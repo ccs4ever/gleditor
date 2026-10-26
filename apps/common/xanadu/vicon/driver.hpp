@@ -67,7 +67,7 @@ private:
   zigzag::vortex::VortexCore core_;
   Compiler compiler_;
   CompiledProgram program_{};
-  zigzag::CellRef cursor_{zigzag::noCell};
+  std::optional<zigzag::CellRef> cursor_;
   bool started_{false};
   bool exhausted_{false};
 };

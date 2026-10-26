@@ -177,8 +177,8 @@ std::string renderGrid(const VplView &view, const ArenaManifold &arena,
                        const vortex::VortexCore &core) {
   auto cells = view.collectCells(arena);
   if (cells.empty()) {
-    if (view.origin() != noCell) {
-      cells.push_back(view.origin());
+    if (const auto origin = view.origin()) {
+      cells.push_back(*origin);
     } else {
       return "[ VPL ] Empty view (no cells to visualize).\n";
     }
@@ -417,22 +417,23 @@ int main(int argc, char *argv[]) {
     currentStore = coordinator.stores().back();
     directEngine.setStore(currentStore->store.get());
     if (const auto dim = currentStore->manifold->dimensionNamed(
-            "d.result", *currentStore->store)) {
+            "d.result", *currentStore->store);
+        dim && currentStore->manifold->home()) {
       const auto first = currentStore->manifold->linked(
-          currentStore->manifold->home(), *dim, DimVector::POS);
-      if (first != noCell) {
+          *currentStore->manifold->home(), *dim, DimVector::POS);
+      if (first) {
         auto remaining =
             static_cast<CellRef>(currentStore->manifold->cellCount());
-        for (auto cell = first; cell != noCell && remaining-- > 0;
+        for (auto cell = first; cell && remaining-- > 0;
              cell =
-                 currentStore->manifold->linked(cell, *dim, DimVector::POS)) {
-          arena.proxyFor(currentStore->spaceId, cell);
+                 currentStore->manifold->linked(*cell, *dim, DimVector::POS)) {
+          arena.proxyFor(currentStore->spaceId, *cell);
         }
         const auto axis = directEngine.resolveDimension("d.result");
         arena.bindDimension(axis, currentStore->spaceId, *dim,
                             DimensionBindingMode::NameMatch);
         directEngine.setVariable(
-            "data", VplView(arena.proxyFor(currentStore->spaceId, first),
+            "data", VplView(arena.proxyFor(currentStore->spaceId, *first),
                             {DirectedDim{axis, DimVector::POS}}));
       }
     }
@@ -490,7 +491,7 @@ int main(int argc, char *argv[]) {
             const auto cell = inCells.front();
             std::cout << formatCell(arena, cell) << "\n";
             if (const auto value = arena.asInt64(cell)) {
-              batchResult = VplView::makeScalar(*value, cell);
+              batchResult = VplView::makeScalar(*value, std::optional{cell});
             } else if (const auto value = arena.asDouble(cell)) {
               batchResult = VplView::makeScalar(*value, true, cell);
             } else if (const auto value = arena.asBool(cell)) {
@@ -572,19 +573,24 @@ int main(int argc, char *argv[]) {
       std::cerr << "No dimension named " << name << " in the open store.\n";
       return false;
     }
-    const auto first = currentStore->manifold->linked(
-        currentStore->manifold->home(), *dim, DimVector::POS);
-    if (first == noCell) {
+    const auto home = currentStore->manifold->home();
+    if (!home) {
+      std::cerr << "The open store has no home cell.\n";
+      return false;
+    }
+    const auto first =
+        currentStore->manifold->linked(*home, *dim, DimVector::POS);
+    if (!first) {
       std::cerr << "Dimension " << name << " has no cells off home.\n";
       return false;
     }
     // Federated edges return only proxies already minted in this arena.
     std::size_t remaining = currentStore->manifold->cellCount();
-    for (auto cell = first; cell != noCell && remaining-- > 0;
-         cell = currentStore->manifold->linked(cell, *dim, DimVector::POS)) {
-      arena.proxyFor(currentStore->spaceId, cell);
+    for (auto cell = first; cell && remaining-- > 0;
+         cell = currentStore->manifold->linked(*cell, *dim, DimVector::POS)) {
+      arena.proxyFor(currentStore->spaceId, *cell);
     }
-    const auto origin = arena.proxyFor(currentStore->spaceId, first);
+    const auto origin = arena.proxyFor(currentStore->spaceId, *first);
     const auto axis   = directEngine.resolveDimension(name);
     arena.bindDimension(axis, currentStore->spaceId, *dim,
                         DimensionBindingMode::NameMatch);
@@ -688,13 +694,15 @@ int main(int argc, char *argv[]) {
           const auto name =
               currentStore->manifold->textOf(dim, *currentStore->store);
           std::cout << "  " << name;
-          const auto first = currentStore->manifold->linked(
-              currentStore->manifold->home(), dim, DimVector::POS);
-          if (first != noCell) {
-            std::cout << " (first: "
-                      << currentStore->manifold->textOf(first,
-                                                        *currentStore->store)
-                      << ")";
+          if (const auto home = currentStore->manifold->home()) {
+            const auto first =
+                currentStore->manifold->linked(*home, dim, DimVector::POS);
+            if (first) {
+              std::cout << " (first: "
+                        << currentStore->manifold->textOf(*first,
+                                                          *currentStore->store)
+                        << ")";
+            }
           }
           std::cout << "\n";
         }
@@ -788,7 +796,7 @@ int main(int argc, char *argv[]) {
           if (!inCells.empty()) {
             const auto cell = inCells.front();
             if (const auto value = arena.asInt64(cell)) {
-              lastView = VplView::makeScalar(*value, cell);
+              lastView = VplView::makeScalar(*value, std::optional{cell});
             } else if (const auto value = arena.asDouble(cell)) {
               lastView = VplView::makeScalar(*value, true, cell);
             } else if (const auto value = arena.asBool(cell)) {

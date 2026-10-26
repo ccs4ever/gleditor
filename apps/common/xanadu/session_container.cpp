@@ -203,17 +203,17 @@ decodeHexBytes(std::string_view hex) {
   if (hex.size() % 2 != 0) return std::nullopt;
   std::vector<std::uint8_t> out;
   out.reserve(hex.size() / 2);
-  auto decodeNibble = [](char c) -> int {
+  auto decodeNibble = [](char c) -> std::optional<unsigned> {
     if (c >= '0' && c <= '9') return c - '0';
     if (c >= 'a' && c <= 'f') return c - 'a' + 10;
     if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-    return -1;
+    return std::nullopt;
   };
   for (std::size_t i = 0; i < hex.size(); i += 2) {
-    const int hi = decodeNibble(hex[i]);
-    const int lo = decodeNibble(hex[i + 1]);
-    if (hi < 0 || lo < 0) return std::nullopt;
-    out.push_back(static_cast<std::uint8_t>((hi << 4) | lo));
+    const auto hi = decodeNibble(hex[i]);
+    const auto lo = decodeNibble(hex[i + 1]);
+    if (!hi || !lo) return std::nullopt;
+    out.push_back(static_cast<std::uint8_t>((*hi << 4) | *lo));
   }
   return out;
 }
@@ -1640,7 +1640,7 @@ importPackage(std::span<const std::uint8_t> archiveBytes,
         return std::unexpected(SessionValidationError::InvalidFieldFormat);
       }
       const std::string sha = entryStr.substr(p3 + 1);
-      const std::string fn = "scroll_" + std::to_string(sId) + "_" +
+      const std::string fn  = "scroll_" + std::to_string(sId) + "_" +
                              std::to_string(start) + "_" + std::to_string(len) +
                              ".slice";
       if (!targetEntries.contains(fn)) {

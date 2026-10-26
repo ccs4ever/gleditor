@@ -145,6 +145,17 @@ TEST(VPLEngineTest, IotaShapeAndValenceDualSyntax) {
   EXPECT_EQ(rankB.valence(), 1u);
 }
 
+TEST(VPLEngineTest, ZeroLengthIotaKeepsItsArrayShapeWithoutAnOrigin) {
+  VPLEngine engine;
+  const auto empty = engine.evaluate("0 ⍳ d.1");
+
+  EXPECT_FALSE(empty.isScalar());
+  ASSERT_EQ(empty.valence(), 1u);
+  EXPECT_FALSE(empty.origin());
+  EXPECT_EQ(empty.shape(engine.arena()), std::vector<std::size_t>{0});
+  EXPECT_TRUE(empty.collectCells(engine.arena()).empty());
+}
+
 TEST(VPLEngineTest, TransposeAndReverse) {
   VPLEngine engine;
 
@@ -300,9 +311,38 @@ TEST(VPLEngineTest, SysArrayStdLibIntegration) {
   EXPECT_TRUE(engine.stdlib().has("sys:array/tally"));
 
   DimRef d1    = engine.resolveDimension("d.1");
-  CellRef head = engine.stdlib().arrayIota(7, d1);
-  EXPECT_NE(head, noCell);
+  CellRef head = engine.stdlib().arrayIota(7, d1).value();
   EXPECT_EQ(engine.stdlib().arrayTally(head, d1), 7u);
 }
 
 } // namespace
+
+TEST(VPLEngineCellPresenceTest,
+     InvalidOriginCannotBecomeNumericZeroOrEmptyText) {
+  VPLEngine engine;
+  const auto dim = engine.arena().ensureDimension("d.1");
+  const std::vector<zigzag::DirectedDim> axes{{dim, zigzag::DimVector::POS}};
+  for (const auto invalid : {zigzag::noCell, zigzag::ephemeralBit - 1}) {
+    ASSERT_FALSE(engine.arena().contains(invalid));
+    const VplView view(invalid, axes);
+    EXPECT_THROW(static_cast<void>(view.shape(engine.arena())),
+                 std::invalid_argument);
+    EXPECT_THROW(static_cast<void>(view.collectCells(engine.arena())),
+                 std::invalid_argument);
+    EXPECT_THROW(static_cast<void>(view.cellAt(engine.arena(), {})),
+                 std::invalid_argument);
+  }
+  const VplView empty(std::nullopt, axes);
+  EXPECT_TRUE(empty.collectCells(engine.arena()).empty());
+  EXPECT_EQ(empty.shape(engine.arena()), std::vector<std::size_t>{0});
+
+  const auto zero = engine.arena().makeScalarCell(std::int64_t{0});
+  const VplView zeroView(zero, axes);
+  EXPECT_THAT(zeroView.collectCells(engine.arena()),
+              testing::ElementsAre(zero));
+  engine.setVariable("zero", zeroView);
+  EXPECT_EQ(engine.evaluate("+/zero").scalarInt(), 0);
+  const auto text = engine.arena().makeCell("");
+  EXPECT_THAT(VplView(text, axes).collectCells(engine.arena()),
+              testing::ElementsAre(text));
+}

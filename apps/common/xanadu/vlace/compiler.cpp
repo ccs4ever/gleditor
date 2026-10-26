@@ -272,7 +272,7 @@ std::expected<ValuePtr, EvalError> Compiler::numericOp(std::string_view op,
   if (!res.success) {
     return fail(CompileError::TypeMismatch, "arithmetic opcode failed", loc);
   }
-  const CellValue rv = core_.render(out);
+  const CellValue rv = core_.render(out).value();
   if (std::holds_alternative<std::int64_t>(rv)) {
     return makeInt(std::get<std::int64_t>(rv));
   }
@@ -419,7 +419,7 @@ Compiler::matchPattern(const PatternNode &pat, const ValuePtr &scrutinee,
                 EvalError{.code   = CompileError::NonLinearPattern,
                           .detail = std::string("'") + p.name +
                                     "' bound twice in one pattern",
-                          .loc    = pat.loc});
+                          .loc = pat.loc});
           }
           out[p.name] = scrutinee;
           return true;

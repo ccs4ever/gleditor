@@ -11,7 +11,6 @@
 
 #include <gleditor/logging.hpp>
 #include <gleditor/ranges.hpp>
-#include <gleditor/sentinel.hpp>
 
 #include "common/xanadu/store_loader.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
@@ -39,7 +38,7 @@ MultiStoreCoordinator::MultiStoreCoordinator(zigzag::vortex::VortexCore &core)
 }
 
 void MultiStoreCoordinator::initDimensions() {
-  coordinatorHome_ = gleditor::fromSentinel<zigzag::noCell>(core_->home());
+  coordinatorHome_ = core_->home();
   dimStores_       = core_->dims().stores;
   dimClone_        = core_->dims().clone;
   dimName_         = core_->dims().name;
@@ -48,11 +47,8 @@ void MultiStoreCoordinator::initDimensions() {
 
 std::optional<CellRef>
 MultiStoreCoordinator::derefCloneMaster(CellRef cell) const noexcept {
-  const auto optCell = gleditor::fromSentinel<zigzag::noCell>(cell);
-  if (!optCell) {
-    return std::nullopt;
-  }
-  return core_->arena().cloneMaster(*optCell, dimClone_).value_or(*optCell);
+  if (!core_->arena().contains(cell)) return std::nullopt;
+  return core_->arena().cloneMaster(cell, dimClone_).value_or(cell);
 }
 
 CellRef MultiStoreCoordinator::linkNewStoreOnRank(CellRef homeCell,
@@ -65,8 +61,7 @@ CellRef MultiStoreCoordinator::linkNewStoreOnRank(CellRef homeCell,
 
   // 2. Append storeCell posward along d.stores off coordinatorHome_
   if (!storesTail_) {
-    const auto coordHome =
-        gleditor::toSentinel<zigzag::noCell>(coordinatorHome_);
+    const auto coordHome = coordinatorHome_.value();
     zigzag::expectWritten(
         arena.link(coordHome, dimStores_, DimVector::POS, storeCell));
   } else {
@@ -98,11 +93,10 @@ CellRef MultiStoreCoordinator::linkNewStoreOnRank(CellRef homeCell,
 CellRef MultiStoreCoordinator::addSlice(std::string_view label,
                                         std::string_view role,
                                         CellRef homeCell) {
-  const auto optHome = gleditor::fromSentinel<zigzag::noCell>(homeCell);
-  if (!optHome) {
-    throw std::invalid_argument("homeCell must not be noCell");
+  if (!core_->arena().contains(homeCell)) {
+    throw std::invalid_argument("homeCell must belong to the composite arena");
   }
-  CellRef storeCell = linkNewStoreOnRank(*optHome, label, role);
+  const CellRef storeCell = linkNewStoreOnRank(homeCell, label, role);
 
   StoreInfo info{
       .label     = std::string(label),
@@ -110,7 +104,7 @@ CellRef MultiStoreCoordinator::addSlice(std::string_view label,
       .path      = "",
       .store     = nullptr,
       .manifold  = nullptr,
-      .homeCell  = optHome,
+      .homeCell  = homeCell,
       .storeCell = storeCell,
       .spaceId   = 0,
   };
@@ -126,20 +120,16 @@ MultiStoreCoordinator::importManifold(const zigzag::Manifold &source,
 
   // Pass 1: Mint corresponding cells and preserve scalar bits / content
   for (const auto &cell : source.cells()) {
-    CellRef srcRef = cell.birthOp;
-    CellRef dstRef = zigzag::noCell;
+    CellRef srcRef       = cell.birthOp;
+    const CellRef dstRef = dest.makeCell();
 
     const auto kind = static_cast<xanadu::ValueKind>(cell.valueKind);
     if (kind != xanadu::ValueKind::None) {
-      dstRef = dest.makeCell();
       zigzag::expectWritten(dest.setValueBits(dstRef, kind, cell.valueBits));
     } else {
       const auto spans = source.contentOf(srcRef);
       if (!spans.empty()) {
-        dstRef = dest.makeCell();
         zigzag::expectWritten(dest.setContent(dstRef, spans));
-      } else {
-        dstRef = dest.makeCell();
       }
     }
     sourceToDest[srcRef] = dstRef;
@@ -157,15 +147,15 @@ MultiStoreCoordinator::importManifold(const zigzag::Manifold &source,
       }
       DimRef dstDim = itDim->second;
 
-      if (dimLink.pos != zigzag::noCell) {
-        auto itPos = sourceToDest.find(dimLink.pos);
+      if (const auto pos = dimLink.neighbor(DimVector::POS)) {
+        auto itPos = sourceToDest.find(*pos);
         if (itPos != sourceToDest.end()) {
           zigzag::expectWritten(
               dest.link(dstRef, dstDim, DimVector::POS, itPos->second));
         }
       }
-      if (dimLink.neg != zigzag::noCell) {
-        auto itNeg = sourceToDest.find(dimLink.neg);
+      if (const auto neg = dimLink.neighbor(DimVector::NEG)) {
+        auto itNeg = sourceToDest.find(*neg);
         if (itNeg != sourceToDest.end()) {
           zigzag::expectWritten(
               dest.link(dstRef, dstDim, DimVector::NEG, itNeg->second));
@@ -174,26 +164,25 @@ MultiStoreCoordinator::importManifold(const zigzag::Manifold &source,
     }
   }
 
-  if (source.home() != zigzag::noCell) {
-    auto itHome = sourceToDest.find(source.home());
+  if (const auto home = source.home()) {
+    auto itHome = sourceToDest.find(*home);
     if (itHome != sourceToDest.end()) {
-      return gleditor::fromSentinel<zigzag::noCell>(itHome->second);
+      return itHome->second;
     }
   }
-  return sourceToDest.empty() ? std::nullopt
-                              : gleditor::fromSentinel<zigzag::noCell>(
-                                    sourceToDest.begin()->second);
+  if (sourceToDest.empty()) return std::nullopt;
+  return sourceToDest.begin()->second;
 }
 
-CellRef
-MultiStoreCoordinator::addStore(std::string_view label, std::string_view role,
-                                const std::shared_ptr<xanadu::Store> &store,
-                                const xanadu::MicroversionId &version) {
+CellRef MultiStoreCoordinator::addStore(
+    std::string_view label, std::string_view role,
+    const std::shared_ptr<xanadu::Store> &store,
+    const std::optional<xanadu::MicroversionId> version) {
   if (!store) {
     throw std::invalid_argument("store must not be null");
   }
-  xanadu::MicroversionId v = version;
-  if (v.isZero()) {
+  xanadu::MicroversionId v = version.value_or(store->primaryCurrentVersion());
+  if (!version) {
     v = store->primaryCurrentVersion();
     // The current version is a document's designation and lags edits made
     // to a slice in the same store; the latest state descending from it is
@@ -209,7 +198,7 @@ MultiStoreCoordinator::addStore(std::string_view label, std::string_view role,
   // there, a store with a perfectly good home answers `##` with nothing. A
   // version named by the caller is taken as asked; a guessed one falls back
   // to a structure head, preferring one that descends from the guess.
-  if (version.isZero() && foldedManifold->home() == zigzag::noCell) {
+  if (!version && !foldedManifold->home()) {
     const auto heads = store->structureHeads();
     const auto descends =
         std::ranges::find_if(heads, [&v](const xanadu::MicroversionId &head) {
@@ -217,11 +206,11 @@ MultiStoreCoordinator::addStore(std::string_view label, std::string_view role,
         });
     const auto head =
         descends != heads.end() ? *descends : store->structureHead();
-    if (!head.isZero()) {
+    if (head) {
       GLEDITOR_LOG_DEBUG("vql.stores",
                          "{}: no home at {}, folding at structure head {}",
-                         label, v.str(), head.str());
-      v = head;
+                         label, v.str(), head->str());
+      v = *head;
       foldedManifold =
           std::make_shared<zigzag::Manifold>(store->rebuildManifold(v));
     }
@@ -235,14 +224,13 @@ MultiStoreCoordinator::addStore(std::string_view label, std::string_view role,
   };
   const auto spaceId = core_->arena().attach(std::move(space));
 
-  CellRef importedHome = zigzag::noCell;
-  if (foldedManifold->home() != zigzag::noCell) {
-    importedHome = core_->arena().proxyFor(spaceId, foldedManifold->home());
-  } else {
-    // For xanadocs without zigzag structure ops or empty slices, mint a home
-    // cell
-    importedHome = core_->arena().makeCell(label);
-  }
+  const CellRef importedHome = [&] {
+    if (const auto home = foldedManifold->home()) {
+      return core_->arena().proxyFor(spaceId, *home);
+    }
+    // Text-only stores still need a representative in the composite view.
+    return core_->arena().makeCell(label);
+  }();
   CellRef storeCell = linkNewStoreOnRank(importedHome, label, role);
 
   StoreInfo info{
@@ -251,7 +239,7 @@ MultiStoreCoordinator::addStore(std::string_view label, std::string_view role,
       .path      = "",
       .store     = store,
       .manifold  = foldedManifold,
-      .homeCell  = gleditor::fromSentinel<zigzag::noCell>(importedHome),
+      .homeCell  = importedHome,
       .storeCell = storeCell,
       .spaceId   = spaceId,
   };

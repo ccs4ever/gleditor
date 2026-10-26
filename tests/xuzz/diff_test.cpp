@@ -117,10 +117,10 @@ TEST(DiffTest, ThreeWayDiffIncludesVersionedSliceValuesAndMembership) {
   Store st;
   const auto before    = st.sliceGenesis(MicroversionId{});
   const auto common    = st.makeCell(before, "common");
-  const auto cell      = st.cellRefOf(common);
+  const auto cell      = st.cellRefOf(common).value();
   const auto left      = st.spliceCell(common, cell, 0, 6, "left");
   const auto right     = st.makeCell(common, "right only");
-  const auto rightCell = st.cellRefOf(right);
+  const auto rightCell = st.cellRefOf(right).value();
 
   const auto result = st.diffVersions({before, left, right});
   ASSERT_EQ(result.versions.size(), 3U);

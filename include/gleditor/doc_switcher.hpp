@@ -9,6 +9,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -96,12 +97,12 @@ public:
     return visible;
   }
 
-  void setActiveDocIndex(const std::uint32_t index) {
+  void setActiveDocIndex(const std::optional<std::uint32_t> index) {
     const std::scoped_lock lock(guard);
     activeIndex = index;
     revision++;
   }
-  [[nodiscard]] std::uint32_t activeDocIndex() const {
+  [[nodiscard]] std::optional<std::uint32_t> activeDocIndex() const {
     const std::scoped_lock lock(guard);
     return activeIndex;
   }
@@ -131,7 +132,7 @@ private:
   std::shared_ptr<const std::vector<std::uint32_t>> pickTargets;
   std::vector<std::shared_ptr<const std::vector<std::uint32_t>>> pickSnapshots;
   bool visible{true};
-  std::uint32_t activeIndex{0};
+  std::optional<std::uint32_t> activeIndex;
   std::uint64_t revision{1};
   std::function<void(std::uint32_t)> closeHandler;
   std::function<void(std::uint32_t)> selectHandler;

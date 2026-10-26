@@ -86,7 +86,7 @@ TEST(NetLensTest, InstanceAllocationAndProjection) {
   // tcp_proto -> conn_1 -> conn_2 along d.instance
   EXPECT_EQ(arena.linked(*proto, dInstance, DimVector::POS), *conn1);
   EXPECT_EQ(arena.linked(*conn1, dInstance, DimVector::POS), *conn2);
-  EXPECT_EQ(arena.linked(*conn2, dInstance, DimVector::POS), noCell);
+  EXPECT_FALSE(arena.linked(*conn2, dInstance, DimVector::POS));
 }
 
 } // namespace

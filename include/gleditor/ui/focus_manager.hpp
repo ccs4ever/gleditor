@@ -5,8 +5,11 @@
 #include <gleditor/ui/input_event.hpp>
 #include <gleditor/ui/layout.hpp>
 #include <memory>
+#include <mutex>
+#include <optional>
 #include <span>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace render {
@@ -40,7 +43,7 @@ public:
   void activate();
   void deactivate();
   [[nodiscard]] virtual bool active() const;
-  [[nodiscard]] std::uint64_t openedSequence() const;
+  [[nodiscard]] std::optional<std::uint64_t> openedSequence() const;
   virtual bool keyPressed(const KeyEvent &) { return false; }
   virtual void textTyped(std::string_view) {}
   /// Retained screen controls handle press/release through pointerEvent.
@@ -63,7 +66,8 @@ public:
   /// Picking and source-specific accessibility actions can request focus
   /// without retaining a pointer to the manager.
   void requestFocus(std::uint32_t node) {
-    requestedNode_.store(static_cast<std::uint64_t>(node) + 1);
+    const std::lock_guard lock(requestedNodeGuard_);
+    requestedNode_ = node;
   }
   [[nodiscard]] virtual bool acceptsCommand(std::string_view) const {
     return false;
@@ -77,14 +81,29 @@ public:
 
 private:
   friend class FocusManager;
-  std::atomic<std::uint64_t> requestedNode_{0};
+  std::optional<std::uint32_t> takeRequestedNode() {
+    const std::lock_guard lock(requestedNodeGuard_);
+    return std::exchange(requestedNode_, std::nullopt);
+  }
+  void restoreRequestedNode(std::uint32_t node) {
+    const std::lock_guard lock(requestedNodeGuard_);
+    if (!requestedNode_) requestedNode_ = node;
+  }
+  std::mutex requestedNodeGuard_;
+  std::optional<std::uint32_t> requestedNode_;
+  mutable std::mutex openedSequenceGuard_;
+  std::optional<std::uint64_t> opened_;
   std::atomic<bool> active_{false};
-  std::atomic<std::uint64_t> opened_{0};
 };
 
 /// No raw scope pointer survives an asynchronous GPU readback.
 struct PointerPickTarget {
-  std::uint64_t registration{}, sequence{}, revision{};
+  struct Registration {
+    std::uint64_t id{}, sequence{};
+    bool operator==(const Registration &) const = default;
+  };
+  std::optional<Registration> registration;
+  std::uint64_t revision{};
   bool modal{};
   bool operator==(const PointerPickTarget &) const = default;
 };
@@ -122,7 +141,7 @@ public:
     friend class FocusManager;
     ScopeHandle(std::weak_ptr<State>, std::uint64_t);
     std::weak_ptr<State> state_;
-    std::uint64_t id_{};
+    std::optional<std::uint64_t> id_;
   };
   using Registration = ScopeHandle;
   FocusManager();

@@ -18,6 +18,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -44,6 +45,7 @@ using zigzag::DirectedDim;
 using zigzag::isEphemeral;
 using zigzag::Manifold;
 using zigzag::noCell;
+using zigzag::Space;
 
 /// An arena with two dimensions minted, since every link needs one and a
 /// dimension here is just a cell (R12).
@@ -75,17 +77,71 @@ TEST(ArenaManifoldTest, everyRefCarriesTheEphemeralBit) {
   EXPECT_FALSE(arena.m.contains(noCell));
 }
 
+TEST(ArenaManifoldTest, missingHomeDimensionAndProvenanceAreOptional) {
+  ArenaManifold arena;
+  Store reader;
+  EXPECT_EQ(arena.home(), std::nullopt);
+  EXPECT_EQ(arena.homeCell(), std::nullopt);
+  EXPECT_EQ(arena.authorshipRoot(), std::nullopt);
+  EXPECT_EQ(arena.dimensionNamed("d.missing"), std::nullopt);
+  EXPECT_EQ(arena.dimensionNamed("d.missing", reader), std::nullopt);
+
+  Store store;
+  const auto genesis = store.sliceGenesis(MicroversionId{});
+  const auto base    = store.rebuildManifold(genesis);
+  ArenaManifold based(&base, &store);
+  const auto named = based.dimensionNamed("d.dims");
+  ASSERT_TRUE(named);
+  EXPECT_EQ(based.dimensionNamed("d.dims", store), named);
+  ASSERT_TRUE(base.home());
+  ASSERT_TRUE(based.home());
+  EXPECT_EQ(*based.home(), *base.home());
+  EXPECT_EQ(*based.homeCell(), *base.home());
+  EXPECT_EQ(based.authorshipRoot(), std::nullopt);
+}
+
+TEST(ArenaManifoldTest, proxyAndDimensionLookupsReturnOptionalReferences) {
+  ArenaManifold arena;
+  const auto space    = arena.attach(Space{.label = "lookup"});
+  const auto arenaDim = arena.ensureDimension("d.lookup");
+  arena.bindDimension(arenaDim, space, 101);
+
+  const auto proxy = arena.proxyFor(space, 42);
+  EXPECT_EQ(arena.findExistingProxy(space, 42), proxy);
+  EXPECT_EQ(arena.findExistingProxy(space, 43), std::nullopt);
+
+  EXPECT_EQ(arena.dimIn(space, arenaDim), std::optional<DimRef>{101});
+  EXPECT_EQ(arena.dimIn(0, arenaDim), std::nullopt);
+  EXPECT_EQ(arena.dimIn(space, 202), std::nullopt);
+  EXPECT_EQ(arena.arenaDimFor(space, 101), std::optional<DimRef>{arenaDim});
+  EXPECT_EQ(arena.arenaDimFor(space, 202), std::nullopt);
+
+  // An absent space selects a wildcard lookup and accepts arena-local dims.
+  EXPECT_EQ(arena.arenaDimFor(std::nullopt, 101),
+            std::optional<DimRef>{arenaDim});
+  EXPECT_EQ(arena.arenaDimFor(std::nullopt, arenaDim),
+            std::optional<DimRef>{arenaDim});
+  EXPECT_EQ(arena.arenaDimFor(0, 101), std::nullopt);
+
+  EXPECT_THROW(arena.attach(Space{.storeCell = noCell}), std::invalid_argument);
+  const auto cellsBeforeInvalidProxy = arena.cellCount();
+  EXPECT_THROW(arena.proxyFor(space, noCell), std::invalid_argument);
+  EXPECT_EQ(arena.cellCount(), cellsBeforeInvalidProxy);
+}
+
 TEST(ArenaManifoldTest, thePersistentSideRefusesAnArenaRefWithoutBeingTold) {
   Store store;
   const auto at = store.sliceGenesis(MicroversionId{});
 
   Arena arena;
   const auto ephemeral = arena.m.makeCell();
+  ASSERT_TRUE(store.homeCell());
+  ASSERT_TRUE(store.dimsDimension());
 
   // Nothing in Store knows this class exists. The refusal is R8's bit doing
   // the work, which is the whole argument for numbering arena cells this way.
-  EXPECT_THROW(store.setLink(at, store.homeCell(), store.dimsDimension(), false,
-                             ephemeral),
+  EXPECT_THROW(store.setLink(at, *store.homeCell(), *store.dimsDimension(),
+                             false, ephemeral),
                std::invalid_argument);
 }
 
@@ -116,7 +172,7 @@ TEST(ArenaManifoldTest, aLinkEvictsWhateverEitherEndHeld) {
   EXPECT_EQ(arena.m.linked(a, arena.step, DimVector::POS), c);
   EXPECT_EQ(arena.m.linked(c, arena.step, DimVector::NEG), a);
   // b kept nothing: the edge it shared with a is the edge that moved.
-  EXPECT_EQ(arena.m.linked(b, arena.step, DimVector::NEG), noCell);
+  EXPECT_EQ(arena.m.linked(b, arena.step, DimVector::NEG), std::nullopt);
 }
 
 TEST(ArenaManifoldTest, aLinkNeedsCellsThisArenaHolds) {
@@ -125,7 +181,7 @@ TEST(ArenaManifoldTest, aLinkNeedsCellsThisArenaHolds) {
   EXPECT_FALSE(
       arena.m.link(a, arena.step, DimVector::POS, ArenaManifold::refOf(99U)));
   EXPECT_FALSE(arena.m.link(a, 7U, DimVector::POS, a));
-  EXPECT_EQ(arena.m.linked(a, arena.step, DimVector::POS), noCell);
+  EXPECT_EQ(arena.m.linked(a, arena.step, DimVector::POS), std::nullopt);
 }
 
 // -- deref, which is cloneMaster --------------------------------------------
@@ -249,7 +305,7 @@ TEST(ArenaManifoldTest, writingAnOlderCellTrailsItOnceAndReleaseRestoresIt) {
   // was overwritten in place.
   EXPECT_EQ(arena.m.linked(old, arena.step, DimVector::POS), first);
   EXPECT_EQ(arena.m.linked(first, arena.step, DimVector::NEG), old);
-  EXPECT_EQ(arena.m.linked(old, arena.clone, DimVector::POS), noCell);
+  EXPECT_EQ(arena.m.linked(old, arena.clone, DimVector::POS), std::nullopt);
   EXPECT_EQ(arena.m.trailSize(), 0U);
   EXPECT_EQ(arena.m.trailSize(), 0U);
 }
@@ -285,7 +341,7 @@ TEST(ArenaManifoldTest, marksNestAndReleaseInReverse) {
   EXPECT_TRUE(arena.m.contains(one));
 
   arena.m.release(outer);
-  EXPECT_EQ(arena.m.linked(base, arena.step, DimVector::POS), noCell);
+  EXPECT_EQ(arena.m.linked(base, arena.step, DimVector::POS), std::nullopt);
   EXPECT_FALSE(arena.m.contains(one));
 }
 
@@ -303,6 +359,81 @@ TEST(ArenaManifoldTest, discardKeepsTheBindingsMadeUnderTheChoicePoint) {
   EXPECT_EQ(arena.m.outstandingMarks(), 0U);
   EXPECT_EQ(arena.m.linked(base, arena.step, DimVector::POS), bound);
   EXPECT_TRUE(arena.m.contains(bound));
+}
+
+TEST(ArenaManifoldTest,
+     discardLastMarkClearsUndoRecordsButKeepsCommittedState) {
+  Arena arena;
+  const auto base  = arena.m.makeCell("base");
+  const auto mark  = arena.m.mark();
+  const auto bound = arena.m.makeCell("bound");
+  ASSERT_TRUE(arena.m.link(base, arena.step, DimVector::POS, bound));
+  ASSERT_GT(arena.m.trailSize(), 0U);
+
+  arena.m.discard(mark);
+  EXPECT_EQ(arena.m.outstandingMarks(), 0U);
+  EXPECT_EQ(arena.m.trailSize(), 0U);
+  EXPECT_EQ(arena.m.linked(base, arena.step, DimVector::POS), bound);
+  EXPECT_EQ(arena.m.linked(bound, arena.step, DimVector::NEG), base);
+
+  const auto nextMark = arena.m.mark();
+  EXPECT_EQ(nextMark.trailSize, 0U);
+  const auto rejected = arena.m.makeCell("rejected");
+  ASSERT_TRUE(arena.m.link(base, arena.step, DimVector::POS, rejected));
+  arena.m.release(nextMark);
+  EXPECT_EQ(arena.m.linked(base, arena.step, DimVector::POS), bound);
+  EXPECT_EQ(arena.m.linked(bound, arena.step, DimVector::NEG), base);
+  EXPECT_FALSE(arena.m.contains(rejected));
+}
+
+TEST(ArenaManifoldTest, discardNestedMarkKeepsUndoForTheEnclosingMark) {
+  Arena arena;
+  const auto base     = arena.m.makeCell("base");
+  const auto original = arena.m.makeCell("original");
+  ASSERT_TRUE(arena.m.link(base, arena.step, DimVector::POS, original));
+
+  const auto outer      = arena.m.mark();
+  const auto outerValue = arena.m.makeCell("outer");
+  ASSERT_TRUE(arena.m.link(base, arena.step, DimVector::POS, outerValue));
+  const auto inner      = arena.m.mark();
+  const auto innerValue = arena.m.makeCell("inner");
+  ASSERT_TRUE(arena.m.link(base, arena.step, DimVector::POS, innerValue));
+  ASSERT_GT(arena.m.trailSize(), inner.trailSize);
+
+  arena.m.discard(inner);
+  EXPECT_EQ(arena.m.outstandingMarks(), 1U);
+  EXPECT_GT(arena.m.trailSize(), inner.trailSize);
+  EXPECT_EQ(arena.m.linked(base, arena.step, DimVector::POS), innerValue);
+  const auto probe = arena.m.mark();
+  EXPECT_GT(probe.trailSize, 0U);
+  arena.m.release(probe);
+
+  arena.m.release(outer);
+  EXPECT_EQ(arena.m.linked(base, arena.step, DimVector::POS), original);
+  EXPECT_EQ(arena.m.linked(original, arena.step, DimVector::NEG), base);
+  EXPECT_FALSE(arena.m.contains(outerValue));
+  EXPECT_FALSE(arena.m.contains(innerValue));
+  EXPECT_EQ(arena.m.trailSize(), 0U);
+  EXPECT_EQ(arena.m.outstandingMarks(), 0U);
+}
+
+TEST(ArenaManifoldTest, committedTurnsDoNotRetainUnusableUndoRecords) {
+  Arena arena;
+  const auto cell                 = arena.m.makeCell("initial");
+  constexpr std::size_t turnCount = 128;
+  for (std::size_t turn = 0; turn < turnCount; ++turn) {
+    const auto mark = arena.m.mark();
+    EXPECT_EQ(mark.trailSize, 0U);
+    const auto text    = std::to_string(turn);
+    const auto content = arena.m.intern(text);
+    ASSERT_TRUE(arena.m.setContent(cell, std::span{&content, 1}));
+    ASSERT_GT(arena.m.trailSize(), 0U);
+    arena.m.discard(mark);
+    EXPECT_EQ(arena.m.trailSize(), 0U);
+    EXPECT_EQ(arena.m.textOf(cell), text);
+  }
+  EXPECT_EQ(arena.m.textOf(cell), std::to_string(turnCount - 1));
+  EXPECT_EQ(arena.m.outstandingMarks(), 0U);
 }
 
 TEST(ArenaManifoldTest, compactionIsRefusedWhileAChoicePointIsOutstanding) {
@@ -384,14 +515,15 @@ TEST(ArenaManifoldTest, theApiRefusesToRecordAScratchSpan) {
   const auto at = store.sliceGenesis(MicroversionId{});
   const PrimediaSpan scratch{
       .scroll = xanadu::scratchScroll, .start = 0, .length = 4};
+  ASSERT_TRUE(store.homeCell());
 
   // An address a failed branch throws away was never permanent, so it may not
   // reach an operation by any route.
   EXPECT_THROW(store.makeCell(at, scratch), std::invalid_argument);
   EXPECT_THROW(
-      store.setValue(at, store.homeCell(), scratch, ValueKind::None, 0),
+      store.setValue(at, *store.homeCell(), scratch, ValueKind::None, 0),
       std::invalid_argument);
-  EXPECT_THROW(store.spliceCellSpan(at, store.homeCell(), 0, 0, scratch),
+  EXPECT_THROW(store.spliceCellSpan(at, *store.homeCell(), 0, 0, scratch),
                std::invalid_argument);
 }
 
@@ -475,15 +607,15 @@ TEST(ArenaManifoldTest, promotionCarriesTheLinksWithBothEndsIntact) {
   std::vector<CellRef> others(promoted->cells.begin() + 1,
                               promoted->cells.end());
 
-  CellRef found = noCell;
+  std::optional<CellRef> found;
   for (const auto dim : others) {
     if (const auto to = manifold.linked(realHead, dim, DimVector::POS);
-        noCell != to) {
+        to.has_value()) {
       found = to;
     }
   }
-  ASSERT_NE(found, noCell);
-  EXPECT_EQ(manifold.textOf(found, store), "next");
+  ASSERT_TRUE(found);
+  EXPECT_EQ(manifold.textOf(*found, store), "next");
 }
 
 TEST(ArenaManifoldTest, aPromotedScalarRegainsTheRenderingTheArenaDeferred) {
@@ -547,9 +679,9 @@ struct Document {
     at                = minted.version;
     dim               = minted.dim;
     at                = store.makeCell(at, "first");
-    first             = store.cellRefOf(at);
+    first             = store.cellRefOf(at).value();
     at                = store.makeCell(at, "second");
-    second            = store.cellRefOf(at);
+    second            = store.cellRefOf(at).value();
     at                = store.setLink(at, first, dim, DimVector::POS, second);
   }
 
@@ -592,7 +724,7 @@ TEST(ArenaManifoldTest, writingAnOverlaidCellShadowsItAndLeavesTheBaseAlone) {
   // And the displaced occupant was shadowed too, since its end of the edge
   // changed -- a base cell nobody named directly.
   EXPECT_TRUE(arena.holdsOwn(doc.second));
-  EXPECT_EQ(arena.linked(doc.second, doc.dim, DimVector::NEG), noCell);
+  EXPECT_EQ(arena.linked(doc.second, doc.dim, DimVector::NEG), std::nullopt);
   EXPECT_EQ(base.linked(doc.second, doc.dim, DimVector::NEG), doc.first);
 }
 

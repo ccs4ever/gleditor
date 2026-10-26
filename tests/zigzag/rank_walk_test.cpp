@@ -9,6 +9,7 @@
 #include <chrono>
 #include <cstdio>
 #include <functional>
+#include <optional>
 #include <ranges>
 #include <vector>
 
@@ -187,7 +188,7 @@ TEST(RankWalkTest, CopyOnWriteArenaWalksTheWholeBase) {
   std::vector<CellRef> cells;
   for (const auto *name : {"a", "b", "c", "d", "e"}) {
     at = store.makeCell(at, name);
-    cells.push_back(store.cellRefOf(at));
+    cells.push_back(store.cellRefOf(at).value());
   }
   const auto dSeq = store.rebuildManifold(at).dimensions().front();
   for (const auto [from, to] : cells | std::views::adjacent<2>) {
@@ -207,13 +208,13 @@ TEST(RankWalkTest, ManifoldRankWalk) {
   auto at = store.sliceGenesis(xanadu::MicroversionId{});
 
   at            = store.makeCell(at, "cell_A");
-  const auto cA = store.cellRefOf(at);
+  const auto cA = store.cellRefOf(at).value();
 
   at            = store.makeCell(at, "cell_B");
-  const auto cB = store.cellRefOf(at);
+  const auto cB = store.cellRefOf(at).value();
 
   at            = store.makeCell(at, "cell_C");
-  const auto cC = store.cellRefOf(at);
+  const auto cC = store.cellRefOf(at).value();
 
   const auto dSeq = store.rebuildManifold(at).dimensions().front();
 
@@ -255,11 +256,11 @@ TEST(RankWalkTest, aRankViewCostsWhatTheHandWrittenLoopCost) {
   };
 
   const double loop   = time([&] {
-    CellRef acc = 0;
-    CellRef cur = cells.front();
-    for (std::size_t limit                 = arena.traversalBound() + 1;
-         cur != noCell && limit-- > 0; cur = arena.linked(cur, d1)) {
-      acc ^= cur;
+    CellRef acc                = 0;
+    std::optional<CellRef> cur = cells.front();
+    for (std::size_t limit = arena.traversalBound() + 1; cur && limit-- > 0;
+         cur               = arena.linked(*cur, d1)) {
+      acc ^= *cur;
     }
     return acc;
   });

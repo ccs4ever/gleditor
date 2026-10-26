@@ -536,11 +536,15 @@ void SystemTorrentManager::addDhtNode(const std::string &host,
   }
 }
 
-std::uint16_t SystemTorrentManager::listenPort() const {
+std::optional<std::uint16_t> SystemTorrentManager::listenPort() const {
   if (!impl_->session) {
-    return 0;
+    return std::nullopt;
   }
-  return static_cast<std::uint16_t>(impl_->session->listen_port());
+  const auto port = impl_->session->listen_port();
+  if (port <= 0) {
+    return std::nullopt;
+  }
+  return static_cast<std::uint16_t>(port);
 }
 
 } // namespace xanadu

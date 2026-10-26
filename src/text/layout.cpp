@@ -9,9 +9,11 @@
 #include <fribidi.h>
 #include <hb.h>
 #include <iostream>
+#include <limits>
 #include <linebreak.h>
 #include <optional>
 #include <ranges>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -19,6 +21,16 @@
 namespace gleditor::text {
 
 namespace {
+
+int checkedExtent(const float value) {
+  const float rounded = std::ceil(value);
+  if (!std::isfinite(rounded) ||
+      static_cast<double>(rounded) > std::numeric_limits<int>::max() ||
+      static_cast<double>(rounded) < std::numeric_limits<int>::min()) {
+    throw std::length_error("Text layout extent exceeds output range");
+  }
+  return static_cast<int>(rounded);
+}
 
 struct ShapedGlyph {
   uint32_t glyphIndex{};
@@ -422,13 +434,14 @@ PageShaping TextLayout::layoutPage(std::string_view text,
                                    const LayoutOptions &options) {
   if (options.ellipsize && options.boxes.empty() &&
       options.blockStyles.empty()) {
-    auto fitted = fit(text, font,
-                      {.maxWidthPx  = options.maxWidthPx,
-                       .maxHeightPx = options.maxHeightPx,
-                       .maxLines    = static_cast<std::uint16_t>(
-                           options.singleParagraph ? 1 : 0),
-                       .overflow = options.singleParagraph ? Overflow::Ellipsis
-                                                           : Overflow::Wrap});
+    auto fitted =
+        fit(text, font,
+            {.maxWidthPx  = options.maxWidthPx,
+             .maxHeightPx = options.maxHeightPx,
+             .maxLines = options.singleParagraph ? std::optional<std::size_t>{1}
+                                                 : std::nullopt,
+             .overflow = options.singleParagraph ? Overflow::Ellipsis
+                                                 : Overflow::Wrap});
     fitted.shaping.page = options.page;
     for (auto &glyph : fitted.shaping.glyphs) {
       const auto &cluster = fitted.shaping.clusters[glyph.clusterIndex];
@@ -446,6 +459,18 @@ PageShaping TextLayout::layoutPage(std::string_view text,
   detail::recordLayout(text.size());
   PageShaping shaping;
   shaping.page = options.page;
+  if ((options.maxWidthPx &&
+       (!std::isfinite(*options.maxWidthPx) || *options.maxWidthPx < 0.0F)) ||
+      (options.maxHeightPx &&
+       (!std::isfinite(*options.maxHeightPx) || *options.maxHeightPx < 0.0F))) {
+    throw std::invalid_argument(
+        "Layout extents must be finite and nonnegative");
+  }
+  if ((options.maxWidthPx && *options.maxWidthPx == 0.0F) ||
+      (options.maxHeightPx && *options.maxHeightPx == 0.0F)) {
+    shaping.limit = 0;
+    return shaping;
+  }
   if (text.empty() || !font) {
     shaping.limit = 0;
     return shaping;
@@ -454,10 +479,10 @@ PageShaping TextLayout::layoutPage(std::string_view text,
   // Bound the input text slice if maxHeightPx is set, to avoid redundant
   // quadratic full-document shaping on multi-megabyte texts when generating
   // individual pages.
-  if (options.maxHeightPx > 0.0F) {
+  if (options.maxHeightPx) {
     const float lh = std::max(1.0F, font->metrics().lineHeight);
     const auto maxLinesEst =
-        static_cast<std::size_t>(std::ceil(options.maxHeightPx / lh)) + 8;
+        static_cast<std::size_t>(std::ceil(*options.maxHeightPx / lh)) + 8;
     const std::size_t sliceBudget =
         std::max<std::size_t>(32768, maxLinesEst * 1024);
     if (text.size() > sliceBudget) {
@@ -487,9 +512,20 @@ PageShaping TextLayout::layoutPage(std::string_view text,
 
   const float lineHeight = font->metrics().lineHeight;
   const float ascent     = font->metrics().ascent;
-  const float maxWidth = options.maxWidthPx > 0.0F ? options.maxWidthPx : 1e6F;
+  double intrinsicWidth  = 0.0;
+  for (const auto &glyph : shaped.glyphs) {
+    intrinsicWidth += std::max(0.0F, glyph.xAdvance);
+  }
+  for (const auto &box : options.boxes) {
+    intrinsicWidth += box.widthPx;
+  }
+  if (!options.maxWidthPx && intrinsicWidth > std::numeric_limits<int>::max()) {
+    throw std::length_error("Unbounded text width exceeds output range");
+  }
+  const float maxWidth = options.maxWidthPx.value_or(
+      std::max(1.0F, static_cast<float>(intrinsicWidth)));
   const float maxHeight =
-      options.maxHeightPx > 0.0F ? options.maxHeightPx : 1e6F;
+      options.maxHeightPx.value_or(std::numeric_limits<float>::max());
 
   struct LineInfo {
     std::size_t startGlyph{};
@@ -556,7 +592,10 @@ PageShaping TextLayout::layoutPage(std::string_view text,
         break;
       }
 
-      const auto align = blockStyleAt(lineStartByte, options.blockStyles).align;
+      const auto align =
+          options.maxWidthPx
+              ? blockStyleAt(lineStartByte, options.blockStyles).align
+              : gleditor::TextAlign::Left;
       const float width   = std::min(box->widthPx, maxWidth);
       const float left    = alignedLeft(maxWidth, width, align);
       const auto nextByte = (lineStart + 1 < shaped.glyphs.size())
@@ -716,7 +755,10 @@ PageShaping TextLayout::layoutPage(std::string_view text,
       break;
     }
 
-    const auto align = blockStyleAt(lineStartByte, options.blockStyles).align;
+    const auto align =
+        options.maxWidthPx
+            ? blockStyleAt(lineStartByte, options.blockStyles).align
+            : gleditor::TextAlign::Left;
 
     // Trailing whitespace -- any run of plain space glyphs right at the end
     // of this line's own glyph range -- does not count as ink: a right-
@@ -799,7 +841,7 @@ PageShaping TextLayout::layoutPage(std::string_view text,
 
   // 3. Assemble PageShaping data
   shaping.limit        = lines.back().endByte;
-  shaping.textHeightPx = static_cast<int>(std::ceil(currentY));
+  shaping.textHeightPx = checkedExtent(currentY);
   shaping.lineCount    = lines.size();
   // Moved into shaping.boxes only after the assembly loop below, which is
   // where an Inline box's own placement is discovered (its left depends on
@@ -912,7 +954,7 @@ PageShaping TextLayout::layoutPage(std::string_view text,
       maxSeenWidth,
       [](const float a, const float b) { return std::max(a, b); });
 
-  shaping.textWidthPx = static_cast<int>(std::ceil(maxSeenWidth));
+  shaping.textWidthPx = checkedExtent(maxSeenWidth);
   if (options.ellipsize && !shaping.lines.empty()) {
     // Keep the existing media/paragraph flow; only its last text line is
     // shortened. A media anchor is atomic and must never become label text.
@@ -1015,18 +1057,15 @@ PageShaping TextLayout::layoutPage(std::string_view text,
       last.barWidth    = prefix.widthPx + (showMarker ? marker.widthPx : 0.0F);
       last.byteLength  = static_cast<std::uint32_t>(prefix.visibleBytes);
       shaping.limit    = visibleEnd;
-      shaping.textHeightPx =
-          static_cast<int>(std::ceil(last.top + last.barHeight));
-      shaping.textWidthPx = 0;
+      shaping.textHeightPx = checkedExtent(last.top + last.barHeight);
+      shaping.textWidthPx  = 0;
       for (const auto &line : shaping.lines) {
-        shaping.textWidthPx =
-            std::max(shaping.textWidthPx,
-                     static_cast<int>(std::ceil(line.left + line.barWidth)));
+        shaping.textWidthPx = std::max(
+            shaping.textWidthPx, checkedExtent(line.left + line.barWidth));
       }
       for (const auto &box : shaping.boxes) {
         shaping.textWidthPx =
-            std::max(shaping.textWidthPx,
-                     static_cast<int>(std::ceil(box.left + box.width)));
+            std::max(shaping.textWidthPx, checkedExtent(box.left + box.width));
       }
     }
   }
@@ -1035,11 +1074,11 @@ PageShaping TextLayout::layoutPage(std::string_view text,
 
 PageShaping TextLayout::layoutSingleLine(std::string_view text,
                                          const FontFacePtr &font,
-                                         const float maxWidthPx,
+                                         const std::optional<float> maxWidthPx,
                                          const bool ellipsize) {
   LayoutOptions opts{
       .maxWidthPx      = maxWidthPx,
-      .maxHeightPx     = 0.0F,
+      .maxHeightPx     = std::nullopt,
       .singleParagraph = true,
       .ellipsize       = ellipsize,
   };

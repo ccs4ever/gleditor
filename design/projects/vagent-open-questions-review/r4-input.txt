@@ -1,0 +1,473 @@
+# vagent open questions: proposed resolutions
+
+Review date: 2026-10-23. Baseline: `design/vagent-agent-language.md` v3.7 at `79e1fa68`. This
+revision exists outside the current main history; the review worktree deliberately starts there.
+Revision: R4, after the third Luna critique. These are recommendations for incorporation, not owner
+approvals, implementation claims, or amendments to the approved P1–P14 register.
+
+The specification lists fourteen open questions in §18. The following entries enumerate all of them,
+give a recommended decision, identify the affected sections, and state how to verify the result.
+Additional details needed to implement a recommendation remain explicitly identified.
+
+"Initial boundary" means a recommended limit for the first vagent implementation. "Extension" means
+a proposed direction that is not a first-release promise; its listed prerequisites must be specified
+before adoption. "Now" below names documentation changes proposed for incorporation; "Later" names
+changes conditional on adopting an extension. None of these words confers approval. The final
+incorporation map lists both for every question.
+
+## U-A1. Reclaiming a busy agent's arena
+
+**Propose a same-pid execution-context replacement between turns.** Copy the reachable state into a
+fresh context, rebuild its program and derived indexes, then install the replacement only after
+validation succeeds. Keep the actor's pid, grant, mailbox, remembered replies, outstanding
+deliveries, and adapter ingress queues. A nonempty mailbox must not prevent this maintenance step.
+Do not reclaim by checkpoint and `resume`: that requires quiescence and changes the pid.
+
+This needs a new core proposal. `WorkerContext` owns mutually referencing, nonmovable arena, core,
+VM and library members; `MeshActorRuntime` owns the context privately. The adapter cannot simply
+assign a new arena. The copy needs a complete ref map, dimension-name registration, clone topology,
+scalar bits, content spans and owned scratch strings. Native bindings retain logical agent,
+intention and effect ids, never raw arena refs. Completed effects arriving during replacement stay
+queued by id. Replacement requires zero outstanding marks/choice points and no running executor. A
+written root and dependency inventory is a prerequisite to the new API, covering:
+
+- the actor's separately stored `cursor` and `stateRoot`;
+- VM cursors, opcode/return references, core symbol/dimension registries, stdlib host registrations,
+  and any program output shadows still needed between turns;
+- arena base/attached-space metadata, span readers, stores and source leases;
+- adapter caches, continuation data, pending host completions and callback tokens.
+
+Rebuild execution machinery from the exact program and ABI; copy semantic state with a ref map,
+remap retained roots, and reconstruct derived indexes. Do not copy stale VM cursor maps or assume
+all dependencies are reachable from `stateRoot`. Preserve shared-base identity where applicable. Pin
+every borrowed source while either context needs it. Keep monitors and transport accounting outside
+the replaced context unchanged. Reject replacement before installation if any dependency cannot be
+reconstructed; do not free the old context or publish its replacement prematurely.
+
+Initial boundary: checkpoint/resume remains the available design path; sustained busy-agent memory
+is not bounded until this extension exists. Add a distinct reclamation mechanism to §1 without
+replacing its checkpoint/migration entry. Later revise §4.2, §4.4, §11 and §15. Price peak
+old-plus-new memory and the O(live cells + links + bytes) copy. Bound live state and maintenance
+work through settings and grants; a single synchronous copy must not be described as a
+bounded-latency solution. A staged copy requires keeping that agent paused while other actors run,
+plus an explicit source-lifetime contract.
+
+**Gate:** drive two runs with identical scripted turn inputs, manual-clock values and mock effect
+results using U-A10's harness, reclaiming only one. Compare semantic state and staged output after
+every turn, including pending asks, timers and effects; do not compare allocation-dependent refs.
+Separately flood runtime ingress during maintenance and test queue/accounting preservation. Inject
+failure after copying each root/dependency class: the old context and queues remain usable. Measure
+pause time and memory before choosing triggers or claiming any latency bound.
+
+## U-A2. Cross-owner spaces
+
+**Keep the first implementation single-owner; specify cross-owner admission separately.** A future
+capability should bind issuer, authenticated sender identity, recipient or space, permitted
+operations and event schemas, expiry, resource limits, and delegation limits. The receiving owner
+(or an explicitly delegated authority) issues admission. A relay preserves the original sender's
+identity and evidence; membership alone grants no spawning or StoreWriter authority.
+
+§4.1 and §11 already explain that `receive` admits sends only from the owner. An adapter filter
+cannot relax this runtime check. Add a separately priced authorization proposal before changing that
+rule, and define revocation/expiry behavior for queued messages and delegated goals.
+
+**Gate:** wrong-owner, forged-sender, expired, replayed and over-budget admissions are refused; a
+valid member cannot impersonate the host or acquire unrelated rights.
+
+## U-A3. Large payloads
+
+**Send a typed immutable value handle in the ordinary small envelope.** Include a sealed content
+reference, schema/version, declared size, and provenance or authorization evidence appropriate to
+the value. Resolving it is an asynchronous native effect with a deadline, cancellation and byte,
+operation and memory budgets. Receipt of a handle does not mean its content is available. Initial
+boundary: existing inline size limits remain; the handle type and resolver are an extension. Its
+encoding, verification rules and lifecycle below must be specified before it is adopted.
+
+The durable value is the verified content reference and schema, never a reader pointer or arena ref.
+Keep that reference in agent state whenever fetched content remains needed. A successful fetch
+acquires readers/source leases before exposing a view; the adapter pins them while any live view
+uses their spans. A failed/cancelled fetch exposes no partial view and releases its temporary pins.
+Checkpoint metadata must retain enough stable publication/source identity to reacquire readers;
+process-local lease tokens are not serialized. Resume resolves and validates dependencies
+asynchronously before a dependent view becomes usable, within a deadline and budget. An unavailable
+source produces an explicit unavailable result, never an empty payload. Existing wait deadlines
+continue to apply; dependency acquisition does not suspend the node.
+
+For local context replacement, acquire/retain replacement pins before the atomic swap and release
+old pins only when old users are gone. Trace shared ownership so dropping one view does not unpin
+another. Drop the final pin only after no view, old context, checkpoint construction or asynchronous
+consumer uses it. A restored handle may remain unresolved; it is not a successfully restored
+readable view until validation and pinning complete. Detailed adapter ownership and checkpoint
+encoding remain extension prerequisites. Preserve primedia source identities, not ephemeral refs.
+
+The existing `ActorDeliverWriteSet` receive path is a reply to a tracked delivery, not unsolicited
+bulk-event ingress. Keep that path correlated and validated. Fetching a graph must not silently
+apply its operations to the receiver's working state or a user's store. Reuse existing published
+value validation where its contract fits; describe any new handle encoding and resolver explicitly.
+
+Update §5.5, §7 and §8.7 with the handle type and failure behavior. Preserve original source spans
+when accessible instead of treating equal decoded text as the same content identity.
+
+**Gate:** missing seeders, corrupt content, schema mismatch, oversized values and cancellation
+produce bounded failures without blocking a turn or writing a visited store. Checkpoint/resume with
+sources available and absent, reclaim with active views, and drop overlapping views in different
+orders; no live span loses its source and no dead view keeps a lease indefinitely.
+
+## U-A4. Hostless swarm spaces
+
+**Retain the host relay for the first implementation.** BEP 46 topic discovery does not by itself
+define membership, authenticated emission, fan-out, replay protection or delivery completion. A
+hostless space needs a separate transport and membership design, preferably after U-A2 establishes
+cross-owner authority. Do not treat discovery as permission or consensus.
+
+Keep §5.4 and §15 honest about the relay bottleneck and host failure. A later proposal must define
+what happens under partitions, concurrent membership changes and rejoining, including whether
+membership is authoritative or eventually convergent and what an emitter's completion means.
+
+**Gate:** partition/rejoin and duplicate dissemination tests preserve declared sender identity,
+bound retries and memory, and never claim exactly-once broadcast.
+
+## U-A5. Commitment strategies
+
+**Keep single-minded commitment as the language default and first implementation.** It already has
+explicit success, drop, plan-exhaustion and maintain-backoff rules. Document blind and open-minded
+commitment as deferred extensions, rather than leaving their absence ambiguous.
+
+Before adding modifiers, define which reconsideration tests each changes. Blind commitment must
+still permit explicit cancellation, deadlines, actor termination and effect failure. Open-minded
+commitment needs a declared pure desire-retention condition, evaluated under §6.4 isolation, with an
+explicit outcome when it stops holding. Existing `continue(i)` checks `drop when` before
+`succeed when`: dropping wins at that boundary, and tests must preserve that order. A future
+modifier must state its interaction with this precedence and maintain restorers. Do not infer a loss
+of desire from plan failure.
+
+Keep §6.4 and §17 unchanged for the first implementation. **Gate:** table-driven cases for success,
+drop, cancellation, condition faults and restorer back-off before any new modifier ships.
+
+## U-A6. Module paths across the language family
+
+**Use colon-separated logical names as the target convention**, for example `std:agent` and
+`mars:exploration`, retaining `/Agent` as the vagent CLI's declaration separator. vagent already
+specifies this grammar. Do not extend this decision to persistent store identities or content URIs.
+
+Treat family-wide syntax convergence as a separate migration: inventory the parsers, standard
+library exports, artifact symbol names and docs first. Define a canonical internal module id and
+convert frontend spelling at that boundary. Do not silently reinterpret existing VQL `::` syntax or
+string imports in other languages. Loader paths must remain distinct from logical module names.
+
+Update §8.11 and §18 with that scope. **Gate:** a shared module resolves to the same canonical
+identity through each supported frontend; ambiguous or duplicate imports fail explicitly.
+
+## U-A7. Suspension anywhere
+
+**Retain §6.6's restricted suspension positions.** Improve diagnostics with the permitted rewrite:
+extract an effect or ask into its own plan statement, then use the resulting local. For
+`for believes`, collect a snapshot into a list or adopt one goal per item before waiting.
+
+A later extension should reify explicit continuation data, not persist VM choice points or marks. It
+must define saved generator alternatives, bindings, logical-update snapshots, cancellation and
+re-entry effects. Splitting a statement across turns changes its undo semantics: the extension must
+state what commits before suspension rather than imply speculative writes remain reversible across
+turns. That is a language change to V2/V4/V13, not just compiler convenience.
+
+**Gate:** the initial checker rejects nested suspension with a useful rewrite. A future prototype
+must survive checkpoint/reclamation at every suspension without repeating an external action.
+
+## U-A8. Recorded inbound streams
+
+**Propose optional per-agent deterministic recording as a test/debug extension.** The initial
+implementation promises single-turn determinism only, not captured lifetime replay. Record all
+selected turn inputs, not just messages: host results and percepts, timer/wake selection, turn time,
+initialization parameters, and external lifecycle decisions. Pin the initial state, program
+artifact, runtime/library semantics and relevant settings. Record resulting state/output digests so
+replay can detect divergence. The replay unit is one agent's actual ordered turn stream, including
+recovery turns and adapter decisions that affect it. Compare semantic state and staged outputs using
+stable names/content references and deterministic graph traversal, excluding allocation refs, reader
+pointers, and resource-cache representation; the canonical encoding is a harness prerequisite.
+
+Per-agent replay treats peer behavior as recorded input; it does not reproduce whole-node timing. A
+later whole-node mode must record/reproduce global actor execution order and relevant host and
+transport decisions, including decisions between turns. Neither mode follows from inbound messages
+alone. Initial debug mode requires a complete captured trace and refuses gaps or incompatible
+artifacts; durable partial traces and recovery remain separate work.
+
+Replay supplies the recorded inputs and suppresses real sends, spawns and native effects, comparing
+staged outputs instead. It is deterministic replay of captured execution, not an explanation of
+unobserved device behavior. Persisting a durable trace belongs to a separate explicitly requested
+artifact, never implicitly to a visited document's hypertime (U-A9).
+
+Update §14 to distinguish single-turn determinism, captured replay, and crash recovery. A durable
+mode needs a defined append/commit order around the arena commit and outbox drain, retention and
+missing-record behavior. Logging alone cannot make a device action exactly once after a crash.
+
+**Gate:** replay a run containing deadlines, failures, effects and reclamation with all external
+bindings disabled; outputs and state digests agree at every turn.
+
+## U-A9. Agents and R8
+
+**Keep persistent user-store writes out of the first implementation until StoreWriter is
+specified.** V9 and §16 name this capacity but define neither its API nor a complete authority
+contract. Mark those references as an unimplemented extension. The proposed direction is selected
+result publication under explicit scoped owner delegation, not automatic promotion of working state.
+Recognizing that delegation as user-generated work under R8 remains a proposed interpretation.
+Record that question now; do not silently amend convergence R8 or treat the existing P1–P14
+approvals as approving it.
+
+A standalone StoreWriter contract is a prerequisite, covering:
+
+- the capacity method signatures and results; stable target identity and exact permitted operation
+  classes; byte/operation budgets and grant lifetime;
+- the owner-authorized issuer/signing identity and how the host verifies scope, provenance and
+  target version before committing, including who may revoke the grant;
+- the atomic commit boundary, conflict/refusal outcomes and behavior of already-staged/in-flight
+  operations on expiry or revocation;
+- a stable operation id scoped to the delegation and request, with retry/recovery reconciliation. If
+  claiming duplicate prevention across crashes, deduplication and the write must commit atomically
+  or use an equivalent recoverable protocol. Specify the real guarantee otherwise.
+
+Message deduplication does not establish crash-safe StoreWriter effects. A lost effect completion
+must not cause an unqualified retry that silently appends a second result. The contract must say how
+the agent learns whether the first attempt committed and how that answer survives restoration. A
+target-version precondition alone is not a substitute for identifying an earlier committed write.
+
+If adopted later, persist selected results/evidence, preserving source spans by transclusion and
+recording agent name, exact program reference, delegation and inputs as result provenance. Reading,
+perceiving, reconsidering and navigating alone grant no write authority. Standing delegation can
+authorize repeated writes; per-turn prompting is not a language requirement. Checkpoint stores,
+traces, reader activity and result documents retain separate purposes.
+
+**Gate:** initially, no StoreWriter operation is available and visited stores stay unchanged by
+working-state updates. Before the extension ships, use concrete target identities, operation classes
+and version preconditions to test authorized success, stale versions, out-of-scope access,
+revocation before/after the commit boundary, lost completion, crash/retry and recovery from an older
+checkpoint. Verify no partial edits or duplicate committed result under the declared guarantee.
+
+## U-A10. Tests
+
+**Specify the harness now; keep test declarations host-side initially.** Use a manual clock,
+in-memory transport, deterministic capability issuer and mock native bindings. A test can initialize
+an agent, deliver one input, execute exactly one turn, inspect state and staged output, and complete
+an effect later. Assert state by stable names and structural values, not allocation-dependent
+CellRefs. Expose the staged outbox at the commit/drain boundary, preserving its exact order. Add a
+separate run-until-idle operation with a strict turn limit. Script all turn sources, times and mock
+outcomes for deterministic paired-run tests; do not require durable recording for them.
+
+Cover rollback, hard-failure recovery, initialize-once, await capture, duplicate/reordered delivery,
+condition faults, timer reconstruction, cancellation and late results. Runtime integration tests
+must also exercise queues, retries and lease behavior: one-arena tests cannot establish those.
+
+Update §11.1 and §18 with the harness contract and test placement under `tests/xuzz/`; a future
+`test` syntax can lower to the same interface. Do not block the compiler on a second parser.
+**Gate:** failure injection proves failed turns drain no staged actions, and earlier committed plan
+statements survive an ordinary later statement failure as §6.7 specifies.
+
+## U-A11. A fast lane
+
+**Correct the adapter-only premise; keep FIFO wire delivery for the first implementation.**
+`MeshActorRuntime::pumpOne` removes `mailbox.front()` before invoking the executor. The adapter
+cannot move a queued urgent wire event ahead of that entry. Handler priority orders handlers of an
+already selected event; it does not shorten its wait in the mailbox.
+
+Initial boundary: introduce no fast-lane modifier or changed host-delivery priority. Preserve §6.5's
+ordering and §11.1's existing bounded wake budget (`ready_per_message`); this recommendation adds no
+new arbitration rule. P4 still needs a complete contract for how message work and local wakes share
+a pump. The initial adapter must document host-delivery versus ready-intention order, count all such
+turns against the wake budget, and serve due deadlines under that policy. This is required scheduler
+detail under the already proposed adapter/P4 work, not an optional urgency feature that can be
+postponed without defining ordinary progress.
+
+Before a fast lane is adopted, specify host ingress capacity and overload behavior, class order,
+FIFO within classes, bounded urgent bursts and ordinary-service fairness. Any priority for queued
+wire events needs a separately priced runtime proposal. Neither handler priority nor host priority
+interrupts a running turn or establishes a hard real-time bound.
+
+Correct the adapter-only claim in §18 now, retaining FIFO in §6.5 and the priority-mailbox refusal
+in §13. **Gate:** test the baseline arbitration and wake quota with message, host, ready and timer
+work simultaneously pending. A future urgency extension must demonstrate exactly what overtakes what
+and prove ordinary inputs and deadlines still progress under continuous urgent ingress.
+
+## U-A12. Overridable selection functions
+
+**Keep all three fixed selection policies initially; consider plan ordering as a later extension.**
+A future pure, fuel-bounded selector can rank applicable untried plan names. Evaluate applicability
+normally and retain its captured bindings; accept only a permutation of that eligible set. The
+selector cannot make a tried or inapplicable plan eligible, modify state, or start effects.
+
+On fault or invalid output, use declaration order and report a bounded condition fault. Stable names
+and deterministic tie handling preserve checkpoint behavior. Event or intention scheduling hooks
+would additionally have to prove fairness; defer them.
+
+Update §6.3, §6.5 and §17 only when this extension is adopted. **Gate:** faulty or adversarial
+selectors fall back deterministically, cannot repeat tried plans, and preserve §6.4 isolation.
+
+## U-A13. Protocol declarations
+
+**Start with typed library protocols, then add syntax only for demonstrated repetition.** Express
+Contract-Net with declared request/proposal/accept/reject/result events, conversation ids,
+participant roles, deadlines, and explicit cancellation and late-message rules. Use existing
+intentions, goals and handlers to store protocol state as cells.
+
+A future `protocol` declaration should desugar to those same mechanisms, adding static checks for
+roles and message types. It must not add a second scheduler or silently strengthen unordered
+transport into ordered or exactly-once delivery. Same-owner conversations work within the existing
+society; cross-owner conversations depend on U-A2. Protocol roles do not grant new authority.
+
+**Gate:** demonstrate successful, refused, timed-out, duplicated, reordered and participant-lost
+conversations in U-A10's harness before choosing new grammar. Add the library example to §12; retain
+§17's current maturity claim until that implementation exists.
+
+## U-A14. A shared program
+
+**Treat an immutable shared program base as a measured optimization after the private baseline.**
+`ArenaManifold` and `WorkerContext` already support an immutable base manifold and private shadows,
+but the actor runtime must gain a separately proposed way to install and retain that shared base. Do
+not claim this eliminates all bootstrap cost: standard-library registration and C++ indexes need
+inspection and reconstruction even if their graph cells can be shared.
+
+Cache by exact program reference and a runtime/stdlib ABI manifest. Pin the base and its content
+readers for every dependent actor. Keep mutable opcode outputs, cursor state, frames, skill fields
+and host bindings private; two agents sharing a base never share a writable output cell. V12's ban
+on state-to-program links remains. Checkpoints still contain state only and reload the pinned
+program on resume. A new immutable base costs no agent-state operations; no new on-disk node layout
+is required by this recommendation.
+
+Update §4.4, §11 and §15 after a spike. **Gate:** compare many-agent memory and load time, verify
+base immutability under interleaved turns/backtracking, reclaim one actor while others continue, and
+checkpoint/resume across cache eviction without changing program identity.
+
+## Worked library protocol: bounded Contract-Net conversation
+
+This is a proposed library-level transition contract for §12, not new grammar or a claim that a
+library is built. This worked example is confined to one node and one owner, with one shared,
+nondecreasing injected clock for all turn times; no migration is allowed during a conversation. A
+multi-node or migrating variant must separately specify clock domains, skew and expiry semantics
+before reusing these comparisons. Messages use declared typed events, existing `emit`, handlers,
+goals, fields, deadlines and cancellations. A reply is authorized by its conversation role and
+expected sender, not merely its event type.
+
+A coordinator obtains a conversation id from a program-declared native `Correlation` capacity, whose
+effect returns a host-issued unique opaque string under a deadline. Its host binding must not
+reissue an id after restart/restore; its concrete issuance mechanism is a library prerequisite.
+Obtain the id once, persist it in conversation state, and never replace it on resuming that
+conversation. Do not use a restorable local counter alone. A test binding supplies deterministic
+fresh ids. The coordinator snapshots `members(inner)` into a participant list and excludes self.
+Each event carries `conversation: Str`; participant-specific events additionally carry the expected
+participant `Agent`. Store a per-conversation record with phase, deadline, participant statuses,
+proposals, selected participant and final result; use copied values or declared keyed predicates.
+Participant state is keyed by `(coordinator name, conversation id)`.
+
+Every protocol event carries `expires_at: Time`, the conversation's fixed maximum validity time.
+`CallForProposal` also carries `collect_until: Time` and `offer_until: Time`; require
+`now < collect_until <= offer_until <= expires_at`, all within configured conversation limits.
+`Proposal` echoes the offer deadline. `Accept` carries `result_until: Time`; require
+`now < result_until <= expires_at` both when creating it and when the participant accepts work. An
+invalid or elapsed result deadline closes/refuses the offer without adopting a work goal. These are
+explicit fields, not the implicit event `time`; compare them against the receiver's `Clock.now()`
+under this example's shared-clock assumption. Reject any event at or after `expires_at`, before
+creating state. An offer can be accepted only before `offer_until`, and a result only before
+`result_until`. State retains the original deadlines; subsequent messages may not extend them. Every
+state-creating control event is validated for expected coordinator/role, participant identity,
+bounds and expiry before allocating records.
+
+| Phase/input                                              | Checks and state transition                                                                                                                                                                                                                                 | Staged action                                                                                                                                     |
+| -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Start                                                    | Allocate id; snapshot members; set collecting deadline and pending status per participant.                                                                                                                                                                  | Emit `CallForProposal` to that list; schedule a deadline event.                                                                                   |
+| Participant receives `CallForProposal`                   | Require expected coordinator, addressed participant, valid deadlines and fresh/open id; record the offer once. Unknown expired or closed ids do not reopen.                                                                                                 | Emit `Proposal` with cost or `Refusal`; a duplicate request reuses its recorded response without starting work.                                   |
+| `Proposal` or `Refusal`                                  | Require collecting phase, matching id, `source` equal to a snapshotted participant, and its status still pending; record one terminal response for that participant.                                                                                        | None until all respond or the deadline is processed.                                                                                              |
+| Collection closes                                        | Choose the cheapest valid proposal; break ties by participant name; mark that participant selected and all others rejected. Empty proposals mean failed conversation.                                                                                       | Send `Accept` to selected participant and `Reject` to others; establish result deadline, or emit terminal failure.                                |
+| Participant receives `Accept`                            | Require matching coordinator/id, proposed state and unexpired offer; change once to executing and adopt a work goal. Duplicate accepts never adopt twice.                                                                                                   | Work goal later emits `Result` or `Failure` for the same id and participant.                                                                      |
+| Participant receives `Reject`                            | Require expected coordinator/id and valid original expiry. Close a proposed offer, or record a closed tombstone if its request has not arrived. Ignore in executing or terminal state; rejection cannot cancel accepted work.                               | No work goal is adopted.                                                                                                                          |
+| Participant receives `Cancel`                            | Require expected coordinator/id and valid original expiry. In proposed or executing state, record terminal cancelled state and detach the matching work intention id in this turn; an unknown id creates a closed tombstone. Terminal state stays terminal. | Drop that work intention and its subgoals, staging best-effort effect cancellation under §6.4. No later local completion sends a protocol result. |
+| `Result` or `Failure`                                    | Require waiting-result phase, matching id and source equal to the selected participant; capture first terminal outcome.                                                                                                                                     | End conversation and notify its caller.                                                                                                           |
+| Deadline, caller cancellation, or known participant loss | Collection closes with proposals already received; a selected-participant failure while waiting ends the conversation once. Cancellation closes immediately.                                                                                                | Reject outstanding offers or send `Cancel` to selected participant as applicable.                                                                 |
+| Late, duplicate or wrong-participant event               | Reject without changing live conversation state or starting work.                                                                                                                                                                                           | Count or report according to a bounded diagnostics policy.                                                                                        |
+
+Handlers validate `occurrence.source` presence and compare its agent name before reading a result as
+a participant response. They record matched payloads in conversation state, so later waits do not
+retain unlinked event cells. A collection deadline uses turn-time comparisons: a response processed
+at or after the deadline is late even if the timer notification is delayed. Result and offer
+deadlines use the same rule. Cancellation/result races follow actual processed turn order; the first
+valid terminal transition wins, and subsequent transitions cannot reopen the conversation.
+Reject/cancel may precede a delayed call-for-proposal or acceptance. Retain a closed tombstone until
+both the original `expires_at` and the retry horizon after closing have passed; all later messages
+are independently rejected by expiry. The participant closes its record and drops its matching work
+goal atomically in its successful cancellation turn; duplicate cancels are no-ops. A work-goal
+completion handler checks that the record is still executing before emitting `Result`/`Failure`. A
+completion after cancellation cannot restart work or send a fresh result; an already emitted result
+may still arrive and is ignored by a coordinator that has closed. If the participant already
+committed a terminal result before processing cancel, that terminal state wins and cannot be undone.
+No cancellation retracts physical effects already performed; §6.4 cancellation stays best effort.
+Late accepts require an open proposed record and are ignored after closure or expiry.
+
+Participant offer expiry closes an unaccepted proposal; execution deadline drops its work goal and
+closes the record under the same rules as cancellation. Bound concurrent conversations, pending
+requests, closed records and payload bytes, rejecting excess new requests without evicting a live
+cancellation tombstone. Known loss in this same-node example means an orderly child-stop signal
+available to its monitor/parent. The baseline cannot detect an unreported local crash; deadlines
+cover that silence. A later distributed variant can additionally consume monitored remote
+`ActorDown` under §5.4, without assuming prompt or universal loss detection.
+
+Example trace for U-A10: coordinator C starts id q with participants P and Q; Q's proposal arrives
+first, P's twice; only the first P proposal changes its status. The collection closes and selects P
+by price, Q gets rejected. A result from Q cannot satisfy P's wait. P's first valid result ends q; a
+duplicate is ignored. In a second run, cancellation arrives before P's delayed acceptance: P's
+tombstone prevents starting work. In a third run, cancel arrives after P starts a work goal with an
+active effect: P closes the record, drops that intention and stages its effect cancel; duplicated
+cancel, delayed accept and late effect completion cannot reopen it or emit a fresh result. Test
+result-before-cancel as the opposite terminal order, refusal, all deadlines, an acceptance whose
+execution deadline has already elapsed (no work is adopted), orderly loss and restoration under the
+same node/clock constraint. An unreported local crash resolves only by deadline; remote loss
+requires the later distributed variant. Use identical scripted clocks and ids. A full source example
+and the Correlation binding contract remain prerequisites to adopting the library; no dedicated
+`protocol` syntax is required for this model.
+
+## Incorporation map and remaining work
+
+The map separates an immediate proposed documentation decision from adoption of an extension. These
+are final recommendations for incorporation only after review convergence; they do not change the
+specification themselves.
+
+| U-A | Now: proposed initial boundary and documentation edits                                                                                   | Later: extension prerequisites and sections affected                                                    |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| 1   | §1 and §18: distinguish portable checkpointing from proposed local reclamation; §15: busy-agent memory remains unbounded by reclamation. | Root/lifetime inventory, bounded maintenance design and new runtime proposal; §§4.2, 4.4, 11, 15.       |
+| 2   | §§1, 4.1, 18: retain single-owner admission.                                                                                             | Capability, relay identity, revocation and runtime authorization proposal; §§5.4, 7, 11.                |
+| 3   | §§5.5, 7, 18: inline limits stay; typed handles are an extension.                                                                        | Handle/checkpoint encoding, resolver and lease lifecycle; §§4.3–4.4, 5.9, 7, 8.7, 11.1.                 |
+| 4   | §§1, 5.4, 15, 18: retain hosted relay and its failure domain.                                                                            | Membership, partition, delivery and transport proposal; §§7, 11.                                        |
+| 5   | §§6.4, 6.5, 17, 18: retain single-minded behavior and existing drop-first precedence.                                                    | New commitment modifiers, outcomes and restorer interactions; §§6, 8, 9, 17.                            |
+| 6   | §§8.11, 18: retain vagent colon syntax; recommend canonical family identity.                                                             | Character grammar, frontend inventory and migration; sibling docs/loaders separately.                   |
+| 7   | §§6.6, 13, 18: retain suspension restrictions and show diagnostic rewrites.                                                              | Explicit continuation semantics, checkpoint/undo/cancellation model; V2/V4/V13, §§6, 8, 9.              |
+| 8   | §§14, 18: retain single-turn guarantee; propose per-agent debug recording.                                                               | Canonical trace/semantic-state encoding and complete capture; §11.1; durable recovery separately.       |
+| 9   | V9, §§16, 18: StoreWriter is unimplemented; R8 interpretation is pending.                                                                | Standalone API, authority, provenance, commit/retry/revocation contract; §§7, 8, 11 and convergence R8. |
+| 10  | §§11.1, 18: specify deterministic harness and separate integration coverage.                                                             | Implement adapter/runtime test seams; add DSL only if useful.                                           |
+| 11  | §18: remove adapter-only priority premise; §§4.2, 11.1: require baseline P4 arbitration; preserve §§6.5, 13 defaults.                    | Only urgency/priority is deferred; it separately changes §§6.5, 10, 11.                                 |
+| 12  | §§6.3, 6.5, 17, 18: retain all fixed selectors.                                                                                          | Pure bounded plan-ranking API and fallback semantics; §§8, 9, 11.1.                                     |
+| 13  | §§12, 17, 18: propose worked same-owner library; dedicated syntax deferred.                                                              | Full source and Correlation contract, harness traces; grammar only after demonstrated need.             |
+| 14  | §§4.4, 15, 18: retain private-program baseline.                                                                                          | ABI/base ownership/registration design, measurements and any core proposal; §§1, 11.                    |
+
+First specify U-A10's harness and record the initial boundaries. Then detail reclamation (U-A1),
+content lifetimes (U-A3), ordinary P4 arbitration (U-A11) and per-agent debug replay (U-A8), pricing
+existing-core changes only where necessary. Treat U-A9's authorship interpretation and write
+contract separately from these baseline mechanisms. Measure before adopting U-A14; demonstrate
+U-A13's library and a need for U-A12 before adding syntax or selector hooks.
+
+Reclamation triggers and pause budgets, concrete capability/value/trace encodings, durable effect
+recovery and family-wide migration remain design work for their explicit extensions. A resolved
+initial release boundary is not a claim that its extension's design or implementation is complete.
+
+## Evidence and verification scope
+
+Primary local evidence: vagent §§3–7, §§9–11, §§13–18; README's "Content, operations, and
+hypertime"; convergence R8; `vortex/worker_context.hpp`; `zigzag/arena_manifold.hpp`;
+`vortex/mesh_actor.cpp` (`pumpOne`, `receive`, `checkpointView`); and the existing
+[review record](projects/vagent-review/README.md). Code paths are under `apps/common/xanadu/`. The
+three architectural perspectives reviewed these recommendations; their code constraints are
+incorporated above. This is a specification review, so the gates are proposed acceptance criteria,
+not executed runtime tests. No claim of built vagent behavior is made.
+
+The provenance recommendations are also consistent with Nelson's
+[transclusion description](https://xanadu.com/transclusion/) and
+[Xanadu vision](https://xanadu.com/xuvision.html): reused material retains its connection to its
+source. His [ZigZag connections tutorial](https://www.xanadu.com/zigzag/tutorial/zzConnex.html)
+describes the dimensional connections; it does not prescribe actor authorization or network
+delivery. The runtime and delegation recommendations here are engineering proposals grounded in this
+repository, not claims that those primary sources specify them.

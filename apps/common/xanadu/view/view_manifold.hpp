@@ -40,7 +40,7 @@ struct ViewCellRef {
 
   constexpr bool operator==(const ViewCellRef &) const = default;
   [[nodiscard]] constexpr bool valid() const noexcept {
-    return ref.has_value();
+    return ref.has_value() && *ref != zigzag::noCell;
   }
 };
 

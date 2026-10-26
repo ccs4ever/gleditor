@@ -7,6 +7,7 @@
 #define COMMON_XANADU_VQL_VQL_ENGINE_HPP
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -104,14 +105,20 @@ private:
                        std::vector<zigzag::CellRef> &out);
 
   // Predicate & Boolean Evaluation
-  bool evaluatePredicate(const BooleanExpr &expr, zigzag::CellRef context);
-  bool evaluateTerm(const BooleanTerm &term, zigzag::CellRef context);
-  bool evaluateFactor(const BooleanFactor &factor, zigzag::CellRef context);
+  bool evaluatePredicate(const BooleanExpr &expr,
+                         std::optional<zigzag::CellRef> context);
+  bool evaluateTerm(const BooleanTerm &term,
+                    std::optional<zigzag::CellRef> context);
+  bool evaluateFactor(const BooleanFactor &factor,
+                      std::optional<zigzag::CellRef> context);
   bool evaluateShapePredicate(const ShapeLiteral &shape,
-                              zigzag::CellRef context);
+                              std::optional<zigzag::CellRef> context);
 
-  zigzag::vortex::CellValue evaluateValueExpr(const ValueExpr &expr,
-                                              zigzag::CellRef context);
+  /// No value for an unset binding or empty path; empty text, zero, and false
+  /// are all present values.
+  std::optional<zigzag::vortex::CellValue>
+  evaluateValueExpr(const ValueExpr &expr,
+                    std::optional<zigzag::CellRef> context);
 
   static bool compareValues(const zigzag::vortex::CellValue &left, CompOp op,
                             const zigzag::vortex::CellValue &right);
@@ -137,19 +144,24 @@ private:
                           const PathStep &targetStep,
                           const std::vector<zigzag::CellRef> &currentCells);
 
-  zigzag::CellRef sliceHomeOf(zigzag::CellRef cell);
+  std::optional<zigzag::CellRef>
+  deltaTarget(const FunctionInvocation &fn,
+              std::optional<zigzag::CellRef> context);
+  std::optional<zigzag::CellRef> sliceHomeOf(zigzag::CellRef cell);
 
   std::vector<zigzag::CellRef> executeScriptBody(const ScriptBody &body);
 
-  std::vector<zigzag::CellRef> executeLambda(const PathLambda &lambda,
-                                             zigzag::CellRef context);
+  std::vector<zigzag::CellRef>
+  executeLambda(const PathLambda &lambda,
+                std::optional<zigzag::CellRef> context);
 
-  std::vector<zigzag::CellRef> callUserDef(const DefDeclaration &def,
-                                           const std::vector<ValueExpr> &args,
-                                           zigzag::CellRef context);
+  std::vector<zigzag::CellRef>
+  callUserDef(const DefDeclaration &def, const std::vector<ValueExpr> &args,
+              std::optional<zigzag::CellRef> context);
 
   bool
-  matchDestructure(const DestructurePattern &pattern, zigzag::CellRef context,
+  matchDestructure(const DestructurePattern &pattern,
+                   std::optional<zigzag::CellRef> context,
                    std::unordered_map<std::string, std::vector<zigzag::CellRef>>
                        &scopedBindings);
 

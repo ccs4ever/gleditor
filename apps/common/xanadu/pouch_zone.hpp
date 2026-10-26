@@ -63,7 +63,7 @@ struct PouchItem {
  */
 struct DropZoneConfig {
   std::string id;
-  zigzag::CellRef cell{zigzag::noCell};
+  std::optional<zigzag::CellRef> cell;
   std::string label{"Notes"};
   glm::vec4 backgroundColor{0.12F, 0.15F, 0.20F, 0.85F};
   std::uint32_t auraColor{0xFFEAB308U};
@@ -87,8 +87,10 @@ public:
     return this;
   }
 
-  [[nodiscard]] zigzag::CellRef cell() const noexcept { return config_.cell; }
-  DropZone *setCell(const zigzag::CellRef cell) noexcept {
+  [[nodiscard]] std::optional<zigzag::CellRef> cell() const noexcept {
+    return config_.cell;
+  }
+  DropZone *setCell(const std::optional<zigzag::CellRef> cell) noexcept {
     config_.cell = cell;
     return this;
   }

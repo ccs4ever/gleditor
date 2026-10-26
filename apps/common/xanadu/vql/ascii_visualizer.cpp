@@ -8,6 +8,7 @@
 #include <iomanip>
 #include <iostream>
 #include <map>
+#include <optional>
 #include <queue>
 #include <ranges>
 #include <sstream>
@@ -23,8 +24,8 @@ namespace {
 
 std::string formatCellBrief(const zigzag::ArenaManifold &manifold,
                             zigzag::CellRef cell) {
-  if (cell == zigzag::noCell) {
-    return "(null)";
+  if (!manifold.contains(cell)) {
+    return "(cell not found)";
   }
   std::ostringstream oss;
   oss << "#" << (cell & ~zigzag::ephemeralBit);
@@ -128,15 +129,15 @@ std::string AsciiVisualizer::renderCellConnections(
 
   // 1. 2D Spatial Lattice Projection along dimension 0 (X) and dimension 1 (Y)
   if (!dimensions.empty()) {
-    zigzag::DimRef dimX       = dimensions[0].dim;
-    std::string_view dimXName = dimensions[0].name;
-    zigzag::DimRef dimY =
-        (dimensions.size() > 1) ? dimensions[1].dim : zigzag::noCell;
+    std::optional<zigzag::DimRef> dimX = dimensions[0].dim;
+    std::string_view dimXName          = dimensions[0].name;
+    std::optional<zigzag::DimRef> dimY =
+        (dimensions.size() > 1) ? dimensions[1].dim : std::nullopt;
     std::string_view dimYName = (dimensions.size() > 1)
                                     ? std::string_view(dimensions[1].name)
                                     : std::string_view{};
-    zigzag::DimRef dimZ =
-        (dimensions.size() > 2) ? dimensions[2].dim : zigzag::noCell;
+    std::optional<zigzag::DimRef> dimZ =
+        (dimensions.size() > 2) ? dimensions[2].dim : std::nullopt;
     std::string_view dimZName = (dimensions.size() > 2)
                                     ? std::string_view(dimensions[2].name)
                                     : std::string_view{};
@@ -169,54 +170,54 @@ std::string AsciiVisualizer::renderCellConnections(
         compMaxY      = std::max(cy, compMaxY);
 
         // Explore along dimX
-        if (dimX != zigzag::noCell) {
-          zigzag::CellRef posTarget =
-              manifold.linked(curr, dimX, zigzag::DimVector::POS);
-          if (posTarget != zigzag::noCell && resultSet.contains(posTarget) &&
-              !posMap.contains(posTarget)) {
+        if (dimX.has_value()) {
+          const auto posTarget =
+              manifold.linked(curr, *dimX, zigzag::DimVector::POS);
+          if (posTarget && resultSet.contains(*posTarget) &&
+              !posMap.contains(*posTarget)) {
             int nx = cx + 1;
             int ny = cy;
             while (gridMap.contains({nx, ny})) nx++;
-            posMap[posTarget] = {nx, ny};
-            gridMap[{nx, ny}] = posTarget;
-            q.push(posTarget);
+            posMap[*posTarget] = {nx, ny};
+            gridMap[{nx, ny}]  = *posTarget;
+            q.push(*posTarget);
           }
-          zigzag::CellRef negTarget =
-              manifold.linked(curr, dimX, zigzag::DimVector::NEG);
-          if (negTarget != zigzag::noCell && resultSet.contains(negTarget) &&
-              !posMap.contains(negTarget)) {
+          const auto negTarget =
+              manifold.linked(curr, *dimX, zigzag::DimVector::NEG);
+          if (negTarget && resultSet.contains(*negTarget) &&
+              !posMap.contains(*negTarget)) {
             int nx = cx - 1;
             int ny = cy;
             while (gridMap.contains({nx, ny})) nx--;
-            posMap[negTarget] = {nx, ny};
-            gridMap[{nx, ny}] = negTarget;
-            q.push(negTarget);
+            posMap[*negTarget] = {nx, ny};
+            gridMap[{nx, ny}]  = *negTarget;
+            q.push(*negTarget);
           }
         }
 
         // Explore along dimY
-        if (dimY != zigzag::noCell) {
-          zigzag::CellRef posTargetY =
-              manifold.linked(curr, dimY, zigzag::DimVector::POS);
-          if (posTargetY != zigzag::noCell && resultSet.contains(posTargetY) &&
-              !posMap.contains(posTargetY)) {
+        if (dimY.has_value()) {
+          const auto posTargetY =
+              manifold.linked(curr, *dimY, zigzag::DimVector::POS);
+          if (posTargetY && resultSet.contains(*posTargetY) &&
+              !posMap.contains(*posTargetY)) {
             int nx = cx;
             int ny = cy + 1;
             while (gridMap.contains({nx, ny})) ny++;
-            posMap[posTargetY] = {nx, ny};
-            gridMap[{nx, ny}]  = posTargetY;
-            q.push(posTargetY);
+            posMap[*posTargetY] = {nx, ny};
+            gridMap[{nx, ny}]   = *posTargetY;
+            q.push(*posTargetY);
           }
-          zigzag::CellRef negTargetY =
-              manifold.linked(curr, dimY, zigzag::DimVector::NEG);
-          if (negTargetY != zigzag::noCell && resultSet.contains(negTargetY) &&
-              !posMap.contains(negTargetY)) {
+          const auto negTargetY =
+              manifold.linked(curr, *dimY, zigzag::DimVector::NEG);
+          if (negTargetY && resultSet.contains(*negTargetY) &&
+              !posMap.contains(*negTargetY)) {
             int nx = cx;
             int ny = cy - 1;
             while (gridMap.contains({nx, ny})) ny--;
-            posMap[negTargetY] = {nx, ny};
-            gridMap[{nx, ny}]  = negTargetY;
-            q.push(negTargetY);
+            posMap[*negTargetY] = {nx, ny};
+            gridMap[{nx, ny}]   = *negTargetY;
+            q.push(*negTargetY);
           }
         }
       }
@@ -309,11 +310,11 @@ std::string AsciiVisualizer::renderCellConnections(
         if (x < maxX) {
           auto nextIt = gridMap.find({x + 1, y});
           if (it != gridMap.end() && nextIt != gridMap.end() &&
-              dimX != zigzag::noCell) {
-            bool pos = (manifold.linked(it->second, dimX, DimVector::POS) ==
+              dimX.has_value()) {
+            bool pos = (manifold.linked(it->second, *dimX, DimVector::POS) ==
                         nextIt->second);
-            bool neg = (manifold.linked(nextIt->second, dimX, DimVector::NEG) ==
-                        it->second);
+            bool neg = (manifold.linked(nextIt->second, *dimX,
+                                        DimVector::NEG) == it->second);
             if (pos && neg) {
               std::string lbl = std::string("+") + std::string(dimXName);
               if (lbl.size() > 5) lbl = lbl.substr(0, 5);
@@ -355,21 +356,21 @@ std::string AsciiVisualizer::renderCellConnections(
       oss << "\n";
 
       // Depth Z-link line if dimZ exists
-      if (dimZ != zigzag::noCell) {
+      if (dimZ.has_value()) {
         for (int x = minX; x <= maxX; ++x) {
           auto it = gridMap.find({x, y});
           if (it != gridMap.end()) {
-            zigzag::CellRef zPos =
-                manifold.linked(it->second, dimZ, DimVector::POS);
-            zigzag::CellRef zNeg =
-                manifold.linked(it->second, dimZ, DimVector::NEG);
+            const auto zPos =
+                manifold.linked(it->second, *dimZ, DimVector::POS);
+            const auto zNeg =
+                manifold.linked(it->second, *dimZ, DimVector::NEG);
             std::ostringstream zoss;
-            if (zPos != zigzag::noCell) {
+            if (zPos) {
               zoss << "+" << dimZName << "->#"
-                   << (zPos & ~zigzag::ephemeralBit);
-            } else if (zNeg != zigzag::noCell) {
+                   << (*zPos & ~zigzag::ephemeralBit);
+            } else if (zNeg) {
               zoss << "-" << dimZName << "<-#"
-                   << (zNeg & ~zigzag::ephemeralBit);
+                   << (*zNeg & ~zigzag::ephemeralBit);
             } else {
               zoss << dimZName << ":(nil)";
             }
@@ -402,15 +403,15 @@ std::string AsciiVisualizer::renderCellConnections(
       oss << "\n";
 
       // Vertical links down to y + 1
-      if (y < maxY && dimY != zigzag::noCell) {
+      if (y < maxY && dimY.has_value()) {
         bool hasAnyDownLink = false;
         for (int x = minX; x <= maxX; ++x) {
           auto it     = gridMap.find({x, y});
           auto downIt = gridMap.find({x, y + 1});
           if (it != gridMap.end() && downIt != gridMap.end() &&
-              ((manifold.linked(it->second, dimY, DimVector::POS) ==
+              ((manifold.linked(it->second, *dimY, DimVector::POS) ==
                 downIt->second) ||
-               (manifold.linked(downIt->second, dimY, DimVector::NEG) ==
+               (manifold.linked(downIt->second, *dimY, DimVector::NEG) ==
                 it->second))) {
             hasAnyDownLink = true;
             break;
@@ -423,9 +424,9 @@ std::string AsciiVisualizer::renderCellConnections(
             auto it     = gridMap.find({x, y});
             auto downIt = gridMap.find({x, y + 1});
             if (it != gridMap.end() && downIt != gridMap.end() &&
-                ((manifold.linked(it->second, dimY, DimVector::POS) ==
+                ((manifold.linked(it->second, *dimY, DimVector::POS) ==
                   downIt->second) ||
-                 (manifold.linked(downIt->second, dimY, DimVector::NEG) ==
+                 (manifold.linked(downIt->second, *dimY, DimVector::NEG) ==
                   it->second))) {
               oss << "         |          ";
             } else {
@@ -440,9 +441,9 @@ std::string AsciiVisualizer::renderCellConnections(
             auto it     = gridMap.find({x, y});
             auto downIt = gridMap.find({x, y + 1});
             if (it != gridMap.end() && downIt != gridMap.end() &&
-                ((manifold.linked(it->second, dimY, DimVector::POS) ==
+                ((manifold.linked(it->second, *dimY, DimVector::POS) ==
                   downIt->second) ||
-                 (manifold.linked(downIt->second, dimY, DimVector::NEG) ==
+                 (manifold.linked(downIt->second, *dimY, DimVector::NEG) ==
                   it->second))) {
               std::string lbl = std::string("+") + std::string(dimYName);
               int leftPad     = (kBoxWidth - static_cast<int>(lbl.size())) / 2;
@@ -464,9 +465,9 @@ std::string AsciiVisualizer::renderCellConnections(
             auto it     = gridMap.find({x, y});
             auto downIt = gridMap.find({x, y + 1});
             if (it != gridMap.end() && downIt != gridMap.end() &&
-                ((manifold.linked(it->second, dimY, DimVector::POS) ==
+                ((manifold.linked(it->second, *dimY, DimVector::POS) ==
                   downIt->second) ||
-                 (manifold.linked(downIt->second, dimY, DimVector::NEG) ==
+                 (manifold.linked(downIt->second, *dimY, DimVector::NEG) ==
                   it->second))) {
               oss << "         v          ";
             } else {
@@ -490,26 +491,26 @@ std::string AsciiVisualizer::renderCellConnections(
 
     for (const auto &vd : dimensions) {
       oss << "  " << std::left << std::setw(12) << vd.name << ": ";
-      if (vd.dim == zigzag::noCell) {
+      if (!vd.dim) {
         oss << "(unresolved dimension)\n";
         continue;
       }
-      zigzag::CellRef neg = manifold.linked(c, vd.dim, zigzag::DimVector::NEG);
-      zigzag::CellRef pos = manifold.linked(c, vd.dim, zigzag::DimVector::POS);
+      const auto neg = manifold.linked(c, *vd.dim, zigzag::DimVector::NEG);
+      const auto pos = manifold.linked(c, *vd.dim, zigzag::DimVector::POS);
 
       // Negward (-)
       oss << "(-) ";
-      if (neg != zigzag::noCell) {
+      if (neg) {
         oss << "<- " << std::left << std::setw(16)
-            << formatCellBrief(manifold, neg);
+            << formatCellBrief(manifold, *neg);
       } else {
         oss << std::left << std::setw(19) << "(nil)";
       }
 
       // Posward (+)
       oss << " (+) ";
-      if (pos != zigzag::noCell) {
-        oss << "-> " << formatCellBrief(manifold, pos);
+      if (pos) {
+        oss << "-> " << formatCellBrief(manifold, *pos);
       } else {
         oss << "(nil)";
       }
@@ -525,16 +526,17 @@ std::string AsciiVisualizer::renderCellConnections(
 
 std::string
 AsciiVisualizer::renderRankGrid(const zigzag::ArenaManifold &manifold,
-                                zigzag::CellRef startCell, zigzag::DimRef dimX,
-                                zigzag::DimRef dimY, std::string_view dimXName,
+                                std::optional<zigzag::CellRef> startCell,
+                                zigzag::DimRef dimX, zigzag::DimRef dimY,
+                                std::string_view dimXName,
                                 std::string_view dimYName, int radius) {
-  if (!manifold.contains(startCell) && startCell != zigzag::noCell) {
+  if (startCell && !manifold.contains(*startCell)) {
     return "(start cell not found in manifold)\n";
   }
 
-  // Build coordinate map (x, y) -> CellRef
-  std::map<std::pair<int, int>, zigzag::CellRef> grid;
-  grid[{0, 0}] = startCell;
+  // Empty coordinates stay explicit rather than borrowing a CellRef value.
+  std::map<std::pair<int, int>, std::optional<zigzag::CellRef>> grid;
+  if (startCell) grid[{0, 0}] = startCell;
 
   // Trace along Y axis from origin
   for (int y = -radius; y <= radius; ++y) {
@@ -542,30 +544,30 @@ AsciiVisualizer::renderRankGrid(const zigzag::ArenaManifold &manifold,
       continue;
     }
     // Walk from origin
-    zigzag::CellRef curr  = startCell;
-    int steps             = std::abs(y);
-    zigzag::DimVector dir = zigzag::fromSign(y);
-    for (int s = 0; s < steps && curr != zigzag::noCell; ++s) {
-      curr = manifold.linked(curr, dimY, dir);
+    std::optional<zigzag::CellRef> curr = startCell;
+    int steps                           = std::abs(y);
+    zigzag::DimVector dir               = zigzag::fromSign(y);
+    for (int s = 0; s < steps && curr; ++s) {
+      curr = manifold.linked(*curr, dimY, dir);
     }
     grid[{0, y}] = curr;
   }
 
   // Trace along X axis for each row
   for (int y = -radius; y <= radius; ++y) {
-    zigzag::CellRef rowOrigin = grid[{0, y}];
-    if (rowOrigin == zigzag::noCell) {
+    const auto rowOrigin = grid[{0, y}];
+    if (!rowOrigin) {
       continue;
     }
     for (int x = -radius; x <= radius; ++x) {
       if (x == 0) {
         continue;
       }
-      zigzag::CellRef curr  = rowOrigin;
-      int steps             = std::abs(x);
-      zigzag::DimVector dir = zigzag::fromSign(x);
-      for (int s = 0; s < steps && curr != zigzag::noCell; ++s) {
-        curr = manifold.linked(curr, dimX, dir);
+      std::optional<zigzag::CellRef> curr = rowOrigin;
+      int steps                           = std::abs(x);
+      zigzag::DimVector dir               = zigzag::fromSign(x);
+      for (int s = 0; s < steps && curr; ++s) {
+        curr = manifold.linked(*curr, dimX, dir);
       }
       grid[{x, y}] = curr;
     }
@@ -579,7 +581,7 @@ AsciiVisualizer::renderRankGrid(const zigzag::ArenaManifold &manifold,
     // Top border of row
     for (int x = -radius; x <= radius; ++x) {
       auto it = grid.find({x, y});
-      if (it != grid.end() && it->second != zigzag::noCell) {
+      if (it != grid.end() && it->second) {
         oss << "+--------------+";
       } else {
         oss << "                ";
@@ -593,8 +595,8 @@ AsciiVisualizer::renderRankGrid(const zigzag::ArenaManifold &manifold,
     // Cell content of row
     for (int x = -radius; x <= radius; ++x) {
       auto it = grid.find({x, y});
-      if (it != grid.end() && it->second != zigzag::noCell) {
-        std::string brief = formatCellBrief(manifold, it->second);
+      if (it != grid.end() && it->second) {
+        std::string brief = formatCellBrief(manifold, *it->second);
         if (brief.size() > 12) {
           brief = brief.substr(0, 11) + "~";
         }
@@ -605,8 +607,8 @@ AsciiVisualizer::renderRankGrid(const zigzag::ArenaManifold &manifold,
       // Horizontal link indicator
       if (x < radius) {
         auto nextIt = grid.find({x + 1, y});
-        if (it != grid.end() && it->second != zigzag::noCell &&
-            nextIt != grid.end() && nextIt->second != zigzag::noCell) {
+        if (it != grid.end() && it->second && nextIt != grid.end() &&
+            nextIt->second) {
           oss << "->";
         } else {
           oss << "  ";
@@ -618,7 +620,7 @@ AsciiVisualizer::renderRankGrid(const zigzag::ArenaManifold &manifold,
     // Bottom border of row
     for (int x = -radius; x <= radius; ++x) {
       auto it = grid.find({x, y});
-      if (it != grid.end() && it->second != zigzag::noCell) {
+      if (it != grid.end() && it->second) {
         oss << "+--------------+";
       } else {
         oss << "                ";
@@ -634,8 +636,8 @@ AsciiVisualizer::renderRankGrid(const zigzag::ArenaManifold &manifold,
       for (int x = -radius; x <= radius; ++x) {
         auto it     = grid.find({x, y});
         auto downIt = grid.find({x, y + 1});
-        if (it != grid.end() && it->second != zigzag::noCell &&
-            downIt != grid.end() && downIt->second != zigzag::noCell) {
+        if (it != grid.end() && it->second && downIt != grid.end() &&
+            downIt->second) {
           oss << "       |        ";
         } else {
           oss << "                ";
@@ -716,13 +718,13 @@ AsciiVisualizer::renderCellInspection(const zigzag::ArenaManifold &manifold,
   oss << "Dimensions linked (" << dims.size() << "):\n";
   for (const auto &dl : dims) {
     oss << "  dim #" << (dl.dim & ~zigzag::ephemeralBit) << ": ";
-    if (dl.neg != zigzag::noCell) {
-      oss << "negward -> #" << (dl.neg & ~zigzag::ephemeralBit) << "  ";
+    if (const auto neg = dl.neighbor(DimVector::NEG)) {
+      oss << "negward -> #" << (*neg & ~zigzag::ephemeralBit) << "  ";
     } else {
       oss << "negward -> (nil)  ";
     }
-    if (dl.pos != zigzag::noCell) {
-      oss << "posward -> #" << (dl.pos & ~zigzag::ephemeralBit) << "\n";
+    if (const auto pos = dl.neighbor(DimVector::POS)) {
+      oss << "posward -> #" << (*pos & ~zigzag::ephemeralBit) << "\n";
     } else {
       oss << "posward -> (nil)\n";
     }

@@ -8,6 +8,7 @@
 #include <fstream>
 #include <future>
 #include <mutex>
+#include <optional>
 #include <thread>
 
 #include "common/xanadu/bencode.hpp"
@@ -30,6 +31,7 @@ struct TransportState {
   std::vector<std::thread::id> threads;
   std::atomic<bool> ack{false};
   std::atomic<bool> failSeed{false};
+  std::optional<std::uint16_t> listenPort;
 };
 
 class TestTransport final : public xanadu::PublicationTransport {
@@ -56,6 +58,10 @@ public:
                     const xanadu::InfoHash &) override {
     recordThread();
     return state_->ack.load();
+  }
+  std::optional<std::uint16_t> listenPort() const override {
+    const std::scoped_lock lock(state_->guard);
+    return state_->listenPort;
   }
 
 private:
@@ -128,6 +134,39 @@ TEST_F(PublicationOutboxTest, ReviewsHistorySliceAndExternalDependencies) {
   EXPECT_THROW(
       (void)xanadu::reviewPublicationDependencies(publication, {roots[0]}),
       std::runtime_error);
+}
+
+TEST_F(PublicationOutboxTest, NoTransportHasNoBoundPort) {
+  auto config          = options();
+  config.makeTransport = {};
+  xanadu::PublicationOutbox outbox(std::move(config));
+
+  EXPECT_FALSE(outbox.listenPort());
+}
+
+TEST_F(PublicationOutboxTest, PortReadinessTracksListenerAvailability) {
+  {
+    const std::scoped_lock lock(transport->guard);
+    transport->listenPort = 43210;
+  }
+  xanadu::PublicationOutbox outbox(options());
+  const auto readyDeadline = std::chrono::steady_clock::now() + 2s;
+  while (outbox.listenPort() != std::optional<std::uint16_t>{43210} &&
+         std::chrono::steady_clock::now() < readyDeadline) {
+    std::this_thread::sleep_for(10ms);
+  }
+  ASSERT_EQ(outbox.listenPort(), std::optional<std::uint16_t>{43210});
+
+  {
+    const std::scoped_lock lock(transport->guard);
+    transport->listenPort.reset();
+  }
+  const auto stoppedDeadline = std::chrono::steady_clock::now() + 2s;
+  while (outbox.listenPort() &&
+         std::chrono::steady_clock::now() < stoppedDeadline) {
+    std::this_thread::sleep_for(10ms);
+  }
+  EXPECT_FALSE(outbox.listenPort());
 }
 
 TEST_F(PublicationOutboxTest, LocalPreparationDoesNotAnnounce) {
@@ -455,6 +494,7 @@ TEST_F(PublicationInboxTest, PinnedSnapshotDoesNotResolveNewerMutableHead) {
   ASSERT_TRUE(inbox.waitFor(id, xanadu::PublicationDownloadPhase::Ready, 3s))
       << inbox.status(id).error;
   EXPECT_EQ(inbox.status(id).version, pin.version);
+  ASSERT_TRUE(inbox.status(id).sequence.has_value());
   EXPECT_EQ(inbox.status(id).sequence, 1);
   pin.version      = {};
   const auto wrong = inbox.submitPinned(pin);
@@ -1503,8 +1543,9 @@ TEST_F(PublicationOutboxNetworkTest,
   EXPECT_EQ(status(reopened, id).manifestHash, expected);
   const auto hash = reader.addMagnet("magnet:?xt=urn:btih:" + expected.hex(),
                                      (root / "download").string());
-  reader.connectPeer(hash, std::getenv("XUDU_TEST_HOST"),
-                     reopened.listenPort());
+  const auto listenPort = reopened.listenPort();
+  ASSERT_TRUE(listenPort);
+  reader.connectPeer(hash, std::getenv("XUDU_TEST_HOST"), *listenPort);
   ASSERT_TRUE(reader.waitForMetadata(hash, 30s));
   const auto meta = reader.metainfo(hash);
   ASSERT_TRUE(meta.has_value());

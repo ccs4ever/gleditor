@@ -6,18 +6,23 @@
  * where independent, asserts all pass criteria, and logs an exhaustive report.
  */
 
+#include <cerrno>
 #include <chrono>
+#include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <future>
 #include <iomanip>
 #include <iostream>
+#include <optional>
 #include <string>
+#include <sys/wait.h>
 #include <vector>
 
 struct SpikeRunResult {
   std::string name;
   std::string binary;
-  int exitCode{0};
+  std::optional<int> exitCode;
   double elapsedSec{0.0};
   std::string output;
 };
@@ -32,8 +37,8 @@ SpikeRunResult runSpikeBinary(const std::string &name,
   // Open pipe to capture output
   FILE *pipe = popen(binaryPath.c_str(), "r");
   if (!pipe) {
-    res.exitCode = -1;
-    res.output   = "Failed to launch binary: " + binaryPath;
+    res.output =
+        "Failed to launch binary: " + binaryPath + ": " + std::strerror(errno);
     return res;
   }
 
@@ -44,7 +49,16 @@ SpikeRunResult runSpikeBinary(const std::string &name,
   const int status = pclose(pipe);
   const auto t1    = std::chrono::steady_clock::now();
 
-  res.exitCode   = WEXITSTATUS(status);
+  if (status == -1) {
+    res.output +=
+        "\nFailed to wait for binary: " + std::string(std::strerror(errno));
+  } else if (WIFEXITED(status)) {
+    res.exitCode = WEXITSTATUS(status);
+  } else if (WIFSIGNALED(status)) {
+    res.output += "\nTerminated by signal " + std::to_string(WTERMSIG(status));
+  } else {
+    res.output += "\nBinary did not report a normal exit";
+  }
   res.elapsedSec = std::chrono::duration<double>(t1 - t0).count();
   return res;
 }

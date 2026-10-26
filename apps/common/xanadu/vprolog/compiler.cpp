@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cctype>
 #include <functional>
+#include <stdexcept>
 
 #include "common/xanadu/vprolog/parser.hpp"
 
@@ -84,12 +85,12 @@ Compiler::lowerTerm(const Term &term,
     return vlog_.makeTerm(comp->functor, loweredArgs);
   }
 
-  return zigzag::noCell;
+  throw std::invalid_argument("unsupported Prolog term");
 }
 
-zigzag::CellRef Compiler::compileClause(const Clause &clause) {
+std::optional<zigzag::CellRef> Compiler::compileClause(const Clause &clause) {
   if (clause.isDirective || clause.isQuery) {
-    return zigzag::noCell;
+    return std::nullopt;
   }
 
   std::string functor;
@@ -102,7 +103,7 @@ zigzag::CellRef Compiler::compileClause(const Clause &clause) {
     functor = atom->name;
     arity   = 0;
   } else {
-    return zigzag::noCell;
+    return std::nullopt;
   }
 
   zigzag::CellRef predCell = getOrCreatePredicate(functor, arity);

@@ -18,6 +18,7 @@
 #define XUDU_OPS_H
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -291,7 +292,7 @@ ProminenceTier prominenceTierFromName(const std::string &name);
  * read by nothing here that decides what may be done.
  */
 struct Link {
-  zigzag::CellRef id{zigzag::noCell};
+  std::optional<zigzag::CellRef> id;
   LinkType type{LinkType::Comment};
   ProminenceTier tier{ProminenceTier::Author};
   /// Who made it. Prestige, not permission.

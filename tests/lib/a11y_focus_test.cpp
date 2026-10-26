@@ -290,11 +290,12 @@ TEST(A11yFocusTest,
   publisher.rebuild(640, 480);
   EXPECT_EQ(second.described, 1);
   publisher.rebuild(1280, 800);
-  EXPECT_EQ(
-      publisher.snapshot().find(publisher.snapshot().root())->bounds->right,
-      1280);
-  EXPECT_EQ(
-      publisher.snapshot().find(publisher.snapshot().root())->bounds->bottom,
-      800);
+  const auto tree = publisher.snapshot();
+  ASSERT_TRUE(tree.root());
+  const auto root = tree.find(*tree.root());
+  ASSERT_TRUE(root);
+  ASSERT_TRUE(root->bounds);
+  EXPECT_EQ(root->bounds->right, 1280);
+  EXPECT_EQ(root->bounds->bottom, 800);
 }
 } // namespace

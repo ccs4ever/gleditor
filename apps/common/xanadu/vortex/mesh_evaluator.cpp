@@ -230,6 +230,8 @@ bool pureOpcode(OpcodeKind opcode) {
   case OpcodeKind::Fail:
   case OpcodeKind::Cut:
     return true;
+  case OpcodeKind::ChoiceDepth:
+    return false;
   }
   return false;
 }
@@ -529,7 +531,8 @@ void checkArithmetic(WorkerContext &context, CellRef instruction,
                      OpcodeKind opcode) {
   const auto inputs = context.core.inputsOf(instruction);
   std::vector<CellValue> values;
-  for (auto input : inputs) values.push_back(context.core.render(input));
+  for (auto input : inputs)
+    values.push_back(context.core.render(input).value());
   const auto integer = [](const CellValue &value) -> std::int64_t {
     return std::visit(
         [](const auto &v) -> std::int64_t {
@@ -615,8 +618,8 @@ void executeProgram(ResultBuilder &builder, WorkerContext &context,
   const auto dimension = [&](const std::string &name) -> DimRef {
     if (auto existing = dimensions.find(name); existing != dimensions.end())
       return existing->second;
-    auto existing     = arena.dimensionNamed(name);
-    const auto result = existing != noCell ? existing : arena.makeCell(name);
+    const auto existing = arena.dimensionNamed(name);
+    const auto result   = existing ? *existing : arena.makeCell(name);
     dimensions.emplace(name, result);
     return result;
   };
@@ -683,11 +686,11 @@ void executeProgram(ResultBuilder &builder, WorkerContext &context,
   std::size_t cycles = 0;
   for (;;) {
     auto pc = context.vm.getCursorOpcode(cursor);
-    if (pc == noCell) break;
-    if (!instructions.contains(pc))
+    if (!pc) break;
+    if (!instructions.contains(*pc))
       throw std::runtime_error("Vortex artifact attempted to execute outside "
                                "its sealed instructions");
-    const auto opcode = context.vm.getOpcodeKind(pc);
+    const auto opcode = context.vm.getOpcodeKind(*pc);
     if (!opcode || !pureOpcode(*opcode))
       throw std::runtime_error(
           "Vortex artifact reached an invalid instruction");
@@ -695,7 +698,7 @@ void executeProgram(ResultBuilder &builder, WorkerContext &context,
     if (cycles++ >= budget.maxCycles)
       throw std::runtime_error("Vortex artifact cycle budget exhausted");
     arena.consumeWork();
-    checkArithmetic(context, pc, *opcode);
+    checkArithmetic(context, *pc, *opcode);
     auto executed = context.vm.step(cursor);
     if (!executed.success) throw std::runtime_error(executed.errorMessage);
   }
@@ -773,8 +776,7 @@ std::optional<CellRef> vplCell(ResultBuilder &builder, const vpl::VplView &view,
     if (view.isFloat()) return arena.makeScalarCell(view.scalarFloat());
     return arena.makeScalarCell(view.scalarInt());
   }
-  return view.origin() == noCell ? std::nullopt
-                                 : std::optional<CellRef>(view.origin());
+  return view.origin();
 }
 
 // Resolution rolls the arena back after each solution, so retaining a CellRef
@@ -790,13 +792,22 @@ LogicValue captureLogic(vprolog::Compiler &compiler, CellRef ref,
   arena.consumeWork();
   if (++cells > limit || active.size() >= 512)
     throw std::runtime_error("Prolog result cell budget exhausted");
-  ref = compiler.stdlib().deref(ref);
+  const auto dereferenced = compiler.stdlib().deref(ref);
+  if (!dereferenced) {
+    throw std::runtime_error("Prolog result refers to an invalid cell");
+  }
+  ref = *dereferenced;
   if (!active.insert(ref).second)
     throw std::runtime_error("Cyclic Prolog result is not portable");
-  LogicValue result{.value = compiler.core().render(ref), .arguments = {}};
+  LogicValue result{.value     = compiler.core().render(ref).value(),
+                    .arguments = {}};
   const auto args = compiler.stdlib().argumentsOf(ref);
   if (!args.empty()) {
-    result.value = compiler.stdlib().functorOf(ref);
+    const auto functor = compiler.stdlib().functorOf(ref);
+    if (!functor) {
+      throw std::runtime_error("Prolog result has an invalid functor cell");
+    }
+    result.value = *functor;
     for (auto arg : args)
       result.arguments.push_back(
           captureLogic(compiler, arg, active, cells, limit));

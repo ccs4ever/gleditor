@@ -46,11 +46,14 @@ struct VocabularyReleaseResult {
  *
  * Ensures terms are linked along d.dims starting posward from releaseCell,
  * then restates releaseCell's content/value with releaseLabel to pin the
- * foreign state.
+ * foreign state. An absent parent selects the store's latest state; an
+ * engaged root ID explicitly selects the empty root state.
  */
-[[nodiscard]] VocabularyReleaseResult publishVocabularyRelease(
-    Store &store, const MicroversionId &parent, zigzag::CellRef releaseCell,
-    std::string_view releaseLabel, std::span<const zigzag::CellRef> terms);
+[[nodiscard]] VocabularyReleaseResult
+publishVocabularyRelease(Store &store, std::optional<MicroversionId> parent,
+                         std::optional<zigzag::CellRef> releaseCell,
+                         std::string_view releaseLabel,
+                         std::span<const zigzag::CellRef> terms);
 
 /**
  * @brief Adopt a published vocabulary as a §5.10 rank quotation (§5.11 §1, §7).
@@ -61,8 +64,8 @@ struct VocabularyReleaseResult {
 [[nodiscard]] AppendedQuotation
 adoptVocabulary(Store &localStore, const MicroversionId &parent,
                 const PublishedVocabulary &vocab, std::string_view localLabel,
-                zigzag::CellRef localRankTail = zigzag::noCell,
-                zigzag::DimRef localRankDim   = zigzag::noCell);
+                std::optional<zigzag::CellRef> localRankTail = std::nullopt,
+                std::optional<zigzag::DimRef> localRankDim   = std::nullopt);
 
 /**
  * @brief Result of filing a term for local use (§5.11 §4).

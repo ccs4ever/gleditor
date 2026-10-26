@@ -140,24 +140,37 @@ BufferPool::Allocation BufferPool::reserve(const std::uint32_t rows) {
   if (0 == rows) {
     return {};
   }
+  if (!nextAllocationId) {
+    throw std::overflow_error("BufferPool: allocation IDs exhausted");
+  }
+  const auto allocationId = *nextAllocationId;
+  if (allocationId == std::numeric_limits<std::uint32_t>::max()) {
+    nextAllocationId.reset();
+  } else {
+    ++*nextAllocationId;
+  }
 
   // Room around the rows as well as for them, so that the first row gained
   // does not cost a move. See slackFor.
   const auto room = rows + slackFor(rows);
-  const Allocation allocation{nextAllocationId++};
-  placements.emplace(allocation.id, Placement{.rowOffset = takeRun(room),
-                                              .rowCount  = rows,
-                                              .roomRows  = room,
-                                              .erased    = {}});
+  const Allocation allocation{.id = allocationId};
+  placements.emplace(allocationId, Placement{.rowOffset = takeRun(room),
+                                             .rowCount  = rows,
+                                             .roomRows  = room,
+                                             .erased    = {}});
   return allocation;
 }
 
 const BufferPool::Placement &
 BufferPool::placementOf(const Allocation &allocation, const char *what) const {
-  const auto found = placements.find(allocation.id);
+  if (!allocation.id) {
+    throw std::invalid_argument(
+        std::format("BufferPool::{}: allocation has no ID", what));
+  }
+  const auto found = placements.find(*allocation.id);
   if (placements.end() == found) {
     throw std::invalid_argument(std::format(
-        "BufferPool::{}: allocation {} is not live", what, allocation.id));
+        "BufferPool::{}: allocation {} is not live", what, *allocation.id));
   }
   return found->second;
 }
@@ -224,10 +237,10 @@ void BufferPool::resize(const Allocation &allocation, const std::uint32_t rows,
 }
 
 void BufferPool::release(const Allocation &allocation) {
-  if (allocation.empty()) {
+  if (!allocation.id) {
     return;
   }
-  const auto found = placements.find(allocation.id);
+  const auto found = placements.find(*allocation.id);
   if (placements.end() == found) {
     return; // released twice, or never reserved
   }

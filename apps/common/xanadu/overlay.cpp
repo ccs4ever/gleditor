@@ -11,39 +11,37 @@
 #include <tuple>
 
 #include "common/xanadu/torrent.hpp"
+#include <gleditor/sentinel.hpp>
 
 namespace xanadu {
 
 namespace {
 
-zigzag::CellRef traceMakeCell(const Store &store,
-                              const std::uint32_t startOpIndex) {
-  std::uint32_t curr = startOpIndex;
-  std::size_t steps  = 0;
-  while (curr != 0 && steps < 10000) {
-    const auto *node = store.getCompactOp(curr);
-    if (nullptr == node || OpKind::Structure != node->kind) {
-      break;
+std::optional<zigzag::CellRef> traceMakeCell(const Store &store,
+                                             const std::uint32_t startOpIndex) {
+  auto current = startOpIndex;
+  while (current != 0) {
+    const auto *node = store.getCompactOp(current);
+    if (!node || node->kind != OpKind::Structure) return std::nullopt;
+    if (structureVerbOf(node->flags) == StructureVerb::Make) {
+      return structureKindOf(node->flags) == StructureKind::Cell
+                 ? std::optional<zigzag::CellRef>{current}
+                 : std::nullopt;
     }
-    if (structureVerbOf(node->flags) == StructureVerb::Make &&
-        structureKindOf(node->flags) == StructureKind::Cell) {
-      return curr;
-    }
-    if (node->sourceOpIndex >= curr || node->sourceOpIndex == 0) {
-      return curr;
-    }
-    curr = node->sourceOpIndex;
-    ++steps;
+    // The immutable source chain strictly descends, so it needs no hop cap.
+    if (node->sourceOpIndex == 0 || node->sourceOpIndex >= current)
+      return std::nullopt;
+    current = node->sourceOpIndex;
   }
-  return curr != 0 ? curr : zigzag::noCell;
+  return std::nullopt;
 }
 
 } // namespace
 
-OverlayTargetResult declareOverlayTarget(Store &store,
-                                         const MicroversionId &parent,
-                                         const GlobalDocumentState &targetState,
-                                         zigzag::CellRef releaseCell) {
+OverlayTargetResult
+declareOverlayTarget(Store &store, const MicroversionId &parent,
+                     const GlobalDocumentState &targetState,
+                     std::optional<zigzag::CellRef> releaseCell) {
   auto curHead = parent.isZero() ? store.latest() : parent;
   auto fold    = store.rebuildManifold(curHead);
 
@@ -66,19 +64,19 @@ OverlayTargetResult declareOverlayTarget(Store &store,
     fold    = store.rebuildManifold(curHead);
   }
 
-  if (releaseCell == zigzag::noCell) {
+  if (!releaseCell) {
     curHead     = store.makeCell(curHead, "overlay_root");
-    releaseCell = store.cellRefOf(curHead);
+    releaseCell = store.cellRefOf(curHead).value();
     fold        = store.rebuildManifold(curHead);
   }
 
   const auto encodedState = writeGlobalDocumentState(targetState);
   curHead                 = store.makeCell(curHead, encodedState);
-  const auto targetCell   = store.cellRefOf(curHead);
+  const auto targetCell   = store.cellRefOf(curHead).value();
   fold                    = store.rebuildManifold(curHead);
 
   const auto targetsTail =
-      zigzag::rankTail(fold, releaseCell, dimOverlayTargets);
+      zigzag::rankTail(fold, *releaseCell, dimOverlayTargets);
   curHead = store.setLink(curHead, targetsTail, dimOverlayTargets,
                           zigzag::DimVector::POS, targetCell);
   fold    = store.rebuildManifold(curHead);
@@ -97,22 +95,22 @@ OverlayTargetResult declareOverlayTarget(Store &store,
   return OverlayTargetResult{
       .version     = curHead,
       .targetCell  = targetCell,
-      .releaseCell = releaseCell,
+      .releaseCell = *releaseCell,
   };
 }
 
 OverlayTargetResult
 declareOverlayTarget(Store &store, const MicroversionId &parent,
-                     const zigzag::CellRef releaseCell,
+                     const std::optional<zigzag::CellRef> releaseCell,
                      const GlobalDocumentState &targetState) {
   return declareOverlayTarget(store, parent, targetState, releaseCell);
 }
 
-OverlayClaimResult
-authorOverlayClaim(Store &store, const MicroversionId &parent,
-                   const zigzag::CellRef from, const zigzag::DimRef dim,
-                   const zigzag::DimVector dir, const zigzag::CellRef to,
-                   zigzag::CellRef releaseCell, const std::string_view label) {
+OverlayClaimResult authorOverlayClaim(
+    Store &store, const MicroversionId &parent, const zigzag::CellRef from,
+    const zigzag::DimRef dim, const zigzag::DimVector dir,
+    const std::optional<zigzag::CellRef> to,
+    std::optional<zigzag::CellRef> releaseCell, const std::string_view label) {
   auto curHead = parent.isZero() ? store.latest() : parent;
   auto fold    = store.rebuildManifold(curHead);
 
@@ -129,33 +127,36 @@ authorOverlayClaim(Store &store, const MicroversionId &parent,
 
   const auto dimOverlayClaims = ensureDim(kDimOverlayClaims);
 
-  if (releaseCell == zigzag::noCell) {
+  if (!releaseCell) {
     curHead     = store.makeCell(curHead, "overlay_root");
-    releaseCell = store.cellRefOf(curHead);
+    releaseCell = store.cellRefOf(curHead).value();
     fold        = store.rebuildManifold(curHead);
   }
 
   curHead              = store.setLink(curHead, from, dim, dir, to);
-  const auto setLinkOp = store.segmentedOps().indexOf(curHead);
+  const auto setLinkOp = store.segmentedOps().indexOf(curHead).value();
   fold                 = store.rebuildManifold(curHead);
 
   curHead               = store.makeOpHandle(curHead, setLinkOp, label);
-  const auto handleCell = store.cellRefOf(curHead);
+  const auto handleCell = store.cellRefOf(curHead).value();
   fold                  = store.rebuildManifold(curHead);
 
-  const auto claimsTail = zigzag::rankTail(fold, releaseCell, dimOverlayClaims);
-  curHead               = store.setLink(curHead, claimsTail, dimOverlayClaims,
-                                        zigzag::DimVector::POS, handleCell);
+  const auto claimsTail =
+      zigzag::rankTail(fold, *releaseCell, dimOverlayClaims);
+  curHead = store.setLink(curHead, claimsTail, dimOverlayClaims,
+                          zigzag::DimVector::POS, handleCell);
 
-  return OverlayClaimResult{
-      .version = curHead, .handleCell = handleCell, .releaseCell = releaseCell};
+  return OverlayClaimResult{.version     = curHead,
+                            .handleCell  = handleCell,
+                            .releaseCell = *releaseCell};
 }
 
 OverlayClaimResult
 authorOverlayClaim(Store &store, const MicroversionId &parent,
-                   const zigzag::CellRef releaseCell,
+                   const std::optional<zigzag::CellRef> releaseCell,
                    const zigzag::CellRef from, const zigzag::DimRef dim,
-                   const zigzag::DimVector dir, const zigzag::CellRef to,
+                   const zigzag::DimVector dir,
+                   const std::optional<zigzag::CellRef> to,
                    const std::string_view label) {
   return authorOverlayClaim(store, parent, from, dim, dir, to, releaseCell,
                             label);
@@ -164,33 +165,33 @@ authorOverlayClaim(Store &store, const MicroversionId &parent,
 OverlayClaimResult authorOverlayBreak(
     Store &store, const MicroversionId &parent, const zigzag::CellRef from,
     const zigzag::DimRef dim, const zigzag::DimVector dir,
-    const zigzag::CellRef releaseCell, const std::string_view label) {
-  return authorOverlayClaim(store, parent, from, dim, dir, zigzag::noCell,
+    std::optional<zigzag::CellRef> releaseCell, const std::string_view label) {
+  return authorOverlayClaim(store, parent, from, dim, dir, std::nullopt,
                             releaseCell, label);
 }
 
 OverlayClaimResult
 authorOverlayBreak(Store &store, const MicroversionId &parent,
-                   const zigzag::CellRef releaseCell,
+                   const std::optional<zigzag::CellRef> releaseCell,
                    const zigzag::CellRef from, const zigzag::DimRef dim,
                    const zigzag::DimVector dir, const std::string_view label) {
-  return authorOverlayClaim(store, parent, from, dim, dir, zigzag::noCell,
+  return authorOverlayClaim(store, parent, from, dim, dir, std::nullopt,
                             releaseCell, label);
 }
 
-OverlayReleaseResult sealOverlayRelease(Store &store,
-                                        const MicroversionId &parent,
-                                        zigzag::CellRef releaseCell,
-                                        const std::string_view label) {
+OverlayReleaseResult
+sealOverlayRelease(Store &store, const MicroversionId &parent,
+                   std::optional<zigzag::CellRef> releaseCell,
+                   const std::string_view label) {
   auto curHead = parent.isZero() ? store.latest() : parent;
-  if (releaseCell == zigzag::noCell) {
+  if (!releaseCell) {
     curHead     = store.makeCell(curHead, label.empty() ? "release" : label);
-    releaseCell = store.cellRefOf(curHead);
+    releaseCell = store.cellRefOf(curHead).value();
   } else {
-    curHead = store.setCellText(curHead, releaseCell,
+    curHead = store.setCellText(curHead, *releaseCell,
                                 label.empty() ? "release" : label);
   }
-  return OverlayReleaseResult{.version = curHead, .releaseCell = releaseCell};
+  return OverlayReleaseResult{.version = curHead, .releaseCell = *releaseCell};
 }
 
 RebaseResult rebaseOverlay(Store &overlayStore, const MicroversionId &parent,
@@ -220,7 +221,7 @@ RebaseResult rebaseOverlay(Store &overlayStore, const MicroversionId &parent,
   // Mint new release cell to preserve hypertime history of old release
   const auto newRelOp = overlayStore.makeCell(
       curHead, newReleaseLabel.empty() ? "rebased" : newReleaseLabel);
-  const auto newRelCell = overlayStore.cellRefOf(newRelOp);
+  const auto newRelCell = overlayStore.cellRefOf(newRelOp).value();
   curHead               = newRelOp;
   fold                  = overlayStore.rebuildManifold(curHead);
 
@@ -233,9 +234,9 @@ RebaseResult rebaseOverlay(Store &overlayStore, const MicroversionId &parent,
   // Link existing claims posward from new release cell
   const auto firstClaim =
       fold.linked(releaseCell, dimClaims, zigzag::DimVector::POS);
-  if (firstClaim != zigzag::noCell) {
+  if (firstClaim) {
     curHead = overlayStore.setLink(curHead, newRelCell, dimClaims,
-                                   zigzag::DimVector::POS, firstClaim);
+                                   zigzag::DimVector::POS, *firstClaim);
     fold    = overlayStore.rebuildManifold(curHead);
   }
 
@@ -253,7 +254,8 @@ RebaseResult rebaseOverlay(Store &overlayStore, const MicroversionId &parent,
     }
 
     const auto from = traceMakeCell(overlayStore, node->sourceOpIndex);
-    if (const auto extFrom = overlayStore.externTarget(from);
+    if (!from) continue;
+    if (const auto extFrom = overlayStore.externTarget(*from);
         extFrom.has_value()) {
       if (extFrom->produces != newTargetState.version &&
           !extFrom->produces.isAncestorOf(newTargetState.version)) {
@@ -264,14 +266,15 @@ RebaseResult rebaseOverlay(Store &overlayStore, const MicroversionId &parent,
             .direction    = (node->flags & structureNegward)
                                 ? zigzag::DimVector::NEG
                                 : zigzag::DimVector::POS,
-            .to           = node->to,
+            .to           = gleditor::fromSentinel<zigzag::noCell>(node->to),
             .state        = OverlayClaimState::OutsideSnapshot,
             .claimOpIndex = *opIndex,
         });
       }
     }
-    if (node->to != zigzag::noCell) {
-      if (const auto extTo = overlayStore.externTarget(node->to);
+    if (const auto nodeTarget =
+            gleditor::fromSentinel<zigzag::noCell>(node->to)) {
+      if (const auto extTo = overlayStore.externTarget(*nodeTarget);
           extTo.has_value()) {
         if (extTo->produces != newTargetState.version &&
             !extTo->produces.isAncestorOf(newTargetState.version)) {
@@ -282,7 +285,7 @@ RebaseResult rebaseOverlay(Store &overlayStore, const MicroversionId &parent,
               .direction    = (node->flags & structureNegward)
                                   ? zigzag::DimVector::NEG
                                   : zigzag::DimVector::POS,
-              .to           = node->to,
+              .to           = nodeTarget,
               .state        = OverlayClaimState::OutsideSnapshot,
               .claimOpIndex = *opIndex,
           });
@@ -528,19 +531,19 @@ OverlayComposition &OverlayComposition::compose() & {
     if (members.size() <= 1) {
       continue;
     }
-    zigzag::DimRef arenaDim = zigzag::noCell;
+    std::optional<zigzag::DimRef> arenaDim;
     for (const auto &[spaceId, dim] : members) {
       const auto existing = arena_.arenaDimFor(spaceId, dim);
-      if (existing != zigzag::noCell) {
-        arenaDim = existing;
+      if (existing) {
+        arenaDim = *existing;
         break;
       }
     }
-    if (arenaDim == zigzag::noCell) {
+    if (!arenaDim) {
       arenaDim = arena_.ensureDimension(name);
     }
     for (const auto &[spaceId, dim] : members) {
-      arena_.bindDimension(arenaDim, spaceId, dim,
+      arena_.bindDimension(*arenaDim, spaceId, dim,
                            zigzag::DimensionBindingMode::Explicit);
     }
   }
@@ -559,9 +562,9 @@ OverlayComposition &OverlayComposition::compose() & {
 
       for (const auto &dLink : target.manifold->dimensionsOf(cellRef)) {
         const auto foreignDim = dLink.dim;
-        zigzag::DimRef arenaDim =
+        std::optional<zigzag::DimRef> arenaDim =
             arena_.arenaDimFor(target.spaceId, foreignDim);
-        if (arenaDim == zigzag::noCell) {
+        if (!arenaDim) {
           std::string dName;
           if (target.store != nullptr) {
             dName = target.manifold->textOf(foreignDim, *target.store);
@@ -570,17 +573,17 @@ OverlayComposition &OverlayComposition::compose() & {
             dName = "dim_" + std::to_string(foreignDim);
           }
           arenaDim = arena_.ensureDimension(dName);
-          arena_.bindDimension(arenaDim, target.spaceId, foreignDim,
+          arena_.bindDimension(*arenaDim, target.spaceId, foreignDim,
                                zigzag::DimensionBindingMode::Explicit);
         }
 
         for (const auto dir :
              {zigzag::DimVector::POS, zigzag::DimVector::NEG}) {
           const auto neighbor = dLink.neighbor(dir);
-          if (neighbor != zigzag::noCell) {
-            const auto proxyTo = arena_.proxyFor(target.spaceId, neighbor);
-            occupiedSlots_.insert(SlotKey{proxyFrom, arenaDim, dir});
-            occupiedSlots_.insert(SlotKey{proxyTo, arenaDim, -dir});
+          if (neighbor) {
+            const auto proxyTo = arena_.proxyFor(target.spaceId, *neighbor);
+            occupiedSlots_.insert(SlotKey{proxyFrom, *arenaDim, dir});
+            occupiedSlots_.insert(SlotKey{proxyTo, *arenaDim, -dir});
           }
         }
       }
@@ -605,12 +608,12 @@ OverlayComposition &OverlayComposition::compose() & {
     const auto dimClaims = *dimClaimsOpt;
 
     std::vector<zigzag::CellRef> claimCells;
-    if (overlay.releaseCell != zigzag::noCell) {
-      if (overlayFold.handleTarget(overlay.releaseCell).has_value()) {
-        claimCells.push_back(overlay.releaseCell);
+    if (overlay.releaseCell) {
+      if (overlayFold.handleTarget(*overlay.releaseCell).has_value()) {
+        claimCells.push_back(*overlay.releaseCell);
       }
       for (const auto h :
-           zigzag::rankAfter(overlayFold, overlay.releaseCell, dimClaims)) {
+           zigzag::rankAfter(overlayFold, *overlay.releaseCell, dimClaims)) {
         claimCells.push_back(h);
       }
     } else {
@@ -619,10 +622,8 @@ OverlayComposition &OverlayComposition::compose() & {
         if (c == zigzag::noCell) {
           continue;
         }
-        if (overlayFold.linked(c, dimClaims, zigzag::DimVector::NEG) ==
-                zigzag::noCell &&
-            overlayFold.linked(c, dimClaims, zigzag::DimVector::POS) !=
-                zigzag::noCell) {
+        if (!overlayFold.linked(c, dimClaims, zigzag::DimVector::NEG) &&
+            overlayFold.linked(c, dimClaims, zigzag::DimVector::POS)) {
           if (overlayFold.handleTarget(c).has_value()) {
             claimCells.push_back(c);
           }
@@ -664,16 +665,28 @@ OverlayComposition &OverlayComposition::compose() & {
                                                 ? zigzag::DimVector::NEG
                                                 : zigzag::DimVector::POS;
       const auto overlayDim               = node->linkId;
-      const auto overlayTo                = node->to;
+      const auto overlayTo = gleditor::fromSentinel<zigzag::noCell>(node->to);
       const auto overlayFrom =
           traceMakeCell(*overlay.store, node->sourceOpIndex);
+
+      if (!overlayFrom) {
+        candidatesToArbitrate.push_back(OverlayCandidate{
+            .claimHandle    = claimHandle,
+            .tier           = ao.tier,
+            .score          = ao.score,
+            .state          = OverlayClaimState::Unintelligible,
+            .claimOpIndex   = opIndex,
+            .publicationKey = overlay.publicationKey,
+        });
+        continue;
+      }
 
       OverlayClaimState claimState =
           OverlayClaimState::Shadowed; // Default pending arbitration
 
       // Resolve from cell
-      zigzag::CellRef fromProxy = zigzag::noCell;
-      if (const auto extFrom = overlay.store->externTarget(overlayFrom);
+      std::optional<zigzag::CellRef> fromProxy;
+      if (const auto extFrom = overlay.store->externTarget(*overlayFrom);
           extFrom.has_value()) {
         const auto rec =
             overlay.store->scrollRegistry().findRecord(extFrom->scroll);
@@ -695,8 +708,8 @@ OverlayComposition &OverlayComposition::compose() & {
               matchedTarget->store != nullptr
                   ? matchedTarget->store->segmentedOps().indexOf(
                         extFrom->produces)
-                  : 0;
-          if (targetOp == 0) {
+                  : std::nullopt;
+          if (!targetOp || *targetOp == 0) {
             claimState = OverlayClaimState::TargetAbsent;
           } else if (extFrom->produces != matchedTarget->state.version &&
                      !extFrom->produces.isAncestorOf(
@@ -704,18 +717,22 @@ OverlayComposition &OverlayComposition::compose() & {
             claimState = OverlayClaimState::OutsideSnapshot;
           } else {
             const auto targetCellRef =
-                traceMakeCell(*matchedTarget->store, targetOp);
-            fromProxy = arena_.proxyFor(matchedTarget->spaceId, targetCellRef);
+                traceMakeCell(*matchedTarget->store, *targetOp);
+            if (targetCellRef)
+              fromProxy =
+                  arena_.proxyFor(matchedTarget->spaceId, *targetCellRef);
+            else
+              claimState = OverlayClaimState::Unintelligible;
           }
         }
       } else {
-        fromProxy = arena_.proxyFor(ao.spaceId, overlayFrom);
+        fromProxy = arena_.proxyFor(ao.spaceId, *overlayFrom);
       }
 
       // Resolve to cell
-      zigzag::CellRef toProxy = zigzag::noCell;
-      if (overlayTo != zigzag::noCell) {
-        if (const auto extTo = overlay.store->externTarget(overlayTo);
+      std::optional<zigzag::CellRef> toProxy;
+      if (overlayTo) {
+        if (const auto extTo = overlay.store->externTarget(*overlayTo);
             extTo.has_value()) {
           const auto rec =
               overlay.store->scrollRegistry().findRecord(extTo->scroll);
@@ -737,8 +754,8 @@ OverlayComposition &OverlayComposition::compose() & {
                 matchedTarget->store != nullptr
                     ? matchedTarget->store->segmentedOps().indexOf(
                           extTo->produces)
-                    : 0;
-            if (targetOp == 0) {
+                    : std::nullopt;
+            if (!targetOp || *targetOp == 0) {
               claimState = OverlayClaimState::TargetAbsent;
             } else if (extTo->produces != matchedTarget->state.version &&
                        !extTo->produces.isAncestorOf(
@@ -746,34 +763,38 @@ OverlayComposition &OverlayComposition::compose() & {
               claimState = OverlayClaimState::OutsideSnapshot;
             } else {
               const auto targetCellRef =
-                  traceMakeCell(*matchedTarget->store, targetOp);
-              toProxy = arena_.proxyFor(matchedTarget->spaceId, targetCellRef);
+                  traceMakeCell(*matchedTarget->store, *targetOp);
+              if (targetCellRef)
+                toProxy =
+                    arena_.proxyFor(matchedTarget->spaceId, *targetCellRef);
+              else
+                claimState = OverlayClaimState::Unintelligible;
             }
           }
         } else {
-          toProxy = arena_.proxyFor(ao.spaceId, overlayTo);
+          toProxy = arena_.proxyFor(ao.spaceId, *overlayTo);
         }
       }
 
       // Resolve dimension: if bound through bindSharedIdentities or system dim,
       // use bound dimension; otherwise, keep private to this overlay (§5.12 §7,
       // Test 11).
-      zigzag::DimRef arenaDim = arena_.arenaDimFor(ao.spaceId, overlayDim);
-      if (arenaDim == zigzag::noCell) {
+      auto arenaDim = arena_.arenaDimFor(ao.spaceId, overlayDim);
+      if (!arenaDim) {
         std::string dName = overlayFold.textOf(overlayDim, *overlay.store);
         if (dName.empty()) {
           dName = "dim_" + std::to_string(overlayDim);
         }
         arenaDim = arena_.ensureDimension(
             "overlay_" + std::to_string(ao.spaceId) + ":" + dName);
-        arena_.bindDimension(arenaDim, ao.spaceId, overlayDim,
+        arena_.bindDimension(*arenaDim, ao.spaceId, overlayDim,
                              zigzag::DimensionBindingMode::Explicit);
       }
 
       candidatesToArbitrate.push_back(OverlayCandidate{
           .claimHandle    = claimHandle,
           .from           = fromProxy,
-          .dimension      = arenaDim,
+          .dimension      = *arenaDim,
           .direction      = authoredDir,
           .to             = toProxy,
           .tier           = ao.tier,
@@ -781,31 +802,33 @@ OverlayComposition &OverlayComposition::compose() & {
           .state          = claimState,
           .claimOpIndex   = opIndex,
           .publicationKey = overlay.publicationKey,
-          .claimVersion   = overlay.store->segmentedOps().idOf(opIndex),
+          .claimVersion   = overlay.store->segmentedOps().idOf(opIndex).value(),
       });
     }
   }
 
   // 6. Deterministic Two-Slot Arbitration (§5.12 §5)
-  std::ranges::sort(candidatesToArbitrate,
-                    [](const OverlayCandidate &a, const OverlayCandidate &b) {
-                      if (a.tier != b.tier) {
-                        return static_cast<std::uint8_t>(a.tier) <
-                               static_cast<std::uint8_t>(b.tier);
-                      }
-                      if (a.score != b.score) {
-                        return a.score > b.score;
-                      }
-                      if (a.publicationKey != b.publicationKey) {
-                        return a.publicationKey < b.publicationKey;
-                      }
-                      const auto vA = a.claimVersion.str();
-                      const auto vB = b.claimVersion.str();
-                      if (vA != vB) {
-                        return vA < vB;
-                      }
-                      return a.claimOpIndex < b.claimOpIndex;
-                    });
+  std::ranges::sort(candidatesToArbitrate, [](const OverlayCandidate &a,
+                                              const OverlayCandidate &b) {
+    if (a.tier != b.tier) {
+      return static_cast<std::uint8_t>(a.tier) <
+             static_cast<std::uint8_t>(b.tier);
+    }
+    if (a.score != b.score) {
+      return a.score > b.score;
+    }
+    if (a.publicationKey != b.publicationKey) {
+      return a.publicationKey < b.publicationKey;
+    }
+    const auto vA =
+        a.claimVersion.transform([](const auto &v) { return v.str(); });
+    const auto vB =
+        b.claimVersion.transform([](const auto &v) { return v.str(); });
+    if (vA != vB) {
+      return vA < vB;
+    }
+    return a.claimOpIndex < b.claimOpIndex;
+  });
 
   for (auto &cand : candidatesToArbitrate) {
     if (cand.state != OverlayClaimState::Shadowed) {
@@ -814,9 +837,13 @@ OverlayComposition &OverlayComposition::compose() & {
       continue;
     }
 
-    const SlotKey slot1{cand.from, cand.dimension, cand.direction};
+    if (!cand.from || !cand.dimension) {
+      cand.state = OverlayClaimState::Unintelligible;
+      continue;
+    }
+    const SlotKey slot1{*cand.from, *cand.dimension, cand.direction};
 
-    if (cand.isBreak()) { // Explicit break to == noCell
+    if (cand.isBreak()) { // Explicit break has no target.
       if (occupiedSlots_.contains(slot1)) {
         cand.state = OverlayClaimState::Shadowed;
       } else {
@@ -826,7 +853,7 @@ OverlayComposition &OverlayComposition::compose() & {
         // result (§5.12 §5)
       }
     } else { // Positive claim
-      const SlotKey slot2{cand.to, cand.dimension, -cand.direction};
+      const SlotKey slot2{*cand.to, *cand.dimension, -cand.direction};
       if (occupiedSlots_.contains(slot1)) {
         cand.state = OverlayClaimState::Shadowed;
       } else if (occupiedSlots_.contains(slot2)) {
@@ -836,17 +863,19 @@ OverlayComposition &OverlayComposition::compose() & {
         occupiedSlots_.insert(slot1);
         occupiedSlots_.insert(slot2);
         zigzag::expectWritten(
-            arena_.link(cand.from, cand.dimension, cand.direction, cand.to));
+            arena_.link(*cand.from, *cand.dimension, cand.direction, *cand.to));
       }
     }
   }
 
   // 7. Store candidates in side index for provenance inspection (§5.12 §4)
   for (const auto &cand : candidatesToArbitrate) {
-    const SlotKey slot1{cand.from, cand.dimension, cand.direction};
-    candidateMap_[slot1].push_back(cand);
-    if (!cand.isBreak()) {
-      const SlotKey slot2{cand.to, cand.dimension, -cand.direction};
+    if (cand.from && cand.dimension) {
+      const SlotKey slot1{*cand.from, *cand.dimension, cand.direction};
+      candidateMap_[slot1].push_back(cand);
+    }
+    if (cand.to && cand.dimension) {
+      const SlotKey slot2{*cand.to, *cand.dimension, -cand.direction};
       candidateMap_[slot2].push_back(cand);
     }
     allCandidates_.push_back(cand);
@@ -877,7 +906,7 @@ OverlayComposition::effectiveLink(const zigzag::CellRef from,
                                   const zigzag::DimRef dim,
                                   const zigzag::DimVector dir) const noexcept {
   const auto res = arena_.linked(from, dim, dir);
-  return zigzag::present(res);
+  return res;
 }
 
 std::vector<GlobalLink>

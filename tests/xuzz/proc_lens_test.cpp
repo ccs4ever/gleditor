@@ -90,7 +90,7 @@ TEST(ProcLensTest, ProcessTreeHierarchyAndSiblingChains) {
   // bash(100) -> sshd(101) -> nginx(102) along d.sibling
   EXPECT_EQ(arena.linked(*cBash, dSibling, DimVector::POS), *cSshd);
   EXPECT_EQ(arena.linked(*cSshd, dSibling, DimVector::POS), *cNginx);
-  EXPECT_EQ(arena.linked(*cNginx, dSibling, DimVector::POS), noCell);
+  EXPECT_FALSE(arena.linked(*cNginx, dSibling, DimVector::POS));
 
   // bash(100) -> firstborn child make(200) along d.child
   EXPECT_EQ(arena.linked(*cBash, dChild, DimVector::POS), *cMake);

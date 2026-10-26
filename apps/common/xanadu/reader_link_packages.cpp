@@ -165,12 +165,13 @@ const GlobalLink *ReaderLinkPackages::find(const LinkKey &key) const {
   const auto *pkg = package(key);
   return pkg ? &pkg->links.at(key.id) : nullptr;
 }
-std::string readerScrollKey(const Store &store, ScrollId slot) {
+std::optional<std::string> readerScrollKey(const Store &store,
+                                           const ScrollId slot) {
   if (slot == localScroll) {
-    if (const auto scroll = store.scroll(store.publishedLocalScroll()))
-      return scrollKey(*scroll);
-    if (!store.bootstrapPermascrollKey().empty())
-      return store.bootstrapPermascrollKey();
+    if (const auto scroll = store.scroll(store.publishedLocalScroll())) {
+      if (const auto key = scrollKey(*scroll)) return key;
+    }
+    if (store.bootstrapPermascrollKey()) return store.bootstrapPermascrollKey();
     return store.userPermascroll().globalScrollKey();
   }
   return globalKeyOf(store, {.scroll = slot});
@@ -183,18 +184,18 @@ PackageOccurrenceIndex::PackageOccurrenceIndex(
   const auto add = [&](const Store &store, std::span<const PrimediaSpan> pieces,
                        std::uint32_t view, zigzag::CellRef cell, bool isCell) {
     std::uint32_t offset = 0;
-    std::map<ScrollId, std::string> keys;
+    std::map<ScrollId, std::optional<std::string>> keys;
     for (const auto &piece : pieces) {
       if (!keys.contains(piece.scroll))
         keys.emplace(piece.scroll, readerScrollKey(store, piece.scroll));
       const auto &key = keys.at(piece.scroll);
-      if (!key.empty() && !piece.empty())
-        entries[key].push_back({.start     = piece.start,
-                                .length    = piece.length,
-                                .docId     = view,
-                                .docOffset = offset,
-                                .cellDense = cell,
-                                .flags = static_cast<std::uint16_t>(isCell)});
+      if (key && !piece.empty())
+        entries[*key].push_back({.start     = piece.start,
+                                 .length    = piece.length,
+                                 .docId     = view,
+                                 .docOffset = offset,
+                                 .cellDense = cell,
+                                 .flags = static_cast<std::uint16_t>(isCell)});
       offset += static_cast<std::uint32_t>(piece.length);
     }
   };
@@ -286,11 +287,10 @@ PackageOccurrenceIndex::resolve(const Store &store,
           {.side        = side,
            .index       = static_cast<std::uint32_t>(members.size()),
            .span        = span,
-           .occurrences = scroll.empty()
-                              ? std::vector<Occurrence>{}
-                              : occurrences({.scroll = scroll,
-                                             .start  = span.start,
-                                             .length = span.length})});
+           .occurrences = !scroll ? std::vector<Occurrence>{}
+                                  : occurrences({.scroll = *scroll,
+                                                 .start  = span.start,
+                                                 .length = span.length})});
     }
   }
   return result;
@@ -300,11 +300,11 @@ LinkOccurrences PackageOccurrenceIndex::resolve(const LinkKey &key,
                                                 const LinkPackage &pkg) const {
   const auto &global = pkg.links.at(key.id);
   Link link;
-  link.id      = key.id;
-  link.type    = global.type;
-  link.tier    = ProminenceTier::Curated;
-  link.owner   = pkg.title + " — curator " + pkg.curator.hex().substr(0, 12) +
-                 " / " + global.owner;
+  link.id    = key.id;
+  link.type  = global.type;
+  link.tier  = ProminenceTier::Curated;
+  link.owner = pkg.title + " — curator " + pkg.curator.hex().substr(0, 12) +
+               " / " + global.owner;
   link.curator = pkg.curator.hex();
   LinkOccurrences result{.key = key, .link = link};
   for (const auto side : {LinkSide::Left, LinkSide::Right}) {

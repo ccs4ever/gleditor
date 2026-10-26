@@ -22,14 +22,14 @@ ViewManifold::baseLinked(zigzag::CellRef cell, zigzag::DimRef dim,
   }
   if (baseArena_) {
     const auto res = baseArena_->linked(cell, dim, dir);
-    if (!res.has_value() || *res == zigzag::noCell) {
+    if (!res) {
       return std::nullopt;
     }
     return *res;
   }
   if (base_) {
     const auto res = base_->linked(cell, dim, dir);
-    if (!res.has_value() || *res == zigzag::noCell) {
+    if (!res) {
       return std::nullopt;
     }
     return *res;

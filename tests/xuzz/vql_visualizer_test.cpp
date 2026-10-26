@@ -65,6 +65,18 @@ TEST(VQLVisualizerTest, RenderRankGrid) {
   EXPECT_THAT(grid, testing::HasSubstr("down"));
 }
 
+TEST(VQLVisualizerTest, RankGridDistinguishesNoFocusFromInvalidFocus) {
+  zigzag::ArenaManifold arena;
+  const auto dimX = arena.makeCell("dx");
+  const auto dimY = arena.makeCell("dy");
+  const auto blank =
+      AsciiVisualizer::renderRankGrid(arena, std::nullopt, dimX, dimY);
+  EXPECT_THAT(blank, testing::HasSubstr("2D Rank Grid"));
+  EXPECT_THAT(blank, testing::Not(testing::HasSubstr("+--------------+")));
+  EXPECT_EQ(AsciiVisualizer::renderRankGrid(arena, zigzag::noCell, dimX, dimY),
+            "(start cell not found in manifold)\n");
+}
+
 TEST(VQLVisualizerTest, RenderQueryResults) {
   zigzag::ArenaManifold arena;
   zigzag::CellRef c1 = arena.makeCell("Alice");
@@ -116,6 +128,19 @@ TEST(VQLVisualizerTest, RenderCellConnections) {
   EXPECT_THAT(view, testing::HasSubstr("hello"));
   EXPECT_THAT(view, testing::HasSubstr("world"));
   EXPECT_THAT(view, testing::HasSubstr("bar"));
+}
+
+TEST(VQLVisualizerTest, UnresolvedDimensionIsExplicitAbsence) {
+  zigzag::ArenaManifold arena;
+  const auto cell                             = arena.makeCell("hello");
+  const std::vector<ViewDimension> dimensions = {
+      {"d.unresolved", std::nullopt}};
+
+  const auto view =
+      AsciiVisualizer::renderCellConnections(arena, {cell}, dimensions);
+
+  EXPECT_THAT(view, testing::HasSubstr("d.unresolved"));
+  EXPECT_THAT(view, testing::HasSubstr("(unresolved dimension)"));
 }
 
 } // namespace

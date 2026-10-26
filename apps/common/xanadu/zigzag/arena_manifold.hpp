@@ -89,8 +89,8 @@ struct Space {
   const xanadu::Scroll *sealedAs{
       nullptr}; ///< opRefOf() needs it; may be null locally
   const xanadu::SpanReader *reader{
-      nullptr};              ///< owning scroll namespace; lifetime pinned
-  CellRef storeCell{noCell}; ///< its cell on the d.stores rank
+      nullptr}; ///< owning scroll namespace; lifetime pinned
+  std::optional<CellRef> storeCell; ///< its cell on the d.stores rank
   std::string label;
 };
 
@@ -270,19 +270,24 @@ public:
     return store_ != nullptr ? store_
                              : (base_ != nullptr ? base_->store() : nullptr);
   }
-  [[nodiscard]] CellRef home() const noexcept;
-  [[nodiscard]] CellRef homeCell() const noexcept { return home(); }
+  /// Persistent home cell from the base manifold, when one exists.
+  [[nodiscard]] std::optional<CellRef> home() const noexcept;
+  [[nodiscard]] std::optional<CellRef> homeCell() const noexcept {
+    return home();
+  }
 
   [[nodiscard]] std::vector<DimRef> dimensions() const;
 
-  [[nodiscard]] DimRef
+  [[nodiscard]] std::optional<DimRef>
   dimensionNamed(std::string_view name,
                  const xanadu::SpanReader *reader = nullptr) const;
   [[nodiscard]] std::optional<DimRef>
   dimensionNamed(std::string_view name, const xanadu::SpanReader &reader) const;
   DimRef ensureDimension(std::string_view name);
 
-  [[nodiscard]] CellRef authorshipRoot() const noexcept {
+  /// Provenance root projected into this arena, when verified provenance is
+  /// available.
+  [[nodiscard]] std::optional<CellRef> authorshipRoot() const noexcept {
     return authorshipRoot_;
   }
   [[nodiscard]] bool isProvenanceCell(CellRef ref) const noexcept {
@@ -307,12 +312,12 @@ public:
 
   /// The proxy naming (@p space, @p foreignIndex), minting it on first ask.
   /// One canonical identity proxy per foreign cell; presentation is separate.
+  /// Throws if @p foreignIndex is noCell.
   CellRef proxyFor(std::uint32_t space, CellRef foreignIndex);
 
-  /// Find existing proxy for (@p space, @p foreignIndex) without allocating;
-  /// noCell if not yet minted.
-  [[nodiscard]] CellRef findExistingProxy(std::uint32_t space,
-                                          CellRef foreignIndex) const noexcept;
+  /// Find existing proxy for (@p space, @p foreignIndex) without allocating.
+  [[nodiscard]] std::optional<CellRef>
+  findExistingProxy(std::uint32_t space, CellRef foreignIndex) const noexcept;
 
   /// Whether @p ref is a canonical federation proxy.
   [[nodiscard]] bool isProxy(CellRef ref) const noexcept;
@@ -323,7 +328,8 @@ public:
   CellRef quoteOccurrence(QuoteViewId view, CellRef canonicalProxy);
 
   [[nodiscard]] bool isQuoteOccurrence(CellRef ref) const noexcept;
-  [[nodiscard]] CellRef canonicalProxyOf(CellRef occurrence) const noexcept;
+  [[nodiscard]] std::optional<CellRef>
+  canonicalProxyOf(CellRef occurrence) const noexcept;
 
   /// What a proxy stands for, or nothing for an ordinary arena cell.
   [[nodiscard]] gleditor::cpp26::optional<ForeignRef>
@@ -367,11 +373,15 @@ public:
   [[nodiscard]] std::optional<QuotedContent> quotedContent(CellRef ref) const;
 
   /// Resolves the corresponding dimension in @p space for @p dim.
-  [[nodiscard]] DimRef dimIn(std::uint32_t space, DimRef dim) const noexcept;
+  [[nodiscard]] std::optional<DimRef> dimIn(std::uint32_t space,
+                                            DimRef dim) const noexcept;
 
   /// Resolves the arena dimension bound to @p foreignDim in @p space.
-  [[nodiscard]] DimRef arenaDimFor(std::uint32_t space,
-                                   DimRef foreignDim) const noexcept;
+  /// An absent space searches every attached space and accepts an arena-local
+  /// dimension as itself.
+  [[nodiscard]] std::optional<DimRef>
+  arenaDimFor(std::optional<std::uint32_t> space,
+              DimRef foreignDim) const noexcept;
 
   /// Explicitly bind @p arenaDim to @p foreignDim in @p space.
   ArenaManifold *
@@ -482,7 +492,7 @@ public:
    * @brief linked(), minting the proxy for a neighbour in a foreign space
    *        that has none yet.
    *
-   * linked() is a read and answers noCell for a foreign neighbour nobody has
+   * linked() is a read and answers nullopt for a foreign neighbour nobody has
    * proxied, so the first step from a store's cell into the rest of that
    * store found nothing: a query walking a loaded store stopped at its home.
    * A query evaluating in the arena is allowed to mint, and walks with this.
@@ -741,7 +751,7 @@ private:
   /// The document being read through, or null for a standalone arena.
   const Manifold *base_{nullptr};
   const xanadu::Store *store_{nullptr};
-  CellRef authorshipRoot_{noCell};
+  std::optional<CellRef> authorshipRoot_;
   std::unordered_set<CellRef> provenanceCells_;
   std::unordered_map<std::string, DimRef> arenaDims_;
   /// base CellRef -> the dense slot shadowing it.
@@ -795,7 +805,7 @@ private:
   };
   std::set<ShadowEdgeKey> proxyShadowedEdges_;
   std::vector<ShadowEdgeKey> proxyShadowedEdgeOrder_;
-  CellRef storesRankTail_{noCell};
+  std::optional<CellRef> storesRankTail_;
   std::uint32_t allocationLimit_{ephemeralBit};
   const xanadu::SpanReader *defaultReader_{nullptr};
   mutable std::optional<std::size_t> workRemaining_;

@@ -10,6 +10,9 @@
 
 namespace render {
 
+/// Keep streamed instance chunks on separate 64-byte transfer boundaries.
+inline constexpr std::size_t kDefaultStreamAlignmentBytes = 64;
+
 /**
  * @brief Represents a mapped memory slice within a persistent ring buffer.
  */
@@ -29,8 +32,9 @@ public:
   virtual ~IStreamBuffer() = default;
 
   /// Allocate a mapped chunk of @p size bytes with alignment @p alignment.
-  [[nodiscard]] virtual MappedChunk allocate(std::size_t size,
-                                             std::size_t alignment = 64) = 0;
+  [[nodiscard]] virtual MappedChunk
+  allocate(std::size_t size,
+           std::size_t alignment = kDefaultStreamAlignmentBytes) = 0;
 
   /// Explicitly flush the mapped chunk range and insert/prepare fence sync.
   virtual void flushAndUnmap(std::size_t offset, std::size_t size) = 0;

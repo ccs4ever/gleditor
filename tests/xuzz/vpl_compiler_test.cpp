@@ -45,26 +45,26 @@ TEST_F(VPLCompilerTest, CompileExecutableStore) {
 
   auto result = compiler.compile("3 + 4", opts);
   ASSERT_TRUE(result.success) << result.errorMessage;
-  ASSERT_NE(result.entryOpcode, noCell);
+  ASSERT_TRUE(result.entryOpcode);
 
   // Home should be linked along +d.spin to entryOpcode
-  CellRef spinTarget =
+  const auto spinTarget =
       core->arena().linked(core->home(), core->dims().spin, false);
-  EXPECT_EQ(spinTarget, result.entryOpcode);
+  ASSERT_TRUE(spinTarget);
+  EXPECT_EQ(*spinTarget, *result.entryOpcode);
 
   // Active cursor should be spawned
   auto cursors = vm->activeCursors();
   ASSERT_FALSE(cursors.empty());
-  EXPECT_EQ(vm->getCursorOpcode(cursors.front()), result.entryOpcode);
+  EXPECT_EQ(vm->getCursorOpcode(cursors.front()), *result.entryOpcode);
 
   // Last instruction in stream should be Halt
-  CellRef lastOp = noCell;
-  CellRef cur    = result.entryOpcode;
-  while (cur != noCell) {
-    lastOp = cur;
-    cur    = core->arena().linked(cur, core->dims().spin, false);
+  CellRef lastOp = *result.entryOpcode;
+  auto cur       = core->arena().linked(lastOp, core->dims().spin, false);
+  while (cur) {
+    lastOp = *cur;
+    cur    = core->arena().linked(*cur, core->dims().spin, false);
   }
-  ASSERT_NE(lastOp, noCell);
   auto kind = vm->getOpcodeKind(lastOp);
   ASSERT_TRUE(kind.has_value());
   EXPECT_EQ(*kind, OpcodeKind::Halt);
@@ -80,31 +80,31 @@ TEST_F(VPLCompilerTest, CompileLibraryStore) {
 
   auto result = compiler.compile("10 + 20", opts);
   ASSERT_TRUE(result.success) << result.errorMessage;
-  ASSERT_NE(result.entryOpcode, noCell);
+  ASSERT_TRUE(result.entryOpcode);
 
   // Module should be linked along +d.stdlib off home
-  CellRef modCell =
+  const auto modCell =
       core->arena().linked(core->home(), core->dims().stdlib, false);
-  ASSERT_NE(modCell, noCell);
-  EXPECT_EQ(core->arena().textOf(modCell), "vpl:math");
+  ASSERT_TRUE(modCell);
+  EXPECT_EQ(core->arena().textOf(*modCell), "vpl:math");
 
   // Symbol should be linked along +d.vars off module cell
-  CellRef symCell = core->arena().linked(modCell, core->dims().vars, false);
-  ASSERT_NE(symCell, noCell);
-  EXPECT_EQ(core->arena().textOf(symCell), "add_nums");
+  const auto symCell = core->arena().linked(*modCell, core->dims().vars, false);
+  ASSERT_TRUE(symCell);
+  EXPECT_EQ(core->arena().textOf(*symCell), "add_nums");
 
   // Symbol's +d.values should point to entryOpcode
-  CellRef fnEntry = core->arena().linked(symCell, core->dims().values, false);
+  const auto fnEntry =
+      core->arena().linked(*symCell, core->dims().values, false);
   EXPECT_EQ(fnEntry, result.entryOpcode);
 
   // Last instruction should be Return
-  CellRef lastOp = noCell;
-  CellRef cur    = result.entryOpcode;
-  while (cur != noCell) {
-    lastOp = cur;
-    cur    = core->arena().linked(cur, core->dims().spin, false);
+  CellRef lastOp = *result.entryOpcode;
+  auto cur       = core->arena().linked(lastOp, core->dims().spin, false);
+  while (cur) {
+    lastOp = *cur;
+    cur    = core->arena().linked(*cur, core->dims().spin, false);
   }
-  ASSERT_NE(lastOp, noCell);
   auto kind = vm->getOpcodeKind(lastOp);
   ASSERT_TRUE(kind.has_value());
   EXPECT_EQ(*kind, OpcodeKind::Return);
@@ -236,7 +236,7 @@ TEST_F(VPLCompilerTest, ExportToStorePersistence) {
 
   MicroversionId ver = compiler.exportToStore(store);
   EXPECT_FALSE(ver.isZero());
-  EXPECT_NE(store.homeCell(), noCell);
+  EXPECT_TRUE(store.homeCell().has_value());
 
   std::string tempDir =
       "/tmp/test_vpl_compiler_store_" +
@@ -250,7 +250,7 @@ TEST_F(VPLCompilerTest, ExportToStorePersistence) {
 
   Store reloaded(permascroll);
   EXPECT_NO_THROW(reloaded.load(tempDir));
-  EXPECT_EQ(reloaded.homeCell(), store.homeCell());
+  EXPECT_EQ(reloaded.homeCell().value(), store.homeCell().value());
 
   std::filesystem::remove_all(tempDir);
 }
@@ -275,7 +275,8 @@ TEST_F(VPLCompilerTest, VortexVMExecutionRun) {
   EXPECT_EQ(execRes.errorMessage, "Halted");
 
   // Output cell of Add opcode should contain 7
-  CellRef addOp = result.entryOpcode;
+  ASSERT_TRUE(result.entryOpcode);
+  CellRef addOp = *result.entryOpcode;
   auto outCells = core->outputsOf(addOp);
   ASSERT_FALSE(outCells.empty());
   EXPECT_EQ(core->arena().asInt64(outCells.front()), 7);

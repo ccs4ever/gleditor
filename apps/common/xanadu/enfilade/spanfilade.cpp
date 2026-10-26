@@ -244,7 +244,7 @@ void Spanfilade::indexContext(const UniversalViewContext &ctx) {
       const auto &manifold = *ctx.manifoldViews[mIdx];
       const auto focus     = (mIdx < ctx.manifoldFoci.size())
                                  ? ctx.manifoldFoci[mIdx]
-                                 : zigzag::noCell;
+                                 : std::nullopt;
       const auto allowed = manifold.cellsWithinRadiusSet(focus, ctx.cellRadius);
       indexManifold(static_cast<uint32_t>(mIdx), manifold, &allowed);
     }
@@ -328,13 +328,13 @@ void Spanfilade::placeTransclusions(
 
   // Precompute allowed cells for each manifold view if radius is constrained
   std::vector<std::unordered_set<zigzag::CellRef>> allowedCellSets;
-  if (ctx.cellRadius >= 0 && !ctx.manifoldViews.empty()) {
+  if (ctx.cellRadius.has_value() && !ctx.manifoldViews.empty()) {
     allowedCellSets.resize(ctx.manifoldViews.size());
     for (std::size_t mIdx = 0; mIdx < ctx.manifoldViews.size(); ++mIdx) {
       if (ctx.manifoldViews[mIdx]) {
         const auto focus      = (mIdx < ctx.manifoldFoci.size())
                                     ? ctx.manifoldFoci[mIdx]
-                                    : zigzag::noCell;
+                                    : std::nullopt;
         allowedCellSets[mIdx] = ctx.manifoldViews[mIdx]->cellsWithinRadiusSet(
             focus, ctx.cellRadius);
       }

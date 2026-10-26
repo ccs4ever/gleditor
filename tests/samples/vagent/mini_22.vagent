@@ -1,0 +1,19 @@
+event Start
+event Cancel
+goal Count() perform
+agent Pauses {
+  var job: Opt<Intention> := none
+  var progress: Int := 0
+  on Start { job := adopt Count() }
+  on Cancel {
+    if job then {
+      drop job
+      job := none
+    }
+  }
+  plan count for Count {
+    progress := 1
+    yield
+    progress := 2
+  }
+}

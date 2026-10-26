@@ -73,7 +73,7 @@ TEST(ArenaFederationTest, SourceIdentityIncludesBaseCellsButNotScratchQuotes) {
   const auto source   = createTestStore(dir);
   const auto genesis  = source->sliceGenesis({});
   const auto head     = source->makeCell(genesis, "authored");
-  const auto cell     = source->cellRefOf(head);
+  const auto cell     = source->cellRefOf(head).value();
   const auto manifold = source->rebuildManifold(head);
   ArenaManifold arena;
   const auto space = arena.attach(Space{.manifold = &manifold,
@@ -104,11 +104,11 @@ TEST(ArenaFederationTest, TwoStoresWithTheSameOperationIndexDoNotCollide) {
 
   auto v1_0        = store1->sliceGenesis(MicroversionId{});
   auto v1_1        = store1->makeCell(v1_0, "doc1_cell");
-  const auto cell1 = store1->cellRefOf(v1_1);
+  const auto cell1 = store1->cellRefOf(v1_1).value();
 
   auto v2_0        = store2->sliceGenesis(MicroversionId{});
   auto v2_1        = store2->makeCell(v2_0, "doc2_cell");
-  const auto cell2 = store2->cellRefOf(v2_1);
+  const auto cell2 = store2->cellRefOf(v2_1).value();
 
   EXPECT_EQ(cell1, cell2); // Same local operation index
 
@@ -192,14 +192,15 @@ TEST(ArenaFederationTest, AProxyNamesItsStoreOnDStoreRefs) {
   const auto spaceId = arena.attach(sp);
   const auto spOpt   = arena.spaceAt(spaceId);
   ASSERT_TRUE(spOpt.has_value());
-  const CellRef storeCell = spOpt->storeCell;
-  EXPECT_NE(storeCell, noCell);
+  ASSERT_TRUE(spOpt->storeCell);
+  const CellRef storeCell = *spOpt->storeCell;
 
   const CellRef proxy     = arena.proxyFor(spaceId, 99);
   const auto dimStoreRefs = arena.ensureDimension("d.store-refs");
 
-  const CellRef negCell = arena.linked(proxy, dimStoreRefs, DimVector::NEG);
-  EXPECT_EQ(negCell, storeCell);
+  const auto negCell = arena.linked(proxy, dimStoreRefs, DimVector::NEG);
+  ASSERT_TRUE(negCell);
+  EXPECT_EQ(*negCell, storeCell);
 }
 
 // 4. manyProxiesDoNotDisplaceTheStoresRank
@@ -208,8 +209,10 @@ TEST(ArenaFederationTest, ManyProxiesDoNotDisplaceTheStoresRank) {
   const auto s1 = arena.attach(Space{.label = "s1"});
   const auto s2 = arena.attach(Space{.label = "s2"});
 
-  const CellRef sc1    = arena.spaceAt(s1)->storeCell;
-  const CellRef sc2    = arena.spaceAt(s2)->storeCell;
+  ASSERT_TRUE(arena.spaceAt(s1)->storeCell);
+  ASSERT_TRUE(arena.spaceAt(s2)->storeCell);
+  const CellRef sc1    = *arena.spaceAt(s1)->storeCell;
+  const CellRef sc2    = *arena.spaceAt(s2)->storeCell;
   const auto dimStores = arena.ensureDimension("d.stores");
 
   EXPECT_EQ(arena.linked(sc1, dimStores, DimVector::POS), sc2);
@@ -224,12 +227,11 @@ TEST(ArenaFederationTest, ManyProxiesDoNotDisplaceTheStoresRank) {
   EXPECT_EQ(arena.linked(sc2, dimStores, DimVector::NEG), sc1);
 
   const auto dimStoreRefs = arena.ensureDimension("d.store-refs");
-  CellRef cur             = sc1;
+  auto cur                = std::optional<CellRef>{sc1};
   std::size_t count1      = 0;
-  while (true) {
-    const CellRef nxt = arena.linked(cur, dimStoreRefs, DimVector::POS);
-    if (nxt == noCell) break;
-    cur = nxt;
+  while (cur) {
+    cur = arena.linked(*cur, dimStoreRefs, DimVector::POS);
+    if (!cur) break;
     count1++;
   }
   EXPECT_EQ(count1, 5u);
@@ -247,12 +249,12 @@ TEST(ArenaFederationTest, AQuotationOccurrenceCannotEscapeItsInducedEdges) {
   auto cC = store->makeCell(cB, "C");
   auto cD = store->makeCell(cC, "D");
 
-  auto vL1 = store->setLink(cD, store->cellRefOf(cA), d1.dim, false,
-                            store->cellRefOf(cB));
-  auto vL2 = store->setLink(vL1, store->cellRefOf(cB), d1.dim, false,
-                            store->cellRefOf(cC));
-  auto vL3 = store->setLink(vL2, store->cellRefOf(cC), d1.dim, false,
-                            store->cellRefOf(cD));
+  auto vL1 = store->setLink(cD, store->cellRefOf(cA).value(), d1.dim, false,
+                            store->cellRefOf(cB).value());
+  auto vL2 = store->setLink(vL1, store->cellRefOf(cB).value(), d1.dim, false,
+                            store->cellRefOf(cC).value());
+  auto vL3 = store->setLink(vL2, store->cellRefOf(cC).value(), d1.dim, false,
+                            store->cellRefOf(cD).value());
 
   auto manifold = store->rebuildManifold(vL3);
 
@@ -260,9 +262,9 @@ TEST(ArenaFederationTest, AQuotationOccurrenceCannotEscapeItsInducedEdges) {
   const auto sp = arena.attach(
       Space{.manifold = &manifold, .store = store.get(), .label = "doc"});
 
-  const CellRef pA = arena.proxyFor(sp, store->cellRefOf(cA));
-  const CellRef pB = arena.proxyFor(sp, store->cellRefOf(cB));
-  const CellRef pC = arena.proxyFor(sp, store->cellRefOf(cC));
+  const CellRef pA = arena.proxyFor(sp, store->cellRefOf(cA).value());
+  const CellRef pB = arena.proxyFor(sp, store->cellRefOf(cB).value());
+  const CellRef pC = arena.proxyFor(sp, store->cellRefOf(cC).value());
 
   const QuoteViewId view = 42;
   const CellRef qA       = arena.quoteOccurrence(view, pA);
@@ -275,9 +277,8 @@ TEST(ArenaFederationTest, AQuotationOccurrenceCannotEscapeItsInducedEdges) {
 
   EXPECT_EQ(arena.linked(qA, dimArena1, DimVector::POS), qB);
   EXPECT_EQ(arena.linked(qB, dimArena1, DimVector::POS), qC);
-  EXPECT_EQ(arena.linked(qC, dimArena1, DimVector::POS),
-            noCell); // Boundary hop returns noCell
-  EXPECT_EQ(arena.linked(qA, dimArena1, DimVector::NEG), noCell);
+  EXPECT_FALSE(arena.linked(qC, dimArena1, DimVector::POS));
+  EXPECT_FALSE(arena.linked(qA, dimArena1, DimVector::NEG));
 }
 
 // 6. overlappingQuotationsKeepIndependentScopes
@@ -304,8 +305,8 @@ TEST(ArenaFederationTest, OverlappingQuotationsKeepIndependentScopes) {
   zigzag::expectWritten(arena.link(qA1, dim1, DimVector::POS, qB1));
   zigzag::expectWritten(arena.link(qB2, dim2, DimVector::POS, qC2));
 
-  EXPECT_EQ(arena.linked(qB1, dim2, DimVector::POS), noCell);
-  EXPECT_EQ(arena.linked(qB2, dim1, DimVector::NEG), noCell);
+  EXPECT_FALSE(arena.linked(qB1, dim2, DimVector::POS));
+  EXPECT_FALSE(arena.linked(qB2, dim1, DimVector::NEG));
 }
 
 // 7. aReadOnlyHopDoesNotMintAProxy
@@ -317,8 +318,8 @@ TEST(ArenaFederationTest, AReadOnlyHopDoesNotMintAProxy) {
   auto d1 = store->makeDimension(v0, "d.1");
   auto cX = store->makeCell(d1.version, "X");
   auto cY = store->makeCell(cX, "Y");
-  auto vL = store->setLink(cY, store->cellRefOf(cX), d1.dim, false,
-                           store->cellRefOf(cY));
+  auto vL = store->setLink(cY, store->cellRefOf(cX).value(), d1.dim, false,
+                           store->cellRefOf(cY).value());
 
   auto manifold = store->rebuildManifold(vL);
 
@@ -326,13 +327,13 @@ TEST(ArenaFederationTest, AReadOnlyHopDoesNotMintAProxy) {
   const auto sp =
       arena.attach(Space{.manifold = &manifold, .store = store.get()});
 
-  const CellRef pX     = arena.proxyFor(sp, store->cellRefOf(cX));
+  const CellRef pX     = arena.proxyFor(sp, store->cellRefOf(cX).value());
   const auto dimArena1 = arena.ensureDimension("d.1");
 
   const std::size_t countBefore = arena.cellCount();
-  const CellRef ans             = arena.linked(pX, dimArena1, DimVector::POS);
+  const auto ans                = arena.linked(pX, dimArena1, DimVector::POS);
 
-  EXPECT_EQ(ans, noCell);
+  EXPECT_FALSE(ans);
   EXPECT_EQ(arena.cellCount(), countBefore);
 }
 
@@ -349,7 +350,7 @@ TEST(ArenaFederationTest,
   std::vector<CellRef> cells;
   for (int i = 0; i < 10; ++i) {
     vCur = store->makeCell(vCur, "cell_" + std::to_string(i));
-    cells.push_back(store->cellRefOf(vCur));
+    cells.push_back(store->cellRefOf(vCur).value());
   }
   for (std::size_t i = 0; i < 9; ++i) {
     vCur = store->setLink(vCur, cells[i], d1.dim, false, cells[i + 1]);
@@ -364,19 +365,19 @@ TEST(ArenaFederationTest,
 
   arena.materializeFrontier(sp, cells[0], d1.dim, DimVector::POS, 10);
 
-  CellRef cur = arena.findExistingProxy(sp, cells[0]);
-  EXPECT_NE(cur, noCell);
+  auto cur = arena.findExistingProxy(sp, cells[0]);
+  ASSERT_TRUE(cur);
 
   for (std::size_t i = 0; i < 9; ++i) {
-    const CellRef nxt = arena.linked(cur, dimArena1, DimVector::POS);
-    ASSERT_NE(nxt, noCell);
-    const auto foreign = arena.foreignOf(nxt);
+    const auto nxt = arena.linked(*cur, dimArena1, DimVector::POS);
+    ASSERT_TRUE(nxt);
+    const auto foreign = arena.foreignOf(*nxt);
     ASSERT_TRUE(foreign.has_value());
     EXPECT_EQ(foreign->space, sp);
     EXPECT_EQ(foreign->index, cells[i + 1]);
-    cur = nxt;
+    cur = *nxt;
   }
-  EXPECT_EQ(arena.linked(cur, dimArena1, DimVector::POS), noCell);
+  EXPECT_FALSE(arena.linked(*cur, dimArena1, DimVector::POS));
 }
 
 // 9. aFederatedRefKeepsItsIdentity
@@ -386,7 +387,7 @@ TEST(ArenaFederationTest, AFederatedRefKeepsItsIdentity) {
 
   auto v0         = store->sliceGenesis(MicroversionId{});
   auto v1         = store->makeCell(v0, "ident");
-  const auto cRef = store->cellRefOf(v1);
+  const auto cRef = store->cellRefOf(v1).value();
 
   ArenaManifold arena;
   const auto sp =
@@ -433,11 +434,11 @@ TEST(ArenaFederationTest, AttachingAStoreCopiesNothing) {
   EXPECT_LT(afterAttach, 10u);
 
   // Minting one proxy increments count by exactly 1
-  arena.proxyFor(s1, store1->cellRefOf(v1));
+  arena.proxyFor(s1, store1->cellRefOf(v1).value());
   EXPECT_EQ(arena.cellCount(), afterAttach + 1);
 
   // Minting same proxy again does not mint additional cells
-  arena.proxyFor(s1, store1->cellRefOf(v1));
+  arena.proxyFor(s1, store1->cellRefOf(v1).value());
   EXPECT_EQ(arena.cellCount(), afterAttach + 1);
 }
 
@@ -450,8 +451,8 @@ TEST(ArenaFederationTest, ShadowedForeignLinkWinsOverDelegation) {
   auto d1 = store->makeDimension(v0, "d.1");
   auto cA = store->makeCell(d1.version, "A");
   auto cB = store->makeCell(cA, "B");
-  auto vL = store->setLink(cB, store->cellRefOf(cA), d1.dim, false,
-                           store->cellRefOf(cB));
+  auto vL = store->setLink(cB, store->cellRefOf(cA).value(), d1.dim, false,
+                           store->cellRefOf(cB).value());
 
   auto manifold = store->rebuildManifold(vL);
 
@@ -460,18 +461,20 @@ TEST(ArenaFederationTest, ShadowedForeignLinkWinsOverDelegation) {
       Space{.manifold = &manifold, .store = store.get(), .label = "doc"});
   const auto dimArena1 = arena.ensureDimension("d.1");
 
-  const CellRef pA = arena.proxyFor(sp, store->cellRefOf(cA));
-  const CellRef pB = arena.proxyFor(sp, store->cellRefOf(cB));
+  const CellRef pA = arena.proxyFor(sp, store->cellRefOf(cA).value());
+  const CellRef pB = arena.proxyFor(sp, store->cellRefOf(cB).value());
 
   EXPECT_EQ(arena.linked(pA, dimArena1, DimVector::POS), pB);
 
   // Local break to noCell
-  zigzag::expectWritten(arena.link(pA, dimArena1, DimVector::POS, noCell));
-  EXPECT_EQ(arena.linked(pA, dimArena1, DimVector::POS), noCell);
+  zigzag::expectWritten(
+      arena.link(pA, dimArena1, DimVector::POS, std::nullopt));
+  EXPECT_FALSE(arena.linked(pA, dimArena1, DimVector::POS));
 
   // Foreign manifold is completely untouched
-  EXPECT_EQ(manifold.linked(store->cellRefOf(cA), d1.dim, DimVector::POS),
-            store->cellRefOf(cB));
+  EXPECT_EQ(
+      manifold.linked(store->cellRefOf(cA).value(), d1.dim, DimVector::POS),
+      store->cellRefOf(cB).value());
 
   // Local override to custom cell
   const CellRef custom = arena.makeCell("local_override");
@@ -488,7 +491,7 @@ TEST(ArenaFederationTest, PromotingAProxyFilesAPlaceholder) {
 
   auto vF0             = foreignStore->sliceGenesis(MicroversionId{});
   auto vF1             = foreignStore->makeCell(vF0, "foreign payload");
-  const auto fCell     = foreignStore->cellRefOf(vF1);
+  const auto fCell     = foreignStore->cellRefOf(vF1).value();
   auto foreignManifold = foreignStore->rebuildManifold(vF1);
 
   ArenaManifold arena;
@@ -534,7 +537,7 @@ TEST(ArenaFederationTest,
 
   auto vF0             = foreignStore->sliceGenesis(MicroversionId{});
   auto vF1             = foreignStore->makeCell(vF0, "shared primedia text");
-  const auto fCell     = foreignStore->cellRefOf(vF1);
+  const auto fCell     = foreignStore->cellRefOf(vF1).value();
   auto foreignManifold = foreignStore->rebuildManifold(vF1);
 
   ArenaManifold arena;
@@ -569,8 +572,10 @@ TEST(ArenaFederationTest, ABoundDimensionResolvesPerSpaceAndRecordsMode) {
   arena.bindDimension(dArena, sp1, 101, DimensionBindingMode::Explicit);
   arena.bindDimension(dArena, sp2, 202, DimensionBindingMode::NameMatch);
 
-  EXPECT_EQ(arena.dimIn(sp1, dArena), 101u);
-  EXPECT_EQ(arena.dimIn(sp2, dArena), 202u);
+  ASSERT_TRUE(arena.dimIn(sp1, dArena));
+  ASSERT_TRUE(arena.dimIn(sp2, dArena));
+  EXPECT_EQ(*arena.dimIn(sp1, dArena), 101u);
+  EXPECT_EQ(*arena.dimIn(sp2, dArena), 202u);
 
   const auto bSetOpt = arena.boundDimensionSet(dArena);
   ASSERT_TRUE(bSetOpt.has_value());
@@ -592,18 +597,25 @@ TEST(ArenaFederationTest, ProxiesVanishWithTheirMark) {
   const auto mark   = arena.mark();
   const CellRef p   = arena.proxyFor(sp, 50);
   const CellRef occ = arena.quoteOccurrence(1, p);
-  zigzag::expectWritten(arena.link(p, dim1, DimVector::POS, noCell));
+  zigzag::expectWritten(arena.link(p, dim1, DimVector::POS, std::nullopt));
 
-  EXPECT_EQ(arena.findExistingProxy(sp, 50), p);
+  ASSERT_TRUE(arena.findExistingProxy(sp, 50));
+  EXPECT_EQ(*arena.findExistingProxy(sp, 50), p);
   EXPECT_TRUE(arena.isQuoteOccurrence(occ));
 
   arena.release(mark);
 
-  EXPECT_EQ(arena.findExistingProxy(sp, 50), noCell);
+  EXPECT_FALSE(arena.findExistingProxy(sp, 50));
   EXPECT_FALSE(arena.isQuoteOccurrence(occ));
 }
 
 // 16. aMintAtTheRefCeilingIsRefused
+TEST(ArenaFederationTest, ProxyFactoryRejectsReservedZeroForeignIndex) {
+  ArenaManifold arena;
+  const auto space = arena.attach(Space{.label = "zero-index"});
+  EXPECT_THROW(arena.proxyFor(space, CellRef{0}), std::invalid_argument);
+}
+
 TEST(ArenaFederationTest, AMintAtTheRefCeilingIsRefused) {
   ArenaManifold arena;
   arena.setAllocationLimitForTesting(

@@ -57,13 +57,17 @@ TEST(MeshSwarmTest, AuthenticatedControlSharesTheVerifiedContentListener) {
   b.source().addTorrent(program->torrent.file,
                         (directory / "download").string());
   const auto deadline = std::chrono::steady_clock::now() + 10s;
-  while ((a.source().listenPort() == 0 || b.source().listenPort() == 0) &&
-         std::chrono::steady_clock::now() < deadline) {
+  auto aPort          = a.source().listenPort();
+  auto bPort          = b.source().listenPort();
+  while ((!aPort || !bPort) && std::chrono::steady_clock::now() < deadline) {
     a.poll();
     b.poll();
+    aPort = a.source().listenPort();
+    bPort = b.source().listenPort();
     std::this_thread::sleep_for(10ms);
   }
-  ASSERT_NE(a.source().listenPort(), 0);
+  ASSERT_TRUE(aPort);
+  ASSERT_TRUE(bPort);
   identity::ActorMessage message;
   message.type      = identity::MessageType::ActorSend;
   message.requestId = "same-socket-control";
@@ -71,8 +75,7 @@ TEST(MeshSwarmTest, AuthenticatedControlSharesTheVerifiedContentListener) {
   message.target    = identity::ActorPid{"node-b", "cursor-b", 1, 1};
   message.value     = "immutable control";
   ASSERT_TRUE(a.send(fingerprint, message));
-  b.source().connectPeer(program->torrent.hash, "127.0.0.1",
-                         a.source().listenPort());
+  b.source().connectPeer(program->torrent.hash, "127.0.0.1", *aPort);
   std::vector<AuthenticatedActorEvent> incoming;
   while (incoming.empty() && std::chrono::steady_clock::now() < deadline) {
     a.poll();

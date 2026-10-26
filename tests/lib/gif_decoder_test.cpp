@@ -5,7 +5,9 @@
 #include <gleditor/gif_decoder.hpp>
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 #ifdef GLEDITOR_HAVE_DECODE_INDEX_GIF
@@ -26,7 +28,8 @@ int gifMemoryWrite(GifFileType *gif, const GifByteType *buf, int len) {
 }
 
 std::vector<std::uint8_t> makeTestGif(const int width, const int height,
-                                      const int frameCount = 2) {
+                                      const int frameCount   = 2,
+                                      const bool transparent = false) {
 #ifdef GLEDITOR_HAVE_DECODE_INDEX_GIF
   std::vector<std::uint8_t> out;
   MemoryWriter writer{&out};
@@ -52,14 +55,15 @@ std::vector<std::uint8_t> makeTestGif(const int width, const int height,
     gcb.DisposalMode     = DISPOSAL_UNSPECIFIED;
     gcb.UserInputFlag    = false;
     gcb.DelayTime        = 20; // 0.20s
-    gcb.TransparentColor = NO_TRANSPARENT_COLOR;
+    gcb.TransparentColor = transparent ? 0 : NO_TRANSPARENT_COLOR;
     std::uint8_t ext[4];
     EGifGCBToExtension(&gcb, ext);
     EGifPutExtension(gif, GRAPHICS_EXT_FUNC_CODE, 4, ext);
 
     EGifPutImageDesc(gif, 0, 0, width, height, false, nullptr);
-    std::vector<GifPixelType> line(static_cast<std::size_t>(width),
-                                   static_cast<GifPixelType>(f % 2));
+    std::vector<GifPixelType> line(
+        static_cast<std::size_t>(width),
+        static_cast<GifPixelType>(transparent ? 0 : f % 2));
     for (int y = 0; y < height; ++y) {
       EGifPutLine(gif, line.data(), width);
     }
@@ -72,6 +76,7 @@ std::vector<std::uint8_t> makeTestGif(const int width, const int height,
   (void)width;
   (void)height;
   (void)frameCount;
+  (void)transparent;
   return {};
 #endif
 }
@@ -89,20 +94,64 @@ TEST(GifDecoderTest, DecodeMultiFrameGif) {
   EXPECT_NEAR(0.60F, decoder->duration(), 0.01F);
 
   // Check frameAt timestamps
-  const auto &f0 = decoder->frameAt(0.0F);
-  EXPECT_EQ(32U * 24U, f0.rgba.size());
-  EXPECT_NEAR(0.0F, f0.timestampSeconds, 0.001F);
-  EXPECT_NEAR(0.20F, f0.durationSeconds, 0.01F);
+  const auto f0 = decoder->frameAt(0.0F);
+  ASSERT_TRUE(f0);
+  EXPECT_EQ(32U * 24U, f0->rgba.size());
+  EXPECT_NEAR(0.0F, f0->timestampSeconds, 0.001F);
+  EXPECT_NEAR(0.20F, f0->durationSeconds, 0.01F);
 
-  const auto &f1 = decoder->frameAt(0.25F);
-  EXPECT_NEAR(0.20F, f1.timestampSeconds, 0.001F);
+  const auto f1 = decoder->frameAt(0.25F);
+  ASSERT_TRUE(f1);
+  EXPECT_NEAR(0.20F, f1->timestampSeconds, 0.001F);
 
-  const auto &f2 = decoder->frameAt(0.55F);
-  EXPECT_NEAR(0.40F, f2.timestampSeconds, 0.001F);
+  const auto f2 = decoder->frameAt(0.55F);
+  ASSERT_TRUE(f2);
+  EXPECT_NEAR(0.40F, f2->timestampSeconds, 0.001F);
 
   // Beyond duration clamps to last frame
-  const auto &fEnd = decoder->frameAt(1.0F);
-  EXPECT_NEAR(0.40F, fEnd.timestampSeconds, 0.001F);
+  const auto fEnd = decoder->frameAt(1.0F);
+  ASSERT_TRUE(fEnd);
+  EXPECT_NEAR(0.40F, fEnd->timestampSeconds, 0.001F);
+
+  const auto firstFrame = decoder->frame(0);
+  ASSERT_TRUE(firstFrame);
+  EXPECT_EQ(firstFrame->timestampSeconds, f0->timestampSeconds);
+  EXPECT_FALSE(decoder->frame(decoder->frameCount()));
+#else
+  EXPECT_EQ(GifDecoder::decode(bytes).error(), DecodeError::NoCodec);
+#endif
+}
+
+TEST(GifDecoderTest, TransparentFrameIsPresentAndOutOfRangeIsAbsent) {
+  const auto bytes = makeTestGif(2, 2, 1, true);
+
+#ifdef GLEDITOR_HAVE_DECODE_INDEX_GIF
+  auto decoder = GifDecoder::decode(bytes).value_or(nullptr);
+  ASSERT_NE(nullptr, decoder);
+  const auto transparent = decoder->frame(0);
+  ASSERT_TRUE(transparent);
+  ASSERT_EQ(4U, transparent->rgba.size());
+  EXPECT_TRUE(std::ranges::all_of(transparent->rgba,
+                                  [](const auto pixel) { return pixel == 0; }));
+  const auto firstAtTime = decoder->frameAt(0.0F);
+  ASSERT_TRUE(firstAtTime);
+  EXPECT_TRUE(std::ranges::all_of(firstAtTime->rgba,
+                                  [](const auto pixel) { return pixel == 0; }));
+  EXPECT_FALSE(decoder->frame(1));
+#else
+  EXPECT_EQ(GifDecoder::decode(bytes).error(), DecodeError::NoCodec);
+#endif
+}
+
+TEST(GifDecoderTest, MovedFromDecoderHasNoCurrentFrame) {
+  const auto bytes = makeTestGif(2, 2, 1);
+
+#ifdef GLEDITOR_HAVE_DECODE_INDEX_GIF
+  auto decoded = GifDecoder::decode(bytes).value_or(nullptr);
+  ASSERT_NE(nullptr, decoded);
+  auto movedTo = std::move(*decoded);
+  ASSERT_TRUE(movedTo.frameAt(0.0F));
+  EXPECT_FALSE(decoded->frameAt(0.0F));
 #else
   EXPECT_EQ(GifDecoder::decode(bytes).error(), DecodeError::NoCodec);
 #endif

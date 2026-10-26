@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
+#include <optional>
 #include <stdexcept>
 
 #include <gleditor/logging.hpp>
@@ -10,6 +12,19 @@
 
 namespace common_ui {
 namespace ui = gleditor::ui;
+
+namespace {
+
+std::optional<float> boundedExtent(const float value) {
+  return value > 0.0F ? std::optional<float>{value} : std::nullopt;
+}
+
+std::uint16_t widgetLineLimit(const std::size_t lines) {
+  return static_cast<std::uint16_t>(
+      std::min<std::size_t>(lines, std::numeric_limits<std::uint16_t>::max()));
+}
+
+} // namespace
 
 const LinkPanelAction *LinkPanelPresentation::find(ui::WidgetId id) const {
   const auto found = std::ranges::find(actions, id, &LinkPanelAction::id);
@@ -82,7 +97,7 @@ LinkPanelPresentation linkPanelPresentation(
                  cache.fitted(button.label, metadataFont, {}).heightPx);
   const auto captionSlot = std::ceil(captionTextHeight) + 2;
   const auto columnsFor  = [&](float width, const auto &face,
-                               float padding = 0.F) {
+                              float padding = 0.F) {
     float longest = metrics.px(sourceTheme.type.minTouchPx);
     for (const auto &button : buttons)
       longest = std::max(
@@ -105,12 +120,12 @@ LinkPanelPresentation linkPanelPresentation(
         for (const auto &entry : sourceLines) {
           if (compact && !entry.compactContext.empty() && contexts++ > 0)
             continue;
-          const auto prefix    = (entry.active ? "\u25B8 " : "") +
-                                 entry.text.substr(0, entry.requiredBytes);
+          const auto prefix = (entry.active ? "\u25B8 " : "") +
+                              entry.text.substr(0, entry.requiredBytes);
           const auto &required = cache.fitted(
               prefix, captions && !entry.requiredBytes ? metadataFont : font,
-              {.maxWidthPx = std::max(0.F, width),
-               .maxLines   = 0,
+              {.maxWidthPx = boundedExtent(width),
+               .maxLines   = std::nullopt,
                .overflow   = gleditor::text::Overflow::Wrap});
           height += entry.requiredBytes
                         ? std::max(lineSlot, std::ceil(required.heightPx) + 2)
@@ -255,9 +270,9 @@ LinkPanelPresentation linkPanelPresentation(
   result.theme.gapEm     = line > 0 ? gap / line : 0;
   const auto colour      = [](std::uint32_t rgba) {
     return glm::vec4(static_cast<float>((rgba >> 24U) & 255U) / 255,
-                     static_cast<float>((rgba >> 16U) & 255U) / 255,
-                     static_cast<float>((rgba >> 8U) & 255U) / 255,
-                     static_cast<float>(rgba & 255U) / 255);
+                          static_cast<float>((rgba >> 16U) & 255U) / 255,
+                          static_cast<float>((rgba >> 8U) & 255U) / 255,
+                          static_cast<float>(rgba & 255U) / 255);
   };
   result.theme.colours.surface       = colour(config.backgroundColour);
   result.theme.colours.text          = colour(config.textColour);
@@ -270,9 +285,9 @@ LinkPanelPresentation linkPanelPresentation(
   for (const auto &entry : lines)
     desiredWidth = std::max(
         desiredWidth, cache.fitted(entry.text, font, {}).widthPx + pad * 2);
-  desiredWidth = std::max(desiredWidth,
-                          (longestAction + pad * 2 * actionPadRatio) * columns +
-                              pad * 4 + gap * (columns - 1));
+  desiredWidth             = std::max(desiredWidth,
+                                      (longestAction + pad * 2 * actionPadRatio) * columns +
+                                          pad * 4 + gap * (columns - 1));
   const auto width         = std::floor(std::min(maxWidth, desiredWidth));
   const auto interiorWidth = std::max(0.0F, width - pad * 2);
   const auto buttonWidth   = std::floor(std::max(
@@ -285,8 +300,8 @@ LinkPanelPresentation linkPanelPresentation(
                         entry.text.substr(0, entry.requiredBytes);
     const auto &required =
         cache.fitted(prefix, rowFont(entry),
-                     {.maxWidthPx = interiorWidth,
-                      .maxLines   = 0,
+                     {.maxWidthPx = boundedExtent(interiorWidth),
+                      .maxLines   = std::nullopt,
                       .overflow   = gleditor::text::Overflow::Wrap});
     const auto minimum =
         entry.requiredBytes
@@ -294,8 +309,9 @@ LinkPanelPresentation linkPanelPresentation(
             : std::ceil(rowFont(entry)->metrics().lineHeight) + 2;
     minimumLabels.push_back(minimum);
     minimumLabelHeight += minimum;
-    labelLineLimits.push_back(
-        std::max({std::uint16_t{1}, config.maxLines, required.lines}));
+    labelLineLimits.push_back(widgetLineLimit(
+        std::max({std::size_t{1}, static_cast<std::size_t>(config.maxLines),
+                  required.lines})));
   }
   // Mandatory wrapped ranges get space before decorative padding. Otherwise
   // a readable prefix can squeeze every action down to an empty hit target.
@@ -337,7 +353,7 @@ LinkPanelPresentation linkPanelPresentation(
     const auto label   = caption(index);
     const auto &fitted = cache.fitted(
         label, rowFont(lines[index]),
-        {.maxWidthPx  = interiorWidth,
+        {.maxWidthPx  = boundedExtent(interiorWidth),
          .maxHeightPx = std::max(labelHeight, minimumLabels[index]),
          .maxLines    = labelLineLimits[index],
          .overflow    = gleditor::text::Overflow::Wrap});
@@ -356,8 +372,8 @@ LinkPanelPresentation linkPanelPresentation(
     for (std::size_t index = 0; index < labelHeights.size(); ++index) {
       auto &label = labelHeights[index];
       label       = minimumLabels[index] +
-                    std::floor((label - minimumLabels[index]) * extra /
-                               std::max(1.0F, wantedLabels - base));
+              std::floor((label - minimumLabels[index]) * extra /
+                         std::max(1.0F, wantedLabels - base));
     }
   }
   const auto buttonHeight =
@@ -375,11 +391,11 @@ LinkPanelPresentation linkPanelPresentation(
     const auto fullLabel = entry.active ? "\u25B8 " + entry.text : entry.text;
     auto label           = caption(index);
     const auto required  = entry.requiredBytes +
-                           (entry.active ? std::string("\u25B8 ").size() : 0);
+                          (entry.active ? std::string("\u25B8 ").size() : 0);
     if (entry.requiredBytes) {
       const auto &fitted =
           cache.fitted(fullLabel, font,
-                       {.maxWidthPx  = std::max(0.F, width - pad * 2),
+                       {.maxWidthPx  = boundedExtent(width - pad * 2),
                         .maxHeightPx = labelHeights[index],
                         .maxLines    = labelLineLimits[index],
                         .overflow    = gleditor::text::Overflow::Wrap});
@@ -485,20 +501,20 @@ inspectorPresentation(std::span<const xanadu::PanelLine> lines,
         i == 0 ? "Controls " + pageLimit + "/" + pageLimit + " · " + text
                : text,
         caption,
-        {.maxWidthPx = width,
-         .maxLines   = 0,
+        {.maxWidthPx = boundedExtent(width),
+         .maxLines   = std::nullopt,
          .overflow   = gleditor::text::Overflow::Wrap});
     const auto slot = std::max(captionSlot, std::ceil(headingFit.heightPx) + 2);
     pinned.push_back(
         {.id        = static_cast<ui::WidgetId>(i + 3),
          .model     = ui::Label{text,
-                                i == 0 ? ui::TextPurpose::Description
+                            i == 0 ? ui::TextPurpose::Description
                                        : ui::TextPurpose::Label,
-                                i == 0 ? fullContext : lines[i].text},
+                            i == 0 ? fullContext : lines[i].text},
          .preferred = {local.logical(width), local.logical(slot)},
          .fontRole  = ui::FontRole::Caption,
          .tone      = lines[i].active ? ui::Tone::Accent : ui::Tone::Normal,
-         .maxLines  = headingFit.lines});
+         .maxLines  = widgetLineLimit(headingFit.lines)});
   }
   // Pending entry remains visible on every page, beside its pinned
   // cancellation.
@@ -507,8 +523,8 @@ inspectorPresentation(std::span<const xanadu::PanelLine> lines,
     if (entry.requiredBytes || !entry.compactContext.empty()) continue;
     const auto &fit =
         cache.fitted(entry.text, caption,
-                     {.maxWidthPx = width,
-                      .maxLines   = 0,
+                     {.maxWidthPx = boundedExtent(width),
+                      .maxLines   = std::nullopt,
                       .overflow   = gleditor::text::Overflow::Wrap});
     pinned.push_back(
         {.id = static_cast<ui::WidgetId>(60 + i),
@@ -518,14 +534,14 @@ inspectorPresentation(std::span<const xanadu::PanelLine> lines,
                        local.logical(std::ceil(fit.heightPx) + 2)},
          .fontRole  = ui::FontRole::Caption,
          .tone      = ui::Tone::Accent,
-         .maxLines  = fit.lines});
+         .maxLines  = widgetLineLimit(fit.lines)});
   }
   std::vector<ui::Widget> footer;
   const auto addButton = [&](ui::WidgetId id, std::string label, bool enabled,
                              std::string accessible = {}) {
     return ui::Widget{.id        = id,
                       .model     = ui::Button{std::move(label), "link_controls",
-                                              enabled, std::move(accessible)},
+                                          enabled, std::move(accessible)},
                       .preferred = {0, local.logical(actionSlot)}};
   };
   footer.push_back(addButton(request.previousId, "Previous", true));
@@ -577,8 +593,8 @@ inspectorPresentation(std::span<const xanadu::PanelLine> lines,
     const auto fit =
         [&](const std::string &text) -> const gleditor::text::FittedText & {
       return cache.fitted(text, font,
-                          {.maxWidthPx = width,
-                           .maxLines   = 0,
+                          {.maxWidthPx = boundedExtent(width),
+                           .maxLines   = std::nullopt,
                            .overflow   = gleditor::text::Overflow::Wrap});
     };
     const auto minimum = std::ceil(fit(core).heightPx) + 2;
@@ -591,7 +607,7 @@ inspectorPresentation(std::span<const xanadu::PanelLine> lines,
           .preferred = {local.logical(width),
                         local.logical(std::ceil(fitted.heightPx) + 2)},
           .tone      = entry.active ? ui::Tone::Accent : ui::Tone::Normal,
-          .maxLines  = fitted.lines},
+          .maxLines  = widgetLineLimit(fitted.lines)},
          std::max(minimum, std::ceil(fitted.heightPx) + 2),
          {}});
   }

@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <memory>
 #include <ranges>
+#include <stdexcept>
 #include <string>
 
 #include "common/xanadu/link_views.hpp"
@@ -49,7 +50,10 @@ inline zigzag::CellRef linkOwnedBy(const xanadu::Store &store,
                                    const std::string &owner) {
   const auto found = gleditor::firstOf(
       store.linkView() | std::views::filter(xanadu::links::ownedBy(owner)));
-  return found ? found->id : zigzag::noCell;
+  if (!found || !found->id) {
+    throw std::logic_error("fixture is missing its required owned link");
+  }
+  return *found->id;
 }
 
 inline TwoByThree makeTwoByThree() {
@@ -72,11 +76,11 @@ inline TwoByThree makeTwoByThree() {
 
   at          = store.sliceGenesis(at);
   at          = store.makeCell(at, f.three);
-  f.wholeCell = store.cellRefOf(at);
+  f.wholeCell = store.cellRefOf(at).value();
   at          = store.makeCell(at, PrimediaSpan{.scroll = f.three.scroll,
                                                 .start  = f.three.start,
                                                 .length = 3});
-  f.partCell  = store.cellRefOf(at);
+  f.partCell  = store.cellRefOf(at).value();
 
   xanadu::Link link;
   link.type  = xanadu::LinkType::Comment;

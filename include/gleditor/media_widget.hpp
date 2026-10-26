@@ -263,12 +263,13 @@ private:
     PlaybackState playback{PlaybackState::Stopped};
     bool muted{}, video{}, frame{};
     float rate{1.0F};
-    int seconds{}, duration{};
+    std::optional<int> seconds, duration;
     bool operator==(const ChromeState &) const = default;
   };
   ChromeState chromeState_;
   std::uint64_t geometryRevision_{1}, chromeBuilds_{}, liveBuiltFor_{};
-  int liveProgress_{-1}, liveVideoWidth_{}, liveVideoHeight_{};
+  std::optional<int> liveProgress_;
+  int liveVideoWidth_{}, liveVideoHeight_{};
   std::optional<a11y::Rect> rootBounds_, seekBounds_;
   std::vector<std::optional<a11y::Rect>> controlBounds_;
   RenderState *pickState_{};

@@ -1,0 +1,14 @@
+event Start
+event Notice
+goal Attempt() perform
+
+agent PlanFailure {
+  var count: Int := 0
+  on Start { adopt Attempt() }
+  plan first for Attempt {
+    count := count + 1
+    emit Notice{}
+    fail
+  }
+  plan fallback for Attempt { count := count + 10 }
+}

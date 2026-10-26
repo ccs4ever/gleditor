@@ -4,6 +4,8 @@
  */
 #include "common/xanadu/vlace/lexer.hpp"
 
+#include <charconv>
+
 #include <array>
 #include <cctype>
 #include <string>
@@ -14,19 +16,27 @@ namespace xanadu::vlace {
 
 namespace {
 
-bool isIdentStart(char c) {
+bool isIdentStart(std::optional<char> input) {
+  if (!input) return false;
+  const char c = *input;
   return (std::islower(static_cast<unsigned char>(c)) != 0) || c == '_';
 }
-bool isIdentCont(char c) {
+bool isIdentCont(std::optional<char> input) {
+  if (!input) return false;
+  const char c = *input;
   return (std::isalnum(static_cast<unsigned char>(c)) != 0) || c == '_' ||
          c == '\'';
 }
-bool isCtorStart(char c) {
+bool isCtorStart(std::optional<char> input) {
+  if (!input) return false;
+  const char c = *input;
   return std::isupper(static_cast<unsigned char>(c)) != 0;
 }
 
 // The symbol characters an operator run is built from (§5.1).
-bool isOpChar(char c) {
+bool isOpChar(std::optional<char> input) {
+  if (!input) return false;
+  const char c = *input;
   switch (c) {
   case '+':
   case '-':
@@ -92,7 +102,7 @@ Token Lexer::makeToken(TokenKind kind, std::string_view text,
 
 void Lexer::skipWhitespaceAndComments() {
   for (;;) {
-    const char c = peekChar();
+    const auto c = peekChar();
     if (c == ' ' || c == '\t' || c == '\r' || c == '\n') {
       advanceChar();
       continue;
@@ -106,7 +116,7 @@ void Lexer::skipWhitespaceAndComments() {
       while (peekChar(n) == '-') {
         ++n;
       }
-      const char after = peekChar(n);
+      const auto after = peekChar(n);
       if (!isOpChar(after)) {
         while (!isAtEnd() && peekChar() != '\n') {
           advanceChar();
@@ -141,11 +151,13 @@ Token Lexer::scanNumber() {
   // Hex / octal / binary integer prefixes.
   if (peekChar() == '0' &&
       (peekChar(1) == 'x' || peekChar(1) == 'o' || peekChar(1) == 'b')) {
-    const char base = peekChar(1);
+    const char base = peekChar(1).value();
     advanceChar();
     advanceChar();
     const std::size_t digitsStart = position();
-    auto isDigitFor               = [&](char c) {
+    auto isDigitFor               = [&](std::optional<char> input) {
+      if (!input) return false;
+      const char c = *input;
       if (base == 'x') return std::isxdigit(static_cast<unsigned char>(c)) != 0;
       if (base == 'o') return c >= '0' && c <= '7';
       return c == '0' || c == '1';
@@ -153,24 +165,33 @@ Token Lexer::scanNumber() {
     while (isDigitFor(peekChar())) {
       advanceChar();
     }
-    Token t = makeToken(TokenKind::IntegerLiteral,
-                        source().substr(start, position() - start), loc);
-    const std::string digits(
-        source().substr(digitsStart, position() - digitsStart));
-    const int radix = base == 'x' ? 16 : (base == 'o' ? 8 : 2);
-    t.intValue =
-        digits.empty()
-            ? 0
-            : static_cast<std::int64_t>(std::stoll(digits, nullptr, radix));
+    Token t           = makeToken(TokenKind::IntegerLiteral,
+                                  source().substr(start, position() - start), loc);
+    const auto digits = source().substr(digitsStart, position() - digitsStart);
+    const int radix   = base == 'x' ? 16 : base == 'o' ? 8 : 2;
+    const auto result = std::from_chars(
+        digits.data(), digits.data() + digits.size(), t.intValue, radix);
+    if (digits.empty() || result.ec != std::errc{} ||
+        result.ptr != digits.data() + digits.size()) {
+      t.kind        = TokenKind::Error;
+      t.stringValue = "radix integer literal is invalid or out of range";
+    }
     return t;
   }
 
   // Decimal integer or float. scanNumberLiteral handles the fractional and
   // exponent parts and classifies int vs float.
-  const ScannedNumber num = scanNumberLiteral();
-  Token t      = makeToken(num.isFloat ? TokenKind::FloatLiteral
-                                       : TokenKind::IntegerLiteral,
-                           source().substr(start, position() - start), loc);
+  const auto scanned = scanNumberLiteral();
+  if (!scanned) {
+    Token error       = makeToken(TokenKind::Error,
+                                  source().substr(start, position() - start), loc);
+    error.stringValue = scanned.error();
+    return error;
+  }
+  const auto &num = *scanned;
+  Token t         = makeToken(num.isFloat ? TokenKind::FloatLiteral
+                                          : TokenKind::IntegerLiteral,
+                      source().substr(start, position() - start), loc);
   t.intValue   = num.intValue;
   t.floatValue = num.floatValue;
   return t;
@@ -191,9 +212,17 @@ Token Lexer::scanChar() {
   const std::size_t start  = position();
   advanceChar(); // opening quote
   std::string value;
+  const auto unterminated = [&] {
+    Token error       = makeToken(TokenKind::Error,
+                                  source().substr(start, position() - start), loc);
+    error.stringValue = "unterminated character literal";
+    return error;
+  };
+  if (isAtEnd()) return unterminated();
   if (peekChar() == '\\') {
     advanceChar();
-    const char esc = advanceChar();
+    if (isAtEnd()) return unterminated();
+    const char esc = advanceChar().value();
     switch (esc) {
     case 'n':
       value.push_back('\n');
@@ -221,7 +250,7 @@ Token Lexer::scanChar() {
       break;
     }
   } else {
-    value.push_back(advanceChar());
+    value.push_back(advanceChar().value());
   }
   Token t;
   if (peekChar() == '\'') {
@@ -243,7 +272,7 @@ Token Lexer::scanChar() {
 Token Lexer::scanOperatorOrSymbol() {
   const SourceLocation loc = currentLocation();
   const std::size_t start  = position();
-  const char c             = peekChar();
+  const char c             = peekChar().value();
 
   // Single-character structural punctuation that is not built from operator
   // characters.
@@ -304,7 +333,7 @@ Token Lexer::nextToken() {
   if (isAtEnd()) {
     return makeToken(TokenKind::EndOfFile, {}, loc);
   }
-  const char c = peekChar();
+  const char c = peekChar().value();
 
   if (c == '_' && !isIdentCont(peekChar(1))) {
     advanceChar();

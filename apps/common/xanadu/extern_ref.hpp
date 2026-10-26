@@ -13,6 +13,7 @@
 
 #include "microversion.hpp"
 #include "spool.hpp"
+#include "xanadoc_selection.hpp"
 #include "zigzag/dim_vector.hpp"
 #include <gleditor/cpp26.hpp>
 
@@ -86,7 +87,7 @@ struct PouchOrigin {
     std::uint32_t start{};
     std::uint32_t end{};
     std::optional<std::uint32_t> cell;
-    std::uint32_t focusedBirth{};
+    XanadocSelection selection;
     bool operator==(const Source &) const = default;
   };
   std::optional<Source> source;
@@ -132,11 +133,11 @@ toString(const ExternResolutionStatus status) noexcept {
 
 struct ExternResolution {
   ExternResolutionStatus status{ExternResolutionStatus::NotFetched};
-  zigzag::CellRef cell{zigzag::noCell};
-  std::uint32_t opIndex{0};
+  std::optional<zigzag::CellRef> cell;
+  std::optional<std::uint32_t> opIndex;
 
   [[nodiscard]] bool isResolved() const noexcept {
-    return status == ExternResolutionStatus::Resolved;
+    return status == ExternResolutionStatus::Resolved && cell && opIndex;
   }
 
   bool operator==(const ExternResolution &) const = default;

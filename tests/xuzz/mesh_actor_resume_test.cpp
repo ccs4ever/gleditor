@@ -280,7 +280,8 @@ TEST_F(MeshActorResumeTest,
   ASSERT_EQ(previous.pumpOne(wall), true);
   const auto root = previous.stateRoot(*pid);
   ASSERT_TRUE(root);
-  previousContext->vm.pushChoicePoint(*cursor, *cursor);
+  const auto alternative = previousContext->vm.mintOpcode(OpcodeKind::Nop);
+  previousContext->vm.pushChoicePoint(*cursor, alternative);
   EXPECT_EQ(previous.checkpointView(*pid, *root).error(),
             ActorError::NotQuiescent);
   previousContext->vm.clearChoicePoints();

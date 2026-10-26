@@ -76,12 +76,13 @@ std::string backendName(Backend backend);
  *
  * Backends map the id onto whatever they actually use -- a GL object name, an
  * index into a table of Vulkan handles -- so callers can copy these around
- * freely without knowing the backing representation. Zero is the null handle.
+ * freely without knowing the backing representation. An absent id means no
+ * resource; every engaged integer, including zero, is an ordinary map key.
  */
 template <typename Tag> struct Handle {
-  std::uint32_t id{};
+  std::optional<std::uint32_t> id;
 
-  [[nodiscard]] bool valid() const { return 0 != id; }
+  [[nodiscard]] bool valid() const { return id.has_value(); }
   explicit operator bool() const { return valid(); }
   bool operator==(const Handle &oth) const = default;
 };
@@ -456,7 +457,8 @@ inline PickingTag unpackPickingTag(const std::uint32_t identity,
 struct PickingResult {
   int x{};
   int y{};
-  std::uint64_t requestId{};
+  /// Present when this result belongs to an asynchronous device request.
+  std::optional<std::uint64_t> requestId;
   PickingTag tag;
   std::shared_ptr<const PickSemanticTarget> semanticTarget;
   std::uint8_t button{1};

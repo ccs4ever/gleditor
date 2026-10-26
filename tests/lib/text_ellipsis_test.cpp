@@ -48,7 +48,7 @@ TEST(TextEllipsisTest, LastVisibleLineEllipsizesButPaginationStillContinues) {
   options.ellipsize = true;
   const auto label  = TextLayout::layoutPage(text, font, options);
   EXPECT_LE(label.lineCount, 2U);
-  EXPECT_LE(label.textHeightPx, options.maxHeightPx + 1.0F);
+  EXPECT_LE(label.textHeightPx, *options.maxHeightPx + 1.0F);
   ASSERT_TRUE(markerPresent(label));
   for (const auto &g : label.glyphs) {
     if (g.chr == "…") {
@@ -60,7 +60,7 @@ TEST(TextEllipsisTest, LastVisibleLineEllipsizesButPaginationStillContinues) {
 TEST(TextEllipsisTest, DecorationsAndNamedPageSurviveFitting) {
   const auto font = FontManager::instance().getFont("Sans 16");
   LayoutOptions options{.maxWidthPx      = 100.0F,
-                        .maxHeightPx     = 0.0F,
+                        .maxHeightPx     = std::nullopt,
                         .singleParagraph = true,
                         .ellipsize       = true};
   options.decoratedRanges = {
@@ -78,7 +78,7 @@ TEST(TextEllipsisTest, DecorationsAndNamedPageSurviveFitting) {
 TEST(TextEllipsisTest, StyledLineKeepsItsIndentAndFitsMarker) {
   const auto font = FontManager::instance().getFont("Sans 16");
   LayoutOptions options{.maxWidthPx      = 120.0F,
-                        .maxHeightPx     = 0.0F,
+                        .maxHeightPx     = std::nullopt,
                         .singleParagraph = true,
                         .ellipsize       = true};
   options.blockStyles = {{.start = 0, .end = 1000, .indentLeftPx = 10.0F}};
@@ -93,7 +93,7 @@ TEST(TextEllipsisTest, StyledLineKeepsItsIndentAndFitsMarker) {
 TEST(TextEllipsisTest, StyledEllipsisKeepsRightAlignment) {
   const auto font = FontManager::instance().getFont("Sans 16");
   LayoutOptions options{.maxWidthPx      = 120.0F,
-                        .maxHeightPx     = 0.0F,
+                        .maxHeightPx     = std::nullopt,
                         .singleParagraph = true,
                         .ellipsize       = true};
   options.blockStyles = {{.start         = 0,

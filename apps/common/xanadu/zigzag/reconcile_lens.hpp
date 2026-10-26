@@ -33,7 +33,7 @@ namespace zigzag {
 struct ServiceConfig {
   std::string name;
   std::string command;
-  int port{-1};
+  std::optional<int> port;
   int replicas{1};
 
   bool operator==(const ServiceConfig &) const = default;
@@ -45,8 +45,8 @@ struct ServiceConfig {
  */
 struct ServiceInstance {
   std::string name;
-  int pid{-1};
-  int port{-1};
+  std::optional<int> pid;
+  std::optional<int> port;
   bool active{false};
 };
 
@@ -115,8 +115,8 @@ struct ReconcileAction {
   ReconcileActionKind kind{ReconcileActionKind::Start};
   std::string serviceName;
   std::string command;
-  int port{-1};
-  int targetPid{-1};
+  std::optional<int> port;
+  std::optional<int> targetPid;
 };
 
 /**

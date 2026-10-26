@@ -212,7 +212,7 @@ void LinkDirectoryDialog::refreshLocked() {
   }
 
   // Also query reader link packages
-  const auto packages = context_.packagePresentation(-1);
+  const auto packages = context_.packagePresentation(std::nullopt);
   for (const auto &pkgOcc : packages) {
     if (std::ranges::any_of(allLinks_, [&](const auto &existing) {
           return existing.key == pkgOcc.key;
@@ -430,13 +430,13 @@ void LinkDirectoryDialog::rebuildModel() {
   const float filterY = searchY - 32.0F;
   float pillX         = panelX_ + pad;
   const auto addPill  = [&](std::uint32_t tag, std::string label,
-                            bool selected) {
+                           bool selected) {
     const float pillW = 75.0F;
     addWidget({.id    = tag,
-               .model = gleditor::ui::Button{std::move(label), "filter", true},
-               .tone  = selected ? gleditor::ui::Tone::Accent
-                                 : gleditor::ui::Tone::Normal},
-              {pillX, filterY, pillW, 24.0F});
+                .model = gleditor::ui::Button{std::move(label), "filter", true},
+                .tone  = selected ? gleditor::ui::Tone::Accent
+                                  : gleditor::ui::Tone::Normal},
+               {pillX, filterY, pillW, 24.0F});
     pillX += pillW + 6.0F;
   };
 

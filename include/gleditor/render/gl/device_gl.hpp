@@ -120,6 +120,8 @@ public:
   void setPresentEnabled(const bool enabled) override { present = enabled; }
 
 private:
+  [[nodiscard]] std::uint32_t allocateHandleId();
+
   /// Whether endFrame() swaps the window. See RenderDevice::setPresentEnabled.
   bool present{true};
 
@@ -210,7 +212,7 @@ private:
   std::unordered_map<std::uint32_t, BufferRecord> buffers;
   std::unordered_map<std::uint32_t, TextureRecord> textures;
   std::unordered_map<std::uint32_t, PipelineRecord> pipelines;
-  std::uint32_t nextHandleId{1};
+  std::optional<std::uint32_t> nextHandleId{1};
 
   PipelineHandle boundPipeline{};
 

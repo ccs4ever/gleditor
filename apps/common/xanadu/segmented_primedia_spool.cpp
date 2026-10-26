@@ -17,7 +17,16 @@ namespace xanadu {
 namespace {
 constexpr std::size_t defaultPrimediaReservation =
     512UZ * 1024 * 1024; // 512 MB
+
+std::optional<int> openDescriptor(const char *path, const int flags,
+                                  const mode_t mode = 0) {
+  const int descriptor = ::open(path, flags, mode);
+  if (descriptor < 0) {
+    return std::nullopt;
+  }
+  return descriptor;
 }
+} // namespace
 
 SegmentedPrimediaSpool::SegmentedPrimediaSpool() {
   arena.reserve(defaultPrimediaReservation);
@@ -37,9 +46,9 @@ SegmentedPrimediaSpool::SegmentedPrimediaSpool(
   // suggest it were.
   other.totalBytes.store(0, std::memory_order_relaxed);
   other.committedBytes = 0;
-  other.activeFd       = -1;
-  other.activeStart    = 0;
-  other.flushedBytes   = 0;
+  other.activeFd.reset();
+  other.activeStart  = 0;
+  other.flushedBytes = 0;
 }
 
 SegmentedPrimediaSpool &
@@ -58,9 +67,9 @@ SegmentedPrimediaSpool::operator=(SegmentedPrimediaSpool &&other) noexcept {
     readOnly       = other.readOnly;
     other.totalBytes.store(0, std::memory_order_relaxed);
     other.committedBytes = 0;
-    other.activeFd       = -1;
-    other.activeStart    = 0;
-    other.flushedBytes   = 0;
+    other.activeFd.reset();
+    other.activeStart  = 0;
+    other.flushedBytes = 0;
   }
   return *this;
 }
@@ -210,21 +219,21 @@ bool SegmentedPrimediaSpool::addSealedSegment(
 
 bool SegmentedPrimediaSpool::openActiveSegment(
     const std::filesystem::path &path) {
-  if (activeFd >= 0) {
-    ::close(activeFd);
-    activeFd = -1;
+  if (activeFd.has_value()) {
+    ::close(*activeFd);
+    activeFd.reset();
   }
   activePath = path.string();
-  activeFd   = ::open(activePath.c_str(), O_RDWR | O_CREAT, 0644);
-  if (activeFd < 0) {
+  activeFd   = openDescriptor(activePath.c_str(), O_RDWR | O_CREAT, 0644);
+  if (!activeFd) {
     // A permascroll that can be read but not appended to: a checked-in fixture
     // in a read-only checkout, or another user's scroll. Reading one is a
     // reasonable thing to want -- it is what makes the document open at all --
     // so this opens it rather than refusing, and flush() below writes nothing
     // because nothing can be appended without a writable arena either.
-    activeFd = ::open(activePath.c_str(), O_RDONLY);
-    readOnly = activeFd >= 0;
-    if (activeFd < 0) {
+    activeFd = openDescriptor(activePath.c_str(), O_RDONLY);
+    readOnly = activeFd.has_value();
+    if (!activeFd) {
       return false;
     }
   } else {
@@ -239,25 +248,25 @@ bool SegmentedPrimediaSpool::openActiveSegment(
   // cannot be extended in place the way appending needs.
   activeStart = totalBytes.load(std::memory_order_relaxed);
   struct stat st{};
-  if (::fstat(activeFd, &st) < 0) {
-    ::close(activeFd);
-    activeFd = -1;
+  if (::fstat(*activeFd, &st) < 0) {
+    ::close(*activeFd);
+    activeFd.reset();
     return false;
   }
   if (st.st_size > 0) {
     const auto have = static_cast<std::size_t>(st.st_size);
     if (!ensureCommitted(activeStart + have)) {
-      ::close(activeFd);
-      activeFd = -1;
+      ::close(*activeFd);
+      activeFd.reset();
       return false;
     }
     std::size_t got = 0;
     while (got < have) {
-      const auto n = ::pread(activeFd, arena.base() + activeStart + got,
+      const auto n = ::pread(*activeFd, arena.base() + activeStart + got,
                              have - got, static_cast<off_t>(got));
       if (n <= 0) {
-        ::close(activeFd);
-        activeFd = -1;
+        ::close(*activeFd);
+        activeFd.reset();
         return false;
       }
       got += static_cast<std::size_t>(n);
@@ -270,11 +279,11 @@ bool SegmentedPrimediaSpool::openActiveSegment(
 }
 
 bool SegmentedPrimediaSpool::refreshActiveSegment() {
-  if (activeFd < 0) {
+  if (!activeFd) {
     return false;
   }
   struct stat st{};
-  if (::fstat(activeFd, &st) < 0) {
+  if (::fstat(*activeFd, &st) < 0) {
     return false;
   }
   const auto currentLoaded =
@@ -290,7 +299,7 @@ bool SegmentedPrimediaSpool::refreshActiveSegment() {
   std::size_t got = 0;
   while (got < newBytes) {
     const auto n =
-        ::pread(activeFd, arena.base() + activeStart + currentLoaded + got,
+        ::pread(*activeFd, arena.base() + activeStart + currentLoaded + got,
                 newBytes - got, static_cast<off_t>(currentLoaded + got));
     if (n <= 0) {
       break;
@@ -306,9 +315,9 @@ bool SegmentedPrimediaSpool::refreshActiveSegment() {
 bool SegmentedPrimediaSpool::sealActive(
     const std::filesystem::path &newActivePath) {
   flush();
-  if (activeFd >= 0) {
-    ::close(activeFd);
-    activeFd = -1;
+  if (activeFd.has_value()) {
+    ::close(*activeFd);
+    activeFd.reset();
   }
   // The sealed range is already in the arena at the addresses it will keep --
   // openActiveSegment() read it there. Recording it is therefore bookkeeping,
@@ -321,8 +330,8 @@ bool SegmentedPrimediaSpool::sealActive(
     info.startOffset = activeStart;
     info.length      = held - activeStart;
     info.path        = activePath;
-    info.fd          = -1;
-    info.isReadOnly  = true;
+    info.fd.reset();
+    info.isReadOnly = true;
     segmentList.push_back(std::move(info));
   }
   return openActiveSegment(newActivePath);
@@ -340,12 +349,12 @@ bool SegmentedPrimediaSpool::flush() {
     // that followed it synced a file no byte had ever been written to.
     arena.flush(arena.base(), static_cast<std::size_t>(published));
   }
-  if (activeFd < 0 || activePath.empty() || readOnly) {
+  if (!activeFd || activePath.empty() || readOnly) {
     return true;
   }
   while (flushedBytes < published) {
     const auto pending = static_cast<std::size_t>(published - flushedBytes);
-    const auto n = ::pwrite(activeFd, arena.base() + flushedBytes, pending,
+    const auto n = ::pwrite(*activeFd, arena.base() + flushedBytes, pending,
                             static_cast<off_t>(flushedBytes - activeStart));
     if (n <= 0) {
       return false;
@@ -355,22 +364,22 @@ bool SegmentedPrimediaSpool::flush() {
   // MinGW's io.h has no fsync(); _commit() is its file-durability
   // equivalent.
 #ifdef _WIN32
-  ::_commit(activeFd);
+  ::_commit(*activeFd);
 #else
-  ::fsync(activeFd);
+  ::fsync(*activeFd);
 #endif
   return true;
 }
 
 void SegmentedPrimediaSpool::clear() {
-  if (activeFd >= 0) {
-    ::close(activeFd);
-    activeFd = -1;
+  if (activeFd.has_value()) {
+    ::close(*activeFd);
+    activeFd.reset();
   }
   for (auto &seg : segmentList) {
-    if (seg.fd >= 0) {
-      ::close(seg.fd);
-      seg.fd = -1;
+    if (seg.fd.has_value()) {
+      ::close(*seg.fd);
+      seg.fd.reset();
     }
   }
   segmentList.clear();

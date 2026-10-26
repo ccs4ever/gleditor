@@ -7,6 +7,7 @@
 #define COMMON_XANADU_VQL_ASCII_VISUALIZER_HPP
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -23,7 +24,7 @@ namespace xanadu::vql {
  */
 struct ViewDimension {
   std::string name;
-  zigzag::DimRef dim{zigzag::noCell};
+  std::optional<zigzag::DimRef> dim;
 };
 
 class AsciiVisualizer {
@@ -38,7 +39,7 @@ public:
   /// Renders a 2D rank grid around startCell along dimX (horizontal) and dimY
   /// (vertical). Radius determines how many steps posward/negward to trace.
   static std::string renderRankGrid(const zigzag::ArenaManifold &manifold,
-                                    zigzag::CellRef startCell,
+                                    std::optional<zigzag::CellRef> startCell,
                                     zigzag::DimRef dimX, zigzag::DimRef dimY,
                                     std::string_view dimXName = "dx",
                                     std::string_view dimYName = "dy",

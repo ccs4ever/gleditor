@@ -2,6 +2,8 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 
@@ -38,6 +40,54 @@ TEST_F(SessionMediaCacheTest, RepeatedPlainQueriesStayEmptyAcrossViewChanges) {
   EXPECT_TRUE(session.mediaSpansFor(version).empty());
   EXPECT_EQ(store.opCount(), ops);
   EXPECT_EQ(perma->size(), bytes);
+}
+
+TEST_F(SessionMediaCacheTest,
+       ExplicitRootFocusSurvivesAlongsideAnActiveXanadoc) {
+  auto &store = session.store();
+  const auto rootText =
+      store.insert(MicroversionId{}, 0, "root bytes", MicroversionId{});
+  const auto birthVersion  = store.makeXanadoc(rootText, "active document");
+  const auto activeVersion = store.insert(birthVersion, 0, "active bytes");
+  const auto birth         = store.activeXanadocOnBranch(activeVersion);
+  ASSERT_TRUE(birth);
+
+  session.viewOpened(activeVersion);
+  ASSERT_TRUE(session.focusTargetForView(0));
+  ASSERT_FALSE(session.focusTargetForView(0)->isRootXanadoc());
+  EXPECT_EQ(session.sourceFor(activeVersion)->text(), "active bytes");
+  EXPECT_EQ(
+      session.sourceFor(activeVersion, 0, XanadocSelection::root())->text(),
+      "root bytes");
+
+  const auto operationsBeforeFocus = store.opCount();
+  session.setFocusTarget(0, FocusTarget::rootXanadoc());
+  ASSERT_TRUE(session.focusTargetForView(0));
+  EXPECT_TRUE(session.focusTargetForView(0)->isRootXanadoc());
+  EXPECT_EQ(session.views()[0].pieces.materialize(store), "root bytes");
+  EXPECT_EQ(store.opCount(), operationsBeforeFocus);
+
+  const auto edited = session.insertText(0, 10, " edited");
+  ASSERT_NE(edited, MicroversionId{});
+  ASSERT_TRUE(store.getOp(edited));
+  EXPECT_EQ(store.getOp(edited)->context, MicroversionId{});
+  EXPECT_EQ(session.views()[0].pieces.materialize(store), "root bytes edited");
+  EXPECT_EQ(store.textOf(edited, XanadocSelection::birth(*birth)),
+            "active bytes");
+  const auto rootDiff =
+      store.diffVersions(activeVersion, edited, XanadocSelection::root());
+  ASSERT_EQ(rootDiff.versions.size(), 2U);
+  EXPECT_EQ(rootDiff.versions[0].text, "root bytes");
+  EXPECT_EQ(rootDiff.versions[1].text, "root bytes edited");
+  ASSERT_TRUE(session.focusTargetForView(0));
+  EXPECT_TRUE(session.focusTargetForView(0)->isRootXanadoc());
+
+  const auto operationsBeforeAutomatic = store.opCount();
+  session.setFocusTarget(0, std::nullopt);
+  ASSERT_TRUE(session.focusTargetForView(0));
+  EXPECT_FALSE(session.focusTargetForView(0)->isRootXanadoc());
+  EXPECT_EQ(session.views()[0].pieces.materialize(store), "active bytes");
+  EXPECT_EQ(store.opCount(), operationsBeforeAutomatic);
 }
 
 TEST_F(SessionMediaCacheTest, LocalMediaOffsetsStaySpecificToEachVersion) {
@@ -128,8 +178,9 @@ TEST_F(SessionMediaCacheTest, MissingExternalBytesBecomeMediaWithoutAnEdit) {
   const auto generation = session.generation();
   EXPECT_TRUE(store.read(span).empty());
   EXPECT_TRUE(session.mediaSpansFor(version).empty());
+  ASSERT_TRUE(remote.publisher);
   store.setExternalLiveBytes(
-      "btpk:" + remote.publisher.hex() + ":" + remote.salt, 0, svg);
+      "btpk:" + remote.publisher->hex() + ":" + remote.salt, 0, svg);
   ASSERT_EQ(store.read(span), svg);
   EXPECT_EQ(store.opCount(), ops);
   EXPECT_EQ(session.generation(), generation);
@@ -169,14 +220,17 @@ TEST_F(SessionMediaCacheTest,
 TEST_F(SessionMediaCacheTest, BootstrapLocalBytesAreNotCachedAsMissing) {
   auto &store = session.store();
   std::string available;
+  std::size_t reads = 0;
   store.setBootstrapPermascroll("bootstrap-test", [&](const PrimediaSpan &) {
+    ++reads;
     return ResolveResult{.status = available.empty()
                                        ? ResolutionStatus::MissingPieces
                                        : ResolutionStatus::VerifiedBytes,
                          .text   = available};
   });
-  const auto version = store.insertSpan(
-      {}, 0, {.scroll = localScroll, .start = 0, .length = svg.size()});
+  const PrimediaSpan span{
+      .scroll = localScroll, .start = 0, .length = svg.size()};
+  const auto version    = store.insertSpan({}, 0, span);
   const auto ops        = store.opCount();
   const auto generation = session.generation();
   ASSERT_EQ(perma->size(), 0U);
@@ -188,7 +242,13 @@ TEST_F(SessionMediaCacheTest, BootstrapLocalBytesAreNotCachedAsMissing) {
   EXPECT_EQ(store.opCount(), ops);
   EXPECT_EQ(session.generation(), generation);
   EXPECT_EQ(perma->size(), 0U);
-  store.setBootstrapPermascroll({}, {});
+  const auto readsBeforeClear = reads;
+  store.setBootstrapPermascroll(std::nullopt);
+  EXPECT_EQ(store.read(span), "");
+  EXPECT_EQ(reads, readsBeforeClear);
+  EXPECT_FALSE(store.bootstrapPermascrollKey());
+  EXPECT_THROW(store.setBootstrapPermascroll(std::string{}, {}),
+               std::invalid_argument);
 }
 
 } // namespace

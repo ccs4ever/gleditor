@@ -126,20 +126,20 @@ ExternResolution resolveLocalExternCell(const Store &localStore,
     return {.status = ExternResolutionStatus::Absent};
   }
   const auto index = foreignStore.segmentedOps().indexOf(target->produces);
-  if (index == 0) {
+  if (!index || *index == 0) {
     return {.status = ExternResolutionStatus::Absent};
   }
-  const auto *op = foreignStore.getCompactOp(index);
+  const auto *op = foreignStore.getCompactOp(*index);
   if (!op || op->kind != OpKind::Structure ||
       structureVerbOf(op->flags) != StructureVerb::MakeCell) {
     return {.status = ExternResolutionStatus::Unintelligible};
   }
-  if (foreignFold && !foreignFold->contains(index)) {
+  if (foreignFold && !foreignFold->contains(*index)) {
     return {.status = ExternResolutionStatus::Absent};
   }
   return {.status  = ExternResolutionStatus::Resolved,
-          .cell    = index,
-          .opIndex = index};
+          .cell    = *index,
+          .opIndex = *index};
 }
 
 } // namespace xanadu

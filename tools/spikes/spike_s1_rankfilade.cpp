@@ -198,10 +198,10 @@ public:
     std::uint32_t curr  = leafCrumIdx;
     std::uint32_t shift = 9;
 
-    while (curr != 0) {
+    while (crums_[curr].parentIndex) {
       const Crum &c = crums_[curr];
       accum += static_cast<std::uint32_t>(c.reservedZero) << shift;
-      curr = c.parentIndex;
+      curr = *c.parentIndex;
       shift += 3;
     }
     return accum;

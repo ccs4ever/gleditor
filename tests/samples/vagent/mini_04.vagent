@@ -1,0 +1,11 @@
+event Choose
+
+agent Route {
+  var budget: Int := 5
+  var route: Str := ""
+  on Choose {
+    let chosen := (budget <- 1 & budget > 2 & "first")
+                | (budget <- 3 & "second")
+    route := chosen
+  }
+}

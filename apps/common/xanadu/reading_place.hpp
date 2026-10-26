@@ -51,7 +51,7 @@ struct ReadingPlace {
   /// The version the slice was shown at: a store's text and its structure
   /// can be on different branches, so its latest is not necessarily it.
   std::string zigzagVersion;
-  std::int64_t zigzagFocus{};
+  std::optional<std::int64_t> zigzagFocus;
   bool zigzagHasKeyboard{};
   /// The pinned link can exist before any endpoint visit is completed.
   std::optional<LinkVisitContext> link;

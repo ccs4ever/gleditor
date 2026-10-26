@@ -102,7 +102,7 @@ StoreObjectManager *StoreObjectManager::createSlice() {
   } else {
     const auto parent = store_.latest();
     const auto name   = "Slice " + std::to_string(store_.opCount() + 1);
-    if (store_.homeCell() == zigzag::noCell) {
+    if (!store_.homeCell()) {
       std::ignore = store_.sliceGenesis(parent, name);
     } else {
       std::ignore = store_.makeSlice(parent, name);
@@ -436,11 +436,14 @@ bool StoreObjectManager::picked(const render::PickingResult &pick,
     createXanadoc();
     return true;
   }
-  if (tag >= kTagItemCheckboxBase && tag < kTagItemCloseBase) {
+  if (tag >= kTagItemCheckboxBase && tag < kTagItemCloseBase &&
+      tag - kTagItemCheckboxBase < items_.size()) {
     toggleItem(tag - kTagItemCheckboxBase);
     return true;
   }
-  if (tag >= kTagItemCloseBase && tag < kTagItemCloseBase + 1000) {
+  if (tag >= kTagItemCloseBase &&
+      tag - kTagItemCloseBase < kSyntheticItemTagCount &&
+      tag - kTagItemCloseBase < items_.size()) {
     closeItem(tag - kTagItemCloseBase);
     return true;
   }

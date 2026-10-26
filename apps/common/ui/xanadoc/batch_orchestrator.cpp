@@ -267,7 +267,7 @@ BatchOrchestrator::execute(Session &session,
               piece.bytes, fileName, piece.mimeType, session.publishedDir(0));
           const auto sId = session.store(0).addScroll(scroll);
           span           = PrimediaSpan{
-              .scroll = sId, .start = 0, .length = piece.bytes.size()};
+                        .scroll = sId, .start = 0, .length = piece.bytes.size()};
           Op op;
           op.kind  = OpKind::Transclude;
           op.at    = at;
@@ -395,7 +395,7 @@ BatchOrchestrator::execute(Session &session,
         const auto text =
             argument.substr(argument.find_first_not_of(" \t", nameEnd));
         version = store.makeCell(version, text);
-        cells.emplace(name, store.cellRefOf(version));
+        cells.emplace(name, store.cellRefOf(version).value());
       } else if (command == "cell-text") {
         const auto nameEnd = argument.find_first_of(" \t");
         if (nameEnd == std::string::npos) {
@@ -434,7 +434,7 @@ BatchOrchestrator::execute(Session &session,
             fail("cell-quote requires a name, a start and a length");
           }
           version = store.makeCell(version, spanAt(start, length));
-          cells.emplace(name, store.cellRefOf(version));
+          cells.emplace(name, store.cellRefOf(version).value());
         } else {
           std::string typeName;
           words >> typeName;

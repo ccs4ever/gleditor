@@ -209,8 +209,8 @@ public:
 
     // Bubble up to root
     std::uint32_t curr = static_cast<std::uint32_t>(zoneCrumIdx);
-    while (curr != rootIndex_) {
-      const std::uint32_t parent = crums_[curr].parentIndex;
+    while (crums_[curr].parentIndex) {
+      const std::uint32_t parent = *crums_[curr].parentIndex;
       TreeCrum &p                = crums_[parent];
 
       // Recompute width summary for child 'curr'

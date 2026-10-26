@@ -142,6 +142,8 @@ TEST(CoverageBoostTest, scrollMethodsAndEdgeCases) {
 
   // Unnamed scroll with segments describe
   Scroll unnamed;
+  EXPECT_FALSE(unnamed.publisher);
+  EXPECT_FALSE(unnamed.isNamed());
   InfoHash ih;
   ih.bytes.fill(0xAB);
   unnamed.segments.push_back(ScrollSegment{0, 100, ih, 0, 0, "path1"});
@@ -155,6 +157,9 @@ TEST(CoverageBoostTest, scrollMethodsAndEdgeCases) {
 
   Scroll single1 = Scroll::ofTorrentFile(ih, 0, "file.txt", 0, 500);
   Scroll single2 = Scroll::ofTorrentFile(ih, 0, "file.txt", 0, 500);
+  EXPECT_FALSE(single1.publisher);
+  EXPECT_FALSE(single2.publisher);
+  EXPECT_FALSE(single1.isNamed());
   EXPECT_TRUE(single1.sameContentAs(single2));
   EXPECT_EQ(single1.segmentAt(0)->length, 500U);
   EXPECT_FALSE((single1.segmentAt(600)).has_value());

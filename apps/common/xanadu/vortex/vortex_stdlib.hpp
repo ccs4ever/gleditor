@@ -53,6 +53,14 @@ struct LogicSolution {
   std::unordered_map<std::string, std::string> formatted;
 };
 
+/// A grid's head plus its shape. An empty dimension has no head, but retains
+/// both requested dimensions so empty grids remain distinguishable values.
+struct GridResult {
+  std::optional<CellRef> head;
+  std::size_t rows{};
+  std::size_t cols{};
+};
+
 class VortexStdLib {
 public:
   VortexStdLib(VortexCore &core, VortexVM &vm);
@@ -109,13 +117,17 @@ public:
   CellRef createFormatCurrencyPipeline();
 
   // -- Module 4: std:functional -----------------------------------------------
-  CellRef map(CellRef head, DimRef inDim, DimRef outDim,
-              gleditor::cpp26::function_ref<CellValue(const CellValue &)> fn);
-  CellRef map(CellRef head, DimRef inDim, DimRef outDim, CellRef fnOp);
+  std::optional<CellRef>
+  map(CellRef head, DimRef inDim, DimRef outDim,
+      gleditor::cpp26::function_ref<CellValue(const CellValue &)> fn);
+  std::optional<CellRef> map(CellRef head, DimRef inDim, DimRef outDim,
+                             CellRef fnOp);
 
-  CellRef filter(CellRef head, DimRef inDim, DimRef outDim,
-                 gleditor::cpp26::function_ref<bool(const CellValue &)> pred);
-  CellRef filter(CellRef head, DimRef inDim, DimRef outDim, CellRef predOp);
+  std::optional<CellRef>
+  filter(CellRef head, DimRef inDim, DimRef outDim,
+         gleditor::cpp26::function_ref<bool(const CellValue &)> pred);
+  std::optional<CellRef> filter(CellRef head, DimRef inDim, DimRef outDim,
+                                CellRef predOp);
 
   CellValue fold(CellRef head, DimRef inDim, CellValue initial,
                  gleditor::cpp26::function_ref<CellValue(const CellValue &,
@@ -123,8 +135,8 @@ public:
                      fn);
   CellValue fold(CellRef head, DimRef inDim, CellValue initial, CellRef fnOp);
 
-  CellRef zip(CellRef headA, CellRef headB, DimRef dimA, DimRef dimB,
-              DimRef outDim);
+  std::optional<CellRef> zip(CellRef headA, CellRef headB, DimRef dimA,
+                             DimRef dimB, DimRef outDim);
 
   // -- Stage 2: data-parallel execution hook ----------------------------------
   /// Attach a worker pool so map/filter/fold fan their per-element function
@@ -142,14 +154,21 @@ public:
   }
 
   // -- Module 5: std:collections ----------------------------------------------
-  CellRef createList(const std::vector<CellValue> &items, DimRef dim = noCell);
-  [[nodiscard]] std::vector<CellValue> listToVector(CellRef head,
-                                                    DimRef dim = noCell) const;
-  void pushBack(CellRef head, const CellValue &val, DimRef dim = noCell);
-  CellRef pushFront(CellRef head, const CellValue &val, DimRef dim = noCell);
-  std::optional<CellValue> popBack(CellRef head, DimRef dim = noCell);
-  CellRef popFront(CellRef head, DimRef dim = noCell);
-  [[nodiscard]] std::size_t listLength(CellRef head, DimRef dim = noCell) const;
+  /// The head of a non-empty list; nullopt is a valid empty list.
+  std::optional<CellRef> createList(const std::vector<CellValue> &items,
+                                    std::optional<DimRef> dim = std::nullopt);
+  [[nodiscard]] std::vector<CellValue>
+  listToVector(CellRef head, std::optional<DimRef> dim = std::nullopt) const;
+  void pushBack(CellRef head, const CellValue &val,
+                std::optional<DimRef> dim = std::nullopt);
+  CellRef pushFront(CellRef head, const CellValue &val,
+                    std::optional<DimRef> dim = std::nullopt);
+  std::optional<CellValue> popBack(CellRef head,
+                                   std::optional<DimRef> dim = std::nullopt);
+  std::optional<CellRef> popFront(std::optional<CellRef> head,
+                                  std::optional<DimRef> dim = std::nullopt);
+  [[nodiscard]] std::size_t
+  listLength(CellRef head, std::optional<DimRef> dim = std::nullopt) const;
 
   CellRef createMap();
   void mapSet(CellRef mapRoot, std::string_view key, const CellValue &val);
@@ -158,12 +177,15 @@ public:
   [[nodiscard]] bool mapHas(CellRef mapRoot, std::string_view key) const;
   [[nodiscard]] std::vector<std::string> mapKeys(CellRef mapRoot) const;
 
-  CellRef createGrid(std::size_t rows, std::size_t cols, DimRef dRow,
-                     DimRef dCol,
-                     const CellValue &initVal = static_cast<std::int64_t>(0));
-  [[nodiscard]] CellValue getGrid(CellRef gridRoot, std::size_t r,
-                                  std::size_t c, DimRef dRow,
-                                  DimRef dCol) const;
+  /// The first cell and dimensions; a zero-sized grid has no head but retains
+  /// its shape in the result.
+  GridResult
+  createGrid(std::size_t rows, std::size_t cols, DimRef dRow, DimRef dCol,
+             const CellValue &initVal = static_cast<std::int64_t>(0));
+  [[nodiscard]] std::optional<CellValue> getGrid(CellRef gridRoot,
+                                                 std::size_t r, std::size_t c,
+                                                 DimRef dRow,
+                                                 DimRef dCol) const;
   void setGrid(CellRef gridRoot, std::size_t r, std::size_t c, DimRef dRow,
                DimRef dCol, const CellValue &val);
 
@@ -198,11 +220,13 @@ public:
   CellRef makeList(std::initializer_list<CellRef> elements);
   CellRef makeList(std::span<const CellRef> elements);
   [[nodiscard]] bool isVar(CellRef cell) const;
-  [[nodiscard]] CellRef deref(CellRef cell) const;
+  [[nodiscard]] std::optional<CellRef> deref(CellRef cell) const;
   zigzag::UnifyResult unify(CellRef a, CellRef b);
   [[nodiscard]] std::vector<CellRef> argumentsOf(CellRef term) const;
-  [[nodiscard]] std::string functorOf(CellRef term) const;
-  [[nodiscard]] std::string renderTerm(CellRef term) const;
+  /// Absence means an invalid reference; an empty atom is an engaged string.
+  [[nodiscard]] std::optional<std::string> functorOf(CellRef term) const;
+  /// Absence means an invalid term or child reference; empty text stays valid.
+  [[nodiscard]] std::optional<std::string> renderTerm(CellRef term) const;
 
   CellRef createPredicate(std::string_view name);
   CellRef addClause(CellRef predCell, CellRef headTerm,
@@ -270,25 +294,38 @@ public:
              std::size_t maxSolutions                  = 100);
 
   // -- Module 9: sys:array ----------------------------------------------------
-  CellRef arrayIota(std::size_t n, DimRef dim = noCell,
-                    CellRef origin = noCell);
-  [[nodiscard]] std::vector<std::size_t>
+  /// Nullopt is the valid empty array for n == 0. A supplied origin must exist.
+  std::optional<CellRef>
+  arrayIota(std::size_t n, std::optional<DimRef> dim = std::nullopt,
+            std::optional<CellRef> origin = std::nullopt);
+  /// Absence means the origin is invalid; a present vector is its extents.
+  [[nodiscard]] std::optional<std::vector<std::size_t>>
   arrayShape(CellRef origin, std::span<const DimRef> dims) const;
-  CellRef arrayTake(CellRef origin, DimRef dim, std::size_t count);
-  CellRef arrayDrop(CellRef origin, DimRef dim, std::size_t count);
-  CellRef arrayReverse(CellRef origin, DimRef dim);
-  [[nodiscard]] std::size_t arrayTally(CellRef origin, DimRef dim) const;
+  /// Nullopt is a valid empty result when count is zero or the source rank is
+  /// empty. Invalid origins throw std::invalid_argument.
+  std::optional<CellRef> arrayTake(CellRef origin, DimRef dim,
+                                   std::size_t count);
+  std::optional<CellRef> arrayDrop(CellRef origin, DimRef dim,
+                                   std::size_t count);
+  /// Nullopt is a valid empty result for an empty source rank.
+  std::optional<CellRef> arrayReverse(CellRef origin, DimRef dim);
+  /// Absence means an invalid origin; a present zero remains a valid tally.
+  [[nodiscard]] std::optional<std::size_t> arrayTally(CellRef origin,
+                                                      DimRef dim) const;
 
   // -- Module 10: std:zigzag --------------------------------------------------
-  CellRef zzStep(CellRef cursor, DimRef dim, DimVector dir = DimVector::POS);
-  CellRef zzInsert(CellRef cursor, DimRef dim, DimVector dir,
-                   std::string_view text);
-  CellRef zzUnlink(CellRef cursor, DimRef dim, DimVector dir = DimVector::POS);
-  CellRef zzLink(CellRef cellA, CellRef cellB, DimRef dim,
-                 DimVector dir = DimVector::POS);
-  CellRef zzDelete(CellRef cell);
-  CellRef zzCloneToChain(CellRef symbolOp, CellRef targetCell);
-  CellRef zzDuplicate(CellRef cell);
+  [[nodiscard]] std::optional<CellRef> zzStep(std::optional<CellRef> cursor,
+                                              DimRef dim,
+                                              DimVector dir = DimVector::POS);
+  std::optional<CellRef> zzInsert(CellRef cursor, DimRef dim, DimVector dir,
+                                  std::string_view text);
+  std::optional<CellRef> zzUnlink(CellRef cursor, DimRef dim,
+                                  DimVector dir = DimVector::POS);
+  std::optional<CellRef> zzLink(CellRef cellA, CellRef cellB, DimRef dim,
+                                DimVector dir = DimVector::POS);
+  std::optional<CellRef> zzDelete(CellRef cell);
+  std::optional<CellRef> zzCloneToChain(CellRef symbolOp, CellRef targetCell);
+  std::optional<CellRef> zzDuplicate(CellRef cell);
 
   // -- Module 11: std:gc ------------------------------------------------------
   std::size_t gcSweep();
@@ -301,8 +338,8 @@ public:
                       std::string_view dimY, std::string_view dimZ);
 
   // -- Module 13: std:nav -----------------------------------------------------
-  CellRef hopHead(CellRef cursor, DimRef dim);
-  CellRef hopTail(CellRef cursor, DimRef dim);
+  std::optional<CellRef> hopHead(CellRef cursor, DimRef dim);
+  std::optional<CellRef> hopTail(CellRef cursor, DimRef dim);
   [[nodiscard]] CellRef jumpHome() const noexcept;
 
   // -- Module 14: std:bridge --------------------------------------------------
@@ -364,15 +401,18 @@ public:
 
   /// Bounded first produce of the generator at @p entryOp: on produce the
   /// result is read from @p outCell and the live choice points are committed
-  /// (discarded, keeping the writes); on exhaustion the activation is
+  /// (discarded, keeping the writes); an absent @p outCell is unit (`true`),
+  /// while a present false, zero or empty text value stays present. On
+  /// exhaustion the activation is
   /// unwound. This is section 4.4's bounded expression as a host call.
   [[nodiscard]] std::optional<CellValue>
-  goalBoundedFirst(CellRef entryOp, CellRef outCell, CellRef haltOp);
+  goalBoundedFirst(CellRef entryOp, std::optional<CellRef> outCell,
+                   CellRef haltOp);
   /// Every produce of @p entryOp, collected eagerly -- the synchronous form
-  /// of `every e` (spec section 5.1). The lazy resume-per-result form is what
-  /// the vicon compiler emits inline.
+  /// of `every e` (spec section 5.1); absent @p outCell produces unit (`true`).
+  /// The lazy resume-per-result form is what the vicon compiler emits inline.
   [[nodiscard]] std::vector<CellValue>
-  goalResults(CellRef entryOp, CellRef outCell, CellRef haltOp);
+  goalResults(CellRef entryOp, std::optional<CellRef> outCell, CellRef haltOp);
 
   /// The operand cells bound for routine @p entryOp: the argument cells
   /// call() writes, in contract order. Empty for an unregistered op.
@@ -384,8 +424,8 @@ public:
   /// Push a scanning cursor for @p subject onto the tail of home's +d.scan
   /// rank -- the posward-most cursor is the current one. The cursor's content
   /// is &pos (1-based, as Icon); its +d.grab is the subject cell. Answers the
-  /// cursor, or noCell when @p subject is not in the arena.
-  CellRef scanPush(CellRef subject);
+  /// cursor, or nullopt when @p subject is not in the arena.
+  std::optional<CellRef> scanPush(CellRef subject);
   /// Drop @p cursor out of the d.scan rank, healing the gap so the enclosing
   /// scan's cursor becomes current again.
   void scanPop(CellRef cursor);
@@ -405,7 +445,7 @@ public:
   bool exportModuleToStore(std::string_view modulePath,
                            xanadu::Store &destStore) const;
   bool exportStandardLibraryToStore(xanadu::Store &destStore) const;
-  CellRef importModuleFromStore(const xanadu::Store &srcStore);
+  std::optional<CellRef> importModuleFromStore(const xanadu::Store &srcStore);
 
 private:
   /// The texts of the cells on @p from's rank along @p dim, after @p from.
@@ -417,7 +457,7 @@ private:
   /// its rendering otherwise.
   CellRef copyValueCell(CellRef source);
   /// @p dim, or d.step when a list builtin was handed no dimension.
-  [[nodiscard]] DimRef listDim(DimRef dim) const noexcept;
+  [[nodiscard]] DimRef listDim(std::optional<DimRef> dim) const noexcept;
   /// The key cell on @p mapRoot's d.vars rank reading @p key.
   [[nodiscard]] std::optional<CellRef> mapKeyCell(CellRef mapRoot,
                                                   std::string_view key) const;

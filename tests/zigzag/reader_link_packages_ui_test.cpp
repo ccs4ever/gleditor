@@ -48,7 +48,7 @@ TEST_F(
           {.path = "text", .data = "012345678901234567890123456789"}},
       "text");
   const auto scroll = Scroll::ofTorrentFile(torrent.hash, 0, "text", 0, 30);
-  const auto global = scrollKey(scroll);
+  const auto global = scrollKey(scroll).value();
   store.bindPublishedLocalScroll(store.addScroll(scroll));
   session.views().push_back(
       {.version = version, .pieces = store.rebuild(version)});
@@ -139,7 +139,7 @@ TEST_F(ReaderPackageUiTest, RestoringPreferencesRefusesNativeAuthorityOverlap) {
   const auto torrent = makeTorrent(
       std::vector<TorrentContent>{{.path = "text", .data = "abc"}}, "text");
   const auto scroll = Scroll::ofTorrentFile(torrent.hash, 0, "text", 0, 3);
-  const auto global = scrollKey(scroll);
+  const auto global = scrollKey(scroll).value();
   GlobalLink link{.left = {{global, 0, 1}}, .right = {{global, 1, 1}}};
   const auto pkg = publishLinkPackage(keys, "layers:collision", "Collision", 1,
                                       1, {link}, {{global, scroll}});
@@ -170,15 +170,16 @@ TEST_F(ReaderPackageUiTest,
        MissingRepresentativeDoesNotHideVisibleLinkMembers) {
   auto perma = std::make_shared<UserPermascroll>();
   Session session((root / "workspace").string(), perma);
-  auto &store       = session.store();
-  const auto leftA  = store.makeCell({}, "left A");
-  const auto leftB  = store.makeCell(leftA, "left B");
-  const auto rightA = store.makeCell(leftB, "right A");
-  const auto rightB = store.makeCell(rightA, "right B");
-  const auto before = store.rebuildManifold(rightB);
-  const auto a = store.cellRefOf(leftA), b = store.cellRefOf(leftB);
-  const auto missing = store.cellRefOf(rightA),
-             visible = store.cellRefOf(rightB);
+  auto &store        = session.store();
+  const auto leftA   = store.makeCell({}, "left A");
+  const auto leftB   = store.makeCell(leftA, "left B");
+  const auto rightA  = store.makeCell(leftB, "right A");
+  const auto rightB  = store.makeCell(rightA, "right B");
+  const auto before  = store.rebuildManifold(rightB);
+  const auto a       = store.cellRefOf(leftA).value(),
+             b       = store.cellRefOf(leftB).value();
+  const auto missing = store.cellRefOf(rightA).value(),
+             visible = store.cellRefOf(rightB).value();
   Link link;
   link.left       = {before.contentOf(a).front(), before.contentOf(b).front()};
   link.right      = {before.contentOf(missing).front(),
@@ -193,7 +194,8 @@ TEST_F(ReaderPackageUiTest,
       .WillByDefault([&](const render::DrawUniforms &,
                          render::BufferHandle buffer, std::size_t offset,
                          std::uint32_t count) {
-        const auto &bytes = device.buffers.at(buffer.id);
+        ASSERT_TRUE(buffer.id);
+        const auto &bytes = device.buffers.at(*buffer.id);
         ASSERT_LE(offset + count * sizeof(gleditor::Beams::Row), bytes.size());
         for (std::uint32_t i = 0; i < count; ++i) {
           gleditor::Beams::Row row;
@@ -205,7 +207,7 @@ TEST_F(ReaderPackageUiTest,
   RenderState state{&device};
   LinkBeams beams(session, nullptr);
   beams.setManifoldViews({&manifold});
-  beams.setCellRadius(-1);
+  beams.setCellRadius(std::nullopt);
   beams.setCellAnchorResolver([&](zigzag::CellRef cell)
                                   -> std::optional<CellAnchor> {
     if (cell == a)
@@ -310,7 +312,7 @@ TEST_F(ReaderPackageUiTest,
   Session session((root / "workspace").string(), perma);
   auto &store           = session.store();
   const auto historical = store.makeCell({}, "old endpoint text");
-  const auto cell       = store.cellRefOf(historical);
+  const auto cell       = store.cellRefOf(historical).value();
   const auto latest     = store.spliceCell(historical, cell, 0, 3, "new");
   store.repointCurrentVersion(latest);
   const auto bound = store.rebuildManifold(latest);
@@ -434,7 +436,7 @@ TEST_F(ReaderPackageUiTest, NativeFormattingIsNotAReaderNavigationCandidate) {
   const auto selected = navigation.selection()->key;
   ASSERT_TRUE(navigation.execute(nav::StepLink{.delta = 1}));
   EXPECT_EQ(navigation.selection()->key, selected);
-  const auto presented = navigation.presentationLinks(-1);
+  const auto presented = navigation.presentationLinks(std::nullopt);
   ASSERT_EQ(presented.size(), 1U);
   EXPECT_EQ(presented.front().link.type, LinkType::Comment);
 }

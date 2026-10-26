@@ -120,7 +120,7 @@ LayoutResult layoutSegmentedPill(const SegmentedPill &pill, Rect bounds,
   if (pill.containerId != 0) {
     result.boxes.push_back({
         .id          = pill.containerId,
-        .parentId    = 0,
+        .parentId    = std::nullopt,
         .rect        = result.bounds,
         .contentRect = result.bounds,
         .focusable   = false,

@@ -152,7 +152,7 @@ TEST(ScalarTest, aCellCarriesTheBitsAndTheBytesAtOnce) {
 
   for (const auto value : interestingDoubles()) {
     at                  = store.makeScalarCell(at, value);
-    const auto cell     = store.cellRefOf(at);
+    const auto cell     = store.cellRefOf(at).value();
     const auto manifold = store.rebuildManifold(at);
 
     // The property step 15 asks for, both halves of it.
@@ -176,7 +176,7 @@ TEST(ScalarTest, aNaNCellRendersAsANaNAndComparesEqualByBitsOnly) {
   Store store;
   auto at = store.sliceGenesis(MicroversionId{});
   at      = store.makeScalarCell(at, std::numeric_limits<double>::quiet_NaN());
-  const auto cell = store.cellRefOf(at);
+  const auto cell = store.cellRefOf(at).value();
 
   const auto manifold = store.rebuildManifold(at);
   ASSERT_TRUE(manifold.asDouble(cell).has_value());
@@ -193,11 +193,11 @@ TEST(ScalarTest, boolsAndIntegersCarryTheirOwnKind) {
   Store store;
   auto at        = store.sliceGenesis(MicroversionId{});
   at             = store.makeScalarCell(at, true);
-  const auto yes = store.cellRefOf(at);
+  const auto yes = store.cellRefOf(at).value();
   at             = store.makeScalarCell(at, false);
-  const auto no  = store.cellRefOf(at);
+  const auto no  = store.cellRefOf(at).value();
   at             = store.makeScalarCell(at, std::int64_t{-9007199254740993});
-  const auto integer = store.cellRefOf(at);
+  const auto integer = store.cellRefOf(at).value();
 
   const auto manifold = store.rebuildManifold(at);
   EXPECT_THAT(manifold.asBool(yes), testing::Optional(true));
@@ -219,9 +219,9 @@ TEST(ScalarTest, twoCellsHoldingOneNumberAreTwoCellsAtTwoAddresses) {
   Store store;
   auto at           = store.sliceGenesis(MicroversionId{});
   at                = store.makeScalarCell(at, 3.14);
-  const auto mine   = store.cellRefOf(at);
+  const auto mine   = store.cellRefOf(at).value();
   at                = store.makeScalarCell(at, 3.14);
-  const auto theirs = store.cellRefOf(at);
+  const auto theirs = store.cellRefOf(at).value();
 
   const auto manifold = store.rebuildManifold(at);
   EXPECT_NE(mine, theirs);
@@ -244,7 +244,7 @@ TEST(ScalarTest, restatingAScalarSpoolsTheNewRenderingAndKeepsTheCell) {
   Store store;
   auto at           = store.sliceGenesis(MicroversionId{});
   at                = store.makeScalarCell(at, 1.5);
-  const auto cell   = store.cellRefOf(at);
+  const auto cell   = store.cellRefOf(at).value();
   const auto before = store.rebuildManifold(at);
   ASSERT_THAT(before.asDouble(cell), testing::Optional(1.5));
 
@@ -267,9 +267,9 @@ TEST(ScalarTest, aScalarCellIsAnOrdinaryCellInEveryOtherWay) {
   const auto minted = store.makeDimension(at, "d.1");
   at                = minted.version;
   at                = store.makeScalarCell(at, 2.5);
-  const auto number = store.cellRefOf(at);
+  const auto number = store.cellRefOf(at).value();
   at                = store.makeCell(at, "a label");
-  const auto label  = store.cellRefOf(at);
+  const auto label  = store.cellRefOf(at).value();
   at = store.setLink(at, label, minted.dim, DimVector::POS, number);
 
   const auto manifold = store.rebuildManifold(at);
@@ -286,7 +286,7 @@ TEST(ScalarTest, userTextEditsRefreshTheTypedValueWithoutChangingTheText) {
   Store store;
   auto at         = store.sliceGenesis(MicroversionId{});
   at              = store.makeCell(at, "0012");
-  const auto cell = store.cellRefOf(at);
+  const auto cell = store.cellRefOf(at).value();
 
   auto folded = store.rebuildManifold(at);
   EXPECT_EQ(folded.textOf(cell, store), "0012");
@@ -320,7 +320,7 @@ TEST(ScalarTest, cellSplicesRefreshAndClearTheTypedValue) {
   Store store;
   auto at         = store.sliceGenesis(MicroversionId{});
   at              = store.makeCell(at, "12");
-  const auto cell = store.cellRefOf(at);
+  const auto cell = store.cellRefOf(at).value();
 
   at          = store.spliceCell(at, cell, 1, 1, "3");
   auto folded = store.rebuildManifold(at);
@@ -342,12 +342,12 @@ TEST(ScalarTest, quotedNumericTextCarriesAValueAndKeepsItsAddress) {
   Store store;
   auto at             = store.sliceGenesis(MicroversionId{});
   at                  = store.makeCell(at, "12");
-  const auto original = store.cellRefOf(at);
+  const auto original = store.cellRefOf(at).value();
   const auto before   = store.rebuildManifold(at);
   const auto quoted   = before.contentOf(original).front();
 
   at                   = store.makeCell(at, quoted);
-  const auto quotation = store.cellRefOf(at);
+  const auto quotation = store.cellRefOf(at).value();
   const auto after     = store.rebuildManifold(at);
   EXPECT_THAT(after.asInt64(quotation), testing::Optional(std::int64_t{12}));
   EXPECT_EQ(after.contentOf(quotation).front(), quoted);
@@ -400,8 +400,10 @@ TEST(ScalarTest, resultSliceKeepsRowsValuesAndSourceReferences) {
   const auto manifold = store.rebuildManifold(version);
   const auto dim      = manifold.dimensionNamed("d.result", store);
   ASSERT_TRUE(dim.has_value());
-  const auto first = manifold.linked(manifold.home(), *dim, DimVector::POS);
-  EXPECT_THAT(manifold.asInt64(first), testing::Optional(std::int64_t{12}));
+  const auto first =
+      manifold.linked(manifold.home().value(), *dim, DimVector::POS);
+  ASSERT_TRUE(first);
+  EXPECT_THAT(manifold.asInt64(*first), testing::Optional(std::int64_t{12}));
   EXPECT_EQ(store.primaryCurrentVersion(), version);
 }
 

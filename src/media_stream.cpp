@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <ios>
 #include <memory>
@@ -13,6 +14,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -100,12 +102,23 @@ const std::byte *MemoryMediaStream::data() const {
 namespace {
 
 std::uint64_t queryFileSize(const std::string &filePath) {
+  std::error_code statusError;
+  if (!std::filesystem::is_regular_file(filePath, statusError)) {
+    throw std::ios_base::failure(
+        "media stream requires a regular file: " + filePath,
+        statusError ? statusError
+                    : std::make_error_code(std::errc::invalid_argument));
+  }
   std::ifstream is(filePath, std::ios::binary | std::ios::ate);
   if (!is.is_open()) {
-    return 0;
+    throw std::ios_base::failure("cannot open media stream file: " + filePath);
   }
   const auto pos = is.tellg();
-  return pos > 0 ? static_cast<std::uint64_t>(pos) : 0;
+  if (pos < 0) {
+    throw std::ios_base::failure("cannot determine media stream size: " +
+                                 filePath);
+  }
+  return static_cast<std::uint64_t>(pos);
 }
 
 } // namespace
@@ -131,18 +144,21 @@ std::size_t FileMediaStream::read(const std::uint64_t offset,
   }
   std::ifstream is(path_, std::ios::binary);
   if (!is.is_open()) {
-    return 0;
+    throw std::ios_base::failure("cannot read media stream file: " + path_);
   }
   const auto absOffset = range.start + offset;
   is.seekg(static_cast<std::streamoff>(absOffset), std::ios::beg);
   if (!is.good()) {
-    return 0;
+    throw std::ios_base::failure("cannot seek media stream file: " + path_);
   }
 
   const auto toRead = static_cast<std::size_t>(
       std::min<std::uint64_t>(dst.size(), range.length - offset));
   is.read(reinterpret_cast<char *>(dst.data()),
           static_cast<std::streamsize>(toRead));
+  if (is.bad() || (is.fail() && !is.eof())) {
+    throw std::ios_base::failure("media stream read failed: " + path_);
+  }
   return static_cast<std::size_t>(is.gcount());
 }
 
@@ -159,13 +175,18 @@ FileMediaStream::subspan(const std::uint64_t offset,
 CallbackMediaStream::CallbackMediaStream(ReadCallback callback,
                                          const std::uint64_t streamSize)
     : readCb(std::move(callback)),
-      range(ByteRange{.start = 0, .length = streamSize}) {}
+      range(ByteRange{.start = 0, .length = streamSize}) {
+  if (!readCb)
+    throw std::invalid_argument("media stream requires a read callback");
+}
 
 CallbackMediaStream::CallbackMediaStream(ReadCallback callback,
                                          const std::uint64_t streamSize,
                                          const std::uint64_t baseOffset,
                                          const std::uint64_t length)
     : readCb(std::move(callback)) {
+  if (!readCb)
+    throw std::invalid_argument("media stream requires a read callback");
   const auto from  = std::min(baseOffset, streamSize);
   const auto count = std::min(length, streamSize - from);
   range            = ByteRange{.start = from, .length = count};
@@ -173,7 +194,7 @@ CallbackMediaStream::CallbackMediaStream(ReadCallback callback,
 
 std::size_t CallbackMediaStream::read(const std::uint64_t offset,
                                       std::span<std::byte> dst) {
-  if (dst.empty() || offset >= range.length || !readCb) {
+  if (dst.empty() || offset >= range.length) {
     return 0;
   }
   const auto available = range.length - offset;
@@ -193,39 +214,44 @@ CallbackMediaStream::subspan(const std::uint64_t offset,
 
 int VlcStreamState::open(void *opaque, void **dataptr, std::uint64_t *sizep) {
   auto *state = static_cast<VlcStreamState *>(opaque);
-  if (nullptr == state || nullptr == state->stream) {
-    return -1;
+  if (!state || !state->stream || !dataptr || !sizep) return -1;
+  try {
+    const auto size = state->stream->size();
+    *dataptr        = state;
+    *sizep          = size;
+    state->cursor   = 0;
+    return 0;
+  } catch (...) {
+    return -1; // C callbacks report failures through LibVLC's ABI.
   }
-  *dataptr      = state;
-  *sizep        = state->stream->size();
-  state->cursor = 0;
-  return 0;
 }
 
 std::ptrdiff_t VlcStreamState::read(void *opaque, unsigned char *buf,
                                     const std::size_t len) {
+  if (len == 0) return 0;
   auto *state = static_cast<VlcStreamState *>(opaque);
-  if (nullptr == state || nullptr == state->stream || nullptr == buf ||
-      0 == len) {
-    return 0;
+  if (!state || !state->stream || !buf) return -1;
+  try {
+    const auto readBytes = state->stream->read(
+        state->cursor,
+        std::span<std::byte>(reinterpret_cast<std::byte *>(buf), len));
+    state->cursor += readBytes;
+    return static_cast<std::ptrdiff_t>(readBytes);
+  } catch (...) {
+    return -1;
   }
-  const auto readBytes = state->stream->read(
-      state->cursor,
-      std::span<std::byte>(reinterpret_cast<std::byte *>(buf), len));
-  state->cursor += readBytes;
-  return static_cast<std::ptrdiff_t>(readBytes);
 }
 
 int VlcStreamState::seek(void *opaque, const std::uint64_t offset) {
   auto *state = static_cast<VlcStreamState *>(opaque);
-  if (nullptr == state || nullptr == state->stream) {
+  if (!state || !state->stream) return -1;
+  try {
+    if (offset > state->stream->size()) return -1;
+    state->cursor = offset;
+    return 0;
+  } catch (...) {
     return -1;
   }
-  if (offset > state->stream->size()) {
-    return -1;
-  }
-  state->cursor = offset;
-  return 0;
 }
 
 void VlcStreamState::close(void *opaque) {

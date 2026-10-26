@@ -13,6 +13,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -140,9 +141,9 @@ void Views::frameForReading(const gleditor::FrameContext &ctx) {
                           glm::vec4(frame->leftPx, frame->topPx, 0.0F, 1.0F));
   const glm::vec3 topRight(frame->localToWorld *
                            glm::vec4(frame->rightPx, frame->topPx, 0.0F, 1.0F));
-  const float halfH       = *distance * std::tan(glm::radians(view.fov) * 0.5F);
-  const float halfW       = halfH * static_cast<float>(view.screenWidth) /
-                            static_cast<float>(view.screenHeight);
+  const float halfH = *distance * std::tan(glm::radians(view.fov) * 0.5F);
+  const float halfW = halfH * static_cast<float>(view.screenWidth) /
+                      static_cast<float>(view.screenHeight);
   const float x           = topRight.x - topLeft.x <= 2.0F * halfW
                                 ? 0.5F * (topLeft.x + topRight.x)
                                 : topLeft.x + halfW;
@@ -244,13 +245,14 @@ Views::widgetRectFor(const Doc &doc, const std::uint32_t docOffset) const {
 }
 
 void Views::showOnly(const MicroversionId &version,
-                     const std::size_t storeIndex) {
+                     const std::size_t storeIndex,
+                     const XanadocSelection selection) {
   const auto count = session.views().size();
   for (std::size_t i = 0; i < count; i++) {
     renderer->push(RenderItemCloseDoc());
   }
   renderer->runWithState([this](RenderState &) { session.clearViews(); });
-  showAlongside(version, 0.0F, storeIndex);
+  showAlongside(version, 0.0F, storeIndex, selection);
 }
 
 void Views::syncMediaWidgets(RenderState &rState) {
@@ -309,17 +311,17 @@ void Views::syncMediaWidgets(RenderState &rState) {
 
 void Views::showAlongside(const MicroversionId &version, const float depthZ,
                           const std::size_t storeIndex,
-                          const std::uint32_t focusedBirth) {
+                          const XanadocSelection selection) {
   renderer->push(RenderItemOpenDoc(
-      session.sourceFor(version, storeIndex, focusedBirth), depthZ));
+      session.sourceFor(version, storeIndex, selection), depthZ));
   renderer->runWithState(
-      [this, version, storeIndex, focusedBirth](RenderState &rState) {
+      [this, version, storeIndex, selection](RenderState &rState) {
         if (rState.docs.empty()) {
           return;
         }
         primaryDocument_ = rState.docs.front();
         rState.docs.back()->addObserver(&session);
-        session.viewOpened(version, storeIndex, focusedBirth);
+        session.viewOpened(version, storeIndex, selection);
         map.setCurrent(session.views().front().version);
         syncMediaWidgets(rState);
       });
@@ -377,7 +379,7 @@ void Views::swingBackToSpan(const PouchItem &item) {
       text.insertSpans(
           0, std::vector<PrimediaSpan>(content.begin(), content.end()));
     } else {
-      text = store.rebuild(source.version, source.focusedBirth);
+      text = store.rebuild(source.version, source.selection);
     }
     if (source.end < source.start) {
       unavailable("The saved source range is invalid.");
@@ -412,14 +414,14 @@ void Views::swingBackToSpan(const PouchItem &item) {
     for (std::size_t i = 0; i < session.views().size(); ++i) {
       const auto &view = session.views()[i];
       if (view.storeIndex == *storeIndex && view.version == source.version &&
-          view.focusedBirth == source.focusedBirth) {
+          view.selection == source.selection) {
         docIndex = i;
         break;
       }
     }
     if (!docIndex) {
       docIndex = session.views().size();
-      showAlongside(source.version, 0.0F, *storeIndex, source.focusedBirth);
+      showAlongside(source.version, 0.0F, *storeIndex, source.selection);
     }
     renderer->runWithState([this, source, storeIndex = *storeIndex,
                             doc = *docIndex](RenderState &rState) {
@@ -427,7 +429,7 @@ void Views::swingBackToSpan(const PouchItem &item) {
           !renderer->editCaret() || doc >= session.views().size() ||
           session.storeIndexOf(doc) != storeIndex ||
           session.versionOf(doc) != source.version ||
-          session.views()[doc].focusedBirth != source.focusedBirth)
+          session.views()[doc].selection != source.selection)
         return;
       activateDocument(rState, static_cast<std::uint32_t>(doc));
       focusSpanAt(rState, doc, source.start, source.end);
@@ -559,7 +561,8 @@ void Views::back() {
     }
     const auto there = here.parent();
     std::cout << "xuzz: " << here.str() << " -> " << there.str() << "\n";
-    showOnly(there, session.views().front().storeIndex);
+    showOnly(there, session.views().front().storeIndex,
+             session.views().front().selection);
   });
 }
 
@@ -580,7 +583,7 @@ void Views::forward() {
       std::cout << " (of " << children.size() << " futures)";
     }
     std::cout << "\n";
-    showOnly(children.front(), sIdx);
+    showOnly(children.front(), sIdx, session.views().front().selection);
   });
 }
 
@@ -791,12 +794,12 @@ void Views::publishCurrent(const std::string &salt) {
                         "the caret is what gets published.");
       return;
     }
-    auto *const caret  = renderer->editCaret();
-    const auto which   = nullptr != caret && caret->active() &&
-                                 caret->documentIndex() < session.views().size()
-                             ? caret->documentIndex()
-                             : 0U;
-    const auto version = session.versionOf(which);
+    auto *const caret   = renderer->editCaret();
+    const auto which    = nullptr != caret && caret->active() &&
+                               caret->documentIndex() < session.views().size()
+                              ? caret->documentIndex()
+                              : 0U;
+    const auto version  = session.versionOf(which);
     const auto storeIdx = session.storeIndexOf(which);
     const auto who      = session.author();
 
@@ -901,19 +904,21 @@ void Views::publishCurrent(const std::string &salt) {
     asked.push_back(std::move(fTopics));
 
     Field editions;
-    editions.label        = "Editions";
-    editions.kind         = Kind::Choice;
-    editions.options      = {"Keep all existing editions"};
-    editions.optionValues = {"keep"};
-    auto editionHead      = session.store(storeIdx).structureHead();
-    if (editionHead.isZero()) editionHead = session.store(storeIdx).latest();
+    editions.label         = "Editions";
+    editions.kind          = Kind::Choice;
+    editions.options       = {"Keep all existing editions"};
+    editions.optionValues  = {"keep"};
+    const auto editionHead = session.store(storeIdx).structureHead().value_or(
+        session.store(storeIdx).latest());
     std::string review;
     for (const auto &edition : session.store(storeIdx).editions(editionHead)) {
-      const auto target = edition.targetVersion.str();
+      const auto editionId =
+          session.store(storeIdx).segmentedOps().idOf(edition.cell);
+      if (!editionId || !edition.targetVersion) continue;
+      const auto target = edition.targetVersion->str();
       editions.options.push_back("Repoint " + edition.name + " (" + target +
                                  ") to " + version.str());
-      editions.optionValues.push_back(
-          session.store(storeIdx).segmentedOps().idOf(edition.cell).str());
+      editions.optionValues.push_back(editionId->str());
       if (!review.empty()) review += "; ";
       review += edition.name + " → " + target;
     }
@@ -1067,16 +1072,17 @@ void Views::saveCurrent() {
       return;
     }
     auto *const caret = renderer->editCaret();
-    auto which        = switcher ? switcher->activeDocIndex() : 0U;
+    auto which =
+        switcher ? switcher->activeDocIndex() : std::optional<std::uint32_t>{};
     if (nullptr != caret && caret->active() &&
         caret->documentIndex() < session.views().size()) {
       which = caret->documentIndex();
     }
-    if (which >= session.views().size()) {
+    if (!which || *which >= session.views().size()) {
       session.saveAll();
       return;
     }
-    const auto storeIdx = session.storeIndexOf(which);
+    const auto storeIdx = session.storeIndexOf(*which);
     if (session.isTemporaryStore(storeIdx)) {
       using Field         = gleditor::Form::Field;
       namespace fs        = std::filesystem;
@@ -1157,13 +1163,14 @@ void Views::closeActive() {
       return;
     }
     auto *const caret = renderer->editCaret();
-    auto which        = switcher ? switcher->activeDocIndex() : 0U;
+    auto which =
+        switcher ? switcher->activeDocIndex() : std::optional<std::uint32_t>{};
     if (nullptr != caret && caret->active() &&
         caret->documentIndex() < rState.docs.size()) {
       which = caret->documentIndex();
     }
-    if (which < rState.docs.size()) {
-      closeDocument(which);
+    if (which && *which < rState.docs.size()) {
+      closeDocument(*which);
     }
   });
 }
@@ -1537,13 +1544,24 @@ void Views::publicationDownloadStatus(const std::string &id) {
   });
 }
 
-void Views::publicationUpdates(const std::string &selected,
-                               std::int64_t sequence) {
+void Views::publicationUpdates(const std::optional<std::string> selected,
+                               const std::optional<std::int64_t> sequence) {
+  if (selected && selected->empty()) {
+    throw std::invalid_argument("publication subscription id must be nonempty");
+  }
+  if (sequence && *sequence < 0) {
+    throw std::invalid_argument("publication sequence must be nonnegative");
+  }
   renderer->runWithState([this, selected, sequence](RenderState &) {
     using Field = gleditor::Form::Field;
     try {
       auto &subscriptions = session.publicationSubscriptions();
       const auto statuses = subscriptions.statuses();
+      if (selected && std::ranges::none_of(statuses, [&](const auto &status) {
+            return status.id == *selected;
+          })) {
+        throw std::invalid_argument("publication subscription not found");
+      }
       Field action;
       action.label         = "Action";
       action.kind          = gleditor::Form::Kind::Choice;
@@ -1572,7 +1590,7 @@ void Views::publicationUpdates(const std::string &selected,
                                    link.key.hex().substr(0, 12) + " #" +
                                    std::to_string(status.sequence));
         followed.optionValues.push_back(status.id);
-        if (status.id == selected)
+        if (selected && status.id == *selected)
           followed.chosen = followed.options.size() - 1;
         for (const auto &notice : status.notices) {
           if (notice.acknowledged) continue;
@@ -1582,7 +1600,8 @@ void Views::publicationUpdates(const std::string &selected,
                                     " → #" + std::to_string(notice.sequence));
           updates.optionValues.push_back(status.id + "@" +
                                          std::to_string(notice.sequence));
-          if (status.id == selected && notice.sequence == sequence)
+          if (selected && status.id == *selected && sequence &&
+              notice.sequence == *sequence)
             updates.chosen = updates.options.size() - 1;
         }
       }
@@ -1610,26 +1629,26 @@ void Views::publicationUpdates(const std::string &selected,
       form.open(
           "Publication updates", std::move(note),
           {std::move(action), std::move(followed), std::move(updates)},
-          [this](const auto &answers) {
-            const auto action   = answers[0].answer();
-            const auto selected = answers[1].answer();
-            const auto update   = answers[2].answer();
+          [this, selected](const auto &answers) {
+            const auto action         = answers[0].answer();
+            const auto selectedAnswer = answers[1].answer();
+            const auto update         = answers[2].answer();
             if (action == "close") return;
             try {
               auto &subscriptions = session.publicationSubscriptions();
               std::string id;
-              std::int64_t seq{-1};
+              std::optional<std::int64_t> seq;
               if (!update.empty()) {
                 const auto split = update.find('@');
                 id               = update.substr(0, split);
                 seq              = std::stoll(update.substr(split + 1));
               }
               if (action == "open" || action == "earlier" || action == "ack") {
-                if (id.empty())
+                if (id.empty() || !seq)
                   throw std::logic_error("No verified update selected");
                 const auto status = subscriptions.status(id);
                 const auto found  = std::ranges::find(
-                    status.notices, seq, &PublicationUpdateNotice::sequence);
+                    status.notices, *seq, &PublicationUpdateNotice::sequence);
                 if (found == status.notices.end())
                   throw std::logic_error("Update is no longer pending");
                 if (action != "ack") {
@@ -1647,16 +1666,31 @@ void Views::publicationUpdates(const std::string &selected,
                   activateNewest();
                   if (action == "open") {
                     frameNewestComparison();
-                    subscriptions.acknowledge(id, seq);
+                    subscriptions.acknowledge(id, *seq);
                   }
                   return;
                 }
-                subscriptions.acknowledge(id, seq);
+                subscriptions.acknowledge(id, *seq);
               }
-              if (action == "check") subscriptions.checkNow(selected);
+              if (action == "check" || action == "pause" ||
+                  action == "resume") {
+                if (selectedAnswer.empty())
+                  throw std::logic_error("No subscription selected");
+                const auto currentStatuses = subscriptions.statuses();
+                if (std::ranges::none_of(currentStatuses, [&](const auto &s) {
+                      return s.id == selectedAnswer;
+                    })) {
+                  throw std::logic_error("Subscription is no longer available");
+                }
+              }
+              if (action == "check") subscriptions.checkNow(selectedAnswer);
               if (action == "pause" || action == "resume")
-                subscriptions.setEnabled(selected, action == "resume");
-              publicationUpdates(selected, seq);
+                subscriptions.setEnabled(selectedAnswer, action == "resume");
+              publicationUpdates(
+                  selectedAnswer.empty()
+                      ? std::nullopt
+                      : std::optional<std::string>{selectedAnswer},
+                  seq);
             } catch (const std::exception &error) {
               Field back;
               back.label         = "Action";
@@ -1772,7 +1806,7 @@ void Views::exportOsmic() {
     }
     auto *const caret   = renderer->editCaret();
     const auto which    = (nullptr != caret && caret->active() &&
-                           caret->documentIndex() < session.views().size())
+                        caret->documentIndex() < session.views().size())
                               ? caret->documentIndex()
                               : 0U;
     const auto storeIdx = session.storeIndexOf(which);
@@ -1796,11 +1830,11 @@ void Views::importFile(const std::string &filePath) {
                             std::istreambuf_iterator<char>());
     auto *const caret   = renderer->editCaret();
     const auto docIdx   = (nullptr != caret && caret->active() &&
-                           caret->documentIndex() < session.views().size())
+                         caret->documentIndex() < session.views().size())
                               ? caret->documentIndex()
                               : 0U;
     const auto at       = (nullptr != caret && caret->active() &&
-                           caret->documentIndex() == docIdx)
+                     caret->documentIndex() == docIdx)
                               ? caret->byteOffset()
                               : 0U;
     const auto detected = gleditor::MimeDetector::detectFile(filePath);
@@ -2068,8 +2102,10 @@ void Views::nextDoc() {
       return;
     }
     const auto total = static_cast<std::uint32_t>(rState.docs.size());
-    const auto cur   = switcher ? switcher->activeDocIndex() : 0U;
-    const auto next  = (cur + 1U) % total;
+    const auto cur =
+        switcher ? switcher->activeDocIndex() : std::optional<std::uint32_t>{};
+    if (!cur) return;
+    const auto next = (*cur + 1U) % total;
     selectDoc(next);
   });
 }
@@ -2080,8 +2116,10 @@ void Views::prevDoc() {
       return;
     }
     const auto total = static_cast<std::uint32_t>(rState.docs.size());
-    const auto cur   = switcher ? switcher->activeDocIndex() : 0U;
-    const auto prev  = (cur + total - 1U) % total;
+    const auto cur =
+        switcher ? switcher->activeDocIndex() : std::optional<std::uint32_t>{};
+    if (!cur) return;
+    const auto prev = (*cur + total - 1U) % total;
     selectDoc(prev);
   });
 }
@@ -2109,8 +2147,8 @@ void Views::setOnionSkin(const bool enabled) {
     if (onionSkinMode_ == enabled) {
       return;
     }
-    onionSkinMode_ = enabled;
-    if (onionSkinMode_) {
+    if (enabled) {
+      activeOnionIdx_.reset();
       auto *const caret = renderer->editCaret();
       if (caret && caret->active() &&
           caret->documentIndex() < rState.docs.size()) {
@@ -2118,11 +2156,16 @@ void Views::setOnionSkin(const bool enabled) {
       } else if (switcher) {
         activeOnionIdx_ = switcher->activeDocIndex();
       }
+      if (!activeOnionIdx_) return;
+    }
+    onionSkinMode_ = enabled;
+    if (onionSkinMode_) {
       arrangeOnionSkin(rState);
       state->showDialog(render::DiagnosticSeverity::Info, "3D Onion Skin",
                         "Onion skin mode active: scroll wheel cycles " +
                             std::to_string(rState.docs.size()) + " documents.");
     } else {
+      activeOnionIdx_.reset();
       arrangeAlongside(rState);
     }
   });
@@ -2131,11 +2174,11 @@ void Views::setOnionSkin(const bool enabled) {
 void Views::toggleOnionSkin() { setOnionSkin(!onionSkinMode_); }
 
 void Views::arrangeOnionSkin(RenderState &rState) {
-  if (rState.docs.empty()) {
+  if (rState.docs.empty() || !activeOnionIdx_) {
     return;
   }
   const auto total  = rState.docs.size();
-  const auto active = activeOnionIdx_ % total;
+  const auto active = *activeOnionIdx_ % total;
   for (std::size_t i = 0; i < total; ++i) {
     if (!rState.docs[i]) {
       continue;
@@ -2179,22 +2222,22 @@ void Views::arrangeAlongside(RenderState &rState) {
 
 void Views::cycleOnionSkin(const int delta) {
   renderer->runWithState([this, delta](RenderState &rState) {
-    if (rState.docs.empty()) {
+    if (rState.docs.empty() || !activeOnionIdx_) {
       return;
     }
     const int n = static_cast<int>(rState.docs.size());
-    int nextIdx = (static_cast<int>(activeOnionIdx_) + delta) % n;
+    int nextIdx = (static_cast<int>(*activeOnionIdx_) + delta) % n;
     if (nextIdx < 0) {
       nextIdx += n;
     }
     activeOnionIdx_ = static_cast<std::size_t>(nextIdx);
     arrangeOnionSkin(rState);
     if (switcher) {
-      switcher->setActiveDocIndex(static_cast<std::uint32_t>(activeOnionIdx_));
+      switcher->setActiveDocIndex(static_cast<std::uint32_t>(*activeOnionIdx_));
     }
     auto *const caret = renderer->editCaret();
     if (caret) {
-      caret->placeAt(static_cast<std::uint32_t>(activeOnionIdx_), 0);
+      caret->placeAt(static_cast<std::uint32_t>(*activeOnionIdx_), 0);
     }
   });
 }

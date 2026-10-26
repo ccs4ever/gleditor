@@ -23,6 +23,8 @@
 #include <utility>
 #include <vulkan/vulkan.h>
 
+#include <gleditor/render/stream_buffer.hpp>
+
 namespace render::vulkan {
 
 struct MappedChunkVK {
@@ -148,8 +150,9 @@ public:
   }
 
   /// Allocate a mapped chunk of @p size bytes with alignment @p alignment.
-  MappedChunkVK allocate(const std::size_t size,
-                         const std::size_t alignment = 64) {
+  MappedChunkVK
+  allocate(const std::size_t size,
+           const std::size_t alignment = kDefaultStreamAlignmentBytes) {
     if (0 == size) {
       return {.ptr = static_cast<std::byte *>(mapped) + head, .offset = head};
     }

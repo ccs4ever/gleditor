@@ -22,9 +22,9 @@ QuotationBuilder::setForeignStore(std::string scrollKey, const Store *store,
     foreignFold_          = std::make_shared<zigzag::Manifold>(
         foreignStore_->rebuildManifold(config_.pinnedVersion));
 
-    if (config_.rootRef.produces.isZero() &&
-        foreignStore_->homeCell() != zigzag::noCell) {
-      setRootCell(foreignStore_->homeCell());
+    const auto home = foreignStore_->homeCell();
+    if (!config_.rootRef && home && foreignFold_->contains(*home)) {
+      setRootCell(home);
     }
   } else {
     foreignFold_.reset();
@@ -32,15 +32,23 @@ QuotationBuilder::setForeignStore(std::string scrollKey, const Store *store,
   return this;
 }
 
-QuotationBuilder *QuotationBuilder::setRootCell(const zigzag::CellRef cell) {
-  if (nullptr == foreignStore_ || zigzag::noCell == cell) {
-    return this;
+QuotationBuilder *
+QuotationBuilder::setRootCell(const std::optional<zigzag::CellRef> cell) {
+  if (!cell) {
+    config_.rootRef.reset();
+    config_.rootLabel.clear();
+    return recomputePreview();
   }
-  const auto op   = foreignStore_->segmentedOps().idOf(cell);
-  config_.rootRef = ExternOpRef{.scroll = 1, .produces = op};
-  if (foreignFold_ && foreignFold_->contains(cell)) {
-    config_.rootLabel = foreignFold_->textOf(cell, *foreignStore_);
+  if (nullptr == foreignStore_ || !foreignFold_ || zigzag::noCell == *cell ||
+      !foreignFold_->contains(*cell)) {
+    throw std::invalid_argument("quotation root must be a cell in the store");
   }
+  const auto op = foreignStore_->segmentedOps().idOf(*cell);
+  if (!op || *op == MicroversionId{}) {
+    throw std::invalid_argument("quotation root has no birth operation");
+  }
+  config_.rootRef   = ExternOpRef{.scroll = 1, .produces = *op};
+  config_.rootLabel = foreignFold_->textOf(*cell, *foreignStore_);
   return this;
 }
 
@@ -106,9 +114,16 @@ QuotationBuilder::recomputePreview(const QuotationBudget &budget) {
   }
 
   // Localise root ref
+  if (!config_.rootRef) {
+    preview_.isValid       = false;
+    preview_.state         = QuotationState::Absent;
+    preview_.statusMessage = "Root cell has not been selected";
+    preview_.cells.clear();
+    return this;
+  }
   const auto opIdx =
-      foreignStore_->segmentedOps().indexOf(config_.rootRef.produces);
-  if (opIdx == 0 || !foreignFold_->contains(opIdx)) {
+      foreignStore_->segmentedOps().indexOf(config_.rootRef->produces);
+  if (!opIdx || *opIdx == 0 || !foreignFold_->contains(*opIdx)) {
     preview_.isValid = false;
     preview_.state   = QuotationState::Absent;
     preview_.statusMessage =
@@ -119,7 +134,7 @@ QuotationBuilder::recomputePreview(const QuotationBudget &budget) {
 
   Selector selector;
   selector.kind                 = config_.mode;
-  selector.root                 = opIdx;
+  selector.root                 = *opIdx;
   selector.rankDirection        = config_.rankDirection;
   selector.query                = config_.vqlQuery;
   selector.queryLanguageVersion = config_.queryLanguageVersion;
@@ -128,14 +143,14 @@ QuotationBuilder::recomputePreview(const QuotationBudget &budget) {
   if (config_.mode == Selector::Kind::Rank && config_.rankDimRef) {
     const auto dIdx =
         foreignStore_->segmentedOps().indexOf(config_.rankDimRef->produces);
-    if (dIdx != 0 && foreignFold_->contains(dIdx)) {
-      selector.rankDim = dIdx;
+    if (dIdx && *dIdx != 0 && foreignFold_->contains(*dIdx)) {
+      selector.rankDim = *dIdx;
     }
   } else if (config_.mode == Selector::Kind::Closure) {
     for (const auto &ref : config_.carryRefs) {
       const auto cIdx = foreignStore_->segmentedOps().indexOf(ref.produces);
-      if (cIdx != 0 && foreignFold_->contains(cIdx)) {
-        selector.carry.push_back(cIdx);
+      if (cIdx && *cIdx != 0 && foreignFold_->contains(*cIdx)) {
+        selector.carry.push_back(*cIdx);
       }
     }
   }
@@ -172,14 +187,14 @@ QuotationBuilder::recomputePreview(const QuotationBudget &budget) {
     }
     pc.birthRef = ExternOpRef{
         .scroll   = 1,
-        .produces = foreignStore_->segmentedOps().idOf(fCell),
+        .produces = foreignStore_->segmentedOps().idOf(fCell).value(),
     };
 
     for (const auto &dimLink : foreignFold_->dimensionsOf(fCell)) {
       const auto nbr = dimLink.neighbor(zigzag::DimVector::POS);
-      if (nbr != zigzag::noCell && selectedSet.contains(nbr)) {
+      if (nbr && selectedSet.contains(*nbr)) {
         const auto dimName = foreignFold_->textOf(dimLink.dim, *foreignStore_);
-        pc.outboundEdges.emplace_back(dimName, nbr);
+        pc.outboundEdges.emplace_back(dimName, *nbr);
       }
     }
     preview_.cells.push_back(std::move(pc));
@@ -223,8 +238,11 @@ AppendedQuotation QuotationBuilder::commit(Store &localStore,
                                            const zigzag::CellRef localTail,
                                            const zigzag::DimRef localDim) {
   SelectorSpec spec;
-  spec.kind                 = config_.mode;
-  spec.rootRef              = config_.rootRef;
+  spec.kind = config_.mode;
+  if (!config_.rootRef) {
+    throw std::logic_error("cannot commit a quotation without a root cell");
+  }
+  spec.rootRef              = *config_.rootRef;
   spec.rankDimRef           = config_.rankDimRef;
   spec.rankDirection        = config_.rankDirection;
   spec.carryRefs            = config_.carryRefs;

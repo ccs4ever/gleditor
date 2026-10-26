@@ -31,13 +31,13 @@ public:
         });
     ON_CALL(*this, resizeBuffer)
         .WillByDefault([this](render::BufferHandle buffer, std::size_t size) {
-          buffers[buffer.id].resize(size);
+          buffers[*buffer.id].resize(size);
           return buffer;
         });
     ON_CALL(*this, updateBuffer)
         .WillByDefault([this](render::BufferHandle buffer, std::size_t offset,
                               std::span<const std::byte> bytes) {
-          auto &storage = buffers[buffer.id];
+          auto &storage = buffers[*buffer.id];
           storage.resize(std::max(storage.size(), offset + bytes.size()));
           std::memcpy(storage.data() + offset, bytes.data(), bytes.size());
         });
@@ -45,7 +45,7 @@ public:
         .WillByDefault([this](const render::DrawUniforms &,
                               render::BufferHandle buffer, std::size_t offset,
                               std::uint32_t count) {
-          const auto &storage = buffers.at(buffer.id);
+          const auto &storage = buffers.at(*buffer.id);
           for (std::uint32_t i = 0; i < count; ++i) {
             Doc::VBORow row{};
             std::memcpy(&row, storage.data() + offset + i * sizeof(row),

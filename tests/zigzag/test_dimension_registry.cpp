@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 
 #include <optional>
+#include <stdexcept>
 
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/zigzag/dimension_registry.hpp"
@@ -16,19 +17,21 @@ using xanadu::Store;
 
 TEST(DimensionRegistryTest, StringInterningAndFastComparison) {
   auto &reg = DimensionRegistry::instance();
+  reg.clear();
 
   const auto d1_a = reg.intern("d.1");
   const auto d1_b = reg.intern("d.1");
   const auto d2   = reg.intern("d.2");
 
-  EXPECT_FALSE(d1_a.empty());
-  EXPECT_TRUE(static_cast<bool>(d1_a));
+  EXPECT_EQ(d1_a.id(), 0U);
   EXPECT_EQ(d1_a.name(), "d.1");
   EXPECT_EQ(d1_a.string(), "d.1");
 
   // Identical strings produce identical interned IDs
   EXPECT_EQ(d1_a.id(), d1_b.id());
   EXPECT_EQ(d1_a, d1_b);
+  ASSERT_TRUE(reg.findInterned("d.1"));
+  EXPECT_EQ(reg.findInterned("d.1")->id(), 0U);
 
   // Distinct strings produce distinct interned IDs
   EXPECT_NE(d1_a.id(), d2.id());
@@ -38,14 +41,18 @@ TEST(DimensionRegistryTest, StringInterningAndFastComparison) {
   EXPECT_TRUE((d1_a <=> d1_b) == 0);
   EXPECT_TRUE((d1_a <=> d2) != 0);
 
-  // Empty string handling
-  const auto empty = reg.intern("");
-  EXPECT_TRUE(empty.empty());
-  EXPECT_EQ(empty.id(), 0U);
+  // Empty names cannot enter the intern pool or manufacture a placeholder.
+  EXPECT_THROW((void)reg.intern(""), std::invalid_argument);
 
   // findInterned lookup without insertion
-  EXPECT_EQ(reg.findInterned("d.1"), d1_a);
-  EXPECT_TRUE(reg.findInterned("d.nonexistent_unknown_dimension").empty());
+  EXPECT_EQ(reg.findInterned("d.1"), std::optional{d1_a});
+  EXPECT_FALSE(reg.findInterned("d.nonexistent_unknown_dimension"));
+  EXPECT_FALSE(reg.findInterned(""));
+
+  reg.clear();
+  const auto firstAfterClear = reg.intern("d.first");
+  EXPECT_EQ(firstAfterClear.id(), 0U);
+  EXPECT_EQ(firstAfterClear.name(), "d.first");
 }
 
 TEST(DimensionRegistryTest, GetOrCreateWithStoreAndManifold) {
@@ -75,6 +82,10 @@ TEST(DimensionRegistryTest, GetOrCreateWithStoreAndManifold) {
 
   // Lookup unknown dimension returns noCell
   EXPECT_EQ(reg.get(store, "d.does_not_exist"), std::nullopt);
+  EXPECT_EQ(reg.get(store, ""), std::nullopt);
+  const auto emptyName = reg.getOrCreate(store, manifold, "");
+  ASSERT_FALSE(emptyName);
+  EXPECT_EQ(emptyName.error(), DimensionError::EmptyName);
 }
 
 TEST(DimensionRegistryTest, GetOrCreateGivenOnlyManifold) {

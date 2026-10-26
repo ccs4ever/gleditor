@@ -65,7 +65,7 @@ TEST(TextBoundsTest, DetectsTheHeightOfRealWrappedText) {
   ASSERT_NE(font, nullptr);
   const auto shaping = gleditor::text::TextLayout::layoutPage(
       "A long label that needs several lines in a narrow parent", font,
-      {.maxWidthPx = 80.0F, .maxHeightPx = 0.0F});
+      {.maxWidthPx = 80.0F, .maxHeightPx = std::nullopt});
   ASSERT_GT(shaping.lineCount, 1U);
 
   const TextBounds parent{.left   = 20.0F,

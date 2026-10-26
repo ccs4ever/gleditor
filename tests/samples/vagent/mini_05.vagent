@@ -1,0 +1,8 @@
+event Run
+agent Loops {
+  var total: Int := 0
+  on Run {
+    for n in [1, 2, 3] do total := total + n
+    while total < 8 do total := total + 1
+  }
+}

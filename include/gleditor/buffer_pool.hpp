@@ -46,9 +46,9 @@ public:
    * offset across one is not, so ask for that at the point of use.
    */
   struct Allocation {
-    std::uint32_t id{};
+    std::optional<std::uint32_t> id;
 
-    [[nodiscard]] bool empty() const { return 0 == id; }
+    [[nodiscard]] bool empty() const { return !id.has_value(); }
     bool operator==(const Allocation &) const = default;
   };
 
@@ -317,7 +317,7 @@ private:
   /// Live allocations by handle. An id is never reused, so a handle to a
   /// released allocation is not silently a handle to somebody else's.
   std::unordered_map<std::uint32_t, Placement> placements;
-  std::uint32_t nextAllocationId{1};
+  std::optional<std::uint32_t> nextAllocationId{1};
   std::uint64_t movesMade{};
 };
 

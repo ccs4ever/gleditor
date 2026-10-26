@@ -10,6 +10,14 @@
 namespace xanadu::view {
 namespace {
 
+TEST(TransductiveViewTest, ViewCellRefRejectsEngagedNoCell) {
+  const ViewCellRef absent{};
+  const ViewCellRef invalidZero{.ref = zigzag::noCell};
+
+  EXPECT_FALSE(absent.valid());
+  EXPECT_FALSE(invalidZero.valid());
+}
+
 TEST(TransductiveViewTest, FilterTenThousandCellsZeroShadowing) {
   zigzag::ArenaManifold base;
   const auto dSeq = base.ensureDimension("d.seq");

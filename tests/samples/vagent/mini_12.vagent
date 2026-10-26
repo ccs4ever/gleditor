@@ -1,0 +1,10 @@
+predicate ready()
+event Start
+goal BecomeReady() achieve {
+  succeed when believes ready()
+}
+
+agent Prepare {
+  on Start { adopt BecomeReady() }
+  plan prepare for BecomeReady { believe ready() }
+}

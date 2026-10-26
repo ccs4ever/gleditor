@@ -75,10 +75,10 @@ TEST_F(MeshValueTest, PublishedSpanRoundTripPromotesAnswerBack) {
   ASSERT_TRUE(dimension);
   const auto number =
       imported->arena->linked(imported->root, *dimension, DimVector::POS);
-  ASSERT_NE(number, zigzag::noCell);
-  EXPECT_EQ(imported->arena->asInt64(number), 42);
+  ASSERT_TRUE(number);
+  EXPECT_EQ(imported->arena->asInt64(*number), 42);
   const auto computed = imported->arena->makeScalarCell(
-      imported->arena->asInt64(number).value() + 1);
+      imported->arena->asInt64(*number).value() + 1);
   const auto computedDimension = imported->arena->makeCell("d.computed");
   zigzag::expectWritten(imported->arena->link(imported->root, computedDimension,
                                               DimVector::POS, computed));
@@ -220,7 +220,7 @@ TEST_F(MeshValueTest,
        ArbitraryOperationHandlesRetainGlobalIdentityAndLabelProvenance) {
   xanadu::Store publisher;
   const auto edit      = publisher.insert({}, 0, "historical edit");
-  const auto editIndex = publisher.segmentedOps().indexOf(edit);
+  const auto editIndex = publisher.segmentedOps().indexOf(edit).value();
   zigzag::ArenaManifold outgoing;
   const auto handle = outgoing.makeCell("comment on the edit");
   ASSERT_TRUE(
@@ -238,6 +238,8 @@ TEST_F(MeshValueTest,
       received->value.publication.scrolls.at(received->value.root.scroll);
   const auto global =
       xanadu::opRefOf(*received->store, *originalTarget, history);
+  ASSERT_TRUE(global);
+  const auto &globalRef = *global;
   xanadu::Store destination;
   destination.setContentSource(&source);
   const auto unrelated =
@@ -251,7 +253,7 @@ TEST_F(MeshValueTest,
   EXPECT_FALSE(imported->arena->handleTarget(imported->root));
   const auto target = xanadu::foreignOpTarget(*imported->arena, imported->root);
   ASSERT_TRUE(target);
-  EXPECT_EQ(*target, global);
+  EXPECT_EQ(*target, globalRef);
   const auto resolved =
       xanadu::resolveForeignOperation(*target, *received->store, history);
   ASSERT_TRUE(resolved);
@@ -263,10 +265,11 @@ TEST_F(MeshValueTest,
   ASSERT_TRUE(labelDimension);
   const auto label =
       imported->arena->linked(imported->root, *labelDimension, DimVector::POS);
-  ASSERT_NE(label, zigzag::noCell);
-  EXPECT_EQ(imported->arena->textOf(label), "comment on the edit");
+  ASSERT_TRUE(label);
+  EXPECT_EQ(imported->arena->textOf(*label), "comment on the edit");
   EXPECT_EQ(
-      xanadu::globalise(destination, imported->arena->contentOf(label).front()),
+      xanadu::globalise(destination,
+                        imported->arena->contentOf(*label).front()),
       xanadu::globalise(*received->store,
                         received->manifold->contentOf(received->root).front()));
   const auto promoted =
@@ -274,8 +277,10 @@ TEST_F(MeshValueTest,
   ASSERT_TRUE(promoted);
   auto fold = destination.rebuildManifold(promoted->version);
   ASSERT_FALSE(promoted->cells.empty());
-  EXPECT_EQ(xanadu::foreignOpTarget(fold, promoted->cells.front(), destination),
-            global);
+  const auto promotedTarget =
+      xanadu::foreignOpTarget(fold, promoted->cells.front(), destination);
+  ASSERT_TRUE(promotedTarget);
+  EXPECT_EQ(*promotedTarget, globalRef);
   std::ostringstream wire;
   xanadu::writeBinaryOpsSpool(wire, destination.opRecords());
   std::istringstream input(wire.str());

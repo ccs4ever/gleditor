@@ -42,29 +42,48 @@ TEST_F(VQLCompilerTest, CompileExecutableStore) {
 
   auto result = compiler.compile("##/d.step", opts);
   ASSERT_TRUE(result.success) << result.errorMessage;
-  ASSERT_NE(result.entryOpcode, noCell);
+  ASSERT_TRUE(result.entryOpcode);
 
   // Home should be linked along +d.spin to entryOpcode
-  CellRef spinTarget =
+  const auto spinTarget =
       core->arena().linked(core->home(), core->dims().spin, false);
-  EXPECT_EQ(spinTarget, result.entryOpcode);
+  ASSERT_TRUE(spinTarget);
+  EXPECT_EQ(*spinTarget, *result.entryOpcode);
 
   // Active cursor should be spawned
   auto cursors = vm->activeCursors();
   ASSERT_FALSE(cursors.empty());
-  EXPECT_EQ(vm->getCursorOpcode(cursors.front()), result.entryOpcode);
+  EXPECT_EQ(vm->getCursorOpcode(cursors.front()), *result.entryOpcode);
 
   // Last instruction in stream should be Halt
-  CellRef lastOp = noCell;
-  CellRef cur    = result.entryOpcode;
-  while (cur != noCell) {
-    lastOp = cur;
-    cur    = core->arena().linked(cur, core->dims().spin, false);
+  CellRef lastOp = *result.entryOpcode;
+  auto cur       = core->arena().linked(lastOp, core->dims().spin, false);
+  while (cur) {
+    lastOp = *cur;
+    cur    = core->arena().linked(*cur, core->dims().spin, false);
   }
-  ASSERT_NE(lastOp, noCell);
   auto kind = vm->getOpcodeKind(lastOp);
   ASSERT_TRUE(kind.has_value());
   EXPECT_EQ(*kind, OpcodeKind::Halt);
+}
+
+TEST_F(VQLCompilerTest, MissingLiteralAnchorProducesNoFallbackResult) {
+  VQLCompiler compiler(*core, *vm);
+  PathExpression path;
+  path.anchor.kind   = AnchorKind::LiteralCellId;
+  path.anchor.cellId = core->arena().cellCount() + 100;
+  QueryExpression query;
+  query.expr = path;
+
+  const auto result = compiler.compile(query);
+  ASSERT_TRUE(result.success) << result.errorMessage;
+  ASSERT_TRUE(result.entryOpcode);
+  ASSERT_EQ(result.generatedOpcodes.size(), 1u);
+  const auto kind = vm->getOpcodeKind(*result.entryOpcode);
+  ASSERT_TRUE(kind);
+  EXPECT_EQ(*kind, OpcodeKind::Halt);
+  EXPECT_FALSE(core->arena().linked(*result.entryOpcode, core->dims().grab,
+                                    zigzag::DimVector::POS));
 }
 
 TEST_F(VQLCompilerTest, CompileLibraryStore) {
@@ -77,31 +96,31 @@ TEST_F(VQLCompilerTest, CompileLibraryStore) {
 
   auto result = compiler.compile("##/d.step/d.width", opts);
   ASSERT_TRUE(result.success) << result.errorMessage;
-  ASSERT_NE(result.entryOpcode, noCell);
+  ASSERT_TRUE(result.entryOpcode);
 
   // Module should be linked along +d.stdlib off home
-  CellRef modCell =
+  const auto modCell =
       core->arena().linked(core->home(), core->dims().stdlib, false);
-  ASSERT_NE(modCell, noCell);
-  EXPECT_EQ(core->arena().textOf(modCell), "std:geometry");
+  ASSERT_TRUE(modCell);
+  EXPECT_EQ(core->arena().textOf(*modCell), "std:geometry");
 
   // Symbol should be linked along +d.vars off module cell
-  CellRef symCell = core->arena().linked(modCell, core->dims().vars, false);
-  ASSERT_NE(symCell, noCell);
-  EXPECT_EQ(core->arena().textOf(symCell), "calculate_area");
+  const auto symCell = core->arena().linked(*modCell, core->dims().vars, false);
+  ASSERT_TRUE(symCell);
+  EXPECT_EQ(core->arena().textOf(*symCell), "calculate_area");
 
   // Symbol's +d.values should point to entryOpcode
-  CellRef fnEntry = core->arena().linked(symCell, core->dims().values, false);
+  const auto fnEntry =
+      core->arena().linked(*symCell, core->dims().values, false);
   EXPECT_EQ(fnEntry, result.entryOpcode);
 
   // Last instruction should be Return
-  CellRef lastOp = noCell;
-  CellRef cur    = result.entryOpcode;
-  while (cur != noCell) {
-    lastOp = cur;
-    cur    = core->arena().linked(cur, core->dims().spin, false);
+  CellRef lastOp = *result.entryOpcode;
+  auto cur       = core->arena().linked(lastOp, core->dims().spin, false);
+  while (cur) {
+    lastOp = *cur;
+    cur    = core->arena().linked(*cur, core->dims().spin, false);
   }
-  ASSERT_NE(lastOp, noCell);
   auto kind = vm->getOpcodeKind(lastOp);
   ASSERT_TRUE(kind.has_value());
   EXPECT_EQ(*kind, OpcodeKind::Return);
@@ -142,7 +161,8 @@ TEST_F(VQLCompilerTest, DisassemblyFormatting) {
   auto result = compiler.compile("##/d.step");
   ASSERT_TRUE(result.success);
 
-  std::string dis = compiler.disassemble(result.entryOpcode);
+  ASSERT_TRUE(result.entryOpcode);
+  std::string dis = compiler.disassemble(*result.entryOpcode);
   EXPECT_FALSE(dis.empty());
   EXPECT_NE(dis.find("#LINK"), std::string::npos);
   EXPECT_NE(dis.find("#HALT"), std::string::npos);
@@ -165,7 +185,7 @@ TEST_F(VQLCompilerTest, ExportToStorePersistence) {
 
   MicroversionId ver = compiler.exportToStore(store);
   EXPECT_FALSE(ver.isZero());
-  EXPECT_NE(store.homeCell(), noCell);
+  EXPECT_TRUE(store.homeCell().has_value());
 
   // Save to temporary directory and verify reloading
   std::string tempDir =
@@ -180,7 +200,7 @@ TEST_F(VQLCompilerTest, ExportToStorePersistence) {
 
   Store reloaded(permascroll);
   EXPECT_NO_THROW(reloaded.load(tempDir));
-  EXPECT_EQ(reloaded.homeCell(), store.homeCell());
+  EXPECT_EQ(reloaded.homeCell().value(), store.homeCell().value());
 
   std::filesystem::remove_all(tempDir);
 }

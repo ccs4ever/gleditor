@@ -294,7 +294,7 @@ void WorldPanel::describe(a11y::Builder &into, const glm::mat4 &canvasToClip,
           projected(child.id, canvasToClip, viewport))
         node.children.push_back(into.id(child.id));
     const auto *box = scene_->layout.find(visual.id);
-    if (box && box->parentId == 0) into.contribute(into.id(visual.id));
+    if (box && !box->parentId) into.contribute(into.id(visual.id));
   }
 }
 } // namespace gleditor::ui

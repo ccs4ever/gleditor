@@ -22,6 +22,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <optional>
 #include <stdexcept>
 
 #ifdef GLEDITOR_HAVE_DECODE_INDEX_ZLIB
@@ -598,19 +599,22 @@ DecodeIndex buildAvIndex(std::span<const std::uint8_t> bytes,
     return result;
   }
 
-  int streamIndex = -1;
+  std::optional<int> streamIndex;
   for (unsigned i = 0; i < handle->fmt->nb_streams; ++i) {
     if (mediaType == handle->fmt->streams[i]->codecpar->codec_type) {
       streamIndex = static_cast<int>(i);
       break;
     }
   }
-  if (streamIndex < 0) {
+  if (!streamIndex) {
     return result;
   }
   result.seekable = true;
 
-  auto *const stream = handle->fmt->streams[streamIndex];
+  auto *const stream = handle->fmt->streams[*streamIndex];
+  if (stream->nb_frames > 0) {
+    result.uncompressedExtent = static_cast<std::uint64_t>(stream->nb_frames);
+  }
   for (int i = 0;; ++i) {
     const auto *const entry = avformat_index_get_entry(stream, i);
     if (nullptr == entry) {
@@ -620,8 +624,7 @@ DecodeIndex buildAvIndex(std::span<const std::uint8_t> bytes,
         .uncompressedPosition = static_cast<std::uint64_t>(entry->timestamp),
         .compressedByteOffset = static_cast<std::uint64_t>(entry->pos)});
   }
-  result.durableIndex       = !result.seekPoints.empty();
-  result.uncompressedExtent = result.seekPoints.size();
+  result.durableIndex = !result.seekPoints.empty();
   return result;
 }
 
@@ -709,6 +712,7 @@ DecodeIndex buildZstdIndex(const std::span<const std::uint8_t> bytes) {
   }
 
   const unsigned frameCount = ZSTD_seekable_getNumFrames(handle.zs);
+  result.uncompressedExtent = 0;
   result.seekPoints.reserve(frameCount);
   for (unsigned i = 0; i < frameCount; ++i) {
     result.seekPoints.push_back(
@@ -986,7 +990,9 @@ DecodeIndex buildFlacIndex(const std::span<const std::uint8_t> bytes) {
   if (!decoder.process_until_end_of_metadata() || !decoder.sawStreamInfo) {
     return result;
   }
-  result.uncompressedExtent = decoder.totalSamples;
+  if (decoder.totalSamples > 0) {
+    result.uncompressedExtent = decoder.totalSamples;
+  }
 
   // FLAC's own SeekPoint::stream_offset is relative to the start of the
   // first audio frame, not the file -- get_decode_position() right after

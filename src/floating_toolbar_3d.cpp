@@ -20,6 +20,15 @@
 namespace gleditor {
 namespace {
 constexpr std::uint32_t toolbarNode = 0x5000U;
+
+// Fractional padding can round both painted edges inward by a pixel.
+constexpr float kFractionalEdgeSafetyPx = 2.0F;
+// Keep the control group inset even when the display is unusually narrow.
+constexpr float kMaximumOuterPaddingViewportShare = 0.1F;
+constexpr float kMinimumToolbarStrokePx           = 1.0F;
+// Draw controls slightly translucent so the page remains visible around them.
+constexpr float kToolbarCanvasOpacity = 0.96F;
+
 bool knownButton(FloatingToolbar3D::ButtonId id) {
   using Id = FloatingToolbar3D::ButtonId;
   switch (id) {
@@ -208,8 +217,10 @@ FloatingToolbar3D::prepareLayoutLocked(const ui::UiMetrics &aMetrics,
     const auto &label = shaping.fitted(def.label, font, {});
     // Rounded box edges can lose a pixel at either side of fractional padding.
     const ui::Size size{
-        std::ceil(std::max(touch, label.widthPx + padding * 2)) + 2,
-        std::ceil(std::max(touch, line + padding * 2)) + 2};
+        std::ceil(std::max(touch, label.widthPx + padding * 2)) +
+            kFractionalEdgeSafetyPx,
+        std::ceil(std::max(touch, line + padding * 2)) +
+            kFractionalEdgeSafetyPx};
     items.push_back({.id        = static_cast<std::uint32_t>(def.id),
                      .intrinsic = size,
                      .focusable = true,
@@ -218,7 +229,8 @@ FloatingToolbar3D::prepareLayoutLocked(const ui::UiMetrics &aMetrics,
   }
   const auto barWidth = std::min(intrinsicWidth, safe.width);
   const auto outerPadding =
-      std::min({padding, safe.width * .1F, safe.height * .1F});
+      std::min({padding, safe.width * kMaximumOuterPaddingViewportShare,
+                safe.height * kMaximumOuterPaddingViewportShare});
   const ui::Rect initial{safe.left + (safe.width - barWidth) * .5F, safe.bottom,
                          barWidth, safe.height};
   const auto inset = [&](ui::Rect rect) {
@@ -248,8 +260,10 @@ FloatingToolbar3D::prepareLayoutLocked(const ui::UiMetrics &aMetrics,
   // padding gives way before the label's own line height.
   for (auto &item : items) {
     item.intrinsic.height = std::min(item.intrinsic.height, rowBudget);
-    item.paddingPx        = std::min(
-        padding, std::max(0.0F, (item.intrinsic.height - line - 2) * .5F));
+    item.paddingPx =
+        std::min(padding, std::max(0.0F, (item.intrinsic.height - line -
+                                          kFractionalEdgeSafetyPx) *
+                                             .5F));
   }
   const auto measured =
       ui::flow(inset(initial), items,
@@ -376,7 +390,7 @@ void FloatingToolbar3D::drawFrame(FrameContext &ctx) {
     const auto &bar    = layout->bounds;
     canvas->setTag(render::tagKindOverlay, 0);
     canvas->addRect(bar.left, bar.bottom, bar.width, bar.height, surface);
-    const auto stroke = std::max(1.0F, metrics.px(1));
+    const auto stroke = std::max(kMinimumToolbarStrokePx, metrics.px(1));
     canvas->addRect(bar.left, bar.bottom + bar.height - stroke, bar.width,
                     stroke, accent);
     for (const auto &button : currentButtons) {
@@ -407,7 +421,7 @@ void FloatingToolbar3D::drawFrame(FrameContext &ctx) {
   const auto projection =
       glm::ortho(0.0F, static_cast<float>(ctx.screenWidth), 0.0F,
                  static_cast<float>(ctx.screenHeight), -1.0F, 1.0F);
-  canvas->draw(ctx.state, projection, 0.96F);
+  canvas->draw(ctx.state, projection, kToolbarCanvasOpacity);
 }
 
 bool FloatingToolbar3D::picked(const render::PickingResult &pick,
@@ -420,12 +434,11 @@ bool FloatingToolbar3D::picked(const render::PickingResult &pick,
     if (!visible || !presentationAvailable ||
         pick.tag.kind != render::tagKindOverlay)
       return false;
-    if (pick.requestId != 0 &&
-        (pickScope == 0 || pick.tag.docIndex != pickScope ||
-         pick.tag.pageIndex != 0))
+    if (pick.requestId && (pickScope == 0 || pick.tag.docIndex != pickScope ||
+                           pick.tag.pageIndex != 0))
       return false;
     id = static_cast<ButtonId>(pick.tag.clusterIndex);
-    if (pick.requestId != 0) {
+    if (pick.requestId) {
       if (!pick.overlayWidgetId || builtPickContext != pickContextRevision)
         return true;
       const auto found            = pickingButtons.find(*pick.overlayWidgetId);

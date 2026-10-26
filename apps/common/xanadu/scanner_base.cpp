@@ -14,7 +14,7 @@ ScannedString ScannerBase::scanQuotedString(char quoteChar) {
   std::string value;
 
   while (pos_ < source_.size()) {
-    char c = advanceChar();
+    char c = advanceChar().value();
     if (c == quoteChar) {
       return ScannedString{.success = true,
                            .value   = std::move(value),
@@ -25,7 +25,7 @@ ScannedString ScannerBase::scanQuotedString(char quoteChar) {
       if (pos_ >= source_.size()) {
         break;
       }
-      char esc = advanceChar();
+      char esc = advanceChar().value();
       switch (esc) {
       case '"':
         value += '"';
@@ -69,25 +69,23 @@ ScannedString ScannerBase::scanQuotedString(char quoteChar) {
                        .errorMessage = "Unterminated string literal"};
 }
 
-ScannedNumber ScannerBase::scanNumberLiteral(bool leadingMinus,
-                                             bool leadingPlus) {
+std::expected<ScannedNumber, std::string>
+ScannerBase::scanNumberLiteral(bool leadingMinus, bool leadingPlus) {
   std::size_t startPos = pos_;
   if (leadingMinus || leadingPlus) {
+    if (pos_ == 0) return std::unexpected("numeric sign was not consumed");
     startPos = pos_ - 1;
   }
 
   bool isFloat = false;
-  while (pos_ < source_.size() &&
-         std::isdigit(static_cast<unsigned char>(peekChar()))) {
+  while (pos_ < source_.size() && peekIsDigit()) {
     advanceChar();
   }
 
-  if (peekChar() == '.' &&
-      std::isdigit(static_cast<unsigned char>(peekChar(1)))) {
+  if (peekChar() == '.' && peekIsDigit(1)) {
     isFloat = true;
     advanceChar(); // consume '.'
-    while (pos_ < source_.size() &&
-           std::isdigit(static_cast<unsigned char>(peekChar()))) {
+    while (pos_ < source_.size() && peekIsDigit()) {
       advanceChar();
     }
   }
@@ -99,29 +97,34 @@ ScannedNumber ScannerBase::scanNumberLiteral(bool leadingMinus,
     if (peekChar() == '+' || peekChar() == '-') {
       advanceChar();
     }
-    while (pos_ < source_.size() &&
-           std::isdigit(static_cast<unsigned char>(peekChar()))) {
+    while (pos_ < source_.size() && peekIsDigit()) {
       advanceChar();
     }
   }
 
   std::string_view numText = source_.substr(startPos, pos_ - startPos);
 
+  auto parsed = numText;
+  if (parsed.starts_with('+')) parsed.remove_prefix(1);
+  if (parsed.empty()) return std::unexpected("expected numeric literal");
+  const auto *const begin = parsed.data();
+  const auto *const end   = begin + parsed.size();
   if (isFloat) {
-    double val = 0.0;
-    try {
-      val = std::stod(std::string(numText));
-    } catch (...) {
-      val = 0.0;
-    }
-    return ScannedNumber{
-        .isFloat = true, .intValue = 0, .floatValue = val, .text = numText};
+    double value{};
+    const auto result = std::from_chars(begin, end, value);
+    if (result.ec == std::errc::result_out_of_range || !std::isfinite(value))
+      return std::unexpected("floating literal is out of range");
+    if (result.ec != std::errc{} || result.ptr != end)
+      return std::unexpected("invalid floating literal");
+    return ScannedNumber{.isFloat = true, .floatValue = value, .text = numText};
   }
-
-  std::int64_t intVal = 0;
-  std::from_chars(numText.data(), numText.data() + numText.size(), intVal);
-  return ScannedNumber{
-      .isFloat = false, .intValue = intVal, .floatValue = 0.0, .text = numText};
+  std::int64_t value{};
+  const auto result = std::from_chars(begin, end, value);
+  if (result.ec == std::errc::result_out_of_range)
+    return std::unexpected("integer literal is out of range");
+  if (result.ec != std::errc{} || result.ptr != end)
+    return std::unexpected("invalid integer literal");
+  return ScannedNumber{.intValue = value, .text = numText};
 }
 
 } // namespace xanadu

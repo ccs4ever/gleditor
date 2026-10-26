@@ -59,11 +59,11 @@ struct TestStore {
 
   zigzag::CellRef makeCell(const std::string_view text) {
     head = store->makeCell(head, text);
-    return store->cellRefOf(head);
+    return store->cellRefOf(head).value();
   }
 
   MicroversionId versionOf(const zigzag::CellRef cell) const {
-    return store->segmentedOps().idOf(cell);
+    return store->segmentedOps().idOf(cell).value();
   }
 
   zigzag::CellRef makeExternPlaceholder(const std::string &targetScroll,
@@ -78,7 +78,7 @@ struct TestStore {
     head          = store->makeExternRef(head, ext);
     fold          = store->rebuildManifold(head);
     const auto ph = fold.scrollRegistry(*store).placeholderForExtern(ext);
-    return ph.value_or(zigzag::noCell);
+    return ph.value();
   }
 
   zigzag::CellRef makeExternPlaceholder(const TestStore &target,
@@ -86,6 +86,33 @@ struct TestStore {
     return makeExternPlaceholder(target.scrollKey, target.versionOf(cell));
   }
 };
+
+TEST(OverlayTest, malformedClaimKeepsMissingEndpointsExplicit) {
+  TestStore overlay("btpk:curator:malformed");
+  const auto release = overlay.makeCell("release");
+  const auto target  = overlay.makeCell("not a link operation");
+  const auto claims  = overlay.makeDim(kDimOverlayClaims);
+  overlay.head       = overlay.store->makeOpHandle(overlay.head, target);
+  const auto handle  = overlay.store->cellRefOf(overlay.head).value();
+  overlay.head       = overlay.store->setLink(overlay.head, release, claims,
+                                              zigzag::DimVector::POS, handle);
+
+  OverlayComposition composition;
+  composition
+      .withOverlay(OverlayAttachment{
+          .store          = overlay.store.get(),
+          .publicationKey = overlay.scrollKey,
+          .releaseCell    = release,
+      })
+      .compose();
+  ASSERT_EQ(composition.allCandidates().size(), 1U);
+  const auto &candidate = composition.allCandidates().front();
+  EXPECT_EQ(candidate.state, OverlayClaimState::Unintelligible);
+  EXPECT_FALSE(candidate.from);
+  EXPECT_FALSE(candidate.dimension);
+  EXPECT_EQ(candidate.claimOpIndex, target);
+  EXPECT_FALSE(candidate.claimVersion);
+}
 
 // 1. anOverlayWritesOnlyItsOwnStore
 TEST(OverlayTest, anOverlayWritesOnlyItsOwnStore) {
@@ -106,10 +133,10 @@ TEST(OverlayTest, anOverlayWritesOnlyItsOwnStore) {
   const auto localB = overlay.makeCell("Local Note");
   const auto dimAlt = overlay.makeDim("d.alternate");
 
-  const auto claimRes = authorOverlayClaim(*overlay.store, overlay.head, phA1,
-                                           dimAlt, zigzag::DimVector::POS,
-                                           localB, zigzag::noCell, "claim");
-  overlay.head        = claimRes.version;
+  const auto claimRes =
+      authorOverlayClaim(*overlay.store, overlay.head, phA1, dimAlt,
+                         zigzag::DimVector::POS, localB, std::nullopt, "claim");
+  overlay.head = claimRes.version;
 
   // Target store is completely unchanged: one-writer rule
   EXPECT_EQ(target.store->segmentedOps().size(), targetOpCountBefore);
@@ -176,7 +203,7 @@ TEST(OverlayTest, anExplicitBreakSurvivesTheFold) {
   overlay.head = overlay.store->setLink(overlay.head, c1, dim1,
                                         zigzag::DimVector::POS, c2);
 
-  // Author an explicit break: to == noCell
+  // Author an explicit break with an absent target.
   const auto breakRes = authorOverlayBreak(*overlay.store, overlay.head, c1,
                                            dim1, zigzag::DimVector::POS);
   overlay.head        = breakRes.version;
@@ -184,7 +211,7 @@ TEST(OverlayTest, anExplicitBreakSurvivesTheFold) {
   const auto fold = overlay.store->rebuildManifold(overlay.head);
 
   // Folded manifold slot is empty (noCell)
-  EXPECT_EQ(fold.linked(c1, dim1, zigzag::DimVector::POS), zigzag::noCell);
+  EXPECT_FALSE(fold.linked(c1, dim1, zigzag::DimVector::POS));
 
   // But the break survives via the operation handle on d.overlay-claims
   const auto dimClaimsOpt =
@@ -306,13 +333,14 @@ TEST(OverlayTest, anOverlayMayAlignTwoTargetStores) {
 
   const auto pEn = comp.view().findExistingProxy(1, cEnglish);
   const auto pFr = comp.view().findExistingProxy(2, cFrench);
-  ASSERT_NE(pEn, zigzag::noCell);
-  ASSERT_NE(pFr, zigzag::noCell);
+  ASSERT_TRUE(pEn);
+  ASSERT_TRUE(pFr);
 
-  const auto dimArenaTr = comp.allCandidates().front().dimension;
+  ASSERT_TRUE(comp.allCandidates().front().dimension);
+  const auto dimArenaTr = *comp.allCandidates().front().dimension;
 
-  EXPECT_EQ(comp.effectiveLink(pEn, dimArenaTr, zigzag::DimVector::POS), pFr);
-  EXPECT_EQ(comp.effectiveLink(pFr, dimArenaTr, zigzag::DimVector::NEG), pEn);
+  EXPECT_EQ(comp.effectiveLink(*pEn, dimArenaTr, zigzag::DimVector::POS), *pFr);
+  EXPECT_EQ(comp.effectiveLink(*pFr, dimArenaTr, zigzag::DimVector::NEG), *pEn);
 }
 
 // 6. intrinsicStructureOutranksEveryOverlay
@@ -390,12 +418,15 @@ TEST(OverlayTest, intrinsicStructureOutranksEveryOverlay) {
   const auto pA     = comp.view().findExistingProxy(1, cA);
   const auto pB     = comp.view().findExistingProxy(1, cB);
   const auto dArena = comp.view().arenaDimFor(1, dimD1);
+  ASSERT_TRUE(pA);
+  ASSERT_TRUE(pB);
+  ASSERT_TRUE(dArena);
 
   // Intrinsic target link remains effective!
-  EXPECT_EQ(comp.effectiveLink(pA, dArena, zigzag::DimVector::POS), pB);
+  EXPECT_EQ(comp.effectiveLink(*pA, *dArena, zigzag::DimVector::POS), *pB);
 
   // All 3 alternative claims are inspectable and marked Shadowed
-  const auto cands = comp.candidates(pA, dArena, zigzag::DimVector::POS);
+  const auto cands = comp.candidates(*pA, *dArena, zigzag::DimVector::POS);
   EXPECT_GE(cands.size(), 3u);
   for (const auto &c : cands) {
     EXPECT_EQ(c.state, OverlayClaimState::Shadowed);
@@ -450,18 +481,22 @@ TEST(OverlayTest, aHigherTierBreakSuppressesOnlyLowerOverlayClaims) {
       .withCurators({curatorKey})
       .compose();
 
-  const auto pA     = comp.view().findExistingProxy(1, cA);
-  const auto dArena = comp.allCandidates().front().dimension;
+  const auto pA = comp.view().findExistingProxy(1, cA);
+  ASSERT_TRUE(pA);
+  ASSERT_TRUE(comp.allCandidates().front().dimension);
+  const auto dArena = *comp.allCandidates().front().dimension;
 
   // The break won: slot is empty
-  EXPECT_EQ(comp.effectiveLink(pA, dArena, zigzag::DimVector::POS),
+  EXPECT_EQ(comp.effectiveLink(*pA, dArena, zigzag::DimVector::POS),
             std::nullopt);
 
   // The public positive claim was shadowed
-  const auto cands = comp.candidates(pA, dArena, zigzag::DimVector::POS);
+  const auto cands = comp.candidates(*pA, dArena, zigzag::DimVector::POS);
   ASSERT_EQ(cands.size(), 2u);
   EXPECT_EQ(cands[0].tier, ProminenceTier::Curated);
   EXPECT_EQ(cands[0].state, OverlayClaimState::Applied);
+  EXPECT_TRUE(cands[0].isBreak());
+  EXPECT_FALSE(cands[0].to);
   EXPECT_EQ(cands[1].tier, ProminenceTier::Public);
   EXPECT_EQ(cands[1].state, OverlayClaimState::Shadowed);
 }
@@ -513,19 +548,23 @@ TEST(OverlayTest, reciprocalSlotConflictsAreResolvedBeforeMaterialisation) {
       })
       .compose();
 
-  const auto pA     = comp.view().findExistingProxy(1, cA);
-  const auto pB     = comp.view().findExistingProxy(1, cB);
-  const auto pC     = comp.view().findExistingProxy(1, cC);
-  const auto dArena = comp.allCandidates().front().dimension;
+  const auto pA = comp.view().findExistingProxy(1, cA);
+  const auto pB = comp.view().findExistingProxy(1, cB);
+  const auto pC = comp.view().findExistingProxy(1, cC);
+  ASSERT_TRUE(pA);
+  ASSERT_TRUE(pB);
+  ASSERT_TRUE(pC);
+  ASSERT_TRUE(comp.allCandidates().front().dimension);
+  const auto dArena = *comp.allCandidates().front().dimension;
 
   // Ov1 won and was applied symmetrically
-  EXPECT_EQ(comp.effectiveLink(pA, dArena, zigzag::DimVector::POS), pB);
-  EXPECT_EQ(comp.effectiveLink(pB, dArena, zigzag::DimVector::NEG), pA);
+  EXPECT_EQ(comp.effectiveLink(*pA, dArena, zigzag::DimVector::POS), *pB);
+  EXPECT_EQ(comp.effectiveLink(*pB, dArena, zigzag::DimVector::NEG), *pA);
 
   // Ov2 had a slot conflict on B's negative slot
-  EXPECT_EQ(comp.effectiveLink(pC, dArena, zigzag::DimVector::POS),
+  EXPECT_EQ(comp.effectiveLink(*pC, dArena, zigzag::DimVector::POS),
             std::nullopt);
-  const auto candsC = comp.candidates(pC, dArena, zigzag::DimVector::POS);
+  const auto candsC = comp.candidates(*pC, dArena, zigzag::DimVector::POS);
   ASSERT_FALSE(candsC.empty());
   EXPECT_EQ(candsC.front().state, OverlayClaimState::SlotConflict);
 }
@@ -594,15 +633,21 @@ TEST(OverlayTest, networkArrivalOrderDoesNotChangeTheView) {
   const auto pB1 = comp1.view().findExistingProxy(1, cB);
   const auto pA2 = comp2.view().findExistingProxy(1, cA);
   const auto pB2 = comp2.view().findExistingProxy(1, cB);
+  ASSERT_TRUE(pA1);
+  ASSERT_TRUE(pB1);
+  ASSERT_TRUE(pA2);
+  ASSERT_TRUE(pB2);
 
-  const auto dArena1 = comp1.allCandidates().front().dimension;
-  const auto dArena2 = comp2.allCandidates().front().dimension;
+  ASSERT_TRUE(comp1.allCandidates().front().dimension);
+  const auto dArena1 = *comp1.allCandidates().front().dimension;
+  ASSERT_TRUE(comp2.allCandidates().front().dimension);
+  const auto dArena2 = *comp2.allCandidates().front().dimension;
 
-  EXPECT_EQ(comp1.effectiveLink(pA1, dArena1, zigzag::DimVector::POS), pB1);
-  EXPECT_EQ(comp2.effectiveLink(pA2, dArena2, zigzag::DimVector::POS), pB2);
+  EXPECT_EQ(comp1.effectiveLink(*pA1, dArena1, zigzag::DimVector::POS), *pB1);
+  EXPECT_EQ(comp2.effectiveLink(*pA2, dArena2, zigzag::DimVector::POS), *pB2);
 
-  const auto cands1 = comp1.candidates(pA1, dArena1, zigzag::DimVector::POS);
-  const auto cands2 = comp2.candidates(pA2, dArena2, zigzag::DimVector::POS);
+  const auto cands1 = comp1.candidates(*pA1, dArena1, zigzag::DimVector::POS);
+  const auto cands2 = comp2.candidates(*pA2, dArena2, zigzag::DimVector::POS);
   ASSERT_EQ(cands1.size(), cands2.size());
   for (std::size_t i = 0; i < cands1.size(); ++i) {
     EXPECT_EQ(cands1[i].state, cands2[i].state);
@@ -688,9 +733,14 @@ TEST(OverlayTest, aPrivateDimensionDoesNotBindBySpelling) {
 
   // The arena dimensions for target's "supports" and overlay's "supports" stay
   // distinct
-  const auto arenaDimTarget  = comp.view().arenaDimFor(1, dimTargetSupports);
-  const auto arenaDimOverlay = comp.allCandidates().front().dimension;
-  EXPECT_NE(arenaDimTarget, arenaDimOverlay);
+  const auto arenaDimTarget = comp.view().arenaDimFor(1, dimTargetSupports);
+  ASSERT_TRUE(comp.allCandidates().front().dimension);
+  const auto arenaDimOverlay = *comp.allCandidates().front().dimension;
+  // An unused private target dimension can remain unmaterialized. A mapped
+  // overlay dimension must not acquire a target binding just from its name.
+  EXPECT_TRUE(comp.view().contains(arenaDimOverlay));
+  EXPECT_FALSE(comp.view().dimIn(1, arenaDimOverlay));
+  if (arenaDimTarget) EXPECT_NE(*arenaDimTarget, arenaDimOverlay);
 }
 
 // 12. anOverlayPinsAndRebasesAsTwoReleases
@@ -742,18 +792,18 @@ TEST(OverlayTest, anOverlayPinsAndRebasesAsTwoReleases) {
   // Old releaseCell still points to target v1
   const auto t1Cell = foldAfterRebase.linked(rel1.releaseCell, dimTargets,
                                              zigzag::DimVector::POS);
-  ASSERT_NE(t1Cell, zigzag::noCell);
+  ASSERT_TRUE(t1Cell);
   const auto state1 =
-      readGlobalDocumentState(foldAfterRebase.textOf(t1Cell, *overlay.store));
+      readGlobalDocumentState(foldAfterRebase.textOf(*t1Cell, *overlay.store));
   ASSERT_TRUE(state1.has_value());
   EXPECT_EQ(state1->version, v1);
 
   // New releaseCell points to target v2
   const auto t2Cell = foldAfterRebase.linked(
       rebaseRes.newReleaseCell, dimTargets, zigzag::DimVector::POS);
-  ASSERT_NE(t2Cell, zigzag::noCell);
+  ASSERT_TRUE(t2Cell);
   const auto state2 =
-      readGlobalDocumentState(foldAfterRebase.textOf(t2Cell, *overlay.store));
+      readGlobalDocumentState(foldAfterRebase.textOf(*t2Cell, *overlay.store));
   ASSERT_TRUE(state2.has_value());
   EXPECT_EQ(state2->version, v2);
 }

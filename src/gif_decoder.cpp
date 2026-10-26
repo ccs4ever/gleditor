@@ -15,8 +15,6 @@
 
 namespace gleditor {
 
-const GifFrame GifDecoder::emptyFrame_{};
-
 bool GifDecoder::isAnimated(const std::span<const std::uint8_t> bytes) {
   return isAnimatedGif(bytes);
 }
@@ -167,10 +165,9 @@ GifDecoder::decode(std::span<const std::uint8_t> /*bytes*/) {
 
 #endif // GLEDITOR_HAVE_DECODE_INDEX_GIF
 
-const GifFrame &GifDecoder::frameAt(const float seconds) const noexcept {
-  if (frames_.empty()) {
-    return emptyFrame_;
-  }
+cpp26::optional<const GifFrame &>
+GifDecoder::frameAt(const float seconds) const noexcept {
+  if (frames_.empty()) return std::nullopt;
   if (seconds <= 0.0F) {
     return frames_.front();
   }
@@ -185,11 +182,12 @@ const GifFrame &GifDecoder::frameAt(const float seconds) const noexcept {
   return showing == frames_.end() ? frames_.back() : *showing;
 }
 
-const GifFrame &GifDecoder::frame(const std::size_t index) const noexcept {
+cpp26::optional<const GifFrame &>
+GifDecoder::frame(const std::size_t index) const noexcept {
   if (index < frames_.size()) {
     return frames_[index];
   }
-  return emptyFrame_;
+  return std::nullopt;
 }
 
 } // namespace gleditor

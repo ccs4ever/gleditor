@@ -144,3 +144,14 @@ TEST(RankfiladeTest, LargeScaleDescentAndAscent100k) {
 }
 
 } // namespace
+
+TEST(RankfiladeParentTest, ParentZeroIsDistinctFromAnAbsentParent) {
+  using Crum = gleditor::enfilade::CrumNode<RankDsp, RankWid, 8>;
+  Crum root;
+  EXPECT_FALSE(root.parentIndex);
+  Crum child;
+  child.parentIndex = 0;
+  ASSERT_TRUE(child.parentIndex);
+  EXPECT_EQ(*child.parentIndex, 0U);
+  static_assert(sizeof(Crum) == 128);
+}

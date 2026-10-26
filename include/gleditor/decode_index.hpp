@@ -112,10 +112,9 @@ struct SeekPoint {
  */
 struct DecodeIndex {
   DecodeIndexFormat format{DecodeIndexFormat::Unsupported};
-  /// Total extent in the canonical coordinate: rows for PNG/JPEG, decoded
-  /// frames for video, decoded MP3 frames for Mp3. Zero when unknown or
-  /// unsupported.
-  std::uint64_t uncompressedExtent{};
+  /// Total extent in the canonical coordinate when the format exposes it:
+  /// rows for images, decoded frames for video, decoded MP3 frames for Mp3.
+  std::optional<std::uint64_t> uncompressedExtent;
   /// Durable seek points, if any -- see the type's own comment for what an
   /// empty vector does and does not imply.
   std::vector<SeekPoint> seekPoints;

@@ -1,0 +1,11 @@
+event Attempt
+event Notice
+
+agent HandlerFailure {
+  var count: Int := 0
+  on Attempt {
+    count := count + 1
+    emit Notice{}
+    fail
+  }
+}

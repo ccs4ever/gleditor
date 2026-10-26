@@ -19,6 +19,12 @@ template <class... Values> void requireFinite(Values... values) {
   }
 }
 
+void requireFinite(const std::optional<float> value) {
+  if (value && !std::isfinite(*value)) {
+    throw std::invalid_argument("ShapingCache constraints must be finite");
+  }
+}
+
 struct ShapingKey {
   std::string text;
   FontFacePtr font;
@@ -62,17 +68,30 @@ struct ShapingKeyHash {
     mix(key.font.get());
     mix(key.fitting);
     if (key.fitting) {
-      mix(key.constraints.maxWidthPx);
-      mix(key.constraints.maxHeightPx);
-      mix(key.constraints.maxLines);
+      mix(key.constraints.maxWidthPx.has_value());
+      if (key.constraints.maxWidthPx) {
+        mix(*key.constraints.maxWidthPx);
+      }
+      mix(key.constraints.maxHeightPx.has_value());
+      if (key.constraints.maxHeightPx) {
+        mix(*key.constraints.maxHeightPx);
+      }
+      mix(key.constraints.maxLines.has_value());
+      if (key.constraints.maxLines) mix(*key.constraints.maxLines);
       mixEnum(key.constraints.overflow);
       mixEnum(key.constraints.at);
       mixEnum(key.constraints.align);
       return hash;
     }
     const auto &options = key.options;
-    mix(options.maxWidthPx);
-    mix(options.maxHeightPx);
+    mix(options.maxWidthPx.has_value());
+    if (options.maxWidthPx) {
+      mix(*options.maxWidthPx);
+    }
+    mix(options.maxHeightPx.has_value());
+    if (options.maxHeightPx) {
+      mix(*options.maxHeightPx);
+    }
     mix(options.singleParagraph);
     mix(options.ellipsize);
     for (const auto &range : options.decoratedRanges) {
@@ -163,8 +182,10 @@ ShapingCache &ShapingCache::operator=(ShapingCache &&) noexcept = default;
 const PageShaping &ShapingCache::page(const std::string_view text,
                                       const FontFacePtr &font,
                                       const LayoutOptions &options) {
-  requireFinite(options.maxWidthPx, options.maxHeightPx, options.page.widthPx,
-                options.page.heightPx, options.page.marginPx);
+  requireFinite(options.maxWidthPx);
+  requireFinite(options.maxHeightPx);
+  requireFinite(options.page.widthPx, options.page.heightPx,
+                options.page.marginPx);
   for (const auto &box : options.boxes) {
     requireFinite(box.widthPx, box.heightPx, box.marginPx,
                   box.baselineOffsetPx);
@@ -180,7 +201,8 @@ const PageShaping &ShapingCache::page(const std::string_view text,
 const FittedText &ShapingCache::fitted(const std::string_view text,
                                        const FontFacePtr &font,
                                        const TextFit &constraints) {
-  requireFinite(constraints.maxWidthPx, constraints.maxHeightPx);
+  requireFinite(constraints.maxWidthPx);
+  requireFinite(constraints.maxHeightPx);
   return std::get<FittedText>(
       impl_->get(ShapingKey{.text        = std::string(text),
                             .font        = font,

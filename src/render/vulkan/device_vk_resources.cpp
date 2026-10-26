@@ -11,6 +11,7 @@
 #include <cstring>
 #include <format>
 #include <fstream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -19,6 +20,11 @@
 namespace render::vulkan {
 
 namespace {
+
+template <typename Map, typename Resource>
+auto findResource(Map &map, const Resource &resource) {
+  return resource.id ? map.find(*resource.id) : map.end();
+}
 
 void check(const VkResult result, const char *what) {
   if (VK_SUCCESS != result) {
@@ -76,6 +82,19 @@ VkFormat attributeFormat(const AttributeType type, const int components) {
 }
 
 } // namespace
+
+std::uint32_t DeviceVK::allocateHandleId() {
+  if (!nextHandleId) {
+    throw std::overflow_error("DeviceVK: resource handle IDs exhausted");
+  }
+  const auto id = *nextHandleId;
+  if (id == std::numeric_limits<std::uint32_t>::max()) {
+    nextHandleId.reset();
+  } else {
+    ++*nextHandleId;
+  }
+  return id;
+}
 
 // -- memory and buffers -------------------------------------------------------
 
@@ -156,6 +175,7 @@ void DeviceVK::retireBuffer(BufferRecord &record) {
 
 BufferHandle DeviceVK::createBuffer(const BufferKind kind,
                                     const std::size_t bytes) {
+  const auto id = allocateHandleId();
   // Host-visible coherent memory keeps updates to a memcpy. The data here is
   // rewritten as documents load rather than being static, so the staging copy a
   // device-local buffer would need buys nothing.
@@ -164,13 +184,13 @@ BufferHandle DeviceVK::createBuffer(const BufferKind kind,
                      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
-  const BufferHandle handle{nextHandleId++};
-  buffers.emplace(handle.id, record);
+  const BufferHandle handle{.id = id};
+  buffers.emplace(id, record);
   return handle;
 }
 
 void DeviceVK::destroyBuffer(const BufferHandle buffer) {
-  const auto it = buffers.find(buffer.id);
+  const auto it = findResource(buffers, buffer);
   if (buffers.end() == it) {
     return;
   }
@@ -181,7 +201,7 @@ void DeviceVK::destroyBuffer(const BufferHandle buffer) {
 
 void DeviceVK::updateBuffer(const BufferHandle buffer, const std::size_t offset,
                             const std::span<const std::byte> data) {
-  const auto it = buffers.find(buffer.id);
+  const auto it = findResource(buffers, buffer);
   if (buffers.end() == it) {
     throw std::invalid_argument("DeviceVK::updateBuffer: unknown buffer");
   }
@@ -200,7 +220,7 @@ void DeviceVK::copyBufferRange(const BufferHandle buffer,
                                const std::size_t srcOffset,
                                const std::size_t dstOffset,
                                const std::size_t bytes) {
-  const auto it = buffers.find(buffer.id);
+  const auto it = findResource(buffers, buffer);
   if (buffers.end() == it) {
     throw std::invalid_argument("DeviceVK::copyBufferRange: unknown buffer");
   }
@@ -221,7 +241,7 @@ void DeviceVK::copyBufferRange(const BufferHandle buffer,
 
 BufferHandle DeviceVK::resizeBuffer(const BufferHandle buffer,
                                     const std::size_t bytes) {
-  const auto it = buffers.find(buffer.id);
+  const auto it = findResource(buffers, buffer);
   if (buffers.end() == it) {
     throw std::invalid_argument("DeviceVK::resizeBuffer: unknown buffer");
   }
@@ -290,6 +310,7 @@ void DeviceVK::endOneShot(const VkCommandBuffer commands) const {
 TextureHandle DeviceVK::createTextureArray(const int size, const int layers,
                                            const TextureFormat format,
                                            const int levels) {
+  const auto id     = allocateHandleId();
   VkFormat vkFormat = VK_FORMAT_R8_UNORM;
   if (TextureFormat::RGBA8 == format) {
     vkFormat = VK_FORMAT_R8G8B8A8_UNORM;
@@ -364,26 +385,26 @@ TextureHandle DeviceVK::createTextureArray(const int size, const int layers,
   barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
   barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
   barrier.image               = record.image;
-  barrier.subresourceRange = {.aspectMask   = VK_IMAGE_ASPECT_COLOR_BIT,
-                              .baseMipLevel = 0,
-                              .levelCount =
-                                  static_cast<std::uint32_t>(record.levels),
-                              .baseArrayLayer = 0,
-                              .layerCount = static_cast<std::uint32_t>(layers)};
-  barrier.srcAccessMask    = 0;
-  barrier.dstAccessMask    = VK_ACCESS_SHADER_READ_BIT;
+  barrier.subresourceRange    = {.aspectMask   = VK_IMAGE_ASPECT_COLOR_BIT,
+                                 .baseMipLevel = 0,
+                                 .levelCount =
+                                     static_cast<std::uint32_t>(record.levels),
+                                 .baseArrayLayer = 0,
+                                 .layerCount = static_cast<std::uint32_t>(layers)};
+  barrier.srcAccessMask       = 0;
+  barrier.dstAccessMask       = VK_ACCESS_SHADER_READ_BIT;
   vkCmdPipelineBarrier(commands, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
                        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0,
                        nullptr, 1, &barrier);
   endOneShot(commands);
 
-  const TextureHandle handle{nextHandleId++};
-  textures.emplace(handle.id, record);
+  const TextureHandle handle{.id = id};
+  textures.emplace(id, record);
   return handle;
 }
 
 void DeviceVK::generateMipmaps(const TextureHandle texture) {
-  const auto it = textures.find(texture.id);
+  const auto it = findResource(textures, texture);
   if (textures.end() == it || 1 >= it->second.levels) {
     return;
   }
@@ -494,7 +515,7 @@ void DeviceVK::generateMipmaps(const TextureHandle texture) {
 }
 
 void DeviceVK::destroyTexture(const TextureHandle texture) {
-  const auto it = textures.find(texture.id);
+  const auto it = findResource(textures, texture);
   if (textures.end() == it) {
     return;
   }
@@ -539,7 +560,7 @@ void DeviceVK::updateTextureLayer(const TextureHandle texture, const int layer,
   if (0 == width || 0 == height) {
     return;
   }
-  const auto it = textures.find(texture.id);
+  const auto it = findResource(textures, texture);
   if (textures.end() == it) {
     throw std::invalid_argument(
         "DeviceVK::updateTextureLayer: unknown texture");
@@ -700,6 +721,7 @@ DeviceVK::createShaderModule(const std::vector<std::uint32_t> &code) const {
 }
 
 PipelineHandle DeviceVK::createPipeline(const PipelineDesc &desc) {
+  const auto id = allocateHandleId();
   if (pipelines.size() >= descriptorPools.size() * pipelinesPerDescriptorPool)
     (void)createPipelineDescriptorPool();
 
@@ -893,8 +915,8 @@ PipelineHandle DeviceVK::createPipeline(const PipelineDesc &desc) {
   check(vkAllocateDescriptorSets(device, &setAlloc, record.sets.data()),
         "vkAllocateDescriptorSets");
 
-  const PipelineHandle handle{nextHandleId++};
-  pipelines.emplace(handle.id, record);
+  const PipelineHandle handle{.id = id};
+  pipelines.emplace(id, record);
   return handle;
 }
 

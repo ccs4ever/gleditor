@@ -1,0 +1,173 @@
+# Xanadu store and Xuzz
+
+[Project overview](../README.md) · [Build setup](../README.md#quick-start) ·
+[Tests and diagnostics](testing.md)
+
+Commands and source paths below are relative to the repository or worktree root.
+
+The xanalogical engine lives in `apps/common/xanadu/`, in namespace `xanadu`, and needs no graphics
+device. `apps/common/ui/xanadoc/` holds xuzz's xanadoc presentation components and
+`apps/common/ui/slice/` its cell visualizer; both are linked into `xuzz`, and `apps/xuzz/` holds
+only the program's own wiring. Pages and cells are two presentations of the same store.
+
+## Content, operations, and hypertime
+
+Each author has one append-only `UserPermascroll` for primedia. A `Store` is an edit decision list
+over local slot 0 and registered external scrolls. A store directory holds `ops.nodes` and
+`store.tables`; it contains **no primedia** and is not portable without the permascroll it
+addresses. The default permascroll lives under `$XDG_DATA_HOME/xuzz/permascroll/`;
+`xuzz --permascroll` binds an explicit one. Publishing packages the content and references others
+need to read, instead of copying a bare store directory.
+
+`ops.nodes` starts with a format header, followed by immutable, 64-byte `CompactOpNode` records in
+64 KiB Merkle-piece-aligned segments. `store.tables` format 4 holds local segment carriers and
+private reader deployment bindings. Scroll registration, links, designated versions and annotations
+are authored Structure operations. A format the loader does not understand is refused by name and
+version; `store-dump --section=header STORE` or `--section=ops` inspects the bytes without that
+loader. Human-readable OSMIC or compact binary operations are optional `ops.export` output, not
+another store file.
+
+A microversion is rebuilt by replaying its ancestral path through the append-only operation tree.
+Editing an earlier state branches rather than discarding its descendants. Deletion removes a
+reference from the current version; it does not erase primedia or earlier versions. Transclusion
+adds another reference to the same content address. Shared addresses, rather than equal strings,
+identify shared content across documents and versions.
+`xuzz --version-id ID --alongside OTHER STORE` shows two branches for comparison; `--map` opens the
+hypertime map.
+
+`OpKind::Structure` is OSMIC's sixth hyperop. It mints ZigZag cells and changes their links or
+content. A cell's persistent identity is the operation that created it, and later changes chain to
+that operation. The same spool produces two replay views: `Version` for document concatext and
+`zigzag::Manifold` for cell structure. Typing into a xanadoc does not itself mint cells.
+`ArenaManifold` supplies an ephemeral copy-on-write space for queries, Vortex execution, and logic
+choice points; explicit promotion mints persistent Structure operations. Navigation and speculative
+work do not silently write hypertime.
+
+A ZigZag dimension is itself a cell. Links on each dimension give a cell at most one posward and one
+negward neighbor, forming ranks. A cell's text is a run of primedia spans; roles, MIME type, media
+paths, and other structured properties live on dimensions rather than hidden markup in that text.
+`sliceToStore()` mints a structure DTO as operations, and `storeToSlice()` projects a manifold back
+to a DTO. The old YAML slice format and its loader are gone.
+
+## Links, discovery, and publication
+
+A Xanadu link has one identity, type, attribution, and ordered left and right endsets of
+`PrimediaSpan`s. Neither side is intrinsically a source or destination. An endset may contain
+multiple discontinuous spans; a stored link does not pair each left member with one right member.
+Links attach to content addresses, so quotations can reveal the same link in another manifestation.
+The Spanfilade indexes span occurrences across documents and cells for transclusion discovery.
+
+Xuzz renders explicit links as cyan/magenta ribbons and shared-content transclusions as gold prisms.
+Its beam layout and margin brackets help distinguish dense, overlapping passages.
+`BridgeCoordinator` brings ZigZag cell anchors and an accessibility source into the page scene.
+Native and reader-enabled package links share exact member and occurrence navigation through the
+link context. The wider interaction contract is described in the
+[Xuzz navigation workflow](../design/ui_workflow_xuzz_navigation.md).
+
+Publication signs an authorship record, seals content and operations for sharing, and can publish
+mutable names through BEP 46. Global spans and operation references map published identities back to
+local stores. A Merkle identity ledger and BEP 10 extensions support author lookup and peer
+verification; Hashcash gates costly requests. See the
+[publication and discovery design](../design/bep46-publication-and-discovery.md) and
+[identity model](../design/oracle-identity-model.md) for protocol details.
+
+### Publishing and downloading
+
+`Ctrl+Alt+Shift+N` adds a slice to the current document's store; `Ctrl+Alt+N` starts a standalone
+slice store. Swarm Telescope (`F3`) takes search input until Escape closes it. Publication counters
+are persisted per publishing key and salt. The Publish form accepts topics and defaults to local
+preparation; `Ctrl+Shift+P` shows background verification, DHT acknowledgement and retry status. For
+an isolated test swarm, `--test-publication-swarm HOST:PORT --dht-node HOST:PORT` enables the
+explicit mock verification destination. `Ctrl+O` opens signed `.xanadoc` publications with
+dependencies cached beside the manifest, and accepts a BEP 46 publication magnet to resolve and
+fetch on a worker. The Download publication panel offers progress refresh, open, cancel and retry;
+completed snapshots remain in the Open picker across restart and open offline. Downloads check the
+manifest's author key, salt and sequence against the signed DHT pointer, then verify every
+dependency before installation.
+
+### Discovery and updates
+
+`Ctrl+Shift+D` discovers signed publications from an author's 64-hex publishing key or a topic. In
+Telescope, Return on a simple topic such as `Ideas` starts a DHT rendezvous query; `author:<key>`
+follows that publishing key. Readers review the signed catalog, choose a publication, and use the
+same download/open controls. Author signatures do not establish Oracle enrollment. Catalogs and
+followed keys persist across restart. A completed download offers Notify me of updates;
+`Ctrl+Shift+U` reviews verified updates, opens earlier and newer snapshots together, marks updates
+reviewed, and pauses or resumes a subscription. Polling retains accepted sequences and catches
+missed updates after reconnect. It preserves earlier snapshots and the author's edition choices.
+`publicationPollSeconds` in `system://settings` defaults to 30 and is read at startup; the isolated
+mock swarm uses a shorter interval. See
+[publication implementation progress](../design/publication-implementation-progress.md) for the
+repaired prerequisites and remaining network/UI work.
+
+### Reader link layers
+
+`Ctrl+Alt+Shift+P` prepares an independent signed package from a selected publication's authored
+links; review it before publishing to the explicit test swarm. `Ctrl+Alt+Shift+L` discovers packages
+referencing that publication's registered global scrolls, fetches and reviews both endsets, and
+opens cited immutable snapshots through the download panel. Review offers Enable/Disable reader
+layer and Select link for navigation. Reader choices pin immutable package versions, persist
+privately and reopen offline; new package versions start disabled. Layers mark exact passages and
+add beams without importing links or changing visited stores. The existing link panel browses either
+endset, crosses sides and enters an explicitly chosen occurrence. A missing endpoint remains
+visible; open its pinned publication before entering it. Review packages matching selected passages
+filters retained packages by global scroll key and byte overlap with the selected document. Catalog
+format 2 distinguishes documents and packages; old development catalogs must be regenerated. See
+[the reader layer validation report](../design/ux_publication_layers_validation_2026-10-07.md).
+
+## Configuration and computation
+
+Xuzz keeps keymaps, settings, layout, UI state, and pouches in five sovereign system xanadocs
+(`system://keymap|settings|layout|ui|pouches`). They are validated structure, with defaults, rather
+than hardcoded application keymaps. Its cell views use sovereign-store-backed system slices.
+`gleditor` remains separate and uses its own TSV configuration. See the
+[system xanadocs design](../design/system-xanadocs-customization-and-metasystem.md).
+
+The pouch drawer can be widened by dragging its inner divider. Focus the divider and use Left or
+Right to resize with the keyboard, or activate it to widen by one step. A completed resize saves
+`pouchPanel.widthPx` in `system://ui`; cancelling a drag restores the previous width. The drawer
+clamps its width to the available safe area.
+
+The quotation builder has Source, Selector, Preview and Commit pages; large font settings keep every
+control reachable through these pages. The telescope provides Channels, Publications and Inspector
+pages, with Refresh for catalog changes. The hypertime graph switches between Graph and Comparison.
+Their preferred sizes and safe-area limits use the `quotationModal`, `telescopeModal` and
+`hypertimeModal` settings in `system://ui`, with `widthPx`, `heightPx`, `maxWidthShare` and
+`maxHeightShare` fields.
+
+The plain editor's chrome typography is independent of its document font. Its configuration accepts
+`ui.scale`, `ui.fontScale`, `ui.safeMarginShare`, `ui.minTouchPx`, `ui.minFontPx`, and
+`ui.font.<caption|label|body|title|mono>.<family|points>`. UI and font scales multiply the display
+scale; safe margin share is between 0 and 0.5. Font sizes and scales must be positive and finite.
+
+The Vortex VM operates over manifolds. VQL queries and VPL array expressions compile to Vortex;
+`vquery`/`vqueryc` and `vpl`/`vplc` expose their runners and compilers. `vprolog` runs a Prolog
+front end over Vortex/Vlog logic operations. Xuzz's cell view also has Vortex and VQL palettes. VQL
+can compose multiple stores in one ephemeral arena; this does not make persistent cross-store cell
+links automatic. The [Vortex](../design/vortex-hyperstructural-runtime.md),
+[VQL](../design/vql-query-language.md), [VPL](../design/vpl-array-language.md), and
+[Vlog](../design/vlog-logic-extension.md) notes document their models and remaining work; the
+[vicon](../design/vicon-goal-directed-language.md) note proposes an Icon-shaped goal-directed
+language over the same runtime, and the [vlace](../design/vlace-functional-language.md) note
+proposes a text-based, purely functional one (both specification only, nothing built).
+
+## ZigZag and Xuzz presentation
+
+`ZigzagVisualizer` owns a `UnifiedTransclusionEngine` over a `Manifold`. It renders the focused cell
+and its rank neighborhood with animated transitions, GPU picking, and accessibility descriptions.
+Cell Content View emphasizes the content of each cell; Topology View emphasizes its dimensional
+connections. The view can cycle dimensions and use execution, scope, contract, logic, and standard
+library bundles. `xuzz --raster STORE` prints a non-graphical projection. The visualizer can adopt a
+store-backed slice or project xanadoc versions via `--xanadoc`.
+
+Xuzz composes this presentation with its pages and beams. The current bridge supplies cell anchors,
+a shared scene, and cell activation. It is a foundation for the proposed unified link journey, not a
+completed persistent activity navigator. The [prototype gallery](../design/ui/prototypes/README.md)
+contains generated mock-ups rather than screenshots of the running UI.
+
+World-space labels fit their local cards and hide when their projected font size becomes too small
+for reading. Their objects remain selectable and retain full accessible names. ZigZag Cell Content
+View preserves rich cell text; Topology View uses compact fitted labels. The floating satelloid,
+blueprint and loading cards follow live typography and the `satelloidCard`, `tetherCard` and
+`hullCard` dimensions, safe-area shares and preview line limits in `system://ui`. Publication hull
+telemetry follows the phase and dependency progress shown by the download form's Refresh action.

@@ -57,11 +57,13 @@ bencode::Value encodeDeployment(const Scroll &scroll) {
   bencode::List segments;
   for (const auto &segment : scroll.segments)
     segments.push_back(encodeRegistrySegment(segment));
+  std::string publisherBytes(32, '\0');
+  if (scroll.isNamed()) {
+    std::copy(scroll.publisher->bytes.begin(), scroll.publisher->bytes.end(),
+              publisherBytes.begin());
+  }
   return bencode::Value::dict(
-      {{"publisher",
-        bencode::Value::string(std::string{
-            reinterpret_cast<const char *>(scroll.publisher.bytes.data()),
-            32})},
+      {{"publisher", bencode::Value::string(std::move(publisherBytes))},
        {"salt", bencode::Value::string(scroll.salt)},
        {"mime", bencode::Value::string(scroll.defaultMimeType)},
        {"segments", bencode::Value::list(std::move(segments))}});
@@ -77,8 +79,10 @@ Scroll decodeDeployment(const bencode::Value &value) {
       !mime || !mime->isString() || !segments || !segments->isList())
     throw StoreTablesUnreadable("invalid deployed scroll descriptor");
   Scroll scroll;
+  PublicKey publisherKey;
   std::copy(publisher->asString().begin(), publisher->asString().end(),
-            scroll.publisher.bytes.begin());
+            publisherKey.bytes.begin());
+  if (!publisherKey.isZero()) scroll.publisher = publisherKey;
   scroll.salt            = salt->asString();
   scroll.defaultMimeType = mime->asString();
   for (const auto &item : segments->asList()) {
@@ -215,7 +219,7 @@ StoreTables deserializeStoreTables(std::span<const std::uint8_t> bytes) {
   for (const auto &item : deployment->asList()) {
     auto scroll    = decodeDeployment(item);
     const auto key = scrollKey(scroll);
-    if (!key.empty() && !keys.insert(key).second)
+    if (key && !keys.insert(*key).second)
       throw StoreTablesUnreadable(
           "store tables have duplicate deployed scrolls");
     tables.deployedScrolls.push_back(std::move(scroll));

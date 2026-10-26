@@ -224,11 +224,11 @@ struct alignas(gleditor::enfilade::kCacheLineBytes) HoleCrum {
   HoleWid wid{};
   std::uint32_t firstChild{0};
   std::uint32_t firstEntry{0};
-  std::uint32_t parentIndex{0};
+  std::optional<std::uint32_t> parentIndex;
   std::uint16_t childCount{0};
   std::uint16_t entryCount{0};
   bool isLeaf{true};
-  std::uint8_t padding[15]{0};
+  std::uint8_t padding[11]{0};
 };
 
 /**

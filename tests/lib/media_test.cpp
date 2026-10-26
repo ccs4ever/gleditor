@@ -64,7 +64,28 @@ TEST(MediaTest, MediaPlayerPlaybackStateCycle) {
 
   player.stop();
   EXPECT_EQ(player.state(), PlaybackState::Stopped);
-  EXPECT_FLOAT_EQ(player.positionSeconds(), 0.0F);
+  ASSERT_TRUE(player.positionSeconds());
+  EXPECT_FLOAT_EQ(player.positionSeconds().value(), 0.0F);
+}
+
+TEST(MediaTest, TimeQueriesDistinguishUnknownFromKnownZero) {
+  MediaPlayer player(true);
+  EXPECT_FALSE(player.positionSeconds());
+  EXPECT_FALSE(player.durationSeconds());
+  EXPECT_FALSE(player.progressFraction());
+
+  auto stream = std::make_shared<MemoryMediaStream>("known duration");
+  ASSERT_TRUE(player.load(MediaResource::fromStream(stream, "known")));
+  ASSERT_TRUE(player.positionSeconds());
+  EXPECT_FLOAT_EQ(player.positionSeconds().value(), 0.0F);
+  ASSERT_TRUE(player.durationSeconds());
+  ASSERT_TRUE(player.progressFraction());
+  EXPECT_FLOAT_EQ(player.progressFraction().value(), 0.0F);
+
+  player.unload();
+  EXPECT_FALSE(player.positionSeconds());
+  EXPECT_FALSE(player.durationSeconds());
+  EXPECT_FALSE(player.progressFraction());
 }
 
 TEST(MediaTest, MediaPlayerVolumeAndMute) {
@@ -101,18 +122,19 @@ TEST(MediaTest, MediaPlayerTimeRangeBoundsAndSeeking) {
 
   // Playing automatically begins at start of range
   player.play();
-  EXPECT_GE(player.positionSeconds(), 10.0F);
+  ASSERT_TRUE(player.positionSeconds());
+  EXPECT_GE(player.positionSeconds().value(), 10.0F);
 
   // Seeking outside range is clamped
   player.seek(5.0F);
-  EXPECT_FLOAT_EQ(player.positionSeconds(), 10.0F);
+  EXPECT_FLOAT_EQ(player.positionSeconds().value(), 10.0F);
 
   player.seek(35.0F);
-  EXPECT_FLOAT_EQ(player.positionSeconds(), 30.0F);
+  EXPECT_FLOAT_EQ(player.positionSeconds().value(), 30.0F);
 
   // Seeking fraction (0.5 within [10.0, 30.0] -> 20.0s)
   player.seekFraction(0.5F);
-  EXPECT_FLOAT_EQ(player.positionSeconds(), 20.0F);
+  EXPECT_FLOAT_EQ(player.positionSeconds().value(), 20.0F);
 
   // Range enforcement on update
   player.seek(29.5F);
@@ -124,7 +146,8 @@ TEST(MediaTest, MediaPlayerTimeRangeBoundsAndSeeking) {
   player.play();
   player.seek(29.5F);
   player.update(1.0F);
-  EXPECT_FLOAT_EQ(player.positionSeconds(), 10.0F); // Looped back to start
+  EXPECT_FLOAT_EQ(player.positionSeconds().value(),
+                  10.0F); // Looped back to start
 }
 
 TEST(MediaTest, anAudioOnlyStreamPlays) {

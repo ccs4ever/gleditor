@@ -10,6 +10,8 @@
 #include <charconv>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -47,16 +49,17 @@ public:
   }
   [[nodiscard]] bool isAtEnd() const noexcept { return pos_ >= source_.size(); }
 
-  [[nodiscard]] char peekChar(std::size_t offset = 0) const noexcept {
-    if (pos_ + offset >= source_.size()) {
-      return '\0';
+  [[nodiscard]] std::optional<char>
+  peekChar(std::size_t offset = 0) const noexcept {
+    if (pos_ >= source_.size() || offset >= source_.size() - pos_) {
+      return std::nullopt;
     }
     return source_[pos_ + offset];
   }
 
-  char advanceChar() noexcept {
-    if (pos_ >= source_.size()) {
-      return '\0';
+  std::optional<char> advanceChar() noexcept {
+    if (isAtEnd()) {
+      return std::nullopt;
     }
     char c = source_[pos_++];
     if (c == '\n') {
@@ -69,11 +72,33 @@ public:
   }
 
   bool match(char expected) noexcept {
-    if (peekChar() == expected) {
+    if (const auto current = peekChar(); current && *current == expected) {
       advanceChar();
       return true;
     }
     return false;
+  }
+
+  [[nodiscard]] bool peekIsAlpha(std::size_t offset = 0) const noexcept {
+    return classifies(std::isalpha, offset);
+  }
+  [[nodiscard]] bool peekIsAlnum(std::size_t offset = 0) const noexcept {
+    return classifies(std::isalnum, offset);
+  }
+  [[nodiscard]] bool peekIsDigit(std::size_t offset = 0) const noexcept {
+    return classifies(std::isdigit, offset);
+  }
+  [[nodiscard]] bool peekIsSpace(std::size_t offset = 0) const noexcept {
+    return classifies(std::isspace, offset);
+  }
+  [[nodiscard]] bool peekIsXdigit(std::size_t offset = 0) const noexcept {
+    return classifies(std::isxdigit, offset);
+  }
+  [[nodiscard]] bool peekIsUpper(std::size_t offset = 0) const noexcept {
+    return classifies(std::isupper, offset);
+  }
+  [[nodiscard]] bool peekIsLower(std::size_t offset = 0) const noexcept {
+    return classifies(std::islower, offset);
   }
 
   void backupChar() noexcept {
@@ -86,8 +111,14 @@ public:
   }
 
   ScannedString scanQuotedString(char quoteChar = '"');
-  ScannedNumber scanNumberLiteral(bool leadingMinus = false,
-                                  bool leadingPlus  = false);
+  std::expected<ScannedNumber, std::string>
+  scanNumberLiteral(bool leadingMinus = false, bool leadingPlus = false);
+
+private:
+  bool classifies(int (*predicate)(int), std::size_t offset) const noexcept {
+    const auto c = peekChar(offset);
+    return c && predicate(static_cast<unsigned char>(*c)) != 0;
+  }
 
 protected:
   std::string_view source_;

@@ -30,11 +30,11 @@ TEST(StoreActivityLogTest, BranchesAndSelectedVisitSurviveReopening) {
                          .target  = xanadu::CellSite{document, {}, 7, {2, 5}},
                          .arrival = xanadu::Arrival::EnteredEndpoint,
                          .link    = xanadu::LinkVisitContext{
-                             .key    = {document, 12},
-                             .active = xanadu::LinkSide::Right,
-                             .left   = {.member = 0, .occurrence = 0},
-                             .right  = {.member = 1, .occurrence = 0},
-                             .origin = origin}});
+                                .key    = {document, 12},
+                                .active = xanadu::LinkSide::Right,
+                                .left   = {.member = 0, .occurrence = 0},
+                                .right  = {.member = 1, .occurrence = 0},
+                                .origin = origin}});
     log.select(origin);
     second = log.append({.parent = origin,
                          .target = xanadu::CellSite{document, {}, 21, {0, 3}}});
@@ -74,8 +74,8 @@ protected:
     config.storageDir = base / "permascroll";
     scroll            = std::make_shared<xanadu::UserPermascroll>(config);
     store             = std::make_unique<xanadu::Store>(scroll);
-    log   = std::make_unique<xanadu::StoreActivityLog>(store.get(),
-                                                       base / "activity");
+    log               = std::make_unique<xanadu::StoreActivityLog>(store.get(),
+                                                                   base / "activity");
     root  = log->append({.target = xanadu::DocumentSite{document, {}, {0, 4}}});
     first = log->append(
         {.parent = root, .target = xanadu::CellSite{document, {}, 8, {0, 3}}});
@@ -94,7 +94,7 @@ protected:
     const auto made = store->makeDimension(store->latest(), dimension);
     auto at         = store->makeCell(made.version, text);
     const auto cell = store->cellRefOf(at);
-    std::ignore     = store->setLink(at, store->homeCell(), made.dim,
+    std::ignore     = store->setLink(at, store->homeCell().value(), made.dim,
                                      zigzag::DimVector::POS, cell);
   }
   std::filesystem::path base;

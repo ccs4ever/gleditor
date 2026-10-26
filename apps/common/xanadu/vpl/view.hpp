@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -33,12 +34,14 @@ public:
   VplView() = default;
 
   /// Construct a view with an origin cell and a list of directed dimensions.
-  VplView(zigzag::CellRef origin, std::vector<zigzag::DirectedDim> axes)
+  VplView(std::optional<zigzag::CellRef> origin,
+          std::vector<zigzag::DirectedDim> axes)
       : origin_(origin), axes_(std::move(axes)) {}
 
   /// Construct a view with an origin cell and dimension refs (default POS
   /// direction).
-  VplView(zigzag::CellRef origin, std::span<const zigzag::DimRef> dims)
+  VplView(std::optional<zigzag::CellRef> origin,
+          std::span<const zigzag::DimRef> dims)
       : origin_(origin) {
     axes_.reserve(dims.size());
     for (zigzag::DimRef d : dims) {
@@ -47,8 +50,9 @@ public:
   }
 
   /// Construct a scalar numeric view (valence 0).
-  static VplView makeScalar(double val, bool isFloat = false,
-                            zigzag::CellRef cell = zigzag::noCell) {
+  static VplView
+  makeScalar(double val, bool isFloat = false,
+             std::optional<zigzag::CellRef> cell = std::nullopt) {
     VplView v;
     v.origin_      = cell;
     v.scalarFloat_ = val;
@@ -58,8 +62,9 @@ public:
     return v;
   }
 
-  static VplView makeScalar(std::int64_t val,
-                            zigzag::CellRef cell = zigzag::noCell) {
+  static VplView
+  makeScalar(std::int64_t val,
+             std::optional<zigzag::CellRef> cell = std::nullopt) {
     VplView v;
     v.origin_      = cell;
     v.scalarFloat_ = static_cast<double>(val);
@@ -69,8 +74,9 @@ public:
     return v;
   }
 
-  static VplView makeScalar(std::string str,
-                            zigzag::CellRef cell = zigzag::noCell) {
+  static VplView
+  makeScalar(std::string str,
+             std::optional<zigzag::CellRef> cell = std::nullopt) {
     VplView v;
     v.origin_       = cell;
     v.scalarString_ = std::move(str);
@@ -89,8 +95,12 @@ public:
     return this;
   }
 
-  [[nodiscard]] zigzag::CellRef origin() const noexcept { return origin_; }
-  void setOrigin(zigzag::CellRef origin) noexcept { origin_ = origin; }
+  [[nodiscard]] std::optional<zigzag::CellRef> origin() const noexcept {
+    return origin_;
+  }
+  void setOrigin(std::optional<zigzag::CellRef> origin) noexcept {
+    origin_ = origin;
+  }
 
   [[nodiscard]] const std::vector<zigzag::DirectedDim> &axes() const noexcept {
     return axes_;
@@ -200,13 +210,14 @@ public:
    */
   [[nodiscard]] std::vector<std::size_t>
   shape(const zigzag::ArenaManifold &arena) const {
+    requireKnownOrigin(arena);
     if (isScalar_) {
       return {};
     }
     if (!extents_.empty()) {
       return extents_;
     }
-    if (axes_.empty() || origin_ == zigzag::noCell) {
+    if (axes_.empty() || !origin_) {
       return {0};
     }
 
@@ -214,12 +225,12 @@ public:
     dims.reserve(axes_.size());
 
     // Walk primary axis
-    std::size_t count0  = 0;
-    zigzag::CellRef cur = origin_;
-    std::size_t limit   = arena.cellCount() + 1;
-    while (cur != zigzag::noCell && limit-- > 0) {
+    std::size_t count0                 = 0;
+    std::optional<zigzag::CellRef> cur = origin_;
+    std::size_t limit                  = arena.cellCount() + 1;
+    while (cur && limit-- > 0) {
       count0++;
-      cur = arena.linked(cur, axes_[0].dim, axes_[0].dir);
+      cur = arena.linked(*cur, axes_[0].dim, axes_[0].dir);
     }
     dims.push_back(count0);
 
@@ -230,15 +241,15 @@ public:
       bool ragged             = false;
 
       // Sample along previous axis positions
-      zigzag::CellRef rowCur = origin_;
-      std::size_t rowLimit   = arena.cellCount() + 1;
-      while (rowCur != zigzag::noCell && rowLimit-- > 0) {
-        std::size_t extent = 0;
-        zigzag::CellRef c  = rowCur;
-        std::size_t l      = arena.cellCount() + 1;
-        while (c != zigzag::noCell && l-- > 0) {
+      std::optional<zigzag::CellRef> rowCur = origin_;
+      std::size_t rowLimit                  = arena.cellCount() + 1;
+      while (rowCur && rowLimit-- > 0) {
+        std::size_t extent               = 0;
+        std::optional<zigzag::CellRef> c = rowCur;
+        std::size_t l                    = arena.cellCount() + 1;
+        while (c && l-- > 0) {
           extent++;
-          c = arena.linked(c, axes_[a].dim, axes_[a].dir);
+          c = arena.linked(*c, axes_[a].dim, axes_[a].dir);
         }
         if (!extentSet) {
           firstExtent = extent;
@@ -246,7 +257,7 @@ public:
         } else if (extent != firstExtent) {
           ragged = true;
         }
-        rowCur = arena.linked(rowCur, axes_[0].dim, axes_[0].dir);
+        rowCur = arena.linked(*rowCur, axes_[0].dim, axes_[0].dir);
       }
       dims.push_back(firstExtent);
       if (ragged) {
@@ -260,13 +271,14 @@ public:
   /**
    * @brief Walks coordinates to fetch a cell.
    */
-  [[nodiscard]] zigzag::CellRef
+  [[nodiscard]] std::optional<zigzag::CellRef>
   cellAt(const zigzag::ArenaManifold &arena,
          std::span<const std::int64_t> coords) const {
-    if (origin_ == zigzag::noCell) return zigzag::noCell;
+    requireKnownOrigin(arena);
+    if (!origin_) return std::nullopt;
     if (coords.empty()) return origin_;
 
-    zigzag::CellRef cur = origin_;
+    std::optional<zigzag::CellRef> cur = origin_;
     for (std::size_t i = 0; i < coords.size() && i < axes_.size(); ++i) {
       std::int64_t steps    = coords[i];
       zigzag::DimVector dir = axes_[i].dir;
@@ -274,11 +286,11 @@ public:
         dir   = -dir;
         steps = -steps;
       }
-      while (steps > 0 && cur != zigzag::noCell) {
-        cur = arena.linked(cur, axes_[i].dim, dir);
+      while (steps > 0 && cur) {
+        cur = arena.linked(*cur, axes_[i].dim, dir);
         steps--;
       }
-      if (cur == zigzag::noCell) break;
+      if (!cur) break;
     }
     return cur;
   }
@@ -288,23 +300,24 @@ public:
    */
   [[nodiscard]] std::vector<zigzag::CellRef>
   collectCells(const zigzag::ArenaManifold &arena) const {
+    requireKnownOrigin(arena);
     std::vector<zigzag::CellRef> cells;
-    if (origin_ == zigzag::noCell) {
+    if (!origin_) {
       return cells;
     }
     if (axes_.empty()) {
-      cells.push_back(origin_);
+      cells.push_back(*origin_);
       return cells;
     }
 
     if (axes_.size() == 1) {
-      auto sh             = shape(arena);
-      zigzag::CellRef cur = origin_;
-      std::size_t limit   = sh.empty() ? arena.cellCount() + 1
-                                       : std::min(sh[0], arena.cellCount() + 1);
-      while (cur != zigzag::noCell && limit-- > 0) {
-        cells.push_back(cur);
-        cur = arena.linked(cur, axes_[0].dim, axes_[0].dir);
+      auto sh                            = shape(arena);
+      std::optional<zigzag::CellRef> cur = origin_;
+      std::size_t limit                  = sh.empty() ? arena.cellCount() + 1
+                                                      : std::min(sh[0], arena.cellCount() + 1);
+      while (cur && limit-- > 0) {
+        cells.push_back(*cur);
+        cur = arena.linked(*cur, axes_[0].dim, axes_[0].dir);
       }
       return cells;
     }
@@ -316,9 +329,9 @@ public:
     std::vector<std::int64_t> coords(axes_.size(), 0);
     std::function<void(std::size_t)> traverse = [&](std::size_t dimIdx) {
       if (dimIdx == axes_.size()) {
-        zigzag::CellRef c = cellAt(arena, coords);
-        if (c != zigzag::noCell) {
-          cells.push_back(c);
+        const auto c = cellAt(arena, coords);
+        if (c) {
+          cells.push_back(*c);
         }
         return;
       }
@@ -332,7 +345,13 @@ public:
   }
 
 private:
-  zigzag::CellRef origin_{zigzag::noCell};
+  void requireKnownOrigin(const zigzag::ArenaManifold &arena) const {
+    if (origin_ && !arena.contains(*origin_)) {
+      throw std::invalid_argument(
+          "VPL view origin does not exist in this arena");
+    }
+  }
+  std::optional<zigzag::CellRef> origin_;
   std::vector<zigzag::DirectedDim> axes_;
   std::vector<std::size_t> extents_;
   std::vector<zigzag::CellRef> dependencies_;

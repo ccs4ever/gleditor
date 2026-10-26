@@ -5,6 +5,7 @@
 #include "link_occurrences.hpp"
 #include "link_package.hpp"
 #include <filesystem>
+#include <optional>
 
 namespace xanadu {
 class ReaderLinkPackagesUnreadable : public std::runtime_error {
@@ -66,7 +67,8 @@ private:
   std::map<std::string, enfilade::ScrollSpanfilade> scrolls;
 };
 /// Read-only slot-zero/imported binding lookup; no deployment slots are added.
-[[nodiscard]] std::string readerScrollKey(const Store &store, ScrollId slot);
+[[nodiscard]] std::optional<std::string> readerScrollKey(const Store &store,
+                                                         ScrollId slot);
 [[nodiscard]] std::vector<PieceMatch>
 packageOccurrences(const Store &store, std::span<const PrimediaSpan> pieces,
                    const GlobalSpan &member);

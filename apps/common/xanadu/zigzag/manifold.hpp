@@ -132,11 +132,6 @@ struct ScrollRegistry {
 
 // CellRef, DimRef, and noCell are defined in dim_vector.hpp
 
-/// Sentinel "no dense index" value, shared by Manifold and ArenaManifold's
-/// denseOf() -- both keep the same free-list-of-dead-slots design and so
-/// need the same value to mean "not tracked densely."
-inline constexpr auto noDense = std::numeric_limits<std::uint32_t>::max();
-
 /// Dead runs a manifold-shaped structure will carry before compact() is
 /// worth doing. Bounded by a multiple of what is live rather than by an
 /// absolute size, so a slice being built pays a compaction a bounded number
@@ -252,10 +247,15 @@ struct DimLink {
   CellRef pos{noCell}; ///< posward neighbour, noCell if none
   CellRef neg{noCell}; ///< negward neighbour, noCell if none
 
-  [[nodiscard]] constexpr CellRef neighbor(const DimVector dir) const noexcept {
-    return dir == DimVector::POS ? pos : neg;
+  [[nodiscard]] constexpr std::optional<CellRef>
+  neighbor(const DimVector dir) const noexcept {
+    const auto encoded = dir == DimVector::POS ? pos : neg;
+    return encoded == noCell ? std::nullopt : std::optional{encoded};
   }
-  [[nodiscard]] constexpr CellRef &neighbor(const DimVector dir) noexcept {
+
+  /// Mutable packed-field access for the storage adapter only.
+  [[nodiscard]] constexpr CellRef &
+  encodedNeighbor(const DimVector dir) noexcept {
     return dir == DimVector::POS ? pos : neg;
   }
 
@@ -507,8 +507,8 @@ public:
   struct Edition {
     CellRef cell{noCell};
     std::string name;
-    CellRef handle{noCell};
-    std::uint32_t targetOp{0};
+    std::optional<CellRef> handle;
+    std::optional<std::uint32_t> targetOp;
   };
 
   /**
@@ -577,23 +577,27 @@ public:
    * @brief Collect all cells within @p radius hops from @p start along any
    *        dimension link.
    *
-   * If @p start is noCell, defaults to home() if valid, or the first cell.
-   * If @p radius < 0, returns all cells in the manifold.
+   * If @p start is absent, defaults to home() if valid, or the first cell.
+   * If @p radius is absent, returns every cell. Negative radii are refused.
    */
-  [[nodiscard]] std::vector<CellRef> cellsWithinRadius(CellRef start = noCell,
-                                                       int radius    = 3) const;
+  [[nodiscard]] std::vector<CellRef>
+  cellsWithinRadius(std::optional<CellRef> start = std::nullopt,
+                    std::optional<int> radius    = 3) const;
 
   [[nodiscard]] std::unordered_set<CellRef>
-  cellsWithinRadiusSet(CellRef start = noCell, int radius = 3) const;
+  cellsWithinRadiusSet(std::optional<CellRef> start = std::nullopt,
+                       std::optional<int> radius    = 3) const;
 
   /// Set presentation formatting flags on @p ref.
   Manifold *setFormatFlags(CellRef ref, std::uint16_t flags) noexcept;
 
   /// The two cells genesis mints by fiat: the first two cells folded, in the
-  /// order Store::sliceGenesis() mints them. noCell in a store that never
-  /// called it. See R5 and R12.
-  [[nodiscard]] CellRef home() const noexcept { return home_; }
-  [[nodiscard]] DimRef dimsDimension() const noexcept { return dimsDim_; }
+  /// order Store::sliceGenesis() mints them. Absent if genesis was never
+  /// called. See R5 and R12.
+  [[nodiscard]] std::optional<CellRef> home() const noexcept { return home_; }
+  [[nodiscard]] std::optional<DimRef> dimsDimension() const noexcept {
+    return dimsDim_;
+  }
 
   /// The highest operation index this fold has seen. What
   /// verifyAgainstFullRebuild() re-folds from.
@@ -809,8 +813,8 @@ private:
   /// dead runs compact() would reclaim.
   std::size_t liveLinks{0};
 
-  CellRef home_{noCell};
-  DimRef dimsDim_{noCell};
+  std::optional<CellRef> home_;
+  std::optional<DimRef> dimsDim_;
   std::uint32_t foldedThrough_{0};
   std::uint32_t refusedOps_{0};
   std::vector<CellRef> externalCells_;

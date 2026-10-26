@@ -12,6 +12,7 @@
 
 #include <cctype>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -20,25 +21,31 @@ namespace xanadu::vicon {
 
 namespace {
 
-bool isIdentStart(char c) {
+bool isIdentStart(std::optional<char> input) {
+  if (!input) return false;
+  const char c = *input;
   return (std::isalpha(static_cast<unsigned char>(c)) != 0) || c == '_';
 }
-bool isIdentCont(char c) {
+bool isIdentCont(std::optional<char> input) {
+  if (!input) return false;
+  const char c = *input;
   return (std::isalnum(static_cast<unsigned char>(c)) != 0) || c == '_';
 }
 
 // Icon radix literals ("16rFF") let letters carry digit values >= 10.
-int radixDigitValue(char c) {
+std::optional<unsigned> radixDigitValue(std::optional<char> input) {
+  if (!input) return std::nullopt;
+  const char c = *input;
   if (c >= '0' && c <= '9') {
-    return c - '0';
+    return static_cast<unsigned>(c - '0');
   }
   if (c >= 'a' && c <= 'z') {
-    return c - 'a' + 10;
+    return static_cast<unsigned>(c - 'a' + 10);
   }
   if (c >= 'A' && c <= 'Z') {
-    return c - 'A' + 10;
+    return static_cast<unsigned>(c - 'A' + 10);
   }
-  return -1;
+  return std::nullopt;
 }
 
 TokenKind keywordKind(std::string_view s) {
@@ -79,7 +86,9 @@ TokenKind keywordKind(std::string_view s) {
 // words that only occur mid-expression (`then`, `else`, `do`, `of`, `to`,
 // `by`, `end`).
 bool beginsContinuation(const ::xanadu::ScannerBase &scanner) {
-  const char c = scanner.peekChar();
+  const auto next = scanner.peekChar();
+  if (!next) return false;
+  const char c = *next;
   switch (c) {
   case ')':
   case ']':
@@ -133,7 +142,7 @@ Token Lexer::makeToken(TokenKind kind, SourceLocation loc,
 
 void Lexer::skipBlanksAndComments() {
   for (;;) {
-    const char c = scanner_.peekChar();
+    const auto c = scanner_.peekChar();
     if (c == ' ' || c == '\t' || c == '\r' || c == '\f' || c == '\v') {
       scanner_.advanceChar();
       continue;
@@ -184,34 +193,40 @@ Token Lexer::scanIdentifierOrKeyword() {
 Token Lexer::scanNumber() {
   const SourceLocation loc = scanner_.currentLocation();
   const std::size_t start  = scanner_.position();
-  const ScannedNumber num  = scanner_.scanNumberLiteral();
+  const auto scanned       = scanner_.scanNumberLiteral();
+  if (!scanned) {
+    Token error       = makeToken(TokenKind::Error, loc, start);
+    error.stringValue = scanned.error();
+    return error;
+  }
+  const auto &num = *scanned;
 
   // Icon's radix literal "Nrddd": the integer before 'r' is the base
   // (2..36) and letters carry digit values 10-35.
   if (!num.isFloat &&
       (scanner_.peekChar() == 'r' || scanner_.peekChar() == 'R') &&
-      radixDigitValue(scanner_.peekChar(1)) >= 0) {
-    const int radix = static_cast<int>(num.intValue);
-    if (radix < 2 || radix > 36) {
+      radixDigitValue(scanner_.peekChar(1)).has_value()) {
+    if (num.intValue < 2 || num.intValue > 36) {
       Token t       = makeToken(TokenKind::Error, loc, start);
       t.stringValue = "invalid radix for integer literal";
       return t;
     }
+    const int radix = static_cast<int>(num.intValue);
     scanner_.advanceChar(); // the 'r'
     std::uint64_t value = 0;
     for (;;) {
-      const int digit = radixDigitValue(scanner_.peekChar());
-      if (digit < 0) {
+      const auto digit = radixDigitValue(scanner_.peekChar());
+      if (!digit) {
         break;
       }
       scanner_.advanceChar();
-      if (digit >= radix) {
+      if (*digit >= static_cast<unsigned>(radix)) {
         Token t       = makeToken(TokenKind::Error, loc, start);
         t.stringValue = "digit out of range for radix literal";
         return t;
       }
       value = value * static_cast<std::uint64_t>(radix) +
-              static_cast<std::uint64_t>(digit);
+              static_cast<std::uint64_t>(*digit);
     }
     Token t    = makeToken(TokenKind::IntegerLiteral, loc, start);
     t.intValue = static_cast<std::int64_t>(value);
@@ -258,7 +273,7 @@ Token Lexer::scanKeywordRef() {
 Token Lexer::scanToken() {
   const SourceLocation loc = scanner_.currentLocation();
   const std::size_t start  = scanner_.position();
-  const char c             = scanner_.peekChar();
+  const char c             = scanner_.peekChar().value();
 
   if (isIdentStart(c)) {
     return scanIdentifierOrKeyword();

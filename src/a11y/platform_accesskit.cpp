@@ -440,7 +440,7 @@ private:
 
     auto *const update = accesskit_tree_update_with_capacity_and_focus(
         self->kept.nodes.size(), self->kept.focus);
-    auto *const tree = newTree(self->kept.root());
+    auto *const tree = newTree(*self->kept.root());
     setToolkitName(tree, self->toolkit.data(), self->toolkit.size());
     setToolkitVersion(tree, self->version.data(), self->version.size());
     attachTree(update, tree);

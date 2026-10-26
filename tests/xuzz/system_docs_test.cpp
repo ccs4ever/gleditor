@@ -185,8 +185,8 @@ TEST(SystemDocsTest, SystemStoreGenesisTopology) {
   const auto manifold = store.rebuildManifold(head);
 
   // Home cell must exist
-  EXPECT_NE(store.homeCell(), zigzag::noCell);
-  EXPECT_EQ(manifold.home(), store.homeCell());
+  EXPECT_TRUE(store.homeCell().has_value());
+  EXPECT_EQ(manifold.home().value(), store.homeCell().value());
 
   // 10 Dimensions registered
   const auto dDims = manifold.dimensionNamed(xanadu::kDimDims, store).value();
@@ -218,20 +218,20 @@ TEST(SystemDocsTest, SystemStoreGenesisTopology) {
   EXPECT_NE(dDefault, 0U);
 
   // Home cell has dimension directory text
-  const auto homeText = manifold.textOf(manifold.home(), store);
+  const auto homeText = manifold.textOf(manifold.home().value(), store);
   EXPECT_NE(homeText.find("d.vars"), std::string::npos);
   EXPECT_NE(homeText.find("d.values"), std::string::npos);
 
   // Notes hanging posward from home
-  const auto storeNotesCell = manifold.linked(manifold.home(), dNotes);
-  EXPECT_NE(storeNotesCell, 0U);
-  const auto notesText = manifold.textOf(storeNotesCell, store);
+  const auto storeNotesCell = manifold.linked(manifold.home().value(), dNotes);
+  ASSERT_TRUE(storeNotesCell);
+  const auto notesText = manifold.textOf(*storeNotesCell, store);
   EXPECT_FALSE(notesText.empty());
 
   // Empty group blank cell hanging posward from home along d.groups
-  const auto emptyGroupCell = manifold.linked(manifold.home(), dGroups);
-  EXPECT_NE(emptyGroupCell, 0U);
-  EXPECT_TRUE(manifold.textOf(emptyGroupCell, store).empty());
+  const auto emptyGroupCell = manifold.linked(manifold.home().value(), dGroups);
+  ASSERT_TRUE(emptyGroupCell);
+  EXPECT_TRUE(manifold.textOf(*emptyGroupCell, store).empty());
 }
 
 TEST(SystemDocsTest, EmptyGroupBlankCellAndHierarchicalGroups) {
@@ -263,52 +263,53 @@ TEST(SystemDocsTest, EmptyGroupBlankCellAndHierarchicalGroups) {
   const auto dClone = manifold.dimensionNamed(xanadu::kDimClone, store).value();
 
   // Blank group cell off home
-  const auto blankCell = manifold.linked(manifold.home(), dGroups);
-  ASSERT_NE(blankCell, 0U);
-  EXPECT_EQ(manifold.textOf(blankCell, store), "");
+  const auto blankCell = manifold.linked(manifold.home().value(), dGroups);
+  ASSERT_TRUE(blankCell);
+  EXPECT_EQ(manifold.textOf(*blankCell, store), "");
 
   // Master setting "flat_option" is posward along d.vars from home
-  auto masterCell      = manifold.linked(manifold.home(), dVars);
+  auto masterCell      = manifold.linked(manifold.home().value(), dVars);
   bool foundFlatMaster = false;
-  while (masterCell != 0U) {
-    if (manifold.textOf(masterCell, store) == "flat_option") {
+  while (masterCell) {
+    if (manifold.textOf(*masterCell, store) == "flat_option") {
       foundFlatMaster = true;
       break;
     }
-    masterCell = manifold.linked(masterCell, dVars);
+    masterCell = manifold.linked(*masterCell, dVars);
   }
   EXPECT_TRUE(foundFlatMaster);
 
   // Clone of flat_option is posward along d.vars from blankCell
-  const auto flatClone = manifold.linked(blankCell, dVars);
-  ASSERT_NE(flatClone, 0U);
-  EXPECT_EQ(manifold.textOf(flatClone, store), "flat_option");
+  const auto flatClone = manifold.linked(*blankCell, dVars);
+  ASSERT_TRUE(flatClone);
+  EXPECT_EQ(manifold.textOf(*flatClone, store), "flat_option");
   // Master is linked to clone via d.clone
-  EXPECT_EQ(manifold.linked(masterCell, dClone), flatClone);
+  ASSERT_TRUE(masterCell);
+  EXPECT_EQ(manifold.linked(*masterCell, dClone), flatClone);
 
   // Next top-level group along d.groups from blankCell is "hud"
-  const auto hudGroup = manifold.linked(blankCell, dGroups);
-  ASSERT_NE(hudGroup, 0U);
-  EXPECT_EQ(manifold.textOf(hudGroup, store), "hud");
+  const auto hudGroup = manifold.linked(*blankCell, dGroups);
+  ASSERT_TRUE(hudGroup);
+  EXPECT_EQ(manifold.textOf(*hudGroup, store), "hud");
 
   // Subgroup "velocity" is posward along d.subgroups from "hud"
-  const auto velSubgroup = manifold.linked(hudGroup, dSubgroups);
-  ASSERT_NE(velSubgroup, 0U);
-  EXPECT_EQ(manifold.textOf(velSubgroup, store), "velocity");
+  const auto velSubgroup = manifold.linked(*hudGroup, dSubgroups);
+  ASSERT_TRUE(velSubgroup);
+  EXPECT_EQ(manifold.textOf(*velSubgroup, store), "velocity");
 
   // Setting clone "x" hangs posward along d.vars from "velocity"
-  const auto xClone = manifold.linked(velSubgroup, dVars);
-  ASSERT_NE(xClone, 0U);
-  EXPECT_EQ(manifold.textOf(xClone, store), "x");
+  const auto xClone = manifold.linked(*velSubgroup, dVars);
+  ASSERT_TRUE(xClone);
+  EXPECT_EQ(manifold.textOf(*xClone, store), "x");
 
   // Master setting "hud.velocity.x" is connected to clone "x" along d.clone
-  auto hierMaster = manifold.linked(manifold.home(), dVars);
-  while (hierMaster != 0U &&
-         manifold.textOf(hierMaster, store) != "hud.velocity.x") {
-    hierMaster = manifold.linked(hierMaster, dVars);
+  auto hierMaster = manifold.linked(manifold.home().value(), dVars);
+  while (hierMaster &&
+         manifold.textOf(*hierMaster, store) != "hud.velocity.x") {
+    hierMaster = manifold.linked(*hierMaster, dVars);
   }
-  ASSERT_NE(hierMaster, 0U);
-  EXPECT_EQ(manifold.linked(hierMaster, dClone), xClone);
+  ASSERT_TRUE(hierMaster);
+  EXPECT_EQ(manifold.linked(*hierMaster, dClone), xClone);
 }
 
 TEST(SystemDocsTest, SchemaAndDefaultValuesAndReset) {
@@ -340,6 +341,58 @@ TEST(SystemDocsTest, SchemaAndDefaultValuesAndReset) {
       xanadu::getSetting(store, xanadu::settings::kFontSize);
   ASSERT_FALSE(restoredVals.empty());
   EXPECT_DOUBLE_EQ(std::get<double>(restoredVals[0]), 16.0);
+}
+
+TEST(SystemDocsTest, ExplicitRootVersionDoesNotFallBackToCurrentHead) {
+  Store store;
+  store.setSystem(true);
+  xanadu::initializeSystemStore(store, SystemDocKind::Settings);
+  ASSERT_FALSE(store.primaryCurrentVersion().isZero());
+
+  const auto currentModel = xanadu::SystemStoreModel::fromStore(store);
+  ASSERT_TRUE(currentModel.isValid()) << currentModel.validationError();
+
+  const auto rootModel =
+      xanadu::SystemStoreModel::fromStore(store, xanadu::MicroversionId{});
+  EXPECT_FALSE(rootModel.isValid());
+  EXPECT_THAT(rootModel.validationError(), testing::HasSubstr("home cell"));
+
+  const auto updated = xanadu::setSetting(store, std::nullopt,
+                                          xanadu::settings::kFontSize, 21.0);
+  store.repointCurrentVersion(updated);
+  const auto updatedValues =
+      xanadu::getSetting(store, xanadu::settings::kFontSize);
+  ASSERT_EQ(updatedValues.size(), 1U);
+  EXPECT_DOUBLE_EQ(std::get<double>(updatedValues.front()), 21.0);
+
+  EXPECT_THROW(xanadu::setSetting(store, xanadu::MicroversionId{},
+                                  xanadu::settings::kFontSize, 22.0),
+               std::invalid_argument);
+}
+
+TEST(SystemDocsTest, EnsureSettingRejectsRootBeforeExistingStoreGenesis) {
+  Store store;
+  store.setSystem(true);
+  xanadu::initializeSystemStore(store, SystemDocKind::Settings);
+  const auto currentHead = store.primaryCurrentVersion();
+
+  xanadu::SettingSpec spec;
+  spec.name  = "branch.only";
+  spec.notes = "Parent selection regression";
+  spec.schemas.push_back({{"string"}, {std::string{"branch value"}}});
+
+  const auto currentBranch = xanadu::ensureSetting(store, std::nullopt, spec);
+  const auto currentModel =
+      xanadu::SystemStoreModel::fromStore(store, currentBranch);
+  ASSERT_TRUE(currentModel.isValid()) << currentModel.validationError();
+  EXPECT_TRUE(currentModel.find(spec.name));
+  EXPECT_TRUE(currentModel.find(xanadu::settings::kFontSize));
+
+  const auto operationsBeforeRootAttempt = store.opCount();
+  EXPECT_THROW(xanadu::ensureSetting(store, xanadu::MicroversionId{}, spec),
+               std::invalid_argument);
+  EXPECT_EQ(store.opCount(), operationsBeforeRootAttempt);
+  EXPECT_EQ(store.primaryCurrentVersion(), currentHead);
 }
 
 TEST(SystemDocsTest, MultiSchemaAlternativeValidation) {
@@ -595,15 +648,16 @@ TEST(SystemDocsTest, LayoutRuntimeSnapshotReadsVarsAndScalarValues) {
   EXPECT_FLOAT_EQ(config.zigzag.contentMaxWidthPx, 260.0F);
   EXPECT_FLOAT_EQ(config.zigzag.connectionBeamWidthPx, 4.0F);
 
-  auto variable = manifold.linked(manifold.home(), vars);
-  while (variable != 0U &&
-         manifold.textOf(variable, store) != "zigzag.connectionBeamWidthPx") {
-    variable = manifold.linked(variable, vars);
+  auto variable = manifold.linked(manifold.home().value(), vars);
+  while (variable &&
+         manifold.textOf(*variable, store) != "zigzag.connectionBeamWidthPx") {
+    variable = manifold.linked(*variable, vars);
   }
-  ASSERT_NE(variable, 0U);
-  const auto value = manifold.linked(variable, values);
+  ASSERT_TRUE(variable);
+  const auto value = manifold.linked(*variable, values);
+  ASSERT_TRUE(value);
   const auto revised =
-      store.setScalar(store.primaryCurrentVersion(), value, 9.5);
+      store.setScalar(store.primaryCurrentVersion(), *value, 9.5);
   store.repointCurrentVersion(revised);
   EXPECT_FLOAT_EQ(LayoutConfig::fromStore(store).zigzag.connectionBeamWidthPx,
                   9.5F);

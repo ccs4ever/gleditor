@@ -110,9 +110,9 @@ TEST(FormatResolverTest, CellResolutionAndFormatFlagsCaching) {
   Store store;
   auto at       = store.sliceGenesis(MicroversionId{});
   at            = store.makeCell(at, "Plain unformatted cell");
-  const auto c1 = store.cellRefOf(at);
+  const auto c1 = store.cellRefOf(at).value();
   at            = store.makeCell(at, "Cell with bold formatting");
-  const auto c2 = store.cellRefOf(at);
+  const auto c2 = store.cellRefOf(at).value();
 
   auto manifold      = store.rebuildManifold(at);
   const auto spansC2 = manifold.contentOf(c2);
@@ -164,7 +164,7 @@ TEST(FormatResolverTest, CrossDomainFormatInheritanceDocToCell) {
 
   // 3) Create cell and transclude the formatted span into the cell
   at                 = store.makeCell(at, "");
-  const auto cellRef = store.cellRefOf(at);
+  const auto cellRef = store.cellRefOf(at).value();
   at = store.spliceCellSpan(at, cellRef, 0, 0, docSpans.front());
 
   // 4) Rebuild manifold and update flags

@@ -471,16 +471,18 @@ TEST(MeshHostSocketTest,
   auto workerTransport =
       std::make_shared<MeshSwarmTransport>(workerIdentity, network("worker"));
   const auto listening = std::chrono::steady_clock::now() + 5s;
-  while ((requesterTransport->source().listenPort() == 0 ||
-          workerTransport->source().listenPort() == 0) &&
-         std::chrono::steady_clock::now() < listening)
+  auto requesterPort   = requesterTransport->source().listenPort();
+  auto workerPort      = workerTransport->source().listenPort();
+  while ((!requesterPort || !workerPort) &&
+         std::chrono::steady_clock::now() < listening) {
+    requesterPort = requesterTransport->source().listenPort();
+    workerPort    = workerTransport->source().listenPort();
     std::this_thread::sleep_for(10ms);
-  ASSERT_NE(requesterTransport->source().listenPort(), 0);
-  ASSERT_NE(workerTransport->source().listenPort(), 0);
-  ASSERT_TRUE(requesterTransport->addPeerHint(
-      "127.0.0.1", workerTransport->source().listenPort()));
-  ASSERT_TRUE(workerTransport->addPeerHint(
-      "127.0.0.1", requesterTransport->source().listenPort()));
+  }
+  ASSERT_TRUE(requesterPort);
+  ASSERT_TRUE(workerPort);
+  ASSERT_TRUE(requesterTransport->addPeerHint("127.0.0.1", *workerPort));
+  ASSERT_TRUE(workerTransport->addPeerHint("127.0.0.1", *requesterPort));
   // Only the requester starts with program metadata or bytes. The shared topic
   // supplies the first authenticated control socket; no program torrent is
   // installed on the worker to manufacture a connection.

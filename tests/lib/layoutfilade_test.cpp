@@ -119,6 +119,21 @@ TEST(LayoutfiladeTest, CoordinateDescentAndR9) {
   ASSERT_TRUE(hitByte.has_value());
   EXPECT_EQ(hitByte->entryIndex, 500U);
   EXPECT_EQ(hitByte->intraByteOffset, 5U);
+
+  const auto indexAtY = filade.findEntryIndexAtY(hitIdx->startYPx + 2.0F);
+  ASSERT_TRUE(indexAtY);
+  EXPECT_EQ(*indexAtY, 500U);
+}
+
+TEST(LayoutfiladeTest, IndexQueryDistinguishesEmptyFromFirstEntry) {
+  const Layoutfilade empty;
+  EXPECT_FALSE(empty.findEntryIndexAtY(0.0F));
+
+  const std::vector<LayoutEntry> entries{{.byteLength = 1, .heightPx = 10.0F}};
+  const auto one   = Layoutfilade::buildFromEntries(entries);
+  const auto index = one.findEntryIndexAtY(0.0F);
+  ASSERT_TRUE(index);
+  EXPECT_EQ(*index, 0U);
 }
 
 TEST(LayoutfiladeTest, RichMediaBoxHandling) {
@@ -289,3 +304,13 @@ TEST(LayoutfiladeTest, IncrementalInvalidationAndResize) {
 }
 
 } // namespace
+
+TEST(LayoutfiladeParentTest, ParentZeroIsDistinctFromRootWithoutGrowingACrum) {
+  LayoutCrum root;
+  EXPECT_FALSE(root.parentIndex);
+  LayoutCrum child;
+  child.parentIndex = 0;
+  ASSERT_TRUE(child.parentIndex);
+  EXPECT_EQ(*child.parentIndex, 0U);
+  static_assert(sizeof(LayoutCrum) == 64);
+}

@@ -1,0 +1,10 @@
+predicate reading(key sensor: Str, value: Int)
+event Sample { sensor: Str, value: Int }
+event Clear { sensor: Str }
+
+agent Readings {
+  var latest: Int := 0
+  on Sample as s { revise reading(s.sensor, s.value) }
+  on +reading(?sensor, ?value) { latest := value }
+  on Clear as c { forget reading(c.sensor, ?old) }
+}

@@ -62,18 +62,18 @@ enum class OverlayClaimState : std::uint8_t {
  */
 struct OverlayCandidate {
   zigzag::CellRef claimHandle{zigzag::noCell};
-  zigzag::CellRef from{zigzag::noCell};
-  zigzag::DimRef dimension{zigzag::noCell};
+  std::optional<zigzag::CellRef> from;
+  std::optional<zigzag::DimRef> dimension;
   zigzag::DimVector direction{zigzag::DimVector::POS};
-  zigzag::CellRef to{zigzag::noCell};
+  std::optional<zigzag::CellRef> to;
   ProminenceTier tier{ProminenceTier::Public};
   std::int64_t score{0};
   OverlayClaimState state{OverlayClaimState::Unintelligible};
-  std::uint32_t claimOpIndex{0};
+  std::optional<std::uint32_t> claimOpIndex;
   std::string publicationKey;
-  MicroversionId claimVersion;
+  std::optional<MicroversionId> claimVersion;
 
-  [[nodiscard]] bool isBreak() const noexcept { return to == zigzag::noCell; }
+  [[nodiscard]] bool isBreak() const noexcept { return !to.has_value(); }
   [[nodiscard]] bool isApplied() const noexcept {
     return state == OverlayClaimState::Applied;
   }
@@ -89,7 +89,7 @@ struct OverlayAttachment {
   std::string publicationKey;
   std::int64_t sequence{0};
   std::optional<ProminenceTier> explicitTier;
-  zigzag::CellRef releaseCell{zigzag::noCell};
+  std::optional<zigzag::CellRef> releaseCell;
   std::vector<GlobalLink> classicLinks;
 };
 
@@ -126,49 +126,55 @@ struct OverlayReleaseResult {
 [[nodiscard]] OverlayTargetResult
 declareOverlayTarget(Store &store, const MicroversionId &parent,
                      const GlobalDocumentState &targetState,
-                     zigzag::CellRef releaseCell = zigzag::noCell);
+                     std::optional<zigzag::CellRef> releaseCell = std::nullopt);
 
 [[nodiscard]] OverlayTargetResult
 declareOverlayTarget(Store &store, const MicroversionId &parent,
-                     zigzag::CellRef releaseCell,
+                     std::optional<zigzag::CellRef> releaseCell,
                      const GlobalDocumentState &targetState);
 
 /**
  * @brief Author an overlay SetLink claim and file its handle on
  * d.overlay-claims (§5.12 §2).
  */
-[[nodiscard]] OverlayClaimResult authorOverlayClaim(
-    Store &store, const MicroversionId &parent, zigzag::CellRef from,
-    zigzag::DimRef dim, zigzag::DimVector dir, zigzag::CellRef to,
-    zigzag::CellRef releaseCell = zigzag::noCell, std::string_view label = {});
+[[nodiscard]] OverlayClaimResult
+authorOverlayClaim(Store &store, const MicroversionId &parent,
+                   zigzag::CellRef from, zigzag::DimRef dim,
+                   zigzag::DimVector dir, std::optional<zigzag::CellRef> to,
+                   std::optional<zigzag::CellRef> releaseCell = std::nullopt,
+                   std::string_view label                     = {});
 
 [[nodiscard]] OverlayClaimResult
 authorOverlayClaim(Store &store, const MicroversionId &parent,
-                   zigzag::CellRef releaseCell, zigzag::CellRef from,
-                   zigzag::DimRef dim, zigzag::DimVector dir,
-                   zigzag::CellRef to, std::string_view label = {});
+                   std::optional<zigzag::CellRef> releaseCell,
+                   zigzag::CellRef from, zigzag::DimRef dim,
+                   zigzag::DimVector dir, std::optional<zigzag::CellRef> to,
+                   std::string_view label = {});
 
 /**
- * @brief Author an explicit break (to == noCell) and file its handle on
+ * @brief Author an explicit break (absent target) and file its handle on
  * d.overlay-claims (§5.12 §2).
  */
-[[nodiscard]] OverlayClaimResult authorOverlayBreak(
-    Store &store, const MicroversionId &parent, zigzag::CellRef from,
-    zigzag::DimRef dim, zigzag::DimVector dir,
-    zigzag::CellRef releaseCell = zigzag::noCell, std::string_view label = {});
+[[nodiscard]] OverlayClaimResult
+authorOverlayBreak(Store &store, const MicroversionId &parent,
+                   zigzag::CellRef from, zigzag::DimRef dim,
+                   zigzag::DimVector dir,
+                   std::optional<zigzag::CellRef> releaseCell = std::nullopt,
+                   std::string_view label                     = {});
 
 [[nodiscard]] OverlayClaimResult
 authorOverlayBreak(Store &store, const MicroversionId &parent,
-                   zigzag::CellRef releaseCell, zigzag::CellRef from,
-                   zigzag::DimRef dim, zigzag::DimVector dir,
-                   std::string_view label = {});
+                   std::optional<zigzag::CellRef> releaseCell,
+                   zigzag::CellRef from, zigzag::DimRef dim,
+                   zigzag::DimVector dir, std::string_view label = {});
 
 /**
  * @brief Seal an overlay release by touching releaseCell last (§5.12 §2).
  */
 [[nodiscard]] OverlayReleaseResult
 sealOverlayRelease(Store &store, const MicroversionId &parent,
-                   zigzag::CellRef releaseCell, std::string_view label = {});
+                   std::optional<zigzag::CellRef> releaseCell = std::nullopt,
+                   std::string_view label                     = {});
 
 struct RebaseResult {
   MicroversionId version;

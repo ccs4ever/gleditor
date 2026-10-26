@@ -497,6 +497,18 @@ FittedText fit(const std::string_view source, const FontFacePtr &font,
   }
   detail::recordLayout(source.size());
   FittedText result;
+  if ((constraints.maxWidthPx && (!std::isfinite(*constraints.maxWidthPx) ||
+                                  *constraints.maxWidthPx < 0.0F)) ||
+      (constraints.maxHeightPx && (!std::isfinite(*constraints.maxHeightPx) ||
+                                   *constraints.maxHeightPx < 0.0F))) {
+    throw std::invalid_argument(
+        "TextFit extents must be finite and nonnegative");
+  }
+  if ((constraints.maxWidthPx && *constraints.maxWidthPx == 0.0F) ||
+      (constraints.maxHeightPx && *constraints.maxHeightPx == 0.0F)) {
+    result.truncated = !source.empty();
+    return result;
+  }
   if (source.empty() || !font || !font->hbFont()) {
     return result;
   }
@@ -506,26 +518,24 @@ FittedText fit(const std::string_view source, const FontFacePtr &font,
   }
   detail::initializeUnicodeBreaks();
   const float lineHeight = std::max(1.0F, font->metrics().lineHeight);
-  std::size_t maxLines   = constraints.maxLines != 0
-                               ? constraints.maxLines
-                               : std::numeric_limits<std::uint16_t>::max();
+  std::optional<std::size_t> maxLines = constraints.maxLines;
   if (constraints.overflow != Overflow::Wrap) {
-    maxLines = std::min(maxLines, std::size_t{1});
+    maxLines = maxLines ? std::min(*maxLines, std::size_t{1}) : 1;
   }
-  if (constraints.maxHeightPx > 0.0F &&
-      std::isfinite(constraints.maxHeightPx)) {
-    const auto heightLines = std::floor(constraints.maxHeightPx / lineHeight);
-    if (heightLines < static_cast<float>(maxLines)) {
+  if (constraints.maxHeightPx) {
+    const auto heightLines = std::floor(*constraints.maxHeightPx / lineHeight);
+    if (heightLines <
+            static_cast<double>(std::numeric_limits<std::size_t>::max()) &&
+        (!maxLines || heightLines < static_cast<double>(*maxLines))) {
       maxLines = static_cast<std::size_t>(heightLines);
     }
   }
-  if (maxLines == 0) {
+  if (maxLines && *maxLines == 0) {
     result.truncated = true;
     return result;
   }
-  const float maxWidth = constraints.maxWidthPx > 0.0F
-                             ? constraints.maxWidthPx
-                             : std::numeric_limits<float>::infinity();
+  const float maxWidth =
+      constraints.maxWidthPx.value_or(std::numeric_limits<float>::max());
   std::string normalized;
   auto text = source;
   if (constraints.overflow != Overflow::Wrap &&
@@ -546,7 +556,7 @@ FittedText fit(const std::string_view source, const FontFacePtr &font,
   const auto marker =
       constraints.overflow == Overflow::Clip ? Marker{} : markerFor(font);
   auto lines = constraints.overflow == Overflow::Wrap
-                   ? wrapLines(atoms, maxWidth, maxLines)
+                   ? wrapLines(atoms, maxWidth, maxLines.value_or(atoms.size()))
                    : std::vector<Line>{
                          Line{.end = atoms.size(), .consumed = atoms.size()}};
   std::vector<const Atom *> retained;
@@ -577,8 +587,10 @@ FittedText fit(const std::string_view source, const FontFacePtr &font,
     const float visibleWidth = constraints.overflow == Overflow::Clip
                                    ? std::min(width, maxWidth)
                                    : width;
-    const float left = alignedLeft(visibleWidth, maxWidth, constraints.align);
-    const float top  = static_cast<float>(lineIndex) * lineHeight;
+    const float left         = alignedLeft(
+        visibleWidth, maxWidth,
+        constraints.maxWidthPx ? constraints.align : gleditor::TextAlign::Left);
+    const float top      = static_cast<float>(lineIndex) * lineHeight;
     const auto paragraph = atoms[line.begin].paragraph;
     float pen            = left;
     if (constraints.overflow == Overflow::Clip && width > maxWidth &&
@@ -647,12 +659,22 @@ FittedText fit(const std::string_view source, const FontFacePtr &font,
     }
     result.visibleBytes = atom->end;
   }
-  result.lines                = static_cast<std::uint16_t>(lines.size());
-  result.heightPx             = static_cast<float>(lines.size()) * lineHeight;
-  result.shaping.limit        = result.visibleBytes;
-  result.shaping.lineCount    = lines.size();
-  result.shaping.textWidthPx  = static_cast<int>(std::ceil(rightmost));
-  result.shaping.textHeightPx = static_cast<int>(std::ceil(result.heightPx));
+  result.lines             = lines.size();
+  result.heightPx          = static_cast<float>(lines.size()) * lineHeight;
+  result.shaping.limit     = result.visibleBytes;
+  result.shaping.lineCount = lines.size();
+  const float outputWidth  = std::ceil(rightmost);
+  const float outputHeight = std::ceil(result.heightPx);
+  const auto exceedsInt    = [](const float extent) {
+    return !std::isfinite(extent) ||
+           static_cast<double>(extent) > std::numeric_limits<int>::max();
+  };
+  if (!std::isfinite(result.widthPx) || exceedsInt(outputWidth) ||
+      exceedsInt(outputHeight)) {
+    throw std::length_error("Fitted text extent exceeds output range");
+  }
+  result.shaping.textWidthPx  = static_cast<int>(outputWidth);
+  result.shaping.textHeightPx = static_cast<int>(outputHeight);
   return result;
 }
 

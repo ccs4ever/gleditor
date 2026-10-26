@@ -8,6 +8,7 @@
 #include <atomic>
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -29,7 +30,7 @@ public:
     std::uint64_t startOffset{0};
     std::uint64_t length{0};
     std::string path;
-    int fd{-1};
+    std::optional<int> fd;
     bool isReadOnly{true};
   };
 
@@ -152,7 +153,7 @@ private:
   std::atomic<std::uint64_t> totalBytes{0};
   std::size_t committedBytes{0};
 
-  int activeFd{-1};
+  std::optional<int> activeFd;
   std::string activePath;
   /// Where the active segment begins in the spool's address space. The file
   /// holds [activeStart, totalBytes), so an arena offset's place in the file

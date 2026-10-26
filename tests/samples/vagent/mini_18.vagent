@@ -1,0 +1,17 @@
+event Start
+capacity Lamp {
+  effect def set_level(value: Int) within 1s
+}
+native skill HostLamp implements Lamp
+goal Light() perform
+
+agent Lighting {
+  uses Lamp
+  install HostLamp()
+  var finished: Bool := false
+  on Start { adopt Light() }
+  plan light for Light {
+    set_level(3)
+    finished := true
+  }
+}

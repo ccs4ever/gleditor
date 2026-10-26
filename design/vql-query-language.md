@@ -730,6 +730,20 @@ Bare truthiness is left alone and is not deprecated: it *is* `any()`, it reads n
 and rewriting every existing query to say so would add a word to each without adding a fact. Write
 the quantifier when a reader might otherwise assume a different one.
 
+**A missing value is not an empty string or a false value.** A variable or path used as a scalar has
+no value when its stream is empty; the string literal `""`, numeric `0`, and Boolean `false` remain
+present values. A missing comparison operand makes the comparison false (then any explicit factor
+negation applies); a missing shape target does not match. Binding a missing scalar result binds an
+empty stream, while `count()` over that stream is the present integer `0`. A computed creation whose
+expression has no value creates no cell. Functions that intentionally coerce an argument define that
+coercion themselves; absence is not passed through an empty-string marker.
+
+For text search, a missing needle yields no matches (or false for `contains`); an explicit empty
+needle keeps its ordinary string-search meaning. An omitted optional slice offset or length keeps
+its documented default, while a supplied expression with no value yields no slice result. A bare
+store anchor still defaults to the local home; an explicit store-key expression with no value
+resolves to an empty result instead of selecting that home.
+
 ### 4.4 Result Materialization: Topological Return Weaving
 
 `return` avoids heap allocations or string serializations, and it does not introduce a JSON-shaped
@@ -1783,6 +1797,14 @@ streams of `Store` handles:
 - **`system(domain)`**: Resolves local sovereign subsystem stores (`keymap`, `settings`,
   `activity`).
 - **`btih(hash)`** & **`ledger(root)`**: Binds immutable frozen archives or Merkle ledgers.
+
+In the query evaluator, `find(text)` uses the supplied text as-is, including the empty string. An
+empty needle matches once on each document line (including a trailing empty line) and matches every
+cell text. In a scalar expression, `delta()` without a target keeps the default `modified` value;
+when an explicit variable or path target resolves to no cell, the expression has no value. A real
+target without a delta link still has the default `modified` value. As a path step, `delta()` maps
+incoming cells, so an empty incoming stream produces no results. Scalar literals do not identify
+target cells and yield no value when supplied as an explicit `delta` target.
 
 ##### Uniform Function Call Syntax (UFCS) & Context Propagation
 

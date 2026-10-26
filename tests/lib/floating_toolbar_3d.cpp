@@ -92,7 +92,7 @@ TEST(FloatingToolbarLayoutTest, IgnoresUnrelatedPickingAndHiddenActions) {
   pick.requestId = 1;
   EXPECT_FALSE(toolbar.picked(pick, state));
   EXPECT_EQ(dispatches, 0);
-  pick.requestId = 0;
+  pick.requestId.reset();
   toolbar.setVisible(false);
   pick.tag.clusterIndex = static_cast<std::uint32_t>(Toolbar::ButtonId::Bold);
   EXPECT_FALSE(toolbar.picked(pick, state));

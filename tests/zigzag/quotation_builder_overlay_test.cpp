@@ -9,9 +9,17 @@
 #include <gtest/gtest.h>
 #include <map>
 #include <set>
+#include <stdexcept>
 
 namespace {
 namespace ui = gleditor::ui;
+std::uint32_t requiredId(const render::BufferHandle handle) {
+  if (!handle.id) {
+    throw std::logic_error("mock received an absent buffer handle");
+  }
+  return *handle.id;
+}
+
 class QuotationInkDevice : public testing::NiceMock<MockRenderDevice> {
 public:
   std::uint32_t next{1};
@@ -35,7 +43,7 @@ public:
         });
     ON_CALL(*this, resizeBuffer)
         .WillByDefault([this](render::BufferHandle handle, std::size_t size) {
-          buffers[handle.id].resize(size);
+          buffers[requiredId(handle)].resize(size);
           return handle;
         });
     ON_CALL(*this, createPipeline)
@@ -44,7 +52,7 @@ public:
         .WillByDefault([this](render::BufferHandle buffer, std::size_t offset,
                               std::span<const std::byte> data) {
           ++uploads;
-          auto &storage = buffers[buffer.id];
+          auto &storage = buffers[requiredId(buffer)];
           storage.resize(std::max(storage.size(), offset + data.size()));
           std::memcpy(storage.data() + offset, data.data(), data.size());
         });
@@ -53,7 +61,7 @@ public:
                               render::BufferHandle buffer, std::size_t offset,
                               std::uint32_t count) {
           if (count) ++draws;
-          const auto &storage = buffers.at(buffer.id);
+          const auto &storage = buffers.at(requiredId(buffer));
           for (std::uint32_t index = 0; index < count; ++index) {
             Doc::VBORow row{};
             std::memcpy(&row, storage.data() + offset + index * sizeof(row),
@@ -80,10 +88,14 @@ struct QuotationFixture {
           head,
           "A full Unicode cell 日本語 👩‍👩‍👧‍👦 café " +
               std::to_string(i));
-      const auto cell = store.cellRefOf(head);
+      const auto cell = store.cellRefOf(head).value();
       const auto branch =
           store.makeDimension(head, "d.branch." + std::to_string(i));
-      head = store.setLink(branch.version, store.homeCell(), branch.dim,
+      const auto home = store.homeCell();
+      if (!home) {
+        throw std::logic_error("quotation fixture requires a home cell");
+      }
+      head = store.setLink(branch.version, *home, branch.dim,
                            zigzag::DimVector::POS, cell);
     }
     for (int i = 0; i < 15; ++i) {
@@ -93,6 +105,17 @@ struct QuotationFixture {
     }
   }
 };
+
+TEST(QuotationBuilderOverlayTest, TextOnlyStoreStartsWithoutRootCell) {
+  auto scroll = std::make_shared<xanadu::UserPermascroll>();
+  xanadu::Store store(scroll);
+  const auto head = store.insert(xanadu::MicroversionId{}, 0, "text only");
+
+  xanadu::QuotationBuilderOverlay overlay(store, head, {});
+
+  EXPECT_FALSE(overlay.builder().config().rootRef);
+}
+
 const ui::WidgetVisual *findAction(const ui::WidgetScene &scene,
                                    std::string_view action) {
   const auto found =
@@ -164,7 +187,7 @@ TEST(QuotationBuilderOverlayTest, PagesDrawFittedInkAndExposeFullSharedBounds) {
             checkContains(box.rect, scene->layout.bounds);
             checkContains(box.contentRect, box.rect);
             if (box.parentId) {
-              const auto *parent = scene->layout.find(box.parentId);
+              const auto *parent = scene->layout.find(*box.parentId);
               ASSERT_NE(parent, nullptr);
               checkContains(box.rect, parent->contentRect);
             }
@@ -396,7 +419,7 @@ TEST(QuotationBuilderOverlayTest,
   const auto go      = [&](std::string page) {
     const auto scene = overlay.prepare(metrics, ui::defaultTheme());
     const auto tab   = std::ranges::find(scene->visuals, page,
-                                         &ui::WidgetVisual::accessibleLabel);
+                                              &ui::WidgetVisual::accessibleLabel);
     EXPECT_NE(tab, scene->visuals.end());
     if (tab != scene->visuals.end()) {
       EXPECT_TRUE(overlay.activateNode(tab->id));

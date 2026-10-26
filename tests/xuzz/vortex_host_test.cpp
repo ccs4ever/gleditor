@@ -22,7 +22,7 @@ TEST(VortexHostTest, InitializationAndStdLibRegistration) {
   VortexHost host;
 
   EXPECT_NE(host.core().home(), noCell);
-  EXPECT_NE(host.gcCursor(), noCell);
+  EXPECT_TRUE(host.gcCursor());
 
   const auto modules = host.availableModules();
   EXPECT_THAT(modules, testing::Contains("std:zigzag"));
@@ -50,38 +50,35 @@ TEST(VortexHostTest, ZigzagStdLibOperations) {
   CellRef c1  = arena.makeCell("Node 1");
 
   // Test zzInsert posward
-  CellRef c2 = stdlib.zzInsert(c1, dimX, DimVector::POS, "Node 2");
-  EXPECT_NE(c2, noCell);
+  CellRef c2 = stdlib.zzInsert(c1, dimX, DimVector::POS, "Node 2").value();
   EXPECT_NE(c2, c1);
   EXPECT_EQ(stdlib.zzStep(c1, dimX, DimVector::POS), c2);
   EXPECT_EQ(stdlib.zzStep(c2, dimX, DimVector::NEG), c1);
 
   // Test zzInsert negward
-  CellRef c0 = stdlib.zzInsert(c1, dimX, DimVector::NEG, "Node 0");
-  EXPECT_NE(c0, noCell);
+  CellRef c0 = stdlib.zzInsert(c1, dimX, DimVector::NEG, "Node 0").value();
   EXPECT_EQ(stdlib.zzStep(c1, dimX, DimVector::NEG), c0);
   EXPECT_EQ(stdlib.zzStep(c0, dimX, DimVector::POS), c1);
 
   // Test zzUnlink
-  CellRef unlinked = stdlib.zzUnlink(c1, dimX, DimVector::POS);
+  CellRef unlinked = stdlib.zzUnlink(c1, dimX, DimVector::POS).value();
   EXPECT_EQ(unlinked, c2);
-  EXPECT_EQ(stdlib.zzStep(c1, dimX, DimVector::POS), noCell);
+  EXPECT_EQ(stdlib.zzStep(c1, dimX, DimVector::POS), std::nullopt);
 
   // Test zzLink
-  CellRef linked = stdlib.zzLink(c1, c2, dimX, DimVector::POS);
+  CellRef linked = stdlib.zzLink(c1, c2, dimX, DimVector::POS).value();
   EXPECT_EQ(linked, c2);
   EXPECT_EQ(stdlib.zzStep(c1, dimX, DimVector::POS), c2);
 
   // Test zzDelete
-  CellRef del = stdlib.zzDelete(c2);
+  CellRef del = stdlib.zzDelete(c2).value();
   EXPECT_EQ(del, c2);
-  EXPECT_EQ(stdlib.zzStep(c1, dimX, DimVector::POS), noCell);
+  EXPECT_EQ(stdlib.zzStep(c1, dimX, DimVector::POS), std::nullopt);
 
   // Test zzCloneToChain
-  CellRef c3    = arena.makeCell("Original");
-  CellRef clone = stdlib.zzCloneToChain(c3, c1);
-  EXPECT_NE(clone, noCell);
-  auto cloneLink = core.link(c3, core.dims().clone, DimVector::POS);
+  CellRef c3     = arena.makeCell("Original");
+  CellRef clone  = stdlib.zzCloneToChain(c3, c1).value();
+  auto cloneLink = core.readLink(c3, core.dims().clone, DimVector::POS);
   EXPECT_TRUE(cloneLink.has_value());
   EXPECT_EQ(*cloneLink, clone);
 }
@@ -115,24 +112,25 @@ TEST(VortexHostTest, ActionDispatching) {
       .z_dimension = "d.3",
   };
 
-  CellRef focus    = arena.makeCell("Focus Node");
-  CellRef newFocus = noCell;
+  CellRef focus = arena.makeCell("Focus Node");
+  std::optional<CellRef> newFocus;
 
   // Insert posward along X
   bool handled =
       host.dispatchAction("insert-cell-x-pos", focus, axes, newFocus);
   EXPECT_TRUE(handled);
-  EXPECT_NE(newFocus, noCell);
-  EXPECT_NE(newFocus, focus);
+  ASSERT_TRUE(newFocus);
+  EXPECT_NE(*newFocus, focus);
 
   // Step negative along X back to focus
-  CellRef backFocus = noCell;
-  handled = host.dispatchAction("step-x-neg", newFocus, axes, backFocus);
+  std::optional<CellRef> backFocus;
+  handled = host.dispatchAction("step-x-neg", *newFocus, axes, backFocus);
   EXPECT_TRUE(handled);
   EXPECT_EQ(backFocus, focus);
 
   // Delete cell
-  handled = host.dispatchAction("delete-focus-cell", newFocus, axes, backFocus);
+  handled =
+      host.dispatchAction("delete-focus-cell", *newFocus, axes, backFocus);
   EXPECT_TRUE(handled);
 }
 
@@ -143,20 +141,21 @@ TEST(VortexHostTest, OpcodeAndSymbolCloning) {
   CellRef root = arena.makeCell("Root");
 
   // Clone opcode
-  CellRef opCell = host.cloneSymbolToChain("#LINK", root);
-  EXPECT_NE(opCell, noCell);
-  EXPECT_EQ(arena.textOf(opCell), "#LINK");
+  const auto opCell = host.cloneSymbolToChain("#LINK", root);
+  ASSERT_TRUE(opCell);
+  EXPECT_EQ(arena.textOf(*opCell), "#LINK");
 
   // Clone stdlib symbol
-  CellRef symClone = host.cloneSymbolToChain("std:zigzag/step", root);
-  EXPECT_NE(symClone, noCell);
-  EXPECT_NE(symClone, opCell);
+  const auto symClone = host.cloneSymbolToChain("std:zigzag/step", root);
+  ASSERT_TRUE(symClone);
+  EXPECT_NE(*symClone, *opCell);
+  EXPECT_FALSE(host.cloneSymbolToChain("std:missing/symbol", root));
 }
 
 TEST(VortexHostTest, ConfigurationFromStore) {
   Store store;
   store.setSystem(true);
-  auto head = initializeSystemStoreGenesis(store, SystemDocKind::Settings, {});
+  auto head = initializeSystemStoreGenesis(store, SystemDocKind::Settings);
 
   SettingSpec budgetSpec;
   budgetSpec.name  = "vortex.cycle_budget";
@@ -194,18 +193,19 @@ TEST(VortexHostTest, VQLCompilationAndAttachmentToArena) {
   auto result  = host.compileAndAttachVQL("/d.1/d.2", root, "d.spin",
                                           DimVector::POS, false);
   ASSERT_TRUE(result.success) << result.errorMessage;
-  ASSERT_NE(result.entryOpcode, noCell);
+  ASSERT_TRUE(result.entryOpcode);
 
-  DimRef spinDim   = host.core().dims().spin;
-  CellRef attached = arena.linked(root, spinDim, DimVector::POS);
-  EXPECT_EQ(attached, result.entryOpcode);
+  DimRef spinDim      = host.core().dims().spin;
+  const auto attached = arena.linked(root, spinDim, DimVector::POS);
+  ASSERT_TRUE(attached);
+  EXPECT_EQ(*attached, result.entryOpcode);
 }
 
 TEST(VortexHostTest, VQLCompilationPromotionToStore) {
   Store store;
   auto parent        = store.sliceGenesis({});
   parent             = store.makeCell(parent, "Persistent Target");
-  CellRef targetCell = store.cellRefOf(parent);
+  CellRef targetCell = store.cellRefOf(parent).value();
 
   auto manifold = store.rebuildManifold(parent);
   VortexHost host(&manifold);
@@ -217,7 +217,7 @@ TEST(VortexHostTest, VQLCompilationPromotionToStore) {
 
   const auto beforeOps = store.opCount();
   auto promoted        = host.promoteAndAttachToStore(
-      result.entryOpcode, targetCell, "d.spin", DimVector::POS, store, parent);
+      *result.entryOpcode, targetCell, "d.spin", DimVector::POS, store, parent);
   ASSERT_TRUE(promoted.has_value());
   EXPECT_FALSE(promoted->cells.empty());
   EXPECT_GT(store.opCount(), beforeOps);
@@ -226,9 +226,10 @@ TEST(VortexHostTest, VQLCompilationPromotionToStore) {
   const auto spinName  = updatedManifold.dimensionNamed("d.spin", store);
   ASSERT_TRUE(spinName.has_value());
   const DimRef spinDim = *spinName;
-  CellRef linkedToTarget =
+  const auto linkedToTarget =
       updatedManifold.linked(targetCell, spinDim, DimVector::POS);
-  EXPECT_EQ(linkedToTarget, promoted->cells.front());
+  ASSERT_TRUE(linkedToTarget);
+  EXPECT_EQ(*linkedToTarget, promoted->cells.front());
 }
 
 TEST(VortexHostTest, VQLQuickNavigationEvaluation) {
@@ -259,9 +260,9 @@ TEST(VortexHostTest, VQLOneTimeScriptExecution) {
   EXPECT_TRUE(res.success) << res.message;
   EXPECT_FALSE(res.affectedCells.empty());
 
-  DimRef stepDim = host.core().dims().step;
-  CellRef child  = arena.linked(root, stepDim, DimVector::POS);
-  EXPECT_NE(child, noCell);
+  DimRef stepDim   = host.core().dims().step;
+  const auto child = arena.linked(root, stepDim, DimVector::POS);
+  ASSERT_TRUE(child);
 }
 
 TEST(VortexHostTest, VQLMacroRegistrationAndSystemStorePersistence) {
@@ -288,8 +289,8 @@ TEST(VortexHostTest, VQLMacroRegistrationAndSystemStorePersistence) {
   EXPECT_TRUE(arena.link(root, d1, DimVector::POS, child));
 
   ViewAxisBinding axes{};
-  CellRef newFocus = noCell;
-  bool handled     = host2.dispatchAction("hop-child", root, axes, newFocus);
+  std::optional<CellRef> newFocus;
+  bool handled = host2.dispatchAction("hop-child", root, axes, newFocus);
   EXPECT_TRUE(handled);
   EXPECT_EQ(newFocus, child);
 }
@@ -305,7 +306,7 @@ TEST(VortexHostTest, KeymapActionDispatching) {
 
   ViewAxisBinding axes{
       .x_dimension = "d.1", .y_dimension = "d.2", .z_dimension = "d.3"};
-  CellRef newFocus = noCell;
+  std::optional<CellRef> newFocus;
 
   // UI action: swap-xy
   EXPECT_TRUE(host.dispatchAction("swap-xy", c1, axes, newFocus));
@@ -344,8 +345,9 @@ TEST(VortexHostTest, KeymapActionDispatching) {
 
   // Duplication: duplicate-focus-cell
   EXPECT_TRUE(host.dispatchAction("duplicate-focus-cell", c1, axes, newFocus));
-  EXPECT_NE(newFocus, c1);
-  EXPECT_EQ(arena.textOf(newFocus), "C1");
+  ASSERT_TRUE(newFocus);
+  EXPECT_NE(*newFocus, c1);
+  EXPECT_EQ(arena.textOf(*newFocus), "C1");
 }
 
 TEST(VortexHostTest, SovereignLibraryPackaging) {
@@ -416,33 +418,39 @@ TEST(VortexHostTest, AppActionDelegateAndCanonicalDispatch) {
 
   ViewAxisBinding axes{
       .x_dimension = "d.1", .y_dimension = "d.2", .z_dimension = "d.3"};
-  CellRef newFocus = noCell;
+  std::optional<CellRef> newFocus;
 
   std::string lastInterceptedAction;
-  host.setAppActionDelegate([&](std::string_view action, CellRef /*focus*/,
-                                ViewAxisBinding & /*axes*/, CellRef &focusOut) {
-    lastInterceptedAction = std::string(action);
-    if (action == "std:xuzz/custom_save") {
-      focusOut = root;
-      return true;
-    }
-    return false;
-  });
+  host.setAppActionDelegate(
+      [&](std::string_view action, std::optional<CellRef> /*focus*/,
+          ViewAxisBinding & /*axes*/, std::optional<CellRef> &focusOut) {
+        lastInterceptedAction = std::string(action);
+        if (action == "std:xuzz/custom_save") {
+          focusOut = root;
+          return true;
+        }
+        return false;
+      });
 
   // Custom action handled by delegate
-  EXPECT_TRUE(
-      host.dispatchAction("std:xuzz/custom_save", noCell, axes, newFocus));
+  EXPECT_TRUE(host.dispatchAction("std:xuzz/custom_save", std::nullopt, axes,
+                                  newFocus));
   EXPECT_EQ(newFocus, root);
   EXPECT_EQ(lastInterceptedAction, "std:xuzz/custom_save");
 
   // Canonical mapping invoked for legacy action to delegate
-  host.dispatchAction("save", noCell, axes, newFocus);
+  host.dispatchAction("save", std::nullopt, axes, newFocus);
   EXPECT_EQ(lastInterceptedAction, "std:xuzz/save");
 
   // Canonical navigation dispatch
   DimRef d1  = host.core().mintDimension("d.1");
   CellRef c2 = arena.makeCell("C2");
   EXPECT_TRUE(arena.link(root, d1, DimVector::POS, c2));
+
+  EXPECT_FALSE(host.dispatchAction("step-x-pos", std::nullopt, axes, newFocus));
+  EXPECT_FALSE(newFocus.has_value());
+  EXPECT_TRUE(host.dispatchAction("jump-home", std::nullopt, axes, newFocus));
+  EXPECT_TRUE(newFocus.has_value());
 
   EXPECT_TRUE(host.dispatchAction("std:nav/step_x_pos", root, axes, newFocus));
   EXPECT_EQ(newFocus, c2);
@@ -562,7 +570,8 @@ TEST(VortexHostTest, ParallelIndependentCursorsAreDeterministic) {
   // determinism and isolation, not the magnitude. (The 200 concurrent steps
   // per context are the thread-stress the TSan target checks.)
   for (std::uint32_t i = 0; i < kContexts; ++i) {
-    const zigzag::vortex::CellValue got = jobs[i].ctx->core.render(jobs[i].acc);
+    const zigzag::vortex::CellValue got =
+        jobs[i].ctx->core.render(jobs[i].acc).value();
     EXPECT_EQ(got, zigzag::vortex::CellValue(static_cast<std::int64_t>(1)))
         << "context " << i << " accumulator wrong";
   }

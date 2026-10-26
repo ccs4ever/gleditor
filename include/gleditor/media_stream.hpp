@@ -99,7 +99,8 @@ public:
    * @brief Read up to dst.size() bytes starting at stream offset.
    * @param offset Byte offset within this stream.
    * @param dst Buffer to receive the bytes.
-   * @return Actual number of bytes read (0 on EOF or invalid offset).
+   * @return Actual number of bytes read (0 on EOF or an empty request).
+   * @throws std::ios_base::failure if file I/O fails; failure is not EOF.
    */
   [[nodiscard]] virtual std::size_t read(std::uint64_t offset,
                                          std::span<std::byte> dst) = 0;
@@ -157,6 +158,8 @@ private:
  */
 class FileMediaStream : public MediaStream {
 public:
+  /// Open a seekable file. Empty files have size zero; unavailable files throw
+  /// std::ios_base::failure instead of masquerading as empty streams.
   explicit FileMediaStream(std::string filePath);
   FileMediaStream(std::string filePath, std::uint64_t fileOffset,
                   std::uint64_t length);
@@ -186,6 +189,7 @@ public:
   using ReadCallback = std::function<std::size_t(std::uint64_t offset,
                                                  std::span<std::byte> dst)>;
 
+  /// An empty callback is invalid and throws std::invalid_argument.
   CallbackMediaStream(ReadCallback callback, std::uint64_t streamSize);
   CallbackMediaStream(ReadCallback callback, std::uint64_t streamSize,
                       std::uint64_t baseOffset, std::uint64_t length);

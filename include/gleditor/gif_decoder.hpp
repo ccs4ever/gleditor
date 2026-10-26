@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <expected>
 
+#include <gleditor/cpp26.hpp>
 #include <gleditor/decode_error.hpp>
 #include <memory>
 #include <optional>
@@ -71,12 +72,14 @@ public:
   /**
    * @brief Get the frame active at time @p seconds.
    */
-  [[nodiscard]] const GifFrame &frameAt(float seconds) const noexcept;
+  [[nodiscard]] cpp26::optional<const GifFrame &>
+  frameAt(float seconds) const noexcept;
 
   /**
    * @brief Direct indexed frame access.
    */
-  [[nodiscard]] const GifFrame &frame(std::size_t index) const noexcept;
+  [[nodiscard]] cpp26::optional<const GifFrame &>
+  frame(std::size_t index) const noexcept;
 
 private:
   GifDecoder() = default;
@@ -85,7 +88,6 @@ private:
   int height_{0};
   float totalDuration_{0.0F};
   std::vector<GifFrame> frames_;
-  static const GifFrame emptyFrame_;
 };
 
 } // namespace gleditor

@@ -20,7 +20,7 @@ protected:
           "text")
           .hash,
       0, "text", 0, 30);
-  std::string global = scrollKey(scroll);
+  std::string global = scrollKey(scroll).value();
   GlobalLink link{.owner = "Author",
                   .left  = {{global, 0, 3}, {global, 6, 3}},
                   .right = {{global, 10, 3}, {global, 16, 3}, {global, 24, 3}}};
@@ -36,6 +36,18 @@ protected:
   }
   ~ReaderLinkPackagesTest() override { std::filesystem::remove_all(root); }
 };
+TEST_F(ReaderLinkPackagesTest,
+       PackageOrdinalZeroIsPresentWhileDraftLinkIdentityIsAbsent) {
+  const std::vector<PackageDocumentView> documents;
+  const PackageOccurrenceIndex index(documents, {});
+  const auto resolved = index.resolve(ReaderLinkPackages::keyOf(hash, 0), pkg);
+  ASSERT_TRUE(resolved.link.id);
+  EXPECT_EQ(*resolved.link.id, 0U);
+
+  const Link draft;
+  EXPECT_FALSE(draft.id);
+}
+
 TEST_F(ReaderLinkPackagesTest,
        ExactImmutableChoicesSurviveRestartWithoutEnablingUpdates) {
   const auto path = root / "preferences";
@@ -125,8 +137,8 @@ TEST_F(
   const auto slot = a.addScroll(scroll);
   auto other      = Scroll::ofTorrentFile(
       makeTorrent(std::vector<TorrentContent>{{.path = "text",
-                                               .data = "unrelated bytes"}},
-                  "other")
+                                                    .data = "unrelated bytes"}},
+                       "other")
           .hash,
       0, "text", 0, 15);
   b.addScroll(other);
@@ -213,7 +225,7 @@ TEST_F(ReaderLinkPackagesTest,
           {.path = "large", .data = std::string(100000, 'x')}},
       "large");
   const auto scroll = Scroll::ofTorrentFile(seal.hash, 0, "large", 0, 100000);
-  const auto global = scrollKey(scroll);
+  const auto global = scrollKey(scroll).value();
   Store store(std::make_shared<UserPermascroll>());
   const auto slot = store.addScroll(scroll);
   std::vector<PrimediaSpan> pieces;

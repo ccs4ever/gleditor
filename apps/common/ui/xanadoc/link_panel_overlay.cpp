@@ -136,8 +136,8 @@ LinkPanelOverlay::noteNavigationSelection(const Caret &caret,
         session.generation(),
         caret.documentIndex(),
         DocumentSite{.store   = session.store(view.storeIndex).documentId(),
-                     .version = view.version,
-                     .range = {caret.selectionStart(), caret.selectionEnd()}}};
+                       .version = view.version,
+                       .range = {caret.selectionStart(), caret.selectionEnd()}}};
   }
   return this;
 }
@@ -334,7 +334,7 @@ void LinkPanelOverlay::rebuildPanel(gleditor::FrameContext &ctx) {
 
 bool LinkPanelOverlay::picked(const render::PickingResult &pick,
                               RenderState &state) {
-  if (pick.requestId == 0 && pick.tag.kind == render::tagKindOverlay &&
+  if (!pick.requestId && pick.tag.kind == render::tagKindOverlay &&
       pick.tag.clusterIndex >= kTagPanelBase &&
       pick.tag.clusterIndex <= kTagPanelBase + buttons.size()) {
     if (!panel.visible()) return false;
@@ -356,7 +356,7 @@ bool LinkPanelOverlay::picked(const render::PickingResult &pick,
   // owns its refusal. Accessibility accurately exposes no action for it.
   const auto scene = panel.snapshot();
   const auto id    = pick.overlayWidgetId ? pick.overlayWidgetId
-                     : pick.requestId == 0 && scene
+                     : !pick.requestId && scene
                          ? scene->resolvePickingId(pick.tag.clusterIndex)
                          : std::nullopt;
   if (id) {
@@ -433,9 +433,9 @@ void LinkPanelOverlay::drawFrame(gleditor::FrameContext &ctx) {
               continue;
             const auto &doc      = *ctx.state.docs[*view];
             const auto pageIndex = doc.pageIndexForOffset(site->range.start);
-            const auto page = pageIndex
-                                  ? doc.page(*pageIndex)
-                                  : gleditor::cpp26::optional<const Page &>{};
+            const auto page      = pageIndex
+                                       ? doc.page(*pageIndex)
+                                       : gleditor::cpp26::optional<const Page &>{};
             if (!page) continue;
             const auto band =
                 page->textBandFor(site->range.start, site->range.end);

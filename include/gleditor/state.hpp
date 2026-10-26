@@ -212,21 +212,33 @@ struct AppState {
   std::atomic<std::chrono::duration<float>> frameTimeDelta;
   std::atomic_int mouseX;
   std::atomic_int mouseY;
-  /// Most recent press anchor for application commands; not a pending pick.
-  std::atomic_int clickX{-1}, clickY{-1};
+  /// A coordinate pair copied under pointerPickMutex, when a press has
+  /// occurred.
+  struct PointerPosition {
+    int x{}, y{};
+    bool operator==(const PointerPosition &) const = default;
+  };
   struct PendingPointerPick {
     int x{}, y{};
     std::uint8_t button{1};
     gleditor::ui::PointerPickTarget origin;
   };
   // A position and its originating opening must be transferred together.
-  std::mutex pointerPickMutex;
+  mutable std::mutex pointerPickMutex;
+  std::optional<PointerPosition> lastClickPosition_;
   std::optional<PendingPointerPick> pendingClick, pendingDrag;
+  void recordClickPosition(const int x, const int y) {
+    const std::scoped_lock lock(pointerPickMutex);
+    lastClickPosition_ = PointerPosition{x, y};
+  }
+  [[nodiscard]] std::optional<PointerPosition> lastClickPosition() const {
+    const std::scoped_lock lock(pointerPickMutex);
+    return lastClickPosition_;
+  }
   void queuePointerPick(PendingPointerPick pick, bool drag = false) {
     const std::scoped_lock lock(pointerPickMutex);
     if (!drag) {
-      clickX = pick.x;
-      clickY = pick.y;
+      lastClickPosition_ = PointerPosition{pick.x, pick.y};
     }
     (drag ? pendingDrag : pendingClick) = std::move(pick);
   }

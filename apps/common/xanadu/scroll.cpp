@@ -10,19 +10,33 @@
 
 namespace xanadu {
 
-std::string scrollKey(const Scroll &scroll) {
+std::optional<std::string> scrollKey(const Scroll &scroll) {
   if (scroll.isNamed()) {
-    return scrollKeyFor(scroll.publisher, scroll.salt);
+    return scrollKeyFor(*scroll.publisher, scroll.salt);
   }
   if (scroll.segments.empty()) {
-    return {};
+    return std::nullopt;
   }
   const auto &first = scroll.segments.front();
   return std::format("file:{}:{}", first.torrent.hex(), first.fileIndex);
 }
 
 std::string scrollKeyFor(const PublicKey &publisher, const std::string &salt) {
+  if (publisher.isZero()) {
+    throw std::invalid_argument(
+        "scroll publisher must be a nonzero public key");
+  }
   return std::format("btpk:{}:{}", publisher.hex(), salt);
+}
+
+std::string liveScrollBufferKey(const Scroll &scroll) {
+  if (scroll.isNamed()) {
+    return scrollKeyFor(*scroll.publisher, scroll.salt);
+  }
+  if (!scroll.segments.empty()) {
+    return *scrollKey(scroll);
+  }
+  return std::format("remote-author:{}", scroll.salt);
 }
 
 gleditor::cpp26::optional<const ScrollSegment &>
@@ -58,7 +72,7 @@ bool Scroll::sameContentAs(const Scroll &other) const {
     return publisher == other.publisher && salt == other.salt;
   }
   if (segments.empty() || other.segments.empty()) {
-    return segments.empty() && other.segments.empty();
+    return segments.empty() && other.segments.empty() && salt == other.salt;
   }
   const auto &mine = segments.front();
   const auto &them = other.segments.front();
@@ -67,7 +81,7 @@ bool Scroll::sameContentAs(const Scroll &other) const {
 
 std::string Scroll::describe() const {
   if (isNamed()) {
-    return "urn:btpk:" + publisher.hex() + (salt.empty() ? "" : "/" + salt);
+    return "urn:btpk:" + publisher->hex() + (salt.empty() ? "" : "/" + salt);
   }
   if (segments.empty()) {
     return "an empty scroll";

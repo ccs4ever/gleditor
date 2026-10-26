@@ -14,6 +14,7 @@
 
 #include <cstdlib>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -58,8 +59,8 @@ void resetAssetDirForTesting();
 
 namespace paths {
 
-/// User's home directory ($HOME or USERPROFILE), or empty if unset.
-[[nodiscard]] inline std::string userHome() {
+/// User's home directory ($HOME or USERPROFILE), or nullopt if unset.
+[[nodiscard]] inline std::optional<std::string> userHome() {
   if (const auto *home = std::getenv("HOME");
       nullptr != home && '\0' != home[0]) {
     return home;
@@ -70,7 +71,7 @@ namespace paths {
     return userProfile;
   }
 #endif
-  return {};
+  return std::nullopt;
 }
 
 /// Base XDG config directory ($XDG_CONFIG_HOME or ~/.config), optionally
@@ -81,8 +82,8 @@ configDir(const std::string_view appName = {}) {
   if (const auto *env = std::getenv("XDG_CONFIG_HOME");
       nullptr != env && '\0' != env[0]) {
     base = env;
-  } else if (const auto home = userHome(); !home.empty()) {
-    base = std::filesystem::path(home) / ".config";
+  } else if (const auto home = userHome(); home) {
+    base = std::filesystem::path(*home) / ".config";
   } else {
     base = ".config";
   }
@@ -99,8 +100,8 @@ configDir(const std::string_view appName = {}) {
   if (const auto *env = std::getenv("XDG_DATA_HOME");
       nullptr != env && '\0' != env[0]) {
     base = env;
-  } else if (const auto home = userHome(); !home.empty()) {
-    base = std::filesystem::path(home) / ".local" / "share";
+  } else if (const auto home = userHome(); home) {
+    base = std::filesystem::path(*home) / ".local" / "share";
   } else {
     base = ".local/share";
   }
@@ -117,8 +118,8 @@ configDir(const std::string_view appName = {}) {
   if (const auto *env = std::getenv("XDG_CACHE_HOME");
       nullptr != env && '\0' != env[0]) {
     base = env;
-  } else if (const auto home = userHome(); !home.empty()) {
-    base = std::filesystem::path(home) / ".cache";
+  } else if (const auto home = userHome(); home) {
+    base = std::filesystem::path(*home) / ".cache";
   } else {
     base = ".cache";
   }

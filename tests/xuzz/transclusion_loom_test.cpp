@@ -40,15 +40,15 @@ TEST(TransclusionLoomTest, DetectsContiguousRankLooms) {
 
   // Mint 3 cells in Zigzag manifold
   at               = store.makeCell(vDoc, "cell1");
-  const auto cell1 = store.cellRefOf(at);
+  const auto cell1 = store.cellRefOf(at).value();
   at               = store.spliceCellSpan(at, cell1, 0, 5, span1);
 
   at               = store.makeCell(at, "cell2");
-  const auto cell2 = store.cellRefOf(at);
+  const auto cell2 = store.cellRefOf(at).value();
   at               = store.spliceCellSpan(at, cell2, 0, 5, span2);
 
   at               = store.makeCell(at, "cell3");
-  const auto cell3 = store.cellRefOf(at);
+  const auto cell3 = store.cellRefOf(at).value();
   at               = store.spliceCellSpan(at, cell3, 0, 5, span3);
 
   // Link cells along sequence dimension: cell1 -> cell2 -> cell3
@@ -99,11 +99,11 @@ TEST(TransclusionLoomTest, NonContiguousOrDifferentDimensionsDoNotBundle) {
 
   // Mint 2 cells in Zigzag manifold
   at               = store.makeCell(vDoc, "cellA");
-  const auto cellA = store.cellRefOf(at);
+  const auto cellA = store.cellRefOf(at).value();
   at               = store.spliceCellSpan(at, cellA, 0, 5, span1);
 
   at               = store.makeCell(at, "cellB");
-  const auto cellB = store.cellRefOf(at);
+  const auto cellB = store.cellRefOf(at).value();
   at               = store.spliceCellSpan(at, cellB, 0, 5, span2);
 
   // They are UNLINKED in the manifold (separate nodes)
@@ -113,7 +113,7 @@ TEST(TransclusionLoomTest, NonContiguousOrDifferentDimensionsDoNotBundle) {
       .docViews      = {&doc},
       .manifoldViews = {&manifold},
       .manifoldFoci  = {cellA},
-      .cellRadius    = -1,
+      .cellRadius    = std::nullopt,
   };
 
   std::vector<TransclusionPair> pairs;
@@ -141,11 +141,11 @@ TEST(TransclusionLoomTest, DetectsNegativeRankLooms) {
   const PrimediaSpan span2{p0.scroll, p0.start + 20, 19};
 
   at            = store.makeCell(vDoc, "c1");
-  const auto c1 = store.cellRefOf(at);
+  const auto c1 = store.cellRefOf(at).value();
   at            = store.spliceCellSpan(at, c1, 0, 2, span1);
 
   at            = store.makeCell(at, "c2");
-  const auto c2 = store.cellRefOf(at);
+  const auto c2 = store.cellRefOf(at).value();
   at            = store.spliceCellSpan(at, c2, 0, 2, span2);
 
   const auto dSeq = store.rebuildManifold(at).dimensions().front();
@@ -157,7 +157,7 @@ TEST(TransclusionLoomTest, DetectsNegativeRankLooms) {
       .docViews      = {&doc},
       .manifoldViews = {&manifold},
       .manifoldFoci  = {c1},
-      .cellRadius    = -1,
+      .cellRadius    = std::nullopt,
   };
 
   std::vector<TransclusionPair> pairs;
@@ -191,15 +191,15 @@ TEST(TransclusionLoomTest, MultiLoomPartitioningAndStrandMapping) {
 
   // Rank 1: cA -> cB -> cC along dSeq
   at            = store.makeCell(vDoc, "cA");
-  const auto cA = store.cellRefOf(at);
+  const auto cA = store.cellRefOf(at).value();
   at            = store.spliceCellSpan(at, cA, 0, 3, sA);
 
   at            = store.makeCell(at, "cB");
-  const auto cB = store.cellRefOf(at);
+  const auto cB = store.cellRefOf(at).value();
   at            = store.spliceCellSpan(at, cB, 0, 3, sB);
 
   at            = store.makeCell(at, "cC");
-  const auto cC = store.cellRefOf(at);
+  const auto cC = store.cellRefOf(at).value();
   at            = store.spliceCellSpan(at, cC, 0, 3, sC);
 
   const auto dSeq = store.rebuildManifold(at).dimensions().front();
@@ -208,11 +208,11 @@ TEST(TransclusionLoomTest, MultiLoomPartitioningAndStrandMapping) {
 
   // Rank 2: cD -> cE along a new dimension dAlt
   at            = store.makeCell(at, "cD");
-  const auto cD = store.cellRefOf(at);
+  const auto cD = store.cellRefOf(at).value();
   at            = store.spliceCellSpan(at, cD, 0, 3, sD);
 
   at            = store.makeCell(at, "cE");
-  const auto cE = store.cellRefOf(at);
+  const auto cE = store.cellRefOf(at).value();
   at            = store.spliceCellSpan(at, cE, 0, 3, sE);
 
   const auto minted = store.makeDimension(at, "d.alt");
@@ -227,7 +227,7 @@ TEST(TransclusionLoomTest, MultiLoomPartitioningAndStrandMapping) {
       .docViews      = {&doc},
       .manifoldViews = {&manifold},
       .manifoldFoci  = {cA},
-      .cellRadius    = -1,
+      .cellRadius    = std::nullopt,
   };
 
   std::vector<TransclusionPair> pairs;

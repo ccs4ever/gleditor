@@ -178,6 +178,7 @@ TEST(ImageCacheTest, AtlasFullFailsClosedWithoutCorruptingEarlierEntries) {
   EXPECT_FALSE(second.valid())
       << "atlas is provably full; a second same-size image must not "
          "silently reuse the first's space";
+  EXPECT_FALSE(second.layer.has_value());
 
   // The one successful upload must be untouched: no later call rewrote any
   // part of it.

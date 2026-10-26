@@ -172,7 +172,7 @@ bool pngDecodeIndexSpike(const std::string &path) {
 struct AvContext {
   AVFormatContext *fmt{nullptr};
   AVCodecContext *codec{nullptr};
-  int streamIndex{-1};
+  std::optional<int> streamIndex;
 
   AvContext()                             = default;
   AvContext(const AvContext &)            = delete;
@@ -229,11 +229,11 @@ std::optional<AvContext> openStream(const std::string &path,
       break;
     }
   }
-  if (ctx.streamIndex < 0) {
+  if (!ctx.streamIndex) {
     std::cerr << label << " spike: no matching stream in " << path << "\n";
     return std::nullopt;
   }
-  const auto *const params  = ctx.fmt->streams[ctx.streamIndex]->codecpar;
+  const auto *const params  = ctx.fmt->streams[*ctx.streamIndex]->codecpar;
   const auto *const decoder = avcodec_find_decoder(params->codec_id);
   if (nullptr == decoder) {
     std::cerr << label << " spike: no decoder for codec " << params->codec_id
@@ -365,7 +365,7 @@ bool avDecodeIndexSpike(const std::string &path) {
     report(false, "av spike: could not open " + path + " for linear decode");
     return false;
   }
-  const auto *const stream = linearCtx->fmt->streams[linearCtx->streamIndex];
+  const auto *const stream = linearCtx->fmt->streams[*linearCtx->streamIndex];
   const auto targetPts =
       av_rescale_q(targetFrameIndex, frameDuration, stream->time_base);
 
@@ -381,7 +381,7 @@ bool avDecodeIndexSpike(const std::string &path) {
     report(false, "av spike: could not open " + path + " for seek decode");
     return false;
   }
-  if (av_seek_frame(seekCtx->fmt, seekCtx->streamIndex, targetPts,
+  if (av_seek_frame(seekCtx->fmt, *seekCtx->streamIndex, targetPts,
                     AVSEEK_FLAG_BACKWARD) < 0) {
     report(false, "av spike: av_seek_frame failed");
     return false;
@@ -497,7 +497,7 @@ bool mp3DecodeIndexSpike(const std::string &path) {
     report(false, "mp3 spike: could not open " + path + " for linear decode");
     return false;
   }
-  const auto *const stream = linearCtx->fmt->streams[linearCtx->streamIndex];
+  const auto *const stream = linearCtx->fmt->streams[*linearCtx->streamIndex];
   const auto targetPts     = av_rescale_q(
       targetFrameIndex * samplesPerMp3Frame,
       AVRational{1, linearCtx->codec->sample_rate}, stream->time_base);
@@ -526,7 +526,7 @@ bool mp3DecodeIndexSpike(const std::string &path) {
     report(false, "mp3 spike: could not open " + path + " for seek decode");
     return false;
   }
-  if (av_seek_frame(seekCtx->fmt, seekCtx->streamIndex, targetPts,
+  if (av_seek_frame(seekCtx->fmt, *seekCtx->streamIndex, targetPts,
                     AVSEEK_FLAG_BACKWARD) < 0) {
     report(false, "mp3 spike: av_seek_frame failed");
     return false;

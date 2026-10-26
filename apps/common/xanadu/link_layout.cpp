@@ -139,7 +139,7 @@ static void placeLinkAttachments(const std::map<zigzag::CellRef, Link> &links,
       const auto &manifold = *ctx.manifoldViews[mIdx];
       const auto focus     = (mIdx < ctx.manifoldFoci.size())
                                  ? ctx.manifoldFoci[mIdx]
-                                 : zigzag::noCell;
+                                 : std::nullopt;
       const auto allowed   = manifold.cellsWithinRadius(focus, ctx.cellRadius);
       for (const auto cell : allowed) {
         if (grouped) {
@@ -205,8 +205,10 @@ static void placeLinkAttachments(const std::map<zigzag::CellRef, Link> &links,
               left.doc == right.doc) {
             continue;
           }
-          if (left.isCell() && right.isCell() && left.cell() == right.cell()) {
-            continue;
+          if (left.isCell() && right.isCell()) {
+            const auto leftCell  = left.cell();
+            const auto rightCell = right.cell();
+            if (leftCell && rightCell && *leftCell == *rightCell) continue;
           }
           between.push_back(LinkedPair{.link = id,
                                        .type = link.type,
@@ -290,7 +292,7 @@ void placeTransclusions(const UniversalViewContext &ctx,
     }
     const auto &manifold = *ctx.manifoldViews[mIdx];
     const auto focus = (mIdx < ctx.manifoldFoci.size()) ? ctx.manifoldFoci[mIdx]
-                                                        : zigzag::noCell;
+                                                        : std::nullopt;
     const auto allowed = manifold.cellsWithinRadius(focus, ctx.cellRadius);
     for (const auto cell : allowed) {
       const auto content = manifold.contentOf(cell);
@@ -365,11 +367,11 @@ void placeTransclusions(const UniversalViewContext &ctx,
 
       const auto startU = pU.textOffset + static_cast<std::uint32_t>(
                                               sharedStart - pU.span.start);
-      const auto endU   = startU + static_cast<std::uint32_t>(sharedLen);
+      const auto endU = startU + static_cast<std::uint32_t>(sharedLen);
 
       const auto startV = pV.textOffset + static_cast<std::uint32_t>(
                                               sharedStart - pV.span.start);
-      const auto endV   = startV + static_cast<std::uint32_t>(sharedLen);
+      const auto endV = startV + static_cast<std::uint32_t>(sharedLen);
 
       const auto endPtU =
           (pU.kind == LinkTargetKind::Document)
@@ -443,20 +445,24 @@ detectTransclusionLooms(const UniversalViewContext &ctx,
   for (std::size_t i = 0; i < pairs.size(); ++i) {
     const auto &p = pairs[i];
     if (p.from.isDocument() && p.to.isCell()) {
+      const auto cell = p.to.cell();
+      if (!cell) continue;
       byDoc[p.from.doc].push_back(Candidate{
           .pairIdx  = i,
           .docIndex = p.from.doc,
           .docStart = p.from.start,
           .docEnd   = p.from.end,
-          .cell     = p.to.cell(),
+          .cell     = *cell,
       });
     } else if (p.from.isCell() && p.to.isDocument()) {
+      const auto cell = p.from.cell();
+      if (!cell) continue;
       byDoc[p.to.doc].push_back(Candidate{
           .pairIdx  = i,
           .docIndex = p.to.doc,
           .docStart = p.to.start,
           .docEnd   = p.to.end,
-          .cell     = p.from.cell(),
+          .cell     = *cell,
       });
     }
   }
@@ -507,14 +513,14 @@ detectTransclusionLooms(const UniversalViewContext &ctx,
                 continue;
               }
               const auto expectedNext = m->linked(curCell, dim, dir);
-              if (expectedNext == zigzag::noCell || expectedNext == curCell) {
+              if (!expectedNext || *expectedNext == curCell) {
                 break;
               }
-              if (candidates[j].cell == expectedNext) {
+              if (candidates[j].cell == *expectedNext) {
                 if (candidates[j].docStart >=
                     candidates[chainCandidateIndices.back()].docStart) {
                   chainCandidateIndices.push_back(j);
-                  curCell = expectedNext;
+                  curCell = *expectedNext;
                 }
               }
             }

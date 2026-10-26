@@ -52,6 +52,14 @@ gleditor_test
 build
 docs
 
+# Keep authored documentation while ignoring generated Doxygen output.
+!/docs/
+/docs/*
+!/docs/vagent-user-guide.md
+!/docs/rendering.md
+!/docs/xanadu.md
+!/docs/testing.md
+
 # SPIR-V compiled from assets/shaders by `make shaders`
 assets/shaders/vulkan/*.spv
 

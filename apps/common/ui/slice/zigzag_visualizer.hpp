@@ -22,6 +22,7 @@
 #include <chrono>
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <span>
@@ -177,8 +178,9 @@ public:
                         const std::vector<xanadu::MicroversionId> &versions);
   void bindXanaduStore(xanadu::Store &store,
                        const xanadu::MicroversionId &version);
-  void reloadStoreVersion(const xanadu::MicroversionId &version,
-                          zigzag::CellRef newFocus = zigzag::noCell);
+  void
+  reloadStoreVersion(const xanadu::MicroversionId &version,
+                     std::optional<zigzag::CellRef> newFocus = std::nullopt);
   ZigzagVisualizer *setOnOpenQuoteBuilder(std::function<void()> cb) {
     onOpenQuoteBuilder_ = std::move(cb);
     return this;
@@ -328,7 +330,9 @@ public:
   }
   /// Remember the focused cell as the far end of the next link.
   ZigzagVisualizer *markFocus() noexcept;
-  [[nodiscard]] CellID markedCell() const noexcept { return markedCell_; }
+  [[nodiscard]] std::optional<CellID> markedCell() const noexcept {
+    return markedCell_;
+  }
   /**
    * @brief Link the focused cell to the marked one along the active X
    *        dimension, then forget the mark.
@@ -454,8 +458,11 @@ public:
   /// operation: "only a user-generated update persists; navigation never does"
   /// (design R8), and drawing a frame is less than navigation. Minting belongs
   /// to the verbs a person invokes -- inserting a cell, making a link.
-  [[nodiscard]] std::optional<DimRef> dimensionRef(const DimID &name) const;
-  [[nodiscard]] CellID focusCellId() const { return accursed_cell_focus_; }
+  [[nodiscard]] std::optional<DimensionQuery>
+  dimensionRef(const DimID &name) const;
+  [[nodiscard]] std::optional<CellID> focusCellId() const {
+    return accursed_cell_focus_;
+  }
   [[nodiscard]] std::optional<xanadu::CellAnchor>
   cellAnchor(CellRef cell) const override;
   /// Show a chosen link occurrence outside the focused neighborhood without
@@ -466,11 +473,22 @@ public:
   [[nodiscard]] const Manifold &manifold() const noexcept override {
     return engine_->manifold();
   }
-  [[nodiscard]] CellRef focusCell() const noexcept override {
-    return static_cast<CellRef>(accursed_cell_focus_);
+  [[nodiscard]] std::optional<CellRef> focusCell() const noexcept override {
+    if (!accursed_cell_focus_ ||
+        *accursed_cell_focus_ > std::numeric_limits<CellRef>::max()) {
+      return std::nullopt;
+    }
+    return static_cast<CellRef>(*accursed_cell_focus_);
   }
-  void focusCell(const CellRef cell) override {
-    navigateFocusTo(static_cast<CellID>(cell));
+  void focusCell(const std::optional<CellRef> cell) override {
+    if (cell) {
+      navigateFocusTo(static_cast<CellID>(*cell));
+    } else {
+      accursed_cell_focus_.reset();
+      cellEditing_ = false;
+      rebuildActiveViewTopology();
+      invalidateAccessibility();
+    }
   }
   void activateCell(CellRef cell) override;
   void setCellActivationCallback(
@@ -649,7 +667,7 @@ private:
   std::shared_ptr<xanadu::UserPermascroll> userPermascroll_;
   xanadu::Store *store_{nullptr};
   std::unique_ptr<UnifiedTransclusionEngine> engine_;
-  CellID accursed_cell_focus_{0};
+  std::optional<CellID> accursed_cell_focus_;
   std::optional<CellRef> preview_cell_;
   ViewAxisBinding current_view_;
 
@@ -729,7 +747,7 @@ private:
   /// replaces it, so a new cell's placeholder is not typed after.
   bool cellEditWhole_{false};
   std::string cellEditText_;
-  CellID markedCell_{0};
+  std::optional<CellID> markedCell_;
 
   bool commandBarVisible_{false};
   std::string commandBarText_;

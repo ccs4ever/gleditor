@@ -1,0 +1,17 @@
+predicate ready(job_id: Str)
+event Ready { job_id: Str }
+event Start { job_id: Str }
+goal WaitForFact(job_id: Str) perform
+goal WaitForEvent(job_id: Str) perform
+
+agent Waits {
+  on Ready as r { believe ready(r.job_id) }
+  on Start as s {
+    adopt WaitForFact(s.job_id)
+    adopt WaitForEvent(s.job_id)
+  }
+  plan fact for WaitForFact { await ready(job_id) within 2s }
+  plan wait_event for WaitForEvent {
+    await Ready as r [r.job_id == job_id] within 2s
+  }
+}

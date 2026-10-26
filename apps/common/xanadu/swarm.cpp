@@ -46,6 +46,22 @@ namespace xanadu {
 
 namespace {
 
+// Resource and retry budgets bound work per swarm pump/session. Keep these
+// implementation policies distinct from wire limits and user preferences.
+constexpr int kPeerReconnectMinimumSeconds = 1;
+constexpr int kPeerReconnectFailureLimit   = 31;
+constexpr int kSessionConnectionLimit      = 128;
+constexpr std::size_t kRememberedPeerLimit = 128;
+constexpr int kPublicationTopicConnections = 16;
+
+constexpr auto kPeerConnectRetryInterval = std::chrono::milliseconds{250};
+constexpr auto kMutableNameRetryInterval = std::chrono::seconds{2};
+constexpr auto kRendezvousPumpInterval   = std::chrono::seconds{1};
+constexpr auto kEarlyRendezvousWindow    = std::chrono::seconds{30};
+constexpr auto kEarlyRendezvousInterval  = std::chrono::seconds{2};
+constexpr auto kSteadyRendezvousInterval = std::chrono::seconds{60};
+constexpr auto kAlertWaitInterval        = std::chrono::milliseconds{50};
+
 /// One of ours for libtorrent's v1 hash.
 InfoHash fromLt(const lt::sha1_hash &hash) {
   InfoHash out;
@@ -257,8 +273,9 @@ struct SwarmContentSource::Impl {
     // Simultaneous open ("duplicate peer-id") or a peer restarting on the same
     // port must retry within a second rather than waiting libtorrent's 60s
     // default backoff or exhausting its 3-attempt failcount cap.
-    pack.set_int(lt::settings_pack::min_reconnect_time, 1);
-    pack.set_int(lt::settings_pack::max_failcount, 31);
+    pack.set_int(lt::settings_pack::min_reconnect_time,
+                 kPeerReconnectMinimumSeconds);
+    pack.set_int(lt::settings_pack::max_failcount, kPeerReconnectFailureLimit);
     // Only the alerts that are acted on. The default set is chatty enough that
     // pumping it would be most of the cost of a read.
     pack.set_int(lt::settings_pack::alert_mask,
@@ -270,7 +287,7 @@ struct SwarmContentSource::Impl {
       throw std::invalid_argument("DHT packet allowance must be positive");
     pack.set_int(lt::settings_pack::dht_block_ratelimit,
                  options.dhtPacketsPerSecond);
-    pack.set_int(lt::settings_pack::connections_limit, 128);
+    pack.set_int(lt::settings_pack::connections_limit, kSessionConnectionLimit);
     pack.set_str(lt::settings_pack::user_agent, "xanadu/0.1");
     return pack;
   }
@@ -321,7 +338,7 @@ struct SwarmContentSource::Impl {
         continue;
       }
       if (status.num_peers > 0 ||
-          now - swarm.lastPeerConnect < std::chrono::milliseconds{250}) {
+          now - swarm.lastPeerConnect < kPeerConnectRetryInterval) {
         continue;
       }
       swarm.lastPeerConnect = now;
@@ -350,7 +367,7 @@ struct SwarmContentSource::Impl {
       return;
     }
     const auto now = std::chrono::steady_clock::now();
-    if (now - lastNameQuery < std::chrono::seconds{2}) {
+    if (now - lastNameQuery < kMutableNameRetryInterval) {
       return;
     }
     lastNameQuery = now;
@@ -443,14 +460,14 @@ struct SwarmContentSource::Impl {
     // A torrent can be added before DHT startup completes. Retry its early
     // rendezvous instead of waiting for libtorrent's long announce interval.
     if (options.enableDht && !swarms.empty() &&
-        now - lastRendezvous >= std::chrono::seconds{1}) {
+        now - lastRendezvous >= kRendezvousPumpInterval) {
       auto current = swarms.upper_bound(lastRendezvousHash);
       for (std::size_t remaining = swarms.size(); remaining; --remaining) {
         if (current == swarms.end()) current = swarms.begin();
         auto &[hash, swarm] = *current++;
-        const auto interval = now - swarm.created < std::chrono::seconds{30}
-                                  ? std::chrono::seconds{2}
-                                  : std::chrono::seconds{60};
+        const auto interval = now - swarm.created < kEarlyRendezvousWindow
+                                  ? kEarlyRendezvousInterval
+                                  : kSteadyRendezvousInterval;
         if (now - swarm.lastDhtQuery < interval) continue;
         session.dht_announce(toLt(hash), session.listen_port());
         session.dht_get_peers(toLt(hash));
@@ -498,7 +515,7 @@ struct SwarmContentSource::Impl {
         const auto found = swarms.find(fromLt(peers->info_hash));
         if (found != swarms.end())
           for (const auto &peer : peers->peers())
-            if (found->second.wantedPeers.size() < 128 &&
+            if (found->second.wantedPeers.size() < kRememberedPeerLimit &&
                 std::ranges::find(found->second.wantedPeers, peer) ==
                     found->second.wantedPeers.end())
               found->second.wantedPeers.push_back(peer);
@@ -582,7 +599,7 @@ struct SwarmContentSource::Impl {
       }
       // Woken by the session when something happens, rather than spun on, but
       // with a bound so the deadline is honoured even in silence.
-      session.wait_for_alert(std::chrono::milliseconds{50});
+      session.wait_for_alert(kAlertWaitInterval);
     }
   }
 };
@@ -1047,7 +1064,8 @@ void SwarmContentSource::joinCatalogRendezvous(const InfoHash &hash,
   }
   if (impl->publicationTopics.insert(hash).second) {
     (void)addMagnet("magnet:?xt=urn:btih:" + hash.hex(), dataRoot, true);
-    impl->swarms.at(hash).handle.set_max_connections(16);
+    impl->swarms.at(hash).handle.set_max_connections(
+        kPublicationTopicConnections);
   }
 }
 std::vector<std::pair<InfoHash, std::string>>
@@ -1181,8 +1199,12 @@ bool SwarmContentSource::publicationAcknowledged(const PublicKey &key,
 
 void SwarmContentSource::poll() { impl->pump(); }
 
-std::uint16_t SwarmContentSource::listenPort() const {
-  return static_cast<std::uint16_t>(impl->session.listen_port());
+std::optional<std::uint16_t> SwarmContentSource::listenPort() const {
+  const auto port = impl->session.listen_port();
+  if (port <= 0) {
+    return std::nullopt;
+  }
+  return static_cast<std::uint16_t>(port);
 }
 
 int SwarmContentSource::peerCount(const InfoHash &hash) const {
@@ -1426,7 +1448,7 @@ SwarmContentSource::collabRoomTarget(const std::string_view hostFingerprint,
   InfoHash h;
   const std::string key = "xanadu:collab:" + std::string(hostFingerprint) +
                           ":" + std::string(roomName);
-  h.bytes               = sha1(key);
+  h.bytes = sha1(key);
   return h;
 }
 

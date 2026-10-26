@@ -550,6 +550,41 @@ TEST(LiveCollaborativeSwarmTest, broadcastAndApplyLiveOpsAcrossPeerStores) {
   EXPECT_TRUE(peerSource.takePendingLiveOps().empty());
 }
 
+TEST(LiveCollaborativeSwarmTest,
+     anonymousRemoteAuthorUsesNoPublisherAndDoesNotAliasNamedAuthors) {
+  Store receiver;
+  const auto namedPublisher = xanadu::createMutableKeys().publicKey;
+  const auto namedKey       = "btpk:" + namedPublisher.hex() + ":named-author";
+
+  xanadu::Op namedOp;
+  namedOp.kind        = xanadu::OpKind::Insert;
+  namedOp.parent      = MicroversionId{};
+  namedOp.at          = 0;
+  namedOp.span.length = 5;
+  const auto namedVersion =
+      receiver.applyRemoteLiveOp(namedOp, "Named", namedKey);
+
+  xanadu::Op anonymousOp;
+  anonymousOp.kind        = xanadu::OpKind::Insert;
+  anonymousOp.parent      = namedVersion;
+  anonymousOp.at          = 5;
+  anonymousOp.span.length = 5;
+  const auto finalVersion = receiver.applyRemoteLiveOp(anonymousOp, "Other");
+
+  EXPECT_EQ(receiver.textOf(finalVersion), "NamedOther");
+  EXPECT_EQ(receiver.readRemoteAuthorBuffer({1, 0, 5}), "Named");
+  EXPECT_EQ(receiver.readRemoteAuthorBuffer({2, 0, 5}), "Other");
+  const auto namedScroll     = receiver.scroll(1);
+  const auto anonymousScroll = receiver.scroll(2);
+  ASSERT_TRUE(namedScroll);
+  ASSERT_TRUE(anonymousScroll);
+  ASSERT_TRUE(namedScroll->publisher);
+  EXPECT_EQ(*namedScroll->publisher, namedPublisher);
+  EXPECT_FALSE(anonymousScroll->publisher);
+  EXPECT_EQ(anonymousScroll->salt, "remote_author");
+  EXPECT_EQ(receiver.userPermascroll().size(), 0U);
+}
+
 TEST(LiveCollaborativeSwarmTest, unsealedRemoteSpanResolvesLiveTextAndHoles) {
   Store bobStore;
   const std::string aliceScrollKey =

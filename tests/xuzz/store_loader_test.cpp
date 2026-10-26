@@ -91,12 +91,12 @@ TEST_F(StoreLoaderTest, ImportStorePackageReconstitutesStoreAndFragments) {
   Scroll scrollA;
   scrollA.publisher      = curatorKeys.publicKey;
   scrollA.salt           = "concept_a";
-  const std::string keyA = scrollKey(scrollA);
+  const std::string keyA = scrollKey(scrollA).value();
 
   Scroll scrollB;
   scrollB.publisher      = curatorKeys.publicKey;
   scrollB.salt           = "concept_b";
-  const std::string keyB = scrollKey(scrollB);
+  const std::string keyB = scrollKey(scrollB).value();
 
   std::map<std::string, Scroll> pkgScrolls{{keyA, scrollA}, {keyB, scrollB}};
 
@@ -197,13 +197,14 @@ TEST_F(StoreLoaderTest, ImportExternalScrollFragments) {
 
   // Add an external scroll with publisher and salt
   Scroll extScroll;
-  extScroll.publisher    = PublicKey{deviceKeys.pub};
-  extScroll.salt         = "quote_salt";
+  extScroll.publisher = PublicKey{deviceKeys.pub};
+  extScroll.salt      = "quote_salt";
+  ASSERT_TRUE(extScroll.publisher);
   const auto extScrollId = sourceStore.addScroll(extScroll);
 
   // Set external live bytes on source
   const std::string authorKey =
-      "btpk:" + extScroll.publisher.hex() + ":" + extScroll.salt;
+      "btpk:" + extScroll.publisher->hex() + ":" + extScroll.salt;
   sourceStore.setExternalLiveBytes(authorKey, 1000,
                                    "Quoted remote scroll passage");
 

@@ -29,6 +29,10 @@ class RenderDevice;
 
 namespace gleditor {
 
+// Pixel defaults shown before a user edits the radial-menu geometry.
+inline constexpr float kDefaultRadialMenuRadiusPx      = 84.0F;
+inline constexpr float kDefaultRadialMenuInnerRadiusPx = 26.0F;
+
 /**
  * @struct RadialAction
  * @brief Descriptor for a single action in the radial marking menu.
@@ -52,8 +56,8 @@ struct RadialAction {
  * @brief User-configurable radial geometry and action list.
  */
 struct RadialConfig {
-  float radius{84.0F};
-  float innerRadius{26.0F};
+  float radius{kDefaultRadialMenuRadiusPx};
+  float innerRadius{kDefaultRadialMenuInnerRadiusPx};
   std::vector<RadialAction> actions;
 
   [[nodiscard]] static RadialConfig createDefault();
@@ -277,7 +281,8 @@ private:
   std::string resolvedFont_;
   std::string canvasFont_;
   text::FittedText hubFitted_;
-  float outerRadiusPx_{84.0F}, innerRadiusPx_{26.0F};
+  float outerRadiusPx_{kDefaultRadialMenuRadiusPx};
+  float innerRadiusPx_{kDefaultRadialMenuInnerRadiusPx};
   std::uint64_t preparedRevision_{}, drawnRevision_{};
   std::uint32_t focusedNode_{};
   std::uint32_t pickScope_{};

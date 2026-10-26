@@ -6,6 +6,7 @@
 #define COMMON_XANADU_VPROLOG_COMPILER_HPP
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -23,7 +24,7 @@ namespace xanadu::vprolog {
 struct CompiledQuery {
   std::vector<zigzag::CellRef> goals;
   std::vector<std::pair<std::string, zigzag::CellRef>> variables;
-  zigzag::CellRef primaryGoal{zigzag::noCell};
+  std::optional<zigzag::CellRef> primaryGoal;
 };
 
 class Compiler {
@@ -35,7 +36,7 @@ public:
 
   /// Compiles a single fact or rule clause and adds it to the predicate
   /// database.
-  zigzag::CellRef compileClause(const Clause &clause);
+  std::optional<zigzag::CellRef> compileClause(const Clause &clause);
 
   /// Compiles a query clause and returns goal cells and variable bindings.
   CompiledQuery compileQuery(const Clause &queryClause);

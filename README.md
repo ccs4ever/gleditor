@@ -18,6 +18,7 @@ decisions; [AGENTS.md](AGENTS.md) is the contributor runbook.
 | `build/vquery`, `build/vqueryc` | VQL query runner/REPL and standalone compiler.                                 |
 | `build/vpl`, `build/vplc`       | VPL array-language runner/REPL and compiler.                                   |
 | `build/vprolog`                 | Prolog REPL over the Vortex/Vlog logic runtime.                                |
+| `build/vagent`                  | vagent source-checking frontend; compiler and actor runtime are in progress.   |
 | `build/store-dump`              | Inspect a store or `ops.nodes` directly, including one the loader refuses.     |
 | `build/xudu-swarm-peer`         | Peer used by the network-namespace swarm tests.                                |
 
@@ -47,8 +48,9 @@ The build needs a C++23 compiler, Make, pkg-config, FreeType, HarfBuzz, libunibr
 Fontconfig, GLM, spdlog, SDL2 or SDL3, libtorrent-rasterbar, OpenSSL, LMDB, and the OpenGL headers.
 GoogleTest and GoogleMock are needed for tests. Vulkan and `glslangValidator` are used when
 available; AccessKit is optional unless explicitly required. `gnupg` is needed at run time for
-signed publication. The [CI workflow](.github/workflows/c-cpp.yml) records a working Linux
-dependency set.
+signed publication. For Ubuntu, the
+[CI build job's apt package list](.github/workflows/c-cpp.yml#L134) is a tested Linux dependency
+set; other distributions use their equivalent library and tool packages.
 
 ```sh
 make -j$(nproc) lib       # shared library
@@ -64,331 +66,78 @@ to use GCC. Useful switches are `GLEDITOR_SDL=2|3`, `GLEDITOR_DISABLE_VULKAN=1`,
 `GLEDITOR_ENABLE_A11Y=1|0`, and `DEBUG=1`. Changing backend or debug flags rebuilds affected
 objects; `ccache` is used automatically when installed. The Makefile lists all targets and switches.
 
-Start with `./build/gleditor file.txt` or `./build/xuzz [store]`. `xuzz --view zigzag` opens on the
+Open an existing text file with `./build/gleditor file.txt`, or start Xuzz with `./build/xuzz`. With
+no store argument, Xuzz opens the default store in the user's data directory (normally
+`$XDG_DATA_HOME/xuzz/xanadocs/default`); edits are saved there on normal exit and reopened from that
+path. A positional store path can select or create another store. `xuzz --view zigzag` opens on the
 cell view and `--view xanadoc` on the pages. `xuzz --xanadoc STORE` projects a xanadoc store into
-the cell view; `--raster` prints a text projection and exits. Each program's `--help` shows everyday
-options and `--help-all` shows batch and diagnostic options. `xuzz --headless` runs batch commands
-without a window. The query and language tools also offer `--help` and headless execution.
+the cell view. For batch and diagnostic options hidden from everyday help, run
+`./build/xuzz --help-all`; `--headless` (also `--batch`) runs batch commands without the GUI.
+`--raster` prints text from a slice/store; add `--lens PATH` to print a filesystem projection, for
+example `./build/xuzz --lens docs --raster`. The query and language tools also offer `--help` and
+headless execution.
+
+The [vagent user guide](docs/vagent-user-guide.md) introduces its typed agent language and explains
+which commands are implemented. The current frontend can be built and checked with:
+
+```sh
+make -j$(nproc) vagent vagent_frontend_test
+make -j$(nproc) test/vagent-frontend
+./build/vagent check tests/samples/vagent/mini_01.vagent
+```
+
+Source checking does not execute an agent. Vortex lowering, the actor adapter, `run`, and the REPL
+remain tracked work in the [implementation progress](design/vagent-implementation.md).
 
 ## Library and rendering
 
-`libgleditor` owns text layout, pagination, the glyph cache, rendering, SDL integration, input,
-accessibility data, and the application loop. It names no xanadoc, cell, link, or document format.
-The plain editor keeps its own TSV configuration and shares no Xanadu code.
+`libgleditor` provides text layout, pagination, glyph caching, rendering, input and accessibility.
+The plain editor uses it without any Xanadu dependency.
 
-### One pipeline, three backends
-
-The graphics backend is selected at run time with `--backend opengl|opengles|vulkan`. OpenGL 3.3
-core is the default, OpenGL ES 3.0 is supported, and Vulkan 1.0 is compiled when its development
-tools are found. All use `render::RenderDevice`, the same glyph instances, and shader bodies from
-`assets/shaders/`. Backend-specific shader preambles and build-time SPIR-V generation keep those
-bodies aligned. GL entry points come from `SDL_GL_GetProcAddress`; the build does not link `-lGL`.
-
-The glyph atlas holds FreeType's 8-bit coverage. HarfBuzz shapes runs, FriBidi resolves text
-direction, libunibreak chooses line breaks, and Fontconfig resolves fonts.
-`TextLayout::layoutPage()` limits work to lines that fit a page; immutable `PageShaping` values pass
-from page building to the render thread. Editing rebuilds the affected page and continues only until
-pagination resynchronizes. Caret and selection offsets are document byte positions, while picking
-and highlighting account for character boundaries inside shaped clusters such as ligatures.
-
-UI labels use `text::fit()` with explicit width, height, line count and overflow policies. End,
-middle and start ellipsis retain complete graphemes and shaping clusters, with source byte offsets
-preserved. `LayoutOptions::ellipsize` now truncates the last visible line; document pages disable it
-to continue normally. Caller-owned `text::ShapingCache` retains page layouts and fitted labels in
-one bounded LRU, keyed by the font and every layout constraint. References last until their entry is
-evicted or the cache clears; use each cache on one thread.
-
-Canvas can fit text directly into a Y-up `ui::Rect`, returning a `BoxedText` with the fitted label
-and its effective draw box. Drawing the returned `FittedText` again uses no layout. `pushClip()` and
-`popClip()` intersect nested boxes on the CPU for rectangles, lines, glyphs and images; `clear()`
-resets the clip stack. Glyph crops preserve integer atlas texels, rounding fractional clip edges
-inward. Image crops interpolate their UV rectangle. The compatibility width-limit API keeps
-single-line ellipsis and clips ink to that width; new callers should use boxed text.
-
-Pages outside the view are culled conservatively in clip space. Distant pages switch to per-line
-coarse bars according to projected size. `--no-cull` and `--coarse-below` expose both paths for
-comparison. `Doc::collect()` submits page draws across open documents as one list. Vulkan can record
-chunks on worker threads; GL and GLES record in order on their context thread. Vulkan measures the
-choice at run time; `GLEDITOR_RECORD_THREADS` overrides it for comparison.
-
-Per-frame render regions keep viewport mapping separate from the writable clip rectangle and depth
-range. Batches carry their region into worker recording; immediate draws use a restoring scope.
-World content and its picking are clipped outside settled edge chrome while screen controls retain
-the whole target. The camera projection is unchanged.
-
-Picking writes an identity attachment beside color. `requestPickingTag()` queues an asynchronous
-read and `takePickingTag()` returns a completed result with its pixel coordinates. GL/GLES use a PBO
-ring and fences; Vulkan uses per-frame host-visible buffers. The renderer also collects driver
-messages in `render::DiagnosticSink`, logs them by category, and shows significant messages as
-notifications. `--strict-diagnostics` makes them fatal for automated checks.
-
-Programs extend the library through `TextSource`, `DocumentObserver`, `SpanDecorator`,
-`FrameContributor`, `PickObserver`, and the application/command interfaces in `include/gleditor/`.
-`Canvas` draws text and geometry in world or screen coordinates through the same glyph pipeline.
-`CurveRibbons` draws tapered NURBS strokes with continuous normals, soft edges and optional
-stationary filament shading through a portable shader; a circular exclusion can preserve a pointer
-picking target beneath transient feedback. `runWithState()` moves commands onto the render thread.
-Xuzz uses these hooks for versioned text, shared-span shading, and links, and contributes ZigZag
-cells and picking without putting its model in `libgleditor`.
-
-For UI text overflow, `SPDLOG_LEVEL=ui.layout=debug` reports declared Canvas parent bounds;
-`ui.layout=trace` also reports render-thread shaping per frame. `--benchmark` includes p95 frame
-time and shaping counts. The optional `make -j$(nproc) ui-text-baseline` tool measures long-label
-rebuilds and retained geometry across backends. See the
-[text-fitting baseline](design/ui-text-fit-baseline.md) for headless commands and coverage.
-
-The public C++26 compatibility facades select native library facilities or pinned fallbacks for
-`function_ref`, optional references and ranges, and `inplace_vector`. Scoped adapters provide
-checked span access and a two-span `views::concat`. Vortex `map`/`filter`/`fold` and
-`WorkerPool::run` use `function_ref`; VQL `!both` uses the concat view.
-`GLEDITOR_CPP26_FORCE_FALLBACK=1` tests the fallback paths. Installed headers record the library's
-native/fallback choices so clients use the same type layout. See the
-[C++26 compatibility note](design/cpp26-compatibility.md) for the exact boundary.
-
-For a rendering regression, build and run `./tools/compare-backends.sh` under `xvfb-run`. It
-compares software-rendered PNGs, picking tags, and Vulkan's single- and multi-thread recordings. A
-process exiting zero while drawing nothing is not a rendering test.
+The [rendering reference](docs/rendering.md) covers the shared OpenGL/GLES/Vulkan pipeline, text
+fitting, clipping and picking, extension interfaces, C++26 compatibility, and backend verification.
+Its [first-file steps](docs/rendering.md#first-saved-file) show how to create, save and reopen a
+plain text file.
 
 ## Xanadu store and application
 
-The xanalogical engine lives in `apps/common/xanadu/`, in namespace `xanadu`, and needs no graphics
-device. `apps/common/ui/xanadoc/` holds xuzz's xanadoc presentation components and
-`apps/common/ui/slice/` its cell visualizer; both are linked into `xuzz`, and `apps/xuzz/` holds
-only the program's own wiring. Pages and cells are two presentations of the same store.
+Xuzz presents documents and ZigZag cells over the shared engine in `apps/common/xanadu/`. Each
+author has one append-only permascroll; a store holds edit decisions and contains no primedia, so a
+bare store directory is not portable alone.
 
-### Content, operations, and hypertime
-
-Each author has one append-only `UserPermascroll` for primedia. A `Store` is an edit decision list
-over local slot 0 and registered external scrolls. A store directory holds `ops.nodes` and
-`store.tables`; it contains **no primedia** and is not portable without the permascroll it
-addresses. The default permascroll lives under `$XDG_DATA_HOME/xuzz/permascroll/`;
-`xuzz --permascroll` binds an explicit one. Publishing packages the content and references others
-need to read, instead of copying a bare store directory.
-
-`ops.nodes` starts with a format header, followed by immutable, 64-byte `CompactOpNode` records in
-64 KiB Merkle-piece-aligned segments. `store.tables` format 4 holds local segment carriers and
-private reader deployment bindings. Scroll registration, links, designated versions and annotations
-are authored Structure operations. A format the loader does not understand is refused by name and
-version; `store-dump --section=header STORE` or `--section=ops` inspects the bytes without that
-loader. Human-readable OSMIC or compact binary operations are optional `ops.export` output, not
-another store file.
-
-A microversion is rebuilt by replaying its ancestral path through the append-only operation tree.
-Editing an earlier state branches rather than discarding its descendants. Deletion removes a
-reference from the current version; it does not erase primedia or earlier versions. Transclusion
-adds another reference to the same content address. Shared addresses, rather than equal strings,
-identify shared content across documents and versions.
-`xuzz --version-id ID --alongside OTHER STORE` shows two branches for comparison; `--map` opens the
-hypertime map.
-
-`OpKind::Structure` is OSMIC's sixth hyperop. It mints ZigZag cells and changes their links or
-content. A cell's persistent identity is the operation that created it, and later changes chain to
-that operation. The same spool produces two replay views: `Version` for document concatext and
-`zigzag::Manifold` for cell structure. Typing into a xanadoc does not itself mint cells.
-`ArenaManifold` supplies an ephemeral copy-on-write space for queries, Vortex execution, and logic
-choice points; explicit promotion mints persistent Structure operations. Navigation and speculative
-work do not silently write hypertime.
-
-A ZigZag dimension is itself a cell. Links on each dimension give a cell at most one posward and one
-negward neighbor, forming ranks. A cell's text is a run of primedia spans; roles, MIME type, media
-paths, and other structured properties live on dimensions rather than hidden markup in that text.
-`sliceToStore()` mints a structure DTO as operations, and `storeToSlice()` projects a manifold back
-to a DTO. The old YAML slice format and its loader are gone.
-
-### Links, discovery, and publication
-
-A Xanadu link has one identity, type, attribution, and ordered left and right endsets of
-`PrimediaSpan`s. Neither side is intrinsically a source or destination. An endset may contain
-multiple discontinuous spans; a stored link does not pair each left member with one right member.
-Links attach to content addresses, so quotations can reveal the same link in another manifestation.
-The Spanfilade indexes span occurrences across documents and cells for transclusion discovery.
-
-Xuzz renders explicit links as cyan/magenta ribbons and shared-content transclusions as gold prisms.
-Its beam layout and margin brackets help distinguish dense, overlapping passages.
-`BridgeCoordinator` brings ZigZag cell anchors and an accessibility source into the page scene.
-Native and reader-enabled package links share exact member and occurrence navigation through the
-link context. The wider interaction contract is described in the
-[Xuzz navigation workflow](design/ui_workflow_xuzz_navigation.md).
-
-Publication signs an authorship record, seals content and operations for sharing, and can publish
-mutable names through BEP 46. Global spans and operation references map published identities back to
-local stores. A Merkle identity ledger and BEP 10 extensions support author lookup and peer
-verification; Hashcash gates costly requests. See the
-[publication and discovery design](design/bep46-publication-and-discovery.md) and
-[identity model](design/oracle-identity-model.md) for protocol details.
-
-`Ctrl+Alt+Shift+N` adds a slice to the current document's store; `Ctrl+Alt+N` starts a standalone
-slice store. Swarm Telescope (`F3`) takes search input until Escape closes it. Publication counters
-are persisted per publishing key and salt. The Publish form accepts topics and defaults to local
-preparation; `Ctrl+Shift+P` shows background verification, DHT acknowledgement and retry status. For
-an isolated test swarm, `--test-publication-swarm HOST:PORT --dht-node HOST:PORT` enables the
-explicit mock verification destination. `Ctrl+O` opens signed `.xanadoc` publications with
-dependencies cached beside the manifest, and accepts a BEP 46 publication magnet to resolve and
-fetch on a worker. The Download publication panel offers progress refresh, open, cancel and retry;
-completed snapshots remain in the Open picker across restart and open offline. Downloads check the
-manifest's author key, salt and sequence against the signed DHT pointer, then verify every
-dependency before installation. `Ctrl+Shift+D` discovers signed publications from an author's 64-hex
-publishing key or a topic. In Telescope, Return on a simple topic such as `Ideas` starts a DHT
-rendezvous query; `author:<key>` follows that publishing key. Readers review the signed catalog,
-choose a publication, and use the same download/open controls. Author signatures do not establish
-Oracle enrollment. Catalogs and followed keys persist across restart. A completed download offers
-Notify me of updates; `Ctrl+Shift+U` reviews verified updates, opens earlier and newer snapshots
-together, marks updates reviewed, and pauses or resumes a subscription. Polling retains accepted
-sequences and catches missed updates after reconnect. It preserves earlier snapshots and the
-author's edition choices. `publicationPollSeconds` in `system://settings` defaults to 30 and is read
-at startup; the isolated mock swarm uses a shorter interval. See
-[publication implementation progress](design/publication-implementation-progress.md) for the
-repaired prerequisites and remaining network/UI work. `Ctrl+Alt+Shift+P` prepares an independent
-signed package from a selected publication's authored links; review it before publishing to the
-explicit test swarm. `Ctrl+Alt+Shift+L` discovers packages referencing that publication's registered
-global scrolls, fetches and reviews both endsets, and opens cited immutable snapshots through the
-download panel. Review offers Enable/Disable reader layer and Select link for navigation. Reader
-choices pin immutable package versions, persist privately and reopen offline; new package versions
-start disabled. Layers mark exact passages and add beams without importing links or changing visited
-stores. The existing link panel browses either endset, crosses sides and enters an explicitly chosen
-occurrence. A missing endpoint remains visible; open its pinned publication before entering it.
-Review packages matching selected passages filters retained packages by global scroll key and byte
-overlap with the selected document. Catalog format 2 distinguishes documents and packages; old
-development catalogs must be regenerated. See
-[the reader layer validation report](design/ux_publication_layers_validation_2026-10-07.md).
-
-### Configuration and computation
-
-Xuzz keeps keymaps, settings, layout, UI state, and pouches in five sovereign system xanadocs
-(`system://keymap|settings|layout|ui|pouches`). They are validated structure, with defaults, rather
-than hardcoded application keymaps. Its cell views use sovereign-store-backed system slices.
-`gleditor` remains separate and uses its own TSV configuration. See the
-[system xanadocs design](design/system-xanadocs-customization-and-metasystem.md).
-
-The pouch drawer can be widened by dragging its inner divider. Focus the divider and use Left or
-Right to resize with the keyboard, or activate it to widen by one step. A completed resize saves
-`pouchPanel.widthPx` in `system://ui`; cancelling a drag restores the previous width. The drawer
-clamps its width to the available safe area.
-
-The quotation builder has Source, Selector, Preview and Commit pages; large font settings keep every
-control reachable through these pages. The telescope provides Channels, Publications and Inspector
-pages, with Refresh for catalog changes. The hypertime graph switches between Graph and Comparison.
-Their preferred sizes and safe-area limits use the `quotationModal`, `telescopeModal` and
-`hypertimeModal` settings in `system://ui`, with `widthPx`, `heightPx`, `maxWidthShare` and
-`maxHeightShare` fields.
-
-The plain editor's chrome typography is independent of its document font. Its configuration accepts
-`ui.scale`, `ui.fontScale`, `ui.safeMarginShare`, `ui.minTouchPx`, `ui.minFontPx`, and
-`ui.font.<caption|label|body|title|mono>.<family|points>`. UI and font scales multiply the display
-scale; safe margin share is between 0 and 0.5. Font sizes and scales must be positive and finite.
-
-The Vortex VM operates over manifolds. VQL queries and VPL array expressions compile to Vortex;
-`vquery`/`vqueryc` and `vpl`/`vplc` expose their runners and compilers. `vprolog` runs a Prolog
-front end over Vortex/Vlog logic operations. Xuzz's cell view also has Vortex and VQL palettes. VQL
-can compose multiple stores in one ephemeral arena; this does not make persistent cross-store cell
-links automatic. The [Vortex](design/vortex-hyperstructural-runtime.md),
-[VQL](design/vql-query-language.md), [VPL](design/vpl-array-language.md), and
-[Vlog](design/vlog-logic-extension.md) notes document their models and remaining work; the
-[vicon](design/vicon-goal-directed-language.md) note proposes an Icon-shaped goal-directed language
-over the same runtime, and the [vlace](design/vlace-functional-language.md) note proposes a
-text-based, purely functional one (both specification only, nothing built).
+The [Xanadu and Xuzz reference](docs/xanadu.md) describes the store formats, hypertime, transclusion
+and link identities, publishing and reader layers, system configuration, and language runtimes. See
+its [disposable-store and backup steps](docs/xanadu.md#create-and-back-up-a-disposable-store) to
+seed, reopen, and back up a scratch store with its permascroll.
 
 ## ZigZag and Xuzz presentation
 
-`ZigzagVisualizer` owns a `UnifiedTransclusionEngine` over a `Manifold`. It renders the focused cell
-and its rank neighborhood with animated transitions, GPU picking, and accessibility descriptions.
-Cell Content View emphasizes the content of each cell; Topology View emphasizes its dimensional
-connections. The view can cycle dimensions and use execution, scope, contract, logic, and standard
-library bundles. `xuzz --raster STORE` prints a non-graphical projection. The visualizer can adopt a
-store-backed slice or project xanadoc versions via `--xanadoc`.
+Xuzz combines page and cell presentations, shared-span beams, animated neighborhood views and GPU
+picking. The current bridge is a foundation for the proposed unified navigation journey; the
+prototype gallery is not a set of running-UI screenshots.
 
-Xuzz composes this presentation with its pages and beams. The current bridge supplies cell anchors,
-a shared scene, and cell activation. It is a foundation for the proposed unified link journey, not a
-completed persistent activity navigator. The [prototype gallery](design/ui/prototypes/README.md)
-contains generated mock-ups rather than screenshots of the running UI.
-
-World-space labels fit their local cards and hide when their projected font size becomes too small
-for reading. Their objects remain selectable and retain full accessible names. ZigZag Cell Content
-View preserves rich cell text; Topology View uses compact fitted labels. The floating satelloid,
-blueprint and loading cards follow live typography and the `satelloidCard`, `tetherCard` and
-`hullCard` dimensions, safe-area shares and preview line limits in `system://ui`. Publication hull
-telemetry follows the phase and dependency progress shown by the download form's Refresh action.
+See [ZigZag and Xuzz presentation](docs/xanadu.md#zigzag-and-xuzz-presentation) for view behavior,
+projection commands and UI sizing.
 
 ## Accessibility and SDL
 
-The GPU draws quads, which do not describe themselves to a screen reader. A separate accessibility
-tree is built from the same document and UI state. It describes documents as line-sized text runs,
-caret and selection offsets in characters, notifications, forms, links, hypertime, and ZigZag cells.
-Actions return through a queue to the thread that owns the target state. `include/gleditor/a11y/`
-defines platform-independent nodes; `src/a11y/` sends them through AccessKit to AT-SPI on Linux, UI
-Automation on Windows, and NSAccessibility on macOS. A build without AccessKit still builds the
-internal tree and uses a no-op platform adapter. `GLEDITOR_ENABLE_A11Y=1` requires the binding;
-`ACCESSKIT_DIR` can point to a local accesskit-c installation. `--dump-a11y` prints the settled tree
-for headless inspection, at its place among the other automation options. `--wait-ms` pauses the
-automation script for up to 60 seconds while rendering, input and background work continue.
-`--click-label "Full control label"` resolves a unique visible actionable accessibility label and
-clicks the centre of its drawn bounds through normal asynchronous picking. Missing or ambiguous
-labels fail the run; responsive panel tests use this instead of fixed coordinates.
+The library maintains an accessibility tree alongside GPU rendering and uses a shared focus manager
+for keyboard navigation, modal input and accessibility actions. SDL2 and SDL3 share one
+compatibility layer.
 
-The Makefile selects SDL3 when pkg-config finds it, otherwise SDL2; use `GLEDITOR_SDL=2|3` to pin a
-major. `include/gleditor/sdl_compat.hpp` normalizes their input, window, and text-input APIs. SDL2
-needs version 2.0.22 or newer. SDL supplies windows and message boxes, not a widget toolkit:
-editable forms such as xuzz's publishing dialog are rendered with `gleditor::Form`. Text input area
-updates position input-method candidate windows beside the focused field.
-
-`ui::FocusManager` owns modal precedence and keyboard focus. Scopes publish immutable
-`ui::LayoutResult` snapshots so traversal, input-method placement, picking and accessibility use the
-same node identities and bounds. Tab follows layout order and wraps; arrows move within a focus
-group after the control has handled editing. The accessibility publisher follows the manager's
-active scope, reports one modal root and blocks background actions while that scope is modal.
-Applications hold `FocusManager::ScopeHandle` registrations for their `FocusScope` objects and
-release the handles before destroying those objects. Composed text uses `std::string_view`;
-render-thread GPU picks are delivered to the same focused scope. Boxed `Canvas::addText` uses
-`TextFit` constraints rather than a mutable canvas-wide width limit. `make lint` rejects byte-based
-ellipsis truncation and fixed Sans size literals in UI components.
+See [accessibility and SDL](docs/rendering.md#accessibility-and-sdl) for platform bindings, input
+methods and headless UI automation.
 
 ## Tests and diagnostics
 
-`make` exports offscreen SDL video, dummy audio, software GL, and XDG data/config/cache directories
-under `build/xdg/`. This keeps tests headless and keeps their primedia, system xanadocs, and cache
-out of your personal directories. For a binary run outside Make, set these explicitly:
-
 ```sh
-SDL_VIDEODRIVER=offscreen SDL_AUDIODRIVER=dummy LIBGL_ALWAYS_SOFTWARE=1 \
-  XDG_DATA_HOME="$PWD/build/xdg/data" XDG_CONFIG_HOME="$PWD/build/xdg/config" \
-  XDG_CACHE_HOME="$PWD/build/xdg/cache" ./build/xuzz_test
+make -j$(nproc) test
+make -j$(nproc) format-check lint
 ```
 
-```sh
-make -j$(nproc) test                 # three gtest binaries, then rootless swarm tests
-make test TEST_FILTER='MediaTest.*'  # focused gtest filter
-make test/e2e-orchestration          # whole-program xuzz orchestration
-make -j$(nproc) test/publication-local # three local UI publications with disposable signing keys
-make -j$(nproc) test/publication-swarm # outbox acknowledgement/restart on separate network stacks
-make -j$(nproc) format-check lint    # formatting and text lint gates
-make -j$(nproc) shaders              # shader validation
-make profile                         # library test coverage
-```
-
-`gleditor_test` links the real shared library; `xuzz_test` exercises the engine without a graphics
-device; `zigzag_test` covers the slice model and transclusion engine. The swarm step uses rootless
-network namespaces and needs the `veth` kernel module. If it ends with
-`Error: Unknown device type.`, inspect the three gtest summaries before diagnosing the failure. Run
-`xvfb-run -s "-screen 0 1024x768x24" ./tools/compare-backends.sh` for the backend image and picking
-comparison.
-
-Binary sample stores live under `tests/samples/xudu/` and `tests/samples/xuzz/`. When an operation
-layout or format changes, regenerate them in the same commit:
-
-```sh
-make -j$(nproc) xuzz
-./tools/create-sample-xanadocs.sh
-./tools/create-floating-image-sample.sh
-```
-
-The second script restores the floating-image sample deleted by the first. Its permascroll is part
-of the fixture. `store-dump --section=ops STORE` is the semantic diff to use across format changes;
-`--section=header` shows the format version.
-
-`make format-check`, `make lint`, `make analyze`, and `make check` are the broader quality gates. If
-a lint tool is missing, install it locally when possible and rerun the gate; a skipped tool is not a
-pass. `AGENTS.md` has formatter and linter setup details. Logging uses named spdlog categories;
-`SPDLOG_LEVEL='warn,text.layout=debug,xuzz.links=trace'` enables selected diagnostics on stderr.
+Make runs tests headlessly with isolated XDG state. The [testing reference](docs/testing.md) covers
+that environment for direct binary runs, focused and network tests, fixture regeneration, backend
+comparisons, quality gates and logging. [AGENTS.md](AGENTS.md) is the contributor runbook.
 
 ## Installing and project layout
 
@@ -415,7 +164,9 @@ for its build scope.
 The [store/slice convergence](design/store-slice-convergence.md) is the central model for cell
 identity and hypertime. The [bridge design](design/xudu-zigzag-unified-hypermedia-bridge.md) covers
 xanadoc/ZigZag composition. The [C++26 compatibility note](design/cpp26-compatibility.md) explains
-native-versus-fallback selection. `make doc` generates API documentation under `docs/`.
+native-versus-fallback selection. See the
+[API documentation reference](docs/testing.md#api-documentation-generation) for the Doxygen build,
+generated indexes, enforced source-coverage check and parser limits.
 
 ## License
 

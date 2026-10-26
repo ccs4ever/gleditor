@@ -5,6 +5,8 @@
  */
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include <stdexcept>
+#include <tuple>
 
 #include <memory>
 #include <string>
@@ -55,9 +57,83 @@ struct TestStore {
 
   zigzag::CellRef makeCell(std::string_view text) {
     head = store->makeCell(head, text);
-    return store->cellRefOf(head);
+    return store->cellRefOf(head).value();
   }
 };
+
+TEST(PublishedVocabulariesTest, InvalidReferencesAreNotMintIfAbsentRequests) {
+  TestStore alice;
+  const auto term = alice.makeDim("d.term");
+  const std::vector<zigzag::CellRef> terms{term};
+  const auto before = alice.store->opCount();
+  EXPECT_THROW(std::ignore = publishVocabularyRelease(*alice.store, alice.head,
+                                                      zigzag::CellRef{0},
+                                                      "release", terms),
+               std::invalid_argument);
+  EXPECT_EQ(alice.store->opCount(), before);
+  const std::vector<zigzag::CellRef> invalidTerms{zigzag::CellRef{0}};
+  EXPECT_THROW(std::ignore = publishVocabularyRelease(*alice.store, alice.head,
+                                                      std::nullopt, "release",
+                                                      invalidTerms),
+               std::invalid_argument);
+  EXPECT_EQ(alice.store->opCount(), before);
+  const auto release = publishVocabularyRelease(*alice.store, alice.head,
+                                                std::nullopt, "release", terms);
+  EXPECT_EQ(release.vocabulary.state.scroll, alice.scrollKey);
+  EXPECT_TRUE(alice.store->rebuildManifold(release.version)
+                  .contains(release.releaseCell));
+}
+
+TEST(PublishedVocabulariesTest, DefaultPermascrollSuppliesStableIdentity) {
+  auto perma = std::make_shared<UserPermascroll>();
+  Store store(perma);
+  const auto head   = store.sliceGenesis(MicroversionId{});
+  const auto before = store.opCount();
+
+  const auto release =
+      publishVocabularyRelease(store, head, std::nullopt, "release", {});
+  const auto stableKey = scrollKey(perma->currentScroll());
+  ASSERT_TRUE(stableKey);
+  EXPECT_EQ(release.vocabulary.state.scroll, *stableKey);
+  EXPECT_GT(store.opCount(), before);
+}
+
+TEST(PublishedVocabulariesTest, OptionalParentDistinguishesLatestFromRoot) {
+  TestStore alice("btpk:parent-selection:vocabulary");
+  const auto latest = alice.store->latest();
+
+  const auto release = publishVocabularyRelease(
+      *alice.store, std::nullopt, std::nullopt, "latest release", {});
+  EXPECT_TRUE(latest.isAncestorOf(release.version));
+
+  const auto beforeRoot = alice.store->opCount();
+  EXPECT_THROW(std::ignore =
+                   publishVocabularyRelease(*alice.store, MicroversionId{},
+                                            std::nullopt, "root release", {}),
+               std::invalid_argument);
+  EXPECT_EQ(alice.store->opCount(), beforeRoot);
+
+  const auto unknownParent = MicroversionId::parse("999");
+  const auto beforeUnknown = alice.store->opCount();
+  EXPECT_THROW(std::ignore = publishVocabularyRelease(
+                   *alice.store, unknownParent, std::nullopt,
+                   "unknown-parent release", {}),
+               std::invalid_argument);
+  EXPECT_EQ(alice.store->opCount(), beforeUnknown);
+}
+
+TEST(PublishedVocabulariesTest, StableScrollIdentitySurvivesStoreRecreation) {
+  TestStore first("btpk:stable:vocabulary");
+  const auto firstRelease = publishVocabularyRelease(
+      *first.store, first.head, std::nullopt, "release", {});
+
+  TestStore reopened("btpk:stable:vocabulary");
+  const auto reopenedRelease = publishVocabularyRelease(
+      *reopened.store, reopened.head, std::nullopt, "release", {});
+
+  EXPECT_EQ(firstRelease.vocabulary.state.scroll,
+            reopenedRelease.vocabulary.state.scroll);
+}
 
 // 1. aVocabularyReleasePinsItsWholeRank
 TEST(PublishedVocabulariesTest, aVocabularyReleasePinsItsWholeRank) {
@@ -68,9 +144,8 @@ TEST(PublishedVocabulariesTest, aVocabularyReleasePinsItsWholeRank) {
   const auto tRefutes  = alice.makeCell("refutes");
 
   std::vector<zigzag::CellRef> terms1{tSupports, tRefutes};
-  const auto rel1 =
-      publishVocabularyRelease(*alice.store, alice.head, zigzag::noCell,
-                               "Argumentation Vocab v1", terms1);
+  const auto rel1 = publishVocabularyRelease(
+      *alice.store, alice.head, std::nullopt, "Argumentation Vocab v1", terms1);
   alice.head = rel1.version;
 
   // Bob adopts Release 1
@@ -91,18 +166,18 @@ TEST(PublishedVocabulariesTest, aVocabularyReleasePinsItsWholeRank) {
   ASSERT_TRUE(dimVocabOpt.has_value());
   const auto entryCell = bobArena.linked(adoptedBob.quotationCell, *dimVocabOpt,
                                          zigzag::DimVector::POS);
-  EXPECT_NE(entryCell, zigzag::noCell);
+  ASSERT_TRUE(entryCell);
 
   const auto bobDimsOpt = bobArena.dimensionNamed(kDimDims, *bob.store);
   ASSERT_TRUE(bobDimsOpt.has_value());
 
   auto curTerm =
-      bobArena.linked(entryCell, *bobDimsOpt, zigzag::DimVector::POS);
-  EXPECT_NE(curTerm, zigzag::noCell);
+      bobArena.linked(*entryCell, *bobDimsOpt, zigzag::DimVector::POS);
+  ASSERT_TRUE(curTerm);
   int bobTermCount = 0;
-  while (curTerm != zigzag::noCell && curTerm != bob.store->homeCell()) {
+  while (curTerm && *curTerm != bob.store->homeCell().value()) {
     bobTermCount++;
-    curTerm = bobArena.linked(curTerm, *bobDimsOpt, zigzag::DimVector::POS);
+    curTerm = bobArena.linked(*curTerm, *bobDimsOpt, zigzag::DimVector::POS);
   }
   EXPECT_EQ(bobTermCount, 2);
 
@@ -132,20 +207,20 @@ TEST(PublishedVocabulariesTest, aVocabularyReleasePinsItsWholeRank) {
   ASSERT_TRUE(charlieVocabOpt.has_value());
   const auto charlieEntry = charlieArena.linked(
       adoptedCharlie.quotationCell, *charlieVocabOpt, zigzag::DimVector::POS);
-  EXPECT_NE(charlieEntry, zigzag::noCell);
+  ASSERT_TRUE(charlieEntry);
 
   const auto charlieDimsOpt =
       charlieArena.dimensionNamed(kDimDims, *charlie.store);
   ASSERT_TRUE(charlieDimsOpt.has_value());
 
-  curTerm = charlieArena.linked(charlieEntry, *charlieDimsOpt,
+  curTerm = charlieArena.linked(*charlieEntry, *charlieDimsOpt,
                                 zigzag::DimVector::POS);
-  EXPECT_NE(curTerm, zigzag::noCell);
+  ASSERT_TRUE(curTerm);
   int charlieTermCount = 0;
-  while (curTerm != zigzag::noCell && curTerm != charlie.store->homeCell()) {
+  while (curTerm && *curTerm != charlie.store->homeCell().value()) {
     charlieTermCount++;
     curTerm =
-        charlieArena.linked(curTerm, *charlieDimsOpt, zigzag::DimVector::POS);
+        charlieArena.linked(*curTerm, *charlieDimsOpt, zigzag::DimVector::POS);
   }
   EXPECT_EQ(charlieTermCount, 3);
 
@@ -166,7 +241,7 @@ TEST(PublishedVocabulariesTest, adoptingAVocabularyDoesNotFileEveryTerm) {
   }
 
   const auto rel = publishVocabularyRelease(
-      *alice.store, alice.head, zigzag::noCell, "Large Vocab 20", terms);
+      *alice.store, alice.head, std::nullopt, "Large Vocab 20", terms);
   alice.head = rel.version;
 
   TestStore bob("btpk:bbbb:bob");
@@ -185,7 +260,7 @@ TEST(PublishedVocabulariesTest, adoptingAVocabularyDoesNotFileEveryTerm) {
     ASSERT_TRUE(slot.has_value());
     const GlobalOpRef gRef{
         .scroll   = alice.scrollKey,
-        .produces = alice.store->segmentedOps().idOf(slot->birthOp),
+        .produces = alice.store->segmentedOps().idOf(slot->birthOp).value(),
     };
     EXPECT_FALSE(findAdoptedDimension(*bob.store, gRef).has_value());
   }
@@ -197,14 +272,14 @@ TEST(PublishedVocabulariesTest, usingAPublishedTermMakesItALocalDimension) {
   const auto tSupports = alice.makeCell("supports");
   std::vector<zigzag::CellRef> terms{tSupports};
   const auto rel = publishVocabularyRelease(*alice.store, alice.head,
-                                            zigzag::noCell, "Rel", terms);
+                                            std::nullopt, "Rel", terms);
   alice.head     = rel.version;
 
   const auto aSlot = alice.store->rebuildManifold(alice.head).slot(tSupports);
   ASSERT_TRUE(aSlot.has_value());
   const GlobalOpRef termRef{
       .scroll   = alice.scrollKey,
-      .produces = alice.store->segmentedOps().idOf(aSlot->birthOp),
+      .produces = alice.store->segmentedOps().idOf(aSlot->birthOp).value(),
   };
 
   TestStore bob("btpk:bbbb:bob");
@@ -238,14 +313,14 @@ TEST(PublishedVocabulariesTest, filingOneTermTwiceReusesItsPlaceholder) {
   const auto tSupports = alice.makeCell("supports");
   std::vector<zigzag::CellRef> terms{tSupports};
   const auto rel = publishVocabularyRelease(*alice.store, alice.head,
-                                            zigzag::noCell, "Rel", terms);
+                                            std::nullopt, "Rel", terms);
   alice.head     = rel.version;
 
   const auto aSlot = alice.store->rebuildManifold(alice.head).slot(tSupports);
   ASSERT_TRUE(aSlot.has_value());
   const GlobalOpRef termRef{
       .scroll   = alice.scrollKey,
-      .produces = alice.store->segmentedOps().idOf(aSlot->birthOp),
+      .produces = alice.store->segmentedOps().idOf(aSlot->birthOp).value(),
   };
 
   TestStore bob("btpk:bbbb:bob");
@@ -288,21 +363,23 @@ TEST(PublishedVocabulariesTest, equalNamesDoNotBindByIdentity) {
   const auto spaceAlice = arena.attach(zigzag::Space{
       .manifold = &mAlice, .store = alice.store.get(), .label = "Alice"});
   const auto spaceBob   = arena.attach(zigzag::Space{
-      .manifold = &mBob, .store = bob.store.get(), .label = "Bob"});
+        .manifold = &mBob, .store = bob.store.get(), .label = "Bob"});
 
   // Bind by identity only
   arena.bindSharedIdentities();
 
   // Equal names do NOT bind by identity
-  EXPECT_EQ(arena.dimIn(spaceBob, aliceDim), zigzag::noCell);
-  EXPECT_EQ(arena.dimIn(spaceAlice, bobDim), zigzag::noCell);
+  EXPECT_FALSE(arena.dimIn(spaceBob, aliceDim));
+  EXPECT_FALSE(arena.dimIn(spaceAlice, bobDim));
 
   // Now explicitly request NameMatch binding
   arena.bindDimensionsByNameMatch();
 
   // Now they bind via NameMatch
-  EXPECT_EQ(arena.dimIn(spaceBob, aliceDim), bobDim);
-  EXPECT_EQ(arena.dimIn(spaceAlice, bobDim), aliceDim);
+  ASSERT_TRUE(arena.dimIn(spaceBob, aliceDim));
+  ASSERT_TRUE(arena.dimIn(spaceAlice, bobDim));
+  EXPECT_EQ(*arena.dimIn(spaceBob, aliceDim), bobDim);
+  EXPECT_EQ(*arena.dimIn(spaceAlice, bobDim), aliceDim);
 
   const auto arenaDim = arena.dimensionNamed("supports", *alice.store);
   ASSERT_TRUE(arenaDim.has_value());
@@ -318,7 +395,7 @@ TEST(PublishedVocabulariesTest, sharedPublishedIdentityBindsAcrossStores) {
   const auto tSupports = vocabStore.makeCell("supports");
   std::vector<zigzag::CellRef> terms{tSupports};
   const auto rel  = publishVocabularyRelease(*vocabStore.store, vocabStore.head,
-                                             zigzag::noCell, "Rel", terms);
+                                             std::nullopt, "Rel", terms);
   vocabStore.head = rel.version;
 
   const auto vSlot =
@@ -326,7 +403,7 @@ TEST(PublishedVocabulariesTest, sharedPublishedIdentityBindsAcrossStores) {
   ASSERT_TRUE(vSlot.has_value());
   const GlobalOpRef termRef{
       .scroll   = vocabStore.scrollKey,
-      .produces = vocabStore.store->segmentedOps().idOf(vSlot->birthOp),
+      .produces = vocabStore.store->segmentedOps().idOf(vSlot->birthOp).value(),
   };
 
   // Bob files the term
@@ -346,15 +423,17 @@ TEST(PublishedVocabulariesTest, sharedPublishedIdentityBindsAcrossStores) {
 
   zigzag::ArenaManifold arena;
   const auto spaceBob     = arena.attach(zigzag::Space{
-      .manifold = &mBob, .store = bob.store.get(), .label = "Bob"});
+          .manifold = &mBob, .store = bob.store.get(), .label = "Bob"});
   const auto spaceCharlie = arena.attach(zigzag::Space{
       .manifold = &mCharlie, .store = charlie.store.get(), .label = "Charlie"});
 
   arena.bindSharedIdentities();
 
   // Federate across stores: Bob's dimension maps to Charlie's local placeholder
-  EXPECT_EQ(arena.dimIn(spaceCharlie, adoptedBob.local), adoptedCharlie.local);
-  EXPECT_EQ(arena.dimIn(spaceBob, adoptedCharlie.local), adoptedBob.local);
+  ASSERT_TRUE(arena.dimIn(spaceCharlie, adoptedBob.local));
+  ASSERT_TRUE(arena.dimIn(spaceBob, adoptedCharlie.local));
+  EXPECT_EQ(*arena.dimIn(spaceCharlie, adoptedBob.local), adoptedCharlie.local);
+  EXPECT_EQ(*arena.dimIn(spaceBob, adoptedCharlie.local), adoptedBob.local);
 
   const auto arenaDimOpt = arena.dimensionNamed("supports", *bob.store);
   ASSERT_TRUE(arenaDimOpt.has_value());
@@ -370,14 +449,14 @@ TEST(PublishedVocabulariesTest, renamingATermPreservesItsIdentity) {
   const auto tSupports = alice.makeCell("supports");
   std::vector<zigzag::CellRef> terms{tSupports};
   const auto rel1 = publishVocabularyRelease(*alice.store, alice.head,
-                                             zigzag::noCell, "Rel 1", terms);
+                                             std::nullopt, "Rel 1", terms);
   alice.head      = rel1.version;
 
   const auto aSlot = alice.store->rebuildManifold(alice.head).slot(tSupports);
   ASSERT_TRUE(aSlot.has_value());
   const GlobalOpRef termRef{
       .scroll   = alice.scrollKey,
-      .produces = alice.store->segmentedOps().idOf(aSlot->birthOp),
+      .produces = alice.store->segmentedOps().idOf(aSlot->birthOp).value(),
   };
 
   TestStore bob("btpk:bbbb:bob");
@@ -403,15 +482,17 @@ TEST(PublishedVocabulariesTest, renamingATermPreservesItsIdentity) {
 
   zigzag::ArenaManifold arena;
   const auto spaceBob     = arena.attach(zigzag::Space{
-      .manifold = &mBob, .store = bob.store.get(), .label = "Bob"});
+          .manifold = &mBob, .store = bob.store.get(), .label = "Bob"});
   const auto spaceCharlie = arena.attach(zigzag::Space{
       .manifold = &mCharlie, .store = charlie.store.get(), .label = "Charlie"});
 
   arena.bindSharedIdentities();
 
   // Identity is preserved despite label edit
-  EXPECT_EQ(arena.dimIn(spaceCharlie, adoptedBob.local), adoptedCharlie.local);
-  EXPECT_EQ(arena.dimIn(spaceBob, adoptedCharlie.local), adoptedBob.local);
+  ASSERT_TRUE(arena.dimIn(spaceCharlie, adoptedBob.local));
+  ASSERT_TRUE(arena.dimIn(spaceBob, adoptedCharlie.local));
+  EXPECT_EQ(*arena.dimIn(spaceCharlie, adoptedBob.local), adoptedCharlie.local);
+  EXPECT_EQ(*arena.dimIn(spaceBob, adoptedCharlie.local), adoptedBob.local);
 }
 
 // 8. replacingATermDoesNotHijackExistingBindings
@@ -420,14 +501,14 @@ TEST(PublishedVocabulariesTest, replacingATermDoesNotHijackExistingBindings) {
   const auto tSupports1 = alice.makeCell("supports");
   std::vector<zigzag::CellRef> terms1{tSupports1};
   const auto rel1 = publishVocabularyRelease(*alice.store, alice.head,
-                                             zigzag::noCell, "Rel 1", terms1);
+                                             std::nullopt, "Rel 1", terms1);
   alice.head      = rel1.version;
 
   const auto slot1 = alice.store->rebuildManifold(alice.head).slot(tSupports1);
   ASSERT_TRUE(slot1.has_value());
   const GlobalOpRef termRef1{
       .scroll   = alice.scrollKey,
-      .produces = alice.store->segmentedOps().idOf(slot1->birthOp),
+      .produces = alice.store->segmentedOps().idOf(slot1->birthOp).value(),
   };
 
   TestStore bob("btpk:bbbb:bob");
@@ -447,7 +528,7 @@ TEST(PublishedVocabulariesTest, replacingATermDoesNotHijackExistingBindings) {
   ASSERT_TRUE(slot2.has_value());
   const GlobalOpRef termRef2{
       .scroll   = alice.scrollKey,
-      .produces = alice.store->segmentedOps().idOf(slot2->birthOp),
+      .produces = alice.store->segmentedOps().idOf(slot2->birthOp).value(),
   };
 
   EXPECT_NE(termRef1.produces, termRef2.produces);
@@ -462,7 +543,7 @@ TEST(PublishedVocabulariesTest, replacingATermDoesNotHijackExistingBindings) {
 
   zigzag::ArenaManifold arena;
   const auto spaceBob     = arena.attach(zigzag::Space{
-      .manifold = &mBob, .store = bob.store.get(), .label = "Bob"});
+          .manifold = &mBob, .store = bob.store.get(), .label = "Bob"});
   const auto spaceCharlie = arena.attach(zigzag::Space{
       .manifold = &mCharlie, .store = charlie.store.get(), .label = "Charlie"});
 
@@ -470,8 +551,8 @@ TEST(PublishedVocabulariesTest, replacingATermDoesNotHijackExistingBindings) {
 
   // Existing documents still bind to original address; replacement does not
   // hijack
-  EXPECT_EQ(arena.dimIn(spaceCharlie, adoptedBob.local), zigzag::noCell);
-  EXPECT_EQ(arena.dimIn(spaceBob, adoptedCharlie.local), zigzag::noCell);
+  EXPECT_FALSE(arena.dimIn(spaceCharlie, adoptedBob.local));
+  EXPECT_FALSE(arena.dimIn(spaceBob, adoptedCharlie.local));
 }
 
 // 9. anUnavailableVocabularyIsAVisibleCitation
@@ -480,7 +561,7 @@ TEST(PublishedVocabulariesTest, anUnavailableVocabularyIsAVisibleCitation) {
   const auto tSupports = alice.makeCell("supports");
   std::vector<zigzag::CellRef> terms{tSupports};
   const auto rel = publishVocabularyRelease(*alice.store, alice.head,
-                                            zigzag::noCell, "Rel 1", terms);
+                                            std::nullopt, "Rel 1", terms);
   alice.head     = rel.version;
 
   TestStore bob("btpk:bbbb:bob");
@@ -518,7 +599,7 @@ TEST(PublishedVocabulariesTest, updatingAVocabularyIsAnAuthoredRepoint) {
   const auto tRefutes  = alice.makeCell("refutes");
   std::vector<zigzag::CellRef> terms1{tSupports, tRefutes};
   const auto rel1 = publishVocabularyRelease(*alice.store, alice.head,
-                                             zigzag::noCell, "Rel 1", terms1);
+                                             std::nullopt, "Rel 1", terms1);
   alice.head      = rel1.version;
 
   TestStore bob("btpk:bbbb:bob");
@@ -560,15 +641,15 @@ TEST(PublishedVocabulariesTest, updatingAVocabularyIsAnAuthoredRepoint) {
   ASSERT_TRUE(dimVocabEarly.has_value());
   const auto entryEarly = arenaEarly.linked(q1.quotationCell, *dimVocabEarly,
                                             zigzag::DimVector::POS);
-  EXPECT_NE(entryEarly, zigzag::noCell);
+  ASSERT_TRUE(entryEarly);
 
   const auto dimsEarly = arenaEarly.dimensionNamed(kDimDims, *bob.store);
   ASSERT_TRUE(dimsEarly.has_value());
-  auto cur = arenaEarly.linked(entryEarly, *dimsEarly, zigzag::DimVector::POS);
+  auto cur = arenaEarly.linked(*entryEarly, *dimsEarly, zigzag::DimVector::POS);
   int earlyCount = 0;
-  while (cur != zigzag::noCell && cur != bob.store->homeCell()) {
+  while (cur && *cur != bob.store->homeCell().value()) {
     earlyCount++;
-    cur = arenaEarly.linked(cur, *dimsEarly, zigzag::DimVector::POS);
+    cur = arenaEarly.linked(*cur, *dimsEarly, zigzag::DimVector::POS);
   }
   EXPECT_EQ(earlyCount, 2);
 
@@ -581,15 +662,15 @@ TEST(PublishedVocabulariesTest, updatingAVocabularyIsAnAuthoredRepoint) {
   ASSERT_TRUE(dimVocabLatest.has_value());
   const auto entryLatest = arenaLatest.linked(q1.quotationCell, *dimVocabLatest,
                                               zigzag::DimVector::POS);
-  EXPECT_NE(entryLatest, zigzag::noCell);
+  ASSERT_TRUE(entryLatest);
 
   const auto dimsLatest = arenaLatest.dimensionNamed(kDimDims, *bob.store);
   ASSERT_TRUE(dimsLatest.has_value());
-  cur = arenaLatest.linked(entryLatest, *dimsLatest, zigzag::DimVector::POS);
+  cur = arenaLatest.linked(*entryLatest, *dimsLatest, zigzag::DimVector::POS);
   int latestCount = 0;
-  while (cur != zigzag::noCell && cur != bob.store->homeCell()) {
+  while (cur && *cur != bob.store->homeCell().value()) {
     latestCount++;
-    cur = arenaLatest.linked(cur, *dimsLatest, zigzag::DimVector::POS);
+    cur = arenaLatest.linked(*cur, *dimsLatest, zigzag::DimVector::POS);
   }
   EXPECT_EQ(latestCount, 3);
 }

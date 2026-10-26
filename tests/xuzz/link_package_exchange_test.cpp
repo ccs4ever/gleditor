@@ -98,7 +98,7 @@ protected:
     const auto seal = makeTorrent(files, "scroll");
     auto scroll =
         Scroll::ofTorrentFile(seal.hash, 0, "text", 0, files[0].data.size());
-    const auto key = scrollKey(scroll);
+    const auto key = scrollKey(scroll).value();
     GlobalLink link;
     link.owner = "Bob's Commentary";
     link.left  = {{key, 0, 5}, {key, 6, 5}};

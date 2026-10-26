@@ -43,6 +43,15 @@ TEST(Picking, resultCarriesTheQueriedPixel) {
   EXPECT_EQ(result->tag, (PickingTag{3, 27}));
 }
 
+TEST(Picking, requestCorrelationDistinguishesMissingFromZero) {
+  const PickingResult uncorrelated{};
+  const PickingResult correlatedToZero{.requestId = 0};
+
+  EXPECT_FALSE(uncorrelated.requestId);
+  ASSERT_TRUE(correlatedToZero.requestId);
+  EXPECT_EQ(*correlatedToZero.requestId, 0U);
+}
+
 TEST(Picking, noResultYetIsNotAnEmptyTag) {
   NiceMock<MockRenderDevice> device;
   ON_CALL(device, takePickingTag)

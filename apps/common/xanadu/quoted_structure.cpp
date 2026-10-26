@@ -277,23 +277,21 @@ evaluateSelector(const Selector &selector,
 
   switch (selector.kind) {
   case Selector::Kind::Cell: {
-    if (selector.root != zigzag::noCell &&
-        foreignManifold.contains(selector.root)) {
-      results.push_back(selector.root);
+    if (selector.root.has_value() && foreignManifold.contains(*selector.root)) {
+      results.push_back(*selector.root);
     }
     break;
   }
 
   case Selector::Kind::Rank: {
-    if (selector.root == zigzag::noCell ||
-        !foreignManifold.contains(selector.root) ||
-        selector.rankDim == zigzag::noCell) {
+    if (!selector.root || !foreignManifold.contains(*selector.root) ||
+        !selector.rankDim) {
       break;
     }
-    zigzag::CellRef cur = selector.root;
+    zigzag::CellRef cur = *selector.root;
     std::unordered_set<zigzag::CellRef> visited;
 
-    while (cur != zigzag::noCell) {
+    while (true) {
       if (visited.contains(cur)) {
         break; // Ring stop before revisiting start
       }
@@ -303,23 +301,24 @@ evaluateSelector(const Selector &selector,
         outState = QuotationState::TooLarge;
         return results;
       }
-      cur =
-          foreignManifold.linked(cur, selector.rankDim, selector.rankDirection);
+      const auto next = foreignManifold.linked(cur, *selector.rankDim,
+                                               selector.rankDirection);
+      if (!next) break;
+      cur = *next;
     }
     break;
   }
 
   case Selector::Kind::Closure: {
-    if (selector.root == zigzag::noCell ||
-        !foreignManifold.contains(selector.root)) {
+    if (!selector.root || !foreignManifold.contains(*selector.root)) {
       break;
     }
 
     std::queue<zigzag::CellRef> q;
     std::unordered_set<zigzag::CellRef> visited;
 
-    q.push(selector.root);
-    visited.insert(selector.root);
+    q.push(*selector.root);
+    visited.insert(*selector.root);
 
     while (!q.empty()) {
       const auto u = q.front();
@@ -335,10 +334,9 @@ evaluateSelector(const Selector &selector,
         for (const auto dir :
              {zigzag::DimVector::POS, zigzag::DimVector::NEG}) {
           const auto v = foreignManifold.linked(u, dim, dir);
-          if (v != zigzag::noCell && foreignManifold.contains(v) &&
-              !visited.contains(v)) {
-            visited.insert(v);
-            q.push(v);
+          if (v && foreignManifold.contains(*v) && !visited.contains(*v)) {
+            visited.insert(*v);
+            q.push(*v);
           }
         }
       }
@@ -419,8 +417,7 @@ void resolveQuotations(zigzag::ArenaManifold &arena,
   std::vector<zigzag::CellRef> quoteHeads;
   for (const auto &cell : base.cells()) {
     const auto qCell = cell.birthOp;
-    if (base.linked(qCell, *dimQuotesState, zigzag::DimVector::POS) !=
-        zigzag::noCell) {
+    if (base.linked(qCell, *dimQuotesState, zigzag::DimVector::POS)) {
       quoteHeads.push_back(qCell);
     }
   }
@@ -484,7 +481,7 @@ void resolveQuotations(zigzag::ArenaManifold &arena,
         }
       }
       const auto opIdx = foreignDoc.store->segmentedOps().indexOf(ext.produces);
-      if (opIdx != 0 && foreignFold->contains(opIdx)) {
+      if (opIdx && *opIdx != 0 && foreignFold->contains(*opIdx)) {
         return opIdx;
       }
       return std::nullopt;
@@ -498,13 +495,11 @@ void resolveQuotations(zigzag::ArenaManifold &arena,
     selector.queryLanguageVersion = q.selectorSpec.queryLanguageVersion;
     selector.orderPolicy          = q.selectorSpec.orderPolicy;
 
-    selector.root =
-        localiseExtern(q.selectorSpec.rootRef).value_or(zigzag::noCell);
+    selector.root = localiseExtern(q.selectorSpec.rootRef);
 
     if (q.selectorSpec.kind == Selector::Kind::Rank &&
         q.selectorSpec.rankDimRef.has_value()) {
-      selector.rankDim =
-          localiseExtern(*q.selectorSpec.rankDimRef).value_or(zigzag::noCell);
+      selector.rankDim = localiseExtern(*q.selectorSpec.rankDimRef);
     } else if (q.selectorSpec.kind == Selector::Kind::Closure) {
       for (const auto &ref : q.selectorSpec.carryRefs) {
         if (const auto localized = localiseExtern(ref)) {
@@ -548,7 +543,7 @@ void resolveQuotations(zigzag::ArenaManifold &arena,
       const auto birthOp = fSlot ? fSlot->birthOp : fCell;
       GlobalOpRef gRef{
           .scroll   = foreignScrollStr,
-          .produces = foreignDoc.store->segmentedOps().idOf(birthOp),
+          .produces = foreignDoc.store->segmentedOps().idOf(birthOp).value(),
       };
 
       if (const auto it = overrideMap.find(gRef); it != overrideMap.end()) {
@@ -568,8 +563,8 @@ void resolveQuotations(zigzag::ArenaManifold &arena,
       for (const auto &dimLink : foreignFold->dimensionsOf(u)) {
         const auto dim = dimLink.dim;
         const auto v   = dimLink.neighbor(zigzag::DimVector::POS);
-        if (v != zigzag::noCell && foreignToView.contains(v)) {
-          const auto vView = foreignToView[v];
+        if (v && foreignToView.contains(*v)) {
+          const auto vView = foreignToView[*v];
           // Ensure or resolve dimension in arena
           const auto dimName  = foreignFold->textOf(dim, *foreignDoc.store);
           const auto arenaDim = arena.ensureDimension(dimName);
@@ -597,8 +592,8 @@ void resolveQuotations(zigzag::ArenaManifold &arena,
       const auto lastCell  = viewRun.back();
 
       (void)arena.link(qCell, d, zigzag::DimVector::POS, entryCell);
-      if (localSucc != zigzag::noCell) {
-        (void)arena.link(lastCell, d, zigzag::DimVector::POS, localSucc);
+      if (localSucc) {
+        (void)arena.link(lastCell, d, zigzag::DimVector::POS, *localSucc);
       }
     }
   }

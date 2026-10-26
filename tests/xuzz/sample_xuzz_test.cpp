@@ -24,9 +24,9 @@ ConvergenceStore makeConvergenceStore() {
   const auto dimension = store.makeDimension(version, "d.1");
   version              = dimension.version;
   version              = store.makeCell(version, "Document passage");
-  result.first         = store.cellRefOf(version);
+  result.first         = store.cellRefOf(version).value();
   version              = store.makeCell(version, "Linked passage");
-  result.second        = store.cellRefOf(version);
+  result.second        = store.cellRefOf(version).value();
   version              = store.setLink(version, result.first, dimension.dim,
                                        zigzag::DimVector::POS, result.second);
   result.version       = version;
@@ -68,7 +68,7 @@ TEST(XuzzConvergenceSample, SliceCanGainXanadocTextAfterGenesis) {
   const auto dimension = store.makeDimension(version, "d.1");
   version              = dimension.version;
   version              = store.makeCell(version, "A slice cell");
-  const auto cell      = store.cellRefOf(version);
+  const auto cell      = store.cellRefOf(version).value();
 
   // Add the Xanadoc after the slice already has structure.
   version = store.insert(version, 0, "Xanadoc text added later");

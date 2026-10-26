@@ -89,7 +89,8 @@ TEST(MediaAnimationTest, AnimatedGifPlaybackAndSpeed) {
   EXPECT_TRUE(player.hasVideo());
   EXPECT_EQ(player.videoWidth(), 32);
   EXPECT_EQ(player.videoHeight(), 24);
-  EXPECT_NEAR(player.durationSeconds(), 0.40F, 0.01F);
+  ASSERT_TRUE(player.durationSeconds());
+  EXPECT_NEAR(player.durationSeconds().value(), 0.40F, 0.01F);
   EXPECT_EQ(player.state(), PlaybackState::Stopped);
 
   EXPECT_TRUE(player.isNewFrameAvailable());
@@ -107,7 +108,7 @@ TEST(MediaAnimationTest, AnimatedGifPlaybackAndSpeed) {
 
   // Advance time with playback rate 1.0
   player.update(0.05F);
-  EXPECT_NEAR(player.positionSeconds(), 0.05F, 0.001F);
+  EXPECT_NEAR(player.positionSeconds().value(), 0.05F, 0.001F);
 
   // Change playback rate to 2.0x
   player.setPlaybackRate(2.0F);
@@ -115,23 +116,52 @@ TEST(MediaAnimationTest, AnimatedGifPlaybackAndSpeed) {
 
   // Advance time by 0.05s * 2.0x = +0.10s -> position = 0.15s
   player.update(0.05F);
-  EXPECT_NEAR(player.positionSeconds(), 0.15F, 0.001F);
+  EXPECT_NEAR(player.positionSeconds().value(), 0.15F, 0.001F);
 
   // Pause
   player.pause();
   EXPECT_EQ(player.state(), PlaybackState::Paused);
   player.update(0.05F);
-  EXPECT_NEAR(player.positionSeconds(), 0.15F,
+  EXPECT_NEAR(player.positionSeconds().value(), 0.15F,
               0.001F); // No advance while paused
 
   // Seeking
   player.seek(0.05F);
-  EXPECT_NEAR(player.positionSeconds(), 0.05F, 0.001F);
+  EXPECT_NEAR(player.positionSeconds().value(), 0.05F, 0.001F);
 
   // Stop resets position to 0
   player.stop();
   EXPECT_EQ(player.state(), PlaybackState::Stopped);
-  EXPECT_FLOAT_EQ(player.positionSeconds(), 0.0F);
+  EXPECT_FLOAT_EQ(player.positionSeconds().value(), 0.0F);
+}
+
+TEST(MediaAnimationTest, ReleasingAndReloadingClearsPublishedFrame) {
+#ifdef GLEDITOR_HAVE_DECODE_INDEX_GIF
+  const auto gifData = makeTestGif(8, 6, 2);
+  const auto stream  = std::make_shared<MemoryMediaStream>(gifData);
+  const auto res     = MediaResource::fromStream(stream, "release-test.gif");
+  MediaPlayer player;
+
+  ASSERT_TRUE(player.load(res));
+  const auto oldFrame = player.latestFrame();
+  ASSERT_NE(oldFrame, nullptr);
+
+  // Loading again publishes a frame synchronously. Leave its availability
+  // unconsumed to exercise release while a frame is still pending.
+  ASSERT_TRUE(player.load(res));
+  ASSERT_TRUE(player.isNewFrameAvailable());
+  player.unload();
+
+  EXPECT_FALSE(player.isNewFrameAvailable());
+  EXPECT_EQ(player.latestFrame(), nullptr);
+
+  ASSERT_TRUE(player.load(res));
+  const auto newFrame = player.latestFrame();
+  ASSERT_NE(newFrame, nullptr);
+  EXPECT_NE(newFrame, oldFrame);
+#else
+  GTEST_SKIP() << "GIF decoding is disabled";
+#endif
 }
 
 // Animated SVG playback is ThorVG's; a build without thorvg-1 has no SVG
@@ -155,13 +185,14 @@ TEST(MediaAnimationTest, AnimatedSvgPlaybackAndClamping) {
   EXPECT_TRUE(player.hasVideo());
   EXPECT_EQ(player.videoWidth(), 100);
   EXPECT_EQ(player.videoHeight(), 100);
-  EXPECT_FLOAT_EQ(player.durationSeconds(), 2.0F);
+  ASSERT_TRUE(player.durationSeconds());
+  EXPECT_FLOAT_EQ(player.durationSeconds().value(), 2.0F);
   EXPECT_EQ(player.state(), PlaybackState::Stopped);
 
   // Set time range [0.5s, 1.5s]
   player.setTimeRange(0.5F, 1.5F);
   EXPECT_TRUE(player.hasRangeConstraint());
-  EXPECT_NEAR(player.positionSeconds(), 0.5F, 0.001F);
+  EXPECT_NEAR(player.positionSeconds().value(), 0.5F, 0.001F);
 
   player.play();
   EXPECT_EQ(player.state(), PlaybackState::Playing);
@@ -172,20 +203,20 @@ TEST(MediaAnimationTest, AnimatedSvgPlaybackAndClamping) {
 
   // Advance by 1.0s * 0.5 = 0.5s -> position = 1.0s
   player.update(1.0F);
-  EXPECT_NEAR(player.positionSeconds(), 1.0F, 0.001F);
+  EXPECT_NEAR(player.positionSeconds().value(), 1.0F, 0.001F);
 
   // Seeking outside range clamps to [0.5, 1.5]
   player.seek(0.1F);
-  EXPECT_NEAR(player.positionSeconds(), 0.5F, 0.001F);
+  EXPECT_NEAR(player.positionSeconds().value(), 0.5F, 0.001F);
 
   player.seek(1.9F);
-  EXPECT_NEAR(player.positionSeconds(), 1.5F, 0.001F);
+  EXPECT_NEAR(player.positionSeconds().value(), 1.5F, 0.001F);
 
   // Looping behavior
   player.setLooping(true);
   player.seek(1.4F);
   player.update(0.4F); // 1.4 + 0.2 = 1.6 >= 1.5 -> loops to 0.5s
-  EXPECT_NEAR(player.positionSeconds(), 0.5F, 0.001F);
+  EXPECT_NEAR(player.positionSeconds().value(), 0.5F, 0.001F);
 }
 
 #endif // GLEDITOR_HAVE_SVG_THORVG

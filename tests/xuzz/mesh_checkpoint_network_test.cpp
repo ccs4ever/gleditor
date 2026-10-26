@@ -229,17 +229,20 @@ TEST_F(MeshCheckpointNetworkTest,
   publisher->source().addDhtNode(peerHost, peerPort);
   ASSERT_TRUE(publisher->seed(*sealed));
   const auto listening = std::chrono::steady_clock::now() + 10s;
-  while (!publisher->source().listenPort() &&
-         std::chrono::steady_clock::now() < listening) {
+  auto publisherPort   = publisher->source().listenPort();
+  while (!publisherPort && std::chrono::steady_clock::now() < listening) {
     publisher->poll();
+    publisherPort = publisher->source().listenPort();
     std::this_thread::sleep_for(10ms);
   }
-  ASSERT_NE(publisher->source().listenPort(), 0);
+  ASSERT_TRUE(publisherPort);
   auto replicaOptions = options("replica", false);
-  replicaOptions.peers.emplace_back(testHost, publisher->source().listenPort());
+  replicaOptions.peers.emplace_back(testHost, *publisherPort);
   auto replica = std::make_shared<MeshSwarmTransport>(
       controller(), std::move(replicaOptions));
   ASSERT_TRUE(replica->prepareValue(sealed->carrier.hash));
+  const auto replicaPort = replica->source().listenPort();
+  ASSERT_TRUE(replicaPort);
   auto replicated = fetchValue(sealed->carrier.hash, replica->source(),
                                std::make_shared<xanadu::UserPermascroll>());
   ASSERT_TRUE(replicated) << replicated.error();
@@ -285,7 +288,7 @@ TEST_F(MeshCheckpointNetworkTest,
   }
   ASSERT_TRUE(partition.heal());
   auto readerOptions = options("restarted-fresh-reader");
-  readerOptions.peers.emplace_back(testHost, replica->source().listenPort());
+  readerOptions.peers.emplace_back(testHost, *replicaPort);
   auto reader = std::make_shared<MeshSwarmTransport>(controller(),
                                                      std::move(readerOptions));
   reader->source().addDhtNode(peerHost, peerPort);

@@ -119,7 +119,7 @@ TEST_F(VPLE2ETest, VplcStoreExportAndReload) {
   auto permascroll = std::make_shared<xanadu::UserPermascroll>();
   xanadu::Store store(permascroll);
   EXPECT_NO_THROW(store.load(outStore.string()));
-  EXPECT_NE(store.homeCell(), zigzag::noCell);
+  EXPECT_TRUE(store.homeCell().has_value());
 }
 
 // -- vpl CLI Tests ------------------------------------------------------------

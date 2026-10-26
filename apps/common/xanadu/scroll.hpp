@@ -41,6 +41,7 @@
 #include <array>
 #include <cstdint>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -256,8 +257,8 @@ struct ScrollSegment {
  * together, and they are not the same scroll.
  */
 struct Scroll {
-  /// The publisher's name. Zero when this scroll has none.
-  PublicKey publisher;
+  /// The publisher's BEP 46 name when the scroll has one.
+  std::optional<PublicKey> publisher;
   /// The salt distinguishing this scroll from others under the same key.
   std::string salt;
   /// Default MIME type for content in this scroll.
@@ -272,7 +273,13 @@ struct Scroll {
     return segments.empty() ? 0 : segments.back().end();
   }
 
-  [[nodiscard]] bool isNamed() const { return !publisher.isZero(); }
+  [[nodiscard]] bool isNamed() const {
+    if (publisher && publisher->isZero()) {
+      throw std::invalid_argument(
+          "named scroll publisher must be a nonzero public key");
+    }
+    return publisher.has_value();
+  }
 
   /// The segment carrying @p offset, or nullptr when nothing does.
   [[nodiscard]] gleditor::cpp26::optional<const ScrollSegment &>
@@ -323,11 +330,16 @@ struct Scroll {
  * publishLocalSpool(): a document whose content is only here cannot be
  * published, because a reader would have no way to fetch what it points at.
  */
-[[nodiscard]] std::string scrollKey(const Scroll &scroll);
+[[nodiscard]] std::optional<std::string> scrollKey(const Scroll &scroll);
 
 /// The key the local spool would have once published under @p publisher.
 [[nodiscard]] std::string scrollKeyFor(const PublicKey &publisher,
                                        const std::string &salt);
+
+/// The in-memory key used to resolve bundled live bytes for a scroll. Named
+/// and fixed-file scrolls use their content identity; an unsealed anonymous
+/// author scroll uses its salt because it has no other identity yet.
+[[nodiscard]] std::string liveScrollBufferKey(const Scroll &scroll);
 
 } // namespace xanadu
 

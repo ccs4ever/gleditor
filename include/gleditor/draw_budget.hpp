@@ -38,7 +38,9 @@ struct DocumentPalette {
  */
 struct DrawBudget {
   /// Drawable width in pixels, which is what turns a clip-space extent into a
-  /// number of screen pixels.
+  /// number of screen pixels. Standalone callers default to an 800-pixel
+  /// viewport; Renderer replaces this with the actual drawable width each
+  /// frame.
   float screenWidth{800.0F};
   /**
    * @brief Screen pixels per layout pixel below which a page is drawn coarsely.

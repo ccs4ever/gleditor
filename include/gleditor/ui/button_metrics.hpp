@@ -26,6 +26,8 @@ struct ButtonMetrics {
   float paddingHorizontalEm{0.75F};
   float paddingVerticalEm{0.25F};
   float seamWidthPx{1.0F};
+  /// Fallback target size for small controls; themes can tune it per input
+  /// style.
   float virtualHitTargetMinPx{36.0F};
 
   [[nodiscard]] constexpr float height(InputModality modality,

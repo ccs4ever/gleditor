@@ -390,21 +390,19 @@ projectStoreWithProvenance(const xanadu::Store &store,
 ZzRasterResult rasterizeZzStructure(const ZzStructureDocument &doc,
                                     const DimID &primaryDim,
                                     const DimID &secondaryDim,
-                                    CellID startCell) {
+                                    const std::optional<CellID> startCell) {
   ZzRasterResult result;
   if (doc.cells.empty()) {
     return result;
   }
 
-  if (startCell == 0 || !doc.cells.contains(startCell)) {
-    startCell = doc.focus;
-    if (startCell == 0 || !doc.cells.contains(startCell)) {
-      startCell = doc.cells.begin()->first;
-    }
-  }
+  const CellID start = startCell && doc.cells.contains(*startCell) ? *startCell
+                       : doc.focus && doc.cells.contains(*doc.focus)
+                           ? *doc.focus
+                           : doc.cells.begin()->first;
 
   // Find head of secondary dimension if present
-  CellID rowHead = startCell;
+  CellID rowHead = start;
   std::unordered_set<CellID> visitedRows;
   while (true) {
     const auto it = doc.cells.find(rowHead);
@@ -550,7 +548,7 @@ SlicedStore sliceToStore(const ZzStructureDocument &doc, xanadu::Store &store,
   SlicedStore out;
   out.version = parent;
 
-  if (zigzag::noCell == store.homeCell()) {
+  if (!store.homeCell()) {
     out.version = store.sliceGenesis(out.version);
   }
 
@@ -602,7 +600,7 @@ SlicedStore sliceToStore(const ZzStructureDocument &doc, xanadu::Store &store,
       out.version =
           store.makeCell(out.version, zzcore::cellDataAsText(cell.data));
     }
-    out.cells.emplace(id, store.cellRefOf(out.version));
+    out.cells.emplace(id, store.cellRefOf(out.version).value());
   }
   manifold = store.rebuildManifold(out.version);
 
@@ -625,7 +623,7 @@ SlicedStore sliceToStore(const ZzStructureDocument &doc, xanadu::Store &store,
       return;
     }
     out.version          = store.makeCell(out.version, value);
-    const auto attribute = store.cellRefOf(out.version);
+    const auto attribute = store.cellRefOf(out.version).value();
     manifold.advanceOrRefold(store, out.version);
     linkTo(owner, out.dimensions.at(DimID{dimName}), DimVector::POS, attribute);
   };
@@ -669,15 +667,15 @@ SlicedStore sliceToStore(const ZzStructureDocument &doc, xanadu::Store &store,
     }
   }
 
-  if (0 != doc.focus && out.cells.contains(doc.focus)) {
-    out.focus = out.cells.at(doc.focus);
+  if (doc.focus && out.cells.contains(*doc.focus)) {
+    out.focus = out.cells.at(*doc.focus);
   }
   return out;
 }
 
 ZzStructureDocument storeToSlice(const xanadu::Store &store,
                                  const Manifold &manifold,
-                                 const CellRef focus) {
+                                 const std::optional<CellRef> focus) {
   ZzStructureDocument doc;
   doc.focus = focus;
 
@@ -685,9 +683,9 @@ ZzStructureDocument storeToSlice(const xanadu::Store &store,
   // back out rather than emitted as cells of their own -- which is what makes
   // this the inverse of sliceToStore() rather than a dump of the manifold.
   std::unordered_map<DimRef, DimID> names;
-  DimRef roleDim  = zigzag::noCell;
-  DimRef mimeDim  = zigzag::noCell;
-  DimRef mediaDim = zigzag::noCell;
+  std::optional<DimRef> roleDim;
+  std::optional<DimRef> mimeDim;
+  std::optional<DimRef> mediaDim;
   for (const auto dim : manifold.dimensions()) {
     const auto name = manifold.textOf(dim, store);
     names.emplace(dim, name);
@@ -704,19 +702,17 @@ ZzStructureDocument storeToSlice(const xanadu::Store &store,
   // than content: they were minted by the conversion, so emitting them as
   // cells would grow the document on every round trip.
   std::set<CellRef> structural;
-  structural.insert(manifold.home());
+  if (const auto home = manifold.home()) structural.insert(*home);
   for (const auto &[dim, name] : names) {
     structural.insert(dim);
   }
   for (const auto &slot : manifold.cells()) {
     for (const auto attribute : {roleDim, mimeDim, mediaDim}) {
-      if (zigzag::noCell == attribute) {
-        continue;
-      }
+      if (!attribute) continue;
       if (const auto held =
-              manifold.linked(slot.birthOp, attribute, DimVector::POS);
-          zigzag::noCell != held) {
-        structural.insert(held);
+              manifold.linked(slot.birthOp, *attribute, DimVector::POS);
+          held) {
+        structural.insert(*held);
       }
     }
   }
@@ -735,13 +731,12 @@ ZzStructureDocument storeToSlice(const xanadu::Store &store,
       cell.data = manifold.textOf(slot.birthOp, store);
     }
 
-    const auto attributeOf = [&](const DimRef dim) {
-      if (zigzag::noCell == dim) {
+    const auto attributeOf = [&](const std::optional<DimRef> dim) {
+      if (!dim) {
         return std::string{};
       }
-      const auto held = manifold.linked(slot.birthOp, dim, DimVector::POS);
-      return zigzag::noCell == held ? std::string{}
-                                    : manifold.textOf(held, store);
+      const auto held = manifold.linked(slot.birthOp, *dim, DimVector::POS);
+      return held ? manifold.textOf(*held, store) : std::string{};
     };
     cell.role       = attributeOf(roleDim);
     cell.mime_type  = attributeOf(mimeDim);
@@ -749,8 +744,9 @@ ZzStructureDocument storeToSlice(const xanadu::Store &store,
 
     for (const auto &link : manifold.dimensionsOf(slot.birthOp)) {
       const auto named = names.find(link.dim);
-      if (named == names.end() || link.dim == roleDim || link.dim == mimeDim ||
-          link.dim == mediaDim) {
+      if (named == names.end() || (roleDim && link.dim == *roleDim) ||
+          (mimeDim && link.dim == *mimeDim) ||
+          (mediaDim && link.dim == *mediaDim)) {
         continue;
       }
       LinkPairs pairs;
@@ -766,7 +762,7 @@ ZzStructureDocument storeToSlice(const xanadu::Store &store,
 }
 
 ZzStructureDocument storeToSlice(const Manifold &manifold,
-                                 const CellRef focus) {
+                                 const std::optional<CellRef> focus) {
   if (const auto *store = manifold.store()) {
     return storeToSlice(*store, manifold, focus);
   }
@@ -781,9 +777,9 @@ storeToLinkPackage(const xanadu::Store &store, const Manifold &manifold,
   std::map<std::string, xanadu::Scroll> scrolls;
 
   std::unordered_map<DimRef, DimID> names;
-  DimRef roleDim  = zigzag::noCell;
-  DimRef mimeDim  = zigzag::noCell;
-  DimRef mediaDim = zigzag::noCell;
+  std::optional<DimRef> roleDim;
+  std::optional<DimRef> mimeDim;
+  std::optional<DimRef> mediaDim;
   for (const auto dim : manifold.dimensions()) {
     const auto name = manifold.textOf(dim, store);
     names.emplace(dim, name);
@@ -797,28 +793,26 @@ storeToLinkPackage(const xanadu::Store &store, const Manifold &manifold,
   }
 
   std::set<CellRef> structural;
-  structural.insert(manifold.home());
+  if (const auto home = manifold.home()) structural.insert(*home);
   for (const auto &[dim, name] : names) {
     structural.insert(dim);
   }
   for (const auto &slot : manifold.cells()) {
     for (const auto attribute : {roleDim, mimeDim, mediaDim}) {
-      if (zigzag::noCell == attribute) {
-        continue;
-      }
+      if (!attribute) continue;
       if (const auto held =
-              manifold.linked(slot.birthOp, attribute, DimVector::POS);
-          zigzag::noCell != held) {
-        structural.insert(held);
+              manifold.linked(slot.birthOp, *attribute, DimVector::POS);
+          held) {
+        structural.insert(*held);
       }
     }
   }
 
   const auto localScroll = store.userPermascroll().currentScroll();
   const auto scrollFor   = [&store,
-                            &localScroll](const xanadu::PrimediaSpan &span) {
+                          &localScroll](const xanadu::PrimediaSpan &span) {
     return span.isLocal() ? gleditor::refOf(&localScroll)
-                          : store.scroll(span.scroll);
+                            : store.scroll(span.scroll);
   };
 
   std::unordered_map<CellRef, xanadu::GlobalSpan> cellSpans;
@@ -852,7 +846,9 @@ storeToLinkPackage(const xanadu::Store &store, const Manifold &manifold,
       continue;
     }
     for (const auto &link : manifold.dimensionsOf(slot.birthOp)) {
-      if (link.dim == roleDim || link.dim == mimeDim || link.dim == mediaDim) {
+      if ((roleDim && link.dim == *roleDim) ||
+          (mimeDim && link.dim == *mimeDim) ||
+          (mediaDim && link.dim == *mediaDim)) {
         continue;
       }
       if (link.pos != 0 && !structural.contains(link.pos)) {

@@ -5,7 +5,11 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <optional>
+#include <stdexcept>
 #include <string>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 #include "common/xanadu/store.hpp"
@@ -45,6 +49,67 @@ TEST(VortexStdLibTest, BootstrapAndModuleDiscovery) {
   EXPECT_TRUE(h.stdlib.has("std:string"));
 
   EXPECT_FALSE(h.stdlib.has("std:nonexistent"));
+}
+
+TEST(VortexStdLibTest, GoalOutputAbsenceIsUnitAndValuesStayPresent) {
+  TestHarness h;
+  const auto makeProducer = [&h](const CellValue &value) {
+    const auto makeValueCell = [&h](const CellValue &v) {
+      return std::visit(
+          [&h](const auto &scalar) -> CellRef {
+            using T = std::decay_t<decltype(scalar)>;
+            if constexpr (std::is_same_v<T, std::string>) {
+              return h.arena.makeCell(scalar);
+            } else {
+              return h.arena.makeScalarCell(scalar);
+            }
+          },
+          v);
+    };
+    OpcodeKind kind;
+    std::vector<CellRef> inputs;
+    if (const auto *boolean = std::get_if<bool>(&value)) {
+      kind = OpcodeKind::Not;
+      inputs.push_back(makeValueCell(CellValue{!*boolean}));
+    } else if (const auto *integer = std::get_if<std::int64_t>(&value)) {
+      kind = OpcodeKind::Sub;
+      inputs.push_back(makeValueCell(CellValue{*integer}));
+      inputs.push_back(makeValueCell(CellValue{std::int64_t{0}}));
+    } else {
+      kind = OpcodeKind::Add;
+      inputs.push_back(makeValueCell(value));
+      inputs.push_back(makeValueCell(CellValue{std::string{}}));
+    }
+    const CellRef output  = h.arena.makeCell();
+    const CellRef produce = h.vm.mintOpcode(kind, "#TEST_PRODUCE");
+    const CellRef suspend = h.vm.mintOpcode(OpcodeKind::Jump, "#TEST_SUSPEND");
+    const CellRef target  = h.arena.makeScalarCell(
+        static_cast<std::int64_t>(h.stdlib.goalHaltOp()));
+    for (const auto input : inputs) h.core.bindInput(produce, input);
+    h.core.bindOutput(produce, output);
+    h.core.bindInput(suspend, target);
+    EXPECT_TRUE(h.arena.link(produce, h.core.dims().spin,
+                             zigzag::DimVector::POS, suspend));
+    return std::pair{produce, output};
+  };
+
+  for (const CellValue &value : {CellValue{false}, CellValue{std::int64_t{0}},
+                                 CellValue{std::string{}}}) {
+    const auto [entry, out] = makeProducer(value);
+    EXPECT_EQ(h.stdlib.goalBoundedFirst(entry, out, h.stdlib.goalHaltOp()),
+              std::optional<CellValue>{value});
+    EXPECT_EQ(h.stdlib.goalResults(entry, out, h.stdlib.goalHaltOp()),
+              (std::vector<CellValue>{value}));
+  }
+
+  const CellValue unit{true};
+  const auto [entry, ignored] = makeProducer(CellValue{std::int64_t{42}});
+  (void)ignored;
+  EXPECT_EQ(
+      h.stdlib.goalBoundedFirst(entry, std::nullopt, h.stdlib.goalHaltOp()),
+      std::optional<CellValue>{unit});
+  EXPECT_EQ(h.stdlib.goalResults(entry, std::nullopt, h.stdlib.goalHaltOp()),
+            (std::vector<CellValue>{unit}));
 }
 
 TEST(VortexStdLibTest, SpatialSymbolResolutionAndInvocation) {
@@ -186,7 +251,7 @@ TEST(VortexStdLibTest, ContractModulePreconditionsAndPostconditions) {
   EXPECT_EQ(res.contractViolation, ContractViolationKind::Precondition);
 
   // Now satisfy precondition with positive input
-  h.core.value(inParam, 0, -1, static_cast<std::int64_t>(20));
+  h.core.writeValue(inParam, 0, std::nullopt, static_cast<std::int64_t>(20));
   CellRef cursor2 = h.vm.spawnCursor(op, "contract_pass");
   auto res2       = h.vm.step(cursor2);
   EXPECT_TRUE(res2.success);
@@ -269,8 +334,7 @@ TEST(VortexStdLibTest, CollectionsModuleListsAndSequences) {
       static_cast<std::int64_t>(30),
   };
 
-  CellRef listHead = h.stdlib.createList(items);
-  EXPECT_NE(listHead, noCell);
+  CellRef listHead = h.stdlib.createList(items).value();
   EXPECT_EQ(h.stdlib.listLength(listHead), 3u);
 
   // Push back 40
@@ -288,15 +352,47 @@ TEST(VortexStdLibTest, CollectionsModuleListsAndSequences) {
   EXPECT_EQ(h.stdlib.listLength(newHead), 4u);
 
   // Pop front -> 5
-  CellRef restoredHead = h.stdlib.popFront(newHead);
-  EXPECT_EQ(h.stdlib.listLength(restoredHead), 3u);
+  const auto restoredHead = h.stdlib.popFront(newHead);
+  ASSERT_TRUE(restoredHead);
+  EXPECT_EQ(h.stdlib.listLength(*restoredHead), 3u);
 
   // Convert to vector
-  auto vec = h.stdlib.listToVector(restoredHead);
+  auto vec = h.stdlib.listToVector(*restoredHead);
   ASSERT_EQ(vec.size(), 3u);
   EXPECT_EQ(vec[0], CellValue(static_cast<std::int64_t>(10)));
   EXPECT_EQ(vec[1], CellValue(static_cast<std::int64_t>(20)));
   EXPECT_EQ(vec[2], CellValue(static_cast<std::int64_t>(30)));
+}
+
+TEST(VortexStdLibTest, EmptyCollectionsAndInvalidReferencesStayDistinct) {
+  TestHarness h;
+  const DimRef dim = h.core.dims().step;
+  const DimRef out = h.arena.makeCell("d.empty.out");
+
+  EXPECT_EQ(h.stdlib.createList({}), std::nullopt);
+  EXPECT_EQ(h.stdlib.arrayIota(0), std::nullopt);
+  EXPECT_THROW(h.stdlib.arrayIota(0, dim, noCell), std::invalid_argument);
+  const auto emptyGrid = h.stdlib.createGrid(0, 3, dim, out);
+  EXPECT_FALSE(emptyGrid.head);
+  EXPECT_EQ(emptyGrid.rows, 0U);
+  EXPECT_EQ(emptyGrid.cols, 3U);
+
+  const CellRef singleton =
+      h.stdlib.createList({CellValue{std::int64_t{1}}}).value();
+  EXPECT_EQ(h.stdlib.arrayTake(singleton, dim, 0), std::nullopt);
+  EXPECT_EQ(h.stdlib.filter(singleton, dim, out,
+                            [](const CellValue &) { return false; }),
+            std::nullopt);
+  EXPECT_THROW(h.stdlib.arrayTake(noCell, dim, 1), std::invalid_argument);
+  EXPECT_THROW(h.stdlib.arrayDrop(noCell, dim, 0), std::invalid_argument);
+
+  EXPECT_EQ(h.stdlib.scanPush(noCell), std::nullopt);
+  EXPECT_EQ(h.stdlib.zzDuplicate(noCell), std::nullopt);
+  EXPECT_EQ(h.stdlib.zzCloneToChain(singleton, noCell), std::nullopt);
+  EXPECT_EQ(h.stdlib.hopHead(noCell, dim), std::nullopt);
+  EXPECT_EQ(h.stdlib.importModuleFromStore(xanadu::Store{}), std::nullopt);
+
+  EXPECT_EQ(h.vm.assembleSequence(std::span<const OpcodeKind>{}), std::nullopt);
 }
 
 TEST(VortexStdLibTest, CollectionsModuleAssociativeMaps) {
@@ -337,9 +433,12 @@ TEST(VortexStdLibTest, CollectionsModule2DGridsAndSpatialTransposition) {
   DimRef dCol = h.arena.makeCell("d.col");
 
   // Create 3 rows x 4 cols grid
-  CellRef grid =
+  const auto gridResult =
       h.stdlib.createGrid(3, 4, dRow, dCol, static_cast<std::int64_t>(0));
-  EXPECT_NE(grid, noCell);
+  ASSERT_TRUE(gridResult.head);
+  EXPECT_EQ(gridResult.rows, 3U);
+  EXPECT_EQ(gridResult.cols, 4U);
+  CellRef grid = *gridResult.head;
 
   // Set cell at (1, 2) to 42
   h.stdlib.setGrid(grid, 1, 2, dRow, dCol, static_cast<std::int64_t>(42));
@@ -350,6 +449,10 @@ TEST(VortexStdLibTest, CollectionsModule2DGridsAndSpatialTransposition) {
   // Cell at (1, 2) in original grid is at (2, 1) in transposed view!
   EXPECT_EQ(h.stdlib.getGrid(grid, 2, 1, dCol, dRow),
             CellValue(static_cast<std::int64_t>(42)));
+
+  h.stdlib.setGrid(grid, 0, 0, dRow, dCol, false);
+  EXPECT_EQ(h.stdlib.getGrid(grid, 0, 0, dRow, dCol), CellValue(false));
+  EXPECT_EQ(h.stdlib.getGrid(grid, 3, 0, dRow, dCol), std::nullopt);
 }
 
 TEST(VortexStdLibTest, FunctionalModuleMapFilterFoldZip) {
@@ -362,14 +465,16 @@ TEST(VortexStdLibTest, FunctionalModuleMapFilterFoldZip) {
       static_cast<std::int64_t>(3), static_cast<std::int64_t>(4),
       static_cast<std::int64_t>(5),
   };
-  CellRef listHead = h.stdlib.createList(nums, inDim);
+  CellRef listHead = h.stdlib.createList(nums, inDim).value();
 
   // Map: square (x * x)
-  CellRef squaredHead = h.stdlib.map(
-      listHead, inDim, outDim, [](const CellValue &v) -> CellValue {
-        std::int64_t x = std::get<std::int64_t>(v);
-        return x * x;
-      });
+  CellRef squaredHead = h.stdlib
+                            .map(listHead, inDim, outDim,
+                                 [](const CellValue &v) -> CellValue {
+                                   std::int64_t x = std::get<std::int64_t>(v);
+                                   return x * x;
+                                 })
+                            .value();
   auto squaredVec = h.stdlib.listToVector(squaredHead, outDim);
   ASSERT_EQ(squaredVec.size(), 5u);
   EXPECT_EQ(squaredVec[0], CellValue(static_cast<std::int64_t>(1)));
@@ -380,10 +485,12 @@ TEST(VortexStdLibTest, FunctionalModuleMapFilterFoldZip) {
 
   // Filter: evens only
   DimRef filterDim  = h.arena.makeCell("d.filter");
-  CellRef evensHead = h.stdlib.filter(
-      squaredHead, outDim, filterDim, [](const CellValue &v) -> bool {
-        return std::get<std::int64_t>(v) % 2 == 0;
-      });
+  CellRef evensHead = h.stdlib
+                          .filter(squaredHead, outDim, filterDim,
+                                  [](const CellValue &v) -> bool {
+                                    return std::get<std::int64_t>(v) % 2 == 0;
+                                  })
+                          .value();
   auto evensVec = h.stdlib.listToVector(evensHead, filterDim);
   ASSERT_EQ(evensVec.size(), 2u);
   EXPECT_EQ(evensVec[0], CellValue(static_cast<std::int64_t>(4)));
@@ -399,9 +506,9 @@ TEST(VortexStdLibTest, FunctionalModuleMapFilterFoldZip) {
 
   // Zip
   DimRef zipDim = h.arena.makeCell("d.zip");
-  CellRef zipped =
+  const auto zipped =
       h.stdlib.zip(squaredHead, evensHead, outDim, filterDim, zipDim);
-  EXPECT_NE(zipped, noCell);
+  EXPECT_TRUE(zipped.has_value());
 }
 
 TEST(VortexStdLibTest, ArrayModuleOperations) {
@@ -417,27 +524,25 @@ TEST(VortexStdLibTest, ArrayModuleOperations) {
   DimRef d1 = h.arena.makeCell("d.1");
 
   // arrayIota: mint 5 cells on d1
-  CellRef head5 = h.stdlib.arrayIota(5, d1);
-  EXPECT_NE(head5, noCell);
+  CellRef head5 = h.stdlib.arrayIota(5, d1).value();
   EXPECT_EQ(h.stdlib.arrayTally(head5, d1), 5u);
 
   auto shape5 = h.stdlib.arrayShape(head5, std::span<const DimRef>{&d1, 1});
-  ASSERT_EQ(shape5.size(), 1u);
-  EXPECT_EQ(shape5[0], 5u);
+  ASSERT_TRUE(shape5);
+  ASSERT_EQ(shape5->size(), 1u);
+  EXPECT_EQ((*shape5)[0], 5u);
 
   // arrayTake: first 3 cells
-  CellRef take3 = h.stdlib.arrayTake(head5, d1, 3);
-  EXPECT_NE(take3, noCell);
+  CellRef take3 = h.stdlib.arrayTake(head5, d1, 3).value();
   EXPECT_EQ(h.stdlib.arrayTally(take3, d1), 3u);
 
   // arrayDrop: drop 2 cells -> 3 left
-  CellRef drop2 = h.stdlib.arrayDrop(head5, d1, 2);
-  EXPECT_NE(drop2, noCell);
-  EXPECT_EQ(h.stdlib.arrayTally(drop2, d1), 3u);
+  const auto drop2 = h.stdlib.arrayDrop(head5, d1, 2);
+  ASSERT_TRUE(drop2);
+  EXPECT_EQ(h.stdlib.arrayTally(*drop2, d1), 3u);
 
   // arrayReverse: reverse 5 cells
-  CellRef rev5 = h.stdlib.arrayReverse(head5, d1);
-  EXPECT_NE(rev5, noCell);
+  CellRef rev5 = h.stdlib.arrayReverse(head5, d1).value();
   EXPECT_EQ(h.stdlib.arrayTally(rev5, d1), 5u);
 
   // Check invocation via call()
@@ -455,6 +560,33 @@ TEST(VortexStdLibTest, ArrayModuleOperations) {
                                         static_cast<std::int64_t>(d1)});
   ASSERT_EQ(callTallyRes.size(), 1u);
   EXPECT_EQ(callTallyRes[0], CellValue(static_cast<std::int64_t>(4)));
+}
+
+TEST(VortexStdLibTest, ArrayShapeAndTallyDistinguishInvalidOrigins) {
+  TestHarness h;
+  const DimRef dim = h.arena.makeCell("d.test-array");
+
+  EXPECT_EQ(h.stdlib.arrayShape(noCell, std::span<const DimRef>{&dim, 1}),
+            std::nullopt);
+  EXPECT_EQ(h.stdlib.arrayTally(noCell, dim), std::nullopt);
+  const auto noCellTally =
+      h.stdlib.call("sys:array/tally", {static_cast<std::int64_t>(noCell),
+                                        static_cast<std::int64_t>(dim)});
+  ASSERT_EQ(noCellTally.size(), 1U);
+  EXPECT_EQ(noCellTally.front(), CellValue(std::int64_t{0}));
+  EXPECT_THROW(
+      h.stdlib.call("sys:array/tally", {static_cast<std::int64_t>(999999),
+                                        static_cast<std::int64_t>(dim)}),
+      std::invalid_argument);
+  EXPECT_THROW(h.stdlib.call("sys:array/tally", {}), std::invalid_argument);
+
+  const CellRef head = h.stdlib.arrayIota(1, dim).value();
+  const auto shape =
+      h.stdlib.arrayShape(head, std::span<const DimRef>{&dim, 1});
+  ASSERT_TRUE(shape);
+  ASSERT_EQ(shape->size(), 1u);
+  EXPECT_EQ((*shape)[0], 1u);
+  EXPECT_EQ(h.stdlib.arrayTally(head, dim), 1u);
 }
 
 TEST(VortexStdLibTest, UiModuleActions) {
@@ -510,10 +642,10 @@ TEST(VortexStdLibTest, NavModuleActions) {
   EXPECT_TRUE(h.arena.link(c1, d1, zigzag::DimVector::POS, c2));
   EXPECT_TRUE(h.arena.link(c2, d1, zigzag::DimVector::POS, c3));
 
-  EXPECT_EQ(h.stdlib.hopHead(c2, d1), c1);
-  EXPECT_EQ(h.stdlib.hopHead(c3, d1), c1);
-  EXPECT_EQ(h.stdlib.hopTail(c1, d1), c3);
-  EXPECT_EQ(h.stdlib.hopTail(c2, d1), c3);
+  EXPECT_EQ(h.stdlib.hopHead(c2, d1), std::optional<CellRef>{c1});
+  EXPECT_EQ(h.stdlib.hopHead(c3, d1), std::optional<CellRef>{c1});
+  EXPECT_EQ(h.stdlib.hopTail(c1, d1), std::optional<CellRef>{c3});
+  EXPECT_EQ(h.stdlib.hopTail(c2, d1), std::optional<CellRef>{c3});
   EXPECT_EQ(h.stdlib.jumpHome(), h.core.home());
 }
 
@@ -522,8 +654,7 @@ TEST(VortexStdLibTest, ZzDuplicate) {
   CellRef original = h.arena.makeCell("Original Content");
   EXPECT_TRUE(h.arena.setValueBits(original, xanadu::ValueKind::Int64, 42));
 
-  CellRef dup = h.stdlib.zzDuplicate(original);
-  EXPECT_NE(dup, noCell);
+  CellRef dup = h.stdlib.zzDuplicate(original).value();
   EXPECT_NE(dup, original);
   EXPECT_EQ(h.arena.textOf(dup), "Original Content");
   EXPECT_EQ(h.arena.asInt64(dup), 42);
@@ -540,8 +671,7 @@ TEST(VortexStdLibTest, SovereignStoreLibraryRoundtrip) {
   EXPECT_GT(store.opCount(), 0u);
 
   TestHarness h2;
-  CellRef imported = h2.stdlib.importModuleFromStore(store);
-  EXPECT_NE(imported, noCell);
+  EXPECT_TRUE(h2.stdlib.importModuleFromStore(store).has_value());
 }
 
 TEST(VortexStdLibTest, XuzzModuleRegistrationAndActions) {
@@ -592,7 +722,7 @@ TEST(VortexStdLibTest, DataParallelMapFilterFoldIsDeterministic) {
     for (int i = 1; i <= 50; ++i) {
       nums.push_back(static_cast<std::int64_t>(i));
     }
-    return h.stdlib.createList(nums, dim);
+    return h.stdlib.createList(nums, dim).value();
   };
 
   auto squareFn = [](const CellValue &v) -> CellValue {
@@ -619,10 +749,11 @@ TEST(VortexStdLibTest, DataParallelMapFilterFoldIsDeterministic) {
     const DimRef outDim = h.arena.makeCell("d.out");
     const DimRef fltDim = h.arena.makeCell("d.flt");
     CellRef list        = buildList(h, inDim);
-    CellRef mapped      = h.stdlib.map(list, inDim, outDim, squareFn);
+    CellRef mapped      = h.stdlib.map(list, inDim, outDim, squareFn).value();
     baselineMap         = h.stdlib.listToVector(mapped, outDim);
-    CellRef filtered    = h.stdlib.filter(mapped, outDim, fltDim, evenPred);
-    baselineFilter      = h.stdlib.listToVector(filtered, fltDim);
+    CellRef filtered =
+        h.stdlib.filter(mapped, outDim, fltDim, evenPred).value();
+    baselineFilter = h.stdlib.listToVector(filtered, fltDim);
     baselineFold =
         h.stdlib.fold(list, inDim, CellValue(std::string("start:")), concatFn);
   }
@@ -639,12 +770,13 @@ TEST(VortexStdLibTest, DataParallelMapFilterFoldIsDeterministic) {
     const DimRef fltDim = h.arena.makeCell("d.flt");
     CellRef list        = buildList(h, inDim);
 
-    CellRef mapped = h.stdlib.map(list, inDim, outDim, squareFn);
+    CellRef mapped = h.stdlib.map(list, inDim, outDim, squareFn).value();
     auto gotMap    = h.stdlib.listToVector(mapped, outDim);
     EXPECT_EQ(gotMap, baselineMap) << "map differs at threads=" << threads;
 
-    CellRef filtered = h.stdlib.filter(mapped, outDim, fltDim, evenPred);
-    auto gotFilter   = h.stdlib.listToVector(filtered, fltDim);
+    CellRef filtered =
+        h.stdlib.filter(mapped, outDim, fltDim, evenPred).value();
+    auto gotFilter = h.stdlib.listToVector(filtered, fltDim);
     EXPECT_EQ(gotFilter, baselineFilter)
         << "filter differs at threads=" << threads;
 

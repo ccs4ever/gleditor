@@ -4,7 +4,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <gleditor/ui/metrics.hpp>
-#include <limits>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -20,15 +20,16 @@ struct LayoutItem {
   std::uint32_t id{};
   Size intrinsic;
   Size minimum;
-  Size maximum{std::numeric_limits<float>::infinity(),
-               std::numeric_limits<float>::infinity()};
+  std::optional<float> maximumWidth;
+  std::optional<float> maximumHeight;
   float grow{};
   bool focusable{};
   bool enabled{true};
   float paddingPx{};
 };
 struct LayoutBox {
-  std::uint32_t id{}, parentId{};
+  std::uint32_t id{};
+  std::optional<std::uint32_t> parentId;
   Rect rect;
   Rect contentRect;
   bool focusable{}, enabled{true};
@@ -57,25 +58,25 @@ struct FlowOptions {
   float gap{}, lineGap{};
   Align align{Align::Start};
   Justify justify{Justify::Start};
-  std::uint32_t parentId{};
+  std::optional<std::uint32_t> parentId;
 };
 struct StackOptions {
   Axis axis{Axis::Vertical};
   float gap{};
   Align align{Align::Stretch};
   Justify justify{Justify::Start};
-  std::uint32_t parentId{};
+  std::optional<std::uint32_t> parentId;
 };
 struct GridOptions {
   std::size_t columns{1};
   float columnGap{}, rowGap{};
-  std::uint32_t parentId{};
+  std::optional<std::uint32_t> parentId;
 };
 struct SplitOptions {
   Axis axis{Axis::Horizontal};
   float firstShare{0.5F};
   float gap{};
-  std::uint32_t parentId{};
+  std::optional<std::uint32_t> parentId;
 };
 /// Results are edge-rounded and clamped to bounds. When minimum sizes cannot
 /// fit, containment takes precedence and those minima shrink proportionally.

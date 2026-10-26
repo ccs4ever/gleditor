@@ -38,9 +38,9 @@ CellRef Vlog::makeTerm(const std::string_view functor,
   for (const CellRef arg : args) {
     CellRef actualArg = arg;
     if (noCell != arg && (std::ranges::contains(seen, arg) ||
-                          noCell != m.linked(arg, grab, DimVector::NEG) ||
-                          noCell != m.linked(arg, step, DimVector::NEG) ||
-                          noCell != m.linked(arg, step, DimVector::POS))) {
+                          m.linked(arg, grab, DimVector::NEG).has_value() ||
+                          m.linked(arg, step, DimVector::NEG).has_value() ||
+                          m.linked(arg, step, DimVector::POS).has_value())) {
       actualArg = m.makeCell();
       zigzag::expectWritten(m.link(endOfRank(arg, clone, DimVector::POS), clone,
                                    DimVector::POS, actualArg));
@@ -66,19 +66,21 @@ std::vector<CellRef> Vlog::argumentsOf(const CellRef ref) const {
   // A term's arguments are the d.step rank off its d.grab head. The rank
   // stops on a ring by itself; the contains() check stops a lasso at its
   // first repeat rather than at the traversal bound.
-  for (const auto arg : rank(m, m.linked(deref(ref), grab), step)) {
-    if (std::ranges::contains(args, arg)) {
-      break;
+  if (const auto head = m.linked(deref(ref), grab)) {
+    for (const auto arg : rank(m, *head, step)) {
+      if (std::ranges::contains(args, arg)) {
+        break;
+      }
+      args.push_back(arg);
     }
-    args.push_back(arg);
   }
   return args;
 }
 
 bool Vlog::isUnbound(const CellRef ref) const noexcept {
   const auto cell       = deref(ref);
-  const bool onVarsRank = noCell != m.linked(cell, vars, DimVector::NEG) ||
-                          noCell != m.linked(cell, vars, DimVector::POS);
+  const bool onVarsRank = m.linked(cell, vars, DimVector::NEG).has_value() ||
+                          m.linked(cell, vars, DimVector::POS).has_value();
   return onVarsRank && m.contentOf(cell).empty() &&
          xanadu::ValueKind::None == m.valueKindOf(cell);
 }

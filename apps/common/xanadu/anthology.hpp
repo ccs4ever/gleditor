@@ -76,10 +76,10 @@ toString(const AnthologyDisplayStatus status) noexcept {
 struct AnthologyMember {
   zigzag::CellRef cell{zigzag::noCell}; ///< The cell on the d.anthology rank
   AnthologyMemberKind kind{AnthologyMemberKind::Local};
-  zigzag::CellRef placeholderCell{
-      zigzag::noCell}; ///< If ForeignEntry, cell linked on d.member
-  zigzag::CellRef stateCell{
-      zigzag::noCell}; ///< If ForeignEntry, cell linked on d.member-state
+  std::optional<zigzag::CellRef>
+      placeholderCell; ///< If ForeignEntry, cell linked on d.member
+  std::optional<zigzag::CellRef>
+      stateCell; ///< If ForeignEntry, cell linked on d.member-state
   std::optional<ExternOpRef>
       externRef; ///< If ForeignEntry, target from placeholder
   std::optional<GlobalDocumentState>
@@ -103,9 +103,9 @@ struct AnthologyMember {
 struct ResolvedAnthologyMember {
   AnthologyMember member;
   AnthologyDisplayStatus status{AnthologyDisplayStatus::NotFetched};
-  zigzag::CellRef resolvedForeignCell{
-      zigzag::noCell};                        ///< cell inside foreign store
-  zigzag::CellRef arenaProxy{zigzag::noCell}; ///< proxy cell in ArenaManifold
+  std::optional<zigzag::CellRef>
+      resolvedForeignCell;                   ///< cell inside foreign store
+  std::optional<zigzag::CellRef> arenaProxy; ///< proxy cell in ArenaManifold
 };
 
 /**

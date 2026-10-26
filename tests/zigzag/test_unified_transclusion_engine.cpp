@@ -5,11 +5,15 @@
  */
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <optional>
+#include <string>
 #include <tuple>
+#include <vector>
 
 #include "../lib/mocks/device.hpp"
 #include "common/ui/slice/unified_transclusion_engine.hpp"
@@ -102,9 +106,9 @@ TEST(UnifiedTransclusionEngineTest, IncrementalSyncKeepsSiblingBranchesApart) {
   const auto genesis   = store.sliceGenesis(xanadu::MicroversionId{});
   const auto common    = store.makeCell(genesis, "common");
   const auto left      = store.makeCell(common, "left");
-  const auto leftCell  = store.cellRefOf(left);
+  const auto leftCell  = store.cellRefOf(left).value();
   const auto right     = store.makeCell(common, "right");
-  const auto rightCell = store.cellRefOf(right);
+  const auto rightCell = store.cellRefOf(right).value();
 
   UnifiedTransclusionEngine engine(store, left);
   const auto extra = engine.addCell("left next");
@@ -130,13 +134,14 @@ TEST(UnifiedTransclusionEngineTest, NewCellCanReuseExactSourceSpans) {
                                                  original.end());
 
   const auto target = engine.addCellFromSpans(quoted);
-  ASSERT_NE(source, target);
-  const auto copied = engine.manifold().contentOf(target);
+  ASSERT_TRUE(target);
+  ASSERT_NE(source, *target);
+  const auto copied = engine.manifold().contentOf(*target);
   ASSERT_EQ(copied.size(), quoted.size());
   EXPECT_EQ(copied.front().scroll, quoted.front().scroll);
   EXPECT_EQ(copied.front().start, quoted.front().start);
   EXPECT_EQ(copied.front().length, quoted.front().length);
-  EXPECT_EQ(engine.manifold().textOf(target, store), "quoted cell content");
+  EXPECT_EQ(engine.manifold().textOf(*target, store), "quoted cell content");
 }
 
 TEST(UnifiedTransclusionEngineTest,
@@ -168,7 +173,7 @@ TEST(UnifiedTransclusionEngineTest,
   EXPECT_EQ(folded.textOf(second, reopened), "saved edit");
   const auto dim = folded.dimensionNamed("d.1", reopened);
   ASSERT_TRUE(dim.has_value());
-  EXPECT_EQ(folded.linked(first, *dim, DimVector::POS), second);
+  ASSERT_EQ(folded.linked(first, *dim, DimVector::POS), second);
   EXPECT_TRUE(folded.editions().empty());
   std::filesystem::remove_all(dir);
 }
@@ -190,7 +195,8 @@ TEST(UnifiedTransclusionEngineTest, IncrementalSyncFoldsMintedCells) {
 
   // A CellRef *is* an operation index, which is why cellForOp() is gone rather
   // than ported: the mapping it held is the identity.
-  EXPECT_EQ(store.cellRefOf(store.segmentedOps().idOf(first)), first);
+  EXPECT_EQ(store.cellRefOf(store.segmentedOps().idOf(first).value()).value(),
+            first);
 
   engine.linkCells(first, second, DimOrdinal::OpsTime);
   const auto opsTime = engine.dimensionFor("d.ops_time");
@@ -200,6 +206,40 @@ TEST(UnifiedTransclusionEngineTest, IncrementalSyncFoldsMintedCells) {
   std::string err;
   EXPECT_TRUE(engine.validate2RankManifold(&err)) << err;
   EXPECT_TRUE(engine.manifold().verifyAgainstFullRebuild(store));
+}
+
+TEST(UnifiedTransclusionEngineTest, MetaDimensionRangeHasNoFixedCapacity) {
+  xanadu::Store store;
+  UnifiedTransclusionEngine engine(store);
+  const auto root     = engine.addCell("root");
+  const auto neighbor = engine.addCell("neighbor");
+  std::vector<DimRef> dimensions;
+  dimensions.reserve(70);
+  for (std::size_t index = 0; index < 70; ++index) {
+    const auto name = "d.test_unbounded." + std::to_string(index);
+    const auto dim  = engine.dimensionFor(name);
+    dimensions.push_back(dim);
+    engine.linkCells(root, neighbor, dim);
+  }
+
+  const auto operationCount = store.opCount();
+  const auto queries        = engine.metaDimensionsOf(root);
+  ASSERT_GT(queries.size(), 64U);
+  EXPECT_TRUE(std::holds_alternative<MetaDimensions>(queries.back()));
+  for (const auto dim : dimensions) {
+    EXPECT_NE(std::ranges::find(queries, DimensionQuery{dim}), queries.end());
+  }
+  EXPECT_EQ(store.opCount(), operationCount);
+
+  engine.linkCells(root, std::nullopt, dimensions.front());
+  const auto withoutInactive = engine.metaDimensionsOf(root);
+  EXPECT_EQ(withoutInactive.size(), 70U);
+  EXPECT_EQ(
+      std::ranges::find(withoutInactive, DimensionQuery{dimensions.front()}),
+      withoutInactive.end());
+
+  const CellRef unknown = ephemeralBit - 1;
+  EXPECT_TRUE(engine.metaDimensionsOf(unknown).empty());
 }
 
 TEST(UnifiedTransclusionEngineTest, AsymmetryCanNoLongerBeConstructed) {
@@ -222,13 +262,21 @@ TEST(UnifiedTransclusionEngineTest, AsymmetryCanNoLongerBeConstructed) {
 
   const auto d1 = engine.dimensionFor("d.1");
   EXPECT_EQ(engine.manifold().linked(one, d1, DimVector::POS), three);
-  EXPECT_EQ(engine.manifold().linked(two, d1, DimVector::NEG), zigzag::noCell)
+  EXPECT_EQ(engine.manifold().linked(two, d1, DimVector::NEG), std::nullopt)
       << "the displaced cell kept a backlink to a cell that no longer names it";
 
+  const auto beforeInvalidTarget = store.opCount();
+  EXPECT_THROW(engine.linkCells(one, std::optional<CellRef>{noCell}, d1),
+               std::invalid_argument);
+  EXPECT_EQ(store.opCount(), beforeInvalidTarget);
+
+  engine.linkCells(one, std::nullopt, d1);
+  EXPECT_EQ(engine.manifold().linked(one, d1, DimVector::POS), std::nullopt);
+  EXPECT_EQ(engine.manifold().linked(three, d1, DimVector::NEG), std::nullopt);
+
   engine.unlinkPositive(one, DimOrdinal::D1);
-  EXPECT_EQ(engine.manifold().linked(one, d1, DimVector::POS), zigzag::noCell);
-  EXPECT_EQ(engine.manifold().linked(three, d1, DimVector::NEG),
-            zigzag::noCell);
+  EXPECT_EQ(engine.manifold().linked(one, d1, DimVector::POS), std::nullopt);
+  EXPECT_EQ(engine.manifold().linked(three, d1, DimVector::NEG), std::nullopt);
   EXPECT_TRUE(engine.validate2RankManifold(&err)) << err;
 }
 
@@ -329,7 +377,7 @@ TEST(UnifiedTransclusionEngineTest, StageWithheldAndTranscopyrightCells) {
   gleditor::GlyphCache glyphCache(&device);
 
   UnifiedTransclusionEngine::RenderSliceRequest req{
-      .focusCellId = 1,
+      .focusCellId = withheld,
       .axisX       = "d.1",
       .axisY       = "d.2",
       .axisZ       = "d.3",
@@ -438,13 +486,14 @@ struct StagingRig {
     for (std::size_t i = 1; i < chain.size(); i++) {
       engine.linkCells(chain[i - 1], chain[i], DimOrdinal::D1);
     }
-    return {.focusCellId = chain.empty() ? zigzag::noCell : chain.front(),
-            .axisX       = "d.1",
-            .axisY       = "d.2",
-            .axisZ       = "d.3",
-            .radiusX     = count,
-            .radiusY     = 1,
-            .radiusZ     = 1};
+    return {.focusCellId =
+                chain.empty() ? std::nullopt : std::optional{chain.front()},
+            .axisX   = "d.1",
+            .axisY   = "d.2",
+            .axisZ   = "d.3",
+            .radiusX = count,
+            .radiusY = 1,
+            .radiusZ = 1};
   }
 };
 
@@ -500,7 +549,7 @@ TEST(ShapingCacheTest, ChangedTextIsNotServedFromCache) {
   // not share an entry.
   const auto first = rig.engine.addCell("Alpha content x");
   const auto req   = UnifiedTransclusionEngine::RenderSliceRequest{
-      .focusCellId = first, .radiusX = 1, .radiusY = 1, .radiusZ = 1};
+        .focusCellId = first, .radiusX = 1, .radiusY = 1, .radiusZ = 1};
 
   std::ignore = rig.engine.stageVisibleCells(req, rig.font, *rig.glyphCache);
   const auto afterFirst = rig.engine.shapingCacheStats();
@@ -508,7 +557,7 @@ TEST(ShapingCacheTest, ChangedTextIsNotServedFromCache) {
   // A second cell whose text differs only in its last character.
   const auto second = rig.engine.addCell("Alpha content y");
   const auto req2   = UnifiedTransclusionEngine::RenderSliceRequest{
-      .focusCellId = second, .radiusX = 1, .radiusY = 1, .radiusZ = 1};
+        .focusCellId = second, .radiusX = 1, .radiusY = 1, .radiusZ = 1};
   std::ignore = rig.engine.stageVisibleCells(req2, rig.font, *rig.glyphCache);
   const auto afterSecond = rig.engine.shapingCacheStats();
 
@@ -706,3 +755,51 @@ TEST(UnifiedTransclusionEngineTest,
 // stored structure now, so d.transclude is minted where a transclusion is
 // recorded (§7's "at write time"), not derived where it is displayed, and the
 // test belongs with whatever mints it.
+
+TEST(UnifiedTransclusionEngineTest, EmptySpanListDoesNotMintACell) {
+  xanadu::Store store;
+  UnifiedTransclusionEngine engine(store);
+  const auto before = store.opCount();
+  EXPECT_FALSE(engine.addCellFromSpans({}));
+  EXPECT_EQ(store.opCount(), before);
+}
+
+TEST(UnifiedTransclusionEngineTest,
+     StagingOffsetZeroIsPresentAndFailureIsAbsent) {
+  struct Buffer final : render::IStreamBuffer {
+    std::vector<std::byte> bytes;
+    bool refuse{};
+    std::size_t allocationCount{};
+    std::size_t flushCount{};
+    render::MappedChunk allocate(std::size_t size, std::size_t) override {
+      ++allocationCount;
+      if (refuse) return {};
+      bytes.resize(size);
+      return {bytes.data(), 0};
+    }
+    void flushAndUnmap(std::size_t offset, std::size_t size) override {
+      EXPECT_EQ(offset, 0U);
+      EXPECT_EQ(size, bytes.size());
+      ++flushCount;
+    }
+    void waitAll() override {}
+    std::size_t capacityBytes() const noexcept override { return bytes.size(); }
+  } buffer;
+  StagingRig rig;
+  auto request      = rig.buildChain(1);
+  const auto offset = rig.engine.stageIntoStreamBuffer(request, rig.font,
+                                                       *rig.glyphCache, buffer);
+  ASSERT_TRUE(offset);
+  EXPECT_EQ(*offset, 0U);
+  EXPECT_EQ(buffer.flushCount, 1U);
+  buffer.refuse = true;
+  EXPECT_FALSE(rig.engine.stageIntoStreamBuffer(request, rig.font,
+                                                *rig.glyphCache, buffer));
+  const auto allocationsBeforeMissingFocus = buffer.allocationCount;
+  buffer.refuse                            = false;
+  request.focusCellId.reset();
+  EXPECT_FALSE(rig.engine.stageIntoStreamBuffer(request, rig.font,
+                                                *rig.glyphCache, buffer));
+  EXPECT_EQ(buffer.allocationCount, allocationsBeforeMissingFocus);
+  EXPECT_EQ(buffer.flushCount, 1U);
+}

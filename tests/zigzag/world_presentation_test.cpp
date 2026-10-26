@@ -10,6 +10,7 @@
 #include <gleditor/text/diagnostics.hpp>
 #include <glm/ext/matrix_clip_space.hpp>
 #include <gtest/gtest.h>
+#include <stdexcept>
 
 namespace {
 using namespace gleditor::ui;
@@ -26,7 +27,7 @@ void fitted(const WidgetScene &scene) {
     contained(box.contentRect, box.rect);
     contained(box.rect, scene.layout.bounds);
     if (box.parentId)
-      contained(box.rect, scene.layout.find(box.parentId)->rect);
+      contained(box.rect, scene.layout.find(*box.parentId)->rect);
     if (const auto *visual = scene.find(box.id)) {
       EXPECT_LE(visual->fitted.widthPx, box.contentRect.width + .01F);
       EXPECT_LE(visual->fitted.heightPx, box.contentRect.height + .01F);
@@ -67,6 +68,15 @@ TEST(WorldPresentationTest,
         }
       }
 }
+namespace {
+zigzag::CellID focusedCell(const zigzag::ZigzagVisualizer &viz) {
+  const auto focus = viz.focusCellId();
+  if (!focus) {
+    throw std::logic_error("test requires a focused cell");
+  }
+  return *focus;
+}
+} // namespace
 TEST(WorldPresentationTest, TelemetryAndBlueprintRetainGeometryAndFullNames) {
   WorldRecordingDevice device;
   RenderState state(&device);
@@ -155,7 +165,7 @@ TEST(WorldPresentationTest, ZigzagLabelsHaveLodWithoutChangingCellContent) {
         ctx.chrome = {};
         viz.drawFrame(ctx);
       }
-      ASSERT_TRUE(viz.projectedCell(viz.focusCellId()));
+      ASSERT_TRUE(viz.projectedCell(focusedCell(viz)));
       EXPECT_EQ(viz.visibleWorldLabelCount() > 0, zoom >= 1);
       device.uploads = 0;
       gleditor::text::ShapingStatsScope warm;
@@ -190,11 +200,11 @@ TEST(WorldPresentationTest, ZigzagLabelsHaveLodWithoutChangingCellContent) {
         return gleditor::hasDecoration(glyph.decorations,
                                        gleditor::Decoration::Underline);
       }));
-  const auto previousFocus = viz.focusCellId();
+  const auto previousFocus = focusedCell(viz);
   viz.setCellRadius(1);
   viz.navigateFocus("d.2", zigzag::DimVector::POS);
   viz.navigateFocus("d.3", zigzag::DimVector::POS);
-  ASSERT_NE(viz.focusCellId(), previousFocus);
+  ASSERT_NE(focusedCell(viz), previousFocus);
   for (unsigned i = 0; i < 300; ++i) {
     ctx.chrome = {};
     state.beginPickScene();
@@ -241,9 +251,9 @@ TEST(WorldPresentationTest,
   EXPECT_FALSE(
       sat.snapshots().front()->find(100)->fitted.shaping.glyphs.empty());
   ASSERT_FALSE(device.drawn.empty());
-  auto tag = render::unpackPickingTag(device.identities.front(),
-                                      device.drawn.front().paper & 65535U, 0);
-  tag.kind = render::tagKindOverlay;
+  auto tag    = render::unpackPickingTag(device.identities.front(),
+                                         device.drawn.front().paper & 65535U, 0);
+  tag.kind    = render::tagKindOverlay;
   auto widget = render::resolveOverlayWidget(state.overlayPickScene, tag);
   ASSERT_TRUE(widget);
   gleditor::a11y::Tree tree;

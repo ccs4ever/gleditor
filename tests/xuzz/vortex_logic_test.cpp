@@ -106,7 +106,7 @@ TEST(VortexLogicTest, OpcodeMakeVarAndIsVar) {
 
   CellRef cur1 = h.vm.spawnCursor(opVar);
   h.vm.step(cur1);
-  auto varVal = h.core.render(outVar);
+  auto varVal = h.core.render(outVar).value();
   ASSERT_TRUE(std::holds_alternative<std::int64_t>(varVal));
   CellRef varCell = static_cast<CellRef>(std::get<std::int64_t>(varVal));
   EXPECT_NE(varCell, noCell);
@@ -133,6 +133,31 @@ TEST(VortexLogicTest, OpcodeMakeVarAndIsVar) {
   EXPECT_EQ(h.core.render(outIsVar2), CellValue(false));
 }
 
+TEST(VortexLogicTest, CursorOpcodeAbsenceSurvivesAnUncachedVm) {
+  LogicHarness h;
+  const auto opcode = h.vm.mintOpcode(OpcodeKind::Nop);
+  const auto cursor = h.vm.spawnCursor(opcode);
+  VortexVM uncached(h.core);
+  EXPECT_EQ(uncached.getCursorOpcode(cursor), opcode);
+  EXPECT_THROW(h.vm.setCursorOpcode(cursor, CellRef{0}), std::invalid_argument);
+  h.vm.setCursorOpcode(cursor, std::nullopt);
+  EXPECT_FALSE(h.vm.getCursorOpcode(cursor));
+  EXPECT_FALSE(uncached.getCursorOpcode(cursor));
+  const auto finished = h.vm.run(cursor);
+  EXPECT_TRUE(finished.success);
+  EXPECT_EQ(finished.errorMessage, "Finished");
+}
+
+TEST(VortexLogicTest, InvalidSerializedOpcodeKindsAreNotDecoded) {
+  LogicHarness h;
+  const auto negative = h.arena.makeScalarCell(std::int64_t{-1});
+  const auto tooLarge = h.arena.makeScalarCell(
+      static_cast<std::int64_t>(OpcodeKind::ChoiceDepth) + 1);
+
+  EXPECT_FALSE(h.vm.getOpcodeKind(negative));
+  EXPECT_FALSE(h.vm.getOpcodeKind(tooLarge));
+}
+
 TEST(VortexLogicTest, OpcodeMakeTermAndDeref) {
   LogicHarness h;
 
@@ -150,10 +175,10 @@ TEST(VortexLogicTest, OpcodeMakeTermAndDeref) {
 
   CellRef cur1 = h.vm.spawnCursor(opTerm);
   h.vm.step(cur1);
-  CellRef termRef =
-      static_cast<CellRef>(std::get<std::int64_t>(h.core.render(outTerm)));
+  CellRef termRef = static_cast<CellRef>(
+      std::get<std::int64_t>(h.core.render(outTerm).value()));
   EXPECT_NE(termRef, noCell);
-  EXPECT_EQ(h.stdlib.functorOf(termRef), "fruit");
+  EXPECT_EQ(h.stdlib.functorOf(termRef).value(), "fruit");
 
   auto args = h.stdlib.argumentsOf(termRef);
   ASSERT_EQ(args.size(), 2u);
@@ -163,7 +188,7 @@ TEST(VortexLogicTest, OpcodeMakeTermAndDeref) {
   // Unify var X with termRef
   CellRef x = h.stdlib.makeVar();
   EXPECT_TRUE(h.stdlib.unify(x, termRef));
-  EXPECT_EQ(h.stdlib.deref(x), termRef);
+  EXPECT_EQ(h.stdlib.deref(x), std::optional<CellRef>{termRef});
 }
 
 TEST(VortexLogicTest, ChoiceAndFailBacktracking) {
@@ -206,7 +231,7 @@ TEST(VortexLogicTest, ChoiceAndFailBacktracking) {
 
   // Step 2: X unifies with "first"
   h.vm.step(cursor);
-  EXPECT_EQ(h.core.arena().textOf(h.stdlib.deref(x)), "first");
+  EXPECT_EQ(h.core.arena().textOf(h.stdlib.deref(x).value()), "first");
   EXPECT_EQ(h.vm.getCursorOpcode(cursor), opFail);
 
   // Step 3: #FAIL triggers backtrack to opAlt, X reverts to unbound!
@@ -217,7 +242,55 @@ TEST(VortexLogicTest, ChoiceAndFailBacktracking) {
 
   // Step 4: Alt branch executes, unifying X with "second"
   h.vm.step(cursor);
-  EXPECT_EQ(h.core.arena().textOf(h.stdlib.deref(x)), "second");
+  EXPECT_EQ(h.core.arena().textOf(h.stdlib.deref(x).value()), "second");
+}
+
+TEST(VortexLogicTest, ChoiceRequiresAValidAlternativeBeforeRecording) {
+  const auto checkRejectedChoice = [](const bool bindAlternative,
+                                      const std::int64_t alternative) {
+    LogicHarness h;
+    const auto choice = h.vm.mintOpcode(OpcodeKind::Choice);
+    if (bindAlternative) {
+      const auto target = h.core.arena().makeScalarCell(alternative);
+      h.core.bindInput(choice, target);
+    }
+    const auto cursor = h.vm.spawnCursor(choice);
+
+    const auto result = h.vm.step(cursor);
+    EXPECT_FALSE(result.success);
+    EXPECT_THAT(result.errorMessage,
+                ::testing::HasSubstr("valid alternative opcode"));
+    EXPECT_EQ(h.vm.choiceDepth(), 0U);
+    EXPECT_EQ(h.vm.getCursorOpcode(cursor), choice);
+    EXPECT_EQ(h.arena.outstandingMarks(), 0U);
+  };
+
+  checkRejectedChoice(false, 0);
+  checkRejectedChoice(true, static_cast<std::int64_t>(noCell));
+  checkRejectedChoice(true, 0);
+}
+
+TEST(VortexLogicTest, AnonymousChoicePointRemainsBacktrackable) {
+  LogicHarness h;
+  const auto alternative = h.vm.mintOpcode(OpcodeKind::Halt);
+
+  h.vm.pushChoicePoint(std::nullopt, alternative);
+  ASSERT_EQ(h.vm.choiceDepth(), 1U);
+  EXPECT_FALSE(h.vm.choiceStack().back().cursor);
+  EXPECT_TRUE(h.vm.backtrack(std::nullopt));
+  EXPECT_EQ(h.vm.choiceDepth(), 0U);
+  EXPECT_EQ(h.arena.outstandingMarks(), 0U);
+}
+
+TEST(VortexLogicTest, MemoKeyLookupDistinguishesEmptyKeyFromMiss) {
+  LogicHarness h;
+  const auto unregistered = h.vm.mintOpcode(OpcodeKind::Nop);
+  const auto emptyKeyOp   = h.vm.mintOpcode(OpcodeKind::Nop);
+
+  EXPECT_FALSE(h.vm.getMemoKey(unregistered));
+  h.vm.enableMemoization(emptyKeyOp, "");
+  ASSERT_TRUE(h.vm.getMemoKey(emptyKeyOp));
+  EXPECT_TRUE(h.vm.getMemoKey(emptyKeyOp)->empty());
 }
 
 TEST(VortexLogicTest, CutPrunesInnerChoicePoints) {
@@ -238,6 +311,50 @@ TEST(VortexLogicTest, CutPrunesInnerChoicePoints) {
   // Cut down to depth 0
   h.vm.cut(0);
   EXPECT_EQ(h.vm.choiceDepth(), 0u);
+}
+
+TEST(VortexLogicTest, ChoiceDepthReadsTheCurrentRuntimeBarrier) {
+  LogicHarness h;
+  const auto op     = h.vm.mintOpcode(OpcodeKind::ChoiceDepth);
+  const auto output = h.core.arena().makeCell();
+  h.core.bindOutput(op, output);
+  const auto alternative = h.vm.mintOpcode(OpcodeKind::Nop);
+  const auto cursor      = h.vm.spawnCursor(op);
+
+  ASSERT_TRUE(h.vm.step(cursor).success);
+  EXPECT_EQ(h.core.render(output), CellValue(std::int64_t{0}));
+  h.vm.pushChoicePoint(cursor, alternative);
+  h.vm.pushChoicePoint(cursor, alternative);
+  h.vm.setCursorOpcode(cursor, op);
+  ASSERT_TRUE(h.vm.step(cursor).success);
+  EXPECT_EQ(h.core.render(output), CellValue(std::int64_t{2}));
+  EXPECT_EQ(h.vm.choiceDepth(), 2U);
+  h.vm.clearChoicePoints();
+}
+
+TEST(VortexLogicTest, RecordedBarrierCutsStatementChoicesButKeepsTheCaller) {
+  LogicHarness h;
+  const auto depth = h.vm.mintOpcode(OpcodeKind::ChoiceDepth);
+  const auto saved = h.core.arena().makeCell();
+  h.core.bindOutput(depth, saved);
+  const auto choose = h.vm.mintOpcode(OpcodeKind::Choice);
+  const auto cut    = h.vm.mintOpcode(OpcodeKind::Cut);
+  h.core.bindInput(cut, saved);
+  ASSERT_TRUE(h.core.arena().link(depth, h.core.dims().spin, false, choose));
+  ASSERT_TRUE(h.core.arena().link(choose, h.core.dims().spin, false, cut));
+  const auto alternative = h.vm.mintOpcode(OpcodeKind::Nop);
+  const auto altTarget =
+      h.core.arena().makeScalarCell(static_cast<std::int64_t>(alternative));
+  h.core.bindInput(choose, altTarget);
+  const auto cursor = h.vm.spawnCursor(depth);
+
+  h.vm.pushChoicePoint(cursor, alternative);
+  ASSERT_TRUE(h.vm.step(cursor).success);
+  ASSERT_TRUE(h.vm.step(cursor).success);
+  EXPECT_EQ(h.vm.choiceDepth(), 2U);
+  ASSERT_TRUE(h.vm.step(cursor).success);
+  EXPECT_EQ(h.vm.choiceDepth(), 1U);
+  h.vm.clearChoicePoints();
 }
 
 TEST(VortexLogicTest, StdLogicModuleRegistrationAndDiscovery) {
@@ -396,9 +513,38 @@ TEST(VortexLogicTest, RationalTreesAndCycleSafety) {
   EXPECT_FALSE(h.stdlib.isVar(x));
 
   // Cycle traversal in deref does not loop
-  CellRef master = h.stdlib.deref(x);
+  CellRef master = h.stdlib.deref(x).value();
   EXPECT_NE(master, noCell);
-  EXPECT_EQ(h.stdlib.functorOf(master), "f");
+  EXPECT_EQ(h.stdlib.functorOf(master).value(), "f");
+}
+
+TEST(VortexLogicTest,
+     DereferenceDistinguishesInvalidRefsFromValidZeroAndFalse) {
+  LogicHarness h;
+
+  EXPECT_EQ(h.stdlib.deref(noCell), std::nullopt);
+
+  const CellRef zero      = h.core.arena().makeScalarCell(std::int64_t{0});
+  const CellRef no        = h.core.arena().makeScalarCell(false);
+  const auto resolvedZero = h.stdlib.deref(zero);
+  const auto resolvedNo   = h.stdlib.deref(no);
+  ASSERT_TRUE(resolvedZero);
+  ASSERT_TRUE(resolvedNo);
+  EXPECT_EQ(h.core.arena().asInt64(*resolvedZero), std::int64_t{0});
+  EXPECT_EQ(h.core.arena().asBool(*resolvedNo), false);
+}
+
+TEST(VortexLogicTest, FunctorAndRenderingDistinguishInvalidFromEmptyAtom) {
+  LogicHarness h;
+
+  EXPECT_EQ(h.stdlib.functorOf(noCell), std::nullopt);
+  EXPECT_EQ(h.stdlib.renderTerm(noCell), std::nullopt);
+
+  const CellRef emptyAtom = h.core.arena().makeCell("");
+  EXPECT_EQ(h.stdlib.functorOf(emptyAtom),
+            std::optional<std::string>{std::string{}});
+  EXPECT_EQ(h.stdlib.renderTerm(emptyAtom),
+            std::optional<std::string>{std::string{}});
 }
 
 TEST(VortexLogicTest, HighThroughputResolutionBenchmark) {
@@ -536,6 +682,44 @@ TEST(VortexLogicTest, HypermediaManifoldPredicates) {
   EXPECT_EQ(spanSols[0].formatted["Span"], "[42,10]");
 }
 
+TEST(VortexLogicTest, HypermediaPredicatesRejectCellIdsWiderThanCellRef) {
+  LogicHarness h;
+  const auto c1  = h.core.arena().makeScalarCell(std::int64_t{100});
+  const auto c2  = h.core.arena().makeScalarCell(std::int64_t{200});
+  const auto dim = h.core.arena().makeCell("d.test");
+  ASSERT_TRUE(h.core.arena().link(c1, dim, zigzag::DimVector::POS, c2));
+
+  const auto wrappedId =
+      (std::uint64_t{1} << 32U) + static_cast<std::uint64_t>(c1);
+  const auto invalidRef =
+      h.core.arena().makeScalarCell(static_cast<std::int64_t>(wrappedId));
+
+  const auto value = h.stdlib.makeVar("Value");
+  EXPECT_TRUE(
+      h.stdlib.solveQuery(h.stdlib.makeTerm("cell_value", {invalidRef, value}))
+          .empty());
+
+  const auto dimension = h.stdlib.makeVar("Dimension");
+  const auto direction = h.stdlib.makeVar("Direction");
+  const auto target    = h.stdlib.makeVar("Target");
+  EXPECT_TRUE(h.stdlib
+                  .solveQuery(h.stdlib.makeTerm(
+                      "cell_link", {invalidRef, dimension, direction, target}))
+                  .empty());
+
+  const auto span = h.stdlib.makeVar("Span");
+  EXPECT_TRUE(
+      h.stdlib.solveQuery(h.stdlib.makeTerm("cell_span", {invalidRef, span}))
+          .empty());
+
+  const auto bridgeDim    = h.core.arena().makeCell("d.test");
+  const auto bridgeTarget = h.stdlib.makeVar("BridgeTarget");
+  EXPECT_TRUE(h.stdlib
+                  .solveQuery(h.stdlib.makeTerm(
+                      "bridge_edge", {invalidRef, bridgeDim, bridgeTarget}))
+                  .empty());
+}
+
 TEST(VortexLogicTest, HypermediaTransclusionAndXanalinkPredicates) {
   LogicHarness h;
   xanadu::Store store;
@@ -575,6 +759,112 @@ TEST(VortexLogicTest, HypermediaTransclusionAndXanalinkPredicates) {
   ASSERT_FALSE(xanaSols.empty());
   EXPECT_EQ(xanaSols[0].formatted["FromSpan"], "[100,15]");
   EXPECT_EQ(xanaSols[0].formatted["ToSpan"], "[200,30]");
+}
+
+TEST(VortexLogicTest,
+     InactiveDeweyTrackingDoesNotAccumulateAcrossChoicesAndCuts) {
+  LogicHarness h;
+  const auto alternative               = h.vm.mintOpcode(OpcodeKind::Halt);
+  const auto cursor                    = h.vm.spawnCursor(alternative);
+  constexpr std::size_t statementCount = 256;
+
+  for (std::size_t statement = 0; statement < statementCount; ++statement) {
+    h.vm.pushChoicePoint(cursor, alternative);
+    ASSERT_EQ(h.vm.choiceDepth(), 1U);
+    EXPECT_TRUE(h.vm.choiceStack().back().deweyPath.empty());
+    EXPECT_TRUE(h.vm.currentDeweyPath().empty());
+    h.vm.cut(0);
+    EXPECT_EQ(h.vm.choiceDepth(), 0U);
+    EXPECT_TRUE(h.vm.currentDeweyPath().empty());
+    EXPECT_EQ(h.arena.outstandingMarks(), 0U);
+  }
+
+  constexpr std::size_t nestedDepth = 64;
+  for (std::size_t depth = 0; depth < nestedDepth; ++depth) {
+    h.vm.pushChoicePoint(cursor, alternative);
+    EXPECT_TRUE(h.vm.choiceStack().back().deweyPath.empty());
+  }
+  for (std::size_t depth = 0; depth < nestedDepth; ++depth) {
+    ASSERT_TRUE(h.vm.backtrack(cursor));
+    EXPECT_TRUE(h.vm.currentDeweyPath().empty());
+    EXPECT_EQ(h.vm.getCursorOpcode(cursor), alternative);
+  }
+  EXPECT_FALSE(h.vm.backtrack(cursor));
+  EXPECT_EQ(h.arena.outstandingMarks(), 0U);
+}
+
+TEST(VortexLogicTest, CutObserverTracksBranchesBeforeReportingTheirPrefixes) {
+  LogicHarness h;
+  std::vector<std::string> pruned;
+  h.vm.setCutCallback(
+      [&pruned](std::string_view prefix) { pruned.emplace_back(prefix); });
+  const auto alternative = h.vm.mintOpcode(OpcodeKind::Halt);
+  const auto cursor      = h.vm.spawnCursor(alternative);
+
+  h.vm.pushChoicePoint(cursor, alternative);
+  EXPECT_THAT(h.vm.currentDeweyPath(), ::testing::ElementsAre(0));
+  EXPECT_THAT(h.vm.choiceStack().back().deweyPath, ::testing::ElementsAre(1));
+  h.vm.pushChoicePoint(cursor, alternative);
+  EXPECT_THAT(h.vm.currentDeweyPath(), ::testing::ElementsAre(0, 0));
+  EXPECT_THAT(h.vm.choiceStack().back().deweyPath,
+              ::testing::ElementsAre(0, 1));
+
+  h.vm.cut(1);
+  EXPECT_EQ(h.vm.choiceDepth(), 1U);
+  EXPECT_THAT(pruned, ::testing::ElementsAre("0"));
+  EXPECT_THAT(h.vm.currentDeweyPath(), ::testing::ElementsAre(0, 0));
+  ASSERT_TRUE(h.vm.backtrack(cursor));
+  EXPECT_THAT(h.vm.currentDeweyPath(), ::testing::ElementsAre(1));
+  EXPECT_EQ(h.vm.getCursorOpcode(cursor), alternative);
+  EXPECT_EQ(h.arena.outstandingMarks(), 0U);
+}
+
+TEST(VortexLogicTest, OracleTrackingContinuesAfterItsDirectedPrefixIsConsumed) {
+  LogicHarness h;
+  const auto first       = h.vm.mintOpcode(OpcodeKind::Choice);
+  const auto second      = h.vm.mintOpcode(OpcodeKind::Choice);
+  const auto alternative = h.vm.mintOpcode(OpcodeKind::Halt);
+  const auto firstTarget =
+      h.arena.makeScalarCell(static_cast<std::int64_t>(alternative));
+  const auto secondTarget =
+      h.arena.makeScalarCell(static_cast<std::int64_t>(alternative));
+  h.core.bindInput(first, firstTarget);
+  h.core.bindInput(second, secondTarget);
+  ASSERT_TRUE(h.arena.link(first, h.core.dims().spin, false, second));
+  const auto cursor = h.vm.spawnCursor(first);
+  const std::vector<std::uint16_t> oracle{0};
+  h.vm.setOraclePath(oracle);
+
+  ASSERT_TRUE(h.vm.step(cursor).success);
+  EXPECT_EQ(h.vm.choiceDepth(), 0U);
+  EXPECT_THAT(h.vm.currentDeweyPath(), ::testing::ElementsAre(0));
+  ASSERT_TRUE(h.vm.step(cursor).success);
+  ASSERT_EQ(h.vm.choiceDepth(), 1U);
+  EXPECT_THAT(h.vm.currentDeweyPath(), ::testing::ElementsAre(0, 0));
+  EXPECT_THAT(h.vm.choiceStack().back().deweyPath,
+              ::testing::ElementsAre(0, 1));
+  ASSERT_TRUE(h.vm.backtrack(cursor));
+  EXPECT_THAT(h.vm.currentDeweyPath(), ::testing::ElementsAre(0, 1));
+  EXPECT_EQ(h.vm.getCursorOpcode(cursor), alternative);
+  EXPECT_EQ(h.arena.outstandingMarks(), 0U);
+}
+
+TEST(VortexLogicTest, OracleAlternativeJumpsWithoutMintingAChoicePoint) {
+  LogicHarness h;
+  const auto choice      = h.vm.mintOpcode(OpcodeKind::Choice);
+  const auto alternative = h.vm.mintOpcode(OpcodeKind::Halt);
+  const auto target =
+      h.arena.makeScalarCell(static_cast<std::int64_t>(alternative));
+  h.core.bindInput(choice, target);
+  const auto cursor = h.vm.spawnCursor(choice);
+  const std::vector<std::uint16_t> oracle{1};
+  h.vm.setOraclePath(oracle);
+
+  ASSERT_TRUE(h.vm.step(cursor).success);
+  EXPECT_EQ(h.vm.choiceDepth(), 0U);
+  EXPECT_THAT(h.vm.currentDeweyPath(), ::testing::ElementsAre(1));
+  EXPECT_EQ(h.vm.getCursorOpcode(cursor), alternative);
+  EXPECT_EQ(h.arena.outstandingMarks(), 0U);
 }
 
 } // namespace

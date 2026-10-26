@@ -97,14 +97,27 @@ TEST_F(TextFitTest, EmptyTextHasNoVisibleSourceOrTruncation) {
   EXPECT_TRUE(fitted.shaping.glyphs.empty());
 }
 
-TEST_F(TextFitTest, ZeroWidthMeansUnboundedAndPreservesTheSource) {
+TEST_F(TextFitTest, AbsentWidthIsUnboundedAndPreservesTheSource) {
   const std::string text = "A long label with combining é and العربية";
-  const auto fitted      = fit(text, font, {.maxWidthPx = 0.0F});
+  const auto fitted      = fit(text, font, {.maxWidthPx = std::nullopt});
   EXPECT_FALSE(fitted.truncated);
   EXPECT_EQ(fitted.visibleBytes, text.size());
   EXPECT_EQ(fitted.lines, 1U);
   EXPECT_GT(fitted.widthPx, 0.0F);
   EXPECT_FALSE(hasEllipsis(fitted.shaping));
+}
+
+TEST_F(TextFitTest, ZeroWidthIsAnEmptyExtent) {
+  const auto fitted = fit("visible", font, {.maxWidthPx = 0.0F});
+  EXPECT_TRUE(fitted.shaping.glyphs.empty());
+  EXPECT_EQ(fitted.widthPx, 0.0F);
+  EXPECT_TRUE(fitted.truncated);
+}
+
+TEST_F(TextFitTest, NegativeExtentIsRejectedEvenWithAnotherZeroExtent) {
+  EXPECT_THROW(
+      (void)fit("text", font, {.maxWidthPx = 0.0F, .maxHeightPx = -1.0F}),
+      std::invalid_argument);
 }
 
 TEST_F(TextFitTest, WidthSweepIncludesSubpixelAndNarrowerThanEllipsis) {
@@ -287,14 +300,25 @@ TEST_F(TextFitTest, HeightBelowOneLineProducesNoOverflow) {
 
 TEST_F(TextFitTest, UnboundedLineCountWrapsAllSource) {
   const std::string text = "One two three four five six seven eight nine ten";
-  const auto fitted =
-      fit(text, font,
-          {.maxWidthPx = 100.0F, .maxLines = 0, .overflow = Overflow::Wrap});
+  const auto fitted      = fit(text, font,
+                               {.maxWidthPx = 100.0F,
+                                .maxLines   = std::nullopt,
+                                .overflow   = Overflow::Wrap});
   expectWithinWidth(fitted, 100.0F);
   EXPECT_GT(fitted.lines, 1U);
   EXPECT_FALSE(fitted.truncated);
   EXPECT_EQ(fitted.visibleBytes, text.size());
   EXPECT_FALSE(hasEllipsis(fitted.shaping));
+}
+
+TEST_F(TextFitTest, ZeroLineLimitProducesEmptyFit) {
+  const auto fitted =
+      fit("A line that would otherwise be visible", font,
+          {.maxWidthPx = 100.0F, .maxLines = 0, .overflow = Overflow::Wrap});
+  EXPECT_TRUE(fitted.truncated);
+  EXPECT_EQ(fitted.lines, 0U);
+  EXPECT_EQ(fitted.visibleBytes, 0U);
+  EXPECT_TRUE(fitted.shaping.glyphs.empty());
 }
 
 TEST_F(TextFitTest, ClipUsesNoEllipsisAndKeepsASingleLine) {

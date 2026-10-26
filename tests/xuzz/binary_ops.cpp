@@ -519,10 +519,10 @@ TEST(BinaryOpsTest, aPublishedSliceFoldsWithItsLinksIntact) {
   const auto dim    = dimRes.dim;
 
   at            = publisher.makeCell(at, "first");
-  const auto c1 = publisher.cellRefOf(at);
+  const auto c1 = publisher.cellRefOf(at).value();
 
   at            = publisher.makeCell(at, "second");
-  const auto c2 = publisher.cellRefOf(at);
+  const auto c2 = publisher.cellRefOf(at).value();
 
   at = publisher.setLink(at, c1, dim, zigzag::DimVector::POS, c2);
   at = publisher.setCellText(at, c1, "first modified");
@@ -542,7 +542,8 @@ TEST(BinaryOpsTest, aPublishedSliceFoldsWithItsLinksIntact) {
   const auto history = xanadu::historyFromSeal(sealed, became, {});
   ASSERT_NE(history, nullptr);
 
-  const auto key = "btpk:" + became.publisher.hex() + ":" + became.salt;
+  ASSERT_TRUE(became.publisher);
+  const auto key = "btpk:" + became.publisher->hex() + ":" + became.salt;
   history->setExternalLiveBytes(key, 0, publisher.userPermascroll().bytes());
 
   const auto histManifold = history->rebuildManifold(at);
@@ -556,7 +557,7 @@ TEST(BinaryOpsTest, aSpliceOperationSurvivesPublication) {
   Store publisher;
   auto at         = publisher.sliceGenesis(MicroversionId{});
   at              = publisher.makeCell(at, "abcdefghij");
-  const auto cell = publisher.cellRefOf(at);
+  const auto cell = publisher.cellRefOf(at).value();
   at              = publisher.spliceCell(at, cell, 2, 4, "XYZ");
 
   Scroll became;
@@ -567,7 +568,8 @@ TEST(BinaryOpsTest, aSpliceOperationSurvivesPublication) {
   const auto history = xanadu::historyFromSeal(sealed, became, {});
   ASSERT_NE(history, nullptr);
 
-  const auto key = "btpk:" + became.publisher.hex() + ":" + became.salt;
+  ASSERT_TRUE(became.publisher);
+  const auto key = "btpk:" + became.publisher->hex() + ":" + became.salt;
   history->setExternalLiveBytes(key, 0, publisher.userPermascroll().bytes());
 
   const auto histManifold = history->rebuildManifold(at);
@@ -587,15 +589,15 @@ TEST(BinaryOpsTest, structureAddressesSurviveBranchDrivenReordering) {
   const auto dim    = dimRes.dim;
 
   at                    = publisher.makeCell(at, "target_cell");
-  const auto targetCell = publisher.cellRefOf(at);
+  const auto targetCell = publisher.cellRefOf(at).value();
 
   at                     = publisher.makeCell(at, "subject_cell");
-  const auto subjectCell = publisher.cellRefOf(at);
+  const auto subjectCell = publisher.cellRefOf(at).value();
 
   at = publisher.setLink(at, subjectCell, dim, zigzag::DimVector::POS,
                          targetCell);
   at = publisher.makeOpHandle(at, targetCell, "handle");
-  const auto handleCell = publisher.cellRefOf(at);
+  const auto handleCell = publisher.cellRefOf(at).value();
 
   Scroll became;
   became.publisher = xanadu::createMutableKeys().publicKey;
@@ -609,12 +611,16 @@ TEST(BinaryOpsTest, structureAddressesSurviveBranchDrivenReordering) {
   EXPECT_EQ(histManifold.refusedOps(), 0U);
 
   const auto targetInHist =
-      history->cellRefOf(publisher.segmentedOps().idOf(targetCell));
+      history->cellRefOf(publisher.segmentedOps().idOf(targetCell).value())
+          .value();
   const auto subjectInHist =
-      history->cellRefOf(publisher.segmentedOps().idOf(subjectCell));
-  const auto dimInHist = history->cellRefOf(publisher.segmentedOps().idOf(dim));
+      history->cellRefOf(publisher.segmentedOps().idOf(subjectCell).value())
+          .value();
+  const auto dimInHist =
+      history->cellRefOf(publisher.segmentedOps().idOf(dim).value()).value();
   const auto handleInHist =
-      history->cellRefOf(publisher.segmentedOps().idOf(handleCell));
+      history->cellRefOf(publisher.segmentedOps().idOf(handleCell).value())
+          .value();
 
   EXPECT_EQ(
       histManifold.linked(subjectInHist, dimInHist, zigzag::DimVector::POS),
@@ -626,14 +632,14 @@ TEST(BinaryOpsTest, aHandleMayTargetALexicallyLaterBranch) {
   Store publisher;
   const auto root     = publisher.insert(MicroversionId{}, 0, "root");
   const auto targetId = publisher.insert(root, 4, "target");
-  const auto targetOp = publisher.segmentedOps().indexOf(targetId);
+  const auto targetOp = publisher.segmentedOps().indexOf(targetId).value();
 
   auto at = publisher.sliceGenesis(root);
   ASSERT_LT(at, targetId);
 
   at = publisher.makeOpHandle(at, targetOp, "handle to target");
   ASSERT_LT(at, targetId);
-  const auto handleCell = publisher.cellRefOf(at);
+  const auto handleCell = publisher.cellRefOf(at).value();
 
   Scroll became;
   became.publisher = xanadu::createMutableKeys().publicKey;
@@ -645,7 +651,7 @@ TEST(BinaryOpsTest, aHandleMayTargetALexicallyLaterBranch) {
 
   const auto histManifold = history->rebuildManifold(at);
   EXPECT_EQ(histManifold.refusedOps(), 0U);
-  const auto histTargetOp = history->segmentedOps().indexOf(targetId);
+  const auto histTargetOp = history->segmentedOps().indexOf(targetId).value();
   ASSERT_NE(histTargetOp, 0U);
   EXPECT_EQ(histManifold.handleTarget(handleCell), histTargetOp);
 }
@@ -662,10 +668,10 @@ TEST(BinaryOpsTest, sealedHistoryUsesTheSameAddressLocalization) {
   const auto dim    = dimRes.dim;
 
   at            = publisher.makeCell(at, "cell_a");
-  const auto cA = publisher.cellRefOf(at);
+  const auto cA = publisher.cellRefOf(at).value();
 
   at            = publisher.makeCell(at, "cell_b");
-  const auto cB = publisher.cellRefOf(at);
+  const auto cB = publisher.cellRefOf(at).value();
 
   at = publisher.setLink(at, cA, dim, zigzag::DimVector::POS, cB);
   at = publisher.setCellText(at, cB, "cell_b updated");
@@ -678,15 +684,19 @@ TEST(BinaryOpsTest, sealedHistoryUsesTheSameAddressLocalization) {
   const auto history = xanadu::historyFromSeal(sealed, became, {});
   ASSERT_NE(history, nullptr);
 
-  const auto key = "btpk:" + became.publisher.hex() + ":" + became.salt;
+  ASSERT_TRUE(became.publisher);
+  const auto key = "btpk:" + became.publisher->hex() + ":" + became.salt;
   history->setExternalLiveBytes(key, 0, publisher.userPermascroll().bytes());
 
   const auto histManifold = history->rebuildManifold(at);
   EXPECT_EQ(histManifold.refusedOps(), 0U);
 
-  const auto cAInHist  = history->cellRefOf(publisher.segmentedOps().idOf(cA));
-  const auto cBInHist  = history->cellRefOf(publisher.segmentedOps().idOf(cB));
-  const auto dimInHist = history->cellRefOf(publisher.segmentedOps().idOf(dim));
+  const auto cAInHist =
+      history->cellRefOf(publisher.segmentedOps().idOf(cA).value()).value();
+  const auto cBInHist =
+      history->cellRefOf(publisher.segmentedOps().idOf(cB).value()).value();
+  const auto dimInHist =
+      history->cellRefOf(publisher.segmentedOps().idOf(dim).value()).value();
 
   EXPECT_NE(cAInHist, cA);
   EXPECT_NE(cBInHist, cB);
@@ -697,8 +707,8 @@ TEST(BinaryOpsTest, sealedHistoryUsesTheSameAddressLocalization) {
   EXPECT_EQ(histManifold.textOf(cBInHist, *history), "cell_b updated");
 
   // Verify source chain matches the localized indices
-  const auto pubOpIdx        = publisher.segmentedOps().indexOf(at);
-  const auto histOpIdx       = history->segmentedOps().indexOf(at);
+  const auto pubOpIdx        = publisher.segmentedOps().indexOf(at).value();
+  const auto histOpIdx       = history->segmentedOps().indexOf(at).value();
   const auto *const pubNode  = publisher.segmentedOps().get(pubOpIdx);
   const auto *const histNode = history->segmentedOps().get(histOpIdx);
   ASSERT_NE(pubNode, nullptr);

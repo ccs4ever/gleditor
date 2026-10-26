@@ -137,14 +137,16 @@ TEST_F(XuduDumpTest, aSlicesStructureOperationsSayWhatTheyDid) {
   zigzag::CellRef head{zigzag::noCell};
   {
     Store store(sample.scroll());
-    auto at           = store.sliceGenesis(MicroversionId{});
-    const auto minted = store.makeDimension(at, "d.doc");
-    at                = minted.version;
-    dim               = minted.dim;
-    at                = store.makeCell(at, "a cell");
-    head              = store.cellRefOf(at);
-    at                = store.makeCell(at, "another");
-    at = store.setLink(at, head, dim, DimVector::POS, store.cellRefOf(at));
+    auto at            = store.sliceGenesis(MicroversionId{});
+    const auto minted  = store.makeDimension(at, "d.doc");
+    at                 = minted.version;
+    dim                = minted.dim;
+    at                 = store.makeCell(at, "a cell");
+    const auto headRef = store.cellRefOf(at);
+    ASSERT_TRUE(headRef);
+    head = *headRef;
+    at   = store.makeCell(at, "another");
+    at   = store.setLink(at, head, dim, DimVector::POS, store.cellRefOf(at));
     store.save(sample.store.string());
   }
 

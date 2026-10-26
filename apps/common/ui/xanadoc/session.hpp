@@ -165,7 +165,7 @@ private:
 struct OpenView {
   MicroversionId version;
   std::size_t storeIndex{0};
-  std::uint32_t focusedBirth{0};
+  XanadocSelection selection;
   std::vector<std::uint32_t> containmentPath;
   /// The version rebuilt, kept so that decorating does not replay the whole
   /// history once per frame per document.
@@ -268,8 +268,8 @@ public:
   ///        would leave a DHT of one.
   void useSwarm(bool privateNetwork = false);
   [[nodiscard]] bool swarmEnabled() const { return nullptr != swarmSource; }
-  /// The port the swarm listens on, or zero when there is no swarm.
-  [[nodiscard]] std::uint16_t swarmPort() const;
+  /// The bound listener port, absent until a swarm listener is available.
+  [[nodiscard]] std::optional<std::uint16_t> swarmPort() const;
 
   /**
    * @brief Introduce a peer that is known to hold some of this content.
@@ -576,7 +576,7 @@ public:
   /// Note that a document showing @p version has been opened. Called from the
   /// render thread as documents come and go.
   void viewOpened(const MicroversionId &version, std::size_t storeIndex = 0,
-                  std::uint32_t focusedBirth = 0);
+                  XanadocSelection selection = XanadocSelection::automatic());
 
   /**
    * @brief Close an open document view. Flushes any uncommitted edits,
@@ -588,8 +588,12 @@ public:
   [[nodiscard]] std::optional<FocusTarget>
   focusTargetForView(std::size_t docIndex) const;
 
-  /// Update the focused birth target for view @p docIndex.
-  void setFocusTarget(std::size_t docIndex, std::uint32_t birthOp);
+  /// Update the focus target for view @p docIndex.
+  void setFocusTarget(std::size_t docIndex, std::optional<FocusTarget> target);
+
+  /// Resolve the operation context selected by an open view for authoring.
+  [[nodiscard]] std::optional<MicroversionId>
+  authoringContextForView(std::size_t docIndex) const;
 
   /**
    * @brief Create a new sovereign store bound to the author's UserPermascroll.
@@ -666,7 +670,7 @@ public:
    */
   [[nodiscard]] std::shared_ptr<VersionTextSource>
   sourceFor(const MicroversionId &version, std::size_t storeIndex = 0,
-            std::uint32_t scopedBirth = 0) const;
+            XanadocSelection selection = XanadocSelection::automatic()) const;
 
   struct MediaSpanInfo {
     PrimediaSpan span;
@@ -866,6 +870,9 @@ public:
 private:
   /// Rebuild the cached version for @p docIndex after an edit moved it.
   void refresh(std::uint32_t docIndex, const MicroversionId &version);
+  /// Select the context for an authored text operation in this view.
+  [[nodiscard]] std::optional<MicroversionId>
+  textContextForView(std::size_t docIndex) const;
   /// Persist the versions currently represented by views in each store.
   void syncCurrentVersions(std::size_t storeIndex) const;
   /// Note that something a decoration depends on has changed.

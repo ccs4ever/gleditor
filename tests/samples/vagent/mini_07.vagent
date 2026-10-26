@@ -1,0 +1,9 @@
+import std:goal (tab, match, upto)
+event Parse { text: Str }
+agent Tags {
+  var tag: Str := ""
+  on Parse as p {
+    let value := p.text ? (tab(match("ID:")) & tab(upto(";")))
+    tag := value
+  }
+}

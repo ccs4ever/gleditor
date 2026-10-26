@@ -20,6 +20,21 @@ using gleditor::Key;
 using gleditor::KeyMods;
 using namespace gleditor::ui;
 
+TEST(AppStateTest, clickPositionIsAnOptionalPairIncludingZeroAndNegative) {
+  AppState state;
+  EXPECT_FALSE(state.lastClickPosition().has_value());
+
+  state.recordClickPosition(0, -7);
+  EXPECT_EQ(state.lastClickPosition(),
+            (std::optional<AppState::PointerPosition>{
+                AppState::PointerPosition{0, -7}}));
+
+  state.queuePointerPick({-3, 0, 1, {}});
+  EXPECT_EQ(state.lastClickPosition(),
+            (std::optional<AppState::PointerPosition>{
+                AppState::PointerPosition{-3, 0}}));
+}
+
 struct Scope : FocusScope {
   std::vector<KeyEvent> keys;
   std::vector<PointerEvent> pointers;
@@ -278,6 +293,23 @@ TEST(FocusManagerTest, registrationLifetimeAndMovesDoNotLeaveDanglingFocus) {
     EXPECT_EQ(manager.focusedScope(), &scope);
   }
   surviving.reset();
+}
+
+TEST(FocusScopeTest, OpenedSequenceTracksActivationPresence) {
+  Scope scope;
+  EXPECT_FALSE(scope.openedSequence());
+
+  scope.activate();
+  const auto firstSequence = scope.openedSequence();
+  ASSERT_TRUE(firstSequence);
+  EXPECT_GT(*firstSequence, 0U);
+
+  scope.deactivate();
+  EXPECT_EQ(scope.openedSequence(), firstSequence);
+
+  scope.activate();
+  ASSERT_TRUE(scope.openedSequence());
+  EXPECT_NE(scope.openedSequence(), firstSequence);
 }
 
 TEST(FocusManagerTest, commandGateCoversNamedAndBoundCommands) {
@@ -745,8 +777,14 @@ TEST(FocusManagerTest, delayedGpuPressIsBoundToRegistrationAndOpening) {
 
 TEST(FocusManagerTest, queuedPressSupersedesPositionAndOriginTogether) {
   AppState state;
-  const PointerPickTarget first{1, 2, 3, true};
-  const PointerPickTarget second{4, 5, 6, false};
+  const PointerPickTarget first{.registration =
+                                    PointerPickTarget::Registration{1, 2},
+                                .revision = 3,
+                                .modal    = true};
+  const PointerPickTarget second{.registration =
+                                     PointerPickTarget::Registration{4, 5},
+                                 .revision = 6,
+                                 .modal    = false};
   state.queuePointerPick({10, 20, 1, first});
   state.queuePointerPick({30, 40, 2, second});
   const auto pending = state.takePointerPick();

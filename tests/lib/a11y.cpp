@@ -229,7 +229,8 @@ TEST(A11yPublisherTest, everySourceHangsOffOneWindow) {
   const auto tree = publisher.snapshot();
 
   ASSERT_FALSE(tree.empty());
-  const auto root = tree.find(tree.root());
+  ASSERT_TRUE(tree.root());
+  const auto root = tree.find(*tree.root());
   ASSERT_TRUE((root).has_value());
   EXPECT_EQ(root->role, a11y::Role::Window);
   EXPECT_EQ(root->label, "test");
@@ -238,6 +239,18 @@ TEST(A11yPublisherTest, everySourceHangsOffOneWindow) {
   ASSERT_EQ(root->children.size(), 2U);
   EXPECT_EQ(tree.find(root->children[0])->label, "first");
   EXPECT_EQ(tree.find(root->children[1])->label, "second");
+}
+
+TEST(A11yTreeTest, RootIsAbsentOnlyForAnEmptyTree) {
+  const a11y::Tree empty;
+  EXPECT_FALSE(empty.root());
+
+  a11y::Publisher publisher("test", "gleditor", "0");
+  publisher.rebuild(800, 600);
+  const auto tree = publisher.snapshot();
+  ASSERT_FALSE(tree.empty());
+  ASSERT_TRUE(tree.root());
+  EXPECT_EQ(*tree.root(), tree.nodes.front().id);
 }
 
 TEST(A11yPublisherTest, nothingIsRebuiltWhileNothingChanges) {
@@ -265,8 +278,10 @@ TEST(A11yPublisherTest, theWindowTitleIsWhatTheWindowIsCalled) {
 
   publisher.setWindowTitle("Publishing an essay");
   publisher.rebuild(800, 600);
-  EXPECT_EQ(publisher.snapshot().find(publisher.snapshot().root())->label,
-            "Publishing an essay");
+  const auto tree = publisher.snapshot();
+  ASSERT_TRUE(tree.root());
+  ASSERT_TRUE(tree.find(*tree.root()));
+  EXPECT_EQ(tree.find(*tree.root())->label, "Publishing an essay");
 }
 
 TEST(A11yPublisherTest, aTreeCanBeReadAsText) {

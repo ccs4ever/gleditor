@@ -188,7 +188,7 @@ public:
   void addDhtNode(const std::string &host, std::uint16_t port);
 
   /// Actual port listened on by the underlying session.
-  [[nodiscard]] std::uint16_t listenPort() const;
+  [[nodiscard]] std::optional<std::uint16_t> listenPort() const;
 
   /// Standardized cache directory for a given torrent info hash.
   [[nodiscard]] std::string cacheDirFor(const InfoHash &hash) const;

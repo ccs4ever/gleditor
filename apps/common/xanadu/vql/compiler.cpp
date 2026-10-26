@@ -6,6 +6,7 @@
 
 #include <cstdio>
 #include <iomanip>
+#include <limits>
 #include <ranges>
 #include <sstream>
 #include <stdexcept>
@@ -21,7 +22,6 @@ namespace xanadu::vql {
 using zigzag::CellRef;
 using zigzag::DimRef;
 using zigzag::DimVector;
-using zigzag::noCell;
 using zigzag::vortex::CellValue;
 using zigzag::vortex::OpcodeKind;
 
@@ -120,6 +120,8 @@ VQLCompiler::opcodeMnemonic(zigzag::vortex::OpcodeKind kind) noexcept {
     return "FAIL";
   case OpcodeKind::Cut:
     return "CUT";
+  case OpcodeKind::ChoiceDepth:
+    return "CHOICEDEPTH";
   default:
     return "UNKNOWN";
   }
@@ -131,12 +133,12 @@ VQLCompiler::VQLCompiler(zigzag::vortex::VortexCore &core,
 
 CellRef VQLCompiler::emitOp(OpcodeKind kind, std::string_view label) {
   CellRef op = vm_.mintOpcode(kind, label);
-  if (entryOp_ == noCell) {
+  if (!entryOp_) {
     entryOp_ = op;
   }
-  if (currentOp_ != noCell) {
+  if (currentOp_) {
     zigzag::expectWritten(
-        core_.arena().link(currentOp_, core_.dims().spin, false, op));
+        core_.arena().link(*currentOp_, core_.dims().spin, false, op));
   }
   currentOp_ = op;
   allOps_.push_back(op);
@@ -154,7 +156,7 @@ void VQLCompiler::emitOutput(CellRef op, CellRef target) {
 CellRef VQLCompiler::emitConstant(const CellValue &val,
                                   std::optional<CellRef> designatedCell) {
   CellRef c = designatedCell ? *designatedCell : core_.arena().makeCell();
-  core_.value(c, 0, -1, val);
+  core_.writeValue(c, 0, std::nullopt, val);
   return c;
 }
 
@@ -166,40 +168,38 @@ CellRef VQLCompiler::emitInputConstant(CellRef op, const CellValue &val) {
 
 CompilationResult VQLCompiler::compile(const QueryExpression &query,
                                        const CompilationOptions &options) {
-  entryOp_   = noCell;
-  currentOp_ = noCell;
+  entryOp_.reset();
+  currentOp_.reset();
   allOps_.clear();
   varBindings_.clear();
   lastResultCells_.clear();
 
-  CellRef resultCell = noCell;
   try {
-    resultCell = compileQuery(query);
+    const auto resultCell = compileQuery(query);
+    if (lastResultCells_.empty() && resultCell) {
+      lastResultCells_.push_back(*resultCell);
+    }
   } catch (const std::invalid_argument &unsupported) {
     return CompilationResult{
         .success          = false,
-        .entryOpcode      = noCell,
+        .entryOpcode      = std::nullopt,
         .errorMessage     = unsupported.what(),
         .generatedOpcodes = {},
         .disassembly      = "",
     };
   }
-  if (lastResultCells_.empty() && resultCell != noCell) {
-    lastResultCells_.push_back(resultCell);
-  }
-
   if (options.targetLibrary) {
     CellRef retOp = emitOp(OpcodeKind::Return, "#RETURN");
     for (CellRef r : lastResultCells_) {
       emitInput(retOp, r);
     }
-    linkAsLibrary(entryOp_, options.moduleName, options.symbolName);
+    linkAsLibrary(entryOp_.value(), options.moduleName, options.symbolName);
   } else {
     CellRef haltOp = emitOp(OpcodeKind::Halt, "#HALT");
     for (CellRef r : lastResultCells_) {
       emitInput(haltOp, r);
     }
-    linkAsExecutable(entryOp_);
+    linkAsExecutable(entryOp_.value());
   }
 
   std::string dis = disassemble(entryOp_);
@@ -244,7 +244,7 @@ CompilationResult VQLCompiler::compile(std::string_view queryString,
   } catch (const ParseError &err) {
     return CompilationResult{
         .success          = false,
-        .entryOpcode      = noCell,
+        .entryOpcode      = std::nullopt,
         .errorMessage     = std::string("Parse error: ") + err.what(),
         .generatedOpcodes = {},
         .disassembly      = "",
@@ -252,7 +252,7 @@ CompilationResult VQLCompiler::compile(std::string_view queryString,
   }
 }
 
-CellRef VQLCompiler::compileQuery(const QueryExpression &query) {
+std::optional<CellRef> VQLCompiler::compileQuery(const QueryExpression &query) {
   if (std::holds_alternative<PathExpression>(query.expr)) {
     return compilePathExpression(std::get<PathExpression>(query.expr),
                                  core_.home());
@@ -260,12 +260,13 @@ CellRef VQLCompiler::compileQuery(const QueryExpression &query) {
   return compileExecutionBlock(std::get<ExecutionBlock>(query.expr));
 }
 
-CellRef VQLCompiler::compileExecutionBlock(const ExecutionBlock &block) {
+std::optional<CellRef>
+VQLCompiler::compileExecutionBlock(const ExecutionBlock &block) {
   // 1. Process bindings (for, let)
   for (const auto &binding : block.bindings) {
     if (std::holds_alternative<LetClause>(binding)) {
       const auto &let = std::get<LetClause>(binding);
-      CellRef valCell = noCell;
+      std::optional<CellRef> valCell;
       if (std::holds_alternative<PathExpression>(let.target)) {
         valCell = compilePathExpression(std::get<PathExpression>(let.target),
                                         core_.home());
@@ -275,17 +276,17 @@ CellRef VQLCompiler::compileExecutionBlock(const ExecutionBlock &block) {
       }
       CellRef bindOp = emitOp(OpcodeKind::Bind, "#BIND " + let.varName);
       emitInputConstant(bindOp, let.varName);
-      if (valCell != noCell) {
-        emitInput(bindOp, valCell);
+      if (valCell) {
+        emitInput(bindOp, *valCell);
       }
       varBindings_[let.varName] = valCell;
     } else if (std::holds_alternative<ForClause>(binding)) {
-      const auto &forCl = std::get<ForClause>(binding);
-      CellRef inStream  = compilePathExpression(forCl.inPath, core_.home());
+      const auto &forCl   = std::get<ForClause>(binding);
+      const auto inStream = compilePathExpression(forCl.inPath, core_.home());
       CellRef bindOp = emitOp(OpcodeKind::Bind, "#FOR_BIND " + forCl.varName);
       emitInputConstant(bindOp, forCl.varName);
-      if (inStream != noCell) {
-        emitInput(bindOp, inStream);
+      if (inStream) {
+        emitInput(bindOp, *inStream);
       }
       varBindings_[forCl.varName] = inStream;
     }
@@ -293,26 +294,28 @@ CellRef VQLCompiler::compileExecutionBlock(const ExecutionBlock &block) {
 
   // 2. Process WhereClause if present
   if (block.where) {
-    CellRef condCell = compileBooleanExpr(block.where->condition, core_.home());
+    auto condCell = compileBooleanExpr(block.where->condition, core_.home());
+    if (!condCell) condCell = emitConstant(false);
     CellRef branchOp = emitOp(OpcodeKind::Branch, "#WHERE_FILTER");
-    emitInput(branchOp, condCell);
+    emitInput(branchOp, *condCell);
   }
 
   // 3. Process ActionClause
   return std::visit(
-      [this](const auto &act) -> CellRef {
+      [this](const auto &act) -> std::optional<CellRef> {
         using T = std::decay_t<decltype(act)>;
         if constexpr (std::is_same_v<T, ReturnClause>) {
-          CellRef lastRes = noCell;
+          std::optional<CellRef> lastRes;
           for (const auto &retItem : act.items) {
             if (std::holds_alternative<PathExpression>(retItem.item)) {
               lastRes = compilePathExpression(
                   std::get<PathExpression>(retItem.item), core_.home());
             } else if (std::holds_alternative<FieldWeave>(retItem.item)) {
-              const auto &fw  = std::get<FieldWeave>(retItem.item);
-              CellRef resCell = core_.arena().makeCell();
+              const auto &fw = std::get<FieldWeave>(retItem.item);
+              std::optional<CellRef> resCell = core_.arena().makeCell();
               for (const auto &step : fw.steps) {
-                resCell = compilePathStep(step, resCell);
+                if (!resCell) break;
+                resCell = compilePathStep(step, *resCell);
               }
               lastRes = resCell;
             }
@@ -326,7 +329,7 @@ CellRef VQLCompiler::compileExecutionBlock(const ExecutionBlock &block) {
                   if constexpr (std::is_same_v<SubT, PathExpression>) {
                     compilePathExpression(sub, core_.home());
                   } else if constexpr (std::is_same_v<SubT, LetClause>) {
-                    CellRef valCell = noCell;
+                    std::optional<CellRef> valCell;
                     if (std::holds_alternative<PathExpression>(sub.target)) {
                       valCell = compilePathExpression(
                           std::get<PathExpression>(sub.target), core_.home());
@@ -337,8 +340,8 @@ CellRef VQLCompiler::compileExecutionBlock(const ExecutionBlock &block) {
                     CellRef bindOp =
                         emitOp(OpcodeKind::Bind, "#WEAVE_BIND " + sub.varName);
                     emitInputConstant(bindOp, sub.varName);
-                    if (valCell != noCell) {
-                      emitInput(bindOp, valCell);
+                    if (valCell) {
+                      emitInput(bindOp, *valCell);
                     }
                   }
                 },
@@ -346,19 +349,21 @@ CellRef VQLCompiler::compileExecutionBlock(const ExecutionBlock &block) {
           }
           return core_.home();
         } else if constexpr (std::is_same_v<T, ConditionalClause>) {
-          CellRef condCell = compileBooleanExpr(act.condition, core_.home());
+          auto condCell = compileBooleanExpr(act.condition, core_.home());
+          if (!condCell) condCell = emitConstant(false);
           CellRef branchOp = emitOp(OpcodeKind::Branch, "#IF_BRANCH");
-          emitInput(branchOp, condCell);
+          emitInput(branchOp, *condCell);
           return condCell;
         } else {
-          return noCell;
+          throw std::logic_error("unsupported VQL execution clause");
         }
       },
       block.action.clause);
 }
 
-CellRef VQLCompiler::compilePathExpression(const PathExpression &path,
-                                           CellRef ctxCell) {
+std::optional<CellRef>
+VQLCompiler::compilePathExpression(const PathExpression &path,
+                                   CellRef ctxCell) {
   if (!path.anchorPredicates.empty()) {
     // Refused rather than compiled without them, which would answer every
     // anchor cell whatever the predicate said.
@@ -366,12 +371,14 @@ CellRef VQLCompiler::compilePathExpression(const PathExpression &path,
         "predicates on an anchor are not compiled to Vortex yet; run the "
         "query with --engine direct");
   }
-  CellRef start = compileAnchor(path.anchor);
-  if (start == noCell) {
-    start = ctxCell != noCell ? ctxCell : core_.home();
+  const auto start = path.anchor.kind == AnchorKind::Context
+                         ? std::optional<CellRef>{ctxCell}
+                         : compileAnchor(path.anchor);
+  if (!start) {
+    lastResultCells_.clear();
+    return std::nullopt;
   }
-
-  std::vector<CellRef> stream = {start};
+  std::vector<CellRef> stream{*start};
 
   for (const auto &step : path.steps) {
     std::vector<CellRef> nextStream;
@@ -414,12 +421,14 @@ CellRef VQLCompiler::compilePathExpression(const PathExpression &path,
               emitInputConstant(valOp, createVal.literal);
             } else if (createVal.kind == CreateValue::Kind::Expression &&
                        createVal.expr) {
-              CellRef valOp = emitOp(OpcodeKind::Value, "#INIT_VALUE");
-              emitInput(valOp, freshCell);
-              emitInputConstant(valOp, static_cast<std::int64_t>(0));
-              emitInputConstant(valOp, static_cast<std::int64_t>(-1));
-              CellRef valData = compileValueExpr(*createVal.expr, current);
-              emitInput(valOp, valData);
+              const auto valData = compileValueExpr(*createVal.expr, current);
+              if (valData) {
+                CellRef valOp = emitOp(OpcodeKind::Value, "#INIT_VALUE");
+                emitInput(valOp, freshCell);
+                emitInputConstant(valOp, static_cast<std::int64_t>(0));
+                emitInputConstant(valOp, static_cast<std::int64_t>(-1));
+                emitInput(valOp, *valData);
+              }
             }
             createdCells.push_back(freshCell);
             attachPoint = freshCell;
@@ -445,12 +454,13 @@ CellRef VQLCompiler::compilePathExpression(const PathExpression &path,
       const auto &fn = std::get<FunctionInvocation>(step.selector);
       if (fn.name == "value" && !fn.args.empty()) {
         for (CellRef current : stream) {
+          const auto argVal = compileValueExpr(fn.args[0], current);
+          if (!argVal) continue;
           CellRef valOp = emitOp(OpcodeKind::Value, "#VALUE");
           emitInput(valOp, current);
           emitInputConstant(valOp, static_cast<std::int64_t>(0));
           emitInputConstant(valOp, static_cast<std::int64_t>(-1));
-          CellRef argVal = compileValueExpr(fn.args[0], current);
-          emitInput(valOp, argVal);
+          emitInput(valOp, *argVal);
           nextStream.push_back(current);
         }
       } else if (fn.name == "link" && fn.args.size() >= 2) {
@@ -483,23 +493,26 @@ CellRef VQLCompiler::compilePathExpression(const PathExpression &path,
           }
         }
 
-        DimRef dim         = resolveDimension(dimName);
-        CellRef targetCell = compileValueExpr(fn.args[1], core_.home());
+        DimRef dim            = resolveDimension(dimName);
+        const auto targetCell = compileValueExpr(fn.args[1], core_.home());
 
         std::vector<CellRef> attachedClones;
-        for (CellRef current : stream) {
-          CellRef cloneOp = emitOp(OpcodeKind::Clone, "#CLONE_GENERATOR");
-          emitInput(cloneOp, targetCell);
-          CellRef cloneCell = core_.arena().makeCell();
-          emitOutput(cloneOp, cloneCell);
+        if (targetCell) {
+          for (CellRef current : stream) {
+            CellRef cloneOp = emitOp(OpcodeKind::Clone, "#CLONE_GENERATOR");
+            emitInput(cloneOp, *targetCell);
+            CellRef cloneCell = core_.arena().makeCell();
+            emitOutput(cloneOp, cloneCell);
 
-          CellRef linkOp = emitOp(OpcodeKind::Link, "#LINK_ATTACH " + dimName);
-          emitInput(linkOp, current);
-          emitInputConstant(linkOp, static_cast<std::int64_t>(dim));
-          emitInputConstant(linkOp,
-                            static_cast<std::int64_t>(toSign(direction)));
-          emitInput(linkOp, cloneCell);
-          attachedClones.push_back(cloneCell);
+            CellRef linkOp =
+                emitOp(OpcodeKind::Link, "#LINK_ATTACH " + dimName);
+            emitInput(linkOp, current);
+            emitInputConstant(linkOp, static_cast<std::int64_t>(dim));
+            emitInputConstant(linkOp,
+                              static_cast<std::int64_t>(toSign(direction)));
+            emitInput(linkOp, cloneCell);
+            attachedClones.push_back(cloneCell);
+          }
         }
 
         if (step.yieldMode == YieldMode::Both) {
@@ -535,9 +548,10 @@ CellRef VQLCompiler::compilePathExpression(const PathExpression &path,
     // Predicates
     for (const auto &pred : step.predicates) {
       for (CellRef c : nextStream) {
-        CellRef condCell = compileBooleanExpr(pred, c);
+        auto condCell = compileBooleanExpr(pred, c);
+        if (!condCell) condCell = emitConstant(false);
         CellRef branchOp = emitOp(OpcodeKind::Branch, "#FILTER_BRANCH");
-        emitInput(branchOp, condCell);
+        emitInput(branchOp, *condCell);
       }
     }
 
@@ -571,7 +585,7 @@ CellRef VQLCompiler::compilePathExpression(const PathExpression &path,
   if (path.cloneTail && !stream.empty()) {
     for (CellRef master : stream) {
       for (const auto &op : path.cloneTail->operands) {
-        CellRef opCell = noCell;
+        std::optional<CellRef> opCell;
         if (op.path) {
           opCell = compilePathExpression(*op.path, core_.home());
         } else if (op.bareCreate) {
@@ -581,43 +595,46 @@ CellRef VQLCompiler::compilePathExpression(const PathExpression &path,
                             static_cast<std::int64_t>(core_.dims().clone));
           emitInputConstant(newOp, static_cast<std::int64_t>(1));
           opCell = core_.arena().makeCell();
-          emitOutput(newOp, opCell);
+          emitOutput(newOp, *opCell);
           if (op.bareCreate->kind == CreateValue::Kind::Literal) {
             CellRef valOp = emitOp(OpcodeKind::Value, "#CLONE_TAIL_INIT");
-            emitInput(valOp, opCell);
+            emitInput(valOp, *opCell);
             emitInputConstant(valOp, static_cast<std::int64_t>(0));
             emitInputConstant(valOp, static_cast<std::int64_t>(-1));
             emitInputConstant(valOp, op.bareCreate->literal);
           } else if (op.bareCreate->kind == CreateValue::Kind::Expression &&
                      op.bareCreate->expr) {
-            CellRef valOp = emitOp(OpcodeKind::Value, "#CLONE_TAIL_INIT");
-            emitInput(valOp, opCell);
-            emitInputConstant(valOp, static_cast<std::int64_t>(0));
-            emitInputConstant(valOp, static_cast<std::int64_t>(-1));
-            CellRef valData =
+            const auto valData =
                 compileValueExpr(*op.bareCreate->expr, core_.home());
-            emitInput(valOp, valData);
+            if (valData) {
+              CellRef valOp = emitOp(OpcodeKind::Value, "#CLONE_TAIL_INIT");
+              emitInput(valOp, *opCell);
+              emitInputConstant(valOp, static_cast<std::int64_t>(0));
+              emitInputConstant(valOp, static_cast<std::int64_t>(-1));
+              emitInput(valOp, *valData);
+            }
           }
         }
 
-        if (opCell != noCell) {
+        if (opCell) {
           CellRef linkOp = emitOp(OpcodeKind::Link, "#CLONE_JOIN");
           emitInput(linkOp, master);
           emitInputConstant(linkOp,
                             static_cast<std::int64_t>(core_.dims().clone));
           emitInputConstant(linkOp, static_cast<std::int64_t>(1));
-          emitInput(linkOp, opCell);
+          emitInput(linkOp, *opCell);
         }
       }
     }
   }
 
   lastResultCells_ = stream;
-  return stream.empty() ? noCell : stream.front();
+  if (stream.empty()) return std::nullopt;
+  return stream.front();
 }
 
-CellRef VQLCompiler::compileAnchor(const AnchorNode &anchor) {
-  CellRef res = noCell;
+std::optional<CellRef> VQLCompiler::compileAnchor(const AnchorNode &anchor) {
+  CellRef res{};
   switch (anchor.kind) {
   case AnchorKind::Home:
     res = core_.home();
@@ -639,8 +656,9 @@ CellRef VQLCompiler::compileAnchor(const AnchorNode &anchor) {
     break;
   case AnchorKind::Variable: {
     auto it = varBindings_.find(anchor.name);
-    if (it != varBindings_.end() && it->second != noCell) {
-      res = it->second;
+    if (it != varBindings_.end()) {
+      if (!it->second) return std::nullopt;
+      res = *it->second;
     } else {
       CellRef resOp = emitOp(OpcodeKind::Resolve, "#RESOLVE " + anchor.name);
       emitInputConstant(resOp, anchor.name);
@@ -650,7 +668,11 @@ CellRef VQLCompiler::compileAnchor(const AnchorNode &anchor) {
     break;
   }
   case AnchorKind::LiteralCellId:
+    if (anchor.cellId > std::numeric_limits<CellRef>::max()) {
+      return std::nullopt;
+    }
     res = static_cast<CellRef>(anchor.cellId);
+    if (!core_.arena().contains(res)) return std::nullopt;
     break;
   case AnchorKind::Context:
     res = core_.home();
@@ -666,12 +688,14 @@ CellRef VQLCompiler::compileAnchor(const AnchorNode &anchor) {
         emitInputConstant(valOp, static_cast<std::int64_t>(-1));
         emitInputConstant(valOp, cv.literal);
       } else if (cv.kind == CreateValue::Kind::Expression && cv.expr) {
-        CellRef valOp = emitOp(OpcodeKind::Value, "#INIT_VALUE");
-        emitInput(valOp, res);
-        emitInputConstant(valOp, static_cast<std::int64_t>(0));
-        emitInputConstant(valOp, static_cast<std::int64_t>(-1));
-        CellRef valData = compileValueExpr(*cv.expr, core_.home());
-        emitInput(valOp, valData);
+        const auto valData = compileValueExpr(*cv.expr, core_.home());
+        if (valData) {
+          CellRef valOp = emitOp(OpcodeKind::Value, "#INIT_VALUE");
+          emitInput(valOp, res);
+          emitInputConstant(valOp, static_cast<std::int64_t>(0));
+          emitInputConstant(valOp, static_cast<std::int64_t>(-1));
+          emitInput(valOp, *valData);
+        }
       }
     }
     break;
@@ -695,44 +719,55 @@ CellRef VQLCompiler::compileAnchor(const AnchorNode &anchor) {
   return res;
 }
 
-CellRef VQLCompiler::compilePathStep(const PathStep &step,
-                                     CellRef inStreamCell) {
+std::optional<CellRef> VQLCompiler::compilePathStep(const PathStep &step,
+                                                    CellRef inStreamCell) {
   PathExpression dummy;
+  dummy.anchor.kind = AnchorKind::Context;
   dummy.steps.push_back(step);
   return compilePathExpression(dummy, inStreamCell);
 }
 
-CellRef VQLCompiler::compileBooleanExpr(const BooleanExpr &expr,
-                                        CellRef ctxCell) {
+std::optional<CellRef> VQLCompiler::compileBooleanExpr(const BooleanExpr &expr,
+                                                       CellRef ctxCell) {
   if (expr.terms.empty()) {
     return emitConstant(true);
   }
 
-  CellRef resultCell = noCell;
+  std::optional<CellRef> resultCell;
   for (const auto &term : expr.terms) {
-    CellRef termCell = noCell;
+    std::optional<CellRef> termCell;
+    if (term.factors.empty()) termCell = emitConstant(true);
     for (const auto &factor : term.factors) {
-      CellRef factCell = noCell;
+      std::optional<CellRef> factCell;
       if (std::holds_alternative<ComparisonExpr>(factor.test)) {
         factCell =
             compileComparison(std::get<ComparisonExpr>(factor.test), ctxCell);
       } else if (std::holds_alternative<PredicateTest>(factor.test)) {
         const auto &pt = std::get<PredicateTest>(factor.test);
         factCell       = std::visit(
-            [this, ctxCell](const auto &t) -> CellRef {
+            [this, ctxCell](const auto &t) -> std::optional<CellRef> {
               using T = std::decay_t<decltype(t)>;
               if constexpr (std::is_same_v<T,
-                                           std::shared_ptr<PathExpression>>) {
-                if (t) return compilePathExpression(*t, ctxCell);
+                                                 std::shared_ptr<PathExpression>>) {
+                if (t) {
+                  const auto pathCell = compilePathExpression(*t, ctxCell);
+                  return pathCell ? pathCell
+                                        : std::optional<CellRef>{emitConstant(false)};
+                }
                 return emitConstant(false);
               } else if constexpr (std::is_same_v<T, bool>) {
                 return ctxCell;
               } else if constexpr (std::is_same_v<T,
-                                                  std::shared_ptr<ValueExpr>>) {
-                if (t) return compileValueExpr(*t, ctxCell);
+                                                        std::shared_ptr<ValueExpr>>) {
+                if (t) {
+                  const auto valueCell = compileValueExpr(*t, ctxCell);
+                  return valueCell
+                                   ? valueCell
+                                   : std::optional<CellRef>{emitConstant(false)};
+                }
                 return emitConstant(false);
               } else if constexpr (std::is_same_v<T, std::shared_ptr<
-                                                         FunctionInvocation>>) {
+                                                               FunctionInvocation>>) {
                 if (t) {
                   CellRef callOp = emitOp(OpcodeKind::Call, "#CALL " + t->name);
                   CellRef outC   = core_.arena().makeCell();
@@ -747,47 +782,51 @@ CellRef VQLCompiler::compileBooleanExpr(const BooleanExpr &expr,
             pt.kind);
       }
 
+      if (!factCell) continue;
       if (factor.negated) {
         CellRef notOp = emitOp(OpcodeKind::Not, "#NOT");
-        emitInput(notOp, factCell);
+        emitInput(notOp, *factCell);
         CellRef notOut = core_.arena().makeCell();
         emitOutput(notOp, notOut);
         factCell = notOut;
       }
 
-      if (termCell == noCell) {
+      if (!termCell) {
         termCell = factCell;
       } else {
         CellRef andOp = emitOp(OpcodeKind::And, "#AND");
-        emitInput(andOp, termCell);
-        emitInput(andOp, factCell);
+        emitInput(andOp, *termCell);
+        emitInput(andOp, *factCell);
         CellRef andOut = core_.arena().makeCell();
         emitOutput(andOp, andOut);
         termCell = andOut;
       }
     }
 
-    if (resultCell == noCell) {
-      resultCell = termCell;
+    if (!termCell) termCell = emitConstant(false);
+    if (!resultCell) {
+      resultCell = *termCell;
     } else {
       CellRef orOp = emitOp(OpcodeKind::Or, "#OR");
-      emitInput(orOp, resultCell);
-      emitInput(orOp, termCell);
+      emitInput(orOp, *resultCell);
+      emitInput(orOp, *termCell);
       CellRef orOut = core_.arena().makeCell();
       emitOutput(orOp, orOut);
       resultCell = orOut;
     }
   }
 
+  if (!resultCell) return emitConstant(false);
   return resultCell;
 }
 
-CellRef VQLCompiler::compileComparison(const ComparisonExpr &comp,
-                                       CellRef ctxCell) {
-  CellRef lhs =
-      comp.left ? compileValueExpr(*comp.left, ctxCell) : core_.home();
-  CellRef rhs =
-      comp.right ? compileValueExpr(*comp.right, ctxCell) : core_.home();
+std::optional<CellRef>
+VQLCompiler::compileComparison(const ComparisonExpr &comp, CellRef ctxCell) {
+  const auto lhs = comp.left ? compileValueExpr(*comp.left, ctxCell)
+                             : std::optional<CellRef>{core_.home()};
+  const auto rhs = comp.right ? compileValueExpr(*comp.right, ctxCell)
+                              : std::optional<CellRef>{core_.home()};
+  if (!lhs || !rhs) return std::nullopt;
 
   OpcodeKind kind = OpcodeKind::Eq;
   switch (comp.op) {
@@ -813,17 +852,18 @@ CellRef VQLCompiler::compileComparison(const ComparisonExpr &comp,
 
   CellRef op =
       emitOp(kind, std::string("#COMP ") + std::string(opcodeMnemonic(kind)));
-  emitInput(op, lhs);
-  emitInput(op, rhs);
+  emitInput(op, *lhs);
+  emitInput(op, *rhs);
 
   CellRef outCell = core_.arena().makeCell();
   emitOutput(op, outCell);
   return outCell;
 }
 
-CellRef VQLCompiler::compileValueExpr(const ValueExpr &expr, CellRef ctxCell) {
+std::optional<CellRef> VQLCompiler::compileValueExpr(const ValueExpr &expr,
+                                                     CellRef ctxCell) {
   return std::visit(
-      [this, ctxCell](const auto &val) -> CellRef {
+      [this, ctxCell](const auto &val) -> std::optional<CellRef> {
         using T = std::decay_t<decltype(val)>;
         if constexpr (std::is_same_v<T, ScalarLiteral>) {
           return std::visit(
@@ -834,7 +874,7 @@ CellRef VQLCompiler::compileValueExpr(const ValueExpr &expr, CellRef ctxCell) {
         } else if constexpr (std::is_same_v<T, std::string>) {
           // VariableRef
           auto it = varBindings_.find(val);
-          if (it != varBindings_.end() && it->second != noCell) {
+          if (it != varBindings_.end()) {
             return it->second;
           }
           CellRef resOp = emitOp(OpcodeKind::Resolve, "#RESOLVE " + val);
@@ -870,7 +910,6 @@ CellRef VQLCompiler::compileValueExpr(const ValueExpr &expr, CellRef ctxCell) {
 }
 
 void VQLCompiler::linkAsExecutable(CellRef entryOp) {
-  if (entryOp == noCell) return;
   // Link posward off home along +d.spin
   zigzag::expectWritten(
       core_.arena().link(core_.home(), core_.dims().spin, false, entryOp));
@@ -880,20 +919,18 @@ void VQLCompiler::linkAsExecutable(CellRef entryOp) {
 
 void VQLCompiler::linkAsLibrary(CellRef entryOp, std::string_view moduleName,
                                 std::string_view symbolName) {
-  if (entryOp == noCell) return;
-
   core_.exportSymbol(core_.getOrCreateModule(moduleName), symbolName, entryOp);
 }
 
-std::string VQLCompiler::disassemble(CellRef entryOp,
+std::string VQLCompiler::disassemble(std::optional<CellRef> entryOp,
                                      std::size_t maxInstructions) const {
-  if (entryOp == noCell) return "(empty opcode stream)";
+  if (!entryOp) return "(empty opcode stream)";
 
   std::ostringstream out;
-  CellRef cur = entryOp;
+  CellRef cur = *entryOp;
   std::unordered_set<CellRef> visited;
 
-  while (cur != noCell && maxInstructions-- > 0) {
+  while (maxInstructions-- > 0) {
     if (!visited.insert(cur).second) {
       out << "  ... (cycle detected to cell " << cur << ")\n";
       break;
@@ -943,7 +980,9 @@ std::string VQLCompiler::disassemble(CellRef entryOp,
 
     out << "\n";
 
-    cur = core_.arena().linked(cur, core_.dims().spin, false);
+    const auto next = core_.arena().linked(cur, core_.dims().spin, false);
+    if (!next) break;
+    cur = *next;
   }
 
   return out.str();
@@ -953,13 +992,13 @@ xanadu::MicroversionId
 VQLCompiler::exportToStore(xanadu::Store &store,
                            const xanadu::MicroversionId &parent) const {
   xanadu::MicroversionId ver = parent;
-  if (store.homeCell() == zigzag::noCell) {
+  if (!store.homeCell()) {
     ver = store.sliceGenesis(ver);
   }
 
   const auto &arena = core_.arena();
   std::unordered_map<CellRef, CellRef> cellMap;
-  cellMap[core_.home()] = store.homeCell();
+  cellMap[core_.home()] = store.homeCell().value();
 
   auto manifold = store.rebuildManifold(ver);
 
@@ -992,7 +1031,7 @@ VQLCompiler::exportToStore(xanadu::Store &store,
     } else {
       ver = store.makeCell(ver, arena.textOf(c));
     }
-    cellMap[c] = store.cellRefOf(ver);
+    cellMap[c] = store.cellRefOf(ver).value();
     manifold.advanceOrRefold(store, ver);
   }
 
@@ -1002,9 +1041,9 @@ VQLCompiler::exportToStore(xanadu::Store &store,
     CellRef from = cellMap.at(c);
 
     for (const auto &[dimRef, mappedDim] : dimMap) {
-      CellRef target = arena.linked(c, dimRef, DimVector::POS);
-      if (target != zigzag::noCell && cellMap.contains(target)) {
-        CellRef to = cellMap.at(target);
+      const auto target = arena.linked(c, dimRef, DimVector::POS);
+      if (target && cellMap.contains(*target)) {
+        CellRef to = cellMap.at(*target);
         ver        = store.setLink(ver, from, mappedDim, DimVector::POS, to);
         manifold.advanceOrRefold(store, ver);
       }

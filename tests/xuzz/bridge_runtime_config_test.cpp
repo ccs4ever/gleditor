@@ -167,6 +167,24 @@ TEST(BridgeRuntimeConfigTest, ApplyToStoreRoundTrip) {
   EXPECT_FLOAT_EQ(loaded.loom.hoverAlpha, custom.loom.hoverAlpha);
 }
 
+TEST(BridgeRuntimeConfigTest, UnboundedRadiusRoundTripsAsAbsentConfiguration) {
+  Store store;
+  store.setSystem(true);
+  initializeSystemStore(store, SystemDocKind::Layout);
+
+  BridgeRuntimeConfig unbounded;
+  unbounded.cellRadius = std::nullopt;
+  const auto written =
+      unbounded.applyToStore(store, store.primaryCurrentVersion());
+  store.repointCurrentVersion(written);
+
+  const auto loaded = BridgeRuntimeConfig::fromSystemDocs(store);
+  EXPECT_EQ(loaded.cellRadius, std::nullopt);
+
+  const auto model = SystemStoreModel::fromStore(store);
+  EXPECT_EQ(model.getInt64(settings::kBridgeCellRadius), -1);
+}
+
 TEST(BridgeRuntimeConfigTest, IngestFromManifoldDirectly) {
   Store store;
   store.setSystem(true);
@@ -179,8 +197,8 @@ TEST(BridgeRuntimeConfigTest, IngestFromManifoldDirectly) {
   store.repointCurrentVersion(v);
 
   const auto manifold = store.rebuildManifold(v);
-  const auto cfg =
-      BridgeRuntimeConfig::fromManifold(manifold, store.homeCell(), &store);
+  const auto cfg      = BridgeRuntimeConfig::fromManifold(
+      manifold, store.homeCell().value(), &store);
 
   EXPECT_EQ(cfg.cellRadius, 6);
   EXPECT_FLOAT_EQ(cfg.satelloid.gap, 22.0F);

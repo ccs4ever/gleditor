@@ -6,6 +6,7 @@
 
 #include <cctype>
 #include <charconv>
+#include <cmath>
 
 namespace xanadu::vpl {
 
@@ -32,7 +33,7 @@ std::vector<Token> Lexer::tokenizeAll() {
 
 void Lexer::skipWhitespaceAndComments() {
   while (!isAtEnd()) {
-    char c = peekChar();
+    char c = peekChar().value();
     if (c == ' ' || c == '\t' || c == '\r') {
       advanceChar();
       continue;
@@ -109,15 +110,14 @@ Token Lexer::scanNumber(bool negative) {
   }
 
   bool isFloat = false;
-  while (!isAtEnd() && std::isdigit(static_cast<unsigned char>(peekChar()))) {
+  while (!isAtEnd() && peekIsDigit()) {
     advanceChar();
   }
 
-  if (peekChar() == '.' &&
-      std::isdigit(static_cast<unsigned char>(peekChar(1)))) {
+  if (peekChar() == '.' && peekIsDigit(1)) {
     isFloat = true;
     advanceChar(); // consume '.'
-    while (!isAtEnd() && std::isdigit(static_cast<unsigned char>(peekChar()))) {
+    while (!isAtEnd() && peekIsDigit()) {
       advanceChar();
     }
   }
@@ -129,11 +129,10 @@ Token Lexer::scanNumber(bool negative) {
     if (peekChar() == '+' || peekChar() == '-') {
       advanceChar();
     }
-    if (!std::isdigit(static_cast<unsigned char>(peekChar()))) {
+    if (!peekIsDigit()) {
       pos_ = ePos; // rollback exponent if incomplete
     } else {
-      while (!isAtEnd() &&
-             std::isdigit(static_cast<unsigned char>(peekChar()))) {
+      while (!isAtEnd() && peekIsDigit()) {
         advanceChar();
       }
     }
@@ -164,19 +163,21 @@ Token Lexer::scanNumber(bool negative) {
     }
   }
 
+  const auto *const begin = cleanText.data();
+  const auto *const end   = begin + cleanText.size();
+  const auto invalid      = [&]() {
+    tok.kind        = TokenKind::Error;
+    tok.stringValue = "numeric literal is invalid or out of range";
+    return tok;
+  };
   if (isFloat) {
-    try {
-      tok.floatValue = std::stod(cleanText);
-    } catch (...) {
-      tok.floatValue = 0.0;
-    }
-    tok.intValue = static_cast<std::int64_t>(tok.floatValue);
+    const auto result = std::from_chars(begin, end, tok.floatValue);
+    if (result.ec != std::errc{} || result.ptr != end ||
+        !std::isfinite(tok.floatValue))
+      return invalid();
   } else {
-    try {
-      tok.intValue = std::stoll(cleanText);
-    } catch (...) {
-      tok.intValue = 0;
-    }
+    const auto result = std::from_chars(begin, end, tok.intValue);
+    if (result.ec != std::errc{} || result.ptr != end) return invalid();
     tok.floatValue = static_cast<double>(tok.intValue);
   }
 
@@ -190,7 +191,7 @@ Token Lexer::scanString(char quoteChar) {
   std::string content;
 
   while (!isAtEnd()) {
-    char c = peekChar();
+    char c = peekChar().value();
     if (c == quoteChar) {
       if (peekChar(1) == quoteChar) {
         // Escaped quote
@@ -227,7 +228,7 @@ Token Lexer::scanDimension() {
   column_ += 2;
 
   while (!isAtEnd()) {
-    char c = peekChar();
+    char c = peekChar().value();
     if (std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '-' ||
         c == '.') {
       advanceChar();
@@ -249,7 +250,7 @@ Token Lexer::scanIdentifierOrKeyword() {
   std::size_t start  = pos_;
 
   while (!isAtEnd()) {
-    char c = peekChar();
+    char c = peekChar().value();
     if (std::isalnum(static_cast<unsigned char>(c)) || c == '_') {
       advanceChar();
     } else {
@@ -259,8 +260,7 @@ Token Lexer::scanIdentifierOrKeyword() {
 
   // Check if trailed by '.' for J-style inflected words (e.g. each., copy.,
   // time., scrub., trans., read., split., print., out.)
-  if (peekChar() == '.' &&
-      !std::isalnum(static_cast<unsigned char>(peekChar(1)))) {
+  if (peekChar() == '.' && !peekIsAlnum(1)) {
     advanceChar(); // consume '.'
   }
 
@@ -531,7 +531,7 @@ Token Lexer::scanSymbolOrGlyph() {
   }
 
   // Single-character ASCII symbols
-  char c = advanceChar();
+  char c = advanceChar().value();
   switch (c) {
   case ',':
     return Token{.kind = TokenKind::Catenate, .text = ",", .location = loc};
@@ -616,7 +616,7 @@ Token Lexer::nextToken() {
   }
 
   // Number literal: digit
-  if (std::isdigit(static_cast<unsigned char>(peekChar()))) {
+  if (peekIsDigit()) {
     return scanNumber(false);
   }
 
@@ -648,8 +648,7 @@ Token Lexer::nextToken() {
   }
 
   // Identifiers, names, or J-style keywords (e.g. i., each., time.)
-  if (std::isalpha(static_cast<unsigned char>(peekChar())) ||
-      peekChar() == '_') {
+  if (peekIsAlpha() || peekChar() == '_') {
     return scanIdentifierOrKeyword();
   }
 

@@ -134,7 +134,7 @@ private:
   Store *store_{nullptr};
   bool consoleEffects_{true};
 
-  zigzag::DimRef defaultDim_{zigzag::noCell};
+  std::optional<zigzag::DimRef> defaultDim_;
   std::unordered_map<std::string, VplView> env_;
   std::vector<std::vector<zigzag::CellRef>> dependencyStack_;
   std::unordered_map<zigzag::CellRef, std::vector<zigzag::CellRef>>

@@ -43,6 +43,9 @@ namespace xanadu {
 
 namespace {
 
+// Faster DHT policy used only by the in-process publication test transports.
+constexpr int kTestPublicationDhtPacketsPerSecond = 100;
+
 /// The branch @p version is on, as its name spells it without the state
 /// number: "3b2" is on "3b", "a1" on "a", and the main line on nothing.
 std::string branchOf(const MicroversionId &version) {
@@ -180,12 +183,15 @@ MicroversionId Session::insertText(const std::uint32_t docIndex,
   if (docIndex >= open.size()) {
     return MicroversionId{};
   }
-  const auto parent      = open[docIndex].version;
-  const auto sIdx        = open[docIndex].storeIndex;
-  auto &st               = store(sIdx);
-  const auto prod        = st.insert(open[docIndex].version, at, newText);
+  const auto parent  = open[docIndex].version;
+  const auto sIdx    = open[docIndex].storeIndex;
+  auto &st           = store(sIdx);
+  const auto context = textContextForView(docIndex);
+  if (!context) return MicroversionId{};
+  const auto selection = open[docIndex].selection;
+  const auto prod = st.insert(open[docIndex].version, at, newText, *context);
   open[docIndex].version = prod;
-  open[docIndex].pieces  = st.rebuild(prod);
+  open[docIndex].pieces  = st.rebuild(prod, selection);
   invalidate();
   if (st.isSystem()) {
     st.repointCurrentVersion(prod);
@@ -234,9 +240,11 @@ MicroversionId Session::insertMedia(const std::uint32_t docIndex,
   if (!focus.has_value() || !focus->isValid()) {
     return MicroversionId{};
   }
-  const auto parent = open[docIndex].version;
-  const auto sIdx   = open[docIndex].storeIndex;
-  auto &st          = store(sIdx);
+  const auto parent  = open[docIndex].version;
+  const auto sIdx    = open[docIndex].storeIndex;
+  auto &st           = store(sIdx);
+  const auto context = textContextForView(docIndex);
+  if (!context) return MicroversionId{};
 
   const auto fileName =
       filePath.empty() ? "media.dat"
@@ -245,9 +253,9 @@ MicroversionId Session::insertMedia(const std::uint32_t docIndex,
       retainMediaScroll(bytes, fileName, mimeType, publishedDir(sIdx));
 
   const auto prod = st.transcludeExternal(open[docIndex].version, at, scroll, 0,
-                                          bytes.size());
+                                          bytes.size(), *context);
   open[docIndex].version = prod;
-  open[docIndex].pieces  = st.rebuild(prod);
+  open[docIndex].pieces  = st.rebuild(prod, open[docIndex].selection);
   invalidate();
   notifyAuthoredCommit(docIndex, parent, prod);
   return prod;
@@ -259,10 +267,12 @@ MicroversionId Session::insertBreak(const std::uint32_t docIndex,
     return MicroversionId{};
   }
   flushUncommitted(docIndex);
-  const auto parent = open[docIndex].version;
-  const auto sIdx   = open[docIndex].storeIndex;
-  auto &st          = store(sIdx);
-  const auto prod   = st.insertBreak(open[docIndex].version, at);
+  const auto parent  = open[docIndex].version;
+  const auto sIdx    = open[docIndex].storeIndex;
+  auto &st           = store(sIdx);
+  const auto context = textContextForView(docIndex);
+  if (!context) return MicroversionId{};
+  const auto prod = st.insertBreak(open[docIndex].version, at, *context);
   save(sIdx);
   refresh(docIndex, prod);
   notifyAuthoredCommit(docIndex, parent, prod);
@@ -275,12 +285,15 @@ MicroversionId Session::insertSpan(const std::uint32_t docIndex,
   if (docIndex >= open.size()) {
     return MicroversionId{};
   }
-  const auto parent      = open[docIndex].version;
-  const auto sIdx        = open[docIndex].storeIndex;
-  auto &st               = store(sIdx);
-  const auto prod        = st.insertSpan(open[docIndex].version, at, span);
+  const auto parent  = open[docIndex].version;
+  const auto sIdx    = open[docIndex].storeIndex;
+  auto &st           = store(sIdx);
+  const auto context = textContextForView(docIndex);
+  if (!context) return MicroversionId{};
+  const auto selection = open[docIndex].selection;
+  const auto prod = st.insertSpan(open[docIndex].version, at, span, *context);
   open[docIndex].version = prod;
-  open[docIndex].pieces  = st.rebuild(prod);
+  open[docIndex].pieces  = st.rebuild(prod, selection);
   invalidate();
   notifyAuthoredCommit(docIndex, parent, prod);
   return prod;
@@ -299,17 +312,19 @@ MicroversionId Session::transclude(const std::uint32_t destDocIndex,
   const auto sourceSpans = srcVer.spansFor(srcStart, srcLength);
   const auto destSIdx    = open[destDocIndex].storeIndex;
   auto &st               = store(destSIdx);
+  const auto context     = textContextForView(destDocIndex);
+  if (!context) return MicroversionId{};
   const auto spans =
       carrySpans(store(open[srcDocIndex].storeIndex), st, sourceSpans);
   if (!spans) throw std::invalid_argument(spans.error());
   auto curVer          = open[destDocIndex].version;
   std::uint32_t curPos = destPos;
   for (const auto &span : *spans) {
-    curVer = st.insertSpan(curVer, curPos, span);
+    curVer = st.insertSpan(curVer, curPos, span, *context);
     curPos += span.length;
   }
   open[destDocIndex].version = curVer;
-  open[destDocIndex].pieces  = st.rebuild(curVer);
+  open[destDocIndex].pieces  = st.rebuild(curVer, open[destDocIndex].selection);
   invalidate();
   notifyAuthoredCommit(destDocIndex, parent, curVer);
   return curVer;
@@ -323,7 +338,8 @@ MicroversionId Session::transcludeText(const std::uint32_t destDocIndex,
     return MicroversionId{};
   }
   const auto srcSIdx = open[srcDocIndex].storeIndex;
-  const auto srcText = store(srcSIdx).textOf(open[srcDocIndex].version);
+  const auto srcText = store(srcSIdx).textOf(open[srcDocIndex].version,
+                                             open[srcDocIndex].selection);
   const auto pos     = srcText.find(queryText);
   if (pos == std::string::npos) {
     throw std::runtime_error("query text not found in source document: " +
@@ -389,8 +405,8 @@ void Session::useSwarm(const bool privateNetwork) {
   }
 }
 
-std::uint16_t Session::swarmPort() const {
-  return nullptr == swarmSource ? 0 : swarmSource->listenPort();
+std::optional<std::uint16_t> Session::swarmPort() const {
+  return nullptr == swarmSource ? std::nullopt : swarmSource->listenPort();
 }
 
 const ContentSource &Session::content() const {
@@ -659,8 +675,8 @@ PublicationOutbox &Session::publicationOutbox() {
       swarm.listenInterfaces               = publicationListen_;
       swarm.restrictDhtToDistinctNetworks  = false;
       swarm.allowManyConnectionsPerAddress = true;
-      swarm.dhtPacketsPerSecond            = 100;
-      options.makeTransport                = publicationSwarmTransport(
+      swarm.dhtPacketsPerSecond = kTestPublicationDhtPacketsPerSecond;
+      options.makeTransport     = publicationSwarmTransport(
           keys, swarm, publicationNodes_,
           xanadocsDirectory().parent_path() / "author-catalog" /
               keys.publicKey.hex());
@@ -681,7 +697,7 @@ PublicationInbox &Session::publicationInbox() {
       swarm.listenInterfaces = publicationListen_.substr(0, colon + 1) + "0";
       swarm.restrictDhtToDistinctNetworks  = false;
       swarm.allowManyConnectionsPerAddress = true;
-      swarm.dhtPacketsPerSecond            = 100;
+      swarm.dhtPacketsPerSecond = kTestPublicationDhtPacketsPerSecond;
       options.makeTransport =
           publicationDownloadSwarmTransport(swarm, publicationNodes_);
     }
@@ -776,8 +792,8 @@ LinkPackageExchange &Session::linkPackageExchange() {
       swarm.listenInterfaces = publicationListen_.substr(0, colon + 1) + "0";
       swarm.restrictDhtToDistinctNetworks  = false;
       swarm.allowManyConnectionsPerAddress = true;
-      swarm.dhtPacketsPerSecond            = 100;
-      options.makePublisher                = publicationSwarmTransport(
+      swarm.dhtPacketsPerSecond = kTestPublicationDhtPacketsPerSecond;
+      options.makePublisher     = publicationSwarmTransport(
           mine, swarm, publicationNodes_,
           xanadocsDirectory().parent_path() / "author-catalog" /
               mine.publicKey.hex());
@@ -869,8 +885,8 @@ PublicationDiscovery &Session::publicationDiscovery() {
       swarm.listenInterfaces = publicationListen_.substr(0, colon + 1) + "0";
       swarm.restrictDhtToDistinctNetworks  = false;
       swarm.allowManyConnectionsPerAddress = true;
-      swarm.dhtPacketsPerSecond            = 100;
-      options.makeTransport                = publicationDiscoverySwarmTransport(
+      swarm.dhtPacketsPerSecond = kTestPublicationDhtPacketsPerSecond;
+      options.makeTransport     = publicationDiscoverySwarmTransport(
           swarm, publicationNodes_, options.directory / "scratch");
     }
     publicationDiscovery_ =
@@ -900,8 +916,8 @@ PublicationSubscriptions &Session::publicationSubscriptions() {
       swarm.listenInterfaces = publicationListen_.substr(0, colon + 1) + "0";
       swarm.restrictDhtToDistinctNetworks  = false;
       swarm.allowManyConnectionsPerAddress = true;
-      swarm.dhtPacketsPerSecond            = 100;
-      options.makeTransport                = publicationDownloadSwarmTransport(
+      swarm.dhtPacketsPerSecond = kTestPublicationDhtPacketsPerSecond;
+      options.makeTransport     = publicationDownloadSwarmTransport(
           swarm, publicationNodes_, {}, std::chrono::seconds{30});
       options.pollInterval = std::chrono::seconds{2};
     }
@@ -950,8 +966,7 @@ std::string Session::publishDocument(const MicroversionId &version,
   st.sealMetadata();
   if (request.editionToRepoint && !request.newEditionName.empty())
     throw std::invalid_argument("choose repointing or a new edition");
-  auto metadataHead = st.structureHead();
-  if (metadataHead.isZero()) metadataHead = st.latest();
+  const auto metadataHead = st.structureHead().value_or(st.latest());
   if (request.editionToRepoint)
     (void)st.repointEdition(metadataHead, *request.editionToRepoint, version);
   else if (!request.newEditionName.empty())
@@ -1037,9 +1052,9 @@ std::string Session::publishDocument(const MicroversionId &version,
     }
     if (const auto scroll = st.scroll(piece.scroll); scroll.has_value()) {
       const auto key = scrollKey(*scroll);
-      if (!key.empty() &&
-          std::ranges::find(record.quotes, key) == record.quotes.end()) {
-        record.quotes.push_back(key);
+      if (key &&
+          std::ranges::find(record.quotes, *key) == record.quotes.end()) {
+        record.quotes.push_back(*key);
       }
     }
   }
@@ -1500,19 +1515,23 @@ Session::versionShowing(const std::vector<PrimediaSpan> &ends,
 
 void Session::viewOpened(const MicroversionId &version,
                          const std::size_t storeIndex,
-                         const std::uint32_t focusedBirth) {
+                         const XanadocSelection selection) {
   const auto &st = store(storeIndex);
-  const auto targetBirth =
-      (focusedBirth != 0) ? focusedBirth : st.activeXanadocOnBranch(version);
+  std::optional<std::uint32_t> targetBirth;
+  if (selection.isAutomatic()) {
+    targetBirth = st.activeXanadocOnBranch(version);
+  } else if (const auto *const birth = selection.birthSelection()) {
+    targetBirth = birth->birthOp();
+  }
   std::vector<std::uint32_t> path;
-  if (targetBirth != 0) {
-    path = st.containmentPath(targetBirth);
+  if (targetBirth) {
+    path = st.containmentPath(*targetBirth);
   }
   open.push_back(OpenView{.version         = version,
                           .storeIndex      = storeIndex,
-                          .focusedBirth    = targetBirth,
+                          .selection       = selection,
                           .containmentPath = std::move(path),
-                          .pieces          = st.rebuild(version, targetBirth),
+                          .pieces          = st.rebuild(version, selection),
                           .decorations     = {},
                           .decoratedAt     = 0,
                           .uncommittedLog  = {}});
@@ -1535,48 +1554,86 @@ Session::focusTargetForView(const std::size_t docIndex) const {
   }
   const auto &view = open[docIndex];
   const auto &st   = store(view.storeIndex);
-  if (view.focusedBirth != 0) {
-    if (!st.validateContainment(view.focusedBirth)) {
+  if (view.selection.isRoot()) return FocusTarget::rootXanadoc();
+  std::optional<std::uint32_t> birth;
+  auto containmentPath = view.containmentPath;
+  if (view.selection.isAutomatic()) {
+    birth = st.activeXanadocOnBranch(view.version);
+    if (birth) {
+      containmentPath = st.containmentPath(*birth);
+    }
+  } else if (const auto *const selected = view.selection.birthSelection()) {
+    birth = selected->birthOp();
+  }
+  if (birth) {
+    if (!st.validateContainment(*birth)) {
       return std::nullopt;
     }
-    const auto kind = st.structureKindOfOp(view.focusedBirth);
-    return FocusTarget{
-        .kind            = kind,
-        .birthOp         = view.focusedBirth,
-        .containmentPath = view.containmentPath,
-    };
+    const auto kind = st.structureKindOfOp(*birth);
+    if (!kind) {
+      return std::nullopt;
+    }
+    auto target = FocusTarget::structure(*kind, *birth, containmentPath);
+    return target.isValid() ? std::optional{std::move(target)} : std::nullopt;
   }
-  const auto activeXanadoc = st.activeXanadocOnBranch(view.version);
-  if (activeXanadoc != 0 && st.validateContainment(activeXanadoc)) {
-    return FocusTarget{
-        .kind            = StructureKind::Xanadoc,
-        .birthOp         = activeXanadoc,
-        .containmentPath = st.containmentPath(activeXanadoc),
-    };
-  }
-  return FocusTarget{
-      .kind            = StructureKind::Xanadoc,
-      .birthOp         = 0,
-      .containmentPath = {},
-  };
+  return FocusTarget::rootXanadoc();
 }
 
 void Session::setFocusTarget(const std::size_t docIndex,
-                             const std::uint32_t birthOp) {
+                             const std::optional<FocusTarget> target) {
   if (docIndex >= open.size()) {
     return;
   }
   auto &view     = open[docIndex];
   const auto &st = store(view.storeIndex);
-  if (birthOp == 0) {
-    view.focusedBirth = 0;
-    view.containmentPath.clear();
+  if (!target) {
+    view.selection   = XanadocSelection::automatic();
+    const auto birth = st.activeXanadocOnBranch(view.version);
+    view.containmentPath =
+        birth ? st.containmentPath(*birth) : std::vector<std::uint32_t>{};
+    view.pieces = st.rebuild(view.version, view.selection);
+    invalidate();
     return;
   }
-  if (st.validateContainment(birthOp)) {
-    view.focusedBirth    = birthOp;
-    view.containmentPath = st.containmentPath(birthOp);
+  if (target->isRootXanadoc()) {
+    view.selection = XanadocSelection::root();
+    view.containmentPath.clear();
+    view.pieces = st.rebuild(view.version, view.selection);
+    invalidate();
+    return;
   }
+  const auto *structure = target->structureFocus();
+  if (structure != nullptr && st.validateContainment(structure->birthOp)) {
+    view.selection       = XanadocSelection::birth(structure->birthOp);
+    view.containmentPath = st.containmentPath(structure->birthOp);
+    view.pieces          = st.rebuild(view.version, view.selection);
+    invalidate();
+  }
+}
+
+std::optional<MicroversionId>
+Session::textContextForView(const std::size_t docIndex) const {
+  if (docIndex >= open.size()) return std::nullopt;
+  const auto &view = open[docIndex];
+  const auto &st   = store(view.storeIndex);
+  std::optional<std::uint32_t> birth;
+  if (view.selection.isAutomatic()) {
+    birth = st.activeXanadocOnBranch(view.version);
+  } else if (view.selection.isRoot()) {
+    return MicroversionId{};
+  } else if (const auto *const selected = view.selection.birthSelection()) {
+    birth = selected->birthOp();
+  }
+  if (!birth) return MicroversionId{};
+  if (!st.validateContainment(*birth)) return std::nullopt;
+  const auto lastOp       = st.lastOpOnStructure(view.version, *birth);
+  const auto contextIndex = lastOp.value_or(*birth);
+  return st.segmentedOps().idOf(contextIndex);
+}
+
+std::optional<MicroversionId>
+Session::authoringContextForView(const std::size_t docIndex) const {
+  return textContextForView(docIndex);
 }
 
 std::size_t Session::systemStoreIndex(const SystemDocKind kind) {
@@ -1650,9 +1707,9 @@ std::size_t Session::systemStoreIndex(const SystemDocKind kind) {
       // An explicit document permascroll may differ from the one that wrote
       // these settings. Never mint replacements for names we cannot resolve.
       const auto groups = manifold.dimensionNamed(kDimGroups, *sysStore);
+      const auto home   = sysStore->homeCell();
       const bool readable =
-          groups &&
-          manifold.linked(sysStore->homeCell(), *groups) != zigzag::noCell &&
+          groups && home && manifold.linked(*home, *groups).has_value() &&
           std::ranges::all_of(
               std::array{kDimVars, kDimValues, kDimSubgroups, kDimClone,
                          kDimNotes, kDimSchemas, kDimAlternates, kDimDefault},
@@ -1823,10 +1880,10 @@ void Session::refresh(const std::uint32_t docIndex,
   // most of the answer. Only a move that is not one step on -- travelling in
   // hypertime, or several edits recorded before anything asked to see them --
   // has to replay the history from the null document.
-  const auto birth = open[docIndex].focusedBirth;
+  const auto selection = open[docIndex].selection;
   if (!st.advance(open[docIndex].pieces, open[docIndex].version, version,
-                  birth)) {
-    open[docIndex].pieces = st.rebuild(version, birth);
+                  selection)) {
+    open[docIndex].pieces = st.rebuild(version, selection);
   }
   open[docIndex].version = version;
   invalidate();
@@ -2085,9 +2142,15 @@ std::vector<ClassifiedStretch> classifyRun(const Store &st,
 
 std::shared_ptr<VersionTextSource>
 Session::sourceFor(const MicroversionId &version, const std::size_t storeIndex,
-                   const std::uint32_t scopedBirth) const {
+                   const XanadocSelection selection) const {
   const auto &st     = store(storeIndex);
-  const auto rebuilt = st.rebuild(version, scopedBirth);
+  const auto rebuilt = st.rebuild(version, selection);
+  std::optional<std::uint32_t> scopedBirth;
+  if (selection.isAutomatic()) {
+    scopedBirth = st.activeXanadocOnBranch(version);
+  } else if (const auto *const birth = selection.birthSelection()) {
+    scopedBirth = birth->birthOp();
+  }
   gleditor::MagicMimeDetector magic;
 
   std::string concatext;
@@ -2183,32 +2246,34 @@ Session::sourceFor(const MicroversionId &version, const std::size_t storeIndex,
       std::make_move_iterator(formattingResult.blockStyles.begin()),
       std::make_move_iterator(formattingResult.blockStyles.end()));
 
-  std::string title;
-  if (scopedBirth != 0) {
-    title = st.resolveStructureName(version, scopedBirth);
+  std::optional<std::string> structureName;
+  if (scopedBirth) {
+    structureName = st.resolveStructureName(version, *scopedBirth);
   }
-  if (title.empty() && st.isSystem()) {
+  const bool hasStructureName = structureName.has_value();
+  std::string title = std::move(structureName).value_or(std::string{});
+  if (!hasStructureName && st.isSystem()) {
     if (const auto kind = systemDocKindForStoreIndex(storeIndex)) {
       title = std::string(systemDocUri(*kind));
     }
   }
-  if (title.empty() && !version.isZero()) {
+  if (!hasStructureName && title.empty() && !version.isZero()) {
     if (const auto ann = st.versionAnnotation(version);
         ann && !ann->alias.empty()) {
       title = ann->alias;
     }
   }
-  if (title.empty() && scopedBirth != 0) {
-    title =
-        (st.structureKindOfOp(scopedBirth) == StructureKind::Slice ? "Slice "
-                                                                   : "Doc ") +
-        std::to_string(scopedBirth);
+  if (!hasStructureName && title.empty() && scopedBirth) {
+    if (const auto kind = st.structureKindOfOp(*scopedBirth)) {
+      title = (*kind == StructureKind::Slice ? "Slice " : "Doc ") +
+              std::to_string(*scopedBirth);
+    }
   }
   // The store's own name, which does not change as it is edited. The version
   // name used to stand in, so a tab read "1", then "3" once a transclusion
   // reloaded it. An untitled store has no name of its own yet; the tab bar
   // numbers those.
-  if (title.empty() && !isTemporaryStore(storeIndex)) {
+  if (!hasStructureName && title.empty() && !isTemporaryStore(storeIndex)) {
     const auto named =
         std::filesystem::path(path(storeIndex)).lexically_normal();
     auto base = named.filename().string();
@@ -2223,7 +2288,8 @@ Session::sourceFor(const MicroversionId &version, const std::size_t storeIndex,
   // branch -- the version name without its last number -- tells them apart
   // and, unlike the version, stays put while either is edited.
   if (const auto branch = branchOf(version); !branch.empty()) {
-    title = (title.empty() ? std::string{"Untitled"} : title) + " · " + branch;
+    if (title.empty() && !hasStructureName) title = "Untitled";
+    title += " · " + branch;
   }
 
   auto target =
@@ -2519,18 +2585,17 @@ void Session::flushUncommitted(const std::optional<std::uint32_t> docIndex) {
       view.uncommittedLog.clear();
       return;
     }
-
-    const auto sIdx        = view.storeIndex;
-    auto &st               = store(sIdx);
-    const auto parent      = view.version;
-    auto curVersion        = parent;
-    const auto targetBirth = focus->birthOp;
-    MicroversionId ctxId{};
-    if (targetBirth != 0) {
-      const auto lastOp = st.lastOpOnStructure(curVersion, targetBirth);
-      ctxId             = (lastOp != 0) ? st.segmentedOps().idOf(lastOp)
-                                        : st.segmentedOps().idOf(targetBirth);
+    const auto context = textContextForView(which);
+    if (!context) {
+      view.uncommittedLog.clear();
+      return;
     }
+
+    const auto sIdx   = view.storeIndex;
+    auto &st          = store(sIdx);
+    const auto parent = view.version;
+    auto curVersion   = parent;
+    const auto ctxId  = *context;
 
     for (const auto &op : compacted) {
       if (op.kind == OpKind::Insert) {

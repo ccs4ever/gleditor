@@ -9,14 +9,17 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <iterator>
 #include <list>
 #include <map>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
+#include <variant>
 #include <vector>
 
 #include "common/xanadu/compact_op.hpp"
@@ -32,9 +35,99 @@
 #include "gleditor/text/font.hpp"
 #include "gleditor/text/layout.hpp"
 #include "gleditor/text/shaping_cache.hpp"
-#include <gleditor/cpp26_inplace_vector.hpp>
 
 namespace zigzag {
+
+/// A derived CSR traversal has no stored dimension cell.
+struct MetaDimensions {
+  bool operator==(const MetaDimensions &) const = default;
+};
+using DimensionQuery = std::variant<MetaDimensions, DimRef>;
+
+/// A read-only, allocation-free view of the active dimensions of one cell.
+/// The view is valid until its manifold is mutated.
+class MetaDimensionRange {
+public:
+  /// Iterators retain a pointer to this view and share its manifold-span
+  /// lifetime; keep the range alive and do not mutate the manifold while using
+  /// them.
+  class Iterator {
+  public:
+    using iterator_category = std::forward_iterator_tag;
+    using value_type        = DimensionQuery;
+    using difference_type   = std::ptrdiff_t;
+
+    Iterator() = default;
+    [[nodiscard]] value_type operator*() const {
+      if (index_ == range_->links_.size()) {
+        return MetaDimensions{};
+      }
+      return range_->links_[index_].dim;
+    }
+    Iterator &operator++() {
+      ++index_;
+      range_->advanceToValue(index_);
+      return *this;
+    }
+    Iterator operator++(int) {
+      auto previous = *this;
+      ++*this;
+      return previous;
+    }
+    bool operator==(const Iterator &) const = default;
+
+  private:
+    friend class MetaDimensionRange;
+    Iterator(const MetaDimensionRange *range, const std::size_t index)
+        : range_(range), index_(index) {}
+    const MetaDimensionRange *range_{};
+    std::size_t index_{};
+  };
+
+  MetaDimensionRange() = default;
+  MetaDimensionRange(const std::span<const DimLink> links,
+                     const bool cellExists)
+      : links_(cellExists ? links : std::span<const DimLink>{}),
+        cellExists_(cellExists) {}
+
+  [[nodiscard]] std::size_t size() const noexcept {
+    if (!cellExists_) return 0;
+    std::size_t count = 1; // d.meta-dims is the final entry.
+    for (std::size_t index = 0; index < links_.size(); ++index) {
+      if (isDimensionAt(index)) ++count;
+    }
+    return count;
+  }
+  [[nodiscard]] bool empty() const noexcept { return size() == 0; }
+  [[nodiscard]] DimensionQuery operator[](const std::size_t ordinal) const {
+    auto it = begin();
+    for (std::size_t index = 0; index < ordinal; ++index) ++it;
+    return *it;
+  }
+  [[nodiscard]] DimensionQuery back() const { return (*this)[size() - 1]; }
+  [[nodiscard]] Iterator begin() const {
+    std::size_t index = 0;
+    advanceToValue(index);
+    return {this, index};
+  }
+  [[nodiscard]] Iterator end() const {
+    return {this, links_.size() + (cellExists_ ? 1U : 0U)};
+  }
+
+private:
+  [[nodiscard]] bool isDimensionAt(const std::size_t index) const noexcept {
+    const auto &link = links_[index];
+    // Manifold::linkFor creates one CSR entry per dimension; entries with no
+    // active edge remain after unlinking and are the only entries to skip.
+    return link.pos != noCell || link.neg != noCell;
+  }
+  void advanceToValue(std::size_t &index) const noexcept {
+    while (index < links_.size() && !isDimensionAt(index)) ++index;
+  }
+
+  std::span<const DimLink> links_;
+  bool cellExists_{};
+};
 
 /**
  * @class UnifiedTransclusionEngine
@@ -110,56 +203,46 @@ public:
    */
   DimRef dimensionFor(std::string_view name);
 
-  /**
-   * @brief The dimension `d.meta-dims` is read along -- a sentinel, not a cell.
-   *
-   * R12 is explicit that `d.meta-dims` is "generated at runtime and stored in
-   * no op": it *is* a cell's CSR run, read sideways. So it cannot be a minted
-   * dimension cell, and this answers a reserved reference with `ephemeralBit`
-   * set instead -- the bit that means "derived: no op backs this".
-   *
-   * That is what keeps every read path const and silent. This used to be
-   * `dimensionFor("d.meta-dims")` reached through a `const_cast` from inside
-   * `linked()`, so asking a cell for its neighbour could append two operations
-   * to the document, from the render loop. `Manifold::applyStructure()` refuses
-   * a link whose dimension is ephemeral, so the sentinel additionally cannot be
-   * persisted by mistake.
-   */
-  [[nodiscard]] static constexpr DimRef metaDimension() noexcept {
-    return ephemeralBit | 1U;
+  /// Read-only traversal of a cell's CSR dimensions; mints no operations.
+  [[nodiscard]] static constexpr MetaDimensions metaDimension() noexcept {
+    return {};
   }
 
-  /// Link @p a to @p b along @p dim, by
-  /// recording one Structure operation. noCell for @p b clears the link. The
-  /// reciprocal edge is what the fold means by a link, not a second write.
-  void linkCells(CellRef a, CellRef b, DimRef dim,
+  /// Link @p a to @p b along @p dim, by recording one Structure operation.
+  /// An absent @p b clears the link. The reciprocal edge is what the fold
+  /// means by a link, not a second write.
+  void linkCells(CellRef a, std::optional<CellRef> b, DimRef dim,
                  DimVector dir = DimVector::POS);
-  void linkCells(CellRef a, CellRef b, DirectedDim target) {
+  void linkCells(CellRef a, std::optional<CellRef> b, DirectedDim target) {
     linkCells(a, b, target.dim, target.dir);
   }
-  void linkCells(CellRef a, CellRef b, DimOrdinal dim,
+  void linkCells(CellRef a, std::optional<CellRef> b, DimOrdinal dim,
                  DimVector dir = DimVector::POS);
-  void linkCells(CellRef a, CellRef b, const DimID &dim,
+  void linkCells(CellRef a, std::optional<CellRef> b, const DimID &dim,
                  DimVector dir = DimVector::POS);
 
-  void linkCells(CellRef a, CellRef b, DimRef dim, bool negward) {
+  void linkCells(CellRef a, std::optional<CellRef> b, DimRef dim,
+                 bool negward) {
     linkCells(a, b, dim, fromNegward(negward));
   }
-  void linkCells(CellRef a, CellRef b, DimOrdinal dim, bool negward) {
+  void linkCells(CellRef a, std::optional<CellRef> b, DimOrdinal dim,
+                 bool negward) {
     linkCells(a, b, dim, fromNegward(negward));
   }
-  void linkCells(CellRef a, CellRef b, const DimID &dim, bool negward) {
+  void linkCells(CellRef a, std::optional<CellRef> b, const DimID &dim,
+                 bool negward) {
     linkCells(a, b, dim, fromNegward(negward));
   }
 
-  /// Sugar for linkCells(a, noCell, dim, DimVector::POS).
+  /// Sugar for clearing the posward link.
   void unlinkPositive(CellRef a, DimOrdinal dim);
 
   /// Mint a cell whose content is @p text, and answer the operation index that
   /// names it. Adding a cell is recording one now: there is nowhere for a cell
   /// with no operation behind it to live.
   CellRef addCell(std::string_view text);
-  CellRef addCellFromSpans(std::span<const xanadu::PrimediaSpan> spans);
+  std::optional<CellRef>
+  addCellFromSpans(std::span<const xanadu::PrimediaSpan> spans);
 
   /// Restate @p cell's content as @p text, recording a SetValue operation.
   void updateCellText(CellRef cell, std::string_view text);
@@ -207,20 +290,26 @@ public:
    * @brief Every dimension @p cell has active connections on, including
    *        d.meta-dims itself.
    */
-  [[nodiscard]] gleditor::cpp26::inplace_vector<DimRef, 64>
-  metaDimensionsOf(CellRef cell) const;
+  [[nodiscard]] MetaDimensionRange metaDimensionsOf(CellRef cell) const;
 
   /**
    * @brief Neighbor of @p from along @p dim. Seamlessly resolves stored
    *        manifold links, ephemeral d.meta-dims ranks, and d.clone
    * projections.
    */
-  [[nodiscard]] CellRef linked(CellRef from, DimRef dim,
-                               DimVector dir = DimVector::POS) const;
-  [[nodiscard]] CellRef linked(CellRef from, DirectedDim target) const {
+  [[nodiscard]] std::optional<CellRef>
+  linked(CellRef from, DimensionQuery dim,
+         DimVector dir = DimVector::POS) const;
+  [[nodiscard]] std::optional<CellRef>
+  linked(CellRef from, DimRef dim, DimVector dir = DimVector::POS) const {
+    return linked(from, DimensionQuery{dim}, dir);
+  }
+  [[nodiscard]] std::optional<CellRef> linked(CellRef from,
+                                              DirectedDim target) const {
     return linked(from, target.dim, target.dir);
   }
-  [[nodiscard]] CellRef linked(CellRef from, DimRef dim, bool negward) const {
+  [[nodiscard]] std::optional<CellRef> linked(CellRef from, DimRef dim,
+                                              bool negward) const {
     return linked(from, dim, fromNegward(negward));
   }
 
@@ -251,7 +340,7 @@ public:
   // -- Zero-Copy GPU Render Staging -----------------------------------------
 
   struct RenderSliceRequest {
-    CellRef focusCellId{1};
+    std::optional<CellRef> focusCellId;
     DimID axisX{"d.1"};
     DimID axisY{"d.2"};
     DimID axisZ{"d.3"};
@@ -277,9 +366,9 @@ public:
   /**
    * @brief Stage visible instances directly into a persistent mapped
    *        StreamBufferGL ring buffer.
-   * @return The offset in bytes inside the ring buffer.
+   * @return An offset (including zero), or no offset when nothing was staged.
    */
-  [[nodiscard]] std::size_t stageIntoStreamBuffer(
+  [[nodiscard]] std::optional<std::size_t> stageIntoStreamBuffer(
       const RenderSliceRequest &req, const gleditor::text::FontFacePtr &font,
       gleditor::GlyphCache &glyphCache, render::IStreamBuffer &streamBuffer);
 
@@ -358,20 +447,19 @@ private:
 
   struct EphemeralMetaDimSlot {
     CellRef parentCell{noCell};
-    DimRef dimension{noCell};
+    DimensionQuery dimension;
     std::size_t index{0};
     std::size_t totalCount{0};
   };
 
   CellRef getOrCreateEphemeralCell(CellRef parent, std::size_t index,
-                                   DimRef dim, std::size_t total) const;
+                                   DimensionQuery dim, std::size_t total) const;
 
   mutable std::unordered_map<CellRef, EphemeralMetaDimSlot> ephemeralSlots_;
   mutable std::map<std::pair<CellRef, std::size_t>, CellRef>
       ephemeralByParentAndIndex_;
-  /// Above the references metaDimension() reserves, so a derived cell can never
-  /// be mistaken for the derived dimension.
-  mutable std::uint32_t nextEphemeralId_{16};
+  /// Derived cells have IDs; the derived dimension query itself has none.
+  mutable std::uint32_t nextEphemeralId_{1};
   mutable CellSlot ephemeralCellSlotDummy_{};
 
   [[nodiscard]] std::size_t countFormatLinks() const noexcept;

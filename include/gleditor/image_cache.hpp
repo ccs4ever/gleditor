@@ -52,7 +52,7 @@ struct ImageResource {
   std::string id;
   int width{0};
   int height{0};
-  int layer{-1};
+  std::optional<int> layer;
   float u0{0.0F};
   float v0{0.0F};
   float u1{1.0F};
@@ -60,7 +60,8 @@ struct ImageResource {
   render::TextureHandle texture{};
 
   [[nodiscard]] bool valid() const {
-    return width > 0 && height > 0 && layer >= 0 && texture.valid();
+    return width > 0 && height > 0 && layer.has_value() && *layer >= 0 &&
+           texture.valid();
   }
 
   [[nodiscard]] float aspectRatio() const {

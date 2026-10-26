@@ -64,7 +64,7 @@ TEST(UiMetricsTest, ImpossibleChromeStillProducesContainedEmptyArea) {
       .screenWidth  = 100,
       .screenHeight = 50,
       .chrome       = {
-          .top = 200.0F, .bottom = 200.0F, .left = 500.0F, .right = 500.0F}};
+                .top = 200.0F, .bottom = 200.0F, .left = 500.0F, .right = 500.0F}};
   const auto area = metrics.pixelSafeArea();
   expectContained(area, {0.0F, 0.0F, 100.0F, 50.0F});
   EXPECT_FLOAT_EQ(area.width, 0.0F);
@@ -122,18 +122,55 @@ TEST(UiLayoutTest, FlowWrapsWholeItemsInReadingOrder) {
   EXPECT_EQ(result.focusOrder, (std::vector<std::uint32_t>{1, 2, 3}));
   expectLayoutContained(result);
 }
+TEST(UiLayoutTest, ParentAbsenceDiffersFromParentIdZero) {
+  const LayoutItem item{.id = 2, .intrinsic = {10.0F, 10.0F}};
+  const auto root = flow({0.0F, 0.0F, 30.0F, 30.0F}, std::span{&item, 1});
+  ASSERT_EQ(root.boxes.size(), 1U);
+  EXPECT_FALSE(root.boxes.front().parentId);
+
+  const auto child =
+      flow({0.0F, 0.0F, 30.0F, 30.0F}, std::span{&item, 1}, {.parentId = 0});
+  ASSERT_EQ(child.boxes.size(), 1U);
+  ASSERT_TRUE(child.boxes.front().parentId);
+  EXPECT_EQ(*child.boxes.front().parentId, 0U);
+}
 TEST(UiLayoutTest, WeightedGrowthRedistributesSaturatedShare) {
   const LayoutItem items[]{
-      {.id        = 1,
-       .intrinsic = {20.0F, 20.0F},
-       .maximum   = {30.0F, 30.0F},
-       .grow      = 1.0F},
+      {.id            = 1,
+       .intrinsic     = {20.0F, 20.0F},
+       .maximumWidth  = 30.0F,
+       .maximumHeight = 30.0F,
+       .grow          = 1.0F},
       {.id = 2, .intrinsic = {20.0F, 20.0F}, .grow = 1.0F}};
   const auto result =
       stack({0.0F, 0.0F, 100.0F, 20.0F}, items, {.axis = Axis::Horizontal});
   EXPECT_FLOAT_EQ(result.find(1)->rect.width, 30.0F);
   EXPECT_FLOAT_EQ(result.find(2)->rect.width, 70.0F);
   expectLayoutContained(result);
+}
+TEST(UiLayoutTest, MaximumsDistinguishAbsentFromZeroAndRejectInfinity) {
+  const LayoutItem unbounded{
+      .id = 1, .intrinsic = {20.0F, 10.0F}, .grow = 1.0F};
+  const auto grown =
+      stack({0.0F, 0.0F, 100.0F, 40.0F}, std::span{&unbounded, 1},
+            {.axis = Axis::Horizontal});
+  EXPECT_FLOAT_EQ(grown.find(1)->rect.width, 100.0F);
+
+  const LayoutItem zeroBound{.id            = 2,
+                             .intrinsic     = {20.0F, 10.0F},
+                             .maximumWidth  = 0.0F,
+                             .maximumHeight = 0.0F};
+  const auto empty =
+      stack({0.0F, 0.0F, 100.0F, 40.0F}, std::span{&zeroBound, 1},
+            {.axis = Axis::Horizontal});
+  EXPECT_FLOAT_EQ(empty.find(2)->rect.width, 0.0F);
+  EXPECT_FLOAT_EQ(empty.find(2)->rect.height, 0.0F);
+
+  const LayoutItem invalid{
+      .id = 3, .maximumWidth = std::numeric_limits<float>::infinity()};
+  EXPECT_THROW(static_cast<void>(
+                   flow({0.0F, 0.0F, 10.0F, 10.0F}, std::span{&invalid, 1})),
+               std::invalid_argument);
 }
 TEST(UiLayoutTest, ShrinkRespectsMinimaWhenTheyFit) {
   const LayoutItem items[]{

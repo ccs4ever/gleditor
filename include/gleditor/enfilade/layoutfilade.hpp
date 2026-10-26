@@ -151,9 +151,9 @@ struct alignas(kCacheLineBytes) LayoutCrum {
   std::uint16_t childCount{0};
   std::uint32_t firstEntry{0};
   std::uint16_t entryCount{0};
-  std::uint32_t parentIndex{0};
+  std::optional<std::uint32_t> parentIndex;
   bool isLeaf{true};
-  std::uint8_t padding[11]{0};
+  std::uint8_t padding[7]{0};
 };
 
 static_assert(sizeof(LayoutCrum) == 64,
@@ -229,7 +229,7 @@ public:
    * @brief Locate the 0-based entry index at vertical screen coordinate Y in
    * O(log N) without constructing a full LayoutHit snapshot.
    */
-  [[nodiscard]] inline std::size_t
+  [[nodiscard]] inline std::optional<std::size_t>
   findEntryIndexAtY(float targetYPx) const noexcept;
 
   /**
@@ -275,10 +275,10 @@ private:
   void buildTree();
 };
 
-inline std::size_t
+inline std::optional<std::size_t>
 Layoutfilade::findEntryIndexAtY(float targetYPx) const noexcept {
   if (entries_.empty() || crums_.empty()) {
-    return 0;
+    return std::nullopt;
   }
 
   std::size_t currCrumIdx = rootIndex_;
@@ -286,7 +286,7 @@ Layoutfilade::findEntryIndexAtY(float targetYPx) const noexcept {
   while (!crums_[currCrumIdx].isLeaf) {
     const auto &crum      = crums_[currCrumIdx];
     const auto childCount = crum.childCount;
-    if (childCount == 0) return 0;
+    if (childCount == 0) return std::nullopt;
     const LayoutCrum *childPtr = &crums_[crum.firstChild];
 
     std::size_t chosenChild = 0;
@@ -365,6 +365,7 @@ Layoutfilade::findEntryIndexAtY(float targetYPx) const noexcept {
         chosenChild = 14;
         goto descended_child;
       }
+      targetYPx -= childPtr[14].wid.totalHeightPx;
       chosenChild = 15;
     } else {
       const auto lastC = static_cast<std::size_t>(childCount - 1);
@@ -387,7 +388,7 @@ Layoutfilade::findEntryIndexAtY(float targetYPx) const noexcept {
   const auto &leaf = crums_[currCrumIdx];
   const auto count = leaf.entryCount;
   if (count == 0) {
-    return 0;
+    return std::nullopt;
   }
   const LayoutEntry *entryPtr = &entries_[leaf.firstEntry];
 

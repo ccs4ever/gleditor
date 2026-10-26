@@ -13,6 +13,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <iostream>
+#include <optional>
 #include <unordered_map>
 #include <vector>
 
@@ -32,20 +33,19 @@ template <typename Hop>
 [[nodiscard]] double nsPerHop(const zigzag::CellRef startCell,
                               const std::size_t hopCount, Hop &&hop) {
   constexpr int repetitions = 20;
-  zigzag::CellRef sink      = zigzag::noCell;
+  zigzag::CellRef sink      = 0;
   const auto start          = Clock::now();
   for (int repeat = 0; repeat < repetitions; ++repeat) {
     auto cursor = startCell;
     for (std::size_t i = 0; i < hopCount; ++i) {
       const auto next = hop(cursor);
-      cursor = (next == zigzag::noCell) ? startCell
-                                        : static_cast<zigzag::CellRef>(next);
+      cursor          = next.value_or(startCell);
     }
     sink ^= cursor;
   }
   const auto elapsed =
       std::chrono::duration<double, std::nano>(Clock::now() - start).count();
-  EXPECT_NE(sink, zigzag::noCell - 1U);
+  EXPECT_LT(sink, zigzag::ephemeralBit);
   return elapsed / static_cast<double>(hopCount * repetitions);
 }
 
@@ -64,7 +64,7 @@ TEST(StructureHyperopBenchmark, DISABLED_ColdFoldAndArenaSubstrate) {
   cells.reserve(cellCount);
   for (std::size_t i = 0; i < cellCount; ++i) {
     at = store.makeCell(at, "c");
-    cells.push_back(store.cellRefOf(at));
+    cells.push_back(store.cellRefOf(at).value());
   }
   for (std::size_t i = 1; i < cellCount; ++i) {
     at = store.setLink(at, cells[i - 1], dim, zigzag::DimVector::POS, cells[i]);
@@ -103,7 +103,9 @@ TEST(StructureHyperopBenchmark, DISABLED_ColdFoldAndArenaSubstrate) {
       nsPerHop(cells.front(), cellCount, [&](const auto proxy) {
         const auto foreign = proxyToForeign.at(proxy);
         const auto next    = base.linked(foreign, dim, zigzag::DimVector::POS);
-        return next ? foreignToProxy.at(*next) : zigzag::noCell;
+        return next.transform([&](const zigzag::CellRef cell) {
+          return foreignToProxy.at(cell);
+        });
       });
   std::cout << "hop baseline/model: direct_ns=" << directNs
             << " arena_readthrough_ns=" << arenaNs

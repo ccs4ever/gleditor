@@ -52,14 +52,14 @@ public:
     bool operator==(const CaretPosition &) const = default;
   };
   using CaretQuery = std::function<std::optional<CaretPosition>()>;
-  /// The ZigZag presentation's focused cell, or noCell.
-  using CellFocusQuery = std::function<zigzag::CellRef()>;
+  /// The ZigZag presentation's focused cell, if it has one.
+  using CellFocusQuery = std::function<std::optional<zigzag::CellRef>()>;
 
   /// What the reading position depends on, as plain values, so a caller can
   /// tell each frame whether it moved without building the position itself.
   struct ReadingStamp {
     std::optional<CaretPosition> caret;
-    zigzag::CellRef cell{zigzag::noCell};
+    std::optional<zigzag::CellRef> cell;
     std::optional<xanadu::VisitId> visit;
     bool operator==(const ReadingStamp &) const = default;
   };
@@ -127,9 +127,9 @@ public:
   resolveForPresentation(const LinkKey &key,
                          std::optional<int> cellRadius = std::nullopt) const;
   [[nodiscard]] std::vector<LinkOccurrences>
-  presentationLinks(int cellRadius) const;
+  presentationLinks(std::optional<int> cellRadius) const;
   [[nodiscard]] std::vector<LinkOccurrences>
-  packagePresentation(int cellRadius = -1) const;
+  packagePresentation(std::optional<int> cellRadius = std::nullopt) const;
   [[nodiscard]] std::optional<Link> recordOf(std::uint64_t renderId) const;
   void packageVisibilityChanged();
   void recordReadingOrigin() { noteOrigin(); }

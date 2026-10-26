@@ -281,7 +281,7 @@ public:
   void poll();
 
   /// The port actually listened on, once the session is up.
-  [[nodiscard]] std::uint16_t listenPort() const;
+  [[nodiscard]] std::optional<std::uint16_t> listenPort() const;
 
   /// How many peers this swarm is connected to right now. Note that a peer
   /// disconnects once it has nothing left to give, so this drops back to zero

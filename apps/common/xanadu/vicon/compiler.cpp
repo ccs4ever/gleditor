@@ -829,8 +829,8 @@ Compiler::compile(const Program &program) {
     }
     // Patch the call-site indirection cell to the body's entry op now that
     // the body exists (forward references and recursion both resolve here).
-    std::ignore = core_.value(procTargets_[decl.name], 0, -1,
-                              CellValue{static_cast<std::int64_t>(*body)});
+    std::ignore = core_.writeValue(procTargets_[decl.name], 0, std::nullopt,
+                                   CellValue{static_cast<std::int64_t>(*body)});
     procEntries_[decl.name] = *body;
   }
 

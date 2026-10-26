@@ -1,0 +1,15 @@
+event Ping
+event Pong
+
+agent Child {
+  on Ping { emit Pong{} in outer for parent }
+}
+agent Parent {
+  var child: Opt<Agent> := none
+  var replies: Int := 0
+  on Initialize {
+    child := spawn Child() in inner
+    emit Ping{} in inner for child
+  }
+  on Pong { replies := replies + 1 }
+}

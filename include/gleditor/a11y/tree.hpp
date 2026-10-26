@@ -226,8 +226,9 @@ struct Tree {
   std::uint64_t focus{};
 
   [[nodiscard]] bool empty() const { return nodes.empty(); }
-  [[nodiscard]] std::uint64_t root() const {
-    return nodes.empty() ? 0 : nodes.front().id;
+  [[nodiscard]] std::optional<std::uint64_t> root() const {
+    if (nodes.empty()) return std::nullopt;
+    return nodes.front().id;
   }
   /// The node with this id, or nothing. Linear: the trees here have tens of
   /// nodes, not thousands, and a map would cost more to build than it saves.

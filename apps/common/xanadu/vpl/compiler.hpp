@@ -35,7 +35,7 @@ struct CompilationOptions {
 
 struct CompilationResult {
   bool success{true};
-  zigzag::CellRef entryOpcode{zigzag::noCell};
+  std::optional<zigzag::CellRef> entryOpcode;
   std::string errorMessage;
   std::vector<zigzag::CellRef> generatedOpcodes;
   std::string disassembly;
@@ -59,7 +59,7 @@ public:
 
   /// Generates a human-readable disassembly listing of opcodes along +d.spin.
   [[nodiscard]] std::string
-  disassemble(zigzag::CellRef entryOpcode,
+  disassemble(std::optional<zigzag::CellRef> entryOpcode,
               std::size_t maxInstructions = 1000) const;
 
   /// Returns the opcode mnemonic for an OpcodeKind.
@@ -91,20 +91,20 @@ private:
                                     const zigzag::vortex::CellValue &val);
 
   // AST compilation subroutines
-  zigzag::CellRef compileNode(const AstNode &node);
-  zigzag::CellRef compileProgram(const Program &prog);
+  std::optional<zigzag::CellRef> compileNode(const AstNode &node);
+  std::optional<zigzag::CellRef> compileProgram(const Program &prog);
   zigzag::CellRef compileScalar(const ScalarExpr &expr);
-  zigzag::CellRef compileVector(const VectorExpr &expr);
+  std::optional<zigzag::CellRef> compileVector(const VectorExpr &expr);
   zigzag::CellRef compileDimension(const DimensionExpr &expr);
-  zigzag::CellRef compileIdentifier(const IdentifierExpr &expr);
+  std::optional<zigzag::CellRef> compileIdentifier(const IdentifierExpr &expr);
   zigzag::CellRef compileVerb(const VerbExpr &expr);
-  zigzag::CellRef compileMonadic(const MonadicExpr &expr);
+  std::optional<zigzag::CellRef> compileMonadic(const MonadicExpr &expr);
   zigzag::CellRef compileDyadic(const DyadicExpr &expr);
   zigzag::CellRef compileAdverb(const AdverbExpr &expr);
   zigzag::CellRef compileConjunction(const ConjunctionExpr &expr);
-  zigzag::CellRef compileAssign(const AssignExpr &expr);
-  zigzag::CellRef compileIndexing(const IndexingExpr &expr);
-  zigzag::CellRef compileQuad(const QuadExpr &expr);
+  std::optional<zigzag::CellRef> compileAssign(const AssignExpr &expr);
+  std::optional<zigzag::CellRef> compileIndexing(const IndexingExpr &expr);
+  std::optional<zigzag::CellRef> compileQuad(const QuadExpr &expr);
 
   // Optimization helpers
   std::optional<zigzag::vortex::CellValue>
@@ -118,12 +118,12 @@ private:
   zigzag::vortex::VortexCore &core_;
   zigzag::vortex::VortexVM &vm_;
 
-  zigzag::CellRef entryOp_{zigzag::noCell};
-  zigzag::CellRef currentOp_{zigzag::noCell};
+  std::optional<zigzag::CellRef> entryOp_;
+  std::optional<zigzag::CellRef> currentOp_;
   std::vector<zigzag::CellRef> allOps_;
   std::vector<zigzag::CellRef> lastResultCells_;
 
-  std::unordered_map<std::string, zigzag::CellRef> varBindings_;
+  std::unordered_map<std::string, std::optional<zigzag::CellRef>> varBindings_;
   bool optimize_{false};
 };
 

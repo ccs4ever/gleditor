@@ -4,13 +4,20 @@
  */
 #include <gtest/gtest.h>
 
+#include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <ios>
 #include <memory>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <vector>
 
 #include <gleditor/media_stream.hpp>
@@ -137,10 +144,10 @@ TEST(MediaStreamTest, MemoryMediaStreamFromBytesAndData) {
 }
 
 TEST(MediaStreamTest, FileMediaStreamNonExistent) {
-  FileMediaStream nonExistent("/path/to/non_existent_file_xyz_123.bin");
-  EXPECT_EQ(nonExistent.size(), 0U);
-  std::vector<std::byte> buf(10);
-  EXPECT_EQ(nonExistent.read(0, buf), 0U);
+  EXPECT_THROW(FileMediaStream(std::filesystem::temp_directory_path().string()),
+               std::ios_base::failure);
+  EXPECT_THROW(FileMediaStream("/path/to/non_existent_file_xyz_123.bin"),
+               std::ios_base::failure);
 }
 
 // -- CallbackMediaStream ------------------------------------------------------
@@ -229,4 +236,59 @@ TEST(MediaStreamTest, VlcStreamCallbacksBridge) {
 
   VlcStreamState::close(&state);
   EXPECT_EQ(state.cursor, 0U);
+}
+
+TEST(MediaStreamTest, EmptyFileHasKnownZeroSizeWhileDisappearedFileIsAnError) {
+  const auto path =
+      std::filesystem::temp_directory_path() /
+      ("gleditor-stream-" +
+       std::to_string(
+           std::chrono::steady_clock::now().time_since_epoch().count()));
+  struct Cleanup {
+    std::filesystem::path path;
+    ~Cleanup() {
+      std::error_code ignored;
+      std::filesystem::remove(path, ignored);
+    }
+  } cleanup{path};
+  {
+    std::ofstream file(path, std::ios::binary);
+    ASSERT_TRUE(file.is_open());
+  }
+  FileMediaStream empty(path.string());
+  EXPECT_EQ(empty.size(), 0U);
+  std::array<std::byte, 4> bytes{};
+  EXPECT_EQ(empty.read(0, bytes), 0U);
+  {
+    std::ofstream file(path, std::ios::binary);
+    file << "data";
+  }
+  auto present = std::make_shared<FileMediaStream>(path.string());
+  ASSERT_EQ(present->size(), 4U);
+  ASSERT_TRUE(std::filesystem::remove(path));
+  EXPECT_THROW(static_cast<void>(present->read(0, bytes)),
+               std::ios_base::failure);
+  VlcStreamState state{present, 0};
+  std::array<unsigned char, 4> nativeBytes{};
+  EXPECT_EQ(
+      VlcStreamState::read(&state, nativeBytes.data(), nativeBytes.size()), -1);
+  EXPECT_EQ(state.cursor, 0U);
+}
+
+TEST(MediaStreamTest,
+     MissingCallbackIsRefusedAndCallbackErrorsStayInsideTheAbi) {
+  EXPECT_THROW(CallbackMediaStream({}, 4), std::invalid_argument);
+  EXPECT_THROW(CallbackMediaStream({}, 4, 0, 2), std::invalid_argument);
+  auto failed = std::make_shared<CallbackMediaStream>(
+      [](std::uint64_t, std::span<std::byte>) -> std::size_t {
+        throw std::ios_base::failure("injected read error");
+      },
+      4);
+  std::array<unsigned char, 4> bytes{};
+  VlcStreamState state{failed, 0};
+  EXPECT_EQ(VlcStreamState::read(&state, bytes.data(), bytes.size()), -1);
+  EXPECT_EQ(state.cursor, 0U);
+  auto empty = std::make_shared<MemoryMediaStream>(std::string_view{});
+  VlcStreamState emptyState{empty, 0};
+  EXPECT_EQ(VlcStreamState::read(&emptyState, bytes.data(), bytes.size()), 0);
 }

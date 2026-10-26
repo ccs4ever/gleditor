@@ -76,9 +76,9 @@ TEST(VPrologCompilerTest, LowerVariablesAndScoping) {
   EXPECT_NE(x1, y);
 
   // Variable name is attached on core.dims().name
-  CellRef nameCell = h.core.arena().linked(x1, h.core.dims().name, false);
-  EXPECT_NE(nameCell, noCell);
-  EXPECT_EQ(h.core.arena().textOf(nameCell), "X");
+  const auto nameCell = h.core.arena().linked(x1, h.core.dims().name, false);
+  ASSERT_TRUE(nameCell);
+  EXPECT_EQ(h.core.arena().textOf(*nameCell), "X");
 }
 
 TEST(VPrologCompilerTest, LowerCompoundsAndLists) {
@@ -116,18 +116,27 @@ TEST(VPrologCompilerTest, CompileFactAndRuleClauses) {
   // Fact: parent(pam, bob).
   Parser p1("parent(pam, bob).");
   Clause factClause = p1.parseClause();
-  CellRef c1        = h.compiler.compileClause(factClause);
+  CellRef c1        = h.compiler.compileClause(factClause).value();
   EXPECT_NE(c1, noCell);
 
   // Rule: ancestor(X, Y) :- parent(X, Y).
   Parser p2("ancestor(X, Y) :- parent(X, Y).");
   Clause ruleClause = p2.parseClause();
-  CellRef c2        = h.compiler.compileClause(ruleClause);
+  CellRef c2        = h.compiler.compileClause(ruleClause).value();
   EXPECT_NE(c2, noCell);
 
   // Predicate list should have "parent" and "ancestor"
   auto customPreds = h.compiler.customPredicates();
   EXPECT_EQ(customPreds.size(), 2u);
+}
+
+TEST(VPrologCompilerTest, QueryAndDirectiveClausesHaveNoStoredClause) {
+  CompilerTestHarness h;
+  Parser queryParser("?- true.");
+  Parser directiveParser(":- initialization(true).");
+  EXPECT_EQ(h.compiler.compileClause(queryParser.parseClause()), std::nullopt);
+  EXPECT_EQ(h.compiler.compileClause(directiveParser.parseClause()),
+            std::nullopt);
 }
 
 TEST(VPrologCompilerTest, CompileAndSolveFactsQuery) {

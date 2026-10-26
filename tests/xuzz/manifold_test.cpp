@@ -18,6 +18,7 @@
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <tuple>
@@ -32,6 +33,7 @@
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/user_permascroll.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
+#include "common/xanadu/zigzag/cell_views.hpp"
 #include "common/xanadu/zigzag/manifold.hpp"
 
 namespace {
@@ -66,7 +68,7 @@ struct Slice {
   /// what the operations after that name.
   CellRef cell(const std::string_view text) {
     at = store.makeCell(at, text);
-    return store.cellRefOf(at);
+    return store.cellRefOf(at).value();
   }
 
   DimRef dimension(const std::string_view name) {
@@ -81,45 +83,97 @@ struct Slice {
   }
 
   void link(const CellRef from, const DimRef dim, const DimVector dir,
-            const CellRef to) {
+            const std::optional<CellRef> to) {
     at = store.setLink(at, from, dim, dir, to);
   }
 
   void link(const CellRef from, const DimRef dim, const bool negward,
-            const CellRef to) {
+            const std::optional<CellRef> to) {
     at = store.setLink(at, from, dim, negward, to);
   }
 
   CellRef opHandle(const std::uint32_t target,
                    const std::string_view text = {}) {
     at = store.makeOpHandle(at, target, text);
-    return store.cellRefOf(at);
+    return store.cellRefOf(at).value();
   }
 };
+
+TEST(ManifoldTest, missingNeighboursStayOptionalThroughTraversal) {
+  static_assert(!std::is_convertible_v<zigzag::OptionalCell, CellRef>);
+  Slice slice;
+  const auto dim    = slice.dimension("d.walk");
+  const auto first  = slice.cell("first");
+  const auto second = slice.cell("second");
+  slice.link(first, dim, DimVector::POS, second);
+  const auto manifold = slice.store.rebuildManifold(slice.at);
+  EXPECT_EQ(manifold.linked(second, dim), std::nullopt);
+  EXPECT_EQ(zigzag::step(manifold, second, dim), std::nullopt);
+  std::vector<CellRef> visited;
+  for (const auto cell : zigzag::rank(manifold, first, dim)) {
+    visited.push_back(cell);
+  }
+  EXPECT_THAT(visited, ::testing::ElementsAre(first, second));
+  EXPECT_TRUE(std::ranges::empty(zigzag::RankView<Manifold>{}));
+}
+
+TEST(ManifoldTest, absentGenesisCellsAreOptional) {
+  Store store;
+  EXPECT_EQ(store.homeCell(), std::nullopt);
+  EXPECT_EQ(store.dimsDimension(), std::nullopt);
+
+  const auto manifold = store.rebuildManifold(MicroversionId{});
+  EXPECT_EQ(manifold.home(), std::nullopt);
+  EXPECT_EQ(manifold.dimsDimension(), std::nullopt);
+}
+
+TEST(ManifoldTest, RadiusAbsenceAndZeroHaveDistinctMeanings) {
+  Slice slice;
+  const auto dim    = slice.dimension("d.radius");
+  const auto first  = slice.cell("first");
+  const auto second = slice.cell("second");
+  slice.link(first, dim, DimVector::POS, second);
+  const auto manifold = slice.store.rebuildManifold(slice.at);
+  EXPECT_THAT(manifold.cellsWithinRadius(first, 0),
+              ::testing::ElementsAre(first));
+  EXPECT_THAT(manifold.cellsWithinRadius(first, 1),
+              ::testing::ElementsAre(first, second));
+  EXPECT_EQ(manifold.cellsWithinRadius(std::nullopt, std::nullopt).size(),
+            manifold.cellCount());
+  ASSERT_TRUE(manifold.home());
+  EXPECT_THAT(manifold.cellsWithinRadius(std::nullopt, 0),
+              ::testing::ElementsAre(*manifold.home()));
+  EXPECT_THROW(std::ignore = manifold.cellsWithinRadius(first, -1),
+               std::invalid_argument);
+}
 
 TEST(ManifoldTest, genesisMintsHomeAndTheDimsDimension) {
   Slice slice;
 
   // Index 2 and index 3, which is what the design describes for a store that
   // was a slice from its first operation (Make(Slice) at op 1).
-  EXPECT_EQ(slice.store.homeCell(), 2U);
-  EXPECT_EQ(slice.store.dimsDimension(), 3U);
+  ASSERT_TRUE(slice.store.homeCell());
+  ASSERT_TRUE(slice.store.dimsDimension());
+  EXPECT_EQ(*slice.store.homeCell(), 2U);
+  EXPECT_EQ(*slice.store.dimsDimension(), 3U);
 
   const auto manifold = slice.store.rebuildManifold(slice.at);
   EXPECT_EQ(manifold.cellCount(), 2U);
-  EXPECT_EQ(manifold.home(), slice.store.homeCell());
-  EXPECT_EQ(manifold.dimsDimension(), slice.store.dimsDimension());
+  ASSERT_TRUE(manifold.home());
+  ASSERT_TRUE(manifold.dimsDimension());
+  EXPECT_EQ(*manifold.home(), *slice.store.homeCell());
+  EXPECT_EQ(*manifold.dimsDimension(), *slice.store.dimsDimension());
   EXPECT_EQ(manifold.refusedOps(), 0U);
 
   // A dimension is a cell whose content is its name -- ordinary spooled
   // primedia, read back through the store like any other span.
-  EXPECT_EQ(manifold.textOf(manifold.home(), slice.store), "home");
-  EXPECT_EQ(manifold.textOf(manifold.dimsDimension(), slice.store), "d.dims");
+  EXPECT_EQ(manifold.textOf(*manifold.home(), slice.store), "home");
+  EXPECT_EQ(manifold.textOf(*manifold.dimsDimension(), slice.store), "d.dims");
 
   // d.dims is on its own rank, so it is a dimension the slice reports rather
   // than the one dimension that is invisible.
   EXPECT_THAT(manifold.dimensions(),
-              testing::ElementsAre(manifold.dimsDimension()));
+              testing::ElementsAre(*manifold.dimsDimension()));
 }
 
 TEST(ManifoldTest, genesisHappensOnce) {
@@ -160,8 +214,8 @@ TEST(ManifoldTest, aLinkIsOneEdgeSharedByTwoCells) {
   // The backlink is not a second operation. It is what the one operation
   // means, maintained by the fold the way zzcore's loader derives it.
   EXPECT_EQ(manifold.linked(two, dim, DimVector::NEG), one);
-  EXPECT_EQ(manifold.linked(one, dim, DimVector::NEG), noCell);
-  EXPECT_EQ(manifold.linked(two, dim, DimVector::POS), noCell);
+  EXPECT_EQ(manifold.linked(one, dim, DimVector::NEG), std::nullopt);
+  EXPECT_EQ(manifold.linked(two, dim, DimVector::POS), std::nullopt);
 }
 
 TEST(ManifoldTest, relinkingBreaksWhatEitherEndWasHolding) {
@@ -178,7 +232,7 @@ TEST(ManifoldTest, relinkingBreaksWhatEitherEndWasHolding) {
   EXPECT_EQ(manifold.linked(three, dim, DimVector::NEG), one);
   // two kept a dangling backlink under any implementation that treats the two
   // directions as independent facts.
-  EXPECT_EQ(manifold.linked(two, dim, DimVector::NEG), noCell);
+  EXPECT_EQ(manifold.linked(two, dim, DimVector::NEG), std::nullopt);
 }
 
 TEST(ManifoldTest, displacingACellFromARankLeavesNoHalfLink) {
@@ -194,7 +248,7 @@ TEST(ManifoldTest, displacingACellFromARankLeavesNoHalfLink) {
   const auto manifold = slice.store.rebuildManifold(slice.at);
   EXPECT_EQ(manifold.linked(three, dim, DimVector::NEG), two);
   EXPECT_EQ(manifold.linked(two, dim, DimVector::POS), three);
-  EXPECT_EQ(manifold.linked(one, dim, DimVector::POS), noCell);
+  EXPECT_EQ(manifold.linked(one, dim, DimVector::POS), std::nullopt);
 }
 
 TEST(ManifoldTest, linkingToNoCellClearsBothEnds) {
@@ -203,11 +257,11 @@ TEST(ManifoldTest, linkingToNoCellClearsBothEnds) {
   const auto one = slice.cell("one");
   const auto two = slice.cell("two");
   slice.link(one, dim, DimVector::POS, two);
-  slice.link(one, dim, DimVector::POS, noCell);
+  slice.link(one, dim, DimVector::POS, std::nullopt);
 
   const auto manifold = slice.store.rebuildManifold(slice.at);
-  EXPECT_EQ(manifold.linked(one, dim, DimVector::POS), noCell);
-  EXPECT_EQ(manifold.linked(two, dim, DimVector::NEG), noCell);
+  EXPECT_EQ(manifold.linked(one, dim, DimVector::POS), std::nullopt);
+  EXPECT_EQ(manifold.linked(two, dim, DimVector::NEG), std::nullopt);
 }
 
 TEST(ManifoldTest, aRankWalksBothWays) {
@@ -224,11 +278,15 @@ TEST(ManifoldTest, aRankWalksBothWays) {
   const auto manifold = slice.store.rebuildManifold(slice.at);
   auto cursor         = rank.front();
   for (std::size_t i = 1; i < rank.size(); i++) {
-    cursor = manifold.linked(cursor, dim, DimVector::POS);
+    const auto next = manifold.linked(cursor, dim, DimVector::POS);
+    ASSERT_TRUE(next);
+    cursor = *next;
     EXPECT_EQ(cursor, rank[i]) << "posward, step " << i;
   }
   for (std::size_t i = rank.size() - 1; i > 0; i--) {
-    cursor = manifold.linked(cursor, dim, DimVector::NEG);
+    const auto next = manifold.linked(cursor, dim, DimVector::NEG);
+    ASSERT_TRUE(next);
+    cursor = *next;
     EXPECT_EQ(cursor, rank[i - 1]) << "negward, step " << i;
   }
   EXPECT_EQ(manifold.textOf(rank[5], slice.store), "cell 5");
@@ -262,9 +320,10 @@ TEST(ManifoldTest, dimensionsComeBackInTheOrderTheyWereMinted) {
   const auto third  = slice.dimension("d.clone");
 
   const auto manifold = slice.store.rebuildManifold(slice.at);
+  ASSERT_TRUE(manifold.dimsDimension());
   EXPECT_THAT(
       manifold.dimensions(),
-      testing::ElementsAre(manifold.dimsDimension(), first, second, third));
+      testing::ElementsAre(*manifold.dimsDimension(), first, second, third));
   EXPECT_EQ(manifold.dimensionNamed("d.2", slice.store), second);
   EXPECT_EQ(manifold.dimensionNamed("d.clone", slice.store), third);
   EXPECT_EQ(manifold.dimensionNamed("d.nothing", slice.store), std::nullopt);
@@ -297,9 +356,9 @@ TEST(ManifoldTest, aCellsMicroHistoryIsAChainOfOperations) {
   const auto cell  = slice.cell("edited");
   const auto other = slice.cell("elsewhere");
   slice.link(cell, dim, DimVector::POS, other);
-  const auto firstLink = slice.store.cellRefOf(slice.at);
-  slice.link(cell, dim, DimVector::POS, noCell);
-  const auto secondLink = slice.store.cellRefOf(slice.at);
+  const auto firstLink = slice.store.cellRefOf(slice.at).value();
+  slice.link(cell, dim, DimVector::POS, std::nullopt);
+  const auto secondLink = slice.store.cellRefOf(slice.at).value();
 
   const auto manifold = slice.store.rebuildManifold(slice.at);
   const auto slot     = manifold.slot(cell);
@@ -337,7 +396,8 @@ TEST(ManifoldTest, setValueRestatesContentAndBits) {
   ASSERT_TRUE(manifold.asDouble(cell).has_value());
   EXPECT_DOUBLE_EQ(*manifold.asDouble(cell), 43.0);
   // A cell that carries no bits answers nothing rather than zero.
-  EXPECT_FALSE(manifold.asDouble(manifold.home()).has_value());
+  ASSERT_TRUE(manifold.home());
+  EXPECT_FALSE(manifold.asDouble(*manifold.home()).has_value());
 }
 
 TEST(ManifoldTest, incrementalFoldingEqualsAColdFold) {
@@ -352,10 +412,12 @@ TEST(ManifoldTest, incrementalFoldingEqualsAColdFold) {
   std::vector<DimRef> dims;
   for (const auto *const name : {"d.doc", "d.meta"}) {
     slice.at = slice.store.makeCell(slice.at, name);
-    dims.push_back(slice.store.cellRefOf(slice.at));
+    dims.push_back(slice.store.cellRefOf(slice.at).value());
     ASSERT_TRUE(manifold.advance(slice.store, slice.at));
-    slice.at = slice.store.setLink(slice.at, slice.store.homeCell(),
-                                   slice.store.dimsDimension(), DimVector::POS,
+    ASSERT_TRUE(slice.store.homeCell());
+    ASSERT_TRUE(slice.store.dimsDimension());
+    slice.at = slice.store.setLink(slice.at, *slice.store.homeCell(),
+                                   *slice.store.dimsDimension(), DimVector::POS,
                                    dims.back());
     ASSERT_TRUE(manifold.advance(slice.store, slice.at));
   }
@@ -421,7 +483,7 @@ TEST(ManifoldTest, anEphemeralReferenceIsRefusedAtTheApiAndInTheFold) {
                                    ephemeralBit | 3U),
                std::invalid_argument);
   EXPECT_THROW(slice.store.setLink(slice.at, cell, ephemeralBit | dim,
-                                   DimVector::POS, noCell),
+                                   DimVector::POS, std::nullopt),
                std::invalid_argument);
 
   // And in the fold, which is what makes it an invariant of the encoding
@@ -432,7 +494,7 @@ TEST(ManifoldTest, anEphemeralReferenceIsRefusedAtTheApiAndInTheFold) {
   op.flags  = xanadu::structureFlags(StructureVerb::SetLink);
   op.to     = ephemeralBit | 3U;
   op.link   = dim;
-  op.source = slice.store.segmentedOps().idOf(cell);
+  op.source = slice.store.segmentedOps().idOf(cell).value();
   slice.at  = slice.store.apply(slice.at, op);
 
   const auto manifold = slice.store.rebuildManifold(slice.at);
@@ -447,17 +509,19 @@ TEST(ManifoldTest, aReferenceThatIsNotACellIsRefusedAtTheApi) {
   // A text operation's index is not a cell, however plausible a number it is.
   slice.at          = slice.store.insert(slice.at, 0, "typed");
   const auto textOp = slice.store.cellRefOf(slice.at);
+  ASSERT_TRUE(textOp);
 
-  EXPECT_THROW(slice.store.setLink(slice.at, textOp, dim, DimVector::POS, cell),
-               std::invalid_argument);
   EXPECT_THROW(
-      slice.store.setLink(slice.at, cell, textOp, DimVector::POS, cell),
+      slice.store.setLink(slice.at, *textOp, dim, DimVector::POS, cell),
+      std::invalid_argument);
+  EXPECT_THROW(
+      slice.store.setLink(slice.at, cell, *textOp, DimVector::POS, cell),
       std::invalid_argument);
   EXPECT_THROW(slice.store.setLink(slice.at, cell, dim, DimVector::POS, textOp),
                std::invalid_argument);
   EXPECT_THROW(slice.store.setLink(slice.at, cell, dim, DimVector::POS, 9999),
                std::invalid_argument);
-  EXPECT_THROW(slice.store.setValue(slice.at, textOp, PrimediaSpan{},
+  EXPECT_THROW(slice.store.setValue(slice.at, *textOp, PrimediaSpan{},
                                     ValueKind::None, 0),
                std::invalid_argument);
 
@@ -477,12 +541,12 @@ TEST(ManifoldTest, aLinkNamingACellTheFoldDoesNotHoldIsRefused) {
   op.flags  = xanadu::structureFlags(StructureVerb::SetLink);
   op.to     = 9999; // no operation, let alone a cell
   op.link   = dim;
-  op.source = slice.store.segmentedOps().idOf(cell);
+  op.source = slice.store.segmentedOps().idOf(cell).value();
   slice.at  = slice.store.apply(slice.at, op);
 
   const auto manifold = slice.store.rebuildManifold(slice.at);
   EXPECT_EQ(manifold.refusedOps(), 1U);
-  EXPECT_EQ(manifold.linked(cell, dim, DimVector::POS), noCell);
+  EXPECT_EQ(manifold.linked(cell, dim, DimVector::POS), std::nullopt);
 }
 
 TEST(ManifoldTest, aSetLinkWithNoChainHasNoSubjectAndIsRefused) {
@@ -522,7 +586,7 @@ TEST(ManifoldTest, twoFuturesOfOneStateAreTwoManifolds) {
   // Neither branch's link exists at the state they forked from, which is what
   // makes structural editing scrubbable in hypertime.
   EXPECT_EQ(slice.store.rebuildManifold(fork).linked(one, dim, DimVector::POS),
-            noCell);
+            std::nullopt);
 }
 
 TEST(ManifoldTest, aChainIsFollowedPerBranchRatherThanAcrossBranches) {
@@ -548,7 +612,7 @@ TEST(ManifoldTest, aChainIsFollowedPerBranchRatherThanAcrossBranches) {
 
   const auto leftManifold = slice.store.rebuildManifold(left);
   EXPECT_EQ(leftManifold.linked(one, dim, DimVector::POS), two);
-  EXPECT_EQ(leftManifold.linked(one, dim, DimVector::NEG), noCell);
+  EXPECT_EQ(leftManifold.linked(one, dim, DimVector::NEG), std::nullopt);
   EXPECT_EQ(leftManifold.refusedOps(), 0U);
 }
 
@@ -577,14 +641,14 @@ struct ArrayCell {
   };
   std::array<Slot, 8> dims{};
 
-  [[nodiscard]] CellRef linked(const DimRef dim,
-                               const DimVector dir = DimVector::POS) const {
+  [[nodiscard]] std::optional<CellRef>
+  linked(const DimRef dim, const DimVector dir = DimVector::POS) const {
     for (const auto &slot : dims) {
       if (slot.dim == dim) {
-        return dir == DimVector::POS ? slot.pos : slot.neg;
+        return zigzag::present(dir == DimVector::POS ? slot.pos : slot.neg);
       }
     }
-    return noCell;
+    return std::nullopt;
   }
 };
 
@@ -597,10 +661,10 @@ double nsPerHop(const CellRef from, const std::size_t hops, Hop &&hop) {
   for (int rep = 0; rep < repetitions; rep++) {
     CellRef cursor = from;
     for (std::size_t i = 0; i < hops; i++) {
-      const CellRef next = hop(cursor);
+      const std::optional<CellRef> next = hop(cursor);
       // The chase is the point: the next hop needs this hop's answer, so the
       // loop cannot be pipelined into hiding the load.
-      cursor = (noCell == next) ? from : next;
+      cursor = next.value_or(from);
     }
     sink ^= cursor;
   }
@@ -623,7 +687,7 @@ TEST(ManifoldTest, aHopCostsWhatR12SaysItCosts) {
   auto manifold = slice.store.rebuildManifold(slice.at);
   for (int d = 0; d < dimCount; d++) {
     slice.at = slice.store.makeCell(slice.at, "d." + std::to_string(d + 1));
-    dims.push_back(slice.store.cellRefOf(slice.at));
+    dims.push_back(slice.store.cellRefOf(slice.at).value());
     ASSERT_TRUE(manifold.advance(slice.store, slice.at));
   }
 
@@ -631,7 +695,7 @@ TEST(ManifoldTest, aHopCostsWhatR12SaysItCosts) {
   cells.reserve(cellCount);
   for (int i = 0; i < cellCount; i++) {
     slice.at = slice.store.makeCell(slice.at, "c");
-    cells.push_back(slice.store.cellRefOf(slice.at));
+    cells.push_back(slice.store.cellRefOf(slice.at).value());
     ASSERT_TRUE(manifold.advance(slice.store, slice.at));
   }
 
@@ -696,7 +760,7 @@ TEST(ManifoldTest, aHopCostsWhatR12SaysItCosts) {
     return [&, dim](const CellRef from) {
       const auto found = denseOf.find(from);
       return found == denseOf.end()
-                 ? noCell
+                 ? std::nullopt
                  : array[found->second].linked(dim, DimVector::POS);
     };
   };
@@ -765,9 +829,9 @@ TEST(ManifoldTest, aSliceSurvivesSavingAndReopening) {
     at                = minted.version;
     dim               = minted.dim;
     at                = store.makeCell(at, "first");
-    head              = store.cellRefOf(at);
+    head              = store.cellRefOf(at).value();
     at                = store.makeCell(at, "second");
-    tail              = store.cellRefOf(at);
+    tail              = store.cellRefOf(at).value();
     at                = store.setLink(at, head, dim, DimVector::POS, tail);
     store.setCurrentVersions({at});
     store.save(dir.string());
@@ -775,8 +839,10 @@ TEST(ManifoldTest, aSliceSurvivesSavingAndReopening) {
 
   Store reopened(permascroll);
   reopened.load(dir.string());
-  EXPECT_EQ(reopened.homeCell(), 2U);
-  EXPECT_EQ(reopened.dimsDimension(), 3U);
+  ASSERT_TRUE(reopened.homeCell());
+  ASSERT_TRUE(reopened.dimsDimension());
+  EXPECT_EQ(*reopened.homeCell(), 2U);
+  EXPECT_EQ(*reopened.dimsDimension(), 3U);
 
   const auto manifold =
       reopened.rebuildManifold(reopened.primaryCurrentVersion());
@@ -784,8 +850,9 @@ TEST(ManifoldTest, aSliceSurvivesSavingAndReopening) {
   EXPECT_EQ(manifold.linked(tail, dim, DimVector::NEG), head);
   EXPECT_EQ(manifold.textOf(head, reopened), "first");
   EXPECT_EQ(manifold.textOf(tail, reopened), "second");
+  ASSERT_TRUE(manifold.dimsDimension());
   EXPECT_THAT(manifold.dimensions(),
-              testing::ElementsAre(manifold.dimsDimension(), dim));
+              testing::ElementsAre(*manifold.dimsDimension(), dim));
   EXPECT_TRUE(manifold.verifyAgainstFullRebuild(reopened));
 
   std::filesystem::remove_all(dir);
@@ -923,17 +990,17 @@ TEST(ManifoldTest, aCellsHistoryIsEveryOperationThatShapedIt) {
   Slice slice;
   const auto dim  = slice.dimension("d.custom");
   const auto cell = slice.cell("step 1");
-  const auto op1  = slice.store.cellRefOf(slice.at);
+  const auto op1  = slice.store.cellRefOf(slice.at).value();
 
   slice.at       = slice.store.setCellText(slice.at, cell, "step 2");
-  const auto op2 = slice.store.segmentedOps().indexOf(slice.at);
+  const auto op2 = slice.store.segmentedOps().indexOf(slice.at).value();
 
   const auto other = slice.cell("other");
   slice.at = slice.store.setLink(slice.at, cell, dim, DimVector::POS, other);
-  const auto op3 = slice.store.segmentedOps().indexOf(slice.at);
+  const auto op3 = slice.store.segmentedOps().indexOf(slice.at).value();
 
   slice.at       = slice.store.setCellText(slice.at, cell, "step 4");
-  const auto op4 = slice.store.segmentedOps().indexOf(slice.at);
+  const auto op4 = slice.store.segmentedOps().indexOf(slice.at).value();
 
   const auto manifold = slice.store.rebuildManifold(slice.at);
   const auto hist     = manifold.historyOf(cell);
@@ -974,7 +1041,7 @@ TEST(ManifoldTest, anUnattachedManifoldHasNoHistory) {
 TEST(ManifoldTest, aCellNobodyTouchedHasAHistoryOfOne) {
   Slice slice;
   const auto cell     = slice.cell("untouched");
-  const auto op       = slice.store.cellRefOf(slice.at);
+  const auto op       = slice.store.cellRefOf(slice.at).value();
   const auto manifold = slice.store.rebuildManifold(slice.at);
 
   const auto hist = manifold.historyOf(cell);
@@ -990,13 +1057,13 @@ TEST(ManifoldTest, aCellNobodyTouchedHasAHistoryOfOne) {
 TEST(ManifoldTest, contentAsOfReplaysASplice) {
   Slice slice;
   const auto cell = slice.cell("the quick brown fox");
-  const auto op1  = slice.store.cellRefOf(slice.at);
+  const auto op1  = slice.store.cellRefOf(slice.at).value();
 
   const auto ver2 = slice.store.spliceCell(slice.at, cell, 4, 5, "slow");
-  const auto op2  = slice.store.segmentedOps().indexOf(ver2);
+  const auto op2  = slice.store.segmentedOps().indexOf(ver2).value();
 
   const auto ver3 = slice.store.spliceCell(ver2, cell, 0, 3, "A");
-  const auto op3  = slice.store.segmentedOps().indexOf(ver3);
+  const auto op3  = slice.store.segmentedOps().indexOf(ver3).value();
 
   const auto manifold = slice.store.rebuildManifold(ver3);
 
@@ -1032,7 +1099,7 @@ TEST(ManifoldTest, contentAsOfRefusesAnOperationFromAnotherCell) {
   Slice slice;
   const auto cell1                  = slice.cell("first cell");
   [[maybe_unused]] const auto cell2 = slice.cell("second cell");
-  const auto opCell2                = slice.store.cellRefOf(slice.at);
+  const auto opCell2                = slice.store.cellRefOf(slice.at).value();
 
   const auto manifold = slice.store.rebuildManifold(slice.at);
   EXPECT_TRUE(manifold.contentAsOf(cell1, opCell2).empty());
@@ -1043,7 +1110,7 @@ TEST(ManifoldTest, contentAsOfRefusesAnOperationFromAnotherCell) {
 TEST(ManifoldTest, anOpHandleNamesTheOperationItWasMintedFor) {
   Slice slice;
   const auto vInsert  = slice.store.insert(slice.at, 0, "underlying text");
-  const auto targetOp = slice.store.segmentedOps().indexOf(vInsert);
+  const auto targetOp = slice.store.segmentedOps().indexOf(vInsert).value();
   slice.at            = vInsert;
 
   const auto handle   = slice.opHandle(targetOp, "commentary");
@@ -1054,13 +1121,14 @@ TEST(ManifoldTest, anOpHandleNamesTheOperationItWasMintedFor) {
   EXPECT_EQ(manifold.textOf(handle, slice.store), "commentary");
 
   // Non-handle cell answers nullopt
-  EXPECT_EQ(manifold.handleTarget(slice.store.homeCell()), std::nullopt);
+  ASSERT_TRUE(slice.store.homeCell());
+  EXPECT_EQ(manifold.handleTarget(*slice.store.homeCell()), std::nullopt);
 }
 
 TEST(ManifoldTest, anOpHandleIsNotAScalar) {
   Slice slice;
   const auto vInsert  = slice.store.insert(slice.at, 0, "text");
-  const auto targetOp = slice.store.segmentedOps().indexOf(vInsert);
+  const auto targetOp = slice.store.segmentedOps().indexOf(vInsert).value();
   slice.at            = vInsert;
 
   const auto handle   = slice.opHandle(targetOp, "label");
@@ -1074,7 +1142,7 @@ TEST(ManifoldTest, anOpHandleIsNotAScalar) {
 TEST(ManifoldTest, aHandleHasItsOwnHistory) {
   Slice slice;
   const auto vInsert  = slice.store.insert(slice.at, 0, "text");
-  const auto targetOp = slice.store.segmentedOps().indexOf(vInsert);
+  const auto targetOp = slice.store.segmentedOps().indexOf(vInsert).value();
   slice.at            = vInsert;
 
   const auto handle    = slice.opHandle(targetOp, "initial note");
@@ -1085,7 +1153,7 @@ TEST(ManifoldTest, aHandleHasItsOwnHistory) {
   EXPECT_EQ(hist1.front(), handle);
 
   slice.at          = slice.store.setCellText(slice.at, handle, "updated note");
-  const auto editOp = slice.store.segmentedOps().indexOf(slice.at);
+  const auto editOp = slice.store.segmentedOps().indexOf(slice.at).value();
   const auto manifold2 = slice.store.rebuildManifold(slice.at);
 
   const auto hist2 = manifold2.historyOf(handle);
@@ -1096,12 +1164,12 @@ TEST(ManifoldTest, aHandleMayNameAnyKindOfOperation) {
   Slice slice;
   // 1. Insert
   const auto vInsert  = slice.store.insert(slice.at, 0, "hello");
-  const auto opInsert = slice.store.segmentedOps().indexOf(vInsert);
+  const auto opInsert = slice.store.segmentedOps().indexOf(vInsert).value();
   slice.at            = vInsert;
 
   // 2. Delete (erase)
   const auto vDelete  = slice.store.erase(slice.at, 0, 2);
-  const auto opDelete = slice.store.segmentedOps().indexOf(vDelete);
+  const auto opDelete = slice.store.segmentedOps().indexOf(vDelete).value();
   slice.at            = vDelete;
 
   // 3. Link (SetLink)
@@ -1109,7 +1177,7 @@ TEST(ManifoldTest, aHandleMayNameAnyKindOfOperation) {
   const auto c1  = slice.cell("c1");
   const auto c2  = slice.cell("c2");
   slice.link(c1, dim, DimVector::POS, c2);
-  const auto opLink = slice.store.segmentedOps().indexOf(slice.at);
+  const auto opLink = slice.store.segmentedOps().indexOf(slice.at).value();
 
   // 4. MakeCell
   const auto c3     = slice.cell("c3");
@@ -1150,7 +1218,8 @@ TEST(ManifoldTest, anEditionSurvivesBeingRepointed) {
   const auto eds1 = slice.store.editions(slice.at);
   ASSERT_EQ(eds1.size(), 1U);
   EXPECT_EQ(eds1[0].name, "French");
-  EXPECT_EQ(eds1[0].targetVersion, v1);
+  ASSERT_TRUE(eds1[0].targetVersion);
+  EXPECT_EQ(*eds1[0].targetVersion, v1);
   const auto frenchCell = eds1[0].cell;
   EXPECT_NE(frenchCell, zigzag::noCell);
 
@@ -1159,7 +1228,8 @@ TEST(ManifoldTest, anEditionSurvivesBeingRepointed) {
   const auto eds2 = slice.store.editions(slice.at);
   ASSERT_EQ(eds2.size(), 1U);
   EXPECT_EQ(eds2[0].name, "French");
-  EXPECT_EQ(eds2[0].targetVersion, v2);
+  ASSERT_TRUE(eds2[0].targetVersion);
+  EXPECT_EQ(*eds2[0].targetVersion, v2);
   // The edition's identity is the cell itself: it persists across repointing
   EXPECT_EQ(eds2[0].cell, frenchCell);
 
@@ -1169,7 +1239,7 @@ TEST(ManifoldTest, anEditionSurvivesBeingRepointed) {
   ASSERT_EQ(mEds.size(), 1U);
   EXPECT_EQ(mEds[0].cell, frenchCell);
   EXPECT_EQ(mEds[0].name, "French");
-  EXPECT_EQ(mEds[0].targetOp, slice.store.segmentedOps().indexOf(v2));
+  EXPECT_EQ(mEds[0].targetOp, slice.store.segmentedOps().indexOf(v2).value());
 
   // Assert Manifold::historyOf shows both designations
   const auto hist = manifold.historyOf(frenchCell);
@@ -1193,22 +1263,24 @@ TEST(ManifoldTest, twoBranchesCarryTheirOwnEditions) {
 
   const auto edA = slice.store.editionNamed(vBranchA, "French");
   ASSERT_TRUE(edA.has_value());
-  EXPECT_EQ(edA->targetVersion, vA1);
+  ASSERT_TRUE(edA->targetVersion);
+  EXPECT_EQ(*edA->targetVersion, vA1);
 
   const auto edB = slice.store.editionNamed(vB1, "French");
   ASSERT_TRUE(edB.has_value());
-  EXPECT_EQ(edB->targetVersion, v0);
+  ASSERT_TRUE(edB->targetVersion);
+  EXPECT_EQ(*edB->targetVersion, v0);
 
   // In folded manifolds
   const auto manifoldA = slice.store.rebuildManifold(vBranchA);
   const auto mEdA      = manifoldA.editionNamed("French");
   ASSERT_TRUE(mEdA.has_value());
-  EXPECT_EQ(mEdA->targetOp, slice.store.segmentedOps().indexOf(vA1));
+  EXPECT_EQ(mEdA->targetOp, slice.store.segmentedOps().indexOf(vA1).value());
 
   const auto manifoldB = slice.store.rebuildManifold(vB1);
   const auto mEdB      = manifoldB.editionNamed("French");
   ASSERT_TRUE(mEdB.has_value());
-  EXPECT_EQ(mEdB->targetOp, slice.store.segmentedOps().indexOf(v0));
+  EXPECT_EQ(mEdB->targetOp, slice.store.segmentedOps().indexOf(v0).value());
 }
 
 TEST(ManifoldTest, theEditionsRankAndTheTableCacheAgree) {
@@ -1236,10 +1308,15 @@ TEST(ManifoldTest, theEditionsRankAndTheTableCacheAgree) {
   EXPECT_EQ(slice.store.currentVersions(), selected);
   slice.store.sealMetadata();
   EXPECT_EQ(slice.store.currentVersions(), selected);
-  const auto editions = slice.store.editions(slice.store.structureHead());
+  const auto editions =
+      slice.store.editions(slice.store.structureHead().value());
   std::vector<MicroversionId> current;
-  for (const auto &edition : editions)
-    if (edition.name == "current") current.push_back(edition.targetVersion);
+  for (const auto &edition : editions) {
+    if (edition.name == "current") {
+      ASSERT_TRUE(edition.targetVersion);
+      current.push_back(*edition.targetVersion);
+    }
+  }
   EXPECT_EQ(current, selected);
 }
 
@@ -1251,12 +1328,12 @@ TEST(ManifoldTest, aVersionAnnotationBecomesAHandleCell) {
   const auto manifold = slice.store.rebuildManifold(slice.at);
   const auto ed       = manifold.editionNamed("v1.0-release");
   ASSERT_TRUE(ed.has_value());
-  EXPECT_NE(ed->handle, zigzag::noCell);
+  ASSERT_TRUE(ed->handle);
 
   // The handle is a ValueKind::OpHandle cell pointing to v1's operation
-  EXPECT_EQ(manifold.valueKindOf(ed->handle), ValueKind::OpHandle);
-  const auto expectedOp = slice.store.segmentedOps().indexOf(v1);
-  EXPECT_EQ(manifold.handleTarget(ed->handle),
+  EXPECT_EQ(manifold.valueKindOf(*ed->handle), ValueKind::OpHandle);
+  const auto expectedOp = slice.store.segmentedOps().indexOf(v1).value();
+  EXPECT_EQ(manifold.handleTarget(*ed->handle),
             std::optional<CellRef>{expectedOp});
 
   // Querying aliases and display names resolves through the edition
@@ -1277,7 +1354,7 @@ TEST(ManifoldTest, anAnnotationKeepsStateSeparateFromClaimedTime) {
                                           .timestamp   = claimedTime});
 
   const auto manifold = slice.store.rebuildManifold(slice.at);
-  const auto targetOp = slice.store.segmentedOps().indexOf(v1);
+  const auto targetOp = slice.store.segmentedOps().indexOf(v1).value();
 
   // The OpHandle cell names the microversion operation index (state identity)
   const auto handle = manifold.findOpHandle(targetOp);
@@ -1296,11 +1373,11 @@ TEST(ManifoldTest, anAnnotationKeepsStateSeparateFromClaimedTime) {
   // An annotation without claimed timestamp has an empty timestamp field;
   // it is never synthesized or derived from the MicroversionId
   const auto v2 = slice.store.insert(slice.at, 15, " and another");
-  slice.at = slice.store.annotateVersion(v2, v2,
-                                         {.alias       = "v2.0",
-                                          .description = "No clock reading",
-                                          .tag         = "unclocked",
-                                          .timestamp   = ""});
+  slice.at      = slice.store.annotateVersion(v2, v2,
+                                              {.alias       = "v2.0",
+                                               .description = "No clock reading",
+                                               .tag         = "unclocked",
+                                               .timestamp   = ""});
 
   const auto ann2 = slice.store.versionAnnotation(v2);
   ASSERT_TRUE(ann2.has_value());
@@ -1352,7 +1429,7 @@ TEST(ManifoldTest, aRegistryCellMayUseAnAlreadyMappedNonZeroScroll) {
   op.span =
       PrimediaSpan{.scroll = scroll1Id, .start = 0, .length = key2.size()};
   slice.at         = slice.store.apply(slice.at, op);
-  const auto cell2 = slice.store.cellRefOf(slice.at);
+  const auto cell2 = slice.store.cellRefOf(slice.at).value();
 
   const auto dimScrolls = slice.dimension("d.scrolls");
   const auto cell1      = reg1.scrolls.front().cell;
@@ -1397,7 +1474,7 @@ TEST(ManifoldTest, anUnrootedRegistryDependencyIsRefused) {
   op.flags = xanadu::structureFlags(StructureVerb::MakeCell);
   op.span  = PrimediaSpan{.scroll = 99, .start = 0, .length = 10};
   slice.at = slice.store.apply(slice.at, op);
-  const auto unrootedCell = slice.store.cellRefOf(slice.at);
+  const auto unrootedCell = slice.store.cellRefOf(slice.at).value();
 
   const auto dimScrolls = slice.dimension("d.scrolls");
   slice.link(cell1, dimScrolls, DimVector::POS, unrootedCell);
@@ -1595,75 +1672,78 @@ TEST(ManifoldTest, verifiedAuthorshipAppearsAsEphemeralArenaCells) {
 
   // Root reachable from arena home on d.authorship
   const auto dimAuthorship = arena.dimensionNamed("d.authorship");
-  ASSERT_NE(dimAuthorship, zigzag::noCell);
+  ASSERT_TRUE(dimAuthorship);
+  const auto home = arena.home();
+  ASSERT_TRUE(home);
   const auto authRoot =
-      arena.linked(arena.home(), dimAuthorship, zigzag::DimVector::POS);
-  ASSERT_NE(authRoot, zigzag::noCell);
-  EXPECT_TRUE(zigzag::isEphemeral(authRoot));
+      arena.linked(*home, *dimAuthorship, zigzag::DimVector::POS);
+  ASSERT_TRUE(authRoot);
+  EXPECT_EQ(arena.authorshipRoot(), authRoot);
+  EXPECT_TRUE(zigzag::isEphemeral(*authRoot));
 
   // Source link points back to authenticated bootstrap scroll
   const auto dimSource = arena.dimensionNamed("d.source");
-  ASSERT_NE(dimSource, zigzag::noCell);
+  ASSERT_TRUE(dimSource);
   const auto bootstrapCell =
-      arena.linked(authRoot, dimSource, zigzag::DimVector::POS);
-  EXPECT_NE(bootstrapCell, zigzag::noCell);
+      arena.linked(*authRoot, *dimSource, zigzag::DimVector::POS);
+  EXPECT_TRUE(bootstrapCell);
 
   // Canonical fields
   const auto dimAuthor = arena.dimensionNamed("d.author");
-  ASSERT_NE(dimAuthor, zigzag::noCell);
+  ASSERT_TRUE(dimAuthor);
   const auto authorCell =
-      arena.linked(authRoot, dimAuthor, zigzag::DimVector::POS);
-  ASSERT_NE(authorCell, zigzag::noCell);
-  EXPECT_TRUE(zigzag::isEphemeral(authorCell));
-  EXPECT_EQ(arena.textOf(authorCell), "Ada Lovelace");
+      arena.linked(*authRoot, *dimAuthor, zigzag::DimVector::POS);
+  ASSERT_TRUE(authorCell);
+  EXPECT_TRUE(zigzag::isEphemeral(*authorCell));
+  EXPECT_EQ(arena.textOf(*authorCell), "Ada Lovelace");
 
   const auto dimEmail = arena.dimensionNamed("d.email");
-  ASSERT_NE(dimEmail, zigzag::noCell);
+  ASSERT_TRUE(dimEmail);
   const auto emailCell =
-      arena.linked(authRoot, dimEmail, zigzag::DimVector::POS);
-  ASSERT_NE(emailCell, zigzag::noCell);
-  EXPECT_TRUE(zigzag::isEphemeral(emailCell));
-  EXPECT_EQ(arena.textOf(emailCell), "ada@example.org");
+      arena.linked(*authRoot, *dimEmail, zigzag::DimVector::POS);
+  ASSERT_TRUE(emailCell);
+  EXPECT_TRUE(zigzag::isEphemeral(*emailCell));
+  EXPECT_EQ(arena.textOf(*emailCell), "ada@example.org");
 
   const auto dimPublisher = arena.dimensionNamed("d.publisher");
-  ASSERT_NE(dimPublisher, zigzag::noCell);
+  ASSERT_TRUE(dimPublisher);
   const auto pubCell =
-      arena.linked(authRoot, dimPublisher, zigzag::DimVector::POS);
-  ASSERT_NE(pubCell, zigzag::noCell);
-  EXPECT_TRUE(zigzag::isEphemeral(pubCell));
-  EXPECT_EQ(arena.textOf(pubCell), record.publisher);
+      arena.linked(*authRoot, *dimPublisher, zigzag::DimVector::POS);
+  ASSERT_TRUE(pubCell);
+  EXPECT_TRUE(zigzag::isEphemeral(*pubCell));
+  EXPECT_EQ(arena.textOf(*pubCell), record.publisher);
 
   const auto dimPerma = arena.dimensionNamed("d.permascroll");
-  ASSERT_NE(dimPerma, zigzag::noCell);
+  ASSERT_TRUE(dimPerma);
   const auto permaCell =
-      arena.linked(authRoot, dimPerma, zigzag::DimVector::POS);
-  ASSERT_NE(permaCell, zigzag::noCell);
-  EXPECT_TRUE(zigzag::isEphemeral(permaCell));
-  EXPECT_EQ(arena.textOf(permaCell), record.permascroll);
+      arena.linked(*authRoot, *dimPerma, zigzag::DimVector::POS);
+  ASSERT_TRUE(permaCell);
+  EXPECT_TRUE(zigzag::isEphemeral(*permaCell));
+  EXPECT_EQ(arena.textOf(*permaCell), record.permascroll);
 
   const auto dimPublished = arena.dimensionNamed("d.published");
-  ASSERT_NE(dimPublished, zigzag::noCell);
+  ASSERT_TRUE(dimPublished);
   const auto pubDateCell =
-      arena.linked(authRoot, dimPublished, zigzag::DimVector::POS);
-  ASSERT_NE(pubDateCell, zigzag::noCell);
-  EXPECT_TRUE(zigzag::isEphemeral(pubDateCell));
-  EXPECT_EQ(arena.textOf(pubDateCell), std::to_string(record.published));
+      arena.linked(*authRoot, *dimPublished, zigzag::DimVector::POS);
+  ASSERT_TRUE(pubDateCell);
+  EXPECT_TRUE(zigzag::isEphemeral(*pubDateCell));
+  EXPECT_EQ(arena.textOf(*pubDateCell), std::to_string(record.published));
 
   const auto dimSig = arena.dimensionNamed("d.signature");
-  ASSERT_NE(dimSig, zigzag::noCell);
-  const auto sigCell = arena.linked(authRoot, dimSig, zigzag::DimVector::POS);
-  ASSERT_NE(sigCell, zigzag::noCell);
-  EXPECT_TRUE(zigzag::isEphemeral(sigCell));
-  EXPECT_EQ(arena.textOf(sigCell), signedProv.signature);
+  ASSERT_TRUE(dimSig);
+  const auto sigCell = arena.linked(*authRoot, *dimSig, zigzag::DimVector::POS);
+  ASSERT_TRUE(sigCell);
+  EXPECT_TRUE(zigzag::isEphemeral(*sigCell));
+  EXPECT_EQ(arena.textOf(*sigCell), signedProv.signature);
 
   // Unknown TSV keys remain visible on derived field dimensions
   const auto dimCustom = arena.dimensionNamed("d.custom_field");
-  ASSERT_NE(dimCustom, zigzag::noCell);
+  ASSERT_TRUE(dimCustom);
   const auto customCell =
-      arena.linked(authRoot, dimCustom, zigzag::DimVector::POS);
-  ASSERT_NE(customCell, zigzag::noCell);
-  EXPECT_TRUE(zigzag::isEphemeral(customCell));
-  EXPECT_EQ(arena.textOf(customCell), "custom_val");
+      arena.linked(*authRoot, *dimCustom, zigzag::DimVector::POS);
+  ASSERT_TRUE(customCell);
+  EXPECT_TRUE(zigzag::isEphemeral(*customCell));
+  EXPECT_EQ(arena.textOf(*customCell), "custom_val");
 }
 
 TEST(ManifoldTest, authorshipProjectionNeverMintsPersistentOps) {
@@ -1689,17 +1769,19 @@ TEST(ManifoldTest, authorshipProjectionNeverMintsPersistentOps) {
     zigzag::ArenaManifold arena(&base, &store);
 
     const auto dimAuthorship = arena.dimensionNamed("d.authorship");
-    ASSERT_NE(dimAuthorship, zigzag::noCell);
+    ASSERT_TRUE(dimAuthorship);
+    const auto home = arena.home();
+    ASSERT_TRUE(home);
     const auto authRoot =
-        arena.linked(arena.home(), dimAuthorship, zigzag::DimVector::POS);
-    ASSERT_NE(authRoot, zigzag::noCell);
+        arena.linked(*home, *dimAuthorship, zigzag::DimVector::POS);
+    ASSERT_TRUE(authRoot);
 
     // Promoting the authorship root directly must be refused
-    const auto res = zigzag::promote(store, at, arena, authRoot);
+    const auto res = zigzag::promote(store, at, arena, *authRoot);
     EXPECT_FALSE(res.has_value());
 
     // Promoting from home must exclude provenance cells
-    const auto resHome = zigzag::promote(store, at, arena, arena.home());
+    const auto resHome = zigzag::promote(store, at, arena, *home);
     if (resHome.has_value()) {
       for (const auto cell : resHome->cells) {
         EXPECT_FALSE(arena.isProvenanceCell(cell));
@@ -1739,8 +1821,8 @@ TEST(ManifoldTest, tamperedAuthorshipIsNotProjected) {
   const auto base = store.rebuildManifold(at);
   const zigzag::ArenaManifold arena(&base, &store);
 
-  EXPECT_EQ(arena.dimensionNamed("d.authorship"), zigzag::noCell);
-  EXPECT_EQ(arena.authorshipRoot(), zigzag::noCell);
+  EXPECT_EQ(arena.dimensionNamed("d.authorship"), std::nullopt);
+  EXPECT_EQ(arena.authorshipRoot(), std::nullopt);
 }
 
 TEST(ManifoldTest, aLinkIsACellWithAnAddress) {
@@ -1778,25 +1860,26 @@ TEST(ManifoldTest, aLinkIsACellWithAnAddress) {
 
   const auto dimLinks = manifold.dimensionNamed("d.links", store);
   ASSERT_TRUE(dimLinks.has_value());
+  const auto home = manifold.home();
+  ASSERT_TRUE(home);
   const auto dimFrom = manifold.dimensionNamed("d.from", store);
   ASSERT_TRUE(dimFrom.has_value());
   const auto dimTo = manifold.dimensionNamed("d.to", store);
   ASSERT_TRUE(dimTo.has_value());
 
   // Link cell is linked on d.links posward from home
-  EXPECT_EQ(manifold.linked(manifold.home(), *dimLinks, zigzag::DimVector::POS),
-            id);
+  EXPECT_EQ(manifold.linked(*home, *dimLinks, zigzag::DimVector::POS), id);
 
   // Link cell has endpoints on d.from and d.to
   const auto fromCell = manifold.linked(id, *dimFrom, zigzag::DimVector::POS);
-  EXPECT_NE(fromCell, zigzag::noCell);
-  EXPECT_EQ(manifold.contentOf(fromCell).size(), 1U);
-  EXPECT_EQ(manifold.contentOf(fromCell).front(), spanA);
+  ASSERT_TRUE(fromCell);
+  EXPECT_EQ(manifold.contentOf(*fromCell).size(), 1U);
+  EXPECT_EQ(manifold.contentOf(*fromCell).front(), spanA);
 
   const auto toCell = manifold.linked(id, *dimTo, zigzag::DimVector::POS);
-  EXPECT_NE(toCell, zigzag::noCell);
-  EXPECT_EQ(manifold.contentOf(toCell).size(), 1U);
-  EXPECT_EQ(manifold.contentOf(toCell).front(), spanB);
+  ASSERT_TRUE(toCell);
+  EXPECT_EQ(manifold.contentOf(*toCell).size(), 1U);
+  EXPECT_EQ(manifold.contentOf(*toCell).front(), spanB);
 }
 
 TEST(ManifoldTest, aMultiSpanLinkSurvivesPublicationAndTransclusion) {
@@ -1958,4 +2041,11 @@ TEST(ManifoldTest, RankContainsAndUnbrokenInsertion) {
       ->insertIntoRank(cB, cA, d1, DimVector::POS);
   EXPECT_TRUE(manifold.rankContains(c1, cA, d1));
   EXPECT_TRUE(manifold.rankContains(c1, cB, d1));
+}
+
+TEST(DimLinkTest, PackedAbsenceIsDecodedAtTheReadBoundary) {
+  const zigzag::DimLink link{.dim = 7, .pos = 12, .neg = zigzag::noCell};
+  EXPECT_EQ(link.neighbor(zigzag::DimVector::POS), 12U);
+  EXPECT_FALSE(link.neighbor(zigzag::DimVector::NEG));
+  static_assert(sizeof(zigzag::DimLink) == 12);
 }

@@ -69,6 +69,30 @@ TEST(StoreObjectManagerTest,
   EXPECT_EQ(items[2].name, "Chapter2");
 }
 
+TEST(StoreObjectManagerTest,
+     SyntheticPickingRejectsMissingRowsAndOutOfRangeTags) {
+  auto scroll = std::make_shared<UserPermascroll>();
+  Store store(scroll);
+  StoreObjectManager manager(store, "Sans 10");
+  manager.setVisible(true);
+  testing::NiceMock<MockRenderDevice> device;
+  RenderState state(&device);
+  render::PickingResult pick{};
+  pick.tag.kind = render::tagKindOverlay;
+  for (const auto tag : {StoreObjectManager::kTagItemCheckboxBase,
+                         StoreObjectManager::kTagItemCloseBase,
+                         StoreObjectManager::kTagItemCloseBase +
+                             StoreObjectManager::kSyntheticItemTagCount}) {
+    pick.tag.clusterIndex = tag;
+    EXPECT_FALSE(manager.picked(pick, state));
+  }
+  manager.createSlice();
+  pick.tag.clusterIndex = StoreObjectManager::kTagItemCheckboxBase + 1;
+  EXPECT_FALSE(manager.picked(pick, state));
+  pick.tag.clusterIndex = StoreObjectManager::kTagItemCloseBase + 1;
+  EXPECT_FALSE(manager.picked(pick, state));
+}
+
 TEST(StoreObjectManagerTest, MultiOpenCheckboxesToggleOpenState) {
   auto scroll = std::make_shared<UserPermascroll>();
   Store store(scroll);

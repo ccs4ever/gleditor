@@ -102,13 +102,16 @@ projectStoreWithProvenance(const xanadu::Store &store,
  * @brief Linearize / rasterize a Zigzag manifold into a continuous text stream
  *        suitable for Xanadoc editing or reading.
  *
- * Traverses cells starting from @p startCell (or document focus if 0) along
+ * Traverses cells starting from @p startCell (or document focus if absent)
+ * along
  * @p primaryDim (e.g. lines/sentences) and optionally @p secondaryDim (e.g.
  * paragraphs).
  */
-[[nodiscard]] ZzRasterResult rasterizeZzStructure(
-    const ZzStructureDocument &doc, const DimID &primaryDim = "d.doc",
-    const DimID &secondaryDim = "d.transclude", CellID startCell = 0);
+[[nodiscard]] ZzRasterResult
+rasterizeZzStructure(const ZzStructureDocument &doc,
+                     const DimID &primaryDim         = "d.doc",
+                     const DimID &secondaryDim       = "d.transclude",
+                     std::optional<CellID> startCell = std::nullopt);
 
 /**
  * @brief Convert a Zigzag structure document into a signed, standalone
@@ -165,7 +168,7 @@ struct SlicedStore {
   std::unordered_map<CellID, CellRef> cells;
   /// Dimension name -> the cell that *is* that dimension (R2).
   std::unordered_map<DimID, DimRef> dimensions;
-  CellRef focus{noCell};
+  std::optional<CellRef> focus;
 };
 
 /**
@@ -201,12 +204,13 @@ sliceToStore(const ZzStructureDocument &doc, xanadu::Store &store,
  * and is used directly as the YAML id, so a round trip renumbers cells rather
  * than restoring whatever numbers the original file used.
  */
-[[nodiscard]] ZzStructureDocument storeToSlice(const xanadu::Store &store,
-                                               const Manifold &manifold,
-                                               CellRef focus = noCell);
+[[nodiscard]] ZzStructureDocument
+storeToSlice(const xanadu::Store &store, const Manifold &manifold,
+             std::optional<CellRef> focus = std::nullopt);
 
-[[nodiscard]] ZzStructureDocument storeToSlice(const Manifold &manifold,
-                                               CellRef focus = noCell);
+[[nodiscard]] ZzStructureDocument
+storeToSlice(const Manifold &manifold,
+             std::optional<CellRef> focus = std::nullopt);
 
 /**
  * @brief Validate that a Zigzag structure strictly satisfies the 2-rank

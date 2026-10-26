@@ -67,11 +67,21 @@ std::string formatTime(const float totalSeconds) {
   return oss.str();
 }
 
+std::string formatTime(const std::optional<int> totalSeconds) {
+  if (!totalSeconds) return "unknown";
+  return formatTime(static_cast<float>(*totalSeconds));
+}
+
 int displayedSeconds(const float value) {
   if (!std::isfinite(value) || value < 0.0F) return 0;
   return static_cast<int>(
       std::min(static_cast<double>(value),
                static_cast<double>(std::numeric_limits<int>::max())));
+}
+
+std::optional<int> displayedSeconds(const std::optional<float> value) {
+  if (!value) return std::nullopt;
+  return displayedSeconds(*value);
 }
 
 } // namespace
@@ -222,11 +232,15 @@ void MediaWidget::applyPendingFragment() {
     return;
   }
   const auto duration = player_->durationSeconds();
-  if (duration <= 0.0F) {
+  if (!duration) {
     return; // LibVLC has not finished parsing the container's metadata yet.
   }
+  if (*duration <= 0.0F) {
+    pendingFragment_.reset();
+    return;
+  }
   const auto range =
-      fragmentTimeRange(*pendingFragment_, pendingContainerLength_, duration);
+      fragmentTimeRange(*pendingFragment_, pendingContainerLength_, *duration);
   if (!range.empty()) {
     player_->setTimeRange(range.startSeconds, range.endSeconds);
   }
@@ -304,10 +318,10 @@ void MediaWidget::deviceReady(render::RenderDevice &device,
                               const render::PipelineDesc &documentPipeline) {
   device_       = &device;
   pipelineDesc_ = documentPipeline;
-  drawnFont_  = ui::scaledFontDescription(fontName_, ui::FontRole::Caption,
-                                          ui::UiMetrics{}, ui::defaultTheme());
-  canvas_     = std::make_unique<Canvas>(&device, drawnFont_);
-  liveCanvas_ = std::make_unique<Canvas>(&device, drawnFont_);
+  drawnFont_    = ui::scaledFontDescription(fontName_, ui::FontRole::Caption,
+                                            ui::UiMetrics{}, ui::defaultTheme());
+  canvas_       = std::make_unique<Canvas>(&device, drawnFont_);
+  liveCanvas_   = std::make_unique<Canvas>(&device, drawnFont_);
   drawnScreenSpace_ = screenSpace_;
   // Embedded in 3D world space uses depth testing; screen overlay turns it off
   canvas_->createPipeline(documentPipeline, !screenSpace_);
@@ -484,7 +498,8 @@ void MediaWidget::drawFrame(FrameContext &ctx) {
 
   if (player_->hasVideo()) updateVideoTexture();
   const auto progress = player_->progressFraction();
-  scrubber_.setFraction(std::isfinite(progress) ? progress : 0.0F);
+  scrubber_.setFraction(progress && std::isfinite(*progress) ? *progress
+                                                             : 0.0F);
   const auto progressStep = static_cast<int>(scrubber_.fraction() * 1000.0);
   const ChromeState next{
       .geometry = geometryRevision_,
@@ -546,7 +561,7 @@ void MediaWidget::drawFrame(FrameContext &ctx) {
     const float gap =
         std::min(std::max(0.0F, theme_.gapEm * lineHeight), padding);
     const float available = std::max(0.0F, width_ - 2.0F * padding);
-    const auto textBox = [&](ui::Rect box, std::string_view label,
+    const auto textBox    = [&](ui::Rect box, std::string_view label,
                              std::uint32_t foreground, std::uint32_t background,
                              text::EllipsisAt at = text::EllipsisAt::End) {
       if (box.width <= 0.0F || box.height < lineHeight) return;
@@ -626,7 +641,7 @@ void MediaWidget::drawFrame(FrameContext &ctx) {
         std::max(0.0F, height_ - 2.0F * padding - headerHeight - gap));
     const std::string timeStr = formatTime(chromeState_.seconds) + " / " +
                                 formatTime(chromeState_.duration);
-    const auto timeWidth      = shaping_.fitted(timeStr, font_, {}).widthPx;
+    const auto timeWidth = shaping_.fitted(timeStr, font_, {}).widthPx;
     std::vector<ui::LayoutItem> controls;
     controls.reserve(clickables_.controls().size() + 1);
     for (const auto &ctrl : clickables_.controls()) {
@@ -714,8 +729,8 @@ void MediaWidget::drawFrame(FrameContext &ctx) {
     ++chromeBuilds_;
     ++revision_;
   }
-  if (liveBuiltFor_ != chromeBuilds_ || liveProgress_ != progressStep ||
-      liveVideoWidth_ != videoFrameWidth_ ||
+  if (liveBuiltFor_ != chromeBuilds_ || !liveProgress_ ||
+      *liveProgress_ != progressStep || liveVideoWidth_ != videoFrameWidth_ ||
       liveVideoHeight_ != videoFrameHeight_) {
     liveProgress_ = progressStep;
     rebuildLive();
@@ -752,7 +767,7 @@ void MediaWidget::rebuildLive() {
                           drawWidth, drawHeight, frame, 0xFFFFFFFFU);
   }
   if (seekRect_.width > 0.0F && seekRect_.height > 0.0F) {
-    const float fraction = static_cast<float>(liveProgress_) / 1000.0F;
+    const float fraction = static_cast<float>(*liveProgress_) / 1000.0F;
     const float fill     = seekRect_.width * fraction;
     const auto segments  = static_cast<unsigned int>(
         std::clamp(std::floor(seekRect_.width), 1.0F, 1001.0F));
@@ -778,7 +793,7 @@ void MediaWidget::rebuildLive() {
     if (fraction > 0.0F) {
       liveCanvas_->setTag(render::tagKindOverlay,
                           tagSeekBase +
-                              static_cast<std::uint32_t>(liveProgress_));
+                              static_cast<std::uint32_t>(*liveProgress_));
       const float knobWidth = std::min(4.0F, seekRect_.width);
       liveCanvas_->addRect(
           std::clamp(seekRect_.left + fill - knobWidth * 0.5F, seekRect_.left,
@@ -849,7 +864,7 @@ bool MediaWidget::picked(const render::PickingResult &pick,
   if (pick.tag.docIndex == pickScope_ && pick.tag.pageIndex == 0 &&
       pickScope_ != 0) {
     if (pick.tag.clusterIndex == 0) return true;
-    if (pick.requestId != 0) {
+    if (pick.requestId) {
       if (!pick.overlayWidgetId) return false;
       tag = *pick.overlayWidgetId;
     } else {
@@ -859,8 +874,8 @@ bool MediaWidget::picked(const render::PickingResult &pick,
   } else {
     // Direct synthetic calls predate captured scenes and use full semantic
     // tags. A real asynchronous result must always match this card's scope.
-    if (pick.requestId != 0 || pick.tag.docIndex != 0 ||
-        pick.tag.pageIndex != 0 || pick.overlayWidgetId)
+    if (pick.requestId || pick.tag.docIndex != 0 || pick.tag.pageIndex != 0 ||
+        pick.overlayWidgetId)
       return false;
     tag = pick.tag.clusterIndex;
   }
@@ -910,8 +925,9 @@ void MediaWidget::describe(a11y::Builder &into) {
   const auto seekId = rootId + tagSeekBase;
   auto &seekNode    = into.add(seekId, a11y::Role::Label);
   seekNode.label    = "Playback Position";
-  seekNode.value    = formatTime(player_->positionSeconds()) + " of " +
-                      formatTime(player_->durationSeconds());
+  seekNode.value    = formatTime(displayedSeconds(player_->positionSeconds())) +
+                   " of " +
+                   formatTime(displayedSeconds(player_->durationSeconds()));
   seekNode.actions =
       a11y::bit(a11y::Action::Click) | a11y::bit(a11y::Action::SetValue);
   seekNode.bounds = seekBounds_;

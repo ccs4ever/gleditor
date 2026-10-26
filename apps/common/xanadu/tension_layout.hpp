@@ -14,6 +14,7 @@
 #define XUDU_TENSION_LAYOUT_HPP
 
 #include <cstddef>
+#include <optional>
 #include <vector>
 
 #include <glm/ext/vector_float3.hpp>
@@ -65,8 +66,10 @@ struct TensionBody {
   [[nodiscard]] constexpr bool isCell() const noexcept {
     return targetKind == LinkTargetKind::ZigzagCell;
   }
-  [[nodiscard]] constexpr zigzag::CellRef cellRef() const noexcept {
-    return isCell() ? static_cast<zigzag::CellRef>(targetId) : zigzag::noCell;
+  [[nodiscard]] constexpr std::optional<zigzag::CellRef>
+  cellRef() const noexcept {
+    if (!isCell() || targetId == zigzag::noCell) return std::nullopt;
+    return static_cast<zigzag::CellRef>(targetId);
   }
 };
 

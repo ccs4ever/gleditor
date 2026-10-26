@@ -8,6 +8,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 
 #include "common/xanadu/microversion.hpp"
 #include "common/xanadu/zigzag/dim_vector.hpp"
@@ -32,7 +33,7 @@ class SpanReader;
  */
 struct BridgeRuntimeConfig {
   /// Discovery and visual neighborhood cell radius
-  int cellRadius{3};
+  std::optional<int> cellRadius{3};
 
   /// Associative depth Z and opacity for the background continuum
   float backgroundDepthZ{-40.0F};
@@ -85,8 +86,8 @@ struct BridgeRuntimeConfig {
    */
   [[nodiscard]] static BridgeRuntimeConfig
   fromManifold(const zigzag::Manifold &manifold,
-               zigzag::CellRef homeCell = zigzag::noCell,
-               const SpanReader *reader = nullptr);
+               std::optional<zigzag::CellRef> homeCell = std::nullopt,
+               const SpanReader *reader                = nullptr);
 
   /**
    * @brief Persist current configuration values into @p store along the

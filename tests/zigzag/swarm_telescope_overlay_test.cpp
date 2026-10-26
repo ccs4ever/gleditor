@@ -25,19 +25,19 @@ public:
   }
 };
 xanadu::PublicationEntry entry(int index) {
-  return {.infoHash          = std::string(38, 'a') + (index < 10 ? "0" : "") +
-                               std::to_string(index),
-          .bep46Uri          = "magnet:?local=long-publication-identity-" +
-                               std::to_string(index),
-          .title             = "Publication 名称 é العربية with a long title " +
-                               std::to_string(index),
+  return {.infoHash = std::string(38, 'a') + (index < 10 ? "0" : "") +
+                      std::to_string(index),
+          .bep46Uri = "magnet:?local=long-publication-identity-" +
+                      std::to_string(index),
+          .title = "Publication 名称 é العربية with a long title " +
+                   std::to_string(index),
           .authorName        = "Author 名称 with a full author name",
           .authorFingerprint = std::string(64, 'b'),
           .topics            = {"hypertext", "multilingual"},
-          .abstractText  = "An extended abstract describes publication "
-                           "identity, provenance, and reading 中文 العربية.",
-          .totalBytes    = 987654321,
-          .microversions = 123};
+          .abstractText      = "An extended abstract describes publication "
+                               "identity, provenance, and reading 中文 العربية.",
+          .totalBytes        = 987654321,
+          .microversions     = 123};
 }
 void contains(ui::Rect child, ui::Rect parent) {
   EXPECT_GE(child.left, parent.left - .01F);
@@ -86,8 +86,8 @@ TEST(SwarmTelescopeOverlayTest,
             contains(box.rect, scene->layout.bounds);
             contains(box.contentRect, box.rect);
             if (box.parentId) {
-              ASSERT_TRUE(scene->layout.find(box.parentId));
-              contains(box.rect, scene->layout.find(box.parentId)->rect);
+              ASSERT_TRUE(scene->layout.find(*box.parentId));
+              contains(box.rect, scene->layout.find(*box.parentId)->rect);
             }
             const auto *visual = scene->find(box.id);
             if (!visual) continue;

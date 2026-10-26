@@ -8,6 +8,7 @@
 #include <cstring>
 #include <format>
 #include <optional>
+#include <stdexcept>
 
 #include <gleditor/logging.hpp>
 #include <queue>
@@ -33,11 +34,26 @@ UnifiedTransclusionEngine::UnifiedTransclusionEngine(
 }
 
 void UnifiedTransclusionEngine::syncTo(const xanadu::MicroversionId &version) {
-  manifold_          = store_.rebuildManifold(version);
-  head_              = version;
-  lastSyncedHead_    = version;
-  lastSyncedOpIndex_ = store_.segmentedOps().indexOf(version);
-  lastStoreOpCount_  = static_cast<std::uint32_t>(store_.segmentedOps().size());
+  manifold_              = store_.rebuildManifold(version);
+  head_                  = version;
+  lastSyncedHead_        = version;
+  const auto &ops        = store_.segmentedOps();
+  const auto targetIndex = ops.indexOf(version);
+  if (targetIndex) {
+    lastSyncedOpIndex_ = *targetIndex;
+  } else {
+    // rebuildManifold() deliberately folds the longest recorded prefix of an
+    // unknown version path. Keep incremental replay at that same prefix.
+    lastSyncedOpIndex_ = 0;
+    for (const auto &step : version.path()) {
+      if (const auto stepIndex = ops.indexOf(step)) {
+        lastSyncedOpIndex_ = *stepIndex;
+      } else {
+        break;
+      }
+    }
+  }
+  lastStoreOpCount_ = static_cast<std::uint32_t>(store_.segmentedOps().size());
   dirtyFormatCells_.clear();
   clearShapingCache();
   updateFormatFlags();
@@ -61,11 +77,11 @@ void UnifiedTransclusionEngine::syncIncremental() {
   const auto parent = lastSyncedHead_;
   const auto &ops   = store_.segmentedOps();
   const auto total  = static_cast<std::uint32_t>(ops.size());
-  const auto target = head_.isZero() && total > 0 ? ops.idOf(total) : head_;
+  const auto target = head_.isZero() && total > 0 ? *ops.idOf(total) : head_;
   for (auto idx = lastSyncedOpIndex_ + 1; idx <= total; idx++) {
     // Spool order interleaves branches; only the named ancestry belongs in
     // this replay product. The index still advances past skipped siblings.
-    const auto version = ops.idOf(idx);
+    const auto version = *ops.idOf(idx);
     if (version != target && !version.isAncestorOf(target)) continue;
     if (const auto *const node = ops.get(idx); nullptr != node) {
       // A refused operation is counted by the manifold (refusedOps()) and
@@ -109,7 +125,7 @@ void UnifiedTransclusionEngine::syncIncremental() {
 }
 
 void UnifiedTransclusionEngine::ensureSliceBegun() {
-  if (zigzag::noCell != store_.homeCell()) {
+  if (store_.homeCell()) {
     return;
   }
   head_ = store_.sliceGenesis(head_);
@@ -117,13 +133,13 @@ void UnifiedTransclusionEngine::ensureSliceBegun() {
 }
 
 DimRef UnifiedTransclusionEngine::dimensionFor(const std::string_view name) {
-  // dimensionFor() answers the engine's own sentinel for "no dimension",
-  // which is what an empty name gets.
-  const auto dim = DimensionRegistry::instance()
-                       .getOrCreate(store_, head_, manifold_, name)
-                       .value_or(noCell);
+  const auto dim =
+      DimensionRegistry::instance().getOrCreate(store_, head_, manifold_, name);
+  if (!dim) {
+    throw std::invalid_argument("A dimension name must not be empty");
+  }
   syncIncremental();
-  return dim;
+  return *dim;
 }
 
 CellRef UnifiedTransclusionEngine::addCell(const std::string_view text) {
@@ -132,16 +148,16 @@ CellRef UnifiedTransclusionEngine::addCell(const std::string_view text) {
   ensureSliceBegun();
   head_ = store_.makeCell(head_, text);
   syncIncremental();
-  return store_.cellRefOf(head_);
+  return store_.cellRefOf(head_).value();
 }
 
-CellRef UnifiedTransclusionEngine::addCellFromSpans(
+std::optional<CellRef> UnifiedTransclusionEngine::addCellFromSpans(
     const std::span<const xanadu::PrimediaSpan> spans) {
-  if (spans.empty()) return noCell;
+  if (spans.empty()) return std::nullopt;
   ensureSliceBegun();
   head_ = store_.makeCell(head_, spans.front());
   syncIncremental();
-  const auto cell  = store_.cellRefOf(head_);
+  const auto cell  = store_.cellRefOf(head_).value();
   std::uint64_t at = spans.front().length;
   for (const auto &span : spans.subspan(1)) {
     head_ = store_.spliceCellSpan(head_, cell, at, 0, span);
@@ -241,7 +257,8 @@ bool UnifiedTransclusionEngine::unlockTranscopyright(const CellRef cell) {
   return true;
 }
 
-void UnifiedTransclusionEngine::linkCells(const CellRef a, const CellRef b,
+void UnifiedTransclusionEngine::linkCells(const CellRef a,
+                                          const std::optional<CellRef> b,
                                           const DimRef dim,
                                           const DimVector dir) {
   if (zigzag::noCell == a || zigzag::noCell == dim) {
@@ -254,13 +271,15 @@ void UnifiedTransclusionEngine::linkCells(const CellRef a, const CellRef b,
   syncIncremental();
 }
 
-void UnifiedTransclusionEngine::linkCells(const CellRef a, const CellRef b,
+void UnifiedTransclusionEngine::linkCells(const CellRef a,
+                                          const std::optional<CellRef> b,
                                           const DimOrdinal dim,
                                           const DimVector dir) {
   linkCells(a, b, dimensionFor(dimOrdinalToString(dim)), dir);
 }
 
-void UnifiedTransclusionEngine::linkCells(const CellRef a, const CellRef b,
+void UnifiedTransclusionEngine::linkCells(const CellRef a,
+                                          const std::optional<CellRef> b,
                                           const DimID &dim,
                                           const DimVector dir) {
   linkCells(a, b, dimensionFor(dim), dir);
@@ -268,7 +287,7 @@ void UnifiedTransclusionEngine::linkCells(const CellRef a, const CellRef b,
 
 void UnifiedTransclusionEngine::unlinkPositive(const CellRef a,
                                                const DimOrdinal dim) {
-  linkCells(a, zigzag::noCell, dim, DimVector::POS);
+  linkCells(a, std::nullopt, dim, DimVector::POS);
 }
 
 zigzag::SlotRef
@@ -281,7 +300,13 @@ UnifiedTransclusionEngine::findCell(const CellRef cell) const noexcept {
     if (it == ephemeralSlots_.end()) {
       return {};
     }
-    return manifold_.slot(it->second.dimension)
+    const auto *dimension = std::get_if<DimRef>(&it->second.dimension);
+    if (!dimension) {
+      ephemeralCellSlotDummy_         = {};
+      ephemeralCellSlotDummy_.birthOp = cell;
+      return ephemeralCellSlotDummy_;
+    }
+    return manifold_.slot(*dimension)
         .transform(
             [&](const zigzag::CellSlot &master) -> const zigzag::CellSlot & {
               ephemeralCellSlotDummy_         = master;
@@ -292,33 +317,15 @@ UnifiedTransclusionEngine::findCell(const CellRef cell) const noexcept {
   return manifold_.slot(cell);
 }
 
-gleditor::cpp26::inplace_vector<DimRef, 64>
+MetaDimensionRange
 UnifiedTransclusionEngine::metaDimensionsOf(const CellRef cell) const {
-  gleditor::cpp26::inplace_vector<DimRef, 64> dims;
-  if (cell == noCell) {
-    return dims;
-  }
-  for (const auto &link : manifold_.dimensionsOf(cell)) {
-    if (link.pos != noCell || link.neg != noCell) {
-      if (std::ranges::find(dims, link.dim) == dims.end()) {
-        if (dims.size() < dims.capacity()) {
-          dims.push_back(link.dim);
-        }
-      }
-    }
-  }
-  // d.meta-dims enumerates itself too, so that walking it from a cell reaches
-  // every dimension the cell participates in including this one.
-  if (std::ranges::find(dims, metaDimension()) == dims.end()) {
-    if (dims.size() < dims.capacity()) {
-      dims.push_back(metaDimension());
-    }
-  }
-  return dims;
+  const bool exists = manifold_.contains(cell);
+  return {exists ? manifold_.dimensionsOf(cell) : std::span<const DimLink>{},
+          exists};
 }
 
 CellRef UnifiedTransclusionEngine::getOrCreateEphemeralCell(
-    const CellRef parent, const std::size_t index, const DimRef dim,
+    const CellRef parent, const std::size_t index, const DimensionQuery dim,
     const std::size_t total) const {
   const auto key = std::pair{parent, index};
   if (const auto it = ephemeralByParentAndIndex_.find(key);
@@ -336,24 +343,25 @@ CellRef UnifiedTransclusionEngine::getOrCreateEphemeralCell(
   return ephId;
 }
 
-CellRef UnifiedTransclusionEngine::linked(const CellRef from, const DimRef dim,
-                                          const DimVector dir) const {
-  if (from == noCell || dim == noCell) {
-    return noCell;
+std::optional<CellRef>
+UnifiedTransclusionEngine::linked(const CellRef from, const DimensionQuery dim,
+                                  const DimVector dir) const {
+  const auto *storedDim = std::get_if<DimRef>(&dim);
+  if (from == noCell || (storedDim && *storedDim == noCell)) {
+    return std::nullopt;
   }
 
-  const auto metaDim = metaDimension();
-  const auto cloneDim =
-      DimensionRegistry::instance().get(manifold_, "d.clone").value_or(noCell);
+  const bool metaDim  = std::holds_alternative<MetaDimensions>(dim);
+  const auto cloneDim = DimensionRegistry::instance().get(manifold_, "d.clone");
 
   if (isEphemeral(from)) {
     const auto it = ephemeralSlots_.find(from);
     if (it == ephemeralSlots_.end()) {
-      return noCell;
+      return std::nullopt;
     }
     const auto &slot = it->second;
 
-    if (metaDim != noCell && dim == metaDim) {
+    if (metaDim) {
       if (dir == DimVector::POS) {
         if (slot.index + 1 < slot.totalCount) {
           const auto mDims = metaDimensionsOf(slot.parentCell);
@@ -363,7 +371,7 @@ CellRef UnifiedTransclusionEngine::linked(const CellRef from, const DimRef dim,
                                             slot.totalCount);
           }
         }
-        return noCell;
+        return std::nullopt;
       }
       if (slot.index > 0) {
         const auto mDims = metaDimensionsOf(slot.parentCell);
@@ -376,27 +384,30 @@ CellRef UnifiedTransclusionEngine::linked(const CellRef from, const DimRef dim,
       return slot.parentCell;
     }
 
-    if (cloneDim != noCell && dim == cloneDim) {
+    if (cloneDim && storedDim && *storedDim == *cloneDim) {
       if (dir == DimVector::NEG) {
-        return slot.dimension;
+        if (const auto *master = std::get_if<DimRef>(&slot.dimension)) {
+          return *master;
+        }
+        return std::nullopt;
       }
-      return noCell;
+      return std::nullopt;
     }
 
-    return noCell;
+    return std::nullopt;
   }
 
-  if (metaDim != noCell && dim == metaDim) {
+  if (metaDim) {
     if (dir == DimVector::POS) {
       const auto mDims = metaDimensionsOf(from);
       if (!mDims.empty()) {
         return getOrCreateEphemeralCell(from, 0, mDims[0], mDims.size());
       }
     }
-    return noCell;
+    return std::nullopt;
   }
 
-  return manifold_.linked(from, dim, dir);
+  return manifold_.linked(from, *storedDim, dir);
 }
 
 std::optional<CellRef>
@@ -406,7 +417,10 @@ UnifiedTransclusionEngine::cloneMaster(const CellRef cell,
   if (isEphemeral(cell)) {
     const auto it = ephemeralSlots_.find(cell);
     if (it != ephemeralSlots_.end()) {
-      return it->second.dimension;
+      if (const auto *master = std::get_if<DimRef>(&it->second.dimension)) {
+        return *master;
+      }
+      return std::nullopt;
     }
     return std::nullopt;
   }
@@ -426,9 +440,9 @@ bool UnifiedTransclusionEngine::isProtected(const CellRef cell) const {
     }
   }
   const auto dimsDim = manifold_.dimsDimension();
-  if (dimsDim != noCell) {
-    if (manifold_.linked(cell, dimsDim, DimVector::NEG) != noCell ||
-        manifold_.linked(cell, dimsDim, DimVector::POS) != noCell) {
+  if (dimsDim) {
+    if (manifold_.linked(cell, *dimsDim, DimVector::NEG) ||
+        manifold_.linked(cell, *dimsDim, DimVector::POS)) {
       return true;
     }
   }
@@ -443,29 +457,33 @@ bool UnifiedTransclusionEngine::validate2RankManifold(
   // Manifold::verifyAgainstFullRebuild() is the other half of the same check.
   for (const auto &slot : manifold_.cells()) {
     for (const auto &link : manifold_.dimensionsOf(slot.birthOp)) {
-      if (zigzag::noCell != link.pos &&
-          manifold_.linked(link.pos, link.dim, DimVector::NEG) !=
-              slot.birthOp) {
-        if (nullptr != errorOut) {
-          *errorOut = std::format(
-              "cell {} posward on dimension {} names {}, whose negward is {}",
-              slot.birthOp, link.dim, link.pos,
-              manifold_.linked(link.pos, link.dim, DimVector::NEG)
-                  .value_or(noCell));
+      if (link.pos != zigzag::noCell) {
+        const auto backlink =
+            manifold_.linked(link.pos, link.dim, DimVector::NEG);
+        if (!backlink || *backlink != slot.birthOp) {
+          if (nullptr != errorOut) {
+            *errorOut = std::format(
+                "cell {} posward on dimension {} names {}, whose negward is "
+                "{}",
+                slot.birthOp, link.dim, link.pos,
+                backlink ? std::to_string(*backlink) : "none");
+          }
+          return false;
         }
-        return false;
       }
-      if (zigzag::noCell != link.neg &&
-          manifold_.linked(link.neg, link.dim, DimVector::POS) !=
-              slot.birthOp) {
-        if (nullptr != errorOut) {
-          *errorOut = std::format(
-              "cell {} negward on dimension {} names {}, whose posward is {}",
-              slot.birthOp, link.dim, link.neg,
-              manifold_.linked(link.neg, link.dim, DimVector::POS)
-                  .value_or(noCell));
+      if (link.neg != zigzag::noCell) {
+        const auto backlink =
+            manifold_.linked(link.neg, link.dim, DimVector::POS);
+        if (!backlink || *backlink != slot.birthOp) {
+          if (nullptr != errorOut) {
+            *errorOut = std::format(
+                "cell {} negward on dimension {} names {}, whose posward is "
+                "{}",
+                slot.birthOp, link.dim, link.neg,
+                backlink ? std::to_string(*backlink) : "none");
+          }
+          return false;
         }
-        return false;
       }
     }
   }
@@ -477,7 +495,10 @@ UnifiedTransclusionEngine::resolveCellText(const CellRef cell) const {
   if (isEphemeral(cell)) {
     const auto it = ephemeralSlots_.find(cell);
     if (it != ephemeralSlots_.end()) {
-      return resolveCellText(it->second.dimension);
+      if (const auto *master = std::get_if<DimRef>(&it->second.dimension)) {
+        return resolveCellText(*master);
+      }
+      return "d.meta-dims";
     }
     return "";
   }
@@ -537,7 +558,7 @@ UnifiedTransclusionEngine::stageVisibleCells(
     const RenderSliceRequest &req, const gleditor::text::FontFacePtr &font,
     gleditor::GlyphCache &glyphCache) {
   RenderInstanceBatch batch;
-  if (0 == manifold_.cellCount() || !font) {
+  if (!req.focusCellId || !manifold_.contains(*req.focusCellId) || !font) {
     return batch;
   }
 
@@ -551,9 +572,7 @@ UnifiedTransclusionEngine::stageVisibleCells(
   const auto axisY = axis(req.axisY);
   const auto axisZ = axis(req.axisZ);
 
-  const CellRef startId = manifold_.contains(req.focusCellId)
-                              ? req.focusCellId
-                              : manifold_.cells().front().birthOp;
+  const CellRef startId = *req.focusCellId;
 
   // Breadth-first collection along requested spatial dimensions reusing scratch
   // buffers
@@ -580,12 +599,11 @@ UnifiedTransclusionEngine::stageVisibleCells(
       continue;
     }
 
-    const auto checkNeighbor = [&](const CellID neighbor) {
-      if (neighbor != 0 &&
-          traversalScratch_.visitedSet.insert(neighbor).second &&
-          findCell(static_cast<CellRef>(neighbor))) {
-        traversalScratch_.visitedList.push_back(neighbor);
-        traversalScratch_.queue.emplace_back(neighbor, dist + 1);
+    const auto checkNeighbor = [&](const std::optional<CellRef> neighbor) {
+      if (neighbor && traversalScratch_.visitedSet.insert(*neighbor).second &&
+          findCell(*neighbor)) {
+        traversalScratch_.visitedList.push_back(*neighbor);
+        traversalScratch_.queue.emplace_back(*neighbor, dist + 1);
       }
     };
 
@@ -685,18 +703,18 @@ UnifiedTransclusionEngine::stageVisibleCells(
   return batch;
 }
 
-std::size_t UnifiedTransclusionEngine::stageIntoStreamBuffer(
+std::optional<std::size_t> UnifiedTransclusionEngine::stageIntoStreamBuffer(
     const RenderSliceRequest &req, const gleditor::text::FontFacePtr &font,
     gleditor::GlyphCache &glyphCache, render::IStreamBuffer &streamBuffer) {
   const auto batch = stageVisibleCells(req, font, glyphCache);
   if (batch.rows.empty()) {
-    return 0;
+    return std::nullopt;
   }
 
   const std::size_t bytes = batch.rows.size() * sizeof(Doc::VBORow);
-  auto chunk              = streamBuffer.allocate(bytes, 64);
+  auto chunk              = streamBuffer.allocate(bytes);
   if (!chunk.ptr) {
-    return 0;
+    return std::nullopt;
   }
 
   std::memcpy(chunk.ptr, batch.rows.data(), bytes);

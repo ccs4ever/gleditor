@@ -146,11 +146,11 @@ TEST(SpanfiladeTest, ZigzagManifoldIndexingAndU3) {
 
   // Cell 1
   at               = store.makeCell(at, "Cell One Content");
-  const auto cell1 = store.cellRefOf(at);
+  const auto cell1 = store.cellRefOf(at).value();
 
   // Cell 2 with multiple spans (via spliceCell)
   at               = store.makeCell(at, "the quick brown fox");
-  const auto cell2 = store.cellRefOf(at);
+  const auto cell2 = store.cellRefOf(at).value();
   at               = store.spliceCell(at, cell2, 4, 5, "slow");
 
   const auto manifold   = store.rebuildManifold(at);
@@ -228,7 +228,7 @@ TEST(SpanfiladeTest, CachedSpanfiladeDifferentialAndSignatureTest) {
   auto at = store.sliceGenesis(MicroversionId{});
 
   at            = store.makeCell(at, "d.1");
-  const auto d1 = store.cellRefOf(at);
+  const auto d1 = store.cellRefOf(at).value();
 
   const auto vDoc = store.insert(at, 0, "0123456789abcdefghijklmnopqrstuvwxyz");
   const auto doc0 = store.rebuild(vDoc);
@@ -241,19 +241,19 @@ TEST(SpanfiladeTest, CachedSpanfiladeDifferentialAndSignatureTest) {
 
   // Cell 1 quotes docSpan
   at               = store.makeCell(vDoc1, "placeholder1");
-  const auto cell1 = store.cellRefOf(at);
+  const auto cell1 = store.cellRefOf(at).value();
   at               = store.spliceCellSpan(at, cell1, 0, 12, docSpan);
 
   // Intermediate cell 2
   at               = store.makeCell(at, "cell2");
-  const auto cell2 = store.cellRefOf(at);
+  const auto cell2 = store.cellRefOf(at).value();
 
   // Distant cell 3 quotes docSpan
   at               = store.makeCell(at, "placeholder3");
-  const auto cell3 = store.cellRefOf(at);
+  const auto cell3 = store.cellRefOf(at).value();
   at               = store.spliceCellSpan(at, cell3, 0, 12, docSpan);
 
-  const auto homeCell = store.homeCell();
+  const auto homeCell = store.homeCell().value();
 
   // Link along d.1: homeCell -> cell1 -> cell2 -> (chain...) -> cell3
   at = store.setLink(at, homeCell, d1, zigzag::DimVector::POS, cell1);
@@ -262,7 +262,7 @@ TEST(SpanfiladeTest, CachedSpanfiladeDifferentialAndSignatureTest) {
   auto prev = cell2;
   for (int i = 0; i < 3; ++i) {
     at                      = store.makeCell(at, "chain");
-    const auto intermediate = store.cellRefOf(at);
+    const auto intermediate = store.cellRefOf(at).value();
     at   = store.setLink(at, prev, d1, zigzag::DimVector::POS, intermediate);
     prev = intermediate;
   }

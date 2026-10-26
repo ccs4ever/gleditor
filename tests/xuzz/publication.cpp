@@ -108,6 +108,18 @@ TEST(PublicationTest, unreachableRunRefusesBeforeRegisteringOrWriting) {
   EXPECT_EQ(destination.userPermascroll().spool().size(), 0U);
 }
 
+TEST(PublicationTest, anonymousUnsealedScrollHasNoGlobalAddress) {
+  xanadu::Store store;
+  Scroll anonymous;
+  anonymous.salt = "remote-author";
+  const auto id  = store.addScroll(anonymous);
+  const xanadu::PrimediaSpan span{.scroll = id, .start = 0, .length = 4};
+
+  EXPECT_FALSE(xanadu::scrollKey(anonymous));
+  EXPECT_FALSE(xanadu::globalKeyOf(store, span));
+  EXPECT_FALSE(xanadu::globalise(store, span));
+}
+
 TEST(PublicationTest, aDocumentIsPublishedAsPointersAndReadsBackTheSame) {
   const auto keys   = xanadu::createMutableKeys();
   const auto scroll = namedScroll(keys.publicKey, "permascroll", 1000);
@@ -273,8 +285,8 @@ TEST(PublicationTest, twoDocumentsQuotingOnePassageAreFoundToShareIt) {
   // The middle of it, written by somebody who only has the address.
   const auto quotingVersion = quoting(quotingStore, scroll, 150, 50);
 
-  const auto first = xanadu::publish(originalStore, originalVersion, author,
-                                     "original", "The Original", 1, 1700000000);
+  const auto first  = xanadu::publish(originalStore, originalVersion, author,
+                                      "original", "The Original", 1, 1700000000);
   const auto second = xanadu::publish(quotingStore, quotingVersion, quoter,
                                       "quoting", "A Quotation", 1, 1700000100);
 
@@ -623,7 +635,8 @@ protected:
                                         .tag         = "review",
                                         .timestamp   = "2026-10-04T00:00:00Z"});
     author.sealMetadata();
-    head = author.designateEdition(author.structureHead(), "release", docB);
+    head = author.designateEdition(author.structureHead().value(), "release",
+                                   docB);
     seal();
   }
   void seal() {
@@ -660,19 +673,21 @@ TEST_F(PublicationInventoryTest,
   EXPECT_EQ(annotation->timestamp, "2026-10-04T00:00:00.000000000Z");
   EXPECT_EQ(restored->editionNamed(head, "release")->targetVersion, docB);
   EXPECT_EQ(restored->textOf(fork), "Alice's ideas alternate");
-  EXPECT_NE(restored->segmentedOps().indexOf(docB),
-            author.segmentedOps().indexOf(docB));
-  EXPECT_EQ(restored->textOf(head, restored->segmentedOps().indexOf(docA)),
-            "Alice's ideasReference");
-  EXPECT_EQ(restored->textOf(head, restored->segmentedOps().indexOf(docB)),
-            "More ideas");
+  EXPECT_NE(restored->segmentedOps().indexOf(docB).value(),
+            author.segmentedOps().indexOf(docB).value());
+  EXPECT_EQ(
+      restored->textOf(head, restored->segmentedOps().indexOf(docA).value()),
+      "Alice's ideasReference");
+  EXPECT_EQ(
+      restored->textOf(head, restored->segmentedOps().indexOf(docB).value()),
+      "More ideas");
   const auto folded = restored->rebuildManifold(head);
   EXPECT_EQ(folded.refusedOps(), 0U);
   EXPECT_EQ(restored->resolveStructureName(
-                head, restored->segmentedOps().indexOf(sliceA)),
+                head, restored->segmentedOps().indexOf(sliceA).value()),
             "Idea board");
   EXPECT_EQ(restored->resolveStructureName(
-                head, restored->segmentedOps().indexOf(sliceB)),
+                head, restored->segmentedOps().indexOf(sliceB).value()),
             "Second board");
   EXPECT_EQ(reader->bytes().size(), 0U);
 }
@@ -724,12 +739,12 @@ TEST_F(PublicationInventoryTest,
   EXPECT_EQ(offline.documentId(), pub.storeId);
   EXPECT_EQ(offline.opCount(), count);
   EXPECT_EQ(offline.textOf(fork), "Alice's ideas alternate");
-  EXPECT_EQ(offline.textOf(head, offline.segmentedOps().indexOf(docB)),
+  EXPECT_EQ(offline.textOf(head, offline.segmentedOps().indexOf(docB).value()),
             "More ideas");
   EXPECT_EQ(offline.currentVersions(), author.currentVersions());
   EXPECT_EQ(offline.editionNamed(head, "release")->targetVersion, docB);
   EXPECT_EQ(offline.resolveStructureName(
-                head, offline.segmentedOps().indexOf(sliceB)),
+                head, offline.segmentedOps().indexOf(sliceB).value()),
             "Second board");
   offline.save(destination.string());
   EXPECT_EQ(offline.opCount(), count);
@@ -813,15 +828,16 @@ TEST_F(PublicationInventoryTest,
   reopened.setContentSource(&source);
   reopened.load((root / "native").string());
   const auto release =
-      reopened.editionNamed(reopened.structureHead(), "release");
+      reopened.editionNamed(reopened.structureHead().value(), "release");
   ASSERT_TRUE(release);
   const auto changed = reopened.repointEdition(
-      reopened.structureHead(), reopened.segmentedOps().idOf(release->cell),
-      fork);
+      reopened.structureHead().value(),
+      reopened.segmentedOps().idOf(release->cell).value(), fork);
   reopened.sealMetadata();
-  const auto folded = reopened.rebuildManifold(reopened.structureHead());
-  EXPECT_FALSE(folded.versionAnnotation(reopened.segmentedOps().indexOf(docB),
-                                        reopened));
+  const auto folded =
+      reopened.rebuildManifold(reopened.structureHead().value());
+  EXPECT_FALSE(folded.versionAnnotation(
+      reopened.segmentedOps().indexOf(docB).value(), reopened));
   EXPECT_EQ(reopened.editionNamed(changed, "release")->targetVersion, fork);
 }
 
@@ -874,8 +890,9 @@ TEST_F(PublicationInventoryTest,
     (void)source.add(seed.metainfo, seed.savePath.string());
   const auto restored = xanadu::restorePublication(next, source, reader);
   EXPECT_EQ(restored->textOf(textA), "Alice's ideas");
-  EXPECT_EQ(restored->textOf(changed, restored->segmentedOps().indexOf(docA)),
-            "Alice's ideas revisedReference");
+  EXPECT_EQ(
+      restored->textOf(changed, restored->segmentedOps().indexOf(docA).value()),
+      "Alice's ideas revisedReference");
   EXPECT_EQ(next.historyScroll, first.historyScroll);
   EXPECT_EQ(next.opsSegments.front(), first.opsSegments.front());
   EXPECT_TRUE(reader->bytes().empty());
@@ -932,8 +949,9 @@ TEST_F(PublicationInventoryTest,
   const auto oldCurrent = author.currentVersions();
   const auto release    = author.editionNamed(head, "release");
   ASSERT_TRUE(release);
-  head = author.repointEdition(author.structureHead(),
-                               author.segmentedOps().idOf(release->cell), fork);
+  head = author.repointEdition(
+      author.structureHead().value(),
+      author.segmentedOps().idOf(release->cell).value(), fork);
   EXPECT_EQ(author.editionNamed(head, "release")->targetVersion, fork);
   EXPECT_EQ(author.currentVersions(), oldCurrent);
   seal();
@@ -948,7 +966,7 @@ TEST(PublicationSequenceTest, reservationsSurviveReopenAndArePerNameAndKey) {
   const auto keys  = xanadu::createMutableKeys();
   const auto other = xanadu::createMutableKeys();
   const auto dir   = std::filesystem::temp_directory_path() /
-                     ("xudu-sequences-" + keys.publicKey.hex());
+                   ("xudu-sequences-" + keys.publicKey.hex());
   std::filesystem::remove_all(dir);
   EXPECT_EQ(
       xanadu::reservePublicationSequence(dir, keys.publicKey, "doc:ideas"), 1);
@@ -977,7 +995,7 @@ TEST(PublicationSequenceTest, reservationsSurviveReopenAndArePerNameAndKey) {
 TEST(PublicationSequenceTest, simultaneousReservationsNeverReuseASequence) {
   const auto keys = xanadu::createMutableKeys();
   const auto dir  = std::filesystem::temp_directory_path() /
-                    ("xudu-sequences-" + keys.publicKey.hex());
+                   ("xudu-sequences-" + keys.publicKey.hex());
   std::vector<std::future<std::int64_t>> writers;
   for (int i = 0; i < 12; ++i) {
     writers.push_back(std::async(std::launch::async, [&] {
@@ -1018,7 +1036,7 @@ TEST(PublicationTest,
 TEST(PublicationSequenceTest, anUnknownCounterVersionCannotResetTheSequence) {
   const auto keys = xanadu::createMutableKeys();
   const auto dir  = std::filesystem::temp_directory_path() /
-                    ("xudu-sequences-" + keys.publicKey.hex());
+                   ("xudu-sequences-" + keys.publicKey.hex());
   EXPECT_EQ(
       xanadu::reservePublicationSequence(dir, keys.publicKey, "doc:ideas"), 1);
   {

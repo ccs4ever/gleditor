@@ -3,6 +3,7 @@
 #include <atomic>
 #include <chrono>
 #include <filesystem>
+#include <optional>
 #include <thread>
 #include <vector>
 
@@ -431,6 +432,10 @@ TEST(TransportAndOrParallelTest,
   ArenaManifold parentArena;
   VortexCore parentCore(parentArena);
   VortexVM parentVm(parentCore);
+  OrParallelCoordinator coordinator(nullptr, kRecomputeCycleThreshold);
+  parentVm.setCutCallback([&coordinator](std::string_view prefix) {
+    coordinator.prunePrefix(prefix);
+  });
 
   // Use #Bind on the cursor to record the branch answer cleanly:
   auto buildBranchProgram = [](VortexCore &core, VortexVM &vm) -> CellRef {
@@ -471,7 +476,6 @@ TEST(TransportAndOrParallelTest,
   ASSERT_TRUE(parentVm.step(cursor).success);
   ASSERT_EQ(parentVm.choiceDepth(), 1U);
 
-  OrParallelCoordinator coordinator(nullptr, kRecomputeCycleThreshold);
   auto exported = coordinator.exportSparkFromVictim(parentVm, entryOp);
   ASSERT_TRUE(exported.has_value());
   EXPECT_EQ(exported->model, SparkModelKind::OracleRecompute);
@@ -485,19 +489,18 @@ TEST(TransportAndOrParallelTest,
   ASSERT_TRUE(decoded.has_value());
   EXPECT_EQ(decoded->model, SparkModelKind::OracleRecompute);
   EXPECT_EQ(decoded->deweyKey, "1");
+  EXPECT_EQ(decoded->cursor, exported->cursor);
 
   // Finish parent's primary branch ("0")
   ASSERT_TRUE(parentVm.run(cursor).success);
-  const CellRef parentVar =
-      parentArena.linked(cursor, parentCore.dims().vars, DimVector::POS)
-          .value_or(noCell);
-  ASSERT_NE(parentVar, noCell);
-  const CellRef parentVal =
-      parentArena.linked(parentVar, parentCore.dims().values, DimVector::POS)
-          .value_or(noCell);
-  ASSERT_NE(parentVal, noCell);
+  const auto parentVar =
+      parentArena.linked(cursor, parentCore.dims().vars, DimVector::POS);
+  ASSERT_TRUE(parentVar);
+  const auto parentVal =
+      parentArena.linked(*parentVar, parentCore.dims().values, DimVector::POS);
+  ASSERT_TRUE(parentVal);
   ASSERT_TRUE(coordinator.submitSolution(parentVm.currentDeweyPath(),
-                                         parentArena.textOf(parentVal)));
+                                         parentArena.textOf(*parentVal)));
 
   // Execute stolen Model 1 spark on an isolated worker
   auto acquired = coordinator.acquireNextSpark();
@@ -510,17 +513,13 @@ TEST(TransportAndOrParallelTest,
       [](VortexCore &wCore, VortexVM &wVm) -> std::optional<std::string> {
         const auto cursors = wVm.activeCursors();
         if (cursors.empty()) return std::nullopt;
-        const CellRef var =
-            wCore.arena()
-                .linked(cursors.front(), wCore.dims().vars, DimVector::POS)
-                .value_or(noCell);
-        if (var == noCell) return std::nullopt;
-        const CellRef val =
-            wCore.arena()
-                .linked(var, wCore.dims().values, DimVector::POS)
-                .value_or(noCell);
-        if (val == noCell) return std::nullopt;
-        return wCore.arena().textOf(val);
+        const auto var = wCore.arena().linked(
+            cursors.front(), wCore.dims().vars, DimVector::POS);
+        if (!var) return std::nullopt;
+        const auto val =
+            wCore.arena().linked(*var, wCore.dims().values, DimVector::POS);
+        if (!val) return std::nullopt;
+        return wCore.arena().textOf(*val);
       },
       coordinator, acquired->second);
   ASSERT_TRUE(workerRes.success) << workerRes.errorMessage;
@@ -534,11 +533,27 @@ TEST(TransportAndOrParallelTest,
   EXPECT_EQ(solutions[1].value, "alt_1");
 }
 
+TEST(TransportAndOrParallelTest, OrParallelSparkWireKeepsAbsentCursor) {
+  OrParallelSpark spark;
+  spark.entryOpcode = 7;
+  spark.cursor      = std::nullopt;
+
+  const auto decoded = decodeOrParallelSpark(encodeOrParallelSpark(spark));
+  ASSERT_TRUE(decoded);
+  EXPECT_EQ(decoded->entryOpcode, 7U);
+  EXPECT_FALSE(decoded->cursor);
+  EXPECT_FALSE(decoded->stackFrame);
+}
+
 TEST(TransportAndOrParallelTest,
      Model2ShadowDeltaPrefixPreservesParentLogicBindingsAtDepthGreaterThanOne) {
   ArenaManifold parentArena;
   VortexCore parentCore(parentArena);
   VortexVM parentVm(parentCore);
+  OrParallelCoordinator coordinator(nullptr, /*cycleThreshold=*/0);
+  parentVm.setCutCallback([&coordinator](std::string_view prefix) {
+    coordinator.prunePrefix(prefix);
+  });
 
   // Depth 1: Parent creates a Vlog logic variable X and binds X =
   // "ancestor_bound"
@@ -589,7 +604,6 @@ TEST(TransportAndOrParallelTest,
   const CellRef postMarkCell = parentArena.makeCell("post_mark_noise");
   std::ignore                = postMarkCell;
 
-  OrParallelCoordinator coordinator(nullptr, /*cycleThreshold=*/0);
   // First steal takes depth-1 choice point; second steal takes depth-2 choice
   // point!
   auto stolenDepth1 =

@@ -1,0 +1,69 @@
+# Tests and diagnostics
+
+[Project overview](../README.md) · [Build setup](../README.md#quick-start) ·
+[Contributor runbook](../AGENTS.md)
+
+Commands and source paths below are relative to the repository or worktree root.
+
+## Headless execution
+
+`make` exports offscreen SDL video, dummy audio, software GL, and XDG data/config/cache directories
+under `build/xdg/`. This keeps tests headless and keeps their primedia, system xanadocs, and cache
+out of your personal directories. For a binary run outside Make, set these explicitly:
+
+```sh
+SDL_VIDEODRIVER=offscreen SDL_AUDIODRIVER=dummy LIBGL_ALWAYS_SOFTWARE=1 \
+  XDG_DATA_HOME="$PWD/build/xdg/data" XDG_CONFIG_HOME="$PWD/build/xdg/config" \
+  XDG_CACHE_HOME="$PWD/build/xdg/cache" ./build/xuzz_test
+```
+
+## Test commands
+
+```sh
+make -j$(nproc) test                 # three gtest binaries, then rootless swarm tests
+make test TEST_FILTER='MediaTest.*'  # focused gtest filter
+make test/e2e-orchestration          # whole-program xuzz orchestration
+make -j$(nproc) test/publication-local # three local UI publications with disposable signing keys
+make -j$(nproc) test/publication-swarm # outbox acknowledgement/restart on separate network stacks
+make -j$(nproc) format-check lint    # formatting and text lint gates
+make -j$(nproc) shaders              # shader validation
+make profile                         # library test coverage
+```
+
+`gleditor_test` links the real shared library; `xuzz_test` exercises the engine without a graphics
+device; `zigzag_test` covers the slice model and transclusion engine. The swarm step uses rootless
+network namespaces and needs the `veth` kernel module. If it ends with
+`Error: Unknown device type.`, inspect the three gtest summaries before diagnosing the failure. Run
+`xvfb-run -s "-screen 0 1024x768x24" ./tools/compare-backends.sh` for the backend image and picking
+comparison.
+
+## Binary fixtures
+
+Binary sample stores live under `tests/samples/xudu/` and `tests/samples/xuzz/`. When an operation
+layout or format changes, regenerate them in the same commit:
+
+```sh
+make -j$(nproc) xuzz
+./tools/create-sample-xanadocs.sh
+./tools/create-floating-image-sample.sh
+```
+
+The second script restores the floating-image sample deleted by the first. Its permascroll is part
+of the fixture. `./build/store-dump --section=ops STORE` is the semantic diff to use across format
+changes; `--section=header` shows the format version.
+
+## Quality gates and logging
+
+`make format-check`, `make lint`, `make analyze`, and `make check` are the broader quality gates. If
+a lint tool is missing, install it locally when possible and rerun the gate; a skipped tool is not a
+pass. [AGENTS.md](../AGENTS.md) has formatter and linter setup details. Logging uses named spdlog
+categories; `SPDLOG_LEVEL='warn,text.layout=debug,xuzz.links=trace'` enables selected diagnostics on
+stderr.
+
+## API documentation generation
+
+`make doc` needs Doxygen and writes HTML to `docs/html/`. Without Doxygen, Make prints a skip
+message and exits successfully; that is not a generated-documentation pass. The current input roots
+are `src/` and `apps/`; public headers under `include/` and tools are omitted. See the
+[Doxygen coverage audit](../design/projects/doxygen-coverage-audit.md) for the configured scope and
+other coverage limits.

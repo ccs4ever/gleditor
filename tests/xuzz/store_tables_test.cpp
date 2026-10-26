@@ -14,6 +14,7 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <tuple>
 
@@ -84,6 +85,39 @@ TEST(StoreTablesTest, everyFieldSurvivesTheRoundTrip) {
   EXPECT_EQ(back.localSegments.front().mimeType, "image/png")
       << "a local segment's MIME type is the one thing the shared segment "
          "encoding has no key for, so the registry adds it";
+}
+
+TEST(StoreTablesTest, zeroPublisherBytesDecodeAsAnAbsentScrollPublisher) {
+  StoreTables sent;
+  Scroll scroll;
+  InfoHash torrent;
+  torrent.bytes.fill(0x5A);
+  scroll.salt = "fixed-file";
+  scroll.segments.push_back(
+      ScrollSegment{.at = 0, .length = 16, .torrent = torrent});
+  sent.deployedScrolls.push_back(scroll);
+
+  const auto back =
+      xanadu::deserializeStoreTables(xanadu::serializeStoreTables(sent));
+
+  ASSERT_EQ(back.deployedScrolls.size(), 1U);
+  EXPECT_FALSE(back.deployedScrolls.front().publisher);
+  EXPECT_FALSE(back.deployedScrolls.front().isNamed());
+  EXPECT_EQ(xanadu::scrollKey(back.deployedScrolls.front()),
+            xanadu::scrollKey(scroll));
+}
+
+TEST(StoreTablesTest, engagedZeroPublisherCannotEncodeAsAbsent) {
+  StoreTables tables;
+  Scroll scroll;
+  scroll.publisher = xanadu::PublicKey{};
+  tables.deployedScrolls.push_back(scroll);
+
+  EXPECT_THROW(std::ignore = xanadu::serializeStoreTables(tables),
+               std::invalid_argument);
+  EXPECT_THROW(std::ignore = xanadu::scrollKey(scroll), std::invalid_argument);
+  EXPECT_THROW(std::ignore = xanadu::scrollKeyFor(xanadu::PublicKey{}, "salt"),
+               std::invalid_argument);
 }
 
 TEST(StoreTablesTest, aFileThatIsNotOneIsRefusedAndSaysWhy) {

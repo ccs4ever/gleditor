@@ -48,6 +48,23 @@ TEST(VQLMultiStoreTest, CoordinatorGenesis) {
   EXPECT_EQ(coord.storeCount(), 0u);
 }
 
+TEST(VQLMultiStoreTest, ExplicitRootDoesNotSelectCurrentStructure) {
+  const auto store =
+      std::make_shared<Store>(std::make_shared<UserPermascroll>());
+  const auto genesis = store->sliceGenesis({}, "slice");
+  ASSERT_TRUE(store->rebuildManifold(genesis).home());
+  MultiStoreCoordinator automatic;
+  automatic.addStore("automatic", "primary", store);
+  ASSERT_EQ(automatic.storeCount(), 1U);
+  EXPECT_TRUE(automatic.stores().front().manifold->home());
+
+  MultiStoreCoordinator root;
+  root.addStore("root", "primary", store, xanadu::MicroversionId{});
+  ASSERT_EQ(root.storeCount(), 1U);
+  EXPECT_FALSE(root.stores().front().manifold->home());
+  EXPECT_EQ(root.stores().front().manifold->cellCount(), 0U);
+}
+
 TEST(VQLMultiStoreTest, SingleSliceRegistration) {
   MultiStoreCoordinator coord;
   auto &arena = coord.arena();
@@ -69,6 +86,17 @@ TEST(VQLMultiStoreTest, SingleSliceRegistration) {
   EXPECT_EQ(coord.resolveNamedStore("non_existent"), std::nullopt);
 }
 
+TEST(VQLMultiStoreTest, InvalidSliceHomeIsRefusedBeforeRegistration) {
+  MultiStoreCoordinator coord;
+  const auto before = coord.arena().cellCount();
+  EXPECT_THROW(coord.addSlice("bad", "primary", zigzag::noCell),
+               std::invalid_argument);
+  EXPECT_THROW(coord.addSlice("bad", "primary", 123456), std::invalid_argument);
+  EXPECT_EQ(coord.storeCount(), 0U);
+  EXPECT_EQ(coord.arena().cellCount(), before);
+  EXPECT_FALSE(coord.derefCloneMaster(123456));
+}
+
 TEST(VQLMultiStoreTest, MultiSliceTopologyAndDerefMaster) {
   MultiStoreCoordinator coord;
   auto &arena = coord.arena();
@@ -84,20 +112,24 @@ TEST(VQLMultiStoreTest, MultiSliceTopologyAndDerefMaster) {
 
   EXPECT_EQ(coord.storeCount(), 3u);
   EXPECT_EQ(coord.coordinatorHome(), coord.homeAnchor());
+  ASSERT_TRUE(coord.coordinatorHome());
 
   // Verify d.stores rank posward walk: coordHome -> storeUsers -> storeMath ->
   // storeGeo
-  CellRef step1 = arena.linked(coord.coordinatorHome().value_or(noCell),
-                               coord.dimStores(), false);
-  EXPECT_EQ(step1, storeUsers);
+  const auto step1 =
+      arena.linked(*coord.coordinatorHome(), coord.dimStores(), false);
+  ASSERT_TRUE(step1);
+  EXPECT_EQ(*step1, storeUsers);
 
-  CellRef step2 = arena.linked(step1, coord.dimStores(), false);
-  EXPECT_EQ(step2, storeMath);
+  const auto step2 = arena.linked(*step1, coord.dimStores(), false);
+  ASSERT_TRUE(step2);
+  EXPECT_EQ(*step2, storeMath);
 
-  CellRef step3 = arena.linked(step2, coord.dimStores(), false);
-  EXPECT_EQ(step3, storeGeo);
+  const auto step3 = arena.linked(*step2, coord.dimStores(), false);
+  ASSERT_TRUE(step3);
+  EXPECT_EQ(*step3, storeGeo);
 
-  EXPECT_EQ(arena.linked(step3, coord.dimStores(), false), noCell);
+  EXPECT_FALSE(arena.linked(*step3, coord.dimStores(), false));
 
   // Test the universal '>' clone master dereference on each storeCell
   EXPECT_EQ(coord.derefCloneMaster(storeUsers),
@@ -107,17 +139,17 @@ TEST(VQLMultiStoreTest, MultiSliceTopologyAndDerefMaster) {
   EXPECT_EQ(coord.derefCloneMaster(storeGeo), std::optional<CellRef>{homeGeo});
 
   // Verify metadata on slice home cells
-  CellRef nameUsers = arena.linked(homeUsers, coord.dimName(), false);
-  EXPECT_NE(nameUsers, noCell);
-  EXPECT_EQ(arena.textOf(nameUsers), "users");
+  const auto nameUsers = arena.linked(homeUsers, coord.dimName(), false);
+  ASSERT_TRUE(nameUsers);
+  EXPECT_EQ(arena.textOf(*nameUsers), "users");
 
-  CellRef roleUsers = arena.linked(homeUsers, coord.dimRole(), false);
-  EXPECT_NE(roleUsers, noCell);
-  EXPECT_EQ(arena.textOf(roleUsers), "data");
+  const auto roleUsers = arena.linked(homeUsers, coord.dimRole(), false);
+  ASSERT_TRUE(roleUsers);
+  EXPECT_EQ(arena.textOf(*roleUsers), "data");
 
-  CellRef nameMath = arena.linked(homeMath, coord.dimName(), false);
-  EXPECT_NE(nameMath, noCell);
-  EXPECT_EQ(arena.textOf(nameMath), "math");
+  const auto nameMath = arena.linked(homeMath, coord.dimName(), false);
+  ASSERT_TRUE(nameMath);
+  EXPECT_EQ(arena.textOf(*nameMath), "math");
 
   // Test ##NAME shorthand resolution
   EXPECT_EQ(coord.resolveNamedStore("users"),
@@ -163,8 +195,8 @@ TEST(VQLMultiStoreTest, StoreImportAndCrossStoreNavigation) {
   // Add custom dimension and cell to Store A
   auto dimStep = storeA->makeDimension(vA1, "d.step");
   auto cellA1  = storeA->makeCell(dimStep.version, "hello_from_A");
-  auto vA2     = storeA->setLink(cellA1, storeA->homeCell(), dimStep.dim, false,
-                                 storeA->cellRefOf(cellA1));
+  auto vA2 = storeA->setLink(cellA1, storeA->homeCell().value(), dimStep.dim,
+                             false, storeA->cellRefOf(cellA1));
 
   UserPermascroll::Config configB;
   configB.storageDir = dirB / "permascroll";
@@ -221,8 +253,9 @@ TEST(VQLMultiStoreTest, AGuessedVersionFoldsWhereTheHomeIs) {
   const auto folded = coord.findStore("forked");
   ASSERT_TRUE(folded.has_value());
   EXPECT_NE(folded->manifold->home(), noCell);
-  EXPECT_EQ(coord.arena().textOf(coord.homeAnchor().value_or(noCell), *store),
-            "home");
+  const auto homeAnchor = coord.homeAnchor();
+  ASSERT_TRUE(homeAnchor);
+  EXPECT_EQ(coord.arena().textOf(*homeAnchor, *store), "home");
 }
 
 // A document's prose is no cell; find() answers a hit in it with the line,
@@ -254,8 +287,36 @@ TEST(VQLMultiStoreTest, FindReadsDocumentProse) {
   const auto sourceDim = coord.core().findDimension("d.source");
   ASSERT_TRUE(sourceDim.has_value());
   const auto origin = arena.linked(hits[0], *sourceDim);
-  ASSERT_NE(origin, noCell);
-  EXPECT_THAT(arena.textOf(origin), ::testing::EndsWith("&at=15"));
+  ASSERT_TRUE(origin);
+  EXPECT_THAT(arena.textOf(*origin), ::testing::EndsWith("&at=15"));
+}
+
+TEST(VQLMultiStoreTest, FindEmptyAndNewlineNeedlesVisitEachDocumentLine) {
+  const auto dir = tempStoreDir("find_line_boundaries");
+  UserPermascroll::Config config;
+  config.storageDir = dir / "permascroll";
+  auto scroll       = std::make_shared<UserPermascroll>(config);
+  auto store        = std::make_shared<Store>(scroll);
+  std::ignore =
+      store->insert(xanadu::MicroversionId{}, 0, "first\nsecond\nthird\n");
+
+  MultiStoreCoordinator coord;
+  coord.addStore("prose", "primary", store);
+  xanadu::vql::VQLEngine engine(coord);
+
+  const auto emptyNeedle = engine.execute(R"(find(""))");
+  ASSERT_EQ(emptyNeedle.size(), 4U);
+  const auto &arena = coord.arena();
+  EXPECT_EQ(arena.textOf(emptyNeedle[0]), "first");
+  EXPECT_EQ(arena.textOf(emptyNeedle[1]), "second");
+  EXPECT_EQ(arena.textOf(emptyNeedle[2]), "third");
+  EXPECT_EQ(arena.textOf(emptyNeedle[3]), "");
+
+  const auto newlineNeedle = engine.execute(R"(find("\n"))");
+  ASSERT_EQ(newlineNeedle.size(), 3U);
+  EXPECT_EQ(arena.textOf(newlineNeedle[0]), "first");
+  EXPECT_EQ(arena.textOf(newlineNeedle[1]), "second");
+  EXPECT_EQ(arena.textOf(newlineNeedle[2]), "third");
 }
 
 TEST(VQLMultiStoreTest, ContainsAnswersAtTheTopLevel) {
@@ -267,6 +328,29 @@ TEST(VQLMultiStoreTest, ContainsAnswersAtTheTopLevel) {
   const auto no = engine.execute(R"(contains("abc", "z"))");
   ASSERT_EQ(no.size(), 1U);
   EXPECT_EQ(coord.core().render(no[0]), zigzag::vortex::CellValue(false));
+}
+
+TEST(VQLMultiStoreTest, DeltaDefaultsButExplicitMissingTargetHasNoValue) {
+  MultiStoreCoordinator coord;
+  xanadu::vql::VQLEngine engine(coord);
+  const auto defaultDelta =
+      engine.execute("let $value := delta(); return $value");
+  ASSERT_EQ(defaultDelta.size(), 1U);
+  EXPECT_EQ(coord.core().render(defaultDelta.front()),
+            zigzag::vortex::CellValue(std::string("modified")));
+  EXPECT_TRUE(
+      engine.execute("let $value := delta($missing); return $value").empty());
+  EXPECT_TRUE(engine.execute("let $value := delta(0); return $value").empty());
+  EXPECT_TRUE(
+      engine.execute("let $value := delta(false); return $value").empty());
+  EXPECT_TRUE(
+      engine.execute(R"(let $value := delta(""); return $value)").empty());
+  EXPECT_TRUE(engine.execute(R"(%subject/delta(0))").empty());
+  EXPECT_TRUE(engine.execute(R"(%subject/delta($missing))").empty());
+  const auto targetDelta = engine.execute(R"(%subject/delta())");
+  ASSERT_EQ(targetDelta.size(), 1U);
+  EXPECT_EQ(coord.core().render(targetDelta.front()),
+            zigzag::vortex::CellValue(std::string("modified")));
 }
 
 // Answering nothing for a function nobody defined reads as "no match".

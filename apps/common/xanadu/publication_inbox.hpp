@@ -35,7 +35,7 @@ struct PublicationDownloadStatus {
   std::uint64_t dependencyCount{};
   std::filesystem::path storePath;
   MicroversionId version;
-  std::int64_t sequence{-1};
+  std::optional<std::int64_t> sequence;
   InfoHash manifestHash;
   std::string error;
 };

@@ -209,12 +209,12 @@ LinkVisitContext decodeLinkContext(const std::string_view text) {
 StoreActivityLog::StoreActivityLog(Store *aStore,
                                    std::filesystem::path aDirectory)
     : store(aStore), directory(std::move(aDirectory)) {
-  if (!store || store->homeCell() == zigzag::noCell) return;
+  if (!store || !store->homeCell()) return;
   const auto manifold = store->rebuildManifold(store->latest());
   if (const auto dim = manifold.dimensionNamed(kVisits, *store)) {
-    for (auto cell = manifold.linked(store->homeCell(), *dim);
-         cell != zigzag::noCell; cell = manifold.linked(cell, *dim)) {
-      auto visit = decode(manifold.textOf(cell, *store));
+    for (auto cell = manifold.linked(store->homeCell().value(), *dim); cell;
+         cell      = manifold.linked(*cell, *dim)) {
+      auto visit = decode(manifold.textOf(*cell, *store));
       visit.id   = VisitId{visits.size() + 1};
       if (visit.parent && visit.parent->value >= visit.id.value) {
         throw std::runtime_error("activity: invalid visit parent");
@@ -223,12 +223,12 @@ StoreActivityLog::StoreActivityLog(Store *aStore,
     }
   }
   if (const auto dim = manifold.dimensionNamed(kCurrent, *store)) {
-    auto cell = store->homeCell();
-    for (auto next = manifold.linked(cell, *dim); next != zigzag::noCell;
-         next      = manifold.linked(cell, *dim)) {
-      cell = next;
+    auto cell = store->homeCell().value();
+    for (auto next = manifold.linked(cell, *dim); next;
+         next      = manifold.linked(*next, *dim)) {
+      cell = *next;
     }
-    if (cell != store->homeCell()) {
+    if (cell != store->homeCell().value()) {
       const auto stored = manifold.textOf(cell, *store);
       std::uint64_t id{};
       const auto [end, error] =
@@ -241,9 +241,9 @@ StoreActivityLog::StoreActivityLog(Store *aStore,
     }
   }
   if (const auto dim = manifold.dimensionNamed(kReferences, *store)) {
-    for (auto cell = manifold.linked(store->homeCell(), *dim);
-         cell != zigzag::noCell; cell = manifold.linked(cell, *dim)) {
-      const auto visit = referenceOf(manifold.textOf(cell, *store));
+    for (auto cell = manifold.linked(store->homeCell().value(), *dim); cell;
+         cell      = manifold.linked(*cell, *dim)) {
+      const auto visit = referenceOf(manifold.textOf(*cell, *store));
       if (!find(visit))
         throw ActivityRecordUnreadable("d.activity-references: unknown visit " +
                                        std::to_string(visit.value));
@@ -252,9 +252,9 @@ StoreActivityLog::StoreActivityLog(Store *aStore,
     }
   }
   if (const auto dim = manifold.dimensionNamed(kAnnotations, *store)) {
-    for (auto cell = manifold.linked(store->homeCell(), *dim);
-         cell != zigzag::noCell; cell = manifold.linked(cell, *dim)) {
-      auto [visit, text] = annotationOf(manifold.textOf(cell, *store));
+    for (auto cell = manifold.linked(store->homeCell().value(), *dim); cell;
+         cell      = manifold.linked(*cell, *dim)) {
+      auto [visit, text] = annotationOf(manifold.textOf(*cell, *store));
       if (!find(visit))
         throw ActivityRecordUnreadable(
             "d.activity-annotations: unknown visit " +
@@ -268,7 +268,7 @@ void StoreActivityLog::appendRecord(const std::string_view dimension,
                                     const std::string_view text) {
   if (!store) return;
   auto at = store->latest();
-  if (store->homeCell() == zigzag::noCell) at = store->sliceGenesis(at);
+  if (!store->homeCell()) at = store->sliceGenesis(at);
   auto dim = store->rebuildManifold(at).dimensionNamed(dimension, *store);
   if (!dim) {
     const auto made = store->makeDimension(at, dimension);
@@ -276,13 +276,13 @@ void StoreActivityLog::appendRecord(const std::string_view dimension,
     dim             = made.dim;
   }
   auto manifold = store->rebuildManifold(at);
-  auto tail     = store->homeCell();
-  for (auto next = manifold.linked(tail, *dim); next != zigzag::noCell;
-       next      = manifold.linked(tail, *dim)) {
-    tail = next;
+  auto tail     = store->homeCell().value();
+  for (auto next = manifold.linked(tail, *dim); next;
+       next      = manifold.linked(*next, *dim)) {
+    tail = *next;
   }
   at              = store->makeCell(at, text);
-  const auto cell = store->cellRefOf(at);
+  const auto cell = store->cellRefOf(at).value();
   at = store->setLink(at, tail, *dim, zigzag::DimVector::POS, cell);
   std::filesystem::create_directories(directory);
   store->save(directory.string());

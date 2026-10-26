@@ -18,6 +18,26 @@ namespace {
 
 constexpr std::uint32_t kStride = 48;
 
+TEST(BufferPoolHandleTest, AllocationAbsenceIsDistinctFromIdZero) {
+  const BufferPool::Allocation absent{};
+  const BufferPool::Allocation zeroId{.id = 0};
+
+  EXPECT_TRUE(absent.empty());
+  EXPECT_FALSE(zeroId.empty());
+  ASSERT_TRUE(zeroId.id);
+  EXPECT_EQ(*zeroId.id, 0U);
+}
+
+TEST(RenderHandleTest, AbsenceIsDistinctFromIdZero) {
+  const render::BufferHandle absent{};
+  const render::BufferHandle zeroId{.id = 0};
+
+  EXPECT_FALSE(absent.valid());
+  EXPECT_TRUE(zeroId.valid());
+  ASSERT_TRUE(zeroId.id);
+  EXPECT_EQ(*zeroId.id, 0U);
+}
+
 class BufferPoolTest : public testing::Test {
 protected:
   std::unique_ptr<NiceMock<MockRenderDevice>> device;

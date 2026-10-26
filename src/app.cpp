@@ -1561,8 +1561,7 @@ int Application::run() {
     // (the radial menu) reads it from here.
     state->mouseX = x;
     state->mouseY = y;
-    state->clickX = x;
-    state->clickY = y;
+    state->recordClickPosition(x, y);
     // Held while a modal is up, along with the drag above: the caret is not
     // what is being moved when there is a question on screen.
     const auto delivery = state->focusManager.dispatchPointerWithPick(

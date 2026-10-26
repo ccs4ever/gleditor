@@ -360,7 +360,7 @@ bool TranscopyrightOverlay::picked(const render::PickingResult &pick,
   std::uint32_t id{};
   if (pick.tag.docIndex == pickScope_ && pick.tag.pageIndex == 0 &&
       pickScope_ != 0) {
-    if (pick.requestId != 0) {
+    if (pick.requestId) {
       if (!pick.overlayWidgetId) return false;
       id = *pick.overlayWidgetId;
     } else {
@@ -370,8 +370,7 @@ bool TranscopyrightOverlay::picked(const render::PickingResult &pick,
       id = (*pickTargets_)[pick.tag.clusterIndex - 1];
     }
   } else {
-    if (pick.requestId != 0 || pick.tag.docIndex != 0 ||
-        pick.tag.pageIndex != 0)
+    if (pick.requestId || pick.tag.docIndex != 0 || pick.tag.pageIndex != 0)
       return false;
     id = pick.tag.clusterIndex;
     if (std::ranges::none_of(activeBadges_, [id](const auto &badge) {
@@ -396,10 +395,10 @@ void TranscopyrightOverlay::describe(gleditor::a11y::Builder &into) {
   const auto snapshot = accessible_.load();
   if (!snapshot) return;
   for (const auto &badge : *snapshot) {
-    auto &node = into.add(badge.id, badge.locked ? gleditor::a11y::Role::Button
-                                                 : gleditor::a11y::Role::Label);
-    node.label = badge.label;
-    node.bounds    = badge.bounds;
+    auto &node  = into.add(badge.id, badge.locked ? gleditor::a11y::Role::Button
+                                                  : gleditor::a11y::Role::Label);
+    node.label  = badge.label;
+    node.bounds = badge.bounds;
     node.focusable = badge.locked;
     node.actions =
         badge.locked ? gleditor::a11y::bit(gleditor::a11y::Action::Click) : 0;

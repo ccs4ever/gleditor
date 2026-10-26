@@ -122,14 +122,17 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
                       [renderer] { renderer->push(RenderItemNewDoc()); });
   app.commands().bind(SDL_SCANCODE_W, Mod::Ctrl, "close",
                       "close the active document", [renderer, switcher] {
-                        renderer->push(
-                            RenderItemCloseDoc(switcher->activeDocIndex()));
+                        if (const auto index = switcher->activeDocIndex()) {
+                          renderer->push(RenderItemCloseDoc(*index));
+                        }
                       });
-  app.commands().bind(
-      SDL_SCANCODE_S, Mod::Ctrl, "save",
-      "write the active document back to disk", [renderer, switcher] {
-        renderer->push(RenderItemSaveDoc(switcher->activeDocIndex()));
-      });
+  app.commands().bind(SDL_SCANCODE_S, Mod::Ctrl, "save",
+                      "write the active document back to disk",
+                      [renderer, switcher] {
+                        if (const auto index = switcher->activeDocIndex()) {
+                          renderer->push(RenderItemSaveDoc(*index));
+                        }
+                      });
 
   // Formatting keybindings
   app.commands().bind(SDL_SCANCODE_B, Mod::Ctrl, "bold",
@@ -153,8 +156,9 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
                 return;
               }
               const auto cur = switcher->activeDocIndex();
+              if (!cur) return;
               const auto next =
-                  (cur + 1U) % static_cast<std::uint32_t>(rState.docs.size());
+                  (*cur + 1U) % static_cast<std::uint32_t>(rState.docs.size());
               updateDocumentSpatialPositions(rState, next, renderer, switcher,
                                              toolbar, spatial);
             });
@@ -170,7 +174,8 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
               }
               const auto total = static_cast<std::uint32_t>(rState.docs.size());
               const auto cur   = switcher->activeDocIndex();
-              const auto prev  = (cur + total - 1U) % total;
+              if (!cur) return;
+              const auto prev = (*cur + total - 1U) % total;
               updateDocumentSpatialPositions(rState, prev, renderer, switcher,
                                              toolbar, spatial);
             });

@@ -27,8 +27,8 @@ ArenaManifold::ArenaManifold(const Manifold *base, const xanadu::Store *store)
   }
 }
 
-CellRef ArenaManifold::home() const noexcept {
-  return base_ ? base_->home() : noCell;
+std::optional<CellRef> ArenaManifold::home() const noexcept {
+  return base_ ? base_->home() : std::nullopt;
 }
 
 std::vector<DimRef> ArenaManifold::dimensions() const {
@@ -48,15 +48,12 @@ std::vector<DimRef> ArenaManifold::dimensions() const {
 std::optional<DimRef>
 ArenaManifold::dimensionNamed(const std::string_view name,
                               const xanadu::SpanReader &reader) const {
-  const auto d = dimensionNamed(name, &reader);
-  if (d != noCell) {
-    return d;
-  }
-  return std::nullopt;
+  return dimensionNamed(name, &reader);
 }
 
-DimRef ArenaManifold::dimensionNamed(const std::string_view name,
-                                     const xanadu::SpanReader *reader) const {
+std::optional<DimRef>
+ArenaManifold::dimensionNamed(const std::string_view name,
+                              const xanadu::SpanReader *reader) const {
   if (!reader) reader = defaultReader_;
   if (base_ != nullptr) {
     std::optional<DimRef> baseDim;
@@ -75,13 +72,13 @@ DimRef ArenaManifold::dimensionNamed(const std::string_view name,
   if (it != arenaDims_.end()) {
     return it->second;
   }
-  return noCell;
+  return std::nullopt;
 }
 
 DimRef ArenaManifold::ensureDimension(const std::string_view name) {
   const auto existing = dimensionNamed(name);
-  if (noCell != existing) {
-    return existing;
+  if (existing) {
+    return *existing;
   }
   const auto it = arenaDims_.find(std::string(name));
   if (it != arenaDims_.end()) {
@@ -93,16 +90,16 @@ DimRef ArenaManifold::ensureDimension(const std::string_view name) {
 
   const auto dimDims = dimensionNamed("d.dims");
   const auto home    = homeCell();
-  if (noCell != dimDims && noCell != home) {
-    CellRef tail = home;
+  if (dimDims && home) {
+    CellRef tail = *home;
     while (true) {
-      const CellRef nxt = linked(tail, dimDims, DimVector::POS);
-      if (noCell == nxt) {
+      const auto nxt = linked(tail, *dimDims, DimVector::POS);
+      if (!nxt) {
         break;
       }
-      tail = nxt;
+      tail = *nxt;
     }
-    link(tail, dimDims, DimVector::POS, dim).value();
+    link(tail, *dimDims, DimVector::POS, dim).value();
   }
   return dim;
 }
@@ -124,39 +121,40 @@ ArenaManifold *ArenaManifold::projectProvenance(const xanadu::Store &store) {
     return this;
   }
 
-  const CellRef home = homeCell();
-  if (noCell == home) {
+  const auto home = homeCell();
+  if (!home) {
     return this;
   }
 
   const DimRef dimAuthorship = ensureDimension("d.authorship");
   provenanceCells_.insert(dimAuthorship);
   authorshipRoot_ = makeCell(intern("AUTHORSHIP.tsv"));
-  provenanceCells_.insert(authorshipRoot_);
-  link(home, dimAuthorship, DimVector::POS, authorshipRoot_).value();
+  provenanceCells_.insert(*authorshipRoot_);
+  link(*home, dimAuthorship, DimVector::POS, *authorshipRoot_).value();
 
   const DimRef dimSource = ensureDimension("d.source");
   provenanceCells_.insert(dimSource);
   CellRef bootstrapCell    = noCell;
   const auto &bootstrapKey = store.bootstrapPermascrollKey();
-  if (!bootstrapKey.empty()) {
+  if (bootstrapKey) {
     const auto &registry = store.scrollRegistry();
     for (const auto &rec : registry.scrolls) {
-      if (rec.globalKey == bootstrapKey && rec.cell != noCell) {
+      if (rec.globalKey == *bootstrapKey && rec.cell != noCell) {
         bootstrapCell = rec.cell;
         break;
       }
     }
     if (noCell == bootstrapCell) {
-      const DimRef dimScrolls = dimensionNamed("d.scrolls");
-      if (noCell != dimScrolls) {
-        CellRef cur = home;
+      const auto dimScrolls = dimensionNamed("d.scrolls");
+      if (dimScrolls) {
+        CellRef cur = *home;
         while (true) {
-          cur = linked(cur, dimScrolls, DimVector::POS);
-          if (noCell == cur) {
+          const auto next = linked(cur, *dimScrolls, DimVector::POS);
+          if (!next) {
             break;
           }
-          if (textOf(cur) == bootstrapKey) {
+          cur = *next;
+          if (textOf(cur) == *bootstrapKey) {
             bootstrapCell = cur;
             break;
           }
@@ -164,12 +162,12 @@ ArenaManifold *ArenaManifold::projectProvenance(const xanadu::Store &store) {
       }
     }
     if (noCell == bootstrapCell) {
-      bootstrapCell = makeCell(intern(bootstrapKey));
+      bootstrapCell = makeCell(intern(*bootstrapKey));
       provenanceCells_.insert(bootstrapCell);
     }
   }
   if (noCell != bootstrapCell) {
-    link(authorshipRoot_, dimSource, DimVector::POS, bootstrapCell).value();
+    link(*authorshipRoot_, dimSource, DimVector::POS, bootstrapCell).value();
   }
 
   auto appendRank = [this](std::string_view dimName, std::string_view value) {
@@ -177,13 +175,13 @@ ArenaManifold *ArenaManifold::projectProvenance(const xanadu::Store &store) {
     provenanceCells_.insert(dim);
     const CellRef cell = makeCell(intern(value));
     provenanceCells_.insert(cell);
-    CellRef tail = authorshipRoot_;
+    CellRef tail = *authorshipRoot_;
     while (true) {
-      const CellRef nxt = linked(tail, dim, DimVector::POS);
-      if (noCell == nxt) {
+      const auto nxt = linked(tail, dim, DimVector::POS);
+      if (!nxt) {
         break;
       }
-      tail = nxt;
+      tail = *nxt;
     }
     link(tail, dim, DimVector::POS, cell).value();
     return cell;
@@ -291,39 +289,42 @@ std::uint32_t ArenaManifold::attach(Space space) {
   const auto dimStores = ensureDimension("d.stores");
   ensureDimension("d.store-refs");
 
-  if (space.storeCell == noCell) {
+  if (space.storeCell && *space.storeCell == noCell) {
+    throw std::invalid_argument("a space store cell cannot be noCell");
+  }
+  if (!space.storeCell) {
     const std::string label =
         space.label.empty() ? ("space_" + std::to_string(id)) : space.label;
     space.storeCell = makeCell(label);
   }
 
-  CellRef root = homeCell();
-  if (root == noCell) {
+  auto root = homeCell();
+  if (!root) {
     root = makeCell("home");
   }
 
-  if (space.storeCell != root &&
-      linked(space.storeCell, dimStores, DimVector::NEG) == noCell &&
-      linked(space.storeCell, dimStores, DimVector::POS) == noCell) {
-    if (storesRankTail_ == noCell) {
-      CellRef cur = root;
+  if (*space.storeCell != *root &&
+      !linked(*space.storeCell, dimStores, DimVector::NEG) &&
+      !linked(*space.storeCell, dimStores, DimVector::POS)) {
+    if (!storesRankTail_) {
+      CellRef cur = *root;
       while (true) {
-        const CellRef nxt = linked(cur, dimStores, DimVector::POS);
-        if (noCell == nxt) {
+        const auto nxt = linked(cur, dimStores, DimVector::POS);
+        if (!nxt) {
           break;
         }
-        cur = nxt;
+        cur = *nxt;
       }
       zigzag::expectWritten(
-          link(cur, dimStores, DimVector::POS, space.storeCell));
+          link(cur, dimStores, DimVector::POS, *space.storeCell));
     } else {
       zigzag::expectWritten(
-          link(storesRankTail_, dimStores, DimVector::POS, space.storeCell));
+          link(*storesRankTail_, dimStores, DimVector::POS, *space.storeCell));
     }
   }
-  storesRankTail_ = space.storeCell;
+  storesRankTail_ = *space.storeCell;
 
-  spaceStoreRefsTail_.push_back(space.storeCell);
+  spaceStoreRefsTail_.push_back(*space.storeCell);
   spaceProxies_.emplace_back();
   spaces_.push_back(space);
   return id;
@@ -351,15 +352,15 @@ CellRef ArenaManifold::proxyFor(const std::uint32_t space,
     throw std::out_of_range("invalid space id in proxyFor");
   }
   if (foreignIndex == noCell) {
-    return noCell;
+    throw std::invalid_argument("a proxy needs a foreign cell reference");
   }
   auto &map = spaceProxies_[space - 1];
   if (const auto it = map.find(foreignIndex); it != map.end()) {
     return it->second;
   }
 
-  const auto bits     = (static_cast<std::uint64_t>(space) << 32) |
-                        static_cast<std::uint64_t>(foreignIndex);
+  const auto bits = (static_cast<std::uint64_t>(space) << 32) |
+                    static_cast<std::uint64_t>(foreignIndex);
   const CellRef proxy = mintSlot(xanadu::ValueKind::ExternRef, bits, {});
 
   const auto dimStoreRefs = ensureDimension("d.store-refs");
@@ -373,18 +374,18 @@ CellRef ArenaManifold::proxyFor(const std::uint32_t space,
   return proxy;
 }
 
-CellRef
+std::optional<CellRef>
 ArenaManifold::findExistingProxy(const std::uint32_t space,
                                  const CellRef foreignIndex) const noexcept {
   if (space == 0 || space > spaceProxies_.size() || foreignIndex == noCell) {
-    return noCell;
+    return std::nullopt;
   }
   const auto &map = spaceProxies_[space - 1];
   const auto it   = map.find(foreignIndex);
   if (it != map.end()) {
     return it->second;
   }
-  return noCell;
+  return std::nullopt;
 }
 
 bool ArenaManifold::isProxy(const CellRef ref) const noexcept {
@@ -422,11 +423,11 @@ CellRef ArenaManifold::quoteOccurrence(const QuoteViewId view,
   const auto dimQuoteOrigin = ensureDimension("d.quote-origin");
   CellRef cur               = canonicalProxy;
   while (true) {
-    const CellRef nxt = linked(cur, dimQuoteOrigin, DimVector::POS);
-    if (noCell == nxt) {
+    const auto nxt = linked(cur, dimQuoteOrigin, DimVector::POS);
+    if (!nxt) {
       break;
     }
-    cur = nxt;
+    cur = *nxt;
   }
   zigzag::expectWritten(link(cur, dimQuoteOrigin, DimVector::POS, occurrence));
   return occurrence;
@@ -436,10 +437,11 @@ bool ArenaManifold::isQuoteOccurrence(const CellRef ref) const noexcept {
   return occurrenceToCanonical_.contains(ref);
 }
 
-CellRef
+std::optional<CellRef>
 ArenaManifold::canonicalProxyOf(const CellRef occurrence) const noexcept {
   const auto it = occurrenceToCanonical_.find(occurrence);
-  return it != occurrenceToCanonical_.end() ? it->second : noCell;
+  if (it == occurrenceToCanonical_.end()) return std::nullopt;
+  return it->second;
 }
 
 gleditor::cpp26::optional<ForeignRef>
@@ -470,7 +472,8 @@ ArenaManifold::foreignOf(const CellRef ref) const noexcept {
 
 gleditor::cpp26::optional<std::pair<const xanadu::Store *, CellRef>>
 ArenaManifold::resolveForeign(const CellRef ref) const noexcept {
-  const auto target  = isQuoteOccurrence(ref) ? canonicalProxyOf(ref) : ref;
+  const auto target =
+      isQuoteOccurrence(ref) ? canonicalProxyOf(ref).value() : ref;
   const auto foreign = foreignOf(target);
   if (!foreign) {
     return gleditor::cpp26::nullopt;
@@ -490,10 +493,10 @@ ArenaManifold::resolveSourceCell(const CellRef ref) const noexcept {
   return gleditor::cpp26::nullopt;
 }
 
-DimRef ArenaManifold::dimIn(const std::uint32_t space,
-                            const DimRef dim) const noexcept {
+std::optional<DimRef> ArenaManifold::dimIn(const std::uint32_t space,
+                                           const DimRef dim) const noexcept {
   if (space == 0 || space > spaces_.size() || dim == noCell) {
-    return noCell;
+    return std::nullopt;
   }
   for (const auto &[arenaDim, bSet] : boundDimensions_) {
     bool matches = (arenaDim == dim);
@@ -516,7 +519,7 @@ DimRef ArenaManifold::dimIn(const std::uint32_t space,
 
   const auto s = spaceAt(space);
   if (!s || !s->manifold) {
-    return noCell;
+    return std::nullopt;
   }
 
   if (spaces_.size() == 1) {
@@ -551,25 +554,27 @@ DimRef ArenaManifold::dimIn(const std::uint32_t space,
     }
   }
 
-  return noCell;
+  return std::nullopt;
 }
 
-DimRef ArenaManifold::arenaDimFor(const std::uint32_t space,
-                                  const DimRef foreignDim) const noexcept {
-  if (foreignDim == noCell) {
-    return noCell;
+std::optional<DimRef>
+ArenaManifold::arenaDimFor(const std::optional<std::uint32_t> space,
+                           const DimRef foreignDim) const noexcept {
+  if (foreignDim == noCell ||
+      (space && (*space == 0 || *space > spaces_.size()))) {
+    return std::nullopt;
   }
   for (const auto &[arenaDim, bSet] : boundDimensions_) {
     for (const auto &member : bSet.members) {
-      if ((space == 0 || member.space == space) && member.dim == foreignDim) {
+      if ((!space || member.space == *space) && member.dim == foreignDim) {
         return arenaDim;
       }
     }
   }
-  if (space == 0 && boundDimensions_.contains(foreignDim)) {
+  if (!space && boundDimensions_.contains(foreignDim)) {
     return foreignDim;
   }
-  return noCell;
+  return std::nullopt;
 }
 
 ArenaManifold *ArenaManifold::bindDimension(const DimRef arenaDim,
@@ -615,14 +620,14 @@ ArenaManifold *ArenaManifold::bindSharedIdentities() {
           const auto slot = s->manifold->slot(dim);
           if (slot.has_value() && slot->birthOp != 0) {
             const auto birth = s->store->segmentedOps().idOf(slot->birthOp);
-            std::string sKey = s->sealedAs != nullptr
+            auto sKey        = s->sealedAs != nullptr
                                    ? scrollKey(*s->sealedAs)
                                    : s->store->bootstrapPermascrollKey();
-            if (sKey.empty()) {
+            if (!sKey && !s->label.empty()) {
               sKey = s->label;
             }
-            if (!sKey.empty() && !birth.isZero()) {
-              gRef = xanadu::GlobalOpRef{.scroll = sKey, .produces = birth};
+            if (sKey && birth && !birth->isZero()) {
+              gRef = xanadu::GlobalOpRef{.scroll = *sKey, .produces = *birth};
             }
           }
         }
@@ -637,7 +642,7 @@ ArenaManifold *ArenaManifold::bindSharedIdentities() {
     if (memberList.size() <= 1) {
       continue;
     }
-    DimRef targetArenaDim = noCell;
+    std::optional<DimRef> targetArenaDim;
     for (const auto &[sp, d] : memberList) {
       for (const auto &[aDim, bSet] : boundDimensions_) {
         for (const auto &m : bSet.members) {
@@ -646,16 +651,16 @@ ArenaManifold *ArenaManifold::bindSharedIdentities() {
             break;
           }
         }
-        if (targetArenaDim != noCell) {
+        if (targetArenaDim) {
           break;
         }
       }
-      if (targetArenaDim != noCell) {
+      if (targetArenaDim) {
         break;
       }
     }
 
-    if (targetArenaDim == noCell) {
+    if (!targetArenaDim) {
       std::string name;
       const auto firstSp = spaceAt(memberList.front().first);
       if (firstSp && firstSp->manifold) {
@@ -674,7 +679,7 @@ ArenaManifold *ArenaManifold::bindSharedIdentities() {
     }
 
     for (const auto &[sp, d] : memberList) {
-      bindDimension(targetArenaDim, sp, d,
+      bindDimension(*targetArenaDim, sp, d,
                     DimensionBindingMode::SharedIdentity);
     }
   }
@@ -731,7 +736,7 @@ ArenaManifold *ArenaManifold::materializeFrontier(const std::uint32_t space,
   if (!s || !s->manifold) {
     return this;
   }
-  CellRef cur = foreignHead;
+  std::optional<CellRef> cur = gleditor::fromSentinel<noCell>(foreignHead);
   if (isProxy(foreignHead)) {
     const auto foreign = foreignOf(foreignHead);
     if (foreign && foreign->space == space) {
@@ -741,14 +746,14 @@ ArenaManifold *ArenaManifold::materializeFrontier(const std::uint32_t space,
   DimRef fDim = foreignDim;
   if (contains(foreignDim)) {
     const auto resolved = dimIn(space, foreignDim);
-    if (noCell != resolved) {
-      fDim = resolved;
+    if (resolved) {
+      fDim = *resolved;
     }
   }
   std::size_t steps = 0;
-  while (cur != noCell && steps < maxSteps) {
-    proxyFor(space, cur);
-    cur = s->manifold->linked(cur, fDim, dir);
+  while (cur && steps < maxSteps) {
+    proxyFor(space, *cur);
+    cur = s->manifold->linked(*cur, fDim, dir);
     steps++;
   }
   return this;
@@ -854,7 +859,7 @@ void ArenaManifold::setOneSide(const std::uint32_t dense, const DimRef dim,
   if (nullptr == edge) {
     return;
   }
-  edge->neighbor(dir) = to;
+  edge->encodedNeighbor(dir) = to;
 }
 
 OptionalCell ArenaManifold::linked(const CellRef from, const DimRef dim,
@@ -870,7 +875,7 @@ OptionalCell ArenaManifold::linked(const CellRef from, const DimRef dim,
     for (std::uint16_t i = 0; i < cell.linkCount; i++) {
       const auto &edge = links_[static_cast<std::size_t>(cell.linkOffset) + i];
       if (edge.dim == dim) {
-        return gleditor::fromSentinel<noCell>(edge.neighbor(dir));
+        return edge.neighbor(dir);
       }
     }
     return std::nullopt;
@@ -884,7 +889,7 @@ OptionalCell ArenaManifold::linked(const CellRef from, const DimRef dim,
         const auto &edge =
             links_[static_cast<std::size_t>(cell.linkOffset) + i];
         if (edge.dim == dim) {
-          return gleditor::fromSentinel<noCell>(edge.neighbor(dir));
+          return edge.neighbor(dir);
         }
       }
       return std::nullopt;
@@ -895,11 +900,11 @@ OptionalCell ArenaManifold::linked(const CellRef from, const DimRef dim,
       const auto s = spaceAt(foreign->space);
       if (s && s->manifold) {
         const auto fDim = dimIn(foreign->space, dim);
-        if (noCell != fDim) {
-          const auto fAns = s->manifold->linked(foreign->index, fDim, dir);
-          if (fAns.has_value() && *fAns != noCell) {
+        if (fDim) {
+          const auto fAns = s->manifold->linked(foreign->index, *fDim, dir);
+          if (fAns.has_value()) {
             const auto existing = findExistingProxy(foreign->space, *fAns);
-            return gleditor::fromSentinel<noCell>(existing);
+            return existing;
           }
         }
       }
@@ -910,7 +915,7 @@ OptionalCell ArenaManifold::linked(const CellRef from, const DimRef dim,
   for (std::uint16_t i = 0; i < cell.linkCount; i++) {
     const auto &edge = links_[static_cast<std::size_t>(cell.linkOffset) + i];
     if (edge.dim == dim) {
-      return gleditor::fromSentinel<noCell>(edge.neighbor(dir));
+      return edge.neighbor(dir);
     }
   }
   return std::nullopt;
@@ -918,8 +923,7 @@ OptionalCell ArenaManifold::linked(const CellRef from, const DimRef dim,
 
 OptionalCell ArenaManifold::linkedMinting(const CellRef from, const DimRef dim,
                                           const DimVector dir) {
-  if (const auto found = linked(from, dim, dir);
-      found.has_value() && *found != noCell) {
+  if (const auto found = linked(from, dim, dir); found.has_value()) {
     return found;
   }
   // Only a proxy delegates to a foreign space, and only there can a
@@ -939,11 +943,11 @@ OptionalCell ArenaManifold::linkedMinting(const CellRef from, const DimRef dim,
     return std::nullopt;
   }
   const auto foreignDim = dimIn(foreign->space, dim);
-  if (noCell == foreignDim) {
+  if (!foreignDim) {
     return std::nullopt;
   }
-  const auto answer = space->manifold->linked(foreign->index, foreignDim, dir);
-  if (!answer.has_value() || *answer == noCell) {
+  const auto answer = space->manifold->linked(foreign->index, *foreignDim, dir);
+  if (!answer.has_value()) {
     return std::nullopt;
   }
   return proxyFor(foreign->space, *answer);
@@ -980,7 +984,7 @@ std::span<const xanadu::PrimediaSpan>
 ArenaManifold::contentOf(const CellRef ref) const noexcept {
   CellRef target = ref;
   if (isQuoteOccurrence(ref)) {
-    target = canonicalProxyOf(ref);
+    target = canonicalProxyOf(ref).value();
   }
   if (isProxy(target)) {
     const auto foreign = foreignOf(target);
@@ -1019,7 +1023,7 @@ std::optional<double>
 ArenaManifold::asDouble(const CellRef ref) const noexcept {
   CellRef target = ref;
   if (isQuoteOccurrence(ref)) {
-    target = canonicalProxyOf(ref);
+    target = canonicalProxyOf(ref).value();
   }
   if (isProxy(target)) {
     const auto foreign = foreignOf(target);
@@ -1041,7 +1045,7 @@ ArenaManifold::asDouble(const CellRef ref) const noexcept {
 std::optional<bool> ArenaManifold::asBool(const CellRef ref) const noexcept {
   CellRef target = ref;
   if (isQuoteOccurrence(ref)) {
-    target = canonicalProxyOf(ref);
+    target = canonicalProxyOf(ref).value();
   }
   if (isProxy(target)) {
     const auto foreign = foreignOf(target);
@@ -1064,7 +1068,7 @@ std::optional<std::int64_t>
 ArenaManifold::asInt64(const CellRef ref) const noexcept {
   CellRef target = ref;
   if (isQuoteOccurrence(ref)) {
-    target = canonicalProxyOf(ref);
+    target = canonicalProxyOf(ref).value();
   }
   if (isProxy(target)) {
     const auto foreign = foreignOf(target);
@@ -1108,7 +1112,7 @@ std::string ArenaManifold::textOf(const CellRef ref,
   if (!reader) reader = defaultReader_;
   CellRef target = ref;
   if (isQuoteOccurrence(ref)) {
-    target = canonicalProxyOf(ref);
+    target = canonicalProxyOf(ref).value();
   }
   if (isProxy(target)) {
     const auto foreign = foreignOf(target);
@@ -1215,7 +1219,7 @@ std::optional<ArenaManifold::QuotedContent>
 ArenaManifold::quotedContent(const CellRef ref) const {
   CellRef target = ref;
   if (isQuoteOccurrence(ref)) {
-    target = canonicalProxyOf(ref);
+    target = canonicalProxyOf(ref).value();
   }
   const xanadu::Store *store = store_;
   if (const auto foreign = foreignOf(target)) {
@@ -1328,21 +1332,20 @@ ArenaResult ArenaManifold::link(const CellRef from, const DimRef dim,
     return std::unexpected{ArenaRefusal::UnknownDimension};
   }
   const CellRef toCell = to.value_or(noCell);
-  if (to.has_value() && *to != noCell && !contains(*to)) {
+  if (to.has_value() && !contains(*to)) {
     return std::unexpected{ArenaRefusal::UnknownTarget};
   }
   const auto dense = shadow(from);
   if (!dense.has_value()) {
     return std::unexpected{ArenaRefusal::UnknownCell};
   }
-  const auto target =
-      (to.has_value() && *to != noCell) ? shadow(*to) : std::nullopt;
+  const auto target = to.has_value() ? shadow(*to) : std::nullopt;
 
   const auto d = *dense;
   // Both sides read out before anything is touched: linkFor() can grow a run,
   // and growing a run can move every DimLink in the arena.
-  CellRef displacedUs = noCell;
-  CellRef displacedIt = noCell;
+  std::optional<CellRef> displacedUs;
+  std::optional<CellRef> displacedIt;
   if (const DimLink *const mine = existingLink(d, dim); nullptr != mine) {
     displacedUs = mine->neighbor(dir);
   }
@@ -1358,13 +1361,13 @@ ArenaResult ArenaManifold::link(const CellRef from, const DimRef dim,
   // linked(b, d, -dir) == a. Maintained rather than derived, same as Manifold.
   // shadow(), not denseOf(): a displaced occupant may still be living in the
   // base, and clearing its end of the edge is a write like any other.
-  if (noCell != displacedUs && displacedUs != toCell) {
-    if (const auto other = shadow(displacedUs); other.has_value()) {
+  if (displacedUs && displacedUs != toCell) {
+    if (const auto other = shadow(*displacedUs); other.has_value()) {
       setOneSide(*other, dim, -dir, noCell);
     }
   }
-  if (noCell != displacedIt && displacedIt != from) {
-    if (const auto other = shadow(displacedIt); other.has_value()) {
+  if (displacedIt && displacedIt != from) {
+    if (const auto other = shadow(*displacedIt); other.has_value()) {
       setOneSide(*other, dim, dir, noCell);
     }
   }
@@ -1390,8 +1393,7 @@ bool ArenaManifold::rankContains(const CellRef anchor, const CellRef cell,
     std::size_t limit = bound;
     while (limit-- > 0) {
       const auto next = linked(cur, dim, DimVector::POS);
-      if (!next.has_value() || *next == noCell || *next == cur ||
-          *next == anchor) {
+      if (!next.has_value() || *next == cur || *next == anchor) {
         break;
       }
       if (*next == cell) {
@@ -1406,8 +1408,7 @@ bool ArenaManifold::rankContains(const CellRef anchor, const CellRef cell,
     std::size_t limit = bound;
     while (limit-- > 0) {
       const auto prev = linked(cur, dim, DimVector::NEG);
-      if (!prev.has_value() || *prev == noCell || *prev == cur ||
-          *prev == anchor) {
+      if (!prev.has_value() || *prev == cur || *prev == anchor) {
         break;
       }
       if (*prev == cell) {
@@ -1431,7 +1432,7 @@ ArenaManifold *ArenaManifold::insertIntoRank(const CellRef cell,
   }
   const auto displaced = linked(anchor, dim, dir);
   std::ignore          = link(anchor, dim, dir, cell);
-  if (displaced.has_value() && *displaced != noCell) {
+  if (displaced.has_value()) {
     std::ignore = link(cell, dim, dir, *displaced);
   }
   return this;
@@ -1599,9 +1600,12 @@ ArenaManifold *ArenaManifold::discard(const Mark &m) noexcept {
   }
   outstandingMarks_--;
   floors_.pop_back();
-  // The trail entries stay. They were recorded for whatever choice point
-  // encloses this one, which still needs them -- this is why cut can throw
-  // away a choice point without undoing the bindings made under it (§5.4).
+  // An enclosing choice point still needs this mark's undo records. Once
+  // the last mark is gone, no release can use them and committed turns must
+  // not retain an ever-growing trail.
+  if (0 == outstandingMarks_) {
+    trail_.clear();
+  }
   return this;
 }
 
@@ -1672,15 +1676,15 @@ ArenaManifold *ArenaManifold::release(const Mark &m) noexcept {
   liveContent_ = m.liveContent;
 
   const auto dimStoreRefs = dimensionNamed("d.store-refs");
-  if (dimStoreRefs != noCell) {
+  if (dimStoreRefs) {
     for (std::size_t s = 0; s < spaces_.size(); ++s) {
-      CellRef cur = spaces_[s].storeCell;
+      CellRef cur = *spaces_[s].storeCell;
       while (cur != noCell) {
-        const CellRef nxt = linked(cur, dimStoreRefs, DimVector::POS);
-        if (nxt == noCell) {
+        const auto nxt = linked(cur, *dimStoreRefs, DimVector::POS);
+        if (!nxt) {
           break;
         }
-        cur = nxt;
+        cur = *nxt;
       }
       if (s < spaceStoreRefsTail_.size()) {
         spaceStoreRefsTail_[s] = cur;
@@ -1874,13 +1878,13 @@ std::optional<Promoted> promote(xanadu::Store &store,
           if (s->sealedAs != nullptr) {
             const auto globalOp =
                 opRefOf(*s->store, foreign->index, *s->sealedAs);
-            if (!globalOp.empty()) {
-              globalKey = globalOp.scroll;
-              produces  = globalOp.produces;
+            if (globalOp) {
+              globalKey = globalOp->scroll;
+              produces  = globalOp->produces;
             }
           }
           if (produces.isZero()) {
-            produces = s->store->segmentedOps().idOf(foreign->index);
+            produces = s->store->segmentedOps().idOf(foreign->index).value();
           }
           if (globalKey.empty()) {
             globalKey = !s->label.empty()
@@ -1958,7 +1962,7 @@ std::optional<Promoted> promote(xanadu::Store &store,
       minted = store.makeCell(out.version, spans.front());
     }
     out.version            = minted;
-    const CellRef realCell = store.cellRefOf(minted);
+    const CellRef realCell = store.cellRefOf(minted).value();
     real.emplace(arena, realCell);
     out.cells.push_back(realCell);
 

@@ -138,11 +138,9 @@ TEST(VQLLambdaStepTest, UserDefinedFunctionBlockBodyAndWeave) {
 
   // Verify link was created along +d.status
   zigzag::DimRef dStatus = engine.resolveDimension("d.status");
-  zigzag::CellRef statusCell =
-      arena.linkedMinting(item1, dStatus, DimVector::POS)
-          .value_or(zigzag::noCell);
-  ASSERT_NE(statusCell, zigzag::noCell);
-  EXPECT_EQ(arena.textOf(statusCell), "processed");
+  const auto statusCell  = arena.linkedMinting(item1, dStatus, DimVector::POS);
+  ASSERT_TRUE(statusCell);
+  EXPECT_EQ(arena.textOf(*statusCell), "processed");
 }
 
 TEST(VQLLambdaStepTest, UserDefinedFunctionWithDefaultParameters) {
@@ -187,6 +185,74 @@ TEST(VQLLambdaStepTest, UserDefinedFunctionDestructuringParameter) {
   auto res                 = engine.execute(script);
   ASSERT_EQ(res.size(), 1u);
   EXPECT_EQ(res[0], title1);
+}
+
+TEST(VQLLambdaStepTest, MissingCurrentCellDoesNotBecomeCellZero) {
+  zigzag::ArenaManifold arena;
+  zigzag::vortex::VortexCore core(arena);
+  VQLEngine engine(core);
+
+  const zigzag::CellRef outer = arena.makeCell("outer binding");
+  engine.setVariable("x", outer);
+
+  const auto lambdaResult = engine.execute(R"(
+    let $f := \($x) $x;
+    return $f
+  )");
+  EXPECT_TRUE(lambdaResult.empty());
+  EXPECT_EQ(engine.getVariable("x"), (std::vector<zigzag::CellRef>{outer}));
+
+  engine.setVariable("value", outer);
+  EXPECT_TRUE(
+      engine.execute("let $value := ##/d.absent; return $value").empty());
+  EXPECT_TRUE(engine.getVariable("value").empty());
+
+  const auto emptyValue = engine.execute(R"(let $value := ""; return $value)");
+  ASSERT_EQ(emptyValue.size(), 1u);
+  EXPECT_EQ(arena.textOf(emptyValue.front()), "");
+
+  const auto countResult = engine.execute("##/d.absent/count()");
+  ASSERT_EQ(countResult.size(), 1u);
+  EXPECT_EQ(arena.asInt64(countResult.front()), 0);
+
+  const zigzag::DimRef dItems = engine.resolveDimension("d.items");
+  const zigzag::CellRef item  = arena.makeCell("item");
+  ASSERT_TRUE(arena.link(core.home(), dItems, DimVector::POS, item));
+  EXPECT_TRUE(engine.execute("for $item in ##/d.items where false return $item")
+                  .empty());
+  EXPECT_EQ(engine.execute("for $item in ##/d.items where true return $item"),
+            (std::vector<zigzag::CellRef>{item}));
+  EXPECT_TRUE(
+      engine
+          .execute(
+              R"(for $item in ##/d.items where $item/d.absent = "" return $item)")
+          .empty());
+
+  const auto missingContains =
+      engine.execute(R"(##/d.items/contains("item", $missing))");
+  ASSERT_EQ(missingContains.size(), 1u);
+  EXPECT_EQ(arena.asBool(missingContains.front()), false);
+  const auto emptyNeedle = engine.execute(R"(##/d.items/contains("item", ""))");
+  ASSERT_EQ(emptyNeedle.size(), 1u);
+  EXPECT_EQ(arena.asBool(emptyNeedle.front()), true);
+}
+
+TEST(VQLLambdaStepTest, ZeroFalseAndEmptyStringRemainValues) {
+  zigzag::ArenaManifold arena;
+  zigzag::vortex::VortexCore core(arena);
+  VQLEngine engine(core);
+
+  const auto zero = engine.execute("let $value := 0; return $value");
+  ASSERT_EQ(zero.size(), 1u);
+  EXPECT_EQ(arena.asInt64(zero.front()), 0);
+
+  const auto boolean = engine.execute("let $value := false; return $value");
+  ASSERT_EQ(boolean.size(), 1u);
+  EXPECT_EQ(arena.asBool(boolean.front()), false);
+
+  const auto empty = engine.execute(R"(let $value := ""; return $value)");
+  ASSERT_EQ(empty.size(), 1u);
+  EXPECT_EQ(arena.textOf(empty.front()), "");
 }
 
 } // namespace

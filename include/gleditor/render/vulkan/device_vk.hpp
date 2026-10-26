@@ -131,6 +131,8 @@ public:
   void setPresentEnabled(bool enabled) override;
 
 private:
+  [[nodiscard]] std::uint32_t allocateHandleId();
+
   /// Thread count and whether it was demanded, as one value so that the
   /// environment is consulted once. See the delegating constructor.
   explicit DeviceVK(std::pair<std::uint32_t, bool> recording);
@@ -250,12 +252,9 @@ private:
       }
     }
     void reset() { count = 0; }
-    /// Median cost per draw, or infinity when nothing has been measured, so
-    /// that an unmeasured strategy never wins a comparison by default.
-    [[nodiscard]] double median() const {
-      if (0 == count) {
-        return std::numeric_limits<double>::infinity();
-      }
+    /// Median cost per draw, absent until the strategy has samples.
+    [[nodiscard]] std::optional<double> median() const {
+      if (0 == count) return std::nullopt;
       auto sorted = samples;
       auto *const middle =
           sorted.begin() + static_cast<std::ptrdiff_t>(count / 2);
@@ -466,7 +465,7 @@ private:
   std::unordered_map<std::uint32_t, BufferRecord> buffers;
   std::unordered_map<std::uint32_t, TextureRecord> textures;
   std::unordered_map<std::uint32_t, PipelineRecord> pipelines;
-  std::uint32_t nextHandleId{1};
+  std::optional<std::uint32_t> nextHandleId{1};
   bool initialised{};
 
   void drainRetiredResources(FrameContext &frame);

@@ -3,6 +3,7 @@
  * @brief Carrying out the link navigator's effects in a running session.
  */
 #include "link_context.hpp"
+#include "common/xanadu/zigzag/cell_views.hpp"
 
 #include <gleditor/render_state.hpp>
 
@@ -131,10 +132,9 @@ LinkContext::packageIndex(const std::optional<int> cellRadius) const {
   std::vector<zigzag::CellRef> everyCell;
   std::vector<PackageCellView> cells;
   if (manifold && focusCell) {
-    everyCell = manifold->cellsWithinRadius(!cellRadius      ? zigzag::noCell
-                                            : cellFocusQuery ? cellFocusQuery()
-                                                             : zigzag::noCell,
-                                            cellRadius.value_or(-1));
+    const auto start =
+        cellRadius && cellFocusQuery ? cellFocusQuery() : std::nullopt;
+    everyCell = manifold->cellsWithinRadius(start, cellRadius);
     cells.push_back({.store    = session.store(manifoldStoreIndex),
                      .version  = manifoldVersion,
                      .manifold = *manifold,
@@ -143,7 +143,7 @@ LinkContext::packageIndex(const std::optional<int> cellRadius) const {
   return PackageOccurrenceIndex(documents, cells);
 }
 std::vector<LinkOccurrences>
-LinkContext::presentationLinks(const int cellRadius) const {
+LinkContext::presentationLinks(const std::optional<int> cellRadius) const {
   const auto keys = session.readerLinkPackages().links();
   std::vector<LinkOccurrences> result;
   const auto index = packageIndex(cellRadius);
@@ -163,7 +163,7 @@ LinkContext::presentationLinks(const int cellRadius) const {
 }
 
 std::vector<LinkOccurrences>
-LinkContext::packagePresentation(const int cellRadius) const {
+LinkContext::packagePresentation(const std::optional<int> cellRadius) const {
   const auto keys = session.readerLinkPackages().links();
   if (keys.empty()) return {};
   const auto index = packageIndex(cellRadius);
@@ -205,7 +205,7 @@ LinkContext::cellSite(const zigzag::CellRef cell) const {
 
 LinkContext::ReadingStamp LinkContext::readingStamp() const {
   return {.caret = caretQuery ? caretQuery() : std::nullopt,
-          .cell  = cellFocusQuery ? cellFocusQuery() : zigzag::noCell,
+          .cell  = cellFocusQuery ? cellFocusQuery() : std::nullopt,
           .visit = navigator.currentVisit()};
 }
 
@@ -223,18 +223,23 @@ std::vector<xanadu::Visit> LinkContext::forwardChoices() const {
 
 xanadu::ReadingPosition LinkContext::reading() const {
   xanadu::ReadingPosition position;
-  const auto current = navigator.currentVisit();
-  const auto visit   = current
-                           ? activity.find(*current)
-                           : gleditor::cpp26::optional<const xanadu::Visit &>{};
+  const auto current  = navigator.currentVisit();
+  const auto visit    = current
+                            ? activity.find(*current)
+                            : gleditor::cpp26::optional<const xanadu::Visit &>{};
   const auto selected = navigator.selection();
   position.entered    = visit && selected &&
-                        xanadu::Arrival::EnteredEndpoint == visit->arrival &&
-                        visit->link && visit->link->key == selected->key;
+                     xanadu::Arrival::EnteredEndpoint == visit->arrival &&
+                     visit->link && visit->link->key == selected->key;
   const bool inCell =
       visit && std::holds_alternative<xanadu::CellSite>(visit->target);
-  position.here =
-      inCell && cellFocusQuery ? cellSite(cellFocusQuery()) : caretSite();
+  if (inCell) {
+    if (cellFocusQuery) {
+      if (const auto cell = cellFocusQuery()) position.here = cellSite(*cell);
+    }
+  } else {
+    position.here = caretSite();
+  }
   return position;
 }
 
@@ -279,8 +284,9 @@ std::string LinkContext::previewVisit(const VisitId id) const {
               0, std::vector<PrimediaSpan>(spans.begin(), spans.end()));
         } else {
           const auto view = viewIndexOf(site);
-          text = store.rebuild(site.version,
-                               view ? session.views()[*view].focusedBirth : 0);
+          text            = store.rebuild(site.version,
+                               view ? session.views()[*view].selection
+                                               : XanadocSelection::automatic());
         }
         if (site.range.end < site.range.start || site.range.end > text.length())
           return "Unavailable saved range";

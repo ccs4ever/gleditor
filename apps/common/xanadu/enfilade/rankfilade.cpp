@@ -207,9 +207,9 @@ Rankfilade::ordinalOfCell(const zigzag::CellRef cell) const noexcept {
 
   // Climb up parent pointer chain
   std::uint32_t currIdx = h.leafIndex;
-  while (currIdx != 0) {
+  while (crums_[currIdx].parentIndex) {
     const std::uint16_t slotInParent = crums_[currIdx].reservedZero;
-    const std::uint32_t parentIdx    = crums_[currIdx].parentIndex;
+    const std::uint32_t parentIdx    = *crums_[currIdx].parentIndex;
     const auto &parent               = crums_[parentIdx];
 
     for (std::size_t s = 0; s < slotInParent && s < parent.childCount; ++s) {

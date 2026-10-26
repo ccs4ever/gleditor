@@ -30,6 +30,7 @@ using xanadu::MicroversionId;
 using xanadu::Op;
 using xanadu::OpKind;
 using xanadu::PrimediaSpan;
+using xanadu::Scroll;
 using xanadu::Store;
 
 std::vector<std::string> names(const std::vector<MicroversionId> &ids) {
@@ -46,6 +47,38 @@ TEST(StoreTest, typingIntoTheNullDocument) {
   EXPECT_EQ(one.str(), "1");
   EXPECT_EQ(store.textOf(one), "hello");
   EXPECT_EQ(store.textOf(MicroversionId{}), "");
+}
+
+TEST(StoreTest, anonymousLiveScrollsRemainDistinctBySalt) {
+  Store store;
+  Scroll first;
+  first.salt = "first-live-author";
+  Scroll second;
+  second.salt = "second-live-author";
+
+  const auto firstId  = store.addScroll(first);
+  const auto secondId = store.addScroll(second);
+  EXPECT_NE(firstId, secondId);
+  EXPECT_EQ(store.addScroll(first), firstId);
+  EXPECT_EQ(store.scroll(firstId)->salt, first.salt);
+  EXPECT_EQ(store.scroll(secondId)->salt, second.salt);
+}
+
+TEST(StoreTest, bundledFixedScrollBytesUseTheirFileIdentity) {
+  Store store;
+  xanadu::InfoHash firstHash, secondHash;
+  firstHash.bytes.fill(0x31);
+  secondHash.bytes.fill(0x32);
+  const auto first   = Scroll::ofTorrentFile(firstHash, 0, "first.txt", 0, 5);
+  const auto second  = Scroll::ofTorrentFile(secondHash, 0, "second.txt", 0, 6);
+  const auto firstId = store.addScroll(first);
+  const auto secondId = store.addScroll(second);
+
+  store.setExternalLiveBytes(xanadu::liveScrollBufferKey(first), 0, "first");
+  store.setExternalLiveBytes(xanadu::liveScrollBufferKey(second), 0, "second");
+  EXPECT_EQ(store.read({.scroll = firstId, .start = 0, .length = 5}), "first");
+  EXPECT_EQ(store.read({.scroll = secondId, .start = 0, .length = 6}),
+            "second");
 }
 
 TEST(StoreTest, editsContinueTheChain) {

@@ -17,7 +17,9 @@
 
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <memory>
+#include <optional>
 #include <unordered_map>
 #include <vector>
 
@@ -59,7 +61,7 @@ using ChronoCrum = gleditor::enfilade::CrumNode<ChronoDsp, EdlTransform, 8>;
 
 struct ChronoKey {
   std::uint32_t opIndex{0};
-  std::uint32_t xanadocBirth{0};
+  std::optional<std::uint32_t> xanadocBirth;
 
   bool operator==(const ChronoKey &other) const noexcept {
     return opIndex == other.opIndex && xanadocBirth == other.xanadocBirth;
@@ -68,8 +70,10 @@ struct ChronoKey {
 
 struct ChronoKeyHash {
   std::size_t operator()(const ChronoKey &k) const noexcept {
-    return (static_cast<std::size_t>(k.xanadocBirth) << 32) ^
-           static_cast<std::size_t>(k.opIndex);
+    const std::size_t document =
+        k.xanadocBirth ? std::hash<std::uint32_t>{}(*k.xanadocBirth)
+                       : std::size_t{0x9e3779b9U};
+    return (document << 1U) ^ static_cast<std::size_t>(k.opIndex);
   }
 };
 
@@ -92,44 +96,51 @@ public:
                 const MicroversionId &produces, const Store &store);
 
   /// Rebuild the Version at @p opIndex in O(1) amortized time using checkpoints
-  /// and composed transforms, optionally scoped to @p xanadocBirth.
-  [[nodiscard]] Version rebuildVersion(std::uint32_t opIndex,
-                                       const Store &store,
-                                       std::uint32_t xanadocBirth = 0) const;
+  /// and composed transforms. A present birth selects that structure; nullopt
+  /// is the already-resolved root text scope. Callers resolve automatic scope
+  /// before entering the Chronofilade.
+  [[nodiscard]] Version rebuildVersion(
+      std::uint32_t opIndex, const Store &store,
+      std::optional<std::uint32_t> xanadocBirth = std::nullopt) const;
 
-  /// Find the Lowest Common Ancestor of operations @p a and @p b in O(log N).
-  [[nodiscard]] std::uint32_t lowestCommonAncestor(std::uint32_t a,
-                                                   std::uint32_t b) const;
+  /// Find the Lowest Common Ancestor of recorded operations @p a and @p b in
+  /// O(log N). State 0 is a valid root result; an unrecorded index is absent.
+  [[nodiscard]] std::optional<std::uint32_t>
+  lowestCommonAncestor(std::uint32_t a, std::uint32_t b) const;
 
-  /// Jump up @p steps ancestral hops from @p idx in O(log steps).
-  [[nodiscard]] std::uint32_t jumpAncestor(std::uint32_t idx,
-                                           std::uint32_t steps) const;
+  /// Jump up @p steps ancestral hops from a recorded operation in O(log steps).
+  /// State 0 is a valid result; an unrecorded starting index is absent.
+  [[nodiscard]] std::optional<std::uint32_t>
+  jumpAncestor(std::uint32_t idx, std::uint32_t steps) const;
 
-  /// Get the ancestral depth of operation @p opIndex (0 for State 0).
-  [[nodiscard]] std::uint32_t depth(std::uint32_t opIndex) const;
+  /// Get the ancestral depth of a recorded operation (0 for State 0).
+  /// Unrecorded and reserved capacity indices are absent.
+  [[nodiscard]] std::optional<std::uint32_t> depth(std::uint32_t opIndex) const;
 
-  /// Carry @p document from @p fromIndex to @p toIndex.
-  [[nodiscard]] bool advance(Version &document, std::uint32_t fromIndex,
-                             std::uint32_t toIndex, const Store &store,
-                             std::uint32_t xanadocBirth = 0) const;
+  /// Carry @p document from @p fromIndex to @p toIndex in a resolved scope;
+  /// nullopt means root text, not automatic Xanadoc selection.
+  [[nodiscard]] bool
+  advance(Version &document, std::uint32_t fromIndex, std::uint32_t toIndex,
+          const Store &store,
+          std::optional<std::uint32_t> xanadocBirth = std::nullopt) const;
 
   /// Compose the EDL transform along the linear ancestral path from
-  /// @p fromAncestor to @p toDescendant.
-  [[nodiscard]] EdlTransform composePath(std::uint32_t fromAncestor,
-                                         std::uint32_t toDescendant,
-                                         const Store &store,
-                                         std::uint32_t xanadocBirth = 0) const;
+  /// @p fromAncestor to @p toDescendant in a resolved scope; nullopt means
+  /// root text.
+  [[nodiscard]] EdlTransform
+  composePath(std::uint32_t fromAncestor, std::uint32_t toDescendant,
+              const Store &store,
+              std::optional<std::uint32_t> xanadocBirth = std::nullopt) const;
 
   /// Verify R9 conformance: confirm that rebuildVersion(opIndex) produces a
   /// state mathematically identical to @p fullRebuilt.
-  [[nodiscard]] bool
-  verifyAgainstFullRebuild(std::uint32_t opIndex, const Store &store,
-                           const Version &fullRebuilt,
-                           std::uint32_t xanadocBirth = 0) const;
+  [[nodiscard]] bool verifyAgainstFullRebuild(
+      std::uint32_t opIndex, const Store &store, const Version &fullRebuilt,
+      std::optional<std::uint32_t> xanadocBirth = std::nullopt) const;
 
   /// Total number of indexed operations.
   [[nodiscard]] std::size_t indexedCount() const noexcept {
-    return depth_.empty() ? 0 : depth_.size() - 1;
+    return indexedCount_;
   }
 
   /// Clear all indexed data.
@@ -138,7 +149,9 @@ public:
 private:
   void ensureCapacity(std::size_t count);
 
-  std::vector<std::uint32_t> depth_{0};
+  std::vector<std::optional<std::uint32_t>> depth_{
+      std::optional<std::uint32_t>{0}};
+  std::size_t indexedCount_{};
   std::vector<std::array<std::uint32_t, MaxLiftingPower>> up_{
       std::array<std::uint32_t, MaxLiftingPower>{}};
   std::unordered_map<ChronoKey, Version, ChronoKeyHash> checkpoints_;

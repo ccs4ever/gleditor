@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <map>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -222,7 +223,7 @@ public:
     std::uint32_t startOpIndex{0};
     std::uint32_t opCount{0};
     std::string path;
-    int fd{-1};
+    std::optional<int> fd;
     bool isReadOnly{true};
   };
 
@@ -271,14 +272,19 @@ public:
   [[nodiscard]] bool contains(const MicroversionId &id) const;
 
   /**
-   * @brief Find the 1-based index for a microversion.
+   * @brief Find the local state index, or nullopt for an unknown state.
+   *
+   * The known root state has index zero, although it has no operation node.
    */
-  [[nodiscard]] std::uint32_t indexOf(const MicroversionId &id) const;
+  [[nodiscard]] std::optional<std::uint32_t>
+  indexOf(const MicroversionId &id) const;
 
   /**
-   * @brief Get the microversion produced by an operation index.
+   * @brief Get the state at an index, or nullopt for an invalid index.
+   *
+   * Index zero names the root state even in an empty spool.
    */
-  [[nodiscard]] MicroversionId idOf(std::uint32_t index) const;
+  [[nodiscard]] std::optional<MicroversionId> idOf(std::uint32_t index) const;
 
   /// Total number of operations recorded.
   [[nodiscard]] std::size_t size() const { return opCount; }
@@ -474,7 +480,7 @@ private:
   /// both when mapping and when falling back to read().
   bool adoptSegmentNodes(int fd, std::uint32_t nodeCount, bool mayMap);
 
-  int activeFd{-1};
+  std::optional<int> activeFd;
   std::string activePath;
   /// Where the active segment starts, and how much of it flush() has already
   /// written. The file holds the range [activeStartIndex, activeStartIndex +

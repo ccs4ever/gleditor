@@ -119,8 +119,9 @@ else
 $(error GLEDITOR_SDL must be 2 or 3, got "$(GLEDITOR_SDL)")
 endif
 # These goals need no native development packages on the host. Formatting and
-# linting compile nothing; swarm-image compiles inside its container.
-NO_SDL_GOALS := format format-check lint swarm-image
+# linting compile nothing; documentation parses source without a native build;
+# swarm-image compiles inside its container.
+NO_SDL_GOALS := format format-check lint swarm-image doc doc-check
 ifneq (,$(filter-out $(NO_SDL_GOALS),$(or $(MAKECMDGOALS),all)))
 ifneq ($(shell pkg-config --exists $(SDL_PKG) && echo 1),1)
 $(error $(SDL_PKG) not found by pkg-config; install it or set GLEDITOR_SDL to the other major version)
@@ -634,6 +635,17 @@ VICON_SRCS      := $(shell find apps/vicon -name '*.cpp' 2>/dev/null)
 VICON_OBJS      := $(call obj,$(VICON_SRCS))
 VICONC_SRCS     := $(shell find apps/viconc -name '*.cpp' 2>/dev/null)
 VICONC_OBJS     := $(call obj,$(VICONC_SRCS))
+VAGENT_SRCS     := $(shell find apps/vagent -name '*.cpp' 2>/dev/null)
+VAGENT_OBJS     := $(call obj,$(VAGENT_SRCS))
+VAGENT_FRONTEND_SRCS := $(addprefix apps/common/xanadu/vagent/,token.cpp lexer.cpp parser.cpp checker.cpp)
+VAGENT_FRONTEND_OBJS := $(call obj,$(VAGENT_FRONTEND_SRCS))
+VAGENT_FRONTEND_TEST_SRCS := $(addprefix tests/xuzz/,vagent_lexer_test.cpp vagent_parser_test.cpp vagent_checker_test.cpp vagent_guide_test.cpp)
+VAGENT_FRONTEND_TEST_OBJS := $(call obj,$(VAGENT_FRONTEND_TEST_SRCS))
+VAGENT_SYNTAX_TEST_OBJS := $(call obj,tests/xuzz/vagent_lexer_test.cpp tests/xuzz/vagent_parser_test.cpp)
+VAGENT_SYNTAX_OBJS := $(call obj,apps/common/xanadu/vagent/token.cpp apps/common/xanadu/vagent/lexer.cpp apps/common/xanadu/vagent/parser.cpp)
+VAGENT_RUNTIME_TEST_OBJS := $(call obj,tests/xuzz/vortex_logic_test.cpp tests/xuzz/vortex_core_test.cpp tests/xuzz/arena_manifold_test.cpp tests/xuzz/transport_and_or_parallel_test.cpp tests/xuzz/mesh_vortex_artifact_test.cpp)
+# This suite isolates shared VM prerequisites while frontend/lowering evolves.
+VAGENT_RUNTIME_CORE_OBJS := $(filter-out $(call obj,$(shell find apps/common/xanadu/vagent -name '*.cpp' 2>/dev/null)),$(XUDU_CORE_OBJS))
 SPIKE_SRCS      := $(shell find tools/spikes -name '*.cpp' 2>/dev/null)
 SPIKE_OBJS      := $(call obj,$(SPIKE_SRCS))
 
@@ -699,7 +711,7 @@ endif
 ALL_OBJS := $(sort $(LIB_OBJS) $(GLEDITOR_OBJS) $(XUDU_CORE_OBJS) $(XUZZ_OBJS) \
 	$(ZIGZAG_CORE_OBJS) $(ZIGZAG_TEST_OBJS) $(COMMON_UI_OBJS) \
 	$(LIB_TEST_OBJS) $(XUDU_TEST_OBJS) $(XUZZ_TEST_OBJS) $(SWARM_PEER_OBJS) \
-	$(GENERATE_SAMPLE_XANADOCS_OBJS) $(VQUERYC_OBJS) $(VQUERY_OBJS) $(VPROLOG_OBJS) $(VPLC_OBJS) $(VPL_OBJS) $(VLACE_OBJS) $(VLACEC_OBJS) $(VICON_OBJS) $(VICONC_OBJS) \
+	$(GENERATE_SAMPLE_XANADOCS_OBJS) $(VQUERYC_OBJS) $(VQUERY_OBJS) $(VPROLOG_OBJS) $(VPLC_OBJS) $(VPL_OBJS) $(VLACE_OBJS) $(VLACEC_OBJS) $(VICON_OBJS) $(VICONC_OBJS) $(VAGENT_OBJS) \
 	$(UI_TEXT_BASELINE_OBJS) $(LINK_STRESS_OBJS) $(SPIKE_OBJS))
 ALL_OBJ_DIRS := $(sort $(OBJDIR)/ $(OBJDIR)/tmp/ $(dir $(ALL_OBJS)))
 DEPS := $(sort $(patsubst %.o,%.dep,$(ALL_OBJS)))
@@ -734,7 +746,7 @@ endif
 GLSL_SOURCES := $(wildcard assets/shaders/*.glsl)
 SPIRV := $(patsubst assets/shaders/%.glsl,assets/shaders/vulkan/%.spv,$(GLSL_SOURCES))
 
-all: lib gleditor xudu xuzz zigzag store-dump xudu-dump vqueryc vquery vprolog vplc vpl vlace vlacec vicon viconc gleditor_test xuzz_test xudu_test zigzag_test $(OBJDIR)/compile_commands.json
+all: lib gleditor xudu xuzz zigzag store-dump xudu-dump vqueryc vquery vprolog vplc vpl vlace vlacec vicon viconc vagent gleditor_test xuzz_test xudu_test zigzag_test $(OBJDIR)/compile_commands.json
 ifdef GLEDITOR_ENABLE_VULKAN
 all: shaders
 endif
@@ -974,8 +986,14 @@ $(eval $(call fuzz-target,identity_wire))
 $(eval $(call fuzz-target,session_package))
 $(eval $(call fuzz-target,x509_delegation))
 
+VAGENT_FRONTEND_FUZZ_OBJS := $(patsubst %.cpp,$(FUZZ_OBJDIR)/%.o,$(VAGENT_FRONTEND_SRCS))
+.PHONY: fuzz_vagent_frontend
+fuzz_vagent_frontend: $(OBJDIR)/fuzz_vagent_frontend
+$(OBJDIR)/fuzz_vagent_frontend: tests/fuzz/fuzz_vagent_frontend.cpp $(VAGENT_FRONTEND_FUZZ_OBJS)
+	$(CXX) -fsanitize=fuzzer,address,undefined $(CXXFLAGS) $^ -o $@
+
 .PHONY: fuzz
-fuzz: fuzz_binary_ops fuzz_link_package fuzz_identity_wire fuzz_session_package fuzz_x509_delegation
+fuzz: fuzz_binary_ops fuzz_link_package fuzz_identity_wire fuzz_session_package fuzz_x509_delegation fuzz_vagent_frontend
 
 # The other end of the swarm tests: a peer that offers a torrent's content and
 # waits to be asked. A separate program because the two peers are meant to be
@@ -1047,6 +1065,42 @@ $(OBJDIR)/vicon: $(VICON_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJD
 viconc: $(OBJDIR)/viconc
 $(OBJDIR)/viconc: $(VICONC_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS)
+
+.PHONY: vagent vagent_frontend_test vagent_syntax_test vagent_runtime_test test/vagent-frontend test/vagent-syntax test/vagent-runtime
+vagent: $(OBJDIR)/vagent
+# The first iteration checks source without instantiating a device or VM.
+# Vortex lowering and the actor adapter will add their engine dependencies.
+$(OBJDIR)/vagent: $(VAGENT_OBJS) $(VAGENT_FRONTEND_OBJS)
+	$(CXX) $(LDFLAGS) -o $@ $^
+
+vagent_frontend_test: $(OBJDIR)/vagent_frontend_test
+$(OBJDIR)/vagent_frontend_test: $(VAGENT_FRONTEND_TEST_OBJS) $(VAGENT_FRONTEND_OBJS)
+	$(CXX) $(LDFLAGS) -o $@ $^ $(TEST_LIBS)
+
+vagent_syntax_test: $(OBJDIR)/vagent_syntax_test
+$(OBJDIR)/vagent_syntax_test: $(VAGENT_SYNTAX_TEST_OBJS) $(VAGENT_SYNTAX_OBJS)
+	$(CXX) $(LDFLAGS) -o $@ $^ $(TEST_LIBS)
+
+test/vagent-syntax: vagent_syntax_test
+	$(OBJDIR)/vagent_syntax_test
+
+vagent_runtime_test: $(OBJDIR)/vagent_runtime_test
+$(OBJDIR)/vagent_runtime_test: $(VAGENT_RUNTIME_TEST_OBJS) $(VAGENT_RUNTIME_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
+	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS) $(TEST_LIBS)
+
+test/vagent-runtime: vagent_runtime_test
+	$(OBJDIR)/vagent_runtime_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
+
+.PHONY: vagent_compiler_test test/vagent-compiler
+vagent_compiler_test: $(OBJDIR)/vagent_compiler_test
+$(OBJDIR)/vagent_compiler_test: $(call obj,tests/xuzz/vagent_compiler_test.cpp) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
+	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS) $(TEST_LIBS)
+
+test/vagent-compiler: vagent_compiler_test
+	$(OBJDIR)/vagent_compiler_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
+
+test/vagent-frontend: vagent vagent_frontend_test
+	$(OBJDIR)/vagent_frontend_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
 
 # Reads a store as text without going through the loader, which is what lets
 # R11 say a format may stop being human-readable. Part of `all` on purpose,
@@ -1214,7 +1268,7 @@ TEST_FILTER ?= -$(SWARM_NETNS_TESTS)
 # under build/), so a fresh checkout's `make test` builds them rather than
 # failing with "binary not found".
 TEST_PROGRAMS := $(addprefix $(OBJDIR)/,gleditor xudu xuzz zigzag xudu-dump \
-	xudu-swarm-peer vquery vpl vplc vprolog vlace vlacec vicon viconc)
+	xudu-swarm-peer vquery vpl vplc vprolog vlace vlacec vicon viconc vagent)
 
 .PHONY: test test/all test/integration test/e2e-orchestration
 test: $(TEST_PROGRAMS) $(OBJDIR)/gleditor_test $(OBJDIR)/xuzz_test $(OBJDIR)/zigzag_test
@@ -1300,13 +1354,20 @@ run: private .UNVEIL += rx:gleditor
 run: $(OBJDIR)/gleditor
 	$(OBJDIR)/gleditor tests/samples/quick_brown_fox.txt
 
-DOXYGEN := $(shell command -v doxygen 2>/dev/null)
+DOXYGEN ?= doxygen
+.PHONY: doc doc-check
 doc:
-ifdef DOXYGEN
-	$(DOXYGEN)
-else
-	@echo "doxygen not found, skipping documentation build"
-endif
+	@command -v "$(DOXYGEN)" >/dev/null 2>&1 || { \
+	  echo "Doxygen is required: install it or set DOXYGEN=/path/to/doxygen" >&2; exit 1; }
+	@if command -v dot >/dev/null 2>&1; then \
+	  "$(DOXYGEN)" Doxyfile; \
+	else \
+	  echo "Graphviz dot not found; generating symbols without optional diagrams" >&2; \
+	  { cat Doxyfile; printf '\nHAVE_DOT = NO\n'; } | "$(DOXYGEN)" -; \
+	fi
+	python3 tools/check-doxygen-coverage.py
+
+doc-check: doc
 
 # -- formatting and linting ----------------------------------------------
 
@@ -1714,8 +1775,10 @@ $(OBJDIR)/compile_commands.json: $(JFILES)
 # dependency header. format, format-check and lint compile nothing either, and are
 # meant to run on a checkout that has not installed the build dependencies at
 # all.
-ifeq (,$(filter clean dist $(NO_SDL_GOALS),$(MAKECMDGOALS)))
+ifeq (,$(filter clean dist,$(MAKECMDGOALS)))
+ifneq (,$(filter-out $(NO_SDL_GOALS),$(or $(MAKECMDGOALS),all)))
 include $(DEPS)
+endif
 endif
 
 # This prepares a native, full-text reading fixture; navigation remains the

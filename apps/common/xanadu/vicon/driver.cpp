@@ -22,8 +22,8 @@ std::expected<void, DriverError> Driver::start(std::string_view source) {
                                        .loc    = program.error().loc,
                                        .phase  = "compile"});
   }
-  program_   = *program;
-  cursor_    = zigzag::noCell; // spawned lazily by the first resume()
+  program_ = *program;
+  cursor_.reset(); // spawned lazily by the first resume()
   started_   = true;
   exhausted_ = false;
   return {};
@@ -33,7 +33,7 @@ std::optional<zigzag::CellRef> Driver::resume() {
   if (!started_ || exhausted_) {
     return std::nullopt;
   }
-  if (cursor_ == zigzag::noCell) {
+  if (!cursor_) {
     auto cur = compiler_.stdlib().goalProduce(program_.entry, program_.haltOp,
                                               "vicon");
     if (!cur) {
@@ -43,7 +43,7 @@ std::optional<zigzag::CellRef> Driver::resume() {
     cursor_ = *cur;
     return program_.resultCell;
   }
-  if (!compiler_.stdlib().goalResume(cursor_, program_.failOp,
+  if (!compiler_.stdlib().goalResume(*cursor_, program_.failOp,
                                      program_.haltOp)) {
     exhausted_ = true;
     return std::nullopt;
@@ -67,6 +67,10 @@ Driver::runAll(std::string_view source) {
 }
 
 std::string Driver::render(zigzag::CellRef cell) const {
+  const auto value = core_.render(cell);
+  if (!value)
+    throw std::invalid_argument("cannot render absent cell " +
+                                std::to_string(cell));
   return std::visit(
       [](const auto &v) -> std::string {
         using T = std::decay_t<decltype(v)>;
@@ -78,7 +82,7 @@ std::string Driver::render(zigzag::CellRef cell) const {
           return std::to_string(v);
         }
       },
-      core_.render(cell));
+      *value);
 }
 
 std::string Driver::formatError(const DriverError &e) {

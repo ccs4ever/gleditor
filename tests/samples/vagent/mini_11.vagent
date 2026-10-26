@@ -1,0 +1,14 @@
+event Start
+event Phase { number: Int }
+goal Outer() perform
+goal Inner() perform
+
+agent Sequence {
+  on Start { adopt Outer() }
+  plan outer for Outer {
+    emit Phase{number: 1}
+    achieve Inner()
+    emit Phase{number: 3}
+  }
+  plan inner for Inner { emit Phase{number: 2} }
+}

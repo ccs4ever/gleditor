@@ -9,6 +9,7 @@
 #include <ranges>
 
 #include "common/xanadu/zigzag/cell_views.hpp"
+#include <gleditor/sentinel.hpp>
 
 namespace zigzag::vortex {
 
@@ -99,8 +100,8 @@ std::string encodeOrParallelSpark(const OrParallelSpark &spark) {
   writeStr(out, spark.deweyKey);
   writeU64(out, spark.cyclesSinceRoot);
   writeU32(out, spark.entryOpcode);
-  writeU32(out, spark.cursor);
-  writeU32(out, spark.stackFrame);
+  writeU32(out, spark.cursor.value_or(noCell));
+  writeU32(out, spark.stackFrame.value_or(noCell));
   if (spark.prefixSnapshot.has_value()) {
     writeU8(out, 1);
     writeStr(out, encodeArenaPrefix(*spark.prefixSnapshot));
@@ -131,11 +132,15 @@ std::optional<OrParallelSpark> decodeOrParallelSpark(std::string_view bytes) {
       return std::nullopt;
     }
   }
+  std::uint32_t stackFrame = noCell;
+  std::uint32_t cursor     = noCell;
   if (!readStr(bytes, out.deweyKey) || !readU64(bytes, out.cyclesSinceRoot) ||
-      !readU32(bytes, out.entryOpcode) || !readU32(bytes, out.cursor) ||
-      !readU32(bytes, out.stackFrame)) {
+      !readU32(bytes, out.entryOpcode) || !readU32(bytes, cursor) ||
+      !readU32(bytes, stackFrame)) {
     return std::nullopt;
   }
+  out.cursor             = gleditor::fromSentinel<noCell>(cursor);
+  out.stackFrame         = gleditor::fromSentinel<noCell>(stackFrame);
   std::uint8_t hasPrefix = 0;
   if (!readU8(bytes, hasPrefix)) {
     return std::nullopt;
@@ -314,10 +319,10 @@ bool OrParallelCoordinator::submitSolution(
   std::vector<std::uint16_t> pathVec(deweyPath.begin(), deweyPath.end());
   const CellRef solCell = arena_.makeCell(value);
   solutions_[pathVec]   = OrParallelSolution{
-      .deweyPath      = pathVec,
-      .deweyKey       = key,
-      .value          = std::string(value),
-      .submissionCell = solCell,
+        .deweyPath      = pathVec,
+        .deweyKey       = key,
+        .value          = std::string(value),
+        .submissionCell = solCell,
   };
   rebuildSubmissionRankLocked();
   return true;
@@ -333,7 +338,7 @@ ExecutionResult OrParallelCoordinator::executeSparkOnWorker(
   if (stopToken.stop_requested() || coordinator.isPruned(spark.deweyKey)) {
     return ExecutionResult{.success           = false,
                            .contractViolation = ContractViolationKind::None,
-                           .failingClause     = noCell,
+                           .failingClause     = std::nullopt,
                            .errorMessage      = "Cancelled by cut"};
   }
 
@@ -351,32 +356,38 @@ ExecutionResult OrParallelCoordinator::executeSparkOnWorker(
     coordinator.prunePrefix(prefix);
   });
 
-  CellRef cursor = spark.cursor;
+  std::optional<CellRef> cursor = spark.cursor;
   if (spark.model == SparkModelKind::OracleRecompute) {
     workerVm.setOraclePath(spark.deweyPath);
-    if (cursor == noCell || !workerArena.contains(cursor)) {
+    if (!cursor || !workerArena.contains(*cursor)) {
       cursor = workerVm.spawnCursor(spark.entryOpcode, "oracle_worker");
     } else {
-      workerVm.setCursorOpcode(cursor, spark.entryOpcode);
+      workerVm.setCursorOpcode(*cursor, spark.entryOpcode);
     }
   } else {
     workerVm.setCurrentDeweyPath(spark.deweyPath);
-    if (cursor == noCell || !workerArena.contains(cursor)) {
+    if (!cursor || !workerArena.contains(*cursor)) {
       cursor = workerVm.spawnCursor(spark.entryOpcode, "shadow_worker");
     } else {
-      workerVm.setCursorOpcode(cursor, spark.entryOpcode);
-      if (spark.stackFrame != noCell &&
-          workerArena.contains(spark.stackFrame)) {
-        zigzag::expectWritten(workerArena.link(cursor, workerCore.dims().stack,
-                                               false, spark.stackFrame));
+      workerVm.setCursorOpcode(*cursor, spark.entryOpcode);
+      if (spark.stackFrame && workerArena.contains(*spark.stackFrame)) {
+        zigzag::expectWritten(workerArena.link(*cursor, workerCore.dims().stack,
+                                               false, *spark.stackFrame));
       }
     }
+  }
+
+  if (!cursor) {
+    return ExecutionResult{.success           = false,
+                           .contractViolation = ContractViolationKind::None,
+                           .failingClause     = std::nullopt,
+                           .errorMessage = "Could not create worker cursor"};
   }
 
   ExecutionResult lastResult{.success = false};
   bool anySuccess = false;
   while (!stopToken.stop_requested() && !coordinator.isPruned(spark.deweyKey)) {
-    auto res   = workerVm.run(cursor, maxCycles, stopToken);
+    auto res   = workerVm.run(*cursor, maxCycles, stopToken);
     lastResult = res;
     if (res.success && !stopToken.stop_requested()) {
       anySuccess = true;
@@ -386,14 +397,14 @@ ExecutionResult OrParallelCoordinator::executeSparkOnWorker(
         }
       }
     }
-    if (!workerVm.backtrack(cursor)) {
+    if (!workerVm.backtrack(*cursor)) {
       break;
     }
   }
   if (anySuccess) {
     return ExecutionResult{.success           = true,
                            .contractViolation = ContractViolationKind::None,
-                           .failingClause     = noCell,
+                           .failingClause     = std::nullopt,
                            .errorMessage      = "Finished"};
   }
   return lastResult;

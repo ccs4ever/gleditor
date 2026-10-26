@@ -172,13 +172,13 @@ double Renderer::stepAnimations() {
   return elapsed;
 }
 
-void Renderer::closeDoc(RenderState &state, const std::uint32_t index) {
+void Renderer::closeDoc(RenderState &state,
+                        const std::optional<std::uint32_t> index) {
   if (state.docs.empty()) {
     return;
   }
-  const auto which = RenderItemCloseDoc::mostRecent == index
-                         ? state.docs.size() - 1
-                         : static_cast<std::size_t>(index);
+  const auto which =
+      index ? static_cast<std::size_t>(*index) : state.docs.size() - 1;
   if (which >= state.docs.size()) {
     return;
   }
@@ -209,13 +209,13 @@ void Renderer::closeDoc(RenderState &state, const std::uint32_t index) {
   }
 }
 
-void Renderer::saveDoc(RenderState &state, const std::uint32_t index) {
+void Renderer::saveDoc(RenderState &state,
+                       const std::optional<std::uint32_t> index) {
   if (state.docs.empty()) {
     return;
   }
-  const auto which = RenderItemSaveDoc::mostRecent == index
-                         ? state.docs.size() - 1
-                         : static_cast<std::size_t>(index);
+  const auto which =
+      index ? static_cast<std::size_t>(*index) : state.docs.size() - 1;
   if (which >= state.docs.size()) {
     return;
   }
@@ -468,14 +468,14 @@ bool Renderer::update(RenderState &state, const bool settled) {
         .screenHeight   = screenHeight,
         .timeline       = timeline,
         .settledChrome  = lastChrome,
-        .metrics       = {.contentScale = this->state->contentScale.load(),
-                          .userScale    = this->state->uiScale.load(),
-                          .fontScale    = this->state->fontScale.load(),
-                          .screenWidth  = screenWidth,
-                          .screenHeight = screenHeight,
-                          .marginShare  = this->state->uiSafeMarginShare.load()},
-        .theme         = theme ? *theme : gleditor::ui::defaultTheme(),
-        .contentRegion = contentRegion};
+        .metrics        = {.contentScale = this->state->contentScale.load(),
+                           .userScale    = this->state->uiScale.load(),
+                           .fontScale    = this->state->fontScale.load(),
+                           .screenWidth  = screenWidth,
+                           .screenHeight = screenHeight,
+                           .marginShare  = this->state->uiSafeMarginShare.load()},
+        .theme          = theme ? *theme : gleditor::ui::defaultTheme(),
+        .contentRegion  = contentRegion};
     for (auto *const contributor : frameContributors) {
       ctx.metrics.chrome = ctx.chrome;
       contributor->drawFrame(ctx);
@@ -770,17 +770,24 @@ void Renderer::placeCaretFromPick(
     const gleditor::ui::PointerPickTarget &origin) {
   if (!this->state->focusManager.acceptsPointerPick(origin)) {
     const auto current = this->state->focusManager.pointerPickTarget();
+    const auto registrationLabel = [](const auto registration) {
+      return registration ? std::to_string(registration->id)
+                          : std::string{"none"};
+    };
     GLEDITOR_LOG_DEBUG("input.pick",
                        "Discarded pointer pick at {},{}: origin registration "
                        "{} revision {}, current registration {} revision {}",
-                       pick.x, pick.y, origin.registration, origin.revision,
-                       current.registration, current.revision);
+                       pick.x, pick.y, registrationLabel(origin.registration),
+                       origin.revision, registrationLabel(current.registration),
+                       current.revision);
     return;
   }
   if (origin.modal) {
-    GLEDITOR_LOG_DEBUG("input.pick",
-                       "Modal pointer pick at {},{} for registration {}",
-                       pick.x, pick.y, origin.registration);
+    GLEDITOR_LOG_DEBUG(
+        "input.pick", "Modal pointer pick at {},{} for registration {}", pick.x,
+        pick.y,
+        origin.registration ? std::to_string(origin.registration->id)
+                            : std::string{"none"});
     draggingSelection = false;
     if (!awaitingDrag)
       std::ignore =
@@ -877,7 +884,9 @@ void Renderer::placeCaretFromPick(
 
 void Renderer::collectPickingResults(RenderState &state) {
   while (const auto pick = device->takePickingTag()) {
-    const auto scene = pickScenes.extract(pick->requestId);
+    if (!pick->requestId) continue;
+    const auto requestId = *pick->requestId;
+    const auto scene     = pickScenes.extract(requestId);
     if (scene.empty()) {
       continue;
     }
@@ -902,13 +911,13 @@ void Renderer::collectPickingResults(RenderState &state) {
     lastPick = resolvedPick;
     if (const auto asked = std::ranges::find_if(
             pickAnswers,
-            [&](const auto &one) { return one.requestId == pick->requestId; });
+            [&](const auto &one) { return one.requestId == requestId; });
         asked != pickAnswers.end()) {
       auto then = std::move(asked->then);
       pickAnswers.erase(asked);
       then(state, resolvedPick);
     }
-    if (awaitingClickRequest == pick->requestId) {
+    if (awaitingClickRequest == requestId) {
       awaitingClick.reset();
       awaitingClickRequest.reset();
       auto pickWithButton   = resolvedPick;
@@ -916,7 +925,7 @@ void Renderer::collectPickingResults(RenderState &state) {
       GLEDITOR_LOG_DEBUG(
           "input.pick",
           "Completed pointer request {} at {},{} button {}, origin present {}",
-          pick->requestId, pick->x, pick->y, pickWithButton.button,
+          requestId, pick->x, pick->y, pickWithButton.button,
           scene.mapped().origin.has_value());
       if (scene.mapped().origin)
         placeCaretFromPick(state, pickWithButton, *scene.mapped().origin);

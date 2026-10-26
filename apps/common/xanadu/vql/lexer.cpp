@@ -198,7 +198,7 @@ Lexer::Lexer(std::string_view source) : ScannerBase(source) {}
 
 void Lexer::skipWhitespaceAndComments() {
   while (pos_ < source_.size()) {
-    char c = peekChar();
+    char c = peekChar().value();
     if (std::isspace(static_cast<unsigned char>(c))) {
       advanceChar();
       continue;
@@ -271,16 +271,14 @@ Token Lexer::nextToken() {
 
   const SourceLocation startLoc = currentLocation();
   const std::size_t startPos    = pos_;
-  const char c                  = advanceChar();
+  const char c                  = advanceChar().value();
 
   // Anchors: ##, ##NAME, #
   if (c == '#') {
     if (match('#')) {
-      if (std::isalpha(static_cast<unsigned char>(peekChar())) ||
-          peekChar() == '_') {
+      if (peekIsAlpha() || peekChar() == '_') {
         std::size_t nameStart = pos_;
-        while (std::isalnum(static_cast<unsigned char>(peekChar())) ||
-               peekChar() == '_') {
+        while (peekIsAlnum() || peekChar() == '_') {
           advanceChar();
         }
         std::string_view name = source_.substr(nameStart, pos_ - nameStart);
@@ -301,11 +299,9 @@ Token Lexer::nextToken() {
   // Cursors: ^, ^NAME, ^^, ^^NAME
   if (c == '^') {
     if (match('^')) {
-      if (std::isalpha(static_cast<unsigned char>(peekChar())) ||
-          peekChar() == '_') {
+      if (peekIsAlpha() || peekChar() == '_') {
         std::size_t nameStart = pos_;
-        while (std::isalnum(static_cast<unsigned char>(peekChar())) ||
-               peekChar() == '_') {
+        while (peekIsAlnum() || peekChar() == '_') {
           advanceChar();
         }
         std::string_view name = source_.substr(nameStart, pos_ - nameStart);
@@ -318,11 +314,9 @@ Token Lexer::nextToken() {
                    .text = source_.substr(startPos, pos_ - startPos),
                    .loc  = startLoc};
     }
-    if (std::isalpha(static_cast<unsigned char>(peekChar())) ||
-        peekChar() == '_') {
+    if (peekIsAlpha() || peekChar() == '_') {
       std::size_t nameStart = pos_;
-      while (std::isalnum(static_cast<unsigned char>(peekChar())) ||
-             peekChar() == '_') {
+      while (peekIsAlnum() || peekChar() == '_') {
         advanceChar();
       }
       std::string_view name = source_.substr(nameStart, pos_ - nameStart);
@@ -339,8 +333,7 @@ Token Lexer::nextToken() {
   // Variable: $var
   if (c == '$') {
     std::size_t nameStart = pos_;
-    while (std::isalnum(static_cast<unsigned char>(peekChar())) ||
-           peekChar() == '_') {
+    while (peekIsAlnum() || peekChar() == '_') {
       advanceChar();
     }
     std::string_view name = source_.substr(nameStart, pos_ - nameStart);
@@ -431,9 +424,9 @@ Token Lexer::nextToken() {
                  .loc  = startLoc};
   }
   if (c == '@') {
-    if (std::isdigit(static_cast<unsigned char>(peekChar()))) {
+    if (peekIsDigit()) {
       std::size_t verStart = pos_;
-      while (std::isalnum(static_cast<unsigned char>(peekChar()))) {
+      while (peekIsAlnum()) {
         advanceChar();
       }
       std::string_view verStr = source_.substr(verStart, pos_ - verStart);
@@ -537,7 +530,7 @@ Token Lexer::nextToken() {
                  .loc  = startLoc};
   }
   if (c == '+') {
-    if (std::isdigit(static_cast<unsigned char>(peekChar()))) {
+    if (peekIsDigit()) {
       return scanNumber(false, true);
     }
     return Token{.kind = TokenKind::Plus,
@@ -545,7 +538,7 @@ Token Lexer::nextToken() {
                  .loc  = startLoc};
   }
   if (c == '-') {
-    if (std::isdigit(static_cast<unsigned char>(peekChar()))) {
+    if (peekIsDigit()) {
       return scanNumber(true, false);
     }
     return Token{.kind = TokenKind::Minus,
@@ -665,16 +658,23 @@ Token Lexer::scanString(char quoteChar) {
 Token Lexer::scanNumber(bool leadingMinus, bool leadingPlus) {
   const SourceLocation startLoc = currentLocation();
   auto res                      = scanNumberLiteral(leadingMinus, leadingPlus);
-  if (res.isFloat) {
+  if (!res) {
+    return Token{.kind = TokenKind::Error,
+                 .text =
+                     source_.substr(startLoc.offset, pos_ - startLoc.offset),
+                 .loc         = startLoc,
+                 .stringValue = res.error()};
+  }
+  if (res->isFloat) {
     return Token{.kind       = TokenKind::FloatLiteral,
-                 .text       = res.text,
+                 .text       = res->text,
                  .loc        = startLoc,
-                 .floatValue = res.floatValue};
+                 .floatValue = res->floatValue};
   }
   return Token{.kind     = TokenKind::IntegerLiteral,
-               .text     = res.text,
+               .text     = res->text,
                .loc      = startLoc,
-               .intValue = res.intValue};
+               .intValue = res->intValue};
 }
 
 Token Lexer::scanIdentifierOrKeyword() {
@@ -682,21 +682,17 @@ Token Lexer::scanIdentifierOrKeyword() {
   const std::size_t startPos    = pos_;
 
   while (pos_ < source_.size()) {
-    char c = peekChar();
+    char c = peekChar().value();
     if (std::isalnum(static_cast<unsigned char>(c)) || c == '_') {
       advanceChar();
       continue;
     }
     // Allow compound identifiers like d.name, d.pinning-cursors, std:math
-    if ((c == '.' || c == '-') &&
-        (std::isalnum(static_cast<unsigned char>(peekChar(1))) ||
-         peekChar(1) == '_')) {
+    if ((c == '.' || c == '-') && (peekIsAlnum(1) || peekChar(1) == '_')) {
       advanceChar();
       continue;
     }
-    if (c == ':' &&
-        (std::isalnum(static_cast<unsigned char>(peekChar(1))) ||
-         peekChar(1) == '_') &&
+    if (c == ':' && (peekIsAlnum(1) || peekChar(1) == '_') &&
         !(peekChar(1) == 'd' && peekChar(2) == '.')) {
       advanceChar();
       continue;
@@ -795,7 +791,7 @@ Token Lexer::scanBareLiteral() {
   const std::size_t startPos    = pos_;
 
   while (pos_ < source_.size()) {
-    char c = peekChar();
+    char c = peekChar().value();
     if (std::isspace(static_cast<unsigned char>(c)) || c == '%' || c == ',' ||
         c == '(' || c == ')' || c == '[' || c == ']' || c == '{' || c == '}' ||
         c == '/' || c == '!') {

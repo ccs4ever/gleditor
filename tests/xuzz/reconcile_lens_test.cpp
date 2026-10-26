@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <optional>
+
 #include "common/xanadu/zigzag/arena_manifold.hpp"
 #include "common/xanadu/zigzag/reconcile_lens.hpp"
 
@@ -64,4 +66,23 @@ TEST(ReconcileLensTest, CryptographicCanaryBarrierRollout) {
   // Valid cryptographic token accepted
   EXPECT_TRUE(lens.advanceCanaryPhase("canary-ok-stage-1-ed25519-sig"));
   EXPECT_TRUE(lens.advanceCanaryPhase("canary-ok-stage-2-ed25519-sig"));
+}
+
+TEST(ReconcileLensTest, MissingPortAndProcessIdsAreRepresentedByOptionals) {
+  auto mockDriver = std::make_shared<MockOSDriver>();
+  ReconcileLens lens(mockDriver);
+  const std::vector<ServiceConfig> desired = {
+      {.name = "worker", .command = "/bin/worker", .port = std::nullopt}};
+
+  const auto plan = lens.planReconciliation(desired);
+  ASSERT_EQ(plan.size(), 1U);
+  EXPECT_FALSE(plan.front().port.has_value());
+  EXPECT_FALSE(plan.front().targetPid.has_value());
+
+  lens.reconcile(desired);
+  EXPECT_EQ(mockDriver->processCount(), 1U);
+  EXPECT_EQ(mockDriver->portCount(), 0U);
+  const auto &instance = lens.actualState().at("worker");
+  EXPECT_TRUE(instance.pid.has_value());
+  EXPECT_FALSE(instance.port.has_value());
 }

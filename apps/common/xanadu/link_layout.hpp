@@ -18,6 +18,7 @@
 
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -74,9 +75,9 @@ struct CellAnchor {
 struct UniversalViewContext {
   std::vector<const Version *> docViews;
   std::vector<const zigzag::Manifold *> manifoldViews;
-  std::vector<zigzag::CellRef>
-      manifoldFoci;  ///< Optional focus cell per manifold view (0 = home)
-  int cellRadius{3}; ///< Active spatial bounding radius (-1 for unbounded)
+  std::vector<std::optional<zigzag::CellRef>>
+      manifoldFoci;                 ///< Absent means home.
+  std::optional<int> cellRadius{3}; ///< Absent means unbounded.
 };
 
 /**

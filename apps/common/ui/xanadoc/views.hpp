@@ -85,10 +85,12 @@ public:
   [[nodiscard]] std::optional<Doc::Anchor>
   widgetRectFor(const Doc &doc, std::uint32_t docOffset) const;
 
-  void showOnly(const MicroversionId &version, std::size_t storeIndex = 0);
-  void showAlongside(const MicroversionId &version, float depthZ = 0.0F,
-                     std::size_t storeIndex     = 0,
-                     std::uint32_t focusedBirth = 0);
+  void showOnly(const MicroversionId &version, std::size_t storeIndex = 0,
+                XanadocSelection selection = XanadocSelection::automatic());
+  void
+  showAlongside(const MicroversionId &version, float depthZ = 0.0F,
+                std::size_t storeIndex     = 0,
+                XanadocSelection selection = XanadocSelection::automatic());
 
   void syncMediaWidgets(RenderState &rState);
 
@@ -202,8 +204,9 @@ public:
       cellSourceEntry;
   std::optional<Publication> packageFilterSource;
   std::map<std::string, Publication> packageQuerySources;
-  void publicationUpdates(const std::string &subscription = {},
-                          std::int64_t sequence           = -1);
+  void
+  publicationUpdates(std::optional<std::string> subscription = std::nullopt,
+                     std::optional<std::int64_t> sequence    = std::nullopt);
   void discoverPublications(const std::string &query = {});
   void publicationDiscoveryStatus(const std::string &id);
   void setPublicationCatalog(SwarmCatalog *catalog) {
@@ -273,7 +276,7 @@ private:
   std::optional<Pending> pending;
   std::vector<std::shared_ptr<gleditor::MediaWidget>> mediaWidgets;
   bool onionSkinMode_{false};
-  std::size_t activeOnionIdx_{0};
+  std::optional<std::size_t> activeOnionIdx_;
 
   render::RenderDevice *device_{nullptr};
   render::PipelineDesc documentDesc_;

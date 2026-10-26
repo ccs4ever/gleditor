@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "common/xanadu/vicon/driver.hpp"
+#include "common/xanadu/vicon/lexer.hpp"
 
 namespace {
 
@@ -19,6 +20,17 @@ TEST(ViconDriverTest, BasicIntegerSequence) {
   ASSERT_TRUE(res.has_value());
   const std::vector<std::string> want = {"1", "2", "3"};
   EXPECT_EQ(*res, want);
+}
+
+TEST(ViconDriverTest, RadixDigitsRejectOutOfBaseAndAcceptUpperBoundary) {
+  auto valid = Lexer("36rZ").tokenize();
+  ASSERT_EQ(valid.front().kind, TokenKind::IntegerLiteral);
+  EXPECT_EQ(valid.front().intValue, 35);
+
+  auto invalid = Lexer("2r2").tokenize();
+  ASSERT_EQ(invalid.front().kind, TokenKind::Error);
+  EXPECT_EQ(invalid.front().stringValue,
+            "digit out of range for radix literal");
 }
 
 TEST(ViconDriverTest, Alternation) {

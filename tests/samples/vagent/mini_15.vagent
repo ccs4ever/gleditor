@@ -1,0 +1,16 @@
+question stock(): Int
+event Inspect
+goal InspectStock() perform
+
+agent Seller(units: Int) {
+  answer stock(): Int { units }
+}
+agent Buyer {
+  var seller: Opt<Agent> := none
+  var available: Int := -1
+  on Initialize { seller := spawn Seller(7) in inner }
+  on Inspect { adopt InspectStock() }
+  plan inspect for InspectStock {
+    available := ask seller.stock() within 1s else 0
+  }
+}

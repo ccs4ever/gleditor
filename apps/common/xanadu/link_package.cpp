@@ -102,7 +102,7 @@ bencode::Value encodeScroll(const Scroll &scroll) {
   };
   if (scroll.isNamed()) {
     dict.emplace("publisher",
-                 bencode::Value::string(rawBytes(scroll.publisher)));
+                 bencode::Value::string(rawBytes(*scroll.publisher)));
   }
   if (!scroll.salt.empty()) {
     dict.emplace("salt", bencode::Value::string(scroll.salt));
@@ -119,8 +119,10 @@ std::optional<Scroll> decodeScroll(const bencode::Value &value) {
   const auto publisher = value.find("publisher");
   if (publisher.has_value() && publisher->isString() &&
       32 == publisher->asString().size()) {
+    PublicKey publisherKey;
     std::copy(publisher->asString().begin(), publisher->asString().end(),
-              scroll.publisher.bytes.begin());
+              publisherKey.bytes.begin());
+    if (!publisherKey.isZero()) scroll.publisher = publisherKey;
   }
   const auto salt = value.find("salt");
   if (salt.has_value() && salt->isString()) {
@@ -394,7 +396,8 @@ void reviewLinkPackage(const LinkPackage &pkg) {
     throw LinkPackageUnreadable(
         "Link package format 1: invalid signed package or limits");
   for (const auto &[key, scroll] : pkg.scrolls) {
-    if (key != scrollKey(scroll) || scroll.segments.empty() ||
+    const auto identity = scrollKey(scroll);
+    if (!identity || key != *identity || scroll.segments.empty() ||
         scroll.segments.size() > 4096)
       throw LinkPackageUnreadable(
           "Link package format 1: scroll identity/deployment mismatch");

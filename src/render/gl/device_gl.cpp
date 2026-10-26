@@ -9,6 +9,7 @@
 #include <cstring>
 #include <format>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -32,6 +33,11 @@ constexpr GLint glyphAtlasUnit = 0;
 /// an integer colour buffer.
 constexpr GLsizeiptr pickingReadBytes = 4 * sizeof(GLuint);
 
+template <typename Map, typename Resource>
+auto findResource(Map &map, const Resource &resource) {
+  return resource.id ? map.find(*resource.id) : map.end();
+}
+
 GLenum bufferTarget(const BufferKind kind) {
   switch (kind) {
   case BufferKind::Vertex:
@@ -47,6 +53,19 @@ GLenum bufferTarget(const BufferKind kind) {
 }
 
 } // namespace
+
+std::uint32_t DeviceGL::allocateHandleId() {
+  if (!nextHandleId) {
+    throw std::overflow_error("DeviceGL: resource handle IDs exhausted");
+  }
+  const auto id = *nextHandleId;
+  if (id == std::numeric_limits<std::uint32_t>::max()) {
+    nextHandleId.reset();
+  } else {
+    ++*nextHandleId;
+  }
+  return id;
+}
 
 DeviceGL::DeviceGL(const Backend backend) : backendKind(backend) {
   if (Backend::OpenGL != backend && Backend::OpenGLES != backend) {
@@ -279,6 +298,7 @@ void DeviceGL::resize(const int width, const int height) {
 
 BufferHandle DeviceGL::createBuffer(const BufferKind kind,
                                     const std::size_t bytes) {
+  const auto id = allocateHandleId();
   BufferRecord record{};
   record.target = bufferTarget(kind);
   record.bytes  = bytes;
@@ -288,13 +308,13 @@ BufferHandle DeviceGL::createBuffer(const BufferKind kind,
                  GL_DYNAMIC_DRAW);
   api.BindBuffer(record.target, 0);
 
-  const BufferHandle handle{nextHandleId++};
-  buffers.emplace(handle.id, record);
+  const BufferHandle handle{.id = id};
+  buffers.emplace(id, record);
   return handle;
 }
 
 void DeviceGL::destroyBuffer(const BufferHandle buffer) {
-  const auto it = buffers.find(buffer.id);
+  const auto it = findResource(buffers, buffer);
   if (buffers.end() == it) {
     return;
   }
@@ -304,7 +324,7 @@ void DeviceGL::destroyBuffer(const BufferHandle buffer) {
 
 void DeviceGL::updateBuffer(const BufferHandle buffer, const std::size_t offset,
                             const std::span<const std::byte> data) {
-  const auto it = buffers.find(buffer.id);
+  const auto it = findResource(buffers, buffer);
   if (buffers.end() == it) {
     throw std::invalid_argument("DeviceGL::updateBuffer: unknown buffer");
   }
@@ -321,7 +341,7 @@ void DeviceGL::copyBufferRange(const BufferHandle buffer,
                                const std::size_t srcOffset,
                                const std::size_t dstOffset,
                                const std::size_t bytes) {
-  const auto it = buffers.find(buffer.id);
+  const auto it = findResource(buffers, buffer);
   if (buffers.end() == it) {
     throw std::invalid_argument("DeviceGL::copyBufferRange: unknown buffer");
   }
@@ -351,7 +371,7 @@ void DeviceGL::copyBufferRange(const BufferHandle buffer,
 
 BufferHandle DeviceGL::resizeBuffer(const BufferHandle buffer,
                                     const std::size_t bytes) {
-  const auto it = buffers.find(buffer.id);
+  const auto it = findResource(buffers, buffer);
   if (buffers.end() == it) {
     throw std::invalid_argument("DeviceGL::resizeBuffer: unknown buffer");
   }
@@ -393,6 +413,7 @@ BufferHandle DeviceGL::resizeBuffer(const BufferHandle buffer,
 TextureHandle DeviceGL::createTextureArray(const int size, const int layers,
                                            const TextureFormat format,
                                            const int levels) {
+  const auto id        = allocateHandleId();
   GLint internalFormat = GL_R8;
   GLenum formatEnum    = GL_RED;
   std::size_t bpp      = 1;
@@ -438,13 +459,13 @@ TextureHandle DeviceGL::createTextureArray(const int size, const int layers,
   api.BindTexture(GL_TEXTURE_2D_ARRAY, 0);
   diagnostics.raiseIfError("creating texture array");
 
-  const TextureHandle handle{nextHandleId++};
-  textures.emplace(handle.id, record);
+  const TextureHandle handle{.id = id};
+  textures.emplace(id, record);
   return handle;
 }
 
 void DeviceGL::generateMipmaps(const TextureHandle texture) {
-  const auto it = textures.find(texture.id);
+  const auto it = findResource(textures, texture);
   if (textures.end() == it || 1 >= it->second.levels) {
     return;
   }
@@ -455,7 +476,7 @@ void DeviceGL::generateMipmaps(const TextureHandle texture) {
 }
 
 void DeviceGL::destroyTexture(const TextureHandle texture) {
-  const auto it = textures.find(texture.id);
+  const auto it = findResource(textures, texture);
   if (textures.end() == it) {
     return;
   }
@@ -470,7 +491,7 @@ void DeviceGL::updateTextureLayer(const TextureHandle texture, const int layer,
   if (0 == width || 0 == height) {
     return;
   }
-  const auto it = textures.find(texture.id);
+  const auto it = findResource(textures, texture);
   if (textures.end() == it) {
     throw std::invalid_argument(
         "DeviceGL::updateTextureLayer: unknown texture");
@@ -515,7 +536,7 @@ bool DeviceGL::renderIntoTextureLayer(
     const TextureHandle texture, const int layer,
     const gleditor::cpp26::function_ref<void(unsigned fbo, void *glContext)>
         fn) {
-  const auto it = textures.find(texture.id);
+  const auto it = findResource(textures, texture);
   if (textures.end() == it) {
     diagnostics.record(DiagnosticSeverity::Error,
                        "DeviceGL::renderIntoTextureLayer: unknown texture");
@@ -573,6 +594,7 @@ GLuint DeviceGL::compileStage(const GLenum stage, const std::string &source,
 }
 
 PipelineHandle DeviceGL::createPipeline(const PipelineDesc &desc) {
+  const auto id = allocateHandleId();
   const auto vertexSource =
       assembleShaderSource(backendKind, ShaderStage::Vertex, desc.vertexSource);
   const auto fragmentSource = assembleShaderSource(
@@ -630,8 +652,8 @@ PipelineHandle DeviceGL::createPipeline(const PipelineDesc &desc) {
 
   api.GenVertexArrays(1, &record.vao);
 
-  const PipelineHandle handle{nextHandleId++};
-  pipelines.emplace(handle.id, record);
+  const PipelineHandle handle{.id = id};
+  pipelines.emplace(id, record);
   return handle;
 }
 
@@ -693,7 +715,7 @@ void DeviceGL::endFrame() {
 }
 
 void DeviceGL::bindPipeline(const PipelineHandle pipeline) {
-  const auto it = pipelines.find(pipeline.id);
+  const auto it = findResource(pipelines, pipeline);
   if (pipelines.end() == it) {
     throw std::invalid_argument("DeviceGL::bindPipeline: unknown pipeline");
   }
@@ -721,7 +743,7 @@ void DeviceGL::bindPipeline(const PipelineHandle pipeline) {
 }
 
 void DeviceGL::bindAtlasTexture(const TextureHandle texture) {
-  const auto it = textures.find(texture.id);
+  const auto it = findResource(textures, texture);
   if (textures.end() == it) {
     return;
   }
@@ -785,8 +807,8 @@ void DeviceGL::drawGlyphs(const DrawUniforms &uniforms,
   if (0 == instanceCount) {
     return;
   }
-  const auto pipelineIt = pipelines.find(boundPipeline.id);
-  const auto bufferIt   = buffers.find(vertices.id);
+  const auto pipelineIt = findResource(pipelines, boundPipeline);
+  const auto bufferIt   = findResource(buffers, vertices);
   if (pipelines.end() == pipelineIt || buffers.end() == bufferIt) {
     throw std::invalid_argument(
         "DeviceGL::drawGlyphs: unknown pipeline or buffer");

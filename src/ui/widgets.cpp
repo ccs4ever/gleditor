@@ -5,6 +5,7 @@
 #include <fribidi.h>
 #include <graphemebreak.h>
 #include <limits>
+#include <optional>
 #include <stdexcept>
 #include <unordered_set>
 
@@ -168,7 +169,7 @@ std::pair<std::size_t, std::size_t> List::visibleRange(float viewport,
   const auto offset = std::clamp(static_cast<double>(scrollPx), 0.0, maxScroll);
   const auto first  = static_cast<std::size_t>(std::floor(offset / height));
   const auto last   = std::min(rows.size(), static_cast<std::size_t>(std::ceil(
-                                                (offset + viewport) / height)));
+                                              (offset + viewport) / height)));
   return {first > overscan ? first - overscan : 0,
           overscan > rows.size() - last ? rows.size() : last + overscan};
 }
@@ -315,7 +316,7 @@ public:
       bounds.bottom  = top - bounds.height;
     }
     place(root, clampToSafeArea(metrics_.rounded(bounds), scene_.layout.bounds),
-          0);
+          std::nullopt);
     auto targets = std::make_shared<std::vector<WidgetId>>();
     targets->reserve(scene_.visuals.size());
     for (const auto &visual : scene_.visuals) targets->push_back(visual.id);
@@ -462,8 +463,8 @@ private:
     bool focusable{false};
     bool enabled{true};
   };
-  LayoutBox box(WidgetId id, WidgetId parent, Rect rect, float paddingX,
-                float paddingY, InteractionFlags flags) {
+  LayoutBox box(WidgetId id, std::optional<WidgetId> parent, Rect rect,
+                float paddingX, float paddingY, InteractionFlags flags) {
     const auto original = rect;
     rect                = clampToSafeArea(metrics_.rounded(rect), original);
     const auto px       = std::max(0.0F, std::min(paddingX, rect.width * 0.5F));
@@ -482,8 +483,8 @@ private:
       scene_.layout.focusOrder.push_back(id);
     return result;
   }
-  LayoutBox box(WidgetId id, WidgetId parent, Rect rect, float padding,
-                InteractionFlags flags) {
+  LayoutBox box(WidgetId id, std::optional<WidgetId> parent, Rect rect,
+                float padding, InteractionFlags flags) {
     return box(id, parent, rect, padding, padding, flags);
   }
   void visual(const Widget &w, LayoutBox geometry, std::string text,
@@ -512,7 +513,7 @@ private:
     text::TextFit constraints{.maxWidthPx  = geometry.contentRect.width,
                               .maxHeightPx = geometry.contentRect.height};
     if (purpose == TextPurpose::Counter) {
-      constraints.maxWidthPx = 0;
+      constraints.maxWidthPx = std::nullopt;
       constraints.overflow   = text::Overflow::Clip;
     }
     if (purpose == TextPurpose::Identifier)
@@ -526,7 +527,7 @@ private:
       item.fitted = cache_.fitted(text, item.font, constraints);
     scene_.visuals.push_back(std::move(item));
   }
-  void place(const Widget &w, Rect rect, WidgetId parent) {
+  void place(const Widget &w, Rect rect, std::optional<WidgetId> parent) {
     const bool button       = std::holds_alternative<Button>(w.model);
     const bool field        = std::holds_alternative<TextField>(w.model);
     const bool scrubber     = std::holds_alternative<Scrubber>(w.model);
@@ -559,7 +560,7 @@ private:
             {.focusable = button || field || scrubber, .enabled = enabled});
     scene_.layout.boxes.back().textInput     = field;
     scene_.layout.boxes.back().defaultAction = w.defaultAction;
-    if (parent && button) scene_.layout.boxes.back().focusGroup = parent;
+    if (parent && button) scene_.layout.boxes.back().focusGroup = *parent;
 
     if (const auto *label = std::get_if<Label>(&w.model)) {
       visual(w, geometry, label->text, label->purpose, a11y::Role::Label);

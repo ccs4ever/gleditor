@@ -437,9 +437,12 @@ std::size_t Publisher::pumpActions() {
       if (!node || (node->actions & bit(asked->action)) == 0) continue;
       if (focus.modal) {
         std::vector<std::uint64_t> roots;
-        if (const auto root = tree.find(tree.root())) {
-          for (auto id : root->children)
-            if (Ids::ownerOf(id) == owner) roots.push_back(id);
+        if (const auto rootId = tree.root(); rootId) {
+          const auto root = tree.find(*rootId);
+          if (root) {
+            for (auto id : root->children)
+              if (Ids::ownerOf(id) == owner) roots.push_back(id);
+          }
         }
         // A manager wrapper can group multiple roots from this namespace.
         for (const auto &candidate : tree.nodes)
@@ -486,7 +489,7 @@ std::string Publisher::describe(const Tree &tree) {
   if (tree.empty()) {
     return "(nothing)\n";
   }
-  describeFrom(out, tree, tree.root(), 0);
+  describeFrom(out, tree, *tree.root(), 0);
   const auto focused     = tree.find(tree.focus);
   std::string focusLabel = "(none)";
   if (focused.has_value()) {

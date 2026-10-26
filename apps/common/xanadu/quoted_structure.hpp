@@ -158,8 +158,8 @@ struct Selector {
   enum class Kind : std::uint8_t { Cell, Rank, Closure, Query };
 
   Kind kind{Kind::Cell};
-  zigzag::CellRef root{zigzag::noCell};                    ///< Foreign ref
-  zigzag::DimRef rankDim{zigzag::noCell};                  ///< Rank only
+  std::optional<zigzag::CellRef> root;                     ///< Foreign ref
+  std::optional<zigzag::DimRef> rankDim;                   ///< Rank only
   zigzag::DimVector rankDirection{zigzag::DimVector::POS}; ///< Rank only
   std::vector<zigzag::DimRef> carry;                       ///< Closure only
   std::string query;                                       ///< Query only

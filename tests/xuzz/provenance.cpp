@@ -486,8 +486,8 @@ TEST(ProvenanceTest, anOperationsGlobalNameOutlivesItsLocalIndex) {
       xanadu::historyFromSeal(xanadu::sealableOps(publisher), became, {});
   ASSERT_NE(history, nullptr);
 
-  const auto here  = publisher.segmentedOps().indexOf(branched);
-  const auto there = history->segmentedOps().indexOf(branched);
+  const auto here  = publisher.segmentedOps().indexOf(branched).value();
+  const auto there = history->segmentedOps().indexOf(branched).value();
   ASSERT_NE(here, 0U);
   ASSERT_NE(there, 0U);
   EXPECT_NE(here, there) << "this test proves nothing unless the index moved";
@@ -495,12 +495,16 @@ TEST(ProvenanceTest, anOperationsGlobalNameOutlivesItsLocalIndex) {
   // The name did not move, so both stores say the same thing about the same
   // operation -- which is the whole of what a GlobalOpRef is for.
   const auto said = xanadu::opRefOf(publisher, here, became);
-  EXPECT_EQ(said.produces, branched);
-  EXPECT_EQ(said, xanadu::opRefOf(*history, there, became));
+  ASSERT_TRUE(said);
+  const auto &saidValue = *said;
+  EXPECT_EQ(saidValue.produces, branched);
+  const auto historyRef = xanadu::opRefOf(*history, there, became);
+  ASSERT_TRUE(historyRef);
+  EXPECT_EQ(saidValue, *historyRef);
 
   // And each store reads it back as its own index, not as the other's.
-  EXPECT_EQ(xanadu::localiseOpRef(publisher, said, became), here);
-  EXPECT_EQ(xanadu::localiseOpRef(*history, said, became), there);
+  EXPECT_EQ(xanadu::localiseOpRef(publisher, saidValue, became), here);
+  EXPECT_EQ(xanadu::localiseOpRef(*history, saidValue, became), there);
 }
 
 TEST(ProvenanceTest, anOpRefIsRefusedByADocumentItDoesNotName) {
@@ -519,22 +523,23 @@ TEST(ProvenanceTest, anOpRefIsRefusedByADocumentItDoesNotName) {
   somebodyElse.salt      = "essay";
 
   const auto said =
-      xanadu::opRefOf(mine, mine.segmentedOps().indexOf(first), became);
-  ASSERT_FALSE(said.empty());
-  EXPECT_EQ(said.produces.str(), "1");
+      xanadu::opRefOf(mine, mine.segmentedOps().indexOf(first).value(), became);
+  ASSERT_TRUE(said);
+  const auto &saidValue = *said;
+  EXPECT_EQ(saidValue.produces.str(), "1");
 
-  EXPECT_FALSE(xanadu::localiseOpRef(mine, said, somebodyElse).has_value())
+  EXPECT_FALSE(xanadu::localiseOpRef(mine, saidValue, somebodyElse).has_value())
       << "a ref into another document must not match on the name alone";
 
   // A name this history does not hold, under the right scroll, is equally not
   // an answer.
-  const xanadu::GlobalOpRef unheardOf{said.scroll,
+  const xanadu::GlobalOpRef unheardOf{saidValue.scroll,
                                       xanadu::MicroversionId::parse("9")};
   EXPECT_FALSE(xanadu::localiseOpRef(mine, unheardOf, became).has_value());
 
   // State zero is not produced by an operation, so no index names it.
-  EXPECT_TRUE(xanadu::opRefOf(mine, 0, became).empty());
-  EXPECT_TRUE(xanadu::opRefOf(mine, 9999, became).empty());
+  EXPECT_FALSE(xanadu::opRefOf(mine, 0, became).has_value());
+  EXPECT_FALSE(xanadu::opRefOf(mine, 9999, became).has_value());
   EXPECT_FALSE(
       xanadu::localiseOpRef(mine, xanadu::GlobalOpRef{}, became).has_value());
 }
@@ -616,7 +621,8 @@ TEST(ProvenanceTest, aSealWhoseScrollsAreMissingIsRefused) {
 
   // Handed the scroll it names, it reads.
   std::map<std::string, Scroll> carried;
-  carried.emplace(xanadu::scrollKey(theirs), theirs);
+  ASSERT_TRUE(xanadu::scrollKey(theirs));
+  carried.emplace(xanadu::scrollKey(theirs).value(), theirs);
   const auto history = xanadu::historyFromSeal(sealed, became, carried);
   ASSERT_NE(history, nullptr);
   EXPECT_EQ(history->opCount(), publisher.opCount());
@@ -649,7 +655,7 @@ TEST(ProvenanceTest, documentHelperEmitsSeedableHistoryAndKeepsEarlierSeals) {
   ASSERT_TRUE(keyring.usable()) << "cannot create temporary GPG signing key";
   const auto mine = xanadu::createMutableKeys();
   const auto dir  = std::filesystem::temp_directory_path() /
-                    ("xudu-publication-" + mine.publicKey.hex());
+                   ("xudu-publication-" + mine.publicKey.hex());
   Store store;
   const auto text   = store.insert({}, 0, "Story Ideas");
   const auto branch = store.insert(text, 11, " alternate");
@@ -664,9 +670,9 @@ TEST(ProvenanceTest, documentHelperEmitsSeedableHistoryAndKeepsEarlierSeals) {
   auto head            = store.sliceGenesis(text);
   const auto dimension = store.makeDimension(head, "d.next");
   head                 = store.makeCell(dimension.version, "idea one");
-  const auto left      = store.cellRefOf(head);
+  const auto left      = store.cellRefOf(head).value();
   head                 = store.makeCell(head, "idea two");
-  const auto right     = store.cellRefOf(head);
+  const auto right     = store.cellRefOf(head).value();
   head =
       store.setLink(head, left, dimension.dim, zigzag::DimVector::POS, right);
   auto record             = signable();
@@ -698,7 +704,7 @@ TEST(ProvenanceTest, documentHelperEmitsSeedableHistoryAndKeepsEarlierSeals) {
   ASSERT_EQ(first.opsSegments.size(), 1U);
   const auto historyPath = dir / first.opsSegments.front().torrent.hex() /
                            "history" / xanadu::sealedOpsName;
-  const auto read        = [](const std::filesystem::path &path) {
+  const auto read = [](const std::filesystem::path &path) {
     std::ifstream in(path, std::ios::binary);
     return std::string(std::istreambuf_iterator<char>(in),
                        std::istreambuf_iterator<char>());
@@ -706,7 +712,7 @@ TEST(ProvenanceTest, documentHelperEmitsSeedableHistoryAndKeepsEarlierSeals) {
   const auto firstOps = read(historyPath);
   ASSERT_FALSE(firstOps.empty());
   const auto &scroll = store.userPermascroll().currentScroll();
-  ASSERT_TRUE(first.scrolls.contains(xanadu::scrollKey(scroll)));
+  ASSERT_TRUE(first.scrolls.contains(xanadu::scrollKey(scroll).value()));
   xanadu::DirectoryContentSource source;
   EXPECT_EQ(source.add(researchTorrent.file, researchRoot.string()),
             researchTorrent.hash);
@@ -725,10 +731,13 @@ TEST(ProvenanceTest, documentHelperEmitsSeedableHistoryAndKeepsEarlierSeals) {
             std::vector<std::uint32_t>{5});
   const auto manifold = history->rebuildManifold(head);
   EXPECT_EQ(manifold.refusedOps(), 0U);
-  const auto readerLeft  = history->cellRefOf(store.segmentedOps().idOf(left));
-  const auto readerRight = history->cellRefOf(store.segmentedOps().idOf(right));
+  const auto readerLeft =
+      history->cellRefOf(store.segmentedOps().idOf(left).value()).value();
+  const auto readerRight =
+      history->cellRefOf(store.segmentedOps().idOf(right).value()).value();
   const auto readerDim =
-      history->cellRefOf(store.segmentedOps().idOf(dimension.dim));
+      history->cellRefOf(store.segmentedOps().idOf(dimension.dim).value())
+          .value();
   EXPECT_EQ(manifold.textOf(readerLeft, *history), "idea one");
   EXPECT_EQ(manifold.linked(readerLeft, readerDim, zigzag::DimVector::POS),
             readerRight);

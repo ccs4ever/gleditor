@@ -38,8 +38,8 @@ struct OrParallelSpark {
   std::string deweyKey{};
   std::uint64_t cyclesSinceRoot{0};
   CellRef entryOpcode{noCell};
-  CellRef cursor{noCell};
-  CellRef stackFrame{noCell};
+  std::optional<CellRef> cursor;
+  std::optional<CellRef> stackFrame;
   std::optional<ArenaManifold::PrefixSnapshot> prefixSnapshot{};
 };
 

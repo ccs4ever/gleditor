@@ -1,13 +1,13 @@
 /**
  * @file sentinel.hpp
- * @brief Zero-cost bidirectional adapters between wire/storage sentinels and
+ * @brief Explicit boundary adapters between wire/storage sentinels and
  * optionals.
  *
- * Wire and packed storage layers retain physical sentinels (such as noCell = 0
- * and noDense = UINT32_MAX) for 64-byte cache line alignment and 12-byte link
- * packing. These templates provide compile-time verified,
- * branchless/single-instruction translation between raw sentinels and
- * std::optional<T>.
+ * Wire and packed storage layers may reserve values for absence (for example,
+ * a zero neighbour in a packed link). Translate those values at the boundary;
+ * application APIs represent absence with std::optional<T>. These helpers do
+ * not establish whether a sentinel is legal for a particular domain or promise
+ * a particular instruction sequence.
  */
 #ifndef GLEDITOR_SENTINEL_HPP
 #define GLEDITOR_SENTINEL_HPP

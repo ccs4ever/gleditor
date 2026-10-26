@@ -3,6 +3,7 @@
  * @brief Xuzz composition boundary for an embedded Zigzag presentation.
  */
 #include "bridge_coordinator.hpp"
+#include "common/xanadu/zigzag/cell_views.hpp"
 
 #include <utility>
 
@@ -22,7 +23,7 @@ bool BridgeCoordinator::attach(xanadu::ZigzagPresentationSurface &surface) {
   }
 
   surface_ = &surface;
-  surface_->setCellRadius(config_.cellRadius);
+  surface_->setCellRadius(config_.cellRadius.value_or(1));
   surface_->setBridgeInvalidationCallback(
       [this](const std::uint64_t) { dirty_ = true; });
   surface_->setCellActivationCallback(
@@ -140,7 +141,7 @@ void BridgeCoordinator::applyConfig(xanadu::BridgeRuntimeConfig config) {
   links_.setCellRadius(config_.cellRadius);
   links_.setBridgeRuntimeConfig(config_);
   if (surface_ != nullptr) {
-    surface_->setCellRadius(config_.cellRadius);
+    surface_->setCellRadius(config_.cellRadius.value_or(1));
   }
   dirty_ = true;
 }

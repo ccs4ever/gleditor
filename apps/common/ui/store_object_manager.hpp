@@ -65,6 +65,10 @@ public:
   static constexpr std::uint32_t kTagNewXanadoc       = 26003U;
   static constexpr std::uint32_t kTagItemCheckboxBase = 26100U;
   static constexpr std::uint32_t kTagItemCloseBase    = 27100U;
+  // Synthetic picking compatibility reserves equal, non-overlapping ranges.
+  // Rendered rows use retained widget identities and have no such item limit.
+  static constexpr std::uint32_t kSyntheticItemTagCount =
+      kTagItemCloseBase - kTagItemCheckboxBase;
 
   struct ObjectItem {
     std::uint32_t birthOp{0};

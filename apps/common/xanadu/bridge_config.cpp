@@ -13,15 +13,29 @@
 #include "common/xanadu/zigzag/manifold.hpp"
 
 namespace xanadu {
+namespace {
+
+std::optional<int> cellRadiusFromModel(const SystemStoreModel &model) {
+  const auto radius = model.getInt64(settings::kBridgeCellRadius);
+  if (radius < 0) {
+    return std::nullopt;
+  }
+  return static_cast<int>(radius);
+}
+
+std::int64_t storedCellRadius(const std::optional<int> radius) {
+  return radius.value_or(-1);
+}
+
+} // namespace
 
 BridgeRuntimeConfig
 BridgeRuntimeConfig::fromSystemDocs(const Store &store,
                                     const zigzag::Manifold *sliceManifold) {
   BridgeRuntimeConfig cfg;
-  if (store.opCount() > 0 && store.homeCell() != zigzag::noCell) {
+  if (store.opCount() > 0 && store.homeCell().has_value()) {
     const auto model = SystemStoreModel::fromStore(store);
-    cfg.cellRadius =
-        static_cast<int>(model.getInt64(settings::kBridgeCellRadius));
+    cfg.cellRadius   = cellRadiusFromModel(model);
     cfg.backgroundDepthZ =
         static_cast<float>(model.getDouble(settings::kBridgeBackgroundDepthZ));
     cfg.backgroundOpacity =
@@ -58,8 +72,8 @@ BridgeRuntimeConfig::fromSystemDocs(const Store &store,
 
   if (sliceManifold != nullptr) {
     const auto sliceModel =
-        SystemStoreModel::fromManifold(*sliceManifold, zigzag::noCell, &store);
-    const auto sliceCfg = fromManifold(*sliceManifold, zigzag::noCell, &store);
+        SystemStoreModel::fromManifold(*sliceManifold, std::nullopt, &store);
+    const auto sliceCfg = fromManifold(*sliceManifold, std::nullopt, &store);
     if (sliceModel.find(settings::kBridgeCellRadius)) {
       cfg.cellRadius = sliceCfg.cellRadius;
     }
@@ -116,15 +130,14 @@ BridgeRuntimeConfig::fromSystemDocs(const Store &store,
 
 BridgeRuntimeConfig
 BridgeRuntimeConfig::fromManifold(const zigzag::Manifold &manifold,
-                                  const zigzag::CellRef homeCell,
+                                  const std::optional<zigzag::CellRef> homeCell,
                                   const SpanReader *reader) {
   BridgeRuntimeConfig cfg;
   const auto model = SystemStoreModel::fromManifold(manifold, homeCell, reader);
   if (!model.isValid() && model.settings().empty()) {
     return cfg;
   }
-  cfg.cellRadius =
-      static_cast<int>(model.getInt64(settings::kBridgeCellRadius));
+  cfg.cellRadius = cellRadiusFromModel(model);
   cfg.backgroundDepthZ =
       static_cast<float>(model.getDouble(settings::kBridgeBackgroundDepthZ));
   cfg.backgroundOpacity =
@@ -164,7 +177,7 @@ BridgeRuntimeConfig::applyToStore(Store &store,
                                   const MicroversionId &parent) const {
   auto ver = parent;
   ver      = setSetting(store, ver, settings::kBridgeCellRadius,
-                        static_cast<std::int64_t>(cellRadius));
+                        storedCellRadius(cellRadius));
   ver      = setSetting(store, ver, settings::kBridgeBackgroundDepthZ,
                         static_cast<double>(backgroundDepthZ));
   ver      = setSetting(store, ver, settings::kBridgeBackgroundOpacity,

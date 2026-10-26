@@ -61,7 +61,7 @@ struct TestStore {
 // 1. aQuotedKeymapIsOneQuotation
 TEST(QuotedStructureTest, aQuotedKeymapIsOneQuotation) {
   TestStore alice("btpk:aaaa:alice");
-  const auto homeAlice = alice.store->homeCell();
+  const auto homeAlice = alice.store->homeCell().value();
 
   // Alice builds a mini-keymap:
   // home --d.vars--> setting1 ("vim.insert") --d.values--> val1 ("i")
@@ -74,13 +74,13 @@ TEST(QuotedStructureTest, aQuotedKeymapIsOneQuotation) {
   const auto dimGroupsA = alice.makeDimAt(atAlice, "d.groups");
 
   atAlice       = alice.store->makeCell(atAlice, "vim.insert");
-  const auto s1 = alice.store->cellRefOf(atAlice);
+  const auto s1 = alice.store->cellRefOf(atAlice).value();
   atAlice       = alice.store->makeCell(atAlice, "i");
-  const auto v1 = alice.store->cellRefOf(atAlice);
+  const auto v1 = alice.store->cellRefOf(atAlice).value();
   atAlice       = alice.store->makeCell(atAlice, "Insert mode");
-  const auto n1 = alice.store->cellRefOf(atAlice);
+  const auto n1 = alice.store->cellRefOf(atAlice).value();
   atAlice       = alice.store->makeCell(atAlice, "Editing");
-  const auto g1 = alice.store->cellRefOf(atAlice);
+  const auto g1 = alice.store->cellRefOf(atAlice).value();
 
   atAlice = alice.store->setLink(atAlice, homeAlice, dimVarsA,
                                  zigzag::DimVector::POS, s1);
@@ -105,23 +105,23 @@ TEST(QuotedStructureTest, aQuotedKeymapIsOneQuotation) {
 
   const ExternOpRef rootRef{
       .scroll   = aliceScrollId,
-      .produces = alice.store->segmentedOps().idOf(homeAlice),
+      .produces = alice.store->segmentedOps().idOf(homeAlice).value(),
   };
   const ExternOpRef varsRef{
       .scroll   = aliceScrollId,
-      .produces = alice.store->segmentedOps().idOf(dimVarsA),
+      .produces = alice.store->segmentedOps().idOf(dimVarsA).value(),
   };
   const ExternOpRef valsRef{
       .scroll   = aliceScrollId,
-      .produces = alice.store->segmentedOps().idOf(dimValsA),
+      .produces = alice.store->segmentedOps().idOf(dimValsA).value(),
   };
   const ExternOpRef notesRef{
       .scroll   = aliceScrollId,
-      .produces = alice.store->segmentedOps().idOf(dimNotesA),
+      .produces = alice.store->segmentedOps().idOf(dimNotesA).value(),
   };
   const ExternOpRef groupsRef{
       .scroll   = aliceScrollId,
-      .produces = alice.store->segmentedOps().idOf(dimGroupsA),
+      .produces = alice.store->segmentedOps().idOf(dimGroupsA).value(),
   };
 
   SelectorSpec spec{
@@ -133,7 +133,7 @@ TEST(QuotedStructureTest, aQuotedKeymapIsOneQuotation) {
   const auto dimVarsB = bob.makeDim("d.vars");
 
   const auto appended =
-      bob.store->quote(bob.head, bob.store->homeCell(), dimVarsB,
+      bob.store->quote(bob.head, bob.store->homeCell().value(), dimVarsB,
                        "Alice's Vim Keymap", pinnedState, spec);
   bob.head = appended.version;
 
@@ -169,7 +169,7 @@ TEST(QuotedStructureTest, aQuotedKeymapIsOneQuotation) {
   ASSERT_TRUE(dimVarsOpt.has_value());
   const auto qSucc =
       arena.linked(appended.quotationCell, *dimVarsOpt, zigzag::DimVector::POS);
-  EXPECT_NE(qSucc, zigzag::noCell);
+  EXPECT_TRUE(qSucc);
 }
 
 // 2. aForeignShapeFoldsWithoutDocumentContent
@@ -179,16 +179,17 @@ TEST(QuotedStructureTest, aForeignShapeFoldsWithoutDocumentContent) {
   const auto dimX = alice.makeDimAt(at, "d.x");
 
   at = alice.store->makeCell(at, "Full Permascroll Document Content");
-  const auto c1 = alice.store->cellRefOf(at);
-  at            = alice.store->setLink(at, alice.store->homeCell(), dimX,
-                                       zigzag::DimVector::POS, c1);
-  alice.head    = at;
+  const auto c1 = alice.store->cellRefOf(at).value();
+  at         = alice.store->setLink(at, alice.store->homeCell().value(), dimX,
+                                    zigzag::DimVector::POS, c1);
+  alice.head = at;
 
   // Folding foreign store without any SpanReader content reads
   const auto folded = alice.store->rebuildManifold(alice.head);
   EXPECT_TRUE(folded.contains(c1));
-  EXPECT_EQ(
-      folded.linked(alice.store->homeCell(), dimX, zigzag::DimVector::POS), c1);
+  EXPECT_EQ(folded.linked(alice.store->homeCell().value(), dimX,
+                          zigzag::DimVector::POS),
+            c1);
 }
 
 // 3. aClosureSelectorResolvesWithoutReadingDocumentContent
@@ -199,10 +200,10 @@ TEST(QuotedStructureTest,
   const auto dimVarsA = alice.makeDimAt(atAlice, "d.vars");
 
   atAlice       = alice.store->makeCell(atAlice, "Heavy Foreign Content");
-  const auto s1 = alice.store->cellRefOf(atAlice);
-  atAlice    = alice.store->setLink(atAlice, alice.store->homeCell(), dimVarsA,
-                                    zigzag::DimVector::POS, s1);
-  alice.head = atAlice;
+  const auto s1 = alice.store->cellRefOf(atAlice).value();
+  atAlice       = alice.store->setLink(atAlice, alice.store->homeCell().value(),
+                                       dimVarsA, zigzag::DimVector::POS, s1);
+  alice.head    = atAlice;
 
   TestStore bob("btpk:bbbb:bob");
   bob.head = bob.store->registerScroll(bob.head, alice.scrollKey);
@@ -211,21 +212,24 @@ TEST(QuotedStructureTest,
 
   const GlobalDocumentState pinnedState{.scroll  = alice.scrollKey,
                                         .version = alice.head};
-  const ExternOpRef rootRef{
-      .scroll   = aliceScrollId,
-      .produces = alice.store->segmentedOps().idOf(alice.store->homeCell())};
-  const ExternOpRef varsRef{.scroll = aliceScrollId,
+  const ExternOpRef rootRef{.scroll = aliceScrollId,
                             .produces =
-                                alice.store->segmentedOps().idOf(dimVarsA)};
+                                alice.store->segmentedOps()
+                                    .idOf(alice.store->homeCell().value())
+                                    .value()};
+  const ExternOpRef varsRef{
+      .scroll   = aliceScrollId,
+      .produces = alice.store->segmentedOps().idOf(dimVarsA).value()};
 
   SelectorSpec spec{.kind      = Selector::Kind::Closure,
                     .rootRef   = rootRef,
                     .carryRefs = {varsRef}};
   const auto dimVarsB = bob.makeDim("d.vars");
 
-  const auto appended = bob.store->quote(bob.head, bob.store->homeCell(),
-                                         dimVarsB, "Quote", pinnedState, spec);
-  bob.head            = appended.version;
+  const auto appended =
+      bob.store->quote(bob.head, bob.store->homeCell().value(), dimVarsB,
+                       "Quote", pinnedState, spec);
+  bob.head = appended.version;
 
   const auto bobFold = bob.store->rebuildManifold(bob.head);
   InMemoryForeignSource source;
@@ -244,21 +248,21 @@ TEST(QuotedStructureTest, aQuotationKeepsTheRestOfTheLocalRank) {
   auto atAlice    = alice.head;
   const auto dimA = alice.makeDimAt(atAlice, "d.vars");
   atAlice         = alice.store->makeCell(atAlice, "Alice1");
-  const auto f1   = alice.store->cellRefOf(atAlice);
-  atAlice         = alice.store->setLink(atAlice, alice.store->homeCell(), dimA,
-                                         zigzag::DimVector::POS, f1);
-  alice.head      = atAlice;
+  const auto f1   = alice.store->cellRefOf(atAlice).value();
+  atAlice = alice.store->setLink(atAlice, alice.store->homeCell().value(), dimA,
+                                 zigzag::DimVector::POS, f1);
+  alice.head = atAlice;
 
   TestStore bob("btpk:bbbb:bob");
   auto atBob      = bob.head;
   const auto dimB = bob.makeDimAt(atBob, "d.vars");
 
   atBob         = bob.store->makeCell(atBob, "BobBefore");
-  const auto l1 = bob.store->cellRefOf(atBob);
+  const auto l1 = bob.store->cellRefOf(atBob).value();
   atBob         = bob.store->makeCell(atBob, "BobAfter");
-  const auto l2 = bob.store->cellRefOf(atBob);
+  const auto l2 = bob.store->cellRefOf(atBob).value();
 
-  atBob    = bob.store->setLink(atBob, bob.store->homeCell(), dimB,
+  atBob    = bob.store->setLink(atBob, bob.store->homeCell().value(), dimB,
                                 zigzag::DimVector::POS, l1);
   atBob    = bob.store->setLink(atBob, l1, dimB, zigzag::DimVector::POS, l2);
   bob.head = atBob;
@@ -269,8 +273,9 @@ TEST(QuotedStructureTest, aQuotationKeepsTheRestOfTheLocalRank) {
 
   const GlobalDocumentState pin{.scroll  = alice.scrollKey,
                                 .version = alice.head};
-  const ExternOpRef rootRef{.scroll   = scrollId,
-                            .produces = alice.store->segmentedOps().idOf(f1)};
+  const ExternOpRef rootRef{.scroll = scrollId,
+                            .produces =
+                                alice.store->segmentedOps().idOf(f1).value()};
   SelectorSpec spec{.kind = Selector::Kind::Cell, .rootRef = rootRef};
 
   // Splice Q after l1 on dimB: original rank was l1 -> l2
@@ -302,7 +307,7 @@ TEST(QuotedStructureTest, twoQuotationsOfTheSameRankKeepBothOccurrences) {
   auto atAlice                     = alice.head;
   [[maybe_unused]] const auto dimA = alice.makeDimAt(atAlice, "d.rank");
   atAlice                          = alice.store->makeCell(atAlice, "F1");
-  const auto f1                    = alice.store->cellRefOf(atAlice);
+  const auto f1                    = alice.store->cellRefOf(atAlice).value();
   alice.head                       = atAlice;
 
   TestStore bob("btpk:bbbb:bob");
@@ -314,16 +319,17 @@ TEST(QuotedStructureTest, twoQuotationsOfTheSameRankKeepBothOccurrences) {
 
   const GlobalDocumentState pin{.scroll  = alice.scrollKey,
                                 .version = alice.head};
-  const ExternOpRef rootRef{.scroll   = scrollId,
-                            .produces = alice.store->segmentedOps().idOf(f1)};
+  const ExternOpRef rootRef{.scroll = scrollId,
+                            .produces =
+                                alice.store->segmentedOps().idOf(f1).value()};
   SelectorSpec spec{.kind = Selector::Kind::Cell, .rootRef = rootRef};
 
-  const auto q1 =
-      bob.store->quote(bob.head, bob.store->homeCell(), dimB, "Q1", pin, spec);
-  bob.head = q1.version;
+  const auto q1 = bob.store->quote(bob.head, bob.store->homeCell().value(),
+                                   dimB, "Q1", pin, spec);
+  bob.head      = q1.version;
 
   bob.head       = bob.store->makeCell(bob.head, "Mid");
-  const auto mid = bob.store->cellRefOf(bob.head);
+  const auto mid = bob.store->cellRefOf(bob.head).value();
 
   const auto q2 = bob.store->quote(bob.head, mid, dimB, "Q2", pin, spec);
   bob.head      = q2.version;
@@ -340,11 +346,13 @@ TEST(QuotedStructureTest, twoQuotationsOfTheSameRankKeepBothOccurrences) {
   const auto occ2 =
       arena.linked(q2.quotationCell, dimB, zigzag::DimVector::POS);
 
-  EXPECT_NE(occ1, zigzag::noCell);
-  EXPECT_NE(occ2, zigzag::noCell);
+  ASSERT_TRUE(occ1);
+  ASSERT_TRUE(occ2);
   EXPECT_NE(occ1, occ2);
-  EXPECT_EQ(arena.linked(occ1, dimB, zigzag::DimVector::NEG), q1.quotationCell);
-  EXPECT_EQ(arena.linked(occ2, dimB, zigzag::DimVector::NEG), q2.quotationCell);
+  EXPECT_EQ(arena.linked(*occ1, dimB, zigzag::DimVector::NEG),
+            q1.quotationCell);
+  EXPECT_EQ(arena.linked(*occ2, dimB, zigzag::DimVector::NEG),
+            q2.quotationCell);
 }
 
 // 6. overlappingQuotationSelectorsDoNotLeakEdges
@@ -355,11 +363,11 @@ TEST(QuotedStructureTest, overlappingQuotationSelectorsDoNotLeakEdges) {
   const auto dimY_A = alice.makeDimAt(atA, "d.y");
 
   atA           = alice.store->makeCell(atA, "A");
-  const auto cA = alice.store->cellRefOf(atA);
+  const auto cA = alice.store->cellRefOf(atA).value();
   atA           = alice.store->makeCell(atA, "B");
-  const auto cB = alice.store->cellRefOf(atA);
+  const auto cB = alice.store->cellRefOf(atA).value();
   atA           = alice.store->makeCell(atA, "C");
-  const auto cC = alice.store->cellRefOf(atA);
+  const auto cC = alice.store->cellRefOf(atA).value();
 
   atA = alice.store->setLink(atA, cA, dimX_A, zigzag::DimVector::POS, cB);
   atA = alice.store->setLink(atA, cA, dimY_A, zigzag::DimVector::POS, cC);
@@ -373,26 +381,28 @@ TEST(QuotedStructureTest, overlappingQuotationSelectorsDoNotLeakEdges) {
 
   const GlobalDocumentState pin{.scroll  = alice.scrollKey,
                                 .version = alice.head};
-  const ExternOpRef refA{.scroll   = sId,
-                         .produces = alice.store->segmentedOps().idOf(cA)};
-  const ExternOpRef refX{.scroll   = sId,
-                         .produces = alice.store->segmentedOps().idOf(dimX_A)};
-  const ExternOpRef refY{.scroll   = sId,
-                         .produces = alice.store->segmentedOps().idOf(dimY_A)};
+  const ExternOpRef refA{
+      .scroll = sId, .produces = alice.store->segmentedOps().idOf(cA).value()};
+  const ExternOpRef refX{.scroll = sId,
+                         .produces =
+                             alice.store->segmentedOps().idOf(dimX_A).value()};
+  const ExternOpRef refY{.scroll = sId,
+                         .produces =
+                             alice.store->segmentedOps().idOf(dimY_A).value()};
 
   // Q1 carries only d.x
   SelectorSpec spec1{
       .kind = Selector::Kind::Closure, .rootRef = refA, .carryRefs = {refX}};
-  const auto q1 =
-      bob.store->quote(bob.head, bob.store->homeCell(), dimR, "Q1", pin, spec1);
-  bob.head = q1.version;
+  const auto q1 = bob.store->quote(bob.head, bob.store->homeCell().value(),
+                                   dimR, "Q1", pin, spec1);
+  bob.head      = q1.version;
 
   // Q2 carries only d.y
   SelectorSpec spec2{
       .kind = Selector::Kind::Closure, .rootRef = refA, .carryRefs = {refY}};
-  const auto q2 =
-      bob.store->quote(bob.head, bob.store->homeCell(), dimR, "Q2", pin, spec2);
-  bob.head = q2.version;
+  const auto q2 = bob.store->quote(bob.head, bob.store->homeCell().value(),
+                                   dimR, "Q2", pin, spec2);
+  bob.head      = q2.version;
 
   const auto bobFold = bob.store->rebuildManifold(bob.head);
   InMemoryForeignSource source;
@@ -406,12 +416,10 @@ TEST(QuotedStructureTest, overlappingQuotationSelectorsDoNotLeakEdges) {
 
   const auto occ1A =
       arena.linked(q1.quotationCell, dimR, zigzag::DimVector::POS);
-  ASSERT_NE(occ1A, zigzag::noCell);
+  ASSERT_TRUE(occ1A);
   // View 1 has d.x edge, but NOT d.y edge
-  EXPECT_NE(arena.linked(occ1A, dimX_B, zigzag::DimVector::POS),
-            zigzag::noCell);
-  EXPECT_EQ(arena.linked(occ1A, dimY_B, zigzag::DimVector::POS),
-            zigzag::noCell);
+  EXPECT_TRUE(arena.linked(*occ1A, dimX_B, zigzag::DimVector::POS));
+  EXPECT_EQ(arena.linked(*occ1A, dimY_B, zigzag::DimVector::POS), std::nullopt);
 }
 
 // 7. aRankSelectorCanWalkEitherWayAroundARing
@@ -421,11 +429,11 @@ TEST(QuotedStructureTest, aRankSelectorCanWalkEitherWayAroundARing) {
   const auto dimRing = alice.makeDimAt(at, "d.ring");
 
   at            = alice.store->makeCell(at, "A");
-  const auto cA = alice.store->cellRefOf(at);
+  const auto cA = alice.store->cellRefOf(at).value();
   at            = alice.store->makeCell(at, "B");
-  const auto cB = alice.store->cellRefOf(at);
+  const auto cB = alice.store->cellRefOf(at).value();
   at            = alice.store->makeCell(at, "C");
-  const auto cC = alice.store->cellRefOf(at);
+  const auto cC = alice.store->cellRefOf(at).value();
 
   // Ring: A -> B -> C -> A
   at = alice.store->setLink(at, cA, dimRing, zigzag::DimVector::POS, cB);
@@ -475,7 +483,7 @@ TEST(QuotedStructureTest, anExplicitQuotationScopeDoesNotLeakPastTheSelector) {
   std::vector<zigzag::CellRef> cells;
   for (int i = 0; i < 10; ++i) {
     at = alice.store->makeCell(at, "Setting_" + std::to_string(i));
-    cells.push_back(alice.store->cellRefOf(at));
+    cells.push_back(alice.store->cellRefOf(at).value());
   }
   for (std::size_t i = 0; i + 1 < cells.size(); ++i) {
     at = alice.store->setLink(at, cells[i], dimX, zigzag::DimVector::POS,
@@ -492,15 +500,17 @@ TEST(QuotedStructureTest, anExplicitQuotationScopeDoesNotLeakPastTheSelector) {
   const GlobalDocumentState pin{.scroll  = alice.scrollKey,
                                 .version = alice.head};
   const ExternOpRef rootRef{
-      .scroll = sId, .produces = alice.store->segmentedOps().idOf(cells[0])};
-  const ExternOpRef dimRef{.scroll   = sId,
-                           .produces = alice.store->segmentedOps().idOf(dimX)};
+      .scroll   = sId,
+      .produces = alice.store->segmentedOps().idOf(cells[0]).value()};
+  const ExternOpRef dimRef{.scroll = sId,
+                           .produces =
+                               alice.store->segmentedOps().idOf(dimX).value()};
 
   SelectorSpec spec{
       .kind = Selector::Kind::Rank, .rootRef = rootRef, .rankDimRef = dimRef};
-  const auto q =
-      bob.store->quote(bob.head, bob.store->homeCell(), dimB, "Q", pin, spec);
-  bob.head = q.version;
+  const auto q = bob.store->quote(bob.head, bob.store->homeCell().value(), dimB,
+                                  "Q", pin, spec);
+  bob.head     = q.version;
 
   const auto bobFold = bob.store->rebuildManifold(bob.head);
   InMemoryForeignSource source;
@@ -528,11 +538,11 @@ TEST(QuotedStructureTest, aQuerySelectorAnswersWhatVqlAnswers) {
   const auto dimX = alice.makeDimAt(at, "d.vars");
 
   at            = alice.store->makeCell(at, "item1");
-  const auto c1 = alice.store->cellRefOf(at);
+  const auto c1 = alice.store->cellRefOf(at).value();
   at            = alice.store->makeCell(at, "item2");
-  const auto c2 = alice.store->cellRefOf(at);
-  at            = alice.store->setLink(at, alice.store->homeCell(), dimX,
-                                       zigzag::DimVector::POS, c1);
+  const auto c2 = alice.store->cellRefOf(at).value();
+  at         = alice.store->setLink(at, alice.store->homeCell().value(), dimX,
+                                    zigzag::DimVector::POS, c1);
   at         = alice.store->setLink(at, c1, dimX, zigzag::DimVector::POS, c2);
   alice.head = at;
 
@@ -577,9 +587,9 @@ TEST(QuotedStructureTest, anOverrideShadowsByGlobalNameNotByPosition) {
   const auto dimX_A = alice.makeDimAt(atA, "d.rank");
 
   atA           = alice.store->makeCell(atA, "F1");
-  const auto f1 = alice.store->cellRefOf(atA);
+  const auto f1 = alice.store->cellRefOf(atA).value();
   atA           = alice.store->makeCell(atA, "F2");
-  const auto f2 = alice.store->cellRefOf(atA);
+  const auto f2 = alice.store->cellRefOf(atA).value();
   atA = alice.store->setLink(atA, f1, dimX_A, zigzag::DimVector::POS, f2);
   alice.head = atA;
 
@@ -591,17 +601,18 @@ TEST(QuotedStructureTest, anOverrideShadowsByGlobalNameNotByPosition) {
 
   const GlobalDocumentState pin1{.scroll  = alice.scrollKey,
                                  .version = alice.head};
-  const ExternOpRef ref1{.scroll   = sId,
-                         .produces = alice.store->segmentedOps().idOf(f1)};
-  const ExternOpRef ref2{.scroll   = sId,
-                         .produces = alice.store->segmentedOps().idOf(f2)};
+  const ExternOpRef ref1{
+      .scroll = sId, .produces = alice.store->segmentedOps().idOf(f1).value()};
+  const ExternOpRef ref2{
+      .scroll = sId, .produces = alice.store->segmentedOps().idOf(f2).value()};
   const ExternOpRef refDim{
-      .scroll = sId, .produces = alice.store->segmentedOps().idOf(dimX_A)};
+      .scroll   = sId,
+      .produces = alice.store->segmentedOps().idOf(dimX_A).value()};
 
   SelectorSpec spec{
       .kind = Selector::Kind::Rank, .rootRef = ref1, .rankDimRef = refDim};
-  const auto q = bob.store->quote(bob.head, bob.store->homeCell(), dimX_B, "Q",
-                                  pin1, spec);
+  const auto q = bob.store->quote(bob.head, bob.store->homeCell().value(),
+                                  dimX_B, "Q", pin1, spec);
   bob.head     = q.version;
 
   // Bob overrides F2 by its birth op ref
@@ -610,7 +621,7 @@ TEST(QuotedStructureTest, anOverrideShadowsByGlobalNameNotByPosition) {
 
   // Now Alice prepends F0 before F1
   atA           = alice.store->makeCell(atA, "F0");
-  const auto f0 = alice.store->cellRefOf(atA);
+  const auto f0 = alice.store->cellRefOf(atA).value();
   atA = alice.store->setLink(atA, f0, dimX_A, zigzag::DimVector::POS, f1);
   alice.head = atA;
 
@@ -628,10 +639,10 @@ TEST(QuotedStructureTest, anOverrideShadowsByGlobalNameNotByPosition) {
   // Verify that the override still replaces F2 and does not affect F1 or F0
   const auto occ =
       arena.linked(q.quotationCell, dimX_B, zigzag::DimVector::POS);
-  ASSERT_NE(occ, zigzag::noCell);
-  const auto occ2 = arena.linked(occ, dimX_B, zigzag::DimVector::POS);
-  ASSERT_NE(occ2, zigzag::noCell);
-  EXPECT_EQ(arena.textOf(occ2, *bob.store), "Bob's Override of F2");
+  ASSERT_TRUE(occ);
+  const auto occ2 = arena.linked(*occ, dimX_B, zigzag::DimVector::POS);
+  ASSERT_TRUE(occ2);
+  EXPECT_EQ(arena.textOf(*occ2, *bob.store), "Bob's Override of F2");
 }
 
 // 12. anOverrideMayShadowACellOffTheRank
@@ -641,9 +652,9 @@ TEST(QuotedStructureTest, anOverrideMayShadowACellOffTheRank) {
   const auto dimValsA = alice.makeDimAt(atA, "d.values");
 
   atA              = alice.store->makeCell(atA, "tab_size");
-  const auto sName = alice.store->cellRefOf(atA);
+  const auto sName = alice.store->cellRefOf(atA).value();
   atA              = alice.store->makeCell(atA, "4");
-  const auto sVal  = alice.store->cellRefOf(atA);
+  const auto sVal  = alice.store->cellRefOf(atA).value();
 
   atA =
       alice.store->setLink(atA, sName, dimValsA, zigzag::DimVector::POS, sVal);
@@ -658,17 +669,20 @@ TEST(QuotedStructureTest, anOverrideMayShadowACellOffTheRank) {
   const GlobalDocumentState pin{.scroll  = alice.scrollKey,
                                 .version = alice.head};
   const ExternOpRef refName{
-      .scroll = sId, .produces = alice.store->segmentedOps().idOf(sName)};
-  const ExternOpRef refVal{.scroll   = sId,
-                           .produces = alice.store->segmentedOps().idOf(sVal)};
+      .scroll   = sId,
+      .produces = alice.store->segmentedOps().idOf(sName).value()};
+  const ExternOpRef refVal{.scroll = sId,
+                           .produces =
+                               alice.store->segmentedOps().idOf(sVal).value()};
   const ExternOpRef refValsDim{
-      .scroll = sId, .produces = alice.store->segmentedOps().idOf(dimValsA)};
+      .scroll   = sId,
+      .produces = alice.store->segmentedOps().idOf(dimValsA).value()};
 
   SelectorSpec spec{.kind      = Selector::Kind::Closure,
                     .rootRef   = refName,
                     .carryRefs = {refValsDim}};
-  const auto q = bob.store->quote(bob.head, bob.store->homeCell(), dimVarsB,
-                                  "Q", pin, spec);
+  const auto q = bob.store->quote(bob.head, bob.store->homeCell().value(),
+                                  dimVarsB, "Q", pin, spec);
   bob.head     = q.version;
 
   // Bob overrides sVal with "2"
@@ -684,14 +698,14 @@ TEST(QuotedStructureTest, anOverrideMayShadowACellOffTheRank) {
 
   const auto occSetting =
       arena.linked(q.quotationCell, dimVarsB, zigzag::DimVector::POS);
-  ASSERT_NE(occSetting, zigzag::noCell);
-  EXPECT_EQ(arena.textOf(occSetting, *alice.store), "tab_size");
+  ASSERT_TRUE(occSetting);
+  EXPECT_EQ(arena.textOf(*occSetting, *alice.store), "tab_size");
 
   const auto dimValsB = arena.ensureDimension("d.values");
   const auto occVal =
-      arena.linked(occSetting, dimValsB, zigzag::DimVector::POS);
-  ASSERT_NE(occVal, zigzag::noCell);
-  EXPECT_EQ(arena.textOf(occVal, *bob.store), "2");
+      arena.linked(*occSetting, dimValsB, zigzag::DimVector::POS);
+  ASSERT_TRUE(occVal);
+  EXPECT_EQ(arena.textOf(*occVal, *bob.store), "2");
 }
 
 // 13. anUnresolvedQuotationIsAVisibleCitation
@@ -705,13 +719,15 @@ TEST(QuotedStructureTest, anUnresolvedQuotationIsAVisibleCitation) {
 
   const GlobalDocumentState pin{.scroll  = alice.scrollKey,
                                 .version = alice.head};
-  const ExternOpRef refRoot{
-      .scroll   = sId,
-      .produces = alice.store->segmentedOps().idOf(alice.store->homeCell())};
+  const ExternOpRef refRoot{.scroll = sId,
+                            .produces =
+                                alice.store->segmentedOps()
+                                    .idOf(alice.store->homeCell().value())
+                                    .value()};
 
   SelectorSpec spec{.kind = Selector::Kind::Cell, .rootRef = refRoot};
-  const auto q = bob.store->quote(bob.head, bob.store->homeCell(), dimVarsB,
-                                  "Unresolved Q", pin, spec);
+  const auto q = bob.store->quote(bob.head, bob.store->homeCell().value(),
+                                  dimVarsB, "Unresolved Q", pin, spec);
   bob.head     = q.version;
 
   const auto bobFold = bob.store->rebuildManifold(bob.head);
@@ -722,26 +738,26 @@ TEST(QuotedStructureTest, anUnresolvedQuotationIsAVisibleCitation) {
 
   // Q remains visible on the rank with label intact
   EXPECT_EQ(bobFold.textOf(q.quotationCell, *bob.store), "Unresolved Q");
-  EXPECT_EQ(
-      arena.linked(bob.store->homeCell(), dimVarsB, zigzag::DimVector::POS),
-      q.quotationCell);
+  EXPECT_EQ(arena.linked(bob.store->homeCell().value(), dimVarsB,
+                         zigzag::DimVector::POS),
+            q.quotationCell);
 }
 
 // 14. aQuotationPinsItsState
 TEST(QuotedStructureTest, aQuotationPinsItsState) {
   TestStore alice("btpk:aaaa:alice");
-  auto atA           = alice.head;
-  const auto dimX    = alice.makeDimAt(atA, "d.vars");
-  atA                = alice.store->makeCell(atA, "v1_cell");
-  const auto c1      = alice.store->cellRefOf(atA);
-  atA                = alice.store->setLink(atA, alice.store->homeCell(), dimX,
-                                            zigzag::DimVector::POS, c1);
-  alice.head         = atA;
+  auto atA        = alice.head;
+  const auto dimX = alice.makeDimAt(atA, "d.vars");
+  atA             = alice.store->makeCell(atA, "v1_cell");
+  const auto c1   = alice.store->cellRefOf(atA).value();
+  atA        = alice.store->setLink(atA, alice.store->homeCell().value(), dimX,
+                                    zigzag::DimVector::POS, c1);
+  alice.head = atA;
   const auto aliceV1 = alice.head;
 
   // Alice advances to v2 adding v2_cell
   atA           = alice.store->makeCell(atA, "v2_cell");
-  const auto c2 = alice.store->cellRefOf(atA);
+  const auto c2 = alice.store->cellRefOf(atA).value();
   atA        = alice.store->setLink(atA, c1, dimX, zigzag::DimVector::POS, c2);
   alice.head = atA;
 
@@ -753,16 +769,17 @@ TEST(QuotedStructureTest, aQuotationPinsItsState) {
   // Bob quotes pinned to aliceV1
   const GlobalDocumentState pinV1{.scroll  = alice.scrollKey,
                                   .version = aliceV1};
-  const ExternOpRef ref1{.scroll   = sId,
-                         .produces = alice.store->segmentedOps().idOf(c1)};
-  const ExternOpRef refDim{.scroll   = sId,
-                           .produces = alice.store->segmentedOps().idOf(dimX)};
+  const ExternOpRef ref1{
+      .scroll = sId, .produces = alice.store->segmentedOps().idOf(c1).value()};
+  const ExternOpRef refDim{.scroll = sId,
+                           .produces =
+                               alice.store->segmentedOps().idOf(dimX).value()};
 
   SelectorSpec spec{
       .kind = Selector::Kind::Rank, .rootRef = ref1, .rankDimRef = refDim};
-  const auto q =
-      bob.store->quote(bob.head, bob.store->homeCell(), dimB, "Q", pinV1, spec);
-  bob.head = q.version;
+  const auto q = bob.store->quote(bob.head, bob.store->homeCell().value(), dimB,
+                                  "Q", pinV1, spec);
+  bob.head     = q.version;
 
   InMemoryForeignSource source;
   source.registerDocument(pinV1, alice.store.get(), nullptr);
@@ -772,9 +789,9 @@ TEST(QuotedStructureTest, aQuotationPinsItsState) {
   resolveQuotations(arena, bobFold, *bob.store, source, QuotationBudget{});
 
   const auto occ1 = arena.linked(q.quotationCell, dimB, zigzag::DimVector::POS);
-  ASSERT_NE(occ1, zigzag::noCell);
+  ASSERT_TRUE(occ1);
   // occ1 has no successor along dimB because v2_cell does not exist at aliceV1
-  EXPECT_EQ(arena.linked(occ1, dimB, zigzag::DimVector::POS), zigzag::noCell);
+  EXPECT_FALSE(arena.linked(*occ1, dimB, zigzag::DimVector::POS));
 }
 
 // 15. aCellBirthDoesNotPinItsLaterSnapshot
@@ -782,7 +799,7 @@ TEST(QuotedStructureTest, aCellBirthDoesNotPinItsLaterSnapshot) {
   TestStore alice("btpk:aaaa:alice");
   auto atA           = alice.head;
   atA                = alice.store->makeCell(atA, "state_one");
-  const auto c       = alice.store->cellRefOf(atA);
+  const auto c       = alice.store->cellRefOf(atA).value();
   const auto aliceV1 = atA;
 
   atA                = alice.store->setCellText(atA, c, "state_two");
@@ -822,14 +839,16 @@ TEST(QuotedStructureTest, preselectionBudgetsBoundTheForeignFold) {
 
   const GlobalDocumentState pin{.scroll  = alice.scrollKey,
                                 .version = alice.head};
-  const ExternOpRef refRoot{
-      .scroll   = sId,
-      .produces = alice.store->segmentedOps().idOf(alice.store->homeCell())};
+  const ExternOpRef refRoot{.scroll = sId,
+                            .produces =
+                                alice.store->segmentedOps()
+                                    .idOf(alice.store->homeCell().value())
+                                    .value()};
 
   SelectorSpec spec{.kind = Selector::Kind::Cell, .rootRef = refRoot};
-  const auto q =
-      bob.store->quote(bob.head, bob.store->homeCell(), dimB, "Q", pin, spec);
-  bob.head = q.version;
+  const auto q = bob.store->quote(bob.head, bob.store->homeCell().value(), dimB,
+                                  "Q", pin, spec);
+  bob.head     = q.version;
 
   InMemoryForeignSource source;
   source.registerDocument(pin, alice.store.get(), nullptr);
@@ -844,7 +863,7 @@ TEST(QuotedStructureTest, preselectionBudgetsBoundTheForeignFold) {
 
   // Q should not have resolved occurrences due to budget
   EXPECT_EQ(arena.linked(q.quotationCell, dimB, zigzag::DimVector::POS),
-            zigzag::noCell);
+            std::nullopt);
 }
 
 // 18. aQuotationOfAQuotationResolves
@@ -854,10 +873,10 @@ TEST(QuotedStructureTest, aQuotationOfAQuotationResolves) {
   auto atA         = a.head;
   const auto dimA  = a.makeDimAt(atA, "d.vars");
   atA              = a.store->makeCell(atA, "RootItemA");
-  const auto itemA = a.store->cellRefOf(atA);
-  atA = a.store->setLink(atA, a.store->homeCell(), dimA, zigzag::DimVector::POS,
-                         itemA);
-  a.head = atA;
+  const auto itemA = a.store->cellRefOf(atA).value();
+  atA              = a.store->setLink(atA, a.store->homeCell().value(), dimA,
+                                      zigzag::DimVector::POS, itemA);
+  a.head           = atA;
 
   TestStore b("btpk:bbbb:b");
   b.head          = b.store->registerScroll(b.head, a.scrollKey);
@@ -865,12 +884,12 @@ TEST(QuotedStructureTest, aQuotationOfAQuotationResolves) {
   const auto dimB = b.makeDim("d.vars");
 
   const GlobalDocumentState pinA{.scroll = a.scrollKey, .version = a.head};
-  const ExternOpRef refA{.scroll   = sIdA,
-                         .produces = a.store->segmentedOps().idOf(itemA)};
+  const ExternOpRef refA{
+      .scroll = sIdA, .produces = a.store->segmentedOps().idOf(itemA).value()};
   SelectorSpec specA{.kind = Selector::Kind::Cell, .rootRef = refA};
-  const auto qB =
-      b.store->quote(b.head, b.store->homeCell(), dimB, "QB", pinA, specA);
-  b.head = qB.version;
+  const auto qB = b.store->quote(b.head, b.store->homeCell().value(), dimB,
+                                 "QB", pinA, specA);
+  b.head        = qB.version;
 
   TestStore c("btpk:cccc:c");
   c.head          = c.store->registerScroll(c.head, b.scrollKey);
@@ -878,13 +897,13 @@ TEST(QuotedStructureTest, aQuotationOfAQuotationResolves) {
   const auto dimC = c.makeDim("d.vars");
 
   const GlobalDocumentState pinB{.scroll = b.scrollKey, .version = b.head};
-  const ExternOpRef refB{.scroll = sIdB,
-                         .produces =
-                             b.store->segmentedOps().idOf(qB.quotationCell)};
+  const ExternOpRef refB{
+      .scroll   = sIdB,
+      .produces = b.store->segmentedOps().idOf(qB.quotationCell).value()};
   SelectorSpec specB{.kind = Selector::Kind::Cell, .rootRef = refB};
-  const auto qC =
-      c.store->quote(c.head, c.store->homeCell(), dimC, "QC", pinB, specB);
-  c.head = qC.version;
+  const auto qC = c.store->quote(c.head, c.store->homeCell().value(), dimC,
+                                 "QC", pinB, specB);
+  c.head        = qC.version;
 
   InMemoryForeignSource source;
   source.registerDocument(pinA, a.store.get(), nullptr);
@@ -895,7 +914,7 @@ TEST(QuotedStructureTest, aQuotationOfAQuotationResolves) {
   resolveQuotations(arena, cFold, *c.store, source, QuotationBudget{});
 
   const auto occ = arena.linked(qC.quotationCell, dimC, zigzag::DimVector::POS);
-  EXPECT_NE(occ, zigzag::noCell);
+  EXPECT_TRUE(occ);
 }
 
 // 19. aQuotationCycleTerminates
@@ -915,22 +934,24 @@ TEST(QuotedStructureTest, aQuotationCycleTerminates) {
   const GlobalDocumentState pinB{.scroll = b.scrollKey, .version = b.head};
   const GlobalDocumentState pinA{.scroll = a.scrollKey, .version = a.head};
 
-  const ExternOpRef refB{.scroll = sIdB_inA,
-                         .produces =
-                             b.store->segmentedOps().idOf(b.store->homeCell())};
-  const ExternOpRef refA{.scroll = sIdA_inB,
-                         .produces =
-                             a.store->segmentedOps().idOf(a.store->homeCell())};
+  const ExternOpRef refB{
+      .scroll = sIdB_inA,
+      .produces =
+          b.store->segmentedOps().idOf(b.store->homeCell().value()).value()};
+  const ExternOpRef refA{
+      .scroll = sIdA_inB,
+      .produces =
+          a.store->segmentedOps().idOf(a.store->homeCell().value()).value()};
 
   SelectorSpec specB{.kind = Selector::Kind::Cell, .rootRef = refB};
   SelectorSpec specA{.kind = Selector::Kind::Cell, .rootRef = refA};
 
-  const auto qA =
-      a.store->quote(a.head, a.store->homeCell(), dimA, "QA", pinB, specB);
-  a.head = qA.version;
-  const auto qB =
-      b.store->quote(b.head, b.store->homeCell(), dimB, "QB", pinA, specA);
-  b.head = qB.version;
+  const auto qA = a.store->quote(a.head, a.store->homeCell().value(), dimA,
+                                 "QA", pinB, specB);
+  a.head        = qA.version;
+  const auto qB = b.store->quote(b.head, b.store->homeCell().value(), dimB,
+                                 "QB", pinA, specA);
+  b.head        = qB.version;
 
   InMemoryForeignSource source;
   source.registerDocument(pinB, b.store.get(), nullptr);
@@ -954,14 +975,16 @@ TEST(QuotedStructureTest, materialisationWritesNothing) {
 
   const GlobalDocumentState pin{.scroll  = alice.scrollKey,
                                 .version = alice.head};
-  const ExternOpRef refRoot{
-      .scroll   = sId,
-      .produces = alice.store->segmentedOps().idOf(alice.store->homeCell())};
+  const ExternOpRef refRoot{.scroll = sId,
+                            .produces =
+                                alice.store->segmentedOps()
+                                    .idOf(alice.store->homeCell().value())
+                                    .value()};
 
   SelectorSpec spec{.kind = Selector::Kind::Cell, .rootRef = refRoot};
-  const auto q =
-      bob.store->quote(bob.head, bob.store->homeCell(), dimB, "Q", pin, spec);
-  bob.head = q.version;
+  const auto q = bob.store->quote(bob.head, bob.store->homeCell().value(), dimB,
+                                  "Q", pin, spec);
+  bob.head     = q.version;
 
   const auto opsBefore = bob.store->opCount();
   const auto bobFold   = bob.store->rebuildManifold(bob.head);
@@ -981,16 +1004,16 @@ TEST(QuotedStructureTest, materialisationWritesNothing) {
 // 21. aQuotedKeymapReadsThroughSystemStoreModel
 TEST(QuotedStructureTest, aQuotedKeymapReadsThroughSystemStoreModel) {
   TestStore alice("btpk:aaaa:alice");
-  const auto homeAlice = alice.store->homeCell();
+  const auto homeAlice = alice.store->homeCell().value();
 
   auto atA            = alice.head;
   const auto dimVarsA = alice.makeDimAt(atA, "d.vars");
   const auto dimValsA = alice.makeDimAt(atA, "d.values");
 
   atA              = alice.store->makeCell(atA, "editor.tab_size");
-  const auto sName = alice.store->cellRefOf(atA);
+  const auto sName = alice.store->cellRefOf(atA).value();
   atA              = alice.store->makeCell(atA, "4");
-  const auto sVal  = alice.store->cellRefOf(atA);
+  const auto sVal  = alice.store->cellRefOf(atA).value();
 
   atA = alice.store->setLink(atA, homeAlice, dimVarsA, zigzag::DimVector::POS,
                              sName);
@@ -1007,19 +1030,23 @@ TEST(QuotedStructureTest, aQuotedKeymapReadsThroughSystemStoreModel) {
   const GlobalDocumentState pin{.scroll  = alice.scrollKey,
                                 .version = alice.head};
   const ExternOpRef refHome{
-      .scroll = sId, .produces = alice.store->segmentedOps().idOf(homeAlice)};
-  const ExternOpRef refVal{.scroll   = sId,
-                           .produces = alice.store->segmentedOps().idOf(sVal)};
+      .scroll   = sId,
+      .produces = alice.store->segmentedOps().idOf(homeAlice).value()};
+  const ExternOpRef refVal{.scroll = sId,
+                           .produces =
+                               alice.store->segmentedOps().idOf(sVal).value()};
   const ExternOpRef refVarsDim{
-      .scroll = sId, .produces = alice.store->segmentedOps().idOf(dimVarsA)};
+      .scroll   = sId,
+      .produces = alice.store->segmentedOps().idOf(dimVarsA).value()};
   const ExternOpRef refValsDim{
-      .scroll = sId, .produces = alice.store->segmentedOps().idOf(dimValsA)};
+      .scroll   = sId,
+      .produces = alice.store->segmentedOps().idOf(dimValsA).value()};
 
   SelectorSpec spec{.kind      = Selector::Kind::Closure,
                     .rootRef   = refHome,
                     .carryRefs = {refVarsDim, refValsDim}};
-  const auto q = bob.store->quote(bob.head, bob.store->homeCell(), dimVarsB,
-                                  "AliceConfig", pin, spec);
+  const auto q = bob.store->quote(bob.head, bob.store->homeCell().value(),
+                                  dimVarsB, "AliceConfig", pin, spec);
   bob.head     = q.version;
 
   // Bob overrides tab_size from 4 to 8
@@ -1034,8 +1061,8 @@ TEST(QuotedStructureTest, aQuotedKeymapReadsThroughSystemStoreModel) {
   resolveQuotations(arena, bobFold, *bob.store, source, QuotationBudget{});
 
   // Read through SystemStoreModel off the ArenaManifold overlay
-  const auto model =
-      SystemStoreModel::fromManifold(arena, arena.home(), bob.store.get());
+  const auto model = SystemStoreModel::fromManifold(arena, arena.home().value(),
+                                                    bob.store.get());
   EXPECT_TRUE(model.isValid());
 
   const auto entry = model.find("editor.tab_size");

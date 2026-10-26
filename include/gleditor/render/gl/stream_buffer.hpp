@@ -89,8 +89,9 @@ public:
   }
 
   /// Allocate a mapped chunk of @p size bytes with alignment @p alignment.
-  MappedChunk allocate(const std::size_t size,
-                       const std::size_t alignment = 64) override {
+  MappedChunk allocate(
+      const std::size_t size,
+      const std::size_t alignment = kDefaultStreamAlignmentBytes) override {
     if (0 == size) {
       return {.ptr = nullptr, .offset = head};
     }

@@ -171,39 +171,40 @@ VQLEngine::executeScriptBody(const ScriptBody &body) {
 }
 
 bool VQLEngine::matchDestructure(
-    const DestructurePattern &pattern, zigzag::CellRef context,
+    const DestructurePattern &pattern, std::optional<zigzag::CellRef> context,
     std::unordered_map<std::string, std::vector<zigzag::CellRef>>
         &scopedBindings) {
-  if (context == zigzag::noCell) {
+  if (!context || !core_->arena().contains(*context)) {
     return false;
   }
   for (const auto &field : pattern.fields) {
     if (field.isContext) {
-      scopedBindings["."] = {context};
+      scopedBindings["."] = {*context};
     } else {
       zigzag::DimRef dim = resolveDimension(field.dimName);
-      zigzag::CellRef linked =
-          core_->arena().linkedMinting(context, dim, field.direction);
-      if (field.isBidir && linked == zigzag::noCell) {
+      std::optional<zigzag::CellRef> linked =
+          core_->arena().linkedMinting(*context, dim, field.direction);
+      if (field.isBidir && !linked) {
         linked = core_->arena().linkedMinting(
-            context, dim,
+            *context, dim,
             (field.direction == zigzag::DimVector::POS)
                 ? zigzag::DimVector::NEG
                 : zigzag::DimVector::POS);
       }
-      if (linked == zigzag::noCell) {
+      if (!linked) {
         return false;
       }
       if (!field.varName.empty()) {
-        scopedBindings[field.varName] = {linked};
+        scopedBindings[field.varName] = {*linked};
       }
     }
   }
   return true;
 }
 
-std::vector<zigzag::CellRef> VQLEngine::executeLambda(const PathLambda &lambda,
-                                                      zigzag::CellRef context) {
+std::vector<zigzag::CellRef>
+VQLEngine::executeLambda(const PathLambda &lambda,
+                         std::optional<zigzag::CellRef> context) {
   this->arena().consumeWork();
   auto savedEnv = env_;
   std::unordered_map<std::string, std::vector<zigzag::CellRef>> scoped;
@@ -211,9 +212,12 @@ std::vector<zigzag::CellRef> VQLEngine::executeLambda(const PathLambda &lambda,
   if (!lambda.params.empty()) {
     const auto &param = lambda.params[0];
     if (std::holds_alternative<bool>(param.target)) {
-      scoped["."] = {context};
+      scoped["."] = context ? std::vector<zigzag::CellRef>{*context}
+                            : std::vector<zigzag::CellRef>{};
     } else if (std::holds_alternative<std::string>(param.target)) {
-      scoped[std::get<std::string>(param.target)] = {context};
+      scoped[std::get<std::string>(param.target)] =
+          context ? std::vector<zigzag::CellRef>{*context}
+                  : std::vector<zigzag::CellRef>{};
     } else if (std::holds_alternative<DestructurePattern>(param.target)) {
       if (!matchDestructure(std::get<DestructurePattern>(param.target), context,
                             scoped)) {
@@ -221,7 +225,8 @@ std::vector<zigzag::CellRef> VQLEngine::executeLambda(const PathLambda &lambda,
       }
     }
   } else {
-    scoped["."] = {context};
+    scoped["."] = context ? std::vector<zigzag::CellRef>{*context}
+                          : std::vector<zigzag::CellRef>{};
   }
 
   for (auto &[k, v] : scoped) {
@@ -235,10 +240,10 @@ std::vector<zigzag::CellRef> VQLEngine::executeLambda(const PathLambda &lambda,
   } else if (std::holds_alternative<std::shared_ptr<ValueExpr>>(lambda.body)) {
     const auto &valExpr = *std::get<std::shared_ptr<ValueExpr>>(lambda.body);
     if (std::holds_alternative<std::shared_ptr<PathExpression>>(valExpr.kind)) {
-      results = evaluatePath(
-          *std::get<std::shared_ptr<PathExpression>>(valExpr.kind),
-          context != zigzag::noCell ? std::vector<zigzag::CellRef>{context}
-                                    : std::vector<zigzag::CellRef>{});
+      results =
+          evaluatePath(*std::get<std::shared_ptr<PathExpression>>(valExpr.kind),
+                       context ? std::vector<zigzag::CellRef>{*context}
+                               : std::vector<zigzag::CellRef>{});
     } else if (std::holds_alternative<std::string>(valExpr.kind)) {
       const auto &varName = std::get<std::string>(valExpr.kind);
       auto it             = env_.find(varName);
@@ -246,8 +251,9 @@ std::vector<zigzag::CellRef> VQLEngine::executeLambda(const PathLambda &lambda,
         results.insert(results.end(), it->second.begin(), it->second.end());
       }
     } else {
-      auto val = evaluateValueExpr(valExpr, context);
-      results.push_back(cellFromValue(val));
+      if (const auto val = evaluateValueExpr(valExpr, context)) {
+        results.push_back(cellFromValue(*val));
+      }
     }
   }
 
@@ -258,7 +264,7 @@ std::vector<zigzag::CellRef> VQLEngine::executeLambda(const PathLambda &lambda,
 std::vector<zigzag::CellRef>
 VQLEngine::callUserDef(const DefDeclaration &def,
                        const std::vector<ValueExpr> &args,
-                       zigzag::CellRef context) {
+                       std::optional<zigzag::CellRef> context) {
   this->arena().consumeWork();
   auto savedEnv = env_;
 
@@ -268,8 +274,9 @@ VQLEngine::callUserDef(const DefDeclaration &def,
     if (param.isVariadic) {
       std::vector<zigzag::CellRef> restCells;
       while (argIdx < args.size()) {
-        auto val = evaluateValueExpr(args[argIdx++], context);
-        restCells.push_back(cellFromValue(val));
+        if (const auto val = evaluateValueExpr(args[argIdx++], context)) {
+          restCells.push_back(cellFromValue(*val));
+        }
       }
       if (std::holds_alternative<std::string>(param.target)) {
         env_[std::get<std::string>(param.target)] = std::move(restCells);
@@ -281,22 +288,24 @@ VQLEngine::callUserDef(const DefDeclaration &def,
     if (argIdx < args.size()) {
       const auto &arg = args[argIdx++];
       if (std::holds_alternative<std::shared_ptr<PathExpression>>(arg.kind)) {
-        paramCells = evaluatePath(
-            *std::get<std::shared_ptr<PathExpression>>(arg.kind),
-            context != zigzag::noCell ? std::vector<zigzag::CellRef>{context}
-                                      : std::vector<zigzag::CellRef>{});
+        paramCells =
+            evaluatePath(*std::get<std::shared_ptr<PathExpression>>(arg.kind),
+                         context ? std::vector<zigzag::CellRef>{*context}
+                                 : std::vector<zigzag::CellRef>{});
       } else if (std::holds_alternative<std::string>(arg.kind)) {
         auto it = env_.find(std::get<std::string>(arg.kind));
         if (it != env_.end()) {
           paramCells = it->second;
         }
       } else {
-        auto val = evaluateValueExpr(arg, context);
-        paramCells.push_back(cellFromValue(val));
+        if (const auto val = evaluateValueExpr(arg, context)) {
+          paramCells.push_back(cellFromValue(*val));
+        }
       }
     } else if (param.defaultValue) {
-      auto val = evaluateValueExpr(*param.defaultValue, context);
-      paramCells.push_back(cellFromValue(val));
+      if (const auto val = evaluateValueExpr(*param.defaultValue, context)) {
+        paramCells.push_back(cellFromValue(*val));
+      }
     }
 
     if (std::holds_alternative<bool>(param.target)) {
@@ -304,8 +313,10 @@ VQLEngine::callUserDef(const DefDeclaration &def,
     } else if (std::holds_alternative<std::string>(param.target)) {
       env_[std::get<std::string>(param.target)] = std::move(paramCells);
     } else if (std::holds_alternative<DestructurePattern>(param.target)) {
-      zigzag::CellRef targetC =
-          paramCells.empty() ? zigzag::noCell : paramCells.front();
+      const std::optional<zigzag::CellRef> targetC =
+          paramCells.empty()
+              ? std::nullopt
+              : std::optional<zigzag::CellRef>{paramCells.front()};
       std::unordered_map<std::string, std::vector<zigzag::CellRef>> scoped;
       if (!matchDestructure(std::get<DestructurePattern>(param.target), targetC,
                             scoped)) {
@@ -325,10 +336,10 @@ VQLEngine::callUserDef(const DefDeclaration &def,
   } else if (std::holds_alternative<std::shared_ptr<ValueExpr>>(def.body)) {
     const auto &valExpr = *std::get<std::shared_ptr<ValueExpr>>(def.body);
     if (std::holds_alternative<std::shared_ptr<PathExpression>>(valExpr.kind)) {
-      results = evaluatePath(
-          *std::get<std::shared_ptr<PathExpression>>(valExpr.kind),
-          context != zigzag::noCell ? std::vector<zigzag::CellRef>{context}
-                                    : std::vector<zigzag::CellRef>{});
+      results =
+          evaluatePath(*std::get<std::shared_ptr<PathExpression>>(valExpr.kind),
+                       context ? std::vector<zigzag::CellRef>{*context}
+                               : std::vector<zigzag::CellRef>{});
     } else if (std::holds_alternative<std::string>(valExpr.kind)) {
       const auto &varName = std::get<std::string>(valExpr.kind);
       auto it             = env_.find(varName);
@@ -336,8 +347,9 @@ VQLEngine::callUserDef(const DefDeclaration &def,
         results.insert(results.end(), it->second.begin(), it->second.end());
       }
     } else {
-      auto val = evaluateValueExpr(valExpr, context);
-      results.push_back(cellFromValue(val));
+      if (const auto val = evaluateValueExpr(valExpr, context)) {
+        results.push_back(cellFromValue(*val));
+      }
     }
   }
 
@@ -419,17 +431,17 @@ VQLEngine::executeWatch(const WatchStatement &watchStmt) {
           env_["."] = {c};
         } else {
           zigzag::DimRef dim = resolveDimension(field.dimName);
-          zigzag::CellRef linked =
+          std::optional<zigzag::CellRef> linked =
               core_->arena().linkedMinting(c, dim, field.direction);
-          if (field.isBidir && linked == zigzag::noCell) {
+          if (field.isBidir && !linked) {
             linked = core_->arena().linkedMinting(
                 c, dim,
                 (field.direction == zigzag::DimVector::POS)
                     ? zigzag::DimVector::NEG
                     : zigzag::DimVector::POS);
           }
-          if (linked != zigzag::noCell) {
-            env_[field.varName] = {linked};
+          if (linked) {
+            env_[field.varName] = {*linked};
           } else {
             env_[field.varName] = {};
           }
@@ -438,11 +450,9 @@ VQLEngine::executeWatch(const WatchStatement &watchStmt) {
     }
 
     // Populate virtual delta properties (d.delta or delta(.))
-    zigzag::CellRef existingDelta =
-        core_->arena()
-            .linkedMinting(c, dDelta, zigzag::DimVector::POS)
-            .value_or(zigzag::noCell);
-    if (existingDelta == zigzag::noCell) {
+    const auto existingDelta =
+        core_->arena().linkedMinting(c, dDelta, zigzag::DimVector::POS);
+    if (!existingDelta) {
       zigzag::CellRef deltaCell = core_->arena().makeCell("modified");
       zigzag::expectWritten(
           core_->arena().link(c, dDelta, zigzag::DimVector::POS, deltaCell));
@@ -483,8 +493,9 @@ VQLEngine::resolveStoreAnchor(const StoreAnchor &sa) {
     }
   }
   if (results.empty() && !sa.args.empty()) {
-    std::string storeKey =
-        textOfValue(evaluateValueExpr(sa.args.front(), zigzag::noCell));
+    const auto storeKeyValue = evaluateValueExpr(sa.args.front(), std::nullopt);
+    if (!storeKeyValue) return results;
+    const auto storeKey = textOfValue(*storeKeyValue);
     if (const auto sh = coordinator_.resolveNamedStore(storeKey)) {
       results.push_back(*sh);
     }
@@ -503,9 +514,9 @@ VQLEngine::resolveStoreAnchor(const StoreAnchor &sa) {
   return results;
 }
 
-zigzag::CellRef VQLEngine::sliceHomeOf(zigzag::CellRef cell) {
-  if (cell == zigzag::noCell) {
-    return coordinator_.homeAnchor().value_or(zigzag::noCell);
+std::optional<zigzag::CellRef> VQLEngine::sliceHomeOf(zigzag::CellRef cell) {
+  if (!core_->arena().contains(cell)) {
+    return std::nullopt;
   }
   if (const auto master = coordinator_.derefCloneMaster(cell)) {
     if (*master != cell) {
@@ -540,7 +551,7 @@ std::vector<zigzag::CellRef> VQLEngine::evaluatePerspectiveStep(
   std::vector<zigzag::CellRef> results;
   for (zigzag::CellRef c : currentCells) {
     this->arena().consumeWork();
-    zigzag::CellRef cloneCell = zigzag::noCell;
+    std::optional<zigzag::CellRef> cloneCell;
     if (!normPersp.empty()) {
       auto itP = perspectiveClones_.find(normPersp);
       if (itP != perspectiveClones_.end()) {
@@ -555,8 +566,8 @@ std::vector<zigzag::CellRef> VQLEngine::evaluatePerspectiveStep(
     activePerspective_ = normPersp;
 
     std::vector<zigzag::CellRef> res;
-    if (cloneCell != zigzag::noCell) {
-      res = evaluateStep(targetStep, {cloneCell});
+    if (cloneCell) {
+      res = evaluateStep(targetStep, {*cloneCell});
     }
     if (res.empty()) {
       res = evaluateStep(targetStep, {c});
@@ -594,11 +605,7 @@ VQLEngine::resolveAnchor(const AnchorNode &anchor,
     break;
 
   case AnchorKind::Cursor:
-    if (core_->dims().cursors != zigzag::noCell) {
-      results.push_back(core_->dims().cursors);
-    } else if (const auto h = coordinator_.homeAnchor()) {
-      results.push_back(*h);
-    }
+    results.push_back(core_->dims().cursors);
     break;
 
   case AnchorKind::NamedCursor:
@@ -637,16 +644,19 @@ VQLEngine::resolveAnchor(const AnchorNode &anchor,
     break;
 
   case AnchorKind::Create: {
-    zigzag::CellRef fresh = core_->arena().makeCell();
-    if (anchor.createValue.has_value()) {
-      const auto &cv = *anchor.createValue;
-      if (cv.kind == CreateValue::Kind::Literal) {
-        core_->value(fresh, 0, -1, cv.literal);
-      } else if (cv.kind == CreateValue::Kind::Expression && cv.expr) {
-        auto val = evaluateValueExpr(*cv.expr, zigzag::noCell);
-        core_->value(fresh, 0, -1, val);
+    std::optional<zigzag::vortex::CellValue> value;
+    if (anchor.createValue) {
+      const auto &createValue = *anchor.createValue;
+      if (createValue.kind == CreateValue::Kind::Literal) {
+        value = createValue.literal;
+      } else if (createValue.kind == CreateValue::Kind::Expression) {
+        if (!createValue.expr) break;
+        value = evaluateValueExpr(*createValue.expr, std::nullopt);
+        if (!value) break;
       }
     }
+    const zigzag::CellRef fresh = core_->arena().makeCell();
+    if (value) core_->writeValue(fresh, 0, std::nullopt, *value);
     results.push_back(fresh);
     break;
   }
@@ -657,12 +667,15 @@ VQLEngine::resolveAnchor(const AnchorNode &anchor,
           results.push_back(*h);
         }
       } else if (!anchor.generator->args.empty()) {
-        std::string storeKey = textOfValue(
-            evaluateValueExpr(anchor.generator->args.front(), zigzag::noCell));
-        if (const auto sh = coordinator_.resolveNamedStore(storeKey)) {
-          results.push_back(*sh);
-        } else if (const auto h = coordinator_.homeAnchor()) {
-          results.push_back(*h);
+        const auto storeKeyValue =
+            evaluateValueExpr(anchor.generator->args.front(), std::nullopt);
+        if (storeKeyValue) {
+          const auto storeKey = textOfValue(*storeKeyValue);
+          if (const auto sh = coordinator_.resolveNamedStore(storeKey)) {
+            results.push_back(*sh);
+          } else if (const auto h = coordinator_.homeAnchor()) {
+            results.push_back(*h);
+          }
         }
       } else if (const auto h = coordinator_.homeAnchor()) {
         results.push_back(*h);
@@ -766,8 +779,8 @@ VQLEngine::evaluatePath(const PathExpression &path,
         if (std::holds_alternative<DimensionShapeRule>(rule.rule)) {
           const auto &dsr = std::get<DimensionShapeRule>(rule.rule);
           if (dsr.targetValue) {
-            zigzag::DimRef dim     = resolveDimension(dsr.dimName);
-            zigzag::CellRef sprout = zigzag::noCell;
+            zigzag::DimRef dim = resolveDimension(dsr.dimName);
+            std::optional<zigzag::CellRef> sprout;
             if (std::holds_alternative<std::string>(dsr.targetValue->kind)) {
               auto it = env_.find(std::get<std::string>(dsr.targetValue->kind));
               if (it != env_.end() && !it->second.empty()) {
@@ -783,19 +796,20 @@ VQLEngine::evaluatePath(const PathExpression &path,
                 sprout = targets.front();
               }
             }
-            if (sprout == zigzag::noCell) {
-              auto val = evaluateValueExpr(*dsr.targetValue, c);
-              sprout   = cellFromValue(val);
+            if (!sprout) {
+              if (const auto val = evaluateValueExpr(*dsr.targetValue, c)) {
+                sprout = cellFromValue(*val);
+              }
             }
-            if (sprout != zigzag::noCell) {
+            if (sprout) {
               zigzag::DimVector oppDir =
                   (dsr.direction == zigzag::DimVector::POS)
                       ? zigzag::DimVector::NEG
                       : zigzag::DimVector::POS;
               zigzag::expectWritten(
-                  core_->arena().link(c, dim, dsr.direction, sprout));
+                  core_->arena().link(c, dim, dsr.direction, *sprout));
               zigzag::expectWritten(
-                  core_->arena().link(sprout, dim, oppDir, c));
+                  core_->arena().link(*sprout, dim, oppDir, c));
             }
           }
         }
@@ -820,10 +834,10 @@ VQLEngine::traverseDimension(const SignedDimensionStep &dimStep,
                         const zigzag::DimVector way, const auto &visit) {
     std::unordered_set<zigzag::CellRef> seen{start};
     for (auto cell = arena.linkedMinting(start, dim, way);
-         zigzag::noCell != cell && seen.insert(cell).second;
-         cell = arena.linkedMinting(cell, dim, way)) {
+         cell && seen.insert(*cell).second;
+         cell = arena.linkedMinting(*cell, dim, way)) {
       this->arena().consumeWork();
-      visit(cell);
+      visit(*cell);
     }
   };
   const auto extreme = [&](const zigzag::CellRef start,
@@ -907,9 +921,10 @@ void VQLEngine::findInDocuments(const StoreInfo &info,
     const auto text     = info.store->textOf(version);
     for (auto at = text.find(needle); std::string::npos != at;) {
       this->arena().consumeWork();
-      const auto newline = text.rfind('\n', at);
-      const auto begin   = std::string::npos == newline ? 0 : newline + 1;
-      const auto end     = std::min(text.find('\n', at), text.size());
+      const auto newline =
+          at == 0 ? std::string::npos : text.rfind('\n', at - 1);
+      const auto begin = std::string::npos == newline ? 0 : newline + 1;
+      const auto end   = std::min(text.find('\n', at), text.size());
       const auto spans =
           document.spansFor(static_cast<std::uint32_t>(begin),
                             static_cast<std::uint32_t>(end - begin));
@@ -919,7 +934,7 @@ void VQLEngine::findInDocuments(const StoreInfo &info,
       zigzag::expectWritten(
           arena.link(hit, sourceDim, zigzag::DimVector::POS, source));
       out.push_back(hit);
-      at = end < text.size() ? text.find(needle, end) : std::string::npos;
+      at = end < text.size() ? text.find(needle, end + 1) : std::string::npos;
     }
   }
 }
@@ -952,30 +967,35 @@ VQLEngine::performCreates(const SignedDimensionStep &dimStep,
     std::vector<zigzag::CellRef> created;
     for (const auto &c : dimStep.creates) {
       this->arena().consumeWork();
-      zigzag::CellRef newC = zigzag::noCell;
+      std::optional<zigzag::CellRef> newCell;
       if (c.kind == CreateValue::Kind::Empty) {
-        newC = core_->arena().makeCell();
+        newCell = core_->arena().makeCell();
       } else if (c.kind == CreateValue::Kind::Literal) {
-        newC = core_->arena().makeCell(c.literal);
-      } else if (c.kind == CreateValue::Kind::Expression && c.expr) {
-        auto val = evaluateValueExpr(*c.expr, in);
-        newC     = cellFromValue(val);
+        newCell = core_->arena().makeCell(c.literal);
+      } else if (c.kind == CreateValue::Kind::Expression) {
+        if (!c.expr) continue;
+        if (const auto val = evaluateValueExpr(*c.expr, in)) {
+          newCell = cellFromValue(*val);
+        } else {
+          continue;
+        }
       }
+      if (!newCell) continue;
+      const auto createdCell = *newCell;
 
       if (insertAtHead) {
         zigzag::expectWritten(core_->arena().link(
-            newC, dim, zigzag::DimVector::POS, attachPoint));
+            createdCell, dim, zigzag::DimVector::POS, attachPoint));
         zigzag::expectWritten(core_->arena().link(
-            attachPoint, dim, zigzag::DimVector::NEG, newC));
-        attachPoint = newC;
+            attachPoint, dim, zigzag::DimVector::NEG, createdCell));
       } else {
         zigzag::expectWritten(core_->arena().link(
-            attachPoint, dim, zigzag::DimVector::POS, newC));
+            attachPoint, dim, zigzag::DimVector::POS, createdCell));
         zigzag::expectWritten(core_->arena().link(
-            newC, dim, zigzag::DimVector::NEG, attachPoint));
-        attachPoint = newC;
+            createdCell, dim, zigzag::DimVector::NEG, attachPoint));
       }
-      created.push_back(newC);
+      attachPoint = createdCell;
+      created.push_back(createdCell);
     }
 
     // Yield handling
@@ -1028,8 +1048,8 @@ VQLEngine::evaluateStep(const PathStep &step,
         s.creates.empty()) {
       for (zigzag::CellRef c : currentCells) {
         this->arena().consumeWork();
-        zigzag::CellRef cloneCell = zigzag::noCell;
-        auto itP                  = perspectiveClones_.find(activePerspective_);
+        std::optional<zigzag::CellRef> cloneCell;
+        auto itP = perspectiveClones_.find(activePerspective_);
         if (itP != perspectiveClones_.end()) {
           auto itC = itP->second.find(c);
           if (itC != itP->second.end()) {
@@ -1037,8 +1057,8 @@ VQLEngine::evaluateStep(const PathStep &step,
           }
         }
         std::vector<zigzag::CellRef> singleRes;
-        if (cloneCell != zigzag::noCell) {
-          singleRes = traverseDimension(s, {cloneCell});
+        if (cloneCell) {
+          singleRes = traverseDimension(s, {*cloneCell});
         }
         if (singleRes.empty()) {
           singleRes = traverseDimension(s, {c});
@@ -1097,24 +1117,26 @@ VQLEngine::evaluateStep(const PathStep &step,
   } else if (std::holds_alternative<FunctionInvocation>(step.selector)) {
     const auto &fn = std::get<FunctionInvocation>(step.selector);
     if (fn.name == "value") {
+      if (currentCells.empty()) return stepOutput;
       std::int64_t offset = 0;
       std::int64_t length = -1;
       if (fn.args.size() >= 2) {
-        auto oVal = evaluateValueExpr(fn.args[1], currentCells[0]);
-        if (std::holds_alternative<std::int64_t>(oVal)) {
-          offset = std::get<std::int64_t>(oVal);
+        const auto offsetValue = evaluateValueExpr(fn.args[1], currentCells[0]);
+        if (!offsetValue) return stepOutput;
+        if (std::holds_alternative<std::int64_t>(*offsetValue)) {
+          offset = std::get<std::int64_t>(*offsetValue);
         }
       }
       if (fn.args.size() >= 3) {
-        auto lVal = evaluateValueExpr(fn.args[2], currentCells[0]);
-        if (std::holds_alternative<std::int64_t>(lVal)) {
-          length = std::get<std::int64_t>(lVal);
+        const auto lengthValue = evaluateValueExpr(fn.args[2], currentCells[0]);
+        if (!lengthValue) return stepOutput;
+        if (std::holds_alternative<std::int64_t>(*lengthValue)) {
+          length = std::get<std::int64_t>(*lengthValue);
         }
       }
       for (zigzag::CellRef c : currentCells) {
         this->arena().consumeWork();
-        auto res = core_->value(c, offset, length);
-        if (res.has_value()) {
+        if (const auto res = core_->readValue(c, offset, length)) {
           stepOutput.push_back(*res);
         }
       }
@@ -1122,8 +1144,9 @@ VQLEngine::evaluateStep(const PathStep &step,
       // Every cell of every loaded store whose text holds the needle: how a
       // reader finds something without knowing where it is. The audit found
       // no way to search text at all.
-      const auto needle =
-          textOfValue(evaluateValueExpr(fn.args[0], zigzag::noCell));
+      const auto needleValue = evaluateValueExpr(fn.args[0], std::nullopt);
+      if (!needleValue) return stepOutput;
+      const auto needle = textOfValue(*needleValue);
       for (const auto &info : coordinator_.stores()) {
         this->arena().consumeWork();
         if (!info.manifold || !info.store) {
@@ -1137,18 +1160,21 @@ VQLEngine::evaluateStep(const PathStep &step,
                 core_->arena().proxyFor(info.spaceId, slot.birthOp));
           }
         }
-        if (!needle.empty()) {
-          findInDocuments(info, needle, stepOutput);
-        }
+        findInDocuments(info, needle, stepOutput);
       }
     } else if (fn.name == "contains" && fn.args.size() >= 2) {
       // The predicate's answer, as a query of its own: true or false.
-      const auto context =
-          currentCells.empty() ? zigzag::noCell : currentCells.front();
-      const auto haystack = textOfValue(evaluateValueExpr(fn.args[0], context));
-      const auto needle   = textOfValue(evaluateValueExpr(fn.args[1], context));
-      stepOutput.push_back(core_->arena().makeScalarCell(
-          std::string::npos != haystack.find(needle)));
+      const std::optional<zigzag::CellRef> context =
+          currentCells.empty()
+              ? std::nullopt
+              : std::optional<zigzag::CellRef>{currentCells.front()};
+      const auto haystackValue = evaluateValueExpr(fn.args[0], context);
+      const auto needleValue   = evaluateValueExpr(fn.args[1], context);
+      const bool contains =
+          haystackValue && needleValue &&
+          std::string::npos !=
+              textOfValue(*haystackValue).find(textOfValue(*needleValue));
+      stepOutput.push_back(core_->arena().makeScalarCell(contains));
     } else if (fn.name == "count") {
       // count(path) counts what the path finds from here; bare count()
       // counts what flowed into the step.
@@ -1204,7 +1230,7 @@ VQLEngine::evaluateStep(const PathStep &step,
       zigzag::DimRef dim = coordinator_.resolveDimension(dimName);
 
       // Resolve target cell from arg 1
-      zigzag::CellRef targetCell = zigzag::noCell;
+      std::optional<zigzag::CellRef> targetCell;
       if (std::holds_alternative<std::string>(fn.args[1].kind)) {
         const auto &varName = std::get<std::string>(fn.args[1].kind);
         auto it             = env_.find(varName);
@@ -1223,13 +1249,13 @@ VQLEngine::evaluateStep(const PathStep &step,
         targetCell      = cellFromValue(lit.value);
       }
 
-      if (targetCell != zigzag::noCell) {
-        auto gen = core_->cloneGenerator(targetCell);
+      if (targetCell) {
+        auto gen = core_->cloneGenerator(*targetCell);
         std::vector<zigzag::CellRef> attachedClones;
         for (zigzag::CellRef c : currentCells) {
           this->arena().consumeWork();
           zigzag::CellRef cloneCell = gen();
-          core_->link(c, dim, direction, cloneCell);
+          core_->setLink(c, dim, direction, cloneCell);
           attachedClones.push_back(cloneCell);
         }
 
@@ -1246,20 +1272,21 @@ VQLEngine::evaluateStep(const PathStep &step,
         }
       }
     } else if (fn.name == "delta") {
-      zigzag::DimRef dDelta = resolveDimension("d.delta");
+      const auto dDelta = resolveDimension("d.delta");
       for (zigzag::CellRef c : currentCells) {
         this->arena().consumeWork();
-        zigzag::CellRef deltaCell =
-            core_->arena().linkedMinting(c, dDelta, zigzag::DimVector::POS);
-        if (deltaCell != zigzag::noCell) {
-          stepOutput.push_back(deltaCell);
+        const auto target = deltaTarget(fn, c);
+        if (!target) continue;
+        if (const auto deltaCell = core_->arena().linkedMinting(
+                *target, dDelta, zigzag::DimVector::POS)) {
+          stepOutput.push_back(*deltaCell);
         } else {
           stepOutput.push_back(core_->arena().makeCell("modified"));
         }
       }
     } else if (auto itDef = userDefs_.find(fn.name); itDef != userDefs_.end()) {
       if (currentCells.empty()) {
-        auto res = callUserDef(itDef->second, fn.args, zigzag::noCell);
+        auto res = callUserDef(itDef->second, fn.args, std::nullopt);
         stepOutput.insert(stepOutput.end(), res.begin(), res.end());
       } else {
         for (zigzag::CellRef c : currentCells) {
@@ -1291,7 +1318,7 @@ VQLEngine::evaluateStep(const PathStep &step,
       }
     } else {
       for (zigzag::CellRef c : currentCells) {
-        stepOutput.push_back(sliceHomeOf(c));
+        if (const auto home = sliceHomeOf(c)) stepOutput.push_back(*home);
       }
     }
   } else if (std::holds_alternative<RootSelectorStep>(step.selector)) {
@@ -1304,7 +1331,7 @@ VQLEngine::evaluateStep(const PathStep &step,
         }
       } else {
         for (zigzag::CellRef c : currentCells) {
-          stepOutput.push_back(sliceHomeOf(c));
+          if (const auto home = sliceHomeOf(c)) stepOutput.push_back(*home);
         }
       }
       break;
@@ -1317,45 +1344,29 @@ VQLEngine::evaluateStep(const PathStep &step,
       } else {
         zigzag::DimRef dMeta = coordinator_.resolveDimension("d.meta");
         for (zigzag::CellRef c : currentCells) {
-          zigzag::CellRef sh = sliceHomeOf(c);
-          zigzag::CellRef meta =
-              core_->arena().linkedMinting(sh, dMeta, zigzag::DimVector::POS);
-          stepOutput.push_back(meta != zigzag::noCell ? meta : sh);
+          if (const auto sh = sliceHomeOf(c)) {
+            const auto meta = core_->arena().linkedMinting(
+                *sh, dMeta, zigzag::DimVector::POS);
+            stepOutput.push_back(meta ? *meta : *sh);
+          }
         }
       }
       break;
 
     case RootSelectorStep::Kind::ActiveCursor: {
-      zigzag::DimRef dCursors = core_->dims().cursors;
+      const auto dCursors = core_->dims().cursors;
       if (currentCells.empty()) {
-        zigzag::CellRef cur = (dCursors != zigzag::noCell)
-                                  ? core_->arena()
-                                        .linkedMinting(core_->home(), dCursors,
-                                                       zigzag::DimVector::POS)
-                                        .value_or(zigzag::noCell)
-                                  : zigzag::noCell;
-        if (cur != zigzag::noCell) {
-          stepOutput.push_back(cur);
-        } else if (dCursors != zigzag::noCell) {
-          stepOutput.push_back(dCursors);
-        } else if (const auto h = coordinator_.homeAnchor()) {
-          stepOutput.push_back(*h);
-        }
+        stepOutput.push_back(
+            core_->arena()
+                .linkedMinting(core_->home(), dCursors, zigzag::DimVector::POS)
+                .value_or(dCursors));
       } else {
-        for (zigzag::CellRef c : currentCells) {
-          zigzag::CellRef sh = sliceHomeOf(c);
-          zigzag::CellRef cur =
-              (dCursors != zigzag::noCell)
-                  ? core_->arena()
-                        .linkedMinting(sh, dCursors, zigzag::DimVector::POS)
-                        .value_or(zigzag::noCell)
-                  : zigzag::noCell;
-          if (cur != zigzag::noCell) {
-            stepOutput.push_back(cur);
-          } else if (dCursors != zigzag::noCell) {
-            stepOutput.push_back(dCursors);
-          } else {
-            stepOutput.push_back(sh);
+        for (const auto c : currentCells) {
+          if (const auto home = sliceHomeOf(c)) {
+            stepOutput.push_back(
+                core_->arena()
+                    .linkedMinting(*home, dCursors, zigzag::DimVector::POS)
+                    .value_or(dCursors));
           }
         }
       }
@@ -1369,19 +1380,18 @@ VQLEngine::evaluateStep(const PathStep &step,
         bases.push_back(core_->home());
       } else {
         for (zigzag::CellRef c : currentCells) {
-          bases.push_back(sliceHomeOf(c));
+          if (const auto base = sliceHomeOf(c)) bases.push_back(*base);
         }
       }
       for (zigzag::CellRef base : bases) {
-        if (dCursors != zigzag::noCell) {
-          zigzag::CellRef cur = core_->arena().linkedMinting(
-              base, dCursors, zigzag::DimVector::POS);
-          std::unordered_set<zigzag::CellRef> seen;
-          while (cur != zigzag::noCell && seen.insert(cur).second) {
-            stepOutput.push_back(cur);
-            cur = core_->arena().linkedMinting(cur, dCursors,
-                                               zigzag::DimVector::POS);
-          }
+
+        auto cur = core_->arena().linkedMinting(base, dCursors,
+                                                zigzag::DimVector::POS);
+        std::unordered_set<zigzag::CellRef> seen;
+        while (cur && seen.insert(*cur).second) {
+          stepOutput.push_back(*cur);
+          cur = core_->arena().linkedMinting(*cur, dCursors,
+                                             zigzag::DimVector::POS);
         }
       }
       break;
@@ -1395,30 +1405,29 @@ VQLEngine::evaluateStep(const PathStep &step,
         bases.push_back(core_->home());
       } else {
         for (zigzag::CellRef c : currentCells) {
-          bases.push_back(sliceHomeOf(c));
+          if (const auto base = sliceHomeOf(c)) bases.push_back(*base);
         }
       }
       for (zigzag::CellRef base : bases) {
-        if (dCursors != zigzag::noCell) {
-          zigzag::CellRef cur = core_->arena().linkedMinting(
-              base, dCursors, zigzag::DimVector::POS);
-          std::unordered_set<zigzag::CellRef> seen;
-          while (cur != zigzag::noCell && seen.insert(cur).second) {
-            std::string name = core_->arena().textOf(cur);
-            if (name != rs.name && dName != zigzag::noCell) {
-              zigzag::CellRef nameCell = core_->arena().linkedMinting(
-                  cur, dName, zigzag::DimVector::POS);
-              if (nameCell != zigzag::noCell) {
-                name = core_->arena().textOf(nameCell);
-              }
+
+        auto cur = core_->arena().linkedMinting(base, dCursors,
+                                                zigzag::DimVector::POS);
+        std::unordered_set<zigzag::CellRef> seen;
+        while (cur && seen.insert(*cur).second) {
+          std::string name = core_->arena().textOf(*cur);
+          if (name != rs.name) {
+            const auto nameCell = core_->arena().linkedMinting(
+                *cur, dName, zigzag::DimVector::POS);
+            if (nameCell) {
+              name = core_->arena().textOf(*nameCell);
             }
-            if (name == rs.name) {
-              stepOutput.push_back(cur);
-              break;
-            }
-            cur = core_->arena().linkedMinting(cur, dCursors,
-                                               zigzag::DimVector::POS);
           }
+          if (name == rs.name) {
+            stepOutput.push_back(*cur);
+            break;
+          }
+          cur = core_->arena().linkedMinting(*cur, dCursors,
+                                             zigzag::DimVector::POS);
         }
       }
       break;
@@ -1432,29 +1441,28 @@ VQLEngine::evaluateStep(const PathStep &step,
         bases.push_back(core_->home());
       } else {
         for (zigzag::CellRef c : currentCells) {
-          bases.push_back(sliceHomeOf(c));
+          if (const auto base = sliceHomeOf(c)) bases.push_back(*base);
         }
       }
       for (zigzag::CellRef base : bases) {
-        if (dCursors != zigzag::noCell) {
-          zigzag::CellRef cur = core_->arena().linkedMinting(
-              base, dCursors, zigzag::DimVector::POS);
-          std::unordered_set<zigzag::CellRef> seen;
-          while (cur != zigzag::noCell && seen.insert(cur).second) {
-            std::string name = core_->arena().textOf(cur);
-            if (name != rs.name && dName != zigzag::noCell) {
-              zigzag::CellRef nameCell = core_->arena().linkedMinting(
-                  cur, dName, zigzag::DimVector::POS);
-              if (nameCell != zigzag::noCell) {
-                name = core_->arena().textOf(nameCell);
-              }
+
+        auto cur = core_->arena().linkedMinting(base, dCursors,
+                                                zigzag::DimVector::POS);
+        std::unordered_set<zigzag::CellRef> seen;
+        while (cur && seen.insert(*cur).second) {
+          std::string name = core_->arena().textOf(*cur);
+          if (name != rs.name) {
+            const auto nameCell = core_->arena().linkedMinting(
+                *cur, dName, zigzag::DimVector::POS);
+            if (nameCell) {
+              name = core_->arena().textOf(*nameCell);
             }
-            if (name == rs.name) {
-              stepOutput.push_back(cur);
-            }
-            cur = core_->arena().linkedMinting(cur, dCursors,
-                                               zigzag::DimVector::POS);
           }
+          if (name == rs.name) {
+            stepOutput.push_back(*cur);
+          }
+          cur = core_->arena().linkedMinting(*cur, dCursors,
+                                             zigzag::DimVector::POS);
         }
       }
       break;
@@ -1469,9 +1477,8 @@ VQLEngine::evaluateStep(const PathStep &step,
   } else if (std::holds_alternative<SliceSelectorStep>(step.selector)) {
     const auto &sl = std::get<SliceSelectorStep>(step.selector);
     for (const auto &info : coordinator_.stores()) {
-      if (info.manifold) {
-        zigzag::CellRef h =
-            core_->arena().proxyFor(info.spaceId, info.manifold->home());
+      if (info.manifold && info.homeCell) {
+        const zigzag::CellRef h = *info.homeCell;
         if (sl.nameFilter) {
           if (info.label == *sl.nameFilter || *sl.nameFilter == "all") {
             stepOutput.push_back(h);
@@ -1493,9 +1500,8 @@ VQLEngine::evaluateStep(const PathStep &step,
   } else if (std::holds_alternative<DocSelectorStep>(step.selector)) {
     const auto &ds = std::get<DocSelectorStep>(step.selector);
     for (const auto &info : coordinator_.stores()) {
-      if (info.manifold) {
-        zigzag::CellRef h =
-            core_->arena().proxyFor(info.spaceId, info.manifold->home());
+      if (info.manifold && info.homeCell) {
+        const zigzag::CellRef h = *info.homeCell;
         if (ds.nameFilter) {
           if (info.label == *ds.nameFilter || *ds.nameFilter == "all") {
             stepOutput.push_back(h);
@@ -1567,14 +1573,15 @@ VQLEngine::evaluateStep(const PathStep &step,
       this->arena().consumeWork();
       for (const auto &tgt : m.targets) {
         this->arena().consumeWork();
-        auto val               = evaluateValueExpr(tgt, c);
-        zigzag::CellRef sprout = cellFromValue(val);
+        const auto value = evaluateValueExpr(tgt, c);
+        if (!value) continue;
+        const zigzag::CellRef sprout = cellFromValue(*value);
 
         if (!perspName.empty()) {
-          auto &clones              = perspectiveClones_[perspName];
-          zigzag::CellRef cloneCell = zigzag::noCell;
-          auto it                   = clones.find(c);
-          if (it != clones.end() && it->second != zigzag::noCell) {
+          auto &clones = perspectiveClones_[perspName];
+          zigzag::CellRef cloneCell;
+          auto it = clones.find(c);
+          if (it != clones.end()) {
             cloneCell = it->second;
           } else {
             cloneCell             = core_->arena().makeCell();
@@ -1610,15 +1617,15 @@ VQLEngine::evaluateStep(const PathStep &step,
   } else if (std::holds_alternative<VirtualDimensionStep>(step.selector)) {
     const auto &v = std::get<VirtualDimensionStep>(step.selector);
     for (zigzag::CellRef c : currentCells) {
-      auto val              = evaluateValueExpr(v.expr, c);
-      zigzag::CellRef vCell = cellFromValue(val);
-      stepOutput.push_back(vCell);
+      if (const auto val = evaluateValueExpr(v.expr, c)) {
+        stepOutput.push_back(cellFromValue(*val));
+      }
     }
   } else if (std::holds_alternative<std::shared_ptr<PathLambda>>(
                  step.selector)) {
     const auto &lambda = *std::get<std::shared_ptr<PathLambda>>(step.selector);
     if (currentCells.empty()) {
-      auto res = executeLambda(lambda, zigzag::noCell);
+      auto res = executeLambda(lambda, std::nullopt);
       stepOutput.insert(stepOutput.end(), res.begin(), res.end());
     } else {
       for (zigzag::CellRef c : currentCells) {
@@ -1717,131 +1724,124 @@ zigzag::CellRef VQLEngine::cellFromValue(const zigzag::vortex::CellValue &val) {
   return core_->arena().makeCell(std::get<std::string>(val));
 }
 
-zigzag::vortex::CellValue
-VQLEngine::evaluateValueExpr(const ValueExpr &expr, zigzag::CellRef context) {
+std::optional<zigzag::CellRef>
+VQLEngine::deltaTarget(const FunctionInvocation &fn,
+                       std::optional<zigzag::CellRef> context) {
+  if (fn.args.empty()) return context;
+  if (const auto *variable = std::get_if<std::string>(&fn.args.front().kind)) {
+    const auto it = env_.find(*variable);
+    if (it == env_.end() || it->second.empty()) return std::nullopt;
+    return it->second.front();
+  }
+  if (const auto *path =
+          std::get_if<std::shared_ptr<PathExpression>>(&fn.args.front().kind)) {
+    const auto cells =
+        evaluatePath(**path, context ? std::vector<zigzag::CellRef>{*context}
+                                     : std::vector<zigzag::CellRef>{});
+    if (cells.empty()) return std::nullopt;
+    return cells.front();
+  }
+  return std::nullopt;
+}
+
+std::optional<zigzag::vortex::CellValue>
+VQLEngine::evaluateValueExpr(const ValueExpr &expr,
+                             std::optional<zigzag::CellRef> context) {
   this->arena().consumeWork();
   if (std::holds_alternative<ScalarLiteral>(expr.kind)) {
     const auto &lit = std::get<ScalarLiteral>(expr.kind);
     if (std::holds_alternative<std::string>(lit.value)) {
-      return std::get<std::string>(lit.value);
+      return zigzag::vortex::CellValue{std::get<std::string>(lit.value)};
     }
     if (std::holds_alternative<double>(lit.value)) {
-      return std::get<double>(lit.value);
+      return zigzag::vortex::CellValue{std::get<double>(lit.value)};
     }
     if (std::holds_alternative<std::int64_t>(lit.value)) {
-      return std::get<std::int64_t>(lit.value);
+      return zigzag::vortex::CellValue{std::get<std::int64_t>(lit.value)};
     }
     if (std::holds_alternative<bool>(lit.value)) {
-      return std::get<bool>(lit.value);
+      return zigzag::vortex::CellValue{std::get<bool>(lit.value)};
     }
   }
 
   if (std::holds_alternative<std::string>(expr.kind)) {
     const auto &varName = std::get<std::string>(expr.kind);
-    auto it             = env_.find(varName);
-    if (it != env_.end() && !it->second.empty()) {
-      return core_->render(it->second[0]);
-    }
-    return "";
+    const auto it       = env_.find(varName);
+    if (it == env_.end() || it->second.empty()) return std::nullopt;
+    return core_->render(it->second.front());
   }
 
   if (std::holds_alternative<std::shared_ptr<PathExpression>>(expr.kind)) {
     const auto &path = *std::get<std::shared_ptr<PathExpression>>(expr.kind);
-    auto cells = evaluatePath(path, context != zigzag::noCell
-                                        ? std::vector<zigzag::CellRef>{context}
-                                        : std::vector<zigzag::CellRef>{});
-    if (!cells.empty()) {
-      return core_->render(cells[0]);
-    }
-    return "";
+    const auto cells =
+        evaluatePath(path, context ? std::vector<zigzag::CellRef>{*context}
+                                   : std::vector<zigzag::CellRef>{});
+    if (cells.empty()) return std::nullopt;
+    return core_->render(cells.front());
   }
 
   if (std::holds_alternative<std::shared_ptr<FunctionInvocation>>(expr.kind)) {
     const auto &fn = *std::get<std::shared_ptr<FunctionInvocation>>(expr.kind);
     if (fn.name == "contains" && fn.args.size() >= 2) {
-      const auto haystack = textOfValue(evaluateValueExpr(fn.args[0], context));
-      const auto needle   = textOfValue(evaluateValueExpr(fn.args[1], context));
-      return std::string::npos != haystack.find(needle);
+      const auto haystack = evaluateValueExpr(fn.args[0], context);
+      const auto needle   = evaluateValueExpr(fn.args[1], context);
+      if (!haystack || !needle) return zigzag::vortex::CellValue{false};
+      return zigzag::vortex::CellValue{
+          std::string::npos !=
+          textOfValue(*haystack).find(textOfValue(*needle))};
     }
-    if (fn.name == "count") {
-      if (!fn.args.empty()) {
-        if (std::holds_alternative<std::shared_ptr<PathExpression>>(
-                fn.args[0].kind)) {
-          const auto &path =
-              *std::get<std::shared_ptr<PathExpression>>(fn.args[0].kind);
-          auto cells =
-              evaluatePath(path, context != zigzag::noCell
-                                     ? std::vector<zigzag::CellRef>{context}
-                                     : std::vector<zigzag::CellRef>{});
-          return static_cast<std::int64_t>(cells.size());
-        }
+    if (fn.name == "count" && !fn.args.empty()) {
+      if (const auto *path =
+              std::get_if<std::shared_ptr<PathExpression>>(&fn.args[0].kind)) {
+        const auto cells = evaluatePath(
+            **path, context ? std::vector<zigzag::CellRef>{*context}
+                            : std::vector<zigzag::CellRef>{});
+        return zigzag::vortex::CellValue{
+            static_cast<std::int64_t>(cells.size())};
       }
     }
     if (fn.name == "delta") {
-      zigzag::CellRef target = context;
-      if (!fn.args.empty()) {
-        if (std::holds_alternative<std::string>(fn.args[0].kind)) {
-          auto it = env_.find(std::get<std::string>(fn.args[0].kind));
-          if (it != env_.end() && !it->second.empty()) {
-            target = it->second.front();
-          }
-        } else if (std::holds_alternative<std::shared_ptr<PathExpression>>(
-                       fn.args[0].kind)) {
-          auto cells = evaluatePath(
-              *std::get<std::shared_ptr<PathExpression>>(fn.args[0].kind),
-              context != zigzag::noCell ? std::vector<zigzag::CellRef>{context}
-                                        : std::vector<zigzag::CellRef>{});
-          if (!cells.empty()) {
-            target = cells.front();
-          }
+      const auto target = deltaTarget(fn, context);
+      if (!fn.args.empty() && !target) return std::nullopt;
+      if (target && core_->arena().contains(*target)) {
+        const auto dDelta = resolveDimension("d.delta");
+        if (const auto deltaCell = core_->arena().linkedMinting(
+                *target, dDelta, zigzag::DimVector::POS)) {
+          return zigzag::vortex::CellValue{core_->arena().textOf(*deltaCell)};
         }
       }
-      if (target != zigzag::noCell) {
-        zigzag::DimRef dDelta = resolveDimension("d.delta");
-        zigzag::CellRef deltaCell =
-            core_->arena()
-                .linkedMinting(target, dDelta, zigzag::DimVector::POS)
-                .value_or(zigzag::noCell);
-        if (deltaCell != zigzag::noCell) {
-          return core_->arena().textOf(deltaCell);
-        }
-      }
-      return std::string("modified");
+      return zigzag::vortex::CellValue{std::string("modified")};
     }
 
-    if (auto itDef = userDefs_.find(fn.name); itDef != userDefs_.end()) {
-      auto res = callUserDef(itDef->second, fn.args, context);
-      if (!res.empty()) {
-        return core_->render(res.front());
-      }
-      return "";
+    if (const auto itDef = userDefs_.find(fn.name); itDef != userDefs_.end()) {
+      const auto results = callUserDef(itDef->second, fn.args, context);
+      if (results.empty()) return std::nullopt;
+      return core_->render(results.front());
     }
   }
 
   if (std::holds_alternative<std::shared_ptr<PathLambda>>(expr.kind)) {
     const auto &lambda = *std::get<std::shared_ptr<PathLambda>>(expr.kind);
-    auto res           = executeLambda(lambda, context);
-    if (!res.empty()) {
-      return core_->render(res.front());
-    }
-    return "";
+    const auto results = executeLambda(lambda, context);
+    if (results.empty()) return std::nullopt;
+    return core_->render(results.front());
   }
 
   if (std::holds_alternative<std::shared_ptr<ShapeLiteral>>(expr.kind)) {
-    return true;
+    return zigzag::vortex::CellValue{true};
   }
 
   if (std::holds_alternative<std::shared_ptr<VersionExpr>>(expr.kind)) {
     const auto &ve = *std::get<std::shared_ptr<VersionExpr>>(expr.kind);
-    return ve.versionStr;
+    return zigzag::vortex::CellValue{ve.versionStr};
   }
 
   if (std::holds_alternative<std::shared_ptr<BooleanExpr>>(expr.kind)) {
     const auto &b = *std::get<std::shared_ptr<BooleanExpr>>(expr.kind);
-    return evaluatePredicate(b, context);
+    return zigzag::vortex::CellValue{evaluatePredicate(b, context)};
   }
 
-  return "";
+  return std::nullopt;
 }
 
 bool VQLEngine::compareValues(const zigzag::vortex::CellValue &left, CompOp op,
@@ -1901,30 +1901,30 @@ bool VQLEngine::compareValues(const zigzag::vortex::CellValue &left, CompOp op,
 }
 
 bool VQLEngine::evaluateFactor(const BooleanFactor &factor,
-                               zigzag::CellRef context) {
+                               std::optional<zigzag::CellRef> context) {
   this->arena().consumeWork();
   bool result = false;
 
   if (std::holds_alternative<ComparisonExpr>(factor.test)) {
-    const auto &cmp = std::get<ComparisonExpr>(factor.test);
-    auto leftVal    = evaluateValueExpr(*cmp.left, context);
-    auto rightVal   = evaluateValueExpr(*cmp.right, context);
-    result          = compareValues(leftVal, cmp.op, rightVal);
+    const auto &cmp     = std::get<ComparisonExpr>(factor.test);
+    const auto leftVal  = evaluateValueExpr(*cmp.left, context);
+    const auto rightVal = evaluateValueExpr(*cmp.right, context);
+    result = leftVal && rightVal && compareValues(*leftVal, cmp.op, *rightVal);
   } else {
     const auto &test = std::get<PredicateTest>(factor.test);
     if (std::holds_alternative<std::shared_ptr<PathExpression>>(test.kind)) {
       const auto &path = *std::get<std::shared_ptr<PathExpression>>(test.kind);
       auto cells =
-          evaluatePath(path, context != zigzag::noCell
-                                 ? std::vector<zigzag::CellRef>{context}
-                                 : std::vector<zigzag::CellRef>{});
+          evaluatePath(path, context ? std::vector<zigzag::CellRef>{*context}
+                                     : std::vector<zigzag::CellRef>{});
       result = !cells.empty();
     } else if (std::holds_alternative<bool>(test.kind)) {
-      result = (context != zigzag::noCell) ? core_->isTruthy(context) : false;
+      result = context ? core_->isTruthy(*context).value_or(false) : false;
     } else if (std::holds_alternative<std::shared_ptr<ValueExpr>>(test.kind)) {
-      auto val = evaluateValueExpr(
-          *std::get<std::shared_ptr<ValueExpr>>(test.kind), context);
-      result = zigzag::vortex::VortexCore::evaluateTruthiness(val);
+      if (const auto val = evaluateValueExpr(
+              *std::get<std::shared_ptr<ValueExpr>>(test.kind), context)) {
+        result = zigzag::vortex::VortexCore::evaluateTruthiness(*val);
+      }
     } else if (std::holds_alternative<std::shared_ptr<ShapeLiteral>>(
                    test.kind)) {
       result = evaluateShapePredicate(
@@ -1935,7 +1935,8 @@ bool VQLEngine::evaluateFactor(const BooleanFactor &factor,
   return factor.negated ? !result : result;
 }
 
-bool VQLEngine::evaluateTerm(const BooleanTerm &term, zigzag::CellRef context) {
+bool VQLEngine::evaluateTerm(const BooleanTerm &term,
+                             std::optional<zigzag::CellRef> context) {
   this->arena().consumeWork();
   return std::ranges::all_of(term.factors, [this, context](const auto &factor) {
     return evaluateFactor(factor, context);
@@ -1943,7 +1944,7 @@ bool VQLEngine::evaluateTerm(const BooleanTerm &term, zigzag::CellRef context) {
 }
 
 bool VQLEngine::evaluatePredicate(const BooleanExpr &expr,
-                                  zigzag::CellRef context) {
+                                  std::optional<zigzag::CellRef> context) {
   this->arena().consumeWork();
   return std::ranges::any_of(expr.terms, [this, context](const auto &term) {
     return evaluateTerm(term, context);
@@ -1964,7 +1965,7 @@ void VQLEngine::evaluateBindings(
   if (bindingIndex >= block.bindings.size()) {
     // All bindings completed, test where clause
     if (block.where.has_value()) {
-      if (!evaluatePredicate(block.where->condition, zigzag::noCell)) {
+      if (!evaluatePredicate(block.where->condition, std::nullopt)) {
         return;
       }
     }
@@ -1988,17 +1989,17 @@ void VQLEngine::evaluateBindings(
             env_["."] = {c};
           } else {
             zigzag::DimRef dim = resolveDimension(field.dimName);
-            zigzag::CellRef linked =
+            std::optional<zigzag::CellRef> linked =
                 core_->arena().linkedMinting(c, dim, field.direction);
-            if (field.isBidir && linked == zigzag::noCell) {
+            if (field.isBidir && !linked) {
               linked = core_->arena().linkedMinting(
                   c, dim,
                   (field.direction == zigzag::DimVector::POS)
                       ? zigzag::DimVector::NEG
                       : zigzag::DimVector::POS);
             }
-            if (linked != zigzag::noCell) {
-              env_[field.varName] = {linked};
+            if (linked) {
+              env_[field.varName] = {*linked};
             } else {
               env_[field.varName] = {};
             }
@@ -2012,9 +2013,12 @@ void VQLEngine::evaluateBindings(
     if (std::holds_alternative<PathExpression>(lc.target)) {
       env_[lc.varName] = evaluatePath(std::get<PathExpression>(lc.target));
     } else {
-      auto val =
-          evaluateValueExpr(std::get<ValueExpr>(lc.target), zigzag::noCell);
-      env_[lc.varName] = {cellFromValue(val)};
+      if (const auto val =
+              evaluateValueExpr(std::get<ValueExpr>(lc.target), std::nullopt)) {
+        env_[lc.varName] = {cellFromValue(*val)};
+      } else {
+        env_[lc.varName] = {};
+      }
     }
     evaluateBindings(block, bindingIndex + 1, accumulatedResults);
   }
@@ -2047,7 +2051,7 @@ void VQLEngine::executeActionClause(
                         accumulatedResults);
   } else if (std::holds_alternative<ConditionalClause>(action.clause)) {
     const auto &cond = std::get<ConditionalClause>(action.clause);
-    if (evaluatePredicate(cond.condition, zigzag::noCell)) {
+    if (evaluatePredicate(cond.condition, std::nullopt)) {
       if (cond.thenClause) {
         executeActionClause(*cond.thenClause, accumulatedResults);
       }
@@ -2075,11 +2079,14 @@ void VQLEngine::executeEffectClause(
                                   env_[lc.varName].begin(),
                                   env_[lc.varName].end());
       } else {
-        auto val =
-            evaluateValueExpr(std::get<ValueExpr>(lc.target), zigzag::noCell);
-        auto c           = cellFromValue(val);
-        env_[lc.varName] = {c};
-        accumulatedResults.push_back(c);
+        if (const auto val = evaluateValueExpr(std::get<ValueExpr>(lc.target),
+                                               std::nullopt)) {
+          const auto cell  = cellFromValue(*val);
+          env_[lc.varName] = {cell};
+          accumulatedResults.push_back(cell);
+        } else {
+          env_[lc.varName] = {};
+        }
       }
     } else {
       const auto &p =
@@ -2098,8 +2105,8 @@ void VQLEngine::executeEffectClause(
 }
 
 bool VQLEngine::evaluateShapePredicate(const ShapeLiteral &shape,
-                                       zigzag::CellRef context) {
-  if (context == zigzag::noCell || !core_->arena().contains(context)) {
+                                       std::optional<zigzag::CellRef> context) {
+  if (!context || !core_->arena().contains(*context)) {
     return false;
   }
   for (const auto &shapeRule : shape.rules) {
@@ -2114,28 +2121,29 @@ bool VQLEngine::evaluateShapePredicate(const ShapeLiteral &shape,
     if (std::holds_alternative<DimensionShapeRule>(shapeRule.rule)) {
       const auto &dr     = std::get<DimensionShapeRule>(shapeRule.rule);
       zigzag::DimRef dim = resolveDimension(dr.dimName);
-      zigzag::CellRef linkedPos =
-          core_->arena().linkedMinting(context, dim, zigzag::DimVector::POS);
-      zigzag::CellRef linkedNeg =
-          core_->arena().linkedMinting(context, dim, zigzag::DimVector::NEG);
-      zigzag::CellRef linked =
+      const auto linkedPos =
+          core_->arena().linkedMinting(*context, dim, zigzag::DimVector::POS);
+      const auto linkedNeg =
+          core_->arena().linkedMinting(*context, dim, zigzag::DimVector::NEG);
+      auto linked =
           (dr.direction == zigzag::DimVector::POS) ? linkedPos : linkedNeg;
       if (dr.isBidir) {
-        linked = (linkedPos != zigzag::noCell) ? linkedPos : linkedNeg;
+        linked = linkedPos ? linkedPos : linkedNeg;
       }
 
       if (dr.negated) {
-        if (linked != zigzag::noCell) {
+        if (linked) {
           return false;
         }
       } else {
-        if (linked == zigzag::noCell) {
+        if (!linked) {
           return false;
         }
         if (dr.targetValue) {
-          auto expectedVal = evaluateValueExpr(*dr.targetValue, context);
-          auto actualVal   = core_->render(linked);
-          if (!compareValues(actualVal, CompOp::Equal, expectedVal)) {
+          const auto expectedVal = evaluateValueExpr(*dr.targetValue, context);
+          const auto actualVal   = core_->render(*linked);
+          if (!expectedVal || !actualVal ||
+              !compareValues(*actualVal, CompOp::Equal, *expectedVal)) {
             return false;
           }
         }

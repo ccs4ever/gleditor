@@ -6,6 +6,7 @@
 #include "reading_place.hpp"
 
 #include <cstdlib>
+#include <stdexcept>
 #include <string_view>
 #include <utility>
 
@@ -31,7 +32,7 @@ constexpr std::string_view kActive    = "d.active";
 class Writer {
 public:
   explicit Writer(Store &aStore) : store(aStore), at(aStore.latest()) {
-    if (zigzag::noCell == store.homeCell()) {
+    if (!store.homeCell()) {
       at = store.sliceGenesis(at);
     }
   }
@@ -48,12 +49,12 @@ public:
 
   zigzag::CellRef text(const std::string_view content) {
     at = store.makeCell(at, content);
-    return store.cellRefOf(at);
+    return store.cellRefOf(at).value();
   }
 
   template <typename Value> zigzag::CellRef scalar(const Value value) {
     at = store.makeScalarCell(at, value);
-    return store.cellRefOf(at);
+    return store.cellRefOf(at).value();
   }
 
   void link(const zigzag::CellRef from, const zigzag::DimRef dim,
@@ -66,9 +67,9 @@ public:
                                      const zigzag::DimRef dim) const {
     const auto manifold = store.rebuildManifold(at);
     auto cell           = from;
-    for (auto next = manifold.linked(cell, dim); zigzag::noCell != next;
+    for (auto next = manifold.linked(cell, dim); next;
          next      = manifold.linked(cell, dim)) {
-      cell = next;
+      cell = *next;
     }
     return cell;
   }
@@ -80,6 +81,9 @@ public:
 } // namespace
 
 MicroversionId recordPlace(Store &store, const ReadingPlace &place) {
+  if (place.zigzagFocus && *place.zigzagFocus <= 0) {
+    throw std::invalid_argument("reading place focus must name a cell");
+  }
   Writer out(store);
   const auto places    = out.dimension(kPlaces);
   const auto documents = out.dimension(kDocuments);
@@ -90,7 +94,7 @@ MicroversionId recordPlace(Store &store, const ReadingPlace &place) {
   const auto zigzagDim = out.dimension(kZigzag);
   const auto active    = out.dimension(kActive);
 
-  const auto previous = out.tail(store.homeCell(), places);
+  const auto previous = out.tail(store.homeCell().value(), places);
   const auto here     = out.text("place");
   out.link(previous, places, here);
 
@@ -118,11 +122,13 @@ MicroversionId recordPlace(Store &store, const ReadingPlace &place) {
   if (!place.zigzagStore.empty()) {
     const auto slice = out.text(place.zigzagStore);
     const auto head  = out.text(place.zigzagVersion);
-    const auto focus = out.scalar(place.zigzagFocus);
     out.link(here, zigzagDim, slice);
     out.link(slice, zigzagDim, head);
-    out.link(head, zigzagDim, focus);
-    out.link(focus, zigzagDim, out.scalar(place.zigzagHasKeyboard));
+    if (place.zigzagFocus) {
+      const auto focus = out.scalar(*place.zigzagFocus);
+      out.link(head, zigzagDim, focus);
+      out.link(focus, zigzagDim, out.scalar(place.zigzagHasKeyboard));
+    }
   }
   if (place.link) {
     const auto selection = out.dimension("d.selection");
@@ -133,7 +139,7 @@ MicroversionId recordPlace(Store &store, const ReadingPlace &place) {
 
 std::optional<ReadingPlace> latestPlace(const Store &store) {
   const auto head = store.latest();
-  if (head.isZero() || zigzag::noCell == store.homeCell()) {
+  if (head.isZero() || !store.homeCell()) {
     return std::nullopt;
   }
   const auto manifold = store.rebuildManifold(head);
@@ -144,12 +150,12 @@ std::optional<ReadingPlace> latestPlace(const Store &store) {
   if (!places) {
     return std::nullopt;
   }
-  auto here = store.homeCell();
-  for (auto next = manifold.linked(here, *places); zigzag::noCell != next;
+  auto here = store.homeCell().value();
+  for (auto next = manifold.linked(here, *places); next;
        next      = manifold.linked(here, *places)) {
-    here = next;
+    here = *next;
   }
-  if (here == store.homeCell()) {
+  if (here == store.homeCell().value()) {
     return std::nullopt;
   }
 
@@ -160,24 +166,26 @@ std::optional<ReadingPlace> latestPlace(const Store &store) {
   const auto anchor    = dim(kAnchor);
   const auto active    = dim(kActive);
   const auto along     = [&](const zigzag::CellRef from,
-                             const std::optional<zigzag::DimRef> onto) {
-    return onto ? manifold.linked(from, *onto) : zigzag::OptionalCell{};
+                         const std::optional<zigzag::DimRef> onto) {
+    return onto ? manifold.linked(from, *onto)
+                    : std::optional<zigzag::CellRef>{};
   };
   const auto activeCell = along(here, active);
-  for (auto cell = along(here, documents); zigzag::noCell != cell;
-       cell      = along(cell, documents)) {
+  for (auto cell = along(here, documents); cell;
+       cell      = along(*cell, documents)) {
     DocumentPlace document;
-    document.storePath = manifold.textOf(cell, store);
-    if (const auto v = along(cell, version); zigzag::noCell != v) {
-      document.version = manifold.textOf(v, store);
+    document.storePath = manifold.textOf(*cell, store);
+    if (const auto v = along(*cell, version); v) {
+      document.version = manifold.textOf(*v, store);
     }
-    const auto number = [&](const zigzag::CellRef at) {
-      return zigzag::noCell == at ? std::nullopt : manifold.asInt64(at);
+    const auto number = [&](const std::optional<zigzag::CellRef> at) {
+      if (!at) return std::optional<std::int64_t>{};
+      return manifold.asInt64(*at);
     };
     document.caret =
-        static_cast<std::uint32_t>(number(along(cell, caret)).value_or(0));
+        static_cast<std::uint32_t>(number(along(*cell, caret)).value_or(0));
     document.anchor = static_cast<std::uint32_t>(
-        number(along(cell, anchor)).value_or(document.caret));
+        number(along(*cell, anchor)).value_or(document.caret));
     if (cell == activeCell) {
       place.active = place.documents.size();
     }
@@ -185,15 +193,13 @@ std::optional<ReadingPlace> latestPlace(const Store &store) {
   }
   if (const auto camera = dim(kCamera)) {
     std::array<double, 4> values{};
-    auto cell  = here;
+    std::optional<zigzag::CellRef> cell{here};
     bool whole = true;
     for (auto &value : values) {
-      cell = manifold.linked(cell, *camera);
-      // A rank that ends early is no camera, and noCell has no value to read.
-      const auto found =
-          zigzag::noCell == cell ? std::nullopt : manifold.asDouble(cell);
-      whole = whole && found.has_value();
-      value = found.value_or(0.0);
+      cell             = cell ? manifold.linked(*cell, *camera) : std::nullopt;
+      const auto found = cell ? manifold.asDouble(*cell) : std::nullopt;
+      whole            = whole && found.has_value();
+      value            = found.value_or(0.0);
     }
     if (whole) {
       place.camera = values;
@@ -201,25 +207,25 @@ std::optional<ReadingPlace> latestPlace(const Store &store) {
   }
   if (const auto zigzagDim = dim(kZigzag)) {
     const auto slice = manifold.linked(here, *zigzagDim);
-    if (zigzag::noCell != slice) {
-      place.zigzagStore = manifold.textOf(slice, store);
-      const auto head   = manifold.linked(slice, *zigzagDim);
-      if (zigzag::noCell != head) {
-        place.zigzagVersion = manifold.textOf(head, store);
+    if (slice) {
+      place.zigzagStore = manifold.textOf(*slice, store);
+      const auto head   = manifold.linked(*slice, *zigzagDim);
+      if (head) {
+        place.zigzagVersion = manifold.textOf(*head, store);
       }
-      const auto focus = zigzag::noCell == head
-                             ? zigzag::OptionalCell{}
-                             : manifold.linked(head, *zigzagDim);
-      if (zigzag::noCell != focus) {
-        place.zigzagFocus = manifold.asInt64(focus).value_or(0);
-        const auto keys   = manifold.linked(focus, *zigzagDim);
+      const auto focus = head ? manifold.linked(*head, *zigzagDim)
+                              : std::optional<zigzag::CellRef>{};
+      if (focus) {
+        const auto focusCell = manifold.asInt64(*focus);
+        if (focusCell && *focusCell > 0) place.zigzagFocus = *focusCell;
+        const auto keys = manifold.linked(*focus, *zigzagDim);
         place.zigzagHasKeyboard =
-            zigzag::noCell != keys && manifold.asBool(keys).value_or(false);
+            keys && manifold.asBool(*keys).value_or(false);
       }
     }
   }
-  if (const auto cell = along(here, dim("d.selection")); zigzag::noCell != cell)
-    place.link = decodeLinkContext(manifold.textOf(cell, store));
+  if (const auto cell = along(here, dim("d.selection")); cell)
+    place.link = decodeLinkContext(manifold.textOf(*cell, store));
   return place;
 }
 

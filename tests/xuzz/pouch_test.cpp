@@ -6,7 +6,10 @@
 
 #include <algorithm>
 #include <memory>
+#include <optional>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 #include <gleditor/cpp26.hpp>
@@ -23,6 +26,23 @@
 #include "common/xanadu/zigzag/cell_views.hpp"
 
 using namespace xanadu;
+
+namespace {
+
+std::optional<zigzag::CellRef> pouchSourceField(Store &store,
+                                                const MicroversionId &version,
+                                                const zigzag::CellRef item,
+                                                const std::string_view name) {
+  const auto manifold  = store.rebuildManifold(version);
+  const auto sourceDim = manifold.dimensionNamed("d.origin-store", store);
+  const auto fieldDim  = manifold.dimensionNamed(name, store);
+  if (!sourceDim || !fieldDim) return std::nullopt;
+  const auto source = manifold.linked(item, *sourceDim, zigzag::DimVector::POS);
+  if (!source) return std::nullopt;
+  return manifold.linked(*source, *fieldDim, zigzag::DimVector::POS);
+}
+
+} // namespace
 
 TEST(PouchTest, DefaultPartitionsAreInitialized) {
   PouchManager pm;
@@ -103,14 +123,15 @@ TEST(PouchTest, aCellDropKeepsItsGlobalIdentity) {
   Store foreignStore(perma);
   auto atF = foreignStore.sliceGenesis(MicroversionId{});
   atF      = foreignStore.makeCell(atF, "Cross-store dragged cell");
-  const auto foreignCellRef = foreignStore.cellRefOf(atF);
+  const auto foreignCellRef = foreignStore.cellRefOf(atF).value();
 
   Scroll sealedAs;
   sealedAs.publisher = PublicKey::fromHex(std::string(64, 'f'));
   sealedAs.salt      = "foreign_doc_salt";
   const auto expectedGlobalRef =
       opRefOf(foreignStore, foreignCellRef, sealedAs);
-  ASSERT_FALSE(expectedGlobalRef.empty());
+  ASSERT_TRUE(expectedGlobalRef);
+  const auto expectedGlobal = *expectedGlobalRef;
 
   Store pouchStore(perma);
   PouchManager pm(pouchStore);
@@ -122,8 +143,8 @@ TEST(PouchTest, aCellDropKeepsItsGlobalIdentity) {
   const auto cellSpan = spans.front();
 
   const auto item =
-      pm.dropCell("notes", cellSpan, "Cross-store dragged cell",
-                  expectedGlobalRef, "d.1: #" + std::to_string(foreignCellRef));
+      pm.dropCell("notes", cellSpan, "Cross-store dragged cell", expectedGlobal,
+                  "d.1: #" + std::to_string(foreignCellRef));
   EXPECT_NE(item.itemId, 0U);
   EXPECT_EQ(item.originKind, PouchOriginKind::ZigzagCell);
 
@@ -145,8 +166,8 @@ TEST(PouchTest, aCellDropKeepsItsGlobalIdentity) {
   EXPECT_EQ(reloadedItem.itemId, item.itemId);
   EXPECT_EQ(reloadedItem.originKind, PouchOriginKind::ZigzagCell);
   ASSERT_TRUE(reloadedItem.originOpRef.has_value());
-  EXPECT_EQ(reloadedItem.originOpRef->scroll, expectedGlobalRef.scroll);
-  EXPECT_EQ(reloadedItem.originOpRef->produces, expectedGlobalRef.produces);
+  EXPECT_EQ(reloadedItem.originOpRef->scroll, expectedGlobal.scroll);
+  EXPECT_EQ(reloadedItem.originOpRef->produces, expectedGlobal.produces);
 }
 
 TEST(PouchTest, droppingDoesNotWriteVersionAnnotations) {
@@ -171,7 +192,7 @@ TEST(PouchTest, droppingDoesNotWriteVersionAnnotations) {
   // Verify that the retired string protocol is completely absent from all
   // versions
   for (std::uint32_t i = 1; i <= store.opCount(); ++i) {
-    const auto ver = store.segmentedOps().idOf(i);
+    const auto ver = store.segmentedOps().idOf(i).value();
     const auto ann = store.versionAnnotation(ver);
     if (ann.has_value()) {
       EXPECT_NE(ann->tag, "pouch-drop");
@@ -518,19 +539,20 @@ TEST(PouchTest, BackedBySystemStore) {
 TEST(PouchTest, ExactSourceIdentityAndRepeatedRangeSurviveReload) {
   auto perma = std::make_shared<UserPermascroll>();
   Store source(perma);
-  auto version = source.insert({}, 0, "same -");
-  version = source.insertSpan(version, 6,
-                              source.rebuild(version).spansFor(0, 5).front());
+  auto version    = source.insert({}, 0, "same -");
+  version         = source.insertSpan(version, 6,
+                                      source.rebuild(version).spansFor(0, 5).front());
   const auto span = source.rebuild(version).spansFor(6, 5).front();
   Store pouch(perma);
   PouchManager manager(pouch);
   manager.loadManifest();
-  const PouchOrigin origin{
-      .source = PouchOrigin::Source{.authority = source.documentId().str(),
-                                    .version   = version,
-                                    .start     = 6,
-                                    .end       = 11,
-                                    .cell      = std::nullopt}};
+  const PouchOrigin origin{.source = PouchOrigin::Source{
+                               .authority = source.documentId().str(),
+                               .version   = version,
+                               .start     = 6,
+                               .end       = 11,
+                               .cell      = std::nullopt,
+                               .selection = XanadocSelection::automatic()}};
   const auto item = manager.dropSpan("notes", span, "same ", origin);
   ASSERT_EQ(item.originSource, origin.source);
   PouchManager reloaded(pouch);
@@ -550,12 +572,13 @@ TEST(PouchTest, SavedSourceCellRemainsDistinctFromPouchItemBirth) {
   Store pouch(store.userPermascrollPtr());
   PouchManager manager(pouch);
   manager.loadManifest();
-  const PouchOrigin origin{
-      .source = PouchOrigin::Source{.authority = store.documentId().str(),
-                                    .version   = head,
-                                    .start     = 0,
-                                    .end       = 9,
-                                    .cell      = store.cellRefOf(head)}};
+  const PouchOrigin origin{.source = PouchOrigin::Source{
+                               .authority = store.documentId().str(),
+                               .version   = head,
+                               .start     = 0,
+                               .end       = 9,
+                               .cell      = store.cellRefOf(head).value(),
+                               .selection = XanadocSelection::automatic()}};
   const auto span =
       store.rebuildManifold(head).contentOf(*origin.source->cell).front();
   manager.dropSpan("notes", span, "cell text", origin);
@@ -563,4 +586,215 @@ TEST(PouchTest, SavedSourceCellRemainsDistinctFromPouchItemBirth) {
   reloaded.loadManifest();
   EXPECT_EQ(reloaded.zoneById("notes")->items().front().originSource,
             origin.source);
+}
+
+TEST(PouchTest, RootAutomaticAndBirthSourceSelectionsSurviveReload) {
+  auto perma = std::make_shared<UserPermascroll>();
+  Store source(perma);
+  auto version =
+      source.insert(MicroversionId{}, 0, "root bytes", MicroversionId{});
+  version          = source.makeXanadoc(version, "active document");
+  version          = source.insert(version, 0, "active bytes");
+  const auto birth = source.activeXanadocOnBranch(version);
+  ASSERT_TRUE(birth);
+  const auto rootSpans =
+      source.rebuild(version, XanadocSelection::root()).spansFor(0, 10);
+  const auto activeSpans =
+      source.rebuild(version, XanadocSelection::birth(*birth)).spansFor(0, 12);
+  ASSERT_EQ(rootSpans.size(), 1U);
+  ASSERT_EQ(activeSpans.size(), 1U);
+
+  Store pouch(perma);
+  PouchManager manager(pouch);
+  manager.loadManifest();
+  const auto makeOrigin = [&](const XanadocSelection selection,
+                              const std::uint32_t start,
+                              const std::uint32_t end) {
+    return PouchOrigin{
+        .source = PouchOrigin::Source{.authority = source.documentId().str(),
+                                      .version   = version,
+                                      .start     = start,
+                                      .end       = end,
+                                      .cell      = std::nullopt,
+                                      .selection = selection}};
+  };
+  manager.dropSpan("notes", rootSpans.front(), "root bytes",
+                   makeOrigin(XanadocSelection::root(), 0, 10));
+  manager.dropSpan("notes", activeSpans.front(), "automatic active",
+                   makeOrigin(XanadocSelection::automatic(), 0, 12));
+  manager.dropSpan("notes", activeSpans.front(), "explicit active birth",
+                   makeOrigin(XanadocSelection::birth(*birth), 0, 12));
+
+  PouchManager reloaded(pouch);
+  reloaded.loadManifest();
+  const auto &items = reloaded.zoneById("notes")->items();
+  ASSERT_EQ(items.size(), 3U);
+  ASSERT_TRUE(items[0].originSource);
+  ASSERT_TRUE(items[1].originSource);
+  ASSERT_TRUE(items[2].originSource);
+  EXPECT_EQ(items[0].originSource->selection, XanadocSelection::root());
+  EXPECT_EQ(items[1].originSource->selection, XanadocSelection::automatic());
+  EXPECT_EQ(items[2].originSource->selection, XanadocSelection::birth(*birth));
+  EXPECT_FALSE(items[0].originSource->cell);
+  EXPECT_FALSE(items[1].originSource->cell);
+  EXPECT_FALSE(items[2].originSource->cell);
+  EXPECT_EQ(source.textOf(version, items[0].originSource->selection),
+            "root bytes");
+  EXPECT_EQ(source.textOf(version, items[1].originSource->selection),
+            "active bytes");
+}
+
+TEST(PouchTest, LegacyPositiveSourceBirthWithoutFocusTagRemainsExplicit) {
+  auto perma = std::make_shared<UserPermascroll>();
+  Store source(perma);
+  auto version = source.makeXanadoc(
+      source.insert(MicroversionId{}, 0, "root bytes", MicroversionId{}),
+      "active document");
+  version          = source.insert(version, 0, "active bytes");
+  const auto birth = source.activeXanadocOnBranch(version);
+  ASSERT_TRUE(birth);
+
+  Store pouch(perma);
+  PouchManager manager(pouch);
+  manager.loadManifest();
+  const auto activeText =
+      source.rebuild(version, XanadocSelection::birth(*birth));
+  const auto span = activeText.spansFor(0, 12).front();
+  const PouchOrigin origin{.source = PouchOrigin::Source{
+                               .authority = source.documentId().str(),
+                               .version   = version,
+                               .start     = 0,
+                               .end       = 12,
+                               .cell      = std::nullopt,
+                               .selection = XanadocSelection::birth(*birth)}};
+  const auto item = manager.dropSpan("notes", span, "active bytes", origin);
+
+  auto head            = manager.currentVersion();
+  auto view            = manager.store().rebuildManifold(head);
+  const auto sourceDim = view.dimensionNamed("d.origin-store", manager.store());
+  const auto focusDim  = view.dimensionNamed("d.origin-focus", manager.store());
+  ASSERT_TRUE(sourceDim);
+  ASSERT_TRUE(focusDim);
+  const auto sourceCell =
+      view.linked(item.itemId, *sourceDim, zigzag::DimVector::POS);
+  ASSERT_TRUE(sourceCell);
+  head = manager.store().setLink(head, *sourceCell, *focusDim,
+                                 zigzag::DimVector::POS, std::nullopt);
+
+  PouchManager reloaded(manager.store());
+  reloaded.loadManifest();
+  const auto &restored = reloaded.zoneById("notes")->items().front();
+  ASSERT_TRUE(restored.originSource);
+  EXPECT_EQ(restored.originSource->selection, XanadocSelection::birth(*birth));
+  EXPECT_EQ(source.textOf(restored.originSource->version,
+                          restored.originSource->selection),
+            "active bytes");
+}
+
+TEST(PouchTest, PresentMalformedFocusDiscriminatorIsRefused) {
+  enum class Corruption {
+    WrongType,
+    NegativeValue,
+    UnknownValue,
+    ConflictingDocument,
+  };
+  for (const auto corruption :
+       {Corruption::WrongType, Corruption::NegativeValue,
+        Corruption::UnknownValue, Corruption::ConflictingDocument}) {
+    Store store;
+    const auto sourceVersion = store.insert(MicroversionId{}, 0, "source");
+    const auto span = store.rebuild(sourceVersion).spansFor(0, 6).front();
+    PouchManager manager(store);
+    manager.loadManifest();
+    const PouchOrigin origin{
+        .source = PouchOrigin::Source{.authority = store.documentId().str(),
+                                      .version   = sourceVersion,
+                                      .start     = 0,
+                                      .end       = 6,
+                                      .cell      = std::nullopt,
+                                      .selection = XanadocSelection::root()}};
+    const auto item      = manager.dropSpan("notes", span, "source", origin);
+    const auto fieldName = corruption == Corruption::ConflictingDocument
+                               ? "d.origin-document"
+                               : "d.origin-focus";
+    const auto field     = pouchSourceField(
+        manager.store(), manager.currentVersion(), item.itemId, fieldName);
+    ASSERT_TRUE(field);
+
+    auto head = manager.currentVersion();
+    if (corruption == Corruption::WrongType) {
+      head = manager.store().setCellText(head, *field, "invalid");
+    } else if (corruption == Corruption::NegativeValue) {
+      head = manager.store().setScalar(head, *field, std::int64_t{-1});
+    } else {
+      const std::int64_t value =
+          corruption == Corruption::ConflictingDocument ? 1 : 3;
+      head = manager.store().setScalar(head, *field, value);
+    }
+    PouchManager reloaded(manager.store());
+    EXPECT_THROW(reloaded.loadManifest(), std::runtime_error);
+  }
+}
+
+TEST(PouchTest, PresentMalformedOptionalSourceCellIsRefused) {
+  enum class Corruption { WrongType, NegativeValue, ZeroValue };
+  for (const auto corruption :
+       {Corruption::WrongType, Corruption::NegativeValue,
+        Corruption::ZeroValue}) {
+    const auto permascroll = std::make_shared<UserPermascroll>();
+    Store sourceStore(permascroll);
+    const auto genesis = sourceStore.sliceGenesis(MicroversionId{}, "source");
+    const auto sourceVersion = sourceStore.makeCell(genesis, "source");
+    const auto sourceCell    = sourceStore.cellRefOf(sourceVersion).value();
+    const auto span          = sourceStore.rebuildManifold(sourceVersion)
+                          .contentOf(sourceCell)
+                          .front();
+
+    Store pouchStore(permascroll);
+    initializeSystemStore(pouchStore, SystemDocKind::Pouches);
+    PouchManager manager(pouchStore);
+    manager.loadManifest();
+    const PouchOrigin origin{.source = PouchOrigin::Source{
+                                 .authority = sourceStore.documentId().str(),
+                                 .version   = sourceVersion,
+                                 .start     = 0,
+                                 .end       = 6,
+                                 .cell      = sourceCell,
+                                 .selection = XanadocSelection::automatic()}};
+    const auto item = manager.dropSpan("notes", span, "source", origin);
+    const auto field =
+        pouchSourceField(manager.store(), manager.currentVersion(), item.itemId,
+                         "d.origin-birth");
+    ASSERT_TRUE(field);
+
+    auto head = manager.currentVersion();
+    if (corruption == Corruption::WrongType) {
+      head = manager.store().setCellText(head, *field, "invalid");
+    } else if (corruption == Corruption::NegativeValue) {
+      head = manager.store().setScalar(head, *field, std::int64_t{-1});
+    } else {
+      head = manager.store().setScalar(head, *field, std::int64_t{0});
+    }
+    PouchManager reloaded(manager.store());
+    EXPECT_THROW(reloaded.loadManifest(), std::runtime_error);
+  }
+}
+
+TEST(PouchTest, ZeroSourceCellIsRefusedBeforePouchOperationsAreMinted) {
+  Store store;
+  const auto zoneVersion = store.makeCell(MicroversionId{}, "zone");
+  const auto zone        = store.cellRefOf(zoneVersion).value();
+  const PouchOrigin origin{.source = PouchOrigin::Source{
+                               .authority = "source-store",
+                               .version   = zoneVersion,
+                               .start     = 0,
+                               .end       = 0,
+                               .cell      = zigzag::CellRef{0},
+                               .selection = XanadocSelection::automatic()}};
+  const auto before = store.opCount();
+
+  EXPECT_THROW(std::ignore = store.appendPouchItemWithRef(
+                   zoneVersion, zone, PrimediaSpan{}, origin),
+               std::invalid_argument);
+  EXPECT_EQ(store.opCount(), before);
 }

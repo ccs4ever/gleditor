@@ -54,7 +54,7 @@ TEST(OsmicWalkerTest, LinearChainTraversal) {
     current = store.insert(current, store.rebuild(current).length(), text);
   }
 
-  const auto targetIdx = store.segmentedOps().indexOf(current);
+  const auto targetIdx = store.segmentedOps().indexOf(current).value();
   ASSERT_EQ(targetIdx, 10U);
 
   // Walk full ancestral path from 0 to 10
@@ -84,7 +84,7 @@ TEST(OsmicWalkerTest, SubpathTraversal) {
   for (int i = 0; i < 10; ++i) {
     const auto text = "word" + std::to_string(i) + " ";
     current = store.insert(current, store.rebuild(current).length(), text);
-    indices.push_back(store.segmentedOps().indexOf(current));
+    indices.push_back(store.segmentedOps().indexOf(current).value());
   }
 
   // Walk subpath from index 3 to index 7 (should visit 4, 5, 6, 7)
@@ -111,7 +111,7 @@ TEST(OsmicWalkerTest, EarlyTermination) {
     current = store.insert(current, store.rebuild(current).length(), "x ");
   }
 
-  const auto targetIdx = store.segmentedOps().indexOf(current);
+  const auto targetIdx = store.segmentedOps().indexOf(current).value();
   std::vector<std::uint32_t> visited;
 
   // Stop after visiting 3 ops
@@ -135,8 +135,8 @@ TEST(OsmicWalkerTest, DivergentBranchHandling) {
   const auto b1 = store.insert(root, store.rebuild(root).length(), "Branch1 ");
   const auto b2 = store.insert(root, store.rebuild(root).length(), "Branch2 ");
 
-  const auto idxB1 = store.segmentedOps().indexOf(b1);
-  const auto idxB2 = store.segmentedOps().indexOf(b2);
+  const auto idxB1 = store.segmentedOps().indexOf(b1).value();
+  const auto idxB2 = store.segmentedOps().indexOf(b2).value();
 
   // b1 is not an ancestor of b2
   std::vector<std::uint32_t> visited;
@@ -150,7 +150,7 @@ TEST(OsmicWalkerTest, DivergentBranchHandling) {
   EXPECT_TRUE(visited.empty());
   EXPECT_FALSE(OsmicWalker::isAncestor(store.segmentedOps(), idxB1, idxB2));
   EXPECT_TRUE(OsmicWalker::isAncestor(
-      store.segmentedOps(), store.segmentedOps().indexOf(root), idxB2));
+      store.segmentedOps(), store.segmentedOps().indexOf(root).value(), idxB2));
 }
 
 TEST(OsmicWalkerTest, StackBufferOverflowToHeapBuffer) {
@@ -163,7 +163,7 @@ TEST(OsmicWalkerTest, StackBufferOverflowToHeapBuffer) {
     current = store.insert(current, store.rebuild(current).length(), "a");
   }
 
-  const auto targetIdx = store.segmentedOps().indexOf(current);
+  const auto targetIdx = store.segmentedOps().indexOf(current).value();
   EXPECT_EQ(targetIdx, kNumOps);
 
   std::vector<std::uint32_t> visited;
@@ -189,7 +189,7 @@ TEST(OsmicWalkerTest, FoldAccumulation) {
     current = store.insert(current, store.rebuild(current).length(), w);
   }
 
-  const auto targetIdx = store.segmentedOps().indexOf(current);
+  const auto targetIdx = store.segmentedOps().indexOf(current).value();
 
   // Fold using OsmicWalker::foldAncestral
   std::uint32_t totalInserts = 0;

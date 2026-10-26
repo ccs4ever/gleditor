@@ -49,7 +49,7 @@ public:
 class MockSurface : public xanadu::ZigzagPresentationSurface {
 public:
   zigzag::Manifold manifold_;
-  zigzag::CellRef focus_{zigzag::noCell};
+  std::optional<zigzag::CellRef> focus_;
   int radius_{3};
   std::uint64_t rev_{1};
   InvalidationCallback invalidationCb_;
@@ -58,10 +58,11 @@ public:
   [[nodiscard]] const zigzag::Manifold &manifold() const noexcept override {
     return manifold_;
   }
-  [[nodiscard]] zigzag::CellRef focusCell() const noexcept override {
+  [[nodiscard]] std::optional<zigzag::CellRef>
+  focusCell() const noexcept override {
     return focus_;
   }
-  void focusCell(const zigzag::CellRef cell) override {
+  void focusCell(const std::optional<zigzag::CellRef> cell) override {
     focus_ = cell;
     ++rev_;
     if (invalidationCb_) {
@@ -261,9 +262,11 @@ TEST(XuzzSovereignKeymapTest, SovereignKeymapGovernance) {
 TEST(XuzzBridgeTest,
      PresentationSurfaceCellActivationAndDocumentFocusCoordination) {
   xanadu::Store store;
-  const auto g  = store.sliceGenesis(xanadu::MicroversionId{});
-  const auto v1 = store.makeCell(g, "Intertwingled Span");
-  const auto c1 = store.cellRefOf(v1);
+  const auto g        = store.sliceGenesis(xanadu::MicroversionId{});
+  const auto v1       = store.makeCell(g, "Intertwingled Span");
+  const auto c1Result = store.cellRefOf(v1);
+  ASSERT_TRUE(c1Result);
+  const auto c1 = *c1Result;
 
   MockSurface surface;
   surface.manifold_ = store.rebuildManifold(v1);
@@ -298,8 +301,10 @@ TEST(XuzzBridgeTest,
 
   // 2. Document link activated: far end points to a Zigzag cell -> focus cell
   // in surface
-  const auto v2                = store.makeCell(v1, "Far Link Anchor");
-  const auto c2                = store.cellRefOf(v2);
+  const auto v2       = store.makeCell(v1, "Far Link Anchor");
+  const auto c2Result = store.cellRefOf(v2);
+  ASSERT_TRUE(c2Result);
+  const auto c2                = *c2Result;
   auto onDocumentLinkActivated = [&](const zigzag::CellRef cell) {
     surface.focusCell(cell);
   };

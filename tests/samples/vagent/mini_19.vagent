@@ -1,0 +1,19 @@
+event Compare
+capacity Scale { def adjust(value: Int): Int }
+skill Double implements Scale {
+  def adjust(value: Int): Int { value * 2 }
+}
+skill Triple implements Scale {
+  def adjust(value: Int): Int { value * 3 }
+}
+agent Scaling {
+  uses Scale
+  install Double()
+  var first: Int := 0
+  var second: Int := 0
+  on Compare {
+    first := adjust(2)
+    install Triple()
+    second := adjust(2)
+  }
+}

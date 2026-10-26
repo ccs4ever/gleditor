@@ -7,8 +7,16 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <map>
+#include <stdexcept>
 
 namespace {
+std::uint32_t requiredId(const render::BufferHandle handle) {
+  if (!handle.id) {
+    throw std::logic_error("mock received an absent buffer handle");
+  }
+  return *handle.id;
+}
+
 class BadgeDevice : public testing::NiceMock<MockRenderDevice> {
 public:
   std::uint32_t next{1};
@@ -28,7 +36,7 @@ public:
         });
     ON_CALL(*this, resizeBuffer)
         .WillByDefault([this](render::BufferHandle handle, std::size_t size) {
-          buffers[handle.id].resize(size);
+          buffers[requiredId(handle)].resize(size);
           return handle;
         });
     ON_CALL(*this, createPipeline)
@@ -37,7 +45,7 @@ public:
         .WillByDefault([this](render::BufferHandle buffer, std::size_t offset,
                               std::span<const std::byte> data) {
           ++uploads;
-          auto &storage = buffers[buffer.id];
+          auto &storage = buffers[requiredId(buffer)];
           storage.resize(std::max(storage.size(), offset + data.size()));
           std::memcpy(storage.data() + offset, data.data(), data.size());
         });
@@ -46,7 +54,7 @@ public:
                               render::BufferHandle buffer, std::size_t offset,
                               std::uint32_t count) {
           if (count) ++draws;
-          const auto &storage = buffers.at(buffer.id);
+          const auto &storage = buffers.at(requiredId(buffer));
           for (std::uint32_t index = 0; index < count; ++index) {
             Doc::VBORow row{};
             std::memcpy(&row, storage.data() + offset + index * sizeof(row),
@@ -234,12 +242,12 @@ TEST_F(TranscopyrightOverlayTest,
   draw();
   const auto captured = state.overlayPickScene.widgetOverlays.front();
   render::PickingResult pick;
-  pick.requestId = 1;
-  pick.tag       = {.kind         = render::tagKindOverlay,
-                    .docIndex     = (captured.identity >> render::tagPageBits) &
-                                    ((1U << render::tagDocBits) - 1U),
-                    .pageIndex    = 0,
-                    .clusterIndex = 1};
+  pick.requestId       = 1;
+  pick.tag             = {.kind     = render::tagKindOverlay,
+                          .docIndex = (captured.identity >> render::tagPageBits) &
+                                      ((1U << render::tagDocBits) - 1U),
+                          .pageIndex    = 0,
+                          .clusterIndex = 1};
   pick.overlayWidgetId = captured.targets->front();
   std::ranges::reverse(holes);
   ++generation;
@@ -286,10 +294,10 @@ TEST_F(TranscopyrightOverlayTest, RemovedBadgesCannotRetargetCapturedPicks) {
   ++generation;
   draw();
   render::PickingResult pick;
-  pick.requestId        = 2;
-  pick.tag.kind         = render::tagKindOverlay;
-  pick.tag.docIndex     = (captured.identity >> render::tagPageBits) &
-                          ((1U << render::tagDocBits) - 1U);
+  pick.requestId    = 2;
+  pick.tag.kind     = render::tagKindOverlay;
+  pick.tag.docIndex = (captured.identity >> render::tagPageBits) &
+                      ((1U << render::tagDocBits) - 1U);
   pick.tag.clusterIndex = 1;
   pick.overlayWidgetId  = oldId;
   EXPECT_FALSE(overlay.picked(pick, state));

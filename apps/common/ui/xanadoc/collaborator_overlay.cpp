@@ -6,6 +6,7 @@
 #include "collaborator_overlay.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 
 #include <glm/ext/matrix_clip_space.hpp>
@@ -19,6 +20,14 @@
 #include "session.hpp"
 
 namespace xanadu {
+namespace {
+
+constexpr auto kCollaboratorLifetime            = std::chrono::seconds{15};
+constexpr float kCollaboratorFadeStartSeconds   = 10.0F;
+constexpr float kCollaboratorFadeDurationSecs   = 5.0F;
+constexpr std::size_t kVisibleCollaboratorLimit = 16;
+
+} // namespace
 
 const CollaboratorNameplatePresentation &CollaboratorNameplate::prepare(
     std::string_view name, std::string_view identity, glm::vec2 anchor,
@@ -146,21 +155,25 @@ void CollaboratorCaretOverlay::drawFrame(gleditor::FrameContext &ctx) {
   std::erase_if(visuals_, [&](const auto &entry) {
     const auto found = collaborators.find(entry.first);
     return found == collaborators.end() ||
-           now - found->second.lastSeen >= std::chrono::seconds{15};
+           now - found->second.lastSeen >= kCollaboratorLifetime;
   });
   std::size_t renderedCount = 0;
   for (const auto &[key, collab] : collaborators) {
-    if (renderedCount >= 16) {
+    if (renderedCount >= kVisibleCollaboratorLimit) {
       break;
     }
     const float idleSec =
         std::chrono::duration<float>(now - collab.lastSeen).count();
-    if (idleSec >= 15.0F) {
+    if (idleSec >=
+        std::chrono::duration<float>(kCollaboratorLifetime).count()) {
       continue;
     }
     float targetAlpha = 1.0F;
-    if (idleSec >= 10.0F) {
-      targetAlpha = std::clamp(1.0F - (idleSec - 10.0F) / 5.0F, 0.0F, 1.0F);
+    if (idleSec >= kCollaboratorFadeStartSeconds) {
+      targetAlpha =
+          std::clamp(1.0F - (idleSec - kCollaboratorFadeStartSeconds) /
+                                kCollaboratorFadeDurationSecs,
+                     0.0F, 1.0F);
     }
 
     if (collab.docIndex >= ctx.state.docs.size()) {

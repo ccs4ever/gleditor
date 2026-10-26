@@ -110,7 +110,7 @@ Lexer::Lexer(std::string_view source) : ScannerBase(source) {}
 
 void Lexer::skipWhitespaceAndComments() {
   while (pos_ < source_.size()) {
-    char c = peekChar();
+    char c = peekChar().value();
     if (std::isspace(static_cast<unsigned char>(c))) {
       advanceChar();
       continue;
@@ -179,7 +179,7 @@ Token Lexer::nextToken() {
 
   const SourceLocation startLoc = currentLocation();
   const std::size_t startPos    = pos_;
-  const char c                  = advanceChar();
+  const char c                  = advanceChar().value();
 
   // Delimiters
   switch (c) {
@@ -230,13 +230,19 @@ Token Lexer::nextToken() {
                  .text = source_.substr(startPos, 1),
                  .loc  = startLoc};
   case '.':
-    if (std::isdigit(static_cast<unsigned char>(peekChar()))) {
+    if (peekIsDigit()) {
       backupChar();
       auto numRes = scanNumberLiteral();
+      if (!numRes) {
+        return Token{.kind        = TokenKind::Error,
+                     .text        = source_.substr(startPos, pos_ - startPos),
+                     .loc         = startLoc,
+                     .stringValue = numRes.error()};
+      }
       return Token{.kind       = TokenKind::FloatLiteral,
-                   .text       = numRes.text,
+                   .text       = numRes->text,
                    .loc        = startLoc,
-                   .floatValue = numRes.floatValue};
+                   .floatValue = numRes->floatValue};
     }
     return Token{.kind = TokenKind::Dot,
                  .text = source_.substr(startPos, 1),
@@ -416,16 +422,22 @@ Token Lexer::nextToken() {
   if (std::isdigit(static_cast<unsigned char>(c))) {
     backupChar();
     auto numRes = scanNumberLiteral();
-    if (numRes.isFloat) {
+    if (!numRes) {
+      return Token{.kind        = TokenKind::Error,
+                   .text        = source_.substr(startPos, pos_ - startPos),
+                   .loc         = startLoc,
+                   .stringValue = numRes.error()};
+    }
+    if (numRes->isFloat) {
       return Token{.kind       = TokenKind::FloatLiteral,
-                   .text       = numRes.text,
+                   .text       = numRes->text,
                    .loc        = startLoc,
-                   .floatValue = numRes.floatValue};
+                   .floatValue = numRes->floatValue};
     }
     return Token{.kind     = TokenKind::IntegerLiteral,
-                 .text     = numRes.text,
+                 .text     = numRes->text,
                  .loc      = startLoc,
-                 .intValue = numRes.intValue};
+                 .intValue = numRes->intValue};
   }
 
   // Variables and Atoms
@@ -443,10 +455,10 @@ Token Lexer::nextToken() {
 Token Lexer::scanIdentifierOrKeyword() {
   const SourceLocation startLoc = currentLocation();
   const std::size_t startPos    = pos_;
-  char first                    = advanceChar();
+  char first                    = advanceChar().value();
 
   while (pos_ < source_.size()) {
-    char c = peekChar();
+    char c = peekChar().value();
     if (std::isalnum(static_cast<unsigned char>(c)) || c == '_') {
       advanceChar();
     } else {

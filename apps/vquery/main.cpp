@@ -13,6 +13,7 @@
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <ranges>
 #include <sstream>
 #include <string>
@@ -54,15 +55,16 @@ resultRows(const xanadu::MultiStoreCoordinator &coordinator,
   rows.reserve(results.size());
   for (const auto cell : results) {
     const auto value = coordinator.core().render(cell);
+    if (!value) continue;
     std::string rendered;
-    if (const auto *number = std::get_if<double>(&value)) {
+    if (const auto *number = std::get_if<double>(&*value)) {
       rendered = xanadu::scalarValue(*number).text;
-    } else if (const auto *integer = std::get_if<std::int64_t>(&value)) {
+    } else if (const auto *integer = std::get_if<std::int64_t>(&*value)) {
       rendered = xanadu::scalarValue(*integer).text;
-    } else if (const auto *truth = std::get_if<bool>(&value)) {
+    } else if (const auto *truth = std::get_if<bool>(&*value)) {
       rendered = xanadu::scalarValue(*truth).text;
     } else {
-      rendered = std::get<std::string>(value);
+      rendered = std::get<std::string>(*value);
     }
     std::string source;
     if (const auto foreign = coordinator.arena().resolveSourceCell(
@@ -82,9 +84,8 @@ resultRows(const xanadu::MultiStoreCoordinator &coordinator,
       // says where it came from along d.source.
       if (const auto sourceDim = coordinator.core().findDimension("d.source")) {
         const auto &arena = coordinator.arena();
-        if (const auto origin = arena.linked(cell, *sourceDim);
-            zigzag::noCell != origin) {
-          source = arena.textOf(origin);
+        if (const auto origin = arena.linked(cell, *sourceDim)) {
+          source = arena.textOf(*origin);
         }
       }
     }
@@ -516,15 +517,16 @@ int main(int argc, char *argv[]) {
     } else {
       // Text output
       for (zigzag::CellRef c : results) {
-        auto val = coordinator.core().render(c);
-        if (std::holds_alternative<std::string>(val)) {
-          std::cout << std::get<std::string>(val) << "\n";
-        } else if (std::holds_alternative<double>(val)) {
-          std::cout << std::get<double>(val) << "\n";
-        } else if (std::holds_alternative<std::int64_t>(val)) {
-          std::cout << std::get<std::int64_t>(val) << "\n";
-        } else if (std::holds_alternative<bool>(val)) {
-          std::cout << (std::get<bool>(val) ? "true" : "false") << "\n";
+        const auto val = coordinator.core().render(c);
+        if (!val) continue;
+        if (std::holds_alternative<std::string>(*val)) {
+          std::cout << std::get<std::string>(*val) << "\n";
+        } else if (std::holds_alternative<double>(*val)) {
+          std::cout << std::get<double>(*val) << "\n";
+        } else if (std::holds_alternative<std::int64_t>(*val)) {
+          std::cout << std::get<std::int64_t>(*val) << "\n";
+        } else if (std::holds_alternative<bool>(*val)) {
+          std::cout << (std::get<bool>(*val) ? "true" : "false") << "\n";
         }
       }
     }

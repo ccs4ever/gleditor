@@ -71,12 +71,12 @@ public:
     ON_CALL(*this, destroyTexture)
         .WillByDefault([this](const render::TextureHandle handle) {
           ++destroyCount;
-          uploads.erase(handle.id);
+          if (handle.id) uploads.erase(*handle.id);
         });
     ON_CALL(*this, updateTextureLayer)
         .WillByDefault([this](const render::TextureHandle handle, int, int, int,
                               int, int, const std::span<const std::byte> data) {
-          uploads[handle.id].assign(data.begin(), data.end());
+          uploads[*handle.id].assign(data.begin(), data.end());
         });
   }
 };
@@ -164,7 +164,7 @@ TEST(SvgCacheTest, LoadBufferRasterizesViaSwCanvasWithCorrectPixels) {
   EXPECT_EQ(resource->height, 128);
   EXPECT_EQ(resource->layer, 0);
 
-  const auto it = device.uploads.find(resource->texture.id);
+  const auto it = device.uploads.find(*resource->texture.id);
   ASSERT_NE(it, device.uploads.end());
   const auto &rgba = it->second;
   ASSERT_EQ(rgba.size(), static_cast<std::size_t>(128 * 128 * 4));

@@ -71,7 +71,7 @@ TEST(UniversalLinkEndpointTest, aggregateInitializationMatchesLegacyLinkEnd) {
   EXPECT_FALSE(end.isCell());
   EXPECT_FALSE(end.isWithheld());
   EXPECT_FALSE(end.isEphemeral());
-  EXPECT_EQ(end.cell(), zigzag::noCell);
+  EXPECT_EQ(end.cell(), std::nullopt);
 }
 
 TEST(UniversalLinkEndpointTest, memberUnionBidirectionalAccess) {
@@ -92,7 +92,7 @@ TEST(UniversalLinkEndpointTest, factoryHelpersForDocumentAndCell) {
   EXPECT_EQ(docEnd.start, 50U);
   EXPECT_EQ(docEnd.end, 90U);
   EXPECT_EQ(docEnd.length(), 40U);
-  EXPECT_EQ(docEnd.cell(), zigzag::noCell);
+  EXPECT_EQ(docEnd.cell(), std::nullopt);
 
   const auto cellEnd = UniversalLinkEnd::forCell(777U, 10U, 35U, 4U, 1U);
   EXPECT_FALSE(cellEnd.isDocument());
@@ -105,6 +105,8 @@ TEST(UniversalLinkEndpointTest, factoryHelpersForDocumentAndCell) {
   EXPECT_EQ(cellEnd.spanIndex, 4U);
   EXPECT_TRUE(cellEnd.isWithheld());
   EXPECT_FALSE(cellEnd.isEphemeral());
+  EXPECT_EQ(UniversalLinkEnd::forCell(zigzag::noCell, 0U, 0U).cell(),
+            std::nullopt);
 }
 
 // -- 3. Transclusion Pair Functionality ---------------------------------------

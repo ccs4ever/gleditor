@@ -224,8 +224,7 @@ importStorePackage(const SessionPackage &pkg,
     if (frag.scrollId != localScroll) {
       const auto which = result.store->scroll(frag.scrollId);
       if (which) {
-        const std::string key =
-            "btpk:" + which->publisher.hex() + ":" + which->salt;
+        const auto key = liveScrollBufferKey(*which);
         const std::string_view text(
             reinterpret_cast<const char *>(frag.bytes.data()),
             frag.bytes.size());

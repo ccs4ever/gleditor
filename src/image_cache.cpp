@@ -150,9 +150,9 @@ ImageResource ImageCache::put(const std::string &id,
   const int imgW = std::min(image.width, atlasSize_);
   const int imgH = std::min(image.height, atlasSize_);
 
-  int chosenLayer = -1;
-  int posX        = 0;
-  int posY        = 0;
+  std::optional<int> chosenLayer;
+  int posX = 0;
+  int posY = 0;
 
   for (auto &layer : layers_) {
     if (layer.currentX + imgW <= atlasSize_ &&
@@ -176,7 +176,7 @@ ImageResource ImageCache::put(const std::string &id,
     }
   }
 
-  if (chosenLayer < 0 && std::cmp_less(layers_.size(), maxLayers_)) {
+  if (!chosenLayer && std::cmp_less(layers_.size(), maxLayers_)) {
     const int nextLayer = static_cast<int>(layers_.size());
     layers_.push_back(AtlasLayer{
         .layerIndex = nextLayer,
@@ -190,7 +190,7 @@ ImageResource ImageCache::put(const std::string &id,
     allocatedLayers_ = static_cast<int>(layers_.size());
   }
 
-  if (chosenLayer < 0) {
+  if (!chosenLayer) {
     // Atlas full; return fallback resource
     return {};
   }
@@ -200,7 +200,7 @@ ImageResource ImageCache::put(const std::string &id,
       // Common case: image.rgba is already exactly imgW*imgH*4 tightly
       // packed bytes, so it can go straight to the device.
       device_->updateTextureLayer(
-          atlasHandle_, chosenLayer, posX, posY, imgW, imgH,
+          atlasHandle_, *chosenLayer, posX, posY, imgW, imgH,
           std::span<const std::byte>(
               reinterpret_cast<const std::byte *>(image.rgba.data()),
               static_cast<std::size_t>(imgW) * imgH * 4));
@@ -227,7 +227,7 @@ ImageResource ImageCache::put(const std::string &id,
                     dstStride);
       }
       device_->updateTextureLayer(
-          atlasHandle_, chosenLayer, posX, posY, imgW, imgH,
+          atlasHandle_, *chosenLayer, posX, posY, imgW, imgH,
           std::span<const std::byte>(
               reinterpret_cast<const std::byte *>(cropped.data()),
               cropped.size()));

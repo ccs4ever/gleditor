@@ -341,7 +341,7 @@ TEST_F(PublicationDiscoveryTest,
   auto configured                 = options();
   auto advertised                 = catalog();
   advertised.entries.front().kind = xanadu::CatalogEntryKind::LinkPackage;
-  const auto key = xanadu::scrollKey(pub.scrolls.begin()->second);
+  const auto key = xanadu::scrollKey(pub.scrolls.begin()->second).value();
   advertised.entries.front().scrollKeys = {key};
   advertised      = xanadu::signAuthorCatalog(advertised, keys);
   state->response = {xanadu::encodeAuthorCatalog(advertised)};

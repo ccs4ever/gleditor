@@ -6,6 +6,7 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstring>
 #include <map>
 #include <memory>
@@ -141,12 +142,14 @@ TEST_F(MediaWidgetTest, PickSeekBarCalculatesFractionAndSeeks) {
   pick.tag.clusterIndex = widget->tagBase() + MediaWidget::tagSeekBase + 500U;
 
   EXPECT_TRUE(widget->picked(pick, *state));
-  EXPECT_FLOAT_EQ(player->progressFraction(), 0.5F);
+  ASSERT_TRUE(player->progressFraction());
+  EXPECT_FLOAT_EQ(player->progressFraction().value(), 0.5F);
 
   // Tag corresponding to 25% seek: tagSeekBase + 250
   pick.tag.clusterIndex = widget->tagBase() + MediaWidget::tagSeekBase + 250U;
   EXPECT_TRUE(widget->picked(pick, *state));
-  EXPECT_FLOAT_EQ(player->progressFraction(), 0.25F);
+  ASSERT_TRUE(player->progressFraction());
+  EXPECT_FLOAT_EQ(player->progressFraction().value(), 0.25F);
 }
 
 TEST_F(MediaWidgetTest, IgnoresUnrelatedPicks) {
@@ -167,6 +170,11 @@ TEST_F(MediaWidgetTest, AccessibilityTreeAndActions) {
   gleditor::a11y::Builder builder(tree, 1);
   widget->setTitle("Audio Sample");
   widget->describe(builder);
+
+  const auto seekNode = std::ranges::find(tree.nodes, "Playback Position",
+                                          &gleditor::a11y::Node::label);
+  ASSERT_NE(seekNode, tree.nodes.end());
+  EXPECT_EQ(seekNode->value, "00:00 of 00:30");
 
   ASSERT_FALSE(tree.nodes.empty());
   EXPECT_EQ(tree.nodes.back().label, "Audio Sample");
@@ -190,6 +198,20 @@ TEST_F(MediaWidgetTest, AccessibilityTreeAndActions) {
   EXPECT_TRUE(widget->performAction(rootId + MediaWidget::tagStop,
                                     gleditor::a11y::Action::Click, ""));
   EXPECT_EQ(player->state(), PlaybackState::Stopped);
+}
+
+TEST_F(MediaWidgetTest, UnknownPlaybackTimeIsReportedAsUnknown) {
+  auto unloadedPlayer = std::make_shared<MediaPlayer>(true);
+  MediaWidget unloaded("Monospace 10", unloadedPlayer);
+  gleditor::a11y::Tree tree;
+  gleditor::a11y::Builder builder(tree, 1);
+
+  unloaded.describe(builder);
+
+  const auto seekNode = std::ranges::find(tree.nodes, "Playback Position",
+                                          &gleditor::a11y::Node::label);
+  ASSERT_NE(seekNode, tree.nodes.end());
+  EXPECT_EQ(seekNode->value, "unknown of unknown");
 }
 
 TEST_F(MediaWidgetTest, EachCardOwnsItsPickingAndAccessibilityRange) {
@@ -373,15 +395,18 @@ TEST_F(MediaWidgetTest, AccessibleSeekUsesTheSharedScrubberClamp) {
   const auto seek = widget->tagBase() + MediaWidget::tagSeekBase;
   EXPECT_TRUE(
       widget->performAction(seek, gleditor::a11y::Action::SetValue, "0.25"));
-  EXPECT_FLOAT_EQ(player->progressFraction(), 0.25F);
+  ASSERT_TRUE(player->progressFraction());
+  EXPECT_FLOAT_EQ(player->progressFraction().value(), 0.25F);
   EXPECT_TRUE(
       widget->performAction(seek, gleditor::a11y::Action::SetValue, "2.0"));
-  EXPECT_FLOAT_EQ(player->progressFraction(), 1.0F);
+  ASSERT_TRUE(player->progressFraction());
+  EXPECT_FLOAT_EQ(player->progressFraction().value(), 1.0F);
   EXPECT_FALSE(widget->performAction(seek, gleditor::a11y::Action::SetValue,
                                      "not a number"));
   EXPECT_TRUE(widget->performAction(gleditor::a11y::Ids::of(16, seek),
                                     gleditor::a11y::Action::SetValue, "0.5"));
-  EXPECT_FLOAT_EQ(player->progressFraction(), 0.5F);
+  ASSERT_TRUE(player->progressFraction());
+  EXPECT_FLOAT_EQ(player->progressFraction().value(), 0.5F);
 }
 
 TEST_F(MediaWidgetTest, MoreThanSixteenCardsKeepCapturedPickingIdentities) {
@@ -434,15 +459,16 @@ TEST_F(MediaWidgetTest, CapturedCardMeaningSurvivesPresentationChanges) {
   ASSERT_EQ(captured.widgetOverlays.size(), 1U);
   render::PickingResult pick{
       .requestId = 1,
-      .tag = render::unpackPickingTag(captured.widgetOverlays[0].identity,
-                                      MediaWidget::tagSeekBase + 750U, 0)};
+      .tag       = render::unpackPickingTag(captured.widgetOverlays[0].identity,
+                                            MediaWidget::tagSeekBase + 750U, 0)};
   pick.overlayWidgetId = render::resolveOverlayWidget(captured, pick.tag);
   widget->setTitle("Changed after the click was requested");
   context.metrics.fontScale = 2.0F;
   state->beginPickScene();
   widget->drawFrame(context);
   EXPECT_TRUE(widget->picked(pick, *state));
-  EXPECT_FLOAT_EQ(player->progressFraction(), 0.75F);
+  ASSERT_TRUE(player->progressFraction());
+  EXPECT_FLOAT_EQ(player->progressFraction().value(), 0.75F);
   pick.overlayWidgetId.reset();
   EXPECT_FALSE(widget->picked(pick, *state));
 }
@@ -460,7 +486,7 @@ TEST_F(MediaWidgetTest, normalCardDrawsItsTitleAndPlaybackBadge) {
   ON_CALL(*device, updateBuffer)
       .WillByDefault([&](render::BufferHandle handle, std::size_t offset,
                          std::span<const std::byte> bytes) {
-        auto &storage = buffers[handle.id];
+        auto &storage = buffers[*handle.id];
         storage.resize(std::max(storage.size(), offset + bytes.size()));
         std::memcpy(storage.data() + offset, bytes.data(), bytes.size());
       });
@@ -469,7 +495,7 @@ TEST_F(MediaWidgetTest, normalCardDrawsItsTitleAndPlaybackBadge) {
       .WillByDefault([&](const render::DrawUniforms &,
                          render::BufferHandle handle, std::size_t offset,
                          std::uint32_t count) {
-        const auto &storage = buffers.at(handle.id);
+        const auto &storage = buffers.at(*handle.id);
         for (std::uint32_t i = 0; i < count; ++i) {
           Doc::VBORow row{};
           std::memcpy(&row, storage.data() + offset + i * sizeof(row),

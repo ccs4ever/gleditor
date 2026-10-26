@@ -1,0 +1,11 @@
+event Enable
+event Work
+
+agent Switch {
+  var enabled: Bool := false
+  var count: Int := 0
+  on Enable { enabled := true }
+  on Work {
+    if enabled == true then count := count + 1
+  }
+}

@@ -10,9 +10,17 @@
 #include <map>
 #include <optional>
 #include <set>
+#include <stdexcept>
 #include <unistd.h>
 
 namespace {
+std::uint32_t requiredId(const render::BufferHandle handle) {
+  if (!handle.id) {
+    throw std::logic_error("mock received an absent buffer handle");
+  }
+  return *handle.id;
+}
+
 class IsolatedPouchConfig {
 public:
   IsolatedPouchConfig() {
@@ -59,7 +67,7 @@ public:
         });
     ON_CALL(*this, resizeBuffer)
         .WillByDefault([this](render::BufferHandle handle, std::size_t size) {
-          buffers[handle.id].resize(size);
+          buffers[requiredId(handle)].resize(size);
           return handle;
         });
     ON_CALL(*this, createPipeline)
@@ -68,7 +76,7 @@ public:
         .WillByDefault([this](render::BufferHandle buffer, std::size_t offset,
                               std::span<const std::byte> data) {
           ++uploads;
-          auto &storage = buffers[buffer.id];
+          auto &storage = buffers[requiredId(buffer)];
           storage.resize(std::max(storage.size(), offset + data.size()));
           std::memcpy(storage.data() + offset, data.data(), data.size());
         });
@@ -77,7 +85,7 @@ public:
                               render::BufferHandle buffer, std::size_t offset,
                               std::uint32_t count) {
           if (count) ++draws;
-          const auto &storage = buffers.at(buffer.id);
+          const auto &storage = buffers.at(requiredId(buffer));
           for (std::uint32_t index = 0; index < count; ++index) {
             Doc::VBORow row{};
             std::memcpy(&row, storage.data() + offset + index * sizeof(row),
@@ -129,7 +137,7 @@ TEST(PouchDrawerInkTest,
     for (const auto &box : layout->boxes) {
       EXPECT_TRUE(layoutIds.insert(box.id).second) << box.id;
       if (!box.parentId) continue;
-      const auto *parent = layout->find(box.parentId);
+      const auto *parent = layout->find(*box.parentId);
       ASSERT_NE(parent, nullptr);
       EXPECT_GE(box.rect.left, parent->contentRect.left - .01F);
       EXPECT_GE(box.rect.bottom, parent->contentRect.bottom - .01F);
@@ -194,11 +202,12 @@ TEST(PouchDrawerInkTest,
       for (const auto &node : tree.nodes) {
         const auto *box = layout->find(static_cast<std::uint32_t>(node.id));
         if (!box) continue;
-        diagnostic += "\n" + node.label + " id=" + std::to_string(box->id) +
-                      " parent=" + std::to_string(box->parentId) +
-                      " rect=" + std::to_string(box->rect.bottom) + "," +
-                      std::to_string(box->rect.height) +
-                      " content=" + std::to_string(box->contentRect.height);
+        diagnostic +=
+            "\n" + node.label + " id=" + std::to_string(box->id) + " parent=" +
+            (box->parentId ? std::to_string(*box->parentId) : "none") +
+            " rect=" + std::to_string(box->rect.bottom) + "," +
+            std::to_string(box->rect.height) +
+            " content=" + std::to_string(box->contentRect.height);
       }
     }
     EXPECT_TRUE(preview) << diagnostic;

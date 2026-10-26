@@ -249,10 +249,14 @@ int main(const int argc, char **argv) {
     if (publish) {
       keys = xanadu::createMutableKeys();
     }
+    const auto listenPort = peer.listenPort();
+    if (!listenPort) {
+      throw std::runtime_error("swarm listener has no bound port");
+    }
 
     // Flushed, because the caller is reading this to know where to connect and
     // will otherwise wait for a buffer that never fills.
-    std::cout << "port " << peer.listenPort() << "\n"
+    std::cout << "port " << *listenPort << "\n"
               << "hash " << hash.hex() << "\n";
     if (publish) {
       std::cout << "pubkey " << keys.publicKey.hex() << "\n";

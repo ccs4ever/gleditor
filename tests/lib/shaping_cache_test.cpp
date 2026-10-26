@@ -124,6 +124,20 @@ TEST(CoreShapingCacheTest, ChangedLayoutProducesItsOwnPage) {
   EXPECT_EQ(cache.stats().misses, 9U);
 }
 
+TEST(CoreShapingCacheTest, AbsentAndZeroExtentsHaveDistinctEntries) {
+  ShapingCache cache;
+  const auto font = FontManager::instance().getFont("Sans 16");
+  LayoutOptions unbounded{.maxWidthPx  = std::nullopt,
+                          .maxHeightPx = std::nullopt};
+  const auto &natural = cache.page("content", font, unbounded);
+  ASSERT_FALSE(natural.glyphs.empty());
+  LayoutOptions zero{.maxWidthPx = 0.0F, .maxHeightPx = std::nullopt};
+  const auto &empty = cache.page("content", font, zero);
+  EXPECT_TRUE(empty.glyphs.empty());
+  EXPECT_EQ(cache.stats().misses, 2U);
+  EXPECT_EQ(cache.stats().entries, 2U);
+}
+
 TEST(CoreShapingCacheTest, FittingConstraintsRemainIndependent) {
   ShapingCache cache;
   const auto font        = FontManager::instance().getFont("Sans 16");
@@ -134,6 +148,7 @@ TEST(CoreShapingCacheTest, FittingConstraintsRemainIndependent) {
     const auto direct  = fit(text, font, constraints);
     expectSamePage(cached.shaping, direct.shaping);
     EXPECT_EQ(cached.truncated, direct.truncated);
+    EXPECT_EQ(cached.lines, direct.lines);
     EXPECT_EQ(cached.visibleBytes, direct.visibleBytes);
   };
   check();
@@ -153,8 +168,12 @@ TEST(CoreShapingCacheTest, FittingConstraintsRemainIndependent) {
   check();
   constraints.overflow = Overflow::Clip;
   check();
-  EXPECT_EQ(cache.stats().misses, 9U);
-  EXPECT_EQ(cache.stats().entries, 9U);
+  constraints.maxLines = std::nullopt;
+  check();
+  constraints.maxLines = 0;
+  check();
+  EXPECT_EQ(cache.stats().misses, 11U);
+  EXPECT_EQ(cache.stats().entries, 11U);
 }
 
 TEST(CoreShapingCacheTest, ChangedMediaReservationIsNotReused) {

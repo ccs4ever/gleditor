@@ -130,9 +130,9 @@ decodeValue(const std::string_view bytes, const ValueLimits limits) {
     if (used != epoch.size() ||
         std::to_string(value.origin.arenaEpoch) != epoch)
       return std::unexpected("mesh value: invalid arena epoch");
-    value.parent = xanadu::MicroversionId::parse(field("parent"));
-    value.root   = {.scroll   = field("scroll"),
-                    .produces = xanadu::MicroversionId::parse(field("root"))};
+    value.parent           = xanadu::MicroversionId::parse(field("parent"));
+    value.root             = {.scroll   = field("scroll"),
+                              .produces = xanadu::MicroversionId::parse(field("root"))};
     const auto publication = xanadu::decodePublication(field("publication"));
     if (!publication)
       return std::unexpected(
@@ -175,8 +175,12 @@ static std::expected<ValueSeed, std::string> publishValueImpl(
       return std::unexpected(provenance ? "mesh value: empty signed provenance"
                                         : provenance.error());
     ValueSeed seed;
-    const auto priorPrimedia = store.userPermascroll().currentScroll();
-    const auto allBytes      = store.primedia().bytes();
+    const auto priorPrimedia    = store.userPermascroll().currentScroll();
+    const auto priorPrimediaKey = xanadu::scrollKey(priorPrimedia);
+    if (!priorPrimediaKey)
+      return std::unexpected(
+          "mesh value: author's permascroll has no identity");
+    const auto allBytes = store.primedia().bytes();
     if (priorPrimedia.length() > allBytes.size())
       return std::unexpected(
           "mesh value: invalid author's primedia seal range");
@@ -185,9 +189,8 @@ static std::expected<ValueSeed, std::string> publishValueImpl(
       if (!primediaSigner)
         return std::unexpected(
             "mesh value: separate primedia provenance signer required");
-      const auto signedPrimedia =
-          primediaSigner(store, unsealed, priorPrimedia.length(),
-                         xanadu::scrollKey(priorPrimedia));
+      const auto signedPrimedia = primediaSigner(
+          store, unsealed, priorPrimedia.length(), *priorPrimediaKey);
       if (!signedPrimedia || signedPrimedia->tsv.empty() ||
           signedPrimedia->signature.empty())
         return std::unexpected(signedPrimedia
@@ -195,10 +198,9 @@ static std::expected<ValueSeed, std::string> publishValueImpl(
                                    : signedPrimedia.error());
       const auto record = xanadu::parseProvenance(signedPrimedia->tsv);
       if ((!record && !allowPresignedFixture) ||
-          (record &&
-           (record->contentLength != unsealed.size() ||
-            record->contentDigest != xanadu::sha256Hex(unsealed) ||
-            record->permascroll != xanadu::scrollKey(priorPrimedia)))) {
+          (record && (record->contentLength != unsealed.size() ||
+                      record->contentDigest != xanadu::sha256Hex(unsealed) ||
+                      record->permascroll != *priorPrimediaKey))) {
         return std::unexpected(
             "mesh value: primedia provenance does not cover sealed bytes");
       }
@@ -228,13 +230,21 @@ static std::expected<ValueSeed, std::string> publishValueImpl(
     seed.value.job          = std::move(job);
     seed.value.continuation = std::move(continuation);
     seed.value.parent       = parent;
-    seed.value.root =
+    const auto root =
         xanadu::opRefOf(store, promoted->cells.front(), seed.history.scroll);
+    if (!root)
+      return std::unexpected(
+          "mesh value: promoted root has no global identity");
+    seed.value.root        = *root;
     seed.value.publication = xanadu::publish(
         store, promoted->version, keys, "vortex-value", "Vortex value", 1, 0,
         &primedia, {*seed.history.opsSegment});
-    seed.value.publication.scrolls.insert_or_assign(
-        xanadu::scrollKey(seed.history.scroll), seed.history.scroll);
+    const auto historyKey = xanadu::scrollKey(seed.history.scroll);
+    if (!historyKey)
+      return std::unexpected(
+          "mesh value: sealed history has no global identity");
+    seed.value.publication.scrolls.insert_or_assign(*historyKey,
+                                                    seed.history.scroll);
     // A foreign operation may have no text spans quoting its source history.
     // Its deployment descriptor must still survive an independently seeded
     // result, even when the optional label is empty.
@@ -248,7 +258,8 @@ static std::expected<ValueSeed, std::string> publishValueImpl(
         return std::unexpected("mesh value: malformed foreign handle history");
       const auto descriptor =
           std::ranges::find_if(store.scrolls(), [&](const auto &scroll) {
-            return xanadu::scrollKey(scroll) == target->scroll;
+            const auto identity = xanadu::scrollKey(scroll);
+            return identity && *identity == target->scroll;
           });
       if (descriptor == store.scrolls().end())
         return std::unexpected(
@@ -417,10 +428,10 @@ importValue(const ReceivedValue &value, xanadu::Store &destination,
             "mesh value: operation handle history unavailable");
       const auto global =
           xanadu::opRefOf(*value.store, *target, history->second);
-      if (global.empty() || !xanadu::resolveForeignOperation(
-                                global, *value.store, history->second))
+      if (!global || !xanadu::resolveForeignOperation(*global, *value.store,
+                                                      history->second))
         return std::unexpected("mesh value: operation handle target absent");
-      foreignHandles.emplace(ref, global);
+      foreignHandles.emplace(ref, *global);
     } else if (source.valueKindOf(ref) == xanadu::ValueKind::ForeignOpHandle) {
       const auto target = xanadu::foreignOpTarget(source, ref, *value.store);
       if (!target)

@@ -54,9 +54,9 @@ enum class PlaybackState : std::uint8_t {
  * fragment is at least in roughly the right place rather than not
  * constrained at all.
  *
- * Returns an empty range (duration() <= 0) when @p containerLength or
- * @p durationSeconds is not yet known, which a caller polling for it -- a
- * duration LibVLC has not finished parsing yet -- can use as "not ready".
+ * Returns an empty range when @p containerLength or @p durationSeconds is
+ * nonpositive. Callers represent an unknown duration separately and should
+ * defer until they have one.
  */
 [[nodiscard]] TimeRange fragmentTimeRange(const ByteRange &fragment,
                                           std::uint64_t containerLength,
@@ -86,6 +86,7 @@ public:
     Stream,
   };
 
+  /// Throws std::ios_base::failure if the file cannot be opened or sized.
   static std::shared_ptr<MediaResource> fromFile(std::string filePath);
   static std::shared_ptr<MediaResource> fromLocation(std::string mrl);
   static std::shared_ptr<MediaResource> fromStream(MediaStreamPtr stream,
@@ -176,9 +177,12 @@ public:
   [[nodiscard]] float playbackRate() const;
 
   [[nodiscard]] PlaybackState state() const;
-  [[nodiscard]] float positionSeconds() const;
-  [[nodiscard]] float durationSeconds() const;
-  [[nodiscard]] float progressFraction() const;
+  /// Current position, absent until the active backend reports it.
+  [[nodiscard]] std::optional<float> positionSeconds() const;
+  /// Duration, absent until the active backend reports container metadata.
+  [[nodiscard]] std::optional<float> durationSeconds() const;
+  /// Progress within the active range or whole resource; absent when unknown.
+  [[nodiscard]] std::optional<float> progressFraction() const;
 
   void setTimeRange(float startSeconds, float endSeconds);
   void setByteRange(std::uint64_t startByte, std::uint64_t length);

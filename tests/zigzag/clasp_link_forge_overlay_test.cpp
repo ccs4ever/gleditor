@@ -54,7 +54,7 @@ TEST(ClaspLinkForgeTest,
         for (const auto &box : scene->layout.boxes) {
           contained(box.rect, scene->layout.bounds);
           if (box.parentId) {
-            const auto *parent = scene->layout.find(box.parentId);
+            const auto *parent = scene->layout.find(*box.parentId);
             ASSERT_NE(parent, nullptr);
             contained(box.rect, parent->contentRect);
           }

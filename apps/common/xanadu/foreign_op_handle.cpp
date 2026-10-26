@@ -134,7 +134,8 @@ resolveForeignOperation(const GlobalOpRef &target, const Store &history,
                         const Scroll &sealedAs) {
   if (!valid(target))
     return std::unexpected(ForeignOpHandleError::InvalidDescriptor);
-  if (scrollKey(sealedAs) != target.scroll) {
+  const auto key = scrollKey(sealedAs);
+  if (!key || *key != target.scroll) {
     return std::unexpected(ForeignOpHandleError::UnavailableHistory);
   }
   const auto index = localiseOpRef(history, target, sealedAs);
@@ -144,9 +145,10 @@ resolveForeignOperation(const GlobalOpRef &target, const Store &history,
   return ResolvedForeignOperation{history, *index};
 }
 
-MicroversionId Store::makeForeignOpHandle(const MicroversionId &parent,
-                                          const GlobalOpRef &target,
-                                          const MicroversionId &context) {
+MicroversionId
+Store::makeForeignOpHandle(const MicroversionId &parent,
+                           const GlobalOpRef &target,
+                           std::optional<MicroversionId> context) {
   const auto descriptor = writeForeignOpHandle(target);
   Op op;
   op.kind    = OpKind::Structure;
@@ -154,9 +156,9 @@ MicroversionId Store::makeForeignOpHandle(const MicroversionId &parent,
                               ValueKind::ForeignOpHandle);
   op.span    = userPermascroll_->append(descriptor);
   op.value   = 0;
-  op.context = context;
-  if (op.context.isZero() && sliceBirth_ != 0)
-    op.context = opsSpool.idOf(sliceBirth_);
+  op.context = context.value_or(MicroversionId{});
+  if (!context && sliceBirth_.has_value())
+    op.context = opsSpool.idOf(*sliceBirth_).value();
   return apply(parent, op);
 }
 } // namespace xanadu

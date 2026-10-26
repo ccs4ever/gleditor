@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -87,7 +88,9 @@ public:
   [[nodiscard]] virtual bool advertise(const Publication &, const InfoHash &) {
     return true;
   }
-  [[nodiscard]] virtual std::uint16_t listenPort() const { return 0; }
+  [[nodiscard]] virtual std::optional<std::uint16_t> listenPort() const {
+    return std::nullopt;
+  }
 };
 
 /// The verification callback is a boundary for future Oracle enrollment.
@@ -115,7 +118,7 @@ public:
   [[nodiscard]] std::vector<PublicationJobStatus> statuses() const;
   [[nodiscard]] bool waitFor(std::string_view id, PublicationPhase phase,
                              std::chrono::milliseconds timeout) const;
-  [[nodiscard]] std::uint16_t listenPort() const;
+  [[nodiscard]] std::optional<std::uint16_t> listenPort() const;
 
 private:
   struct Impl;

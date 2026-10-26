@@ -90,7 +90,8 @@ FontFace::FontFace(FT_Library ftLib, const std::string &fontPath,
   }
 
   // FreeType char size in 26.6 fractional points
-  const auto charSize = static_cast<FT_F26Dot6>(std::round(pointSize * 64.0));
+  const auto charSize =
+      static_cast<FT_F26Dot6>(std::round(pointSize * kFixed26Dot6Scale));
   if (FT_Set_Char_Size(face_, 0, charSize, dpi, dpi) != 0) {
     FT_Done_Face(face_);
     throw std::runtime_error(

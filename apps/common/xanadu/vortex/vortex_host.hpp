@@ -34,9 +34,9 @@
 
 namespace zigzag::vortex {
 
-using AppActionDelegate =
-    std::function<bool(std::string_view action, CellRef focusCell,
-                       ViewAxisBinding &axes, CellRef &newFocusOut)>;
+using AppActionDelegate = std::function<bool(
+    std::string_view action, std::optional<CellRef> focusCell,
+    ViewAxisBinding &axes, std::optional<CellRef> &newFocusOut)>;
 
 struct VortexHostConfig {
   std::size_t schedulerCycleBudget{1000};
@@ -159,7 +159,9 @@ public:
   stepScheduler(std::optional<std::size_t> cycleBudget = std::nullopt);
 
   /// Daemon cursor for background reachability GC.
-  [[nodiscard]] CellRef gcCursor() const noexcept { return gcCursor_; }
+  [[nodiscard]] std::optional<CellRef> gcCursor() const noexcept {
+    return gcCursor_;
+  }
 
   /// Triggers an immediate topological GC sweep and compaction pass.
   std::size_t triggerGarbageCollection();
@@ -170,17 +172,20 @@ public:
    *        routines or registered VQL macros.
    *
    * @param actionName The action identifier (e.g. "step-x-pos", "insert-cell").
-   * @param focusCell The currently focused cell in the visualizer.
+   * @param focusCell The currently focused cell, if the visualizer has one.
    * @param axes The active X, Y, Z view axis bindings.
    * @param newFocusOut Out parameter populated with updated focus cell if
    * moved.
    * @return true if the action was handled by a Vortex routine or macro.
    */
   bool dispatchAction(std::string_view actionName);
-  bool dispatchAction(std::string_view actionName, CellRef focusCell,
-                      ViewAxisBinding &axes, CellRef &newFocusOut);
-  bool dispatchAction(std::string_view actionName, CellRef focusCell,
-                      const ViewAxisBinding &axes, CellRef &newFocusOut);
+  bool dispatchAction(std::string_view actionName,
+                      std::optional<CellRef> focusCell, ViewAxisBinding &axes,
+                      std::optional<CellRef> &newFocusOut);
+  bool dispatchAction(std::string_view actionName,
+                      std::optional<CellRef> focusCell,
+                      const ViewAxisBinding &axes,
+                      std::optional<CellRef> &newFocusOut);
   void setView(ViewAxisBinding &axes, std::string_view dimX,
                std::string_view dimY, std::string_view dimZ);
 
@@ -206,7 +211,8 @@ public:
    * @brief Clones a symbol or opcode from d.stdlib into targetCell along
    * +d.spin or a specified dimension.
    */
-  CellRef cloneSymbolToChain(std::string_view symbolPath, CellRef targetCell);
+  std::optional<CellRef> cloneSymbolToChain(std::string_view symbolPath,
+                                            CellRef targetCell);
 
   // -- Stage 2: In-App VQL Translation & Chain Attachment ---------------------
   /**
@@ -260,18 +266,18 @@ public:
 
   /**
    * @brief Evaluates a VQL path relative to currentFocus (or ##), returning the
-   * destination cell if reached.
+   * destination cell if reached. A missing focus leaves `##` unbound.
    */
   std::optional<CellRef> navigatePath(std::string_view pathExpr,
-                                      CellRef currentFocus);
+                                      std::optional<CellRef> currentFocus);
 
   /**
    * @brief Runs an arbitrary VQL script or weave block, promoting created cells
    * into store if provided.
    */
   ScriptResult executeScript(std::string_view script,
-                             CellRef contextCell  = noCell,
-                             xanadu::Store *store = nullptr);
+                             std::optional<CellRef> contextCell = std::nullopt,
+                             xanadu::Store *store               = nullptr);
 
   /**
    * @brief Evaluates an arbitrary VPL expression and formats the array view.
@@ -348,7 +354,7 @@ private:
   AppActionDelegate appActionDelegate_;
   xanadu::Store *boundStore_{nullptr};
   VortexHostConfig config_{};
-  CellRef gcCursor_{noCell};
+  std::optional<CellRef> gcCursor_;
   std::size_t frameCount_{0};
 
   // Stage 2: the host-owned data-parallel worker pool, (re)built from

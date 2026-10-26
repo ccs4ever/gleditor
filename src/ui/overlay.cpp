@@ -328,10 +328,10 @@ bool ScreenOverlay::pointerEvent(const PointerEvent &event) {
     }
     if (activateId) {
       const auto *box = scene_->layout.find(activateId);
-      fraction = box && box->contentRect.width > 0
-                     ? (static_cast<double>(event.x) - box->contentRect.left) /
+      fraction        = box && box->contentRect.width > 0
+                            ? (static_cast<double>(event.x) - box->contentRect.left) /
                            box->contentRect.width
-                     : 0;
+                            : 0;
     }
   }
   if (scrollId) return scrollList(scrollId, scroll);
@@ -493,7 +493,7 @@ bool ScreenOverlay::picked(const render::PickingResult &pick, RenderState &) {
   if (pick.tag.kind != render::tagKindOverlay ||
       pick.tag.pageIndex != identity_ || pick.tag.docIndex != 0)
     return false;
-  if (pick.requestId != 0 && !pick.overlayWidgetId) return true;
+  if (pick.requestId && !pick.overlayWidgetId) return true;
   const auto scene = snapshot();
   if (!scene || !visible()) return false;
   const auto id = pick.overlayWidgetId
@@ -501,7 +501,7 @@ bool ScreenOverlay::picked(const render::PickingResult &pick, RenderState &) {
                       : scene->resolvePickingId(pick.tag.clusterIndex);
   if (!id) return false;
   const auto *box = scene->layout.find(*id);
-  if (!box) return pick.requestId != 0;
+  if (!box) return pick.requestId.has_value();
   const auto fraction =
       box->contentRect.width > 0
           ? (static_cast<double>(pick.x) - box->contentRect.left) /
@@ -535,7 +535,7 @@ void ScreenOverlay::describe(a11y::Builder &builder) {
     for (const auto &child : scene_->layout.boxes)
       if (child.parentId == visual.id)
         node.children.push_back(builder.id(child.id));
-    if (box->parentId == 0) builder.contribute(builder.id(visual.id));
+    if (!box->parentId) builder.contribute(builder.id(visual.id));
     if (visual.textInput) {
       const auto *widget = findWidget(model_, visual.id);
       const auto *input =

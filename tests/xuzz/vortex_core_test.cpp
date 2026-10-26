@@ -5,6 +5,7 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -68,17 +69,16 @@ TEST(VortexCoreTest, LinkPrimitiveLifecycle) {
   DimRef customDim = h.core.dims().step;
 
   // 1. Read unlinked -> nullopt
-  EXPECT_EQ(h.core.link(a, customDim, DimVector::POS), std::nullopt);
+  EXPECT_EQ(h.core.readLink(a, customDim, DimVector::POS), std::nullopt);
 
   // 2. Allocate (target == -1)
-  auto created =
-      h.core.link(a, customDim, DimVector::POS, static_cast<CellRef>(-1));
+  auto created = h.core.allocateLink(a, customDim, DimVector::POS);
   ASSERT_TRUE(created.has_value());
   EXPECT_NE(*created, noCell);
   EXPECT_NE(*created, a);
 
   // 3. Read linked
-  auto readRes = h.core.link(a, customDim, DimVector::POS);
+  auto readRes = h.core.readLink(a, customDim, DimVector::POS);
   ASSERT_TRUE(readRes.has_value());
   EXPECT_EQ(*readRes, *created);
 
@@ -86,20 +86,20 @@ TEST(VortexCoreTest, LinkPrimitiveLifecycle) {
   EXPECT_EQ(h.arena.linked(*created, customDim, DimVector::NEG), a);
 
   // 4. Isolate (target == 0)
-  auto isolated = h.core.link(a, customDim, DimVector::POS, 0);
+  auto isolated = h.core.isolateLink(a, customDim, DimVector::POS);
   ASSERT_TRUE(isolated.has_value());
   EXPECT_EQ(*isolated, *created);
 
   // Now unlinked
-  EXPECT_EQ(h.core.link(a, customDim, DimVector::POS), std::nullopt);
-  EXPECT_EQ(h.arena.linked(*created, customDim, DimVector::NEG), noCell);
+  EXPECT_EQ(h.core.readLink(a, customDim, DimVector::POS), std::nullopt);
+  EXPECT_EQ(h.arena.linked(*created, customDim, DimVector::NEG), std::nullopt);
 
   // 5. Literal target
   CellRef b    = h.arena.makeCell("nodeB");
-  auto literal = h.core.link(a, customDim, DimVector::POS, b);
+  auto literal = h.core.setLink(a, customDim, DimVector::POS, b);
   ASSERT_TRUE(literal.has_value());
   EXPECT_EQ(*literal, b);
-  EXPECT_EQ(h.core.link(a, customDim, DimVector::POS), b);
+  EXPECT_EQ(h.core.readLink(a, customDim, DimVector::POS), b);
   EXPECT_EQ(h.arena.linked(b, customDim, DimVector::NEG), a);
 }
 
@@ -108,27 +108,87 @@ TEST(VortexCoreTest, ValuePrimitiveReadWholeSliceAndSplice) {
   CellRef c = h.arena.makeCell("The quick brown fox");
 
   // 1. Read Whole Content -> returns cell itself
-  auto whole = h.core.value(c, 0, -1);
+  auto whole = h.core.readValue(c, 0, std::nullopt);
   ASSERT_TRUE(whole.has_value());
   EXPECT_EQ(*whole, c);
   EXPECT_EQ(h.core.render(c), CellValue(std::string("The quick brown fox")));
 
   // 2. Read Slice -> returns ephemeral cell quoting range
-  auto slice = h.core.value(c, 4, 5); // "quick"
+  auto slice = h.core.readValue(c, 4, 5); // "quick"
   ASSERT_TRUE(slice.has_value());
   EXPECT_NE(*slice, c);
   EXPECT_EQ(h.core.render(*slice), CellValue(std::string("quick")));
 
   // Negative indexing: offset -3, length 3 -> "fox"
-  auto foxSlice = h.core.value(c, -3, 3);
+  auto foxSlice = h.core.readValue(c, -3, 3);
   ASSERT_TRUE(foxSlice.has_value());
   EXPECT_EQ(h.core.render(*foxSlice), CellValue(std::string("fox")));
 
   // 3. Splice -> splices in-place on clone master, returns cell
-  auto spliced = h.core.value(c, 10, 5, CellValue(std::string("silver")));
+  auto spliced = h.core.writeValue(c, 10, 5, CellValue(std::string("silver")));
   ASSERT_TRUE(spliced.has_value());
   EXPECT_EQ(*spliced, c);
   EXPECT_EQ(h.core.render(c), CellValue(std::string("The quick silver fox")));
+}
+
+TEST(VortexCoreTest, ValueLengthAbsenceAndZeroAreDistinct) {
+  TestHarness h;
+  const CellRef cell = h.arena.makeCell("abcdef");
+
+  const auto whole = h.core.readValue(cell);
+  ASSERT_TRUE(whole);
+  EXPECT_EQ(*whole, cell);
+
+  const auto empty = h.core.readValue(cell, 2, 0);
+  ASSERT_TRUE(empty);
+  EXPECT_EQ(h.core.render(*empty), CellValue(std::string{}));
+
+  const auto remaining = h.core.readValue(cell, 2, std::nullopt);
+  ASSERT_TRUE(remaining);
+  EXPECT_EQ(h.core.render(*remaining), CellValue(std::string("cdef")));
+
+  ASSERT_TRUE(h.core.writeValue(cell, 2, 0, std::string("X")));
+  EXPECT_EQ(h.core.render(cell), CellValue(std::string("abXcdef")));
+  ASSERT_TRUE(h.core.writeValue(cell, 2, std::nullopt, std::string("Y")));
+  EXPECT_EQ(h.core.render(cell), CellValue(std::string("abY")));
+}
+
+TEST(VortexCoreTest, GetDistinguishesMissingCellFromFalseyValues) {
+  TestHarness h;
+  const auto falseCell = h.arena.makeScalarCell(false);
+  const auto emptyCell = h.arena.makeCell("");
+  const auto zeroCell  = h.arena.makeScalarCell(static_cast<std::int64_t>(0));
+
+  EXPECT_EQ(h.core.get(noCell), std::nullopt);
+
+  const auto falseValue = h.core.get(falseCell);
+  ASSERT_TRUE(falseValue);
+  ASSERT_TRUE(std::holds_alternative<bool>(*falseValue));
+  EXPECT_FALSE(std::get<bool>(*falseValue));
+
+  const auto emptyValue = h.core.get(emptyCell);
+  ASSERT_TRUE(emptyValue);
+  ASSERT_TRUE(std::holds_alternative<std::string>(*emptyValue));
+  EXPECT_TRUE(std::get<std::string>(*emptyValue).empty());
+
+  const auto zeroValue = h.core.get(zeroCell);
+  ASSERT_TRUE(zeroValue);
+  ASSERT_TRUE(std::holds_alternative<std::int64_t>(*zeroValue));
+  EXPECT_EQ(std::get<std::int64_t>(*zeroValue), 0);
+}
+
+TEST(VortexCoreTest, RenderDistinguishesMissingCellFromFalseyValues) {
+  TestHarness h;
+  const auto falseCell = h.arena.makeScalarCell(false);
+  const auto emptyCell = h.arena.makeCell("");
+  const auto zeroCell  = h.arena.makeScalarCell(std::int64_t{0});
+
+  EXPECT_EQ(h.core.render(noCell), std::nullopt);
+  EXPECT_EQ(h.core.render(falseCell), std::optional<CellValue>{false});
+  EXPECT_EQ(h.core.render(emptyCell), std::optional<CellValue>{std::string{}});
+  EXPECT_EQ(h.core.render(zeroCell), std::optional<CellValue>{std::int64_t{0}});
+  EXPECT_EQ(h.core.isTruthy(noCell), std::nullopt);
+  EXPECT_EQ(h.core.isTruthy(falseCell), std::optional<bool>{false});
 }
 
 TEST(VortexCoreTest, StructuralIdentitySharingViaDClone) {
@@ -137,10 +197,10 @@ TEST(VortexCoreTest, StructuralIdentitySharingViaDClone) {
 
   // Mint clone posward
   CellRef cloneA = h.arena.makeCell();
-  h.core.link(master, h.core.dims().clone, DimVector::POS, cloneA);
+  h.core.setLink(master, h.core.dims().clone, DimVector::POS, cloneA);
 
   CellRef cloneB = h.arena.makeCell();
-  h.core.link(cloneA, h.core.dims().clone, DimVector::POS, cloneB);
+  h.core.setLink(cloneA, h.core.dims().clone, DimVector::POS, cloneB);
 
   // All resolve to master's content
   EXPECT_EQ(h.core.render(master), CellValue(std::string("original text")));
@@ -148,14 +208,14 @@ TEST(VortexCoreTest, StructuralIdentitySharingViaDClone) {
   EXPECT_EQ(h.core.render(cloneB), CellValue(std::string("original text")));
 
   // Modifying via cloneA updates master and cloneB
-  h.core.value(cloneA, 0, 8, CellValue(std::string("updated")));
+  h.core.writeValue(cloneA, 0, 8, CellValue(std::string("updated")));
   EXPECT_EQ(h.core.render(master), CellValue(std::string("updated text")));
   EXPECT_EQ(h.core.render(cloneA), CellValue(std::string("updated text")));
   EXPECT_EQ(h.core.render(cloneB), CellValue(std::string("updated text")));
 
   // Linking a new cell negward of master makes it the new head
   CellRef newHead = h.arena.makeCell("overriding authority");
-  h.core.link(master, h.core.dims().clone, DimVector::NEG, newHead);
+  h.core.setLink(master, h.core.dims().clone, DimVector::NEG, newHead);
 
   // Instantly all cells resolve through the new head
   EXPECT_EQ(h.core.render(newHead),
@@ -321,7 +381,7 @@ TEST(VortexCoreTest, VortexNativeMemoizationLifecycle) {
   EXPECT_EQ((*cached)[0], CellValue(static_cast<std::int64_t>(49)));
 
   // Change outTarget to 0 to verify Cache Hit overwrites it from cache
-  h.core.value(outTarget, 0, -1, static_cast<std::int64_t>(0));
+  h.core.writeValue(outTarget, 0, std::nullopt, static_cast<std::int64_t>(0));
   EXPECT_EQ(h.core.render(outTarget), CellValue(static_cast<std::int64_t>(0)));
 
   // Second execution: Cache Hit!
@@ -421,6 +481,198 @@ TEST(VortexCoreTest, CursorAssociativeScopes) {
   auto res       = h.vm.run(cursor, 5);
   EXPECT_TRUE(res.success);
   EXPECT_EQ(h.core.render(outCell), CellValue(static_cast<std::int64_t>(42)));
+}
+
+} // namespace
+
+namespace {
+
+struct NumericExecution {
+  CellRef opcode;
+  std::vector<CellRef> outputs;
+  ExecutionResult result;
+};
+
+NumericExecution executeNumeric(TestHarness &h, OpcodeKind kind,
+                                const std::vector<CellValue> &inputs) {
+  NumericExecution execution{h.vm.mintOpcode(kind), {}, {}};
+  for (const auto &input : inputs) {
+    const auto cell = h.arena.makeCell();
+    h.core.writeValue(cell, 0, std::nullopt, input);
+    h.core.bindInput(execution.opcode, cell);
+  }
+  const auto outputCount = kind == OpcodeKind::DivMod ? 2 : 1;
+  for (int i = 0; i < outputCount; ++i) {
+    const auto output = h.arena.makeScalarCell(std::int64_t{123});
+    h.core.bindOutput(execution.opcode, output);
+    execution.outputs.push_back(output);
+  }
+  execution.result = h.vm.step(h.vm.spawnCursor(execution.opcode));
+  return execution;
+}
+
+TEST(VortexCoreTest, Int64RelationsPreserveAdjacentLargeValuesAndExtremes) {
+  constexpr auto min = std::numeric_limits<std::int64_t>::min();
+  constexpr auto max = std::numeric_limits<std::int64_t>::max();
+  const std::vector<std::pair<std::int64_t, std::int64_t>> ordered{
+      {9007199254740992LL, 9007199254740993LL},
+      {min, min + 1},
+      {max - 1, max},
+      {min, max}};
+  for (const auto &[left, right] : ordered) {
+    for (const auto kind :
+         {OpcodeKind::Lt, OpcodeKind::Lte, OpcodeKind::Gt, OpcodeKind::Gte}) {
+      for (const bool reverse : {false, true}) {
+        SCOPED_TRACE(::testing::Message()
+                     << static_cast<int>(kind) << ": " << left << ", " << right
+                     << ", reversed=" << reverse);
+        TestHarness h;
+        auto execution = executeNumeric(
+            h, kind, {reverse ? right : left, reverse ? left : right});
+        ASSERT_TRUE(execution.result.success);
+        const bool less = kind == OpcodeKind::Lt || kind == OpcodeKind::Lte;
+        EXPECT_EQ(h.core.render(execution.outputs[0]),
+                  CellValue{less != reverse});
+      }
+      TestHarness h;
+      auto equal = executeNumeric(h, kind, {left, left});
+      ASSERT_TRUE(equal.result.success);
+      EXPECT_EQ(h.core.render(equal.outputs[0]),
+                CellValue{kind == OpcodeKind::Lte || kind == OpcodeKind::Gte});
+    }
+  }
+}
+
+TEST(VortexCoreTest, SignedArithmeticOverflowRejectsWithoutWritingAnyOutput) {
+  constexpr auto min = std::numeric_limits<std::int64_t>::min();
+  constexpr auto max = std::numeric_limits<std::int64_t>::max();
+  const std::vector<std::pair<OpcodeKind, std::vector<CellValue>>> cases{
+      {OpcodeKind::Add, {max, std::int64_t{1}}},
+      {OpcodeKind::Add, {min, std::int64_t{-1}}},
+      {OpcodeKind::Sub, {min, std::int64_t{1}}},
+      {OpcodeKind::Sub, {max, std::int64_t{-1}}},
+      {OpcodeKind::Sub, {min}},
+      {OpcodeKind::Mul, {max, std::int64_t{2}}},
+      {OpcodeKind::Mul, {min, std::int64_t{-1}}},
+      {OpcodeKind::Neg, {min}},
+      {OpcodeKind::Abs, {min}},
+      {OpcodeKind::Div, {min, std::int64_t{-1}}},
+      {OpcodeKind::Mod, {min, std::int64_t{-1}}},
+      {OpcodeKind::DivMod, {min, std::int64_t{-1}}}};
+  for (const auto &[kind, inputs] : cases) {
+    SCOPED_TRACE(static_cast<int>(kind));
+    TestHarness h;
+    auto execution = executeNumeric(h, kind, inputs);
+    EXPECT_FALSE(execution.result.success);
+    EXPECT_EQ(execution.result.contractViolation,
+              ContractViolationKind::Precondition);
+    EXPECT_EQ(execution.result.failingClause, execution.opcode);
+    EXPECT_THAT(execution.result.errorMessage,
+                ::testing::HasSubstr("overflow"));
+    for (const auto output : execution.outputs) {
+      EXPECT_EQ(h.core.render(output), CellValue{std::int64_t{123}});
+    }
+  }
+}
+
+TEST(VortexCoreTest, SignedArithmeticSafeEdgesAndUnaryDoubleRemainValid) {
+  constexpr auto min = std::numeric_limits<std::int64_t>::min();
+  constexpr auto max = std::numeric_limits<std::int64_t>::max();
+  struct Case {
+    OpcodeKind kind;
+    std::vector<CellValue> inputs;
+    std::vector<CellValue> outputs;
+  };
+  const std::vector<Case> cases{
+      {OpcodeKind::Add, {max, std::int64_t{0}}, {max}},
+      {OpcodeKind::Add, {min, std::int64_t{0}}, {min}},
+      {OpcodeKind::Sub, {min, min}, {std::int64_t{0}}},
+      {OpcodeKind::Sub, {max, max}, {std::int64_t{0}}},
+      {OpcodeKind::Sub, {min + 1}, {max}},
+      {OpcodeKind::Sub, {1.25}, {-1.25}},
+      {OpcodeKind::Mul, {min, std::int64_t{1}}, {min}},
+      {OpcodeKind::Mul, {max, std::int64_t{1}}, {max}},
+      {OpcodeKind::Neg, {-max}, {max}},
+      {OpcodeKind::Abs, {-max}, {max}},
+      {OpcodeKind::Div, {min, std::int64_t{1}}, {min}},
+      {OpcodeKind::Mod, {min, std::int64_t{1}}, {std::int64_t{0}}},
+      {OpcodeKind::DivMod, {min, std::int64_t{1}}, {min, std::int64_t{0}}},
+      {OpcodeKind::Div, {min, std::int64_t{0}}, {0.0}},
+      {OpcodeKind::Mod, {min, std::int64_t{0}}, {std::int64_t{0}}},
+      {OpcodeKind::DivMod,
+       {min, std::int64_t{0}},
+       {std::int64_t{0}, std::int64_t{0}}},
+      {OpcodeKind::Add, {std::int64_t{2}, 0.5}, {2.5}},
+      {OpcodeKind::Sub, {std::int64_t{2}, 0.5}, {1.5}},
+      {OpcodeKind::Mul, {std::int64_t{2}, 0.5}, {1.0}},
+      {OpcodeKind::Div, {std::int64_t{2}, 0.5}, {4.0}}};
+  for (const auto &[kind, inputs, outputs] : cases) {
+    SCOPED_TRACE(static_cast<int>(kind));
+    TestHarness h;
+    auto execution = executeNumeric(h, kind, inputs);
+    ASSERT_TRUE(execution.result.success) << execution.result.errorMessage;
+    for (std::size_t i = 0; i < outputs.size(); ++i) {
+      EXPECT_EQ(h.core.render(execution.outputs[i]), outputs[i]);
+    }
+  }
+}
+
+TEST(VortexCoreTest, RelationsRetainMixedNumericAndLexicographicSemantics) {
+  struct Case {
+    OpcodeKind kind;
+    CellValue left;
+    CellValue right;
+    bool result;
+  };
+  const std::vector<Case> cases{
+      {OpcodeKind::Lt, std::int64_t{2}, 2.5, true},
+      {OpcodeKind::Lte, 2.0, std::int64_t{2}, true},
+      {OpcodeKind::Gt, 2.5, std::int64_t{2}, true},
+      {OpcodeKind::Gte, std::int64_t{2}, 2.0, true},
+      {OpcodeKind::Lt, std::int64_t{9007199254740993LL}, 9007199254740992.0,
+       false},
+      {OpcodeKind::Lt, std::string{"10"}, std::string{"2"}, true},
+      {OpcodeKind::Lte, std::string{"same"}, std::string{"same"}, true},
+      {OpcodeKind::Gt, std::string{"b"}, std::string{"aa"}, true},
+      {OpcodeKind::Gte, std::string{"same"}, std::string{"same"}, true}};
+  for (const auto &[kind, left, right, expected] : cases) {
+    TestHarness h;
+    auto execution = executeNumeric(h, kind, {left, right});
+    ASSERT_TRUE(execution.result.success);
+    EXPECT_EQ(h.core.render(execution.outputs[0]), CellValue{expected});
+  }
+}
+
+} // namespace
+
+namespace {
+
+TEST(VortexCoreTest,
+     OverflowingArithmeticContractCannotFallBackToTruthyOpcode) {
+  TestHarness h;
+  const auto operation = h.vm.mintOpcode(OpcodeKind::Add);
+  const auto left      = h.arena.makeScalarCell(std::int64_t{1});
+  const auto right     = h.arena.makeScalarCell(std::int64_t{2});
+  const auto output    = h.arena.makeScalarCell(std::int64_t{123});
+  h.core.bindInput(operation, left);
+  h.core.bindInput(operation, right);
+  h.core.bindOutput(operation, output);
+
+  const auto clause =
+      h.vm.mintOpcode(OpcodeKind::Mul, "overflowing precondition");
+  const auto max =
+      h.arena.makeScalarCell(std::numeric_limits<std::int64_t>::max());
+  const auto two = h.arena.makeScalarCell(std::int64_t{2});
+  h.core.bindInput(clause, max);
+  h.core.bindInput(clause, two);
+  h.core.attachPrecondition(operation, clause);
+  ASSERT_TRUE(h.core.isTruthy(clause));
+
+  const auto result = h.vm.step(h.vm.spawnCursor(operation));
+  EXPECT_FALSE(result.success);
+  EXPECT_EQ(result.contractViolation, ContractViolationKind::Precondition);
+  EXPECT_EQ(result.failingClause, clause);
+  EXPECT_EQ(h.core.render(output), CellValue{std::int64_t{123}});
 }
 
 } // namespace

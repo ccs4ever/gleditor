@@ -50,10 +50,12 @@ TEST(MeshEvaluatorTest, VplPreservesArrayTopologyAndAxes) {
   auto dimension = along(arena, axis, "d.mesh.axis");
   auto value     = firstValue(*result);
   ASSERT_EQ(arena.asInt64(value), 1);
-  value = arena.linked(value, dimension, DimVector::POS);
-  ASSERT_EQ(arena.asInt64(value), 2);
-  value = arena.linked(value, dimension, DimVector::POS);
-  ASSERT_EQ(arena.asInt64(value), 3);
+  auto next = arena.linked(value, dimension, DimVector::POS);
+  ASSERT_TRUE(next);
+  ASSERT_EQ(arena.asInt64(*next), 2);
+  next = arena.linked(*next, dimension, DimVector::POS);
+  ASSERT_TRUE(next);
+  ASSERT_EQ(arena.asInt64(*next), 3);
 }
 
 TEST(MeshEvaluatorTest, PrologKeepsSolutionsAfterBacktracking) {
@@ -155,9 +157,11 @@ TEST(MeshEvaluatorTest, VplEnclosuresKeepTheNestedArrayTopology) {
   ASSERT_NE(nested, noCell);
   auto item = along(arena, nested, "d.mesh.value");
   EXPECT_EQ(arena.asInt64(item), 1);
-  auto axis = along(arena, nested, "d.mesh.axes");
-  auto dim  = along(arena, axis, "d.mesh.axis");
-  EXPECT_EQ(arena.asInt64(arena.linked(item, dim, DimVector::POS)), 2);
+  auto axis       = along(arena, nested, "d.mesh.axes");
+  auto dim        = along(arena, axis, "d.mesh.axis");
+  const auto next = arena.linked(item, dim, DimVector::POS);
+  ASSERT_TRUE(next);
+  EXPECT_EQ(arena.asInt64(*next), 2);
 }
 
 TEST(MeshEvaluatorTest, RemoteEffectsAndFunctionsRefuse) {

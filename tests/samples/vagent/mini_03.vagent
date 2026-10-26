@@ -1,0 +1,11 @@
+event Check
+
+agent Match(value: Int) {
+  var first: Int := 0
+  var accepted: Bool := false
+  on Check {
+    let n := (1 | 2)
+    first := n
+    if value == (1 | 2) then accepted := true
+  }
+}

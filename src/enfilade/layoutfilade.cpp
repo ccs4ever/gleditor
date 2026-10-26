@@ -165,13 +165,13 @@ void Layoutfilade::buildTree() {
     const auto idx = crums_.size();
 
     LayoutCrum crum;
-    crum.firstEntry  = static_cast<std::uint32_t>(i);
-    crum.entryCount  = count;
-    crum.firstChild  = 0;
-    crum.childCount  = 0;
-    crum.parentIndex = 0;
-    crum.isLeaf      = true;
-    crum.wid         = computeWidForEntries(&entries_[i], count);
+    crum.firstEntry = static_cast<std::uint32_t>(i);
+    crum.entryCount = count;
+    crum.firstChild = 0;
+    crum.childCount = 0;
+    crum.parentIndex.reset();
+    crum.isLeaf = true;
+    crum.wid    = computeWidForEntries(&entries_[i], count);
 
     crums_.push_back(crum);
     currentLevel.push_back(idx);
@@ -187,12 +187,12 @@ void Layoutfilade::buildTree() {
       const auto firstChild = static_cast<std::uint32_t>(currentLevel[i]);
 
       LayoutCrum parentCrum;
-      parentCrum.firstEntry  = 0;
-      parentCrum.entryCount  = 0;
-      parentCrum.firstChild  = firstChild;
-      parentCrum.childCount  = childCount;
-      parentCrum.parentIndex = 0;
-      parentCrum.isLeaf      = false;
+      parentCrum.firstEntry = 0;
+      parentCrum.entryCount = 0;
+      parentCrum.firstChild = firstChild;
+      parentCrum.childCount = childCount;
+      parentCrum.parentIndex.reset();
+      parentCrum.isLeaf = false;
 
       LayoutWid parentWid{};
       for (std::size_t c = 0; c < childCount; ++c) {
@@ -424,8 +424,8 @@ VisibleRange Layoutfilade::visibleRange(const float viewportTopY,
   // Ending offset / coordinates
   range.endByteOffset = hitBottom->startByte + hitBottom->entry.byteLength;
   range.endYPx        = hitBottom->startYPx + hitBottom->entry.heightPx +
-                        (2.0F * hitBottom->entry.marginPx);
-  range.entryCount    = (lastIdx - firstIdx) + 1;
+                 (2.0F * hitBottom->entry.marginPx);
+  range.entryCount = (lastIdx - firstIdx) + 1;
 
   for (std::size_t idx = firstIdx; idx <= lastIdx; ++idx) {
     if (entries_[idx].isMediaBox()) {
@@ -463,12 +463,12 @@ bool Layoutfilade::updateEntry(const std::size_t entryIndex,
   // Recompute leaf and bubble up parent chain
   recomputeWid(leafIdx);
 
-  std::size_t curr = crums_[leafIdx].parentIndex;
-  while (curr != rootIndex_ && curr < crums_.size()) {
-    recomputeWid(curr);
-    curr = crums_[curr].parentIndex;
+  auto parent = crums_[leafIdx].parentIndex;
+  while (parent && *parent < crums_.size()) {
+    const auto index = *parent;
+    recomputeWid(index);
+    parent = crums_[index].parentIndex;
   }
-  recomputeWid(rootIndex_);
 
   return true;
 }

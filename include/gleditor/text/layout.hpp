@@ -6,6 +6,7 @@
 #include <gleditor/layout_box.hpp>
 #include <gleditor/text/font.hpp>
 #include <memory>
+#include <optional>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -16,10 +17,10 @@ namespace gleditor::text {
  * @brief Options controlling multi-line text layout and page slicing.
  */
 struct LayoutOptions {
-  float maxWidthPx{
-      1024.0F}; ///< Maximum width before line wrapping (0 for unbounded)
-  float maxHeightPx{
-      1024.0F}; ///< Maximum height before page slicing (0 for unbounded)
+  std::optional<float> maxWidthPx{
+      1024.0F}; ///< Maximum width before line wrapping; absent is unbounded.
+  std::optional<float> maxHeightPx{
+      1024.0F}; ///< Maximum height before page slicing; absent is unbounded.
   bool singleParagraph{false}; ///< True to treat newlines as spaces (for
                                ///< single-line titles/toasts)
   bool ellipsize{
@@ -78,8 +79,8 @@ public:
    */
   static PageShaping layoutSingleLine(std::string_view text,
                                       const FontFacePtr &font,
-                                      float maxWidthPx = 0.0F,
-                                      bool ellipsize   = false);
+                                      std::optional<float> maxWidthPx = {},
+                                      bool ellipsize                  = false);
   static PageShaping layoutSingleLine(std::string_view text,
                                       const FontFacePtr &font,
                                       const LayoutOptions &options);

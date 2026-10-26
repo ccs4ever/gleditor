@@ -24,6 +24,12 @@
 namespace xanadu {
 namespace {
 
+// Fixed scheduling cadence for refreshing already-published names and
+// retrying the author catalog; publication retry intervals remain Options.
+constexpr auto kNameRefreshInterval      = std::chrono::seconds{5};
+constexpr auto kCatalogRetryInterval     = std::chrono::seconds{2};
+constexpr auto kOutboxWorkerWaitInterval = std::chrono::milliseconds{50};
+
 std::string jobId(const Publication &pub) {
   return pub.publisher.hex() + ":" + toHex(pub.salt) + ":" +
          std::to_string(pub.sequence);
@@ -162,7 +168,7 @@ public:
     source_.publishMutable(keys_, next->first, next->second.first,
                            next->second.second);
     lastRefresh_ = next->first;
-    nextRefresh_ = now + std::chrono::seconds{5};
+    nextRefresh_ = now + kNameRefreshInterval;
   }
   void announcePackage(const LinkPackage &pkg, const InfoHash &hash) override {
     Publication name;
@@ -215,11 +221,13 @@ public:
       for (const auto &[host, port] : nodes_) source_.addDhtNode(host, port);
       source_.publishMutable(keys_, "catalog", catalogHash_,
                              catalog_->sequence);
-      nextCatalogAttempt_ = now + std::chrono::seconds{2};
+      nextCatalogAttempt_ = now + kCatalogRetryInterval;
     }
     return false;
   }
-  std::uint16_t listenPort() const override { return source_.listenPort(); }
+  std::optional<std::uint16_t> listenPort() const override {
+    return source_.listenPort();
+  }
 
 private:
   MutableKeys keys_;
@@ -227,7 +235,7 @@ private:
   std::map<std::string, std::pair<InfoHash, std::int64_t>> announcements_;
   std::string lastRefresh_;
   std::chrono::steady_clock::time_point nextRefresh_{
-      std::chrono::steady_clock::now() + std::chrono::seconds{5}};
+      std::chrono::steady_clock::now() + kNameRefreshInterval};
   std::vector<std::pair<std::string, std::uint16_t>> nodes_;
   std::set<InfoHash> seeded_;
   std::filesystem::path catalogDirectory_;
@@ -278,7 +286,8 @@ reviewPublicationDependencies(const Publication &pub,
           "publication segment does not fit its seed file");
   };
   for (const auto &[name, scroll] : pub.scrolls) {
-    if (name != scrollKey(scroll))
+    const auto identity = scrollKey(scroll);
+    if (!identity || name != *identity)
       throw std::runtime_error(
           "publication scroll key does not match its descriptor");
     for (const auto &segment : scroll.segments) checkSegment(segment);
@@ -396,7 +405,7 @@ struct PublicationOutbox::Impl {
   std::deque<std::string> retries;
   std::map<std::string, Job> jobs;
   std::vector<PublicationJobStatus> visible;
-  std::atomic<std::uint16_t> port{0};
+  std::optional<std::uint16_t> port;
   std::string workerError;
   std::jthread worker;
 
@@ -527,7 +536,11 @@ struct PublicationOutbox::Impl {
     std::string transportError;
     try {
       if (options.makeTransport) transport = options.makeTransport();
-      if (transport) port.store(transport->listenPort());
+      if (transport) {
+        const auto listenPort = transport->listenPort();
+        const std::scoped_lock lock(guard);
+        port = listenPort;
+      }
     } catch (const std::exception &error) {
       transportError = error.what();
     }
@@ -586,7 +599,11 @@ struct PublicationOutbox::Impl {
           }
           if (!transport && options.makeTransport) {
             transport = options.makeTransport();
-            if (transport) port.store(transport->listenPort());
+            if (transport) {
+              const auto listenPort = transport->listenPort();
+              const std::scoped_lock lock(guard);
+              port = listenPort;
+            }
           }
           if (!transport)
             throw std::runtime_error(transportError.empty()
@@ -619,13 +636,18 @@ struct PublicationOutbox::Impl {
         }
       }
       try {
-        if (transport) transport->poll();
+        if (transport) {
+          transport->poll();
+          const auto listenPort = transport->listenPort();
+          const std::scoped_lock lock(guard);
+          port = listenPort;
+        }
       } catch (const std::exception &error) {
         GLEDITOR_LOG_DEBUG("xudu.publication", "Transport poll failed: {}",
                            error.what());
       }
       std::unique_lock lock(guard);
-      changed.wait_for(lock, std::chrono::milliseconds{50}, [&] {
+      changed.wait_for(lock, kOutboxWorkerWaitInterval, [&] {
         return stop.stop_requested() || !submitted.empty() || !retries.empty();
       });
     }
@@ -688,8 +710,9 @@ bool PublicationOutbox::waitFor(std::string_view id, PublicationPhase phase,
     });
   });
 }
-std::uint16_t PublicationOutbox::listenPort() const {
-  return impl_->port.load();
+std::optional<std::uint16_t> PublicationOutbox::listenPort() const {
+  const std::scoped_lock lock(impl_->guard);
+  return impl_->port;
 }
 
 std::function<std::unique_ptr<PublicationTransport>()>

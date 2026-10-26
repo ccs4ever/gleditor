@@ -94,13 +94,13 @@ openFactStore(Compiler &compiler, std::vector<Clause> &clauses,
   const auto manifold   = input.rebuildManifold(version);
   const auto resultDim  = manifold.dimensionNamed("d.result", input);
   std::string sources;
-  if (resultDim) {
-    auto cell = manifold.linked(manifold.home(), *resultDim, DimVector::POS);
-    for (std::size_t remaining = manifold.cellCount();
-         cell != noCell && remaining-- > 0;
-         cell = manifold.linked(cell, *resultDim, DimVector::POS)) {
+  const auto home = manifold.home();
+  if (resultDim && home) {
+    auto cell = manifold.linked(*home, *resultDim, DimVector::POS);
+    for (std::size_t remaining = manifold.cellCount(); cell && remaining-- > 0;
+         cell = manifold.linked(*cell, *resultDim, DimVector::POS)) {
       if (!sources.empty()) sources += ";";
-      sources += sourceName + "#cell=" + std::to_string(cell);
+      sources += sourceName + "#cell=" + std::to_string(*cell);
     }
   }
   std::vector<Clause> parsed;
@@ -150,17 +150,17 @@ void printGrid(Compiler &compiler) {
   std::vector<CellRef> cellsToInspect;
   for (CellRef pred : preds) {
     cellsToInspect.push_back(pred);
-    CellRef cl = compiler.core().arena().linked(
+    auto cl = compiler.core().arena().linked(
         pred, compiler.core().dims().clause, false);
     std::size_t limit = 50;
-    while (cl != noCell && limit-- > 0) {
-      cellsToInspect.push_back(cl);
-      CellRef hd = compiler.core().arena().linked(
-          cl, compiler.core().dims().grab, false);
-      if (hd != noCell) {
-        cellsToInspect.push_back(hd);
+    while (cl && limit-- > 0) {
+      cellsToInspect.push_back(*cl);
+      const auto hd = compiler.core().arena().linked(
+          *cl, compiler.core().dims().grab, false);
+      if (hd) {
+        cellsToInspect.push_back(*hd);
       }
-      cl = compiler.core().arena().linked(cl, compiler.core().dims().clause,
+      cl = compiler.core().arena().linked(*cl, compiler.core().dims().clause,
                                           false);
     }
   }

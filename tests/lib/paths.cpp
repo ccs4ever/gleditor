@@ -118,6 +118,9 @@ TEST(XdgPathsTest, respectsEnvironmentAndFallbacks) {
   const SavedVar data("XDG_DATA_HOME");
   const SavedVar cache("XDG_CACHE_HOME");
   const SavedVar home("HOME");
+#ifndef _WIN32
+  EXPECT_FALSE(gleditor::paths::userHome());
+#endif
 
   setenv("XDG_CONFIG_HOME", "/custom/config", 1);
   EXPECT_EQ(gleditor::paths::configDir("xuzz"), "/custom/config/xuzz");
@@ -126,6 +129,7 @@ TEST(XdgPathsTest, respectsEnvironmentAndFallbacks) {
 
   unsetenv("XDG_CONFIG_HOME");
   setenv("HOME", "/home/testuser", 1);
+  EXPECT_EQ(gleditor::paths::userHome(), "/home/testuser");
   EXPECT_EQ(gleditor::paths::configDir("xuzz"), "/home/testuser/.config/xuzz");
   EXPECT_EQ(gleditor::paths::cacheDir("zigzag/slices"),
             "/home/testuser/.cache/zigzag/slices");

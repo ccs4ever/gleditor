@@ -22,8 +22,8 @@ readAnthologyMember(const zigzag::Manifold &manifold, const Store &store,
   res.cell  = cell;
   res.label = manifold.textOf(cell, store);
 
-  const auto dimMemberOpt     = manifold.dimensionNamed("d.member", store);
-  zigzag::CellRef placeholder = zigzag::noCell;
+  const auto dimMemberOpt = manifold.dimensionNamed("d.member", store);
+  std::optional<zigzag::CellRef> placeholder;
   if (dimMemberOpt.has_value()) {
     for (const auto c : zigzag::rankAfter(manifold, cell, *dimMemberOpt,
                                           zigzag::DimVector::POS)) {
@@ -36,17 +36,17 @@ readAnthologyMember(const zigzag::Manifold &manifold, const Store &store,
     }
   }
 
-  if (zigzag::noCell != placeholder) {
+  if (placeholder) {
     res.kind            = AnthologyMemberKind::ForeignEntry;
     res.placeholderCell = placeholder;
-    res.externRef       = store.externTarget(placeholder);
+    res.externRef       = store.externTarget(*placeholder);
 
     const auto dimMemberStateOpt =
         manifold.dimensionNamed("d.member-state", store);
     const auto stateCellOpt =
         dimMemberStateOpt ? zigzag::step(manifold, cell, *dimMemberStateOpt)
                           : std::nullopt;
-    if (stateCellOpt.has_value() && *stateCellOpt != zigzag::noCell) {
+    if (stateCellOpt) {
       res.stateCell   = *stateCellOpt;
       const auto text = manifold.textOf(*stateCellOpt, store);
       res.pinnedState = readGlobalDocumentState(text);
@@ -75,7 +75,7 @@ void forEachAnthologyMember(
   zigzag::CellRef start = root;
   if (root == store.homeCell()) {
     const auto first = zigzag::step(manifold, root, dimAnthology);
-    if (!first.has_value() || *first == zigzag::noCell) {
+    if (!first) {
       return;
     }
     start = *first;
@@ -140,12 +140,12 @@ resolveAnthologyMember(const Store &localStore, const AnthologyMember &member,
     return res;
   }
 
-  if (zigzag::noCell == member.placeholderCell || !member.externRef) {
+  if (!member.placeholderCell || !member.externRef) {
     res.status = AnthologyDisplayStatus::Unintelligible;
     return res;
   }
 
-  const auto extRes = resolveExternCell(localStore, member.placeholderCell,
+  const auto extRes = resolveExternCell(localStore, *member.placeholderCell,
                                         foreignStore, sealedAs, foreignFold);
   switch (extRes.status) {
   case ExternResolutionStatus::Resolved:
@@ -189,8 +189,8 @@ resolveAnthologyInArena(zigzag::ArenaManifold &arena, const Store &localStore,
   res = resolveAnthologyMember(localStore, member, *space.store, sealedAs,
                                space.manifold);
   if (res.status == AnthologyDisplayStatus::Resolved &&
-      zigzag::noCell != res.resolvedForeignCell) {
-    res.arenaProxy = arena.proxyFor(foreignSpaceId, res.resolvedForeignCell);
+      res.resolvedForeignCell.has_value()) {
+    res.arenaProxy = arena.proxyFor(foreignSpaceId, *res.resolvedForeignCell);
   }
   return res;
 }

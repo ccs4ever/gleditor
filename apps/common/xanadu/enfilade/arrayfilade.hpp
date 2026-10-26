@@ -59,6 +59,10 @@ struct ArrayWid;
 /**
  * @struct ArrayDsp
  * @brief Relative displacement monoid across multidimensional axes.
+ *
+ * Coordinates and composed displacements must remain representable in int64_t;
+ * callers must not request a translation beyond that coordinate domain.
+ * Width valence must not exceed MaxValence.
  */
 struct ArrayDsp {
   std::uint8_t valence{1};
@@ -185,13 +189,12 @@ inline ArrayWid ArrayDsp::act(const ArrayWid &w) const noexcept {
     return w;
   }
   ArrayWid res = w;
-  for (std::size_t i = 0; i < MaxValence; ++i) {
-    if (res.minCoord[i] != std::numeric_limits<std::int64_t>::max()) {
-      res.minCoord[i] += deltaCoords[i];
-    }
-    if (res.maxCoord[i] != std::numeric_limits<std::int64_t>::lowest()) {
-      res.maxCoord[i] += deltaCoords[i];
-    }
+  // count identifies an empty width; integer extrema are valid coordinates.
+  // Only active axes have coordinates, so inactive reduction identities stay
+  // put.
+  for (std::size_t i = 0; i < w.valence; ++i) {
+    res.minCoord[i] += deltaCoords[i];
+    res.maxCoord[i] += deltaCoords[i];
   }
   return res;
 }

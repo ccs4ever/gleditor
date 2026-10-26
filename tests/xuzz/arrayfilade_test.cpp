@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -34,6 +35,24 @@ using zigzag::DimVector;
 static_assert(DisplacementMonoid<ArrayDsp>);
 static_assert(WidthMonoid<ArrayWid>);
 static_assert(EnfiladeAction<ArrayDsp, ArrayWid>);
+
+TEST(ArrayfiladeTest, DisplacementDoesNotReserveIntegerExtremaForAbsence) {
+  const auto highest = std::numeric_limits<std::int64_t>::max();
+  const auto lowest  = std::numeric_limits<std::int64_t>::lowest();
+  ArrayWid width{.valence  = 2,
+                 .count    = 1,
+                 .minCoord = {highest, lowest, highest, highest},
+                 .maxCoord = {highest, lowest, lowest, lowest}};
+  const ArrayDsp move{.valence = 2, .deltaCoords = {-1, 1, 3, 4}};
+  const auto shifted = move.act(width);
+  EXPECT_EQ(shifted.minCoord[0], highest - 1);
+  EXPECT_EQ(shifted.maxCoord[0], highest - 1);
+  EXPECT_EQ(shifted.minCoord[1], lowest + 1);
+  EXPECT_EQ(shifted.maxCoord[1], lowest + 1);
+  EXPECT_EQ(shifted.minCoord[2], highest);
+  EXPECT_EQ(shifted.maxCoord[2], lowest);
+  EXPECT_EQ(move.act(ArrayWid{}), ArrayWid{});
+}
 
 TEST(ArrayfiladeTest, MonoidAxiomsAndAction) {
   // Identity and composition

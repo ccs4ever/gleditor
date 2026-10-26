@@ -82,20 +82,20 @@ public:
     ON_CALL(*this, resizeBuffer)
         .WillByDefault(
             [this](const render::BufferHandle handle, const std::size_t bytes) {
-              buffers[handle.id].resize(bytes, std::byte{});
+              buffers[*handle.id].resize(bytes, std::byte{});
               return handle;
             });
     ON_CALL(*this, updateBuffer)
         .WillByDefault([this](const render::BufferHandle handle,
                               const std::size_t offset,
                               const std::span<const std::byte> data) {
-          auto &buf = buffers[handle.id];
+          auto &buf = buffers[*handle.id];
           if (offset + data.size() > buf.size()) {
             buf.resize(offset + data.size(), std::byte{});
           }
           std::memcpy(buf.data() + offset, data.data(), data.size());
-          writtenBytes[handle.id] =
-              std::max(writtenBytes[handle.id], offset + data.size());
+          writtenBytes[*handle.id] =
+              std::max(writtenBytes[*handle.id], offset + data.size());
         });
     ON_CALL(*this, createPipeline)
         .WillByDefault([this](const render::PipelineDesc &) {
@@ -107,7 +107,7 @@ public:
   [[nodiscard]] ImageRowMirror imageRowAt(const render::BufferHandle handle,
                                           const std::size_t byteOffset) const {
     ImageRowMirror row{};
-    std::memcpy(&row, buffers.at(handle.id).data() + byteOffset, sizeof(row));
+    std::memcpy(&row, buffers.at(*handle.id).data() + byteOffset, sizeof(row));
     return row;
   }
 
@@ -159,6 +159,9 @@ TEST_F(CanvasImageTest, degenerateOrInvalidImagesAddNothing) {
   canvas->addImage(0.0F, 0.0F, 0.0F, 10.0F, valid);
   canvas->addImage(0.0F, 0.0F, 10.0F, 0.0F, valid);
   canvas->addImage(0.0F, 0.0F, 10.0F, 10.0F, ImageResource{});
+  auto negativeLayer  = valid;
+  negativeLayer.layer = -1;
+  canvas->addImage(0.0F, 0.0F, 10.0F, 10.0F, negativeLayer);
 
   canvas->commit();
   EXPECT_TRUE(canvas->empty());
@@ -181,7 +184,8 @@ TEST_F(CanvasImageTest, anImageRowCarriesTheResourcesUvRectVerbatim) {
   EXPECT_FLOAT_EQ(row.uv[1], image.v0);
   EXPECT_FLOAT_EQ(row.uv[2], image.u1);
   EXPECT_FLOAT_EQ(row.uv[3], image.v1);
-  EXPECT_EQ(row.layer, static_cast<std::uint32_t>(image.layer));
+  ASSERT_TRUE(image.layer.has_value());
+  EXPECT_EQ(row.layer, static_cast<std::uint32_t>(*image.layer));
   EXPECT_EQ(row.tint, 0x11223344U);
 }
 
@@ -209,7 +213,7 @@ TEST_F(CanvasImageTest, addRectStaysOnTheGlyphStreamAlone) {
   // The image buffer exists from construction (the pool reserves its initial
   // capacity eagerly), but addRect alone must never write to it: nothing
   // committed to the image stream, and it stays all zero.
-  const auto &imageContents = device->buffers.at(imageBuffer().id);
+  const auto &imageContents = device->buffers.at(*imageBuffer().id);
   EXPECT_TRUE(std::ranges::all_of(
       imageContents, [](const std::byte b) { return std::byte{0} == b; }));
 }

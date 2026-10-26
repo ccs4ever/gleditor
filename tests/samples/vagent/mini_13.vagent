@@ -1,0 +1,14 @@
+predicate level(value: Int)
+event Level { value: Int }
+goal Enough(minimum: Int) maintain {
+  holds believes level(?value) from self & value >= minimum
+}
+
+agent Maintain {
+  var watch: Opt<Intention> := none
+  on Level as l {
+    revise level(l.value)
+    if not watch then watch := adopt Enough(3)
+  }
+  plan restore for Enough { revise level(minimum) }
+}

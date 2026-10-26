@@ -117,21 +117,23 @@ public:
   }
 
   void setManifoldViews(std::vector<const zigzag::Manifold *> views,
-                        std::vector<zigzag::CellRef> foci = {}) {
+                        std::vector<std::optional<zigzag::CellRef>> foci = {}) {
     manifoldViews_   = std::move(views);
     manifoldFoci_    = std::move(foci);
     strandsRebuilt   = true;
     spanfiladeClean_ = false;
   }
 
-  void setCellRadius(const int radius) noexcept {
+  void setCellRadius(const std::optional<int> radius) noexcept {
     if (cellRadius_ != radius) {
       cellRadius_      = radius;
       strandsRebuilt   = true;
       spanfiladeClean_ = false;
     }
   }
-  [[nodiscard]] int cellRadius() const noexcept { return cellRadius_; }
+  [[nodiscard]] std::optional<int> cellRadius() const noexcept {
+    return cellRadius_;
+  }
 
   [[nodiscard]] const xanadu::enfilade::Spanfilade &
   cachedSpanfilade() const noexcept {
@@ -517,7 +519,7 @@ private:
   MediaRectResolver mediaRectResolver;
   CellAnchorResolver cellAnchorResolver;
   std::vector<const zigzag::Manifold *> manifoldViews_;
-  std::vector<zigzag::CellRef> manifoldFoci_;
+  std::vector<std::optional<zigzag::CellRef>> manifoldFoci_;
   std::unique_ptr<gleditor::Beams> beams, anchorAccents;
   AnchorMotion anchorMotion;
   std::vector<Strand> strands;
@@ -626,8 +628,8 @@ private:
     std::vector<const zigzag::Manifold *> manifoldViews;
     std::vector<std::size_t> manifoldCellCounts;
     std::vector<std::uint32_t> manifoldFoldedThrough;
-    std::vector<zigzag::CellRef> manifoldFoci;
-    int cellRadius{3};
+    std::vector<std::optional<zigzag::CellRef>> manifoldFoci;
+    std::optional<int> cellRadius{3};
 
     bool operator==(const SpanfiladeCacheSignature &) const = default;
   };
@@ -635,7 +637,7 @@ private:
   xanadu::enfilade::Spanfilade cachedSpanfilade_;
   SpanfiladeCacheSignature spanfiladeSignature_{};
   bool spanfiladeClean_{false};
-  int cellRadius_{3};
+  std::optional<int> cellRadius_{3};
 
   struct AnchorReach {
     float value{}, opacity{1};

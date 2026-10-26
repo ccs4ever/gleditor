@@ -176,7 +176,8 @@ TEST(DecodeIndexGifTest, BuildDecodeIndexGif) {
   EXPECT_EQ(DecodeIndexFormat::Gif, index.format);
   EXPECT_TRUE(index.seekable);
   EXPECT_TRUE(index.durableIndex);
-  EXPECT_EQ(2U, index.uncompressedExtent);
+  ASSERT_TRUE(index.uncompressedExtent);
+  EXPECT_EQ(2U, *index.uncompressedExtent);
   EXPECT_EQ(2U, index.seekPoints.size());
   EXPECT_EQ(0U, index.seekPoints[0].uncompressedPosition);
   EXPECT_EQ(1U, index.seekPoints[1].uncompressedPosition);

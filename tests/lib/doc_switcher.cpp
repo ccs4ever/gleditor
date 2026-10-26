@@ -5,6 +5,7 @@
 #include <cstring>
 #include <fstream>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "mocks/device.hpp"
@@ -81,19 +82,52 @@ protected:
   }
 };
 
+TEST_F(DocumentSwitcherTest, zeroIsARealDocumentName) {
+  addDoc("0");
+  addDoc("");
+  switcher->deviceReady(*device, {});
+  draw({.screenWidth = 640, .screenHeight = 480});
+  gleditor::a11y::Tree tree;
+  gleditor::a11y::Builder builder(tree, 12);
+  switcher->describe(builder);
+  const auto named   = tree.find(builder.id(1U));
+  const auto unnamed = tree.find(builder.id(3U));
+  ASSERT_TRUE(named);
+  ASSERT_TRUE(unnamed);
+  EXPECT_EQ(named->label, "0");
+  EXPECT_EQ(unnamed->label, "Doc 2");
+}
+
 TEST_F(DocumentSwitcherTest, defaultVisibilityAndSelection) {
   EXPECT_TRUE(switcher->isVisible());
-  EXPECT_EQ(switcher->activeDocIndex(), 0U);
+  EXPECT_FALSE(switcher->activeDocIndex());
 
-  switcher->setActiveDocIndex(2U);
-  EXPECT_EQ(switcher->activeDocIndex(), 2U);
+  addDoc("first");
+  switcher->deviceReady(*device, {});
+  draw({.screenWidth = 640, .screenHeight = 480});
+  ASSERT_TRUE(switcher->activeDocIndex());
+  EXPECT_EQ(*switcher->activeDocIndex(), 0U);
+
+  switcher->setActiveDocIndex(0U);
+  EXPECT_EQ(switcher->activeDocIndex(), 0U);
 
   switcher->setVisible(false);
   EXPECT_FALSE(switcher->isVisible());
 }
 
+TEST_F(DocumentSwitcherTest, ActiveSelectionClearsWhenNoDocumentsRemain) {
+  addDoc("first");
+  switcher->deviceReady(*device, {});
+  draw({.screenWidth = 640, .screenHeight = 480});
+  ASSERT_EQ(switcher->activeDocIndex(), 0U);
+
+  state->docs.clear();
+  draw({.screenWidth = 640, .screenHeight = 480});
+  EXPECT_FALSE(switcher->activeDocIndex());
+}
+
 TEST_F(DocumentSwitcherTest, pickTabSelectionTriggersHandler) {
-  std::uint32_t selectedDoc = ~0U;
+  std::optional<std::uint32_t> selectedDoc;
   switcher->setSelectHandler(
       [&selectedDoc](const std::uint32_t index) { selectedDoc = index; });
 
@@ -111,7 +145,7 @@ TEST_F(DocumentSwitcherTest, pickTabSelectionTriggersHandler) {
 }
 
 TEST_F(DocumentSwitcherTest, pickCloseButtonTriggersCloseHandler) {
-  std::uint32_t closedDoc = ~0U;
+  std::optional<std::uint32_t> closedDoc;
   switcher->setCloseHandler(
       [&closedDoc](const std::uint32_t index) { closedDoc = index; });
 
@@ -193,8 +227,8 @@ TEST_F(DocumentSwitcherTest,
         for (const auto &box : layout.boxes) {
           contained(box.rect, layout.bounds);
           contained(box.contentRect, box.rect);
-          if (box.parentId != 0) {
-            const auto *parent = layout.find(box.parentId);
+          if (box.parentId) {
+            const auto *parent = layout.find(*box.parentId);
             ASSERT_NE(parent, nullptr);
             contained(box.rect, parent->rect);
           }
@@ -260,8 +294,8 @@ TEST_F(DocumentSwitcherTest,
   switcher->deviceReady(*device, {});
   const ui::UiMetrics metrics{.screenWidth = 640, .screenHeight = 480};
   draw(metrics);
-  std::uint32_t selected = ~0U;
-  std::uint32_t closed   = ~0U;
+  std::optional<std::uint32_t> selected;
+  std::optional<std::uint32_t> closed;
   bool created{}, managed{};
   switcher->setSelectHandler([&](std::uint32_t index) {
     selected = index;
@@ -323,7 +357,7 @@ TEST_F(DocumentSwitcherTest,
       render::unpackPickingTag(saved.widgetOverlays.front().identity, 3U, 0);
   pick.overlayWidgetId = render::resolveOverlayWidget(saved, pick.tag);
   ASSERT_TRUE(pick.overlayWidgetId);
-  std::uint32_t selected = ~0U, closed = ~0U;
+  std::optional<std::uint32_t> selected, closed;
   bool created{}, managed{};
   switcher->setSelectHandler([&](std::uint32_t index) { selected = index; });
   switcher->setCloseHandler([&](std::uint32_t index) { closed = index; });
@@ -366,9 +400,9 @@ TEST_F(DocumentSwitcherTest,
   draw({.screenWidth = 640, .screenHeight = 480});
   EXPECT_NE(state->overlayPickScene.widgetOverlays.front().targets->front(),
             *pick.overlayWidgetId);
-  closed = ~0U;
+  closed.reset();
   EXPECT_FALSE(switcher->picked(pick, *state));
-  EXPECT_EQ(closed, ~0U);
+  EXPECT_FALSE(closed);
 }
 
 class FloatingToolbar3DTest : public testing::Test {
@@ -416,9 +450,9 @@ TEST_F(FloatingToolbar3DTest, FormattingAndHeadingState) {
 }
 
 TEST_F(FloatingToolbar3DTest, PickingActionDispatchesHandler) {
-  using ButtonId              = gleditor::FloatingToolbar3D::ButtonId;
-  ButtonId dispatchedBtn      = ButtonId::NewDoc;
-  std::uint32_t dispatchedDoc = ~0U;
+  using ButtonId         = gleditor::FloatingToolbar3D::ButtonId;
+  ButtonId dispatchedBtn = ButtonId::NewDoc;
+  std::optional<std::uint32_t> dispatchedDoc;
 
   toolbar->setActionHandler([&dispatchedBtn, &dispatchedDoc](
                                 const ButtonId btn, const std::uint32_t doc) {
@@ -439,9 +473,9 @@ TEST_F(FloatingToolbar3DTest, PickingActionDispatchesHandler) {
 }
 
 TEST_F(FloatingToolbar3DTest, AccessibilityActionPerformsClick) {
-  using ButtonId              = gleditor::FloatingToolbar3D::ButtonId;
-  ButtonId dispatchedBtn      = ButtonId::NewDoc;
-  std::uint32_t dispatchedDoc = ~0U;
+  using ButtonId         = gleditor::FloatingToolbar3D::ButtonId;
+  ButtonId dispatchedBtn = ButtonId::NewDoc;
+  std::optional<std::uint32_t> dispatchedDoc;
 
   toolbar->setActionHandler([&dispatchedBtn, &dispatchedDoc](
                                 const ButtonId btn, const std::uint32_t doc) {

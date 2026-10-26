@@ -17,6 +17,7 @@
 #include "common/xanadu/compact_op.hpp"
 #include "common/xanadu/microversion.hpp"
 #include "common/xanadu/segmented_ops_spool.hpp"
+#include "common/xanadu/store.hpp"
 #include "common/xanadu/virtual_memory_arena.hpp"
 
 namespace {
@@ -26,6 +27,24 @@ using xanadu::MicroversionId;
 using xanadu::OpKind;
 using xanadu::PrimediaSpan;
 using xanadu::SegmentedOpsSpool;
+
+TEST(SegmentedOpsSpoolTest, rootStateAndMissingNamesAreDistinct) {
+  SegmentedOpsSpool spool;
+  const MicroversionId root;
+  EXPECT_EQ(spool.indexOf(root), std::optional<std::uint32_t>{0U});
+  EXPECT_EQ(spool.idOf(0), std::optional<MicroversionId>{root});
+  EXPECT_FALSE(spool.contains(root));
+  EXPECT_EQ(spool.get(0U), nullptr);
+  EXPECT_FALSE(spool.indexOf(MicroversionId::parse("999")));
+  EXPECT_FALSE(spool.idOf(1U));
+
+  CompactOpNode node;
+  const auto name  = MicroversionId::parse("1");
+  const auto index = spool.append(node, name);
+  EXPECT_EQ(spool.indexOf(name), index);
+  EXPECT_EQ(spool.idOf(index), name);
+  EXPECT_FALSE(spool.idOf(index + 1U));
+}
 
 TEST(SegmentedOpsSpoolTest, appendAndTraverseLinearChain) {
   SegmentedOpsSpool spool;
@@ -52,8 +71,8 @@ TEST(SegmentedOpsSpoolTest, appendAndTraverseLinearChain) {
   EXPECT_EQ(spool.size(), 2U);
   EXPECT_EQ(spool.indexOf(id1), 1U);
   EXPECT_EQ(spool.indexOf(id2), 2U);
-  EXPECT_EQ(spool.idOf(1U).str(), "1");
-  EXPECT_EQ(spool.idOf(2U).str(), "2");
+  EXPECT_EQ(spool.idOf(1U).value().str(), "1");
+  EXPECT_EQ(spool.idOf(2U).value().str(), "2");
 
   // Verify ancestral path
   const auto path2 = spool.ancestralPath(idx2);
@@ -167,7 +186,7 @@ TEST(SegmentedOpsSpoolTest, aSpoolCountsDownToItsCeilingAndThenRefuses) {
   // no place in the tree, so the document is still exactly the one it was.
   EXPECT_EQ(spool.size(), capacity);
   EXPECT_FALSE(spool.contains(name));
-  EXPECT_EQ(spool.indexOf(name), 0U);
+  EXPECT_FALSE(spool.indexOf(name));
   EXPECT_TRUE(spool.childrenOf(capacity).empty());
   EXPECT_EQ(spool.opCapacityRemaining(), 0U);
 }
@@ -336,7 +355,7 @@ TEST(SegmentedOpsSpoolTest, anActiveSegmentIsPickedUpWhereItWasLeft) {
     const auto id = MicroversionId::parse(std::to_string(i));
     EXPECT_TRUE(reopened.contains(id)) << "state " << i << " went missing";
     EXPECT_EQ(reopened.indexOf(id), i);
-    EXPECT_EQ(reopened.idOf(i).str(), id.str());
+    EXPECT_EQ(reopened.idOf(i).value().str(), id.str());
   }
   // and it keeps growing from there rather than starting over
   appendChain(reopened, 2);
@@ -429,7 +448,7 @@ TEST(SegmentedOpsSpoolTest, branchesSurviveBeingSealedAndReopened) {
   // 1a2 continues 1a1 -- ordinal zero, despite its own last segment saying
   // branch a. Deriving that from the segment letter rather than from the step
   // is the way to get this wrong.
-  EXPECT_EQ(spool.idOf(5).str(), "1a2");
+  EXPECT_EQ(spool.idOf(5).value().str(), "1a2");
   EXPECT_THAT(spool.ancestralPath(5), testing::ElementsAre(1U, 4U, 5U));
 }
 
@@ -738,7 +757,7 @@ TEST(SegmentedOpsSpoolTest, aSegmentFileSaysWhatItIsAndComesBackTheSame) {
   for (std::uint32_t i = 1; i <= spool.size(); i++) {
     ASSERT_NE(reopened.get(i), nullptr);
     EXPECT_EQ(reopened.get(i)->at, spool.get(i)->at);
-    EXPECT_EQ(reopened.idOf(i).str(), spool.idOf(i).str());
+    EXPECT_EQ(reopened.idOf(i).value().str(), spool.idOf(i).value().str());
   }
   // Including the branch, whose name is derived rather than written down.
   EXPECT_TRUE(reopened.contains(MicroversionId::parse("3a1")));
@@ -763,6 +782,77 @@ TEST(SegmentedOpsSpoolTest, aSegmentFileSaysWhatItIsAndComesBackTheSame) {
   EXPECT_TRUE(again.contains(MicroversionId::parse("3a3")));
   EXPECT_THAT(again.ancestralPath(10),
               testing::ElementsAre(1U, 2U, 3U, 8U, 9U, 10U));
+}
+
+TEST(StoreLookupTest, cellLookupPreservesKnownOperationsButRejectsMissingOnes) {
+  xanadu::Store store;
+  EXPECT_FALSE(store.structureHead());
+  EXPECT_FALSE(store.cellRefOf(MicroversionId{}));
+  EXPECT_FALSE(store.cellRefOf(MicroversionId::parse("999")));
+  const auto text      = store.insert(MicroversionId{}, 0, "text");
+  const auto textIndex = store.cellRefOf(text);
+  ASSERT_TRUE(textIndex);
+  EXPECT_FALSE(store.editedBirthOf(*textIndex));
+  EXPECT_FALSE(store.editedBirths().at(*textIndex));
+  EXPECT_THROW(store.setCellText(text, *textIndex, "invalid"),
+               std::invalid_argument);
+  const auto cellVersion = store.makeCell(text, "");
+  const auto cell        = store.cellRefOf(cellVersion);
+  ASSERT_TRUE(cell);
+  EXPECT_EQ(store.structureKindOfOp(*cell), xanadu::StructureKind::Cell);
+  EXPECT_EQ(store.resolveStructureName(cellVersion, *cell), "");
+  EXPECT_FALSE(store.resolveStructureName(cellVersion, 0));
+  EXPECT_FALSE(store.structureKindOfOp(*textIndex));
+  EXPECT_FALSE(store.structureKindOfOp(0));
+  EXPECT_FALSE(store.editedBirthOf(0));
+  EXPECT_FALSE(store.editedBirthOf(999));
+  EXPECT_EQ(store.editedBirthOf(*cell), cell);
+}
+
+TEST(StoreLookupTest, structureHeadsRespectBranchesAndLaterCellReferences) {
+  xanadu::Store store;
+  const auto base      = store.makeCell(MicroversionId{}, "base");
+  const auto cell      = store.cellRefOf(base).value();
+  const auto edited    = store.setCellText(base, cell, "edited");
+  const auto editIndex = store.cellRefOf(edited).value();
+  EXPECT_EQ(store.lastOpOnStructure(base, cell), cell);
+  EXPECT_EQ(store.lastOpOnStructure(edited, cell), editIndex);
+  EXPECT_EQ(store.headOfStructure(cell, base), base);
+  EXPECT_EQ(store.headOfStructure(cell, edited), edited);
+  EXPECT_FALSE(store.headOfStructure(cell, MicroversionId{}));
+  EXPECT_FALSE(store.lastOpOnStructure(MicroversionId::parse("999"), cell));
+
+  const auto sibling     = store.makeCell(base, "sibling");
+  const auto siblingCell = store.cellRefOf(sibling).value();
+  EXPECT_FALSE(store.lastOpOnStructure(edited, siblingCell));
+  EXPECT_THROW(store.setCellText(edited, siblingCell, "wrong branch"),
+               std::invalid_argument);
+  EXPECT_THROW(store.setScalar(edited, 0, std::int64_t{0}),
+               std::invalid_argument);
+  const auto again = store.setCellText(edited, editIndex, "again");
+  EXPECT_EQ(store.lastOpOnStructure(again, cell), store.cellRefOf(again));
+  EXPECT_EQ(store.headOfStructure(cell), again);
+}
+
+TEST(StoreLookupTest, editionWithoutTargetDoesNotNameTheRootState) {
+  xanadu::Store store;
+  const auto slice    = store.sliceGenesis(MicroversionId{});
+  const auto text     = store.insert(slice, 0, "edition text");
+  const auto authored = store.designateEdition(text, "release", text);
+  const auto edition  = store.editionNamed(authored, "release");
+  ASSERT_TRUE(edition);
+  ASSERT_TRUE(edition->handle);
+  EXPECT_EQ(edition->targetVersion, text);
+  const auto fold = store.rebuildManifold(authored);
+  const auto dim  = fold.dimensionNamed("d.edition-of", store);
+  ASSERT_TRUE(dim);
+  const auto broken     = store.setLink(authored, edition->cell, *dim,
+                                        zigzag::DimVector::POS, std::nullopt);
+  const auto unresolved = store.editionNamed(broken, "release");
+  ASSERT_TRUE(unresolved);
+  EXPECT_FALSE(unresolved->handle);
+  EXPECT_FALSE(unresolved->targetOp);
+  EXPECT_FALSE(unresolved->targetVersion);
 }
 
 } // namespace

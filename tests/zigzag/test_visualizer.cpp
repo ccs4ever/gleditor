@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include <stdexcept>
 
 #include <gleditor/doc.hpp>
 
@@ -14,10 +15,20 @@
 
 using namespace zigzag;
 
+namespace {
+CellID focusedCell(const ZigzagVisualizer &viz) {
+  const auto focus = viz.focusCellId();
+  if (!focus) {
+    throw std::logic_error("test requires a focused cell");
+  }
+  return *focus;
+}
+} // namespace
+
 TEST(ZigzagVisualizerTest, DefaultStateAndFallback) {
   ZigzagVisualizer viz("Sans 12");
 
-  EXPECT_NE(viz.focusCellId(), 0U);
+  ASSERT_TRUE(viz.focusCellId());
   EXPECT_EQ(viz.currentView().x_dimension, "d.1");
   EXPECT_EQ(viz.currentView().y_dimension, "d.2");
   EXPECT_EQ(viz.currentView().z_dimension, "d.3");
@@ -28,7 +39,7 @@ TEST(ZigzagVisualizerTest, EmbeddedPresentationSurfaceExposesLiveState) {
   xanadu::ZigzagPresentationSurface &surface = viz;
 
   EXPECT_EQ(&surface.manifold(), &viz.engine()->manifold());
-  EXPECT_EQ(surface.focusCell(), viz.focusCellId());
+  EXPECT_EQ(surface.focusCell(), viz.focusCell());
   EXPECT_EQ(surface.cellRadius(), 3);
   EXPECT_EQ(surface.frameContributor(), &viz);
   EXPECT_EQ(surface.pickObserver(), &viz);
@@ -47,28 +58,69 @@ TEST(ZigzagVisualizerTest, EmbeddedPresentationSurfaceExposesLiveState) {
   EXPECT_EQ(surface.cellRadius(), 1);
 }
 
+TEST(ZigzagVisualizerTest, EmptyFocusCanBeRestoredWithoutMintingCells) {
+  ZigzagVisualizer viz("Sans 12");
+  const auto originalFocus = focusedCell(viz);
+  const auto operations    = viz.operationCount();
+
+  viz.focusCell(std::nullopt);
+
+  EXPECT_FALSE(viz.focusCellId());
+  EXPECT_FALSE(viz.focusCell());
+  EXPECT_EQ(viz.operationCount(), operations);
+
+  viz.focusCell(static_cast<CellRef>(originalFocus));
+  EXPECT_EQ(viz.focusCellId(), originalFocus);
+  viz.focusCell(noCell);
+  EXPECT_EQ(viz.focusCellId(), originalFocus);
+  EXPECT_EQ(viz.operationCount(), operations);
+}
+
+TEST(ZigzagVisualizerTest, EmptyStoreHasNoFocusedCell) {
+  xanadu::Store emptyStore;
+  ZigzagVisualizer viz("Sans 12");
+
+  viz.bindXanaduStore(emptyStore, emptyStore.latest());
+
+  EXPECT_FALSE(viz.focusCellId());
+  EXPECT_FALSE(viz.focusCell());
+  EXPECT_TRUE(viz.visibleCells().empty());
+}
+
+TEST(ZigzagVisualizerTest, ReturnWithoutFocusDoesNotActivateACell) {
+  xanadu::Store emptyStore;
+  ZigzagVisualizer viz("Sans 12");
+  viz.bindXanaduStore(emptyStore, emptyStore.latest());
+
+  bool activated = false;
+  viz.setCellActivationCallback([&](const CellRef) { activated = true; });
+  viz.keyPressed(gleditor::Key::Return, gleditor::KeyMods::None);
+
+  EXPECT_FALSE(activated);
+}
+
 TEST(ZigzagVisualizerTest, NavigationAlongDimensions) {
   ZigzagVisualizer viz("Sans 12");
 
-  const auto root = viz.focusCellId();
+  const auto root = focusedCell(viz);
   EXPECT_NE(root, 0U);
 
   // In default sample: root has d.1 pos, and d.2 pos
   viz.navigateFocus("d.1", DimVector::POS);
-  const auto c2 = viz.focusCellId();
+  const auto c2 = focusedCell(viz);
   EXPECT_NE(c2, root);
 
   viz.navigateFocus("d.1", DimVector::NEG);
-  EXPECT_EQ(viz.focusCellId(), root);
+  EXPECT_EQ(focusedCell(viz), root);
 
   viz.navigateFocus("d.2", DimVector::POS);
-  const auto c3 = viz.focusCellId();
+  const auto c3 = focusedCell(viz);
   EXPECT_NE(c3, root);
   EXPECT_NE(c3, c2);
 
   // Cell c3 has d.3 pos
   viz.navigateFocus("d.3", DimVector::POS);
-  const auto c4 = viz.focusCellId();
+  const auto c4 = focusedCell(viz);
   EXPECT_NE(c4, root);
   EXPECT_NE(c4, c2);
   EXPECT_NE(c4, c3);
@@ -103,21 +155,21 @@ TEST(ZigzagVisualizerTest, CycleDimensions) {
 TEST(ZigzagVisualizerTest, DirectNavigationToCell) {
   ZigzagVisualizer viz("Sans 12");
 
-  const auto root = viz.focusCellId();
+  const auto root = focusedCell(viz);
   viz.navigateFocus("d.2", DimVector::POS);
   viz.navigateFocus("d.3", DimVector::POS);
-  const auto target = viz.focusCellId();
+  const auto target = focusedCell(viz);
   EXPECT_NE(target, root);
 
   viz.navigateFocusTo(root);
-  EXPECT_EQ(viz.focusCellId(), root);
+  EXPECT_EQ(focusedCell(viz), root);
 
   viz.navigateFocusTo(target);
-  EXPECT_EQ(viz.focusCellId(), target);
+  EXPECT_EQ(focusedCell(viz), target);
 
   // Non-existent cell should be ignored
   viz.navigateFocusTo(99999);
-  EXPECT_EQ(viz.focusCellId(), target);
+  EXPECT_EQ(focusedCell(viz), target);
 }
 
 TEST(ZigzagVisualizerTest, AdoptDocument) {
@@ -130,7 +182,7 @@ TEST(ZigzagVisualizerTest, AdoptDocument) {
   doc.cells[10] = Cell{.id = 10, .data = std::string("Custom Focus")};
 
   viz.adoptDocument(std::move(doc), "custom");
-  EXPECT_NE(viz.focusCellId(), 0U);
+  ASSERT_TRUE(viz.focusCellId());
   EXPECT_EQ(viz.structureName(), "Custom Outline");
   EXPECT_EQ(viz.currentView().x_dimension, "d.a");
 }
@@ -142,11 +194,11 @@ TEST(ZigzagVisualizerTest, AdoptDocument) {
 TEST(ZigzagVisualizerTest, MousePicking) {
   ZigzagVisualizer viz("Sans 12");
 
-  const auto root = viz.focusCellId();
+  const auto root = focusedCell(viz);
   viz.navigateFocus("d.1", DimVector::POS);
-  const auto neighbor = viz.focusCellId();
+  const auto neighbor = focusedCell(viz);
   viz.navigateFocus("d.1", DimVector::NEG);
-  EXPECT_EQ(viz.focusCellId(), root);
+  EXPECT_EQ(focusedCell(viz), root);
 
   testing::NiceMock<MockRenderDevice> device;
   RenderState state(&device);
@@ -174,7 +226,7 @@ TEST(ZigzagVisualizerTest, MousePicking) {
   ASSERT_TRUE(scene.overlays.at(key)->cellRef);
   EXPECT_EQ(*scene.overlays.at(key)->cellRef, static_cast<CellRef>(neighbor));
   EXPECT_TRUE(viz.picked(pick, state));
-  EXPECT_EQ(viz.focusCellId(), neighbor);
+  EXPECT_EQ(focusedCell(viz), neighbor);
 
   pick.semanticTarget = std::make_shared<render::PickSemanticTarget>(
       render::PickSemanticTarget{.documentId   = viz.documentId(),
@@ -205,13 +257,13 @@ TEST(ZigzagVisualizerTest, InAppInteractiveCellAndDimensionEditing) {
   ZigzagVisualizer viz("Sans 12");
 
   // Focus starts at root
-  const auto rootId = viz.focusCellId();
+  const auto rootId = focusedCell(viz);
   EXPECT_NE(rootId, 0U);
 
   // Insert connected cell along positive X ("d.1")
   EXPECT_TRUE(
       viz.insertConnectedCell("Newly Inserted Topic", "d.1", DimVector::POS));
-  const auto newCellId = viz.focusCellId();
+  const auto newCellId = focusedCell(viz);
   EXPECT_NE(newCellId, rootId);
 
   // Update cell text
@@ -219,23 +271,23 @@ TEST(ZigzagVisualizerTest, InAppInteractiveCellAndDimensionEditing) {
 
   // Step back along negative X to root cell
   viz.navigateFocus("d.1", DimVector::NEG);
-  EXPECT_EQ(viz.focusCellId(), rootId);
+  EXPECT_EQ(focusedCell(viz), rootId);
 
   // Step forward to our edited cell
   viz.navigateFocus("d.1", DimVector::POS);
-  EXPECT_EQ(viz.focusCellId(), newCellId);
+  EXPECT_EQ(focusedCell(viz), newCellId);
 
   // Unlink along negative X
   EXPECT_TRUE(viz.unlinkFocusAlong("d.1", DimVector::NEG));
 
   // Stepping back should now stay at newCellId since link was broken
   viz.navigateFocus("d.1", DimVector::NEG);
-  EXPECT_EQ(viz.focusCellId(), newCellId);
+  EXPECT_EQ(focusedCell(viz), newCellId);
 
   // Re-link manually
   EXPECT_TRUE(viz.linkFocusAlong("d.1", rootId, DimVector::NEG));
   viz.navigateFocus("d.1", DimVector::NEG);
-  EXPECT_EQ(viz.focusCellId(), rootId);
+  EXPECT_EQ(focusedCell(viz), rootId);
 }
 
 TEST(ZigzagVisualizerTest, CloneCellEditingSync) {
@@ -245,7 +297,7 @@ TEST(ZigzagVisualizerTest, CloneCellEditingSync) {
   doc.meta.name = "Clone Sync Test";
   doc.focus     = 2;
   doc.view      = {
-      .x_dimension = "d.1", .y_dimension = "d.clone", .z_dimension = "d.3"};
+           .x_dimension = "d.1", .y_dimension = "d.clone", .z_dimension = "d.3"};
   doc.cells[1] = Cell{.id         = 1,
                       .data       = std::string("Original Text"),
                       .dimensions = {{"d.clone", LinkPairs{.pos = 2}}}};
@@ -253,7 +305,7 @@ TEST(ZigzagVisualizerTest, CloneCellEditingSync) {
       Cell{.id = 2, .dimensions = {{"d.clone", LinkPairs{.neg = 1}}}};
 
   viz.adoptDocument(std::move(doc), "clone_test");
-  const auto cloneFocus = viz.focusCellId();
+  const auto cloneFocus = focusedCell(viz);
   EXPECT_NE(cloneFocus, 0U);
 
   // Focus is at clone cell. Editing focus cell text should update the master
@@ -262,7 +314,7 @@ TEST(ZigzagVisualizerTest, CloneCellEditingSync) {
 
   const auto currentDoc = viz.document();
   viz.navigateFocus("d.clone", DimVector::NEG);
-  const auto masterId = viz.focusCellId();
+  const auto masterId = focusedCell(viz);
   EXPECT_NE(masterId, cloneFocus);
 
   EXPECT_EQ(currentDoc.cells.at(masterId).text(), "Mutated Text From Clone");
@@ -291,34 +343,34 @@ TEST(ZigzagVisualizerTest, DefaultFocusOnHomeWhenUnspecified) {
 
   ZzStructureDocument doc;
   doc.meta.name = "No Focus Slice";
-  doc.focus     = 0; // Explicitly no focus
+  doc.focus     = std::nullopt;
   doc.view = {.x_dimension = "d.1", .y_dimension = "d.2", .z_dimension = "d.3"};
   doc.cells[10] = Cell{.id = 10, .data = std::string("Only cell")};
 
   viz.adoptDocument(std::move(doc), "no_focus");
-  EXPECT_NE(viz.focusCellId(), 0U);
+  ASSERT_TRUE(viz.focusCellId());
   // Default focus on empty/missing focus adopts home cell
-  EXPECT_TRUE(viz.isProtected(viz.focusCellId()));
+  EXPECT_TRUE(viz.isProtected(focusedCell(viz)));
 }
 
 TEST(ZigzagVisualizerTest, MetaDimensionsDynamicTraversal) {
   ZigzagVisualizer viz("Sans 12");
 
   // In default sample structure, root has connections on d.1 and d.2
-  const auto root = viz.focusCellId();
+  const auto root = focusedCell(viz);
   EXPECT_NE(root, 0U);
 
   // Stepping posward on d.meta-dims navigates to an ephemeral dimension clone
   // cell
   viz.navigateFocus("d.meta-dims", DimVector::POS);
-  const auto eph1 = viz.focusCellId();
+  const auto eph1 = focusedCell(viz);
   EXPECT_NE(eph1, root);
   EXPECT_TRUE(isEphemeral(eph1));
 
   // Stepping negward along d.clone from ephemeral cell navigates to master
   // dimension cell on d.dims
   viz.navigateFocus("d.clone", DimVector::NEG);
-  const auto masterDim = viz.focusCellId();
+  const auto masterDim = focusedCell(viz);
   EXPECT_NE(masterDim, eph1);
   EXPECT_FALSE(isEphemeral(masterDim));
   EXPECT_TRUE(
@@ -327,36 +379,36 @@ TEST(ZigzagVisualizerTest, MetaDimensionsDynamicTraversal) {
   // Stepping negward along d.clone from master dimension cell doesn't navigate
   // away
   viz.navigateFocus("d.clone", DimVector::NEG);
-  EXPECT_EQ(viz.focusCellId(), masterDim);
+  EXPECT_EQ(focusedCell(viz), masterDim);
 
   // Step back to ephemeral cell by navigating to it
   viz.navigateFocusTo(eph1);
-  EXPECT_EQ(viz.focusCellId(), eph1);
+  EXPECT_EQ(focusedCell(viz), eph1);
 
   // Stepping negward along d.meta-dims returns to the parent cell
   viz.navigateFocus("d.meta-dims", DimVector::NEG);
-  EXPECT_EQ(viz.focusCellId(), root);
+  EXPECT_EQ(focusedCell(viz), root);
 
   // Walking along d.meta-dims posward enumerates all dimensions root links on,
   // plus d.meta-dims itself
   viz.navigateFocus("d.meta-dims", DimVector::POS);
-  const auto dimCell1 = viz.focusCellId();
+  const auto dimCell1 = focusedCell(viz);
   EXPECT_TRUE(isEphemeral(dimCell1));
 
   viz.navigateFocus("d.meta-dims", DimVector::POS);
-  const auto dimCell2 = viz.focusCellId();
+  const auto dimCell2 = focusedCell(viz);
   EXPECT_TRUE(isEphemeral(dimCell2));
   EXPECT_NE(dimCell2, dimCell1);
 
   viz.navigateFocus("d.meta-dims", DimVector::POS);
-  const auto dimCell3 = viz.focusCellId();
+  const auto dimCell3 = focusedCell(viz);
   EXPECT_TRUE(isEphemeral(dimCell3));
   EXPECT_NE(dimCell3, dimCell2);
 
-  // Navigating negward on d.clone from the last ephemeral cell resolves to
-  // d.meta-dims
+  // The derived dimension has no stored master; d.clone leaves focus on
+  // its protected ephemeral facet.
   viz.navigateFocus("d.clone", DimVector::NEG);
-  EXPECT_TRUE(viz.isProtected(viz.focusCellId()));
+  EXPECT_TRUE(viz.isProtected(focusedCell(viz)));
 }
 
 TEST(ZigzagVisualizerTest, DeletionProtection) {
@@ -376,45 +428,45 @@ TEST(ZigzagVisualizerTest, DeletionProtection) {
   // Navigate to an ephemeral cell via d.meta-dims and then to master dimension
   // on d.dims
   viz.navigateFocus("d.meta-dims", DimVector::POS);
-  const auto eph = viz.focusCellId();
+  const auto eph = focusedCell(viz);
   EXPECT_TRUE(isEphemeral(eph));
   EXPECT_TRUE(viz.isProtected(eph));
   EXPECT_FALSE(viz.deleteFocusCell()); // Cannot delete ephemeral cell
 
   viz.navigateFocus("d.clone", DimVector::NEG);
-  const auto dimCell = viz.focusCellId();
+  const auto dimCell = focusedCell(viz);
   EXPECT_TRUE(viz.isProtected(dimCell));
   EXPECT_FALSE(viz.deleteFocusCell()); // Cannot delete dimension cell
 
   // 4) Unprotected content cells CAN be deleted, preserving rank continuity
   EXPECT_TRUE(viz.insertConnectedCell("Chain Cell A", "d.1", DimVector::POS));
-  const auto cellA = viz.focusCellId();
+  const auto cellA = focusedCell(viz);
   EXPECT_TRUE(viz.insertConnectedCell("Chain Cell B", "d.1", DimVector::POS));
-  const auto cellB = viz.focusCellId();
+  const auto cellB = focusedCell(viz);
   EXPECT_TRUE(viz.insertConnectedCell("Chain Cell C", "d.1", DimVector::POS));
-  const auto cellC = viz.focusCellId();
+  const auto cellC = focusedCell(viz);
 
   // Focus on cell B
   viz.navigateFocus("d.1", DimVector::NEG);
-  EXPECT_EQ(viz.focusCellId(), cellB);
+  EXPECT_EQ(focusedCell(viz), cellB);
   EXPECT_FALSE(viz.isProtected(cellB));
 
   // Delete cell B
   EXPECT_TRUE(viz.deleteFocusCell());
 
   // Focus moves safely to an adjacent cell (cell C or cell A)
-  const auto currentFocus = viz.focusCellId();
+  const auto currentFocus = focusedCell(viz);
   EXPECT_TRUE(currentFocus == cellA || currentFocus == cellC);
 
   // Verify rank continuity: cell A and cell C are now directly connected along
   // d.1
   viz.navigateFocusTo(cellA);
-  EXPECT_EQ(viz.focusCellId(), cellA);
+  EXPECT_EQ(focusedCell(viz), cellA);
   viz.navigateFocus("d.1", DimVector::POS);
-  EXPECT_EQ(viz.focusCellId(), cellC);
+  EXPECT_EQ(focusedCell(viz), cellC);
 
   viz.navigateFocus("d.1", DimVector::NEG);
-  EXPECT_EQ(viz.focusCellId(), cellA);
+  EXPECT_EQ(focusedCell(viz), cellA);
 }
 
 TEST(ZigzagVisualizerTest, HomeAndDimensionCellsAccessibleInTree) {
@@ -450,7 +502,7 @@ TEST(ZigzagVisualizerTest, DeletingACellCostsOneOperationPerDimension) {
   ASSERT_TRUE(viz.insertConnectedCell("B", "d.1", DimVector::POS));
   ASSERT_TRUE(viz.insertConnectedCell("C", "d.1", DimVector::POS));
 
-  const auto victim = viz.focusCellId();
+  const auto victim = focusedCell(viz);
   ASSERT_FALSE(viz.isProtected(victim));
 
   // The cell sits at the end of a d.1 chain and carries a d.role attribute, so
@@ -491,10 +543,19 @@ TEST(ZigzagVisualizerTest, NavigatingAnAbsentDimensionRecordsNothing) {
 TEST(ZigzagVisualizerTest, ADeletedCellIsNotAnnounced) {
   ZigzagVisualizer viz("Sans 12");
   ASSERT_TRUE(viz.insertConnectedCell("Keep me", "d.1", DimVector::POS));
+  const auto keeper = focusedCell(viz);
   ASSERT_TRUE(viz.insertConnectedCell("Delete me", "d.1", DimVector::POS));
-  const auto victim = viz.focusCellId();
+  const auto victim = focusedCell(viz);
   ASSERT_FALSE(viz.isProtected(victim));
+  ASSERT_FALSE(viz.isProtected(keeper));
+  ASSERT_NE(viz.engine(), nullptr);
+  const auto d1 = viz.engine()->dimensionFor("d.1");
+  ASSERT_TRUE(viz.unlinkFocusAlong("d.1", DimVector::POS));
+  EXPECT_FALSE(viz.engine()->manifold().linked(victim, d1, DimVector::POS));
+  ASSERT_EQ(viz.engine()->manifold().linked(victim, d1, DimVector::NEG),
+            keeper);
   ASSERT_TRUE(viz.deleteFocusCell());
+  EXPECT_EQ(viz.focusCellId(), keeper);
 
   gleditor::a11y::Publisher publisher("zigzag", "test", "1.0");
   publisher.addSource(&viz);
@@ -519,7 +580,7 @@ TEST(ZigzagVisualizerTest, ADeletedCellIsNotAnnounced) {
 
 TEST(ZigzagVisualizerTest, FormattedCellDecoratedRangesInTopology) {
   ZigzagVisualizer viz("Sans 12");
-  const auto root = viz.focusCellId();
+  const auto root = focusedCell(viz);
   ASSERT_NE(root, 0U);
   ASSERT_NE(viz.engine(), nullptr);
   ASSERT_NE(viz.store(), nullptr);
@@ -550,7 +611,7 @@ TEST(ZigzagVisualizerTest, FormattedCellDecoratedRangesInTopology) {
 
 TEST(ZigzagVisualizerTest, VisualizerCellAnchorGeneration) {
   ZigzagVisualizer viz("Sans 12");
-  const auto root = viz.focusCellId();
+  const auto root = focusedCell(viz);
   ASSERT_NE(root, 0U);
 
   const auto anchor = viz.cellAnchor(static_cast<CellRef>(root));
@@ -568,21 +629,21 @@ TEST(ZigzagVisualizerTest, VisualizerCellAnchorGeneration) {
 
 TEST(ZigzagVisualizerTest, LinkPreviewShowsDistantCellWithoutChangingFocus) {
   ZigzagVisualizer viz("Sans 12");
-  const auto focus   = viz.focusCell();
+  const auto focus   = focusedCell(viz);
   const auto distant = static_cast<CellRef>(viz.createCell("distant", "text"));
   ASSERT_NE(distant, focus);
   const auto operations = viz.store()->opCount();
 
   viz.setPreviewCell(distant);
 
-  EXPECT_EQ(viz.focusCell(), focus);
+  EXPECT_EQ(viz.focusCell(), static_cast<CellRef>(focus));
   EXPECT_EQ(viz.store()->opCount(), operations);
   ASSERT_TRUE(viz.visibleCells().contains(static_cast<CellID>(distant)));
   EXPECT_GT(viz.visibleCells().at(static_cast<CellID>(distant)).target_alpha,
             0.0F);
 
   viz.setPreviewCell(std::nullopt);
-  EXPECT_EQ(viz.focusCell(), focus);
+  EXPECT_EQ(viz.focusCell(), static_cast<CellRef>(focus));
   EXPECT_EQ(viz.store()->opCount(), operations);
   EXPECT_FLOAT_EQ(
       viz.visibleCells().at(static_cast<CellID>(distant)).target_alpha, 0.0F);
@@ -590,7 +651,7 @@ TEST(ZigzagVisualizerTest, LinkPreviewShowsDistantCellWithoutChangingFocus) {
 
 TEST(ZigzagVisualizerTest, DualContinuumDepthTiering) {
   ZigzagVisualizer viz("Sans 12");
-  const auto root = viz.focusCellId();
+  const auto root = focusedCell(viz);
   ASSERT_NE(root, 0U);
 
   EXPECT_FLOAT_EQ(viz.depthTier(), 0.0F);
@@ -614,7 +675,7 @@ TEST(ZigzagVisualizerTest, DualContinuumDepthTiering) {
 
 TEST(ZigzagVisualizerTest, PresentationOriginKeepsTheHostDocumentClear) {
   ZigzagVisualizer viz("Sans 12");
-  const auto root = viz.focusCellId();
+  const auto root = focusedCell(viz);
   ASSERT_NE(root, 0U);
 
   viz.setPresentationOrigin({420.0F, 0.0F, 0.0F});
@@ -705,7 +766,7 @@ TEST(ZigzagVisualizerTest, OpcodeAndLibraryPaletteHUD) {
 
 TEST(ZigzagVisualizerTest, ActionDispatchingRoutesCorrectly) {
   ZigzagVisualizer viz("Sans 12");
-  const auto root = viz.focusCellId();
+  const auto root = focusedCell(viz);
   ASSERT_NE(root, 0U);
 
   // Step action
@@ -721,7 +782,7 @@ TEST(ZigzagVisualizerTest, ActionDispatchingRoutesCorrectly) {
 
 TEST(ZigzagVisualizerTest, TranslateVQLAndAttachToFocus) {
   ZigzagVisualizer viz("Sans 12");
-  const auto originalFocus = viz.focusCellId();
+  const auto originalFocus = focusedCell(viz);
   ASSERT_NE(originalFocus, 0U);
 
   const auto beforeOpCount = viz.operationCount();
@@ -731,7 +792,7 @@ TEST(ZigzagVisualizerTest, TranslateVQLAndAttachToFocus) {
   EXPECT_GT(viz.operationCount(), beforeOpCount);
 
   // Focus should have moved to the entry opcode of the compiled query
-  const auto newFocus = viz.focusCellId();
+  const auto newFocus = focusedCell(viz);
   EXPECT_NE(newFocus, originalFocus);
 
   // The entry opcode cell text should be an opcode mnemonic (e.g. #RESOLVE,
@@ -793,14 +854,14 @@ TEST(ZigzagVisualizerTest, CommandOmnibarTogglingAndTextInput) {
 
 TEST(ZigzagVisualizerTest, CommandOmnibarQuickPathNavigation) {
   ZigzagVisualizer viz("Sans 12");
-  const auto initialFocus = viz.focusCellId();
+  const auto initialFocus = focusedCell(viz);
   ASSERT_NE(initialFocus, 0U);
 
   viz.setCommandBarVisible(true);
   viz.setCommandBarText("/d.1");
   const bool success = viz.executeCommandBar();
   EXPECT_TRUE(success);
-  EXPECT_NE(viz.focusCellId(), initialFocus);
+  EXPECT_NE(focusedCell(viz), initialFocus);
   EXPECT_FALSE(viz.commandBarFeedback().empty());
   EXPECT_FALSE(viz.commandBarFeedbackIsError());
 
@@ -813,7 +874,7 @@ TEST(ZigzagVisualizerTest, CommandOmnibarQuickPathNavigation) {
 
 TEST(ZigzagVisualizerTest, CommandOmnibarScriptExecution) {
   ZigzagVisualizer viz("Sans 12");
-  [[maybe_unused]] const auto initialFocus   = viz.focusCellId();
+  [[maybe_unused]] const auto initialFocus   = focusedCell(viz);
   [[maybe_unused]] const auto initialOpCount = viz.operationCount();
 
   viz.setCommandBarVisible(true);
@@ -826,7 +887,7 @@ TEST(ZigzagVisualizerTest, CommandOmnibarScriptExecution) {
 
 TEST(ZigzagVisualizerTest, CommandOmnibarMacroDefinitionAndDispatch) {
   ZigzagVisualizer viz("Sans 12");
-  const auto root = viz.focusCellId();
+  const auto root = focusedCell(viz);
   ASSERT_NE(root, 0U);
 
   // Define a macro via Omnibar: :macro hop-first /d.1[0]
@@ -839,12 +900,12 @@ TEST(ZigzagVisualizerTest, CommandOmnibarMacroDefinitionAndDispatch) {
   // Dispatch the macro as a visualizer action
   const bool handled = viz.dispatchAction("hop-first");
   EXPECT_TRUE(handled);
-  EXPECT_NE(viz.focusCellId(), root);
+  EXPECT_NE(focusedCell(viz), root);
 }
 
 TEST(ZigzagVisualizerTest, LivingKeymapActionDispatching) {
   ZigzagVisualizer viz("Sans 12");
-  const auto initialFocus = viz.focusCellId();
+  const auto initialFocus = focusedCell(viz);
   ASSERT_NE(initialFocus, 0U);
 
   // swap-xy
@@ -859,7 +920,7 @@ TEST(ZigzagVisualizerTest, LivingKeymapActionDispatching) {
 
   // duplicate-focus-cell
   EXPECT_TRUE(viz.dispatchAction("duplicate-focus-cell"));
-  const auto dupFocus = viz.focusCellId();
+  const auto dupFocus = focusedCell(viz);
   EXPECT_NE(dupFocus, initialFocus);
   EXPECT_TRUE(
       viz.engine()->findCell(static_cast<CellRef>(dupFocus)).has_value());
@@ -871,7 +932,9 @@ TEST(ZigzagVisualizerTest, LivingKeymapActionDispatching) {
 
   // jump-home
   EXPECT_TRUE(viz.dispatchAction("jump-home"));
-  EXPECT_EQ(viz.focusCellId(), viz.engine()->manifold().home());
+  const auto home = viz.engine()->manifold().home();
+  ASSERT_TRUE(home);
+  EXPECT_EQ(focusedCell(viz), *home);
 }
 
 TEST(ZigzagVisualizerTest, CommandOmnibarViewAndLibraryCommands) {
@@ -998,10 +1061,10 @@ TEST(ZigzagVisualizerTest, BridgeCommandOmnibarCommands) {
   EXPECT_THAT(viz.commandBarFeedback(), testing::HasSubstr("test-doc-target"));
   EXPECT_FALSE(viz.commandBarFeedbackIsError());
 
-  const auto focus = viz.focusCellId();
+  const auto focus = focusedCell(viz);
   viz.setCommandBarText(std::format(":bridge-to-cell {}", focus));
   EXPECT_TRUE(viz.executeCommandBar());
-  EXPECT_EQ(viz.focusCellId(), focus);
+  EXPECT_EQ(focusedCell(viz), focus);
   EXPECT_THAT(
       viz.commandBarFeedback(),
       testing::HasSubstr(std::format("Bridged focus to cell {}", focus)));
@@ -1094,7 +1157,7 @@ TEST(ZigzagVisualizerTest, CellActivationCallbackAndReturnKeyDispatch) {
   EXPECT_EQ(activatedCell, 99U);
 
   // 3. Key::Return when no modal is grabbing
-  const auto focusId = viz.focusCellId();
+  const auto focusId = focusedCell(viz);
   EXPECT_FALSE(viz.active());
   EXPECT_TRUE(viz.keyPressed(gleditor::Key::Return, gleditor::KeyMods::None));
   EXPECT_EQ(activatedCell, focusId);
@@ -1112,7 +1175,7 @@ TEST(ZigzagVisualizerTest, ZigzagVisualizerTranscopyrightSettlement) {
   ZigzagVisualizer viz("Sans 12");
   ASSERT_NE(viz.engine(), nullptr);
 
-  const auto focus = viz.focusCellId();
+  const auto focus = focusedCell(viz);
   ASSERT_NE(focus, 0U);
 
   // Mark the cell as transcopyright-locked in cold cache
@@ -1161,8 +1224,8 @@ TEST(ZigzagVisualizerTest, QuotationCellInspectionAndBadge) {
   const auto fGenesis = foreignStore.sliceGenesis(xanadu::MicroversionId{});
   const auto fCellVer = foreignStore.makeCell(fGenesis, "Foreign content");
   const auto froot    = foreignStore.cellRefOf(fCellVer);
-  ASSERT_NE(froot, zigzag::noCell);
-  const auto fop = foreignStore.segmentedOps().idOf(froot);
+  ASSERT_TRUE(froot);
+  const auto fop = foreignStore.segmentedOps().idOf(*froot).value();
 
   xanadu::Store localStore;
   const auto lGenesis = localStore.sliceGenesis(xanadu::MicroversionId{});
@@ -1170,7 +1233,7 @@ TEST(ZigzagVisualizerTest, QuotationCellInspectionAndBadge) {
   const auto dimRef   = lDimVer.dim;
   const auto lCellVer = localStore.makeCell(lDimVer.version, "Local root text");
   const auto lroot    = localStore.cellRefOf(lCellVer);
-  ASSERT_NE(lroot, zigzag::noCell);
+  ASSERT_TRUE(lroot);
 
   const auto regVer = localStore.registerScroll(lCellVer, "foreign_scroll_123");
   const auto foreignScrollId =
@@ -1189,7 +1252,7 @@ TEST(ZigzagVisualizerTest, QuotationCellInspectionAndBadge) {
   spec.orderPolicy = "identity";
 
   const auto q =
-      localStore.quote(regVer, lroot, dimRef, "Alice's Keymap", pin, spec);
+      localStore.quote(regVer, *lroot, dimRef, "Alice's Keymap", pin, spec);
 
   ZigzagVisualizer viz("Sans 12");
   viz.bindXanaduStore(localStore, q.version);
@@ -1228,7 +1291,7 @@ TEST(ZigzagVisualizerTest, QuotationCommandBarExecution) {
   EXPECT_NE(viz.commandBarFeedback().find("Quoted structure 'BobDoc' minted"),
             std::string::npos);
 
-  const auto focus = viz.focusCellId();
+  const auto focus = focusedCell(viz);
   ASSERT_NE(focus, 0U);
   const auto cellInfo = viz.inspectCell(static_cast<CellRef>(focus));
   EXPECT_TRUE(cellInfo.is_quote);
@@ -1245,7 +1308,7 @@ TEST(ZigzagVisualizerTest, QuotationCommandBarExecution) {
   EXPECT_NE(viz.commandBarFeedback().find("Quoted query 'QueryQuote' minted"),
             std::string::npos);
 
-  const auto queryFocus = viz.focusCellId();
+  const auto queryFocus = focusedCell(viz);
   ASSERT_NE(queryFocus, 0U);
   const auto queryInfo = viz.inspectCell(static_cast<CellRef>(queryFocus));
   EXPECT_TRUE(queryInfo.is_quote);
@@ -1277,12 +1340,12 @@ TEST(ZigzagVisualizerTest, QuoteBuilderOmnibarAndReloadStoreVersion) {
   ASSERT_NE(viz.store(), nullptr);
   const auto curVer = viz.store()->primaryCurrentVersion();
   viz.reloadStoreVersion(curVer);
-  EXPECT_NE(viz.focusCellId(), 0U);
+  ASSERT_TRUE(viz.focusCellId());
 }
 
 TEST(ZigzagVisualizerTest, LinkHighlightsMarkExactBytesAndBorder) {
   ZigzagVisualizer viz("Sans 12");
-  const auto root = viz.focusCellId();
+  const auto root = focusedCell(viz);
   ASSERT_NE(root, 0U);
   const auto cell = static_cast<CellRef>(root);
 
@@ -1313,16 +1376,16 @@ TEST(ZigzagVisualizerTest, LinkHighlightsMarkExactBytesAndBorder) {
 
 TEST(ZigzagVisualizerTest, FocusingAnUnconnectedCellShowsIt) {
   ZigzagVisualizer viz("Sans 12");
-  const auto home = viz.focusCellId();
+  const auto home = focusedCell(viz);
   // Minted through the store directly, so no rank connects it to home.
   auto &store     = *viz.store();
   const auto made = store.makeCell(store.latest(), "island");
-  const auto cell = store.cellRefOf(made);
+  const auto cell = store.cellRefOf(made).value();
   viz.engine()->syncTo(made);
 
   viz.focusCell(cell);
 
-  EXPECT_EQ(viz.focusCellId(), cell);
+  EXPECT_EQ(focusedCell(viz), cell);
   const auto &shown = viz.visibleCells();
   ASSERT_TRUE(shown.contains(cell)) << "the focused cell has no card";
   EXPECT_GT(shown.at(cell).target_alpha, 0.0F);
@@ -1349,22 +1412,26 @@ TEST(ZigzagVisualizerTest, ReadableScaleOnlyEnlargesInQuarterSteps) {
 // as a lone home cell; one whose home the view already shows keeps it.
 TEST(ZigzagVisualizerTest, aSliceOpensAlongTheDimensionItsHomeUses) {
   xanadu::Store results;
-  auto at         = results.sliceGenesis(xanadu::MicroversionId{});
-  const auto rank = results.makeDimension(at, "d.result");
-  at              = results.makeCell(rank.version, "first result");
-  at = results.setLink(at, results.homeCell(), rank.dim, zigzag::DimVector::POS,
-                       results.cellRefOf(at));
+  auto at                = results.sliceGenesis(xanadu::MicroversionId{});
+  const auto rank        = results.makeDimension(at, "d.result");
+  at                     = results.makeCell(rank.version, "first result");
+  const auto resultsHome = results.homeCell();
+  ASSERT_TRUE(resultsHome);
+  at = results.setLink(at, *resultsHome, rank.dim, zigzag::DimVector::POS,
+                       results.cellRefOf(at).value());
 
   ZigzagVisualizer viz("Sans 12");
   viz.bindXanaduStore(results, at);
   EXPECT_EQ(viz.currentView().x_dimension, "d.result");
 
   xanadu::Store sequence;
-  auto seq       = sequence.sliceGenesis(xanadu::MicroversionId{});
-  const auto two = sequence.makeDimension(seq, "d.2");
-  seq            = sequence.makeCell(two.version, "below");
-  seq = sequence.setLink(seq, sequence.homeCell(), two.dim,
-                         zigzag::DimVector::POS, sequence.cellRefOf(seq));
+  auto seq                = sequence.sliceGenesis(xanadu::MicroversionId{});
+  const auto two          = sequence.makeDimension(seq, "d.2");
+  seq                     = sequence.makeCell(two.version, "below");
+  const auto sequenceHome = sequence.homeCell();
+  ASSERT_TRUE(sequenceHome);
+  seq = sequence.setLink(seq, *sequenceHome, two.dim, zigzag::DimVector::POS,
+                         sequence.cellRefOf(seq).value());
   viz.bindXanaduStore(sequence, seq);
   EXPECT_EQ(viz.currentView().x_dimension, "d.result")
       << "home links along d.2, which the view still shows";
@@ -1409,4 +1476,41 @@ TEST(ZigzagVisualizerTest, DimensionBundlesDoNotAuthorMissingDimensions) {
   EXPECT_EQ(store.opCount(), before);
   EXPECT_EQ(viz.sliceHead(), head);
   EXPECT_FALSE(store.rebuildManifold(head).dimensionNamed("d.require", store));
+}
+
+TEST(ZigzagVisualizerTest, DerivedDimensionQueryHasNoStoredCloneMaster) {
+  ZigzagVisualizer viz("Sans 12");
+  auto &engine      = *viz.engine();
+  const auto root   = focusedCell(viz);
+  const auto before = viz.operationCount();
+  const auto dims   = engine.metaDimensionsOf(root);
+  ASSERT_FALSE(dims.empty());
+  EXPECT_TRUE(std::holds_alternative<MetaDimensions>(dims.back()));
+
+  auto facet = engine.linked(root, engine.metaDimension());
+  ASSERT_TRUE(facet);
+  for (std::size_t i = 1; i < dims.size(); ++i) {
+    facet = engine.linked(*facet, engine.metaDimension());
+    ASSERT_TRUE(facet);
+  }
+  EXPECT_FALSE(engine.linked(noCell, engine.metaDimension()));
+  const CellRef unknown = ephemeralBit - 1;
+  ASSERT_FALSE(engine.manifold().contains(unknown));
+  EXPECT_TRUE(engine.metaDimensionsOf(unknown).empty());
+  EXPECT_FALSE(engine.linked(unknown, engine.metaDimension()));
+  EXPECT_EQ(engine.resolveCellText(*facet), "d.meta-dims");
+  ASSERT_TRUE(engine.findCell(*facet));
+  EXPECT_EQ(engine.findCell(*facet)->birthOp, *facet);
+  const auto cloneDim = engine.dimensionFor("d.clone");
+  EXPECT_FALSE(engine.cloneMaster(*facet, cloneDim));
+  EXPECT_FALSE(engine.linked(*facet, cloneDim, DimVector::NEG));
+  EXPECT_FALSE(engine.linked(*facet, engine.metaDimension()));
+  EXPECT_EQ(viz.operationCount(), before);
+}
+
+TEST(ZigzagVisualizerTest, EmptyDimensionNameIsRefusedWithoutOperations) {
+  ZigzagVisualizer viz("Sans 12");
+  const auto before = viz.operationCount();
+  EXPECT_THROW(viz.engine()->dimensionFor(""), std::invalid_argument);
+  EXPECT_EQ(viz.operationCount(), before);
 }

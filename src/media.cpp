@@ -188,17 +188,28 @@ struct MediaPlayer::Impl {
       libvlc_media_release(vlcMedia);
       vlcMedia = nullptr;
     }
+    {
+      std::scoped_lock lock(videoMutex);
+      frame.reset();
+      frameAvailable = false;
+    }
     streamState.reset();
     gifDecoder.reset();
     svgAnimator.reset();
+    currentResource.reset();
     backend = Backend::Dummy;
   }
 
   void updateAnimFrame() {
     if (backend == Backend::Gif && gifDecoder) {
-      const auto &f = gifDecoder->frameAt(animPosition);
+      const auto f = gifDecoder->frameAt(animPosition);
       std::scoped_lock lock(videoMutex);
-      videoBuffer      = f.rgba;
+      if (!f) {
+        frame.reset();
+        frameAvailable = false;
+        return;
+      }
+      videoBuffer      = f->rgba;
       auto newFrame    = std::make_shared<VideoFrame>();
       newFrame->width  = frameWidth;
       newFrame->height = frameHeight;
@@ -408,7 +419,8 @@ struct MediaPlayer::Impl {
 
     if (timeRange) {
       const auto pos = positionSeconds();
-      if (pos < timeRange->startSeconds || pos >= timeRange->endSeconds) {
+      if (!pos || *pos < timeRange->startSeconds ||
+          *pos >= timeRange->endSeconds) {
         seek(timeRange->startSeconds);
       }
     }
@@ -473,15 +485,15 @@ struct MediaPlayer::Impl {
   }
 
   void seekFraction(const float fraction) {
-    const auto dur = durationSeconds();
-    if (dur > 0.0F) {
-      if (timeRange) {
-        const auto target =
-            timeRange->startSeconds + (fraction * timeRange->duration());
-        seek(target);
-      } else {
-        seek(fraction * dur);
+    if (timeRange) {
+      const auto rangeDuration = timeRange->duration();
+      if (rangeDuration > 0.0F) {
+        seek(timeRange->startSeconds + (fraction * rangeDuration));
       }
+      return;
+    }
+    if (const auto dur = durationSeconds(); dur && *dur > 0.0F) {
+      seek(fraction * *dur);
     }
   }
 
@@ -551,41 +563,46 @@ struct MediaPlayer::Impl {
     return PlaybackState::Stopped;
   }
 
-  [[nodiscard]] float positionSeconds() const {
+  [[nodiscard]] std::optional<float> positionSeconds() const {
     if (backend == Backend::Gif || backend == Backend::Thorvg) {
       return animPosition;
     }
 
-    if (dummyMode || nullptr == mediaPlayer) {
+    if (dummyMode && currentResource && currentResource->isValid()) {
       return simulatedPosition;
     }
+    if (nullptr == mediaPlayer) return std::nullopt;
     const auto ms = libvlc_media_player_get_time(mediaPlayer);
-    return ms >= 0 ? static_cast<float>(ms) / 1000.0F : 0.0F;
+    return ms >= 0 ? std::optional<float>{static_cast<float>(ms) / 1000.0F}
+                   : std::nullopt;
   }
 
-  [[nodiscard]] float durationSeconds() const {
+  [[nodiscard]] std::optional<float> durationSeconds() const {
     if (backend == Backend::Gif || backend == Backend::Thorvg) {
       return animDuration;
     }
 
-    if (dummyMode || nullptr == mediaPlayer) {
+    if (dummyMode && currentResource && currentResource->isValid()) {
       return simulatedDuration;
     }
+    if (nullptr == mediaPlayer) return std::nullopt;
     const auto ms = libvlc_media_player_get_length(mediaPlayer);
-    return ms > 0 ? static_cast<float>(ms) / 1000.0F : 0.0F;
+    return ms >= 0 ? std::optional<float>{static_cast<float>(ms) / 1000.0F}
+                   : std::nullopt;
   }
 
-  [[nodiscard]] float progressFraction() const {
-    const auto dur = durationSeconds();
-    if (dur <= 0.0F) {
-      return 0.0F;
-    }
+  [[nodiscard]] std::optional<float> progressFraction() const {
+    const auto pos = positionSeconds();
+    if (!pos) return std::nullopt;
     if (timeRange) {
-      const auto pos = positionSeconds();
-      return std::clamp((pos - timeRange->startSeconds) / timeRange->duration(),
-                        0.0F, 1.0F);
+      const auto rangeDuration = timeRange->duration();
+      if (rangeDuration <= 0.0F) return std::nullopt;
+      return std::clamp((*pos - timeRange->startSeconds) / rangeDuration, 0.0F,
+                        1.0F);
     }
-    return std::clamp(positionSeconds() / dur, 0.0F, 1.0F);
+    const auto dur = durationSeconds();
+    if (!dur || *dur <= 0.0F) return std::nullopt;
+    return std::clamp(*pos / *dur, 0.0F, 1.0F);
   }
 
   void update(const float dtSeconds) {
@@ -625,7 +642,7 @@ struct MediaPlayer::Impl {
     if (nullptr != mediaPlayer && timeRange &&
         state() == PlaybackState::Playing) {
       const auto pos = positionSeconds();
-      if (pos >= timeRange->endSeconds) {
+      if (pos && *pos >= timeRange->endSeconds) {
         if (looping) {
           seek(timeRange->startSeconds);
         } else {
@@ -682,16 +699,23 @@ void MediaPlayer::setPlaybackRate(const float rate) {
 float MediaPlayer::playbackRate() const { return impl->playbackRate(); }
 
 PlaybackState MediaPlayer::state() const { return impl->state(); }
-float MediaPlayer::positionSeconds() const { return impl->positionSeconds(); }
-float MediaPlayer::durationSeconds() const { return impl->durationSeconds(); }
-float MediaPlayer::progressFraction() const { return impl->progressFraction(); }
+std::optional<float> MediaPlayer::positionSeconds() const {
+  return impl->positionSeconds();
+}
+std::optional<float> MediaPlayer::durationSeconds() const {
+  return impl->durationSeconds();
+}
+std::optional<float> MediaPlayer::progressFraction() const {
+  return impl->progressFraction();
+}
 
 void MediaPlayer::setTimeRange(const float startSeconds,
                                const float endSeconds) {
   impl->timeRange = TimeRange{.startSeconds = std::max(0.0F, startSeconds),
                               .endSeconds = std::max(startSeconds, endSeconds)};
-  if (impl->positionSeconds() < impl->timeRange->startSeconds ||
-      impl->positionSeconds() > impl->timeRange->endSeconds) {
+  if (const auto position = impl->positionSeconds();
+      position && (*position < impl->timeRange->startSeconds ||
+                   *position > impl->timeRange->endSeconds)) {
     impl->seek(impl->timeRange->startSeconds);
   }
 }

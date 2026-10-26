@@ -72,9 +72,9 @@ struct RenderItemNewDoc : RenderItem {
  * which document it meant should do.
  */
 struct RenderItemCloseDoc : RenderItem {
-  static constexpr std::uint32_t mostRecent = ~0U;
-  std::uint32_t docIndex;
-  explicit RenderItemCloseDoc(const std::uint32_t index = mostRecent)
+  std::optional<std::uint32_t> docIndex;
+  explicit RenderItemCloseDoc(
+      const std::optional<std::uint32_t> index = std::nullopt)
       : RenderItem(Type::CloseDoc), docIndex(index) {}
 };
 
@@ -88,9 +88,9 @@ struct RenderItemCloseDoc : RenderItem {
  * Renderer::saveDoc for what that does instead of guessing a name.
  */
 struct RenderItemSaveDoc : RenderItem {
-  static constexpr std::uint32_t mostRecent = ~0U;
-  std::uint32_t docIndex;
-  explicit RenderItemSaveDoc(const std::uint32_t index = mostRecent)
+  std::optional<std::uint32_t> docIndex;
+  explicit RenderItemSaveDoc(
+      const std::optional<std::uint32_t> index = std::nullopt)
       : RenderItem(Type::SaveDoc), docIndex(index) {}
 };
 
@@ -533,7 +533,7 @@ protected:
    * but is kept alive and drawn until its fade finishes. The documents after
    * it are renumbered and eased into the places that opened up.
    */
-  void closeDoc(RenderState &state, std::uint32_t index);
+  void closeDoc(RenderState &state, std::optional<std::uint32_t> index);
 
   /**
    * @brief Write the document at @p index back to wherever it was opened
@@ -544,7 +544,7 @@ protected:
    * no name yet (created with "new"), the write itself failed (permissions,
    * a full disk, a revoked Android Uri grant), or it succeeded.
    */
-  void saveDoc(RenderState &state, std::uint32_t index);
+  void saveDoc(RenderState &state, std::optional<std::uint32_t> index);
 
   /**
    * Draw one frame.

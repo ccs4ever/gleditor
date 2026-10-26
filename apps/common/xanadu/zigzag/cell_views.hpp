@@ -66,21 +66,27 @@ present(const CellRef ref) noexcept {
   return gleditor::fromSentinel<noCell>(ref);
 }
 
-/// @p from's neighbour along @p dim, or nullopt. linked() with the sentinel
-/// taken off, so a chain of hops is a chain of and_then()s.
+/// @p from's neighbour along @p dim, or nullopt, for composing graph hops.
 template <CellGraph M>
 [[nodiscard]] constexpr std::optional<CellRef>
 step(const M &m, const CellRef from, const DimRef dim,
      const DimVector dir = DimVector::POS) noexcept {
-  const auto cell = m.linked(from, dim, dir);
-  return cell.has_value() && *cell != noCell ? std::optional<CellRef>{*cell}
-                                             : std::nullopt;
+  return m.linked(from, dim, dir);
 }
 
 template <CellGraph M>
 [[nodiscard]] constexpr std::optional<CellRef>
 step(const M &m, const CellRef from, const DirectedDim target) noexcept {
   return step(m, from, target.dim, target.dir);
+}
+
+/// Missing query endpoints or dimensions produce no hop.
+template <CellGraph M>
+[[nodiscard]] constexpr std::optional<CellRef>
+step(const M &m, const std::optional<CellRef> from,
+     const std::optional<DimRef> dim,
+     const DimVector dir = DimVector::POS) noexcept {
+  return from && dim ? step(m, *from, *dim, dir) : std::nullopt;
 }
 
 /// A step() bound to its manifold and direction, for `and_then`:
@@ -114,7 +120,7 @@ hops(const M &m, const CellRef from, const DimRef dim, const std::size_t n,
  *
  * Yields @p start first, then each neighbour in turn, and ends at the first
  * of:
- * - a dead end (the next link is noCell),
+ * - a dead end (the next link is absent),
  * - a self-link (the next cell is the current one),
  * - a ring closing (the next cell is @p start), or
  * - traversalBound() + 1 cells, which bounds a cycle that does not pass
@@ -139,25 +145,22 @@ public:
     iterator() = default;
     iterator(const M *m, const CellRef start, const DimRef dim,
              const DimVector dir, const std::size_t limit) noexcept
-        : m_{m}, start_{start}, cur_{start}, dim_{dim}, dir_{dir},
+        : m_{m}, start_{start}, cur_{present(start)}, dim_{dim}, dir_{dir},
           limit_{limit} {
       if (noCell == dim || 0 == limit) {
-        cur_ = noCell;
+        cur_.reset();
       }
     }
 
-    [[nodiscard]] CellRef operator*() const noexcept { return cur_; }
+    [[nodiscard]] CellRef operator*() const noexcept { return *cur_; }
 
     iterator &operator++() noexcept {
       if (++taken_ >= limit_) {
-        cur_ = noCell;
+        cur_.reset();
         return *this;
       }
-      const auto next = m_->linked(cur_, dim_, dir_);
-      cur_ = (!next.has_value() || *next == noCell || *next == cur_ ||
-              *next == start_)
-                 ? noCell
-                 : *next;
+      const auto next = m_->linked(*cur_, dim_, dir_);
+      cur_ = (!next || next == cur_ || *next == start_) ? std::nullopt : next;
       return *this;
     }
 
@@ -169,7 +172,7 @@ public:
 
     [[nodiscard]] bool
     operator==(std::default_sentinel_t /*end*/) const noexcept {
-      return noCell == cur_;
+      return !cur_;
     }
 
     // Two iterators over one rank are equal when they are at the same place;
@@ -177,14 +180,14 @@ public:
     // traversalBound() guard is still bounding. Every end compares equal to
     // every other end.
     [[nodiscard]] bool operator==(const iterator &other) const noexcept {
-      return (noCell == cur_ && noCell == other.cur_) ||
+      return (!cur_ && !other.cur_) ||
              (cur_ == other.cur_ && taken_ == other.taken_);
     }
 
   private:
     const M *m_{nullptr};
     CellRef start_{noCell};
-    CellRef cur_{noCell};
+    std::optional<CellRef> cur_;
     DimRef dim_{noCell};
     DimVector dir_{DimVector::POS};
     std::size_t taken_{0};
@@ -197,7 +200,8 @@ public:
       : m_{&m}, start_{start}, dim_{dim}, dir_{dir} {}
 
   [[nodiscard]] iterator begin() const noexcept {
-    return iterator{m_, start_, dim_, dir_, m_->traversalBound() + 1};
+    return m_ ? iterator{m_, start_, dim_, dir_, m_->traversalBound() + 1}
+              : iterator{};
   }
   [[nodiscard]] static std::default_sentinel_t end() noexcept { return {}; }
 
@@ -222,11 +226,26 @@ template <CellGraph M>
   return RankView<M>{m, start, target.dim, target.dir};
 }
 
+/// An absent query origin or dimension is an empty rank.
+template <CellGraph M>
+[[nodiscard]] RankView<M> rank(const M &m, const std::optional<CellRef> start,
+                               const std::optional<DimRef> dim,
+                               const DimVector dir = DimVector::POS) noexcept {
+  return start && dim ? rank(m, *start, *dim, dir) : RankView<M>{};
+}
+
 /// The rank after @p start: its neighbours, not the cell itself. The ring
 /// guard still stops at @p start, so a rank walked from its head -- the d.dims
 /// rank from home, a group from its header cell -- ends where it began.
 template <CellGraph M>
 [[nodiscard]] auto rankAfter(const M &m, const CellRef start, const DimRef dim,
+                             const DimVector dir = DimVector::POS) noexcept {
+  return rank(m, start, dim, dir) | std::views::drop(1);
+}
+
+template <CellGraph M>
+[[nodiscard]] auto rankAfter(const M &m, const std::optional<CellRef> start,
+                             const std::optional<DimRef> dim,
                              const DimVector dir = DimVector::POS) noexcept {
   return rank(m, start, dim, dir) | std::views::drop(1);
 }
@@ -240,6 +259,15 @@ template <CellGraph M>
                                const DimRef dim,
                                const DimVector dir = DimVector::POS) noexcept {
   return lastOf(rank(m, start, dim, dir)).value_or(start);
+}
+
+template <CellGraph M>
+[[nodiscard]] std::optional<CellRef>
+rankTail(const M &m, const std::optional<CellRef> start,
+         const std::optional<DimRef> dim,
+         const DimVector dir = DimVector::POS) noexcept {
+  if (!start) return std::nullopt;
+  return lastOf(rank(m, start, dim, dir)).value_or(*start);
 }
 
 /**
@@ -298,8 +326,8 @@ constexpr void walkRank(const M &m, const CellRef start,
 
 /// One neighbour of a cell: the dimension it lies along and the cell there.
 struct Hop {
-  DimRef dim{noCell};
-  CellRef cell{noCell};
+  DimRef dim;
+  CellRef cell;
 
   bool operator==(const Hop &) const = default;
 };
@@ -310,11 +338,12 @@ template <CellGraph M>
 [[nodiscard]] auto neighbours(const M &m, const CellRef ref,
                               const DimVector dir) noexcept {
   return m.dimensionsOf(ref) |
-         std::views::transform([dir](const DimLink &link) noexcept {
-           return Hop{.dim = link.dim, .cell = link.neighbor(dir)};
+         std::views::filter([dir](const DimLink &link) noexcept {
+           return link.neighbor(dir).has_value();
          }) |
-         std::views::filter(
-             [](const Hop &hop) noexcept { return noCell != hop.cell; });
+         std::views::transform([dir](const DimLink &link) noexcept {
+           return Hop{.dim = link.dim, .cell = *link.neighbor(dir)};
+         });
 }
 
 /// Both directions: every posward neighbour, then every negward one.

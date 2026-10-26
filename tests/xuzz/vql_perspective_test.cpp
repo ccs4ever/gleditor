@@ -38,10 +38,8 @@ TEST(VQLPerspectiveTest, ConcurrentAnnotationsAndValencePreservation) {
 
   // 3. Verify canonical paragraph's own +d.comment degree <= 1 (specifically 0
   // here)
-  zigzag::CellRef canonicalComment =
-      arena.linkedMinting(paragraph, dComment, DimVector::POS)
-          .value_or(zigzag::noCell);
-  EXPECT_EQ(canonicalComment, zigzag::noCell);
+  EXPECT_FALSE(
+      arena.linkedMinting(paragraph, dComment, DimVector::POS).has_value());
 
   // 4. Verify reading through $p/@alice:+d.comment returns Alice's note
   auto readAlice = engine.execute("$p/@alice:+d.comment");

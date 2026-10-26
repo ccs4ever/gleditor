@@ -203,7 +203,7 @@ struct StructureMeta {
 /// sliceToStore()/storeToSlice()), not an on-disk format of its own.
 struct ZzStructureDocument {
   StructureMeta meta;
-  CellID focus = 0;
+  std::optional<CellID> focus;
   ViewAxisBinding view;
   std::unordered_map<DimID, DimensionMeta> dimension_meta;
   SceneMeta scene;

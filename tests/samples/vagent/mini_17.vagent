@@ -1,0 +1,14 @@
+predicate available(item: Str)
+event Report
+event Withdraw
+event RemoveOwn
+
+agent Reporter {
+  on Report { tell parent available("bolt") }
+  on Withdraw { untell parent available("bolt") }
+}
+agent Receiver {
+  var reporter: Opt<Agent> := none
+  on Initialize { reporter := spawn Reporter() in inner }
+  on RemoveOwn { forget available("bolt") }
+}

@@ -32,7 +32,7 @@ namespace xanadu {
 struct QuotationBuilderConfig {
   std::string foreignScrollKey;
   MicroversionId pinnedVersion;
-  ExternOpRef rootRef;
+  std::optional<ExternOpRef> rootRef;
   std::string rootLabel;
   Selector::Kind mode{Selector::Kind::Closure};
 
@@ -89,7 +89,7 @@ public:
                   const Scroll *sealedAs                      = nullptr,
                   std::optional<MicroversionId> pinnedVersion = std::nullopt);
 
-  QuotationBuilder *setRootCell(zigzag::CellRef cell);
+  QuotationBuilder *setRootCell(std::optional<zigzag::CellRef> cell);
   QuotationBuilder *setRootRef(ExternOpRef ref, std::string label = {});
 
   QuotationBuilder *setMode(const Selector::Kind mode) noexcept {

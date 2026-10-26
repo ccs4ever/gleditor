@@ -33,9 +33,8 @@ TEST(VortexBenchmarkTest, LinkPrimitiveThroughput) {
   const auto t0 = std::chrono::steady_clock::now();
   CellRef cur   = root;
   for (std::size_t i = 0; i < OpsCount; ++i) {
-    auto next =
-        core.link(cur, testDim, DimVector::POS, static_cast<CellRef>(-1));
-    cur = *next;
+    auto next = core.allocateLink(cur, testDim, DimVector::POS);
+    cur       = *next;
   }
   const auto t1 = std::chrono::steady_clock::now();
   const auto durationUs =
@@ -61,9 +60,9 @@ TEST(VortexBenchmarkTest, ValueSpliceAndSliceThroughput) {
   const auto t0 = std::chrono::steady_clock::now();
   for (std::size_t i = 0; i < OpsCount; ++i) {
     // Splicing
-    core.value(doc, 6, 4, CellValue(std::string("Omega")));
+    core.writeValue(doc, 6, 4, CellValue(std::string("Omega")));
     // Slicing
-    auto slice = core.value(doc, 0, 15);
+    auto slice = core.readValue(doc, 0, 15);
     (void)slice;
   }
   const auto t1 = std::chrono::steady_clock::now();

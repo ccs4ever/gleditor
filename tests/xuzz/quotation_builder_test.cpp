@@ -37,24 +37,53 @@ TEST(QuotationBuilderTest, ConfigureForeignStoreAndRootCell) {
 
   auto atA         = alice.head;
   atA              = alice.store->makeCell(atA, "SettingName");
-  const auto sName = alice.store->cellRefOf(atA);
-  atA        = alice.store->setLink(atA, alice.store->homeCell(), dimVarsA,
-                                    zigzag::DimVector::POS, sName);
+  const auto sName = alice.store->cellRefOf(atA).value();
+  atA = alice.store->setLink(atA, alice.store->homeCell().value(), dimVarsA,
+                             zigzag::DimVector::POS, sName);
   alice.head = atA;
 
   QuotationBuilder builder;
+  EXPECT_FALSE(builder.config().rootRef.has_value());
   builder.setForeignStore(alice.scrollKey, alice.store.get());
 
   EXPECT_EQ(builder.config().foreignScrollKey, alice.scrollKey);
   EXPECT_EQ(builder.config().pinnedVersion, alice.head);
-  EXPECT_EQ(builder.config().rootRef.produces,
-            alice.store->segmentedOps().idOf(alice.store->homeCell()));
+  ASSERT_TRUE(builder.config().rootRef.has_value());
+  EXPECT_EQ(builder.config().rootRef->produces,
+            alice.store->segmentedOps()
+                .idOf(alice.store->homeCell().value())
+                .value());
   EXPECT_EQ(builder.config().rootLabel, "home");
 
   builder.setRootCell(sName);
-  EXPECT_EQ(builder.config().rootRef.produces,
-            alice.store->segmentedOps().idOf(sName));
+  ASSERT_TRUE(builder.config().rootRef.has_value());
+  EXPECT_EQ(builder.config().rootRef->produces,
+            alice.store->segmentedOps().idOf(sName).value());
   EXPECT_EQ(builder.config().rootLabel, "SettingName");
+
+  const auto selectedRoot = builder.config().rootRef;
+  EXPECT_THROW(builder.setRootCell(zigzag::noCell), std::invalid_argument);
+  EXPECT_THROW(builder.setRootCell(zigzag::CellRef{999999}),
+               std::invalid_argument);
+  EXPECT_EQ(builder.config().rootRef, selectedRoot);
+  builder.setRootCell(std::nullopt);
+  EXPECT_FALSE(builder.config().rootRef);
+  EXPECT_TRUE(builder.config().rootLabel.empty());
+}
+
+TEST(QuotationBuilderTest, ExplicitInvalidRootRemainsPresentButUnresolvable) {
+  TestStore alice("btpk:aaaa:alice");
+  QuotationBuilder builder;
+  builder.setForeignStore(alice.scrollKey, alice.store.get());
+  builder.setRootRef(ExternOpRef{.scroll = 1, .produces = MicroversionId{}},
+                     "root-id");
+
+  ASSERT_TRUE(builder.config().rootRef.has_value());
+  builder.recomputePreview();
+
+  EXPECT_FALSE(builder.preview().isValid);
+  EXPECT_EQ(builder.preview().state, QuotationState::Absent);
+  EXPECT_EQ(builder.config().rootLabel, "root-id");
 }
 
 TEST(QuotationBuilderTest, PreviewRankMode) {
@@ -63,11 +92,11 @@ TEST(QuotationBuilderTest, PreviewRankMode) {
 
   auto atA      = alice.head;
   atA           = alice.store->makeCell(atA, "item1");
-  const auto c1 = alice.store->cellRefOf(atA);
+  const auto c1 = alice.store->cellRefOf(atA).value();
   atA           = alice.store->makeCell(atA, "item2");
-  const auto c2 = alice.store->cellRefOf(atA);
+  const auto c2 = alice.store->cellRefOf(atA).value();
   atA           = alice.store->makeCell(atA, "item3");
-  const auto c3 = alice.store->cellRefOf(atA);
+  const auto c3 = alice.store->cellRefOf(atA).value();
 
   atA        = alice.store->setLink(atA, c1, dimR, zigzag::DimVector::POS, c2);
   atA        = alice.store->setLink(atA, c2, dimR, zigzag::DimVector::POS, c3);
@@ -80,7 +109,7 @@ TEST(QuotationBuilderTest, PreviewRankMode) {
 
   const ExternOpRef dimRef{
       .scroll   = 1,
-      .produces = alice.store->segmentedOps().idOf(dimR),
+      .produces = alice.store->segmentedOps().idOf(dimR).value(),
   };
   builder.setRankStep(dimRef, zigzag::DimVector::POS);
 
@@ -112,9 +141,9 @@ TEST(QuotationBuilderTest, PreviewClosureMode) {
 
   auto atA         = alice.head;
   atA              = alice.store->makeCell(atA, "tab_size");
-  const auto sName = alice.store->cellRefOf(atA);
+  const auto sName = alice.store->cellRefOf(atA).value();
   atA              = alice.store->makeCell(atA, "4");
-  const auto sVal  = alice.store->cellRefOf(atA);
+  const auto sVal  = alice.store->cellRefOf(atA).value();
 
   atA = alice.store->setLink(atA, sName, dimVals, zigzag::DimVector::POS, sVal);
   alice.head = atA;
@@ -126,11 +155,11 @@ TEST(QuotationBuilderTest, PreviewClosureMode) {
 
   const ExternOpRef varsRef{
       .scroll   = 1,
-      .produces = alice.store->segmentedOps().idOf(dimVars),
+      .produces = alice.store->segmentedOps().idOf(dimVars).value(),
   };
   const ExternOpRef valsRef{
       .scroll   = 1,
-      .produces = alice.store->segmentedOps().idOf(dimVals),
+      .produces = alice.store->segmentedOps().idOf(dimVals).value(),
   };
   builder.setCarriedDimensions({varsRef, valsRef});
 
@@ -157,11 +186,11 @@ TEST(QuotationBuilderTest, PreviewVqlQueryMode) {
 
   auto atA      = alice.head;
   atA           = alice.store->makeCell(atA, "alpha");
-  const auto cA = alice.store->cellRefOf(atA);
+  const auto cA = alice.store->cellRefOf(atA).value();
   atA           = alice.store->makeCell(atA, "beta");
-  const auto cB = alice.store->cellRefOf(atA);
+  const auto cB = alice.store->cellRefOf(atA).value();
 
-  atA = alice.store->setLink(atA, alice.store->homeCell(), dimVars,
+  atA = alice.store->setLink(atA, alice.store->homeCell().value(), dimVars,
                              zigzag::DimVector::POS, cA);
   atA = alice.store->setLink(atA, cA, dimVars, zigzag::DimVector::POS, cB);
   alice.head = atA;
@@ -185,11 +214,11 @@ TEST(QuotationBuilderTest, PreviewNavigation) {
 
   auto atA      = alice.head;
   atA           = alice.store->makeCell(atA, "1");
-  const auto c1 = alice.store->cellRefOf(atA);
+  const auto c1 = alice.store->cellRefOf(atA).value();
   atA           = alice.store->makeCell(atA, "2");
-  const auto c2 = alice.store->cellRefOf(atA);
+  const auto c2 = alice.store->cellRefOf(atA).value();
   atA           = alice.store->makeCell(atA, "3");
-  const auto c3 = alice.store->cellRefOf(atA);
+  const auto c3 = alice.store->cellRefOf(atA).value();
 
   atA        = alice.store->setLink(atA, c1, dimR, zigzag::DimVector::POS, c2);
   atA        = alice.store->setLink(atA, c2, dimR, zigzag::DimVector::POS, c3);
@@ -200,7 +229,7 @@ TEST(QuotationBuilderTest, PreviewNavigation) {
   builder.setRootCell(c1);
   builder.setMode(Selector::Kind::Rank);
   builder.setRankStep(ExternOpRef{
-      .scroll = 1, .produces = alice.store->segmentedOps().idOf(dimR)});
+      .scroll = 1, .produces = alice.store->segmentedOps().idOf(dimR).value()});
   builder.recomputePreview();
 
   EXPECT_EQ(builder.preview().focusedIndex, 0U);
@@ -229,7 +258,7 @@ TEST(QuotationBuilderTest, CommitQuotationAppliesToLocalStore) {
 
   auto atA      = alice.head;
   atA           = alice.store->makeCell(atA, "target_cell");
-  const auto cA = alice.store->cellRefOf(atA);
+  const auto cA = alice.store->cellRefOf(atA).value();
   alice.head    = atA;
 
   TestStore bob("btpk:bbbb:bob");
@@ -243,15 +272,15 @@ TEST(QuotationBuilderTest, CommitQuotationAppliesToLocalStore) {
   builder.setRootRef(
       ExternOpRef{
           .scroll   = sId,
-          .produces = alice.store->segmentedOps().idOf(cA),
+          .produces = alice.store->segmentedOps().idOf(cA).value(),
       },
       "target_cell");
   builder.setMode(Selector::Kind::Cell);
   builder.setQuotationLabel("AdoptedTarget");
 
-  const auto q =
-      builder.commit(*bob.store, bob.head, bob.store->homeCell(), dimLocal);
-  bob.head = q.version;
+  const auto q = builder.commit(*bob.store, bob.head,
+                                bob.store->homeCell().value(), dimLocal);
+  bob.head     = q.version;
 
   EXPECT_NE(q.quotationCell, zigzag::noCell);
   EXPECT_NE(q.placeholderCell, zigzag::noCell);
@@ -260,9 +289,9 @@ TEST(QuotationBuilderTest, CommitQuotationAppliesToLocalStore) {
 
   const auto bobFold = bob.store->rebuildManifold(bob.head);
   EXPECT_EQ(bobFold.textOf(q.quotationCell, *bob.store), "AdoptedTarget");
-  EXPECT_EQ(
-      bobFold.linked(bob.store->homeCell(), dimLocal, zigzag::DimVector::POS),
-      q.quotationCell);
+  EXPECT_EQ(bobFold.linked(bob.store->homeCell().value(), dimLocal,
+                           zigzag::DimVector::POS),
+            q.quotationCell);
 }
 
 } // namespace

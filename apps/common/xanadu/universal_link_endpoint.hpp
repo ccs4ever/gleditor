@@ -7,6 +7,7 @@
 #define COMMON_XANADU_UNIVERSAL_LINK_ENDPOINT_HPP
 
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 #include "common/xanadu/ops.hpp"
@@ -70,8 +71,9 @@ struct alignas(4) UniversalLinkEnd {
     return (flags & 2U) != 0;
   }
 
-  [[nodiscard]] constexpr zigzag::CellRef cell() const noexcept {
-    return isCell() ? static_cast<zigzag::CellRef>(targetId) : zigzag::noCell;
+  [[nodiscard]] constexpr std::optional<zigzag::CellRef> cell() const noexcept {
+    if (!isCell() || targetId == zigzag::noCell) return std::nullopt;
+    return static_cast<zigzag::CellRef>(targetId);
   }
 
   static constexpr UniversalLinkEnd

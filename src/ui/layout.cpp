@@ -22,20 +22,31 @@ float component(Size size, Axis axis) {
 Axis other(Axis axis) {
   return axis == Axis::Horizontal ? Axis::Vertical : Axis::Horizontal;
 }
-float maximum(const LayoutItem &item, Axis axis) {
-  const float value = component(item.maximum, axis);
-  return std::isinf(value) && value > 0.0F ? value : extent(value);
+std::optional<float> maximum(const LayoutItem &item, Axis axis) {
+  return axis == Axis::Horizontal ? item.maximumWidth : item.maximumHeight;
+}
+float bounded(const float value, const LayoutItem &item, const Axis axis) {
+  if (const auto limit = maximum(item, axis)) return std::min(value, *limit);
+  return value;
 }
 float minimum(const LayoutItem &item, Axis axis) {
-  return std::min(extent(component(item.minimum, axis)), maximum(item, axis));
+  return bounded(extent(component(item.minimum, axis)), item, axis);
 }
 float preferred(const LayoutItem &item, Axis axis) {
-  return std::clamp(extent(component(item.intrinsic, axis)),
-                    minimum(item, axis), maximum(item, axis));
+  return bounded(
+      std::max(extent(component(item.intrinsic, axis)), minimum(item, axis)),
+      item, axis);
+}
+void validateMaximum(const std::optional<float> value) {
+  if (value && (!std::isfinite(*value) || *value < 0.0F))
+    throw std::invalid_argument(
+        "layout maximum must be finite and nonnegative");
 }
 void validateIds(std::span<const LayoutItem> items) {
   std::unordered_set<std::uint32_t> ids;
   for (const auto &item : items) {
+    validateMaximum(item.maximumWidth);
+    validateMaximum(item.maximumHeight);
     if (!ids.insert(item.id).second) {
       throw std::invalid_argument("layout has duplicate item id");
     }
@@ -53,15 +64,15 @@ Rect intersection(Rect rect, Rect bounds) {
   return {left, bottom, right - left, top - bottom};
 }
 void addBox(LayoutResult &result, const LayoutItem &item, Rect rect,
-            std::uint32_t parent) {
+            const std::optional<std::uint32_t> parent) {
   rect                = intersection(UiMetrics{}.rounded(rect), result.bounds);
   const float padding = extent(item.paddingPx);
   const float horizontal = std::min(padding, rect.width * 0.5F);
   const float vertical   = std::min(padding, rect.height * 0.5F);
   const auto content     = intersection(
       UiMetrics{}.rounded({rect.left + horizontal, rect.bottom + vertical,
-                           std::max(0.0F, rect.width - 2.0F * horizontal),
-                           std::max(0.0F, rect.height - 2.0F * vertical)}),
+                               std::max(0.0F, rect.width - 2.0F * horizontal),
+                               std::max(0.0F, rect.height - 2.0F * vertical)}),
       rect);
   result.boxes.push_back(
       {item.id, parent, rect, content, item.focusable, item.enabled});
@@ -96,17 +107,19 @@ std::vector<float> distribute(std::span<const LayoutItem> items, Axis axis,
       const float remaining = available - total;
       float weight{};
       for (std::size_t index = 0; index < items.size(); ++index) {
-        if (sizes[index] < maximum(items[index], axis)) {
+        const auto limit = maximum(items[index], axis);
+        if (!limit || sizes[index] < *limit) {
           weight += extent(items[index].grow);
         }
       }
       if (weight <= 0.0F || remaining <= 0.0F) break;
       const float before = total;
       for (std::size_t index = 0; index < items.size(); ++index) {
-        if (sizes[index] < maximum(items[index], axis)) {
-          sizes[index] = std::min(
-              maximum(items[index], axis),
-              sizes[index] + remaining * extent(items[index].grow) / weight);
+        const auto limit = maximum(items[index], axis);
+        if (!limit || sizes[index] < *limit) {
+          sizes[index] = bounded(
+              sizes[index] + remaining * extent(items[index].grow) / weight,
+              items[index], axis);
         }
       }
       total = std::accumulate(sizes.begin(), sizes.end(), 0.0F);
@@ -204,7 +217,7 @@ LayoutResult flow(Rect bounds, std::span<const LayoutItem> items,
       const auto &item = line[index];
       const float childCross =
           options.align == Align::Stretch
-              ? std::min(crossSize, maximum(item, other(axis)))
+              ? bounded(crossSize, item, other(axis))
               : std::min(crossSize, preferred(item, other(axis)));
       float childOffset{};
       if (options.align == Align::Centre)
@@ -263,10 +276,9 @@ LayoutResult grid(Rect bounds, std::span<const LayoutItem> items,
     for (std::size_t col = 0; col < columns; ++col) {
       const auto index = row * columns + col;
       if (index >= items.size()) break;
-      const auto &item  = items[index];
-      const float width = std::min(cellWidth, maximum(item, Axis::Horizontal));
-      const float height =
-          std::min(heights[row], maximum(item, Axis::Vertical));
+      const auto &item   = items[index];
+      const float width  = bounded(cellWidth, item, Axis::Horizontal);
+      const float height = bounded(heights[row], item, Axis::Vertical);
       addBox(result, item,
              {result.bounds.left +
                   static_cast<float>(col) * (cellWidth + columnGap),
@@ -299,17 +311,15 @@ LayoutResult split(Rect bounds, const LayoutItem &first,
   } else if (firstMin + secondMin > 0.0F) {
     firstSize = available * firstMin / (firstMin + secondMin);
   }
-  const float firstUsed = std::min(firstSize, maximum(first, options.axis));
-  const float secondUsed =
-      std::min(available - firstSize, maximum(second, options.axis));
+  const float firstUsed  = bounded(firstSize, first, options.axis);
+  const float secondUsed = bounded(available - firstSize, second, options.axis);
   addBox(result, first,
          axisRect(result.bounds, options.axis, 0.0F, 0.0F, firstUsed,
-                  std::min(cross, maximum(first, other(options.axis)))),
+                  bounded(cross, first, other(options.axis))),
          options.parentId);
   addBox(result, second,
          axisRect(result.bounds, options.axis, firstSize + gap, 0.0F,
-                  secondUsed,
-                  std::min(cross, maximum(second, other(options.axis)))),
+                  secondUsed, bounded(cross, second, other(options.axis))),
          options.parentId);
   return result;
 }

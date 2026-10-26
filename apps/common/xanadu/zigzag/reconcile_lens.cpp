@@ -83,23 +83,23 @@ ReconcileLens::reconcile(const std::vector<ServiceConfig> &desired) {
   for (const auto &action : plan) {
     switch (action.kind) {
     case ReconcileActionKind::Stop: {
-      if (action.targetPid > 0) {
-        driver_->terminateProcess(action.targetPid);
+      if (action.targetPid && *action.targetPid > 0) {
+        driver_->terminateProcess(*action.targetPid);
       }
-      if (action.port > 0) {
-        driver_->unbindPort(action.port);
+      if (action.port && *action.port > 0) {
+        driver_->unbindPort(*action.port);
       }
       liveServices_.erase(action.serviceName);
       break;
     }
     case ReconcileActionKind::Start: {
       const int pid = driver_->spawnProcess(action.serviceName, action.command);
-      if (action.port > 0) {
-        driver_->bindPort(action.port);
+      if (action.port && *action.port > 0) {
+        driver_->bindPort(*action.port);
       }
       ServiceInstance inst{};
-      inst.name                         = action.serviceName;
-      inst.pid                          = pid;
+      inst.name = action.serviceName;
+      if (pid > 0) inst.pid = pid;
       inst.port                         = action.port;
       inst.active                       = true;
       liveServices_[action.serviceName] = inst;

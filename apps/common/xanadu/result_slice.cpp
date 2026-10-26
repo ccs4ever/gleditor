@@ -6,13 +6,14 @@
 #include <utility>
 
 #include "common/xanadu/publication.hpp"
+#include "common/xanadu/zigzag/cell_views.hpp"
 #include "common/xanadu/zigzag/manifold.hpp"
 
 namespace xanadu {
 
 MicroversionId writeResultSlice(Store &store,
                                 const std::span<const ResultRow> rows) {
-  if (store.homeCell() != zigzag::noCell) {
+  if (store.homeCell().has_value()) {
     throw std::invalid_argument("result output store must be empty");
   }
   // Every quotation checked before anything is written: a refused row leaves
@@ -35,16 +36,16 @@ MicroversionId writeResultSlice(Store &store,
   version           = source.version;
 
   auto manifold = store.rebuildManifold(version);
-  auto previous = store.homeCell();
+  auto previous = store.homeCell().value();
   for (const auto &row : rows) {
     zigzag::CellRef cell = zigzag::noCell;
     if (row.quote) {
       // The quoted bytes, transcluded: the first span makes the cell and
       // each after it is spliced on, one span per operation (U3).
       const auto &spans = row.quote->spans;
-      version = store.makeCell(version,
-                               *carrySpan(*row.quote->store, store, spans[0]));
-      cell    = store.cellRefOf(version);
+      version           = store.makeCell(version,
+                                         *carrySpan(*row.quote->store, store, spans[0]));
+      cell              = store.cellRefOf(version).value();
       manifold.advanceOrRefold(store, version);
       std::uint64_t at = spans[0].length;
       for (const auto &quoted : spans | std::views::drop(1)) {
@@ -55,7 +56,7 @@ MicroversionId writeResultSlice(Store &store,
       }
     } else {
       version = store.makeCell(version, row.text);
-      cell    = store.cellRefOf(version);
+      cell    = store.cellRefOf(version).value();
       manifold.advanceOrRefold(store, version);
     }
     version = store.setLink(version, previous, result.dim,
@@ -64,7 +65,7 @@ MicroversionId writeResultSlice(Store &store,
     previous = cell;
     if (!row.source.empty()) {
       version               = store.makeCell(version, row.source);
-      const auto sourceCell = store.cellRefOf(version);
+      const auto sourceCell = store.cellRefOf(version).value();
       manifold.advanceOrRefold(store, version);
       version = store.setLink(version, cell, source.dim, zigzag::DimVector::POS,
                               sourceCell);
@@ -84,21 +85,21 @@ std::vector<ResultRow> readResultSlice(const Store &store,
   }
   const auto source = manifold.dimensionNamed("d.source", store);
   std::vector<ResultRow> rows;
-  auto cell = manifold.linked(manifold.home(), *result, zigzag::DimVector::POS);
-  for (std::size_t remaining = manifold.cellCount();
-       cell != zigzag::noCell && remaining-- > 0;
-       cell = manifold.linked(cell, *result, zigzag::DimVector::POS)) {
-    const auto content = manifold.contentOf(cell);
-    ResultRow row{.text   = manifold.textOf(cell, store),
+  auto cell =
+      zigzag::step(manifold, manifold.home(), result, zigzag::DimVector::POS);
+  for (std::size_t remaining = manifold.cellCount(); cell && remaining-- > 0;
+       cell = manifold.linked(*cell, *result, zigzag::DimVector::POS)) {
+    const auto content = manifold.contentOf(*cell);
+    ResultRow row{.text   = manifold.textOf(*cell, store),
                   .source = {},
                   .quote =
                       QuotedSpans{.store = &store,
                                   .spans = {content.begin(), content.end()}}};
     if (source) {
       if (const auto origin =
-              manifold.linked(cell, *source, zigzag::DimVector::POS);
-          origin != zigzag::noCell) {
-        row.source = manifold.textOf(origin, store);
+              manifold.linked(*cell, *source, zigzag::DimVector::POS);
+          origin) {
+        row.source = manifold.textOf(*origin, store);
       }
     }
     rows.push_back(std::move(row));

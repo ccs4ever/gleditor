@@ -68,7 +68,7 @@ TEST(UniversalTransclusionTest, DocCellTransclusionDiscovery) {
 
   // Mint Cell in Zigzag manifold containing that exact span
   at                = store.makeCell(vDoc, "placeholder");
-  const auto cellId = store.cellRefOf(at);
+  const auto cellId = store.cellRefOf(at).value();
   at                = store.spliceCellSpan(at, cellId, 0, 11, transSpan);
 
   const auto manifold = store.rebuildManifold(at);
@@ -111,7 +111,7 @@ TEST(UniversalTransclusionTest, CellCellTransclusionDiscovery) {
 
   // Cell 1
   at               = store.makeCell(at, "Universal Transclusion Across Slices");
-  const auto cell1 = store.cellRefOf(at);
+  const auto cell1 = store.cellRefOf(at).value();
 
   const auto manifold1    = store.rebuildManifold(at);
   const auto cell1Content = manifold1.contentOf(cell1);
@@ -120,7 +120,7 @@ TEST(UniversalTransclusionTest, CellCellTransclusionDiscovery) {
 
   // Cell 2 sharing the exact same span
   at               = store.makeCell(at, "dummy");
-  const auto cell2 = store.cellRefOf(at);
+  const auto cell2 = store.cellRefOf(at).value();
   at               = store.spliceCellSpan(at, cell2, 0, 5, sharedSpan);
 
   const auto manifold = store.rebuildManifold(at);
@@ -129,7 +129,7 @@ TEST(UniversalTransclusionTest, CellCellTransclusionDiscovery) {
       .docViews      = {},
       .manifoldViews = {&manifold},
       .manifoldFoci  = {},
-      .cellRadius    = -1, // Unbounded
+      .cellRadius    = std::nullopt, // Unbounded
   };
 
   std::vector<TransclusionPair> layoutPairs;
@@ -184,7 +184,7 @@ TEST(UniversalTransclusionTest, MultiSpanCellOffsetAccuracy) {
 
   // Make Cell with 3 spans: "AAA" + midSpan + "BBB"
   at              = store.makeCell(vBase, "AAA");
-  const auto cell = store.cellRefOf(at);
+  const auto cell = store.cellRefOf(at).value();
   at              = store.spliceCellSpan(at, cell, 3, 0, midSpan);
   at              = store.spliceCell(at, cell, 9, 0, "BBB");
 
@@ -223,7 +223,7 @@ TEST(UniversalTransclusionTest, ViewportRadiusBoundingPrunesDistantCells) {
 
   // Mint dimension cell d.1
   at            = store.makeCell(at, "d.1");
-  const auto d1 = store.cellRefOf(at);
+  const auto d1 = store.cellRefOf(at).value();
 
   // Document with text
   const auto vDoc =
@@ -234,19 +234,19 @@ TEST(UniversalTransclusionTest, ViewportRadiusBoundingPrunesDistantCells) {
 
   // Cell 4 quotes that docSpan
   at               = store.makeCell(vDoc, "placeholder");
-  const auto cell4 = store.cellRefOf(at);
+  const auto cell4 = store.cellRefOf(at).value();
   at               = store.spliceCellSpan(at, cell4, 0, 11, docSpan);
 
   at               = store.makeCell(at, "Cell Three");
-  const auto cell3 = store.cellRefOf(at);
+  const auto cell3 = store.cellRefOf(at).value();
 
   at               = store.makeCell(at, "Cell Two");
-  const auto cell2 = store.cellRefOf(at);
+  const auto cell2 = store.cellRefOf(at).value();
 
   at               = store.makeCell(at, "Cell One");
-  const auto cell1 = store.cellRefOf(at);
+  const auto cell1 = store.cellRefOf(at).value();
 
-  const auto homeCell = store.homeCell();
+  const auto homeCell = store.homeCell().value();
 
   // Link along d.1: homeCell -> cell1 -> cell2 -> cell3 -> cell4
   at = store.setLink(at, homeCell, d1, DimVector::POS, cell1);
@@ -306,7 +306,7 @@ TEST(UniversalTransclusionTest, CrossDomainLinkPlacement) {
 
   // Cell text
   at                   = store.makeCell(vDoc, "Cell Destination Target");
-  const auto cell      = store.cellRefOf(at);
+  const auto cell      = store.cellRefOf(at).value();
   const auto manifold  = store.rebuildManifold(at);
   const auto cellSpans = manifold.contentOf(cell);
   ASSERT_FALSE(cellSpans.empty());

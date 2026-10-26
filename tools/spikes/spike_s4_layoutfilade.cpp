@@ -104,7 +104,8 @@ int main() {
 
   const auto tStabStart = std::chrono::steady_clock::now();
   for (std::size_t i = 0; i < kViewportQueries; ++i) {
-    sinkIdx += filade.findEntryIndexAtY(queryYs[i]);
+    if (const auto index = filade.findEntryIndexAtY(queryYs[i]))
+      sinkIdx += *index;
   }
   const auto tStabEnd = std::chrono::steady_clock::now();
   const double stabNs =

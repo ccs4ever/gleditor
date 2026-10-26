@@ -36,7 +36,7 @@ TEST(ChronofiladeBenchmarkTest, ScalabilityAndSpeedup) {
   // Benchmark timeline scrubbing at the end of history (worst-case for linear
   // replay)
   const auto targetId  = history.back();
-  const auto targetIdx = store.segmentedOps().indexOf(targetId);
+  const auto targetIdx = store.segmentedOps().indexOf(targetId).value();
 
   // 1. Raw linear replay from State 0
   const auto startRaw      = std::chrono::high_resolution_clock::now();

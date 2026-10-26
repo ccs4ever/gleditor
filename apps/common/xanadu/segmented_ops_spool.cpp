@@ -196,10 +196,10 @@ SegmentedOpsSpool::SegmentedOpsSpool(SegmentedOpsSpool &&other) noexcept
       activeFd(other.activeFd), activePath(std::move(other.activePath)),
       activeStartIndex(other.activeStartIndex),
       activeFlushedOps(other.activeFlushedOps) {
-  other.opCount          = 0;
-  other.committedBytes   = 0;
-  other.idHashCount      = 0;
-  other.activeFd         = -1;
+  other.opCount        = 0;
+  other.committedBytes = 0;
+  other.idHashCount    = 0;
+  other.activeFd.reset();
   other.activeStartIndex = 1;
   other.activeFlushedOps = 0;
   // A moved-from vector is left empty, not just cleared of its old contents
@@ -214,23 +214,23 @@ SegmentedOpsSpool &
 SegmentedOpsSpool::operator=(SegmentedOpsSpool &&other) noexcept {
   if (this != &other) {
     clear();
-    arena                  = std::move(other.arena);
-    reservationBytes       = other.reservationBytes;
-    segmentList            = std::move(other.segmentList);
-    opCount                = other.opCount;
-    committedBytes         = other.committedBytes;
-    indexLookup            = std::move(other.indexLookup);
-    tree                   = std::move(other.tree);
-    idHashSlots            = std::move(other.idHashSlots);
-    idHashCount            = other.idHashCount;
-    activeFd               = other.activeFd;
-    activePath             = std::move(other.activePath);
-    activeStartIndex       = other.activeStartIndex;
-    activeFlushedOps       = other.activeFlushedOps;
-    other.opCount          = 0;
-    other.committedBytes   = 0;
-    other.idHashCount      = 0;
-    other.activeFd         = -1;
+    arena                = std::move(other.arena);
+    reservationBytes     = other.reservationBytes;
+    segmentList          = std::move(other.segmentList);
+    opCount              = other.opCount;
+    committedBytes       = other.committedBytes;
+    indexLookup          = std::move(other.indexLookup);
+    tree                 = std::move(other.tree);
+    idHashSlots          = std::move(other.idHashSlots);
+    idHashCount          = other.idHashCount;
+    activeFd             = other.activeFd;
+    activePath           = std::move(other.activePath);
+    activeStartIndex     = other.activeStartIndex;
+    activeFlushedOps     = other.activeFlushedOps;
+    other.opCount        = 0;
+    other.committedBytes = 0;
+    other.idHashCount    = 0;
+    other.activeFd.reset();
     other.activeStartIndex = 1;
     other.activeFlushedOps = 0;
     other.indexLookup.emplace_back();
@@ -416,14 +416,17 @@ bool SegmentedOpsSpool::contains(const MicroversionId &id) const {
   return idHashFind(id) != 0;
 }
 
-std::uint32_t SegmentedOpsSpool::indexOf(const MicroversionId &id) const {
-  return idHashFind(id);
+std::optional<std::uint32_t>
+SegmentedOpsSpool::indexOf(const MicroversionId &id) const {
+  if (id.isZero()) return std::uint32_t{0};
+  const auto index = idHashFind(id);
+  return index == 0 ? std::nullopt : std::optional<std::uint32_t>{index};
 }
 
-MicroversionId SegmentedOpsSpool::idOf(const std::uint32_t index) const {
-  if (0 == index || index >= indexLookup.size()) {
-    return {};
-  }
+std::optional<MicroversionId>
+SegmentedOpsSpool::idOf(const std::uint32_t index) const {
+  if (index == 0) return MicroversionId{};
+  if (index >= indexLookup.size()) return std::nullopt;
   return indexLookup[index];
 }
 
@@ -509,19 +512,18 @@ bool SegmentedOpsSpool::adoptSegmentNodes(const int fd,
   const auto *const nodes =
       reinterpret_cast<const CompactOpNode *>(arena.base());
   for (std::uint32_t i = 0; i < nodeCount; i++) {
-    const auto &node  = nodes[startIndex + i];
-    const auto parent = node.parentIndex < startIndex
-                            ? idOf(node.parentIndex)
-                            : names[node.parentIndex - startIndex];
+    const auto &node = nodes[startIndex + i];
     if (node.parentIndex >= startIndex + i) {
       return false; // a parent at or after its own child is not a tree
     }
-    if (0 != node.parentIndex && parent.isZero()) {
-      return false; // names a parent this spool does not hold
-    }
-    const auto name = 0 == node.branchOrdinal
-                          ? parent.next()
-                          : parent.branch(node.branchOrdinal);
+    const auto parent = node.parentIndex < startIndex
+                            ? idOf(node.parentIndex)
+                            : std::optional<MicroversionId>{
+                                  names[node.parentIndex - startIndex]};
+    if (!parent || (node.parentIndex != 0 && parent->isZero())) return false;
+    const auto name = node.branchOrdinal == 0
+                          ? parent->next()
+                          : parent->branch(node.branchOrdinal);
     // A state is produced by one operation and no more. Two nodes claiming the
     // same parent and the same ordinal name the same state, which a tree
     // cannot mean -- and taking them both would leave two entries a lookup
@@ -599,9 +601,9 @@ bool SegmentedOpsSpool::addSealedSegment(const std::filesystem::path &path) {
 }
 
 bool SegmentedOpsSpool::openActiveSegment(const std::filesystem::path &path) {
-  if (activeFd >= 0) {
-    ::close(activeFd);
-    activeFd = -1;
+  if (activeFd.has_value()) {
+    ::close(*activeFd);
+    activeFd.reset();
   }
   const int fd = ::open(path.string().c_str(), O_RDWR | O_CREAT, 0644);
   if (fd < 0) {
@@ -656,7 +658,7 @@ bool SegmentedOpsSpool::sealActive(const std::filesystem::path &newActivePath) {
   // The operations stay exactly where they are. Sealing is a change of what
   // the range is called -- read-only, backed by a file that is now complete
   // -- and reading them back in would file every one of them a second time.
-  if (activeFd >= 0 && activeFlushedOps > 0) {
+  if (activeFd.has_value() && activeFlushedOps > 0) {
     SegmentInfo info;
     info.startOpIndex = activeStartIndex;
     info.opCount      = activeFlushedOps;
@@ -664,17 +666,17 @@ bool SegmentedOpsSpool::sealActive(const std::filesystem::path &newActivePath) {
     info.fd           = activeFd;
     info.isReadOnly   = true;
     segmentList.push_back(std::move(info));
-    activeFd = -1; // the segment owns the descriptor now
-  } else if (activeFd >= 0) {
-    ::close(activeFd);
-    activeFd = -1;
+    activeFd.reset(); // the segment owns the descriptor now
+  } else if (activeFd.has_value()) {
+    ::close(*activeFd);
+    activeFd.reset();
   }
   activePath.clear();
   return openActiveSegment(newActivePath);
 }
 
 bool SegmentedOpsSpool::flush() {
-  if (activeFd >= 0 && opCount >= activeStartIndex) {
+  if (activeFd.has_value() && opCount >= activeStartIndex) {
     const auto pending = (opCount - activeStartIndex + 1U) - activeFlushedOps;
     if (pending > 0) {
       const auto *const nodes =
@@ -683,10 +685,10 @@ bool SegmentedOpsSpool::flush() {
       const auto bytes = pending * sizeof(CompactOpNode);
       const auto at    = static_cast<off_t>(
           opsSegmentHeaderBytes + activeFlushedOps * sizeof(CompactOpNode));
-      if (::lseek(activeFd, at, SEEK_SET) < 0) {
+      if (::lseek(*activeFd, at, SEEK_SET) < 0) {
         return false;
       }
-      if (::write(activeFd, &nodes[from], bytes) !=
+      if (::write(*activeFd, &nodes[from], bytes) !=
           static_cast<ssize_t>(bytes)) {
         return false;
       }
@@ -696,22 +698,22 @@ bool SegmentedOpsSpool::flush() {
       // are not there. readSegmentShape() recovers the first and refuses the
       // second, which is the way round that keeps the operations.
       const std::uint64_t count = activeFlushedOps;
-      if (::lseek(activeFd,
+      if (::lseek(*activeFd,
                   static_cast<off_t>(offsetof(OpsSegmentHeader, nodeCount)),
                   SEEK_SET) < 0 ||
-          ::write(activeFd, &count, sizeof(count)) !=
+          ::write(*activeFd, &count, sizeof(count)) !=
               static_cast<ssize_t>(sizeof(count))) {
         return false;
       }
     }
   }
-  if (activeFd >= 0 && !activePath.empty()) {
+  if (activeFd.has_value() && !activePath.empty()) {
     // MinGW's io.h has no fsync(); _commit() is its file-durability
     // equivalent.
 #ifdef _WIN32
-    ::_commit(activeFd);
+    ::_commit(*activeFd);
 #else
-    ::fsync(activeFd);
+    ::fsync(*activeFd);
 #endif
   }
   return true;
@@ -743,14 +745,14 @@ bool SegmentedOpsSpool::writeSegmentFile(
 }
 
 void SegmentedOpsSpool::clear() {
-  if (activeFd >= 0) {
-    ::close(activeFd);
-    activeFd = -1;
+  if (activeFd.has_value()) {
+    ::close(*activeFd);
+    activeFd.reset();
   }
   for (auto &seg : segmentList) {
-    if (seg.fd >= 0) {
-      ::close(seg.fd);
-      seg.fd = -1;
+    if (seg.fd.has_value()) {
+      ::close(*seg.fd);
+      seg.fd.reset();
     }
   }
   segmentList.clear();

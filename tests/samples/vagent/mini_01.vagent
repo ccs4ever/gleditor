@@ -1,0 +1,9 @@
+event Add { amount: Int }
+
+agent Sum {
+  var total: Int := 0
+  on Add as a {
+    let next := total + a.amount
+    total := next
+  }
+}

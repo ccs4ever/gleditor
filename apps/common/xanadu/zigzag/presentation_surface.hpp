@@ -50,8 +50,9 @@ public:
   virtual ~ZigzagPresentationSurface() = default;
 
   [[nodiscard]] virtual const zigzag::Manifold &manifold() const noexcept = 0;
-  [[nodiscard]] virtual zigzag::CellRef focusCell() const noexcept        = 0;
-  virtual void focusCell(zigzag::CellRef cell)                            = 0;
+  [[nodiscard]] virtual std::optional<zigzag::CellRef>
+  focusCell() const noexcept                                              = 0;
+  virtual void focusCell(std::optional<zigzag::CellRef> cell)             = 0;
   virtual void activateCell(zigzag::CellRef cell)                         = 0;
   virtual void setCellActivationCallback(CellActivationCallback callback) = 0;
   [[nodiscard]] virtual int cellRadius() const noexcept                   = 0;

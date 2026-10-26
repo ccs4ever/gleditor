@@ -441,24 +441,24 @@ publishDocument(Store &store, const MicroversionId &version,
  * dropped it would be published at a different pagination than it was written
  * at. So it is carried as a zero-length piece under a reserved name instead.
  *
- * Cannot collide with a real key: scrollKey() only ever produces "btpk:" for a
- * named scroll and "file:" for a torrent-backed one.
+ * Cannot collide with a real key: scrollKey() only produces "btpk:" for a
+ * named scroll and "file:" for a fixed torrent file.
  */
 inline constexpr std::string_view breakMarkerKey = "break:";
 
 /**
  * @brief The global name of the scroll @p span points into.
  *
- * Empty when it has none, which is the case for content typed here and not yet
- * sealed: it exists at an offset in this machine's spool and nowhere else.
+ * Absent when it has none, which is the case for content typed here and not
+ * yet sealed: it exists at an offset in this machine's spool and nowhere else.
  *
  * @param localSealedAs What the local spool has been sealed as, if it has. Its
  *        offsets are the same bytes, so a local span's address is unchanged --
  *        only the name it is said under is new.
  */
-[[nodiscard]] std::string globalKeyOf(const Store &store,
-                                      const PrimediaSpan &span,
-                                      const Scroll *localSealedAs = nullptr);
+[[nodiscard]] std::optional<std::string>
+globalKeyOf(const Store &store, const PrimediaSpan &span,
+            const Scroll *localSealedAs = nullptr);
 
 /// @p span written so another machine can read it, or nothing when its scroll
 /// has no global name.
@@ -518,11 +518,11 @@ carrySpans(const Store &from, Store &into, std::span<const PrimediaSpan> spans);
  * operations are published under, which the store cannot know for itself --
  * the same reason globalKeyOf() is told rather than asked.
  *
- * @return An empty ref when no operation sits at @p opIndex, including index
+ * @return No value when no operation sits at @p opIndex, including index
  *         zero, which is state zero and is definitionally not an operation.
  */
-[[nodiscard]] GlobalOpRef opRefOf(const Store &store, std::uint32_t opIndex,
-                                  const Scroll &sealedAs);
+[[nodiscard]] std::optional<GlobalOpRef>
+opRefOf(const Store &store, std::uint32_t opIndex, const Scroll &sealedAs);
 
 /**
  * @brief @p ref in @p store's own coordinates.

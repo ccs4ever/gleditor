@@ -13,6 +13,7 @@
 #include <numeric>
 #include <ranges>
 #include <sstream>
+#include <stdexcept>
 
 #include "common/xanadu/scalar.hpp"
 #include "common/xanadu/store.hpp"
@@ -31,7 +32,7 @@ void mergeDependencies(std::vector<zigzag::CellRef> &into,
 }
 
 bool isScalarCell(const zigzag::ArenaManifold &arena, zigzag::CellRef c) {
-  if (c == zigzag::noCell) return false;
+  if (!arena.contains(c)) return false;
   return arena.asDouble(c).has_value() || arena.asInt64(c).has_value() ||
          arena.asBool(c).has_value();
 }
@@ -101,10 +102,10 @@ VPLEngine::VPLEngine(Store &store) : store_(&store) {
 VPLEngine::~VPLEngine() = default;
 
 zigzag::DimRef VPLEngine::defaultDim() {
-  if (defaultDim_ == zigzag::noCell) {
+  if (!defaultDim_) {
     defaultDim_ = resolveDimension("d.1");
   }
-  return defaultDim_;
+  return *defaultDim_;
 }
 
 zigzag::DimRef VPLEngine::resolveDimension(std::string_view name) {
@@ -275,7 +276,7 @@ VplView VPLEngine::evalVector(const VectorExpr &expr) {
       if (v.isFloat()) anyFloat = true;
       if (v.isString()) anyString = true;
     }
-    if (v.valence() != 1 || v.origin() != zigzag::noCell) {
+    if (v.valence() != 1 || v.origin()) {
       allDimensions = false;
     }
     elemViews.push_back(std::move(v));
@@ -291,7 +292,9 @@ VplView VPLEngine::evalVector(const VectorExpr &expr) {
         axes.push_back(ev.axes()[0]);
       }
     }
-    return {zigzag::noCell, std::move(axes)};
+    VplView dimensions;
+    dimensions.axes() = std::move(axes);
+    return dimensions;
   }
 
   // All scalar strings
@@ -331,17 +334,14 @@ VplView VPLEngine::evalVector(const VectorExpr &expr) {
   std::vector<zigzag::CellRef> cells;
   for (const auto &ev : elemViews) {
     arena().consumeWork();
-    if (ev.origin() != zigzag::noCell) {
-      cells.push_back(ev.origin());
+    if (const auto origin = ev.origin()) {
+      cells.push_back(*origin);
     } else if (ev.isScalar()) {
-      zigzag::CellRef c = zigzag::noCell;
-      if (ev.isString()) {
-        c = arena().makeCell(ev.scalarString());
-      } else if (ev.isFloat()) {
-        c = arena().makeScalarCell(ev.scalarFloat());
-      } else {
-        c = arena().makeScalarCell(ev.scalarInt());
-      }
+      const auto c = [&] {
+        if (ev.isString()) return arena().makeCell(ev.scalarString());
+        if (ev.isFloat()) return arena().makeScalarCell(ev.scalarFloat());
+        return arena().makeScalarCell(ev.scalarInt());
+      }();
       cells.push_back(c);
     }
   }
@@ -357,7 +357,7 @@ VplView VPLEngine::evalVector(const VectorExpr &expr) {
 
 VplView VPLEngine::evalDimension(const DimensionExpr &expr) {
   zigzag::DimRef dim = resolveDimension(expr.name());
-  return VplView(zigzag::noCell,
+  return VplView(std::nullopt,
                  {zigzag::DirectedDim{dim, zigzag::DimVector::POS}});
 }
 
@@ -367,7 +367,7 @@ VplView VPLEngine::evalIdentifier(const IdentifierExpr &expr) {
   }
   if (expr.name().starts_with("d.")) {
     zigzag::DimRef dim = resolveDimension(expr.name());
-    return VplView(zigzag::noCell,
+    return VplView(std::nullopt,
                    {zigzag::DirectedDim{dim, zigzag::DimVector::POS}});
   }
   auto it = env_.find(expr.name());
@@ -406,7 +406,7 @@ VplView VPLEngine::evalIndexing(const IndexingExpr &expr) {
           return VplView::makeScalar(*d, true, c);
         }
         if (auto n = arena().asInt64(c); n.has_value()) {
-          return VplView::makeScalar(*n, c);
+          return VplView::makeScalar(*n, std::optional{c});
         }
       }
       return VplView::makeScalar(arena().textOf(c), c);
@@ -434,9 +434,9 @@ VplView VPLEngine::evalIndexing(const IndexingExpr &expr) {
 
   if (selected.empty()) return {};
 
-  zigzag::DimRef axis  = defaultDim();
-  zigzag::CellRef head = zigzag::noCell;
-  zigzag::CellRef prev = zigzag::noCell;
+  zigzag::DimRef axis = defaultDim();
+  std::optional<zigzag::CellRef> head;
+  std::optional<zigzag::CellRef> prev;
   for (zigzag::CellRef c : selected) {
     arena().consumeWork();
     zigzag::CellRef copy = arena().makeCell();
@@ -447,13 +447,13 @@ VplView VPLEngine::evalIndexing(const IndexingExpr &expr) {
         copy = arena().makeScalarCell(*n);
       }
     } else {
-      core_->value(copy, 0, -1, core_->render(c));
+      core_->writeValue(copy, 0, std::nullopt, core_->render(c).value());
     }
-    if (head == zigzag::noCell) {
+    if (!head) {
       head = copy;
     } else {
       zigzag::expectWritten(
-          arena().link(prev, axis, zigzag::DimVector::POS, copy));
+          arena().link(*prev, axis, zigzag::DimVector::POS, copy));
     }
     prev = copy;
   }
@@ -562,14 +562,14 @@ VplView VPLEngine::evalDyadic(const DyadicExpr &expr) {
         zigzag::DimRef dRow = defaultDim();
         zigzag::DimRef dCol = resolveDimension("d.2");
 
-        zigzag::CellRef root        = zigzag::noCell;
-        zigzag::CellRef prevRowHead = zigzag::noCell;
+        std::optional<zigzag::CellRef> root;
+        std::optional<zigzag::CellRef> prevRowHead;
 
         for (zigzag::CellRef lc : leftCells) {
           arena().consumeWork();
-          double lVal             = cellValueDouble(lc);
-          zigzag::CellRef rowHead = zigzag::noCell;
-          zigzag::CellRef prevCol = zigzag::noCell;
+          double lVal = cellValueDouble(lc);
+          std::optional<zigzag::CellRef> rowHead;
+          std::optional<zigzag::CellRef> prevCol;
 
           for (zigzag::CellRef rc : rightCells) {
             arena().consumeWork();
@@ -578,18 +578,18 @@ VplView VPLEngine::evalDyadic(const DyadicExpr &expr) {
             zigzag::CellRef cell =
                 arena().makeScalarCell(static_cast<std::int64_t>(val));
 
-            if (rowHead == zigzag::noCell) rowHead = cell;
-            if (prevCol != zigzag::noCell) {
+            if (!rowHead) rowHead = cell;
+            if (prevCol) {
               zigzag::expectWritten(
-                  arena().link(prevCol, dCol, zigzag::DimVector::POS, cell));
+                  arena().link(*prevCol, dCol, zigzag::DimVector::POS, cell));
             }
             prevCol = cell;
           }
 
-          if (root == zigzag::noCell) root = rowHead;
-          if (prevRowHead != zigzag::noCell) {
+          if (!root) root = rowHead;
+          if (prevRowHead) {
             zigzag::expectWritten(arena().link(
-                prevRowHead, dRow, zigzag::DimVector::POS, rowHead));
+                *prevRowHead, dRow, zigzag::DimVector::POS, rowHead));
           }
           prevRowHead = rowHead;
         }
@@ -617,8 +617,8 @@ VplView VPLEngine::evalDyadic(const DyadicExpr &expr) {
         }
         zigzag::DimRef axis =
             right.axes().empty() ? defaultDim() : right.axes()[0].dim;
-        zigzag::CellRef head = zigzag::noCell;
-        zigzag::CellRef prev = zigzag::noCell;
+        std::optional<zigzag::CellRef> head;
+        std::optional<zigzag::CellRef> prev;
         for (zigzag::CellRef sc : selected) {
           arena().consumeWork();
           zigzag::CellRef copy = arena().makeCell();
@@ -629,12 +629,12 @@ VplView VPLEngine::evalDyadic(const DyadicExpr &expr) {
               copy = arena().makeScalarCell(*d);
             }
           } else {
-            core_->value(copy, 0, -1, core_->render(sc));
+            core_->writeValue(copy, 0, std::nullopt, core_->render(sc).value());
           }
-          if (head == zigzag::noCell) head = copy;
-          if (prev != zigzag::noCell) {
+          if (!head) head = copy;
+          if (prev) {
             zigzag::expectWritten(
-                arena().link(prev, axis, zigzag::DimVector::POS, copy));
+                arena().link(*prev, axis, zigzag::DimVector::POS, copy));
           }
           prev = copy;
         }
@@ -814,9 +814,11 @@ VplView VPLEngine::applyMonadicVerb(TokenKind verb, const VplView &arg) {
   if (verb == TokenKind::Iota) {
     std::size_t n =
         static_cast<std::size_t>(std::max<std::int64_t>(0, arg.scalarInt()));
-    zigzag::DimRef dim   = defaultDim();
-    zigzag::CellRef head = stdlib_->arrayIota(n, dim);
-    VplView res(head, {zigzag::DirectedDim{dim, zigzag::DimVector::POS}});
+    const auto dim  = defaultDim();
+    const auto head = stdlib_->arrayIota(n, dim);
+    VplView res;
+    if (head) res.setOrigin(*head);
+    res.axes().emplace_back(dim, zigzag::DimVector::POS);
     res.setExtents({n});
     return res;
   }
@@ -842,8 +844,8 @@ VplView VPLEngine::applyMonadicVerb(TokenKind verb, const VplView &arg) {
     }
     auto sh = arg.shape(arena());
     if (sh.empty()) return VplView::makeScalar(static_cast<std::int64_t>(0));
-    if (sh.size() == 1 && sh[0] == 1 && arg.origin() != zigzag::noCell) {
-      std::string txt = arena().textOf(arg.origin());
+    if (sh.size() == 1 && sh[0] == 1 && arg.origin()) {
+      std::string txt = arena().textOf(*arg.origin());
       if (!txt.empty()) {
         return VplView::makeScalar(static_cast<std::int64_t>(txt.size()));
       }
@@ -884,10 +886,9 @@ VplView VPLEngine::applyMonadicVerb(TokenKind verb, const VplView &arg) {
     if (arg.isEnclosed() && arg.enclosedView()) {
       return *arg.enclosedView();
     }
-    if (arg.origin() != zigzag::noCell) {
-      const auto master =
-          arena().cloneMaster(arg.origin(), core_->dims().clone);
-      if (master && *master != arg.origin()) {
+    if (const auto origin = arg.origin()) {
+      const auto master = arena().cloneMaster(*origin, core_->dims().clone);
+      if (master && *master != *origin) {
         return {*master, arg.axes()};
       }
       auto cells = arg.collectCells(arena());
@@ -992,12 +993,12 @@ VplView VPLEngine::applyDyadicVerb(TokenKind verb, const VplView &left,
 
     const zigzag::CellRef lastH = zigzag::rankTail(arena(), core_->home(), d);
 
-    zigzag::CellRef firstMinted = zigzag::noCell;
-    zigzag::CellRef prev        = lastH;
+    std::optional<zigzag::CellRef> firstMinted;
+    zigzag::CellRef prev = lastH;
     for (std::size_t i = 1; i <= n; ++i) {
       arena().consumeWork();
       zigzag::CellRef c = arena().makeScalarCell(static_cast<std::int64_t>(i));
-      if (firstMinted == zigzag::noCell) firstMinted = c;
+      if (!firstMinted) firstMinted = c;
       zigzag::expectWritten(arena().link(prev, d, zigzag::DimVector::POS, c));
       prev = c;
     }
@@ -1010,8 +1011,8 @@ VplView VPLEngine::applyDyadicVerb(TokenKind verb, const VplView &left,
   // ⍴ (Reshape / View construction)
   if (verb == TokenKind::Rho) {
     // Case 1: H ⍴ (d.1 d.2 d.3)
-    if (left.origin() != zigzag::noCell && !right.axes().empty()) {
-      VplView res(left.origin(), right.axes());
+    if (const auto origin = left.origin(); origin && !right.axes().empty()) {
+      VplView res(*origin, right.axes());
       res.setExtents(res.shape(arena()));
       return res;
     }
@@ -1022,7 +1023,7 @@ VplView VPLEngine::applyDyadicVerb(TokenKind verb, const VplView &left,
       auto cells       = left.collectCells(arena());
       zigzag::expectWritten(
           arena().linkChain(cells, d, zigzag::DimVector::POS));
-      VplView res(cells.empty() ? zigzag::noCell : cells[0],
+      VplView res(cells.empty() ? std::nullopt : std::optional{cells[0]},
                   {zigzag::DirectedDim{d, zigzag::DimVector::POS}});
       res.setExtents({cells.size()});
       return res;
@@ -1047,13 +1048,13 @@ VplView VPLEngine::applyDyadicVerb(TokenKind verb, const VplView &left,
       std::size_t R       = newDims[0];
       std::size_t C       = newDims[1];
 
-      zigzag::CellRef root        = zigzag::noCell;
-      zigzag::CellRef prevRowHead = zigzag::noCell;
+      std::optional<zigzag::CellRef> root;
+      std::optional<zigzag::CellRef> prevRowHead;
 
       for (std::size_t r = 0; r < R; ++r) {
         arena().consumeWork();
-        zigzag::CellRef rowHead = zigzag::noCell;
-        zigzag::CellRef prevCol = zigzag::noCell;
+        std::optional<zigzag::CellRef> rowHead;
+        std::optional<zigzag::CellRef> prevCol;
 
         for (std::size_t c = 0; c < C; ++c) {
           arena().consumeWork();
@@ -1067,20 +1068,21 @@ VplView VPLEngine::applyDyadicVerb(TokenKind verb, const VplView &left,
               cell = arena().makeScalarCell(*n);
             }
           } else {
-            core_->value(cell, 0, -1, core_->render(itemCells[idx]));
+            core_->writeValue(cell, 0, std::nullopt,
+                              core_->render(itemCells[idx]).value());
           }
-          if (rowHead == zigzag::noCell) rowHead = cell;
-          if (prevCol != zigzag::noCell) {
+          if (!rowHead) rowHead = cell;
+          if (prevCol) {
             zigzag::expectWritten(
-                arena().link(prevCol, dCol, zigzag::DimVector::POS, cell));
+                arena().link(*prevCol, dCol, zigzag::DimVector::POS, cell));
           }
           prevCol = cell;
         }
 
-        if (root == zigzag::noCell) root = rowHead;
-        if (prevRowHead != zigzag::noCell) {
-          zigzag::expectWritten(
-              arena().link(prevRowHead, dRow, zigzag::DimVector::POS, rowHead));
+        if (!root) root = rowHead;
+        if (prevRowHead) {
+          zigzag::expectWritten(arena().link(*prevRowHead, dRow,
+                                             zigzag::DimVector::POS, rowHead));
         }
         prevRowHead = rowHead;
       }
@@ -1124,7 +1126,7 @@ VplView VPLEngine::applyDyadicVerb(TokenKind verb, const VplView &left,
         right.axes().empty() ? defaultDim() : right.axes()[0].dim;
     zigzag::expectWritten(
         arena().linkChain(taken, axis, zigzag::DimVector::POS));
-    VplView res(taken.empty() ? zigzag::noCell : taken[0],
+    VplView res(taken.empty() ? std::nullopt : std::optional{taken[0]},
                 {zigzag::DirectedDim{axis, zigzag::DimVector::POS}});
     res.setExtents({taken.size()});
     return res;
@@ -1147,7 +1149,7 @@ VplView VPLEngine::applyDyadicVerb(TokenKind verb, const VplView &left,
         right.axes().empty() ? defaultDim() : right.axes()[0].dim;
     zigzag::expectWritten(
         arena().linkChain(dropped, axis, zigzag::DimVector::POS));
-    VplView res(dropped.empty() ? zigzag::noCell : dropped[0],
+    VplView res(dropped.empty() ? std::nullopt : std::optional{dropped[0]},
                 {zigzag::DirectedDim{axis, zigzag::DimVector::POS}});
     res.setExtents({dropped.size()});
     return res;
@@ -1174,9 +1176,9 @@ VplView VPLEngine::applyDyadicVerb(TokenKind verb, const VplView &left,
 
   // ≡ (Match: address identity or exact value match)
   if (verb == TokenKind::Match) {
-    if (left.origin() != zigzag::noCell && right.origin() != zigzag::noCell) {
+    if (const auto leftOrigin = left.origin(); leftOrigin && right.origin()) {
       return VplView::makeScalar(
-          static_cast<std::int64_t>(left.origin() == right.origin() ? 1 : 0));
+          static_cast<std::int64_t>(*leftOrigin == *right.origin() ? 1 : 0));
     }
     bool match = (left.scalarInt() == right.scalarInt() &&
                   left.scalarFloat() == right.scalarFloat());
@@ -1352,7 +1354,8 @@ double VPLEngine::computeDyadicScalar(TokenKind verb, double left,
 }
 
 double VPLEngine::cellValueDouble(zigzag::CellRef cell) const {
-  if (cell == zigzag::noCell) return 0.0;
+  if (!arena().contains(cell))
+    throw std::invalid_argument("VPL numeric cell does not exist");
   if (auto d = arena().asDouble(cell); d.has_value()) return *d;
   if (auto n = arena().asInt64(cell); n.has_value())
     return static_cast<double>(*n);
@@ -1369,7 +1372,8 @@ double VPLEngine::cellValueDouble(zigzag::CellRef cell) const {
 }
 
 std::int64_t VPLEngine::cellValueInt(zigzag::CellRef cell) const {
-  if (cell == zigzag::noCell) return 0;
+  if (!arena().contains(cell))
+    throw std::invalid_argument("VPL integer cell does not exist");
   if (auto n = arena().asInt64(cell); n.has_value()) return *n;
   if (auto d = arena().asDouble(cell); d.has_value())
     return static_cast<std::int64_t>(*d);
@@ -1386,7 +1390,8 @@ std::int64_t VPLEngine::cellValueInt(zigzag::CellRef cell) const {
 }
 
 std::string VPLEngine::cellValueString(zigzag::CellRef cell) const {
-  if (cell == zigzag::noCell) return "";
+  if (!arena().contains(cell))
+    throw std::invalid_argument("VPL text cell does not exist");
   return arena().textOf(cell);
 }
 

@@ -252,13 +252,13 @@ void ScrollHolefilade::buildTree() {
     const auto idx = crums_.size();
 
     HoleCrum crum;
-    crum.firstEntry  = static_cast<std::uint32_t>(i);
-    crum.entryCount  = count;
-    crum.firstChild  = 0;
-    crum.childCount  = 0;
-    crum.parentIndex = 0;
-    crum.isLeaf      = true;
-    crum.wid         = computeWidForEntries(&entries_[i], count);
+    crum.firstEntry = static_cast<std::uint32_t>(i);
+    crum.entryCount = count;
+    crum.firstChild = 0;
+    crum.childCount = 0;
+    crum.parentIndex.reset();
+    crum.isLeaf = true;
+    crum.wid    = computeWidForEntries(&entries_[i], count);
 
     crums_.push_back(crum);
     currentLevel.push_back(idx);
@@ -274,12 +274,12 @@ void ScrollHolefilade::buildTree() {
       const auto firstChild = static_cast<std::uint32_t>(currentLevel[i]);
 
       HoleCrum parentCrum;
-      parentCrum.firstEntry  = 0;
-      parentCrum.entryCount  = 0;
-      parentCrum.firstChild  = firstChild;
-      parentCrum.childCount  = childCount;
-      parentCrum.parentIndex = 0;
-      parentCrum.isLeaf      = false;
+      parentCrum.firstEntry = 0;
+      parentCrum.entryCount = 0;
+      parentCrum.firstChild = firstChild;
+      parentCrum.childCount = childCount;
+      parentCrum.parentIndex.reset();
+      parentCrum.isLeaf = false;
 
       HoleWid parentWid{};
       for (std::size_t c = 0; c < childCount; ++c) {

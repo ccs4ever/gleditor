@@ -19,6 +19,7 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 
 namespace gleditor::enfilade {
 
@@ -85,8 +86,8 @@ struct alignas(kCacheLineBytes) CrumNode {
 
   std::array<Dsp, B> dsps{}; ///< Relative displacements into child frames.
   std::array<Wid, B> wids{}; ///< Subtree summaries of children.
-  std::array<std::uint32_t, B> children{}; ///< Indices of child nodes.
-  std::uint32_t parentIndex{0};            ///< Parent node index (0 if root).
+  std::array<std::uint32_t, B> children{};  ///< Indices of child nodes.
+  std::optional<std::uint32_t> parentIndex; ///< Absent for the root.
   std::uint8_t childCount{0}; ///< Number of active children (0 <= count <= B).
   std::uint8_t isLeaf{0};     ///< 1 if leaf crum, 0 if interior.
   std::uint16_t reservedZero{0};

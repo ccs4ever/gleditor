@@ -392,7 +392,7 @@ TEST(SliceToStoreTest, aSliceBecomesOperationsAndFoldsBackToItself) {
   // holds strictly more cells than the document had -- the metadata became
   // cells, which is the point.
   EXPECT_EQ(minted.cells.size(), doc.cells.size());
-  EXPECT_NE(minted.focus, zigzag::noCell);
+  ASSERT_TRUE(minted.focus);
   EXPECT_EQ(minted.focus, minted.cells.at(1));
 
   const auto manifold = store.rebuildManifold(minted.version);

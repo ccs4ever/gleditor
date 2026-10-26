@@ -471,10 +471,11 @@ TEST(UserPermascrollTest, IngestSubscrollWritesBytesAndCreatesHierarchy) {
                           std::istreambuf_iterator<char>());
   EXPECT_EQ(readContent, text);
 
-  EXPECT_EQ(subscroll.publisher, scroll.config().deviceKeys.publicKey);
+  ASSERT_TRUE(subscroll.publisher);
+  EXPECT_EQ(*subscroll.publisher, scroll.config().deviceKeys.publicKey);
   EXPECT_EQ(subscroll.salt, "permascroll/laptop");
   EXPECT_TRUE(subscroll.isNamed());
-  EXPECT_EQ(xanadu::scrollKey(subscroll),
+  EXPECT_EQ(xanadu::scrollKey(subscroll).value(),
             "btpk:" + scroll.config().deviceKeys.publicKey.hex() +
                 ":permascroll/laptop");
 
@@ -516,10 +517,11 @@ TEST(UserPermascrollTest,
                           std::istreambuf_iterator<char>());
   EXPECT_EQ(readContent, "Registered peer primedia stream");
 
-  EXPECT_EQ(subscroll.publisher, scroll.config().deviceKeys.publicKey);
+  ASSERT_TRUE(subscroll.publisher);
+  EXPECT_EQ(*subscroll.publisher, scroll.config().deviceKeys.publicKey);
   EXPECT_EQ(subscroll.salt, "permascroll/peer-station");
   EXPECT_TRUE(subscroll.isNamed());
-  EXPECT_EQ(xanadu::scrollKey(subscroll),
+  EXPECT_EQ(xanadu::scrollKey(subscroll).value(),
             "btpk:" + scroll.config().deviceKeys.publicKey.hex() +
                 ":permascroll/peer-station");
 

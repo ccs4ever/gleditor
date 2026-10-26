@@ -18,11 +18,17 @@ namespace xanadu::vpl {
 using zigzag::CellRef;
 using zigzag::DimRef;
 using zigzag::DimVector;
-using zigzag::noCell;
 using zigzag::vortex::CellValue;
 using zigzag::vortex::OpcodeKind;
 
 namespace {
+
+CellRef requireCompiledCell(const std::optional<CellRef> result) {
+  if (!result) {
+    throw std::invalid_argument("VPL expression has no compiled cell");
+  }
+  return *result;
+}
 
 std::string_view verbName(TokenKind kind) noexcept {
   switch (kind) {
@@ -320,6 +326,8 @@ VPLCompiler::opcodeMnemonic(zigzag::vortex::OpcodeKind kind) noexcept {
     return "FAIL";
   case OpcodeKind::Cut:
     return "CUT";
+  case OpcodeKind::ChoiceDepth:
+    return "CHOICEDEPTH";
   default:
     return "UNKNOWN";
   }
@@ -331,12 +339,12 @@ VPLCompiler::VPLCompiler(zigzag::vortex::VortexCore &core,
 
 CellRef VPLCompiler::emitOp(OpcodeKind kind, std::string_view label) {
   CellRef op = vm_.mintOpcode(kind, label);
-  if (entryOp_ == noCell) {
+  if (!entryOp_) {
     entryOp_ = op;
   }
-  if (currentOp_ != noCell) {
+  if (currentOp_) {
     zigzag::expectWritten(
-        core_.arena().link(currentOp_, core_.dims().spin, false, op));
+        core_.arena().link(*currentOp_, core_.dims().spin, false, op));
   }
   currentOp_ = op;
   allOps_.push_back(op);
@@ -354,7 +362,7 @@ void VPLCompiler::emitOutput(CellRef op, CellRef target) {
 CellRef VPLCompiler::emitConstant(const CellValue &val,
                                   std::optional<CellRef> designatedCell) {
   CellRef c = designatedCell ? *designatedCell : core_.arena().makeCell();
-  core_.value(c, 0, -1, val);
+  core_.writeValue(c, 0, std::nullopt, val);
   return c;
 }
 
@@ -501,7 +509,7 @@ VPLCompiler::tryFoldConstant(const AstNode &node) const {
   return std::nullopt;
 }
 
-CellRef VPLCompiler::compileNode(const AstNode &node) {
+std::optional<CellRef> VPLCompiler::compileNode(const AstNode &node) {
   if (optimize_) {
     auto folded = tryFoldConstant(node);
     if (folded) {
@@ -549,16 +557,16 @@ CellRef VPLCompiler::compileNode(const AstNode &node) {
     return compileQuad(*qd);
   }
 
-  return noCell;
+  return std::nullopt;
 }
 
-CellRef VPLCompiler::compileProgram(const Program &prog) {
-  CellRef lastRes = noCell;
+std::optional<CellRef> VPLCompiler::compileProgram(const Program &prog) {
+  std::optional<CellRef> lastRes;
   for (const auto &expr : prog.expressions()) {
     if (expr) {
       lastRes = compileNode(*expr);
-      if (lastRes != noCell) {
-        lastResultCells_.push_back(lastRes);
+      if (lastRes) {
+        lastResultCells_.push_back(*lastRes);
       }
     }
   }
@@ -575,19 +583,19 @@ CellRef VPLCompiler::compileScalar(const ScalarExpr &expr) {
   return emitConstant(expr.intValue());
 }
 
-CellRef VPLCompiler::compileVector(const VectorExpr &expr) {
+std::optional<CellRef> VPLCompiler::compileVector(const VectorExpr &expr) {
   const auto &elements = expr.elements();
-  if (elements.empty()) return noCell;
+  if (elements.empty()) return std::nullopt;
 
   std::vector<CellRef> cells;
   cells.reserve(elements.size());
   for (const auto &elem : elements) {
     if (elem) {
-      cells.push_back(compileNode(*elem));
+      if (const auto cell = compileNode(*elem)) cells.push_back(*cell);
     }
   }
 
-  if (cells.empty()) return noCell;
+  if (cells.empty()) return std::nullopt;
 
   // Chain vector cells along +d.step via the shared batch-link primitive.
   zigzag::expectWritten(core_.arena().linkChain(cells, core_.dims().step,
@@ -601,9 +609,10 @@ CellRef VPLCompiler::compileDimension(const DimensionExpr &expr) {
   return emitConstant(static_cast<std::int64_t>(dim));
 }
 
-CellRef VPLCompiler::compileIdentifier(const IdentifierExpr &expr) {
+std::optional<CellRef>
+VPLCompiler::compileIdentifier(const IdentifierExpr &expr) {
   auto it = varBindings_.find(expr.name());
-  if (it != varBindings_.end() && it->second != noCell) {
+  if (it != varBindings_.end()) {
     return it->second;
   }
 
@@ -618,18 +627,19 @@ CellRef VPLCompiler::compileVerb(const VerbExpr &expr) {
   return emitConstant(std::string(verbName(expr.verb())));
 }
 
-CellRef VPLCompiler::compileAssign(const AssignExpr &expr) {
-  CellRef valCell = expr.value() ? compileNode(*expr.value()) : noCell;
-  CellRef bindOp  = emitOp(OpcodeKind::Bind, "#BIND " + expr.target());
+std::optional<CellRef> VPLCompiler::compileAssign(const AssignExpr &expr) {
+  std::optional<CellRef> valCell =
+      expr.value() ? compileNode(*expr.value()) : std::nullopt;
+  CellRef bindOp = emitOp(OpcodeKind::Bind, "#BIND " + expr.target());
   emitInputConstant(bindOp, expr.target());
-  if (valCell != noCell) {
-    emitInput(bindOp, valCell);
+  if (valCell) {
+    emitInput(bindOp, *valCell);
   }
   varBindings_[expr.target()] = valCell;
   return valCell;
 }
 
-CellRef VPLCompiler::compileMonadic(const MonadicExpr &expr) {
+std::optional<CellRef> VPLCompiler::compileMonadic(const MonadicExpr &expr) {
   if (expr.verb() == TokenKind::Catenate) {
     throw std::invalid_argument("Catenate requires the direct VPL engine");
   }
@@ -663,10 +673,12 @@ CellRef VPLCompiler::compileMonadic(const MonadicExpr &expr) {
         if (const auto *vec =
                 dynamic_cast<const VectorExpr *>(expr.right().get())) {
           for (const auto &el : vec->elements()) {
-            if (el) operandCells.push_back(compileNode(*el));
+            if (el)
+              operandCells.push_back(requireCompiledCell(compileNode(*el)));
           }
         } else if (expr.right()) {
-          operandCells.push_back(compileNode(*expr.right()));
+          operandCells.push_back(
+              requireCompiledCell(compileNode(*expr.right())));
         }
 
         if (operandCells.empty()) return core_.home();
@@ -689,10 +701,12 @@ CellRef VPLCompiler::compileMonadic(const MonadicExpr &expr) {
         if (const auto *vec =
                 dynamic_cast<const VectorExpr *>(expr.right().get())) {
           for (const auto &el : vec->elements()) {
-            if (el) operandCells.push_back(compileNode(*el));
+            if (el)
+              operandCells.push_back(requireCompiledCell(compileNode(*el)));
           }
         } else if (expr.right()) {
-          operandCells.push_back(compileNode(*expr.right()));
+          operandCells.push_back(
+              requireCompiledCell(compileNode(*expr.right())));
         }
 
         if (operandCells.empty()) return core_.home();
@@ -719,7 +733,9 @@ CellRef VPLCompiler::compileMonadic(const MonadicExpr &expr) {
       }
 
       if (adverb == TokenKind::Each) {
-        CellRef r  = expr.right() ? compileNode(*expr.right()) : core_.home();
+        CellRef r  = expr.right()
+                         ? requireCompiledCell(compileNode(*expr.right()))
+                         : core_.home();
         CellRef op = emitOp(OpcodeKind::Call, "#EACH");
         emitInput(op, r);
         CellRef out = core_.arena().makeCell();
@@ -729,23 +745,24 @@ CellRef VPLCompiler::compileMonadic(const MonadicExpr &expr) {
     }
   }
 
-  CellRef rCell = expr.right() ? compileNode(*expr.right()) : noCell;
+  const std::optional<CellRef> rCell =
+      expr.right() ? compileNode(*expr.right()) : std::nullopt;
 
   switch (expr.verb()) {
   case TokenKind::Iota: {
     // Monadic Iota: ⍳N -> Mint N cells on d.1
     std::int64_t n = 0;
-    if (rCell != noCell) {
-      if (auto iVal = core_.arena().asInt64(rCell)) {
+    if (rCell) {
+      if (auto iVal = core_.arena().asInt64(*rCell)) {
         n = *iVal;
       }
     }
     DimRef dim   = resolveDimension("d.1");
     CellRef prev = core_.home();
-    CellRef head = noCell;
+    std::optional<CellRef> head;
     for (std::int64_t i = 1; i <= n; ++i) {
       CellRef fresh = core_.arena().makeCell();
-      if (head == noCell) head = fresh;
+      if (!head) head = fresh;
       CellRef newOp = emitOp(OpcodeKind::New, "#MINT_CELL");
       emitInput(newOp, prev);
       emitInputConstant(newOp, static_cast<std::int64_t>(dim));
@@ -760,7 +777,7 @@ CellRef VPLCompiler::compileMonadic(const MonadicExpr &expr) {
 
       prev = fresh;
     }
-    return head != noCell ? head : core_.home();
+    return head ? head : std::optional<CellRef>{core_.home()};
   }
   case TokenKind::Plus:
     // Identity
@@ -769,21 +786,21 @@ CellRef VPLCompiler::compileMonadic(const MonadicExpr &expr) {
   case TokenKind::Minus: {
     CellRef op  = emitOp(OpcodeKind::Neg, "#NEG");
     CellRef out = core_.arena().makeCell();
-    if (rCell != noCell) emitInput(op, rCell);
+    if (rCell) emitInput(op, *rCell);
     emitOutput(op, out);
     return out;
   }
   case TokenKind::Magnitude: {
     CellRef op  = emitOp(OpcodeKind::Abs, "#ABS");
     CellRef out = core_.arena().makeCell();
-    if (rCell != noCell) emitInput(op, rCell);
+    if (rCell) emitInput(op, *rCell);
     emitOutput(op, out);
     return out;
   }
   case TokenKind::Not: {
     CellRef op  = emitOp(OpcodeKind::Not, "#NOT");
     CellRef out = core_.arena().makeCell();
-    if (rCell != noCell) emitInput(op, rCell);
+    if (rCell) emitInput(op, *rCell);
     emitOutput(op, out);
     return out;
   }
@@ -792,7 +809,7 @@ CellRef VPLCompiler::compileMonadic(const MonadicExpr &expr) {
     CellRef one = emitConstant(1.0);
     CellRef op  = emitOp(OpcodeKind::Div, "#RECIPROCAL");
     emitInput(op, one);
-    if (rCell != noCell) emitInput(op, rCell);
+    if (rCell) emitInput(op, *rCell);
     CellRef out = core_.arena().makeCell();
     emitOutput(op, out);
     return out;
@@ -804,7 +821,7 @@ CellRef VPLCompiler::compileMonadic(const MonadicExpr &expr) {
     emitInput(op, box);
     emitInputConstant(op, static_cast<std::int64_t>(0));
     emitInputConstant(op, static_cast<std::int64_t>(-1));
-    if (rCell != noCell) emitInput(op, rCell);
+    if (rCell) emitInput(op, *rCell);
     emitOutput(op, box);
     return box;
   }
@@ -812,7 +829,7 @@ CellRef VPLCompiler::compileMonadic(const MonadicExpr &expr) {
     // ⊃C: Resolve clone along -d.clone to master
     CellRef master = core_.arena().makeCell();
     CellRef op     = emitOp(OpcodeKind::Link, "#DISCLOSE");
-    if (rCell != noCell) emitInput(op, rCell);
+    if (rCell) emitInput(op, *rCell);
     emitInputConstant(op, static_cast<std::int64_t>(core_.dims().clone));
     emitInputConstant(op, static_cast<std::int64_t>(-1));
     emitOutput(op, master);
@@ -822,7 +839,7 @@ CellRef VPLCompiler::compileMonadic(const MonadicExpr &expr) {
     // ⍴A: Monadic shape
     CellRef op  = emitOp(OpcodeKind::Link, "#SHAPE");
     CellRef out = core_.arena().makeCell();
-    if (rCell != noCell) emitInput(op, rCell);
+    if (rCell) emitInput(op, *rCell);
     emitInputConstant(op, static_cast<std::int64_t>(core_.dims().spin));
     emitInputConstant(op, static_cast<std::int64_t>(1));
     emitOutput(op, out);
@@ -835,7 +852,7 @@ CellRef VPLCompiler::compileMonadic(const MonadicExpr &expr) {
     return rCell;
 
   default:
-    return rCell != noCell ? rCell : core_.home();
+    return rCell ? rCell : std::optional<CellRef>{core_.home()};
   }
 }
 
@@ -850,7 +867,7 @@ CellRef VPLCompiler::compileDyadic(const DyadicExpr &expr) {
             dynamic_cast<const DimensionExpr *>(expr.right().get())) {
       dim = resolveDimension(dimExpr->name());
     } else if (expr.right()) {
-      CellRef rCell = compileNode(*expr.right());
+      const CellRef rCell = requireCompiledCell(compileNode(*expr.right()));
       if (auto dVal = core_.arena().asInt64(rCell)) {
         dim = static_cast<DimRef>(*dVal);
       }
@@ -861,17 +878,17 @@ CellRef VPLCompiler::compileDyadic(const DyadicExpr &expr) {
             dynamic_cast<const ScalarExpr *>(expr.left().get())) {
       count = leftScalar->intValue();
     } else if (expr.left()) {
-      CellRef lCell = compileNode(*expr.left());
+      const CellRef lCell = requireCompiledCell(compileNode(*expr.left()));
       if (auto iVal = core_.arena().asInt64(lCell)) {
         count = *iVal;
       }
     }
 
     CellRef prev = core_.home();
-    CellRef head = noCell;
+    std::optional<CellRef> head;
     for (std::int64_t i = 1; i <= count; ++i) {
       CellRef fresh = core_.arena().makeCell();
-      if (head == noCell) head = fresh;
+      if (!head) head = fresh;
       CellRef newOp = emitOp(OpcodeKind::New, "#MINT_CELL");
       emitInput(newOp, prev);
       emitInputConstant(newOp, static_cast<std::int64_t>(dim));
@@ -886,11 +903,11 @@ CellRef VPLCompiler::compileDyadic(const DyadicExpr &expr) {
 
       prev = fresh;
     }
-    return head != noCell ? head : core_.home();
+    return head.value_or(core_.home());
   }
 
-  CellRef lCell = expr.left() ? compileNode(*expr.left()) : noCell;
-  CellRef rCell = expr.right() ? compileNode(*expr.right()) : noCell;
+  const auto lCell = expr.left() ? compileNode(*expr.left()) : std::nullopt;
+  const auto rCell = expr.right() ? compileNode(*expr.right()) : std::nullopt;
 
   OpcodeKind kind    = OpcodeKind::Nop;
   std::string_view l = "#NOP";
@@ -979,8 +996,8 @@ CellRef VPLCompiler::compileDyadic(const DyadicExpr &expr) {
   }
 
   CellRef op = emitOp(kind, l);
-  if (lCell != noCell) emitInput(op, lCell);
-  if (rCell != noCell) emitInput(op, rCell);
+  if (lCell) emitInput(op, *lCell);
+  if (rCell) emitInput(op, *rCell);
   CellRef out = core_.arena().makeCell();
   emitOutput(op, out);
   return out;
@@ -993,11 +1010,11 @@ CellRef VPLCompiler::compileAdverb(const AdverbExpr &expr) {
             dynamic_cast<const VectorExpr *>(expr.operand().get())) {
       const auto &elems = vec->elements();
       if (elems.empty()) return core_.home();
-      if (elems.size() == 1) return compileNode(*elems[0]);
+      if (elems.size() == 1) return requireCompiledCell(compileNode(*elems[0]));
 
-      CellRef acc = compileNode(*elems[0]);
+      CellRef acc = requireCompiledCell(compileNode(*elems[0]));
       for (std::size_t i = 1; i < elems.size(); ++i) {
-        CellRef cur = compileNode(*elems[i]);
+        CellRef cur = requireCompiledCell(compileNode(*elems[i]));
         CellRef op  = emitOp(OpcodeKind::Add, "#REDUCE_ADD");
         emitInput(op, acc);
         emitInput(op, cur);
@@ -1015,11 +1032,11 @@ CellRef VPLCompiler::compileAdverb(const AdverbExpr &expr) {
       if (elems.empty()) return core_.home();
 
       std::vector<CellRef> scanCells;
-      CellRef acc = compileNode(*elems[0]);
+      CellRef acc = requireCompiledCell(compileNode(*elems[0]));
       scanCells.push_back(acc);
 
       for (std::size_t i = 1; i < elems.size(); ++i) {
-        CellRef cur = compileNode(*elems[i]);
+        CellRef cur = requireCompiledCell(compileNode(*elems[i]));
         CellRef op  = emitOp(OpcodeKind::Add, "#SCAN_ADD");
         emitInput(op, acc);
         emitInput(op, cur);
@@ -1038,34 +1055,36 @@ CellRef VPLCompiler::compileAdverb(const AdverbExpr &expr) {
     }
   }
 
-  CellRef opRef = expr.operand() ? compileNode(*expr.operand()) : noCell;
-  CellRef op    = emitOp(OpcodeKind::Call, "#ADVERB");
-  if (opRef != noCell) emitInput(op, opRef);
+  const auto opRef =
+      expr.operand() ? compileNode(*expr.operand()) : std::nullopt;
+  CellRef op = emitOp(OpcodeKind::Call, "#ADVERB");
+  if (opRef) emitInput(op, *opRef);
   CellRef out = core_.arena().makeCell();
   emitOutput(op, out);
   return out;
 }
 
 CellRef VPLCompiler::compileConjunction(const ConjunctionExpr &expr) {
-  CellRef l  = expr.left() ? compileNode(*expr.left()) : noCell;
-  CellRef r  = expr.right() ? compileNode(*expr.right()) : noCell;
-  CellRef op = emitOp(OpcodeKind::Call, "#CONJUNCTION");
-  if (l != noCell) emitInput(op, l);
-  if (r != noCell) emitInput(op, r);
+  const auto l = expr.left() ? compileNode(*expr.left()) : std::nullopt;
+  const auto r = expr.right() ? compileNode(*expr.right()) : std::nullopt;
+  CellRef op   = emitOp(OpcodeKind::Call, "#CONJUNCTION");
+  if (l) emitInput(op, *l);
+  if (r) emitInput(op, *r);
   CellRef out = core_.arena().makeCell();
   emitOutput(op, out);
   return out;
 }
 
-CellRef VPLCompiler::compileIndexing(const IndexingExpr &expr) {
-  CellRef target = expr.target() ? compileNode(*expr.target()) : noCell;
-  if (target == noCell) return core_.home();
+std::optional<CellRef> VPLCompiler::compileIndexing(const IndexingExpr &expr) {
+  const auto target =
+      expr.target() ? compileNode(*expr.target()) : std::nullopt;
+  if (!target) return std::nullopt;
 
-  CellRef cur = target;
+  CellRef cur = *target;
   for (const auto &idx : expr.indices()) {
     if (!idx) continue;
-    CellRef idxCell    = compileNode(*idx);
-    std::int64_t steps = 1;
+    const CellRef idxCell = requireCompiledCell(compileNode(*idx));
+    std::int64_t steps    = 1;
     if (auto iVal = core_.arena().asInt64(idxCell)) {
       steps = *iVal;
     }
@@ -1082,24 +1101,24 @@ CellRef VPLCompiler::compileIndexing(const IndexingExpr &expr) {
   return cur;
 }
 
-CellRef VPLCompiler::compileQuad(const QuadExpr &expr) {
-  CellRef arg = expr.arg() ? compileNode(*expr.arg()) : noCell;
+std::optional<CellRef> VPLCompiler::compileQuad(const QuadExpr &expr) {
+  const auto arg = expr.arg() ? compileNode(*expr.arg()) : std::nullopt;
 
   if (expr.quadKind() == TokenKind::Quad) {
     CellRef op = emitOp(OpcodeKind::Nop, "#PRINT");
-    if (arg != noCell) emitInput(op, arg);
-    return arg != noCell ? arg : core_.home();
+    if (arg) emitInput(op, *arg);
+    return arg ? arg : std::optional<CellRef>{core_.home()};
   }
   if (expr.quadKind() == TokenKind::QuadRead) {
     CellRef op = emitOp(OpcodeKind::Call, "#READ");
-    if (arg != noCell) emitInput(op, arg);
+    if (arg) emitInput(op, *arg);
     CellRef out = core_.arena().makeCell();
     emitOutput(op, out);
     return out;
   }
   if (expr.quadKind() == TokenKind::QuadSplit) {
     CellRef op = emitOp(OpcodeKind::Call, "#SPLIT");
-    if (arg != noCell) emitInput(op, arg);
+    if (arg) emitInput(op, *arg);
     CellRef out = core_.arena().makeCell();
     emitOutput(op, out);
     return out;
@@ -1109,7 +1128,6 @@ CellRef VPLCompiler::compileQuad(const QuadExpr &expr) {
 }
 
 void VPLCompiler::linkAsExecutable(CellRef entryOp) {
-  if (entryOp == noCell) return;
   // Link posward off home along +d.spin
   zigzag::expectWritten(
       core_.arena().link(core_.home(), core_.dims().spin, false, entryOp));
@@ -1119,23 +1137,21 @@ void VPLCompiler::linkAsExecutable(CellRef entryOp) {
 
 void VPLCompiler::linkAsLibrary(CellRef entryOp, std::string_view moduleName,
                                 std::string_view symbolName) {
-  if (entryOp == noCell) return;
-
   core_.exportSymbol(core_.getOrCreateModule(moduleName), symbolName, entryOp);
 }
 
 CompilationResult VPLCompiler::compile(const Program &program,
                                        const CompilationOptions &options) {
-  entryOp_   = noCell;
-  currentOp_ = noCell;
+  entryOp_.reset();
+  currentOp_.reset();
   allOps_.clear();
   varBindings_.clear();
   lastResultCells_.clear();
   optimize_ = options.optimize;
 
-  CellRef resultCell = compileProgram(program);
-  if (lastResultCells_.empty() && resultCell != noCell) {
-    lastResultCells_.push_back(resultCell);
+  const auto resultCell = compileProgram(program);
+  if (lastResultCells_.empty() && resultCell) {
+    lastResultCells_.push_back(*resultCell);
   }
 
   if (options.targetLibrary) {
@@ -1143,13 +1159,13 @@ CompilationResult VPLCompiler::compile(const Program &program,
     for (CellRef r : lastResultCells_) {
       emitInput(retOp, r);
     }
-    linkAsLibrary(entryOp_, options.moduleName, options.symbolName);
+    linkAsLibrary(entryOp_.value(), options.moduleName, options.symbolName);
   } else {
     CellRef haltOp = emitOp(OpcodeKind::Halt, "#HALT");
     for (CellRef r : lastResultCells_) {
       emitInput(haltOp, r);
     }
-    linkAsExecutable(entryOp_);
+    linkAsExecutable(entryOp_.value());
   }
 
   std::string dis = disassemble(entryOp_);
@@ -1182,7 +1198,7 @@ CompilationResult VPLCompiler::compile(std::string_view source,
     if (!program) {
       return CompilationResult{
           .success          = false,
-          .entryOpcode      = noCell,
+          .entryOpcode      = std::nullopt,
           .errorMessage     = "Parser returned null AST",
           .generatedOpcodes = {},
           .disassembly      = "",
@@ -1192,7 +1208,7 @@ CompilationResult VPLCompiler::compile(std::string_view source,
   } catch (const std::exception &err) {
     return CompilationResult{
         .success          = false,
-        .entryOpcode      = noCell,
+        .entryOpcode      = std::nullopt,
         .errorMessage     = std::string("Compilation error: ") + err.what(),
         .generatedOpcodes = {},
         .disassembly      = "",
@@ -1200,15 +1216,15 @@ CompilationResult VPLCompiler::compile(std::string_view source,
   }
 }
 
-std::string VPLCompiler::disassemble(CellRef entryOp,
+std::string VPLCompiler::disassemble(std::optional<CellRef> entryOp,
                                      std::size_t maxInstructions) const {
-  if (entryOp == noCell) return "(empty opcode stream)";
+  if (!entryOp) return "(empty opcode stream)";
 
   std::ostringstream out;
-  CellRef cur = entryOp;
+  CellRef cur = *entryOp;
   std::unordered_set<CellRef> visited;
 
-  while (cur != noCell && maxInstructions-- > 0) {
+  while (maxInstructions-- > 0) {
     if (!visited.insert(cur).second) {
       out << "  ... (cycle detected to cell " << cur << ")\n";
       break;
@@ -1260,7 +1276,9 @@ std::string VPLCompiler::disassemble(CellRef entryOp,
 
     out << "\n";
 
-    cur = core_.arena().linked(cur, core_.dims().spin, false);
+    const auto next = core_.arena().linked(cur, core_.dims().spin, false);
+    if (!next) break;
+    cur = *next;
   }
 
   return out.str();
@@ -1276,13 +1294,13 @@ xanadu::MicroversionId
 VPLCompiler::exportToStore(xanadu::Store &store,
                            const xanadu::MicroversionId &parent) const {
   xanadu::MicroversionId ver = parent;
-  if (store.homeCell() == zigzag::noCell) {
+  if (!store.homeCell()) {
     ver = store.sliceGenesis(ver);
   }
 
   const auto &arena = core_.arena();
   std::unordered_map<CellRef, CellRef> cellMap;
-  cellMap[core_.home()] = store.homeCell();
+  cellMap[core_.home()] = store.homeCell().value();
 
   auto manifold = store.rebuildManifold(ver);
 
@@ -1315,7 +1333,7 @@ VPLCompiler::exportToStore(xanadu::Store &store,
     } else {
       ver = store.makeCell(ver, arena.textOf(c));
     }
-    cellMap[c] = store.cellRefOf(ver);
+    cellMap[c] = store.cellRefOf(ver).value();
     manifold.advanceOrRefold(store, ver);
   }
 
@@ -1325,9 +1343,9 @@ VPLCompiler::exportToStore(xanadu::Store &store,
     CellRef from = cellMap.at(c);
 
     for (const auto &[dimRef, mappedDim] : dimMap) {
-      CellRef target = arena.linked(c, dimRef, DimVector::POS);
-      if (target != zigzag::noCell && cellMap.contains(target)) {
-        CellRef to = cellMap.at(target);
+      const auto target = arena.linked(c, dimRef, DimVector::POS);
+      if (target && cellMap.contains(*target)) {
+        CellRef to = cellMap.at(*target);
         ver        = store.setLink(ver, from, mappedDim, DimVector::POS, to);
         manifold.advanceOrRefold(store, ver);
       }

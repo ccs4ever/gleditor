@@ -84,13 +84,14 @@ enum class OpcodeKind : std::uint8_t {
   Choice,
   Fail,
   Cut,
+  ChoiceDepth,
 };
 
 struct ChoicePoint {
-  CellRef cursor{noCell};
+  std::optional<CellRef> cursor;
   CellRef altOp{noCell};
   zigzag::Mark mark{};
-  CellRef stackFrame{noCell};
+  std::optional<CellRef> stackFrame;
   std::size_t cutBarrier{0};
   std::vector<std::uint16_t> deweyPath;
   std::uint16_t nextAltIndex{1};
@@ -108,7 +109,7 @@ public:
 
   // -- Program Assembly Helpers -----------------------------------------------
   CellRef mintOpcode(OpcodeKind op, std::string_view label = {});
-  CellRef assembleSequence(std::span<const OpcodeKind> ops);
+  std::optional<CellRef> assembleSequence(std::span<const OpcodeKind> ops);
   void setOpcodeKind(CellRef opCell, OpcodeKind op);
   [[nodiscard]] std::optional<OpcodeKind> getOpcodeKind(CellRef opCell) const;
 
@@ -119,16 +120,19 @@ public:
   // -- Opt-In Memoization -----------------------------------------------------
   void enableMemoization(CellRef opcode, std::string_view memoKey);
   [[nodiscard]] bool isMemoized(CellRef opcode) const;
-  [[nodiscard]] std::string getMemoKey(CellRef opcode) const;
+  [[nodiscard]] std::optional<std::string> getMemoKey(CellRef opcode) const;
 
   // -- Vlog Logic Programming & Choice Points ---------------------------------
-  void pushChoicePoint(CellRef cursor, CellRef altOp);
-  bool backtrack(CellRef cursor);
+  void pushChoicePoint(std::optional<CellRef> cursor, CellRef altOp);
+  bool backtrack(std::optional<CellRef> cursor);
   void cut(std::size_t cutBarrier = 0);
   [[nodiscard]] std::size_t choiceDepth() const noexcept;
   void clearChoicePoints();
 
   // -- Distributed / Intra-Node OR-Parallelism Extensions ---------------------
+  // Path tracking is opt-in through a nonempty oracle or a cut callback.
+  // OR-parallel victims must register their callback before creating choices;
+  // installing one after choices exist cannot reconstruct their branch paths.
   VortexVM *setOraclePath(std::span<const std::uint16_t> path);
   VortexVM *setCurrentDeweyPath(std::span<const std::uint16_t> path);
   [[nodiscard]] std::span<const std::uint16_t>
@@ -155,8 +159,8 @@ public:
   std::size_t stepScheduler(std::stop_token stopToken = {});
 
   // -- Cursor PC Tracking ----------------------------------------------------
-  [[nodiscard]] CellRef getCursorOpcode(CellRef cursor) const;
-  void setCursorOpcode(CellRef cursor, CellRef op);
+  [[nodiscard]] std::optional<CellRef> getCursorOpcode(CellRef cursor) const;
+  void setCursorOpcode(CellRef cursor, std::optional<CellRef> op);
 
   // -- Pipeline Execution Helper ----------------------------------------------
   void runPipeline(CellRef paramCell);
@@ -170,12 +174,13 @@ private:
   ExecutionResult executeOpcodeBody(OpcodeKind kind, CellRef opcode,
                                     const std::vector<CellValue> &inputs,
                                     std::vector<CellValue> &outputs,
-                                    CellRef cursor, bool &jumped);
+                                    std::optional<CellRef> cursor,
+                                    bool &jumped);
 
   VortexCore &core_;
   std::unordered_map<CellRef, OpcodeKind> opcodeMap_;
   std::unordered_map<CellRef, std::string> memoizedOps_;
-  std::unordered_map<CellRef, CellRef> cursorPC_;
+  std::unordered_map<CellRef, std::optional<CellRef>> cursorPC_;
   std::vector<ChoicePoint> choiceStack_;
   std::vector<std::uint16_t> currentDeweyPath_;
   std::vector<std::uint16_t> oraclePath_;

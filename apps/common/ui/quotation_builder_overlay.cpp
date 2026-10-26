@@ -147,13 +147,14 @@ QuotationBuilderOverlay::selectStore(const std::size_t index) {
   // Populate candidate roots from the store
   candidateRootCells_.clear();
   const auto home = targetStore->homeCell();
-  if (home != zigzag::noCell) {
-    candidateRootCells_.emplace_back(home, "home");
+  const auto fold = targetStore->rebuildManifold(targetStore->latest());
+  if (home && fold.contains(*home)) {
+    candidateRootCells_.emplace_back(*home, "home");
   }
 
-  const auto fold = targetStore->rebuildManifold(targetStore->latest());
   for (const auto &c : fold.cells()) {
-    if (c.birthOp != home && c.birthOp != fold.dimsDimension()) {
+    const auto dims = fold.dimsDimension();
+    if ((!home || c.birthOp != *home) && (!dims || c.birthOp != *dims)) {
       const auto txt = fold.textOf(c.birthOp, *targetStore);
       candidateRootCells_.emplace_back(
           c.birthOp,
@@ -189,9 +190,8 @@ QuotationBuilderOverlay::selectRootCell(const std::size_t index) {
   }
   selectedRootCellIndex_ = index;
   const auto rootCell    = candidateRootCells_[index].first;
-  if (rootCell != zigzag::noCell) {
-    builder_.setRootCell(rootCell);
-  }
+  builder_.setRootCell(rootCell == zigzag::noCell ? std::nullopt
+                                                  : std::optional{rootCell});
   recomputePreview();
   return this;
 }
@@ -241,7 +241,7 @@ void QuotationBuilderOverlay::recomputePreview() {
     for (const auto d : selectedCarriedDims_) {
       dims.push_back(ExternOpRef{
           .scroll   = scrollId,
-          .produces = st->segmentedOps().idOf(d),
+          .produces = st->segmentedOps().idOf(d).value(),
       });
     }
     builder_.setCarriedDimensions(std::move(dims));
@@ -253,7 +253,7 @@ void QuotationBuilderOverlay::recomputePreview() {
       builder_.setRankStep(
           ExternOpRef{
               .scroll   = scrollId,
-              .produces = st->segmentedOps().idOf(dim),
+              .produces = st->segmentedOps().idOf(dim).value(),
           },
           rankDir_);
     }
@@ -303,13 +303,13 @@ bool QuotationBuilderOverlay::commitQuotation() {
     targetDim = *dimLocal;
   }
 
-  zigzag::CellRef localHead = st.homeCell();
-  if (localHead == zigzag::noCell) {
+  auto localHead = st.homeCell();
+  if (!localHead) {
     baseVer   = st.makeCell(baseVer, "Quotation Anchor");
-    localHead = st.cellRefOf(baseVer);
+    localHead = st.cellRefOf(baseVer).value();
   }
 
-  const auto q   = builder_.commit(st, baseVer, localHead, targetDim);
+  const auto q   = builder_.commit(st, baseVer, *localHead, targetDim);
   activeVersion_ = q.version;
 
   if (onCommit_) {
@@ -327,8 +327,8 @@ ui::WidgetId QuotationBuilderOverlay::allocate() {
 }
 ui::WidgetId QuotationBuilderOverlay::contentId(std::string_view name,
                                                 zigzag::CellRef ref) {
-  const auto key   = std::to_string(page_) + ":" + std::string(name) + ":" +
-                     std::to_string(ref);
+  const auto key = std::to_string(page_) + ":" + std::string(name) + ":" +
+                   std::to_string(ref);
   const auto found = contentIds_.find(key);
   if (found != contentIds_.end()) return found->second;
   const auto id = allocate();
@@ -394,7 +394,7 @@ QuotationBuilderOverlay::prepare(const ui::UiMetrics &metrics,
     // Include nested flow padding and rounding slack. Compact Preview reserves
     // two complete candidate rows alongside its inspector.
     return std::max(t * 5 + p * 8 + g * 4 + 16,
-                    t * 4 + line + p * 10 + g * 3 + 16);
+                       t * 4 + line + p * 10 + g * 3 + 16);
   };
   float factor = 1;
   if (required(factor) > height) {
@@ -540,12 +540,12 @@ QuotationBuilderOverlay::prepare(const ui::UiMetrics &metrics,
            .preferred = {0, metrics.logical(listHeight_)}});
     }
   } else if (page_ == 2) {
-    const auto budget     = std::to_string(preview.cells.size()) + " cells / " +
-                            std::to_string(preview.totalOpBytes) + " B ops · ";
+    const auto budget = std::to_string(preview.cells.size()) + " cells / " +
+                        std::to_string(preview.totalOpBytes) + " B ops · ";
     std::string inspector = budget + "No cell focused";
     if (preview.isValid && preview.focusedIndex < preview.cells.size()) {
       const auto &cell = preview.cells[preview.focusedIndex];
-      inspector = budget + "Cell #" + std::to_string(cell.foreignCell) +
+      inspector        = budget + "Cell #" + std::to_string(cell.foreignCell) +
                   " · Op " + cell.birthRef.produces.str() + " · Degree " +
                   std::to_string(cell.outboundEdges.size()) + " · " + cell.text;
     }

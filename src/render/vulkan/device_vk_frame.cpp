@@ -21,6 +21,11 @@ namespace render::vulkan {
 
 namespace {
 
+template <typename Map, typename Resource>
+auto findResource(Map &map, const Resource &resource) {
+  return resource.id ? map.find(*resource.id) : map.end();
+}
+
 void check(const VkResult result, const char *what) {
   if (VK_SUCCESS != result) {
     throw std::runtime_error(std::format("Vulkan: {} failed with VkResult {}",
@@ -152,9 +157,9 @@ VkCommandBuffer DeviceVK::beginSecondary(RecordSlot &slot) {
   inherit.framebuffer = framebuffer;
 
   VkCommandBufferBeginInfo begin{};
-  begin.sType            = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-  begin.flags            = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT |
-                           VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT;
+  begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+  begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT |
+                VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT;
   begin.pInheritanceInfo = &inherit;
   check(vkBeginCommandBuffer(commands, &begin),
         "vkBeginCommandBuffer (secondary)");
@@ -173,7 +178,7 @@ VkCommandBuffer DeviceVK::beginSecondary(RecordSlot &slot) {
   vkCmdSetViewport(commands, 0, 1, &viewport);
   vkCmdSetScissor(commands, 0, 1, &scissor);
 
-  const auto pipelineIt = pipelines.find(boundPipeline.id);
+  const auto pipelineIt = findResource(pipelines, boundPipeline);
   if (pipelines.end() != pipelineIt) {
     vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS,
                       pipelineIt->second.pipeline);
@@ -207,7 +212,7 @@ void DeviceVK::closeSequentialSecondary() {
 }
 
 void DeviceVK::bindPipeline(const PipelineHandle pipeline) {
-  const auto it = pipelines.find(pipeline.id);
+  const auto it = findResource(pipelines, pipeline);
   if (pipelines.end() == it) {
     throw std::invalid_argument("DeviceVK::bindPipeline: unknown pipeline");
   }
@@ -223,8 +228,8 @@ void DeviceVK::bindPipeline(const PipelineHandle pipeline) {
 void DeviceVK::bindAtlasTexture(const TextureHandle texture) {
   boundTexture = texture;
 
-  const auto pipelineIt = pipelines.find(boundPipeline.id);
-  const auto textureIt  = textures.find(texture.id);
+  const auto pipelineIt = findResource(pipelines, boundPipeline);
+  const auto textureIt  = findResource(textures, texture);
   if (pipelines.end() == pipelineIt || textures.end() == textureIt) {
     return;
   }
@@ -241,7 +246,7 @@ void DeviceVK::bindAtlasTexture(const TextureHandle texture) {
     return;
   }
 
-  const auto highlightIt = buffers.find(highlightBuffers[frameIndex].id);
+  const auto highlightIt = findResource(buffers, highlightBuffers[frameIndex]);
   if (buffers.end() == highlightIt) {
     return;
   }
@@ -283,7 +288,7 @@ void DeviceVK::bindAtlasTexture(const TextureHandle texture) {
 }
 
 void DeviceVK::setHighlights(const std::span<const HighlightRange> ranges) {
-  const auto it = buffers.find(highlightBuffers[frameIndex].id);
+  const auto it = findResource(buffers, highlightBuffers[frameIndex]);
   if (buffers.end() == it) {
     return;
   }
@@ -304,8 +309,8 @@ void DeviceVK::setHighlights(const std::span<const HighlightRange> ranges) {
 
 void DeviceVK::recordBatch(const VkCommandBuffer commands,
                            const GlyphBatch &batch) const {
-  const auto pipelineIt = pipelines.find(boundPipeline.id);
-  const auto bufferIt   = buffers.find(batch.vertices.id);
+  const auto pipelineIt = findResource(pipelines, boundPipeline);
+  const auto bufferIt   = findResource(buffers, batch.vertices);
   if (pipelines.end() == pipelineIt || buffers.end() == bufferIt) {
     throw std::invalid_argument(
         "DeviceVK::recordBatch: unknown pipeline or buffer");
@@ -458,11 +463,14 @@ void DeviceVK::drawGlyphBatches(const std::span<const GlyphBatch> batches) {
   // the split first -- and afterwards commit to the cheaper one and stop
   // timing. Timing only during the comparison is what keeps the choice from
   // drifting with the noise of whichever strategy happens to be in use.
-  const bool probing = recordingProbeFrame < recordingProbeFrames;
-  const bool split = probing
-                         ? (recordingProbeFrame < recordingProbeBlock)
-                         : parallelCost.median() < sequentialCost.median() *
-                                                       parallelRecordingMargin;
+  const bool probing          = recordingProbeFrame < recordingProbeFrames;
+  const auto parallelMedian   = parallelCost.median();
+  const auto sequentialMedian = sequentialCost.median();
+  const bool split =
+      probing
+          ? (recordingProbeFrame < recordingProbeBlock)
+          : parallelMedian && sequentialMedian &&
+                *parallelMedian < *sequentialMedian * parallelRecordingMargin;
   // The opening frames of each block are thrown away: the first split frame
   // after a run of sequential ones wakes workers that have been parked, which
   // is a cost the steady state does not pay.
@@ -496,10 +504,14 @@ void DeviceVK::drawGlyphBatches(const std::span<const GlyphBatch> batches) {
     reportedRecordingChoice = split;
     diagnostics.record(
         DiagnosticSeverity::Info,
-        std::format("recording {} draws on {} thread(s): {:.0f} ns/draw split "
-                    "against {:.0f} ns/draw in one piece",
-                    batches.size(), split ? recorders.parallelism() : 1U,
-                    parallelCost.median(), sequentialCost.median()));
+        std::format(
+            "recording {} draws on {} thread(s): {} split against {} "
+            "in one piece",
+            batches.size(), split ? recorders.parallelism() : 1U,
+            parallelMedian ? std::format("{:.0f} ns/draw", *parallelMedian)
+                           : "unmeasured",
+            sequentialMedian ? std::format("{:.0f} ns/draw", *sequentialMedian)
+                             : "unmeasured"));
   }
 }
 
@@ -549,7 +561,7 @@ std::optional<PickingResult> DeviceVK::takePickingTag() {
     frame.pickPending   = false;
     frame.pickSubmitted = false;
 
-    const auto bufferIt = buffers.find(frame.pickingBuffer.id);
+    const auto bufferIt = findResource(buffers, frame.pickingBuffer);
     if (buffers.end() == bufferIt || nullptr == bufferIt->second.mapped) {
       continue;
     }
@@ -603,7 +615,7 @@ void DeviceVK::endFrame() {
     // The render pass left the tag image in TRANSFER_SRC layout, so the single
     // pixel can be copied out without an extra barrier. The copy rides along
     // with the frame and completes when its fence signals.
-    const auto pickIt = buffers.find(frame.pickingBuffer.id);
+    const auto pickIt = findResource(buffers, frame.pickingBuffer);
     if (buffers.end() != pickIt) {
       VkBufferImageCopy region{};
       region.imageSubresource = {.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,

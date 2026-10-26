@@ -65,7 +65,7 @@ enum class ContractViolationKind : std::uint8_t {
 struct ExecutionResult {
   bool success{true};
   ContractViolationKind contractViolation{ContractViolationKind::None};
-  CellRef failingClause{noCell};
+  std::optional<CellRef> failingClause;
   std::string errorMessage;
 };
 
@@ -74,12 +74,15 @@ struct ExecutionResult {
  * Negative offsets and lengths count from the end of the content.
  */
 inline std::pair<std::size_t, std::size_t>
-resolve_range(std::size_t size, std::int64_t offset, std::int64_t length) {
+resolve_range(std::size_t size, std::int64_t offset,
+              std::optional<std::int64_t> length) {
   const auto signed_size = static_cast<std::int64_t>(size);
   std::int64_t from      = (offset < 0) ? signed_size + offset : offset;
   from                   = std::clamp<std::int64_t>(from, 0, signed_size);
 
-  std::int64_t to = (length < 0) ? signed_size + length + 1 : from + length;
+  std::int64_t to = !length         ? signed_size
+                    : (*length < 0) ? signed_size + *length + 1
+                                    : from + *length;
   to              = std::clamp<std::int64_t>(to, from, signed_size);
 
   return {static_cast<std::size_t>(from), static_cast<std::size_t>(to - from)};
@@ -101,38 +104,61 @@ public:
   [[nodiscard]] const ArenaManifold &arena() const noexcept { return arena_; }
 
   // -- The Single-Primitive Core ----------------------------------------------
-  /**
-   * @brief Inspects, creates, breaks, or redirects dimensional links.
-   *
-   * target omitted        -> read: linked cell or nullopt.
-   * target == -1          -> allocate: fresh cell minted and linked.
-   * target == 0           -> isolate: severs link, returns previously linked
-   * cell. target == literal ref -> establishes link to target.
-   */
-  std::optional<CellRef> link(CellRef cell, DimRef dim, DimVector dir,
-                              std::optional<CellRef> target = std::nullopt);
-  std::optional<CellRef>
-  link(CellRef cell, DirectedDim target,
-       std::optional<CellRef> linkTarget = std::nullopt) {
-    return link(cell, target.dim, target.dir, linkTarget);
+  /// Read the neighbour along a dimension, or nullopt when there is none.
+  [[nodiscard]] std::optional<CellRef> readLink(CellRef cell, DimRef dim,
+                                                DimVector dir) const;
+  [[nodiscard]] std::optional<CellRef> readLink(CellRef cell,
+                                                DirectedDim target) const {
+    return readLink(cell, target.dim, target.dir);
   }
-  std::optional<CellRef> link(CellRef cell, DimRef dim, bool negward,
-                              std::optional<CellRef> target = std::nullopt) {
-    return link(cell, dim, fromNegward(negward), target);
+  [[nodiscard]] std::optional<CellRef> readLink(CellRef cell, DimRef dim,
+                                                bool negward) const {
+    return readLink(cell, dim, fromNegward(negward));
+  }
+  /// Establish a link to an existing cell.
+  std::optional<CellRef> setLink(CellRef cell, DimRef dim, DimVector dir,
+                                 CellRef target);
+  std::optional<CellRef> setLink(CellRef cell, DirectedDim target,
+                                 CellRef linkTarget) {
+    return setLink(cell, target.dim, target.dir, linkTarget);
+  }
+  std::optional<CellRef> setLink(CellRef cell, DimRef dim, bool negward,
+                                 CellRef target) {
+    return setLink(cell, dim, fromNegward(negward), target);
+  }
+  /// Mint a fresh cell and link it to this position.
+  std::optional<CellRef> allocateLink(CellRef cell, DimRef dim, DimVector dir);
+  std::optional<CellRef> allocateLink(CellRef cell, DirectedDim target) {
+    return allocateLink(cell, target.dim, target.dir);
+  }
+  std::optional<CellRef> allocateLink(CellRef cell, DimRef dim, bool negward) {
+    return allocateLink(cell, dim, fromNegward(negward));
+  }
+  /// Sever a link and return the former neighbour, if one existed.
+  std::optional<CellRef> isolateLink(CellRef cell, DimRef dim, DimVector dir);
+  std::optional<CellRef> isolateLink(CellRef cell, DirectedDim target) {
+    return isolateLink(cell, target.dim, target.dir);
+  }
+  std::optional<CellRef> isolateLink(CellRef cell, DimRef dim, bool negward) {
+    return isolateLink(cell, dim, fromNegward(negward));
   }
 
   /**
    * @brief Reads, slices, or splices cell content in the universal currency of
    * CellRef.
    *
-   * Read whole (offset 0, len -1, no repl) -> returns cell itself.
+   * An absent length means the whole remaining value; a supplied negative
+   * length retains the language's count-from-end meaning.
    * Read slice (offset/len specified)      -> returns ephemeral cell quoting
    * range. Write (replacement specified)         -> splices on clone master,
    * returns cell.
    */
   std::optional<CellRef>
-  value(CellRef cell, std::int64_t offset = 0, std::int64_t length = -1,
-        std::optional<CellValue> replacement = std::nullopt);
+  readValue(CellRef cell, std::int64_t offset = 0,
+            std::optional<std::int64_t> length = std::nullopt);
+  std::optional<CellRef> writeValue(CellRef cell, std::int64_t offset,
+                                    std::optional<std::int64_t> length,
+                                    const CellValue &replacement);
 
   // -- Named Vocabulary Helpers -----------------------------------------------
   std::optional<CellRef> newCell(CellRef cell, DimRef dim,
@@ -197,10 +223,11 @@ public:
   void exportSymbol(CellRef moduleCell, std::string_view symbolName,
                     CellRef entryOp);
 
-  [[nodiscard]] CellValue get(CellRef cell, std::int64_t offset = 0,
-                              std::int64_t length = -1);
-  [[nodiscard]] CellValue render(CellRef cell) const;
-  [[nodiscard]] bool isTruthy(CellRef cell) const;
+  [[nodiscard]] std::optional<CellValue>
+  get(CellRef cell, std::int64_t offset = 0,
+      std::optional<std::int64_t> length = std::nullopt);
+  [[nodiscard]] std::optional<CellValue> render(CellRef cell) const;
+  [[nodiscard]] std::optional<bool> isTruthy(CellRef cell) const;
   [[nodiscard]] static bool evaluateTruthiness(const CellValue &val);
 
   [[nodiscard]] std::function<CellRef()> cloneGenerator(CellRef source);
@@ -213,7 +240,7 @@ public:
 
   // -- Parameter Pre/Postprocessing Pipelines ---------------------------------
   [[nodiscard]] bool hasPipeline(CellRef paramCell) const;
-  [[nodiscard]] CellRef getPipelineHead(CellRef paramCell) const;
+  [[nodiscard]] std::optional<CellRef> getPipelineHead(CellRef paramCell) const;
   void attachPipeline(CellRef paramCell, CellRef firstOp);
 
   // -- Design by Contract -----------------------------------------------------
@@ -223,7 +250,7 @@ public:
   void attachPostcondition(CellRef opcode, CellRef conditionOp);
 
   // -- Pinning & Memory Lifecycle ---------------------------------------------
-  CellRef pin(std::string_view name, CellRef targetNode);
+  CellRef pin(std::string_view name, std::optional<CellRef> targetNode);
   [[nodiscard]] std::optional<CellRef> findPin(std::string_view name) const;
   bool flushPin(std::string_view name);
   bool retirePin(std::string_view name);

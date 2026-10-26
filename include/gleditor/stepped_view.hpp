@@ -24,8 +24,8 @@ namespace gleditor {
  * - A step produces std::nullopt (end of path).
  * - A self-loop is detected (step produces current element).
  * - A cycle closing back to @p start is detected.
- * - @p limit iterations are reached (guaranteeing cycle termination on lasso
- * paths).
+ * - The optional @p limit is reached (guaranteeing cycle termination on lasso
+ *   paths when a finite limit is supplied).
  */
 template <typename T, typename StepFn>
 class stepped_path_view
@@ -39,8 +39,9 @@ public:
 
     constexpr iterator() noexcept = default;
     constexpr iterator(const StepFn *step, std::optional<T> start,
-                       std::size_t limit) noexcept
-        : step_{step}, start_{start}, cur_{start}, limit_{limit} {}
+                       std::optional<std::size_t> limit) noexcept
+        : step_{step}, start_{start},
+          cur_{limit && *limit == 0 ? std::nullopt : start}, limit_{limit} {}
 
     [[nodiscard]] constexpr const T &operator*() const noexcept {
       return *cur_;
@@ -52,7 +53,7 @@ public:
         return *this;
       }
       ++taken_;
-      if (taken_ >= limit_) {
+      if (limit_ && taken_ >= *limit_) {
         cur_ = std::nullopt;
         return *this;
       }
@@ -85,13 +86,13 @@ public:
     std::optional<T> start_{std::nullopt};
     std::optional<T> cur_{std::nullopt};
     std::size_t taken_{0};
-    std::size_t limit_{static_cast<std::size_t>(-1)};
+    std::optional<std::size_t> limit_;
   };
 
   constexpr stepped_path_view() noexcept = default;
   constexpr stepped_path_view(
       StepFn step, std::optional<T> start,
-      std::size_t limit = static_cast<std::size_t>(-1)) noexcept
+      std::optional<std::size_t> limit = std::nullopt) noexcept
       : step_{std::move(step)}, start_{start}, limit_{limit} {}
 
   [[nodiscard]] constexpr iterator begin() const noexcept {
@@ -105,12 +106,12 @@ public:
 private:
   StepFn step_{};
   std::optional<T> start_{std::nullopt};
-  std::size_t limit_{static_cast<std::size_t>(-1)};
+  std::optional<std::size_t> limit_;
 };
 
 template <typename T, typename StepFn>
 stepped_path_view(StepFn, std::optional<T>,
-                  std::size_t = static_cast<std::size_t>(-1))
+                  std::optional<std::size_t> = std::nullopt)
     -> stepped_path_view<T, StepFn>;
 
 namespace detail {

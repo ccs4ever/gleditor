@@ -37,11 +37,6 @@ class Manifold;
  */
 class InternedDimName {
 public:
-  constexpr InternedDimName() noexcept = default;
-  constexpr explicit InternedDimName(std::uint32_t id,
-                                     std::string_view name) noexcept
-      : id_(id), name_(name) {}
-
   [[nodiscard]] constexpr std::uint32_t id() const noexcept { return id_; }
   [[nodiscard]] constexpr std::string_view name() const noexcept {
     return name_;
@@ -49,11 +44,6 @@ public:
   [[nodiscard]] constexpr std::string_view string() const noexcept {
     return name_;
   }
-  [[nodiscard]] constexpr bool empty() const noexcept { return id_ == 0; }
-  [[nodiscard]] constexpr explicit operator bool() const noexcept {
-    return id_ != 0;
-  }
-
   constexpr bool operator==(const InternedDimName &other) const noexcept {
     return id_ == other.id_;
   }
@@ -62,7 +52,13 @@ public:
   }
 
 private:
-  std::uint32_t id_{0};
+  friend class DimensionRegistry;
+
+  constexpr explicit InternedDimName(std::uint32_t id,
+                                     std::string_view name) noexcept
+      : id_(id), name_(name) {}
+
+  std::uint32_t id_{};
   std::string_view name_;
 };
 
@@ -93,10 +89,12 @@ public:
   DimensionRegistry &operator=(const DimensionRegistry &) = delete;
 
   /// Intern a dimension string name for fast O(1) comparison.
+  /// Intern a nonempty name. Empty names are invalid and throw.
   InternedDimName intern(std::string_view name);
 
-  /// Return the interned name if already interned, or empty if not.
-  [[nodiscard]] InternedDimName findInterned(std::string_view name) const;
+  /// Return the interned name if already interned.
+  [[nodiscard]] std::optional<InternedDimName>
+  findInterned(std::string_view name) const;
 
   /**
    * @brief Given a manifold and a dimension name, return the cellid of the dim

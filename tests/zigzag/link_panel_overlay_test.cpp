@@ -51,7 +51,8 @@ std::vector<xanadu::PanelLine> contextLines() {
 }
 
 std::array<ui::WidgetId, 12> actionIds() {
-  return {1024, 1025, 1026, 1027, 1028, 1029, 1030, 1031, 1032, 1033, 1034, 1035};
+  return {1024, 1025, 1026, 1027, 1028, 1029,
+          1030, 1031, 1032, 1033, 1034, 1035};
 }
 
 TEST(LinkPanelPresentationTest, BothChosenLineBandsStayClearOfContextChrome) {
@@ -198,7 +199,7 @@ TEST(LinkPanelPresentationTest,
           contained(box.rect, scene->layout.bounds);
           contained(box.contentRect, box.rect);
           if (box.parentId) {
-            const auto *parent = scene->layout.find(box.parentId);
+            const auto *parent = scene->layout.find(*box.parentId);
             ASSERT_NE(parent, nullptr);
             contained(box.rect, parent->rect);
           }
@@ -478,8 +479,9 @@ protected:
       at         = store.addLink(at, std::move(link));
     }
     for (const auto &link : store.linkView()) {
-      if (link.owner == "first") links[0] = link.id;
-      if (link.owner == "second") links[1] = link.id;
+      ASSERT_TRUE(link.id);
+      if (link.owner == "first") links[0] = *link.id;
+      if (link.owner == "second") links[1] = *link.id;
     }
     ASSERT_NE(links[0], zigzag::noCell);
     ASSERT_NE(links[1], zigzag::noCell);
@@ -532,10 +534,10 @@ TEST_F(LinkPanelOverlayTest, PreviewEdgesKeepLinkHueExactRangesAndActiveSide) {
       nav::SelectOccurrence{key, xanadu::LinkSide::Left, 0, 0}));
   ASSERT_TRUE(navigation.execute(
       nav::SelectOccurrence{key, xanadu::LinkSide::Right, 0, 0}));
-  auto app      = std::make_shared<AppState>();
-  auto renderer = Renderer::create(app, render::Backend::OpenGL);
-  auto doc = Doc::create(renderer, &device, glm::mat4(1.F),
-                         gleditor::MemoryTextSource("Left right", "edge-test"));
+  auto app           = std::make_shared<AppState>();
+  auto renderer      = Renderer::create(app, render::Backend::OpenGL);
+  auto doc           = Doc::create(renderer, &device, glm::mat4(1.F),
+                                   gleditor::MemoryTextSource("Left right", "edge-test"));
   const auto collect = [&] {
     std::vector<gleditor::SpanStyle> styles;
     overlay.decorate(*doc, styles);

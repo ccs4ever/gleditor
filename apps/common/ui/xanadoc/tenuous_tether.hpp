@@ -41,7 +41,6 @@ struct FlyingTetherAnchor {
     std::size_t targetId;
   };
   LinkTargetKind targetKind{LinkTargetKind::Document};
-  zigzag::CellRef cellRef{zigzag::noCell};
 
   glm::vec3 originPos{
       0.0F}; ///< Resting home coordinate in background (Z ~ -40)

@@ -1,0 +1,10 @@
+event Tick
+event Remove
+behavior Counter {
+  var ticks: Int := 0
+  on Tick { ticks := ticks + 1 }
+}
+agent Host {
+  behavior Counter
+  on Remove { unmount Counter }
+}

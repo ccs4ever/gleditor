@@ -193,7 +193,7 @@ void Manifold::setOneSide(const std::uint32_t dense, const DimRef dim,
   if (nullptr == link) {
     return;
   }
-  link->neighbor(dir) = to;
+  link->encodedNeighbor(dir) = to;
 }
 
 std::span<const xanadu::PrimediaSpan>
@@ -330,10 +330,7 @@ Manifold::applyStructure(const std::uint32_t opIndex,
         if (!node.span().empty()) {
           spliceContent(d, node.at, 0, node.span());
         } else if (store_ && node.sourceOpIndex > 0) {
-          const auto srcBirth =
-              (store_->editedBirths().size() > node.sourceOpIndex)
-                  ? store_->editedBirths()[node.sourceOpIndex]
-                  : 0;
+          const auto srcBirth = store_->editedBirthOf(node.sourceOpIndex);
           const auto srcDoc =
               store_->rebuildFromIndex(node.sourceOpIndex, srcBirth);
           const auto spans = srcDoc.spansFor(node.sourceAt, node.sourceLength);
@@ -450,9 +447,9 @@ Manifold::applyStructure(const std::uint32_t opIndex,
     // Genesis mints home first and d.dims second, by fiat, because linking the
     // first dimension onto the d.dims rank needs d.dims to be nameable
     // already. See R12.
-    if (noCell == home_) {
+    if (!home_) {
       home_ = opIndex;
-    } else if (noCell == dimsDim_) {
+    } else if (!dimsDim_) {
       dimsDim_ = opIndex;
     }
     if (xanadu::valueKindOf(node.flags) == xanadu::ValueKind::ExternRef) {
@@ -489,8 +486,8 @@ Manifold::applyStructure(const std::uint32_t opIndex,
     const auto d        = *dense;
     const CellRef self  = slots[d].birthOp;
     const DimVector dir = xanadu::structureDirectionOf(node.flags);
-    CellRef displacedUs = noCell;
-    CellRef displacedIt = noCell;
+    std::optional<CellRef> displacedUs;
+    std::optional<CellRef> displacedIt;
     // Read both sides out before touching anything: setOneSide() can grow a
     // run, and growing a run can move every DimLink in the arena.
     if (const DimLink *const mine = existingLink(d, dim); nullptr != mine) {
@@ -509,13 +506,13 @@ Manifold::applyStructure(const std::uint32_t opIndex,
     // linked(a, d, dir) == b exactly when linked(b, d, -dir) == a. zzcore's
     // loader derives the same backlinks; here it has to be maintained rather
     // than derived, because an op arrives one at a time.
-    if (noCell != displacedUs && displacedUs != to) {
-      if (const auto other = denseOf(displacedUs); other.has_value()) {
+    if (displacedUs && displacedUs != to) {
+      if (const auto other = denseOf(*displacedUs); other.has_value()) {
         setOneSide(*other, dim, -dir, noCell);
       }
     }
-    if (noCell != displacedIt && displacedIt != self) {
-      if (const auto other = denseOf(displacedIt); other.has_value()) {
+    if (displacedIt && displacedIt != self) {
+      if (const auto other = denseOf(*displacedIt); other.has_value()) {
         setOneSide(*other, dim, dir, noCell);
       }
     }
@@ -594,16 +591,16 @@ AdvanceResult Manifold::advance(const xanadu::Store &store,
                                 const xanadu::MicroversionId &version) {
   store_           = const_cast<xanadu::Store *>(&store);
   const auto index = store.segmentedOps().indexOf(version);
-  if (0 == index) {
+  if (!index || *index == 0) {
     return std::unexpected{
         AdvanceError{.kind = AdvanceError::Kind::UnknownVersion}};
   }
-  const auto *const node = store.getCompactOp(index);
+  const auto *const node = store.getCompactOp(*index);
   if (nullptr == node) {
     return std::unexpected{
         AdvanceError{.kind = AdvanceError::Kind::MissingNode}};
   }
-  return applyStructure(index, *node)
+  return applyStructure(*index, *node)
       .transform_error([](const FoldRefusal why) {
         return AdvanceError{.kind    = AdvanceError::Kind::Refused,
                             .refusal = why};
@@ -647,7 +644,7 @@ OptionalCell Manifold::linked(const CellRef from, const DimRef dim,
   for (std::uint16_t i = 0; i < cell.linkCount; i++) {
     const auto &link = links_[static_cast<std::size_t>(cell.linkOffset) + i];
     if (link.dim == dim) {
-      return gleditor::fromSentinel<noCell>(link.neighbor(dir));
+      return link.neighbor(dir);
     }
   }
   return std::nullopt;
@@ -655,6 +652,9 @@ OptionalCell Manifold::linked(const CellRef from, const DimRef dim,
 
 Manifold *Manifold::link(const CellRef from, const DimRef dim,
                          const DimVector dir, const std::optional<CellRef> to) {
+  if (to && *to == noCell) {
+    throw std::invalid_argument("a link target must be a cell or nullopt");
+  }
   const auto dense = denseOf(from);
   if (!dense.has_value()) {
     return this;
@@ -662,11 +662,10 @@ Manifold *Manifold::link(const CellRef from, const DimRef dim,
   const auto d         = *dense;
   const CellRef self   = slots[d].birthOp;
   const CellRef toCell = to.value_or(noCell);
-  const auto target =
-      (to.has_value() && *to != noCell) ? denseOf(*to) : std::nullopt;
+  const auto target    = to.has_value() ? denseOf(*to) : std::nullopt;
 
-  CellRef displacedUs = noCell;
-  CellRef displacedIt = noCell;
+  std::optional<CellRef> displacedUs;
+  std::optional<CellRef> displacedIt;
   if (const DimLink *const mine = existingLink(d, dim); nullptr != mine) {
     displacedUs = mine->neighbor(dir);
   }
@@ -677,13 +676,13 @@ Manifold *Manifold::link(const CellRef from, const DimRef dim,
     }
   }
 
-  if (noCell != displacedUs && displacedUs != toCell) {
-    if (const auto other = denseOf(displacedUs); other.has_value()) {
+  if (displacedUs && displacedUs != toCell) {
+    if (const auto other = denseOf(*displacedUs); other.has_value()) {
       setOneSide(*other, dim, -dir, noCell);
     }
   }
-  if (noCell != displacedIt && displacedIt != self) {
-    if (const auto other = denseOf(displacedIt); other.has_value()) {
+  if (displacedIt && displacedIt != self) {
+    if (const auto other = denseOf(*displacedIt); other.has_value()) {
       setOneSide(*other, dim, dir, noCell);
     }
   }
@@ -710,8 +709,7 @@ bool Manifold::rankContains(const CellRef anchor, const CellRef cell,
     std::size_t limit = bound;
     while (limit-- > 0) {
       const auto next = linked(cur, dim, DimVector::POS);
-      if (!next.has_value() || *next == noCell || *next == cur ||
-          *next == anchor) {
+      if (!next.has_value() || *next == cur || *next == anchor) {
         break;
       }
       if (*next == cell) {
@@ -726,8 +724,7 @@ bool Manifold::rankContains(const CellRef anchor, const CellRef cell,
     std::size_t limit = bound;
     while (limit-- > 0) {
       const auto prev = linked(cur, dim, DimVector::NEG);
-      if (!prev.has_value() || *prev == noCell || *prev == cur ||
-          *prev == anchor) {
+      if (!prev.has_value() || *prev == cur || *prev == anchor) {
         break;
       }
       if (*prev == cell) {
@@ -749,7 +746,7 @@ Manifold *Manifold::insertIntoRank(const CellRef cell, const CellRef anchor,
   }
   const auto displaced = linked(anchor, dim, dir);
   link(anchor, dim, dir, cell);
-  if (displaced.has_value() && *displaced != noCell) {
+  if (displaced.has_value()) {
     link(cell, dim, dir, *displaced);
   }
   return this;
@@ -771,10 +768,10 @@ std::span<const DimRef> Manifold::dimensions() const {
     return dimsCache;
   }
   dimsCache.clear();
-  if (noCell != home_) {
+  if (home_ && dimsDim_) {
     // From home rather than from its neighbour, so the ring guard is what
     // stops the walk at home -- the rank is a ring through it.
-    std::ranges::copy(rankAfter(*this, home_, dimsDim_),
+    std::ranges::copy(rankAfter(*this, *home_, *dimsDim_),
                       std::back_inserter(dimsCache));
   }
   dimsCacheStale = false;
@@ -802,19 +799,19 @@ Manifold::dimensionNamed(const std::string_view name,
       }
     }
   }
-  auto named =
-      dimensions() | std::views::filter([&](const DimRef dim) {
-        if (textOf(dim, reader) == name) {
-          return true;
-        }
-        if (dimAlias.has_value() && *dimAlias != dim) {
-          const auto aliasCell = linked(dim, *dimAlias, DimVector::POS);
-          if (aliasCell != noCell && textOf(aliasCell, reader) == name) {
-            return true;
-          }
-        }
-        return false;
-      });
+  auto named = dimensions() | std::views::filter([&](const DimRef dim) {
+                 if (textOf(dim, reader) == name) {
+                   return true;
+                 }
+                 if (dimAlias.has_value() && *dimAlias != dim) {
+                   const auto aliasCell =
+                       linked(dim, *dimAlias, DimVector::POS);
+                   if (aliasCell && textOf(*aliasCell, reader) == name) {
+                     return true;
+                   }
+                 }
+                 return false;
+               });
   return firstOf(named).transform([&](const DimRef dim) {
     if (nullptr != store_) {
       DimensionRegistry::instance().registerDim(*store_, name, dim);
@@ -1029,10 +1026,7 @@ Manifold::contentAsOf(const CellRef cell, const std::uint32_t op) const {
       if (!node->span().empty()) {
         toInsert.push_back(node->span());
       } else if (store_ && node->sourceOpIndex > 0) {
-        const auto srcBirth =
-            (store_->editedBirths().size() > node->sourceOpIndex)
-                ? store_->editedBirths()[node->sourceOpIndex]
-                : 0;
+        const auto srcBirth = store_->editedBirthOf(node->sourceOpIndex);
         const auto srcDoc =
             store_->rebuildFromIndex(node->sourceOpIndex, srcBirth);
         toInsert = srcDoc.spansFor(node->sourceAt, node->sourceLength);
@@ -1198,12 +1192,16 @@ Manifold::structureBirths(const xanadu::StructureKind kind) const {
   return ops;
 }
 
-std::vector<CellRef> Manifold::cellsWithinRadius(CellRef start,
-                                                 const int radius) const {
+std::vector<CellRef>
+Manifold::cellsWithinRadius(const std::optional<CellRef> start,
+                            const std::optional<int> radius) const {
+  if (radius && *radius < 0) {
+    throw std::invalid_argument("cell radius must be nonnegative or absent");
+  }
   if (slots.empty()) {
     return {};
   }
-  if (radius < 0) {
+  if (!radius) {
     std::vector<CellRef> allCells;
     allCells.reserve(slots.size());
     for (const auto &cell : slots) {
@@ -1212,10 +1210,10 @@ std::vector<CellRef> Manifold::cellsWithinRadius(CellRef start,
     return allCells;
   }
 
-  CellRef root = start;
-  if (noCell == root || !contains(root)) {
-    root = (home_ != noCell && contains(home_)) ? home_ : slots.front().birthOp;
-  }
+  const CellRef root =
+      start && contains(*start)
+          ? *start
+          : (home_ && contains(*home_) ? *home_ : slots.front().birthOp);
 
   std::vector<CellRef> ordered;
   std::unordered_set<CellRef> visited;
@@ -1229,7 +1227,7 @@ std::vector<CellRef> Manifold::cellsWithinRadius(CellRef start,
   std::size_t head = 0;
   while (head < queue.size()) {
     const auto [curr, dist] = queue[head++];
-    if (dist >= radius) {
+    if (dist >= *radius) {
       continue;
     }
 
@@ -1251,7 +1249,8 @@ std::vector<CellRef> Manifold::cellsWithinRadius(CellRef start,
 }
 
 std::unordered_set<CellRef>
-Manifold::cellsWithinRadiusSet(CellRef start, const int radius) const {
+Manifold::cellsWithinRadiusSet(const std::optional<CellRef> start,
+                               const std::optional<int> radius) const {
   const auto list = cellsWithinRadius(start, radius);
   return std::unordered_set<CellRef>{list.begin(), list.end()};
 }
@@ -1289,7 +1288,7 @@ std::vector<Manifold::Edition> Manifold::editions() const {
     return {};
   }
   const auto home = store_->homeCell();
-  if (noCell == home) {
+  if (!home) {
     return {};
   }
   const auto dimEditions = dimensionNamed("d.editions", *store_);
@@ -1304,17 +1303,16 @@ std::vector<Manifold::Edition> Manifold::editions() const {
   std::vector<Edition> result;
   for (const auto cell : rankAfter(*this, home, *dimEditions)) {
     const auto handle =
-        step(*this, cell, *dimEditionOf, DimVector::POS)
-            .or_else([&] {
-              return step(*this, cell, *dimEditionOf, DimVector::NEG);
-            })
-            .value_or(noCell);
-    const auto target = handleTarget(handle);
+        step(*this, cell, *dimEditionOf, DimVector::POS).or_else([&] {
+          return step(*this, cell, *dimEditionOf, DimVector::NEG);
+        });
+    const auto target =
+        handle.and_then([&](CellRef ref) { return handleTarget(ref); });
     result.push_back(Edition{
         .cell     = cell,
         .name     = textOf(cell, *store_),
         .handle   = handle,
-        .targetOp = target.value_or(0),
+        .targetOp = target,
     });
   }
 
@@ -1447,8 +1445,8 @@ std::vector<std::pair<std::string, CellRef>>
 Manifold::aliases(const xanadu::Store &store) const {
   std::vector<std::pair<std::string, CellRef>> result;
   for (const auto &ed : editions()) {
-    if (!ed.name.empty() && ed.name != "current" && ed.targetOp > 0) {
-      result.emplace_back(ed.name, static_cast<CellRef>(ed.targetOp));
+    if (!ed.name.empty() && ed.name != "current" && ed.targetOp.has_value()) {
+      result.emplace_back(ed.name, static_cast<CellRef>(*ed.targetOp));
     }
   }
   const auto dimAlias = dimensionNamed("d.alias", store);
@@ -1476,18 +1474,18 @@ Manifold::aliases(const xanadu::Store &store) const {
 ScrollRegistry
 Manifold::scrollRegistry(const xanadu::SpanReader &reader) const {
   ScrollRegistry registry;
-  if (nullptr == store_ && noCell == home_) {
+  if (nullptr == store_ && !home_) {
     return registry;
   }
   const auto dimScrolls = store_ ? dimensionNamed("d.scrolls", *store_)
                                  : dimensionNamed("d.scrolls");
-  if (!dimScrolls || noCell == home_) {
+  if (!dimScrolls || !home_) {
     return registry;
   }
 
   // 1. Collect all scroll cells on d.scrolls rank off home
   std::vector<CellRef> scrollCells;
-  for (const auto cell : rankAfter(*this, home_, *dimScrolls)) {
+  for (const auto cell : rankAfter(*this, *home_, *dimScrolls)) {
     scrollCells.push_back(cell);
   }
 
@@ -1509,7 +1507,8 @@ Manifold::scrollRegistry(const xanadu::SpanReader &reader) const {
       const auto &scrolls = store_->scrolls();
       const auto held =
           std::ranges::find_if(scrolls, [&](const xanadu::Scroll &scroll) {
-            return xanadu::scrollKey(scroll) == key;
+            const auto identity = xanadu::scrollKey(scroll);
+            return identity && *identity == key;
           });
       if (held != scrolls.end())
         return static_cast<xanadu::ScrollId>(
@@ -1627,7 +1626,7 @@ std::vector<ScrollRecord> Manifold::scrolls() const {
 std::map<CellRef, xanadu::Link>
 Manifold::links(const xanadu::SpanReader &reader) const {
   std::map<CellRef, xanadu::Link> result;
-  if (noCell == home_) {
+  if (!home_) {
     return result;
   }
   const auto dimLinks = dimensionNamed("d.links", reader);
@@ -1641,7 +1640,7 @@ Manifold::links(const xanadu::SpanReader &reader) const {
   const auto dimOwner   = dimensionNamed("d.owner", reader);
   const auto dimCurator = dimensionNamed("d.curator", reader);
 
-  for (const auto cell : rankAfter(*this, home_, *dimLinks)) {
+  for (const auto cell : rankAfter(*this, *home_, *dimLinks)) {
     xanadu::Link link;
     link.id = cell;
 
@@ -1672,14 +1671,14 @@ Manifold::links(const xanadu::SpanReader &reader) const {
               });
     };
 
-    link.left    = readEndpoint(dimFrom);
-    link.right   = readEndpoint(dimTo);
-    link.type    = readProp(dimType)
-                       .transform(xanadu::linkTypeFromName)
-                       .value_or(xanadu::LinkType::Comment);
-    link.tier    = readProp(dimTier)
-                       .transform(xanadu::prominenceTierFromName)
-                       .value_or(xanadu::ProminenceTier::Author);
+    link.left  = readEndpoint(dimFrom);
+    link.right = readEndpoint(dimTo);
+    link.type  = readProp(dimType)
+                    .transform(xanadu::linkTypeFromName)
+                    .value_or(xanadu::LinkType::Comment);
+    link.tier = readProp(dimTier)
+                    .transform(xanadu::prominenceTierFromName)
+                    .value_or(xanadu::ProminenceTier::Author);
     link.owner   = readProp(dimOwner).value_or("");
     link.curator = readProp(dimCurator).value_or("");
 

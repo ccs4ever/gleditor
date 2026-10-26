@@ -24,8 +24,7 @@ constexpr std::uint32_t tabsId    = barId - 1;
 constexpr std::uint32_t actionsId = barId - 2;
 
 std::string formatDocTitle(const std::string &rawName, std::size_t index) {
-  if (rawName.empty() || rawName == "0")
-    return "Doc " + std::to_string(index + 1);
+  if (rawName.empty()) return "Doc " + std::to_string(index + 1);
   if (rawName.starts_with("system://")) return "⚙ " + rawName;
   return std::filesystem::path(rawName).filename().string();
 }
@@ -125,23 +124,24 @@ void DocumentSwitcher::rebuild(FrameContext &ctx,
   layoutResult           = ui::split(
       bar, {.id = tabsId}, {.id = actionsId},
       {.firstShare = available > 0
-                         ? std::max(0.0F, available - actionWidth) / available
-                         : 0.0F,
-       .gap        = gap,
-       .parentId   = barId});
-  layoutResult.boxes.push_back({barId, 0, bar, bar});
+                                   ? std::max(0.0F, available - actionWidth) / available
+                                   : 0.0F,
+                 .gap        = gap,
+                 .parentId   = barId});
+  layoutResult.boxes.push_back({barId, std::nullopt, bar, bar});
   const auto tabsBounds    = layoutResult.find(tabsId)->rect;
   const auto actionsBounds = layoutResult.find(actionsId)->rect;
   std::vector<ui::LayoutItem> items;
   for (const auto &tab : currentTabs) {
     const auto &intrinsic = shaping.fitted(tab.name, font, {});
     items.push_back(
-        {.id        = (tab.docIndex << 1U) + 1U,
-         .intrinsic = {intrinsic.widthPx + 2 * padding + touch, height},
-         .minimum   = {touch * 2, height},
-         .maximum   = {std::max(touch, em * 12), height},
-         .grow      = 1,
-         .focusable = true});
+        {.id            = (tab.docIndex << 1U) + 1U,
+         .intrinsic     = {intrinsic.widthPx + 2 * padding + touch, height},
+         .minimum       = {touch * 2, height},
+         .maximumWidth  = std::max(touch, em * 12),
+         .maximumHeight = height,
+         .grow          = 1,
+         .focusable     = true});
   }
   layoutResult.append(ui::flow(
       tabsBounds, items, {.wrap = false, .gap = gap, .parentId = tabsId}));
@@ -234,6 +234,12 @@ void DocumentSwitcher::rebuild(FrameContext &ctx,
 
 void DocumentSwitcher::drawFrame(FrameContext &ctx) {
   const std::scoped_lock lock(guard);
+  if (ctx.state.docs.empty() ||
+      (activeIndex && (*activeIndex >= ctx.state.docs.size() ||
+                       !ctx.state.docs[*activeIndex] ||
+                       ctx.state.docs[*activeIndex]->isClosing()))) {
+    activeIndex.reset();
+  }
   if (!visible || !device || !pipeline) return;
   if (pickScope == 0)
     pickScope = ctx.state.allocatePersistentOverlayPickScope();
@@ -243,10 +249,12 @@ void DocumentSwitcher::drawFrame(FrameContext &ctx) {
   nextMetrics.chrome       = ctx.chrome;
   bool changed             = documents.size() != ctx.state.docs.size();
   std::size_t live{};
+  std::optional<std::uint32_t> firstLive;
   for (std::size_t index = 0; index < ctx.state.docs.size(); ++index) {
     const auto &doc = ctx.state.docs[index];
     changed |= index >= documents.size() || documents[index] != doc.get();
     if (!doc || doc->isClosing()) continue;
+    if (!firstLive) firstLive = static_cast<std::uint32_t>(index);
     changed |= live >= currentTabs.size() ||
                currentTabs[live].docIndex != index ||
                currentTabs[live].sourceName != doc->name();
@@ -254,6 +262,7 @@ void DocumentSwitcher::drawFrame(FrameContext &ctx) {
   }
   changed |= live != currentTabs.size();
   if (live == 0) {
+    activeIndex.reset();
     if (!layoutResult.boxes.empty()) ++revision;
     layoutResult = {};
     currentTabs.clear();
@@ -261,6 +270,12 @@ void DocumentSwitcher::drawFrame(FrameContext &ctx) {
     releasePickSnapshots();
     builtRevision = 0;
     return;
+  }
+  if (!activeIndex || *activeIndex >= ctx.state.docs.size() ||
+      !ctx.state.docs[*activeIndex] ||
+      ctx.state.docs[*activeIndex]->isClosing()) {
+    activeIndex = firstLive;
+    ++revision;
   }
   if (!canvas || changed || builtRevision != revision ||
       metrics != nextMetrics || theme != ctx.theme)
@@ -309,7 +324,7 @@ bool DocumentSwitcher::picked(const render::PickingResult &pick,
                               RenderState &state) {
   if (pick.tag.kind != render::tagKindOverlay) return false;
   auto tag = pick.tag.clusterIndex;
-  if (pick.requestId != 0) {
+  if (pick.requestId) {
     const std::scoped_lock lock(guard);
     if (pickScope == 0 || pick.tag.docIndex != pickScope ||
         pick.tag.pageIndex != 0)

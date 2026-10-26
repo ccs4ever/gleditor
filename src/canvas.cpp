@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstring>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -398,15 +399,15 @@ void Canvas::addImage(const float left, const float bottom, const float width,
     return;
   }
   imageAtlas = image.texture;
-  pushImageRow(left, bottom, width, height, image.layer, image.u0, image.v0,
+  pushImageRow(left, bottom, width, height, *image.layer, image.u0, image.v0,
                image.u1, image.v1, tint);
 }
 
 TextMetrics Canvas::measureText(const std::string_view utf8) const {
   auto font = text::FontManager::instance().getFont(fontName);
   text::LayoutOptions opts{
-      .maxWidthPx      = 0.0F,
-      .maxHeightPx     = 0.0F,
+      .maxWidthPx      = std::nullopt,
+      .maxHeightPx     = std::nullopt,
       .singleParagraph = true,
       .ellipsize       = false,
   };
@@ -426,8 +427,8 @@ Canvas::addText(RenderState &state, const float left, const float top,
   }
 
   text::LayoutOptions opts{
-      .maxWidthPx      = 0.0F,
-      .maxHeightPx     = 0.0F,
+      .maxWidthPx      = std::nullopt,
+      .maxHeightPx     = std::nullopt,
       .singleParagraph = true,
       .ellipsize       = false,
       .decoratedRanges = std::vector<DecoratedRange>(decoratedRanges.begin(),
@@ -498,13 +499,12 @@ Canvas::addText(RenderState &state, const ui::Rect box,
     return result;
   }
   auto fitConstraints       = constraints;
-  fitConstraints.maxWidthPx = constraints.maxWidthPx > 0.0F
-                                  ? std::min(box.width, constraints.maxWidthPx)
+  fitConstraints.maxWidthPx = constraints.maxWidthPx
+                                  ? std::min(box.width, *constraints.maxWidthPx)
                                   : box.width;
   fitConstraints.maxHeightPx =
-      constraints.maxHeightPx > 0.0F
-          ? std::min(box.height, constraints.maxHeightPx)
-          : box.height;
+      constraints.maxHeightPx ? std::min(box.height, *constraints.maxHeightPx)
+                              : box.height;
   result.fitted =
       text::fit(utf8, text::FontManager::instance().getFont(fontName),
                 fitConstraints, cache);
@@ -523,8 +523,8 @@ Canvas::addText(RenderState &state, const ui::Rect box,
       glyph.clusterTop += font->metrics().lineHeight * 0.2F;
     }
   }
-  result.box = {box.left, box.bottom + box.height - fitConstraints.maxHeightPx,
-                fitConstraints.maxWidthPx, fitConstraints.maxHeightPx};
+  result.box = {box.left, box.bottom + box.height - *fitConstraints.maxHeightPx,
+                *fitConstraints.maxWidthPx, *fitConstraints.maxHeightPx};
   const ScopedClip clip(*this, result.box);
   if (result.box.width > 0.0F && result.box.height > 0.0F) {
     drawText(state, result.box.left, result.box.bottom + result.box.height,

@@ -41,13 +41,13 @@ public:
         });
     ON_CALL(*this, resizeBuffer)
         .WillByDefault([this](render::BufferHandle buffer, std::size_t size) {
-          buffers[buffer.id].resize(size);
+          buffers[*buffer.id].resize(size);
           return buffer;
         });
     ON_CALL(*this, updateBuffer)
         .WillByDefault([this](render::BufferHandle buffer, std::size_t offset,
                               std::span<const std::byte> bytes) {
-          auto &storage = buffers[buffer.id];
+          auto &storage = buffers[*buffer.id];
           storage.resize(std::max(storage.size(), offset + bytes.size()));
           std::memcpy(storage.data() + offset, bytes.data(), bytes.size());
         });
@@ -57,7 +57,7 @@ public:
         .WillByDefault([this](const render::DrawUniforms &uniforms,
                               render::BufferHandle buffer, std::size_t offset,
                               std::uint32_t count) {
-          const auto &storage = buffers.at(buffer.id);
+          const auto &storage = buffers.at(*buffer.id);
           ASSERT_LE(offset + count * sizeof(Doc::VBORow), storage.size());
           for (std::uint32_t index = 0; index < count; ++index) {
             Doc::VBORow row{};
@@ -163,8 +163,8 @@ TEST_F(ScreenOverlayTest, layoutDrawPickAndAccessibilityShareTheSameBounds) {
           SCOPED_TRACE(box.id);
           expectContained(box.rect, scene->layout.bounds);
           expectContained(box.contentRect, box.rect);
-          if (box.parentId != 0) {
-            const auto *parent = scene->layout.find(box.parentId);
+          if (box.parentId) {
+            const auto *parent = scene->layout.find(*box.parentId);
             ASSERT_NE(parent, nullptr);
             expectContained(box.rect, parent->rect);
           }

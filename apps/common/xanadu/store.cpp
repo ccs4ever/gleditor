@@ -32,6 +32,15 @@ namespace xanadu {
 
 namespace {
 
+constexpr std::string_view anonymousRemoteAuthorPrefix = "remote-author:";
+
+void validateXanadocBirth(const std::optional<std::uint32_t> xanadocBirth) {
+  if (xanadocBirth && *xanadocBirth == 0) {
+    throw std::invalid_argument(
+        "xanadoc birth must be a nonzero operation index");
+  }
+}
+
 /// Refuse a span that names the arena's scratch scroll.
 ///
 /// The address-side twin of setLink()'s isEphemeral() check: scratch bytes are
@@ -163,12 +172,10 @@ void Store::detachManifold(zigzag::Manifold *const m) noexcept {
 
 std::optional<const zigzag::Manifold *>
 Store::manifoldAt(const MicroversionId &version) const noexcept {
-  if (!version.isZero() && !opsSpool.contains(version)) {
-    return std::nullopt;
-  }
   const auto targetIdx = opsSpool.indexOf(version);
+  if (!targetIdx) return std::nullopt;
   for (const auto *m : activeManifolds_) {
-    if (m != nullptr && m->foldedThrough() == targetIdx) {
+    if (m != nullptr && m->foldedThrough() == *targetIdx) {
       return m;
     }
   }
@@ -191,23 +198,25 @@ void Store::putOp(const MicroversionId &produces, const Op &op) {
         op.parent.str() + ", but that name follows " + produces.parent().str());
   }
 
-  const auto parentIdx = opsSpool.indexOf(op.parent);
-  if (!op.parent.isZero() && 0 == parentIdx) {
+  const auto parent = opsSpool.indexOf(op.parent);
+  if (!parent) {
     throw std::invalid_argument("operation filed under " + produces.str() +
                                 " names unknown parent " + op.parent.str());
   }
-
-  const auto sourceIdx = op.source.isZero() ? 0U : opsSpool.indexOf(op.source);
-  if (!op.source.isZero() && 0 == sourceIdx && OpKind::Structure == op.kind) {
+  const auto parentIdx = *parent;
+  const auto source    = opsSpool.indexOf(op.source);
+  if (!source && OpKind::Structure == op.kind) {
     throw std::invalid_argument("operation filed under " + produces.str() +
                                 " names unknown source " + op.source.str());
   }
-  const auto contextIdx =
-      op.context.isZero() ? 0U : opsSpool.indexOf(op.context);
-  if (!op.context.isZero() && 0 == contextIdx) {
+  // CompactOpNode reserves zero for an unavailable non-Structure source.
+  const auto sourceIdx = source.value_or(0U);
+  const auto context   = opsSpool.indexOf(op.context);
+  if (!context) {
     throw std::invalid_argument("operation filed under " + produces.str() +
                                 " names unknown context " + op.context.str());
   }
+  const auto contextIdx = *context;
 
   if (contextIdx != 0) {
     if (contextIdx > parentIdx) {
@@ -251,38 +260,40 @@ void Store::putOp(const MicroversionId &produces, const Op &op) {
   const auto index = opsSpool.append(node, produces);
 
   if (index >= editedBirths_.size()) {
-    editedBirths_.resize(index + 1, 0);
-    containerBirths_.resize(index + 1, 0);
+    editedBirths_.resize(index + 1, std::nullopt);
+    containerBirths_.resize(index + 1, std::nullopt);
   }
   if (OpKind::Structure == op.kind &&
       StructureVerb::Make == structureVerbOf(op.flags)) {
-    const auto kind         = structureKindOf(op.flags);
-    editedBirths_[index]    = index;
-    containerBirths_[index] = contextIdx;
-    if (StructureKind::Slice == kind && sliceBirth_ == 0) {
+    const auto kind      = structureKindOf(op.flags);
+    editedBirths_[index] = index;
+    containerBirths_[index] =
+        contextIdx != 0 ? std::optional{contextIdx} : std::nullopt;
+    if (StructureKind::Slice == kind && !sliceBirth_) {
       sliceBirth_ = index;
     } else if (StructureKind::Cell == kind) {
-      if (sliceBirth_ != 0 && contextIdx == sliceBirth_) {
-        if (zigzag::noCell == homeCell_) {
+      if (sliceBirth_.has_value() && contextIdx == *sliceBirth_) {
+        if (!homeCell_) {
           homeCell_ = index;
-        } else if (zigzag::noCell == dimsDimension_) {
+        } else if (!dimsDimension_) {
           dimsDimension_ = index;
         }
-      } else if (sliceBirth_ == 0) {
-        if (zigzag::noCell == homeCell_) {
+      } else if (!sliceBirth_) {
+        if (!homeCell_) {
           homeCell_ = index;
-        } else if (zigzag::noCell == dimsDimension_) {
+        } else if (!dimsDimension_) {
           dimsDimension_ = index;
         }
       }
     }
   } else {
-    editedBirths_[index] =
-        (contextIdx != 0 && contextIdx < index) ? editedBirths_[contextIdx] : 0;
-    containerBirths_[index] = (editedBirths_[index] != 0 &&
-                               editedBirths_[index] < containerBirths_.size())
-                                  ? containerBirths_[editedBirths_[index]]
-                                  : 0;
+    editedBirths_[index]    = (contextIdx != 0 && contextIdx < index)
+                                  ? editedBirths_[contextIdx]
+                                  : std::nullopt;
+    containerBirths_[index] = (editedBirths_[index] &&
+                               *editedBirths_[index] < containerBirths_.size())
+                                  ? containerBirths_[*editedBirths_[index]]
+                                  : std::nullopt;
   }
 
   if (chronofilade_ && index > 0) {
@@ -291,11 +302,11 @@ void Store::putOp(const MicroversionId &produces, const Op &op) {
 }
 
 void Store::indexGenesisCells() {
-  homeCell_      = zigzag::noCell;
-  dimsDimension_ = zigzag::noCell;
-  sliceBirth_    = 0;
-  editedBirths_.assign(opsSpool.size() + 1, 0);
-  containerBirths_.assign(opsSpool.size() + 1, 0);
+  homeCell_.reset();
+  dimsDimension_.reset();
+  sliceBirth_.reset();
+  editedBirths_.assign(opsSpool.size() + 1, std::nullopt);
+  containerBirths_.assign(opsSpool.size() + 1, std::nullopt);
 
   for (std::uint32_t idx = 1; idx <= opsSpool.size(); idx++) {
     const auto *const node = opsSpool.get(idx);
@@ -307,30 +318,31 @@ void Store::indexGenesisCells() {
         StructureVerb::Make == structureVerbOf(node->flags)) {
       const auto kind       = structureKindOf(node->flags);
       editedBirths_[idx]    = idx;
-      containerBirths_[idx] = ctx;
-      if (StructureKind::Slice == kind && sliceBirth_ == 0) {
+      containerBirths_[idx] = ctx != 0 ? std::optional{ctx} : std::nullopt;
+      if (StructureKind::Slice == kind && !sliceBirth_) {
         sliceBirth_ = idx;
       } else if (StructureKind::Cell == kind) {
-        if (sliceBirth_ != 0 && ctx == sliceBirth_) {
-          if (zigzag::noCell == homeCell_) {
+        if (sliceBirth_.has_value() && ctx == *sliceBirth_) {
+          if (!homeCell_) {
             homeCell_ = idx;
-          } else if (zigzag::noCell == dimsDimension_) {
+          } else if (!dimsDimension_) {
             dimsDimension_ = idx;
           }
-        } else if (sliceBirth_ == 0) {
-          if (zigzag::noCell == homeCell_) {
+        } else if (!sliceBirth_) {
+          if (!homeCell_) {
             homeCell_ = idx;
-          } else if (zigzag::noCell == dimsDimension_) {
+          } else if (!dimsDimension_) {
             dimsDimension_ = idx;
           }
         }
       }
     } else {
-      editedBirths_[idx]    = (ctx != 0 && ctx < idx) ? editedBirths_[ctx] : 0;
-      containerBirths_[idx] = (editedBirths_[idx] != 0 &&
-                               editedBirths_[idx] < containerBirths_.size())
-                                  ? containerBirths_[editedBirths_[idx]]
-                                  : 0;
+      editedBirths_[idx] =
+          (ctx != 0 && ctx < idx) ? editedBirths_[ctx] : std::nullopt;
+      containerBirths_[idx] =
+          (editedBirths_[idx] && *editedBirths_[idx] < containerBirths_.size())
+              ? containerBirths_[*editedBirths_[idx]]
+              : std::nullopt;
     }
   }
 }
@@ -342,14 +354,14 @@ std::optional<Op> Store::getOp(const MicroversionId &id) const {
   }
   const auto ctxIdx = contextOf(*node);
   const auto contextVersion =
-      ctxIdx != 0 ? opsSpool.idOf(ctxIdx) : MicroversionId{};
+      ctxIdx != 0 ? opsSpool.idOf(ctxIdx).value() : MicroversionId{};
   MicroversionId sourceVersion{};
   if (node->kind == OpKind::Transclude ||
       (node->kind == OpKind::Structure &&
        structureVerbOf(node->flags) != StructureVerb::Make)) {
-    sourceVersion = opsSpool.idOf(node->sourceOpIndex);
+    sourceVersion = opsSpool.idOf(node->sourceOpIndex).value();
   }
-  return node->toOp(opsSpool.idOf(node->parentIndex), sourceVersion,
+  return node->toOp(opsSpool.idOf(node->parentIndex).value(), sourceVersion,
                     contextVersion);
 }
 
@@ -413,10 +425,24 @@ void Store::replay(const CompactOpNode &node, Version &onto) const {
 }
 
 Version Store::rebuildFromIndex(const std::uint32_t index,
-                                std::uint32_t xanadocBirth) const {
-  if (0 == xanadocBirth) {
-    xanadocBirth = activeXanadocOnBranch(opsSpool.idOf(index));
-  }
+                                const XanadocSelection selection) const {
+  const auto version = opsSpool.idOf(index).value();
+  return rebuildResolvedFromIndex(index,
+                                  resolveXanadocBirth(version, selection));
+}
+
+Version
+Store::rebuildFromIndex(const std::uint32_t index,
+                        const std::optional<std::uint32_t> xanadocBirth) const {
+  return rebuildFromIndex(index, xanadocBirth
+                                     ? XanadocSelection::birth(*xanadocBirth)
+                                     : XanadocSelection::automatic());
+}
+
+Version Store::rebuildResolvedFromIndex(
+    const std::uint32_t index,
+    std::optional<std::uint32_t> xanadocBirth) const {
+  validateXanadocBirth(xanadocBirth);
   if (chronofilade_) {
     return chronofilade_->rebuildVersion(index, *this, xanadocBirth);
   }
@@ -424,13 +450,13 @@ Version Store::rebuildFromIndex(const std::uint32_t index,
   OsmicWalker::walkAncestral(opsSpool, index,
                              [this, &built, xanadocBirth](
                                  std::uint32_t idx, const CompactOpNode &node) {
-                               if (xanadocBirth != 0) {
+                               if (xanadocBirth) {
                                  if (idx < editedBirths_.size() &&
-                                     editedBirths_[idx] == xanadocBirth) {
+                                     editedBirths_[idx] == *xanadocBirth) {
                                    replay(node, built);
                                  }
                                } else {
-                                 if (!isCellOp(idx)) {
+                                 if (!editedBirthOf(idx)) {
                                    replay(node, built);
                                  }
                                }
@@ -439,12 +465,23 @@ Version Store::rebuildFromIndex(const std::uint32_t index,
 }
 
 Version Store::rebuild(const MicroversionId &version,
-                       std::uint32_t xanadocBirth) const {
-  if (0 == xanadocBirth) {
-    xanadocBirth = activeXanadocOnBranch(version);
-  }
-  if (const auto targetIdx = opsSpool.indexOf(version); targetIdx > 0) {
-    return rebuildFromIndex(targetIdx, xanadocBirth);
+                       const XanadocSelection selection) const {
+  return rebuildResolved(version, resolveXanadocBirth(version, selection));
+}
+
+Version Store::rebuild(const MicroversionId &version,
+                       const std::optional<std::uint32_t> xanadocBirth) const {
+  return rebuild(version, xanadocBirth ? XanadocSelection::birth(*xanadocBirth)
+                                       : XanadocSelection::automatic());
+}
+
+Version
+Store::rebuildResolved(const MicroversionId &version,
+                       const std::optional<std::uint32_t> xanadocBirth) const {
+  validateXanadocBirth(xanadocBirth);
+  if (const auto targetIdx = opsSpool.indexOf(version);
+      targetIdx && *targetIdx > 0) {
+    return rebuildResolvedFromIndex(*targetIdx, xanadocBirth);
   }
   // Nothing is filed under this name. Replaying the longest recorded prefix of
   // it is still the right answer -- asking for a state one edit past the end
@@ -453,13 +490,13 @@ Version Store::rebuild(const MicroversionId &version,
   Version built;
   for (const auto &step : version.path()) {
     if (const auto *const node = opsSpool.get(step); nullptr != node) {
-      const auto idx = opsSpool.indexOf(step);
-      if (xanadocBirth != 0) {
-        if (idx < editedBirths_.size() && editedBirths_[idx] == xanadocBirth) {
+      const auto idx = opsSpool.indexOf(step).value();
+      if (xanadocBirth) {
+        if (idx < editedBirths_.size() && editedBirths_[idx] == *xanadocBirth) {
           replay(*node, built);
         }
       } else {
-        if (!isCellOp(idx)) {
+        if (!editedBirthOf(idx)) {
           replay(*node, built);
         }
       }
@@ -485,8 +522,9 @@ Store::rebuildManifoldFromIndex(const std::uint32_t index) const {
 }
 
 zigzag::Manifold Store::rebuildManifold(const MicroversionId &version) const {
-  if (const auto targetIdx = opsSpool.indexOf(version); targetIdx > 0) {
-    return rebuildManifoldFromIndex(targetIdx);
+  if (const auto targetIdx = opsSpool.indexOf(version);
+      targetIdx && *targetIdx > 0) {
+    return rebuildManifoldFromIndex(*targetIdx);
   }
   // Nothing filed under this name: fold the longest recorded prefix of it, for
   // the same reason rebuild() replays one.
@@ -495,81 +533,113 @@ zigzag::Manifold Store::rebuildManifold(const MicroversionId &version) const {
   for (const auto &step : version.path()) {
     if (const auto *const node = opsSpool.get(step); nullptr != node) {
       // As above: refusals are counted, not fatal to the fold.
-      std::ignore = folded.applyStructure(opsSpool.indexOf(step), *node);
+      std::ignore =
+          folded.applyStructure(opsSpool.indexOf(step).value(), *node);
     }
   }
   folded.compact();
   return folded;
 }
 
-std::uint32_t Store::lastOpOnCell(const MicroversionId &parent,
-                                  const zigzag::CellRef cell) const {
-  if (const auto m = manifoldAt(parent); m.has_value()) {
-    if (const auto slot = (*m)->slot(cell); slot.has_value()) {
-      return slot->lastOp;
+std::optional<std::uint32_t>
+Store::lastOpOnCell(const MicroversionId &parent,
+                    const zigzag::CellRef cell) const {
+  // A caller may name a later operation on a cell. Follow its immutable R7
+  // source chain to the birth before asking which branch-local edit is latest.
+  auto birth = cell;
+  while (birth != 0) {
+    const auto *const node = opsSpool.get(birth);
+    if (!node || node->kind != OpKind::Structure) return std::nullopt;
+    if (structureVerbOf(node->flags) == StructureVerb::Make) {
+      if (structureKindOf(node->flags) != StructureKind::Cell)
+        return std::nullopt;
+      break;
     }
+    if (node->sourceOpIndex == 0 || node->sourceOpIndex >= birth)
+      return std::nullopt;
+    birth = node->sourceOpIndex;
   }
-  const auto last = lastOpOnStructure(parent, cell);
-  return last != 0 ? last : cell;
+  if (birth == 0) return std::nullopt;
+  if (const auto m = manifoldAt(parent); m.has_value()) {
+    if (const auto slot = (*m)->slot(birth); slot.has_value())
+      return slot->lastOp;
+  }
+  return lastOpOnStructure(parent, birth);
 }
 
-std::uint32_t
+std::optional<std::uint32_t>
 Store::lastOpOnStructure(const MicroversionId &parent,
                          const std::uint32_t structureBirth) const {
-  if (structureBirth == 0 || structureBirth > opsSpool.size()) {
-    return 0;
+  const auto *const birth = opsSpool.get(structureBirth);
+  if (!birth || birth->kind != OpKind::Structure ||
+      structureVerbOf(birth->flags) != StructureVerb::Make)
+    return std::nullopt;
+  auto current = opsSpool.indexOf(parent);
+  while (current && *current >= structureBirth) {
+    const auto index = *current;
+    if (index < editedBirths_.size() && editedBirths_[index] == structureBirth)
+      return index;
+    const auto *const node = opsSpool.get(index);
+    if (!node || node->parentIndex >= index) break;
+    current = node->parentIndex;
   }
-  auto curr = opsSpool.indexOf(parent);
-  while (curr >= structureBirth) {
-    if (curr < editedBirths_.size() && editedBirths_[curr] == structureBirth) {
-      return curr;
-    }
-    const auto *const node = opsSpool.get(curr);
-    if (!node || node->parentIndex == 0 || node->parentIndex >= curr) {
-      break;
-    }
-    curr = node->parentIndex;
-  }
-  return 0;
+  return std::nullopt;
 }
 
-std::uint32_t Store::activeXanadocOnBranch(const MicroversionId &parent) const {
-  auto curr = opsSpool.indexOf(parent);
-  while (curr != 0) {
-    if (curr < editedBirths_.size() && editedBirths_[curr] != 0) {
-      const auto birth        = editedBirths_[curr];
-      const auto *const bNode = opsSpool.get(birth);
-      if (bNode && OpKind::Structure == bNode->kind &&
-          StructureVerb::Make == structureVerbOf(bNode->flags) &&
-          StructureKind::Xanadoc == structureKindOf(bNode->flags)) {
+std::optional<std::uint32_t>
+Store::activeXanadocOnBranch(const MicroversionId &parent) const {
+  auto current = opsSpool.indexOf(parent);
+  while (current && *current != 0) {
+    const auto index = *current;
+    if (index < editedBirths_.size() && editedBirths_[index].has_value()) {
+      const auto birth       = editedBirths_[index];
+      const auto *const node = opsSpool.get(*birth);
+      if (node && node->kind == OpKind::Structure &&
+          structureVerbOf(node->flags) == StructureVerb::Make &&
+          structureKindOf(node->flags) == StructureKind::Xanadoc)
         return birth;
-      }
     }
-    const auto *const node = opsSpool.get(curr);
-    if (!node || node->parentIndex == 0 || node->parentIndex >= curr) {
-      break;
-    }
-    curr = node->parentIndex;
+    const auto *const node = opsSpool.get(index);
+    if (!node || node->parentIndex >= index) break;
+    current = node->parentIndex;
   }
-  return 0;
+  return std::nullopt;
 }
 
-MicroversionId Store::resolveTextContext(const MicroversionId &parent,
-                                         const MicroversionId &context) const {
-  if (!context.isZero()) {
-    const auto cIdx = opsSpool.indexOf(context);
-    if (cIdx == 0) {
-      throw std::invalid_argument("context microversion " + context.str() +
+std::optional<std::uint32_t>
+Store::resolveXanadocBirth(const MicroversionId &version,
+                           const XanadocSelection &selection) const {
+  if (selection.isAutomatic()) return activeXanadocOnBranch(version);
+  if (selection.isRoot()) return std::nullopt;
+  const auto *const birth = selection.birthSelection();
+  if (birth == nullptr || !structureKindOfOp(birth->birthOp())) {
+    throw std::invalid_argument(
+        "replay selection does not name a minted Structure birth");
+  }
+  return birth->birthOp();
+}
+
+MicroversionId
+Store::resolveTextContext(const MicroversionId &parent,
+                          const std::optional<MicroversionId> &context) const {
+  if (context) {
+    const auto contextIndex = opsSpool.indexOf(*context);
+    if (!contextIndex) {
+      throw std::invalid_argument("context microversion " + context->str() +
                                   " not found in store");
     }
-    const auto parentIdx = opsSpool.indexOf(parent);
+    const auto cIdx        = *contextIndex;
+    const auto parentIndex = opsSpool.indexOf(parent);
+    if (!parentIndex)
+      throw std::invalid_argument("unknown parent " + parent.str());
+    const auto parentIdx = *parentIndex;
     if (cIdx > parentIdx) {
       throw std::invalid_argument("context operation " + std::to_string(cIdx) +
                                   " is in the future relative to parent " +
                                   std::to_string(parentIdx));
     }
-    bool reachable = false;
-    for (auto curr = parentIdx; curr != 0 && curr >= cIdx;) {
+    bool reachable = cIdx == 0;
+    for (auto curr = parentIdx; !reachable && curr != 0 && curr >= cIdx;) {
       if (curr == cIdx) {
         reachable = true;
         break;
@@ -586,22 +656,22 @@ MicroversionId Store::resolveTextContext(const MicroversionId &parent,
           " is not on active ancestral path of parent " +
           std::to_string(parentIdx));
     }
-    const auto birth = (cIdx < editedBirths_.size()) ? editedBirths_[cIdx] : 0;
-    if (birth != 0) {
-      const auto lastOp = lastOpOnStructure(parent, birth);
-      if (lastOp != 0) {
-        return opsSpool.idOf(lastOp);
+    const auto birth = editedBirthOf(cIdx);
+    if (birth) {
+      const auto lastOp = lastOpOnStructure(parent, *birth);
+      if (lastOp) {
+        return opsSpool.idOf(*lastOp).value();
       }
     }
-    return context;
+    return *context;
   }
   const auto activeXanadoc = activeXanadocOnBranch(parent);
-  if (activeXanadoc != 0) {
-    const auto lastOp = lastOpOnStructure(parent, activeXanadoc);
-    if (lastOp != 0) {
-      return opsSpool.idOf(lastOp);
+  if (activeXanadoc) {
+    const auto lastOp = lastOpOnStructure(parent, *activeXanadoc);
+    if (lastOp) {
+      return opsSpool.idOf(*lastOp).value();
     }
-    return opsSpool.idOf(activeXanadoc);
+    return opsSpool.idOf(*activeXanadoc).value();
   }
   return {};
 }
@@ -665,7 +735,7 @@ MicroversionId Store::makeXanadoc(const MicroversionId &parent,
 
 MicroversionId Store::makeCell(const MicroversionId &parent,
                                const PrimediaSpan &content,
-                               const MicroversionId &context) {
+                               std::optional<MicroversionId> context) {
   requireAddressable(content, "a cell's content");
   InferredTextValue inferred;
   if (content.length <= maxInferredScalarTextBytes) {
@@ -681,16 +751,16 @@ MicroversionId Store::makeCell(const MicroversionId &parent,
   op.flags   = structureFlags(StructureVerb::MakeCell, false, inferred.kind);
   op.span    = content;
   op.value   = inferred.bits;
-  op.context = context;
-  if (op.context.isZero() && sliceBirth_ != 0) {
-    op.context = opsSpool.idOf(sliceBirth_);
+  op.context = context.value_or(MicroversionId{});
+  if (!context && sliceBirth_.has_value()) {
+    op.context = opsSpool.idOf(*sliceBirth_).value();
   }
   return apply(parent, op);
 }
 
 MicroversionId Store::makeCell(const MicroversionId &parent,
                                const std::string_view text,
-                               const MicroversionId &context) {
+                               std::optional<MicroversionId> context) {
   // Into the permascroll first, exactly as insert() does it: a cell's content
   // is ordinary spooled primedia, which is what makes it a link endpoint and a
   // transclusion source rather than a payload of its own kind. See R6.
@@ -700,61 +770,64 @@ MicroversionId Store::makeCell(const MicroversionId &parent,
   op.flags   = structureFlags(StructureVerb::MakeCell, false, inferred.kind);
   op.span    = userPermascroll_->append(text);
   op.value   = inferred.bits;
-  op.context = context;
-  if (op.context.isZero() && sliceBirth_ != 0) {
-    op.context = opsSpool.idOf(sliceBirth_);
+  op.context = context.value_or(MicroversionId{});
+  if (!context && sliceBirth_.has_value()) {
+    op.context = opsSpool.idOf(*sliceBirth_).value();
   }
   return apply(parent, op);
 }
 
 MicroversionId Store::applyScalar(const MicroversionId &parent,
-                                  const zigzag::CellRef cell,
+                                  const std::optional<zigzag::CellRef> cell,
                                   const ScalarValue &value,
-                                  const MicroversionId &context) {
+                                  std::optional<MicroversionId> context) {
   // The rendering is spooled whether this mints or restates, because a cell's
   // content is primedia at an address and an address is what a link, a
   // transclusion and a diff all attach to. R6 accepts the permascroll now
   // holding bytes a program wrote rather than bytes a person typed -- worst
   // case 24 for a double, typically fewer -- as the price of a scalar being a
   // first-class Xanadu object rather than a payload of its own kind.
+  if (cell && *cell == zigzag::noCell) {
+    throw std::invalid_argument("a scalar target must be a cell or nullopt");
+  }
   const auto span = userPermascroll_->append(value.text);
-  if (zigzag::noCell == cell) {
+  if (!cell) {
     Op op;
     op.kind    = OpKind::Structure;
     op.flags   = structureFlags(StructureVerb::MakeCell, false, value.kind);
     op.span    = span;
     op.value   = value.bits;
-    op.context = context;
-    if (op.context.isZero() && sliceBirth_ != 0) {
-      op.context = opsSpool.idOf(sliceBirth_);
+    op.context = context.value_or(MicroversionId{});
+    if (!context && sliceBirth_.has_value()) {
+      op.context = opsSpool.idOf(*sliceBirth_).value();
     }
     return apply(parent, op);
   }
-  return setValue(parent, cell, span, value.kind, value.bits, context);
+  return setValue(parent, *cell, span, value.kind, value.bits, context);
 }
 
 MicroversionId Store::makeScalarCell(const MicroversionId &parent,
                                      const double value,
-                                     const MicroversionId &context) {
-  return applyScalar(parent, zigzag::noCell, scalarValue(value), context);
+                                     std::optional<MicroversionId> context) {
+  return applyScalar(parent, std::nullopt, scalarValue(value), context);
 }
 
 MicroversionId Store::makeScalarCell(const MicroversionId &parent,
                                      const bool value,
-                                     const MicroversionId &context) {
-  return applyScalar(parent, zigzag::noCell, scalarValue(value), context);
+                                     std::optional<MicroversionId> context) {
+  return applyScalar(parent, std::nullopt, scalarValue(value), context);
 }
 
 MicroversionId Store::makeScalarCell(const MicroversionId &parent,
                                      const std::int64_t value,
-                                     const MicroversionId &context) {
-  return applyScalar(parent, zigzag::noCell, scalarValue(value), context);
+                                     std::optional<MicroversionId> context) {
+  return applyScalar(parent, std::nullopt, scalarValue(value), context);
 }
 
 MicroversionId Store::makeOpHandle(const MicroversionId &parent,
                                    const std::uint32_t target,
                                    const std::string_view text,
-                                   const MicroversionId &context) {
+                                   std::optional<MicroversionId> context) {
   if (zigzag::isEphemeral(target)) {
     throw std::invalid_argument(
         "a derived cell has no operation behind it, so a handle naming one "
@@ -773,29 +846,29 @@ MicroversionId Store::makeOpHandle(const MicroversionId &parent,
       structureFlags(StructureVerb::MakeCell, false, ValueKind::OpHandle);
   op.span    = span;
   op.value   = target;
-  op.context = context;
-  if (op.context.isZero() && sliceBirth_ != 0) {
-    op.context = opsSpool.idOf(sliceBirth_);
+  op.context = context.value_or(MicroversionId{});
+  if (!context && sliceBirth_.has_value()) {
+    op.context = opsSpool.idOf(*sliceBirth_).value();
   }
   return apply(parent, op);
 }
 
 MicroversionId Store::setScalar(const MicroversionId &parent,
                                 const zigzag::CellRef cell, const double value,
-                                const MicroversionId &context) {
+                                std::optional<MicroversionId> context) {
   return applyScalar(parent, cell, scalarValue(value), context);
 }
 
 MicroversionId Store::setScalar(const MicroversionId &parent,
                                 const zigzag::CellRef cell, const bool value,
-                                const MicroversionId &context) {
+                                std::optional<MicroversionId> context) {
   return applyScalar(parent, cell, scalarValue(value), context);
 }
 
 MicroversionId Store::setScalar(const MicroversionId &parent,
                                 const zigzag::CellRef cell,
                                 const std::int64_t value,
-                                const MicroversionId &context) {
+                                std::optional<MicroversionId> context) {
   return applyScalar(parent, cell, scalarValue(value), context);
 }
 
@@ -804,7 +877,7 @@ MicroversionId Store::spliceCellSpan(const MicroversionId &parent,
                                      const std::uint64_t at,
                                      const std::uint64_t removing,
                                      const PrimediaSpan &quoted,
-                                     const MicroversionId &context) {
+                                     std::optional<MicroversionId> context) {
   if (zigzag::noCell == cell || zigzag::isEphemeral(cell)) {
     throw std::invalid_argument("spliceCell needs a cell an operation minted");
   }
@@ -845,26 +918,30 @@ MicroversionId Store::spliceCellSpan(const MicroversionId &parent,
   op.flags = structureFlags(StructureVerb::Splice, false, inferred.kind);
   // The one Structure verb whose `at` is not zero: it is an offset inside the
   // cell's own content, which is the frame this operation edits within.
-  op.at     = static_cast<std::uint32_t>(at);
-  op.length = static_cast<std::uint32_t>(removing);
-  op.span   = quoted;
-  op.value  = inferred.bits;
-  if (const auto previous = lastOpOnCell(parent, cell);
-      zigzag::noCell != previous) {
-    op.source = opsSpool.idOf(previous);
+  op.at               = static_cast<std::uint32_t>(at);
+  op.length           = static_cast<std::uint32_t>(removing);
+  op.span             = quoted;
+  op.value            = inferred.bits;
+  const auto previous = lastOpOnCell(parent, cell);
+  if (!previous) {
+    throw std::invalid_argument("cell " + std::to_string(cell) +
+                                " is absent from parent " + parent.str());
   }
-  if (!context.isZero()) {
-    op.context = context;
+  op.source = opsSpool.idOf(*previous).value();
+  if (context) {
+    op.context = *context;
   } else {
     op.context = op.source;
   }
   return apply(parent, op);
 }
 
-MicroversionId
-Store::spliceCell(const MicroversionId &parent, const zigzag::CellRef cell,
-                  const std::uint64_t at, const std::uint64_t removing,
-                  const std::string_view text, const MicroversionId &context) {
+MicroversionId Store::spliceCell(const MicroversionId &parent,
+                                 const zigzag::CellRef cell,
+                                 const std::uint64_t at,
+                                 const std::uint64_t removing,
+                                 const std::string_view text,
+                                 std::optional<MicroversionId> context) {
   // Into the permascroll first, and only what was actually typed -- which is
   // the difference this verb exists to make. setCellText() appends the whole
   // cell however little of it changed.
@@ -876,45 +953,49 @@ Store::spliceCell(const MicroversionId &parent, const zigzag::CellRef cell,
 MicroversionId Store::setCellText(const MicroversionId &parent,
                                   const zigzag::CellRef cell,
                                   const std::string_view text,
-                                  const MicroversionId &context) {
+                                  std::optional<MicroversionId> context) {
   const auto span     = userPermascroll_->append(text);
   const auto inferred = inferTextValue(text);
   return setValue(parent, cell, span, inferred.kind, inferred.bits, context);
 }
 
-MicroversionId
-Store::setLink(const MicroversionId &parent, const zigzag::CellRef from,
-               const zigzag::DimRef dim, const zigzag::DimVector dir,
-               const zigzag::CellRef to, const MicroversionId &context) {
+MicroversionId Store::setLink(const MicroversionId &parent,
+                              const zigzag::CellRef from,
+                              const zigzag::DimRef dim,
+                              const zigzag::DimVector dir,
+                              const std::optional<zigzag::CellRef> to,
+                              std::optional<MicroversionId> context) {
   if (zigzag::noCell == from) {
     throw std::invalid_argument("a link has to be from some cell");
   }
   if (zigzag::isEphemeral(from) || zigzag::isEphemeral(dim) ||
-      zigzag::isEphemeral(to)) {
+      (to && zigzag::isEphemeral(*to))) {
     throw std::invalid_argument(
         "a derived cell has no operation behind it, so a link naming one "
         "cannot be recorded -- see design R8 and R12");
   }
   requireCellOp(from, "the cell a link is from");
   requireCellOp(dim, "the dimension a link is along");
-  if (zigzag::noCell != to) {
-    requireCellOp(to, "the cell a link is to");
+  if (to) {
+    requireCellOp(*to, "the cell a link is to");
   }
 
   Op op;
   op.kind  = OpKind::Structure;
   op.flags = structureFlags(StructureVerb::SetLink, dir);
-  op.to    = to;
+  op.to    = to.value_or(zigzag::noCell);
   op.link  = dim;
   // The chain, which is also how the fold knows whose link this is: there is
   // no separate subject field, and the chain's far end is the MakeCell whose
   // index is the cell. See R7.
-  if (const auto previous = lastOpOnCell(parent, from);
-      zigzag::noCell != previous) {
-    op.source = opsSpool.idOf(previous);
+  const auto previous = lastOpOnCell(parent, from);
+  if (!previous) {
+    throw std::invalid_argument("cell " + std::to_string(from) +
+                                " is absent from parent " + parent.str());
   }
-  if (!context.isZero()) {
-    op.context = context;
+  op.source = opsSpool.idOf(*previous).value();
+  if (context) {
+    op.context = *context;
   } else {
     op.context = op.source;
   }
@@ -925,23 +1006,25 @@ MicroversionId Store::setValue(const MicroversionId &parent,
                                const zigzag::CellRef cell,
                                const PrimediaSpan &content,
                                const ValueKind kind, const std::uint64_t bits,
-                               const MicroversionId &context) {
+                               std::optional<MicroversionId> context) {
   if (zigzag::noCell == cell || zigzag::isEphemeral(cell)) {
     throw std::invalid_argument("setValue needs a cell an operation minted");
   }
   requireCellOp(cell, "the cell a value is set on");
   requireAddressable(content, "the content a value restates");
   Op op;
-  op.kind  = OpKind::Structure;
-  op.flags = structureFlags(StructureVerb::SetValue, false, kind);
-  op.span  = content;
-  op.value = bits;
-  if (const auto previous = lastOpOnCell(parent, cell);
-      zigzag::noCell != previous) {
-    op.source = opsSpool.idOf(previous);
+  op.kind             = OpKind::Structure;
+  op.flags            = structureFlags(StructureVerb::SetValue, false, kind);
+  op.span             = content;
+  op.value            = bits;
+  const auto previous = lastOpOnCell(parent, cell);
+  if (!previous) {
+    throw std::invalid_argument("cell " + std::to_string(cell) +
+                                " is absent from parent " + parent.str());
   }
-  if (!context.isZero()) {
-    op.context = context;
+  op.source = opsSpool.idOf(*previous).value();
+  if (context) {
+    op.context = *context;
   } else {
     op.context = op.source;
   }
@@ -950,10 +1033,10 @@ MicroversionId Store::setValue(const MicroversionId &parent,
 
 MicroversionId Store::sliceGenesis(const MicroversionId &parent,
                                    std::string_view sliceName) {
-  if (zigzag::noCell != homeCell_) {
+  if (homeCell_) {
     throw std::invalid_argument(
         "this store already has a home cell at operation " +
-        std::to_string(homeCell_) +
+        std::to_string(*homeCell_) +
         "; genesis mints the two cells that cannot be deleted, once");
   }
   const auto withSlice = makeSlice(parent, sliceName);
@@ -964,24 +1047,24 @@ MicroversionId Store::sliceGenesis(const MicroversionId &parent,
   // d.dims is a dimension like any other, so it belongs on its own rank --
   // which is what makes dimensions() report it alongside everything minted
   // afterwards instead of it being the one dimension that is invisible.
-  const auto res = setLink(withDims, homeCell_, dimsDimension_,
-                           zigzag::DimVector::POS, dimsDimension_, withSlice);
+  const auto res = setLink(withDims, *homeCell_, *dimsDimension_,
+                           zigzag::DimVector::POS, *dimsDimension_, withSlice);
   zigzag::DimensionRegistry::instance().registerDim(*this, "d.dims",
-                                                    dimsDimension_);
+                                                    *dimsDimension_);
   return res;
 }
 
 Store::MintedDimension Store::makeDimension(const MicroversionId &parent,
                                             const std::string_view name) {
-  if (zigzag::noCell == dimsDimension_) {
+  if (!dimsDimension_) {
     throw std::invalid_argument(
         "a dimension goes on the d.dims rank, and this store has no d.dims "
         "cell yet -- call sliceGenesis() first");
   }
-  const auto ctx =
-      sliceBirth_ != 0 ? opsSpool.idOf(sliceBirth_) : MicroversionId{};
+  const auto ctx = sliceBirth_.has_value() ? opsSpool.idOf(*sliceBirth_).value()
+                                           : MicroversionId{};
   const auto minted = makeCell(parent, name, ctx);
-  const auto ref    = cellRefOf(minted);
+  const auto ref    = cellRefOf(minted).value();
 
   std::optional<zigzag::Manifold> folded;
   const zigzag::Manifold *currentFold = nullptr;
@@ -992,24 +1075,24 @@ Store::MintedDimension Store::makeDimension(const MicroversionId &parent,
     currentFold = &folded.value();
   }
   // The rank's tail, so dimensions come back in the order they were minted.
-  auto tail = homeCell_;
+  auto tail = *homeCell_;
   for (auto step = currentFold->cellCount() + 1; step > 0; step--) {
     const auto next =
-        currentFold->linked(tail, dimsDimension_, zigzag::DimVector::POS);
-    if (zigzag::noCell == next || next == ref || next == homeCell_) {
+        currentFold->linked(tail, *dimsDimension_, zigzag::DimVector::POS);
+    if (!next || *next == ref || *next == *homeCell_) {
       break;
     }
-    tail = next;
+    tail = *next;
   }
   const auto version =
-      setLink(minted, tail, dimsDimension_, zigzag::DimVector::POS, ref, ctx);
+      setLink(minted, tail, *dimsDimension_, zigzag::DimVector::POS, ref, ctx);
   zigzag::DimensionRegistry::instance().registerDim(*this, name, ref);
   return MintedDimension{.version = version, .dim = ref};
 }
 
 bool Store::advance(Version &document, const MicroversionId &known,
                     const MicroversionId &version,
-                    std::uint32_t xanadocBirth) const {
+                    const XanadocSelection selection) const {
   // One step on means the op filed under `version` names `known` as its
   // parent -- which is what putOp() checks when it is recorded, so asking
   // MicroversionId is asking the same question the spool already answered.
@@ -1020,57 +1103,78 @@ bool Store::advance(Version &document, const MicroversionId &known,
   if (nullptr == node) {
     return false;
   }
-  const auto idx = opsSpool.indexOf(version);
-  if (0 == xanadocBirth) {
-    xanadocBirth = activeXanadocOnBranch(version);
+  const auto idx          = opsSpool.indexOf(version).value();
+  const auto knownBirth   = resolveXanadocBirth(known, selection);
+  const auto xanadocBirth = resolveXanadocBirth(version, selection);
+  if (knownBirth != xanadocBirth) {
+    document = rebuildResolved(version, xanadocBirth);
+    return true;
   }
-  if (xanadocBirth != 0) {
-    if (idx < editedBirths_.size() && editedBirths_[idx] == xanadocBirth) {
+  if (xanadocBirth) {
+    if (idx < editedBirths_.size() && editedBirths_[idx] == *xanadocBirth) {
       replay(*node, document);
     }
   } else {
-    if (!isCellOp(idx)) {
+    if (!editedBirthOf(idx)) {
       replay(*node, document);
     }
   }
+  return true;
+}
+
+bool Store::advance(Version &document, const MicroversionId &known,
+                    const MicroversionId &version,
+                    const std::optional<std::uint32_t> xanadocBirth) const {
+  return advance(document, known, version,
+                 xanadocBirth ? XanadocSelection::birth(*xanadocBirth)
+                              : XanadocSelection::automatic());
+}
+
+bool Store::advanceTo(Version &document, const MicroversionId &known,
+                      const MicroversionId &version,
+                      const XanadocSelection selection) const {
+  const auto knownBirth   = resolveXanadocBirth(known, selection);
+  const auto xanadocBirth = resolveXanadocBirth(version, selection);
+  if (known == version) {
+    return true;
+  }
+  if (knownBirth != xanadocBirth) {
+    document = rebuildResolved(version, xanadocBirth);
+    return true;
+  }
+  const auto fromIdx = opsSpool.indexOf(known);
+  const auto toIdx   = opsSpool.indexOf(version);
+  if (chronofilade_ && fromIdx && toIdx && *toIdx > 0) {
+    return chronofilade_->advance(document, *fromIdx, *toIdx, *this,
+                                  xanadocBirth);
+  }
+  document = rebuildResolved(version, xanadocBirth);
   return true;
 }
 
 bool Store::advanceTo(Version &document, const MicroversionId &known,
                       const MicroversionId &version,
-                      std::uint32_t xanadocBirth) const {
-  if (known == version) {
-    return true;
-  }
-  const auto fromIdx = opsSpool.indexOf(known);
-  const auto toIdx   = opsSpool.indexOf(version);
-  if (0 == xanadocBirth) {
-    xanadocBirth = activeXanadocOnBranch(version);
-  }
-  if (chronofilade_ && toIdx > 0) {
-    return chronofilade_->advance(document, fromIdx, toIdx, *this,
-                                  xanadocBirth);
-  }
-  document = rebuild(version, xanadocBirth);
-  return true;
+                      const std::optional<std::uint32_t> xanadocBirth) const {
+  return advanceTo(document, known, version,
+                   xanadocBirth ? XanadocSelection::birth(*xanadocBirth)
+                                : XanadocSelection::automatic());
 }
 
 bool Store::verifyAgainstFullRebuild(const std::uint32_t index,
-                                     std::uint32_t xanadocBirth) const {
-  if (0 == xanadocBirth) {
-    xanadocBirth = activeXanadocOnBranch(opsSpool.idOf(index));
-  }
+                                     const XanadocSelection selection) const {
+  const auto xanadocBirth =
+      resolveXanadocBirth(opsSpool.idOf(index).value(), selection);
   Version raw;
   OsmicWalker::walkAncestral(
       opsSpool, index,
       [this, &raw, xanadocBirth](std::uint32_t idx, const CompactOpNode &node) {
-        if (xanadocBirth != 0) {
+        if (xanadocBirth) {
           if (idx < editedBirths_.size() &&
-              editedBirths_[idx] == xanadocBirth) {
+              editedBirths_[idx] == *xanadocBirth) {
             replay(node, raw);
           }
         } else {
-          if (!isCellOp(idx)) {
+          if (!editedBirthOf(idx)) {
             replay(node, raw);
           }
         }
@@ -1082,19 +1186,43 @@ bool Store::verifyAgainstFullRebuild(const std::uint32_t index,
   return true;
 }
 
+bool Store::verifyAgainstFullRebuild(
+    const std::uint32_t index,
+    const std::optional<std::uint32_t> xanadocBirth) const {
+  return verifyAgainstFullRebuild(
+      index, xanadocBirth ? XanadocSelection::birth(*xanadocBirth)
+                          : XanadocSelection::automatic());
+}
+
 bool Store::verifyAgainstFullRebuild(const MicroversionId &version,
-                                     const std::uint32_t xanadocBirth) const {
+                                     const XanadocSelection selection) const {
   const auto idx = opsSpool.indexOf(version);
-  return verifyAgainstFullRebuild(idx, xanadocBirth);
+  return idx && verifyAgainstFullRebuild(*idx, selection);
+}
+
+bool Store::verifyAgainstFullRebuild(
+    const MicroversionId &version,
+    const std::optional<std::uint32_t> xanadocBirth) const {
+  return verifyAgainstFullRebuild(
+      version, xanadocBirth ? XanadocSelection::birth(*xanadocBirth)
+                            : XanadocSelection::automatic());
 }
 
 std::string Store::textOf(const MicroversionId &version,
-                          const std::uint32_t xanadocBirth) const {
-  return rebuild(version, xanadocBirth).materialize(*this);
+                          const XanadocSelection selection) const {
+  return rebuild(version, selection).materialize(*this);
+}
+
+std::string
+Store::textOf(const MicroversionId &version,
+              const std::optional<std::uint32_t> xanadocBirth) const {
+  return textOf(version, xanadocBirth ? XanadocSelection::birth(*xanadocBirth)
+                                      : XanadocSelection::automatic());
 }
 
 MultiVersionDiffResult
-Store::diffVersions(const std::vector<MicroversionId> &versions) const {
+Store::diffVersions(const std::vector<MicroversionId> &versions,
+                    const XanadocSelection selection) const {
   MultiVersionDiffResult result;
   result.totalComparedVersions = versions.size();
   if (versions.empty()) {
@@ -1129,7 +1257,7 @@ Store::diffVersions(const std::vector<MicroversionId> &versions) const {
   for (std::size_t vIdx = 0; vIdx < versions.size(); ++vIdx) {
     VerData vd;
     vd.id   = versions[vIdx];
-    vd.doc  = rebuild(vd.id);
+    vd.doc  = rebuild(vd.id, selection);
     vd.text = vd.doc.materialize(*this);
 
     for (const auto &piece : vd.doc.pieces()) {
@@ -1233,10 +1361,10 @@ Store::diffVersions(const std::vector<MicroversionId> &versions) const {
       if (states.empty()) states.resize(versions.size());
       const auto links = manifold.dimensionsOf(slot.birthOp);
       states[vIdx]     = CellState{
-          .text  = manifold.textOf(slot.birthOp, *this),
-          .kind  = slot.valueKind,
-          .bits  = slot.valueBits,
-          .links = std::vector<zigzag::DimLink>(links.begin(), links.end())};
+              .text  = manifold.textOf(slot.birthOp, *this),
+              .kind  = slot.valueKind,
+              .bits  = slot.valueBits,
+              .links = std::vector<zigzag::DimLink>(links.begin(), links.end())};
     }
   }
   for (const auto &[ref, states] : cells) {
@@ -1371,10 +1499,14 @@ Store::segmentsOverlapping(const ScrollId scrollId, const std::uint64_t start,
 }
 
 void Store::setBootstrapPermascroll(
-    std::string key,
+    std::optional<std::string> key,
     std::function<ResolveResult(const PrimediaSpan &)> reader) {
+  if (key && key->empty()) {
+    throw std::invalid_argument(
+        "bootstrap permascroll key cannot be empty; use nullopt to clear it");
+  }
   bootstrapPermascrollKey_ = std::move(key);
-  bootstrapReader_         = std::move(reader);
+  bootstrapReader_ = bootstrapPermascrollKey_ ? std::move(reader) : nullptr;
 }
 
 void Store::setProvenance(SignedProvenance prov, const SigningOptions &where) {
@@ -1390,7 +1522,7 @@ void Store::setProvenance(SignedProvenance prov, const SigningOptions &where) {
 
 ResolveResult Store::resolve(const PrimediaSpan &span) const {
   if (span.isLocal()) {
-    if (!bootstrapPermascrollKey_.empty() && bootstrapReader_) {
+    if (bootstrapPermascrollKey_ && bootstrapReader_) {
       auto bRes = bootstrapReader_(span);
       if (bRes.status == ResolutionStatus::VerifiedBytes) {
         return bRes;
@@ -1429,7 +1561,7 @@ ResolveResult Store::resolve(const PrimediaSpan &span) const {
 
 std::string Store::read(const PrimediaSpan &span) const {
   if (span.isLocal()) {
-    if (!bootstrapPermascrollKey_.empty() && bootstrapReader_) {
+    if (bootstrapPermascrollKey_ && bootstrapReader_) {
       auto bRes = bootstrapReader_(span);
       if (bRes.status == ResolutionStatus::VerifiedBytes) {
         return bRes.text;
@@ -1525,8 +1657,8 @@ std::string Store::readRemoteAuthorBuffer(const PrimediaSpan &span) const {
   if (!which) {
     return {};
   }
-  const std::string key = "btpk:" + which->publisher.hex() + ":" + which->salt;
-  const auto it         = remoteAuthorBuffers_.find(key);
+  const auto key = liveScrollBufferKey(*which);
+  const auto it  = remoteAuthorBuffers_.find(key);
   if (it == remoteAuthorBuffers_.end()) {
     return {};
   }
@@ -1579,14 +1711,15 @@ void Store::trimRemoteAuthorBuffer(const std::string_view authorScrollKey,
   }
 }
 
-MicroversionId Store::transcludeExternal(const MicroversionId &parent,
-                                         const std::uint32_t at,
-                                         const Scroll &from,
-                                         const std::uint64_t scrollOffset,
-                                         const std::uint64_t length) {
+MicroversionId
+Store::transcludeExternal(const MicroversionId &parent, const std::uint32_t at,
+                          const Scroll &from, const std::uint64_t scrollOffset,
+                          const std::uint64_t length,
+                          std::optional<MicroversionId> context) {
   Op op;
-  op.kind = OpKind::Transclude;
-  op.at   = at;
+  op.kind    = OpKind::Transclude;
+  op.at      = at;
+  op.context = resolveTextContext(parent, context);
   // No source version: the content is named directly by a content address, so
   // there is no other document to resolve it through. This is the case Xanadu
   // wants and the local spool cannot express.
@@ -1597,10 +1730,10 @@ MicroversionId Store::transcludeExternal(const MicroversionId &parent,
 
 MicroversionId Store::insertBreak(const MicroversionId &parent,
                                   const std::uint32_t at,
-                                  const MicroversionId &context) {
-  if (!context.isZero()) {
-    const auto cIdx = opsSpool.indexOf(context);
-    if (cIdx < editedBirths_.size() && isCellOp(cIdx)) {
+                                  std::optional<MicroversionId> context) {
+  if (context) {
+    const auto cIdx = opsSpool.indexOf(*context);
+    if (cIdx && *cIdx < editedBirths_.size() && isCellOp(*cIdx)) {
       throw std::invalid_argument(
           "PageBreak requires a Xanadoc context, cannot target a Cell");
     }
@@ -1611,7 +1744,7 @@ MicroversionId Store::insertBreak(const MicroversionId &parent,
   op.context = resolveTextContext(parent, context);
   if (!op.context.isZero()) {
     const auto ctxIdx = opsSpool.indexOf(op.context);
-    if (ctxIdx < editedBirths_.size() && isCellOp(ctxIdx)) {
+    if (ctxIdx && *ctxIdx < editedBirths_.size() && isCellOp(*ctxIdx)) {
       throw std::invalid_argument(
           "PageBreak requires a Xanadoc context, cannot target a Cell");
     }
@@ -1629,14 +1762,14 @@ Store::applyRemoteLiveOp(const Op &op, const std::string_view primediaText,
     if (localOp.span.scroll > 0 && localOp.span.scroll <= externals.size()) {
       const auto sc = scroll(localOp.span.scroll);
       if (sc) {
-        effectiveKey = "btpk:" + sc->publisher.hex() + ":" + sc->salt;
+        effectiveKey =
+            sc->publisher ? "btpk:" + sc->publisher->hex() + ":" + sc->salt
+                          : std::string{anonymousRemoteAuthorPrefix} + sc->salt;
       }
     }
   }
   if (effectiveKey.empty()) {
-    effectiveKey =
-        "btpk:0000000000000000000000000000000000000000000000000000000000000000:"
-        "remote_author";
+    effectiveKey = std::string{anonymousRemoteAuthorPrefix} + "remote_author";
   }
 
   if (localOp.kind == OpKind::Insert) {
@@ -1645,9 +1778,19 @@ Store::applyRemoteLiveOp(const Op &op, const std::string_view primediaText,
       const auto rest  = std::string_view(effectiveKey).substr(5);
       const auto colon = rest.find(':');
       if (colon != std::string_view::npos) {
-        targetScroll.publisher = PublicKey::fromHex(rest.substr(0, colon));
-        targetScroll.salt      = std::string(rest.substr(colon + 1));
+        const auto publisher = PublicKey::fromHex(rest.substr(0, colon));
+        targetScroll.salt    = std::string(rest.substr(colon + 1));
+        if (publisher.isZero()) {
+          effectiveKey =
+              std::string{anonymousRemoteAuthorPrefix} + targetScroll.salt;
+        } else {
+          targetScroll.publisher = publisher;
+        }
       }
+    } else if (effectiveKey.starts_with(anonymousRemoteAuthorPrefix)) {
+      targetScroll.salt =
+          std::string(std::string_view(effectiveKey)
+                          .substr(anonymousRemoteAuthorPrefix.size()));
     }
     const auto scrollId = addScroll(targetScroll);
     localOp.span.scroll = scrollId;
@@ -1704,7 +1847,7 @@ MicroversionId Store::apply(const MicroversionId &parent, Op op) {
 MicroversionId Store::insert(const MicroversionId &parent,
                              const std::uint32_t at,
                              const std::string_view text,
-                             const MicroversionId &context) {
+                             std::optional<MicroversionId> context) {
   const auto resolvedContext = resolveTextContext(parent, context);
   Op op;
   op.kind    = OpKind::Insert;
@@ -1720,7 +1863,7 @@ Store::InsertedMedia Store::insertMedia(const MicroversionId &parent,
                                         const std::uint32_t at,
                                         const std::string_view bytes,
                                         std::string mimeType,
-                                        const MicroversionId &context) {
+                                        std::optional<MicroversionId> context) {
   const auto resolvedContext = resolveTextContext(parent, context);
   Op op;
   op.kind    = OpKind::Insert;
@@ -1738,7 +1881,7 @@ Store::InsertedMedia Store::insertMedia(const MicroversionId &parent,
 MicroversionId Store::insertSpan(const MicroversionId &parent,
                                  const std::uint32_t at,
                                  const PrimediaSpan &span,
-                                 const MicroversionId &context) {
+                                 std::optional<MicroversionId> context) {
   Op op;
   op.kind    = OpKind::Insert;
   op.at      = at;
@@ -1749,7 +1892,7 @@ MicroversionId Store::insertSpan(const MicroversionId &parent,
 
 MicroversionId Store::erase(const MicroversionId &parent,
                             const std::uint32_t at, const std::uint32_t length,
-                            const MicroversionId &context) {
+                            std::optional<MicroversionId> context) {
   Op op;
   op.kind    = OpKind::Delete;
   op.at      = at;
@@ -1762,7 +1905,7 @@ MicroversionId Store::rearrange(const MicroversionId &parent,
                                 const std::uint32_t at,
                                 const std::uint32_t length,
                                 const std::uint32_t to,
-                                const MicroversionId &context) {
+                                std::optional<MicroversionId> context) {
   Op op;
   op.kind    = OpKind::Rearrange;
   op.at      = at;
@@ -1777,7 +1920,7 @@ MicroversionId Store::transclude(const MicroversionId &parent,
                                  const MicroversionId &source,
                                  const std::uint32_t sourceAt,
                                  const std::uint32_t sourceLength,
-                                 const MicroversionId &context) {
+                                 std::optional<MicroversionId> context) {
   Op op;
   op.kind         = OpKind::Transclude;
   op.at           = at;
@@ -1803,11 +1946,11 @@ MicroversionId Store::addLink(const MicroversionId &parent, Link link) {
   auto curHead = parent;
   updateFold(curHead);
 
-  if (zigzag::noCell == homeCell_) {
+  if (!homeCell_) {
     curHead = sliceGenesis(curHead);
     updateFold(curHead);
-  } else if (!currentFold->contains(homeCell_)) {
-    curHead = structureHead();
+  } else if (!currentFold->contains(*homeCell_)) {
+    curHead = structureHead().value();
     updateFold(curHead);
   }
 
@@ -1832,12 +1975,12 @@ MicroversionId Store::addLink(const MicroversionId &parent, Link link) {
 
   // Mint the link cell itself.
   curHead             = makeCell(curHead, PrimediaSpan{});
-  const auto linkCell = cellRefOf(curHead);
+  const auto linkCell = cellRefOf(curHead).value();
   link.id             = linkCell;
   updateFold(curHead);
 
   // Link onto d.links rank off homeCell_
-  const auto tailLinks = zigzag::rankTail(*currentFold, homeCell_, dimLinks,
+  const auto tailLinks = zigzag::rankTail(*currentFold, *homeCell_, dimLinks,
                                           zigzag::DimVector::POS);
   curHead =
       setLink(curHead, tailLinks, dimLinks, zigzag::DimVector::POS, linkCell);
@@ -1846,7 +1989,7 @@ MicroversionId Store::addLink(const MicroversionId &parent, Link link) {
   // From endpoint (d.from)
   if (!link.left.empty()) {
     curHead             = makeCell(curHead, link.left.front());
-    const auto fromCell = cellRefOf(curHead);
+    const auto fromCell = cellRefOf(curHead).value();
     std::uint64_t at    = link.left.front().length;
     updateFold(curHead);
     for (const auto &span : link.left | std::views::drop(1)) {
@@ -1862,7 +2005,7 @@ MicroversionId Store::addLink(const MicroversionId &parent, Link link) {
   // To endpoint (d.to)
   if (!link.right.empty()) {
     curHead           = makeCell(curHead, link.right.front());
-    const auto toCell = cellRefOf(curHead);
+    const auto toCell = cellRefOf(curHead).value();
     std::uint64_t at  = link.right.front().length;
     updateFold(curHead);
     for (const auto &span : link.right | std::views::drop(1)) {
@@ -1881,7 +2024,7 @@ MicroversionId Store::addLink(const MicroversionId &parent, Link link) {
       return;
     }
     curHead             = makeCell(curHead, prop);
-    const auto propCell = cellRefOf(curHead);
+    const auto propCell = cellRefOf(curHead).value();
     updateFold(curHead);
     curHead = setLink(curHead, linkCell, dim, zigzag::DimVector::POS, propCell);
     updateFold(curHead);
@@ -1935,7 +2078,7 @@ std::vector<MicroversionId> Store::allVersions() const {
   std::vector<MicroversionId> found;
   found.reserve(opsSpool.size());
   for (std::uint32_t idx = 1; idx <= opsSpool.size(); idx++) {
-    found.push_back(opsSpool.idOf(idx));
+    found.push_back(opsSpool.idOf(idx).value());
   }
   std::ranges::sort(found);
   return found;
@@ -1957,19 +2100,20 @@ MicroversionId Store::latest() const {
   }
   const auto ids =
       std::views::iota(1U, static_cast<std::uint32_t>(opsSpool.size() + 1)) |
-      std::views::transform(
-          [this](const std::uint32_t idx) { return opsSpool.idOf(idx); });
+      std::views::transform([this](const std::uint32_t idx) {
+        return opsSpool.idOf(idx).value();
+      });
   return std::ranges::max(ids);
 }
 
 std::vector<MicroversionId> Store::structureHeads() const {
-  if (zigzag::noCell == homeCell_ || opsSpool.empty()) {
+  if (!homeCell_ || opsSpool.empty()) {
     return {};
   }
   const auto hasHomeInAncestry = [this](const std::uint32_t idx) {
     auto curr = idx;
     while (curr > 0 && curr <= opsSpool.size()) {
-      if (curr == homeCell_) {
+      if (curr == *homeCell_) {
         return true;
       }
       const auto *const node = opsSpool.get(curr);
@@ -1987,22 +2131,24 @@ std::vector<MicroversionId> Store::structureHeads() const {
         return opsSpool.childrenOf(idx).empty();
       }) |
       std::views::filter(hasHomeInAncestry) |
-      std::views::transform(
-          [this](const std::uint32_t idx) { return opsSpool.idOf(idx); });
+      std::views::transform([this](const std::uint32_t idx) {
+        return opsSpool.idOf(idx).value();
+      });
 
   return std::ranges::to<std::vector<MicroversionId>>(leafHeads);
 }
 
-MicroversionId Store::structureHead() const {
+std::optional<MicroversionId> Store::structureHead() const {
   const auto heads = structureHeads();
-  return heads.empty() ? MicroversionId{} : std::ranges::max(heads);
+  if (heads.empty()) return std::nullopt;
+  return std::ranges::max(heads);
 }
 
 const std::vector<MicroversionId> &Store::currentVersions() const {
   if (hasExplicitCurrentVersions_) return currentVersions_;
   if (currentVersions_.empty()) {
     const auto sHead  = structureHead();
-    const auto target = !sHead.isZero() ? sHead : latest();
+    const auto target = sHead.value_or(latest());
     if (!target.isZero()) {
       const auto manifold = rebuildManifold(target);
       const_cast<Store *>(this)->syncCurrentVersionsFromRank(manifold);
@@ -2047,7 +2193,7 @@ MicroversionId Store::designateEdition(const MicroversionId &parent,
                                        const MicroversionId &target,
                                        const bool allowDuplicateName) {
   const auto targetOp = opsSpool.indexOf(target);
-  if (0 == targetOp) {
+  if (!targetOp || *targetOp == 0) {
     throw std::invalid_argument("target version does not exist in store");
   }
 
@@ -2065,11 +2211,11 @@ MicroversionId Store::designateEdition(const MicroversionId &parent,
   auto curHead = parent;
   updateFold(curHead);
 
-  if (zigzag::noCell == homeCell_) {
+  if (!homeCell_) {
     curHead = sliceGenesis(curHead);
     updateFold(curHead);
-  } else if (!currentFold->contains(homeCell_)) {
-    curHead = structureHead();
+  } else if (!currentFold->contains(*homeCell_)) {
+    curHead = structureHead().value();
     updateFold(curHead);
   }
 
@@ -2090,12 +2236,12 @@ MicroversionId Store::designateEdition(const MicroversionId &parent,
 
   // 3. Mint or find the handle cell for targetOp
   zigzag::CellRef handleCell = zigzag::noCell;
-  const auto existingHandle  = currentFold->findOpHandle(targetOp);
+  const auto existingHandle  = currentFold->findOpHandle(*targetOp);
   if (existingHandle.has_value()) {
     handleCell = *existingHandle;
   } else {
-    curHead    = makeOpHandle(curHead, targetOp);
-    handleCell = cellRefOf(curHead);
+    curHead    = makeOpHandle(curHead, *targetOp);
+    handleCell = cellRefOf(curHead).value();
     updateFold(curHead);
   }
 
@@ -2103,7 +2249,7 @@ MicroversionId Store::designateEdition(const MicroversionId &parent,
   zigzag::CellRef existingEditionCell = zigzag::noCell;
   if (!allowDuplicateName) {
     for (const auto cell :
-         zigzag::rankAfter(*currentFold, homeCell_, dimEditions)) {
+         zigzag::rankAfter(*currentFold, *homeCell_, dimEditions)) {
       if (currentFold->textOf(cell, *this) == name) {
         existingEditionCell = cell;
         break;
@@ -2118,11 +2264,11 @@ MicroversionId Store::designateEdition(const MicroversionId &parent,
   } else {
     // Mint new edition cell with name
     curHead                = makeCell(curHead, name);
-    const auto editionCell = cellRefOf(curHead);
+    const auto editionCell = cellRefOf(curHead).value();
     updateFold(curHead);
 
     // Link onto tail of d.editions rank
-    const auto tail = zigzag::rankTail(*currentFold, homeCell_, dimEditions,
+    const auto tail = zigzag::rankTail(*currentFold, *homeCell_, dimEditions,
                                        zigzag::DimVector::POS);
     curHead = setLink(curHead, tail, dimEditions, zigzag::DimVector::POS,
                       editionCell);
@@ -2153,11 +2299,10 @@ MicroversionId Store::removeEdition(const MicroversionId &parent,
   const auto dim = manifold.dimensionNamed("d.editions", *this);
   if (edition == editions.end() || !dim)
     throw std::invalid_argument("edition is absent");
-  const auto prev = manifold.linked(cell, *dim, zigzag::DimVector::NEG);
-  const auto next = manifold.linked(cell, *dim, zigzag::DimVector::POS);
-  if (prev == zigzag::noCell)
-    throw std::invalid_argument("edition rank is unrooted");
-  const auto head = setLink(parent, prev, *dim, zigzag::DimVector::POS, next);
+  const auto prev = manifold.linked(*cell, *dim, zigzag::DimVector::NEG);
+  const auto next = manifold.linked(*cell, *dim, zigzag::DimVector::POS);
+  if (!prev) throw std::invalid_argument("edition rank is unrooted");
+  const auto head = setLink(parent, *prev, *dim, zigzag::DimVector::POS, next);
   currentVersions_.clear();
   aliasIndex_.erase(edition->name);
   const auto updated = rebuildManifold(head);
@@ -2175,22 +2320,25 @@ MicroversionId Store::repointEdition(const MicroversionId &parent,
   const auto editions    = manifold.editions();
   const auto edition     = std::ranges::find(editions, editionCell,
                                              &zigzag::Manifold::Edition::cell);
-  if (targetOp == 0 || editionCell == 0 || edition == editions.end())
+  if (!targetOp || *targetOp == 0 || !editionCell || *editionCell == 0 ||
+      edition == editions.end())
     throw std::invalid_argument("edition or target version is absent");
   if (edition->targetOp == targetOp) return parent;
-  const auto oldTarget = opsSpool.idOf(edition->targetOp);
-  if (!pendingVersionAnnotations_.contains(oldTarget))
-    versionAnnotations_.erase(oldTarget);
+  if (edition->targetOp) {
+    const auto oldTarget = opsSpool.idOf(*edition->targetOp).value();
+    if (!pendingVersionAnnotations_.contains(oldTarget))
+      versionAnnotations_.erase(oldTarget);
+  }
   const auto dim = manifold.dimensionNamed("d.edition-of", *this);
   if (!dim)
     throw std::invalid_argument("edition has no d.edition-of dimension");
   auto head   = parent;
-  auto handle = manifold.findOpHandle(targetOp);
+  auto handle = manifold.findOpHandle(*targetOp);
   if (!handle) {
-    head   = makeOpHandle(head, targetOp);
-    handle = cellRefOf(head);
+    head   = makeOpHandle(head, *targetOp);
+    handle = cellRefOf(head).value();
   }
-  head = setLink(head, editionCell, *dim, zigzag::DimVector::POS, *handle);
+  head = setLink(head, *editionCell, *dim, zigzag::DimVector::POS, *handle);
   const auto updated = rebuildManifold(head);
   syncCurrentVersionsFromRank(updated);
   syncAliasesFromRank(updated);
@@ -2206,8 +2354,8 @@ void Store::syncCurrentVersionsFromRank(const zigzag::Manifold &manifold) {
   std::vector<MicroversionId> heads;
   heads.reserve(eds.size());
   for (const auto &ed : eds) {
-    if (ed.name == "current" && ed.targetOp > 0) {
-      const auto id = opsSpool.idOf(ed.targetOp);
+    if (ed.name == "current" && ed.targetOp.has_value()) {
+      const auto id = opsSpool.idOf(*ed.targetOp).value();
       if (!id.isZero() && std::ranges::find(heads, id) == heads.end()) {
         heads.push_back(id);
       }
@@ -2215,8 +2363,8 @@ void Store::syncCurrentVersionsFromRank(const zigzag::Manifold &manifold) {
   }
   if (heads.empty()) {
     for (const auto &ed : eds) {
-      if (ed.targetOp > 0) {
-        const auto id = opsSpool.idOf(ed.targetOp);
+      if (ed.targetOp.has_value()) {
+        const auto id = opsSpool.idOf(*ed.targetOp).value();
         if (!id.isZero() && std::ranges::find(heads, id) == heads.end()) {
           heads.push_back(id);
         }
@@ -2230,7 +2378,7 @@ void Store::syncCurrentVersionsFromRank(const zigzag::Manifold &manifold) {
 
 void Store::syncAliasesFromRank(const zigzag::Manifold &manifold) {
   for (const auto &[name, targetOp] : manifold.aliases(*this)) {
-    const auto id = opsSpool.idOf(targetOp);
+    const auto id = opsSpool.idOf(targetOp).value();
     if (!id.isZero()) {
       aliasIndex_[name] = id;
       if (const auto ann = manifold.versionAnnotation(targetOp, *this)) {
@@ -2252,8 +2400,9 @@ void Store::syncScrollsFromRank(const zigzag::Manifold &manifold) {
       const auto colon = rest.find(':');
       if (colon != std::string_view::npos) {
         try {
-          sc.publisher = PublicKey::fromHex(rest.substr(0, colon));
-          sc.salt      = std::string(rest.substr(colon + 1));
+          const auto publisher = PublicKey::fromHex(rest.substr(0, colon));
+          if (!publisher.isZero()) sc.publisher = publisher;
+          sc.salt = std::string(rest.substr(colon + 1));
         } catch (...) {
         }
       }
@@ -2315,11 +2464,11 @@ MicroversionId Store::registerScroll(const MicroversionId &parent,
   auto curHead = parent;
   updateFold(curHead);
 
-  if (zigzag::noCell == homeCell_) {
+  if (!homeCell_) {
     curHead = sliceGenesis(curHead);
     updateFold(curHead);
-  } else if (!currentFold->contains(homeCell_)) {
-    curHead = structureHead();
+  } else if (!currentFold->contains(*homeCell_)) {
+    curHead = structureHead().value();
     updateFold(curHead);
   }
 
@@ -2337,17 +2486,17 @@ MicroversionId Store::registerScroll(const MicroversionId &parent,
   const auto dimScrolls = ensureDim("d.scrolls");
 
   for (const auto cell :
-       zigzag::rankAfter(*currentFold, homeCell_, dimScrolls)) {
+       zigzag::rankAfter(*currentFold, *homeCell_, dimScrolls)) {
     if (currentFold->textOf(cell, *this) == globalKey) {
       return curHead;
     }
   }
 
   curHead               = makeCell(curHead, globalKey);
-  const auto scrollCell = cellRefOf(curHead);
+  const auto scrollCell = cellRefOf(curHead).value();
   updateFold(curHead);
 
-  const auto tail = zigzag::rankTail(*currentFold, homeCell_, dimScrolls,
+  const auto tail = zigzag::rankTail(*currentFold, *homeCell_, dimScrolls,
                                      zigzag::DimVector::POS);
   curHead =
       setLink(curHead, tail, dimScrolls, zigzag::DimVector::POS, scrollCell);
@@ -2377,11 +2526,11 @@ MicroversionId Store::linkScrollRef(const MicroversionId &parent,
   auto curHead = parent;
   updateFold(curHead);
 
-  if (zigzag::noCell == homeCell_) {
+  if (!homeCell_) {
     curHead = sliceGenesis(curHead);
     updateFold(curHead);
-  } else if (!currentFold->contains(homeCell_)) {
-    curHead = structureHead();
+  } else if (!currentFold->contains(*homeCell_)) {
+    curHead = structureHead().value();
     updateFold(curHead);
   }
 
@@ -2441,7 +2590,7 @@ MicroversionId Store::makeExternRef(const MicroversionId &parent,
   op.value = 0;
 
   auto curHead           = apply(parent, op);
-  const auto placeholder = cellRefOf(curHead);
+  const auto placeholder = cellRefOf(curHead).value();
 
   curHead = linkScrollRef(curHead, scrollRec->cell, placeholder);
   return curHead;
@@ -2489,8 +2638,10 @@ Store::AppendedPouchItem Store::appendPouchItemWithRef(
   if (zigzag::noCell == zone) {
     throw std::invalid_argument("cannot append pouch item to noCell zone");
   }
-  if (origin.source && (origin.source->authority.empty() ||
-                        origin.source->end < origin.source->start))
+  if (origin.source &&
+      (origin.source->authority.empty() ||
+       origin.source->end < origin.source->start ||
+       (origin.source->cell && *origin.source->cell == zigzag::noCell)))
     throw std::invalid_argument("invalid pouch source identity or range");
 
   std::optional<zigzag::Manifold> folded;
@@ -2522,7 +2673,7 @@ Store::AppendedPouchItem Store::appendPouchItemWithRef(
 
   // Mint the item cell with content
   curHead             = makeCell(curHead, content);
-  const auto itemCell = cellRefOf(curHead);
+  const auto itemCell = cellRefOf(curHead).value();
   updateFold(curHead);
 
   // Append itemCell to zone's d.items rank posward
@@ -2551,8 +2702,8 @@ Store::AppendedPouchItem Store::appendPouchItemWithRef(
           currentFold->scrollRegistry(*this).placeholderForExtern(extRef);
       if (placeholder && *placeholder != zigzag::noCell) {
         const auto dimOriginCell = ensureDim("d.origin-cell");
-        curHead = setLink(curHead, itemCell, dimOriginCell,
-                          zigzag::DimVector::POS, *placeholder);
+        curHead                  = setLink(curHead, itemCell, dimOriginCell,
+                                           zigzag::DimVector::POS, *placeholder);
         updateFold(curHead);
       }
     }
@@ -2562,7 +2713,7 @@ Store::AppendedPouchItem Store::appendPouchItemWithRef(
                           !origin.document->version.isZero())) {
     const auto descText = writeGlobalDocumentState(*origin.document);
     curHead             = makeCell(curHead, descText);
-    const auto descCell = cellRefOf(curHead);
+    const auto descCell = cellRefOf(curHead).value();
     updateFold(curHead);
 
     const auto dimOriginState = ensureDim("d.origin-state");
@@ -2575,25 +2726,33 @@ Store::AppendedPouchItem Store::appendPouchItemWithRef(
     const auto &source    = *origin.source;
     const auto originDim  = ensureDim("d.origin-store");
     curHead               = makeCell(curHead, source.authority);
-    const auto sourceCell = cellRefOf(curHead);
+    const auto sourceCell = cellRefOf(curHead).value();
     curHead = setLink(curHead, itemCell, originDim, zigzag::DimVector::POS,
                       sourceCell);
     updateFold(curHead);
     const auto versionDim = ensureDim("d.origin-version");
     curHead               = makeCell(curHead, source.version.str());
     curHead = setLink(curHead, sourceCell, versionDim, zigzag::DimVector::POS,
-                      cellRefOf(curHead));
+                      cellRefOf(curHead).value());
     updateFold(curHead);
     const auto addNumber = [&](std::string_view name, std::uint32_t value) {
       const auto dim = ensureDim(name);
       curHead = makeScalarCell(curHead, static_cast<std::int64_t>(value));
       curHead = setLink(curHead, sourceCell, dim, zigzag::DimVector::POS,
-                        cellRefOf(curHead));
+                        cellRefOf(curHead).value());
       updateFold(curHead);
     };
     addNumber("d.origin-start", source.start);
     addNumber("d.origin-end", source.end);
-    addNumber("d.origin-document", source.focusedBirth);
+    const auto *const birth       = source.selection.birthSelection();
+    const std::uint32_t focusKind = source.selection.isAutomatic() ? 0U
+                                    : source.selection.isRoot()    ? 1U
+                                                                   : 2U;
+    if (focusKind == 2U && (birth == nullptr || birth->birthOp() == 0)) {
+      throw std::invalid_argument("invalid pouch Xanadoc selection");
+    }
+    addNumber("d.origin-focus", focusKind);
+    addNumber("d.origin-document", birth ? birth->birthOp() : 0U);
     if (source.cell) addNumber("d.origin-birth", *source.cell);
   }
 
@@ -2641,12 +2800,12 @@ MicroversionId Store::dismissPouchItem(const MicroversionId &parent,
   const auto prev = currentFold->linked(item, dimItems, zigzag::DimVector::NEG);
   const auto next = currentFold->linked(item, dimItems, zigzag::DimVector::POS);
 
-  if (zigzag::noCell != prev) {
-    curHead = setLink(curHead, prev, dimItems, zigzag::DimVector::POS, next);
+  if (prev) {
+    curHead = setLink(curHead, *prev, dimItems, zigzag::DimVector::POS, next);
     updateFold(curHead);
-  } else if (zigzag::noCell != next) {
-    curHead = setLink(curHead, next, dimItems, zigzag::DimVector::NEG,
-                      zigzag::noCell);
+  } else if (next) {
+    curHead =
+        setLink(curHead, *next, dimItems, zigzag::DimVector::NEG, std::nullopt);
     updateFold(curHead);
   }
 
@@ -2663,9 +2822,9 @@ MicroversionId Store::dismissPouchItem(const MicroversionId &parent,
   };
 
   const auto dimDismissed = ensureDim("d.dismissed");
-  const auto anchor       = (zigzag::noCell != zone) ? zone : homeCell_;
-  if (zigzag::noCell != anchor) {
-    const auto tail = zigzag::rankTail(*currentFold, anchor, dimDismissed,
+  const auto anchor = zone != zigzag::noCell ? std::optional{zone} : homeCell_;
+  if (anchor) {
+    const auto tail = zigzag::rankTail(*currentFold, *anchor, dimDismissed,
                                        zigzag::DimVector::POS);
     curHead =
         setLink(curHead, tail, dimDismissed, zigzag::DimVector::POS, item);
@@ -2750,12 +2909,12 @@ Store::AppendedAnthologyEntry Store::appendAnthologyEntry(
   // 2. Mint the descriptor cell for pinnedState
   const auto descText  = writeGlobalDocumentState(effectiveState);
   curHead              = makeCell(curHead, descText);
-  const auto stateCell = cellRefOf(curHead);
+  const auto stateCell = cellRefOf(curHead).value();
   updateFold(curHead);
 
   // 3. Mint the entry cell
   curHead              = makeCell(curHead, label);
-  const auto entryCell = cellRefOf(curHead);
+  const auto entryCell = cellRefOf(curHead).value();
   updateFold(curHead);
 
   // 4. Link entryCell on d.member towards placeholder (or tail of placeholder's
@@ -2906,7 +3065,7 @@ Store::refreshAnthologyEntry(const MicroversionId &parent,
 
   const auto descText     = writeGlobalDocumentState(newPinnedState);
   curHead                 = makeCell(curHead, descText);
-  const auto newStateCell = cellRefOf(curHead);
+  const auto newStateCell = cellRefOf(curHead).value();
   updateFold(curHead);
 
   curHead = setLink(curHead, entryCell, dimMemberState, zigzag::DimVector::POS,
@@ -2969,13 +3128,13 @@ AppendedQuotation Store::quote(const MicroversionId &parent,
   // 2. Mint the descriptor cell for pinnedState
   const auto descText  = writeGlobalDocumentState(pinnedState);
   curHead              = makeCell(curHead, descText);
-  const auto stateCell = cellRefOf(curHead);
+  const auto stateCell = cellRefOf(curHead).value();
   updateFold(curHead);
 
   // 3. Mint the selector descriptor cell
   const auto selText      = writeSelectorDescriptor(selector);
   curHead                 = makeCell(curHead, selText);
-  const auto selectorCell = cellRefOf(curHead);
+  const auto selectorCell = cellRefOf(curHead).value();
   updateFold(curHead);
 
   if (selector.kind == Selector::Kind::Rank &&
@@ -3010,18 +3169,18 @@ AppendedQuotation Store::quote(const MicroversionId &parent,
 
   // 4. Mint quotation cell Q
   curHead              = makeCell(curHead, label);
-  const auto entryCell = cellRefOf(curHead);
+  const auto entryCell = cellRefOf(curHead).value();
   updateFold(curHead);
 
   // 5. Link Q to root placeholder, stateCell, and selectorCell
   const auto existingNeg =
       currentFold->linked(*placeholder, dimQuotes, zigzag::DimVector::NEG);
-  if (existingNeg == zigzag::noCell) {
+  if (!existingNeg) {
     curHead = setLink(curHead, entryCell, dimQuotes, zigzag::DimVector::POS,
                       *placeholder);
     updateFold(curHead);
   } else {
-    curHead = setLink(curHead, existingNeg, dimQuotes, zigzag::DimVector::POS,
+    curHead = setLink(curHead, *existingNeg, dimQuotes, zigzag::DimVector::POS,
                       entryCell);
     updateFold(curHead);
 
@@ -3046,9 +3205,9 @@ AppendedQuotation Store::quote(const MicroversionId &parent,
                               zigzag::DimVector::POS, entryCell);
     updateFold(curHead);
 
-    if (succ != zigzag::noCell) {
+    if (succ) {
       curHead = setLink(curHead, entryCell, localRankDim,
-                        zigzag::DimVector::POS, succ);
+                        zigzag::DimVector::POS, *succ);
       updateFold(curHead);
     }
   }
@@ -3112,7 +3271,7 @@ Store::overrideQuotedCell(const MicroversionId &parent,
 
   // 2. makeCell(content)
   curHead                 = makeCell(curHead, overrideContent);
-  const auto overrideCell = cellRefOf(curHead);
+  const auto overrideCell = cellRefOf(curHead).value();
   updateFold(curHead);
 
   // 3. setLink(O, d.shadows, POS, P_target)
@@ -3136,12 +3295,12 @@ Store::editions(const MicroversionId &version) const {
   result.reserve(eds.size());
   for (const auto &ed : eds) {
     result.push_back(EditionInfo{
-        .cell     = ed.cell,
-        .name     = ed.name,
-        .handle   = ed.handle,
-        .targetOp = ed.targetOp,
-        .targetVersion =
-            ed.targetOp > 0 ? opsSpool.idOf(ed.targetOp) : MicroversionId{},
+        .cell          = ed.cell,
+        .name          = ed.name,
+        .handle        = ed.handle,
+        .targetOp      = ed.targetOp,
+        .targetVersion = ed.targetOp.and_then(
+            [&](std::uint32_t index) { return opsSpool.idOf(index); }),
     });
   }
   return result;
@@ -3174,12 +3333,12 @@ MicroversionId Store::renameStructure(const MicroversionId &parent,
   auto currentFold = &folded.value();
   auto curHead     = parent;
 
-  if (zigzag::noCell == homeCell_) {
+  if (!homeCell_) {
     curHead     = sliceGenesis(curHead);
     folded      = rebuildManifold(curHead);
     currentFold = &folded.value();
-  } else if (!currentFold->contains(homeCell_)) {
-    curHead     = structureHead();
+  } else if (!currentFold->contains(*homeCell_)) {
+    curHead     = structureHead().value();
     folded      = rebuildManifold(curHead);
     currentFold = &folded.value();
   }
@@ -3205,23 +3364,23 @@ MicroversionId Store::renameStructure(const MicroversionId &parent,
     handleCell = *existingHandle;
   } else {
     curHead     = makeOpHandle(curHead, structureBirth);
-    handleCell  = cellRefOf(curHead);
+    handleCell  = cellRefOf(curHead).value();
     folded      = rebuildManifold(curHead);
     currentFold = &folded.value();
   }
 
   // Mint alias Cell with newNameSpan
-  const auto ctx =
-      sliceBirth_ != 0 ? opsSpool.idOf(sliceBirth_) : MicroversionId{};
-  curHead              = makeCell(curHead, newNameSpan, ctx);
-  const auto aliasCell = cellRefOf(curHead);
+  const auto ctx = sliceBirth_.has_value() ? opsSpool.idOf(*sliceBirth_).value()
+                                           : MicroversionId{};
+  curHead        = makeCell(curHead, newNameSpan, ctx);
+  const auto aliasCell = cellRefOf(curHead).value();
   folded               = rebuildManifold(curHead);
   currentFold          = &folded.value();
 
   // Find structure's last op along curHead's ancestral branch
-  const auto lastOp = lastOpOnStructure(curHead, structureBirth);
-  const auto contextVersion =
-      lastOp != 0 ? opsSpool.idOf(lastOp) : opsSpool.idOf(structureBirth);
+  const auto lastOp         = lastOpOnStructure(curHead, structureBirth);
+  const auto contextVersion = lastOp ? opsSpool.idOf(*lastOp).value()
+                                     : opsSpool.idOf(structureBirth).value();
 
   curHead = setLink(curHead, handleCell, dimAlias, zigzag::DimVector::POS,
                     aliasCell, contextVersion);
@@ -3251,12 +3410,12 @@ MicroversionId Store::annotateTimestamp(const MicroversionId &parent,
   auto currentFold = &folded.value();
   auto curHead     = parent;
 
-  if (zigzag::noCell == homeCell_) {
+  if (!homeCell_) {
     curHead     = sliceGenesis(curHead);
     folded      = rebuildManifold(curHead);
     currentFold = &folded.value();
-  } else if (!currentFold->contains(homeCell_)) {
-    curHead     = structureHead();
+  } else if (!currentFold->contains(*homeCell_)) {
+    curHead     = structureHead().value();
     folded      = rebuildManifold(curHead);
     currentFold = &folded.value();
   }
@@ -3282,7 +3441,7 @@ MicroversionId Store::annotateTimestamp(const MicroversionId &parent,
     handleCell = *existingHandle;
   } else {
     curHead     = makeOpHandle(curHead, structureBirth);
-    handleCell  = cellRefOf(curHead);
+    handleCell  = cellRefOf(curHead).value();
     folded      = rebuildManifold(curHead);
     currentFold = &folded.value();
   }
@@ -3292,8 +3451,8 @@ MicroversionId Store::annotateTimestamp(const MicroversionId &parent,
   const auto span   = userPermascroll_->append(scalar.text);
 
   // Mint Cell with ValueKind::Timestamp
-  const auto ctx =
-      sliceBirth_ != 0 ? opsSpool.idOf(sliceBirth_) : MicroversionId{};
+  const auto ctx = sliceBirth_.has_value() ? opsSpool.idOf(*sliceBirth_).value()
+                                           : MicroversionId{};
   Op op;
   op.kind = OpKind::Structure;
   op.flags =
@@ -3302,14 +3461,14 @@ MicroversionId Store::annotateTimestamp(const MicroversionId &parent,
   op.value            = scalar.bits;
   op.context          = ctx;
   curHead             = apply(curHead, op);
-  const auto timeCell = cellRefOf(curHead);
+  const auto timeCell = cellRefOf(curHead).value();
   folded              = rebuildManifold(curHead);
   currentFold         = &folded.value();
 
   // Find structure's last op along curHead's ancestral branch
-  const auto lastOp = lastOpOnStructure(curHead, structureBirth);
-  const auto contextVersion =
-      lastOp != 0 ? opsSpool.idOf(lastOp) : opsSpool.idOf(structureBirth);
+  const auto lastOp         = lastOpOnStructure(curHead, structureBirth);
+  const auto contextVersion = lastOp ? opsSpool.idOf(*lastOp).value()
+                                     : opsSpool.idOf(structureBirth).value();
 
   curHead = setLink(curHead, handleCell, dimCreated, zigzag::DimVector::POS,
                     timeCell, contextVersion);
@@ -3328,11 +3487,11 @@ Store::annotateTimestamp(const MicroversionId &parent,
   return annotateTimestamp(parent, structureBirth, parsed);
 }
 
-std::string
+std::optional<std::string>
 Store::resolveStructureName(const MicroversionId &version,
                             const std::uint32_t structureBirth) const {
   if (structureBirth == 0 || structureBirth > opsSpool.size()) {
-    return "";
+    return std::nullopt;
   }
   const auto manifold = rebuildManifold(version);
   const auto handle   = manifold.findOpHandle(structureBirth);
@@ -3341,16 +3500,17 @@ Store::resolveStructureName(const MicroversionId &version,
     if (dimAlias.has_value()) {
       const auto aliasCell =
           manifold.linked(*handle, *dimAlias, zigzag::DimVector::POS);
-      if (aliasCell != zigzag::noCell) {
-        return manifold.textOf(aliasCell, *this);
+      if (aliasCell) {
+        return manifold.textOf(*aliasCell, *this);
       }
     }
   }
   const auto *const node = opsSpool.get(structureBirth);
-  if (nullptr != node && node->span().length > 0) {
-    return read(node->span());
+  if (node && node->kind == OpKind::Structure &&
+      structureVerbOf(node->flags) == StructureVerb::Make) {
+    return node->span().empty() ? std::string{} : read(node->span());
   }
-  return "";
+  return std::nullopt;
 }
 
 std::vector<Store::StructureBirth>
@@ -3366,11 +3526,11 @@ Store::discoverStructureBirths(const MicroversionId &version) const {
       const auto kind = structureKindOf(node->flags);
       if (kind == StructureKind::Slice || kind == StructureKind::Xanadoc) {
         auto name = resolveStructureName(version, idx);
-        if (name.empty()) {
+        if (!name || name->empty()) {
           name = (kind == StructureKind::Slice ? "Slice " : "Doc ") +
                  std::to_string(idx);
         }
-        result.push_back(StructureBirth{idx, kind, std::move(name)});
+        result.push_back(StructureBirth{idx, kind, std::move(*name)});
       }
     }
   }
@@ -3394,10 +3554,10 @@ Store::resolveStructureCreated(const MicroversionId &version,
   }
   const auto timeCell =
       manifold.linked(*handle, *dimCreated, zigzag::DimVector::POS);
-  if (timeCell == zigzag::noCell) {
+  if (!timeCell) {
     return std::nullopt;
   }
-  const auto sl = manifold.slot(timeCell);
+  const auto sl = manifold.slot(*timeCell);
   if (sl.has_value() &&
       static_cast<ValueKind>(sl->valueKind) == ValueKind::Timestamp) {
     TimestampInstant instant{};
@@ -3405,7 +3565,7 @@ Store::resolveStructureCreated(const MicroversionId &version,
                 sizeof(instant.epochNanos));
     return instant;
   }
-  const auto text = manifold.textOf(timeCell, *this);
+  const auto text = manifold.textOf(*timeCell, *this);
   if (text.empty()) {
     return std::nullopt;
   }
@@ -3421,7 +3581,7 @@ MicroversionId Store::annotateVersion(const MicroversionId &parent,
                                       VersionAnnotation annotation) {
   canonicalizeAnnotationTimestamp(annotation);
   const auto targetOp = opsSpool.indexOf(target);
-  if (0 == targetOp) {
+  if (!targetOp || *targetOp == 0) {
     throw std::invalid_argument("target version does not exist in store");
   }
 
@@ -3439,11 +3599,11 @@ MicroversionId Store::annotateVersion(const MicroversionId &parent,
   auto curHead = parent;
   updateFold(curHead);
 
-  if (zigzag::noCell == homeCell_) {
+  if (!homeCell_) {
     curHead = sliceGenesis(curHead);
     updateFold(curHead);
-  } else if (!currentFold->contains(homeCell_)) {
-    curHead = structureHead();
+  } else if (!currentFold->contains(*homeCell_)) {
+    curHead = structureHead().value();
     updateFold(curHead);
   }
 
@@ -3465,18 +3625,18 @@ MicroversionId Store::annotateVersion(const MicroversionId &parent,
 
   // Mint or find OpHandle for targetOp
   zigzag::CellRef handleCell = zigzag::noCell;
-  const auto existingHandle  = currentFold->findOpHandle(targetOp);
+  const auto existingHandle  = currentFold->findOpHandle(*targetOp);
   if (existingHandle.has_value()) {
     handleCell = *existingHandle;
   } else {
-    curHead    = makeOpHandle(curHead, targetOp);
-    handleCell = cellRefOf(curHead);
+    curHead    = makeOpHandle(curHead, *targetOp);
+    handleCell = cellRefOf(curHead).value();
     updateFold(curHead);
   }
 
   if (!annotation.description.empty()) {
     curHead             = makeCell(curHead, annotation.description);
-    const auto descCell = cellRefOf(curHead);
+    const auto descCell = cellRefOf(curHead).value();
     updateFold(curHead);
     curHead = setLink(curHead, handleCell, dimNotes, zigzag::DimVector::POS,
                       descCell);
@@ -3485,7 +3645,7 @@ MicroversionId Store::annotateVersion(const MicroversionId &parent,
 
   if (!annotation.tag.empty()) {
     curHead            = makeCell(curHead, annotation.tag);
-    const auto tagCell = cellRefOf(curHead);
+    const auto tagCell = cellRefOf(curHead).value();
     updateFold(curHead);
     curHead =
         setLink(curHead, handleCell, dimTag, zigzag::DimVector::POS, tagCell);
@@ -3494,10 +3654,11 @@ MicroversionId Store::annotateVersion(const MicroversionId &parent,
 
   if (!annotation.alias.empty()) {
     curHead              = makeCell(curHead, annotation.alias);
-    const auto aliasCell = cellRefOf(curHead);
+    const auto aliasCell = cellRefOf(curHead).value();
     updateFold(curHead);
-    const auto lastOp         = lastOpOnStructure(curHead, targetOp);
-    const auto contextVersion = lastOp != 0 ? opsSpool.idOf(lastOp) : target;
+    const auto lastOp = lastOpOnStructure(curHead, *targetOp);
+    const auto contextVersion =
+        lastOp ? opsSpool.idOf(*lastOp).value() : target;
     curHead = setLink(curHead, handleCell, dimAlias, zigzag::DimVector::POS,
                       aliasCell, contextVersion);
     updateFold(curHead);
@@ -3512,8 +3673,9 @@ MicroversionId Store::annotateVersion(const MicroversionId &parent,
     }
     const auto scalar = scalarTimestamp(parsed);
     const auto span   = userPermascroll_->append(scalar.text);
-    const auto ctx =
-        sliceBirth_ != 0 ? opsSpool.idOf(sliceBirth_) : MicroversionId{};
+    const auto ctx    = sliceBirth_.has_value()
+                            ? opsSpool.idOf(*sliceBirth_).value()
+                            : MicroversionId{};
     Op op;
     op.kind = OpKind::Structure;
     op.flags =
@@ -3522,10 +3684,11 @@ MicroversionId Store::annotateVersion(const MicroversionId &parent,
     op.value            = scalar.bits;
     op.context          = ctx;
     curHead             = apply(curHead, op);
-    const auto timeCell = cellRefOf(curHead);
+    const auto timeCell = cellRefOf(curHead).value();
     updateFold(curHead);
-    const auto lastOp         = lastOpOnStructure(curHead, targetOp);
-    const auto contextVersion = lastOp != 0 ? opsSpool.idOf(lastOp) : target;
+    const auto lastOp = lastOpOnStructure(curHead, *targetOp);
+    const auto contextVersion =
+        lastOp ? opsSpool.idOf(*lastOp).value() : target;
     curHead = setLink(curHead, handleCell, dimCreated, zigzag::DimVector::POS,
                       timeCell, contextVersion);
     updateFold(curHead);
@@ -3552,7 +3715,7 @@ Store::versionAnnotation(const MicroversionId &id) const {
     return it->second;
   }
   const auto targetOp = opsSpool.indexOf(id);
-  if (0 == targetOp) {
+  if (!targetOp || *targetOp == 0) {
     return std::nullopt;
   }
   const auto lat = latest();
@@ -3560,7 +3723,7 @@ Store::versionAnnotation(const MicroversionId &id) const {
     return std::nullopt;
   }
   const auto manifold = rebuildManifold(lat);
-  const auto ann      = manifold.versionAnnotation(targetOp, *this);
+  const auto ann      = manifold.versionAnnotation(*targetOp, *this);
   if (ann.has_value()) {
     versionAnnotations_[id] = *ann;
     if (!ann->alias.empty()) {
@@ -3631,33 +3794,34 @@ Store::opRecords(const std::uint32_t sinceExclusive) const {
       const auto verb = structureVerbOf(node->flags);
       if (StructureVerb::SetLink == verb) {
         if (node->linkId > 0) {
-          dimId = opsSpool.idOf(node->linkId);
+          dimId = opsSpool.idOf(node->linkId).value();
         }
         if (node->to > 0) {
-          targetId = opsSpool.idOf(node->to);
+          targetId = opsSpool.idOf(node->to).value();
         }
       }
       if (ValueKind::OpHandle == valueKindOf(node->flags)) {
         if (node->value > 0) {
-          valTargetId = opsSpool.idOf(static_cast<std::uint32_t>(node->value));
+          valTargetId =
+              opsSpool.idOf(static_cast<std::uint32_t>(node->value)).value();
         }
       }
     }
     const auto ctxIdx = contextOf(*node);
     const auto contextVersion =
-        ctxIdx != 0 ? opsSpool.idOf(ctxIdx) : MicroversionId{};
+        ctxIdx != 0 ? opsSpool.idOf(ctxIdx).value() : MicroversionId{};
     MicroversionId sourceVersion{};
     if (node->kind == OpKind::Transclude ||
         (node->kind == OpKind::Structure &&
          structureVerbOf(node->flags) != StructureVerb::Make)) {
       if (node->sourceOpIndex != 0) {
-        sourceVersion = opsSpool.idOf(node->sourceOpIndex);
+        sourceVersion = opsSpool.idOf(node->sourceOpIndex).value();
       }
     }
     records.push_back(
-        OpRecord{.produces = opsSpool.idOf(idx),
-                 .op       = node->toOp(opsSpool.idOf(node->parentIndex),
-                                        sourceVersion, contextVersion),
+        OpRecord{.produces = opsSpool.idOf(idx).value(),
+                 .op = node->toOp(opsSpool.idOf(node->parentIndex).value(),
+                                  sourceVersion, contextVersion),
                  .structureDimension   = dimId,
                  .structureTarget      = targetId,
                  .structureValueTarget = valTargetId,
@@ -3781,14 +3945,14 @@ void Store::adoptOpRecords(const std::vector<OpRecord> &records) {
           !record.context.isZero() ? record.context : record.op.context;
       if (!ctx.isZero()) {
         const auto contextSpoolIdx = opsSpool.indexOf(ctx);
-        if (0 == contextSpoolIdx) {
+        if (!contextSpoolIdx || *contextSpoolIdx == 0) {
           throw std::invalid_argument("unresolved context " + ctx.str());
         }
         op.context = ctx;
       }
       if (!op.source.isZero() && OpKind::Transclude == op.kind) {
         const auto srcIdx = opsSpool.indexOf(op.source);
-        if (0 == srcIdx) {
+        if (!srcIdx || *srcIdx == 0) {
           throw std::invalid_argument("unresolved transclude source " +
                                       op.source.str());
         }
@@ -3799,19 +3963,19 @@ void Store::adoptOpRecords(const std::vector<OpRecord> &records) {
         if (StructureVerb::SetLink == verb) {
           if (!record.structureDimension.isZero()) {
             const auto dimIdx = opsSpool.indexOf(record.structureDimension);
-            if (0 == dimIdx) {
+            if (!dimIdx || *dimIdx == 0) {
               throw std::invalid_argument("unresolved SetLink dimension " +
                                           record.structureDimension.str());
             }
-            op.link = dimIdx;
+            op.link = *dimIdx;
           }
           if (!record.structureTarget.isZero()) {
             const auto targetIdx = opsSpool.indexOf(record.structureTarget);
-            if (0 == targetIdx) {
+            if (!targetIdx || *targetIdx == 0) {
               throw std::invalid_argument("unresolved SetLink target " +
                                           record.structureTarget.str());
             }
-            op.to = targetIdx;
+            op.to = *targetIdx;
           } else if (!record.structureDimension.isZero()) {
             op.to = 0;
           }
@@ -3821,11 +3985,11 @@ void Store::adoptOpRecords(const std::vector<OpRecord> &records) {
           if (!record.structureValueTarget.isZero()) {
             const auto valTargetIdx =
                 opsSpool.indexOf(record.structureValueTarget);
-            if (0 == valTargetIdx) {
+            if (!valTargetIdx || *valTargetIdx == 0) {
               throw std::invalid_argument("unresolved OpHandle target " +
                                           record.structureValueTarget.str());
             }
-            op.value = valTargetIdx;
+            op.value = *valTargetIdx;
           }
         }
       }
@@ -3858,11 +4022,11 @@ void Store::sealPendingMetadataAsCells() const {
     return;
   }
   if (pendingVersionAnnotations_.empty() && !hasExplicitCurrentVersions_ &&
-      (zigzag::noCell == homeCell_ || externals.empty())) {
+      (!homeCell_ || externals.empty())) {
     return;
   }
   auto *mutableStore = const_cast<Store *>(this);
-  auto curHead = (zigzag::noCell != homeCell_) ? structureHead() : latest();
+  auto curHead       = homeCell_ ? structureHead().value() : latest();
   if (curHead.isZero()) {
     curHead = latest();
   }
@@ -3871,8 +4035,8 @@ void Store::sealPendingMetadataAsCells() const {
   const auto pendingAnnotations = pendingVersionAnnotations_;
   for (const auto &[id, ann] : pendingAnnotations) {
     const auto targetOp = opsSpool.indexOf(id);
-    if (targetOp > 0) {
-      const auto existing = manifold.versionAnnotation(targetOp, *this);
+    if (targetOp && *targetOp > 0) {
+      const auto existing = manifold.versionAnnotation(*targetOp, *this);
       if (!existing.has_value() || existing->description != ann.description ||
           existing->tag != ann.tag || existing->alias != ann.alias ||
           existing->timestamp != ann.timestamp) {
@@ -3892,19 +4056,20 @@ void Store::sealPendingMetadataAsCells() const {
     for (const auto &edition : manifold.editions())
       if (edition.name == "current") currents.push_back(edition);
     for (std::size_t i = 0; i < wanted.size(); ++i) {
-      if (opsSpool.indexOf(wanted[i]) == 0)
+      const auto wantedIndex = opsSpool.indexOf(wanted[i]);
+      if (!wantedIndex || *wantedIndex == 0)
         throw std::invalid_argument("current version is absent: " +
                                     wanted[i].str());
       if (i < currents.size())
         curHead = mutableStore->repointEdition(
-            curHead, opsSpool.idOf(currents[i].cell), wanted[i]);
+            curHead, opsSpool.idOf(currents[i].cell).value(), wanted[i]);
       else
         curHead =
             mutableStore->designateEdition(curHead, "current", wanted[i], true);
     }
     for (std::size_t i = wanted.size(); i < currents.size(); ++i)
-      curHead =
-          mutableStore->removeEdition(curHead, opsSpool.idOf(currents[i].cell));
+      curHead = mutableStore->removeEdition(
+          curHead, opsSpool.idOf(currents[i].cell).value());
     mutableStore->currentVersions_            = wanted;
     mutableStore->hasExplicitCurrentVersions_ = false;
     manifold                                  = rebuildManifold(curHead);
@@ -3913,13 +4078,12 @@ void Store::sealPendingMetadataAsCells() const {
   // Imported deployment descriptors are not author registrations. A read
   // retains even scrolls quoted on branches whose registry never names them;
   // saving those bindings must not mint operations in the author's history.
-  if (publishedLocalScroll_ == localScroll && zigzag::noCell != homeCell_ &&
-      !externals.empty()) {
+  if (publishedLocalScroll_ == localScroll && homeCell_ && !externals.empty()) {
     const auto reg = manifold.scrollRegistry(*this);
     for (const auto &sc : externals) {
       const auto key = scrollKey(sc);
-      if (!key.empty() && !reg.byKey.contains(key)) {
-        curHead  = mutableStore->registerScroll(curHead, key);
+      if (key && !reg.byKey.contains(*key)) {
+        curHead  = mutableStore->registerScroll(curHead, *key);
         manifold = rebuildManifold(curHead);
       }
     }
@@ -4037,8 +4201,8 @@ Store::opsInAncestryOf(std::span<const MicroversionId> targets) const {
   std::vector<std::uint32_t> queue;
   for (const auto &v : targets) {
     const auto idx = opsSpool.indexOf(v);
-    if (idx != 0 && idx <= opsSpool.size()) {
-      queue.push_back(idx);
+    if (idx && *idx != 0 && *idx <= opsSpool.size()) {
+      queue.push_back(*idx);
     }
   }
   while (!queue.empty()) {
@@ -4117,16 +4281,16 @@ Store::resolveVersionTargets(std::span<const std::string> versionOrAliasStrings,
       }
 
       auto addEditionTargets = [&](const EditionInfo &e) {
-        if (!e.targetVersion.isZero()) {
-          result.push_back(e.targetVersion);
+        if (e.targetVersion) {
+          result.push_back(*e.targetVersion);
         }
         for (std::uint32_t i = opsSpool.size(); i >= 1; --i) {
           const auto *node = opsSpool.get(i);
           if (node && node->kind == OpKind::Structure &&
               structureVerbOf(node->flags) == StructureVerb::SetLink) {
-            if ((e.handle != zigzag::noCell && node->to == e.handle) ||
+            if ((e.handle && node->to == *e.handle) ||
                 (e.cell != zigzag::noCell && node->to == e.cell)) {
-              const auto opId = opsSpool.idOf(i);
+              const auto opId = opsSpool.idOf(i).value();
               if (!opId.isZero()) {
                 result.push_back(opId);
                 break;
@@ -4350,7 +4514,7 @@ void Store::load(const std::string &directory) {
     syncScrollsFromRank(manifold);
     syncLinksFromRank(manifold);
   }
-  if (zigzag::noCell == homeCell_) {
+  if (!homeCell_) {
     for (const auto &seg : localSegments.segments) {
       if (!seg.torrent.isZero()) {
         bool found = false;
@@ -4386,21 +4550,21 @@ Store::containmentPath(const std::uint32_t birthOp) const {
   }
   std::vector<std::uint32_t> path;
   std::unordered_set<std::uint32_t> visited;
-  auto curr = birthOp;
-  while (curr != 0) {
-    if (!visited.insert(curr).second) {
+  std::optional<std::uint32_t> curr = birthOp;
+  while (curr) {
+    if (!visited.insert(*curr).second) {
       return {};
     }
-    path.push_back(curr);
-    if (curr >= containerBirths_.size()) {
+    path.push_back(*curr);
+    if (*curr >= containerBirths_.size()) {
       return {};
     }
-    const auto container = containerBirths_[curr];
-    if (container != 0) {
-      if (container >= curr) {
+    const auto container = containerBirths_[*curr];
+    if (container) {
+      if (*container >= *curr) {
         return {};
       }
-      const auto *const cNode = opsSpool.get(container);
+      const auto *const cNode = opsSpool.get(*container);
       if (!cNode || cNode->kind != OpKind::Structure ||
           structureVerbOf(cNode->flags) != StructureVerb::Make) {
         return {};
@@ -4422,50 +4586,31 @@ bool Store::isCellOp(const std::uint32_t opIndex) const noexcept {
     return false;
   }
   const auto birth = editedBirths_[opIndex];
-  if (birth == 0 || birth > opsSpool.size()) {
+  if (!birth || *birth > opsSpool.size()) {
     return false;
   }
-  const auto *const bNode = opsSpool.get(birth);
+  const auto *const bNode = opsSpool.get(*birth);
   return bNode && OpKind::Structure == bNode->kind &&
          StructureVerb::Make == structureVerbOf(bNode->flags) &&
          StructureKind::Cell == structureKindOf(bNode->flags);
 }
 
-StructureKind
+std::optional<StructureKind>
 Store::structureKindOfOp(const std::uint32_t birthOp) const noexcept {
-  if (birthOp == 0 || birthOp > opsSpool.size()) {
-    return StructureKind::Cell;
-  }
   const auto *const node = opsSpool.get(birthOp);
-  if (node && OpKind::Structure == node->kind &&
-      StructureVerb::Make == structureVerbOf(node->flags)) {
+  if (node && node->kind == OpKind::Structure &&
+      structureVerbOf(node->flags) == StructureVerb::Make) {
     return structureKindOf(node->flags);
   }
-  return StructureKind::Cell;
+  return std::nullopt;
 }
 
-MicroversionId Store::headOfStructure(const std::uint32_t structureBirth,
-                                      const MicroversionId &branch) const {
-  if (structureBirth == 0 || structureBirth > opsSpool.size()) {
-    return {};
-  }
-  const auto br     = branch.isZero() ? latest() : branch;
-  const auto lastOp = lastOpOnStructure(br, structureBirth);
-  if (lastOp != 0) {
-    return opsSpool.idOf(lastOp);
-  }
-  auto curr = opsSpool.indexOf(br);
-  while (curr != 0 && curr >= structureBirth) {
-    if (curr == structureBirth) {
-      return opsSpool.idOf(structureBirth);
-    }
-    const auto *const node = opsSpool.get(curr);
-    if (!node || node->parentIndex == 0 || node->parentIndex >= curr) {
-      break;
-    }
-    curr = node->parentIndex;
-  }
-  return {};
+std::optional<MicroversionId>
+Store::headOfStructure(const std::uint32_t structureBirth,
+                       const std::optional<MicroversionId> branch) const {
+  const auto last =
+      lastOpOnStructure(branch.value_or(latest()), structureBirth);
+  return last ? opsSpool.idOf(*last) : std::nullopt;
 }
 
 } // namespace xanadu

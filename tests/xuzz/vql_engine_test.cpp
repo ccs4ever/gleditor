@@ -102,10 +102,12 @@ TEST(VQLEngineTest, CreationSugarAndYieldModes) {
 
   // Verify they are linked on d.fruits off home
   zigzag::DimRef dFruits = engine.resolveDimension("d.fruits");
-  zigzag::CellRef first  = arena.linked(core.home(), dFruits, DimVector::POS);
-  EXPECT_EQ(first, res1[0]);
-  zigzag::CellRef second = arena.linked(first, dFruits, DimVector::POS);
-  EXPECT_EQ(second, res1[1]);
+  const auto first       = arena.linked(core.home(), dFruits, DimVector::POS);
+  ASSERT_TRUE(first);
+  EXPECT_EQ(*first, res1[0]);
+  const auto second = arena.linked(*first, dFruits, DimVector::POS);
+  ASSERT_TRUE(second);
+  EXPECT_EQ(*second, res1[1]);
 
   // 2. Create with !keep
   auto res2 = engine.execute("##/d.colors%\"Red\"!");
@@ -177,6 +179,22 @@ TEST(VQLEngineTest, PredicatesAndQuantifiers) {
   auto resEq = engine.execute("##/d.numbers[. = 50]");
   ASSERT_EQ(resEq.size(), 1u);
   EXPECT_EQ(resEq[0], c50);
+}
+
+TEST(VQLEngineTest, MissingComparisonOperandIsFalseBeforeFactorNegation) {
+  zigzag::ArenaManifold arena;
+  zigzag::vortex::VortexCore core(arena);
+  VQLEngine engine(core);
+  const auto dim  = engine.resolveDimension("d.missing_operand");
+  const auto cell = arena.makeScalarCell(std::int64_t{0});
+  ASSERT_TRUE(arena.link(core.home(), dim, DimVector::POS, cell));
+  engine.setVariable("unset", std::vector<zigzag::CellRef>{});
+
+  EXPECT_TRUE(engine.execute("##/d.missing_operand[$unset != false]").empty());
+  const auto negated =
+      engine.execute("##/d.missing_operand[not $unset != false]");
+  ASSERT_EQ(negated.size(), 1U);
+  EXPECT_EQ(negated.front(), cell);
 }
 
 TEST(VQLEngineTest, RangeClamps) {
@@ -262,13 +280,13 @@ TEST(VQLEngineTest, WeaveEffectBlock) {
   engine.execute("weave { ##/d.tasks%\"Task1\"%\"Task2\" }");
 
   zigzag::DimRef dTasks = engine.resolveDimension("d.tasks");
-  zigzag::CellRef t1    = arena.linked(core.home(), dTasks, DimVector::POS);
-  ASSERT_NE(t1, zigzag::noCell);
-  EXPECT_EQ(arena.textOf(t1), "Task1");
+  const auto t1         = arena.linked(core.home(), dTasks, DimVector::POS);
+  ASSERT_TRUE(t1);
+  EXPECT_EQ(arena.textOf(*t1), "Task1");
 
-  zigzag::CellRef t2 = arena.linked(t1, dTasks, DimVector::POS);
-  ASSERT_NE(t2, zigzag::noCell);
-  EXPECT_EQ(arena.textOf(t2), "Task2");
+  const auto t2 = arena.linked(*t1, dTasks, DimVector::POS);
+  ASSERT_TRUE(t2);
+  EXPECT_EQ(arena.textOf(*t2), "Task2");
 }
 
 TEST(VQLEngineTest, SlicingSugar) {

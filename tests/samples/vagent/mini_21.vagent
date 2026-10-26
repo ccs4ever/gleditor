@@ -1,0 +1,10 @@
+event Alarm { severity: Int }
+agent Alarms {
+  var high: Int := 0
+  var low: Int := 0
+  on Alarm as a [a.severity > 5] priority 2 {
+    high := high + 1
+    consume
+  }
+  on Alarm { low := low + 1 }
+}

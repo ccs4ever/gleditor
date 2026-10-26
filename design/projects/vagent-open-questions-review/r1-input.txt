@@ -1,0 +1,282 @@
+# vagent open questions: proposed resolutions
+
+Review date: 2026-10-23. Baseline: `design/vagent-agent-language.md` v3.7 at `79e1fa68`. This
+revision exists outside the current main history; the review worktree deliberately starts there.
+These are recommendations for incorporation, not owner approvals, implementation claims, or
+amendments to the approved P1–P14 register.
+
+The specification lists fourteen open questions in §18. The following entries enumerate all of them,
+give a recommended decision, identify the affected sections, and state how to verify the result.
+Additional details needed to implement a recommendation remain explicitly identified.
+
+## U-A1. Reclaiming a busy agent's arena
+
+**Propose a same-pid execution-context replacement between turns.** Copy the reachable state into a
+fresh context, rebuild its program and derived indexes, then install the replacement only after
+validation succeeds. Keep the actor's pid, grant, mailbox, remembered replies, outstanding
+deliveries, and adapter ingress queues. A nonempty mailbox must not prevent this maintenance step.
+Do not reclaim by checkpoint and `resume`: that requires quiescence and changes the pid.
+
+This needs a new core proposal. `WorkerContext` owns mutually referencing, nonmovable arena, core,
+VM and library members; `MeshActorRuntime` owns the context privately. The adapter cannot simply
+assign a new arena. The copy needs a complete ref map, dimension-name registration, clone topology,
+scalar bits, content spans and owned scratch strings. Native bindings retain logical agent,
+intention and effect ids, never raw arena refs. Completed effects arriving during replacement stay
+queued by id. The adapter must identify and remap any other live references before the swap.
+
+Revise §4.2, §4.4, §11 and §15. Price peak old-plus-new memory and the O(live cells + links + bytes)
+copy. Bound live state and maintenance work through settings and grants; a single synchronous copy
+must not be described as a bounded-latency solution. A staged copy requires keeping that agent
+paused while other actors run, plus an explicit source-lifetime contract.
+
+**Gate:** flood the mailbox while repeatedly reclaiming; compare subsequent observable turns with a
+non-reclaimed run, including pending asks, timers and effects. Inject copy failure: the old context
+and all queues must remain usable. Measure pause time and memory before choosing triggers.
+
+## U-A2. Cross-owner spaces
+
+**Keep the first implementation single-owner; specify cross-owner admission separately.** A future
+capability should bind issuer, authenticated sender identity, recipient or space, permitted
+operations and event schemas, expiry, resource limits, and delegation limits. The receiving owner
+(or an explicitly delegated authority) issues admission. A relay preserves the original sender's
+identity and evidence; membership alone grants no spawning or StoreWriter authority.
+
+§4.1 and §11 already explain that `receive` admits sends only from the owner. An adapter filter
+cannot relax this runtime check. Add a separately priced authorization proposal before changing that
+rule, and define revocation/expiry behavior for queued messages and delegated goals.
+
+**Gate:** wrong-owner, forged-sender, expired, replayed and over-budget admissions are refused; a
+valid member cannot impersonate the host or acquire unrelated rights.
+
+## U-A3. Large payloads
+
+**Send a typed immutable value handle in the ordinary small envelope.** Include a sealed content
+reference, schema/version, declared size, and provenance or authorization evidence appropriate to
+the value. Resolving it is an asynchronous native effect with a deadline, cancellation and byte,
+operation and memory budgets. Receipt of a handle does not mean its content is available. Pin
+verified content readers or source leases while imported spans remain live.
+
+The existing `ActorDeliverWriteSet` receive path is a reply to a tracked delivery, not unsolicited
+bulk-event ingress. Keep that path correlated and validated. Fetching a graph must not silently
+apply its operations to the receiver's working state or a user's store. Reuse existing published
+value validation where its contract fits; describe any new handle encoding and resolver explicitly.
+
+Update §5.5, §7 and §8.7 with the handle type and failure behavior. Preserve original source spans
+when accessible instead of treating equal decoded text as the same content identity.
+
+**Gate:** missing seeders, corrupt content, schema mismatch, oversized values and cancellation
+produce bounded failures without blocking a turn or writing a visited store.
+
+## U-A4. Hostless swarm spaces
+
+**Retain the host relay for the first implementation.** BEP 46 topic discovery does not by itself
+define membership, authenticated emission, fan-out, replay protection or delivery completion. A
+hostless space needs a separate transport and membership design, preferably after U-A2 establishes
+cross-owner authority. Do not treat discovery as permission or consensus.
+
+Keep §5.4 and §15 honest about the relay bottleneck and host failure. A later proposal must define
+what happens under partitions, concurrent membership changes and rejoining, including whether
+membership is authoritative or eventually convergent and what an emitter's completion means.
+
+**Gate:** partition/rejoin and duplicate dissemination tests preserve declared sender identity,
+bound retries and memory, and never claim exactly-once broadcast.
+
+## U-A5. Commitment strategies
+
+**Keep single-minded commitment as the language default and first implementation.** It already has
+explicit success, drop, plan-exhaustion and maintain-backoff rules. Document blind and open-minded
+commitment as deferred extensions, rather than leaving their absence ambiguous.
+
+Before adding modifiers, define which reconsideration tests each changes. Blind commitment must
+still permit explicit cancellation, deadlines, actor termination and effect failure. Open-minded
+commitment needs a declared pure desire-retention condition, evaluated under §6.4 isolation, with an
+explicit outcome when it stops holding. Specify precedence when success and dropping coincide, and
+how maintain restorers inherit the policy. Do not infer a loss of desire from plan failure.
+
+Keep §6.4 and §17 unchanged for the first implementation. **Gate:** table-driven cases for success,
+drop, cancellation, condition faults and restorer back-off before any new modifier ships.
+
+## U-A6. Module paths across the language family
+
+**Use colon-separated logical names as the target convention**, for example `std:agent` and
+`mars:exploration`, retaining `/Agent` as the vagent CLI's declaration separator. vagent already
+specifies this grammar. Do not extend this decision to persistent store identities or content URIs.
+
+Treat family-wide syntax convergence as a separate migration: inventory the parsers, standard
+library exports, artifact symbol names and docs first. Define a canonical internal module id and
+convert frontend spelling at that boundary. Do not silently reinterpret existing VQL `::` syntax or
+string imports in other languages. Loader paths must remain distinct from logical module names.
+
+Update §8.11 and §18 with that scope. **Gate:** a shared module resolves to the same canonical
+identity through each supported frontend; ambiguous or duplicate imports fail explicitly.
+
+## U-A7. Suspension anywhere
+
+**Retain §6.6's restricted suspension positions.** Improve diagnostics with the permitted rewrite:
+extract an effect or ask into its own plan statement, then use the resulting local. For
+`for believes`, collect a snapshot into a list or adopt one goal per item before waiting.
+
+A later extension should reify explicit continuation data, not persist VM choice points or marks. It
+must define saved generator alternatives, bindings, logical-update snapshots, cancellation and
+re-entry effects. Splitting a statement across turns changes its undo semantics: the extension must
+state what commits before suspension rather than imply speculative writes remain reversible across
+turns. That is a language change to V2/V4/V13, not just compiler convenience.
+
+**Gate:** the initial checker rejects nested suspension with a useful rewrite. A future prototype
+must survive checkpoint/reclamation at every suspension without repeating an external action.
+
+## U-A8. Recorded inbound streams
+
+**Offer optional deterministic execution recording, beginning as a test/debug facility.** Record all
+selected turn inputs, not just messages: host results and percepts, timer/wake selection, turn time,
+initialization parameters, and external lifecycle decisions. Pin the initial state, program
+artifact, runtime/library semantics and relevant settings. Record resulting state/output digests so
+replay can detect divergence.
+
+Replay supplies the recorded inputs and suppresses real sends, spawns and native effects, comparing
+staged outputs instead. It is deterministic replay of captured execution, not an explanation of
+unobserved device behavior. Persisting a durable trace belongs to a separate explicitly requested
+artifact, never implicitly to a visited document's hypertime (U-A9).
+
+Update §14 to distinguish single-turn determinism, captured replay, and crash recovery. A durable
+mode needs a defined append/commit order around the arena commit and outbox drain, retention and
+missing-record behavior. Logging alone cannot make a device action exactly once after a crash.
+
+**Gate:** replay a run containing deadlines, failures, effects and reclamation with all external
+bindings disabled; outputs and state digests agree at every turn.
+
+## U-A9. Agents and R8
+
+**Allow persistent results through an explicit, scoped StoreWriter delegation.** The owner grants a
+target and an allowed class of updates, with a budget and lifetime. A standing delegation may
+authorize repeated writes; per-turn prompting is not a language requirement. Reading, perceiving,
+reconsidering or navigating alone grants no write authority.
+
+Persist selected results and evidence, not the whole working arena. Preserve source spans by
+transclusion when possible, and attach the acting agent name, program reference, delegation and
+input references as provenance appropriate to the authored result. Validate against a target version
+or equivalent precondition; conflicts produce a proposal or explicit refusal rather than silently
+overwriting intervening work. Revocation prevents subsequent unauthorized writes.
+
+Clarify V9 and §16. The active R8 text says only user-generated updates persist in the structure;
+recognizing scoped delegated authorship is an explicit proposed interpretation to incorporate in
+that document too. Checkpoint stores, execution traces, reader activity and result documents have
+different purposes and must not be merged implicitly.
+
+**Gate:** repeated percepts and navigation add no target operations; an authorized result writes
+only its permitted target; stale-version, revoked and out-of-scope writes fail without partial
+edits.
+
+## U-A10. Tests
+
+**Specify the harness now; keep test declarations host-side initially.** Use a manual clock,
+in-memory transport, deterministic capability issuer and mock native bindings. A test can initialize
+an agent, deliver one input, execute exactly one turn, inspect state and staged output, and complete
+an effect later. Add a separate run-until-idle operation with a strict turn limit.
+
+Cover rollback, hard-failure recovery, initialize-once, await capture, duplicate/reordered delivery,
+condition faults, timer reconstruction, cancellation and late results. Runtime integration tests
+must also exercise queues, retries and lease behavior: one-arena tests cannot establish those.
+
+Update §11.1 and §18 with the harness contract and test placement under `tests/xuzz/`; a future
+`test` syntax can lower to the same interface. Do not block the compiler on a second parser.
+**Gate:** failure injection proves failed turns drain no staged actions, and earlier committed plan
+statements survive an ordinary later statement failure as §6.7 specifies.
+
+## U-A11. A fast lane
+
+**Correct the adapter-only premise; keep FIFO wire delivery for the first implementation.**
+`MeshActorRuntime::pumpOne` removes `mailbox.front()` before invoking the executor. The adapter
+cannot move a queued urgent wire event ahead of that entry. Handler priority orders handlers of an
+already selected event; it does not shorten its wait in the mailbox.
+
+The adapter can prioritize its own host deliveries over ready intentions, subject to a bounded burst
+and fair service for other inputs. Whether host wakes can outrank mailbox work also depends on P4's
+eventual pump semantics. Do not promise that ordering before P4 specifies it. Any priority for
+queued wire events needs a new runtime proposal for selection/admission, preserving replies,
+cancellations and timeout service under load. No scheme interrupts a running turn.
+
+Fix §6.5, §13 and §18 now in the proposed revision. **Gate:** queued-message tests demonstrate what
+can actually overtake what; continuous urgent ingress cannot starve ordinary work. A device safety
+deadline also requires measured turn and binding latency, not only a priority keyword.
+
+## U-A12. Overridable selection functions
+
+**Keep fixed event and intention ordering; optionally extend plan ordering first.** A future pure,
+fuel-bounded selector can rank applicable untried plan names. Evaluate applicability normally and
+retain its captured bindings; accept only a permutation of that eligible set. The selector cannot
+make a tried or inapplicable plan eligible, modify state, or start effects.
+
+On fault or invalid output, use declaration order and report a bounded condition fault. Stable names
+and deterministic tie handling preserve checkpoint behavior. Event or intention scheduling hooks
+would additionally have to prove fairness; defer them.
+
+Update §6.3, §6.5 and §17 only when this extension is adopted. **Gate:** faulty or adversarial
+selectors fall back deterministically, cannot repeat tried plans, and preserve §6.4 isolation.
+
+## U-A13. Protocol declarations
+
+**Start with typed library protocols, then add syntax only for demonstrated repetition.** Express
+Contract-Net with declared request/proposal/accept/reject/result events, conversation ids,
+participant roles, deadlines, and explicit cancellation and late-message rules. Use existing
+intentions, goals and handlers to store protocol state as cells.
+
+A future `protocol` declaration should desugar to those same mechanisms, adding static checks for
+roles and message types. It must not add a second scheduler or silently strengthen unordered
+transport into ordered or exactly-once delivery. Protocol authority still depends on U-A2.
+
+**Gate:** demonstrate successful, refused, timed-out, duplicated, reordered and participant-lost
+conversations in U-A10's harness before choosing new grammar. Add the library example to §12; retain
+§17's current maturity claim until that implementation exists.
+
+## U-A14. A shared program
+
+**Treat an immutable shared program base as a measured optimization after the private baseline.**
+`ArenaManifold` and `WorkerContext` already support an immutable base manifold and private shadows,
+but the actor runtime must gain a separately proposed way to install and retain that shared base. Do
+not claim this eliminates all bootstrap cost: standard-library registration and C++ indexes need
+inspection and reconstruction even if their graph cells can be shared.
+
+Cache by exact program reference and a runtime/stdlib ABI manifest. Pin the base and its content
+readers for every dependent actor. Keep mutable opcode outputs, cursor state, frames, skill fields
+and host bindings private; two agents sharing a base never share a writable output cell. V12's ban
+on state-to-program links remains. Checkpoints still contain state only and reload the pinned
+program on resume. A new immutable base costs no agent-state operations; no new on-disk node layout
+is required by this recommendation.
+
+Update §4.4, §11 and §15 after a spike. **Gate:** compare many-agent memory and load time, verify
+base immutability under interleaved turns/backtracking, reclaim one actor while others continue, and
+checkpoint/resume across cache eviction without changing program identity.
+
+## Incorporation order and remaining decisions
+
+First incorporate the explicit first-release boundaries (U-A2, U-A4, U-A5, U-A7, U-A11), the test
+contract (U-A10), the proposed delegated-write rule (U-A9), and vagent's naming decision (U-A6).
+These make the existing design more precise without pretending to implement extensions.
+
+Next specify and price runtime context replacement (U-A1), the typed large-value interface (U-A3)
+and optional replay (U-A8). Measure a private-program baseline before deciding U-A14. Keep U-A12 and
+U-A13 as separate language/library enhancements after tests establish the baseline.
+
+Outstanding choices include reclamation triggers and pause budgets, the concrete capability and
+large-value encodings, the durable trace commit protocol, a family-wide naming migration, and
+whether optional commitment/selector/protocol extensions justify their cost. A decision to defer is
+a resolved release boundary, not a claim that its implementation design is complete.
+
+## Evidence and verification scope
+
+Primary local evidence: vagent §§3–7, §§9–11, §§13–18; README's "Content, operations, and
+hypertime"; convergence R8; `vortex/worker_context.hpp`; `zigzag/arena_manifold.hpp`;
+`vortex/mesh_actor.cpp` (`pumpOne`, `receive`, `checkpointView`); and the existing
+[review record](projects/vagent-review/README.md). Code paths are under `apps/common/xanadu/`. The
+three architectural perspectives reviewed these recommendations; their code constraints are
+incorporated above. This is a specification review, so the gates are proposed acceptance criteria,
+not executed runtime tests. No claim of built vagent behavior is made.
+
+The provenance recommendations are also consistent with Nelson's
+[transclusion description](https://xanadu.com/transclusion/) and
+[Xanadu vision](https://xanadu.com/xuvision.html): reused material retains its connection to its
+source. His [ZigZag connections tutorial](https://www.xanadu.com/zigzag/tutorial/zzConnex.html)
+describes the dimensional connections; it does not prescribe actor authorization or network
+delivery. The runtime and delegation recommendations here are engineering proposals grounded in this
+repository, not claims that those primary sources specify them.

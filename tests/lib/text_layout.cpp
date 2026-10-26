@@ -36,6 +36,30 @@ TEST(TextLayoutTest, LayoutSingleLineProducesValidShaping) {
   EXPECT_FALSE(shaping.clusters.empty());
 }
 
+TEST(TextLayoutTest, AbsentExtentsLayOutIntrinsicTextAtTheOrigin) {
+  const auto font = FontManager::instance().getFont("Monospace 16");
+  ASSERT_NE(font, nullptr);
+  LayoutOptions options{.maxWidthPx  = std::nullopt,
+                        .maxHeightPx = std::nullopt};
+  options.blockStyles = {{.start = 0, .end = 100, .align = TextAlign::Right}};
+  const auto page =
+      TextLayout::layoutPage("long unbounded text", font, options);
+  ASSERT_EQ(page.lineCount, 1U);
+  EXPECT_GT(page.textWidthPx, 0);
+  EXPECT_EQ(page.lines.front().left, 0.0F);
+}
+
+TEST(TextLayoutTest, ZeroExtentProducesAnEmptyLayout) {
+  const auto font = FontManager::instance().getFont("Monospace 16");
+  ASSERT_NE(font, nullptr);
+  const auto page = TextLayout::layoutPage(
+      "text", font,
+      LayoutOptions{.maxWidthPx = 0.0F, .maxHeightPx = std::nullopt});
+  EXPECT_TRUE(page.glyphs.empty());
+  EXPECT_EQ(page.limit, 0U);
+  EXPECT_EQ(page.lineCount, 0U);
+}
+
 TEST(TextLayoutTest, LayoutMultiLineWrapsOnWidth) {
   auto &fm  = FontManager::instance();
   auto font = fm.getFont("Monospace 16");
@@ -734,7 +758,7 @@ TEST(TextLayoutTest, JustifyStretchesInterWordSpacesToFillTheBand) {
 
   ASSERT_GE(shaping.lines.size(), 2u);
   EXPECT_FLOAT_EQ(shaping.lines.front().left, 0.0F);
-  EXPECT_FLOAT_EQ(shaping.lines.front().barWidth, opts.maxWidthPx);
+  EXPECT_FLOAT_EQ(shaping.lines.front().barWidth, *opts.maxWidthPx);
 }
 
 TEST(TextLayoutTest, JustifyLeavesAParagraphsLastLineRagged) {
@@ -786,7 +810,7 @@ TEST(TextLayoutTest, JustifyWithNoSpacesFallsBackToLeft) {
   ASSERT_GE(shaping.lines.size(), 2u);
   EXPECT_FLOAT_EQ(shaping.lines.front().left, 0.0F);
   // Not stretched to the band -- there was nothing to stretch.
-  EXPECT_LT(shaping.lines.front().barWidth, opts.maxWidthPx);
+  EXPECT_LT(shaping.lines.front().barWidth, *opts.maxWidthPx);
 }
 
 TEST(TextLayoutTest, TrailingSpacesDoNotShiftARightAlignedLinesInk) {

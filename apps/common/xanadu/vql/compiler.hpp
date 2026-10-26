@@ -36,7 +36,7 @@ struct CompilationOptions {
 
 struct CompilationResult {
   bool success{true};
-  zigzag::CellRef entryOpcode{zigzag::noCell};
+  std::optional<zigzag::CellRef> entryOpcode;
   std::string errorMessage;
   std::vector<zigzag::CellRef> generatedOpcodes;
   std::string disassembly;
@@ -56,7 +56,7 @@ public:
 
   /// Generates a human-readable disassembly listing of opcodes along +d.spin.
   [[nodiscard]] std::string
-  disassemble(zigzag::CellRef entryOpcode,
+  disassemble(std::optional<zigzag::CellRef> entryOpcode,
               std::size_t maxInstructions = 1000) const;
 
   /// Returns the opcode mnemonic for an OpcodeKind.
@@ -85,19 +85,20 @@ private:
                                     const zigzag::vortex::CellValue &val);
 
   // AST compilation subroutines
-  zigzag::CellRef compileQuery(const QueryExpression &query);
-  zigzag::CellRef compileExecutionBlock(const ExecutionBlock &block);
-  zigzag::CellRef compilePathExpression(const PathExpression &path,
-                                        zigzag::CellRef ctxCell);
-  zigzag::CellRef compileAnchor(const AnchorNode &anchor);
-  zigzag::CellRef compilePathStep(const PathStep &step,
-                                  zigzag::CellRef inStreamCell);
-  zigzag::CellRef compileBooleanExpr(const BooleanExpr &expr,
-                                     zigzag::CellRef ctxCell);
-  zigzag::CellRef compileValueExpr(const ValueExpr &expr,
-                                   zigzag::CellRef ctxCell);
-  zigzag::CellRef compileComparison(const ComparisonExpr &comp,
-                                    zigzag::CellRef ctxCell);
+  std::optional<zigzag::CellRef> compileQuery(const QueryExpression &query);
+  std::optional<zigzag::CellRef>
+  compileExecutionBlock(const ExecutionBlock &block);
+  std::optional<zigzag::CellRef>
+  compilePathExpression(const PathExpression &path, zigzag::CellRef ctxCell);
+  std::optional<zigzag::CellRef> compileAnchor(const AnchorNode &anchor);
+  std::optional<zigzag::CellRef> compilePathStep(const PathStep &step,
+                                                 zigzag::CellRef inStreamCell);
+  std::optional<zigzag::CellRef> compileBooleanExpr(const BooleanExpr &expr,
+                                                    zigzag::CellRef ctxCell);
+  std::optional<zigzag::CellRef> compileValueExpr(const ValueExpr &expr,
+                                                  zigzag::CellRef ctxCell);
+  std::optional<zigzag::CellRef> compileComparison(const ComparisonExpr &comp,
+                                                   zigzag::CellRef ctxCell);
 
   // Library / Executable structure emission
   void linkAsExecutable(zigzag::CellRef entryOp);
@@ -107,12 +108,12 @@ private:
   zigzag::vortex::VortexCore &core_;
   zigzag::vortex::VortexVM &vm_;
 
-  zigzag::CellRef entryOp_{zigzag::noCell};
-  zigzag::CellRef currentOp_{zigzag::noCell};
+  std::optional<zigzag::CellRef> entryOp_;
+  std::optional<zigzag::CellRef> currentOp_;
   std::vector<zigzag::CellRef> allOps_;
   std::vector<zigzag::CellRef> lastResultCells_;
 
-  std::unordered_map<std::string, zigzag::CellRef> varBindings_;
+  std::unordered_map<std::string, std::optional<zigzag::CellRef>> varBindings_;
 };
 
 } // namespace xanadu::vql

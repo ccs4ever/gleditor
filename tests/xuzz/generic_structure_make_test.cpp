@@ -119,29 +119,30 @@ TEST(GenericStructureMakeTest,
 
   // Births before, between, and after cell births
   static_cast<void>(store.sliceGenesis(MicroversionId{}, "Slice1"));
-  const auto birthS1 = store.sliceBirth();
+  const auto birthS1 = store.sliceBirth().value();
 
   const auto doc1    = store.makeXanadoc(store.latest(), "Doc1");
-  const auto birthD1 = store.segmentedOps().indexOf(doc1);
+  const auto birthD1 = store.segmentedOps().indexOf(doc1).value();
 
   const auto cell1   = store.makeCell(store.latest(), "cell1",
-                                      store.segmentedOps().idOf(birthS1));
-  const auto birthC1 = store.segmentedOps().indexOf(cell1);
+                                      store.segmentedOps().idOf(birthS1).value());
+  const auto birthC1 = store.segmentedOps().indexOf(cell1).value();
 
   const auto slice2  = store.makeSlice(store.latest(), "Slice2", cell1);
-  const auto birthS2 = store.segmentedOps().indexOf(slice2);
+  const auto birthS2 = store.segmentedOps().indexOf(slice2).value();
 
   const auto cell2   = store.makeCell(store.latest(), "cell2", slice2);
-  const auto birthC2 = store.segmentedOps().indexOf(cell2);
+  const auto birthC2 = store.segmentedOps().indexOf(cell2).value();
 
   const auto doc2    = store.makeXanadoc(store.latest(), "Doc2");
-  const auto birthD2 = store.segmentedOps().indexOf(doc2);
+  const auto birthD2 = store.segmentedOps().indexOf(doc2).value();
 
   // Incremental fold vs full rebuild
   const auto fullManifold = store.rebuildManifold(store.latest());
 
-  EXPECT_EQ(fullManifold.home(), store.homeCell());
-  EXPECT_EQ(fullManifold.dimsDimension(), store.dimsDimension());
+  EXPECT_EQ(fullManifold.home(), store.homeCell().value());
+  EXPECT_EQ(fullManifold.dimsDimension().value(),
+            store.dimsDimension().value());
   EXPECT_GT(fullManifold.cellCount(), 0U);
 
   // Structure birth discovery validation
@@ -188,8 +189,8 @@ TEST(GenericStructureMakeTest,
 
   const auto doc1   = store.makeXanadoc(MicroversionId{}, "Doc1");
   const auto doc2   = store.makeXanadoc(doc1, "Doc2");
-  const auto birth1 = store.segmentedOps().indexOf(doc1);
-  const auto birth2 = store.segmentedOps().indexOf(doc2);
+  const auto birth1 = store.segmentedOps().indexOf(doc1).value();
+  const auto birth2 = store.segmentedOps().indexOf(doc2).value();
 
   // Interleaved document edits in one ancestral branch
   const auto v1 = store.insert(doc2, 0, "First ", doc1);
@@ -204,7 +205,7 @@ TEST(GenericStructureMakeTest,
   // Interleave cell edits
   const auto slice     = store.makeSlice(v4, "Slice");
   const auto cell      = store.makeCell(slice, "", slice);
-  const auto cellBirth = store.segmentedOps().indexOf(cell);
+  const auto cellBirth = store.segmentedOps().indexOf(cell).value();
 
   const auto vCell1 = store.insert(cell, 0, "CellText", cell);
 
@@ -238,7 +239,7 @@ TEST(GenericStructureMakeTest,
   Store store(scroll);
 
   const auto doc1   = store.makeXanadoc(MicroversionId{}, "Doc1");
-  const auto birth1 = store.segmentedOps().indexOf(doc1);
+  const auto birth1 = store.segmentedOps().indexOf(doc1).value();
 
   // Chain operations on Doc1
   const auto vIns   = store.insert(doc1, 0, "ABCDEFGHIJ", doc1);
@@ -254,12 +255,12 @@ TEST(GenericStructureMakeTest,
   const auto vLink = store.apply(vTrans, linkOp);
 
   // Assert context chaining
-  const auto opIns   = store.segmentedOps().indexOf(vIns);
-  const auto opDel   = store.segmentedOps().indexOf(vDel);
-  const auto opRearr = store.segmentedOps().indexOf(vRearr);
-  const auto opBrk   = store.segmentedOps().indexOf(vBrk);
-  const auto opTrans = store.segmentedOps().indexOf(vTrans);
-  const auto opLink  = store.segmentedOps().indexOf(vLink);
+  const auto opIns   = store.segmentedOps().indexOf(vIns).value();
+  const auto opDel   = store.segmentedOps().indexOf(vDel).value();
+  const auto opRearr = store.segmentedOps().indexOf(vRearr).value();
+  const auto opBrk   = store.segmentedOps().indexOf(vBrk).value();
+  const auto opTrans = store.segmentedOps().indexOf(vTrans).value();
+  const auto opLink  = store.segmentedOps().indexOf(vLink).value();
 
   EXPECT_EQ(contextOf(*store.getCompactOp(opIns)), birth1);
   EXPECT_EQ(contextOf(*store.getCompactOp(opDel)), opIns);
@@ -270,9 +271,9 @@ TEST(GenericStructureMakeTest,
 
   // Fork a second Xanadoc and branch from an earlier edit (vDel)
   const auto doc2   = store.makeXanadoc(vLink, "Doc2");
-  const auto birth2 = store.segmentedOps().indexOf(doc2);
+  const auto birth2 = store.segmentedOps().indexOf(doc2).value();
   const auto vFork  = store.insert(vDel, 0, "ForkedContent", doc1);
-  const auto opFork = store.segmentedOps().indexOf(vFork);
+  const auto opFork = store.segmentedOps().indexOf(vFork).value();
 
   EXPECT_EQ(contextOf(*store.getCompactOp(opFork)), opDel);
   EXPECT_EQ(store.editedBirthOf(opFork), birth1);
@@ -305,10 +306,10 @@ TEST(GenericStructureMakeTest,
   Store store(scroll);
 
   static_cast<void>(store.sliceGenesis(MicroversionId{}, "InitialSlice"));
-  const auto sliceBirth = store.sliceBirth();
+  const auto sliceBirth = store.sliceBirth().value();
 
   const auto doc      = store.makeXanadoc(store.latest(), "InitialDoc");
-  const auto docBirth = store.segmentedOps().indexOf(doc);
+  const auto docBirth = store.segmentedOps().indexOf(doc).value();
 
   const auto vPreRename = store.latest();
   EXPECT_EQ(store.resolveStructureName(vPreRename, sliceBirth), "InitialSlice");
@@ -326,7 +327,7 @@ TEST(GenericStructureMakeTest,
 
   // Fork before rename resolves initial names
   const auto vFork = store.insert(vPreRename, 0, "BranchText",
-                                  store.segmentedOps().idOf(docBirth));
+                                  store.segmentedOps().idOf(docBirth).value());
   EXPECT_EQ(store.resolveStructureName(vFork, sliceBirth), "InitialSlice");
   EXPECT_EQ(store.resolveStructureName(vFork, docBirth), "InitialDoc");
 
@@ -363,10 +364,10 @@ TEST(GenericStructureMakeTest, AcceptanceCheck6_BirthTimestampsOnDCreated) {
   Store store(scroll);
 
   static_cast<void>(store.sliceGenesis(MicroversionId{}, "Slice"));
-  const auto sBirth = store.sliceBirth();
+  const auto sBirth = store.sliceBirth().value();
 
   const auto doc    = store.makeXanadoc(store.latest(), "Doc");
-  const auto dBirth = store.segmentedOps().indexOf(doc);
+  const auto dBirth = store.segmentedOps().indexOf(doc).value();
 
   // Pre-epoch timestamp (-1000 seconds)
   const TimestampInstant preEpoch{-1'000'000'000'000LL};
@@ -455,8 +456,8 @@ TEST(GenericStructureMakeTest,
   Store diskStore(scroll);
   diskStore.load(tmpDir.path.string());
   EXPECT_EQ(diskStore.opCount(), store.opCount());
-  EXPECT_EQ(diskStore.textOf(trans, store.segmentedOps().indexOf(doc)),
-            store.textOf(trans, store.segmentedOps().indexOf(doc)));
+  EXPECT_EQ(diskStore.textOf(trans, store.segmentedOps().indexOf(doc).value()),
+            store.textOf(trans, store.segmentedOps().indexOf(doc).value()));
 }
 
 // 8. Test focus switching between a document page and Cell content in Xudu,
@@ -468,39 +469,39 @@ TEST(GenericStructureMakeTest, AcceptanceCheck8_FocusSwitchingAndTypingTarget) {
   Store store(scroll);
 
   const auto doc    = store.makeXanadoc(MicroversionId{}, "Doc8");
-  const auto dBirth = store.segmentedOps().indexOf(doc);
+  const auto dBirth = store.segmentedOps().indexOf(doc).value();
 
   const auto slice  = store.makeSlice(doc, "Slice8");
   const auto cell   = store.makeCell(slice, "Cell8", slice);
-  const auto cBirth = store.segmentedOps().indexOf(cell);
+  const auto cBirth = store.segmentedOps().indexOf(cell).value();
 
   const auto countBefore = store.opCount();
 
   // Focus target representation
-  FocusTarget docFocus{
-      .kind            = StructureKind::Xanadoc,
-      .birthOp         = dBirth,
-      .containmentPath = {dBirth},
-  };
+  FocusTarget docFocus =
+      FocusTarget::structure(StructureKind::Xanadoc, dBirth, {dBirth});
   EXPECT_TRUE(docFocus.isValid());
 
-  FocusTarget cellFocus{
-      .kind            = StructureKind::Cell,
-      .birthOp         = cBirth,
-      .containmentPath = {store.segmentedOps().indexOf(slice), cBirth},
-  };
+  FocusTarget cellFocus = FocusTarget::structure(
+      StructureKind::Cell, cBirth,
+      {store.segmentedOps().indexOf(slice).value(), cBirth});
   EXPECT_TRUE(cellFocus.isValid());
+
+  const auto rootFocus = FocusTarget::rootXanadoc();
+  EXPECT_TRUE(rootFocus.isValid());
+  EXPECT_TRUE(rootFocus.isRootXanadoc());
 
   FocusTarget invalidFocus{};
   EXPECT_FALSE(invalidFocus.isValid());
 
   // Sequential typing with active focus on ancestral path
   const auto vCellEdit = store.insert(cell, 0, "CellTyped", cell);
-  EXPECT_EQ(store.editedBirthOf(store.segmentedOps().indexOf(vCellEdit)),
-            cBirth);
+  EXPECT_EQ(
+      store.editedBirthOf(store.segmentedOps().indexOf(vCellEdit).value()),
+      cBirth);
 
   const auto vDocEdit = store.insert(vCellEdit, 0, "DocTyped", doc);
-  EXPECT_EQ(store.editedBirthOf(store.segmentedOps().indexOf(vDocEdit)),
+  EXPECT_EQ(store.editedBirthOf(store.segmentedOps().indexOf(vDocEdit).value()),
             dBirth);
 
   // Navigation alone creates no new operations in the store
@@ -515,11 +516,11 @@ TEST(GenericStructureMakeTest, AcceptanceCheck9_CellHistoryBoundary) {
   Store store(scroll);
 
   static_cast<void>(store.sliceGenesis(MicroversionId{}, "Slice9"));
-  const auto sBirth = store.sliceBirth();
+  const auto sBirth = store.sliceBirth().value();
 
   const auto cell   = store.makeCell(store.latest(), "Cell9",
-                                     store.segmentedOps().idOf(sBirth));
-  const auto cBirth = store.segmentedOps().indexOf(cell);
+                                     store.segmentedOps().idOf(sBirth).value());
+  const auto cBirth = store.segmentedOps().indexOf(cell).value();
 
   const auto v1 = store.insert(cell, 0, "Initial", cell);
   const auto v2 = store.setScalar(v1, cBirth, 3.14159);
@@ -527,7 +528,7 @@ TEST(GenericStructureMakeTest, AcceptanceCheck9_CellHistoryBoundary) {
 
   zigzag::Manifold manifold;
   manifold.setStore(&store);
-  const auto maxOp = store.segmentedOps().indexOf(v3);
+  const auto maxOp = store.segmentedOps().indexOf(v3).value();
   for (std::uint32_t i = 1; i <= maxOp; ++i) {
     ASSERT_TRUE(manifold.applyStructure(i, *store.getCompactOp(i)).has_value());
   }
@@ -554,19 +555,19 @@ TEST(GenericStructureMakeTest, AcceptanceCheck10_NestedStructureHierarchy) {
   Store store(scroll);
 
   const auto sliceA = store.makeSlice(MicroversionId{}, "SliceA");
-  const auto bA     = store.segmentedOps().indexOf(sliceA);
+  const auto bA     = store.segmentedOps().indexOf(sliceA).value();
 
   const auto cellB = store.makeCell(sliceA, "CellB", sliceA);
-  const auto bB    = store.segmentedOps().indexOf(cellB);
+  const auto bB    = store.segmentedOps().indexOf(cellB).value();
 
   const auto sliceC = store.makeSlice(cellB, "SliceC", cellB);
-  const auto bC     = store.segmentedOps().indexOf(sliceC);
+  const auto bC     = store.segmentedOps().indexOf(sliceC).value();
 
   const auto cellD = store.makeCell(sliceC, "CellD", sliceC);
-  const auto bD    = store.segmentedOps().indexOf(cellD);
+  const auto bD    = store.segmentedOps().indexOf(cellD).value();
 
   const auto docE = store.makeXanadoc(cellD, "DocE", cellB);
-  const auto bE   = store.segmentedOps().indexOf(docE);
+  const auto bE   = store.segmentedOps().indexOf(docE).value();
 
   // Containment paths
   EXPECT_EQ(store.containmentPath(bD),
@@ -578,8 +579,10 @@ TEST(GenericStructureMakeTest, AcceptanceCheck10_NestedStructureHierarchy) {
   const auto vEditD = store.insert(docE, 0, "D_Text", cellD);
   const auto vEditE = store.insert(vEditD, 0, "E_Text", docE);
 
-  EXPECT_EQ(store.editedBirthOf(store.segmentedOps().indexOf(vEditD)), bD);
-  EXPECT_EQ(store.editedBirthOf(store.segmentedOps().indexOf(vEditE)), bE);
+  EXPECT_EQ(store.editedBirthOf(store.segmentedOps().indexOf(vEditD).value()),
+            bD);
+  EXPECT_EQ(store.editedBirthOf(store.segmentedOps().indexOf(vEditE).value()),
+            bE);
 
   // Refusal of non-birth container (edit op used as container)
   EXPECT_THROW(store.makeCell(vEditE, "InvalidCell", vEditD),
@@ -608,20 +611,20 @@ TEST(GenericStructureMakeTest,
 
   // Public creation path for Xanadoc
   const auto doc = store.makeXanadoc(MicroversionId{}, "MyDocument");
-  EXPECT_EQ(store.textOf(doc, store.segmentedOps().indexOf(doc)), "");
+  EXPECT_EQ(store.textOf(doc, store.segmentedOps().indexOf(doc).value()), "");
 
   const auto v1 = store.insert(doc, 0, "Nelsonian Xanadoc text", doc);
-  EXPECT_EQ(store.textOf(v1, store.segmentedOps().indexOf(doc)),
+  EXPECT_EQ(store.textOf(v1, store.segmentedOps().indexOf(doc).value()),
             "Nelsonian Xanadoc text");
 
   // Public creation path for Slice
   const auto slice = store.sliceGenesis(v1, "MainSlice");
-  EXPECT_NE(store.homeCell(), zigzag::noCell);
-  EXPECT_NE(store.dimsDimension(), zigzag::noCell);
+  EXPECT_TRUE(store.homeCell().has_value());
+  EXPECT_TRUE(store.dimsDimension().has_value());
 
   const auto manifold = store.rebuildManifold(slice);
-  EXPECT_EQ(manifold.home(), store.homeCell());
-  EXPECT_EQ(manifold.dimsDimension(), store.dimsDimension());
+  EXPECT_EQ(manifold.home().value(), store.homeCell().value());
+  EXPECT_EQ(manifold.dimsDimension().value(), store.dimsDimension().value());
 }
 
 // 12. Measure Manifold::advance() and full rebuild on the existing large-slice

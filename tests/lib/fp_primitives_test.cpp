@@ -79,6 +79,35 @@ TEST(FpPrimitivesTest, SteppedPathViewLinearAndCycleTermination) {
   EXPECT_EQ(ringRes, (std::vector<int>{1, 2}));
 }
 
+TEST(FpPrimitivesTest, SteppedPathViewOptionalLimit) {
+  auto nextStep = [](int x) -> std::optional<int> { return x + 1; };
+
+  const auto view   = stepped_path_view(nextStep, std::optional{1},
+                                        std::optional<std::size_t>{3});
+  const auto copied = view;
+  std::vector<int> limited;
+  for (const int value : view) limited.push_back(value);
+  EXPECT_EQ(limited, (std::vector<int>{1, 2, 3}));
+
+  std::vector<int> copiedValues;
+  for (const int value : copied) copiedValues.push_back(value);
+  EXPECT_EQ(copiedValues, limited);
+
+  const auto zeroLimit = stepped_path_view(nextStep, std::optional{1},
+                                           std::optional<std::size_t>{0});
+  EXPECT_TRUE(zeroLimit.begin() == zeroLimit.end());
+}
+
+TEST(FpPrimitivesTest, SteppedPathViewWithoutLimitUsesRangeEnd) {
+  auto nextStep = [](int x) -> std::optional<int> {
+    return x < 3 ? std::optional{x + 1} : std::nullopt;
+  };
+  const auto view = stepped_path_view(nextStep, std::optional{1});
+  std::vector<int> values;
+  for (const int value : view) values.push_back(value);
+  EXPECT_EQ(values, (std::vector<int>{1, 2, 3}));
+}
+
 TEST(FpPrimitivesTest, FilterPresentRangeAdaptor) {
   const std::vector<std::optional<int>> options{1, std::nullopt, 3,
                                                 std::nullopt, 5};

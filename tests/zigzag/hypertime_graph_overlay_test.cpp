@@ -113,7 +113,7 @@ TEST(HypertimeGraphOverlayTest,
             graphContains(box.rect, scene->layout.bounds);
             graphContains(box.contentRect, box.rect);
             if (box.parentId) {
-              const auto *parent = scene->layout.find(box.parentId);
+              const auto *parent = scene->layout.find(*box.parentId);
               ASSERT_NE(parent, nullptr);
               graphContains(box.rect, parent->contentRect);
             }

@@ -1,0 +1,12 @@
+event Set { value: Int }
+agent Limits {
+  var stored: Int := 0
+  def capped(value: Int): Int {
+    if value > 5 then return 5
+    value
+  }
+  def store(value: Int) requires value >= 0 ensures stored >= 0 {
+    stored := value
+  }
+  on Set as s { store(capped(s.value)) }
+}

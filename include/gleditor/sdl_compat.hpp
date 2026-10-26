@@ -33,6 +33,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -443,12 +444,14 @@ enum class MessageKind : std::uint8_t { Info, Warning, Error };
  *
  * @param buttons Labels, left to right. The first is the default that return
  *        presses; the last is what escape presses.
- * @return Which button was pressed, or -1 when the platform could not show it
- *         at all -- a headless run, or a system with no dialog service.
+ * @return Which button was pressed, or std::nullopt when the platform could
+ *         not show it at all -- a headless run, or a system with no dialog
+ *         service.
  */
-inline int showMessageBox(SDL_Window *parent, const MessageKind kind,
-                          const std::string &title, const std::string &message,
-                          const std::vector<std::string> &buttons) {
+inline std::optional<int>
+showMessageBox(SDL_Window *parent, const MessageKind kind,
+               const std::string &title, const std::string &message,
+               const std::vector<std::string> &buttons) {
   std::vector<SDL_MessageBoxButtonData> laid;
   laid.reserve(buttons.size());
   for (std::size_t i = 0; i < buttons.size(); i++) {
@@ -489,14 +492,14 @@ inline int showMessageBox(SDL_Window *parent, const MessageKind kind,
   data.numbuttons = static_cast<int>(laid.size());
   data.buttons    = laid.data();
 
-  int pressed = -1;
+  int pressed{};
 #if GLEDITOR_SDL_MAJOR == 3
   if (!SDL_ShowMessageBox(&data, &pressed)) {
-    return -1;
+    return std::nullopt;
   }
 #else
   if (0 != SDL_ShowMessageBox(&data, &pressed)) {
-    return -1;
+    return std::nullopt;
   }
 #endif
   return pressed;

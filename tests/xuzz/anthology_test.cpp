@@ -62,7 +62,7 @@ TEST(AnthologyTest, anAnthologyMixesLocalAndForeignMembersOnOneRank) {
       .version = MicroversionId::parse("3"),
   };
 
-  const auto home = store.homeCell();
+  const auto home = store.homeCell().value();
 
   // 1. Foreign member A
   const auto entryA = store.appendAnthologyEntry(
@@ -71,7 +71,7 @@ TEST(AnthologyTest, anAnthologyMixesLocalAndForeignMembersOnOneRank) {
 
   // 2. Local member note
   at                   = store.makeCell(at, "Editor's Preface Note");
-  const auto localCell = store.cellRefOf(at);
+  const auto localCell = store.cellRefOf(at).value();
   at                   = store.appendAnthologyLocalMember(at, home, localCell);
 
   // 3. Foreign member B
@@ -111,7 +111,8 @@ TEST(AnthologyTest, anAnthologyMixesLocalAndForeignMembersOnOneRank) {
   EXPECT_EQ(m2->kind, AnthologyMemberKind::Local);
   EXPECT_EQ(m2->cell, localCell);
   EXPECT_EQ(m2->label, "Editor's Preface Note");
-  EXPECT_EQ(m2->placeholderCell, zigzag::noCell);
+  EXPECT_FALSE(m2->placeholderCell);
+  EXPECT_FALSE(m2->stateCell);
 
   const auto m3 = readAnthologyMember(manifold, store, visited[2]);
   ASSERT_TRUE(m3.has_value());
@@ -150,7 +151,7 @@ TEST(AnthologyTest, anAnthologyMemberPinsItsState) {
   Store foreignStore(perma);
   auto atF = foreignStore.sliceGenesis(MicroversionId{});
   atF      = foreignStore.makeCell(atF, "Alice Chapter 3 Draft 1");
-  [[maybe_unused]] const auto foreignCell = foreignStore.cellRefOf(atF);
+  [[maybe_unused]] const auto foreignCell = foreignStore.cellRefOf(atF).value();
   const auto verA                         = atF;
 
   // Advance foreign store past that state
@@ -163,7 +164,7 @@ TEST(AnthologyTest, anAnthologyMemberPinsItsState) {
   Scroll sealedAs;
   sealedAs.publisher    = PublicKey::fromHex(std::string(64, 'a'));
   sealedAs.salt         = "alice_novel";
-  const auto foreignKey = scrollKey(sealedAs);
+  const auto foreignKey = scrollKey(sealedAs).value();
 
   // Local anthology store cites foreignCell pinned at verA
   Store localStore(perma);
@@ -174,9 +175,9 @@ TEST(AnthologyTest, anAnthologyMemberPinsItsState) {
   const ExternOpRef memberRef{.scroll = scrollId, .produces = verA};
   const GlobalDocumentState pinnedState{.scroll = foreignKey, .version = verA};
 
-  const auto entry =
-      localStore.appendAnthologyEntry(atL, localStore.homeCell(), memberRef,
-                                      pinnedState, "Alice ch.3 (Edition 1)");
+  const auto entry = localStore.appendAnthologyEntry(
+      atL, localStore.homeCell().value(), memberRef, pinnedState,
+      "Alice ch.3 (Edition 1)");
   atL = entry.version;
 
   const auto manifold = localStore.rebuildManifold(atL);
@@ -194,7 +195,8 @@ TEST(AnthologyTest, anAnthologyMemberPinsItsState) {
   const auto resolvedA    = resolveAnthologyMember(
       localStore, *member, foreignStore, sealedAs, &foreignFoldA);
   EXPECT_EQ(resolvedA.status, AnthologyDisplayStatus::Resolved);
-  EXPECT_EQ(foreignFoldA.textOf(resolvedA.resolvedForeignCell, foreignStore),
+  ASSERT_TRUE(resolvedA.resolvedForeignCell);
+  EXPECT_EQ(foreignFoldA.textOf(*resolvedA.resolvedForeignCell, foreignStore),
             "Alice Chapter 3 Draft 1");
 }
 
@@ -218,7 +220,7 @@ TEST(AnthologyTest, theSameCellMayAppearTwiceInAnAnthology) {
   const GlobalDocumentState state2{.scroll  = foreignKey,
                                    .version = MicroversionId::parse("5")};
 
-  const auto home = localStore.homeCell();
+  const auto home = localStore.homeCell().value();
 
   // First occurrence pins state1
   const auto entry1 = localStore.appendAnthologyEntry(
@@ -227,7 +229,7 @@ TEST(AnthologyTest, theSameCellMayAppearTwiceInAnAnthology) {
 
   // Middle local cell separator
   at                 = localStore.makeCell(at, "--- Comparative Analysis ---");
-  const auto midCell = localStore.cellRefOf(at);
+  const auto midCell = localStore.cellRefOf(at).value();
   at                 = localStore.appendAnthologyLocalMember(at, home, midCell);
 
   // Second occurrence of same foreign cell pins state2
@@ -270,8 +272,10 @@ TEST(AnthologyTest, anAnthologySurvivesAMemberGoingDark) {
   Store store(perma);
   auto at = store.sliceGenesis(MicroversionId{});
 
+  // An offline publisher still has a named identity; only its content is
+  // absent.
   const std::string darkKey =
-      "btpk:0000000000000000000000000000000000000000000000000000000000000000:"
+      "btpk:5555555555555555555555555555555555555555555555555555555555555555:"
       "offline_store";
   at                  = store.registerScroll(at, darkKey);
   const auto scrollId = *store.scrollRegistry().scrollIdForKey(darkKey);
@@ -281,9 +285,9 @@ TEST(AnthologyTest, anAnthologySurvivesAMemberGoingDark) {
   const GlobalDocumentState pinnedState{.scroll  = darkKey,
                                         .version = MicroversionId::parse("1")};
 
-  const auto entry = store.appendAnthologyEntry(at, store.homeCell(), memberRef,
-                                                pinnedState, "Rare Manuscript");
-  at               = entry.version;
+  const auto entry = store.appendAnthologyEntry(
+      at, store.homeCell().value(), memberRef, pinnedState, "Rare Manuscript");
+  at = entry.version;
 
   const auto manifold = store.rebuildManifold(at);
 
@@ -296,7 +300,7 @@ TEST(AnthologyTest, anAnthologySurvivesAMemberGoingDark) {
   const auto dimAnthologyOpt = manifold.dimensionNamed("d.anthology", store);
   ASSERT_TRUE(dimAnthologyOpt.has_value());
   const auto firstCell =
-      zigzag::step(manifold, store.homeCell(), *dimAnthologyOpt);
+      zigzag::step(manifold, store.homeCell().value(), *dimAnthologyOpt);
   ASSERT_TRUE(firstCell.has_value());
   EXPECT_EQ(*firstCell, entry.entryCell);
 
@@ -310,7 +314,7 @@ TEST(AnthologyTest, anAnthologySurvivesAMemberGoingDark) {
   // Resolution against empty store returns Absent
   Store emptyForeign(perma);
   Scroll sealedEmpty;
-  sealedEmpty.publisher = PublicKey::fromHex(std::string(64, '0'));
+  sealedEmpty.publisher = PublicKey::fromHex(std::string(64, '5'));
   sealedEmpty.salt      = "offline_store";
 
   const auto resolved =
@@ -339,9 +343,9 @@ TEST(AnthologyTest, refreshingAMemberIsAnOperation) {
   const GlobalDocumentState state1{.scroll = foreignKey, .version = ver1};
   const GlobalDocumentState state2{.scroll = foreignKey, .version = ver2};
 
-  const auto entry = store.appendAnthologyEntry(at, store.homeCell(), memberRef,
-                                                state1, "Week 1 Reading");
-  at               = entry.version;
+  const auto entry = store.appendAnthologyEntry(
+      at, store.homeCell().value(), memberRef, state1, "Week 1 Reading");
+  at                        = entry.version;
   const auto vBeforeRefresh = at;
 
   const auto manifold1 = store.rebuildManifold(vBeforeRefresh);
@@ -395,8 +399,8 @@ TEST(AnthologyTest, invalidAncestryThrows) {
   const GlobalDocumentState pinnedState{.scroll  = foreignKey,
                                         .version = MicroversionId::parse("2")};
 
-  EXPECT_THROW(std::ignore = store.appendAnthologyEntry(at, store.homeCell(),
-                                                        memberRef, pinnedState),
+  EXPECT_THROW(std::ignore = store.appendAnthologyEntry(
+                   at, store.homeCell().value(), memberRef, pinnedState),
                std::invalid_argument);
 }
 
@@ -406,13 +410,13 @@ TEST(AnthologyTest, arenaResolutionAttachesForeignProxyWithoutCopying) {
   Store foreignStore(perma);
   auto atF = foreignStore.sliceGenesis(MicroversionId{});
   atF      = foreignStore.makeCell(atF, "Foreign Cell Content");
-  [[maybe_unused]] const auto foreignCell = foreignStore.cellRefOf(atF);
+  [[maybe_unused]] const auto foreignCell = foreignStore.cellRefOf(atF).value();
   const auto foreignBirthVersion          = atF;
 
   Scroll sealedAs;
   sealedAs.publisher    = PublicKey::fromHex(std::string(64, 'f'));
   sealedAs.salt         = "foreign_arena_doc";
-  const auto foreignKey = scrollKey(sealedAs);
+  const auto foreignKey = scrollKey(sealedAs).value();
 
   Store localStore(perma);
   auto atL            = localStore.sliceGenesis(MicroversionId{});
@@ -425,7 +429,8 @@ TEST(AnthologyTest, arenaResolutionAttachesForeignProxyWithoutCopying) {
                                         .version = foreignBirthVersion};
 
   const auto entry = localStore.appendAnthologyEntry(
-      atL, localStore.homeCell(), memberRef, pinnedState, "Foreign Citation");
+      atL, localStore.homeCell().value(), memberRef, pinnedState,
+      "Foreign Citation");
   atL = entry.version;
 
   const auto localManifold = localStore.rebuildManifold(atL);
@@ -450,9 +455,9 @@ TEST(AnthologyTest, arenaResolutionAttachesForeignProxyWithoutCopying) {
       resolveAnthologyInArena(arena, localStore, *member, spaceId, sealedAs);
 
   EXPECT_EQ(resolved.status, AnthologyDisplayStatus::Resolved);
-  ASSERT_NE(resolved.arenaProxy, zigzag::noCell);
-  EXPECT_TRUE(arena.isProxy(resolved.arenaProxy));
-  EXPECT_EQ(arena.textOf(resolved.arenaProxy), "Foreign Cell Content");
+  ASSERT_TRUE(resolved.arenaProxy);
+  EXPECT_TRUE(arena.isProxy(*resolved.arenaProxy));
+  EXPECT_EQ(arena.textOf(*resolved.arenaProxy), "Foreign Cell Content");
 }
 
 } // namespace

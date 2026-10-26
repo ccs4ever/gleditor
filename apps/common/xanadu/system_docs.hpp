@@ -852,13 +852,14 @@ struct SettingSpec {
 class SystemStoreModel {
 public:
   [[nodiscard]] static SystemStoreModel
-  fromStore(const Store &store, const MicroversionId &version = {});
+  fromStore(const Store &store,
+            std::optional<MicroversionId> version = std::nullopt);
 
   template <typename ManifoldT>
   [[nodiscard]] static SystemStoreModel
   fromManifold(const ManifoldT &manifold,
-               zigzag::CellRef homeCell = zigzag::noCell,
-               const SpanReader *reader = nullptr);
+               std::optional<zigzag::CellRef> homeCell = std::nullopt,
+               const SpanReader *reader                = nullptr);
 
   [[nodiscard]] bool isValid() const noexcept { return isValid_; }
   [[nodiscard]] const std::string &validationError() const noexcept {
@@ -902,12 +903,12 @@ public:
 
   // Updates & Reset
   static MicroversionId updateSetting(Store &store,
-                                      const MicroversionId &parent,
+                                      std::optional<MicroversionId> parent,
                                       std::string_view name,
                                       std::span<const CellValue> values);
 
   static MicroversionId resetToDefault(Store &store,
-                                       const MicroversionId &parent,
+                                       std::optional<MicroversionId> parent,
                                        std::string_view name);
 
 private:
@@ -921,12 +922,12 @@ private:
 [[nodiscard]] std::vector<CellValue> getSetting(const Store &store,
                                                 std::string_view name);
 
-MicroversionId setSetting(Store &store, const MicroversionId &parent,
+MicroversionId setSetting(Store &store, std::optional<MicroversionId> parent,
                           std::string_view name,
                           std::span<const CellValue> values);
 
 template <typename... Args>
-MicroversionId setSetting(Store &store, const MicroversionId &parent,
+MicroversionId setSetting(Store &store, std::optional<MicroversionId> parent,
                           std::string_view name, Args &&...args) {
   std::vector<CellValue> vals;
   vals.reserve(sizeof...(args));
@@ -934,16 +935,19 @@ MicroversionId setSetting(Store &store, const MicroversionId &parent,
   return setSetting(store, parent, name, std::span<const CellValue>{vals});
 }
 
-MicroversionId resetSettingToDefault(Store &store, const MicroversionId &parent,
+MicroversionId resetSettingToDefault(Store &store,
+                                     std::optional<MicroversionId> parent,
                                      std::string_view name);
 
-MicroversionId initializeSystemStoreGenesis(Store &store, SystemDocKind kind,
-                                            const MicroversionId &parent = {});
+MicroversionId initializeSystemStoreGenesis(
+    Store &store, SystemDocKind kind,
+    std::optional<MicroversionId> parent = std::nullopt);
 
-MicroversionId ensureSetting(Store &store, const MicroversionId &parent,
+MicroversionId ensureSetting(Store &store, std::optional<MicroversionId> parent,
                              const SettingSpec &spec);
 
-MicroversionId ensureAllSettings(Store &store, const MicroversionId &parent,
+MicroversionId ensureAllSettings(Store &store,
+                                 std::optional<MicroversionId> parent,
                                  SystemDocKind kind);
 MicroversionId ensureAllSettings(Store &store, SystemDocKind kind);
 
@@ -1273,7 +1277,7 @@ struct UIConfig {
 };
 
 struct DropZoneSpec {
-  zigzag::CellRef cell{zigzag::noCell};
+  std::optional<zigzag::CellRef> cell;
   std::string id;
   std::string label{"Notes"};
   std::uint32_t auraColor{0x06B6D4FFU};
@@ -1289,9 +1293,9 @@ struct PouchConfig {
 /**
  * @brief Add or ensure a drop zone setting on d.vars in a system store (§5.8).
  */
-MicroversionId addPouchZone(Store &store, const MicroversionId &parent,
+MicroversionId addPouchZone(Store &store, std::optional<MicroversionId> parent,
                             const DropZoneSpec &spec,
-                            zigzag::CellRef *cellOut = nullptr);
+                            std::optional<zigzag::CellRef> *cellOut = nullptr);
 
 } // namespace xanadu
 

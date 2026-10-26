@@ -93,7 +93,7 @@ TEST(ExternRefTest, LocalSliceReferenceKeepsBirthAcrossLaterEditAndReload) {
     auto foreignHead       = foreign.sliceGenesis({});
     foreignHead            = foreign.makeCell(foreignHead, "original");
     birth                  = foreignHead;
-    const auto foreignCell = foreign.cellRefOf(birth);
+    const auto foreignCell = foreign.cellRefOf(birth).value();
     foreignKey             = foreign.documentId().str();
     foreignHead = foreign.setCellText(foreignHead, foreignCell, "later state");
     foreign.save((dir / "foreign").string());
@@ -126,8 +126,10 @@ TEST(ExternRefTest, LocalSliceReferenceKeepsBirthAcrossLaterEditAndReload) {
   const auto resolved =
       resolveLocalExternCell(local, placeholder, foreign, &fold);
   ASSERT_TRUE(resolved.isResolved());
-  EXPECT_EQ(foreign.segmentedOps().idOf(resolved.cell), birth);
-  EXPECT_EQ(fold.textOf(resolved.cell, foreign), "later state");
+  ASSERT_TRUE(resolved.cell);
+  ASSERT_TRUE(resolved.opIndex);
+  EXPECT_EQ(foreign.segmentedOps().idOf(*resolved.opIndex), birth);
+  EXPECT_EQ(fold.textOf(*resolved.cell, foreign), "later state");
 }
 
 TEST(ExternRefTest, anUnresolvableExternIsNotCorruption) {
@@ -159,7 +161,7 @@ TEST(ExternRefTest, aRankDeadEndsAtAPlaceholderRatherThanVanishing) {
   Store store(perma);
   auto at            = store.sliceGenesis(MicroversionId{});
   const auto dimTest = store.makeDimension(at, "d.test").dim;
-  at                 = store.structureHead();
+  at                 = store.structureHead().value();
 
   at = store.registerScroll(
       at,
@@ -170,7 +172,7 @@ TEST(ExternRefTest, aRankDeadEndsAtAPlaceholderRatherThanVanishing) {
       "11:doc");
 
   at                    = store.makeCell(at, "Local Start Cell");
-  const auto localStart = store.cellRefOf(at);
+  const auto localStart = store.cellRefOf(at).value();
 
   const ExternOpRef targetRef{.scroll   = scrollId,
                               .produces = MicroversionId::parse("3b2")};
@@ -195,7 +197,7 @@ TEST(ExternRefTest, aPlaceholderIsNotEphemeral) {
   Store store(perma);
   auto at            = store.sliceGenesis(MicroversionId{});
   const auto dimTest = store.makeDimension(at, "d.test").dim;
-  at                 = store.structureHead();
+  at                 = store.structureHead().value();
 
   at = store.registerScroll(
       at,
@@ -214,7 +216,7 @@ TEST(ExternRefTest, aPlaceholderIsNotEphemeral) {
   EXPECT_FALSE(zigzag::isEphemeral(placeholder));
 
   at                 = store.makeCell(at, "Subject Cell");
-  const auto subject = store.cellRefOf(at);
+  const auto subject = store.cellRefOf(at).value();
 
   EXPECT_NO_THROW({
     at = store.setLink(at, subject, dimTest, zigzag::DimVector::POS,
@@ -246,12 +248,13 @@ TEST(ExternRefTest, anExternRefSurvivesTheForeignStoreGainingABranch) {
   // Branch 2: make the cell on branch 2
   const auto b2_1 = foreignStore.makeCell(baseVersion, "Foreign Cell Content");
   const auto foreignBirthVersion = b2_1;
-  const auto foreignCellHere     = foreignStore.cellRefOf(foreignBirthVersion);
+  const auto foreignCellHere =
+      foreignStore.cellRefOf(foreignBirthVersion).value();
 
   Scroll sealedAs;
   sealedAs.publisher    = PublicKey::fromHex(std::string(64, 'a'));
   sealedAs.salt         = "test_salt";
-  const auto foreignKey = scrollKey(sealedAs);
+  const auto foreignKey = scrollKey(sealedAs).value();
 
   const auto history = historyFromSeal(sealableOps(foreignStore), sealedAs, {});
   ASSERT_NE(history, nullptr);
@@ -281,8 +284,11 @@ TEST(ExternRefTest, anExternRefSurvivesTheForeignStoreGainingABranch) {
 
   EXPECT_EQ(resolution.status, ExternResolutionStatus::Resolved);
   EXPECT_TRUE(resolution.isResolved());
-  EXPECT_EQ(resolution.cell, foreignCellThere);
-  EXPECT_NE(resolution.cell, foreignCellHere);
+  ASSERT_TRUE(resolution.cell);
+  ASSERT_TRUE(resolution.opIndex);
+  EXPECT_EQ(*resolution.cell, foreignCellThere);
+  EXPECT_NE(*resolution.cell, foreignCellHere);
+  EXPECT_EQ(*resolution.opIndex, foreignCellThere);
 }
 
 TEST(ExternRefTest, anExternRefIsRefusedForTheWrongDocument) {
@@ -303,9 +309,9 @@ TEST(ExternRefTest, anExternRefIsRefusedForTheWrongDocument) {
 
   Store localStore(perma);
   auto atL = localStore.sliceGenesis(MicroversionId{});
-  atL      = localStore.registerScroll(atL, scrollKey(sealedAsDocA));
-  const auto scrollId =
-      *localStore.scrollRegistry().scrollIdForKey(scrollKey(sealedAsDocA));
+  atL      = localStore.registerScroll(atL, scrollKey(sealedAsDocA).value());
+  const auto scrollId = *localStore.scrollRegistry().scrollIdForKey(
+      scrollKey(sealedAsDocA).value());
 
   const ExternOpRef targetRef{.scroll   = scrollId,
                               .produces = foreignBirthVersion};
@@ -328,7 +334,7 @@ TEST(ExternRefTest, aResolvedExternCellMustNameItsBirthOperation) {
   Store foreignStore(perma);
   auto atF        = foreignStore.sliceGenesis(MicroversionId{});
   atF             = foreignStore.makeCell(atF, "Initial Text");
-  const auto cell = foreignStore.cellRefOf(atF);
+  const auto cell = foreignStore.cellRefOf(atF).value();
 
   // Perform a SetValue operation on the foreign cell
   atF = foreignStore.setCellText(atF, cell, "Updated Text");
@@ -337,7 +343,7 @@ TEST(ExternRefTest, aResolvedExternCellMustNameItsBirthOperation) {
   Scroll sealedAs;
   sealedAs.publisher    = PublicKey::fromHex(std::string(64, 'c'));
   sealedAs.salt         = "salt_c";
-  const auto foreignKey = scrollKey(sealedAs);
+  const auto foreignKey = scrollKey(sealedAs).value();
 
   Store localStore(perma);
   auto atL            = localStore.sliceGenesis(MicroversionId{});
@@ -432,7 +438,7 @@ TEST(ExternRefTest, manyPlaceholdersDoNotDisplaceTheScrollRegistryRank) {
   ASSERT_TRUE(dimScrolls.has_value());
 
   const auto visitedScrolls =
-      zigzag::rankAfter(manifold, manifold.home(), *dimScrolls) |
+      zigzag::rankAfter(manifold, manifold.home().value(), *dimScrolls) |
       std::ranges::to<std::vector>();
 
   ASSERT_EQ(visitedScrolls.size(), 3U);

@@ -268,3 +268,18 @@ TEST_F(ActiveSegmentTest, nothingIsDurableUntilItIsFlushed) {
 }
 
 } // namespace
+
+TEST_F(ActiveSegmentTest, MoveTransfersTheOpenDescriptorWithoutClosingIt) {
+  const auto path = dir / "active.primedia";
+  SegmentedPrimediaSpool source;
+  ASSERT_TRUE(source.openActiveSegment(path));
+  source.append("before");
+  SegmentedPrimediaSpool destination(std::move(source));
+  source.clear();
+  destination.append(" after");
+  ASSERT_TRUE(destination.flush());
+
+  SegmentedPrimediaSpool reopened;
+  ASSERT_TRUE(reopened.openActiveSegment(path));
+  EXPECT_EQ(reopened.bytes(), "before after");
+}

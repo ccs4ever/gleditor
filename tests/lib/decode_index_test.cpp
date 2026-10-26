@@ -178,6 +178,7 @@ TEST(DecodeIndexTest, UnrecognisedMimeTypeIsUnsupported) {
   EXPECT_EQ(index.format, DecodeIndexFormat::Unsupported);
   EXPECT_FALSE(index.seekable);
   EXPECT_FALSE(index.durableIndex);
+  EXPECT_FALSE(index.uncompressedExtent);
   EXPECT_TRUE(index.seekPoints.empty());
 }
 
@@ -186,6 +187,7 @@ TEST(DecodeIndexTest, EmptyBufferNeverThrowsAndIsNotSeekable) {
   EXPECT_NO_THROW({
     const auto index = buildDecodeIndex(empty, MimeType::ImagePng);
     EXPECT_FALSE(index.seekable);
+    EXPECT_FALSE(index.uncompressedExtent);
   });
 }
 
@@ -205,7 +207,8 @@ TEST(DecodeIndexTest, PngReportsSeekableButNoDurableIndex) {
   // why this is a real, permanent limitation rather than a gap.
   EXPECT_FALSE(index.durableIndex);
   EXPECT_TRUE(index.seekPoints.empty());
-  EXPECT_EQ(index.uncompressedExtent, 64U); // sample_image.png is 64x64.
+  ASSERT_TRUE(index.uncompressedExtent);
+  EXPECT_EQ(*index.uncompressedExtent, 64U); // sample_image.png is 64x64.
 }
 
 TEST(PngCheckpointsTest, BuildFailsOnNonPngBytes) {
@@ -300,7 +303,8 @@ TEST(DecodeIndexTest, JpegWithRestartMarkersIsSeekableAndDurable) {
   // checkpoint of its own, unlike PNG.
   EXPECT_TRUE(index.seekable);
   EXPECT_TRUE(index.durableIndex);
-  EXPECT_GT(index.uncompressedExtent, 0U);
+  ASSERT_TRUE(index.uncompressedExtent);
+  EXPECT_GT(*index.uncompressedExtent, 0U);
   EXPECT_TRUE(index.seekPoints.empty()); // the restart markers *are* the
                                          // index; nothing to extract here.
 }
@@ -316,12 +320,12 @@ TEST(DecodeIndexTest, VideoGetsADurableContainerIndex) {
   }
   EXPECT_EQ(index.format, DecodeIndexFormat::Video);
   EXPECT_TRUE(index.seekable);
-  // FFmpeg's MP4 demuxer builds a full AVIndexEntry table for free -- unlike
-  // MP3's, confirmed empirically while scoping this component (see
-  // design/decode-index-spike.md).
+  // FFmpeg's MP4 demuxer builds an AVIndexEntry table for free -- unlike
+  // MP3's. Index-entry count is not a decoded-frame extent; the latter is
+  // reported only if the stream metadata supplies it.
   EXPECT_TRUE(index.durableIndex);
   EXPECT_FALSE(index.seekPoints.empty());
-  EXPECT_EQ(index.uncompressedExtent, index.seekPoints.size());
+  if (index.uncompressedExtent) EXPECT_GT(*index.uncompressedExtent, 0U);
 }
 
 TEST(DecodeIndexTest, Mp3IsSeekableButBuildsNoExtractableIndex) {
@@ -379,7 +383,8 @@ TEST(DecodeIndexTest, SeekableZstdReportsDurableIndexWithSeekPoints) {
   // before choosing to vendor the seekable format instead).
   EXPECT_TRUE(index.durableIndex);
   ASSERT_FALSE(index.seekPoints.empty());
-  EXPECT_EQ(index.uncompressedExtent,
+  ASSERT_TRUE(index.uncompressedExtent);
+  EXPECT_EQ(*index.uncompressedExtent,
             4606957U); // tests/samples/kjv.txt's size.
 
   // Every entry's offsets must strictly increase -- a basic sanity check on
@@ -444,7 +449,8 @@ TEST(DecodeIndexTest, PlainFlacHasNoDurableIndexButIsStillSeekable) {
   EXPECT_TRUE(index.seekable);
   EXPECT_FALSE(index.durableIndex);
   EXPECT_TRUE(index.seekPoints.empty());
-  EXPECT_EQ(index.uncompressedExtent, 529200U); // 12s at 44100Hz mono.
+  ASSERT_TRUE(index.uncompressedExtent);
+  EXPECT_EQ(*index.uncompressedExtent, 529200U); // 12s at 44100Hz mono.
 }
 
 TEST(DecodeIndexTest, SeekableFlacReportsDurableIndexWithSeekPoints) {
@@ -460,7 +466,8 @@ TEST(DecodeIndexTest, SeekableFlacReportsDurableIndexWithSeekPoints) {
   EXPECT_TRUE(index.seekable);
   EXPECT_TRUE(index.durableIndex);
   ASSERT_FALSE(index.seekPoints.empty());
-  EXPECT_EQ(index.uncompressedExtent, 529200U);
+  ASSERT_TRUE(index.uncompressedExtent);
+  EXPECT_EQ(*index.uncompressedExtent, 529200U);
 
   // Every entry's offsets must strictly increase, and the first point must
   // resolve to sample 0 at the very start of the audio (stream_offset 0
@@ -526,7 +533,8 @@ TEST(DecodeIndexTest, SingleStripTiffHasOnlyOneSeekPoint) {
   EXPECT_TRUE(index.durableIndex);
   ASSERT_EQ(index.seekPoints.size(), 1U);
   EXPECT_EQ(index.seekPoints.front().uncompressedPosition, 0U);
-  EXPECT_EQ(index.uncompressedExtent, 512U); // sample_image.tif is 256x512.
+  ASSERT_TRUE(index.uncompressedExtent);
+  EXPECT_EQ(*index.uncompressedExtent, 512U); // sample_image.tif is 256x512.
 }
 
 TEST(DecodeIndexTest, SeekableTiffReportsManyStripsWithSeekPoints) {
@@ -541,7 +549,8 @@ TEST(DecodeIndexTest, SeekableTiffReportsManyStripsWithSeekPoints) {
   EXPECT_EQ(index.format, DecodeIndexFormat::Tiff);
   EXPECT_TRUE(index.seekable);
   EXPECT_TRUE(index.durableIndex);
-  EXPECT_EQ(index.uncompressedExtent, 512U);
+  ASSERT_TRUE(index.uncompressedExtent);
+  EXPECT_EQ(*index.uncompressedExtent, 512U);
   // 512 rows / 8 rows-per-strip (this function's own default) = 64 strips.
   ASSERT_EQ(index.seekPoints.size(), 64U);
 

@@ -33,7 +33,8 @@ void PrintTo(const ReadingPlace &place, std::ostream *out) {
     *out << "-";
   }
   *out << " zigzag:" << place.zigzagStore << "@" << place.zigzagVersion << "#"
-       << place.zigzagFocus << (place.zigzagHasKeyboard ? " keys" : "") << "}";
+       << (place.zigzagFocus ? std::to_string(*place.zigzagFocus) : "-")
+       << (place.zigzagHasKeyboard ? " keys" : "") << "}";
 }
 } // namespace xanadu
 
@@ -77,6 +78,18 @@ TEST_F(ReadingPlaceTest, anEmptyStoreHasNoPlace) {
   EXPECT_FALSE(xanadu::latestPlace(store).has_value());
 }
 
+TEST_F(ReadingPlaceTest, absentFocusIsDistinctFromInvalidZero) {
+  xanadu::Store store(perma);
+  auto place        = twoDocuments();
+  place.zigzagFocus = 0;
+  EXPECT_THROW(std::ignore = xanadu::recordPlace(store, place),
+               std::invalid_argument);
+  place.zigzagFocus.reset();
+  std::ignore = xanadu::recordPlace(store, place);
+  ASSERT_TRUE(xanadu::latestPlace(store));
+  EXPECT_FALSE(xanadu::latestPlace(store)->zigzagFocus);
+}
+
 TEST_F(ReadingPlaceTest, thePlaceRecordedIsThePlaceReadBack) {
   xanadu::Store store(perma);
   std::ignore = xanadu::recordPlace(store, twoDocuments());
@@ -93,7 +106,7 @@ TEST_F(ReadingPlaceTest, theNewestPlaceWinsAndSurvivesSaving) {
   first.camera.reset();
   first.zigzagStore.clear();
   first.zigzagVersion.clear();
-  first.zigzagFocus       = 0;
+  first.zigzagFocus.reset();
   first.zigzagHasKeyboard = false;
   std::ignore             = xanadu::recordPlace(store, first);
   EXPECT_EQ(xanadu::latestPlace(store), first);

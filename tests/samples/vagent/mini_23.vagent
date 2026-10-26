@@ -1,0 +1,11 @@
+event Shutdown
+event Finish
+agent Child {
+  on Finish { terminate }
+  on Destroy { Logging.info("child stopping") }
+}
+agent Parent {
+  var child: Opt<Agent> := none
+  on Initialize { child := spawn Child() in inner }
+  on Shutdown { if child then stop child }
+}

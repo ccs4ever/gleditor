@@ -106,8 +106,10 @@ bencode::Value encodeScroll(const Scroll &scroll) {
   for (const auto &segment : scroll.segments) {
     segments.push_back(encodeSegment(segment));
   }
+  std::string publisherBytes(32, '\0');
+  if (scroll.isNamed()) publisherBytes = rawBytes(*scroll.publisher);
   return bencode::Value::dict({
-      {"key", bencode::Value::string(rawBytes(scroll.publisher))},
+      {"key", bencode::Value::string(std::move(publisherBytes))},
       {"salt", bencode::Value::string(scroll.salt)},
       {"segments", bencode::Value::list(std::move(segments))},
   });
@@ -122,8 +124,10 @@ std::optional<Scroll> decodeScroll(const bencode::Value &value) {
     return std::nullopt;
   }
   Scroll scroll;
+  PublicKey publisher;
   std::copy(key->asString().begin(), key->asString().end(),
-            scroll.publisher.bytes.begin());
+            publisher.bytes.begin());
+  if (!publisher.isZero()) scroll.publisher = publisher;
   scroll.salt = salt->asString();
   for (const auto &item : segments->asList()) {
     auto segment = decodeSegment(item);
@@ -191,7 +195,7 @@ std::vector<MicroversionId> historyHeads(const Store &store) {
   std::vector<MicroversionId> heads;
   for (std::uint32_t i = 1; i <= store.opCount(); ++i)
     if (store.segmentedOps().childrenOf(i).empty())
-      heads.push_back(store.segmentedOps().idOf(i));
+      heads.push_back(store.segmentedOps().idOf(i).value());
   std::ranges::sort(heads);
   return heads;
 }
@@ -203,16 +207,16 @@ structureInventory(const Store &store,
   for (const auto &birth : store.discoverStructureBirths()) {
     PublishedStructure item;
     item.kind  = birth.kind;
-    item.birth = store.segmentedOps().idOf(birth.opIndex);
+    item.birth = store.segmentedOps().idOf(birth.opIndex).value();
     for (const auto &head : heads) {
       const auto path = store.opsFor(head);
       if (std::ranges::find(path, item.birth) == path.end()) continue;
       auto name = store.resolveStructureName(head, birth.opIndex);
-      if (name.empty())
+      if (!name || name->empty())
         name =
             std::string(item.kind == StructureKind::Slice ? "Slice " : "Doc ") +
             item.birth.str();
-      item.views.push_back({head, std::move(name)});
+      item.views.push_back({head, std::move(*name)});
     }
     inventory.push_back(std::move(item));
   }
@@ -846,8 +850,9 @@ std::optional<SealState> decodeSealState(const std::string_view encoded) {
   return state;
 }
 
-std::string globalKeyOf(const Store &store, const PrimediaSpan &span,
-                        const Scroll *const localSealedAs) {
+std::optional<std::string> globalKeyOf(const Store &store,
+                                       const PrimediaSpan &span,
+                                       const Scroll *const localSealedAs) {
   // A break is not an address, so asking the store for its scroll gets nullptr
   // and reads as "content this machine has not published" -- which is how
   // publishing any document with a page break in it used to throw. It has a
@@ -860,18 +865,18 @@ std::string globalKeyOf(const Store &store, const PrimediaSpan &span,
   // name is the address it always had, said globally.
   const auto scroll = span.isLocal() ? gleditor::refOf(localSealedAs)
                                      : store.scroll(span.scroll);
-  return scroll ? scrollKey(*scroll) : std::string{};
+  return scroll ? scrollKey(*scroll) : std::nullopt;
 }
 
 std::optional<GlobalSpan> globalise(const Store &store,
                                     const PrimediaSpan &span,
                                     const Scroll *const localSealedAs) {
   auto key = globalKeyOf(store, span, localSealedAs);
-  if (key.empty()) {
+  if (!key) {
     return std::nullopt;
   }
   return GlobalSpan{
-      .scroll = std::move(key), .start = span.start, .length = span.length};
+      .scroll = std::move(*key), .start = span.start, .length = span.length};
 }
 
 bool canCarry(const Store &from, const Store &into, const PrimediaSpan &span) {
@@ -919,7 +924,7 @@ localise(Store &store, const GlobalSpan &span,
   // learned of a re-seal keeps the identity it already had.
   const auto &known = store.scrolls();
   for (std::size_t i = 0; i < known.size(); i++) {
-    if (scrollKey(known[i]) == span.scroll) {
+    if (const auto key = scrollKey(known[i]); key && *key == span.scroll) {
       return PrimediaSpan{.scroll = static_cast<ScrollId>(i + 1),
                           .start  = span.start,
                           .length = span.length};
@@ -934,26 +939,28 @@ localise(Store &store, const GlobalSpan &span,
                       .length = span.length};
 }
 
-GlobalOpRef opRefOf(const Store &store, const std::uint32_t opIndex,
-                    const Scroll &sealedAs) {
+std::optional<GlobalOpRef> opRefOf(const Store &store,
+                                   const std::uint32_t opIndex,
+                                   const Scroll &sealedAs) {
   auto produces = store.segmentedOps().idOf(opIndex);
-  if (produces.isZero()) {
-    // Index zero is state zero and every other index past the end reads as it
-    // too. Neither is an operation, so neither gets a name.
-    return {};
+  if (!produces || produces->isZero()) {
+    // State zero has a name but contains no operation to publish.
+    return std::nullopt;
   }
-  return GlobalOpRef{.scroll   = scrollKey(sealedAs),
-                     .produces = std::move(produces)};
+  const auto key = scrollKey(sealedAs);
+  if (!key) return std::nullopt;
+  return GlobalOpRef{.scroll = *key, .produces = std::move(*produces)};
 }
 
 std::optional<std::uint32_t> localiseOpRef(const Store &store,
                                            const GlobalOpRef &ref,
                                            const Scroll &sealedAs) {
-  if (ref.empty() || scrollKey(sealedAs) != ref.scroll) {
+  const auto key = scrollKey(sealedAs);
+  if (ref.empty() || !key || *key != ref.scroll) {
     return std::nullopt;
   }
   const auto index = store.segmentedOps().indexOf(ref.produces);
-  return 0 == index ? std::nullopt : std::optional{index};
+  return index && *index != 0 ? index : std::nullopt;
 }
 
 namespace {
@@ -991,13 +998,13 @@ std::string sealableOps(const Store &store,
           node->scrollId));
     }
     auto key = scrollKey(*scroll);
-    if (key.empty()) {
+    if (!key) {
       throw std::runtime_error(
           "cannot seal these operations: one of them quotes a scroll with no "
           "global name. Content has to be published before a history that "
           "points at it can be.");
     }
-    named.emplace(node->scrollId, std::move(key));
+    named.emplace(node->scrollId, std::move(*key));
   }
 
   std::string out{sealedOpsMagic};
@@ -1113,8 +1120,10 @@ restorePublication(const Publication &pub, const ContentSource &source,
   if (pub.opsSegments.empty()) refuse("no complete history supplied");
   const auto local = pub.scrolls.find(pub.historyScroll);
   if (local == pub.scrolls.end()) refuse("global permascroll missing");
-  for (const auto &[key, scroll] : pub.scrolls)
-    if (key != scrollKey(scroll)) refuse("scroll identity mismatch");
+  for (const auto &[key, scroll] : pub.scrolls) {
+    const auto identity = scrollKey(scroll);
+    if (!identity || key != *identity) refuse("scroll identity mismatch");
+  }
   auto history =
       std::make_unique<Store>(std::move(readerPermascroll), pub.storeId);
   history->setContentSource(&source);
@@ -1170,7 +1179,7 @@ restorePublication(const Publication &pub, const ContentSource &source,
     refuse("signed inventory disagrees with history");
   if (!history->getOp(pub.version)) refuse("selected version is absent");
   const auto selected = history->activeXanadocOnBranch(pub.version);
-  if (history->segmentedOps().idOf(selected) != pub.selectedBirth)
+  if (history->segmentedOps().idOf(selected.value_or(0U)) != pub.selectedBirth)
     refuse("selected document birth disagrees with history");
   std::vector<GlobalSpan> pieces;
   for (const auto &span : history->rebuild(pub.version, selected).pieces()) {
@@ -1282,12 +1291,14 @@ Publication publish(const Store &store, const MicroversionId &version,
   Publication pub;
   pub.storeId = store.documentId();
   pub.selectedBirth =
-      store.segmentedOps().idOf(store.activeXanadocOnBranch(version));
+      store.segmentedOps()
+          .idOf(store.activeXanadocOnBranch(version).value_or(0U))
+          .value();
   if (!opsSegments.empty()) {
-    if (!localSealedAs || scrollKey(*localSealedAs).empty())
+    if (!localSealedAs || !scrollKey(*localSealedAs))
       throw PublicationUnreadable(
           "publication history has no global permascroll");
-    pub.historyScroll = scrollKey(*localSealedAs);
+    pub.historyScroll = *scrollKey(*localSealedAs);
     pub.scrolls.emplace(pub.historyScroll, *localSealedAs);
     pub.heads     = historyHeads(store);
     pub.inventory = structureInventory(store, pub.heads);
@@ -1434,7 +1445,7 @@ std::vector<Library::Sighting> Library::showing(const GlobalSpan &span) const {
             static_cast<std::uint32_t>(shared.start - piece.start);
         out.push_back(Sighting{.document = &pub,
                                .start    = at + into,
-                               .end = at + into +
+                               .end      = at + into +
                                       static_cast<std::uint32_t>(shared.length),
                                .shared = shared});
       }

@@ -244,7 +244,7 @@ bool OverviewOverlay::picked(const render::PickingResult &pick,
   const std::scoped_lock lock(guard);
   if (render::tagKindOverlay != pick.tag.kind || !isVisible() || !lastFit)
     return false;
-  if (pick.requestId != 0) {
+  if (pick.requestId) {
     if (pick.tag.docIndex != pickScope || pick.tag.pageIndex != 0) return false;
     if (pick.overlayWidgetId != pickToken) return true;
   } else if (!(pick.tag.docIndex == 0 && pick.tag.pageIndex == 0 &&

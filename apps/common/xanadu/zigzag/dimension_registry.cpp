@@ -4,6 +4,8 @@
  */
 #include "common/xanadu/zigzag/dimension_registry.hpp"
 
+#include <stdexcept>
+
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/zigzag/manifold.hpp"
 
@@ -16,40 +18,37 @@ DimensionRegistry &DimensionRegistry::instance() noexcept {
 
 InternedDimName DimensionRegistry::intern(const std::string_view name) {
   if (name.empty()) {
-    return InternedDimName{0, ""};
+    throw std::invalid_argument("cannot intern an empty dimension name");
   }
   std::scoped_lock lock(mutex_);
   if (const auto it = nameToId_.find(name); it != nameToId_.end()) {
     const auto id = it->second;
-    return InternedDimName{id, internPool_[id - 1]};
+    return InternedDimName{id, internPool_[id]};
   }
 
-  internPool_.emplace_back(name);
   const auto id = static_cast<std::uint32_t>(internPool_.size());
+  internPool_.emplace_back(name);
   std::string_view pooled(internPool_.back());
   nameToId_[pooled] = id;
   return InternedDimName{id, pooled};
 }
 
-InternedDimName
+std::optional<InternedDimName>
 DimensionRegistry::findInterned(const std::string_view name) const {
   if (name.empty()) {
-    return InternedDimName{0, ""};
+    return std::nullopt;
   }
   std::scoped_lock lock(mutex_);
   if (const auto it = nameToId_.find(name); it != nameToId_.end()) {
     const auto id = it->second;
-    return InternedDimName{id, internPool_[id - 1]};
+    return InternedDimName{id, internPool_[id]};
   }
-  return InternedDimName{0, ""};
+  return std::nullopt;
 }
 
 std::optional<DimRef>
 DimensionRegistry::get(const xanadu::Store &store,
                        const InternedDimName dimName) const {
-  if (dimName.empty()) {
-    return std::nullopt;
-  }
   std::scoped_lock lock(mutex_);
   const auto storeIt = storeDims_.find(&store);
   if (storeIt == storeDims_.end()) {
@@ -65,14 +64,15 @@ DimensionRegistry::get(const xanadu::Store &store,
 std::optional<DimRef>
 DimensionRegistry::get(const xanadu::Store &store,
                        const std::string_view name) const {
-  return get(store, findInterned(name));
+  const auto dimName = findInterned(name);
+  return dimName ? get(store, *dimName) : std::nullopt;
 }
 
 std::optional<DimRef>
 DimensionRegistry::get(const Manifold &manifold,
                        const InternedDimName dimName) const {
   const auto *const store = manifold.store();
-  if (dimName.empty() || nullptr == store) {
+  if (nullptr == store) {
     return std::nullopt;
   }
   // The cache first; a cached dim this version does not hold falls back to a
@@ -87,9 +87,10 @@ DimensionRegistry::get(const Manifold &manifold,
 std::optional<DimRef>
 DimensionRegistry::get(const Manifold &manifold,
                        const std::string_view name) const {
+  if (name.empty()) return std::nullopt;
   const auto dimName = findInterned(name);
-  if (!dimName.empty()) {
-    return get(manifold, dimName);
+  if (dimName) {
+    return get(manifold, *dimName);
   }
   if (const auto *const store = manifold.store(); nullptr != store) {
     return manifold.dimensionNamed(name, *store);
@@ -100,7 +101,7 @@ DimensionRegistry::get(const Manifold &manifold,
 void DimensionRegistry::registerDim(const xanadu::Store &store,
                                     const InternedDimName dimName,
                                     const DimRef cell) {
-  if (dimName.empty() || noCell == cell) {
+  if (noCell == cell) {
     return;
   }
   std::scoped_lock lock(mutex_);
@@ -131,9 +132,6 @@ void DimensionRegistry::clear() noexcept {
 
 DimensionResult DimensionRegistry::getOrCreate(Manifold &manifold,
                                                const InternedDimName dimName) {
-  if (dimName.empty()) {
-    return std::unexpected{DimensionError::EmptyName};
-  }
   auto *const store = manifold.store();
   if (nullptr != store) {
     return getOrCreate(*store, manifold, dimName);
@@ -164,20 +162,18 @@ std::optional<DimRef> DimensionRegistry::held(const xanadu::Store &store,
 
 DimensionResult DimensionRegistry::getOrCreate(Manifold &manifold,
                                                const std::string_view name) {
+  if (name.empty()) return std::unexpected{DimensionError::EmptyName};
   return getOrCreate(manifold, intern(name));
 }
 
 DimensionResult DimensionRegistry::getOrCreate(xanadu::Store &store,
                                                Manifold &manifold,
                                                const InternedDimName dimName) {
-  if (dimName.empty()) {
-    return std::unexpected{DimensionError::EmptyName};
-  }
   if (const auto known = held(store, manifold, dimName)) {
     return *known;
   }
 
-  if (noCell == store.homeCell()) {
+  if (!store.homeCell()) {
     auto rootParent = store.latest();
     store.sliceGenesis(rootParent);
   }
@@ -191,6 +187,7 @@ DimensionResult DimensionRegistry::getOrCreate(xanadu::Store &store,
 DimensionResult DimensionRegistry::getOrCreate(xanadu::Store &store,
                                                Manifold &manifold,
                                                const std::string_view name) {
+  if (name.empty()) return std::unexpected{DimensionError::EmptyName};
   return getOrCreate(store, manifold, intern(name));
 }
 
@@ -198,14 +195,11 @@ DimensionResult DimensionRegistry::getOrCreate(xanadu::Store &store,
                                                xanadu::MicroversionId &head,
                                                Manifold &manifold,
                                                const InternedDimName dimName) {
-  if (dimName.empty()) {
-    return std::unexpected{DimensionError::EmptyName};
-  }
   if (const auto known = held(store, manifold, dimName)) {
     return *known;
   }
 
-  if (noCell == store.homeCell()) {
+  if (!store.homeCell()) {
     head = store.sliceGenesis(head);
   }
   const auto minted = store.makeDimension(head, dimName.name());
@@ -226,6 +220,7 @@ DimensionResult DimensionRegistry::getOrCreate(xanadu::Store &store,
                                                xanadu::MicroversionId &head,
                                                Manifold &manifold,
                                                const std::string_view name) {
+  if (name.empty()) return std::unexpected{DimensionError::EmptyName};
   return getOrCreate(store, head, manifold, intern(name));
 }
 

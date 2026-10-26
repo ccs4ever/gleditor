@@ -30,13 +30,48 @@ constexpr std::uint32_t menuNode        = 0x8000U;
 constexpr std::uint32_t hubNode         = menuNode + 99U;
 constexpr std::uint32_t firstActionNode = menuNode + 100U;
 
+// Used only before a window has reported its drawable size.
+constexpr float kFallbackScreenWidthPx  = 1920.0F;
+constexpr float kFallbackScreenHeightPx = 1080.0F;
+
+// A usable outer wheel needs room for the label and touch target; the inner
+// radius stays far enough inside it to leave a visible ring.
+constexpr float kMinimumOuterRadiusPx    = 40.0F;
+constexpr float kMinimumInnerRadiusPx    = 10.0F;
+constexpr float kMinimumOuterInnerGapPx  = 20.0F;
+constexpr float kMaximumInnerRadiusShare = 0.55F;
+constexpr float kHubRadiusShare          = 0.85F;
+constexpr float kHubContentRadiusShare   = 0.7F;
+constexpr float kHubContentDiameterShare = 1.4F;
+
+// Keep the disk and the wedge strokes legible without oversampling each pixel.
+constexpr std::size_t kMinimumDiscSlices                = 8;
+constexpr std::size_t kCircleBorderSegments             = 128;
+constexpr std::size_t kHubDiscSegments                  = 32;
+constexpr float kWedgeRasterStepPx                      = 1.0F;
+constexpr float kRasterRowOverlapPx                     = 1.0F;
+constexpr float kBorderSegmentLengthPx                  = 2.0F;
+constexpr std::size_t kMinimumArcSegments               = 2;
+constexpr std::size_t kMinimumRadialSegments            = 1;
+constexpr std::size_t kInitialWedgeIntersectionCapacity = 4;
+
+// These tolerances cover float angle calculations and subpixel edge overlap.
+constexpr float kAngleComparisonToleranceRad   = 1e-4F;
+constexpr float kMinimumSineForIntersection    = 1e-4F;
+constexpr float kSubpixelEdgeTolerancePx       = 0.5F;
+constexpr float kUniqueIntersectionTolerancePx = 0.5F;
+constexpr float kMinimumOverlayStrokePx        = 1.0F;
+
+// Wedges leave a small angular seam and keep labels inside their readable core.
+constexpr float kWedgeGapAngleRad = 0.035F;
+constexpr float kWedgeLabelShare  = 0.8F;
+
+constexpr float kRadialMenuOpacity = 0.98F;
+
 } // namespace
 
 RadialConfig RadialConfig::createDefault() {
   RadialConfig cfg;
-  cfg.radius      = 84.0F;
-  cfg.innerRadius = 26.0F;
-
   RadialAction bold;
   bold.id     = "bold";
   bold.label  = "B";
@@ -157,8 +192,9 @@ void RadialMenu::setConfig(RadialConfig aConfig) {
 
 void RadialMenu::setRadius(const float outer, const float inner) {
   const std::scoped_lock lock(guard_);
-  config_.radius      = std::max(outer, 40.0F);
-  config_.innerRadius = std::clamp(inner, 10.0F, config_.radius - 20.0F);
+  config_.radius      = std::max(outer, kMinimumOuterRadiusPx);
+  config_.innerRadius = std::clamp(inner, kMinimumInnerRadiusPx,
+                                   config_.radius - kMinimumOuterInnerGapPx);
   revision_++;
 }
 
@@ -182,8 +218,9 @@ void RadialMenu::openLocked(float screenX, float screenY,
   ++pickingRevision_;
   activate();
   inSubWheel_ = false;
-  rebuildLayout(lastScreenWidth_ > 0.0F ? lastScreenWidth_ : 1920.0F,
-                lastScreenHeight_ > 0.0F ? lastScreenHeight_ : 1080.0F);
+  rebuildLayout(
+      lastScreenWidth_ > 0.0F ? lastScreenWidth_ : kFallbackScreenWidthPx,
+      lastScreenHeight_ > 0.0F ? lastScreenHeight_ : kFallbackScreenHeightPx);
   revision_++;
 }
 
@@ -192,9 +229,10 @@ void RadialMenu::openAtWindowCoords(const float windowX, const float windowY,
                                     const std::uint32_t aCharOffset,
                                     const std::uint32_t aCharLength) {
   const std::scoped_lock lock(guard_);
-  const float fallbackW = lastScreenWidth_ > 0.0F ? lastScreenWidth_ : 1920.0F;
+  const float fallbackW =
+      lastScreenWidth_ > 0.0F ? lastScreenWidth_ : kFallbackScreenWidthPx;
   const float fallbackH =
-      lastScreenHeight_ > 0.0F ? lastScreenHeight_ : 1080.0F;
+      lastScreenHeight_ > 0.0F ? lastScreenHeight_ : kFallbackScreenHeightPx;
   const float wx = (windowX <= 0.0F) ? (fallbackW * 0.5F) : windowX;
   const float wy = (windowY <= 0.0F) ? (fallbackH * 0.5F) : windowY;
   const float canvasY =
@@ -237,8 +275,9 @@ void RadialMenu::enterSubRadialLocked(const std::size_t actionIndex) {
     inSubWheel_         = true;
     activeParentAction_ = actionIndex;
     ++pickingRevision_;
-    rebuildLayout(lastScreenWidth_ > 0.0F ? lastScreenWidth_ : 1920.0F,
-                  lastScreenHeight_ > 0.0F ? lastScreenHeight_ : 1080.0F);
+    rebuildLayout(
+        lastScreenWidth_ > 0.0F ? lastScreenWidth_ : kFallbackScreenWidthPx,
+        lastScreenHeight_ > 0.0F ? lastScreenHeight_ : kFallbackScreenHeightPx);
     revision_++;
   }
 }
@@ -251,8 +290,9 @@ void RadialMenu::exitSubRadialLocked() {
   if (inSubWheel_) {
     inSubWheel_ = false;
     ++pickingRevision_;
-    rebuildLayout(lastScreenWidth_ > 0.0F ? lastScreenWidth_ : 1920.0F,
-                  lastScreenHeight_ > 0.0F ? lastScreenHeight_ : 1080.0F);
+    rebuildLayout(
+        lastScreenWidth_ > 0.0F ? lastScreenWidth_ : kFallbackScreenWidthPx,
+        lastScreenHeight_ > 0.0F ? lastScreenHeight_ : kFallbackScreenHeightPx);
     revision_++;
   }
 }
@@ -301,10 +341,10 @@ void RadialMenu::rebuildLayout(const float screenW, const float screenH) {
   metrics.screenWidth  = static_cast<int>(screenW);
   metrics.screenHeight = static_cast<int>(screenH);
   const auto safe      = metrics.pixelSafeArea();
-  const auto line    = font_ ? font_->metrics().lineHeight
-                             : metrics.fontPixels(ui::FontRole::Label, theme_);
-  const auto padding = line * theme_.paddingEm;
-  const auto border  = std::max(1.0F, metrics.px(1));
+  const auto line      = font_ ? font_->metrics().lineHeight
+                               : metrics.fontPixels(ui::FontRole::Label, theme_);
+  const auto padding   = line * theme_.paddingEm;
+  const auto border    = std::max(1.0F, metrics.px(1));
   const auto available =
       std::max(0.0F, std::min(safe.width, safe.height) * .5F);
   const auto plateRadius = std::min(
@@ -313,8 +353,8 @@ void RadialMenu::rebuildLayout(const float screenW, const float screenH) {
   const auto touchRadius = metrics.px(theme_.type.minTouchPx) * .5F;
   innerRadiusPx_         = std::clamp(
       std::max({metrics.px(config_.innerRadius), line * .9F, touchRadius}),
-      0.0F, outerRadiusPx_ * .55F);
-  hubRadius_ = innerRadiusPx_ * .85F;
+      0.0F, outerRadiusPx_ * kMaximumInnerRadiusShare);
+  hubRadius_ = innerRadiusPx_ * kHubRadiusShare;
   const auto placed =
       ui::clampToSafeArea({centerX_ - plateRadius, centerY_ - plateRadius,
                            plateRadius * 2, plateRadius * 2},
@@ -326,11 +366,13 @@ void RadialMenu::rebuildLayout(const float screenW, const float screenH) {
   hubY_         = cY - hubRadius_;
   auto next     = std::make_shared<ui::LayoutResult>();
   next->bounds  = placed;
-  next->boxes.push_back({menuNode, 0, placed, placed});
+  next->boxes.push_back({menuNode, std::nullopt, placed, placed});
   const ui::Rect hubRect{hubX_, hubY_, hubSize_, hubSize_};
   const auto hubContent =
-      ui::clampToSafeArea({cX - hubRadius_ * .7F, cY - hubRadius_ * .7F,
-                           hubRadius_ * 1.4F, hubRadius_ * 1.4F},
+      ui::clampToSafeArea({cX - hubRadius_ * kHubContentRadiusShare,
+                           cY - hubRadius_ * kHubContentRadiusShare,
+                           hubRadius_ * kHubContentDiameterShare,
+                           hubRadius_ * kHubContentDiameterShare},
                           hubRect);
   next->boxes.push_back({hubNode, menuNode, hubRect, hubContent, true});
   next->focusOrder.push_back(hubNode);
@@ -348,10 +390,9 @@ void RadialMenu::rebuildLayout(const float screenW, const float screenH) {
   constexpr float twoPi  = 2.0F * std::numbers::pi_v<float>;
   constexpr float halfPi = 0.5F * std::numbers::pi_v<float>;
 
-  const float sectorWidth  = twoPi / static_cast<float>(count);
-  constexpr float gapAngle = 0.035F; // ~2 deg angular gap between wedge buttons
-  const float wedgeRIn     = innerRadiusPx_;
-  const float wedgeROut    = outerRadiusPx_;
+  const float sectorWidth = twoPi / static_cast<float>(count);
+  const float wedgeRIn    = innerRadiusPx_;
+  const float wedgeROut   = outerRadiusPx_;
 
   for (std::size_t i = 0; i < count; ++i) {
     const float angle =
@@ -362,8 +403,8 @@ void RadialMenu::rebuildLayout(const float screenW, const float screenH) {
     PodLayout pod;
     pod.actionIndex = i;
     pod.angle       = angle;
-    pod.startAngle  = angle - sectorWidth * 0.5F + gapAngle * 0.5F;
-    pod.endAngle    = angle + sectorWidth * 0.5F - gapAngle * 0.5F;
+    pod.startAngle  = angle - sectorWidth * 0.5F + kWedgeGapAngleRad * 0.5F;
+    pod.endAngle    = angle + sectorWidth * 0.5F - kWedgeGapAngleRad * 0.5F;
     pod.innerRadius = wedgeRIn;
     pod.outerRadius = wedgeROut;
     pod.tag         = kRadialTagBase + static_cast<std::uint32_t>(i);
@@ -399,10 +440,10 @@ void RadialMenu::rebuildLayout(const float screenW, const float screenH) {
     const auto wedge =
         ui::clampToSafeArea({left, bottom, right - left, top - bottom}, placed);
     const auto textWidth = std::min(
-        wedge.width,
-        2 * rMid * std::sin(std::min(sectorWidth * .5F, halfPi)) * .8F);
+        wedge.width, 2 * rMid * std::sin(std::min(sectorWidth * .5F, halfPi)) *
+                         kWedgeLabelShare);
     const auto textHeight =
-        std::min(wedge.height, (wedgeROut - wedgeRIn) * .8F);
+        std::min(wedge.height, (wedgeROut - wedgeRIn) * kWedgeLabelShare);
     const auto content = ui::clampToSafeArea({podCenterX - textWidth * .5F,
                                               podCenterY - textHeight * .5F,
                                               textWidth, textHeight},
@@ -488,7 +529,7 @@ void RadialMenu::drawDisc(Canvas &canvas, const float cX, const float cY,
   if (radius <= 0.0F) {
     return;
   }
-  const std::size_t nSlices = std::max<std::size_t>(8, slices);
+  const std::size_t nSlices = std::max(kMinimumDiscSlices, slices);
   const float step          = (2.0F * radius) / static_cast<float>(nSlices);
   const float rSq           = radius * radius;
 
@@ -500,11 +541,12 @@ void RadialMenu::drawDisc(Canvas &canvas, const float cX, const float cY,
       continue;
     }
     const float wHalf = std::sqrt(remSq);
-    canvas.addRect(cX - wHalf, cY + y0, 2.0F * wHalf, step + 1.0F, fillCol);
+    canvas.addRect(cX - wHalf, cY + y0, 2.0F * wHalf,
+                   step + kRasterRowOverlapPx, fillCol);
   }
 
   if (borderWidth > 0.0F && borderCol != 0) {
-    constexpr std::size_t kSegments = 128;
+    constexpr std::size_t kSegments = kCircleBorderSegments;
     constexpr float twoPi           = 2.0F * std::numbers::pi_v<float>;
     for (std::size_t i = 0; i < kSegments; ++i) {
       const float a1 = static_cast<float>(i) * (twoPi / kSegments);
@@ -558,7 +600,8 @@ void RadialMenu::drawWedge(Canvas &canvas, const float cX, const float cY,
     while (da >= twoPi) {
       da -= twoPi;
     }
-    return da >= -1e-4F && da <= span + 1e-4F;
+    return da >= -kAngleComparisonToleranceRad &&
+           da <= span + kAngleComparisonToleranceRad;
   };
 
   constexpr float halfPi = 0.5F * std::numbers::pi_v<float>;
@@ -569,7 +612,7 @@ void RadialMenu::drawWedge(Canvas &canvas, const float cX, const float cY,
     yMin = -rOut;
   }
 
-  constexpr float step = 1.0F;
+  constexpr float step = kWedgeRasterStepPx;
   const auto nSteps =
       static_cast<std::size_t>(std::max(1.0F, std::ceil((yMax - yMin) / step)));
 
@@ -580,7 +623,7 @@ void RadialMenu::drawWedge(Canvas &canvas, const float cX, const float cY,
     }
 
     std::vector<float> xs;
-    xs.reserve(4);
+    xs.reserve(kInitialWedgeIntersectionCapacity);
 
     if (std::abs(y) <= rOut) {
       const float w = std::sqrt(std::max(0.0F, rOut * rOut - y * y));
@@ -602,16 +645,18 @@ void RadialMenu::drawWedge(Canvas &canvas, const float cX, const float cY,
       }
     }
 
-    if (std::abs(sinStart) > 1e-4F) {
+    if (std::abs(sinStart) > kMinimumSineForIntersection) {
       const float r = y / sinStart;
-      if (r >= rIn - 0.5F && r <= rOut + 0.5F) {
+      if (r >= rIn - kSubpixelEdgeTolerancePx &&
+          r <= rOut + kSubpixelEdgeTolerancePx) {
         xs.push_back(r * cosStart);
       }
     }
 
-    if (std::abs(sinEnd) > 1e-4F) {
+    if (std::abs(sinEnd) > kMinimumSineForIntersection) {
       const float r = y / sinEnd;
-      if (r >= rIn - 0.5F && r <= rOut + 0.5F) {
+      if (r >= rIn - kSubpixelEdgeTolerancePx &&
+          r <= rOut + kSubpixelEdgeTolerancePx) {
         xs.push_back(r * cosEnd);
       }
     }
@@ -624,7 +669,8 @@ void RadialMenu::drawWedge(Canvas &canvas, const float cX, const float cY,
     std::vector<float> uniqueXs;
     uniqueXs.reserve(xs.size());
     for (const float x : xs) {
-      if (uniqueXs.empty() || std::abs(x - uniqueXs.back()) > 0.5F) {
+      if (uniqueXs.empty() ||
+          std::abs(x - uniqueXs.back()) > kUniqueIntersectionTolerancePx) {
         uniqueXs.push_back(x);
       }
     }
@@ -633,21 +679,23 @@ void RadialMenu::drawWedge(Canvas &canvas, const float cX, const float cY,
       const float xL = uniqueXs[0];
       const float xR = uniqueXs[1];
       if (xR > xL) {
-        canvas.addRect(cX + xL, cY + y - 0.5F * step, xR - xL, step + 1.0F,
-                       fillCol);
+        canvas.addRect(cX + xL, cY + y - 0.5F * step, xR - xL,
+                       step + kRasterRowOverlapPx, fillCol);
       }
     } else if (uniqueXs.size() >= 3) {
       for (std::size_t j = 0; j + 1 < uniqueXs.size(); ++j) {
         const float xMid = (uniqueXs[j] + uniqueXs[j + 1]) * 0.5F;
         const float rSq  = xMid * xMid + y * y;
-        if (rSq >= (rIn - 0.5F) * (rIn - 0.5F) &&
-            rSq <= (rOut + 0.5F) * (rOut + 0.5F)) {
+        if (rSq >= (rIn - kSubpixelEdgeTolerancePx) *
+                       (rIn - kSubpixelEdgeTolerancePx) &&
+            rSq <= (rOut + kSubpixelEdgeTolerancePx) *
+                       (rOut + kSubpixelEdgeTolerancePx)) {
           if (inAngle(std::atan2(y, xMid))) {
             const float xL = uniqueXs[j];
             const float xR = uniqueXs[j + 1];
             if (xR > xL) {
               canvas.addRect(cX + xL, cY + y - 0.5F * step, xR - xL,
-                             step + 1.0F, fillCol);
+                             step + kRasterRowOverlapPx, fillCol);
             }
           }
         }
@@ -656,8 +704,9 @@ void RadialMenu::drawWedge(Canvas &canvas, const float cX, const float cY,
   }
 
   if (borderWidth > 0.0F && borderCol != 0) {
-    const std::size_t nInSteps =
-        static_cast<std::size_t>(std::max(2.0F, std::ceil(rIn * span / 2.0F)));
+    const std::size_t nInSteps = static_cast<std::size_t>(
+        std::max(static_cast<float>(kMinimumArcSegments),
+                 std::ceil(rIn * span / kBorderSegmentLengthPx)));
     for (std::size_t s = 0; s < nInSteps; ++s) {
       const float a0 = aStart + span * (static_cast<float>(s) / nInSteps);
       const float a1 = aStart + span * (static_cast<float>(s + 1) / nInSteps);
@@ -666,8 +715,9 @@ void RadialMenu::drawWedge(Canvas &canvas, const float cX, const float cY,
                      borderWidth, borderCol);
     }
 
-    const std::size_t nOutSteps =
-        static_cast<std::size_t>(std::max(2.0F, std::ceil(rOut * span / 2.0F)));
+    const std::size_t nOutSteps = static_cast<std::size_t>(
+        std::max(static_cast<float>(kMinimumArcSegments),
+                 std::ceil(rOut * span / kBorderSegmentLengthPx)));
     for (std::size_t s = 0; s < nOutSteps; ++s) {
       const float a0 = aStart + span * (static_cast<float>(s) / nOutSteps);
       const float a1 = aStart + span * (static_cast<float>(s + 1) / nOutSteps);
@@ -677,7 +727,8 @@ void RadialMenu::drawWedge(Canvas &canvas, const float cX, const float cY,
     }
 
     const std::size_t nRadSteps = static_cast<std::size_t>(
-        std::max(1.0F, std::ceil((rOut - rIn) / 2.0F)));
+        std::max(static_cast<float>(kMinimumRadialSegments),
+                 std::ceil((rOut - rIn) / kBorderSegmentLengthPx)));
     for (std::size_t s = 0; s < nRadSteps; ++s) {
       const float r0 = rIn + (rOut - rIn) * (static_cast<float>(s) / nRadSteps);
       const float r1 =
@@ -723,7 +774,8 @@ void RadialMenu::drawFrame(FrameContext &ctx) {
     const auto accent  = ui::rgba(theme_.colours.accent);
     canvas_->setTag(render::tagKindOverlay, 0);
     drawDisc(*canvas_, cX, cY, layout_->bounds.width * .5F, surface, border,
-             std::max(1.0F, metrics_.px(1)), 128);
+             std::max(kMinimumOverlayStrokePx, metrics_.px(1)),
+             kCircleBorderSegments);
     const auto &actions = inSubRadialLocked()
                               ? config_.actions[activeParentAction_].subActions
                               : config_.actions;
@@ -737,7 +789,7 @@ void RadialMenu::drawFrame(FrameContext &ctx) {
       canvas_->setTag(render::tagKindOverlay, pod.tag);
       drawWedge(*canvas_, cX, cY, pod.innerRadius, pod.outerRadius,
                 pod.startAngle, pod.endAngle, fill, border,
-                std::max(1.0F, metrics_.px(1)));
+                std::max(kMinimumOverlayStrokePx, metrics_.px(1)));
       auto textBox = box->contentRect;
       textBox.bottom += (textBox.height - pod.fitted.heightPx) * .5F;
       textBox.height = pod.fitted.heightPx;
@@ -749,7 +801,8 @@ void RadialMenu::drawFrame(FrameContext &ctx) {
     canvas_->setTag(render::tagKindOverlay,
                     inSubRadialLocked() ? kRadialTagBack : kRadialTagHub);
     drawDisc(*canvas_, cX, cY, hubRadius_, accent, border,
-             std::max(1.0F, metrics_.px(1)), 32);
+             std::max(kMinimumOverlayStrokePx, metrics_.px(1)),
+             kHubDiscSegments);
     if (const auto *hub = layout_->find(hubNode)) {
       auto textBox = hub->contentRect;
       textBox.bottom += (textBox.height - hubFitted_.heightPx) * .5F;
@@ -762,7 +815,7 @@ void RadialMenu::drawFrame(FrameContext &ctx) {
     canvas_->commit();
     drawnRevision_ = preparedRevision_;
   }
-  canvas_->draw(ctx.state, ortho, 0.98F);
+  canvas_->draw(ctx.state, ortho, kRadialMenuOpacity);
 }
 
 bool RadialMenu::finishDispatch(ActionDispatch dispatch) {
@@ -878,12 +931,12 @@ RadialMenu::pickedLocked(const render::PickingResult &pick,
   }
 
   // Check tagKindOverlay hits
-  const bool ownTag = pick.requestId == 0 ||
-                      (pickScope_ != 0 && pick.tag.docIndex == pickScope_ &&
-                       pick.tag.pageIndex == 0);
+  const bool ownTag =
+      !pick.requestId || (pickScope_ != 0 && pick.tag.docIndex == pickScope_ &&
+                          pick.tag.pageIndex == 0);
   if (pick.tag.kind == render::tagKindOverlay && ownTag) {
     const auto cluster = pick.tag.clusterIndex;
-    if (pick.requestId != 0 &&
+    if (pick.requestId &&
         (!pickingTargets_ || builtPickingRevision_ != pickingRevision_ ||
          !pick.overlayWidgetId || cluster == 0 ||
          cluster > pickingTargets_->size() || *pick.overlayWidgetId == 0 ||
@@ -948,7 +1001,7 @@ void RadialMenu::describe(a11y::Builder &into) {
     const auto height =
         static_cast<double>(metrics_.screenHeight > 0 ? metrics_.screenHeight
                             : lastScreenHeight_ > 0   ? lastScreenHeight_
-                                                      : 1080);
+                                                    : kFallbackScreenHeightPx);
     return a11y::Rect{rect.left, height - rect.bottom - rect.height,
                       rect.left + rect.width, height - rect.bottom};
   };

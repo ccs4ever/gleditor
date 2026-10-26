@@ -108,7 +108,7 @@ std::optional<Scroll> permascrollState(UserPermascroll::Config &config,
         throw PermascrollStateUnreadable(
             "permascroll state format 1: invalid key pair");
       const std::string storedDev = device->asString();
-      const bool devMatch = (storedDev == config.deviceId) ||
+      const bool devMatch         = (storedDev == config.deviceId) ||
                             (config.deviceId.empty() && storedDev == "main");
       if (master->asString() != config.masterIdentity.toString() || !devMatch ||
           (!config.deviceKeys.publicKey.isZero() &&
@@ -121,8 +121,8 @@ std::optional<Scroll> permascrollState(UserPermascroll::Config &config,
                              ? "permascroll"
                              : "permascroll/" + config.deviceId;
       if (!state || state->opsAlreadySealed != 0 ||
-          !state->opsSegments.empty() ||
-          state->scroll.publisher != keys.publicKey ||
+          !state->opsSegments.empty() || !state->scroll.publisher ||
+          *state->scroll.publisher != keys.publicKey ||
           state->scroll.salt != salt)
         throw PermascrollStateUnreadable(
             "permascroll state format 1: invalid scroll");
@@ -466,7 +466,12 @@ Scroll UserPermascroll::currentScroll() const {
 
 std::string UserPermascroll::globalScrollKey() const {
   std::scoped_lock lock(appendMutex_);
-  return scrollKey(currentScroll_);
+  const auto key = scrollKey(currentScroll_);
+  if (!key) {
+    throw std::logic_error(
+        "active user permascroll must have a publisher identity");
+  }
+  return *key;
 }
 
 std::optional<ScrollSegment> UserPermascroll::sealIncremental(
