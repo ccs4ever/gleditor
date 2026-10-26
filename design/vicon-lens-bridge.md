@@ -1,4 +1,4 @@
-# vicon Lens Bridge: Lenses as Suspended Host Requests in a Goal-Directed Language (v1.27)
+# vicon Lens Bridge: Lenses as Suspended Host Requests in a Goal-Directed Language (v1.28)
 
 A design specification for how a **vicon program** — not a `vicon` REPL verb — opens, traverses,
 mounts, writes back, and releases projection lenses. Design deliverable only: the signatures are
@@ -112,7 +112,7 @@ On `expected`-refusal the Driver writes `ok := 0` and records the reason in Driv
 the call **fails** (D3).
 
 `lens(path)`/`lens("kw","spec")`/`dirLens`/`sqlLens`/`gitLens`/`logLens`/`journalLens`/`cfgLens`/`unionLens(spec,…)`, `kids(c)`, and `lroots(c)` produce **several** results: the Driver holds a per-site
-answer queue (`unordered_map<ChoicePoint*, deque<CellRef>>` — keyed by the request site's own choice-point pointer, not the site scalar: a nested activation pushes a *new* site CP, and its `NEXT` re-send lands back at exactly that CP after backtrack, so each activation resolves its own queue — same-site recursion (the canonical `every k := kids(c) do walk(k)` tree-walk) works without a `seq` token; a popped CP's queue is freed with the frame). Queue discipline: **a fresh request at a site REPLACES the queue** — a re-fired
+answer queue (`unordered_map<(site-id, choice-stack index), deque<CellRef>>` — the CP's *index* in `choiceStack_` (stable across `push_back` realloc — a pointer key moves; an index doesn't), paired with the compile-minted site id: a nested activation pushes a new CP at a *deeper* index, so `(site, depth)` uniquely names the activation; the outer's `NEXT` re-send pops back to its own index and resolves its own queue — same-site recursion (the canonical `every k := kids(c) do walk(k)` tree-walk) works without a `seq` token; a popped CP's queue entry is freed by erasing the index when `backtrack` shrinks the stack). Queue discipline: **a fresh request at a site REPLACES the queue** — a re-fired
 `kids(c)`/`lens(path)`/`lens("kw","spec")`/`dirLens`/`sqlLens`/`gitLens`/`logLens`/`journalLens`/`cfgLens`/`unionLens(spec,…)` with a different arg must not serve the old arg's stale answers, and a
 re-drive must not append duplicates. The fragment's `altOp` re-sends `NEXT site` — wrapped through
 `guardedAlt` (`compiler.cpp:125-136`) like every other resume path, so a `\n` kill-gate poisons the
