@@ -1,4 +1,4 @@
-# vprolog Lens Bridge: Lenses as Builtin Predicates in a Backtracking Logic Engine (v1.18)
+# vprolog Lens Bridge: Lenses as Builtin Predicates in a Backtracking Logic Engine (v1.19)
 
 A design specification for how a **vprolog program** — not the `vprolog` REPL's `:lens` verbs —
 opens, enumerates, mounts, writes back, and releases projection lenses. Design deliverable only:
@@ -115,7 +115,7 @@ the lens, the argument carries its spec. `lens_open(Spec, Root)` accepts:
 |---|---|
 | `'/x'` / `"/x"` (Atom or String) | bare path → `openLensUri`'s auto-detect (`lens_uri.cpp:104-124`: directory → `RouterLens`, delegable file → its delegate, else `FilesystemLens`); **a `scheme:`-shaped operand fails** — spell the functor, not the scheme |
 | `dir(Path)` | `dir:` → `RouterLens` |
-| `sql(Dsn)` | `sql:` — the DSN keeps `openSqlUri`'s own option grammar: `?write=1`/`&write=1` is stripped into the writable flag (`sql_lens.cpp:1184-1207`), so `sql('sqlite:///x.db?write=1')` opens writable (the `?write=1` strip runs only inside the `sql:<backend>:` branch, `sql_lens.cpp:1184-1207` — a bare path treats `?` as a literal filename); it is a spec-suffix, not a scheme |
+| `sql(Dsn)` | `sql:` — the DSN keeps `openSqlUri`'s own option grammar: a *trailing* `?write=1` is stripped (sqlite strips only the suffix, `sql_lens.cpp:1203-1206`; the `&` form is pg-conninfo-only, `:1220`) into the writable flag (`sql_lens.cpp:1184-1207`), so `sql('sqlite:///x.db?write=1')` opens writable (the `?write=1` strip runs only inside the `sql:<backend>:` branch, `sql_lens.cpp:1184-1207` — a bare path treats `?` as a literal filename); it is a spec-suffix, not a scheme |
 | `git(Path)` / `cfg(Path)` / `log(Path)` | `git:` / `cfg:` / `log:` |
 | `journal` / `journal(Unit)` | `journal:` / `journal:<unit>` (`lens_uri.cpp:93-96`) |
 | `meta(Label)` | the `MetaSource` fold path (D9) — **not** an `openLensUri` scheme (`kSchemes` refuses it, `lens_uri.cpp:42-45`) |
@@ -124,7 +124,7 @@ the lens, the argument carries its spec. `lens_open(Spec, Root)` accepts:
 
 The spec term lowers like any argument — `dir('/x')` is `Compound{"dir", [String "/x"]}`
 (`parser.cpp:264-274`) → `makeTerm("dir", …)` — and the builtin reads it back via
-`functorOf`/`argumentsOf`/`textOf` (`vortex_stdlib.cpp:4075-4088`). **Zero lexer/parser changes**:
+`functorOf`/`argumentsOf` + `core.arena().textOf` (`vortex_stdlib.cpp:4075-4088`; `textOf` is `ArenaManifold`'s, not `VortexStdLib`'s). **Zero lexer/parser changes**:
 atoms, quoted atoms (`lexer.cpp:385-398`), strings, and compounds already cover every form.
 
 `lens_open` is the generator arm: it resolves the spec, dedupe/opens the session (D6), then
@@ -217,7 +217,7 @@ the mesh `onSolution` budget throw (`mesh_evaluator.cpp:948`) — propagating pa
 (`arena_manifold.hpp:755`), so `compact()` is refused forever (`arena_manifold.cpp:1698-1701`)
 and `ProjectionSession::rewind`'s foreign-mint check fails permanently — the same stranded-mark
 class as vicon's V9 `start()`-drain. `solve()` gains the drain: on unwind (exception or return),
-release outstanding marks in stack order — `floors_` keeps only `{cells,links,content}` (3 of `Mark`'s 11 fields, `arena_manifold.hpp:764-769`), so either a `discard()` loop heals `outstandingMarks_` (leaving mints/trails un-truncated — different semantics) OR an arena-side full-`Mark` floor stack (`drainMarks()`) truncates to pre-solve state, which
+release outstanding marks in stack order — `floors_` keeps only `{cells,links,content}` (3 of `Mark`'s 12 fields, `arena_manifold.hpp:764-769`), so either a `discard()` loop heals `outstandingMarks_` (leaving mints/trails un-truncated — different semantics) OR an arena-side full-`Mark` floor stack (`drainMarks()`) truncates to pre-solve state, which
 the epoch invalidation absorbs.
 
 ### D5 — Session truth carries the payload; `commit()` must never read the arena image
