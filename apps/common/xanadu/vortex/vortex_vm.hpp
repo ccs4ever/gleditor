@@ -84,7 +84,10 @@ enum class OpcodeKind : std::uint8_t {
   Choice,
   Fail,
   Cut,
+  // Appended last so artifacts minted before it keep their opcode numbers.
   ChoiceDepth,
+  // #Point out, ref: out becomes a handle to the cell `ref` names.
+  Point,
 };
 
 struct ChoicePoint {
@@ -130,11 +133,16 @@ public:
   void clearChoicePoints();
 
   // -- Distributed / Intra-Node OR-Parallelism Extensions ---------------------
-  // Path tracking is opt-in through a nonempty oracle or a cut callback.
-  // OR-parallel victims must register their callback before creating choices;
-  // installing one after choices exist cannot reconstruct their branch paths.
+  // Tracking is opt-in; an oracle or cut observer also requires branch paths.
   VortexVM *setOraclePath(std::span<const std::uint16_t> path);
   VortexVM *setCurrentDeweyPath(std::span<const std::uint16_t> path);
+  VortexVM *setDeweyTracking(bool enabled) noexcept {
+    deweyTracking_ = enabled;
+    return this;
+  }
+  [[nodiscard]] bool deweyTracking() const noexcept {
+    return deweyTracking_ || !oraclePath_.empty() || bool(cutCallback_);
+  }
   [[nodiscard]] std::span<const std::uint16_t>
   currentDeweyPath() const noexcept {
     return currentDeweyPath_;
@@ -185,6 +193,7 @@ private:
   std::vector<std::uint16_t> currentDeweyPath_;
   std::vector<std::uint16_t> oraclePath_;
   std::size_t oracleCursor_{0};
+  bool deweyTracking_{false};
   std::uint64_t totalCycles_{0};
   std::function<void(std::string_view deweyPrefix)> cutCallback_;
 };

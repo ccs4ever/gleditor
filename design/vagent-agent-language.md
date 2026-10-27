@@ -3,7 +3,7 @@
 | field         | value                                                                                                                                                                                                                       |
 | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | version       | 3.13 (see [Appendix](#appendix-versioning-and-change-history))                                                                                                                                                              |
-| status        | Implementation in progress: source frontend and P1/P12/P13 are present; Vortex lowering and actor execution are not yet built. See [progress](vagent-implementation.md).                                                    |
+| status        | Implementation in progress: source frontend, scalar compiler and a separate actor compiler/runtime are present; frontend unification and full conformance remain open. See [progress](vagent-implementation.md).            |
 | compiles to   | Vortex opcode streams over an `ArenaManifold`, run one turn at a time by a Spool-Mesh actor executor                                                                                                                        |
 | rests on      | Vortex ([runtime](vortex-hyperstructural-runtime.md)), Vlog ([logic](vlog-logic-extension.md)), vicon ([goals](vicon-goal-directed-language.md)), the Spool-Mesh actor runtime (`apps/common/xanadu/vortex/mesh_actor.hpp`) |
 | prerequisites | Vlog §6 clause database (specified, unbuilt); vicon §6's scanning functions `tab`, `move`, `find`, `many`, `upto`, `match`, `any`, `bal` (specified; `std:goal` registers only `scan`, `subject` and `pos` today)           |
@@ -57,12 +57,14 @@ ______________________________________________________________________
 
 ## 1. Status of each mechanism
 
-This documentation reconciliation imports the other branch's P15/P16 decisions and P17 companion
-specification, while retaining the current implementation. It does not import that branch's
-alternate AST/parser, full agent compiler or actor executor. Source checking and the scalar
-statement compiler remain the current frontend; P15/P16 and P17 runtime integration are still
-outstanding here. Earlier progress and source citations describe their named historical baseline,
-not evidence that the incoming runtime was merged.
+The runtime from `46402f26` is integrated under `apps/common/xanadu/vagent/runtime/`, namespace
+`xanadu::vagent::runtime`, alongside the existing bounded frontend and scalar compiler.
+`vagent check` retains the existing frontend; `vagent check-runtime` checks the imported compiler's
+dialect and `vagent run` executes it. Shared-program bases, live upgrade, activation frames, actor
+turns, beliefs, effects and checkpoint/resume have dedicated runtime tests. The two ASTs remain
+separate; accepting a source unit with `check` does not guarantee that `run` accepts it. P18 and P19
+are not implemented by this integration. The table below records the original implementation
+baseline; use [implementation progress](vagent-implementation.md) for the integration boundary.
 
 "Built" means present in the tree at the cited place. "Prerequisite" means specified by a sibling
 document and not yet built. "Owed" means this document asks for it and
@@ -77,9 +79,9 @@ conditions, without claiming its implementation or approving a new core change.
 The source frontend (`vagent/lexer`, `parser`, `checker`) and `apps/vagent` checking command are
 implemented and tested as an iteration; module loading and remaining static-checking gaps are
 tracked in [the progress record](vagent-implementation.md). The scalar statement-lowering subset is
-present; a full agent compiler and actor executor are not. P1's opcode and P12/P13's core behaviors
-have focused runtime tests. "Built" in the table still refers to the named mechanism, not to
-complete vagent execution.
+present alongside the imported actor compiler and executor in `vagent/runtime/`. P1's opcode and
+P12/P13's core behaviors have focused runtime tests. "Built" in the table still refers to the named
+mechanism, not to complete vagent execution.
 
 | Concept                      | Mechanism                                                                                                 | State                                                                |
 | ---------------------------- | --------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
@@ -2859,7 +2861,7 @@ ______________________________________________________________________
 | organisation     | contexts, spaces, holons    | via JaCaMo                    | none                         | contexts, spaces, holons (single owner)                                                            |
 | protocols        | by hand                     | by hand                       | by hand                      | by hand, with typed questions; a `protocol` declaration is U-A13                                   |
 | distribution     | Janus network               | via JADE or JaCaMo            | none                         | Spool-Mesh actors                                                                                  |
-| maturity         | production compiler and IDE | mature interpreter            | mature interpreter           | source frontend built; Vortex compiler and actor executor remain unbuilt                           |
+| maturity         | production compiler and IDE | mature interpreter            | mature interpreter           | source frontend and separate actor runtime built; full conformance remains open                    |
 
 Where vagent is weaker: no executable agent runtime yet, two messages per send, single-owner spaces,
 a turn per effect, slow and remote-only child-loss detection, checkpoint bounds, a program copy per

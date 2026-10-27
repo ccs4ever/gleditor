@@ -86,8 +86,11 @@ make -j$(nproc) test/vagent-frontend
 ./build/vagent check tests/samples/vagent/mini_01.vagent
 ```
 
-Source checking does not execute an agent. Vortex lowering, the actor adapter, `run`, and the REPL
-remain tracked work in the [implementation progress](design/vagent-implementation.md).
+The actor runtime is available through `vagent run FILE --agent TYPE`; use
+`vagent check-runtime FILE` to check its dialect. The existing `check` command retains the bounded
+source frontend, whose AST differs from the imported runtime compiler. Runtime tests run with
+`make -j$(nproc) test/vagent-actor`. See the
+[implementation progress](design/vagent-implementation.md) for integration boundaries and open work.
 
 ## Library and rendering
 

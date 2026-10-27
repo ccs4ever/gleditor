@@ -230,7 +230,12 @@ bool pureOpcode(OpcodeKind opcode) {
   case OpcodeKind::Fail:
   case OpcodeKind::Cut:
     return true;
+  // Reads the host's choice stack, which a pure remote job does not have.
   case OpcodeKind::ChoiceDepth:
+    return false;
+  // Binds a handle to a cell of the local arena, which a pure remote job
+  // has no business holding.
+  case OpcodeKind::Point:
     return false;
   }
   return false;

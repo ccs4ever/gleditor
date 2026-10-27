@@ -4,11 +4,12 @@
 Option B; companion to [`vagent-agent-language.md`](vagent-agent-language.md) v3.12, §11.1, §11.2,
 and §18 `U-A14`)
 
-This companion design was imported with its review history in a documentation-only merge. Its
-implementation-specific examples refer to the source branch at `46402f26` (and its earlier commits),
-not to code imported into this checkout. The current frontend, scalar compiler and runtime
-interfaces are preserved. Approved design status is separate from implementation status; full agent
-execution and shared-program/live-upgrade integration remain outstanding here.
+The runtime from `46402f26` is integrated under `apps/common/xanadu/vagent/runtime/`, namespace
+`xanadu::vagent::runtime`. Its shared-program and upgrade tests accompany the existing frontend and
+scalar compiler tests. Implementation paths below use the original source-branch spelling: prepend
+`runtime/` to filenames within `apps/common/xanadu/vagent/`. Approved design status does not
+establish complete language conformance; see [implementation progress](vagent-implementation.md) for
+the current integration boundary.
 
 ______________________________________________________________________
 

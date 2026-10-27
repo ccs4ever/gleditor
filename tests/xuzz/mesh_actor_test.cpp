@@ -48,7 +48,7 @@ void authorize(MeshActorRuntime &runtime, const Fingerprint &identity) {
   runtime.setExecutor(
       [](const ActorExecution &execution,
          WorkerContext &) -> std::expected<std::string, ActorError> {
-        return "result:" + execution.message.value;
+        return "result:" + execution.message.value().value;
       });
 }
 
@@ -109,7 +109,7 @@ TEST(MeshActorTest,
         const auto cursorList = context.vm.activeCursors();
         EXPECT_NE(std::ranges::find(cursorList, execution.cursor),
                   cursorList.end());
-        context.arena.makeCell(execution.message.value);
+        context.arena.makeCell(execution.message.value().value);
         return "ok";
       });
   ASSERT_TRUE(runtime.receive(identity, sendTo(*first), ActorTime{}, wall));

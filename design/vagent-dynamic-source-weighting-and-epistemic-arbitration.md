@@ -27,13 +27,14 @@ v1.2 working edits captured before Round 3. Only documentation changes are propo
 
 P17 design: [shared program and live upgrade](vagent-shared-program-and-live-upgrade.md), originally
 reviewed at `b1311f56` with approval recorded at `6aef0d8a`. That companion and its review history
-are now imported by a documentation-only merge; the historical baseline table above still describes
-the original P19 review input. No incoming runtime implementation was imported. Historical P18
+are imported. The historical baseline table above still describes the original P19 review input. The
+runtime from `46402f26` is now integrated separately under `vagent/runtime/`, including the actor
+executor, shared-program base and live-upgrade tests. This does not implement P19. Historical P18
 design: `git show f033eda8:design/vagent-extended-capabilities-and-belief-vlog-unification.md`
-remains absent from this branch. Implementers must reconcile P17 and import/reconcile P18 before
-runtime integration; documentation presence does not establish implementation. The
+remains absent from this branch; its semantics must be reconciled before implementing P19. The
 [current vagent specification](vagent-agent-language.md) and
-[runtime grounding](vagent-runtime-grounding.md) describe the available compiler and call boundary.
+[implementation progress](vagent-implementation.md) describe the two compiler frontends and their
+call boundary.
 
 P19 assumes P18's keyed ground facts coexist per asserting source on `d.clause`, with provenance on
 `d.source`, and P17's shared immutable program base plus private actor overlay. Arbitration

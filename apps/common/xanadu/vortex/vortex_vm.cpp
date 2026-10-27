@@ -15,6 +15,8 @@
 
 #include <gleditor/logging.hpp>
 
+#include "common/xanadu/foreign_op_handle.hpp"
+
 #include "common/xanadu/zigzag/cell_views.hpp"
 #include "common/xanadu/zigzag/vlog.hpp"
 
@@ -107,7 +109,7 @@ std::optional<OpcodeKind> VortexVM::getOpcodeKind(CellRef opCell) const {
   auto val = core_.arena().asInt64(opCell);
   if (val && *val >= 0 &&
       static_cast<std::uint64_t>(*val) <=
-          static_cast<std::uint64_t>(OpcodeKind::ChoiceDepth)) {
+          static_cast<std::uint64_t>(OpcodeKind::Point)) {
     return static_cast<OpcodeKind>(*val);
   }
   return std::nullopt;
@@ -206,7 +208,7 @@ void VortexVM::pushChoicePoint(const std::optional<CellRef> cursor,
     stackFrame = core_.arena().linked(*cursor, core_.dims().stack, false);
   }
   std::vector<std::uint16_t> altDewey;
-  if (!oraclePath_.empty() || cutCallback_) {
+  if (deweyTracking()) {
     altDewey = currentDeweyPath_;
     altDewey.push_back(1);
     currentDeweyPath_.push_back(0);
@@ -232,7 +234,7 @@ bool VortexVM::backtrack(const std::optional<CellRef> cursor) {
     choiceStack_.pop_back();
     if (!cursor || cp.cursor == cursor || !cp.cursor) {
       core_.arena().release(cp.mark);
-      if (!oraclePath_.empty() || cutCallback_) {
+      if (deweyTracking()) {
         currentDeweyPath_ = cp.deweyPath;
       }
       if (cursor) {
@@ -1063,7 +1065,7 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
     }
     if (oracleCursor_ < oraclePath_.size()) {
       const std::uint16_t directive = oraclePath_[oracleCursor_++];
-      currentDeweyPath_.push_back(directive);
+      if (deweyTracking()) currentDeweyPath_.push_back(directive);
       if (directive > 0 && cursor) {
         setCursorOpcode(*cursor, altOp);
         jumped = true;
@@ -1099,6 +1101,47 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
   case OpcodeKind::ChoiceDepth:
     outputs.emplace_back(static_cast<std::int64_t>(choiceDepth()));
     break;
+  case OpcodeKind::Point: {
+    // Outputs are not followed (wingOf), so this rebinds the handle itself;
+    // nothing is emitted, so step() writes no value over it.
+    const auto outCells     = core_.outputsOf(opcode);
+    const auto invalidPoint = [opcode] {
+      return ExecutionResult{
+          .success           = false,
+          .contractViolation = ContractViolationKind::None,
+          .failingClause     = opcode,
+          .errorMessage =
+              "Point requires an output and a valid cell reference"};
+    };
+    if (outCells.size() != 1 || inputs.size() != 1 ||
+        !std::holds_alternative<std::int64_t>(inputs.front())) {
+      return invalidPoint();
+    }
+    const auto rawTarget = std::get<std::int64_t>(inputs.front());
+    if (rawTarget <= 0 || static_cast<std::uint64_t>(rawTarget) >
+                              std::numeric_limits<CellRef>::max()) {
+      return invalidPoint();
+    }
+    const auto target = static_cast<CellRef>(rawTarget);
+    auto &arena       = core_.arena();
+    if (!arena.contains(target) ||
+        !arena.setValueBits(outCells[0], xanadu::ValueKind::OpHandle, target)) {
+      return ExecutionResult{.success           = false,
+                             .contractViolation = ContractViolationKind::None,
+                             .failingClause     = opcode,
+                             .errorMessage      = "Point: no such cell"};
+    }
+    // promote() refuses a handle to an arena cell unless it carries the
+    // relocation marker, which is what makes it remap the target on
+    // checkpoint instead of copying the number.
+    if (!xanadu::isCellRelocationHandle(arena, outCells[0])) {
+      const CellRef marker = arena.makeCell(xanadu::cellRelocationMarker);
+      zigzag::expectWritten(arena.link(
+          outCells[0], arena.ensureDimension(xanadu::cellRelocationDimension),
+          DimVector::POS, marker));
+    }
+    break;
+  }
   case OpcodeKind::Halt:
   case OpcodeKind::Nop:
   default:

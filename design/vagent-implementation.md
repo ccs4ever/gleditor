@@ -6,6 +6,37 @@ The objective is a working initial-release vagent language as specified by
 finished language. Deferred U-A extensions stay deferred; they are not substitutes for initial
 features or prerequisites for declaring the initial release complete.
 
+## Runtime integration
+
+The actor implementation from `46402f26` is integrated under `apps/common/xanadu/vagent/runtime/`,
+namespace `xanadu::vagent::runtime`. It includes its own parser/checker/compiler, activation frames,
+belief and BDI execution, messaging, effects, timers, shared program bases, upgrade and
+checkpoint/resume. Shared VM, arena, mesh and system-settings changes are reconciled with the
+current optional-reference APIs and numeric validation.
+
+The existing bounded source frontend and scalar compiler remain in `vagent/`; `vagent check`
+continues to use them, including stdin and multiple files. `vagent check-runtime` and `vagent run`
+use the imported actor frontend. These ASTs are incompatible and have not been unified. The
+historical iteration table below records the earlier frontend work, rather than a new conformance
+claim about every imported runtime feature. P18/P19, the REPL, and complete initial-release
+conformance remain open. The CLI currently uses built-in `AgentSettings` defaults; it does not read
+edits to the user's system settings store. Run `make -j$(nproc) test/vagent-actor` for the combined
+engine-side vagent tests, alongside the original frontend, syntax and scalar compiler targets.
+
+### Integration validation (2026-10-27)
+
+- Combined vagent suite: 586 passed, including both frontend generations, scalar compilation, actor
+  turns, effects, beliefs, checkpoint/resume, shared programs and upgrades.
+- Runtime prerequisites: 105 passed; library: 830 passed; ZigZag: 256 passed.
+- Rootless network stages: 12 swarm tests and 5 publication/checkpoint tests passed, including
+  checkpoint recovery across publisher restart, partition and reactivation.
+- Xuzz: 2,679 passed and 10 skipped in the full run. The sole failure,
+  `E2EBinaryOrchestrationTest.ForeignRunDragCreatesAReaderOwnedStore`, could not identify scaled
+  screenshot selection bounds; it passed when rerun in isolation. The original full command
+  therefore returned failure, despite the successful isolated rerun.
+- Changed C++ passes clang-format 19; changed Markdown passes mdformat with GFM, dollar-math and
+  frontmatter plugins and mdl. Configuration harmony and `git diff --check` pass.
+
 ## Iteration sequence
 
 | Iteration                           | Deliverable                                                                                                                                                 | Required evidence                                                                                                                                        | State                                                                                 |

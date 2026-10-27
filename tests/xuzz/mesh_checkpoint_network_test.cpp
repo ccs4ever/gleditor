@@ -165,7 +165,7 @@ protected:
         [this, target = &runtime](
             const ActorExecution &execution,
             WorkerContext &context) -> std::expected<std::string, ActorError> {
-          if (execution.message.value != "increment")
+          if (execution.message.value().value != "increment")
             return std::unexpected(ActorError::InvalidMessage);
           ++executions;
           CellRef root;

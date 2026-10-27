@@ -16,12 +16,29 @@
 #include "common/xanadu/scalar.hpp"
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
+#include "common/xanadu/zigzag/dimension_registry.hpp"
 #include <gleditor/logging.hpp>
 
 namespace zigzag {
 
 ArenaManifold::ArenaManifold(const Manifold *base, const xanadu::Store *store)
     : base_(base), store_(store) {
+  if (base_ != nullptr && store_ == nullptr) {
+    store_ = base_->store();
+  }
+  if (base_ != nullptr) {
+    for (const auto dim : base_->dimensions()) {
+      std::string name;
+      if (store_ != nullptr) {
+        name = base_->textOf(dim, *store_);
+      } else if (base_->store() != nullptr) {
+        name = base_->textOf(dim, *base_->store());
+      }
+      if (!name.empty() && !arenaDims_.contains(name)) {
+        arenaDims_.emplace(std::move(name), dim);
+      }
+    }
+  }
   if (store_ != nullptr) {
     projectProvenance(*store_);
   }
@@ -2051,6 +2068,403 @@ std::optional<Promoted> promote(xanadu::Store &store,
       }
     }
   }
+  out.mapping = real;
+  return out;
+}
+
+namespace {
+constexpr std::array<std::string_view, 33> kCanonicalVortexDimensions{
+    "d.grab",
+    "d.step",
+    "d.spin",
+    "d.stack",
+    "d.contract",
+    "d.clone",
+    "d.cursors",
+    "d.cache",
+    "d.vars",
+    "d.values",
+    "d.pinning-cursors",
+    "d.name",
+    "d.stdlib",
+    "d.clause",
+    "d.scan",
+    "d.stores",
+    "d.role",
+    "d.mesh.items",
+    "d.mesh.value",
+    "d.mesh.arguments",
+    "d.mesh.next",
+    "d.mesh.relocation",
+    "d.mesh.enclosed",
+    "d.mesh.axes",
+    "d.mesh.axis",
+    "d.mesh.extent",
+    "d.mesh.direction",
+    "d.or",
+    "d.branch",
+    "d.frontier",
+    "d.submission",
+    "d.require",
+    "d.ensure"};
+
+constexpr std::array<std::string_view, 13> kCanonicalAgentDimensions{
+    "d.behavior", "d.skill",     "d.capacity", "d.space",  "d.member",
+    "d.holon",    "d.intention", "d.subgoal",  "d.outbox", "d.belief",
+    "d.pending",  "d.source",    "d.extends"};
+} // namespace
+
+std::optional<Promoted> promoteOverlay(const ArenaManifold &arena,
+                                       const CellRef root,
+                                       xanadu::Store *targetStore,
+                                       const xanadu::MicroversionId &parent,
+                                       const PromotionBudget budget) {
+  if (targetStore == nullptr) {
+    return std::nullopt;
+  }
+  return promoteOverlay(arena, root, *targetStore, parent, budget);
+}
+
+std::optional<Promoted> promoteOverlay(const ArenaManifold &from,
+                                       const CellRef root, xanadu::Store &store,
+                                       const xanadu::MicroversionId &parent,
+                                       const PromotionBudget budget) {
+  if (!from.contains(root) || from.isProvenanceCell(root)) {
+    return std::nullopt;
+  }
+
+  // The reachable subgraph of overlay cells, in discovery order.
+  std::vector<CellRef> order;
+  std::vector<CellRef> frontier{root};
+  std::unordered_set<CellRef> seen{root};
+  std::unordered_set<CellRef> queued{root};
+  if (isEphemeral(root) || from.holdsOwn(root)) {
+    order.push_back(root);
+  }
+
+  for (std::size_t i = 0; i < frontier.size(); i++) {
+    const CellRef current = frontier[i];
+    if ((current != root && !isEphemeral(current) && !from.holdsOwn(current)) ||
+        from.isProxy(current)) {
+      continue;
+    }
+    if (xanadu::isCellRelocationHandle(from, current)) {
+      const auto target = from.handleTarget(current);
+      if (!target || !from.contains(*target)) return std::nullopt;
+      if (isEphemeral(*target) || from.holdsOwn(*target)) {
+        if (seen.insert(*target).second) order.push_back(*target);
+        if (queued.insert(*target).second) frontier.push_back(*target);
+      }
+    }
+    for (const auto &edge : from.dimensionsOf(current)) {
+      if (from.textOf(edge.dim) == "d.dims") {
+        continue;
+      }
+      auto discover = [&](const CellRef next, const bool expand) {
+        if (noCell == next || !from.contains(next) ||
+            from.isProvenanceCell(next)) {
+          return;
+        }
+        if (isEphemeral(next) || from.holdsOwn(next)) {
+          if (seen.insert(next).second) {
+            order.push_back(next);
+          }
+          if (expand && queued.insert(next).second) {
+            frontier.push_back(next);
+          }
+        }
+      };
+      discover(edge.pos, true);
+      discover(edge.neg, true);
+    }
+    if (order.size() > budget.maxOps) {
+      return std::nullopt;
+    }
+  }
+
+  // Topological sorting for handle targets (same as promote)
+  std::vector<CellRef> mintOrder;
+  std::vector<CellRef> deferred;
+  std::vector<CellRef> cyclicHandles;
+  std::unordered_set<CellRef> ready;
+  for (const auto cell : order) {
+    if (from.valueKindOf(cell) == xanadu::ValueKind::OpHandle &&
+        (isEphemeral(cell) || from.holdsOwn(cell)) && !from.isProxy(cell)) {
+      const auto target = from.handleTarget(cell);
+      if (!target) return std::nullopt;
+      if (isEphemeral(*target) || from.holdsOwn(*target)) {
+        if (!xanadu::isCellRelocationHandle(from, cell) ||
+            !seen.contains(*target))
+          return std::nullopt;
+        deferred.push_back(cell);
+        continue;
+      }
+      if (!store.getCompactOp(*target)) return std::nullopt;
+    }
+    mintOrder.push_back(cell);
+    ready.insert(cell);
+  }
+  while (!deferred.empty()) {
+    const auto before = deferred.size();
+    std::erase_if(deferred, [&](CellRef cell) {
+      if (!ready.contains(*from.handleTarget(cell))) return false;
+      mintOrder.push_back(cell);
+      ready.insert(cell);
+      return true;
+    });
+    if (deferred.size() == before) {
+      cyclicHandles = std::move(deferred);
+      mintOrder.insert(mintOrder.end(), cyclicHandles.begin(),
+                       cyclicHandles.end());
+      break;
+    }
+  }
+  if (order.size() > budget.maxOps ||
+      cyclicHandles.size() > budget.maxOps - order.size())
+    return std::nullopt;
+  const std::unordered_set<CellRef> delayed(cyclicHandles.begin(),
+                                            cyclicHandles.end());
+
+  for (const CellRef arena : mintOrder) {
+    if (from.valueKindOf(arena) == xanadu::ValueKind::ForeignOpHandle &&
+        !xanadu::foreignOpTarget(from, arena)) {
+      return std::nullopt;
+    }
+    if ((!isEphemeral(arena) && !from.holdsOwn(arena)) || from.isProxy(arena)) {
+      continue;
+    }
+    if (const auto quoted = from.quotedContent(arena);
+        quoted && quoted->store != &store &&
+        !std::ranges::all_of(
+            quoted->spans, [&](const xanadu::PrimediaSpan &span) {
+              return xanadu::canCarry(*quoted->store, store, span);
+            })) {
+      return std::nullopt;
+    }
+  }
+
+  // Validate reachability and budgets before emitting any persistent
+  // operations.
+  xanadu::MicroversionId curHead = parent;
+  if (!store.homeCell()) {
+    curHead = store.sliceGenesis(curHead, "state");
+  }
+
+  // Seed canonical dimensions in segment 0
+  for (const auto dimName : kCanonicalVortexDimensions) {
+    if (!DimensionRegistry::instance().get(store, dimName)) {
+      const auto minted = store.makeDimension(curHead, dimName);
+      curHead           = minted.version;
+    }
+  }
+  for (const auto dimName : kCanonicalAgentDimensions) {
+    if (!DimensionRegistry::instance().get(store, dimName)) {
+      const auto minted = store.makeDimension(curHead, dimName);
+      curHead           = minted.version;
+    }
+  }
+
+  auto getOrMakeStoreDim = [&](DimRef fromDim) -> std::optional<DimRef> {
+    if (noCell == fromDim) return std::nullopt;
+    std::string name = from.textOf(fromDim);
+    if (name.empty() && from.base() != nullptr) {
+      if (from.store() != nullptr) {
+        name = from.base()->textOf(fromDim, *from.store());
+      } else if (from.base()->store() != nullptr) {
+        name = from.base()->textOf(fromDim, *from.base()->store());
+      }
+    }
+    if (name.empty()) return std::nullopt;
+    if (name == "d.dims") return store.dimsDimension();
+    if (const auto existing = DimensionRegistry::instance().get(store, name)) {
+      return *existing;
+    }
+    const auto minted = store.makeDimension(curHead, name);
+    curHead           = minted.version;
+    return minted.dim;
+  };
+
+  std::unordered_map<CellRef, CellRef> real;
+  real.reserve(order.size());
+  Promoted out{.version = curHead, .cells = {}};
+  out.cells.reserve(order.size());
+
+  for (const CellRef arena : mintOrder) {
+    if (!isEphemeral(arena) && !from.holdsOwn(arena)) {
+      real.emplace(arena, arena);
+      continue;
+    }
+    if (from.isProxy(arena)) {
+      const auto foreign = from.foreignOf(arena);
+      if (foreign) {
+        const auto s = from.spaceAt(foreign->space);
+        if (s && s->store) {
+          xanadu::MicroversionId produces;
+          std::string globalKey;
+          if (s->sealedAs != nullptr) {
+            const auto globalOp =
+                opRefOf(*s->store, foreign->index, *s->sealedAs);
+            if (globalOp) {
+              globalKey = globalOp->scroll;
+              produces  = globalOp->produces;
+            }
+          }
+          if (produces.isZero()) {
+            produces = s->store->segmentedOps().idOf(foreign->index).value();
+          }
+          if (globalKey.empty()) {
+            globalKey = !s->label.empty()
+                            ? s->label
+                            : ("store_" + std::to_string(foreign->space));
+          }
+          auto scrollIdOpt = store.scrollRegistry().scrollIdForKey(globalKey);
+          if (!scrollIdOpt.has_value()) {
+            out.version = store.registerScroll(out.version, globalKey);
+            scrollIdOpt = store.scrollRegistry().scrollIdForKey(globalKey);
+          }
+          if (scrollIdOpt.has_value()) {
+            const xanadu::ExternOpRef targetRef{.scroll   = *scrollIdOpt,
+                                                .produces = produces};
+            out.version = store.makeExternRef(out.version, targetRef);
+            const auto placeholder = store.placeholderForExtern(targetRef);
+            if (placeholder.has_value()) {
+              real.emplace(arena, *placeholder);
+              out.cells.push_back(*placeholder);
+              continue;
+            }
+          }
+        }
+      }
+    }
+    const auto content = from.contentOf(arena);
+    std::vector<xanadu::PrimediaSpan> spans(content.begin(), content.end());
+    if (const auto quoted = from.quotedContent(arena);
+        quoted && quoted->store != &store) {
+      for (auto &span : spans) {
+        if (const auto carried =
+                xanadu::carrySpan(*quoted->store, store, span)) {
+          span = *carried;
+        }
+      }
+    }
+    const auto kind = from.valueKindOf(arena);
+
+    xanadu::MicroversionId minted = out.version;
+    if (xanadu::ValueKind::Double == kind) {
+      minted =
+          store.makeScalarCell(out.version, from.asDouble(arena).value_or(0.0));
+    } else if (xanadu::ValueKind::Bool == kind) {
+      minted =
+          store.makeScalarCell(out.version, from.asBool(arena).value_or(false));
+    } else if (xanadu::ValueKind::Int64 == kind) {
+      minted =
+          store.makeScalarCell(out.version, from.asInt64(arena).value_or(0));
+    } else if (xanadu::ValueKind::OpHandle == kind && delayed.contains(arena)) {
+      if (spans.empty())
+        minted = store.makeCell(out.version, std::string_view{});
+      else if (spans.front().scroll == xanadu::scratchScroll)
+        minted = store.makeCell(out.version, from.scratchTextOf(spans.front()));
+      else
+        minted = store.makeCell(out.version, spans.front());
+    } else if (xanadu::ValueKind::OpHandle == kind) {
+      const auto target = *from.handleTarget(arena);
+      minted            = store.makeOpHandle(out.version,
+                                  (isEphemeral(target) || from.holdsOwn(target))
+                                                 ? real.at(target)
+                                                 : target,
+                                             from.textOf(arena));
+    } else if (xanadu::ValueKind::ForeignOpHandle == kind) {
+      const auto target = xanadu::foreignOpTarget(from, arena);
+      minted            = store.makeForeignOpHandle(out.version, *target);
+      spans.clear();
+    } else if (spans.empty()) {
+      minted = store.makeCell(out.version, std::string_view{});
+    } else if (xanadu::scratchScroll == spans.front().scroll) {
+      minted = store.makeCell(out.version, from.scratchTextOf(spans.front()));
+    } else {
+      minted = store.makeCell(out.version, spans.front());
+    }
+    out.version            = minted;
+    const CellRef realCell = store.cellRefOf(minted).value();
+    real.emplace(arena, realCell);
+    out.cells.push_back(realCell);
+
+    std::uint64_t at = spans.empty() ? 0 : spans.front().length;
+    for (std::size_t i = 1; i < spans.size(); i++) {
+      const auto &span = spans[i];
+      if (xanadu::scratchScroll == span.scroll) {
+        out.version = store.spliceCell(out.version, realCell, at, 0,
+                                       from.scratchTextOf(span));
+      } else {
+        out.version = store.spliceCellSpan(out.version, realCell, at, 0, span);
+      }
+      at += span.length;
+    }
+  }
+
+  if (!cyclicHandles.empty()) {
+    auto current = store.rebuildManifold(out.version);
+    for (const auto handle : cyclicHandles) {
+      const auto born    = real.at(handle);
+      const auto content = current.contentOf(born);
+      const std::vector<xanadu::PrimediaSpan> spans(content.begin(),
+                                                    content.end());
+      const auto target = *from.handleTarget(handle);
+      out.version       = store.setValue(
+          out.version, born,
+          spans.empty() ? xanadu::PrimediaSpan{} : spans.front(),
+          xanadu::ValueKind::OpHandle,
+          (isEphemeral(target) || from.holdsOwn(target)) ? real.at(target)
+                                                               : target);
+      std::uint64_t offset = spans.empty() ? 0 : spans.front().length;
+      for (std::size_t i = 1; i < spans.size(); ++i) {
+        out.version =
+            store.spliceCellSpan(out.version, born, offset, 0, spans[i]);
+        offset += spans[i].length;
+      }
+    }
+  }
+  out.cells.clear();
+  for (const auto cell : order) {
+    if (isEphemeral(cell) || from.holdsOwn(cell))
+      out.cells.push_back(real.at(cell));
+  }
+
+  auto known = store.rebuildManifold(out.version);
+  for (const CellRef arena : order) {
+    if (!from.holdsOwn(arena) || from.isProxy(arena)) {
+      continue;
+    }
+    for (const auto &edge : from.dimensionsOf(arena)) {
+      if (noCell == edge.pos) {
+        continue;
+      }
+      auto dimIt = real.find(edge.dim);
+      if (dimIt == real.end()) {
+        const auto storeDim = getOrMakeStoreDim(edge.dim);
+        if (storeDim.has_value()) {
+          dimIt = real.emplace(edge.dim, *storeDim).first;
+        } else {
+          continue;
+        }
+      }
+      const auto to = real.find(edge.pos);
+      if (to == real.end()) {
+        continue;
+      }
+      out.version = store.setLink(out.version, real.at(arena), dimIt->second,
+                                  false, to->second);
+      if (const auto stepped = known.advance(store, out.version); !stepped) {
+        GLEDITOR_LOG_WARN(
+            "zigzag.arena",
+            "promoteOverlay: the fold refused a link it just minted "
+            "(kind {}, {})",
+            static_cast<int>(stepped.error().kind),
+            toString(stepped.error().refusal));
+      }
+    }
+  }
+  out.mapping = real;
   return out;
 }
 

@@ -9,6 +9,12 @@ This guide introduces the language specified by [vagent v3.9](../design/vagent-a
 The design document defines the exact contract; this guide teaches how to use it and why its
 distinctions matter.
 
+The imported actor compiler is available through `vagent check-runtime FILE` and
+`vagent run FILE --agent TYPE`. The existing `vagent check` command uses a separate bounded
+frontend; successful checking there does not establish runtime compatibility. Examples in this guide
+retain their stated validation level. See the
+[implementation progress](../design/vagent-implementation.md) for this integration boundary.
+
 ## Contents
 
 - [Who this guide is for](#who-this-guide-is-for)

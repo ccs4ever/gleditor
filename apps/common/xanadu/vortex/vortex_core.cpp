@@ -363,10 +363,23 @@ std::vector<CellRef> VortexCore::wingOf(const CellRef opcode,
         })
         .value_or(masterOf(slot));
   };
+  // P16: an input operand that is a handle reads through to its target, so a
+  // run-time-minted cell is usable without poking the program graph. Outputs
+  // keep the handle itself, which is what lets #Point rebind it.
+  const bool follow  = DimVector::POS == side;
+  const auto resolve = [this, follow, operand](const CellRef slot) {
+    const auto cell = operand(slot);
+    if (!follow) return cell;
+    return arena_.handleTarget(cell)
+        .and_then([this](const CellRef target) {
+          return arena_.contains(target) ? std::optional{target} : std::nullopt;
+        })
+        .value_or(cell);
+  };
   const auto first = arena_.linked(opcode, dims_.grab, side);
   if (!first) return {};
   return zigzag::rank(arena_, *first, dims_.step) |
-         std::views::transform(operand) | std::ranges::to<std::vector>();
+         std::views::transform(resolve) | std::ranges::to<std::vector>();
 }
 
 std::vector<CellRef> VortexCore::inputsOf(CellRef opcode) const {
