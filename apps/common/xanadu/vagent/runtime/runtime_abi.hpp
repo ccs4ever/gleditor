@@ -44,7 +44,7 @@ namespace xanadu::vagent::runtime {
 // -- Dimensions (§5.1)
 // ---------------------------------------------------------
 
-/// The thirteen dimensions the adapter registers in every agent arena (V10).
+/// The fifteen dimensions the adapter registers in every agent arena (V10).
 /// The reused genesis dimensions (`d.vars`, `d.values`, `d.clause`, `d.grab`,
 /// `d.step`, `d.spin`, `d.clone`, `d.stack`) are looked up from VortexCore.
 struct AgentDims {
@@ -61,12 +61,14 @@ struct AgentDims {
   zigzag::DimRef pending{};
   zigzag::DimRef source{};
   zigzag::DimRef extends{};
+  zigzag::DimRef trust{};
+  zigzag::DimRef epistemic{};
 };
 
-inline constexpr std::array<std::string_view, 13> kAgentDimensionNames{
+inline constexpr std::array<std::string_view, 15> kAgentDimensionNames{
     "d.behavior", "d.skill",     "d.capacity", "d.space",  "d.member",
     "d.holon",    "d.intention", "d.subgoal",  "d.outbox", "d.belief",
-    "d.pending",  "d.source",    "d.extends"};
+    "d.pending",  "d.source",    "d.extends",  "d.trust",  "d.epistemic"};
 
 /// Idempotent: `ensureDimension` returns the existing cell for a name, so a
 /// resumed arena that already holds them gets the same refs back.
@@ -85,6 +87,8 @@ inline AgentDims registerDimensions(zigzag::ArenaManifold &arena) {
       .pending   = arena.ensureDimension("d.pending"),
       .source    = arena.ensureDimension("d.source"),
       .extends   = arena.ensureDimension("d.extends"),
+      .trust     = arena.ensureDimension("d.trust"),
+      .epistemic = arena.ensureDimension("d.epistemic"),
   };
 }
 

@@ -35,7 +35,7 @@ namespace xanadu::vagent::runtime {
 
 /// Bumped when the compiled shape of a program changes meaning, so a ref made
 /// by an older compiler never names a program this one would build differently.
-inline constexpr std::string_view kProgramFormat = "vagent-program-1";
+inline constexpr std::string_view kProgramFormat = "vagent-program-2";
 
 class CompiledProgram final : public AgentProgram {
 public:

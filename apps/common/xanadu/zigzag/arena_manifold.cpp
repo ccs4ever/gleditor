@@ -2108,10 +2108,10 @@ constexpr std::array<std::string_view, 33> kCanonicalVortexDimensions{
     "d.require",
     "d.ensure"};
 
-constexpr std::array<std::string_view, 13> kCanonicalAgentDimensions{
+constexpr std::array<std::string_view, 15> kCanonicalAgentDimensions{
     "d.behavior", "d.skill",     "d.capacity", "d.space",  "d.member",
     "d.holon",    "d.intention", "d.subgoal",  "d.outbox", "d.belief",
-    "d.pending",  "d.source",    "d.extends"};
+    "d.pending",  "d.source",    "d.extends",  "d.trust",  "d.epistemic"};
 } // namespace
 
 std::optional<Promoted> promoteOverlay(const ArenaManifold &arena,

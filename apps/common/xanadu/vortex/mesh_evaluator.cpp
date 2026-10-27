@@ -237,6 +237,12 @@ bool pureOpcode(OpcodeKind opcode) {
   // has no business holding.
   case OpcodeKind::Point:
     return false;
+  // New elementary math instructions are deliberately excluded from the
+  // current persisted pure-job opcode range (which ends at Cut).
+  case OpcodeKind::Exp:
+  case OpcodeKind::Ln:
+  case OpcodeKind::Sqrt:
+    return false;
   }
   return false;
 }

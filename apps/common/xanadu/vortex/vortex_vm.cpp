@@ -109,7 +109,7 @@ std::optional<OpcodeKind> VortexVM::getOpcodeKind(CellRef opCell) const {
   auto val = core_.arena().asInt64(opCell);
   if (val && *val >= 0 &&
       static_cast<std::uint64_t>(*val) <=
-          static_cast<std::uint64_t>(OpcodeKind::Point)) {
+          static_cast<std::uint64_t>(OpcodeKind::Sqrt)) {
     return static_cast<OpcodeKind>(*val);
   }
   return std::nullopt;
@@ -400,6 +400,13 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
                                ContractViolationKind::Precondition,
                            .failingClause = opcode,
                            .errorMessage = "Signed integer overflow in opcode"};
+  };
+  const auto mathFailure = [opcode](std::string message) {
+    return ExecutionResult{.success = false,
+                           .contractViolation =
+                               ContractViolationKind::Precondition,
+                           .failingClause = opcode,
+                           .errorMessage  = message};
   };
   constexpr auto minInt = std::numeric_limits<std::int64_t>::min();
   switch (kind) {
@@ -869,6 +876,32 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
         outputs.emplace_back(v < 0 ? -v : v);
       }
     }
+    break;
+  }
+  case OpcodeKind::Exp:
+  case OpcodeKind::Ln:
+  case OpcodeKind::Sqrt: {
+    if (inputs.size() != 1 || !std::holds_alternative<double>(inputs[0])) {
+      return mathFailure("Math opcode requires exactly one Float input");
+    }
+    const double value = std::get<double>(inputs[0]);
+    if (!std::isfinite(value)) {
+      return mathFailure("Math opcode requires a finite Float input");
+    }
+    if (kind == OpcodeKind::Ln && value <= 0.0) {
+      return mathFailure("Ln requires a positive Float input");
+    }
+    if (kind == OpcodeKind::Sqrt && value < 0.0) {
+      return mathFailure("Sqrt requires a nonnegative Float input");
+    }
+
+    const double result = kind == OpcodeKind::Exp  ? std::exp(value)
+                          : kind == OpcodeKind::Ln ? std::log(value)
+                                                   : std::sqrt(value);
+    if (!std::isfinite(result)) {
+      return mathFailure("Math opcode result is not finite");
+    }
+    outputs.emplace_back(result);
     break;
   }
   case OpcodeKind::Min: {

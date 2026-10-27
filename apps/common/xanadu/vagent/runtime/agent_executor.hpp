@@ -35,6 +35,7 @@
 #include <vector>
 
 #include "common/xanadu/resolver.hpp"
+#include "common/xanadu/vagent/runtime/epistemic_limits.hpp"
 #include "common/xanadu/vagent/runtime/host_bindings.hpp"
 #include "common/xanadu/vagent/runtime/runtime_abi.hpp"
 #include "common/xanadu/vagent/runtime/wire.hpp"
@@ -62,6 +63,7 @@ struct AgentSettings {
   /// The validator wants a hashcash stamp on a spawn and the runtime does not
   /// check one, so a spawn the host itself issues carries this fixed text.
   std::string spawnStamp{"vagent-local-spawn"};
+  EpistemicLimits epistemic{};
 };
 
 /// What the issuer signs for one child. `parameters` is the bencoded

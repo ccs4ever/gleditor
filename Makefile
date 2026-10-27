@@ -681,7 +681,7 @@ VAGENT_FRONTEND_TEST_SRCS := $(addprefix tests/xuzz/,vagent_lexer_test.cpp vagen
 VAGENT_FRONTEND_TEST_OBJS := $(call obj,$(VAGENT_FRONTEND_TEST_SRCS))
 VAGENT_SYNTAX_TEST_OBJS := $(call obj,tests/xuzz/vagent_lexer_test.cpp tests/xuzz/vagent_parser_test.cpp)
 VAGENT_SYNTAX_OBJS := $(call obj,apps/common/xanadu/vagent/token.cpp apps/common/xanadu/vagent/lexer.cpp apps/common/xanadu/vagent/parser.cpp)
-VAGENT_RUNTIME_TEST_OBJS := $(call obj,tests/xuzz/vortex_logic_test.cpp tests/xuzz/vortex_core_test.cpp tests/xuzz/arena_manifold_test.cpp tests/xuzz/transport_and_or_parallel_test.cpp tests/xuzz/mesh_vortex_artifact_test.cpp)
+VAGENT_RUNTIME_TEST_OBJS := $(call obj,tests/xuzz/vagent_epistemic_math_test.cpp tests/xuzz/vortex_logic_test.cpp tests/xuzz/vortex_core_test.cpp tests/xuzz/arena_manifold_test.cpp tests/xuzz/transport_and_or_parallel_test.cpp tests/xuzz/mesh_vortex_artifact_test.cpp)
 # This suite isolates shared VM prerequisites while frontend/lowering evolves.
 VAGENT_RUNTIME_CORE_OBJS := $(filter-out $(call obj,$(shell find apps/common/xanadu/vagent -name '*.cpp' 2>/dev/null)),$(XUDU_CORE_OBJS))
 SPIKE_SRCS      := $(shell find tools/spikes -name '*.cpp' 2>/dev/null)

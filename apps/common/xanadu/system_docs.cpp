@@ -20,6 +20,7 @@
 #include "common/xanadu/format.hpp"
 #include "common/xanadu/ops.hpp"
 #include "common/xanadu/store.hpp"
+#include "common/xanadu/vagent/runtime/epistemic_limits.hpp"
 #include "common/xanadu/version.hpp"
 #include <gleditor/ranges.hpp>
 
@@ -115,7 +116,11 @@ std::string defaultSystemDocSchema(const SystemDocKind kind) {
            "vagent.ready_per_message: Wake turns run between two message "
            "turns. Default is 4.\n"
            "vagent.compact_every: Turns between arena compactions. Default is "
-           "64.\n";
+           "64.\n"
+           "vagent.max_sources: Epistemic source admission bound; positive. "
+           "Default is 128.\n"
+           "vagent.max_candidates: Epistemic query admission bound; positive. "
+           "Default is 1024.\n";
   case SystemDocKind::Layout:
     return "Schema and Purpose\n\n"
            "Purpose:\n"
@@ -903,6 +908,18 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .notes   = "vagent: turns between arena compact calls; positive",
          .schemas = {{.expectedTypes = {"integer"},
                       .defaultValues = {std::int64_t{64}}}}},
+        {.name    = std::string(settings::kVagentMaxSources),
+         .notes   = "vagent: positive epistemic source admission bound; "
+                    "cell/fuel grants still apply",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues =
+                          {vagent::runtime::kDefaultEpistemicMaxSources}}}},
+        {.name  = std::string(settings::kVagentMaxCandidates),
+         .notes = "vagent: positive epistemic query candidate admission bound; "
+                  "cell/fuel grants still apply",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues =
+                          {vagent::runtime::kDefaultEpistemicMaxCandidates}}}},
     };
     break;
 

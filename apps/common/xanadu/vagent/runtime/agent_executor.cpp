@@ -12,6 +12,7 @@
 #include <limits>
 #include <mutex>
 #include <ranges>
+#include <stdexcept>
 #include <unordered_map>
 
 namespace xanadu::vagent::runtime {
@@ -473,7 +474,11 @@ AgentExecutor::AgentExecutor(zigzag::vortex::mesh::MeshActorRuntime &runtime,
       localNode_(std::move(localNode)), epoch_(epoch),
       settings_(std::move(settings)), clock_(std::move(clock)),
       posts_(std::make_shared<PostBox>()),
-      hostPid_{localNode_, std::string(kHostCursor), epoch_, 1} {}
+      hostPid_{localNode_, std::string(kHostCursor), epoch_, 1} {
+  if (!settings_.epistemic.validate()) {
+    throw std::invalid_argument("invalid epistemic admission limits");
+  }
+}
 
 AgentExecutor::~AgentExecutor() = default;
 
@@ -487,6 +492,9 @@ AgentExecutor::withFloors(zigzag::vortex::mesh::ActorOptions options) {
 
 zigzag::vortex::mesh::ActorOptions
 AgentExecutor::runtimeOptions(const AgentSettings &settings) {
+  if (!settings.epistemic.validate()) {
+    throw std::invalid_argument("invalid epistemic admission limits");
+  }
   auto options                   = withFloors();
   options.valueLimits.operations = settings.valueOperations;
   return options;

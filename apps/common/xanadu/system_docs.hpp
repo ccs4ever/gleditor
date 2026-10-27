@@ -284,6 +284,9 @@ inline constexpr std::string_view kVagentRenewFraction =
 inline constexpr std::string_view kVagentReadyPerMessage =
     "vagent.ready_per_message";
 inline constexpr std::string_view kVagentCompactEvery = "vagent.compact_every";
+inline constexpr std::string_view kVagentMaxSources   = "vagent.max_sources";
+inline constexpr std::string_view kVagentMaxCandidates =
+    "vagent.max_candidates";
 
 // UI
 inline constexpr std::string_view kTabBarVisible       = "tabBarVisible";

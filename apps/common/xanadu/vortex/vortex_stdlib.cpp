@@ -5,6 +5,7 @@
 #include "common/xanadu/vortex/vortex_stdlib.hpp"
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <cctype>
 #include <cmath>
@@ -1497,6 +1498,20 @@ void VortexStdLib::bootstrap() {
 }
 
 void VortexStdLib::buildMathModule(CellRef mod) {
+  // Export executable primitives; graph callers still supply their own call
+  // ABI.
+  for (const auto &[name, kind] : std::array{
+           std::pair{"exp", OpcodeKind::Exp}, std::pair{"ln", OpcodeKind::Ln},
+           std::pair{"sqrt", OpcodeKind::Sqrt}}) {
+    const CellRef input  = core_.arena().makeScalarCell(0.0);
+    const CellRef output = core_.arena().makeScalarCell(0.0);
+    const CellRef op     = vm_.mintOpcode(kind, std::string("#MATH_") + name);
+    core_.bindInput(op, input);
+    core_.bindOutput(op, output);
+    routineBindings_[op] = {.inputParams = {input}, .outputParams = {output}};
+    exportSymbol(mod, name, op);
+  }
+
   // abs: #MATH_ABS in out (postcondition: out >= 0)
   {
     CellRef in  = core_.arena().makeCell();
@@ -1985,6 +2000,12 @@ std::vector<CellValue> VortexStdLib::call(std::string_view path,
 std::vector<CellValue> VortexStdLib::call(CellRef fnOp,
                                           const std::vector<CellValue> &args) {
   if (fnOp == noCell) {
+    return {};
+  }
+  const auto kind = vm_.getOpcodeKind(fnOp);
+  if ((kind == OpcodeKind::Exp || kind == OpcodeKind::Ln ||
+       kind == OpcodeKind::Sqrt) &&
+      args.size() != 1) {
     return {};
   }
   std::string opName = core_.arena().textOf(fnOp);

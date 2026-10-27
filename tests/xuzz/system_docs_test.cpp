@@ -169,6 +169,8 @@ TEST(SystemDocsTest, VagentSettingsSeedWithDesignDefaults) {
       {"vagent.renew_fraction", 0.8},
       {"vagent.ready_per_message", std::int64_t{4}},
       {kVagentCompactEvery, std::int64_t{64}},
+      {"vagent.max_sources", std::int64_t{128}},
+      {"vagent.max_candidates", std::int64_t{1024}},
   };
   for (const auto &[name, value] : expected) {
     const auto it = find(name);

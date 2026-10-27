@@ -88,6 +88,10 @@ enum class OpcodeKind : std::uint8_t {
   ChoiceDepth,
   // #Point out, ref: out becomes a handle to the cell `ref` names.
   Point,
+  // Appended after Point so existing serialized opcode values remain stable.
+  Exp,
+  Ln,
+  Sqrt,
 };
 
 struct ChoicePoint {

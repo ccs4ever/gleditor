@@ -160,6 +160,29 @@ TEST(MeshVortexArtifactTest, VagentDepthOpcodeCannotEnterPureArtifacts) {
                         budget));
 }
 
+TEST(MeshVortexArtifactTest, ElementaryMathOpcodesRemainOutsidePureArtifacts) {
+  for (const auto opcode :
+       {OpcodeKind::Exp, OpcodeKind::Ln, OpcodeKind::Sqrt}) {
+    auto program                        = addition();
+    program.instructions.front().opcode = opcode;
+    EXPECT_FALSE(sealVortexProgram(program));
+
+    auto sealed = sealVortexProgram(addition());
+    ASSERT_TRUE(sealed) << sealed.error();
+    auto body = xanadu::bencode::decode(
+                    xanadu::bencode::decode(*sealed).find("body")->asString())
+                    .asDict();
+    auto instructions    = body.at("instructions").asList();
+    auto first           = instructions.front().asDict();
+    first["opcode"]      = Wire::integer(static_cast<std::int64_t>(opcode));
+    instructions.front() = Wire::dict(std::move(first));
+    body["instructions"] = Wire::list(std::move(instructions));
+    EXPECT_FALSE(evaluate(Frontend::Vortex,
+                          replaceBody(*sealed, Wire::dict(std::move(body))),
+                          budget));
+  }
+}
+
 TEST(MeshVortexArtifactTest, CyclicProgramsConsumeExplicitCycleBudget) {
   VortexProgram program{.cells        = {{}, {VortexReference{0}, {}}},
                         .instructions = {{0, OpcodeKind::Jump, {1}, {}, {}}},
