@@ -25,11 +25,13 @@ v1.2 working edits captured before Round 3. Only documentation changes are propo
 | Shared program base (P17), belief coexistence (P18)          | Historical designs described below                                     | Prerequisites; approval elsewhere does not establish implementation here            |
 | Epistemic syntax, profiles, learning, fusion, scoped results | This document                                                          | Owed by P19                                                                         |
 
-Historical P17 design: `git show b1311f56:design/vagent-shared-program-and-live-upgrade.md`;
-approval recorded at `6aef0d8a`. Historical P18 design:
-`git show f033eda8:design/vagent-extended-capabilities-and-belief-vlog-unification.md`. Those
-documents are absent from this branch. Implementers must reconcile or import their specifications
-explicitly before integration; this document does not silently merge other branches. The
+P17 design: [shared program and live upgrade](vagent-shared-program-and-live-upgrade.md), originally
+reviewed at `b1311f56` with approval recorded at `6aef0d8a`. That companion and its review history
+are now imported by a documentation-only merge; the historical baseline table above still describes
+the original P19 review input. No incoming runtime implementation was imported. Historical P18
+design: `git show f033eda8:design/vagent-extended-capabilities-and-belief-vlog-unification.md`
+remains absent from this branch. Implementers must reconcile P17 and import/reconcile P18 before
+runtime integration; documentation presence does not establish implementation. The
 [current vagent specification](vagent-agent-language.md) and
 [runtime grounding](vagent-runtime-grounding.md) describe the available compiler and call boundary.
 
