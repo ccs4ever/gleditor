@@ -1,102 +1,93 @@
-# Multi-Agent Review: Vagent Dynamic Source Weighting & Epistemic Arbitration
+# vagent epistemic arbitration review
 
-**Document Under Review**:
-[`design/vagent-dynamic-source-weighting-and-epistemic-arbitration.md`](../vagent-dynamic-source-weighting-and-epistemic-arbitration.md)\
-**Facilitator**: Antigravity Multi-Agent Orchestrator\
-**Review Skill**: `vortex-design-critique`\
-**Dates**: 2026-10-25\
-**Current Status**: **Round 2 incomplete: 5 of 10 critics converged, 1 not converged
-(hardware-fault, addressed in v1.2), 4 produced no report (quota). See
-[`r2-disposition.md`](r2-disposition.md).**
+Target: [specification][target].
 
-______________________________________________________________________
+Resumed on 2026-10-27 in `/data/git/gleditor`, branch `design/vagent-epistemic-arbitration`. Rounds
+1–2 were started by Devin's earlier workflow; this continuation preserves their reports and the
+incoming uncommitted v1.2 edits as an [exact baseline](baseline-v1.2.txt).
 
-## 1. Overview
+The lead used the recovered `vortex-design-critique` protocol with ten review roles, all on Luna.
+Six subagents covered the roles in waves within the concurrency limit; each role has a separate
+report. The four additional experts each had their own subagent: ML, mathematics/Markdown math,
+epistemology/certainty methodology and hardware faults. See [resumed brief](brief-r3.md) and
+[workflow source](workflow-source.txt).
 
-This project folder contains the complete multi-agent review history for the architectural
-specification: **Vagent Dynamic Source Weighting and Epistemic Arbitration Framework** (Proposals
-P19.1–P19.7).
+## Outcome
 
-The review engaged ten specialized critic personas across software engineering, mathematics,
-philosophy, and hardware engineering:
+The owner approved P19.1–P19.8 on 2026-10-27; see [approval-p19.md](approval-p19.md). The requested
+additional full ten-role review is complete. Round 6 found remaining specification gaps; v1.4
+corrects them, and all ten Round 7 follow-ups converge with zero BLOCKING and zero MAJOR findings.
+The approved design remains unimplemented on this branch.
 
-1. **Technical Writer (`writer`)**: Markdown hygiene, MD013 formatting, example conformance.
-1. **Vortex & Spool-Mesh Expert (`vortex`)**: VortexCore opcodes, trail/backtrack isolation,
-   MeshActorRuntime turn atomicity.
-1. **Codebase Expert (`codebase`)**: Ground-truth C++23 source verification, AST/runtime ABI
-   symbols, Proposal Register accounting.
-1. **System Architect (`architect`)**: Architectural layering, C++-vs-Vortex division of labor, live
-   upgrade migration across reconciler.cpp.
-1. **Programming Language Design & Ergonomics Expert (`ergo`)**: Surface syntax, EBNF
-   unambiguousness, keyword collisions, static diagnostics.
-1. **Xanadu / ZigZag Purist (`zigzag`)**: Strict 2-degree rank invariants, Nelsonian purity,
-   `d.clone` rank usage, 1D rank excision.
-1. **Machine Learning Expert (`ml-expert`)**: Online learning stability, Robbins-Monro convergence,
-   contextual bandits, Kalman/Gaussian fusion.
-1. **Mathematician & Math Formatting Specialist (`mathematician`)**: Bayesian conjugate priors,
-   Noisy-OR fallacies, log-odds accumulation, KaTeX hygiene.
-1. **Epistemologist & Methodology of Certainty (`epistemologist`)**: Theories of truth, AGM belief
-   revision, social epistemology, defeasible reasoning, Gettier problems.
-1. **Hardware Fault Specialist (`hardware-fault`)**: Physical sensor failure modes (thermal drift,
-   bias instability, multipath, stiction) and FDI mitigations.
+The new corrections make verdict replacement replace old training evidence, store keyed calibration
+and audited dependence groups explicitly, validate rho, define exact oversized-cluster alternatives,
+and resolve ranked tie semantics. Replay/idempotency and common physical measurement time are also
+explicit. See [Round 6 disposition](r6-disposition.md) and [Round 7 closure](r7-disposition.md).
 
-______________________________________________________________________
+| Role                            | Latest closing report                   |
+| ------------------------------- | --------------------------------------- |
+| Technical writer                | [R7 writer](r7-writer.md)               |
+| Vortex and Spool-Mesh           | [R7 Vortex](r7-vortex.md)               |
+| Codebase                        | [R7 codebase](r7-codebase.md)           |
+| System architect                | [R7 architect](r7-architect.md)         |
+| PL design and ergonomics        | [R7 ergonomics](r7-ergo.md)             |
+| Xanadu/ZigZag                   | [R7 ZigZag](r7-zigzag.md)               |
+| Machine learning                | [R7 ML](r7-ml-expert.md)                |
+| Mathematics and math formatting | [R7 math](r7-mathematician.md)          |
+| Epistemology                    | [R7 epistemology](r7-epistemologist.md) |
+| Hardware faults                 | [R7 hardware](r7-hardware-fault.md)     |
 
-## 2. Review Artifacts Directory
+Round 6 used the [approved v1.3 snapshot](r6-input-v1.3-approved.txt) and
+[full-round brief](brief-r6.md). The literal minor-only NOT CONVERGED hardware verdict in R6 is
+preserved; its timing clarification is closed in R7. Approval is distinct from implementation or
+passing the future engine acceptance gates.
 
-### Common Review Guidance
+## Earlier review pass: Rounds 3–5
 
-- [`brief-common.md`](brief-common.md): Shared briefing document defining scope, focus areas,
-  standing rules, and output criteria.
+The earlier pass produced v1.3 and closed the incoming v1.2 findings. Its historical status and
+reports are retained below; statements about pending approval in those reports describe that time.
 
-### Round 1: Discovery & Architecture Stress-Testing
+The review corrected source-accuracy/posterior confusion, impossible same-arena rollback immunity,
+constant-time clone lookup claims, moving feature normalization, unsupported bandit confidence,
+physical covariance/time/frame semantics, unverifiable authority and missing resource lifetimes. The
+sensor taxonomy now covers multiple modalities and shared causes, with compensation limits. Recent
+ML/calibration sources include 2025 online conformal work and 2026 configuration-shift research; raw
+neural/LLM scores do not become calibrated evidence by declaration.
 
-- [`r1-hardware-fault.md`](r1-hardware-fault.md): Hardware Fault Specialist critique (dimensional
-  units in fusion, $\chi^2$ innovation gating, continuous tolerance clustering, dead-reckoning drift
-  vs. decay).
-- [`r1-epistemologist.md`](r1-epistemologist.md): Epistemologist critique (Gettier epistemic luck,
-  AGM belief contraction failure, social testimony echo chambers, undercutting defeaters).
-- [`r1-ml-expert.md`](r1-ml-expert.md): Machine Learning Expert critique (LinUCB vs. Beta-UCB,
-  non-existent `#Exp` opcode, unregularized SGD, feature scaling).
-- [`r1-mathematician.md`](r1-mathematician.md): Mathematician critique (Noisy-OR coin-flip paradox,
-  log-odds accumulation, UCB probability simplex escapes, maximum-entropy decay).
-- [`r1-architect.md`](r1-architect.md): System Architect critique (asynchronous skills in pure
-  guards, raw `CellRef`s across upgrades, `reconciler.cpp` migration).
-- [`r1-zigzag.md`](r1-zigzag.md): Xanadu / ZigZag Purist critique (uncloned fan-in on tokens,
-  `ArenaManifold::discard` cell leakage, base profile fan-in, `d.clone` masters).
-- [`r1-vortex.md`](r1-vortex.md): Vortex & Spool-Mesh Expert critique (`discard()` cell leak, turn
-  failure rollback of refutations, layer confusion in settle loop).
-- [`r1-codebase.md`](r1-codebase.md): Codebase Expert critique (expression purity violation, runtime
-  ABI dimension array size, `restoreState` checkpoint resume).
-- [`r1-ergo.md`](r1-ergo.md): PL Design & Ergonomics Expert critique (plan declaration syntax, logic
-  pattern variables `?v`, contextual keywords, EBNF ambiguities).
-- [`r1-writer.md`](r1-writer.md): Technical Writer critique (hallucinated plan syntax in examples,
-  broken TOC anchors, math line breaks).
-- [`r1-disposition.md`](r1-disposition.md): Complete orchestrator disposition tracking resolving all
-  BLOCKING and MAJOR findings.
+| Role                            | Round 3             | Closing report                          |
+| ------------------------------- | ------------------- | --------------------------------------- |
+| Technical writer                | 1 BLOCKING, 1 MAJOR | [R4 writer](r4-writer.md)               |
+| Vortex and Spool-Mesh           | 1 BLOCKING, 3 MAJOR | [R4 Vortex](r4-vortex.md)               |
+| Codebase                        | 1 BLOCKING, 2 MAJOR | [R4 codebase](r4-codebase.md)           |
+| System architect                | 1 BLOCKING, 2 MAJOR | [R4 architect](r4-architect.md)         |
+| PL design and ergonomics        | 2 BLOCKING, 2 MAJOR | [R4 ergonomics](r4-ergo.md)             |
+| Xanadu/ZigZag                   | 0 BLOCKING, 0 MAJOR | [R4 ZigZag](r4-zigzag.md)               |
+| Machine learning                | 0 BLOCKING, 5 MAJOR | [R5 ML](r5-ml-expert.md)                |
+| Mathematics and math formatting | 1 BLOCKING, 3 MAJOR | [R4 math](r4-mathematician.md)          |
+| Epistemology                    | 0 BLOCKING, 5 MAJOR | [R5 epistemology](r5-epistemologist.md) |
+| Hardware faults                 | 0 BLOCKING, 4 MAJOR | [R4 hardware](r4-hardware-fault.md)     |
 
-______________________________________________________________________
+Round 3 counts include duplicate observations across personas. The R3 ZigZag report's literal
+verdict was NOT CONVERGED despite zero BLOCKING/MAJOR findings; its three minor topology issues were
+corrected and followed up. Earlier verdicts are preserved, not rewritten.
 
-## 3. Summary of Key Architectural Rulings in R1 Disposition
+## Review record
 
-1. **Bayesian Posterior Log-Odds Formulation**: Replaces flawed Noisy-OR formula with
-   $\text{logit}(W) = \text{logit}(P_0) + \sum_{S} \ln \frac{w_S}{1 - w_S}$, ensuring $w=0.5$
-   contributes zero evidence and uninformative sources cannot manufacture artificial certainty.
-1. **Decoupled Physical Noise & Epistemic Inflation**: Solves dimensional analysis failure by
-   decoupling physical measurement covariance $R_i$ from dimensionless trust $w_i$, using trust as
-   covariance inflation $\tilde{R}_i = R_i / \max(w_i, \epsilon_{\text{floor}})$ with $\chi^2$
-   Mahalanobis innovation gating.
-1. **Metric $\epsilon$-Neighborhood Clustering**: Resolves floating-point jitter in continuous
-   domains by clustering candidate clauses whose key attributes fall within tolerance
-   $\epsilon_{\text{tol}}$ prior to arbitration.
-1. **Perceptual Verification vs. Epistemic Luck**: Eliminates automated goal-outcome backpropagation
-   to prevent Gettier-style reward of lucky errors. Updates require explicit perceptual verification
-   (`confirm`, `refute`, innovation parity).
-1. **Inner Evaluation Scoping for Memory Lifecycle**: Solves `ArenaManifold::discard` cell leakage
-   by scoring candidates under an inner evaluation mark $m_{\text{eval}}$, reclaiming scratch
-   allocations via `release(m_{\text{eval}})` prior to binding the winning clause.
-1. **New Math Opcodes (Proposal P19.7)**: Formally proposes `#Exp`, `#Ln`, `#Sqrt` in
-   `vortex_vm.hpp` to support numeric computing natively without ad-hoc approximations.
-1. **Expression Purity Enforcement**: Native ML skills are restricted to asynchronous plan
-   statements or background percept pipes; query expressions (`believes truest`) evaluate
-   synchronously against cached on-manifold feature embeddings.
+- [Round 1 disposition](r1-disposition.md): initial discovery and v1.1 corrections.
+- [Round 2 disposition](r2-disposition.md): incomplete due quota; four missing reports and
+  unconfirmed hardware fixes: five converged roles, one nonconverged role, four missing roles.
+- [Round 3 disposition](r3-disposition.md): full resumed audit and item-by-item v1.3 rulings.
+- [Round 4 disposition](r4-disposition.md): follow-up, final scope/authority corrections and checks.
+- [Round 5 disposition](r5-disposition.md): earlier epistemology/ML verification and closure.
+- [Owner approval](approval-p19.md): P19.1–P19.8 approved.
+- [Round 6 disposition](r6-disposition.md): additional full ten-role audit and v1.4 corrections.
+- [Round 7 disposition](r7-disposition.md): focused follow-up, all ten roles converged.
+- [Historical initial brief](brief-common.md): retained as the original Round 1 guidance; paths,
+  formulas and instructions in it are historical. Current guidance is [brief-r3.md](brief-r3.md).
+
+Every `r1-<role>.md`, available `r2-<role>.md`, and `r3-<role>.md` remains in this directory.
+Follow-ups reference the `/tmp` draft they read; the integrated specification is the target linked
+above. [Final snapshot identity](final-input-sha256.txt) identifies the delivered design and the
+incoming baseline. No engine implementation or unrelated worktree files were modified.
+
+[target]: ../../vagent-dynamic-source-weighting-and-epistemic-arbitration.md
