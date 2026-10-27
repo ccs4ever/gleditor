@@ -12,7 +12,41 @@ report. The four additional experts each had their own subagent: ML, mathematics
 epistemology/certainty methodology and hardware faults. See [resumed brief](brief-r3.md) and
 [workflow source](workflow-source.txt).
 
-## Outcome
+## Current outcome: integrated-runtime review (Rounds 8–9)
+
+After actor-runtime integration at `64b05125`, the owner requested another full ten-role critique
+against upgrade and belief logic. Each role had its own Luna subagent, scheduled in waves of up to
+three critics. [Round 8](r8-disposition.md) found 2 BLOCKING and 14 MAJOR findings across
+overlapping reports. The lead verified them in source and revised the proposal to v1.5; every role's
+[Round 9 follow-up](r9-disposition.md) converges with zero BLOCKING and zero MAJOR findings.
+
+The revision preserves coalesced ground facts with distinct per-source observations, defines
+upgrade/resume translation and typed compatibility, preserves clock uncertainty and fault latches,
+separates transport receipt from committed verification, and targets the actual actor frontend. The
+scope callback ABI and integration acceptance cases are explicit. A generic host upgrade callback is
+built; full automatic vagent reconciliation is still a prerequisite. P19 itself remains
+unimplemented. P19.1–P19.8 approval remains in force; no new engine proposal is added.
+
+| Role                            | Latest closing report                     |
+| ------------------------------- | ----------------------------------------- |
+| Technical writer                | [R9 writer](r9-writer.md)                 |
+| Vortex and Spool-Mesh           | [R9 vortex](r9-vortex.md)                 |
+| Codebase                        | [R9 codebase](r9-codebase.md)             |
+| System architect                | [R9 architect](r9-architect.md)           |
+| PL design and ergonomics        | [R9 ergo](r9-ergo.md)                     |
+| Xanadu/ZigZag                   | [R9 zigzag](r9-zigzag.md)                 |
+| Machine learning                | [R9 ml-expert](r9-ml-expert.md)           |
+| Mathematics and math formatting | [R9 mathematician](r9-mathematician.md)   |
+| Epistemology                    | [R9 epistemologist](r9-epistemologist.md) |
+| Hardware faults                 | [R9 hardware-fault](r9-hardware-fault.md) |
+
+Inputs and evidence: [R8 brief](brief-r8.md), [runtime-era v1.4 input](r8-input-v1.4.txt),
+[R8 rulings](r8-disposition.md), [R9 brief](brief-r9.md), [v1.5 input](r9-input-v1.5.txt),
+[R9 closure](r9-disposition.md), [identity](r9-input-sha256.txt) and [checks](validation-r8-r9.txt).
+Numeric formulas are unchanged; earlier snapshots and reports remain preserved below. No engine
+files were changed in this critique.
+
+## Previous closure: Rounds 6–7
 
 The owner approved P19.1–P19.8 on 2026-10-27; see [approval-p19.md](approval-p19.md). The requested
 additional full ten-role review is complete. Round 6 found remaining specification gaps; v1.4
@@ -82,12 +116,15 @@ corrected and followed up. Earlier verdicts are preserved, not rewritten.
 - [Owner approval](approval-p19.md): P19.1–P19.8 approved.
 - [Round 6 disposition](r6-disposition.md): additional full ten-role audit and v1.4 corrections.
 - [Round 7 disposition](r7-disposition.md): focused follow-up, all ten roles converged.
+- [Round 8 disposition](r8-disposition.md): full critique against integrated runtime `64b05125`.
+- [Round 9 disposition](r9-disposition.md): focused follow-up, all ten roles converge on v1.5.
 - [Historical initial brief](brief-common.md): retained as the original Round 1 guidance; paths,
   formulas and instructions in it are historical. Current guidance is [brief-r3.md](brief-r3.md).
 
 Every `r1-<role>.md`, available `r2-<role>.md`, and `r3-<role>.md` remains in this directory.
 Follow-ups reference the `/tmp` draft they read; the integrated specification is the target linked
-above. [Final snapshot identity](final-input-sha256.txt) identifies the delivered design and the
-incoming baseline. No engine implementation or unrelated worktree files were modified.
+above. The historical [Round 7 identity](final-input-sha256.txt) identifies that earlier design and
+incoming baseline; [current snapshot identity](r9-input-sha256.txt) identifies v1.5 and its R8
+input. No engine implementation or unrelated worktree files were modified.
 
 [target]: ../../vagent-dynamic-source-weighting-and-epistemic-arbitration.md

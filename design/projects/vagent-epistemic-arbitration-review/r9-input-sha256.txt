@@ -1,0 +1,5 @@
+SHA-256; P19 v1.5 reviewed against runtime 64b05125
+
+229e8434f752c9e2fa9e1394f6e79549d005279f180f7356325588b63ec90147  design/vagent-dynamic-source-weighting-and-epistemic-arbitration.md
+c3d1750831376784f75d91799b431964f7b87331f26f9256d1b9f95bca659924  design/projects/vagent-epistemic-arbitration-review/r8-input-v1.4.txt
+229e8434f752c9e2fa9e1394f6e79549d005279f180f7356325588b63ec90147  design/projects/vagent-epistemic-arbitration-review/r9-input-v1.5.txt

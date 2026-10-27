@@ -1,0 +1,18 @@
+Round 8 / Round 9 validation, 2026-10-27
+Runtime source baseline: 64b05125
+Proposal: v1.5 (unimplemented; P19.1-P19.8 remain approved)
+
+PASS: all 10 Round 8 reports present; all 10 Round 9 reports present.
+PASS: all 10 closing reports have 0 BLOCKING, 0 MAJOR and CONVERGED.
+PASS: proposal equals immutable r9-input-v1.5.txt byte for byte.
+PASS: all SHA-256 entries in r9-input-sha256.txt match.
+PASS: all 7 math fences are byte-identical to Round 8 input.
+PASS: 98 local Markdown link targets exist across proposal and new review records/index.
+PASS: mdformat --check --wrap 100 --extensions gfm --extensions dollarmath --extensions frontmatter
+      across proposal, briefs, index, dispositions and 20 critic reports.
+PASS: mdl -i across the same files.
+PASS: git diff --check.
+
+Scope: design/review documentation only; no engine changes or running P19 acceptance tests.
+Existing runtime tests cited are evidence for baseline capability, not for P19 conformance.
+Earlier untracked R3-R7 artifacts are preserved and are not staged by this review.

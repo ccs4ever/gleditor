@@ -1,6 +1,6 @@
 # vagent Dynamic Source Weighting & Epistemic Arbitration Framework
 
-Version 1.4. Approved design, unimplemented. The owner approved P19.1–P19.8 on 2026-10-27; see the
+Version 1.5. Approved design, unimplemented. The owner approved P19.1–P19.8 on 2026-10-27; see the
 [approval record](projects/vagent-epistemic-arbitration-review/approval-p19.md). Review history:
 [epistemic arbitration review](projects/vagent-epistemic-arbitration-review/README.md).
 
@@ -11,35 +11,41 @@ implementation or replace the acceptance gates.
 
 ## 1. Baseline, dependencies and rulings
 
-The baseline is commit `5ee5f6ff` on `design/vagent-epistemic-arbitration`, plus the pre-existing
-v1.2 working edits captured before Round 3. Only documentation changes are proposed here.
+The current code baseline is commit `64b05125` on `design/vagent-epistemic-arbitration`, which
+integrates the actor runtime from `46402f26`. The original P19 review used `5ee5f6ff`; its input and
+verdicts remain historical records. This revision changes the design and review records only. Paths
+in the following table are relative to `apps/common/xanadu/` unless qualified.
 
-| Mechanism                                                    | Verified baseline                                                      | Status for this proposal                                                            |
-| ------------------------------------------------------------ | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| Arena marks, release, discard                                | `zigzag/arena_manifold.cpp:1572–1675` under `apps/common/xanadu/`      | Built; release reverses writes and truncates allocations, discard keeps allocations |
-| VM choices and backtracking                                  | `vortex/vortex_vm.cpp:214–245`                                         | Built; backtracking releases the choice's arena mark                                |
-| Clone master lookup                                          | `zigzag/arena_manifold.cpp:1009–1011`, `zigzag/cell_views.hpp:281–292` | Built rank walk, linear in clone-rank length                                        |
-| vagent compiler                                              | `vagent/compiler.hpp:38–47`                                            | Scalar statement compiler; explicitly not an agent runner                           |
-| Belief database and isolated SLD solver                      | [Vlog](vlog-logic-extension.md), §6–§7                                 | Prerequisites, unbuilt here                                                         |
-| Actor executor, runtime ABI, reconciler                      | Absent from this checkout                                              | Prerequisites; no current file:line evidence for their behavior                     |
-| Shared program base (P17), belief coexistence (P18)          | Historical designs described below                                     | Prerequisites; approval elsewhere does not establish implementation here            |
-| Epistemic syntax, profiles, learning, fusion, scoped results | This document                                                          | Owed by P19                                                                         |
+| Mechanism                                                    | Current evidence                                                                                       | P19 boundary                                                                                                                  |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| Arena marks, release, discard                                | `zigzag/arena_manifold.cpp:1589–1717`                                                                  | Built; release reverses writes and truncates allocations                                                                      |
+| Choices, handle operands and Point                           | `vortex/vortex_vm.cpp:208–258,1104–1144`; `vortex/vortex_core.cpp:353–386`                             | Built; no scoped-result transfer primitive                                                                                    |
+| Clone master lookup                                          | `zigzag/arena_manifold.cpp:1026–1028`; `zigzag/cell_views.hpp:279–292`                                 | Built rank walk, O(L) in clone-rank length                                                                                    |
+| Bounded frontend and scalar compiler                         | `vagent/compiler.hpp:38–47`; `apps/vagent/main.cpp:608–624`                                            | Preserved `check` path; not P19's actor compiler                                                                              |
+| Actor compiler and executor                                  | `vagent/runtime/compiler.cpp`; `vagent/runtime/agent_executor.cpp:1380–1534`                           | Built; P19 syntax, scoring and verification are absent                                                                        |
+| Keyed ground beliefs                                         | `vagent/runtime/compiler.cpp:3947–4208,4444–4478`; `tests/xuzz/vagent_belief_test.cpp:296–350,412–486` | Built source-name support, same-term coalescing and source-specific keyed replacement; no P19 observation ledger              |
+| Vlog terms versus actor rule solving                         | `zigzag/vlog.hpp:51–107`; `vagent/runtime/compiler.cpp:3947–3961`                                      | Unification is built; the actor belief query scans ground facts, not isolated Horn/SLD proofs                                 |
+| Shared program and host upgrade seam                         | `vagent/runtime/program.cpp:48–107`; `vortex/mesh_actor.hpp:138–142`; `vortex/mesh_actor.cpp:683–732`  | Built program base and caller-supplied StateReconciler/context swap; automatic vagent schema/plan reconciliation remains owed |
+| Checkpoint state restoration                                 | `vagent/runtime/agent_executor.cpp:3152–3282,3344–3461`                                                | Built fixed-dimension copier; it does not preserve P19 ranks or enforce P19 compatibility                                     |
+| Epistemic syntax, profiles, learning, fusion, scoped results | This document, P19.1–P19.8                                                                             | Approved, unimplemented                                                                                                       |
 
-P17 design: [shared program and live upgrade](vagent-shared-program-and-live-upgrade.md), originally
-reviewed at `b1311f56` with approval recorded at `6aef0d8a`. That companion and its review history
-are imported. The historical baseline table above still describes the original P19 review input. The
-runtime from `46402f26` is now integrated separately under `vagent/runtime/`, including the actor
-executor, shared-program base and live-upgrade tests. This does not implement P19. Historical P18
-design: `git show f033eda8:design/vagent-extended-capabilities-and-belief-vlog-unification.md`
-remains absent from this branch; its semantics must be reconciled before implementing P19. The
-[current vagent specification](vagent-agent-language.md) and
-[implementation progress](vagent-implementation.md) describe the two compiler frontends and their
-call boundary.
+P17's [shared-program/live-upgrade design](vagent-shared-program-and-live-upgrade.md) and review
+history are imported. Its full reconciliation policy is not established by the generic callback or
+by tests that manually deliver `Upgrade`: see `tests/xuzz/vagent_upgrade_test.cpp:132–240,246–282`.
+P19.1 must compose with a completed vagent upgrade pipeline; a host callback alone supplies no
+schema or epistemic migration policy. Checkpoint/resume and live upgrade are separate paths.
 
-P19 assumes P18's keyed ground facts coexist per asserting source on `d.clause`, with provenance on
-`d.source`, and P17's shared immutable program base plus private actor overlay. Arbitration
-initially covers overlay ground facts only. It does not silently assign confidence to derived Horn
-proofs. An arbitrated query never falls back to an unscored rule when no eligible fact remains.
+The historical P18 document remains available as
+`git show f033eda8:design/vagent-extended-capabilities-and-belief-vlog-unification.md`, not as a
+file on this branch. Its absence does not erase the implemented keyed/source-aware ground facts. P19
+builds on those facts and explicitly adds authenticated observation identity and migration below;
+Horn-rule coexistence/resolution and derived-proof arbitration remain outside initial scope. The
+[current specification](vagent-agent-language.md) and [progress](vagent-implementation.md) document
+the two frontends. P19.4 targets `vagent/runtime/` and `check-runtime`/`run`; the bounded `check`
+frontend keeps its current behavior. Neither accepts the proposed P19 syntax today.
+
+Arbitration initially covers private-overlay ground observations over the shared immutable program
+base. An arbitrated query never falls back to an unscored rule when no eligible fact remains.
 
 | Decision | Ruling                                                                                                       |
 | -------- | ------------------------------------------------------------------------------------------------------------ |
@@ -62,28 +68,80 @@ be inspected or reconciled with the agent's state.
 ### 2.1 Profiles, observations and provenance
 
 P19.1 adds `d.trust` and `d.epistemic`. `$agent +d.trust` heads the source profile registry. Each
-profile is a clone master; each clause or token has its own source occurrence posward of that master
-on `d.clone`. Multiple referrers never share one occurrence on the same dimension. Insertion splices
-a new occurrence into the existing clone rank; it never overwrites the master's first successor.
-`cloneMaster()` walks negward to the rank end: cost is O(L) for L occurrences, including token and
-retained observation occurrences. No new index is assumed.
+profile is a clone master; each observation or token owns its own source occurrence posward of that
+master on `d.clone`. Multiple referrers never share one occurrence on the same dimension. Insertion
+splices a new occurrence into the existing clone rank; it never overwrites the master's first
+successor. `cloneMaster()` walks negward to the rank end: cost is O(L) for L occurrences, including
+token and retained observation occurrences. No new index is assumed.
 
 Each origin has one `d.epistemic` rank: an agent heads settle requests, a predicate descriptor heads
-policy/calibration records, a clause heads observation metadata, and an intention heads query
-tokens. Records are `d.vars` field-name ranks with owned `d.values` cells. Vectors and lists have an
-owned head-to-first edge on `d.grab` and elements chained on `d.step`; matrices, if introduced
-later, require row and element cells rather than encoded text. No two field cells point to the same
-owned value cell along `d.values`; sharing uses a fresh clone view. Metadata never goes into
-serialized JSON or bit-packed integer fields.
+policy/calibration records, a source-support cell heads its observation records, and an intention
+heads query tokens. Records are `d.vars` field-name ranks with owned `d.values` cells. Vectors and
+lists have an owned head-to-first edge on `d.grab` and elements chained on `d.step`; matrices, if
+introduced later, require row and element cells rather than encoded text. No two field cells point
+to the same owned value cell along `d.values`; sharing uses a fresh clone view. Metadata never goes
+into serialized JSON or bit-packed integer fields.
 
-| Record             | Required fields                                                                                                                                                                                                                                                                     |
-| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Source profile     | Stable authenticated source identity/incarnation, health flags, last receive time, last observation sequence, reject count, calibration-record rank head                                                                                                                            |
-| Domain calibration | Source identity/incarnation, predicate signature, domain/schema ID, calibration/model epoch; alpha, beta, decay rate, weights, bias, normalizer state, verified-label count, active-label ledger head and policy reference                                                          |
-| Observation        | Stable event ID, full predicate and key values, source identity/incarnation, domain/calibration key, source sequence, observed time, received time, clock mapping version, frame/unit schema, value, full current scalar variance if continuous, verdict, model/calibration version |
-| Query token        | Predicate signature, full key and value tuple, observation IDs and versions, source clone occurrences, context snapshot, query/model version                                                                                                                                        |
-| Verification       | Stable verification ID and revision, checked grant/principal, target observation IDs/versions and calibration epoch, optional predecessor ID per target, y/q, evidence references, commit/outcome status                                                                            |
-| Dependence group   | Stable group ID and policy/domain epoch, finite rho in [0,1], issuing authority and audit provenance, owned source-membership list head                                                                                                                                             |
+| Record             | Required fields                                                                                                                                                                                                                                                                                                                                                     |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Source profile     | Stable authenticated source identity/incarnation, health flags, last receive time, last observation sequence, reject count, calibration-record rank head                                                                                                                                                                                                            |
+| Domain calibration | Source identity/incarnation, predicate signature, domain/schema ID, calibration/model epoch; alpha, beta, decay rate, weights, bias, normalizer state, verified-label count, active-label ledger head and policy reference                                                                                                                                          |
+| Observation        | Stable event ID, full predicate and key values, source identity/incarnation, domain/calibration key, source sequence, mapped acquisition time and its uncertainty bound, original clock basis/epoch, received time/basis, immutable clock-mapping version, frame/unit schema, value, full current scalar variance if continuous, verdict, model/calibration version |
+| Query token        | Predicate signature, full key and value tuple, observation IDs and versions, source clone occurrences, context snapshot, query/model version                                                                                                                                                                                                                        |
+| Verification       | Stable verification ID and revision, checked grant/principal, target observation IDs/versions and calibration epoch, optional predecessor ID per target, y/q, evidence references, commit/outcome status                                                                                                                                                            |
+| Dependence group   | Stable group ID and policy/domain epoch, finite rho in [0,1], issuing authority and audit provenance, owned source-membership list head                                                                                                                                                                                                                             |
+
+#### Shared clauses and independently owned observations
+
+The existing compiler coalesces an equal ground term into one clause and adds source-name cells on
+that clause's `d.source` rank. Keyed replacement removes only the replacing source; another source
+can keep the old clause alive (`vagent/runtime/compiler.cpp:4116–4208`). Preserve those term/query
+and `+pred`/`-pred` change semantics. P19 does not turn every source report into a duplicate clause.
+
+For an arbitrated predicate, each such support cell owns a bounded observation-history rank on
+`d.epistemic`. Each observation is a separate record with the complete fields above, including its
+own source/profile occurrence, ID/version, time/uncertainty, variance, features and verdict. A
+clause is only the common proposition container: its sources never share one observation record.
+Existing source-name text is a routing/display alias, not authenticated identity. P19.1/P19.5 bind
+ingress to a checked principal/incarnation and map the alias to that identity; ambiguous or unbound
+aliases return `UnknownSource`. Plain predicates keep their existing name-based behavior. Legacy
+facts without that binding and complete observation metadata are unscored and ineligible on an
+arbitrated predicate; migration cannot silently invent provenance, acquisition time or variance for
+them.
+
+Exactly one current observation per authenticated source/incarnation and predicate key contributes
+to arbitration. A new event with the same tuple still creates a new observation/version and retires
+that source's previous current observation; it refreshes only its own time/features/variance. An
+exact authenticated event retry creates nothing and refreshes nothing. Another source reporting the
+same tuple gets an independent observation under its own support cell. The bounded history retains
+pinned verification targets; historical observations do not add extra votes.
+
+When keyed replacement or retraction removes a support, move its still-retained observation records
+to an owned retained-observation list under the keyed calibration record before excising the
+support. A record has one owner at a time; transfer splices ranks rather than sharing a list head.
+Tokens and ledgers resolve stable IDs across current and retained records. A correction of a retired
+observation may correct its training label, but never makes it the current reading again or replaces
+a later source sequence. Restoring assertion support after refutation is permitted only if that
+observation is still current for the source/key and is otherwise eligible.
+
+A normative two-degree topology is:
+
+```text
+clause --d.source--> support_A --d.source--> support_B
+support_A --d.epistemic--> observation_A1 --d.epistemic--> observation_A2
+observation_A1 --d.vars--> profile_field --d.vars--> event_id_field
+profile_field --d.values--> profile_view_A1
+profile_master --d.clone--> profile_view_A1 --d.clone--> profile_view_B1
+```
+
+Every arrow is reciprocal. Each record field owns its value or its fresh view; no field points
+directly to a shared master on `d.values`. A calibration policy field likewise owns a fresh view on
+the policy master's clone rank. Insert each view by splicing posward after the master (or an
+existing successor), retaining the old successor and reciprocal negative edges; never replace an
+occupied edge without the splice. Excising a view reconnects its predecessor/successor on `d.clone`
+before removing its owner's edge. Lists use owned `d.grab` heads and `d.step` elements. Migration
+enumerates owned records and reconstructs these edges from its ref map; an unrestricted clone-rank
+walk must not pull unrelated base/program graphs into the overlay.
 
 Numeric state uses canonical R6 scalar cells with the appropriate `ValueKind`; integers and floats
 are distinct. Continuous scope initially accepts scalar isotropic variance: k coordinates have
@@ -123,7 +181,7 @@ Pruning chooses the least recently received inactive NOMINAL profile with no liv
 token, verifier, or continuation reference; ties use stable source identity. If none is reclaimable,
 admission fails explicitly. Unlinking a rank is logical removal and does not reclaim arena slots.
 The existing `ArenaManifold::compact()` compacts link/content runs, not slots
-(`zigzag/arena_manifold.cpp:1702–1730`). Tombstones continue to count against the physical cell
+(`zigzag/arena_manifold.cpp:1719–1747`). Tombstones continue to count against the physical cell
 budget. Initial scope refuses new allocations at that budget; repeated profile churn may exhaust it
 even with few live sources. Long-running service with reusable cell capacity requires a future
 reachable-graph rebuild into a fresh arena at a quiescent checkpoint, with complete ref remapping
@@ -131,12 +189,66 @@ and peak-copy budgets. That mechanism is not claimed as implemented or supplied 
 Retained observations and deduplication windows are bounded by the actor's replay horizon; expired
 IDs cannot be resubmitted as fresh verification.
 
-P19.1 reconciliation migrates profiles first, then observations and source clone occurrences, then
-tokens/continuations. Use the remapping produced by graph copying; no raw arena reference crosses
-contexts. Full typed keys and observation identities are authoritative; a 64-bit key hash may only
-accelerate equality with full-value collision checking. A schema/model version change invalidates
-incompatible weights, normalization state and cached features explicitly, never by reinterpreting
-old vector positions. Checkpoint/resume must preserve these same fields and replay protection.
+#### Upgrade and checkpoint translation (P19.1)
+
+The current `StateReconciler` callback is only an atomic context-swap seam. The separate
+`AgentExecutor::restoreState` copier matches predicates by name and copies selected dimensions; its
+`termFrom` set is `d.grab`, `d.step`, `d.source`
+(`vagent/runtime/agent_executor.cpp:3200–3203,3233–3247`). Adding new rank names to the ABI alone
+would lose the observation/profile graph. P19.1 therefore extends `vagent/runtime/runtime_abi.hpp`,
+the `vagent/runtime/agent_executor.cpp` resume path and a new runtime-owned epistemic translation
+routine shared by resume and the vagent upgrade callback. It does not claim an automatic full P17
+upgrader already exists. Epistemic state is copied into the private overlay; neither program base is
+mutated.
+
+Translation receives old/new program manifests, the old owned-state root, a new context and checked
+clock/identity bindings. Predicate compatibility uses name, arity, ordered argument types and key
+positions plus domain/unit/frame schema, feature schema, policy/model/calibration epochs and source
+incarnation. Full typed values are authoritative; a hash is only an accelerator with collision
+checking. A display-name match or equal 64-bit hash is insufficient.
+
+The translator builds one complete old-to-new ref map in bounded passes:
+
+1. Resolve compatible immutable descriptors in the new program; copy profile masters, health,
+   policy/dependence groups, keyed calibrations and their owned ledger/list heads first.
+1. Copy shared clauses and each source support, then every current/retained observation and its
+   distinct profile/policy clone occurrence. Preserve event IDs, payload identities, full keys,
+   current-versus-retired status, active labels, defeaters and application-delivery outcomes.
+1. Rebuild all owned `d.trust`, `d.epistemic`, field/list and clone edges through the map. Copy
+   tokens/intentions last, resolve their observation IDs and rebind only compatible descriptors.
+   Never persist a raw old-context `CellRef` as a new-context address.
+1. On same-program resume, preserve compatible scalar/model/normalizer bits and verify the mapped
+   query versions. On program upgrade, invalidate ranked continuations by default with
+   `StaleEpistemicQuery`; new queries must use the new program/policy snapshot. No live inner scope
+   crosses the quiescent boundary.
+
+A changed schema/model or source incarnation requires an explicit typed migration or new epoch with
+declared priors; it cannot reinterpret old vector positions or attach old clauses by name. Old
+observations become ineligible, pending labels/completions return `ExpiredLabel` or
+`ExpiredVerificationTarget`, and retained IDs/outcomes/floors still reject replay. If a compatible
+translation, retained replay state or peak-copy budget cannot be established, refuse the whole
+operation and keep the old actor/context and grant. The composed upgrade pipeline must roll back
+both translation and `on Upgrade`, not merely the generic context swap. Checkpoint restoration must
+validate this contract before the new actor runs.
+
+Preserve fault latches, warning/suspicion reasons and their provenance, reject counters, health
+policy and source binding. Model reset or program upgrade never clears a hardware fault. A source
+reboot alone is not reset authority; carrying a physical fault into a replacement binding or
+clearing it requires the host's checked replacement/reset policy. Preserve each observation's mapped
+time, uncertainty and immutable mapping snapshot/version. Rebase heartbeat deadlines from a trusted
+paired clock mapping including elapsed downtime and uncertainty, or mark the affected
+liveness/observations stale and require fresh authenticated input. Never compare raw steady-clock
+epochs across reboot or restart a full heartbeat grace period. Unknown clock mapping cannot clear a
+latched fault.
+
+Checkpoint already refuses pending host deliveries, unanswered sends and in-flight effects
+(`vagent/runtime/agent_executor.cpp:3351–3365`). P19 retains that boundary and adds pending
+verification processing/scopes to the quiescence check. Live upgrade must drain or verifiably cancel
+external native work before translation; callbacks may not transplant executor-side flight/request
+tables. Any late completion is matched to its immutable full learner key and expired on mismatch.
+Stable application-verification journals and cached outcomes migrate as owned state even after
+transport has retired its own delivery record. Prices include both old/new graphs and remapping
+workspace; ordinary link/content `compact()` is not physical-slot reclamation.
 
 ## 3. Warrant, decay and learning
 
@@ -222,12 +334,14 @@ nor does it make a multispecies/categorical prior uniformly distributed. Static 
 lambda=0. Freshness eligibility also has a maximum age: an old reading approaching 0.5 need not
 remain actionable. Silence is handled by health timers, independently of probability decay.
 
-Every observation has an acquisition time mapped to the actor's time basis plus a mapping
-uncertainty and sequence number. Negative ages, future timestamps beyond the policy tolerance,
-replayed sequences, or unknown clock mappings are rejected as `ObservationTimeMismatch`. After
-restart/reboot, a steady clock epoch is not assumed comparable: re-establish a mapping or expire
-affected observations. Receipt time is used for liveness; acquisition time is used for physical
-alignment and age.
+Every observation owns an acquisition time mapped to the actor's time basis, a finite nonnegative
+mapping-uncertainty bound in seconds, the original clock basis/epoch and a sequence number. Preserve
+an immutable mapping snapshot or an addressable version for the full retained observation lifetime;
+query evaluation cannot consult a replacement mapping as though it were the original one. Negative
+ages, future timestamps beyond the policy tolerance, replayed sequences, or unknown clock mappings
+are rejected as `ObservationTimeMismatch`. After restart/reboot, a steady clock epoch is not assumed
+comparable: re-establish a mapping or expire affected observations. Receipt time is used for
+liveness; acquisition time is used for physical alignment and age.
 
 Dead-reckoning skills integrate increments into pose and propagate their own current covariance, for
 example `P_next = F P F^T + Q` for the specified model. The assertion supplies that full current
@@ -316,10 +430,11 @@ calibrator.
 
 ## 4. Surface language and static contract
 
-The following syntax is proposed P19.4, not accepted by the current scalar compiler. Base `Term`
-means one predicate identifier with argument list, as parsed by `vagent/parser.cpp:819–832`;
-conjunction is outside that term. The modifier is recognized contextually only when followed by a
-predicate term. A predicate actually named `truest` remains parseable as `believes truest(...)`.
+The following syntax is proposed P19.4, not accepted by either current frontend. Base `Term` means
+one predicate identifier with argument list, consumed by the actor parser at
+`vagent/runtime/parser.cpp:1285–1293`; conjunction is outside that term. The modifier is recognized
+contextually only when followed by a predicate term. A predicate actually named `truest` remains
+parseable as `believes truest(...)`.
 
 ```ebnf
 BeliefQuery = 'believes' [ Modifier ] Term [ 'from' Postfix ]
@@ -370,6 +485,19 @@ policy retain base query semantics. On an arbitrated predicate, an omitted modif
 declared strategy; an explicit modifier overrides strategy while retaining the other validated
 policy fields. Model/risk/variance incompatibilities after an override are rejected statically or by
 typed refusal for dynamic fields.
+
+The actor AST binding is explicit: extend `runtime::EBelieves` with a typed strategy enum, optional
+typed source selector and uncertainty binder; extend the belief form of `runtime::EFor` with the
+same query-policy reference. Add a typed policy to `PredicateDecl`, an assertion action carrying
+term/variance and an opaque checked-ingress binding, and distinct verification/health action
+variants. `runtime::Term` keeps the predicate's typed argument tuple; it does not store an event ID
+in an argument string. Observation IDs, source-incarnation and schema/model keys are runtime ABI
+records supplied by ingress/translation, not forgeable language literals. A source-name expression
+can select only an already authenticated binding. The checker resolves the predicate policy and
+validates strategy, source, features, uncertainty type, purity and handler authority context;
+dynamic binding/epoch mismatches are typed refusals. `check-runtime` checks this actor AST and `run`
+lowers it through the actor compiler. Successful bounded `check` results do not establish P19
+conformance.
 
 Policy fields are typed constants: strategy, model, minimum warrant, freshness half-life/maximum
 age, frame, units, clock basis, alignment tolerance, cluster tolerance, maximum cluster diameter,
@@ -555,16 +683,59 @@ does not specify a working lowering. P19.8 therefore proposes a scoped evaluatio
 documented typed result ABI; this is a dependency, not an existing method.
 
 The invocation is a new `OpcodeKind::ScopedEvaluate` (`#ScopedEvaluate`) instruction emitted at the
-belief-query site. Its input wing carries a validated callback entry opcode, an argument-record root
-that predates the scope, and a typed result-schema descriptor; its output wing names a pre-existing
-destination record under the caller's mark. The compiler supplies a graph callback using an explicit
-evaluation frame for inputs and result fields. The VM enters that callback on the same cursor via an
-internal scoped-execution frame, and its sentinel completion resumes the instruction's saved
-successor after cleanup and result reconstruction. This is part of the normal interpreter loop; no
-native-call registry or host stdlib dispatch is assumed. Callback targets and input/schema roots
-must belong to the current program/arena and pass lifetime/type validation. The destination receives
-the reconstructed value only after release; its write remains trailed under the caller's enclosing
-mark. Nested scope frames are bounded by the actor's depth/fuel limits.
+belief-query site. Its input wing carries the entry/completion, argument/schema and frame-binding
+references defined below; its output wing names a pre-existing destination record under the caller's
+mark. The compiler supplies a graph callback using an explicit evaluation frame for inputs and
+result fields. The VM enters that callback on the same cursor via an internal scoped-execution
+frame, and its dedicated completion target resumes the instruction's saved successor after cleanup
+and result reconstruction. This is part of the normal interpreter loop; no native-call registry or
+host stdlib dispatch is assumed. Callback targets and input/schema roots must belong to the current
+program/arena and pass lifetime/type validation. The destination receives the reconstructed value
+only after release; its write remains trailed under the caller's enclosing mark. Nested scope frames
+are bounded by the actor's depth/fuel limits.
+
+The normative graph ABI is versioned as `epistemic-scope-1`. Unlike arithmetic inputs, these wings
+carry reference operands, not rendered cell values. P19.8 adds an explicit raw-reference operand
+reader: every input/output slot holds a relocation-marked `OpHandle` naming the target below. It
+validates ownership and type before following the handle, rather than passing it through
+`VortexCore::inputsOf`'s value-following behavior (`vortex_core.cpp:353–386`). No persisted integer
+cell address is accepted as a substitute.
+
+| Wing/slot | Target and ownership                                                                   |
+| --------- | -------------------------------------------------------------------------------------- |
+| Input 0   | Callback entry opcode in the current program's validated pure graph                    |
+| Input 1   | Dedicated completion Nop in that same graph, reached by an explicit callback-root Jump |
+| Input 2   | Typed argument-record root, pinned by the caller and older than the inner mark         |
+| Input 3   | Immutable argument/result schema descriptor and effect manifest                        |
+| Input 4   | Compiler-assigned frame-handle register in this actor's overlay                        |
+| Output 0  | Caller-owned, pre-existing destination record matching the result schema               |
+
+Before entry, save the caller PC/successor, stack/frame-handle bindings and choice depth. Under the
+inner mark allocate a fresh evaluation frame with owned `args`, `result` and `outcome` fields, copy
+typed arguments within budget, and bind Input 4's register to it. The callback reads/writes these
+fields through compiler-generated handles, as ordinary framed routines do
+(`vagent/runtime/compiler.cpp:829–873`); it never tries to read the VM's private Call return frame.
+Recursive scopes get distinct frames; inner release restores the previous handle binding. The effect
+manifest permits writes only to scoped frame/scratch, never pre-existing agent state or an outbox;
+verifier checks cover the whole reachable callback graph and every call target.
+
+Reaching Input 1 is the only normal root completion. Reaching Halt, missing PC or an unmatched root
+Return is `InvalidScopedCompletion`; nested ordinary calls still use their own Return frames. The VM
+intercepts completion before executing that Nop. The callback's typed outcome is `Value` with a
+schema-valid payload or `Empty`; a dynamic policy error may instead supply `Refused` with a typed
+error code. Exhausting the root choice floor maps to `Empty`. A Cut below the floor, trap, numeric
+fault or fuel exhaustion maps to `Refused`, never `Empty` or partial `Value`. Snapshot the bounded
+outcome/payload, close child choices, release the inner mark, restore caller state and reconstruct
+the destination under the caller's mark. It has typed `outcome`, optional `payload` and optional
+`error` fields; absent fields use optional values, not reserved integers. Result-copy or
+reconstruction uses a fresh publication mark after inner release: discard it only after every field
+is valid; release it on failure and propagate the typed VM refusal without a partial destination.
+
+Lowering consumes that status immediately: `Value` binds the query, `Empty` follows the query's
+ordinary failure rule, and `Refused` propagates a distinguished epistemic refusal. P19.8 extends the
+VM result channel and P19.4/P19.5 carry that code through condition/turn diagnostics; it must not be
+collapsed to generic statement failure or retried as another candidate. The saved successor resumes
+only after cleanup and status publication. No second cursor or nested scheduler runs the callback.
 
 The primitive runs a compiler-verified pure callback on the owner's cursor under an inner mark,
 within the caller's fuel and depth budget. It saves caller cursor/stack/choice state and establishes
@@ -671,11 +842,45 @@ after successful non-speculative turn completion, applying labels, model updates
 retractions atomically with deduplication. A plan/statement failure that releases an enclosing mark
 rolls back the queue too. This explicitly withdraws v1.2's impossible same-arena rollback immunity.
 
-Independently acquired verification is delivered as its own authenticated percept and committed in a
-separate successful turn before subsequent plan work. Failed verification turns do not acknowledge
-the event and may be retried; the eventual adapter must implement this delivery/commit boundary. A
-successfully committed verification survives failures of later turns. A local speculative directive
-has no such survival guarantee. No C++ side channel bypasses actor transaction atomicity.
+#### Transport receipt versus committed verification (P19.5)
+
+Independently acquired verification is delivered as its own authenticated percept, and its learning
+update commits in a separate successful turn before dependent plan work. The current adapter does
+not supply that application-delivery guarantee: `MeshActorRuntime::receive` sends `ActorAck` on
+enqueue (`vortex/mesh_actor.cpp:517–534`); ordinary dispatch ignores a failed `runTurn` outcome and
+returns a successful transport execution result (`vagent/runtime/agent_executor.cpp:1160–1180`).
+Host-event settling also removes a batch before ignoring its turn outcomes (`:1284–1292`). Merely
+releasing a failed turn therefore does not make the input reliably retryable.
+
+P19.5 uses a separate application protocol over existing actor messages, not a new wire kind:
+
+1. The issuer retains a bounded on-manifold pending-verification record keyed by checked issuer,
+   immutable event ID and canonical payload identity. Transport `ActorAck`/`ActorDeliverValue` only
+   confirms transport progress and never deletes this application record.
+1. A dedicated authenticated intake turn admits an owned receiver journal record under the agent's
+   `d.epistemic` rank before reporting application acceptance. Admission failure publishes no
+   acceptance; the issuer may retry. An exact pending retry names the same entry, not a new job.
+   Host-posted verification likewise remains pending until intake commits; it cannot use the current
+   drop-on-settle host-event behavior.
+1. A separate processing turn atomically publishes the label/model change, effective-label and
+   replay records, cached terminal outcome and staged `VerificationOutcome` response. Rollback
+   leaves the intake journal pending and emits no committed outcome. Retry is scheduled with bounded
+   backoff/budgets, not an unbounded same-turn loop. A terminal typed rejection is itself recorded
+   transactionally and reported; resource starvation never becomes an invented successful label.
+1. The issuer removes its application pending record only after a checked `VerificationOutcome`
+   naming the exact actor, issuer/event ID, payload identity and terminal outcome. A lost response
+   causes redelivery; the receiver re-emits its cached committed/rejected outcome without
+   retraining. Model publication and cached outcome precede response drain. Later unrelated plan
+   failure cannot undo them. Journals/outcomes survive upgrade/resume with replay floors and
+   retention budgets.
+
+This is new work in `vagent/runtime/agent_executor.*`, `vagent/runtime/runtime_abi.hpp` and
+graph/compiler lowering, not existing successful-delivery behavior. Ordinary failed user handlers
+retain their current semantics. Verification intake/processing have no external model effects inside
+their mark; processing a native result uses its immutable full-key check first. A local speculative
+directive has no durability beyond its enclosing successful turn. No C++ side channel stores learned
+state or bypasses transaction atomicity. The extra intake/processing turns, response and journal
+cells are charged to P19.5's actor budgets.
 
 Refutation removes matching assertional support by 1D rank excision and retains a bounded,
 inspectable defeater with event identity and evidence. The defeater matches the exact refuted event
@@ -683,8 +888,9 @@ IDs and acquisition window, suppressing their replay/relayed copies during the r
 horizon. It does not ban the predicate/key forever: a fresh authorized observation with a new
 ID/time is retained as new evidence and may reopen the hypothesis; a host adjudication can reverse
 the old verdict with an authorized predecessor-linked correction under the active-ledger replay rule
-above. A corrected positive verdict clears that event-scoped defeater and restores the retained
-assertion support transactionally, subject to current health/age eligibility. Expired
+above. A corrected positive verdict clears that event-scoped defeater and restores retained
+assertion support transactionally only when the observation is still current for that source/key,
+subject to health/age eligibility; it cannot resurrect a superseded reading. Expired
 verification/tombstone IDs remain subject to the actor replay floor, so expiration cannot turn a
 replay into fresh evidence. It does not erase an immutable Horn rule or guarantee AGM
 closure/contraction over all derived beliefs. Re-derivation must carry its supporting evidence and
@@ -719,16 +925,16 @@ innovation gating is an inconsistency check, not a proof against Byzantine behav
 All paths below are relative to `apps/common/xanadu/` unless stated. Future files are explicitly
 labelled. The proposals do not change `CompactOpNode`, store formats or the 64 KiB Merkle piece.
 
-| Proposal                             | Files and why the change belongs there                                                                                                                                 | Cost and fallback                                                                                                                                                                                                                                                         |
-| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| P19.1 Profiles, policy and migration | New runtime ABI/executor/reconciler integration when prerequisites exist; `vagent/compiler.cpp`; `system_docs.cpp` default specs/schema                                | O(S) identity/health profiles plus keyed domain calibrations, dependence groups/memberships and O(observations, features, tokens); scalar cells/ranks with lookup walks charged to fuel. If declined, retain P18 source coexistence without learned arbitration           |
-| P19.2 Analytic scoring and fusion    | `vortex/vortex_stdlib.{hpp,cpp}` graph construction and callable graph ABI; no C++ model evaluator                                                                     | Beta/decay O(1) per source, pooling O(N plus clone/calibration/group-membership walks), naive clustering O(N squared), sort O(N log N), scalar fusion O(Nk). If declined, explicit caller policy without built-in queries                                                 |
-| P19.3 Online SGD                     | Same stdlib graph files; reuses arithmetic, rank walking and typed scalar access                                                                                       | O(d) per prediction/label; O(Sd) weights plus O(L\*d) bounded active-label features/replay state; normalizer and pending labels. Bandits deferred. If declined, Beta model only                                                                                           |
-| P19.4 Surface language               | `vagent/{token,lexer,ast,parser,checker,compiler}.{hpp,cpp}` as applicable                                                                                             | Adds typed AST/policy checks and graph lowering; emitted size depends on N,d,k and scope ABI, not a claimed fixed 35 instructions. If declined, no new syntax                                                                                                             |
-| P19.5 Verification transactions      | `vagent/compiler.cpp` and future executor/runtime ABI/host authorization integration                                                                                   | O(referenced observations times d) per new label; O(L*d) corrective replay and O(L*d) retained training state; bounded token/queue/defeater state. Separate percept turns for durable verification. If declined, explicit P18 belief revision without learned attribution |
-| P19.6 Native models                  | Future host binding adapter files; OS/device/model runtime is the C++ boundary                                                                                         | Opt-in model memory, latency and completion budgets; model/schema IDs and cancellation. If declined, analytic/on-manifold features only                                                                                                                                   |
-| P19.7 Elementary math                | `vortex/vortex_vm.{hpp,cpp}`, `vortex/vortex_core.{hpp,cpp}`, stdlib registration and all opcode decoders/name mappings/tests found by an enum audit                   | Three enum entries and validation/dispatch work; benchmark platform `exp/log/sqrt` rather than assert 3–15 cycles. If declined, P19 math-dependent features remain unavailable                                                                                            |
-| P19.8 Scoped result primitive        | `vortex/vortex_vm.{hpp,cpp}`, `vortex/vortex_core.{hpp,cpp}`, `vagent/compiler.cpp`, graph ABI and every opcode decoder/name table/artifact reader found by enum audit | One ScopedEvaluate enum entry, one live mark/continuation plus bounded result copy; runtime ownership cannot be encoded by a plain graph call. If declined, scratch-lifetime-dependent queries remain unimplemented                                                       |
+| Proposal                             | Files and why the change belongs there                                                                                                                                                                                                                             | Cost and fallback                                                                                                                                                                                                                                                                                                                              |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P19.1 Profiles, policy and migration | `vagent/runtime/runtime_abi.hpp`, `vagent/runtime/agent_executor.*` restoreState and a new shared runtime epistemic translator composed with the host upgrade callback; `vagent/runtime/compiler.cpp`; `system_docs.cpp` defaults/schema                           | O(S) identity/health profiles plus keyed domain calibrations, dependence groups/memberships and O(observations, features, tokens); scalar cells/ranks with lookup walks charged to fuel. If declined, retain current source-name ground-fact coexistence without learned arbitration                                                           |
+| P19.2 Analytic scoring and fusion    | `vortex/vortex_stdlib.{hpp,cpp}` graph construction and callable graph ABI; no C++ model evaluator                                                                                                                                                                 | Beta/decay O(1) per source, pooling O(N plus clone/calibration/group-membership walks), naive clustering O(N squared), sort O(N log N), scalar fusion O(Nk). If declined, explicit caller policy without built-in queries                                                                                                                      |
+| P19.3 Online SGD                     | Same stdlib graph files; reuses arithmetic, rank walking and typed scalar access                                                                                                                                                                                   | O(d) per prediction/label; O(Sd) weights plus O(L\*d) bounded active-label features/replay state; normalizer and pending labels. Bandits deferred. If declined, Beta model only                                                                                                                                                                |
+| P19.4 Surface language               | `vagent/runtime/{token,lexer,ast,parser,checker,compiler}.{hpp,cpp}` as applicable; bounded frontend unchanged                                                                                                                                                     | Adds typed AST/policy checks and graph lowering; emitted size depends on N,d,k and scope ABI, not a claimed fixed 35 instructions. If declined, no new syntax                                                                                                                                                                                  |
+| P19.5 Verification transactions      | `vagent/runtime/compiler.cpp`, `vagent/runtime/agent_executor.*`, `vagent/runtime/runtime_abi.hpp` and host bindings for authorization, intake/retry journals and application outcomes; audit existing mesh messages without changing their receipt semantics      | O(referenced observations times d) per new label; O(L*d) corrective replay and O(L*d) retained training state; bounded token/queue/defeater state. Intake/processing turns, bounded application journals and cached outcome responses for durable verification. If declined, current explicit ground-fact revision without learned attribution |
+| P19.6 Native models                  | `vagent/runtime/host_bindings.*` and `vagent/runtime/agent_executor.*`; OS/device/model runtime is the C++ boundary                                                                                                                                                | Opt-in model memory, latency and completion budgets; model/schema IDs and cancellation. If declined, analytic/on-manifold features only                                                                                                                                                                                                        |
+| P19.7 Elementary math                | `vortex/vortex_vm.{hpp,cpp}`, `vortex/vortex_core.{hpp,cpp}`, stdlib registration and all opcode decoders/name mappings/tests found by an enum audit                                                                                                               | Three enum entries and validation/dispatch work; benchmark platform `exp/log/sqrt` rather than assert 3–15 cycles. If declined, P19 math-dependent features remain unavailable                                                                                                                                                                 |
+| P19.8 Scoped result primitive        | `vortex/vortex_vm.{hpp,cpp}`, `vortex/vortex_core.{hpp,cpp}`, `vagent/runtime/compiler.cpp`, `vagent/runtime/agent_executor.*` refusal propagation, graph ABI/raw-reference operand reader and every opcode decoder/name table/artifact reader found by enum audit | One ScopedEvaluate enum entry, one live mark/continuation, typed evaluation frame/reference operands and bounded argument/result copy; runtime ownership cannot be encoded by a plain graph call. If declined, scratch-lifetime-dependent queries remain unimplemented                                                                         |
 
 Prices count logical cells, links and feature dimensions; they are not heap-byte claims. Allocator
 capacity, CSR runs, trail records, primedia spans and retained tombstones add costs. Measure peak
@@ -756,9 +962,10 @@ overflow; a non-finite intermediate refuses rather than invents confidence.
 
 ### 8.2 Acceptance gates
 
-Implementation cannot begin by treating the historical review verdicts as running tests. First
-reconcile P17/P18 with the current branch and specify the actor delivery/commit and graph-call ABI.
-Then add tests beside the owning code:
+Implementation cannot begin by treating the historical review verdicts as running tests. Use the
+current baseline in §1, the upgrade/resume translation in §2.2, the graph ABI in §6.1 and the
+application protocol in §6.3. Complete the independent full-vagent upgrade prerequisite before
+claiming P19 upgrade support. Then add tests beside the owning code:
 
 1. VM/core tests: numeric domain/overflow behavior; scope success, ordinary failure, trap, fuel
    exhaustion and nested choices restore marks/cursor; no scratch ref escapes; primedia pins survive
@@ -772,7 +979,7 @@ Then add tests beside the owning code:
 1. Parser/checker/compiler tests: each modifier and contextual-name ambiguity; AST fields/policies;
    invalid risk/model combination; variance/uncertainty types; pure ranked bodies and no native
    calls in guards. Examples are proposed fragments until this compiler exists.
-1. Actor integration tests when the executor exists: failed local verification rolls back;
+1. Actor integration tests against the existing executor: failed local verification rolls back;
    unauthorized/self-issued verification and unauthorized reset are rejected; independent
    verification commits exactly once despite redelivery and later plan failure; query reads never
    update health; silence, freeze, persistent degraded reasons and latched reset obey the health
@@ -782,20 +989,43 @@ Then add tests beside the owning code:
    repeated query cleanup and sustained ingestion with explicit physical-cell budget refusal;
    link-run compaction must not be mistaken for slot reclamation.
 
+The integration-specific regressions must include:
+
+- Equal tuples from two sources share one clause while retaining different observation IDs,
+  times/clock uncertainties, variances, features and labels. A same-value new event refreshes only
+  its source; exact retry refreshes neither. Retracting/refuting one source preserves the other.
+  Correcting a retired observation never revives it over a newer source sequence.
+- Resume and composed upgrade preserve shared-clause topology, profile/policy clone occurrences,
+  current/retired observations, active labels, retained defeaters and application outcomes. A
+  same-named predicate with changed arity/key/types/frame/schema is rejected or explicitly migrated;
+  forced full-key hash collisions do not match. Program bases are unchanged on success or refusal.
+- Model/schema/incarnation changes expire delayed labels/native completions; a prior fault latch and
+  unrelated warning survive upgrades and model resets. Clock-mapping/uncertainty snapshots survive
+  resume or observations become ineligible; an unavailable heartbeat epoch yields stale state
+  without a new grace period or automatic fault reset.
+- Observe transport receipt separately from application outcome: fail verification processing after
+  intake, retry/redeliver, commit once, lose/replay its outcome and then fail a later plan. Model,
+  ledger, journal, cached outcomes and sender pending state must follow §6.3 in every case.
+- `check-runtime` and `run` exercise the runtime AST and all new diagnostics; bounded `check`
+  compatibility is checked separately. Graph tests validate each raw-reference operand, callback
+  completion, nested frame binding, choice floor, typed refusal and cleanup/reconstruction exit.
+
 The existing `tests/xuzz/vagent_*` frontend tests and `vortex_core_test.cpp`/`vortex_logic_test.cpp`
-are starting locations; executor/reconciler tests are future files, not existing passing coverage.
-Run headless under the repository's `make` environment. Format/lint this document and new review
-records with the required Markdown plugins; no engine build is claimed for a design-only revision.
+are starting locations, alongside existing `vagent_belief_test.cpp`, `vagent_upgrade_test.cpp`,
+`vagent_resume_test.cpp` and `mesh_actor_vagent_test.cpp`. Those tests establish baseline behavior,
+not P19 conformance; the P19-specific cases below are new tests. Run headless under the repository's
+`make` environment. Format/lint this document and new review records with the required Markdown
+plugins; no engine build is claimed for a design-only revision.
 
 ## 9. Open boundaries and change history
 
-| Boundary                             | Initial behavior                               | Extension prerequisite                                                        |
-| ------------------------------------ | ---------------------------------------------- | ----------------------------------------------------------------------------- |
-| Exact truth probabilities            | Warrant ranking heuristic                      | Directional calibrated likelihoods and joint dependence model                 |
-| Matrix/correlated fusion             | Refuse unsupported covariance/dependence       | Typed matrix ABI, tested covariance model or covariance-intersection proposal |
-| Derived-rule arbitration/AGM closure | Ground observations and bounded defeaters only | Proof provenance and dependency truth maintenance                             |
-| Active verification bandits          | Deferred; ordinary explicit verification       | Reward/cost/propensity and bounded RNG/algorithm specification                |
-| Full actor operation                 | Not implemented on this branch                 | P17/P18 reconciliation, actor executor and P19 acceptance gates               |
+| Boundary                             | Initial behavior                                           | Extension prerequisite                                                                 |
+| ------------------------------------ | ---------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| Exact truth probabilities            | Warrant ranking heuristic                                  | Directional calibrated likelihoods and joint dependence model                          |
+| Matrix/correlated fusion             | Refuse unsupported covariance/dependence                   | Typed matrix ABI, tested covariance model or covariance-intersection proposal          |
+| Derived-rule arbitration/AGM closure | Ground observations and bounded defeaters only             | Proof provenance and dependency truth maintenance                                      |
+| Active verification bandits          | Deferred; ordinary explicit verification                   | Reward/cost/propensity and bounded RNG/algorithm specification                         |
+| P19 actor integration                | Actor runtime integrated; epistemic behavior unimplemented | Full vagent upgrade pipeline plus P19 translation, ingress, scope and acceptance gates |
 
 Version 1.3 resumes the incomplete Round 2 review. It retains v1.2's health states, variance
 ingestion, slew gates, clustering, recovery directives, pure queries and asynchronous native models.
@@ -810,6 +1040,13 @@ query failure rules, explicit oversized-component singleton alternatives, audite
 dependence groups and rho domain, and effective-label supersession/replay with idempotent delivery.
 Approval of P19.1–P19.8 remains in force; these are corrections within that register, not new engine
 implementation or promotion of deferred extensions.
+
+Version 1.5 records Round 8 against runtime baseline `64b05125`. It preserves ground-fact coalescing
+with distinct per-source observation records, targets the actor frontend, specifies separate upgrade
+and resume translation, persists clock uncertainty and fault latches, separates transport receipt
+from committed verification, and makes the scoped callback ABI concrete. These refine approved
+P19.1/P19.4/P19.5/P19.8; no P19 implementation, new engine proposal or approval of deferred Horn
+arbitration is implied.
 
 [faa-gnss]: https://www.faa.gov/air_traffic/publications/atpubs/aim_html/chap1_section_2.html
 [nhtsa-sensors]: https://www-nrd.nhtsa.dot.gov/pdf/ESV/Proceedings/27/27ESV-000160.pdf
