@@ -47,9 +47,9 @@ preserved. Only accepted iteration files are staged/committed, with material lim
   accepted ([validation](i2a-validation.md)) as that foundation only; it does not complete P19.8 or
   enable epistemic queries.
 - I2B lands in slices ([validation](i2b-validation.md)). I2B-1 derives each turn's scope grant from
-  the actor grant and settings and revokes it between turns, closing M4. Structured/reference result
-  assignment, guarded structural scratch operations, compiler emission, query graph lowering and
-  domain-error mapping remain.
+  the actor grant and settings, closing M4. I2B-2 adds typed structural reads and pinned selection
+  export; four sonnet persona reviewers pass it and the owner approved the scope-only opcode
+  meanings. Composite export, compiler emission and query lowering arrive with I4.
 - I2U, supported-agent live upgrade, is accepted ([validation](i2u-validation.md)). Running the
   draft found and fixed two engine defects (dimension identity in the owned-graph copier, member
   plans missing from the upgrade schema) and a `dropped_field` compiler defect. It refuses populated

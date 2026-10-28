@@ -229,6 +229,13 @@ private:
     std::unordered_set<CellRef> readable;
     std::unordered_set<CellRef> writable;
     std::map<std::string, CellRef> pins;
+    // Publication replaces this owned record graph; its old cells cannot
+    // become escaped references, even when independently caller-pinned.
+    std::unordered_set<CellRef> publicationProtected;
+    // Pre-mark caller cells reached from a pin, with every root reaching
+    // them. The scope can never relink caller cells, so a reached cell stays
+    // reachable and the record may only grow; backtracking needs no trail.
+    std::unordered_multimap<CellRef, std::string> reach;
     std::unordered_map<CellRef, CellRef> bindingTargets;
     std::unordered_map<CellRef, ScopeType> bindingTypes;
     std::vector<ScopedAssignment> assignments;
@@ -246,6 +253,12 @@ private:
   ExecutionResult refuseScopes(ScopedRefusal refusal);
   void assignScopedValue(ScopedFrame &frame, CellRef cell, ScopeCodec &codec);
   void restoreScopedAssignments(std::size_t tail) noexcept;
+  void requireScopedPublicationStable(CellRef target, ScopeCodec &codec) const;
+  ExecutionResult stepScopedStructure(ScopedFrame &frame, ScopeCodec &codec,
+                                      OpcodeKind kind, CellRef op,
+                                      const std::vector<CellRef> &in,
+                                      const std::vector<CellRef> &out,
+                                      CellRef cursor);
   void verifyScope(ScopedFrame &frame, ScopeCodec &codec, CellRef entry,
                    CellRef frameRegister, CellRef args, CellRef descriptor);
   // Internal execution phases

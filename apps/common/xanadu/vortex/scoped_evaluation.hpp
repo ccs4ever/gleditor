@@ -4,6 +4,7 @@
 #include <map>
 #include <memory>
 #include <stdexcept>
+#include <unordered_map>
 #include <unordered_set>
 namespace zigzag::vortex {
 [[nodiscard]] std::string_view scopedRefusalName(ScopedRefusal refusal);
@@ -43,7 +44,10 @@ enum class ScopeType : std::uint8_t {
   Unit,
   Record,
   List,
-  PinnedRef
+  PinnedRef,
+  // Binding-only: a read-only position in argument data or a caller pin.
+  // Never a schema field, so it can be neither an argument nor a result.
+  Cursor
 };
 struct ScopeSchemaNode {
   ScopeType type{ScopeType::Unit};
@@ -126,6 +130,13 @@ public:
   replaceRecord(CellRef root,
                 const std::vector<std::pair<std::string, CellRef>> &values);
   const std::unordered_set<CellRef> &protectedCells() const { return seen_; }
+  // Caller cells a scope reached by walking from a named pin. A PinnedRef
+  // value may name one of these under the same root as well as the pin.
+  ScopeCodec *setPinnedReach(
+      const std::unordered_multimap<CellRef, std::string> *reach) noexcept {
+    reach_ = reach;
+    return this;
+  }
 
 private:
   ScopeSchema schema(CellRef root, bool recordRoot);
@@ -138,6 +149,7 @@ private:
   std::optional<std::size_t> releaseScratchFloor_;
   std::shared_ptr<ScopedEvaluationBudget> budget_;
   std::unordered_set<CellRef> seen_;
+  const std::unordered_multimap<CellRef, std::string> *reach_{};
 };
 } // namespace zigzag::vortex
 #endif

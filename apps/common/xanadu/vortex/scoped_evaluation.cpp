@@ -1,5 +1,6 @@
 #include "common/xanadu/vortex/scoped_evaluation.hpp"
 #include "common/xanadu/foreign_op_handle.hpp"
+#include <algorithm>
 #include <cmath>
 #include <limits>
 namespace zigzag::vortex {
@@ -24,6 +25,7 @@ ScopeType type(std::string_view name) {
   if (name == "Record") return ScopeType::Record;
   if (name == "List") return ScopeType::List;
   if (name == "PinnedRef") return ScopeType::PinnedRef;
+  if (name == "Cursor") return ScopeType::Cursor;
   invalid(ScopedRefusal::InvalidSchema, "Unknown scope type");
 }
 } // namespace
@@ -328,6 +330,9 @@ ScopeSchema ScopeCodec::schema(CellRef root, bool recordRoot) {
       exact(f, {"name", "kind", "pinned_root"});
       node.pinnedRoot = string(f.at("pinned_root"));
       break;
+    case ScopeType::Cursor:
+      invalid(ScopedRefusal::InvalidSchema,
+              "Cursor is a binding kind, not a schema field");
     default:
       exact(f, {"name", "kind"});
       break;
@@ -463,7 +468,16 @@ ScopeValue ScopeCodec::snapshot(CellRef value, const ScopeSchema &schema,
     case ScopeType::PinnedRef: {
       const auto ref = reference(job.cell);
       auto pin       = pins.find(s.pinnedRoot);
-      if (pin == pins.end() || pin->second != ref) mismatch();
+      if (pin == pins.end()) mismatch();
+      if (pin->second != ref) {
+        if (!reach_) mismatch();
+        const auto [first, last] = reach_->equal_range(ref);
+        if (std::none_of(first, last, [&](const auto &entry) {
+              charge();
+              return entry.second == s.pinnedRoot;
+            }))
+          mismatch();
+      }
       node.pinned = ref;
       break;
     }
@@ -480,6 +494,9 @@ ScopeValue ScopeCodec::snapshot(CellRef value, const ScopeSchema &schema,
       }
       break;
     }
+    case ScopeType::Cursor:
+      mismatch();
+      break;
     case ScopeType::List: {
       node.content        = captureContent(job.cell);
       const auto elements = list(job.cell);
@@ -627,6 +644,8 @@ CellRef ScopeCodec::materialize(const ScopeValue &value,
       replaceRecord(root, fields);
       break;
     }
+    case ScopeType::Cursor:
+      invalid(ScopedRefusal::TypeMismatch, "Cursor cannot be published");
     case ScopeType::List: {
       root       = v.content ? restoreContent(*v.content) : a.makeCell("[]");
       auto tail  = root;

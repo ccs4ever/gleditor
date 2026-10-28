@@ -1393,6 +1393,721 @@ TEST_F(ScopedEvaluationTest, LiveScopeArgumentKeepsForeignQuoteIdentity) {
   const auto manifold = store.rebuildManifold(promoted->version);
   EXPECT_EQ(manifold.textOf(promoted->mapping.at(exported), store), "so!");
 }
+// I2B-2: typed structural reads. The descriptor is rebuilt per test so each
+// names exactly the bindings and kinds it exercises.
+class ScopedStructureTest : public ScopedEvaluationTest {
+protected:
+  CellRef field(std::string_view name, std::string_view kind,
+                std::vector<std::pair<std::string, CellRef>> extra = {}) {
+    std::vector<std::pair<std::string, CellRef>> values{
+        {"name", arena.makeCell(name)}, {"kind", arena.makeCell(kind)}};
+    for (auto &entry : extra) values.push_back(std::move(entry));
+    return codec.record("ScopeFieldSchema", values);
+  }
+  CellRef str(std::string_view name) {
+    return field(name, "Str",
+                 {{"max_bytes", arena.makeScalarCell(std::int64_t{64})}});
+  }
+  CellRef pinnedField(std::string_view name, std::string_view root) {
+    return field(name, "PinnedRef", {{"pinned_root", arena.makeCell(root)}});
+  }
+  CellRef recordSchema(const std::vector<CellRef> &fields) {
+    return codec.record("ScopeRecordSchema", {{"fields", list(fields)}});
+  }
+  CellRef reg(std::string_view label) { return handle(arena.makeCell(label)); }
+  CellRef bind(CellRef r, std::string_view target, std::string_view kind) {
+    return codec.record("ScopeBinding", {{"register", handle(r)},
+                                         {"target", arena.makeCell(target)},
+                                         {"kind", arena.makeCell(kind)}});
+  }
+  CellRef op(OpcodeKind kind, std::initializer_list<CellRef> ins,
+             std::initializer_list<CellRef> outs) {
+    const auto cell = vm.mintOpcode(kind);
+    if (ins.size() != 0) wing(cell, DimVector::POS, ins);
+    if (outs.size() != 0) wing(cell, DimVector::NEG, outs);
+    return cell;
+  }
+  // Chains @p body on d.spin into the verified completion Jump and installs
+  // it as the callback with the given schemas, bindings and arguments.
+  void install(CellRef argsSchema, CellRef resultSchema,
+               const std::vector<CellRef> &bindings,
+               const std::vector<CellRef> &body,
+               const std::vector<std::pair<std::string, CellRef>> &values,
+               bool chain = true) {
+    std::vector<CellRef> graph = body;
+    for (std::size_t i = 0; chain && i < body.size(); ++i)
+      EXPECT_TRUE(arena.link(body[i], core.dims().spin, DimVector::POS,
+                             i + 1 < body.size() ? body[i + 1] : jump));
+    graph.push_back(jump);
+    graph.push_back(completion);
+    std::vector<CellRef> handles;
+    for (auto cell : graph) handles.push_back(handle(cell));
+    const auto invocation = codec.wing(invoke, DimVector::POS);
+    codec.replaceRecord(invocation[3], {{"args_schema", argsSchema},
+                                        {"result_schema", resultSchema},
+                                        {"effect_graph", list(handles)},
+                                        {"bindings", list(bindings)}});
+    const auto entry = core.readLink(invoke, core.dims().grab, DimVector::POS);
+    EXPECT_TRUE(entry);
+    EXPECT_TRUE(
+        arena.setValueBits(*entry, xanadu::ValueKind::OpHandle, body.front()));
+    codec.replaceRecord(args, values);
+  }
+  // A caller-pinned list of observation records {w: Float}.
+  CellRef observations(std::string_view pin, std::initializer_list<double> ws,
+                       std::vector<CellRef> *cells = nullptr) {
+    std::vector<CellRef> items;
+    for (auto w : ws)
+      items.push_back(
+          codec.record("Observation", {{"w", arena.makeScalarCell(w)}}));
+    if (cells) *cells = items;
+    const auto root = list(items);
+    core.pin(pin, root);
+    return root;
+  }
+  CellRef payloadField(std::string_view name) {
+    return codec.fields(codec.fields(dest).at("payload")).at(std::string(name));
+  }
+};
+TEST_F(ScopedStructureTest, SelectsAReachedObservationAndReadsItsField) {
+  setup();
+  std::vector<CellRef> obs;
+  const auto root   = observations("obs", {0.25, 0.75}, &obs);
+  const auto argObs = reg("arg.obs"), selFirst = reg("arg.first"),
+             selNext = reg("arg.next"), selW = reg("arg.w"), cur = reg("cur"),
+             wcur = reg("wcur"), found = reg("found"), best = reg("best"),
+             score = reg("score");
+  const std::vector body{op(OpcodeKind::Point, {argObs}, {cur}),
+                         op(OpcodeKind::Link, {cur, selFirst}, {cur, found}),
+                         op(OpcodeKind::Link, {cur, selNext}, {cur, found}),
+                         op(OpcodeKind::Link, {cur, selW}, {wcur, found}),
+                         op(OpcodeKind::Deref, {wcur}, {score}),
+                         op(OpcodeKind::Point, {cur}, {best})};
+  install(recordSchema(
+              {pinnedField("obs", "obs"), str("first"), str("next"), str("w")}),
+          recordSchema({pinnedField("best", "obs"), field("score", "Float")}),
+          {bind(argObs, "arg.obs", "PinnedRef"),
+           bind(selFirst, "arg.first", "Str"), bind(selNext, "arg.next", "Str"),
+           bind(selW, "arg.w", "Str"), bind(cur, "temp.cur", "Cursor"),
+           bind(wcur, "temp.wcur", "Cursor"), bind(found, "temp.found", "Bool"),
+           bind(best, "result.best", "PinnedRef"),
+           bind(score, "result.score", "Float")},
+          body,
+          {{"obs", handle(root)},
+           {"first", arena.makeCell("first")},
+           {"next", arena.makeCell("next")},
+           {"w", arena.makeCell(".w")}});
+  const auto marks = arena.outstandingMarks();
+  auto result      = vm.run(cursor);
+  ASSERT_TRUE(result.success) << result.errorMessage;
+  ASSERT_EQ(outcome(), "Value");
+  EXPECT_EQ(arena.outstandingMarks(), marks);
+  EXPECT_EQ(arena.asDouble(payloadField("score")), 0.75);
+  // The exported reference names the caller's own observation, which
+  // outlives the released scope.
+  EXPECT_EQ(arena.handleTarget(payloadField("best")), obs[1]);
+  EXPECT_EQ(arena.asDouble(codec.fields(obs[1]).at("w")), 0.75);
+}
+TEST_F(ScopedStructureTest, OwnedArgumentDataCannotBecomeAResultReference) {
+  setup();
+  const auto root   = observations("obs", {1.0});
+  const auto argObs = reg("arg.obs"), argData = reg("arg.data"),
+             cur = reg("cur"), best = reg("best");
+  install(recordSchema({pinnedField("obs", "obs"),
+                        field("data", "Record",
+                              {{"fields", list({field("w", "Float")})}})}),
+          recordSchema({pinnedField("best", "obs")}),
+          {bind(argObs, "arg.obs", "PinnedRef"),
+           bind(argData, "arg.data", "Record"), bind(cur, "temp.cur", "Cursor"),
+           bind(best, "result.best", "PinnedRef")},
+          {op(OpcodeKind::Point, {argData}, {cur}),
+           op(OpcodeKind::Point, {cur}, {best})},
+          {{"obs", handle(root)},
+           {"data", codec.record("Data", {{"w", arena.makeScalarCell(1.0)}})}});
+  auto result = vm.run(cursor);
+  EXPECT_EQ(result.scopedRefusal, ScopedRefusal::TypeMismatch);
+  EXPECT_EQ(outcome(), "Refused");
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+TEST_F(ScopedStructureTest, AReferenceCannotBeLaunderedAcrossPinRoots) {
+  for (const bool sameRoot : {true, false}) {
+    SCOPED_TRACE(sameRoot);
+    setup();
+    std::vector<CellRef> other;
+    const auto mine    = observations("mine", {1.0});
+    const auto theirs  = observations("theirs", {2.0}, &other);
+    const auto argMine = reg("arg.mine"), argTheirs = reg("arg.theirs"),
+               selFirst = reg("arg.first"), cur = reg("cur"),
+               found = reg("found"), best = reg("best");
+    install(recordSchema({pinnedField("mine", "mine"),
+                          pinnedField("theirs", "theirs"), str("first")}),
+            recordSchema({pinnedField("best", sameRoot ? "theirs" : "mine")}),
+            {bind(argMine, "arg.mine", "PinnedRef"),
+             bind(argTheirs, "arg.theirs", "PinnedRef"),
+             bind(selFirst, "arg.first", "Str"),
+             bind(cur, "temp.cur", "Cursor"), bind(found, "temp.found", "Bool"),
+             bind(best, "result.best", "PinnedRef")},
+            {op(OpcodeKind::Point, {argTheirs}, {cur}),
+             op(OpcodeKind::Link, {cur, selFirst}, {cur, found}),
+             op(OpcodeKind::Point, {cur}, {best})},
+            {{"mine", handle(mine)},
+             {"theirs", handle(theirs)},
+             {"first", arena.makeCell("first")}});
+    auto result = vm.run(cursor);
+    if (sameRoot) {
+      // The reached cell publishes under the root it was reached from.
+      ASSERT_TRUE(result.success) << result.errorMessage;
+      EXPECT_EQ(arena.handleTarget(payloadField("best")), other[0]);
+    } else {
+      EXPECT_EQ(result.scopedRefusal, ScopedRefusal::TypeMismatch);
+      EXPECT_EQ(outcome(), "Refused");
+      EXPECT_FALSE(codec.fields(dest).contains("payload"));
+    }
+  }
+}
+TEST_F(ScopedStructureTest, MissingFieldReportsNotFoundWithoutMovingTheCursor) {
+  setup();
+  const auto root   = observations("obs", {1.0});
+  const auto argObs = reg("arg.obs"), selFirst = reg("arg.first"),
+             selMissing = reg("arg.missing"), cur = reg("cur"),
+             other = reg("other"), found = reg("found"), seen = reg("seen");
+  install(
+      recordSchema({pinnedField("obs", "obs"), str("first"), str("missing")}),
+      recordSchema({field("seen", "Bool"), field("found", "Bool")}),
+      {bind(argObs, "arg.obs", "PinnedRef"), bind(selFirst, "arg.first", "Str"),
+       bind(selMissing, "arg.missing", "Str"), bind(cur, "temp.cur", "Cursor"),
+       bind(other, "temp.other", "Cursor"), bind(seen, "result.seen", "Bool"),
+       bind(found, "result.found", "Bool")},
+      {op(OpcodeKind::Point, {argObs}, {cur}),
+       op(OpcodeKind::Link, {cur, selFirst}, {cur, seen}),
+       op(OpcodeKind::Link, {cur, selMissing}, {other, found})},
+      {{"obs", handle(root)},
+       {"first", arena.makeCell("first")},
+       {"missing", arena.makeCell(".absent")}});
+  auto result = vm.run(cursor);
+  ASSERT_TRUE(result.success) << result.errorMessage;
+  ASSERT_EQ(outcome(), "Value");
+  EXPECT_EQ(arena.asBool(payloadField("seen")), true);
+  EXPECT_EQ(arena.asBool(payloadField("found")), false);
+}
+TEST_F(ScopedStructureTest, UnassignedCursorAndWrongScalarKindRefuse) {
+  for (const bool readUnassigned : {true, false}) {
+    SCOPED_TRACE(readUnassigned);
+    setup();
+    const auto root   = observations("obs", {1.0});
+    const auto argObs = reg("arg.obs"), selFirst = reg("arg.first"),
+               selW = reg("arg.w"), cur = reg("cur"), found = reg("found"),
+               n = reg("n");
+    std::vector<CellRef> body;
+    if (!readUnassigned) {
+      body.push_back(op(OpcodeKind::Point, {argObs}, {cur}));
+      body.push_back(op(OpcodeKind::Link, {cur, selFirst}, {cur, found}));
+      body.push_back(op(OpcodeKind::Link, {cur, selW}, {cur, found}));
+    }
+    // w holds a Float; reading it as Int is a type error, not a conversion.
+    body.push_back(op(OpcodeKind::Deref, {cur}, {n}));
+    install(recordSchema({pinnedField("obs", "obs"), str("first"), str("w")}),
+            recordSchema({field("n", "Int")}),
+            {bind(argObs, "arg.obs", "PinnedRef"),
+             bind(selFirst, "arg.first", "Str"), bind(selW, "arg.w", "Str"),
+             bind(cur, "temp.cur", "Cursor"), bind(found, "temp.found", "Bool"),
+             bind(n, "result.n", "Int")},
+            body,
+            {{"obs", handle(root)},
+             {"first", arena.makeCell("first")},
+             {"w", arena.makeCell(".w")}});
+    auto result = vm.run(cursor);
+    EXPECT_EQ(result.scopedRefusal, ScopedRefusal::TypeMismatch);
+    EXPECT_EQ(outcome(), "Refused");
+    EXPECT_EQ(arena.outstandingMarks(), 0u);
+  }
+}
+TEST_F(ScopedStructureTest,
+       BacktrackingUnassignsACursorMovedInTheFailedBranch) {
+  // The branch parks the cursor on a real Float. Only the twin without Fail
+  // may read it; after Fail the alternative finds the cursor unassigned.
+  for (const bool failBranch : {false, true}) {
+    SCOPED_TRACE(failBranch);
+    setup();
+    const auto root   = observations("obs", {1.5});
+    const auto argObs = reg("arg.obs"), selFirst = reg("arg.first"),
+               selW = reg("arg.w"), cur = reg("cur"), found = reg("found"),
+               n      = reg("n");
+    const auto read   = op(OpcodeKind::Deref, {cur}, {n});
+    const auto choose = vm.mintOpcode(OpcodeKind::Choice);
+    wing(choose, DimVector::POS, {read});
+    const std::vector moves{op(OpcodeKind::Point, {argObs}, {cur}),
+                            op(OpcodeKind::Link, {cur, selFirst}, {cur, found}),
+                            op(OpcodeKind::Link, {cur, selW}, {cur, found})};
+    const auto fail = vm.mintOpcode(OpcodeKind::Fail);
+    ASSERT_TRUE(arena.link(choose, core.dims().spin, DimVector::POS, moves[0]));
+    ASSERT_TRUE(
+        arena.link(moves[0], core.dims().spin, DimVector::POS, moves[1]));
+    ASSERT_TRUE(
+        arena.link(moves[1], core.dims().spin, DimVector::POS, moves[2]));
+    ASSERT_TRUE(arena.link(moves[2], core.dims().spin, DimVector::POS,
+                           failBranch ? fail : read));
+    install(recordSchema({pinnedField("obs", "obs"), str("first"), str("w")}),
+            recordSchema({field("n", "Float")}),
+            {bind(argObs, "arg.obs", "PinnedRef"),
+             bind(selFirst, "arg.first", "Str"), bind(selW, "arg.w", "Str"),
+             bind(cur, "temp.cur", "Cursor"), bind(found, "temp.found", "Bool"),
+             bind(n, "result.n", "Float")},
+            {read},
+            {{"obs", handle(root)},
+             {"first", arena.makeCell("first")},
+             {"w", arena.makeCell(".w")}});
+    std::vector graph{choose, moves[0], moves[1],  moves[2],
+                      read,   jump,     completion};
+    if (failBranch) graph.push_back(fail);
+    selectEntryAndGraph(choose, graph);
+    auto result = vm.run(cursor);
+    if (failBranch) {
+      EXPECT_EQ(result.scopedRefusal, ScopedRefusal::TypeMismatch);
+      EXPECT_EQ(outcome(), "Refused");
+    } else {
+      ASSERT_TRUE(result.success) << result.errorMessage;
+      EXPECT_EQ(arena.asDouble(payloadField("n")), 1.5);
+    }
+    EXPECT_EQ(arena.outstandingMarks(), 0u);
+  }
+}
+TEST_F(ScopedStructureTest, ACellPinnedTwiceIsAttributedToBothRoots) {
+  // Order independence: walking from one root may publish under the other.
+  setup();
+  std::vector<CellRef> obs;
+  const auto root = observations("a", {1.0}, &obs);
+  core.pin("b", root);
+  const auto argA = reg("arg.a"), argB = reg("arg.b"),
+             selFirst = reg("arg.first"), cur = reg("cur"),
+             found = reg("found"), best = reg("best");
+  install(recordSchema(
+              {pinnedField("a", "a"), pinnedField("b", "b"), str("first")}),
+          recordSchema({pinnedField("best", "b")}),
+          {bind(argA, "arg.a", "PinnedRef"), bind(argB, "arg.b", "PinnedRef"),
+           bind(selFirst, "arg.first", "Str"), bind(cur, "temp.cur", "Cursor"),
+           bind(found, "temp.found", "Bool"),
+           bind(best, "result.best", "PinnedRef")},
+          {op(OpcodeKind::Point, {argA}, {cur}),
+           op(OpcodeKind::Link, {cur, selFirst}, {cur, found}),
+           op(OpcodeKind::Point, {cur}, {best})},
+          {{"a", handle(root)},
+           {"b", handle(root)},
+           {"first", arena.makeCell("first")}});
+  auto result = vm.run(cursor);
+  ASSERT_TRUE(result.success) << result.errorMessage;
+  EXPECT_EQ(arena.handleTarget(payloadField("best")), obs[0]);
+}
+TEST_F(ScopedStructureTest, TargetFollowsAnOwnedReferenceOnlyToItsPin) {
+  setup();
+  std::vector<CellRef> obs;
+  const auto root    = observations("obs", {2.5}, &obs);
+  const auto argRefs = reg("arg.refs"), argText = reg("arg.text"),
+             selFirst = reg("arg.first"), selTarget = reg("arg.target"),
+             selW = reg("arg.w"), cur = reg("cur"), w = reg("w"),
+             found = reg("found"), plain = reg("plain"), plainFound = reg("pf"),
+             best = reg("best"), score = reg("score"), deref = reg("deref");
+  install(recordSchema(
+              {field("refs", "List",
+                     {{"item", pinnedField("item", "obs")},
+                      {"max_items", arena.makeScalarCell(std::int64_t{4})}}),
+               pinnedField("obs", "obs"), str("text"), str("first"),
+               str("target"), str("w")}),
+          recordSchema({pinnedField("best", "obs"), field("score", "Float"),
+                        field("deref", "Bool"), field("plain", "Bool")}),
+          {bind(argRefs, "arg.refs", "List"), bind(argText, "arg.text", "Str"),
+           bind(selFirst, "arg.first", "Str"),
+           bind(selTarget, "arg.target", "Str"), bind(selW, "arg.w", "Str"),
+           bind(cur, "temp.cur", "Cursor"), bind(w, "temp.w", "Cursor"),
+           bind(found, "temp.found", "Bool"),
+           bind(plain, "temp.plain", "Cursor"),
+           bind(plainFound, "result.plain", "Bool"),
+           bind(best, "result.best", "PinnedRef"),
+           bind(score, "result.score", "Float"),
+           bind(deref, "result.deref", "Bool")},
+          {op(OpcodeKind::Point, {argRefs}, {cur}),
+           op(OpcodeKind::Link, {cur, selFirst}, {cur, found}),
+           op(OpcodeKind::Link, {cur, selTarget}, {cur, deref}),
+           // The observation record is not a reference: target is not found.
+           op(OpcodeKind::Link, {cur, selFirst}, {cur, found}),
+           op(OpcodeKind::Link, {cur, selTarget}, {plain, plainFound}),
+           op(OpcodeKind::Link, {cur, selW}, {w, found}),
+           op(OpcodeKind::Deref, {w}, {score}),
+           op(OpcodeKind::Point, {cur}, {best})},
+          {{"refs", list({handle(root)})},
+           {"obs", handle(root)},
+           {"text", arena.makeCell("x")},
+           {"first", arena.makeCell("first")},
+           {"target", arena.makeCell("target")},
+           {"w", arena.makeCell(".w")}});
+  auto result = vm.run(cursor);
+  ASSERT_TRUE(result.success) << result.errorMessage;
+  EXPECT_EQ(arena.asBool(payloadField("deref")), true);
+  EXPECT_EQ(arena.asBool(payloadField("plain")), false);
+  EXPECT_EQ(arena.asDouble(payloadField("score")), 2.5);
+  EXPECT_EQ(arena.handleTarget(payloadField("best")), obs[0]);
+}
+TEST_F(ScopedStructureTest, UnknownSelectorWordRefusesInsteadOfMissing) {
+  setup();
+  const auto root   = observations("obs", {1.0});
+  const auto argObs = reg("arg.obs"), sel = reg("arg.sel"), cur = reg("cur"),
+             found = reg("found");
+  install(recordSchema({pinnedField("obs", "obs"), str("sel")}),
+          recordSchema({field("found", "Bool")}),
+          {bind(argObs, "arg.obs", "PinnedRef"), bind(sel, "arg.sel", "Str"),
+           bind(cur, "temp.cur", "Cursor"),
+           bind(found, "result.found", "Bool")},
+          {op(OpcodeKind::Point, {argObs}, {cur}),
+           op(OpcodeKind::Link, {cur, sel}, {cur, found})},
+          {{"obs", handle(root)}, {"sel", arena.makeCell("frist")}});
+  EXPECT_EQ(vm.run(cursor).scopedRefusal, ScopedRefusal::TypeMismatch);
+  EXPECT_EQ(outcome(), "Refused");
+}
+TEST_F(ScopedStructureTest, NonFiniteFloatAndNumericFaultRefuseUnderAChoice) {
+  // Neither a stored infinity nor Ln(0) may backtrack into the open choice's
+  // alternative and so turn into a plausible Empty.
+  for (const bool numericFault : {false, true}) {
+    SCOPED_TRACE(numericFault);
+    setup();
+    const auto root = observations(
+        "obs", {numericFault ? 0.0 : std::numeric_limits<double>::infinity()});
+    const auto argObs = reg("arg.obs"), selFirst = reg("arg.first"),
+               selW = reg("arg.w"), cur = reg("cur"), found = reg("found"),
+               n = reg("n"), logn = reg("logn");
+    const std::vector body{op(OpcodeKind::Point, {argObs}, {cur}),
+                           op(OpcodeKind::Link, {cur, selFirst}, {cur, found}),
+                           op(OpcodeKind::Link, {cur, selW}, {cur, found}),
+                           op(OpcodeKind::Deref, {cur}, {n}),
+                           op(OpcodeKind::Ln, {n}, {logn})};
+    install(recordSchema({pinnedField("obs", "obs"), str("first"), str("w")}),
+            recordSchema({field("logn", "Float")}),
+            {bind(argObs, "arg.obs", "PinnedRef"),
+             bind(selFirst, "arg.first", "Str"), bind(selW, "arg.w", "Str"),
+             bind(cur, "temp.cur", "Cursor"), bind(found, "temp.found", "Bool"),
+             bind(n, "temp.n", "Float"), bind(logn, "result.logn", "Float")},
+            body,
+            {{"obs", handle(root)},
+             {"first", arena.makeCell("first")},
+             {"w", arena.makeCell(".w")}});
+    const auto fail   = vm.mintOpcode(OpcodeKind::Fail);
+    const auto choose = vm.mintOpcode(OpcodeKind::Choice);
+    wing(choose, DimVector::POS, {fail});
+    ASSERT_TRUE(arena.link(choose, core.dims().spin, DimVector::POS, body[0]));
+    std::vector graph{choose, fail, jump, completion};
+    graph.insert(graph.end(), body.begin(), body.end());
+    selectEntryAndGraph(choose, graph);
+    auto result = vm.run(cursor);
+    EXPECT_FALSE(result.success);
+    EXPECT_EQ(result.scopedRefusal, numericFault ? ScopedRefusal::CallbackFault
+                                                 : ScopedRefusal::TypeMismatch);
+    EXPECT_EQ(outcome(), "Refused");
+    EXPECT_EQ(arena.outstandingMarks(), 0u);
+  }
+}
+TEST_F(ScopedStructureTest, BestOfCandidatesWithProfileLookupAndAccumulator) {
+  // The I4 shape: walk candidate observations, look each source's profile up
+  // by name, score w * alpha with Int alpha promoted by Add, keep the maximum
+  // and accumulate the total weight. Everything is an ordinary scoped graph.
+  setup();
+  std::vector<CellRef> obsItems;
+  for (const auto &[w, src] : std::vector<std::pair<double, std::string>>{
+           {0.5, "a"}, {0.4, "b"}, {0.9, "zzz"}})
+    obsItems.push_back(
+        codec.record("Observation", {{"w", arena.makeScalarCell(w)},
+                                     {"src", arena.makeCell(src)}}));
+  const auto obsRoot = list(obsItems);
+  core.pin("obs", obsRoot);
+  std::vector<CellRef> profileItems;
+  for (const auto &[name, alpha] :
+       std::vector<std::pair<std::string, std::int64_t>>{{"a", 1}, {"b", 3}})
+    profileItems.push_back(
+        codec.record("Profile", {{"name", arena.makeCell(name)},
+                                 {"alpha", arena.makeScalarCell(alpha)}}));
+  const auto profileRoot = list(profileItems);
+  core.pin("profiles", profileRoot);
+
+  const auto argObs = reg("arg.obs"), argProfiles = reg("arg.profiles"),
+             sFirst = reg("s.first"), sNext = reg("s.next"), sW = reg("s.w"),
+             sSrc = reg("s.src"), sName = reg("s.name"),
+             sAlpha = reg("s.alpha"), zero = reg("zero"), negOne = reg("neg"),
+             c = reg("c"), pc = reg("pc"), x = reg("x"), found = reg("found"),
+             nf = reg("nf"), w = reg("w"), src = reg("src"), name = reg("name"),
+             alphaI = reg("alphaI"), alpha = reg("alpha"), sc = reg("sc"),
+             same = reg("same"), better = reg("better"), nb = reg("nb"),
+             best = reg("best"), score = reg("score"), total = reg("total");
+  const auto done    = op(OpcodeKind::Nop, {}, {});
+  const auto nextObs = op(OpcodeKind::Link, {c, sNext}, {c, found});
+  const auto loop    = op(OpcodeKind::Not, {found}, {nf});
+  const auto ploop   = op(OpcodeKind::Not, {found}, {nf});
+  const auto hit     = op(OpcodeKind::Link, {pc, sAlpha}, {x, found});
+  const auto branch  = [&](CellRef cond, CellRef target) {
+    const auto cell = vm.mintOpcode(OpcodeKind::Branch);
+    wing(cell, DimVector::POS, {cond, target});
+    return cell;
+  };
+  const auto jumpTo = [&](CellRef target) {
+    const auto cell = vm.mintOpcode(OpcodeKind::Jump);
+    wing(cell, DimVector::POS, {target});
+    return cell;
+  };
+  const auto backToPloop = jumpTo(ploop);
+  const auto backToLoop  = jumpTo(loop);
+  const std::vector<std::vector<CellRef>> runs{
+      {op(OpcodeKind::Add, {zero, zero}, {total}),
+       op(OpcodeKind::Add, {negOne, zero}, {score}),
+       op(OpcodeKind::Point, {argObs}, {c}),
+       op(OpcodeKind::Link, {c, sFirst}, {c, found}),
+       loop,
+       branch(nf, done),
+       op(OpcodeKind::Link, {c, sW}, {x, found}),
+       op(OpcodeKind::Deref, {x}, {w}),
+       op(OpcodeKind::Add, {total, w}, {total}),
+       op(OpcodeKind::Link, {c, sSrc}, {x, found}),
+       op(OpcodeKind::Deref, {x}, {src}),
+       op(OpcodeKind::Point, {argProfiles}, {pc}),
+       op(OpcodeKind::Link, {pc, sFirst}, {pc, found}),
+       ploop,
+       branch(nf, nextObs),
+       op(OpcodeKind::Link, {pc, sName}, {x, found}),
+       op(OpcodeKind::Deref, {x}, {name}),
+       op(OpcodeKind::Eq, {name, src}, {same}),
+       branch(same, hit),
+       op(OpcodeKind::Link, {pc, sNext}, {pc, found}),
+       backToPloop},
+      {hit, op(OpcodeKind::Deref, {x}, {alphaI}),
+       op(OpcodeKind::Add, {alphaI, zero}, {alpha}),
+       op(OpcodeKind::Mul, {w, alpha}, {sc}),
+       op(OpcodeKind::Gt, {sc, score}, {better}),
+       op(OpcodeKind::Not, {better}, {nb}), branch(nb, nextObs),
+       op(OpcodeKind::Add, {sc, zero}, {score}),
+       op(OpcodeKind::Point, {c}, {best}), nextObs, backToLoop},
+      {done}};
+  std::vector<CellRef> graph;
+  for (const auto &run : runs) {
+    for (std::size_t i = 0; i + 1 < run.size(); ++i)
+      ASSERT_TRUE(
+          arena.link(run[i], core.dims().spin, DimVector::POS, run[i + 1]));
+    graph.insert(graph.end(), run.begin(), run.end());
+  }
+  ASSERT_TRUE(arena.link(done, core.dims().spin, DimVector::POS, jump));
+  graph.push_back(jump);
+  graph.push_back(completion);
+  const auto text = [&](CellRef r, std::string_view t) {
+    return bind(r, t, "Str");
+  };
+  install(recordSchema(
+              {pinnedField("obs", "obs"), pinnedField("profiles", "profiles"),
+               str("first"), str("next"), str("w"), str("src"), str("name"),
+               str("alpha"), field("zero", "Float"), field("neg", "Float")}),
+          recordSchema({pinnedField("best", "obs"), field("score", "Float"),
+                        field("total", "Float")}),
+          {bind(argObs, "arg.obs", "PinnedRef"),
+           bind(argProfiles, "arg.profiles", "PinnedRef"),
+           text(sFirst, "arg.first"),
+           text(sNext, "arg.next"),
+           text(sW, "arg.w"),
+           text(sSrc, "arg.src"),
+           text(sName, "arg.name"),
+           text(sAlpha, "arg.alpha"),
+           bind(zero, "arg.zero", "Float"),
+           bind(negOne, "arg.neg", "Float"),
+           bind(c, "temp.c", "Cursor"),
+           bind(pc, "temp.pc", "Cursor"),
+           bind(x, "temp.x", "Cursor"),
+           bind(found, "temp.found", "Bool"),
+           bind(nf, "temp.nf", "Bool"),
+           bind(w, "temp.w", "Float"),
+           text(src, "temp.src"),
+           text(name, "temp.name"),
+           bind(alphaI, "temp.alphaI", "Int"),
+           bind(alpha, "temp.alpha", "Float"),
+           bind(sc, "temp.sc", "Float"),
+           bind(same, "temp.same", "Bool"),
+           bind(better, "temp.better", "Bool"),
+           bind(nb, "temp.nb", "Bool"),
+           bind(best, "result.best", "PinnedRef"),
+           bind(score, "result.score", "Float"),
+           bind(total, "result.total", "Float")},
+          {runs[0][0]},
+          {{"obs", handle(obsRoot)},
+           {"profiles", handle(profileRoot)},
+           {"first", arena.makeCell("first")},
+           {"next", arena.makeCell("next")},
+           {"w", arena.makeCell(".w")},
+           {"src", arena.makeCell(".src")},
+           {"name", arena.makeCell(".name")},
+           {"alpha", arena.makeCell(".alpha")},
+           {"zero", arena.makeScalarCell(0.0)},
+           {"neg", arena.makeScalarCell(-1.0)}},
+          false);
+  selectEntryAndGraph(runs[0][0], graph);
+  auto result = vm.run(cursor);
+  ASSERT_TRUE(result.success) << result.errorMessage;
+  ASSERT_EQ(outcome(), "Value");
+  EXPECT_EQ(arena.handleTarget(payloadField("best")), obsItems[1]);
+  EXPECT_DOUBLE_EQ(*arena.asDouble(payloadField("score")), 1.2);
+  EXPECT_DOUBLE_EQ(*arena.asDouble(payloadField("total")), 1.8);
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+TEST_F(ScopedStructureTest, TheDestinationRecordCannotBePublishedAsAResult) {
+  // Publication relinks the destination, so naming it would build a cycle.
+  setup();
+  core.pin("d", dest);
+  const auto argD = reg("arg.d"), cur = reg("cur"), best = reg("best");
+  install(recordSchema({pinnedField("d", "d")}),
+          recordSchema({pinnedField("best", "d")}),
+          {bind(argD, "arg.d", "PinnedRef"), bind(cur, "temp.cur", "Cursor"),
+           bind(best, "result.best", "PinnedRef")},
+          {op(OpcodeKind::Point, {argD}, {cur}),
+           op(OpcodeKind::Point, {cur}, {best})},
+          {{"d", handle(dest)}});
+  auto result = vm.run(cursor);
+  EXPECT_EQ(result.scopedRefusal, ScopedRefusal::TypeMismatch);
+  EXPECT_EQ(outcome(), "Refused");
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+TEST_F(ScopedStructureTest,
+       OldDestinationFieldGraphCannotEscapeThroughItsOwnPin) {
+  for (const auto part : {"marker", "name", "value"}) {
+    SCOPED_TRACE(part);
+    setup();
+    const auto marker = core.readLink(dest, core.dims().vars, DimVector::POS);
+    ASSERT_TRUE(marker);
+    const auto name = core.readLink(*marker, core.dims().vars, DimVector::POS);
+    ASSERT_TRUE(name);
+    const auto value = core.readLink(*name, core.dims().values, DimVector::POS);
+    ASSERT_TRUE(value);
+    const auto target = std::string_view(part) == "marker" ? *marker
+                        : std::string_view(part) == "name" ? *name
+                                                           : *value;
+    core.pin("saved", target);
+    const auto argSaved = reg("arg.saved"), cur = reg("cur"),
+               best = reg("best");
+    install(recordSchema({pinnedField("saved", "saved")}),
+            recordSchema({pinnedField("best", "saved")}),
+            {bind(argSaved, "arg.saved", "PinnedRef"),
+             bind(cur, "temp.cur", "Cursor"),
+             bind(best, "result.best", "PinnedRef")},
+            {op(OpcodeKind::Point, {argSaved}, {cur}),
+             op(OpcodeKind::Point, {cur}, {best})},
+            {{"saved", handle(target)}});
+    // Establish that this is a valid pinned argument and readable position;
+    // refusal must occur specifically at the attempted reference export.
+    ASSERT_TRUE(vm.step(cursor).success);
+    ASSERT_TRUE(vm.step(cursor).success);
+    const auto result = vm.step(cursor);
+    EXPECT_EQ(result.scopedRefusal, ScopedRefusal::TypeMismatch);
+    EXPECT_EQ(outcome(), "Refused");
+    EXPECT_FALSE(codec.fields(dest).contains("payload"));
+    EXPECT_EQ(arena.outstandingMarks(), 0u);
+    EXPECT_FALSE(core.readLink(*marker, core.dims().vars, DimVector::NEG));
+  }
+}
+TEST_F(ScopedStructureTest, UnrelatedCallerFieldNameRemainsAnExportablePin) {
+  setup();
+  const auto callerValue = arena.makeCell("caller value");
+  const auto callerRecord =
+      codec.record("CallerRecord", {{"outcome", callerValue}});
+  const auto marker =
+      core.readLink(callerRecord, core.dims().vars, DimVector::POS);
+  ASSERT_TRUE(marker);
+  const auto name = core.readLink(*marker, core.dims().vars, DimVector::POS);
+  ASSERT_TRUE(name);
+  core.pin("saved", *name);
+  const auto argSaved = reg("arg.saved"), cur = reg("cur"), best = reg("best");
+  install(recordSchema({pinnedField("saved", "saved")}),
+          recordSchema({pinnedField("best", "saved")}),
+          {bind(argSaved, "arg.saved", "PinnedRef"),
+           bind(cur, "temp.cur", "Cursor"),
+           bind(best, "result.best", "PinnedRef")},
+          {op(OpcodeKind::Point, {argSaved}, {cur}),
+           op(OpcodeKind::Point, {cur}, {best})},
+          {{"saved", handle(*name)}});
+  ASSERT_TRUE(vm.step(cursor).success);
+  ASSERT_TRUE(vm.step(cursor).success);
+  ASSERT_TRUE(vm.step(cursor).success);
+  const auto result = vm.run(cursor);
+  ASSERT_TRUE(result.success) << result.errorMessage;
+  EXPECT_EQ(outcome(), "Value");
+  EXPECT_EQ(arena.handleTarget(payloadField("best")), *name);
+  EXPECT_EQ(arena.textOf(*name), "outcome");
+  EXPECT_EQ(core.readLink(callerRecord, core.dims().vars, DimVector::POS),
+            marker);
+  EXPECT_EQ(core.readLink(*marker, core.dims().vars, DimVector::NEG),
+            callerRecord);
+  EXPECT_EQ(core.readLink(*name, core.dims().values, DimVector::POS),
+            callerValue);
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+TEST_F(ScopedStructureTest,
+       OldDestinationReferenceDoesNotOwnItsCallerReferent) {
+  setup();
+  const auto observation = arena.makeCell("caller observation");
+  core.pin("obs", observation);
+  const auto oldPayload =
+      codec.record("ScopeRecord", {{"best", handle(observation)}});
+  codec.replaceRecord(
+      dest, {{"outcome", arena.makeCell("Empty")}, {"payload", oldPayload}});
+  const auto argObs = reg("arg.obs"), cur = reg("cur"), best = reg("best");
+  install(recordSchema({pinnedField("obs", "obs")}),
+          recordSchema({pinnedField("best", "obs")}),
+          {bind(argObs, "arg.obs", "PinnedRef"),
+           bind(cur, "temp.cur", "Cursor"),
+           bind(best, "result.best", "PinnedRef")},
+          {op(OpcodeKind::Point, {argObs}, {cur}),
+           op(OpcodeKind::Point, {cur}, {best})},
+          {{"obs", handle(observation)}});
+  const auto result = vm.run(cursor);
+  ASSERT_TRUE(result.success) << result.errorMessage;
+  EXPECT_EQ(outcome(), "Value");
+  EXPECT_EQ(arena.handleTarget(payloadField("best")), observation);
+  EXPECT_EQ(arena.textOf(observation), "caller observation");
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+TEST_F(ScopedStructureTest, VerifierRefusesIllTypedStructuralOperands) {
+  struct Case {
+    const char *name;
+    ScopedRefusal expected;
+  };
+  for (const auto &c : {Case{"cursor-result", ScopedRefusal::InvalidSchema},
+                        Case{"float-found", ScopedRefusal::TypeMismatch},
+                        Case{"result-source", ScopedRefusal::TypeMismatch},
+                        Case{"cursor-schema", ScopedRefusal::InvalidSchema}}) {
+    SCOPED_TRACE(c.name);
+    setup();
+    const auto root   = observations("obs", {1.0});
+    const auto argObs = reg("arg.obs"), selFirst = reg("arg.first"),
+               cur = reg("cur"), flag = reg("flag"), best = reg("best");
+    const std::string name = c.name;
+    std::vector<CellRef> bindings{bind(argObs, "arg.obs", "PinnedRef"),
+                                  bind(selFirst, "arg.first", "Str")};
+    std::vector<CellRef> body;
+    auto resultSchema = recordSchema({pinnedField("best", "obs")});
+    if (name == "cursor-result") {
+      bindings.push_back(bind(best, "result.best", "Cursor"));
+      body.push_back(op(OpcodeKind::Point, {argObs}, {best}));
+    } else if (name == "float-found") {
+      bindings.push_back(bind(cur, "temp.cur", "Cursor"));
+      bindings.push_back(bind(flag, "temp.flag", "Float"));
+      body.push_back(op(OpcodeKind::Link, {argObs, selFirst}, {cur, flag}));
+    } else if (name == "result-source") {
+      bindings.push_back(bind(best, "result.best", "PinnedRef"));
+      bindings.push_back(bind(cur, "temp.cur", "Cursor"));
+      body.push_back(op(OpcodeKind::Point, {best}, {cur}));
+    } else {
+      resultSchema = recordSchema({field("best", "Cursor")});
+      bindings.push_back(bind(cur, "temp.cur", "Cursor"));
+      body.push_back(op(OpcodeKind::Point, {argObs}, {cur}));
+    }
+    install(recordSchema({pinnedField("obs", "obs"), str("first")}),
+            resultSchema, bindings, body,
+            {{"obs", handle(root)}, {"first", arena.makeCell("first")}});
+    auto result = vm.step(cursor);
+    EXPECT_EQ(result.scopedRefusal, c.expected);
+    EXPECT_EQ(arena.outstandingMarks(), 0u);
+    EXPECT_EQ(outcome(), "Empty");
+  }
+}
 TEST_F(ScopedEvaluationTest, OpcodeNumbersAppendAndDecodeStable) {
   EXPECT_EQ(static_cast<unsigned>(OpcodeKind::ScopedEvaluate),
             static_cast<unsigned>(OpcodeKind::Sqrt) + 1);

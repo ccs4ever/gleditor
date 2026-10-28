@@ -40,6 +40,11 @@ bool pure(OpcodeKind kind) {
   case OpcodeKind::Exp:
   case OpcodeKind::Ln:
   case OpcodeKind::Sqrt:
+  // Structural opcodes have a typed read-only meaning inside a scope only
+  // (stepScopedStructure); their manifold-writing bodies never run there.
+  case OpcodeKind::Point:
+  case OpcodeKind::Link:
+  case OpcodeKind::Deref:
   case OpcodeKind::Jump:
   case OpcodeKind::Branch:
   case OpcodeKind::Call:
@@ -66,6 +71,19 @@ std::optional<std::size_t> controlIndex(OpcodeKind kind) {
   default:
     return std::nullopt;
   }
+}
+bool structural(OpcodeKind kind) {
+  return kind == OpcodeKind::Point || kind == OpcodeKind::Link ||
+         kind == OpcodeKind::Deref;
+}
+bool scalar(ScopeType type) {
+  return type == ScopeType::Float || type == ScopeType::Int ||
+         type == ScopeType::Bool || type == ScopeType::Str;
+}
+// Kinds whose register resolves to a position a cursor may start from.
+bool positional(ScopeType type) {
+  return type == ScopeType::Cursor || type == ScopeType::PinnedRef ||
+         type == ScopeType::Record || type == ScopeType::List;
 }
 ExecutionResult refusalResult(ScopedRefusal code, std::string message) {
   ExecutionResult r;
@@ -111,6 +129,8 @@ void VortexVM::verifyScope(ScopedFrame &f, ScopeCodec &codec, CellRef entry,
             "Binding target aliases protected data");
     const bool arg    = b.target.starts_with("arg.");
     const bool result = b.target.starts_with("result.");
+    require(b.target.starts_with("temp.") || b.type != ScopeType::Cursor,
+            ScopedRefusal::InvalidSchema, "Cursor bindings must be temps");
     if (arg || result) {
       const auto &schema = arg ? f.descriptor.args : f.descriptor.result;
       const auto name    = b.target.substr(arg ? 4 : 7);
@@ -126,6 +146,7 @@ void VortexVM::verifyScope(ScopedFrame &f, ScopeCodec &codec, CellRef entry,
       require(b.target.starts_with("temp.") || b.target == "outcome" ||
                   b.target == "error",
               ScopedRefusal::InvalidSchema, "Unknown frame binding target");
+
       if (b.target == "outcome" || b.target == "error")
         require(b.type == ScopeType::Str, ScopedRefusal::InvalidSchema,
                 "Outcome/error bindings must be Str");
@@ -141,6 +162,17 @@ void VortexVM::verifyScope(ScopedFrame &f, ScopeCodec &codec, CellRef entry,
           !protectedCells.contains(frameRegister) &&
           !f.graph.contains(frameRegister) && !registers.contains(frameTarget),
       ScopedRefusal::InvalidGraph, "Frame handle aliases protected data");
+  std::unordered_map<CellRef, std::pair<ScopeType, bool>> kinds;
+  for (const auto &b : f.descriptor.bindings) {
+    codec.charge();
+    kinds.emplace(b.reg, std::pair{b.type, b.target.starts_with("arg.")});
+  }
+  const auto kindOf = [&](CellRef reg) {
+    const auto found = kinds.find(reg);
+    require(found != kinds.end(), ScopedRefusal::InvalidGraph,
+            "Unregistered structural operand");
+    return found->second;
+  };
   // Verify every listed instruction, including unreachable malicious nodes.
   bool completionEdge = false;
   std::unordered_set<CellRef> completionTargets{f.completion};
@@ -185,6 +217,30 @@ void VortexVM::verifyScope(ScopedFrame &f, ScopeCodec &codec, CellRef entry,
       // Runtime validates nested manifests independently, with the outer write
       // set imposing an additional publication boundary.
       continue;
+    }
+    if (structural(*kind)) {
+      const std::size_t inputs  = *kind == OpcodeKind::Link ? 2 : 1;
+      const std::size_t outputs = *kind == OpcodeKind::Link ? 2 : 1;
+      require(in.size() == inputs && out.size() == outputs,
+              ScopedRefusal::InvalidGraph, "Structural scope operand arity");
+      // A result reference is published, never a starting position, so an
+      // unassigned result can't be walked; cursors start only from data.
+      const auto [from, fromArg] = kindOf(in[0]);
+      require(positional(from) && (from != ScopeType::PinnedRef || fromArg) &&
+                  (from == ScopeType::Cursor || fromArg),
+              ScopedRefusal::TypeMismatch, "Structural source is not data");
+      const auto to = kindOf(out[0]).first;
+      if (*kind == OpcodeKind::Point)
+        require(to == ScopeType::Cursor || to == ScopeType::PinnedRef,
+                ScopedRefusal::TypeMismatch, "Point needs a reference target");
+      else if (*kind == OpcodeKind::Link)
+        require(to == ScopeType::Cursor &&
+                    kindOf(in[1]).first == ScopeType::Str &&
+                    kindOf(out[1]).first == ScopeType::Bool,
+                ScopedRefusal::TypeMismatch, "Link needs cursor, Str, Bool");
+      else
+        require(scalar(to), ScopedRefusal::TypeMismatch,
+                "Deref needs a scalar target");
     }
     for (std::size_t i = 0; i < in.size(); ++i) {
       codec.charge();
@@ -299,6 +355,11 @@ ExecutionResult VortexVM::enterScope(CellRef cursor, CellRef opcode) {
         (void)name;
         pinned.insert(target);
       }
+      for (const auto &[target, root] : parent.reach) {
+        codec.charge();
+        (void)root;
+        pinned.insert(target);
+      }
     }
     require(pinned.contains(in[2]), ScopedRefusal::InvalidOperands,
             "Scope arguments are not caller-pinned");
@@ -352,6 +413,12 @@ ExecutionResult VortexVM::enterScope(CellRef cursor, CellRef opcode) {
       }
     const auto relocationDimension =
         a.dimensionNamed(xanadu::cellRelocationDimension);
+    for (auto cell : destProtection.protectedCells()) {
+      codec.charge();
+      // The relocation dimension is shared vocabulary, not destination-owned
+      // data. Referents of old PinnedRefs are likewise outside this closure.
+      if (relocationDimension != cell) frame.publicationProtected.insert(cell);
+    }
     for (auto cell : argsProtection.protectedCells()) {
       codec.charge();
       // Distinct argument/result handles legitimately share their canonical
@@ -503,8 +570,10 @@ ExecutionResult VortexVM::stepScope(CellRef cursor) {
               ScopedRefusal::InvalidScopedCompletion,
               "Malformed scoped call frame");
     }
-    const auto in      = codec.wing(*op, DimVector::POS);
-    const auto out     = codec.wing(*op, DimVector::NEG);
+    const auto in  = codec.wing(*op, DimVector::POS);
+    const auto out = codec.wing(*op, DimVector::NEG);
+    if (structural(*kind))
+      return stepScopedStructure(f, codec, *kind, *op, in, out, cursor);
     const auto control = controlIndex(*kind);
     std::vector<CellValue> inputs;
     for (std::size_t i = 0; i < in.size(); ++i) {
@@ -727,8 +796,13 @@ ExecutionResult VortexVM::finishScope(ScopedOutcome outcome,
                   ScopedRefusal::TypeMismatch,
                   "Value completion has unassigned result data");
         }
+        codec.setPinnedReach(&live.reach);
         payload = codec.snapshot(fields.at("result"), live.descriptor.result,
                                  live.pins);
+        for (const auto &node : payload->nodes) {
+          codec.charge();
+          if (node.pinned) requireScopedPublicationStable(*node.pinned, codec);
+        }
       }
     } catch (const ScopeError &error) {
       outcome = ScopedOutcome::Refused;
@@ -795,6 +869,204 @@ ExecutionResult VortexVM::finishScope(ScopedOutcome outcome,
   if (outcome == ScopedOutcome::Refused)
     return refusalResult(*refusal, "Scoped callback refused");
   return {};
+}
+ExecutionResult VortexVM::stepScopedStructure(ScopedFrame &f, ScopeCodec &codec,
+                                              OpcodeKind kind, CellRef op,
+                                              const std::vector<CellRef> &in,
+                                              const std::vector<CellRef> &out,
+                                              CellRef cursor) {
+  auto &a = core_.arena();
+  // verifyScope already proved this shape; recheck so a later caller of this
+  // helper can never index past an operand list.
+  const std::size_t width = kind == OpcodeKind::Link ? 2 : 1;
+  require(in.size() == width && out.size() == width,
+          ScopedRefusal::InvalidGraph, "Structural scope operand arity");
+  // The frame's own register target; redirection is refused as elsewhere.
+  const auto bound = [&](CellRef reg, bool write) {
+    require((write ? f.writable : f.readable).contains(reg),
+            ScopedRefusal::InvalidGraph, "Structural operand escaped frame");
+    const auto target = codec.reference(reg);
+    require(f.bindingTargets.at(reg) == target, ScopedRefusal::InvalidGraph,
+            "Structural binding was redirected");
+    return target;
+  };
+  const auto assigned = [&](CellRef cell) {
+    const auto tracked = f.assignmentIndex.find(cell);
+    return tracked == f.assignmentIndex.end() ||
+           f.assignments[tracked->second].assigned;
+  };
+  // Every pin a caller cell is reached from; owned argument copies and
+  // callback scratch have none.
+  const auto rootsOf = [&](CellRef target) {
+    std::vector<std::string> roots;
+    for (const auto &[name, pin] : f.pins) {
+      codec.charge();
+      if (pin == target) roots.push_back(name);
+    }
+    const auto [first, last] = f.reach.equal_range(target);
+    for (auto entry = first; entry != last; ++entry) {
+      codec.charge();
+      roots.push_back(entry->second);
+    }
+    return roots;
+  };
+  // Each record is charged as traversal work, so the shared work grant, not
+  // the schema field bound, limits how much a dense scan may record.
+  const auto reached = [&](CellRef target,
+                           const std::vector<std::string> &roots) {
+    for (const auto &root : roots) {
+      codec.charge();
+      const auto [first, last] = f.reach.equal_range(target);
+      if (std::none_of(first, last,
+                       [&](const auto &entry) { return entry.second == root; }))
+        f.reach.emplace(target, root);
+    }
+  };
+  // Where a register's position is: a cursor or argument reference names its
+  // handle target; an owned argument record or list is its own position.
+  const auto position = [&](CellRef reg) {
+    const auto cell = bound(reg, false);
+    require(assigned(cell), ScopedRefusal::TypeMismatch,
+            "Structural read precedes assignment");
+    const auto type = f.bindingTypes.at(reg);
+    if (type == ScopeType::Record || type == ScopeType::List) return cell;
+    const auto target = a.valueKindOf(cell) == xanadu::ValueKind::OpHandle
+                            ? a.handleTarget(cell)
+                            : std::nullopt;
+    require(target && a.contains(*target), ScopedRefusal::TypeMismatch,
+            "Structural reference is dead");
+    return *target;
+  };
+  const auto point = [&](CellRef cell, CellRef target) {
+    require(bool(a.setValueBits(cell, xanadu::ValueKind::OpHandle, target)),
+            ScopedRefusal::CallbackFault, "Cannot move scoped cursor");
+    assignScopedValue(f, cell, codec);
+  };
+  const auto from = position(in[0]);
+  require(!core_.hasPipeline(from), ScopedRefusal::InvalidGraph,
+          "Scoped position has pipeline");
+  if (kind == OpcodeKind::Point) {
+    const auto dest = bound(out[0], true);
+    // A published reference must stay valid after release: only a caller
+    // pin, never argument copies or callback scratch, can become a result.
+    // Publication replaces the destination's owned field graph as well as
+    // its root. An independent pin cannot preserve that ownership relation.
+    if (f.bindingTypes.at(out[0]) == ScopeType::PinnedRef) {
+      require(!rootsOf(from).empty(), ScopedRefusal::TypeMismatch,
+              "Result reference is not caller-pinned");
+      requireScopedPublicationStable(from, codec);
+    }
+    point(dest, from);
+  } else if (kind == OpcodeKind::Link) {
+    const auto selectorCell = bound(in[1], false);
+    require(assigned(selectorCell), ScopedRefusal::TypeMismatch,
+            "Structural selector precedes assignment");
+    const auto selector = codec.boundedText(selectorCell);
+    std::optional<CellRef> next;
+    auto roots = rootsOf(from);
+    if (selector == "first")
+      next = core_.readLink(from, core_.dims().grab, DimVector::POS);
+    else if (selector == "next")
+      next = core_.readLink(from, core_.dims().step, DimVector::POS);
+    else if (selector == "target") {
+      // Following a reference may only reach a caller pin.
+      if (a.valueKindOf(from) == xanadu::ValueKind::OpHandle)
+        if (const auto target = a.handleTarget(from);
+            target && a.contains(*target))
+          if (auto pins = rootsOf(*target); !pins.empty()) {
+            next  = target;
+            roots = std::move(pins);
+          }
+    } else {
+      // Fields are `.name`, so a field can never shadow a navigation word
+      // and an unknown word refuses instead of reading as a missing field.
+      require(selector.size() > 1 && selector.front() == '.',
+              ScopedRefusal::TypeMismatch, "Unknown structural selector");
+      const auto wanted = std::string_view(selector).substr(1);
+      std::unordered_set<CellRef> visited;
+      auto name = core_.readLink(from, core_.dims().vars, DimVector::POS);
+      while (name && !next) {
+        codec.charge();
+        require(visited.insert(*name).second &&
+                    visited.size() <= f.limits.fields,
+                ScopedRefusal::ResourceLimit, "Cyclic or oversized record");
+        // Compare lengths from the charged span list before copying any
+        // caller text, then pay for the bytes actually read.
+        std::size_t length = 0;
+        for (const auto &span : a.contentOf(*name)) {
+          codec.charge();
+          // Any name longer than the selector cannot match; stop summing
+          // before an adversarial span list can overflow the length.
+          if (span.length > wanted.size() - std::min(length, wanted.size())) {
+            length = wanted.size() + 1;
+            break;
+          }
+          length += static_cast<std::size_t>(span.length);
+        }
+        if (a.valueKindOf(*name) == xanadu::ValueKind::None &&
+            length == wanted.size()) {
+          codec.debitBytes(length);
+          if (a.textOf(*name) == wanted)
+            next = core_.readLink(*name, core_.dims().values, DimVector::POS);
+        }
+        name = core_.readLink(*name, core_.dims().vars, DimVector::POS);
+      }
+    }
+    if (next) {
+      require(!core_.hasPipeline(*next), ScopedRefusal::InvalidGraph,
+              "Scoped position has pipeline");
+      reached(*next, roots);
+    }
+    const auto found = bound(out[1], true);
+    if (next) point(bound(out[0], true), *next);
+    require(
+        core_.writeValue(found, 0, std::nullopt, next.has_value()).has_value(),
+        ScopedRefusal::CallbackFault, "Scoped found flag write failed");
+    assignScopedValue(f, found, codec);
+  } else {
+    const auto dest = bound(out[0], true);
+    const auto type = f.bindingTypes.at(out[0]);
+    std::optional<CellValue> value;
+    switch (type) {
+    case ScopeType::Float:
+      if (const auto n = a.asDouble(from); n && std::isfinite(*n)) value = *n;
+      break;
+    case ScopeType::Int:
+      if (const auto n = a.asInt64(from)) value = *n;
+      break;
+    case ScopeType::Bool:
+      if (const auto n = a.asBool(from)) value = *n;
+      break;
+    case ScopeType::Str:
+      if (a.valueKindOf(from) == xanadu::ValueKind::None) {
+        auto text = codec.boundedText(from);
+        for (std::size_t n = 0; n < text.size(); ++n) codec.charge();
+        // The copy written to the destination is new scratch as well.
+        codec.debitBytes(text.size());
+        value = std::move(text);
+      }
+      break;
+    default:
+      break;
+    }
+    require(value.has_value(), ScopedRefusal::TypeMismatch,
+            "Scoped position does not hold the declared scalar");
+    require(core_.writeValue(dest, 0, std::nullopt, *value).has_value(),
+            ScopedRefusal::CallbackFault, "Scoped Deref write failed");
+    assignScopedValue(f, dest, codec);
+  }
+  setCursorOpcode(cursor,
+                  core_.readLink(op, core_.dims().spin, DimVector::POS));
+  return {};
+}
+void VortexVM::requireScopedPublicationStable(CellRef target,
+                                              ScopeCodec &codec) const {
+  for (const auto &frame : scopedFrames_) {
+    codec.charge();
+    require(!frame.publicationProtected.contains(target),
+            ScopedRefusal::TypeMismatch,
+            "Result reference belongs to a replaced destination graph");
+  }
 }
 void VortexVM::assignScopedValue(ScopedFrame &frame, CellRef cell,
                                  ScopeCodec &codec) {
