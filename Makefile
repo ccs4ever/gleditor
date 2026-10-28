@@ -1004,10 +1004,17 @@ FUZZ_CORE_OBJS := $(patsubst %.cpp,$(FUZZ_OBJDIR)/%.o,$(XUDU_CORE_SRCS))
 # the same reason xudu-swarm-peer needs them below: anything linking the
 # engine now needs these two as well.
 FUZZ_CORE_OBJS += $(FUZZ_OBJDIR)/src/mimetype.o $(FUZZ_OBJDIR)/src/source_grounder.o
+# The engine also calls the generic Layoutfilade and focus manager, which the
+# test binaries link explicitly for the same reason.
+FUZZ_CORE_OBJS += $(FUZZ_OBJDIR)/src/enfilade/layoutfilade.o $(FUZZ_OBJDIR)/src/ui/focus_manager.o
 
+# Header dependencies, as the regular objects have: without them a changed
+# struct layout leaves stale sanitizer objects that disagree with fresh ones,
+# which shows up as a crash in code that is not wrong.
 $(FUZZ_OBJDIR)/%.o: %.cpp
 	@$(MKDIR) -p $(@D)
-	$(CXX) $(FUZZ_FLAGS) $(CXXFLAGS) -c -o $@ $<
+	$(CXX) $(FUZZ_FLAGS) $(CXXFLAGS) -MMD -MP -c -o $@ $<
+-include $(FUZZ_CORE_OBJS:.o=.d)
 
 # $(1) target name
 define fuzz-target
@@ -1026,6 +1033,9 @@ $(eval $(call fuzz-target,link_package))
 $(eval $(call fuzz-target,identity_wire))
 $(eval $(call fuzz-target,session_package))
 $(eval $(call fuzz-target,x509_delegation))
+# Actor source is untrusted input, and an accepted arbitration policy feeds
+# every later epistemic score, so its domains are checked on every input.
+$(eval $(call fuzz-target,vagent_runtime_policy))
 
 VAGENT_FRONTEND_FUZZ_OBJS := $(patsubst %.cpp,$(FUZZ_OBJDIR)/%.o,$(VAGENT_FRONTEND_SRCS))
 .PHONY: fuzz_vagent_frontend
@@ -1034,7 +1044,7 @@ $(OBJDIR)/fuzz_vagent_frontend: tests/fuzz/fuzz_vagent_frontend.cpp $(VAGENT_FRO
 	$(CXX) -fsanitize=fuzzer,address,undefined $(CXXFLAGS) $^ -o $@
 
 .PHONY: fuzz
-fuzz: fuzz_binary_ops fuzz_link_package fuzz_identity_wire fuzz_session_package fuzz_x509_delegation fuzz_vagent_frontend
+fuzz: fuzz_binary_ops fuzz_link_package fuzz_identity_wire fuzz_session_package fuzz_x509_delegation fuzz_vagent_frontend fuzz_vagent_runtime_policy
 
 # The other end of the swarm tests: a peer that offers a torrent's content and
 # waits to be asked. A separate program because the two peers are meant to be

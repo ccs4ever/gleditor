@@ -118,6 +118,12 @@ std::string_view checkErrorName(CheckErrorCode code) noexcept {
     return "SignatureMismatch";
   case C::PlanParamNotInGoal:
     return "PlanParamNotInGoal";
+  case C::InvalidEpistemicPolicy:
+    return "InvalidEpistemicPolicy";
+  case C::MissingClusterTolerance:
+    return "MissingClusterTolerance";
+  case C::EpistemicIngressOnly:
+    return "EpistemicIngressOnly";
   case C::AlternationOfLiterals:
     return "AlternationOfLiterals";
   }
@@ -1137,37 +1143,56 @@ private:
     }
     for (const auto &d : unit_.decls) {
       std::visit(
-          Overloaded{[&](const PredicateDecl &p) {
-                       PredicateInfo info;
-                       info.name = p.name;
-                       info.loc  = p.loc;
-                       std::unordered_set<std::string> seen;
-                       for (const auto &pp : p.params) {
-                         checkValueName(pp.name, p.loc);
-                         if (!seen.insert(pp.name).second) {
-                           err(CheckErrorCode::DuplicateName, p.loc,
-                               std::format("predicate argument `{}` repeats",
-                                           pp.name));
-                         }
-                         info.params.push_back(
-                             {pp.name, resolveType(pp.type), pp.key});
-                       }
-                       out_.predicates.emplace(p.name, std::move(info));
-                     },
-                     [&](const QuestionDecl &q) {
-                       QuestionInfo info;
-                       info.name   = q.name;
-                       info.loc    = q.loc;
-                       info.params = resolveParams(q.params);
-                       info.result = resolveType(q.result);
-                       out_.questions.emplace(q.name, std::move(info));
-                     },
-                     [&](const GoalDecl &g) {
-                       if (!out_.goals.contains(g.name)) {
-                         out_.goals.emplace(g.name, resolveGoal(g));
-                       }
-                     },
-                     [&](const auto &) {}},
+          Overloaded{
+              [&](const PredicateDecl &p) {
+                PredicateInfo info;
+                info.name = p.name;
+                info.loc  = p.loc;
+                std::unordered_set<std::string> seen;
+                for (const auto &pp : p.params) {
+                  checkValueName(pp.name, p.loc);
+                  if (!seen.insert(pp.name).second) {
+                    err(CheckErrorCode::DuplicateName, p.loc,
+                        std::format("predicate argument `{}` repeats",
+                                    pp.name));
+                  }
+                  info.params.push_back(
+                      {pp.name, resolveType(pp.type), pp.key});
+                }
+                if (p.arbitration) {
+                  const bool continuous = std::ranges::any_of(
+                      info.params, [](const PredicateParamInfo &pi) {
+                        return !pi.key && pi.type.kind == K::Float;
+                      });
+                  auto policy =
+                      checkArbitrationPolicy(*p.arbitration, continuous);
+                  if (policy) {
+                    info.policy = std::move(*policy);
+                  } else {
+                    for (const auto &issue : policy.error()) {
+                      err(issue.code == PolicyIssueCode::MissingClusterTolerance
+                              ? CheckErrorCode::MissingClusterTolerance
+                              : CheckErrorCode::InvalidEpistemicPolicy,
+                          issue.loc, issue.message);
+                    }
+                  }
+                }
+                out_.predicates.emplace(p.name, std::move(info));
+              },
+              [&](const QuestionDecl &q) {
+                QuestionInfo info;
+                info.name   = q.name;
+                info.loc    = q.loc;
+                info.params = resolveParams(q.params);
+                info.result = resolveType(q.result);
+                out_.questions.emplace(q.name, std::move(info));
+              },
+              [&](const GoalDecl &g) {
+                if (!out_.goals.contains(g.name)) {
+                  out_.goals.emplace(g.name, resolveGoal(g));
+                }
+              },
+              [&](const auto &) {}},
           d);
     }
     resolveCapacities();
@@ -1522,6 +1547,11 @@ private:
       return;
     }
     declare(name, type, SymKind::Local, loc);
+  }
+
+  [[nodiscard]] bool arbitrated(const std::string &predicate) const {
+    const auto it = out_.predicates.find(predicate);
+    return it != out_.predicates.end() && it->second.policy.has_value();
   }
 
   void checkTerm(const Term &t) {
@@ -2475,6 +2505,14 @@ private:
 
   Type node(const EBelieves &n, const Expr &, Pos) {
     checkTerm(n.term);
+    if (n.from && arbitrated(n.term.name)) {
+      // Supports are named by authenticated principal, so an alias would
+      // match nothing; source selection returns with authenticated bindings.
+      err(CheckErrorCode::EpistemicIngressOnly, n.from->loc,
+          std::format("`believes ... from` cannot filter the arbitrated "
+                      "predicate `{}` by a source name",
+                      n.term.name));
+    }
     if (n.from) {
       const Type t = infer(*n.from, operandPos);
       expectType(basic(K::Agent), t, n.from->loc, "`from`");
@@ -2547,6 +2585,12 @@ private:
                       : n.kind == EBeliefChange::Kind::Forget ? "forget"
                                                               : "revise");
     checkTerm(n.fact);
+    if (arbitrated(n.fact.name)) {
+      err(CheckErrorCode::EpistemicIngressOnly, e.loc,
+          std::format("`{}` is arbitrated: only checked ingestion changes "
+                      "its beliefs",
+                      n.fact.name));
+    }
     return basic(K::Unit);
   }
 

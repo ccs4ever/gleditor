@@ -214,6 +214,10 @@ int checkUpgrade(const std::string &oldPath, const std::string &newPath,
       std::cerr << newPath << ": note: plan '" << change.symbol
                 << "' changed; active intentions must replan\n";
       break;
+    case UpgradeChangeKind::EpistemicPolicy:
+      std::cerr << newPath << ": error: predicate '" << change.symbol
+                << "' changed its arbitration policy (breaking upgrade)\n";
+      break;
     }
   }
   return failures > 0 ? exitError : exitOk;

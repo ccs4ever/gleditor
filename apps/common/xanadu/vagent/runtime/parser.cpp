@@ -561,6 +561,51 @@ PredicateDecl Parser::parsePredicate() {
     }
   }
   expectClose(TokenKind::CloseParen);
+  // `arbitrated` is contextual: it means nothing anywhere else, so a
+  // predicate or value may still be named `arbitrated`.
+  if (atWord("arbitrated")) {
+    ArbitrationClause clause;
+    clause.loc = cur().loc;
+    advance();
+    expect(TokenKind::By, "'by' after 'arbitrated'");
+    clause.strategy = expectName("an arbitration strategy");
+    expect(TokenKind::OpenParen, "'(' after the arbitration strategy");
+    while (!at(TokenKind::CloseParen)) {
+      PolicyArg arg;
+      arg.loc = cur().loc;
+      arg.key = expectName("a policy key");
+      expect(TokenKind::Colon, "':' after the policy key");
+      // A leading minus is part of the constant, so a negative value reaches
+      // the checker's domain rule rather than failing to parse.
+      const bool negative = accept(TokenKind::Minus);
+      const auto value    = parsePrimary();
+      const auto *literal = std::get_if<ELiteral>(&value->node);
+      if (literal == nullptr) {
+        fail(ParseErrorCode::UnexpectedToken,
+             "a policy value must be a literal", value->loc);
+      }
+      arg.value = *literal;
+      if (negative) {
+        using LK = ELiteral::Kind;
+        if (arg.value.kind == LK::Int) {
+          arg.value.intValue = -arg.value.intValue;
+        } else if (arg.value.kind == LK::Float) {
+          arg.value.floatValue = -arg.value.floatValue;
+        } else if (arg.value.kind == LK::Duration) {
+          arg.value.durationMs = -arg.value.durationMs;
+        } else {
+          fail(ParseErrorCode::UnexpectedToken,
+               "only a number or duration can be negative", value->loc);
+        }
+      }
+      clause.args.push_back(std::move(arg));
+      if (!accept(TokenKind::Comma)) {
+        break;
+      }
+    }
+    expectClose(TokenKind::CloseParen);
+    d.arbitration = std::move(clause);
+  }
   return d;
 }
 

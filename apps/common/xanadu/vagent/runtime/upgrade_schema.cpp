@@ -619,6 +619,9 @@ makeUpgradeSchema(const CheckedUnit &checked) {
     UpgradePredicate output;
     for (const auto &p : predicate.params)
       output.parameters.push_back(param({p.name, p.type}, p.key));
+    if (predicate.policy)
+      output.epistemicPolicy = EpistemicPolicySchema{
+          *predicate.policy, policyHash(*predicate.policy)};
     result.predicates.emplace(name, std::move(output));
   }
   for (const auto &[name, record] : checked.records)
@@ -692,6 +695,16 @@ compareUpgradeSchemas(const UpgradeSchema &oldSchema,
     if (oldKeys != newKeys)
       out.push_back(
           {UpgradeChangeKind::PredicateKeyPositions, "predicate", name});
+    const auto hashOf = [](const UpgradePredicate &p) {
+      return p.epistemicPolicy ? p.epistemicPolicy->hash : std::string();
+    };
+    if (hashOf(oldPred) != hashOf(next->second)) {
+      UpgradeChange change{UpgradeChangeKind::EpistemicPolicy, "predicate",
+                           name};
+      change.oldHash = hashOf(oldPred);
+      change.newHash = hashOf(next->second);
+      out.push_back(std::move(change));
+    }
   }
   comparePlans(oldSchema.plans, newSchema.plans, {}, out);
   return out;
@@ -705,6 +718,7 @@ bool upgradeChangeRequiresRefusal(const UpgradeChange &change) noexcept {
   case UpgradeChangeKind::PredicateArity:
   case UpgradeChangeKind::PredicateParameterType:
   case UpgradeChangeKind::PredicateKeyPositions:
+  case UpgradeChangeKind::EpistemicPolicy:
     return true;
   default:
     return false;
@@ -735,6 +749,8 @@ std::string_view upgradeChangeName(const UpgradeChangeKind kind) noexcept {
     return "ChangedPlanHash";
   case UpgradeChangeKind::PlanHashVersion:
     return "PlanHashVersion";
+  case UpgradeChangeKind::EpistemicPolicy:
+    return "EpistemicPolicy";
   }
   return "Unknown";
 }

@@ -325,9 +325,22 @@ struct PredParam {
   std::string name;
   TypeExpr type;
 };
+/// One `key: literal` of an `arbitrated by` clause; the checker types it.
+struct PolicyArg {
+  std::string key;
+  ELiteral value;
+  SourceLocation loc{};
+};
+/// `arbitrated by strategy(key: literal, ...)` (P19.4).
+struct ArbitrationClause {
+  std::string strategy;
+  std::vector<PolicyArg> args;
+  SourceLocation loc{};
+};
 struct PredicateDecl {
   std::string name;
   std::vector<PredParam> params;
+  std::optional<ArbitrationClause> arbitration;
   SourceLocation loc{};
 };
 struct QuestionDecl {

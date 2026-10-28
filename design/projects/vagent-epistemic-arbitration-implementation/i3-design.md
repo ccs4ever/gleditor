@@ -61,7 +61,23 @@ Required keys:
     `InvalidEpistemicPolicy`.
   - Continuous-only keys on a discrete predicate, and `consensus` on a discrete predicate, refuse
     `InvalidEpistemicPolicy`.
-- Optional `clock_skew`: a non-negative duration, default 0.
+- Optional keys, each with its domain; absent ones have no field except where a resolved default is
+  stated:
+  - `clock_skew`: non-negative duration, resolves to 0.
+  - `decay`: positive duration, the freshness half-life of P19 section 3.2.
+  - `alignment`: non-negative duration.
+  - `score_tolerance`: finite and ≥ 0, resolves to 1e-9 (P19 section 5.3), so the hash records the
+    value in force.
+  - `allow_untested`: Bool, resolves to false; true lets truest/ranked expose cold-start hypotheses
+    and is refused for consensus.
+  - Continuous only: `max_cluster_diameter` (finite, ≥ `cluster_tolerance`), `max_slew` (> 0, in
+    units per second) and `innovation` (> 0, the gate quantile).
+- Global bounds: priors ≤ 1e12; durations ≤ 10^12 ms (about 31 years), so I4's age arithmetic stays
+  in Int64; an integer literal widens to Float only up to 2^53, where the double is exact; a leading
+  minus is part of a numeric or duration constant, so negatives reach the domain rules.
+- Keys I4 needs that 1a does not decide (epsilon_w, epsilon_floor, feature names, health thresholds)
+  arrive with their slices. Each addition bumps the canonical encoding tag `vagent-policy-1`, so
+  older hashes never compare equal to newer ones.
 
 **Arbitrated facts follow ingestion semantics, not belief-set revision.** On an arbitrated predicate
 the ingestion routine is the only clause writer. The checker refuses `EpistemicIngressOnly` for:
@@ -458,6 +474,44 @@ Later slices:
 - I3-3: heartbeat turns, timeout eligibility and clock-mapping resolution.
 - I3-4: verification percepts and the application journal (P19.5). Pinning targets must happen
   before a label uses them, since retired records are excised eagerly.
+
+### Noisy-sensor simulation and fuzzing (1b and 1c acceptance)
+
+The owner asked for noisy sensors to be simulated. Two complementary tools are part of 1b's and 1c's
+acceptance evidence:
+
+1. **`tests/fuzz/fuzz_epistemic_ingress.cpp`**, a libFuzzer target in `make fuzz` under ASan and
+   UBSan like the existing targets. The fuzz bytes decode into a script over a fixed program with
+   one continuous and one discrete arbitrated predicate and at most four principals: bind, unbind,
+   retire, rebind at a new incarnation, set the wall clock synchronised or not, observe and pump.
+   Observation fields are drawn adversarially: NaN, infinities, subnormal and huge variances,
+   sequence reversals, duplicate and conflicting event IDs, relays, skewed or future acquisition
+   times and foreign frames. After every step the harness checks:
+
+   - no crash or undefined behaviour, and every outcome is typed;
+   - each ingestion is all-or-nothing, so the epistemic ranks are unchanged after a refusal;
+   - at most one current record per (principal, key), with the profile's incarnation;
+   - `$epistemic_cells` equals a walk of the epistemic graph;
+   - resending committed bytes is `Duplicate` and changes nothing;
+   - no refusal of a relayed copy changes health counters or contact.
+
+   A seed corpus covers each refusal code.
+
+1. **A seeded noisy-sensor simulator**, a test-support header used by gtest property tests over many
+   seeds. It is deterministic and not a fuzzer. It generates ground-truth trajectories and reports
+   from:
+
+   - GPS with Gaussian noise, dropouts and multipath spikes;
+   - odometry whose variance grows with drift;
+   - a stuck sensor;
+   - clock skew;
+   - reboots that reset sequences and bump the incarnation;
+   - relay duplication;
+   - bursty rates that reach backpressure.
+
+   1b and 1c use it to show the invariants hold under realistic noise. I4 reuses it with its ground
+   truth as evidence for scoring and fusion at the ML gate. Its distributions are stated
+   assumptions, not validation of a deployed sensor.
 
 ## 12. Findings and their resolution
 

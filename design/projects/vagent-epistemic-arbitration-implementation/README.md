@@ -56,8 +56,8 @@ preserved. Only accepted iteration files are staged/committed, with material lim
   P19 roots until the typed epistemic translator exists.
 - I3-1, checked ingress and per-source observation history, has an accepted [design](i3-design.md)
   after five review rounds by four sonnet personas ([reports](i3-review/)). It lands as slices 1a
-  (policy syntax and checker), 1b with 1c (ingestion and incarnations) and 1d (checkpoint and
-  resume, after a restore spike).
+  (policy syntax and checker; accepted, see [validation](i3-validation.md)), 1b with 1c (ingestion
+  and incarnations) and 1d (checkpoint and resume, after a restore spike).
 - The existing actor compiler has declarations for goal/plan lowering but does not implement the
   complete source-to-intention pipeline. Active-intention upgrade must explicitly refuse where
   compatibility/remapping cannot be proved. This prerequisite remains open; no full P17/P19

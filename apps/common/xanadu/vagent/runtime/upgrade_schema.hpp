@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "common/xanadu/vagent/runtime/checker.hpp"
+#include "common/xanadu/vagent/runtime/epistemic_policy.hpp"
 
 namespace xanadu::vagent::runtime {
 
@@ -31,15 +32,11 @@ struct UpgradePlan {
   std::string astHash;
 };
 
-// P19 adds this as a typed field. Disengaged means the source has no policy;
-// unknown/future syntax is a checker error and must never be collapsed to
-// absent.
-enum class EpistemicStrategy : std::uint8_t { Truest, Ranked, Consensus };
-enum class EpistemicModel : std::uint8_t { BetaReputation, OnlineSgd };
-
+// Disengaged means the predicate has no `arbitrated by` policy; an invalid
+// clause is a checker error and never collapses to absent.
 struct EpistemicPolicySchema {
-  EpistemicStrategy strategy{EpistemicStrategy::Truest};
-  EpistemicModel model{EpistemicModel::BetaReputation};
+  ArbitrationPolicy policy;
+  std::string hash; ///< `policyHash(policy)`, compared on upgrade and restore
 };
 
 struct UpgradePredicate {
@@ -76,6 +73,10 @@ enum class UpgradeChangeKind {
   RemovedPlan,
   ChangedPlanHash,
   PlanHashVersion,
+  /// A predicate gained, lost or changed its arbitration policy. Records
+  /// scored under one policy must not be reinterpreted under another, so
+  /// this refuses until the typed epistemic translator exists.
+  EpistemicPolicy,
 };
 
 struct UpgradeChange {

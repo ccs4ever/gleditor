@@ -58,6 +58,7 @@
 #include <gleditor/logging.hpp>
 
 #include "common/xanadu/foreign_op_handle.hpp"
+#include "common/xanadu/vagent/runtime/epistemic_policy.hpp"
 #include "common/xanadu/vagent/runtime/prelude.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
 
@@ -1117,6 +1118,8 @@ private:
     CellRef cell{noCell};
     std::vector<Ty> argTys;
     std::size_t nkeys{0};
+    /// Only checked ingestion writes an arbitrated predicate's clauses.
+    bool arbitrated{false};
   };
   /// How one argument of a term participates in a match or a build.
   struct ArgPlan {
@@ -1164,6 +1167,7 @@ private:
   void pushTail(CellRef listReg, CellRef tailReg, CellRef cell);
   void selfName(CellRef out);
   Ty believesExpr(const EBelieves &b, CellRef out);
+  void mintPolicyMaster(CellRef predicate, const ArbitrationPolicy &policy);
   Ty findallExpr(const EFindall &f, CellRef out, SourceLocation loc);
   Ty forBelieves(const EFor &f, CellRef out);
   Ty beliefChange(EBeliefChange::Kind kind, const Term &t, CellRef out);
@@ -3989,15 +3993,86 @@ void Gen::mintPredicates() {
     }
     pi.cell = arena_.makeCell(pd->name);
     stateCells_.insert(pi.cell);
+    std::optional<ArbitrationPolicy> arbitration;
+    if (pd->arbitration) {
+      const bool continuous = std::ranges::any_of(
+          std::views::iota(std::size_t{0}, pd->params.size()),
+          [&](std::size_t i) {
+            return !pd->params[i].key && pi.argTys[i].k == Ty::K::Float;
+          });
+      // The checker already accepted the clause; a refusal here means the
+      // two disagree, which is a compiler defect, not a user error.
+      const auto policy = checkArbitrationPolicy(*pd->arbitration, continuous);
+      if (!policy) {
+        bail(CompileError::Unsupported,
+             "arbitration policy the checker accepted: " +
+                 policy.error().front().message,
+             pd->loc);
+      }
+      pi.arbitrated = true;
+      arbitration.emplace(*policy);
+    }
     const CellRef cell = pi.cell;
     if (!preds_.emplace(pd->name, std::move(pi)).second) {
       bail(CompileError::DuplicateName, "predicate " + pd->name, pd->loc);
     }
+    if (arbitration) mintPolicyMaster(cell, *arbitration);
     zigzag::expectWritten(
         arena_.link(lastPred_ == noCell ? agentCell_ : lastPred_, dims_.belief,
                     DimVector::POS, cell));
     lastPred_ = cell;
   }
+}
+
+/// The predicate's policy master heads its `d.epistemic` rank: a record of
+/// typed constants that later calibration records take clone views of
+/// (P19 section 2.1). Durations are Int64 milliseconds; absent optional keys
+/// have no field rather than a sentinel value.
+void Gen::mintPolicyMaster(CellRef predicate, const ArbitrationPolicy &p) {
+  const CellRef master = arena_.makeCell(std::string_view("EpistemicPolicy"));
+  zigzag::expectWritten(
+      arena_.link(predicate, dims_.epistemic, DimVector::POS, master));
+  CellRef tail     = master;
+  const auto field = [&](std::string_view name, CellRef value) {
+    const CellRef label = arena_.makeCell(name);
+    zigzag::expectWritten(
+        arena_.link(tail, core_.dims().vars, DimVector::POS, label));
+    zigzag::expectWritten(
+        arena_.link(label, core_.dims().values, DimVector::POS, value));
+    tail = label;
+  };
+  const auto real = [&](std::string_view name, std::optional<double> v) {
+    if (v) field(name, arena_.makeScalarCell(*v));
+  };
+  const auto ms = [&](std::string_view name, std::optional<std::int64_t> v) {
+    if (v) field(name, arena_.makeScalarCell(*v));
+  };
+  const auto text = [&](std::string_view name,
+                        const std::optional<std::string> &v) {
+    if (v) field(name, arena_.makeCell(std::string_view(*v)));
+  };
+  text("strategy", std::string(strategyName(p.strategy)));
+  text("model", p.model);
+  real("min_confidence", p.minConfidence);
+  real("prior_alpha", p.priorAlpha);
+  real("prior_beta", p.priorBeta);
+  text("clock", std::string(clockName(p.clock)));
+  ms("max_age", p.maxAgeMs);
+  ms("clock_skew", p.clockSkewMs);
+  ms("decay", p.decayMs);
+  ms("alignment", p.alignmentMs);
+  real("score_tolerance", p.scoreTolerance);
+  field("allow_untested", arena_.makeScalarCell(p.allowUntested));
+  field("continuous", arena_.makeScalarCell(p.continuous));
+  real("cluster_tolerance", p.clusterTolerance);
+  text("frame", p.frame);
+  text("units", p.units);
+  real("min_variance", p.minVariance);
+  real("max_variance", p.maxVariance);
+  real("max_cluster_diameter", p.maxClusterDiameter);
+  real("max_slew", p.maxSlew);
+  real("innovation", p.innovation);
+  text("hash", policyHash(p));
 }
 
 const Gen::PredInfo &Gen::predOf(const Term &t) {
@@ -4554,6 +4629,12 @@ Ty Gen::forBelieves(const EFor &f, CellRef out) {
 Ty Gen::beliefChange(EBeliefChange::Kind kind, const Term &t, CellRef out) {
   using Kind        = EBeliefChange::Kind;
   const PredInfo &p = predOf(t);
+  // The checker refuses this with EpistemicIngressOnly; reaching rtBSet or
+  // rtBDrop here would let a program forge an authenticated support.
+  if (p.arbitrated) {
+    bail(CompileError::Unsupported,
+         "belief change on the arbitrated predicate " + t.name, t.loc);
+  }
   const CellRef who = reg();
   selfName(who);
   if (kind == Kind::Forget) {
@@ -4696,6 +4777,9 @@ Ty Gen::terminateExpr(const ETerminate &t, CellRef out) {
 std::vector<Gen::TellSeq> Gen::emitTellTests(CellRef ty, CellRef eq) {
   std::vector<TellSeq> seqs;
   for (auto &[name, info] : preds_) {
+    // A peer's tell is not authenticated ingress; with no test it is counted
+    // unhandled like any undeclared event.
+    if (info.arbitrated) continue;
     for (const bool untell : {false, true}) {
       TellSeq s{&name, &info, untell, newLabel()};
       const std::string type =
@@ -4710,6 +4794,10 @@ std::vector<Gen::TellSeq> Gen::emitTellTests(CellRef ty, CellRef eq) {
 
 void Gen::emitTellBodies(const std::vector<TellSeq> &seqs, CellRef end) {
   for (const TellSeq &s : seqs) {
+    if (s.info->arbitrated) {
+      bail(CompileError::Unsupported,
+           "tell body for the arbitrated predicate " + *s.pred, {});
+    }
     place(s.label);
     const PredInfo &p = *s.info;
     // The fact is rebuilt from the event's positional fields; a field the

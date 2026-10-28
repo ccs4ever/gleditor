@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "common/xanadu/vagent/runtime/ast.hpp"
+#include "common/xanadu/vagent/runtime/epistemic_policy.hpp"
 #include "common/xanadu/vagent/runtime/token.hpp"
 
 namespace xanadu::vagent::runtime {
@@ -75,6 +76,11 @@ enum class CheckErrorCode : std::uint8_t {
   MissingImplementation,
   SignatureMismatch,
   PlanParamNotInGoal,
+  // Epistemic arbitration (P19.4)
+  InvalidEpistemicPolicy,
+  MissingClusterTolerance,
+  EpistemicIngressOnly, ///< a program-level write or alias filter on an
+                        ///< arbitrated predicate, which only ingestion writes
   // Warnings (CheckedUnit::warnings only)
   AlternationOfLiterals,
 };
@@ -160,6 +166,9 @@ struct PredicateParamInfo {
 struct PredicateInfo {
   std::string name;
   std::vector<PredicateParamInfo> params;
+  /// Present for an `arbitrated by` predicate, whose clauses only checked
+  /// ingestion writes.
+  std::optional<ArbitrationPolicy> policy;
   SourceLocation loc{};
 };
 
