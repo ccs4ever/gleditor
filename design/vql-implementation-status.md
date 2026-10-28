@@ -198,3 +198,24 @@ is the next review item.
 
 Logs: `/tmp/vql-variadic-focused.log`, `/tmp/vql-variadic-full-build.log`,
 `/tmp/vql-variadic-format.log`.
+
+### Contract accounting iteration
+
+Luna implemented a borrowed VM result visitor, preserving scalar/typed-stream identity and order,
+and changed contract subject collection to charge before each append without first copying a whole
+result vector. Matcher input remains materialized. Shared matching now charges recursive type visits
+and field probes before proxy/default work. Native tests isolate prebound subject traversal, default
+suppression, capture isolation and recovery; frontend tests separately cover structured request
+budget errors and recovery. Environment snapshot/preparation costs are not fully metered by this
+change, and no universal allocation/performance guarantee is made.
+
+All 452 focused tests, the full build and formatting check passed. Luna cross-reviews and the
+architecture design gate accepted the bounded implementation. Full §4.12 remains incomplete. Logs:
+`/tmp/vql-contract-budget-focused.log`, `/tmp/vql-contract-budget-full-build.log`,
+`/tmp/vql-contract-budget-format.log`.
+
+The combined full Xuzz run for both new iterations passed 2,373 tests with 27 skips (2,400 tests
+run, plus one disabled test). All 256 ZigZag tests also passed. The full build and formatting gate
+passed; lint remains blocked by the same two unchanged UI defaults. No library or rootless swarm
+stage was rerun for these engine-only changes. Logs: `/tmp/vql-iterations-full-xuzz.log`,
+`/tmp/vql-iterations-zigzag.log`, `/tmp/vql-iterations-lint.log`.

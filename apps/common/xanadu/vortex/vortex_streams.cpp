@@ -55,19 +55,33 @@ void VortexVM::requireStreamCursor(const CellRef cursor) {
 }
 
 std::vector<CellRef> VortexVM::resultCells(const CellRef slot) const {
-  if (iteratorSlots_.contains(slot)) return {};
-  if (const auto found = streams_.find(slot); found != streams_.end()) {
-    return found->second ? *found->second : std::vector<CellRef>{};
+  std::vector<CellRef> result;
+  if (!iteratorSlots_.contains(slot)) {
+    if (const auto found = streams_.find(slot);
+        found != streams_.end() && found->second)
+      result.reserve(found->second->size());
   }
-  if (streamSlots_.contains(slot)) return {};
+  forEachResultCell(slot, [&](const CellRef cell) { result.push_back(cell); });
+  return result;
+}
+
+void VortexVM::forEachResultCell(
+    const CellRef slot,
+    gleditor::cpp26::function_ref<void(CellRef)> visitor) const {
+  if (iteratorSlots_.contains(slot)) return;
+  if (const auto found = streams_.find(slot); found != streams_.end()) {
+    if (found->second)
+      for (const CellRef cell : *found->second) visitor(cell);
+    return;
+  }
+  if (streamSlots_.contains(slot)) return;
   if (const auto found = cellReferences_.find(slot);
       found != cellReferences_.end()) {
-    return found->second && core_.arena().contains(*found->second)
-               ? std::vector<CellRef>{*found->second}
-               : std::vector<CellRef>{};
+    if (found->second && core_.arena().contains(*found->second))
+      visitor(*found->second);
+    return;
   }
-  return core_.arena().contains(slot) ? std::vector<CellRef>{slot}
-                                      : std::vector<CellRef>{};
+  if (core_.arena().contains(slot)) visitor(slot);
 }
 
 ExecutionResult VortexVM::executeCellRefCopy(const OpcodeKind kind,

@@ -4,6 +4,12 @@
  */
 #include <gtest/gtest.h>
 
+#include <cstddef>
+#include <memory>
+#include <span>
+#include <string>
+#include <vector>
+
 #include "common/xanadu/multi_store.hpp"
 #include "common/xanadu/vortex/vortex_core.hpp"
 #include "common/xanadu/vql/contracts.hpp"
@@ -137,6 +143,113 @@ TEST_F(ContractMatcherTest, NumericTextCanAlsoSatisfyString) {
   EXPECT_TRUE(matcher->satisfiesType(basicType(BasicType::Kind::String),
                                      std::span{&numericText, 1}, nullptr,
                                      evaluateDefault));
+}
+
+TEST_F(ContractMatcherTest,
+       PreboundStreamChecksConsumeFuelPerMemberAndRecoverAfterReset) {
+  TypeExpr cellType = basicType(BasicType::Kind::Cell);
+  TypeExpr streamType;
+  streamType.unionType.members.push_back(PrimaryType{
+      .kind = GenericType{
+          .name = "Stream",
+          .args = {std::make_shared<TypeExpr>(std::move(cellType))}}});
+
+  std::vector<CellRef> prebound;
+  prebound.reserve(128);
+  for (std::size_t index = 0; index < 128; ++index)
+    prebound.push_back(arena.makeCell());
+
+  const auto evaluateDefault = [this](const ValueExpr &expr,
+                                      std::optional<CellRef> context) {
+    return noDefault(expr, context);
+  };
+  arena.setExecutionLimits(100'000, 8, 100'000);
+  EXPECT_THROW((void)matcher->satisfiesType(streamType, prebound, nullptr,
+                                            evaluateDefault),
+               std::runtime_error);
+
+  arena.setExecutionLimits(100'000, 512, 100'000);
+  EXPECT_TRUE(
+      matcher->satisfiesType(streamType, prebound, nullptr, evaluateDefault));
+}
+
+TEST_F(ContractMatcherTest,
+       DestructureFuelPrecedesDefaultCallbackAndCellMinting) {
+  const CellRef root = arena.makeCell();
+  DestructurePattern pattern;
+  pattern.fields.push_back(DestructureField{
+      .dimName      = "d.defaulted",
+      .varName      = "$value",
+      .defaultValue = std::make_shared<ValueExpr>(
+          ValueExpr{.kind = ScalarLiteral{.value = std::string{"fallback"}}})});
+  ContractBindings bindings;
+  std::size_t defaultCalls   = 0;
+  const auto evaluateDefault = [&](const ValueExpr &,
+                                   const std::optional<CellRef>) {
+    ++defaultCalls;
+    return std::vector<CellRef>{arena.makeCell("fallback")};
+  };
+
+  const auto cellsBefore = arena.cellCount();
+  arena.setExecutionLimits(100'000, 0, 100'000);
+  EXPECT_THROW((void)matcher->matchDestructure(
+                   pattern, root, bindings,
+                   ContractMatcher::MissingField::Refuse, evaluateDefault),
+               std::runtime_error);
+  EXPECT_EQ(defaultCalls, 0u);
+  EXPECT_EQ(arena.cellCount(), cellsBefore);
+  EXPECT_TRUE(bindings.empty());
+
+  arena.setExecutionLimits(100'000, 16, 100'000);
+  ASSERT_TRUE(matcher->matchDestructure(pattern, root, bindings,
+                                        ContractMatcher::MissingField::Refuse,
+                                        evaluateDefault));
+  EXPECT_EQ(defaultCalls, 1u);
+  EXPECT_GT(arena.cellCount(), cellsBefore);
+  ASSERT_TRUE(bindings.contains("$value"));
+  ASSERT_EQ(bindings.at("$value").size(), 1u);
+  EXPECT_EQ(arena.textOf(bindings.at("$value").front()), "fallback");
+}
+
+TEST_F(ContractMatcherTest,
+       FuelFailureAfterShapeCaptureDoesNotLeakAndCanRecover) {
+  const CellRef root = arena.makeCell();
+  const CellRef text = arena.makeCell("present");
+  const auto present = coordinator->resolveDimension("d.present");
+  ASSERT_TRUE(core->setLink(root, present, DimVector::POS, text));
+  const CellRef fallback = arena.makeCell("fallback");
+
+  DestructurePattern pattern;
+  pattern.fields.push_back(
+      DestructureField{.dimName = "d.present", .varName = "$captured"});
+  pattern.fields.push_back(DestructureField{
+      .dimName      = "d.optional",
+      .varName      = "$defaulted",
+      .defaultValue = std::make_shared<ValueExpr>(
+          ValueExpr{.kind = ScalarLiteral{.value = std::string{"fallback"}}})});
+  TypeExpr shape;
+  shape.unionType.members.push_back(
+      PrimaryType{.kind = ShapeType{.pattern = std::move(pattern)}});
+  ContractBindings captures;
+  const auto evaluateDefault = [fallback](const ValueExpr &,
+                                          const std::optional<CellRef>) {
+    return std::vector<CellRef>{fallback};
+  };
+  const std::span<const CellRef> subject{&root, 1};
+
+  arena.setExecutionLimits(100'000, 2, 100'000);
+  EXPECT_THROW(
+      (void)matcher->satisfiesType(shape, subject, &captures, evaluateDefault),
+      std::runtime_error);
+  EXPECT_TRUE(captures.empty());
+
+  arena.setExecutionLimits(100'000, 16, 100'000);
+  ASSERT_TRUE(
+      matcher->satisfiesType(shape, subject, &captures, evaluateDefault));
+  ASSERT_TRUE(captures.contains("$captured"));
+  EXPECT_EQ(captures.at("$captured"), (std::vector<CellRef>{text}));
+  ASSERT_TRUE(captures.contains("$defaulted"));
+  EXPECT_EQ(captures.at("$defaulted"), (std::vector<CellRef>{fallback}));
 }
 
 } // namespace

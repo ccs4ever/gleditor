@@ -23,6 +23,8 @@
 #include <variant>
 #include <vector>
 
+#include <gleditor/cpp26.hpp>
+
 #include "common/xanadu/vortex/vortex_core.hpp"
 
 namespace xanadu {
@@ -218,6 +220,11 @@ public:
   [[nodiscard]] std::optional<CellRef> resultCell(CellRef slot) const;
   /// Resolve a scalar or stream register as zero or more cell identities.
   [[nodiscard]] std::vector<CellRef> resultCells(CellRef slot) const;
+  /// Visit a register's current cell identities without retaining them.
+  /// The callback must not mutate VM register maps.
+  void
+  forEachResultCell(CellRef slot,
+                    gleditor::cpp26::function_ref<void(CellRef)> visitor) const;
   VortexVM *setContractCoordinator(xanadu::MultiStoreCoordinator &coordinator);
 
   // -- Pipeline Execution Helper ----------------------------------------------

@@ -2306,14 +2306,17 @@ below describe the intended shared semantics.
   arguments capture caller bindings, including untyped functor step vectors. Decorated functor
   captures freeze their body across rebinding; application runs that body before applying the outer
   predicates/clamp to the combined result. Query-time master dereference resolves foreign proxies,
-  charges each probe and returns the original cell on a cycle. Step predicates retain cell identity
-  through guarded reference slots and Boolean control flow short-circuits. Unsupported cases refuse
-  explicitly. Runtime rank iterators and eager sequence registers now support per-member typed
-  filtering, stream cardinality, predicates and integer index clamps. Foreign neighbors resolve
-  through canonical arena proxies; choice points restore iterator state and proxy minting. Universal
-  lazy streaming, recursive frames, nonliteral contract-field default thunks, mutation enforcement,
-  and complete frontend/parallel parity remain open; compiled execution never silently calls the
-  direct evaluator as a fallback.
+  charges each probe and returns the original cell on a cycle. Contract subject collection charges
+  members before copying them into its matcher buffer, and matching charges recursive type visits
+  and field probes. Matching still materializes subjects; no zero-copy or universal allocation
+  guarantee follows. Step predicates retain cell identity through guarded reference slots and
+  Boolean control flow short-circuits. Unsupported cases refuse explicitly. Runtime rank iterators
+  and eager sequence registers now support per-member typed filtering, stream cardinality,
+  predicates and integer index clamps. Foreign neighbors resolve through canonical arena proxies;
+  choice points restore iterator state and proxy minting. Universal lazy streaming, recursive
+  frames, nonliteral contract-field default thunks, mutation enforcement, and complete
+  frontend/parallel parity remain open; compiled execution never silently calls the direct evaluator
+  as a fallback.
 
 ______________________________________________________________________
 

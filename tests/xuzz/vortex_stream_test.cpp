@@ -2,8 +2,10 @@
 
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
+#include "common/xanadu/multi_store.hpp"
 #include "common/xanadu/vortex/vortex_vm.hpp"
 
 namespace {
@@ -145,6 +147,123 @@ TEST(VortexStreamTest, EmptyStreamProducesNoSequenceItems) {
   ASSERT_TRUE(run.success) << run.errorMessage;
   EXPECT_TRUE(h.vm.resultCells(stream).empty());
   EXPECT_EQ(h.arena.asBool(present), std::optional{false});
+}
+
+TEST(VortexStreamTest, ResultCellVisitorMatchesScalarAndTypedRegisters) {
+  Harness h;
+  const CellRef first       = h.arena.makeCell("first");
+  const CellRef second      = h.arena.makeCell("second");
+  const CellRef emptyStream = h.arena.makeCell();
+  const CellRef stream      = h.arena.makeCell();
+  const CellRef iterator    = h.arena.makeCell();
+  const CellRef item        = h.arena.makeCell();
+  const CellRef present     = h.arena.makeCell();
+  const CellRef nextStream  = h.arena.makeCell();
+
+  const CellRef clearEmpty   = h.vm.mintOpcode(OpcodeKind::StreamClear);
+  const CellRef clear        = h.vm.mintOpcode(OpcodeKind::StreamClear);
+  const CellRef appendFirst  = h.vm.mintOpcode(OpcodeKind::StreamAppend);
+  const CellRef appendSecond = h.vm.mintOpcode(OpcodeKind::StreamAppend);
+  const CellRef begin        = h.vm.mintOpcode(OpcodeKind::StreamBegin);
+  const CellRef next         = h.vm.mintOpcode(OpcodeKind::IteratorNext);
+  const CellRef halt         = h.vm.mintOpcode(OpcodeKind::Halt);
+  const CellRef clearNext    = h.vm.mintOpcode(OpcodeKind::StreamClear);
+  const CellRef haltNext     = h.vm.mintOpcode(OpcodeKind::Halt);
+  const CellRef code[]{clearEmpty, clear, appendFirst, appendSecond, begin,
+                       next,       halt,  clearNext,   haltNext};
+  bindSequence(h, code);
+  h.core.bindOutput(clearEmpty, emptyStream);
+  h.core.bindOutput(clear, stream);
+  h.core.bindInput(appendFirst, first);
+  h.core.bindOutput(appendFirst, stream);
+  h.core.bindInput(appendSecond, second);
+  h.core.bindOutput(appendSecond, stream);
+  h.core.bindInput(begin, stream);
+  h.core.bindOutput(begin, iterator);
+  h.core.bindInput(next, iterator);
+  h.core.bindOutput(next, item);
+  h.core.bindOutput(next, present);
+  h.core.bindOutput(clearNext, nextStream);
+
+  const CellRef cursor = h.vm.spawnCursor(clearEmpty, "result-cell-visitor");
+  EXPECT_FALSE(h.vm.run(cursor, 6).success);
+
+  const auto visit = [&](const CellRef slot) {
+    std::vector<CellRef> cells;
+    h.vm.forEachResultCell(slot,
+                           [&](const CellRef cell) { cells.push_back(cell); });
+    return cells;
+  };
+  EXPECT_EQ(visit(first), (std::vector<CellRef>{first}));
+  EXPECT_EQ(visit(emptyStream), std::vector<CellRef>{});
+  EXPECT_EQ(visit(stream), (std::vector<CellRef>{first, second}));
+  EXPECT_EQ(visit(iterator), std::vector<CellRef>{});
+  EXPECT_EQ(visit(item), (std::vector<CellRef>{first}));
+  EXPECT_EQ(visit(present), (std::vector<CellRef>{present}));
+
+  ASSERT_TRUE(h.vm.run(cursor, 1).success);
+  const CellRef nextCursor = h.vm.spawnCursor(clearNext, "result-cell-expired");
+  EXPECT_FALSE(h.vm.run(nextCursor, 1).success);
+  EXPECT_EQ(visit(stream), std::vector<CellRef>{});
+  EXPECT_EQ(visit(iterator), std::vector<CellRef>{});
+}
+
+TEST(VortexStreamTest, ContractBudgetChargesBeforeCopyAndCanRecover) {
+  Harness h;
+  xanadu::MultiStoreCoordinator coordinator(h.core);
+  h.vm.setContractCoordinator(coordinator);
+  const CellRef first       = h.arena.makeCell("first");
+  const CellRef second      = h.arena.makeCell("second");
+  const CellRef firstTitle  = h.arena.makeCell("first title");
+  const CellRef secondTitle = h.arena.makeCell("second title");
+  const auto title          = coordinator.resolveDimension("d.title");
+  zigzag::expectWritten(h.arena.link(first, title, DimVector::POS, firstTitle));
+  zigzag::expectWritten(
+      h.arena.link(second, title, DimVector::POS, secondTitle));
+  const CellRef stream     = h.arena.makeCell();
+  const CellRef descriptor = h.arena.makeCell(
+      "VQL_CONTRACT/1\nStream<Cell { +d.title: $title: String }>");
+  const CellRef matched      = h.arena.makeCell();
+  const CellRef capture      = h.arena.makeCell();
+  const CellRef clear        = h.vm.mintOpcode(OpcodeKind::StreamClear);
+  const CellRef appendFirst  = h.vm.mintOpcode(OpcodeKind::StreamAppend);
+  const CellRef appendSecond = h.vm.mintOpcode(OpcodeKind::StreamAppend);
+  const CellRef contract     = h.vm.mintOpcode(OpcodeKind::MatchContract);
+  const CellRef halt         = h.vm.mintOpcode(OpcodeKind::Halt);
+  const CellRef code[]{clear, appendFirst, appendSecond, contract, halt};
+  bindSequence(h, code);
+  h.core.bindOutput(clear, stream);
+  h.core.bindInput(appendFirst, first);
+  h.core.bindOutput(appendFirst, stream);
+  h.core.bindInput(appendSecond, second);
+  h.core.bindOutput(appendSecond, stream);
+  h.core.bindInput(contract, descriptor);
+  h.core.bindInput(contract, stream);
+  h.core.bindOutput(contract, matched);
+  h.core.bindOutput(contract, capture);
+
+  const CellRef cursor = h.vm.spawnCursor(clear, "contract-subject-budget");
+  EXPECT_FALSE(h.vm.run(cursor, 3).success);
+  EXPECT_EQ(h.vm.resultCells(stream), (std::vector<CellRef>{first, second}));
+
+  constexpr std::size_t descriptorWork =
+      std::string_view(
+          "VQL_CONTRACT/1\nStream<Cell { +d.title: $title: String }>")
+          .size();
+  h.arena.setExecutionLimits(100'000, descriptorWork + 2, 100'000);
+  const auto failed = h.vm.run(cursor, 1);
+  EXPECT_FALSE(failed.success);
+  EXPECT_NE(failed.errorMessage.find("work budget exhausted"),
+            std::string::npos);
+  EXPECT_FALSE(h.arena.asBool(matched));
+  EXPECT_FALSE(h.vm.cellReferenceOf(capture));
+
+  h.arena.setExecutionLimits(100'000, 100'000, 100'000);
+  const auto recovered = h.vm.run(cursor, 2);
+  ASSERT_TRUE(recovered.success) << recovered.errorMessage;
+  EXPECT_EQ(h.arena.asBool(matched), std::optional{true});
+  EXPECT_FALSE(h.vm.cellReferenceOf(capture));
+  EXPECT_EQ(h.vm.resultCells(stream), (std::vector<CellRef>{first, second}));
 }
 
 TEST(VortexStreamTest, AppendCanSnapshotAndAppendItsOwnPrefix) {

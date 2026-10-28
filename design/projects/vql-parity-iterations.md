@@ -219,5 +219,40 @@ passed; the full build and formatting gate passed. Logs: `/tmp/vql-variadic-focu
 
 Profiling review identified an existing accounting edge: VM contract matching copies a whole result
 stream before charging its individual members, and direct matching can inspect prebound subjects
-without its own per-member fuel charge. The next iteration addresses that boundary; no performance
-or allocation improvement is claimed here. Full §4.12 remains incomplete.
+without its own per-member fuel charge. The accounting iteration below addresses that boundary; no
+performance or allocation improvement is claimed here. Full §4.12 remains incomplete.
+
+## Contract traversal and collection accounting
+
+A borrowed `forEachResultCell` visitor now supplies the same scalar/stream/iterator resolution as
+`resultCells`. It retains no callback, and callbacks must not mutate VM register maps during the
+visit. `resultCells` still returns a materialized vector and reserves known live stream capacity. VM
+contract collection uses the visitor and charges each member before appending it to its matcher
+input buffer, avoiding the prior extra per-input result-vector copy. The matcher buffer remains a
+vector; this is not zero-copy execution or an allocation/speed guarantee.
+
+The shared matcher charges each recursive type visit and each destructured field before its
+lookup/proxy/default work. Tests supply prebound subjects independently of argument generation,
+exercise exhausted fuel before default callbacks and cell minting, verify no partial caller captures
+from a failed wrapped match, and recover after resetting limits. VM tests prepare a stream before
+limiting work, exhaust during subject collection, and retry the same instruction successfully with
+unchanged identities/order. Frontend zero-fuel tests separately verify structured budget errors and
+later request recovery; they may fail at request entry rather than at the matcher probe.
+
+All 452 focused tests passed, as did the full build and formatting gate. Luna implemented both the
+VM visitor and matcher charging, then cross-reviewed each other's changes. Architecture review
+accepted the bounded algorithm. No persisted opcode/format changed and no direct evaluator fallback
+was introduced.
+
+These are logical fuel boundaries when arena execution limits are enabled, not a bound on every
+allocation or CPU instruction. Environment snapshot/preparation copies, general lazy streaming,
+atomic mutation contracts and the remaining §4.12 work stay open. Exact total fuel thresholds are
+not cross-backend equivalence guarantees. Logs: `/tmp/vql-contract-budget-focused.log`,
+`/tmp/vql-contract-budget-full-build.log`, `/tmp/vql-contract-budget-format.log`.
+
+The combined regression run for the variadic and accounting iterations completed with 2,373 Xuzz
+passes and 27 skips (2,400 tests run, plus one disabled test), and all 256 ZigZag tests passed. Lint
+still stops at the same two unchanged UI typography defaults. The library and rootless swarm stages
+were not rerun for these engine-only changes; their preceding successful runs are recorded above.
+Logs: `/tmp/vql-iterations-full-xuzz.log`, `/tmp/vql-iterations-zigzag.log`,
+`/tmp/vql-iterations-lint.log`. Full §4.12 remains incomplete.

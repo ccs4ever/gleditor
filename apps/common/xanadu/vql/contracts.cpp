@@ -135,6 +135,7 @@ bool ContractMatcher::matchDestructure(
     const MissingField missing, const DefaultEvaluator evaluateDefault) {
   if (!context || !core_.arena().contains(*context)) return false;
   for (const auto &field : pattern.fields) {
+    core_.arena().consumeWork();
     if (field.isContext) {
       bindings["."] = {*context};
       if (!field.varName.empty()) bindings[field.varName] = {*context};
@@ -169,6 +170,7 @@ bool ContractMatcher::matchDestructure(
 bool ContractMatcher::satisfiesType(
     const TypeExpr &type, const std::span<const zigzag::CellRef> cells,
     ContractBindings *const bindings, const DefaultEvaluator evaluateDefault) {
+  core_.arena().consumeWork();
   validateType(type);
   for (const auto &member : type.unionType.members) {
     ContractBindings trial;

@@ -216,4 +216,27 @@ TEST(VQLExecutionTest, InvalidSignatureRegistersNoDefinitionsInDirectEngine) {
             std::string::npos);
 }
 
+TEST(VQLExecutionTest, PreboundTypedRequestBudgetFailureCanRecoverInBothModes) {
+  for (const auto mode :
+       {QueryExecutionMode::Direct, QueryExecutionMode::Vortex}) {
+    Harness h;
+    const auto value = h.arena.makeCell("prebound");
+    const std::vector<CellRef> expected(128, value);
+    h.direct.setVariable("seed", expected);
+    auto executor     = h.executor(mode);
+    const auto source = "def collect(...$xs: Stream<Cell>): Stream<Cell> := "
+                        "$xs; collect($seed)";
+    // Request-entry failure is separate from the native matcher probe tests.
+    h.arena.setExecutionLimits(100'000, 0, 100'000);
+    const auto exhausted = executor.execute(source);
+    ASSERT_FALSE(exhausted);
+    EXPECT_EQ(exhausted.error().category,
+              QueryExecutionError::Category::Budget);
+    h.arena.setExecutionLimits(100'000, 100'000, 100'000);
+    const auto recovered = executor.execute(source);
+    ASSERT_TRUE(recovered) << recovered.error().message;
+    EXPECT_EQ(*recovered, expected);
+  }
+}
+
 } // namespace xanadu::vql

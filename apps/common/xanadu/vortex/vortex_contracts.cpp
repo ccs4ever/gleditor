@@ -43,11 +43,10 @@ ExecutionResult VortexVM::executeTypeContract(OpcodeKind kind, CellRef opcode,
     std::vector<CellRef> subjects;
     for (std::size_t i = firstSubject; i < inputs.size(); ++i) {
       core_.arena().consumeWork();
-      const auto cells = resultCells(inputs[i]);
-      for (const CellRef cell : cells) {
+      forEachResultCell(inputs[i], [&](const CellRef cell) {
         core_.arena().consumeWork();
         subjects.push_back(cell);
-      }
+      });
     }
     xanadu::vql::ContractBindings captures;
     const auto defaultValue =
