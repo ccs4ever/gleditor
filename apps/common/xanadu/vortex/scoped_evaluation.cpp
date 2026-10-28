@@ -186,9 +186,9 @@ CellRef ScopeCodec::reference(CellRef handle) {
   bool marked = false;
   for (const auto &edge : a.dimensionsOf(handle)) {
     charge();
-    if (edge.pos != noCell &&
-        string(edge.dim) == xanadu::cellRelocationDimension &&
-        string(edge.pos) == xanadu::cellRelocationMarker)
+    const auto next = edge.neighbor(DimVector::POS);
+    if (next && string(edge.dim) == xanadu::cellRelocationDimension &&
+        string(*next) == xanadu::cellRelocationMarker)
       marked = true;
   }
   if (a.valueKindOf(handle) != xanadu::ValueKind::OpHandle || !marked)

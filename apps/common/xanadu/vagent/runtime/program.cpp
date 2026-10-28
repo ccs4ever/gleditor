@@ -85,7 +85,6 @@ CompiledProgram::fromSource(std::string_view source, std::string_view name) {
   for (const auto &[agentName, stagingAgent] : stagingAgents) {
     CompiledAgent persistentAgent;
     const auto remap = [&](zigzag::CellRef cell) -> zigzag::CellRef {
-      if (cell == zigzag::noCell) return zigzag::noCell;
       auto it = promoted->mapping.find(cell);
       return it != promoted->mapping.end() ? it->second : cell;
     };

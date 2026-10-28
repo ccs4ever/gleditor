@@ -309,9 +309,10 @@ public:
       // for the same dimension, and each carries real owned links.
       for (const auto &link : from_.dimensionsOf(cell)) {
         charge();
-        if (!link.pos) continue;
+        const auto next = link.neighbor(DimVector::POS);
+        if (!next) continue;
         if (target(link.dim)) {
-          if (!mapped_.contains(link.pos)) add(link.pos);
+          if (!mapped_.contains(*next)) add(*next);
           continue;
         }
         const auto name      = from_.textOf(link.dim);
@@ -348,12 +349,13 @@ public:
       charge();
       for (const auto &link : from_.dimensionsOf(old)) {
         charge();
-        if (!link.pos) continue;
+        const auto next = link.neighbor(DimVector::POS);
+        if (!next) continue;
         const auto into = link.dim == clone_.first
                               ? std::optional{clone_.second}
                               : target(link.dim);
         if (!into) continue;
-        const auto found = mapped_.find(link.pos);
+        const auto found = mapped_.find(*next);
         if (found == mapped_.end() || !found->second)
           throw std::runtime_error(link.dim == clone_.first
                                        ? "unowned clone edge"
@@ -3420,7 +3422,7 @@ void AgentExecutor::restoreState(State &state, CellRef saved) {
   // base's home cell, which is the agent cell, and that part is the new
   // arena's own.
   const auto inBase = [](CellRef ref) {
-    return ref != zigzag::noCell && (ref & zigzag::ephemeralBit) == 0;
+    return (ref & zigzag::ephemeralBit) == 0;
   };
   std::unordered_map<std::string, zigzag::DimRef> savedDim;
   {
@@ -3430,56 +3432,83 @@ void AgentExecutor::restoreState(State &state, CellRef saved) {
       for (const auto &link : arena.dimensionsOf(frontier[i])) {
         if (!inBase(link.dim)) continue;
         savedDim.try_emplace(text(arena, link.dim), link.dim);
-        for (const auto next : {link.pos, link.neg}) {
-          if (inBase(next) && seen.emplace(next, true).second) {
-            frontier.push_back(next);
+        for (const auto dir : {DimVector::POS, DimVector::NEG}) {
+          const auto next = link.neighbor(dir);
+          if (next && inBase(*next) && seen.emplace(*next, true).second) {
+            frontier.push_back(*next);
           }
         }
       }
     }
   }
-  const auto old = [&](std::string_view name) {
+  // A dimension the saved graph never links along is absent, and so is
+  // everything it would have carried.
+  const auto old = [&](std::string_view name) -> std::optional<zigzag::DimRef> {
     const auto found = savedDim.find(std::string(name));
-    return found == savedDim.end() ? zigzag::noCell : found->second;
+    return found == savedDim.end() ? std::nullopt
+                                   : std::optional{found->second};
   };
-  const ValueDims oldVd{.vars   = old("d.vars"),
-                        .values = old("d.values"),
-                        .grab   = old("d.grab"),
-                        .step   = old("d.step")};
+  // The (saved, current) pairs a copy follows: only dimensions the saved
+  // graph actually has.
+  struct DimMap {
+    std::vector<zigzag::DimRef> from, into;
+  };
+  const auto pairs =
+      [](std::initializer_list<
+          std::pair<std::optional<zigzag::DimRef>, zigzag::DimRef>>
+             wanted) {
+        DimMap map;
+        for (const auto &[from, into] : wanted) {
+          if (!from) continue;
+          map.from.push_back(*from);
+          map.into.push_back(into);
+        }
+        return map;
+      };
+  const auto oldVars = old("d.vars"), oldValues = old("d.values"),
+             oldGrab = old("d.grab"), oldStep = old("d.step");
   GLEDITOR_LOG_DEBUG(kLog, "restoring {} from '{}': {} dimensions known",
                      state.name, text(arena, saved), savedDim.size());
 
-  const std::array valueFrom{oldVd.vars, oldVd.values, oldVd.grab, oldVd.step};
-  const std::array valueInto{vd.vars, vd.values, vd.grab, vd.step};
-  const std::array termFrom{oldVd.grab, oldVd.step, old("d.source")};
-  const std::array termInto{vd.grab, vd.step, state.dims.source};
+  const auto value = pairs({{oldVars, vd.vars},
+                            {oldValues, vd.values},
+                            {oldGrab, vd.grab},
+                            {oldStep, vd.step}});
+  const auto term  = pairs({{oldGrab, vd.grab},
+                            {oldStep, vd.step},
+                            {old("d.source"), state.dims.source}});
   const std::array newValueDims{vd.vars, vd.values, vd.grab, vd.step};
 
   // Fields. A scalar or text field is read by compiled code through its
   // static value cell, so it is overwritten in place; a field with structure
   // (a list, a record) is read through its name cell and is replaced.
-  if (oldVd.vars != zigzag::noCell && oldVd.values != zigzag::noCell) {
+  if (oldVars && oldValues) {
+    // fieldsOf walks only `vars` and `values`.
+    const ValueDims oldVd{.vars   = *oldVars,
+                          .values = *oldValues,
+                          .grab   = vd.grab,
+                          .step   = vd.step};
     for (const auto &[nameCell, valueCell] : fieldsOf(arena, oldVd, saved)) {
       if (!valueCell) continue;
       const auto name = text(arena, nameCell);
       if (name.empty() || name == kFieldTurn) continue;
       const auto target = fieldValue(arena, vd, ac, name);
       const bool structured =
-          hasLinks(arena, *valueCell, valueFrom) ||
+          hasLinks(arena, *valueCell, value.from) ||
           (target && hasLinks(arena, *target, newValueDims));
       if (target && !structured) {
         copyCellData(arena, *valueCell, *target);
       } else {
         setField(arena, vd, ac, name,
-                 cloneGraph(arena, *valueCell, valueFrom, valueInto));
+                 cloneGraph(arena, *valueCell, value.from, value.into));
       }
     }
   }
 
-  const auto ranked = [&](CellRef owner, zigzag::DimRef dim) {
-    return dim == zigzag::noCell ? std::vector<CellRef>{}
-                                 : zigzag::rankAfter(arena, owner, dim) |
-                                       std::ranges::to<std::vector<CellRef>>();
+  const auto ranked = [&](CellRef owner, std::optional<zigzag::DimRef> dim) {
+    return !dim ? std::vector<CellRef>{}
+                : zigzag::rankAfter(arena, owner, *dim) |
+                      std::ranges::to<std::vector<CellRef>>();
   };
 
   // Beliefs: the predicates are the new program's cells; the clauses, with
@@ -3495,7 +3524,7 @@ void AgentExecutor::restoreState(State &state, CellRef saved) {
     if (match == freshPredicates.end()) continue;
     for (const auto clause : ranked(predicate, oldClause)) {
       appendToRank(arena, *match, core.clause,
-                   cloneGraph(arena, clause, termFrom, termInto));
+                   cloneGraph(arena, clause, term.from, term.into));
     }
   }
 
@@ -3525,13 +3554,14 @@ void AgentExecutor::restoreState(State &state, CellRef saved) {
 
   // Intentions are data (§5.6): the cell, its fields and its subgoal chain
   // are copied under the new agent cell, keeping their order.
-  const std::array intentionFrom{oldVd.vars, oldVd.values, oldVd.grab,
-                                 oldVd.step, old("d.subgoal")};
-  const std::array intentionInto{vd.vars, vd.values, vd.grab, vd.step,
-                                 state.dims.subgoal};
+  const auto intention = pairs({{oldVars, vd.vars},
+                                {oldValues, vd.values},
+                                {oldGrab, vd.grab},
+                                {oldStep, vd.step},
+                                {old("d.subgoal"), state.dims.subgoal}});
   for (const auto top : ranked(saved, old("d.intention"))) {
     appendToRank(arena, ac, state.dims.intention,
-                 cloneGraph(arena, top, intentionFrom, intentionInto));
+                 cloneGraph(arena, top, intention.from, intention.into));
   }
 
   // §5.5: request ids from this name must exceed any the old incarnation

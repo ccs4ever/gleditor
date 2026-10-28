@@ -67,15 +67,15 @@ struct CompileFailure {
 struct FrameBody {
   /// The handle the host points at a frame cell. `make` leaves it naming the
   /// frame it built; `enter` runs the body against the frame it names.
-  zigzag::CellRef frame{zigzag::noCell};
+  zigzag::CellRef frame{};
   /// Builds a frame, copies `args` into its parameters, and points `frame`
   /// at it. The frame is left off the stack.
-  zigzag::CellRef make{zigzag::noCell};
+  zigzag::CellRef make{};
   /// Stacks the frame `frame` names, binds the body's handles to it, runs the
   /// body and unstacks it. The result is in `result`.
-  zigzag::CellRef enter{zigzag::noCell};
+  zigzag::CellRef enter{};
   std::vector<zigzag::CellRef> args;
-  zigzag::CellRef result{zigzag::noCell};
+  zigzag::CellRef result{};
 };
 
 class Compiler {
