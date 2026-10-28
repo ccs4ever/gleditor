@@ -20,15 +20,15 @@ review. Reports stay in this project or the existing review record.
 
 ## Iterations and evidence
 
-| Iteration | Scope                                                                                                               | State             | Evidence                                                                               |
-| --------- | ------------------------------------------------------------------------------------------------------------------- | ----------------- | -------------------------------------------------------------------------------------- |
-| I1        | Generic Exp/Ln/Sqrt VM contract; trust/epistemic ABI dimensions and setting defaults                                | Accepted          | [I1 validation](i1-validation.md), [ML gate](ml-gate-i1.md)                            |
-| I2        | Typed scoped graph ABI, choice isolation, result transfer/refusal; full upgrade prerequisite and shared translation | I2A, I2U accepted | Nested scope exits, graph validation, rollback, upgrade/resume tests                   |
-| I3        | Checked ingress, per-source observation history, health/clock lifecycle and application verification journals       | Pending           | Coalescing, retries, authorization, clocks/faults, full-key epochs and budgets         |
-| I4        | Actor AST/checker/lowering plus analytic scoring, ranked queries, clustering and scalar fusion as Vortex graphs     | Pending ML review | Pure queries, numeric vectors, ties/dependence/alignment/refusal, actual run journeys  |
-| I5        | Online SGD, active labels/corrections, deterministic replay and drift policy as Vortex graphs                       | Pending ML review | Independent model/replay vectors, stale labels, epochs, bounded replay and expert gate |
-| I6        | Opt-in async native model binding and keyed feature completion                                                      | Pending ML review | Cancellation, stale completion, schemas, latency/memory bounds and expert gate         |
-| Final     | Whole-system acceptance and documented user journeys                                                                | Pending           | Appropriate full headless suites, source/format checks, all ML gates closed            |
+| Iteration | Scope                                                                                                               | State                | Evidence                                                                               |
+| --------- | ------------------------------------------------------------------------------------------------------------------- | -------------------- | -------------------------------------------------------------------------------------- |
+| I1        | Generic Exp/Ln/Sqrt VM contract; trust/epistemic ABI dimensions and setting defaults                                | Accepted             | [I1 validation](i1-validation.md), [ML gate](ml-gate-i1.md)                            |
+| I2        | Typed scoped graph ABI, choice isolation, result transfer/refusal; full upgrade prerequisite and shared translation | I2A, I2U accepted    | Nested scope exits, graph validation, rollback, upgrade/resume tests                   |
+| I3        | Checked ingress, per-source observation history, health/clock lifecycle and application verification journals       | I3-1 design accepted | Coalescing, retries, authorization, clocks/faults, full-key epochs and budgets         |
+| I4        | Actor AST/checker/lowering plus analytic scoring, ranked queries, clustering and scalar fusion as Vortex graphs     | Pending ML review    | Pure queries, numeric vectors, ties/dependence/alignment/refusal, actual run journeys  |
+| I5        | Online SGD, active labels/corrections, deterministic replay and drift policy as Vortex graphs                       | Pending ML review    | Independent model/replay vectors, stale labels, epochs, bounded replay and expert gate |
+| I6        | Opt-in async native model binding and keyed feature completion                                                      | Pending ML review    | Cancellation, stale completion, schemas, latency/memory bounds and expert gate         |
+| Final     | Whole-system acceptance and documented user journeys                                                                | Pending              | Appropriate full headless suites, source/format checks, all ML gates closed            |
 
 The source frontend under `vagent/` remains separate from the actor frontend under
 `vagent/runtime/`; P19 targets the latter. P17's generic host upgrade callback is not a complete
@@ -54,6 +54,10 @@ preserved. Only accepted iteration files are staged/committed, with material lim
   draft found and fixed two engine defects (dimension identity in the owned-graph copier, member
   plans missing from the upgrade schema) and a `dropped_field` compiler defect. It refuses populated
   P19 roots until the typed epistemic translator exists.
+- I3-1, checked ingress and per-source observation history, has an accepted [design](i3-design.md)
+  after five review rounds by four sonnet personas ([reports](i3-review/)). It lands as slices 1a
+  (policy syntax and checker), 1b with 1c (ingestion and incarnations) and 1d (checkpoint and
+  resume, after a restore spike).
 - The existing actor compiler has declarations for goal/plan lowering but does not implement the
   complete source-to-intention pipeline. Active-intention upgrade must explicitly refuse where
   compatibility/remapping cannot be proved. This prerequisite remains open; no full P17/P19
