@@ -5,12 +5,14 @@
 #include <filesystem>
 #include <gtest/gtest.h>
 #include <memory>
+#include <vector>
 
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/user_permascroll.hpp"
 #include "common/xanadu/vortex/vortex_core.hpp"
 #include "common/xanadu/vortex/vortex_vm.hpp"
 #include "common/xanadu/vql/compiler.hpp"
+#include "common/xanadu/vql/parser.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
 
 namespace xanadu::vql {
@@ -84,6 +86,102 @@ TEST_F(VQLCompilerTest, MissingLiteralAnchorProducesNoFallbackResult) {
   EXPECT_EQ(*kind, OpcodeKind::Halt);
   EXPECT_FALSE(core->arena().linked(*result.entryOpcode, core->dims().grab,
                                     zigzag::DimVector::POS));
+}
+
+TEST_F(VQLCompilerTest, CompilesFunctionDefinitionsWithRuntimeContracts) {
+  VQLCompiler compiler(*core, *vm);
+  const auto result =
+      compiler.compile("def pure identity($x: Int): Int := $x; identity(7)");
+  ASSERT_TRUE(result.success) << result.errorMessage;
+  ASSERT_FALSE(vm->activeCursors().empty());
+  EXPECT_TRUE(vm->run(vm->activeCursors().back(), 1000).success);
+  const auto slots = core->inputsOf(result.generatedOpcodes.back());
+  ASSERT_EQ(slots.size(), 1u);
+  const auto cells = vm->resultCells(slots.front());
+  ASSERT_EQ(cells.size(), 1u);
+  EXPECT_EQ(core->arena().asInt64(cells.front()), 7);
+}
+
+TEST_F(VQLCompilerTest, CompilesAndRunsPointFreeFunctorBindingAndApplication) {
+  const CellRef child  = core->arena().makeCell("child");
+  const CellRef parent = core->arena().makeCell("parent");
+  ASSERT_TRUE(core->arena().link(child, core->dims().step, false, parent));
+  ASSERT_TRUE(
+      core->arena().link(core->home(), core->dims().step, false, child));
+
+  VQLCompiler compiler(*core, *vm);
+  const auto result = compiler.compile("let $up := /+d.step return ##/$up");
+
+  ASSERT_TRUE(result.success) << result.errorMessage;
+  ASSERT_TRUE(result.entryOpcode);
+  const auto cursors = vm->activeCursors();
+  ASSERT_FALSE(cursors.empty());
+  const auto execution = vm->run(cursors.front(), 1000);
+  EXPECT_TRUE(execution.success) << execution.errorMessage;
+  const auto slots = core->inputsOf(result.generatedOpcodes.back());
+  ASSERT_EQ(slots.size(), 1u);
+  EXPECT_EQ(vm->resultCells(slots.front()),
+            (std::vector<CellRef>{child, parent}));
+}
+
+TEST_F(VQLCompilerTest, ComposesBoundPointFreeFunctors) {
+  const CellRef child  = core->arena().makeCell("child");
+  const CellRef parent = core->arena().makeCell("parent");
+  ASSERT_TRUE(
+      core->arena().link(core->home(), core->dims().step, false, child));
+  ASSERT_TRUE(core->arena().link(child, core->dims().step, false, parent));
+
+  VQLCompiler compiler(*core, *vm);
+  const auto result =
+      compiler.compile("let $up := /+d.step; let $twice := $up / /$up "
+                       "return ##/$twice");
+
+  ASSERT_TRUE(result.success) << result.errorMessage;
+  ASSERT_TRUE(result.entryOpcode);
+  const auto cursors = vm->activeCursors();
+  ASSERT_FALSE(cursors.empty());
+  const auto execution = vm->run(cursors.front(), 1000);
+  EXPECT_TRUE(execution.success) << execution.errorMessage;
+  const auto slots = core->inputsOf(result.generatedOpcodes.back());
+  ASSERT_EQ(slots.size(), 1u);
+  EXPECT_EQ(vm->resultCells(slots.front()), (std::vector<CellRef>{parent}));
+}
+
+TEST_F(VQLCompilerTest, RefusesSelfReferentialFunctorBinding) {
+  VQLCompiler compiler(*core, *vm);
+  const auto result = compiler.compile("let $self := /$self return ##/$self");
+
+  EXPECT_FALSE(result.success);
+  EXPECT_NE(result.errorMessage.find("unbound point-free functor"),
+            std::string::npos);
+}
+
+TEST_F(VQLCompilerTest,
+       RefusesQualifiedFunctorCaptureWithoutDroppingModifiers) {
+  for (const auto suffix : {">", "@(88)"}) {
+    VQLCompiler compiler(*core, *vm);
+    auto query = Parser("def apply($f): Cell := ##/$f; "
+                        "let $f := /+d.step; apply($f)")
+                     .parseQuery();
+    const auto qualified = Parser("$f" + std::string(suffix)).parseQuery();
+    auto &path = std::get<PathExpression>(query.body.statements.back());
+    auto &call = std::get<FunctionInvocation>(path.steps.front().selector);
+    call.args.front().kind = std::make_shared<PathExpression>(
+        std::get<PathExpression>(qualified.expr));
+    const auto result = compiler.compile(query);
+    EXPECT_FALSE(result.success);
+    EXPECT_NE(result.errorMessage.find("qualified functor anchors"),
+              std::string::npos)
+        << result.errorMessage;
+  }
+}
+
+TEST_F(VQLCompilerTest, RefusesNamedStoreWithoutCoordinator) {
+  VQLCompiler compiler(*core, *vm);
+  const auto result = compiler.compile("##missing/d.items");
+  EXPECT_FALSE(result.success);
+  EXPECT_NE(result.errorMessage.find("require a coordinator"),
+            std::string::npos);
 }
 
 TEST_F(VQLCompilerTest, CompileLibraryStore) {
@@ -164,7 +262,7 @@ TEST_F(VQLCompilerTest, DisassemblyFormatting) {
   ASSERT_TRUE(result.entryOpcode);
   std::string dis = compiler.disassemble(*result.entryOpcode);
   EXPECT_FALSE(dis.empty());
-  EXPECT_NE(dis.find("#LINK"), std::string::npos);
+  EXPECT_NE(dis.find("#RANK_BEGIN"), std::string::npos);
   EXPECT_NE(dis.find("#HALT"), std::string::npos);
   EXPECT_NE(dis.find("in:"), std::string::npos);
 }

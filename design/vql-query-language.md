@@ -4,13 +4,15 @@
 **Compilation Target:** Vortex Hyperstructural Runtime Core (Single-Primitive Matrix Manifold)
 
 VQL is the declarative, XQuery-like companion language for
-[Vortex](vortex-hyperstructural-runtime.md): every VQL query compiles down to the same
-`link`/`value` primitives that make up Vortex's two-primitive core. As with the Vortex spec, this
-document specifies a language design consuming the Zigzag `zzstructure` manifold model (see
-[zigzag-multidimensional-space-and-projection.md](zigzag-multidimensional-space-and-projection.md));
-nothing here is wired into the gleditor build. A third front end onto the same manifold,
-[VPL](vpl-array-language.md), borrows APL's glyphs instead of XQuery's paths — where VQL asks
-questions of a manifold, VPL does arithmetic over one.
+[Vortex](vortex-hyperstructural-runtime.md). Its direct evaluator and restricted Vortex compiler are
+built under `apps/common/xanadu/vql/`; `vquery` and `vqueryc` expose them.
+[VPL](vpl-array-language.md) is an array-oriented frontend over the same manifold.
+
+This specification includes implemented semantics and proposed extensions. The
+[implementation status](vql-implementation-status.md) distinguishes them. In particular, distributed
+discovery, live ZZ9P watches, complete compiler parity, and the specialized SIMD/JIT lowering below
+are not complete. The timing and allocation claims in those proposed lowerings are not measurements
+of the direct evaluator.
 
 The language rests on three design choices: a single directional traversal operator (`/`, with
 direction carried by a sign on the dimension name rather than a second token), `%` creation sugar so
@@ -2225,34 +2227,32 @@ let $inspect := $to_parent / $to_author;
 return ##/+d.items / $inspect;
 ```
 
-#### 4.12.4 Systems Lowering: The 24-Byte `CurriedMorphism` and `TRAVERSE_CURRIED_DIM`
+#### 4.12.4 Systems Lowering: `CurriedMorphism` and `TRAVERSE_CURRIED_DIM` (Proposed)
 
-To ensure zero heap allocation and native C++ speed:
+A specialized traversal representation is an optimization milestone after semantic parity. Its
+acceptance conditions are:
 
-**1. The 24-Byte POD Descriptor (`CurriedMorphism`)**: Passes in three 64-bit integer registers
-(`%rdi`, `%rsi`, `%rdx`) under the System V ABI:
+- Preserve the full `CellRef` and `DimRef` widths used by the runtime. Both currently use 32 bits;
+  narrowing a dimension to 16 bits loses valid identities.
+- Preserve arbitrary path length. A bounded inline fast path needs a complete fallback for longer
+  chains and for predicates, shapes, clamps, pins, placements, and yield modes.
+- Represent absence through the public optional APIs, rather than reserving a cell identity.
+- Measure binding, compilation, repeated execution, and allocations separately against ordinary
+  traversal lowering. Record build flags, processor, input topology, path lengths, and error cases.
+- Derive any descriptor-size and calling-convention claims from the actual implementation. A size
+  assertion alone does not establish register passing or a per-hop cycle count.
 
-```cpp
-struct alignas(8) CurriedMorphism {
-  std::uint32_t anchor_cell{0xFFFFFFFFU};    // 4 bytes
-  std::array<std::uint16_t, 4> dim_chain{0}; // 8 bytes: packed dim IDs
-  std::uint8_t  direction_mask{0};           // 1 byte: POS vs NEG bits
-  std::uint8_t  step_count{0};               // 1 byte: bound steps
-  std::uint16_t morphism_flags{0};           // 2 bytes
-  std::uint32_t capture_val{0};              // 4 bytes: scalar capture
-  std::uint32_t filter_pc{0};                // 4 bytes: optional filter PC
-};
-static_assert(sizeof(CurriedMorphism) == 24);
-```
-
-**2. Dedicated Vortex Opcode (`TRAVERSE_CURRIED_DIM`)**: Instead of allocating closure control
-blocks, the VM executes a tight, unrolled inner CSR loop directly over `ArenaManifold::links_` in
-**3–5 CPU cycles per hop** (28x–45x faster than general call frames).
+The earlier 24-byte sketch narrowed four dimension IDs to 16 bits and could not represent the full
+path language. It is not an implementation contract. No zero-allocation, 3–5-cycle, or fixed speedup
+claim is established by the current evaluator or compiler.
 
 #### 4.12.5 What the Direct Evaluator Implements, and What It Decided
 
-The reference engine (`apps/common/xanadu/vql/vql_engine.cpp`) implements §4.12.1–§4.12.3; the
-lowering in §4.12.4 is not built. The rulings below are where the prose above left a choice open.
+The direct evaluator implements signature matching, unified shape contracts, and step-vector
+functors. Compiled execution now has a shared contract matcher and a bounded typed-call milestone;
+full compile-time/mutation-boundary enforcement and backend parity are still being implemented. The
+[parity iteration record](projects/vql-parity-iterations.md) is the acceptance ledger. The rulings
+below describe the intended shared semantics.
 
 - **A shape type is a destructure pattern.** `ShapeType` holds a `DestructurePattern`, and a
   `DestructureField` carries an optional variable, type and default. So `Cell { +d.title: String }`
@@ -2280,21 +2280,33 @@ lowering in §4.12.4 is not built. The rulings below are where the prose above l
   or the arena's own; `Store` a registered store's cell on `d.stores` or the coordinator origin.
 
 - **A default is used only when the field is absent**, and passing a cell or a path never mints: the
-  bound cell is the linked one. Only a literal default mints its scalar, and only when it is used.
-  `let $y := $x` now binds `$x`'s cells too, where it used to mint a copy of their value.
+  bound cell is the linked one. A literal field default mints its scalar only when it is used;
+  omitted parameter expressions may also run supported nested calls and paths lazily. `let $y := $x`
+  now binds `$x`'s cells too, where it used to mint a copy of their value.
 
 - **A functor is its steps, composed when bound.** `let` (and an untyped def parameter) keeps a
   leading-`/` path, or a path anchored on a functor variable, as a step list rather than evaluating
   it; a bare `/$f` step inside it is inlined then, so rebinding `$f` later does not reach into a
   functor already built from it. `f / /g` is `f/g`: the second slash is `g`'s own. Applied as a step
   (`$c / $up`) the steps run over the step's input, and the step's predicates and clamp then apply
-  to what they reach. Applying one allocates no closure or frame; the step vectors are the same as
-  any path's, which §4.12.4's `CurriedMorphism` is what removes.
+  to what they reach. Decorated references retain a captured step sequence across later rebinding.
+  Binding and compilation may copy AST data, and execution materializes result streams. Specialized
+  representation and allocation/performance claims remain subject to §4.12.4's measurements.
 
-- **The compiler refuses a functor binding**
-  (`point-free path functors are not compiled to Vortex yet; run the query with --engine direct`)
-  rather than compiling it as the cells the path reaches from home. Types are erased by the
-  compiler, as §4.12.1 allows; it does not yet check them.
+- **The compiler uses real VM instructions.** Bound point-free steps lower to Vortex traversals;
+  nonrecursive typed calls use shared matching, capture slots, mismatch branches, body instructions,
+  and return checks. Omitted parameter expressions compile after earlier parameter guards; explicit
+  arguments capture caller bindings, including untyped functor step vectors. Decorated functor
+  captures freeze their body across rebinding; application runs that body before applying the outer
+  predicates/clamp to the combined result. Query-time master dereference resolves foreign proxies,
+  charges each probe and returns the original cell on a cycle. Step predicates retain cell identity
+  through guarded reference slots and Boolean control flow short-circuits. Unsupported cases refuse
+  explicitly. Runtime rank iterators and eager sequence registers now support per-member typed
+  filtering, stream cardinality, predicates and integer index clamps. Foreign neighbors resolve
+  through canonical arena proxies; choice points restore iterator state and proxy minting. Universal
+  lazy streaming, recursive frames, nonliteral contract-field default thunks, mutation enforcement,
+  and complete frontend/parallel parity remain open; compiled execution never silently calls the
+  direct evaluator as a fallback.
 
 ______________________________________________________________________
 
@@ -2947,4 +2959,4 @@ table.
 [toc-48]: #4121-the-gradual-type-system-and-atomic-handles
 [toc-49]: #4122-unified-shape-contracts-coexistence-of-typing-and-destructuring
 [toc-50]: #4123-point-free-topological-traversal-functors--currying
-[toc-51]: #4124-systems-lowering-the-24-byte-curriedmorphism-and-traverse_curried_dim
+[toc-51]: #4124-systems-lowering-curriedmorphism-and-traverse_curried_dim-proposed

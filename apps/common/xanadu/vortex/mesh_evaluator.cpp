@@ -229,7 +229,19 @@ bool pureOpcode(OpcodeKind opcode) {
   case OpcodeKind::Choice:
   case OpcodeKind::Fail:
   case OpcodeKind::Cut:
+  case OpcodeKind::MatchContract:
+  case OpcodeKind::RequireContract:
+  case OpcodeKind::CopyCellRefs:
+  case OpcodeKind::ClearCellRefs:
+  case OpcodeKind::BranchFalseCell:
     return true;
+  case OpcodeKind::StreamClear:
+  case OpcodeKind::StreamAppend:
+  case OpcodeKind::StreamBegin:
+  case OpcodeKind::StreamReverseBegin:
+  case OpcodeKind::RankBegin:
+  case OpcodeKind::IteratorNext:
+    return false;
   case OpcodeKind::ChoiceDepth:
     return false;
   }
@@ -469,7 +481,8 @@ VortexProgram decodeProgram(std::string_view bytes, SyntaxLimits limits) {
   for (const auto &item : instructions) {
     dictionary(item, 5);
     const auto opcode = required(item, "opcode").asInteger();
-    if (opcode < 0 || opcode > static_cast<std::int64_t>(OpcodeKind::Cut))
+    if (opcode < 0 ||
+        opcode > static_cast<std::int64_t>(OpcodeKind::StreamReverseBegin))
       throw std::runtime_error("Unknown Vortex artifact opcode");
     const auto &next = required(item, "next").asList();
     if (next.size() > 1)

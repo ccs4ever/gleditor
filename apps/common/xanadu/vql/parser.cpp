@@ -98,12 +98,20 @@ bool Parser::isNextTokenComparisonOperand() {
 QueryExpression Parser::parseQuery() {
   std::vector<DefDeclaration> defs;
   std::vector<MountDeclaration> mounts;
-  while (check(TokenKind::KwDef) || check(TokenKind::KwMount)) {
+  std::vector<NamespaceDeclaration> namespaceDeclarations;
+  while (check(TokenKind::KwDef) || check(TokenKind::KwMount) ||
+         check(TokenKind::KwUnmount)) {
     if (check(TokenKind::KwDef)) {
       defs.push_back(parseDefDeclaration());
       match(TokenKind::Semicolon);
     } else {
-      mounts.push_back(parseMountDeclaration());
+      if (check(TokenKind::KwMount)) {
+        auto mount = parseMountDeclaration();
+        mounts.push_back(mount);
+        namespaceDeclarations.emplace_back(std::move(mount));
+      } else {
+        namespaceDeclarations.emplace_back(parseUnmountDeclaration());
+      }
       match(TokenKind::Semicolon);
     }
   }
@@ -125,10 +133,11 @@ QueryExpression Parser::parseQuery() {
   }
 
   return QueryExpression{
-      .defs   = std::move(defs),
-      .mounts = std::move(mounts),
-      .body   = std::move(body),
-      .expr   = std::move(expr),
+      .defs                  = std::move(defs),
+      .mounts                = std::move(mounts),
+      .namespaceDeclarations = std::move(namespaceDeclarations),
+      .body                  = std::move(body),
+      .expr                  = std::move(expr),
   };
 }
 
@@ -322,6 +331,22 @@ MountDeclaration Parser::parseMountDeclaration() {
   };
 }
 
+UnmountDeclaration Parser::parseUnmountDeclaration() {
+  consume(TokenKind::KwUnmount, "Expected 'unmount'");
+  zigzag::DimVector direction = zigzag::DimVector::POS;
+  if (match(TokenKind::Plus)) {
+    direction = zigzag::DimVector::POS;
+  } else if (match(TokenKind::Minus)) {
+    direction = zigzag::DimVector::NEG;
+  } else {
+    throw ParseError("Expected signed dimension after 'unmount'", current_.loc);
+  }
+  const Token dim =
+      consume(TokenKind::Identifier, "Expected dimension name after 'unmount'");
+  return UnmountDeclaration{.dimName   = std::string(dim.text),
+                            .direction = direction};
+}
+
 DefDeclaration Parser::parseDefDeclaration() {
   consume(TokenKind::KwDef, "Expected 'def'");
   DefDeclaration::Effect effect = DefDeclaration::Effect::Inferred;
@@ -407,7 +432,8 @@ PathExpression Parser::parsePathExpression(bool allowCloneTail) {
       }
       consume(TokenKind::CloseBracket, "Expected ']' after slice arguments");
 
-      FunctionInvocation fn{.name = "value", .args = std::move(args)};
+      FunctionInvocation fn{
+          .name = "value", .args = std::move(args), .isSliceRead = true};
       PathStep step{.selector = std::move(fn)};
       steps.push_back(std::move(step));
       continue;
@@ -1422,6 +1448,10 @@ PredicateTest Parser::parsePredicateTest() {
 }
 
 ValueExpr Parser::parseValueExpr() {
+  if (check(TokenKind::KwLens) && peekToken().is(TokenKind::OpenParen)) {
+    return ValueExpr{.kind = std::make_shared<FunctionInvocation>(
+                         parseFunctionInvocation())};
+  }
   if (check(TokenKind::OpenBrace)) {
     return ValueExpr{.kind =
                          std::make_shared<ShapeLiteral>(parseShapeLiteral())};
@@ -1523,9 +1553,16 @@ FunctionInvocation Parser::parseFunctionInvocation() {
   Token nameTok = advance();
   consume(TokenKind::OpenParen, "Expected '(' after function name");
   std::vector<ValueExpr> args;
+  std::vector<std::string> names;
 
   if (!check(TokenKind::CloseParen)) {
     while (true) {
+      std::string name;
+      if (check(TokenKind::Identifier) && peekToken().is(TokenKind::Colon)) {
+        name = std::string(advance().text);
+        advance();
+      }
+      names.push_back(std::move(name));
       args.push_back(parseValueExpr());
       if (!match(TokenKind::Comma)) {
         break;
@@ -1539,8 +1576,9 @@ FunctionInvocation Parser::parseFunctionInvocation() {
     args.push_back(
         ValueExpr{.kind = std::make_shared<PathLambda>(parsePathLambda())});
   }
-  return FunctionInvocation{.name = std::string(nameTok.text),
-                            .args = std::move(args)};
+  return FunctionInvocation{.name     = std::string(nameTok.text),
+                            .args     = std::move(args),
+                            .argNames = std::move(names)};
 }
 
 DestructurePattern Parser::parseDestructurePattern() {
@@ -1885,33 +1923,42 @@ VersionExpr Parser::parseVersionExpr() {
     throw ParseError("Expected version expression", current_.loc);
   }
 
-  if (match(TokenKind::Plus)) {
-    Token offsetTok =
-        consume(TokenKind::IntegerLiteral, "Expected integer offset after '+'");
-    VersionExpr nextExpr;
-    nextExpr.op         = VersionExpr::Op::Next;
-    nextExpr.left       = std::make_shared<VersionExpr>(std::move(expr));
-    nextExpr.stepOffset = offsetTok.intValue;
-    return nextExpr;
-  }
-  if (match(TokenKind::Minus)) {
-    Token offsetTok =
-        consume(TokenKind::IntegerLiteral, "Expected integer offset after '-'");
-    VersionExpr parentExpr;
-    parentExpr.op         = VersionExpr::Op::Parent;
-    parentExpr.left       = std::make_shared<VersionExpr>(std::move(expr));
-    parentExpr.stepOffset = offsetTok.intValue;
-    return parentExpr;
-  }
-  if (match(TokenKind::Slash)) {
-    Token bTok = advance();
-    VersionExpr branchExpr;
-    branchExpr.op         = VersionExpr::Op::Branch;
-    branchExpr.left       = std::make_shared<VersionExpr>(std::move(expr));
-    branchExpr.branchName = (bTok.kind == TokenKind::StringLiteral)
-                                ? bTok.stringValue
-                                : std::string(bTok.text);
-    return branchExpr;
+  while (true) {
+    if (match(TokenKind::DotDot)) {
+      VersionExpr rangeExpr;
+      rangeExpr.op    = VersionExpr::Op::Range;
+      rangeExpr.left  = std::make_shared<VersionExpr>(std::move(expr));
+      rangeExpr.right = std::make_shared<VersionExpr>(parseVersionExpr());
+      return rangeExpr;
+    }
+    const bool isNext   = match(TokenKind::Plus);
+    const bool isParent = !isNext && match(TokenKind::Minus);
+    if (isNext || isParent) {
+      Token offsetTok = consume(TokenKind::IntegerLiteral,
+                                "Expected integer offset after version step");
+      VersionExpr stepExpr;
+      stepExpr.op   = isNext ? VersionExpr::Op::Next : VersionExpr::Op::Parent;
+      stepExpr.left = std::make_shared<VersionExpr>(std::move(expr));
+      stepExpr.stepOffset = offsetTok.intValue;
+      expr                = std::move(stepExpr);
+      continue;
+    }
+    if (match(TokenKind::Slash)) {
+      Token bTok = advance();
+      if (bTok.kind != TokenKind::StringLiteral &&
+          bTok.kind != TokenKind::Identifier) {
+        throw ParseError("Expected branch name after version '/'", bTok.loc);
+      }
+      VersionExpr branchExpr;
+      branchExpr.op         = VersionExpr::Op::Branch;
+      branchExpr.left       = std::make_shared<VersionExpr>(std::move(expr));
+      branchExpr.branchName = bTok.kind == TokenKind::StringLiteral
+                                  ? bTok.stringValue
+                                  : std::string(bTok.text);
+      expr                  = std::move(branchExpr);
+      continue;
+    }
+    break;
   }
 
   return expr;
@@ -1932,7 +1979,14 @@ VersionPin Parser::parseVersionPin() {
   bool isRange = false;
 
   while (!check(TokenKind::CloseParen) && !check(TokenKind::EndOfFile)) {
-    versions.push_back(parseVersionExpr());
+    auto expr = parseVersionExpr();
+    if (expr.op == VersionExpr::Op::Range && expr.left && expr.right) {
+      isRange = true;
+      versions.push_back(std::move(*expr.left));
+      versions.push_back(std::move(*expr.right));
+      break;
+    }
+    versions.push_back(std::move(expr));
     if (match(TokenKind::DotDot)) {
       isRange = true;
       versions.push_back(parseVersionExpr());

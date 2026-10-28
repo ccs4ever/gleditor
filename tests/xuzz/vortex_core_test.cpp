@@ -5,6 +5,7 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <cstdint>
 #include <limits>
 #include <string>
 #include <vector>
@@ -101,6 +102,100 @@ TEST(VortexCoreTest, LinkPrimitiveLifecycle) {
   EXPECT_EQ(*literal, b);
   EXPECT_EQ(h.core.readLink(a, customDim, DimVector::POS), b);
   EXPECT_EQ(h.arena.linked(b, customDim, DimVector::NEG), a);
+}
+
+TEST(VortexVMTest, LinkOutputsCarryCellIdentityIntoFollowingOperations) {
+  TestHarness h;
+  const CellRef first  = h.arena.makeCell("first");
+  const CellRef second = h.arena.makeCell("second");
+  const CellRef third  = h.arena.makeCell("third");
+  ASSERT_TRUE(h.arena.link(first, h.core.dims().step, DimVector::POS, second));
+  ASSERT_TRUE(h.arena.link(second, h.core.dims().step, DimVector::POS, third));
+
+  const CellRef firstRead = h.vm.mintOpcode(OpcodeKind::Link, "#READ_FIRST");
+  const CellRef firstOut  = h.arena.makeCell();
+  h.core.bindInput(firstRead, first);
+  h.core.bindInput(firstRead, h.arena.makeScalarCell(static_cast<std::int64_t>(
+                                  h.core.dims().step)));
+  h.core.bindInput(firstRead, h.arena.makeScalarCell(std::int64_t{1}));
+  h.core.bindOutput(firstRead, firstOut);
+
+  const CellRef secondRead = h.vm.mintOpcode(OpcodeKind::Link, "#READ_SECOND");
+  const CellRef secondOut  = h.arena.makeCell();
+  h.core.bindInput(secondRead, firstOut);
+  h.core.bindInput(secondRead, h.arena.makeScalarCell(static_cast<std::int64_t>(
+                                   h.core.dims().step)));
+  h.core.bindInput(secondRead, h.arena.makeScalarCell(std::int64_t{1}));
+  h.core.bindOutput(secondRead, secondOut);
+
+  const CellRef halt = h.vm.mintOpcode(OpcodeKind::Halt, "#HALT");
+  zigzag::expectWritten(
+      h.arena.link(firstRead, h.core.dims().spin, DimVector::POS, secondRead));
+  zigzag::expectWritten(
+      h.arena.link(secondRead, h.core.dims().spin, DimVector::POS, halt));
+  const CellRef cursor = h.vm.spawnCursor(firstRead, "identity-test");
+
+  const auto result = h.vm.run(cursor, 10);
+
+  ASSERT_TRUE(result.success) << result.errorMessage;
+  EXPECT_EQ(h.vm.cellReferenceOf(firstOut), second);
+  EXPECT_EQ(h.vm.cellReferenceOf(secondOut), third);
+  EXPECT_EQ(h.arena.asInt64(firstOut), static_cast<std::int64_t>(second));
+  EXPECT_EQ(h.arena.asInt64(secondOut), static_cast<std::int64_t>(third));
+
+  const CellRef alternative = h.vm.mintOpcode(OpcodeKind::Nop, "#ALTERNATIVE");
+  h.vm.pushChoicePoint(std::nullopt, alternative);
+  const CellRef alternate = h.arena.makeCell("alternate");
+  ASSERT_TRUE(
+      h.core.setLink(first, h.core.dims().step, DimVector::POS, alternate));
+  h.vm.setCursorOpcode(cursor, firstRead);
+  const auto branchResult = h.vm.run(cursor, 10);
+  ASSERT_TRUE(branchResult.success) << branchResult.errorMessage;
+  EXPECT_EQ(h.vm.cellReferenceOf(firstOut), alternate);
+  EXPECT_FALSE(h.vm.cellReferenceOf(secondOut));
+
+  ASSERT_TRUE(h.vm.backtrack(std::nullopt));
+  EXPECT_EQ(h.vm.cellReferenceOf(firstOut), second);
+  EXPECT_EQ(h.vm.cellReferenceOf(secondOut), third);
+  EXPECT_EQ(h.core.readLink(first, h.core.dims().step, DimVector::POS), second);
+
+  ASSERT_TRUE(h.core.breakLink(first, h.core.dims().step, DimVector::POS));
+  h.vm.setCursorOpcode(cursor, firstRead);
+  const auto missingResult = h.vm.run(cursor, 10);
+  ASSERT_TRUE(missingResult.success) << missingResult.errorMessage;
+  EXPECT_FALSE(h.vm.cellReferenceOf(firstOut));
+  EXPECT_FALSE(h.vm.cellReferenceOf(secondOut));
+  EXPECT_EQ(h.arena.asInt64(firstOut), static_cast<std::int64_t>(noCell));
+}
+
+TEST(VortexVMTest, LinkMemoizationDoesNotReuseStaleTopology) {
+  TestHarness h;
+  const CellRef source = h.arena.makeCell("source");
+  const CellRef first  = h.arena.makeCell("first");
+  const CellRef second = h.arena.makeCell("second");
+  ASSERT_TRUE(h.arena.link(source, h.core.dims().step, DimVector::POS, first));
+
+  const CellRef read   = h.vm.mintOpcode(OpcodeKind::Link, "#READ");
+  const CellRef output = h.arena.makeCell();
+  h.core.bindInput(read, source);
+  h.core.bindInput(read, h.arena.makeScalarCell(
+                             static_cast<std::int64_t>(h.core.dims().step)));
+  h.core.bindInput(read, h.arena.makeScalarCell(std::int64_t{1}));
+  h.core.bindOutput(read, output);
+  const CellRef halt = h.vm.mintOpcode(OpcodeKind::Halt, "#HALT");
+  zigzag::expectWritten(
+      h.arena.link(read, h.core.dims().spin, DimVector::POS, halt));
+  const CellRef cursor = h.vm.spawnCursor(read, "memo-link-test");
+  h.vm.enableMemoization(read, "memo:link");
+
+  ASSERT_TRUE(h.vm.run(cursor, 10).success);
+  EXPECT_EQ(h.vm.cellReferenceOf(output), first);
+
+  ASSERT_TRUE(
+      h.core.setLink(source, h.core.dims().step, DimVector::POS, second));
+  h.vm.setCursorOpcode(cursor, read);
+  ASSERT_TRUE(h.vm.run(cursor, 10).success);
+  EXPECT_EQ(h.vm.cellReferenceOf(output), second);
 }
 
 TEST(VortexCoreTest, ValuePrimitiveReadWholeSliceAndSplice) {

@@ -1,0 +1,299 @@
+/**
+ * @file vql_contract_export_test.cpp
+ * @brief Reopen and execute compiled typed VQL calls from a Store.
+ */
+#include <chrono>
+#include <concepts>
+#include <cstdint>
+#include <filesystem>
+#include <memory>
+#include <string>
+#include <system_error>
+#include <tuple>
+#include <type_traits>
+#include <unordered_set>
+#include <variant>
+#include <vector>
+
+#include <gtest/gtest.h>
+
+#include "common/xanadu/multi_store.hpp"
+#include "common/xanadu/store.hpp"
+#include "common/xanadu/user_permascroll.hpp"
+#include "common/xanadu/vortex/vortex_core.hpp"
+#include "common/xanadu/vortex/vortex_vm.hpp"
+#include "common/xanadu/vql/compiler.hpp"
+#include "common/xanadu/zigzag/arena_manifold.hpp"
+
+namespace {
+
+namespace fs = std::filesystem;
+using zigzag::CellRef;
+using zigzag::DimVector;
+using zigzag::vortex::ContractViolationKind;
+using zigzag::vortex::OpcodeKind;
+
+class TemporaryDirectory {
+public:
+  TemporaryDirectory() {
+    const auto stamp =
+        std::chrono::steady_clock::now().time_since_epoch().count();
+    path_ = fs::temp_directory_path() /
+            ("vql_contract_export_" + std::to_string(stamp));
+    fs::create_directories(path_);
+  }
+
+  ~TemporaryDirectory() {
+    std::error_code error;
+    fs::remove_all(path_, error);
+  }
+
+  [[nodiscard]] const fs::path &path() const noexcept { return path_; }
+
+private:
+  fs::path path_;
+};
+
+struct Case {
+  std::string query;
+  bool expectRuntimeFailure{false};
+  std::string expectedValue;
+  std::vector<std::string> expectedValues;
+  std::string expectedError;
+};
+
+void compileExportReloadAndRun(const Case &testCase, const fs::path &root) {
+  const auto permascrollPath = root / "permascroll";
+  const auto storePath       = root / "compiled";
+  auto permascroll           = std::make_shared<xanadu::UserPermascroll>(
+      xanadu::UserPermascroll::Config{.storageDir = permascrollPath});
+
+  zigzag::ArenaManifold sourceArena;
+  zigzag::vortex::VortexCore sourceCore(sourceArena);
+  xanadu::MultiStoreCoordinator sourceCoordinator(sourceCore);
+  zigzag::vortex::VortexVM sourceVm(sourceCore);
+  xanadu::vql::VQLCompiler sourceCompiler(sourceCoordinator, sourceVm);
+  const auto compilation = sourceCompiler.compile(testCase.query);
+  ASSERT_TRUE(compilation.success) << compilation.errorMessage;
+  ASSERT_TRUE(compilation.entryOpcode);
+
+  xanadu::Store sourceStore(permascroll);
+  const auto firstExport     = sourceCompiler.exportToStore(sourceStore);
+  const auto exportedVersion = sourceCompiler.exportToStore(sourceStore);
+  EXPECT_TRUE(firstExport.isAncestorOf(exportedVersion));
+  ASSERT_FALSE(exportedVersion.isZero());
+  sourceStore.save(storePath.string());
+
+  // Reload through the on-disk reader and execute from the reconstructed
+  // manifold, with no opcode or type AST retained from the compiling VM.
+  xanadu::Store reloadedStore(permascroll);
+  ASSERT_NO_THROW(reloadedStore.load(storePath.string()));
+  ASSERT_TRUE(reloadedStore.structureHead());
+  const auto reopenedManifold =
+      reloadedStore.rebuildManifold(*reloadedStore.structureHead());
+  zigzag::ArenaManifold reopenedArena(&reopenedManifold, reloadedStore);
+  zigzag::vortex::VortexCore reopenedCore(reopenedArena);
+  xanadu::MultiStoreCoordinator reopenedCoordinator(reopenedCore);
+  zigzag::vortex::VortexVM reopenedVm(reopenedCore);
+  reopenedVm.setContractCoordinator(reopenedCoordinator);
+
+  const auto entry = reopenedArena.linked(
+      reopenedCore.home(), reopenedCore.dims().spin, DimVector::POS);
+  ASSERT_TRUE(entry) << "exported Store has no executable entry in +d.spin";
+
+  // The branch target is an actual instruction cell in the persisted spin
+  // chain, rather than a process-local PC or a stale CellRef.
+  std::unordered_set<CellRef> instructions;
+  auto instruction = entry;
+  while (instruction && instructions.insert(*instruction).second) {
+    instruction = reopenedArena.linked(*instruction, reopenedCore.dims().spin,
+                                       DimVector::POS);
+  }
+  bool sawParameterBranch = false;
+  bool sawMatchContract   = false;
+  for (const CellRef opcode : instructions) {
+    sawMatchContract |=
+        reopenedVm.getOpcodeKind(opcode) == OpcodeKind::MatchContract;
+    if (reopenedVm.getOpcodeKind(opcode) != OpcodeKind::BranchFalseCell)
+      continue;
+    sawParameterBranch = true;
+    const auto inputs  = reopenedCore.inputsOf(opcode);
+    ASSERT_EQ(inputs.size(), 2u);
+    EXPECT_TRUE(instructions.contains(inputs[1]));
+    EXPECT_TRUE(reopenedVm.getOpcodeKind(inputs[1]) == OpcodeKind::Nop ||
+                reopenedVm.getOpcodeKind(inputs[1]) ==
+                    OpcodeKind::IteratorNext);
+  }
+  EXPECT_TRUE(sawMatchContract)
+      << "typed parameter MatchContract was not exported";
+  EXPECT_TRUE(sawParameterBranch)
+      << "typed parameter MatchContract lost its BranchFalseCell";
+
+  const auto cursor    = reopenedVm.spawnCursor(*entry, "reloaded_typed_call");
+  const auto execution = reopenedVm.run(cursor, 10000);
+  if (testCase.expectRuntimeFailure) {
+    EXPECT_FALSE(execution.success);
+    EXPECT_EQ(execution.contractViolation,
+              ContractViolationKind::Postcondition);
+    EXPECT_EQ(execution.errorMessage, testCase.expectedError);
+    return;
+  }
+
+  ASSERT_TRUE(execution.success) << execution.errorMessage;
+  CellRef halt = *entry;
+  auto next =
+      reopenedArena.linked(halt, reopenedCore.dims().spin, DimVector::POS);
+  while (next) {
+    halt = *next;
+    next = reopenedArena.linked(halt, reopenedCore.dims().spin, DimVector::POS);
+  }
+  ASSERT_EQ(reopenedVm.getOpcodeKind(halt), OpcodeKind::Halt);
+  const auto resultSlots = reopenedCore.inputsOf(halt);
+  std::vector<std::string> actual;
+  for (const auto slot : resultSlots) {
+    for (const auto result : reopenedVm.resultCells(slot)) {
+      const auto rendered = reopenedCore.render(result);
+      ASSERT_TRUE(rendered);
+      actual.push_back(std::visit(
+          [](const auto &value) -> std::string {
+            using Value = std::remove_cvref_t<decltype(value)>;
+            if constexpr (std::same_as<Value, std::string>)
+              return value;
+            else if constexpr (std::same_as<Value, bool>)
+              return value ? "true" : "false";
+            else
+              return std::to_string(value);
+          },
+          *rendered));
+    }
+  }
+  auto expected = testCase.expectedValues;
+  if (expected.empty() && !testCase.expectedValue.empty())
+    expected.push_back(testCase.expectedValue);
+  EXPECT_EQ(actual, expected);
+}
+
+TEST(VQLContractExportTest, TypedCallGraphSurvivesStoreReloadAndFreshVM) {
+  TemporaryDirectory temporary;
+  const std::vector<Case> cases{
+      {.query         = "def identity($x: Int): Int := $x; "
+                        "let $f := /d.items; let $g := /$f>[. != \"bad\"][-1]; "
+                        "let $f := /d.absent; let $p := %\"paper\"; "
+                        "$p/d.items%\"7\"%\"bad\"%\"9\"; $p/$g/identity()",
+       .expectedValue = "9"},
+
+      {.query          = "def identity($x: String): String := $x; "
+                         "let $p := %\"paper\"; $p/d.items%\"7\"%\"9\"; "
+                         "$p/-d.items::rank/identity()",
+       .expectedValues = {"9", "7", "paper"}},
+
+      {.query         = "def identity($x: Int): Int := $x; "
+                        "let $p := %\"paper\"; $p/d.items%\"7\"%\"9\"; "
+                        "$p/d.items%\"11\"; $p/d.items::tail/identity()",
+       .expectedValue = "11"},
+
+      {.query          = "def identity($x: Int): Int := $x; "
+                         "let $p := %\"paper\"; $p/+d.items%\"7\"%\"bad\"%\"9\"; "
+                         "$p/+d.items/identity()[-1]",
+       .expectedValues = {"9"}},
+      {.query          = "def identity($x: Int): Int := $x; "
+                         "let $p := %\"paper\"; $p/+d.items%\"7\"%\"bad\"%\"9\"; "
+                         "$p/+d.items/identity()",
+       .expectedValues = {"7", "9"}},
+      {.query          = "def identity($x: Cell): Cell := $x; "
+                         "let $p := %\"paper\"; $p/+d.items%\"7\"%\"bad\"%\"9\"; "
+                         "$p/+d.items/identity()",
+       .expectedValues = {"7", "bad", "9"}},
+      {.query = "def identity($x: String): String := $x; identity(\"95\")",
+       .expectedValue = "95"},
+      {.query         = "def inner($x: Int): Int := $x; "
+                        "def outer($x: Int := inner(9)): Int := $x; outer()",
+       .expectedValue = "9"},
+      {.query         = "def apply($c: Cell, $f): Cell := $c/$f; "
+                        "let $p := %\"paper\"; $p/+d.score%\"95\"; "
+                        "apply($p, /+d.score)",
+       .expectedValue = "95"},
+      {.query         = "def identity($x: Int): Int := $x; identity(7)",
+       .expectedValue = "7"},
+      {.query = "def identity($x: Int): Int := $x; identity(2147483650)",
+       .expectedValue = "2147483650"},
+      {.query         = "def identity($x: Cell): Cell := $x; ##/identity()",
+       .expectedValue = "home"},
+      {.query = "def score($p: Cell { +d.score: Int }): Int := $p/+d.score; "
+                "let $p := %\"paper\"; $p/+d.score%\"95\"; score($p)",
+       .expectedValue = "95"},
+      {.query = "def accept($x: Cell): Bool := false; "
+                "let $p := %\"paper\"; $p/+d.score%\"95\"; "
+                "$p/+d.score[accept(.)]"},
+      {.query = "def identity($x: Int): Int := $x; identity(\"not-int\")"},
+      {.query                = "def broken($x: Int): String := $x; broken(7)",
+       .expectRuntimeFailure = true,
+       .expectedError = "broken() returned a value outside its declared type"},
+  };
+  for (std::size_t i = 0; i < cases.size(); ++i) {
+    SCOPED_TRACE(cases[i].query);
+    compileExportReloadAndRun(cases[i], temporary.path() / std::to_string(i));
+  }
+}
+
+TEST(VQLContractExportTest, PreservesIndependentContentAndValueBits) {
+  TemporaryDirectory temporary;
+  auto permascroll =
+      std::make_shared<xanadu::UserPermascroll>(xanadu::UserPermascroll::Config{
+          .storageDir = temporary.path() / "scroll"});
+  zigzag::ArenaManifold arena;
+  zigzag::vortex::VortexCore core(arena);
+  xanadu::MultiStoreCoordinator coordinator(core);
+  zigzag::vortex::VortexVM vm(core);
+  xanadu::vql::VQLCompiler compiler(coordinator, vm);
+  ASSERT_TRUE(compiler
+                  .compile("def identity($x: String): String := $x; "
+                           "identity(\"95\")")
+                  .success);
+  const auto text = arena.makeCell("95");
+  zigzag::expectWritten(arena.setValueBits(text, xanadu::ValueKind::None, 0));
+  const auto scalar = arena.makeCell("custom integer display");
+  zigzag::expectWritten(
+      arena.setValueBits(scalar, xanadu::ValueKind::Int64, 42));
+  zigzag::expectWritten(
+      arena.setValueBits(core.home(), xanadu::ValueKind::Int64, 73));
+  const auto textAxis   = core.mintDimension("d.export_text");
+  const auto scalarAxis = core.mintDimension("d.export_scalar");
+  zigzag::expectWritten(
+      arena.link(core.home(), textAxis, DimVector::POS, text));
+  zigzag::expectWritten(
+      arena.link(core.home(), scalarAxis, DimVector::POS, scalar));
+  xanadu::Store store(permascroll);
+  compiler.exportToStore(store);
+  const auto path = temporary.path() / "compiled";
+  store.save(path.string());
+  xanadu::Store reloaded(permascroll);
+  reloaded.load(path.string());
+  const auto manifold = reloaded.rebuildManifold(*reloaded.structureHead());
+  zigzag::ArenaManifold reopened(&manifold, reloaded);
+  zigzag::vortex::VortexCore reopenedCore(reopened);
+  const auto check = [&](CellRef cell, std::string_view content,
+                         xanadu::ValueKind kind, std::uint64_t bits) {
+    EXPECT_EQ(reopened.textOf(cell), content);
+    const auto slot = reopened.slot(cell);
+    ASSERT_TRUE(slot);
+    EXPECT_EQ(static_cast<xanadu::ValueKind>(slot->valueKind), kind);
+    EXPECT_EQ(slot->valueBits, bits);
+  };
+  check(reopenedCore.home(), "home", xanadu::ValueKind::Int64, 73);
+  for (const auto &[name, content, kind, bits] :
+       std::vector<std::tuple<std::string, std::string, xanadu::ValueKind,
+                              std::uint64_t>>{
+           {"d.export_text", "95", xanadu::ValueKind::None, 0},
+           {"d.export_scalar", "custom integer display",
+            xanadu::ValueKind::Int64, 42}}) {
+    const auto axis = reopenedCore.findDimension(name);
+    ASSERT_TRUE(axis);
+    const auto cell =
+        reopened.linked(reopenedCore.home(), *axis, DimVector::POS);
+    ASSERT_TRUE(cell);
+    check(*cell, content, kind, bits);
+  }
+}
+
+} // namespace

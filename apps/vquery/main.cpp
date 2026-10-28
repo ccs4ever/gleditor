@@ -33,6 +33,7 @@
 #include "common/xanadu/vortex/vortex_vm.hpp"
 #include "common/xanadu/vql/ascii_visualizer.hpp"
 #include "common/xanadu/vql/compiler.hpp"
+#include "common/xanadu/vql/execution.hpp"
 #include "common/xanadu/vql/parser.hpp"
 #include "common/xanadu/vql/vql_engine.hpp"
 #include "common/xanadu/zigzag/lens_repl.hpp"
@@ -471,68 +472,23 @@ int main(int argc, char *argv[]) {
       std::cout << xanadu::vql::AsciiVisualizer::renderAST(ast) << "\n";
     }
 
-    std::vector<zigzag::CellRef> results;
-
-    if (engineMode == "vortex") {
-      // Compile on-the-fly and execute in VortexVM
-      zigzag::vortex::VortexVM vm(coordinator.core());
-      xanadu::vql::VQLCompiler compiler(coordinator.core(), vm);
-
-      xanadu::vql::CompilationOptions opts;
-      opts.targetLibrary = false;
-      auto compRes       = compiler.compile(ast, opts);
-
-      if (!compRes.success) {
-        std::cerr << "Compilation failed: " << compRes.errorMessage << "\n";
-        return false;
-      }
-
-      if (dumpAsm) {
-        std::cout << compRes.disassembly << "\n";
-      }
-
-      // Execute in VM
-      auto cursors = vm.activeCursors();
-      if (!cursors.empty()) {
-        auto execRes = vm.run(cursors.front(), 100000);
-        if (!execRes.success && execRes.errorMessage != "Halted" &&
-            execRes.errorMessage != "Finished") {
-          std::cerr << "VortexVM execution failed: " << execRes.errorMessage
-                    << "\n";
-          return false;
-        }
-      }
-
-      // Collect outputs along cursor or results
-      std::optional<zigzag::CellRef> haltOp;
-      for (unsigned int &generatedOpcode :
-           std::views::reverse(compRes.generatedOpcodes)) {
-        auto k = vm.getOpcodeKind(generatedOpcode);
-        if (k && *k == zigzag::vortex::OpcodeKind::Halt) {
-          haltOp = generatedOpcode;
-          break;
-        }
-      }
-      if (haltOp) {
-        results = coordinator.core().inputsOf(*haltOp);
-      } else if (!compRes.generatedOpcodes.empty()) {
-        results.push_back(compRes.generatedOpcodes.front());
-      }
-    } else {
-      // Direct fast-path execution
-      xanadu::vql::VQLEngine engine(coordinator);
-      // An open lens enters the query space as $lens: '$lens/d.contains'
-      // walks the projected tree exactly as if the cells were authored.
-      if (const auto root = lensRepl.root()) {
-        engine.setVariable("lens", *root);
-      }
-      try {
-        results = engine.execute(ast);
-      } catch (const std::runtime_error &err) {
-        std::cerr << "Error: " << err.what() << "\n";
-        return false;
-      }
+    xanadu::vql::VQLEngine engine(coordinator);
+    if (const auto root = lensRepl.root()) engine.setVariable("lens", *root);
+    zigzag::vortex::VortexVM vm(coordinator.core());
+    xanadu::vql::QueryExecutionOptions executionOptions;
+    executionOptions.mode = engineMode == "vortex"
+                                  ? xanadu::vql::QueryExecutionMode::Vortex
+                                  : xanadu::vql::QueryExecutionMode::Direct;
+    xanadu::vql::QueryExecutor executor(engine, vm, executionOptions);
+    const auto execution = executor.execute(ast);
+    if (dumpAsm &&
+        executionOptions.mode == xanadu::vql::QueryExecutionMode::Vortex)
+      std::cout << executor.disassembly() << "\n";
+    if (!execution) {
+      std::cerr << "Query failed: " << execution.error().message << "\n";
+      return false;
     }
+    const auto &results = *execution;
 
     lastResults = results;
     hasResults  = true;

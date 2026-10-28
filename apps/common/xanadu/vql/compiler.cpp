@@ -3,6 +3,7 @@
  * @brief Implementation of VQL Compiler translating AST to Vortex bytecode.
  */
 #include "common/xanadu/vql/compiler.hpp"
+#include "common/xanadu/vql/invocation.hpp"
 
 #include <cstdio>
 #include <iomanip>
@@ -12,6 +13,8 @@
 #include <stdexcept>
 #include <unordered_set>
 
+#include "common/xanadu/vql/contract_codec.hpp"
+#include "common/xanadu/vql/contracts.hpp"
 #include "common/xanadu/vql/lexer.hpp"
 #include "common/xanadu/vql/parser.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
@@ -82,6 +85,28 @@ VQLCompiler::opcodeMnemonic(zigzag::vortex::OpcodeKind kind) noexcept {
     return "RETURN";
   case OpcodeKind::Halt:
     return "HALT";
+  case OpcodeKind::MatchContract:
+    return "MATCH_CONTRACT";
+  case OpcodeKind::RequireContract:
+    return "REQUIRE_CONTRACT";
+  case OpcodeKind::CopyCellRefs:
+    return "COPY_CELL_REFS";
+  case OpcodeKind::ClearCellRefs:
+    return "CLEAR_CELL_REFS";
+  case OpcodeKind::BranchFalseCell:
+    return "BRANCH_FALSE_CELL";
+  case OpcodeKind::StreamClear:
+    return "STREAM_CLEAR";
+  case OpcodeKind::StreamAppend:
+    return "STREAM_APPEND";
+  case OpcodeKind::StreamBegin:
+    return "STREAM_BEGIN";
+  case OpcodeKind::StreamReverseBegin:
+    return "STREAM_REVERSE_BEGIN";
+  case OpcodeKind::RankBegin:
+    return "RANK_BEGIN";
+  case OpcodeKind::IteratorNext:
+    return "ITERATOR_NEXT";
   case OpcodeKind::Nop:
     return "NOP";
   case OpcodeKind::Bind:
@@ -131,6 +156,12 @@ VQLCompiler::VQLCompiler(zigzag::vortex::VortexCore &core,
                          zigzag::vortex::VortexVM &vm)
     : core_(core), vm_(vm) {}
 
+VQLCompiler::VQLCompiler(MultiStoreCoordinator &coordinator,
+                         zigzag::vortex::VortexVM &vm)
+    : core_(coordinator.core()), vm_(vm), coordinator_(coordinator) {
+  vm_.setContractCoordinator(coordinator);
+}
+
 CellRef VQLCompiler::emitOp(OpcodeKind kind, std::string_view label) {
   CellRef op = vm_.mintOpcode(kind, label);
   if (!entryOp_) {
@@ -172,7 +203,17 @@ CompilationResult VQLCompiler::compile(const QueryExpression &query,
   currentOp_.reset();
   allOps_.clear();
   varBindings_.clear();
+  streamBindings_ = options.initialBindings;
+  for (const auto &[name, cells] : streamBindings_)
+    varBindings_[name] =
+        cells.empty() ? std::nullopt : std::optional{cells.front()};
+  definitions_.clear();
+  activeCalls_.clear();
+  contextInputs_  = options.contextCells;
+  ambientContext_ = std::nullopt;
+  functorBindings_.clear();
   lastResultCells_.clear();
+  dynamicStreams_.clear();
 
   try {
     const auto resultCell = compileQuery(query);
@@ -253,6 +294,42 @@ CompilationResult VQLCompiler::compile(std::string_view queryString,
 }
 
 std::optional<CellRef> VQLCompiler::compileQuery(const QueryExpression &query) {
+  for (const auto &definition : query.defs) {
+    if (!definitions_.emplace(definition.name, definition).second)
+      throw std::invalid_argument("duplicate function definition: " +
+                                  definition.name);
+    try {
+      for (const auto &parameter : definition.params)
+        if (parameter.type) ContractMatcher::validateType(*parameter.type);
+      if (definition.returnType)
+        ContractMatcher::validateType(*definition.returnType);
+    } catch (const TypeContractError &error) {
+      throw std::invalid_argument(error.what());
+    }
+  }
+  if (!query.mounts.empty() || !query.namespaceDeclarations.empty()) {
+    throw std::invalid_argument(
+        "VQL mount declarations are not compiled to Vortex yet; run the "
+        "query with --engine direct");
+  }
+  if (!query.body.statements.empty()) {
+    std::optional<CellRef> result;
+    for (const auto &statement : query.body.statements) {
+      lastResultCells_.clear();
+      if (const auto *path = std::get_if<PathExpression>(&statement)) {
+        result = compilePathExpression(*path, core_.home());
+      } else if (const auto *block = std::get_if<ExecutionBlock>(&statement)) {
+        result = compileExecutionBlock(*block);
+      } else if (const auto *weave = std::get_if<WeaveStatement>(&statement)) {
+        result = compileExecutionBlock(
+            ExecutionBlock{.action = ActionClause{.clause = weave->effect}});
+      } else {
+        throw std::invalid_argument(
+            "watch and perspective statements require the direct engine");
+      }
+    }
+    return result;
+  }
   if (std::holds_alternative<PathExpression>(query.expr)) {
     return compilePathExpression(std::get<PathExpression>(query.expr),
                                  core_.home());
@@ -267,20 +344,35 @@ VQLCompiler::compileExecutionBlock(const ExecutionBlock &block) {
     if (std::holds_alternative<LetClause>(binding)) {
       const auto &let = std::get<LetClause>(binding);
       std::optional<CellRef> valCell;
-      if (const auto *path = std::get_if<PathExpression>(&let.target);
-          path != nullptr && path->isFunctor) {
-        // Compiled as a path it would bind the cells the functor reaches from
-        // home, not the functor.
-        throw std::invalid_argument(
-            "point-free path functors are not compiled to Vortex yet; run the "
-            "query with --engine direct");
+      const PathExpression *functorPath =
+          std::get_if<PathExpression>(&let.target);
+      const ValueExpr *functorValue = std::get_if<ValueExpr>(&let.target);
+      const auto functor =
+          functorPath != nullptr    ? functorArgument(*functorPath)
+          : functorValue != nullptr ? functorArgument(*functorValue)
+                                    : std::nullopt;
+      if (functor) {
+        functorBindings_[let.varName] = *functor;
+        varBindings_.erase(let.varName);
+        streamBindings_.erase(let.varName);
+        continue;
       }
-      if (std::holds_alternative<PathExpression>(let.target)) {
-        valCell = compilePathExpression(std::get<PathExpression>(let.target),
-                                        core_.home());
+      functorBindings_.erase(let.varName);
+      if (functorPath != nullptr &&
+          std::holds_alternative<PathExpression>(let.target)) {
+        valCell = compilePathExpression(*functorPath, core_.home());
+      } else if (functorValue != nullptr) {
+        const auto values = compileArgument(*functorValue, ambientContext_);
+        streamBindings_[let.varName] = values;
+        valCell = values.empty() ? std::nullopt : std::optional{values.front()};
       } else if (std::holds_alternative<ValueExpr>(let.target)) {
         valCell =
             compileValueExpr(std::get<ValueExpr>(let.target), core_.home());
+      }
+      if (functorPath) streamBindings_[let.varName] = lastResultCells_;
+      if (valCell && dynamicStreams_.contains(*valCell)) {
+        varBindings_[let.varName] = valCell;
+        continue;
       }
       CellRef bindOp = emitOp(OpcodeKind::Bind, "#BIND " + let.varName);
       emitInputConstant(bindOp, let.varName);
@@ -289,8 +381,15 @@ VQLCompiler::compileExecutionBlock(const ExecutionBlock &block) {
       }
       varBindings_[let.varName] = valCell;
     } else if (std::holds_alternative<ForClause>(binding)) {
-      const auto &forCl   = std::get<ForClause>(binding);
+      const auto &forCl = std::get<ForClause>(binding);
+      functorBindings_.erase(forCl.varName);
       const auto inStream = compilePathExpression(forCl.inPath, core_.home());
+      streamBindings_[forCl.varName] = lastResultCells_;
+      if (inStream && dynamicStreams_.contains(*inStream)) {
+        varBindings_[forCl.varName] = inStream;
+        emitOp(OpcodeKind::Nop, "#FOR_BIND " + forCl.varName);
+        continue;
+      }
       CellRef bindOp = emitOp(OpcodeKind::Bind, "#FOR_BIND " + forCl.varName);
       emitInputConstant(bindOp, forCl.varName);
       if (inStream) {
@@ -372,6 +471,11 @@ VQLCompiler::compileExecutionBlock(const ExecutionBlock &block) {
 std::optional<CellRef>
 VQLCompiler::compilePathExpression(const PathExpression &path,
                                    CellRef ctxCell) {
+  if (path.anchor.versionPin ||
+      std::ranges::any_of(path.steps, [](const PathStep &step) {
+        return step.versionPin.has_value();
+      }))
+    throw std::invalid_argument("version pins require historical VM lowering");
   if (!path.anchorPredicates.empty()) {
     // Refused rather than compiled without them, which would answer every
     // anchor cell whatever the predicate said.
@@ -379,219 +483,36 @@ VQLCompiler::compilePathExpression(const PathExpression &path,
         "predicates on an anchor are not compiled to Vortex yet; run the "
         "query with --engine direct");
   }
-  const auto start = path.anchor.kind == AnchorKind::Context
-                         ? std::optional<CellRef>{ctxCell}
-                         : compileAnchor(path.anchor);
-  if (!start) {
-    lastResultCells_.clear();
-    return std::nullopt;
+  std::vector<CellRef> stream;
+  if (path.anchor.kind == AnchorKind::Variable &&
+      streamBindings_.contains(path.anchor.name)) {
+    stream = streamBindings_.at(path.anchor.name);
+  } else {
+    if (path.anchor.kind == AnchorKind::Context) {
+      if (ambientContext_)
+        stream.push_back(*ambientContext_);
+      else if (activeCalls_.empty() && !contextInputs_.empty())
+        stream = contextInputs_;
+      else if (!path.steps.empty() &&
+               std::holds_alternative<FunctionInvocation>(
+                   path.steps.front().selector))
+        stream.push_back(ctxCell);
+    } else if (const auto start = compileAnchor(path.anchor)) {
+      stream.push_back(*start);
+    }
   }
-  std::vector<CellRef> stream{*start};
-
-  for (const auto &step : path.steps) {
-    std::vector<CellRef> nextStream;
-
-    if (std::holds_alternative<SignedDimensionStep>(step.selector)) {
-      const auto &sd = std::get<SignedDimensionStep>(step.selector);
-      DimRef dim     = resolveDimension(sd.dimName);
-
-      if (sd.creates.empty()) {
-        for (CellRef current : stream) {
-          CellRef linkOp =
-              emitOp(OpcodeKind::Link, std::string("#TRAVERSE ") + sd.dimName);
-          emitInput(linkOp, current);
-          emitInputConstant(linkOp, static_cast<std::int64_t>(dim));
-          emitInputConstant(linkOp,
-                            static_cast<std::int64_t>(toSign(sd.direction)));
-
-          CellRef nextCell = core_.arena().makeCell();
-          emitOutput(linkOp, nextCell);
-          nextStream.push_back(nextCell);
-        }
-      } else {
-        for (CellRef current : stream) {
-          std::vector<CellRef> createdCells;
-          CellRef attachPoint = current;
-          for (const auto &createVal : sd.creates) {
-            CellRef newOp = emitOp(OpcodeKind::New, "#MINT_CELL");
-            emitInput(newOp, attachPoint);
-            emitInputConstant(newOp, static_cast<std::int64_t>(dim));
-            emitInputConstant(newOp, static_cast<std::int64_t>(sd.direction));
-
-            CellRef freshCell = core_.arena().makeCell();
-            emitOutput(newOp, freshCell);
-
-            if (createVal.kind == CreateValue::Kind::Literal) {
-              CellRef valOp = emitOp(OpcodeKind::Value, "#INIT_VALUE");
-              emitInput(valOp, freshCell);
-              emitInputConstant(valOp, static_cast<std::int64_t>(0));
-              emitInputConstant(valOp, static_cast<std::int64_t>(-1));
-              emitInputConstant(valOp, createVal.literal);
-            } else if (createVal.kind == CreateValue::Kind::Expression &&
-                       createVal.expr) {
-              const auto valData = compileValueExpr(*createVal.expr, current);
-              if (valData) {
-                CellRef valOp = emitOp(OpcodeKind::Value, "#INIT_VALUE");
-                emitInput(valOp, freshCell);
-                emitInputConstant(valOp, static_cast<std::int64_t>(0));
-                emitInputConstant(valOp, static_cast<std::int64_t>(-1));
-                emitInput(valOp, *valData);
-              }
-            }
-            createdCells.push_back(freshCell);
-            attachPoint = freshCell;
-          }
-
-          if (step.yieldMode == YieldMode::Both) {
-            nextStream.push_back(current);
-            nextStream.insert(nextStream.end(), createdCells.begin(),
-                              createdCells.end());
-          } else if (step.yieldMode == YieldMode::Keep) {
-            nextStream.push_back(current);
-          } else if (step.yieldMode == YieldMode::Last) {
-            if (!createdCells.empty()) {
-              nextStream.push_back(createdCells.back());
-            }
-          } else {
-            nextStream.insert(nextStream.end(), createdCells.begin(),
-                              createdCells.end());
-          }
-        }
-      }
-    } else if (std::holds_alternative<FunctionInvocation>(step.selector)) {
-      const auto &fn = std::get<FunctionInvocation>(step.selector);
-      if (fn.name == "value" && !fn.args.empty()) {
-        for (CellRef current : stream) {
-          const auto argVal = compileValueExpr(fn.args[0], current);
-          if (!argVal) continue;
-          CellRef valOp = emitOp(OpcodeKind::Value, "#VALUE");
-          emitInput(valOp, current);
-          emitInputConstant(valOp, static_cast<std::int64_t>(0));
-          emitInputConstant(valOp, static_cast<std::int64_t>(-1));
-          emitInput(valOp, *argVal);
-          nextStream.push_back(current);
-        }
-      } else if (fn.name == "link" && fn.args.size() >= 2) {
-        // Existing-Target Fan-Out (§4.7)
-        std::string dimName;
-        zigzag::DimVector direction = zigzag::DimVector::POS;
-        if (std::holds_alternative<ScalarLiteral>(fn.args[0].kind)) {
-          const auto &lit = std::get<ScalarLiteral>(fn.args[0].kind);
-          if (std::holds_alternative<std::string>(lit.value)) {
-            std::string str = std::get<std::string>(lit.value);
-            if (!str.empty() && str[0] == '-') {
-              direction = zigzag::DimVector::NEG;
-              dimName   = str.substr(1);
-            } else if (!str.empty() && str[0] == '+') {
-              direction = zigzag::DimVector::POS;
-              dimName   = str.substr(1);
-            } else {
-              dimName = str;
-            }
-          }
-        } else if (std::holds_alternative<std::shared_ptr<PathExpression>>(
-                       fn.args[0].kind)) {
-          const auto &p =
-              *std::get<std::shared_ptr<PathExpression>>(fn.args[0].kind);
-          if (!p.steps.empty() && std::holds_alternative<SignedDimensionStep>(
-                                      p.steps[0].selector)) {
-            const auto &sd = std::get<SignedDimensionStep>(p.steps[0].selector);
-            dimName        = sd.dimName;
-            direction      = sd.direction;
-          }
-        }
-
-        DimRef dim            = resolveDimension(dimName);
-        const auto targetCell = compileValueExpr(fn.args[1], core_.home());
-
-        std::vector<CellRef> attachedClones;
-        if (targetCell) {
-          for (CellRef current : stream) {
-            CellRef cloneOp = emitOp(OpcodeKind::Clone, "#CLONE_GENERATOR");
-            emitInput(cloneOp, *targetCell);
-            CellRef cloneCell = core_.arena().makeCell();
-            emitOutput(cloneOp, cloneCell);
-
-            CellRef linkOp =
-                emitOp(OpcodeKind::Link, "#LINK_ATTACH " + dimName);
-            emitInput(linkOp, current);
-            emitInputConstant(linkOp, static_cast<std::int64_t>(dim));
-            emitInputConstant(linkOp,
-                              static_cast<std::int64_t>(toSign(direction)));
-            emitInput(linkOp, cloneCell);
-            attachedClones.push_back(cloneCell);
-          }
-        }
-
-        if (step.yieldMode == YieldMode::Both) {
-          nextStream = stream;
-          nextStream.insert(nextStream.end(), attachedClones.begin(),
-                            attachedClones.end());
-        } else if (step.yieldMode == YieldMode::Keep) {
-          nextStream = stream;
-        } else if (step.yieldMode == YieldMode::Last) {
-          if (!attachedClones.empty()) {
-            nextStream.push_back(attachedClones.back());
-          }
-        } else {
-          nextStream = attachedClones;
-        }
-      }
-    }
-
-    // Deref master
-    if (step.derefMaster) {
-      for (auto &c : nextStream) {
-        CellRef derefOp = emitOp(OpcodeKind::Link, "#DEREF_CLONE_MASTER");
-        emitInput(derefOp, c);
-        emitInputConstant(derefOp,
-                          static_cast<std::int64_t>(core_.dims().clone));
-        emitInputConstant(derefOp, static_cast<std::int64_t>(-1));
-        CellRef masterCell = core_.arena().makeCell();
-        emitOutput(derefOp, masterCell);
-        c = masterCell;
-      }
-    }
-
-    // Predicates
-    for (const auto &pred : step.predicates) {
-      for (CellRef c : nextStream) {
-        auto condCell = compileBooleanExpr(pred, c);
-        if (!condCell) condCell = emitConstant(false);
-        CellRef branchOp = emitOp(OpcodeKind::Branch, "#FILTER_BRANCH");
-        emitInput(branchOp, *condCell);
-      }
-    }
-
-    // Range Clamp [start, end]
-    if (step.rangeClamp.has_value() && !nextStream.empty()) {
-      // step is a const-bound reference with no reassignment since the
-      // has_value() check just above.
-      const auto &clamp =
-          *step.rangeClamp; // NOLINT(bugprone-unchecked-optional-access)
-      auto total     = static_cast<std::int64_t>(nextStream.size());
-      std::int64_t s = clamp.start;
-      std::int64_t e = clamp.end.value_or(s);
-
-      std::int64_t from = (s < 0) ? (total + s) : (s - 1);
-      std::int64_t to   = (e < 0) ? (total + e) : (e - 1);
-
-      from = std::clamp<std::int64_t>(from, 0, total - 1);
-      to   = std::clamp<std::int64_t>(to, 0, total - 1);
-
-      if (from <= to) {
-        nextStream = std::vector<CellRef>(nextStream.begin() + from,
-                                          nextStream.begin() + to + 1);
-      } else {
-        nextStream.clear();
-      }
-    }
-
-    stream = std::move(nextStream);
+  if (path.anchor.derefMaster) {
+    stream = emitMap(stream, [&](CellRef candidate) {
+      return std::vector<CellRef>{emitDereference(candidate)};
+    });
   }
+  stream =
+      compileSteps(path.steps, std::move(stream),
+                   path.anchor.kind != AnchorKind::Context ||
+                       ambientContext_.has_value() || !contextInputs_.empty());
 
   if (path.cloneTail && !stream.empty()) {
-    for (CellRef master : stream) {
+    stream = emitMap(stream, [&](CellRef master) {
       for (const auto &op : path.cloneTail->operands) {
         std::optional<CellRef> opCell;
         if (op.path) {
@@ -633,7 +554,8 @@ VQLCompiler::compilePathExpression(const PathExpression &path,
           emitInput(linkOp, *opCell);
         }
       }
-    }
+      return std::vector<CellRef>{master};
+    });
   }
 
   lastResultCells_ = stream;
@@ -645,24 +567,34 @@ std::optional<CellRef> VQLCompiler::compileAnchor(const AnchorNode &anchor) {
   CellRef res{};
   switch (anchor.kind) {
   case AnchorKind::Home:
-    res = core_.home();
+  case AnchorKind::Root:
+    if (coordinator_) {
+      const auto home = coordinator_->homeAnchor();
+      if (!home) return std::nullopt;
+      res = *home;
+    } else {
+      res = core_.home();
+    }
     break;
   case AnchorKind::NamedStore: {
-    CellRef scanOp =
-        emitOp(OpcodeKind::Resolve, "#RESOLVE_STORE " + anchor.name);
-    emitInputConstant(scanOp, anchor.name);
-    res = core_.arena().makeCell();
-    emitOutput(scanOp, res);
+    if (!coordinator_)
+      throw std::invalid_argument("named-store anchors require a coordinator");
+    const auto home = coordinator_->resolveNamedStore(anchor.name);
+    if (!home) return std::nullopt;
+    res = *home;
     break;
   }
-  case AnchorKind::Root:
   case AnchorKind::Cursor:
   case AnchorKind::NamedCursor:
   case AnchorKind::AllCursors:
   case AnchorKind::AllNamedCursors:
-    res = core_.home();
-    break;
+    throw std::invalid_argument("cursor anchors require VM selector lowering");
   case AnchorKind::Variable: {
+    if (functorBindings_.contains(anchor.name)) {
+      throw std::invalid_argument(
+          "a point-free functor must be applied to a path before it can be "
+          "returned as a cell");
+    }
     auto it = varBindings_.find(anchor.name);
     if (it != varBindings_.end()) {
       if (!it->second) return std::nullopt;
@@ -711,19 +643,10 @@ std::optional<CellRef> VQLCompiler::compileAnchor(const AnchorNode &anchor) {
   case AnchorKind::StoreGenerator:
   case AnchorKind::StoreAnchor:
   case AnchorKind::Microversion:
-    res = core_.home();
-    break;
+    throw std::invalid_argument(
+        "store generators and historical anchors require VM selector lowering");
   }
 
-  if (anchor.derefMaster) {
-    CellRef derefOp = emitOp(OpcodeKind::Link, "#DEREF_MASTER");
-    emitInput(derefOp, res);
-    emitInputConstant(derefOp, static_cast<std::int64_t>(core_.dims().clone));
-    emitInputConstant(derefOp, static_cast<std::int64_t>(-1));
-    CellRef master = core_.arena().makeCell();
-    emitOutput(derefOp, master);
-    res = master;
-  }
   return res;
 }
 
@@ -737,14 +660,23 @@ std::optional<CellRef> VQLCompiler::compilePathStep(const PathStep &step,
 
 std::optional<CellRef> VQLCompiler::compileBooleanExpr(const BooleanExpr &expr,
                                                        CellRef ctxCell) {
-  if (expr.terms.empty()) {
-    return emitConstant(true);
-  }
-
-  std::optional<CellRef> resultCell;
+  const auto result     = core_.arena().makeCell();
+  const auto falseValue = emitConstant(false);
+  const auto trueValue  = emitConstant(true);
+  const auto initialize = emitOp(OpcodeKind::CopyCellRefs, "#BOOL_FALSE");
+  emitInput(initialize, falseValue);
+  emitOutput(initialize, result);
+  const auto end    = vm_.mintOpcode(OpcodeKind::Nop, "#BOOL_END");
+  const auto append = [&](CellRef opcode) {
+    zigzag::expectWritten(
+        core_.arena().link(*currentOp_, core_.dims().spin, false, opcode));
+    currentOp_ = opcode;
+    allOps_.push_back(opcode);
+  };
+  // False factors skip the remainder of their conjunction; a true term skips
+  // all later alternatives, including effects and return-contract checks.
   for (const auto &term : expr.terms) {
-    std::optional<CellRef> termCell;
-    if (term.factors.empty()) termCell = emitConstant(true);
+    const auto nextTerm = vm_.mintOpcode(OpcodeKind::Nop, "#BOOL_NEXT_TERM");
     for (const auto &factor : term.factors) {
       std::optional<CellRef> factCell;
       if (std::holds_alternative<ComparisonExpr>(factor.test)) {
@@ -758,9 +690,10 @@ std::optional<CellRef> VQLCompiler::compileBooleanExpr(const BooleanExpr &expr,
               if constexpr (std::is_same_v<T,
                                                  std::shared_ptr<PathExpression>>) {
                 if (t) {
-                  const auto pathCell = compilePathExpression(*t, ctxCell);
-                  return pathCell ? pathCell
-                                        : std::optional<CellRef>{emitConstant(false)};
+                  const auto cells =
+                      compileArgument(ValueExpr{.kind = t}, ctxCell);
+                  return cells.empty() ? emitConstant(false)
+                                             : emitCellPresence(cells.front());
                 }
                 return emitConstant(false);
               } else if constexpr (std::is_same_v<T, bool>) {
@@ -768,29 +701,26 @@ std::optional<CellRef> VQLCompiler::compileBooleanExpr(const BooleanExpr &expr,
               } else if constexpr (std::is_same_v<T,
                                                         std::shared_ptr<ValueExpr>>) {
                 if (t) {
-                  const auto valueCell = compileValueExpr(*t, ctxCell);
-                  return valueCell
-                                   ? valueCell
-                                   : std::optional<CellRef>{emitConstant(false)};
+                  const auto value = compileValueExpr(*t, ctxCell);
+                  return value ? *value : emitConstant(false);
                 }
                 return emitConstant(false);
               } else if constexpr (std::is_same_v<T, std::shared_ptr<
                                                                FunctionInvocation>>) {
                 if (t) {
-                  CellRef callOp = emitOp(OpcodeKind::Call, "#CALL " + t->name);
-                  CellRef outC   = core_.arena().makeCell();
-                  emitOutput(callOp, outC);
-                  return outC;
+                  return compileValueExpr(ValueExpr{.kind = t}, ctxCell);
                 }
                 return emitConstant(false);
               } else {
-                return emitConstant(true);
+                throw std::invalid_argument(
+                    "VQL shape predicates are not compiled to Vortex yet; "
+                          "run the query with --engine direct");
               }
             },
             pt.kind);
       }
 
-      if (!factCell) continue;
+      if (!factCell) factCell = emitConstant(false);
       if (factor.negated) {
         CellRef notOp = emitOp(OpcodeKind::Not, "#NOT");
         emitInput(notOp, *factCell);
@@ -799,33 +729,20 @@ std::optional<CellRef> VQLCompiler::compileBooleanExpr(const BooleanExpr &expr,
         factCell = notOut;
       }
 
-      if (!termCell) {
-        termCell = factCell;
-      } else {
-        CellRef andOp = emitOp(OpcodeKind::And, "#AND");
-        emitInput(andOp, *termCell);
-        emitInput(andOp, *factCell);
-        CellRef andOut = core_.arena().makeCell();
-        emitOutput(andOp, andOut);
-        termCell = andOut;
-      }
+      const auto branch = emitOp(OpcodeKind::BranchFalseCell, "#BOOL_AND");
+      emitInput(branch, *factCell);
+      emitInput(branch, nextTerm);
     }
-
-    if (!termCell) termCell = emitConstant(false);
-    if (!resultCell) {
-      resultCell = *termCell;
-    } else {
-      CellRef orOp = emitOp(OpcodeKind::Or, "#OR");
-      emitInput(orOp, *resultCell);
-      emitInput(orOp, *termCell);
-      CellRef orOut = core_.arena().makeCell();
-      emitOutput(orOp, orOut);
-      resultCell = orOut;
-    }
+    const auto success = emitOp(OpcodeKind::CopyCellRefs, "#BOOL_TRUE");
+    emitInput(success, trueValue);
+    emitOutput(success, result);
+    const auto done = emitOp(OpcodeKind::BranchFalseCell, "#BOOL_OR_DONE");
+    emitInput(done, falseValue);
+    emitInput(done, end);
+    append(nextTerm);
   }
-
-  if (!resultCell) return emitConstant(false);
-  return resultCell;
+  append(end);
+  return result;
 }
 
 std::optional<CellRef>
@@ -883,7 +800,8 @@ std::optional<CellRef> VQLCompiler::compileValueExpr(const ValueExpr &expr,
           // VariableRef
           auto it = varBindings_.find(val);
           if (it != varBindings_.end()) {
-            return it->second;
+            return it->second ? std::optional{emitFirstCell(*it->second)}
+                              : std::nullopt;
           }
           CellRef resOp = emitOp(OpcodeKind::Resolve, "#RESOLVE " + val);
           emitInputConstant(resOp, val);
@@ -893,18 +811,24 @@ std::optional<CellRef> VQLCompiler::compileValueExpr(const ValueExpr &expr,
         } else if constexpr (std::is_same_v<T,
                                             std::shared_ptr<PathExpression>>) {
           if (val) {
-            return compilePathExpression(*val, ctxCell);
+            const auto result = compilePathExpression(*val, ctxCell);
+            return result ? std::optional{emitFirstCell(*result)}
+                          : std::nullopt;
           }
           return core_.home();
         } else if constexpr (std::is_same_v<
                                  T, std::shared_ptr<FunctionInvocation>>) {
-          if (val) {
-            CellRef callOp  = emitOp(OpcodeKind::Call, "#CALL " + val->name);
-            CellRef outCell = core_.arena().makeCell();
-            emitOutput(callOp, outCell);
-            return outCell;
-          }
-          return core_.home();
+          if (!val) return std::nullopt;
+          const auto definition = definitions_.find(val->name);
+          if (definition == definitions_.end())
+            throw std::invalid_argument("unknown compiled function: " +
+                                        val->name);
+          requirePositionalArguments(*val);
+          const auto results =
+              compileCall(definition->second, val->args, ctxCell, false);
+          return results.empty()
+                     ? std::nullopt
+                     : std::optional{emitFirstCell(results.front())};
         } else if constexpr (std::is_same_v<T, std::shared_ptr<BooleanExpr>>) {
           if (val) {
             return compileBooleanExpr(*val, ctxCell);
@@ -994,71 +918,6 @@ std::string VQLCompiler::disassemble(std::optional<CellRef> entryOp,
   }
 
   return out.str();
-}
-
-xanadu::MicroversionId
-VQLCompiler::exportToStore(xanadu::Store &store,
-                           const xanadu::MicroversionId &parent) const {
-  xanadu::MicroversionId ver = parent;
-  if (!store.homeCell()) {
-    ver = store.sliceGenesis(ver);
-  }
-
-  const auto &arena = core_.arena();
-  std::unordered_map<CellRef, CellRef> cellMap;
-  cellMap[core_.home()] = store.homeCell().value();
-
-  auto manifold = store.rebuildManifold(ver);
-
-  // 1. Replicate dimensions
-  std::unordered_map<DimRef, DimRef> dimMap;
-  for (CellRef c = 1; c <= arena.cellCount(); ++c) {
-    if (!arena.contains(c)) continue;
-    std::string name = arena.textOf(c);
-    if (!name.empty() && name.starts_with("d.")) {
-      // name is non-empty here, the one way getOrCreate() can refuse a store.
-      if (const auto dim = zigzag::DimensionRegistry::instance().getOrCreate(
-              store, ver, manifold, name)) {
-        dimMap[c]  = *dim;
-        cellMap[c] = *dim;
-      }
-    }
-  }
-
-  // 2. Mint cells
-  for (CellRef c = 1; c <= arena.cellCount(); ++c) {
-    if (!arena.contains(c)) continue;
-    if (cellMap.contains(c)) continue;
-
-    if (auto dVal = arena.asDouble(c)) {
-      ver = store.makeScalarCell(ver, *dVal);
-    } else if (auto iVal = arena.asInt64(c)) {
-      ver = store.makeScalarCell(ver, *iVal);
-    } else if (auto bVal = arena.asBool(c)) {
-      ver = store.makeScalarCell(ver, *bVal);
-    } else {
-      ver = store.makeCell(ver, arena.textOf(c));
-    }
-    cellMap[c] = store.cellRefOf(ver).value();
-    manifold.advanceOrRefold(store, ver);
-  }
-
-  // 3. Link edges (posward links only)
-  for (CellRef c = 1; c <= arena.cellCount(); ++c) {
-    if (!arena.contains(c) || !cellMap.contains(c)) continue;
-    CellRef from = cellMap.at(c);
-
-    for (const auto &[dimRef, mappedDim] : dimMap) {
-      const auto target = arena.linked(c, dimRef, DimVector::POS);
-      if (target && cellMap.contains(*target)) {
-        CellRef to = cellMap.at(*target);
-        ver        = store.setLink(ver, from, mappedDim, DimVector::POS, to);
-        manifold.advanceOrRefold(store, ver);
-      }
-    }
-  }
-
-  return ver;
 }
 
 } // namespace xanadu::vql

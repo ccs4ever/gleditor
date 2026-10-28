@@ -160,6 +160,8 @@ std::string_view tokenKindName(TokenKind kind) noexcept {
     return "pure";
   case TokenKind::KwMount:
     return "mount";
+  case TokenKind::KwUnmount:
+    return "unmount";
   case TokenKind::KwAs:
     return "as";
   case TokenKind::KwWatch:
@@ -766,6 +768,8 @@ Token Lexer::scanIdentifierOrKeyword() {
     return Token{.kind = TokenKind::KwPure, .text = text, .loc = startLoc};
   if (text == "mount")
     return Token{.kind = TokenKind::KwMount, .text = text, .loc = startLoc};
+  if (text == "unmount")
+    return Token{.kind = TokenKind::KwUnmount, .text = text, .loc = startLoc};
   if (text == "as")
     return Token{.kind = TokenKind::KwAs, .text = text, .loc = startLoc};
   if (text == "watch")

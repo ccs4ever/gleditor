@@ -18,12 +18,19 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
+
+#include <gleditor/cpp26.hpp>
 
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/vortex/vortex_core.hpp"
 #include "common/xanadu/vortex/vortex_vm.hpp"
 #include "common/xanadu/vql/ast.hpp"
+
+namespace xanadu {
+class MultiStoreCoordinator;
+}
 
 namespace xanadu::vql {
 
@@ -32,6 +39,8 @@ struct CompilationOptions {
   std::string moduleName{"std:custom"}; ///< Module name for library store
   std::string symbolName{"query"};      ///< Exported symbol name
   bool optimize{false};                 ///< Enable optimizations
+  std::vector<zigzag::CellRef> contextCells;
+  std::unordered_map<std::string, std::vector<zigzag::CellRef>> initialBindings;
 };
 
 struct CompilationResult {
@@ -45,6 +54,7 @@ struct CompilationResult {
 class VQLCompiler {
 public:
   VQLCompiler(zigzag::vortex::VortexCore &core, zigzag::vortex::VortexVM &vm);
+  VQLCompiler(MultiStoreCoordinator &coordinator, zigzag::vortex::VortexVM &vm);
 
   /// Compiles a parsed QueryExpression AST into Vortex bytecode.
   CompilationResult compile(const QueryExpression &query,
@@ -68,9 +78,9 @@ public:
 
   /// Exports the compiled ArenaManifold instructions and zzstructure to a
   /// Store.
-  xanadu::MicroversionId
-  exportToStore(xanadu::Store &store,
-                const xanadu::MicroversionId &parent = {}) const;
+  xanadu::MicroversionId exportToStore(
+      xanadu::Store &store,
+      std::optional<xanadu::MicroversionId> parent = std::nullopt) const;
 
 private:
   // Emission helpers
@@ -84,8 +94,53 @@ private:
   zigzag::CellRef emitInputConstant(zigzag::CellRef op,
                                     const zigzag::vortex::CellValue &val);
 
+  std::optional<std::vector<PathStep>>
+  functorArgument(const ValueExpr &argument) const;
+  std::optional<std::vector<PathStep>>
+  functorArgument(const PathExpression &path) const;
+
+  void appendOpcode(zigzag::CellRef opcode);
+  zigzag::CellRef emitStreamClear();
+  void emitAppendStream(zigzag::CellRef output,
+                        std::span<const zigzag::CellRef> inputs);
+  std::vector<zigzag::CellRef>
+  emitClamp(std::span<const zigzag::CellRef> inputs, const RangeClamp &clamp);
+  void
+  emitIteratorLoop(zigzag::CellRef iterator,
+                   gleditor::cpp26::function_ref<void(zigzag::CellRef)> body);
+  zigzag::CellRef emitReverse(std::span<const zigzag::CellRef> inputs);
+  zigzag::CellRef emitDereference(zigzag::CellRef candidate);
+  zigzag::CellRef emitExtreme(zigzag::CellRef anchor, zigzag::DimRef dimension,
+                              zigzag::DimVector direction);
+  zigzag::CellRef emitRank(zigzag::CellRef anchor, zigzag::DimRef dimension,
+                           zigzag::DimVector direction);
+  std::vector<zigzag::CellRef>
+  emitMap(std::span<const zigzag::CellRef> inputs,
+          gleditor::cpp26::function_ref<
+              std::vector<zigzag::CellRef>(zigzag::CellRef)>
+              body);
+  std::vector<zigzag::CellRef> compileSteps(std::span<const PathStep> steps,
+                                            std::vector<zigzag::CellRef> stream,
+                                            bool hasContext);
+  std::vector<zigzag::CellRef> compileSelector(const PathStep &step,
+                                               zigzag::CellRef current,
+                                               bool hasContext);
+  std::unordered_set<zigzag::CellRef> dynamicStreams_;
+
   // AST compilation subroutines
   std::optional<zigzag::CellRef> compileQuery(const QueryExpression &query);
+  std::vector<zigzag::CellRef>
+  compileCall(const DefDeclaration &definition,
+              const std::vector<ValueExpr> &arguments,
+              std::optional<zigzag::CellRef> context, bool ufcs);
+  std::vector<zigzag::CellRef>
+  compileArgument(const ValueExpr &argument,
+                  std::optional<zigzag::CellRef> context);
+  std::unordered_map<std::string, DefDeclaration> definitions_;
+  std::vector<std::string> activeCalls_;
+  std::optional<zigzag::CellRef> ambientContext_;
+  std::vector<zigzag::CellRef> contextInputs_;
+  std::unordered_map<std::string, std::vector<zigzag::CellRef>> streamBindings_;
   std::optional<zigzag::CellRef>
   compileExecutionBlock(const ExecutionBlock &block);
   std::optional<zigzag::CellRef>
@@ -93,6 +148,9 @@ private:
   std::optional<zigzag::CellRef> compileAnchor(const AnchorNode &anchor);
   std::optional<zigzag::CellRef> compilePathStep(const PathStep &step,
                                                  zigzag::CellRef inStreamCell);
+  zigzag::CellRef emitFirstCell(zigzag::CellRef input);
+  zigzag::CellRef emitCellPresence(zigzag::CellRef candidate);
+  zigzag::CellRef emitStreamPresence(std::span<const zigzag::CellRef> inputs);
   std::optional<zigzag::CellRef> compileBooleanExpr(const BooleanExpr &expr,
                                                     zigzag::CellRef ctxCell);
   std::optional<zigzag::CellRef> compileValueExpr(const ValueExpr &expr,
@@ -107,6 +165,7 @@ private:
 
   zigzag::vortex::VortexCore &core_;
   zigzag::vortex::VortexVM &vm_;
+  gleditor::cpp26::optional<MultiStoreCoordinator &> coordinator_;
 
   std::optional<zigzag::CellRef> entryOp_;
   std::optional<zigzag::CellRef> currentOp_;
@@ -114,6 +173,7 @@ private:
   std::vector<zigzag::CellRef> lastResultCells_;
 
   std::unordered_map<std::string, std::optional<zigzag::CellRef>> varBindings_;
+  std::unordered_map<std::string, std::vector<PathStep>> functorBindings_;
 };
 
 } // namespace xanadu::vql

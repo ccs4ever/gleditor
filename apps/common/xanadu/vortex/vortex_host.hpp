@@ -27,6 +27,7 @@
 #include "common/xanadu/vpl/vpl_engine.hpp"
 #include "common/xanadu/vprolog/compiler.hpp"
 #include "common/xanadu/vql/compiler.hpp"
+#include "common/xanadu/vql/execution.hpp"
 #include "common/xanadu/vql/vql_engine.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
 #include "common/xanadu/zigzag/manifold.hpp"
@@ -250,6 +251,12 @@ public:
   std::vector<CellRef>
   executeVQL(std::string_view queryOrWeave,
              const std::vector<CellRef> &contextCells = {});
+  VortexHost *
+  setVQLExecutionOptions(xanadu::vql::QueryExecutionOptions options);
+  [[nodiscard]] std::expected<std::vector<CellRef>,
+                              xanadu::vql::QueryExecutionError>
+  executeVQLChecked(std::string_view query,
+                    const std::vector<CellRef> &contextCells = {});
 
   /// Stage 4 (vortex-multithreading-study.md §6.3): run a batch of independent
   /// VQL queries in parallel, one per worker context over the shared frozen
@@ -351,6 +358,7 @@ private:
 
   xanadu::vql::VQLEngine vqlEngine_;
   xanadu::vql::VQLCompiler vqlCompiler_;
+  xanadu::vql::QueryExecutionOptions vqlOptions_;
   xanadu::vpl::VPLEngine vplEngine_;
 
   AppActionDelegate appActionDelegate_;

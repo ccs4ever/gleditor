@@ -99,7 +99,8 @@ VortexHostConfig VortexHostConfig::fromStore(const xanadu::Store &store) {
 
 VortexHost::VortexHost(const Manifold *baseManifold)
     : baseManifold_(baseManifold), primary_(baseManifold),
-      vqlEngine_(primary_.core), vqlCompiler_(primary_.core, primary_.vm),
+      vqlEngine_(primary_.core),
+      vqlCompiler_(vqlEngine_.coordinator(), primary_.vm),
       vplEngine_(primary_.core) {
   initHostServices();
 }
@@ -641,21 +642,26 @@ std::optional<zigzag::Promoted> VortexHost::promoteAndAttachToStore(
   return promoted;
 }
 
+VortexHost *
+VortexHost::setVQLExecutionOptions(xanadu::vql::QueryExecutionOptions options) {
+  vqlOptions_ = options;
+  return this;
+}
+
+std::expected<std::vector<CellRef>, xanadu::vql::QueryExecutionError>
+VortexHost::executeVQLChecked(std::string_view query,
+                              const std::vector<CellRef> &contextCells) {
+  xanadu::vql::QueryExecutor executor(vqlEngine_, primary_.vm, vqlOptions_);
+  return executor.execute(query, contextCells);
+}
+
 std::vector<CellRef>
 VortexHost::executeVQL(std::string_view queryOrWeave,
                        const std::vector<CellRef> &contextCells) {
-  try {
-    xanadu::vql::Parser parser(queryOrWeave);
-    auto expr = parser.parseQuery();
-    if (std::holds_alternative<xanadu::vql::PathExpression>(expr.expr)) {
-      return vqlEngine_.evaluatePath(
-          std::get<xanadu::vql::PathExpression>(expr.expr), contextCells);
-    }
-    return vqlEngine_.execute(expr);
-  } catch (const std::exception &err) {
-    std::cerr << "VortexHost::executeVQL error: " << err.what() << "\n";
-    return {};
-  }
+  auto result = executeVQLChecked(queryOrWeave, contextCells);
+  if (result) return std::move(*result);
+  GLEDITOR_LOG_WARN("vql.execute", "{}", result.error().message);
+  return {};
 }
 
 std::vector<std::vector<std::string>> VortexHost::executeVQLBatchParallel(
@@ -682,19 +688,9 @@ std::vector<std::vector<std::string>> VortexHost::executeVQLBatchParallel(
     WorkerContext &ctx = *contexts[i];
     prepare(ctx, i);
     xanadu::vql::VQLEngine engine(ctx.core);
-    std::vector<CellRef> cells;
-    try {
-      xanadu::vql::Parser parser(queries[i]);
-      auto expr = parser.parseQuery();
-      if (std::holds_alternative<xanadu::vql::PathExpression>(expr.expr)) {
-        cells = engine.evaluatePath(
-            std::get<xanadu::vql::PathExpression>(expr.expr), {});
-      } else {
-        cells = engine.execute(expr);
-      }
-    } catch (const std::exception &) {
-      cells.clear();
-    }
+    xanadu::vql::QueryExecutor executor(engine, ctx.vm, vqlOptions_);
+    const auto execution = executor.execute(queries[i]);
+    const auto cells     = execution ? *execution : std::vector<CellRef>{};
     std::vector<std::string> rendered;
     rendered.reserve(cells.size());
     for (const CellRef c : cells) {
@@ -746,19 +742,14 @@ VortexHost::navigatePath(std::string_view pathExpr,
       return std::nullopt;
     }
 
-    xanadu::vql::Parser parser(query);
-    auto expr = parser.parseQuery();
-    std::vector<CellRef> results;
-    if (std::holds_alternative<xanadu::vql::PathExpression>(expr.expr)) {
-      std::vector<CellRef> ctx;
-      if (currentFocus) {
-        ctx.push_back(*currentFocus);
-      }
-      results = vqlEngine_.evaluatePath(
-          std::get<xanadu::vql::PathExpression>(expr.expr), ctx);
-    } else {
-      results = vqlEngine_.execute(expr);
+    std::vector<CellRef> ctx;
+    if (currentFocus) ctx.push_back(*currentFocus);
+    const auto execution = executeVQLChecked(query, ctx);
+    if (!execution) {
+      GLEDITOR_LOG_WARN("vql.execute", "{}", execution.error().message);
+      return std::nullopt;
     }
+    const auto &results = *execution;
     if (!results.empty() && results.front() != noCell) {
       return results.front();
     }
@@ -829,22 +820,14 @@ VortexHost::executeScript(std::string_view script,
       return res;
     }
 
-    if (contextCell) {
-      vqlEngine_.setVariable(".", *contextCell);
+    std::vector<CellRef> ctx;
+    if (contextCell) ctx.push_back(*contextCell);
+    const auto execution = executeVQLChecked(trimmed, ctx);
+    if (!execution) {
+      res.message = execution.error().message;
+      return res;
     }
-    xanadu::vql::Parser parser(trimmed);
-    auto expr = parser.parseQuery();
-    std::vector<CellRef> cells;
-    if (std::holds_alternative<xanadu::vql::PathExpression>(expr.expr)) {
-      std::vector<CellRef> ctx;
-      if (contextCell) {
-        ctx.push_back(*contextCell);
-      }
-      cells = vqlEngine_.evaluatePath(
-          std::get<xanadu::vql::PathExpression>(expr.expr), ctx);
-    } else {
-      cells = vqlEngine_.execute(expr);
-    }
+    const auto &cells = *execution;
 
     res.affectedCells = cells;
     res.success       = true;

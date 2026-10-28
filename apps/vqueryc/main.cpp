@@ -142,16 +142,22 @@ int main(int argc, char *argv[]) {
   }
 
   auto outPath = program.get<std::string>("--output");
-  if (!outPath.empty()) {
-    std::filesystem::create_directories(outPath);
-    auto permascroll = std::make_shared<xanadu::UserPermascroll>();
-    xanadu::Store store(permascroll);
-    if (std::filesystem::exists(outPath + "/ops.nodes")) {
-      store.load(outPath);
+  try {
+    if (!outPath.empty()) {
+      std::filesystem::create_directories(outPath);
+      auto permascroll = std::make_shared<xanadu::UserPermascroll>();
+      xanadu::Store store(permascroll);
+      if (std::filesystem::exists(outPath + "/ops.nodes")) {
+        store.load(outPath);
+      }
+      compiler.exportToStore(store);
+      store.save(outPath);
+      std::cout << "Successfully compiled and saved to " << outPath << "\n";
     }
-    compiler.exportToStore(store);
-    store.save(outPath);
-    std::cout << "Successfully compiled and saved to " << outPath << "\n";
+
+  } catch (const std::exception &error) {
+    std::cerr << "Export failed: " << error.what() << "\n";
+    return 1;
   }
 
   return 0;

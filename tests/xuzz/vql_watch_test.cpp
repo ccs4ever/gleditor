@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 
 #include "common/xanadu/multi_store.hpp"
+#include "common/xanadu/vql/parser.hpp"
 #include "common/xanadu/vql/vql_engine.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
 
@@ -26,17 +27,141 @@ TEST(VQLWatchTest, StreamingAndDeltaMetadata) {
   EXPECT_TRUE(arena.link(core.home(), dItems, DimVector::POS, item1));
   EXPECT_TRUE(arena.link(item1, dItems, DimVector::POS, item2));
 
-  // watch streaming over target path with virtual d.delta
+  // Snapshot watch execution does not invent a delta cell for existing data.
   auto deltas = engine.execute("watch ##/d.items as $item {\n"
                                "  $item/+d.delta\n"
                                "}");
 
   ASSERT_EQ(deltas.size(), 2u);
-  EXPECT_EQ(arena.textOf(deltas[0]), "modified");
-  EXPECT_EQ(arena.textOf(deltas[1]), "modified");
+  EXPECT_EQ(deltas[0], item1);
+  EXPECT_EQ(deltas[1], item2);
 }
 
-TEST(VQLWatchTest, SinceAndUntilTermination) {
+TEST(VQLWatchTest, PollReportsMembershipChangesAndCanBeCancelled) {
+  zigzag::ArenaManifold arena;
+  zigzag::vortex::VortexCore core(arena);
+  VQLEngine engine(core);
+
+  const auto dim = engine.resolveDimension("d.items");
+  const auto a   = arena.makeCell("a");
+  const auto b   = arena.makeCell("b");
+  ASSERT_TRUE(arena.link(core.home(), dim, DimVector::POS, a));
+  ASSERT_TRUE(arena.link(a, dim, DimVector::POS, b));
+
+  xanadu::vql::Parser parser("##/d.items");
+  const auto query = parser.parseQuery();
+  const auto id = engine.subscribeWatch(std::get<PathExpression>(query.expr));
+  const auto initial = engine.pollWatch(id);
+  ASSERT_EQ(initial.size(), 2u);
+  EXPECT_EQ(initial[0].cell, a);
+  EXPECT_EQ(initial[0].change, VQLEngine::WatchChange::Added);
+  EXPECT_TRUE(engine.pollWatch(id).empty());
+
+  ASSERT_TRUE(arena.setValueBits(a, xanadu::ValueKind::Int64, 41));
+  const auto valueChanged = engine.pollWatch(id, [&](const auto &event) {
+    if (event.cell == a)
+      ASSERT_TRUE(arena.setValueBits(a, xanadu::ValueKind::Int64, 42));
+  });
+  ASSERT_EQ(valueChanged.size(), 1u);
+  EXPECT_EQ(valueChanged.front().cell, a);
+  EXPECT_EQ(valueChanged.front().change, VQLEngine::WatchChange::Modified);
+  ASSERT_TRUE(valueChanged.front().afterValue.has_value());
+  EXPECT_EQ(std::get<std::int64_t>(*valueChanged.front().afterValue), 41);
+  EXPECT_TRUE(engine.pollWatch(id).empty());
+
+  const auto c = arena.makeCell("c");
+  ASSERT_TRUE(arena.link(b, dim, DimVector::POS, c));
+  const auto changed = engine.pollWatch(id);
+  ASSERT_EQ(changed.size(), 2u);
+  EXPECT_EQ(changed[0].cell, b);
+  EXPECT_EQ(changed[0].change, VQLEngine::WatchChange::Modified);
+  EXPECT_TRUE(changed[0].topologyChanged);
+  EXPECT_EQ(changed[1].cell, c);
+  EXPECT_EQ(changed[1].change, VQLEngine::WatchChange::Added);
+
+  const auto dExtra = engine.resolveDimension("d.extra");
+  const auto extra  = arena.makeCell("extra");
+  ASSERT_TRUE(arena.link(a, dExtra, DimVector::POS, extra));
+  const auto topologyChanged = engine.pollWatch(id);
+  ASSERT_EQ(topologyChanged.size(), 1u);
+  EXPECT_EQ(topologyChanged.front().cell, a);
+  EXPECT_TRUE(topologyChanged.front().topologyChanged);
+  EXPECT_TRUE(engine.cancelWatch(id));
+  EXPECT_FALSE(engine.cancelWatch(id));
+}
+
+TEST(VQLWatchTest, LocalMountDispatchAddsNoArenaCells) {
+  zigzag::ArenaManifold arena;
+  zigzag::vortex::VortexCore core(arena);
+  VQLEngine engine(core);
+  MountDeclaration mount{.storeAnchor = StoreAnchor{.method = "current"},
+                         .dimName     = "d.cluster",
+                         .direction   = DimVector::POS};
+  const auto initialCellCount = arena.cellCount();
+  engine.executeMount(mount);
+  EXPECT_EQ(arena.cellCount(), initialCellCount);
+
+  const auto result = engine.execute("##/+d.cluster");
+  ASSERT_EQ(result.size(), 1u);
+  EXPECT_EQ(result.front(), core.home());
+
+  EXPECT_TRUE(engine.execute("unmount +d.cluster; ##/+d.cluster").empty());
+  const auto remounted =
+      engine.execute("mount current() as +d.cluster; ##/+d.cluster");
+  ASSERT_EQ(remounted.size(), 1u);
+  EXPECT_EQ(remounted.front(), core.home());
+}
+
+TEST(VQLWatchTest, RemoteMountDoesNotSilentlyResolveToLocalHome) {
+  zigzag::ArenaManifold arena;
+  zigzag::vortex::VortexCore core(arena);
+  VQLEngine engine(core);
+
+  EXPECT_THROW(engine.execute("mount topic(\"cluster\") as +d.remote; ##"),
+               std::runtime_error);
+}
+
+TEST(VQLWatchTest, MountAliasIsPrivateToItsEngineSession) {
+  zigzag::ArenaManifold arena;
+  zigzag::vortex::VortexCore core(arena);
+  VQLEngine mounted(core);
+  VQLEngine isolated(core);
+  const MountDeclaration mount{.storeAnchor = StoreAnchor{.method = "current"},
+                               .dimName     = "d.private",
+                               .direction   = DimVector::POS};
+
+  mounted.executeMount(mount);
+  EXPECT_TRUE(isolated.execute("##/+d.private").empty());
+  const auto mountedResult = mounted.execute("##/+d.private");
+  ASSERT_EQ(mountedResult.size(), 1u);
+  EXPECT_EQ(mountedResult.front(), core.home());
+}
+
+TEST(VQLWatchTest, CallbackMayCancelAndRegisterSubscriptionsSafely) {
+  zigzag::ArenaManifold arena;
+  zigzag::vortex::VortexCore core(arena);
+  VQLEngine engine(core);
+  const auto dim  = engine.resolveDimension("d.items");
+  const auto item = arena.makeCell("item");
+  ASSERT_TRUE(arena.link(core.home(), dim, DimVector::POS, item));
+
+  xanadu::vql::Parser parser("##/d.items");
+  const auto query = parser.parseQuery();
+  const auto path  = std::get<PathExpression>(query.expr);
+  const auto id    = engine.subscribeWatch(path);
+  std::vector<VQLEngine::WatchId> added;
+  const auto events = engine.pollWatch(id, [&](const auto &) {
+    EXPECT_TRUE(engine.cancelWatch(id));
+    while (added.size() < 128) added.push_back(engine.subscribeWatch(path));
+  });
+
+  ASSERT_EQ(events.size(), 1u);
+  EXPECT_FALSE(engine.cancelWatch(id));
+  ASSERT_EQ(added.size(), 128u);
+  for (const auto addedId : added) EXPECT_TRUE(engine.cancelWatch(addedId));
+}
+
+TEST(VQLWatchTest, SinceRequiresStoreBackedHistory) {
   zigzag::ArenaManifold arena;
   zigzag::vortex::VortexCore core(arena);
   VQLEngine engine(core);
@@ -52,16 +177,11 @@ TEST(VQLWatchTest, SinceAndUntilTermination) {
   EXPECT_TRUE(arena.link(t2, dTasks, DimVector::POS, t3));
   EXPECT_TRUE(arena.link(t3, dTasks, DimVector::POS, t4));
 
-  // watch with since @88 catch-up simulation and until $t = "done" termination
-  auto results =
+  EXPECT_THROW(
       engine.execute("watch ##/d.tasks as $t since @88 until $t = \"done\" {\n"
                      "  $t\n"
-                     "}");
-
-  ASSERT_EQ(results.size(), 3u);
-  EXPECT_EQ(arena.textOf(results[0]), "init");
-  EXPECT_EQ(arena.textOf(results[1]), "processing");
-  EXPECT_EQ(arena.textOf(results[2]), "done");
+                     "}"),
+      std::runtime_error);
 }
 
 TEST(VQLWatchTest, MultiStatementScriptWithForAndWatch) {

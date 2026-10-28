@@ -3,6 +3,9 @@
  * @brief Direct query evaluation engine for VQL v16.0.
  */
 #include "common/xanadu/vql/vql_engine.hpp"
+#include "common/xanadu/vql/clone_master.hpp"
+#include "common/xanadu/vql/functor_capture.hpp"
+#include "common/xanadu/vql/invocation.hpp"
 
 #include <algorithm>
 #include <charconv>
@@ -23,6 +26,11 @@ using zigzag::DimVector;
 
 namespace {
 
+template <class Action> struct RestoreScope {
+  Action action;
+  ~RestoreScope() { action(); }
+};
+
 std::vector<zigzag::CellRef>
 concatCellStreams(const std::span<const zigzag::CellRef> current,
                   const std::span<const zigzag::CellRef> created) {
@@ -41,16 +49,6 @@ bool stringToDouble(std::string_view sv, double &out) {
   char *end = nullptr;
   out       = std::strtod(s.c_str(), &end);
   return end == s.c_str() + s.size();
-}
-
-bool stringToInt64(std::string_view sv, std::int64_t &out) {
-  if (sv.empty()) {
-    return false;
-  }
-  const char *begin = sv.data();
-  const char *end   = sv.data() + sv.size();
-  auto [ptr, ec]    = std::from_chars(begin, end, out);
-  return ec == std::errc{} && ptr == end;
 }
 
 double cellValueToDouble(const zigzag::vortex::CellValue &val,
@@ -78,16 +76,19 @@ double cellValueToDouble(const zigzag::vortex::CellValue &val,
 } // namespace
 
 VQLEngine::VQLEngine(MultiStoreCoordinator &coordinator)
-    : coordinator_(coordinator), core_(&coordinator.core()) {}
+    : coordinator_(coordinator), core_(&coordinator.core()),
+      contracts_(*core_, coordinator_) {}
 
 VQLEngine::VQLEngine(zigzag::vortex::VortexCore &core)
     : ownedCoordinator_(std::make_unique<MultiStoreCoordinator>(core)),
-      coordinator_(*ownedCoordinator_), core_(&core) {}
+      coordinator_(*ownedCoordinator_), core_(&core),
+      contracts_(*core_, coordinator_) {}
 
 VQLEngine::VQLEngine(zigzag::ArenaManifold &arena)
     : ownedCore_(std::make_unique<zigzag::vortex::VortexCore>(arena)),
       ownedCoordinator_(std::make_unique<MultiStoreCoordinator>(*ownedCore_)),
-      coordinator_(*ownedCoordinator_), core_(ownedCore_.get()) {}
+      coordinator_(*ownedCoordinator_), core_(ownedCore_.get()),
+      contracts_(*core_, coordinator_) {}
 
 namespace {
 /// A value as the text a comparison or a search reads.
@@ -132,6 +133,7 @@ VQLEngine::getVariable(std::string_view name) const {
 void VQLEngine::clearVariables() noexcept {
   env_.clear();
   functors_.clear();
+  putGetLenses_.clear();
 }
 
 std::vector<zigzag::CellRef> VQLEngine::execute(std::string_view queryString) {
@@ -147,8 +149,20 @@ std::vector<zigzag::CellRef> VQLEngine::execute(const QueryExpression &query) {
     userDefs_[def.name] = def;
   }
 
-  for (const auto &mount : query.mounts) {
-    executeMount(mount);
+  if (!query.namespaceDeclarations.empty()) {
+    for (const auto &declaration : query.namespaceDeclarations) {
+      std::visit(
+          [this](const auto &entry) {
+            using T = std::remove_cvref_t<decltype(entry)>;
+            if constexpr (std::same_as<T, MountDeclaration>)
+              executeMount(entry);
+            else
+              executeUnmount(entry);
+          },
+          declaration);
+    }
+  } else {
+    for (const auto &mount : query.mounts) executeMount(mount);
   }
 
   if (!query.body.statements.empty()) {
@@ -166,10 +180,8 @@ VQLEngine::executeScriptBody(const ScriptBody &body) {
   std::vector<zigzag::CellRef> lastResult;
   for (const auto &stmt : body.statements) {
     this->arena().consumeWork();
-    auto res = executeStatement(stmt);
-    if (!res.empty()) {
-      lastResult = std::move(res);
-    }
+    auto res   = executeStatement(stmt);
+    lastResult = std::move(res);
   }
   return lastResult;
 }
@@ -178,193 +190,42 @@ bool VQLEngine::matchDestructure(const DestructurePattern &pattern,
                                  std::optional<zigzag::CellRef> context,
                                  Bindings &scopedBindings,
                                  const MissingField missing) {
-  if (!context || !core_->arena().contains(*context)) {
-    return false;
-  }
-  for (const auto &field : pattern.fields) {
-    if (field.isContext) {
-      scopedBindings["."] = {*context};
-      if (!field.varName.empty()) {
-        scopedBindings[field.varName] = {*context};
-      }
-      continue;
-    }
-    zigzag::DimRef dim = resolveDimension(field.dimName);
-    auto linked = core_->arena().linkedMinting(*context, dim, field.direction);
-    if (field.isBidir && !linked) {
-      linked = core_->arena().linkedMinting(
-          *context, dim,
-          (field.direction == zigzag::DimVector::POS) ? zigzag::DimVector::NEG
-                                                      : zigzag::DimVector::POS);
-    }
-    std::vector<zigzag::CellRef> bound;
-    if (linked) {
-      bound.push_back(*linked);
-    } else if (field.defaultValue) {
-      bound = cellsOfValueExpr(*field.defaultValue, context);
-    }
-    // A typed field decides absence by its type (`T?` admits it); an untyped
-    // one by the caller's rule.
-    if (field.type) {
-      if (!satisfiesType(*field.type, bound, &scopedBindings)) {
-        return false;
-      }
-    } else if (bound.empty() && missing == MissingField::Refuse) {
-      return false;
-    }
-    if (!field.varName.empty()) {
-      scopedBindings[field.varName] = std::move(bound);
-    }
-  }
-  return true;
+  const auto evaluateDefault =
+      [this](const ValueExpr &expr, const std::optional<zigzag::CellRef> ctx) {
+        return cellsOfValueExpr(expr, ctx);
+      };
+  return contracts_.matchDestructure(pattern, context, scopedBindings, missing,
+                                     evaluateDefault);
 }
 
 bool VQLEngine::satisfiesType(const TypeExpr &type,
                               const std::span<const zigzag::CellRef> cells,
                               Bindings *const scopedBindings) {
-  for (const auto &member : type.unionType.members) {
-    // A member that fails partway must leave no bindings behind.
-    Bindings trial;
-    if (satisfiesPrimary(member, cells,
-                         scopedBindings != nullptr ? &trial : nullptr)) {
-      if (scopedBindings != nullptr) {
-        for (auto &[name, bound] : trial) {
-          (*scopedBindings)[name] = std::move(bound);
-        }
-      }
-      return true;
-    }
-  }
-  return false;
-}
-
-bool VQLEngine::satisfiesPrimary(const PrimaryType &type,
-                                 const std::span<const zigzag::CellRef> cells,
-                                 Bindings *const scopedBindings) {
-  const auto *const generic = std::get_if<GenericType>(&type.kind);
-  if (generic != nullptr) {
-    if (generic->name != "Stream" || generic->args.size() != 1) {
-      throw TypeContractError("unknown type " + generic->name + " with " +
-                              std::to_string(generic->args.size()) +
-                              " argument(s)");
-    }
-    // Each member is checked alone, so a shape inside a stream binds nothing:
-    // one name cannot hold a field of every member at once.
-    return std::ranges::all_of(cells, [&](const zigzag::CellRef cell) {
-      return satisfiesType(*generic->args.front(), std::span{&cell, 1},
-                           nullptr) &&
-             (!type.refinement || [&] {
-               Bindings ignored;
-               return matchDestructure(type.refinement->pattern, cell, ignored);
-             }());
-    });
-  }
-  if (cells.empty()) {
-    return type.isOptional;
-  }
-  // A non-stream type is one value; a stream of several is not one.
-  return cells.size() == 1 &&
-         satisfiesAtom(type, cells.front(), scopedBindings);
-}
-
-bool VQLEngine::satisfiesAtom(const PrimaryType &type,
-                              const zigzag::CellRef cell,
-                              Bindings *const scopedBindings) {
-  Bindings ignored;
-  Bindings &bindings   = scopedBindings != nullptr ? *scopedBindings : ignored;
-  const bool inhabited = std::visit(
-      [&](const auto &held) -> bool {
-        using T = std::remove_cvref_t<decltype(held)>;
-        if constexpr (std::same_as<T, BasicType>) {
-          return hasBasicType(held, cell);
-        } else if constexpr (std::same_as<T, ShapeType>) {
-          return core_->arena().contains(cell) &&
-                 matchDestructure(held.pattern, cell, bindings);
-        } else if constexpr (std::same_as<T, std::shared_ptr<TypeExpr>>) {
-          return satisfiesType(*held, std::span{&cell, 1}, scopedBindings);
-        } else {
-          return false; // GenericType is answered by satisfiesPrimary
-        }
-      },
-      type.kind);
-  return inhabited &&
-         (!type.refinement ||
-          matchDestructure(type.refinement->pattern, cell, bindings));
-}
-
-bool VQLEngine::hasBasicType(const BasicType &type,
-                             const zigzag::CellRef cell) {
-  using K     = BasicType::Kind;
-  auto &arena = core_->arena();
-  if (type.kind == K::Contextual) {
-    throw TypeContractError("unknown type " + type.name);
-  }
-  if (!arena.contains(cell)) {
-    return false;
-  }
-  // Scalars are read as comparisons read them (§4.3): a text cell whose whole
-  // content is a number is that number, since imported and typed content is
-  // text and only cells minted from literals carry value bits.
-  const auto value = core_->render(cell);
-  if (!value) return false;
-  const auto &rendered   = *value;
-  const auto *const text = std::get_if<std::string>(&rendered);
-  switch (type.kind) {
-  case K::Any:
-  case K::Cell:
-    return true;
-  case K::Dim:
-    // A front end's dimensions live on the core's d.dims rank, a store's in
-    // the arena's own table; a cell is a Dim if either names it.
-    return std::ranges::contains(arena.dimensions(), cell) ||
-           (text != nullptr && core_->findDimension(*text) == cell);
-  case K::Store:
-    return coordinator_.coordinatorHome() == cell ||
-           std::ranges::any_of(coordinator_.stores(), [&](const auto &info) {
-             return info.storeCell == cell;
-           });
-  case K::Slice:
-    return arena.home() == cell ||
-           std::ranges::any_of(coordinator_.stores(), [&](const auto &info) {
-             return info.homeCell == cell;
-           });
-  case K::Version:
-    if (text == nullptr || text->empty()) {
-      return false;
-    }
-    try {
-      (void)xanadu::MicroversionId::parse(*text);
-      return true;
-    } catch (const std::invalid_argument &) {
-      return false;
-    }
-  case K::Int: {
-    std::int64_t parsed = 0;
-    return std::holds_alternative<std::int64_t>(rendered) ||
-           (text != nullptr && stringToInt64(*text, parsed));
-  }
-  case K::Float: {
-    double parsed = 0.0;
-    return std::holds_alternative<double>(rendered) ||
-           std::holds_alternative<std::int64_t>(rendered) ||
-           (text != nullptr && stringToDouble(*text, parsed));
-  }
-  case K::String:
-    return text != nullptr;
-  case K::Bool:
-    return std::holds_alternative<bool>(rendered) ||
-           (text != nullptr && (*text == "true" || *text == "false"));
-  case K::Contextual:
-    break;
-  }
-  return false;
+  const auto evaluateDefault =
+      [this](const ValueExpr &expr, const std::optional<zigzag::CellRef> ctx) {
+        return cellsOfValueExpr(expr, ctx);
+      };
+  return contracts_.satisfiesType(type, cells, scopedBindings, evaluateDefault);
 }
 
 std::vector<zigzag::CellRef>
 VQLEngine::cellsOfValueExpr(const ValueExpr &expr,
                             const std::optional<zigzag::CellRef> context) {
+  if (const auto *version =
+          std::get_if<std::shared_ptr<VersionExpr>>(&expr.kind)) {
+    const auto resolved = evaluateVersionExpr(**version, context);
+    if (!resolved) return {};
+    const auto cell = arena().makeCell(resolved->str());
+    versionValues_.insert_or_assign(cell, *resolved);
+    return {cell};
+  }
   std::vector<zigzag::CellRef> contextCells;
   if (context) contextCells.push_back(*context);
+  if (const auto *shape =
+          std::get_if<std::shared_ptr<ShapeLiteral>>(&expr.kind)) {
+    return *shape ? std::vector<zigzag::CellRef>{makeShapeHandle(**shape)}
+                  : std::vector<zigzag::CellRef>{};
+  }
   if (const auto *path =
           std::get_if<std::shared_ptr<PathExpression>>(&expr.kind)) {
     return evaluatePath(**path, contextCells);
@@ -375,6 +236,16 @@ VQLEngine::cellsOfValueExpr(const ValueExpr &expr,
     }
     auto it = env_.find(*name);
     return it != env_.end() ? it->second : std::vector<zigzag::CellRef>{};
+  }
+  if (const auto *function =
+          std::get_if<std::shared_ptr<FunctionInvocation>>(&expr.kind)) {
+    if (*function) {
+      if (const auto found = userDefs_.find((*function)->name);
+          found != userDefs_.end()) {
+        requirePositionalArguments(**function);
+        return callUserDef(found->second, (*function)->args, context);
+      }
+    }
   }
   if (const auto value = evaluateValueExpr(expr, context)) {
     return {cellFromValue(*value)};
@@ -410,26 +281,14 @@ VQLEngine::functorOf(const PathExpression &path) const {
     }
     steps = **head;
   }
-  // Inlining a bare `/$f` now binds the functor it names today, so a later
-  // rebinding of $f does not reach into this one.
-  for (const auto &step : path.steps) {
-    const auto *const dimStep =
-        std::get_if<SignedDimensionStep>(&step.selector);
-    const bool bare = dimStep != nullptr && dimStep->dimName.starts_with('$') &&
-                      dimStep->creates.empty() &&
-                      dimStep->placement == Placement::Default &&
-                      !step.derefMaster && step.predicates.empty() &&
-                      step.shapePredicates.empty() && !step.rangeClamp &&
-                      !step.versionPin && step.yieldMode == YieldMode::Default;
-    const auto inner =
-        bare ? functorNamed(std::string_view(dimStep->dimName).substr(1))
-             : std::nullopt;
-    if (inner) {
-      steps.insert(steps.end(), (*inner)->begin(), (*inner)->end());
-    } else {
-      steps.push_back(step);
-    }
-  }
+  auto captured = captureFunctorApplications(
+      path.steps,
+      [&](std::string_view name) -> std::optional<std::vector<PathStep>> {
+        const auto found = functorNamed(name);
+        if (!found) return std::nullopt;
+        return **found;
+      });
+  steps.insert(steps.end(), captured.begin(), captured.end());
   return std::make_shared<const std::vector<PathStep>>(std::move(steps));
 }
 
@@ -444,6 +303,8 @@ VQLEngine::applyFunctor(const std::vector<PathStep> &steps,
 }
 
 std::vector<zigzag::CellRef> VQLEngine::bindLet(const LetClause &let) {
+  if (bindLens(let)) return {};
+  putGetLenses_.erase(let.varName);
   const PathExpression *path = std::get_if<PathExpression>(&let.target);
   const ValueExpr *value     = std::get_if<ValueExpr>(&let.target);
   if (value != nullptr) {
@@ -473,6 +334,7 @@ std::vector<zigzag::CellRef> VQLEngine::bindLet(const LetClause &let) {
 void VQLEngine::bindName(const std::string &name,
                          std::vector<zigzag::CellRef> cells) {
   functors_.erase(name);
+  putGetLenses_.erase(name);
   env_[name] = std::move(cells);
 }
 
@@ -482,11 +344,17 @@ VQLEngine::executeLambda(const PathLambda &lambda,
   this->arena().consumeWork();
   auto savedEnv      = env_;
   auto savedFunctors = functors_;
+  auto savedLenses   = putGetLenses_;
   Bindings scoped;
+  bool restored      = false;
   const auto restore = [&] {
-    env_      = std::move(savedEnv);
-    functors_ = std::move(savedFunctors);
+    if (restored) return;
+    restored      = true;
+    env_          = std::move(savedEnv);
+    functors_     = std::move(savedFunctors);
+    putGetLenses_ = std::move(savedLenses);
   };
+  const RestoreScope restoreOnExit{restore};
 
   if (!lambda.params.empty()) {
     const auto &param = lambda.params[0];
@@ -542,10 +410,53 @@ VQLEngine::callUserDef(const DefDeclaration &def,
   this->arena().consumeWork();
   auto savedEnv      = env_;
   auto savedFunctors = functors_;
+  auto savedLenses   = putGetLenses_;
+  bool restored      = false;
   const auto restore = [&] {
-    env_      = std::move(savedEnv);
-    functors_ = std::move(savedFunctors);
+    if (restored) return;
+    restored      = true;
+    env_          = std::move(savedEnv);
+    functors_     = std::move(savedFunctors);
+    putGetLenses_ = std::move(savedLenses);
   };
+  const RestoreScope restoreOnExit{restore};
+
+  struct PreparedArgument {
+    std::vector<zigzag::CellRef> cells;
+    std::optional<FunctorSteps> functor;
+  };
+  std::vector<PreparedArgument> prepared;
+  prepared.reserve(args.size());
+  for (std::size_t index = 0; index < args.size(); ++index) {
+    const ValueExpr &arg         = args[index];
+    const LambdaParam *parameter = nullptr;
+    std::size_t parameterIndex   = 0;
+    for (const auto &candidate : def.params) {
+      if (candidate.isVariadic) {
+        if (index >= parameterIndex) parameter = &candidate;
+        break;
+      }
+      if (index == parameterIndex) {
+        parameter = &candidate;
+        break;
+      }
+      ++parameterIndex;
+    }
+
+    PreparedArgument value;
+    if (parameter && !parameter->isVariadic && !parameter->type &&
+        std::holds_alternative<std::string>(parameter->target)) {
+      if (const auto *path =
+              std::get_if<std::shared_ptr<PathExpression>>(&arg.kind);
+          path && *path) {
+        value.functor = functorOf(**path);
+      } else if (const auto *name = std::get_if<std::string>(&arg.kind)) {
+        value.functor = functorNamed(*name);
+      }
+    }
+    if (!value.functor) value.cells = cellsOfValueExpr(arg, context);
+    prepared.push_back(std::move(value));
+  }
 
   std::size_t argIdx = 0;
   for (std::size_t i = 0; i < def.params.size(); ++i) {
@@ -553,7 +464,7 @@ VQLEngine::callUserDef(const DefDeclaration &def,
     if (param.isVariadic) {
       std::vector<zigzag::CellRef> restCells;
       while (argIdx < args.size()) {
-        auto cells = cellsOfValueExpr(args[argIdx++], context);
+        auto cells = std::move(prepared[argIdx++].cells);
         // A variadic's type is each argument's, not the whole tail's.
         if (param.type && !satisfiesType(*param.type, cells, nullptr)) {
           restore();
@@ -567,30 +478,21 @@ VQLEngine::callUserDef(const DefDeclaration &def,
       break;
     }
 
-    const ValueExpr *arg = argIdx < args.size() ? &args[argIdx++] : nullptr;
+    const PreparedArgument *arg =
+        argIdx < args.size() ? &prepared[argIdx++] : nullptr;
 
     // An untyped name parameter takes a functor argument as a functor, so a
     // traversal can be handed to a def and applied there.
-    if (arg != nullptr && !param.type &&
-        std::holds_alternative<std::string>(param.target)) {
-      std::optional<FunctorSteps> functor;
-      if (const auto *path =
-              std::get_if<std::shared_ptr<PathExpression>>(&arg->kind)) {
-        functor = functorOf(**path);
-      } else if (const auto *name = std::get_if<std::string>(&arg->kind)) {
-        functor = functorNamed(*name);
-      }
-      if (functor) {
-        const auto &name = std::get<std::string>(param.target);
-        env_.erase(name);
-        functors_[name] = std::move(*functor);
-        continue;
-      }
+    if (arg != nullptr && arg->functor) {
+      const auto &name = std::get<std::string>(param.target);
+      env_.erase(name);
+      functors_[name] = std::move(*arg->functor);
+      continue;
     }
 
     std::vector<zigzag::CellRef> paramCells;
     if (arg != nullptr) {
-      paramCells = cellsOfValueExpr(*arg, context);
+      paramCells = arg->cells;
     } else if (param.defaultValue) {
       paramCells = cellsOfValueExpr(*param.defaultValue, context);
     }
@@ -691,15 +593,71 @@ VQLEngine::executePerspectiveBlock(const PerspectiveBlock &block) {
 std::vector<zigzag::CellRef>
 VQLEngine::executeWatch(const WatchStatement &watchStmt) {
   this->arena().consumeWork();
-  auto targetCells = evaluatePath(watchStmt.targetPath);
-  std::vector<zigzag::CellRef> results;
-
-  // Chronofilade catch-up simulation if sinceVersion is supplied
-  if (watchStmt.sinceVersion.has_value()) {
-    // Replay/catch-up state: targetCells is the caught-up stream
+  if (watchStmt.targetPath.anchor.kind == AnchorKind::StoreGenerator &&
+      watchStmt.targetPath.anchor.generator &&
+      watchStmt.targetPath.anchor.generator->opName != "current" &&
+      watchStmt.targetPath.anchor.generator->opName != "local" &&
+      watchStmt.targetPath.anchor.generator->opName != "system") {
+    throw std::runtime_error(
+        "watch over remote discovery requires a connected ZZ9P session");
   }
+  auto targetCells = evaluatePath(watchStmt.targetPath);
+  if (watchStmt.sinceVersion.has_value()) {
+    if (targetCells.empty() || !storeForCell(targetCells.front())) {
+      throw std::runtime_error(
+          "watch since requires a target backed by a local Store");
+    }
+    if (watchStmt.targetPath.anchor.versionPin) {
+      throw std::runtime_error(
+          "watch since cannot be combined with a pinned path anchor");
+    }
 
-  zigzag::DimRef dDelta = resolveDimension("d.delta");
+    PathExpression historicalPath = watchStmt.targetPath;
+    VersionPin pin;
+    pin.versions.push_back(*watchStmt.sinceVersion);
+    historicalPath.anchor.versionPin = std::move(pin);
+    const auto historicalCells       = evaluatePath(historicalPath);
+
+    using SourceKey = WatchSourceKey;
+    struct SourceKeyHash {
+      std::size_t operator()(const SourceKey &key) const noexcept {
+        const auto storeHash = std::hash<const xanadu::Store *>{}(key.first);
+        const auto cellHash  = std::hash<zigzag::CellRef>{}(key.second);
+        return storeHash ^
+               (cellHash + 0x9e3779b9U + (storeHash << 6U) + (storeHash >> 2U));
+      }
+    };
+    const auto keyOf = [&](const zigzag::CellRef cell) {
+      return watchSourceKey(cell);
+    };
+    std::unordered_map<SourceKey, zigzag::CellRef, SourceKeyHash> historical;
+    for (const auto cell : historicalCells)
+      historical.try_emplace(keyOf(cell), cell);
+    std::unordered_map<SourceKey, zigzag::CellRef, SourceKeyHash> current;
+    for (const auto cell : targetCells) current.try_emplace(keyOf(cell), cell);
+
+    std::vector<zigzag::CellRef> changed;
+    for (const auto cell : targetCells) {
+      const auto key    = keyOf(cell);
+      const auto before = historical.find(key);
+      if (before == historical.end()) {
+        changed.push_back(cell);
+        continue;
+      }
+      const auto beforeTopology = watchTopology(before->second);
+      const auto afterTopology  = watchTopology(cell);
+      if (core_->render(before->second) != core_->render(cell) ||
+          !std::ranges::equal(beforeTopology, afterTopology)) {
+        changed.push_back(cell);
+      }
+    }
+    for (const auto cell : historicalCells) {
+      const auto key = keyOf(cell);
+      if (!current.contains(key)) changed.push_back(cell);
+    }
+    targetCells = std::move(changed);
+  }
+  std::vector<zigzag::CellRef> results;
 
   for (zigzag::CellRef c : targetCells) {
     this->arena().consumeWork();
@@ -720,17 +678,6 @@ VQLEngine::executeWatch(const WatchStatement &watchStmt) {
       }
     }
 
-    // Populate virtual delta properties (d.delta or delta(.))
-    const auto existingDelta =
-        core_->arena().linkedMinting(c, dDelta, zigzag::DimVector::POS);
-    if (!existingDelta) {
-      zigzag::CellRef deltaCell = core_->arena().makeCell("modified");
-      zigzag::expectWritten(
-          core_->arena().link(c, dDelta, zigzag::DimVector::POS, deltaCell));
-      zigzag::expectWritten(
-          core_->arena().link(deltaCell, dDelta, zigzag::DimVector::NEG, c));
-    }
-
     if (watchStmt.body) {
       for (const auto &stmt : watchStmt.body->statements) {
         auto stmtRes = executeStatement(stmt);
@@ -748,22 +695,233 @@ VQLEngine::executeWatch(const WatchStatement &watchStmt) {
   return results.empty() ? targetCells : results;
 }
 
-void VQLEngine::executeMount(const MountDeclaration &mount) {
-  sessionMounts_[mount.dimName] = mount;
-  if (!mount.dimName.starts_with("d.")) {
-    sessionMounts_["d." + mount.dimName] = mount;
+VQLEngine::WatchId VQLEngine::subscribeWatch(PathExpression path) {
+  if (path.anchor.kind == AnchorKind::StoreGenerator && path.anchor.generator &&
+      path.anchor.generator->opName != "current" &&
+      path.anchor.generator->opName != "local" &&
+      path.anchor.generator->opName != "system") {
+    throw std::runtime_error(
+        "watch over remote discovery requires a connected ZZ9P session");
   }
+  if (nextWatchId_ == 0) {
+    throw std::overflow_error("VQL watch subscription identifiers exhausted");
+  }
+  const WatchId id = nextWatchId_++;
+  watches_.emplace(id, WatchSubscription{.path = std::move(path)});
+  return id;
+}
+
+std::vector<VQLEngine::WatchEvent> VQLEngine::pollWatch(const WatchId id) {
+  return pollWatch(id, [](const WatchEvent &) {});
+}
+
+std::vector<VQLEngine::WatchEvent> VQLEngine::pollWatch(
+    const WatchId id,
+    const gleditor::cpp26::function_ref<void(const WatchEvent &)> onEvent) {
+  const auto found = watches_.find(id);
+  if (found == watches_.end())
+    throw std::out_of_range("unknown VQL watch subscription");
+  if (found->second.polling)
+    throw std::logic_error("VQL watch subscription is already being polled");
+
+  const PathExpression path = found->second.path;
+  const auto current        = evaluatePath(path);
+  std::unordered_map<zigzag::CellRef, WatchSubscription::Snapshot> next;
+  std::vector<zigzag::CellRef> nextOrder;
+  next.reserve(current.size());
+  nextOrder.reserve(current.size());
+  for (const auto cell : current) {
+    WatchSubscription::Snapshot snapshot{.value    = core_->render(cell),
+                                         .topology = watchTopology(cell)};
+    if (next.emplace(cell, std::move(snapshot)).second)
+      nextOrder.push_back(cell);
+  }
+  std::vector<WatchEvent> events;
+  for (const auto cell : nextOrder) {
+    const auto &snapshot = next.at(cell);
+    const auto previous  = found->second.previous.find(cell);
+    if (previous == found->second.previous.end()) {
+      events.push_back({.cell       = cell,
+                        .change     = WatchChange::Added,
+                        .afterValue = snapshot.value});
+      continue;
+    }
+    const bool valueChanged    = previous->second.value != snapshot.value;
+    const bool topologyChanged = previous->second.topology != snapshot.topology;
+    if (valueChanged || topologyChanged) {
+      events.push_back({.cell            = cell,
+                        .change          = WatchChange::Modified,
+                        .beforeValue     = previous->second.value,
+                        .afterValue      = snapshot.value,
+                        .topologyChanged = topologyChanged});
+    }
+  }
+  for (const auto cell : found->second.order) {
+    const auto previous = found->second.previous.find(cell);
+    if (previous != found->second.previous.end() && !next.contains(cell)) {
+      events.push_back({.cell        = cell,
+                        .change      = WatchChange::Removed,
+                        .beforeValue = previous->second.value});
+    }
+  }
+  found->second.polling = true;
+  try {
+    for (const auto &event : events) onEvent(event);
+  } catch (...) {
+    if (const auto active = watches_.find(id); active != watches_.end())
+      active->second.polling = false;
+    throw;
+  }
+
+  // Advance after callbacks so writes caused by this batch are part of the
+  // next baseline and cannot recursively trigger the same subscription.
+  auto active = watches_.find(id);
+  if (active == watches_.end()) return events;
+  try {
+    const auto settled = evaluatePath(path);
+    next.clear();
+    nextOrder.clear();
+    for (const auto cell : settled) {
+      WatchSubscription::Snapshot snapshot{.value    = core_->render(cell),
+                                           .topology = watchTopology(cell)};
+      if (next.emplace(cell, std::move(snapshot)).second)
+        nextOrder.push_back(cell);
+    }
+  } catch (...) {
+    if (const auto stillActive = watches_.find(id);
+        stillActive != watches_.end()) {
+      stillActive->second.polling = false;
+    }
+    throw;
+  }
+  active->second.previous = std::move(next);
+  active->second.order    = std::move(nextOrder);
+  active->second.polling  = false;
+  return events;
+}
+
+bool VQLEngine::cancelWatch(const WatchId id) noexcept {
+  return watches_.erase(id) != 0;
+}
+
+VQLEngine::WatchSourceKey
+VQLEngine::watchSourceKey(const zigzag::CellRef cell) const {
+  if (const auto source = arena().resolveSourceCell(cell))
+    return {source->first, source->second};
+  return {nullptr, cell};
+}
+
+std::vector<VQLEngine::WatchTopologyLink>
+VQLEngine::watchTopology(const zigzag::CellRef cell) {
+  if (const auto foreign = arena().foreignOf(cell)) {
+    const auto space = arena().spaceAt(foreign->space);
+    if (space && space->manifold) {
+      std::vector<WatchTopologyLink> topology;
+      std::unordered_set<zigzag::DimRef> localDimensions;
+      for (const auto foreignDim : space->manifold->dimensions()) {
+        const auto arenaDim = arenaDimensionFor(cell, foreignDim);
+        localDimensions.insert(arenaDim);
+        const auto pos =
+            arena().linkedMinting(cell, arenaDim, zigzag::DimVector::POS);
+        const auto neg =
+            arena().linkedMinting(cell, arenaDim, zigzag::DimVector::NEG);
+        if (!pos && !neg) continue;
+        topology.push_back(
+            {.dim = {space->store, foreignDim},
+             .pos = pos ? watchSourceKey(*pos)
+                        : WatchSourceKey{nullptr, zigzag::noCell},
+             .neg = neg ? watchSourceKey(*neg)
+                        : WatchSourceKey{nullptr, zigzag::noCell}});
+      }
+      const auto localLinks = arena().dimensionsOf(cell);
+      for (const auto &link : localLinks) {
+        if (arena().dimIn(foreign->space, link.dim)) continue;
+        if (!localDimensions.insert(link.dim).second) continue;
+        const auto pos =
+            arena().linkedMinting(cell, link.dim, zigzag::DimVector::POS);
+        const auto neg =
+            arena().linkedMinting(cell, link.dim, zigzag::DimVector::NEG);
+        if (!pos && !neg) continue;
+        topology.push_back(
+            {.dim = watchSourceKey(link.dim),
+             .pos = pos ? watchSourceKey(*pos)
+                        : WatchSourceKey{nullptr, zigzag::noCell},
+             .neg = neg ? watchSourceKey(*neg)
+                        : WatchSourceKey{nullptr, zigzag::noCell}});
+      }
+      return topology;
+    }
+  }
+  const auto links = arena().dimensionsOf(cell);
+  std::vector<WatchTopologyLink> topology;
+  topology.reserve(links.size());
+  for (const auto &link : links) {
+    topology.push_back({.dim = watchSourceKey(link.dim),
+                        .pos = watchSourceKey(link.pos),
+                        .neg = watchSourceKey(link.neg)});
+  }
+  return topology;
+}
+
+void VQLEngine::executeMount(const MountDeclaration &mount) {
+  auto roots = resolveStoreAnchor(mount.storeAnchor);
+  if (roots.empty()) {
+    throw std::runtime_error(std::format(
+        "mount anchor for {} did not resolve in the local coordinator",
+        mount.dimName));
+  }
+  SessionMount binding{.direction = mount.direction, .roots = std::move(roots)};
+  sessionMounts_[mount.dimName] = binding;
+  if (!mount.dimName.starts_with("d."))
+    sessionMounts_["d." + mount.dimName] = std::move(binding);
+}
+
+void VQLEngine::executeUnmount(const UnmountDeclaration &unmount) {
+  const std::string canonical = unmount.dimName.starts_with("d.")
+                                    ? unmount.dimName
+                                    : "d." + unmount.dimName;
+  const std::string shortName = unmount.dimName.starts_with("d.")
+                                    ? unmount.dimName.substr(2)
+                                    : unmount.dimName;
+  const auto found            = sessionMounts_.find(canonical);
+  if (found == sessionMounts_.end() ||
+      found->second.direction != unmount.direction) {
+    throw std::runtime_error(std::format(
+        "no mount is registered for {} in the requested direction", canonical));
+  }
+  sessionMounts_.erase(canonical);
+  sessionMounts_.erase(shortName);
 }
 
 std::vector<zigzag::CellRef>
 VQLEngine::resolveStoreAnchor(const StoreAnchor &sa) {
   std::vector<zigzag::CellRef> results;
-  if (!sa.sliceName.empty()) {
+  if (sa.method == "current") {
+    if (const auto home = coordinator_.homeAnchor()) results.push_back(*home);
+  } else if (sa.method == "local" && !sa.args.empty()) {
+    const auto pathValue = evaluateValueExpr(sa.args.front(), std::nullopt);
+    if (pathValue) {
+      const auto path = textOfValue(*pathValue);
+      for (const auto &info : coordinator_.stores()) {
+        if (info.path == path || info.label == path) {
+          if (info.homeCell) results.push_back(*info.homeCell);
+          break;
+        }
+      }
+    }
+  } else if (sa.method == "system" && !sa.args.empty()) {
+    const auto domainValue = evaluateValueExpr(sa.args.front(), std::nullopt);
+    if (domainValue) {
+      if (const auto home =
+              coordinator_.resolveNamedStore(textOfValue(*domainValue)))
+        results.push_back(*home);
+    }
+  } else if (sa.method.empty() && !sa.sliceName.empty()) {
     if (const auto sh = coordinator_.resolveNamedStore(sa.sliceName)) {
       results.push_back(*sh);
     }
   }
-  if (results.empty() && !sa.args.empty()) {
+  if (sa.method.empty() && results.empty() && !sa.args.empty()) {
     const auto storeKeyValue = evaluateValueExpr(sa.args.front(), std::nullopt);
     if (!storeKeyValue) return results;
     const auto storeKey = textOfValue(*storeKeyValue);
@@ -771,7 +929,7 @@ VQLEngine::resolveStoreAnchor(const StoreAnchor &sa) {
       results.push_back(*sh);
     }
   }
-  if (results.empty()) {
+  if (sa.method.empty() && results.empty()) {
     if (const auto h = coordinator_.homeAnchor()) {
       results.push_back(*h);
     }
@@ -779,7 +937,7 @@ VQLEngine::resolveStoreAnchor(const StoreAnchor &sa) {
   if (sa.derefMaster) {
     for (auto &c : results) {
       this->arena().consumeWork();
-      c = coordinator_.derefCloneMaster(c).value_or(c);
+      c = queryCloneMaster(core_->arena(), c, core_->dims().clone).value_or(c);
     }
   }
   return results;
@@ -943,25 +1101,30 @@ VQLEngine::resolveAnchor(const AnchorNode &anchor,
     break;
   }
   case AnchorKind::StoreGenerator: {
-    if (anchor.generator) {
-      if (anchor.generator->opName == "current") {
-        if (const auto h = coordinator_.homeAnchor()) {
-          results.push_back(*h);
-        }
-      } else if (!anchor.generator->args.empty()) {
-        const auto storeKeyValue =
-            evaluateValueExpr(anchor.generator->args.front(), std::nullopt);
-        if (storeKeyValue) {
-          const auto storeKey = textOfValue(*storeKeyValue);
-          if (const auto sh = coordinator_.resolveNamedStore(storeKey)) {
-            results.push_back(*sh);
-          } else if (const auto h = coordinator_.homeAnchor()) {
-            results.push_back(*h);
-          }
-        }
-      } else if (const auto h = coordinator_.homeAnchor()) {
-        results.push_back(*h);
+    if (!anchor.generator) break;
+    const auto &generator = *anchor.generator;
+    if (generator.opName == "slices" || generator.opName == "docs") {
+      std::optional<std::string> name;
+      if (!generator.args.empty()) {
+        const auto value =
+            evaluateValueExpr(generator.args.front(), std::nullopt);
+        if (!value) break;
+        name = textOfValue(*value);
       }
+      PathStep selector;
+      if (generator.opName == "slices")
+        selector.selector = SliceSelectorStep{.nameFilter = name};
+      else
+        selector.selector = DocSelectorStep{.nameFilter = name};
+      results = evaluateStep(selector, {});
+    } else if (generator.opName == "current" || generator.opName == "local" ||
+               generator.opName == "system") {
+      results = resolveStoreAnchor(
+          StoreAnchor{.method = generator.opName, .args = generator.args});
+    } else {
+      throw std::runtime_error("store generator requires a connected discovery "
+                               "provider: " +
+                               generator.opName);
     }
     break;
   }
@@ -974,6 +1137,15 @@ VQLEngine::resolveAnchor(const AnchorNode &anchor,
   case AnchorKind::Microversion: {
     if (const auto h = coordinator_.homeAnchor()) {
       results.push_back(*h);
+      if (anchor.versionPin) {
+        results = applyVersionPin(*anchor.versionPin, results);
+      } else {
+        VersionPin pin;
+        VersionExpr version;
+        version.versionStr = anchor.microversionId;
+        pin.versions.push_back(std::move(version));
+        results = applyVersionPin(pin, results);
+      }
     }
     break;
   }
@@ -982,7 +1154,7 @@ VQLEngine::resolveAnchor(const AnchorNode &anchor,
   if (anchor.derefMaster) {
     for (auto &c : results) {
       this->arena().consumeWork();
-      c = coordinator_.derefCloneMaster(c).value_or(c);
+      c = queryCloneMaster(core_->arena(), c, core_->dims().clone).value_or(c);
     }
   }
 
@@ -994,6 +1166,9 @@ VQLEngine::evaluatePath(const PathExpression &path,
                         const std::vector<zigzag::CellRef> &contextCells) {
   std::vector<zigzag::CellRef> current =
       resolveAnchor(path.anchor, contextCells);
+  if (path.anchor.versionPin && path.anchor.kind != AnchorKind::Microversion) {
+    current = applyVersionPin(*path.anchor.versionPin, current);
+  }
   std::erase_if(current, [&](const zigzag::CellRef cell) {
     return !std::ranges::all_of(
         path.anchorPredicates,
@@ -1054,49 +1229,23 @@ VQLEngine::evaluatePath(const PathExpression &path,
 
   // Shape Projection / Weave: $path{ +d.dim => $val }
   if (path.shapeProjection.has_value() && !current.empty()) {
-    for (zigzag::CellRef c : current) {
-      this->arena().consumeWork();
-      for (const auto &rule : path.shapeProjection->rules) {
-        this->arena().consumeWork();
-        if (std::holds_alternative<DimensionShapeRule>(rule.rule)) {
-          const auto &dsr = std::get<DimensionShapeRule>(rule.rule);
-          if (dsr.targetValue) {
-            zigzag::DimRef dim = resolveDimension(dsr.dimName);
-            std::optional<zigzag::CellRef> sprout;
-            if (std::holds_alternative<std::string>(dsr.targetValue->kind)) {
-              auto it = env_.find(std::get<std::string>(dsr.targetValue->kind));
-              if (it != env_.end() && !it->second.empty()) {
-                sprout = it->second.front();
-              }
-            } else if (std::holds_alternative<std::shared_ptr<PathExpression>>(
-                           dsr.targetValue->kind)) {
-              auto targets =
-                  evaluatePath(*std::get<std::shared_ptr<PathExpression>>(
-                                   dsr.targetValue->kind),
-                               contextCells);
-              if (!targets.empty()) {
-                sprout = targets.front();
-              }
-            }
-            if (!sprout) {
-              if (const auto val = evaluateValueExpr(*dsr.targetValue, c)) {
-                sprout = cellFromValue(*val);
-              }
-            }
-            if (sprout) {
-              zigzag::DimVector oppDir =
-                  (dsr.direction == zigzag::DimVector::POS)
-                      ? zigzag::DimVector::NEG
-                      : zigzag::DimVector::POS;
-              zigzag::expectWritten(
-                  core_->arena().link(c, dim, dsr.direction, *sprout));
-              zigzag::expectWritten(
-                  core_->arena().link(*sprout, dim, oppDir, c));
-            }
-          }
-        }
+    std::vector<zigzag::CellRef> projected;
+    for (const auto cell : current) {
+      auto shape = expandShape(*path.shapeProjection, cell);
+      const bool dynamic =
+          std::ranges::any_of(shape.rules, [](const ShapeRule &rule) {
+            return std::holds_alternative<DimensionPivotRule>(rule.rule) ||
+                   std::holds_alternative<VirtualDimensionDefRule>(rule.rule);
+          });
+      if (dynamic) {
+        auto views = projectDynamic(shape, {cell});
+        projected.insert(projected.end(), views.begin(), views.end());
+      } else {
+        applyShapeProjection(shape, cell);
+        projected.push_back(cell);
       }
     }
+    current = std::move(projected);
   }
 
   return current;
@@ -1131,6 +1280,10 @@ VQLEngine::traverseDimension(const SignedDimensionStep &dimStep,
 
   for (zigzag::CellRef in : inputs) {
     this->arena().consumeWork();
+    if (auto projected = traverseView(dimStep, in)) {
+      results.insert(results.end(), projected->begin(), projected->end());
+      continue;
+    }
     if (!arena.contains(in)) {
       continue;
     }
@@ -1177,8 +1330,8 @@ VQLEngine::traverseDimension(const SignedDimensionStep &dimStep,
     auto mountIt = sessionMounts_.find(dimStep.dimName);
     if (mountIt != sessionMounts_.end()) {
       if (dimStep.isBidir || dimStep.direction == mountIt->second.direction) {
-        auto mRoots = resolveStoreAnchor(mountIt->second.storeAnchor);
-        results.insert(results.end(), mRoots.begin(), mRoots.end());
+        results.insert(results.end(), mountIt->second.roots.begin(),
+                       mountIt->second.roots.end());
       }
     }
   }
@@ -1235,6 +1388,10 @@ VQLEngine::performCreates(const SignedDimensionStep &dimStep,
 
   for (zigzag::CellRef in : inputs) {
     this->arena().consumeWork();
+    if (auto projected = traverseView(dimStep, in)) {
+      results.insert(results.end(), projected->begin(), projected->end());
+      continue;
+    }
     if (!core_->arena().contains(in)) {
       continue;
     }
@@ -1294,13 +1451,156 @@ VQLEngine::performCreates(const SignedDimensionStep &dimStep,
   return results;
 }
 
+const StoreInfo *VQLEngine::storeForCell(const zigzag::CellRef cell) const {
+  if (const auto source = core_->arena().resolveSourceCell(cell)) {
+    const auto found =
+        std::ranges::find_if(coordinator_.stores(), [&](const StoreInfo &info) {
+          return info.store.get() == source->first;
+        });
+    if (found != coordinator_.stores().end()) return &*found;
+  }
+  const auto stores = coordinator_.stores();
+  if (stores.empty()) return nullptr;
+  const auto primary =
+      std::ranges::find(stores, std::string_view("primary"), &StoreInfo::role);
+  return primary == stores.end() ? &stores.front() : &*primary;
+}
+
+std::optional<xanadu::MicroversionId>
+VQLEngine::evaluateVersionExpr(const VersionExpr &expr,
+                               const std::optional<zigzag::CellRef> context) {
+  using Op = VersionExpr::Op;
+  if (expr.op == Op::Range) return std::nullopt;
+  if (expr.op == Op::Literal) {
+    try {
+      return xanadu::MicroversionId::parse(expr.versionStr);
+    } catch (const std::invalid_argument &) {
+      return std::nullopt;
+    }
+  }
+  if (expr.op == Op::Variable) {
+    const auto found = env_.find(expr.versionStr);
+    if (found == env_.end() || found->second.empty()) return std::nullopt;
+    const auto rendered = core_->render(found->second.front());
+    if (!rendered || !std::holds_alternative<std::string>(*rendered)) {
+      return std::nullopt;
+    }
+    try {
+      return xanadu::MicroversionId::parse(std::get<std::string>(*rendered));
+    } catch (const std::invalid_argument &) {
+      return std::nullopt;
+    }
+  }
+  if (!expr.left) return std::nullopt;
+  auto version = evaluateVersionExpr(*expr.left, context);
+  if (!version) return std::nullopt;
+  if (expr.op == Op::Next || expr.op == Op::Parent) {
+    if (expr.stepOffset < 0) return std::nullopt;
+    for (std::int64_t i = 0; i < expr.stepOffset; ++i) {
+      this->arena().consumeWork();
+      *version = expr.op == Op::Next ? version->next() : version->parent();
+    }
+    return version;
+  }
+  if (expr.op == Op::Branch) {
+    std::uint64_t ordinal = 0;
+    for (const char ch : expr.branchName) {
+      if (ch < 'a' || ch > 'z') return std::nullopt;
+      const auto digit = static_cast<std::uint64_t>(ch - 'a' + 1);
+      if (ordinal > (UINT32_MAX - digit) / 26) return std::nullopt;
+      ordinal = ordinal * 26 + digit;
+    }
+    if (ordinal == 0) return std::nullopt;
+    return version->branch(static_cast<std::uint32_t>(ordinal));
+  }
+  return std::nullopt;
+}
+
+std::vector<zigzag::CellRef>
+VQLEngine::applyVersionPin(const VersionPin &pin,
+                           const std::vector<zigzag::CellRef> &cells) {
+  if (pin.versions.empty()) return {};
+  std::vector<zigzag::CellRef> pinned;
+  for (const auto input : cells) {
+    this->arena().consumeWork();
+    const auto *info = storeForCell(input);
+    if (!info || !info->store) continue;
+    std::vector<xanadu::MicroversionId> versions;
+    if (pin.isRange && pin.versions.size() >= 2) {
+      const auto first = evaluateVersionExpr(pin.versions[0], input);
+      const auto last  = evaluateVersionExpr(pin.versions[1], input);
+      if (!first || !last || !first->isAncestorOf(*last)) continue;
+      for (const auto &version : last->path()) {
+        this->arena().consumeWork();
+        if (*first <= version && version <= *last) versions.push_back(version);
+      }
+    } else {
+      for (const auto &expr : pin.versions) {
+        this->arena().consumeWork();
+        if (const auto version = evaluateVersionExpr(expr, input)) {
+          versions.push_back(*version);
+        }
+      }
+    }
+    const auto available = info->store->allVersions();
+    for (const auto &version : versions) {
+      this->arena().consumeWork();
+      if (std::ranges::find(available, version) == available.end()) continue;
+      const auto cacheKey =
+          std::to_string(reinterpret_cast<std::uintptr_t>(info->store.get())) +
+          ":" + version.str();
+      auto space = historicalSpaces_.find(cacheKey);
+      std::uint32_t spaceId{};
+      if (space != historicalSpaces_.end()) {
+        spaceId = space->second;
+      } else {
+        auto fold = std::make_shared<zigzag::Manifold>(
+            info->store->rebuildManifold(version));
+        if (!fold->home()) continue;
+        spaceId = core_->arena().attach(zigzag::Space{
+            .manifold      = fold.get(),
+            .ownedManifold = fold,
+            .store         = info->store.get(),
+            .reader        = info->store.get(),
+            .label         = info->label + "@" + version.str(),
+        });
+        core_->arena().bindDimensionsByNameMatch();
+        historicalSpaces_.emplace(cacheKey, spaceId);
+      }
+      const auto attached = core_->arena().spaceAt(spaceId);
+      if (!attached || !attached->manifold) continue;
+      if (const auto source = core_->arena().resolveSourceCell(input)) {
+        if (source->first == info->store.get()) {
+          if (attached->manifold->contains(source->second)) {
+            pinned.push_back(core_->arena().proxyFor(spaceId, source->second));
+          }
+        }
+      } else if (info->homeCell == input) {
+        if (const auto home = attached->manifold->home()) {
+          pinned.push_back(core_->arena().proxyFor(spaceId, *home));
+        }
+      }
+    }
+  }
+  return pinned;
+}
+
 std::vector<zigzag::CellRef>
 VQLEngine::evaluateStep(const PathStep &step,
-                        const std::vector<zigzag::CellRef> &currentCells) {
+                        const std::vector<zigzag::CellRef> &inputCells) {
+  auto currentCells = inputCells;
   // A function has an answer for nothing flowing in -- zero, what a search
   // finds anywhere, whether one string holds another -- except the two that
   // act on their inputs. A name nobody knows is still reported below.
   const auto *const function = std::get_if<FunctionInvocation>(&step.selector);
+  if (function && (function->name == "value" || function->name == "link")) {
+    for (auto &cell : currentCells) {
+      for (auto found = viewCells_.find(cell); found != viewCells_.end();
+           found      = viewCells_.find(cell)) {
+        cell = found->second.source;
+      }
+    }
+  }
   const bool canStartFromEmpty =
       std::holds_alternative<GenesisSelector>(step.selector) ||
       std::holds_alternative<RootSelectorStep>(step.selector) ||
@@ -1318,11 +1618,22 @@ VQLEngine::evaluateStep(const PathStep &step,
 
   if (std::holds_alternative<SignedDimensionStep>(step.selector)) {
     const auto &s = std::get<SignedDimensionStep>(step.selector);
+    if (s.dimName.starts_with('$') && !step.capturedFunctor) {
+      const auto lens = putGetLenses_.find(s.dimName.substr(1));
+      if (lens != putGetLenses_.end()) {
+        // Copy callbacks: a callback can bind another lens and rehash the map.
+        const auto callbacks = lens->second;
+        stepOutput           = applyLens(callbacks, s, currentCells);
+      }
+    }
     const auto functor =
-        s.dimName.starts_with('$')
+        step.capturedFunctor ? std::optional<FunctorSteps>{step.capturedFunctor}
+        : s.dimName.starts_with('$')
             ? functorNamed(std::string_view(s.dimName).substr(1))
             : std::nullopt;
-    if (s.dimName.starts_with('$') && !functor) {
+    const bool isLens = !step.capturedFunctor && s.dimName.starts_with('$') &&
+                        putGetLenses_.contains(s.dimName.substr(1));
+    if (s.dimName.starts_with('$') && !functor && !isLens) {
       std::string varName = s.dimName.substr(1);
       auto it             = env_.find(varName);
       if (it != env_.end()) {
@@ -1330,7 +1641,9 @@ VQLEngine::evaluateStep(const PathStep &step,
         return stepOutput;
       }
     }
-    if (functor) {
+    if (isLens) {
+      // Lens callbacks already supplied the output; predicates below still run.
+    } else if (functor) {
       // `$c / $up`: the functor's steps run over this step's input, and the
       // step's own predicates and clamp then apply to what they reach.
       stepOutput = applyFunctor(**functor, currentCells);
@@ -1406,29 +1719,45 @@ VQLEngine::evaluateStep(const PathStep &step,
     }
   } else if (std::holds_alternative<FunctionInvocation>(step.selector)) {
     const auto &fn = std::get<FunctionInvocation>(step.selector);
-    if (fn.name == "value") {
-      if (currentCells.empty()) return stepOutput;
-      std::int64_t offset = 0;
-      std::optional<std::int64_t> length;
-      if (fn.args.size() >= 2) {
-        const auto offsetValue = evaluateValueExpr(fn.args[1], currentCells[0]);
-        if (!offsetValue) return stepOutput;
-        if (std::holds_alternative<std::int64_t>(*offsetValue)) {
-          offset = std::get<std::int64_t>(*offsetValue);
-        }
+    if (fn.name == "sort_into") {
+      stepOutput = sortInto(fn);
+    } else if (fn.name == "value") {
+      if (fn.args.size() > 3) {
+        throw std::runtime_error("value expects replacement, offset, length");
       }
-      if (fn.args.size() >= 3) {
-        const auto lengthValue = evaluateValueExpr(fn.args[2], currentCells[0]);
-        if (!lengthValue) return stepOutput;
-        if (std::holds_alternative<std::int64_t>(*lengthValue)) {
-          length = std::get<std::int64_t>(*lengthValue);
+      struct ContentInput {
+        zigzag::CellRef cell;
+        std::optional<zigzag::vortex::CellValue> replacement;
+        std::int64_t offset;
+        std::optional<std::int64_t> length;
+      };
+      std::vector<ContentInput> inputs;
+      for (const auto cell : currentCells) {
+        arena().consumeWork();
+        ContentInput input{.cell = cell, .offset = 0};
+        if (!fn.args.empty() && !fn.isSliceRead) {
+          input.replacement = evaluateValueExpr(fn.args.front(), cell);
+          if (!input.replacement) continue;
         }
+        const auto integerArgument = [&](std::size_t index) {
+          const auto value = evaluateValueExpr(fn.args[index], cell);
+          if (!value || !std::holds_alternative<std::int64_t>(*value))
+            throw std::runtime_error(
+                "value offset and length must be integers");
+          return std::get<std::int64_t>(*value);
+        };
+        if (fn.args.size() >= 2) input.offset = integerArgument(1);
+        if (fn.args.size() >= 3) input.length = integerArgument(2);
+        inputs.push_back(std::move(input));
       }
-      for (zigzag::CellRef c : currentCells) {
-        this->arena().consumeWork();
-        if (const auto res = core_->readValue(c, offset, length)) {
-          stepOutput.push_back(*res);
-        }
+      // Snapshot every operand before changing any clone master in the stream.
+      for (const auto &input : inputs) {
+        const auto result =
+            input.replacement
+                ? core_->writeValue(input.cell, input.offset, input.length,
+                                    *input.replacement)
+                : core_->readValue(input.cell, input.offset, input.length);
+        if (result) stepOutput.push_back(*result);
       }
     } else if (fn.name == "find" && !fn.args.empty()) {
       // Every cell of every loaded store whose text holds the needle: how a
@@ -1575,6 +1904,7 @@ VQLEngine::evaluateStep(const PathStep &step,
         }
       }
     } else if (auto itDef = userDefs_.find(fn.name); itDef != userDefs_.end()) {
+      requirePositionalArguments(fn);
       if (currentCells.empty()) {
         auto res = callUserDef(itDef->second, fn.args, std::nullopt);
         stepOutput.insert(stepOutput.end(), res.begin(), res.end());
@@ -1782,7 +2112,8 @@ VQLEngine::evaluateStep(const PathStep &step,
         }
       }
     }
-    if (stepOutput.empty()) {
+    if (coordinator_.stores().empty() && !sl.nameFilter &&
+        !sl.predicateFilter) {
       if (const auto h = coordinator_.homeAnchor()) {
         stepOutput.push_back(*h);
       }
@@ -1805,7 +2136,8 @@ VQLEngine::evaluateStep(const PathStep &step,
         }
       }
     }
-    if (stepOutput.empty()) {
+    if (coordinator_.stores().empty() && !ds.nameFilter &&
+        !ds.predicateFilter) {
       if (const auto h = coordinator_.homeAnchor()) {
         stepOutput.push_back(*h);
       }
@@ -1903,7 +2235,12 @@ VQLEngine::evaluateStep(const PathStep &step,
       }
     }
   } else if (std::holds_alternative<DimensionPivotStep>(step.selector)) {
-    stepOutput = currentCells;
+    const auto &pivot = std::get<DimensionPivotStep>(step.selector);
+    ShapeLiteral shape;
+    shape.rules.push_back(
+        ShapeRule{.rule = DimensionPivotRule{.fromDim = pivot.fromDim,
+                                             .toDim   = pivot.toDim}});
+    stepOutput = projectDynamic(shape, currentCells);
   } else if (std::holds_alternative<VirtualDimensionStep>(step.selector)) {
     const auto &v = std::get<VirtualDimensionStep>(step.selector);
     for (zigzag::CellRef c : currentCells) {
@@ -1926,10 +2263,15 @@ VQLEngine::evaluateStep(const PathStep &step,
   }
 
   // Master Dereference >
+  if (step.versionPin) {
+    stepOutput = applyVersionPin(*step.versionPin, stepOutput);
+  }
+
+  // Master Dereference >
   if (step.derefMaster) {
     for (auto &c : stepOutput) {
       this->arena().consumeWork();
-      c = coordinator_.derefCloneMaster(c).value_or(c);
+      c = queryCloneMaster(core_->arena(), c, core_->dims().clone).value_or(c);
     }
   }
 
@@ -2113,6 +2455,7 @@ VQLEngine::evaluateValueExpr(const ValueExpr &expr,
     }
 
     if (const auto itDef = userDefs_.find(fn.name); itDef != userDefs_.end()) {
+      requirePositionalArguments(fn);
       const auto results = callUserDef(itDef->second, fn.args, context);
       if (results.empty()) return std::nullopt;
       return core_->render(results.front());
@@ -2127,12 +2470,14 @@ VQLEngine::evaluateValueExpr(const ValueExpr &expr,
   }
 
   if (std::holds_alternative<std::shared_ptr<ShapeLiteral>>(expr.kind)) {
-    return zigzag::vortex::CellValue{true};
+    return std::nullopt;
   }
 
   if (std::holds_alternative<std::shared_ptr<VersionExpr>>(expr.kind)) {
-    const auto &ve = *std::get<std::shared_ptr<VersionExpr>>(expr.kind);
-    return zigzag::vortex::CellValue{ve.versionStr};
+    const auto &ve     = *std::get<std::shared_ptr<VersionExpr>>(expr.kind);
+    const auto version = evaluateVersionExpr(ve, context);
+    if (!version) return std::nullopt;
+    return zigzag::vortex::CellValue{version->str()};
   }
 
   if (std::holds_alternative<std::shared_ptr<BooleanExpr>>(expr.kind)) {
@@ -2208,7 +2553,37 @@ bool VQLEngine::evaluateFactor(const BooleanFactor &factor,
     const auto &cmp     = std::get<ComparisonExpr>(factor.test);
     const auto leftVal  = evaluateValueExpr(*cmp.left, context);
     const auto rightVal = evaluateValueExpr(*cmp.right, context);
-    result = leftVal && rightVal && compareValues(*leftVal, cmp.op, *rightVal);
+    const auto lhs      = versionValue(*cmp.left, context);
+    const auto rhs      = versionValue(*cmp.right, context);
+    if (lhs && rhs) {
+      if (lhs && rhs) {
+        const bool ancestor        = lhs->isAncestorOf(*rhs);
+        const bool reverseAncestor = rhs->isAncestorOf(*lhs);
+        switch (cmp.op) {
+        case CompOp::Equal:
+          result = *lhs == *rhs;
+          break;
+        case CompOp::NotEqual:
+          result = *lhs != *rhs;
+          break;
+        case CompOp::LessThan:
+          result = ancestor && *lhs != *rhs;
+          break;
+        case CompOp::GreaterThan:
+          result = reverseAncestor && *lhs != *rhs;
+          break;
+        case CompOp::LessEqual:
+          result = ancestor;
+          break;
+        case CompOp::GreaterEqual:
+          result = reverseAncestor;
+          break;
+        }
+      }
+    } else {
+      result =
+          leftVal && rightVal && compareValues(*leftVal, cmp.op, *rightVal);
+    }
   } else {
     const auto &test = std::get<PredicateTest>(factor.test);
     if (std::holds_alternative<std::shared_ptr<PathExpression>>(test.kind)) {
@@ -2228,6 +2603,12 @@ bool VQLEngine::evaluateFactor(const BooleanFactor &factor,
                    test.kind)) {
       result = evaluateShapePredicate(
           *std::get<std::shared_ptr<ShapeLiteral>>(test.kind), context);
+    } else if (const auto *function =
+                   std::get_if<std::shared_ptr<FunctionInvocation>>(&test.kind);
+               function && *function) {
+      const ValueExpr expression{.kind = *function};
+      if (const auto value = evaluateValueExpr(expression, context))
+        result = zigzag::vortex::VortexCore::evaluateTruthiness(*value);
     }
   }
 
@@ -2366,62 +2747,6 @@ void VQLEngine::executeEffectClause(
       }
     }
   }
-}
-
-bool VQLEngine::evaluateShapePredicate(const ShapeLiteral &shape,
-                                       std::optional<zigzag::CellRef> context) {
-  if (!context || !core_->arena().contains(*context)) {
-    return false;
-  }
-  for (const auto &shapeRule : shape.rules) {
-    this->arena().consumeWork();
-    if (std::holds_alternative<ShapeWildcard>(shapeRule.rule)) {
-      auto wc = std::get<ShapeWildcard>(shapeRule.rule);
-      if (wc == ShapeWildcard::Nothing) {
-        return false;
-      }
-      continue;
-    }
-    if (std::holds_alternative<DimensionShapeRule>(shapeRule.rule)) {
-      const auto &dr     = std::get<DimensionShapeRule>(shapeRule.rule);
-      zigzag::DimRef dim = resolveDimension(dr.dimName);
-      const auto linkedPos =
-          core_->arena().linkedMinting(*context, dim, zigzag::DimVector::POS);
-      const auto linkedNeg =
-          core_->arena().linkedMinting(*context, dim, zigzag::DimVector::NEG);
-      auto linked =
-          (dr.direction == zigzag::DimVector::POS) ? linkedPos : linkedNeg;
-      if (dr.isBidir) {
-        linked = linkedPos ? linkedPos : linkedNeg;
-      }
-
-      if (dr.negated) {
-        if (linked) {
-          return false;
-        }
-      } else {
-        if (!linked) {
-          return false;
-        }
-        if (dr.targetValue) {
-          const auto expectedVal = evaluateValueExpr(*dr.targetValue, context);
-          const auto actualVal   = core_->render(*linked);
-          if (!expectedVal || !actualVal ||
-              !compareValues(*actualVal, CompOp::Equal, *expectedVal)) {
-            return false;
-          }
-        }
-      }
-    } else if (std::holds_alternative<std::shared_ptr<ShapeLiteral>>(
-                   shapeRule.rule)) {
-      if (!evaluateShapePredicate(
-              *std::get<std::shared_ptr<ShapeLiteral>>(shapeRule.rule),
-              context)) {
-        return false;
-      }
-    }
-  }
-  return true;
 }
 
 } // namespace xanadu::vql

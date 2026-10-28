@@ -1,0 +1,85 @@
+#include <gtest/gtest.h>
+
+#include "common/xanadu/vortex/vortex_host.hpp"
+
+namespace {
+using xanadu::vql::QueryExecutionMode;
+using zigzag::vortex::VortexHost;
+
+TEST(VQLHostParityTest, QueryNavigationScriptAndBatchUseTheRequestedBackend) {
+  for (const auto mode :
+       {QueryExecutionMode::Direct, QueryExecutionMode::Vortex}) {
+    SCOPED_TRACE(mode == QueryExecutionMode::Direct ? "direct" : "vortex");
+    VortexHost host;
+    host.setVQLExecutionOptions({.mode = mode});
+    const auto query =
+        host.executeVQLChecked("def f($x: Int): Int := $x; f(7)");
+    ASSERT_TRUE(query) << query.error().message;
+    ASSERT_EQ(query->size(), 1u);
+    EXPECT_EQ(host.core().arena().asInt64(query->front()), 7);
+    const auto target = host.core().arena().makeCell("focus");
+    const auto destination =
+        host.navigatePath("def f($x: Cell): Cell := $x; f(.)", target);
+    EXPECT_EQ(destination, target);
+    const auto script =
+        host.executeScript("def broken($x: Int): String := $x; broken(7)");
+    EXPECT_FALSE(script.success);
+    EXPECT_EQ(script.message,
+              "broken() returned a value outside its declared type");
+    const auto rows = host.executeVQLBatchParallel(
+        {"def f($x: Int): Int := $x; f(7)"},
+        [](zigzag::vortex::WorkerContext &, std::size_t) {});
+    ASSERT_EQ(rows.size(), 1u);
+    EXPECT_EQ(rows.front(), std::vector<std::string>{"7"});
+  }
+}
+TEST(VQLHostParityTest, RuntimeRanksFlowThroughQueryNavigationScriptAndBatch) {
+  const std::string query =
+      "def identity($x: Int): Int := $x; ##/d.items/identity()";
+  for (const auto mode :
+       {QueryExecutionMode::Direct, QueryExecutionMode::Vortex}) {
+    VortexHost host;
+    host.setVQLExecutionOptions({.mode = mode});
+    const auto seed = [](auto &core) {
+      auto &arena      = core.arena();
+      const auto axis  = core.mintDimension("d.items");
+      const auto first = arena.makeScalarCell(std::int64_t{7});
+      const auto bad   = arena.makeCell("bad");
+      const auto last  = arena.makeScalarCell(std::int64_t{9});
+      zigzag::expectWritten(arena.link(core.home(), axis, false, first));
+      zigzag::expectWritten(arena.link(first, axis, false, bad));
+      zigzag::expectWritten(arena.link(bad, axis, false, last));
+      return std::vector<zigzag::CellRef>{first, last};
+    };
+    const auto expected = seed(host.core());
+    const auto results  = host.executeVQLChecked(query);
+    ASSERT_TRUE(results) << results.error().message;
+    EXPECT_EQ(*results, expected);
+    EXPECT_EQ(host.navigatePath(query + "[-1]", host.core().home()),
+              expected.back());
+    EXPECT_EQ(host.navigatePath("##/d.items::tail", host.core().home()),
+              expected.back());
+    const auto script = host.executeScript(query);
+    EXPECT_TRUE(script.success) << script.message;
+    const std::string decorated =
+        "let $f := /d.items; let $g := /$f[. != \"bad\"][-1]; "
+        "let $f := /d.absent; ##/$g";
+    const auto functorResult = host.executeVQLChecked(decorated);
+    ASSERT_TRUE(functorResult) << functorResult.error().message;
+    EXPECT_EQ(*functorResult, (std::vector<zigzag::CellRef>{expected.back()}));
+    EXPECT_EQ(host.navigatePath(decorated, host.core().home()),
+              expected.back());
+    const auto functorScript = host.executeScript(decorated);
+    ASSERT_TRUE(functorScript.success) << functorScript.message;
+    EXPECT_EQ(functorScript.affectedCells,
+              (std::vector<zigzag::CellRef>{expected.back()}));
+    const auto rows = host.executeVQLBatchParallel(
+        {query, decorated}, [&](zigzag::vortex::WorkerContext &worker,
+                                std::size_t) { seed(worker.core); });
+    ASSERT_EQ(rows.size(), 2u);
+    EXPECT_EQ(rows.front(), (std::vector<std::string>{"7", "9"}));
+    EXPECT_EQ(rows.back(), (std::vector<std::string>{"9"}));
+  }
+}
+
+} // namespace

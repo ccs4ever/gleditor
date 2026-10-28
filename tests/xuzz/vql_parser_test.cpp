@@ -425,6 +425,18 @@ TEST(VQLParserTest, VersionPinningAndMicroversionLiterals) {
   EXPECT_EQ(path3.steps[0].versionPin->versions.size(), 2u);
   EXPECT_EQ(path3.steps[0].versionPin->versions[0].versionStr, "88");
   EXPECT_EQ(path3.steps[0].versionPin->versions[1].versionStr, "2a9");
+
+  Parser p4("##@(@2a4 + 1 - 1 / \"b\")");
+  auto q4 = p4.parseQuery();
+  ASSERT_TRUE(std::holds_alternative<PathExpression>(q4.expr));
+  const auto &path4 = std::get<PathExpression>(q4.expr);
+  ASSERT_TRUE(path4.anchor.versionPin.has_value());
+  const auto &expr = path4.anchor.versionPin->versions.front();
+  EXPECT_EQ(expr.op, VersionExpr::Op::Branch);
+  ASSERT_NE(expr.left, nullptr);
+  EXPECT_EQ(expr.left->op, VersionExpr::Op::Parent);
+  ASSERT_NE(expr.left->left, nullptr);
+  EXPECT_EQ(expr.left->left->op, VersionExpr::Op::Next);
 }
 
 TEST(VQLParserTest, DestructuringInForClause) {
@@ -554,6 +566,25 @@ TEST(VQLParserTest, MultiStatementScriptAndMounts) {
   ASSERT_EQ(watchStmt.body->statements.size(), 1u);
   EXPECT_TRUE(
       std::holds_alternative<WeaveStatement>(watchStmt.body->statements[0]));
+}
+
+TEST(VQLParserTest, NamespaceDeclarationsPreserveMountAndUnmountOrder) {
+  Parser parser("mount current() as +d.cluster; "
+                "unmount +d.cluster; "
+                "mount current() as +d.cluster; ##/+d.cluster");
+  const auto query = parser.parseQuery();
+
+  ASSERT_EQ(query.namespaceDeclarations.size(), 3u);
+  EXPECT_TRUE(
+      std::holds_alternative<MountDeclaration>(query.namespaceDeclarations[0]));
+  ASSERT_TRUE(std::holds_alternative<UnmountDeclaration>(
+      query.namespaceDeclarations[1]));
+  const auto &unmount =
+      std::get<UnmountDeclaration>(query.namespaceDeclarations[1]);
+  EXPECT_EQ(unmount.dimName, "d.cluster");
+  EXPECT_EQ(unmount.direction, zigzag::DimVector::POS);
+  EXPECT_TRUE(
+      std::holds_alternative<MountDeclaration>(query.namespaceDeclarations[2]));
 }
 
 TEST(VQLParserTest, WatchStatementWithSinceAndUntil) {

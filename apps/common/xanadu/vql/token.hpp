@@ -100,6 +100,7 @@ enum class TokenKind : std::uint8_t {
   KwDef,
   KwPure,
   KwMount,
+  KwUnmount,
   KwAs,
   KwWatch,
   KwSince,

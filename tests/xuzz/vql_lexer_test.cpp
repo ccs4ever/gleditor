@@ -149,10 +149,10 @@ TEST(VQLLexerTest, MicroversionLiterals) {
 
 TEST(VQLLexerTest, ExtendedKeywords) {
   Lexer lexer("current local topic btpk slices docs citing backlinks find "
-              "system btih ledger def mount as watch since lens list");
+              "system btih ledger def mount unmount as watch since lens list");
   auto tokens = lexer.tokenizeAll();
 
-  ASSERT_EQ(tokens.size(), 20u);
+  ASSERT_EQ(tokens.size(), 21u);
   EXPECT_EQ(tokens[0].kind, TokenKind::KwCurrent);
   EXPECT_EQ(tokens[1].kind, TokenKind::KwLocal);
   EXPECT_EQ(tokens[2].kind, TokenKind::KwTopic);
@@ -167,12 +167,13 @@ TEST(VQLLexerTest, ExtendedKeywords) {
   EXPECT_EQ(tokens[11].kind, TokenKind::KwLedger);
   EXPECT_EQ(tokens[12].kind, TokenKind::KwDef);
   EXPECT_EQ(tokens[13].kind, TokenKind::KwMount);
-  EXPECT_EQ(tokens[14].kind, TokenKind::KwAs);
-  EXPECT_EQ(tokens[15].kind, TokenKind::KwWatch);
-  EXPECT_EQ(tokens[16].kind, TokenKind::KwSince);
-  EXPECT_EQ(tokens[17].kind, TokenKind::KwLens);
-  EXPECT_EQ(tokens[18].kind, TokenKind::KwList);
-  EXPECT_EQ(tokens[19].kind, TokenKind::EndOfFile);
+  EXPECT_EQ(tokens[14].kind, TokenKind::KwUnmount);
+  EXPECT_EQ(tokens[15].kind, TokenKind::KwAs);
+  EXPECT_EQ(tokens[16].kind, TokenKind::KwWatch);
+  EXPECT_EQ(tokens[17].kind, TokenKind::KwSince);
+  EXPECT_EQ(tokens[18].kind, TokenKind::KwLens);
+  EXPECT_EQ(tokens[19].kind, TokenKind::KwList);
+  EXPECT_EQ(tokens[20].kind, TokenKind::EndOfFile);
 }
 
 TEST(VQLLexerTest, VQL15_1TokensAndKeywords) {

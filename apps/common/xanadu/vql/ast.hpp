@@ -127,6 +127,8 @@ struct ValueExpr {
 struct FunctionInvocation {
   std::string name;
   std::vector<ValueExpr> args;
+  std::vector<std::string> argNames;
+  bool isSliceRead{false};
 };
 
 // -- First-Class Shapes -------------------------------------------------------
@@ -309,6 +311,9 @@ struct PathStep {
   std::optional<RangeClamp> rangeClamp{std::nullopt};
   std::optional<VersionPin> versionPin{std::nullopt};
   YieldMode yieldMode{YieldMode::Default};
+  // Internal lexical capture; nested AST nodes are read-only after parsing.
+  // Executable export lowers this body to instructions, never serializes it.
+  std::shared_ptr<const std::vector<PathStep>> capturedFunctor;
 };
 
 struct MacroDimensionGroup {
@@ -479,6 +484,13 @@ struct MountDeclaration {
   zigzag::DimVector direction{zigzag::DimVector::POS};
 };
 
+struct UnmountDeclaration {
+  std::string dimName;
+  zigzag::DimVector direction{zigzag::DimVector::POS};
+};
+
+using NamespaceDeclaration = std::variant<MountDeclaration, UnmountDeclaration>;
+
 struct WeaveStatement {
   EffectClause effect;
 };
@@ -517,6 +529,7 @@ struct DefDeclaration {
 struct QueryExpression {
   std::vector<DefDeclaration> defs;
   std::vector<MountDeclaration> mounts;
+  std::vector<NamespaceDeclaration> namespaceDeclarations;
   ScriptBody body;
   std::variant<ExecutionBlock, PathExpression> expr;
 };

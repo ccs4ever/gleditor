@@ -49,6 +49,9 @@ public:
   /// Parses a mount declaration.
   MountDeclaration parseMountDeclaration();
 
+  /// Parses an unmount declaration.
+  UnmountDeclaration parseUnmountDeclaration();
+
   /// Parses a weave statement.
   WeaveStatement parseWeaveStatement();
 

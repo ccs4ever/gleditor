@@ -38,7 +38,8 @@ ProcessResult runVQuery(const std::string &args) {
       "LIBGL_ALWAYS_SOFTWARE=1 XDG_DATA_HOME=" +
       fs::current_path().string() +
       "/build/xdg/data XDG_CONFIG_HOME=" + fs::current_path().string() +
-      "/build/xdg/config " + binary + " " + args + " 2>&1";
+      "/build/xdg/config XDG_CACHE_HOME=" + fs::current_path().string() +
+      "/build/xdg/cache " + binary + " " + args + " 2>&1";
 
   FILE *pipe = popen(cmd.c_str(), "r");
   if (!pipe) {
@@ -89,7 +90,7 @@ TEST_F(VQueryE2ETest, OnTheFlyVortexCompilation) {
   auto res =
       runVQuery("-e \"##/d.1\" --engine vortex --dump-asm --format cells");
   EXPECT_EQ(res.exitCode, 0) << res.output;
-  EXPECT_NE(res.output.find("#TRAVERSE"), std::string::npos);
+  EXPECT_NE(res.output.find("#RANK_BEGIN"), std::string::npos);
   EXPECT_NE(res.output.find("#HALT"), std::string::npos);
 }
 
@@ -99,12 +100,82 @@ TEST_F(VQueryE2ETest, AsciiVisualizationMode) {
   EXPECT_NE(res.output.find("=== VQL Query Results"), std::string::npos);
 }
 
+TEST_F(VQueryE2ETest, CompiledValueResultsRenderContentRatherThanSlotIds) {
+  const auto result =
+      runVQuery(R"(--engine vortex --eval '%"before"/value("after")/value()')");
+  EXPECT_EQ(result.exitCode, 0) << result.output;
+  EXPECT_EQ(result.output, "after\n");
+}
+
+TEST_F(VQueryE2ETest, CompiledSliceReadsDoNotChangeTheSource) {
+  const auto result = runVQuery(
+      R"(--engine vortex --eval 'let $item := %"abcdef"; $item.[1, 2]; $item/value()')");
+  EXPECT_EQ(result.exitCode, 0) << result.output;
+  EXPECT_EQ(result.output, "abcdef\n");
+}
+
+TEST_F(VQueryE2ETest, TypedDefinitionsAndReturnErrorsHaveBackendParity) {
+  for (const auto mode : {"direct", "vortex"}) {
+    SCOPED_TRACE(mode);
+    const auto success =
+        runVQuery(std::string("--engine ") + mode +
+                  R"( --eval 'def identity($x: Int): Int := $x; identity(7)')");
+    EXPECT_EQ(success.exitCode, 0) << success.output;
+    EXPECT_EQ(success.output, "7\n");
+    const auto failure =
+        runVQuery(std::string("--engine ") + mode +
+                  R"( --eval 'def broken($x: Int): String := $x; broken(7)')");
+    EXPECT_NE(failure.exitCode, 0);
+    EXPECT_EQ(
+        failure.output,
+        "Query failed: broken() returned a value outside its declared type\n");
+  }
+}
+
+TEST_F(VQueryE2ETest, RuntimeRankTypedFilterHasBackendParity) {
+  for (const auto mode : {"direct", "vortex"}) {
+    const auto result = runVQuery(
+        std::string("--engine ") + mode +
+        R"( --eval 'def identity($x: Int): Int := $x; let $p := %"paper"; $p/d.items%"7"%"bad"%"9"; $p/d.items/identity()')");
+    EXPECT_EQ(result.exitCode, 0) << result.output;
+    EXPECT_EQ(result.output, "7\n9\n");
+  }
+}
+
+TEST_F(VQueryE2ETest, RuntimeEndpointAndAppendHaveBackendParity) {
+  for (const auto mode : {"direct", "vortex"}) {
+    const auto result = runVQuery(
+        std::string("--engine ") + mode +
+        R"( --eval 'let $p := %"paper"; $p/d.items%"7"%"9"; $p/d.items%"11"; $p/d.items::tail')");
+    EXPECT_EQ(result.exitCode, 0) << result.output;
+    EXPECT_EQ(result.output, "11\n");
+  }
+}
+
+TEST_F(VQueryE2ETest, DecoratedFunctorCaptureSurvivesRebinding) {
+  for (const auto mode : {"direct", "vortex"}) {
+    const auto result = runVQuery(
+        std::string("--engine ") + mode +
+        R"( --eval 'let $f := /d.items; let $g := /$f>[. != "bad"][-1]; let $f := /d.absent; let $p := %"paper"; $p/d.items%"7"%"bad"%"9"; $p/$g')");
+    EXPECT_EQ(result.exitCode, 0) << result.output;
+    EXPECT_EQ(result.output, "9\n");
+  }
+}
+
 TEST_F(VQueryE2ETest, MultiStoreNamedResolution) {
   fs::path storeA = "tests/samples/xudu/core_hypertext/xanadoc_a";
   fs::path storeB = "tests/samples/xudu/core_hypertext/xanadoc_b";
 
   if (!fs::exists(storeA) || !fs::exists(storeB)) {
     GTEST_SKIP() << "Sample fixtures not present";
+  }
+
+  for (const auto mode : {"direct", "vortex"}) {
+    const auto named =
+        runVQuery(std::string("--engine ") + mode + " " + storeA.string() +
+                  " " + storeB.string() + " -e \"##xanadoc_b/d.name\"");
+    EXPECT_EQ(named.exitCode, 0) << named.output;
+    EXPECT_NE(named.output.find("xanadoc_b"), std::string::npos);
   }
 
   // 1. Query name of store B

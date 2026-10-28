@@ -654,6 +654,7 @@ XUZZ_TEST_OBJS  := $(call obj,$(XUZZ_TEST_SRCS))
 XUDU_TEST_OBJS  := $(XUZZ_TEST_OBJS)
 SWARM_PEER_OBJS := $(call obj,tools/xudu-swarm-peer.cpp)
 UI_TEXT_BASELINE_OBJS := $(call obj,tools/ui-text-baseline.cpp)
+VQL_RANK_BENCH_OBJS := $(call obj,tools/vql-rank-benchmark.cpp)
 LINK_STRESS_OBJS := $(call obj,tools/render-link-stress.cpp)
 VQUERYC_SRCS    := $(shell find apps/vqueryc -name '*.cpp' 2>/dev/null)
 VQUERYC_OBJS    := $(call obj,$(VQUERYC_SRCS))
@@ -750,7 +751,7 @@ ALL_OBJS := $(sort $(LIB_OBJS) $(GLEDITOR_OBJS) $(XUDU_CORE_OBJS) $(XUZZ_OBJS) \
 	$(ZIGZAG_CORE_OBJS) $(ZIGZAG_TEST_OBJS) $(COMMON_UI_OBJS) \
 	$(LIB_TEST_OBJS) $(XUDU_TEST_OBJS) $(XUZZ_TEST_OBJS) $(SWARM_PEER_OBJS) \
 	$(GENERATE_SAMPLE_XANADOCS_OBJS) $(VQUERYC_OBJS) $(VQUERY_OBJS) $(VPROLOG_OBJS) $(VPLC_OBJS) $(VPL_OBJS) $(VLACE_OBJS) $(VLACEC_OBJS) $(VICON_OBJS) $(VICONC_OBJS) $(VAGENT_OBJS) \
-	$(UI_TEXT_BASELINE_OBJS) $(LINK_STRESS_OBJS) $(SPIKE_OBJS))
+	$(UI_TEXT_BASELINE_OBJS) $(VQL_RANK_BENCH_OBJS) $(LINK_STRESS_OBJS) $(SPIKE_OBJS))
 ALL_OBJ_DIRS := $(sort $(OBJDIR)/ $(OBJDIR)/tmp/ $(dir $(ALL_OBJS)))
 DEPS := $(sort $(patsubst %.o,%.dep,$(ALL_OBJS)))
 JFILES := $(sort $(patsubst %.o,%.j,$(ALL_OBJS)))
@@ -1061,6 +1062,11 @@ swarm-image:
 	$(CONTAINER_ENGINE) build --file packaging/docker/swarm.Dockerfile \
 	  --build-arg SWARM_IMAGE_BASE="$(SWARM_IMAGE_BASE)" \
 	  --build-arg GLEDITOR_VERSION="$(VERS)" --tag "$(SWARM_IMAGE)" .
+
+.PHONY: vql-rank-benchmark
+vql-rank-benchmark: $(OBJDIR)/vql-rank-benchmark
+$(OBJDIR)/vql-rank-benchmark: $(VQL_RANK_BENCH_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
+	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS)
 
 .PHONY: vqueryc
 vqueryc: $(OBJDIR)/vqueryc
