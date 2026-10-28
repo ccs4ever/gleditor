@@ -83,13 +83,13 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
   auto savedStreams       = streamBindings_;
   auto savedFunctors      = functorBindings_;
   const auto savedContext = ambientContext_;
-  activeCalls_.push_back(definition.name);
+  bool callActivated      = false;
   const RestoreScope restore{[&] {
     varBindings_     = std::move(savedVariables);
     streamBindings_  = std::move(savedStreams);
     functorBindings_ = std::move(savedFunctors);
     ambientContext_  = savedContext;
-    activeCalls_.pop_back();
+    if (callActivated) activeCalls_.pop_back();
   }};
 
   // Arguments belong to the caller's lexical scope. Evaluate every operand
@@ -114,6 +114,8 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
     functors.push_back(std::move(functor));
   }
   ambientContext_ = context;
+  activeCalls_.push_back(definition.name);
+  callActivated = true;
 
   const auto clear =
       emitOp(OpcodeKind::ClearCellRefs, "#CALL_CLEAR " + definition.name);
@@ -126,7 +128,8 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
         cells.empty() ? std::nullopt : std::optional{cells.front()};
   };
   const auto check = [&](const TypeExpr &type,
-                         const std::vector<CellRef> &subjects) {
+                         const std::vector<CellRef> &subjects,
+                         const bool bindCaptures) {
     checkDefaultSupport(type);
     const auto descriptor = emitConstant(encodeTypeDescriptor(type));
     const auto match =
@@ -138,7 +141,7 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
     for (const auto &name : ContractMatcher::contractCaptureNames(type)) {
       const auto capture = core_.arena().makeCell();
       emitOutput(match, capture);
-      bind(name, {capture});
+      if (bindCaptures) bind(name, {capture});
     }
     const auto branch = emitOp(OpcodeKind::BranchFalseCell, "#PARAM_FILTER");
     emitInput(branch, matched);
@@ -158,7 +161,8 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
     std::vector<CellRef> cells;
     if (parameter.isVariadic) {
       while (argumentIndex < values.size()) {
-        if (parameter.type) check(*parameter.type, values[argumentIndex]);
+        if (parameter.type)
+          check(*parameter.type, values[argumentIndex], false);
         cells.insert(cells.end(), values[argumentIndex].begin(),
                      values[argumentIndex].end());
         ++argumentIndex;
@@ -169,19 +173,20 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
       else if (parameter.defaultValue) {
         cells = compileArgument(*parameter.defaultValue, context);
       }
-      if (parameter.type) check(*parameter.type, cells);
+      if (parameter.type) check(*parameter.type, cells, true);
     }
     if (const auto *pattern =
             std::get_if<DestructurePattern>(&parameter.target)) {
       TypeExpr shape{
           .unionType = UnionType{.members = {PrimaryType{
                                      .kind = ShapeType{.pattern = *pattern}}}}};
-      check(shape, cells);
+      check(shape, cells, true);
     } else if (const auto *name = std::get_if<std::string>(&parameter.target)) {
       bind(*name, std::move(cells));
     } else {
       bind(".", std::move(cells));
     }
+    if (parameter.isVariadic) break;
   }
 
   std::vector<CellRef> bodyResults;

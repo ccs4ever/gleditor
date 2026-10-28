@@ -73,6 +73,32 @@ void ContractMatcher::validateType(const TypeExpr &type) {
   }
 }
 
+void validateFunctionSignature(const DefDeclaration &definition) {
+  for (std::size_t index = 0; index < definition.params.size(); ++index) {
+    const auto &parameter = definition.params[index];
+    if (parameter.isVariadic) {
+      if (index + 1 != definition.params.size())
+        throw TypeContractError(definition.name +
+                                "() variadic parameter must be last");
+      if (!std::holds_alternative<std::string>(parameter.target))
+        throw TypeContractError(
+            definition.name + "() variadic parameters require a variable name");
+      if (parameter.defaultValue)
+        throw TypeContractError(
+            definition.name +
+            "() variadic parameter defaults are not supported");
+    }
+    if (parameter.type) ContractMatcher::validateType(*parameter.type);
+    if (const auto *pattern =
+            std::get_if<DestructurePattern>(&parameter.target)) {
+      for (const auto &field : pattern->fields)
+        if (field.type) ContractMatcher::validateType(*field.type);
+    }
+  }
+  if (definition.returnType)
+    ContractMatcher::validateType(*definition.returnType);
+}
+
 std::vector<std::string>
 ContractMatcher::contractCaptureNames(const TypeExpr &type) {
   std::set<std::string> names;

@@ -145,6 +145,7 @@ std::vector<zigzag::CellRef> VQLEngine::execute(std::string_view queryString) {
 std::vector<zigzag::CellRef> VQLEngine::execute(const QueryExpression &query) {
   this->arena().consumeWork();
 
+  for (const auto &def : query.defs) validateFunctionSignature(def);
   for (const auto &def : query.defs) {
     userDefs_[def.name] = def;
   }

@@ -23,24 +23,9 @@ template <typename Action> struct RestoreScope {
   ~RestoreScope() { action(); }
 };
 
-void validatePattern(const DestructurePattern &pattern) {
-  for (const auto &field : pattern.fields) {
-    if (field.type) ContractMatcher::validateType(*field.type);
-  }
-}
-
 void validateSignatures(const QueryExpression &query) {
-  for (const auto &definition : query.defs) {
-    for (const auto &parameter : definition.params) {
-      if (parameter.type) ContractMatcher::validateType(*parameter.type);
-      if (const auto *pattern =
-              std::get_if<DestructurePattern>(&parameter.target)) {
-        validatePattern(*pattern);
-      }
-    }
-    if (definition.returnType)
-      ContractMatcher::validateType(*definition.returnType);
-  }
+  for (const auto &definition : query.defs)
+    validateFunctionSignature(definition);
 }
 
 bool budgetFailure(const std::string_view message) {

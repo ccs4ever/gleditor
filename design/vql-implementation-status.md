@@ -97,10 +97,11 @@ the compiler AST guard is tested separately.
 - **§4.11:** the complete first-class Store/Slice/Dim register model, filesystem-opening generators,
   discovery catalogue, universal projection dispatch and 16-byte `HyperHandle` lowering remain
   incomplete. Invalid/unavailable pins yield no matches. Local mounts resolve registered stores.
-- **§4.12:** complete lazy/runtime stream semantics, recursive frames, general variadics, nonliteral
-  shape-field default thunks, mutation-boundary enforcement, functor shape/pin/yield completeness,
-  session-state/frontend parity, and specialized `CurriedMorphism`/`TRAVERSE_CURRIED_DIM` lowering
-  remain incomplete. Qualified functor anchors refuse explicitly in compiled capture.
+- **§4.12:** complete lazy/runtime stream semantics, recursive frames, variadic
+  defaults/dot/destructuring, nonliteral shape-field default thunks, mutation-boundary enforcement,
+  functor shape/pin/yield completeness, session-state/frontend parity, and specialized
+  `CurriedMorphism`/`TRAVERSE_CURRIED_DIM` lowering remain incomplete. Qualified functor anchors
+  refuse explicitly in compiled capture.
 - **§5:** arena lifetime and choice-point rollback exist; a VQL tracing/sweeping garbage collector
   rooted in the proposed live-query root set is not implemented.
 
@@ -183,3 +184,17 @@ Logs: `/tmp/vql-annotated-final-build.log`, `/tmp/vql-annotated-focused.log`,
 `/tmp/vql-annotated-probe.jsonl`, `/tmp/vql-annotated-full-build.log`,
 `/tmp/vql-annotated-format.log`, `/tmp/vql-annotated-zigzag.log`, `/tmp/vql-annotated-lint.log`,
 `/tmp/vql-annotated-full-xuzz.log`. Full §4.12 remains incomplete.
+
+### Named variadic and nested-argument iteration
+
+Named final variadics preserve source/member order and duplicates, type-check each actual argument
+stream before concatenation, and leave shape captures out of the callee environment. Shared
+signature validation rejects unsupported rest forms before registering any definitions. Finite
+nested calls in argument expressions now compile before callee activation; true body/default
+recursion still refuses. Luna implemented the binder and runtime/frontend/export regressions, with
+separate architecture/source gates. All 446 focused tests, the full build and formatting checks
+passed. General variadic forms and full §4.12 remain incomplete; contract traversal/copy accounting
+is the next review item.
+
+Logs: `/tmp/vql-variadic-focused.log`, `/tmp/vql-variadic-full-build.log`,
+`/tmp/vql-variadic-format.log`.

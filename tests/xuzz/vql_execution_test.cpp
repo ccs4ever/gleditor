@@ -7,6 +7,7 @@
 #include "common/xanadu/multi_store.hpp"
 #include "common/xanadu/vortex/vortex_core.hpp"
 #include "common/xanadu/vortex/vortex_vm.hpp"
+#include "common/xanadu/vql/compiler.hpp"
 #include "common/xanadu/vql/execution.hpp"
 #include "common/xanadu/vql/vql_engine.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
@@ -178,6 +179,41 @@ TEST(VQLExecutionTest, FiltersMixedCandidatesWithoutLosingIdentity) {
     ASSERT_TRUE(result) << result.error().message;
     EXPECT_EQ(*result, std::vector<CellRef>{yes});
   }
+}
+
+TEST(VQLExecutionTest, UnsupportedVariadicSignaturesFailBeforeExecution) {
+  for (const auto mode :
+       {QueryExecutionMode::Direct, QueryExecutionMode::Vortex}) {
+    Harness h;
+    auto executor = h.executor(mode);
+    for (const auto source : {"def f(...$rest, $later): Any := $rest; ##",
+                              "def f(...$first, ...$rest): Any := $rest; ##",
+                              "def f(...$rest := 7): Any := $rest; ##",
+                              "def f(... .): Any := .; ##",
+                              "def f(...{ +d.title: $t }): Any := $t; ##"}) {
+      SCOPED_TRACE(source);
+      const auto result = executor.execute(source);
+      ASSERT_FALSE(result);
+      EXPECT_EQ(result.error().category,
+                QueryExecutionError::Category::TypeContract);
+      EXPECT_NE(result.error().message.find("variadic"), std::string::npos);
+    }
+  }
+}
+
+TEST(VQLExecutionTest, InvalidSignatureRegistersNoDefinitionsInDirectEngine) {
+  Harness h;
+  EXPECT_THROW(
+      h.direct.execute("def installed(): Int := 7; "
+                       "def invalid(...$rest, $later): Any := $rest; ##"),
+      TypeContractError);
+  EXPECT_THROW(h.direct.execute("installed()"), std::exception);
+  VQLCompiler compiler(h.coordinator, h.vm);
+  const auto compiled =
+      compiler.compile("def invalid(...$rest, $later): Any := $rest; ##");
+  EXPECT_FALSE(compiled.success);
+  EXPECT_NE(compiled.errorMessage.find("variadic parameter must be last"),
+            std::string::npos);
 }
 
 } // namespace xanadu::vql

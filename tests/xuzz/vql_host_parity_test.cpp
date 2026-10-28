@@ -1,4 +1,8 @@
+#include <cstdint>
 #include <gtest/gtest.h>
+
+#include <string>
+#include <vector>
 
 #include "common/xanadu/vortex/vortex_host.hpp"
 
@@ -79,6 +83,67 @@ TEST(VQLHostParityTest, RuntimeRanksFlowThroughQueryNavigationScriptAndBatch) {
     ASSERT_EQ(rows.size(), 2u);
     EXPECT_EQ(rows.front(), (std::vector<std::string>{"7", "9"}));
     EXPECT_EQ(rows.back(), (std::vector<std::string>{"9"}));
+  }
+}
+
+TEST(VQLHostParityTest,
+     TypedVariadicCallsFlowThroughQueryNavigationScriptAndBatch) {
+  const std::string success =
+      "def collect(...$rest: Int): Stream<Int> := $rest; collect(7, 9, 7)";
+  const std::string mismatch =
+      "def collect(...$rest: Int): Stream<Int> := $rest; "
+      "collect(7, 9, \"bad\")";
+  const std::string brokenReturn =
+      "def broken(...$rest: Int): String := $rest; broken(7, 9)";
+
+  for (const auto mode :
+       {QueryExecutionMode::Direct, QueryExecutionMode::Vortex}) {
+    SCOPED_TRACE(mode == QueryExecutionMode::Direct ? "direct" : "vortex");
+    VortexHost host;
+    host.setVQLExecutionOptions({.mode = mode});
+
+    const auto query = host.executeVQLChecked(success);
+    ASSERT_TRUE(query) << query.error().message;
+    std::vector<std::int64_t> actual;
+    for (const auto cell : *query) {
+      const auto value = host.core().arena().asInt64(cell);
+      ASSERT_TRUE(value);
+      actual.push_back(*value);
+    }
+    EXPECT_EQ(actual, (std::vector<std::int64_t>{7, 9, 7}));
+
+    const auto rejected = host.executeVQLChecked(mismatch);
+    ASSERT_TRUE(rejected) << rejected.error().message;
+    EXPECT_TRUE(rejected->empty());
+
+    const auto target = host.core().arena().makeCell("context");
+    EXPECT_EQ(
+        host.navigatePath("def from_context(...$rest: Cell): Cell := $rest; "
+                          "from_context(.)",
+                          target),
+        target);
+
+    const auto script = host.executeScript(success);
+    ASSERT_TRUE(script.success) << script.message;
+    ASSERT_EQ(script.affectedCells.size(), 3u);
+    std::vector<std::int64_t> scriptValues;
+    for (const auto cell : script.affectedCells) {
+      const auto value = host.core().arena().asInt64(cell);
+      ASSERT_TRUE(value);
+      scriptValues.push_back(*value);
+    }
+    EXPECT_EQ(scriptValues, (std::vector<std::int64_t>{7, 9, 7}));
+    const auto failedScript = host.executeScript(brokenReturn);
+    EXPECT_FALSE(failedScript.success);
+    EXPECT_EQ(failedScript.message,
+              "broken() returned a value outside its declared type");
+
+    const auto rows = host.executeVQLBatchParallel(
+        {success, mismatch},
+        [](zigzag::vortex::WorkerContext &, std::size_t) {});
+    ASSERT_EQ(rows.size(), 2u);
+    EXPECT_EQ(rows[0], (std::vector<std::string>{"7", "9", "7"}));
+    EXPECT_TRUE(rows[1].empty());
   }
 }
 

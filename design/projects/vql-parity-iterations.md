@@ -25,8 +25,8 @@ This milestone is intentionally narrower than §4.12. The full feature gate rema
 
 ### Required before the §4.12 gate can pass
 
-- Complete runtime stream semantics, general variadics, recursive frames, and parallel/mesh stream
-  lifecycle. The eager rank foundation below is implemented.
+- Complete runtime stream semantics, deferred variadic forms, recursive frames, and parallel/mesh
+  stream lifecycle. The eager rank foundation below is implemented.
 - All four unified contract modes over runtime streams, aliases, and nonliteral contract-field
   default thunks. Bounded optional/union contracts, nested calls and parameter expression defaults
   are implemented.
@@ -139,10 +139,10 @@ process; its timings are not isolated and establish no performance improvement o
 
 ### Still required
 
-Lazy universal streaming, recursive frames, general variadics, nonliteral contract-field default
-thunks, atomic mutation-boundary checks, functor shape/pin support, complete session/selector
-semantics, and parallel/mesh/export parity remain release blockers. No specialized functor ABI or
-performance claim has been established.
+Lazy universal streaming, recursive frames, variadic defaults/dot/destructuring, nonliteral
+contract-field default thunks, atomic mutation-boundary checks, functor shape/pin support, complete
+session/selector semantics, and parallel/mesh/export parity remain release blockers. No specialized
+functor ABI or performance claim has been established.
 
 ## Annotated functor and query-dereference iteration
 
@@ -192,3 +192,32 @@ annotated. The annotated graph does more work; this is not an optimization compa
 timings include parsing, first-process rows have cold outliers, and allocations were not measured.
 The Luna profiler accepted these reporting limits. Artifact: `/tmp/vql-annotated-probe.jsonl`; build
 flags and host metadata match the earlier rank probe.
+
+## Named variadic calls and caller argument activation
+
+Named final variadic parameters now have a differential runtime/frontend/export gate. Each actual
+argument is checked against the rest parameter's type before its result stream is concatenated in
+source/member order. `...$xs: Int` therefore rejects one multi-cell actual; `...$xs: Stream<Int>`
+can accept that actual. Empty rest streams, duplicate identities, fixed defaults, UFCS and repeated
+calls are covered. Variadic shape checks do not introduce capture bindings, matching direct
+evaluation; matcher output slots still exist in the VM instruction graph.
+
+One shared signature validator checks all declarations before registration or lowering. Non-final or
+multiple variadics and the currently unsupported defaulted/dot/destructured rest forms fail
+explicitly in both modes. Nonvariadic defaults and existing extra-argument behavior are unchanged.
+These deferred forms still prevent a claim of complete variadic specification support.
+
+Explicit arguments now compile in caller scope before the callee is marked active. Finite nested
+calls such as `identity(identity(7))` and `collect(collect(1,2),3)` compile and execute, while true
+recursive bodies and recursive defaults remain refused pending VM call frames. Guarded scope cleanup
+also handles argument-preparation failures.
+
+Luna implemented the binder changes, runtime regressions and CLI/host/fresh-VM export cases.
+Independent architecture and source reviews accepted the bounded design. All 446 focused tests
+passed; the full build and formatting gate passed. Logs: `/tmp/vql-variadic-focused.log`,
+`/tmp/vql-variadic-full-build.log`, `/tmp/vql-variadic-format.log`.
+
+Profiling review identified an existing accounting edge: VM contract matching copies a whole result
+stream before charging its individual members, and direct matching can inspect prebound subjects
+without its own per-member fuel charge. The next iteration addresses that boundary; no performance
+or allocation improvement is claimed here. Full §4.12 remains incomplete.

@@ -25,11 +25,15 @@ namespace xanadu::vql {
 using ContractBindings =
     std::unordered_map<std::string, std::vector<zigzag::CellRef>>;
 
-/// A def result violated its signature, or a type name is not supported.
+/// A signature is unsupported, or a result violates its declared contract.
 class TypeContractError : public std::runtime_error {
 public:
   using std::runtime_error::runtime_error;
 };
+
+/// Validate a user definition before registration or lowering in either
+/// backend.
+void validateFunctionSignature(const DefDeclaration &definition);
 
 /// Evaluates structural type and destructuring contracts over one VQL arena.
 /// The default evaluator is borrowed for each call and is never retained.

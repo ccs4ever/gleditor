@@ -132,6 +132,23 @@ TEST_F(VQueryE2ETest, TypedDefinitionsAndReturnErrorsHaveBackendParity) {
   }
 }
 
+TEST_F(VQueryE2ETest, TypedVariadicCallsPreserveOrderAndRejectLateMismatch) {
+  for (const auto mode : {"direct", "vortex"}) {
+    SCOPED_TRACE(mode);
+    const auto success = runVQuery(
+        std::string("--engine ") + mode +
+        R"( --eval 'def collect(...$rest: Int): Stream<Int> := $rest; collect(7, 9, 7)')");
+    EXPECT_EQ(success.exitCode, 0) << success.output;
+    EXPECT_EQ(success.output, "7\n9\n7\n");
+
+    const auto mismatch = runVQuery(
+        std::string("--engine ") + mode +
+        R"( --eval 'def collect(...$rest: Int): Stream<Int> := $rest; collect(7, 9, "bad")')");
+    EXPECT_EQ(mismatch.exitCode, 0) << mismatch.output;
+    EXPECT_TRUE(mismatch.output.empty()) << mismatch.output;
+  }
+}
+
 TEST_F(VQueryE2ETest, RuntimeRankTypedFilterHasBackendParity) {
   for (const auto mode : {"direct", "vortex"}) {
     const auto result = runVQuery(

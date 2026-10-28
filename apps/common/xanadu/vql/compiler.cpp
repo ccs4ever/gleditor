@@ -294,18 +294,16 @@ CompilationResult VQLCompiler::compile(std::string_view queryString,
 }
 
 std::optional<CellRef> VQLCompiler::compileQuery(const QueryExpression &query) {
+  try {
+    for (const auto &definition : query.defs)
+      validateFunctionSignature(definition);
+  } catch (const TypeContractError &error) {
+    throw std::invalid_argument(error.what());
+  }
   for (const auto &definition : query.defs) {
     if (!definitions_.emplace(definition.name, definition).second)
       throw std::invalid_argument("duplicate function definition: " +
                                   definition.name);
-    try {
-      for (const auto &parameter : definition.params)
-        if (parameter.type) ContractMatcher::validateType(*parameter.type);
-      if (definition.returnType)
-        ContractMatcher::validateType(*definition.returnType);
-    } catch (const TypeContractError &error) {
-      throw std::invalid_argument(error.what());
-    }
   }
   if (!query.mounts.empty() || !query.namespaceDeclarations.empty()) {
     throw std::invalid_argument(

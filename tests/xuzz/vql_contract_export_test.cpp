@@ -215,6 +215,17 @@ TEST(VQLContractExportTest, TypedCallGraphSurvivesStoreReloadAndFreshVM) {
        .expectedValue = "95"},
       {.query         = "def identity($x: Int): Int := $x; identity(7)",
        .expectedValue = "7"},
+      {.query          = "def collect(...$rest: Int): Stream<Int> := $rest; "
+                         "collect(7, 9, 7)",
+       .expectedValues = {"7", "9", "7"}},
+      {.query = "def collect(...$rest: Stream<Cell>): Stream<Cell> := $rest; "
+                "let $p := %\"paper\"; "
+                "$p/+d.left%\"7\"%\"9\"; "
+                "$p/+d.right%\"9\"%\"7\"; "
+                "collect($p/+d.left, $p/+d.right)",
+       .expectedValues = {"7", "9", "9", "7"}},
+      {.query = "def collect(...$rest: Int): Stream<Int> := $rest; "
+                "collect(7, 9, \"bad\")"},
       {.query = "def identity($x: Int): Int := $x; identity(2147483650)",
        .expectedValue = "2147483650"},
       {.query         = "def identity($x: Cell): Cell := $x; ##/identity()",

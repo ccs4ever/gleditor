@@ -2272,6 +2272,13 @@ below describe the intended shared semantics.
   one name cannot hold a field of every member). A typed field decides absence by its type, so
   `+d.subtitle: $s: String?` admits a cell with no subtitle and binds `$s` empty.
 
+- **A variadic checks each actual before concatenating it.** A named final `...$xs: Int` takes
+  trailing one-cell integer arguments; a multi-cell actual requires a type such as `Stream<Int>`.
+  Rest arguments preserve cell identity, order and duplicates, and their shape contracts introduce
+  no capture bindings. Defaulted, dot and destructured variadic forms remain explicitly unsupported.
+  Explicit argument expressions compile before callee activation, so finite nested calls of the same
+  definition are distinct from recursive body/default expansion, which still needs VM frames.
+
 - **Scalars are read as comparisons read them (§4.3).** `Int`, `Float` and `Bool` accept a cell
   minted with those value bits and a text cell whose whole content reads as one, because imported
   and typed content is text and only literal-minted cells carry value bits. `"95"` is therefore both
