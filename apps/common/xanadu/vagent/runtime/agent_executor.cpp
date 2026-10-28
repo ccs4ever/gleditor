@@ -1,8 +1,11 @@
 #include "common/xanadu/vagent/runtime/agent_executor.hpp"
+#include "common/xanadu/vagent/runtime/program.hpp"
+#include "common/xanadu/vagent/runtime/upgrade_schema.hpp"
 
 #include <gleditor/logging.hpp>
 
 #include "common/xanadu/vortex/mesh_checkpoint.hpp"
+#include "common/xanadu/vortex/scoped_evaluation.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
 
 #include <algorithm>
@@ -12,6 +15,7 @@
 #include <limits>
 #include <mutex>
 #include <ranges>
+#include <set>
 #include <stdexcept>
 #include <unordered_map>
 
@@ -245,6 +249,148 @@ CellRef cloneGraph(ArenaManifold &arena, CellRef from,
   return copy.at(from);
 }
 
+// A single identity map covers fields, clauses and source supports. Ownership
+// dimensions are explicit: traversing clone ranks would import unrelated code.
+class UpgradeGraph {
+public:
+  // Dimensions are mapped by role. An arena can hold several cells named for
+  // one dimension, and compiled code reads exactly its core's/adapter's ref,
+  // so neither a name lookup nor ensureDimension finds the right target.
+  using DimPair = std::pair<zigzag::DimRef, zigzag::DimRef>;
+  UpgradeGraph(const ArenaManifold &from, ArenaManifold &into,
+               std::uint64_t maxCells, std::uint64_t maxBytes,
+               std::uint64_t &work, bool extensionTranslator,
+               std::vector<DimPair> dataDims, DimPair cloneDim)
+      : from_(from), into_(into), maxCells_(maxCells), maxBytes_(maxBytes),
+        work_(work), extensionTranslator_(extensionTranslator),
+        dims_(std::move(dataDims)), clone_(cloneDim) {}
+  void charge(std::uint64_t amount = 1) {
+    if (amount > work_) throw std::runtime_error("upgrade work budget");
+    work_ -= amount;
+    into_.consumeWork();
+  }
+  void bind(CellRef from, CellRef into) {
+    charge();
+    if (!from_.contains(from) || !into_.contains(into))
+      throw std::runtime_error("invalid symbolic upgrade binding");
+    if (const auto found = mapped_.find(from); found != mapped_.end()) {
+      if (found->second && *found->second != into)
+        throw std::runtime_error("conflicting upgrade binding");
+    }
+    if (!mapped_.contains(from) && mapped_.size() >= maxCells_)
+      throw std::runtime_error("upgrade map budget");
+    mapped_.insert_or_assign(from, into);
+  }
+  void add(CellRef from, std::optional<CellRef> into = std::nullopt) {
+    charge();
+    if (!from_.contains(from)) throw std::runtime_error("invalid owned cell");
+    if (into) bind(from, *into);
+    if (!mapped_.contains(from) && mapped_.size() >= maxCells_)
+      throw std::runtime_error("upgrade map budget");
+    mapped_.try_emplace(from, std::nullopt);
+    if (owned_.insert(from).second) order_.push_back(from);
+  }
+  void preflight() {
+    std::uint64_t bytes = 0;
+    for (std::size_t i = 0; i < order_.size(); ++i) {
+      charge();
+      if (order_.size() > maxCells_)
+        throw std::runtime_error("upgrade peak cells");
+      const auto cell = order_[i];
+      for (const auto span : from_.contentOf(cell)) {
+        charge();
+        if (span.length > maxBytes_ - bytes)
+          throw std::runtime_error("upgrade peak bytes");
+        bytes += span.length;
+      }
+      // Future owned dimensions must be handled by a typed translator; losing
+      // a profile or an activation frame silently is never a valid upgrade.
+      // Dimensions match by name: an arena can hold more than one cell named
+      // for the same dimension, and each carries real owned links.
+      for (const auto &link : from_.dimensionsOf(cell)) {
+        charge();
+        if (!link.pos) continue;
+        if (target(link.dim)) {
+          if (!mapped_.contains(link.pos)) add(link.pos);
+          continue;
+        }
+        const auto name      = from_.textOf(link.dim);
+        const bool extension = extensionTranslator_ &&
+                               (name == "d.epistemic" || name == "d.trust");
+        if (!extension && link.dim != clone_.first &&
+            name != "d.mesh.relocation")
+          throw std::runtime_error("unsupported owned upgrade dimension");
+      }
+    }
+  }
+  void copy() {
+    for (const auto old : order_) {
+      charge();
+      auto &target = mapped_.at(old);
+      if (!target) target = into_.makeCell();
+    }
+    for (const auto old : order_) {
+      charge();
+      const auto target = *mapped_.at(old);
+      const auto bytes  = from_.textOf(old);
+      const std::array spans{into_.intern(bytes)};
+      zigzag::expectWritten(into_.setContent(target, spans));
+      const auto slot = from_.slot(old);
+      if (!slot) throw std::runtime_error("lost owned cell");
+      const auto kind = from_.valueKindOf(old);
+      if (kind == xanadu::ValueKind::OpHandle ||
+          kind == xanadu::ValueKind::ForeignOpHandle ||
+          kind == xanadu::ValueKind::ExternRef)
+        throw std::runtime_error("unsupported upgrade handle");
+      zigzag::expectWritten(into_.setValueBits(target, kind, slot->valueBits));
+    }
+    for (const auto old : order_) {
+      charge();
+      for (const auto &link : from_.dimensionsOf(old)) {
+        charge();
+        if (!link.pos) continue;
+        const auto into = link.dim == clone_.first
+                              ? std::optional{clone_.second}
+                              : target(link.dim);
+        if (!into) continue;
+        const auto found = mapped_.find(link.pos);
+        if (found == mapped_.end() || !found->second)
+          throw std::runtime_error(link.dim == clone_.first
+                                       ? "unowned clone edge"
+                                       : "incomplete upgrade map");
+        const auto result =
+            into_.link(*mapped_.at(old), *into, DimVector::POS, *found->second);
+        if (!result) throw std::runtime_error("upgrade edge refused");
+      }
+    }
+  }
+  [[nodiscard]] CellRef at(CellRef old) const { return *mapped_.at(old); }
+  [[nodiscard]] std::map<CellRef, CellRef> translation() const {
+    std::map<CellRef, CellRef> result;
+    for (const auto &[old, into] : mapped_) {
+      if (into) result.emplace(old, *into);
+    }
+    return result;
+  }
+
+private:
+  const ArenaManifold &from_;
+  ArenaManifold &into_;
+  std::uint64_t maxCells_;
+  std::uint64_t maxBytes_;
+  std::uint64_t &work_;
+  bool extensionTranslator_;
+  [[nodiscard]] std::optional<zigzag::DimRef> target(zigzag::DimRef dim) const {
+    const auto found = std::ranges::find(dims_, dim, &DimPair::first);
+    return found == dims_.end() ? std::nullopt : std::optional{found->second};
+  }
+  std::vector<DimPair> dims_;
+  DimPair clone_;
+  std::map<CellRef, std::optional<CellRef>> mapped_;
+  std::set<CellRef> owned_;
+  std::vector<CellRef> order_;
+};
+
 } // namespace
 
 std::string_view toString(CheckpointRefusal refusal) noexcept {
@@ -302,6 +448,7 @@ struct AgentExecutor::State {
   std::string agentType;
   std::string prefix;
   std::optional<identity::ActorPid> parentPid;
+  std::shared_ptr<AgentProgram> program;
   CompiledAgent agent{};
   AgentDims dims{};
   ValueDims vd{};
@@ -409,6 +556,8 @@ struct AgentExecutor::TurnSpec {
   /// An `answer` turn (§7.1): read `$answer`, then undo the turn whether or
   /// not it succeeded, so the answer cannot have written anything.
   bool readOnly{false};
+  /// The private upgrade transaction commits effects only after runtime swap.
+  bool deferDrain{false};
   /// Extra fields of `$turn`, for a turn that needs more than `time`.
   WireRecord turnFields;
 };
@@ -475,9 +624,31 @@ AgentExecutor::AgentExecutor(zigzag::vortex::mesh::MeshActorRuntime &runtime,
       settings_(std::move(settings)), clock_(std::move(clock)),
       posts_(std::make_shared<PostBox>()),
       hostPid_{localNode_, std::string(kHostCursor), epoch_, 1} {
+  programs_.emplace(
+      std::string(program.programRef()),
+      std::shared_ptr<AgentProgram>(&program, [](AgentProgram *) {}));
   if (!settings_.epistemic.validate()) {
     throw std::invalid_argument("invalid epistemic admission limits");
   }
+}
+
+bool AgentExecutor::retainProgram(std::shared_ptr<AgentProgram> program) {
+  if (!program || program->programRef().empty()) return false;
+  const std::string ref(program->programRef());
+  const auto found = programs_.find(ref);
+  if (found != programs_.end()) {
+    if (found->second.get() != program.get()) return false;
+    found->second = std::move(program);
+    return true;
+  }
+  programs_.emplace(ref, std::move(program));
+  return true;
+}
+
+std::shared_ptr<AgentProgram>
+AgentExecutor::resolveProgram(std::string_view ref) const {
+  const auto found = programs_.find(ref);
+  return found == programs_.end() ? nullptr : found->second;
 }
 
 AgentExecutor::~AgentExecutor() = default;
@@ -698,7 +869,8 @@ bool AgentExecutor::prepare(State &state, WorkerContext &context,
   state.parentPid  = info ? info->parent : std::nullopt;
 
   try {
-    auto compiled = program_.instantiate(context, state.agentType);
+    if (!state.program) return false;
+    auto compiled = state.program->instantiate(context, state.agentType);
     if (!compiled) {
       GLEDITOR_LOG_DEBUG(kLog, "instantiate refused: {}", compiled.error());
       return false;
@@ -883,6 +1055,9 @@ AgentExecutor::execute(const ActorExecution &execution,
     ~InTurn() { state.inTurn = false; }
   } inTurn(state);
   liftLimits(context);
+  if (!state.prepared) {
+    state.program = resolveProgram(execution.grant.programRef);
+  }
   if (!state.prepared &&
       !prepare(state, context, execution.spawnRequest, execution.stateRoot)) {
     return fatal(state, kCauseInit);
@@ -1399,9 +1574,10 @@ AgentExecutor::TurnOutcome AgentExecutor::runTurnOnce(State &state,
                                 std::numeric_limits<std::uint32_t>::max());
     const auto work = static_cast<std::size_t>(std::min<std::uint64_t>(
         grant.maxInstructions, std::numeric_limits<std::size_t>::max()));
-    arena.setExecutionLimits(static_cast<std::uint32_t>(cells), work,
-                             std::size_t{m0.scratchSize} +
-                                 grant.maxOutputBytes);
+    if (!spec.deferDrain)
+      arena.setExecutionLimits(static_cast<std::uint32_t>(cells), work,
+                               std::size_t{m0.scratchSize} +
+                                   grant.maxOutputBytes);
 
     std::optional<std::string> failure;
     std::optional<WireValue> answer;
@@ -1429,7 +1605,7 @@ AgentExecutor::TurnOutcome AgentExecutor::runTurnOnce(State &state,
       if (spec.event) {
         const auto event = mintEvent(state, *spec.event, spec.space, millis);
         setField(arena, state.vd, turnCell, kTurnEvent, event);
-        if (observer_) observer_(state.pid, context, event);
+        if (observer_ && !spec.deferDrain) observer_(state.pid, context, event);
       }
       setField(arena, state.vd, agent.agentCell, kFieldTurn, turnCell);
       if (spec.intention && spec.cause.empty() && intentionObserver_) {
@@ -1450,7 +1626,21 @@ AgentExecutor::TurnOutcome AgentExecutor::runTurnOnce(State &state,
           failure = std::string(kFailCycles);
           break;
         }
-        const auto result = vm.run(cursor, work - used);
+        const auto beforeRun = vm.totalCycles();
+        const auto result    = vm.run(cursor, work - used);
+        if (spec.deferDrain) {
+          // Upgrade shares one structural+VM budget across the whole private
+          // translation. Ordinary turns retain their existing per-turn budget.
+          for (auto cycles = vm.totalCycles() - beforeRun; cycles != 0;
+               --cycles)
+            arena.consumeWork();
+        }
+        if (result.scopedRefusal) {
+          failure =
+              "epistemic." + std::string(zigzag::vortex::scopedRefusalName(
+                                 *result.scopedRefusal));
+          break;
+        }
         if (result.success) break;
         if (result.contractViolation !=
             zigzag::vortex::ContractViolationKind::None) {
@@ -1504,7 +1694,7 @@ AgentExecutor::TurnOutcome AgentExecutor::runTurnOnce(State &state,
     } else {
       arena.discard(m0);
     }
-    liftLimits(context);
+    if (!spec.deferDrain) liftLimits(context);
     // 8. Scope: the activation frames of this turn only.
     zigzag::expectWritten(
         arena.unlink(cursor, context.core.dims().vars, DimVector::POS));
@@ -1521,6 +1711,8 @@ AgentExecutor::TurnOutcome AgentExecutor::runTurnOnce(State &state,
       GLEDITOR_LOG_DEBUG(kLog, "turn of {} undone: {}", state.name, *failure);
     }
   }
+
+  if (spec.deferDrain) return outcome;
 
   // 9. Drain. After an undo the outbox is empty again, but a relay is the
   //    host's duty and does not depend on the user's handler succeeding.
@@ -2038,7 +2230,7 @@ void AgentExecutor::spawnChild(State &state, WorkerContext &context,
     failed();
     return;
   }
-  SpawnTicket ticket{.programRef = std::string(program_.programRef()),
+  SpawnTicket ticket{.programRef = std::string(state.program->programRef()),
                      .agentType  = item.agentType,
                      .childName  = item.childName,
                      .parentName = state.name,
@@ -2201,7 +2393,10 @@ bool AgentExecutor::sendEnvelope(State &state, std::uint64_t turn,
 
 std::expected<identity::ActorPid, ActorError>
 AgentExecutor::launch(std::string_view agentType, std::string_view name,
-                      WireRecord args) {
+                      WireRecord args, std::string_view programRef) {
+  if (programRef.empty()) programRef = program_.programRef();
+  if (!resolveProgram(programRef))
+    return std::unexpected(ActorError::NotAuthorized);
   WireRecord params;
   params.set(std::string(kWireSpawnName), WireValue::text(std::string(name)));
   params.set(std::string(kWireSpawnParent), WireValue::text(std::string{}));
@@ -2210,7 +2405,7 @@ AgentExecutor::launch(std::string_view agentType, std::string_view name,
              WireValue::text(std::string(agentType)));
   auto parameters = encodeValue(WireValue::record(std::move(params)));
   if (!parameters) return std::unexpected(ActorError::InvalidMessage);
-  SpawnTicket ticket{.programRef = std::string(program_.programRef()),
+  SpawnTicket ticket{.programRef = std::string(programRef),
                      .agentType  = std::string(agentType),
                      .childName  = std::string(name),
                      .parentName = {},
@@ -2378,7 +2573,7 @@ bool AgentExecutor::renewLease(State &state,
   params.set(std::string(kWireSpawnAgent), WireValue::text(state.agentType));
   auto parameters = encodeValue(WireValue::record(std::move(params)));
   if (!parameters) return false;
-  SpawnTicket ticket{.programRef = std::string(program_.programRef()),
+  SpawnTicket ticket{.programRef = std::string(state.program->programRef()),
                      .agentType  = state.agentType,
                      .childName  = state.name,
                      .parentName = state.parentName,
@@ -3398,7 +3593,7 @@ AgentExecutor::checkpoint(const identity::ActorPid &pid) {
   out.agentType  = state.agentType;
   out.name       = state.name;
   out.parentName = state.parentName;
-  out.programRef = std::string(program_.programRef());
+  out.programRef = std::string(state.program->programRef());
   out.adopted    = state.adopted;
   out.source     = std::make_shared<xanadu::DirectoryContentSource>();
   for (const auto &payload : seed->payloads) {
@@ -3467,6 +3662,365 @@ AgentExecutor::resume(const AgentCheckpoint &checkpoint) {
   resumeAdopted_[pidKey(*pid)] = checkpoint.adopted;
   needsFirstTurn_.push_back(*pid);
   return pid;
+}
+
+std::expected<void, ActorError>
+AgentExecutor::upgrade(const identity::ActorPid &pid,
+                       std::shared_ptr<CompiledProgram> program,
+                       const ActorGrant &grant) {
+  const auto found = states_.find(pidKey(pid));
+  if (found == states_.end() || !found->second->prepared ||
+      !live(*found->second))
+    return std::unexpected(ActorError::UnknownProcess);
+  const State &old = *found->second;
+  if (!program ||
+      resolveProgram(program->programRef()).get() != program.get() ||
+      grant.programRef != program->programRef() ||
+      !program->declares(old.agentType))
+    return std::unexpected(ActorError::NotAuthorized);
+  const auto previous = std::dynamic_pointer_cast<CompiledProgram>(old.program);
+  if (!previous) return std::unexpected(ActorError::ExecutionFailed);
+  if (old.inTurn || !old.hostEvents.empty() || posts_->pendingFor(pid) ||
+      !old.flights.empty() || !old.requests.empty() ||
+      std::ranges::any_of(outstanding_,
+                          [&](const auto &entry) {
+                            return entry.second.ownerKey == pidKey(pid);
+                          }) ||
+      old.context->vm.choiceDepth() != 0 ||
+      old.context->arena.outstandingMarks() != 0 ||
+      old.context->arena.linked(old.agent.agentCell, old.dims.outbox) ||
+      old.context->arena.linked(old.agent.agentCell, old.dims.pending))
+    return std::unexpected(ActorError::NotQuiescent);
+  // This compiler cannot lower/resume BDI plans yet. Refuse rather than
+  // misbinding saved plan PCs or silently dropping an existing intention.
+  if (old.context->arena.linked(old.agent.agentCell, old.dims.intention))
+    return std::unexpected(ActorError::ExecutionFailed);
+
+  try {
+    const auto *before    = &previous->upgradeSchema();
+    const auto *after     = &program->upgradeSchema();
+    std::uint64_t work    = grant.maxInstructions;
+    const auto schemaCost = [](const UpgradeSchema &schema) {
+      std::uint64_t count = schema.predicates.size() + schema.records.size() +
+                            schema.events.size() + schema.plans.size();
+      for (const auto *set :
+           {&schema.agents, &schema.skills, &schema.behaviors})
+        for (const auto &[name, container] : *set) {
+          (void)name;
+          count += 1 + container.parameters.size() + container.fields.size() +
+                   container.plans.size();
+        }
+      for (const auto &[name, predicate] : schema.predicates) {
+        (void)name;
+        count += predicate.parameters.size();
+      }
+      return count;
+    };
+    const auto cost = schemaCost(*before) + schemaCost(*after);
+    if (cost > work) return std::unexpected(ActorError::ResourceLimit);
+    work -= cost;
+    const auto changes = compareUpgradeSchemas(*before, *after);
+    for (const auto &change : changes) {
+      if (upgradeChangeRequiresRefusal(change))
+        return std::unexpected(ActorError::ExecutionFailed);
+      // A queued old event must be consumable with exactly its old layout.
+      if (runtime_.pending(pid) != 0 && change.owner == "event")
+        return std::unexpected(ActorError::NotQuiescent);
+    }
+    if (runtime_.pending(pid) != 0) {
+      for (const auto &[name, fields] : before->events) {
+        (void)fields;
+        if (!after->events.contains(name))
+          return std::unexpected(ActorError::NotQuiescent);
+      }
+    }
+    const auto &oldSchema = before->agents.at(old.agentType);
+    const auto &newSchema = after->agents.at(old.agentType);
+    std::unique_ptr<State> candidate;
+    const auto status = runtime_.upgrade(
+        pid, grant, wallNow(),
+        zigzag::vortex::mesh::MeshActorRuntime::PreparedStateReconciler{
+            [&](const identity::ActorPid &, const ArenaManifold &source,
+                std::optional<CellRef>, WorkerContext &context,
+                CellRef cursor) -> std::expected<CellRef, ActorError> {
+              for (auto budgeted = cost; budgeted != 0; --budgeted)
+                context.arena.consumeWork();
+              candidate      = std::make_unique<State>(old);
+              State &next    = *candidate;
+              next.context   = &context;
+              next.program   = program;
+              next.grant     = grant;
+              next.cursor    = cursor;
+              next.leaseSeen = wallNow();
+              next.wakeIntention.reset();
+              next.schedule     = {};
+              next.sinceCompact = 0;
+              const auto compiled =
+                  program->instantiate(context, old.agentType);
+              if (!compiled)
+                return std::unexpected(ActorError::ExecutionFailed);
+              next.agent = *compiled;
+              next.dims  = registerDimensions(context.arena);
+              next.vd    = valueDims(context.core);
+              context.vm.setDeweyTracking(false);
+              auto &arena     = context.arena;
+              const auto ac   = next.agent.agentCell;
+              const auto &was = old.context->core.dims();
+              const auto &now = context.core.dims();
+              UpgradeGraph graph(source, arena, grant.maxCells,
+                                 grant.maxOutputBytes, work,
+                                 static_cast<bool>(ownedStateTranslator_),
+                                 {{was.vars, now.vars},
+                                  {was.values, now.values},
+                                  {was.grab, now.grab},
+                                  {was.step, now.step},
+                                  {was.clause, now.clause},
+                                  {old.dims.source, next.dims.source},
+                                  {old.dims.member, next.dims.member},
+                                  {old.dims.space, next.dims.space},
+                                  {old.dims.holon, next.dims.holon}},
+                                 {was.clone, now.clone});
+              graph.bind(old.agent.agentCell, ac);
+              WireRecord dropped;
+              std::uint64_t droppedBytes = 0;
+              struct FieldCopy {
+                CellRef oldValue;
+                CellRef owner;
+                std::string name;
+              };
+              std::vector<FieldCopy> fields;
+              struct AddedDefault {
+                CellRef entry;
+              };
+              std::vector<AddedDefault> defaults;
+              std::vector<CellRef> hooks;
+              const auto reconcileFields = [&](CellRef oldOwner,
+                                               CellRef newOwner,
+                                               const UpgradeContainer &was,
+                                               const UpgradeContainer &now,
+                                               const auto &defaultEntries,
+                                               std::string_view prefix) {
+                std::set<std::string, std::less<>> names;
+                for (const auto &field : now.fields) names.insert(field.name);
+                for (const auto &param : now.parameters)
+                  names.insert(param.name);
+                for (const auto &[nameCell, value] :
+                     fieldsOf(source, old.vd, oldOwner)) {
+                  graph.charge();
+                  if (!value) continue;
+                  const auto name = source.textOf(nameCell);
+                  if (name == kFieldTurn || name == kFieldDroppedFields)
+                    continue;
+                  const bool reserved = !name.empty() && name.front() == '$';
+                  if (!reserved && !names.contains(name)) {
+                    for (const auto span : source.contentOf(*value)) {
+                      graph.charge();
+                      if (span.length > grant.maxOutputBytes - droppedBytes)
+                        throw std::runtime_error("dropped field byte budget");
+                      droppedBytes += span.length;
+                    }
+                    const auto bytes = source.textOf(*value);
+                    dropped.set(std::string(prefix) + name,
+                                WireValue::text(bytes));
+                    continue;
+                  }
+                  const auto target =
+                      fieldValue(arena, next.vd, newOwner, name);
+                  // Scalars remain at their compiled address; structured values
+                  // are reached through the field name cell and can be copied
+                  // privately.
+                  if (target && !hasLinks(source, *value,
+                                          std::array{old.vd.vars, old.vd.values,
+                                                     old.vd.grab, old.vd.step}))
+                    graph.add(*value, *target);
+                  else
+                    graph.add(*value);
+                  fields.push_back({*value, newOwner, name});
+                }
+                for (const auto &field : now.fields) {
+                  graph.charge();
+                  if (std::ranges::any_of(was.fields, [&](const auto &f) {
+                        return f.name == field.name;
+                      }))
+                    continue;
+                  const auto entry = defaultEntries.find(field.name);
+                  if (entry == defaultEntries.end())
+                    throw std::runtime_error("missing upgrade default entry");
+                  defaults.push_back({entry->second});
+                }
+              };
+              reconcileFields(old.agent.agentCell, ac, oldSchema, newSchema,
+                              next.agent.fieldDefaults, "");
+              struct RankCopy {
+                CellRef owner;
+                zigzag::DimRef dim;
+                CellRef first;
+              };
+              std::vector<RankCopy> ranks;
+              for (const auto oldPredicate : zigzag::rankAfter(
+                       source, old.agent.agentCell, old.dims.belief)) {
+                graph.charge();
+                const auto name = source.textOf(oldPredicate);
+                if (!after->predicates.contains(name)) continue;
+                std::optional<CellRef> target;
+                for (const auto predicate :
+                     zigzag::rankAfter(arena, ac, next.dims.belief)) {
+                  graph.charge();
+                  if (arena.textOf(predicate) == name) {
+                    target = predicate;
+                    break;
+                  }
+                }
+                if (!target)
+                  return std::unexpected(ActorError::ExecutionFailed);
+                graph.bind(oldPredicate, *target);
+                if (const auto first = source.linked(
+                        oldPredicate, old.context->core.dims().clause)) {
+                  graph.add(*first);
+                  ranks.push_back(
+                      {*target, context.core.dims().clause, *first});
+                }
+              }
+              for (const auto [from, into] :
+                   {std::pair{old.dims.space, next.dims.space},
+                    std::pair{old.dims.holon, next.dims.holon}}) {
+                if (const auto first =
+                        source.linked(old.agent.agentCell, from)) {
+                  graph.add(*first);
+                  ranks.push_back({ac, into, *first});
+                }
+              }
+              const auto containers = [&](const auto &oldInfo,
+                                          const auto &newInfo,
+                                          const auto &oldSet,
+                                          const auto &newSet,
+                                          zigzag::DimRef fromRank,
+                                          zigzag::DimRef intoRank) {
+                for (const auto &[name, info] : oldInfo) {
+                  graph.charge();
+                  const bool mounted =
+                      std::ranges::any_of(info.members, [&](CellRef cell) {
+                        return source.linked(cell, fromRank, DimVector::NEG)
+                            .has_value();
+                      });
+                  if (!mounted) continue;
+                  const auto target = newInfo.find(name);
+                  if (target == newInfo.end()) continue;
+                  const auto &was = oldSet.at(name);
+                  const auto &now = newSet.at(name);
+                  if (info.members.size() != target->second.members.size())
+                    throw std::runtime_error("incompatible mounted container");
+                  graph.bind(info.owner, target->second.owner);
+                  for (std::size_t i = 0; i < info.members.size(); ++i)
+                    graph.bind(info.members[i], target->second.members[i]);
+                  reconcileFields(info.owner, target->second.owner, was, now,
+                                  target->second.fieldDefaults, name + ".");
+                  for (const auto member : target->second.members)
+                    appendToRank(arena, ac, intoRank, member);
+                  if (target->second.upgradeEntry)
+                    hooks.push_back(*target->second.upgradeEntry);
+                }
+              };
+              containers(old.agent.skills, next.agent.skills, before->skills,
+                         after->skills, old.dims.skill, next.dims.skill);
+              containers(old.agent.behaviors, next.agent.behaviors,
+                         before->behaviors, after->behaviors, old.dims.behavior,
+                         next.dims.behavior);
+              // P19's typed translator owns trust/epistemic graphs. Until
+              // registered, populated roots cannot be silently erased by this
+              // baseline copier.
+              if (!ownedStateTranslator_ &&
+                  (source.linked(old.agent.agentCell, old.dims.trust) ||
+                   source.linked(old.agent.agentCell, old.dims.epistemic)))
+                return std::unexpected(ActorError::ExecutionFailed);
+              graph.preflight();
+              graph.copy();
+              for (const auto &field : fields)
+                setField(arena, next.vd, field.owner, field.name,
+                         graph.at(field.oldValue));
+              for (const auto &rank : ranks)
+                zigzag::expectWritten(arena.link(rank.owner, rank.dim,
+                                                 DimVector::POS,
+                                                 graph.at(rank.first)));
+              if (ownedStateTranslator_) {
+                auto mapping          = graph.translation();
+                const auto translated = ownedStateTranslator_(
+                    *previous, *program, source, old.agent.agentCell, context,
+                    ac, mapping, work);
+                if (!translated) return std::unexpected(translated.error());
+                for (const auto &[from, into] : mapping) {
+                  graph.charge();
+                  if (!source.contains(from) || !arena.contains(into))
+                    return std::unexpected(ActorError::ExecutionFailed);
+                }
+              }
+              setField(arena, next.vd, ac, kFieldDroppedFields,
+                       writeValue(arena, next.vd,
+                                  WireValue::record(std::move(dropped))));
+              Envelope event;
+              event.kind = std::string(kKindEvent);
+              event.type = std::string(kEventUpgrade);
+              event.fields.set("from_version", WireValue::text(std::string(
+                                                   previous->programRef())));
+              const auto run = [&](CellRef entry) {
+                if (work == 0) return false;
+                ActorGrant budget      = grant;
+                budget.maxInstructions = work;
+                TurnSpec spec;
+                spec.entry         = entry;
+                spec.event         = &event;
+                spec.deferDrain    = true;
+                const auto started = context.vm.totalCycles();
+                const auto result =
+                    runTurnOnce(next, cursor, budget, context, spec);
+                const auto used = context.vm.totalCycles() - started;
+                if (used > work) return false;
+                work -= used;
+                return result.committed;
+              };
+              for (const auto &field : defaults) {
+                if (!run(field.entry) || arena.linked(ac, next.dims.outbox))
+                  return std::unexpected(ActorError::ExecutionFailed);
+              }
+              for (const auto entry : hooks) {
+                if (!run(entry))
+                  return std::unexpected(ActorError::ExecutionFailed);
+              }
+              if (!run(next.agent.dispatchEntry))
+                return std::unexpected(ActorError::ExecutionFailed);
+              // Even an indirect effect call is refused before any native
+              // binding or external delivery is invoked. The live actor is
+              // still untouched here.
+              for (const auto item :
+                   zigzag::rankAfter(arena, ac, next.dims.outbox)) {
+                graph.charge();
+                const auto kind = arena.textOf(item);
+                if (kind == kKindEffect || kind == kKindEffectCancel ||
+                    kind == kKindAsk || kind == kKindAchieve)
+                  return std::unexpected(ActorError::ExecutionFailed);
+              }
+              setField(arena, next.vd, ac, kFieldDroppedFields, std::nullopt);
+              // Cursor PC is execution machinery; an upgrade ends at the usual
+              // halt.
+              return ac;
+            }});
+    if (!status) return status;
+    // No allocations or user callbacks between the runtime's commit and the
+    // adapter binding. The old state's context is never dereferenced again.
+    found->second.swap(candidate);
+  } catch (const std::exception &) {
+    return std::unexpected(ActorError::ResourceLimit);
+  }
+  State &committed = *found->second;
+  liftLimits(*committed.context);
+  TurnSpec spec;
+  drain(committed, *committed.context, counter(committed, kFieldTurnCount),
+        spec);
+  setCounter(committed, kFieldTurnCount,
+             counter(committed, kFieldTurnCount) + 1);
+  flushStats(committed);
+  deriveSchedule(committed);
+  return {};
 }
 
 bool AgentExecutor::retire(const identity::ActorPid &pid) {

@@ -34,6 +34,7 @@
 #include "common/xanadu/vagent/runtime/checker.hpp"
 #include "common/xanadu/vagent/runtime/parser.hpp"
 #include "common/xanadu/vagent/runtime/program.hpp"
+#include "common/xanadu/vagent/runtime/upgrade_schema.hpp"
 #include "common/xanadu/vagent/token.hpp"
 
 namespace {
@@ -149,101 +150,72 @@ int checkUpgrade(const std::string &oldPath, const std::string &newPath,
     return exitError;
   }
 
-  int failures = 0;
-
-  auto checkContainers = [&](const auto &oldMap, const auto &newMap,
-                             const char *kind) {
-    for (const auto &[name, oldCont] : oldMap) {
-      auto it = newMap.find(name);
-      if (it == newMap.end()) continue;
-      const auto &newCont = it->second;
-      std::unordered_map<std::string, const FieldInfo *> newFields;
-      for (const auto &f : newCont.fields) newFields[f.name] = &f;
-      for (const auto &f1 : oldCont.fields) {
-        auto fit = newFields.find(f1.name);
-        if (fit != newFields.end()) {
-          const auto *f2 = fit->second;
-          if (f1.type != f2->type) {
-            std::cerr << newPath << ':' << f2->loc.line << ':' << f2->loc.column
-                      << ": error: " << kind << " '" << name << "': field '"
-                      << f1.name << "' changed type from " << typeName(f1.type)
-                      << " to " << typeName(f2->type)
-                      << " (breaking upgrade)\n";
-            ++failures;
-          }
-        }
+  auto oldSchema = makeUpgradeSchema(*c1);
+  auto newSchema = makeUpgradeSchema(*c2);
+  if (!oldSchema || !newSchema) {
+    std::cerr << "vagent: could not construct upgrade schema\n";
+    return exitError;
+  }
+  const auto changes = compareUpgradeSchemas(*oldSchema, *newSchema);
+  int failures       = 0;
+  for (const auto &change : changes) {
+    if (upgradeChangeRequiresRefusal(change)) ++failures;
+    switch (change.kind) {
+    case UpgradeChangeKind::ContainerParameters:
+      std::cerr << newPath << ": error: " << change.owner << " '"
+                << change.symbol << "' parameters changed (breaking upgrade)\n";
+      break;
+    case UpgradeChangeKind::ChangedFieldType:
+      std::cerr << newPath << ": error: " << change.owner << " '"
+                << change.symbol << "': field '" << change.member
+                << "' changed type from " << typeName(*change.oldType) << " to "
+                << typeName(*change.newType) << " (breaking upgrade)\n";
+      break;
+    case UpgradeChangeKind::PredicateArity:
+      std::cerr << newPath << ": error: predicate '" << change.symbol
+                << "' arity changed (breaking upgrade)\n";
+      break;
+    case UpgradeChangeKind::PredicateParameterType:
+      std::cerr << newPath << ": error: predicate '" << change.symbol
+                << "' parameter '" << change.member
+                << "' changed type (breaking upgrade)\n";
+      break;
+    case UpgradeChangeKind::PredicateKeyPositions:
+      std::cerr << newPath << ": error: predicate '" << change.symbol
+                << "' key positions changed (breaking upgrade)\n";
+      break;
+    case UpgradeChangeKind::RemovedField:
+      if (change.owner == "record") {
+        std::cerr << newPath << ": error: record '" << change.symbol
+                  << "' layout changed (breaking upgrade)\n";
+        break;
       }
-    }
-  };
-
-  checkContainers(c1->agents, c2->agents, "agent");
-  checkContainers(c1->skills, c2->skills, "skill");
-  checkContainers(c1->behaviors, c2->behaviors, "behavior");
-
-  for (const auto &[pname, pred1] : c1->predicates) {
-    auto pit = c2->predicates.find(pname);
-    if (pit == c2->predicates.end()) continue;
-    const auto &pred2 = pit->second;
-    if (pred1.params.size() != pred2.params.size()) {
-      std::cerr << newPath << ':' << pred2.loc.line << ':' << pred2.loc.column
-                << ": error: predicate '" << pname << "' arity changed from "
-                << pred1.params.size() << " to " << pred2.params.size()
-                << " (breaking upgrade)\n";
-      ++failures;
-    } else {
-      for (std::size_t i = 0; i < pred1.params.size(); ++i) {
-        if (pred1.params[i].type != pred2.params[i].type) {
-          std::cerr << newPath << ':' << pred2.loc.line << ':'
-                    << pred2.loc.column << ": error: predicate '" << pname
-                    << "' parameter '" << pred2.params[i].name
-                    << "' changed type from " << typeName(pred1.params[i].type)
-                    << " to " << typeName(pred2.params[i].type)
-                    << " (breaking upgrade)\n";
-          ++failures;
-        }
+      std::cerr << newPath << ": note: " << change.owner << " '"
+                << change.symbol << "': removed field '" << change.member
+                << "' is available through dropped_field during on Upgrade\n";
+      break;
+    case UpgradeChangeKind::AddedField:
+      if (change.owner == "record") {
+        std::cerr << newPath << ": error: record '" << change.symbol
+                  << "' layout changed (breaking upgrade)\n";
+        break;
       }
+      std::cerr << newPath << ": note: " << change.owner << " '"
+                << change.symbol << "': added field '" << change.member
+                << "' requires its declared default\n";
+      break;
+    case UpgradeChangeKind::RemovedPredicate:
+    case UpgradeChangeKind::RemovedPlan:
+      std::cerr << newPath << ": note: removed " << change.symbol
+                << "; dependent state is discarded or replanned\n";
+      break;
+    case UpgradeChangeKind::ChangedPlanHash:
+    case UpgradeChangeKind::PlanHashVersion:
+      std::cerr << newPath << ": note: plan '" << change.symbol
+                << "' changed; active intentions must replan\n";
+      break;
     }
   }
-
-  for (const auto &[rname, rec1] : c1->records) {
-    auto rit = c2->records.find(rname);
-    if (rit == c2->records.end()) continue;
-    const auto &rec2 = rit->second;
-    std::unordered_map<std::string, const FieldInfo *> newFields;
-    for (const auto &f : rec2.fields) newFields[f.name] = &f;
-    for (const auto &f1 : rec1.fields) {
-      auto fit = newFields.find(f1.name);
-      if (fit != newFields.end() && f1.type != fit->second->type) {
-        std::cerr << newPath << ':' << fit->second->loc.line << ':'
-                  << fit->second->loc.column << ": error: record '" << rname
-                  << "': field '" << f1.name << "' changed type from "
-                  << typeName(f1.type) << " to " << typeName(fit->second->type)
-                  << " (breaking upgrade)\n";
-        ++failures;
-      }
-    }
-  }
-
-  for (const auto &[ename, ev1] : c1->events) {
-    if (ev1.builtin) continue;
-    auto eit = c2->events.find(ename);
-    if (eit == c2->events.end()) continue;
-    const auto &ev2 = eit->second;
-    std::unordered_map<std::string, const FieldInfo *> newFields;
-    for (const auto &f : ev2.fields) newFields[f.name] = &f;
-    for (const auto &f1 : ev1.fields) {
-      auto fit = newFields.find(f1.name);
-      if (fit != newFields.end() && f1.type != fit->second->type) {
-        std::cerr << newPath << ':' << fit->second->loc.line << ':'
-                  << fit->second->loc.column << ": error: event '" << ename
-                  << "': field '" << f1.name << "' changed type from "
-                  << typeName(f1.type) << " to " << typeName(fit->second->type)
-                  << " (breaking upgrade)\n";
-        ++failures;
-      }
-    }
-  }
-
   return failures > 0 ? exitError : exitOk;
 }
 

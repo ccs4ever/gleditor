@@ -23,6 +23,7 @@
 #include "common/xanadu/vagent/runtime/agent_executor.hpp"
 #include "common/xanadu/vagent/runtime/ast.hpp"
 #include "common/xanadu/vagent/runtime/checker.hpp"
+#include "common/xanadu/vagent/runtime/upgrade_schema.hpp"
 
 namespace xanadu {
 class Store;
@@ -35,13 +36,13 @@ namespace xanadu::vagent::runtime {
 
 /// Bumped when the compiled shape of a program changes meaning, so a ref made
 /// by an older compiler never names a program this one would build differently.
-inline constexpr std::string_view kProgramFormat = "vagent-program-2";
+inline constexpr std::string_view kProgramFormat = "vagent-program-3";
 
 class CompiledProgram final : public AgentProgram {
 public:
   CompiledProgram(CompiledProgram &&other) noexcept
       : unit_(std::move(other.unit_)), checked_(std::move(other.checked_)),
-        ref_(std::move(other.ref_)),
+        ref_(std::move(other.ref_)), schema_(std::move(other.schema_)),
         programStore_(std::move(other.programStore_)),
         programManifold_(std::move(other.programManifold_)),
         agents_(std::move(other.agents_)),
@@ -57,6 +58,7 @@ public:
       checked_           = std::move(other.checked_);
       checked_.unit      = &unit_;
       ref_               = std::move(other.ref_);
+      schema_            = std::move(other.schema_);
       programStore_      = std::move(other.programStore_);
       programManifold_   = std::move(other.programManifold_);
       agents_            = std::move(other.agents_);
@@ -106,14 +108,17 @@ public:
   [[nodiscard]] const Unit &unit() const noexcept { return unit_; }
   [[nodiscard]] const CheckedUnit &checked() const noexcept { return checked_; }
   [[nodiscard]] bool declares(std::string_view agentType) const;
+  [[nodiscard]] const UpgradeSchema &upgradeSchema() const { return *schema_; }
 
 private:
   CompiledProgram(Unit unit, CheckedUnit checked, std::string ref,
                   std::shared_ptr<xanadu::Store> programStore       = nullptr,
                   std::shared_ptr<zigzag::Manifold> programManifold = nullptr,
-                  std::map<std::string, CompiledAgent> agents       = {})
+                  std::map<std::string, CompiledAgent> agents       = {},
+                  std::shared_ptr<const UpgradeSchema> schema       = nullptr)
       : unit_(std::move(unit)), checked_(std::move(checked)),
-        ref_(std::move(ref)), programStore_(std::move(programStore)),
+        ref_(std::move(ref)), schema_(std::move(schema)),
+        programStore_(std::move(programStore)),
         programManifold_(std::move(programManifold)),
         agents_(std::move(agents)) {
     checked_.unit = &unit_;
@@ -122,6 +127,7 @@ private:
   Unit unit_;
   CheckedUnit checked_;
   std::string ref_;
+  std::shared_ptr<const UpgradeSchema> schema_;
   std::shared_ptr<xanadu::Store> programStore_;
   std::shared_ptr<zigzag::Manifold> programManifold_;
   std::map<std::string, CompiledAgent> agents_;
@@ -172,6 +178,10 @@ public:
                               zigzag::vortex::mesh::ActorError>
   launch(std::string_view agentType, std::string_view name,
          WireRecord args = {});
+  [[nodiscard]] std::expected<identity::ActorPid,
+                              zigzag::vortex::mesh::ActorError>
+  launch(std::shared_ptr<CompiledProgram> program, std::string_view agentType,
+         std::string_view name, WireRecord args = {});
   [[nodiscard]] std::expected<void, zigzag::vortex::mesh::ActorError>
   send(const identity::ActorPid &target, Envelope event);
   std::size_t pump(std::size_t maxTurns = 100000);
@@ -198,7 +208,15 @@ public:
   [[nodiscard]] zigzag::vortex::mesh::MeshActorRuntime &runtime() noexcept {
     return *runtime_;
   }
-  [[nodiscard]] CompiledProgram &program() noexcept { return program_; }
+  [[nodiscard]] CompiledProgram &program() noexcept { return *program_; }
+  /// Retain a version without changing any actor or the default launch version.
+  [[nodiscard]] std::shared_ptr<CompiledProgram>
+  retainProgram(CompiledProgram program);
+  /// Preserve pid and queued messages; failure leaves the old version active.
+  [[nodiscard]] std::expected<void, zigzag::vortex::mesh::ActorError>
+  upgrade(const identity::ActorPid &pid,
+          std::shared_ptr<CompiledProgram> program,
+          std::optional<std::uint64_t> instructionLimit = std::nullopt);
   [[nodiscard]] const std::string &node() const noexcept { return node_; }
   [[nodiscard]] const xanadu::MutableKeys &deviceKeys() const noexcept {
     return keys_;
@@ -211,7 +229,12 @@ public:
 
 private:
   class Issuer;
-  CompiledProgram program_;
+  std::shared_ptr<CompiledProgram> program_;
+  std::map<std::string, std::shared_ptr<CompiledProgram>, std::less<>>
+      programs_;
+  AgentSettings settings_;
+  AgentClock clock_;
+  std::uint64_t maxInstructions_{};
   xanadu::MutableKeys keys_;
   std::string node_;
   std::filesystem::path seedRoot_;

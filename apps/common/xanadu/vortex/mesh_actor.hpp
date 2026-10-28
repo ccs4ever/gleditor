@@ -140,6 +140,10 @@ public:
   using StateReconciler = std::function<std::expected<CellRef, ActorError>(
       const ActorPid &pid, const ArenaManifold &oldArena,
       std::optional<CellRef> oldStateRoot, WorkerContext &newContext)>;
+  using PreparedStateReconciler =
+      std::function<std::expected<CellRef, ActorError>(
+          const ActorPid &, const ArenaManifold &, std::optional<CellRef>,
+          WorkerContext &, CellRef newCursor)>;
 
   MeshActorRuntime(std::string node, std::uint64_t epoch,
                    ActorOptions options = {});
@@ -205,6 +209,10 @@ public:
   upgrade(const ActorPid &pid, const ActorGrant &newGrant,
           std::chrono::system_clock::time_point wallNow,
           const StateReconciler &reconciler);
+  [[nodiscard]] std::expected<void, ActorError>
+  upgrade(const ActorPid &pid, const ActorGrant &newGrant,
+          std::chrono::system_clock::time_point wallNow,
+          const PreparedStateReconciler &reconciler);
 
   /// Marks the actor stopped, tells its monitors, and erases it once its
   /// outstanding deliveries have drained. Safe from inside its own executor.

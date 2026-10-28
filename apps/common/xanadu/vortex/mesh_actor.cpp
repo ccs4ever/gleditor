@@ -684,51 +684,73 @@ std::expected<void, ActorError>
 MeshActorRuntime::upgrade(const ActorPid &pid, const ActorGrant &newGrant,
                           std::chrono::system_clock::time_point wallNow,
                           const StateReconciler &reconciler) {
+  if (!reconciler) return std::unexpected(ActorError::InvalidMessage);
+  return upgrade(
+      pid, newGrant, wallNow,
+      PreparedStateReconciler{
+          [&](const ActorPid &actor, const ArenaManifold &oldArena,
+              std::optional<CellRef> root, WorkerContext &context,
+              CellRef) { return reconciler(actor, oldArena, root, context); }});
+}
+
+std::expected<void, ActorError>
+MeshActorRuntime::upgrade(const ActorPid &pid, const ActorGrant &newGrant,
+                          std::chrono::system_clock::time_point wallNow,
+                          const PreparedStateReconciler &reconciler) {
   auto *actor = find(pid);
-  if (!actor || (actor->stopped && !actor->leaseExpired)) {
+  if (!actor || (actor->stopped && !actor->leaseExpired))
     return std::unexpected(ActorError::UnknownProcess);
-  }
-  if (actor->running) {
+  if (actor->running || !drained(pid) ||
+      actor->context->vm.choiceDepth() != 0 ||
+      actor->context->arena.outstandingMarks() != 0)
     return std::unexpected(ActorError::NotQuiescent);
-  }
-  if (newGrant.programRef.empty() || newGrant.baseRef.empty() ||
+  if (!reconciler || newGrant.programRef.empty() || newGrant.baseRef.empty() ||
       newGrant.maxInstructions == 0 || newGrant.maxCells == 0 ||
       newGrant.maxOutputBytes == 0 || newGrant.maxOutputBytes > 32768 ||
       newGrant.maxSolutions == 0 || newGrant.maxMailboxBytes == 0 ||
-      wallNow >= newGrant.expiresAt) {
+      wallNow >= newGrant.expiresAt)
     return std::unexpected(ActorError::NotAuthorized);
-  }
-
-  const zigzag::Manifold *newBaseManifold =
+  if (actor->mailboxBytes > newGrant.maxMailboxBytes)
+    return std::unexpected(ActorError::ResourceLimit);
+  const auto *base =
       programResolver_ ? programResolver_(newGrant.programRef) : nullptr;
-  auto newContext = std::make_unique<WorkerContext>(newBaseManifold);
-  if (actor->sourceLease && actor->checkpoint && actor->checkpoint->store) {
-    newContext->arena.setDefaultSpanReader(actor->checkpoint->store.get());
-  }
-  const auto initial = newContext->arena.cellCount();
-  if (newGrant.maxCells >= ephemeralBit - initial) {
+  if (programResolver_ && !base)
+    return std::unexpected(ActorError::NotAuthorized);
+  try {
+    // Prepare every potentially allocating value before touching the live slot.
+    auto installedGrant       = newGrant;
+    auto installedSpawn       = actor->spawnRequest;
+    installedSpawn.programRef = newGrant.programRef;
+    auto context =
+        std::make_unique<WorkerContext>(base, base ? base->store() : nullptr);
+    const auto initial = context->arena.cellCount();
+    if (newGrant.maxCells >= ephemeralBit - initial)
+      return std::unexpected(ActorError::ResourceLimit);
+    context->arena.setExecutionLimits(
+        static_cast<std::uint32_t>(initial) + newGrant.maxCells,
+        static_cast<std::size_t>(std::min<std::uint64_t>(
+            newGrant.maxInstructions, std::numeric_limits<std::size_t>::max())),
+        newGrant.maxOutputBytes);
+    const auto entry  = context->arena.makeCell("actor:await-message");
+    const auto cursor = context->vm.spawnCursor(entry, actor->pid.cursor);
+    auto root         = reconciler(pid, actor->context->arena, actor->stateRoot,
+                                   *context, cursor);
+    if (!root) return std::unexpected(root.error());
+    if (!context->arena.contains(*root) ||
+        context->arena.outstandingMarks() != 0 ||
+        context->vm.choiceDepth() != 0)
+      return std::unexpected(ActorError::NotQuiescent);
+    actor->cursor       = cursor;
+    actor->stateRoot    = *root;
+    actor->context      = std::move(context);
+    actor->grant        = std::move(installedGrant);
+    actor->spawnRequest = std::move(installedSpawn);
+    actor->stopped      = false;
+    actor->leaseExpired = false;
+    return {};
+  } catch (const std::exception &) {
     return std::unexpected(ActorError::ResourceLimit);
   }
-  newContext->arena.setExecutionLimits(
-      static_cast<std::uint32_t>(initial) + newGrant.maxCells,
-      static_cast<std::size_t>(std::min<std::uint64_t>(
-          newGrant.maxInstructions, std::numeric_limits<std::size_t>::max())),
-      newGrant.maxOutputBytes);
-
-  auto newStateRoot = reconciler(actor->pid, actor->context->arena,
-                                 actor->stateRoot, *newContext);
-  if (!newStateRoot) {
-    return std::unexpected(newStateRoot.error());
-  }
-
-  const auto entry    = newContext->arena.makeCell("actor:await-message");
-  actor->cursor       = newContext->vm.spawnCursor(entry, actor->pid.cursor);
-  actor->stateRoot    = *newStateRoot;
-  actor->context      = std::move(newContext);
-  actor->grant        = newGrant;
-  actor->stopped      = false;
-  actor->leaseExpired = false;
-  return {};
 }
 
 std::expected<void, ActorError> MeshActorRuntime::stop(const ActorPid &pid) {

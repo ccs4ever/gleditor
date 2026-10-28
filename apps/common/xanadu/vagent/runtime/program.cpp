@@ -45,6 +45,8 @@ CompiledProgram::fromSource(std::string_view source, std::string_view name) {
     return std::unexpected(std::move(message));
   }
 
+  auto schema = makeUpgradeSchema(*checked);
+  if (!schema) return std::unexpected(schema.error().message);
   auto programStore = std::make_shared<xanadu::Store>();
   auto curHead      = programStore->sliceGenesis(xanadu::MicroversionId{});
   zigzag::vortex::WorkerContext stagingContext;
@@ -87,6 +89,23 @@ CompiledProgram::fromSource(std::string_view source, std::string_view name) {
       auto it = promoted->mapping.find(cell);
       return it != promoted->mapping.end() ? it->second : cell;
     };
+    for (const auto &[name, entry] : stagingAgent.fieldDefaults)
+      persistentAgent.fieldDefaults.emplace(name, remap(entry));
+    const auto remapContainers = [&](const auto &input, auto &output) {
+      for (const auto &[name, source] : input) {
+        CompiledContainer target;
+        target.owner = remap(source.owner);
+        for (const auto member : source.members)
+          target.members.push_back(remap(member));
+        for (const auto &[field, entry] : source.fieldDefaults)
+          target.fieldDefaults.emplace(field, remap(entry));
+        if (source.upgradeEntry)
+          target.upgradeEntry = remap(*source.upgradeEntry);
+        output.emplace(name, std::move(target));
+      }
+    };
+    remapContainers(stagingAgent.skills, persistentAgent.skills);
+    remapContainers(stagingAgent.behaviors, persistentAgent.behaviors);
     persistentAgent.agentCell     = remap(stagingAgent.agentCell);
     persistentAgent.initEntry     = remap(stagingAgent.initEntry);
     persistentAgent.dispatchEntry = remap(stagingAgent.dispatchEntry);
@@ -104,9 +123,11 @@ CompiledProgram::fromSource(std::string_view source, std::string_view name) {
     persistentAgents[agentName] = persistentAgent;
   }
 
-  return CompiledProgram(std::move(*unit), std::move(*checked), refOf(source),
-                         std::move(programStore), std::move(programManifold),
-                         std::move(persistentAgents));
+  return CompiledProgram(
+      std::move(*unit), std::move(*checked), refOf(source),
+      std::move(programStore), std::move(programManifold),
+      std::move(persistentAgents),
+      std::make_shared<const UpgradeSchema>(std::move(*schema)));
 }
 
 bool CompiledProgram::declares(std::string_view agentType) const {
@@ -201,7 +222,7 @@ LocalHost::LocalHost(CompiledProgram program)
     : LocalHost(std::move(program), Options{}) {}
 
 LocalHost::LocalHost(CompiledProgram program, Options options)
-    : program_(std::move(program)),
+    : program_(std::make_shared<CompiledProgram>(std::move(program))),
       keys_(options.keys ? *options.keys : xanadu::createMutableKeys()),
       node_(zigzag::vortex::mesh::NodeId{options.author, keys_.publicKey.hex(),
                                          options.epoch}
@@ -215,25 +236,28 @@ LocalHost::LocalHost(CompiledProgram program, Options options)
         options.clock.wall());
     options.clock.wall = [now = manualNow_] { return *now; };
   }
+  maxInstructions_ = options.maxInstructions;
+  settings_        = options.settings;
+  clock_           = options.clock;
+  programs_.emplace(std::string(program_->programRef()), program_);
   const auto owner = *identity::Fingerprint::fromString(kLocalOwner);
   const auto life  = options.clock.wall() + kLocalGrantLife;
-  program_.setBeliefEventDepth(options.settings.beliefEventDepth)
+  program_->setBeliefEventDepth(options.settings.beliefEventDepth)
       ->setConditionFuel(options.settings.conditionFuel)
       ->setMaintainBackoffMs(options.settings.maintainBackoff.count());
-  if (program_.programManifold()) {
+  if (program_->programManifold()) {
     runtime_->setProgramResolver(
         [this](std::string_view ref) -> const zigzag::Manifold * {
-          if (ref == program_.programRef()) {
-            return program_.programManifold();
-          }
-          return nullptr;
+          const auto found = programs_.find(ref);
+          return found == programs_.end() ? nullptr
+                                          : found->second->programManifold();
         });
   }
   runtime_->setAuthorizer(
       [this, instructions = options.maxInstructions,
        life](const identity::Fingerprint &, const ActorMessage &request)
           -> std::expected<ActorGrant, ActorError> {
-        if (request.programRef != program_.programRef()) {
+        if (!programs_.contains(request.programRef)) {
           return std::unexpected(ActorError::NotAuthorized);
         }
         // A resume request names the checkpoint its grant is based on.
@@ -260,8 +284,9 @@ LocalHost::LocalHost(CompiledProgram program, Options options)
                           true};
       });
   executor_ = std::make_unique<AgentExecutor>(
-      *runtime_, *issuer_, program_, owner, node_, options.epoch,
+      *runtime_, *issuer_, *program_, owner, node_, options.epoch,
       options.settings, std::move(options.clock));
+  (void)executor_->retainProgram(program_);
   executor_->install()
       ->setBindings(&bindings_)
       ->setHostSink(
@@ -274,6 +299,42 @@ LocalHost::LocalHost(CompiledProgram program, Options options)
       zigzag::vortex::mesh::NodeId{options.author, keys_.publicKey.hex(),
                                    options.epoch},
       seedRoot_, xanadu::SignedProvenance{"vagent-local-host", "unsigned"}});
+}
+
+std::shared_ptr<CompiledProgram>
+LocalHost::retainProgram(CompiledProgram program) {
+  const std::string ref(program.programRef());
+  if (const auto found = programs_.find(ref); found != programs_.end())
+    return found->second;
+  program.setBeliefEventDepth(settings_.beliefEventDepth)
+      ->setConditionFuel(settings_.conditionFuel)
+      ->setMaintainBackoffMs(settings_.maintainBackoff.count());
+  auto held = std::make_shared<CompiledProgram>(std::move(program));
+  if (!executor_->retainProgram(held)) return nullptr;
+  programs_.emplace(ref, held);
+  return held;
+}
+
+std::expected<void, ActorError>
+LocalHost::upgrade(const identity::ActorPid &pid,
+                   std::shared_ptr<CompiledProgram> program,
+                   std::optional<std::uint64_t> instructionLimit) {
+  if (!program || !programs_.contains(program->programRef()) ||
+      programs_.at(std::string(program->programRef())).get() != program.get()) {
+    return std::unexpected(ActorError::NotAuthorized);
+  }
+  // The local host is the capability authority. The adapter validates every
+  // state and schema condition before asking the runtime to install the grant.
+  ActorGrant grant{std::string(program->programRef()),
+                   std::string(program->programRef()),
+                   instructionLimit.value_or(maxInstructions_),
+                   kLocalMaxCells,
+                   kLocalMaxOutputBytes,
+                   kLocalMaxSolutions,
+                   kLocalMaxMailboxBytes,
+                   clock_.wall() + kLocalGrantLife,
+                   true};
+  return executor_->upgrade(pid, std::move(program), grant);
 }
 
 LocalHost::~LocalHost() {
@@ -295,10 +356,22 @@ void LocalHost::connect(LocalHost &peer) {
 std::expected<identity::ActorPid, ActorError>
 LocalHost::launch(std::string_view agentType, std::string_view name,
                   WireRecord args) {
-  if (!program_.declares(agentType)) {
+  if (!program_->declares(agentType)) {
     return std::unexpected(ActorError::InvalidMessage);
   }
   return executor_->launch(agentType, name, std::move(args));
+}
+
+std::expected<identity::ActorPid, ActorError>
+LocalHost::launch(std::shared_ptr<CompiledProgram> program,
+                  std::string_view agentType, std::string_view name,
+                  WireRecord args) {
+  if (!program || !programs_.contains(program->programRef()) ||
+      programs_.at(std::string(program->programRef())).get() != program.get() ||
+      !program->declares(agentType))
+    return std::unexpected(ActorError::NotAuthorized);
+  return executor_->launch(agentType, name, std::move(args),
+                           program->programRef());
 }
 
 std::expected<void, ActorError>

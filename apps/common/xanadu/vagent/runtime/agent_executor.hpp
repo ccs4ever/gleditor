@@ -192,6 +192,8 @@ struct AgentCheckpoint {
   zigzag::vortex::mesh::ValueSeed seed;
 };
 
+class CompiledProgram;
+
 class AgentExecutor {
 public:
   AgentExecutor(zigzag::vortex::mesh::MeshActorRuntime &runtime,
@@ -223,7 +225,35 @@ public:
   [[nodiscard]] std::expected<identity::ActorPid,
                               zigzag::vortex::mesh::ActorError>
   launch(std::string_view agentType, std::string_view name,
-         WireRecord args = {});
+         WireRecord args = {}, std::string_view programRef = {});
+
+  /// Retain an immutable compiled version for actors, children and resumes.
+  /// A retained ref is never rebound to a different program object.
+  [[nodiscard]] bool retainProgram(std::shared_ptr<AgentProgram> program);
+  [[nodiscard]] std::shared_ptr<AgentProgram>
+  resolveProgram(std::string_view ref) const;
+
+  /// Upgrade one prepared live actor under a replacement grant. The host must
+  /// retain and authorize the new program before calling this owner-thread API.
+  [[nodiscard]] std::expected<void, zigzag::vortex::mesh::ActorError>
+  upgrade(const identity::ActorPid &pid,
+          std::shared_ptr<CompiledProgram> program,
+          const zigzag::vortex::mesh::ActorGrant &grant);
+
+  /// A trusted typed translator may extend the owned graph with future ABI
+  /// records. It runs privately before hooks, shares the relocation map and
+  /// remaining work budget, and must stage no external effects. Without one,
+  /// populated extension dimensions refuse the upgrade.
+  using OwnedStateTranslator =
+      std::function<std::expected<void, zigzag::vortex::mesh::ActorError>(
+          const CompiledProgram &, const CompiledProgram &,
+          const zigzag::ArenaManifold &, zigzag::CellRef,
+          zigzag::vortex::WorkerContext &, zigzag::CellRef,
+          std::map<zigzag::CellRef, zigzag::CellRef> &, std::uint64_t &)>;
+  AgentExecutor *setOwnedStateTranslator(OwnedStateTranslator translator) {
+    ownedStateTranslator_ = std::move(translator);
+    return this;
+  }
 
   /// Where a launched agent's `emit ... in outer` goes: the launcher hosts
   /// that space, so there is no parent actor to relay it. Without a sink such
@@ -574,6 +604,7 @@ private:
   zigzag::vortex::mesh::MeshActorRuntime &runtime_;
   CapabilityIssuer &issuer_;
   AgentProgram &program_;
+  std::map<std::string, std::shared_ptr<AgentProgram>, std::less<>> programs_;
   identity::Fingerprint owner_;
   std::string localNode_;
   std::uint64_t epoch_;
@@ -582,6 +613,7 @@ private:
   TurnObserver observer_;
   IntentionObserver intentionObserver_;
   HostBindings *bindings_{};
+  OwnedStateTranslator ownedStateTranslator_;
   std::shared_ptr<PostBox> posts_;
   identity::ActorPid hostPid_;
   std::uint64_t launches_{0};

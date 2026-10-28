@@ -33,9 +33,11 @@
 
 #include <array>
 #include <cstdint>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "common/xanadu/zigzag/arena_manifold.hpp"
 
@@ -657,6 +659,13 @@ inline constexpr std::size_t kRequestIdPositionDigits = 4;
  * `failOp`; the adapter treats that as a hard failure (§4.2) and undoes the
  * turn. The adapter pushes its own base choice point before running either.
  */
+struct CompiledContainer {
+  zigzag::CellRef owner{};
+  std::vector<zigzag::CellRef> members;
+  std::map<std::string, zigzag::CellRef, std::less<>> fieldDefaults;
+  std::optional<zigzag::CellRef> upgradeEntry;
+};
+
 struct CompiledAgent {
   zigzag::CellRef agentCell{};     ///< content: the agent type's name
   zigzag::CellRef initEntry{};     ///< field initialisers, then `on Initialize`
@@ -673,6 +682,9 @@ struct CompiledAgent {
   /// leaves the value in `$answer`. The adapter rolls the turn back. Absent:
   /// every ask is `unanswered`.
   std::optional<zigzag::CellRef> answerEntry{};
+  std::map<std::string, zigzag::CellRef, std::less<>> fieldDefaults;
+  std::map<std::string, CompiledContainer, std::less<>> skills;
+  std::map<std::string, CompiledContainer, std::less<>> behaviors;
 };
 
 } // namespace xanadu::vagent::runtime

@@ -1102,6 +1102,8 @@ private:
   void emitHandlerFrame(HandlerInfo &h);
   void emitFrameBody(MethodInfo &m);
   void emitInit(CellRef entryLabel);
+  CellRef emitFieldDefault(const VarDecl &field, Container *owner);
+  CellRef emitUpgradeHook(Container &owner);
   void emitDispatch(CellRef entryLabel);
   void buildProgramStructure();
   std::vector<const HandlerInfo *> mergedFor(const std::string &type);
@@ -2719,6 +2721,12 @@ Ty Gen::call(const ECall &c, CellRef out, SourceLocation loc) {
     }
     const CellRef fname = reg();
     expr(*c.args[0], fname);
+    if (own_ != nullptr) {
+      const CellRef qualified = reg();
+      emit(OpcodeKind::Add, "dropped-owner",
+           {S(cStr(own_->name + ".")), S(fname)}, {qualified});
+      mov(S(fname), S(qualified));
+    }
     const CellRef ag = reg();
     loadRef(ag, agentCell_);
     CellRef vp, np;
@@ -2729,7 +2737,8 @@ Ty Gen::call(const ECall &c, CellRef out, SourceLocation loc) {
     mov(S(a1_), S(fname));
     callLabel(rtFind_);
     branchIfZero(r0_, noDropped);
-    mov(S(out), S(r0_));
+    // r0 names the saved value cell; the field's text is its content.
+    mov(S(out), D(r0_));
     jump(done);
     place(noDropped);
     movC(out, cStr(""));
@@ -5106,6 +5115,55 @@ void Gen::emitHandlerRun(const HandlerInfo &h, bool checkConsumed,
   place(next);
 }
 
+CellRef Gen::emitFieldDefault(const VarDecl &field, Container *owner) {
+  const CellRef entry = newLabel(), body = newLabel();
+  tail_  = noCell;
+  frame_ = nullptr;
+  place(entry);
+  callLabel(body);
+  jump(haltOp_);
+  tail_ = noCell;
+  Framed fr;
+  openFramed(fr, body);
+  scopes_.clear();
+  dRegs_.clear();
+  stmtDepth_ = 0;
+  pushScope();
+  ctx_          = Ctx{};
+  ctx_.retReg   = scratchG_;
+  ctx_.epi      = fr.epi;
+  own_          = owner;
+  const auto &f = owner ? owner->fields.at(field.name) : fields_.at(field.name);
+  const CellRef val = global();
+  stmtWrap([&] {
+    const Ty vt = valueInto(*field.init, val);
+    coerceInto(f.ty, vt, val);
+    storeField(f, val);
+  });
+  closeFramed(fr);
+  own_ = nullptr;
+  return entry;
+}
+
+CellRef Gen::emitUpgradeHook(Container &owner) {
+  const CellRef entry = newLabel();
+  tail_               = noCell;
+  frame_              = nullptr;
+  place(entry);
+  // Adapter writes from_version in the normal Upgrade event shape.
+  const auto &turn = fields_.at(std::string(kFieldTurn));
+  mov(S(a0_), S(rd(S(turn.nameCell), core_.dims().values)));
+  movC(a1_, cStr(std::string(kTurnEvent)));
+  callLabel(rtFind_);
+  mov(S(a0_), S(r0_));
+  movC(a1_, cStr("from_version"));
+  callLabel(rtFind_);
+  mov(S(a0_), S(r0_));
+  callLabel(owner.upgradeLabel);
+  jump(haltOp_);
+  return entry;
+}
+
 void Gen::emitInit(CellRef entryLabel) {
   const CellRef body = newLabel();
   tail_              = noCell;
@@ -5898,6 +5956,28 @@ CompiledAgent Gen::run() {
   emitSettle();
   emitInit(out.initEntry);
   emitDispatch(out.dispatchEntry);
+  for (const auto &member : agent_->members) {
+    if (const auto *field = std::get_if<VarDecl>(&member))
+      out.fieldDefaults.emplace(field->name, emitFieldDefault(*field, nullptr));
+  }
+  const auto metadata = [&](auto &containers, auto &output) {
+    for (auto &[name, container] : containers) {
+      CompiledContainer info;
+      info.owner   = container.cell;
+      info.members = container.instances.empty()
+                         ? std::vector<CellRef>{container.cell}
+                         : container.instances;
+      for (const auto &member : *container.members) {
+        if (const auto *field = std::get_if<VarDecl>(&member))
+          info.fieldDefaults.emplace(field->name,
+                                     emitFieldDefault(*field, &container));
+      }
+      info.upgradeEntry = emitUpgradeHook(container);
+      output.emplace(name, std::move(info));
+    }
+  };
+  metadata(skills_, out.skills);
+  metadata(behaviors_, out.behaviors);
   buildProgramStructure();
   return out;
 }
