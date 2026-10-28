@@ -24,6 +24,14 @@ namespace zigzag::vortex {
 
 namespace {
 
+ExecutionResult cursorlessScopeRefusal(CellRef opcode) {
+  return ExecutionResult{.success       = false,
+                         .failingClause = opcode,
+                         .errorMessage =
+                             "ScopedEvaluate requires owner-cursor dispatch",
+                         .scopedRefusal = ScopedRefusal::InvalidOperands};
+}
+
 double toDouble(const CellValue &val) {
   if (std::holds_alternative<double>(val)) return std::get<double>(val);
   if (std::holds_alternative<std::int64_t>(val))
@@ -109,7 +117,7 @@ std::optional<OpcodeKind> VortexVM::getOpcodeKind(CellRef opCell) const {
   auto val = core_.arena().asInt64(opCell);
   if (val && *val >= 0 &&
       static_cast<std::uint64_t>(*val) <=
-          static_cast<std::uint64_t>(OpcodeKind::Sqrt)) {
+          static_cast<std::uint64_t>(OpcodeKind::ScopedEvaluate)) {
     return static_cast<OpcodeKind>(*val);
   }
   return std::nullopt;
@@ -195,6 +203,9 @@ std::string formatDeweyPath(std::span<const std::uint16_t> path) {
 
 void VortexVM::pushChoicePoint(const std::optional<CellRef> cursor,
                                const CellRef altOp) {
+  if (!scopedFrames_.empty() && (cursor != scopedFrames_.back().cursor ||
+                                 !scopedFrames_.back().graph.contains(altOp)))
+    throw std::invalid_argument("Scoped choice escapes its owner or graph");
   if (cursor && *cursor == noCell) {
     throw std::invalid_argument(
         "choice-point cursor must be a cell or nullopt");
@@ -222,18 +233,27 @@ void VortexVM::pushChoicePoint(const std::optional<CellRef> cursor,
       .deweyPath       = std::move(altDewey),
       .nextAltIndex    = 1,
       .cyclesSinceRoot = totalCycles_,
+      .scopedAssignmentTail =
+          scopedFrames_.empty()
+              ? std::nullopt
+              : std::optional{scopedFrames_.back().assignmentTrail.size()},
   });
 }
 
 bool VortexVM::backtrack(const std::optional<CellRef> cursor) {
+  if (!scopedFrames_.empty() && cursor != scopedFrames_.back().cursor)
+    return false;
   if (cursor && *cursor == noCell) {
     throw std::invalid_argument("backtrack cursor must be a cell or nullopt");
   }
-  while (!choiceStack_.empty()) {
+  while (choiceStack_.size() >
+         (scopedFrames_.empty() ? 0 : scopedFrames_.back().choiceFloor)) {
     ChoicePoint cp = choiceStack_.back();
     choiceStack_.pop_back();
     if (!cursor || cp.cursor == cursor || !cp.cursor) {
       core_.arena().release(cp.mark);
+      if (cp.scopedAssignmentTail)
+        restoreScopedAssignments(*cp.scopedAssignmentTail);
       if (deweyTracking()) {
         currentDeweyPath_ = cp.deweyPath;
       }
@@ -251,18 +271,20 @@ bool VortexVM::backtrack(const std::optional<CellRef> cursor) {
 }
 
 void VortexVM::cut(std::size_t cutBarrier) {
+  if (!scopedFrames_.empty() && !scopedCut_) return;
   while (choiceStack_.size() > cutBarrier) {
     ChoicePoint cp = choiceStack_.back();
     choiceStack_.pop_back();
     core_.arena().discard(cp.mark);
-    if (cutCallback_ && !cp.deweyPath.empty()) {
+    if (scopedFrames_.empty() && cutCallback_ && !cp.deweyPath.empty()) {
       const auto parentSpan =
           std::span<const std::uint16_t>{cp.deweyPath}.subspan(
               0, cp.deweyPath.size() - 1);
       cutCallback_(formatDeweyPath(parentSpan));
     }
   }
-  if (cutCallback_ && choiceStack_.empty() && !currentDeweyPath_.empty()) {
+  if (scopedFrames_.empty() && cutCallback_ && choiceStack_.empty() &&
+      !currentDeweyPath_.empty()) {
     const auto parentSpan =
         std::span<const std::uint16_t>{currentDeweyPath_}.subspan(
             0, currentDeweyPath_.size() - 1);
@@ -289,7 +311,7 @@ VortexVM *VortexVM::setCurrentDeweyPath(std::span<const std::uint16_t> path) {
 }
 
 std::optional<ChoicePoint> VortexVM::stealNearRootChoicePoint() {
-  if (choiceStack_.empty()) {
+  if (!scopedFrames_.empty() || choiceStack_.empty()) {
     return std::nullopt;
   }
   ChoicePoint stolen = std::move(choiceStack_.front());
@@ -309,12 +331,22 @@ VortexVM::setCutCallback(std::function<void(std::string_view deweyPrefix)> cb) {
   return this;
 }
 
-void VortexVM::runPipeline(CellRef paramCell) {
+ExecutionResult VortexVM::runPipeline(CellRef paramCell) {
+  if (!scopedFrames_.empty()) {
+    ExecutionResult result;
+    result.success       = false;
+    result.scopedRefusal = ScopedRefusal::InvalidGraph;
+    result.errorMessage =
+        "Pipeline dispatch is unavailable during ScopedEvaluate";
+    return result;
+  }
   auto pipeOp       = core_.getPipelineHead(paramCell);
   std::size_t limit = 1000;
   while (pipeOp && limit-- > 0) {
     auto kindOpt    = getOpcodeKind(*pipeOp);
     OpcodeKind kind = kindOpt ? *kindOpt : OpcodeKind::Nop;
+    if (kind == OpcodeKind::ScopedEvaluate)
+      return cursorlessScopeRefusal(*pipeOp);
     if (kind == OpcodeKind::Halt || kind == OpcodeKind::Return) {
       break;
     }
@@ -331,7 +363,9 @@ void VortexVM::runPipeline(CellRef paramCell) {
 
     std::vector<CellValue> outVals;
     bool jumped = false;
-    executeOpcodeBody(kind, *pipeOp, inVals, outVals, std::nullopt, jumped);
+    auto result =
+        executeOpcodeBody(kind, *pipeOp, inVals, outVals, std::nullopt, jumped);
+    if (!result.success) return result;
 
     std::vector<CellRef> outCells = core_.outputsOf(*pipeOp);
     if (outCells.empty()) {
@@ -350,11 +384,13 @@ void VortexVM::runPipeline(CellRef paramCell) {
 
     pipeOp = core_.arena().linked(*pipeOp, core_.dims().spin, false);
   }
+  return {};
 }
 
-bool VortexVM::evaluateCondition(CellRef clause,
-                                 const std::vector<CellValue> &oldInputs,
-                                 const std::vector<CellValue> &outputs) {
+std::expected<bool, ExecutionResult>
+VortexVM::evaluateCondition(CellRef clause,
+                            const std::vector<CellValue> &oldInputs,
+                            const std::vector<CellValue> &outputs) {
   const CellRef actualClause =
       core_.arena().cloneMaster(clause, core_.dims().clone).value_or(clause);
   auto kindOpt = getOpcodeKind(actualClause);
@@ -362,7 +398,9 @@ bool VortexVM::evaluateCondition(CellRef clause,
     return core_.isTruthy(actualClause).value_or(false);
   }
 
-  OpcodeKind kind              = *kindOpt;
+  OpcodeKind kind = *kindOpt;
+  if (kind == OpcodeKind::ScopedEvaluate)
+    return std::unexpected(cursorlessScopeRefusal(actualClause));
   std::vector<CellRef> inCells = core_.inputsOf(actualClause);
   std::vector<CellValue> inVals;
   if (!inCells.empty()) {
@@ -382,7 +420,10 @@ bool VortexVM::evaluateCondition(CellRef clause,
   bool jumped       = false;
   const auto result = executeOpcodeBody(kind, actualClause, inVals, outVals,
                                         std::nullopt, jumped);
-  if (!result.success) return false;
+  if (!result.success) {
+    if (result.scopedRefusal) return std::unexpected(result);
+    return false;
+  }
   if (!outVals.empty()) {
     return VortexCore::evaluateTruthiness(outVals[0]);
   }
@@ -1175,6 +1216,8 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
     }
     break;
   }
+  case OpcodeKind::ScopedEvaluate:
+    return cursorlessScopeRefusal(opcode);
   case OpcodeKind::Halt:
   case OpcodeKind::Nop:
   default:
@@ -1187,6 +1230,24 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
 }
 
 ExecutionResult VortexVM::step(CellRef cursor) {
+  if (!scopedFrames_.empty()) {
+    if (scopedFrames_.back().cursor != cursor) {
+      ExecutionResult result;
+      result.success       = false;
+      result.scopedRefusal = ScopedRefusal::CursorOwnership;
+      result.errorMessage  = "ScopedEvaluate owns another cursor";
+      return result;
+    }
+    auto result = stepScope(cursor);
+    if (!result.success && !scopedFrames_.empty())
+      return refuseScopes(
+          result.scopedRefusal.value_or(ScopedRefusal::CallbackFault));
+    return result;
+  }
+  if (auto op = getCursorOpcode(cursor);
+      op && getOpcodeKind(*op) == OpcodeKind::ScopedEvaluate) {
+    return enterScope(cursor, *op);
+  }
   const auto op = getCursorOpcode(cursor);
   if (!op) {
     return ExecutionResult{.success           = true,
@@ -1209,7 +1270,9 @@ ExecutionResult VortexVM::step(CellRef cursor) {
   // 1. Precondition Evaluation (-d.contract)
   std::vector<CellRef> preconds = core_.preconditionsOf(*op);
   for (CellRef clause : preconds) {
-    if (!evaluateCondition(clause, {}, {})) {
+    const auto condition = evaluateCondition(clause, {}, {});
+    if (!condition) return condition.error();
+    if (!*condition) {
       return ExecutionResult{
           .success           = false,
           .contractViolation = ContractViolationKind::Precondition,
@@ -1223,7 +1286,8 @@ ExecutionResult VortexVM::step(CellRef cursor) {
   std::unordered_set<CellRef> processedIn;
   for (CellRef paramCell : inputCells) {
     if (processedIn.insert(paramCell).second && core_.hasPipeline(paramCell)) {
-      runPipeline(paramCell);
+      const auto result = runPipeline(paramCell);
+      if (!result.success) return result;
     }
   }
 
@@ -1276,7 +1340,8 @@ ExecutionResult VortexVM::step(CellRef cursor) {
     std::unordered_set<CellRef> processedOut;
     for (CellRef outCell : outCells) {
       if (processedOut.insert(outCell).second && core_.hasPipeline(outCell)) {
-        runPipeline(outCell);
+        const auto result = runPipeline(outCell);
+        if (!result.success) return result;
       }
     }
   }
@@ -1290,7 +1355,9 @@ ExecutionResult VortexVM::step(CellRef cursor) {
 
   std::vector<CellRef> postconds = core_.postconditionsOf(*op);
   for (CellRef clause : postconds) {
-    if (!evaluateCondition(clause, oldInputs, finalOutputs)) {
+    const auto condition = evaluateCondition(clause, oldInputs, finalOutputs);
+    if (!condition) return condition.error();
+    if (!*condition) {
       return ExecutionResult{
           .success           = false,
           .contractViolation = ContractViolationKind::Postcondition,
@@ -1321,22 +1388,25 @@ ExecutionResult VortexVM::step(CellRef cursor) {
 
 ExecutionResult VortexVM::run(CellRef cursor, std::size_t maxCycles,
                               std::stop_token stopToken) {
+  if (!scopedFrames_.empty() && scopedFrames_.back().cursor != cursor)
+    return step(cursor);
   for (std::size_t i = 0; i < maxCycles; ++i) {
     if (stopToken.stop_requested()) {
+      if (!scopedFrames_.empty()) return refuseScopes(ScopedRefusal::Cancelled);
       return ExecutionResult{.success           = false,
                              .contractViolation = ContractViolationKind::None,
                              .failingClause     = std::nullopt,
                              .errorMessage      = "Cancelled by cut"};
     }
     const auto op = getCursorOpcode(cursor);
-    if (!op) {
+    if (!op && scopedFrames_.empty()) {
       return ExecutionResult{.success           = true,
                              .contractViolation = ContractViolationKind::None,
                              .failingClause     = std::nullopt,
                              .errorMessage      = "Finished"};
     }
-    auto kind = getOpcodeKind(*op);
-    if (kind && *kind == OpcodeKind::Halt) {
+    auto kind = op ? getOpcodeKind(*op) : std::nullopt;
+    if (scopedFrames_.empty() && kind && *kind == OpcodeKind::Halt) {
       return ExecutionResult{.success           = true,
                              .contractViolation = ContractViolationKind::None,
                              .failingClause     = std::nullopt,
@@ -1347,6 +1417,7 @@ ExecutionResult VortexVM::run(CellRef cursor, std::size_t maxCycles,
       return res;
     }
   }
+  if (!scopedFrames_.empty()) return refuseScopes(ScopedRefusal::ResourceLimit);
   return ExecutionResult{.success           = false,
                          .contractViolation = ContractViolationKind::None,
                          .failingClause     = std::nullopt,
@@ -1354,7 +1425,7 @@ ExecutionResult VortexVM::run(CellRef cursor, std::size_t maxCycles,
 }
 
 std::size_t VortexVM::stepScheduler(std::stop_token stopToken) {
-  if (stopToken.stop_requested()) {
+  if (!scopedFrames_.empty() || stopToken.stop_requested()) {
     return 0;
   }
   std::size_t executed         = 0;

@@ -3,6 +3,7 @@
 #include <bit>
 #include <iostream>
 #include <ranges>
+#include <unordered_set>
 #include <utility>
 
 #include "common/xanadu/scalar.hpp"
@@ -380,6 +381,22 @@ std::vector<CellRef> VortexCore::wingOf(const CellRef opcode,
   if (!first) return {};
   return zigzag::rank(arena_, *first, dims_.step) |
          std::views::transform(resolve) | std::ranges::to<std::vector>();
+}
+
+std::expected<std::vector<CellRef>, ScopedRefusal>
+VortexCore::rawWingSlotsOf(CellRef opcode, DimVector side,
+                           std::size_t maxSlots) const {
+  std::vector<CellRef> slots;
+  std::unordered_set<CellRef> seen;
+  auto slot = arena_.linked(opcode, dims_.grab, side);
+  while (slot) {
+    arena_.consumeWork();
+    if (slots.size() >= maxSlots || !seen.insert(*slot).second)
+      return std::unexpected(ScopedRefusal::InvalidOperands);
+    slots.push_back(*slot);
+    slot = arena_.linked(*slot, dims_.step, DimVector::POS);
+  }
+  return slots;
 }
 
 std::vector<CellRef> VortexCore::inputsOf(CellRef opcode) const {

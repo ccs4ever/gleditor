@@ -130,6 +130,8 @@ VQLCompiler::opcodeMnemonic(zigzag::vortex::OpcodeKind kind) noexcept {
     return "LN";
   case OpcodeKind::Sqrt:
     return "SQRT";
+  case OpcodeKind::ScopedEvaluate:
+    return "SCOPEDEVALUATE";
   default:
     return "UNKNOWN";
   }

@@ -160,9 +160,9 @@ TEST(MeshVortexArtifactTest, VagentDepthOpcodeCannotEnterPureArtifacts) {
                         budget));
 }
 
-TEST(MeshVortexArtifactTest, ElementaryMathOpcodesRemainOutsidePureArtifacts) {
-  for (const auto opcode :
-       {OpcodeKind::Exp, OpcodeKind::Ln, OpcodeKind::Sqrt}) {
+TEST(MeshVortexArtifactTest, ExtendedOpcodesRemainOutsidePureArtifacts) {
+  for (const auto opcode : {OpcodeKind::Exp, OpcodeKind::Ln, OpcodeKind::Sqrt,
+                            OpcodeKind::ScopedEvaluate}) {
     auto program                        = addition();
     program.instructions.front().opcode = opcode;
     EXPECT_FALSE(sealVortexProgram(program));

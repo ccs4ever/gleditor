@@ -243,6 +243,9 @@ bool pureOpcode(OpcodeKind opcode) {
   case OpcodeKind::Ln:
   case OpcodeKind::Sqrt:
     return false;
+  // Scoped execution owns local arena/continuation lifetimes.
+  case OpcodeKind::ScopedEvaluate:
+    return false;
   }
   return false;
 }

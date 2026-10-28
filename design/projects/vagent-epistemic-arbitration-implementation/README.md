@@ -22,8 +22,8 @@ review. Reports stay in this project or the existing review record.
 
 | Iteration | Scope                                                                                                               | State             | Evidence                                                                               |
 | --------- | ------------------------------------------------------------------------------------------------------------------- | ----------------- | -------------------------------------------------------------------------------------- |
-| I1        | Generic Exp/Ln/Sqrt VM contract; trust/epistemic ABI dimensions and setting defaults                                | In progress       | Build, domain/refusal/persistence and compatibility tests required                     |
-| I2        | Typed scoped graph ABI, choice isolation, result transfer/refusal; full upgrade prerequisite and shared translation | Pending           | Nested scope exits, graph validation, rollback, upgrade/resume tests                   |
+| I1        | Generic Exp/Ln/Sqrt VM contract; trust/epistemic ABI dimensions and setting defaults                                | Accepted          | [I1 validation](i1-validation.md), [ML gate](ml-gate-i1.md)                            |
+| I2        | Typed scoped graph ABI, choice isolation, result transfer/refusal; full upgrade prerequisite and shared translation | I2A accepted      | Nested scope exits, graph validation, rollback, upgrade/resume tests                   |
 | I3        | Checked ingress, per-source observation history, health/clock lifecycle and application verification journals       | Pending           | Coalescing, retries, authorization, clocks/faults, full-key epochs and budgets         |
 | I4        | Actor AST/checker/lowering plus analytic scoring, ranked queries, clustering and scalar fusion as Vortex graphs     | Pending ML review | Pure queries, numeric vectors, ties/dependence/alignment/refusal, actual run journeys  |
 | I5        | Online SGD, active labels/corrections, deterministic replay and drift policy as Vortex graphs                       | Pending ML review | Independent model/replay vectors, stale labels, epochs, bounded replay and expert gate |
@@ -39,3 +39,29 @@ clock, transport, authorization and native-effect boundaries. No on-disk layout 
 Tests run headless with isolated XDG state. The lead centralizes builds using `make -j$(nproc)`;
 independent agents own disjoint source files. Existing unrelated untracked review artifacts are
 preserved. Only accepted iteration files are staged/committed, with material limitations recorded.
+
+## Active I2 slices
+
+- I2A is the generic scalar/control scope foundation: explicit host admission, typed graph
+  descriptor, same-cursor continuation, owned value transfer and resource/refusal semantics. It is
+  accepted ([validation](i2a-validation.md)) as that foundation only; it does not complete P19.8 or
+  enable epistemic queries, and scopes stay disabled in actors until I2B closes M4.
+- I2B still needs guarded structural scratch operations, structured/reference result assignment,
+  compiler emission and query graph lowering. Generic scope refusals also need domain-error mapping
+  before the P19 surface API is complete.
+- I2U's supported-agent live-upgrade implementation is drafted separately in
+  `/tmp/vagent-p19-i2-upgrade-impl/upgrade-impl.patch`; it is held out of the worktree until I2A is
+  accepted. It includes typed schema compatibility, private-context/default/hook execution, retained
+  program versions and transactional context/adapter commit. It refuses populated P19 roots until
+  the later typed epistemic translator exists.
+- The existing actor compiler has declarations for goal/plan lowering but does not implement the
+  complete source-to-intention pipeline. Active-intention upgrade must explicitly refuse where
+  compatibility/remapping cannot be proved. This prerequisite remains open; no full P17/P19
+  completion is claimed from the generic host callback or adapter-level intention fixtures.
+
+The P19.8 implementation needs narrow read-only arena access to content namespace and remaining
+execution budgets. Existing public APIs do not expose quote-space ownership for mixed/storeless
+content or the active native-copy allowance. The added accessors expose existing state without new
+side tables, layout changes or model evaluation; they let the scope preserve span identity and clamp
+native carriers to actor grants. This is implementation support within the approved scoped
+result/lifetime proposal, not a separate learned-state mechanism.

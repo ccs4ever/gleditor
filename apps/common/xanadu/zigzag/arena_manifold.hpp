@@ -366,6 +366,11 @@ public:
   CellRef makeQuote(std::uint32_t space,
                     std::span<const xanadu::PrimediaSpan> content);
 
+  /// Explicit content namespace for proxies, occurrences and quotations.
+  /// Native arena/base content has no namespace override.
+  [[nodiscard]] std::optional<std::uint32_t>
+  contentSpaceOf(CellRef ref) const noexcept;
+
   /// Spans in a store's own scroll namespace, and the store.
   struct QuotedContent {
     const xanadu::Store *store{nullptr};
@@ -425,6 +430,20 @@ public:
   }
   [[nodiscard]] bool executionLimited() const noexcept {
     return workRemaining_.has_value();
+  }
+  [[nodiscard]] std::optional<std::size_t>
+  remainingExecutionWork() const noexcept {
+    return workRemaining_;
+  }
+  [[nodiscard]] std::optional<std::size_t>
+  remainingScratchBytes() const noexcept {
+    if (!scratchLimit_) return std::nullopt;
+    return scratch_.size() < *scratchLimit_ ? *scratchLimit_ - scratch_.size()
+                                            : 0;
+  }
+  [[nodiscard]] std::size_t remainingCellAllowance() const noexcept {
+    return slots_.size() < allocationLimit_ ? allocationLimit_ - slots_.size()
+                                            : 0;
   }
   void consumeWork() const {
     if (workRemaining_) {

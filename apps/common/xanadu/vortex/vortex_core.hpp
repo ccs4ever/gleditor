@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <expected>
 #include <functional>
 #include <optional>
 #include <span>
@@ -62,11 +63,26 @@ enum class ContractViolationKind : std::uint8_t {
   Postcondition,
 };
 
+enum class ScopedRefusal : std::uint8_t {
+  InvalidOperands,
+  InvalidSchema,
+  InvalidGraph,
+  InvalidScopedCompletion,
+  CutBelowFloor,
+  ResourceLimit,
+  TypeMismatch,
+  PublicationFailed,
+  CallbackFault,
+  Cancelled,
+  CursorOwnership
+};
+
 struct ExecutionResult {
   bool success{true};
   ContractViolationKind contractViolation{ContractViolationKind::None};
   std::optional<CellRef> failingClause;
   std::string errorMessage;
+  std::optional<ScopedRefusal> scopedRefusal;
 };
 
 /**
@@ -235,6 +251,9 @@ public:
   // -- Dual-Wing Calling Convention -------------------------------------------
   [[nodiscard]] std::vector<CellRef> inputsOf(CellRef opcode) const;
   [[nodiscard]] std::vector<CellRef> outputsOf(CellRef opcode) const;
+  /// Enumerate structural slots without coercing integers or following handles.
+  [[nodiscard]] std::expected<std::vector<CellRef>, ScopedRefusal>
+  rawWingSlotsOf(CellRef opcode, DimVector side, std::size_t maxSlots) const;
   void bindInput(CellRef opcode, CellRef operand);
   void bindOutput(CellRef opcode, CellRef target);
 

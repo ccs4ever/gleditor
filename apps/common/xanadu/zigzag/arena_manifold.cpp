@@ -1232,6 +1232,20 @@ ArenaManifold::makeQuote(const std::uint32_t space,
   return cell;
 }
 
+std::optional<std::uint32_t>
+ArenaManifold::contentSpaceOf(CellRef ref) const noexcept {
+  if (!contains(ref)) return std::nullopt;
+  if (isQuoteOccurrence(ref)) {
+    const auto canonical = canonicalProxyOf(ref);
+    if (!canonical) return std::nullopt;
+    ref = *canonical;
+  }
+  if (const auto foreign = foreignOf(ref)) return foreign->space;
+  if (const auto quote = quoteSpace_.find(ref); quote != quoteSpace_.end())
+    return quote->second;
+  return std::nullopt;
+}
+
 std::optional<ArenaManifold::QuotedContent>
 ArenaManifold::quotedContent(const CellRef ref) const {
   CellRef target = ref;
