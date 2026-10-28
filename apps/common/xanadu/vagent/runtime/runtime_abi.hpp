@@ -518,6 +518,13 @@ inline constexpr std::string_view kTurnQuestion = "question";
 inline constexpr std::string_view kTurnArgs     = "args";
 inline constexpr std::string_view kTurnSender   = "sender";
 inline constexpr std::string_view kFieldAnswer  = "$answer";
+/// A routine that reports a typed outcome writes a symbolic code here and
+/// halts; the adapter reads it before committing or undoing the turn, so the
+/// code survives an undo that `Fail` would erase with the turn's mark.
+inline constexpr std::string_view kFieldTurnResult     = "$turn_result";
+inline constexpr std::string_view kTurnResultCommitted = "Committed";
+/// The stat prefix a refused typed outcome is counted under, after the undo.
+inline constexpr std::string_view kStatRefusedPrefix = "refused.";
 
 inline constexpr std::string_view kFaultUnanswered = "unanswered";
 inline constexpr std::string_view kFaultRemote     = "remote_fault";

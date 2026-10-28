@@ -358,6 +358,33 @@ protected:
                                     a.linkTo(s1, a.dims.outbox, s2)}),
                            a.chain({a.add(msgs)}), a.halt, a.fail};
     };
+    // A routine that reports a typed outcome from inside a called
+    // subroutine: it writes `$turn_result` and jumps straight to halt with
+    // the call frame still on the stack (P19 I3-1b spike).
+    for (const auto &[type, code] :
+         {std::pair<std::string, std::string>{"Refuser", "StaleSequence"},
+          std::pair<std::string, std::string>{
+              "Committer", std::string(kTurnResultCommitted)}}) {
+      program.types[type] = [type, code](WorkerContext &c) {
+        Asm a(c);
+        const auto agent  = c.arena.makeCell(std::string_view(type));
+        const auto msgs   = a.counterField(agent, "msgs");
+        const auto result = c.arena.makeCell(std::string_view(""));
+        setField(c.arena, valueDims(c.core), agent, kFieldTurnResult, result);
+        const auto write = c.vm.mintOpcode(OpcodeKind::Add);
+        c.core.bindInput(write, c.arena.makeCell(std::string_view(code)));
+        c.core.bindInput(write, c.arena.makeCell(std::string_view("")));
+        c.core.bindOutput(write, result);
+        const auto sub  = a.chain({write});
+        const auto call = c.vm.mintOpcode(OpcodeKind::Call);
+        c.core.bindInput(call, a.scalar(static_cast<std::int64_t>(sub)));
+        // Never reached: the subroutine halts instead of returning.
+        const auto after = a.add(msgs);
+        return CompiledAgent{
+            agent, a.chain({a.add(a.counterField(agent, "i"))}),
+            a.chain({a.add(msgs), call, after}), a.halt, a.fail};
+      };
+    }
     // Spawns a child and at once emits into its inner space.
     program.types["Talker"] = [](WorkerContext &c) {
       Asm a(c);
@@ -508,6 +535,49 @@ TEST_F(VagentExecutor, FailingDispatchUndoesItsWritesAndIsCounted) {
   ASSERT_TRUE(deliver(external(*pid, "m2")));
   ASSERT_EQ(runtime->pumpOne(now), true);
   EXPECT_EQ(exec->stat(*pid, kStatDropped), 2U);
+}
+
+TEST_F(VagentExecutor, ATypedRefusalHaltsFromANestedCallAndIsUndone) {
+  build();
+  const auto pid = exec->launch("Refuser", "r");
+  ASSERT_TRUE(pid);
+  exec->pumpUntilIdle();
+  ASSERT_TRUE(deliver(external(*pid, "m1")));
+  exec->pumpUntilIdle();
+  // The increment before the call is undone with the turn, the code survives
+  // the undo as a stat, and the field is empty again.
+  EXPECT_EQ(intField(*pid, "msgs"), 0);
+  EXPECT_EQ(exec->stat(*pid, std::string(kStatRefusedPrefix) + "StaleSequence"),
+            1U);
+  EXPECT_EQ(exec->stat(*pid, kStatDropped), 0U);
+  const auto *ctx  = exec->context(*pid);
+  const auto agent = exec->agentCell(*pid);
+  const auto cell =
+      fieldValue(ctx->arena, valueDims(ctx->core), *agent, kFieldTurnResult);
+  ASSERT_TRUE(cell);
+  EXPECT_EQ(ctx->arena.textOf(*cell), "");
+  // No activation frame from the abandoned call outlives the turn.
+  for (const auto cursor : ctx->vm.activeCursors())
+    EXPECT_FALSE(ctx->arena.linked(cursor, ctx->core.dims().stack));
+}
+
+TEST_F(VagentExecutor, ACommittedResultCommitsAndClearsTheField) {
+  build();
+  const auto pid = exec->launch("Committer", "c");
+  ASSERT_TRUE(pid);
+  exec->pumpUntilIdle();
+  ASSERT_TRUE(deliver(external(*pid, "m1")));
+  exec->pumpUntilIdle();
+  EXPECT_EQ(intField(*pid, "msgs"), 1);
+  EXPECT_EQ(exec->stat(*pid, std::string(kStatRefusedPrefix) +
+                                 std::string(kTurnResultCommitted)),
+            0U);
+  const auto *ctx  = exec->context(*pid);
+  const auto agent = exec->agentCell(*pid);
+  const auto cell =
+      fieldValue(ctx->arena, valueDims(ctx->core), *agent, kFieldTurnResult);
+  ASSERT_TRUE(cell);
+  EXPECT_EQ(ctx->arena.textOf(*cell), "");
 }
 
 TEST_F(VagentExecutor, CycleExhaustionIsAHardFailure) {

@@ -583,6 +583,9 @@ struct AgentExecutor::TurnOutcome {
   std::string cause;
   /// The value a `readOnly` turn left in `$answer`.
   std::optional<WireValue> answer;
+  /// The code a routine left in `$turn_result`. Anything but `Committed` is a
+  /// typed refusal: the turn was undone and the code is all that remains.
+  std::optional<std::string> result;
 };
 
 struct AgentExecutor::HostEvent {
@@ -1605,6 +1608,7 @@ AgentExecutor::TurnOutcome AgentExecutor::runTurnOnce(State &state,
 
     std::optional<std::string> failure;
     std::optional<WireValue> answer;
+    bool refusal = false;
     try {
       // 3. Turn cell.
       const auto millis = static_cast<std::int64_t>(
@@ -1685,6 +1689,17 @@ AgentExecutor::TurnOutcome AgentExecutor::runTurnOnce(State &state,
           failure = std::string(kFailUnfinished);
         }
       }
+      // A typed result is read before the commit or undo below; only a
+      // routine that reached halt can have left one.
+      if (!failure) {
+        if (const auto cell = fieldValue(arena, state.vd, agent.agentCell,
+                                         kFieldTurnResult)) {
+          if (auto code = arena.textOf(*cell); !code.empty()) {
+            refusal        = code != kTurnResultCommitted;
+            outcome.result = std::move(code);
+          }
+        }
+      }
       // An answer is read before the undo below discards it (§7.1).
       if (!failure && spec.readOnly) {
         if (const auto cell =
@@ -1709,13 +1724,19 @@ AgentExecutor::TurnOutcome AgentExecutor::runTurnOnce(State &state,
 
     // 7. Commit or undo. Either way no choice point survives the turn.
     vm.clearChoicePoints();
-    if (failure || spec.readOnly) {
+    if (failure || spec.readOnly || refusal) {
       arena.release(m0);
       vm.setCursorOpcode(cursor, *spec.entry);
-      outcome = {.committed = !failure,
+      outcome = {.committed = !failure && !refusal,
                  .cause     = failure.value_or(std::string{}),
-                 .answer    = std::move(answer)};
+                 .answer    = std::move(answer),
+                 .result    = std::move(outcome.result)};
     } else {
+      // The code belongs to this turn only; the next turn starts without one.
+      if (const auto cell =
+              fieldValue(arena, state.vd, agent.agentCell, kFieldTurnResult))
+        zigzag::expectWritten(
+            arena.setContent(*cell, std::array{arena.intern("")}));
       arena.discard(m0);
     }
     if (!spec.deferDrain) liftLimits(context);
@@ -1727,6 +1748,10 @@ AgentExecutor::TurnOutcome AgentExecutor::runTurnOnce(State &state,
     if (const auto name =
             fieldNameCell(arena, state.vd, agent.agentCell, kFieldTurn)) {
       setField(arena, state.vd, agent.agentCell, kFieldTurn, std::nullopt);
+    }
+    if (refusal && outcome.result) {
+      // After the undo, so the count survives it.
+      bumpStat(state, std::string(kStatRefusedPrefix) + *outcome.result);
     }
     if (failure) {
       // After the undo, so the count survives it.
