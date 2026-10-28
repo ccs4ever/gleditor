@@ -45,10 +45,11 @@ preserved. Only accepted iteration files are staged/committed, with material lim
 - I2A is the generic scalar/control scope foundation: explicit host admission, typed graph
   descriptor, same-cursor continuation, owned value transfer and resource/refusal semantics. It is
   accepted ([validation](i2a-validation.md)) as that foundation only; it does not complete P19.8 or
-  enable epistemic queries, and scopes stay disabled in actors until I2B closes M4.
-- I2B still needs guarded structural scratch operations, structured/reference result assignment,
-  compiler emission and query graph lowering. Generic scope refusals also need domain-error mapping
-  before the P19 surface API is complete.
+  enable epistemic queries.
+- I2B lands in slices ([validation](i2b-validation.md)). I2B-1 derives each turn's scope grant from
+  the actor grant and settings and revokes it between turns, closing M4. Structured/reference result
+  assignment, guarded structural scratch operations, compiler emission, query graph lowering and
+  domain-error mapping remain.
 - I2U, supported-agent live upgrade, is accepted ([validation](i2u-validation.md)). Running the
   draft found and fixed two engine defects (dimension identity in the owned-graph copier, member
   plans missing from the upgrade schema) and a `dropped_field` compiler defect. It refuses populated

@@ -287,6 +287,10 @@ inline constexpr std::string_view kVagentCompactEvery = "vagent.compact_every";
 inline constexpr std::string_view kVagentMaxSources   = "vagent.max_sources";
 inline constexpr std::string_view kVagentMaxCandidates =
     "vagent.max_candidates";
+inline constexpr std::string_view kVagentScopeDepth =
+    "vagent.epistemic_scope_depth";
+inline constexpr std::string_view kVagentNestedScopes =
+    "vagent.epistemic_nested_scopes";
 
 // UI
 inline constexpr std::string_view kTabBarVisible       = "tabBarVisible";

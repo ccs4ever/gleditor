@@ -171,6 +171,8 @@ TEST(SystemDocsTest, VagentSettingsSeedWithDesignDefaults) {
       {kVagentCompactEvery, std::int64_t{64}},
       {"vagent.max_sources", std::int64_t{128}},
       {"vagent.max_candidates", std::int64_t{1024}},
+      {"vagent.epistemic_scope_depth", std::int64_t{32}},
+      {"vagent.epistemic_nested_scopes", std::int64_t{8}},
   };
   for (const auto &[name, value] : expected) {
     const auto it = find(name);

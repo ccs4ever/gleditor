@@ -175,6 +175,18 @@ public:
     scopeLimits_ = limits;
     return this;
   }
+  /// Withdraw the host grant; ScopedEvaluate refuses until one is installed.
+  [[nodiscard]] std::expected<VortexVM *, ScopedRefusal>
+  revokeScopedEvaluationLimits() {
+    if (!scopedFrames_.empty())
+      return std::unexpected(ScopedRefusal::ResourceLimit);
+    scopeLimits_.reset();
+    return this;
+  }
+  [[nodiscard]] std::optional<ScopedEvaluationLimits>
+  scopedEvaluationLimits() const noexcept {
+    return scopeLimits_;
+  }
 
   // -- Execution Lifecycle ----------------------------------------------------
   ExecutionResult step(CellRef cursor);

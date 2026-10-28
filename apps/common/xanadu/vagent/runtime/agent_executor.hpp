@@ -163,6 +163,15 @@ enum class CheckpointRefusal : std::uint8_t {
 
 [[nodiscard]] std::string_view toString(CheckpointRefusal refusal) noexcept;
 
+/// The scoped-evaluation grant one turn may use. It never exceeds the actor's
+/// grant: work and instructions are the turn's fuel, bytes its output bytes,
+/// value nodes its cells; nesting comes from the validated settings. The VM
+/// additionally clamps every entry to what the turn has left. A grant with a
+/// zero budget yields none, so ScopedEvaluate refuses rather than runs free.
+[[nodiscard]] std::optional<zigzag::vortex::ScopedEvaluationLimits>
+scopedEvaluationGrant(const zigzag::vortex::mesh::ActorGrant &grant,
+                      const EpistemicLimits &limits) noexcept;
+
 /// What signs and names a checkpoint. `origin.str()` must equal the node name
 /// the executor was built with, because `resume` compares them.
 struct CheckpointIdentity {

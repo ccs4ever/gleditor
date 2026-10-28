@@ -393,6 +393,22 @@ private:
 
 } // namespace
 
+std::optional<zigzag::vortex::ScopedEvaluationLimits>
+scopedEvaluationGrant(const ActorGrant &grant,
+                      const EpistemicLimits &limits) noexcept {
+  const auto work = static_cast<std::size_t>(std::min<std::uint64_t>(
+      grant.maxInstructions, std::numeric_limits<std::size_t>::max()));
+  const zigzag::vortex::ScopedEvaluationLimits scoped{
+      .traversalWork = work,
+      .bytes         = grant.maxOutputBytes,
+      .depth         = limits.maxScopeDepth,
+      .fields        = grant.maxCells,
+      .instructions  = work,
+      .scopes        = limits.maxNestedScopes};
+  if (!scoped.valid()) return std::nullopt;
+  return scoped;
+}
+
 std::string_view toString(CheckpointRefusal refusal) noexcept {
   switch (refusal) {
   case CheckpointRefusal::UnknownAgent:
@@ -729,6 +745,9 @@ void AgentExecutor::liftLimits(WorkerContext &context) const {
   context.arena.setExecutionLimits(std::numeric_limits<std::uint32_t>::max(),
                                    std::numeric_limits<std::size_t>::max(),
                                    std::numeric_limits<std::size_t>::max());
+  // A scope grant is the turn's; the adapter's own work between turns never
+  // runs a scoped callback.
+  (void)context.vm.revokeScopedEvaluationLimits();
 }
 
 // -- Reserved fields, counters and statistics
@@ -1578,6 +1597,11 @@ AgentExecutor::TurnOutcome AgentExecutor::runTurnOnce(State &state,
       arena.setExecutionLimits(static_cast<std::uint32_t>(cells), work,
                                std::size_t{m0.scratchSize} +
                                    grant.maxOutputBytes);
+    // No scope is open between turns, so installing or revoking cannot fail.
+    if (const auto scoped = scopedEvaluationGrant(grant, settings_.epistemic))
+      (void)vm.setScopedEvaluationLimits(*scoped);
+    else
+      (void)vm.revokeScopedEvaluationLimits();
 
     std::optional<std::string> failure;
     std::optional<WireValue> answer;

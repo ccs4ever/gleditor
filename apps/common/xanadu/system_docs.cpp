@@ -920,6 +920,18 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .schemas = {{.expectedTypes = {"integer"},
                       .defaultValues =
                           {vagent::runtime::kDefaultEpistemicMaxCandidates}}}},
+        {.name    = std::string(settings::kVagentScopeDepth),
+         .notes   = "vagent: positive schema and value nesting a scoped "
+                    "epistemic query may admit; cell/fuel grants still apply",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues =
+                          {vagent::runtime::kDefaultEpistemicScopeDepth}}}},
+        {.name    = std::string(settings::kVagentNestedScopes),
+         .notes   = "vagent: positive count of scoped epistemic evaluations "
+                    "an actor may hold open at once, nesting included",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues =
+                          {vagent::runtime::kDefaultEpistemicNestedScopes}}}},
     };
     break;
 
