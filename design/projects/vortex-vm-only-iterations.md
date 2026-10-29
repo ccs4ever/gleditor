@@ -129,3 +129,25 @@ preceding string allocation. Full `make -j$(nproc)` passed, and all 249 focused 
 Independent Luna architecture, senior and profiler reviews accepted this bounded implementation. No
 full-suite or performance claim follows. Logs: `/tmp/vql-comparison-build.log`,
 `/tmp/vql-comparison-tests.log`, `/tmp/vql-comparison-format.log`.
+
+## Iteration 5: lazy alias field defaults
+
+Contract field defaults may capture a prior lexical variable or earlier parameter as a graph slot.
+The matcher reads that slot only when the field is absent, preserving the original cell identity;
+empty bindings remain empty. Existing fields skip fallback resolution entirely. Larger alias streams
+refuse explicitly because the current capture representation does not preserve them in full. Path
+and function-call defaults still require genuine VM thunks and refuse during compilation.
+
+`VQL_CONTRACT/3` adds explicit subject counts and ordered alias slots to matching and return checks.
+Older descriptors refuse. Exact operand and capture layouts are checked before matching. Descriptor
+collection is shared by call guards, return checks and loop destructuring.
+
+General matcher atomicity remains unfinished: literal-default cells can survive a later mismatch. A
+whole-matcher arena rollback would currently leave minted dimension-cache entries stale, so this
+iteration adds no such rollback. Alias resolution itself introduces no graph mutations.
+
+Validation: full `make -j$(nproc)` passed; all 261 focused tests passed, including malformed ABI
+refusal before default allocation and alias execution from a saved graph in a fresh VM. Independent
+Luna architecture and profiler reviews accepted this bounded scope. No full-suite pass or general
+lazy-thunk/atomicity completion is claimed. Logs: `/tmp/vql-alias-default-build.log`,
+`/tmp/vql-alias-default-tests.log`, `/tmp/vql-alias-default-format.log`.

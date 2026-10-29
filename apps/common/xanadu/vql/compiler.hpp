@@ -139,6 +139,7 @@ private:
   std::vector<zigzag::CellRef>
   compileArgument(const ValueExpr &argument,
                   std::optional<zigzag::CellRef> context);
+  std::vector<zigzag::CellRef> emitContractDefaultSlots(const TypeExpr &type);
   std::unordered_map<std::string, DefDeclaration> definitions_;
   std::vector<std::string> activeCalls_;
   std::optional<zigzag::CellRef> ambientContext_;

@@ -41,9 +41,12 @@ explicitly. Syntax acceptance alone does not establish execution support.
 
 Runtime block loops, destructuring, `where`, conditional actions and ordered multi-return now use
 actual VM instructions. Typed context fields and implicit context captures use descriptor ABI
-`VQL_CONTRACT/2`; version 1 descriptors refuse. Request execution restores its contract coordinator
-on every exit. The VM-only ledger records 238 passing focused tests for this bounded iteration;
-recursive frames, nonliteral field-default thunks and atomic mutation enforcement remain open.
+`VQL_CONTRACT/3`; older descriptors refuse. Request execution restores its contract coordinator on
+every exit. The VM-only ledger records 238 passing focused tests for this bounded iteration;
+recursive frames, path/call field-default thunks and atomic mutation enforcement remain open.
+Variable-alias field defaults now capture prior lexical VM slots lazily, preserving identity for
+zero or one fallback cell. Larger streams refuse explicitly. This alias increment passes 261 focused
+tests; it does not establish general lazy-thunk support.
 
 Scalar comparisons now lower to a dedicated Vortex instruction with exact Int64 and IEEE Double
 semantics, whole-token text inference and canonical text fallback. Typed bits override display text;

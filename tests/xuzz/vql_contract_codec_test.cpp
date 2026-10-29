@@ -23,7 +23,7 @@ TEST(VQLContractCodecTest, CanonicalBasicTypeUsesItsSemanticKind) {
                     .members = {PrimaryType{
                         .kind = BasicType{.kind = BasicType::Kind::Int}}}}};
   const auto descriptor = encodeTypeDescriptor(type);
-  EXPECT_EQ(descriptor, "VQL_CONTRACT/2\nInt");
+  EXPECT_EQ(descriptor, "VQL_CONTRACT/3\nInt");
   EXPECT_EQ(std::get<BasicType>(
                 decodeTypeDescriptor(descriptor).unionType.members.front().kind)
                 .kind,
@@ -33,7 +33,7 @@ TEST(VQLContractCodecTest, CanonicalBasicTypeUsesItsSemanticKind) {
 TEST(VQLContractCodecTest, RoundTripsNestedUnionOptionalAndGenericTypes) {
   const auto source = parseType("Stream<(Cell? | Dim)?> | Stream<Int | Float>");
   const auto encoded = encodeTypeDescriptor(source);
-  EXPECT_TRUE(encoded.starts_with("VQL_CONTRACT/2\n"));
+  EXPECT_TRUE(encoded.starts_with("VQL_CONTRACT/3\n"));
 
   const auto decoded = decodeTypeDescriptor(encoded);
   EXPECT_EQ(encodeTypeDescriptor(decoded), encoded);
@@ -63,17 +63,25 @@ TEST(VQLContractCodecTest, RoundTripsRefinementAndShapeBindingsAndDefaults) {
   EXPECT_TRUE(fields[2].isContext);
 }
 
-TEST(VQLContractCodecTest, RoundTripsSimplePathDefaultsAndFullWidthNames) {
-  const auto source  = parseType("{ +d.default: $v := ##/+d.next/-d.prev }");
-  const auto encoded = encodeTypeDescriptor(source);
-  const auto decoded = decodeTypeDescriptor(encoded);
-  EXPECT_EQ(encodeTypeDescriptor(decoded), encoded);
+TEST(VQLContractCodecTest, RejectsPathDefaultsWithoutVmThunks) {
+  const auto source = parseType("{ +d.default: $v := ##/+d.next/-d.prev }");
+  EXPECT_THROW((void)encodeTypeDescriptor(source), ContractDescriptorError);
+}
+
+TEST(VQLContractCodecTest, DefaultAliasesHaveDeterministicUniqueOrdering) {
+  const auto source = parseType(
+      "Cell { +d.first: $first: Int := $z, +d.second: $second: Int := $a, "
+      "+d.third: $third: Int := $z }");
+  const auto aliases = contractDefaultVariables(source);
+  EXPECT_EQ(aliases, (std::vector<std::string>{"a", "z"}));
+  const auto decoded = decodeTypeDescriptor(encodeTypeDescriptor(source));
+  EXPECT_EQ(contractDefaultVariables(decoded), aliases);
 }
 
 TEST(VQLContractCodecTest, RoundTripsTypedContextFields) {
   const auto alias        = parseType("Cell { .: $self: String }");
   const auto encodedAlias = encodeTypeDescriptor(alias);
-  EXPECT_EQ(encodedAlias, "VQL_CONTRACT/2\nCell{.: $self: String}");
+  EXPECT_EQ(encodedAlias, "VQL_CONTRACT/3\nCell{.: $self: String}");
   const auto decodedAlias = decodeTypeDescriptor(encodedAlias);
   ASSERT_TRUE(decodedAlias.unionType.members.front().refinement);
   const auto &aliasFields =
@@ -85,7 +93,7 @@ TEST(VQLContractCodecTest, RoundTripsTypedContextFields) {
   EXPECT_EQ(encodeTypeDescriptor(decodedAlias), encodedAlias);
 
   const auto unaliased = parseType("Cell { .: Int }");
-  EXPECT_EQ(encodeTypeDescriptor(unaliased), "VQL_CONTRACT/2\nCell{.: Int}");
+  EXPECT_EQ(encodeTypeDescriptor(unaliased), "VQL_CONTRACT/3\nCell{.: Int}");
 }
 
 TEST(VQLContractCodecTest, RejectsMalformedAndUnknownVersionsByName) {
@@ -102,6 +110,8 @@ TEST(VQLContractCodecTest, RejectsMalformedAndUnknownVersionsByName) {
                ContractDescriptorError);
   EXPECT_THROW((void)decodeTypeDescriptor("VQL_CONTRACT/1\nCell"),
                ContractDescriptorError);
+  EXPECT_THROW((void)decodeTypeDescriptor("VQL_CONTRACT/2\nCell"),
+               ContractDescriptorError);
 }
 
 TEST(VQLContractCodecTest, RejectsUnsupportedLazyDefaultExpressionsClearly) {
@@ -116,16 +126,16 @@ TEST(VQLContractCodecTest, RejectsUnsupportedLazyDefaultExpressionsClearly) {
 }
 
 TEST(VQLContractCodecTest, RejectsTrailingPayloadAndBoundsImportedSyntax) {
-  EXPECT_THROW((void)decodeTypeDescriptor("VQL_CONTRACT/2\nInt) := 1; //"),
+  EXPECT_THROW((void)decodeTypeDescriptor("VQL_CONTRACT/3\nInt) := 1; //"),
                ContractDescriptorError);
   EXPECT_THROW(
-      (void)decodeTypeDescriptor("VQL_CONTRACT/2\nInt) := $value; ## //"),
+      (void)decodeTypeDescriptor("VQL_CONTRACT/3\nInt) := $value; ## //"),
       ContractDescriptorError);
-  EXPECT_THROW((void)decodeTypeDescriptor("VQL_CONTRACT/2\nStream<Stream<Int>>",
+  EXPECT_THROW((void)decodeTypeDescriptor("VQL_CONTRACT/3\nStream<Stream<Int>>",
                                           {.maxBytes = 1024, .maxNesting = 1}),
                ContractDescriptorError);
   EXPECT_THROW(
-      (void)decodeTypeDescriptor("VQL_CONTRACT/2\nInt", {.maxBytes = 8}),
+      (void)decodeTypeDescriptor("VQL_CONTRACT/3\nInt", {.maxBytes = 8}),
       ContractDescriptorError);
 }
 

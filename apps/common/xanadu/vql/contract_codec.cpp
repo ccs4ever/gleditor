@@ -7,8 +7,10 @@
 #include <charconv>
 #include <cmath>
 #include <format>
+#include <functional>
 #include <iterator>
 #include <limits>
+#include <set>
 #include <string>
 #include <system_error>
 #include <type_traits>
@@ -18,7 +20,7 @@
 namespace xanadu::vql {
 namespace {
 
-constexpr std::string_view descriptorHeader = "VQL_CONTRACT/2\n";
+constexpr std::string_view descriptorHeader = "VQL_CONTRACT/3\n";
 
 [[noreturn]] void unencodable(const std::string_view reason) {
   throw ContractDescriptorError(
@@ -195,36 +197,6 @@ void appendType(std::string &out, const TypeExpr &type) {
   }
 }
 
-void appendPath(std::string &out, const PathExpression &path) {
-  if (!path.anchorPredicates.empty() || path.shapeProjection ||
-      path.cloneTail || path.anchor.versionPin || path.anchor.derefMaster ||
-      (!path.isFunctor && path.anchor.kind != AnchorKind::Home &&
-       path.anchor.kind != AnchorKind::Variable)) {
-    unencodable("a path default outside the simple home/variable form");
-  }
-  if (!path.isFunctor) {
-    if (path.anchor.kind == AnchorKind::Variable) {
-      out.push_back('$');
-      out += path.anchor.name;
-    } else {
-      out += "##";
-    }
-  }
-  for (const auto &step : path.steps) {
-    const auto *dimension = std::get_if<SignedDimensionStep>(&step.selector);
-    if (!dimension || dimension->creates.size() ||
-        dimension->placement != Placement::Default || step.derefMaster ||
-        !step.predicates.empty() || !step.shapePredicates.empty() ||
-        step.rangeClamp || step.versionPin ||
-        step.yieldMode != YieldMode::Default) {
-      unencodable("a path default outside simple dimension traversal");
-    }
-    out.push_back('/');
-    out += dimension->direction == zigzag::DimVector::NEG ? "-" : "+";
-    out += dimension->dimName;
-  }
-}
-
 void appendDefault(std::string &out, const ValueExpr &value) {
   std::visit(
       [&](const auto &kind) {
@@ -263,13 +235,9 @@ void appendDefault(std::string &out, const ValueExpr &value) {
         } else if constexpr (std::is_same_v<T, std::string>) {
           out.push_back('$');
           out += kind;
-        } else if constexpr (std::is_same_v<T,
-                                            std::shared_ptr<PathExpression>>) {
-          if (!kind) unencodable("a null path default");
-          appendPath(out, *kind);
         } else {
-          unencodable("a default expression other than a scalar, variable, or "
-                      "simple path");
+          unencodable("a default expression other than a scalar or variable "
+                      "alias");
         }
       },
       value.kind);
@@ -278,9 +246,50 @@ void appendDefault(std::string &out, const ValueExpr &value) {
 } // namespace
 
 std::string encodeTypeDescriptor(const TypeExpr &type) {
+  (void)contractDefaultVariables(type);
   std::string result(descriptorHeader);
   appendType(result, type);
   return result;
+}
+
+std::vector<std::string> contractDefaultVariables(const TypeExpr &type) {
+  std::set<std::string> names;
+  std::function<void(const TypeExpr &)> visitType;
+  std::function<void(const DestructurePattern &)> visitPattern;
+  visitPattern = [&](const DestructurePattern &pattern) {
+    for (const auto &field : pattern.fields) {
+      if (field.defaultValue) {
+        if (const auto *name =
+                std::get_if<std::string>(&field.defaultValue->kind)) {
+          if (name->empty())
+            unencodable("a default variable with an empty name");
+          names.insert(*name);
+        } else if (!std::holds_alternative<ScalarLiteral>(
+                       field.defaultValue->kind)) {
+          unencodable("a default expression other than a scalar or variable "
+                      "alias");
+        }
+      }
+      if (field.type) visitType(*field.type);
+    }
+  };
+  visitType = [&](const TypeExpr &current) {
+    for (const auto &member : current.unionType.members) {
+      if (const auto *shape = std::get_if<ShapeType>(&member.kind)) {
+        visitPattern(shape->pattern);
+      } else if (const auto *generic = std::get_if<GenericType>(&member.kind)) {
+        for (const auto &argument : generic->args) {
+          if (argument) visitType(*argument);
+        }
+      } else if (const auto *nested =
+                     std::get_if<std::shared_ptr<TypeExpr>>(&member.kind)) {
+        if (*nested) visitType(**nested);
+      }
+      if (member.refinement) visitPattern(member.refinement->pattern);
+    }
+  };
+  visitType(type);
+  return {names.begin(), names.end()};
 }
 
 TypeExpr decodeTypeDescriptor(const std::string_view descriptor,
@@ -310,7 +319,7 @@ TypeExpr decodeTypeDescriptor(const std::string_view descriptor,
   }
   if (!descriptor.starts_with("VQL_CONTRACT/")) {
     throw ContractDescriptorError(
-        "VQL contract descriptor format mismatch: expected VQL_CONTRACT/2");
+        "VQL contract descriptor format mismatch: expected VQL_CONTRACT/3");
   }
   if (!descriptor.starts_with(descriptorHeader)) {
     const auto newline = descriptor.find('\n');
@@ -318,13 +327,13 @@ TypeExpr decodeTypeDescriptor(const std::string_view descriptor,
         0, newline == std::string_view::npos ? descriptor.size() : newline);
     throw ContractDescriptorError(
         std::format("VQL contract descriptor version mismatch: expected "
-                    "VQL_CONTRACT/2, found {}",
+                    "VQL_CONTRACT/3, found {}",
                     found));
   }
   const auto syntax = descriptor.substr(descriptorHeader.size());
   if (syntax.empty()) {
     throw ContractDescriptorError(
-        "VQL contract descriptor VQL_CONTRACT/2 has no type expression");
+        "VQL contract descriptor VQL_CONTRACT/3 has no type expression");
   }
   try {
     const std::string wrapped =
@@ -344,12 +353,14 @@ TypeExpr decodeTypeDescriptor(const std::string_view descriptor,
         std::get<std::string>((*body)->kind) != "value")
       throw ContractDescriptorError(
           "VQL contract descriptor has trailing syntax");
-    return *query.defs.front().params.front().type;
+    auto type = *query.defs.front().params.front().type;
+    (void)contractDefaultVariables(type);
+    return type;
   } catch (const ContractDescriptorError &) {
     throw;
   } catch (const std::exception &error) {
     throw ContractDescriptorError(std::format(
-        "malformed VQL_CONTRACT/2 type expression: {}", error.what()));
+        "malformed VQL_CONTRACT/3 type expression: {}", error.what()));
   }
 }
 

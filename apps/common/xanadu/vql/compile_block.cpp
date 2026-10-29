@@ -24,39 +24,6 @@ TypeExpr optionalAnyType() {
                           .isOptional = true}}}};
 }
 
-void requireLiteralDefaults(const DestructurePattern &pattern);
-
-void requireLiteralDefaults(const TypeExpr &type) {
-  for (const auto &member : type.unionType.members) {
-    const auto visitPattern = [](const ShapeType &shape) {
-      requireLiteralDefaults(shape.pattern);
-    };
-    if (member.refinement) visitPattern(*member.refinement);
-    if (const auto *shape = std::get_if<ShapeType>(&member.kind))
-      visitPattern(*shape);
-    if (const auto *generic = std::get_if<GenericType>(&member.kind)) {
-      for (const auto &argument : generic->args) {
-        if (argument) requireLiteralDefaults(*argument);
-      }
-    }
-    if (const auto *nested =
-            std::get_if<std::shared_ptr<TypeExpr>>(&member.kind)) {
-      if (*nested) requireLiteralDefaults(**nested);
-    }
-  }
-}
-
-void requireLiteralDefaults(const DestructurePattern &pattern) {
-  for (const auto &field : pattern.fields) {
-    if (field.defaultValue &&
-        !std::holds_alternative<ScalarLiteral>(field.defaultValue->kind)) {
-      throw std::invalid_argument(
-          "nonliteral destructure defaults require compiled lazy thunks");
-    }
-    if (field.type) requireLiteralDefaults(*field.type);
-  }
-}
-
 TypeExpr destructureContract(const DestructurePattern &source) {
   auto pattern = source;
   for (auto &field : pattern.fields) {
@@ -70,7 +37,6 @@ TypeExpr destructureContract(const DestructurePattern &source) {
       .unionType =
           UnionType{.members = {PrimaryType{
                         .kind = ShapeType{.pattern = std::move(pattern)}}}}};
-  requireLiteralDefaults(contract);
   try {
     ContractMatcher::validateType(contract);
     (void)encodeTypeDescriptor(contract);
@@ -260,12 +226,15 @@ VQLCompiler::compileExecutionBlock(const ExecutionBlock &block) {
 
       std::optional<CellRef> skip;
       if (loop.destructurePattern) {
-        const auto contract = destructureContract(*loop.destructurePattern);
-        const auto names    = ContractMatcher::contractCaptureNames(contract);
+        const auto contract     = destructureContract(*loop.destructurePattern);
+        const auto defaultSlots = emitContractDefaultSlots(contract);
+        const auto names = ContractMatcher::contractCaptureNames(contract);
         const CellRef descriptor = emitConstant(encodeTypeDescriptor(contract));
         const CellRef match = emitOp(OpcodeKind::MatchContract, "#FOR_MATCH");
         emitInput(match, descriptor);
+        emitInputConstant(match, std::int64_t{1});
         emitInput(match, item);
+        for (const auto slot : defaultSlots) emitInput(match, slot);
         const CellRef matched = core_.arena().makeCell();
         emitOutput(match, matched);
         for (const auto &name : names) {

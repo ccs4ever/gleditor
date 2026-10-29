@@ -2290,11 +2290,11 @@ explicit refusals. The rulings below describe the intended semantics.
   definition are distinct from recursive body/default expansion, which still needs VM frames.
 
 - **Scalars are read as comparisons read them (§4.3).** `Int`, `Float` and `Bool` accept a cell
-  minted with those value bits and a text cell whose whole content reads as one, because imported
-  and typed content is text and only literal-minted cells carry value bits. `"95"` is therefore both
-  a `String` and an `Int`. `Version` is text that `MicroversionId::parse` accepts; `Dim` a cell on
-  the core's `d.dims` rank or in the arena's dimension table; `Slice` a registered store's home cell
-  or the arena's own; `Store` a registered store's cell on `d.stores` or the coordinator origin.
+  minted with those value bits and a text cell whose whole content reads as one. Stored text may
+  also carry inferred value bits; text-only cells still use whole-token inference. `"95"` is both a
+  `String` and an `Int`. `Version` is text that `MicroversionId::parse` accepts; `Dim` a cell on the
+  core's `d.dims` rank or in the arena's dimension table; `Slice` a registered store's home cell or
+  the arena's own; `Store` a registered store's cell on `d.stores` or the coordinator origin.
 
 - **A default is used only when the field is absent**, and passing a cell or a path never mints: the
   bound cell is the linked one. A literal field default mints its scalar only when it is used;
@@ -2313,8 +2313,12 @@ explicit refusals. The rulings below describe the intended semantics.
 - **Block bindings run per member.** Nested `for` bindings preserve source order and duplicates;
   `where` and conditional actions branch in the VM. Untyped missing destructure fields bind empty,
   while explicit types determine whether absence is accepted. Literal field defaults are lazy.
+  Variable-alias field defaults capture prior lexical VM slots and preserve cell identity when a
+  field is absent; a present field never reads its fallback. This lowering accepts zero or one
+  fallback cell, with explicit refusal of larger streams and defaults requiring path/call thunks.
   Context fields accept a type and alias, and their captures establish the callee's context.
-  `VQL_CONTRACT/2` records the context-capture layout; version 1 descriptors are refused.
+  `VQL_CONTRACT/3` records explicit subject counts and ordered fallback slots as well as the
+  context-capture layout; older descriptors are refused.
 
 - **The compiler uses real VM instructions.** Bound point-free steps lower to Vortex traversals;
   nonrecursive typed calls use shared matching, capture slots, mismatch branches, body instructions,
@@ -2330,7 +2334,7 @@ explicit refusals. The rulings below describe the intended semantics.
   and eager sequence registers now support per-member typed filtering, stream cardinality,
   predicates and integer index clamps. Foreign neighbors resolve through canonical arena proxies;
   choice points restore iterator state and proxy minting. Universal lazy streaming, recursive
-  frames, nonliteral contract-field default thunks, mutation enforcement, and complete
+  frames, path/call contract-field default thunks, mutation enforcement, and complete
   frontend/parallel parity remain open; compiled execution never silently calls the direct evaluator
   as a fallback.
 

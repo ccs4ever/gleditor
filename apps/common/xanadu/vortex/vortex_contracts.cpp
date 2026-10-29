@@ -1,5 +1,9 @@
 #include "common/xanadu/vortex/vortex_vm.hpp"
 
+#include <cstdint>
+#include <limits>
+#include <unordered_map>
+
 #include "common/xanadu/vql/contract_codec.hpp"
 #include "common/xanadu/vql/contracts.hpp"
 
@@ -23,11 +27,13 @@ VortexVM::ContractCoordinator VortexVM::contractCoordinator() const noexcept {
 
 ExecutionResult VortexVM::executeTypeContract(OpcodeKind kind, CellRef opcode,
                                               std::vector<CellValue> &outputs) {
-  const auto inputs              = core_.inputsOf(opcode);
-  const auto slots               = core_.outputsOf(opcode);
-  const bool required            = kind == OpcodeKind::RequireContract;
-  const std::size_t firstSubject = required ? 2 : 1;
-  if (inputs.size() < firstSubject || (!required && slots.empty())) {
+  const auto inputs                   = core_.inputsOf(opcode);
+  const auto slots                    = core_.outputsOf(opcode);
+  const bool required                 = kind == OpcodeKind::RequireContract;
+  const std::size_t subjectCountIndex = required ? 2 : 1;
+  const std::size_t firstSubject      = subjectCountIndex + 1;
+  if (inputs.size() <= subjectCountIndex || (!required && slots.empty()) ||
+      (required && !slots.empty())) {
     return {.success = false, .errorMessage = "invalid contract operands"};
   }
   // A failed call must clear every capture, even when the same slots were
@@ -47,11 +53,41 @@ ExecutionResult VortexVM::executeTypeContract(OpcodeKind kind, CellRef opcode,
     }
     auto type =
         xanadu::vql::decodeTypeDescriptor(std::get<std::string>(descriptor));
+    const auto names = xanadu::vql::ContractMatcher::contractCaptureNames(type);
+    if (!required && slots.size() != names.size() + 1) {
+      throw xanadu::vql::TypeContractError("contract capture slots disagree");
+    }
+    const auto subjectCountValue = inputValue(inputs[subjectCountIndex]);
+    const auto *subjectCount = std::get_if<std::int64_t>(&subjectCountValue);
+    if (!subjectCount || *subjectCount < 0 ||
+        static_cast<std::uint64_t>(*subjectCount) >
+            std::numeric_limits<std::size_t>::max()) {
+      throw xanadu::vql::TypeContractError(
+          "contract subject count must be a nonnegative integer");
+    }
+    const auto subjectCountSize = static_cast<std::size_t>(*subjectCount);
+    const auto defaultNames     = xanadu::vql::contractDefaultVariables(type);
+    if (subjectCountSize > inputs.size() - firstSubject ||
+        defaultNames.size() !=
+            inputs.size() - firstSubject - subjectCountSize) {
+      throw xanadu::vql::TypeContractError(
+          "contract subject and default slot counts disagree");
+    }
+    std::unordered_map<std::string, CellRef> defaultSlots;
+    for (std::size_t i = 0; i < defaultNames.size(); ++i) {
+      const auto slot = inputs[firstSubject + subjectCountSize + i];
+      if (!core_.arena().contains(slot) ||
+          !defaultSlots.emplace(defaultNames[i], slot).second) {
+        throw xanadu::vql::TypeContractError(
+            "contract default alias slots are invalid");
+      }
+    }
     xanadu::MultiStoreCoordinator fallback(core_);
     auto &coordinator = contractCoordinator_ ? *contractCoordinator_ : fallback;
     xanadu::vql::ContractMatcher matcher(core_, coordinator);
     std::vector<CellRef> subjects;
-    for (std::size_t i = firstSubject; i < inputs.size(); ++i) {
+    for (std::size_t i = firstSubject; i < firstSubject + subjectCountSize;
+         ++i) {
       core_.arena().consumeWork();
       forEachResultCell(inputs[i], [&](const CellRef cell) {
         core_.arena().consumeWork();
@@ -64,16 +100,32 @@ ExecutionResult VortexVM::executeTypeContract(OpcodeKind kind, CellRef opcode,
             std::optional<CellRef>) -> std::vector<CellRef> {
       const auto *literal =
           std::get_if<xanadu::vql::ScalarLiteral>(&expression.kind);
-      if (!literal)
+      if (literal) {
+        const auto cell = core_.arena().makeCell();
+        std::visit(
+            [&](const auto &value) {
+              core_.writeValue(cell, 0, std::nullopt, CellValue{value});
+            },
+            literal->value);
+        return {cell};
+      }
+      const auto *name = std::get_if<std::string>(&expression.kind);
+      if (!name)
         throw xanadu::vql::TypeContractError(
-            "compiled nonliteral default requires a lazy VM thunk");
-      const auto cell = core_.arena().makeCell();
-      std::visit(
-          [&](const auto &value) {
-            core_.writeValue(cell, 0, std::nullopt, CellValue{value});
-          },
-          literal->value);
-      return {cell};
+            "compiled default expression requires an unsupported VM thunk");
+      const auto found = defaultSlots.find(*name);
+      if (found == defaultSlots.end())
+        throw xanadu::vql::TypeContractError(
+            "compiled contract default has no captured alias slot");
+      std::vector<CellRef> values;
+      forEachResultCell(found->second, [&](const CellRef cell) {
+        core_.arena().consumeWork();
+        if (!values.empty())
+          throw xanadu::vql::TypeContractError(
+              "contract default alias resolves to more than one cell");
+        values.push_back(cell);
+      });
+      return values;
     };
     const bool matched = matcher.match(type, subjects, &captures, defaultValue);
     if (required) {
@@ -86,11 +138,6 @@ ExecutionResult VortexVM::executeTypeContract(OpcodeKind kind, CellRef opcode,
                     "() returned a value outside its declared type"};
       }
       return {};
-    }
-    const auto names = xanadu::vql::ContractMatcher::contractCaptureNames(type);
-    if (slots.size() != names.size() + 1) {
-      return {.success      = false,
-              .errorMessage = "contract capture slots disagree"};
     }
     if (matched) {
       std::vector<CellValue> values;

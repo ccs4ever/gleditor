@@ -16,27 +16,47 @@ template <class Action> struct RestoreScope {
   ~RestoreScope() { action(); }
 };
 
-void checkDefaultSupport(const TypeExpr &type) {
-  for (const auto &primary : type.unionType.members) {
-    const auto shape = [&](const ShapeType &shapeType) {
-      for (const auto &field : shapeType.pattern.fields) {
-        if (field.defaultValue &&
-            !std::holds_alternative<ScalarLiteral>(field.defaultValue->kind))
-          throw std::invalid_argument(
-              "nonliteral contract defaults require compiled lazy thunks");
-        if (field.type) checkDefaultSupport(*field.type);
-      }
-    };
-    if (primary.refinement) shape(*primary.refinement);
-    if (const auto *s = std::get_if<ShapeType>(&primary.kind)) shape(*s);
-    if (const auto *g = std::get_if<GenericType>(&primary.kind))
-      for (const auto &argument : g->args) checkDefaultSupport(*argument);
-    if (const auto *nested =
-            std::get_if<std::shared_ptr<TypeExpr>>(&primary.kind))
-      checkDefaultSupport(**nested);
-  }
-}
 } // namespace
+
+std::vector<CellRef>
+VQLCompiler::emitContractDefaultSlots(const TypeExpr &type) {
+  std::vector<CellRef> slots;
+  std::vector<std::string> names;
+  try {
+    names = contractDefaultVariables(type);
+  } catch (const ContractDescriptorError &error) {
+    throw std::invalid_argument(error.what());
+  }
+  for (const auto &name : names) {
+    if (functorBindings_.contains(name)) {
+      throw std::invalid_argument("contract default $" + name +
+                                  " cannot capture a path functor");
+    }
+
+    const auto found = streamBindings_.find(name);
+    if (found == streamBindings_.end()) {
+      if (const auto scalar = varBindings_.find(name);
+          scalar != varBindings_.end() && scalar->second) {
+        slots.push_back(*scalar->second);
+      } else {
+        throw std::invalid_argument("contract default $" + name +
+                                    " has no prior lexical binding");
+      }
+    } else {
+      const auto &bound = found->second;
+      if (bound.size() > 1) {
+        throw std::invalid_argument("contract default $" + name +
+                                    " must resolve to at most one cell");
+      }
+      slots.push_back(bound.empty() ? emitStreamClear() : bound.front());
+    }
+    if (core_.hasPipeline(slots.back())) {
+      throw std::invalid_argument(
+          "contract default aliases cannot depend on parameter pipelines");
+    }
+  }
+  return slots;
+}
 
 std::vector<CellRef>
 VQLCompiler::compileArgument(const ValueExpr &argument,
@@ -130,12 +150,14 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
   const auto check = [&](const TypeExpr &type,
                          const std::vector<CellRef> &subjects,
                          const bool bindCaptures) {
-    checkDefaultSupport(type);
-    const auto descriptor = emitConstant(encodeTypeDescriptor(type));
+    const auto defaultSlots = emitContractDefaultSlots(type);
+    const auto descriptor   = emitConstant(encodeTypeDescriptor(type));
     const auto match =
         emitOp(OpcodeKind::MatchContract, "#MATCH " + definition.name);
     emitInput(match, descriptor);
+    emitInputConstant(match, static_cast<std::int64_t>(subjects.size()));
     for (const auto subject : subjects) emitInput(match, subject);
+    for (const auto slot : defaultSlots) emitInput(match, slot);
     const auto matched = core_.arena().makeCell();
     emitOutput(match, matched);
     for (const auto &name : ContractMatcher::contractCaptureNames(type)) {
@@ -226,14 +248,16 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
     }
   }
   if (definition.returnType) {
-    checkDefaultSupport(*definition.returnType);
+    const auto defaultSlots = emitContractDefaultSlots(*definition.returnType);
     const auto descriptor =
         emitConstant(encodeTypeDescriptor(*definition.returnType));
     const auto require =
         emitOp(OpcodeKind::RequireContract, "#RETURN_TYPE " + definition.name);
     emitInput(require, descriptor);
     emitInputConstant(require, definition.name);
+    emitInputConstant(require, static_cast<std::int64_t>(bodyResults.size()));
     for (const auto result : bodyResults) emitInput(require, result);
+    for (const auto slot : defaultSlots) emitInput(require, slot);
   }
   std::vector<CellRef> results;
   const auto copy =

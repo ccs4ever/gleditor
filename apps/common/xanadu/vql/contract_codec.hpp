@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "common/xanadu/vql/ast.hpp"
 
@@ -27,8 +28,13 @@ struct ContractDescriptorLimits {
   std::size_t maxNesting{128};
 };
 
-/// Encode a type AST as `VQL_CONTRACT/2\n` followed by canonical VQL syntax.
+/// Encode a type AST as `VQL_CONTRACT/3\n` followed by canonical VQL syntax.
 [[nodiscard]] std::string encodeTypeDescriptor(const TypeExpr &type);
+
+/// Return sorted unique variable aliases used by field defaults. Throws when a
+/// default requires evaluation beyond a scalar literal or variable alias.
+[[nodiscard]] std::vector<std::string>
+contractDefaultVariables(const TypeExpr &type);
 
 /// Decode a portable contract descriptor without process-local state.
 [[nodiscard]] TypeExpr

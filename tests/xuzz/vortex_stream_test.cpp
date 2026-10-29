@@ -222,7 +222,7 @@ TEST(VortexStreamTest, ContractBudgetChargesBeforeCopyAndCanRecover) {
       h.arena.link(second, title, DimVector::POS, secondTitle));
   const CellRef stream     = h.arena.makeCell();
   const CellRef descriptor = h.arena.makeCell(
-      "VQL_CONTRACT/2\nStream<Cell { +d.title: $title: String }>");
+      "VQL_CONTRACT/3\nStream<Cell { +d.title: $title: String }>");
   const CellRef matched      = h.arena.makeCell();
   const CellRef capture      = h.arena.makeCell();
   const CellRef clear        = h.vm.mintOpcode(OpcodeKind::StreamClear);
@@ -238,6 +238,7 @@ TEST(VortexStreamTest, ContractBudgetChargesBeforeCopyAndCanRecover) {
   h.core.bindInput(appendSecond, second);
   h.core.bindOutput(appendSecond, stream);
   h.core.bindInput(contract, descriptor);
+  h.core.bindInput(contract, h.arena.makeScalarCell(std::int64_t{1}));
   h.core.bindInput(contract, stream);
   h.core.bindOutput(contract, matched);
   h.core.bindOutput(contract, capture);
@@ -248,7 +249,7 @@ TEST(VortexStreamTest, ContractBudgetChargesBeforeCopyAndCanRecover) {
 
   constexpr std::size_t descriptorWork =
       std::string_view(
-          "VQL_CONTRACT/2\nStream<Cell { +d.title: $title: String }>")
+          "VQL_CONTRACT/3\nStream<Cell { +d.title: $title: String }>")
           .size();
   h.arena.setExecutionLimits(100'000, descriptorWork + 2, 100'000);
   const auto failed = h.vm.run(cursor, 1);
@@ -264,6 +265,46 @@ TEST(VortexStreamTest, ContractBudgetChargesBeforeCopyAndCanRecover) {
   EXPECT_EQ(h.arena.asBool(matched), std::optional{true});
   EXPECT_FALSE(h.vm.cellReferenceOf(capture));
   EXPECT_EQ(h.vm.resultCells(stream), (std::vector<CellRef>{first, second}));
+}
+
+TEST(VortexStreamTest, ContractRejectsMalformedSubjectCounts) {
+  for (const auto count :
+       {std::int64_t{-1}, std::int64_t{0}, std::int64_t{2}}) {
+    Harness h;
+    const auto descriptor = h.arena.makeCell("VQL_CONTRACT/3\nCell");
+    const auto contract   = h.vm.mintOpcode(OpcodeKind::MatchContract);
+    const auto halt       = h.vm.mintOpcode(OpcodeKind::Halt);
+    const CellRef code[]{contract, halt};
+    bindSequence(h, code);
+    h.core.bindInput(contract, descriptor);
+    h.core.bindInput(contract, h.arena.makeScalarCell(count));
+    h.core.bindInput(contract, h.core.home());
+    h.core.bindOutput(contract, h.arena.makeCell());
+    const auto cursor = h.vm.spawnCursor(contract, "invalid-contract-layout");
+    const auto execution = h.vm.run(cursor, 10);
+    EXPECT_FALSE(execution.success) << count;
+    EXPECT_NE(execution.errorMessage.find("contract"), std::string::npos);
+  }
+}
+
+TEST(VortexStreamTest, ContractRejectsCaptureLayoutBeforeAllocatingDefaults) {
+  Harness h;
+  const auto descriptor =
+      h.arena.makeCell("VQL_CONTRACT/3\nCell { +d.missing: $value: Int := 7 }");
+  const auto contract = h.vm.mintOpcode(OpcodeKind::MatchContract);
+  const auto halt     = h.vm.mintOpcode(OpcodeKind::Halt);
+  const CellRef code[]{contract, halt};
+  bindSequence(h, code);
+  h.core.bindInput(contract, descriptor);
+  h.core.bindInput(contract, h.arena.makeScalarCell(std::int64_t{1}));
+  h.core.bindInput(contract, h.core.home());
+  h.core.bindOutput(contract, h.arena.makeCell());
+  const auto cursor      = h.vm.spawnCursor(contract, "invalid-capture-layout");
+  const auto cellsBefore = h.arena.cellCount();
+  const auto execution   = h.vm.run(cursor, 10);
+  EXPECT_FALSE(execution.success);
+  EXPECT_NE(execution.errorMessage.find("capture slots"), std::string::npos);
+  EXPECT_EQ(h.arena.cellCount(), cellsBefore);
 }
 
 TEST(VortexStreamTest, AppendCanSnapshotAndAppendItsOwnPrefix) {
