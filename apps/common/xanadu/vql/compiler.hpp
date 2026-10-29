@@ -49,6 +49,9 @@ struct CompilationResult {
   std::string errorMessage;
   std::vector<zigzag::CellRef> generatedOpcodes;
   std::string disassembly;
+  std::optional<zigzag::CellRef> terminalOpcode;
+  std::optional<zigzag::CellRef> cursor;
+  std::vector<zigzag::CellRef> resultSlots;
 };
 
 class VQLCompiler {
@@ -159,7 +162,7 @@ private:
                                                    zigzag::CellRef ctxCell);
 
   // Library / Executable structure emission
-  void linkAsExecutable(zigzag::CellRef entryOp);
+  zigzag::CellRef linkAsExecutable(zigzag::CellRef entryOp);
   void linkAsLibrary(zigzag::CellRef entryOp, std::string_view moduleName,
                      std::string_view symbolName);
 

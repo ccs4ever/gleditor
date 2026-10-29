@@ -3,9 +3,11 @@
  * @brief Implementation of VPL Compiler translating AST to Vortex bytecode.
  */
 #include "common/xanadu/vpl/compiler.hpp"
+#include "common/xanadu/vortex/assembly_transaction.hpp"
 
 #include <cmath>
 #include <iomanip>
+#include <limits>
 #include <sstream>
 #include <unordered_set>
 
@@ -424,7 +426,9 @@ VPLCompiler::tryFoldConstant(const AstNode &node) const {
         return std::abs(std::get<double>(*foldedR));
       }
       if (std::holds_alternative<std::int64_t>(*foldedR)) {
-        return std::abs(std::get<std::int64_t>(*foldedR));
+        const auto value = std::get<std::int64_t>(*foldedR);
+        if (value != std::numeric_limits<std::int64_t>::min())
+          return std::abs(value);
       }
     }
     if (mon->verb() == TokenKind::Not) {
@@ -437,6 +441,10 @@ VPLCompiler::tryFoldConstant(const AstNode &node) const {
     auto lVal = tryFoldConstant(*dya->left());
     auto rVal = tryFoldConstant(*dya->right());
     if (!lVal || !rVal) return std::nullopt;
+    if (std::holds_alternative<std::string>(*lVal) ||
+        std::holds_alternative<std::string>(*rVal)) {
+      return std::nullopt;
+    }
 
     bool isFloat = std::holds_alternative<double>(*lVal) ||
                    std::holds_alternative<double>(*rVal);
@@ -459,23 +467,47 @@ VPLCompiler::tryFoldConstant(const AstNode &node) const {
     };
 
     switch (dya->verb()) {
-    case TokenKind::Plus:
+    case TokenKind::Plus: {
+      if (!isFloat) {
+        std::int64_t result{};
+        if (__builtin_add_overflow(toI(*lVal), toI(*rVal), &result))
+          return std::nullopt;
+        return result;
+      }
       return isFloat ? CellValue(toD(*lVal) + toD(*rVal))
                      : CellValue(toI(*lVal) + toI(*rVal));
-    case TokenKind::Minus:
+    }
+    case TokenKind::Minus: {
+      if (!isFloat) {
+        std::int64_t result{};
+        if (__builtin_sub_overflow(toI(*lVal), toI(*rVal), &result))
+          return std::nullopt;
+        return result;
+      }
       return isFloat ? CellValue(toD(*lVal) - toD(*rVal))
                      : CellValue(toI(*lVal) - toI(*rVal));
-    case TokenKind::Times:
+    }
+    case TokenKind::Times: {
+      if (!isFloat) {
+        std::int64_t result{};
+        if (__builtin_mul_overflow(toI(*lVal), toI(*rVal), &result))
+          return std::nullopt;
+        return result;
+      }
       return isFloat ? CellValue(toD(*lVal) * toD(*rVal))
                      : CellValue(toI(*lVal) * toI(*rVal));
+    }
     case TokenKind::Divide: {
       double r = toD(*rVal);
-      return r != 0.0 ? CellValue(toD(*lVal) / r) : CellValue(0.0);
+      if (r == 0.0) return std::nullopt;
+      return CellValue(toD(*lVal) / r);
     }
     case TokenKind::Magnitude: {
       std::int64_t mod = toI(*rVal);
-      return mod != 0 ? CellValue(toI(*lVal) % mod)
-                      : CellValue(static_cast<std::int64_t>(0));
+      if (mod == 0 ||
+          (toI(*lVal) == std::numeric_limits<std::int64_t>::min() && mod == -1))
+        return std::nullopt;
+      return CellValue(toI(*lVal) % mod);
     }
     case TokenKind::Ceiling:
       return isFloat ? CellValue(std::max(toD(*lVal), toD(*rVal)))
@@ -557,18 +589,18 @@ std::optional<CellRef> VPLCompiler::compileNode(const AstNode &node) {
     return compileQuad(*qd);
   }
 
-  return std::nullopt;
+  throw std::invalid_argument("unsupported VPL AST node in VM compiler");
 }
 
 std::optional<CellRef> VPLCompiler::compileProgram(const Program &prog) {
   std::optional<CellRef> lastRes;
   for (const auto &expr : prog.expressions()) {
-    if (expr) {
-      lastRes = compileNode(*expr);
-      if (lastRes) {
-        lastResultCells_.push_back(*lastRes);
-      }
-    }
+    if (!expr)
+      throw std::invalid_argument("VPL program contains a missing expression");
+    lastRes = compileNode(*expr);
+    if (!lastRes)
+      throw std::invalid_argument("VPL expression has no VM-compiled result");
+    lastResultCells_.push_back(*lastRes);
   }
   return lastRes;
 }
@@ -585,17 +617,22 @@ CellRef VPLCompiler::compileScalar(const ScalarExpr &expr) {
 
 std::optional<CellRef> VPLCompiler::compileVector(const VectorExpr &expr) {
   const auto &elements = expr.elements();
-  if (elements.empty()) return std::nullopt;
+  if (elements.empty())
+    throw std::invalid_argument("empty VPL vectors are unsupported by the VM");
 
   std::vector<CellRef> cells;
   cells.reserve(elements.size());
   for (const auto &elem : elements) {
-    if (elem) {
-      if (const auto cell = compileNode(*elem)) cells.push_back(*cell);
-    }
+    if (!elem)
+      throw std::invalid_argument("VPL vector contains a missing element");
+    const auto cell = compileNode(*elem);
+    if (!cell)
+      throw std::invalid_argument("VPL vector element has no VM result");
+    cells.push_back(*cell);
   }
 
-  if (cells.empty()) return std::nullopt;
+  if (cells.empty())
+    throw std::invalid_argument("VPL vector has no VM-compiled elements");
 
   // Chain vector cells along +d.step via the shared batch-link primitive.
   zigzag::expectWritten(core_.arena().linkChain(cells, core_.dims().step,
@@ -624,25 +661,23 @@ VPLCompiler::compileIdentifier(const IdentifierExpr &expr) {
 }
 
 CellRef VPLCompiler::compileVerb(const VerbExpr &expr) {
-  return emitConstant(std::string(verbName(expr.verb())));
+  (void)expr;
+  throw std::invalid_argument("VPL first-class verb values are unsupported");
 }
 
 std::optional<CellRef> VPLCompiler::compileAssign(const AssignExpr &expr) {
   std::optional<CellRef> valCell =
       expr.value() ? compileNode(*expr.value()) : std::nullopt;
+  if (!valCell)
+    throw std::invalid_argument("VPL assignment requires a compiled value");
   CellRef bindOp = emitOp(OpcodeKind::Bind, "#BIND " + expr.target());
   emitInputConstant(bindOp, expr.target());
-  if (valCell) {
-    emitInput(bindOp, *valCell);
-  }
+  emitInput(bindOp, *valCell);
   varBindings_[expr.target()] = valCell;
   return valCell;
 }
 
 std::optional<CellRef> VPLCompiler::compileMonadic(const MonadicExpr &expr) {
-  if (expr.verb() == TokenKind::Catenate) {
-    throw std::invalid_argument("Catenate requires the direct VPL engine");
-  }
   if (expr.hasCustomVerb()) {
     if (const auto *adv =
             dynamic_cast<const AdverbExpr *>(expr.customVerb().get())) {
@@ -653,9 +688,12 @@ std::optional<CellRef> VPLCompiler::compileMonadic(const MonadicExpr &expr) {
         innerVerb = v->verb();
       }
 
-      OpcodeKind opKind        = OpcodeKind::Add;
-      std::string_view opLabel = "#REDUCE_ADD";
-      if (innerVerb == TokenKind::Times) {
+      OpcodeKind opKind = OpcodeKind::Add;
+      std::string_view opLabel =
+          adverb == TokenKind::Reduce ? "#REDUCE_ADD" : "#SCAN_ADD";
+      if (innerVerb == TokenKind::Plus) {
+        // Addition is the only currently supported reduction primitive.
+      } else if (innerVerb == TokenKind::Times) {
         opKind  = OpcodeKind::Mul;
         opLabel = (adverb == TokenKind::Reduce) ? "#REDUCE_MUL" : "#SCAN_MUL";
       } else if (innerVerb == TokenKind::Ceiling) {
@@ -665,23 +703,25 @@ std::optional<CellRef> VPLCompiler::compileMonadic(const MonadicExpr &expr) {
         opKind  = OpcodeKind::Min;
         opLabel = (adverb == TokenKind::Reduce) ? "#REDUCE_MIN" : "#SCAN_MIN";
       } else {
-        opLabel = (adverb == TokenKind::Reduce) ? "#REDUCE_ADD" : "#SCAN_ADD";
+        throw std::invalid_argument(
+            "VPL VM reduce/scan supports only +, *, maximum, and minimum");
       }
 
       if (adverb == TokenKind::Reduce) {
+        const auto *vec = dynamic_cast<const VectorExpr *>(expr.right().get());
+        if (!vec)
+          throw std::invalid_argument(
+              "VPL VM reduce currently requires a literal vector");
         std::vector<CellRef> operandCells;
-        if (const auto *vec =
-                dynamic_cast<const VectorExpr *>(expr.right().get())) {
-          for (const auto &el : vec->elements()) {
-            if (el)
-              operandCells.push_back(requireCompiledCell(compileNode(*el)));
-          }
-        } else if (expr.right()) {
-          operandCells.push_back(
-              requireCompiledCell(compileNode(*expr.right())));
+        for (const auto &el : vec->elements()) {
+          if (!el)
+            throw std::invalid_argument(
+                "VPL reduction rank contains a missing element");
+          operandCells.push_back(requireCompiledCell(compileNode(*el)));
         }
 
-        if (operandCells.empty()) return core_.home();
+        if (operandCells.empty())
+          throw std::invalid_argument("VPL reduce requires a nonempty rank");
         if (operandCells.size() == 1) return operandCells.front();
 
         CellRef acc = operandCells[0];
@@ -697,19 +737,19 @@ std::optional<CellRef> VPLCompiler::compileMonadic(const MonadicExpr &expr) {
       }
 
       if (adverb == TokenKind::Scan) {
+        const auto *vec = dynamic_cast<const VectorExpr *>(expr.right().get());
+        if (!vec)
+          throw std::invalid_argument(
+              "VPL VM scan currently requires a literal vector");
         std::vector<CellRef> operandCells;
-        if (const auto *vec =
-                dynamic_cast<const VectorExpr *>(expr.right().get())) {
-          for (const auto &el : vec->elements()) {
-            if (el)
-              operandCells.push_back(requireCompiledCell(compileNode(*el)));
-          }
-        } else if (expr.right()) {
-          operandCells.push_back(
-              requireCompiledCell(compileNode(*expr.right())));
+        for (const auto &el : vec->elements()) {
+          if (!el)
+            throw std::invalid_argument("VPL scan rank has a missing element");
+          operandCells.push_back(requireCompiledCell(compileNode(*el)));
         }
 
-        if (operandCells.empty()) return core_.home();
+        if (operandCells.empty())
+          throw std::invalid_argument("VPL scan requires a nonempty rank");
 
         std::vector<CellRef> scanCells;
         CellRef acc = operandCells[0];
@@ -733,52 +773,30 @@ std::optional<CellRef> VPLCompiler::compileMonadic(const MonadicExpr &expr) {
       }
 
       if (adverb == TokenKind::Each) {
-        CellRef r  = expr.right()
-                         ? requireCompiledCell(compileNode(*expr.right()))
-                         : core_.home();
-        CellRef op = emitOp(OpcodeKind::Call, "#EACH");
-        emitInput(op, r);
-        CellRef out = core_.arena().makeCell();
-        emitOutput(op, out);
-        return out;
+        throw std::invalid_argument("VPL VM each adverb is unsupported");
       }
     }
+    throw std::invalid_argument("unsupported VPL custom verb in VM compiler");
   }
 
-  const std::optional<CellRef> rCell =
-      expr.right() ? compileNode(*expr.right()) : std::nullopt;
+  if (expr.verb() == TokenKind::Iota || expr.verb() == TokenKind::Catenate ||
+      expr.verb() == TokenKind::Enclose || expr.verb() == TokenKind::Disclose ||
+      expr.verb() == TokenKind::Rho || expr.verb() == TokenKind::Transpose ||
+      expr.verb() == TokenKind::ReverseFirst ||
+      expr.verb() == TokenKind::ReverseLast ||
+      expr.verb() == TokenKind::Power || expr.verb() == TokenKind::Times ||
+      expr.verb() == TokenKind::Floor || expr.verb() == TokenKind::Ceiling) {
+    throw std::invalid_argument("unsupported VPL monadic verb in VM compiler");
+  }
+
+  if (!expr.right())
+    throw std::invalid_argument("VPL monadic verb requires an operand");
+
+  const std::optional<CellRef> rCell = compileNode(*expr.right());
+  if (!rCell)
+    throw std::invalid_argument("VPL monadic operand has no VM result");
 
   switch (expr.verb()) {
-  case TokenKind::Iota: {
-    // Monadic Iota: ⍳N -> Mint N cells on d.1
-    std::int64_t n = 0;
-    if (rCell) {
-      if (auto iVal = core_.arena().asInt64(*rCell)) {
-        n = *iVal;
-      }
-    }
-    DimRef dim   = resolveDimension("d.1");
-    CellRef prev = core_.home();
-    std::optional<CellRef> head;
-    for (std::int64_t i = 1; i <= n; ++i) {
-      CellRef fresh = core_.arena().makeCell();
-      if (!head) head = fresh;
-      CellRef newOp = emitOp(OpcodeKind::New, "#MINT_CELL");
-      emitInput(newOp, prev);
-      emitInputConstant(newOp, static_cast<std::int64_t>(dim));
-      emitInputConstant(newOp, static_cast<std::int64_t>(1));
-      emitOutput(newOp, fresh);
-
-      CellRef valOp = emitOp(OpcodeKind::Value, "#INIT_VALUE");
-      emitInput(valOp, fresh);
-      emitInputConstant(valOp, static_cast<std::int64_t>(0));
-      emitInputConstant(valOp, static_cast<std::int64_t>(-1));
-      emitInputConstant(valOp, i);
-
-      prev = fresh;
-    }
-    return head ? head : std::optional<CellRef>{core_.home()};
-  }
   case TokenKind::Plus:
     // Identity
     return rCell;
@@ -814,103 +832,28 @@ std::optional<CellRef> VPLCompiler::compileMonadic(const MonadicExpr &expr) {
     emitOutput(op, out);
     return out;
   }
-  case TokenKind::Enclose: {
-    // ⊂A: Enclose view into cell via OpcodeKind::Value
-    CellRef box = core_.arena().makeCell();
-    CellRef op  = emitOp(OpcodeKind::Value, "#ENCLOSE");
-    emitInput(op, box);
-    emitInputConstant(op, static_cast<std::int64_t>(0));
-    emitInputConstant(op, static_cast<std::int64_t>(-1));
-    if (rCell) emitInput(op, *rCell);
-    emitOutput(op, box);
-    return box;
-  }
-  case TokenKind::Disclose: {
-    // ⊃C: Resolve clone along -d.clone to master
-    CellRef master = core_.arena().makeCell();
-    CellRef op     = emitOp(OpcodeKind::Link, "#DISCLOSE");
-    if (rCell) emitInput(op, *rCell);
-    emitInputConstant(op, static_cast<std::int64_t>(core_.dims().clone));
-    emitInputConstant(op, static_cast<std::int64_t>(-1));
-    emitOutput(op, master);
-    return master;
-  }
-  case TokenKind::Rho: {
-    // ⍴A: Monadic shape
-    CellRef op  = emitOp(OpcodeKind::Link, "#SHAPE");
-    CellRef out = core_.arena().makeCell();
-    if (rCell) emitInput(op, *rCell);
-    emitInputConstant(op, static_cast<std::int64_t>(core_.dims().spin));
-    emitInputConstant(op, static_cast<std::int64_t>(1));
-    emitOutput(op, out);
-    return out;
-  }
-  case TokenKind::Transpose:
-  case TokenKind::ReverseFirst:
-  case TokenKind::ReverseLast:
-    // Transpose and reverse are O(1) view operations
-    return rCell;
-
   default:
-    return rCell ? rCell : std::optional<CellRef>{core_.home()};
+    throw std::invalid_argument("unsupported VPL monadic verb in VM compiler");
   }
 }
 
 CellRef VPLCompiler::compileDyadic(const DyadicExpr &expr) {
-  if (expr.verb() == TokenKind::Catenate) {
-    throw std::invalid_argument("Catenate requires the direct VPL engine");
-  }
-  if (expr.verb() == TokenKind::Iota) {
-    // Dyadic Iota: N ⍳ dim -> Mint N cells on dimension from home
-    DimRef dim = resolveDimension("d.1");
-    if (const auto *dimExpr =
-            dynamic_cast<const DimensionExpr *>(expr.right().get())) {
-      dim = resolveDimension(dimExpr->name());
-    } else if (expr.right()) {
-      const CellRef rCell = requireCompiledCell(compileNode(*expr.right()));
-      if (auto dVal = core_.arena().asInt64(rCell)) {
-        dim = static_cast<DimRef>(*dVal);
-      }
-    }
-
-    std::int64_t count = 0;
-    if (const auto *leftScalar =
-            dynamic_cast<const ScalarExpr *>(expr.left().get())) {
-      count = leftScalar->intValue();
-    } else if (expr.left()) {
-      const CellRef lCell = requireCompiledCell(compileNode(*expr.left()));
-      if (auto iVal = core_.arena().asInt64(lCell)) {
-        count = *iVal;
-      }
-    }
-
-    CellRef prev = core_.home();
-    std::optional<CellRef> head;
-    for (std::int64_t i = 1; i <= count; ++i) {
-      CellRef fresh = core_.arena().makeCell();
-      if (!head) head = fresh;
-      CellRef newOp = emitOp(OpcodeKind::New, "#MINT_CELL");
-      emitInput(newOp, prev);
-      emitInputConstant(newOp, static_cast<std::int64_t>(dim));
-      emitInputConstant(newOp, static_cast<std::int64_t>(1));
-      emitOutput(newOp, fresh);
-
-      CellRef valOp = emitOp(OpcodeKind::Value, "#INIT_VALUE");
-      emitInput(valOp, fresh);
-      emitInputConstant(valOp, static_cast<std::int64_t>(0));
-      emitInputConstant(valOp, static_cast<std::int64_t>(-1));
-      emitInputConstant(valOp, i);
-
-      prev = fresh;
-    }
-    return head.value_or(core_.home());
+  if (expr.verb() == TokenKind::Iota || expr.verb() == TokenKind::Catenate ||
+      expr.verb() == TokenKind::Rho || expr.verb() == TokenKind::Take ||
+      expr.verb() == TokenKind::Drop || expr.verb() == TokenKind::Scrub ||
+      expr.verb() == TokenKind::Power) {
+    throw std::invalid_argument("unsupported VPL dyadic verb in VM compiler");
   }
 
-  const auto lCell = expr.left() ? compileNode(*expr.left()) : std::nullopt;
-  const auto rCell = expr.right() ? compileNode(*expr.right()) : std::nullopt;
+  if (!expr.left() || !expr.right())
+    throw std::invalid_argument("VPL dyadic verb requires two operands");
+  const auto lCell = compileNode(*expr.left());
+  const auto rCell = compileNode(*expr.right());
+  if (!lCell || !rCell)
+    throw std::invalid_argument("VPL dyadic operands must compile to values");
 
-  OpcodeKind kind    = OpcodeKind::Nop;
-  std::string_view l = "#NOP";
+  OpcodeKind kind;
+  std::string_view l;
 
   switch (expr.verb()) {
   case TokenKind::Plus:
@@ -973,26 +916,8 @@ CellRef VPLCompiler::compileDyadic(const DyadicExpr &expr) {
     kind = OpcodeKind::Or;
     l    = "#OR";
     break;
-  case TokenKind::Rho:
-    kind = OpcodeKind::Link;
-    l    = "#RESHAPE";
-    break;
-  case TokenKind::Take:
-    kind = OpcodeKind::Link;
-    l    = "#TAKE";
-    break;
-  case TokenKind::Drop:
-    kind = OpcodeKind::Link;
-    l    = "#DROP";
-    break;
-  case TokenKind::Scrub:
-    kind = OpcodeKind::Call;
-    l    = "#SCRUB";
-    break;
   default:
-    kind = OpcodeKind::Nop;
-    l    = "#NOP";
-    break;
+    throw std::invalid_argument("unsupported VPL dyadic verb in VM compiler");
   }
 
   CellRef op = emitOp(kind, l);
@@ -1004,135 +929,31 @@ CellRef VPLCompiler::compileDyadic(const DyadicExpr &expr) {
 }
 
 CellRef VPLCompiler::compileAdverb(const AdverbExpr &expr) {
-  if (expr.adverb() == TokenKind::Reduce) {
-    // Fold along rank
-    if (const auto *vec =
-            dynamic_cast<const VectorExpr *>(expr.operand().get())) {
-      const auto &elems = vec->elements();
-      if (elems.empty()) return core_.home();
-      if (elems.size() == 1) return requireCompiledCell(compileNode(*elems[0]));
-
-      CellRef acc = requireCompiledCell(compileNode(*elems[0]));
-      for (std::size_t i = 1; i < elems.size(); ++i) {
-        CellRef cur = requireCompiledCell(compileNode(*elems[i]));
-        CellRef op  = emitOp(OpcodeKind::Add, "#REDUCE_ADD");
-        emitInput(op, acc);
-        emitInput(op, cur);
-        CellRef out = core_.arena().makeCell();
-        emitOutput(op, out);
-        acc = out;
-      }
-      return acc;
-    }
-  } else if (expr.adverb() == TokenKind::Scan) {
-    // Fold emitting intermediate cells
-    if (const auto *vec =
-            dynamic_cast<const VectorExpr *>(expr.operand().get())) {
-      const auto &elems = vec->elements();
-      if (elems.empty()) return core_.home();
-
-      std::vector<CellRef> scanCells;
-      CellRef acc = requireCompiledCell(compileNode(*elems[0]));
-      scanCells.push_back(acc);
-
-      for (std::size_t i = 1; i < elems.size(); ++i) {
-        CellRef cur = requireCompiledCell(compileNode(*elems[i]));
-        CellRef op  = emitOp(OpcodeKind::Add, "#SCAN_ADD");
-        emitInput(op, acc);
-        emitInput(op, cur);
-        CellRef out = core_.arena().makeCell();
-        emitOutput(op, out);
-        scanCells.push_back(out);
-        acc = out;
-      }
-
-      // Link scan cells along +d.step
-      for (std::size_t i = 0; i + 1 < scanCells.size(); ++i) {
-        zigzag::expectWritten(core_.arena().link(
-            scanCells[i], core_.dims().step, false, scanCells[i + 1]));
-      }
-      return scanCells.front();
-    }
-  }
-
-  const auto opRef =
-      expr.operand() ? compileNode(*expr.operand()) : std::nullopt;
-  CellRef op = emitOp(OpcodeKind::Call, "#ADVERB");
-  if (opRef) emitInput(op, *opRef);
-  CellRef out = core_.arena().makeCell();
-  emitOutput(op, out);
-  return out;
+  (void)expr;
+  throw std::invalid_argument("unsupported VPL adverb in VM compiler");
 }
 
 CellRef VPLCompiler::compileConjunction(const ConjunctionExpr &expr) {
-  const auto l = expr.left() ? compileNode(*expr.left()) : std::nullopt;
-  const auto r = expr.right() ? compileNode(*expr.right()) : std::nullopt;
-  CellRef op   = emitOp(OpcodeKind::Call, "#CONJUNCTION");
-  if (l) emitInput(op, *l);
-  if (r) emitInput(op, *r);
-  CellRef out = core_.arena().makeCell();
-  emitOutput(op, out);
-  return out;
+  (void)expr;
+  throw std::invalid_argument("VPL conjunctions are unsupported by the VM");
 }
 
 std::optional<CellRef> VPLCompiler::compileIndexing(const IndexingExpr &expr) {
-  const auto target =
-      expr.target() ? compileNode(*expr.target()) : std::nullopt;
-  if (!target) return std::nullopt;
-
-  CellRef cur = *target;
-  for (const auto &idx : expr.indices()) {
-    if (!idx) continue;
-    const CellRef idxCell = requireCompiledCell(compileNode(*idx));
-    std::int64_t steps    = 1;
-    if (auto iVal = core_.arena().asInt64(idxCell)) {
-      steps = *iVal;
-    }
-    for (std::int64_t s = 0; s < steps; ++s) {
-      CellRef op = emitOp(OpcodeKind::Link, "#INDEX_WALK");
-      emitInput(op, cur);
-      emitInputConstant(op, static_cast<std::int64_t>(core_.dims().step));
-      emitInputConstant(op, static_cast<std::int64_t>(1));
-      CellRef next = core_.arena().makeCell();
-      emitOutput(op, next);
-      cur = next;
-    }
-  }
-  return cur;
+  (void)expr;
+  throw std::invalid_argument("VPL indexing is unsupported by the VM");
 }
 
 std::optional<CellRef> VPLCompiler::compileQuad(const QuadExpr &expr) {
-  const auto arg = expr.arg() ? compileNode(*expr.arg()) : std::nullopt;
-
-  if (expr.quadKind() == TokenKind::Quad) {
-    CellRef op = emitOp(OpcodeKind::Nop, "#PRINT");
-    if (arg) emitInput(op, *arg);
-    return arg ? arg : std::optional<CellRef>{core_.home()};
-  }
-  if (expr.quadKind() == TokenKind::QuadRead) {
-    CellRef op = emitOp(OpcodeKind::Call, "#READ");
-    if (arg) emitInput(op, *arg);
-    CellRef out = core_.arena().makeCell();
-    emitOutput(op, out);
-    return out;
-  }
-  if (expr.quadKind() == TokenKind::QuadSplit) {
-    CellRef op = emitOp(OpcodeKind::Call, "#SPLIT");
-    if (arg) emitInput(op, *arg);
-    CellRef out = core_.arena().makeCell();
-    emitOutput(op, out);
-    return out;
-  }
-
-  return core_.home();
+  (void)expr;
+  throw std::invalid_argument("VPL quad IO is unsupported by the VM");
 }
 
-void VPLCompiler::linkAsExecutable(CellRef entryOp) {
+CellRef VPLCompiler::linkAsExecutable(CellRef entryOp) {
   // Link posward off home along +d.spin
   zigzag::expectWritten(
       core_.arena().link(core_.home(), core_.dims().spin, false, entryOp));
   // Spawn main execution cursor
-  vm_.spawnCursor(entryOp, "main");
+  return vm_.spawnCursor(entryOp, "main");
 }
 
 void VPLCompiler::linkAsLibrary(CellRef entryOp, std::string_view moduleName,
@@ -1142,6 +963,7 @@ void VPLCompiler::linkAsLibrary(CellRef entryOp, std::string_view moduleName,
 
 CompilationResult VPLCompiler::compile(const Program &program,
                                        const CompilationOptions &options) {
+  zigzag::vortex::AssemblyTransaction transaction(vm_);
   entryOp_.reset();
   currentOp_.reset();
   allOps_.clear();
@@ -1149,33 +971,56 @@ CompilationResult VPLCompiler::compile(const Program &program,
   lastResultCells_.clear();
   optimize_ = options.optimize;
 
-  const auto resultCell = compileProgram(program);
-  if (lastResultCells_.empty() && resultCell) {
-    lastResultCells_.push_back(*resultCell);
-  }
-
-  if (options.targetLibrary) {
-    CellRef retOp = emitOp(OpcodeKind::Return, "#RETURN");
-    for (CellRef r : lastResultCells_) {
-      emitInput(retOp, r);
+  try {
+    const auto resultCell = compileProgram(program);
+    if (lastResultCells_.empty() && resultCell) {
+      lastResultCells_.push_back(*resultCell);
     }
-    linkAsLibrary(entryOp_.value(), options.moduleName, options.symbolName);
-  } else {
-    CellRef haltOp = emitOp(OpcodeKind::Halt, "#HALT");
-    for (CellRef r : lastResultCells_) {
-      emitInput(haltOp, r);
-    }
-    linkAsExecutable(entryOp_.value());
-  }
 
-  std::string dis = disassemble(entryOp_);
-  return CompilationResult{
-      .success          = true,
-      .entryOpcode      = entryOp_,
-      .errorMessage     = "",
-      .generatedOpcodes = allOps_,
-      .disassembly      = std::move(dis),
-  };
+    std::optional<CellRef> terminal;
+    std::optional<CellRef> cursor;
+    if (options.targetLibrary) {
+      CellRef retOp = emitOp(OpcodeKind::Return, "#RETURN");
+      for (CellRef r : lastResultCells_) {
+        emitInput(retOp, r);
+      }
+      terminal = retOp;
+      linkAsLibrary(entryOp_.value(), options.moduleName, options.symbolName);
+    } else {
+      CellRef haltOp = emitOp(OpcodeKind::Halt, "#HALT");
+      for (CellRef r : lastResultCells_) {
+        emitInput(haltOp, r);
+      }
+      terminal = haltOp;
+      cursor   = linkAsExecutable(entryOp_.value());
+    }
+
+    std::string dis = disassemble(entryOp_);
+    CompilationResult result{
+        .success          = true,
+        .entryOpcode      = entryOp_,
+        .errorMessage     = "",
+        .generatedOpcodes = allOps_,
+        .disassembly      = std::move(dis),
+        .terminalOpcode   = terminal,
+        .cursor           = cursor,
+        .resultSlots      = lastResultCells_,
+    };
+    transaction.commit();
+    return result;
+  } catch (const std::exception &err) {
+    entryOp_.reset();
+    currentOp_.reset();
+    allOps_.clear();
+    lastResultCells_.clear();
+    return CompilationResult{
+        .success          = false,
+        .entryOpcode      = std::nullopt,
+        .errorMessage     = std::string("Compilation error: ") + err.what(),
+        .generatedOpcodes = {},
+        .disassembly      = "",
+    };
+  }
 }
 
 CompilationResult VPLCompiler::compile(const AstNode &ast,

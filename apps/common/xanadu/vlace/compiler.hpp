@@ -115,13 +115,10 @@ public:
   Compiler(zigzag::vortex::VortexCore &core, zigzag::vortex::VortexVM &vm)
       : core_(core), vm_(vm) {}
 
-  /// Evaluate an expression in a fresh global environment (plus any
-  /// previously-defined top-level bindings). Returns the value or a named
-  /// error.
+  /// Refuses until expressions are lowered to Vortex VM instructions.
   [[nodiscard]] std::expected<ValuePtr, EvalError> evaluate(const Expr &expr);
 
-  /// Evaluate a whole program: bind its declarations, then evaluate the
-  /// trailing expression (or return a unit-ish Int 0 when there is none).
+  /// Refuses until programs are lowered to Vortex VM instructions.
   [[nodiscard]] std::expected<ValuePtr, EvalError>
   evaluateProgram(const Program &prog);
 
@@ -133,29 +130,19 @@ public:
   /// one writes nothing, so the pure fragment stays referentially transparent.
   void installBuiltins();
 
-  /// Perform an IO action at the program boundary (§6.5/§8.2). `action` is the
-  /// value produced by evaluating an `IO a` program; runIO interprets its
-  /// description tree (IO.Pure/PutStr/PutStrLn/GetLine/Bind/Then and any
-  /// std:xanadu effect node) performing real console/authoring effects, and
-  /// returns the final wrapped value `a`. `in`/`out` are the console streams
-  /// (injected so tests can drive them). Only runIO performs effects; render()
-  /// and evaluate() never do.
+  /// Refuses until IO actions are lowered to Vortex VM instructions.
   std::expected<ValuePtr, EvalError> runIO(const ValuePtr &action,
                                            std::istream &in, std::ostream &out);
 
-  /// Render a value to the text a REPL prints (shallow; does not force).
+  /// Render a value shallowly without forcing a thunk.
   [[nodiscard]] static std::string show(const ValuePtr &v);
 
-  /// Force a value fully and render it, including lazy lists as [a, b, c] and
-  /// constructed values as "Ctor arg arg". Bounded so a cyclic/infinite value
-  /// is truncated rather than looping (§6.7).
+  /// Throws std::logic_error until forcing is lowered to Vortex VM
+  /// instructions.
   [[nodiscard]] std::string render(const ValuePtr &v, int depthBudget = 10000);
 
-  /// Force a portable result under the same evaluator budget, without
-  /// rendering.
-  std::expected<ValuePtr, EvalError> forceValue(ValuePtr value) {
-    return force(std::move(value));
-  }
+  /// Refuses until thunk forcing is lowered to Vortex VM instructions.
+  std::expected<ValuePtr, EvalError> forceValue(ValuePtr value);
 
   [[nodiscard]] zigzag::vortex::VortexCore &core() noexcept { return core_; }
 

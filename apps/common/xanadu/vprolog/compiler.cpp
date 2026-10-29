@@ -231,17 +231,18 @@ CompiledQuery Compiler::compileQuery(std::string_view queryString) {
 
 std::vector<zigzag::vortex::LogicSolution>
 Compiler::solve(const CompiledQuery &query, std::size_t maxSolutions) {
-  if (query.goals.empty()) {
-    return {};
-  }
-  return stdlib_.solveQuery(query.goals, customPredicates(), maxSolutions);
+  static_cast<void>(query);
+  static_cast<void>(maxSolutions);
+  throw std::logic_error(
+      "vprolog execution is unavailable: VM resolution lowering is not "
+      "implemented");
 }
 
 bool Compiler::solveOnce(const CompiledQuery &query) {
-  if (query.goals.empty()) {
-    return false;
-  }
-  return stdlib_.solveOnce(query.goals, customPredicates());
+  static_cast<void>(query);
+  throw std::logic_error(
+      "vprolog execution is unavailable: VM resolution lowering is not "
+      "implemented");
 }
 
 } // namespace xanadu::vprolog

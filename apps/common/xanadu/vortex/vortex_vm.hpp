@@ -161,6 +161,8 @@ public:
   CellRef mintOpcode(OpcodeKind op, std::string_view label = {});
   std::optional<CellRef> assembleSequence(std::span<const OpcodeKind> ops);
   void setOpcodeKind(CellRef opCell, OpcodeKind op);
+  /// Remove assembly caches for cells released by a failed compilation.
+  VortexVM *pruneAssemblyState();
   [[nodiscard]] std::optional<OpcodeKind> getOpcodeKind(CellRef opCell) const;
 
   // -- Cursor Creation & Process Scheduler ------------------------------------

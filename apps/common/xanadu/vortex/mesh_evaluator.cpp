@@ -23,6 +23,7 @@
 #include "common/xanadu/vpl/vpl_engine.hpp"
 #include "common/xanadu/vprolog/compiler.hpp"
 #include "common/xanadu/vprolog/parser.hpp"
+#include "common/xanadu/vql/execution.hpp"
 #include "common/xanadu/vql/vql_engine.hpp"
 
 namespace zigzag::vortex::mesh {
@@ -946,7 +947,12 @@ evaluate(Frontend frontend, std::string_view source, EvaluationBudget budget,
     }
     case Frontend::Vquery: {
       vql::VQLEngine engine(context->core);
-      for (auto value : engine.execute(source)) builder.append(tail, value);
+      vql::QueryExecutor executor(engine, context->vm,
+                                  {.mode      = vql::QueryExecutionMode::Vortex,
+                                   .maxCycles = budget.maxCycles});
+      const auto execution = executor.execute(source);
+      if (!execution) throw std::runtime_error(execution.error().message);
+      for (auto value : *execution) builder.append(tail, value);
       break;
     }
     case Frontend::Vprolog: {

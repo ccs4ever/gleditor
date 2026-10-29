@@ -115,7 +115,7 @@ TEST_F(VQueryE2ETest, CompiledSliceReadsDoNotChangeTheSource) {
 }
 
 TEST_F(VQueryE2ETest, TypedDefinitionsAndReturnErrorsHaveBackendParity) {
-  for (const auto mode : {"direct", "vortex"}) {
+  for (const auto mode : {"vortex"}) {
     SCOPED_TRACE(mode);
     const auto success =
         runVQuery(std::string("--engine ") + mode +
@@ -133,7 +133,7 @@ TEST_F(VQueryE2ETest, TypedDefinitionsAndReturnErrorsHaveBackendParity) {
 }
 
 TEST_F(VQueryE2ETest, TypedVariadicCallsPreserveOrderAndRejectLateMismatch) {
-  for (const auto mode : {"direct", "vortex"}) {
+  for (const auto mode : {"vortex"}) {
     SCOPED_TRACE(mode);
     const auto success = runVQuery(
         std::string("--engine ") + mode +
@@ -150,7 +150,7 @@ TEST_F(VQueryE2ETest, TypedVariadicCallsPreserveOrderAndRejectLateMismatch) {
 }
 
 TEST_F(VQueryE2ETest, RuntimeRankTypedFilterHasBackendParity) {
-  for (const auto mode : {"direct", "vortex"}) {
+  for (const auto mode : {"vortex"}) {
     const auto result = runVQuery(
         std::string("--engine ") + mode +
         R"( --eval 'def identity($x: Int): Int := $x; let $p := %"paper"; $p/d.items%"7"%"bad"%"9"; $p/d.items/identity()')");
@@ -160,7 +160,7 @@ TEST_F(VQueryE2ETest, RuntimeRankTypedFilterHasBackendParity) {
 }
 
 TEST_F(VQueryE2ETest, RuntimeEndpointAndAppendHaveBackendParity) {
-  for (const auto mode : {"direct", "vortex"}) {
+  for (const auto mode : {"vortex"}) {
     const auto result = runVQuery(
         std::string("--engine ") + mode +
         R"( --eval 'let $p := %"paper"; $p/d.items%"7"%"9"; $p/d.items%"11"; $p/d.items::tail')");
@@ -170,7 +170,7 @@ TEST_F(VQueryE2ETest, RuntimeEndpointAndAppendHaveBackendParity) {
 }
 
 TEST_F(VQueryE2ETest, DecoratedFunctorCaptureSurvivesRebinding) {
-  for (const auto mode : {"direct", "vortex"}) {
+  for (const auto mode : {"vortex"}) {
     const auto result = runVQuery(
         std::string("--engine ") + mode +
         R"( --eval 'let $f := /d.items; let $g := /$f>[. != "bad"][-1]; let $f := /d.absent; let $p := %"paper"; $p/d.items%"7"%"bad"%"9"; $p/$g')");
@@ -187,7 +187,7 @@ TEST_F(VQueryE2ETest, MultiStoreNamedResolution) {
     GTEST_SKIP() << "Sample fixtures not present";
   }
 
-  for (const auto mode : {"direct", "vortex"}) {
+  for (const auto mode : {"vortex"}) {
     const auto named =
         runVQuery(std::string("--engine ") + mode + " " + storeA.string() +
                   " " + storeB.string() + " -e \"##xanadoc_b/d.name\"");

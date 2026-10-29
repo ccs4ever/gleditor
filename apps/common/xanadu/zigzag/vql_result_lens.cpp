@@ -6,6 +6,8 @@
 
 #include "common/xanadu/zigzag/vql_result_lens.hpp"
 
+#include "common/xanadu/vortex/vortex_vm.hpp"
+#include "common/xanadu/vql/execution.hpp"
 #include "common/xanadu/vql/vql_engine.hpp"
 
 namespace zigzag {
@@ -25,7 +27,12 @@ VqlResultLens::dimensions() const {
 
 std::expected<void, std::string>
 VqlResultLens::run(const std::string_view vql) {
-  answers_ = engine_->execute(vql);
+  zigzag::vortex::VortexVM vm(engine_->core());
+  xanadu::vql::QueryExecutor executor(
+      *engine_, vm, {.mode = xanadu::vql::QueryExecutionMode::Vortex});
+  const auto execution = executor.execute(vql);
+  if (!execution) return std::unexpected(execution.error().message);
+  answers_ = *execution;
   vql_     = vql;
   connKey_ = "vq:" + std::to_string(runs_++);
   return {};

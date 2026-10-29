@@ -28,8 +28,7 @@ struct StreamHarness {
 };
 
 TEST(VQLStreamParityTest, RanksAndTypedMemberCallsPreserveOrderAndIdentity) {
-  for (const auto mode :
-       {QueryExecutionMode::Direct, QueryExecutionMode::Vortex}) {
+  for (const auto mode : {QueryExecutionMode::Vortex}) {
     StreamHarness h;
     QueryExecutor executor(h.engine, h.vm, {.mode = mode});
     for (
@@ -60,8 +59,7 @@ TEST(VQLStreamParityTest, RanksAndTypedMemberCallsPreserveOrderAndIdentity) {
 }
 
 TEST(VQLStreamParityTest, ContextStreamsPreserveDuplicateMembers) {
-  for (const auto mode :
-       {QueryExecutionMode::Direct, QueryExecutionMode::Vortex}) {
+  for (const auto mode : {QueryExecutionMode::Vortex}) {
     StreamHarness h;
     QueryExecutor executor(h.engine, h.vm, {.mode = mode});
     const auto result = executor.execute(
@@ -73,8 +71,7 @@ TEST(VQLStreamParityTest, ContextStreamsPreserveDuplicateMembers) {
 }
 
 TEST(VQLStreamParityTest, EmptyRankCallsAndReturnFailuresMatch) {
-  for (const auto mode :
-       {QueryExecutionMode::Direct, QueryExecutionMode::Vortex}) {
+  for (const auto mode : {QueryExecutionMode::Vortex}) {
     StreamHarness h;
     QueryExecutor executor(h.engine, h.vm, {.mode = mode});
     const auto empty =
@@ -104,8 +101,7 @@ TEST(VQLStreamParityTest, EmptyRankCallsAndReturnFailuresMatch) {
 }
 
 TEST(VQLStreamParityTest, StreamPresenceDiffersFromScalarFirstValueTruthiness) {
-  for (const auto mode :
-       {QueryExecutionMode::Direct, QueryExecutionMode::Vortex}) {
+  for (const auto mode : {QueryExecutionMode::Vortex}) {
     StreamHarness h;
     const auto axis = h.coordinator.resolveDimension("d.flags");
     const auto no   = h.arena.makeScalarCell(false);
@@ -124,8 +120,7 @@ TEST(VQLStreamParityTest, StreamPresenceDiffersFromScalarFirstValueTruthiness) {
 }
 
 TEST(VQLStreamParityTest, RuntimeClampsCountFilteredMembersAndResetPerCall) {
-  for (const auto mode :
-       {QueryExecutionMode::Direct, QueryExecutionMode::Vortex}) {
+  for (const auto mode : {QueryExecutionMode::Vortex}) {
     StreamHarness h;
     QueryExecutor executor(h.engine, h.vm, {.mode = mode});
     for (const auto &[query, expected] :
@@ -158,8 +153,7 @@ TEST(VQLStreamParityTest, RuntimeClampsCountFilteredMembersAndResetPerCall) {
 }
 
 TEST(VQLStreamParityTest, PlacementAndBidirectionalTraversalMatch) {
-  for (const auto mode :
-       {QueryExecutionMode::Direct, QueryExecutionMode::Vortex}) {
+  for (const auto mode : {QueryExecutionMode::Vortex}) {
     StreamHarness h;
     QueryExecutor executor(h.engine, h.vm, {.mode = mode});
     for (const auto &[query, expected] :
@@ -195,8 +189,7 @@ TEST(VQLStreamParityTest, PlacementAndBidirectionalTraversalMatch) {
 }
 
 TEST(VQLStreamParityTest, DefaultCreatesAppendAndMintPerRuntimeInvocation) {
-  for (const auto mode :
-       {QueryExecutionMode::Direct, QueryExecutionMode::Vortex}) {
+  for (const auto mode : {QueryExecutionMode::Vortex}) {
     StreamHarness h;
     QueryExecutor executor(h.engine, h.vm, {.mode = mode});
     const auto appended = executor.execute("##/-d.items%\"new\"");
@@ -237,8 +230,7 @@ TEST(VQLStreamParityTest, UnsupportedVersionPinsRefuseEverySelectorKind) {
 }
 
 TEST(VQLStreamParityTest, DecoratedFunctorsApplyModifiersAfterCapturedPath) {
-  for (const auto mode :
-       {QueryExecutionMode::Direct, QueryExecutionMode::Vortex}) {
+  for (const auto mode : {QueryExecutionMode::Vortex}) {
     StreamHarness h;
     const auto out    = h.coordinator.resolveDimension("d.out");
     const auto target = h.arena.makeScalarCell(std::int64_t{11});
@@ -281,8 +273,7 @@ TEST(VQLStreamParityTest, DecoratedFunctorsApplyModifiersAfterCapturedPath) {
 }
 
 TEST(VQLStreamParityTest, QueryDereferenceKeepsOrdinaryCellsAndResolvesChains) {
-  for (const auto mode :
-       {QueryExecutionMode::Direct, QueryExecutionMode::Vortex}) {
+  for (const auto mode : {QueryExecutionMode::Vortex}) {
     StreamHarness h;
     const auto master = h.arena.makeCell("master");
     const auto middle = h.arena.makeCell("middle");

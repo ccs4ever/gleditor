@@ -3,8 +3,7 @@
  * @brief VQL Query Runner and Interactive REPL (vquery).
  *
  * Executes VQL queries against single or multiple xanadoc / slice stores.
- * Supports on-the-fly execution via direct fast-path evaluator (VQLEngine) or
- * by compiling to Vortex bytecode (VQLCompiler) and executing in VortexVM.
+ * Compiles queries to Vortex bytecode and executes them in VortexVM.
  * Features in-place store modification, designated output store
  * creation/update, and ASCII art visualization for terminal debugging.
  */
@@ -116,8 +115,7 @@ void printHelpREPL() {
       << "  :dims [dims]          Inspect or set active viewing "
          "dimensions (e.g. d.1,d.2,d.3)\n"
       << "  :ascii                Toggle ASCII art output mode\n"
-      << "  :engine <dir|vortex>  Switch execution engine (direct or "
-         "vortex)\n"
+      << "  :engine vortex        Select the Vortex VM execution engine\n"
       << "  :store <label> <path> Load additional xanadoc/slice store\n"
       << "  :stores               List currently loaded stores\n"
       << "  :save <path>          Save the last query rows as a result slice\n"
@@ -247,10 +245,8 @@ int main(int argc, char *argv[]) {
       .implicit_value(true);
 
   program.add_argument("--engine")
-      .help(
-          "Execution engine: 'direct' (fast-path C++) or 'vortex' (compile to "
-          "bytecode and run in VM)")
-      .default_value(std::string("direct"));
+      .help("Execution engine: 'vortex' (compile to bytecode and run in VM)")
+      .default_value(std::string("vortex"));
 
   program.add_argument("--format")
       .help("Output format: 'text', 'ascii', 'view'/'grid', 'cells', 'table'")
@@ -336,8 +332,13 @@ int main(int argc, char *argv[]) {
   std::vector<std::string> viewDimNames = parseDimensionNames(dimsOpt);
 
   auto engineMode = program.get<std::string>("--engine");
-  bool dumpAst    = program.get<bool>("--dump-ast");
-  bool dumpAsm    = program.get<bool>("--dump-asm");
+  if (engineMode != "vortex") {
+    std::cerr << "Unsupported execution engine '" << engineMode
+              << "'; VQL runs through the Vortex VM\n";
+    return 2;
+  }
+  bool dumpAst = program.get<bool>("--dump-ast");
+  bool dumpAsm = program.get<bool>("--dump-asm");
 
   std::vector<std::string> storePaths;
   if (program.present<std::vector<std::string>>("stores")) {
@@ -476,9 +477,7 @@ int main(int argc, char *argv[]) {
     if (const auto root = lensRepl.root()) engine.setVariable("lens", *root);
     zigzag::vortex::VortexVM vm(coordinator.core());
     xanadu::vql::QueryExecutionOptions executionOptions;
-    executionOptions.mode = engineMode == "vortex"
-                                  ? xanadu::vql::QueryExecutionMode::Vortex
-                                  : xanadu::vql::QueryExecutionMode::Direct;
+    executionOptions.mode = xanadu::vql::QueryExecutionMode::Vortex;
     xanadu::vql::QueryExecutor executor(engine, vm, executionOptions);
     const auto execution = executor.execute(ast);
     if (dumpAsm &&
@@ -665,11 +664,14 @@ int main(int argc, char *argv[]) {
       std::istringstream iss(line);
       std::string cmd, eng;
       iss >> cmd >> eng;
-      if (eng == "direct" || eng == "vortex") {
+      if (eng == "vortex") {
         engineMode = eng;
         std::cout << "Engine set to: " << engineMode << "\n";
+      } else if (eng == "direct") {
+        std::cout << "Unsupported execution engine 'direct'; VQL runs through "
+                     "the Vortex VM\n";
       } else {
-        std::cout << "Unknown engine. Use :engine direct or :engine vortex\n";
+        std::cout << "Unknown engine. Use :engine vortex\n";
       }
     } else if (zigzag::LensRepl::handles(line)) {
       lensRepl.run(line, std::cout, lensMeta);

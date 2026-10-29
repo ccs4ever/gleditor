@@ -2,10 +2,12 @@
 
 ## Objective and release policy
 
-Implement §4.12 of `design/vql-query-language.md` first, then the remaining specification work.
-Direct and Vortex execution must have complete feature parity across the applicable frontend paths.
-No new feature is accepted on the strength of direct-mode tests alone. Existing parity gaps are
-blockers, not supported alternatives. Internal milestones do not establish §4.12 completion.
+Implement §4.12 of `design/vql-query-language.md` first, then the remaining specification work. All
+executable language frontends must compile to real Vortex instruction graphs and run on the Vortex
+VM. Text and ASTs are compilation intermediates. Direct execution is removed; unsupported lowering
+produces an explicit error, including features that previously worked in an interpreter. The earlier
+direct/Vortex comparisons below are historical validation, not supported execution modes. Internal
+milestones do not establish §4.12 completion.
 
 Each iteration requires independent Luna architecture and senior-engineering gates for quality,
 correctness, and fitness for purpose. Profiling review rejects unmeasured ABI, allocation, and
@@ -39,10 +41,10 @@ This milestone is intentionally narrower than §4.12. The full feature gate rema
 ## Subsequent iterations
 
 Work through the remaining entries in `design/vql-implementation-status.md`, implementing each
-feature in both execution modes and running the frontend parity matrix before acceptance. This
-includes streaming/materialization, shapes/functions, distributed discovery and watches, dynamic
-lenses, complete handles/projections/history, and reachability collection. These remain unfinished
-until their respective implementation and review gates pass.
+feature in the VM and running the frontend route matrix before acceptance. This includes
+streaming/materialization, shapes/functions, distributed discovery and watches, dynamic lenses,
+complete handles/projections/history, and reachability collection. These remain unfinished until
+their respective implementation and review gates pass.
 
 ## Validation log
 

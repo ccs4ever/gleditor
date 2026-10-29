@@ -239,18 +239,12 @@ TEST_F(VQLCompilerTest, CreationSugarAndClones) {
   EXPECT_NE(result.disassembly.find("Beta"), std::string::npos);
 }
 
-TEST_F(VQLCompilerTest, FLWORAndConditionals) {
+TEST_F(VQLCompilerTest, IncompleteWhereLoweringRefusesExplicitly) {
   VQLCompiler compiler(*core, *vm);
-
   auto result = compiler.compile(
       "for $x in ##/d.items let $factor := 2 where $factor > 1 return $x");
-  ASSERT_TRUE(result.success) << result.errorMessage;
-
-  // Check generated opcodes
-  EXPECT_NE(result.disassembly.find("#FOR_BIND"), std::string::npos);
-  EXPECT_NE(result.disassembly.find("#BIND"), std::string::npos);
-  EXPECT_NE(result.disassembly.find("#COMP GT"), std::string::npos);
-  EXPECT_NE(result.disassembly.find("#BRANCH"), std::string::npos);
+  ASSERT_FALSE(result.success);
+  EXPECT_NE(result.errorMessage.find("where clauses"), std::string::npos);
 }
 
 TEST_F(VQLCompilerTest, DisassemblyFormatting) {

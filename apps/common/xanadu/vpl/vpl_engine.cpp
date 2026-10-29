@@ -147,12 +147,10 @@ std::optional<VplView> VPLEngine::getVariable(std::string_view name) const {
 void VPLEngine::clearVariables() noexcept { env_.clear(); }
 
 VplView VPLEngine::evaluate(std::string_view source) {
-  Parser parser(source);
-  auto program = parser.parseProgram();
-  if (!program) {
-    return {};
-  }
-  return evaluate(*program);
+  (void)source;
+  throw std::runtime_error(
+      "VPL direct AST evaluation is disabled; compile and execute through the "
+      "Vortex VM");
 }
 
 std::span<const zigzag::CellRef>
@@ -178,30 +176,10 @@ void VPLEngine::recordSources(VplView &view) {
 }
 
 VplView VPLEngine::evaluate(const AstNode &node) {
-  // A program returns its last expression, not the dependencies of unrelated
-  // earlier statements. Nested expressions collect only their own operands.
-  if (dynamic_cast<const Program *>(&node)) return evaluateNode(node);
-  dependencyStack_.emplace_back();
-  VplView result;
-  try {
-    result = evaluateNode(node);
-    recordSources(result);
-  } catch (...) {
-    dependencyStack_.pop_back();
-    throw;
-  }
-  auto dependencies = std::move(dependencyStack_.back());
-  dependencyStack_.pop_back();
-  mergeDependencies(dependencies, result.dependencies());
-  result.setDependencies(dependencies);
-  for (const auto cell : result.collectCells(arena())) {
-    arena().consumeWork();
-    cellDependencies_.try_emplace(cell, dependencies);
-  }
-  if (!dependencyStack_.empty()) {
-    mergeDependencies(dependencyStack_.back(), dependencies);
-  }
-  return result;
+  (void)node;
+  throw std::runtime_error(
+      "VPL direct AST evaluation is disabled; compile and execute through the "
+      "Vortex VM");
 }
 
 VplView VPLEngine::evaluateNode(const AstNode &node) {

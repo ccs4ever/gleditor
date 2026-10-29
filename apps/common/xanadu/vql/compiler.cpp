@@ -3,6 +3,7 @@
  * @brief Implementation of VQL Compiler translating AST to Vortex bytecode.
  */
 #include "common/xanadu/vql/compiler.hpp"
+#include "common/xanadu/vortex/assembly_transaction.hpp"
 #include "common/xanadu/vql/invocation.hpp"
 
 #include <cstdio>
@@ -199,6 +200,7 @@ CellRef VQLCompiler::emitInputConstant(CellRef op, const CellValue &val) {
 
 CompilationResult VQLCompiler::compile(const QueryExpression &query,
                                        const CompilationOptions &options) {
+  zigzag::vortex::AssemblyTransaction transaction(vm_);
   entryOp_.reset();
   currentOp_.reset();
   allOps_.clear();
@@ -229,28 +231,37 @@ CompilationResult VQLCompiler::compile(const QueryExpression &query,
         .disassembly      = "",
     };
   }
+  std::optional<CellRef> terminal;
+  std::optional<CellRef> cursor;
   if (options.targetLibrary) {
     CellRef retOp = emitOp(OpcodeKind::Return, "#RETURN");
     for (CellRef r : lastResultCells_) {
       emitInput(retOp, r);
     }
+    terminal = retOp;
     linkAsLibrary(entryOp_.value(), options.moduleName, options.symbolName);
   } else {
     CellRef haltOp = emitOp(OpcodeKind::Halt, "#HALT");
     for (CellRef r : lastResultCells_) {
       emitInput(haltOp, r);
     }
-    linkAsExecutable(entryOp_.value());
+    terminal = haltOp;
+    cursor   = linkAsExecutable(entryOp_.value());
   }
 
   std::string dis = disassemble(entryOp_);
-  return CompilationResult{
+  CompilationResult result{
       .success          = true,
       .entryOpcode      = entryOp_,
       .errorMessage     = "",
       .generatedOpcodes = allOps_,
       .disassembly      = std::move(dis),
+      .terminalOpcode   = terminal,
+      .cursor           = cursor,
+      .resultSlots      = lastResultCells_,
   };
+  transaction.commit();
+  return result;
 }
 
 DimRef VQLCompiler::resolveDimension(std::string_view name) {
@@ -307,8 +318,7 @@ std::optional<CellRef> VQLCompiler::compileQuery(const QueryExpression &query) {
   }
   if (!query.mounts.empty() || !query.namespaceDeclarations.empty()) {
     throw std::invalid_argument(
-        "VQL mount declarations are not compiled to Vortex yet; run the "
-        "query with --engine direct");
+        "VQL mount declarations require Vortex graph lowering");
   }
   if (!query.body.statements.empty()) {
     std::optional<CellRef> result;
@@ -323,7 +333,7 @@ std::optional<CellRef> VQLCompiler::compileQuery(const QueryExpression &query) {
             ExecutionBlock{.action = ActionClause{.clause = weave->effect}});
       } else {
         throw std::invalid_argument(
-            "watch and perspective statements require the direct engine");
+            "watch and perspective statements require Vortex graph lowering");
       }
     }
     return result;
@@ -337,6 +347,9 @@ std::optional<CellRef> VQLCompiler::compileQuery(const QueryExpression &query) {
 
 std::optional<CellRef>
 VQLCompiler::compileExecutionBlock(const ExecutionBlock &block) {
+  if (block.where)
+    throw std::invalid_argument(
+        "where clauses require Vortex filtering lowering");
   // 1. Process bindings (for, let)
   for (const auto &binding : block.bindings) {
     if (std::holds_alternative<LetClause>(binding)) {
@@ -380,6 +393,9 @@ VQLCompiler::compileExecutionBlock(const ExecutionBlock &block) {
       varBindings_[let.varName] = valCell;
     } else if (std::holds_alternative<ForClause>(binding)) {
       const auto &forCl = std::get<ForClause>(binding);
+      if (forCl.destructurePattern)
+        throw std::invalid_argument(
+            "for destructuring requires Vortex contract lowering");
       functorBindings_.erase(forCl.varName);
       const auto inStream = compilePathExpression(forCl.inPath, core_.home());
       streamBindings_[forCl.varName] = lastResultCells_;
@@ -397,32 +413,22 @@ VQLCompiler::compileExecutionBlock(const ExecutionBlock &block) {
     }
   }
 
-  // 2. Process WhereClause if present
-  if (block.where) {
-    auto condCell = compileBooleanExpr(block.where->condition, core_.home());
-    if (!condCell) condCell = emitConstant(false);
-    CellRef branchOp = emitOp(OpcodeKind::Branch, "#WHERE_FILTER");
-    emitInput(branchOp, *condCell);
-  }
-
   // 3. Process ActionClause
   return std::visit(
       [this](const auto &act) -> std::optional<CellRef> {
         using T = std::decay_t<decltype(act)>;
         if constexpr (std::is_same_v<T, ReturnClause>) {
+          if (act.items.size() > 1)
+            throw std::invalid_argument(
+                "multiple return items require Vortex result lowering");
           std::optional<CellRef> lastRes;
           for (const auto &retItem : act.items) {
             if (std::holds_alternative<PathExpression>(retItem.item)) {
               lastRes = compilePathExpression(
                   std::get<PathExpression>(retItem.item), core_.home());
             } else if (std::holds_alternative<FieldWeave>(retItem.item)) {
-              const auto &fw = std::get<FieldWeave>(retItem.item);
-              std::optional<CellRef> resCell = core_.arena().makeCell();
-              for (const auto &step : fw.steps) {
-                if (!resCell) break;
-                resCell = compilePathStep(step, *resCell);
-              }
-              lastRes = resCell;
+              throw std::invalid_argument(
+                  "field weaving requires Vortex graph lowering");
             }
           }
           return lastRes;
@@ -448,19 +454,19 @@ VQLCompiler::compileExecutionBlock(const ExecutionBlock &block) {
                     if (valCell) {
                       emitInput(bindOp, *valCell);
                     }
+                  } else {
+                    throw std::invalid_argument(
+                        "nested weave loops require Vortex control lowering");
                   }
                 },
                 effItem.item);
           }
           return core_.home();
         } else if constexpr (std::is_same_v<T, ConditionalClause>) {
-          auto condCell = compileBooleanExpr(act.condition, core_.home());
-          if (!condCell) condCell = emitConstant(false);
-          CellRef branchOp = emitOp(OpcodeKind::Branch, "#IF_BRANCH");
-          emitInput(branchOp, *condCell);
-          return condCell;
+          throw std::invalid_argument(
+              "conditional action clauses require Vortex graph lowering");
         } else {
-          throw std::logic_error("unsupported VQL execution clause");
+          throw std::invalid_argument("unsupported VQL execution clause");
         }
       },
       block.action.clause);
@@ -478,8 +484,7 @@ VQLCompiler::compilePathExpression(const PathExpression &path,
     // Refused rather than compiled without them, which would answer every
     // anchor cell whatever the predicate said.
     throw std::invalid_argument(
-        "predicates on an anchor are not compiled to Vortex yet; run the "
-        "query with --engine direct");
+        "anchor predicates require Vortex graph lowering");
   }
   std::vector<CellRef> stream;
   if (path.anchor.kind == AnchorKind::Variable &&
@@ -711,8 +716,7 @@ std::optional<CellRef> VQLCompiler::compileBooleanExpr(const BooleanExpr &expr,
                 return emitConstant(false);
               } else {
                 throw std::invalid_argument(
-                    "VQL shape predicates are not compiled to Vortex yet; "
-                          "run the query with --engine direct");
+                    "VQL shape predicates require Vortex graph lowering");
               }
             },
             pt.kind);
@@ -813,7 +817,7 @@ std::optional<CellRef> VQLCompiler::compileValueExpr(const ValueExpr &expr,
             return result ? std::optional{emitFirstCell(*result)}
                           : std::nullopt;
           }
-          return core_.home();
+          throw std::invalid_argument("null compiled path expression");
         } else if constexpr (std::is_same_v<
                                  T, std::shared_ptr<FunctionInvocation>>) {
           if (!val) return std::nullopt;
@@ -831,20 +835,21 @@ std::optional<CellRef> VQLCompiler::compileValueExpr(const ValueExpr &expr,
           if (val) {
             return compileBooleanExpr(*val, ctxCell);
           }
-          return core_.home();
+          throw std::invalid_argument("null compiled boolean expression");
         } else {
-          return core_.home();
+          throw std::invalid_argument(
+              "value expression requires Vortex graph lowering");
         }
       },
       expr.kind);
 }
 
-void VQLCompiler::linkAsExecutable(CellRef entryOp) {
+CellRef VQLCompiler::linkAsExecutable(CellRef entryOp) {
   // Link posward off home along +d.spin
   zigzag::expectWritten(
       core_.arena().link(core_.home(), core_.dims().spin, false, entryOp));
   // Spawn main execution cursor
-  vm_.spawnCursor(entryOp, "main");
+  return vm_.spawnCursor(entryOp, "main");
 }
 
 void VQLCompiler::linkAsLibrary(CellRef entryOp, std::string_view moduleName,

@@ -14,6 +14,7 @@
 #include "common/xanadu/vortex/vortex_vm.hpp"
 #include "common/xanadu/vpl/compiler.hpp"
 #include "common/xanadu/vpl/parser.hpp"
+#include "common/xanadu/vpl/vpl_engine.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
 
 namespace xanadu::vpl {
@@ -110,28 +111,20 @@ TEST_F(VPLCompilerTest, CompileLibraryStore) {
   EXPECT_EQ(*kind, OpcodeKind::Return);
 }
 
-TEST_F(VPLCompilerTest, CompileDyadicIotaAndAssignment) {
+TEST_F(VPLCompilerTest, RejectsDyadicIotaInsteadOfCompilingItAtCompileTime) {
   VPLCompiler compiler(*core, *vm);
 
-  // Both APL and J-style syntax
-  auto resultApl = compiler.compile("A ← 5⍳d.1");
-  ASSERT_TRUE(resultApl.success) << resultApl.errorMessage;
-  EXPECT_NE(resultApl.disassembly.find("#NEW"), std::string::npos);
-  EXPECT_NE(resultApl.disassembly.find("#VALUE"), std::string::npos);
-  EXPECT_NE(resultApl.disassembly.find("#BIND A"), std::string::npos);
-  EXPECT_NE(resultApl.disassembly.find("#HALT"), std::string::npos);
+  const auto resultApl = compiler.compile("A ← 5⍳d.1");
+  EXPECT_FALSE(resultApl.success);
+  EXPECT_NE(resultApl.errorMessage.find("unsupported VPL dyadic verb"),
+            std::string::npos);
+  EXPECT_FALSE(resultApl.entryOpcode);
+  EXPECT_TRUE(resultApl.generatedOpcodes.empty());
 
-  // Re-instantiate for clean manifold
-  zigzag::ArenaManifold arena2;
-  VortexCore core2(arena2);
-  VortexVM vm2(core2);
-  VPLCompiler compiler2(core2, vm2);
-
-  auto resultJ = compiler2.compile("A =. 5 i. d.1");
-  ASSERT_TRUE(resultJ.success) << resultJ.errorMessage;
-  EXPECT_NE(resultJ.disassembly.find("#NEW"), std::string::npos);
-  EXPECT_NE(resultJ.disassembly.find("#VALUE"), std::string::npos);
-  EXPECT_NE(resultJ.disassembly.find("#BIND A"), std::string::npos);
+  const auto resultJ = compiler.compile("A =. 5 i. d.1");
+  EXPECT_FALSE(resultJ.success);
+  EXPECT_NE(resultJ.errorMessage.find("unsupported VPL dyadic verb"),
+            std::string::npos);
 }
 
 TEST_F(VPLCompilerTest, CompileMonadicOperations) {
@@ -190,20 +183,29 @@ TEST_F(VPLCompilerTest, CompileOptimizationConstantFolding) {
   EXPECT_EQ(resOpt.generatedOpcodes.size(), 1u); // Only Halt
 }
 
-TEST_F(VPLCompilerTest, CompileIndexingAndEnclose) {
+TEST_F(VPLCompilerTest, RejectsUnsupportedIndexingAndContainment) {
   VPLCompiler compiler(*core, *vm);
 
-  auto resEnc = compiler.compile("⊂ 42");
-  ASSERT_TRUE(resEnc.success);
-  EXPECT_NE(resEnc.disassembly.find("#ENCLOSE"), std::string::npos);
+  const auto enclose = compiler.compile("⊂ 42");
+  EXPECT_FALSE(enclose.success);
+  EXPECT_NE(enclose.errorMessage.find("unsupported VPL monadic verb"),
+            std::string::npos);
 
-  auto resDisc = compiler.compile("⊃ C");
-  ASSERT_TRUE(resDisc.success);
-  EXPECT_NE(resDisc.disassembly.find("#DISCLOSE"), std::string::npos);
+  EXPECT_FALSE(compiler.compile("⊃ C").success);
 
-  auto resIdx = compiler.compile("A[3]");
-  ASSERT_TRUE(resIdx.success);
-  EXPECT_NE(resIdx.disassembly.find("#INDEX_WALK"), std::string::npos);
+  const auto indexing = compiler.compile("A[3]");
+  EXPECT_FALSE(indexing.success);
+  EXPECT_NE(indexing.errorMessage.find("VPL indexing is unsupported"),
+            std::string::npos);
+}
+
+TEST_F(VPLCompilerTest, DirectEvaluationEntryPointsRefuseAstExecution) {
+  VPLEngine engine(*core);
+  Parser parser("1 + 2");
+  const auto ast = parser.parseProgram();
+  ASSERT_NE(ast, nullptr);
+  EXPECT_THROW(engine.evaluate(*ast), std::runtime_error);
+  EXPECT_THROW(engine.evaluate("1 + 2"), std::runtime_error);
 }
 
 TEST_F(VPLCompilerTest, RenderASTFormatting) {

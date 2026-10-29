@@ -272,22 +272,28 @@ public:
     return predBridgeEdge_;
   }
 
+  /// Throws std::logic_error until logic resolution is lowered to VM code.
   bool solveOnce(CellRef goal, std::span<const CellRef> customPredicates = {});
+  /// Throws std::logic_error until logic resolution is lowered to VM code.
   bool solveOnce(std::span<const CellRef> goals,
                  std::span<const CellRef> customPredicates = {});
 
+  /// Throws std::logic_error until logic resolution is lowered to VM code.
   std::vector<LogicSolution>
   solveQuery(CellRef goal, std::span<const CellRef> customPredicates = {},
              std::size_t maxSolutions = 100);
+  /// Throws std::logic_error until logic resolution is lowered to VM code.
   std::vector<LogicSolution>
   solveQuery(std::span<const CellRef> goals,
              std::span<const CellRef> customPredicates = {},
              std::size_t maxSolutions                  = 100);
 
+  /// Throws std::logic_error until logic resolution is lowered to VM code.
   bool solve(CellRef goal,
              std::function<bool(const LogicSolution &)> onSolution,
              std::span<const CellRef> customPredicates = {},
              std::size_t maxSolutions                  = 100);
+  /// Throws std::logic_error until logic resolution is lowered to VM code.
   bool solve(std::span<const CellRef> goals,
              std::function<bool(const LogicSolution &)> onSolution,
              std::span<const CellRef> customPredicates = {},

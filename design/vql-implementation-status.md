@@ -1,3 +1,8 @@
+> Current execution policy: all language frontends must compile to Vortex graphs and run on the VM.
+> Direct execution has been cut off; earlier direct/Vortex parity results below are historical.
+> Missing VM lowering now refuses explicitly. See
+> [VM-only iterations](projects/vortex-vm-only-iterations.md) for validation and remaining work.
+
 # VQL implementation status
 
 The specification includes a direct evaluator, a restricted compiler, and proposed systems

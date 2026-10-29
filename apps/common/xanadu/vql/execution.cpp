@@ -11,9 +11,11 @@
 #include <ranges>
 #include <unordered_set>
 
+#include "common/xanadu/multi_store.hpp"
 #include "common/xanadu/vql/compiler.hpp"
 #include "common/xanadu/vql/contracts.hpp"
 #include "common/xanadu/vql/parser.hpp"
+#include "common/xanadu/vql/vql_engine.hpp"
 
 namespace xanadu::vql {
 namespace {
@@ -48,10 +50,18 @@ QueryExecutionError runtimeError(const std::exception &error) {
 
 } // namespace
 
-QueryExecutor::QueryExecutor(VQLEngine &directEngine,
+QueryExecutor::QueryExecutor(MultiStoreCoordinator &coordinator,
                              zigzag::vortex::VortexVM &vm,
+                             QueryExecutionOptions options,
+                             ContractBindings bindings)
+    : coordinator_(coordinator), bindings_(std::move(bindings)), vm_(vm),
+      options_(options) {}
+
+QueryExecutor::QueryExecutor(VQLEngine &session, zigzag::vortex::VortexVM &vm,
                              QueryExecutionOptions options)
-    : directEngine_(directEngine), vm_(vm), options_(options) {}
+    : QueryExecutor(session.coordinator(), vm, options) {
+  bindingSource_ = std::cref(session.variables());
+}
 
 std::expected<std::vector<zigzag::CellRef>, QueryExecutionError>
 QueryExecutor::execute(const std::string_view source,
@@ -73,7 +83,7 @@ std::expected<std::vector<zigzag::CellRef>, QueryExecutionError>
 QueryExecutor::execute(const QueryExpression &query,
                        const std::vector<zigzag::CellRef> &contextCells) {
   disassembly_.clear();
-  if (&directEngine_.core() != &vm_.core()) {
+  if (&coordinator_.core() != &vm_.core()) {
     return std::unexpected(QueryExecutionError{
         .category = QueryExecutionError::Category::Runtime,
         .message  = "VQL executor engines must share one VortexCore",
@@ -87,39 +97,13 @@ QueryExecutor::execute(const QueryExpression &query,
         .message  = error.what(),
     });
   }
-  if (options_.mode == QueryExecutionMode::Direct)
-    return executeDirect(query, contextCells);
-  return executeVortex(query, contextCells);
-}
-
-std::expected<std::vector<zigzag::CellRef>, QueryExecutionError>
-QueryExecutor::executeDirect(const QueryExpression &query,
-                             const std::vector<zigzag::CellRef> &contextCells) {
-  try {
-    if (query.defs.empty() && query.mounts.empty() &&
-        query.namespaceDeclarations.empty() && query.body.statements.empty() &&
-        std::holds_alternative<PathExpression>(query.expr)) {
-      return directEngine_.evaluatePath(std::get<PathExpression>(query.expr),
-                                        contextCells);
-    }
-
-    // Context anchors consult `.` after the engine has entered a function.
-    // Save and restore the binding so one frontend request cannot leak context.
-    const auto savedContext = directEngine_.getVariable(".");
-    const auto restore      = [this, savedContext] {
-      directEngine_.setVariable(".", savedContext);
-    };
-    const RestoreScope restoreScope{restore};
-    directEngine_.setVariable(".", contextCells);
-    return directEngine_.execute(query);
-  } catch (const TypeContractError &error) {
+  if (options_.mode != QueryExecutionMode::Vortex)
     return std::unexpected(QueryExecutionError{
-        .category = QueryExecutionError::Category::TypeContract,
-        .message  = error.what(),
+        .category = QueryExecutionError::Category::Compile,
+        .message =
+            "direct execution was removed; VQL requires Vortex compilation",
     });
-  } catch (const std::exception &error) {
-    return std::unexpected(runtimeError(error));
-  }
+  return executeVortex(query, contextCells);
 }
 
 std::expected<std::vector<zigzag::CellRef>, QueryExecutionError>
@@ -132,15 +116,13 @@ QueryExecutor::executeVortex(const QueryExpression &query,
     });
   }
   try {
-    const auto before = vm_.activeCursors();
-    const std::unordered_set<zigzag::CellRef> oldCursors(before.begin(),
-                                                         before.end());
-    VQLCompiler compiler(directEngine_.coordinator(), vm_);
+    VQLCompiler compiler(coordinator_, vm_);
     CompilationOptions compilation;
-    compilation.contextCells    = contextCells;
-    compilation.initialBindings = directEngine_.variables();
-    const auto result           = compiler.compile(query, compilation);
-    disassembly_                = result.disassembly;
+    compilation.contextCells = contextCells;
+    compilation.initialBindings =
+        bindingSource_ ? bindingSource_->get() : bindings_;
+    const auto result = compiler.compile(query, compilation);
+    disassembly_      = result.disassembly;
     if (!result.success) {
       return std::unexpected(QueryExecutionError{
           .category = QueryExecutionError::Category::Compile,
@@ -148,22 +130,19 @@ QueryExecutor::executeVortex(const QueryExpression &query,
       });
     }
 
-    const auto after  = vm_.activeCursors();
-    const auto cursor = std::ranges::find_if(after, [&](const auto candidate) {
-      return !oldCursors.contains(candidate);
-    });
-    if (cursor == after.end()) {
+    if (!result.cursor || !result.terminalOpcode) {
       return std::unexpected(QueryExecutionError{
-          .category = QueryExecutionError::Category::Runtime,
-          .message  = "compiled VQL did not create an execution cursor",
+          .category = QueryExecutionError::Category::Compile,
+          .message  = "compiled VQL has no executable activation metadata",
       });
     }
+    const auto cursor = *result.cursor;
 
     // A frontend request has no resume handle. Keep raw VM stops resumable,
     // but release this request's cursor on success, failure, or exception.
     const RestoreScope finishRequest{
-        [this, id = *cursor] { vm_.setCursorOpcode(id, std::nullopt); }};
-    const auto execution = vm_.run(*cursor, options_.maxCycles);
+        [this, id = cursor] { vm_.setCursorOpcode(id, std::nullopt); }};
+    const auto execution = vm_.run(cursor, options_.maxCycles);
     if (!execution.success) {
       const auto category =
           execution.contractViolation ==
@@ -179,20 +158,7 @@ QueryExecutor::executeVortex(const QueryExpression &query,
     }
 
     std::vector<zigzag::CellRef> cells;
-    std::optional<zigzag::CellRef> halt;
-    for (const auto opcode : result.generatedOpcodes | std::views::reverse) {
-      if (vm_.getOpcodeKind(opcode) == zigzag::vortex::OpcodeKind::Halt) {
-        halt = opcode;
-        break;
-      }
-    }
-    if (!halt) {
-      return std::unexpected(QueryExecutionError{
-          .category = QueryExecutionError::Category::Compile,
-          .message  = "compiled VQL has no Halt instruction",
-      });
-    }
-    for (const auto slot : directEngine_.core().inputsOf(*halt)) {
+    for (const auto slot : result.resultSlots) {
       const auto values = vm_.resultCells(slot);
       cells.insert(cells.end(), values.begin(), values.end());
     }

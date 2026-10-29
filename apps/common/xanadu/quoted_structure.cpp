@@ -15,6 +15,8 @@
 
 #include "common/xanadu/publication.hpp"
 #include "common/xanadu/store.hpp"
+#include "common/xanadu/vortex/vortex_vm.hpp"
+#include "common/xanadu/vql/execution.hpp"
 #include "common/xanadu/vql/vql_engine.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
 #include "common/xanadu/zigzag/dimension_registry.hpp"
@@ -353,7 +355,14 @@ evaluateSelector(const Selector &selector,
     try {
       zigzag::ArenaManifold foreignArena(&foreignManifold, &foreignStore);
       vql::VQLEngine engine(foreignArena);
-      results = engine.execute(selector.query);
+      zigzag::vortex::VortexVM vm(engine.core());
+      vql::QueryExecutor executor(engine, vm);
+      const auto execution = executor.execute(selector.query);
+      if (!execution) {
+        outState = QuotationState::Unintelligible;
+        return {};
+      }
+      results = *execution;
 
       if (results.size() >= budget.maxCells) {
         outState = QuotationState::TooLarge;

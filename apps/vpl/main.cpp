@@ -2,9 +2,8 @@
  * @file main.cpp
  * @brief VPL Query Runner and Interactive REPL (vpl).
  *
- * Executes VPL array expressions using either a direct fast-path evaluator
- * (VPLEngine) or ahead-of-time bytecode compilation into VortexVM
- * (VPLCompiler). Supports dual APL/J syntax, 2D/3D lattice grid visualization
+ * Compiles VPL array expressions into VortexVM bytecode. Supports dual APL/J
+ * syntax, 2D/3D lattice grid visualization
  * (:grid), and persistent store modification.
  */
 #include <argparse/argparse.hpp>
@@ -214,10 +213,9 @@ void printREPLHelp() {
          "data\n"
       << "  :rank <dimension>     Bind a rank from the open slice as data\n"
       << "  :save <new-store>     Save the current result as a slice\n"
-      << "  ,                     Ravel or join values (direct engine): data , "
+      << "  ,                     Ravel or join values: data , "
          "+/data\n"
-      << "  :engine <dir|vortex>  Switch execution engine ('direct' or "
-         "'vortex')\n"
+      << "  :engine vortex        Show or select the Vortex VM\n"
       << "  :ast <expr>           Dump abstract syntax tree for expression\n"
       << "  :asm <expr>           Dump compiled Vortex bytecode disassembly\n"
       << "  :time                 Inspect current hypertime microversion\n"
@@ -303,9 +301,8 @@ int main(int argc, char *argv[]) {
       .default_value(std::string(""));
 
   program.add_argument("--engine")
-      .help("Execution engine: 'direct' (fast-path C++) or 'vortex' (bytecode "
-            "VM)")
-      .default_value(std::string("direct"));
+      .help("Execution engine ('vortex' only)")
+      .default_value(std::string("vortex"));
 
   program.add_argument("-o", "--output-store")
       .help("Path to result store to create or update")
@@ -383,7 +380,12 @@ int main(int argc, char *argv[]) {
   }
 
   auto engineMode = program.get<std::string>("--engine");
-  auto format     = program.get<std::string>("--format");
+  if (engineMode != "vortex") {
+    std::cerr << "Unsupported VPL execution engine '" << engineMode
+              << "'; only 'vortex' is available.\n";
+    return 2;
+  }
+  auto format = program.get<std::string>("--format");
   if (program.get<bool>("--grid") || program.get<bool>("--view")) {
     format = "grid";
   }
@@ -513,18 +515,17 @@ int main(int argc, char *argv[]) {
           std::cerr << "Compilation failed: " << cRes.errorMessage << "\n";
           return 1;
         }
-        auto cursors = vm.activeCursors();
-        if (!cursors.empty()) {
-          auto execRes = vm.run(cursors.front(), 100000);
+        if (cRes.cursor) {
+          auto execRes = vm.run(*cRes.cursor, 100000);
+          vm.setCursorOpcode(*cRes.cursor, std::nullopt);
           if (!execRes.success && execRes.errorMessage != "Halted") {
             std::cerr << "Execution error: " << execRes.errorMessage << "\n";
             return 1;
           }
         }
         // Output result of vortex execution
-        if (!cRes.generatedOpcodes.empty()) {
-          CellRef lastOp = cRes.generatedOpcodes.back();
-          auto inCells   = core.inputsOf(lastOp);
+        if (cRes.terminalOpcode) {
+          const auto &inCells = cRes.resultSlots;
           if (!inCells.empty()) {
             const auto cell = inCells.front();
             std::cout << formatCell(arena, cell) << "\n";
@@ -540,21 +541,6 @@ int main(int argc, char *argv[]) {
             }
           }
         }
-      }
-    }
-
-    if (engineMode == "direct") {
-      try {
-        VplView result = directEngine.evaluate(*ast);
-        batchResult    = result;
-        if (format == "grid") {
-          std::cout << renderGrid(result, arena, core) << "\n";
-        } else {
-          std::cout << formatView(result, arena) << "\n";
-        }
-      } catch (const std::exception &err) {
-        std::cerr << "Evaluation error: " << err.what() << "\n";
-        return 1;
       }
     }
 
@@ -786,12 +772,12 @@ int main(int argc, char *argv[]) {
       std::size_t aStart = arg.find_first_not_of(" \t");
       if (aStart != std::string::npos) {
         std::string mode = arg.substr(aStart);
-        if (mode == "direct" || mode == "vortex") {
+        if (mode == "vortex") {
           engineMode = mode;
           std::cout << "Execution engine switched to: " << engineMode << "\n";
         } else {
           std::cout << "Unknown engine '" << mode
-                    << "'. Use 'direct' or 'vortex'.\n";
+                    << "'. VPL supports only the Vortex VM.\n";
         }
       } else {
         std::cout << "Current execution engine: " << engineMode << "\n";
@@ -838,15 +824,7 @@ int main(int argc, char *argv[]) {
       auto pAst = p.parseProgram();
       if (!pAst) continue;
 
-      if (engineMode == "direct") {
-        lastView = directEngine.evaluate(*pAst);
-        hasView  = true;
-        if (format == "grid") {
-          std::cout << renderGrid(lastView, arena, core) << "\n";
-        } else {
-          std::cout << formatView(lastView, arena) << "\n";
-        }
-      } else {
+      {
         hasView = false;
         CompilationOptions cOpts;
         cOpts.optimize = optimize;
@@ -855,13 +833,16 @@ int main(int argc, char *argv[]) {
           std::cerr << "Compilation error: " << cRes.errorMessage << "\n";
           continue;
         }
-        auto cursors = vm.activeCursors();
-        if (!cursors.empty()) {
-          vm.run(cursors.front(), 100000);
+        if (cRes.cursor) {
+          const auto execution = vm.run(*cRes.cursor, 100000);
+          vm.setCursorOpcode(*cRes.cursor, std::nullopt);
+          if (!execution.success) {
+            std::cerr << "Execution error: " << execution.errorMessage << "\n";
+            continue;
+          }
         }
-        if (!cRes.generatedOpcodes.empty()) {
-          CellRef lastOp = cRes.generatedOpcodes.back();
-          auto inCells   = core.inputsOf(lastOp);
+        if (cRes.terminalOpcode) {
+          const auto &inCells = cRes.resultSlots;
           if (!inCells.empty()) {
             const auto cell = inCells.front();
             if (const auto value = arena.asInt64(cell)) {

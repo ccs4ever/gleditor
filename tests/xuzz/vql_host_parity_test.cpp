@@ -11,8 +11,7 @@ using xanadu::vql::QueryExecutionMode;
 using zigzag::vortex::VortexHost;
 
 TEST(VQLHostParityTest, QueryNavigationScriptAndBatchUseTheRequestedBackend) {
-  for (const auto mode :
-       {QueryExecutionMode::Direct, QueryExecutionMode::Vortex}) {
+  for (const auto mode : {QueryExecutionMode::Vortex}) {
     SCOPED_TRACE(mode == QueryExecutionMode::Direct ? "direct" : "vortex");
     VortexHost host;
     host.setVQLExecutionOptions({.mode = mode});
@@ -40,8 +39,7 @@ TEST(VQLHostParityTest, QueryNavigationScriptAndBatchUseTheRequestedBackend) {
 TEST(VQLHostParityTest, RuntimeRanksFlowThroughQueryNavigationScriptAndBatch) {
   const std::string query =
       "def identity($x: Int): Int := $x; ##/d.items/identity()";
-  for (const auto mode :
-       {QueryExecutionMode::Direct, QueryExecutionMode::Vortex}) {
+  for (const auto mode : {QueryExecutionMode::Vortex}) {
     VortexHost host;
     host.setVQLExecutionOptions({.mode = mode});
     const auto seed = [](auto &core) {
@@ -96,8 +94,7 @@ TEST(VQLHostParityTest,
   const std::string brokenReturn =
       "def broken(...$rest: Int): String := $rest; broken(7, 9)";
 
-  for (const auto mode :
-       {QueryExecutionMode::Direct, QueryExecutionMode::Vortex}) {
+  for (const auto mode : {QueryExecutionMode::Vortex}) {
     SCOPED_TRACE(mode == QueryExecutionMode::Direct ? "direct" : "vortex");
     VortexHost host;
     host.setVQLExecutionOptions({.mode = mode});

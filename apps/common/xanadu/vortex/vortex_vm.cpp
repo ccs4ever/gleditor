@@ -101,6 +101,16 @@ VortexVM::assembleSequence(std::span<const OpcodeKind> ops) {
   return head;
 }
 
+VortexVM *VortexVM::pruneAssemblyState() {
+  std::erase_if(opcodeMap_, [this](const auto &entry) {
+    return !core_.arena().contains(entry.first);
+  });
+  std::erase_if(cursorPC_, [this](const auto &entry) {
+    return !core_.arena().contains(entry.first);
+  });
+  return this;
+}
+
 void VortexVM::setOpcodeKind(CellRef opCell, OpcodeKind op) {
   opcodeMap_[opCell] = op;
 }

@@ -65,15 +65,14 @@ TEST(VQLExecutionTest, TypedCallsRunThroughEitherRequestedEngine) {
   };
   const auto direct = run(QueryExecutionMode::Direct);
   const auto vortex = run(QueryExecutionMode::Vortex);
-  ASSERT_TRUE(direct) << direct.error().message;
+  ASSERT_FALSE(direct);
+  EXPECT_EQ(direct.error().category, QueryExecutionError::Category::Compile);
   ASSERT_TRUE(vortex) << vortex.error().message;
-  EXPECT_EQ(*direct, (std::vector<std::string>{"17"}));
   EXPECT_EQ(*vortex, (std::vector<std::string>{"17"}));
 }
 
 TEST(VQLExecutionTest, ExternalCellBindingsKeepTheirIdentityInBothModes) {
-  for (const auto mode :
-       {QueryExecutionMode::Direct, QueryExecutionMode::Vortex}) {
+  for (const auto mode : {QueryExecutionMode::Vortex}) {
     Harness harness;
     const auto value = harness.arena.makeScalarCell(std::int64_t{41});
     harness.direct.setVariable("external", value);
@@ -86,8 +85,7 @@ TEST(VQLExecutionTest, ExternalCellBindingsKeepTheirIdentityInBothModes) {
 }
 
 TEST(VQLExecutionTest, ParameterMismatchFiltersWithoutChangingEngineMode) {
-  for (const auto mode :
-       {QueryExecutionMode::Direct, QueryExecutionMode::Vortex}) {
+  for (const auto mode : {QueryExecutionMode::Vortex}) {
     Harness harness;
     auto executor     = harness.executor(mode);
     const auto result = executor.execute(
@@ -98,8 +96,7 @@ TEST(VQLExecutionTest, ParameterMismatchFiltersWithoutChangingEngineMode) {
 }
 
 TEST(VQLExecutionTest, ReturnMismatchHasTheSameStructuredErrorCategory) {
-  for (const auto mode :
-       {QueryExecutionMode::Direct, QueryExecutionMode::Vortex}) {
+  for (const auto mode : {QueryExecutionMode::Vortex}) {
     Harness harness;
     auto executor     = harness.executor(mode);
     const auto result = executor.execute(
@@ -113,8 +110,7 @@ TEST(VQLExecutionTest, ReturnMismatchHasTheSameStructuredErrorCategory) {
 }
 
 TEST(VQLExecutionTest, ContextCellsReachBothExecutionModes) {
-  for (const auto mode :
-       {QueryExecutionMode::Direct, QueryExecutionMode::Vortex}) {
+  for (const auto mode : {QueryExecutionMode::Vortex}) {
     Harness harness;
     const auto title      = harness.coordinator.resolveDimension("d.title");
     const CellRef context = harness.arena.makeCell();
@@ -131,8 +127,7 @@ TEST(VQLExecutionTest, ContextCellsReachBothExecutionModes) {
 }
 
 TEST(VQLExecutionTest, ParseAndUnknownTypeErrorsAreStructured) {
-  for (const auto mode :
-       {QueryExecutionMode::Direct, QueryExecutionMode::Vortex}) {
+  for (const auto mode : {QueryExecutionMode::Vortex}) {
     Harness harness;
     auto executor    = harness.executor(mode);
     const auto parse = executor.execute("def nope(");
@@ -159,8 +154,7 @@ TEST(VQLExecutionTest, VortexCycleBudgetIsReportedWithoutFallback) {
 
 } // namespace
 TEST(VQLExecutionTest, FiltersMixedCandidatesWithoutLosingIdentity) {
-  for (const auto mode :
-       {QueryExecutionMode::Direct, QueryExecutionMode::Vortex}) {
+  for (const auto mode : {QueryExecutionMode::Vortex}) {
     Harness harness;
     const auto yesRoot = harness.arena.makeCell("yes root");
     const auto noRoot  = harness.arena.makeCell("no root");
@@ -182,8 +176,7 @@ TEST(VQLExecutionTest, FiltersMixedCandidatesWithoutLosingIdentity) {
 }
 
 TEST(VQLExecutionTest, UnsupportedVariadicSignaturesFailBeforeExecution) {
-  for (const auto mode :
-       {QueryExecutionMode::Direct, QueryExecutionMode::Vortex}) {
+  for (const auto mode : {QueryExecutionMode::Vortex}) {
     Harness h;
     auto executor = h.executor(mode);
     for (const auto source : {"def f(...$rest, $later): Any := $rest; ##",
@@ -217,8 +210,7 @@ TEST(VQLExecutionTest, InvalidSignatureRegistersNoDefinitionsInDirectEngine) {
 }
 
 TEST(VQLExecutionTest, PreboundTypedRequestBudgetFailureCanRecoverInBothModes) {
-  for (const auto mode :
-       {QueryExecutionMode::Direct, QueryExecutionMode::Vortex}) {
+  for (const auto mode : {QueryExecutionMode::Vortex}) {
     Harness h;
     const auto value = h.arena.makeCell("prebound");
     const std::vector<CellRef> expected(128, value);

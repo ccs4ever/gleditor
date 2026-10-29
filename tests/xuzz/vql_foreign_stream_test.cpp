@@ -66,8 +66,7 @@ struct ForeignRank {
 };
 
 TEST(VQLForeignStreamTest, LongRanksMintNeighborsAndRetainCanonicalIdentity) {
-  for (const auto mode :
-       {QueryExecutionMode::Direct, QueryExecutionMode::Vortex}) {
+  for (const auto mode : {QueryExecutionMode::Vortex}) {
     ForeignRank h(256);
     EXPECT_FALSE(h.arena.findExistingProxy(h.space, h.foreign.back()));
     QueryExecutor executor(h.engine, h.vm, {.mode = mode});
@@ -106,8 +105,7 @@ TEST(VQLForeignStreamTest, LongRanksMintNeighborsAndRetainCanonicalIdentity) {
 }
 
 TEST(VQLForeignStreamTest, ForeignCyclesTerminateAndLocalEdgesOverride) {
-  for (const auto mode :
-       {QueryExecutionMode::Direct, QueryExecutionMode::Vortex}) {
+  for (const auto mode : {QueryExecutionMode::Vortex}) {
     ForeignRank h(3, true);
     QueryExecutor executor(h.engine, h.vm, {.mode = mode});
     const auto result = executor.execute("./~d.items", {h.anchor});
@@ -126,8 +124,7 @@ TEST(VQLForeignStreamTest, ForeignCyclesTerminateAndLocalEdgesOverride) {
 
 TEST(VQLForeignStreamTest,
      ReverseWholeRankUsesCanonicalForwardOrderWithOverlay) {
-  for (const auto mode :
-       {QueryExecutionMode::Direct, QueryExecutionMode::Vortex}) {
+  for (const auto mode : {QueryExecutionMode::Vortex}) {
     ForeignRank h(3);
     const auto middle = h.arena.proxyFor(h.space, h.foreign[1]);
     const auto local  = h.arena.makeCell("overlay");
@@ -146,8 +143,7 @@ TEST(VQLForeignStreamTest,
 
 TEST(VQLForeignStreamTest,
      QueryDereferenceResolvesForeignMasterAndOverlayCycles) {
-  for (const auto mode :
-       {QueryExecutionMode::Direct, QueryExecutionMode::Vortex}) {
+  for (const auto mode : {QueryExecutionMode::Vortex}) {
     ForeignRank h(3);
     // Bind the same foreign rank as d.clone without materializing its
     // neighbors.

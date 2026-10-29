@@ -37,8 +37,7 @@ struct VariadicHarness {
 };
 
 TEST(VQLVariadicParityTest, FlattensArgumentStreamsInOrderAndKeepsDuplicates) {
-  for (const auto mode :
-       {QueryExecutionMode::Direct, QueryExecutionMode::Vortex}) {
+  for (const auto mode : {QueryExecutionMode::Vortex}) {
     VariadicHarness h;
     QueryExecutor executor(h.engine, h.vm, {.mode = mode});
     const auto result = executor.execute(
@@ -51,8 +50,7 @@ TEST(VQLVariadicParityTest, FlattensArgumentStreamsInOrderAndKeepsDuplicates) {
 }
 
 TEST(VQLVariadicParityTest, EmptyRestAndFixedParameterDefault) {
-  for (const auto mode :
-       {QueryExecutionMode::Direct, QueryExecutionMode::Vortex}) {
+  for (const auto mode : {QueryExecutionMode::Vortex}) {
     VariadicHarness h;
     QueryExecutor executor(h.engine, h.vm, {.mode = mode});
     const auto empty = executor.execute(
@@ -68,8 +66,7 @@ TEST(VQLVariadicParityTest, EmptyRestAndFixedParameterDefault) {
 }
 
 TEST(VQLVariadicParityTest, TypeChecksEachArgumentStreamBeforeFlattening) {
-  for (const auto mode :
-       {QueryExecutionMode::Direct, QueryExecutionMode::Vortex}) {
+  for (const auto mode : {QueryExecutionMode::Vortex}) {
     VariadicHarness h;
     QueryExecutor executor(h.engine, h.vm, {.mode = mode});
     const auto valid = executor.execute(
@@ -94,8 +91,7 @@ TEST(VQLVariadicParityTest, TypeChecksEachArgumentStreamBeforeFlattening) {
 }
 
 TEST(VQLVariadicParityTest, RestCaptureDoesNotLeakShapeFieldsIntoScope) {
-  for (const auto mode :
-       {QueryExecutionMode::Direct, QueryExecutionMode::Vortex}) {
+  for (const auto mode : {QueryExecutionMode::Vortex}) {
     VariadicHarness h;
     QueryExecutor executor(h.engine, h.vm, {.mode = mode});
     const auto result = executor.execute(
@@ -108,8 +104,7 @@ TEST(VQLVariadicParityTest, RestCaptureDoesNotLeakShapeFieldsIntoScope) {
 }
 
 TEST(VQLVariadicParityTest, CallerScopeUfcsAndRepeatedCallsStayIsolated) {
-  for (const auto mode :
-       {QueryExecutionMode::Direct, QueryExecutionMode::Vortex}) {
+  for (const auto mode : {QueryExecutionMode::Vortex}) {
     VariadicHarness h;
     QueryExecutor executor(h.engine, h.vm, {.mode = mode});
     const auto query =
@@ -134,8 +129,7 @@ TEST(VQLVariadicParityTest, CallerScopeUfcsAndRepeatedCallsStayIsolated) {
 }
 
 TEST(VQLVariadicParityTest, LateBadArgumentDoesNotPartiallyReturnRest) {
-  for (const auto mode :
-       {QueryExecutionMode::Direct, QueryExecutionMode::Vortex}) {
+  for (const auto mode : {QueryExecutionMode::Vortex}) {
     VariadicHarness h;
     QueryExecutor executor(h.engine, h.vm, {.mode = mode});
     const auto result =
@@ -147,8 +141,7 @@ TEST(VQLVariadicParityTest, LateBadArgumentDoesNotPartiallyReturnRest) {
 }
 
 TEST(VQLVariadicParityTest, NestedCallsEvaluateBeforeCallerActivation) {
-  for (const auto mode :
-       {QueryExecutionMode::Direct, QueryExecutionMode::Vortex}) {
+  for (const auto mode : {QueryExecutionMode::Vortex}) {
     VariadicHarness h;
     QueryExecutor executor(h.engine, h.vm, {.mode = mode});
     const auto variadic = executor.execute(
@@ -186,8 +179,7 @@ TEST(VQLVariadicParityTest, RecursiveBodiesAndDefaultsStillRefuseInVortex) {
 }
 
 TEST(VQLVariadicParityTest, ReturnPromiseChecksFlattenedBodyResults) {
-  for (const auto mode :
-       {QueryExecutionMode::Direct, QueryExecutionMode::Vortex}) {
+  for (const auto mode : {QueryExecutionMode::Vortex}) {
     VariadicHarness h;
     QueryExecutor executor(h.engine, h.vm, {.mode = mode});
     const auto result = executor.execute(
