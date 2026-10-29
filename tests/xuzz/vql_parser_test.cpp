@@ -465,6 +465,31 @@ TEST(VQLParserTest, DestructuringInForClause) {
   EXPECT_EQ(pattern.fields[2].varName, "prev");
 }
 
+TEST(VQLParserTest, ContextDestructureFieldsCanCarryTypesAndAliases) {
+  Parser parser("def typed($value: Cell { .: String }) := $value; "
+                "def captured({ .: $self: Int }) := $self; ##");
+  const auto query = parser.parseQuery();
+  ASSERT_EQ(query.defs.size(), 2u);
+
+  const auto &typed = query.defs[0].params[0].type->unionType.members.front();
+  ASSERT_TRUE(typed.refinement);
+  const auto &typedField = typed.refinement->pattern.fields.front();
+  EXPECT_TRUE(typedField.isContext);
+  ASSERT_TRUE(typedField.type);
+
+  const auto &pattern =
+      std::get<DestructurePattern>(query.defs[1].params[0].target);
+  ASSERT_EQ(pattern.fields.size(), 1u);
+  EXPECT_TRUE(pattern.fields.front().isContext);
+  EXPECT_EQ(pattern.fields.front().varName, "self");
+  ASSERT_TRUE(pattern.fields.front().type);
+}
+
+TEST(VQLParserTest, ContextDestructureFieldsRejectDefaults) {
+  Parser parser("def invalid({ .: $self := \"fallback\" }) := $self; ##");
+  EXPECT_THROW((void)parser.parseQuery(), ParseError);
+}
+
 TEST(VQLParserTest, MorphismsAndVirtualDimensions) {
   // Sprout morphism: ##/d.node/=> [ "child1", "child2" ]
   Parser p1("##/d.node/=> [ \"child1\", \"child2\" ]");

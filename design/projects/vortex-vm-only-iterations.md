@@ -82,3 +82,30 @@ No full-suite pass or full language/specification completion is claimed.
 
 Logs: `/tmp/vpl-shared-vm-build.log`, `/tmp/vpl-shared-vm-focused.log`,
 `/tmp/vpl-shared-vm-format.log`.
+
+## Iteration 3: runtime VQL blocks and context contracts
+
+- Nested block-level `for` loops, destructuring, per-member `where`, conditional actions and ordered
+  multi-item returns now lower to runtime stream iterators and graph-referenced branches. Lexical
+  shadowing restores outer bindings; untyped absent fields bind empty instead of dropping the
+  iteration; literal field defaults mint fresh cells only when needed.
+- Context contracts support `.: Type` and `.: $alias: Type`. Context captures drive function bodies,
+  later parameter defaults and explicit dot parameters. A selected union arm without a context
+  capture preserves the caller context through VM branches and reference copies.
+- The portable descriptor ABI is now `VQL_CONTRACT/2`, including implicit context-capture slots.
+  Version 1 is refused explicitly; old executable contract artifacts must be recompiled.
+- Request-scoped execution restores the VM's prior contract coordinator on every exit, including
+  restoring an unset coordinator, so returned mesh contexts retain no request-local service pointer.
+- Export/reload tests execute both conditional branches and runtime destructuring/default/filter
+  loops in a fresh VM. The same for-contract query passes CLI, host query/navigation/script/batch
+  and mesh routes. Compiler and AST destruction before execution is tested directly.
+
+Validation: full `make -j$(nproc)` passed; all 238 focused frontend, parser, contract, stream and VM
+core tests passed. Formatting is checked independently. Luna architecture, senior engineering and
+profiler reviews accepted the bounded design; no performance or full-specification claim follows.
+Nonliteral contract-field defaults, recursive frames, field-weave results and nested effect loops
+remain explicit limitations. Mixed-kind/numeric-text comparison policy is the next independent
+semantic gap; same-kind comparisons are used in the exported filter fixtures.
+
+Logs: `/tmp/vql-block-vm-build.log`, `/tmp/vql-block-vm-focused.log`,
+`/tmp/vql-block-vm-format.log`.

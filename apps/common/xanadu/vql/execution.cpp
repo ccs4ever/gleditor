@@ -115,6 +115,11 @@ QueryExecutor::executeVortex(const QueryExpression &query,
         .message  = "VQL execution cycle budget must be positive",
     });
   }
+  const auto priorContractCoordinator = vm_.contractCoordinator();
+  const RestoreScope restoreContractCoordinator{
+      [this, priorContractCoordinator] {
+        vm_.setContractCoordinator(priorContractCoordinator);
+      }};
   try {
     VQLCompiler compiler(coordinator_, vm_);
     CompilationOptions compilation;

@@ -222,7 +222,7 @@ TEST(VortexStreamTest, ContractBudgetChargesBeforeCopyAndCanRecover) {
       h.arena.link(second, title, DimVector::POS, secondTitle));
   const CellRef stream     = h.arena.makeCell();
   const CellRef descriptor = h.arena.makeCell(
-      "VQL_CONTRACT/1\nStream<Cell { +d.title: $title: String }>");
+      "VQL_CONTRACT/2\nStream<Cell { +d.title: $title: String }>");
   const CellRef matched      = h.arena.makeCell();
   const CellRef capture      = h.arena.makeCell();
   const CellRef clear        = h.vm.mintOpcode(OpcodeKind::StreamClear);
@@ -248,7 +248,7 @@ TEST(VortexStreamTest, ContractBudgetChargesBeforeCopyAndCanRecover) {
 
   constexpr std::size_t descriptorWork =
       std::string_view(
-          "VQL_CONTRACT/1\nStream<Cell { +d.title: $title: String }>")
+          "VQL_CONTRACT/2\nStream<Cell { +d.title: $title: String }>")
           .size();
   h.arena.setExecutionLimits(100'000, descriptorWork + 2, 100'000);
   const auto failed = h.vm.run(cursor, 1);

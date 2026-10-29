@@ -106,6 +106,7 @@ ContractMatcher::contractCaptureNames(const TypeExpr &type) {
   std::function<void(const DestructurePattern &)> visitPattern;
   visitPattern = [&](const DestructurePattern &pattern) {
     for (const auto &field : pattern.fields) {
+      if (field.isContext) names.insert(".");
       if (!field.varName.empty()) names.insert(field.varName);
       if (field.type) visitType(*field.type);
     }
@@ -137,6 +138,11 @@ bool ContractMatcher::matchDestructure(
   for (const auto &field : pattern.fields) {
     core_.arena().consumeWork();
     if (field.isContext) {
+      const std::vector<zigzag::CellRef> bound{*context};
+      if (field.type &&
+          !satisfiesType(*field.type, bound, &bindings, evaluateDefault)) {
+        return false;
+      }
       bindings["."] = {*context};
       if (!field.varName.empty()) bindings[field.varName] = {*context};
       continue;

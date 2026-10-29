@@ -177,6 +177,20 @@ TEST(VQLContractExportTest, TypedCallGraphSurvivesStoreReloadAndFreshVM) {
   TemporaryDirectory temporary;
   const std::vector<Case> cases{
       {.query         = "def identity($x: Int): Int := $x; "
+                        "if true return identity(7) else return identity(9)",
+       .expectedValue = "7"},
+      {.query         = "def identity($x: Int): Int := $x; "
+                        "if false return identity(7) else return identity(9)",
+       .expectedValue = "9"},
+      {.query =
+           "let $p := %\"paper\"; $p/d.items%\"first\"%\"second\"; "
+           "for { ., +d.score: $score: Int := 7 } in $p/d.items return $score",
+       .expectedValues = {"7", "7"}},
+      {.query = "let $p := %\"paper\"; $p/d.items%\"7\"%\"bad\"%\"9\"; "
+                "for { .: $item: Int } in $p/d.items where $item != \"9\" "
+                "return $item",
+       .expectedValues = {"7"}},
+      {.query         = "def identity($x: Int): Int := $x; "
                         "let $f := /d.items; let $g := /$f>[. != \"bad\"][-1]; "
                         "let $f := /d.absent; let $p := %\"paper\"; "
                         "$p/d.items%\"7\"%\"bad\"%\"9\"; $p/$g/identity()",

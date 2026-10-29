@@ -2246,13 +2246,13 @@ The earlier 24-byte sketch narrowed four dimension IDs to 16 bits and could not 
 path language. It is not an implementation contract. No zero-allocation, 3–5-cycle, or fixed speedup
 claim is established by the current evaluator or compiler.
 
-#### 4.12.5 What the Direct Evaluator Implements, and What It Decided
+#### 4.12.5 Shared Semantics and Current VM Lowering
 
-The direct evaluator implements signature matching, unified shape contracts, and step-vector
-functors. Compiled execution now has a shared contract matcher and a bounded typed-call milestone;
-full compile-time/mutation-boundary enforcement and backend parity are still being implemented. The
-[parity iteration record](projects/vql-parity-iterations.md) is the acceptance ledger. The rulings
-below describe the intended shared semantics.
+Execution now compiles to Vortex graphs and runs on the VM; text and ASTs are compiler inputs. The
+shared contract matcher supports a bounded typed-call and runtime-block milestone. Full
+compile-time/mutation-boundary enforcement and remaining language lowering are still incomplete. The
+[VM-only iteration record](projects/vortex-vm-only-iterations.md) records accepted milestones and
+explicit refusals. The rulings below describe the intended semantics.
 
 - **A shape type is a destructure pattern.** `ShapeType` holds a `DestructurePattern`, and a
   `DestructureField` carries an optional variable, type and default. So `Cell { +d.title: String }`
@@ -2299,6 +2299,12 @@ below describe the intended shared semantics.
   to what they reach. Decorated references retain a captured step sequence across later rebinding.
   Binding and compilation may copy AST data, and execution materializes result streams. Specialized
   representation and allocation/performance claims remain subject to §4.12.4's measurements.
+
+- **Block bindings run per member.** Nested `for` bindings preserve source order and duplicates;
+  `where` and conditional actions branch in the VM. Untyped missing destructure fields bind empty,
+  while explicit types determine whether absence is accepted. Literal field defaults are lazy.
+  Context fields accept a type and alias, and their captures establish the callee's context.
+  `VQL_CONTRACT/2` records the context-capture layout; version 1 descriptors are refused.
 
 - **The compiler uses real VM instructions.** Bound point-free steps lower to Vortex traversals;
   nonrecursive typed calls use shared matching, capture slots, mismatch branches, body instructions,

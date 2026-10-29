@@ -1598,9 +1598,18 @@ DestructureField Parser::parseDestructureField() {
   if (match(TokenKind::Dot)) {
     DestructureField field{.isContext = true};
     if (match(TokenKind::Colon)) {
-      field.varName = consume(TokenKind::Variable,
-                              "Expected $variable after '.:' in destructure")
-                          .stringValue;
+      if (check(TokenKind::Variable)) {
+        field.varName = advance().stringValue;
+        if (match(TokenKind::Colon)) {
+          field.type = std::make_shared<TypeExpr>(parseTypeExpr());
+        }
+      } else {
+        field.type = std::make_shared<TypeExpr>(parseTypeExpr());
+      }
+    }
+    if (match(TokenKind::Assign)) {
+      throw ParseError("context destructuring fields cannot have defaults",
+                       current_.loc);
     }
     return field;
   }

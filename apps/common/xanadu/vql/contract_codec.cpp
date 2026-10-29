@@ -18,7 +18,7 @@
 namespace xanadu::vql {
 namespace {
 
-constexpr std::string_view descriptorHeader = "VQL_CONTRACT/1\n";
+constexpr std::string_view descriptorHeader = "VQL_CONTRACT/2\n";
 
 [[noreturn]] void unencodable(const std::string_view reason) {
   throw ContractDescriptorError(
@@ -67,7 +67,7 @@ void appendDefault(std::string &out, const ValueExpr &value);
 
 void appendField(std::string &out, const DestructureField &field) {
   if (field.isContext) {
-    if (!field.dimName.empty() || field.type || field.defaultValue ||
+    if (!field.dimName.empty() || field.defaultValue ||
         field.direction != zigzag::DimVector::POS || field.isBidir) {
       unencodable("a noncanonical context shape field");
     }
@@ -75,6 +75,13 @@ void appendField(std::string &out, const DestructureField &field) {
     if (!field.varName.empty()) {
       out += ": $";
       out += field.varName;
+      if (field.type) {
+        out += ": ";
+        appendType(out, *field.type);
+      }
+    } else if (field.type) {
+      out += ": ";
+      appendType(out, *field.type);
     }
     return;
   }
@@ -303,7 +310,7 @@ TypeExpr decodeTypeDescriptor(const std::string_view descriptor,
   }
   if (!descriptor.starts_with("VQL_CONTRACT/")) {
     throw ContractDescriptorError(
-        "VQL contract descriptor format mismatch: expected VQL_CONTRACT/1");
+        "VQL contract descriptor format mismatch: expected VQL_CONTRACT/2");
   }
   if (!descriptor.starts_with(descriptorHeader)) {
     const auto newline = descriptor.find('\n');
@@ -311,13 +318,13 @@ TypeExpr decodeTypeDescriptor(const std::string_view descriptor,
         0, newline == std::string_view::npos ? descriptor.size() : newline);
     throw ContractDescriptorError(
         std::format("VQL contract descriptor version mismatch: expected "
-                    "VQL_CONTRACT/1, found {}",
+                    "VQL_CONTRACT/2, found {}",
                     found));
   }
   const auto syntax = descriptor.substr(descriptorHeader.size());
   if (syntax.empty()) {
     throw ContractDescriptorError(
-        "VQL contract descriptor VQL_CONTRACT/1 has no type expression");
+        "VQL contract descriptor VQL_CONTRACT/2 has no type expression");
   }
   try {
     const std::string wrapped =
@@ -342,7 +349,7 @@ TypeExpr decodeTypeDescriptor(const std::string_view descriptor,
     throw;
   } catch (const std::exception &error) {
     throw ContractDescriptorError(std::format(
-        "malformed VQL_CONTRACT/1 type expression: {}", error.what()));
+        "malformed VQL_CONTRACT/2 type expression: {}", error.what()));
   }
 }
 

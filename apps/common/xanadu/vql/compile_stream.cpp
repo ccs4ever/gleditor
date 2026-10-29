@@ -180,6 +180,30 @@ CellRef VQLCompiler::emitCellPresence(CellRef candidate) {
   return emitStreamPresence(std::span{&candidate, 1});
 }
 
+CellRef
+VQLCompiler::emitContextFallback(const CellRef candidate,
+                                 const std::optional<CellRef> previousContext) {
+  const CellRef merged = core_.arena().makeCell();
+  const auto clear     = emitOp(OpcodeKind::ClearCellRefs, "#CONTEXT_CLEAR");
+  emitOutput(clear, merged);
+  if (previousContext) {
+    const auto fallback = emitOp(OpcodeKind::CopyCellRefs, "#CONTEXT_FALLBACK");
+    emitInput(fallback, *previousContext);
+    emitOutput(fallback, merged);
+  }
+
+  const auto present = emitCellPresence(candidate);
+  const auto end     = vm_.mintOpcode(OpcodeKind::Nop, "#CONTEXT_CAPTURE_END");
+  const auto branch  = emitOp(OpcodeKind::BranchFalseCell, "#CONTEXT_TEST");
+  emitInput(branch, present);
+  emitInput(branch, end);
+  const auto capture = emitOp(OpcodeKind::CopyCellRefs, "#CONTEXT_CAPTURE");
+  emitInput(capture, candidate);
+  emitOutput(capture, merged);
+  appendOpcode(end);
+  return merged;
+}
+
 CellRef VQLCompiler::emitStreamPresence(std::span<const CellRef> inputs) {
   const auto begin = emitOp(OpcodeKind::StreamBegin, "#PRESENCE_BEGIN");
   for (const auto input : inputs) emitInput(begin, input);

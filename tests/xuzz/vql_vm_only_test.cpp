@@ -56,9 +56,9 @@ TEST(VQLVMOnlyTest, MissingBindingsProduceEmptyStreamsRatherThanFalseCells) {
 
 TEST(VQLVMOnlyTest, CompiledActivationOutlivesItsAst) {
   Harness harness;
-  VQLCompiler compiler(harness.coordinator, harness.vm);
   CompilationResult compiled;
   {
+    VQLCompiler compiler(harness.coordinator, harness.vm);
     Parser parser("def answer(): Int := 42; answer()");
     const auto ast = parser.parseQuery();
     compiled       = compiler.compile(ast);

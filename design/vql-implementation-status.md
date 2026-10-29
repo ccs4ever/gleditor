@@ -37,16 +37,21 @@ explicitly. Syntax acceptance alone does not establish execution support.
   missing links clear old results, and backtracking restores reference mappings. Topology reads
   bypass value-only memoization. Unsupported declarations/selectors refuse explicitly.
 
-## §4.12 parity iteration in progress
+## §4.12 VM iteration in progress
 
-The shared `ContractMatcher` is now used by direct execution and actual Vortex contract opcodes.
-Versioned, bounded descriptors survive save/reload without a process-local AST registry.
-Nonrecursive positional typed calls support filtering, captures, literal shape defaults, nested
-calls and return checks. Omitted parameter defaults lower supported expressions to real VM
-instructions after earlier parameter matches. Explicit arguments resolve in the caller scope, and
-untyped named parameters capture functor steps before callee bindings are introduced. A shared
-`QueryExecutor` supplies structured errors and context handling for CLI and host
-query/navigation/script/batch entry points.
+Runtime block loops, destructuring, `where`, conditional actions and ordered multi-return now use
+actual VM instructions. Typed context fields and implicit context captures use descriptor ABI
+`VQL_CONTRACT/2`; version 1 descriptors refuse. Request execution restores its contract coordinator
+on every exit. The VM-only ledger records 238 passing focused tests for this bounded iteration;
+recursive frames, nonliteral field-default thunks and atomic mutation enforcement remain open.
+
+The shared `ContractMatcher` is used by actual Vortex contract opcodes. Versioned, bounded
+descriptors survive save/reload without a process-local AST registry. Nonrecursive positional typed
+calls support filtering, captures, literal shape defaults, nested calls and return checks. Omitted
+parameter defaults lower supported expressions to real VM instructions after earlier parameter
+matches. Explicit arguments resolve in the caller scope, and untyped named parameters capture
+functor steps before callee bindings are introduced. A shared `QueryExecutor` supplies structured
+errors and context handling for CLI and host query/navigation/script/batch entry points.
 
 Executable export now traverses full arena cell identities and relocates parameter slots, dimension
 operands and cursor PCs. Tests execute the saved graph in a fresh VM, rather than merely checking

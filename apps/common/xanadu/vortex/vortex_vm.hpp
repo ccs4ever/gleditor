@@ -227,7 +227,11 @@ public:
   void
   forEachResultCell(CellRef slot,
                     gleditor::cpp26::function_ref<void(CellRef)> visitor) const;
+  using ContractCoordinator =
+      std::optional<std::reference_wrapper<xanadu::MultiStoreCoordinator>>;
   VortexVM *setContractCoordinator(xanadu::MultiStoreCoordinator &coordinator);
+  VortexVM *setContractCoordinator(ContractCoordinator coordinator);
+  [[nodiscard]] ContractCoordinator contractCoordinator() const noexcept;
 
   // -- Pipeline Execution Helper ----------------------------------------------
   void runPipeline(CellRef paramCell);

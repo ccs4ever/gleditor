@@ -153,6 +153,9 @@ private:
                                                  zigzag::CellRef inStreamCell);
   zigzag::CellRef emitFirstCell(zigzag::CellRef input);
   zigzag::CellRef emitCellPresence(zigzag::CellRef candidate);
+  zigzag::CellRef
+  emitContextFallback(zigzag::CellRef candidate,
+                      std::optional<zigzag::CellRef> previousContext);
   zigzag::CellRef emitStreamPresence(std::span<const zigzag::CellRef> inputs);
   std::optional<zigzag::CellRef> compileBooleanExpr(const BooleanExpr &expr,
                                                     zigzag::CellRef ctxCell);

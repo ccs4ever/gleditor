@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include "common/xanadu/vortex/mesh_evaluator.hpp"
 #include "common/xanadu/vortex/vortex_host.hpp"
 
 namespace {
@@ -145,3 +146,47 @@ TEST(VQLHostParityTest,
 }
 
 } // namespace
+
+TEST(VQLHostParityTest, ForContractsRunThroughEveryHostAndMeshRoute) {
+  const std::string source =
+      "let $p := %\"paper\"; $p/d.items%\"7\"%\"bad\"%\"9\"; "
+      "for { .: $item: Int } in $p/d.items where $item != \"9\" return $item";
+  VortexHost host;
+  const auto query = host.executeVQLChecked(source);
+  ASSERT_TRUE(query) << query.error().message;
+  ASSERT_EQ(query->size(), 1u);
+  EXPECT_EQ(host.core().arena().textOf(query->front()), "7");
+  const auto destination = host.navigatePath(source, host.core().home());
+  ASSERT_TRUE(destination);
+  EXPECT_EQ(host.core().arena().textOf(*destination), "7");
+  const auto script = host.executeScript(source);
+  ASSERT_TRUE(script.success) << script.message;
+  ASSERT_EQ(script.affectedCells.size(), 1u);
+  EXPECT_EQ(host.core().arena().textOf(script.affectedCells.front()), "7");
+  const auto rows = host.executeVQLBatchParallel(
+      {source}, [](zigzag::vortex::WorkerContext &, std::size_t) {});
+  EXPECT_EQ(rows, (std::vector<std::vector<std::string>>{{"7"}}));
+
+  namespace mesh = zigzag::vortex::mesh;
+  auto remote    = mesh::evaluate(mesh::Frontend::Vquery, source,
+                                  {.maxCycles      = 100000,
+                                   .maxCells       = 100000,
+                                   .maxSolutions   = 16,
+                                   .maxOutputBytes = 1024 * 1024});
+  ASSERT_TRUE(remote) << remote.error();
+  auto &arena = remote->context->arena;
+  std::optional<zigzag::DimRef> items, value;
+  for (const auto &cell : arena.cells()) {
+    if (arena.textOf(cell.birthOp) == "d.mesh.items") items = cell.birthOp;
+    if (arena.textOf(cell.birthOp) == "d.mesh.value") value = cell.birthOp;
+  }
+  ASSERT_TRUE(items);
+  ASSERT_TRUE(value);
+  const auto record =
+      arena.linked(remote->root, *items, zigzag::DimVector::POS);
+  ASSERT_TRUE(record);
+  const auto result = arena.linked(*record, *value, zigzag::DimVector::POS);
+  ASSERT_TRUE(result);
+  EXPECT_EQ(arena.textOf(*result), "7");
+  EXPECT_FALSE(arena.linked(*record, *items, zigzag::DimVector::POS));
+}

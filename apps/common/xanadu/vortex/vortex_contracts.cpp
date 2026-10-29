@@ -11,6 +11,16 @@ VortexVM::setContractCoordinator(xanadu::MultiStoreCoordinator &coordinator) {
   return this;
 }
 
+VortexVM *VortexVM::setContractCoordinator(ContractCoordinator coordinator) {
+  contractCoordinator_ = coordinator ? &coordinator->get() : nullptr;
+  return this;
+}
+
+VortexVM::ContractCoordinator VortexVM::contractCoordinator() const noexcept {
+  if (!contractCoordinator_) return std::nullopt;
+  return std::ref(*contractCoordinator_);
+}
+
 ExecutionResult VortexVM::executeTypeContract(OpcodeKind kind, CellRef opcode,
                                               std::vector<CellValue> &outputs) {
   const auto inputs              = core_.inputsOf(opcode);

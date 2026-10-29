@@ -239,12 +239,14 @@ TEST_F(VQLCompilerTest, CreationSugarAndClones) {
   EXPECT_NE(result.disassembly.find("Beta"), std::string::npos);
 }
 
-TEST_F(VQLCompilerTest, IncompleteWhereLoweringRefusesExplicitly) {
+TEST_F(VQLCompilerTest, LowersForAndWhereControlFlow) {
   VQLCompiler compiler(*core, *vm);
   auto result = compiler.compile(
       "for $x in ##/d.items let $factor := 2 where $factor > 1 return $x");
-  ASSERT_FALSE(result.success);
-  EXPECT_NE(result.errorMessage.find("where clauses"), std::string::npos);
+  ASSERT_TRUE(result.success) << result.errorMessage;
+  EXPECT_NE(result.disassembly.find("#FOR_BEGIN"), std::string::npos);
+  EXPECT_NE(result.disassembly.find("#WHERE_FALSE"), std::string::npos);
+  EXPECT_NE(result.disassembly.find("#STREAM_YIELD"), std::string::npos);
 }
 
 TEST_F(VQLCompilerTest, DisassemblyFormatting) {

@@ -95,6 +95,7 @@ TEST_F(ContractMatcherTest, CaptureNamesAreUniqueAndSortedAcrossUnionArms) {
   first.fields.push_back(DestructureField{.varName = "$z"});
   first.fields.push_back(DestructureField{.varName = "$a"});
   DestructurePattern second;
+  second.fields.push_back(DestructureField{.isContext = true});
   second.fields.push_back(DestructureField{.varName = "$z"});
   nested.unionType.members.push_back(
       PrimaryType{.kind = ShapeType{.pattern = std::move(first)}});
@@ -102,7 +103,34 @@ TEST_F(ContractMatcherTest, CaptureNamesAreUniqueAndSortedAcrossUnionArms) {
       PrimaryType{.kind = ShapeType{.pattern = std::move(second)}});
 
   EXPECT_EQ(ContractMatcher::contractCaptureNames(nested),
-            (std::vector<std::string>{"$a", "$z"}));
+            (std::vector<std::string>{"$a", "$z", "."}));
+}
+
+TEST_F(ContractMatcherTest, ContextFieldChecksTypeBeforeBindingCaptures) {
+  const CellRef context = arena.makeCell("context");
+  DestructurePattern pattern;
+  pattern.fields.push_back(DestructureField{
+      .isContext = true,
+      .varName   = "$self",
+      .type = std::make_shared<TypeExpr>(basicType(BasicType::Kind::String))});
+  ContractBindings bindings;
+  const auto evaluateDefault = [this](const ValueExpr &expr,
+                                      std::optional<CellRef> cell) {
+    return noDefault(expr, cell);
+  };
+
+  ASSERT_TRUE(matcher->matchDestructure(pattern, context, bindings,
+                                        ContractMatcher::MissingField::Refuse,
+                                        evaluateDefault));
+  EXPECT_EQ(bindings.at("."), (std::vector<CellRef>{context}));
+  EXPECT_EQ(bindings.at("$self"), (std::vector<CellRef>{context}));
+
+  const CellRef number = arena.makeScalarCell(std::int64_t{7});
+  bindings.clear();
+  EXPECT_FALSE(matcher->matchDestructure(pattern, number, bindings,
+                                         ContractMatcher::MissingField::Refuse,
+                                         evaluateDefault));
+  EXPECT_TRUE(bindings.empty());
 }
 
 TEST_F(ContractMatcherTest, OptionalAndStreamCardinalityAreDistinct) {

@@ -141,7 +141,12 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
     for (const auto &name : ContractMatcher::contractCaptureNames(type)) {
       const auto capture = core_.arena().makeCell();
       emitOutput(match, capture);
-      if (bindCaptures) bind(name, {capture});
+      if (bindCaptures) {
+        bind(name, {capture});
+        if (name == ".") {
+          ambientContext_ = emitContextFallback(capture, ambientContext_);
+        }
+      }
     }
     const auto branch = emitOp(OpcodeKind::BranchFalseCell, "#PARAM_FILTER");
     emitInput(branch, matched);
@@ -171,7 +176,9 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
       if (argumentIndex < values.size())
         cells = values[argumentIndex++];
       else if (parameter.defaultValue) {
-        cells = compileArgument(*parameter.defaultValue, context);
+        cells = compileArgument(*parameter.defaultValue,
+                                ambientContext_.has_value() ? ambientContext_
+                                                            : context);
       }
       if (parameter.type) check(*parameter.type, cells, true);
     }
@@ -185,6 +192,16 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
       bind(*name, std::move(cells));
     } else {
       bind(".", std::move(cells));
+      const auto &contextCells = streamBindings_.at(".");
+      if (contextCells.empty()) {
+        ambientContext_.reset();
+      } else if (contextCells.size() == 1) {
+        ambientContext_ = contextCells.front();
+      } else {
+        const CellRef contextStream = emitStreamClear();
+        emitAppendStream(contextStream, contextCells);
+        ambientContext_ = contextStream;
+      }
     }
     if (parameter.isVariadic) break;
   }
@@ -192,7 +209,8 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
   std::vector<CellRef> bodyResults;
   if (const auto *value =
           std::get_if<std::shared_ptr<ValueExpr>>(&definition.body)) {
-    bodyResults = compileArgument(**value, context);
+    bodyResults = compileArgument(
+        **value, ambientContext_.has_value() ? ambientContext_ : context);
   } else {
     const auto &body = *std::get<std::shared_ptr<ScriptBody>>(definition.body);
     for (const auto &statement : body.statements) {

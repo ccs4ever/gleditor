@@ -320,3 +320,10 @@ TEST_F(VQueryE2ETest, CellConnectionCustomDimensions) {
 }
 
 } // namespace
+
+TEST_F(VQueryE2ETest, DefaultVmExecutesForContractsAndRuntimeFiltering) {
+  const auto result = runVQuery(
+      R"(--eval 'let $p := %"paper"; $p/d.items%"7"%"bad"%"9"; for { .: $item: Int } in $p/d.items where $item != "9" return $item')");
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  EXPECT_EQ(result.output, "7\n");
+}
