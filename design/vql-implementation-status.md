@@ -5,10 +5,10 @@
 
 # VQL implementation status
 
-The specification includes a direct evaluator, a restricted compiler, and proposed systems
-lowerings. Syntax acceptance alone does not establish execution support.
+Executable VQL now uses a restricted compiler and the Vortex VM. Missing lowering refuses
+explicitly. Syntax acceptance alone does not establish execution support.
 
-## Implemented in this change
+## Historical foundation (interpreter-only entries currently refuse)
 
 - **§4.2/§7.4, content access:** slice reads remain distinct from replacement writes;
   `value(replacement, offset, length)` snapshots its operands and returns the edited cell. Callback

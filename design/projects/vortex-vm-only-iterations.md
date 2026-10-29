@@ -60,3 +60,25 @@ before builds; use `make -j$(nproc)` and headless tests with all three XDG direc
 
 Logs: `/tmp/vortex-vm-only-build.log`, `/tmp/vortex-vm-only-focused.log`,
 `/tmp/vortex-vm-only-core.log`, `/tmp/vortex-vm-only-format.log`.
+
+## Iteration 2: shared VPL execution and portable graphs
+
+- CLI, host and mesh VPL execution now use one compiler/VM executor. Persistent executor sessions
+  retain scalar/rank bindings, directed axes and source dependencies; failed submissions do not
+  publish binding updates. Rebinding the host manifold clears session references and provenance.
+- Programs return their final expression; literal vectors/scans retain their complete rank. Scalar
+  operations on ranks, unknown variables and untyped dimension handles refuse explicitly until
+  corresponding VM lowering exists. VPL's retired engine is no longer used by these routes.
+- VQL and VPL share the relocation exporter. A VPL arithmetic program is saved, reloaded and run in
+  a fresh VM after the original arena/compiler/VM are destroyed. Full portable result-layout
+  metadata remains future work, including singleton rank/scalar distinctions for artifact consumers.
+- Missing VQL bindings now produce empty streams rather than fabricated false-valued cells.
+
+Validation: full `make -j$(nproc)` passed. The combined cutoff, compiler, session/provenance, mesh,
+CLI and exported-artifact matrix passed all 141 tests. Repository formatting passed before the final
+test-input corrections; the modified tests were formatted with clang-format 19 afterwards. Luna
+architecture and independent senior reviews found no remaining blocker for this bounded iteration.
+No full-suite pass or full language/specification completion is claimed.
+
+Logs: `/tmp/vpl-shared-vm-build.log`, `/tmp/vpl-shared-vm-focused.log`,
+`/tmp/vpl-shared-vm-format.log`.

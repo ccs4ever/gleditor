@@ -46,6 +46,14 @@ TEST(VQLVMOnlyTest, ExecutorDefaultsToVortexAndDirectModeRefuses) {
   EXPECT_EQ(refused.error().category, QueryExecutionError::Category::Compile);
 }
 
+TEST(VQLVMOnlyTest, MissingBindingsProduceEmptyStreamsRatherThanFalseCells) {
+  Harness harness;
+  QueryExecutor executor(harness.coordinator, harness.vm);
+  const auto result = executor.execute("$missing>");
+  ASSERT_TRUE(result) << result.error().message;
+  EXPECT_TRUE(result->empty());
+}
+
 TEST(VQLVMOnlyTest, CompiledActivationOutlivesItsAst) {
   Harness harness;
   VQLCompiler compiler(harness.coordinator, harness.vm);

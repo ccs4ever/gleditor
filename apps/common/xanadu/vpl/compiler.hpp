@@ -23,6 +23,7 @@
 #include "common/xanadu/vortex/vortex_core.hpp"
 #include "common/xanadu/vortex/vortex_vm.hpp"
 #include "common/xanadu/vpl/ast.hpp"
+#include "common/xanadu/vpl/view.hpp"
 
 namespace xanadu::vpl {
 
@@ -31,6 +32,13 @@ struct CompilationOptions {
   std::string moduleName{"vpl:custom"}; ///< Module name for library store
   std::string symbolName{"main"};       ///< Exported symbol name
   bool optimize{false};                 ///< Enable optimizations
+  std::unordered_map<std::string, VplView> initialBindings;
+};
+
+struct CompiledBinding {
+  zigzag::CellRef cell;
+  std::vector<zigzag::DirectedDim> axes;
+  std::vector<zigzag::CellRef> dependencies;
 };
 
 struct CompilationResult {
@@ -42,6 +50,11 @@ struct CompilationResult {
   std::optional<zigzag::CellRef> terminalOpcode;
   std::optional<zigzag::CellRef> cursor;
   std::vector<zigzag::CellRef> resultSlots;
+  std::vector<zigzag::DirectedDim> resultAxes;
+  std::vector<zigzag::CellRef> resultDependencies;
+  std::unordered_map<zigzag::CellRef, std::vector<zigzag::CellRef>>
+      cellDependencies;
+  std::unordered_map<std::string, CompiledBinding> assignedBindings;
 };
 
 class VPLCompiler {
@@ -125,9 +138,24 @@ private:
   std::optional<zigzag::CellRef> currentOp_;
   std::vector<zigzag::CellRef> allOps_;
   std::vector<zigzag::CellRef> lastResultCells_;
+  std::vector<zigzag::DirectedDim> lastResultAxes_;
+  std::vector<zigzag::CellRef> lastResultDependencies_;
 
   std::unordered_map<std::string, std::optional<zigzag::CellRef>> varBindings_;
+  std::unordered_map<std::string, std::vector<zigzag::DirectedDim>> varAxes_;
+  std::unordered_map<std::string, CompiledBinding> assignedBindings_;
+  std::unordered_map<zigzag::CellRef, std::vector<zigzag::DirectedDim>>
+      rankAxes_;
+  std::unordered_map<zigzag::CellRef, std::vector<zigzag::CellRef>>
+      rankDependencies_;
+  std::unordered_map<zigzag::CellRef, std::vector<zigzag::CellRef>>
+      cellDependencies_;
   bool optimize_{false};
+
+  [[nodiscard]] std::vector<zigzag::CellRef>
+  dependenciesOf(zigzag::CellRef cell) const;
+  [[nodiscard]] std::vector<zigzag::CellRef>
+  rankDependenciesOf(zigzag::CellRef cell) const;
 };
 
 } // namespace xanadu::vpl

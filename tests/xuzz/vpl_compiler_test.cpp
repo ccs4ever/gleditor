@@ -157,6 +157,54 @@ TEST_F(VPLCompilerTest, CompileReduceAndScan) {
   auto resScan = compiler.compile("+\\ 1 2 3 4 5");
   ASSERT_TRUE(resScan.success);
   EXPECT_NE(resScan.disassembly.find("#SCAN_ADD"), std::string::npos);
+  ASSERT_EQ(resRed.resultSlots.size(), 1u);
+  EXPECT_TRUE(resRed.resultAxes.empty());
+  ASSERT_EQ(resScan.resultSlots.size(), 1u);
+  ASSERT_EQ(resScan.resultAxes.size(), 1u);
+  EXPECT_EQ(resScan.resultAxes.front(),
+            (zigzag::DirectedDim{core->dims().step, zigzag::DimVector::POS}));
+}
+
+TEST_F(VPLCompilerTest, ProgramExposesOnlyFinalResultAndRankAxes) {
+  VPLCompiler compiler(*core, *vm);
+
+  const auto result = compiler.compile("A ← 1 2 3; B ← A; B");
+  ASSERT_TRUE(result.success) << result.errorMessage;
+  ASSERT_EQ(result.resultSlots.size(), 1u);
+  ASSERT_EQ(result.resultAxes.size(), 1u);
+  EXPECT_EQ(result.resultAxes.front(),
+            (zigzag::DirectedDim{core->dims().step, zigzag::DimVector::POS}));
+  ASSERT_TRUE(result.assignedBindings.contains("A"));
+  ASSERT_TRUE(result.assignedBindings.contains("B"));
+  ASSERT_EQ(result.assignedBindings.at("A").axes.size(), 1u);
+  EXPECT_EQ(result.assignedBindings.at("A").axes.front(),
+            result.resultAxes.front());
+  EXPECT_EQ(result.assignedBindings.at("B").axes,
+            result.assignedBindings.at("A").axes);
+
+  const auto multiple = compiler.compile("1; 2; 3");
+  ASSERT_TRUE(multiple.success) << multiple.errorMessage;
+  ASSERT_EQ(multiple.resultSlots.size(), 1u);
+  EXPECT_TRUE(multiple.resultAxes.empty());
+}
+
+TEST_F(VPLCompilerTest, ScalarArithmeticExplicitlyRefusesRankOperands) {
+  VPLCompiler compiler(*core, *vm);
+
+  const auto dyadic = compiler.compile("1 2 3 + 4 5 6");
+  EXPECT_FALSE(dyadic.success);
+  EXPECT_NE(dyadic.errorMessage.find("scalar dyadic arithmetic on ranks"),
+            std::string::npos);
+
+  const auto monadic = compiler.compile("- 1 2 3");
+  EXPECT_FALSE(monadic.success);
+  EXPECT_NE(monadic.errorMessage.find("scalar monadic arithmetic on a rank"),
+            std::string::npos);
+
+  const auto unbound = compiler.compile("missing");
+  EXPECT_FALSE(unbound.success);
+  EXPECT_NE(unbound.errorMessage.find("unbound VPL identifier"),
+            std::string::npos);
 }
 
 TEST_F(VPLCompilerTest, CompileOptimizationConstantFolding) {
@@ -196,6 +244,11 @@ TEST_F(VPLCompilerTest, RejectsUnsupportedIndexingAndContainment) {
   const auto indexing = compiler.compile("A[3]");
   EXPECT_FALSE(indexing.success);
   EXPECT_NE(indexing.errorMessage.find("VPL indexing is unsupported"),
+            std::string::npos);
+
+  const auto dimension = compiler.compile("d.1");
+  EXPECT_FALSE(dimension.success);
+  EXPECT_NE(dimension.errorMessage.find("typed-handle VM lowering"),
             std::string::npos);
 }
 

@@ -24,7 +24,7 @@
 #include "common/xanadu/vortex/vortex_vm.hpp"
 #include "common/xanadu/vortex/vortex_worker_pool.hpp"
 #include "common/xanadu/vortex/worker_context.hpp"
-#include "common/xanadu/vpl/vpl_engine.hpp"
+#include "common/xanadu/vpl/execution.hpp"
 #include "common/xanadu/vprolog/compiler.hpp"
 #include "common/xanadu/vql/compiler.hpp"
 #include "common/xanadu/vql/execution.hpp"
@@ -128,11 +128,11 @@ public:
   [[nodiscard]] xanadu::vql::VQLCompiler &vqlCompiler() noexcept {
     return vqlCompiler_;
   }
-  [[nodiscard]] const xanadu::vpl::VPLEngine &vplEngine() const noexcept {
-    return vplEngine_;
+  [[nodiscard]] const xanadu::vpl::Executor &vplExecutor() const noexcept {
+    return *vplExecutor_;
   }
-  [[nodiscard]] xanadu::vpl::VPLEngine &vplEngine() noexcept {
-    return vplEngine_;
+  [[nodiscard]] xanadu::vpl::Executor &vplExecutor() noexcept {
+    return *vplExecutor_;
   }
 
   VortexHost *setAppActionDelegate(AppActionDelegate delegate) {
@@ -359,7 +359,7 @@ private:
   xanadu::vql::VQLEngine vqlEngine_;
   xanadu::vql::VQLCompiler vqlCompiler_;
   xanadu::vql::QueryExecutionOptions vqlOptions_;
-  xanadu::vpl::VPLEngine vplEngine_;
+  std::unique_ptr<xanadu::vpl::Executor> vplExecutor_;
 
   AppActionDelegate appActionDelegate_;
   xanadu::Store *boundStore_{nullptr};

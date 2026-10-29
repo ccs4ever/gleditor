@@ -603,10 +603,7 @@ std::optional<CellRef> VQLCompiler::compileAnchor(const AnchorNode &anchor) {
       if (!it->second) return std::nullopt;
       res = *it->second;
     } else {
-      CellRef resOp = emitOp(OpcodeKind::Resolve, "#RESOLVE " + anchor.name);
-      emitInputConstant(resOp, anchor.name);
-      res = core_.arena().makeCell();
-      emitOutput(resOp, res);
+      return std::nullopt;
     }
     break;
   }
@@ -805,11 +802,7 @@ std::optional<CellRef> VQLCompiler::compileValueExpr(const ValueExpr &expr,
             return it->second ? std::optional{emitFirstCell(*it->second)}
                               : std::nullopt;
           }
-          CellRef resOp = emitOp(OpcodeKind::Resolve, "#RESOLVE " + val);
-          emitInputConstant(resOp, val);
-          CellRef outCell = core_.arena().makeCell();
-          emitOutput(resOp, outCell);
-          return outCell;
+          return std::nullopt;
         } else if constexpr (std::is_same_v<T,
                                             std::shared_ptr<PathExpression>>) {
           if (val) {

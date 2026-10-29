@@ -101,7 +101,8 @@ VortexHost::VortexHost(const Manifold *baseManifold)
     : baseManifold_(baseManifold), primary_(baseManifold),
       vqlEngine_(primary_.core),
       vqlCompiler_(vqlEngine_.coordinator(), primary_.vm),
-      vplEngine_(primary_.core) {
+      vplExecutor_(
+          std::make_unique<xanadu::vpl::Executor>(primary_.core, primary_.vm)) {
   initHostServices();
 }
 
@@ -152,6 +153,8 @@ void VortexHost::bindManifold(const Manifold *baseManifold) {
   // references into primary_.arena, and move-assigning the arena replaces its
   // contents while keeping those references valid. Record the base so any
   // worker contexts made afterwards overlay the same one (Stage 1 §3.3).
+  vqlEngine_.clearVariables();
+  vplExecutor_->clearVariables();
   baseManifold_  = baseManifold;
   primary_.arena = ArenaManifold(baseManifold);
   extraContexts_.clear();
@@ -161,7 +164,6 @@ void VortexHost::bindManifold(const Manifold *baseManifold) {
 void VortexHost::bindStore(xanadu::Store *store) {
   boundStore_ = store;
   primary_.stdlib.setBoundStore(store);
-  vplEngine_.setStore(store);
   if (boundStore_) {
     loadConfigFromStore(*boundStore_);
   }
@@ -881,7 +883,12 @@ VortexHost::ScriptResult VortexHost::executeVPL(std::string_view expr) {
       return res;
     }
 
-    auto view         = vplEngine_.evaluate(trimmed);
+    auto execution = vplExecutor_->execute(trimmed);
+    if (!execution) {
+      res.message = "VPL Error: " + execution.error().message;
+      return res;
+    }
+    auto view         = std::move(execution->view);
     res.affectedCells = view.collectCells(primary_.arena);
     res.success       = true;
     if (view.isScalar()) {

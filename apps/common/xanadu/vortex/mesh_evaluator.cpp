@@ -20,7 +20,7 @@
 #include "common/xanadu/vlace/compiler.hpp"
 #include "common/xanadu/vlace/parser.hpp"
 #include "common/xanadu/vlace/types.hpp"
-#include "common/xanadu/vpl/vpl_engine.hpp"
+#include "common/xanadu/vpl/execution.hpp"
 #include "common/xanadu/vprolog/compiler.hpp"
 #include "common/xanadu/vprolog/parser.hpp"
 #include "common/xanadu/vql/execution.hpp"
@@ -938,10 +938,10 @@ evaluate(Frontend frontend, std::string_view source, EvaluationBudget budget,
     CellRef tail = root;
     switch (frontend) {
     case Frontend::Vpl: {
-      vpl::VPLEngine engine(context->core);
-      engine.withConsoleEffects(false);
-      auto result = engine.evaluate(source);
-      if (auto value = vplCell(builder, result, root))
+      vpl::Executor executor(context->core, context->vm);
+      auto execution = executor.execute(source, budget.maxCycles);
+      if (!execution) throw std::runtime_error(execution.error().message);
+      if (auto value = vplCell(builder, execution->view, root))
         builder.append(tail, *value);
       break;
     }

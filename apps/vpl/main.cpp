@@ -29,9 +29,9 @@
 #include "common/xanadu/vortex/vortex_core.hpp"
 #include "common/xanadu/vortex/vortex_vm.hpp"
 #include "common/xanadu/vpl/compiler.hpp"
+#include "common/xanadu/vpl/execution.hpp"
 #include "common/xanadu/vpl/parser.hpp"
 #include "common/xanadu/vpl/view.hpp"
-#include "common/xanadu/vpl/vpl_engine.hpp"
 #include "common/xanadu/vql/ascii_visualizer.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
 #include "common/xanadu/zigzag/lens_repl.hpp"
@@ -133,7 +133,8 @@ std::string formatView(const VplView &view, const ArenaManifold &arena) {
 std::vector<xanadu::ResultRow>
 resultRows(const VplView &view, const ArenaManifold &arena,
            const xanadu::MultiStoreCoordinator &coordinator,
-           const VPLEngine &engine, const std::string_view transientPath = {}) {
+           const Executor &executor,
+           const std::string_view transientPath = {}) {
   const auto sourceOf = [&](const std::span<const CellRef> dependencies) {
     std::string source;
     for (const auto dependency : dependencies) {
@@ -166,7 +167,7 @@ resultRows(const VplView &view, const ArenaManifold &arena,
                                   .spans = std::move(quoted->spans)};
     }
     rows.push_back({.text   = persistedCellText(arena, cell),
-                    .source = sourceOf(engine.dependenciesOf(cell)),
+                    .source = sourceOf(executor.dependenciesOf(cell)),
                     .quote  = std::move(quote)});
   }
   return rows;
@@ -397,7 +398,7 @@ int main(int argc, char *argv[]) {
   ArenaManifold arena;
   vortex::VortexCore core(arena);
   vortex::VortexVM vm(core);
-  VPLEngine directEngine(core);
+  Executor executor(core, vm);
   VPLCompiler compiler(core, vm);
   xanadu::MultiStoreCoordinator coordinator(core);
 
@@ -422,7 +423,6 @@ int main(int argc, char *argv[]) {
         std::filesystem::path(inputStore).filename().string(), "primary",
         inputStore, permascroll);
     currentStore = coordinator.stores().back();
-    directEngine.setStore(currentStore->store.get());
     if (const auto dim = currentStore->manifold->dimensionNamed(
             "d.result", *currentStore->store);
         dim && currentStore->manifold->home()) {
@@ -436,10 +436,10 @@ int main(int argc, char *argv[]) {
                  currentStore->manifold->linked(*cell, *dim, DimVector::POS)) {
           arena.proxyFor(currentStore->spaceId, *cell);
         }
-        const auto axis = directEngine.resolveDimension("d.result");
+        const auto axis = executor.resolveDimension("d.result");
         arena.bindDimension(axis, currentStore->spaceId, *dim,
                             DimensionBindingMode::NameMatch);
-        directEngine.setVariable(
+        executor.setVariable(
             "data", VplView(arena.proxyFor(currentStore->spaceId, *first),
                             {DirectedDim{axis, DimVector::POS}}));
       }
@@ -461,8 +461,7 @@ int main(int argc, char *argv[]) {
     return std::pair{store->rebuildManifold(store->primaryCurrentVersion()),
                      store.get()};
   };
-  // The engine's own arena core: lens cells land where bindRank and
-  // directEngine already look -- a projected rank is a native VPL rank.
+  // Lens cells land in the shared core and bindRank can reach them as a rank.
   zigzag::LensRepl lensRepl(core);
 
   // --lens is the programmatic surface: print the projection and exit.
@@ -504,44 +503,19 @@ int main(int argc, char *argv[]) {
     }
 
     if (dumpAsm || engineMode == "vortex") {
-      CompilationOptions cOpts;
-      cOpts.optimize = optimize;
-      auto cRes      = compiler.compile(*ast, cOpts);
-      if (dumpAsm) {
-        std::cout << cRes.disassembly << "\n";
+      const auto execution = executor.execute(*ast, 100000, optimize);
+      if (!execution) {
+        std::cerr << (execution.error().stage == ExecutionError::Stage::Compile
+                          ? "Compilation failed: "
+                          : "Execution error: ")
+                  << execution.error().message << "\n";
+        return 1;
       }
-      if (engineMode == "vortex") {
-        if (!cRes.success) {
-          std::cerr << "Compilation failed: " << cRes.errorMessage << "\n";
-          return 1;
-        }
-        if (cRes.cursor) {
-          auto execRes = vm.run(*cRes.cursor, 100000);
-          vm.setCursorOpcode(*cRes.cursor, std::nullopt);
-          if (!execRes.success && execRes.errorMessage != "Halted") {
-            std::cerr << "Execution error: " << execRes.errorMessage << "\n";
-            return 1;
-          }
-        }
-        // Output result of vortex execution
-        if (cRes.terminalOpcode) {
-          const auto &inCells = cRes.resultSlots;
-          if (!inCells.empty()) {
-            const auto cell = inCells.front();
-            std::cout << formatCell(arena, cell) << "\n";
-            if (const auto value = arena.asInt64(cell)) {
-              batchResult = VplView::makeScalar(*value, std::optional{cell});
-            } else if (const auto value = arena.asDouble(cell)) {
-              batchResult = VplView::makeScalar(*value, true, cell);
-            } else if (const auto value = arena.asBool(cell)) {
-              batchResult =
-                  VplView::makeScalar(xanadu::scalarValue(*value).text, cell);
-            } else {
-              batchResult = VplView::makeScalar(arena.textOf(cell), cell);
-            }
-          }
-        }
-      }
+      if (dumpAsm) std::cout << execution->disassembly << "\n";
+      batchResult = execution->view;
+      std::cout << (format == "grid" ? renderGrid(*batchResult, arena, core)
+                                     : formatView(*batchResult, arena))
+                << "\n";
     }
 
     if (!outStore.empty()) {
@@ -559,7 +533,7 @@ int main(int argc, char *argv[]) {
       const auto destination =
           streamOutput ? streamStore->path() : std::filesystem::path(outStore);
       xanadu::writeResultSlice(
-          store, resultRows(*batchResult, arena, coordinator, directEngine,
+          store, resultRows(*batchResult, arena, coordinator, executor,
                             stdinStore ? stdinStore->path().string() : ""));
       store.save(destination.string());
       if (streamOutput) {
@@ -597,12 +571,12 @@ int main(int argc, char *argv[]) {
       // walking d.seq between the siblings that dim's links reach.
       std::optional<CellRef> first;
       if (const auto lroot = lensRepl.root()) {
-        const auto ldim = directEngine.core().findDimension(name);
+        const auto ldim = core.findDimension(name);
         if (ldim) {
           first = arena.linked(*lroot, *ldim, DimVector::POS);
         }
         if (!first) {
-          const auto cont = directEngine.core().findDimension("d.contains");
+          const auto cont = core.findDimension("d.contains");
           if (cont) {
             first = arena.linked(*lroot, *cont, DimVector::POS);
           }
@@ -613,13 +587,13 @@ int main(int argc, char *argv[]) {
                   << " in the open store or lens.\n";
         return false;
       }
-      const auto axis = directEngine.core().findDimension("d.seq");
+      const auto axis = core.findDimension("d.seq");
       if (!axis) {
         std::cerr << "The lens has no d.seq dimension.\n";
         return false;
       }
       lastView = VplView(*first, {DirectedDim{*axis, DimVector::POS}});
-      directEngine.setVariable("data", lastView);
+      executor.setVariable("data", lastView);
       hasView = true;
       std::cout << "data: " << formatView(lastView, arena) << "\n";
       return true;
@@ -642,11 +616,11 @@ int main(int argc, char *argv[]) {
       arena.proxyFor(currentStore->spaceId, *cell);
     }
     const auto origin = arena.proxyFor(currentStore->spaceId, *first);
-    const auto axis   = directEngine.resolveDimension(name);
+    const auto axis   = executor.resolveDimension(name);
     arena.bindDimension(axis, currentStore->spaceId, *dim,
                         DimensionBindingMode::NameMatch);
     lastView = VplView(origin, {DirectedDim{axis, DimVector::POS}});
-    directEngine.setVariable("data", lastView);
+    executor.setVariable("data", lastView);
     hasView = true;
     std::cout << "data: " << formatView(lastView, arena) << "\n";
     return true;
@@ -692,12 +666,11 @@ int main(int argc, char *argv[]) {
             std::filesystem::path(path).filename().string(), "library", path,
             permascroll);
         currentStore = coordinator.stores().back();
-        directEngine.setStore(currentStore->store.get());
         std::cout << "Opened " << path << " with "
                   << currentStore->manifold->cellCount() << " cells.\n";
         hasView  = false;
         lastView = {};
-        directEngine.setVariable("data", {});
+        executor.setVariable("data", {});
         if (!currentStore->manifold->dimensionNamed("d.result",
                                                     *currentStore->store) ||
             !bindRank("d.result")) {
@@ -725,7 +698,7 @@ int main(int argc, char *argv[]) {
             throw std::invalid_argument("result path already exists: " + path);
           }
           const auto rows =
-              resultRows(lastView, arena, coordinator, directEngine,
+              resultRows(lastView, arena, coordinator, executor,
                          stdinStore ? stdinStore->path().string() : "");
           xanadu::Store output(permascroll);
           xanadu::writeResultSlice(output, rows);
@@ -804,8 +777,9 @@ int main(int argc, char *argv[]) {
         auto pAst = p.parseProgram();
         if (pAst) {
           CompilationOptions cOpts;
-          cOpts.optimize = optimize;
-          auto cRes      = compiler.compile(*pAst, cOpts);
+          cOpts.optimize        = optimize;
+          cOpts.initialBindings = executor.variables();
+          auto cRes             = compiler.compile(*pAst, cOpts);
           std::cout << cRes.disassembly << "\n";
         }
       } catch (const std::exception &err) {
@@ -824,42 +798,18 @@ int main(int argc, char *argv[]) {
       auto pAst = p.parseProgram();
       if (!pAst) continue;
 
-      {
-        hasView = false;
-        CompilationOptions cOpts;
-        cOpts.optimize = optimize;
-        auto cRes      = compiler.compile(*pAst, cOpts);
-        if (!cRes.success) {
-          std::cerr << "Compilation error: " << cRes.errorMessage << "\n";
-          continue;
-        }
-        if (cRes.cursor) {
-          const auto execution = vm.run(*cRes.cursor, 100000);
-          vm.setCursorOpcode(*cRes.cursor, std::nullopt);
-          if (!execution.success) {
-            std::cerr << "Execution error: " << execution.errorMessage << "\n";
-            continue;
-          }
-        }
-        if (cRes.terminalOpcode) {
-          const auto &inCells = cRes.resultSlots;
-          if (!inCells.empty()) {
-            const auto cell = inCells.front();
-            if (const auto value = arena.asInt64(cell)) {
-              lastView = VplView::makeScalar(*value, std::optional{cell});
-            } else if (const auto value = arena.asDouble(cell)) {
-              lastView = VplView::makeScalar(*value, true, cell);
-            } else if (const auto value = arena.asBool(cell)) {
-              lastView =
-                  VplView::makeScalar(xanadu::scalarValue(*value).text, cell);
-            } else {
-              lastView = VplView::makeScalar(arena.textOf(cell), cell);
-            }
-            hasView = true;
-            std::cout << formatCell(arena, cell) << "\n";
-          }
-        }
+      hasView              = false;
+      const auto execution = executor.execute(*pAst, 100000, optimize);
+      if (!execution) {
+        std::cerr << (execution.error().stage == ExecutionError::Stage::Compile
+                          ? "Compilation error: "
+                          : "Execution error: ")
+                  << execution.error().message << "\n";
+        continue;
       }
+      lastView = execution->view;
+      hasView  = true;
+      std::cout << formatView(lastView, arena) << "\n";
     } catch (const std::exception &err) {
       hasView = false;
       std::cerr << "Error: " << err.what() << "\n";

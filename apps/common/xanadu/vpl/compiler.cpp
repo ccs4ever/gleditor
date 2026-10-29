@@ -4,16 +4,18 @@
  */
 #include "common/xanadu/vpl/compiler.hpp"
 #include "common/xanadu/vortex/assembly_transaction.hpp"
+#include "common/xanadu/vortex/program_export.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <iomanip>
 #include <limits>
+#include <ranges>
 #include <sstream>
 #include <unordered_set>
 
 #include "common/xanadu/vpl/lexer.hpp"
 #include "common/xanadu/vpl/parser.hpp"
-#include "common/xanadu/zigzag/dimension_registry.hpp"
 
 namespace xanadu::vpl {
 
@@ -24,6 +26,13 @@ using zigzag::vortex::CellValue;
 using zigzag::vortex::OpcodeKind;
 
 namespace {
+
+void mergeDependencies(std::vector<CellRef> &into,
+                       const std::vector<CellRef> &from) {
+  for (const auto cell : from) {
+    if (std::ranges::find(into, cell) == into.end()) into.push_back(cell);
+  }
+}
 
 CellRef requireCompiledCell(const std::optional<CellRef> result) {
   if (!result) {
@@ -339,6 +348,23 @@ VPLCompiler::VPLCompiler(zigzag::vortex::VortexCore &core,
                          zigzag::vortex::VortexVM &vm)
     : core_(core), vm_(vm) {}
 
+std::vector<CellRef> VPLCompiler::dependenciesOf(const CellRef cell) const {
+  if (const auto found = cellDependencies_.find(cell);
+      found != cellDependencies_.end()) {
+    return found->second;
+  }
+  if (core_.arena().resolveForeign(cell)) return {cell};
+  return {};
+}
+
+std::vector<CellRef> VPLCompiler::rankDependenciesOf(const CellRef cell) const {
+  if (const auto found = rankDependencies_.find(cell);
+      found != rankDependencies_.end()) {
+    return found->second;
+  }
+  return dependenciesOf(cell);
+}
+
 CellRef VPLCompiler::emitOp(OpcodeKind kind, std::string_view label) {
   CellRef op = vm_.mintOpcode(kind, label);
   if (!entryOp_) {
@@ -355,10 +381,12 @@ CellRef VPLCompiler::emitOp(OpcodeKind kind, std::string_view label) {
 
 void VPLCompiler::emitInput(CellRef op, CellRef operand) {
   core_.bindInput(op, operand);
+  mergeDependencies(cellDependencies_[op], dependenciesOf(operand));
 }
 
 void VPLCompiler::emitOutput(CellRef op, CellRef target) {
   core_.bindOutput(op, target);
+  cellDependencies_[target] = dependenciesOf(op);
 }
 
 CellRef VPLCompiler::emitConstant(const CellValue &val,
@@ -600,7 +628,13 @@ std::optional<CellRef> VPLCompiler::compileProgram(const Program &prog) {
     lastRes = compileNode(*expr);
     if (!lastRes)
       throw std::invalid_argument("VPL expression has no VM-compiled result");
+    lastResultCells_.clear();
     lastResultCells_.push_back(*lastRes);
+    lastResultAxes_.clear();
+    if (const auto axes = rankAxes_.find(*lastRes); axes != rankAxes_.end()) {
+      lastResultAxes_ = axes->second;
+    }
+    lastResultDependencies_ = rankDependenciesOf(*lastRes);
   }
   return lastRes;
 }
@@ -634,30 +668,46 @@ std::optional<CellRef> VPLCompiler::compileVector(const VectorExpr &expr) {
   if (cells.empty())
     throw std::invalid_argument("VPL vector has no VM-compiled elements");
 
-  // Chain vector cells along +d.step via the shared batch-link primitive.
-  zigzag::expectWritten(core_.arena().linkChain(cells, core_.dims().step,
-                                                zigzag::DimVector::POS));
+  for (const auto cell : cells) {
+    if (rankAxes_.contains(cell)) {
+      throw std::invalid_argument(
+          "nested VPL ranks require explicit array lowering");
+    }
+  }
+  const auto axis = core_.dims().step;
+  zigzag::expectWritten(
+      core_.arena().linkChain(cells, axis, zigzag::DimVector::POS));
+  rankAxes_[cells.front()] = {zigzag::DirectedDim{axis, DimVector::POS}};
+  auto &dependencies       = rankDependencies_[cells.front()];
+  for (const auto cell : cells) {
+    core_.arena().consumeWork();
+    mergeDependencies(dependencies, dependenciesOf(cell));
+  }
 
   return cells.front();
 }
 
 CellRef VPLCompiler::compileDimension(const DimensionExpr &expr) {
-  DimRef dim = resolveDimension(expr.name());
-  return emitConstant(static_cast<std::int64_t>(dim));
+  (void)expr;
+  throw std::invalid_argument(
+      "VPL dimension values require typed-handle VM lowering");
 }
 
 std::optional<CellRef>
 VPLCompiler::compileIdentifier(const IdentifierExpr &expr) {
+  if (expr.name() == "H") return core_.home();
   auto it = varBindings_.find(expr.name());
   if (it != varBindings_.end()) {
+    if (it->second) {
+      if (const auto axes = varAxes_.find(expr.name());
+          axes != varAxes_.end() && !axes->second.empty()) {
+        rankAxes_[*it->second] = axes->second;
+      }
+    }
     return it->second;
   }
 
-  CellRef resOp = emitOp(OpcodeKind::Resolve, "#RESOLVE " + expr.name());
-  emitInputConstant(resOp, expr.name());
-  CellRef outCell = core_.arena().makeCell();
-  emitOutput(resOp, outCell);
-  return outCell;
+  throw std::invalid_argument("unbound VPL identifier '" + expr.name() + "'");
 }
 
 CellRef VPLCompiler::compileVerb(const VerbExpr &expr) {
@@ -674,6 +724,20 @@ std::optional<CellRef> VPLCompiler::compileAssign(const AssignExpr &expr) {
   emitInputConstant(bindOp, expr.target());
   emitInput(bindOp, *valCell);
   varBindings_[expr.target()] = valCell;
+  const auto axes             = rankAxes_.find(*valCell);
+  const std::vector<zigzag::DirectedDim> bindingAxes =
+      axes == rankAxes_.end() ? std::vector<zigzag::DirectedDim>{}
+                              : axes->second;
+  if (bindingAxes.empty()) {
+    varAxes_.erase(expr.target());
+  } else {
+    varAxes_[expr.target()] = bindingAxes;
+  }
+  assignedBindings_[expr.target()] = {
+      .cell         = *valCell,
+      .axes         = bindingAxes,
+      .dependencies = rankDependenciesOf(*valCell),
+  };
   return valCell;
 }
 
@@ -765,9 +829,17 @@ std::optional<CellRef> VPLCompiler::compileMonadic(const MonadicExpr &expr) {
           acc = out;
         }
 
+        const auto axis = core_.dims().step;
         for (std::size_t i = 0; i + 1 < scanCells.size(); ++i) {
           zigzag::expectWritten(core_.arena().link(
-              scanCells[i], core_.dims().step, false, scanCells[i + 1]));
+              scanCells[i], axis, DimVector::POS, scanCells[i + 1]));
+        }
+        rankAxes_[scanCells.front()] = {
+            zigzag::DirectedDim{axis, DimVector::POS}};
+        auto &dependencies = rankDependencies_[scanCells.front()];
+        for (const auto cell : scanCells) {
+          core_.arena().consumeWork();
+          mergeDependencies(dependencies, dependenciesOf(cell));
         }
         return scanCells.front();
       }
@@ -795,6 +867,10 @@ std::optional<CellRef> VPLCompiler::compileMonadic(const MonadicExpr &expr) {
   const std::optional<CellRef> rCell = compileNode(*expr.right());
   if (!rCell)
     throw std::invalid_argument("VPL monadic operand has no VM result");
+  if (expr.verb() != TokenKind::Plus && rankAxes_.contains(*rCell)) {
+    throw std::invalid_argument(
+        "VPL scalar monadic arithmetic on a rank requires array lowering");
+  }
 
   switch (expr.verb()) {
   case TokenKind::Plus:
@@ -851,6 +927,10 @@ CellRef VPLCompiler::compileDyadic(const DyadicExpr &expr) {
   const auto rCell = compileNode(*expr.right());
   if (!lCell || !rCell)
     throw std::invalid_argument("VPL dyadic operands must compile to values");
+  if (rankAxes_.contains(*lCell) || rankAxes_.contains(*rCell)) {
+    throw std::invalid_argument(
+        "VPL scalar dyadic arithmetic on ranks requires array lowering");
+  }
 
   OpcodeKind kind;
   std::string_view l;
@@ -968,13 +1048,66 @@ CompilationResult VPLCompiler::compile(const Program &program,
   currentOp_.reset();
   allOps_.clear();
   varBindings_.clear();
+  varAxes_.clear();
+  rankAxes_.clear();
+  rankDependencies_.clear();
+  cellDependencies_.clear();
+  assignedBindings_.clear();
   lastResultCells_.clear();
+  lastResultAxes_.clear();
+  lastResultDependencies_.clear();
   optimize_ = options.optimize;
+
+  for (const auto &[name, binding] : options.initialBindings) {
+    std::optional<CellRef> cell = binding.origin();
+    if (!cell && binding.isScalar()) {
+      if (binding.isString()) {
+        cell = emitConstant(binding.scalarString());
+      } else if (binding.isFloat()) {
+        cell = emitConstant(binding.scalarFloat());
+      } else {
+        cell = emitConstant(binding.scalarInt());
+      }
+    }
+    varBindings_[name]                    = cell;
+    varAxes_[name]                        = binding.axes();
+    std::vector<CellRef> rankDependencies = binding.dependencies();
+    if (cell) {
+      auto members = binding.collectCells(core_.arena());
+      if (members.empty()) members.push_back(*cell);
+      for (const auto member : members) {
+        core_.arena().consumeWork();
+        std::vector<CellRef> memberDependencies;
+        if (binding.axes().empty()) {
+          memberDependencies = binding.dependencies();
+        }
+        if (core_.arena().resolveForeign(member)) {
+          const std::vector<CellRef> source{member};
+          mergeDependencies(memberDependencies, source);
+        }
+        if (!memberDependencies.empty()) {
+          mergeDependencies(cellDependencies_[member], memberDependencies);
+        }
+        mergeDependencies(rankDependencies, memberDependencies);
+      }
+      if (!binding.axes().empty()) {
+        rankDependencies_[*cell] = std::move(rankDependencies);
+      }
+    }
+    if (cell && !binding.axes().empty()) {
+      rankAxes_[*cell] = binding.axes();
+    }
+  }
 
   try {
     const auto resultCell = compileProgram(program);
     if (lastResultCells_.empty() && resultCell) {
       lastResultCells_.push_back(*resultCell);
+      if (const auto axes = rankAxes_.find(*resultCell);
+          axes != rankAxes_.end()) {
+        lastResultAxes_ = axes->second;
+      }
+      lastResultDependencies_ = rankDependenciesOf(*resultCell);
     }
 
     std::optional<CellRef> terminal;
@@ -997,14 +1130,18 @@ CompilationResult VPLCompiler::compile(const Program &program,
 
     std::string dis = disassemble(entryOp_);
     CompilationResult result{
-        .success          = true,
-        .entryOpcode      = entryOp_,
-        .errorMessage     = "",
-        .generatedOpcodes = allOps_,
-        .disassembly      = std::move(dis),
-        .terminalOpcode   = terminal,
-        .cursor           = cursor,
-        .resultSlots      = lastResultCells_,
+        .success            = true,
+        .entryOpcode        = entryOp_,
+        .errorMessage       = "",
+        .generatedOpcodes   = allOps_,
+        .disassembly        = std::move(dis),
+        .terminalOpcode     = terminal,
+        .cursor             = cursor,
+        .resultSlots        = lastResultCells_,
+        .resultAxes         = lastResultAxes_,
+        .resultDependencies = lastResultDependencies_,
+        .cellDependencies   = cellDependencies_,
+        .assignedBindings   = assignedBindings_,
     };
     transaction.commit();
     return result;
@@ -1013,6 +1150,11 @@ CompilationResult VPLCompiler::compile(const Program &program,
     currentOp_.reset();
     allOps_.clear();
     lastResultCells_.clear();
+    lastResultAxes_.clear();
+    lastResultDependencies_.clear();
+    cellDependencies_.clear();
+    rankDependencies_.clear();
+    assignedBindings_.clear();
     return CompilationResult{
         .success          = false,
         .entryOpcode      = std::nullopt,
@@ -1138,66 +1280,9 @@ std::string VPLCompiler::renderAST(const AstNode &node) {
 xanadu::MicroversionId
 VPLCompiler::exportToStore(xanadu::Store &store,
                            const xanadu::MicroversionId &parent) const {
-  xanadu::MicroversionId ver = parent;
-  if (!store.homeCell()) {
-    ver = store.sliceGenesis(ver);
-  }
-
-  const auto &arena = core_.arena();
-  std::unordered_map<CellRef, CellRef> cellMap;
-  cellMap[core_.home()] = store.homeCell().value();
-
-  auto manifold = store.rebuildManifold(ver);
-
-  // 1. Replicate dimensions
-  std::unordered_map<DimRef, DimRef> dimMap;
-  for (CellRef c = 1; c <= arena.cellCount(); ++c) {
-    if (!arena.contains(c)) continue;
-    std::string name = arena.textOf(c);
-    if (!name.empty() && name.starts_with("d.")) {
-      // name is non-empty here, the one way getOrCreate() can refuse a store.
-      if (const auto dim = zigzag::DimensionRegistry::instance().getOrCreate(
-              store, ver, manifold, name)) {
-        dimMap[c]  = *dim;
-        cellMap[c] = *dim;
-      }
-    }
-  }
-
-  // 2. Mint cells
-  for (CellRef c = 1; c <= arena.cellCount(); ++c) {
-    if (!arena.contains(c)) continue;
-    if (cellMap.contains(c)) continue;
-
-    if (auto dVal = arena.asDouble(c)) {
-      ver = store.makeScalarCell(ver, *dVal);
-    } else if (auto iVal = arena.asInt64(c)) {
-      ver = store.makeScalarCell(ver, *iVal);
-    } else if (auto bVal = arena.asBool(c)) {
-      ver = store.makeScalarCell(ver, *bVal);
-    } else {
-      ver = store.makeCell(ver, arena.textOf(c));
-    }
-    cellMap[c] = store.cellRefOf(ver).value();
-    manifold.advanceOrRefold(store, ver);
-  }
-
-  // 3. Link edges (posward links only)
-  for (CellRef c = 1; c <= arena.cellCount(); ++c) {
-    if (!arena.contains(c) || !cellMap.contains(c)) continue;
-    CellRef from = cellMap.at(c);
-
-    for (const auto &[dimRef, mappedDim] : dimMap) {
-      const auto target = arena.linked(c, dimRef, DimVector::POS);
-      if (target && cellMap.contains(*target)) {
-        CellRef to = cellMap.at(*target);
-        ver        = store.setLink(ver, from, mappedDim, DimVector::POS, to);
-        manifold.advanceOrRefold(store, ver);
-      }
-    }
-  }
-
-  return ver;
+  return zigzag::vortex::exportProgram(core_, vm_, allOps_, store,
+                                       parent.isZero() ? std::nullopt
+                                                       : std::optional{parent});
 }
 
 } // namespace xanadu::vpl

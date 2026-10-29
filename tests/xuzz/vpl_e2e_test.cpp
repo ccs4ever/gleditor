@@ -28,7 +28,8 @@ ProcessResult runCommand(const std::string &cmdLine) {
       "LIBGL_ALWAYS_SOFTWARE=1 XDG_DATA_HOME=" +
       fs::current_path().string() +
       "/build/xdg/data XDG_CONFIG_HOME=" + fs::current_path().string() +
-      "/build/xdg/config " + cmdLine + " 2>&1";
+      "/build/xdg/config XDG_CACHE_HOME=" + fs::current_path().string() +
+      "/build/xdg/cache " + cmdLine + " 2>&1";
 
   FILE *pipe = popen(fullCmd.c_str(), "r");
   if (!pipe) {
@@ -72,9 +73,9 @@ TEST_F(VPLE2ETest, VplcHelpFlag) {
   EXPECT_NE(res.output.find("--library"), std::string::npos);
 }
 
-TEST_F(VPLE2ETest, VplcDumpAst) {
+TEST_F(VPLE2ETest, VplcDumpsAstBeforeRefusingUnloweredCode) {
   auto res = runCommand("./build/vplc --dump-ast -e \"A ← 5⍳d.1\"");
-  EXPECT_EQ(res.exitCode, 0) << res.output;
+  EXPECT_NE(res.exitCode, 0) << res.output;
   EXPECT_NE(res.output.find("Program"), std::string::npos);
   EXPECT_NE(res.output.find("AssignExpr: A"), std::string::npos);
   EXPECT_NE(res.output.find("DyadicExpr: ⍳"), std::string::npos);
@@ -82,19 +83,13 @@ TEST_F(VPLE2ETest, VplcDumpAst) {
   EXPECT_NE(res.output.find("DimensionExpr: d.1"), std::string::npos);
 }
 
-TEST_F(VPLE2ETest, VplcDumpAsmDualSyntax) {
-  auto resApl = runCommand("./build/vplc --dump-asm -e \"A ← 5⍳d.1\"");
-  EXPECT_EQ(resApl.exitCode, 0) << resApl.output;
-  EXPECT_NE(resApl.output.find("#NEW"), std::string::npos);
-  EXPECT_NE(resApl.output.find("#VALUE"), std::string::npos);
-  EXPECT_NE(resApl.output.find("#BIND A"), std::string::npos);
-  EXPECT_NE(resApl.output.find("#HALT"), std::string::npos);
-
-  auto resJ = runCommand("./build/vplc --dump-asm -e \"A =. 5 i. d.1\"");
-  EXPECT_EQ(resJ.exitCode, 0) << resJ.output;
-  EXPECT_NE(resJ.output.find("#NEW"), std::string::npos);
-  EXPECT_NE(resJ.output.find("#VALUE"), std::string::npos);
-  EXPECT_NE(resJ.output.find("#BIND A"), std::string::npos);
+TEST_F(VPLE2ETest, VplcRefusesUnloweredIotaInBothSyntaxes) {
+  for (const auto &expression : {"A ← 5⍳d.1", "A =. 5 i. d.1"}) {
+    const auto result = runCommand("./build/vplc --dump-asm -e \"" +
+                                   std::string(expression) + "\"");
+    EXPECT_NE(result.exitCode, 0) << result.output;
+    EXPECT_NE(result.output.find("VM"), std::string::npos);
+  }
 }
 
 TEST_F(VPLE2ETest, VplcConstantFoldingOptimization) {
@@ -132,20 +127,19 @@ TEST_F(VPLE2ETest, VplHelpFlag) {
   EXPECT_NE(res.output.find("--grid"), std::string::npos);
 }
 
-TEST_F(VPLE2ETest, VplDirectEvaluation) {
+TEST_F(VPLE2ETest, VplDefaultVmReduction) {
   auto res = runCommand("./build/vpl --headless -e \"+/ 1 2 3 4 5\"");
   EXPECT_EQ(res.exitCode, 0) << res.output;
   EXPECT_NE(res.output.find("15"), std::string::npos);
 }
 
-TEST_F(VPLE2ETest, VplDualSyntaxEvaluation) {
-  auto resApl = runCommand("./build/vpl --headless -e \"5⍳d.1\"");
-  EXPECT_EQ(resApl.exitCode, 0) << resApl.output;
-  EXPECT_NE(resApl.output.find("1 2 3 4 5"), std::string::npos);
-
-  auto resJ = runCommand("./build/vpl --headless -e \"5 i. d.1\"");
-  EXPECT_EQ(resJ.exitCode, 0) << resJ.output;
-  EXPECT_NE(resJ.output.find("1 2 3 4 5"), std::string::npos);
+TEST_F(VPLE2ETest, VplRefusesUnloweredIotaInBothSyntaxes) {
+  for (const auto &expression : {"5⍳d.1", "5 i. d.1"}) {
+    const auto result = runCommand("./build/vpl --headless -e \"" +
+                                   std::string(expression) + "\"");
+    EXPECT_NE(result.exitCode, 0) << result.output;
+    EXPECT_NE(result.output.find("VM"), std::string::npos);
+  }
 }
 
 TEST_F(VPLE2ETest, VplVortexEngineEvaluation) {
@@ -155,21 +149,23 @@ TEST_F(VPLE2ETest, VplVortexEngineEvaluation) {
 }
 
 TEST_F(VPLE2ETest, VplGridVisualization) {
-  auto res = runCommand("./build/vpl --headless --grid -e \"5 ⍳ d.1\"");
+  auto res = runCommand("./build/vpl --headless --grid -e \"1 2 3 4 5\"");
   EXPECT_EQ(res.exitCode, 0) << res.output;
   EXPECT_NE(res.output.find("Xanadu Zigzag Cell Connection View"),
             std::string::npos);
   EXPECT_NE(res.output.find("2D Spatial Lattice Projection"),
             std::string::npos);
-  EXPECT_NE(res.output.find("+d.1--->"), std::string::npos);
+  EXPECT_NE(res.output.find("Viewing Dimensions: [X] d.step"),
+            std::string::npos);
+  EXPECT_NE(res.output.find("Result Set: 5 cells"), std::string::npos);
 }
 
 TEST_F(VPLE2ETest, VplScriptFileExecution) {
   fs::path scriptPath = testDir / "test.vpl";
   {
     std::ofstream ofs(scriptPath);
-    ofs << "A ← 5⍳d.1\n";
-    ofs << "+/ A\n";
+    ofs << "A ← 3\n";
+    ofs << "A + 12\n";
   }
 
   auto res =
@@ -186,3 +182,38 @@ TEST_F(VPLE2ETest, VplPipedReplInput) {
 }
 
 } // namespace
+
+TEST_F(VPLE2ETest, VmDefaultPreservesCompleteVector) {
+  const auto result = runCommand("./build/vpl -e '1 2 3'");
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  EXPECT_EQ(result.output, "1 2 3\n");
+}
+
+TEST_F(VPLE2ETest, VmProgramReturnsFinalExpression) {
+  const auto source = testDir / "last.vpl";
+  {
+    std::ofstream out(source);
+    out << "1 + 2\n4 + 5\n";
+  }
+  const auto result = runCommand("./build/vpl -f '" + source.string() + "'");
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  EXPECT_EQ(result.output, "9\n");
+}
+
+TEST_F(VPLE2ETest, VmReplPreservesBindingsAndRankShape) {
+  const auto source = testDir / "session.txt";
+  {
+    std::ofstream out(source);
+    out << "A ← 1 2 3\nA\nB ← 5\nB + 2\n";
+  }
+  const auto result = runCommand("./build/vpl < '" + source.string() + "'");
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  EXPECT_EQ(result.output, "1 2 3\n1 2 3\n5\n7\n");
+}
+
+TEST_F(VPLE2ETest, DirectFlagRefusesBeforeExecution) {
+  const auto result = runCommand("./build/vpl --engine direct -e '1 + 2'");
+  EXPECT_EQ(result.exitCode, 2) << result.output;
+  EXPECT_NE(result.output.find("Unsupported VPL execution engine"),
+            std::string::npos);
+}
