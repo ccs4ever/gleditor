@@ -71,7 +71,11 @@ enum class EpistemicRefusal : std::uint8_t {
   AliasInUse,
   DuplicateAlias,
   UnknownSource,
-  UnsupportedIncarnation,
+  /// Below the incarnation bound for the principal: a replay of a superseded
+  /// boot, or a binding that would lower the floor.
+  StaleIncarnation,
+  /// Above the bound incarnation: only binding advances one.
+  UnboundIncarnation,
   InvalidObservation,
   ClockUnsynchronised,
   ObservationTimeMismatch,

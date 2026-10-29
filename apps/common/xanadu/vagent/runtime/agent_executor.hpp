@@ -310,6 +310,12 @@ public:
   AgentExecutor *unbindSource(const identity::ActorPid &target,
                               std::string_view principal,
                               std::string_view predicate);
+  /// The operator's decommission path: revoke every binding of @p principal
+  /// and queue a retire turn that drops its supports, excises its unpinned
+  /// history and keeps a tombstone with its highest incarnation, so a later
+  /// binding must present a strictly higher one.
+  [[nodiscard]] std::expected<AgentExecutor *, EpistemicRefusal>
+  retireSource(const identity::ActorPid &target, std::string_view principal);
   /// The host's time service reports whether the wall clock is synchronised;
   /// until it is, observations on a wall-basis predicate refuse retryably.
   AgentExecutor *setWallClockSynchronised(bool synchronised);

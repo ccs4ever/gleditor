@@ -1191,6 +1191,7 @@ private:
   void emitRtBSet();
   void emitObserve(CellRef entryLabel);
   void emitObserveRefusal(CellRef entryLabel);
+  void emitSourceChange(CellRef entryLabel);
   /// Re-attach a detached history (@p moved, zero when none) to support
   /// @p sc, and return @p sc in r1.
   void finishSupport(CellRef sc, CellRef moved);
@@ -4470,6 +4471,217 @@ void Gen::emitObserveRefusal(CellRef entryLabel) {
   endObservation(kTurnResultIngestionFault);
 }
 
+/// `sourceChangeEntry` (P19 I3-1c): advance a principal to the incarnation
+/// a new binding carries, or retire it for the operator. The arena is the
+/// authority on the replay floor, so a binding the host accepted may still
+/// refuse `StaleIncarnation` here, and the adapter then revokes it.
+///
+/// An advance retires every record of a lower incarnation on every key, so a
+/// replacement device never leaves its predecessor's readings current, and
+/// clears the dedup window and the streams, whose sequences restart. The
+/// latches (faulted, the counters) stay: a restart cannot shed them.
+///
+/// A retirement drops the principal's supports through `rtBDrop`, settling
+/// `-pred`, excises its unpinned records with their clone occurrences, and
+/// leaves the profile cell as a tombstone with the higher of the two
+/// incarnations. Records are reached from the profile master's `d.clone`
+/// rank, one occurrence per record: O(K * H) cells.
+void Gen::emitSourceChange(CellRef entryLabel) {
+  tail_  = std::nullopt;
+  frame_ = nullptr;
+  place(entryLabel);
+  const FieldInfo &turn = fields_.at(std::string(kFieldTurn));
+  const CellRef tp = reg(), change = reg(), who = reg(), inc = reg(),
+                retire = reg(), t = reg();
+  const CellRef malformed = newLabel();
+  mov(S(tp), S(rd(S(turn.nameCell), core_.dims().values)));
+  const auto find = [&](CellRef record, std::string_view name, CellRef out) {
+    mov(S(a0_), S(record));
+    movC(a1_, cStr(std::string(name)));
+    callLabel(rtFind_);
+    mov(S(out), S(r0_));
+  };
+  find(tp, kTurnSourceChange, change);
+  branchIfZero(change, malformed);
+  for (const auto &[name, out] :
+       {std::pair{kObsSource, who}, std::pair{kObsIncarnation, inc},
+        std::pair{kSourceRetire, retire}}) {
+    find(change, name, out);
+    branchIfZero(out, malformed);
+  }
+  // A fresh streams record and dedup list, for a new or revived profile.
+  const auto freshWindows = [&](CellRef prof) {
+    const CellRef streams = reg(), seen = reg();
+    alloc(streams);
+    mov(D(streams), S(cStr(std::string(kProfileStreams))));
+    markRecord(streams);
+    CellRef vc;
+    callSetField(prof, std::string(kProfileStreams), streams, vc);
+    alloc(seen);
+    mov(D(seen), S(cStr(std::string(kListContent))));
+    callSetField(prof, std::string(kProfileDedup), seen, vc);
+  };
+  const auto setField = [&](CellRef record, std::string_view name, Opd v) {
+    CellRef vc;
+    callSetField(record, std::string(name), std::nullopt, vc);
+    mov(D(vc), v);
+  };
+  // The negward head of @p from's run on @p dim.
+  const auto head = [&](CellRef from, DimRef dim, CellRef out) {
+    const CellRef p = reg(), loop = newLabel(), done = newLabel();
+    mov(S(out), S(from));
+    place(loop);
+    mov(S(p), S(rd(D(out), dim, true)));
+    branchIfZero(p, done);
+    mov(S(out), S(p));
+    jump(loop);
+    place(done);
+  };
+  // A clone occurrence is the value of its record's `profile` field.
+  const auto recordOf = [&](CellRef view, CellRef out) {
+    const CellRef name = reg();
+    mov(S(name), S(rd(D(view), core_.dims().values, true)));
+    head(name, core_.dims().vars, out);
+  };
+
+  const CellRef prof = reg(), same = reg(), loop = newLabel(),
+                found = newLabel(), absent = newLabel();
+  mov(S(prof), S(rd(S(agentCell_), dims_.trust)));
+  place(loop);
+  branchIfZero(prof, absent);
+  emit(OpcodeKind::Eq, "who?", {D(prof), D(who)}, {same});
+  branch(S(same), found);
+  mov(S(prof), S(rd(D(prof), dims_.trust)));
+  jump(loop);
+  place(absent);
+  {
+    // Nothing seen yet: an advance has nothing to do, and a retirement
+    // leaves a bare tombstone so the floor still holds.
+    const CellRef skip = newLabel();
+    emit(OpcodeKind::Eq, "retire?", {D(retire), S(true_)}, {t});
+    requireTrue(t, skip);
+    alloc(prof);
+    mov(D(prof), D(who));
+    markRecord(prof);
+    setField(prof, kProfileIncarnation, D(inc));
+    setField(prof, kProfileRetired, S(true_));
+    emitAppendTail(S(agentCell_), dims_.trust, dims_.trust, prof);
+    place(skip);
+    endObservation(kTurnResultCommitted);
+  }
+  place(found);
+  const CellRef profInc = reg(), tomb = reg(), lower = reg();
+  find(prof, kProfileIncarnation, profInc);
+  branchIfZero(profInc, malformed);
+  {
+    const CellRef v = reg(), known = newLabel();
+    movC(tomb, false_);
+    find(prof, kProfileRetired, v);
+    branchIfZero(v, known);
+    mov(S(tomb), D(v));
+    place(known);
+  }
+  const CellRef doRetire = newLabel(), stale = newLabel();
+  emit(OpcodeKind::Eq, "retire?", {D(retire), S(true_)}, {t});
+  branch(S(t), doRetire);
+  {
+    // Advance, or revive a tombstone, only to a strictly higher incarnation;
+    // a live profile already there needs nothing.
+    const CellRef revive = newLabel(), advance = newLabel();
+    emit(OpcodeKind::Lt, "higher?", {D(profInc), D(inc)}, {lower});
+    branch(S(tomb), revive);
+    branch(S(lower), advance);
+    emit(OpcodeKind::Eq, "same?", {D(profInc), D(inc)}, {same});
+    requireTrue(same, stale);
+    endObservation(kTurnResultCommitted);
+    place(revive);
+    requireTrue(lower, stale);
+    mov(D(profInc), D(inc));
+    setField(prof, kProfileRetired, S(false_));
+    freshWindows(prof);
+    endObservation(kTurnResultCommitted);
+    place(advance);
+    mov(D(profInc), D(inc));
+    const CellRef v = reg(), rec = reg(), ri = reg(), st = reg();
+    const CellRef walk = newLabel(), next = newLabel(), done = newLabel();
+    mov(S(v), S(rd(D(prof), core_.dims().clone)));
+    place(walk);
+    branchIfZero(v, done);
+    recordOf(v, rec);
+    find(rec, kObsIncarnation, ri);
+    branchIfZero(ri, next);
+    emit(OpcodeKind::Lt, "older?", {D(ri), D(inc)}, {t});
+    requireTrue(t, next);
+    find(rec, kObsStatus, st);
+    branchIfZero(st, next);
+    mov(D(st), S(cStr(std::string(kObsStatusRetired))));
+    place(next);
+    mov(S(v), S(rd(D(v), core_.dims().clone)));
+    jump(walk);
+    place(done);
+    freshWindows(prof);
+    endObservation(kTurnResultCommitted);
+  }
+  place(doRetire);
+  {
+    const CellRef v = reg(), nextV = reg(), rec = reg(), sup = reg(),
+                  cl = reg(), pred = reg(), nm = reg(), st = reg(), pin = reg();
+    const CellRef walk = newLabel(), detached = newLabel(), kept = newLabel(),
+                  next = newLabel(), done = newLabel();
+    mov(S(v), S(rd(D(prof), core_.dims().clone)));
+    place(walk);
+    branchIfZero(v, done);
+    mov(S(nextV), S(rd(D(v), core_.dims().clone)));
+    recordOf(v, rec);
+    find(rec, kObsStatus, st);
+    {
+      const CellRef none = newLabel();
+      branchIfZero(st, none);
+      mov(D(st), S(cStr(std::string(kObsStatusRetired))));
+      place(none);
+    }
+    // The record's support, dropped from its clause once; a support no
+    // longer on a source rank is already detached.
+    head(rec, dims_.epistemic, sup);
+    mov(S(cl), S(rd(D(sup), dims_.source, true)));
+    branchIfZero(cl, detached);
+    head(sup, dims_.source, cl);
+    head(cl, core_.dims().clause, pred);
+    mov(S(nm), D(sup));
+    mov(S(a0_), S(pred));
+    mov(S(a1_), S(cl));
+    mov(S(a2_), S(nm));
+    callLabel(rtBDrop_);
+    place(detached);
+    // Pinned records stay until I3-4 can release the pin.
+    find(rec, kObsPinned, pin);
+    branchIfZero(pin, kept);
+    emit(OpcodeKind::Eq, "pinned?", {D(pin), S(true_)}, {t});
+    branch(S(t), next);
+    place(kept);
+    unlinkFromRank(v, core_.dims().clone);
+    unlinkFromRank(rec, dims_.epistemic);
+    place(next);
+    mov(S(v), S(nextV));
+    jump(walk);
+    place(done);
+    callLabel(rtSettle_);
+    callClearField(prof, std::string(kProfileDedup));
+    callClearField(prof, std::string(kProfileStreams));
+    setField(prof, kProfileRetired, S(true_));
+    const CellRef keep = newLabel();
+    emit(OpcodeKind::Lt, "higher?", {D(profInc), D(inc)}, {lower});
+    requireTrue(lower, keep);
+    mov(D(profInc), D(inc));
+    place(keep);
+    endObservation(kTurnResultCommitted);
+  }
+  place(stale);
+  endObservation(kTurnResultStaleIncarnation);
+  place(malformed);
+  endObservation(kTurnResultIngestionFault);
+}
+
 /// `observeEntry` (P19 I3-1b): record the checked observation in
 /// `$turn.observation` under its source's support and settle. Every exit
 /// leaves a code in `$turn_result` and halts, so the adapter can undo a
@@ -4555,7 +4767,20 @@ void Gen::emitObserve(CellRef entryLabel) {
     branchIfZero(prof, absent);
     emit(OpcodeKind::Eq, "who?", {D(prof), D(who)}, {same});
     branch(S(same), found);
-    emit(OpcodeKind::Add, "n+", {S(count), S(one_)}, {count});
+    {
+      // A tombstone keeps its replay floor but no share of the budget.
+      const CellRef retired = reg(), live = newLabel(), next = newLabel();
+      mov(S(a0_), S(prof));
+      movC(a1_, cStr(std::string(kProfileRetired)));
+      callLabel(rtFind_);
+      mov(S(retired), S(r0_));
+      branchIfZero(retired, live);
+      emit(OpcodeKind::Eq, "tomb?", {D(retired), S(true_)}, {same});
+      branch(S(same), next);
+      place(live);
+      emit(OpcodeKind::Add, "n+", {S(count), S(one_)}, {count});
+      place(next);
+    }
     mov(S(prof), S(rd(D(prof), dims_.trust)));
     jump(loop);
     place(absent);
@@ -4595,13 +4820,27 @@ void Gen::emitObserve(CellRef entryLabel) {
     callLabel(rtFind_);
     mov(S(out), S(r0_));
   };
-  // 2. Until incarnations land (I3-1c) a profile keeps its first one.
+  // 2. The observation carries exactly the profile's incarnation. Ingress
+  //    already requires the binding's, and an advance turn runs before any
+  //    observation under a new binding, so this is defensive: only binding
+  //    advances an incarnation, and a tombstone takes no observation.
   {
-    const CellRef profInc = reg(), same = reg(), ok = newLabel();
+    const CellRef profInc = reg(), retired = reg(), same = reg(),
+                  live = newLabel(), notLower = newLabel(), ok = newLabel();
+    profileField(kProfileRetired, retired);
+    branchIfZero(retired, live);
+    emit(OpcodeKind::Eq, "tomb?", {D(retired), S(true_)}, {same});
+    requireTrue(same, live);
+    endObservation(kTurnResultStaleIncarnation);
+    place(live);
     profileField(kProfileIncarnation, profInc);
     emit(OpcodeKind::Eq, "inc?", {D(profInc), D(inc)}, {same});
     branch(S(same), ok);
-    endObservation(kTurnResultUnsupportedIncarnation);
+    emit(OpcodeKind::Lt, "lower?", {D(inc), D(profInc)}, {same});
+    requireTrue(same, notLower);
+    endObservation(kTurnResultStaleIncarnation);
+    place(notLower);
+    endObservation(kTurnResultUnboundIncarnation);
     place(ok);
   }
   // 3. Exact retries commit nothing; a reused ID with other bytes refuses.
@@ -6686,6 +6925,8 @@ CompiledAgent Gen::run() {
     emitObserve(*out.observeEntry);
     out.observeRefusalEntry = newLabel();
     emitObserveRefusal(*out.observeRefusalEntry);
+    out.sourceChangeEntry = newLabel();
+    emitSourceChange(*out.sourceChangeEntry);
   }
   for (const auto &member : agent_->members) {
     if (const auto *field = std::get_if<VarDecl>(&member))

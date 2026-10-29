@@ -174,6 +174,10 @@ protected:
     const auto cell = value(profile, name);
     return cell ? ctx().arena.asInt64(*cell).value_or(-1) : -1;
   }
+  std::optional<bool> flag(CellRef record, std::string_view name) {
+    const auto cell = value(record, name);
+    return cell ? ctx().arena.asBool(*cell) : std::nullopt;
+  }
   std::uint64_t refused(std::string_view code) {
     return host->executor().stat(pid, std::string(kStatRefusedPrefix) +
                                           std::string(code));
@@ -346,12 +350,150 @@ TEST_F(VagentEpistemicIngress, APrincipalBeyondTheBudgetIsRefused) {
   EXPECT_EQ(supports(clauses().front()).size(), 1U);
 }
 
-TEST_F(VagentEpistemicIngress, AnIncarnationChangeWaitsForIncarnationSupport) {
+TEST_F(VagentEpistemicIngress,
+       AnObservationCarriesExactlyItsBindingsIncarnation) {
   observe(reading(kP1, "e1", 1, 1.0));
-  auto rebooted        = reading(kP1, "r1", 1, 1.0);
+  auto rebooted        = reading(kP1, "r1", 2, 1.0);
   rebooted.incarnation = 2;
-  EXPECT_EQ(refusedAtIngress(rebooted),
-            EpistemicRefusal::UnsupportedIncarnation);
+  EXPECT_EQ(refusedAtIngress(rebooted), EpistemicRefusal::UnboundIncarnation);
+  EXPECT_EQ(outcomeOf(rebooted)->outcomeClass, OutcomeClass::NeedsHostAction);
+  auto older        = reading(kP1, "o1", 2, 1.0);
+  older.incarnation = 0;
+  EXPECT_EQ(refusedAtIngress(older), EpistemicRefusal::StaleIncarnation);
+  EXPECT_EQ(outcomeOf(older)->outcomeClass, OutcomeClass::Terminal);
+}
+
+TEST_F(VagentEpistemicIngress, AHigherIncarnationRetiresEveryKeyAndRestarts) {
+  observe(reading(kP1, "e1", 1, 1.0));
+  auto other  = reading(kP1, "e2", 2, 5.0);
+  other.tuple = {WireValue::text("other"), WireValue::real(5.0)};
+  observe(other);
+  auto direct  = reading(kP1, "e3", 3, 1.0);
+  direct.frame = "ecef";
+  EXPECT_TRUE(refusedAtIngress(direct));
+  const auto prof = profiles().front();
+  // Queued under the old boot, then superseded before its turn.
+  const auto queued = reading(kP1, "e4", 4, 2.0);
+  ASSERT_TRUE(host->executor().observe(pid, queued));
+  ASSERT_TRUE(host->executor().bindSource(pid, grant(kP1, "sensor:gps", 2)));
+  // The new boot restarts its sequence and may reuse an event ID; queued
+  // before the pump, it still runs after the advance.
+  auto restarted        = reading(kP1, "e1", 1, 3.0);
+  restarted.incarnation = 2;
+  ASSERT_TRUE(host->executor().observe(pid, restarted));
+  host->pump();
+  EXPECT_EQ(outcomeOf(queued)->code, "StaleIncarnation");
+  EXPECT_EQ(outcomeOf(restarted)->kind, IngestOutcome::Kind::Committed);
+  EXPECT_EQ(counter(prof, kProfileIncarnation), 2);
+  // The latch outlives the restart.
+  EXPECT_EQ(counter(prof, kProfileContentRefusals), 1);
+  std::size_t current = 0, retired = 0;
+  for (const auto clause : clauses())
+    for (const auto support : supports(clause))
+      for (const auto record : history(support)) {
+        const auto status = text(record, kObsStatus);
+        if (status == kObsStatusCurrent) {
+          ++current;
+          EXPECT_EQ(counter(record, kObsIncarnation), 2);
+        } else {
+          ++retired;
+        }
+      }
+  EXPECT_EQ(current, 1U);
+  EXPECT_EQ(retired, 2U);
+  auto stale = reading(kP1, "e5", 5, 1.0);
+  EXPECT_EQ(refusedAtIngress(stale), EpistemicRefusal::StaleIncarnation);
+}
+
+TEST_F(VagentEpistemicIngress, ABindingCannotLowerTheIncarnationFloor) {
+  const auto lower =
+      host->executor().bindSource(pid, grant(kP1, "sensor:gps", 0));
+  ASSERT_FALSE(lower);
+  EXPECT_EQ(lower.error(), EpistemicRefusal::StaleIncarnation);
+  ASSERT_TRUE(host->executor().bindSource(pid, grant(kP1, "sensor:gps", 3)));
+  auto third        = reading(kP1, "e1", 1, 1.0);
+  third.incarnation = 3;
+  observe(third);
+  // Unbinding clears the host's view, but the arena keeps the floor.
+  host->executor().unbindSource(pid, kP1, "at");
+  ASSERT_TRUE(host->executor().bindSource(pid, grant(kP1, "sensor:gps", 2)));
+  host->pump();
+  const auto revoked = host->executor().ingestOutcome(pid, kP1, 2, "");
+  ASSERT_TRUE(revoked);
+  EXPECT_EQ(revoked->code, "StaleIncarnation");
+  auto replay        = reading(kP1, "e2", 2, 1.0);
+  replay.incarnation = 2;
+  EXPECT_EQ(refusedAtIngress(replay), EpistemicRefusal::UnknownSource);
+}
+
+TEST_F(VagentEpistemicIngress, RetiringASourceDropsItsSupportsAndKeepsAFloor) {
+  observe(reading(kP1, "e1", 1, 1.0));
+  auto other  = reading(kP1, "e2", 2, 5.0);
+  other.tuple = {WireValue::text("other"), WireValue::real(5.0)};
+  observe(other);
+  observe(reading(kP2, "o1", 1, 1.0));
+  const auto before = *host->executor().epistemicCells(pid);
+  ASSERT_TRUE(host->executor().retireSource(pid, kP1));
+  host->pump();
+  // "self" keeps kP2's support; "other" had only kP1's.
+  EXPECT_EQ(clauses().size(), 1U);
+  EXPECT_EQ(intField("drops"), 1);
+  ASSERT_EQ(clauses().size(), 1U);
+  ASSERT_EQ(supports(clauses().front()).size(), 1U);
+  EXPECT_EQ(arena().textOf(supports(clauses().front()).front()), kP2);
+  EXPECT_LT(*host->executor().epistemicCells(pid), before);
+  const auto tomb = profiles().front();
+  EXPECT_EQ(arena().textOf(tomb), kP1);
+  EXPECT_EQ(flag(tomb, kProfileRetired), true);
+  EXPECT_EQ(counter(tomb, kProfileIncarnation), 1);
+  EXPECT_FALSE(value(tomb, kProfileDedup));
+  EXPECT_FALSE(arena().linked(tomb, ctx().core.dims().clone));
+  EXPECT_EQ(refusedAtIngress(reading(kP1, "e3", 3, 1.0)),
+            EpistemicRefusal::UnknownSource);
+  // Rebinding the retired boot is refused by the arena's floor.
+  ASSERT_TRUE(host->executor().bindSource(pid, grant(kP1, "sensor:gps", 1)));
+  host->pump();
+  EXPECT_EQ(refusedAtIngress(reading(kP1, "e3", 3, 1.0)),
+            EpistemicRefusal::UnknownSource);
+  // A strictly higher one revives the profile, but an old event is too old.
+  ASSERT_TRUE(host->executor().bindSource(pid, grant(kP1, "sensor:gps", 2)));
+  auto revived        = reading(kP1, "n1", 1, 1.0);
+  revived.incarnation = 2;
+  observe(revived);
+  EXPECT_EQ(outcomeOf(revived)->kind, IngestOutcome::Kind::Committed);
+  EXPECT_EQ(flag(tomb, kProfileRetired), false);
+  auto old        = reading(kP1, "n2", 2, 1.0);
+  old.incarnation = 2;
+  old.acquiredAt  = base - 60.0;
+  EXPECT_EQ(refusedAtIngress(old), EpistemicRefusal::StaleObservation);
+}
+
+TEST_F(VagentEpistemicIngress, ATombstoneTakesNoShareOfThePrincipalBudget) {
+  AgentSettings settings;
+  settings.epistemic.maxSources = 1;
+  start(settings);
+  observe(reading(kP1, "e1", 1, 1.0));
+  ASSERT_TRUE(host->executor().retireSource(pid, kP1));
+  host->pump();
+  observe(reading(kP2, "o1", 1, 2.0));
+  EXPECT_EQ(refused(kTurnResultEpistemicBudget), 0U);
+  EXPECT_EQ(profiles().size(), 2U);
+  EXPECT_EQ(clauses().size(), 1U);
+}
+
+TEST_F(VagentEpistemicIngress, RetiringAnUnseenPrincipalLeavesABareTombstone) {
+  ASSERT_TRUE(host->executor().bindSource(pid, grant(kP1, "sensor:gps", 4)));
+  ASSERT_TRUE(host->executor().retireSource(pid, kP1));
+  host->pump();
+  ASSERT_EQ(profiles().size(), 1U);
+  EXPECT_EQ(counter(profiles().front(), kProfileIncarnation), 4);
+  ASSERT_TRUE(host->executor().bindSource(pid, grant(kP1, "sensor:gps", 4)));
+  host->pump();
+  EXPECT_EQ(host->executor().ingestOutcome(pid, kP1, 4, "")->code,
+            "StaleIncarnation");
+  const auto bad = host->executor().retireSource(pid, "nothex");
+  ASSERT_FALSE(bad);
+  EXPECT_EQ(bad.error(), EpistemicRefusal::InvalidPrincipal);
 }
 
 TEST_F(VagentEpistemicIngress, TheDedupWindowKeepsOnlyTheNewestEntries) {

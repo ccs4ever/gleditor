@@ -580,6 +580,9 @@ inline constexpr std::string_view kProfileStreams = "streams";
 inline constexpr std::string_view kProfileDedup       = "dedup";
 inline constexpr std::string_view kProfileLastReceive = "last_receive";
 inline constexpr std::string_view kProfileLastContact = "last_contact";
+/// True on a retired principal's tombstone: the profile cell kept with its
+/// highest incarnation and latches, so the replay floor survives retirement.
+inline constexpr std::string_view kProfileRetired = "retired";
 /// The code of the newest refusal charged to the profile.
 inline constexpr std::string_view kProfileLastRefusal = "last_refusal";
 // The adapter passes the refusals charged to one principal since its last
@@ -591,6 +594,11 @@ inline constexpr std::string_view kRefusalContent = "content";
 inline constexpr std::string_view kRefusalOther   = "other";
 inline constexpr std::string_view kRefusalCode    = "code";
 inline constexpr std::string_view kRefusalContact = "contact";
+// The adapter passes a binding's incarnation advance, or an operator's
+// retirement, to `sourceChangeEntry` as `$turn.source_change`: the source
+// token, the incarnation, and whether it retires the principal.
+inline constexpr std::string_view kTurnSourceChange = "source_change";
+inline constexpr std::string_view kSourceRetire     = "retire";
 /// A bookkeeping turn for a principal with no profile: nothing to charge.
 inline constexpr std::string_view kTurnResultNoProfile = "NoProfile";
 // Typed ingestion outcomes besides `Committed`.
@@ -600,8 +608,12 @@ inline constexpr std::string_view kTurnResultConflictingEvent =
 inline constexpr std::string_view kTurnResultStaleSequence = "StaleSequence";
 inline constexpr std::string_view kTurnResultEpistemicBudget =
     "EpistemicBudget";
-inline constexpr std::string_view kTurnResultUnsupportedIncarnation =
-    "UnsupportedIncarnation";
+/// Below the profile's incarnation, or not above a tombstone's.
+inline constexpr std::string_view kTurnResultStaleIncarnation =
+    "StaleIncarnation";
+/// Above the profile's: only binding advances an incarnation.
+inline constexpr std::string_view kTurnResultUnboundIncarnation =
+    "UnboundIncarnation";
 inline constexpr std::string_view kTurnResultObservationTimeMismatch =
     "ObservationTimeMismatch";
 inline constexpr std::string_view kTurnResultEpistemicKeyLimit =
@@ -782,6 +794,9 @@ struct CompiledAgent {
   /// Charges the refusals in `$turn.refusal` to their principal's profile
   /// (P19 I3-1b); present exactly when `observeEntry` is.
   std::optional<zigzag::CellRef> observeRefusalEntry{};
+  /// Advances or retires a principal per `$turn.source_change` (P19 I3-1c);
+  /// present exactly when `observeEntry` is.
+  std::optional<zigzag::CellRef> sourceChangeEntry{};
   std::map<std::string, zigzag::CellRef, std::less<>> fieldDefaults;
   std::map<std::string, CompiledContainer, std::less<>> skills;
   std::map<std::string, CompiledContainer, std::less<>> behaviors;

@@ -540,6 +540,13 @@ struct IngestKey {
   double receivedSteady{};
 };
 
+/// An incarnation advance or a retirement for one principal (P19 I3-1c).
+struct SourceChange {
+  std::string principal;
+  std::uint64_t incarnation{};
+  bool retire{false};
+};
+
 struct AgentExecutor::PostBox {
   struct Item {
     identity::ActorPid pid;
@@ -551,6 +558,8 @@ struct AgentExecutor::PostBox {
     std::optional<IngestKey> ingest;
     /// A principal with refusals waiting to be charged to its profile.
     std::optional<std::string> refusalsOf;
+    /// Runs before anything queued for the agent.
+    std::optional<SourceChange> sourceChange;
     std::int64_t effect{};
     EffectResult result;
   };
@@ -686,6 +695,7 @@ struct AgentExecutor::HostEvent {
   std::string type;
   WireRecord fields;
   std::optional<IngestKey> ingest;
+  std::optional<SourceChange> sourceChange;
   /// A routine other than the dispatcher, run with `turnFields` as extra
   /// `$turn` fields and no event (an ingestion turn).
   std::optional<CellRef> entry;
@@ -1613,6 +1623,31 @@ AgentExecutor::TurnOutcome AgentExecutor::deliverHost(State &state,
           ingress_->charge(pid, event.ingest->principal, logged.code,
                            event.ingest->relayed, event.ingest->receivedSteady))
         postRefusals(state.pid, event.ingest->principal);
+    }
+    if (event.sourceChange && !event.sourceChange->retire &&
+        outcome.result == kTurnResultStaleIncarnation) {
+      // The arena holds the floor: a binding below it never authorizes.
+      const auto &change = *event.sourceChange;
+      const std::lock_guard lock(ingress_->mutex);
+      const auto pid = pidKey(state.pid);
+      for (auto it = ingress_->bindings.begin();
+           it != ingress_->bindings.end();) {
+        if (std::get<0>(it->first) == pid &&
+            std::get<1>(it->first) == change.principal &&
+            it->second.incarnation == change.incarnation) {
+          ingress_->aliases.erase({pid, it->second.alias});
+          it = ingress_->bindings.erase(it);
+        } else {
+          ++it;
+        }
+      }
+      ingress_->log(
+          pid, settings_.epistemic.outcomeLog,
+          {change.principal,
+           change.incarnation,
+           {},
+           {IngestOutcome::Kind::Refused,
+            std::string(kTurnResultStaleIncarnation), OutcomeClass::Terminal}});
     }
     return outcome;
   }
@@ -2986,12 +3021,64 @@ AgentExecutor::bindSource(const identity::ActorPid &target,
   if (const auto routed = ingress_->aliases.find({pid, grant.alias});
       routed != ingress_->aliases.end() && routed->second != grant.principal)
     return std::unexpected(EpistemicRefusal::AliasInUse);
+  // Incarnations per principal are strictly increasing across its
+  // bindings; the arena's floor (profile or tombstone) is checked by the
+  // advance turn, which revokes a binding that would lower it.
+  std::optional<std::uint64_t> bound;
+  for (const auto &[k, b] : ingress_->bindings)
+    if (std::get<0>(k) == pid && std::get<1>(k) == grant.principal)
+      bound = std::max(bound.value_or(0), b.incarnation);
+  if (bound && grant.incarnation < *bound)
+    return std::unexpected(EpistemicRefusal::StaleIncarnation);
+  const bool advance = !bound || grant.incarnation > *bound;
   const std::tuple key{pid, grant.principal, grant.predicate};
   if (const auto held = ingress_->bindings.find(key);
-      held != ingress_->bindings.end() && held->second.alias != grant.alias)
+      !advance && held != ingress_->bindings.end() &&
+      held->second.alias != grant.alias)
     return std::unexpected(EpistemicRefusal::DuplicateAlias);
+  if (advance) {
+    // A new boot supersedes every lower binding of the principal at once.
+    for (auto it = ingress_->bindings.begin();
+         it != ingress_->bindings.end();) {
+      if (std::get<0>(it->first) == pid &&
+          std::get<1>(it->first) == grant.principal) {
+        ingress_->aliases.erase({pid, it->second.alias});
+        it = ingress_->bindings.erase(it);
+      } else {
+        ++it;
+      }
+    }
+    PostBox::Item item;
+    item.pid          = target;
+    item.sourceChange = SourceChange{grant.principal, grant.incarnation, false};
+    posts_->putBack({std::move(item)});
+  }
   ingress_->bindings.insert_or_assign(key, std::move(binding));
   ingress_->aliases.insert_or_assign({pid, grant.alias}, grant.principal);
+  return this;
+}
+
+std::expected<AgentExecutor *, EpistemicRefusal>
+AgentExecutor::retireSource(const identity::ActorPid &target,
+                            std::string_view principal) {
+  if (!isPrincipalToken(principal))
+    return std::unexpected(EpistemicRefusal::InvalidPrincipal);
+  const auto pid = pidKey(target);
+  const std::lock_guard lock(ingress_->mutex);
+  std::uint64_t highest = 0;
+  for (auto it = ingress_->bindings.begin(); it != ingress_->bindings.end();) {
+    if (std::get<0>(it->first) == pid && std::get<1>(it->first) == principal) {
+      highest = std::max(highest, it->second.incarnation);
+      ingress_->aliases.erase({pid, it->second.alias});
+      it = ingress_->bindings.erase(it);
+    } else {
+      ++it;
+    }
+  }
+  PostBox::Item item;
+  item.pid          = target;
+  item.sourceChange = SourceChange{std::string(principal), highest, true};
+  posts_->putBack({std::move(item)});
   return this;
 }
 
@@ -3054,8 +3141,10 @@ AgentExecutor::observe(const identity::ActorPid &target,
     return refuse(EpistemicRefusal::UnknownSource);
   const auto &b      = binding->second;
   const auto &policy = b.policy;
-  if (o.incarnation != b.incarnation)
-    return refuse(EpistemicRefusal::UnsupportedIncarnation);
+  if (o.incarnation < b.incarnation)
+    return refuse(EpistemicRefusal::StaleIncarnation);
+  if (o.incarnation > b.incarnation)
+    return refuse(EpistemicRefusal::UnboundIncarnation);
   const auto fits = [](std::uint64_t v) {
     return std::in_range<std::int64_t>(v);
   };
@@ -3171,8 +3260,10 @@ std::string_view epistemicRefusalName(EpistemicRefusal refusal) noexcept {
     return "DuplicateAlias";
   case EpistemicRefusal::UnknownSource:
     return "UnknownSource";
-  case EpistemicRefusal::UnsupportedIncarnation:
-    return "UnsupportedIncarnation";
+  case EpistemicRefusal::StaleIncarnation:
+    return "StaleIncarnation";
+  case EpistemicRefusal::UnboundIncarnation:
+    return "UnboundIncarnation";
   case EpistemicRefusal::InvalidObservation:
     return "InvalidObservation";
   case EpistemicRefusal::ClockUnsynchronised:
@@ -3232,7 +3323,25 @@ void AgentExecutor::drainPosted() {
       continue;
     }
     liftLimits(*state.context);
-    if (item.refusalsOf) {
+    if (item.sourceChange) {
+      if (!state.agent.sourceChangeEntry) continue;
+      WireRecord change;
+      change.set(std::string(kObsSource),
+                 WireValue::text(item.sourceChange->principal));
+      change.set(std::string(kObsIncarnation),
+                 WireValue::integer(static_cast<std::int64_t>(
+                     item.sourceChange->incarnation)));
+      change.set(std::string(kSourceRetire),
+                 WireValue::boolean(item.sourceChange->retire));
+      HostEvent turn;
+      turn.entry        = state.agent.sourceChangeEntry;
+      turn.sourceChange = std::move(item.sourceChange);
+      turn.turnFields.set(std::string(kTurnSourceChange),
+                          WireValue::record(std::move(change)));
+      // Ahead of the agent's pending ingestions and queries, so nothing runs
+      // between supersession and the advance.
+      state.hostEvents.insert(state.hostEvents.begin(), std::move(turn));
+    } else if (item.refusalsOf) {
       Ingress::Charge charge;
       {
         const std::lock_guard lock(ingress_->mutex);
@@ -3275,6 +3384,24 @@ void AgentExecutor::drainPosted() {
                          item.ingest->eventId,
                          {IngestOutcome::Kind::Refused, "UnknownSource",
                           OutcomeClass::Terminal}});
+          continue;
+        }
+        // Superseded while queued: a newer boot's binding replaced it.
+        if (binding->second.incarnation != item.ingest->incarnation) {
+          const auto code = std::string(epistemicRefusalName(
+              item.ingest->incarnation < binding->second.incarnation
+                  ? EpistemicRefusal::StaleIncarnation
+                  : EpistemicRefusal::UnboundIncarnation));
+          ingress_->log(
+              pid, settings_.epistemic.outcomeLog,
+              {item.ingest->principal,
+               item.ingest->incarnation,
+               item.ingest->eventId,
+               {IngestOutcome::Kind::Refused, code, outcomeClassOf(code)}});
+          if (ingress_->charge(pid, item.ingest->principal, code,
+                               item.ingest->relayed,
+                               item.ingest->receivedSteady))
+            postRefusals(item.pid, item.ingest->principal);
           continue;
         }
       }
