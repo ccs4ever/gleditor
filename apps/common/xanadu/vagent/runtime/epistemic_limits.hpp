@@ -28,8 +28,23 @@ inline constexpr std::int64_t kDefaultEpistemicDedup                 = 16;
 inline constexpr std::int64_t kDefaultEpistemicKeysPerSource         = 4;
 inline constexpr std::int64_t kDefaultEpistemicIngressQueue          = 64;
 inline constexpr std::int64_t kDefaultEpistemicIngressQueuePerSource = 8;
-inline constexpr std::int64_t kDefaultEpistemicOutcomeLog            = 256;
+inline constexpr std::int64_t kDefaultEpistemicOutcomeLog            = 64;
 inline constexpr std::int64_t kDefaultEpistemicCells                 = 32768;
+/// About 20 ms of ingestion per wake at the measured 4.3k cycles a turn, so
+/// a flooded actor cannot hold a shared pump for long.
+inline constexpr std::int64_t kDefaultEpistemicIngestPerWake = 4;
+/// Arena slots past which ingestion refuses ArenaExhausted. Slots are never
+/// reused (excision is logical), so this bounds an actor's lifetime between
+/// checkpoints: at about 250 slots an ingestion, 2^30 slots is about 50 days
+/// at 1 Hz in aggregate. Half the ref space, below the ephemeral bit.
+inline constexpr std::int64_t kDefaultEpistemicArenaSlots = std::int64_t{1}
+                                                            << 30;
+
+// Wire bounds on one checked observation, checked before anything is
+// stored: an event ID is an identifier and a name is a name, not a payload.
+inline constexpr std::size_t kMaxEventIdBytes           = 256;
+inline constexpr std::size_t kMaxObservationNameBytes   = 256;
+inline constexpr std::size_t kMaxObservationSignedBytes = 64 * 1024;
 
 enum class EpistemicLimitError : std::uint8_t {
   InvalidSources,
@@ -70,11 +85,17 @@ struct EpistemicLimits {
   std::size_t ingressQueuePerSource{
       static_cast<std::size_t>(kDefaultEpistemicIngressQueuePerSource)};
   /// `vagent.epistemic_outcome_log`: ingestion outcomes the host log keeps per
-  /// actor.
+  /// source of an actor, so no source's flood evicts another's.
   std::size_t outcomeLog{static_cast<std::size_t>(kDefaultEpistemicOutcomeLog)};
   /// `vagent.epistemic_cells`: maintained epistemic cell ceiling, kept below
   /// vagent.value_operations so a full budget still checkpoints.
   std::size_t cells{static_cast<std::size_t>(kDefaultEpistemicCells)};
+  /// `vagent.epistemic_ingest_per_wake`: ingestion turns one wake runs before
+  /// the pump moves on to other actors.
+  std::size_t ingestPerWake{
+      static_cast<std::size_t>(kDefaultEpistemicIngestPerWake)};
+  /// `vagent.epistemic_arena_slots`: the actor's arena slot allowance.
+  std::size_t arenaSlots{static_cast<std::size_t>(kDefaultEpistemicArenaSlots)};
 
   [[nodiscard]] std::expected<void, EpistemicLimitError> validate() const {
     if (maxSources == 0)
@@ -85,8 +106,9 @@ struct EpistemicLimits {
       return std::unexpected(EpistemicLimitError::InvalidScopeDepth);
     if (maxNestedScopes == 0)
       return std::unexpected(EpistemicLimitError::InvalidNestedScopes);
-    for (const auto bound : {history, dedup, keysPerSource, ingressQueue,
-                             ingressQueuePerSource, outcomeLog, cells})
+    for (const auto bound :
+         {history, dedup, keysPerSource, ingressQueue, ingressQueuePerSource,
+          outcomeLog, cells, ingestPerWake, arenaSlots})
       if (bound == 0)
         return std::unexpected(EpistemicLimitError::InvalidIngestionBound);
     if (ingressQueuePerSource > ingressQueue)

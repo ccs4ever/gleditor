@@ -83,6 +83,7 @@ TEST(VagentEpistemicNoise, InvariantsHoldForEverySeed) {
     ASSERT_TRUE(pid);
     host.pump();
     auto &executor = host.executor();
+    executor.setWallClockSynchronised(true);
     NoisySensorSim sim(seed, wallSeconds() - 5.0);
     for (const auto &s : sim.sensors())
       ASSERT_TRUE(
@@ -128,9 +129,8 @@ TEST(VagentEpistemicNoise, InvariantsHoldForEverySeed) {
         ASSERT_TRUE(outcome) << o.eventId;
         ASSERT_NE(outcome->kind, IngestOutcome::Kind::Pending) << o.eventId;
         ++seen[codeOf(*outcome)];
-        // A relayed copy shares its original's key, so the log's newest
-        // outcome for both is the copy's: `Duplicate` means the original,
-        // whose ID is fresh each report, committed in this step.
+        // A relayed copy shares its original's key, and a committed entry
+        // stays committed; the copy's own turn is counted as a duplicate.
         anyCommitted |= outcome->kind == IngestOutcome::Kind::Committed ||
                         outcome->kind == IngestOutcome::Kind::Duplicate;
       }
@@ -139,6 +139,10 @@ TEST(VagentEpistemicNoise, InvariantsHoldForEverySeed) {
       if (!anyCommitted && !rebound)
         EXPECT_EQ(after.snapshot().beliefs, before.beliefs) << "step " << step;
     }
+    // Relayed copies of committed reports were recognised as retries.
+    seen["Duplicate"] +=
+        executor.stat(*pid, std::string(kStatRefusedPrefix) +
+                                std::string(kTurnResultDuplicate));
     const EpistemicView view(executor, *pid, kPredicates);
     for (const auto &s : sim.sensors())
       if (const auto recorded = view.incarnationOf(s.principal))

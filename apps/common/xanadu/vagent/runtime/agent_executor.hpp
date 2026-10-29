@@ -204,6 +204,10 @@ struct AgentCheckpoint {
 
 class CompiledProgram;
 
+// Ingress records, private to the executor (agent_executor.cpp).
+struct IngestKey;
+struct SourceChange;
+
 class AgentExecutor {
 public:
   AgentExecutor(zigzag::vortex::mesh::MeshActorRuntime &runtime,
@@ -319,6 +323,11 @@ public:
   /// The host's time service reports whether the wall clock is synchronised;
   /// until it is, observations on a wall-basis predicate refuse retryably.
   AgentExecutor *setWallClockSynchronised(bool synchronised);
+  /// The newest advance or retire turn's outcome for @p principal: how a
+  /// host learns that the arena refused a binding it had accepted.
+  [[nodiscard]] std::optional<IngestOutcome>
+  sourceChangeOutcome(const identity::ActorPid &target,
+                      std::string_view principal) const;
   /// The newest outcome the bounded log holds for one event, if any.
   [[nodiscard]] std::optional<IngestOutcome>
   ingestOutcome(const identity::ActorPid &target, std::string_view principal,
@@ -500,6 +509,16 @@ private:
   void deriveSchedule(State &state) const;
   /// Move percepts and effect results the host posted onto their agents.
   void drainPosted();
+  /// An ingestion's end, run or not: release its queue slots, log its
+  /// outcome and charge a refusal to its source.
+  void finishIngest(State &state, const IngestKey &ingest,
+                    std::string_view code);
+  /// An advance or retire turn's end: record it, move the host's floor, and
+  /// revoke a binding the arena refused.
+  void finishSourceChange(State &state, const SourceChange &change,
+                          std::string_view code);
+  /// Discard host events that cannot run, accounting for every ingestion.
+  void dropHostEvents(State &state);
   /// Drop a stopped actor's bindings, queue counts, outcome log and charges.
   void forgetIngress(const identity::ActorPid &pid);
   /// Ask for a bookkeeping turn charging @p principal's waiting refusals.

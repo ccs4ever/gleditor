@@ -966,7 +966,7 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
                    {vagent::runtime::kDefaultEpistemicIngressQueuePerSource}}}},
         {.name    = std::string(settings::kVagentEpistemicOutcomeLog),
          .notes   = "vagent: positive count of ingestion outcomes the host log "
-                    "keeps per actor",
+                    "keeps per source of an actor",
          .schemas = {{.expectedTypes = {"integer"},
                       .defaultValues =
                           {vagent::runtime::kDefaultEpistemicOutcomeLog}}}},
@@ -977,6 +977,19 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .schemas =
              {{.expectedTypes = {"integer"},
                .defaultValues = {vagent::runtime::kDefaultEpistemicCells}}}},
+        {.name    = std::string(settings::kVagentEpistemicIngestPerWake),
+         .notes   = "vagent: positive count of ingestion turns one wake runs "
+                    "before the pump serves other actors",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues =
+                          {vagent::runtime::kDefaultEpistemicIngestPerWake}}}},
+        {.name    = std::string(settings::kVagentEpistemicArenaSlots),
+         .notes   = "vagent: arena slots past which ingestion refuses "
+                    "ArenaExhausted until a checkpoint and resume reclaims "
+                    "them",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues =
+                          {vagent::runtime::kDefaultEpistemicArenaSlots}}}},
     };
     break;
 

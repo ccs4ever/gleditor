@@ -228,16 +228,18 @@ Whether the principal has a profile to charge is decided later by `drainPosted` 
 thread, which owns the arena.
 
 Outcomes are typed `Committed`, `Duplicate` or `Refused{code, class}`, and the outcome log is keyed
-by (principal, incarnation, event ID).
+by (principal, incarnation, event ID), one log per source (section 14).
 
-- **Terminal:** `StaleSequence`, `ConflictingEvent`, `StaleIncarnation`, `UnboundIncarnation`,
-  `UnknownSource`, `StaleObservation`, `EpistemicKeyLimit` and every content refusal. The host must
-  not resend the same bytes.
-- **Retryable:** `IngressBackpressure` and `ClockUnsynchronised`, which clear by themselves, and
-  turn fuel or cycle exhaustion.
+- **Terminal:** `StaleSequence`, `ConflictingEvent`, `StaleIncarnation`, `UnknownSource`,
+  `StaleObservation`, `EpistemicKeyLimit` and every content refusal. The host must not resend the
+  same bytes.
+- **Retryable:** `IngressBackpressure`, `ClockUnsynchronised` and `Undelivered`, which clear by
+  themselves.
 - **Needs host action:** `EpistemicBudget` (cell ceiling or `max_sources`) clears only after
   `retireSource` or a configuration change; `ArenaExhausted` clears only after a checkpoint and
-  resume (section 9). The outcome names the action.
+  resume (section 9); `UnboundIncarnation` after the host binds the new incarnation; `TurnExhausted`
+  after the grant grows, because the same bytes on the same state cost the same. The outcome names
+  the action.
 - A failed turn that set no `$turn_result` (statement failure, settle depth) is `Refused` with code
   `IngestionFault`, class needs-host-action: it indicates a program or runtime defect, not data.
 
@@ -400,7 +402,9 @@ updated). Each setting gets a `defaultSettingSpecs` entry with schema notes:
 | `vagent.epistemic_keys_per_source`          | 4       | keys one principal may support per predicate  |
 | `vagent.epistemic_ingress_queue`            | 64      | queued ingestions per actor                   |
 | `vagent.epistemic_ingress_queue_per_source` | 8       | queued ingestions per principal               |
-| `vagent.epistemic_outcome_log`              | 256     | host outcome entries per actor                |
+| `vagent.epistemic_outcome_log`              | 64      | host outcome entries per source of an actor   |
+| `vagent.epistemic_ingest_per_wake`          | 4       | ingestion turns per wake before others run    |
+| `vagent.epistemic_arena_slots`              | 2^30    | slot allowance past which `ArenaExhausted`    |
 | `vagent.epistemic_cells`                    | 32768   | maintained epistemic cell ceiling             |
 
 The cell estimate comes from the field list:
@@ -413,16 +417,16 @@ The cell estimate comes from the field list:
   logical ceiling, and the cell ceiling is the binding one.
 
 **Physical slots.** Excision and retirement return logical budget only; unlinking never reclaims
-arena slots, as P19 section 2.2 states. Every ingestion therefore mints about 100 slots that are
-never reused. The bound is the actor's configured cell allowance A, which memory usually caps well
-below 2^31, since each slot costs at least 32 bytes. An actor lasts about A / (100 × R) seconds at
-an aggregate rate of R ingestions per second: 2^31 slots would give roughly 248 days at 1 Hz in
-aggregate, and an allowance of 2^24 slots under two days at 1 Hz. The `ArenaManifold` cell allowance
-is the physical counter. When it would be exceeded, ingestion refuses `ArenaExhausted`, with the
-host action stated. A checkpoint and resume (1d) copies only the reachable graph into a fresh arena,
-so it is the reclamation path. 1b's tests bound the aggregate rate they exercise, and the deployment
-note in section 5.2's sense is that the host keeps the aggregate ingestion rate at what arbitration
-needs.
+arena slots, as P19 section 2.2 states. Every ingestion therefore mints slots that are never reused:
+measured at about 250 (section 14), of which the record itself is about 80 and the program's own
+handler frames most of the rest. The bound is `vagent.epistemic_arena_slots`, A, which memory
+usually caps well below 2^31, since each slot costs at least 32 bytes. An actor lasts about A / (250
+× R) seconds at an aggregate rate of R ingestions per second: the 2^30 default gives roughly 50 days
+at 1 Hz in aggregate, and an allowance of 2^24 slots under a day. Past the allowance, ingestion
+refuses `ArenaExhausted` before running, with the host action stated. A checkpoint and resume (1d)
+copies only the reachable graph into a fresh arena, so it is the reclamation path. 1b's tests bound
+the aggregate rate they exercise, and the deployment note in section 5.2's sense is that the host
+keeps the aggregate ingestion rate at what arbitration needs.
 
 The checkpoint's `vagent.value_operations` (65536) counts every reachable cell of the agent, not
 only epistemic ones. The epistemic ceiling is therefore set well under it, and 1d adds a test that a
@@ -639,4 +643,64 @@ hardware in round 5, each with no BLOCKING or MAJOR finding. Reports are in
   Mapping resolution stays on I3-3's list.
 - **Boot counters (hardware 5):** they must be persisted by the device or issued by its host
   identity layer. A RAM-only counter repeats after a power loss, and the device then refuses
-  `StaleIncarnation` until the operator retires it.
+  `StaleIncarnation`. Retirement does not reset it: the tombstone keeps the floor, so the host must
+  issue the device an incarnation above it (section 14).
+
+## 14. Amendments from the implementation review (1b, 1c)
+
+The four personas reviewed the implementation at `4ad3f53a` ([reports](i3-1bc-review/)); every
+persona failed it with MAJOR findings and none BLOCKING. The fixes change the design where it was
+silent or wrong:
+
+- **Outcome log.** One bounded log per (actor, principal), one entry per event updated in place, so
+  no source's flood evicts another's outcomes and an accepted event costs one entry. A `Committed`
+  or `Duplicate` entry is never overwritten: a later resend, relay or refusal of the same key is a
+  retry of an event the store holds, and is not charged to the source.
+- **Unauthenticated input.** A malformed principal or relay, an event ID over 256 bytes, a name over
+  256 bytes or signed fields over 64 KiB refuse `InvalidObservation`, and an unbound source
+  `UnknownSource`, without being logged: the return value is the answer, and the log keeps only what
+  a binding authorized. An incarnation that does not fit Int64 refuses `InvalidIncarnation`.
+- **Queue.** Slots are held until the ingestion's turn completes, not until it is drained. Each
+  principal, and each relay, may hold a fair share of the actor queue: the per-source bound, shrunk
+  to the queue divided among the bound sources. A wake runs at most
+  `vagent.epistemic_ingest_per_wake` ingestions, so a flooded actor yields the pump. An ingestion
+  that can never run (its actor stopped or could not be woken) is logged `Undelivered`.
+- **Wall clock.** The synchronised flag starts unknown: wall-basis observations refuse
+  `ClockUnsynchronised` until the host's time service reports. A host that steps its clock clears
+  the flag around the step, or every source is charged the time refusals the step causes.
+- **Incarnation floor.** The host keeps the floor each advance and retire reports, so `bindSource`
+  refuses `StaleIncarnation` synchronously below a live profile's incarnation or at or below a
+  tombstone's. The advance turn remains the authority (a resumed actor's arena may know more) and
+  `sourceChangeOutcome` reports its result. Every bind queues the source-change turn; at the
+  profile's incarnation it changes nothing, so rebinding retries an advance that failed. A revived
+  tombstone takes a share of `max_sources` again. Retiring a principal that nothing names leaves
+  nothing.
+- **Keys and clocks.** A key counts against `keys_per_source` only while it holds a current record,
+  so a predecessor's retired supports do not silence its successor. A keyless arbitrated predicate
+  is one quantity per source: its new reading supersedes the last. Streams record the last sequence,
+  clock epoch and mapping version, and a regression of either refuses `ObservationTimeMismatch`;
+  only a higher epoch resets the per-key acquisition order.
+- **Record identity.** Each record carries observation version 1, its domain (predicate name and
+  arity with the policy hash), model, model and calibration epochs 0, feature schema 0 with an empty
+  feature list, the executor's steady-clock instance and the source's health at ingest.
+- **Failed turns.** A turn that set no code and ran out of cycles or fuel is `TurnExhausted`, needs
+  host action; any other is `IngestionFault`.
+- **Open for I4.** A support whose records are all retired is still a belief (plain queries and
+  handlers see it); I4 decides whether a support exists only while it has a current record. Counters
+  are lifetime-cumulative across incarnations and revivals; I3-2 decides whether health needs them
+  per incarnation or windowed. A source refused from its first event has no profile to charge; I3-2
+  says how health treats one.
+
+**Fuzz evidence.** The fuzzer program gained a keyless predicate. The seed corpus reaches 13 logged
+outcome codes; `ConflictingEvent`, `EpistemicKeyLimit`, `Duplicate` (now visible as a duplicate
+turn, the entry staying `Committed`) and the unlogged refusals are pinned by unit tests instead.
+Four regression inputs from fuzzing are in the corpus: the non-finite reading and three harness
+corrections for the sticky, per-source log.
+
+**Cost.** The routine read every field by a search and copied the observation, a recursive copy with
+a frame per cell. It now adopts the observation the executor wrote as the record and reads it in one
+walk in a fixed field order (`kObservationOrder`), each name checked, and writes scalars in place. A
+committed ingestion went from 12,096 to 4,362 VM cycles (12.1 ms to 4.6 ms at -O3 on the lead's
+machine) and from about 670 to about 250 arena slots. The remaining slots are mostly the record and
+the program's handler frames, which every vagent activation allocates and never reclaims, a
+compiler-wide cost outside this slice.

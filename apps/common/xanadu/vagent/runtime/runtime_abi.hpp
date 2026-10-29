@@ -564,8 +564,69 @@ inline constexpr std::string_view kObsAcquiredAt     = "acquired_at";
 inline constexpr std::string_view kObsAcquiredUncertainty =
     "acquired_uncertainty";
 inline constexpr std::string_view kObsClockEpoch = "clock_epoch";
+inline constexpr std::string_view kObsClockBasis = "clock_basis";
+inline constexpr std::string_view kObsClockMappingVersion =
+    "clock_mapping_version";
+inline constexpr std::string_view kObsFrame    = "frame";
+inline constexpr std::string_view kObsUnits    = "units";
+inline constexpr std::string_view kObsVariance = "variance";
+// What produced a record, stamped at ingress so a stored reading stays
+// usable for calibration across model, schema and policy versions.
+inline constexpr std::string_view kObsVersion     = "observation_version";
+inline constexpr std::int64_t kObservationVersion = 1;
+/// The predicate signature with its policy hash.
+inline constexpr std::string_view kObsDomain           = "domain";
+inline constexpr std::string_view kObsModel            = "model";
+inline constexpr std::string_view kObsModelEpoch       = "model_epoch";
+inline constexpr std::string_view kObsCalibrationEpoch = "calibration_epoch";
+inline constexpr std::string_view kObsFeatureSchema    = "feature_schema";
+inline constexpr std::string_view kObsFeatures         = "features";
+/// Names the executor's steady clock, whose readings mean nothing to another.
+inline constexpr std::string_view kObsClockInstance = "clock_instance";
+/// The source's health when the record was ingested.
+inline constexpr std::string_view kObsHealth        = "health";
+inline constexpr std::string_view kObsHealthNominal = "NOMINAL";
+inline constexpr std::string_view kObsHealthFaulted = "FAULTED";
 /// The record's own clone occurrence of its source's profile.
 inline constexpr std::string_view kObsProfile = "profile";
+/// The order the executor writes an observation's required fields in, and
+/// the routine reads them in: one walk of the record, each name checked,
+/// instead of a field search per read, which was most of an ingestion's
+/// cost. The fields ingestion decides come first, written by the executor
+/// with their initial values (a refused turn undoes the whole record), so
+/// status and pinned sit at fixed positions for every later walk. Optional
+/// fields (variance, relay) and the identity stamps follow, unordered.
+inline constexpr std::array<std::string_view, 23> kObservationOrder{
+    kObsStatus,
+    kObsVerdict,
+    kObsVerdictEpoch,
+    kObsVerdictRevisions,
+    kObsPinned,
+    kObsProfile,
+    kObsHealth,
+    kObsPredicate,
+    kObsSource,
+    kObsTuple,
+    kObsIncarnation,
+    kObsEventId,
+    kObsDigest,
+    kObsSequence,
+    kObsAcquiredAt,
+    kObsAcquiredUncertainty,
+    kObsClockBasis,
+    kObsClockEpoch,
+    kObsClockMappingVersion,
+    kObsFrame,
+    kObsUnits,
+    kObsReceivedSteady,
+    kObsReceivedWall};
+/// A field's position after the record marker, for walks that read only a
+/// few fields of a stored record.
+consteval std::size_t observationPosition(std::string_view name) {
+  for (std::size_t i = 0; i < kObservationOrder.size(); ++i)
+    if (kObservationOrder[i] == name) return i;
+  throw "not an ordered observation field";
+}
 // A source profile on `$agent +d.trust`: a record whose content is the
 // principal's token.
 inline constexpr std::string_view kProfileIncarnation     = "incarnation";
@@ -621,6 +682,14 @@ inline constexpr std::string_view kTurnResultEpistemicKeyLimit =
 /// A failed ingestion turn that set no code (a malformed input record, a
 /// statement failure): a program or runtime defect, never a data refusal.
 inline constexpr std::string_view kTurnResultIngestionFault = "IngestionFault";
+/// The turn ran out of its instruction budget. The same bytes on the same
+/// state cost the same, so resending cannot help: the grant must grow.
+inline constexpr std::string_view kTurnResultTurnExhausted = "TurnExhausted";
+/// The arena reached the actor's slot allowance; slots come back only
+/// through a checkpoint and resume, which copies the reachable graph.
+inline constexpr std::string_view kTurnResultArenaExhausted = "ArenaExhausted";
+/// Queued but never run: the actor could not be woken. Resend.
+inline constexpr std::string_view kTurnResultUndelivered = "Undelivered";
 inline constexpr std::string_view kTurnResultInvalidObservation =
     "InvalidObservation";
 

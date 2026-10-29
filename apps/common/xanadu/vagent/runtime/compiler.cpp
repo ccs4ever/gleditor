@@ -973,6 +973,7 @@ private:
   void callSetField(CellRef owner, const std::string &name,
                     std::optional<CellRef> existing, CellRef &vc);
   void callClearField(CellRef owner, const std::string &name);
+  void putScalar(CellRef owner, std::string_view fname, Opd value);
   void callListPush(CellRef list, CellRef elem);
   CellRef callOutbox(std::string_view kind);
   void callCopy(CellRef src, CellRef dst);
@@ -1426,6 +1427,25 @@ void Gen::callSetField(CellRef owner, const std::string &fname,
   callLabel(routineLabel(rtSetField_, &Gen::emitRtSetField));
   vc = reg();
   mov(S(vc), S(r0_));
+}
+
+/// Write a scalar field in place. `callSetField` on a field that exists mints
+/// a value cell and orphans the old one, a slot per write that excision
+/// never returns; a counter or timestamp written every ingestion would leak.
+void Gen::putScalar(CellRef owner, std::string_view fname, Opd value) {
+  const CellRef vc = reg(), absent = newLabel(), done = newLabel();
+  mov(S(a0_), S(owner));
+  movC(a1_, cStr(std::string(fname)));
+  callLabel(rtFind_);
+  mov(S(vc), S(r0_));
+  branchIfZero(vc, absent);
+  mov(D(vc), value);
+  jump(done);
+  place(absent);
+  CellRef fresh;
+  callSetField(owner, std::string(fname), std::nullopt, fresh);
+  mov(D(fresh), value);
+  place(done);
 }
 
 void Gen::callClearField(CellRef owner, const std::string &fname) {
@@ -4458,13 +4478,23 @@ void Gen::emitObserveRefusal(CellRef entryLabel) {
   };
   charge(kProfileContentRefusals, content);
   charge(kProfileRefusedCount, other);
-  CellRef vc;
-  callSetField(prof, std::string(kProfileLastRefusal), std::nullopt, vc);
-  mov(D(vc), D(code));
+  putScalar(prof, kProfileLastRefusal, D(code));
   const CellRef unseen = newLabel();
   branchIfZero(contact, unseen);
-  callSetField(prof, std::string(kProfileLastContact), std::nullopt, vc);
-  mov(D(vc), D(contact));
+  {
+    // Charges coalesce, so a refusal received before a later commit can be
+    // charged after it: contact only ever moves forward.
+    const CellRef last = reg(), older = reg(), fresh = newLabel();
+    mov(S(a0_), S(prof));
+    movC(a1_, cStr(std::string(kProfileLastContact)));
+    callLabel(rtFind_);
+    mov(S(last), S(r0_));
+    branchIfZero(last, fresh);
+    emit(OpcodeKind::Lte, "older?", {D(contact), D(last)}, {older});
+    branch(S(older), unseen);
+    place(fresh);
+    putScalar(prof, kProfileLastContact, D(contact));
+  }
   place(unseen);
   endObservation(kTurnResultCommitted);
   place(malformed);
@@ -4492,7 +4522,7 @@ void Gen::emitSourceChange(CellRef entryLabel) {
   place(entryLabel);
   const FieldInfo &turn = fields_.at(std::string(kFieldTurn));
   const CellRef tp = reg(), change = reg(), who = reg(), inc = reg(),
-                retire = reg(), t = reg();
+                retire = reg(), t = reg(), maxSources = reg();
   const CellRef malformed = newLabel();
   mov(S(tp), S(rd(S(turn.nameCell), core_.dims().values)));
   const auto find = [&](CellRef record, std::string_view name, CellRef out) {
@@ -4504,11 +4534,13 @@ void Gen::emitSourceChange(CellRef entryLabel) {
   find(tp, kTurnSourceChange, change);
   branchIfZero(change, malformed);
   for (const auto &[name, out] :
-       {std::pair{kObsSource, who}, std::pair{kObsIncarnation, inc},
-        std::pair{kSourceRetire, retire}}) {
+       {std::pair{kObsSource, who}, std::pair{kSourceRetire, retire},
+        std::pair{kIngestMaxSources, maxSources}}) {
     find(change, name, out);
     branchIfZero(out, malformed);
   }
+  // Absent only for the retirement of a principal no binding names.
+  find(change, kObsIncarnation, inc);
   // A fresh streams record and dedup list, for a new or revived profile.
   const auto freshWindows = [&](CellRef prof) {
     const CellRef streams = reg(), seen = reg();
@@ -4522,9 +4554,7 @@ void Gen::emitSourceChange(CellRef entryLabel) {
     callSetField(prof, std::string(kProfileDedup), seen, vc);
   };
   const auto setField = [&](CellRef record, std::string_view name, Opd v) {
-    CellRef vc;
-    callSetField(record, std::string(name), std::nullopt, vc);
-    mov(D(vc), v);
+    putScalar(record, name, v);
   };
   // The negward head of @p from's run on @p dim.
   const auto head = [&](CellRef from, DimRef dim, CellRef out) {
@@ -4560,6 +4590,7 @@ void Gen::emitSourceChange(CellRef entryLabel) {
     const CellRef skip = newLabel();
     emit(OpcodeKind::Eq, "retire?", {D(retire), S(true_)}, {t});
     requireTrue(t, skip);
+    branchIfZero(inc, skip);
     alloc(prof);
     mov(D(prof), D(who));
     markRecord(prof);
@@ -4584,6 +4615,7 @@ void Gen::emitSourceChange(CellRef entryLabel) {
   const CellRef doRetire = newLabel(), stale = newLabel();
   emit(OpcodeKind::Eq, "retire?", {D(retire), S(true_)}, {t});
   branch(S(t), doRetire);
+  branchIfZero(inc, malformed);
   {
     // Advance, or revive a tombstone, only to a strictly higher incarnation;
     // a live profile already there needs nothing.
@@ -4596,6 +4628,30 @@ void Gen::emitSourceChange(CellRef entryLabel) {
     endObservation(kTurnResultCommitted);
     place(revive);
     requireTrue(lower, stale);
+    {
+      // A revived principal takes a share of the budget again.
+      const CellRef p = reg(), n = reg(), v = reg(), full = reg(),
+                    walk = newLabel(), live = newLabel(), next = newLabel(),
+                    counted = newLabel(), room = newLabel();
+      movC(n, zero_);
+      mov(S(p), S(rd(S(agentCell_), dims_.trust)));
+      place(walk);
+      branchIfZero(p, counted);
+      find(p, kProfileRetired, v);
+      branchIfZero(v, live);
+      emit(OpcodeKind::Eq, "tomb?", {D(v), S(true_)}, {t});
+      branch(S(t), next);
+      place(live);
+      emit(OpcodeKind::Add, "n+", {S(n), S(one_)}, {n});
+      place(next);
+      mov(S(p), S(rd(D(p), dims_.trust)));
+      jump(walk);
+      place(counted);
+      emit(OpcodeKind::Lt, "room?", {S(n), D(maxSources)}, {full});
+      branch(S(full), room);
+      endObservation(kTurnResultEpistemicBudget);
+      place(room);
+    }
     mov(D(profInc), D(inc));
     setField(prof, kProfileRetired, S(false_));
     freshWindows(prof);
@@ -4670,6 +4726,7 @@ void Gen::emitSourceChange(CellRef entryLabel) {
     callClearField(prof, std::string(kProfileStreams));
     setField(prof, kProfileRetired, S(true_));
     const CellRef keep = newLabel();
+    branchIfZero(inc, keep);
     emit(OpcodeKind::Lt, "higher?", {D(profInc), D(inc)}, {lower});
     requireTrue(lower, keep);
     mov(D(profInc), D(inc));
@@ -4698,62 +4755,105 @@ void Gen::emitObserve(CellRef entryLabel) {
   place(entryLabel);
   const FieldInfo &turn = fields_.at(std::string(kFieldTurn));
   const CellRef tp = global(), obs = global(), ty = global(), eq = global(),
-                tuple = global(), who = global();
+                tuple = global(), who = global(), obsName = global();
   const CellRef malformed = newLabel(), invalid = newLabel();
+  const CellRef ingest = global(), maxSources = global(),
+                dedupWindow = global(), inc = global(), eventId = global(),
+                digest = global(), seq = global(), received = global(),
+                relayed = global(), historyLimit = global(),
+                keysLimit = global(), acquiredAt = global(),
+                acquiredUnc = global(), clockEpoch = global(),
+                mapping = global(), view = global(), health = global();
+  // Records are read in one walk in the order their writer used, checking
+  // each name, rather than by a field search per read: the search was most
+  // of an ingestion's cost.
+  const auto readInOrder =
+      [&](CellRef record, std::span<const std::string_view> names,
+          const std::map<std::string_view, CellRef> &into, CellRef cursor) {
+        mov(S(cursor), S(rd(D(record), core_.dims().vars)));
+        branchIfZero(cursor, malformed);
+        emit(OpcodeKind::Eq, "mrk?",
+             {D(cursor), S(cStr(std::string(kRecordMarker)))}, {eq});
+        requireTrue(eq, malformed);
+        for (const auto name : names) {
+          mov(S(cursor), S(rd(D(cursor), core_.dims().vars)));
+          branchIfZero(cursor, malformed);
+          emit(OpcodeKind::Eq, "field?",
+               {D(cursor), S(cStr(std::string(name)))}, {eq});
+          requireTrue(eq, malformed);
+          if (const auto out = into.find(name); out != into.end()) {
+            mov(S(out->second), S(rd(D(cursor), core_.dims().values)));
+            branchIfZero(out->second, malformed);
+          }
+        }
+      };
+  // A stored record's fields by position (kObservationOrder), in one walk:
+  // every record here was written by the executor in that order.
+  const auto readAt = [&](CellRef record,
+                          std::vector<std::pair<std::size_t, CellRef>> at) {
+    std::ranges::sort(at);
+    const CellRef f = reg();
+    mov(S(f), S(rd(D(record), core_.dims().vars)));
+    std::size_t here = 0;
+    for (const auto &[position, out] : at) {
+      for (; here <= position; ++here)
+        mov(S(f), S(rd(D(f), core_.dims().vars)));
+      mov(S(out), S(rd(D(f), core_.dims().values)));
+    }
+  };
   mov(S(tp), S(rd(S(turn.nameCell), core_.dims().values)));
   mov(S(a0_), S(tp));
   movC(a1_, cStr(std::string(kTurnObservation)));
   callLabel(rtFind_);
   mov(S(obs), S(r0_));
+  mov(S(obsName), S(r1_));
   branchIfZero(obs, malformed);
-  const auto field = [&](std::string_view name, CellRef out) {
-    mov(S(a0_), S(obs));
-    movC(a1_, cStr(std::string(name)));
-    callLabel(rtFind_);
-    mov(S(out), S(r0_));
-  };
-  field(kObsPredicate, ty);
-  branchIfZero(ty, malformed);
-  field(kObsTuple, tuple);
-  branchIfZero(tuple, malformed);
-  field(kObsSource, who);
-  branchIfZero(who, malformed);
-  const CellRef ingest = global(), maxSources = global(),
-                dedupWindow = global(), inc = global(), eventId = global(),
-                digest = global(), seq = global(), received = global(),
-                relayed = global();
+  const CellRef cursor = global();
+  readInOrder(obs, kObservationOrder,
+              {{kObsProfile, view},
+               {kObsHealth, health},
+               {kObsPredicate, ty},
+               {kObsSource, who},
+               {kObsTuple, tuple},
+               {kObsIncarnation, inc},
+               {kObsEventId, eventId},
+               {kObsDigest, digest},
+               {kObsSequence, seq},
+               {kObsAcquiredAt, acquiredAt},
+               {kObsAcquiredUncertainty, acquiredUnc},
+               {kObsClockEpoch, clockEpoch},
+               {kObsClockMappingVersion, mapping},
+               {kObsReceivedSteady, received}},
+              cursor);
+  {
+    // The optional relay follows the required fields.
+    const CellRef loop = newLabel(), done = newLabel(), next = newLabel();
+    movC(relayed, zero_);
+    place(loop);
+    mov(S(cursor), S(rd(D(cursor), core_.dims().vars)));
+    branchIfZero(cursor, done);
+    emit(OpcodeKind::Eq, "relay?",
+         {D(cursor), S(cStr(std::string(kObsRelayedBy)))}, {eq});
+    requireTrue(eq, next);
+    mov(S(relayed), S(rd(D(cursor), core_.dims().values)));
+    jump(done);
+    place(next);
+    jump(loop);
+    place(done);
+  }
   mov(S(a0_), S(tp));
   movC(a1_, cStr(std::string(kTurnIngest)));
   callLabel(rtFind_);
   mov(S(ingest), S(r0_));
   branchIfZero(ingest, malformed);
-  const auto limit = [&](std::string_view name, CellRef out) {
-    mov(S(a0_), S(ingest));
-    movC(a1_, cStr(std::string(name)));
-    callLabel(rtFind_);
-    mov(S(out), S(r0_));
-    branchIfZero(out, malformed);
-  };
-  limit(kIngestMaxSources, maxSources);
-  limit(kIngestDedup, dedupWindow);
-  const CellRef historyLimit = global(), keysLimit = global();
-  limit(kIngestHistory, historyLimit);
-  limit(kIngestKeysPerSource, keysLimit);
-  const auto required = [&](std::string_view name, CellRef out) {
-    field(name, out);
-    branchIfZero(out, malformed);
-  };
-  required(kObsIncarnation, inc);
-  required(kObsEventId, eventId);
-  required(kObsDigest, digest);
-  required(kObsSequence, seq);
-  required(kObsReceivedSteady, received);
-  const CellRef acquiredAt = global(), acquiredUnc = global(),
-                clockEpoch = global();
-  required(kObsAcquiredAt, acquiredAt);
-  required(kObsAcquiredUncertainty, acquiredUnc);
-  required(kObsClockEpoch, clockEpoch);
-  field(kObsRelayedBy, relayed);
+  static constexpr std::array<std::string_view, 4> kIngestOrder{
+      kIngestMaxSources, kIngestDedup, kIngestHistory, kIngestKeysPerSource};
+  readInOrder(ingest, kIngestOrder,
+              {{kIngestMaxSources, maxSources},
+               {kIngestDedup, dedupWindow},
+               {kIngestHistory, historyLimit},
+               {kIngestKeysPerSource, keysLimit}},
+              cursor);
 
   // 1. The source's profile: found by its token on `$agent +d.trust`, or
   //    created within the principal budget.
@@ -4852,21 +4952,21 @@ void Gen::emitObserve(CellRef entryLabel) {
     mov(S(e), S(rd(D(seenList), core_.dims().grab)));
     place(loop);
     branchIfZero(e, done);
-    const auto entryIs = [&](std::string_view name, CellRef want) {
-      mov(S(a0_), S(e));
-      movC(a1_, cStr(std::string(name)));
-      callLabel(rtFind_);
-      mov(S(v), S(r0_));
-      branchIfZero(v, next);
-      emit(OpcodeKind::Eq, "seen?", {D(v), D(want)}, {same});
-      requireTrue(same, next);
+    // An entry is (marker, incarnation, event ID, digest), as minted below.
+    const CellRef f = reg();
+    mov(S(f), S(rd(D(e), core_.dims().vars)));
+    const auto nextField = [&] {
+      mov(S(f), S(rd(D(f), core_.dims().vars)));
+      mov(S(v), S(rd(D(f), core_.dims().values)));
     };
-    entryIs(kObsIncarnation, inc);
-    entryIs(kObsEventId, eventId);
-    mov(S(a0_), S(e));
-    movC(a1_, cStr(std::string(kObsDigest)));
-    callLabel(rtFind_);
-    emit(OpcodeKind::Eq, "digest?", {D(r0_), D(digest)}, {same});
+    nextField();
+    emit(OpcodeKind::Eq, "seen?", {D(v), D(inc)}, {same});
+    requireTrue(same, next);
+    nextField();
+    emit(OpcodeKind::Eq, "seen?", {D(v), D(eventId)}, {same});
+    requireTrue(same, next);
+    nextField();
+    emit(OpcodeKind::Eq, "digest?", {D(v), D(digest)}, {same});
     branch(S(same), dup);
     endObservation(kTurnResultConflictingEvent);
     place(dup);
@@ -4880,33 +4980,56 @@ void Gen::emitObserve(CellRef entryLabel) {
   const CellRef streamsRec = global(), predName = global();
   profileField(kProfileStreams, streamsRec);
   mov(S(predName), D(ty));
+  // A stream is (last sequence, clock epoch, mapping version); a regression
+  // of the epoch, or of the mapping within one epoch, is a clock fault.
+  static constexpr std::array<std::string_view, 3> kStreamOrder{
+      kObsSequence, kObsClockEpoch, kObsClockMappingVersion};
+  const CellRef stream = global(), lastSeq = global(), lastEpoch = global(),
+                lastMapping = global();
   {
-    const CellRef last = reg(), stale = reg(), fresh = newLabel();
+    const CellRef stale = reg(), fresh = newLabel(), sameEpoch = newLabel(),
+                  ordered = newLabel();
     mov(S(a0_), S(streamsRec));
     mov(S(a1_), S(predName));
     callLabel(rtFind_);
-    mov(S(last), S(r0_));
-    branchIfZero(last, fresh);
-    emit(OpcodeKind::Lte, "stale?", {D(seq), D(last)}, {stale});
-    requireTrue(stale, fresh);
+    mov(S(stream), S(r0_));
+    branchIfZero(stream, fresh);
+    readInOrder(stream, kStreamOrder,
+                {{kObsSequence, lastSeq},
+                 {kObsClockEpoch, lastEpoch},
+                 {kObsClockMappingVersion, lastMapping}},
+                cursor);
+    emit(OpcodeKind::Lte, "stale?", {D(seq), D(lastSeq)}, {stale});
+    const CellRef advancing = newLabel();
+    requireTrue(stale, advancing);
     endObservation(kTurnResultStaleSequence);
+    place(advancing);
+    emit(OpcodeKind::Lt, "epoch<?", {D(clockEpoch), D(lastEpoch)}, {stale});
+    requireTrue(stale, sameEpoch);
+    endObservation(kTurnResultObservationTimeMismatch);
+    place(sameEpoch);
+    emit(OpcodeKind::Eq, "epoch=?", {D(clockEpoch), D(lastEpoch)}, {stale});
+    requireTrue(stale, ordered);
+    emit(OpcodeKind::Lt, "map<?", {D(mapping), D(lastMapping)}, {stale});
+    requireTrue(stale, ordered);
+    endObservation(kTurnResultObservationTimeMismatch);
+    place(ordered);
     place(fresh);
   }
   // Committed only: the profile's view in the record, the dedup entry, the
   // stream and the receipt times.
   const auto bookkeeping = [&](CellRef rec) {
     {
-      const CellRef view = reg(), old = reg(), lone = newLabel();
-      alloc(view);
-      mov(D(view), D(who));
+      // The record's profile field already holds the token; its value cell
+      // becomes the clone occurrence, spliced posward after the master.
+      (void)rec;
+      const CellRef old = reg(), lone = newLabel();
       mov(S(old), S(rd(D(prof), core_.dims().clone)));
       breakOp(D(prof), core_.dims().clone);
       linkOp(D(prof), core_.dims().clone, D(view));
       branchIfZero(old, lone);
       linkOp(D(view), core_.dims().clone, D(old));
       place(lone);
-      CellRef vc;
-      callSetField(rec, std::string(kObsProfile), view, vc);
     }
     {
       const CellRef entry = reg(), n = reg(), e = reg(), over = reg();
@@ -4943,21 +5066,38 @@ void Gen::emitObserve(CellRef entryLabel) {
       place(last);
       place(kept);
     }
-    mov(S(a0_), S(streamsRec));
-    mov(S(a1_), S(predName));
-    movC(a2_, zero_);
-    callLabel(routineLabel(rtSetField_, &Gen::emitRtSetField));
-    mov(D(r0_), D(seq));
-    CellRef vc;
-    callSetField(prof, std::string(kProfileLastReceive), std::nullopt, vc);
-    mov(D(vc), D(received));
+    {
+      const CellRef first = newLabel(), written = newLabel();
+      branchIfZero(stream, first);
+      mov(D(lastSeq), D(seq));
+      mov(D(lastEpoch), D(clockEpoch));
+      mov(D(lastMapping), D(mapping));
+      jump(written);
+      place(first);
+      const CellRef fresh = reg();
+      alloc(fresh);
+      mov(D(fresh), S(cStr(std::string(kProfileStreams))));
+      markRecord(fresh);
+      for (const auto &[fname, value] :
+           {std::pair{kObsSequence, seq}, std::pair{kObsClockEpoch, clockEpoch},
+            std::pair{kObsClockMappingVersion, mapping}}) {
+        CellRef vc;
+        callSetField(fresh, std::string(fname), std::nullopt, vc);
+        mov(D(vc), D(value));
+      }
+      mov(S(a0_), S(streamsRec));
+      mov(S(a1_), S(predName));
+      mov(S(a2_), S(fresh));
+      callLabel(routineLabel(rtSetField_, &Gen::emitRtSetField));
+      place(written);
+    }
+    putScalar(prof, kProfileLastReceive, D(received));
     // Only a directly received event shows the device is alive.
     const CellRef direct = newLabel(), after = newLabel();
     branchIfZero(relayed, direct);
     jump(after);
     place(direct);
-    callSetField(prof, std::string(kProfileLastContact), std::nullopt, vc);
-    mov(D(vc), D(received));
+    putScalar(prof, kProfileLastContact, D(received));
     place(after);
   };
   for (auto &[name, info] : preds_) {
@@ -4996,24 +5136,31 @@ void Gen::emitObserve(CellRef entryLabel) {
     loadRef(a0_, info.cell);
     mov(S(a1_), S(tr));
     mov(S(a2_), S(name_));
-    movC(a3_, info.nkeys > 0 ? one_ : zero_);
+    // Always replace: a keyless arbitrated predicate is one quantity per
+    // source, so its new reading supersedes the last (one implicit key)
+    // rather than piling up as further current propositions.
+    movC(a3_, one_);
     movC(a4_, cInt(static_cast<std::int64_t>(info.nkeys)));
     callLabel(rtBSet_);
     movC(keepHistG_, zero_);
     mov(S(support), S(r1_));
-    // The record is the checked metadata, owned, plus what ingestion decides.
+    // The record is the checked observation itself, detached from `$turn`
+    // so it outlives the turn, plus what ingestion decides. Copying it cost
+    // a frame per cell and as many slots again.
     const CellRef rec = reg();
-    callCopy(obs, rec);
-    const auto set = [&](std::string_view fname, CellRef value) {
-      CellRef vc;
-      callSetField(rec, std::string(fname), std::nullopt, vc);
-      mov(D(vc), S(value));
-    };
-    set(kObsStatus, cStr(std::string(kObsStatusCurrent)));
-    set(kObsVerdict, cStr(std::string(kObsVerdictUntested)));
-    set(kObsVerdictEpoch, zero_);
-    set(kObsVerdictRevisions, cStr(std::string(kListContent)));
-    set(kObsPinned, false_);
+    breakOp(D(obsName), core_.dims().values);
+    mov(S(rec), S(obs));
+    // Status, verdict and pinned arrive at their initial values; health is
+    // NOMINAL unless the profile's latch says otherwise.
+    {
+      const CellRef faulted = reg(), noted = newLabel();
+      profileField(kProfileFaulted, faulted);
+      branchIfZero(faulted, noted);
+      emit(OpcodeKind::Eq, "faulted?", {D(faulted), S(true_)}, {eq});
+      requireTrue(eq, noted);
+      mov(D(health), S(cStr(std::string(kObsHealthFaulted))));
+      place(noted);
+    }
     bookkeeping(rec);
     // The source's previous current record on this key is superseded, unless
     // the new reading was acquired before it by more than both uncertainties
@@ -5028,27 +5175,31 @@ void Gen::emitObserve(CellRef entryLabel) {
       mov(S(r), S(rd(D(support), dims_.epistemic)));
       place(loop);
       branchIfZero(r, done);
-      const auto recField = [&](std::string_view fname, CellRef out) {
-        mov(S(a0_), S(r));
-        movC(a1_, cStr(std::string(fname)));
-        callLabel(rtFind_);
-        mov(S(out), S(r0_));
-      };
-      recField(kObsStatus, st);
+      const CellRef unc = reg(), when = reg();
+      readAt(r, {{observationPosition(kObsStatus), st},
+                 {observationPosition(kObsClockEpoch), v},
+                 {observationPosition(kObsAcquiredUncertainty), unc},
+                 {observationPosition(kObsAcquiredAt), when}});
       branchIfZero(st, skip);
       emit(OpcodeKind::Eq, "cur?",
            {D(st), S(cStr(std::string(kObsStatusCurrent)))}, {cur});
       requireTrue(cur, skip);
-      recField(kObsClockEpoch, v);
       branchIfZero(v, retire);
+      {
+        // Only a newer clock epoch resets the comparison; an older one
+        // must never retire the reading it predates.
+        const CellRef notOlder = newLabel();
+        emit(OpcodeKind::Lt, "epoch<?", {D(clockEpoch), D(v)}, {same});
+        requireTrue(same, notOlder);
+        endObservation(kTurnResultObservationTimeMismatch);
+        place(notOlder);
+      }
       emit(OpcodeKind::Eq, "epoch?", {D(v), D(clockEpoch)}, {same});
       requireTrue(same, retire);
-      recField(kObsAcquiredUncertainty, v);
-      emit(OpcodeKind::Add, "tol", {D(v), D(acquiredUnc)}, {tol});
+      emit(OpcodeKind::Add, "tol", {D(unc), D(acquiredUnc)}, {tol});
       emit(OpcodeKind::Add, "tol+skew",
            {S(tol), S(cFloat(info.clockSkewSeconds))}, {tol});
-      recField(kObsAcquiredAt, v);
-      emit(OpcodeKind::Sub, "floor", {D(v), S(tol)}, {floor});
+      emit(OpcodeKind::Sub, "floor", {D(when), S(tol)}, {floor});
       emit(OpcodeKind::Lt, "early?", {D(acquiredAt), S(floor)}, {early});
       requireTrue(early, retire);
       endObservation(kTurnResultObservationTimeMismatch);
@@ -5076,6 +5227,24 @@ void Gen::emitObserve(CellRef entryLabel) {
       branchIfZero(sp, nextClause);
       emit(OpcodeKind::Eq, "mine?", {D(sp), D(who)}, {same});
       requireTrue(same, nextSource);
+      {
+        // A key counts while it holds a current reading: a predecessor
+        // boot's retired supports must not crowd out its successor's keys.
+        const CellRef r = reg(), st = reg(), scan = newLabel(),
+                      live = newLabel(), nextRec = newLabel();
+        mov(S(r), S(rd(D(sp), dims_.epistemic)));
+        place(scan);
+        branchIfZero(r, nextSource);
+        readAt(r, {{observationPosition(kObsStatus), st}});
+        branchIfZero(st, nextRec);
+        emit(OpcodeKind::Eq, "cur?",
+             {D(st), S(cStr(std::string(kObsStatusCurrent)))}, {same});
+        branch(S(same), live);
+        place(nextRec);
+        mov(S(r), S(rd(D(r), dims_.epistemic)));
+        jump(scan);
+        place(live);
+      }
       emit(OpcodeKind::Add, "n+", {S(n), S(one_)}, {n});
       place(nextSource);
       mov(S(sp), S(rd(D(sp), dims_.source)));
@@ -5111,21 +5280,17 @@ void Gen::emitObserve(CellRef entryLabel) {
       mov(S(r), S(rd(D(support), dims_.epistemic)));
       place(scan);
       branchIfZero(r, trimmed);
-      const auto recIs = [&](std::string_view fname, CellRef want) {
-        mov(S(a0_), S(r));
-        movC(a1_, cStr(std::string(fname)));
-        callLabel(rtFind_);
-        mov(S(v), S(r0_));
-        branchIfZero(v, nextRec);
-        emit(OpcodeKind::Eq, "is?", {D(v), S(want)}, {ok});
+      const CellRef pin = reg(), st = reg();
+      readAt(r, {{observationPosition(kObsStatus), st},
+                 {observationPosition(kObsPinned), pin},
+                 {observationPosition(kObsProfile), v}});
+      for (const auto &[have, want] :
+           {std::pair{st, cStr(std::string(kObsStatusRetired))},
+            std::pair{pin, false_}}) {
+        branchIfZero(have, nextRec);
+        emit(OpcodeKind::Eq, "is?", {D(have), S(want)}, {ok});
         requireTrue(ok, nextRec);
-      };
-      recIs(kObsStatus, cStr(std::string(kObsStatusRetired)));
-      recIs(kObsPinned, false_);
-      mov(S(a0_), S(r));
-      movC(a1_, cStr(std::string(kObsProfile)));
-      callLabel(rtFind_);
-      mov(S(v), S(r0_));
+      }
       {
         const CellRef noView = newLabel();
         branchIfZero(v, noView);

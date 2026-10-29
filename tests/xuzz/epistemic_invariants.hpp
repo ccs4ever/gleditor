@@ -45,13 +45,17 @@ struct EpistemicSnapshot {
 /// Reads one agent's epistemic state; `predicates` names the arbitrated ones.
 class EpistemicView {
 public:
+  /// @p keyless names the predicates with no key argument: one quantity per
+  /// source, so each source supports at most one of their clauses.
   EpistemicView(AgentExecutor &executor, const identity::ActorPid &pid,
-                std::span<const std::string_view> predicates)
+                std::span<const std::string_view> predicates,
+                std::span<const std::string_view> keyless = {})
       : ctx_(*executor.context(pid)), agent_(*executor.agentCell(pid)),
         dims_(registerDimensions(
             const_cast<zigzag::ArenaManifold &>(ctx_.arena))),
         values_(valueDims(ctx_.core)),
-        predicates_(predicates.begin(), predicates.end()) {}
+        predicates_(predicates.begin(), predicates.end()),
+        keyless_(keyless.begin(), keyless.end()) {}
 
   [[nodiscard]] EpistemicSnapshot snapshot() const {
     EpistemicSnapshot out;
@@ -76,7 +80,8 @@ public:
     for (const auto &[name, pred] : predicateCells())
       for (const auto clause :
            zigzag::rankAfter(arena(), pred, ctx_.core.dims().clause)) {
-        const auto key = keyOf(clause);
+        const auto key =
+            keyless_.contains(name) ? std::string{} : keyOf(clause);
         for (const auto support :
              zigzag::rankAfter(arena(), clause, dims_.source)) {
           const auto token = arena().textOf(support);
@@ -140,7 +145,7 @@ private:
       if (arena().textOf(profile) == token) return profile;
     return std::nullopt;
   }
-  /// Every arbitrated predicate here keys on its first argument.
+  /// Every keyed arbitrated predicate here keys on its first argument.
   std::string keyOf(zigzag::CellRef clause) const {
     const auto &d   = ctx_.core.dims();
     const auto term = arena().linked(clause, d.grab);
@@ -178,6 +183,7 @@ private:
   AgentDims dims_;
   ValueDims values_;
   std::set<std::string, std::less<>> predicates_;
+  std::set<std::string, std::less<>> keyless_;
 };
 
 } // namespace xanadu::vagent::runtime::epistemic_test

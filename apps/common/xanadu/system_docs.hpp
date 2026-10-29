@@ -305,6 +305,10 @@ inline constexpr std::string_view kVagentEpistemicOutcomeLog =
     "vagent.epistemic_outcome_log";
 inline constexpr std::string_view kVagentEpistemicCells =
     "vagent.epistemic_cells";
+inline constexpr std::string_view kVagentEpistemicIngestPerWake =
+    "vagent.epistemic_ingest_per_wake";
+inline constexpr std::string_view kVagentEpistemicArenaSlots =
+    "vagent.epistemic_arena_slots";
 
 // UI
 inline constexpr std::string_view kTabBarVisible       = "tabBarVisible";

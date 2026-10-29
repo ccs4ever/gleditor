@@ -76,6 +76,8 @@ enum class EpistemicRefusal : std::uint8_t {
   StaleIncarnation,
   /// Above the bound incarnation: only binding advances one.
   UnboundIncarnation,
+  /// An incarnation that does not fit the arena's Int64.
+  InvalidIncarnation,
   InvalidObservation,
   ClockUnsynchronised,
   ObservationTimeMismatch,

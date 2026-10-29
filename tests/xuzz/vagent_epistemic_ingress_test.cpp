@@ -47,16 +47,17 @@ protected:
 
   void SetUp() override { start({}); }
 
-  void start(AgentSettings settings) {
-    auto program = CompiledProgram::fromSource(kProgram);
+  void start(AgentSettings settings, LocalHost::Options options = {},
+             std::string_view source = kProgram) {
+    auto program = CompiledProgram::fromSource(source);
     ASSERT_TRUE(program) << program.error();
-    LocalHost::Options options;
     options.settings = settings;
     host.emplace(std::move(*program), options);
     const auto launched = host->launch("A", "a");
     ASSERT_TRUE(launched);
     pid = *launched;
     host->pump();
+    host->executor().setWallClockSynchronised(true);
     base = std::chrono::duration<double>(
                std::chrono::system_clock::now().time_since_epoch())
                .count();
@@ -425,13 +426,18 @@ TEST_F(VagentEpistemicIngress, ABindingCannotLowerTheIncarnationFloor) {
   auto third        = reading(kP1, "e1", 1, 1.0);
   third.incarnation = 3;
   observe(third);
-  // Unbinding clears the host's view, but the arena keeps the floor.
+  EXPECT_EQ(host->executor().sourceChangeOutcome(pid, kP1),
+            (IngestOutcome{IngestOutcome::Kind::Committed}));
+  // Unbinding drops the binding, not the floor the advance reported, so a
+  // lower boot is refused at once rather than accepted and revoked later.
   host->executor().unbindSource(pid, kP1, "at");
-  ASSERT_TRUE(host->executor().bindSource(pid, grant(kP1, "sensor:gps", 2)));
-  host->pump();
-  const auto revoked = host->executor().ingestOutcome(pid, kP1, 2, "");
-  ASSERT_TRUE(revoked);
-  EXPECT_EQ(revoked->code, "StaleIncarnation");
+  const auto again =
+      host->executor().bindSource(pid, grant(kP1, "sensor:gps", 2));
+  ASSERT_FALSE(again);
+  EXPECT_EQ(again.error(), EpistemicRefusal::StaleIncarnation);
+  // The same boot may bind again.
+  ASSERT_TRUE(host->executor().bindSource(pid, grant(kP1, "sensor:gps", 3)));
+  host->executor().unbindSource(pid, kP1, "at");
   auto replay        = reading(kP1, "e2", 2, 1.0);
   replay.incarnation = 2;
   EXPECT_EQ(refusedAtIngress(replay), EpistemicRefusal::UnknownSource);
@@ -461,9 +467,12 @@ TEST_F(VagentEpistemicIngress, RetiringASourceDropsItsSupportsAndKeepsAFloor) {
   EXPECT_FALSE(arena().linked(tomb, ctx().core.dims().clone));
   EXPECT_EQ(refusedAtIngress(reading(kP1, "e3", 3, 1.0)),
             EpistemicRefusal::UnknownSource);
-  // Rebinding the retired boot is refused by the arena's floor.
-  ASSERT_TRUE(host->executor().bindSource(pid, grant(kP1, "sensor:gps", 1)));
-  host->pump();
+  // Rebinding the retired boot is refused: a RAM-only boot counter that
+  // repeats needs a host-issued incarnation, retirement does not reset it.
+  const auto retiredBoot =
+      host->executor().bindSource(pid, grant(kP1, "sensor:gps", 1));
+  ASSERT_FALSE(retiredBoot);
+  EXPECT_EQ(retiredBoot.error(), EpistemicRefusal::StaleIncarnation);
   EXPECT_EQ(refusedAtIngress(reading(kP1, "e3", 3, 1.0)),
             EpistemicRefusal::UnknownSource);
   // A strictly higher one revives the profile, but an old event is too old.
@@ -498,10 +507,15 @@ TEST_F(VagentEpistemicIngress, RetiringAnUnseenPrincipalLeavesABareTombstone) {
   host->pump();
   ASSERT_EQ(profiles().size(), 1U);
   EXPECT_EQ(counter(profiles().front(), kProfileIncarnation), 4);
-  ASSERT_TRUE(host->executor().bindSource(pid, grant(kP1, "sensor:gps", 4)));
+  EXPECT_EQ(
+      host->executor().bindSource(pid, grant(kP1, "sensor:gps", 4)).error(),
+      EpistemicRefusal::StaleIncarnation);
+  // Retiring a principal nothing names leaves nothing behind.
+  ASSERT_TRUE(host->executor().retireSource(pid, kP2));
+  host->executor().unbindSource(pid, kP2, "at");
+  ASSERT_TRUE(host->executor().retireSource(pid, std::string(64, '5')));
   host->pump();
-  EXPECT_EQ(host->executor().ingestOutcome(pid, kP1, 4, "")->code,
-            "StaleIncarnation");
+  EXPECT_EQ(profiles().size(), 2U); // kP1's and kP2's (bound) tombstones
   const auto bad = host->executor().retireSource(pid, "nothex");
   ASSERT_FALSE(bad);
   EXPECT_EQ(bad.error(), EpistemicRefusal::InvalidPrincipal);
@@ -735,8 +749,11 @@ TEST_F(VagentEpistemicIngress, TheOutcomeLogFollowsAnEventToItsTurn) {
   EXPECT_EQ(outcomeOf(o)->kind, IngestOutcome::Kind::Pending);
   host->pump();
   EXPECT_EQ(outcomeOf(o), (IngestOutcome{IngestOutcome::Kind::Committed}));
+  // One entry per event, and a committed one stays committed whatever a
+  // resend or a relay meets later.
   observe(o);
-  EXPECT_EQ(outcomeOf(o)->kind, IngestOutcome::Kind::Duplicate);
+  EXPECT_EQ(outcomeOf(o)->kind, IngestOutcome::Kind::Committed);
+  EXPECT_EQ(refused(kTurnResultDuplicate), 1U);
   EXPECT_FALSE(host->executor().ingestOutcome(pid, kP1, 1, "never"));
 }
 
@@ -852,6 +869,279 @@ TEST_F(VagentEpistemicIngress, AStoppedActorKeepsNoIngressState) {
   EXPECT_FALSE(outcomeOf(o));
   EXPECT_EQ(host->executor().observe(pid, o).error(),
             EpistemicRefusal::UnknownSource);
+}
+
+// -- Review round 1 findings (i3-1bc-review/) ---------------------------------
+
+TEST_F(VagentEpistemicIngress,
+       AKeylessPredicateHoldsOneCurrentReadingPerSource) {
+  start({}, {}, R"vagent(
+predicate at(x: Float)
+  arbitrated by truest(model: "beta_reputation", min_confidence: 0.5,
+    prior_alpha: 1, prior_beta: 1, clock: "wall", max_age: 10s,
+    cluster_tolerance: 0.5, frame: "enu", units: "m",
+    min_variance: 0.0001, max_variance: 100.0)
+agent A { var adds: Int := 0 }
+)vagent");
+  for (std::uint64_t i = 1; i <= 6; ++i) {
+    auto o  = reading(kP1, "e" + std::to_string(i), i, 0.0);
+    o.tuple = {WireValue::real(static_cast<double>(i))};
+    observe(o);
+    EXPECT_EQ(outcomeOf(o)->kind, IngestOutcome::Kind::Committed) << i;
+  }
+  // The newest reading supersedes the last; no key limit is reached.
+  ASSERT_EQ(clauses().size(), 1U);
+  EXPECT_EQ(refused(kTurnResultEpistemicKeyLimit), 0U);
+}
+
+TEST_F(VagentEpistemicIngress, AResendPastMaxAgeIsARetryNotAFault) {
+  LocalHost::Options options;
+  options.manualClock = true;
+  start({}, options);
+  const auto o = reading(kP1, "e1", 1, 1.0);
+  observe(o);
+  const auto prof = profiles().front();
+  host->advance(std::chrono::seconds(30));
+  // The store-and-forward flush of an event it already holds.
+  EXPECT_EQ(refusedAtIngress(o), EpistemicRefusal::StaleObservation);
+  EXPECT_EQ(outcomeOf(o)->kind, IngestOutcome::Kind::Committed);
+  EXPECT_EQ(counter(prof, kProfileContentRefusals), 0);
+}
+
+TEST_F(VagentEpistemicIngress, ARecordCarriesWhatProducedIt) {
+  observe(reading(kP1, "e1", 1, 1.0));
+  const auto record = history(supports(clauses().front()).front()).front();
+  EXPECT_EQ(counter(record, kObsVersion), kObservationVersion);
+  EXPECT_TRUE(text(record, kObsDomain).starts_with("at/2@"));
+  EXPECT_EQ(text(record, kObsModel), "beta_reputation");
+  EXPECT_EQ(counter(record, kObsModelEpoch), 0);
+  EXPECT_EQ(counter(record, kObsCalibrationEpoch), 0);
+  EXPECT_EQ(counter(record, kObsFeatureSchema), 0);
+  EXPECT_TRUE(value(record, kObsFeatures));
+  EXPECT_EQ(text(record, kObsClockInstance).size(), 16U);
+  EXPECT_EQ(text(record, kObsHealth), kObsHealthNominal);
+  EXPECT_EQ(text(record, kObsStatus), kObsStatusCurrent);
+  EXPECT_EQ(text(record, kObsVerdict), kObsVerdictUntested);
+}
+
+TEST_F(VagentEpistemicIngress, ClockEpochsAndMappingsNeverRegress) {
+  auto later                = reading(kP1, "e1", 1, 1.0);
+  later.clockEpoch          = 5;
+  later.clockMappingVersion = 2;
+  observe(later);
+  // On another key, so only the stream (not the per-key order) sees it.
+  auto olderEpoch       = reading(kP1, "e2", 2, 2.0);
+  olderEpoch.tuple      = {WireValue::text("other"), WireValue::real(2.0)};
+  olderEpoch.clockEpoch = 4;
+  observe(olderEpoch);
+  EXPECT_EQ(outcomeOf(olderEpoch)->code, "ObservationTimeMismatch");
+  auto olderMapping       = reading(kP1, "e3", 3, 3.0);
+  olderMapping.tuple      = {WireValue::text("other"), WireValue::real(3.0)};
+  olderMapping.clockEpoch = 5;
+  olderMapping.clockMappingVersion = 1;
+  observe(olderMapping);
+  EXPECT_EQ(outcomeOf(olderMapping)->code, "ObservationTimeMismatch");
+  // A newer epoch resets the per-key order: its times are a new scale.
+  auto rebased       = reading(kP1, "e4", 4, 4.0);
+  rebased.clockEpoch = 6;
+  rebased.acquiredAt = at(1) - 2.0;
+  observe(rebased);
+  EXPECT_EQ(outcomeOf(rebased)->kind, IngestOutcome::Kind::Committed);
+}
+
+TEST_F(VagentEpistemicIngress,
+       APredecessorsRetiredKeysDoNotCrowdOutItsSuccessor) {
+  AgentSettings settings;
+  settings.epistemic.keysPerSource = 2;
+  start(settings);
+  for (const auto &[key, n] : {std::pair{"k1", 1}, std::pair{"k2", 2}}) {
+    auto o  = reading(kP1, key, n, 1.0);
+    o.tuple = {WireValue::text(key), WireValue::real(1.0)};
+    observe(o);
+  }
+  ASSERT_TRUE(host->executor().bindSource(pid, grant(kP1, "sensor:gps", 2)));
+  auto fresh        = reading(kP1, "n1", 1, 1.0);
+  fresh.incarnation = 2;
+  fresh.tuple       = {WireValue::text("k3"), WireValue::real(1.0)};
+  observe(fresh);
+  EXPECT_EQ(outcomeOf(fresh)->kind, IngestOutcome::Kind::Committed);
+}
+
+TEST_F(VagentEpistemicIngress, AStarvedTurnIsExhaustedNotADefect) {
+  LocalHost::Options options;
+  options.maxInstructions = 1000;
+  start({}, options);
+  const auto o = reading(kP1, "e1", 1, 1.0);
+  observe(o);
+  EXPECT_EQ(outcomeOf(o)->code, kTurnResultTurnExhausted);
+  EXPECT_EQ(outcomeOf(o)->outcomeClass, OutcomeClass::NeedsHostAction);
+}
+
+TEST_F(VagentEpistemicIngress,
+       EveryBindRunsTheSourceChangeSoAFailedOneRetries) {
+  observe(reading(kP1, "e1", 1, 1.0));
+  host->executor().unbindSource(pid, kP1, "at");
+  ASSERT_TRUE(host->executor().bindSource(pid, grant(kP1, "sensor:gps")));
+  host->pump();
+  // The same boot: the turn ran and changed nothing.
+  EXPECT_EQ(host->executor().sourceChangeOutcome(pid, kP1),
+            (IngestOutcome{IngestOutcome::Kind::Committed}));
+  EXPECT_EQ(counter(profiles().front(), kProfileIncarnation), 1);
+}
+
+TEST_F(VagentEpistemicIngress, PastTheArenaAllowanceIngestionRefusesExhausted) {
+  AgentSettings settings;
+  settings.epistemic.arenaSlots = 1;
+  start(settings);
+  const auto o = reading(kP1, "e1", 1, 1.0);
+  observe(o);
+  EXPECT_EQ(outcomeOf(o)->code, kTurnResultArenaExhausted);
+  EXPECT_EQ(outcomeOf(o)->outcomeClass, OutcomeClass::NeedsHostAction);
+  EXPECT_TRUE(clauses().empty());
+}
+
+TEST_F(VagentEpistemicIngress, NothingUnboundOrMalformedIsLogged) {
+  const auto kP3 = std::string(64, '3');
+  EXPECT_EQ(refusedAtIngress(reading(kP3, "e1", 1, 1.0)),
+            EpistemicRefusal::UnknownSource);
+  EXPECT_FALSE(outcomeOf(reading(kP3, "e1", 1, 1.0)));
+  auto huge = reading(kP1, std::string(kMaxEventIdBytes + 1, 'x'), 1, 1.0);
+  EXPECT_EQ(refusedAtIngress(huge), EpistemicRefusal::InvalidObservation);
+  EXPECT_FALSE(outcomeOf(huge));
+  auto relay      = reading(kP1, "e2", 2, 1.0);
+  relay.relayedBy = "not-a-principal";
+  EXPECT_EQ(refusedAtIngress(relay), EpistemicRefusal::InvalidObservation);
+}
+
+TEST_F(VagentEpistemicIngress, OneSourcesFloodNeverEvictsAnothersOutcomes) {
+  AgentSettings settings;
+  settings.epistemic.outcomeLog = 4;
+  start(settings);
+  const auto kept = reading(kP1, "e1", 1, 1.0);
+  observe(kept);
+  for (int i = 0; i < 20; ++i) {
+    auto bad  = reading(kP2, "b" + std::to_string(i), 1, 1.0);
+    bad.frame = "ecef";
+    EXPECT_TRUE(refusedAtIngress(bad));
+  }
+  EXPECT_EQ(outcomeOf(kept)->kind, IngestOutcome::Kind::Committed);
+}
+
+TEST_F(VagentEpistemicIngress, EachSourceAndRelayGetsAFairShareOfTheQueue) {
+  AgentSettings settings;
+  settings.epistemic.ingressQueue          = 4;
+  settings.epistemic.ingressQueuePerSource = 4;
+  start(settings);
+  auto &executor = host->executor();
+  // Two bound sources: two slots each.
+  EXPECT_TRUE(executor.observe(pid, reading(kP1, "e1", 1, 1.0)));
+  EXPECT_TRUE(executor.observe(pid, reading(kP1, "e2", 2, 1.0)));
+  EXPECT_EQ(executor.observe(pid, reading(kP1, "e3", 3, 1.0)).error(),
+            EpistemicRefusal::IngressBackpressure);
+  // A relay carrying the other source's events is held to a share too.
+  const auto kRelay = std::string(64, '9');
+  for (const auto *id : {"o1", "o2"}) {
+    auto copy      = reading(kP2, id, id[1] - '0', 1.0);
+    copy.relayedBy = kRelay;
+    EXPECT_TRUE(executor.observe(pid, copy));
+  }
+  host->pump();
+  EXPECT_EQ(outcomeOf(reading(kP1, "e2", 2, 1.0))->kind,
+            IngestOutcome::Kind::Committed);
+}
+
+TEST_F(VagentEpistemicIngress, AWakeRunsABoundedNumberOfIngestions) {
+  AgentSettings settings;
+  settings.epistemic.ingestPerWake = 1;
+  start(settings);
+  for (std::uint64_t i = 1; i <= 3; ++i)
+    ASSERT_TRUE(host->executor().observe(
+        pid, reading(kP1, "e" + std::to_string(i), i, 1.0)));
+  host->pump(1);
+  EXPECT_EQ(outcomeOf(reading(kP1, "e1", 1, 1.0))->kind,
+            IngestOutcome::Kind::Committed);
+  EXPECT_EQ(outcomeOf(reading(kP1, "e3", 3, 1.0))->kind,
+            IngestOutcome::Kind::Pending);
+  host->pump();
+  EXPECT_EQ(outcomeOf(reading(kP1, "e3", 3, 1.0))->kind,
+            IngestOutcome::Kind::Committed);
+}
+
+TEST_F(VagentEpistemicIngress, TheWallClockIsUnsynchronisedUntilReported) {
+  auto program = CompiledProgram::fromSource(kProgram);
+  ASSERT_TRUE(program);
+  LocalHost fresh(std::move(*program));
+  const auto agent = fresh.launch("A", "a");
+  ASSERT_TRUE(agent);
+  fresh.pump();
+  ASSERT_TRUE(fresh.executor().bindSource(*agent, grant(kP1, "sensor:gps")));
+  EXPECT_EQ(
+      fresh.executor().observe(*agent, reading(kP1, "e1", 1, 1.0)).error(),
+      EpistemicRefusal::ClockUnsynchronised);
+}
+
+TEST_F(VagentEpistemicIngress, AnIncarnationMustFitTheArena) {
+  const auto bound = host->executor().bindSource(
+      pid, grant(kP1, "sensor:gps", std::numeric_limits<std::uint64_t>::max()));
+  ASSERT_FALSE(bound);
+  EXPECT_EQ(bound.error(), EpistemicRefusal::InvalidIncarnation);
+}
+
+TEST_F(VagentEpistemicIngress, ARevivedSourceTakesAShareOfTheBudgetAgain) {
+  AgentSettings settings;
+  settings.epistemic.maxSources = 1;
+  start(settings);
+  observe(reading(kP1, "e1", 1, 1.0));
+  ASSERT_TRUE(host->executor().retireSource(pid, kP1));
+  host->pump();
+  observe(reading(kP2, "o1", 1, 1.0));
+  ASSERT_TRUE(host->executor().bindSource(pid, grant(kP1, "sensor:gps", 2)));
+  host->pump();
+  EXPECT_EQ(host->executor().sourceChangeOutcome(pid, kP1)->code,
+            kTurnResultEpistemicBudget);
+}
+
+TEST_F(VagentEpistemicIngress, TheVarianceBoundsAreInclusive) {
+  // The policy admits [0.0001, 100.0].
+  observe(reading(kP1, "lo", 1, 1.0, 0.0001));
+  EXPECT_EQ(outcomeOf(reading(kP1, "lo", 1, 1.0))->kind,
+            IngestOutcome::Kind::Committed);
+  observe(reading(kP1, "hi", 2, 2.0, 100.0));
+  EXPECT_EQ(outcomeOf(reading(kP1, "hi", 2, 2.0))->kind,
+            IngestOutcome::Kind::Committed);
+  EXPECT_EQ(refusedAtIngress(reading(kP1, "over", 3, 3.0, 100.0001)),
+            EpistemicRefusal::InvalidVariance);
+  EXPECT_EQ(refusedAtIngress(reading(kP1, "under", 4, 3.0, 0.00009)),
+            EpistemicRefusal::InvalidVariance);
+}
+
+TEST_F(VagentEpistemicIngress, TheTimeWindowsWidenByUncertaintyAndSkew) {
+  LocalHost::Options options;
+  options.manualClock = true;
+  start({}, options);
+  // max_age 10 s and the default clock_skew; uncertainty widens both sides.
+  const double now = std::chrono::duration<double>(
+                         std::chrono::system_clock::now().time_since_epoch())
+                         .count();
+  auto old                = reading(kP1, "old", 1, 1.0);
+  old.acquiredUncertainty = 2.0;
+  old.acquiredAt          = now - 11.0; // inside max_age + uncertainty
+  observe(old);
+  EXPECT_EQ(outcomeOf(old)->kind, IngestOutcome::Kind::Committed);
+  auto older                = reading(kP1, "older", 2, 1.0);
+  older.acquiredUncertainty = 0.5;
+  older.acquiredAt          = now - 11.0; // outside
+  EXPECT_EQ(refusedAtIngress(older), EpistemicRefusal::StaleObservation);
+  auto ahead                = reading(kP1, "ahead", 3, 1.0);
+  ahead.acquiredUncertainty = 2.0;
+  ahead.acquiredAt          = now + 1.5; // inside uncertainty
+  observe(ahead);
+  EXPECT_EQ(outcomeOf(ahead)->kind, IngestOutcome::Kind::Committed);
+  auto further                = reading(kP1, "further", 4, 1.0);
+  further.acquiredUncertainty = 0.0;
+  further.acquiredAt          = now + 5.0;
+  EXPECT_EQ(refusedAtIngress(further),
+            EpistemicRefusal::ObservationTimeMismatch);
 }
 
 TEST(VagentEpistemicIngressPlain, AProgramWithoutArbitrationCannotBind) {

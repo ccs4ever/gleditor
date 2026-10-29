@@ -57,6 +57,11 @@ predicate at(key who: Str, x: Float)
     prior_alpha: 1, prior_beta: 1, clock: "wall", max_age: 10s,
     cluster_tolerance: 0.5, frame: "enu", units: "m",
     min_variance: 0.0001, max_variance: 100.0)
+predicate level(v: Float)
+  arbitrated by truest(model: "beta_reputation", min_confidence: 0.5,
+    prior_alpha: 1, prior_beta: 1, clock: "wall", max_age: 10s,
+    cluster_tolerance: 0.5, frame: "enu", units: "m",
+    min_variance: 0.0001, max_variance: 100.0)
 predicate door(key id: Str, open: Bool)
   arbitrated by ranked(model: "beta_reputation", min_confidence: 0.5,
     prior_alpha: 2, prior_beta: 2, clock: "wall", max_age: 10s)
@@ -69,7 +74,8 @@ agent A {
 }
 )vagent";
 
-constexpr std::string_view kPredicates[] = {"at", "door"};
+constexpr std::string_view kPredicates[] = {"at", "door", "level"};
+constexpr std::string_view kKeyless[]    = {"level"};
 const std::array<std::string, 4> kPrincipals{
     std::string(64, '1'), std::string(64, '2'), std::string(64, '3'),
     std::string(64, '4')};
@@ -163,10 +169,15 @@ CheckedObservation pickObservation(FuzzedDataProvider &in, double now,
   default:
     o.sequence = ++source.sequence;
   }
-  const int predicate = in.ConsumeIntegralInRange(0, 4);
-  o.predicate = predicate < 2 ? "at" : predicate < 4 ? "door" : "elsewhere";
+  const int predicate = in.ConsumeIntegralInRange(0, 5);
+  o.predicate         = predicate < 2   ? "at"
+                        : predicate < 4 ? "door"
+                        : predicate < 5 ? "level"
+                                        : "elsewhere";
   // Mostly the right shape, so ingestion's later steps are reached.
-  if (in.ConsumeIntegralInRange(0, 3) != 0) {
+  if (o.predicate == "level" && in.ConsumeIntegralInRange(0, 3) != 0) {
+    o.tuple = {WireValue::real(pickDouble(in))};
+  } else if (in.ConsumeIntegralInRange(0, 3) != 0) {
     // Three keys, past the per-source key limit of two.
     constexpr std::array keys{"self", "other", "third"};
     o.tuple = {WireValue::text(
@@ -193,8 +204,8 @@ CheckedObservation pickObservation(FuzzedDataProvider &in, double now,
   o.clockMappingVersion = in.ConsumeIntegralInRange<std::uint64_t>(0, 1);
   o.frame               = in.ConsumeIntegralInRange(0, 7) == 0 ? "ecef" : "enu";
   o.units               = in.ConsumeIntegralInRange(0, 7) == 0 ? "ft" : "m";
-  if (o.predicate == "at" ? in.ConsumeIntegralInRange(0, 7) != 0
-                          : in.ConsumeIntegralInRange(0, 7) == 0)
+  if (o.predicate != "door" ? in.ConsumeIntegralInRange(0, 7) != 0
+                            : in.ConsumeIntegralInRange(0, 7) == 0)
     o.variance = in.ConsumeBool() ? 0.25 : pickDouble(in);
   return o;
 }
@@ -218,6 +229,12 @@ LocalHost &sharedHost() {
     return LocalHost(std::move(*program), harnessOptions());
   }();
   return host;
+}
+
+/// Refusals the executor answers by return value only, without logging.
+bool unlogged(EpistemicRefusal refusal) {
+  return refusal == EpistemicRefusal::UnknownSource ||
+         refusal == EpistemicRefusal::InvalidObservation;
 }
 
 std::string codeOf(const IngestOutcome &o) {
@@ -263,7 +280,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data,
   // Executor-wide, so it must not carry over from the previous input.
   executor.setWallClockSynchronised(true);
   for (std::size_t i = 0; i < kPrincipals.size(); ++i)
-    for (const auto *predicate : {"at", "door"})
+    for (const auto *predicate : {"at", "door", "level"})
       require(executor
                   .bindSource(*pid, {std::string(predicate) + std::to_string(i),
                                      kPrincipals[i], 1, predicate,
@@ -273,15 +290,22 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data,
   host.pump();
 
   const auto deliver = [&](const CheckedObservation &o) {
-    const EpistemicView before(executor, *pid, kPredicates);
+    const EpistemicView before(executor, *pid, kPredicates, kKeyless);
     const auto snapshot = before.snapshot();
     const auto receipt  = executor.observe(*pid, o);
     host.pump();
-    const EpistemicView after(executor, *pid, kPredicates);
+    const EpistemicView after(executor, *pid, kPredicates, kKeyless);
     const auto broken = after.violation();
     if (broken) std::fprintf(stderr, "%s\n", broken->c_str());
     require(!broken, "ingestion invariants");
     require(*executor.epistemicCells(*pid) <= limits.cells, "cell ceiling");
+    // Unbound and malformed input is answered by the return value alone, and
+    // writes nothing anywhere.
+    if (!receipt && unlogged(receipt.error())) {
+      require(after.snapshot() == snapshot,
+              "an unlogged refusal changes nothing");
+      return std::optional<IngestOutcome>{};
+    }
     const auto outcome =
         executor.ingestOutcome(*pid, o.principal, o.incarnation, o.eventId);
     if (!outcome)
@@ -293,8 +317,9 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data,
     require(outcome.has_value(), "every observation has an outcome");
     require(outcome->kind != IngestOutcome::Kind::Pending,
             "no outcome is left pending after a pump");
-    require(receipt || outcome->kind == IngestOutcome::Kind::Refused,
-            "an ingress refusal is logged as refused");
+    // A refused resend of an event the store holds keeps its entry.
+    require(receipt || outcome->kind != IngestOutcome::Kind::Pending,
+            "an ingress refusal leaves no pending entry");
     if (report) std::fprintf(stderr, "outcome %s\n", codeOf(*outcome).c_str());
     const auto later = after.snapshot();
     if (outcome->kind != IngestOutcome::Kind::Committed)
@@ -306,7 +331,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data,
         require(was->second == is->second,
                 "a refused relayed copy leaves health and contact alone");
     }
-    return *outcome;
+    return outcome;
   };
 
   for (int step = 0; step < maxHarnessSteps && in.remaining_bytes() > 0;
@@ -348,26 +373,42 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data,
       break;
     case 4:
       if (last) {
+        const auto statName =
+            std::string(kStatRefusedPrefix) + std::string(kTurnResultDuplicate);
+        const auto duplicates = executor.stat(*pid, statName);
+        const auto beliefs =
+            EpistemicView(executor, *pid, kPredicates, kKeyless).snapshot();
         const auto again = deliver(last->observation);
-        // Bytes acquired near max_age may age out between the two sends.
-        if (last->generation == generation &&
-            last->observation.acquiredAt > now - 9.0)
-          require(again.kind == IngestOutcome::Kind::Duplicate,
-                  "resending committed bytes is a duplicate");
+        // A resend never changes what is believed, and the committed entry
+        // stays committed.
+        require(EpistemicView(executor, *pid, kPredicates, kKeyless)
+                        .snapshot()
+                        .beliefs == beliefs.beliefs,
+                "resending committed bytes writes nothing");
+        if (last->generation == generation) {
+          require(again && again->kind == IngestOutcome::Kind::Committed,
+                  "a committed outcome stays committed");
+          // Bytes acquired near max_age may age out between the two sends.
+          if (last->observation.acquiredAt > now - 9.0)
+            require(executor.stat(*pid, statName) == duplicates + 1,
+                    "resending committed bytes is a duplicate");
+        }
       }
       break;
     case 5: {
       // Several observations before one pump: the per-source queue share
       // of two pushes back, and the queue drains in one go.
-      const EpistemicView before(executor, *pid, kPredicates);
+      const EpistemicView before(executor, *pid, kPredicates, kKeyless);
       const auto snapshot = before.snapshot();
       std::vector<CheckedObservation> batch;
       for (int i = in.ConsumeIntegralInRange(2, 5); i > 0; --i) {
-        batch.push_back(pickObservation(in, now, sources));
-        (void)executor.observe(*pid, batch.back());
+        auto o = pickObservation(in, now, sources);
+        if (const auto receipt = executor.observe(*pid, o);
+            receipt || !unlogged(receipt.error()))
+          batch.push_back(std::move(o));
       }
       host.pump();
-      const EpistemicView after(executor, *pid, kPredicates);
+      const EpistemicView after(executor, *pid, kPredicates, kKeyless);
       require(!after.violation(), "ingestion invariants after a burst");
       bool changed = false;
       for (const auto &o : batch) {
@@ -387,7 +428,8 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data,
     }
     default: {
       const auto o = pickObservation(in, now, sources);
-      if (deliver(o).kind == IngestOutcome::Kind::Committed)
+      if (const auto done = deliver(o);
+          done && done->kind == IngestOutcome::Kind::Committed)
         last = Committed{o, generation};
       break;
     }

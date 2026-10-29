@@ -178,8 +178,10 @@ TEST(SystemDocsTest, VagentSettingsSeedWithDesignDefaults) {
       {"vagent.epistemic_keys_per_source", std::int64_t{4}},
       {"vagent.epistemic_ingress_queue", std::int64_t{64}},
       {"vagent.epistemic_ingress_queue_per_source", std::int64_t{8}},
-      {"vagent.epistemic_outcome_log", std::int64_t{256}},
+      {"vagent.epistemic_outcome_log", std::int64_t{64}},
       {"vagent.epistemic_cells", std::int64_t{32768}},
+      {"vagent.epistemic_ingest_per_wake", std::int64_t{4}},
+      {"vagent.epistemic_arena_slots", std::int64_t{1} << 30},
   };
   for (const auto &[name, value] : expected) {
     const auto it = find(name);
