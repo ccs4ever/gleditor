@@ -88,10 +88,26 @@ std::vector<CellRef> VQLCompiler::compileSteps(std::span<const PathStep> steps,
       });
     }
 
+    for (const auto &shape : step.shapePredicates) {
+      nextStream = emitMap(nextStream, [&](const CellRef candidate) {
+        const auto result = core_.arena().makeCell();
+        const auto clear  = emitOp(OpcodeKind::ClearCellRefs, "#SHAPE_CLEAR");
+        emitOutput(clear, result);
+        const auto condition = compileShapePredicate(shape, candidate);
+        const auto end = vm_.mintOpcode(OpcodeKind::Nop, "#SHAPE_FILTER_END");
+        const auto branch =
+            emitOp(OpcodeKind::BranchFalseCell, "#SHAPE_FILTER");
+        emitInput(branch, condition);
+        emitInput(branch, end);
+        const auto copy = emitOp(OpcodeKind::CopyCellRefs, "#SHAPE_KEEP");
+        emitInput(copy, candidate);
+        emitOutput(copy, result);
+        appendOpcode(end);
+        return std::vector<CellRef>{result};
+      });
+    }
+
     if (step.rangeClamp) nextStream = emitClamp(nextStream, *step.rangeClamp);
-    if (!step.shapePredicates.empty())
-      throw std::invalid_argument(
-          "compiled stream shape predicates require lowering");
 
     if (creationStep) {
       if (step.yieldMode == YieldMode::Keep) {

@@ -103,8 +103,18 @@ Creation-step `!last` now selects globally after predicates/clamps, and `!both` 
 before creations. Bound functors retain those creation-step semantics after capture and rebinding.
 Read `!last`/`!both` remain no-ops. `link()` fan-out mints distinct clones per runtime iteration,
 preserving each attachment. The iteration passes all 412 affected tests, the full build and
-formatting, including saved-graph execution. General yield overrides on opaque functor applications,
-shape predicates and pins remain open.
+formatting, including saved-graph execution. General yield overrides on opaque functor applications
+and pins remain open.
+
+Nonempty static shape predicates now compile bare signed, bidirectional, and negated dimension rules
+into native `ProbeLink` instructions with Boolean graph branches. These one-hop checks recognize
+self-links and resolve foreign proxies, retain candidate identities and duplicates, and filter
+before clamping. Boolean shape tests in anchors, `where` and `if`, captured functors, CLI/host/mesh
+routes, and persisted graph execution share this lowering. Empty/wildcard shapes, value/nested
+constraints, dynamic shape references and projection still require further lowering. The full build,
+formatting and all 435 affected tests passed, with independent Luna gates. A separate expanded mesh
+run retains seven failures on missing Prolog, VLace and VPL lowerings; no full-suite or full §4.12
+pass is claimed. See iteration 10 in the VM-only ledger for logs.
 
 The stream foundation supports one active stream cursor per VM; overlapping cursors and stream
 choice-point stealing refuse. Mesh stream transport, foreign/base-backed export, and general lazy

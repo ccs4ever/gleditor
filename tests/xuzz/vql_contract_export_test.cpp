@@ -195,6 +195,17 @@ void compileExportReloadAndRun(const Case &testCase, const fs::path &root) {
 TEST(VQLContractExportTest, TypedCallGraphSurvivesStoreReloadAndFreshVM) {
   TemporaryDirectory temporary;
   const std::vector<Case> cases{
+      {.query          = "let $p := %\"paper\"; $p/d.items%\"one\"%\"two\"; "
+                         "$p/d.items/d.tag%\"tagged\"; "
+                         "$p/d.items[{ +d.tag, !d.hidden }][-1]",
+       .expectContract = false,
+       .expectedValue  = "two"},
+      {.query          = "let $p := %\"paper\"; $p/d.items%\"one\"%\"two\"; "
+                         "$p/d.items/d.tag%\"tagged\"; "
+                         "let $f := /d.items[{ ~d.tag, !d.hidden }]; "
+                         "let $g := /$f; let $f := /d.absent; $p/$g",
+       .expectContract = false,
+       .expectedValues = {"one", "two"}},
       {.query = "def reveal($items: Stream<Cell { .: $title: String }>): "
                 "String := $title; let $title := \"outer\"; "
                 "let $p := %\"paper\"; $p/d.items%\"first\"%\"second\"; "

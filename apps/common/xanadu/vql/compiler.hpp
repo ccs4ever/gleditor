@@ -164,6 +164,8 @@ private:
                                                   zigzag::CellRef ctxCell);
   std::optional<zigzag::CellRef> compileComparison(const ComparisonExpr &comp,
                                                    zigzag::CellRef ctxCell);
+  zigzag::CellRef compileShapePredicate(const ShapeLiteral &shape,
+                                        zigzag::CellRef candidate);
 
   // Library / Executable structure emission
   zigzag::CellRef linkAsExecutable(zigzag::CellRef entryOp);

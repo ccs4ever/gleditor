@@ -124,7 +124,7 @@ std::optional<OpcodeKind> VortexVM::getOpcodeKind(CellRef opCell) const {
   auto val = core_.arena().asInt64(opCell);
   if (val && *val >= 0 &&
       static_cast<std::uint64_t>(*val) <=
-          static_cast<std::uint64_t>(OpcodeKind::ResumeSet)) {
+          static_cast<std::uint64_t>(OpcodeKind::ProbeLink)) {
     return static_cast<OpcodeKind>(*val);
   }
   return std::nullopt;
@@ -247,6 +247,70 @@ CellValue VortexVM::inputValue(const CellRef input) const {
   }
   return core_.render(input).value_or(
       CellValue{static_cast<std::int64_t>(noCell)});
+}
+
+ExecutionResult VortexVM::executeProbeLink(const CellRef opcode,
+                                           std::vector<CellValue> &outputs) {
+  const auto fail = [opcode](std::string message) {
+    return ExecutionResult{.success       = false,
+                           .failingClause = opcode,
+                           .errorMessage  = std::move(message)};
+  };
+  try {
+    const auto inputs = core_.inputsOf(opcode);
+    const auto slots  = core_.outputsOf(opcode);
+    if (inputs.size() != 3 || slots.size() != 1)
+      return fail("ProbeLink expects three inputs and one output");
+    if (std::ranges::find(inputs, slots.front()) != inputs.end())
+      return fail("ProbeLink output must not alias an input");
+    if (isMemoized(opcode)) return fail("ProbeLink cannot be memoized");
+    if (!core_.preconditionsOf(opcode).empty() ||
+        !core_.postconditionsOf(opcode).empty())
+      return fail("ProbeLink does not support pre/postconditions");
+
+    const auto typed = [this](const CellRef slot) {
+      return streamSlots_.contains(slot) || iteratorSlots_.contains(slot);
+    };
+    if (std::ranges::any_of(inputs, typed) || typed(slots.front()))
+      return fail("ProbeLink requires scalar reference slots");
+    if (std::ranges::any_of(
+            inputs,
+            [&](const CellRef slot) { return core_.hasPipeline(slot); }) ||
+        core_.hasPipeline(slots.front()))
+      return fail("ProbeLink does not support parameter pipelines");
+
+    for (const CellRef slot : inputs)
+      if (!core_.arena().contains(slot))
+        return fail("ProbeLink input slot is missing");
+    if (!core_.arena().contains(slots.front()))
+      return fail("ProbeLink output slot is missing");
+
+    if (cellReferences_.contains(inputs[1]) ||
+        cellReferences_.contains(inputs[2]))
+      return fail("ProbeLink dimension and direction must be scalar values");
+    const auto dimensionValue = core_.arena().asInt64(inputs[1]);
+    if (!dimensionValue || *dimensionValue < 0 ||
+        static_cast<std::uint64_t>(*dimensionValue) >
+            std::numeric_limits<DimRef>::max() ||
+        !core_.arena().contains(static_cast<DimRef>(*dimensionValue)))
+      return fail("ProbeLink dimension must be a valid 32-bit dimension");
+    const auto directionValue = core_.arena().asInt64(inputs[2]);
+    if (!directionValue || (*directionValue != 1 && *directionValue != -1))
+      return fail("ProbeLink direction must be exactly +1 or -1");
+
+    const auto anchor =
+        resolveCell(inputs, {}, cellReferences_, 0, core_.arena());
+    core_.arena().consumeWork();
+    const auto neighbor =
+        anchor ? core_.arena().linkedMinting(
+                     *anchor, static_cast<DimRef>(*dimensionValue),
+                     *directionValue > 0 ? DimVector::POS : DimVector::NEG)
+               : std::nullopt;
+    outputs.emplace_back(static_cast<std::int64_t>(neighbor.value_or(noCell)));
+    return {};
+  } catch (const std::exception &error) {
+    return fail(error.what());
+  }
 }
 
 bool VortexVM::isMemoized(CellRef opcode) const {
@@ -417,6 +481,10 @@ void VortexVM::runPipeline(CellRef paramCell) {
       throw std::invalid_argument(
           "resume-state opcodes cannot run in parameter pipelines");
     }
+    if (kind == OpcodeKind::ProbeLink) {
+      throw std::invalid_argument(
+          "ProbeLink cannot run in a parameter pipeline");
+    }
     if (streamStateOpcode(kind)) {
       throw std::invalid_argument(
           "stream and iterator opcodes cannot run in parameter pipelines");
@@ -489,6 +557,8 @@ bool VortexVM::evaluateCondition(CellRef clause,
   if (kind == OpcodeKind::ResumeInit || kind == OpcodeKind::ResumeSet) {
     return false;
   }
+  if (kind == OpcodeKind::ProbeLink)
+    throw std::invalid_argument("ProbeLink cannot run as a condition");
   std::vector<CellRef> inCells = core_.inputsOf(actualClause);
   std::vector<CellValue> inVals;
   if (kind == OpcodeKind::VqlCompare) {
@@ -537,6 +607,8 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
     return executeResumeSet(opcode, inputs, cursor);
   case OpcodeKind::VqlCompare:
     return executeVqlCompare(opcode, outputs);
+  case OpcodeKind::ProbeLink:
+    return executeProbeLink(opcode, outputs);
   case OpcodeKind::Add: {
     if (inputs.size() >= 2) {
       if (std::holds_alternative<std::string>(inputs[0]) &&
@@ -1327,6 +1399,46 @@ ExecutionResult VortexVM::step(CellRef cursor) {
       kind == OpcodeKind::MatchContract || kind == OpcodeKind::RequireContract;
   const bool resumeStateOp =
       kind == OpcodeKind::ResumeInit || kind == OpcodeKind::ResumeSet;
+  const bool probeLinkOp           = kind == OpcodeKind::ProbeLink;
+  const auto hasProbeLinkCondition = [this](const auto &clauses) {
+    return std::ranges::any_of(clauses, [this](const CellRef clause) {
+      const CellRef actual = core_.arena()
+                                 .cloneMaster(clause, core_.dims().clone)
+                                 .value_or(clause);
+      return getOpcodeKind(actual) == OpcodeKind::ProbeLink;
+    });
+  };
+  if (hasProbeLinkCondition(core_.preconditionsOf(*op)) ||
+      hasProbeLinkCondition(core_.postconditionsOf(*op))) {
+    return {.success      = false,
+            .errorMessage = "ProbeLink cannot run as a condition"};
+  }
+  if (probeLinkOp) {
+    if (!core_.preconditionsOf(*op).empty() ||
+        !core_.postconditionsOf(*op).empty()) {
+      return {.success      = false,
+              .errorMessage = "ProbeLink does not support pre/postconditions"};
+    }
+    if (std::ranges::any_of(
+            inputCells,
+            [&](const CellRef input) { return core_.hasPipeline(input); }) ||
+        std::ranges::any_of(outCells, [&](const CellRef output) {
+          return core_.hasPipeline(output);
+        })) {
+      return {.success      = false,
+              .errorMessage = "ProbeLink does not support parameter pipelines"};
+    }
+    const auto isTypedSlot = [this](const CellRef slot) {
+      return streamSlots_.contains(slot) || iteratorSlots_.contains(slot);
+    };
+    if (std::ranges::any_of(inputCells, isTypedSlot) ||
+        std::ranges::any_of(outCells, isTypedSlot)) {
+      return {.success      = false,
+              .errorMessage = "ProbeLink requires scalar reference slots"};
+    }
+    if (isMemoized(*op))
+      return {.success = false, .errorMessage = "ProbeLink cannot be memoized"};
+  }
   if (contractOp) {
     if (!core_.preconditionsOf(*op).empty() ||
         !core_.postconditionsOf(*op).empty()) {
@@ -1443,7 +1555,7 @@ ExecutionResult VortexVM::step(CellRef cursor) {
           kind == OpcodeKind::ClearCellRefs ||
           kind == OpcodeKind::MatchContract ||
           kind == OpcodeKind::RequireContract ||
-          kind == OpcodeKind::VqlCompare) {
+          kind == OpcodeKind::VqlCompare || kind == OpcodeKind::ProbeLink) {
         oldInputs.emplace_back(false);
       } else {
         oldInputs.push_back(inputValue(paramCell));
@@ -1466,7 +1578,7 @@ ExecutionResult VortexVM::step(CellRef cursor) {
       kind != OpcodeKind::ClearCellRefs &&
       kind != OpcodeKind::BranchFalseCell && kind != OpcodeKind::VqlCompare &&
       kind != OpcodeKind::ResumeInit && kind != OpcodeKind::ResumeSet &&
-      !stateful;
+      kind != OpcodeKind::ProbeLink && !stateful;
   if (memoizable && isMemoized(*op)) {
     if (const auto key = getMemoKey(*op)) {
       CellRef pin = core_.getOrCreateMemoPin(*key);
@@ -1513,7 +1625,8 @@ ExecutionResult VortexVM::step(CellRef cursor) {
       // Stateful registers write their runtime state and output refs directly.
     } else if (kind == OpcodeKind::Link || kind == OpcodeKind::Break ||
                kind == OpcodeKind::Value || kind == OpcodeKind::CopyCellRefs ||
-               kind == OpcodeKind::ClearCellRefs) {
+               kind == OpcodeKind::ClearCellRefs ||
+               kind == OpcodeKind::ProbeLink) {
       writeCellReferences(outCells, newOutputs,
                           kind == OpcodeKind::CopyCellRefs ||
                               kind == OpcodeKind::ClearCellRefs);

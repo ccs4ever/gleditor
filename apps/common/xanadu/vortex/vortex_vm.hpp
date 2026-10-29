@@ -109,6 +109,7 @@ enum class OpcodeKind : std::uint8_t {
   VqlCompare,
   ResumeInit,
   ResumeSet,
+  ProbeLink,
 };
 
 enum class VqlComparisonKind : std::int64_t {
@@ -266,6 +267,8 @@ private:
   void pruneResumeState() noexcept;
   ExecutionResult executeVqlCompare(CellRef opcode,
                                     std::vector<CellValue> &outputs);
+  ExecutionResult executeProbeLink(CellRef opcode,
+                                   std::vector<CellValue> &outputs);
   ExecutionResult executeTypeContract(OpcodeKind kind, CellRef opcode,
                                       std::vector<CellValue> &outputs);
   xanadu::MultiStoreCoordinator *contractCoordinator_{nullptr};

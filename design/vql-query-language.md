@@ -2342,6 +2342,10 @@ explicit refusals. The rulings below describe the intended semantics.
   back. Atomic enforcement of user mutations remains a separate milestone. Matching still
   materializes subjects; no zero-copy or universal allocation guarantee follows. Step predicates
   retain cell identity through guarded reference slots and Boolean control flow short-circuits.
+  Nonempty literal shape predicates now lower targetless dimension presence/absence rules to native
+  one-hop probes, including foreign neighbors and self-links. Scalar predicates run before shape
+  predicates and both precede the range clamp; the AST does not retain their source interleaving.
+  Empty/wildcard shapes, target constraints, nesting and dynamic shape rules still require lowering.
   Unsupported cases refuse explicitly. Runtime rank iterators and eager sequence registers now
   support per-member typed filtering, stream cardinality, predicates and integer index clamps.
   Foreign neighbors resolve through canonical arena proxies; choice points restore iterator state

@@ -52,7 +52,8 @@ exportProgram(const VortexCore &core, const VortexVM &vm,
       }
     }
     if (*kind == OpcodeKind::Link || *kind == OpcodeKind::New ||
-        *kind == OpcodeKind::Break || *kind == OpcodeKind::RankBegin) {
+        *kind == OpcodeKind::Break || *kind == OpcodeKind::RankBegin ||
+        *kind == OpcodeKind::ProbeLink) {
       const auto inputs = core.inputsOf(opcode);
       if (inputs.size() < 2)
         throw std::runtime_error("structural opcode has no dimension operand");

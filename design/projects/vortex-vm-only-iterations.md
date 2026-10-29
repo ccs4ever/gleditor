@@ -242,6 +242,43 @@ Existing-target `link()` fan-out mints a fresh clone on each runtime iteration t
 creation and link instructions, rather than reusing a compiler-allocated output cell. This preserves
 distinct identities and each context's attachment. No interpreter fallback is introduced.
 
-Validation is pending. This bounded change does not add general yield overrides for opaque functor
-applications, shape predicates, lazy default thunks, recursive frames or mutation-boundary
-contracts.
+Validation: full `make -j$(nproc)` and repository `format-check` passed. All 412 affected tests from
+36 suites passed, including eight new VM regressions, the previously failing contexts-before-clones
+case, captured functors after rebinding, and persisted graphs executed in a fresh VM. Independent
+Luna architecture, senior and profiler reviews gated the bounded change; no performance improvement
+or full-suite pass is claimed.
+
+This change does not add general yield overrides for opaque functor applications, shape predicates,
+lazy default thunks, recursive frames or mutation-boundary contracts. Full §4.12 remains incomplete.
+
+Logs: `/tmp/vql-yield-baseline.log`, `/tmp/vql-creation-yield-build.log`,
+`/tmp/vql-creation-yield-tests.log`, `/tmp/vql-creation-yield-format.log`.
+
+## Iteration 10: static dimensional shape predicates
+
+Nonempty literal shape predicates with targetless dimension rules compile to native graph
+instructions. Signed rules test the immediate neighbor, `~d.name` accepts either direction, and
+`!d.name` requires absence in both directions. Rules combine with short-circuit conjunction. Shape
+filtering preserves candidate identity, order and duplicates, and runs after scalar predicates but
+before the range clamp. The same helper serves Boolean shape tests and captured functor bodies. The
+AST keeps scalar and shape predicate groups separately; this stage does not preserve their original
+bracket interleaving.
+
+`ProbeLink` is an explicit, metered one-hop VM instruction. It resolves canonical foreign neighbors
+and recognizes self-links without applying rank iteration's visited-cell suppression. Ordinary
+`Link` behavior is unchanged. Compilation emits no runtime AST evaluator or shape callback.
+
+Empty shapes, wildcards, value and nested constraints, shape references/functions, pivots and
+virtual-dimension rules still refuse explicitly. They require further graph lowering. Validation:
+full `make -j$(nproc)` and repository `format-check` passed. All 435 affected tests from 39 suites
+passed, including seven shape tests, seven native probe tests, CLI/host query, navigation, script
+and batch routes, source mesh execution, sealed mesh artifacts, and saved graphs executed in a fresh
+VM. Independent Luna architecture, senior and profiler gates accepted the bounded stage. No runtime
+performance improvement is claimed; mesh also charges its normal per-instruction fuel.
+
+An expanded 446-test run passed 439 and failed seven broader mesh expectations on missing Prolog,
+VLace, and VPL array/enclosure lowering. These failures are retained in the expanded-run log. No
+full-suite pass or full §4.12 completion is claimed.
+
+Logs: `/tmp/vql-shape-predicate-build.log`, `/tmp/vql-shape-predicate-focused.log`,
+`/tmp/vql-shape-predicate-tests.log` (expanded run), `/tmp/vql-shape-predicate-format.log`.

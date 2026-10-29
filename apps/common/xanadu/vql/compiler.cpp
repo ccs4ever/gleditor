@@ -110,6 +110,8 @@ VQLCompiler::opcodeMnemonic(zigzag::vortex::OpcodeKind kind) noexcept {
     return "RESUME_INIT";
   case OpcodeKind::ResumeSet:
     return "RESUME_SET";
+  case OpcodeKind::ProbeLink:
+    return "PROBE_LINK";
   case OpcodeKind::RankBegin:
     return "RANK_BEGIN";
   case OpcodeKind::IteratorNext:
@@ -359,12 +361,6 @@ VQLCompiler::compilePathExpression(const PathExpression &path,
         return step.versionPin.has_value();
       }))
     throw std::invalid_argument("version pins require historical VM lowering");
-  if (!path.anchorPredicates.empty()) {
-    // Refused rather than compiled without them, which would answer every
-    // anchor cell whatever the predicate said.
-    throw std::invalid_argument(
-        "anchor predicates require Vortex graph lowering");
-  }
   std::vector<CellRef> stream;
   if (path.anchor.kind == AnchorKind::Variable &&
       streamBindings_.contains(path.anchor.name)) {
@@ -382,6 +378,24 @@ VQLCompiler::compilePathExpression(const PathExpression &path,
     } else if (const auto start = compileAnchor(path.anchor)) {
       stream.push_back(*start);
     }
+  }
+  for (const auto &predicate : path.anchorPredicates) {
+    stream = emitMap(stream, [&](const CellRef candidate) {
+      const CellRef result = core_.arena().makeCell();
+      const auto clear     = emitOp(OpcodeKind::ClearCellRefs, "#ANCHOR_CLEAR");
+      emitOutput(clear, result);
+      auto condition = compileBooleanExpr(predicate, candidate);
+      if (!condition) condition = emitConstant(false);
+      const auto end    = vm_.mintOpcode(OpcodeKind::Nop, "#ANCHOR_FILTER_END");
+      const auto branch = emitOp(OpcodeKind::BranchFalseCell, "#ANCHOR_FILTER");
+      emitInput(branch, *condition);
+      emitInput(branch, end);
+      const auto copy = emitOp(OpcodeKind::CopyCellRefs, "#ANCHOR_KEEP");
+      emitInput(copy, candidate);
+      emitOutput(copy, result);
+      appendOpcode(end);
+      return std::vector<CellRef>{result};
+    });
   }
   if (path.anchor.derefMaster) {
     stream = emitMap(stream, [&](CellRef candidate) {
@@ -580,10 +594,19 @@ std::optional<CellRef> VQLCompiler::compileBooleanExpr(const BooleanExpr &expr,
               } else if constexpr (std::is_same_v<T,
                                                         std::shared_ptr<ValueExpr>>) {
                 if (t) {
+                  if (const auto *shape =
+                          std::get_if<std::shared_ptr<ShapeLiteral>>(&t->kind);
+                      shape && *shape) {
+                    return compileShapePredicate(**shape, ctxCell);
+                  }
                   const auto value = compileValueExpr(*t, ctxCell);
                   return value ? *value : emitConstant(false);
                 }
                 return emitConstant(false);
+              } else if constexpr (std::is_same_v<
+                                             T, std::shared_ptr<ShapeLiteral>>) {
+                return t ? std::optional{compileShapePredicate(*t, ctxCell)}
+                               : std::optional{emitConstant(false)};
               } else if constexpr (std::is_same_v<T, std::shared_ptr<
                                                                FunctionInvocation>>) {
                 if (t) {
@@ -592,7 +615,7 @@ std::optional<CellRef> VQLCompiler::compileBooleanExpr(const BooleanExpr &expr,
                 return emitConstant(false);
               } else {
                 throw std::invalid_argument(
-                    "VQL shape predicates require Vortex graph lowering");
+                    "unsupported VQL predicate requires graph lowering");
               }
             },
             pt.kind);
