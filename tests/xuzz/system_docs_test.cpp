@@ -173,6 +173,13 @@ TEST(SystemDocsTest, VagentSettingsSeedWithDesignDefaults) {
       {"vagent.max_candidates", std::int64_t{1024}},
       {"vagent.epistemic_scope_depth", std::int64_t{32}},
       {"vagent.epistemic_nested_scopes", std::int64_t{8}},
+      {"vagent.epistemic_history", std::int64_t{4}},
+      {"vagent.epistemic_dedup", std::int64_t{16}},
+      {"vagent.epistemic_keys_per_source", std::int64_t{4}},
+      {"vagent.epistemic_ingress_queue", std::int64_t{64}},
+      {"vagent.epistemic_ingress_queue_per_source", std::int64_t{8}},
+      {"vagent.epistemic_outcome_log", std::int64_t{256}},
+      {"vagent.epistemic_cells", std::int64_t{32768}},
   };
   for (const auto &[name, value] : expected) {
     const auto it = find(name);

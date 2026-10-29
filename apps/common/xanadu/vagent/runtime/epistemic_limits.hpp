@@ -21,12 +21,22 @@ inline constexpr std::int64_t kDefaultEpistemicScopeDepth = 32;
 // A query may call a ranked sub-query inside its callback; eight levels bound
 // the saved caller continuations an actor can hold at once.
 inline constexpr std::int64_t kDefaultEpistemicNestedScopes = 8;
+// Checked ingestion (I3-1 design section 9). A record costs about 100 cells,
+// so these defaults hold about 18 fully active principals in the cell budget.
+inline constexpr std::int64_t kDefaultEpistemicHistory               = 4;
+inline constexpr std::int64_t kDefaultEpistemicDedup                 = 16;
+inline constexpr std::int64_t kDefaultEpistemicKeysPerSource         = 4;
+inline constexpr std::int64_t kDefaultEpistemicIngressQueue          = 64;
+inline constexpr std::int64_t kDefaultEpistemicIngressQueuePerSource = 8;
+inline constexpr std::int64_t kDefaultEpistemicOutcomeLog            = 256;
+inline constexpr std::int64_t kDefaultEpistemicCells                 = 32768;
 
 enum class EpistemicLimitError : std::uint8_t {
   InvalidSources,
   InvalidCandidates,
   InvalidScopeDepth,
   InvalidNestedScopes,
+  InvalidIngestionBound,
 };
 
 /// Logical admission bounds; actor cell, byte and fuel grants remain
@@ -41,6 +51,30 @@ struct EpistemicLimits {
   /// Scoped evaluations one actor may have open at once, nesting included.
   std::size_t maxNestedScopes{
       static_cast<std::size_t>(kDefaultEpistemicNestedScopes)};
+  /// `vagent.epistemic_history`: records retained per (principal, key) support;
+  /// current and pinned records are never excised.
+  std::size_t history{static_cast<std::size_t>(kDefaultEpistemicHistory)};
+  /// `vagent.epistemic_dedup`: (incarnation, event ID, digest) entries per
+  /// source profile; the replay horizon for exact retries.
+  std::size_t dedup{static_cast<std::size_t>(kDefaultEpistemicDedup)};
+  /// `vagent.epistemic_keys_per_source`: keys one source principal may support
+  /// on one predicate.
+  std::size_t keysPerSource{
+      static_cast<std::size_t>(kDefaultEpistemicKeysPerSource)};
+  /// `vagent.epistemic_ingress_queue`: checked observations queued for one
+  /// actor.
+  std::size_t ingressQueue{
+      static_cast<std::size_t>(kDefaultEpistemicIngressQueue)};
+  /// `vagent.epistemic_ingress_queue_per_source`: queued observations one
+  /// source principal may hold.
+  std::size_t ingressQueuePerSource{
+      static_cast<std::size_t>(kDefaultEpistemicIngressQueuePerSource)};
+  /// `vagent.epistemic_outcome_log`: ingestion outcomes the host log keeps per
+  /// actor.
+  std::size_t outcomeLog{static_cast<std::size_t>(kDefaultEpistemicOutcomeLog)};
+  /// `vagent.epistemic_cells`: maintained epistemic cell ceiling, kept below
+  /// vagent.value_operations so a full budget still checkpoints.
+  std::size_t cells{static_cast<std::size_t>(kDefaultEpistemicCells)};
 
   [[nodiscard]] std::expected<void, EpistemicLimitError> validate() const {
     if (maxSources == 0)
@@ -51,6 +85,12 @@ struct EpistemicLimits {
       return std::unexpected(EpistemicLimitError::InvalidScopeDepth);
     if (maxNestedScopes == 0)
       return std::unexpected(EpistemicLimitError::InvalidNestedScopes);
+    for (const auto bound : {history, dedup, keysPerSource, ingressQueue,
+                             ingressQueuePerSource, outcomeLog, cells})
+      if (bound == 0)
+        return std::unexpected(EpistemicLimitError::InvalidIngestionBound);
+    if (ingressQueuePerSource > ingressQueue)
+      return std::unexpected(EpistemicLimitError::InvalidIngestionBound);
     return {};
   }
 };

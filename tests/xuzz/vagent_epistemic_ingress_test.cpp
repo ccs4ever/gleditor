@@ -42,14 +42,35 @@ protected:
   std::optional<LocalHost> host;
   ActorPid pid;
 
-  void SetUp() override {
+  void SetUp() override { start({}); }
+
+  void start(AgentSettings settings) {
     auto program = CompiledProgram::fromSource(kProgram);
     ASSERT_TRUE(program) << program.error();
-    host.emplace(std::move(*program));
+    LocalHost::Options options;
+    options.settings = settings;
+    host.emplace(std::move(*program), options);
     const auto launched = host->launch("A", "a");
     ASSERT_TRUE(launched);
     pid = *launched;
     host->pump();
+  }
+
+  std::vector<CellRef> profiles() {
+    const auto dims = registerDimensions(arena());
+    return zigzag::rankAfter(arena(), *host->executor().agentCell(pid),
+                             dims.trust) |
+           std::ranges::to<std::vector<CellRef>>();
+  }
+  std::size_t listLength(CellRef list) {
+    std::size_t n = 0;
+    for (auto e = arena().linked(list, ctx().core.dims().grab); e;
+         e      = arena().linked(*e, ctx().core.dims().step))
+      ++n;
+    return n;
+  }
+  std::optional<CellRef> value(CellRef record, std::string_view name) {
+    return fieldValue(ctx().arena, valueDims(ctx().core), record, name);
   }
 
   CheckedObservation reading(const std::string &principal, std::string eventId,
@@ -229,6 +250,96 @@ TEST_F(VagentEpistemicIngress,
   EXPECT_FALSE(host->executor().observe(pid, huge));
   host->pump();
   EXPECT_TRUE(clauses().empty());
+}
+
+TEST_F(VagentEpistemicIngress, EachPrincipalGetsOneProfileOnTheTrustRank) {
+  observe(reading(kP1, "e1", 1, 1.0));
+  observe(reading(kP1, "e2", 2, 1.5));
+  observe(reading(kP2, "q1", 1, 1.0));
+  const auto ps = profiles();
+  ASSERT_EQ(ps.size(), 2U);
+  EXPECT_EQ(arena().textOf(ps[0]), kP1);
+  EXPECT_EQ(arena().textOf(ps[1]), kP2);
+  EXPECT_EQ(arena().asInt64(*value(ps[0], kProfileIncarnation)), 1);
+  EXPECT_EQ(arena().asBool(*value(ps[0], kProfileFaulted)), false);
+  EXPECT_EQ(arena().asInt64(*value(ps[0], kProfileRefusedCount)), 0);
+  EXPECT_EQ(listLength(*value(ps[0], kProfileDedup)), 2U);
+  // The record's profile field is a clone occurrence of the profile master.
+  const auto rec  = history(supports(clauses().front()).front()).front();
+  const auto view = value(rec, kObsProfile);
+  ASSERT_TRUE(view);
+  EXPECT_EQ(arena().cloneMaster(*view, ctx().core.dims().clone), ps[0]);
+}
+
+TEST_F(VagentEpistemicIngress, AnExactRetryCommitsNothingAndAReuseConflicts) {
+  observe(reading(kP1, "e1", 1, 1.0));
+  observe(reading(kP1, "e1", 1, 1.0));
+  EXPECT_EQ(refused(kTurnResultDuplicate), 1U);
+  auto reused = reading(kP1, "e1", 1, 3.0);
+  observe(reused);
+  EXPECT_EQ(refused(kTurnResultConflictingEvent), 1U);
+  const auto cls = clauses();
+  ASSERT_EQ(cls.size(), 1U);
+  EXPECT_EQ(history(supports(cls[0]).front()).size(), 1U);
+  EXPECT_EQ(intField("adds"), 1);
+  // A relay of the same event carries the same digest: still a duplicate.
+  auto relayed      = reading(kP1, "e1", 1, 1.0);
+  relayed.relayedBy = kP2;
+  observe(relayed);
+  EXPECT_EQ(refused(kTurnResultDuplicate), 2U);
+}
+
+TEST_F(VagentEpistemicIngress, ASequenceThatDoesNotAdvanceIsStale) {
+  observe(reading(kP1, "e5", 5, 1.0));
+  observe(reading(kP1, "e4", 4, 2.0));
+  observe(reading(kP1, "e5b", 5, 2.0));
+  EXPECT_EQ(refused(kTurnResultStaleSequence), 2U);
+  EXPECT_EQ(history(supports(clauses().front()).front()).size(), 1U);
+}
+
+TEST_F(VagentEpistemicIngress, APrincipalBeyondTheBudgetIsRefused) {
+  AgentSettings settings;
+  settings.epistemic.maxSources = 1;
+  start(settings);
+  observe(reading(kP1, "e1", 1, 1.0));
+  observe(reading(kP2, "q1", 1, 1.0));
+  EXPECT_EQ(refused(kTurnResultEpistemicBudget), 1U);
+  EXPECT_EQ(profiles().size(), 1U);
+  EXPECT_EQ(supports(clauses().front()).size(), 1U);
+}
+
+TEST_F(VagentEpistemicIngress, AnIncarnationChangeWaitsForIncarnationSupport) {
+  observe(reading(kP1, "e1", 1, 1.0));
+  auto rebooted        = reading(kP1, "r1", 1, 1.0);
+  rebooted.incarnation = 2;
+  observe(rebooted);
+  EXPECT_EQ(refused(kTurnResultUnsupportedIncarnation), 1U);
+}
+
+TEST_F(VagentEpistemicIngress, TheDedupWindowKeepsOnlyTheNewestEntries) {
+  AgentSettings settings;
+  settings.epistemic.dedup = 2;
+  start(settings);
+  for (std::uint64_t i = 1; i <= 4; ++i)
+    observe(reading(kP1, "e" + std::to_string(i), i, 1.0));
+  const auto dedup = *value(profiles().front(), kProfileDedup);
+  ASSERT_EQ(listLength(dedup), 2U);
+  const auto first = arena().linked(dedup, ctx().core.dims().grab);
+  EXPECT_EQ(text(*first, kObsEventId), "e3");
+  // e1 fell out of the window, so its replay falls to the sequence rule.
+  observe(reading(kP1, "e1", 1, 1.0));
+  EXPECT_EQ(refused(kTurnResultStaleSequence), 1U);
+}
+
+TEST_F(VagentEpistemicIngress, OnlyADirectEventRefreshesContact) {
+  auto relayed      = reading(kP1, "e1", 1, 1.0);
+  relayed.relayedBy = kP2;
+  observe(relayed);
+  const auto prof = profiles().front();
+  EXPECT_TRUE(value(prof, kProfileLastReceive));
+  EXPECT_FALSE(value(prof, kProfileLastContact));
+  observe(reading(kP1, "e2", 2, 1.0));
+  EXPECT_TRUE(value(prof, kProfileLastContact));
 }
 
 TEST(VagentEpistemicIngressPlain, AProgramWithoutArbitrationHasNoRoutine) {

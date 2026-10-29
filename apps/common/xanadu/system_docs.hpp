@@ -291,6 +291,20 @@ inline constexpr std::string_view kVagentScopeDepth =
     "vagent.epistemic_scope_depth";
 inline constexpr std::string_view kVagentNestedScopes =
     "vagent.epistemic_nested_scopes";
+inline constexpr std::string_view kVagentEpistemicHistory =
+    "vagent.epistemic_history";
+inline constexpr std::string_view kVagentEpistemicDedup =
+    "vagent.epistemic_dedup";
+inline constexpr std::string_view kVagentEpistemicKeysPerSource =
+    "vagent.epistemic_keys_per_source";
+inline constexpr std::string_view kVagentEpistemicIngressQueue =
+    "vagent.epistemic_ingress_queue";
+inline constexpr std::string_view kVagentEpistemicIngressQueuePerSource =
+    "vagent.epistemic_ingress_queue_per_source";
+inline constexpr std::string_view kVagentEpistemicOutcomeLog =
+    "vagent.epistemic_outcome_log";
+inline constexpr std::string_view kVagentEpistemicCells =
+    "vagent.epistemic_cells";
 
 // UI
 inline constexpr std::string_view kTabBarVisible       = "tabBarVisible";

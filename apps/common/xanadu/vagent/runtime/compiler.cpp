@@ -4431,6 +4431,213 @@ void Gen::emitObserve(CellRef entryLabel) {
   branchIfZero(tuple, malformed);
   field(kObsSource, who);
   branchIfZero(who, malformed);
+  const CellRef ingest = global(), maxSources = global(),
+                dedupWindow = global(), inc = global(), eventId = global(),
+                digest = global(), seq = global(), received = global(),
+                relayed = global();
+  mov(S(a0_), S(tp));
+  movC(a1_, cStr(std::string(kTurnIngest)));
+  callLabel(rtFind_);
+  mov(S(ingest), S(r0_));
+  branchIfZero(ingest, malformed);
+  const auto limit = [&](std::string_view name, CellRef out) {
+    mov(S(a0_), S(ingest));
+    movC(a1_, cStr(std::string(name)));
+    callLabel(rtFind_);
+    mov(S(out), S(r0_));
+    branchIfZero(out, malformed);
+  };
+  limit(kIngestMaxSources, maxSources);
+  limit(kIngestDedup, dedupWindow);
+  const auto required = [&](std::string_view name, CellRef out) {
+    field(name, out);
+    branchIfZero(out, malformed);
+  };
+  required(kObsIncarnation, inc);
+  required(kObsEventId, eventId);
+  required(kObsDigest, digest);
+  required(kObsSequence, seq);
+  required(kObsReceivedSteady, received);
+  field(kObsRelayedBy, relayed);
+
+  // 1. The source's profile: found by its token on `$agent +d.trust`, or
+  //    created within the principal budget.
+  const CellRef prof = global(), count = global(), full = global();
+  {
+    const CellRef same = reg(), loop = newLabel(), found = newLabel(),
+                  absent = newLabel();
+    movC(count, zero_);
+    mov(S(prof), S(rd(S(agentCell_), dims_.trust)));
+    place(loop);
+    branchIfZero(prof, absent);
+    emit(OpcodeKind::Eq, "who?", {D(prof), D(who)}, {same});
+    branch(S(same), found);
+    emit(OpcodeKind::Add, "n+", {S(count), S(one_)}, {count});
+    mov(S(prof), S(rd(D(prof), dims_.trust)));
+    jump(loop);
+    place(absent);
+    const CellRef admit = newLabel();
+    emit(OpcodeKind::Lt, "room?", {S(count), D(maxSources)}, {full});
+    branch(S(full), admit);
+    endObservation(kTurnResultEpistemicBudget);
+    place(admit);
+    alloc(prof);
+    mov(D(prof), D(who));
+    markRecord(prof);
+    const auto init = [&](std::string_view name, Opd value) {
+      CellRef vc;
+      callSetField(prof, std::string(name), std::nullopt, vc);
+      mov(D(vc), value);
+    };
+    init(kProfileIncarnation, D(inc));
+    init(kProfileFaulted, S(false_));
+    for (const auto counter : {kProfileRejectionStreak, kProfileRejectCount,
+                               kProfileContentRefusals, kProfileRefusedCount})
+      init(counter, S(zero_));
+    const CellRef streams = reg(), seen = reg();
+    alloc(streams);
+    mov(D(streams), S(cStr(std::string(kProfileStreams))));
+    markRecord(streams);
+    CellRef vc;
+    callSetField(prof, std::string(kProfileStreams), streams, vc);
+    alloc(seen);
+    mov(D(seen), S(cStr(std::string(kListContent))));
+    callSetField(prof, std::string(kProfileDedup), seen, vc);
+    emitAppendTail(S(agentCell_), dims_.trust, dims_.trust, prof);
+    place(found);
+  }
+  const auto profileField = [&](std::string_view name, CellRef out) {
+    mov(S(a0_), S(prof));
+    movC(a1_, cStr(std::string(name)));
+    callLabel(rtFind_);
+    mov(S(out), S(r0_));
+  };
+  // 2. Until incarnations land (I3-1c) a profile keeps its first one.
+  {
+    const CellRef profInc = reg(), same = reg(), ok = newLabel();
+    profileField(kProfileIncarnation, profInc);
+    emit(OpcodeKind::Eq, "inc?", {D(profInc), D(inc)}, {same});
+    branch(S(same), ok);
+    endObservation(kTurnResultUnsupportedIncarnation);
+    place(ok);
+  }
+  // 3. Exact retries commit nothing; a reused ID with other bytes refuses.
+  const CellRef seenList = global();
+  profileField(kProfileDedup, seenList);
+  {
+    const CellRef e = reg(), v = reg(), same = reg(), loop = newLabel(),
+                  next = newLabel(), done = newLabel(), dup = newLabel();
+    mov(S(e), S(rd(D(seenList), core_.dims().grab)));
+    place(loop);
+    branchIfZero(e, done);
+    const auto entryIs = [&](std::string_view name, CellRef want) {
+      mov(S(a0_), S(e));
+      movC(a1_, cStr(std::string(name)));
+      callLabel(rtFind_);
+      mov(S(v), S(r0_));
+      branchIfZero(v, next);
+      emit(OpcodeKind::Eq, "seen?", {D(v), D(want)}, {same});
+      requireTrue(same, next);
+    };
+    entryIs(kObsIncarnation, inc);
+    entryIs(kObsEventId, eventId);
+    mov(S(a0_), S(e));
+    movC(a1_, cStr(std::string(kObsDigest)));
+    callLabel(rtFind_);
+    emit(OpcodeKind::Eq, "digest?", {D(r0_), D(digest)}, {same});
+    branch(S(same), dup);
+    endObservation(kTurnResultConflictingEvent);
+    place(dup);
+    endObservation(kTurnResultDuplicate);
+    place(next);
+    mov(S(e), S(rd(D(e), core_.dims().step)));
+    jump(loop);
+    place(done);
+  }
+  // 4. Transport order, per (profile, predicate) stream.
+  const CellRef streamsRec = global(), predName = global();
+  profileField(kProfileStreams, streamsRec);
+  mov(S(predName), D(ty));
+  {
+    const CellRef last = reg(), stale = reg(), fresh = newLabel();
+    mov(S(a0_), S(streamsRec));
+    mov(S(a1_), S(predName));
+    callLabel(rtFind_);
+    mov(S(last), S(r0_));
+    branchIfZero(last, fresh);
+    emit(OpcodeKind::Lte, "stale?", {D(seq), D(last)}, {stale});
+    requireTrue(stale, fresh);
+    endObservation(kTurnResultStaleSequence);
+    place(fresh);
+  }
+  // Committed only: the profile's view in the record, the dedup entry, the
+  // stream and the receipt times.
+  const auto bookkeeping = [&](CellRef rec) {
+    {
+      const CellRef view = reg(), old = reg(), lone = newLabel();
+      alloc(view);
+      mov(D(view), D(who));
+      mov(S(old), S(rd(D(prof), core_.dims().clone)));
+      breakOp(D(prof), core_.dims().clone);
+      linkOp(D(prof), core_.dims().clone, D(view));
+      branchIfZero(old, lone);
+      linkOp(D(view), core_.dims().clone, D(old));
+      place(lone);
+      CellRef vc;
+      callSetField(rec, std::string(kObsProfile), view, vc);
+    }
+    {
+      const CellRef entry = reg(), n = reg(), e = reg(), over = reg();
+      const CellRef tally = newLabel(), counted = newLabel(), kept = newLabel();
+      alloc(entry);
+      mov(D(entry), S(cStr("Seen")));
+      markRecord(entry);
+      for (const auto &[name, value] :
+           {std::pair{kObsIncarnation, inc}, std::pair{kObsEventId, eventId},
+            std::pair{kObsDigest, digest}}) {
+        CellRef vc;
+        callSetField(entry, std::string(name), std::nullopt, vc);
+        mov(D(vc), D(value));
+      }
+      callListPush(seenList, entry);
+      movC(n, zero_);
+      mov(S(e), S(rd(D(seenList), core_.dims().grab)));
+      place(tally);
+      branchIfZero(e, counted);
+      emit(OpcodeKind::Add, "n+", {S(n), S(one_)}, {n});
+      mov(S(e), S(rd(D(e), core_.dims().step)));
+      jump(tally);
+      place(counted);
+      emit(OpcodeKind::Gt, "over?", {S(n), D(dedupWindow)}, {over});
+      requireTrue(over, kept);
+      // The oldest entry is first; its successor heads the window.
+      const CellRef first = reg(), second = reg(), last = newLabel();
+      mov(S(first), S(rd(D(seenList), core_.dims().grab)));
+      mov(S(second), S(rd(D(first), core_.dims().step)));
+      breakOp(D(seenList), core_.dims().grab);
+      branchIfZero(second, last);
+      breakOp(D(first), core_.dims().step);
+      linkOp(D(seenList), core_.dims().grab, D(second));
+      place(last);
+      place(kept);
+    }
+    mov(S(a0_), S(streamsRec));
+    mov(S(a1_), S(predName));
+    movC(a2_, zero_);
+    callLabel(routineLabel(rtSetField_, &Gen::emitRtSetField));
+    mov(D(r0_), D(seq));
+    CellRef vc;
+    callSetField(prof, std::string(kProfileLastReceive), std::nullopt, vc);
+    mov(D(vc), D(received));
+    // Only a directly received event shows the device is alive.
+    const CellRef direct = newLabel(), after = newLabel();
+    branchIfZero(relayed, direct);
+    jump(after);
+    place(direct);
+    callSetField(prof, std::string(kProfileLastContact), std::nullopt, vc);
+    mov(D(vc), D(received));
+    place(after);
+  };
   for (auto &[name, info] : preds_) {
     if (!info.arbitrated) continue;
     const CellRef next = newLabel();
@@ -4485,6 +4692,7 @@ void Gen::emitObserve(CellRef entryLabel) {
     set(kObsVerdictEpoch, zero_);
     set(kObsVerdictRevisions, cStr(std::string(kListContent)));
     set(kObsPinned, false_);
+    bookkeeping(rec);
     // The source's previous current record on this key is superseded.
     {
       const CellRef r = reg(), st = reg(), cur = reg();

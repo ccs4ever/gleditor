@@ -547,6 +547,44 @@ inline constexpr std::string_view kObsVerdictRevisions = "verdict_revisions";
 inline constexpr std::string_view kObsPinned           = "pinned";
 /// The typed outcome a failed ingestion turn reports when the routine itself
 /// could not run (a malformed input record), never a data refusal.
+/// Limits the adapter passes beside the observation, from the settings.
+inline constexpr std::string_view kTurnIngest       = "ingest";
+inline constexpr std::string_view kIngestMaxSources = "max_sources";
+inline constexpr std::string_view kIngestDedup      = "dedup";
+// Observation fields the routine reads; the executor writes all of them.
+inline constexpr std::string_view kObsIncarnation = "incarnation";
+inline constexpr std::string_view kObsEventId     = "event_id";
+/// SHA-256 over the origin-signed fields, computed by the executor.
+inline constexpr std::string_view kObsDigest         = "digest";
+inline constexpr std::string_view kObsSequence       = "sequence";
+inline constexpr std::string_view kObsReceivedSteady = "received_steady";
+inline constexpr std::string_view kObsReceivedWall   = "received_wall";
+inline constexpr std::string_view kObsRelayedBy      = "relayed_by";
+/// The record's own clone occurrence of its source's profile.
+inline constexpr std::string_view kObsProfile = "profile";
+// A source profile on `$agent +d.trust`: a record whose content is the
+// principal's token.
+inline constexpr std::string_view kProfileIncarnation     = "incarnation";
+inline constexpr std::string_view kProfileFaulted         = "faulted";
+inline constexpr std::string_view kProfileRejectionStreak = "rejection_streak";
+inline constexpr std::string_view kProfileRejectCount     = "reject_count";
+inline constexpr std::string_view kProfileContentRefusals = "content_refusals";
+inline constexpr std::string_view kProfileRefusedCount    = "refused_count";
+/// Per-predicate last sequence: a record whose fields are predicate names.
+inline constexpr std::string_view kProfileStreams = "streams";
+/// The dedup window: a list of (incarnation, event ID, digest) records.
+inline constexpr std::string_view kProfileDedup       = "dedup";
+inline constexpr std::string_view kProfileLastReceive = "last_receive";
+inline constexpr std::string_view kProfileLastContact = "last_contact";
+// Typed ingestion outcomes besides `Committed`.
+inline constexpr std::string_view kTurnResultDuplicate = "Duplicate";
+inline constexpr std::string_view kTurnResultConflictingEvent =
+    "ConflictingEvent";
+inline constexpr std::string_view kTurnResultStaleSequence = "StaleSequence";
+inline constexpr std::string_view kTurnResultEpistemicBudget =
+    "EpistemicBudget";
+inline constexpr std::string_view kTurnResultUnsupportedIncarnation =
+    "UnsupportedIncarnation";
 inline constexpr std::string_view kTurnResultIngestionFault = "IngestionFault";
 inline constexpr std::string_view kTurnResultInvalidObservation =
     "InvalidObservation";

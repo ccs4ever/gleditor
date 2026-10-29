@@ -932,6 +932,51 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .schemas = {{.expectedTypes = {"integer"},
                       .defaultValues =
                           {vagent::runtime::kDefaultEpistemicNestedScopes}}}},
+        {.name  = std::string(settings::kVagentEpistemicHistory),
+         .notes = "vagent: positive count of records retained per (principal, "
+                  "key) support; current and pinned records are never excised",
+         .schemas =
+             {{.expectedTypes = {"integer"},
+               .defaultValues = {vagent::runtime::kDefaultEpistemicHistory}}}},
+        {.name = std::string(settings::kVagentEpistemicDedup),
+         .notes =
+             "vagent: positive count of (incarnation, event ID, digest) "
+             "entries per source profile; the replay horizon for exact retries",
+         .schemas =
+             {{.expectedTypes = {"integer"},
+               .defaultValues = {vagent::runtime::kDefaultEpistemicDedup}}}},
+        {.name    = std::string(settings::kVagentEpistemicKeysPerSource),
+         .notes   = "vagent: positive count of keys one source principal may "
+                    "support on one predicate",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues =
+                          {vagent::runtime::kDefaultEpistemicKeysPerSource}}}},
+        {.name    = std::string(settings::kVagentEpistemicIngressQueue),
+         .notes   = "vagent: positive count of checked observations queued for "
+                    "one actor",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues =
+                          {vagent::runtime::kDefaultEpistemicIngressQueue}}}},
+        {.name  = std::string(settings::kVagentEpistemicIngressQueuePerSource),
+         .notes = "vagent: positive count of queued observations one source "
+                  "principal may hold",
+         .schemas =
+             {{.expectedTypes = {"integer"},
+               .defaultValues =
+                   {vagent::runtime::kDefaultEpistemicIngressQueuePerSource}}}},
+        {.name    = std::string(settings::kVagentEpistemicOutcomeLog),
+         .notes   = "vagent: positive count of ingestion outcomes the host log "
+                    "keeps per actor",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues =
+                          {vagent::runtime::kDefaultEpistemicOutcomeLog}}}},
+        {.name  = std::string(settings::kVagentEpistemicCells),
+         .notes = "vagent: positive ceiling on the epistemic cells an actor "
+                  "keeps, below vagent.value_operations so a full budget "
+                  "still checkpoints",
+         .schemas =
+             {{.expectedTypes = {"integer"},
+               .defaultValues = {vagent::runtime::kDefaultEpistemicCells}}}},
     };
     break;
 

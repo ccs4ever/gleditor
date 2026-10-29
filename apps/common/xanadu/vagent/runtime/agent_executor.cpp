@@ -1,4 +1,6 @@
 #include "common/xanadu/vagent/runtime/agent_executor.hpp"
+
+#include "common/xanadu/provenance.hpp"
 #include "common/xanadu/vagent/runtime/program.hpp"
 #include "common/xanadu/vagent/runtime/upgrade_schema.hpp"
 
@@ -2766,13 +2768,28 @@ AgentExecutor::observe(const identity::ActorPid &target,
   WireRecord tuple;
   for (std::size_t i = 0; i < o.tuple.size(); ++i)
     tuple.set(std::to_string(i), o.tuple[i]);
+  // The digest covers what the origin signed, never host-mapped times or the
+  // relay, so two relays of one event share it.
+  WireRecord signedFields;
+  signedFields.set(std::string(kObsSource), WireValue::text(o.principal));
+  signedFields.set(std::string(kObsIncarnation), integer(o.incarnation));
+  signedFields.set(std::string(kObsEventId), WireValue::text(o.eventId));
+  signedFields.set(std::string(kObsSequence), integer(o.sequence));
+  signedFields.set(std::string(kObsPredicate), WireValue::text(o.predicate));
+  signedFields.set(std::string(kObsTuple), WireValue::record(tuple));
+  signedFields.set("frame", WireValue::text(o.frame));
+  signedFields.set("units", WireValue::text(o.units));
+  if (o.variance) signedFields.set("variance", WireValue::real(*o.variance));
+  const auto encoded = encodeValue(WireValue::record(std::move(signedFields)));
+  if (!encoded) return std::unexpected(EpistemicRefusal::InvalidObservation);
   WireRecord r;
   r.set(std::string(kObsPredicate), WireValue::text(o.predicate));
   r.set(std::string(kObsSource), WireValue::text(o.principal));
   r.set(std::string(kObsTuple), WireValue::record(std::move(tuple)));
-  r.set("incarnation", integer(o.incarnation));
-  r.set("event_id", WireValue::text(o.eventId));
-  r.set("sequence", integer(o.sequence));
+  r.set(std::string(kObsIncarnation), integer(o.incarnation));
+  r.set(std::string(kObsEventId), WireValue::text(o.eventId));
+  r.set(std::string(kObsDigest), WireValue::text(xanadu::sha256Hex(*encoded)));
+  r.set(std::string(kObsSequence), integer(o.sequence));
   r.set("acquired_at", WireValue::real(o.acquiredAt));
   r.set("acquired_uncertainty", WireValue::real(o.acquiredUncertainty));
   r.set("clock_basis", WireValue::text(o.clockBasis));
@@ -2781,11 +2798,12 @@ AgentExecutor::observe(const identity::ActorPid &target,
   r.set("frame", WireValue::text(o.frame));
   r.set("units", WireValue::text(o.units));
   if (o.variance) r.set("variance", WireValue::real(*o.variance));
-  if (o.relayedBy) r.set("relayed_by", WireValue::text(*o.relayedBy));
+  if (o.relayedBy)
+    r.set(std::string(kObsRelayedBy), WireValue::text(*o.relayedBy));
   // The executor's own stamps: the host supplies neither receipt time.
-  r.set("received_steady",
+  r.set(std::string(kObsReceivedSteady),
         WireValue::real(seconds(clock_.steady().time_since_epoch())));
-  r.set("received_wall",
+  r.set(std::string(kObsReceivedWall),
         WireValue::real(seconds(wallNow().time_since_epoch())));
   PostBox::Item item;
   item.pid         = target;
@@ -2848,6 +2866,15 @@ void AgentExecutor::drainPosted() {
       ingest.entry = state.agent.observeEntry;
       ingest.turnFields.set(std::string(kTurnObservation),
                             WireValue::record(std::move(*item.observation)));
+      WireRecord limits;
+      limits.set(std::string(kIngestMaxSources),
+                 WireValue::integer(static_cast<std::int64_t>(
+                     settings_.epistemic.maxSources)));
+      limits.set(std::string(kIngestDedup),
+                 WireValue::integer(
+                     static_cast<std::int64_t>(settings_.epistemic.dedup)));
+      ingest.turnFields.set(std::string(kTurnIngest),
+                            WireValue::record(std::move(limits)));
       state.hostEvents.push_back(std::move(ingest));
     } else if (item.percept) {
       raise(state, item.type, std::move(item.fields));
