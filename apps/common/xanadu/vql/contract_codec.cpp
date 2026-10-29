@@ -20,7 +20,7 @@
 namespace xanadu::vql {
 namespace {
 
-constexpr std::string_view descriptorHeader = "VQL_CONTRACT/3\n";
+constexpr std::string_view descriptorHeader = "VQL_CONTRACT/4\n";
 
 [[noreturn]] void unencodable(const std::string_view reason) {
   throw ContractDescriptorError(
@@ -319,7 +319,7 @@ TypeExpr decodeTypeDescriptor(const std::string_view descriptor,
   }
   if (!descriptor.starts_with("VQL_CONTRACT/")) {
     throw ContractDescriptorError(
-        "VQL contract descriptor format mismatch: expected VQL_CONTRACT/3");
+        "VQL contract descriptor format mismatch: expected VQL_CONTRACT/4");
   }
   if (!descriptor.starts_with(descriptorHeader)) {
     const auto newline = descriptor.find('\n');
@@ -327,13 +327,13 @@ TypeExpr decodeTypeDescriptor(const std::string_view descriptor,
         0, newline == std::string_view::npos ? descriptor.size() : newline);
     throw ContractDescriptorError(
         std::format("VQL contract descriptor version mismatch: expected "
-                    "VQL_CONTRACT/3, found {}",
+                    "VQL_CONTRACT/4, found {}",
                     found));
   }
   const auto syntax = descriptor.substr(descriptorHeader.size());
   if (syntax.empty()) {
     throw ContractDescriptorError(
-        "VQL contract descriptor VQL_CONTRACT/3 has no type expression");
+        "VQL contract descriptor VQL_CONTRACT/4 has no type expression");
   }
   try {
     const std::string wrapped =
@@ -360,7 +360,7 @@ TypeExpr decodeTypeDescriptor(const std::string_view descriptor,
     throw;
   } catch (const std::exception &error) {
     throw ContractDescriptorError(std::format(
-        "malformed VQL_CONTRACT/3 type expression: {}", error.what()));
+        "malformed VQL_CONTRACT/4 type expression: {}", error.what()));
   }
 }
 

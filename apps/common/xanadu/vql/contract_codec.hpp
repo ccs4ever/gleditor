@@ -28,7 +28,7 @@ struct ContractDescriptorLimits {
   std::size_t maxNesting{128};
 };
 
-/// Encode a type AST as `VQL_CONTRACT/3\n` followed by canonical VQL syntax.
+/// Encode a type AST as `VQL_CONTRACT/4\n` followed by canonical VQL syntax.
 [[nodiscard]] std::string encodeTypeDescriptor(const TypeExpr &type);
 
 /// Return sorted unique variable aliases used by field defaults. Throws when a

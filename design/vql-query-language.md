@@ -2282,8 +2282,10 @@ explicit refusals. The rulings below describe the intended semantics.
 
 - **A non-stream type is one value.** `Cell` takes exactly one cell, `Cell?` zero or one, and
   `Stream<T>` any number, each checked against `T` alone (so a shape inside a stream binds nothing:
-  one name cannot hold a field of every member). A typed field decides absence by its type, so
-  `+d.subtitle: $s: String?` admits a cell with no subtitle and binds `$s` empty.
+  one name cannot hold a field of every member). Stream element patterns and refinements introduce
+  no callee bindings and leave enclosing lexical names and context intact. A typed field decides
+  absence by its type, so `+d.subtitle: $s: String?` admits a cell with no subtitle and binds `$s`
+  empty.
 
 - **A variadic checks each actual before concatenating it.** A named final `...$xs: Int` takes
   trailing one-cell integer arguments; a multi-cell actual requires a type such as `Stream<Int>`.
@@ -2320,8 +2322,9 @@ explicit refusals. The rulings below describe the intended semantics.
   field is absent; a present field never reads its fallback. This lowering accepts zero or one
   fallback cell, with explicit refusal of larger streams and defaults requiring path/call thunks.
   Context fields accept a type and alias, and their captures establish the callee's context.
-  `VQL_CONTRACT/3` records explicit subject counts and ordered fallback slots as well as the
-  context-capture layout; older descriptors are refused.
+  `VQL_CONTRACT/4` records explicit subject counts and ordered fallback slots as well as the
+  context-capture layout. Its output layout excludes names inside stream element contracts and
+  refinements; older descriptors are refused.
 
 - **The compiler uses real VM instructions.** Bound point-free steps lower to Vortex traversals;
   nonrecursive typed calls use shared matching, capture slots, mismatch branches, body instructions,

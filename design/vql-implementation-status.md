@@ -41,7 +41,7 @@ explicitly. Syntax acceptance alone does not establish execution support.
 
 Runtime block loops, destructuring, `where`, conditional actions and ordered multi-return now use
 actual VM instructions. Typed context fields and implicit context captures use descriptor ABI
-`VQL_CONTRACT/3`; older descriptors refuse. Request execution restores its contract coordinator on
+`VQL_CONTRACT/4`; older descriptors refuse. Request execution restores its contract coordinator on
 every exit. The VM-only ledger records 238 passing focused tests for this bounded iteration;
 recursive frames, path/call field-default thunks and atomic mutation enforcement remain open.
 Variable-alias field defaults now capture prior lexical VM slots lazily, preserving identity for
@@ -60,7 +60,11 @@ minted dimensions. Return validation releases temporary defaults on both success
 rollback restores empty-run scalar headers and dimension-cache journals; branch-prefix payloads use
 `APF2`. The matching-atomicity and explicit VM resume-state iteration passes 395 affected tests; it
 does not establish mutation-boundary enforcement. Recursive frames and default thunks remain
-separate work. Stream element contracts intentionally publish no per-element captures (§4.12.5).
+separate work. Stream element contracts intentionally publish no per-element captures (§4.12.5). The
+subsequent capture-scope iteration prevents empty generic capture slots from shadowing lexical names
+or context. Descriptor ABI `/4` excludes those slots and explicitly refuses older versions. All 402
+affected tests, the full build, repository formatting, and independent Luna gates passed, including
+saved graphs executed by a fresh VM.
 
 The shared `ContractMatcher` is used by actual Vortex contract opcodes. Versioned, bounded
 descriptors survive save/reload without a process-local AST registry. Nonrecursive positional typed

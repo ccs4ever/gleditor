@@ -119,10 +119,10 @@ ContractMatcher::contractCaptureNames(const TypeExpr &type) {
       } else if (const auto *nested =
                      std::get_if<std::shared_ptr<TypeExpr>>(&member.kind)) {
         if (*nested) visitType(**nested);
-      } else if (const auto *generic = std::get_if<GenericType>(&member.kind)) {
-        for (const auto &arg : generic->args) {
-          if (arg) visitType(*arg);
-        }
+      } else if (std::holds_alternative<GenericType>(member.kind)) {
+        // Generic arguments and refinements validate without exporting
+        // captures.
+        continue;
       }
       if (member.refinement) visitPattern(member.refinement->pattern);
     }

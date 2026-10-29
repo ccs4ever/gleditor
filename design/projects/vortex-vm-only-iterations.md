@@ -209,3 +209,23 @@ the bounded implementation. No full-suite pass or full §4.12 completion is clai
 
 Logs: `/tmp/vql-contract-atomicity-build.log`, `/tmp/vql-contract-atomicity-tests.log`,
 `/tmp/vql-contract-atomicity-format.log`.
+
+## Iteration 8: stream contract capture scope
+
+Stream element types and stream refinements validate each member without exporting its captures. The
+compiler now omits those names from the match output layout, so an empty capture slot cannot shadow
+an enclosing lexical binding or context. Shapes outside a stream still publish their normal
+captures, including non-stream union arms. Invalid stream members still reject the entire call.
+
+`VQL_CONTRACT/4` makes the corrected output layout explicit and refuses older descriptor versions.
+No Store operation layout changes. The graph remains executable through native contract
+instructions; no textual evaluator or process-local AST registry is introduced.
+
+Validation: full `make -j$(nproc)` and repository `format-check` passed. All 402 affected tests from
+34 suites passed, including seven capture-scope regressions, descriptor version refusal, retained
+alias-default inputs, and saved-graph execution in a fresh VM for populated and empty streams.
+Independent Luna architecture, senior and profiler reviews found no blocker. This bounded scope does
+not complete §4.12 or introduce lazy default thunks; no runtime performance improvement is claimed.
+
+Logs: `/tmp/vql-stream-capture-build.log`, `/tmp/vql-stream-capture-tests.log`,
+`/tmp/vql-stream-capture-format.log`.

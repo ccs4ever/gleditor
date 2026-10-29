@@ -45,7 +45,7 @@ struct Harness {
 
   Program compile(const std::string_view syntax, const bool required = false) {
     const auto descriptor =
-        std::string("VQL_CONTRACT/3\n") + std::string(syntax);
+        std::string("VQL_CONTRACT/4\n") + std::string(syntax);
     const auto type   = xanadu::vql::decodeTypeDescriptor(descriptor);
     const auto opcode = vm.mintOpcode(required ? OpcodeKind::RequireContract
                                                : OpcodeKind::MatchContract);
@@ -207,7 +207,7 @@ TEST(VQLContractAtomicityTest, FailedCheckDoesNotRestoreSpentFuel) {
   const auto program = h.compile(syntax);
   const auto before  = h.snapshot();
   const auto descriptorWork =
-      std::string_view("VQL_CONTRACT/3\n").size() + syntax.size();
+      std::string_view("VQL_CONTRACT/4\n").size() + syntax.size();
   // Two subject charges, the shape and first field visits, its default cell,
   // and its Int check use this fuel; the next field must exhaust it.
   constexpr std::size_t firstDefaultWork = 6;
@@ -319,7 +319,7 @@ TEST(VQLContractAtomicityTest, DuplicateOutputRefusalPreservesPriorRegisters) {
 
 TEST(VQLContractAtomicityTest, EmptyOutputRefusalIsSafeAndNonmutating) {
   Harness h;
-  const auto descriptor = h.arena.makeCell("VQL_CONTRACT/3\nCell");
+  const auto descriptor = h.arena.makeCell("VQL_CONTRACT/4\nCell");
   const auto count      = h.arena.makeScalarCell(std::int64_t{1});
   const auto opcode     = h.vm.mintOpcode(OpcodeKind::MatchContract);
   const auto halt       = h.vm.mintOpcode(OpcodeKind::Halt);
@@ -351,7 +351,7 @@ TEST(VQLContractAtomicityTest, CaptureArityRefusalPreservesPriorRegisters) {
 
   const auto descriptor = h.core.inputsOf(program.opcode).front();
   h.core.writeValue(descriptor, 0, std::nullopt,
-                    zigzag::vortex::CellValue{"VQL_CONTRACT/3\nCell"});
+                    zigzag::vortex::CellValue{"VQL_CONTRACT/4\nCell"});
   h.vm.setCursorOpcode(program.cursor, program.opcode);
   const auto before    = h.snapshot();
   const auto malformed = h.vm.step(program.cursor);
