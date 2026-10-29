@@ -2299,9 +2299,12 @@ explicit refusals. The rulings below describe the intended semantics.
 - **Scalars are read as comparisons read them (§4.3).** `Int`, `Float` and `Bool` accept a cell
   minted with those value bits and a text cell whose whole content reads as one. Stored text may
   also carry inferred value bits; text-only cells still use whole-token inference. `"95"` is both a
-  `String` and an `Int`. `Version` is text that `MicroversionId::parse` accepts; `Dim` a cell on the
-  core's `d.dims` rank or in the arena's dimension table; `Slice` a registered store's home cell or
-  the arena's own; `Store` a registered store's cell on `d.stores` or the coordinator origin.
+  `String` and an `Int`. Typed numeric and Boolean values retain their types even when they have
+  display text; empty textual values still satisfy String. Foreign cells and clone masters follow
+  the same typed reader, and oversized integer text is not rounded into Float. `Version` is text
+  that `MicroversionId::parse` accepts; `Dim` a cell on the core's `d.dims` rank or in the arena's
+  dimension table; `Slice` a registered store's home cell or the arena's own; `Store` a registered
+  store's cell on `d.stores` or the coordinator origin.
 
 - **A default is used only when the field is absent**, and passing a cell or a path never mints: the
   bound cell is the linked one. A literal field default mints its scalar only when it is used;

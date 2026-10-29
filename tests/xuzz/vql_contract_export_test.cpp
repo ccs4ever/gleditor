@@ -195,6 +195,10 @@ void compileExportReloadAndRun(const Case &testCase, const fs::path &root) {
 TEST(VQLContractExportTest, TypedCallGraphSurvivesStoreReloadAndFreshVM) {
   TemporaryDirectory temporary;
   const std::vector<Case> cases{
+      {.query = "def identity($x: String): String := $x; identity(\"\")",
+       .expectedValues = {""}},
+      {.query = "def identity($x: Float): Cell := $x; "
+                "identity(\"9223372036854775808\")"},
       {.query          = "let $p := %\"paper\"; $p/d.items%\"one\"%\"two\"; "
                          "$p/d.items/d.video%\"video\"/d.codec%\"h264\"; "
                          "let $f := /d.items[{~d.video: {+d.codec: \"h264\"}}]; "

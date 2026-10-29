@@ -133,6 +133,12 @@ accepted the bounded foundation, predicate filtering, omitted-default and argume
 iterations. The argument parser still rejects some qualified functor arguments before compilation;
 the compiler AST guard is tested separately.
 
+Comparisons and primitive contracts now share a query scalar reader with exact foreign typed bits,
+clone-master resolution and bounded text inference. Empty text remains String, Timestamp keeps its
+text fallback, and malformed foreign values produce errors rather than silent contract mismatches.
+All 454 affected tests, the full build, formatting and Luna gates passed for this correction. Full
+§4.12 remains open; the remaining dependency sequence is tracked in the parity iteration plan.
+
 ## Remaining specification work
 
 - **§4.1–§4.4:** the direct evaluator materializes vectors; universal lazy streaming, full

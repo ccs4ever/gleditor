@@ -5,36 +5,16 @@
 #include "common/xanadu/vql/contracts.hpp"
 
 #include <algorithm>
-#include <charconv>
 #include <concepts>
-#include <cstdlib>
 #include <ranges>
 #include <set>
-#include <string_view>
 
 #include "common/xanadu/microversion.hpp"
+#include "common/xanadu/scalar.hpp"
 #include "common/xanadu/zigzag/arena_savepoint.hpp"
+#include "common/xanadu/zigzag/query_scalar.hpp"
 
 namespace xanadu::vql {
-namespace {
-
-bool stringToDouble(const std::string_view value, double &out) {
-  if (value.empty()) return false;
-  const std::string owned{value};
-  char *end = nullptr;
-  out       = std::strtod(owned.c_str(), &end);
-  return end == owned.c_str() + owned.size();
-}
-
-bool stringToInt64(const std::string_view value, std::int64_t &out) {
-  if (value.empty()) return false;
-  const char *begin       = value.data();
-  const char *end         = begin + value.size();
-  const auto [ptr, error] = std::from_chars(begin, end, out);
-  return error == std::errc{} && ptr == end;
-}
-
-} // namespace
 
 ContractMatcher::ContractMatcher(zigzag::vortex::VortexCore &core,
                                  MultiStoreCoordinator &coordinator)
@@ -263,20 +243,30 @@ bool ContractMatcher::satisfiesAtom(const PrimaryType &type,
 
 bool ContractMatcher::hasBasicType(const BasicType &type,
                                    const zigzag::CellRef cell) const {
-  using K           = BasicType::Kind;
-  const auto &arena = core_.arena();
+  using K     = BasicType::Kind;
+  auto &arena = core_.arena();
   if (type.kind == K::Contextual || !arena.contains(cell)) return false;
-  const auto value = core_.render(cell);
-  if (!value) return false;
-  const auto &rendered = *value;
-  const auto *text     = std::get_if<std::string>(&rendered);
+  const auto scalarValue = [&] {
+    auto scalar = zigzag::readQueryScalar(arena, cell, core_.dims().clone);
+    if (!scalar) {
+      if (scalar.error() == zigzag::QueryScalarReadError::InvalidForeign)
+        throw TypeContractError("contract scalar has no valid source cell");
+      if (scalar.error() == zigzag::QueryScalarReadError::Unreadable)
+        throw TypeContractError("contract scalar payload is unreadable");
+    }
+    return scalar;
+  };
   switch (type.kind) {
   case K::Any:
   case K::Cell:
     return true;
   case K::Dim:
-    return std::ranges::contains(arena.dimensions(), cell) ||
-           (text != nullptr && core_.findDimension(*text) == cell);
+    if (const auto value = core_.render(cell)) {
+      const auto *text = std::get_if<std::string>(&*value);
+      return std::ranges::contains(arena.dimensions(), cell) ||
+             (text != nullptr && core_.findDimension(*text) == cell);
+    }
+    return false;
   case K::Store:
     return coordinator_.coordinatorHome() == cell ||
            std::ranges::any_of(coordinator_.stores(), [&](const auto &info) {
@@ -287,7 +277,9 @@ bool ContractMatcher::hasBasicType(const BasicType &type,
            std::ranges::any_of(coordinator_.stores(), [&](const auto &info) {
              return info.homeCell == cell;
            });
-  case K::Version:
+  case K::Version: {
+    auto scalar      = scalarValue();
+    const auto *text = scalar ? std::get_if<std::string>(&*scalar) : nullptr;
     if (text == nullptr || text->empty()) return false;
     try {
       (void)xanadu::MicroversionId::parse(*text);
@@ -295,22 +287,47 @@ bool ContractMatcher::hasBasicType(const BasicType &type,
     } catch (const std::invalid_argument &) {
       return false;
     }
-  case K::Int: {
-    std::int64_t parsed = 0;
-    return std::holds_alternative<std::int64_t>(rendered) ||
-           (text != nullptr && stringToInt64(*text, parsed));
   }
-  case K::Float: {
-    double parsed = 0.0;
-    return std::holds_alternative<double>(rendered) ||
-           std::holds_alternative<std::int64_t>(rendered) ||
-           (text != nullptr && stringToDouble(*text, parsed));
-  }
+  case K::Int:
+  case K::Float:
   case K::String:
-    return text != nullptr;
   case K::Bool:
-    return std::holds_alternative<bool>(rendered) ||
-           (text != nullptr && (*text == "true" || *text == "false"));
+    break;
+  case K::Contextual:
+    return false;
+  }
+
+  const auto scalar = scalarValue();
+  if (!scalar) return false;
+  if (type.kind == K::String)
+    return std::holds_alternative<std::string>(*scalar);
+
+  const auto *text = std::get_if<std::string>(&*scalar);
+  if (text == nullptr) {
+    if (type.kind == K::Int)
+      return std::holds_alternative<std::int64_t>(*scalar);
+    if (type.kind == K::Float)
+      return std::holds_alternative<double>(*scalar) ||
+             std::holds_alternative<std::int64_t>(*scalar);
+    return std::holds_alternative<bool>(*scalar);
+  }
+
+  const auto inferred = xanadu::inferTextValue(*text);
+  switch (type.kind) {
+  case K::Int:
+    return inferred.kind == xanadu::ValueKind::Int64;
+  case K::Float:
+    return inferred.kind == xanadu::ValueKind::Double ||
+           inferred.kind == xanadu::ValueKind::Int64;
+  case K::Bool:
+    return inferred.kind == xanadu::ValueKind::Bool;
+  case K::Any:
+  case K::Cell:
+  case K::Dim:
+  case K::Store:
+  case K::Slice:
+  case K::Version:
+  case K::String:
   case K::Contextual:
     return false;
   }

@@ -14,7 +14,7 @@
 #include <variant>
 
 #include "common/xanadu/scalar.hpp"
-#include "common/xanadu/zigzag/query_clone_master.hpp"
+#include "common/xanadu/zigzag/query_scalar.hpp"
 
 namespace zigzag::vortex {
 namespace {
@@ -36,55 +36,21 @@ comparisonOperand(VortexCore &core, const CellReferenceMap &references,
     if (!reference->second) return std::nullopt;
     cell = *reference->second;
   }
-  if (!core.arena().contains(cell)) return std::nullopt;
-
-  const CellRef master =
-      zigzag::queryCloneMaster(core.arena(), cell, core.dims().clone)
-          .value_or(cell);
-  if (!core.arena().contains(master)) return std::nullopt;
-  auto kind = core.arena().valueKindOf(master);
-  if (const auto foreign = core.arena().foreignOf(master)) {
-    const auto space = core.arena().spaceAt(foreign->space);
-    if (!space || !space->manifold ||
-        !space->manifold->contains(foreign->index)) {
-      throw std::invalid_argument(
-          "VQL comparison foreign operand has no valid source cell");
-    }
-    kind = space->manifold->valueKindOf(foreign->index);
-  }
-  if (kind == xanadu::ValueKind::OpHandle ||
-      kind == xanadu::ValueKind::ExternRef ||
-      kind == xanadu::ValueKind::ForeignOpHandle) {
+  auto scalar = zigzag::readQueryScalar(core.arena(), cell, core.dims().clone);
+  if (scalar) return std::move(*scalar);
+  switch (scalar.error()) {
+  case zigzag::QueryScalarReadError::Missing:
+    return std::nullopt;
+  case zigzag::QueryScalarReadError::InvalidForeign:
+    throw std::invalid_argument(
+        "VQL comparison foreign operand has no valid source cell");
+  case zigzag::QueryScalarReadError::UnsupportedHandle:
     throw std::invalid_argument(
         "VQL comparison does not support structural handles");
+  case zigzag::QueryScalarReadError::Unreadable:
+    throw std::invalid_argument("VQL comparison scalar value is unreadable");
   }
-  if (kind == xanadu::ValueKind::Int64) {
-    const auto value = core.arena().asInt64(master);
-    if (!value) {
-      throw std::invalid_argument("VQL comparison integer value is unreadable");
-    }
-    return CellValue(*value);
-  }
-  if (kind == xanadu::ValueKind::Double) {
-    const auto value = core.arena().asDouble(master);
-    if (!value) {
-      throw std::invalid_argument("VQL comparison double value is unreadable");
-    }
-    return CellValue(*value);
-  }
-  if (kind == xanadu::ValueKind::Bool) {
-    const auto value = core.arena().asBool(master);
-    if (!value) {
-      throw std::invalid_argument("VQL comparison boolean value is unreadable");
-    }
-    return CellValue(*value);
-  }
-  const auto text = core.arena().textOf(master);
-  for (const auto byte : text) {
-    (void)byte;
-    core.arena().consumeWork();
-  }
-  return CellValue{text};
+  throw std::invalid_argument("VQL comparison scalar value is unreadable");
 }
 
 ComparisonValue classifyText(std::string text) {

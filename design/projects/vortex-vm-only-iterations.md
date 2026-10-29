@@ -315,3 +315,27 @@ frames and mutation-boundary contracts remain open. Full §4.12 is incomplete.
 
 Logs: `/tmp/vql-shape-target-build.log`, `/tmp/vql-shape-target-tests.log`,
 `/tmp/vql-shape-target-format.log`.
+
+## Iteration 12: shared scalar contract reads
+
+Comparisons and structural contracts now use one query scalar reader in the ZigZag layer. It
+resolves clone masters and foreign source kinds, preserving Int64/Double/Bool bits despite custom
+display text. Primitive contracts no longer classify a typed foreign value from its display. Only
+textual values satisfy String, including empty text; Timestamp keeps its existing textual fallback.
+Untyped text uses the same bounded inference as comparison, so an oversized integer is not silently
+admitted as a rounded Float. Float contracts still admit Int values without converting the stored
+bits, as specified.
+
+Missing cells and valid structural handles are ordinary primitive mismatches. Invalid foreign
+sources and unreadable typed payloads fail loudly. Any/Cell keep their physical identity semantics.
+Untyped text bytes are charged before materialization; the reader still traverses text twice and no
+allocation or latency improvement is claimed.
+
+Validation: full `make -j$(nproc)` and repository `format-check` passed. All 454 affected tests from
+43 suites passed, including local/foreign contracts, foreign clone masters, empty text, lossless
+inference, Timestamp fallback, invalid proxies and saved graphs. Independent Luna architecture,
+engineering and profiler reviews accepted this bounded correction. §4.12 remains incomplete;
+activation frames and resumable default thunks are the next dependencies.
+
+Logs: `/tmp/vql-contract-scalar-build.log`, `/tmp/vql-contract-scalar-tests.log`,
+`/tmp/vql-contract-scalar-format.log`.

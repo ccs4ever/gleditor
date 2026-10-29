@@ -38,6 +38,42 @@ This milestone is intentionally narrower than §4.12. The full feature gate rema
 - Measured evaluation of specialized functor lowering with full-width dimension references and an
   arbitrary-length fallback. Unsupported performance/ABI assertions must be corrected.
 
+## Remaining completion sequence
+
+The §4.12 goal remains active until these gates pass; a bounded commit is progress, not completion.
+
+- **Scalar contract parity:** one shared typed query reader for comparisons and contracts; foreign
+  Int64/Double/Bool bits override misleading display text, clone masters resolve canonically, and
+  text inference is bounded and lossless. Cover local/foreign, aliases, returns and exported graphs.
+- **Activation frames:** descriptor-listed local registers receive separate runtime backing per
+  invocation. Immutable graph constants and external cells remain shared. Direct/mutual recursion,
+  nested argument calls, context and results preserve identity and caller locals. Frame stacks,
+  streams and iterators participate in choice points, cancellation and cursor cleanup, with budgets
+  and fresh-VM export tests. Keep legacy language calling conventions separate.
+- **Lazy field defaults:** resumable native matching preserves exact field/union/stream traversal
+  and arena savepoints while compiled graph thunks run. Defaults execute only at absent fields, use
+  the owning nested context and captured lexical inputs, and return ordered values without
+  truncation. Failed union arms and failed calls restore defaults/captures without refunding fuel.
+  Do not substitute eager evaluation, whole-match replay or nested interpreter execution.
+- **Mutation boundaries:** enforce active structural contracts for value/link/creation/attachment
+  and weave operations, with atomic refusal and source-store preservation. Test aliases and nested
+  calls so another reference cannot bypass enforcement.
+- **Complete parameter and functor behavior:** implement the deferred variadic, lambda, closure,
+  composition, decorated traversal and application forms required by the specification. Exercise the
+  four documented contract modes, including their actual expression bodies, not just signature
+  parsing. Unsupported arithmetic or builtins in those examples remain blockers.
+- **Route and lifecycle parity:** the same applicable behavior and errors must hold through CLI,
+  host/palette, scripts/batches, mesh/parallel workers and saved/reloaded graphs. Include budgets,
+  cancellation, backtracking and independently constructed malformed graphs.
+- **Lowering evaluation:** after semantic parity, measure binding, compilation, repeated execution
+  and allocations for full-width functor traversal with arbitrary-length fallback. Adopt a
+  specialization only when the measurements support it; make no unsupported ABI/cycle/JIT claim.
+
+The native activation model uses per-invocation mappings rather than snapshotting and restoring
+physical graph-cell values: restoring observable cells could overwrite caller data or alter result
+identity. Lazy matching needs a real continuation across graph calls; replaying a match can rerun
+branch effects and change default semantics.
+
 ## Subsequent iterations
 
 Work through the remaining entries in `design/vql-implementation-status.md`, implementing each
