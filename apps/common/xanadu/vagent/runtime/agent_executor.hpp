@@ -299,6 +299,24 @@ public:
   [[nodiscard]] std::expected<TransportReceipt, EpistemicRefusal>
   observe(const identity::ActorPid &target,
           const CheckedObservation &observation);
+  /// Authorize one origin principal to report one arbitrated predicate to
+  /// @p target. Call it from the thread that pumps: it reads the program the
+  /// agent runs to snapshot the predicate's policy and parameter types.
+  [[nodiscard]] std::expected<AgentExecutor *, EpistemicRefusal>
+  bindSource(const identity::ActorPid &target,
+             const EpistemicSourceGrant &grant);
+  /// Revoke authorization only; an observation still queued under it refuses
+  /// UnknownSource when its turn comes.
+  AgentExecutor *unbindSource(const identity::ActorPid &target,
+                              std::string_view principal,
+                              std::string_view predicate);
+  /// The host's time service reports whether the wall clock is synchronised;
+  /// until it is, observations on a wall-basis predicate refuse retryably.
+  AgentExecutor *setWallClockSynchronised(bool synchronised);
+  /// The newest outcome the bounded log holds for one event, if any.
+  [[nodiscard]] std::optional<IngestOutcome>
+  ingestOutcome(const identity::ActorPid &target, std::string_view principal,
+                std::uint64_t incarnation, std::string_view eventId) const;
   /// The live epistemic cells of a prepared agent: profiles with their
   /// streams, dedup windows and clone views, and every arbitrated support's
   /// history. What the ingestion budget admits against.
@@ -641,6 +659,9 @@ private:
   HostBindings *bindings_{};
   OwnedStateTranslator ownedStateTranslator_;
   std::shared_ptr<PostBox> posts_;
+  /// Ingress authorization and execution outcomes; never learned state.
+  struct Ingress;
+  std::shared_ptr<Ingress> ingress_;
   identity::ActorPid hostPid_;
   std::uint64_t launches_{0};
   std::uint64_t hostSends_{0};

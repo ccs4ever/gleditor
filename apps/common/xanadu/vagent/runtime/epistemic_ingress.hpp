@@ -9,6 +9,7 @@
 #ifndef COMMON_XANADU_VAGENT_RUNTIME_EPISTEMIC_INGRESS_HPP
 #define COMMON_XANADU_VAGENT_RUNTIME_EPISTEMIC_INGRESS_HPP
 
+#include <chrono>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -43,16 +44,66 @@ struct CheckedObservation {
   std::optional<double> variance;
 };
 
+/// The host's authorization for one origin principal to report one arbitrated
+/// predicate to one actor. The alias is for routing and display only; the
+/// principal names the source everywhere it is recorded.
+struct EpistemicSourceGrant {
+  std::string alias;
+  /// Lowercase hex fingerprint of the origin identity, 64 digits.
+  std::string principal;
+  std::uint64_t incarnation{};
+  std::string predicate;
+  /// From binding, on the executor's steady clock, so a wall-clock step can
+  /// neither expire nor extend it.
+  std::chrono::steady_clock::duration lifetime{};
+};
+
 /// Queued, never committed: the ingestion turn decides that later.
 struct TransportReceipt {
   std::string eventId;
 };
 
+/// Refusals the executor gives before queueing (binding and observation
+/// checks that need no arena). Each is also recorded in the outcome log.
 enum class EpistemicRefusal : std::uint8_t {
-  UnknownAgent,
   NotArbitrated,
+  InvalidPrincipal,
+  AliasInUse,
+  DuplicateAlias,
+  UnknownSource,
+  UnsupportedIncarnation,
   InvalidObservation,
+  ClockUnsynchronised,
+  ObservationTimeMismatch,
+  StaleObservation,
+  ObservationFrameMismatch,
+  MissingVariance,
+  InvalidVariance,
+  IngressBackpressure,
 };
+
+/// What the host may do with a refused event.
+enum class OutcomeClass : std::uint8_t {
+  /// Never resend these bytes.
+  Terminal,
+  /// Resend unchanged; the condition clears by itself.
+  Retryable,
+  /// Clears only after the host acts (retire a source, bind an incarnation,
+  /// change a setting, checkpoint and resume).
+  NeedsHostAction,
+};
+
+/// One event's ingestion outcome as the host's outcome log records it.
+struct IngestOutcome {
+  enum class Kind : std::uint8_t { Pending, Committed, Duplicate, Refused };
+  Kind kind{Kind::Pending};
+  /// The refusal code, empty unless `kind` is `Refused`.
+  std::string code;
+  std::optional<OutcomeClass> outcomeClass;
+  bool operator==(const IngestOutcome &) const = default;
+};
+
+[[nodiscard]] OutcomeClass outcomeClassOf(std::string_view code) noexcept;
 
 [[nodiscard]] std::string_view
 epistemicRefusalName(EpistemicRefusal refusal) noexcept;
