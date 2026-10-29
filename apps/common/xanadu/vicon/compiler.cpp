@@ -9,21 +9,17 @@
  * choice point. The produce context travels through members because the
  * emit* signatures return only the fragment's entry op.
  *
- * Deviation note for iteration 2: the design's flag+drain bounded-eval and
- * `e \ n` kill-flag idioms assume a flag write survives `release()`. Under
- * ArenaManifold's trail, every write to a compile-time cell is recorded and
- * undone when the covering choice point pops, so flags cannot persist
- * through a resume. `emitBounded` therefore composes structurally (produce
- * flows straight into the continuation) and `limit` emits the documented
- * kill-flag graph but the flag cannot hold: `\n` currently yields all of
- * `e`, and stale `if`-else choice points can re-fire. The committed
- * std:goal module hits the same wall and resolves it host-side with a
- * second cursor and `cut()`; doing that inline needs a new opcode or a new
- * ChoicePoint field, both out of scope for I2.
+ * VIcon resume-control values live in VM-owned Resume tokens, not arena cells.
+ * Their references participate in ChoicePoint snapshots, while their scalar
+ * values survive ArenaManifold release so a generator can count resumed
+ * results without weakening data rollback.
  */
 #include "common/xanadu/vicon/compiler.hpp"
 
+#include <functional>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <variant>
 
@@ -57,6 +53,104 @@ CompileError mapParseError(ParseError code) {
   default:
     return CompileError::UnexpectedToken;
   }
+}
+
+void collectProcedureCalls(const Expr &expr, std::vector<std::string> &calls) {
+  std::visit(
+      [&](const auto &node) {
+        using T          = std::decay_t<decltype(node)>;
+        const auto visit = [&](const ExprPtr &child) {
+          if (child) collectProcedureCalls(*child, calls);
+        };
+        if constexpr (std::is_same_v<T, EUnary>) {
+          visit(node.operand);
+        } else if constexpr (std::is_same_v<T, EBinary>) {
+          visit(node.left);
+          visit(node.right);
+        } else if constexpr (std::is_same_v<T, EAlternation>) {
+          visit(node.first);
+          visit(node.second);
+        } else if constexpr (std::is_same_v<T, ETo>) {
+          visit(node.lo);
+          visit(node.hi);
+          visit(node.by);
+        } else if constexpr (std::is_same_v<T, ELimit>) {
+          visit(node.expr);
+          visit(node.count);
+        } else if constexpr (std::is_same_v<T, ECall>) {
+          calls.push_back(node.name);
+          for (const auto &arg : node.args) visit(arg);
+        } else if constexpr (std::is_same_v<T, ESubscript>) {
+          visit(node.base);
+          visit(node.index);
+        } else if constexpr (std::is_same_v<T, ESlice>) {
+          visit(node.base);
+          visit(node.from);
+          visit(node.to);
+        } else if constexpr (std::is_same_v<T, ESequence>) {
+          for (const auto &child : node.exprs) visit(child);
+        } else if constexpr (std::is_same_v<T, EIf>) {
+          visit(node.cond);
+          visit(node.thenBranch);
+          visit(node.elseBranch);
+        } else if constexpr (std::is_same_v<T, EWhile> ||
+                             std::is_same_v<T, EUntil>) {
+          visit(node.cond);
+          visit(node.body);
+        } else if constexpr (std::is_same_v<T, EEvery>) {
+          visit(node.gen);
+          visit(node.body);
+        } else if constexpr (std::is_same_v<T, EBreak>) {
+          visit(node.result);
+        } else if constexpr (std::is_same_v<T, EReturn> ||
+                             std::is_same_v<T, ESuspend> ||
+                             std::is_same_v<T, ERepeat>) {
+          visit(node.expr);
+        } else if constexpr (std::is_same_v<T, ECase>) {
+          visit(node.subject);
+          for (const auto &arm : node.arms) {
+            visit(arm.match);
+            visit(arm.body);
+          }
+          visit(node.otherwise);
+        }
+      },
+      expr.node);
+}
+
+std::optional<std::pair<std::string, SourceLocation>>
+recursiveProcedure(const Program &program) {
+  std::unordered_set<std::string> declared;
+  for (const auto &decl : program.procedures) declared.insert(decl.name);
+
+  std::unordered_map<std::string, std::vector<std::string>> graph;
+  for (const auto &decl : program.procedures) {
+    std::vector<std::string> calls;
+    if (decl.body) collectProcedureCalls(*decl.body, calls);
+    for (auto &name : calls) {
+      if (name != "write" && declared.contains(name)) {
+        graph[decl.name].push_back(std::move(name));
+      }
+    }
+  }
+
+  enum class Visit : std::uint8_t { Active, Complete };
+  std::unordered_map<std::string, Visit> visits;
+  std::function<bool(const std::string &)> hasCycle = [&](const auto &name) {
+    if (const auto found = visits.find(name); found != visits.end()) {
+      return found->second == Visit::Active;
+    }
+    visits.emplace(name, Visit::Active);
+    for (const auto &callee : graph[name]) {
+      if (hasCycle(callee)) return true;
+    }
+    visits[name] = Visit::Complete;
+    return false;
+  };
+  for (const auto &decl : program.procedures) {
+    if (hasCycle(decl.name)) return std::pair{decl.name, decl.loc};
+  }
+  return std::nullopt;
 }
 
 } // namespace
@@ -494,20 +588,26 @@ std::expected<CellRef, CompileFailure> Compiler::emitTo(const ETo &to) {
 }
 
 std::expected<CellRef, CompileFailure> Compiler::emitLimit(const ELimit &lim) {
-  const CellRef nC   = core_.arena().makeCell();
-  const CellRef cnt  = core_.arena().makeCell();
-  const CellRef kill = core_.arena().makeCell();
-  const CellRef eRes = core_.arena().makeCell();
-  const CellRef t    = core_.arena().makeCell();
+  const CellRef nC      = core_.arena().makeCell();
+  const CellRef cnt     = core_.arena().makeCell();
+  const CellRef kill    = core_.arena().makeCell();
+  const CellRef eRes    = core_.arena().makeCell();
+  const CellRef cntNext = core_.arena().makeCell();
+  const CellRef t       = core_.arena().makeCell();
+  const CellRef starts  = core_.arena().makeCell();
 
   CellRef entry   = mintOp(OpcodeKind::Choice, "VICON_LIMIT");
-  CellRef initCnt = mintOp(OpcodeKind::Add, "VICON_LIMIT_INIT");
-  CellRef initK   = mintOp(OpcodeKind::Value, "VICON_LIMIT_KILLCLR");
+  CellRef initCnt = mintOp(OpcodeKind::ResumeInit, "VICON_LIMIT_INIT");
+  CellRef initK   = mintOp(OpcodeKind::ResumeInit, "VICON_LIMIT_KILLCLR");
+  CellRef startT  = mintOp(OpcodeKind::Gt, "VICON_LIMIT_START");
+  CellRef startBr = mintOp(OpcodeKind::Branch, "VICON_LIMIT_STARTBR");
+  CellRef startNo = mintOp(OpcodeKind::Fail, "VICON_LIMIT_EMPTY");
   CellRef gate    = mintOp(OpcodeKind::Sub, "VICON_LIMIT_GATE");
-  CellRef cntT    = mintOp(OpcodeKind::Eq, "VICON_LIMIT_CNT");
+  CellRef setCnt  = mintOp(OpcodeKind::ResumeSet, "VICON_LIMIT_SETCOUNT");
+  CellRef cntT    = mintOp(OpcodeKind::Lte, "VICON_LIMIT_CNT");
   CellRef killBr  = mintOp(OpcodeKind::Branch, "VICON_LIMIT_KILLBR");
   CellRef delivJ  = mintOp(OpcodeKind::Jump, "VICON_LIMIT_DELIVJ");
-  CellRef setKill = mintOp(OpcodeKind::Value, "VICON_LIMIT_KILLSET");
+  CellRef setKill = mintOp(OpcodeKind::ResumeSet, "VICON_LIMIT_KILLSET");
   CellRef killOp  = mintOp(OpcodeKind::Fail, "VICON_LIMIT_KILL");
   CellRef exit    = mintOp(OpcodeKind::Fail, "VICON_LIMIT_EXIT");
 
@@ -524,24 +624,32 @@ std::expected<CellRef, CompileFailure> Compiler::emitLimit(const ELimit &lim) {
 
   spin(entry, initCnt);
   spin(initCnt, initK);
-  spin(initK, *eEntry);
-  spin(gate, cntT);
+  spin(initK, startT);
+  spin(startT, startBr);
+  spin(startBr, startNo);
+  spin(startNo, *eEntry);
+  spin(gate, setCnt);
   spin(cntT, killBr);
   spin(killBr, delivJ);
   spin(delivJ, setKill);
   spin(setKill, delivE);
+  spin(setCnt, cntT);
 
   core_.bindInput(entry, opref(guardedAlt(exit)));
   core_.bindInput(initCnt, nC);
-  core_.bindInput(initCnt, zero_);
   core_.bindOutput(initCnt, cnt);
-  core_.bindInput(initK, kill);
   core_.bindInput(initK, zero_);
-  core_.bindInput(initK, negOne_);
-  core_.bindInput(initK, zero_);
+  core_.bindOutput(initK, kill);
+  core_.bindInput(startT, nC);
+  core_.bindInput(startT, zero_);
+  core_.bindOutput(startT, starts);
+  core_.bindInput(startBr, starts);
+  core_.bindInput(startBr, opref(*eEntry));
   core_.bindInput(gate, cnt);
   core_.bindInput(gate, one_);
-  core_.bindOutput(gate, cnt);
+  core_.bindOutput(gate, cntNext);
+  core_.bindInput(setCnt, cnt);
+  core_.bindInput(setCnt, cntNext);
   core_.bindInput(cntT, cnt);
   core_.bindInput(cntT, zero_);
   core_.bindOutput(cntT, t);
@@ -549,8 +657,6 @@ std::expected<CellRef, CompileFailure> Compiler::emitLimit(const ELimit &lim) {
   core_.bindInput(killBr, opref(setKill));
   core_.bindInput(delivJ, opref(delivE));
   core_.bindInput(setKill, kill);
-  core_.bindInput(setKill, zero_);
-  core_.bindInput(setKill, negOne_);
   core_.bindInput(setKill, one_);
 
   return emitBounded(*lim.count, nC, entry);
@@ -565,18 +671,15 @@ std::expected<CellRef, CompileFailure> Compiler::emitScan(const EBinary &) {
 // ---------------------------------------------------------
 
 std::expected<CellRef, CompileFailure> Compiler::emitIf(const EIf &e) {
-  // Flag-guarded else: `taken` is a compile-minted cell, so a write to it
-  // is not trailed under any mark pushed after compile() — it survives
-  // release() (unlike a runtime Bind cell). The catch frame's alt lands on
-  // the guard: once the condition has produced even once, the flag is set
-  // and the stale else frame dies instead of re-firing. `init` re-runs on
-  // every activation, so a re-entered `if` (inside a loop) resets.
+  // The catch frame's alt lands on the guard: once the condition has
+  // produced, the resume token kills a stale else alternative. Re-entry
+  // initializes a fresh token for this activation.
   const CellRef taken = core_.arena().makeCell();
-  CellRef init        = mintOp(OpcodeKind::Value, "VICON_IF_INIT");
+  CellRef init        = mintOp(OpcodeKind::ResumeInit, "VICON_IF_INIT");
   CellRef dead        = mintOp(OpcodeKind::Fail, "VICON_IF_DEAD");
   CellRef guard       = mintOp(OpcodeKind::Branch, "VICON_IF_GUARD");
   CellRef entry       = mintOp(OpcodeKind::Choice, "VICON_IF");
-  CellRef setT        = mintOp(OpcodeKind::Value, "VICON_IF_TAKEN");
+  CellRef setT        = mintOp(OpcodeKind::ResumeSet, "VICON_IF_TAKEN");
   CellRef setJ        = mintOp(OpcodeKind::Jump, "VICON_IF_TAKENJ");
 
   auto elseE = e.elseBranch ? emitInto(*e.elseBranch, produceOut_, produceCont_)
@@ -588,7 +691,9 @@ std::expected<CellRef, CompileFailure> Compiler::emitIf(const EIf &e) {
   if (!thenE) {
     return thenE;
   }
+  killGuards_.push_back({taken, dead});
   auto cond = emitBounded(*e.cond, scratchCell_, setT);
+  killGuards_.pop_back();
   if (!cond) {
     return cond;
   }
@@ -598,16 +703,12 @@ std::expected<CellRef, CompileFailure> Compiler::emitIf(const EIf &e) {
   spin(guard, *elseE);
   spin(setT, setJ);
 
-  core_.bindInput(init, taken);
   core_.bindInput(init, zero_);
-  core_.bindInput(init, negOne_);
-  core_.bindInput(init, zero_);
+  core_.bindOutput(init, taken);
   core_.bindInput(entry, opref(guardedAlt(guard)));
   core_.bindInput(guard, taken);
   core_.bindInput(guard, opref(dead));
   core_.bindInput(setT, taken);
-  core_.bindInput(setT, zero_);
-  core_.bindInput(setT, negOne_);
   core_.bindInput(setT, one_);
   core_.bindInput(setJ, opref(*thenE));
   return init;
@@ -772,6 +873,13 @@ std::expected<CellRef, CompileFailure> Compiler::emitCall(const ECall &c) {
 
 std::expected<CompiledProgram, CompileFailure>
 Compiler::compile(const Program &program) {
+  if (const auto recursive = recursiveProcedure(program)) {
+    return fail(CompileError::UnsupportedConstruct,
+                "recursive procedure calls are unsupported: " +
+                    recursive->first,
+                recursive->second);
+  }
+
   // Per-program plumbing.
   resultCell_  = core_.arena().makeCell();
   nullCell_    = core_.arena().makeCell();

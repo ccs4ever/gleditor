@@ -39,6 +39,24 @@ The driver boundary is the only place results leave the machine; inside a run, b
 nested generators inline. `Driver::resume()` is therefore roughly
 `vm.setCursorOpcode(cursor, failOp); vm.run(cursor)` and read the result cell on `"Halted"`.
 
+### Resume control state
+
+`ResumeInit(initial) -> slot` creates an opaque activation token with an Int64 or Bool control
+value. `ResumeSet(slot, value)` changes that VM-owned value. The slot's token reference participates
+in choice-point snapshots, while the token's control value survives arena rollback. Re-entering a
+limit or condition creates a new token; backtracking can restore a previous activation's reference.
+
+These opcodes run on the Vortex VM and contain no AST evaluator. They refuse parameter pipelines,
+contracts, memoization and cross-cursor token use. Cursor closure releases its values; a yield Halt
+keeps them. Restarting the VIcon driver closes its previous cursor before assembling another graph.
+Mutable resume state cannot yet be transferred through mesh artifacts or OR-parallel sparks, which
+refuse it explicitly. Recursive procedure calls also refuse until genuine call frames exist.
+
+`limit` and `if` flags use these registers rather than relying on scalar writes escaping an arena
+mark. Limit counts at or below zero yield nothing. An `if` condition uses its first success; later
+condition alternatives cannot re-enter the then branch or fire the else branch. The then branch
+keeps its own generator alternatives.
+
 ### The retry idiom — one `altOp` reused per generator
 
 Each generator emits `#Choice` once at entry and re-pushes the *same* `altOp` on each production, so
@@ -76,8 +94,9 @@ same way. Ordering is the choice stack's LIFO order, which is Icon's resumption 
 ### `e \ n` limitation — kill flag
 
 A resume cannot be intercepted once a CP is on the stack, so instead of intercepting, stale CPs are
-*poisoned*: every generator emitted inside the limited `e` checks a per-site `kill` scalar cell at
-the head of its resume path (`altOp` = `Branch kill -> KILL; ...` where `KILL` is a `#Fail` cell).
+*poisoned*: every generator emitted inside the limited `e` checks a per-activation `kill` resume
+register at the head of its resume path (`altOp` = `Branch kill -> KILL; ...` where `KILL` is a
+`#Fail` cell).
 
 ```
 entry:   Choice  EXIT            // catches natural exhaustion

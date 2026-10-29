@@ -3,11 +3,14 @@
 #include <cstdint>
 #include <limits>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "common/xanadu/vql/contract_codec.hpp"
 #include "common/xanadu/vql/contracts.hpp"
+#include "common/xanadu/zigzag/arena_savepoint.hpp"
 
 namespace zigzag::vortex {
+namespace {} // namespace
 
 VortexVM *
 VortexVM::setContractCoordinator(xanadu::MultiStoreCoordinator &coordinator) {
@@ -32,18 +35,37 @@ ExecutionResult VortexVM::executeTypeContract(OpcodeKind kind, CellRef opcode,
   const bool required                 = kind == OpcodeKind::RequireContract;
   const std::size_t subjectCountIndex = required ? 2 : 1;
   const std::size_t firstSubject      = subjectCountIndex + 1;
-  if (inputs.size() <= subjectCountIndex || (!required && slots.empty()) ||
-      (required && !slots.empty())) {
-    return {.success = false, .errorMessage = "invalid contract operands"};
-  }
-  // A failed call must clear every capture, even when the same slots were
-  // populated by an earlier invocation of this program.
-  if (!required && slots.size() > 1) {
-    writeCellReferences(
-        std::span(slots).subspan(1),
-        std::vector<CellValue>(slots.size() - 1, std::int64_t{noCell}));
-  }
+  const auto outputStart              = outputs.size();
+  bool outputsPrepared                = false;
+  const auto forgetCaptureMappings    = [&] {
+    if (required || slots.size() < 2) return;
+    for (const auto slot : std::span(slots).subspan(1)) {
+      if (const auto found = cellReferences_.find(slot);
+          found != cellReferences_.end())
+        found->second.reset();
+    }
+  };
   try {
+    if (!required) {
+      if (slots.empty()) {
+        throw xanadu::vql::TypeContractError(
+            "contract output slots are missing");
+      }
+      std::unordered_set<CellRef> seen;
+      for (const auto slot : slots) {
+        if (!core_.arena().contains(slot) || streamSlots_.contains(slot) ||
+            iteratorSlots_.contains(slot) || !seen.insert(slot).second) {
+          throw xanadu::vql::TypeContractError(
+              "contract output slots must be distinct scalar cells");
+        }
+      }
+    } else if (!slots.empty()) {
+      throw xanadu::vql::TypeContractError(
+          "required contract opcodes cannot have output slots");
+    }
+    if (inputs.size() <= subjectCountIndex) {
+      throw xanadu::vql::TypeContractError("invalid contract operands");
+    }
     const auto descriptor = inputValue(inputs[0]);
     if (!std::holds_alternative<std::string>(descriptor))
       throw xanadu::vql::TypeContractError("contract descriptor must be text");
@@ -94,6 +116,13 @@ ExecutionResult VortexVM::executeTypeContract(OpcodeKind kind, CellRef opcode,
         subjects.push_back(cell);
       });
     }
+    if (!required) {
+      outputsPrepared = true;
+      if (auto prepared = prepareTypeContract(kind, opcode);
+          !prepared.success) {
+        return prepared;
+      }
+    }
     xanadu::vql::ContractBindings captures;
     const auto defaultValue =
         [&](const xanadu::vql::ValueExpr &expression,
@@ -127,8 +156,10 @@ ExecutionResult VortexVM::executeTypeContract(OpcodeKind kind, CellRef opcode,
       });
       return values;
     };
+    zigzag::ArenaSavepoint savepoint(core_.arena());
     const bool matched = matcher.match(type, subjects, &captures, defaultValue);
     if (required) {
+      savepoint.rollback();
       if (!matched) {
         return {.success           = false,
                 .contractViolation = ContractViolationKind::Postcondition,
@@ -149,10 +180,17 @@ ExecutionResult VortexVM::executeTypeContract(OpcodeKind kind, CellRef opcode,
         values.emplace_back(static_cast<std::int64_t>(cell));
       }
       writeCellReferences(std::span(slots).subspan(1), values);
+      outputs.emplace_back(true);
+      core_.writeValue(slots.front(), 0, std::nullopt, CellValue{true});
+      savepoint.commit();
+      return {};
     }
-    outputs.emplace_back(matched);
+    savepoint.rollback();
+    outputs.emplace_back(false);
     return {};
   } catch (const std::exception &error) {
+    outputs.resize(outputStart);
+    if (outputsPrepared) forgetCaptureMappings();
     return {.success       = false,
             .failingClause = opcode,
             .errorMessage  = error.what()};

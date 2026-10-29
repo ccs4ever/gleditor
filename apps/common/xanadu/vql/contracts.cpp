@@ -13,6 +13,7 @@
 #include <string_view>
 
 #include "common/xanadu/microversion.hpp"
+#include "common/xanadu/zigzag/arena_savepoint.hpp"
 
 namespace xanadu::vql {
 namespace {
@@ -135,16 +136,18 @@ bool ContractMatcher::matchDestructure(
     const std::optional<zigzag::CellRef> context, ContractBindings &bindings,
     const MissingField missing, const DefaultEvaluator evaluateDefault) {
   if (!context || !core_.arena().contains(*context)) return false;
+  ContractBindings trial = bindings;
+  zigzag::ArenaSavepoint savepoint(core_.arena());
   for (const auto &field : pattern.fields) {
     core_.arena().consumeWork();
     if (field.isContext) {
       const std::vector<zigzag::CellRef> bound{*context};
       if (field.type &&
-          !satisfiesType(*field.type, bound, &bindings, evaluateDefault)) {
+          !satisfiesType(*field.type, bound, &trial, evaluateDefault)) {
         return false;
       }
-      bindings["."] = {*context};
-      if (!field.varName.empty()) bindings[field.varName] = {*context};
+      trial["."] = {*context};
+      if (!field.varName.empty()) trial[field.varName] = {*context};
       continue;
     }
     const zigzag::DimRef dim = coordinator_.resolveDimension(field.dimName);
@@ -162,14 +165,16 @@ bool ContractMatcher::matchDestructure(
       bound = evaluateDefault(*field.defaultValue, context);
     }
     if (field.type) {
-      if (!satisfiesType(*field.type, bound, &bindings, evaluateDefault)) {
+      if (!satisfiesType(*field.type, bound, &trial, evaluateDefault)) {
         return false;
       }
     } else if (bound.empty() && missing == MissingField::Refuse) {
       return false;
     }
-    if (!field.varName.empty()) bindings[field.varName] = std::move(bound);
+    if (!field.varName.empty()) trial[field.varName] = std::move(bound);
   }
+  bindings.swap(trial);
+  savepoint.commit();
   return true;
 }
 
@@ -179,13 +184,17 @@ bool ContractMatcher::satisfiesType(
   core_.arena().consumeWork();
   validateType(type);
   for (const auto &member : type.unionType.members) {
+    zigzag::ArenaSavepoint savepoint(core_.arena());
     ContractBindings trial;
-    if (satisfiesPrimary(member, cells, bindings != nullptr ? &trial : nullptr,
-                         evaluateDefault)) {
+    ContractBindings *trialBindings = nullptr;
+    if (bindings != nullptr) {
+      trial         = *bindings;
+      trialBindings = &trial;
+    }
+    if (satisfiesPrimary(member, cells, trialBindings, evaluateDefault)) {
       if (bindings != nullptr) {
-        for (auto &[name, bound] : trial) {
-          (*bindings)[name] = std::move(bound);
-        }
+        bindings->swap(trial);
+        savepoint.commit();
       }
       return true;
     }
@@ -204,15 +213,19 @@ bool ContractMatcher::satisfiesPrimary(
     const PrimaryType &type, const std::span<const zigzag::CellRef> cells,
     ContractBindings *const bindings, const DefaultEvaluator evaluateDefault) {
   if (const auto *generic = std::get_if<GenericType>(&type.kind)) {
-    return std::ranges::all_of(cells, [&](const zigzag::CellRef cell) {
-      return satisfiesType(*generic->args.front(), std::span{&cell, 1}, nullptr,
-                           evaluateDefault) &&
-             (!type.refinement || [&] {
-               ContractBindings ignored;
-               return matchDestructure(type.refinement->pattern, cell, ignored,
-                                       MissingField::Refuse, evaluateDefault);
-             }());
-    });
+    zigzag::ArenaSavepoint savepoint(core_.arena());
+    const bool matched =
+        std::ranges::all_of(cells, [&](const zigzag::CellRef cell) {
+          return satisfiesType(*generic->args.front(), std::span{&cell, 1},
+                               nullptr, evaluateDefault) &&
+                 (!type.refinement || [&] {
+                   ContractBindings ignored;
+                   return matchDestructure(type.refinement->pattern, cell,
+                                           ignored, MissingField::Refuse,
+                                           evaluateDefault);
+                 }());
+        });
+    return matched;
   }
   if (cells.empty()) return type.isOptional;
   return cells.size() == 1 &&

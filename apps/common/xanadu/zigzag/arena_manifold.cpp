@@ -84,9 +84,21 @@ DimRef ArenaManifold::ensureDimension(const std::string_view name) {
   if (it != arenaDims_.end()) {
     return it->second;
   }
-  const auto span               = intern(name);
-  const auto dim                = makeCell(span);
-  arenaDims_[std::string(name)] = dim;
+  const auto span                   = intern(name);
+  const auto dim                    = makeCell(span);
+  const auto key                    = std::string(name);
+  const auto [insertedAt, inserted] = arenaDims_.emplace(key, dim);
+  if (!inserted) {
+    return insertedAt->second;
+  }
+  if (outstandingMarks_ > 0) {
+    try {
+      dimensionOrder_.push_back(DimensionEntry{.name = key, .dim = dim});
+    } catch (...) {
+      arenaDims_.erase(insertedAt);
+      throw;
+    }
+  }
 
   const auto dimDims = dimensionNamed("d.dims");
   const auto home    = homeCell();
@@ -1516,11 +1528,12 @@ void ArenaManifold::trail(const std::uint32_t dense) {
   }
 
   auto &cell = slots_[dense];
-  // Already copied out under this mark -- both runs sit above the floor, so
-  // every write to them is already in territory release() truncates. Exact
-  // rather than a heuristic, and it is what keeps one trail entry per old cell
-  // per choice point instead of one per write.
-  if (cell.linkOffset >= floor.links && cell.spanOffset >= floor.content) {
+  // Already copied out under this mark -- a nonempty run above the floor is
+  // reclaimed by truncation, and its header already has an undo entry. Empty
+  // runs can sit exactly at both floors without any copy, so they still need a
+  // saved header (notably for scalar value bits).
+  if ((cell.linkCount > 0 || cell.spanCount > 0) &&
+      cell.linkOffset >= floor.links && cell.spanOffset >= floor.content) {
     return;
   }
 
@@ -1569,7 +1582,7 @@ void ArenaManifold::trail(const std::uint32_t dense) {
   }
 }
 
-Mark ArenaManifold::mark() noexcept {
+Mark ArenaManifold::mark() {
   const Mark taken{
       .cellCount   = static_cast<std::uint32_t>(slots_.size()),
       .linkSize    = static_cast<std::uint32_t>(links_.size()),
@@ -1585,6 +1598,7 @@ Mark ArenaManifold::mark() noexcept {
       .proxyShadowedEdgeCount =
           static_cast<std::uint32_t>(proxyShadowedEdgeOrder_.size()),
       .quoteSpaceCount = static_cast<std::uint32_t>(quoteSpaceOrder_.size()),
+      .dimensionCount  = static_cast<std::uint32_t>(dimensionOrder_.size()),
   };
   floors_.push_back(Floors{.cells   = taken.cellCount,
                            .links   = taken.linkSize,
@@ -1605,11 +1619,21 @@ ArenaManifold *ArenaManifold::discard(const Mark &m) noexcept {
   // not retain an ever-growing trail.
   if (0 == outstandingMarks_) {
     trail_.clear();
+    dimensionOrder_.clear();
   }
   return this;
 }
 
 ArenaManifold *ArenaManifold::release(const Mark &m) noexcept {
+  for (std::size_t i = dimensionOrder_.size(); i > m.dimensionCount; i--) {
+    const auto &entry = dimensionOrder_[i - 1];
+    const auto found  = arenaDims_.find(entry.name);
+    if (found != arenaDims_.end() && found->second == entry.dim) {
+      arenaDims_.erase(found);
+    }
+  }
+  dimensionOrder_.resize(m.dimensionCount);
+
   for (std::size_t i = quoteSpaceOrder_.size(); i > m.quoteSpaceCount; i--) {
     quoteSpace_.erase(quoteSpaceOrder_[i - 1]);
   }
@@ -1690,11 +1714,20 @@ ArenaManifold *ArenaManifold::release(const Mark &m) noexcept {
         spaceStoreRefsTail_[s] = cur;
       }
     }
+  } else {
+    for (std::size_t s = 0; s < spaces_.size(); ++s) {
+      if (s < spaceStoreRefsTail_.size() && spaces_[s].storeCell) {
+        spaceStoreRefsTail_[s] = *spaces_[s].storeCell;
+      }
+    }
   }
 
   if (outstandingMarks_ > 0) {
     outstandingMarks_--;
     floors_.pop_back();
+    if (outstandingMarks_ == 0) {
+      dimensionOrder_.clear();
+    }
   }
   return this;
 }
@@ -2057,6 +2090,9 @@ std::optional<Promoted> promote(xanadu::Store &store,
 ArenaManifold::PrefixSnapshot ArenaManifold::exportPrefix(const Mark &m) const {
   PrefixSnapshot out{};
   out.mark = m;
+  // The snapshot carries the full name map, so a hydrated worker starts with
+  // no dimension-cache undo entries of its own.
+  out.mark.dimensionCount = 0;
 
   const auto cellCount = std::min<std::size_t>(m.cellCount, slots_.size());
   out.slots.assign(slots_.begin(),
@@ -2103,6 +2139,7 @@ ArenaManifold *ArenaManifold::hydratePrefix(const PrefixSnapshot &snapshot) {
   scratch_     = snapshot.scratch;
   shadowOrder_ = snapshot.shadowOrder;
   arenaDims_   = snapshot.arenaDims;
+  dimensionOrder_.clear();
   liveLinks_   = snapshot.mark.liveLinks;
   liveContent_ = snapshot.mark.liveContent;
 
@@ -2211,7 +2248,7 @@ bool readStr(std::string_view &in, std::string &out) {
 
 std::string encodeArenaPrefix(const ArenaManifold::PrefixSnapshot &snapshot) {
   std::string out;
-  out.append("APFX", 4);
+  out.append("APF2", 4);
   writeU32(out, snapshot.mark.cellCount);
   writeU32(out, snapshot.mark.linkSize);
   writeU32(out, snapshot.mark.contentSize);
@@ -2224,6 +2261,7 @@ std::string encodeArenaPrefix(const ArenaManifold::PrefixSnapshot &snapshot) {
   writeU32(out, snapshot.mark.quoteOccurrenceCount);
   writeU32(out, snapshot.mark.proxyShadowedEdgeCount);
   writeU32(out, snapshot.mark.quoteSpaceCount);
+  writeU32(out, snapshot.mark.dimensionCount);
 
   writeU32(out, static_cast<std::uint32_t>(snapshot.slots.size()));
   for (const auto &s : snapshot.slots) {
@@ -2270,7 +2308,7 @@ std::string encodeArenaPrefix(const ArenaManifold::PrefixSnapshot &snapshot) {
 
 std::optional<ArenaManifold::PrefixSnapshot>
 decodeArenaPrefix(std::string_view bytes) {
-  if (bytes.size() < 4 || bytes.substr(0, 4) != "APFX") {
+  if (bytes.size() < 4 || bytes.substr(0, 4) != "APF2") {
     return std::nullopt;
   }
   bytes.remove_prefix(4);
@@ -2287,7 +2325,8 @@ decodeArenaPrefix(std::string_view bytes) {
       !readU32(bytes, out.mark.proxyCount) ||
       !readU32(bytes, out.mark.quoteOccurrenceCount) ||
       !readU32(bytes, out.mark.proxyShadowedEdgeCount) ||
-      !readU32(bytes, out.mark.quoteSpaceCount)) {
+      !readU32(bytes, out.mark.quoteSpaceCount) ||
+      !readU32(bytes, out.mark.dimensionCount)) {
     return std::nullopt;
   }
 

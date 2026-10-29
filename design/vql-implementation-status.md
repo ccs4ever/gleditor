@@ -55,6 +55,13 @@ without rounding integers through floating point; stored types remain distinct. 
 iteration passes 263 focused tests, including CLI/host/mesh filtering and actual persisted-graph
 execution. The mixed numeric matrix preserves operand kinds and bits at Int64 and IEEE boundaries.
 
+Contract matching now stages shape captures and rolls back failed union/default attempts, including
+minted dimensions. Return validation releases temporary defaults on both success and failure. Arena
+rollback restores empty-run scalar headers and dimension-cache journals; branch-prefix payloads use
+`APF2`. The matching-atomicity and explicit VM resume-state iteration passes 395 affected tests; it
+does not establish mutation-boundary enforcement. Recursive frames and default thunks remain
+separate work. Stream element contracts intentionally publish no per-element captures (§4.12.5).
+
 The shared `ContractMatcher` is used by actual Vortex contract opcodes. Versioned, bounded
 descriptors survive save/reload without a process-local AST registry. Nonrecursive positional typed
 calls support filtering, captures, literal shape defaults, nested calls and return checks. Omitted

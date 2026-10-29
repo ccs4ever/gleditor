@@ -108,6 +108,7 @@ VortexVM *VortexVM::pruneAssemblyState() {
   std::erase_if(cursorPC_, [this](const auto &entry) {
     return !core_.arena().contains(entry.first);
   });
+  pruneResumeState();
   return this;
 }
 
@@ -123,7 +124,7 @@ std::optional<OpcodeKind> VortexVM::getOpcodeKind(CellRef opCell) const {
   auto val = core_.arena().asInt64(opCell);
   if (val && *val >= 0 &&
       static_cast<std::uint64_t>(*val) <=
-          static_cast<std::uint64_t>(OpcodeKind::VqlCompare)) {
+          static_cast<std::uint64_t>(OpcodeKind::ResumeSet)) {
     return static_cast<OpcodeKind>(*val);
   }
   return std::nullopt;
@@ -165,6 +166,7 @@ void VortexVM::setCursorOpcode(CellRef cursor, std::optional<CellRef> op) {
         "an opcode reference must be a cell or nullopt");
   }
   cursorPC_[cursor] = op;
+  if (!op) clearResumeState(cursor);
   if (core_.arena().contains(cursor)) {
     if (op) {
       zigzag::expectWritten(core_.arena().setValueBits(
@@ -234,6 +236,7 @@ CellValue VortexVM::inputValue(const CellRef input) const {
     throw std::invalid_argument("a stream register is not a scalar input");
   if (iteratorSlots_.contains(input))
     throw std::invalid_argument("an iterator register is not a scalar input");
+  if (const auto resume = resumeValueForInput(input)) return *resume;
   if (const auto reference = cellReferences_.find(input);
       reference != cellReferences_.end()) {
     if (reference->second && core_.arena().contains(*reference->second)) {
@@ -320,6 +323,7 @@ bool VortexVM::backtrack(const std::optional<CellRef> cursor) {
       streamSlots_    = std::move(cp.streamSlots);
       iteratorSlots_  = std::move(cp.iteratorSlots);
       streamCursor_   = cp.streamCursor;
+      pruneResumeState();
       if (!oraclePath_.empty() || cutCallback_) {
         currentDeweyPath_ = cp.deweyPath;
       }
@@ -404,6 +408,15 @@ void VortexVM::runPipeline(CellRef paramCell) {
     if (kind == OpcodeKind::Halt || kind == OpcodeKind::Return) {
       break;
     }
+    if (kind == OpcodeKind::MatchContract ||
+        kind == OpcodeKind::RequireContract) {
+      throw std::invalid_argument(
+          "contract opcodes cannot run in parameter pipelines");
+    }
+    if (kind == OpcodeKind::ResumeInit || kind == OpcodeKind::ResumeSet) {
+      throw std::invalid_argument(
+          "resume-state opcodes cannot run in parameter pipelines");
+    }
     if (streamStateOpcode(kind)) {
       throw std::invalid_argument(
           "stream and iterator opcodes cannot run in parameter pipelines");
@@ -468,7 +481,14 @@ bool VortexVM::evaluateCondition(CellRef clause,
     return core_.isTruthy(actualClause).value_or(false);
   }
 
-  OpcodeKind kind              = *kindOpt;
+  OpcodeKind kind = *kindOpt;
+  if (kind == OpcodeKind::MatchContract ||
+      kind == OpcodeKind::RequireContract) {
+    return false;
+  }
+  if (kind == OpcodeKind::ResumeInit || kind == OpcodeKind::ResumeSet) {
+    return false;
+  }
   std::vector<CellRef> inCells = core_.inputsOf(actualClause);
   std::vector<CellValue> inVals;
   if (kind == OpcodeKind::VqlCompare) {
@@ -511,6 +531,10 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
   };
   constexpr auto minInt = std::numeric_limits<std::int64_t>::min();
   switch (kind) {
+  case OpcodeKind::ResumeInit:
+    return executeResumeInit(opcode, inputs, cursor);
+  case OpcodeKind::ResumeSet:
+    return executeResumeSet(opcode, inputs, cursor);
   case OpcodeKind::VqlCompare:
     return executeVqlCompare(opcode, outputs);
   case OpcodeKind::Add: {
@@ -1278,6 +1302,13 @@ ExecutionResult VortexVM::step(CellRef cursor) {
                            .errorMessage      = "Halted"};
   }
 
+  struct ActiveCursorScope {
+    std::optional<CellRef> &active;
+    std::optional<CellRef> prior;
+    ~ActiveCursorScope() { active = prior; }
+  } activeScope{activeCursor_, activeCursor_};
+  activeCursor_ = cursor;
+
   if (streamCursor_ && *streamCursor_ != cursor) {
     const auto ownerOpcode = getCursorOpcode(*streamCursor_);
     const bool ownerActive =
@@ -1289,11 +1320,61 @@ ExecutionResult VortexVM::step(CellRef cursor) {
     }
   }
 
-  totalCycles_++;
-
   const auto inputCells = core_.inputsOf(*op);
   const auto outCells   = core_.outputsOf(*op);
   const bool stateful   = streamStateOpcode(kind);
+  const bool contractOp =
+      kind == OpcodeKind::MatchContract || kind == OpcodeKind::RequireContract;
+  const bool resumeStateOp =
+      kind == OpcodeKind::ResumeInit || kind == OpcodeKind::ResumeSet;
+  if (contractOp) {
+    if (!core_.preconditionsOf(*op).empty() ||
+        !core_.postconditionsOf(*op).empty()) {
+      return {.success = false,
+              .errorMessage =
+                  "contract opcodes do not support pre/postconditions"};
+    }
+    if (std::ranges::any_of(
+            inputCells,
+            [&](const CellRef input) { return core_.hasPipeline(input); }) ||
+        std::ranges::any_of(outCells, [&](const CellRef output) {
+          return core_.hasPipeline(output);
+        })) {
+      return {.success      = false,
+              .errorMessage = "contract opcodes do not support pipelines"};
+    }
+  }
+  if (resumeStateOp) {
+    if (!core_.preconditionsOf(*op).empty() ||
+        !core_.postconditionsOf(*op).empty()) {
+      return {.success = false,
+              .errorMessage =
+                  "resume-state opcodes do not support pre/postconditions"};
+    }
+    if (std::ranges::any_of(
+            inputCells,
+            [&](const CellRef input) { return core_.hasPipeline(input); }) ||
+        std::ranges::any_of(outCells, [&](const CellRef output) {
+          return core_.hasPipeline(output);
+        })) {
+      return {.success      = false,
+              .errorMessage = "resume-state opcodes do not support pipelines"};
+    }
+    const auto isTypedSlot = [this](const CellRef slot) {
+      return streamSlots_.contains(slot) || iteratorSlots_.contains(slot);
+    };
+    if (std::ranges::any_of(inputCells, isTypedSlot) ||
+        std::ranges::any_of(outCells, isTypedSlot)) {
+      return {.success = false,
+              .errorMessage =
+                  "resume-state opcodes require scalar arena slots"};
+    }
+    if (isMemoized(*op)) {
+      return {.success      = false,
+              .errorMessage = "resume-state opcodes cannot be memoized"};
+    }
+  }
+  totalCycles_++;
   const bool streamRefOp =
       kind == OpcodeKind::CopyCellRefs || kind == OpcodeKind::ClearCellRefs ||
       kind == OpcodeKind::MatchContract || kind == OpcodeKind::RequireContract;
@@ -1384,6 +1465,7 @@ ExecutionResult VortexVM::step(CellRef cursor) {
       kind != OpcodeKind::RequireContract && kind != OpcodeKind::CopyCellRefs &&
       kind != OpcodeKind::ClearCellRefs &&
       kind != OpcodeKind::BranchFalseCell && kind != OpcodeKind::VqlCompare &&
+      kind != OpcodeKind::ResumeInit && kind != OpcodeKind::ResumeSet &&
       !stateful;
   if (memoizable && isMemoized(*op)) {
     if (const auto key = getMemoKey(*op)) {
@@ -1424,7 +1506,10 @@ ExecutionResult VortexVM::step(CellRef cursor) {
 
     // Structural reads and value reads return cell handles. Preserve identity
     // so later operations consume the target cell, not the result slot.
-    if (stateful) {
+    if (kind == OpcodeKind::MatchContract || kind == OpcodeKind::ResumeInit ||
+        kind == OpcodeKind::ResumeSet) {
+      // The contract handler atomically publishes its Bool and capture refs.
+    } else if (stateful) {
       // Stateful registers write their runtime state and output refs directly.
     } else if (kind == OpcodeKind::Link || kind == OpcodeKind::Break ||
                kind == OpcodeKind::Value || kind == OpcodeKind::CopyCellRefs ||
@@ -1494,6 +1579,45 @@ ExecutionResult VortexVM::step(CellRef cursor) {
                          .contractViolation = ContractViolationKind::None,
                          .failingClause     = std::nullopt,
                          .errorMessage      = ""};
+}
+
+ExecutionResult VortexVM::prepareTypeContract(OpcodeKind kind, CellRef opcode) {
+  if (kind != OpcodeKind::MatchContract) return {.success = true};
+  const auto slots = core_.outputsOf(opcode);
+  if (slots.empty()) {
+    return {.success = false, .errorMessage = "invalid contract output slots"};
+  }
+  try {
+    for (const auto slot : std::span(slots).subspan(1)) {
+      if (const auto found = cellReferences_.find(slot);
+          found != cellReferences_.end()) {
+        found->second.reset();
+      } else {
+        cellReferences_.emplace(slot, std::nullopt);
+      }
+    }
+    const bool invalidOutput =
+        std::ranges::any_of(slots, [this](const CellRef slot) {
+          return !core_.arena().contains(slot) || streamSlots_.contains(slot) ||
+                 iteratorSlots_.contains(slot);
+        });
+    if (invalidOutput) {
+      return {.success = false,
+              .errorMessage =
+                  "contract output slots must be scalar arena cells"};
+    }
+    cellReferences_.erase(slots.front());
+    clearTypedRegister(slots.front());
+    core_.writeValue(slots.front(), 0, std::nullopt, CellValue{false});
+  } catch (const std::exception &error) {
+    for (const auto slot : std::span(slots).subspan(1)) {
+      if (const auto found = cellReferences_.find(slot);
+          found != cellReferences_.end())
+        found->second.reset();
+    }
+    return {.success = false, .errorMessage = error.what()};
+  }
+  return {.success = true};
 }
 
 ExecutionResult VortexVM::run(CellRef cursor, std::size_t maxCycles,

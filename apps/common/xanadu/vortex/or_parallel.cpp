@@ -189,6 +189,7 @@ OrParallelCoordinator::OrParallelCoordinator(const Manifold *base,
 std::optional<OrParallelSpark>
 OrParallelCoordinator::exportSparkFromVictim(VortexVM &victimVm,
                                              const CellRef rootEntryOpcode) {
+  if (victimVm.hasResumeState()) return std::nullopt;
   auto stolen = victimVm.stealNearRootChoicePoint();
   if (!stolen.has_value()) {
     return std::nullopt;

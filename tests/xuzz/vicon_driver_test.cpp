@@ -49,6 +49,64 @@ TEST(ViconDriverTest, Limitation) {
   EXPECT_EQ(*res, want);
 }
 
+TEST(ViconDriverTest, LimitationRejectsNonpositiveCounts) {
+  Driver driver;
+  auto zero = driver.runAll("(1 to 4) \\ 0");
+  ASSERT_TRUE(zero.has_value());
+  EXPECT_TRUE(zero->empty());
+
+  auto negative = driver.runAll("(1 to 4) \\ -2");
+  ASSERT_TRUE(negative.has_value());
+  EXPECT_TRUE(negative->empty());
+}
+
+TEST(ViconDriverTest, NestedAndDynamicLimitCountersSurviveResume) {
+  Driver nested;
+  auto nestedResults = nested.runAll("((1 to 4) \\ 2) \\ 1");
+  ASSERT_TRUE(nestedResults.has_value());
+  EXPECT_EQ(*nestedResults, (std::vector<std::string>{"1"}));
+
+  Driver dynamic;
+  auto dynamicResults = dynamic.runAll("n := 3; (1 to 10) \\ n");
+  ASSERT_TRUE(dynamicResults.has_value());
+  EXPECT_EQ(*dynamicResults, (std::vector<std::string>{"1", "2", "3"}));
+}
+
+TEST(ViconDriverTest, LimitTokenReinitializesOnEachLoopActivation) {
+  Driver driver;
+  auto res = driver.runAll("every (1 to 2) do write((1 to 10) \\ 2)");
+  ASSERT_TRUE(res.has_value());
+  EXPECT_EQ(*res, (std::vector<std::string>{"1", "2", "1", "2", ""}));
+}
+
+TEST(ViconDriverTest, IfResumeDoesNotReenterElseAfterThenProduced) {
+  Driver driver;
+  auto res = driver.runAll("if 1 to 2 then 7 else 9");
+  ASSERT_TRUE(res.has_value());
+  EXPECT_EQ(*res, (std::vector<std::string>{"7"}));
+
+  Driver thenGenerator;
+  auto thenResults = thenGenerator.runAll("if 1 then (7 | 8) else 9");
+  ASSERT_TRUE(thenResults.has_value());
+  EXPECT_EQ(*thenResults, (std::vector<std::string>{"7", "8"}));
+}
+
+TEST(ViconDriverTest, RecursiveProcedureCycleIsRefusedAtCompileTime) {
+  Driver driver;
+  auto selfRecursive = driver.start("procedure f() f() end; f()");
+  ASSERT_FALSE(selfRecursive.has_value());
+  EXPECT_EQ(selfRecursive.error().phase, "compile");
+  EXPECT_NE(selfRecursive.error().detail.find("recursive procedure"),
+            std::string::npos);
+
+  auto mutuallyRecursive =
+      driver.start("procedure f() g() end; procedure g() f() end; f()");
+  ASSERT_FALSE(mutuallyRecursive.has_value());
+  EXPECT_EQ(mutuallyRecursive.error().phase, "compile");
+  EXPECT_NE(mutuallyRecursive.error().detail.find("recursive procedure"),
+            std::string::npos);
+}
+
 TEST(ViconDriverTest, EveryLoop) {
   Driver driver;
   auto res = driver.runAll("every write(1 to 3)");

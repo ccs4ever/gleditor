@@ -310,6 +310,65 @@ TEST(ArenaManifoldTest, writingAnOlderCellTrailsItOnceAndReleaseRestoresIt) {
   EXPECT_EQ(arena.m.trailSize(), 0U);
 }
 
+TEST(ArenaManifoldTest, releaseRestoresScalarBitsForEmptyRunsAtTheFloor) {
+  ArenaManifold arena;
+  const auto scalar = arena.makeScalarCell(std::int64_t{37});
+  const auto before = arena.slot(scalar);
+  ASSERT_TRUE(before);
+  ASSERT_EQ(before->linkCount, 0U);
+  ASSERT_EQ(before->spanCount, 0U);
+
+  const auto mark = arena.mark();
+  ASSERT_TRUE(arena.setValueBits(scalar, ValueKind::Bool, 1));
+  EXPECT_EQ(arena.slot(scalar)->valueKind,
+            static_cast<std::uint8_t>(ValueKind::Bool));
+  arena.release(mark);
+
+  ASSERT_TRUE(arena.slot(scalar));
+  EXPECT_EQ(arena.slot(scalar)->valueKind,
+            static_cast<std::uint8_t>(ValueKind::Int64));
+  EXPECT_EQ(arena.slot(scalar)->valueBits, 37U);
+}
+
+TEST(ArenaManifoldTest, repeatedScalarWritesRestoreAcrossNestedMarks) {
+  ArenaManifold arena;
+  const auto scalar = arena.makeScalarCell(std::int64_t{7});
+  const auto outer  = arena.mark();
+  ASSERT_TRUE(arena.setValueBits(scalar, ValueKind::Int64, 11));
+
+  const auto inner = arena.mark();
+  ASSERT_TRUE(arena.setValueBits(scalar, ValueKind::Bool, 1));
+  ASSERT_TRUE(arena.setValueBits(scalar, ValueKind::Int64, 19));
+  arena.release(inner);
+  EXPECT_EQ(arena.slot(scalar)->valueKind,
+            static_cast<std::uint8_t>(ValueKind::Int64));
+  EXPECT_EQ(arena.slot(scalar)->valueBits, 11U);
+
+  arena.release(outer);
+  EXPECT_EQ(arena.slot(scalar)->valueKind,
+            static_cast<std::uint8_t>(ValueKind::Int64));
+  EXPECT_EQ(arena.slot(scalar)->valueBits, 7U);
+}
+
+TEST(ArenaManifoldTest, hydratedPrefixTrailsEmptyRunSlotHeaders) {
+  ArenaManifold source;
+  const auto scalar   = source.makeScalarCell(std::int64_t{23});
+  const auto mark     = source.mark();
+  const auto snapshot = source.exportPrefix(mark);
+  const auto decoded =
+      zigzag::decodeArenaPrefix(zigzag::encodeArenaPrefix(snapshot));
+  ASSERT_TRUE(decoded);
+
+  ArenaManifold hydrated;
+  hydrated.hydratePrefix(*decoded);
+  ASSERT_TRUE(hydrated.setValueBits(scalar, ValueKind::Bool, 1));
+  hydrated.release(decoded->mark);
+
+  EXPECT_EQ(hydrated.slot(scalar)->valueKind,
+            static_cast<std::uint8_t>(ValueKind::Int64));
+  EXPECT_EQ(hydrated.slot(scalar)->valueBits, 23U);
+}
+
 TEST(ArenaManifoldTest, releaseRestoresContentRestatedUnderTheMark) {
   Arena arena;
   const auto cell = arena.m.makeCell("before");
@@ -343,6 +402,74 @@ TEST(ArenaManifoldTest, marksNestAndReleaseInReverse) {
   arena.m.release(outer);
   EXPECT_EQ(arena.m.linked(base, arena.step, DimVector::POS), std::nullopt);
   EXPECT_FALSE(arena.m.contains(one));
+}
+
+TEST(ArenaManifoldTest, releaseRemovesDimensionsMintedUnderTheMark) {
+  ArenaManifold arena;
+  const auto existing   = arena.ensureDimension("d.existing");
+  const auto mark       = arena.mark();
+  const auto rolledBack = arena.ensureDimension("d.temporary");
+
+  EXPECT_EQ(arena.dimensionNamed("d.existing"), existing);
+  EXPECT_EQ(arena.dimensionNamed("d.temporary"), rolledBack);
+  arena.release(mark);
+
+  EXPECT_EQ(arena.dimensionNamed("d.existing"), existing);
+  EXPECT_EQ(arena.dimensionNamed("d.temporary"), std::nullopt);
+  const auto reminted = arena.ensureDimension("d.temporary");
+  EXPECT_EQ(arena.dimensionNamed("d.temporary"), reminted);
+  EXPECT_EQ(arena.textOf(reminted), "d.temporary");
+}
+
+TEST(ArenaManifoldTest, nestedDimensionJournalFollowsReleaseAndDiscard) {
+  ArenaManifold arena;
+  const auto outer     = arena.mark();
+  const auto retained  = arena.ensureDimension("d.outer");
+  const auto inner     = arena.mark();
+  const auto discarded = arena.ensureDimension("d.inner");
+
+  arena.discard(inner);
+  EXPECT_EQ(arena.dimensionNamed("d.inner"), discarded);
+  arena.release(outer);
+  EXPECT_EQ(arena.dimensionNamed("d.outer"), std::nullopt);
+  EXPECT_EQ(arena.dimensionNamed("d.inner"), std::nullopt);
+
+  const auto nextOuter = arena.mark();
+  const auto committed = arena.ensureDimension("d.committed");
+  arena.discard(nextOuter);
+  EXPECT_EQ(arena.dimensionNamed("d.committed"), committed);
+
+  const auto probe     = arena.mark();
+  const auto temporary = arena.ensureDimension("d.probe");
+  arena.release(probe);
+  EXPECT_EQ(arena.dimensionNamed("d.committed"), committed);
+  EXPECT_EQ(arena.dimensionNamed("d.probe"), std::nullopt);
+  EXPECT_NE(retained, discarded);
+  EXPECT_FALSE(arena.contains(temporary));
+}
+
+TEST(ArenaManifoldTest, hydratedPrefixTreatsItsDimensionMapAsCommitted) {
+  ArenaManifold source;
+  const auto inherited = source.ensureDimension("d.inherited");
+  const auto mark      = source.mark();
+  source.ensureDimension("d.after-mark");
+
+  const auto snapshot = source.exportPrefix(mark);
+  EXPECT_EQ(snapshot.mark.dimensionCount, 0U);
+  const auto wire = zigzag::encodeArenaPrefix(snapshot);
+  EXPECT_EQ(wire.substr(0, 4), "APF2");
+  EXPECT_FALSE(zigzag::decodeArenaPrefix("APFX"));
+  const auto decoded = zigzag::decodeArenaPrefix(wire);
+  ASSERT_TRUE(decoded);
+  EXPECT_EQ(decoded->mark.dimensionCount, 0U);
+
+  ArenaManifold hydrated;
+  hydrated.hydratePrefix(*decoded);
+  EXPECT_EQ(hydrated.dimensionNamed("d.inherited"), inherited);
+  EXPECT_EQ(hydrated.dimensionNamed("d.after-mark"), std::nullopt);
+  const auto child = hydrated.mark();
+  hydrated.release(child);
+  EXPECT_EQ(hydrated.dimensionNamed("d.inherited"), inherited);
 }
 
 TEST(ArenaManifoldTest, discardKeepsTheBindingsMadeUnderTheChoicePoint) {

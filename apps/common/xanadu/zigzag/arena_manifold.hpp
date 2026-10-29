@@ -155,12 +155,10 @@ struct TrailEntry {
 static_assert(sizeof(TrailEntry) == 40);
 
 /**
- * @brief A choice point: the arena's high-water marks.
+ * @brief A choice point: the arena's high-water marks and undo journals.
  *
- * Undo is truncation, so a choice point is the set of lengths to truncate back
- * to. Taking one allocates nothing and writes nothing, which is the property
- * that lets a resolution engine take a million of them (vlog §5.2); a
- * MicroversionId is a choice point too and cannot be taken a million times.
+ * Undo truncates arena vectors and journals to these sizes. A choice point
+ * stays constant-size; its floor stack may grow as marks are nested.
  *
  * liveLinks and liveContent are carried rather than recomputed so that
  * release() is O(trail) instead of O(cells): every slot above the mark is
@@ -183,6 +181,7 @@ struct Mark {
   std::uint32_t quoteOccurrenceCount{0};
   std::uint32_t proxyShadowedEdgeCount{0};
   std::uint32_t quoteSpaceCount{0};
+  std::uint32_t dimensionCount{0};
 };
 
 /// What promote() refuses above, so that a runaway evaluation cannot write an
@@ -644,8 +643,8 @@ public:
 
   // -- choice points ---------------------------------------------------------
 
-  /// Take a choice point. Reads seven lengths; allocates nothing.
-  [[nodiscard]] Mark mark() noexcept;
+  /// Take a choice point by recording the current arena and journal sizes.
+  [[nodiscard]] Mark mark();
 
   /// Undo everything since @p m: replay its trail tail in reverse, then
   /// truncate. Cells minted under the mark are *gone*, not garbage.
@@ -754,6 +753,13 @@ private:
   std::optional<CellRef> authorshipRoot_;
   std::unordered_set<CellRef> provenanceCells_;
   std::unordered_map<std::string, DimRef> arenaDims_;
+  struct DimensionEntry {
+    std::string name;
+    DimRef dim{noCell};
+  };
+  /// Dimension-name mappings added under a mark, so release can remove only
+  /// entries introduced by the failed branch without copying the whole map.
+  std::vector<DimensionEntry> dimensionOrder_;
   /// base CellRef -> the dense slot shadowing it.
   std::unordered_map<CellRef, std::uint32_t> overlay_;
   /// The same refs in the order they were shadowed, so release() can drop the

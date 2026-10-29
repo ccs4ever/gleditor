@@ -15,6 +15,11 @@ namespace xanadu::vicon {
 Driver::Driver() : core_(arena_), compiler_(core_) {}
 
 std::expected<void, DriverError> Driver::start(std::string_view source) {
+  compiler_.vm().clearChoicePoints();
+  if (cursor_) compiler_.vm().setCursorOpcode(*cursor_, std::nullopt);
+  cursor_.reset();
+  started_     = false;
+  exhausted_   = false;
   auto program = compiler_.compileSource(source);
   if (!program) {
     return std::unexpected(DriverError{.code   = program.error().code,
@@ -22,8 +27,7 @@ std::expected<void, DriverError> Driver::start(std::string_view source) {
                                        .loc    = program.error().loc,
                                        .phase  = "compile"});
   }
-  program_ = *program;
-  cursor_.reset(); // spawned lazily by the first resume()
+  program_   = *program;
   started_   = true;
   exhausted_ = false;
   return {};
@@ -45,6 +49,8 @@ std::optional<zigzag::CellRef> Driver::resume() {
   }
   if (!compiler_.stdlib().goalResume(*cursor_, program_.failOp,
                                      program_.haltOp)) {
+    compiler_.vm().clearChoicePoints();
+    compiler_.vm().setCursorOpcode(*cursor_, std::nullopt);
     exhausted_ = true;
     return std::nullopt;
   }

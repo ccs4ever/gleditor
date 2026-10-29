@@ -256,7 +256,7 @@ TEST(VortexStreamTest, ContractBudgetChargesBeforeCopyAndCanRecover) {
   EXPECT_FALSE(failed.success);
   EXPECT_NE(failed.errorMessage.find("work budget exhausted"),
             std::string::npos);
-  EXPECT_FALSE(h.arena.asBool(matched));
+  EXPECT_EQ(h.arena.asBool(matched), std::nullopt);
   EXPECT_FALSE(h.vm.cellReferenceOf(capture));
 
   h.arena.setExecutionLimits(100'000, 100'000, 100'000);

@@ -170,3 +170,42 @@ comparisons), including unchanged operand kinds/bits. Independent Luna senior an
 found no blocker; no performance improvement or full-specification completion is claimed. Logs:
 `/tmp/vql-mixed-numeric-build.log`, `/tmp/vql-mixed-numeric-tests.log`,
 `/tmp/vql-mixed-numeric-format.log`.
+
+## Iteration 7: atomic matching and explicit resume state
+
+Arena rollback now includes dimension-cache insertion journals and empty-run scalar headers. Nested
+discard keeps undo records available to an outer mark; prefix hydration starts a clean local
+journal. Branch-prefix payloads use `APF2` and refuse `APFX`. Taking a mark may allocate floor-stack
+capacity; its API no longer promises `noexcept` or allocation-free operation.
+
+Failed shape matches, union arms and exceptional default evaluation discard their arena changes.
+Successful matches publish captures and their Boolean result together; return checks discard all
+temporary validation defaults even on success. Work already spent remains spent after rollback.
+Contract instructions refuse attached parameter pipelines and pre/postconditions in this bounded
+implementation. General mutation-boundary contracts, recursive frames and path/call default thunks
+remain future work.
+
+### Goal-control regression uncovered by correct rollback
+
+The corrected scalar trail exposed VIcon's reliance on compile-minted counter writes escaping
+backtracking. `ResumeInit` and `ResumeSet` now represent that control state explicitly in the VM.
+Activation token references roll back with choice points; their Int64/Bool values survive resume.
+Cursor closure cleans up values, and restart/exhaustion closes the VIcon cursor. Limits and
+condition flags compile to these graph instructions. Data cells retain normal rollback.
+
+Nested/dynamic/nonpositive limits, bounded conditions, repeated loop activation and token ownership
+are regression cases. Recursive VIcon call cycles refuse pending real call frames. Mesh artifacts
+and OR-parallel spark export refuse resume state until transfer semantics are implemented. No
+end-to-end latency or allocation improvement is claimed; state cleanup and ownership scans are not
+constant-time. General bounded-body semantics for VIcon `while` and mutation-boundary enforcement
+remain separate work. Stream element contracts intentionally validate without publishing per-element
+captures, as specified in §4.12.5.
+
+Validation: full `make -j$(nproc)` and repository `format-check` passed. All 395 affected tests from
+33 suites passed, including overlaid-store preservation, allocation/fuel recovery, existing VQL
+foreign/in-place paths, VIcon controls, native resume identity/ownership, goal helper cleanup, Vlog,
+and OR-parallel prefix hydration. Independent Luna architecture, senior and profiler reviews gated
+the bounded implementation. No full-suite pass or full §4.12 completion is claimed.
+
+Logs: `/tmp/vql-contract-atomicity-build.log`, `/tmp/vql-contract-atomicity-tests.log`,
+`/tmp/vql-contract-atomicity-format.log`.

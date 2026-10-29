@@ -112,6 +112,53 @@ TEST(VortexStdLibTest, GoalOutputAbsenceIsUnitAndValuesStayPresent) {
             (std::vector<CellValue>{unit}));
 }
 
+TEST(VortexStdLibTest, GoalHelpersReleasePrivateResumeStateOnClose) {
+  TestHarness h;
+  const auto one   = h.arena.makeScalarCell(std::int64_t{1});
+  const auto zero  = h.arena.makeScalarCell(std::int64_t{0});
+  const auto token = h.arena.makeCell();
+  const auto out   = h.arena.makeCell();
+  const auto init  = h.vm.mintOpcode(OpcodeKind::ResumeInit);
+  const auto read  = h.vm.mintOpcode(OpcodeKind::Add);
+  const auto jump  = h.vm.mintOpcode(OpcodeKind::Jump);
+  const auto target =
+      h.arena.makeScalarCell(static_cast<std::int64_t>(h.stdlib.goalHaltOp()));
+  ASSERT_TRUE(
+      h.arena.link(init, h.core.dims().spin, zigzag::DimVector::POS, read));
+  ASSERT_TRUE(
+      h.arena.link(read, h.core.dims().spin, zigzag::DimVector::POS, jump));
+  h.core.bindInput(init, one);
+  h.core.bindOutput(init, token);
+  h.core.bindInput(read, token);
+  h.core.bindInput(read, zero);
+  h.core.bindOutput(read, out);
+  h.core.bindInput(jump, target);
+
+  const auto outerAlternative = h.vm.mintOpcode(OpcodeKind::Halt);
+  h.vm.pushChoicePoint(std::nullopt, outerAlternative);
+
+  EXPECT_EQ(h.stdlib.goalBoundedFirst(init, out, h.stdlib.goalHaltOp()),
+            std::optional<CellValue>{std::int64_t{1}});
+  EXPECT_FALSE(h.vm.hasResumeState());
+  EXPECT_EQ(h.vm.choiceDepth(), 1U);
+
+  EXPECT_EQ(h.stdlib.goalResults(init, out, h.stdlib.goalHaltOp()),
+            (std::vector<CellValue>{std::int64_t{1}}));
+  EXPECT_FALSE(h.vm.hasResumeState());
+  EXPECT_EQ(h.vm.choiceDepth(), 1U);
+
+  const auto cursor =
+      h.stdlib.goalProduce(init, h.stdlib.goalHaltOp(), "goal-close-test");
+  ASSERT_TRUE(cursor);
+  EXPECT_TRUE(h.vm.hasResumeState(*cursor));
+  EXPECT_FALSE(h.stdlib.goalResume(*cursor, h.stdlib.goalFailOp(),
+                                   h.stdlib.goalHaltOp()));
+  EXPECT_FALSE(h.vm.hasResumeState(*cursor));
+  EXPECT_EQ(h.vm.choiceDepth(), 1U);
+
+  h.vm.clearChoicePoints();
+}
+
 TEST(VortexStdLibTest, SpatialSymbolResolutionAndInvocation) {
   TestHarness h;
   EXPECT_TRUE(h.stdlib.has("std:math/abs"));

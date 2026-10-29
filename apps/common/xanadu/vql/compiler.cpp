@@ -106,6 +106,10 @@ VQLCompiler::opcodeMnemonic(zigzag::vortex::OpcodeKind kind) noexcept {
     return "STREAM_REVERSE_BEGIN";
   case OpcodeKind::VqlCompare:
     return "VQL_COMPARE";
+  case OpcodeKind::ResumeInit:
+    return "RESUME_INIT";
+  case OpcodeKind::ResumeSet:
+    return "RESUME_SET";
   case OpcodeKind::RankBegin:
     return "RANK_BEGIN";
   case OpcodeKind::IteratorNext:

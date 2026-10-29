@@ -342,7 +342,7 @@ There is no trail, because nothing was destroyed. There is no undo log, because 
 history and it only ever grew. The search tree is the hypertime DAG, and `d.ops_dag` — already
 declared in the convergence — is the dimension along which you walk it.
 
-### 5.2 Arena: a choice point is a pair of high-water marks
+### 5.2 Arena: a choice point records high-water marks
 
 The persistent regime is semantically perfect and operationally ruinous: a binding is a 64-byte
 `CompactOpNode`, and a query performing $10^6$ inferences would append tens of megabytes to the
@@ -353,25 +353,33 @@ An `ArenaManifold` (convergence step 21, **built**: `apps/common/xanadu/zigzag/a
 holds dense vectors and only ever appends. So:
 
 ```cpp
-struct Mark {                    // seven lengths, no allocation
+struct Mark {                    // constant-size rollback boundaries
   std::uint32_t cellCount, linkSize, contentSize, scratchSize, trailSize;
   std::uint32_t liveLinks, liveContent;
+  std::uint32_t shadowCount, proxyCount, quoteOccurrenceCount;
+  std::uint32_t proxyShadowedEdgeCount, quoteSpaceCount, dimensionCount;
 };
-Mark mark()               ->  read them
+Mark mark()               ->  record counts and push a floor
 void release(const Mark&) ->  replay the trail tail in reverse, then truncate
 void discard(const Mark&) ->  give up the retry, keep the bindings (§5.4)
 ```
 
-The last two lengths are what this document originally got wrong by omission. `liveLinks` and
+The live counters are what this document originally got wrong by omission. `liveLinks` and
 `liveContent` are derived counters, and recomputing them on release would make it $O(cells)$ — which
-would defeat the whole point, since the reason an arena choice point beats a microversion is that it
-is $O(1)$. Carrying them in the mark is exact: every slot above it is discarded and every slot below
-it is restored, so the live counts return to precisely what they were and can be assigned back.
+would defeat the purpose of saving boundaries rather than rebuilding cells. Carrying them in the
+mark is exact: every slot above it is discarded and every slot below it is restored, so the live
+counts return to precisely what they were and can be assigned back.
 
-**Undo is truncation.** A choice point is four integers and costs no allocation; discarding one on
-success costs nothing at all. This is the WAM's cost model reached from the other direction: the WAM
-allocates a choice-point frame and pushes trail entries; the arena's structure means the frame *is*
-the lengths it would have recorded.
+**Undo is truncation plus journal replay.** The mark is constant-size; taking it pushes an arena
+floor, whose vector can allocate at a new nesting depth. The live mark now carries thirteen counts,
+including overlay, federation, quotation and dimension-cache journals. Releasing a mark removes
+dimension names introduced after it as well as their cells. Discarding an inner mark keeps its undo
+records for an enclosing rollback; ending the last mark clears committed journals. Empty-run scalar
+headers must still be trailed: offsets equal to the floor do not prove that an undo record exists.
+
+Branch-prefix serialization uses `APF2`, including the dimension-journal count. The old `APFX` shape
+is refused; a hydrated prefix supplies its complete dimension map and starts an empty local journal.
+The WAM comparison is about bounded rollback state, not an allocation-free API guarantee.
 
 What that `contentArenaSize` is — and what the arena is therefore *not* — is §5.5, because two
 plausible readings of it are both wrong and one of them would be an architectural violation.
@@ -427,14 +435,16 @@ pristine, every later write lands in territory truncation reclaims, and restorin
 enough because the header is the only thing pointing at the copy.
 
 That is copy-on-write per cell per choice point, and §5.3's condition is exactly what bounds how
-often it happens: a variable minted for this clause activation is never copied. It also gives a
-precise test for "already copied out under this mark" — both runs sitting above the mark's arena
-lengths — which is what keeps this at one entry per old cell rather than one per write.
+often it happens: a variable minted for this clause activation is never copied. It also gives a test
+for "already copied out under this mark" for cells with a nonempty run: both runs sit above the
+mark's arena lengths. Empty-run cells are an exception; their offsets can equal those lengths
+without any saved header, so repeated scalar writes may add repeated header entries. Reverse replay
+restores them correctly.
 
-**The cost of a binding is one entry per old cell the edit touches, and an eviction touches one.**
-Setting a link displaces whatever the far end held, and the displaced occupant is a cell too. So
-binding an old variable whose previous target is also old costs two entries, not one. Easy to forget
-when counting what an undo must restore, which is why there is a test named for it.
+**A link binding trails the old cells it touches, including a displaced occupant.** Setting a link
+displaces whatever the far end held, and the displaced occupant is a cell too. So binding an old
+variable whose previous target is also old costs two entries, not one. Easy to forget when counting
+what an undo must restore, which is why there is a test named for it.
 
 **Compaction is forbidden while a mark is outstanding.** Not caution — compaction moves every run,
 which is precisely what makes an offset recorded in a `Mark` meaningless, so an arena that compacted

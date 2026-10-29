@@ -107,6 +107,8 @@ enum class OpcodeKind : std::uint8_t {
   IteratorNext,
   StreamReverseBegin,
   VqlCompare,
+  ResumeInit,
+  ResumeSet,
 };
 
 enum class VqlComparisonKind : std::int64_t {
@@ -242,16 +244,43 @@ public:
   VortexVM *setContractCoordinator(xanadu::MultiStoreCoordinator &coordinator);
   VortexVM *setContractCoordinator(ContractCoordinator coordinator);
   [[nodiscard]] ContractCoordinator contractCoordinator() const noexcept;
+  [[nodiscard]] bool hasResumeState(CellRef cursor) const noexcept;
+  [[nodiscard]] bool hasResumeState() const noexcept;
 
   // -- Pipeline Execution Helper ----------------------------------------------
   void runPipeline(CellRef paramCell);
 
 private:
+  ExecutionResult prepareTypeContract(OpcodeKind kind, CellRef opcode);
+  ExecutionResult executeResumeInit(CellRef opcode,
+                                    const std::vector<CellValue> &inputs,
+                                    std::optional<CellRef> cursor);
+  ExecutionResult executeResumeSet(CellRef opcode,
+                                   const std::vector<CellValue> &inputs,
+                                   std::optional<CellRef> cursor);
+  [[nodiscard]] std::optional<CellValue>
+  resumeValueForInput(CellRef input) const;
+  [[nodiscard]] std::optional<CellValue>
+  resumeValueForToken(CellRef tokenCell, std::uint64_t tokenId) const;
+  void clearResumeState(CellRef cursor) noexcept;
+  void pruneResumeState() noexcept;
   ExecutionResult executeVqlCompare(CellRef opcode,
                                     std::vector<CellValue> &outputs);
   ExecutionResult executeTypeContract(OpcodeKind kind, CellRef opcode,
                                       std::vector<CellValue> &outputs);
   xanadu::MultiStoreCoordinator *contractCoordinator_{nullptr};
+  struct ResumeValue {
+    CellRef tokenCell{noCell};
+    CellRef outputSlot{noCell};
+    CellRef cursor{noCell};
+    CellValue value{std::int64_t{0}};
+  };
+  // Resume values are VM control state, deliberately not part of a
+  // ChoicePoint snapshot. Only token references in cellReferences_ backtrack.
+  std::unordered_map<std::uint64_t, ResumeValue> resumeValues_;
+  std::unordered_map<CellRef, std::uint64_t> resumeTokenIds_;
+  std::uint64_t nextResumeTokenId_{1};
+  std::optional<CellRef> activeCursor_;
   // Internal execution phases
   [[nodiscard]] bool evaluateCondition(CellRef clause,
                                        const std::vector<CellValue> &oldInputs,

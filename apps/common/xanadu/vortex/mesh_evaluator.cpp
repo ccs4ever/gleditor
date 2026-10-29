@@ -244,6 +244,9 @@ bool pureOpcode(OpcodeKind opcode) {
   case OpcodeKind::RankBegin:
   case OpcodeKind::IteratorNext:
     return false;
+  case OpcodeKind::ResumeInit:
+  case OpcodeKind::ResumeSet:
+    return false;
   case OpcodeKind::ChoiceDepth:
     return false;
   }
@@ -483,8 +486,7 @@ VortexProgram decodeProgram(std::string_view bytes, SyntaxLimits limits) {
   for (const auto &item : instructions) {
     dictionary(item, 5);
     const auto opcode = required(item, "opcode").asInteger();
-    if (opcode < 0 ||
-        opcode > static_cast<std::int64_t>(OpcodeKind::VqlCompare))
+    if (opcode < 0 || opcode > static_cast<std::int64_t>(OpcodeKind::ResumeSet))
       throw std::runtime_error("Unknown Vortex artifact opcode");
     const auto &next = required(item, "next").asList();
     if (next.size() > 1)

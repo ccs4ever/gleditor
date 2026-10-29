@@ -1856,9 +1856,9 @@ came back byte-identical across every regenerated fixture.
    - **Dense vectors and no ops.** `slots`/`links`/`content` as in `Manifold`, keeping CSR per V3,
      with compaction folded into the reachability sweep rather than triggered at a load an arena
      never has.
-   - **`mark()` / `release(Mark)`** (Vlog §5.2). A choice point is the four arena lengths; undo is
-     `resize()`. Cheap enough to take a million times in a query, which is the property no
-     microversion can have.
+   - **`mark()` / `release(Mark)`** (Vlog §5.2). A choice point records arena and journal high-water
+     counts. Undo replays saved headers and truncates vectors and journals; it never appends a
+     persistent operation. Nesting can grow the floor stack.
    - **A conditional trail** (Vlog §5.3), written only when the overwritten cell is older than the
      innermost mark, because a younger cell is undone by the truncation that removes it. The WAM's
      conditional-trailing rule, arrived at as a consequence of the arena's structure.
@@ -1876,15 +1876,21 @@ came back byte-identical across every regenerated fixture.
 
    Three things the paper had wrong, found by writing it, and corrected in Vlog §5.2–§5.3:
 
-   - **A `Mark` is seven lengths, not four.** `liveLinks`/`liveContent` are derived counters, and
-     recomputing them on release would make it $O(cells)$ — defeating the only reason an arena
-     choice point beats a microversion.
+   - **A `Mark` records live counters and side-table journals.** `liveLinks`/`liveContent` avoid an
+     $O(cells)$ recomputation on release. The current mark has thirteen counts, including overlay,
+     federation, quotation and dimension-cache boundaries. Taking a mark may grow its floor stack;
+     release replays only the retained undo records and journal tails.
    - **A trail entry is a saved `CellSlot` (40 bytes), not a link's previous value (16).** A run
      *relocation* changes the slot header and no `DimLink` at all, so replaying link values would
      restore an offset pointing above the mark.
    - **Trailing a cell copies its runs above the mark.** A `DimLink` lives in a shared arena, so
      overwriting one in place below the mark survives truncation. Copy-on-write per cell per choice
      point, bounded by the same conditional-trailing rule.
+
+   Dimension names created under a mark are journaled and erased on release, so retry cannot find a
+   cache entry naming a truncated cell. Empty-run scalar headers are also trailed; offsets equal to
+   the floor alone cannot establish that a previous copy exists. Branch-prefix payloads now use
+   `APF2` for this mark shape and refuse `APFX`; no persistent operation layout changes.
 
    And one constraint that was not in the paper at all: **compaction is forbidden while a mark is
    outstanding**, because compaction moves every run a `Mark`'s offsets name. It costs nothing —

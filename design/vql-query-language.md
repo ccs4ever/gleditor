@@ -2331,15 +2331,18 @@ explicit refusals. The rulings below describe the intended semantics.
   predicates/clamp to the combined result. Query-time master dereference resolves foreign proxies,
   charges each probe and returns the original cell on a cycle. Contract subject collection charges
   members before copying them into its matcher buffer, and matching charges recursive type visits
-  and field probes. Matching still materializes subjects; no zero-copy or universal allocation
-  guarantee follows. Step predicates retain cell identity through guarded reference slots and
-  Boolean control flow short-circuits. Unsupported cases refuse explicitly. Runtime rank iterators
-  and eager sequence registers now support per-member typed filtering, stream cardinality,
-  predicates and integer index clamps. Foreign neighbors resolve through canonical arena proxies;
-  choice points restore iterator state and proxy minting. Universal lazy streaming, recursive
-  frames, path/call contract-field default thunks, mutation enforcement, and complete
-  frontend/parallel parity remain open; compiled execution never silently calls the direct evaluator
-  as a fallback.
+  and field probes. Failed shape and union attempts roll back arena defaults and minted dimensions;
+  captures are staged until the full match succeeds. Return validation releases its temporary
+  defaults on both outcomes. Failed matching spends fuel even when its graph changes are rolled
+  back. Atomic enforcement of user mutations remains a separate milestone. Matching still
+  materializes subjects; no zero-copy or universal allocation guarantee follows. Step predicates
+  retain cell identity through guarded reference slots and Boolean control flow short-circuits.
+  Unsupported cases refuse explicitly. Runtime rank iterators and eager sequence registers now
+  support per-member typed filtering, stream cardinality, predicates and integer index clamps.
+  Foreign neighbors resolve through canonical arena proxies; choice points restore iterator state
+  and proxy minting. Universal lazy streaming, recursive frames, path/call contract-field default
+  thunks, mutation enforcement, and complete frontend/parallel parity remain open; compiled
+  execution never silently calls the direct evaluator as a fallback.
 
 ______________________________________________________________________
 

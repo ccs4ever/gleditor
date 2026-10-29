@@ -2440,6 +2440,7 @@ std::optional<CellRef> VortexStdLib::goalProduce(const CellRef entryOp,
   // the stack is back where the caller found it.
   while (vm_.choiceDepth() > base && vm_.backtrack(cursor)) {
   }
+  vm_.setCursorOpcode(cursor, std::nullopt);
   return std::nullopt;
 }
 
@@ -2456,6 +2457,16 @@ std::optional<CellRef> VortexStdLib::goalResume(const CellRef cursor,
   if (res.success && vm_.getCursorOpcode(cursor) == haltOp) {
     return cursor;
   }
+  const auto choices = vm_.choiceStack();
+  for (std::size_t base = 0; base < choices.size(); ++base) {
+    if (choices[base].cursor == cursor &&
+        choices[base].altOp == goalSentinel_) {
+      while (vm_.choiceDepth() > base && vm_.backtrack(cursor)) {
+      }
+      break;
+    }
+  }
+  vm_.setCursorOpcode(cursor, std::nullopt);
   return std::nullopt;
 }
 
@@ -2476,10 +2487,12 @@ VortexStdLib::goalBoundedFirst(const CellRef entryOp,
     // Bounded evaluation commits its first result: the choice points are
     // discarded and the produce write stands (spec section 4.4).
     vm_.cut(base);
+    vm_.setCursorOpcode(cursor, std::nullopt);
     return v;
   }
   while (vm_.choiceDepth() > base && vm_.backtrack(cursor)) {
   }
+  vm_.setCursorOpcode(cursor, std::nullopt);
   return std::nullopt;
 }
 
@@ -2511,6 +2524,7 @@ VortexStdLib::goalResults(const CellRef entryOp,
   }
   while (vm_.choiceDepth() > base && vm_.backtrack(cursor)) {
   }
+  vm_.setCursorOpcode(cursor, std::nullopt);
   return results;
 }
 

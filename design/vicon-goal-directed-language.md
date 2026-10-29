@@ -303,11 +303,14 @@ ephemeral quoting cell, never a copied character (§6).
 
 ### 5.3 Limitation `\`, `every`, and iterating a generator to exhaustion
 
-`e \ n` caps a generator at `n` results. It is `std:goal/limit`: a counter cell decremented per
-resume, which emits `#Fail` once it hits zero regardless of whether `e` has more to give.
-`(1 to 10) \ 3` produces `1, 2, 3` and then fails. The counter is a scalar cell; the comparison is
-`#Gt` against zero. No new control flow — a limitation is a generator wrapping a generator,
-intercepting the resume.
+`e \ n` caps a generator at `n` results. The compiled graph initializes a VM resume token and
+updates its counter through `ResumeInit` and `ResumeSet`. Its value survives goal resume while the
+token reference participates in choice-point snapshots; ordinary arena cells keep full rollback.
+`#Gt` and `#Branch` guard entry, and `#Fail` ends the generator when the count is exhausted.
+`(1 to 10) \ 3` produces `1, 2, 3` and then fails; a nonpositive count produces nothing. These state
+operations run in the VM and do not evaluate source or AST nodes. Cursor closure releases resume
+values. Recursive procedures and distributed transfer of this control state remain explicit
+limitations of the current implementation.
 
 ### 5.4 `break`, `next`, and goal-directed loops
 
