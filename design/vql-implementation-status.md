@@ -50,9 +50,10 @@ tests; it does not establish general lazy-thunk support.
 
 Scalar comparisons now lower to a dedicated Vortex instruction with exact Int64 and IEEE Double
 semantics, whole-token text inference and canonical text fallback. Typed bits override display text;
-clone masters and missing operands are respected. Mixed Int/Float currently refuses pending the
-cross-type policy decision. The comparison iteration passes 249 focused tests, including
-CLI/host/mesh filtering and actual persisted-graph execution.
+clone masters and missing operands are respected. Mixed Int/Float compares numeric values losslessly
+without rounding integers through floating point; stored types remain distinct. The comparison
+iteration passes 263 focused tests, including CLI/host/mesh filtering and actual persisted-graph
+execution. The mixed numeric matrix preserves operand kinds and bits at Int64 and IEEE boundaries.
 
 The shared `ContractMatcher` is used by actual Vortex contract opcodes. Versioned, bounded
 descriptors survive save/reload without a process-local AST registry. Nonrecursive positional typed

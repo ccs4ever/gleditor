@@ -151,3 +151,22 @@ refusal before default allocation and alias execution from a saved graph in a fr
 Luna architecture and profiler reviews accepted this bounded scope. No full-suite pass or general
 lazy-thunk/atomicity completion is claimed. Logs: `/tmp/vql-alias-default-build.log`,
 `/tmp/vql-alias-default-tests.log`, `/tmp/vql-alias-default-format.log`.
+
+## Iteration 6: lossless mixed numeric comparisons
+
+Mixed Int/Float operands compare their exact numeric values while preserving their stored types. No
+Int-to-Float conversion is used. Integer boundaries are checked before converting a finite in-range
+Float's integral part, after which exact integer ordering and its fractional part determine the
+result. NaN stays unordered, signed zeros compare equal, and infinities lie outside the finite
+integer range. Both operand orders use the same comparison rule.
+
+Regression coverage includes all six operators in both operand orders, fractions, subnormals, IEEE
+special values, adjacent integers beyond 2^53, and both Int64 boundaries. Exported graph and
+CLI/host/mesh fixtures now exercise mixed numeric comparisons.
+
+Validation: full `make -j$(nproc)` and repository formatting passed; all 263 focused tests passed.
+The mixed matrix checks 18 numeric pairs across six operators in both operand orders (216 VM
+comparisons), including unchanged operand kinds/bits. Independent Luna senior and profiler reviews
+found no blocker; no performance improvement or full-specification completion is claimed. Logs:
+`/tmp/vql-mixed-numeric-build.log`, `/tmp/vql-mixed-numeric-tests.log`,
+`/tmp/vql-mixed-numeric-format.log`.

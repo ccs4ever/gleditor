@@ -746,8 +746,11 @@ Positive and negative zero compare equal. A typed cell's value bits take precede
 text. Whole text tokens may be read through the bounded scalar inference rules; malformed or
 out-of-range integer text remains text. Comparisons that require text use each typed scalar's
 shortest round-trip canonical text and otherwise preserve the original text, with bytewise lexical
-ordering. Clone operands read through their master. The current VM lowering explicitly refuses mixed
-`Int`/`Float` operands while that cross-type policy is being settled.
+ordering. Clone operands read through their master. Mixed `Int`/`Float` operands compare their
+numeric values losslessly while retaining their stored types: `1 = 1.0`, but
+`9007199254740993 > 9007199254740992.0`. Integers are never rounded through floating point for
+comparison. NaN remains unordered against integers, and infinities order beyond every finite
+integer.
 
 For text search, a missing needle yields no matches (or false for `contains`); an explicit empty
 needle keeps its ordinary string-search meaning. An omitted optional slice offset or length keeps

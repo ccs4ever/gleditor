@@ -1,6 +1,7 @@
 #include "common/xanadu/vortex/vortex_vm.hpp"
 
 #include <bit>
+#include <cmath>
 #include <compare>
 #include <concepts>
 #include <cstdint>
@@ -99,34 +100,67 @@ std::string canonicalText(const ComparisonValue &value) {
       value);
 }
 
-bool applyComparison(const std::strong_ordering order,
+bool applyComparison(const std::partial_ordering order,
                      const VqlComparisonKind kind) {
   switch (kind) {
   case VqlComparisonKind::Equal:
-    return order == std::strong_ordering::equal;
+    return order == std::partial_ordering::equivalent;
   case VqlComparisonKind::NotEqual:
-    return order != std::strong_ordering::equal;
+    return order != std::partial_ordering::equivalent;
   case VqlComparisonKind::LessThan:
-    return order == std::strong_ordering::less;
+    return order == std::partial_ordering::less;
   case VqlComparisonKind::LessEqual:
-    return order != std::strong_ordering::greater;
+    return order == std::partial_ordering::less ||
+           order == std::partial_ordering::equivalent;
   case VqlComparisonKind::GreaterThan:
-    return order == std::strong_ordering::greater;
+    return order == std::partial_ordering::greater;
   case VqlComparisonKind::GreaterEqual:
-    return order != std::strong_ordering::less;
+    return order == std::partial_ordering::greater ||
+           order == std::partial_ordering::equivalent;
   }
   return false;
 }
 
-std::optional<bool> compareSameOrTextFallback(const ComparisonValue &left,
-                                              const ComparisonValue &right,
-                                              const VqlComparisonKind kind) {
+std::partial_ordering compareIntegerDouble(const std::int64_t integer,
+                                           const double floating) noexcept {
+  if (std::isnan(floating)) return std::partial_ordering::unordered;
+
+  // INT64_MAX rounds up to 2^63 as a double, so guard the exclusive upper
+  // bound before converting the truncated value to an integer.
+  constexpr double signedLimit = 0x1p63;
+  if (floating >= signedLimit) return std::partial_ordering::less;
+  if (floating < -signedLimit) return std::partial_ordering::greater;
+
+  const double integral = std::trunc(floating);
+  const auto whole      = static_cast<std::int64_t>(integral);
+  if (integer < whole) return std::partial_ordering::less;
+  if (integer > whole) return std::partial_ordering::greater;
+  if (floating > integral) return std::partial_ordering::less;
+  if (floating < integral) return std::partial_ordering::greater;
+  return std::partial_ordering::equivalent;
+}
+
+std::partial_ordering reverse(const std::partial_ordering order) noexcept {
+  if (order == std::partial_ordering::less)
+    return std::partial_ordering::greater;
+  if (order == std::partial_ordering::greater)
+    return std::partial_ordering::less;
+  return order;
+}
+
+bool compareSameOrTextFallback(const ComparisonValue &left,
+                               const ComparisonValue &right,
+                               const VqlComparisonKind kind) {
   if (left.index() != right.index()) {
-    const bool mixedIntDouble = (std::holds_alternative<std::int64_t>(left) &&
-                                 std::holds_alternative<double>(right)) ||
-                                (std::holds_alternative<double>(left) &&
-                                 std::holds_alternative<std::int64_t>(right));
-    if (mixedIntDouble) return std::nullopt;
+    if (const auto *l = std::get_if<std::int64_t>(&left)) {
+      if (const auto *r = std::get_if<double>(&right)) {
+        return applyComparison(compareIntegerDouble(*l, *r), kind);
+      }
+    } else if (const auto *l = std::get_if<double>(&left)) {
+      if (const auto *r = std::get_if<std::int64_t>(&right)) {
+        return applyComparison(reverse(compareIntegerDouble(*r, *l)), kind);
+      }
+    }
 
     const auto lText = canonicalText(left);
     const auto rText = canonicalText(right);
@@ -138,20 +172,7 @@ std::optional<bool> compareSameOrTextFallback(const ComparisonValue &left,
   }
   if (const auto *l = std::get_if<double>(&left)) {
     const double r = std::get<double>(right);
-    switch (kind) {
-    case VqlComparisonKind::Equal:
-      return *l == r;
-    case VqlComparisonKind::NotEqual:
-      return *l != r;
-    case VqlComparisonKind::LessThan:
-      return *l < r;
-    case VqlComparisonKind::LessEqual:
-      return *l <= r;
-    case VqlComparisonKind::GreaterThan:
-      return *l > r;
-    case VqlComparisonKind::GreaterEqual:
-      return *l >= r;
-    }
+    return applyComparison(*l <=> r, kind);
   }
   if (const auto *l = std::get_if<bool>(&left)) {
     return applyComparison(*l <=> std::get<bool>(right), kind);
@@ -188,12 +209,8 @@ ExecutionResult VortexVM::executeVqlCompare(const CellRef opcode,
       return {};
     }
 
-    const auto result =
-        compareSameOrTextFallback(classify(*left), classify(*right), kind);
-    if (!result) {
-      return fail("mixed Int and Float comparisons are not yet defined");
-    }
-    outputs.emplace_back(*result);
+    outputs.emplace_back(
+        compareSameOrTextFallback(classify(*left), classify(*right), kind));
     return {};
   } catch (const std::exception &error) {
     return fail(error.what());

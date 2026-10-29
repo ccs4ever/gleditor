@@ -4,6 +4,7 @@
  */
 #include <gtest/gtest.h>
 
+#include <array>
 #include <bit>
 #include <chrono>
 #include <cmath>
@@ -66,6 +67,82 @@ struct Harness {
     return result ? *result : std::vector<CellRef>{};
   }
 };
+
+struct ComparisonOperand {
+  bool isDouble;
+  std::uint64_t bits;
+
+  [[nodiscard]] CellRef materialize(zigzag::ArenaManifold &arena) const {
+    if (isDouble) {
+      const auto cell = arena.makeCell();
+      zigzag::expectWritten(
+          arena.setValueBits(cell, xanadu::ValueKind::Double, bits));
+      return cell;
+    }
+    return arena.makeScalarCell(std::bit_cast<std::int64_t>(bits));
+  }
+};
+
+enum class ExpectedOrder { Less, Equivalent, Greater, Unordered };
+
+struct MixedComparisonCase {
+  const char *name;
+  ComparisonOperand left;
+  ComparisonOperand right;
+  ExpectedOrder expectedOrder;
+};
+
+bool runRawComparison(const ComparisonOperand &leftValue,
+                      const ComparisonOperand &rightValue,
+                      const zigzag::vortex::VqlComparisonKind kind) {
+  zigzag::ArenaManifold arena;
+  zigzag::vortex::VortexCore core(arena);
+  zigzag::vortex::VortexVM vm(core);
+  const auto left        = leftValue.materialize(arena);
+  const auto right       = rightValue.materialize(arena);
+  const auto leftBefore  = *arena.slot(left);
+  const auto rightBefore = *arena.slot(right);
+  const auto opcode = vm.mintOpcode(zigzag::vortex::OpcodeKind::VqlCompare);
+  const auto halt   = vm.mintOpcode(zigzag::vortex::OpcodeKind::Halt);
+  const auto output = arena.makeCell();
+  zigzag::expectWritten(
+      arena.link(opcode, core.dims().spin, DimVector::POS, halt));
+  core.bindInput(opcode, arena.makeScalarCell(static_cast<std::int64_t>(kind)));
+  core.bindInput(opcode, left);
+  core.bindInput(opcode, right);
+  core.bindOutput(opcode, output);
+
+  const auto execution = vm.run(vm.spawnCursor(opcode, "mixed-compare"), 8);
+  EXPECT_TRUE(execution.success) << execution.errorMessage;
+  EXPECT_EQ(static_cast<std::uint8_t>(arena.valueKindOf(left)),
+            leftBefore.valueKind);
+  EXPECT_EQ(arena.slot(left)->valueBits, leftBefore.valueBits);
+  EXPECT_EQ(static_cast<std::uint8_t>(arena.valueKindOf(right)),
+            rightBefore.valueKind);
+  EXPECT_EQ(arena.slot(right)->valueBits, rightBefore.valueBits);
+  const auto result = vm.resultCell(output);
+  EXPECT_TRUE(result);
+  return result ? arena.asBool(*result).value_or(false) : false;
+}
+
+std::array<bool, 6> expectedComparison(const ExpectedOrder order) {
+  switch (order) {
+  case ExpectedOrder::Less:
+    return {false, true, true, true, false, false};
+  case ExpectedOrder::Equivalent:
+    return {true, false, false, true, false, true};
+  case ExpectedOrder::Greater:
+    return {false, true, false, false, true, true};
+  case ExpectedOrder::Unordered:
+    return {false, true, false, false, false, false};
+  }
+  return {};
+}
+
+std::array<bool, 6> reversedExpected(const std::array<bool, 6> &expected) {
+  return {expected[0], expected[1], expected[4],
+          expected[5], expected[2], expected[3]};
+}
 
 TEST(VQLComparisonVMTest, IntegerBoundsAndAdjacentValuesRemainExact) {
   Harness h;
@@ -152,6 +229,84 @@ TEST(VQLComparisonVMTest, AdjacentDoublesCompareWithoutAnEpsilon) {
             (std::vector<CellRef>{one}));
   EXPECT_EQ(h.run("for $x in ##/d.values where $x != 1.0 return $x"),
             (std::vector<CellRef>{next}));
+}
+
+TEST(VQLComparisonVMTest, MixedIntegerDoubleComparisonIsLosslessInBothOrders) {
+  using Kind         = zigzag::vortex::VqlComparisonKind;
+  const auto integer = [](const std::int64_t value) {
+    return ComparisonOperand{false, std::bit_cast<std::uint64_t>(value)};
+  };
+  const auto floating = [](const double value) {
+    return ComparisonOperand{true, std::bit_cast<std::uint64_t>(value)};
+  };
+  const std::vector<MixedComparisonCase> cases{
+      {"same integer value", integer(1), floating(1.0),
+       ExpectedOrder::Equivalent},
+      {"positive fraction", integer(1), floating(1.5), ExpectedOrder::Less},
+      {"negative fraction above", integer(-1), floating(-0.5),
+       ExpectedOrder::Less},
+      {"negative fraction below", integer(-1), floating(-1.5),
+       ExpectedOrder::Greater},
+      {"positive zero", integer(0), floating(0.0), ExpectedOrder::Equivalent},
+      {"negative zero", integer(0), floating(-0.0), ExpectedOrder::Equivalent},
+      {"positive subnormal", integer(0),
+       floating(std::numeric_limits<double>::denorm_min()),
+       ExpectedOrder::Less},
+      {"negative subnormal", integer(0),
+       floating(-std::numeric_limits<double>::denorm_min()),
+       ExpectedOrder::Greater},
+      {"quiet NaN", integer(0),
+       floating(std::bit_cast<double>(UINT64_C(0x7ff8000000000042))),
+       ExpectedOrder::Unordered},
+      {"positive infinity", integer(INT64_MAX),
+       floating(std::numeric_limits<double>::infinity()), ExpectedOrder::Less},
+      {"negative infinity", integer(INT64_MIN),
+       floating(-std::numeric_limits<double>::infinity()),
+       ExpectedOrder::Greater},
+      {"integer above 2^53", integer(INT64_C(9007199254740993)),
+       floating(0x1p53), ExpectedOrder::Greater},
+      {"integer exactly 2^53", integer(INT64_C(9007199254740992)),
+       floating(0x1p53), ExpectedOrder::Equivalent},
+      {"maximum below positive 2^63", integer(INT64_MAX), floating(0x1p63),
+       ExpectedOrder::Less},
+      {"maximum above predecessor of 2^63", integer(INT64_MAX),
+       floating(std::nextafter(0x1p63, 0.0)), ExpectedOrder::Greater},
+      {"minimum equals negative 2^63", integer(INT64_MIN), floating(-0x1p63),
+       ExpectedOrder::Equivalent},
+      {"minimum below successor of negative 2^63", integer(INT64_MIN),
+       floating(std::nextafter(-0x1p63, 0.0)), ExpectedOrder::Less},
+      {"minimum above predecessor of negative 2^63", integer(INT64_MIN),
+       floating(
+           std::nextafter(-0x1p63, -std::numeric_limits<double>::infinity())),
+       ExpectedOrder::Greater},
+  };
+  constexpr std::array kinds{Kind::Equal,       Kind::NotEqual,
+                             Kind::LessThan,    Kind::LessEqual,
+                             Kind::GreaterThan, Kind::GreaterEqual};
+
+  for (const auto &test : cases) {
+    SCOPED_TRACE(test.name);
+    const auto expected = expectedComparison(test.expectedOrder);
+    const auto reversed = reversedExpected(expected);
+    for (std::size_t index = 0; index < kinds.size(); ++index) {
+      EXPECT_EQ(runRawComparison(test.left, test.right, kinds[index]),
+                expected[index])
+          << "left integer, operator " << index;
+      EXPECT_EQ(runRawComparison(test.right, test.left, kinds[index]),
+                reversed[index])
+          << "left double, operator " << index;
+    }
+  }
+}
+
+TEST(VQLComparisonVMTest, CompiledFrontendMatchesIntegerAndDoubleEquality) {
+  Harness h;
+  const auto integer  = h.arena.makeScalarCell(std::int64_t{1});
+  const auto floating = h.arena.makeScalarCell(1.0);
+  h.append(integer);
+  h.append(floating);
+  EXPECT_EQ(h.run("for $x in ##/d.values where $x = 1.0 return $x"),
+            (std::vector<CellRef>{integer, floating}));
 }
 
 TEST(VQLComparisonVMTest, CustomDisplayDoesNotOverrideTypedBits) {
