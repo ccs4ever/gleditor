@@ -106,6 +106,16 @@ enum class OpcodeKind : std::uint8_t {
   RankBegin,
   IteratorNext,
   StreamReverseBegin,
+  VqlCompare,
+};
+
+enum class VqlComparisonKind : std::int64_t {
+  Equal        = 0,
+  NotEqual     = 1,
+  LessThan     = 2,
+  LessEqual    = 3,
+  GreaterThan  = 4,
+  GreaterEqual = 5,
 };
 
 using CellReferenceMap = std::unordered_map<CellRef, std::optional<CellRef>>;
@@ -237,6 +247,8 @@ public:
   void runPipeline(CellRef paramCell);
 
 private:
+  ExecutionResult executeVqlCompare(CellRef opcode,
+                                    std::vector<CellValue> &outputs);
   ExecutionResult executeTypeContract(OpcodeKind kind, CellRef opcode,
                                       std::vector<CellValue> &outputs);
   xanadu::MultiStoreCoordinator *contractCoordinator_{nullptr};

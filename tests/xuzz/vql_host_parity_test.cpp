@@ -150,7 +150,7 @@ TEST(VQLHostParityTest,
 TEST(VQLHostParityTest, ForContractsRunThroughEveryHostAndMeshRoute) {
   const std::string source =
       "let $p := %\"paper\"; $p/d.items%\"7\"%\"bad\"%\"9\"; "
-      "for { .: $item: Int } in $p/d.items where $item != \"9\" return $item";
+      "for { .: $item: Int } in $p/d.items where $item != 9 return $item";
   VortexHost host;
   const auto query = host.executeVQLChecked(source);
   ASSERT_TRUE(query) << query.error().message;

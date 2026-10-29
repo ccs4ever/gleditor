@@ -109,3 +109,23 @@ semantic gap; same-kind comparisons are used in the exported filter fixtures.
 
 Logs: `/tmp/vql-block-vm-build.log`, `/tmp/vql-block-vm-focused.log`,
 `/tmp/vql-block-vm-format.log`.
+
+## Iteration 4: typed scalar comparisons
+
+VQL comparison expressions now emit the graph-native `VqlCompare` instruction. Generic VM comparison
+instructions keep their existing language-independent behavior. Operands resolve runtime references
+and clone masters; missing operands compare false, including inequality. Int/Int comparisons are
+exact, Float/Float comparisons follow IEEE rules, and bounded whole-token text inference uses the
+shared scalar parser. Other comparisons use canonical scalar text and original nonnumeric text.
+Typed value bits take precedence over custom display text. Mixed Int/Float comparisons explicitly
+refuse pending the cross-type policy decision.
+
+The instruction is included in persisted opcode decoding and the mesh artifact allowlist. It
+bypasses value-only memoization and eager input snapshots to preserve missing references. Tests
+cover integer bounds, IEEE special values, text fallback, clone values, missing operands, work
+exhaustion, and actual exported graphs. The CLI/host/mesh filter fixture now compares text cells
+against an integer literal. Text byte charging occurs after materialization; it does not bound the
+preceding string allocation. Full `make -j$(nproc)` passed, and all 249 focused tests passed.
+Independent Luna architecture, senior and profiler reviews accepted this bounded implementation. No
+full-suite or performance claim follows. Logs: `/tmp/vql-comparison-build.log`,
+`/tmp/vql-comparison-tests.log`, `/tmp/vql-comparison-format.log`.

@@ -104,6 +104,8 @@ VQLCompiler::opcodeMnemonic(zigzag::vortex::OpcodeKind kind) noexcept {
     return "STREAM_BEGIN";
   case OpcodeKind::StreamReverseBegin:
     return "STREAM_REVERSE_BEGIN";
+  case OpcodeKind::VqlCompare:
+    return "VQL_COMPARE";
   case OpcodeKind::RankBegin:
     return "RANK_BEGIN";
   case OpcodeKind::IteratorNext:
@@ -625,30 +627,31 @@ VQLCompiler::compileComparison(const ComparisonExpr &comp, CellRef ctxCell) {
                               : std::optional<CellRef>{core_.home()};
   if (!lhs || !rhs) return std::nullopt;
 
-  OpcodeKind kind = OpcodeKind::Eq;
+  zigzag::vortex::VqlComparisonKind comparison =
+      zigzag::vortex::VqlComparisonKind::Equal;
   switch (comp.op) {
   case CompOp::Equal:
-    kind = OpcodeKind::Eq;
+    comparison = zigzag::vortex::VqlComparisonKind::Equal;
     break;
   case CompOp::NotEqual:
-    kind = OpcodeKind::Neq;
+    comparison = zigzag::vortex::VqlComparisonKind::NotEqual;
     break;
   case CompOp::LessThan:
-    kind = OpcodeKind::Lt;
+    comparison = zigzag::vortex::VqlComparisonKind::LessThan;
     break;
   case CompOp::LessEqual:
-    kind = OpcodeKind::Lte;
+    comparison = zigzag::vortex::VqlComparisonKind::LessEqual;
     break;
   case CompOp::GreaterThan:
-    kind = OpcodeKind::Gt;
+    comparison = zigzag::vortex::VqlComparisonKind::GreaterThan;
     break;
   case CompOp::GreaterEqual:
-    kind = OpcodeKind::Gte;
+    comparison = zigzag::vortex::VqlComparisonKind::GreaterEqual;
     break;
   }
 
-  CellRef op =
-      emitOp(kind, std::string("#COMP ") + std::string(opcodeMnemonic(kind)));
+  CellRef op = emitOp(OpcodeKind::VqlCompare, "#VQL_COMPARE");
+  emitInput(op, emitConstant(CellValue(static_cast<std::int64_t>(comparison))));
   emitInput(op, *lhs);
   emitInput(op, *rhs);
 

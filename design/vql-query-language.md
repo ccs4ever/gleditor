@@ -739,6 +739,16 @@ empty stream, while `count()` over that stream is the present integer `0`. A com
 expression has no value creates no cell. Functions that intentionally coerce an argument define that
 coercion themselves; absence is not passed through an empty-string marker.
 
+Scalar comparisons preserve the distinction between `Int` and `Float`. Two `Int` operands compare as
+exact signed 64-bit integers. Two `Float` operands use IEEE 754 comparisons, without an epsilon: NaN
+compares unequal to every value, including itself, and every ordered comparison with NaN is false.
+Positive and negative zero compare equal. A typed cell's value bits take precedence over its display
+text. Whole text tokens may be read through the bounded scalar inference rules; malformed or
+out-of-range integer text remains text. Comparisons that require text use each typed scalar's
+shortest round-trip canonical text and otherwise preserve the original text, with bytewise lexical
+ordering. Clone operands read through their master. The current VM lowering explicitly refuses mixed
+`Int`/`Float` operands while that cross-type policy is being settled.
+
 For text search, a missing needle yields no matches (or false for `contains`); an explicit empty
 needle keeps its ordinary string-search meaning. An omitted optional slice offset or length keeps
 its documented default, while a supplied expression with no value yields no slice result. A bare

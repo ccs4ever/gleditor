@@ -45,6 +45,12 @@ actual VM instructions. Typed context fields and implicit context captures use d
 on every exit. The VM-only ledger records 238 passing focused tests for this bounded iteration;
 recursive frames, nonliteral field-default thunks and atomic mutation enforcement remain open.
 
+Scalar comparisons now lower to a dedicated Vortex instruction with exact Int64 and IEEE Double
+semantics, whole-token text inference and canonical text fallback. Typed bits override display text;
+clone masters and missing operands are respected. Mixed Int/Float currently refuses pending the
+cross-type policy decision. The comparison iteration passes 249 focused tests, including
+CLI/host/mesh filtering and actual persisted-graph execution.
+
 The shared `ContractMatcher` is used by actual Vortex contract opcodes. Versioned, bounded
 descriptors survive save/reload without a process-local AST registry. Nonrecursive positional typed
 calls support filtering, captures, literal shape defaults, nested calls and return checks. Omitted

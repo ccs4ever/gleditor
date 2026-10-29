@@ -123,7 +123,7 @@ std::optional<OpcodeKind> VortexVM::getOpcodeKind(CellRef opCell) const {
   auto val = core_.arena().asInt64(opCell);
   if (val && *val >= 0 &&
       static_cast<std::uint64_t>(*val) <=
-          static_cast<std::uint64_t>(OpcodeKind::StreamReverseBegin)) {
+          static_cast<std::uint64_t>(OpcodeKind::VqlCompare)) {
     return static_cast<OpcodeKind>(*val);
   }
   return std::nullopt;
@@ -419,7 +419,10 @@ void VortexVM::runPipeline(CellRef paramCell) {
 
     std::vector<CellRef> inCells = core_.inputsOf(*pipeOp);
     std::vector<CellValue> inVals;
-    if (inCells.empty()) {
+    if (kind == OpcodeKind::VqlCompare) {
+      // The comparison handler reads these registers directly so it can
+      // distinguish a missing reference from an ordinary scalar value.
+    } else if (inCells.empty()) {
       inVals.push_back(inputValue(paramCell));
     } else {
       for (CellRef c : inCells) {
@@ -468,7 +471,9 @@ bool VortexVM::evaluateCondition(CellRef clause,
   OpcodeKind kind              = *kindOpt;
   std::vector<CellRef> inCells = core_.inputsOf(actualClause);
   std::vector<CellValue> inVals;
-  if (!inCells.empty()) {
+  if (kind == OpcodeKind::VqlCompare) {
+    // Its handler resolves raw slots and must observe missing references.
+  } else if (!inCells.empty()) {
     for (CellRef c : inCells) {
       inVals.push_back(inputValue(c));
     }
@@ -506,6 +511,8 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
   };
   constexpr auto minInt = std::numeric_limits<std::int64_t>::min();
   switch (kind) {
+  case OpcodeKind::VqlCompare:
+    return executeVqlCompare(opcode, outputs);
   case OpcodeKind::Add: {
     if (inputs.size() >= 2) {
       if (std::holds_alternative<std::string>(inputs[0]) &&
@@ -1354,7 +1361,8 @@ ExecutionResult VortexVM::step(CellRef cursor) {
       if (stateful || kind == OpcodeKind::CopyCellRefs ||
           kind == OpcodeKind::ClearCellRefs ||
           kind == OpcodeKind::MatchContract ||
-          kind == OpcodeKind::RequireContract) {
+          kind == OpcodeKind::RequireContract ||
+          kind == OpcodeKind::VqlCompare) {
         oldInputs.emplace_back(false);
       } else {
         oldInputs.push_back(inputValue(paramCell));
@@ -1375,7 +1383,8 @@ ExecutionResult VortexVM::step(CellRef cursor) {
       kind != OpcodeKind::Value && kind != OpcodeKind::MatchContract &&
       kind != OpcodeKind::RequireContract && kind != OpcodeKind::CopyCellRefs &&
       kind != OpcodeKind::ClearCellRefs &&
-      kind != OpcodeKind::BranchFalseCell && !stateful;
+      kind != OpcodeKind::BranchFalseCell && kind != OpcodeKind::VqlCompare &&
+      !stateful;
   if (memoizable && isMemoized(*op)) {
     if (const auto key = getMemoKey(*op)) {
       CellRef pin = core_.getOrCreateMemoPin(*key);

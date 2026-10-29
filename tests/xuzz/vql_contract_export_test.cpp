@@ -177,6 +177,13 @@ TEST(VQLContractExportTest, TypedCallGraphSurvivesStoreReloadAndFreshVM) {
   TemporaryDirectory temporary;
   const std::vector<Case> cases{
       {.query         = "def identity($x: Int): Int := $x; "
+                        "if 9007199254740993 > 9007199254740992 "
+                        "return identity(7) else return identity(9)",
+       .expectedValue = "7"},
+      {.query         = "def identity($x: Int): Int := $x; "
+                        "if \"95\" = 95 return identity(7) else return identity(9)",
+       .expectedValue = "7"},
+      {.query         = "def identity($x: Int): Int := $x; "
                         "if true return identity(7) else return identity(9)",
        .expectedValue = "7"},
       {.query         = "def identity($x: Int): Int := $x; "
@@ -187,7 +194,7 @@ TEST(VQLContractExportTest, TypedCallGraphSurvivesStoreReloadAndFreshVM) {
            "for { ., +d.score: $score: Int := 7 } in $p/d.items return $score",
        .expectedValues = {"7", "7"}},
       {.query = "let $p := %\"paper\"; $p/d.items%\"7\"%\"bad\"%\"9\"; "
-                "for { .: $item: Int } in $p/d.items where $item != \"9\" "
+                "for { .: $item: Int } in $p/d.items where $item != 9 "
                 "return $item",
        .expectedValues = {"7"}},
       {.query         = "def identity($x: Int): Int := $x; "
