@@ -494,6 +494,8 @@ private:
   void deriveSchedule(State &state) const;
   /// Move percepts and effect results the host posted onto their agents.
   void drainPosted();
+  /// Ask for a bookkeeping turn charging @p principal's waiting refusals.
+  void postRefusals(const identity::ActorPid &target, std::string principal);
   void startEffect(State &state, const OutboxItem &item);
   void cancelEffect(State &state, std::int64_t id);
   void cancelFlights(State &state);

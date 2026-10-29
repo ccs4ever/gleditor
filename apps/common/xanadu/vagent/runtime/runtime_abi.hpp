@@ -545,8 +545,6 @@ inline constexpr std::string_view kObsVerdictUntested  = "UNTESTED";
 inline constexpr std::string_view kObsVerdictEpoch     = "verdict_epoch";
 inline constexpr std::string_view kObsVerdictRevisions = "verdict_revisions";
 inline constexpr std::string_view kObsPinned           = "pinned";
-/// The typed outcome a failed ingestion turn reports when the routine itself
-/// could not run (a malformed input record), never a data refusal.
 /// Limits the adapter passes beside the observation, from the settings.
 inline constexpr std::string_view kTurnIngest          = "ingest";
 inline constexpr std::string_view kIngestMaxSources    = "max_sources";
@@ -582,6 +580,19 @@ inline constexpr std::string_view kProfileStreams = "streams";
 inline constexpr std::string_view kProfileDedup       = "dedup";
 inline constexpr std::string_view kProfileLastReceive = "last_receive";
 inline constexpr std::string_view kProfileLastContact = "last_contact";
+/// The code of the newest refusal charged to the profile.
+inline constexpr std::string_view kProfileLastRefusal = "last_refusal";
+// The adapter passes the refusals charged to one principal since its last
+// bookkeeping turn to `observeRefusalEntry` as `$turn.refusal`, a record of
+// the source token, both counts, the newest code and, when a direct content
+// refusal showed the device alive, its steady receipt time.
+inline constexpr std::string_view kTurnRefusal    = "refusal";
+inline constexpr std::string_view kRefusalContent = "content";
+inline constexpr std::string_view kRefusalOther   = "other";
+inline constexpr std::string_view kRefusalCode    = "code";
+inline constexpr std::string_view kRefusalContact = "contact";
+/// A bookkeeping turn for a principal with no profile: nothing to charge.
+inline constexpr std::string_view kTurnResultNoProfile = "NoProfile";
 // Typed ingestion outcomes besides `Committed`.
 inline constexpr std::string_view kTurnResultDuplicate = "Duplicate";
 inline constexpr std::string_view kTurnResultConflictingEvent =
@@ -595,6 +606,8 @@ inline constexpr std::string_view kTurnResultObservationTimeMismatch =
     "ObservationTimeMismatch";
 inline constexpr std::string_view kTurnResultEpistemicKeyLimit =
     "EpistemicKeyLimit";
+/// A failed ingestion turn that set no code (a malformed input record, a
+/// statement failure): a program or runtime defect, never a data refusal.
 inline constexpr std::string_view kTurnResultIngestionFault = "IngestionFault";
 inline constexpr std::string_view kTurnResultInvalidObservation =
     "InvalidObservation";
@@ -766,6 +779,9 @@ struct CompiledAgent {
   /// leaves a typed code in `$turn_result` and halts. Present only for a
   /// program with an arbitrated predicate.
   std::optional<zigzag::CellRef> observeEntry{};
+  /// Charges the refusals in `$turn.refusal` to their principal's profile
+  /// (P19 I3-1b); present exactly when `observeEntry` is.
+  std::optional<zigzag::CellRef> observeRefusalEntry{};
   std::map<std::string, zigzag::CellRef, std::less<>> fieldDefaults;
   std::map<std::string, CompiledContainer, std::less<>> skills;
   std::map<std::string, CompiledContainer, std::less<>> behaviors;

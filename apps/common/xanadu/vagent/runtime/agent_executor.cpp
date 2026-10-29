@@ -534,6 +534,10 @@ struct IngestKey {
   std::uint64_t incarnation{};
   std::string eventId;
   std::string predicate;
+  /// What a refusal of the event charges: a relayed copy never shows the
+  /// device alive.
+  bool relayed{false};
+  double receivedSteady{};
 };
 
 struct AgentExecutor::PostBox {
@@ -545,6 +549,8 @@ struct AgentExecutor::PostBox {
     /// A checked observation for the agent's ingestion turn.
     std::optional<WireRecord> observation;
     std::optional<IngestKey> ingest;
+    /// A principal with refusals waiting to be charged to its profile.
+    std::optional<std::string> refusalsOf;
     std::int64_t effect{};
     EffectResult result;
   };
@@ -629,12 +635,50 @@ struct AgentExecutor::Ingress {
   std::map<std::string, std::size_t> queued;
   std::map<std::pair<std::string, std::string>, std::size_t> queuedBy;
   std::map<std::string, std::deque<Logged>> outcomes;
+  /// Refusals not yet charged, by pid and principal. They coalesce, so a
+  /// flood of refused events costs one bookkeeping turn, not one each.
+  struct Charge {
+    std::int64_t content{};
+    std::int64_t other{};
+    std::string code;
+    std::optional<double> contact;
+  };
+  std::map<std::pair<std::string, std::string>, Charge> charges;
   bool wallSynchronised{true};
 
   void log(const std::string &pid, std::size_t bound, Logged entry) {
     auto &q = outcomes[pid];
     q.push_back(std::move(entry));
     while (q.size() > bound) q.pop_front();
+  }
+  /// Record one refusal against @p principal; true when it is the first
+  /// since the last bookkeeping turn, so the caller posts a note for it.
+  bool charge(const std::string &pid, const std::string &principal,
+              std::string_view code, bool relayed, double receivedSteady) {
+    if (!chargeable(code)) return false;
+    auto [it, fresh] = charges.try_emplace({pid, principal});
+    auto &c          = it->second;
+    if (!relayed && isContentRefusal(code)) {
+      ++c.content;
+      c.contact = receivedSteady;
+    } else {
+      ++c.other;
+    }
+    c.code = std::string(code);
+    return fresh;
+  }
+  /// Frame, unit, variance and time refusals: the device demonstrably sent
+  /// what the policy cannot use.
+  static bool isContentRefusal(std::string_view code) {
+    return code == "ObservationFrameMismatch" || code == "MissingVariance" ||
+           code == "InvalidVariance" || code == "ObservationTimeMismatch" ||
+           code == "StaleObservation";
+  }
+  /// The host's own conditions and runtime defects are never the source's.
+  static bool chargeable(std::string_view code) {
+    return code != "ClockUnsynchronised" && code != "IngressBackpressure" &&
+           code != "UnknownSource" && code != kTurnResultIngestionFault &&
+           code != "cycles" && code != "fuel";
   }
 };
 
@@ -1537,12 +1581,15 @@ AgentExecutor::TurnOutcome AgentExecutor::deliverHost(State &state,
     spec.entry      = event.entry;
     spec.turnFields = event.turnFields;
     // Admission is net: the routine has already excised what it may.
-    spec.admit = [this, &state]() -> std::optional<std::string> {
-      const auto ceiling = settings_.epistemic.cells;
-      if (epistemicCellsWithin(state, ceiling) > ceiling)
-        return std::string(kTurnResultEpistemicBudget);
-      return std::nullopt;
-    };
+    // Bookkeeping turns only update counters in place, so they are not
+    // admitted against the ceiling a refusal may have been for.
+    if (event.ingest)
+      spec.admit = [this, &state]() -> std::optional<std::string> {
+        const auto ceiling = settings_.epistemic.cells;
+        if (epistemicCellsWithin(state, ceiling) > ceiling)
+          return std::string(kTurnResultEpistemicBudget);
+        return std::nullopt;
+      };
     auto outcome = runTurn(state, cursor, grant, context, spec);
     if (event.ingest) {
       IngestOutcome logged;
@@ -1558,9 +1605,14 @@ AgentExecutor::TurnOutcome AgentExecutor::deliverHost(State &state,
         logged.outcomeClass = outcomeClassOf(code);
       }
       const std::lock_guard lock(ingress_->mutex);
-      ingress_->log(pidKey(state.pid), settings_.epistemic.outcomeLog,
+      const auto pid = pidKey(state.pid);
+      ingress_->log(pid, settings_.epistemic.outcomeLog,
                     {event.ingest->principal, event.ingest->incarnation,
-                     event.ingest->eventId, std::move(logged)});
+                     event.ingest->eventId, logged});
+      if (logged.kind == IngestOutcome::Kind::Refused &&
+          ingress_->charge(pid, event.ingest->principal, logged.code,
+                           event.ingest->relayed, event.ingest->receivedSteady))
+        postRefusals(state.pid, event.ingest->principal);
     }
     return outcome;
   }
@@ -2989,6 +3041,11 @@ AgentExecutor::observe(const identity::ActorPid &target,
                    o.incarnation,
                    o.eventId,
                    {IngestOutcome::Kind::Refused, name, outcomeClassOf(name)}});
+    if (ingress_->charge(
+            pid, o.principal, name, o.relayedBy.has_value(),
+            std::chrono::duration<double>(clock_.steady().time_since_epoch())
+                .count()))
+      postRefusals(target, o.principal);
     return std::unexpected(code);
   };
   const auto binding = ingress_->bindings.find({pid, o.principal, o.predicate});
@@ -3092,7 +3149,12 @@ AgentExecutor::observe(const identity::ActorPid &target,
   PostBox::Item item;
   item.pid         = target;
   item.observation = std::move(r);
-  item.ingest = IngestKey{o.principal, o.incarnation, o.eventId, o.predicate};
+  item.ingest      = IngestKey{o.principal,
+                          o.incarnation,
+                          o.eventId,
+                          o.predicate,
+                          o.relayedBy.has_value(),
+                          seconds(clock_.steady().time_since_epoch())};
   posts_->push(std::move(item));
   return TransportReceipt{o.eventId};
 }
@@ -3131,6 +3193,14 @@ std::string_view epistemicRefusalName(EpistemicRefusal refusal) noexcept {
   return "Unknown";
 }
 
+void AgentExecutor::postRefusals(const identity::ActorPid &target,
+                                 std::string principal) {
+  PostBox::Item item;
+  item.pid        = target;
+  item.refusalsOf = std::move(principal);
+  posts_->push(std::move(item));
+}
+
 void AgentExecutor::percept(const identity::ActorPid &target, std::string type,
                             WireRecord fields) {
   PostBox::Item item;
@@ -3162,7 +3232,32 @@ void AgentExecutor::drainPosted() {
       continue;
     }
     liftLimits(*state.context);
-    if (item.observation) {
+    if (item.refusalsOf) {
+      Ingress::Charge charge;
+      {
+        const std::lock_guard lock(ingress_->mutex);
+        const auto found =
+            ingress_->charges.find({pidKey(item.pid), *item.refusalsOf});
+        if (found == ingress_->charges.end()) continue;
+        charge = std::move(found->second);
+        ingress_->charges.erase(found);
+      }
+      if (!state.agent.observeRefusalEntry) continue;
+      WireRecord note;
+      note.set(std::string(kObsSource), WireValue::text(*item.refusalsOf));
+      note.set(std::string(kRefusalContent),
+               WireValue::integer(charge.content));
+      note.set(std::string(kRefusalOther), WireValue::integer(charge.other));
+      note.set(std::string(kRefusalCode), WireValue::text(charge.code));
+      if (charge.contact)
+        note.set(std::string(kRefusalContact),
+                 WireValue::real(*charge.contact));
+      HostEvent bookkeeping;
+      bookkeeping.entry = state.agent.observeRefusalEntry;
+      bookkeeping.turnFields.set(std::string(kTurnRefusal),
+                                 WireValue::record(std::move(note)));
+      state.hostEvents.push_back(std::move(bookkeeping));
+    } else if (item.observation) {
       if (item.ingest) {
         const std::lock_guard lock(ingress_->mutex);
         const auto pid = pidKey(item.pid);

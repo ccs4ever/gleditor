@@ -1190,6 +1190,7 @@ private:
   void emitRtBDrop();
   void emitRtBSet();
   void emitObserve(CellRef entryLabel);
+  void emitObserveRefusal(CellRef entryLabel);
   /// Re-attach a detached history (@p moved, zero when none) to support
   /// @p sc, and return @p sc in r1.
   void finishSupport(CellRef sc, CellRef moved);
@@ -4398,6 +4399,77 @@ void Gen::endObservation(std::string_view code) {
   jump(haltOp_);
 }
 
+/// `observeRefusalEntry` (P19 I3-1b): charge the refusals in `$turn.refusal`
+/// to their principal's profile, apart from the gate's `reject_count`.
+/// Content refusals of direct events may feed health (I3-2) and show the
+/// device alive; every other refusal, and any of a relayed copy, is
+/// diagnostic only, so a replay or a hostile relay can make a source look
+/// neither faulty nor alive.
+void Gen::emitObserveRefusal(CellRef entryLabel) {
+  tail_  = std::nullopt;
+  frame_ = nullptr;
+  place(entryLabel);
+  const FieldInfo &turn = fields_.at(std::string(kFieldTurn));
+  const CellRef tp = reg(), note = reg(), who = reg(), content = reg(),
+                other = reg(), code = reg(), contact = reg();
+  const CellRef malformed = newLabel();
+  mov(S(tp), S(rd(S(turn.nameCell), core_.dims().values)));
+  mov(S(a0_), S(tp));
+  movC(a1_, cStr(std::string(kTurnRefusal)));
+  callLabel(rtFind_);
+  mov(S(note), S(r0_));
+  branchIfZero(note, malformed);
+  const auto field = [&](std::string_view name, CellRef out) {
+    mov(S(a0_), S(note));
+    movC(a1_, cStr(std::string(name)));
+    callLabel(rtFind_);
+    mov(S(out), S(r0_));
+  };
+  for (const auto &[name, out] :
+       {std::pair{kObsSource, who}, std::pair{kRefusalContent, content},
+        std::pair{kRefusalOther, other}, std::pair{kRefusalCode, code}}) {
+    field(name, out);
+    branchIfZero(out, malformed);
+  }
+  field(kRefusalContact, contact);
+  const CellRef prof = reg(), same = reg(), loop = newLabel(),
+                found = newLabel(), absent = newLabel();
+  mov(S(prof), S(rd(S(agentCell_), dims_.trust)));
+  place(loop);
+  branchIfZero(prof, absent);
+  emit(OpcodeKind::Eq, "who?", {D(prof), D(who)}, {same});
+  branch(S(same), found);
+  mov(S(prof), S(rd(D(prof), dims_.trust)));
+  jump(loop);
+  place(absent);
+  endObservation(kTurnResultNoProfile);
+  place(found);
+  const CellRef sum = reg();
+  const auto charge = [&](std::string_view counter, CellRef by) {
+    mov(S(a0_), S(prof));
+    movC(a1_, cStr(std::string(counter)));
+    callLabel(rtFind_);
+    const CellRef v = reg();
+    mov(S(v), S(r0_));
+    branchIfZero(v, malformed);
+    emit(OpcodeKind::Add, "n+", {D(v), D(by)}, {sum});
+    mov(D(v), S(sum));
+  };
+  charge(kProfileContentRefusals, content);
+  charge(kProfileRefusedCount, other);
+  CellRef vc;
+  callSetField(prof, std::string(kProfileLastRefusal), std::nullopt, vc);
+  mov(D(vc), D(code));
+  const CellRef unseen = newLabel();
+  branchIfZero(contact, unseen);
+  callSetField(prof, std::string(kProfileLastContact), std::nullopt, vc);
+  mov(D(vc), D(contact));
+  place(unseen);
+  endObservation(kTurnResultCommitted);
+  place(malformed);
+  endObservation(kTurnResultIngestionFault);
+}
+
 /// `observeEntry` (P19 I3-1b): record the checked observation in
 /// `$turn.observation` under its source's support and settle. Every exit
 /// leaves a code in `$turn_result` and halts, so the adapter can undo a
@@ -6612,6 +6684,8 @@ CompiledAgent Gen::run() {
                           [](const auto &p) { return p.second.arbitrated; })) {
     out.observeEntry = newLabel();
     emitObserve(*out.observeEntry);
+    out.observeRefusalEntry = newLabel();
+    emitObserveRefusal(*out.observeRefusalEntry);
   }
   for (const auto &member : agent_->members) {
     if (const auto *field = std::get_if<VarDecl>(&member))

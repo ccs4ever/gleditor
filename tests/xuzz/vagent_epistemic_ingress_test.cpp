@@ -170,6 +170,10 @@ protected:
         fieldValue(ctx().arena, valueDims(ctx().core), record, name);
     return cell ? ctx().arena.asDouble(*cell) : std::nullopt;
   }
+  std::int64_t counter(CellRef profile, std::string_view name) {
+    const auto cell = value(profile, name);
+    return cell ? ctx().arena.asInt64(*cell).value_or(-1) : -1;
+  }
   std::uint64_t refused(std::string_view code) {
     return host->executor().stat(pid, std::string(kStatRefusedPrefix) +
                                           std::string(code));
@@ -594,6 +598,95 @@ TEST_F(VagentEpistemicIngress, ARevocationWhileQueuedRefusesAtItsTurn) {
   EXPECT_EQ(logged->code, "UnknownSource");
   EXPECT_TRUE(clauses().empty());
   EXPECT_TRUE(profiles().empty());
+}
+
+TEST_F(VagentEpistemicIngress, ADirectContentRefusalChargesHealthAndContact) {
+  auto relayed      = reading(kP1, "e1", 1, 1.0);
+  relayed.relayedBy = kP2;
+  observe(relayed);
+  const auto prof = profiles().front();
+  ASSERT_FALSE(value(prof, kProfileLastContact));
+  auto frame  = reading(kP1, "e2", 2, 1.0);
+  frame.frame = "ecef";
+  EXPECT_EQ(refusedAtIngress(frame),
+            EpistemicRefusal::ObservationFrameMismatch);
+  EXPECT_EQ(counter(prof, kProfileContentRefusals), 1);
+  EXPECT_EQ(counter(prof, kProfileRefusedCount), 0);
+  EXPECT_EQ(counter(prof, kProfileRejectCount), 0);
+  EXPECT_EQ(text(prof, kProfileLastRefusal), "ObservationFrameMismatch");
+  // The device demonstrably sent it.
+  EXPECT_TRUE(value(prof, kProfileLastContact));
+}
+
+TEST_F(VagentEpistemicIngress, ARelayedRefusalIsDiagnosticOnly) {
+  auto relayed      = reading(kP1, "e1", 1, 1.0);
+  relayed.relayedBy = kP2;
+  observe(relayed);
+  const auto prof = profiles().front();
+  auto frame      = reading(kP1, "e2", 2, 1.0);
+  frame.frame     = "ecef";
+  frame.relayedBy = kP2;
+  EXPECT_EQ(refusedAtIngress(frame),
+            EpistemicRefusal::ObservationFrameMismatch);
+  EXPECT_EQ(counter(prof, kProfileContentRefusals), 0);
+  EXPECT_EQ(counter(prof, kProfileRefusedCount), 1);
+  EXPECT_FALSE(value(prof, kProfileLastContact));
+}
+
+TEST_F(VagentEpistemicIngress, InTurnRefusalsAreChargedAfterTheUndo) {
+  observe(reading(kP1, "e1", 1, 1.0));
+  const auto prof = profiles().front();
+  observe(reading(kP1, "e0", 1, 1.0)); // StaleSequence
+  EXPECT_EQ(refused(kTurnResultStaleSequence), 1U);
+  EXPECT_EQ(counter(prof, kProfileRefusedCount), 1);
+  auto older       = reading(kP1, "e2", 2, 1.0);
+  older.acquiredAt = at(1) - 0.5; // ObservationTimeMismatch
+  observe(older);
+  EXPECT_EQ(counter(prof, kProfileContentRefusals), 1);
+  EXPECT_EQ(text(prof, kProfileLastRefusal), "ObservationTimeMismatch");
+  // A duplicate is an exact retry, not a refusal.
+  observe(reading(kP1, "e1", 1, 1.0));
+  EXPECT_EQ(counter(prof, kProfileRefusedCount), 1);
+  EXPECT_EQ(counter(prof, kProfileContentRefusals), 1);
+}
+
+TEST_F(VagentEpistemicIngress, HostConditionsAreNeverCharged) {
+  AgentSettings settings;
+  settings.epistemic.ingressQueuePerSource = 1;
+  start(settings);
+  observe(reading(kP1, "e1", 1, 1.0));
+  const auto prof = profiles().front();
+  host->executor().setWallClockSynchronised(false);
+  EXPECT_EQ(refusedAtIngress(reading(kP1, "e2", 2, 1.0)),
+            EpistemicRefusal::ClockUnsynchronised);
+  host->executor().setWallClockSynchronised(true);
+  ASSERT_TRUE(host->executor().observe(pid, reading(kP1, "e3", 3, 1.0)));
+  EXPECT_FALSE(host->executor().observe(pid, reading(kP1, "e4", 4, 1.0)));
+  host->executor().unbindSource(pid, kP1, "at");
+  host->pump(); // e3 refuses UnknownSource at its turn
+  EXPECT_EQ(counter(prof, kProfileContentRefusals), 0);
+  EXPECT_EQ(counter(prof, kProfileRefusedCount), 0);
+  EXPECT_EQ(text(prof, kProfileLastRefusal), "<absent>");
+}
+
+TEST_F(VagentEpistemicIngress, RefusalsCoalesceIntoOneChargeAndNeedAProfile) {
+  // No profile yet: the refusal is logged, and nothing is created for it.
+  auto frame  = reading(kP1, "f0", 1, 1.0);
+  frame.frame = "ecef";
+  EXPECT_EQ(refusedAtIngress(frame),
+            EpistemicRefusal::ObservationFrameMismatch);
+  EXPECT_TRUE(profiles().empty());
+  EXPECT_EQ(refused(kTurnResultNoProfile), 1U);
+  observe(reading(kP1, "e1", 1, 1.0));
+  const auto prof = profiles().front();
+  for (int i = 0; i < 5; ++i) {
+    auto bad  = reading(kP1, "f" + std::to_string(i + 1), 2, 1.0);
+    bad.units = "ft";
+    EXPECT_FALSE(host->executor().observe(pid, bad));
+  }
+  host->pump();
+  EXPECT_EQ(counter(prof, kProfileContentRefusals), 5);
+  EXPECT_EQ(refused(kTurnResultNoProfile), 1U);
 }
 
 TEST(VagentEpistemicIngressPlain, AProgramWithoutArbitrationCannotBind) {
