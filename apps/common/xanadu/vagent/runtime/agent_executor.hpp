@@ -299,6 +299,11 @@ public:
   [[nodiscard]] std::expected<TransportReceipt, EpistemicRefusal>
   observe(const identity::ActorPid &target,
           const CheckedObservation &observation);
+  /// The live epistemic cells of a prepared agent: profiles with their
+  /// streams, dedup windows and clone views, and every arbitrated support's
+  /// history. What the ingestion budget admits against.
+  [[nodiscard]] std::optional<std::size_t>
+  epistemicCells(const identity::ActorPid &pid) const;
 
   void percept(const identity::ActorPid &target, std::string type,
                WireRecord fields = {});
@@ -615,6 +620,9 @@ private:
   void flushStats(State &state);
   [[nodiscard]] bool initialized(const State &state) const;
   void liftLimits(zigzag::vortex::WorkerContext &context) const;
+  /// Counts at most `ceiling + 1` cells, so admission stays bounded.
+  [[nodiscard]] std::size_t epistemicCellsWithin(const State &state,
+                                                 std::size_t ceiling) const;
   [[nodiscard]] std::chrono::system_clock::time_point wallNow() const {
     return clock_.wall();
   }

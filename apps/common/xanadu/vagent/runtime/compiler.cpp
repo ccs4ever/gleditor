@@ -1149,6 +1149,8 @@ private:
     std::size_t nkeys{0};
     /// Only checked ingestion writes an arbitrated predicate's clauses.
     bool arbitrated{false};
+    /// The policy's clock skew in seconds, for ingestion's order check.
+    double clockSkewSeconds{0.0};
   };
   /// How one argument of a term participates in a match or a build.
   struct ArgPlan {
@@ -4061,7 +4063,8 @@ void Gen::mintPredicates() {
                  policy.error().front().message,
              pd->loc);
       }
-      pi.arbitrated = true;
+      pi.arbitrated       = true;
+      pi.clockSkewSeconds = static_cast<double>(policy->clockSkewMs) / 1000.0;
       arbitration.emplace(*policy);
     }
     const CellRef cell = pi.cell;
@@ -4449,6 +4452,9 @@ void Gen::emitObserve(CellRef entryLabel) {
   };
   limit(kIngestMaxSources, maxSources);
   limit(kIngestDedup, dedupWindow);
+  const CellRef historyLimit = global(), keysLimit = global();
+  limit(kIngestHistory, historyLimit);
+  limit(kIngestKeysPerSource, keysLimit);
   const auto required = [&](std::string_view name, CellRef out) {
     field(name, out);
     branchIfZero(out, malformed);
@@ -4458,6 +4464,11 @@ void Gen::emitObserve(CellRef entryLabel) {
   required(kObsDigest, digest);
   required(kObsSequence, seq);
   required(kObsReceivedSteady, received);
+  const CellRef acquiredAt = global(), acquiredUnc = global(),
+                clockEpoch = global();
+  required(kObsAcquiredAt, acquiredAt);
+  required(kObsAcquiredUncertainty, acquiredUnc);
+  required(kObsClockEpoch, clockEpoch);
   field(kObsRelayedBy, relayed);
 
   // 1. The source's profile: found by its token on `$agent +d.trust`, or
@@ -4693,21 +4704,44 @@ void Gen::emitObserve(CellRef entryLabel) {
     set(kObsVerdictRevisions, cStr(std::string(kListContent)));
     set(kObsPinned, false_);
     bookkeeping(rec);
-    // The source's previous current record on this key is superseded.
+    // The source's previous current record on this key is superseded, unless
+    // the new reading was acquired before it by more than both uncertainties
+    // and the policy's skew in the same clock epoch: arrival order must never
+    // let an older reading replace a newer one. Other keys never order each
+    // other, so a multi-target sensor may report keys in any order.
     {
-      const CellRef r = reg(), st = reg(), cur = reg();
-      const CellRef loop = newLabel(), skip = newLabel(), done = newLabel();
+      const CellRef r = reg(), st = reg(), cur = reg(), v = reg(), same = reg(),
+                    tol = reg(), floor = reg(), early = reg();
+      const CellRef loop = newLabel(), skip = newLabel(), done = newLabel(),
+                    retire = newLabel();
       mov(S(r), S(rd(D(support), dims_.epistemic)));
       place(loop);
       branchIfZero(r, done);
-      mov(S(a0_), S(r));
-      movC(a1_, cStr(std::string(kObsStatus)));
-      callLabel(rtFind_);
-      mov(S(st), S(r0_));
+      const auto recField = [&](std::string_view fname, CellRef out) {
+        mov(S(a0_), S(r));
+        movC(a1_, cStr(std::string(fname)));
+        callLabel(rtFind_);
+        mov(S(out), S(r0_));
+      };
+      recField(kObsStatus, st);
       branchIfZero(st, skip);
       emit(OpcodeKind::Eq, "cur?",
            {D(st), S(cStr(std::string(kObsStatusCurrent)))}, {cur});
       requireTrue(cur, skip);
+      recField(kObsClockEpoch, v);
+      branchIfZero(v, retire);
+      emit(OpcodeKind::Eq, "epoch?", {D(v), D(clockEpoch)}, {same});
+      requireTrue(same, retire);
+      recField(kObsAcquiredUncertainty, v);
+      emit(OpcodeKind::Add, "tol", {D(v), D(acquiredUnc)}, {tol});
+      emit(OpcodeKind::Add, "tol+skew",
+           {S(tol), S(cFloat(info.clockSkewSeconds))}, {tol});
+      recField(kObsAcquiredAt, v);
+      emit(OpcodeKind::Sub, "floor", {D(v), S(tol)}, {floor});
+      emit(OpcodeKind::Lt, "early?", {D(acquiredAt), S(floor)}, {early});
+      requireTrue(early, retire);
+      endObservation(kTurnResultObservationTimeMismatch);
+      place(retire);
       mov(D(st), S(cStr(std::string(kObsStatusRetired))));
       place(skip);
       mov(S(r), S(rd(D(r), dims_.epistemic)));
@@ -4715,6 +4749,86 @@ void Gen::emitObserve(CellRef entryLabel) {
       place(done);
     }
     emitAppendTail(D(support), dims_.epistemic, dims_.epistemic, rec);
+    // One principal supports at most `keys_per_source` keys of a predicate.
+    {
+      const CellRef cl = reg(), sp = reg(), same = reg(), n = reg(),
+                    over    = reg();
+      const CellRef clauses = newLabel(), sources = newLabel(),
+                    nextClause = newLabel(), nextSource = newLabel(),
+                    counted = newLabel();
+      movC(n, zero_);
+      mov(S(cl), S(rd(S(info.cell), core_.dims().clause)));
+      place(clauses);
+      branchIfZero(cl, counted);
+      mov(S(sp), S(rd(D(cl), dims_.source)));
+      place(sources);
+      branchIfZero(sp, nextClause);
+      emit(OpcodeKind::Eq, "mine?", {D(sp), D(who)}, {same});
+      requireTrue(same, nextSource);
+      emit(OpcodeKind::Add, "n+", {S(n), S(one_)}, {n});
+      place(nextSource);
+      mov(S(sp), S(rd(D(sp), dims_.source)));
+      jump(sources);
+      place(nextClause);
+      mov(S(cl), S(rd(D(cl), core_.dims().clause)));
+      jump(clauses);
+      place(counted);
+      const CellRef within = newLabel();
+      emit(OpcodeKind::Gt, "keys?", {S(n), D(keysLimit)}, {over});
+      requireTrue(over, within);
+      endObservation(kTurnResultEpistemicKeyLimit);
+      place(within);
+    }
+    // History bound: excise the oldest unpinned retired records beyond it,
+    // each with its clone occurrence; current and pinned records stay.
+    {
+      const CellRef n = reg(), r = reg(), v = reg(), ok = reg(), over = reg();
+      const CellRef tally = newLabel(), counted = newLabel(), trim = newLabel(),
+                    scan = newLabel(), nextRec = newLabel(),
+                    trimmed = newLabel();
+      movC(n, zero_);
+      mov(S(r), S(rd(D(support), dims_.epistemic)));
+      place(tally);
+      branchIfZero(r, counted);
+      emit(OpcodeKind::Add, "n+", {S(n), S(one_)}, {n});
+      mov(S(r), S(rd(D(r), dims_.epistemic)));
+      jump(tally);
+      place(counted);
+      place(trim);
+      emit(OpcodeKind::Gt, "over?", {S(n), D(historyLimit)}, {over});
+      requireTrue(over, trimmed);
+      mov(S(r), S(rd(D(support), dims_.epistemic)));
+      place(scan);
+      branchIfZero(r, trimmed);
+      const auto recIs = [&](std::string_view fname, CellRef want) {
+        mov(S(a0_), S(r));
+        movC(a1_, cStr(std::string(fname)));
+        callLabel(rtFind_);
+        mov(S(v), S(r0_));
+        branchIfZero(v, nextRec);
+        emit(OpcodeKind::Eq, "is?", {D(v), S(want)}, {ok});
+        requireTrue(ok, nextRec);
+      };
+      recIs(kObsStatus, cStr(std::string(kObsStatusRetired)));
+      recIs(kObsPinned, false_);
+      mov(S(a0_), S(r));
+      movC(a1_, cStr(std::string(kObsProfile)));
+      callLabel(rtFind_);
+      mov(S(v), S(r0_));
+      {
+        const CellRef noView = newLabel();
+        branchIfZero(v, noView);
+        unlinkFromRank(v, core_.dims().clone);
+        place(noView);
+      }
+      unlinkFromRank(r, dims_.epistemic);
+      emit(OpcodeKind::Sub, "n-", {S(n), S(one_)}, {n});
+      jump(trim);
+      place(nextRec);
+      mov(S(r), S(rd(D(r), dims_.epistemic)));
+      jump(scan);
+      place(trimmed);
+    }
     callLabel(rtSettle_);
     endObservation(kTurnResultCommitted);
     place(next);

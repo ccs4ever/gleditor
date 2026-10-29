@@ -582,6 +582,9 @@ struct AgentExecutor::TurnSpec {
   bool deferDrain{false};
   /// Extra fields of `$turn`, for a turn that needs more than `time`.
   WireRecord turnFields;
+  /// Checked after a routine reports `Committed` and before the commit; a
+  /// code turns the turn into that refusal (ingestion's cell budget).
+  std::function<std::optional<std::string>()> admit;
 };
 
 struct AgentExecutor::TurnOutcome {
@@ -1490,6 +1493,13 @@ AgentExecutor::TurnOutcome AgentExecutor::deliverHost(State &state,
     TurnSpec spec;
     spec.entry      = event.entry;
     spec.turnFields = event.turnFields;
+    // Admission is net: the routine has already excised what it may.
+    spec.admit = [this, &state]() -> std::optional<std::string> {
+      const auto ceiling = settings_.epistemic.cells;
+      if (epistemicCellsWithin(state, ceiling) > ceiling)
+        return std::string(kTurnResultEpistemicBudget);
+      return std::nullopt;
+    };
     return runTurn(state, cursor, grant, context, spec);
   }
   Envelope envelope;
@@ -1711,7 +1721,13 @@ AgentExecutor::TurnOutcome AgentExecutor::runTurnOnce(State &state,
         if (const auto cell = fieldValue(arena, state.vd, agent.agentCell,
                                          kFieldTurnResult)) {
           if (auto code = arena.textOf(*cell); !code.empty()) {
-            refusal        = code != kTurnResultCommitted;
+            refusal = code != kTurnResultCommitted;
+            if (!refusal && spec.admit) {
+              if (auto denied = spec.admit()) {
+                refusal = true;
+                code    = std::move(*denied);
+              }
+            }
             outcome.result = std::move(code);
           }
         }
@@ -2747,6 +2763,53 @@ bool waitsOnReply(const ArenaManifold &arena, const ValueDims &vd,
 
 } // namespace
 
+std::size_t AgentExecutor::epistemicCellsWithin(const State &state,
+                                                std::size_t ceiling) const {
+  const auto &arena = state.context->arena;
+  const auto &core  = state.context->core.dims();
+  const std::array data{core.vars, core.values, core.grab, core.step,
+                        core.clone};
+  std::unordered_set<CellRef> seen;
+  std::vector<CellRef> stack;
+  const auto admit = [&](CellRef cell) {
+    if (seen.size() <= ceiling && seen.insert(cell).second)
+      stack.push_back(cell);
+  };
+  // Profiles, with their streams, dedup windows and clone views.
+  for (const auto profile :
+       zigzag::rankAfter(arena, state.agent.agentCell, state.dims.trust))
+    admit(profile);
+  // Every support's history on an arbitrated predicate: the predicate heads
+  // its policy master on `d.epistemic`, which only arbitration mints.
+  for (const auto predicate :
+       zigzag::rankAfter(arena, state.agent.agentCell, state.dims.belief)) {
+    if (!arena.linked(predicate, state.dims.epistemic)) continue;
+    for (const auto clause : zigzag::rankAfter(arena, predicate, core.clause))
+      for (const auto support :
+           zigzag::rankAfter(arena, clause, state.dims.source))
+        for (const auto record :
+             zigzag::rankAfter(arena, support, state.dims.epistemic))
+          admit(record);
+  }
+  while (!stack.empty() && seen.size() <= ceiling) {
+    const auto cell = stack.back();
+    stack.pop_back();
+    for (const auto dim : data)
+      if (const auto next = arena.linked(cell, dim)) admit(*next);
+  }
+  return seen.size();
+}
+
+std::optional<std::size_t>
+AgentExecutor::epistemicCells(const identity::ActorPid &pid) const {
+  const auto found = states_.find(pidKey(pid));
+  if (found == states_.end() || !found->second->prepared ||
+      !found->second->context)
+    return std::nullopt;
+  return epistemicCellsWithin(*found->second,
+                              std::numeric_limits<std::size_t>::max() - 1);
+}
+
 std::expected<TransportReceipt, EpistemicRefusal>
 AgentExecutor::observe(const identity::ActorPid &target,
                        const CheckedObservation &o) {
@@ -2790,10 +2853,11 @@ AgentExecutor::observe(const identity::ActorPid &target,
   r.set(std::string(kObsEventId), WireValue::text(o.eventId));
   r.set(std::string(kObsDigest), WireValue::text(xanadu::sha256Hex(*encoded)));
   r.set(std::string(kObsSequence), integer(o.sequence));
-  r.set("acquired_at", WireValue::real(o.acquiredAt));
-  r.set("acquired_uncertainty", WireValue::real(o.acquiredUncertainty));
+  r.set(std::string(kObsAcquiredAt), WireValue::real(o.acquiredAt));
+  r.set(std::string(kObsAcquiredUncertainty),
+        WireValue::real(o.acquiredUncertainty));
   r.set("clock_basis", WireValue::text(o.clockBasis));
-  r.set("clock_epoch", integer(o.clockEpoch));
+  r.set(std::string(kObsClockEpoch), integer(o.clockEpoch));
   r.set("clock_mapping_version", integer(o.clockMappingVersion));
   r.set("frame", WireValue::text(o.frame));
   r.set("units", WireValue::text(o.units));
@@ -2873,6 +2937,12 @@ void AgentExecutor::drainPosted() {
       limits.set(std::string(kIngestDedup),
                  WireValue::integer(
                      static_cast<std::int64_t>(settings_.epistemic.dedup)));
+      limits.set(std::string(kIngestHistory),
+                 WireValue::integer(
+                     static_cast<std::int64_t>(settings_.epistemic.history)));
+      limits.set(std::string(kIngestKeysPerSource),
+                 WireValue::integer(static_cast<std::int64_t>(
+                     settings_.epistemic.keysPerSource)));
       ingest.turnFields.set(std::string(kTurnIngest),
                             WireValue::record(std::move(limits)));
       state.hostEvents.push_back(std::move(ingest));

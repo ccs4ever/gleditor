@@ -548,9 +548,11 @@ inline constexpr std::string_view kObsPinned           = "pinned";
 /// The typed outcome a failed ingestion turn reports when the routine itself
 /// could not run (a malformed input record), never a data refusal.
 /// Limits the adapter passes beside the observation, from the settings.
-inline constexpr std::string_view kTurnIngest       = "ingest";
-inline constexpr std::string_view kIngestMaxSources = "max_sources";
-inline constexpr std::string_view kIngestDedup      = "dedup";
+inline constexpr std::string_view kTurnIngest          = "ingest";
+inline constexpr std::string_view kIngestMaxSources    = "max_sources";
+inline constexpr std::string_view kIngestDedup         = "dedup";
+inline constexpr std::string_view kIngestHistory       = "history";
+inline constexpr std::string_view kIngestKeysPerSource = "keys_per_source";
 // Observation fields the routine reads; the executor writes all of them.
 inline constexpr std::string_view kObsIncarnation = "incarnation";
 inline constexpr std::string_view kObsEventId     = "event_id";
@@ -560,6 +562,10 @@ inline constexpr std::string_view kObsSequence       = "sequence";
 inline constexpr std::string_view kObsReceivedSteady = "received_steady";
 inline constexpr std::string_view kObsReceivedWall   = "received_wall";
 inline constexpr std::string_view kObsRelayedBy      = "relayed_by";
+inline constexpr std::string_view kObsAcquiredAt     = "acquired_at";
+inline constexpr std::string_view kObsAcquiredUncertainty =
+    "acquired_uncertainty";
+inline constexpr std::string_view kObsClockEpoch = "clock_epoch";
 /// The record's own clone occurrence of its source's profile.
 inline constexpr std::string_view kObsProfile = "profile";
 // A source profile on `$agent +d.trust`: a record whose content is the
@@ -585,6 +591,10 @@ inline constexpr std::string_view kTurnResultEpistemicBudget =
     "EpistemicBudget";
 inline constexpr std::string_view kTurnResultUnsupportedIncarnation =
     "UnsupportedIncarnation";
+inline constexpr std::string_view kTurnResultObservationTimeMismatch =
+    "ObservationTimeMismatch";
+inline constexpr std::string_view kTurnResultEpistemicKeyLimit =
+    "EpistemicKeyLimit";
 inline constexpr std::string_view kTurnResultIngestionFault = "IngestionFault";
 inline constexpr std::string_view kTurnResultInvalidObservation =
     "InvalidObservation";

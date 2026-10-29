@@ -342,6 +342,102 @@ TEST_F(VagentEpistemicIngress, OnlyADirectEventRefreshesContact) {
   EXPECT_TRUE(value(prof, kProfileLastContact));
 }
 
+TEST_F(VagentEpistemicIngress, AnOlderAcquisitionCannotReplaceANewerReading) {
+  observe(reading(kP1, "e1", 1, 1.0));
+  auto older       = reading(kP1, "e2", 2, 2.0);
+  older.acquiredAt = 100.5; // e1 was acquired at 101.0
+  observe(older);
+  EXPECT_EQ(refused(kTurnResultObservationTimeMismatch), 1U);
+  // Within both uncertainties it is the same instant, so it is accepted.
+  auto close       = reading(kP1, "e3", 3, 2.0);
+  close.acquiredAt = 100.995;
+  observe(close);
+  EXPECT_EQ(refused(kTurnResultObservationTimeMismatch), 1U);
+  // A new clock epoch resets the comparison.
+  auto rebased       = reading(kP1, "e4", 4, 3.0);
+  rebased.acquiredAt = 1.0;
+  rebased.clockEpoch = 1;
+  observe(rebased);
+  EXPECT_EQ(refused(kTurnResultObservationTimeMismatch), 1U);
+}
+
+TEST_F(VagentEpistemicIngress, DifferentKeysNeverOrderEachOther) {
+  observe(reading(kP1, "e1", 1, 1.0));
+  auto other       = reading(kP1, "e2", 2, 5.0);
+  other.tuple      = {WireValue::text("other"), WireValue::real(5.0)};
+  other.acquiredAt = 50.0;
+  observe(other);
+  EXPECT_EQ(refused(kTurnResultObservationTimeMismatch), 0U);
+  EXPECT_EQ(clauses().size(), 2U);
+}
+
+TEST_F(VagentEpistemicIngress, APrincipalSupportsAtMostItsKeyLimit) {
+  AgentSettings settings;
+  settings.epistemic.keysPerSource = 1;
+  start(settings);
+  observe(reading(kP1, "e1", 1, 1.0));
+  auto other  = reading(kP1, "e2", 2, 5.0);
+  other.tuple = {WireValue::text("other"), WireValue::real(5.0)};
+  observe(other);
+  EXPECT_EQ(refused(kTurnResultEpistemicKeyLimit), 1U);
+  EXPECT_EQ(clauses().size(), 1U);
+  // Another value on the same key is still one key.
+  observe(reading(kP1, "e3", 3, 2.0));
+  EXPECT_EQ(refused(kTurnResultEpistemicKeyLimit), 1U);
+}
+
+TEST_F(VagentEpistemicIngress, TheHistoryBoundExcisesRetiredRecordsAndViews) {
+  AgentSettings settings;
+  settings.epistemic.history = 2;
+  start(settings);
+  for (std::uint64_t i = 1; i <= 5; ++i)
+    observe(reading(kP1, "e" + std::to_string(i), i, 1.0));
+  const auto h = history(supports(clauses().front()).front());
+  ASSERT_EQ(h.size(), 2U);
+  EXPECT_EQ(text(h[0], kObsEventId), "e4");
+  EXPECT_EQ(text(h[0], kObsStatus), kObsStatusRetired);
+  EXPECT_EQ(text(h[1], kObsEventId), "e5");
+  EXPECT_EQ(text(h[1], kObsStatus), kObsStatusCurrent);
+  // One clone occurrence per surviving record.
+  std::size_t views = 0;
+  for (auto v = arena().linked(profiles().front(), ctx().core.dims().clone); v;
+       v      = arena().linked(*v, ctx().core.dims().clone))
+    ++views;
+  EXPECT_EQ(views, 2U);
+}
+
+TEST_F(VagentEpistemicIngress, TheEpistemicCellCountPlateausAtTheHistoryBound) {
+  AgentSettings settings;
+  settings.epistemic.history = 2;
+  settings.epistemic.dedup   = 2;
+  start(settings);
+  std::vector<std::size_t> counts;
+  for (std::uint64_t i = 1; i <= 6; ++i) {
+    observe(reading(kP1, "e" + std::to_string(i), i, 1.0));
+    counts.push_back(*host->executor().epistemicCells(pid));
+  }
+  EXPECT_LT(counts[0], counts[1]);
+  // Excision and window trimming return what each new reading adds, and
+  // every reading committed: a plateau from refused turns would prove nothing.
+  EXPECT_EQ(counts[3], counts[4]);
+  EXPECT_EQ(counts[4], counts[5]);
+  const auto h = history(supports(clauses().front()).front());
+  ASSERT_EQ(h.size(), 2U);
+  EXPECT_EQ(text(h[1], kObsEventId), "e6");
+  EXPECT_EQ(host->executor().stat(pid, kStatDropped), 0U);
+}
+
+TEST_F(VagentEpistemicIngress, TheCellCeilingRefusesWithoutWritingAnything) {
+  AgentSettings settings;
+  settings.epistemic.cells = 20;
+  start(settings);
+  observe(reading(kP1, "e1", 1, 1.0));
+  EXPECT_EQ(refused(kTurnResultEpistemicBudget), 1U);
+  EXPECT_TRUE(profiles().empty());
+  EXPECT_TRUE(clauses().empty());
+  EXPECT_EQ(*host->executor().epistemicCells(pid), 0U);
+}
+
 TEST(VagentEpistemicIngressPlain, AProgramWithoutArbitrationHasNoRoutine) {
   auto program = CompiledProgram::fromSource("agent A { var n: Int := 0 }");
   ASSERT_TRUE(program) << program.error();
