@@ -1036,6 +1036,9 @@ $(eval $(call fuzz-target,x509_delegation))
 # Actor source is untrusted input, and an accepted arbitration policy feeds
 # every later epistemic score, so its domains are checked on every input.
 $(eval $(call fuzz-target,vagent_runtime_policy))
+# Checked observations stand for devices the host only partly trusts, and a
+# bad one must never leave half an ingestion or a second current record.
+$(eval $(call fuzz-target,epistemic_ingress))
 
 VAGENT_FRONTEND_FUZZ_OBJS := $(patsubst %.cpp,$(FUZZ_OBJDIR)/%.o,$(VAGENT_FRONTEND_SRCS))
 .PHONY: fuzz_vagent_frontend
@@ -1044,7 +1047,7 @@ $(OBJDIR)/fuzz_vagent_frontend: tests/fuzz/fuzz_vagent_frontend.cpp $(VAGENT_FRO
 	$(CXX) -fsanitize=fuzzer,address,undefined $(CXXFLAGS) $^ -o $@
 
 .PHONY: fuzz
-fuzz: fuzz_binary_ops fuzz_link_package fuzz_identity_wire fuzz_session_package fuzz_x509_delegation fuzz_vagent_frontend fuzz_vagent_runtime_policy
+fuzz: fuzz_binary_ops fuzz_link_package fuzz_identity_wire fuzz_session_package fuzz_x509_delegation fuzz_vagent_frontend fuzz_vagent_runtime_policy fuzz_epistemic_ingress
 
 # The other end of the swarm tests: a peer that offers a torrent's content and
 # waits to be asked. A separate program because the two peers are meant to be

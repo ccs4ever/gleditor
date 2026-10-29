@@ -27,9 +27,11 @@ predicate at(key who: Str, x: Float)
     prior_alpha: 1, prior_beta: 1, clock: "wall", max_age: 10s,
     cluster_tolerance: 0.5, frame: "enu", units: "m",
     min_variance: 0.0001, max_variance: 100.0)
+event Quit { }
 agent A {
   var adds: Int := 0
   var drops: Int := 0
+  on Quit { terminate }
   on +at(?w, ?x) { adds := adds + 1 }
   on -at(?w, ?x) { drops := drops + 1 }
 }
@@ -270,6 +272,15 @@ TEST_F(VagentEpistemicIngress, MalformedObservationsAreRefusedAtIngress) {
   auto wrongType  = reading(kP1, "x3", 3, 1.0);
   wrongType.tuple = {WireValue::text("self"), WireValue::text("one")};
   EXPECT_EQ(refusedAtIngress(wrongType), EpistemicRefusal::InvalidObservation);
+  // A non-finite reading, found by the ingress fuzzer: the wire encoder
+  // would refuse it, so ingress refuses it first, and logs it.
+  for (const double x : {std::numeric_limits<double>::quiet_NaN(),
+                         std::numeric_limits<double>::infinity()}) {
+    const auto nonFinite = reading(kP1, "x4", 4, x);
+    EXPECT_EQ(refusedAtIngress(nonFinite),
+              EpistemicRefusal::InvalidObservation);
+    EXPECT_EQ(outcomeOf(nonFinite)->code, "InvalidObservation");
+  }
   EXPECT_TRUE(clauses().empty());
   EXPECT_EQ(intField("adds"), 0);
   // Every refusal is in the outcome log, with its class.
@@ -829,6 +840,18 @@ TEST_F(VagentEpistemicIngress, RefusalsCoalesceIntoOneChargeAndNeedAProfile) {
   host->pump();
   EXPECT_EQ(counter(prof, kProfileContentRefusals), 5);
   EXPECT_EQ(refused(kTurnResultNoProfile), 1U);
+}
+
+TEST_F(VagentEpistemicIngress, AStoppedActorKeepsNoIngressState) {
+  const auto o = reading(kP1, "e1", 1, 1.0);
+  observe(o);
+  ASSERT_TRUE(outcomeOf(o));
+  host->percept(pid, "Quit");
+  host->pump();
+  EXPECT_FALSE(host->executor().context(pid));
+  EXPECT_FALSE(outcomeOf(o));
+  EXPECT_EQ(host->executor().observe(pid, o).error(),
+            EpistemicRefusal::UnknownSource);
 }
 
 TEST(VagentEpistemicIngressPlain, AProgramWithoutArbitrationCannotBind) {

@@ -660,6 +660,18 @@ struct AgentExecutor::Ingress {
     q.push_back(std::move(entry));
     while (q.size() > bound) q.pop_front();
   }
+  /// Drop everything held for a stopped actor: its bindings authorize
+  /// nothing now, and nothing will query or drain its queues again.
+  void forget(const std::string &pid) {
+    std::erase_if(bindings,
+                  [&](const auto &b) { return std::get<0>(b.first) == pid; });
+    std::erase_if(aliases, [&](const auto &a) { return a.first.first == pid; });
+    queued.erase(pid);
+    std::erase_if(queuedBy,
+                  [&](const auto &q) { return q.first.first == pid; });
+    outcomes.erase(pid);
+    std::erase_if(charges, [&](const auto &c) { return c.first.first == pid; });
+  }
   /// Record one refusal against @p principal; true when it is the first
   /// since the last bookkeeping turn, so the caller posts a note for it.
   bool charge(const std::string &pid, const std::string &principal,
@@ -1251,6 +1263,7 @@ AgentExecutor::fatal(State &state, std::string_view cause) {
   stageChildStopping(state, cause);
   // stop() frees the slot and tells monitors; erasure waits for pumpOne.
   (void)runtime_.stop(state.pid);
+  forgetIngress(state.pid);
   state.context = nullptr;
   return std::unexpected(ActorError::ExecutionFailed);
 }
@@ -1703,6 +1716,7 @@ void AgentExecutor::orderlyStop(State &state, CellRef cursor,
   // stop() frees the slot and tells monitors; erasure waits for the executor
   // to return and the deliveries to drain.
   (void)runtime_.stop(state.pid);
+  forgetIngress(state.pid);
   state.context = nullptr;
 }
 
@@ -1856,6 +1870,8 @@ AgentExecutor::TurnOutcome AgentExecutor::runTurnOnce(State &state,
                       : std::string(kFailStatement);
         break;
       }
+      GLEDITOR_LOG_TRACE(kLog, "{} turn ran {} cycles", state.name,
+                         vm.totalCycles() - startCycles);
       if (!failure) {
         const auto at = vm.getCursorOpcode(cursor);
         if (at == agent.failOp) {
@@ -2970,7 +2986,9 @@ bool fitsKind(Type::Kind kind, const WireValue &value) {
   case Type::Kind::Int:
     return std::holds_alternative<std::int64_t>(value.data);
   case Type::Kind::Float:
-    return std::holds_alternative<double>(value.data);
+    // The wire carries no non-finite real, and no position or reading is one.
+    return std::holds_alternative<double>(value.data) &&
+           std::isfinite(std::get<double>(value.data));
   case Type::Kind::Bool:
     return std::holds_alternative<bool>(value.data);
   case Type::Kind::Str:
@@ -3206,7 +3224,7 @@ AgentExecutor::observe(const identity::ActorPid &target,
   signedFields.set("units", WireValue::text(o.units));
   if (o.variance) signedFields.set("variance", WireValue::real(*o.variance));
   const auto encoded = encodeValue(WireValue::record(std::move(signedFields)));
-  if (!encoded) return std::unexpected(EpistemicRefusal::InvalidObservation);
+  if (!encoded) return refuse(EpistemicRefusal::InvalidObservation);
   WireRecord r;
   r.set(std::string(kObsPredicate), WireValue::text(o.predicate));
   r.set(std::string(kObsSource), WireValue::text(o.principal));
@@ -3282,6 +3300,11 @@ std::string_view epistemicRefusalName(EpistemicRefusal refusal) noexcept {
     return "IngressBackpressure";
   }
   return "Unknown";
+}
+
+void AgentExecutor::forgetIngress(const identity::ActorPid &pid) {
+  const std::lock_guard lock(ingress_->mutex);
+  ingress_->forget(pidKey(pid));
 }
 
 void AgentExecutor::postRefusals(const identity::ActorPid &target,
@@ -4774,6 +4797,8 @@ bool AgentExecutor::retire(const identity::ActorPid &pid) {
   const auto found = states_.find(pidKey(pid));
   if (found == states_.end() || !live(*found->second)) return false;
   if (!runtime_.stop(pid)) return false;
+  // The host it resumed on binds its sources afresh.
+  forgetIngress(pid);
   cancelFlights(*found->second);
   found->second->context = nullptr;
   return true;

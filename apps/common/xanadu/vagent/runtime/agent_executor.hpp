@@ -500,6 +500,8 @@ private:
   void deriveSchedule(State &state) const;
   /// Move percepts and effect results the host posted onto their agents.
   void drainPosted();
+  /// Drop a stopped actor's bindings, queue counts, outcome log and charges.
+  void forgetIngress(const identity::ActorPid &pid);
   /// Ask for a bookkeeping turn charging @p principal's waiting refusals.
   void postRefusals(const identity::ActorPid &target, std::string principal);
   void startEffect(State &state, const OutboxItem &item);
