@@ -116,6 +116,9 @@ CompiledProgram::fromSource(std::string_view source, std::string_view name) {
     if (stagingAgent.failStepEntry) {
       persistentAgent.failStepEntry = remap(*stagingAgent.failStepEntry);
     }
+    if (stagingAgent.observeEntry) {
+      persistentAgent.observeEntry = remap(*stagingAgent.observeEntry);
+    }
     if (stagingAgent.answerEntry) {
       persistentAgent.answerEntry = remap(*stagingAgent.answerEntry);
     }

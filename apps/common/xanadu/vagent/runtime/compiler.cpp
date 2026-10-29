@@ -449,14 +449,35 @@ private:
   CellRef curEvent_{}, scratchG_{}, refTmp_{};
   CellRef failStep_{};
   CellRef haltOp_{}, failOp_{};
-  CellRef rtFind_{}, rtAppendField_{}, rtSetField_{}, rtClearField_{},
-      rtListPush_{}, rtOutbox_{}, rtCopy_{}, rtEqual_{}, rtRaiseHostEv_{},
-      rtStrLen_{}, rtFindIntention_{}, rtCancelWait_{}, rtEndIntention_{},
-      rtReconsider_{}, rtMatchAwaits_{};
-  FramePlan copyPlan_, equalPlan_, endIntPlan_;
+  CellRef rtFind_{}, rtAppendField_{}, rtListPush_{}, rtOutbox_{}, rtCopy_{};
+  FramePlan copyPlan_, equalPlan_;
   CellRef copyPro_{}, copyBody_{};
-  CellRef equalPro_{}, equalBody_{};
-  CellRef endIntPro_{}, endIntBody_{};
+  // Emitted only for a unit that calls them: the first call site mints the
+  // label and queues the emitter, which run() drains after the main pass.
+  using Emitter = void (Gen::*)();
+  std::vector<Emitter> pendingRoutines_;
+  std::optional<CellRef> rtSetField_, rtClearField_, rtEqual_, rtRaiseHostEv_,
+      rtStrLen_;
+  CellRef routineLabel(std::optional<CellRef> &label, Emitter emit) {
+    if (!label) {
+      label = newLabel();
+      pendingRoutines_.push_back(emit);
+    }
+    return *label;
+  }
+  /// The intention runtime (find, end, cancel a wait, reconsider, match
+  /// awaits) is not lowered by this compiler; a unit that needs it is refused
+  /// here instead of calling a routine that does not exist.
+  /// A plan's failure label; reached only from plan code, which this
+  /// compiler refuses until plan lowering exists.
+  CellRef planLabel(const std::optional<CellRef> &label) {
+    if (!label) bail(CompileError::Unsupported, "plan lowering");
+    return *label;
+  }
+  [[noreturn]] void intentionRuntime(std::string_view routine) {
+    bail(CompileError::Unsupported,
+         "the intention runtime routine " + std::string(routine));
+  }
 
   // -- activation frames (§5.8) ----------------------------------------------
   /// What a handle cell stands for. A `Temp` and a `Local` read and write like
@@ -514,7 +535,10 @@ private:
   std::uint64_t conditionFuel_{kDefaultConditionFuel};
   std::int64_t maintainBackoffMs_{kDefaultMaintainBackoffMs};
   CellRef curIntention_{};
-  CellRef inCondG_{}, condFuelG_{}, condBaseD_{}, condContractD_{}, condD_{};
+  // Condition and plan state, minted by run() holding 0: no lowering this
+  // compiler implements raises the flags, so conditions and plan contracts
+  // stay dormant rather than reading a cell that was never minted.
+  CellRef inCondG_{}, condFuelG_{}, condContractD_{}, condD_{};
   CellRef inPlanG_{}, planContractDG_{};
   CellRef scanSubjG_{}, scanPosG_{}, scanLenG_{};
 
@@ -531,8 +555,9 @@ private:
     bool inHandler{false};
     bool inPlan{false};
     PlanInfo *planInfo{nullptr};
-    CellRef planFail{};
-    CellRef planContractFail{};
+    /// Set only by plan lowering, which this compiler does not implement.
+    std::optional<CellRef> planFail;
+    std::optional<CellRef> planContractFail;
   } ctx_;
 
   // -- cell and op construction
@@ -1001,9 +1026,10 @@ private:
     ++stmtDepth_;
     emit(OpcodeKind::ChoiceDepth, "d", {}, {d});
     if (ctx_.inPlan && curDepth == 0) {
-      emit(OpcodeKind::Choice, "pcontract", {S(opref(ctx_.planContractFail))});
+      emit(OpcodeKind::Choice, "pcontract",
+           {S(opref(planLabel(ctx_.planContractFail)))});
       emit(OpcodeKind::ChoiceDepth, "pcd", {}, {planContractDG_});
-      emit(OpcodeKind::Choice, "pfail", {S(opref(ctx_.planFail))});
+      emit(OpcodeKind::Choice, "pfail", {S(opref(planLabel(ctx_.planFail)))});
     } else {
       emit(OpcodeKind::Choice, "sfail", {S(opref(failStep_))});
     }
@@ -1148,6 +1174,9 @@ private:
   std::unordered_map<std::string, PredInfo> preds_;
   std::optional<CellRef> lastPred_;
   CellRef a3_{}, a4_{}, roundsG_{};
+  /// Set only by `rtObserve` around its `rtBSet` call: carry the replaced
+  /// support's observation history over to the surviving support.
+  CellRef keepHistG_{};
   CellRef rtBRaise_{}, rtHasSrc_{}, rtBDrop_{}, rtBSet_{}, rtSettle_{};
 
   void mintPredicates();
@@ -1158,6 +1187,13 @@ private:
   void emitRtHasSrc();
   void emitRtBDrop();
   void emitRtBSet();
+  void emitObserve(CellRef entryLabel);
+  /// Re-attach a detached history (@p moved, zero when none) to support
+  /// @p sc, and return @p sc in r1.
+  void finishSupport(CellRef sc, CellRef moved);
+  /// Leave @p code in `$turn_result` and halt; the adapter commits only
+  /// `Committed` and undoes every other code.
+  void endObservation(std::string_view code);
   void emitSettle();
   TermPlan planTerm(const Term &t, bool allowVars);
   void declarePlanVars(const TermPlan &pl);
@@ -1383,7 +1419,7 @@ void Gen::callSetField(CellRef owner, const std::string &fname,
   } else {
     movC(a2_, zero_);
   }
-  callLabel(rtSetField_);
+  callLabel(routineLabel(rtSetField_, &Gen::emitRtSetField));
   vc = reg();
   mov(S(vc), S(r0_));
 }
@@ -1391,7 +1427,7 @@ void Gen::callSetField(CellRef owner, const std::string &fname,
 void Gen::callClearField(CellRef owner, const std::string &fname) {
   mov(S(a0_), S(owner));
   movC(a1_, cStr(fname));
-  callLabel(rtClearField_);
+  callLabel(routineLabel(rtClearField_, &Gen::emitRtClearField));
 }
 
 void Gen::markRecord(CellRef record) {
@@ -1422,18 +1458,18 @@ void Gen::callCopy(CellRef src, CellRef dst) {
 void Gen::callEqual(CellRef a, CellRef b, CellRef out) {
   mov(S(a0_), S(a));
   mov(S(a1_), S(b));
-  callLabel(rtEqual_);
+  callLabel(routineLabel(rtEqual_, &Gen::emitRtEqual));
   mov(S(out), S(r0_));
 }
 
 void Gen::callRaiseHostEv(CellRef ev) {
   mov(S(a0_), S(ev));
-  callLabel(rtRaiseHostEv_);
+  callLabel(routineLabel(rtRaiseHostEv_, &Gen::emitRtRaiseHostEv));
 }
 
 void Gen::callStrLen(CellRef s, CellRef out) {
   mov(S(a0_), S(s));
-  callLabel(rtStrLen_);
+  callLabel(routineLabel(rtStrLen_, &Gen::emitRtStrLen));
   mov(S(out), S(r0_));
 }
 
@@ -1504,7 +1540,7 @@ void Gen::emitRtAppendField() {
 }
 
 void Gen::emitRtSetField() {
-  beginInternal(rtSetField_);
+  beginInternal(*rtSetField_);
   const CellRef owner = reg(), fname = reg(), ex = reg(), np = reg(),
                 vc        = reg();
   const CellRef appendNew = newLabel(), fresh = newLabel(), cont = newLabel();
@@ -1533,7 +1569,7 @@ void Gen::emitRtSetField() {
 }
 
 void Gen::emitRtClearField() {
-  beginInternal(rtClearField_);
+  beginInternal(*rtClearField_);
   const CellRef np   = reg();
   const CellRef done = newLabel();
   callLabel(rtFind_);
@@ -1623,12 +1659,13 @@ void Gen::emitRtCopy() {
 }
 
 void Gen::emitRtEqual() {
-  tail_             = std::nullopt;
-  equalPlan_.cyclic = true;
-  frame_            = &equalPlan_;
-  place(rtEqual_);
-  jump(equalPro_);
-  place(equalBody_);
+  tail_                  = std::nullopt;
+  equalPlan_.cyclic      = true;
+  frame_                 = &equalPlan_;
+  const CellRef equalPro = newLabel(), equalBody = newLabel();
+  place(*rtEqual_);
+  jump(equalPro);
+  place(equalBody);
   const CellRef x = reg(), y = reg(), eq = reg(), n = reg(), v1 = reg(),
                 v2 = reg(), e1 = reg(), e2 = reg(), isMarker = reg();
   const CellRef xZero = newLabel(), bothZero = newLabel(), nope = newLabel(),
@@ -1665,7 +1702,7 @@ void Gen::emitRtEqual() {
   branchIfZero(v2, nope);
   mov(S(a0_), S(v1));
   mov(S(a1_), S(v2));
-  callUser(rtEqual_);
+  callUser(*rtEqual_);
   branchIfZero(r0_, nope);
   jump(vnext);
   place(v1Zero);
@@ -1684,7 +1721,7 @@ void Gen::emitRtEqual() {
   branchIfZero(e2, nope);
   mov(S(a0_), S(e1));
   mov(S(a1_), S(e2));
-  callUser(rtEqual_);
+  callUser(*rtEqual_);
   branchIfZero(r0_, nope);
   place(lstep);
   mov(S(e1), S(rd(D(e1), core_.dims().step)));
@@ -1702,14 +1739,14 @@ void Gen::emitRtEqual() {
   movC(r0_, zero_);
   emitFramePop();
   ret();
-  place(equalPro_);
+  place(equalPro);
   emitFramePush(equalPlan_);
-  jump(equalBody_);
+  jump(equalBody);
   frame_ = nullptr;
 }
 
 void Gen::emitRtRaiseHostEv() {
-  beginInternal(rtRaiseHostEv_);
+  beginInternal(*rtRaiseHostEv_);
   CellRef vc       = reg();
   const CellRef ev = reg(), self = reg(), sp = reg(), sc = reg(), tc = reg();
   mov(S(ev), S(a0_));
@@ -1744,7 +1781,7 @@ void Gen::emitRtRaiseHostEv() {
 }
 
 void Gen::emitRtStrLen() {
-  beginInternal(rtStrLen_);
+  beginInternal(*rtStrLen_);
   const CellRef s = reg(), len = reg(), ch = reg(), eq = reg();
   const CellRef loop = newLabel(), done = newLabel();
   mov(S(s), S(a0_));
@@ -2621,7 +2658,7 @@ Ty Gen::call(const ECall &c, CellRef out, SourceLocation loc) {
     const CellRef ok = newLabel(), bad = newLabel();
     expr(*c.args[0], id);
     mov(S(a0_), S(id));
-    callLabel(rtFindIntention_);
+    intentionRuntime("FindIntention");
     mov(S(ic), S(r0_));
     branchIfZero(ic, bad);
     CellRef kindVp, kindNp;
@@ -2646,7 +2683,7 @@ Ty Gen::call(const ECall &c, CellRef out, SourceLocation loc) {
     alloc(res);
     mov(D(res), S(cStr(std::string(kListContent))));
     mov(S(a0_), S(id));
-    callLabel(rtFindIntention_);
+    intentionRuntime("FindIntention");
     mov(S(ic), S(r0_));
     branchIfZero(ic, done);
     mov(S(sub), S(rd(D(ic), dims_.subgoal)));
@@ -3071,7 +3108,8 @@ Ty Gen::ifExpr(const EIf &i, CellRef out) {
   ++stmtDepth_;
   emit(OpcodeKind::ChoiceDepth, "d", {}, {d});
   if (ctx_.inPlan && curDepth == 0) {
-    emit(OpcodeKind::Choice, "pcontract", {S(opref(ctx_.planContractFail))});
+    emit(OpcodeKind::Choice, "pcontract",
+         {S(opref(planLabel(ctx_.planContractFail)))});
     emit(OpcodeKind::ChoiceDepth, "pcd", {}, {planContractDG_});
   }
   emit(OpcodeKind::Choice, "else", {S(opref(elseL))});
@@ -3113,7 +3151,8 @@ Ty Gen::whileExpr(const EWhile &w, CellRef out) {
   ++stmtDepth_;
   emit(OpcodeKind::ChoiceDepth, "d", {}, {d});
   if (ctx_.inPlan && curDepth == 0) {
-    emit(OpcodeKind::Choice, "pcontract", {S(opref(ctx_.planContractFail))});
+    emit(OpcodeKind::Choice, "pcontract",
+         {S(opref(planLabel(ctx_.planContractFail)))});
     emit(OpcodeKind::ChoiceDepth, "pcd", {}, {planContractDG_});
   }
   emit(OpcodeKind::Choice, "done", {S(opref(done))});
@@ -3283,13 +3322,13 @@ Ty Gen::dropExpr(const EDrop &d, CellRef out, SourceLocation loc) {
   const CellRef done = newLabel();
   expr(*d.target, id);
   mov(S(a0_), S(id));
-  callLabel(rtFindIntention_);
+  intentionRuntime("FindIntention");
   mov(S(ic), S(r0_));
   branchIfZero(ic, done);
   mov(S(a0_), S(ic));
   movC(a1_, cStr(std::string(kGoalDropped)));
   movC(a2_, cStr(std::string(kCauseDropped)));
-  callLabel(rtEndIntention_);
+  intentionRuntime("EndIntention");
   place(done);
   movC(out, unit_c_);
   return tyOf(Ty::K::Unit);
@@ -3317,9 +3356,10 @@ Ty Gen::yieldExpr(const EYield &y, CellRef out, SourceLocation loc) {
 
   place(resumeLabel);
   emit(OpcodeKind::ChoiceDepth, "d", {}, {dRegAt(0)});
-  emit(OpcodeKind::Choice, "pcontract", {S(opref(ctx_.planContractFail))});
+  emit(OpcodeKind::Choice, "pcontract",
+       {S(opref(planLabel(ctx_.planContractFail)))});
   emit(OpcodeKind::ChoiceDepth, "pcd", {}, {planContractDG_});
-  emit(OpcodeKind::Choice, "pfail", {S(opref(ctx_.planFail))});
+  emit(OpcodeKind::Choice, "pfail", {S(opref(planLabel(ctx_.planFail)))});
   movC(out, unit_c_);
   return tyOf(Ty::K::Unit);
 }
@@ -3367,9 +3407,10 @@ Ty Gen::achieveExpr(const EAchieve &a, CellRef out, SourceLocation loc) {
 
     place(resumeLabel);
     emit(OpcodeKind::ChoiceDepth, "d", {}, {dRegAt(0)});
-    emit(OpcodeKind::Choice, "pcontract", {S(opref(ctx_.planContractFail))});
+    emit(OpcodeKind::Choice, "pcontract",
+         {S(opref(planLabel(ctx_.planContractFail)))});
     emit(OpcodeKind::ChoiceDepth, "pcd", {}, {planContractDG_});
-    emit(OpcodeKind::Choice, "pfail", {S(opref(ctx_.planFail))});
+    emit(OpcodeKind::Choice, "pfail", {S(opref(planLabel(ctx_.planFail)))});
     CellRef wVp, wNp, mVp, mNp, okVp, okNp;
     callFind(curIntention_, std::string(kIntentionWaiting), wVp, wNp);
     callClearField(curIntention_, std::string(kIntentionWaiting));
@@ -3389,9 +3430,10 @@ Ty Gen::achieveExpr(const EAchieve &a, CellRef out, SourceLocation loc) {
     if (a.orElse) {
       emit(OpcodeKind::Cut, "cut", {S(dRegAt(0))});
       emit(OpcodeKind::ChoiceDepth, "d", {}, {dRegAt(0)});
-      emit(OpcodeKind::Choice, "pcontract", {S(opref(ctx_.planContractFail))});
+      emit(OpcodeKind::Choice, "pcontract",
+           {S(opref(planLabel(ctx_.planContractFail)))});
       emit(OpcodeKind::ChoiceDepth, "pcd", {}, {planContractDG_});
-      emit(OpcodeKind::Choice, "pfail", {S(opref(ctx_.planFail))});
+      emit(OpcodeKind::Choice, "pfail", {S(opref(planLabel(ctx_.planFail)))});
       expr(*a.orElse, out);
     } else {
       failNow();
@@ -3465,9 +3507,10 @@ Ty Gen::achieveExpr(const EAchieve &a, CellRef out, SourceLocation loc) {
 
   place(resumeLabel);
   emit(OpcodeKind::ChoiceDepth, "d", {}, {dRegAt(0)});
-  emit(OpcodeKind::Choice, "pcontract", {S(opref(ctx_.planContractFail))});
+  emit(OpcodeKind::Choice, "pcontract",
+       {S(opref(planLabel(ctx_.planContractFail)))});
   emit(OpcodeKind::ChoiceDepth, "pcd", {}, {planContractDG_});
-  emit(OpcodeKind::Choice, "pfail", {S(opref(ctx_.planFail))});
+  emit(OpcodeKind::Choice, "pfail", {S(opref(planLabel(ctx_.planFail)))});
   CellRef wVp, wNp, mVp, mNp, okVp, okNp, toVp, toNp;
   callFind(curIntention_, std::string(kIntentionWaiting), wVp, wNp);
   const CellRef delFailed = newLabel(), checkMatch = newLabel(),
@@ -3477,7 +3520,7 @@ Ty Gen::achieveExpr(const EAchieve &a, CellRef out, SourceLocation loc) {
   branchIfZero(toVp, checkMatch);
   // Timed out: send $cancel to the delegate (§7.4).
   mov(S(a0_), S(wVp));
-  callLabel(rtCancelWait_);
+  intentionRuntime("CancelWait");
   callClearField(curIntention_, std::string(kIntentionWaiting));
   jump(delFailed);
   place(checkMatch);
@@ -3491,9 +3534,10 @@ Ty Gen::achieveExpr(const EAchieve &a, CellRef out, SourceLocation loc) {
   if (a.orElse) {
     emit(OpcodeKind::Cut, "cut", {S(dRegAt(0))});
     emit(OpcodeKind::ChoiceDepth, "d", {}, {dRegAt(0)});
-    emit(OpcodeKind::Choice, "pcontract", {S(opref(ctx_.planContractFail))});
+    emit(OpcodeKind::Choice, "pcontract",
+         {S(opref(planLabel(ctx_.planContractFail)))});
     emit(OpcodeKind::ChoiceDepth, "pcd", {}, {planContractDG_});
-    emit(OpcodeKind::Choice, "pfail", {S(opref(ctx_.planFail))});
+    emit(OpcodeKind::Choice, "pfail", {S(opref(planLabel(ctx_.planFail)))});
     expr(*a.orElse, out);
   } else {
     failNow();
@@ -3599,9 +3643,10 @@ Ty Gen::askExpr(const EAsk &a, CellRef out, SourceLocation loc) {
 
   place(resumeLabel);
   emit(OpcodeKind::ChoiceDepth, "d", {}, {dRegAt(0)});
-  emit(OpcodeKind::Choice, "pcontract", {S(opref(ctx_.planContractFail))});
+  emit(OpcodeKind::Choice, "pcontract",
+       {S(opref(planLabel(ctx_.planContractFail)))});
   emit(OpcodeKind::ChoiceDepth, "pcd", {}, {planContractDG_});
-  emit(OpcodeKind::Choice, "pfail", {S(opref(ctx_.planFail))});
+  emit(OpcodeKind::Choice, "pfail", {S(opref(planLabel(ctx_.planFail)))});
   CellRef wVp, wNp, mVp, mNp, okVp, okNp, valVp, valNp;
   callFind(curIntention_, std::string(kIntentionWaiting), wVp, wNp);
   callClearField(curIntention_, std::string(kIntentionWaiting));
@@ -3633,9 +3678,10 @@ Ty Gen::askExpr(const EAsk &a, CellRef out, SourceLocation loc) {
   if (a.orElse) {
     emit(OpcodeKind::Cut, "cut", {S(dRegAt(0))});
     emit(OpcodeKind::ChoiceDepth, "d", {}, {dRegAt(0)});
-    emit(OpcodeKind::Choice, "pcontract", {S(opref(ctx_.planContractFail))});
+    emit(OpcodeKind::Choice, "pcontract",
+         {S(opref(planLabel(ctx_.planContractFail)))});
     emit(OpcodeKind::ChoiceDepth, "pcd", {}, {planContractDG_});
-    emit(OpcodeKind::Choice, "pfail", {S(opref(ctx_.planFail))});
+    emit(OpcodeKind::Choice, "pfail", {S(opref(planLabel(ctx_.planFail)))});
     expr(*a.orElse, out);
   } else {
     failNow();
@@ -3712,9 +3758,10 @@ Ty Gen::awaitExpr(const EAwait &a, CellRef out, SourceLocation loc) {
 
   place(resumeLabel);
   emit(OpcodeKind::ChoiceDepth, "d", {}, {dRegAt(0)});
-  emit(OpcodeKind::Choice, "pcontract", {S(opref(ctx_.planContractFail))});
+  emit(OpcodeKind::Choice, "pcontract",
+       {S(opref(planLabel(ctx_.planContractFail)))});
   emit(OpcodeKind::ChoiceDepth, "pcd", {}, {planContractDG_});
-  emit(OpcodeKind::Choice, "pfail", {S(opref(ctx_.planFail))});
+  emit(OpcodeKind::Choice, "pfail", {S(opref(planLabel(ctx_.planFail)))});
   CellRef wVp, wNp, mVp, mNp, toVp, toNp;
   callFind(curIntention_, std::string(kIntentionWaiting), wVp, wNp);
   callClearField(curIntention_, std::string(kIntentionWaiting));
@@ -3739,9 +3786,10 @@ Ty Gen::awaitExpr(const EAwait &a, CellRef out, SourceLocation loc) {
   if (a.orElse) {
     emit(OpcodeKind::Cut, "cut", {S(dRegAt(0))});
     emit(OpcodeKind::ChoiceDepth, "d", {}, {dRegAt(0)});
-    emit(OpcodeKind::Choice, "pcontract", {S(opref(ctx_.planContractFail))});
+    emit(OpcodeKind::Choice, "pcontract",
+         {S(opref(planLabel(ctx_.planContractFail)))});
     emit(OpcodeKind::ChoiceDepth, "pcd", {}, {planContractDG_});
-    emit(OpcodeKind::Choice, "pfail", {S(opref(ctx_.planFail))});
+    emit(OpcodeKind::Choice, "pfail", {S(opref(planLabel(ctx_.planFail)))});
     expr(*a.orElse, out);
   } else {
     failNow();
@@ -3828,9 +3876,10 @@ Ty Gen::effectCall(const std::string &skillName, const MethodSig &sig,
 
   place(resumeLabel);
   emit(OpcodeKind::ChoiceDepth, "d", {}, {dRegAt(0)});
-  emit(OpcodeKind::Choice, "pcontract", {S(opref(ctx_.planContractFail))});
+  emit(OpcodeKind::Choice, "pcontract",
+       {S(opref(planLabel(ctx_.planContractFail)))});
   emit(OpcodeKind::ChoiceDepth, "pcd", {}, {planContractDG_});
-  emit(OpcodeKind::Choice, "pfail", {S(opref(ctx_.planFail))});
+  emit(OpcodeKind::Choice, "pfail", {S(opref(planLabel(ctx_.planFail)))});
   CellRef wVp, wNp, mVp, mNp, okVp, okNp, valVp, valNp;
   callFind(curIntention_, std::string(kIntentionWaiting), wVp, wNp);
   callClearField(curIntention_, std::string(kIntentionWaiting));
@@ -4200,7 +4249,8 @@ void Gen::emitRtBDrop() {
 }
 
 /// a0 = predicate, a1 = a fresh ground term (adopted), a2 = source name,
-/// a3 = replace (keyed `believe`, `revise`), a4 = key count.
+/// a3 = replace (keyed `believe`, `revise`), a4 = key count. r1 = the source's
+/// support cell on the fact, for `rtObserve`.
 ///
 /// With replace, every other fact with the same key arguments that this source
 /// asserts loses the source first, so `-old` is raised before `+new`. Then the
@@ -4209,7 +4259,8 @@ void Gen::emitRtBSet() {
   beginInternal(rtBSet_);
   const CellRef pred = reg(), term = reg(), src = reg(), repl = reg(),
                 nk = reg(), c = reg(), nx = reg(), ct = reg(), t1 = reg(),
-                t2 = reg(), i = reg(), u = reg(), cl = reg(), sc = reg();
+                t2 = reg(), i = reg(), u = reg(), cl = reg(), sc = reg(),
+                keep = reg(), moved = reg(), old = reg(), hist = reg();
   const CellRef add = newLabel(), loop1 = newLabel(), next1 = newLabel(),
                 keyOk = newLabel(), keySame = newLabel(), kloop = newLabel(),
                 loop2 = newLabel(), exists = newLabel(), addSrc = newLabel(),
@@ -4219,6 +4270,9 @@ void Gen::emitRtBSet() {
   mov(S(src), S(a2_));
   mov(S(repl), S(a3_));
   mov(S(nk), S(a4_));
+  // A fresh global is not 1, so only rtObserve's explicit flag keeps history.
+  emit(OpcodeKind::Eq, "keep?", {S(keepHistG_), S(one_)}, {keep});
+  movC(moved, zero_);
   branchIfZero(repl, add);
   mov(S(c), S(rd(D(pred), core_.dims().clause)));
   place(loop1);
@@ -4246,6 +4300,26 @@ void Gen::emitRtBSet() {
   mov(S(a1_), S(src));
   callLabel(rtHasSrc_);
   branchIfZero(r0_, next1);
+  {
+    // One owner at a time: detach this source's history from the support
+    // about to be dropped, to re-attach it to the surviving support.
+    const CellRef noKeep = newLabel(), scan = newLabel(), got = newLabel(),
+                  same = reg();
+    branchIfZero(keep, noKeep);
+    mov(S(old), S(rd(D(c), dims_.source)));
+    place(scan);
+    branchIfZero(old, noKeep);
+    emit(OpcodeKind::Eq, "src?", {D(old), S(src)}, {same});
+    branch(S(same), got);
+    mov(S(old), S(rd(D(old), dims_.source)));
+    jump(scan);
+    place(got);
+    mov(S(hist), S(rd(D(old), dims_.epistemic)));
+    branchIfZero(hist, noKeep);
+    breakOp(D(old), dims_.epistemic);
+    mov(S(moved), S(hist));
+    place(noKeep);
+  }
   mov(S(a0_), S(pred));
   mov(S(a1_), S(c));
   mov(S(a2_), S(src));
@@ -4269,12 +4343,24 @@ void Gen::emitRtBSet() {
   mov(S(a1_), S(src));
   callLabel(rtHasSrc_);
   branchIfZero(r0_, addSrc);
+  {
+    const CellRef scan = newLabel(), got = newLabel(), same = reg();
+    mov(S(sc), S(rd(D(c), dims_.source)));
+    place(scan);
+    emit(OpcodeKind::Eq, "src?", {D(sc), S(src)}, {same});
+    branch(S(same), got);
+    mov(S(sc), S(rd(D(sc), dims_.source)));
+    jump(scan);
+    place(got);
+  }
+  finishSupport(sc, moved);
   movC(r0_, zero_);
   ret();
   place(addSrc);
   alloc(sc);
   mov(D(sc), S(src));
   emitAppendTail(D(c), dims_.source, dims_.source, sc);
+  finishSupport(sc, moved);
   movC(r0_, zero_);
   ret();
 
@@ -4286,12 +4372,150 @@ void Gen::emitRtBSet() {
   mov(D(sc), S(src));
   linkOp(D(cl), dims_.source, D(sc));
   emitAppendTail(D(pred), core_.dims().clause, core_.dims().clause, cl);
+  finishSupport(sc, moved);
   movC(a0_, cStr(std::string(kBeliefAdded)));
   mov(S(a1_), S(term));
   mov(S(a2_), S(pred));
   callLabel(rtBRaise_);
   movC(r0_, one_);
   ret();
+}
+
+void Gen::finishSupport(CellRef sc, CellRef moved) {
+  const CellRef none = newLabel();
+  branchIfZero(moved, none);
+  emitAppendTail(D(sc), dims_.epistemic, dims_.epistemic, moved);
+  place(none);
+  mov(S(r1_), S(sc));
+}
+
+void Gen::endObservation(std::string_view code) {
+  mov(S(fields_.at(std::string(kFieldTurnResult)).valueCell),
+      S(cStr(std::string(code))));
+  jump(haltOp_);
+}
+
+/// `observeEntry` (P19 I3-1b): record the checked observation in
+/// `$turn.observation` under its source's support and settle. Every exit
+/// leaves a code in `$turn_result` and halts, so the adapter can undo a
+/// refusal without losing the reason, which `#Fail` would.
+///
+/// Arbitrated facts have no other writer (the checker refuses program
+/// changes and no tell test exists for them), so a support here is always
+/// named by an authenticated identity token. A predicate's key arguments
+/// decide which of its source's earlier facts a new one replaces; a predicate
+/// with none keeps each tuple as its own proposition.
+void Gen::emitObserve(CellRef entryLabel) {
+  tail_  = std::nullopt;
+  frame_ = nullptr;
+  place(entryLabel);
+  const FieldInfo &turn = fields_.at(std::string(kFieldTurn));
+  const CellRef tp = global(), obs = global(), ty = global(), eq = global(),
+                tuple = global(), who = global();
+  const CellRef malformed = newLabel(), invalid = newLabel();
+  mov(S(tp), S(rd(S(turn.nameCell), core_.dims().values)));
+  mov(S(a0_), S(tp));
+  movC(a1_, cStr(std::string(kTurnObservation)));
+  callLabel(rtFind_);
+  mov(S(obs), S(r0_));
+  branchIfZero(obs, malformed);
+  const auto field = [&](std::string_view name, CellRef out) {
+    mov(S(a0_), S(obs));
+    movC(a1_, cStr(std::string(name)));
+    callLabel(rtFind_);
+    mov(S(out), S(r0_));
+  };
+  field(kObsPredicate, ty);
+  branchIfZero(ty, malformed);
+  field(kObsTuple, tuple);
+  branchIfZero(tuple, malformed);
+  field(kObsSource, who);
+  branchIfZero(who, malformed);
+  for (auto &[name, info] : preds_) {
+    if (!info.arbitrated) continue;
+    const CellRef next = newLabel();
+    emit(OpcodeKind::Eq, "pred?", {D(ty), S(cStr(name))}, {eq});
+    requireTrue(eq, next);
+    // The fact, rebuilt from the tuple's positional fields.
+    const CellRef tr = reg();
+    alloc(tr);
+    mov(D(tr), S(cStr(name)));
+    std::optional<CellRef> prev;
+    for (std::size_t i = 0; i < info.argTys.size(); ++i) {
+      mov(S(a0_), S(tuple));
+      movC(a1_, cStr(std::to_string(i)));
+      callLabel(rtFind_);
+      const CellRef vp = reg(), cell = reg();
+      mov(S(vp), S(r0_));
+      branchIfZero(vp, invalid);
+      if (info.argTys[i].composite()) {
+        callCopy(vp, cell);
+      } else {
+        alloc(cell);
+        mov(D(cell), D(vp));
+      }
+      if (!prev) {
+        linkOp(D(tr), core_.dims().grab, D(cell));
+      } else {
+        linkOp(D(*prev), core_.dims().step, D(cell));
+      }
+      prev = cell;
+    }
+    const CellRef support = reg(), name_ = reg();
+    mov(S(name_), D(who));
+    movC(keepHistG_, one_);
+    loadRef(a0_, info.cell);
+    mov(S(a1_), S(tr));
+    mov(S(a2_), S(name_));
+    movC(a3_, info.nkeys > 0 ? one_ : zero_);
+    movC(a4_, cInt(static_cast<std::int64_t>(info.nkeys)));
+    callLabel(rtBSet_);
+    movC(keepHistG_, zero_);
+    mov(S(support), S(r1_));
+    // The record is the checked metadata, owned, plus what ingestion decides.
+    const CellRef rec = reg();
+    callCopy(obs, rec);
+    const auto set = [&](std::string_view fname, CellRef value) {
+      CellRef vc;
+      callSetField(rec, std::string(fname), std::nullopt, vc);
+      mov(D(vc), S(value));
+    };
+    set(kObsStatus, cStr(std::string(kObsStatusCurrent)));
+    set(kObsVerdict, cStr(std::string(kObsVerdictUntested)));
+    set(kObsVerdictEpoch, zero_);
+    set(kObsVerdictRevisions, cStr(std::string(kListContent)));
+    set(kObsPinned, false_);
+    // The source's previous current record on this key is superseded.
+    {
+      const CellRef r = reg(), st = reg(), cur = reg();
+      const CellRef loop = newLabel(), skip = newLabel(), done = newLabel();
+      mov(S(r), S(rd(D(support), dims_.epistemic)));
+      place(loop);
+      branchIfZero(r, done);
+      mov(S(a0_), S(r));
+      movC(a1_, cStr(std::string(kObsStatus)));
+      callLabel(rtFind_);
+      mov(S(st), S(r0_));
+      branchIfZero(st, skip);
+      emit(OpcodeKind::Eq, "cur?",
+           {D(st), S(cStr(std::string(kObsStatusCurrent)))}, {cur});
+      requireTrue(cur, skip);
+      mov(D(st), S(cStr(std::string(kObsStatusRetired))));
+      place(skip);
+      mov(S(r), S(rd(D(r), dims_.epistemic)));
+      jump(loop);
+      place(done);
+    }
+    emitAppendTail(D(support), dims_.epistemic, dims_.epistemic, rec);
+    callLabel(rtSettle_);
+    endObservation(kTurnResultCommitted);
+    place(next);
+  }
+  // A predicate this program does not arbitrate is a malformed request.
+  place(malformed);
+  endObservation(kTurnResultIngestionFault);
+  place(invalid);
+  endObservation(kTurnResultInvalidObservation);
 }
 
 /// The §4.2 settle loop: drain `d.pending` a round at a time. A round detaches
@@ -4935,6 +5159,12 @@ void Gen::mintAgentCell() {
   reserved(kFieldStats, bare);
   reserved(kFieldOrdinal, num);
   reserved(kFieldConsumed, flag);
+  // Only an agent that ingests observations reports typed turn results.
+  if (std::ranges::any_of(unit_.decls, [](const TopDecl &d) {
+        const auto *p = std::get_if<PredicateDecl>(&d);
+        return p != nullptr && p->arbitration.has_value();
+      }))
+    reserved(kFieldTurnResult, str);
   reserved(kFieldKeepChildren, flag);
   // Unit-typed reserved fields are read dynamically through their name cell.
   fields_.at(std::string(kFieldTurn)).ty = tyOf(Ty::K::Record);
@@ -5994,10 +6224,18 @@ CompiledAgent Gen::run() {
   rtSettle_      = newLabel();
   rtCapFind_     = newLabel();
   a3_            = global();
-  a4_            = global();
-  roundsG_       = global();
-  copyPro_       = newLabel();
-  copyBody_      = newLabel();
+  keepHistG_     = global();
+  for (CellRef *zeroed : {&inCondG_, &condFuelG_, &condContractD_, &condD_,
+                          &inPlanG_, &planContractDG_})
+    *zeroed = arena_.makeScalarCell(std::int64_t{0});
+  curIntention_ = global();
+  scanSubjG_    = global();
+  scanPosG_     = global();
+  scanLenG_     = global();
+  a4_           = global();
+  roundsG_      = global();
+  copyPro_      = newLabel();
+  copyBody_     = newLabel();
 
   mintAgentCell();
   mintPredicates();
@@ -6048,6 +6286,11 @@ CompiledAgent Gen::run() {
   emitSettle();
   emitInit(out.initEntry);
   emitDispatch(out.dispatchEntry);
+  if (std::ranges::any_of(preds_,
+                          [](const auto &p) { return p.second.arbitrated; })) {
+    out.observeEntry = newLabel();
+    emitObserve(*out.observeEntry);
+  }
   for (const auto &member : agent_->members) {
     if (const auto *field = std::get_if<VarDecl>(&member))
       out.fieldDefaults.emplace(field->name, emitFieldDefault(*field, nullptr));
@@ -6070,6 +6313,11 @@ CompiledAgent Gen::run() {
   };
   metadata(skills_, out.skills);
   metadata(behaviors_, out.behaviors);
+  while (!pendingRoutines_.empty()) {
+    const Emitter emit = pendingRoutines_.back();
+    pendingRoutines_.pop_back();
+    (this->*emit)();
+  }
   buildProgramStructure();
   return out;
 }

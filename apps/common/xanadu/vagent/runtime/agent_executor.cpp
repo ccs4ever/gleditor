@@ -531,6 +531,8 @@ struct AgentExecutor::PostBox {
     bool percept{false};
     std::string type;
     WireRecord fields;
+    /// A checked observation for the agent's ingestion turn.
+    std::optional<WireRecord> observation;
     std::int64_t effect{};
     EffectResult result;
   };
@@ -593,6 +595,10 @@ struct AgentExecutor::TurnOutcome {
 struct AgentExecutor::HostEvent {
   std::string type;
   WireRecord fields;
+  /// A routine other than the dispatcher, run with `turnFields` as extra
+  /// `$turn` fields and no event (an ingestion turn).
+  std::optional<CellRef> entry;
+  WireRecord turnFields;
 };
 
 struct AgentExecutor::OutboxItem {
@@ -1478,6 +1484,12 @@ AgentExecutor::TurnOutcome AgentExecutor::deliverHost(State &state,
                                                       const ActorGrant &grant,
                                                       WorkerContext &context,
                                                       const HostEvent &event) {
+  if (event.entry) {
+    TurnSpec spec;
+    spec.entry      = event.entry;
+    spec.turnFields = event.turnFields;
+    return runTurn(state, cursor, grant, context, spec);
+  }
   Envelope envelope;
   envelope.kind   = std::string(kKindEvent);
   envelope.type   = event.type;
@@ -2733,6 +2745,67 @@ bool waitsOnReply(const ArenaManifold &arena, const ValueDims &vd,
 
 } // namespace
 
+std::expected<TransportReceipt, EpistemicRefusal>
+AgentExecutor::observe(const identity::ActorPid &target,
+                       const CheckedObservation &o) {
+  const auto fits = [](std::uint64_t v) {
+    return std::in_range<std::int64_t>(v);
+  };
+  if (o.principal.empty() || o.eventId.empty() || o.predicate.empty() ||
+      !fits(o.incarnation) || !fits(o.sequence) || !fits(o.clockEpoch) ||
+      !fits(o.clockMappingVersion) || !std::isfinite(o.acquiredAt) ||
+      !std::isfinite(o.acquiredUncertainty) || o.acquiredUncertainty < 0 ||
+      (o.variance && !std::isfinite(*o.variance)))
+    return std::unexpected(EpistemicRefusal::InvalidObservation);
+  const auto seconds = [](auto duration) {
+    return std::chrono::duration<double>(duration).count();
+  };
+  const auto integer = [](std::uint64_t v) {
+    return WireValue::integer(static_cast<std::int64_t>(v));
+  };
+  WireRecord tuple;
+  for (std::size_t i = 0; i < o.tuple.size(); ++i)
+    tuple.set(std::to_string(i), o.tuple[i]);
+  WireRecord r;
+  r.set(std::string(kObsPredicate), WireValue::text(o.predicate));
+  r.set(std::string(kObsSource), WireValue::text(o.principal));
+  r.set(std::string(kObsTuple), WireValue::record(std::move(tuple)));
+  r.set("incarnation", integer(o.incarnation));
+  r.set("event_id", WireValue::text(o.eventId));
+  r.set("sequence", integer(o.sequence));
+  r.set("acquired_at", WireValue::real(o.acquiredAt));
+  r.set("acquired_uncertainty", WireValue::real(o.acquiredUncertainty));
+  r.set("clock_basis", WireValue::text(o.clockBasis));
+  r.set("clock_epoch", integer(o.clockEpoch));
+  r.set("clock_mapping_version", integer(o.clockMappingVersion));
+  r.set("frame", WireValue::text(o.frame));
+  r.set("units", WireValue::text(o.units));
+  if (o.variance) r.set("variance", WireValue::real(*o.variance));
+  if (o.relayedBy) r.set("relayed_by", WireValue::text(*o.relayedBy));
+  // The executor's own stamps: the host supplies neither receipt time.
+  r.set("received_steady",
+        WireValue::real(seconds(clock_.steady().time_since_epoch())));
+  r.set("received_wall",
+        WireValue::real(seconds(wallNow().time_since_epoch())));
+  PostBox::Item item;
+  item.pid         = target;
+  item.observation = std::move(r);
+  posts_->push(std::move(item));
+  return TransportReceipt{o.eventId};
+}
+
+std::string_view epistemicRefusalName(EpistemicRefusal refusal) noexcept {
+  switch (refusal) {
+  case EpistemicRefusal::UnknownAgent:
+    return "UnknownAgent";
+  case EpistemicRefusal::NotArbitrated:
+    return "NotArbitrated";
+  case EpistemicRefusal::InvalidObservation:
+    return "InvalidObservation";
+  }
+  return "Unknown";
+}
+
 void AgentExecutor::percept(const identity::ActorPid &target, std::string type,
                             WireRecord fields) {
   PostBox::Item item;
@@ -2764,7 +2837,19 @@ void AgentExecutor::drainPosted() {
       continue;
     }
     liftLimits(*state.context);
-    if (item.percept) {
+    if (item.observation) {
+      if (!state.agent.observeEntry) {
+        // The program arbitrates nothing; ingestion has no routine to run.
+        bumpStat(state, std::string(kStatRefusedPrefix) +
+                            std::string(kTurnResultIngestionFault));
+        continue;
+      }
+      HostEvent ingest;
+      ingest.entry = state.agent.observeEntry;
+      ingest.turnFields.set(std::string(kTurnObservation),
+                            WireValue::record(std::move(*item.observation)));
+      state.hostEvents.push_back(std::move(ingest));
+    } else if (item.percept) {
       raise(state, item.type, std::move(item.fields));
     } else {
       finishEffect(state, item.effect, std::move(item.result), false);

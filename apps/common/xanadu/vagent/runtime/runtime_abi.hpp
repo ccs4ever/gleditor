@@ -526,6 +526,31 @@ inline constexpr std::string_view kTurnResultCommitted = "Committed";
 /// The stat prefix a refused typed outcome is counted under, after the undo.
 inline constexpr std::string_view kStatRefusedPrefix = "refused.";
 
+// -- Checked ingestion (P19 I3-1b) --------------------------------------------
+// The adapter passes one checked observation to `observeEntry` as
+// `$turn.observation`, a record of typed scalar cells. An absent optional
+// field (`variance`, `relayed_by`) has no field cell at all.
+inline constexpr std::string_view kTurnObservation = "observation";
+inline constexpr std::string_view kObsPredicate    = "predicate";
+/// The origin principal's identity token, which names its support cell.
+inline constexpr std::string_view kObsSource = "source";
+/// Positional fields "0".."n-1" carrying the predicate's arguments.
+inline constexpr std::string_view kObsTuple = "tuple";
+// Fields the routine adds to the copy it records.
+inline constexpr std::string_view kObsStatus           = "status";
+inline constexpr std::string_view kObsStatusCurrent    = "current";
+inline constexpr std::string_view kObsStatusRetired    = "retired";
+inline constexpr std::string_view kObsVerdict          = "verdict";
+inline constexpr std::string_view kObsVerdictUntested  = "UNTESTED";
+inline constexpr std::string_view kObsVerdictEpoch     = "verdict_epoch";
+inline constexpr std::string_view kObsVerdictRevisions = "verdict_revisions";
+inline constexpr std::string_view kObsPinned           = "pinned";
+/// The typed outcome a failed ingestion turn reports when the routine itself
+/// could not run (a malformed input record), never a data refusal.
+inline constexpr std::string_view kTurnResultIngestionFault = "IngestionFault";
+inline constexpr std::string_view kTurnResultInvalidObservation =
+    "InvalidObservation";
+
 inline constexpr std::string_view kFaultUnanswered = "unanswered";
 inline constexpr std::string_view kFaultRemote     = "remote_fault";
 inline constexpr std::string_view kFaultTooLarge   = "too_large";
@@ -689,6 +714,10 @@ struct CompiledAgent {
   /// leaves the value in `$answer`. The adapter rolls the turn back. Absent:
   /// every ask is `unanswered`.
   std::optional<zigzag::CellRef> answerEntry{};
+  /// Records one checked observation (P19 I3-1b): reads `$turn.observation`,
+  /// leaves a typed code in `$turn_result` and halts. Present only for a
+  /// program with an arbitrated predicate.
+  std::optional<zigzag::CellRef> observeEntry{};
   std::map<std::string, zigzag::CellRef, std::less<>> fieldDefaults;
   std::map<std::string, CompiledContainer, std::less<>> skills;
   std::map<std::string, CompiledContainer, std::less<>> behaviors;

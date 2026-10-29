@@ -35,6 +35,7 @@
 #include <vector>
 
 #include "common/xanadu/resolver.hpp"
+#include "common/xanadu/vagent/runtime/epistemic_ingress.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_limits.hpp"
 #include "common/xanadu/vagent/runtime/host_bindings.hpp"
 #include "common/xanadu/vagent/runtime/runtime_abi.hpp"
@@ -291,6 +292,14 @@ public:
   /// `pumpUntilIdle` or `tick`, and always before a checkpoint is accepted.
   /// An event type the program does not declare is counted unhandled by the
   /// dispatcher, as any event is.
+  /// Queue one checked observation for @p target's arbitrated predicate
+  /// (P19 I3-1b). Callable from any thread, like `percept`; the observation
+  /// runs in its own ingestion turn at the next pump. The receipt means
+  /// queued, never committed.
+  [[nodiscard]] std::expected<TransportReceipt, EpistemicRefusal>
+  observe(const identity::ActorPid &target,
+          const CheckedObservation &observation);
+
   void percept(const identity::ActorPid &target, std::string type,
                WireRecord fields = {});
 
