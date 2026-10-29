@@ -110,11 +110,17 @@ Nonempty static shape predicates now compile bare signed, bidirectional, and neg
 into native `ProbeLink` instructions with Boolean graph branches. These one-hop checks recognize
 self-links and resolve foreign proxies, retain candidate identities and duplicates, and filter
 before clamping. Boolean shape tests in anchors, `where` and `if`, captured functors, CLI/host/mesh
-routes, and persisted graph execution share this lowering. Empty/wildcard shapes, value/nested
-constraints, dynamic shape references and projection still require further lowering. The full build,
-formatting and all 435 affected tests passed, with independent Luna gates. A separate expanded mesh
-run retains seven failures on missing Prolog, VLace and VPL lowerings; no full-suite or full §4.12
-pass is claimed. See iteration 10 in the VM-only ledger for logs.
+routes, and persisted graph execution share this lowering. Scalar literal constraints and nested
+static shape targets now lower to native comparisons and recursive graph branches. Bidirectional
+targets accept either matching neighbor; absent neighbors cannot satisfy nested absence constraints.
+Negated rules retain absence-only semantics and skip target evaluation. Foreign comparisons read
+underlying typed bits, preserving exact mixed numeric comparisons and structural-handle refusal.
+Compiler preflight bounds depth, cyclic ASTs, repeated validation work and bidirectional graph
+expansion. All 449 affected tests, the full build, formatting and Luna gates passed for this target
+increment. Empty/wildcard shapes, dynamic shape references and projection still need lowering. The
+full build, formatting and all 435 affected tests passed, with independent Luna gates. A separate
+expanded mesh run retains seven failures on missing Prolog, VLace and VPL lowerings; no full-suite
+or full §4.12 pass is claimed. See iteration 10 in the VM-only ledger for logs.
 
 The stream foundation supports one active stream cursor per VM; overlapping cursors and stream
 choice-point stealing refuse. Mesh stream transport, foreign/base-backed export, and general lazy

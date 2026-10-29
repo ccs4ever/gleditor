@@ -196,6 +196,16 @@ TEST(VQLContractExportTest, TypedCallGraphSurvivesStoreReloadAndFreshVM) {
   TemporaryDirectory temporary;
   const std::vector<Case> cases{
       {.query          = "let $p := %\"paper\"; $p/d.items%\"one\"%\"two\"; "
+                         "$p/d.items/d.video%\"video\"/d.codec%\"h264\"; "
+                         "let $f := /d.items[{~d.video: {+d.codec: \"h264\"}}]; "
+                         "let $g := /$f; let $f := /d.absent; $p/$g[-1]",
+       .expectContract = false,
+       .expectedValue  = "two"},
+      {.query          = "let $p := %\"paper\"; $p/d.items%\"one\"%\"two\"; "
+                         "$p/d.items/d.score%9007199254740993; "
+                         "$p/d.items[{+d.score: 9007199254740992.0}]",
+       .expectContract = false},
+      {.query          = "let $p := %\"paper\"; $p/d.items%\"one\"%\"two\"; "
                          "$p/d.items/d.tag%\"tagged\"; "
                          "$p/d.items[{ +d.tag, !d.hidden }][-1]",
        .expectContract = false,

@@ -12,6 +12,7 @@
 #ifndef COMMON_XANADU_VQL_COMPILER_HPP
 #define COMMON_XANADU_VQL_COMPILER_HPP
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -33,6 +34,8 @@ class MultiStoreCoordinator;
 }
 
 namespace xanadu::vql {
+
+inline constexpr std::size_t maxCompiledShapePredicateRules = 4096;
 
 struct CompilationOptions {
   bool targetLibrary{false};            ///< Emit library store instead of exec
@@ -183,6 +186,12 @@ private:
 
   std::unordered_map<std::string, std::optional<zigzag::CellRef>> varBindings_;
   std::unordered_map<std::string, std::vector<PathStep>> functorBindings_;
+  std::size_t remainingShapePredicateRules_{maxCompiledShapePredicateRules};
+  std::size_t remainingShapePredicateValidationNodes_{
+      maxCompiledShapePredicateRules};
+  std::unordered_map<const ValueExpr *, zigzag::CellRef> shapeTargetConstants_;
+  zigzag::CellRef compileShapePredicateImpl(const ShapeLiteral &shape,
+                                            zigzag::CellRef candidate);
 };
 
 } // namespace xanadu::vql

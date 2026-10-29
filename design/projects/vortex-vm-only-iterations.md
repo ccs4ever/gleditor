@@ -282,3 +282,36 @@ full-suite pass or full §4.12 completion is claimed.
 
 Logs: `/tmp/vql-shape-predicate-build.log`, `/tmp/vql-shape-predicate-focused.log`,
 `/tmp/vql-shape-predicate-tests.log` (expanded run), `/tmp/vql-shape-predicate-format.log`.
+
+## Iteration 11: scalar and nested static shape targets
+
+Static shape rules may constrain an immediate neighbor to a scalar literal or another static shape.
+Scalar constraints use native `VqlCompare` equality, preserving exact integer and lossless mixed
+numeric comparisons. Nested shapes emit further native probes and Boolean graph branches. A
+bidirectional rule succeeds when either selected neighbor matches; a missing outer neighbor never
+satisfies a nested absence check. Negated dimension rules retain absence-in-both-directions
+semantics and do not evaluate their static targets. Dynamic target expressions still refuse.
+
+Compiler preflight detects cyclic programmatic shapes, limits nesting to 128, and caps expanded
+shape work at 4096 units across a compilation. A separate budget of 4096 rule visits also bounds
+validation of shared and ignored target subtrees. Its expansion count includes duplicated nested
+bidirectional branches. These guards bound this lowering; they do not establish a general parser or
+whole-query compilation budget. Shared acyclic shape subtrees remain supported.
+
+Foreign comparisons now inspect the source manifold's scalar kind and read its typed payload,
+instead of rejecting a proxy wrapper or relying on display text. Exact Int64, Double and Bool bits
+survive misleading text and foreign clone masters; actual structural handles still refuse. The
+shared, work-metered clone resolver now lives in the ZigZag layer for both consumers.
+
+Validation: full `make -j$(nproc)` and repository `format-check` passed. All 449 affected tests from
+42 suites passed, including seven target tests, six compiler-bound tests, the restored existing
+nested-shape regression, CLI/host/mesh routes, and saved graphs executed in a fresh VM. Independent
+Luna architecture, senior and profiler reviews accepted the bounded stage. No full-suite pass or
+runtime performance improvement is claimed. The broader unsupported-language mesh failures recorded
+in iteration 10 remain separate work.
+
+Wildcard/exact-valence shapes, dynamic shape values, general field-default thunks, recursive VM
+frames and mutation-boundary contracts remain open. Full §4.12 is incomplete.
+
+Logs: `/tmp/vql-shape-target-build.log`, `/tmp/vql-shape-target-tests.log`,
+`/tmp/vql-shape-target-format.log`.

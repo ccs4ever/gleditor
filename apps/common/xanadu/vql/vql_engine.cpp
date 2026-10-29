@@ -3,10 +3,10 @@
  * @brief Direct query evaluation engine for VQL v16.0.
  */
 #include "common/xanadu/vql/vql_engine.hpp"
-#include "common/xanadu/vql/clone_master.hpp"
 #include "common/xanadu/vql/execution.hpp"
 #include "common/xanadu/vql/functor_capture.hpp"
 #include "common/xanadu/vql/invocation.hpp"
+#include "common/xanadu/zigzag/query_clone_master.hpp"
 
 #include <algorithm>
 #include <charconv>
@@ -747,7 +747,8 @@ VQLEngine::resolveStoreAnchor(const StoreAnchor &sa) {
   if (sa.derefMaster) {
     for (auto &c : results) {
       this->arena().consumeWork();
-      c = queryCloneMaster(core_->arena(), c, core_->dims().clone).value_or(c);
+      c = zigzag::queryCloneMaster(core_->arena(), c, core_->dims().clone)
+              .value_or(c);
     }
   }
   return results;
@@ -964,7 +965,8 @@ VQLEngine::resolveAnchor(const AnchorNode &anchor,
   if (anchor.derefMaster) {
     for (auto &c : results) {
       this->arena().consumeWork();
-      c = queryCloneMaster(core_->arena(), c, core_->dims().clone).value_or(c);
+      c = zigzag::queryCloneMaster(core_->arena(), c, core_->dims().clone)
+              .value_or(c);
     }
   }
 

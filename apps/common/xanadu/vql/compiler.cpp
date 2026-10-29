@@ -209,6 +209,9 @@ CellRef VQLCompiler::emitInputConstant(CellRef op, const CellValue &val) {
 CompilationResult VQLCompiler::compile(const QueryExpression &query,
                                        const CompilationOptions &options) {
   zigzag::vortex::AssemblyTransaction transaction(vm_);
+  remainingShapePredicateRules_           = maxCompiledShapePredicateRules;
+  remainingShapePredicateValidationNodes_ = maxCompiledShapePredicateRules;
+  shapeTargetConstants_.clear();
   entryOp_.reset();
   currentOp_.reset();
   allOps_.clear();
