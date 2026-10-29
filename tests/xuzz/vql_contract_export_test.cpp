@@ -57,6 +57,8 @@ private:
 struct Case {
   std::string query;
   bool expectRuntimeFailure{false};
+  bool expectLinkedFanout{false};
+  bool expectContract{true};
   std::string expectedValue;
   std::vector<std::string> expectedValues;
   std::string expectedError;
@@ -124,10 +126,12 @@ void compileExportReloadAndRun(const Case &testCase, const fs::path &root) {
                 reopenedVm.getOpcodeKind(inputs[1]) ==
                     OpcodeKind::IteratorNext);
   }
-  EXPECT_TRUE(sawMatchContract)
-      << "typed parameter MatchContract was not exported";
-  EXPECT_TRUE(sawParameterBranch)
-      << "typed parameter MatchContract lost its BranchFalseCell";
+  if (testCase.expectContract) {
+    EXPECT_TRUE(sawMatchContract)
+        << "typed parameter MatchContract was not exported";
+    EXPECT_TRUE(sawParameterBranch)
+        << "typed parameter MatchContract lost its BranchFalseCell";
+  }
 
   const auto cursor    = reopenedVm.spawnCursor(*entry, "reloaded_typed_call");
   const auto execution = reopenedVm.run(cursor, 10000);
@@ -149,9 +153,11 @@ void compileExportReloadAndRun(const Case &testCase, const fs::path &root) {
   }
   ASSERT_EQ(reopenedVm.getOpcodeKind(halt), OpcodeKind::Halt);
   const auto resultSlots = reopenedCore.inputsOf(halt);
+  std::vector<CellRef> actualCells;
   std::vector<std::string> actual;
   for (const auto slot : resultSlots) {
     for (const auto result : reopenedVm.resultCells(slot)) {
+      actualCells.push_back(result);
       const auto rendered = reopenedCore.render(result);
       ASSERT_TRUE(rendered);
       actual.push_back(std::visit(
@@ -171,6 +177,19 @@ void compileExportReloadAndRun(const Case &testCase, const fs::path &root) {
   if (expected.empty() && !testCase.expectedValue.empty())
     expected.push_back(testCase.expectedValue);
   EXPECT_EQ(actual, expected);
+
+  if (testCase.expectLinkedFanout) {
+    ASSERT_EQ(actualCells.size(), 4u);
+    EXPECT_NE(actualCells[2], actualCells[3]);
+    const auto fanout = reopenedCoordinator.resolveDimension("d.fanout");
+    EXPECT_EQ(reopenedArena.linked(actualCells[0], fanout, DimVector::POS),
+              actualCells[2]);
+    EXPECT_EQ(reopenedArena.linked(actualCells[1], fanout, DimVector::POS),
+              actualCells[3]);
+    EXPECT_EQ(reopenedArena.linked(actualCells[2], reopenedCore.dims().clone,
+                                   DimVector::POS),
+              actualCells[3]);
+  }
 }
 
 TEST(VQLContractExportTest, TypedCallGraphSurvivesStoreReloadAndFreshVM) {
@@ -181,6 +200,20 @@ TEST(VQLContractExportTest, TypedCallGraphSurvivesStoreReloadAndFreshVM) {
                 "let $p := %\"paper\"; $p/d.items%\"first\"%\"second\"; "
                 "reveal($p/d.items)",
        .expectedValue = "outer"},
+      {.query          = "let $p := %\"paper\"; $p/d.parents%\"one\"%\"two\"; "
+                         "$p/d.parents/d.children%\"A\"%\"B\"!last",
+       .expectContract = false,
+       .expectedValue  = "B"},
+      {.query          = "let $p := %\"paper\"; $p/d.parents%\"one\"%\"two\"; "
+                         "$p/d.parents/d.children%\"A\"%\"B\"!both",
+       .expectContract = false,
+       .expectedValues = {"one", "two", "A", "B", "A", "B"}},
+      {.query = "let $p := %\"paper\"; $p/d.parents%\"one\"%\"two\"; "
+                "let $target := %\"Target\"; "
+                "$p/d.parents/link(+d.fanout, $target)!both",
+       .expectLinkedFanout = true,
+       .expectContract     = false,
+       .expectedValues     = {"one", "two", "Target", "Target"}},
       {.query = "def reveal($items: Stream<Cell { .: $title: String }>): "
                 "String := $title; let $title := \"outer\"; "
                 "let $p := %\"paper\"; reveal($p/d.empty)",

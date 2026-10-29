@@ -81,20 +81,8 @@ std::vector<CellRef> VQLCompiler::compileSelector(const PathStep &step,
           attachPoint = freshCell;
         }
 
-        if (step.yieldMode == YieldMode::Both) {
-          nextStream.push_back(current);
-          nextStream.insert(nextStream.end(), createdCells.begin(),
-                            createdCells.end());
-        } else if (step.yieldMode == YieldMode::Keep) {
-          nextStream.push_back(current);
-        } else if (step.yieldMode == YieldMode::Last) {
-          if (!createdCells.empty()) {
-            nextStream.push_back(createdCells.back());
-          }
-        } else {
-          nextStream.insert(nextStream.end(), createdCells.begin(),
-                            createdCells.end());
-        }
+        nextStream.insert(nextStream.end(), createdCells.begin(),
+                          createdCells.end());
       }
     }
   } else if (std::holds_alternative<FunctionInvocation>(step.selector)) {
@@ -182,10 +170,21 @@ std::vector<CellRef> VQLCompiler::compileSelector(const PathStep &step,
       std::vector<CellRef> attachedClones;
       if (targetCell) {
         for (CellRef current : stream) {
-          CellRef cloneOp = emitOp(OpcodeKind::Clone, "#CLONE_GENERATOR");
-          emitInput(cloneOp, *targetCell);
+          const auto cloneTail = emitExtreme(*targetCell, core_.dims().clone,
+                                             zigzag::DimVector::POS);
+          const auto cloneOp   = emitOp(OpcodeKind::New, "#CLONE_GENERATOR");
+          emitInput(cloneOp, cloneTail);
+          emitInputConstant(cloneOp,
+                            static_cast<std::int64_t>(core_.dims().clone));
+          emitInputConstant(cloneOp, std::int64_t{1});
+
+          const auto cloneRead = emitOp(OpcodeKind::Link, "#CLONE_RESULT");
+          emitInput(cloneRead, cloneTail);
+          emitInputConstant(cloneRead,
+                            static_cast<std::int64_t>(core_.dims().clone));
+          emitInputConstant(cloneRead, std::int64_t{1});
           CellRef cloneCell = core_.arena().makeCell();
-          emitOutput(cloneOp, cloneCell);
+          emitOutput(cloneRead, cloneCell);
 
           CellRef linkOp = emitOp(OpcodeKind::Link, "#LINK_ATTACH " + dimName);
           emitInput(linkOp, current);
@@ -197,19 +196,7 @@ std::vector<CellRef> VQLCompiler::compileSelector(const PathStep &step,
         }
       }
 
-      if (step.yieldMode == YieldMode::Both) {
-        nextStream = stream;
-        nextStream.insert(nextStream.end(), attachedClones.begin(),
-                          attachedClones.end());
-      } else if (step.yieldMode == YieldMode::Keep) {
-        nextStream = stream;
-      } else if (step.yieldMode == YieldMode::Last) {
-        if (!attachedClones.empty()) {
-          nextStream.push_back(attachedClones.back());
-        }
-      } else {
-        nextStream = attachedClones;
-      }
+      nextStream = std::move(attachedClones);
     } else if (const auto definition = definitions_.find(fn.name);
                definition != definitions_.end()) {
       requirePositionalArguments(fn);
@@ -225,8 +212,7 @@ std::vector<CellRef> VQLCompiler::compileSelector(const PathStep &step,
     }
   } else {
     throw std::invalid_argument(
-        "this VQL path selector is not compiled to Vortex yet; run the "
-        "query with --engine direct");
+        "this VQL path selector does not have Vortex graph lowering yet");
   }
 
   return nextStream;

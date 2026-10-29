@@ -876,9 +876,11 @@ literal that has nothing to do with the cell model it's returning from:
   single `::fixed` flag can only say "don't follow", leaving `!both` and `!last` unspellable.
 
   The suffix sits on the **step**, where a `RangeClamp` sits, applying after everything else the
-  step did — because what a step yields is the last question about it. It composes with any
-  placement: `/d.clone::head%"override"!` mints a new master and leaves the path on the cell that
-  had one.
+  step did — because what a step yields is the last question about it. Creation results are
+  flattened across the entire input stream before predicates and clamps; `!last` then selects one
+  final surviving result overall, and `!both` places all original contexts before the surviving
+  creations. It composes with any placement: `/d.clone::head%"override"!` mints a new master and
+  leaves the path on the cell that had one.
 
   On a read step only `!keep` means anything, since nothing was created: it reads as "walk here but
   keep my place", which is either what was meant or a sign the step should not have been written.

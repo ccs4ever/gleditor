@@ -14,13 +14,19 @@ std::vector<CellRef> VQLCompiler::compileSteps(std::span<const PathStep> steps,
     if (step.versionPin)
       throw std::invalid_argument(
           "version pins require historical VM lowering");
+    const auto stepInput = stream;
     std::vector<CellRef> nextStream;
 
-    const auto *function = std::get_if<FunctionInvocation>(&step.selector);
-    const bool userCall  = function && definitions_.contains(function->name);
+    const auto *function  = std::get_if<FunctionInvocation>(&step.selector);
+    const auto *dimension = std::get_if<SignedDimensionStep>(&step.selector);
+    const bool userCall   = function && definitions_.contains(function->name);
+    const bool creationStep =
+        !step.capturedFunctor &&
+        ((dimension && !dimension->dimName.starts_with('$') &&
+          !dimension->creates.empty()) ||
+         (function && function->name == "link" && function->args.size() >= 2));
     const auto present =
         userCall ? std::optional{emitStreamPresence(stream)} : std::nullopt;
-    const auto *dimension = std::get_if<SignedDimensionStep>(&step.selector);
     if (step.capturedFunctor) {
       nextStream = compileSteps(*step.capturedFunctor, stream, hasContext);
     } else if (dimension && dimension->dimName.starts_with('$')) {
@@ -87,7 +93,25 @@ std::vector<CellRef> VQLCompiler::compileSteps(std::span<const PathStep> steps,
       throw std::invalid_argument(
           "compiled stream shape predicates require lowering");
 
-    if (step.yieldMode != YieldMode::Keep) stream = std::move(nextStream);
+    if (creationStep) {
+      if (step.yieldMode == YieldMode::Keep) {
+        // Keep the incoming context while retaining the selector's writes.
+      } else if (step.yieldMode == YieldMode::Last) {
+        if (!nextStream.empty()) {
+          nextStream = emitClamp(nextStream, RangeClamp{.start = -1});
+        }
+        stream = std::move(nextStream);
+      } else if (step.yieldMode == YieldMode::Both) {
+        const auto both = emitStreamClear();
+        emitAppendStream(both, stepInput);
+        emitAppendStream(both, nextStream);
+        stream = {both};
+      } else {
+        stream = std::move(nextStream);
+      }
+    } else if (step.yieldMode != YieldMode::Keep) {
+      stream = std::move(nextStream);
+    }
     hasContext = true;
   }
 

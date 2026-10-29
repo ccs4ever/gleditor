@@ -229,3 +229,19 @@ not complete §4.12 or introduce lazy default thunks; no runtime performance imp
 
 Logs: `/tmp/vql-stream-capture-build.log`, `/tmp/vql-stream-capture-tests.log`,
 `/tmp/vql-stream-capture-format.log`.
+
+## Iteration 9: whole-step creation yields
+
+Creation selectors emit their complete runtime result stream before the step's dereference,
+predicates and clamp. Yield then selects once across the flattened stream: `!last` keeps its final
+member, `!both` yields all original contexts followed by surviving creations, and `!keep` retains
+the contexts while creation side effects still run. Source order and duplicate contexts are
+preserved. Read steps keep their existing `!last`/`!both` behavior.
+
+Existing-target `link()` fan-out mints a fresh clone on each runtime iteration through native graph
+creation and link instructions, rather than reusing a compiler-allocated output cell. This preserves
+distinct identities and each context's attachment. No interpreter fallback is introduced.
+
+Validation is pending. This bounded change does not add general yield overrides for opaque functor
+applications, shape predicates, lazy default thunks, recursive frames or mutation-boundary
+contracts.

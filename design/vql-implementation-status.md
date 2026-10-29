@@ -98,9 +98,13 @@ Decorated functor calls now run their full captured path before applying call-si
 predicates and clamps over the combined result. Shared capture freezes decorated dependencies across
 rebinding while preserving empty-input function behavior. Query-time `>` walks canonical foreign
 clone chains with per-probe fuel checks; ordinary cells retain identity and cycles return the
-original cell. The same VM lowering handles anchor, variable-stream and step dereference. Existing
-functor `!last`/`!both` behavior is preserved; their complete specification semantics, shape
-predicates and pins remain open.
+original cell. The same VM lowering handles anchor, variable-stream and step dereference.
+Creation-step `!last` now selects globally after predicates/clamps, and `!both` yields contexts
+before creations. Bound functors retain those creation-step semantics after capture and rebinding.
+Read `!last`/`!both` remain no-ops. `link()` fan-out mints distinct clones per runtime iteration,
+preserving each attachment. The iteration passes all 412 affected tests, the full build and
+formatting, including saved-graph execution. General yield overrides on opaque functor applications,
+shape predicates and pins remain open.
 
 The stream foundation supports one active stream cursor per VM; overlapping cursors and stream
 choice-point stealing refuse. Mesh stream transport, foreign/base-backed export, and general lazy
