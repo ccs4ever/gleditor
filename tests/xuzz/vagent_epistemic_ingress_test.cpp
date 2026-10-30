@@ -1261,6 +1261,31 @@ TEST_F(VagentEpistemicIngress, ARepeatedRefusalIsChargedOnce) {
   EXPECT_EQ(counter(profiles().front(), kProfileContentRefusals), 1);
 }
 
+TEST_F(VagentEpistemicIngress, AnInTurnRefusalResentIsChargedOnce) {
+  observe(reading(kP1, "e1", 1, 1.0));
+  auto older       = reading(kP1, "e2", 2, 2.0);
+  older.acquiredAt = at(1) - 0.5; // refused in the turn: acquired earlier
+  observe(older);
+  observe(older);
+  EXPECT_EQ(outcomeOf(older)->code, "ObservationTimeMismatch");
+  EXPECT_EQ(counter(profiles().front(), kProfileContentRefusals), 1);
+}
+
+TEST_F(VagentEpistemicIngress, ARelayedRefusalDoesNotHideTheDirectCopy) {
+  observe(reading(kP1, "e1", 1, 1.0));
+  const auto prof   = profiles().front();
+  auto relayed      = reading(kP1, "e2", 2, 1.0);
+  relayed.frame     = "ecef";
+  relayed.relayedBy = kP2;
+  EXPECT_TRUE(refusedAtIngress(relayed));
+  auto direct      = relayed;
+  direct.relayedBy = std::nullopt;
+  EXPECT_TRUE(refusedAtIngress(direct));
+  EXPECT_TRUE(refusedAtIngress(direct));
+  EXPECT_EQ(counter(prof, kProfileRefusedCount), 1);
+  EXPECT_EQ(counter(prof, kProfileContentRefusals), 1);
+}
+
 TEST_F(VagentEpistemicIngress, BindingAnUnknownActorIsRefused) {
   ActorPid nobody = pid;
   nobody.spawnSequence += 1000;

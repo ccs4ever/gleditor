@@ -67,7 +67,7 @@ std::string codeOf(const IngestOutcome &o) {
   case IngestOutcome::Kind::Duplicate:
     return "Duplicate";
   case IngestOutcome::Kind::Refused:
-    return o.code;
+    return o.code.value_or("Refused");
   }
   return "?";
 }

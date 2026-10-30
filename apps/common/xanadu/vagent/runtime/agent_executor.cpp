@@ -660,6 +660,12 @@ struct AgentExecutor::Ingress {
     std::uint64_t incarnation{};
     std::string eventId;
     IngestOutcome outcome;
+    /// The refusal this event was last charged for, kept while the entry
+    /// moves on, so a resend meeting it again is not charged twice.
+    std::optional<std::string> charged;
+    /// Whether a directly received copy was among those charged: a relayed
+    /// copy charged first must not hide the device's own.
+    bool chargedDirect{false};
   };
   /// The lowest incarnation a new binding may present, as far as the host
   /// knows: the arena's floor reaches the host only through the turns that
@@ -692,6 +698,7 @@ struct AgentExecutor::Ingress {
   struct Charge {
     std::int64_t content{};
     std::int64_t other{};
+    /// The newest charged refusal; a charge exists only once one is made.
     std::string code;
     std::optional<double> contact;
   };
@@ -736,6 +743,25 @@ struct AgentExecutor::Ingress {
       if (entry.incarnation == incarnation && entry.eventId == eventId)
         return &entry;
     return nullptr;
+  }
+  /// Whether a refusal of this event is charged: once per code, and once
+  /// more for the first direct copy after relayed ones. Call after logging
+  /// the event, so its entry exists.
+  bool firstCharge(const SourceKey &source, std::uint64_t incarnation,
+                   std::string_view eventId, std::string_view code,
+                   bool relayed) {
+    const auto q = outcomes.find(source);
+    if (q == outcomes.end()) return true;
+    for (auto &entry : q->second) {
+      if (entry.incarnation != incarnation || entry.eventId != eventId)
+        continue;
+      if (entry.charged == code && (entry.chargedDirect || relayed))
+        return false;
+      entry.charged = std::string(code);
+      entry.chargedDirect |= !relayed;
+      return true;
+    }
+    return true;
   }
   /// The share of the actor queue one principal or relay may hold: the
   /// per-source bound, shrunk so every bound source keeps a slot.
@@ -1745,12 +1771,13 @@ AgentExecutor::TurnOutcome AgentExecutor::deliverHost(State &state,
         return std::nullopt;
       };
     // Slots are never reused, so past the allowance only a checkpoint and
-    // resume helps; refuse before running rather than fail mid-turn.
-    if (event.ingest &&
-        context.arena.cellCount() >= settings_.epistemic.arenaSlots) {
+    // resume helps; no epistemic turn runs, rather than fail mid-turn.
+    if (context.arena.cellCount() >= settings_.epistemic.arenaSlots) {
       TurnOutcome exhausted;
       exhausted.result = std::string(kTurnResultArenaExhausted);
-      finishIngest(state, *event.ingest, *exhausted.result);
+      if (event.ingest) finishIngest(state, *event.ingest, *exhausted.result);
+      if (event.sourceChange)
+        finishSourceChange(state, *event.sourceChange, *exhausted.result);
       return exhausted;
     }
     auto outcome = runTurn(state, cursor, grant, context, spec);
@@ -1798,9 +1825,11 @@ void AgentExecutor::finishIngest(State &state, const IngestKey &ingest,
   ingress_->log(source, settings_.epistemic.outcomeLog, ingest.incarnation,
                 ingest.eventId, logged);
   if (logged.kind == IngestOutcome::Kind::Refused) {
-    GLEDITOR_LOG_DEBUG(kIngressLog, "ingestion refused: {}", logged.code);
+    GLEDITOR_LOG_DEBUG(kIngressLog, "ingestion refused: {}", *logged.code);
     if (!retry &&
-        ingress_->charge(pid, ingest.principal, logged.code,
+        ingress_->firstCharge(source, ingest.incarnation, ingest.eventId,
+                              *logged.code, ingest.relay.has_value()) &&
+        ingress_->charge(pid, ingest.principal, *logged.code,
                          ingest.relay.has_value(), ingest.receivedSteady))
       postRefusals(state.pid, ingest.principal);
   }
@@ -3410,18 +3439,19 @@ AgentExecutor::observe(const identity::ActorPid &target,
     // A resend of an event the store already holds is a retry: the content
     // refusal it now meets (it aged past max_age, say) is not the device's.
     const auto *held = ingress_->find(source, o.incarnation, o.eventId);
-    // A resend of a held event, of one still queued, or of one already
-    // refused for the same reason is the same event again: it neither
-    // overwrites the entry nor is charged twice.
-    const bool retry = held != nullptr &&
-                       (held->outcome.kind != IngestOutcome::Kind::Refused ||
-                        held->outcome.code == name);
-    if (held == nullptr || held->outcome.kind == IngestOutcome::Kind::Refused)
+    // A resend of a held or still-queued event neither overwrites its entry
+    // nor is charged; one refused again for the same reason is charged once.
+    const bool kept =
+        held != nullptr && held->outcome.kind != IngestOutcome::Kind::Refused;
+    if (!kept)
       ingress_->log(source, settings_.epistemic.outcomeLog, o.incarnation,
                     o.eventId,
                     {IngestOutcome::Kind::Refused, name, outcomeClassOf(name)});
-    if (!retry && ingress_->charge(pid, o.principal, name,
-                                   o.relayedBy.has_value(), receivedSteady))
+    if (!kept &&
+        ingress_->firstCharge(source, o.incarnation, o.eventId, name,
+                              o.relayedBy.has_value()) &&
+        ingress_->charge(pid, o.principal, name, o.relayedBy.has_value(),
+                         receivedSteady))
       postRefusals(target, o.principal);
     return std::unexpected(code);
   };
@@ -3543,8 +3573,9 @@ AgentExecutor::observe(const identity::ActorPid &target,
   // in two places, so they are compared here, where a mismatch is cheap.
   for (std::size_t i = 0; i < kObservationOrder.size(); ++i)
     if (r.names[i] != kObservationOrder[i]) {
+      // A build defect, not the source's: refused, never logged or charged.
       GLEDITOR_LOG_WARN(kIngressLog, "observation field {} out of order", i);
-      return refuse(EpistemicRefusal::InvalidObservation);
+      return std::unexpected(EpistemicRefusal::InvalidObservation);
     }
   PostBox::Item item;
   item.pid         = target;

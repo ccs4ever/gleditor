@@ -105,6 +105,13 @@ public:
             return "two current records for " + token + " on " + name;
         }
       }
+    // A profile's retired history holds only retired records.
+    for (const auto profile : profiles())
+      for (const auto record :
+           zigzag::rankAfter(arena(), profile, dims_.epistemic))
+        if (text(record, kObsStatus) != kObsStatusRetired)
+          return "a live record in the retired history of " +
+                 arena().textOf(profile);
     return std::nullopt;
   }
 

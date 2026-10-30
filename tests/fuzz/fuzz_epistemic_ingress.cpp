@@ -246,7 +246,7 @@ std::string codeOf(const IngestOutcome &o) {
   case IngestOutcome::Kind::Duplicate:
     return "Duplicate";
   case IngestOutcome::Kind::Refused:
-    return o.code;
+    return o.code.value_or("Refused");
   }
   return "?";
 }
@@ -302,6 +302,9 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data,
     const auto conflicts = executor.stat(*pid, conflictStat);
     const auto receipt   = executor.observe(*pid, o);
     host.pump();
+    if (report && !receipt)
+      std::fprintf(stderr, "receipt %s\n",
+                   epistemicRefusalName(receipt.error()).data());
     if (report && executor.stat(*pid, duplicateStat) > duplicates)
       std::fprintf(stderr, "outcome Duplicate\n");
     if (report && executor.stat(*pid, conflictStat) > conflicts)
@@ -346,7 +349,9 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data,
         require(was->second == is->second,
                 "a refused relayed copy leaves health and contact alone");
     }
-    return outcome;
+    // A refusal before queueing committed nothing, whatever an earlier
+    // event under the same ID left in the log.
+    return receipt ? outcome : std::optional<IngestOutcome>{};
   };
 
   for (int step = 0; step < maxHarnessSteps && in.remaining_bytes() > 0;
@@ -434,13 +439,13 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data,
                         .snapshot()
                         .beliefs == beliefs.beliefs,
                 "resending committed bytes writes nothing");
-        if (last->generation == generation) {
+        // Bytes acquired near max_age may age out between the two sends.
+        if (last->generation == generation &&
+            last->observation.acquiredAt > now - 9.0) {
           require(again && again->kind == IngestOutcome::Kind::Committed,
                   "a committed outcome stays committed");
-          // Bytes acquired near max_age may age out between the two sends.
-          if (last->observation.acquiredAt > now - 9.0)
-            require(executor.stat(*pid, statName) == duplicates + 1,
-                    "resending committed bytes is a duplicate");
+          require(executor.stat(*pid, statName) == duplicates + 1,
+                  "resending committed bytes is a duplicate");
         }
       }
       break;

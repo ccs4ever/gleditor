@@ -108,8 +108,8 @@ enum class OutcomeClass : std::uint8_t {
 struct IngestOutcome {
   enum class Kind : std::uint8_t { Pending, Committed, Duplicate, Refused };
   Kind kind{Kind::Pending};
-  /// The refusal code, empty unless `kind` is `Refused`.
-  std::string code;
+  /// The refusal code, present exactly when `kind` is `Refused`.
+  std::optional<std::string> code;
   std::optional<OutcomeClass> outcomeClass;
   bool operator==(const IngestOutcome &) const = default;
 };

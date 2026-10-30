@@ -741,6 +741,26 @@ it and resumes.
   committed before the checkpoint is refused and charged as such. Every exception in a turn is
   classed as a fuel failure, which predates this slice.
 
+**Review round 3.** All four personas passed `08425c60` (ML, epistemology, hardware, codebase), with
+no BLOCKING or MAJOR finding. The closing changes: a refusal is charged once per event and code,
+with one more charge for the first direct copy after relayed ones, wherever it is refused;
+`IngestOutcome::code` is optional and `FrameBody` has no unset defaults; a field-order mismatch is a
+host error, never charged; `recordOf` refuses a broken clone rank; and `ArenaExhausted` gates
+source-change and bookkeeping turns as well as ingestions. Recorded and open:
+
+- **A failing `-pred` handler blocks a source's lifecycle.** The advance and the retire settle the
+  `-pred` they raise in their own all-or-nothing turn, as every belief change does, so a handler
+  that always fails makes both refuse (`TurnExhausted` or `IngestionFault`) until the program is
+  fixed, and a rebind meets the same. Options for a later slice: deliver those events in ordinary
+  handler turns after the source change commits, or let an operator retire without settling.
+- **The retired history is per profile.** It is not age-ordered within one boot (its order is the
+  clone rank's), and a later support for the same key starts a fresh history, so I3-2 and I4 read
+  the profile's chain for a source's past.
+- **Smaller.** A stopped actor's outcome log goes with it rather than reading `Undelivered`. A
+  changed policy is refused by `resume`; the `restoreState` check behind it throws untyped. Every
+  exception in a turn is a fuel failure (older than this slice). No test drives an advance that
+  fails and is then retried successfully, since no setting fails an advance while ingestion fits.
+
 **Fuzz evidence.** The fuzzer program gained a keyless predicate, and the harness two scripted steps
 (a principal past its key limit, an event ID reused with other bytes) that random bytes rarely
 reach. Report mode counts unlogged refusals and the duplicate and conflicting turns a sticky entry

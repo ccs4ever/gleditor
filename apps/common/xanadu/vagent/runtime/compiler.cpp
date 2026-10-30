@@ -4573,6 +4573,8 @@ void Gen::emitSourceChange(CellRef entryLabel) {
   const auto recordOf = [&](CellRef view, CellRef out) {
     const CellRef name = reg();
     mov(S(name), S(rd(D(view), core_.dims().values, true)));
+    // An occurrence no record names is a broken rank, not a record.
+    branchIfZero(name, malformed);
     head(name, core_.dims().vars, out);
   };
 
@@ -6166,12 +6168,12 @@ void Gen::emitMethod(MethodInfo &m) {
 /// the body's own epilogue is unchanged; between runs the frame is just a cell
 /// holding the locals.
 void Gen::emitFrameBody(MethodInfo &m) {
-  FrameBody fb;
-  fb.frame               = mintHandle();
-  fb.args                = m.argRegs;
-  fb.result              = m.retReg;
-  fb.make                = newLabel();
-  fb.enter               = newLabel();
+  // Built whole: every field is a real cell, none has an unset value.
+  FrameBody fb{.frame  = mintHandle(),
+               .make   = newLabel(),
+               .enter  = newLabel(),
+               .args   = m.argRegs,
+               .result = m.retReg};
   const CellRef makeBody = newLabel(), enterBody = newLabel();
 
   tail_ = std::nullopt;

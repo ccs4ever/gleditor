@@ -250,6 +250,30 @@ TEST_F(VagentEpistemicResume, AdvanceAndRetireWalkTheRestoredRanks) {
   EXPECT_EQ(b.views(*b.profile(kP2)), 0U);
 }
 
+TEST_F(VagentEpistemicResume, ARetiredHistoryCrossesAResume) {
+  populate();
+  a.bind(kP1, 2); // moves kP1's records to its profile's retired history
+  const auto p1    = *a.profile(kP1);
+  const auto chain = zigzag::rankAfter(a.arena(), p1, a.dims().epistemic) |
+                     std::ranges::to<std::vector<CellRef>>();
+  ASSERT_FALSE(chain.empty());
+  const auto views = a.views(p1);
+  ASSERT_TRUE(resumeOnB());
+  const auto q1 = *b.profile(kP1);
+  EXPECT_EQ((zigzag::rankAfter(b.arena(), q1, b.dims().epistemic) |
+             std::ranges::to<std::vector<CellRef>>())
+                .size(),
+            chain.size());
+  EXPECT_EQ(b.views(q1), views);
+  const EpistemicView view(b.executor(), b.pid, kPredicates);
+  const auto broken = view.violation();
+  EXPECT_FALSE(broken) << *broken;
+  // The retire turn clears it on the resumed side.
+  ASSERT_TRUE(b.executor().retireSource(b.pid, kP1));
+  b.host->pump();
+  EXPECT_EQ(b.views(q1), 0U);
+}
+
 TEST_F(VagentEpistemicResume, LivenessStartsAgainFromTheFirstContact) {
   populate();
   ASSERT_TRUE(a.value(*a.profile(kP1), kProfileLastContact));
