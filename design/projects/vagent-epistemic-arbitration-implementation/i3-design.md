@@ -690,11 +690,11 @@ silent or wrong:
   feature list, the executor's steady-clock instance and the source's health at ingest.
 - **Failed turns.** A turn that set no code and ran out of cycles or fuel is `TurnExhausted`, needs
   host action; any other is `IngestionFault`.
-- **Open for I4** (options in [i3-open-questions.md](i3-open-questions.md)). A support whose records
-  are all retired is still a belief (plain queries and handlers see it); I4 decides whether a
-  support exists only while it has a current record. Counters are lifetime-cumulative across
-  incarnations and revivals; I3-2 decides whether health needs them per incarnation or windowed. A
-  source refused from its first event has no profile to charge; I3-2 says how health treats one.
+- **Open for I4** (options in [i3-open-questions.md](i3-open-questions.md)). Decided in round 2: an
+  advance drops supports left with no current record (see below); how plain queries of an arbitrated
+  predicate answer is I4's. Counters are lifetime-cumulative across incarnations and revivals; I3-2
+  decides whether health needs them per incarnation or windowed. A source refused from its first
+  event has no profile to charge; I3-2 says how health treats one.
 
 **Uncertainty bound (hardware M3).** The owner chose a policy key: `max_uncertainty`, optional,
 resolving to `max_age` and hashed, so an existing program keeps working and the bound in force is
@@ -714,6 +714,32 @@ program reference covers it; `restoreState` compares the policy hashes again. A 
 about two operations per epistemic cell: at the old 32,768-cell default a full budget did not
 checkpoint under `vagent.value_operations` (65,536), so the default is now 24,576, and a test fills
 it and resumes.
+
+**Review round 2.** ML passed; hardware, epistemology and codebase each failed one MAJOR, fixed:
+
+- **Source changes keep call order.** `bindSource` and `retireSource` put their change ahead of
+  every other post but behind the changes already waiting, so a retire followed by the next boot's
+  bind before one pump runs in that order (it ran newest first, tombstoning the live binding).
+- **An advance drops the predecessor's supports** (the owner's decision on open question 1). Every
+  support of the principal holds only retired records after an advance, so each is dropped through
+  `rtBDrop`, settling `-pred`, and its records move to a retired-history chain on the profile's own
+  `d.epistemic`, trimmed to `history × keys_per_source` (unpinned oldest first, with their clone
+  occurrences). A belief then means a current boot asserts it, calibration keeps the records, and a
+  device that reports new keys after every reboot stays bounded: it filled the cell ceiling at about
+  86 boots and then refused every source on the actor. The retire turn and the resume copy walk the
+  chain like any history.
+- **Smaller fixes.** No host floor for a principal nothing names (the floor's 0 default was a
+  sentinel). A revive the budget refused revokes its binding. Queue counter entries are erased at
+  zero and never made by a refused observation. `bindSource` refuses an unknown pid
+  (`UnknownActor`). A resend of a held or queued event, or of one refused for the same reason,
+  neither overwrites the log entry nor is charged again. `observe` checks its field order against
+  `kObservationOrder`, and `readAt` refuses a record shorter than the order.
+- **Recorded, not changed.** A reading can be accepted up to about `max_age + max_uncertainty` old,
+  at most twice `max_age`. The default queue (64 slots) is shared fairly among bound sources, so
+  more than 64 sources get one slot each and no more. A source's own flood can evict its oldest
+  outcomes from its log. After a resume the outcome log starts empty, so a retry of an event
+  committed before the checkpoint is refused and charged as such. Every exception in a turn is
+  classed as a fuel failure, which predates this slice.
 
 **Fuzz evidence.** The fuzzer program gained a keyless predicate, and the harness two scripted steps
 (a principal past its key limit, an event ID reused with other bytes) that random bytes rarely

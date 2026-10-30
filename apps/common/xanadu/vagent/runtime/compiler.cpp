@@ -4523,7 +4523,7 @@ void Gen::emitSourceChange(CellRef entryLabel) {
   place(entryLabel);
   const FieldInfo &turn = fields_.at(std::string(kFieldTurn));
   const CellRef tp = reg(), change = reg(), who = reg(), inc = reg(),
-                retire = reg(), t = reg(), maxSources = reg();
+                retire = reg(), t = reg(), maxSources = reg(), retained = reg();
   const CellRef malformed = newLabel();
   mov(S(tp), S(rd(S(turn.nameCell), core_.dims().values)));
   const auto find = [&](CellRef record, std::string_view name, CellRef out) {
@@ -4536,7 +4536,8 @@ void Gen::emitSourceChange(CellRef entryLabel) {
   branchIfZero(change, malformed);
   for (const auto &[name, out] :
        {std::pair{kObsSource, who}, std::pair{kSourceRetire, retire},
-        std::pair{kIngestMaxSources, maxSources}}) {
+        std::pair{kIngestMaxSources, maxSources},
+        std::pair{kSourceRetained, retained}}) {
     find(change, name, out);
     branchIfZero(out, malformed);
   }
@@ -4676,6 +4677,76 @@ void Gen::emitSourceChange(CellRef entryLabel) {
     mov(S(v), S(rd(D(v), core_.dims().clone)));
     jump(walk);
     place(done);
+    // The predecessor's supports now hold no current reading. A belief
+    // means a current boot asserts it, so each is dropped through rtBDrop,
+    // settling -pred; its records move to the profile's retired history,
+    // where calibration still finds them, bounded below.
+    {
+      const CellRef sup = reg(), cl = reg(), pred = reg(), nm = reg(),
+                    chain = reg();
+      const CellRef walk2 = newLabel(), next2 = newLabel(), done2 = newLabel();
+      mov(S(v), S(rd(D(prof), core_.dims().clone)));
+      place(walk2);
+      branchIfZero(v, done2);
+      recordOf(v, rec);
+      // Moved already (its head is the profile) or detached: nothing to do.
+      head(rec, dims_.epistemic, sup);
+      mov(S(cl), S(rd(D(sup), dims_.source, true)));
+      branchIfZero(cl, next2);
+      mov(S(chain), S(rd(D(sup), dims_.epistemic)));
+      breakOp(D(sup), dims_.epistemic);
+      emitAppendTail(D(prof), dims_.epistemic, dims_.epistemic, chain);
+      head(sup, dims_.source, cl);
+      head(cl, core_.dims().clause, pred);
+      mov(S(nm), D(sup));
+      mov(S(a0_), S(pred));
+      mov(S(a1_), S(cl));
+      mov(S(a2_), S(nm));
+      callLabel(rtBDrop_);
+      place(next2);
+      mov(S(v), S(rd(D(v), core_.dims().clone)));
+      jump(walk2);
+      place(done2);
+    }
+    {
+      // The retired history keeps the newest `retained` records; the oldest
+      // unpinned go first, with their clone occurrences.
+      const CellRef n = reg(), r = reg(), over = reg(), pin = reg(),
+                    view  = reg();
+      const CellRef tally = newLabel(), counted = newLabel(), trim = newLabel(),
+                    scan = newLabel(), nextRec = newLabel(),
+                    trimmed = newLabel(), noView = newLabel();
+      movC(n, zero_);
+      mov(S(r), S(rd(D(prof), dims_.epistemic)));
+      place(tally);
+      branchIfZero(r, counted);
+      emit(OpcodeKind::Add, "n+", {S(n), S(one_)}, {n});
+      mov(S(r), S(rd(D(r), dims_.epistemic)));
+      jump(tally);
+      place(counted);
+      place(trim);
+      emit(OpcodeKind::Gt, "over?", {S(n), D(retained)}, {over});
+      requireTrue(over, trimmed);
+      mov(S(r), S(rd(D(prof), dims_.epistemic)));
+      place(scan);
+      branchIfZero(r, trimmed);
+      find(r, kObsPinned, pin);
+      branchIfZero(pin, nextRec);
+      emit(OpcodeKind::Eq, "pinned?", {D(pin), S(true_)}, {t});
+      branch(S(t), nextRec);
+      find(r, kObsProfile, view);
+      branchIfZero(view, noView);
+      unlinkFromRank(view, core_.dims().clone);
+      place(noView);
+      unlinkFromRank(r, dims_.epistemic);
+      emit(OpcodeKind::Sub, "n-", {S(n), S(one_)}, {n});
+      jump(trim);
+      place(nextRec);
+      mov(S(r), S(rd(D(r), dims_.epistemic)));
+      jump(scan);
+      place(trimmed);
+    }
+    callLabel(rtSettle_);
     freshWindows(prof);
     endObservation(kTurnResultCommitted);
   }
@@ -4797,8 +4868,11 @@ void Gen::emitObserve(CellRef entryLabel) {
     mov(S(f), S(rd(D(record), core_.dims().vars)));
     std::size_t here = 0;
     for (const auto &[position, out] : at) {
-      for (; here <= position; ++here)
+      // A record shorter than the order is malformed, never a read of 0.
+      for (; here <= position; ++here) {
         mov(S(f), S(rd(D(f), core_.dims().vars)));
+        branchIfZero(f, malformed);
+      }
       mov(S(out), S(rd(D(f), core_.dims().values)));
     }
   };

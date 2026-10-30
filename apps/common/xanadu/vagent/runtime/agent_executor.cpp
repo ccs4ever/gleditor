@@ -587,6 +587,15 @@ struct AgentExecutor::PostBox {
     const std::lock_guard lock(mutex);
     return std::exchange(items, {});
   }
+  /// A source change: ahead of every other post, behind the source changes
+  /// already waiting, so two calls for one principal run in call order.
+  void pushControl(Item item) {
+    const std::lock_guard lock(mutex);
+    const auto after = std::ranges::find_if_not(items, [](const Item &waiting) {
+      return waiting.sourceChange.has_value();
+    });
+    items.insert(after, std::move(item));
+  }
   /// Put back, ahead of anything newer, what the owner could not yet place.
   void putBack(std::vector<Item> kept) {
     const std::lock_guard lock(mutex);
@@ -742,8 +751,8 @@ struct AgentExecutor::Ingress {
   void release(const std::string &pid, const std::string &principal,
                const std::optional<std::string> &relay) {
     const auto down = [](auto &map, const auto &key) {
-      if (const auto it = map.find(key); it != map.end() && it->second > 0)
-        --it->second;
+      if (const auto it = map.find(key); it != map.end() && --it->second == 0)
+        map.erase(it);
     };
     down(queued, pid);
     down(queuedBy, SourceKey{pid, principal});
@@ -1812,10 +1821,13 @@ void AgentExecutor::finishSourceChange(State &state, const SourceChange &change,
       floor = {std::max(floor.incarnation, *change.incarnation), false};
     return;
   }
-  if (code != kTurnResultStaleIncarnation) return;
+  // A revive the budget refused leaves a tombstone, which takes no reading:
+  // the binding cannot authorize anything until the host makes room.
+  const bool budget = code == kTurnResultEpistemicBudget;
+  if (code != kTurnResultStaleIncarnation && !budget) return;
   // The arena holds the floor: a binding at or below it never authorizes,
   // and the host now knows to refuse one synchronously.
-  floor = {std::max(floor.incarnation, *change.incarnation), true};
+  if (!budget) floor = {std::max(floor.incarnation, *change.incarnation), true};
   std::vector<std::string> revoked;
   for (const auto &[key, binding] : ingress_->bindings)
     if (std::get<0>(key) == pid && std::get<1>(key) == change.principal &&
@@ -3115,10 +3127,18 @@ std::size_t AgentExecutor::epistemicCellsWithin(const State &state,
     if (seen.size() <= ceiling && seen.insert(cell).second)
       stack.push_back(cell);
   };
-  // Profiles, with their streams, dedup windows and clone views.
+  // This is host admission against a host setting, run between the routine's
+  // halt and the commit, so it is C++ rather than a routine: the turn's
+  // fuel is already spent and the walk is bounded by the ceiling.
+  // Profiles, with their streams, dedup windows, clone views and retired
+  // histories.
   for (const auto profile :
-       zigzag::rankAfter(arena, state.agent.agentCell, state.dims.trust))
+       zigzag::rankAfter(arena, state.agent.agentCell, state.dims.trust)) {
     admit(profile);
+    for (const auto record :
+         zigzag::rankAfter(arena, profile, state.dims.epistemic))
+      admit(record);
+  }
   // Every support's history on an arbitrated predicate: the predicate heads
   // its policy master on `d.epistemic`, which only arbitration mints.
   for (const auto predicate :
@@ -3211,6 +3231,8 @@ AgentExecutor::bindSource(const identity::ActorPid &target,
   // Incarnations travel as Int64 in the arena.
   if (!std::in_range<std::int64_t>(grant.incarnation))
     return std::unexpected(EpistemicRefusal::InvalidIncarnation);
+  if (!states_.contains(pidKey(target)) && !runtime_.localCursor(target))
+    return std::unexpected(EpistemicRefusal::UnknownActor);
   // The program this agent runs, or the root program before its first turn.
   const AgentProgram *program = &program_;
   if (const auto found = states_.find(pidKey(target));
@@ -3277,7 +3299,7 @@ AgentExecutor::bindSource(const identity::ActorPid &target,
   PostBox::Item item;
   item.pid          = target;
   item.sourceChange = SourceChange{grant.principal, grant.incarnation, false};
-  posts_->putBack({std::move(item)});
+  posts_->pushControl(std::move(item));
   return this;
 }
 
@@ -3294,14 +3316,19 @@ AgentExecutor::retireSource(const identity::ActorPid &target,
     if (std::get<0>(k) == pid && std::get<1>(k) == who)
       highest = std::max(highest.value_or(0), held.incarnation);
   ingress_->unbindAll(pid, who);
-  // The floor survives retirement: a later binding must exceed it.
-  auto &floor = ingress_->floors[{pid, who}];
-  if (highest) floor.incarnation = std::max(floor.incarnation, *highest);
-  floor.strict = true;
+  // The floor survives retirement: a later binding must exceed it. With no
+  // binding and no floor known, the host knows of no incarnation to keep;
+  // the arena's tombstone, if any, still holds its own.
+  if (const auto floor = ingress_->floors.find({pid, who});
+      highest || floor != ingress_->floors.end()) {
+    auto &held = ingress_->floors[{pid, who}];
+    held = {std::max(held.incarnation, highest.value_or(held.incarnation)),
+            true};
+  }
   PostBox::Item item;
   item.pid          = target;
   item.sourceChange = SourceChange{who, highest, true};
-  posts_->putBack({std::move(item)});
+  posts_->pushControl(std::move(item));
   return this;
 }
 
@@ -3383,12 +3410,16 @@ AgentExecutor::observe(const identity::ActorPid &target,
     // A resend of an event the store already holds is a retry: the content
     // refusal it now meets (it aged past max_age, say) is not the device's.
     const auto *held = ingress_->find(source, o.incarnation, o.eventId);
+    // A resend of a held event, of one still queued, or of one already
+    // refused for the same reason is the same event again: it neither
+    // overwrites the entry nor is charged twice.
     const bool retry = held != nullptr &&
-                       (held->outcome.kind == IngestOutcome::Kind::Committed ||
-                        held->outcome.kind == IngestOutcome::Kind::Duplicate);
-    ingress_->log(source, settings_.epistemic.outcomeLog, o.incarnation,
-                  o.eventId,
-                  {IngestOutcome::Kind::Refused, name, outcomeClassOf(name)});
+                       (held->outcome.kind != IngestOutcome::Kind::Refused ||
+                        held->outcome.code == name);
+    if (held == nullptr || held->outcome.kind == IngestOutcome::Kind::Refused)
+      ingress_->log(source, settings_.epistemic.outcomeLog, o.incarnation,
+                    o.eventId,
+                    {IngestOutcome::Kind::Refused, name, outcomeClassOf(name)});
     if (!retry && ingress_->charge(pid, o.principal, name,
                                    o.relayedBy.has_value(), receivedSteady))
       postRefusals(target, o.principal);
@@ -3508,6 +3539,13 @@ AgentExecutor::observe(const identity::ActorPid &target,
   r.set(std::string(kObsFeatures), WireValue::list({}));
   r.set(std::string(kObsClockInstance),
         WireValue::text(ingress_->clockInstance));
+  // The routine reads these fields by position; the two orders are written
+  // in two places, so they are compared here, where a mismatch is cheap.
+  for (std::size_t i = 0; i < kObservationOrder.size(); ++i)
+    if (r.names[i] != kObservationOrder[i]) {
+      GLEDITOR_LOG_WARN(kIngressLog, "observation field {} out of order", i);
+      return refuse(EpistemicRefusal::InvalidObservation);
+    }
   PostBox::Item item;
   item.pid         = target;
   item.observation = std::move(r);
@@ -3521,10 +3559,15 @@ AgentExecutor::observe(const identity::ActorPid &target,
     const auto share =
         ingress_->share(pid, settings_.epistemic.ingressQueue,
                         settings_.epistemic.ingressQueuePerSource);
+    const auto held = [](const auto &map, const auto &key) {
+      const auto it = map.find(key);
+      return it == map.end() ? std::size_t{0} : it->second;
+    };
     const bool full =
-        ingress_->queued[pid] >= settings_.epistemic.ingressQueue ||
-        ingress_->queuedBy[source] >= share ||
-        (o.relayedBy && ingress_->queuedVia[{pid, *o.relayedBy}] >= share);
+        held(ingress_->queued, pid) >= settings_.epistemic.ingressQueue ||
+        held(ingress_->queuedBy, source) >= share ||
+        (o.relayedBy && held(ingress_->queuedVia,
+                             Ingress::SourceKey{pid, *o.relayedBy}) >= share);
     if (!full) {
       posts_->push(std::move(item));
       ++ingress_->queued[pid];
@@ -3556,6 +3599,8 @@ std::string_view epistemicRefusalName(EpistemicRefusal refusal) noexcept {
     return "UnboundIncarnation";
   case EpistemicRefusal::InvalidIncarnation:
     return "InvalidIncarnation";
+  case EpistemicRefusal::UnknownActor:
+    return "UnknownActor";
   case EpistemicRefusal::InvalidObservation:
     return "InvalidObservation";
   case EpistemicRefusal::ClockUnsynchronised:
@@ -3662,6 +3707,10 @@ void AgentExecutor::drainPosted() {
       change.set(std::string(kIngestMaxSources),
                  WireValue::integer(static_cast<std::int64_t>(
                      settings_.epistemic.maxSources)));
+      change.set(std::string(kSourceRetained),
+                 WireValue::integer(static_cast<std::int64_t>(
+                     settings_.epistemic.history *
+                     settings_.epistemic.keysPerSource)));
       HostEvent turn;
       turn.entry        = state.agent.sourceChangeEntry;
       turn.sourceChange = std::move(item.sourceChange);
@@ -4513,7 +4562,8 @@ void AgentExecutor::restoreState(State &state, CellRef saved) {
                                 {oldValues, vd.values},
                                 {oldGrab, vd.grab},
                                 {oldStep, vd.step},
-                                {oldClone, core.clone}});
+                                {oldClone, core.clone},
+                                {oldEpistemic, state.dims.epistemic}});
   for (const auto profile : ranked(saved, old("d.trust"))) {
     const auto copy =
         cloneGraph(arena, profile, epistemic.from, epistemic.into, &copies);

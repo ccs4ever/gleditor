@@ -30,6 +30,10 @@ Supersession never causes this; only an advance does (a retire drops the support
    then bookkeeping that programs never read directly, and only `+at`/`-at` remain to define. Cost:
    it is a checker and lowering decision for I4, and the event semantics still need one of 1–3.
 
+**Decided (owner, I3-1 review round 2).** Option 2, keeping the history: the advance drops the
+supports and moves their records to a retired-history chain on the profile (design section 14). How
+plain queries of an arbitrated predicate answer stays I4's decision.
+
 **Recommendation.** 4 for queries, with 2 for events: in I4, a query of an arbitrated predicate is
 the arbitrated answer, and the advance drops supports left with no current record so that `-at`
 means what it says, moving their history to a retired-history rank on the profile. Calibration keeps

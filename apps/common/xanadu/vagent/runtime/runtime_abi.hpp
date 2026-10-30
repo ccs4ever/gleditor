@@ -660,6 +660,9 @@ inline constexpr std::string_view kRefusalContact = "contact";
 // token, the incarnation, and whether it retires the principal.
 inline constexpr std::string_view kTurnSourceChange = "source_change";
 inline constexpr std::string_view kSourceRetire     = "retire";
+/// Records a profile's retired history keeps: the history bound for each
+/// key the source may support.
+inline constexpr std::string_view kSourceRetained = "retained";
 /// A bookkeeping turn for a principal with no profile: nothing to charge.
 inline constexpr std::string_view kTurnResultNoProfile = "NoProfile";
 // Typed ingestion outcomes besides `Committed`.

@@ -78,6 +78,8 @@ enum class EpistemicRefusal : std::uint8_t {
   UnboundIncarnation,
   /// An incarnation that does not fit the arena's Int64.
   InvalidIncarnation,
+  /// No actor the executor knows has that pid.
+  UnknownActor,
   InvalidObservation,
   ClockUnsynchronised,
   ObservationTimeMismatch,

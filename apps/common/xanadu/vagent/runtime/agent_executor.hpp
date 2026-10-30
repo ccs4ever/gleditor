@@ -289,13 +289,6 @@ public:
     bindings_ = bindings;
     return this;
   }
-  /// Post an event of type @p type to @p target as a percept (§7.5): a host
-  /// delivery with no source, run in a wake turn of its own, in arrival order
-  /// with the other host deliveries. It takes no mailbox slot. Callable from
-  /// any thread; it is queued and the agent hears it at the next
-  /// `pumpUntilIdle` or `tick`, and always before a checkpoint is accepted.
-  /// An event type the program does not declare is counted unhandled by the
-  /// dispatcher, as any event is.
   /// Queue one checked observation for @p target's arbitrated predicate
   /// (P19 I3-1b). Callable from any thread, like `percept`; the observation
   /// runs in its own ingestion turn at the next pump. The receipt means
@@ -338,6 +331,13 @@ public:
   [[nodiscard]] std::optional<std::size_t>
   epistemicCells(const identity::ActorPid &pid) const;
 
+  /// Post an event of type @p type to @p target as a percept (§7.5): a host
+  /// delivery with no source, run in a wake turn of its own, in arrival order
+  /// with the other host deliveries. It takes no mailbox slot. Callable from
+  /// any thread; it is queued and the agent hears it at the next
+  /// `pumpUntilIdle` or `tick`, and always before a checkpoint is accepted.
+  /// An event type the program does not declare is counted unhandled by the
+  /// dispatcher, as any event is.
   void percept(const identity::ActorPid &target, std::string type,
                WireRecord fields = {});
 

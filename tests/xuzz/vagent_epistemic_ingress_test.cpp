@@ -412,7 +412,18 @@ TEST_F(VagentEpistemicIngress, AHigherIncarnationRetiresEveryKeyAndRestarts) {
         }
       }
   EXPECT_EQ(current, 1U);
-  EXPECT_EQ(retired, 2U);
+  EXPECT_EQ(retired, 0U);
+  // The predecessor's supports were dropped (one clause left, for the key
+  // the new boot reported; "other" settled -at) and its records moved to the
+  // profile's retired history, where calibration still finds them.
+  EXPECT_EQ(clauses().size(), 1U);
+  EXPECT_EQ(intField("drops"), 2);
+  const auto kept = history(prof);
+  ASSERT_EQ(kept.size(), 2U);
+  for (const auto record : kept) {
+    EXPECT_EQ(text(record, kObsStatus), kObsStatusRetired);
+    EXPECT_EQ(counter(record, kObsIncarnation), 1);
+  }
   auto stale = reading(kP1, "e5", 5, 1.0);
   EXPECT_EQ(refusedAtIngress(stale), EpistemicRefusal::StaleIncarnation);
 }
@@ -1099,6 +1110,10 @@ TEST_F(VagentEpistemicIngress, ARevivedSourceTakesAShareOfTheBudgetAgain) {
   host->pump();
   EXPECT_EQ(host->executor().sourceChangeOutcome(pid, kP1)->code,
             kTurnResultEpistemicBudget);
+  // The tombstone takes no reading, so the binding is revoked.
+  auto revived        = reading(kP1, "n1", 1, 1.0);
+  revived.incarnation = 2;
+  EXPECT_EQ(refusedAtIngress(revived), EpistemicRefusal::UnknownSource);
 }
 
 TEST_F(VagentEpistemicIngress, TheVarianceBoundsAreInclusive) {
@@ -1172,6 +1187,86 @@ agent A { var adds: Int := 0 }
   EXPECT_EQ(refusedAtIngress(over), EpistemicRefusal::UncertainAcquisition);
   // A content refusal: the device sent a timestamp it cannot vouch for.
   EXPECT_EQ(counter(profiles().front(), kProfileContentRefusals), 1);
+}
+
+// -- Review round 2 findings
+// ---------------------------------------------------
+
+TEST_F(VagentEpistemicIngress, SourceChangesInOnePumpRunInCallOrder) {
+  observe(reading(kP1, "e1", 1, 1.0));
+  // Retire, then bind the next boot, before the agent runs either.
+  ASSERT_TRUE(host->executor().retireSource(pid, kP1));
+  ASSERT_TRUE(host->executor().bindSource(pid, grant(kP1, "sensor:gps", 2)));
+  host->pump();
+  EXPECT_EQ(host->executor().sourceChangeOutcome(pid, kP1),
+            (IngestOutcome{IngestOutcome::Kind::Committed}));
+  auto next        = reading(kP1, "n1", 1, 1.0);
+  next.incarnation = 2;
+  observe(next);
+  EXPECT_EQ(outcomeOf(next)->kind, IngestOutcome::Kind::Committed);
+  EXPECT_EQ(flag(profiles().front(), kProfileRetired), false);
+  // Two advances in one pump: the later boot wins, and its floor is not
+  // made strict by the earlier one.
+  ASSERT_TRUE(host->executor().bindSource(pid, grant(kP1, "sensor:gps", 5)));
+  ASSERT_TRUE(host->executor().bindSource(pid, grant(kP1, "sensor:gps", 6)));
+  host->pump();
+  EXPECT_EQ(counter(profiles().front(), kProfileIncarnation), 6);
+  EXPECT_TRUE(host->executor().bindSource(pid, grant(kP1, "sensor:gps", 6)));
+}
+
+TEST_F(VagentEpistemicIngress, ReplacementBootsWithNewKeysStayBounded) {
+  // A device that reports different keys after every reboot.
+  std::size_t afterTen = 0;
+  for (std::uint64_t boot = 1; boot <= 30; ++boot) {
+    if (boot > 1)
+      ASSERT_TRUE(
+          host->executor().bindSource(pid, grant(kP1, "sensor:gps", boot)));
+    for (std::uint64_t k = 0; k < 4; ++k) {
+      auto o =
+          reading(kP1, "b" + std::to_string(boot) + "k" + std::to_string(k),
+                  k + 1, 1.0);
+      o.incarnation = boot;
+      o.tuple       = {WireValue::text("key" + std::to_string(boot * 4 + k)),
+                       WireValue::real(1.0)};
+      observe(o);
+      ASSERT_EQ(outcomeOf(o)->kind, IngestOutcome::Kind::Committed)
+          << boot << "/" << k;
+    }
+    if (boot == 10) afterTen = *host->executor().epistemicCells(pid);
+  }
+  // Only the current boot's keys are believed, and the retired history is
+  // bounded, so the epistemic cells stop growing.
+  EXPECT_EQ(clauses().size(), 4U);
+  EXPECT_LE(history(profiles().front()).size(),
+            AgentSettings{}.epistemic.history *
+                AgentSettings{}.epistemic.keysPerSource);
+  EXPECT_LE(*host->executor().epistemicCells(pid), afterTen + 64);
+  observe(reading(kP2, "o1", 1, 1.0));
+  EXPECT_EQ(outcomeOf(reading(kP2, "o1", 1, 1.0))->kind,
+            IngestOutcome::Kind::Committed);
+}
+
+TEST_F(VagentEpistemicIngress, RetiringAnUnseenPrincipalSetsNoFloor) {
+  const auto kP3 = std::string(64, '3');
+  ASSERT_TRUE(host->executor().retireSource(pid, kP3));
+  host->pump();
+  EXPECT_TRUE(host->executor().bindSource(pid, grant(kP3, "sensor:new", 0)));
+}
+
+TEST_F(VagentEpistemicIngress, ARepeatedRefusalIsChargedOnce) {
+  observe(reading(kP1, "e1", 1, 1.0));
+  auto bad  = reading(kP1, "e2", 2, 1.0);
+  bad.frame = "ecef";
+  for (int i = 0; i < 5; ++i) EXPECT_TRUE(refusedAtIngress(bad));
+  EXPECT_EQ(counter(profiles().front(), kProfileContentRefusals), 1);
+}
+
+TEST_F(VagentEpistemicIngress, BindingAnUnknownActorIsRefused) {
+  ActorPid nobody = pid;
+  nobody.spawnSequence += 1000;
+  const auto bound = host->executor().bindSource(nobody, grant(kP1, "x"));
+  ASSERT_FALSE(bound);
+  EXPECT_EQ(bound.error(), EpistemicRefusal::UnknownActor);
 }
 
 TEST(VagentEpistemicIngressPlain, AProgramWithoutArbitrationCannotBind) {
