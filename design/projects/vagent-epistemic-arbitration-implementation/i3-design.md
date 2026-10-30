@@ -769,6 +769,14 @@ against the cell ceiling; an unbound principal is charged only if it already has
 1's query half (a query of an arbitrated predicate is the arbitrated answer) belongs to I4, and
 question 2 (latches for life, counters as decayed rates with an ML-reviewed half-life) to I3-2.
 
+The ML gate passed it ([review-ml-q3.md](i3-1bc-review/review-ml-q3.md)); its two test gaps (a
+profile's incarnation when a later boot refuses first, admission at the ceiling) are closed.
+Carried: a source that only sends refused events holds a `max_sources` slot, so a fleet of
+misconfigured sources can lock out a healthy one until the host retires them; a charge whose
+bookkeeping turn the budget refused is not charged again when the event is resent; a refusal-only
+profile has no `last_receive`, a state I3-2's health rules must name; and bookkeeping turns now run
+the admission walk, which is bounded by the ceiling.
+
 **Fuzz evidence.** The fuzzer program gained a keyless predicate, and the harness two scripted steps
 (a principal past its key limit, an event ID reused with other bytes) that random bytes rarely
 reach. Report mode counts unlogged refusals and the duplicate and conflicting turns a sticky entry

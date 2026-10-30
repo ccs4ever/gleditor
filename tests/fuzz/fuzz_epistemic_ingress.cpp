@@ -320,10 +320,14 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data,
       if (report)
         std::fprintf(stderr, "outcome %s\n",
                      epistemicRefusalName(receipt.error()).data());
-      // Beliefs only: InvalidObservation is also the logged refusal of a
-      // bound source's bad tuple, which is charged and may earn a profile.
+      // Beliefs only for InvalidObservation, which is also the logged
+      // refusal of a bound source's bad tuple, charged and able to earn a
+      // profile; an unbound source changes nothing at all.
       require(after.snapshot().beliefs == snapshot.beliefs,
               "a refusal before queueing changes no belief");
+      if (receipt.error() == EpistemicRefusal::UnknownSource)
+        require(after.snapshot() == snapshot,
+                "an unbound source changes nothing");
       return std::optional<IngestOutcome>{};
     }
     const auto outcome =

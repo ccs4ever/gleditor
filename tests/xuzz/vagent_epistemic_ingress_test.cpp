@@ -876,6 +876,28 @@ TEST_F(VagentEpistemicIngress, ABoundSourcesFirstRefusalEarnsItAProfile) {
   EXPECT_EQ(counter(prof, kProfileContentRefusals), 6);
 }
 
+TEST_F(VagentEpistemicIngress, AFirstRefusalsProfileStartsAtTheBoundBoot) {
+  ASSERT_TRUE(host->executor().bindSource(pid, grant(kP1, "sensor:gps", 2)));
+  auto frame        = reading(kP1, "f0", 1, 1.0);
+  frame.incarnation = 2;
+  frame.frame       = "ecef";
+  EXPECT_TRUE(refusedAtIngress(frame));
+  ASSERT_EQ(profiles().size(), 1U);
+  EXPECT_EQ(counter(profiles().front(), kProfileIncarnation), 2);
+}
+
+TEST_F(VagentEpistemicIngress,
+       AFirstRefusalsProfileIsAdmittedAgainstTheCeiling) {
+  AgentSettings settings;
+  settings.epistemic.cells = 10;
+  start(settings);
+  auto frame  = reading(kP1, "f0", 1, 1.0);
+  frame.frame = "ecef";
+  EXPECT_TRUE(refusedAtIngress(frame));
+  EXPECT_TRUE(profiles().empty());
+  EXPECT_EQ(refused(kTurnResultEpistemicBudget), 1U);
+}
+
 TEST_F(VagentEpistemicIngress, ARefusalEarnsNoProfileBeyondTheBudget) {
   AgentSettings settings;
   settings.epistemic.maxSources = 1;
