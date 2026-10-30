@@ -1,26 +1,33 @@
-# I3-2 design: source health, decayed counters and operator health actions
+# I3-2 design: source health, settle-after-commit and operator health actions
 
-Status: revision 1, for review by the four personas (ML gate, epistemology, hardware, codebase).
-Authority: approved P19 v1.5 sections 2.1 (health preservation), 4 (`EpistemicHealthGrant`,
-`UnauthorizedHealthAction`) and 5.1 (latch, reasons, displayed state), and the owner's decisions on
+Status: revision 2. Revision 1 (`e226c507`) failed all four reviews with no BLOCKING finding and 24
+MAJOR ones ([reports](i3-2-review/)); section 12 maps each to its resolution. Authority: approved
+P19 v1.5 sections 2.1 (health preservation), 4 (`EpistemicHealthGrant`, `UnauthorizedHealthAction`)
+and 5.1 (latch, reasons, displayed state); the owner's decisions on
 [open question 2](i3-open-questions.md) (latches for life, counters as decayed rates with an
-ML-reviewed half-life) and question 3 (built in I3-1). Baseline: `8ec71fc6`, with I3-1a to 1d
-accepted ([validation](i3-validation.md)).
+ML-reviewed half-life); and two owner decisions taken on revision 1's review: **add an operator
+`clear`** that removes degradation reasons without a reset and never unlatches, and **fix the
+`-pred` handler wedge in I3-2**. Baseline: `8ec71fc6`, with I3-1a to 1d accepted
+([validation](i3-validation.md)).
 
 ## 1. Scope and split
 
 I3-2 gives each source profile a health that the arena keeps, that a reboot cannot shed, that an
-authorized operator can change, and that evidence can heal. It ships in two slices:
+authorized operator can change, and that evidence can heal. It ships in three slices:
 
-| Slice | Content                                                                                                  | Gate             |
-| ----- | -------------------------------------------------------------------------------------------------------- | ---------------- |
-| 2a    | decayed refusal and rejection counters, the derived health state, its stamp on records, resume rebasing  | ML, then all     |
-| 2b    | `EpistemicHealthGrant`, the host health action API, and the Vortex health turn (isolate, degrade, reset) | all four, ML too |
+| Slice | Content                                                                                                     | Gate         |
+| ----- | ----------------------------------------------------------------------------------------------------------- | ------------ |
+| 2a    | the decayed content-refusal fraction, the derived health state and its stamp on records                     | ML, then all |
+| 2b    | settle after commit: source changes (and 2c's actions) commit first, then their belief events run           | all four     |
+| 2c    | `EpistemicHealthGrant`, the host health-action API, the Vortex health turn (isolate, degrade, clear, reset) | all four, ML |
 
-Moved out, with reasons (section 9): cross-key retained transfer and user-level revision go to I4;
+2b comes before 2c because isolate and reset drop supports, and a failing `-pred` handler must not
+be able to block them (section 6).
+
+Moved out, with reasons (section 10): cross-key retained transfer and user-level revision go to I4;
 sensor-originated health reports go to I3-3 with heartbeats and device telemetry; the `reset`,
-`isolate` and `degrade` source directives in the actor language go to I4's lowering, onto the turn
-2b builds.
+`isolate`, `degrade` and `clear` directives in the actor language go to I4's lowering, onto 2c's
+turn.
 
 ## 2. What exists
 
@@ -31,278 +38,438 @@ profile on `$agent +d.trust` holds:
   as `FAULTED` instead of `NOMINAL` (`compiler.cpp:5257`);
 - four Int64 counters, all lifetime-cumulative across advances and revivals: `rejection_streak` and
   `reject_count` (gate rejections, which nothing produces until I4's gates), `content_refusals`
-  (direct frame, unit, variance, time and uncertainty refusals) and `refused_count` (every other
-  chargeable refusal, and any refusal of a relayed copy);
+  (direct frame, unit, variance, time and uncertainty refusals, `agent_executor.cpp:845`) and
+  `refused_count` (every other chargeable refusal, and any refusal of a relayed copy);
 - `last_receive` and `last_contact`, steady seconds, dropped on resume; `last_refusal`, a code.
 
 Nothing reads a counter. The spec asks for more: separate degradation and suspicion reasons with
 provenance, a displayed state FAULTED, else SUSPECT, else DEGRADED, else NOMINAL, and authorized
-`isolate`, `degrade` and `reset`.
+health actions.
 
-## 3. Decayed counters (2a, ML gate)
+## 3. The decayed content-refusal fraction (2a, ML gate)
 
-### 3.1 Which counters decay
+### 3.1 Which refusals are evidence against a source
 
-| Counter            | Today        | I3-2                      | Why                                                                     |
-| ------------------ | ------------ | ------------------------- | ----------------------------------------------------------------------- |
-| `content_refusals` | lifetime Int | decayed rate, Double      | feeds health; a repaired device must recover on evidence                |
-| `reject_count`     | lifetime Int | decayed rate, Double      | the same, for I4's gate rejections                                      |
-| `rejection_streak` | lifetime Int | unchanged, a streak       | P19 5.1: consecutive rejections; an accepted measurement clears it (I4) |
-| `refused_count`    | lifetime Int | unchanged, lifetime total | diagnostic only, never feeds health; a total answers "how much replay"  |
+A refusal feeds health only when the bytes the device signed are unusable whatever the path did to
+them: `ObservationFrameMismatch`, `MissingVariance`, `InvalidVariance`, `UncertainAcquisition` (the
+device itself claims it cannot place the reading in time), each of a directly received event. These
+are **health refusals**. `InvalidObservation` (a non-finite or oversized field) is refused before a
+charge is classified as content and stays diagnostic, as in I3-1.
 
-Keeping `refused_count` lifetime is deliberate: it never reaches a health rule, so its decay would
-only lose the audit total. Its overflow is already saturating.
+`StaleObservation` and `ObservationTimeMismatch` are not. A link outage followed by a buffer flush,
+a host clock-mapping fault or a congested relay produces them from a healthy device, and one host
+fault would move every source at once (a common cause read as a fleet failure). They stay in the
+lifetime `content_refusals` total and still refresh contact, as today, but feed no health rule until
+I3-3 can tell device lateness from path lateness.
 
-### 3.2 The update
+Relayed copies charge only `refused_count`, as today, so a relay cannot make a victim SUSPECT.
 
-Each decayed counter is a pair of profile fields: the value `c` (Double, at least 0) and the steady
-time `t_c` (Double seconds on the executor's clock) at which `c` was last brought up to date. With
-half-life `h` seconds, a charge of `n` events at time `t`:
+### 3.2 The estimator
 
-```math
-c \leftarrow c \cdot 2^{-\max(0,\,t - t_c)/h} + n,
-\qquad t_c \leftarrow \max(t_c,\, t).
-```
+Health uses an exponentially weighted fraction indexed by **events**, not seconds. Two Double fields
+on the profile, `health_refused` (R) and `health_events` (N), both starting at 0. With half-life `H`
+events and `b = 2^(-1/H)`:
 
-The value of the counter at any later time `s`, without writing anything, is
-`c * 2^(-max(0, s - t_c)/h)`. The routine computes `2^(-x)` as `Exp(-x * ln 2)` (I1's `Exp`,
-correctly rounded within 1 ulp per its contract).
+- a committed ingestion (an accepted reading, direct or relayed, never a duplicate): `R <- b R`,
+  `N <- b N + 1`;
+- a bookkeeping turn charging `k` health refusals: `R <- b^k R + (1 - b^k)/(1 - b)`,
+  `N <- b^k N + (1 - b^k)/(1 - b)`, computing `b^k` as `Exp(k * ln b)` (I1's `Exp`).
 
-Properties the tests pin:
+The refusal fraction is `f = R / N` when `N > 0`. It is a weighted proportion of the source's recent
+outcomes: the newest event has weight 1, one `H` events back weight 1/2.
 
-- **Order.** Coalesced charges can arrive out of time order (I3-1 section 14: a refusal received
-  before a later commit is charged after it). The `max(0, ...)` clamp charges a late event at full
-  weight instead of up-weighting it by a negative age, and `t_c` never moves back. An event late by
-  `d` counts 1 at `t_c` where its exact weight is `2^(-d/h)`: an overcount by a factor of at most
-  `2^(d/h)`, which for the coalescing delay (one pump, milliseconds) against a one-minute `h` is
-  below 1e-4 relative.
-- **Steady state.** A source refused at a constant rate `lambda` per second converges to
-  `lambda * h / ln 2` (the integral of the kernel). A burst of `k` refusals reads `k`, then halves
-  every `h`.
-- **Range.** `c` is finite: each update is a contraction plus a bounded `n` (charges coalesce per
-  pump, bounded by the ingress queue), so `c <= n_max / (1 - 2^(-Δ/h))` for the minimum spacing; a
-  test drives 10^6 charges and checks finiteness. A non-finite intermediate refuses `IngestionFault`
-  (the VM's own float checks), never a stored NaN.
-- **Zero.** A fresh profile has `c = 0` and `t_c` absent: the first charge sets `c = n`, `t_c = t`.
-  An absent `t_c` is the arena's absence (no field), not a 0 time.
+Why events rather than seconds (the revision 1 rule was a time-decayed count, and every reviewer
+showed it unsound):
 
-### 3.3 The half-life and the threshold
+- **Traffic-independent.** A count of refusals per unit time scales with the sample rate: at 60 s
+  and threshold 3, a 100 Hz sensor refusing 1 in 2000 read SUSPECT, and a sensor reporting slower
+  than every 35 s never could. A fraction is a property of the source's quality, the same at 0.01 Hz
+  and 100 Hz.
+- **Bounded.** `0 <= R <= N <= 1/(1 - b)`: no flush, coalesced batch or zero spacing can push it
+  past the bound, and nothing can become non-finite (every operand is finite, `b^k` is in (0, 1\]).
+- **No clock.** The update needs no time, so there is no out-of-order clamp, no coalescing-delay
+  overweight, no suspend or steady-clock question, and no resume rebase: a checkpoint carries R and
+  N and resumes them unchanged. A source that falls silent keeps its fraction, which is right: P19
+  5.1 says silence establishes missing data, not its cause, and a silent source has no fresh reading
+  to inflate.
+- **Recovery on evidence.** A repaired device clears its fraction by sending good readings, at a
+  rate set by its own traffic.
 
-Health is per profile, and a principal may be bound to several predicates with different policies,
-so the half-life cannot be a predicate policy key without a rule for which policy wins. I3-2 makes
-both health parameters system settings, read by the executor and passed in the turn record like
-`max_sources` already is:
+The owner's ruling (counters as decayed rates with a half-life) is kept: this is a decayed rate of
+refusal per event, and `H` is the half-life the ML gate reviews.
 
-| Setting                             | Default | Domain         | Meaning                                                               |
-| ----------------------------------- | ------- | -------------- | --------------------------------------------------------------------- |
-| `vagent.epistemic_health_half_life` | 60 s    | (0, 31 years\] | half-life `h` of `content_refusals` and `reject_count`                |
-| `vagent.epistemic_suspect_refusals` | 3       | (0, 1e6\]      | decayed `content_refusals` at or above which the source reads SUSPECT |
+**Order.** Charges coalesce, so a batch of refusals can be charged after accepted readings received
+after them. The fraction then weights the batch as newer than it was. For a batch of `k` charged `m`
+events late, each member's weight is off by a factor `b^(-m)`; with the defaults that is below 2 for
+`m < H`. It errs toward suspicion, never toward trust, and only for the events in flight.
 
-The defaults, argued. P19 5.1 sets three consecutive rejections for suspicion; three refusals within
-much less than a half-life is the same evidence count. With `h = 60 s`, a source reads SUSPECT under
-a burst of three refusals, or under a sustained content-refusal rate above `3 ln 2 / 60`, about one
-every 29 s; a 1 Hz sensor with a 3% refusal rate stays NOMINAL and one with 5% does not. A repaired
-device's count halves every minute: a burst of 10 falls below 3 within about 105 s. P19 calls these
-"configurable engineering heuristics, with a declared sample-rate or window interpretation"; this
-table is that declaration, and the system-docs schema notes repeat it.
+### 3.3 Defaults and their interpretation
+
+| Setting                               | Default | Domain    | Meaning                                               |
+| ------------------------------------- | ------- | --------- | ----------------------------------------------------- |
+| `vagent.epistemic_health_half_life`   | 32      | [1, 10^6] | half-life `H` of the fraction, in events              |
+| `vagent.epistemic_suspect_fraction`   | 0.25    | (0, 1\]   | `f` at or above which the source reads SUSPECT        |
+| `vagent.epistemic_suspect_min_events` | 3       | [1, 10^6] | `N` below which `f` decides nothing (a fresh profile) |
+
+Simulated (Bernoulli refusals, 4×10^5 events, `/tmp/i3-2-lead/sim.py`, reproduced in the test
+suite's noisy-sensor simulation), fraction of time SUSPECT and state changes per hour at 1 Hz:
+
+| True refusal rate | H = 16     | H = 32 (default) | H = 64       |
+| ----------------- | ---------- | ---------------- | ------------ |
+| 5%                | 0, 0       | 0, 0             | 0, 0         |
+| 10%               | 0.2%, 6/h  | 0, 0.1/h         | 0, 0         |
+| 15%               | 3.9%, 76/h | 0.7%, 13/h       | 0.04%, 0.5/h |
+| 20%               | 20%, 256/h | 12%, 132/h       | 5%, 48/h     |
+| 30%               | 76%        | 85%              | 93%          |
+| 50%               | 100%       | 100%             | 100%         |
+
+Events to read SUSPECT from a long clean history: 14 when every reading is refused, about 33 at a
+50% rate. From SUSPECT at a 100% rate back to NOMINAL on good readings: 64 events. A fresh profile
+reads SUSPECT after its first three readings if all three are refused.
+
+The declared interpretation (P19 5.1): **SUSPECT means about a quarter or more of the source's last
+few dozen outcomes were unusable content.** A source refusing under 10% stays NOMINAL. Between 15%
+and 25% the state is noisy by nature: the fraction near the threshold is a fair coin. The ML gate
+judged hysteresis a bad trade (it needs stored state and doubles the time a source stays SUSPECT for
+fewer transitions), so instead the state is for display, the latch and audit, and I4 must use the
+continuous fraction, not the thresholded state, in scoring (section 4).
+
+This is not P19's "three consecutive rejections". That is a streak of gate rejections, conditioned
+on adjacency, which I4 produces into `rejection_streak` and adds to the state rule with its own
+thresholds (three for SUSPECT, five for FAULTED). `content_refusals`, `reject_count` and
+`refused_count` stay lifetime Int64 totals for diagnostics; I4 converts gate rejections into the
+same estimator when it adds them.
 
 Refused alternatives:
 
-- **A policy key per predicate** (`health_half_life`): ambiguous for multi-predicate principals, and
-  the policy hash would make a tuning change refuse resume.
-- **A field on `EpistemicSourceGrant`**: the same ambiguity across a principal's bindings, and a
-  host could reset the evidence's weight by rebinding.
-- **A fixed window count** (the last N minutes): needs a ring of timestamps per counter, cells
-  proportional to traffic, which the budget would have to price.
-- **Hysteresis** (raise at 3, clear at 1.5): the decayed value is smooth, so it crosses the
-  threshold once per burst; flapping needs refusals arriving at exactly the threshold rate. Recorded
-  as a question for the ML gate rather than built.
+- **A time-decayed count** (revision 1): traffic-dependent, unbounded under flushes, and unreachable
+  for slow sources (section 3.2).
+- **A time-decayed fraction** (both R and N decayed by time): bounded and traffic-normalised, but a
+  slow source's N never reaches the evidence floor within a half-life, so the half-life would have
+  to follow each binding's cadence; the cadence is I3-3's heartbeat interval, not known here.
+- **A policy key or a grant field**: health is per profile and a principal may be bound to several
+  predicates, so there would be no rule for which value wins; a policy key would also make a tuning
+  change refuse resume.
+- **A window of the last N outcomes**: exact, but a ring of cells per profile proportional to N.
 
-`reject_count` gets no threshold in I3-2: its producer is I4's gates, which will add the streak
-thresholds of P19 5.1 (three for suspicion, five for fault) and say how a rejection rate maps to
-DEGRADED with the gates' false-alarm rates in hand.
+### 3.4 Settings are owner-written
 
-### 3.4 Where the time comes from
-
-- **Bookkeeping turns** (`observeRefusalEntry`): the refusal note gains `at`, the steady receipt
-  time of the newest refusal it charges (the executor already stamps `contact` for direct content
-  refusals; `at` is stamped for every charge, direct or relayed, since `refused_count` is the only
-  counter a relayed copy reaches and it does not decay).
-- **Ingestion** reads the record's `received_steady` to stamp health (section 4); it charges nothing
-  in I3-2.
-- **Health turns** (2b) carry the steady time the executor queued them.
-
-A turn never reads a clock: each time is a turn input, so a replayed turn decays identically.
-
-### 3.5 Resume
-
-Steady times are not comparable across executors (I3-1 1d drops `last_receive` and `last_contact`).
-`restoreState` rewrites each `t_c` to the restoring executor's steady time at restore: the counter
-keeps its value and does not decay over the downtime. Crediting the downtime would let an operator
-launder a suspect source by checkpointing it for a few half-lives; P19 2.1 says unknown clock
-mapping cannot clear a latched fault, and the same reasoning applies to evidence that decides
-SUSPECT. The cost: a device repaired during the downtime recovers a downtime late.
+The three settings are system-xanadoc values (`system://settings`), validated at load (NaN, infinite
+and out-of-domain values refuse). A stamp is the state under the settings in force at ingest; the
+turn record carries the values used, so a later reader can tell.
 
 ## 4. Health state (2a)
 
-The displayed state is derived, never stored, by one shared IR routine
-`rtHealth(profile, now, threshold, h)`:
+The state is derived, never stored, by one shared IR routine `rtHealth(profile, limits)` returning
+the state and the code of the reason that decided it:
 
-1. `faulted` latched: **FAULTED**.
-1. Any suspicion reason on the profile, or decayed `content_refusals` at `now` at or above the
-   threshold: **SUSPECT**.
-1. Any degradation reason: **DEGRADED**.
+1. `faulted` latched: **FAULTED**, with the fault's code.
+1. A `suspect` reason on the profile, or `N >= min_events` and `f >= suspect_fraction`: **SUSPECT**,
+   with that reason's code or `refusal_fraction`.
+1. A `degraded` reason: **DEGRADED**, with its code.
 1. Otherwise **NOMINAL**.
 
-Ingestion stamps the result on each record's `health` field at `received_steady` (today it writes
-NOMINAL or FAULTED), so I4 and calibration see the health the source had when the reading arrived.
-I4's queries call the same routine at query time without writing anything (P19 5.1: queries never
-advance counters). Deriving rather than storing SUSPECT means there is no "clear the suspicion"
-event to miss: a quiet source's count decays and the state follows on the next read.
+An absent field reads as its initial value (R and N 0, latch false, no reasons), so a tombstone or a
+profile restored from before 2a has a state.
+
+**Two consumers, two rules.** Ingestion stamps the state on each record's `health` (today NOMINAL or
+FAULTED) for audit and for calibration's view of the source at arrival. The stamp is computed from
+the charges made before the ingestion turn ran, so it is pump-order dependent. I4's eligibility and
+scoring must recompute the state at query time, through the same routine, without writing (P19 5.1:
+queries never advance counters), and must never read the stamp for eligibility: an isolated source's
+earlier records stay stamped NOMINAL and are not rewritten. I4 takes the continuous `f` as a smooth
+penalty and applies any inflation once (P19 5.1). I4 must also train calibration on readings
+whatever their stamp, or on gate-passed readings only, so that excluding SUSPECT readings cannot
+stop calibration learning the drift that made them suspect.
 
 A profile created by refusals alone (I3-1 question 3) has no `last_receive`. That state is named,
-not special-cased: it has no current record, so nothing of it is eligible; its counters and latch
-apply as to any profile; and I3-3's heartbeat rules treat an absent `last_receive` as "never
+not special-cased: it has no current record, so nothing of it is eligible; its fraction (which can
+read SUSPECT with no reading ever accepted) and latch apply as to any profile; a reset of it is
+valid and retires nothing; and I3-3's heartbeat rules treat an absent `last_receive` as "never
 supplied a reading", never as time 0.
 
-## 5. Reasons and provenance (2b)
+## 5. Profile health records (2c)
 
-The profile gains one owned list, `reasons`, on the I3-1 list shape (`d.grab` head, `d.step`
-elements). Each element is a record:
+Three owned structures on the profile, all on the I3-1 shapes (records on `d.vars`/`d.values`, lists
+on `d.grab`/`d.step`), all copied with the profile on resume:
 
-| Field     | Type   | Meaning                                                                      |
-| --------- | ------ | ---------------------------------------------------------------------------- |
-| `kind`    | Text   | `degraded` or `suspect`                                                      |
-| `code`    | Text   | the operator's reason code, at most `kMaxObservationNameBytes`               |
-| `grant`   | Text   | the health grant's ID                                                        |
-| `issuer`  | Text   | the grant's issuing principal                                                |
-| `at_wall` | Double | the host's wall time of the action, for audit only; nothing computes with it |
+- **`fault`**, a record, absent until the first isolate: kind `isolate`, the operator's code, the
+  grant ID, the issuer, the incarnation at the time, and the wall time when the executor's wall
+  clock was synchronised (otherwise absent).
+- **`reasons`**, a list of records, unique by (kind, code): kind `degraded` or `suspect`, code,
+  grant, issuer, incarnation, wall time. A repeated degrade with the same code adds no reason (the
+  first provenance stands) and is recorded only in `actions`. Bounded by
+  `vagent.epistemic_health_reasons` (default 4); a new reason past it refuses `EpistemicBudget`.
+- **`actions`**, the audit list: one record per accepted action (kind, code, grant, issuer,
+  incarnation, wall time; for a reset or clear, the codes it removed). Bounded by
+  `vagent.epistemic_health_actions` (default 8), oldest evicted. A reset never clears it, so the
+  profile always says that a fault existed, who latched it and who cleared it. The host keeps its
+  own log for anything older.
 
-The latch gets the same provenance as a record in a `fault` field (absent until the first isolate).
-Reasons are bounded by `vagent.epistemic_health_reasons` (default 8 per profile): a `degrade` past
-the bound refuses `EpistemicBudget` rather than evicting an older reason, since a reason is evidence
-an operator placed and only `reset` removes it. Each reason is about 12 cells, counted in
-`$epistemic_cells` like every profile cell.
+An advance keeps all three, as it keeps the latch: a replacement device inherits its predecessor's
+fault and reasons until the host's reset says otherwise (P19 2.1). Each record carries its
+incarnation, so a reader can tell a reason placed on the previous boot.
+
+Price: a reason is about 14 cells, an action about 16, the fault record about 14. A profile that
+reaches both bounds grows by about 200 cells. Only operators produce these, so the typical profile
+pays nothing; the worst case is priced in section 9.
 
 `suspect` reasons have no producer in I3-2; the kind exists so I3-3's telemetry and I4's gates add
 reasons without reshaping the list.
 
-## 6. Health grants and actions (2b)
+## 6. Settle after commit (2b)
 
-### 6.1 The grant
+Today a source change drops supports through `rtBDrop`, which queues `-pred` events on
+`$agent d.pending`, and `rtSettle_` runs their handlers inside the same all-or-nothing turn. A
+handler that always fails therefore makes the advance, the retire, and (in 2c) the reset and isolate
+refuse, for ever: the repair path fails exactly when a source sends garbage.
+
+From 2b, the entries `sourceChangeEntry` and `healthEntry` end without settling. The turn commits
+its state change with the belief events still queued on `d.pending`. The executor then runs, in the
+same wake and before any other item for that actor, a **settle turn**: `settleEntry`, emitted IR
+that runs `rtSettle_` and halts. If it commits, the events have run as they would have. If it fails
+(a handler failed, cycles or fuel ran out, the event depth was exceeded), its undo restores
+`d.pending`, and the executor runs `discardPendingEntry`, which detaches `d.pending` and commits, so
+no later turn inherits the events. The change's outcome becomes `SettleFailed` (`NeedsHostAction`:
+the program's handlers need fixing), its state change stands, and `stat()` counts the discarded
+events.
+
+Running the settle turn first is what keeps the semantics: an ordinary turn's own `rtSettle_` would
+otherwise pick the leftover events up and fail on their account, moving the wedge into ingestion.
+
+What a program sees: its `-pred` handlers run after the belief change, as before, and in their own
+turn, so a handler that fails no longer undoes the source change it reacts to. A handler that needs
+the change undone on its failure had no such guarantee for other belief changes either (an ordinary
+turn's failure undoes the turn that raised the event, which here is the operator's change, and the
+operator's authority wins).
+
+Tests: a `-pred` handler that always fails; an advance, a retire and (2c) a reset each commit, the
+outcome reads `SettleFailed`, later ingestion runs normally, and a correct handler still sees every
+event once.
+
+## 7. Health grants and actions (2c)
+
+### 7.1 The grant
 
 ```cpp
-enum class HealthActionKind : std::uint8_t { Isolate, Degrade, Reset };
+enum class HealthActionKind : std::uint8_t { Isolate, Degrade, Clear, Reset };
 
 struct EpistemicHealthGrant {
-  std::string id;                       // audit name, bounded
+  std::string id;                       // audit label, at most kMaxObservationNameBytes
   std::string issuer;                   // 64-hex fingerprint of the operator identity
-  std::vector<std::string> sources;     // principals it may act on; never empty
-  std::vector<HealthActionKind> actions;// never empty
-  std::chrono::steady_clock::duration lifetime{};
+  std::vector<std::string> sources;     // principals it may act on: 1 to maxSources
+  cpp26::inplace_vector<HealthActionKind, 4> actions; // 1 to 4, no repeats
+  std::chrono::steady_clock::duration lifetime;       // (0, kMaxHealthGrantLifetime]
 };
+
+[[nodiscard]] std::expected<HealthGrantToken, EpistemicRefusal>
+grantHealth(const identity::ActorPid &target, const EpistemicHealthGrant &grant);
+AgentExecutor *revokeHealthGrant(const identity::ActorPid &target, std::string_view id);
 ```
 
-`grantHealth(target, grant)` installs it for one actor, deny by default: an empty source or action
-list, a malformed principal, a duplicate ID or a zero lifetime refuses `InvalidHealthGrant`. There
-is no wildcard source: P19 4 grants "for specified source identities", and an operator who means
-every source lists them. `revokeHealthGrant(target, id)` removes it. Grants live in the executor's
-ingress state beside the bindings: they are host authorization (the brief's permitted C++), and no
-learned state is in them. They are not checkpointed, as bindings are not.
+`grantHealth` installs the grant for one actor, deny by default, and returns a `HealthGrantToken`:
+128 random bits from the executor's random source, kept host-side and never written to the arena.
+The ID, which is written into every reason and action and so readable by programs, stays an audit
+label and authorizes nothing. Refusals (`InvalidHealthGrant`): an empty or oversized source list, an
+empty or repeated action list, a malformed principal, a duplicate ID, a zero or oversized lifetime,
+more than `kMaxHealthGrants` (16) grants on the actor, or an issuer that equals a principal in
+`sources` or any principal bound to the actor: a sensor identity can never hold health authority
+over itself or its peers (P19 4: a sensor cannot clear its own fault). There is no wildcard source.
+Grants live in the executor's ingress state beside the bindings: they are host authorization, carry
+no learned state, are not checkpointed (as bindings are not), and are erased with the actor's
+ingress state.
 
-### 6.2 The request
+### 7.2 The request
 
 ```cpp
+struct Isolate { std::string code; };
+struct Degrade { std::string code; };
+struct Clear   { std::optional<std::string> code; }; // one code, or every degraded reason
+struct Reset   {};
+using HealthAction = std::variant<Isolate, Degrade, Clear, Reset>;
+
 struct HealthActionRequest {
-  std::string grant;     // the grant's ID
-  std::string issuer;    // checked equal to the grant's
-  std::string principal; // the source acted on
-  HealthActionKind kind;
-  std::optional<std::string> code; // required for Isolate and Degrade, absent for Reset
-  double atWall{};       // audit only
+  HealthGrantToken token;
+  std::string principal;   // the source acted on
+  HealthAction action;
 };
+
+[[nodiscard]] std::expected<HealthReceipt, EpistemicRefusal>
+healthAction(const identity::ActorPid &target, const HealthActionRequest &request);
+[[nodiscard]] std::optional<IngestOutcome>
+healthOutcome(const identity::ActorPid &target, const HealthReceipt &receipt) const;
 ```
 
-`healthAction(target, request)` refuses synchronously `UnauthorizedHealthAction` when the grant is
-missing, expired (steady clock), issued by another principal, does not name the source, or does not
-allow the kind; and `InvalidObservation` for a missing or oversized code. Otherwise it queues a
-health turn with `pushControl`, so it keeps call order with source changes (a reset queued after a
-rebind runs after its advance). The outcome is read like a source change's:
-`healthActionOutcome(target, principal)` returns the newest. Authentication of the issuer is the
-host adapter's, exactly as for observations: the executor checks the claim against the grant, not a
-signature.
+`healthAction` refuses synchronously `UnauthorizedHealthAction` for an unknown or expired token, a
+principal the grant does not name, or a kind it does not allow; `InvalidHealthCode` for an empty or
+oversized code; `IngressBackpressure` past `kMaxPendingHealthActions` (16) queued on the actor. The
+executor stamps the wall time (when synchronised) and the steady time. A receipt carries a ticket;
+outcomes live in their own bounded per-actor log (`epistemic.outcomeLog` entries), never in the
+source-change map, whose entries drive binding revocation.
 
-### 6.3 The turn
+The grant is checked again when the queued action becomes a turn: a token revoked or expired while
+the action waited refuses `UnauthorizedHealthAction` into the outcome log, as a queued observation
+whose binding lapsed refuses `UnknownSource`.
 
-`healthEntry`, emitted Vortex IR beside `sourceChangeEntry`, reads `$turn.health` (source token,
-incarnation when the principal is bound, kind, code, grant, issuer, wall time, steady time, the
-reason bound and `max_sources`) and finds the profile through `emitProfileFor` when bound, so an
-operator can isolate a bound source before its first reading; an unbound principal with no profile
-refuses `NoProfile`. Then:
+### 7.3 Order
 
-- **Isolate** sets `faulted` and writes the `fault` provenance (a second isolate keeps the first
-  provenance and adds nothing: the latch records when it latched). Supports stay: eligibility
-  excludes a faulted source's readings (P19 5.1), and plain queries become arbitrated answers in I4
-  (question 1).
-- **Degrade** appends a `degraded` reason.
-- **Reset** clears the latch and its provenance, empties `reasons`, zeroes both decayed counters and
-  the streak, and invalidates the source's readings: every current record is retired and every
-  support dropped through `rtBDrop`, settling `-pred`, with the records moving to the profile's
-  retired-history chain, exactly as an advance does (the advance body is shared, parameterised on
-  whether the incarnation changes). The dedup window and streams stay, so replays and old sequences
-  still refuse (P19 2.1: floors still reject replay). Calibration records do not exist until I4,
-  which must reset them to the declared prior in the same turn (P19 5.1).
+Health actions are control items, like source changes: they go ahead of queued observations and
+behind control items already waiting, in call order. "Control item" becomes one predicate used in
+all four places that today test `sourceChange.has_value()`: `PostBox::pushControl`, the `hostEvents`
+insertion in the pump, and the `epistemic` and `abandon` lambdas.
 
-A reset source supplies a new reading before it is eligible again, because nothing current survives.
-`refused_count` and `last_refusal` stay: they are diagnostics, not health.
+A reset must not be undone by evidence received before it. At `healthAction(Reset)` the executor,
+under the ingress mutex, bumps the principal's **reset epoch** and drops its coalesced charge entry.
+Every queued observation and refusal note records the epoch it was queued under; when one becomes a
+turn under an older epoch it refuses `SupersededByReset` (Terminal: the reading predates the reset
+and must never count as the new eligible observation P19 5.1 requires). The epoch is host state, not
+checkpointed: a checkpoint already requires an empty queue.
 
-ArenaExhausted and the cell ceiling gate the health turn like every epistemic turn (I3-1 section
-14). A reset that the budget refuses changes nothing and reports its code.
+### 7.4 The turn
 
-## 7. Why Vortex, and the C++ that is not
+`healthEntry` is emitted Vortex IR beside `sourceChangeEntry`. It reads `$turn.health` (source
+token, incarnation when bound, kind, code, grant ID, issuer, wall time when synchronised,
+`retained`, the reasons and actions bounds, `max_sources`) and finds the principal's profile,
+creating it through `emitProfileFor` when the principal is bound and has none (so a bound source can
+be isolated before its first reading). An unbound principal with no profile refuses `NoProfile`
+(`NeedsHostAction`: bind it first; a binding carries no readings). A tombstone is acted on like any
+profile, and its latch survives a revive.
 
-The counter update, the state derivation, the reasons list and all three actions are emitted IR run
-by the VM, sharing `emitProfileFor`, `putScalar` and the advance body. The C++ is grant storage and
-checking (authorization), the steady and wall timestamps (clocks), queueing and the outcome map
-(transport), and the `t_c` rebase in `restoreState`, which is the resume copy that already rebases
-steady fields.
+- **Isolate.** Sets `faulted` first; writes `fault` provenance if absent (a second isolate keeps the
+  first and adds an action); then drops every support of the principal through the shared drop body
+  (section 7.5), so the source's readings stop supporting beliefs at once, not only in I4's
+  eligibility. While latched, ingestion records nothing: the routine refuses `SourceFaulted`
+  (`NeedsHostAction`, never charged), and the executor mirrors the latch host-side once the isolate
+  commits, so `observe` refuses at ingress without spending arena slots. After a resume the mirror
+  is empty and the arena's refusal rebuilds it. Nothing is lost by refusing: the only way out of
+  FAULTED is a reset, which invalidates every old reading anyway.
+- **Degrade.** Adds a `degraded` reason (unique by code).
+- **Clear.** Removes the named `degraded` reason, or every `degraded` reason; never touches the
+  latch, `suspect` reasons, readings or (in I4) calibration. A mistaken degrade no longer costs
+  learned state. Only reset unlatches FAULTED (P19 5.1).
+- **Reset.** Clears the latch and `fault`, empties `reasons`, zeroes R, N and `rejection_streak`,
+  and drops every support (section 7.5). The dedup window and streams stay, so replays and old
+  sequences still refuse (P19 2.1). `refused_count`, `content_refusals` and `last_refusal` stay:
+  they are diagnostics. The action record keeps the removed fault and reason codes. Calibration
+  records arrive in I4, which resets them to the declared prior in this same turn (P19 5.1) and
+  tests that a reading after a reset is weighted from the prior.
 
-## 8. Tests, budget and settings
+A device reflashed without a persistent boot counter restarts its sequence and refuses
+`StaleSequence` after a reset; the runbook is reset, then rebind at a higher incarnation.
 
-| Slice | Tests                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 2a    | decay against a closed-form reference (burst, constant rate, out-of-order charge, gaps of 0 and 10h); SUSPECT at the threshold and NOMINAL after it decays; the stamp on records; a relayed refusal charges nothing that decays; resume keeps value, rebases time, no downtime decay; 10^6 charges stay finite; the noisy-sensor simulation's faulty source reads SUSPECT and its honest peers NOMINAL                     |
-| 2b    | each unauthorized case (missing, expired, issuer, source, kind); isolate before the first reading sticks and stamps FAULTED; a reboot keeps the latch and reasons; reset clears them, retires every current record, raises `-pred`, keeps the dedup floor (a replay still refuses), and the source is eligible only after a new reading; the reason bound; order with a queued rebind; resume keeps reasons and provenance |
+**Budgets.** Isolate, clear and reset are exempt from the cell ceiling and from `ArenaExhausted`, as
+source changes are from the ceiling: each removes or holds cells except for the bounded provenance
+and action records, which are counted in `$epistemic_cells`, so ingestion sees them. Profile
+creation for an isolate is exempt from `max_sources` (bounded by bindings). Degrade is admitted
+against the ceiling like any ingestion. The safety action therefore cannot be refused by the
+exhaustion a flooding source causes, and the ingress mirror stops the flood.
 
-New settings get `defaultSettingSpecs` entries with schema notes: the two in section 3.3 and
-`vagent.epistemic_health_reasons`. The fuzzer gains a health-action step (isolate, degrade, reset
-under a valid and an invalid grant) and the invariant that a refused action changes nothing.
+### 7.5 One drop body
 
-Cost: the decay adds one `Exp` and about 20 instructions to a bookkeeping turn; the state adds a
-reasons walk (at most 8) and one `Exp` to an ingestion. A health turn is bounded like an advance,
-O(K * H) for a reset.
+The advance's walk in `emitSourceChange` (inline IR: retire records below the new incarnation, drop
+the emptied supports, move their records to the retired chain, trim to `retained`) becomes one
+emitted routine, `rtSourceDrop(profile, mode, retained)`, called by the advance (mode: incarnation
+below), the retire (mode: every record, then excise), isolate and reset (mode: every current
+record). `freshWindows` (clearing dedup and streams) stays in the advance's caller only. Every I3-1c
+advance and retire test is a gate for this refactor.
 
-## 9. Moved out of I3-2
+## 8. Why Vortex, and the C++ that is not
+
+The estimator, the state derivation, the three structures, all four actions, the drop body and the
+settle and discard turns are emitted IR run by the VM. The C++ is grant storage and checking with
+the token (authorization), the wall and steady stamps (clocks), queueing, the reset epoch, the latch
+mirror and the outcome log (transport), and the choice to run the settle turn after a committed
+change (scheduling).
+
+## 9. Vocabulary, budget, settings and tests
+
+**Vocabulary.** `EpistemicRefusal` gains `InvalidHealthGrant`, `UnauthorizedHealthAction`,
+`InvalidHealthCode`, `SourceFaulted` and `SupersededByReset`, with `epistemicRefusalName` cases.
+Turn results gain `SourceFaulted`, `SupersededByReset` and `SettleFailed`; `outcomeClassOf` maps
+`SourceFaulted`, `SettleFailed`, `UnauthorizedHealthAction` and `NoProfile` to `NeedsHostAction`,
+`SupersededByReset` to `Terminal`. Constants: `kObsHealthSuspect`, `kObsHealthDegraded`,
+`kProfileHealthRefused`, `kProfileHealthEvents`, `kProfileFault`, `kProfileReasons`,
+`kProfileActions`, `kTurnHealth` and the record field names, pinned by the ABI test. `CompiledAgent`
+gains `healthEntry`, `settleEntry` and `discardPendingEntry`, each remapped in `program.cpp` (a
+missed remap is a silent no-op after upgrade).
+
+**Budget.** Worst case per profile: about 200 cells of health records (section 5). Across the
+default 128 sources that is 25,600 cells, above the 24,576 ceiling, so the bounds are per profile
+and operator actions on many sources can fill the budget: degrade is admitted against it, and the
+exempt actions are bounded by the action list. The default ceiling is not raised; the schema notes
+say that operators acting on every source of a large fleet should raise it.
+
+**Settings.** Six new `EpistemicLimits` fields with defaults in `epistemic_limits.hpp`, `validate()`
+cases and `EpistemicLimitError` enumerators: the three in section 3.3, the two bounds in section 5,
+and none for the grant constants (fixed bounds in the header). Each has a `defaultSettingSpecs`
+entry, a `settings::` name, the expected list in `system_docs_test.cpp`, and Schema page text with
+the interpretation of section 3.3.
+
+**Tests.**
+
+| Slice | Tests                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2a    | the estimator against a closed form (k refusals, m accepts, a coalesced batch); bounds after 10^6 updates; SUSPECT at the threshold and min-events edges, NOMINAL after good readings; stale and time-mismatch refusals and relayed copies move nothing; a 1000-reading stale flush leaves a good source NOMINAL; the stamp; resume keeps R and N; the noisy-sensor simulation's 30% source reads SUSPECT and its 5% peers NOMINAL at 0.1, 1 and 100 Hz; a tombstone and a restored profile have a state                                                                                                                                                    |
+| 2b    | an always-failing `-pred` handler: advance and retire commit, `SettleFailed`, no later turn fails on their events, and the next ingestion commits; a correct handler sees each event exactly once, after the change; the settle turn runs before a queued observation                                                                                                                                                                                                                                                                                                                                                                                       |
+| 2c    | each refused grant and request; a revoked token while queued; an issuer that is a bound source; isolate before the first reading sticks, drops supports, refuses later readings at ingress and in the arena (after resume too) and fits a full arena; a reboot, a retire and revive, and a checkpoint keep latch, reasons and actions; degrade is unique by code; clear removes only degraded reasons and never unlatches; reset clears latch, reasons, R, N and streak, keeps dedup and actions, refuses a reading queued before it, and the source is eligible only after a new reading; order with a queued rebind; reset with a failing handler commits |
+
+The fuzzer gains health-action steps (each action under a valid, a revoked and a wrong-kind grant),
+the invariants that a refused action changes nothing and that a faulted source's later readings
+change nothing, and the estimator bounds.
+
+**Cost.** The estimator adds one `Exp` and about 20 instructions to a bookkeeping turn and about 10
+to an ingestion; the state adds a reasons walk (at most 4). A settle turn costs what settling cost
+inside the change. A reset or isolate is bounded like an advance, O(K·H) records with a settle per
+dropped support: a reset of 16 records is measured against the default turn fuel before 2c lands.
+
+## 10. Moved out of I3-2
 
 - **Cross-key retained transfer.** P19 2.1 moves a removed support's retained records "to an owned
-  retained-observation list under the keyed calibration record". That record is I4's, and until it
-  exists I3-1 already keeps every removed support's history on the profile's retired chain. I4
-  re-homes it when it builds the calibration record.
+  retained-observation list under the keyed calibration record". That record is I4's; until it
+  exists, I3-1 keeps every removed support's history on the profile's retired chain, and reset and
+  isolate use the same chain. I4 re-homes it, keeping retained IDs, outcomes and floors (P19 2.1).
 - **User-level revision.** I3-1a statically refuses every program writer of an arbitrated predicate.
-  Letting a program assert or retract one (`assert ... with variance`, P19 4) needs the actor AST
-  and lowering that I4 adds, so the revision rule belongs to the same change.
+  Letting a program assert or retract one needs the actor AST and lowering that I4 adds.
 - **Sensor health reports.** "A sensor's authenticated health report may add a configured warning"
-  needs a schema for configured warnings and a telemetry path; it lands with I3-3's heartbeats and
-  device telemetry, adding `suspect` and `degraded` reasons to this list.
-- **The language directives.** `reset source`, `isolate source` and `degrade source` lower in I4
-  onto `healthEntry`, under the same grant check, with `UnauthorizedHealthAction` outside an
-  authorized context.
+  needs a schema for configured warnings and a telemetry path; it lands with I3-3, adding `suspect`
+  and `degraded` reasons to this list, and its recovery percept clears only reasons that source
+  added. The self-clear rule holds from 2c: no sensor identity can hold a health grant (section
+  7.1).
+- **The language directives.** `reset`, `isolate`, `degrade` and `clear source` lower in I4 onto
+  `healthEntry`, under the same grant check, with `UnauthorizedHealthAction` outside an authorized
+  context. Until then P19 8.2's "unauthorized reset is rejected" is met at the host API only.
+- **Gate rejections.** `rejection_streak` thresholds (three SUSPECT, five FAULTED) and the gate
+  estimator are I4's, with the gates that produce them.
 
-## 10. Open for review
+## 11. Spec amendment
 
-- Is a 60 s half-life and a threshold of 3 a defensible default, and should the state have
-  hysteresis (section 3.3)?
-- Should `degrade` be clearable without a full `reset` (P19 lists only three directives; a recovery
-  percept clears its own reason, but there is no operator "undegrade")?
-- The I3-1 carried wedge applies to reset: a `-pred` handler that always fails makes a reset refuse,
-  as it makes an advance and a retire refuse.
+`clear` is the owner's addition to P19 5.1's health actions: "`clear` removes degradation reasons an
+operator placed; it never unlatches FAULTED and never touches calibration." The spec's change
+history records it with I3-2's acceptance.
+
+## 12. Revision 1 findings and their resolution
+
+| Finding                                                          | Resolution                                          |
+| ---------------------------------------------------------------- | --------------------------------------------------- |
+| ML M1, M2, hardware M1, codebase m1: count flaps, traffic-bound  | event-indexed fraction with an evidence floor (3.2) |
+| ML M3, epistemology M2, hardware M6: latency scored as quality   | only health refusals feed it (3.1)                  |
+| ML m1-m3, hardware m2, codebase m2-m3: clamp, `h` domain, ranges | no clock in the estimator; bounded by construction  |
+| epistemology M6, ML m3, hardware m6: resume and downtime decay   | nothing to rebase (3.2)                             |
+| epistemology M1, hardware M2, codebase M3, M4: reset overtaken   | reset epoch, one control predicate (7.3)            |
+| epistemology M3, hardware M5, codebase M7: no audit, forgeable   | `actions` list, token, executor-stamped time (5, 7) |
+| epistemology M4: FAULTED changes no answer                       | isolate drops supports and refuses readings (7.4)   |
+| epistemology M5, hardware M3: isolate refusable under pressure   | exempt from ceiling, arena gate, max_sources (7.4)  |
+| hardware M4, codebase m7: reasons fill, cost half the budget     | unique by code, bound 4, `clear`, priced (5, 9)     |
+| hardware M7: wedge blocks reset                                  | settle after commit, slice 2b (6)                   |
+| codebase M1: authorized only at queue time                       | rechecked at turn time (7.2)                        |
+| codebase M2: advance body not a parameter                        | `rtSourceDrop` refactor, I3-1c tests gate it (7.5)  |
+| codebase M5: Int-to-Double breaks readers                        | lifetime counters stay Int; R, N are new fields     |
+| codebase M6: absence rules, tombstones                           | absent reads as initial; tombstones acted on (4, 7) |
+| codebase M8: vocabulary missing                                  | listed (9)                                          |
+| ML m4-m6, epistemology m6, codebase m9: stamp versus query time  | two consumers, two rules; I4 obligations (4)        |
+| epistemology m1: self-issued actions                             | issuer never a bound or named source (7.1)          |
+| epistemology m4, m5: reason identity, derived reason             | unique (kind, code); `rtHealth` returns the code    |
+| epistemology m9, m10: reboot cases, refusal-only reset           | tested (9)                                          |
+| hardware minors: grant bounds, outcome map, reflash, suspend     | bounded (7.1, 7.2), own log, runbook, no clock      |
+| codebase m5, m6: API shapes, settings plumbing                   | variant, `inplace_vector`, chaining; listed (9)     |
+| codebase m10: reset fuel                                         | measured before 2c (9)                              |
