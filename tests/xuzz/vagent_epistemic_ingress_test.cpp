@@ -850,24 +850,42 @@ TEST_F(VagentEpistemicIngress, HostConditionsAreNeverCharged) {
   EXPECT_EQ(text(prof, kProfileLastRefusal), "<absent>");
 }
 
-TEST_F(VagentEpistemicIngress, RefusalsCoalesceIntoOneChargeAndNeedAProfile) {
-  // No profile yet: the refusal is logged, and nothing is created for it.
+TEST_F(VagentEpistemicIngress, ABoundSourcesFirstRefusalEarnsItAProfile) {
+  // Wrong from its first event: the refusal creates the profile a commit
+  // would have, at the binding's incarnation, and is charged to it.
   auto frame  = reading(kP1, "f0", 1, 1.0);
   frame.frame = "ecef";
   EXPECT_EQ(refusedAtIngress(frame),
             EpistemicRefusal::ObservationFrameMismatch);
-  EXPECT_TRUE(profiles().empty());
-  EXPECT_EQ(refused(kTurnResultNoProfile), 1U);
-  observe(reading(kP1, "e1", 1, 1.0));
+  ASSERT_EQ(profiles().size(), 1U);
   const auto prof = profiles().front();
+  EXPECT_EQ(counter(prof, kProfileIncarnation), 1);
+  EXPECT_EQ(counter(prof, kProfileContentRefusals), 1);
+  EXPECT_EQ(refused(kTurnResultNoProfile), 0U);
+  // The first commit finds it, health and all.
+  observe(reading(kP1, "e1", 1, 1.0));
+  EXPECT_EQ(profiles().size(), 1U);
+  EXPECT_EQ(counter(prof, kProfileContentRefusals), 1);
   for (int i = 0; i < 5; ++i) {
     auto bad  = reading(kP1, "f" + std::to_string(i + 1), 2, 1.0);
     bad.units = "ft";
     EXPECT_FALSE(host->executor().observe(pid, bad));
   }
   host->pump();
-  EXPECT_EQ(counter(prof, kProfileContentRefusals), 5);
-  EXPECT_EQ(refused(kTurnResultNoProfile), 1U);
+  // Five refusals, one bookkeeping turn.
+  EXPECT_EQ(counter(prof, kProfileContentRefusals), 6);
+}
+
+TEST_F(VagentEpistemicIngress, ARefusalEarnsNoProfileBeyondTheBudget) {
+  AgentSettings settings;
+  settings.epistemic.maxSources = 1;
+  start(settings);
+  observe(reading(kP1, "e1", 1, 1.0));
+  auto frame  = reading(kP2, "f0", 1, 1.0);
+  frame.frame = "ecef";
+  EXPECT_TRUE(refusedAtIngress(frame));
+  EXPECT_EQ(profiles().size(), 1U);
+  EXPECT_EQ(refused(kTurnResultEpistemicBudget), 1U);
 }
 
 TEST_F(VagentEpistemicIngress, AStoppedActorKeepsNoIngressState) {
@@ -1185,8 +1203,9 @@ agent A { var adds: Int := 0 }
   auto over                = reading(kP1, "over", 2, 1.0);
   over.acquiredUncertainty = 1.001;
   EXPECT_EQ(refusedAtIngress(over), EpistemicRefusal::UncertainAcquisition);
-  // A content refusal: the device sent a timestamp it cannot vouch for.
-  EXPECT_EQ(counter(profiles().front(), kProfileContentRefusals), 1);
+  // Content refusals: the device sent timestamps it cannot vouch for. The
+  // first two, before any commit, earned the profile they are charged to.
+  EXPECT_EQ(counter(profiles().front(), kProfileContentRefusals), 3);
 }
 
 // -- Review round 2 findings

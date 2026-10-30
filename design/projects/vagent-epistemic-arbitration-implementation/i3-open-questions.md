@@ -30,9 +30,10 @@ Supersession never causes this; only an advance does (a retire drops the support
    then bookkeeping that programs never read directly, and only `+at`/`-at` remain to define. Cost:
    it is a checker and lowering decision for I4, and the event semantics still need one of 1–3.
 
-**Decided (owner, I3-1 review round 2).** Option 2, keeping the history: the advance drops the
-supports and moves their records to a retired-history chain on the profile (design section 14). How
-plain queries of an arbitrated predicate answer stays I4's decision.
+**Decided (owner).** The recommendation. Option 2 for events, keeping the history, came first (round
+2: the advance drops the supports and moves their records to a retired-history chain on the profile,
+design section 14); option 4 for queries follows in I4, where a query of an arbitrated predicate is
+the arbitrated answer and programs never read raw supports.
 
 **Recommendation.** 4 for queries, with 2 for events: in I4, a query of an arbitrated predicate is
 the arbitrated answer, and the advance drops supports left with no current record so that `-at`
@@ -60,6 +61,10 @@ fault) and a revived tombstone inherits them.
 1. **Latches lifetime, counters windowed.** The `faulted` latch and the degradation reasons stay
    until the reset authority I3-2 introduces clears them; the counters decay.
 
+**Decided (owner).** The recommendation, option 4, for I3-2: latches stay until the reset authority
+clears them, and counters become exponentially decayed rates whose half-life is reviewed at the ML
+gate.
+
 **Recommendation.** 4. It keeps the design's rule that a restart cannot shed a fault (the latch),
 lets a repaired device recover on evidence (the decayed counters), and needs no per-incarnation
 storage. The half-life is a policy or system-setting value with its own ML-gate review.
@@ -83,6 +88,9 @@ looks better than a source that was right and then slipped.
 1. **Keep the charges at the host until the profile exists**, and apply them in the first commit's
    bookkeeping. No arena cost until a commit. Cost: host state that is not checkpointed, so a resume
    loses them, and a source that never commits is never charged.
+
+**Decided (owner).** The recommendation, option 2, implemented after I3-1's acceptance (design
+section 14).
 
 **Recommendation.** 2. It is bounded by bindings and `max_sources`, it survives checkpoints, and it
 makes the first commit's health honest; the cost is cells the budget already accounts for.

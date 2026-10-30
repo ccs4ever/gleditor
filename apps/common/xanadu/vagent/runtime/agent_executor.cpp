@@ -1760,10 +1760,11 @@ AgentExecutor::TurnOutcome AgentExecutor::deliverHost(State &state,
     TurnSpec spec;
     spec.entry      = event.entry;
     spec.turnFields = event.turnFields;
-    // Admission is net: the routine has already excised what it may.
-    // Bookkeeping turns only update counters in place, so they are not
-    // admitted against the ceiling a refusal may have been for.
-    if (event.ingest)
+    // Admission is net: the routine has already excised what it may. A
+    // bookkeeping turn may create a profile, so it is admitted too; a
+    // source change is not, or a full budget would pin a source to its old
+    // boot.
+    if (event.ingest || event.entry == state.agent.observeRefusalEntry)
       spec.admit = [this, &state]() -> std::optional<std::string> {
         const auto ceiling = settings_.epistemic.cells;
         if (epistemicCellsWithin(state, ceiling) > ceiling)
@@ -3772,6 +3773,21 @@ void AgentExecutor::drainPosted() {
                WireValue::integer(charge.content));
       note.set(std::string(kRefusalOther), WireValue::integer(charge.other));
       note.set(std::string(kRefusalCode), WireValue::text(charge.code));
+      note.set(std::string(kIngestMaxSources),
+               WireValue::integer(
+                   static_cast<std::int64_t>(settings_.epistemic.maxSources)));
+      {
+        // Bound now: the profile it may earn starts at the binding's boot.
+        const std::lock_guard lock(ingress_->mutex);
+        std::optional<std::uint64_t> bound;
+        for (const auto &[key, binding] : ingress_->bindings)
+          if (std::get<0>(key) == pidKey(item.pid) &&
+              std::get<1>(key) == *item.refusalsOf)
+            bound = std::max(bound.value_or(0), binding.incarnation);
+        if (bound)
+          note.set(std::string(kObsIncarnation),
+                   WireValue::integer(static_cast<std::int64_t>(*bound)));
+      }
       if (charge.contact)
         note.set(std::string(kRefusalContact),
                  WireValue::real(*charge.contact));

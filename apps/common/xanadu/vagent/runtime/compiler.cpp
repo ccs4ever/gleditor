@@ -1192,6 +1192,8 @@ private:
   void emitRtBSet();
   void emitObserve(CellRef entryLabel);
   void emitObserveRefusal(CellRef entryLabel);
+  void emitProfileFor(CellRef who, CellRef inc, CellRef maxSources,
+                      CellRef prof);
   void emitSourceChange(CellRef entryLabel);
   /// Re-attach a detached history (@p moved, zero when none) to support
   /// @p sc, and return @p sc in r1.
@@ -4421,6 +4423,71 @@ void Gen::endObservation(std::string_view code) {
   jump(haltOp_);
 }
 
+/// Find @p who's profile on `$agent +d.trust` into @p prof, or create it at
+/// incarnation @p inc while fewer than @p maxSources live principals have
+/// one (a tombstone keeps its replay floor but no share); past that the turn
+/// ends `EpistemicBudget`. Ingestion and refusal bookkeeping share it, so a
+/// source refused from its first event gets the same profile a commit would
+/// have made.
+void Gen::emitProfileFor(CellRef who, CellRef inc, CellRef maxSources,
+                         CellRef prof) {
+  const CellRef count = reg(), full = reg();
+  const CellRef same = reg(), loop = newLabel(), found = newLabel(),
+                absent = newLabel();
+  movC(count, zero_);
+  mov(S(prof), S(rd(S(agentCell_), dims_.trust)));
+  place(loop);
+  branchIfZero(prof, absent);
+  emit(OpcodeKind::Eq, "who?", {D(prof), D(who)}, {same});
+  branch(S(same), found);
+  {
+    // A tombstone keeps its replay floor but no share of the budget.
+    const CellRef retired = reg(), live = newLabel(), next = newLabel();
+    mov(S(a0_), S(prof));
+    movC(a1_, cStr(std::string(kProfileRetired)));
+    callLabel(rtFind_);
+    mov(S(retired), S(r0_));
+    branchIfZero(retired, live);
+    emit(OpcodeKind::Eq, "tomb?", {D(retired), S(true_)}, {same});
+    branch(S(same), next);
+    place(live);
+    emit(OpcodeKind::Add, "n+", {S(count), S(one_)}, {count});
+    place(next);
+  }
+  mov(S(prof), S(rd(D(prof), dims_.trust)));
+  jump(loop);
+  place(absent);
+  const CellRef admit = newLabel();
+  emit(OpcodeKind::Lt, "room?", {S(count), D(maxSources)}, {full});
+  branch(S(full), admit);
+  endObservation(kTurnResultEpistemicBudget);
+  place(admit);
+  alloc(prof);
+  mov(D(prof), D(who));
+  markRecord(prof);
+  const auto init = [&](std::string_view name, Opd value) {
+    CellRef vc;
+    callSetField(prof, std::string(name), std::nullopt, vc);
+    mov(D(vc), value);
+  };
+  init(kProfileIncarnation, D(inc));
+  init(kProfileFaulted, S(false_));
+  for (const auto counter : {kProfileRejectionStreak, kProfileRejectCount,
+                             kProfileContentRefusals, kProfileRefusedCount})
+    init(counter, S(zero_));
+  const CellRef streams = reg(), seen = reg();
+  alloc(streams);
+  mov(D(streams), S(cStr(std::string(kProfileStreams))));
+  markRecord(streams);
+  CellRef vc;
+  callSetField(prof, std::string(kProfileStreams), streams, vc);
+  alloc(seen);
+  mov(D(seen), S(cStr(std::string(kListContent))));
+  callSetField(prof, std::string(kProfileDedup), seen, vc);
+  emitAppendTail(S(agentCell_), dims_.trust, dims_.trust, prof);
+  place(found);
+}
+
 /// `observeRefusalEntry` (P19 I3-1b): charge the refusals in `$turn.refusal`
 /// to their principal's profile, apart from the gate's `reject_count`.
 /// Content refusals of direct events may feed health (I3-2) and show the
@@ -4454,8 +4521,20 @@ void Gen::emitObserveRefusal(CellRef entryLabel) {
     branchIfZero(out, malformed);
   }
   field(kRefusalContact, contact);
+  // A bound source's first refusal earns it a profile, as a commit would
+  // have: the binding is the host's authorization either way, and health
+  // must not start clean for a source wrong from its first event. An unbound
+  // principal (a stale binding's last event) is charged only if known.
+  const CellRef inc = reg(), maxSources = reg();
+  field(kObsIncarnation, inc);
+  field(kIngestMaxSources, maxSources);
+  branchIfZero(maxSources, malformed);
   const CellRef prof = reg(), same = reg(), loop = newLabel(),
-                found = newLabel(), absent = newLabel();
+                found = newLabel(), absent = newLabel(), lookup = newLabel();
+  branchIfZero(inc, lookup);
+  emitProfileFor(who, inc, maxSources, prof);
+  jump(found);
+  place(lookup);
   mov(S(prof), S(rd(S(agentCell_), dims_.trust)));
   place(loop);
   branchIfZero(prof, absent);
@@ -4934,63 +5013,8 @@ void Gen::emitObserve(CellRef entryLabel) {
 
   // 1. The source's profile: found by its token on `$agent +d.trust`, or
   //    created within the principal budget.
-  const CellRef prof = global(), count = global(), full = global();
-  {
-    const CellRef same = reg(), loop = newLabel(), found = newLabel(),
-                  absent = newLabel();
-    movC(count, zero_);
-    mov(S(prof), S(rd(S(agentCell_), dims_.trust)));
-    place(loop);
-    branchIfZero(prof, absent);
-    emit(OpcodeKind::Eq, "who?", {D(prof), D(who)}, {same});
-    branch(S(same), found);
-    {
-      // A tombstone keeps its replay floor but no share of the budget.
-      const CellRef retired = reg(), live = newLabel(), next = newLabel();
-      mov(S(a0_), S(prof));
-      movC(a1_, cStr(std::string(kProfileRetired)));
-      callLabel(rtFind_);
-      mov(S(retired), S(r0_));
-      branchIfZero(retired, live);
-      emit(OpcodeKind::Eq, "tomb?", {D(retired), S(true_)}, {same});
-      branch(S(same), next);
-      place(live);
-      emit(OpcodeKind::Add, "n+", {S(count), S(one_)}, {count});
-      place(next);
-    }
-    mov(S(prof), S(rd(D(prof), dims_.trust)));
-    jump(loop);
-    place(absent);
-    const CellRef admit = newLabel();
-    emit(OpcodeKind::Lt, "room?", {S(count), D(maxSources)}, {full});
-    branch(S(full), admit);
-    endObservation(kTurnResultEpistemicBudget);
-    place(admit);
-    alloc(prof);
-    mov(D(prof), D(who));
-    markRecord(prof);
-    const auto init = [&](std::string_view name, Opd value) {
-      CellRef vc;
-      callSetField(prof, std::string(name), std::nullopt, vc);
-      mov(D(vc), value);
-    };
-    init(kProfileIncarnation, D(inc));
-    init(kProfileFaulted, S(false_));
-    for (const auto counter : {kProfileRejectionStreak, kProfileRejectCount,
-                               kProfileContentRefusals, kProfileRefusedCount})
-      init(counter, S(zero_));
-    const CellRef streams = reg(), seen = reg();
-    alloc(streams);
-    mov(D(streams), S(cStr(std::string(kProfileStreams))));
-    markRecord(streams);
-    CellRef vc;
-    callSetField(prof, std::string(kProfileStreams), streams, vc);
-    alloc(seen);
-    mov(D(seen), S(cStr(std::string(kListContent))));
-    callSetField(prof, std::string(kProfileDedup), seen, vc);
-    emitAppendTail(S(agentCell_), dims_.trust, dims_.trust, prof);
-    place(found);
-  }
+  const CellRef prof = global();
+  emitProfileFor(who, inc, maxSources, prof);
   const auto profileField = [&](std::string_view name, CellRef out) {
     mov(S(a0_), S(prof));
     movC(a1_, cStr(std::string(name)));

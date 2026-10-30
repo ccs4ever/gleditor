@@ -761,6 +761,14 @@ source-change and bookkeeping turns as well as ingestions. Recorded and open:
   exception in a turn is a fuel failure (older than this slice). No test drives an advance that
   fails and is then retried successfully, since no setting fails an advance while ingestion fits.
 
+**After acceptance: the owner's decisions on the open questions.** All three recommendations in
+[i3-open-questions.md](i3-open-questions.md) were accepted. Question 3 is built: a bound source's
+first chargeable refusal creates its profile, at the binding's incarnation, through the same
+find-or-create the ingestion routine uses (`emitProfileFor`), within `max_sources` and admitted
+against the cell ceiling; an unbound principal is charged only if it already has a profile. Question
+1's query half (a query of an arbitrated predicate is the arbitrated answer) belongs to I4, and
+question 2 (latches for life, counters as decayed rates with an ML-reviewed half-life) to I3-2.
+
 **Fuzz evidence.** The fuzzer program gained a keyless predicate, and the harness two scripted steps
 (a principal past its key limit, an event ID reused with other bytes) that random bytes rarely
 reach. Report mode counts unlogged refusals and the duplicate and conflicting turns a sticky entry
