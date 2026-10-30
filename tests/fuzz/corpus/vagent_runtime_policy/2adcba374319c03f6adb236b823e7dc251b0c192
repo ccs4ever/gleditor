@@ -1,1 +1,0 @@
-truest(model: "beta_reputatkn", min_confidence: 0.7, prioror_aleta: 2, r_tolerance: 0.25, frame: "mu", unce: 0.0001, ma, clw: 15)

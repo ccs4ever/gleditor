@@ -1,1 +1,0 @@
-consensus(model: "beta_reputaon", min_confidence: 0.5, priorearnce: 0.5, frame: "enu", units: "m", min_variance: 1e-150, max_variance: 1e150, max_cluster_diamet: 2.0, innovation: 5.99)

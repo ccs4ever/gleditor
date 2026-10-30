@@ -1,1 +1,0 @@
-truest(model: "beta_reputation", ma: 1, prior_be: 1, clock: "wall", max_age: 10s, max_uncertainty: 250ms, clock_skew: 20ms,rita: 1, clock: "wall", max_age: 10s, max_uncertainty: 250ms, clock_skew: 20ms,riance: 100.0)
