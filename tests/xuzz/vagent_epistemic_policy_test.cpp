@@ -316,6 +316,8 @@ TEST(VagentEpistemicPolicy, HashChangesWithEveryFieldAndOptionalPresence) {
       {"clock", "\"actor_mapped\""},
       {"max_age", "4s"},
       {"clock_skew", "11ms"},
+      // Absent from the base, so this also tests its presence.
+      {"max_uncertainty", "2s"},
       {"decay", "2s"},
       {"alignment", "60ms"},
       {"score_tolerance", "0.002"},
@@ -352,6 +354,7 @@ TEST(VagentEpistemicPolicy, HashChangesWithEveryFieldAndOptionalPresence) {
   auto explicitDefaults               = fullPolicy();
   explicitDefaults["score_tolerance"] = "1e-9";
   explicitDefaults["clock_skew"]      = "0s";
+  explicitDefaults["max_uncertainty"] = "3s"; // max_age
   explicitDefaults["allow_untested"]  = "false";
   auto omitted                        = fullPolicy();
   for (const auto *key : {"score_tolerance", "clock_skew", "allow_untested"})
@@ -391,6 +394,10 @@ TEST(VagentEpistemicPolicy, EveryDomainBoundaryAcceptsOrRefuses) {
       {"max_age", "1000000000001ms", false},
       {"clock_skew", "0s", true},
       {"clock_skew", "-1ms", false},
+      {"max_uncertainty", "3s", true}, // max_age
+      {"max_uncertainty", "1ms", true},
+      {"max_uncertainty", "3001ms", false},
+      {"max_uncertainty", "0s", false},
       {"decay", "0s", false},
       {"alignment", "0s", true},
       {"alignment", "-1ms", false},

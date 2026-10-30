@@ -1144,6 +1144,36 @@ TEST_F(VagentEpistemicIngress, TheTimeWindowsWidenByUncertaintyAndSkew) {
             EpistemicRefusal::ObservationTimeMismatch);
 }
 
+TEST_F(VagentEpistemicIngress,
+       AClaimedUncertaintyIsBoundedBeforeItWidensAnything) {
+  start({}, {}, R"vagent(
+predicate at(key who: Str, x: Float)
+  arbitrated by truest(model: "beta_reputation", min_confidence: 0.5,
+    prior_alpha: 1, prior_beta: 1, clock: "wall", max_age: 10s,
+    max_uncertainty: 1s, cluster_tolerance: 0.5, frame: "enu", units: "m",
+    min_variance: 0.0001, max_variance: 100.0)
+agent A { var adds: Int := 0 }
+)vagent");
+  // Dated 100000 s ago, or a year ahead: a huge claimed uncertainty would
+  // otherwise stretch both windows to admit it.
+  for (const double offset : {-100000.0, 365.0 * 86400.0}) {
+    auto far       = reading(kP1, "f" + std::to_string(offset), 1, 1.0);
+    far.acquiredAt = base + offset;
+    far.acquiredUncertainty = 1e9;
+    EXPECT_EQ(refusedAtIngress(far), EpistemicRefusal::UncertainAcquisition)
+        << offset;
+  }
+  auto edge                = reading(kP1, "edge", 1, 1.0);
+  edge.acquiredUncertainty = 1.0;
+  observe(edge);
+  EXPECT_EQ(outcomeOf(edge)->kind, IngestOutcome::Kind::Committed);
+  auto over                = reading(kP1, "over", 2, 1.0);
+  over.acquiredUncertainty = 1.001;
+  EXPECT_EQ(refusedAtIngress(over), EpistemicRefusal::UncertainAcquisition);
+  // A content refusal: the device sent a timestamp it cannot vouch for.
+  EXPECT_EQ(counter(profiles().front(), kProfileContentRefusals), 1);
+}
+
 TEST(VagentEpistemicIngressPlain, AProgramWithoutArbitrationCannotBind) {
   auto program = CompiledProgram::fromSource("agent A { var n: Int := 0 }");
   ASSERT_TRUE(program) << program.error();

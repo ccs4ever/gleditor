@@ -1,0 +1,1 @@
+consensus(model: "beta_reputation", mine: 0.5, prio0r_alpha: 1, priorr_tolerance: 0.5, frame: "enu", units: "m", min_va: 1e-150, mriance: 1e-150, max_variani_cluset: 2.4, innoaovitn: 5.99)

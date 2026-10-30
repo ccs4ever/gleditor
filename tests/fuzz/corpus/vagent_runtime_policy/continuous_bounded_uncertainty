@@ -1,0 +1,1 @@
+truest(model: "beta_reputation", min_confidence: 0.5, prior_alpha: 1, prior_beta: 1, clock: "wall", max_age: 10s, max_uncertainty: 250ms, clock_skew: 20ms, cluster_tolerance: 0.5, frame: "enu", units: "m", min_variance: 0.0001, max_variance: 100.0)

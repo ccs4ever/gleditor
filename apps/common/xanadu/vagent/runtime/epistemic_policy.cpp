@@ -37,6 +37,10 @@ constexpr std::array kKeys{
     KeySpec{"clock", LiteralType::Text, Need::Always},
     KeySpec{"max_age", LiteralType::Duration, Need::Always},
     KeySpec{"clock_skew", LiteralType::Duration, Need::Optional},
+    // The largest acquisition uncertainty a reading may claim; it widens the
+    // age and future windows, so it must be bounded for them to mean
+    // anything. Resolves to max_age.
+    KeySpec{"max_uncertainty", LiteralType::Duration, Need::Optional},
     // `decay` is the freshness half-life of P19 section 3.2.
     KeySpec{"decay", LiteralType::Duration, Need::Optional},
     KeySpec{"alignment", LiteralType::Duration, Need::Optional},
@@ -191,14 +195,15 @@ private:
   }
 
   void assign() {
-    policy_.model         = *text("model");
-    policy_.minConfidence = *num("min_confidence");
-    policy_.priorAlpha    = *num("prior_alpha");
-    policy_.priorBeta     = *num("prior_beta");
-    policy_.maxAgeMs      = *ms("max_age");
-    policy_.clockSkewMs   = ms("clock_skew").value_or(0);
-    policy_.decayMs       = ms("decay");
-    policy_.alignmentMs   = ms("alignment");
+    policy_.model            = *text("model");
+    policy_.minConfidence    = *num("min_confidence");
+    policy_.priorAlpha       = *num("prior_alpha");
+    policy_.priorBeta        = *num("prior_beta");
+    policy_.maxAgeMs         = *ms("max_age");
+    policy_.clockSkewMs      = ms("clock_skew").value_or(0);
+    policy_.maxUncertaintyMs = ms("max_uncertainty").value_or(policy_.maxAgeMs);
+    policy_.decayMs          = ms("decay");
+    policy_.alignmentMs      = ms("alignment");
     policy_.scoreTolerance =
         num("score_tolerance").value_or(kDefaultScoreTolerance);
     if (const auto *flag = arg("allow_untested"))
@@ -255,6 +260,10 @@ private:
     need(policy_.clockSkewMs >= 0 &&
              policy_.clockSkewMs <= kMaxPolicyDurationMs,
          "clock_skew", "must be a non-negative duration of at most 31 years");
+    // Beyond max_age a reading could be any age and still pass.
+    need(policy_.maxUncertaintyMs > 0 &&
+             policy_.maxUncertaintyMs <= policy_.maxAgeMs,
+         "max_uncertainty", "must be a positive duration of at most max_age");
     positiveMs("decay", policy_.decayMs);
     // P19 section 8.1 asks only for a nonnegative alignment tolerance.
     if (policy_.alignmentMs)
@@ -331,7 +340,7 @@ std::string_view clockName(ObservationClock c) noexcept {
 std::string canonicalPolicy(const ArbitrationPolicy &p) {
   // Length-prefixed fields in a fixed order; doubles by their exact bits so
   // the encoding never depends on decimal formatting.
-  std::string out("vagent-policy-1");
+  std::string out("vagent-policy-2");
   out.push_back('\0');
   const auto put = [&](std::string_view tag, std::string_view value) {
     out += std::format("{}:{}:{};", tag, value.size(), value);
@@ -357,6 +366,7 @@ std::string canonicalPolicy(const ArbitrationPolicy &p) {
   put("clock", clockName(p.clock));
   dur("max_age", p.maxAgeMs);
   dur("clock_skew", p.clockSkewMs);
+  dur("max_uncertainty", p.maxUncertaintyMs);
   dur("decay", p.decayMs);
   dur("alignment", p.alignmentMs);
   real("score_tolerance", p.scoreTolerance);

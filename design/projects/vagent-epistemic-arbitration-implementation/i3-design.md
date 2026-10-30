@@ -64,6 +64,9 @@ Required keys:
 - Optional keys, each with its domain; absent ones have no field except where a resolved default is
   stated:
   - `clock_skew`: non-negative duration, resolves to 0.
+  - `max_uncertainty`: positive duration at most `max_age`, resolves to `max_age`. A claimed
+    acquisition uncertainty above it refuses `UncertainAcquisition`, because the uncertainty widens
+    both the age and the future window (section 14).
   - `decay`: positive duration, the freshness half-life of P19 section 3.2.
   - `alignment`: non-negative duration.
   - `score_tolerance`: finite and ≥ 0, resolves to 1e-9 (P19 section 5.3), so the hash records the
@@ -218,6 +221,7 @@ Before queueing, `observe` checks everything that does not need the arena:
 | `InvalidObservation`                      | a uint64 that does not fit Int64, a wrong tuple arity or type, a non-finite time, negative uncertainty                                    |
 | `ClockUnsynchronised`                     | a `wall`-basis predicate while the host reports the wall clock unsynchronised                                                             |
 | `ObservationTimeMismatch`                 | another clock basis; acquisition after the matching receipt time by more than uncertainty plus `clock_skew`                               |
+| `UncertainAcquisition`                    | a claimed acquisition uncertainty above `max_uncertainty` (a content refusal)                                                             |
 | `StaleObservation`                        | acquisition before the matching receipt time by more than `max_age` plus uncertainty                                                      |
 | `ObservationFrameMismatch`                | frame or units that differ from the policy                                                                                                |
 | `MissingVariance` / `InvalidVariance`     | absent on a continuous predicate, present on a discrete one, outside \[`min_variance`, `max_variance`\], non-finite                       |
@@ -405,7 +409,7 @@ updated). Each setting gets a `defaultSettingSpecs` entry with schema notes:
 | `vagent.epistemic_outcome_log`              | 64      | host outcome entries per source of an actor   |
 | `vagent.epistemic_ingest_per_wake`          | 4       | ingestion turns per wake before others run    |
 | `vagent.epistemic_arena_slots`              | 2^30    | slot allowance past which `ArenaExhausted`    |
-| `vagent.epistemic_cells`                    | 32768   | maintained epistemic cell ceiling             |
+| `vagent.epistemic_cells`                    | 24576   | maintained epistemic cell ceiling             |
 
 The cell estimate comes from the field list:
 
@@ -413,8 +417,9 @@ The cell estimate comes from the field list:
   about 100 cells.
 - A principal with 4 keys at a history of 4 costs about 1,600 cells. Its profile, streams and a
   16-pair dedup window add about 150.
-- So the 32,768 default holds about 18 fully active principals. `max_sources` (128) remains the
-  logical ceiling, and the cell ceiling is the binding one.
+- So the 24,576 default holds about 18 fully active principals at the measured 80 cells a record
+  (section 14). `max_sources` (128) remains the logical ceiling, and the cell ceiling is the binding
+  one.
 
 **Physical slots.** Excision and retirement return logical budget only; unlinking never reclaims
 arena slots, as P19 section 2.2 states. Every ingestion therefore mints slots that are never reused:
@@ -685,17 +690,38 @@ silent or wrong:
   feature list, the executor's steady-clock instance and the source's health at ingest.
 - **Failed turns.** A turn that set no code and ran out of cycles or fuel is `TurnExhausted`, needs
   host action; any other is `IngestionFault`.
-- **Open for I4.** A support whose records are all retired is still a belief (plain queries and
-  handlers see it); I4 decides whether a support exists only while it has a current record. Counters
-  are lifetime-cumulative across incarnations and revivals; I3-2 decides whether health needs them
-  per incarnation or windowed. A source refused from its first event has no profile to charge; I3-2
-  says how health treats one.
+- **Open for I4** (options in [i3-open-questions.md](i3-open-questions.md)). A support whose records
+  are all retired is still a belief (plain queries and handlers see it); I4 decides whether a
+  support exists only while it has a current record. Counters are lifetime-cumulative across
+  incarnations and revivals; I3-2 decides whether health needs them per incarnation or windowed. A
+  source refused from its first event has no profile to charge; I3-2 says how health treats one.
 
-**Fuzz evidence.** The fuzzer program gained a keyless predicate. The seed corpus reaches 13 logged
-outcome codes; `ConflictingEvent`, `EpistemicKeyLimit`, `Duplicate` (now visible as a duplicate
-turn, the entry staying `Committed`) and the unlogged refusals are pinned by unit tests instead.
-Four regression inputs from fuzzing are in the corpus: the non-finite reading and three harness
-corrections for the sticky, per-source log.
+**Uncertainty bound (hardware M3).** The owner chose a policy key: `max_uncertainty`, optional,
+resolving to `max_age` and hashed, so an existing program keeps working and the bound in force is
+recorded. The canonical encoding is now `vagent-policy-2`. A reading claiming more refuses
+`UncertainAcquisition`, a content refusal; the in-turn acquisition order, which adds both
+uncertainties, is bounded by the same key.
+
+**Checkpoint and resume (1d).** `restoreState` copies the source profiles (with their streams, dedup
+windows and clone ranks) and every support's history through one copy map, so each record's clone
+occurrence is the copy its profile's rank made and the ranks come out rebuilt once: the single-arena
+`cloneGraph`, given a shared map, needed no generalised `UpgradeGraph`. Profiles drop `last_receive`
+and `last_contact`, so liveness starts again from the first contact on the new executor; records
+keep their steady stamps, tagged with the clock instance that made them. Bindings, queues and the
+outcome log are not checkpointed: the host rebinds, and the arena's floor refuses a binding below it
+on the advance turn, which revokes it. A changed policy is refused by `resume` itself, since the
+program reference covers it; `restoreState` compares the policy hashes again. A checkpoint encodes
+about two operations per epistemic cell: at the old 32,768-cell default a full budget did not
+checkpoint under `vagent.value_operations` (65,536), so the default is now 24,576, and a test fills
+it and resumes.
+
+**Fuzz evidence.** The fuzzer program gained a keyless predicate, and the harness two scripted steps
+(a principal past its key limit, an event ID reused with other bytes) that random bytes rarely
+reach. Report mode counts unlogged refusals and the duplicate and conflicting turns a sticky entry
+hides. The seed corpus reaches 17 outcome codes, every one a reading can meet except
+`StaleSequence`, which unit tests pin with the host-condition codes (`TurnExhausted`,
+`ArenaExhausted`, `Undelivered`). Four regression inputs from fuzzing are in the corpus: the
+non-finite reading and three harness corrections for the sticky, per-source log.
 
 **Cost.** The routine read every field by a search and copied the observation, a recursive copy with
 a frame per cell. It now adopts the observation the executor wrote as the record and reads it in one

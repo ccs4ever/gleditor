@@ -55,6 +55,9 @@ struct ArbitrationPolicy {
   ObservationClock clock{ObservationClock::Wall};
   std::int64_t maxAgeMs{};
   std::int64_t clockSkewMs{};
+  /// `max_uncertainty`, resolved to max_age when absent, so the hash records
+  /// the bound in force.
+  std::int64_t maxUncertaintyMs{};
   std::optional<std::int64_t> decayMs;
   std::optional<std::int64_t> alignmentMs;
   double scoreTolerance{kDefaultScoreTolerance};

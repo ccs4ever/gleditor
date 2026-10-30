@@ -292,8 +292,20 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data,
   const auto deliver = [&](const CheckedObservation &o) {
     const EpistemicView before(executor, *pid, kPredicates, kKeyless);
     const auto snapshot = before.snapshot();
-    const auto receipt  = executor.observe(*pid, o);
+    const auto duplicateStat =
+        std::string(kStatRefusedPrefix) + std::string(kTurnResultDuplicate);
+    const auto duplicates = executor.stat(*pid, duplicateStat);
+    // Like a duplicate, a conflicting resend leaves the committed entry, so
+    // report mode reads it from its stat.
+    const auto conflictStat = std::string(kStatRefusedPrefix) +
+                              std::string(kTurnResultConflictingEvent);
+    const auto conflicts = executor.stat(*pid, conflictStat);
+    const auto receipt   = executor.observe(*pid, o);
     host.pump();
+    if (report && executor.stat(*pid, duplicateStat) > duplicates)
+      std::fprintf(stderr, "outcome Duplicate\n");
+    if (report && executor.stat(*pid, conflictStat) > conflicts)
+      std::fprintf(stderr, "outcome ConflictingEvent\n");
     const EpistemicView after(executor, *pid, kPredicates, kKeyless);
     const auto broken = after.violation();
     if (broken) std::fprintf(stderr, "%s\n", broken->c_str());
@@ -302,6 +314,9 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data,
     // Unbound and malformed input is answered by the return value alone, and
     // writes nothing anywhere.
     if (!receipt && unlogged(receipt.error())) {
+      if (report)
+        std::fprintf(stderr, "outcome %s\n",
+                     epistemicRefusalName(receipt.error()).data());
       require(after.snapshot() == snapshot,
               "an unlogged refusal changes nothing");
       return std::optional<IngestOutcome>{};
@@ -338,7 +353,41 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data,
        ++step) {
     const auto which     = in.ConsumeIntegralInRange<std::size_t>(0, 3);
     const auto principal = kPrincipals[which];
-    switch (in.ConsumeIntegralInRange(0, 11)) {
+    switch (in.ConsumeIntegralInRange(0, 13)) {
+    case 12:
+    case 13: {
+      // Scripted steps into states random bytes rarely reach: a principal
+      // past its key limit, and an event ID reused with other bytes.
+      auto good = [&](std::string_view key, double x) {
+        auto &state = sources[which];
+        CheckedObservation o;
+        o.principal   = principal;
+        o.incarnation = state.incarnation;
+        o.eventId     = "e" + std::to_string(++state.events);
+        o.sequence    = ++state.sequence;
+        o.predicate   = "at";
+        o.tuple       = {WireValue::text(std::string(key)), WireValue::real(x)};
+        o.acquiredAt  = now - 1.0;
+        o.acquiredUncertainty = 0.01;
+        o.clockBasis          = "wall";
+        o.frame               = "enu";
+        o.units               = "m";
+        o.variance            = 0.25;
+        return o;
+      };
+      if (in.ConsumeBool()) {
+        for (const auto *key : {"self", "other", "third"})
+          (void)deliver(good(key, 1.0));
+      } else {
+        const auto first = good("self", 1.0);
+        (void)deliver(first);
+        auto conflicting  = first;
+        conflicting.tuple = {WireValue::text("self"), WireValue::real(2.0)};
+        (void)deliver(conflicting);
+      }
+      last.reset();
+      break;
+    }
     case 0: {
       const bool at = in.ConsumeBool();
       // Usually the principal's own alias, so a rebind is a supersession.

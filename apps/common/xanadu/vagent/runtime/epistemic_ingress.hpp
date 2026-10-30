@@ -81,6 +81,9 @@ enum class EpistemicRefusal : std::uint8_t {
   InvalidObservation,
   ClockUnsynchronised,
   ObservationTimeMismatch,
+  /// A claimed acquisition uncertainty above the policy's max_uncertainty:
+  /// the reading cannot be placed in time closely enough to be used.
+  UncertainAcquisition,
   StaleObservation,
   ObservationFrameMismatch,
   MissingVariance,

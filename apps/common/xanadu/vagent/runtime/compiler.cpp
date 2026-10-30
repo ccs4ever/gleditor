@@ -4135,6 +4135,7 @@ void Gen::mintPolicyMaster(CellRef predicate, const ArbitrationPolicy &p) {
   text("clock", std::string(clockName(p.clock)));
   ms("max_age", p.maxAgeMs);
   ms("clock_skew", p.clockSkewMs);
+  ms("max_uncertainty", p.maxUncertaintyMs);
   ms("decay", p.decayMs);
   ms("alignment", p.alignmentMs);
   real("score_tolerance", p.scoreTolerance);

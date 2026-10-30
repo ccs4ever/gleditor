@@ -21,7 +21,7 @@ inline constexpr std::int64_t kDefaultEpistemicScopeDepth = 32;
 // A query may call a ranked sub-query inside its callback; eight levels bound
 // the saved caller continuations an actor can hold at once.
 inline constexpr std::int64_t kDefaultEpistemicNestedScopes = 8;
-// Checked ingestion (I3-1 design section 9). A record costs about 100 cells,
+// Checked ingestion (I3-1 design section 9). A record costs about 80 cells,
 // so these defaults hold about 18 fully active principals in the cell budget.
 inline constexpr std::int64_t kDefaultEpistemicHistory               = 4;
 inline constexpr std::int64_t kDefaultEpistemicDedup                 = 16;
@@ -29,7 +29,10 @@ inline constexpr std::int64_t kDefaultEpistemicKeysPerSource         = 4;
 inline constexpr std::int64_t kDefaultEpistemicIngressQueue          = 64;
 inline constexpr std::int64_t kDefaultEpistemicIngressQueuePerSource = 8;
 inline constexpr std::int64_t kDefaultEpistemicOutcomeLog            = 64;
-inline constexpr std::int64_t kDefaultEpistemicCells                 = 32768;
+/// A checkpoint encodes about two operations per epistemic cell, so this
+/// stays under vagent.value_operations (65536) with the rest of the agent:
+/// measured, 24k cells checkpoint and 32k do not.
+inline constexpr std::int64_t kDefaultEpistemicCells = 24576;
 /// About 20 ms of ingestion per wake at the measured 4.3k cycles a turn, so
 /// a flooded actor cannot hold a shared pump for long.
 inline constexpr std::int64_t kDefaultEpistemicIngestPerWake = 4;

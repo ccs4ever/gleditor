@@ -1,0 +1,1 @@
+truest(model: "beta_reputation", min_confi_age: 3s, cluster_tolerance: 0.25, frame: "map_enu",s: "metres", min_variance: 0.0001, max_variance: 100.0, max_slew: 15)

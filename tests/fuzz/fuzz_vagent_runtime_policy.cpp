@@ -37,6 +37,7 @@ void checkDomains(const ArbitrationPolicy &p, bool continuous) {
   require(std::isfinite(p.priorAlpha) && p.priorAlpha > 0);
   require(std::isfinite(p.priorBeta) && p.priorBeta > 0);
   require(p.maxAgeMs > 0 && p.clockSkewMs >= 0);
+  require(p.maxUncertaintyMs > 0 && p.maxUncertaintyMs <= p.maxAgeMs);
   require(!p.decayMs || *p.decayMs > 0);
   require(!p.alignmentMs || *p.alignmentMs >= 0);
   require(std::isfinite(p.scoreTolerance) && p.scoreTolerance >= 0);

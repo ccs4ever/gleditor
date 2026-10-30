@@ -1,0 +1,1 @@
+truest(model: "beta_reputaton", min_confpha: 1, prior_beta: 1.5, clock: "actor_mapped", max_age: 3s, cluster_tolerance: 0.25,iin_variance: 1e-150, max_variance: 1e150, max_cluster_diameter: 3.0, innovaer: 2.0, innovation: 5, max_slew: 15)

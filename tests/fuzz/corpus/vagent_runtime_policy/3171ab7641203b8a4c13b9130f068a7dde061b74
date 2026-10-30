@@ -1,0 +1,1 @@
+consensus(model: "beta_reputation", min_confidence: 0.5, prior_alpha: 1, prior_betence: 0.5, prior_alpha: 1, prior_beta: 1, clock: "wall", mamax_cluster_diamet: 2.0, iin_variance: 1e-150, max_variance: 1e150, max_cluster_diameter: 2.0, innovation: 5.99)

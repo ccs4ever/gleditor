@@ -223,20 +223,27 @@ bool hasLinks(const ArenaManifold &arena, CellRef cell,
 /// A copy of everything reachable from @p from by positive links along
 /// @p dims, relinked along @p into (the same dimensions as the arena now
 /// knows them). Iterative: a list or a clause chain can be long.
+///
+/// With @p shared, cells already copied (by an earlier call with the same
+/// map) are reused rather than copied again, so graphs that meet, such as a
+/// record and the clone occurrence its profile's rank also reaches, come out
+/// meeting.
 CellRef cloneGraph(ArenaManifold &arena, CellRef from,
                    std::span<const zigzag::DimRef> dims,
-                   std::span<const zigzag::DimRef> into) {
-  std::vector<CellRef> order{from};
-  std::unordered_map<CellRef, CellRef> copy;
+                   std::span<const zigzag::DimRef> into,
+                   std::unordered_map<CellRef, CellRef> *shared = nullptr) {
+  std::unordered_map<CellRef, CellRef> local;
+  auto &copy = shared != nullptr ? *shared : local;
+  if (const auto done = copy.find(from); done != copy.end())
+    return done->second;
+  std::vector<CellRef> order;
   const auto admit = [&](CellRef c) {
     const auto made = arena.makeCell();
     copyCellData(arena, c, made);
     copy.emplace(c, made);
     order.push_back(c);
   };
-  copy.emplace(from, CellRef{});
-  copy.at(from) = arena.makeCell();
-  copyCellData(arena, from, copy.at(from));
+  admit(from);
   for (std::size_t i = 0; i < order.size(); ++i) {
     for (const auto d : dims) {
       if (const auto next = arena.linked(order[i], d);
@@ -803,7 +810,7 @@ struct AgentExecutor::Ingress {
   static bool isContentRefusal(std::string_view code) {
     return code == "ObservationFrameMismatch" || code == "MissingVariance" ||
            code == "InvalidVariance" || code == "ObservationTimeMismatch" ||
-           code == "StaleObservation";
+           code == "UncertainAcquisition" || code == "StaleObservation";
   }
   /// The host's own conditions, its pending actions and runtime defects are
   /// never the source's.
@@ -3412,6 +3419,10 @@ AgentExecutor::observe(const identity::ActorPid &target,
                              : receivedSteady;
   const double skew    = static_cast<double>(policy.clockSkewMs) / 1000.0;
   const double maxAge  = static_cast<double>(policy.maxAgeMs) / 1000.0;
+  // The uncertainty widens both windows below, so it is bounded first.
+  if (o.acquiredUncertainty >
+      static_cast<double>(policy.maxUncertaintyMs) / 1000.0)
+    return refuse(EpistemicRefusal::UncertainAcquisition);
   if (o.acquiredAt > receipt + o.acquiredUncertainty + skew)
     return refuse(EpistemicRefusal::ObservationTimeMismatch);
   if (o.acquiredAt < receipt - maxAge - o.acquiredUncertainty)
@@ -3551,6 +3562,8 @@ std::string_view epistemicRefusalName(EpistemicRefusal refusal) noexcept {
     return "ClockUnsynchronised";
   case EpistemicRefusal::ObservationTimeMismatch:
     return "ObservationTimeMismatch";
+  case EpistemicRefusal::UncertainAcquisition:
+    return "UncertainAcquisition";
   case EpistemicRefusal::StaleObservation:
     return "StaleObservation";
   case EpistemicRefusal::ObservationFrameMismatch:
@@ -4457,9 +4470,6 @@ void AgentExecutor::restoreState(State &state, CellRef saved) {
                             {oldValues, vd.values},
                             {oldGrab, vd.grab},
                             {oldStep, vd.step}});
-  const auto term  = pairs({{oldGrab, vd.grab},
-                            {oldStep, vd.step},
-                            {old("d.source"), state.dims.source}});
   const std::array newValueDims{vd.vars, vd.values, vd.grab, vd.step};
 
   // Fields. A scalar or text field is read by compiled code through its
@@ -4494,10 +4504,53 @@ void AgentExecutor::restoreState(State &state, CellRef saved) {
                       std::ranges::to<std::vector<CellRef>>();
   };
 
+  // Source profiles, then beliefs (P19 I3-1d). One copy map covers both,
+  // so each history record's clone occurrence is the copy its profile's
+  // rank already made: the clone ranks come out rebuilt exactly once.
+  std::unordered_map<CellRef, CellRef> copies;
+  const auto oldEpistemic = old("d.epistemic"), oldClone = old("d.clone");
+  const auto epistemic = pairs({{oldVars, vd.vars},
+                                {oldValues, vd.values},
+                                {oldGrab, vd.grab},
+                                {oldStep, vd.step},
+                                {oldClone, core.clone}});
+  for (const auto profile : ranked(saved, old("d.trust"))) {
+    const auto copy =
+        cloneGraph(arena, profile, epistemic.from, epistemic.into, &copies);
+    // Steady stamps from another executor's clock mean nothing here: liveness
+    // starts again from the first contact after the resume. Records keep
+    // theirs, tagged with the clock instance that made them.
+    for (const auto field : {kProfileLastReceive, kProfileLastContact})
+      if (fieldValue(arena, vd, copy, field))
+        setField(arena, vd, copy, field, std::nullopt);
+    appendToRank(arena, ac, state.dims.trust, copy);
+  }
   // Beliefs: the predicates are the new program's cells; the clauses, with
-  // their terms and sources, are copied under them.
+  // their terms, sources and source histories, are copied under them.
+  const auto belief          = pairs({{oldGrab, vd.grab},
+                                      {oldStep, vd.step},
+                                      {old("d.source"), state.dims.source},
+                                      {oldEpistemic, state.dims.epistemic},
+                                      {oldVars, vd.vars},
+                                      {oldValues, vd.values},
+                                      {oldClone, core.clone}});
   const auto freshPredicates = ranked(ac, state.dims.belief);
   const auto oldClause       = old("d.clause");
+  const auto policyHashOf =
+      [&](CellRef predicate,
+          std::optional<zigzag::DimRef> dim) -> std::optional<std::string> {
+    if (!dim) return std::nullopt;
+    const auto master = arena.linked(predicate, *dim);
+    if (!master) return std::nullopt;
+    const auto hash = fieldValue(arena,
+                                 oldVars ? ValueDims{.vars   = *oldVars,
+                                                     .values = *oldValues,
+                                                     .grab   = vd.grab,
+                                                     .step   = vd.step}
+                                         : vd,
+                                 *master, "hash");
+    return hash ? std::optional{arena.textOf(*hash)} : std::nullopt;
+  };
   for (const auto predicate : ranked(saved, old("d.belief"))) {
     const auto name = text(arena, predicate);
     const auto match =
@@ -4505,9 +4558,22 @@ void AgentExecutor::restoreState(State &state, CellRef saved) {
           return text(arena, candidate) == name;
         });
     if (match == freshPredicates.end()) continue;
+    // A source's history was judged under its policy; a resume under
+    // another would score it by rules it was never checked against.
+    const auto was = policyHashOf(predicate, oldEpistemic);
+    const auto now = [&]() -> std::optional<std::string> {
+      const auto master = arena.linked(*match, state.dims.epistemic);
+      if (!master) return std::nullopt;
+      const auto hash = fieldValue(arena, vd, *master, "hash");
+      return hash ? std::optional{arena.textOf(*hash)} : std::nullopt;
+    }();
+    if (was != now)
+      throw std::runtime_error("the arbitration policy of " + name +
+                               " changed since the checkpoint");
     for (const auto clause : ranked(predicate, oldClause)) {
-      appendToRank(arena, *match, core.clause,
-                   cloneGraph(arena, clause, term.from, term.into));
+      appendToRank(
+          arena, *match, core.clause,
+          cloneGraph(arena, clause, belief.from, belief.into, &copies));
     }
   }
 
