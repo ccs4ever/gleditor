@@ -5,6 +5,7 @@
 
 #include "common/xanadu/merkle_ledger.hpp"
 #include "common/xanadu/store.hpp"
+#include "common/xanadu/system_docs.hpp"
 #include "common/xanadu/vagent/runtime/compiler.hpp"
 #include "common/xanadu/vagent/runtime/parser.hpp"
 #include "common/xanadu/vortex/worker_context.hpp"
@@ -35,7 +36,13 @@ CompiledProgram::fromSource(std::string_view source, std::string_view name) {
     return std::unexpected(
         std::format("{}:{}", name, formatParseError(unit.error())));
   }
-  auto checked = check(*unit);
+  return fromUnit(std::move(*unit), name, refOf(source));
+}
+
+std::expected<CompiledProgram, std::string>
+CompiledProgram::fromUnit(Unit unit, std::string_view name,
+                          std::optional<std::string> ref) {
+  auto checked = check(unit);
   if (!checked) {
     std::string message;
     for (const auto &error : checked.error()) {
@@ -53,7 +60,7 @@ CompiledProgram::fromSource(std::string_view source, std::string_view name) {
   Compiler compiler(stagingContext.core);
   std::map<std::string, CompiledAgent> stagingAgents;
   for (const auto &[agentName, _] : checked->agents) {
-    auto compiled = compiler.compileAgent(*unit, agentName);
+    auto compiled = compiler.compileAgent(unit, agentName);
     if (!compiled) {
       return std::unexpected(std::format(
           "{}:{}:{}: {}: {}", name, compiled.error().loc.line,
@@ -93,9 +100,15 @@ CompiledProgram::fromSource(std::string_view source, std::string_view name) {
     const auto remapContainers = [&](const auto &input, auto &output) {
       for (const auto &[name, source] : input) {
         CompiledContainer target;
-        target.owner = remap(source.owner);
+        target.owner        = remap(source.owner);
+        target.cell         = remap(source.cell);
+        target.member       = remap(source.member);
+        target.installLabel = remap(source.installLabel);
+        target.upgradeLabel = remap(source.upgradeLabel);
         for (const auto member : source.members)
           target.members.push_back(remap(member));
+        for (const auto inst : source.instances)
+          target.instances.push_back(remap(inst));
         for (const auto &[field, entry] : source.fieldDefaults)
           target.fieldDefaults.emplace(field, remap(entry));
         if (source.upgradeEntry)
@@ -133,8 +146,13 @@ CompiledProgram::fromSource(std::string_view source, std::string_view name) {
     persistentAgents[agentName] = persistentAgent;
   }
 
+  std::string progRef = ref.value_or("");
+  if (progRef.empty()) {
+    progRef = toHex32(sha256Digest(std::format("{}:{}", kProgramFormat, name)));
+  }
+
   return CompiledProgram(
-      std::move(*unit), std::move(*checked), refOf(source),
+      std::move(unit), std::move(*checked), std::move(progRef),
       std::move(programStore), std::move(programManifold),
       std::move(persistentAgents),
       std::make_shared<const UpgradeSchema>(std::move(*schema)));
@@ -227,6 +245,36 @@ private:
   }
   std::string key_{randomKey()};
 };
+
+LocalHost::Options
+LocalHost::Options::fromModel(const xanadu::SystemStoreModel &model) {
+  Options options;
+  options.settings = AgentSettings::fromModel(model);
+  const auto maxInst =
+      model.getInt64(xanadu::settings::kVagentMaxInstructions,
+                     static_cast<std::int64_t>(options.maxInstructions));
+  if (maxInst > 0) {
+    options.maxInstructions = static_cast<std::uint64_t>(maxInst);
+  }
+  return options;
+}
+
+LocalHost::Options LocalHost::Options::fromStore(const xanadu::Store &store) {
+  if (store.opCount() == 0 || !store.homeCell()) {
+    return Options{};
+  }
+  const auto model = xanadu::SystemStoreModel::fromStore(store);
+  return fromModel(model);
+}
+
+LocalHost::Options
+LocalHost::Options::fromManifold(const zigzag::Manifold &manifold,
+                                 const std::optional<zigzag::CellRef> homeCell,
+                                 const xanadu::SpanReader *reader) {
+  const auto model =
+      xanadu::SystemStoreModel::fromManifold(manifold, homeCell, reader);
+  return fromModel(model);
+}
 
 LocalHost::LocalHost(CompiledProgram program)
     : LocalHost(std::move(program), Options{}) {}
@@ -345,6 +393,13 @@ LocalHost::upgrade(const identity::ActorPid &pid,
                    clock_.wall() + kLocalGrantLife,
                    true};
   return executor_->upgrade(pid, std::move(program), grant);
+}
+
+std::expected<void, ActorError>
+LocalHost::upgrade(const identity::ActorPid &pid, CompiledProgram program) {
+  auto held = retainProgram(std::move(program));
+  if (!held) return std::unexpected(ActorError::NotAuthorized);
+  return executor_->upgrade(pid, *held);
 }
 
 LocalHost::~LocalHost() {

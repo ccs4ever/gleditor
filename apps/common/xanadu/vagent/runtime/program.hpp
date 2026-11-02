@@ -27,16 +27,62 @@
 
 namespace xanadu {
 class Store;
-}
+class SystemStoreModel;
+class SpanReader;
+} // namespace xanadu
 namespace zigzag {
 class Manifold;
-}
+using CellRef = std::uint32_t;
+} // namespace zigzag
 
 namespace xanadu::vagent::runtime {
 
 /// Bumped when the compiled shape of a program changes meaning, so a ref made
 /// by an older compiler never names a program this one would build differently.
 inline constexpr std::string_view kProgramFormat = "vagent-program-3";
+
+struct NativeSettings {
+  bool enabled{false};
+  std::string start{"lazy"};
+  std::string stagingDir{};
+  std::size_t maxHosts{16};
+  std::size_t maxGrants{8};
+  std::string grantPolicy{"ask"};
+  std::string terminalFilter{"strict"};
+  std::vector<std::string> libraryPaths{};
+  std::size_t memoryLimit{512 * 1024 * 1024};
+  std::size_t maxFds{64};
+  std::size_t ringBytes{1 * 1024 * 1024};
+  std::size_t frameBytes{64 * 1024};
+  std::size_t drainPerWake{256};
+  std::size_t queueDepth{64};
+  std::size_t poolThreads{4};
+  std::size_t maxHandles{4096};
+  std::size_t maxOutBytes{4096};
+  std::chrono::milliseconds callGrace{2000};
+  std::chrono::milliseconds restartBackoff{1000};
+  std::chrono::milliseconds restartBackoffMax{60000};
+  std::size_t maxFailedStarts{5};
+  std::size_t logBytesPerSecond{16 * 1024};
+  std::size_t opLogOps{1000000};
+};
+
+struct ClusterSettings {
+  bool enabled{true};
+  std::string trustPolicy{"pinned"};
+  std::vector<std::string> trustedKeys{};
+  std::string casDir{};
+  std::uint64_t casMaxBytes{10737418240ULL};
+  std::size_t inlineBundleBytes{1048576};
+  std::size_t maxPackageBytes{67108864};
+  std::size_t maxPendingFetches{32};
+  std::size_t maxPendingFetchesPerPeer{4};
+  std::chrono::milliseconds fetchTimeout{30000};
+  std::size_t maxBundledLibs{32};
+  std::size_t maxBundledLibBytes{33554432};
+  bool allowHeterogeneousMigration{true};
+  bool verifyTorrentPieces{true};
+};
 
 class CompiledProgram final : public AgentProgram {
 public:
@@ -74,6 +120,11 @@ public:
   [[nodiscard]] static std::expected<CompiledProgram, std::string>
   fromSource(std::string_view source, std::string_view name = "<source>");
 
+  /// Lower and compile a pre-parsed @p unit with an optional explicit @p ref.
+  [[nodiscard]] static std::expected<CompiledProgram, std::string>
+  fromUnit(Unit unit, std::string_view name = "<unit>",
+           std::optional<std::string> ref = std::nullopt);
+
   [[nodiscard]] std::string_view programRef() const override { return ref_; }
   [[nodiscard]] std::expected<CompiledAgent, std::string>
   instantiate(zigzag::vortex::WorkerContext &context,
@@ -104,6 +155,15 @@ public:
   CompiledProgram *setMaintainBackoffMs(std::int64_t backoffMs) noexcept {
     maintainBackoffMs_ = backoffMs;
     return this;
+  }
+  [[nodiscard]] std::size_t beliefEventDepth() const noexcept {
+    return beliefEventDepth_;
+  }
+  [[nodiscard]] std::size_t conditionFuel() const noexcept {
+    return conditionFuel_;
+  }
+  [[nodiscard]] std::int64_t maintainBackoffMs() const noexcept {
+    return maintainBackoffMs_;
   }
   [[nodiscard]] const Unit &unit() const noexcept { return unit_; }
   [[nodiscard]] const CheckedUnit &checked() const noexcept { return checked_; }
@@ -150,6 +210,8 @@ class LocalHost {
 public:
   struct Options {
     AgentSettings settings{};
+    NativeSettings nativeSettings{};
+    ClusterSettings clusterSettings{};
     /// Per-turn instruction budget granted to every agent. Compiled routines
     /// are long straight-line opcode graphs, so the default is generous.
     std::uint64_t maxInstructions{10'000'000};
@@ -166,6 +228,14 @@ public:
     std::string author{"local"};
     std::optional<xanadu::MutableKeys> keys;
     std::uint64_t epoch{1};
+
+    [[nodiscard]] static Options fromStore(const xanadu::Store &store);
+    [[nodiscard]] static Options
+    fromManifold(const zigzag::Manifold &manifold,
+                 std::optional<zigzag::CellRef> homeCell = std::nullopt,
+                 const xanadu::SpanReader *reader        = nullptr);
+    [[nodiscard]] static Options
+    fromModel(const xanadu::SystemStoreModel &model);
   };
 
   explicit LocalHost(CompiledProgram program);
@@ -217,6 +287,8 @@ public:
   upgrade(const identity::ActorPid &pid,
           std::shared_ptr<CompiledProgram> program,
           std::optional<std::uint64_t> instructionLimit = std::nullopt);
+  [[nodiscard]] std::expected<void, zigzag::vortex::mesh::ActorError>
+  upgrade(const identity::ActorPid &pid, CompiledProgram program);
   [[nodiscard]] const std::string &node() const noexcept { return node_; }
   [[nodiscard]] const xanadu::MutableKeys &deviceKeys() const noexcept {
     return keys_;

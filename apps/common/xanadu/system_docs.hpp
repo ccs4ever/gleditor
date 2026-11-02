@@ -276,15 +276,22 @@ inline constexpr std::string_view kVagentConditionFuel =
     "vagent.condition_fuel";
 inline constexpr std::string_view kVagentMaintainBackoff =
     "vagent.maintain_backoff";
+inline constexpr std::string_view kVagentMaintainBackoffMs =
+    "vagent.maintain_backoff_ms";
 inline constexpr std::string_view kVagentSendRetries = "vagent.send_retries";
 inline constexpr std::string_view kVagentSendRetryInterval =
     "vagent.send_retry_interval";
+inline constexpr std::string_view kVagentSendRetryIntervalMs =
+    "vagent.send_retry_interval_ms";
 inline constexpr std::string_view kVagentRenewFraction =
     "vagent.renew_fraction";
 inline constexpr std::string_view kVagentReadyPerMessage =
     "vagent.ready_per_message";
 inline constexpr std::string_view kVagentCompactEvery = "vagent.compact_every";
-inline constexpr std::string_view kVagentMaxSources   = "vagent.max_sources";
+inline constexpr std::string_view kVagentMaxInstructions =
+    "vagent.max_instructions";
+inline constexpr std::string_view kVagentSpawnStamp = "vagent.spawn_stamp";
+inline constexpr std::string_view kVagentMaxSources = "vagent.max_sources";
 inline constexpr std::string_view kVagentMaxCandidates =
     "vagent.max_candidates";
 inline constexpr std::string_view kVagentScopeDepth =

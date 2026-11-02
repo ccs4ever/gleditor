@@ -1,8 +1,12 @@
 #include "common/xanadu/vagent/runtime/agent_executor.hpp"
 
 #include "common/xanadu/provenance.hpp"
+#include "common/xanadu/store.hpp"
+#include "common/xanadu/system_docs.hpp"
 #include "common/xanadu/vagent/runtime/program.hpp"
+#include "common/xanadu/vagent/runtime/reconciler.hpp"
 #include "common/xanadu/vagent/runtime/upgrade_schema.hpp"
+#include "common/xanadu/zigzag/manifold.hpp"
 
 #include <cstdio>
 #include <gleditor/logging.hpp>
@@ -1021,6 +1025,53 @@ AgentExecutor::agentCell(const identity::ActorPid &pid) const {
   return found->second->agent.agentCell;
 }
 
+std::vector<identity::ActorPid> AgentExecutor::activeActors() const {
+  std::vector<identity::ActorPid> out;
+  out.reserve(states_.size());
+  for (const auto &[key, state] : states_) {
+    if (state) {
+      out.push_back(state->pid);
+    }
+  }
+  return out;
+}
+
+std::optional<std::string>
+AgentExecutor::agentType(const identity::ActorPid &pid) const {
+  const auto found = states_.find(pidKey(pid));
+  if (found == states_.end()) return std::nullopt;
+  return found->second->agentType;
+}
+
+std::optional<std::string>
+AgentExecutor::agentName(const identity::ActorPid &pid) const {
+  const auto found = states_.find(pidKey(pid));
+  if (found == states_.end()) return std::nullopt;
+  return found->second->name;
+}
+
+std::optional<std::string>
+AgentExecutor::programRef(const identity::ActorPid &pid) const {
+  const auto found = states_.find(pidKey(pid));
+  if (found == states_.end()) return std::nullopt;
+  if (found->second->grant) return found->second->grant->programRef;
+  if (found->second->program)
+    return std::string(found->second->program->programRef());
+  return std::nullopt;
+}
+
+std::optional<zigzag::vortex::mesh::ActorGrant>
+AgentExecutor::grant(const identity::ActorPid &pid) const {
+  const auto found = states_.find(pidKey(pid));
+  if (found == states_.end()) return std::nullopt;
+  return found->second->grant;
+}
+
+bool AgentExecutor::isPrepared(const identity::ActorPid &pid) const {
+  const auto found = states_.find(pidKey(pid));
+  return found != states_.end() && found->second->prepared;
+}
+
 void AgentExecutor::liftLimits(WorkerContext &context) const {
   // The grant's budget is per turn (§4.2 step 2). Between turns the adapter's
   // own writes must not draw on whatever a failed turn left of it.
@@ -1109,7 +1160,7 @@ std::uint64_t AgentExecutor::stat(const identity::ActorPid &pid,
       pending != state.pendingStats.end()) {
     total += pending->second;
   }
-  if (state.context && state.prepared) {
+  if (live(state)) {
     const auto &arena = state.context->arena;
     if (const auto stats =
             fieldValue(arena, state.vd, state.agent.agentCell, kFieldStats)) {
@@ -1393,8 +1444,8 @@ AgentExecutor::execute(const ActorExecution &execution,
     // run a dispatch with no event.
     const auto intention = std::exchange(state.wakeIntention, std::nullopt);
     const bool plain     = !justInitialised && !state.quietWake &&
-                       state.hostEvents.empty() && !intention;
-    state.quietWake = false;
+                           state.hostEvents.empty() && !intention;
+    state.quietWake      = false;
     if (intention && state.agent.continueEntry) {
       continueIntention(state, *intention, execution.grant, context);
     } else if (plain) {
@@ -2887,6 +2938,10 @@ AgentExecutor::launch(std::string_view agentType, std::string_view name,
   const auto pid        = runtime_.spawn(owner_, request, wallNow());
   if (!pid) return std::unexpected(pid.error());
   needsFirstTurn_.push_back(*pid);
+  auto &state     = stateFor(*pid);
+  state.pid       = *pid;
+  state.name      = std::string(name);
+  state.agentType = std::string(agentType);
   return pid;
 }
 
@@ -3194,7 +3249,7 @@ std::optional<std::size_t>
 AgentExecutor::epistemicCells(const identity::ActorPid &pid) const {
   const auto found = states_.find(pidKey(pid));
   if (found == states_.end() || !found->second->prepared ||
-      !found->second->context)
+      !found->second->context || !live(*found->second))
     return std::nullopt;
   return epistemicCellsWithin(*found->second,
                               std::numeric_limits<std::size_t>::max() - 1);
@@ -3582,7 +3637,7 @@ AgentExecutor::observe(const identity::ActorPid &target,
   item.pid         = target;
   item.observation = std::move(r);
   item.ingest      = IngestKey{o.principal, o.incarnation, o.eventId,
-                          o.predicate, o.relayedBy,   receivedSteady};
+                               o.predicate, o.relayedBy,   receivedSteady};
   {
     const std::lock_guard lock(ingress_->mutex);
     // Each principal, and each relay, gets a fair share of the actor queue,
@@ -4037,7 +4092,7 @@ void AgentExecutor::failMigrated(State &state) {
 
 void AgentExecutor::deriveSchedule(State &state) const {
   state.schedule = {};
-  if (!state.prepared || !state.context) return;
+  if (!live(state)) return;
   const auto &arena = state.context->arena;
   const auto &vd    = state.vd;
   auto &schedule    = state.schedule;
@@ -4075,7 +4130,7 @@ void AgentExecutor::deriveSchedule(State &state) const {
 std::vector<std::int64_t>
 AgentExecutor::readyIntentions(const identity::ActorPid &pid) const {
   const auto found = states_.find(pidKey(pid));
-  if (found == states_.end()) return {};
+  if (found == states_.end() || !live(*found->second)) return {};
   State &state = *found->second;
   deriveSchedule(state);
   return state.schedule.ready |
@@ -4086,7 +4141,7 @@ AgentExecutor::readyIntentions(const identity::ActorPid &pid) const {
 std::optional<std::int64_t>
 AgentExecutor::nextDeadline(const identity::ActorPid &pid) const {
   const auto found = states_.find(pidKey(pid));
-  if (found == states_.end()) return std::nullopt;
+  if (found == states_.end() || !live(*found->second)) return std::nullopt;
   State &state = *found->second;
   deriveSchedule(state);
   if (state.schedule.deadlines.empty()) return std::nullopt;
@@ -4272,7 +4327,10 @@ bool AgentExecutor::settleRequest(State &state, const std::string &id,
 
 void AgentExecutor::receiveReply(State &state, const ActorMessage &message) {
   const auto request = state.requests.find(message.requestId);
-  if (request == state.requests.end()) return;
+  if (request == state.requests.end()) {
+    bumpStat(state, kStatReplyStale);
+    return;
+  }
   // An `achieve` is acknowledged with an empty result; its answer is the
   // later `outcome`.
   if (!request->second.ask) return;
@@ -4373,9 +4431,9 @@ void AgentExecutor::receiveCancel(State &state, const Envelope &envelope) {
   const auto nowMillis = std::chrono::duration_cast<std::chrono::milliseconds>(
                              wallNow().time_since_epoch())
                              .count();
-  const auto window = static_cast<std::int64_t>(settings_.sendRetries) *
-                      settings_.sendRetryInterval.count();
-  auto list = readCancelled(state);
+  const auto window    = static_cast<std::int64_t>(settings_.sendRetries) *
+                         settings_.sendRetryInterval.count();
+  auto list            = readCancelled(state);
   std::erase_if(
       list, [&](const WireValue &entry) { return expired(entry, nowMillis); });
   while (list.size() >= kMaxCancelled) list.erase(list.begin());
@@ -4424,8 +4482,8 @@ AgentExecutor::receiveAchieve(State &state, const ActorExecution &execution,
   const auto nowMillis = std::chrono::duration_cast<std::chrono::milliseconds>(
                              wallNow().time_since_epoch())
                              .count();
-  auto cancelled    = readCancelled(state);
-  const auto before = cancelled.size();
+  auto cancelled       = readCancelled(state);
+  const auto before    = cancelled.size();
   // Expired ids first: one past its window is an ordinary `achieve` again.
   std::erase_if(cancelled, [&](const WireValue &entry) {
     return expired(entry, nowMillis);
@@ -5207,10 +5265,6 @@ AgentExecutor::upgrade(const identity::ActorPid &pid,
                 if (!run(field.entry) || arena.linked(ac, next.dims.outbox))
                   return std::unexpected(ActorError::ExecutionFailed);
               }
-              for (const auto entry : hooks) {
-                if (!run(entry))
-                  return std::unexpected(ActorError::ExecutionFailed);
-              }
               if (!run(next.agent.dispatchEntry))
                 return std::unexpected(ActorError::ExecutionFailed);
               // Even an indirect effect call is refused before any native
@@ -5257,6 +5311,261 @@ bool AgentExecutor::retire(const identity::ActorPid &pid) {
   cancelFlights(*found->second);
   found->second->context = nullptr;
   return true;
+}
+
+std::expected<void, zigzag::vortex::mesh::ActorError>
+AgentExecutor::upgrade(const identity::ActorPid &pid,
+                       CompiledProgram &newProgram) {
+  const auto found = states_.find(pidKey(pid));
+  if (found == states_.end() || !live(*found->second)) {
+    return std::unexpected(ActorError::UnknownProcess);
+  }
+  State &state = *found->second;
+  if (state.inTurn) {
+    return std::unexpected(ActorError::NotQuiescent);
+  }
+
+  const auto *fromProgram =
+      state.program ? dynamic_cast<const CompiledProgram *>(state.program.get())
+                    : dynamic_cast<const CompiledProgram *>(&program_);
+  if (!fromProgram) {
+    return std::unexpected(ActorError::ExecutionFailed);
+  }
+
+  ActorGrant newGrant;
+  if (state.grant) {
+    newGrant = *state.grant;
+  } else {
+    newGrant.maxInstructions = 10'000'000;
+    newGrant.maxCells        = 1U << 22;
+    newGrant.maxOutputBytes  = 32768;
+    newGrant.maxSolutions    = 1U << 12;
+    newGrant.maxMailboxBytes = 1U << 20;
+    newGrant.expiresAt       = wallNow() + std::chrono::hours(24);
+    newGrant.immutable       = true;
+  }
+  newGrant.programRef = std::string(newProgram.programRef());
+  newGrant.baseRef    = "base";
+
+  ReconcileOutcome outcome;
+  ReconcileOptions options{
+      .fromVersion     = std::string(fromProgram->programRef()),
+      .toVersion       = std::string(newProgram.programRef()),
+      .agentType       = state.agentType,
+      .maxInstructions = newGrant.maxInstructions,
+  };
+  auto reconciler = makeStateReconciler(*fromProgram, newProgram,
+                                        std::move(options), &outcome);
+
+  auto res = runtime_.upgrade(pid, newGrant, wallNow(), reconciler);
+  if (!res) {
+    return res;
+  }
+
+  state.context = runtime_.context(pid);
+  state.grant   = newGrant;
+  if (const auto resolved = resolveProgram(newProgram.programRef())) {
+    state.program = resolved;
+  } else {
+    state.program =
+        std::shared_ptr<AgentProgram>(&newProgram, [](AgentProgram *) {});
+  }
+  if (state.context) {
+    state.dims = registerDimensions(state.context->arena);
+    state.vd   = valueDims(state.context->core);
+
+    if (outcome.compiledAgent) {
+      state.agent = *outcome.compiledAgent;
+    } else {
+      auto compiled = newProgram.instantiate(*state.context, state.agentType);
+      if (compiled) {
+        state.agent = *compiled;
+      }
+    }
+
+    drain(state, *state.context, counter(state, kFieldTurnCount), TurnSpec{});
+    deriveSchedule(state);
+  }
+
+  needsFirstTurn_.push_back(pid);
+  return {};
+}
+
+AgentSettings AgentSettings::fromModel(const xanadu::SystemStoreModel &model) {
+  AgentSettings settings;
+
+  const auto depth =
+      model.getInt64(xanadu::settings::kVagentBeliefEventDepth,
+                     static_cast<std::int64_t>(settings.beliefEventDepth));
+  if (depth > 0) {
+    settings.beliefEventDepth = static_cast<std::size_t>(depth);
+  }
+
+  const auto fuel =
+      model.getInt64(xanadu::settings::kVagentConditionFuel,
+                     static_cast<std::int64_t>(settings.conditionFuel));
+  if (fuel > 0) {
+    settings.conditionFuel = static_cast<std::size_t>(fuel);
+  }
+
+  const auto msEntry  = model.find(xanadu::settings::kVagentMaintainBackoffMs);
+  const auto secEntry = model.find(xanadu::settings::kVagentMaintainBackoff);
+  if (msEntry.has_value() &&
+      model.getInt64(xanadu::settings::kVagentMaintainBackoffMs, 30000) !=
+          30000) {
+    const auto ms =
+        model.getInt64(xanadu::settings::kVagentMaintainBackoffMs, 30000);
+    if (ms >= 0) {
+      settings.maintainBackoff = std::chrono::milliseconds(ms);
+    }
+  } else if (secEntry.has_value() &&
+             model.getDouble(xanadu::settings::kVagentMaintainBackoff, 30.0) !=
+                 30.0) {
+    const auto sec =
+        model.getDouble(xanadu::settings::kVagentMaintainBackoff, 30.0);
+    if (sec >= 0.0) {
+      settings.maintainBackoff =
+          std::chrono::milliseconds(static_cast<std::int64_t>(sec * 1000.0));
+    }
+  } else if (msEntry.has_value()) {
+    const auto ms =
+        model.getInt64(xanadu::settings::kVagentMaintainBackoffMs, 30000);
+    if (ms >= 0) {
+      settings.maintainBackoff = std::chrono::milliseconds(ms);
+    }
+  } else if (secEntry.has_value()) {
+    const auto sec =
+        model.getDouble(xanadu::settings::kVagentMaintainBackoff, 30.0);
+    if (sec >= 0.0) {
+      settings.maintainBackoff =
+          std::chrono::milliseconds(static_cast<std::int64_t>(sec * 1000.0));
+    }
+  }
+
+  const auto retries =
+      model.getInt64(xanadu::settings::kVagentSendRetries,
+                     static_cast<std::int64_t>(settings.sendRetries));
+  if (retries >= 0) {
+    settings.sendRetries = static_cast<std::size_t>(retries);
+  }
+
+  const auto sendMsEntry =
+      model.find(xanadu::settings::kVagentSendRetryIntervalMs);
+  const auto sendSecEntry =
+      model.find(xanadu::settings::kVagentSendRetryInterval);
+  if (sendMsEntry.has_value() &&
+      model.getInt64(xanadu::settings::kVagentSendRetryIntervalMs, 1000) !=
+          1000) {
+    const auto ms =
+        model.getInt64(xanadu::settings::kVagentSendRetryIntervalMs, 1000);
+    if (ms >= 0) {
+      settings.sendRetryInterval = std::chrono::milliseconds(ms);
+    }
+  } else if (sendSecEntry.has_value() &&
+             model.getDouble(xanadu::settings::kVagentSendRetryInterval, 1.0) !=
+                 1.0) {
+    const auto sec =
+        model.getDouble(xanadu::settings::kVagentSendRetryInterval, 1.0);
+    if (sec >= 0.0) {
+      settings.sendRetryInterval =
+          std::chrono::milliseconds(static_cast<std::int64_t>(sec * 1000.0));
+    }
+  } else if (sendMsEntry.has_value()) {
+    const auto ms =
+        model.getInt64(xanadu::settings::kVagentSendRetryIntervalMs, 1000);
+    if (ms >= 0) {
+      settings.sendRetryInterval = std::chrono::milliseconds(ms);
+    }
+  } else if (sendSecEntry.has_value()) {
+    const auto sec =
+        model.getDouble(xanadu::settings::kVagentSendRetryInterval, 1.0);
+    if (sec >= 0.0) {
+      settings.sendRetryInterval =
+          std::chrono::milliseconds(static_cast<std::int64_t>(sec * 1000.0));
+    }
+  }
+
+  const auto fraction = model.getDouble(xanadu::settings::kVagentRenewFraction,
+                                        settings.renewFraction);
+  if (fraction > 0.0 && fraction < 1.0) {
+    settings.renewFraction = fraction;
+  }
+
+  const auto rpm =
+      model.getInt64(xanadu::settings::kVagentReadyPerMessage,
+                     static_cast<std::int64_t>(settings.readyPerMessage));
+  if (rpm > 0) {
+    settings.readyPerMessage = static_cast<std::size_t>(rpm);
+  }
+
+  const auto compact =
+      model.getInt64(xanadu::settings::kVagentCompactEvery,
+                     static_cast<std::int64_t>(settings.compactEvery));
+  if (compact > 0) {
+    settings.compactEvery = static_cast<std::size_t>(compact);
+  }
+
+  const auto valOps =
+      model.getInt64(xanadu::settings::kVagentValueOperations,
+                     static_cast<std::int64_t>(settings.valueOperations));
+  if (valOps > 0 && valOps <= std::numeric_limits<std::uint32_t>::max()) {
+    settings.valueOperations = static_cast<std::uint32_t>(valOps);
+  }
+
+  const auto stamp =
+      model.getString(xanadu::settings::kVagentSpawnStamp, settings.spawnStamp);
+  if (!stamp.empty()) {
+    settings.spawnStamp = stamp;
+  }
+
+  auto ep                 = settings.epistemic;
+  const auto loadPositive = [&](const std::string_view name,
+                                std::size_t &target) {
+    const auto val = model.getInt64(name, static_cast<std::int64_t>(target));
+    if (val > 0) {
+      target = static_cast<std::size_t>(val);
+    }
+  };
+
+  loadPositive(xanadu::settings::kVagentMaxSources, ep.maxSources);
+  loadPositive(xanadu::settings::kVagentMaxCandidates, ep.maxCandidates);
+  loadPositive(xanadu::settings::kVagentScopeDepth, ep.maxScopeDepth);
+  loadPositive(xanadu::settings::kVagentNestedScopes, ep.maxNestedScopes);
+  loadPositive(xanadu::settings::kVagentEpistemicHistory, ep.history);
+  loadPositive(xanadu::settings::kVagentEpistemicDedup, ep.dedup);
+  loadPositive(xanadu::settings::kVagentEpistemicKeysPerSource,
+               ep.keysPerSource);
+  loadPositive(xanadu::settings::kVagentEpistemicIngressQueue, ep.ingressQueue);
+  loadPositive(xanadu::settings::kVagentEpistemicIngressQueuePerSource,
+               ep.ingressQueuePerSource);
+  loadPositive(xanadu::settings::kVagentEpistemicOutcomeLog, ep.outcomeLog);
+  loadPositive(xanadu::settings::kVagentEpistemicCells, ep.cells);
+  loadPositive(xanadu::settings::kVagentEpistemicIngestPerWake,
+               ep.ingestPerWake);
+  loadPositive(xanadu::settings::kVagentEpistemicArenaSlots, ep.arenaSlots);
+
+  if (ep.validate().has_value()) {
+    settings.epistemic = ep;
+  }
+
+  return settings;
+}
+
+AgentSettings AgentSettings::fromStore(const xanadu::Store &store) {
+  if (store.opCount() == 0 || !store.homeCell()) {
+    return AgentSettings{};
+  }
+  const auto model = xanadu::SystemStoreModel::fromStore(store);
+  return fromModel(model);
+}
+
+AgentSettings
+AgentSettings::fromManifold(const zigzag::Manifold &manifold,
+                            const std::optional<zigzag::CellRef> homeCell,
+                            const xanadu::SpanReader *reader) {
+  const auto model =
+      xanadu::SystemStoreModel::fromManifold(manifold, homeCell, reader);
+  return fromModel(model);
 }
 
 } // namespace xanadu::vagent::runtime

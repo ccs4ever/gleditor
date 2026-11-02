@@ -107,16 +107,24 @@ std::string defaultSystemDocSchema(const SystemDocKind kind) {
            "vagent.maintain_backoff: Seconds before a maintain intention is "
            "re-adopted after its restorer failed or was dropped. Default is "
            "30.\n"
+           "vagent.maintain_backoff_ms: Milliseconds before a maintain "
+           "intention is re-adopted. Default is 30000.\n"
            "vagent.send_retries: Redeliveries before an unanswered send is "
            "abandoned. Default is 5.\n"
            "vagent.send_retry_interval: Seconds between redeliveries. Default "
            "is 1.\n"
+           "vagent.send_retry_interval_ms: Milliseconds between redeliveries. "
+           "Default is 1000.\n"
            "vagent.renew_fraction: Fraction of a lease elapsed before renewal "
            "starts, in (0, 1). Default is 0.8.\n"
            "vagent.ready_per_message: Wake turns run between two message "
            "turns. Default is 4.\n"
            "vagent.compact_every: Turns between arena compactions. Default is "
            "64.\n"
+           "vagent.max_instructions: Per-turn instruction budget granted to "
+           "each agent. Default is 10000000.\n"
+           "vagent.spawn_stamp: Fixed hashcash stamp for host-issued spawns. "
+           "Default is vagent-local-spawn.\n"
            "vagent.max_sources: Epistemic source admission bound; positive. "
            "Default is 128.\n"
            "vagent.max_candidates: Epistemic query admission bound; positive. "
@@ -888,6 +896,12 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .notes   = "vagent: seconds before a maintain intention is re-adopted "
                     "after its restorer failed or was dropped",
          .schemas = {{.expectedTypes = {"float"}, .defaultValues = {30.0}}}},
+        {.name = std::string(settings::kVagentMaintainBackoffMs),
+         .notes =
+             "vagent: milliseconds before a maintain intention is re-adopted "
+             "after its restorer failed or was dropped",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues = {std::int64_t{30000}}}}},
         {.name    = std::string(settings::kVagentSendRetries),
          .notes   = "vagent: redeliveries before an unanswered send is "
                     "abandoned; zero disables retry",
@@ -896,6 +910,11 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
         {.name  = std::string(settings::kVagentSendRetryInterval),
          .notes = "vagent: seconds between redeliveries of an unanswered send",
          .schemas = {{.expectedTypes = {"float"}, .defaultValues = {1.0}}}},
+        {.name = std::string(settings::kVagentSendRetryIntervalMs),
+         .notes =
+             "vagent: milliseconds between redeliveries of an unanswered send",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues = {std::int64_t{1000}}}}},
         {.name    = std::string(settings::kVagentRenewFraction),
          .notes   = "vagent: fraction of a lease that elapses before renewal "
                     "starts; range 0 to 1 exclusive",
@@ -908,6 +927,15 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .notes   = "vagent: turns between arena compact calls; positive",
          .schemas = {{.expectedTypes = {"integer"},
                       .defaultValues = {std::int64_t{64}}}}},
+        {.name  = std::string(settings::kVagentMaxInstructions),
+         .notes = "vagent: per-turn instruction budget granted to each agent; "
+                  "positive",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues = {std::int64_t{10'000'000}}}}},
+        {.name    = std::string(settings::kVagentSpawnStamp),
+         .notes   = "vagent: fixed hashcash stamp for host-issued spawns",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"vagent-local-spawn"}}}}},
         {.name    = std::string(settings::kVagentMaxSources),
          .notes   = "vagent: positive epistemic source admission bound; "
                     "cell/fuel grants still apply",
@@ -1226,9 +1254,9 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
         {.name    = std::string(settings::kRadialMenuInnerRadius),
          .notes   = "Inner deadzone radius of radial menu in pixels",
          .schemas = {{.expectedTypes = {"float"}, .defaultValues = {42.0}}}},
-        {.name    = std::string(settings::kLinkPanelFont),
-         .notes   = "Typography role name (caption, label, body, title, mono); "
-                    "empty follows label; legacy font descriptions are accepted",
+        {.name  = std::string(settings::kLinkPanelFont),
+         .notes = "Typography role name (caption, label, body, title, mono); "
+                  "empty follows label; legacy font descriptions are accepted",
          .schemas = {{.expectedTypes = {"string"},
                       .defaultValues = {panel.font}}}},
         {.name    = std::string(settings::kLinkPanelMaxLines),
@@ -2169,9 +2197,9 @@ initializeSystemStoreGenesis(Store &store, const SystemDocKind kind,
     const std::string storeNoteText = "Sovereign system store managing " +
                                       std::string(systemDocName(kind)) +
                                       " configuration.";
-    cur                = store.makeCell(cur, storeNoteText);
-    const auto noteRef = store.cellRefOf(cur).value();
-    manifold           = store.rebuildManifold(cur);
+    cur                             = store.makeCell(cur, storeNoteText);
+    const auto noteRef              = store.cellRefOf(cur).value();
+    manifold                        = store.rebuildManifold(cur);
     cur = store.setLink(cur, home, notesDim, zigzag::DimVector::POS, noteRef);
     manifold = store.rebuildManifold(cur);
   }
@@ -2295,10 +2323,10 @@ MicroversionId ensureSetting(Store &store,
       if (matched) {
         currentGroup = *matched;
       } else {
-        const auto lastSub    = firstChild
-                                    ? zigzag::rankTail(*m, *firstChild, groupsDim)
-                                    : currentGroup;
-        cur                   = store.makeCell(cur, subName);
+        const auto lastSub = firstChild
+                                 ? zigzag::rankTail(*m, *firstChild, groupsDim)
+                                 : currentGroup;
+        cur                = store.makeCell(cur, subName);
         const auto matchedSub = store.cellRefOf(cur).value();
         folded                = store.rebuildManifold(cur);
         m                     = &folded.value();
@@ -2648,7 +2676,7 @@ SystemStoreModel::fromManifold(const ManifoldT &manifold,
         .memberSettingNames = zigzag::rankAfter(manifold, gCell, varsDim) |
                               std::views::transform(text) |
                               std::ranges::to<std::vector>(),
-        .childSubgroups = std::move(childSubgroups),
+        .childSubgroups     = std::move(childSubgroups),
     };
   };
 
@@ -2697,9 +2725,9 @@ SystemStoreModel::fromManifold(const ManifoldT &manifold,
     // Active values along d.values
     entry.value.valueCells = zigzag::rankAfter(manifold, setCell, valuesDim) |
                              std::ranges::to<std::vector>();
-    entry.value.elements = entry.value.valueCells |
-                           std::views::transform(valueOf) |
-                           std::ranges::to<std::vector>();
+    entry.value.elements   = entry.value.valueCells |
+                             std::views::transform(valueOf) |
+                             std::ranges::to<std::vector>();
 
     // Validate
     std::string err;
@@ -3388,7 +3416,7 @@ LayoutConfig LayoutConfig::fromStore(const Store &store) {
       settings::kPhysicsMaxForce, static_cast<double>(cfg.physics.maxForce)));
   cfg.physics.maxVelocity             = static_cast<float>(
       model.getDouble(settings::kPhysicsMaxVelocity,
-                                  static_cast<double>(cfg.physics.maxVelocity)));
+                      static_cast<double>(cfg.physics.maxVelocity)));
   cfg.physics.timeStep = static_cast<float>(model.getDouble(
       settings::kPhysicsTimeStep, static_cast<double>(cfg.physics.timeStep)));
 

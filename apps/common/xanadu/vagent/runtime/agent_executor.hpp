@@ -44,10 +44,21 @@
 #include "common/xanadu/vortex/mesh_value.hpp"
 #include "common/xanadu/vortex/worker_context.hpp"
 
+namespace xanadu {
+class Store;
+class SystemStoreModel;
+class SpanReader;
+} // namespace xanadu
+
+namespace zigzag {
+class Manifold;
+using CellRef = std::uint32_t;
+} // namespace zigzag
+
 namespace xanadu::vagent::runtime {
 
-/// The §10 settings the adapter reads, with their defaults. P9 will fill this
-/// from `system://settings`; until then the host constructs it.
+/// The §10 settings the adapter reads, with their defaults. Loaded from
+/// `system://settings` via SystemStoreModel or constructed by the host.
 struct AgentSettings {
   std::size_t beliefEventDepth{16};
   std::size_t conditionFuel{1000};
@@ -65,6 +76,16 @@ struct AgentSettings {
   /// check one, so a spawn the host itself issues carries this fixed text.
   std::string spawnStamp{"vagent-local-spawn"};
   EpistemicLimits epistemic{};
+
+  bool operator==(const AgentSettings &) const = default;
+
+  [[nodiscard]] static AgentSettings fromStore(const xanadu::Store &store);
+  [[nodiscard]] static AgentSettings
+  fromManifold(const zigzag::Manifold &manifold,
+               std::optional<zigzag::CellRef> homeCell = std::nullopt,
+               const xanadu::SpanReader *reader        = nullptr);
+  [[nodiscard]] static AgentSettings
+  fromModel(const xanadu::SystemStoreModel &model);
 };
 
 /// What the issuer signs for one child. `parameters` is the bencoded
@@ -253,6 +274,11 @@ public:
   upgrade(const identity::ActorPid &pid,
           std::shared_ptr<CompiledProgram> program,
           const zigzag::vortex::mesh::ActorGrant &grant);
+  [[nodiscard]] std::expected<void, zigzag::vortex::mesh::ActorError>
+  upgrade(const identity::ActorPid &pid, CompiledProgram &newProgram);
+  [[nodiscard]] const AgentSettings &settings() const noexcept {
+    return settings_;
+  }
 
   /// A trusted typed translator may extend the owned graph with future ABI
   /// records. It runs privately before hooks, shares the relocation map and
@@ -432,6 +458,17 @@ public:
   [[nodiscard]] std::size_t outstanding() const noexcept {
     return outstanding_.size();
   }
+
+  [[nodiscard]] std::vector<identity::ActorPid> activeActors() const;
+  [[nodiscard]] std::optional<std::string>
+  agentType(const identity::ActorPid &pid) const;
+  [[nodiscard]] std::optional<std::string>
+  agentName(const identity::ActorPid &pid) const;
+  [[nodiscard]] std::optional<std::string>
+  programRef(const identity::ActorPid &pid) const;
+  [[nodiscard]] std::optional<zigzag::vortex::mesh::ActorGrant>
+  grant(const identity::ActorPid &pid) const;
+  [[nodiscard]] bool isPrepared(const identity::ActorPid &pid) const;
 
 private:
   struct State;
