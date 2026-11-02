@@ -43,7 +43,7 @@ class SliceViewPresenter : public gleditor::FrameContributor,
                            public gleditor::a11y::Source {
 public:
   explicit SliceViewPresenter(std::shared_ptr<view::SliceView> view,
-                              std::string fontName = "Sans 12");
+                              std::string fontName = {});
   ~SliceViewPresenter() override = default;
 
   void setView(std::shared_ptr<view::SliceView> view) noexcept {

@@ -1345,6 +1345,10 @@ ExprPtr Parser::parsePrimary() {
     f.templ = parseTermArg();
     expect(TokenKind::Comma, "',' between the template and the goal");
     f.goal = parseTerm();
+    if (atWord("from") && !breaksLine()) {
+      advance();
+      f.from = parsePostfix();
+    }
     expectClose(TokenKind::CloseParen);
     return mk(std::move(f), loc);
   }
@@ -1382,6 +1386,10 @@ ExprPtr Parser::parseFor() {
   EFor f;
   if (accept(TokenKind::Believes)) {
     f.believesTerm = parseTerm();
+    if (atWord("from") && !breaksLine()) {
+      advance();
+      f.believesFrom = parsePostfix();
+    }
   } else {
     f.binder = expectName("a loop variable");
     expect(TokenKind::In, "'in' after the loop variable");
@@ -1562,6 +1570,17 @@ ExprPtr Parser::parseAction() {
                         : k == TokenKind::Forget ? EBeliefChange::Kind::Forget
                                                  : EBeliefChange::Kind::Revise;
     b.fact            = parseTerm();
+    return mk(std::move(b), loc);
+  }
+  case TokenKind::Assert:
+  case TokenKind::Retract: {
+    EBeliefChange b;
+    const TokenKind k = advance().kind;
+    b.kind            = k == TokenKind::Assert ? EBeliefChange::Kind::Assert
+                                               : EBeliefChange::Kind::Retract;
+    b.fact            = parseTerm();
+    expectContextual("from");
+    b.from = parsePostfix();
     return mk(std::move(b), loc);
   }
   case TokenKind::Spawn: {

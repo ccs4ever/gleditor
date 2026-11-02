@@ -319,10 +319,10 @@ bool OrParallelCoordinator::submitSolution(
   std::vector<std::uint16_t> pathVec(deweyPath.begin(), deweyPath.end());
   const CellRef solCell = arena_.makeCell(value);
   solutions_[pathVec]   = OrParallelSolution{
-        .deweyPath      = pathVec,
-        .deweyKey       = key,
-        .value          = std::string(value),
-        .submissionCell = solCell,
+      .deweyPath      = pathVec,
+      .deweyKey       = key,
+      .value          = std::string(value),
+      .submissionCell = solCell,
   };
   rebuildSubmissionRankLocked();
   return true;

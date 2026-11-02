@@ -102,6 +102,10 @@ std::string_view checkErrorName(CheckErrorCode code) noexcept {
     return "EffectInMethod";
   case C::EffectPosition:
     return "EffectPosition";
+  case C::CannotSuspend:
+    return "CannotSuspend";
+  case C::FlounderedNegation:
+    return "FlounderedNegation";
   case C::ReturnOutsideMethod:
     return "ReturnOutsideMethod";
   case C::ConsumeOutsideHandler:
@@ -118,6 +122,8 @@ std::string_view checkErrorName(CheckErrorCode code) noexcept {
     return "SignatureMismatch";
   case C::PlanParamNotInGoal:
     return "PlanParamNotInGoal";
+  case C::KeyMustPrecede:
+    return "KeyMustPrecede";
   case C::InvalidEpistemicPolicy:
     return "InvalidEpistemicPolicy";
   case C::MissingClusterTolerance:
@@ -369,6 +375,7 @@ private:
   std::optional<Type> returnType_;
   DefFacts *curFacts_{nullptr};
   bool inBelievesLoop_{false};
+  bool inNegatedBelief_{false};
   bool lenient_{false}; ///< top-level goals and plans: the agent is not known
   const ContainerInfo *cur_{nullptr};
 
@@ -1149,12 +1156,24 @@ private:
                 info.name = p.name;
                 info.loc  = p.loc;
                 std::unordered_set<std::string> seen;
+                bool seenNonKey = false;
                 for (const auto &pp : p.params) {
                   checkValueName(pp.name, p.loc);
                   if (!seen.insert(pp.name).second) {
                     err(CheckErrorCode::DuplicateName, p.loc,
                         std::format("predicate argument `{}` repeats",
                                     pp.name));
+                  }
+                  if (pp.key) {
+                    if (seenNonKey) {
+                      err(CheckErrorCode::KeyMustPrecede, p.loc,
+                          std::format(
+                              "`key` parameter `{}` must precede non-key "
+                              "parameters in predicate `{}`",
+                              pp.name, p.name));
+                    }
+                  } else {
+                    seenNonKey = true;
                   }
                   info.params.push_back(
                       {pp.name, resolveType(pp.type), pp.key});
@@ -1563,7 +1582,16 @@ private:
       }
       for (const auto &a : t.args) {
         if (a.logicVar) {
-          bindLogicVar(*a.logicVar, basic(K::Any), t.loc);
+          if (inNegatedBelief_) {
+            const Symbol *s = lookup(*a.logicVar);
+            if (s == nullptr) {
+              err(CheckErrorCode::FlounderedNegation, t.loc,
+                  std::format("unbound variable `?{}` in negated belief query",
+                              *a.logicVar));
+            }
+          } else {
+            bindLogicVar(*a.logicVar, basic(K::Any), t.loc);
+          }
         } else if (a.expr && !isWildcard(*a.expr)) {
           (void)infer(*a.expr, operandPos);
         }
@@ -1580,7 +1608,16 @@ private:
       const Type want = i < params.size() ? params[i].type : basic(K::Any);
       const auto &a   = t.args[i];
       if (a.logicVar) {
-        bindLogicVar(*a.logicVar, want, t.loc);
+        if (inNegatedBelief_) {
+          const Symbol *s = lookup(*a.logicVar);
+          if (s == nullptr) {
+            err(CheckErrorCode::FlounderedNegation, t.loc,
+                std::format("unbound variable `?{}` in negated belief query",
+                            *a.logicVar));
+          }
+        } else {
+          bindLogicVar(*a.logicVar, want, t.loc);
+        }
       } else if (a.expr && !isWildcard(*a.expr)) {
         const Type got = infer(*a.expr, operandPos);
         expectType(want, got, a.expr->loc,
@@ -1704,11 +1741,18 @@ private:
       }
       break;
     case Body::Handler:
+    case Body::Lifecycle:
       if (!pos.bounded) {
         err(CheckErrorCode::EffectPosition, loc,
             std::format("effect `{}` in a handler must be in a bounded "
                         "position (§8.3)",
                         name));
+      } else if (pos.used) {
+        err(CheckErrorCode::CannotSuspend, loc,
+            std::format(
+                "cannot capture return value of effect `{}` in a "
+                "handler or lifecycle; effects only suspend in plans (§8.3)",
+                name));
       }
       break;
     default:
@@ -1789,6 +1833,12 @@ private:
   }
 
   Type node(const EUnary &n, const Expr &e, Pos) {
+    if (n.op == EUnary::Op::Not) {
+      const Restore neg(inNegatedBelief_, true);
+      const Type t = infer(*n.operand, operandPos);
+      checkTruth(*n.operand, t);
+      return basic(K::Unit);
+    }
     const Type t = infer(*n.operand, operandPos);
     switch (n.op) {
     case EUnary::Op::Neg:
@@ -1820,7 +1870,6 @@ private:
       }
       return basic(K::Int);
     case EUnary::Op::Not:
-      checkTruth(*n.operand, t);
       return basic(K::Unit);
     }
     return basic(K::Any);
@@ -2465,15 +2514,34 @@ private:
     return basic(K::Unit);
   }
 
+  void checkFrom(const ExprPtr &from) {
+    if (!from) return;
+    const Type t = infer(*from, operandPos);
+    if (!assignable(basic(K::Agent), t) && !assignable(basic(K::Str), t)) {
+      err(CheckErrorCode::TypeMismatch, from->loc,
+          std::format("`from` takes an Agent or Str, not {}", typeName(t)));
+    }
+  }
+
   Type node(const EFor &n, const Expr &e, Pos pos) {
     ScopeGuard scope(*this);
     if (!n.iterable) {
-      // `for believes term do body`
+      // `for believes term [from S] do body`
       const Restore loop(inBelievesLoop_, true);
       {
         const Restore purity(purity_, Purity::Strict);
         if (n.believesTerm) {
           checkTerm(*n.believesTerm);
+        }
+        if (n.believesFrom && n.believesTerm &&
+            arbitrated(n.believesTerm->name)) {
+          err(CheckErrorCode::EpistemicIngressOnly, n.believesFrom->loc,
+              std::format("`for believes ... from` cannot filter the "
+                          "arbitrated predicate `{}` by a source name",
+                          n.believesTerm->name));
+        }
+        if (n.believesFrom) {
+          checkFrom(n.believesFrom);
         }
       }
       (void)infer(*n.body, Pos{pos.bounded, false, false});
@@ -2514,8 +2582,7 @@ private:
                       n.term.name));
     }
     if (n.from) {
-      const Type t = infer(*n.from, operandPos);
-      expectType(basic(K::Agent), t, n.from->loc, "`from`");
+      checkFrom(n.from);
     }
     return basic(K::Unit);
   }
@@ -2523,6 +2590,15 @@ private:
   Type node(const EFindall &n, const Expr &, Pos) {
     ScopeGuard scope(*this);
     checkTerm(n.goal);
+    if (n.from && arbitrated(n.goal.name)) {
+      err(CheckErrorCode::EpistemicIngressOnly, n.from->loc,
+          std::format("`findall(..., ... from)` cannot filter the arbitrated "
+                      "predicate `{}` by a source name",
+                      n.goal.name));
+    }
+    if (n.from) {
+      checkFrom(n.from);
+    }
     if (n.templ.logicVar) {
       const Symbol *s = lookup(*n.templ.logicVar);
       if (s == nullptr) {
@@ -2581,10 +2657,29 @@ private:
   }
 
   Type node(const EBeliefChange &n, const Expr &e, Pos) {
-    noteAction(e.loc, n.kind == EBeliefChange::Kind::Believe  ? "believe"
-                      : n.kind == EBeliefChange::Kind::Forget ? "forget"
-                                                              : "revise");
+    const char *action = "believe";
+    switch (n.kind) {
+    case EBeliefChange::Kind::Believe:
+      action = "believe";
+      break;
+    case EBeliefChange::Kind::Forget:
+      action = "forget";
+      break;
+    case EBeliefChange::Kind::Revise:
+      action = "revise";
+      break;
+    case EBeliefChange::Kind::Assert:
+      action = "assert";
+      break;
+    case EBeliefChange::Kind::Retract:
+      action = "retract";
+      break;
+    }
+    noteAction(e.loc, action);
     checkTerm(n.fact);
+    if (n.from) {
+      checkFrom(n.from);
+    }
     if (arbitrated(n.fact.name)) {
       err(CheckErrorCode::EpistemicIngressOnly, e.loc,
           std::format("`{}` is arbitrated: only checked ingestion changes "
@@ -2831,7 +2926,7 @@ private:
         ok = false;
       } else {
         const DefFacts &f = it->second;
-        ok                = !f.action && !f.effect && !f.unknownCall &&
+        ok = !f.action && !f.effect && !f.unknownCall &&
              (mode == Purity::Strict ? !f.assign : !f.fieldWrite);
         for (const auto &c : f.callees) {
           if (!ok) {

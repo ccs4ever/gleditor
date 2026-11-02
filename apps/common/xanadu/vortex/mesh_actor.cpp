@@ -79,6 +79,8 @@ struct MeshActorRuntime::Actor {
   bool reapRequested{false};
   bool downSent{false};
   bool leaseExpired{false};
+  bool programPending{false};
+  std::chrono::system_clock::time_point pendingSince{};
 };
 
 struct MeshActorRuntime::Monitor {
@@ -195,9 +197,10 @@ MeshActorRuntime::spawn(const xanadu::identity::Fingerprint &identity,
   actor->context = std::make_unique<WorkerContext>(baseManifold);
   // The opaque handle is derived from immutable spawn identity, never from
   // an arena address. Restart epoch and monotonic sequence prevent ABA reuse.
-  actor->pid         = ActorPid{node_, content, epoch_, nextSpawn_++};
-  auto &context      = *actor->context;
-  const auto initial = context.arena.cellCount();
+  actor->pid                = ActorPid{node_, content, epoch_, nextSpawn_++};
+  auto &context             = *actor->context;
+  const auto initial        = context.arena.cellCount();
+  const auto initialScratch = context.arena.scratchBytes();
   if (grant->maxCells >= ephemeralBit - initial) {
     return std::unexpected(ActorError::ResourceLimit);
   }
@@ -205,12 +208,16 @@ MeshActorRuntime::spawn(const xanadu::identity::Fingerprint &identity,
       static_cast<std::uint32_t>(initial) + grant->maxCells,
       static_cast<std::size_t>(std::min<std::uint64_t>(
           grant->maxInstructions, std::numeric_limits<std::size_t>::max())),
-      grant->maxOutputBytes);
+      initialScratch + grant->maxOutputBytes);
   try {
     const auto entry = context.arena.makeCell("actor:await-message");
     actor->cursor    = context.vm.spawnCursor(entry, actor->pid.cursor);
   } catch (const std::exception &) {
     return std::unexpected(ActorError::ResourceLimit);
+  }
+  if (isProgramPending(request.programRef)) {
+    actor->programPending = true;
+    actor->pendingSince   = wallNow;
   }
   const auto pid = actor->pid;
   actors_.emplace(pidKey(pid), std::move(actor));
@@ -296,8 +303,8 @@ std::expected<ActorPid, ActorError> MeshActorRuntime::resume(
   // mutable Manifold or its receiver-local numeric root as authority.
   ValueLimits limits = options_.valueLimits;
   limits.operations  = std::min(limits.operations, grant->maxCells);
-  auto verified      = receiveValue(manifest, *sourceLease,
-                                    checkpoint.store->userPermascrollPtr(), limits);
+  auto verified = receiveValue(manifest, *sourceLease,
+                               checkpoint.store->userPermascrollPtr(), limits);
   if (!verified) return std::unexpected(ActorError::InvalidMessage);
   try {
     auto actor          = std::make_unique<Actor>();
@@ -310,7 +317,8 @@ std::expected<ActorPid, ActorError> MeshActorRuntime::resume(
         std::make_unique<WorkerContext>(actor->checkpoint->manifold.get());
     auto &context = *actor->context;
     context.arena.setDefaultSpanReader(actor->checkpoint->store.get());
-    const auto initial = context.arena.cellCount();
+    const auto initial        = context.arena.cellCount();
+    const auto initialScratch = context.arena.scratchBytes();
     if (grant->maxCells >= ephemeralBit - initial) {
       return std::unexpected(ActorError::ResourceLimit);
     }
@@ -318,7 +326,7 @@ std::expected<ActorPid, ActorError> MeshActorRuntime::resume(
         static_cast<std::uint32_t>(initial) + grant->maxCells,
         static_cast<std::size_t>(std::min<std::uint64_t>(
             grant->maxInstructions, std::numeric_limits<std::size_t>::max())),
-        grant->maxOutputBytes);
+        initialScratch + grant->maxOutputBytes);
     actor->pid = ActorPid{node_, content, epoch_, nextSpawn_};
     if (actor->pid == continuation->pid) {
       return std::unexpected(ActorError::WrongEpoch);
@@ -332,6 +340,10 @@ std::expected<ActorPid, ActorError> MeshActorRuntime::resume(
       actor->remembered.emplace(
           record.requestId,
           Actor::Remembered{record.contentHash, std::move(response)});
+    }
+    if (isProgramPending(request.programRef)) {
+      actor->programPending = true;
+      actor->pendingSince   = wallNow;
     }
     const auto pid = actor->pid;
     actors_.emplace(pidKey(pid), std::move(actor));
@@ -569,7 +581,8 @@ MeshActorRuntime::pumpOne(std::chrono::system_clock::time_point wallNow) {
   const auto pick = [&](auto first, auto last) {
     for (; first != last && !chosen; ++first) {
       const Actor &candidate = *first->second;
-      if (!candidate.stopped && !candidate.mailbox.empty()) {
+      if (!candidate.stopped && !candidate.programPending &&
+          !candidate.mailbox.empty()) {
         chosen    = first->second.get();
         chosenKey = first->first;
       }
@@ -624,6 +637,9 @@ MeshActorRuntime::wake(const ActorPid &pid,
   if (!actor || actor->stopped) {
     return std::unexpected(ActorError::UnknownProcess);
   }
+  if (actor->programPending) {
+    return std::unexpected(ActorError::ProgramPending);
+  }
   if (actor->running) return std::unexpected(ActorError::NotQuiescent);
   if (!executor_) return std::unexpected(ActorError::NotAuthorized);
   if (wallNow >= actor->grant.expiresAt) {
@@ -664,8 +680,9 @@ MeshActorRuntime::renew(const ActorPid &pid,
       wallNow >= grant->expiresAt) {
     return std::unexpected(ActorError::NotAuthorized);
   }
-  auto &arena        = actor->context->arena;
-  const auto initial = arena.cellCount();
+  auto &arena               = actor->context->arena;
+  const auto initial        = arena.cellCount();
+  const auto initialScratch = arena.scratchBytes();
   if (grant->maxCells >= ephemeralBit - initial) {
     return std::unexpected(ActorError::ResourceLimit);
   }
@@ -673,7 +690,7 @@ MeshActorRuntime::renew(const ActorPid &pid,
       static_cast<std::uint32_t>(initial) + grant->maxCells,
       static_cast<std::size_t>(std::min<std::uint64_t>(
           grant->maxInstructions, std::numeric_limits<std::size_t>::max())),
-      grant->maxOutputBytes);
+      initialScratch + grant->maxOutputBytes);
   actor->grant        = *grant;
   actor->stopped      = false;
   actor->leaseExpired = false;
@@ -684,13 +701,60 @@ std::expected<void, ActorError>
 MeshActorRuntime::upgrade(const ActorPid &pid, const ActorGrant &newGrant,
                           std::chrono::system_clock::time_point wallNow,
                           const StateReconciler &reconciler) {
-  if (!reconciler) return std::unexpected(ActorError::InvalidMessage);
-  return upgrade(
-      pid, newGrant, wallNow,
-      PreparedStateReconciler{
-          [&](const ActorPid &actor, const ArenaManifold &oldArena,
-              std::optional<CellRef> root, WorkerContext &context,
-              CellRef) { return reconciler(actor, oldArena, root, context); }});
+  auto *actor = find(pid);
+  if (!actor || (actor->stopped && !actor->leaseExpired)) {
+    return std::unexpected(ActorError::UnknownProcess);
+  }
+  if (actor->running) {
+    return std::unexpected(ActorError::NotQuiescent);
+  }
+  if (!reconciler || newGrant.programRef.empty() || newGrant.baseRef.empty() ||
+      newGrant.maxInstructions == 0 || newGrant.maxCells == 0 ||
+      newGrant.maxOutputBytes == 0 || newGrant.maxOutputBytes > 32768 ||
+      newGrant.maxSolutions == 0 || newGrant.maxMailboxBytes == 0 ||
+      wallNow >= newGrant.expiresAt) {
+    return std::unexpected(ActorError::NotAuthorized);
+  }
+  if (isProgramPending(newGrant.programRef)) {
+    return std::unexpected(ActorError::ProgramPending);
+  }
+
+  const zigzag::Manifold *newBaseManifold =
+      programResolver_ ? programResolver_(newGrant.programRef) : nullptr;
+  if (programResolver_ && !newBaseManifold) {
+    return std::unexpected(ActorError::ProgramPending);
+  }
+  auto newContext = std::make_unique<WorkerContext>(
+      newBaseManifold, newBaseManifold ? newBaseManifold->store() : nullptr);
+  if (actor->sourceLease && actor->checkpoint && actor->checkpoint->store) {
+    newContext->arena.setDefaultSpanReader(actor->checkpoint->store.get());
+  }
+  const auto initial        = newContext->arena.cellCount();
+  const auto initialScratch = newContext->arena.scratchBytes();
+  if (newGrant.maxCells >= ephemeralBit - initial) {
+    return std::unexpected(ActorError::ResourceLimit);
+  }
+  newContext->arena.setExecutionLimits(
+      static_cast<std::uint32_t>(initial) + newGrant.maxCells,
+      static_cast<std::size_t>(std::min<std::uint64_t>(
+          newGrant.maxInstructions, std::numeric_limits<std::size_t>::max())),
+      initialScratch + newGrant.maxOutputBytes);
+
+  auto newStateRoot = reconciler(actor->pid, actor->context->arena,
+                                 actor->stateRoot, *newContext);
+  if (!newStateRoot) {
+    return std::unexpected(newStateRoot.error());
+  }
+
+  const auto entry = newContext->arena.makeCell("actor:await-message");
+  actor->cursor    = newContext->vm.spawnCursor(entry, actor->pid.cursor);
+  actor->stateRoot = *newStateRoot;
+  actor->context   = std::move(newContext);
+  actor->grant     = newGrant;
+  actor->spawnRequest.programRef = newGrant.programRef;
+  actor->stopped                 = false;
+  actor->leaseExpired            = false;
+  return {};
 }
 
 std::expected<void, ActorError>
@@ -712,10 +776,12 @@ MeshActorRuntime::upgrade(const ActorPid &pid, const ActorGrant &newGrant,
     return std::unexpected(ActorError::NotAuthorized);
   if (actor->mailboxBytes > newGrant.maxMailboxBytes)
     return std::unexpected(ActorError::ResourceLimit);
+  if (isProgramPending(newGrant.programRef))
+    return std::unexpected(ActorError::ProgramPending);
   const auto *base =
       programResolver_ ? programResolver_(newGrant.programRef) : nullptr;
   if (programResolver_ && !base)
-    return std::unexpected(ActorError::NotAuthorized);
+    return std::unexpected(ActorError::ProgramPending);
   try {
     // Prepare every potentially allocating value before touching the live slot.
     auto installedGrant       = newGrant;
@@ -723,14 +789,15 @@ MeshActorRuntime::upgrade(const ActorPid &pid, const ActorGrant &newGrant,
     installedSpawn.programRef = newGrant.programRef;
     auto context =
         std::make_unique<WorkerContext>(base, base ? base->store() : nullptr);
-    const auto initial = context->arena.cellCount();
+    const auto initial        = context->arena.cellCount();
+    const auto initialScratch = context->arena.scratchBytes();
     if (newGrant.maxCells >= ephemeralBit - initial)
       return std::unexpected(ActorError::ResourceLimit);
     context->arena.setExecutionLimits(
         static_cast<std::uint32_t>(initial) + newGrant.maxCells,
         static_cast<std::size_t>(std::min<std::uint64_t>(
             newGrant.maxInstructions, std::numeric_limits<std::size_t>::max())),
-        newGrant.maxOutputBytes);
+        initialScratch + newGrant.maxOutputBytes);
     const auto entry  = context->arena.makeCell("actor:await-message");
     const auto cursor = context->vm.spawnCursor(entry, actor->pid.cursor);
     auto root         = reconciler(pid, actor->context->arena, actor->stateRoot,
@@ -1000,6 +1067,14 @@ MeshActorRuntime::localCursor(const ActorPid &pid) const {
   const auto *actor = find(pid);
   return actor ? std::optional<CellRef>(actor->cursor) : std::nullopt;
 }
+WorkerContext *MeshActorRuntime::context(const ActorPid &pid) {
+  auto *actor = find(pid);
+  return actor ? actor->context.get() : nullptr;
+}
+const WorkerContext *MeshActorRuntime::context(const ActorPid &pid) const {
+  const auto *actor = find(pid);
+  return actor ? actor->context.get() : nullptr;
+}
 std::expected<ActorCheckpointView, ActorError>
 MeshActorRuntime::checkpointView(const ActorPid &pid, CellRef stateRoot) const {
   const auto *actor = find(pid);
@@ -1027,4 +1102,74 @@ MeshActorRuntime::checkpointView(const ActorPid &pid, CellRef stateRoot) const {
   return ActorCheckpointView{std::move(continuation), actor->context->arena,
                              stateRoot};
 }
+
+void MeshActorRuntime::markProgramPending(std::string_view programRef) {
+  pendingPrograms_.insert(std::string(programRef));
+}
+
+bool MeshActorRuntime::isProgramPending(std::string_view programRef) const {
+  return pendingPrograms_.contains(std::string(programRef));
+}
+
+void MeshActorRuntime::completePendingProgram(
+    std::string_view programRef, std::expected<void, ActorError> result) {
+  pendingPrograms_.erase(std::string(programRef));
+  const auto now = std::chrono::system_clock::now();
+
+  for (auto &[key, actor] : actors_) {
+    if (actor->grant.programRef != programRef) continue;
+    if (!actor->programPending) continue;
+
+    if (result.has_value()) {
+      if (actor->pendingSince.time_since_epoch().count() > 0 &&
+          now > actor->pendingSince) {
+        const auto elapsed = now - actor->pendingSince;
+        actor->grant.expiresAt += elapsed;
+      }
+      actor->programPending = false;
+    } else {
+      actor->programPending = false;
+      actor->stopped        = true;
+      const auto monIt      = monitors_.find(pidKey(actor->pid));
+      if (monIt != monitors_.end()) {
+        for (const auto &watcher : monIt->second.watchers) {
+          ActorMessage down;
+          down.type      = MessageType::ActorDown;
+          down.source    = actor->pid;
+          down.target    = watcher;
+          down.requestId = "down:" + actor->pid.node + ":" + actor->pid.cursor;
+          emit(watcher.node, down);
+        }
+        monitors_.erase(monIt);
+      }
+    }
+  }
+}
+
+std::vector<ActorPid> MeshActorRuntime::actorPids() const {
+  std::vector<ActorPid> out;
+  out.reserve(actors_.size());
+  for (const auto &[key, actor] : actors_) {
+    if (actor) {
+      out.push_back(actor->pid);
+    }
+  }
+  return out;
+}
+
+bool MeshActorRuntime::isRunning(const ActorPid &pid) const {
+  const auto *actor = find(pid);
+  return actor ? actor->running : false;
+}
+
+bool MeshActorRuntime::isStopped(const ActorPid &pid) const {
+  const auto *actor = find(pid);
+  return actor ? actor->stopped : true;
+}
+
+std::optional<ActorGrant> MeshActorRuntime::grant(const ActorPid &pid) const {
+  const auto *actor = find(pid);
+  return actor ? std::optional<ActorGrant>(actor->grant) : std::nullopt;
+}
+
 } // namespace zigzag::vortex::mesh

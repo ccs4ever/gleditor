@@ -65,12 +65,14 @@ struct AgentDims {
   zigzag::DimRef extends{};
   zigzag::DimRef trust{};
   zigzag::DimRef epistemic{};
+  zigzag::DimRef scan{};
 };
 
-inline constexpr std::array<std::string_view, 15> kAgentDimensionNames{
-    "d.behavior", "d.skill",     "d.capacity", "d.space",  "d.member",
-    "d.holon",    "d.intention", "d.subgoal",  "d.outbox", "d.belief",
-    "d.pending",  "d.source",    "d.extends",  "d.trust",  "d.epistemic"};
+inline constexpr std::array<std::string_view, 16> kAgentDimensionNames{
+    "d.behavior", "d.skill",  "d.capacity",  "d.space",
+    "d.member",   "d.holon",  "d.intention", "d.subgoal",
+    "d.outbox",   "d.belief", "d.pending",   "d.source",
+    "d.extends",  "d.trust",  "d.epistemic", "d.scan"};
 
 /// Idempotent: `ensureDimension` returns the existing cell for a name, so a
 /// resumed arena that already holds them gets the same refs back.
@@ -91,6 +93,7 @@ inline AgentDims registerDimensions(zigzag::ArenaManifold &arena) {
       .extends   = arena.ensureDimension("d.extends"),
       .trust     = arena.ensureDimension("d.trust"),
       .epistemic = arena.ensureDimension("d.epistemic"),
+      .scan      = arena.ensureDimension("d.scan"),
   };
 }
 
@@ -838,7 +841,12 @@ inline constexpr std::size_t kRequestIdPositionDigits = 4;
  */
 struct CompiledContainer {
   zigzag::CellRef owner{};
+  zigzag::CellRef cell{};
+  zigzag::CellRef member{};
   std::vector<zigzag::CellRef> members;
+  std::vector<zigzag::CellRef> instances;
+  zigzag::CellRef installLabel{};
+  zigzag::CellRef upgradeLabel{};
   std::map<std::string, zigzag::CellRef, std::less<>> fieldDefaults;
   std::optional<zigzag::CellRef> upgradeEntry;
 };

@@ -330,8 +330,15 @@ private:
     case EBeliefChange::Kind::Revise:
       tag("revise");
       break;
+    case EBeliefChange::Kind::Assert:
+      tag("assert");
+      break;
+    case EBeliefChange::Kind::Retract:
+      tag("retract");
+      break;
     }
     term(n.fact);
+    optionalExpr(n.from);
   }
   void expressionNode(const ESpawn &n) {
     tag("ESpawn");

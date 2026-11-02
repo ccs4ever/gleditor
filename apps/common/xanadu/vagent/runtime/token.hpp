@@ -25,26 +25,26 @@ using SourceLocation = ::xanadu::SourceLocation;
 // clang-format off
 #define XANADU_VAGENT_KEYWORDS(X)                                              \
   X(Achieve, "achieve")       X(Adopt, "adopt")         X(Agent, "agent")      \
-  X(Answer, "answer")         X(Ask, "ask")             X(Await, "await")      \
-  X(Behavior, "behavior")     X(Believe, "believe")     X(Believes, "believes")\
-  X(By, "by")                 X(Capacity, "capacity")   X(Consume, "consume")  \
-  X(Def, "def")               X(Do, "do")               X(Drop, "drop")        \
-  X(Effect, "effect")         X(Else, "else")           X(Emit, "emit")        \
-  X(Event, "event")           X(Extends, "extends")     X(Fail, "fail")        \
-  X(Findall, "findall")       X(For, "for")             X(Forget, "forget")    \
-  X(Goal, "goal")             X(If, "if")               X(Implements, "implements") \
-  X(Import, "import")         X(In, "in")               X(Install, "install")  \
-  X(Key, "key")               X(Let, "let")             X(Mount, "mount")      \
-  X(Native, "native")         X(None, "none")           X(Not, "not")          \
-  X(On, "on")                 X(Plan, "plan")           X(Predicate, "predicate") \
-  X(Question, "question")     X(Record, "record")       X(Return, "return")    \
-  X(Revise, "revise")         X(Self, "self")           X(Skill, "skill")      \
-  X(Spawn, "spawn")           X(Stop, "stop")           X(Tell, "tell")        \
-  X(Terminate, "terminate")   X(Then, "then")           X(To, "to")            \
-  X(Uninstall, "uninstall")   X(Unmount, "unmount")     X(Untell, "untell")    \
-  X(Upgrade, "upgrade")       X(Uses, "uses")           X(Var, "var")          \
-  X(Where, "where")           X(While, "while")         X(Within, "within")    \
-  X(Yield, "yield")
+  X(Answer, "answer")         X(Ask, "ask")             X(Assert, "assert")    \
+  X(Await, "await")           X(Behavior, "behavior")   X(Believe, "believe")  \
+  X(Believes, "believes")     X(By, "by")               X(Capacity, "capacity")\
+  X(Consume, "consume")       X(Def, "def")             X(Do, "do")            \
+  X(Drop, "drop")             X(Effect, "effect")       X(Else, "else")        \
+  X(Emit, "emit")             X(Event, "event")         X(Extends, "extends")  \
+  X(Fail, "fail")             X(Findall, "findall")     X(For, "for")          \
+  X(Forget, "forget")         X(Goal, "goal")           X(If, "if")            \
+  X(Implements, "implements") X(Import, "import")       X(In, "in")            \
+  X(Install, "install")       X(Key, "key")             X(Let, "let")          \
+  X(Mount, "mount")           X(Native, "native")       X(None, "none")        \
+  X(Not, "not")               X(On, "on")               X(Plan, "plan")        \
+  X(Predicate, "predicate")   X(Question, "question")   X(Record, "record")    \
+  X(Retract, "retract")       X(Return, "return")       X(Revise, "revise")    \
+  X(Self, "self")             X(Skill, "skill")         X(Spawn, "spawn")      \
+  X(Stop, "stop")             X(Tell, "tell")           X(Terminate, "terminate") \
+  X(Then, "then")             X(To, "to")               X(Uninstall, "uninstall") \
+  X(Unmount, "unmount")       X(Untell, "untell")       X(Upgrade, "upgrade")  \
+  X(Uses, "uses")             X(Var, "var")             X(Where, "where")      \
+  X(While, "while")           X(Within, "within")       X(Yield, "yield")
 // clang-format on
 
 enum class TokenKind : std::uint8_t {

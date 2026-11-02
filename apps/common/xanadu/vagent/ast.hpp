@@ -10,6 +10,17 @@
 
 #include "common/xanadu/vagent/token.hpp"
 
+/**
+ * @file ast.hpp
+ * @brief Bounded Frontend AST for vagent.
+ *
+ * This AST represents the user-facing surface syntax validated by `vagent
+ * check` and frontend tools. It is consolidated with the full typed runtime AST
+ * (`common/xanadu/vagent/runtime/ast.hpp`) via the bidirectional bridge in
+ * `common/xanadu/vagent/ast_bridge.hpp`, allowing frontend programs to be
+ * lowered directly into `runtime::Unit` representations for compilation into
+ * Vortex graphs.
+ */
 namespace xanadu::vagent {
 
 struct Type {

@@ -471,7 +471,7 @@ std::expected<Token, LexFailure> Lexer::scanString() {
       std::size_t count = 0;
       while (isHexDigit(scanner_.peekChar())) {
         const char h = scanner_.advanceChar().value();
-        cp           = (cp << 4) |
+        cp = (cp << 4) |
              static_cast<char32_t>(h <= '9' ? h - '0' : (h | 0x20) - 'a' + 10);
         if (++count > maxUnicodeEscapeDigits) {
           break;

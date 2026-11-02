@@ -118,6 +118,8 @@ struct EpistemicLimits {
       return std::unexpected(EpistemicLimitError::InvalidIngestionBound);
     return {};
   }
+
+  bool operator==(const EpistemicLimits &) const = default;
 };
 
 /// Validate signed system-setting values before converting them to allocation

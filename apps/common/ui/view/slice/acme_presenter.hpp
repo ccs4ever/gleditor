@@ -25,7 +25,7 @@ namespace xanadu::ui {
 class AcmePresenter : public SliceViewPresenter {
 public:
   explicit AcmePresenter(std::shared_ptr<view::AcmeSliceView> acmeView,
-                         std::string fontName = "Sans 12");
+                         std::string fontName = {});
   ~AcmePresenter() override = default;
 
   [[nodiscard]] const view::AcmeSliceView *acmeView() const noexcept {

@@ -1439,8 +1439,8 @@ std::size_t VortexVM::stepScheduler(std::stop_token stopToken) {
   // category is disabled, so an instrumented build pays nothing by default.
   static const auto schedLogger = gleditor::logging::category("vortex.sched");
   const bool trace              = schedLogger->should_log(spdlog::level::trace);
-  const auto tickStart          = trace ? std::chrono::steady_clock::now()
-                                        : std::chrono::steady_clock::time_point{};
+  const auto tickStart = trace ? std::chrono::steady_clock::now()
+                               : std::chrono::steady_clock::time_point{};
 
   for (CellRef cursor : cursors) {
     if (stopToken.stop_requested()) {

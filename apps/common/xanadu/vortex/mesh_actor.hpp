@@ -11,6 +11,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -40,6 +41,8 @@ enum class ActorError {
   NotQuiescent,
   /// The id lies below a floor the sender has already advanced past.
   StaleRequest,
+  /// Admission deferred while programRef is fetched across the cluster.
+  ProgramPending,
 };
 
 /// The verifier checks these against the signed capability, authenticated
@@ -255,10 +258,30 @@ public:
   [[nodiscard]] std::size_t actorCount() const noexcept;
   [[nodiscard]] std::size_t pending(const ActorPid &pid) const;
   [[nodiscard]] std::optional<CellRef> localCursor(const ActorPid &pid) const;
+  [[nodiscard]] WorkerContext *context(const ActorPid &pid);
+  [[nodiscard]] const WorkerContext *context(const ActorPid &pid) const;
   /// Owner-thread borrow: publish before resuming execution. Refuses pending
   /// mailboxes, outstanding replies and choice stacks.
   [[nodiscard]] std::expected<ActorCheckpointView, ActorError>
   checkpointView(const ActorPid &pid, CellRef stateRoot) const;
+
+  /// Registers a programRef as pending cluster fetch.
+  void markProgramPending(std::string_view programRef);
+
+  /// Checks whether programRef is pending cluster fetch.
+  [[nodiscard]] bool isProgramPending(std::string_view programRef) const;
+
+  /// Completes a pending program fetch across the cluster.
+  /// If result is ok, unmarks programRef, credits elapsed fetch wait time, and
+  /// unblocks actors. If result has an error, stops affected actors and
+  /// notifies monitors.
+  void completePendingProgram(std::string_view programRef,
+                              std::expected<void, ActorError> result);
+
+  [[nodiscard]] std::vector<ActorPid> actorPids() const;
+  [[nodiscard]] bool isRunning(const ActorPid &pid) const;
+  [[nodiscard]] bool isStopped(const ActorPid &pid) const;
+  [[nodiscard]] std::optional<ActorGrant> grant(const ActorPid &pid) const;
 
 private:
   struct Actor;
@@ -288,6 +311,7 @@ private:
   std::map<std::string, Monitor> monitors_;
   std::map<std::string, Delivery> deliveries_;
   std::map<std::string, xanadu::identity::Fingerprint> trustedNodes_;
+  std::set<std::string> pendingPrograms_;
   std::string lastServed_;
 };
 } // namespace zigzag::vortex::mesh

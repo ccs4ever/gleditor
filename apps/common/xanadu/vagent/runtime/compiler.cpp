@@ -347,6 +347,7 @@ template <typename F> void forEachChild(const Expr &e, F &&f) {
           if (n.believesTerm) {
             for (const auto &a : n.believesTerm->args) opt(a.expr);
           }
+          opt(n.believesFrom);
           opt(n.body);
         } else if constexpr (std::is_same_v<T, EEmit>) {
           opt(n.event);
@@ -363,8 +364,10 @@ template <typename F> void forEachChild(const Expr &e, F &&f) {
         } else if constexpr (std::is_same_v<T, EFindall>) {
           opt(n.templ.expr);
           for (const auto &a : n.goal.args) opt(a.expr);
+          opt(n.from);
         } else if constexpr (std::is_same_v<T, EBeliefChange>) {
           for (const auto &a : n.fact.args) opt(a.expr);
+          opt(n.from);
         } else if constexpr (std::is_same_v<T, EInstall>) {
           for (const auto &a : n.args) opt(a);
         } else if constexpr (std::is_same_v<T, ETell>) {
@@ -540,7 +543,7 @@ private:
   // stay dormant rather than reading a cell that was never minted.
   CellRef inCondG_{}, condFuelG_{}, condContractD_{}, condD_{};
   CellRef inPlanG_{}, planContractDG_{};
-  CellRef scanSubjG_{}, scanPosG_{}, scanLenG_{};
+  CellRef scanSubjG_{}, scanPosG_{}, scanLenG_{}, scanCursorG_{};
 
   // Per-routine emission state.
   std::vector<std::unordered_map<std::string, Local>> scopes_;
@@ -917,7 +920,7 @@ private:
   /// `if reg == 0 goto label`
   void branchIfZero(CellRef r, CellRef label) {
     const CellRef t = reg();
-    emit(OpcodeKind::Eq, "z", {S(r), S(zero_)}, {t});
+    emit(OpcodeKind::Not, "!z", {S(r)}, {t});
     branch(S(t), label);
   }
 
@@ -1096,7 +1099,7 @@ private:
   Ty yieldExpr(const EYield &y, CellRef out, SourceLocation loc);
   Ty effectCall(const std::string &skillName, const MethodSig &sig,
                 const std::vector<ExprPtr> &args, CellRef out,
-                SourceLocation loc);
+                SourceLocation loc, const std::string &capacityName = {});
   CellRef buildGoalArgs(const GoalInfo &gi, const std::vector<ExprPtr> &args,
                         SourceLocation loc);
   CellRef mintIntentionCell(const GoalInfo &gi, CellRef argsRec, bool setReady);
@@ -1215,7 +1218,8 @@ private:
   void mintPolicyMaster(CellRef predicate, const ArbitrationPolicy &policy);
   Ty findallExpr(const EFindall &f, CellRef out, SourceLocation loc);
   Ty forBelieves(const EFor &f, CellRef out);
-  Ty beliefChange(EBeliefChange::Kind kind, const Term &t, CellRef out);
+  Ty beliefChange(EBeliefChange::Kind kind, const Term &t,
+                  const ExprPtr &fromExpr, CellRef out);
   void emitBeliefBind(HandlerInfo &h);
 
   // -- capacities, skills and behaviors (§5.3, §5.7)
@@ -1814,7 +1818,7 @@ void Gen::emitRtStrLen() {
   movC(len, zero_);
   place(loop);
   emit(OpcodeKind::Value, "ch", {S(s), S(len), S(one_)}, {ch});
-  emit(OpcodeKind::Eq, "end?", {S(ch), S(cStr(""))}, {eq});
+  emit(OpcodeKind::Eq, "end?", {D(ch), S(cStr(""))}, {eq});
   branch(S(eq), done);
   emit(OpcodeKind::Add, "len+", {S(len), S(one_)}, {len});
   jump(loop);
@@ -2059,7 +2063,7 @@ Ty Gen::expr(const Expr &e, CellRef out) {
         } else if constexpr (std::is_same_v<T, EFindall>) {
           return findallExpr(n, out, loc);
         } else if constexpr (std::is_same_v<T, EBeliefChange>) {
-          return beliefChange(n.kind, n.fact, out);
+          return beliefChange(n.kind, n.fact, n.from, out);
         } else if constexpr (std::is_same_v<T, EInstall>) {
           return installByName(n.kind, n.name, n.args, out, loc);
         } else if constexpr (std::is_same_v<T, ETell>) {
@@ -2312,29 +2316,63 @@ Ty Gen::binary(const EBinary &b, CellRef out, SourceLocation loc) {
     return assign(b, out, loc);
   case Op::Scan: {
     const CellRef subj = reg(), savedSubj = reg(), savedPos = reg(),
-                  savedLen = reg();
-    const Ty lt            = expr(*b.left, subj);
+                  savedLen = reg(), savedCursor = reg(), curCursor = reg();
+    const Ty lt = expr(*b.left, subj);
     if (lt.k != Ty::K::Str) {
       bail(CompileError::TypeMismatch, "? requires a string subject", loc);
     }
     mov(S(savedSubj), S(scanSubjG_));
     mov(S(savedPos), S(scanPosG_));
     mov(S(savedLen), S(scanLenG_));
+    mov(S(savedCursor), S(scanCursorG_));
+
     const CellRef scanFail = newLabel(), scanDone = newLabel();
     emit(OpcodeKind::Choice, "scan", {S(opref(scanFail))});
     mov(S(scanSubjG_), S(subj));
-    movC(scanPosG_, zero_);
+    movC(scanPosG_, one_);
     callStrLen(subj, scanLenG_);
+
+    // Mint cursor cell on dims_.scan linked posward of frameH_
+    // Cursor's +d.grab is subj
+    alloc(curCursor);
+    mov(S(scanCursorG_), S(curCursor));
+    emit(OpcodeKind::Value, "cinit",
+         {S(curCursor), S(zero_), S(negOne_), S(one_)}, {});
+    emit(OpcodeKind::Link, "cscan",
+         {S(frameH_), S(cInt(static_cast<std::int64_t>(dims_.scan))), S(one_),
+          S(curCursor)},
+         {});
+    emit(OpcodeKind::Link, "cgrab",
+         {S(curCursor), S(cInt(static_cast<std::int64_t>(core_.dims().grab))),
+          S(one_), S(subj)},
+         {});
+
     const Ty rt = expr(*b.right, out);
+
+    // Unlink cursor and restore saved
+    emit(OpcodeKind::Break, "cunc",
+         {S(curCursor), S(cInt(static_cast<std::int64_t>(dims_.scan)))}, {});
+    emit(OpcodeKind::Break, "cung",
+         {S(curCursor), S(cInt(static_cast<std::int64_t>(core_.dims().grab)))},
+         {});
     mov(S(scanSubjG_), S(savedSubj));
     mov(S(scanPosG_), S(savedPos));
     mov(S(scanLenG_), S(savedLen));
+    mov(S(scanCursorG_), S(savedCursor));
     jump(scanDone);
+
     place(scanFail);
+    emit(OpcodeKind::Break, "cuncF",
+         {S(curCursor), S(cInt(static_cast<std::int64_t>(dims_.scan)))}, {});
+    emit(OpcodeKind::Break, "cungF",
+         {S(curCursor), S(cInt(static_cast<std::int64_t>(core_.dims().grab)))},
+         {});
     mov(S(scanSubjG_), S(savedSubj));
     mov(S(scanPosG_), S(savedPos));
     mov(S(scanLenG_), S(savedLen));
+    mov(S(scanCursorG_), S(savedCursor));
     failNow();
+
     place(scanDone);
     return rt;
   }
@@ -2481,15 +2519,25 @@ Ty Gen::call(const ECall &c, CellRef out, SourceLocation loc) {
     }
     return tyOf(Ty::K::Str);
   }
-  // String scanning built-ins (§10).
+  // String scanning built-ins (§10). Positions are 1-based: 1 is before the
+  // first character, len + 1 is after the last, and non-positive arguments a <=
+  // 0 to pos(i) and tab(i) are end-relative (len + 1 + a).
   if (callee->name == "pos") {
     if (c.args.empty()) {
       mov(S(out), S(scanPosG_));
       return tyOf(Ty::K::Int);
     }
     if (c.args.size() == 1) {
-      const CellRef target = reg(), eq = reg(), ok = newLabel();
-      expr(*c.args[0], target);
+      const CellRef arg = reg(), target = reg(), endOne = reg(), eq = reg(),
+                    leZero     = reg();
+      const CellRef normalized = newLabel(), ok = newLabel();
+      expr(*c.args[0], arg);
+      mov(S(target), S(arg));
+      emit(OpcodeKind::Lte, "a<=0", {S(arg), S(zero_)}, {leZero});
+      branchIfZero(leZero, normalized);
+      emit(OpcodeKind::Add, "len+1", {S(scanLenG_), S(one_)}, {endOne});
+      emit(OpcodeKind::Add, "rel", {S(endOne), S(arg)}, {target});
+      place(normalized);
       emit(OpcodeKind::Eq, "pos?", {S(scanPosG_), S(target)}, {eq});
       branch(S(eq), ok);
       failNow();
@@ -2504,26 +2552,33 @@ Ty Gen::call(const ECall &c, CellRef out, SourceLocation loc) {
       bail(CompileError::BadArity, callee->name + " takes 1 argument", loc);
     }
     const CellRef arg = reg(), newPos = reg(), oldPos = reg(), lo = reg(),
-                  hi = reg(), len = reg(), bad = reg();
-    const CellRef ok1 = newLabel(), ok2 = newLabel(), fwd = newLabel(),
-                  haveBounds = newLabel(), emptySub = newLabel(),
-                  done = newLabel();
+                  hi = reg(), len = reg(), bad = reg(), endOne = reg(),
+                  loZero     = reg();
+    const CellRef normalized = newLabel(), ok1 = newLabel(), ok2 = newLabel(),
+                  fwd = newLabel(), haveBounds = newLabel(),
+                  emptySub = newLabel(), done = newLabel();
     expr(*c.args[0], arg);
     mov(S(oldPos), S(scanPosG_));
+    emit(OpcodeKind::Add, "len+1", {S(scanLenG_), S(one_)}, {endOne});
     if (callee->name == "move") {
       emit(OpcodeKind::Add, "mv+", {S(oldPos), S(arg)}, {newPos});
     } else {
       mov(S(newPos), S(arg));
+      emit(OpcodeKind::Lte, "a<=0", {S(arg), S(zero_)}, {bad});
+      branchIfZero(bad, normalized);
+      emit(OpcodeKind::Add, "rel", {S(endOne), S(arg)}, {newPos});
+      place(normalized);
     }
-    emit(OpcodeKind::Lt, "p<0", {S(newPos), S(zero_)}, {bad});
+    emit(OpcodeKind::Lt, "p<1", {S(newPos), S(one_)}, {bad});
     branchIfZero(bad, ok1);
     failNow();
     place(ok1);
-    emit(OpcodeKind::Gt, "p>len", {S(newPos), S(scanLenG_)}, {bad});
+    emit(OpcodeKind::Gt, "p>len+1", {S(newPos), S(endOne)}, {bad});
     branchIfZero(bad, ok2);
     failNow();
     place(ok2);
     mov(S(scanPosG_), S(newPos));
+    mov(D(scanCursorG_), S(newPos));
     emit(OpcodeKind::Lte, "o<=n", {S(oldPos), S(newPos)}, {bad});
     branch(S(bad), fwd);
     mov(S(lo), S(newPos));
@@ -2535,7 +2590,10 @@ Ty Gen::call(const ECall &c, CellRef out, SourceLocation loc) {
     place(haveBounds);
     emit(OpcodeKind::Sub, "len", {S(hi), S(lo)}, {len});
     branchIfZero(len, emptySub);
-    emit(OpcodeKind::Value, "sub", {S(scanSubjG_), S(lo), S(len)}, {out});
+    emit(OpcodeKind::Sub, "lo0", {S(lo), S(one_)}, {loZero});
+    const CellRef slice = reg();
+    emit(OpcodeKind::Value, "sub", {S(scanSubjG_), S(loZero), S(len)}, {slice});
+    mov(S(out), D(slice));
     jump(done);
     place(emptySub);
     movC(out, cStr(""));
@@ -2546,25 +2604,26 @@ Ty Gen::call(const ECall &c, CellRef out, SourceLocation loc) {
     if (c.args.size() != 1) {
       bail(CompileError::BadArity, "match takes 1 argument", loc);
     }
-    const CellRef pref = reg(), plen = reg(), endPos = reg(), bad = reg(),
-                  sub      = reg();
+    const CellRef pref = reg(), plen = reg(), endPos = reg(), endOne = reg(),
+                  posZero = reg(), bad = reg(), sub = reg();
     const CellRef inBounds = newLabel(), emptyPref = newLabel(),
                   checkSub = newLabel(), matched = newLabel();
     expr(*c.args[0], pref);
     callStrLen(pref, plen);
     emit(OpcodeKind::Add, "end", {S(scanPosG_), S(plen)}, {endPos});
-    emit(OpcodeKind::Gt, "end>len", {S(endPos), S(scanLenG_)}, {bad});
+    emit(OpcodeKind::Add, "len+1", {S(scanLenG_), S(one_)}, {endOne});
+    emit(OpcodeKind::Gt, "end>len+1", {S(endPos), S(endOne)}, {bad});
     branchIfZero(bad, inBounds);
     failNow();
     place(inBounds);
     branchIfZero(plen, emptyPref);
-    emit(OpcodeKind::Value, "sub", {S(scanSubjG_), S(scanPosG_), S(plen)},
-         {sub});
+    emit(OpcodeKind::Sub, "pos0", {S(scanPosG_), S(one_)}, {posZero});
+    emit(OpcodeKind::Value, "sub", {S(scanSubjG_), S(posZero), S(plen)}, {sub});
     jump(checkSub);
     place(emptyPref);
     movC(sub, cStr(""));
     place(checkSub);
-    emit(OpcodeKind::Eq, "m?", {S(sub), S(pref)}, {bad});
+    emit(OpcodeKind::Eq, "m?", {D(sub), S(pref)}, {bad});
     branch(S(bad), matched);
     failNow();
     place(matched);
@@ -2582,7 +2641,7 @@ Ty Gen::call(const ECall &c, CellRef out, SourceLocation loc) {
                   after = newLabel();
     expr(*c.args[0], cset);
     callStrLen(cset, clen);
-    mov(S(i), S(scanPosG_));
+    emit(OpcodeKind::Sub, "pos0", {S(scanPosG_), S(one_)}, {i});
     place(oloop);
     emitCondTick();
     emit(OpcodeKind::Gte, "i>=len", {S(i), S(scanLenG_)}, {cmp});
@@ -2593,14 +2652,14 @@ Ty Gen::call(const ECall &c, CellRef out, SourceLocation loc) {
     emit(OpcodeKind::Gte, "j>=clen", {S(j), S(clen)}, {cmp});
     branch(S(cmp), onext);
     emit(OpcodeKind::Value, "cch", {S(cset), S(j), S(one_)}, {cch});
-    emit(OpcodeKind::Eq, "hit?", {S(ch), S(cch)}, {cmp});
+    emit(OpcodeKind::Eq, "hit?", {D(ch), D(cch)}, {cmp});
     branch(S(cmp), found);
     place(inext);
     emit(OpcodeKind::Add, "j+", {S(j), S(one_)}, {j});
     jump(iloop);
     place(found);
     emit(OpcodeKind::Choice, "upto", {S(opref(onext))});
-    mov(S(out), S(i));
+    emit(OpcodeKind::Add, "i+1", {S(i), S(one_)}, {out});
     jump(after);
     place(onext);
     emit(OpcodeKind::Add, "i+", {S(i), S(one_)}, {i});
@@ -2621,7 +2680,7 @@ Ty Gen::call(const ECall &c, CellRef out, SourceLocation loc) {
                   done = newLabel(), after = newLabel();
     expr(*c.args[0], sub);
     callStrLen(sub, slen);
-    mov(S(i), S(scanPosG_));
+    emit(OpcodeKind::Sub, "pos0", {S(scanPosG_), S(one_)}, {i});
     place(loop);
     emitCondTick();
     emit(OpcodeKind::Add, "end", {S(i), S(slen)}, {endPos});
@@ -2631,18 +2690,191 @@ Ty Gen::call(const ECall &c, CellRef out, SourceLocation loc) {
     emit(OpcodeKind::Value, "cand", {S(scanSubjG_), S(i), S(slen)}, {cand});
     jump(checkCand);
     place(emptySub);
-    movC(cand, cStr(""));
+    alloc(cand);
+    mov(D(cand), S(cStr("")));
     place(checkCand);
-    emit(OpcodeKind::Eq, "hit?", {S(cand), S(sub)}, {cmp});
+    emit(OpcodeKind::Eq, "hit?", {D(cand), S(sub)}, {cmp});
     branch(S(cmp), hit);
     jump(next);
     place(hit);
     emit(OpcodeKind::Choice, "find", {S(opref(next))});
-    mov(S(out), S(i));
+    emit(OpcodeKind::Add, "i+1", {S(i), S(one_)}, {out});
     jump(after);
     place(next);
     emit(OpcodeKind::Add, "i+", {S(i), S(one_)}, {i});
     jump(loop);
+    place(done);
+    failNow();
+    place(after);
+    return tyOf(Ty::K::Int);
+  }
+  if (callee->name == "any") {
+    if (c.args.size() != 1) {
+      bail(CompileError::BadArity, "any takes 1 argument", loc);
+    }
+    const CellRef cset = reg(), clen = reg(), posZero = reg(), j = reg(),
+                  ch = reg(), cch = reg(), cmp = reg();
+    const CellRef inBounds = newLabel(), loop = newLabel(), hit = newLabel(),
+                  done = newLabel();
+    expr(*c.args[0], cset);
+    callStrLen(cset, clen);
+    emit(OpcodeKind::Sub, "pos0", {S(scanPosG_), S(one_)}, {posZero});
+    emit(OpcodeKind::Lt, "p<len", {S(posZero), S(scanLenG_)}, {cmp});
+    branch(S(cmp), inBounds);
+    failNow();
+    place(inBounds);
+    emit(OpcodeKind::Value, "ch", {S(scanSubjG_), S(posZero), S(one_)}, {ch});
+    movC(j, zero_);
+    place(loop);
+    emit(OpcodeKind::Gte, "j>=clen", {S(j), S(clen)}, {cmp});
+    branch(S(cmp), done);
+    emit(OpcodeKind::Value, "cch", {S(cset), S(j), S(one_)}, {cch});
+    emit(OpcodeKind::Eq, "hit?", {D(ch), D(cch)}, {cmp});
+    branch(S(cmp), hit);
+    emit(OpcodeKind::Add, "j+", {S(j), S(one_)}, {j});
+    jump(loop);
+    place(done);
+    failNow();
+    place(hit);
+    emit(OpcodeKind::Add, "pos+1", {S(scanPosG_), S(one_)}, {out});
+    return tyOf(Ty::K::Int);
+  }
+  if (callee->name == "many") {
+    if (c.args.size() != 1) {
+      bail(CompileError::BadArity, "many takes 1 argument", loc);
+    }
+    const CellRef cset = reg(), clen = reg(), startZero = reg(), i = reg(),
+                  j = reg(), ch = reg(), cch = reg(), cmp = reg();
+    const CellRef oloop = newLabel(), iloop = newLabel(), advance = newLabel(),
+                  stopScan = newLabel(), matched = newLabel();
+    expr(*c.args[0], cset);
+    callStrLen(cset, clen);
+    emit(OpcodeKind::Sub, "pos0", {S(scanPosG_), S(one_)}, {startZero});
+    mov(S(i), S(startZero));
+    place(oloop);
+    emitCondTick();
+    emit(OpcodeKind::Gte, "i>=len", {S(i), S(scanLenG_)}, {cmp});
+    branch(S(cmp), stopScan);
+    emit(OpcodeKind::Value, "ch", {S(scanSubjG_), S(i), S(one_)}, {ch});
+    movC(j, zero_);
+    place(iloop);
+    emit(OpcodeKind::Gte, "j>=clen", {S(j), S(clen)}, {cmp});
+    branch(S(cmp), stopScan);
+    emit(OpcodeKind::Value, "cch", {S(cset), S(j), S(one_)}, {cch});
+    emit(OpcodeKind::Eq, "hit?", {D(ch), D(cch)}, {cmp});
+    branch(S(cmp), advance);
+    emit(OpcodeKind::Add, "j+", {S(j), S(one_)}, {j});
+    jump(iloop);
+    place(advance);
+    emit(OpcodeKind::Add, "i+", {S(i), S(one_)}, {i});
+    jump(oloop);
+    place(stopScan);
+    emit(OpcodeKind::Gt, "i>start", {S(i), S(startZero)}, {cmp});
+    branch(S(cmp), matched);
+    failNow();
+    place(matched);
+    emit(OpcodeKind::Add, "i+1", {S(i), S(one_)}, {out});
+    return tyOf(Ty::K::Int);
+  }
+  if (callee->name == "bal") {
+    if (c.args.empty() || c.args.size() > 3) {
+      bail(CompileError::BadArity, "bal takes 1, 2, or 3 arguments", loc);
+    }
+    const CellRef cset = reg(), copen = reg(), cclose = reg(), clen = reg(),
+                  openLen = reg(), closeLen = reg(), i = reg(), depth = reg(),
+                  ch = reg(), cch = reg(), j = reg(), cmp = reg();
+    const CellRef loop = newLabel(), done = newLabel(), after = newLabel(),
+                  nextCand = newLabel(), checkC1 = newLabel(),
+                  inC1 = newLabel(), checkOpen = newLabel(),
+                  inOpen = newLabel(), checkClose = newLabel(),
+                  inClose = newLabel(), stepI = newLabel();
+    expr(*c.args[0], cset);
+    callStrLen(cset, clen);
+    if (c.args.size() >= 2) {
+      expr(*c.args[1], copen);
+    } else {
+      movC(copen, cStr("("));
+    }
+    callStrLen(copen, openLen);
+    if (c.args.size() >= 3) {
+      expr(*c.args[2], cclose);
+    } else {
+      movC(cclose, cStr(")"));
+    }
+    callStrLen(cclose, closeLen);
+
+    // 0-based offset i starts at scanPosG_ - 1
+    emit(OpcodeKind::Sub, "pos0", {S(scanPosG_), S(one_)}, {i});
+    movC(depth, zero_);
+
+    place(loop);
+    emitCondTick();
+    emit(OpcodeKind::Gte, "i>=len", {S(i), S(scanLenG_)}, {cmp});
+    branch(S(cmp), done);
+    emit(OpcodeKind::Value, "ch", {S(scanSubjG_), S(i), S(one_)}, {ch});
+
+    // If depth == 0, check if ch is in cset
+    branchIfZero(depth, checkC1);
+    jump(checkOpen);
+
+    place(checkC1);
+    movC(j, zero_);
+    const CellRef c1Loop = newLabel();
+    place(c1Loop);
+    emit(OpcodeKind::Gte, "j>=clen", {S(j), S(clen)}, {cmp});
+    branch(S(cmp), checkOpen);
+    emit(OpcodeKind::Value, "cch", {S(cset), S(j), S(one_)}, {cch});
+    emit(OpcodeKind::Eq, "c1?", {D(ch), D(cch)}, {cmp});
+    branch(S(cmp), inC1);
+    emit(OpcodeKind::Add, "j+", {S(j), S(one_)}, {j});
+    jump(c1Loop);
+
+    place(inC1);
+    // Generator choice point! Yield 1-based position i + 1. On backtrack,
+    // resume at nextCand
+    emit(OpcodeKind::Choice, "bal", {S(opref(nextCand))});
+    emit(OpcodeKind::Add, "pos1", {S(i), S(one_)}, {out});
+    jump(after);
+
+    place(nextCand);
+    // Continue from nextCand by updating depth for ch and stepping i
+    place(checkOpen);
+    movC(j, zero_);
+    const CellRef openLoop = newLabel();
+    place(openLoop);
+    emit(OpcodeKind::Gte, "j>=olen", {S(j), S(openLen)}, {cmp});
+    branch(S(cmp), checkClose);
+    emit(OpcodeKind::Value, "cch", {S(copen), S(j), S(one_)}, {cch});
+    emit(OpcodeKind::Eq, "open?", {D(ch), D(cch)}, {cmp});
+    branch(S(cmp), inOpen);
+    emit(OpcodeKind::Add, "j+", {S(j), S(one_)}, {j});
+    jump(openLoop);
+
+    place(inOpen);
+    emit(OpcodeKind::Add, "d+", {S(depth), S(one_)}, {depth});
+    jump(stepI);
+
+    place(checkClose);
+    movC(j, zero_);
+    const CellRef closeLoop = newLabel();
+    place(closeLoop);
+    emit(OpcodeKind::Gte, "j>=closeLen", {S(j), S(closeLen)}, {cmp});
+    branch(S(cmp), stepI);
+    emit(OpcodeKind::Value, "cch", {S(cclose), S(j), S(one_)}, {cch});
+    emit(OpcodeKind::Eq, "close?", {D(ch), D(cch)}, {cmp});
+    branch(S(cmp), inClose);
+    emit(OpcodeKind::Add, "j+", {S(j), S(one_)}, {j});
+    jump(closeLoop);
+
+    place(inClose);
+    emit(OpcodeKind::Lt, "d<1", {S(depth), S(one_)}, {cmp});
+    branch(S(cmp), done); // unmatched closing delimiter -> fail
+    emit(OpcodeKind::Sub, "d-", {S(depth), S(one_)}, {depth});
+
+    place(stepI);
+    emit(OpcodeKind::Add, "i+", {S(i), S(one_)}, {i});
+    jump(loop);
+
     place(done);
     failNow();
     place(after);
@@ -2862,7 +3094,7 @@ std::optional<Ty> Gen::capacityCall(const ECall &c, CellRef out,
   const auto arity       = [&](std::size_t n) {
     if (c.args.size() != n) {
       bail(CompileError::BadArity,
-                 cap + "." + fn + " takes " + std::to_string(n) + " arguments", loc);
+           cap + "." + fn + " takes " + std::to_string(n) + " arguments", loc);
     }
   };
   CellRef vc;
@@ -3826,44 +4058,66 @@ Ty Gen::awaitExpr(const EAwait &a, CellRef out, SourceLocation loc) {
 
 Ty Gen::effectCall(const std::string &skillName, const MethodSig &sig,
                    const std::vector<ExprPtr> &args, CellRef out,
-                   SourceLocation loc) {
+                   SourceLocation loc, const std::string &capacityName) {
   if (args.size() != sig.params.size()) {
     bail(CompileError::BadArity,
          sig.name + " takes " + std::to_string(sig.params.size()) +
              " arguments",
          loc);
   }
-  const CellRef argsRec = reg();
-  alloc(argsRec);
-  mov(D(argsRec), S(cStr(sig.name)));
-  markRecord(argsRec);
+  const CellRef argsList = reg();
+  alloc(argsList);
+  mov(D(argsList), S(cStr(std::string(kListContent))));
   for (std::size_t i = 0; i < sig.params.size(); ++i) {
     const CellRef v  = reg();
     const Ty paramTy = fromType(sig.params[i].type, sig.params[i].loc);
     const Ty vt      = valueInto(*args[i], v);
     coerceInto(paramTy, vt, v);
-    CellRef vc;
+    const CellRef elem = reg();
     if (paramTy.composite()) {
-      callAppendField(argsRec, sig.params[i].name, v, vc);
+      callCopy(v, elem);
     } else {
-      callAppendField(argsRec, sig.params[i].name, std::nullopt, vc);
-      mov(D(vc), S(v));
+      alloc(elem);
+      mov(D(elem), S(v));
     }
+    callListPush(argsList, elem);
   }
   const FieldInfo &next = fields_.at(std::string(kFieldNextId));
   const CellRef effId   = reg();
   mov(S(effId), S(next.valueCell));
   emit(OpcodeKind::Add, "id+", {S(next.valueCell), S(one_)}, {next.valueCell});
 
+  const FieldInfo &turn = fields_.at(std::string(kFieldTurn));
+  const CellRef tp = reg(), nowReg = reg(), durReg = reg(), deadline = reg();
+  CellRef timeP, nameP;
+  mov(S(tp), S(rd(S(turn.nameCell), core_.dims().values)));
+  callFind(tp, std::string(kTurnTime), timeP, nameP);
+  movC(nowReg, zero_);
+  const CellRef noTime = newLabel();
+  branchIfZero(timeP, noTime);
+  mov(S(nowReg), D(timeP));
+  place(noTime);
+  movC(durReg, cInt(sig.withinMs.value_or(30000)));
+  emit(OpcodeKind::Add, "dl", {S(nowReg), S(durReg)}, {deadline});
+
   const CellRef entry = callOutbox(kKindEffect);
   CellRef vc;
   callAppendField(entry, std::string(kOutboxEffectSkill), std::nullopt, vc);
   mov(D(vc), S(cStr(skillName)));
+  callAppendField(entry, std::string(kOutboxEffectCapacity), std::nullopt, vc);
+  mov(D(vc), S(cStr(capacityName)));
   callAppendField(entry, std::string(kOutboxEffectMethod), std::nullopt, vc);
   mov(D(vc), S(cStr(sig.name)));
   callAppendField(entry, std::string(kOutboxEffectId), std::nullopt, vc);
   mov(D(vc), S(effId));
-  callAppendField(entry, std::string(kOutboxEffectArgs), argsRec, vc);
+  callAppendField(entry, std::string(kOutboxEffectArgs), argsList, vc);
+  callAppendField(entry, std::string(kOutboxEffectDeadline), std::nullopt, vc);
+  mov(D(vc), S(deadline));
+  if (sig.preempts) {
+    callAppendField(entry, std::string(kOutboxEffectPreempts), std::nullopt,
+                    vc);
+    mov(D(vc), S(cBool(true)));
+  }
 
   Ty retTy = sig.result ? fromType(*sig.result, loc) : tyOf(Ty::K::Unit);
   if (!ctx_.inPlan || ctx_.planInfo == nullptr) {
@@ -4062,7 +4316,12 @@ void Gen::mintPredicates() {
       if (t.k == Ty::K::Record || t.k == Ty::K::Unit) {
         unsupported("a record or () belief argument", pd->loc);
       }
-      if (p.key && leadingKeys) {
+      if (p.key) {
+        if (!leadingKeys) {
+          bail(CompileError::Unsupported,
+               "key parameters must precede non-key parameters in " + pd->name,
+               pd->loc);
+        }
         ++pi.nkeys;
       } else {
         leadingKeys = false;
@@ -5689,6 +5948,14 @@ Ty Gen::believesExpr(const EBelieves &b, CellRef out) {
 
 Ty Gen::findallExpr(const EFindall &f, CellRef out, SourceLocation loc) {
   pushScope();
+  std::optional<CellRef> fromReg;
+  if (f.from) {
+    fromReg     = reg();
+    const Ty ft = valueInto(*f.from, *fromReg);
+    if (ft.k != Ty::K::Str) {
+      bail(CompileError::TypeMismatch, "from needs an agent", f.from->loc);
+    }
+  }
   const TermPlan pl = planTerm(f.goal, true);
   const CellRef res = reg(), tail = reg();
   alloc(res);
@@ -5701,6 +5968,12 @@ Ty Gen::findallExpr(const EFindall &f, CellRef out, SourceLocation loc) {
     mov(S(cl), D(e));
     mov(S(ct), S(rd(D(cl), core_.dims().grab)));
     emitMatch(pl, ct, noMatch);
+    if (fromReg) {
+      mov(S(a0_), S(cl));
+      mov(S(a1_), S(*fromReg));
+      callLabel(rtHasSrc_);
+      branchIfZero(r0_, noMatch);
+    }
     bindVars(pl);
     const CellRef v = reg(), cell = reg();
     if (f.templ.logicVar) {
@@ -5734,6 +6007,15 @@ Ty Gen::findallExpr(const EFindall &f, CellRef out, SourceLocation loc) {
 
 Ty Gen::forBelieves(const EFor &f, CellRef out) {
   pushScope();
+  std::optional<CellRef> fromReg;
+  if (f.believesFrom) {
+    fromReg     = reg();
+    const Ty ft = valueInto(*f.believesFrom, *fromReg);
+    if (ft.k != Ty::K::Str) {
+      bail(CompileError::TypeMismatch, "from needs an agent",
+           f.believesFrom->loc);
+    }
+  }
   const TermPlan pl     = planTerm(*f.believesTerm, true);
   const CellRef snap    = snapshotClauses(*pl.pred);
   const CellRef bodyOut = reg();
@@ -5742,6 +6024,12 @@ Ty Gen::forBelieves(const EFor &f, CellRef out) {
     mov(S(cl), D(e));
     mov(S(ct), S(rd(D(cl), core_.dims().grab)));
     emitMatch(pl, ct, noMatch);
+    if (fromReg) {
+      mov(S(a0_), S(cl));
+      mov(S(a1_), S(*fromReg));
+      callLabel(rtHasSrc_);
+      branchIfZero(r0_, noMatch);
+    }
     bindVars(pl);
     stmtWrap([&] { expr(*f.body, bodyOut); });
     place(noMatch);
@@ -5751,7 +6039,8 @@ Ty Gen::forBelieves(const EFor &f, CellRef out) {
   return tyOf(Ty::K::Unit);
 }
 
-Ty Gen::beliefChange(EBeliefChange::Kind kind, const Term &t, CellRef out) {
+Ty Gen::beliefChange(EBeliefChange::Kind kind, const Term &t,
+                     const ExprPtr &fromExpr, CellRef out) {
   using Kind        = EBeliefChange::Kind;
   const PredInfo &p = predOf(t);
   // The checker refuses this with EpistemicIngressOnly; reaching rtBSet or
@@ -5761,8 +6050,15 @@ Ty Gen::beliefChange(EBeliefChange::Kind kind, const Term &t, CellRef out) {
          "belief change on the arbitrated predicate " + t.name, t.loc);
   }
   const CellRef who = reg();
-  selfName(who);
-  if (kind == Kind::Forget) {
+  if (fromExpr) {
+    const Ty ft = valueInto(*fromExpr, who);
+    if (ft.k != Ty::K::Str) {
+      bail(CompileError::TypeMismatch, "from needs an agent", fromExpr->loc);
+    }
+  } else {
+    selfName(who);
+  }
+  if (kind == Kind::Forget || kind == Kind::Retract) {
     pushScope();
     const TermPlan pl  = planTerm(t, true);
     const CellRef snap = snapshotClauses(p);
@@ -6420,8 +6716,9 @@ void Gen::emitInit(CellRef entryLabel) {
   // §8.5: believe, install and behavior members run in declaration order.
   for (const Member &m : agent_->members) {
     if (const auto *b = std::get_if<BeliefDecl>(&m)) {
-      stmtWrap(
-          [&] { beliefChange(EBeliefChange::Kind::Believe, b->fact, reg()); });
+      stmtWrap([&] {
+        beliefChange(EBeliefChange::Kind::Believe, b->fact, nullptr, reg());
+      });
     } else if (const auto *i = std::get_if<InstallDecl>(&m)) {
       stmtWrap([&] {
         installByName(EInstall::Kind::Install, i->name, i->args, reg(), i->loc);
@@ -6477,8 +6774,12 @@ void Gen::emitDispatch(CellRef entryLabel) {
   for (const PreludeEvent &pe : preludeEvents()) {
     if (pe.name != kEventInitialize) types.emplace_back(pe.name);
   }
+  const bool hasSkillUpgrade = std::ranges::any_of(skills_, [](const auto &kv) {
+    return kv.second.upgradeLabel != CellRef{};
+  });
   for (const std::string &t : types) {
-    if (mergedFor(t).empty()) continue;
+    if (mergedFor(t).empty() && !(t == kEventUpgrade && hasSkillUpgrade))
+      continue;
     const CellRef seq = newLabel();
     emit(OpcodeKind::Eq, "ty?", {S(ty), S(cStr(t))}, {eq});
     branch(S(eq), seq);
@@ -6488,6 +6789,27 @@ void Gen::emitDispatch(CellRef entryLabel) {
   jump(end);
   for (const auto &[t, seq] : seqs) {
     place(seq);
+    if (t == kEventUpgrade) {
+      mov(S(a0_), S(curEvent_));
+      movC(a1_, cStr("from_version"));
+      callLabel(rtFind_);
+      const CellRef noFv = newLabel(), callSkills = newLabel();
+      branchIfZero(r0_, noFv);
+      mov(S(a0_), D(r0_));
+      jump(callSkills);
+      place(noFv);
+      movC(a0_, cStr(""));
+      place(callSkills);
+      const CellRef fvReg = reg();
+      mov(S(fvReg), S(a0_));
+      for (auto &[sname, sc] : skills_) {
+        const CellRef skipSk = newLabel();
+        branchIfZero(rd(S(sc.member), dims_.skill, true), skipSk);
+        mov(S(a0_), S(fvReg));
+        callUser(sc.upgradeLabel);
+        place(skipSk);
+      }
+    }
     for (const HandlerInfo *h : mergedFor(t)) emitHandlerRun(*h, true, end);
     jump(end);
   }
@@ -6819,7 +7141,30 @@ Ty Gen::capacityCall(const std::string &cap, const std::string &method,
   if (sig == nullptr) {
     bail(CompileError::UnknownName, cap + " has no method " + method, loc);
   }
-  if (sig->isEffect) unsupported("effect methods", loc);
+  if (sig->isEffect) {
+    std::string skillName;
+    for (const auto &[n, sk] : skills_) {
+      if (std::ranges::find(sk.capacities, cap) != sk.capacities.end()) {
+        skillName = n;
+        break;
+      }
+    }
+    if (skillName.empty()) {
+      for (const TopDecl &d : unit_.decls) {
+        if (const auto *sk = std::get_if<SkillDecl>(&d)) {
+          if (sk->native &&
+              std::ranges::find(sk->implements, cap) != sk->implements.end()) {
+            skillName = sk->name;
+            break;
+          }
+        }
+      }
+    }
+    if (skillName.empty()) {
+      skillName = cap;
+    }
+    return effectCall(skillName, *sig, args, out, loc, cap);
+  }
   if (args.size() != sig->params.size()) {
     bail(CompileError::BadArity,
          method + " takes " + std::to_string(sig->params.size()) + " arguments",
@@ -7131,6 +7476,7 @@ CompiledAgent Gen::run() {
   scanSubjG_    = global();
   scanPosG_     = global();
   scanLenG_     = global();
+  scanCursorG_  = global();
   a4_           = global();
   roundsG_      = global();
   copyPro_      = newLabel();
@@ -7201,10 +7547,15 @@ CompiledAgent Gen::run() {
   const auto metadata = [&](auto &containers, auto &output) {
     for (auto &[name, container] : containers) {
       CompiledContainer info;
-      info.owner   = container.cell;
-      info.members = container.instances.empty()
-                         ? std::vector<CellRef>{container.cell}
-                         : container.instances;
+      info.owner        = container.cell;
+      info.members      = container.instances.empty()
+                              ? std::vector<CellRef>{container.cell}
+                              : container.instances;
+      info.cell         = container.cell;
+      info.member       = container.member;
+      info.instances    = container.instances;
+      info.installLabel = container.installLabel;
+      info.upgradeLabel = container.upgradeLabel;
       for (const auto &member : *container.members) {
         if (const auto *field = std::get_if<VarDecl>(&member))
           info.fieldDefaults.emplace(field->name,

@@ -1,6 +1,8 @@
 #include "common/ui/view/slice/slice_view_presenter.hpp"
 #include <gleditor/color.hpp>
 #include <gleditor/render_state.hpp>
+#include <gleditor/ui/metrics.hpp>
+#include <gleditor/ui/theme.hpp>
 
 namespace xanadu::ui {
 
@@ -19,7 +21,12 @@ void SliceViewPresenter::updateLayout(const view::SliceLayoutInput &input) {
 void SliceViewPresenter::deviceReady(
     render::RenderDevice &device,
     const render::PipelineDesc &documentPipeline) {
-  canvas_ = std::make_unique<gleditor::Canvas>(&device, fontName_);
+  const std::string resolvedFont =
+      fontName_.empty()
+          ? gleditor::ui::UiMetrics{}.fontDescription(
+                gleditor::ui::FontRole::Body, gleditor::ui::defaultTheme())
+          : fontName_;
+  canvas_ = std::make_unique<gleditor::Canvas>(&device, resolvedFont);
   canvas_->createPipeline(documentPipeline, false);
 }
 

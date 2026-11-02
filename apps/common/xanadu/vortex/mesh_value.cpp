@@ -130,9 +130,9 @@ decodeValue(const std::string_view bytes, const ValueLimits limits) {
     if (used != epoch.size() ||
         std::to_string(value.origin.arenaEpoch) != epoch)
       return std::unexpected("mesh value: invalid arena epoch");
-    value.parent           = xanadu::MicroversionId::parse(field("parent"));
-    value.root             = {.scroll   = field("scroll"),
-                              .produces = xanadu::MicroversionId::parse(field("root"))};
+    value.parent = xanadu::MicroversionId::parse(field("parent"));
+    value.root   = {.scroll   = field("scroll"),
+                    .produces = xanadu::MicroversionId::parse(field("root"))};
     const auto publication = xanadu::decodePublication(field("publication"));
     if (!publication)
       return std::unexpected(

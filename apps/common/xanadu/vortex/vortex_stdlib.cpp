@@ -794,7 +794,7 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
     std::unordered_set<CellRef> seenVars;
     collectVariables(stdlib, goalArgs[0], checkVars, seenVars);
     for (CellRef v : checkVars) {
-      CellRef actual = stdlib.deref(v);
+      const CellRef actual = stdlib.deref(v).value_or(v);
       if (stdlib.isVar(actual)) {
         throw std::runtime_error(
             "floundered_negation: unbound variable in negation");
@@ -1173,8 +1173,8 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
           CellRef oDocCell    = core.arena().makeCell("store");
           std::string spanStr = "[" + std::to_string(cop->spanStart) + "," +
                                 std::to_string(cop->spanLength) + "]";
-          CellRef spanCell = core.arena().makeCell(spanStr);
-          CellRef tDocCell = core.arena().makeCell("active");
+          CellRef spanCell    = core.arena().makeCell(spanStr);
+          CellRef tDocCell    = core.arena().makeCell("active");
           if (stdlib.unify(goalArgs[0], oDocCell) &&
               stdlib.unify(goalArgs[1], spanCell) &&
               stdlib.unify(goalArgs[2], tDocCell)) {
@@ -1248,7 +1248,7 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
             core.arena().makeScalarCell(static_cast<std::int64_t>(c));
         std::string spanStr = "[" + std::to_string(sp.start) + "," +
                               std::to_string(sp.length) + "]";
-        CellRef spCell = core.arena().makeCell(spanStr);
+        CellRef spCell      = core.arena().makeCell(spanStr);
         if (stdlib.unify(goalArgs[0], cCell) &&
             stdlib.unify(goalArgs[1], spCell)) {
           bool keepGoing = solveQueryHelper(
@@ -2288,7 +2288,7 @@ std::vector<CellValue> VortexStdLib::call(CellRef fnOp,
       std::vector<CellValue> items;
       items.reserve(matches.size());
       for (const auto m : matches) items.emplace_back(m);
-      return {static_cast<std::int64_t>(createList(items))};
+      return {static_cast<std::int64_t>(createList(items).value_or(noCell))};
     }
     if (opName == "#GOAL_UPTO") {
       const auto getStr = [](const CellValue &v) -> std::string {
@@ -2302,7 +2302,7 @@ std::vector<CellValue> VortexStdLib::call(CellRef fnOp,
       std::vector<CellValue> items;
       items.reserve(matches.size());
       for (const auto m : matches) items.emplace_back(m);
-      return {static_cast<std::int64_t>(createList(items))};
+      return {static_cast<std::int64_t>(createList(items).value_or(noCell))};
     }
     if (opName == "#GOAL_ANY") {
       const auto getStr = [](const CellValue &v) -> std::string {
@@ -2341,7 +2341,7 @@ std::vector<CellValue> VortexStdLib::call(CellRef fnOp,
       std::vector<CellValue> items;
       items.reserve(matches.size());
       for (const auto m : matches) items.emplace_back(m);
-      return {static_cast<std::int64_t>(createList(items))};
+      return {static_cast<std::int64_t>(createList(items).value_or(noCell))};
     }
   }
   auto it = routineBindings_.find(fnOp);
@@ -4146,11 +4146,11 @@ VortexStdLib::scanTab(const std::int64_t targetPos,
   const std::int64_t hi     = std::max(currentPos, norm);
   const std::int64_t count  = hi - lo;
   const std::int64_t offset = lo - 1;
-  std::string traversed     = count > 0 && offset >= 0 && offset < len
-                                  ? subjStr.substr(static_cast<std::size_t>(offset),
-                                                   static_cast<std::size_t>(count))
-                                  : "";
-  core_.value(cur, 0, -1, norm);
+  std::string traversed = count > 0 && offset >= 0 && offset < len
+                              ? subjStr.substr(static_cast<std::size_t>(offset),
+                                               static_cast<std::size_t>(count))
+                              : "";
+  (void)core_.writeValue(cur, 0, std::nullopt, norm);
   return traversed;
 }
 
@@ -5435,8 +5435,8 @@ bool VortexStdLib::exportStandardLibraryToStore(
 
 std::optional<CellRef>
 VortexStdLib::importModuleFromStore(const xanadu::Store &srcStore) {
-  auto ver         = srcStore.allVersions().empty() ? xanadu::MicroversionId{}
-                                                    : srcStore.primaryCurrentVersion();
+  auto ver = srcStore.allVersions().empty() ? xanadu::MicroversionId{}
+                                            : srcStore.primaryCurrentVersion();
   auto srcManifold = srcStore.rebuildManifold(ver);
   if (srcManifold.cellCount() == 0) {
     return std::nullopt;
@@ -5531,9 +5531,9 @@ bool VortexStdLib::bridgeCellToDoc(xanadu::Store &store, CellRef cell,
     return false;
   }
   std::string text = core_.arena().textOf(cell);
-  auto parent      = store.allVersions().empty() ? xanadu::MicroversionId{}
-                                                 : store.primaryCurrentVersion();
-  auto newVer      = store.insert(parent, docOffset, text);
+  auto parent = store.allVersions().empty() ? xanadu::MicroversionId{}
+                                            : store.primaryCurrentVersion();
+  auto newVer = store.insert(parent, docOffset, text);
   store.repointCurrentVersion(newVer);
   return true;
 }
@@ -5541,8 +5541,8 @@ bool VortexStdLib::bridgeCellToDoc(xanadu::Store &store, CellRef cell,
 CellRef VortexStdLib::bridgeDocToCell(xanadu::Store &store,
                                       std::uint32_t docOffset,
                                       std::uint32_t length) {
-  auto ver            = store.allVersions().empty() ? xanadu::MicroversionId{}
-                                                    : store.primaryCurrentVersion();
+  auto ver = store.allVersions().empty() ? xanadu::MicroversionId{}
+                                         : store.primaryCurrentVersion();
   std::string docText = store.textOf(ver);
   if (docOffset >= docText.size()) {
     return core_.arena().makeCell("");

@@ -1867,7 +1867,7 @@ void Checker::declaration(const Decl &decl, const Decl *owner) {
     for (const auto &name : decl.names) {
       const auto *capacity = global(name);
       const bool builtin   = name == "Clock" || name == "Schedules" ||
-                           name == "Logging" || name == "Accepts";
+                             name == "Logging" || name == "Accepts";
       require(builtin || (capacity && capacity->kind == DeclKind::Capacity),
               DiagnosticCode::UnknownName,
               "unknown used capacity '" + name + "'", decl.loc);

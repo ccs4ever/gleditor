@@ -67,6 +67,8 @@ enum class CheckErrorCode : std::uint8_t {
   SuspensionInBelievesLoop,
   EffectInMethod,
   EffectPosition,
+  CannotSuspend,
+  FlounderedNegation, ///< unbound logic variable inside negated belief
   ReturnOutsideMethod,
   ConsumeOutsideHandler,
   // Declarations (§8.9 notes)
@@ -76,6 +78,7 @@ enum class CheckErrorCode : std::uint8_t {
   MissingImplementation,
   SignatureMismatch,
   PlanParamNotInGoal,
+  KeyMustPrecede,
   // Epistemic arbitration (P19.4)
   InvalidEpistemicPolicy,
   MissingClusterTolerance,

@@ -181,11 +181,13 @@ struct EWhile {
   ExprPtr cond;
   ExprPtr body;
 };
-/// `for x in e do body`, or `for believes term do body` (binder empty).
+/// `for x in e do body`, or `for believes term [from S] do body` (binder
+/// empty).
 struct EFor {
   std::string binder;
   ExprPtr iterable;                 ///< null for the `believes` form
   std::optional<Term> believesTerm; ///< set for the `believes` form
+  ExprPtr believesFrom; ///< may be null; `from Postfix` on `for believes`
   ExprPtr body;
 };
 
@@ -196,6 +198,7 @@ struct EBelieves {
 struct EFindall {
   TermArg templ;
   Term goal;
+  ExprPtr from; ///< may be null; `from Postfix` on `findall`
 };
 
 // -- Actions (§8.6) ---------------------------------------------------------
@@ -214,9 +217,12 @@ struct EBeliefChange {
   enum class Kind : std::uint8_t {
     Believe,
     Forget,
-    Revise
+    Revise,
+    Assert,
+    Retract
   } kind{Kind::Believe};
   Term fact;
+  ExprPtr from; ///< may be null; set for assert/retract ... from S
 };
 struct ESpawn {
   std::string agent;
