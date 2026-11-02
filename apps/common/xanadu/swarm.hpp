@@ -297,6 +297,10 @@ public:
    */
   [[nodiscard]] std::int64_t bytesFromPeers(const InfoHash &hash) const;
 
+  /// True when all pieces of @p hash are either completed in memory/disk or the
+  /// torrent is seeding.
+  [[nodiscard]] bool isComplete(const InfoHash &hash) const;
+
   // -- Real-Time Live Collaborative Swarm Operations -----------------------
 
   /// A live operation broadcasted between connected collaborative swarm peers.

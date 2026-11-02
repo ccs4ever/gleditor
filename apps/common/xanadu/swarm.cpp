@@ -1223,6 +1223,31 @@ std::int64_t SwarmContentSource::bytesFromPeers(const InfoHash &hash) const {
   return found->second.handle.status().all_time_download;
 }
 
+bool SwarmContentSource::isComplete(const InfoHash &hash) const {
+  impl->pump();
+  const auto found = impl->swarms.find(hash);
+  if (found == impl->swarms.end() || !found->second.meta) {
+    return false;
+  }
+  const auto &swarm = found->second;
+  if (swarm.handle.is_valid()) {
+    const auto st = swarm.handle.status();
+    if (st.is_seeding || st.state == lt::torrent_status::seeding) {
+      return true;
+    }
+  }
+  const auto &meta = *swarm.meta;
+  if (meta.pieceCount() == 0) {
+    return true;
+  }
+  for (std::size_t i = 0; i < meta.pieceCount(); ++i) {
+    if (!swarm.pieces.contains(static_cast<int>(i))) {
+      return false;
+    }
+  }
+  return true;
+}
+
 std::optional<std::string>
 SwarmContentSource::torrentMetadata(const InfoHash &hash) const {
   impl->pump();
@@ -1448,7 +1473,7 @@ SwarmContentSource::collabRoomTarget(const std::string_view hostFingerprint,
   InfoHash h;
   const std::string key = "xanadu:collab:" + std::string(hostFingerprint) +
                           ":" + std::string(roomName);
-  h.bytes = sha1(key);
+  h.bytes               = sha1(key);
   return h;
 }
 
