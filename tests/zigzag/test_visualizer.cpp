@@ -804,9 +804,15 @@ TEST(ZigzagVisualizerTest, TranslateVQLAndAttachToFocus) {
   const auto originalFocus = focusedCell(viz);
   ASSERT_NE(originalFocus, 0U);
 
+  const auto beforeTraversalOps = viz.operationCount();
+  EXPECT_FALSE(viz.compileVQL("/d.1/d.2").success);
+  EXPECT_FALSE(viz.translateVQLAndAttachToFocus("/d.1/d.2", "d.spin", false));
+  EXPECT_EQ(viz.operationCount(), beforeTraversalOps);
+  EXPECT_EQ(focusedCell(viz), originalFocus);
+
   const auto beforeOpCount = viz.operationCount();
-  const bool attached =
-      viz.translateVQLAndAttachToFocus("/d.1/d.2", "d.spin", false);
+  const bool attached      = viz.translateVQLAndAttachToFocus(
+      "##/d.step%\"compiled\"", "d.spin", false);
   EXPECT_TRUE(attached);
   EXPECT_GT(viz.operationCount(), beforeOpCount);
 
@@ -822,7 +828,7 @@ TEST(ZigzagVisualizerTest, TranslateVQLAndAttachToFocus) {
   EXPECT_FALSE(text.empty());
 
   // Non-mutating compilation should also work
-  const auto check = viz.compileVQL("/d.1/d.2");
+  const auto check = viz.compileVQL("##/d.step%\"compiled\"");
   EXPECT_TRUE(check.success);
   EXPECT_FALSE(check.disassembly.empty());
 }
@@ -833,10 +839,10 @@ TEST(ZigzagVisualizerTest, PaletteVQLTranslationMode) {
   EXPECT_TRUE(viz.isPaletteVisible());
 
   // Set filter to a VQL expression
-  viz.setPaletteFilter("/d.1/d.2");
+  viz.setPaletteFilter("##/d.step%\"compiled\"");
   const auto items = viz.paletteItems();
   ASSERT_FALSE(items.empty());
-  EXPECT_EQ(items[0], "VQL: /d.1/d.2");
+  EXPECT_EQ(items[0], "VQL: ##/d.step%\"compiled\"");
 
   // Clones / compiles the VQL expression to focus
   const auto beforeOps  = viz.operationCount();

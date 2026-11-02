@@ -1062,6 +1062,15 @@ swarm-image:
 	  --build-arg SWARM_IMAGE_BASE="$(SWARM_IMAGE_BASE)" \
 	  --build-arg GLEDITOR_VERSION="$(VERS)" --tag "$(SWARM_IMAGE)" .
 
+# Scoped VQL experiment; inherits the compiler/standard probes and headless env.
+.PHONY: vql-spike vql-spike-abi
+vql-spike: $(OBJDIR)/vql-spike
+vql-spike-abi: $(OBJDIR)/vql-spike-abi.s
+$(OBJDIR)/vql-spike-abi.s: tools/spikes/vql_abi_probe.cpp $(FLAGSTAMP) | $(OBJDIR)/
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -S -o $@ $<
+$(OBJDIR)/vql-spike: $(call obj,tools/spikes/spike_vql_semantics.cpp) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
+	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS)
+
 .PHONY: vqueryc
 vqueryc: $(OBJDIR)/vqueryc
 $(OBJDIR)/vqueryc: $(VQUERYC_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o

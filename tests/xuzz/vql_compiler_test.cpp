@@ -40,7 +40,7 @@ TEST_F(VQLCompilerTest, CompileExecutableStore) {
   CompilationOptions opts;
   opts.targetLibrary = false;
 
-  auto result = compiler.compile("##/d.step", opts);
+  auto result = compiler.compile("##/d.step%\"compiled\"", opts);
   ASSERT_TRUE(result.success) << result.errorMessage;
   ASSERT_TRUE(result.entryOpcode);
 
@@ -94,7 +94,8 @@ TEST_F(VQLCompilerTest, CompileLibraryStore) {
   opts.moduleName    = "std:geometry";
   opts.symbolName    = "calculate_area";
 
-  auto result = compiler.compile("##/d.step/d.width", opts);
+  auto result =
+      compiler.compile("##/d.step%\"compiled\"/d.width%\"field\"", opts);
   ASSERT_TRUE(result.success) << result.errorMessage;
   ASSERT_TRUE(result.entryOpcode);
 
@@ -126,19 +127,39 @@ TEST_F(VQLCompilerTest, CompileLibraryStore) {
   EXPECT_EQ(*kind, OpcodeKind::Return);
 }
 
-TEST_F(VQLCompilerTest, CreationSugarAndClones) {
+TEST_F(VQLCompilerTest, LiteralCreationSugar) {
   VQLCompiler compiler(*core, *vm);
 
   CompilationOptions opts;
-  auto result = compiler.compile("##/d.step%\"Alpha\"%\"Beta\"><%", opts);
+  auto result = compiler.compile("##/d.step%\"Alpha\"%\"Beta\"", opts);
   ASSERT_TRUE(result.success) << result.errorMessage;
 
-  // Disassembly should contain NEW, VALUE, and LINK opcodes
+  // Literal creation lowers to structural NEW and VALUE opcodes
   EXPECT_NE(result.disassembly.find("#NEW"), std::string::npos);
   EXPECT_NE(result.disassembly.find("#VALUE"), std::string::npos);
-  EXPECT_NE(result.disassembly.find("#LINK"), std::string::npos);
   EXPECT_NE(result.disassembly.find("Alpha"), std::string::npos);
   EXPECT_NE(result.disassembly.find("Beta"), std::string::npos);
+}
+
+TEST_F(VQLCompilerTest, BareCreationRefusesBeforeEmission) {
+  VQLCompiler compiler(*core, *vm);
+  const auto cellCount  = arena.cellCount();
+  const auto cursors    = vm->activeCursors();
+  const auto spinTarget = arena.linked(core->home(), core->dims().spin, false);
+
+  for (const auto *query : {"%\"Alpha\"", "%\"Alpha\"/d.child%\"Beta\""}) {
+    SCOPED_TRACE(query);
+    const auto result = compiler.compile(query);
+    EXPECT_FALSE(result.success);
+    EXPECT_NE(result.errorMessage.find("bare creation anchors"),
+              std::string::npos);
+    EXPECT_NE(result.errorMessage.find("--engine direct"), std::string::npos);
+    EXPECT_FALSE(result.entryOpcode);
+    EXPECT_TRUE(result.generatedOpcodes.empty());
+    EXPECT_EQ(arena.cellCount(), cellCount);
+    EXPECT_EQ(vm->activeCursors(), cursors);
+    EXPECT_EQ(arena.linked(core->home(), core->dims().spin, false), spinTarget);
+  }
 }
 
 TEST_F(VQLCompilerTest, FLWORAndConditionals) {
@@ -146,25 +167,21 @@ TEST_F(VQLCompilerTest, FLWORAndConditionals) {
 
   auto result = compiler.compile(
       "for $x in ##/d.items let $factor := 2 where $factor > 1 return $x");
-  ASSERT_TRUE(result.success) << result.errorMessage;
-
-  // Check generated opcodes
-  EXPECT_NE(result.disassembly.find("#FOR_BIND"), std::string::npos);
-  EXPECT_NE(result.disassembly.find("#BIND"), std::string::npos);
-  EXPECT_NE(result.disassembly.find("#COMP GT"), std::string::npos);
-  EXPECT_NE(result.disassembly.find("#BRANCH"), std::string::npos);
+  EXPECT_FALSE(result.success);
+  EXPECT_NE(result.errorMessage.find("FLWOR"), std::string::npos);
+  EXPECT_TRUE(result.generatedOpcodes.empty());
 }
 
 TEST_F(VQLCompilerTest, DisassemblyFormatting) {
   VQLCompiler compiler(*core, *vm);
 
-  auto result = compiler.compile("##/d.step");
+  auto result = compiler.compile("##/d.step%\"compiled\"");
   ASSERT_TRUE(result.success);
 
   ASSERT_TRUE(result.entryOpcode);
   std::string dis = compiler.disassemble(*result.entryOpcode);
   EXPECT_FALSE(dis.empty());
-  EXPECT_NE(dis.find("#LINK"), std::string::npos);
+  EXPECT_NE(dis.find("#NEW"), std::string::npos);
   EXPECT_NE(dis.find("#HALT"), std::string::npos);
   EXPECT_NE(dis.find("in:"), std::string::npos);
 }
@@ -206,15 +223,11 @@ TEST_F(VQLCompilerTest, ExportToStorePersistence) {
 }
 
 TEST_F(VQLCompilerTest, VortexVMExecutionEquivalence) {
-  // Pre-seed arena with items on +d.step
-  CellRef c1 = core->arena().makeCell("item1");
-  EXPECT_TRUE(core->arena().link(core->home(), core->dims().step, false, c1));
-
   VQLCompiler compiler(*core, *vm);
   CompilationOptions opts;
   opts.targetLibrary = false;
 
-  auto result = compiler.compile("##/d.step", opts);
+  auto result = compiler.compile("##/d.step%\"compiled\"", opts);
   ASSERT_TRUE(result.success);
 
   auto cursors = vm->activeCursors();

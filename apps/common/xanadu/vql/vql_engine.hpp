@@ -132,6 +132,14 @@ private:
   static bool compareValues(const zigzag::vortex::CellValue &left, CompOp op,
                             const zigzag::vortex::CellValue &right);
 
+  static bool isSemanticBuiltin(std::string_view name);
+  std::vector<zigzag::CellRef>
+  evaluateSemanticBuiltin(const FunctionInvocation &fn,
+                          const std::vector<zigzag::CellRef> &contextCells);
+  std::vector<zigzag::CellRef>
+  applyShape(const std::vector<zigzag::CellRef> &subjects,
+             const ShapeLiteral &shape, bool edit);
+
   // Execution Block & FLWOR
   std::vector<zigzag::CellRef> executeBlock(const ExecutionBlock &block);
 

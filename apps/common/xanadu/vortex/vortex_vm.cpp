@@ -654,10 +654,35 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
     std::vector<CellRef> inCells  = core_.inputsOf(opcode);
     std::vector<CellRef> outCells = core_.outputsOf(opcode);
     if (inCells.size() >= 3 || inputs.size() >= 3) {
-      const auto c = resolveCell(inCells, inputs, 0, core_.arena());
-      DimRef d     = inputs.size() >= 2 ? toInt(inputs[1]) : 0;
-      bool neg     = inputs.size() >= 3 && toInt(inputs[2]) < 0;
+      auto c   = resolveCell(inCells, inputs, 0, core_.arena());
+      DimRef d = inputs.size() >= 2 ? toInt(inputs[1]) : 0;
+      bool neg = inputs.size() >= 3 && toInt(inputs[2]) < 0;
       if (c) {
+        const bool append = inputs.size() == 4 &&
+                            std::holds_alternative<bool>(inputs[3]) &&
+                            std::get<bool>(inputs[3]);
+        if (append) {
+          if (!outCells.empty() &&
+              (core_.arena().linked(outCells.front(), d, false) ||
+               core_.arena().linked(outCells.front(), d, true))) {
+            return ExecutionResult{
+                .success = false,
+                .errorMessage =
+                    "Compiled creation output was already used; compile a "
+                    "fresh executable"};
+          }
+          std::unordered_set<CellRef> seen{*c};
+          while (const auto next = core_.arena().linked(*c, d, neg)) {
+            core_.arena().consumeWork();
+            if (!seen.insert(*next).second) {
+              return ExecutionResult{
+                  .success = false,
+                  .errorMessage =
+                      "Compiled append requires an open rank, not a cycle"};
+            }
+            c = *next;
+          }
+        }
         if (!outCells.empty()) {
           CellRef fresh = outCells[0];
           core_.setLink(*c, d, neg, fresh);

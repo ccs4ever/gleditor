@@ -25,6 +25,113 @@ using zigzag::DimVector;
 using zigzag::vortex::CellValue;
 using zigzag::vortex::OpcodeKind;
 
+namespace {
+
+[[noreturn]] void unsupported(std::string_view feature) {
+  throw std::invalid_argument(std::string(feature) +
+                              " is not compiled to Vortex yet; run the query "
+                              "with --engine direct");
+}
+
+void validatePath(const PathExpression &path) {
+  if (path.isFunctor) unsupported("point-free path functors");
+  if (!path.anchorPredicates.empty()) unsupported("anchor predicates");
+  if (path.shapeProjection) unsupported("shape projection");
+  if (path.cloneTail) unsupported("clone tails");
+  const auto &anchor = path.anchor;
+  if (anchor.versionPin || anchor.kind == AnchorKind::Microversion)
+    unsupported("version selection");
+  if (anchor.derefMaster) unsupported("clone-master dereferencing");
+  switch (anchor.kind) {
+  case AnchorKind::Home:
+  case AnchorKind::LiteralCellId:
+    break;
+  case AnchorKind::Create:
+    unsupported("bare creation anchors");
+  case AnchorKind::StoreGenerator:
+    unsupported("store generators");
+  case AnchorKind::StoreAnchor:
+    unsupported("store anchors");
+  default:
+    unsupported("this anchor");
+  }
+  if (anchor.createValue &&
+      anchor.createValue->kind == CreateValue::Kind::Expression)
+    unsupported("computed creation values");
+  for (const auto &step : path.steps) {
+    if (step.derefMaster) unsupported("clone-master dereferencing");
+    if (!step.predicates.empty() || !step.shapePredicates.empty())
+      unsupported("step predicates");
+    if (step.rangeClamp) unsupported("range clamps");
+    if (step.versionPin) unsupported("version selection");
+    const auto *dimension = std::get_if<SignedDimensionStep>(&step.selector);
+    if (!dimension) unsupported("this step selector or function");
+    if (dimension->dimName.empty() || dimension->dimName.starts_with('$'))
+      unsupported("variable or empty dimensions");
+    if (dimension->creates.empty()) unsupported("whole-rank traversal");
+    if (dimension->isBidir || dimension->direction != DimVector::POS ||
+        dimension->placement != Placement::Default)
+      unsupported("negative, bidirectional or placed creation");
+    for (const auto &value : dimension->creates) {
+      if (value.kind == CreateValue::Kind::Expression)
+        unsupported("computed creation values");
+    }
+  }
+}
+
+void validateBlock(const ExecutionBlock &block) {
+  if (!block.bindings.empty()) {
+    for (const auto &binding : block.bindings) {
+      if (const auto *let = std::get_if<LetClause>(&binding)) {
+        if (const auto *path = std::get_if<PathExpression>(&let->target);
+            path && path->isFunctor)
+          unsupported("point-free path functors");
+      }
+    }
+    unsupported("FLWOR bindings and type contracts");
+  }
+  if (block.where) unsupported("where filters");
+  const auto *result = std::get_if<ReturnClause>(&block.action.clause);
+  if (!result) unsupported("conditional and weave actions");
+  if (result->items.size() != 1) unsupported("multiple return items");
+  const auto *path = std::get_if<PathExpression>(&result->items.front().item);
+  if (!path) unsupported("field weaves");
+  validatePath(*path);
+}
+
+void validateQuery(const QueryExpression &query) {
+  if (!query.defs.empty())
+    unsupported("function definitions and type contracts");
+  if (!query.mounts.empty()) unsupported("mount declarations");
+  if (query.body.statements.empty()) {
+    // Programmatic callers may populate the legacy single-expression field.
+    std::visit(
+        [](const auto &expr) {
+          using T = std::decay_t<decltype(expr)>;
+          if constexpr (std::is_same_v<T, PathExpression>)
+            validatePath(expr);
+          else
+            validateBlock(expr);
+        },
+        query.expr);
+    return;
+  }
+  if (query.body.statements.size() != 1) unsupported("multiple statements");
+  std::visit(
+      [](const auto &statement) {
+        using T = std::decay_t<decltype(statement)>;
+        if constexpr (std::is_same_v<T, PathExpression>)
+          validatePath(statement);
+        else if constexpr (std::is_same_v<T, ExecutionBlock>)
+          validateBlock(statement);
+        else
+          unsupported("watch, weave, or perspective statements");
+      },
+      query.body.statements.front());
+}
+
+} // namespace
+
 std::string_view
 VQLCompiler::opcodeMnemonic(zigzag::vortex::OpcodeKind kind) noexcept {
   switch (kind) {
@@ -175,6 +282,7 @@ CompilationResult VQLCompiler::compile(const QueryExpression &query,
   lastResultCells_.clear();
 
   try {
+    validateQuery(query);
     const auto resultCell = compileQuery(query);
     if (lastResultCells_.empty() && resultCell) {
       lastResultCells_.push_back(*resultCell);
@@ -253,6 +361,12 @@ CompilationResult VQLCompiler::compile(std::string_view queryString,
 }
 
 std::optional<CellRef> VQLCompiler::compileQuery(const QueryExpression &query) {
+  if (!query.body.statements.empty()) {
+    const auto &statement = query.body.statements.front();
+    if (const auto *path = std::get_if<PathExpression>(&statement))
+      return compilePathExpression(*path, core_.home());
+    return compileExecutionBlock(std::get<ExecutionBlock>(statement));
+  }
   if (std::holds_alternative<PathExpression>(query.expr)) {
     return compilePathExpression(std::get<PathExpression>(query.expr),
                                  core_.home());
@@ -417,6 +531,9 @@ VQLCompiler::compilePathExpression(const PathExpression &path,
             emitInput(newOp, attachPoint);
             emitInputConstant(newOp, static_cast<std::int64_t>(dim));
             emitInputConstant(newOp, static_cast<std::int64_t>(sd.direction));
+            // Percent creation appends; ordinary Vortex New keeps its
+            // existing immediate-neighbor behavior without this mode.
+            emitInputConstant(newOp, true);
 
             CellRef freshCell = core_.arena().makeCell();
             emitOutput(newOp, freshCell);
@@ -442,20 +559,15 @@ VQLCompiler::compilePathExpression(const PathExpression &path,
             attachPoint = freshCell;
           }
 
-          if (step.yieldMode == YieldMode::Both) {
-            nextStream.push_back(current);
-            nextStream.insert(nextStream.end(), createdCells.begin(),
-                              createdCells.end());
-          } else if (step.yieldMode == YieldMode::Keep) {
-            nextStream.push_back(current);
-          } else if (step.yieldMode == YieldMode::Last) {
-            if (!createdCells.empty()) {
-              nextStream.push_back(createdCells.back());
-            }
-          } else {
-            nextStream.insert(nextStream.end(), createdCells.begin(),
-                              createdCells.end());
-          }
+          nextStream.insert(nextStream.end(), createdCells.begin(),
+                            createdCells.end());
+        }
+        if (step.yieldMode == YieldMode::Both) {
+          nextStream.insert(nextStream.begin(), stream.begin(), stream.end());
+        } else if (step.yieldMode == YieldMode::Keep) {
+          nextStream = stream;
+        } else if (step.yieldMode == YieldMode::Last && !nextStream.empty()) {
+          nextStream = {nextStream.back()};
         }
       }
     } else if (std::holds_alternative<FunctionInvocation>(step.selector)) {
@@ -676,8 +788,9 @@ std::optional<CellRef> VQLCompiler::compileAnchor(const AnchorNode &anchor) {
     break;
   }
   case AnchorKind::LiteralCellId:
-    if (anchor.cellId > std::numeric_limits<CellRef>::max()) {
-      return std::nullopt;
+    if (anchor.cellId == 0 ||
+        anchor.cellId > std::numeric_limits<CellRef>::max()) {
+      throw std::invalid_argument("literal cell anchor is invalid");
     }
     res = static_cast<CellRef>(anchor.cellId);
     if (!core_.arena().contains(res)) return std::nullopt;

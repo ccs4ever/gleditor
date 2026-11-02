@@ -1,16 +1,19 @@
 # Vortex Query Language (VQL) Specification
 
-**Document Version:** 16.0 — Structural Typing, Unified Shape Contracts & Point-Free Functors
-**Compilation Target:** Vortex Hyperstructural Runtime Core (Single-Primitive Matrix Manifold)
+**Document Version:** 16.1 — Explicit Semantics, Conformance and Measured Performance **Compilation
+Target:** Vortex Hyperstructural Runtime Core (Single-Primitive Matrix Manifold)
 
 VQL is the declarative, XQuery-like companion language for
-[Vortex](vortex-hyperstructural-runtime.md): every VQL query compiles down to the same
-`link`/`value` primitives that make up Vortex's two-primitive core. As with the Vortex spec, this
-document specifies a language design consuming the Zigzag `zzstructure` manifold model (see
-[zigzag-multidimensional-space-and-projection.md](zigzag-multidimensional-space-and-projection.md));
-nothing here is wired into the gleditor build. A third front end onto the same manifold,
-[VPL](vpl-array-language.md), borrows APL's glyphs instead of XQuery's paths — where VQL asks
-questions of a manifold, VPL does arithmetic over one.
+[Vortex](vortex-hyperstructural-runtime.md). Its direct evaluator, parser and restricted compiler
+are built under `apps/common/xanadu/vql/`; `vquery` and `vqueryc` expose them.
+[VPL](vpl-array-language.md) is an array-oriented frontend over the same manifold.
+
+**Implementation boundary:** syntax acceptance is separate from execution support. See
+[engine conformance and file-backed examples](vql-conformance.md) for the tested subset and
+[the performance spike](vql-performance-spike.md) for actual measurements. Unsupported compiled
+constructs refuse before executable emission. Distributed discovery, historical folds, suspended
+watches and dynamic virtual lenses below remain proposals; their examples are not working service
+integrations.
 
 The language rests on three design choices: a single directional traversal operator (`/`, with
 direction carried by a sign on the dimension name rather than a second token), `%` creation sugar so
@@ -77,17 +80,7 @@ ______________________________________________________________________
     - [Point-Free Topological Traversal Functors & Currying][toc-50]
     - [Systems Lowering: The 24-Byte CurriedMorphism and TRAVERSE_CURRIED_DIM][toc-51]
 - [5. Memory Management & Topological Garbage Collection][toc-06]
-- [6. Canonical Production Query Examples](#6-canonical-production-query-examples)
-  - [6.1 Deep Structural Navigation with Zero-Copy Slice][toc-07]
-  - [6.2 Topological Regex Compilation with Star-Pivot Caching][toc-08]
-  - [6.3 Shared Identity via a Clone Rank](#63-shared-identity-via-a-clone-rank)
-  - [6.4 In-Place Graph Rewriting & Edge Re-Targeting][toc-09]
-  - [6.5 Context-Preserving Sprout and Generalized Sorting][toc-20]
-  - [6.6 Conditional Shape Morphisms and Lens Masking][toc-21]
-  - [6.7 Distributed Job Orchestration and Multi-Machine Aggregation][toc-36]
-  - [6.8 Cross-Store Transclusion Pipeline with Transcopyright Settlement][toc-37]
-  - [6.9 Multi-Store Swarm Navigation and Dynamic Slice Filtering][toc-45]
-  - [6.10 Hypertime Pinning, Manifold Folds & Microversion Arithmetic][toc-46]
+- [6. Executable Conformance Corpus](#6-executable-conformance-corpus)
 - [7. Reconciliation with the Unified Store/Slice](#7-reconciliation-with-the-unified-storeslice)
   - [7.1 Two regimes, and a query can be in either](#71-two-regimes-and-a-query-can-be-in-either)
   - [7.2 `##` is the origin cell, but the origin is not cell zero][toc-10]
@@ -99,111 +92,57 @@ ______________________________________________________________________
 
 ## 1. Architectural Foundations & Operational Invariants
 
-Vortex Query Language (VQL) is a declarative, zero-allocation path navigation and graph mutation
-language tailored specifically for **zzstructures** (multidimensional bidirectional graphs). VQL
-queries do not evaluate into ephemeral tabular heaps, relational tuples, or serialized JSON arrays.
-Instead, every query expression compiles down to spatial traversals, generator pipelines, and link
-mutations driven by the atomic engine:
-
-```math
-\mathcal{M} = \langle \text{link}, \, \text{value} \rangle
-```
+VQL navigates and reshapes multidimensional bidirectional cell structures through two primitive
+families: topology (`link`, `new`, `break`) and content (`value`). The direct evaluator uses
+vectors, maps, syntax trees and arena cells and does allocate.
 
 ### Fundamental Invariants
 
-- **The Single-Primitive Core**: Path traversal and every mutation, update, insertion, and
-  allocation compile strictly to `link(cell, ±dim, [target])` — the direction is carried by the
-  dimension's sign, exactly as it is in a path step, so there is no separate `dir` argument; reading
-  if `target` is omitted, and otherwise writing: `target == -1` allocates, `target == 0` isolates —
-  **`0` is the absence of a cell, not a sentinel standing in for one (R5), so "link this at nothing"
-  and "link this at cell zero" are the same instruction** — and any other value links straight to
-  that cell. `link` returns the linked/allocated/broken cell, or nothing if there wasn't one; VQL
-  treats an empty result the same way any other step that "returns nothing" is treated (§3).
-  `value(cell, [offset], [length], [replacement])` is the matching content primitive — one call for
-  both directions, answering in a `cell_id` either way, so a write composes in a path like anything
-  else — see Vortex §2's `get_cell_value`/`set_cell_value`, renamed here to match how they're
-  spelled in every VQL surface form. Vortex §2 also defines
-  `new(cell, ±dim, [value])`/`break(cell, ±dim)` as named entry points fixing `link`'s `target` to
-  `-1`/`0` respectively (`new`'s optional `value` is a `value()` applied to the freshly allocated
-  cell); VQL reaches all three the same way — as ordinary `FunctionInvocation`s (§3) — so
-  `$cell/break(+d.foo)` and `$cell/link(+d.foo, 0)` compile to the same call.
-- **Dual-Wing Invocation Topology**: Built-in functions, custom routines, and opcodes adhere to the
-  dual-wing interface. Out-parameters project negward along `-d.grab` (chained posward along
-  `+d.step` for multiple returns). In-parameters project posward along `+d.grab` and chain along
-  `+d.step`.
-- **Snapshot-Before-Write Execution**: When updating nodes in-place or writing query projections,
-  all input operand payloads are fully dereferenced and snapshotted prior to invoking `value()` or
-  mutating pointers, preventing self-aliasing hazards.
-- **Associative Cursor Scopes**: Query variables are not stored in stack frames or hash lookups.
-  They resolve directly against the active Spin-Head cursor along `+d.vars`, with bound payloads or
-  complex subgraphs projecting perpendicularly along `+d.values`.
-- **Shared Identity by Clone Rank (`d.clone`)**: `$a><$b` joins two cells on a `d.clone` rank —
-  sugar for `link($a, +d.clone, $b)` directly (§4.6). A clone holds no content of its own: it reads
-  the rank's **master**, found by walking `d.clone` negward until nothing precedes. So setting any
-  member's content sets the master's, and every member sees it at once, across all viewports and
-  observer ranks — not because they share a pointer, but because they were always reading the same
-  cell. Link a new cell negward of the master and it *becomes* the master: every cell on the rank
-  changes value in that one operation, with nothing copied and nobody notified.
-- **Zero-Allocation Lazy Rank-Streaming**: A path step (`/dim`) does not materialize an intermediate
-  collection. It instantiates an $O(1)$ spatial cursor that lazily yields matching `cell_id`
-  coordinates along `dim`'s entire rank until `link`'s read form returns nothing or a loopback
-  boundary is reached — a single `/` step already walks the whole rank, not one hop of it. Absence
-  of a link, not a `cell_id` of `0`, is what ends the stream, so a rank can freely pass through Cell
-  0 without truncating early.
-- **Xanalogical Mutation**: VQL does not have a separate "update" sublanguage. `%` creation sugar
-  and `link`/`set` calls are ordinary path steps with side effects; a query that reads and a query
-  that writes are the same grammar, evaluated under `return` or `weave` respectively. This mirrors
-  the rest of the system: an edit is a walk that happens to allocate and link, not a different kind
-  of operation layered on top of the read path.
-- **Persistent Star-Pivot Caching**: Expensive generative transformations (e.g., regex compilation
-  or macro expansions) memoize their topological results along `+d.cache`, anchoring invocation
-  nodes to input and output manifolds. The rank hangs off a detached head cell held up by a named
-  pin on `d.pinning-cursors`, **not** off the origin — an origin-anchored cache is immortal, since
-  the origin is in the Root Set. See §7.5.
-- **Universal Docuverse Anchoring & Genesis Selection (`/##`)**: Rather than adopting web-style
-  hierarchical URLs or ad-hoc keyword prefixes, VQL models store discovery as first-class generator
-  functions returning streams of sovereign `Store` handles: BEP 46 author public keys and corpus
-  salts (`btpk(author, salt)`), deterministic DHT topic rendezvous (`topic(tag)`), transclusion
-  backlinks (`citing(target)`), embedded SQLite FTS5 catalog search (`find(query)`), immutable
-  content hashes (`btih(hash)`), append-only Merkle ledgers (`ledger(root)`), and sovereign system
-  stores (`system(domain)`). The genesis selector `/##` resolves the origin/home `CellRef` from any
-  store, slice, or doc context, while `/##` as a federated hop switches ops spool contexts without
-  copying or caching intermediate graphs. Bare `##` anchors to the active ambient store's home cell.
-- **Strict 2-Rank Manifold Invariant Across Distributed Slices ($\deg^\pm(c, d) \le 1$)**: No
-  distributed operation or multi-user edit may ever cause a cell to exceed valence 1 posward or
-  negward along any dimension. Perspective-preserving clone ranks (`@persp: ±d.dim => target`)
-  guarantee that concurrent divergent links create local clone facets along `d.clone` in the
-  observer's namespace rather than violating the global invariant.
-- **Universal Zero-Copy Transclusion (`<~`)**: Transclusion links the target cell directly to the
-  author-local or global `PrimediaSpan` `(author_pubkey, spool_id, start_offset, length)` without
-  allocating new bytes in the author's permascroll. Transclusions across stores leverage BEP 10/46
-  wire exchanges and in-band transcopyright micropayment verification.
-- **The "No Remote Mutation" Invariant**: There is no distributed shared mutable memory. Remote
-  operations never write directly into a foreign ops spool; they compile to **Intent Action Cells**
-  on `d.ctl` or **Sealed Write-Sets** transferred via BEP 10 `ActorDeliverWriteSet` (`0x47`), which
-  the remote host validates (Ed25519 signature + capability checks) and commits locally.
-- **Arbitrary Dynamic Lenses as $O(1)$ Virtual Projections**: Lenses do not allocate intermediate
-  materialization manifolds. A dynamic lens is a 64-byte cache-line aligned `DynamicLensMatrix` that
-  applies axis permutations (`d.1 <=> d.tag`), virtual computed dimensions (`+d.active := expr`),
-  and bidirectional getters/putters directly in the hot traversal loop via SIMD bitmasks.
-- **First-Class Stores, Slices, Docs, and Hypertime Coordinates**: Stores, Slices, and Xanadocs are
-  not opaque string handles or external containers; they are first-class runtime types passed in
-  16-byte `HyperHandle` registers. Slices and external structures are enumerated via `/slices(...)`
-  and `/docs(...)`, projected into multidimensional zzspace through the bidirectional
-  **Anything-to-ZigZag Lens** architecture
-  ([`anything-to-zigzag-lens.md`](anything-to-zigzag-lens.md)). Every lens implements the
-  source-agnostic `ProjectionLens` trait managed by a `ProjectionSession`, mapping source structures
-  onto canonical generic dimensions (`d.contains`, `d.seq`, `d.ref`, `d.clone`) and source ranks
-  (`d.transclude`, `d.version`) via an explicit `ExternalKey ↔ CellRef` identity map, with
-  character-level `PrimediaSpan` zero-copy provenance and bidirectional unprojection
-  (`applyContentChange`, `applyReparent`). Hypertime is an accessible spatial axis: slices, docs,
-  and cells can be pinned to historical microversions via `@(v1, v2)`, evaluating living manifold
-  folds across the append-only ops spool, with first-class `MicroversionId` literals (`@2a9`) and
-  stack-inline topological arithmetic (`+`, `-`, `/`, `..`).
+- **Named operations and optional absence.** Read returns an optional neighbor; `new` allocates,
+  `break` isolates and `link` names an existing target in the core vocabulary. VQL currently uses
+  `%` for allocation and explicit apply_shape masks for isolation; new/break function wrappers
+  refuse until implemented. Numeric link targets do not stand for these operations. Persistent cell
+  zero is not addressable; `##` resolves minted home.
+- **Whole-rank traversal.** `/d.name` walks the outward rank, excluding its context and stopping at
+  absence or a cycle boundary. Shape fields inspect immediate neighbors. Current intermediate
+  streams are materialized vectors, not general allocation-free cursors.
+- **Reciprocal topology.** A cell has at most one neighbor per direction on a dimension. Linking
+  updates reciprocals. Snapshot cells must never steal original neighbors' reciprocal links.
+- **Explicit views and edits.** `project(subject, shape)` creates a detached, identity-remapped
+  arena snapshot. `apply_shape(subject, shape)` explicitly edits an arena neighborhood. Bare
+  `subject{...}` refuses its formerly ambiguous view/edit meaning. Neither silently writes a store.
+- **Deliberate content authority.** `d.clone` shares editable content authority, not byte equality
+  or generic reference identity. Clone joins preserve leftmost authority and reject occupied-rank
+  collisions. Quotations share identified spans; independent equal-content files remain independent.
+- **Existential comparison.** Two streams compare by any satisfying operand pair. Empty operands
+  compare false, including `!=`. Rendered equality is different from `same_cell` identity.
+- **Explicit quantifier domains.** Use `any(domain, predicate)`, `all(domain, predicate)` or
+  `none(domain, predicate)`. Binding a domain through a variable does not change its meaning.
+  Cardinality helpers make zero/one/many decisions explicit.
+- **Scratch and persistence.** Execution uses ArenaManifold. Promotion needs an explicit persistent
+  destination and remaps references. Navigation writes no operations to visited stores. Arena
+  reclamation follows ownership/mark lifetimes; persistent history is append-only.
+- **Immutable evidence.** Primedia bytes and pinned quotations do not change. New document
+  assemblies can rearrange/replace references. Initial external capture is an import; later reuse
+  may transclude captured spans. Known authorized backlinks do not imply universal discovery.
+- **Explicit unsupported states.** Unimplemented discovery, pins, watches and virtual dimensions
+  refuse by name instead of substituting home, current state or simulated deltas.
+- **Checked compilation subset.** Unchecked types cannot be erased as though proven. The compiler
+  refuses semantics without equivalent lowering. The matrix/corpus identify verified common cases.
+- **Measured performance.** A descriptor size, SIMD lookup or inline coordinate does not guarantee
+  register passage, arbitrary-computation latency or end-to-end source performance. Benchmark the
+  actual implementation before selecting an optimization.
+
+The dual-wing convention belongs to the VM. Direct evaluation currently uses C++ variable maps;
+associative cursor scopes and universal streaming are design directions. Frontend validation and
+native allocation/time measurement require C++; reusable workflow policies belong in Vortex.
 
 ______________________________________________________________________
 
 ## 2. Syntactic Token & Structural Shorthand Matrix
+
+This design inventory includes proposed forms. Use the conformance matrix for execution support;
+bare shape application and numeric link targets are retired even when old shorthand is shown.
 
 | Token / Operator            | Structural Equivalent            | Functional & Spatial Semantic Mapping                                                                                                                                        |
 | --------------------------- | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -246,15 +185,15 @@ ______________________________________________________________________
 | `"key" => list(...)`        | Multi-Value Sprout               | Sprouts quoted key along `+d.vars`, values chained along `+d.values`; context kept — see §4.8.5.                                                                             |
 | `±d.dim => val`             | Dimension Morphism               | Links fresh cell with `val` along canonical dimension `±d.dim`; context kept on origin cell — see §4.8.5.                                                                    |
 | `tgt <~ src.[off, len]`     | Transclusion Morphism            | Zero-copy links `PrimediaSpan` into target cell without writing bytes to permascroll — see §4.9.3.                                                                           |
-| `@pers: ±d.dim => val`      | Perspective Morphism             | Links under an observer perspective, minting a `d.clone` cell in `system://activity` to preserve $\deg^\pm \le 1$ (`@persp:` alias, `@<id>:` named) — see §4.9.4.            |
+| `@pers: ±d.dim => val`      | Perspective Morphism             | Links under an observer perspective, using a private annotation proxy to preserve $\deg^\pm \le 1$ (`@persp:` alias, `@<id>:` named) — see §4.9.4.                           |
 | `/$cell/@pers:+d.dim`       | Perspective Read Step            | Traverses dimension through perspective overlay with transparent fallback to canonical master cell — see §4.9.4.                                                             |
-| `d.x <=> d.y`               | Dimension Pivot                  | Dynamically swaps or projects coordinate dimensions in lens views ($O(1)$) — see §4.10.1.                                                                                    |
+| `d.x <=> d.y`               | Dimension Pivot                  | Proposed coordinate remapping; execution cost requires measurement — see §4.10.1.                                                                                            |
 | `+d.dim := expr`            | Virtual Dimension                | Dynamically synthesizes a transient computed dimension evaluated on demand — see §4.10.2.                                                                                    |
 | `lens(get:, put:)`          | Bidirectional Lens               | Defines bidirectional projection mapping between view cells and underlying manifold — see §4.10.3.                                                                           |
 | `watch $p (as $x)? { ... }` | Reactive Observer & Chronofilade | Streams hypertime diffs and replays history via 9P `Zread` on watch fid (`wfid`), with backpressure and delta inspection — see §4.9.6.                                       |
 | `[{...}]`                   | Shape Predicate                  | Fast L1 CSR row match: tests presence, absence, and values of local dimensional connections (sugar for `[. ~ {...}]`) — see §4.8.2.                                          |
 | `$path{...}`                | Shape Mask / Lens                | Projects a shape onto context cells, masking unmentioned dimensions and remapping links (replaces `@lens`) — see §4.8.3.                                                     |
-| `{}`                        | Empty Shape                      | Drops all connections in projection; tests for unlinked cell (valence 0) in predicates — see §4.8.1.                                                                         |
+| `{}`                        | Empty Shape                      | Empty snapshot via project; isolates via apply_shape; tests unlinked cells in predicates — see §4.8.1.                                                                       |
 | `{*}`                       | Universal Shape                  | Projects all connections; tests for cell with valence $\ge 1$ — see §4.8.1.                                                                                                  |
 | `{*, !d.dim}`               | Complement Shape                 | Derives from universal shape `*`, subtracting `d.dim` — see §4.8.1.                                                                                                          |
 | `{!*, d.dim}`               | Exclusive Shape                  | Derives from empty shape `!*`, including only posward `d.dim` — see §4.8.1.                                                                                                  |
@@ -286,6 +225,12 @@ ______________________________________________________________________
 
 ## 3. Formal EBNF Grammar
 
+This is the design grammar, including proposed forms. The [conformance matrix](vql-conformance.md)
+is the implemented contract. General scalar infix arithmetic, conditional scalar values, named
+arguments and several later design examples are not accepted features merely because the prose uses
+them. Use positional calls and the executable corpus. Complete queries consume EOF; unmatched
+closing braces and trailing tokens are errors.
+
 ```
 QueryExpression       ::= ( DefDeclaration | MountDeclaration )* ScriptBody
 
@@ -312,7 +257,7 @@ MountDeclaration      ::= "mount" StoreAnchor "as" SignedDimension ";"
 ExecutionBlock        ::= ( ForClause | LetClause )+ WhereClause? ActionClause
 
 ForClause             ::= "for" ( VariableRef | DestructurePattern ) "in" PathExpression
-DestructurePattern    ::= "{" DestructureField ( "," DestructureField )* "}"
+DestructurePattern    ::= "{" ( DestructureField ( "," DestructureField )* )? "}"
 DestructureField      ::= "." ( ":" VariableRef )?
                         | SignedDimension ( ":" VariableRef )? ( ":" TypeExpr )? ( ":=" ValueExpr )?
 
@@ -344,7 +289,8 @@ ConditionalClause     ::= "if" BooleanExpr ActionClause ( "else" ActionClause )?
 
 PathExpression        ::= ( AnchorNode | PartialPathFunctor ) VersionPin? PathStep* ShapeProjection? CloneTail?
 PartialPathFunctor    ::= "/" StepSelector
-ShapeProjection       ::= "{" ShapeRule ( "," ShapeRule )* "}"
+ShapeProjection       ::= "{" ( ShapeRule ( "," ShapeRule )* )? "}"
+                          (* parsed for diagnosis; use project/apply_shape *)
 
 AnchorNode            ::= RootSelector
                         | StoreAnchor
@@ -359,7 +305,7 @@ StoreSpec             ::= Identifier ( "(" ArgumentList? ")" )?
 SliceSelector         ::= "#" Identifier
 DerefMaster           ::= ">"
 VariableRef           ::= "$" [a-zA-Z_][a-zA-Z0-9_]*
-LiteralCellId         ::= [0-9]+
+LiteralCellId         ::= [1-9][0-9]*
 
 PathStep              ::= "/" StepSelector VersionPin? PredicateClause* RangeClamp? Yield?
 StepSelector          ::= RootSelector
@@ -424,7 +370,7 @@ BareLiteral           ::= (run of characters excluding whitespace, "%", ",", "("
 DimensionPivot        ::= DimensionIdentifier "<=>" DimensionIdentifier
 VirtualDimensionDef   ::= SignedDimension ":=" ValueExpr
 
-ShapeLiteral          ::= "{" ShapeRule ( "," ShapeRule )* "}"
+ShapeLiteral          ::= "{" ( ShapeRule ( "," ShapeRule )* )? "}"
 ShapeRule             ::= BaseShapeRule | DimensionShapeRule | DimensionPivot | VirtualDimensionDef
 BaseShapeRule         ::= "*" | "!*" | VariableRef | FunctionInvocation
 DimensionShapeRule    ::= "!"? ( "+" | "-" | "~" )? DimensionIdentifier ( ":" ValueExpr )?
@@ -622,7 +568,8 @@ ______________________________________________________________________
 
 ### 4.1 Lazy Rank-Streaming Engine
 
-`/d.dim` and `/-d.dim` compile to the same loop; the sign only picks `direction`:
+The intended streaming lowering of `/d.dim` and `/-d.dim` uses the same loop; the sign only picks
+`direction`. This is proposed lowering, not the current compiler subset:
 
 ```cpp
 cell_id current = start_node;
@@ -642,12 +589,16 @@ while (true) {
 and the loop terminates purely on `link`'s read form returning nothing rather than on a `cell_id`
 value, so nothing here has to special-case anything.
 
-- **Index Clamping (`[n]`)**: Evaluated lazily with 1-based indexing, **over the stream the step
-  yielded** — which is to say over the cells that matched, after any predicate, not over the rank
-  they were drawn from.
+The direct evaluator currently materializes rank traversal and predicates into vectors before
+applying index ranges. It does not guarantee early termination for `[1]`. Ordinary traversal is
+refused by the current compiler. Streaming execution and bounded early termination require separate
+implementation and measurement.
 
-  - `[1]`: the first matching cell. Short-circuits traversal, so a dense rank is not walked further
-    than it has to be.
+- **Index Clamping (`[n]`)**: Uses 1-based indexing, **over the stream the step yielded** — which is
+  to say over the cells that matched, after any predicate, not over the rank they were drawn from.
+
+  - `[1]`: the first matching cell. The proposed streaming lowering can short-circuit traversal; the
+    current direct evaluator still traverses and materializes the step.
   - `[-1]`: **the last match.** An earlier draft said "scans to the rank tail, returning only the
     final matching coordinate", which is the same answer only when nothing filtered the stream.
     `d.name[. = "x"][-1]` is the last cell that *matched*, and if the rank's actual tail did not
@@ -675,59 +626,26 @@ VQL supports zero-copy virtual slicing on text payloads:
 
 ### 4.3 Extended Truthiness Rules
 
-Predicates evaluate conditions according to canonical truthiness semantics:
+A path in boolean position is true when it selects any cell, independently of its content. Scalar
+truthiness retains the existing boolean/number/text rules. Source failure, missing values and SQL
+NULL are separate concerns and are not all empty successful results.
 
-- **Truthy**: `true`, non-zero double, and case-insensitive strings: `"true"`, `"1"`, `"yes"`,
-  `"on"`. Unrecognized non-empty strings default to true. A bare `PathExpression` used as a
-  condition (`PredicateTest`) is truthy if it selects at least one cell, independent of that cell's
-  own content.
-- **Falsy**: `false`, `0.0`, empty string `""`, and case-insensitive strings: `"false"`, `"0"`,
-  `"no"`, `"off"`. A `PathExpression` used as a condition is falsy if it selects nothing.
-
-A direct scalar comparison like `where $inv/d.inputs = $pattern` is a type error in intent even
-where it happens to parse: `$inv/d.inputs` is a rank, not a value, and may stream zero, one, or many
-cells. The correct form filters the rank with a predicate and lets its non-emptiness stand for the
-condition — `where $inv/d.inputs[. = $pattern]` — or binds a single dereferenced value first with
-`let` before comparing it.
+Comparisons are existential over operand streams: `A = B` is true if some pair renders equal;
+`A != B` is true if some pair differs. If either stream is empty, both are false. A rank containing
+Alice and Bob can satisfy both equality and inequality with Alice. Only examining the first member
+is incorrect. Use `same_cell` when reference identity is intended.
 
 #### The quantifier that form hides, and the three that name it
 
-`where <stream>` is truthy when the stream selects at least one cell, so
-`where $inv/d.inputs[. = $pattern]` is **existential**: *some* input equals the pattern. That is
-usually what is wanted and it reads well, but the quantifier is implied by position rather than
-written, and one consequence of leaving it implied is a trap:
+`any(domain, predicate)`, `all(domain, predicate)` and `none(domain, predicate)` evaluate a
+predicate per domain occurrence. A lambda, functor or contextual boolean expression can supply that
+predicate. `all` and `none` over an empty domain are true; `any` is false. A domain bound through
+`let` has exactly the same meaning. One-argument forms refuse rather than secretly recovering a
+discarded source predicate from syntax; use path truthiness for simple existence.
 
-> **`[. != $x]` is not the negation of `[. = $x]`.** The first is "some member differs from `$x`",
-> the second "some member equals `$x`", and a rank holding `"a"` and `"b"` satisfies *both*.
-> Negating a filter negates the comparison, not the quantifier, and the quantifier is the part that
-> was never written down.
-
-So VQL has three predicate assertions, each taking a stream and answering a boolean:
-
-| form             | true when                                                          |
-| ---------------- | ------------------------------------------------------------------ |
-| `any(<stream>)`  | at least one cell is selected — what bare truthiness already means |
-| `all(<stream>)`  | every cell in the *source* rank satisfies the predicate            |
-| `none(<stream>)` | no cell does; exactly `!any(...)`                                  |
-
-`none($inv/d.inputs[. = $x])` is what `[. != $x]` is usually mistaken for, and
-`all($inv/d.inputs[. = $x])` has no spelling in the filtering form at all — which is the real
-argument for having them, rather than mere explicitness.
-
-Two rules worth stating rather than discovering:
-
-- **`all()` over an empty rank is true**, as vacuous truth requires. An invoice with no inputs
-  satisfies "all inputs match the pattern". If that is the wrong answer for a query, the query wants
-  `all(...) and any(...)`, and having to write that is the point — the alternative is an `all()`
-  that quietly means something else for one input size.
-- **`all()` needs the source rank, not just the filtered stream**, since a filter discards exactly
-  the cells that would falsify it. It is therefore defined over a `PathExpression` whose final step
-  is a predicate: `all($path/d.dim[<test>])` compares the count the predicate kept against the count
-  `$path/d.dim` yields. A stream with no predicate on its final step is all-true trivially.
-
-Bare truthiness is left alone and is not deprecated: it *is* `any()`, it reads naturally in `where`,
-and rewriting every existing query to say so would add a word to each without adding a fact. Write
-the quantifier when a reader might otherwise assume a different one.
+A universal result over selected members is not proof of remote coverage. Source completeness must
+be established separately. Use `one`, `optional_one` and deliberate `first` when scalar cardinality
+matters; `same_cell` tests identity rather than rendered content.
 
 **A missing value is not an empty string or a false value.** A variable or path used as a scalar has
 no value when its stream is empty; the string literal `""`, numeric `0`, and Boolean `false` remain
@@ -745,37 +663,18 @@ resolves to an empty result instead of selecting that home.
 
 ### 4.4 Result Materialization: Topological Return Weaving
 
-`return` avoids heap allocations or string serializations, and it does not introduce a JSON-shaped
-literal that has nothing to do with the cell model it's returning from:
-
-1. The engine instantiates an Invocation Result Cell appended posward along the active cursor's
-   `+d.results` rank.
-
-1. A `PathExpression` return item (e.g. `return $status_code`) links its resolved value posward off
-   the invocation cell along `+d.values` — the scalar-return case.
-
-1. A `FieldWeave` return item — a bare chain of `PathStep`s with no anchor, always starting with `/`
-   — is implicitly rooted at the Invocation Result Cell instead of the current query context. This
-   is what lets a multi-field result be written as ordinary `%`-creation (§4.5) rather than a
-   bracketed record literal:
-
-   ```
-   return
-       /d.vars%"worker_id"/d.values%$worker,
-       /d.vars%"status"/d.values%$status_code
-   ```
-
-   Each item creates a labeled `d.vars` cell off the result cell and pairs it with a `d.values` cell
-   holding the projected value — exactly the same `d.vars`/`d.values` shape Vortex §4 uses for
-   cursor scopes, so a query result and a variable scope are the same structure, walkable the same
-   way.
+The direct evaluator returns vectors of cell references. A path return appends its selected refs;
+each FieldWeave item constructs an ephemeral result root and evaluates its steps there. This
+materializes cells and containers and is not allocation-free. Persistent retention is explicit
+promotion. Any future streaming/result-weaving lowering must preserve cardinality, identity, order
+and failures before its cost can be compared with this implementation.
 
 ### 4.5 Cell Creation Sugar (`%`)
 
 `%`, suffixed onto a `SignedDimension` step, is sugar over allocation:
 
-- **Bare (`/dim%`)**: `link(., ±dim, -1)`. Applied once per cell in the current context stream (like
-  any other step).
+- **Bare (`/dim%`)**: the named `new` operation along the dimension. Applied once per cell in the
+  current context stream (like any other step).
 
 - **Initialized (`/dim%VALUE`)**: the same allocation, immediately followed by
   `value(., 0, -1, VALUE)` on the newly allocated cell. `VALUE` may be a bare token
@@ -896,44 +795,19 @@ literal that has nothing to do with the cell model it's returning from:
 
 ### 4.6 Clone Sugar (`><`)
 
-`><` is sugar over `link(A, +d.clone, B)`: two cells put on one `d.clone` rank. A clone holds no
-content of its own and reads the rank's master — the cell reached by walking `d.clone` negward until
-nothing precedes — so setting either one's content afterwards sets what both show, because both were
-already reading the same cell.
+A clone rank deliberately shares one editable content authority at its negward head. Equal text,
+repeated membership and a foreign reference do not imply shared authority.
 
-- **Base form (`A><B`)**: `link(A, +d.clone, B)`. `A` and `B` are each a full `PathExpression`'s
-  result — `CloneTail` (§3) binds after all of a path's own `PathStep`s, not mid-traversal. `B` goes
-  *posward* of `A`, which leaves `A` nearer the master.
-- **Chainable (`A><B><C`)**: each additional operand nests the accumulated expression as the new
-  `target` argument of a fresh `link` call rooted at the new operand —
-  `link(C, +d.clone, link(A, +d.clone, B))`. Since a literal, already-existing `target` always
-  echoes back out as `link`'s return value, the inner call returns `B`, so the outer call reduces to
-  `link(C, +d.clone, B)`: `A` and `B` are linked directly, and `C` joins the same rank through `B`.
-  Every member resolves to the same master regardless of which pair is directly linked, because
-  resolution is a walk to the end of the rank rather than membership of a set.
-- **Payload authority follows argument order, not chain length — and it is now a fact about
-  structure rather than a seeding rule.** In `link(cell, ±dim, target)` the new member goes posward,
-  so `cell` stays nearer the rank's negward end and remains the master. Since the leftmost operand
-  in a `CloneTail` always ends up as `cell` in the first `link` call that establishes the rank (see
-  the chaining rule above), **the leftmost operand is the master, and its content is what the whole
-  rank shows.** Nothing is discarded and nothing is copied: a member's own prior content simply
-  stops being read while it is a clone, and is there again if it leaves the rank.
-- **Combines with `%` (`A><%`, `A><%VALUE`, `%VALUE><A`)**: a bare `%` — with no dimension prefix,
-  distinct from `/dim%`'s dimension-attached form — allocates a free cell with no incoming
-  structural link at all; `%VALUE` allocates and immediately `value()`s it to `VALUE`, same as
-  `/dim%VALUE` does for a dimension-attached create. Because payload authority follows argument
-  order (previous bullet), where the `%` sits in the chain determines whether its `VALUE` survives:
-  - **`%VALUE><$a`**: the fresh cell is the leftmost (`cell`) operand, so its `VALUE` is
-    authoritative — after the join, `$a` is the master and shows `VALUE`.
-  - **`$a><%VALUE`**: `$a` is leftmost, so `$a`'s existing value is authoritative; the fresh cell's
-    `VALUE` is overwritten by the join and never observed. Write `$a><%` instead if the intent is
-    just "give me a new cell cloning `$a`" — the value is never read either way, so spelling out a
-    `VALUE` there is misleading.
-  - Any `VALUE` past the first operand in a longer chain is likewise ignored, for the same reason.
-- **Maps over a rank like any other step.** `$path/d.name><%` takes each cell in `d.name`'s posward
-  rank (§4.1) and clones it into its own freshly created partner — one new cell per rank member, not
-  one new cell shared by the whole rank. §4.7 covers the mirror case: an *existing* single cell
-  reused as the target for many context cells.
+`A><B><C` establishes A–B–C adjacency and yields leftmost authority A. If A already heads a rank,
+new detached operands append at its tail. A must be one authority; each added operand must be
+detached on d.clone. Repeated operands, occupied-rank merges and a non-master left operand refuse
+before linking. Operand evaluation can allocate scratch cells; refusal preserves clone edges, not
+unrelated argument effects.
+
+`%VALUE><$a` makes the fresh left cell authoritative only when $a is detached. `$a>\<%VALUE\`
+preserves $a. Nested right-associative linking must not reverse the rank or steal an old neighbor.
+Use reference/occurrence structures for general fan-out, not clones chosen by coincidentally equal
+content. Existing implicit fan-out remains a separate design issue in §4.7.
 
 ### 4.7 Existing-Target Fan-Out
 
@@ -1012,20 +886,20 @@ A shape literal `{...}` defines a set of constraints or projections over the sig
 $\mathcal{D}(c)$ incident to a cell $c$. VQL defines a rigorous Boolean wildcard algebra for
 neighborhood shapes:
 
-| Shape Literal        | Predicate Semantics (Test)                                                          | Projection / Mask Semantics (Effect)                          |
-| -------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------- |
-| `{}`                 | Valence-0 check: $\lvert\mathcal{D}(c)\rvert = 0$ (cell is completely unlinked)     | Drop all links; isolates cell completely (eager for GC)       |
-| `{*}`                | Valence $\ge 1$ check: $\lvert\mathcal{D}(c)\rvert \ge 1$ (cell has any connection) | Identity projection: preserves all existing dimensional links |
-| `{*, !d.tag}`        | Complement check: has connections, but none along `d.tag`                           | Preserves all connections except `d.tag`, which is severed    |
-| `{!*, d.tag}`        | Exclusive check: has connection along `+d.tag`, and no others                       | Drops all connections except posward along `d.tag`            |
-| `{ $shape, !d.tag }` | Shape derivation: matches `$shape` without `d.tag`                                  | Projects `$shape` with `d.tag` filtered out                   |
-| `{ func(.) }`        | Dynamic embedding: matches dynamically evaluated shape                              | Projects dynamically evaluated shape                          |
-| `{~d.tag}`           | Bidirectional check: has connections along both or either `±d.tag`                  | Preserves only negward and posward links along `d.tag`        |
+| Shape Literal        | Predicate Semantics (Test)                                                          | Projection / Mask Semantics (Effect)                               |
+| -------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `{}`                 | Valence-0 check: $\lvert\mathcal{D}(c)\rvert = 0$ (cell is completely unlinked)     | Explicit apply_shape isolates; project copies an isolated snapshot |
+| `{*}`                | Valence $\ge 1$ check: $\lvert\mathcal{D}(c)\rvert \ge 1$ (cell has any connection) | Identity projection: preserves all existing dimensional links      |
+| `{*, !d.tag}`        | Complement check: has connections, but none along `d.tag`                           | Preserves all connections except `d.tag`, which is severed         |
+| `{!*, d.tag}`        | Exclusive check: has connection along `+d.tag`, and no others                       | Drops all connections except posward along `d.tag`                 |
+| `{ $shape, !d.tag }` | Shape derivation: matches `$shape` without `d.tag`                                  | Projects `$shape` with `d.tag` filtered out                        |
+| `{ func(.) }`        | Dynamic embedding: matches dynamically evaluated shape                              | Projects dynamically evaluated shape                               |
+| `{~d.tag}`           | Bidirectional check: has connections along both or either `±d.tag`                  | Preserves only negward and posward links along `d.tag`             |
 
 - **Empty Shape (`{}`)**: Evaluated as a predicate, `{}` is true if and only if the cell has no
-  incident links across any dimension in the manifold. Evaluated under shape projection (`$c{}`), it
-  severs all links across all dimensions, isolating `$c` from the reachable root set and scheduling
-  it for topological garbage collection (§5).
+  incident links across any dimension in the manifold. Applied through `apply_shape($c, {})`, it
+  severs arena links. Use `project($c, {})` for a detached snapshot; persistent history is never
+  garbage-collected.
 - **`*` as the Universal "Everything" Shape**: Inside any shape literal, `*` literally denotes the
   universal base shape containing every active dimension. Therefore, `{*, !d.foo}` is not a one-off
   syntax exception — it is simply shape derivation: start with `*` and subtract `d.foo`.
@@ -1066,23 +940,20 @@ cache ($O(k)$ for valence $k$, without rank traversal). A shape test succeeds if
 
 #### 4.8.3 Shape Masking, Projection, and Lens Subsumption
 
-Prior revisions of VQL experimented with a separate `@lens` construct for viewing and filtering
-subgraphs. VQL 14.0 completely retires and deletes `@lens`, subsuming all lens behaviors under
-**Shape Projection** (`$path{...}`):
+Use `project(subject, shape)` for a detached arena snapshot and `apply_shape(subject, shape)` for an
+explicit arena neighborhood edit. Bare `$subject{...}` refuses with an actionable diagnostic. Shape
+predicates in brackets remain read-only tests.
 
-```
-$path{ +d.tag: ./d.old_tag }
-```
+Projection currently accepts masks only: empty, wildcard and signed dimension selection/exclusion.
+It copies the selected reachable topology with remapped cell identity, preserves referenced content
+spans and scalar payloads, and never links back into source neighbors. Target assignments, dynamic
+shape composition, pivots and virtual rules refuse. Snapshot construction consumes work and memory;
+it is neither an authorization boundary nor an allocation-free lens.
 
-When a shape literal is applied directly to a path expression `$path{ ShapeRule, ... }`:
-
-1. It masks and severs all dimensions on each cell in `$path` that are not permitted by the shape's
-   wildcard algebra (defaulting to exclusive projection unless `*` is present).
-1. It assigns or updates the specified dimensions to the evaluated right-hand side expressions. In
-   `$path{ +d.tag: ./d.old_tag }`, the dimension `+d.tag` is linked to the value cell retrieved from
-   `./d.old_tag`, while all other dimensional links on `$path` are filtered out.
-1. It preserves the context on the original cells in `$path`, allowing subsequent traversal steps to
-   chain directly.
+`apply_shape` masks the subject's links and applies supported assignments explicitly. Empty shape
+isolates the subject; wildcard retains links except explicitly removed directions. Nested/dynamic
+unsupported forms refuse. Retention, promotion and source writeback are separate operations. An
+export must select a permitted versioned evidence closure: hiding links cannot erase history.
 
 #### 4.8.4 The Bidirectional Tilde Operator (`~`)
 
@@ -1198,25 +1069,31 @@ promoting user-defined functions and lambdas to first-class topological morphism
 
 ##### Function Declarations and Effects (`pure` vs `weave`)
 
-Functions are declared at the query top level via `def`. Declarations can explicitly qualify their
-effect signature:
+Functions are declared at the query top level via `def`. The parser accepts `pure` and `weave`
+qualifiers, but the direct evaluator does not yet enforce their effects or infer a checked effect
+signature. The compiler refuses function declarations. Neither qualifier currently grants authority
+or guarantees read-only execution.
 
 ```vql
-def pure add($a, $b) := $a + $b;
-
-def weave tag_cell($c, $tag) := {
-  weave $c { +d.tag => $tag };
-  return $c;
-};
+def pure identity($a) := $a;
+def weave tag_cell($c, $tag) := apply_shape($c, {*, +d.tag: $tag});
 ```
 
-- **`pure`**: Statically declares that the function is a read-only perspective that mints no
-  structure operations into the ops spool.
-- **`weave`**: Declares that the function weaves operations into the manifold.
-- **Inferred Effect**: When neither modifier is specified, the compiler infers the effect from the
-  body (pure expressions vs mutative weave blocks).
+These declarations illustrate accepted positional syntax. Until effect checking is implemented,
+`pure` is an unchecked declaration of intent. A future checked model must propagate effects through
+higher-order calls and reject a mutating pure body before mutation; see the workflow proposal §3.2.
 
 ##### Parameter Destructuring, Defaults, and Variadics
+
+Explicit arguments evaluate in caller scope before any callee parameter is installed. Defaults then
+evaluate in callee scope and may reference earlier parameters. Cell and bound-functor identity is
+preserved; surplus arguments refuse before evaluation unless a final variadic parameter accepts
+them. Function and lambda lexical bindings restore on success, contract mismatch and exceptions.
+This restores lexical scope, not topology already edited by a body.
+
+A path function maps over selected candidates; an empty path does not invoke a downstream body.
+Top-level function invocation is distinct. A script's final executed statement determines its result
+even when that result is empty; emptiness never resurrects an earlier result.
 
 Function and lambda parameter lists support pattern destructuring, parameter defaults, and
 variadics:
@@ -1330,6 +1207,9 @@ same derived shape.
 
 ### 4.9 Distributed Swarm Execution, ZZ9P Protocol & Universal Docuverse
 
+**Design proposal beyond the implemented subset.** The following service/lowering examples do not
+establish execution support. Consult the conformance matrix; unsupported operations refuse.
+
 VQL 15.0 unifies multi-machine network computation and hypermedia transclusion under Theodor Holm
 Nelson's universal docuverse. Slashes do not navigate hierarchical directory trees or remote
 filesystems: everything is dimensions and cells. Cross-machine operations, store bridges, and
@@ -1369,9 +1249,9 @@ functions returning lazy streams of `Store` handles:
    lazy stream of candidate store roots without relying on centralized aggregators.
 
 1. **Transclusion Backlinks & Citations (`citing(target)` / `backlinks(target)`)**: The
-   bidirectional heart of Nelsonian hypertext: discovers every store, document, or slice across the
-   network that quotes, links to, or transcludes `target` (a cell, span, or scroll key). The engine
-   invokes `PublicationDiscoveryTransport::backlinks(scrollKeys)` over DHT target
+   bidirectional heart of Nelsonian hypertext: discovers known reachable and authorized stores,
+   documents, or slices that quote, link to, or transclude `target` (a cell, span, or scroll key).
+   The engine invokes `PublicationDiscoveryTransport::backlinks(scrollKeys)` over DHT target
    $\text{Target} = \text{SHA-1}("xanadu:link-package:" \parallel \text{scrollKey})$, streaming
    citing link packages across hypertime.
 
@@ -1407,8 +1287,8 @@ DerefMaster   ::= ">"
 - **Bare `##`**: Anchors to the active local store's genesis/home cell (`home`).
 - **`#slice`**: Selects a specific named slice manifold within the resolved store (e.g. `#active`,
   `#main_slice`). If omitted, selects the primary default slice.
-- **Master Dereference `>`**: If the slice's designated entry point is a clone rank, `>`
-  dereferences along `d.clone` directly to the rank's master cell in $O(1)$.
+- **Master Dereference `>`**: If the slice's designated entry point is a clone rank, `>` walks
+  negward along `d.clone` to the rank master; cost depends on rank length.
 - **ZZ9P Protocol Handshake**: Remote anchors trigger a 9Z2026 wire protocol `Tattach` handshake
   (`fid`, `afid`, `uname`, `aname`), securing authenticated capability tokens and mounting the
   remote root cell without downloading the entire store.
@@ -1424,9 +1304,10 @@ let $remote_notes := $book/+d.source_store/##/+d.annotations
 return $remote_notes
 ```
 
-The context switches ops spools in $O(1)$. Remote cells stream lazily across 64 KiB Merkle-aligned
-piece buffers via `Zread` and `Zhop` messages, caching immutable op segments in local memory without
-creating shadow copies or diverging from the authoritative remote Merkle root.
+The proposed hop resolves a new store context and may require source I/O. Remote cells would stream
+across 64 KiB Merkle-aligned piece buffers via `Zread` and `Zhop` messages, caching immutable op
+segments in local memory without creating shadow copies or diverging from the authoritative remote
+Merkle root.
 
 #### 4.9.2 Private Dimension Mounts and Namespace Isolation
 
@@ -1475,91 +1356,40 @@ weave ##/d.anthology/d.entries% {
   micropayment settles over the Spool-Mesh ledger, and the cryptographic content key is released to
   the local render pipeline.
 
-#### 4.9.4 Perspective-Preserving Quantum Clone Ranks & Sovereign Activity Stores
+#### 4.9.4 Private perspectives and shared subjects
 
-In a decentralized docuverse, multiple users concurrently read, annotate, and extend shared cells.
-If Alice and Bob simultaneously link different comments to the same paragraph along `+d.comment`, a
-naive in-place write would bifurcate the rank, violating the sacred 2-rank manifold invariant:
+**Proposed, unbuilt:** perspective qualifiers (`@pers:`, alias `@persp:`, or named `@<ident>:`)
+select an observer-local overlay. The compiler refuses them. The direct evaluator has a tested
+transient arena prototype for named/scoped overlays and canonical fallback, using its local
+`perspectiveClones_` map. It does not implement durable cross-store proxy identity, publication or
+access control. The model below specifies that future durable extension. Private annotation
+structure belongs to a designated annotation store, separate from reader-navigation
+`system://activity`.
 
-$$
-\deg^\pm(c, d) \le 1
-$$
-
-Conventional computing "solves" this through the original sin of the shadow copy: forking files,
-duplicating raw text, and severing character-level provenance.
-
-VQL 15.0 resolves this through **Perspective Qualifiers** (`@pers:`, alias `@persp:`, or named
-`@<ident>:`):
-
-```
-weave @alice: $shared_paragraph/+d.comment => $alice_note
-weave @bob:   $shared_paragraph/+d.comment => $bob_note
-```
+Alice and Bob can each annotate a shared paragraph without changing its store. Each private store
+owns its own proxy and comment/occurrence ranks, including both reciprocal ends of each local edge.
+The proxy carries a stable external reference to the shared subject and a pinned observation or an
+explicit subject-following policy. Exact quoted text transcludes retained spans. A remote reference
+is not an ordinary cross-store `d.clone` edge; `Manifold::cloneMaster()` alone cannot resolve it.
 
 ```mermaid
 graph LR
-    subgraph Master ["Canonical Store"]
-        P["Shared Paragraph (Master)"]
-    end
-
-    subgraph AlicePersp ["Alice's Perspective (system(alice))"]
-        CA["Paragraph Clone (Alice)"]
-        NA["Alice's Note"]
-        CA -->|"+d.comment"| NA
-    end
-
-    subgraph BobPersp ["Bob's Perspective (system(bob))"]
-        CB["Paragraph Clone (Bob)"]
-        NB["Bob's Note"]
-        CB -->|"+d.comment"| NB
-    end
-
-    P ---|"d.clone"| CA
-    P ---|"d.clone"| CB
+    P["Shared subject and pinned observation"]
+    CA["Alice's local proxy"] --> NA["Alice's note occurrence"]
+    CB["Bob's local proxy"] --> NB["Bob's note occurrence"]
+    CA -. "stable reference" .-> P
+    CB -. "stable reference" .-> P
 ```
 
-- **Topological Mechanics & Plan 9 Equivalence**:
-  1. **Plan 9 Union Mount Equivalence**: Just as Plan 9 processes construct private per-process
-     namespaces via union mounts (`mount -b /srv/alice /doc` / `MBEFORE`), `@pers:` overlays Alice's
-     dimensional links over the shared document without mutating the underlying canonical store.
+Each dimension still has at most one neighbor in each direction. Shared membership uses local
+facets/occurrences instead of several direct edges claiming the same reciprocal slot. A composite
+arena can resolve accessible references for display; it does not create a globally mutable clone
+rank or authorize edits in another observer's private store.
 
-  1. **Quantum Clone Ranks in Sovereign Activity Stores**: The master cell $P$ remains pristine.
-     Establishing a link under `@alice:` mints a perspective clone $CA$ along `d.clone` inside
-     Alice's sovereign activity store (`system://activity` or `system(alice)`).
-
-  1. **Zero-Copy Span Provenance**: $CA$ contains zero duplicated text bytes; it resolves its text
-     and payload directly to master $P$ via `Manifold::cloneMaster()`. However, $CA$ possesses
-     independent dimensional link slots! For $P$, $\deg^+(P, \text{d.comment}) \le 1$; for $CA$,
-     $\deg^+(CA, \text{d.comment}) = 1$. The 2-rank manifold invariant holds across all manifolds.
-
-  1. **Symmetric Read Traversal**: Traversal through perspective planes uses symmetric step syntax
-     or scoped blocks:
-
-     ```
-     // Traversal through Alice's perspective
-     for $note in $doc/@alice:/+d.comment return $note
-
-     // Ambient activity perspective shorthand
-     for $note in $doc/@pers:/+d.comment return $note
-
-     // Scoped perspective block
-     with perspective("alice") {
-       for $note in $doc/+d.comment return $note
-     }
-     ```
-
-  1. **The Transparent Fallback Rule**: When stepping along dimension $D$ on cell $C$ through
-     perspective $P$, the runtime checks if $C$ has an active clone $C_P$ in $P$ along `d.clone`. If
-     $C_P$ exists and has links along $D$, traversal follows $C_P$'s link along $D$. If $C_P$ does
-     not exist or has valence 0 along $D$, traversal falls through transparently to master $C$'s
-     link along $D$.
-
-  1. **Multi-Perspective Stacking & Composition**: `with perspective("alice", fallback: "team")` or
-     `@(alice + bob)` combines layers with explicit precedence.
-
-  1. **Bidirectional Discovery & Backlinks**: Links never rot or disappear into one-way dead ends.
-     The Nelsonian backlink ledger discovers all perspective commentary: querying `citing(P)` or
-     traversing `~d.clone` discovers all perspective clones across the docuverse.
+Overlay composition must declare precedence, explicit masking versus absent links, source version
+and anchor policy. Published accessible commentary can be discovered through reference/backlink
+indexes with stated coverage. Private or unavailable commentary is not universally enumerable;
+`~d.clone` does not promise complete discovery across the docuverse.
 
 #### 4.9.5 The "No Remote Mutation" Invariant and Action Cells
 
@@ -1613,7 +1443,8 @@ watch topic("ci-pipelines")/d.active[d.status = "failed"] as $failed_job since @
      `@head`, replaying historical operations that touched the path.
   1. Once caught up to `@head`, it transitions into suspended reactive mode, awaiting live commits.
   1. If a network partition occurs, upon reconnection the client resumes with
-     `since @last_seen_version`, providing deterministic, zero-loss replay.
+     `since @last_seen_version`, providing replay over retained accessible history; unavailable
+     history yields an explicit gap.
 - **The 9P Styx Event Wire Protocol (Backpressure & Flow Control)**: Rather than unbackpressured
   server push packets, `watch` compiles to the 9P Styx event file abstraction:
   1. Client opens a watch channel via `MsgZwatch(tag, wfid, cell, dim, dir, mask)`.
@@ -1640,10 +1471,9 @@ watch topic("ci-pipelines")/d.active[d.status = "failed"] as $failed_job since @
      swamped by fast writers.
 
   1. Clean cancellation is achieved via standard 9P `Tflush` and `Tclunk(wfid)`.
-- **Transclusion Ripples**: When an author modifies a quoted span in their permascroll in another
-  store, `Spanfilade` interval intersection detects the overlap. The update generates a Transclusion
-  Ripple that propagates through the transclusion link, waking the reactive watch query on the
-  quoting document.
+- **Transclusion Ripples (proposed)**: A source assembly or live selector can change and yield
+  another observation. Immutable primedia spans and pinned quotations do not change. Interval
+  indexes identify shared references; they do not rewrite old quotations or prove complete capture.
 - **Context Variable & Delta Introspection**: In `watch $path as $item`:
   1. `$item` binds to the affected cell.
   1. Virtual delta properties (`$item/d.delta` or `delta(.)`) expose
@@ -1656,9 +1486,12 @@ ______________________________________________________________________
 
 ### 4.10 Virtual Dynamic Lenses, Dimension Pivoting & Bidirectional Morphisms
 
+**Design proposal beyond the implemented subset.** The following service/lowering examples do not
+establish execution support. Consult the conformance matrix; unsupported operations refuse.
+
 In VQL 14.0, first-class shapes `{...}` unified schema matching and projection, deprecating static
 `@lens` blocks. VQL 15.0 completes this evolution by introducing **Arbitrary Dynamic Lenses**:
-$O(1)$ virtual coordinate projections that pivot spatial axes, synthesize computed dimensions on
+candidate coordinate projections that pivot spatial axes and synthesize computed dimensions on
 demand, and provide bidirectional write-back semantics.
 
 #### 4.10.1 Coordinate Axis Pivoting and Dynamic Projections
@@ -1676,9 +1509,9 @@ return $task/+d.1, $task/+d.2
 - **The Pivot Operator (`<=>`)**: Swaps or remaps logical dimensions within the projected view
   scope. Navigating posward along `+d.1` in `$pivoted_view` traverses along physical `+d.priority`;
   navigating posward along `+d.2` traverses along `+d.assignee`.
-- **Zero-Allocation Projection**: Pivoting produces no scratch cells or graph transforms in memory.
-  The traversal engine intercepts dimension indices directly inside the inner loop using an $O(1)$
-  lookup matrix.
+- **Proposed remapping**: A bounded lookup table could intercept dimension indices. General
+  dimensions need a fallback; arbitrary computed values and materialized snapshots have additional
+  execution/allocation costs. This is not an implemented zero-allocation guarantee.
 
 #### 4.10.2 Virtual Computed Dimensions
 
@@ -1725,31 +1558,16 @@ weave $item/$currency_lens%19.99
 
 #### 4.10.4 Systems Lowering: DynamicLensMatrix and SIMD Evaluation
 
-To guarantee zero performance degradation, dynamic lenses lower into a hardware-optimized C++23
-structure matching the CPU cache line:
-
-```cpp
-struct alignas(64) DynamicLensMatrix {
-  std::array<std::uint16_t, 16> dim_remap;    // 32 bytes: direct dimension LUT
-  std::uint64_t                 mask_pass;    // 8 bytes: bitmask of allowed dimensions
-  std::uint64_t                 mask_virtual; // 8 bytes: bitmask of computed dimensions
-  BytecodeFunction*             virtual_eval[2]; // 16 bytes: JIT evaluator function pointers
-};
-static_assert(sizeof(DynamicLensMatrix) == 64, "DynamicLensMatrix must fit one L1 cache line");
-```
-
-- **$O(1)$ Hot Path Execution**: When the rank-streaming cursor steps along dimension $d$:
-  1. The engine checks `mask_pass` in a single bitwise instruction. If masked out, traversal yields
-     `0` (no cell) immediately.
-  1. If mapped, the dimension index is translated in a single vector instruction (`_mm_shuffle_epi8`
-     or table load).
-  1. If marked in `mask_virtual`, the cursor executes the JIT-compiled bytecode evaluator in
-     $\le 3\text{ ns}$.
-- **Hardware Prefetching**: During rank traversal through a dynamic lens, the engine issues
-  `_mm_prefetch` for the next 64-byte `CompactOpNode` in the CSR segment, preventing pipeline
-  stalls.
+A bounded remapping table is an unbuilt optimization. A fixed 64-byte prototype represents only its
+declared dimension/callback bounds; arbitrary dimensions need a fallback and arbitrary computed
+values execute arbitrary work. SIMD and prefetching guarantee neither fixed latency nor zero
+performance degradation. The [spike](vql-performance-spike.md) separates actual measurements from
+prototype layout experiments. Layout alone proves no graph execution, provenance or JIT support.
 
 ### 4.11 First-Class Stores, Slices, Hypertime Pinning & Version Arithmetic
+
+**Design proposal beyond the implemented subset.** The following service/lowering examples do not
+establish execution support. Consult the conformance matrix; unsupported operations refuse.
 
 VQL 15.0 unifies the Nelsonian docuverse and OSMIC hypertime by treating **Stores**, **Slices**,
 **Xanadocs**, and **Microversions** as first-class runtime types. Stores cease to be external file
@@ -1770,15 +1588,14 @@ In the Vortex VM, the type universe comprises:
   home cell (`##`) and active dimension dispatch table. Under the Nelsonian Anything-to-ZigZag
   projection lens architecture (§4.11.3), Xanadocs are natively unified into `Slice` handles,
   rendering a separate `Doc` handle redundant.
-- **`Cell`**: An atomic ZigZag crum or node identified by an opIndex in hypertime.
+- **`Cell`**: A ZigZag cell identified by its creating operation in hypertime.
 - **`Dim`**: A first-class dimension axis handle (formerly `SignedDimension`), representing signed
   topological vectors (`+d.name`, `-d.name`).
 - **`Version` (`MicroversionId`)**: A discrete coordinate in OSMIC hypertime, representing an
   immutable document/manifold state arranged in a bijective base-26 DAG.
 
-To maintain zero memory overhead, handles pass through the Vortex VM's dual-wing parameter registers
-as 16-byte POD descriptors (`HyperHandle`), fitting into two 64-bit machine registers without heap
-allocations.
+A 16-byte HyperHandle is a proposed descriptor experiment, not the current runtime representation.
+Its layout, ABI, identity range and overflow policy require separate validation (§4.11.6).
 
 #### 4.11.2 Functional Generators, Slice Enumeration & Root Step Selectors
 
@@ -1940,7 +1757,7 @@ spatial vocabulary:
 | `d.contains`   | `GenericDim::Containment` | Document -> paragraph hierarchy   | Directory -> child entry hierarchy    |
 | `d.seq`        | `GenericDim::Sequence`    | Paragraph reading order           | Sibling order within directory        |
 | `d.ref`        | `GenericDim::Reference`   | Associative xanalink connection   | Symlink / hardlink target             |
-| `d.clone`      | `GenericDim::Clone`       | Shared-content clone master rank  | Identical-content file deduplication  |
+| `d.clone`      | `GenericDim::Clone`       | Shared-content clone master rank  | Explicit shared content authority     |
 | `d.role`       | Generic Attribute         | Element role (`heading`, `quote`) | Entry kind (`file`, `dir`, `symlink`) |
 | `d.mime`       | Generic Attribute         | Document MIME type                | Content MIME (`text/markdown`)        |
 | `d.transclude` | Xanadoc Custom            | Overlapping permascroll primedia  | — (no filesystem analogue)            |
@@ -2099,42 +1916,21 @@ VQL maps arithmetic operators directly to the OSMIC hypertime tree:
 | `$v1 .. $v2` | `versionRange($v1, $v2)` | Lazily streams the causal ancestry sequence from ancestor `$v1` to descendant `$v2`.         |
 | `$v1 < $v2`  | `$v1.isAncestorOf($v2)`  | Lineage test: true if `$v1` is an ancestor of `$v2` along its hypertime path.                |
 
-Because `MicroversionId::inlineSegments = 2`, mainlines and single-level branches (covering over
-99.9% of all production edits) execute entirely in registers and stack memory with **zero heap
-allocations**.
+Inline MicroversionId coordinates can avoid allocation within their shallow bounds. Deep coordinates
+need the general representation; no production distribution or universal timing bound is
+established.
 
 #### 4.11.6 Systems Lowering: HyperHandle, LCA Time-Travel, and Open-Addressing Pinning
 
-To guarantee real-time execution in the Vortex runtime:
+A compact handle is a future representation choice. A 16-byte prototype establishes neither ABI
+passage nor version/lifetime resolution costs. Optional versions need explicit absence rather than
+API sentinels; broad/deep coordinates require a general representation. Store-local slots are not
+global identities.
 
-1. **In-Register Handle Layout (`HyperHandle`)**: Passes in two 64-bit general-purpose registers:
-
-   ```cpp
-   struct alignas(16) HyperHandle {
-     std::uint32_t spoolId{0};   // Store coordinate slot
-     std::uint32_t birthOp{0};   // Slice birth, Xanadoc birth, or CellRef
-     std::uint32_t versionOp{0}; // Pinned microversion opIndex (0 = active tip)
-     HandleKind    kind{HandleKind::Unset};
-     std::uint8_t  flags{0};     // Ephemeral, ReadOnly, SwarmRemote
-     std::uint16_t reserved{0};
-   };
-   static_assert(sizeof(HyperHandle) == 16);
-   ```
-
-1. **Sub-Microsecond Structural Filtering**: `store/slices(##/d.tag = "foo")` bypasses linear ops
-   spool scans ($O(N)$) entirely. The engine intersects the store's pre-indexed
-   `structureBirths(StructureKind::Slice)` table ($S \le 10^2 \ll N$) with the origin cell's
-   contiguous `DimLink` run ($D \le 16$), evaluating the filter in sub-microsecond time.
-
-1. **Lazy Chronofilade Time-Travel**: `slice("bar")@(v1, v2)` rejects cold spool replays. Using
-   `Chronofilade`'s power-18 binary lifting tables, the engine computes
-   $v_{\text{LCA}} = \text{LCA}(v_1, v_2)$ in $O(\log N)$ steps and applies forward delta operations
-   in $O(\Delta)$ time, or evaluates concurrent comparisons via lightweight `ShadowManifoldDelta`
-   overlays.
-
-1. **$O(1)$ Hash-Directed Cell Pinning**: `##@(v1, v2)` probes `SegmentedOpsSpool::indexOf(v)` via
-   open-addressing hash table in expected $O(1)$ time, bounding Nelson R7 edit chains to locate the
-   effective `CompactOpNode` directly in mmap'd memory.
+Chronofilade and hash indexes can accelerate particular lookups. Finding a birth operation does not
+reconstruct all subsequent effective values in constant time. Historical reconstruction needs
+ancestral operations or a valid retained fold. No real-time/sub-microsecond bound is established;
+version pins refuse until their runtime integration exists.
 
 ### 4.12 Structural Typing, Unified Shape Contracts & Topological Functors
 
@@ -2148,8 +1944,9 @@ VQL rejects nominal inheritance hierarchies ("class taxonomies") that shatter as
 Instead, VQL adopts **Gradual Structural Typing**:
 
 - Typing is completely optional: prototype queries omit types without ceremony.
-- Contracts are enforced at compile time and at mutation boundaries (`setLink`, `setValue`,
-  `weave`), and erased inside tight JIT kernels for zero runtime overhead.
+- The direct evaluator checks parameter matching and declared returns at runtime. A return check
+  occurs after the body and is not mutation preflight. The compiler refuses unchecked typed
+  definitions; a future static pass must prove checks redundant before erasing them.
 
 The atomic types are:
 
@@ -2225,29 +2022,15 @@ let $inspect := $to_parent / $to_author;
 return ##/+d.items / $inspect;
 ```
 
-#### 4.12.4 Systems Lowering: The 24-Byte `CurriedMorphism` and `TRAVERSE_CURRIED_DIM`
+#### 4.12.4 Systems Lowering: Proposed CurriedMorphism and Specialized Traversal
 
-To ensure zero heap allocation and native C++ speed:
+The current representation is a shared immutable vector of path steps; binding/composition and
+application can allocate. The [spike](vql-performance-spike.md) measures these phases separately.
 
-**1. The 24-Byte POD Descriptor (`CurriedMorphism`)**: Passes in three 64-bit integer registers
-(`%rdi`, `%rsi`, `%rdx`) under the System V ABI:
-
-```cpp
-struct alignas(8) CurriedMorphism {
-  std::uint32_t anchor_cell{0xFFFFFFFFU};    // 4 bytes
-  std::array<std::uint16_t, 4> dim_chain{0}; // 8 bytes: packed dim IDs
-  std::uint8_t  direction_mask{0};           // 1 byte: POS vs NEG bits
-  std::uint8_t  step_count{0};               // 1 byte: bound steps
-  std::uint16_t morphism_flags{0};           // 2 bytes
-  std::uint32_t capture_val{0};              // 4 bytes: scalar capture
-  std::uint32_t filter_pc{0};                // 4 bytes: optional filter PC
-};
-static_assert(sizeof(CurriedMorphism) == 24);
-```
-
-**2. Dedicated Vortex Opcode (`TRAVERSE_CURRIED_DIM`)**: Instead of allocating closure control
-blocks, the VM executes a tight, unrolled inner CSR loop directly over `ArenaManifold::links_` in
-**3–5 CPU cycles per hop** (28x–45x faster than general call frames).
+A packed 24-byte descriptor and specialized traversal opcode are unbuilt experiments. A bounded
+chain needs a documented fallback. Size does not determine calling convention: the previous
+three-register System V claim was unsupported. Inspect compiler-generated ABI output before choosing
+a layout. No 3–5-cycle traversal or 28x–45x speedup has been established.
 
 #### 4.12.5 What the Direct Evaluator Implements, and What It Decided
 
@@ -2288,382 +2071,38 @@ lowering in §4.12.4 is not built. The rulings below are where the prose above l
   it; a bare `/$f` step inside it is inlined then, so rebinding `$f` later does not reach into a
   functor already built from it. `f / /g` is `f/g`: the second slash is `g`'s own. Applied as a step
   (`$c / $up`) the steps run over the step's input, and the step's predicates and clamp then apply
-  to what they reach. Applying one allocates no closure or frame; the step vectors are the same as
-  any path's, which §4.12.4's `CurriedMorphism` is what removes.
+  to what they reach. Application uses the ordinary step evaluator and can allocate intermediate
+  vectors. The specialized §4.12.4 representation is unbuilt.
 
 - **The compiler refuses a functor binding**
   (`point-free path functors are not compiled to Vortex yet; run the query with --engine direct`)
-  rather than compiling it as the cells the path reaches from home. Types are erased by the
-  compiler, as §4.12.1 allows; it does not yet check them.
+  rather than compiling it as cells reached from home. The compiler also refuses typed definitions
+  until it can preserve their checks; unchecked erasure is not sound conformance.
 
 ______________________________________________________________________
 
 ## 5. Memory Management & Topological Garbage Collection
 
-VQL relies on geometric reachability rather than linear allocation trackers:
-
-```mermaid
-graph TD
-    Root["Root Set: Origin, d.cursors, d.dims, d.pinning-cursors"]
-    Reach["Reachable Active Manifolds"]
-    Pinned["Pinned Islands (caches)"]
-    Unreach["Unreachable Clusters"]
-    GC["Reclaimed by GC"]
-
-    Root -->|"link(..., read)" traversal| Reach
-    Root -->|"d.pinning-cursors"| Pinned
-    Reach -->|"link(..., 0) severs a link"| Unreach
-    Pinned -->|"break the pin"| Unreach
-    Unreach --> GC
-```
-
-The Root Set has four parts, not three. `d.dims` is where the dimensions themselves hang (§7.1);
-`d.pinning-cursors` is what holds up a detached island that must outlive the query that built it,
-and §7.5 is the case it exists for.
-
-- **Allocation**: `%` (§4.5) or a direct `link(cell, ±dim, -1)` materializes a new cell directly
-  into the coordinate system.
-- **Disconnection & Re-linking**: `link(cell, ±dim, 0)` — or `break(cell, ±dim)` (§1) — severs a
-  pointer. If a cell's aggregate link count reaches zero across all dimensions, the cell is eagerly
-  evicted from the matrix storage map.
-- **Sub-graph Isolation**: If a pipeline or temporary manifold is severed from the root set, it is
-  marked as unreachable during the next sweep phase and reclaimed without manual deallocation.
-
-______________________________________________________________________
-
-## 6. Canonical Production Query Examples
-
-### 6.1 Deep Structural Navigation with Zero-Copy Slice
-
-Locates an active worker thread, pulls its buffer variable, slices a token out of the string, and
-weaves the result as a `d.vars`/`d.values` pair off the invocation cell instead of a JSON-shaped
-literal:
-
-```
-for $worker in ^
-where $worker/d.name = "HTTP_WORKER"
-let $raw_header := $worker/d.vars[. = "buffer"]/d.values/.
-let $status_code := $raw_header.[9, 3]
-where $status_code = "200"
-return
-    /d.vars%"worker_id"/d.values%$worker,
-    /d.vars%"status"/d.values%$status_code
-```
-
-`^` already streams every cursor cell (§2), so no further dimension step is needed to reach them.
-`where $worker/d.name = "HTTP_WORKER"` compares a rank to a scalar, which is existential (§3): some
-cell on the worker's `d.name` rank is that name. Spelling it `any(...)` is the same query and is
-worth writing where a reader might expect `all`. `where $status_code = "200"` is a comparison of two
-scalars rather than of a rank, because `$status_code` came from a `let` already dereferenced.
-
-### 6.2 Topological Regex Compilation with Star-Pivot Caching
-
-Checks whether a regular expression has already been woven into an NFA manifold. On a cache hit, it
-returns the cached entry root directly. On a cache miss, it weaves a new Thompson NFA graph and
-caches the result on the regex cache's pinned island, using `if`/`else` (§3) to choose between the
-two:
-
-```
-for $compiler in ^COMPILER_THREAD
-let $pattern := $compiler/d.vars[. = "regex"]/d.values/.
-let $cache_root := ##/d.pinning-cursors[d.name = "regex_compile"]/d.cache
-let $hit := $cache_root/d.invocations[./d.inputs[. = $pattern]][1]
-if $hit
-  return $hit/d.outputs
-else
-  weave {
-    let $new_inv := $cache_root/d.invocations%,
-    $new_inv/d.inputs%$pattern,
-    let $nfa_start := $new_inv/d.outputs%"#START",
-    for $ch in EXPLODE($pattern, "")
-      weave $nfa_start/d.step%$ch,
-    $compiler/link(+d.results, $nfa_start)
-  }
-```
-
-The character loop leans on §4.5's tail-seeking: each `$nfa_start/d.step%$ch` walks to wherever the
-chain currently ends and appends there, so the loop builds one linked rank instead of repeatedly
-overwriting `$nfa_start`'s own `d.step` link. The final line points `d.results` at the NFA's actual
-entry cell — an existing target, so it's spelled with `link`, not `%`.
-
-Everything this weaves lands on the regex cache's island, which is held up by one named pin and
-nothing else (§7.5). Discarding every compiled NFA is therefore
-`##/d.pinning-cursors[d.name = "regex_compile"]/break(+d.cache)` — one break, after which the whole
-graph this example built is unreachable and collected, with the pin left in place to be filled
-again.
-
-### 6.3 Shared Identity via a Clone Rank
-
-Seeds a new user's `d.theme` cell from the system default by cloning the default instead of copying
-its value, so a later change to the default is seen by every user who has not set their own theme —
-and is seen the instant it happens, because none of them held a copy to update:
-
-```
-for $new_user in ##/d.users%$username
-let $default_theme := ##/d.settings[. = "default_theme"]/d.values
-weave $default_theme><$new_user/d.theme%
-```
-
-`$default_theme` is written first, so it is the rank's master and its content is what every member
-shows (§4.6). The right-hand operand is an ordinary `/dim%` create with no `VALUE` of its own, so
-there is nothing to discard.
-
-**Changing the default for everyone is one link, not a sweep.** Weaving a new cell *negward* of
-`$default_theme` makes that cell the master, and every user's theme cell resolves to it from the
-next read onwards — no iteration over users, no invalidation, no notification, because no user cell
-ever held the old value. And because that link is an ordinary operation in hypertime, scrubbing
-behind it restores the previous default for the whole population at once.
-
-A user who later sets their own theme leaves the rank with `$new_user/d.theme/break(+d.clone)` —
-`link(..., 0)` under the hood (§1), not a different "unclone" primitive — and keeps whatever content
-is its own.
-
-### 6.4 In-Place Graph Rewriting & Edge Re-Targeting
-
-Updates a deprecated microservice node, rewires active event routes to its replacement, and
-disconnects the retired cell for automatic garbage collection:
-
-```
-for $old_service in ##/d.services[. = "auth_v1"]
-let $new_service := ##/d.services[. = "auth_v2"]
-weave {
-    for $caller in $old_service/-d.route
-      weave $caller/link(+d.route, $new_service),
-
-    // Clear all incoming and outgoing connections of old service
-    $old_service/break(d.services, +1),
-    $old_service/break(d.services, -1)
-    // Topological GC automatically reclaims $old_service once isolated
-}
-```
-
-`/-d.route` walks `d.route` negward from `$old_service` — the same traversal operator as every other
-step in the query, with the direction living on the dimension name rather than the operator.
-
-### 6.5 Context-Preserving Sprout and Generalized Sorting
-
-Tags video asset cells along `d.videos` with a newly allocated cell along `+d.tag` storing their
-MIME type, then produces an ordered topological sequence of those video cells along `d.videos`
-sorted by their tag:
-
-```
-weave ##/d.videos{ +d.tag: mime_type(.) }
-return sort_into(##/d.videos, by: +d.tag)
-```
-
-#### Topological Mechanics and Evolution of Syntax
-
-Earlier drafts explored using the sprout operator `=>` directly against dimensions
-(`##/d.videos/+d.tag => mime_type(.)`), raising an architectural question: **is using `=>` with a
-dimension and a shape an error or an enhancement?**
-
-1. **Strict Sprout Reading**: In §4.8.5, `$cell/attr => val` strictly creates a `+d.vars` key cell
-   pointing to a `+d.values` payload cell. Treating `+d.tag => val` as a dimension link would
-   overload `=>` with two mutually incompatible topological meanings (`d.vars` metadata branch vs.
-   general manifold edge).
-
-1. **Canonical Shape Projection Reading**: In VQL 14.0, modifying a cell's immediate dimensional
-   connectivity is the exact domain of **Shape Projection** (`$path{...}`):
-   `weave ##/d.videos{ +d.tag: mime_type(.) }`. The context naturally stays on the video cell, the
-   `+d.tag` link is established with the evaluated result of `mime_type(.)`, and no temporary
-   variables are allocated.
-
-1. **The Pipeline Form**: Alternatively, using `%` with the keep-yield operator `!` (§4.5):
-
-   ```
-   weave ##/d.videos/+d.tag%mime_type(.)!
-   return sort_into(##/d.videos, by: +d.tag)
-   ```
-
-   Here, `/+d.tag%mime_type(.)!` creates the tag cell while keeping the stream context anchored to
-   the video cell.
-
-`sort_into` consumes the video cells, queries each cell's tag via the shorthand `by: +d.tag` (which
-expands to `by: \(.) ./+d.tag`), sorts them, and updates their `+d.videos` and `-d.videos` links in
-place, preserving the $\deg^\pm \le 1$ 2-rank invariant.
-
-### 6.6 Conditional Shape Morphisms and Lens Masking
-
-Defines a dynamic user function that selects an export shape based on visibility permissions,
-filtering private and billing dimensions while preserving all other structural links:
-
-```
-def export_shape($is_admin) :=
-  if $is_admin
-    { * }
-  else
-    { *, !d.billing, !d.private_keys };
-
-for $account in ##/d.accounts
-let $admin_flag := $account/d.roles[. = "admin"]
-weave $account{ export_shape(?$admin_flag) }
-```
-
-In this query:
-
-- The function `export_shape` evaluates the truthiness of `$is_admin` and returns either the
-  universal shape `{*}` (identity projection) or the complement shape
-  `{*, !d.billing, !d.private_keys}`.
-- Applying the shape via `$account{ ... }` strips the restricted dimensions from non-admin accounts
-  in place, executing the transformation without copying cell payloads or creating shadow copies.
-  This completely replaces the retired `@lens` construct.
-
-### 6.7 Distributed Job Orchestration and Multi-Machine Aggregation
-
-Demonstrates multi-machine task distribution across a Spool-Mesh cluster. The query mounts two
-remote worker manifolds over the ZZ9P wire protocol, dispatches compute jobs via `+d.ctl` action
-cells without violating the "No Remote Mutation" invariant, and reactively aggregates completed
-metrics using `watch`:
-
-```
-// Mount remote worker node manifolds over ZZ9P
-mount btpk($worker_alpha_key, "tasks")#active as +d.alpha;
-mount btpk($worker_beta_key, "tasks")#active  as +d.beta;
-
-// Dispatch pending batch jobs to idle workers
-for $worker in (##/+d.alpha, ##/+d.beta)
-where $worker/+d.status = "idle"
-let $job := ##/d.pending_jobs[1]
-weave {
-  $worker/+d.ctl%"run_task"! {
-    "job_id"   => $job/+d.id,
-    "dataset"  => $job/+d.dataset_key,
-    "strategy" => "map_reduce"
-  },
-  $job/link(+d.status, 0),
-  $job/link(+d.status, "dispatched")
-}
-
-// Reactively stream task completions and aggregate metrics locally
-watch ##/+d.alpha/+d.completed as $done {
-  weave ##/d.telemetry%"record"! {
-    "worker"  => "alpha",
-    "job_id"  => $done/+d.id,
-    "elapsed" => $done/+d.elapsed_ms,
-    "success" => $done/+d.exit_code = 0
-  }
-}
-```
-
-In this pipeline:
-
-- `mount` creates session-scoped dimension aliases `+d.alpha` and `+d.beta` in `d.dims` with zero
-  ops minted to the local ops spool.
-- Job dispatch appends an action cell along `+d.ctl` on the remote node with payload parameters
-  structured via sprout morphisms (`"key" => val`).
-- The `watch` statement compiles to ZZ9P `MsgZwatch` (`type 122`), binding a watch fid (`wfid`) on
-  the remote worker. The local engine drains binary `EventFrame`s via pacing `Zread` requests
-  whenever the remote worker appends completed tasks to `+d.completed`, recording telemetry in local
-  zzspace with automatic backpressure and zero CPU spinning.
-
-### 6.8 Cross-Store Transclusion Pipeline with Transcopyright Settlement
-
-Demonstrates authentic Nelsonian character-level transclusion across independent sovereign stores,
-with in-band transcopyright micropayment authorization:
-
-```
-let $archive := find("corpus:xanadu author:nelson is:verified")[1]#canon_slice
-for $passage in $archive/d.essays[d.author = "Ted Nelson"]
-let $excerpt := $passage/d.text.[512, 128]
-weave ##/d.curated_anthology/d.sections% {
-  <~ $excerpt, max_spend: 150,
-  +d.curator_note: "Nelsonian transclusion preserves provenance across hypertime",
-  +d.timestamp: now()
-}
-
-// Discover foreign slices transcluding this excerpt across the docuverse
-for $citing_slice in citing($excerpt)
-return $citing_slice/+d.title, $citing_slice/+d.author
-```
-
-Under this workflow:
-
-- `find("corpus:xanadu ...")[1]#canon_slice` queries the local `SwarmCatalogIndex` via SQLite FTS5,
-  ranking verified Nelsonian corpora with BM25 and resolving the canon slice without hardcoded
-  locations.
-- `$passage/d.text.[512, 128]` isolates a 128-character span without copying raw character bytes.
-- `<~ $excerpt, max_spend: 150` executes the transclusion morphism:
-  1. Negotiates BEP 10 transcopyright hole tokens (`0x48`/`0x49`) against the preservation vault,
-     authorizing up to 150 credit units.
-  1. Creates an EDL reference in `Spanfilade` directly pointing to the vault's `PrimediaSpan`.
-  1. Lights up the gold transclusion beam in `xuzz` connecting the local anthology cell to the
-     author's original permascroll paragraph.
-  1. Appends zero text bytes to the local author's permascroll.
-- `citing($excerpt)` queries the DHT rendezvous topic
-  $\text{SHA-1}("xanadu:link-package:" \parallel \text{scrollKey})$, streaming all foreign stores
-  and slices across the docuverse that link to or quote the selected passage.
-
-### 6.9 Multi-Store Swarm Navigation and Dynamic Slice Filtering
-
-Demonstrates multi-store swarm discovery via DHT topic rendezvous, selecting slices with attribute
-predicates, and resolving home cells with genesis selection (`/##`):
-
-```
-// Discover all peer stores announced in the "hypertext" topic swarm
-for $st in topic("hypertext")
-for $sl in $st/slices(##/d.tag = "distributed")
-return {
-  "store_title" => $st/##/+d.title,
-  "slice_name"  => $sl/##/+d.name,
-  "nodes"       => $sl/##/+d.nodes
-}
-
-// Select the home cell of the slice named "canvas" in the first matching topic store
-let $canvas_home := topic("hypertext")[1]/slices("canvas")/##
-return $canvas_home/+d.layers
-```
-
-In this pipeline:
-
-- `topic("hypertext")` invokes the Mainline DHT topic rendezvous transport in $O(1)$ setup time,
-  streaming matching `Store` handles lazily as peer nodes respond.
-- `$st/slices(##/d.tag = "distributed")` filters slices without scanning the ops spool, inspecting
-  pre-indexed slice births in $O(S)$ time and checking the `d.tag` link off each slice's origin.
-- `$sl/##` resolves the slice's genesis `CellRef`, auto-grounding subsequent path steps along
-  `+d.nodes`.
-
-### 6.10 Hypertime Pinning, Manifold Folds & Microversion Arithmetic
-
-Demonstrates hypertime historical slicing across living manifold folds, cell-level version pinning,
-and branch arithmetic over `MicroversionId`:
-
-```
-// Pin slice to two historical microversions, streaming parallel manifold folds
-for $fold in current()/slices("canvas")@(88, 2a9)
-for $node in $fold/##/+d.nodes
-return {
-  "version" => $fold/@ver,
-  "title"   => $node/+d.title,
-  "summary" => $node/+d.body.[0, 100]
-}
-
-// Stream historical cell states across branch microversions
-let $cell_states := ##@(2a5, 8c5)
-
-// Topological hypertime branch arithmetic and ancestry range
-let $base_ver   := @2a4
-let $next_ver   := $base_ver + 1         // Advances to @2a5 in O(1)
-let $branch_ver := $base_ver / "b"       // Forks branch 'b' -> @2a4b1
-
-for $v in (@2a1 .. $next_ver)
-let $snap := current()/slices("canvas")@$v
-return {
-  "version" => $v,
-  "summary" => $snap/##/+d.summary
-}
-```
-
-In this pipeline:
-
-- `slices("canvas")@(88, 2a9)` triggers a lazy bifurcated replay from
-  $v_{\text{LCA}} = \text{LCA}(88, 2a9)$, evaluating both folds in $O(\log N + \Delta)$ time without
-  cold database replays.
-- `##@(2a5, 8c5)` probes `SegmentedOpsSpool::indexOf()` in $O(1)$ expected time, locating the
-  effective `CompactOpNode` on the cell's R7 chain for each microversion.
-- Arithmetic operators (`+ 1`, `/ "b"`, `..`) execute entirely within the stack-inline
-  representation of `MicroversionId` with zero heap allocations.
-
-______________________________________________________________________
+Persistent operations and primedia are append-only. Severing links changes current topology and
+reclaims no historical bytes. Arena data belongs to its context; marks, release and compaction obey
+ArenaManifold lifetime rules, including refusing compaction while a mark is outstanding. Detached
+snapshots consume capacity until normal reclamation boundaries.
+
+Automatic reachability collection and pinned cache islands are design directions, not implemented
+mark-and-sweep guarantees. Future pipelines/caches need bounded ownership, invalidation,
+cancellation and retention. Measure actual allocation and reclamation behavior.
+
+## 6. Executable Conformance Corpus
+
+[Engine conformance](vql-conformance.md) links actual programs under
+`tests/samples/vql/conformance/`, consumed by `tests/xuzz/vql_conformance_test.cpp`. The corpus
+separates direct execution, common compiled execution and explicit rejection. Fixture topology and
+expected outputs are controlled and require no live network or personal configuration.
+
+The former canonical-production federation, settlement, dynamic lens and historical fold snippets
+were unexecuted proposals. Those topics remain design examples in §4.9–§4.11. The file-backed corpus
+is now the normative example set; parser acceptance, direct behavior and compiled equivalence are
+separate assertions.
 
 ## 7. Reconciliation with the Unified Store/Slice
 
@@ -2678,7 +2117,8 @@ whoever writes the compiler.
 
 The convergence splits the manifold in two (its R8). A `Manifold` is a replay of an operations
 spool: durable, addressable, and the thing a document *is*. An `ArenaManifold` is scratch: cells
-that exist because a query made them, backed by no operation and collected when unreachable.
+that exist because a query made them, backed by no operation and owned by their arena context.
+Unreachability alone does not currently reclaim them.
 
 The rule for which one a VQL mutation lands in is **not** "reads are ephemeral, writes are
 persistent". It is:
@@ -2687,9 +2127,9 @@ persistent". It is:
 
 So `weave` on behalf of a person editing a document writes operations. A cursor moving, a rank being
 streamed, an intermediate manifold a pipeline built and will discard — none of these earn a name in
-hypertime, however much structure they create along the way. §5's reachability GC below is
-`ArenaManifold`'s garbage collector specifically; the persistent side has no garbage, because an
-append-only spool never drops anything.
+hypertime, however much structure they create along the way. §5 describes current arena ownership
+and the proposed reachability collector; it does not promise an implemented sweep. The persistent
+side is append-only and never drops historical operations.
 
 The proposed Xuzz activity store can record completed visits in its own history. That does not
 promote a VQL cursor or intermediate query manifold into the visited store.
@@ -2709,12 +2149,9 @@ number. Two smaller things change: `LiteralCellId` may not be written as `0`, an
 absence and zero are the same value again, and the loop still terminates on `link`'s read form
 returning nothing rather than on an id.
 
-**`link`'s isolate sentinel is now simply `0`.** It needed a sentinel only because zero was an
-addressable cell; it is not one, so `break(...)` compiles to `link(., ±dim, 0)` and means what it
-reads as. `link`'s remaining `-1` goes the same way (Vortex §5.1): `CellRef` is unsigned, so
-allocate becomes a verb. `new(...)`/`break(...)` (§1) were already the spellings this language
-preferred; they stop being sugar over a magic target and become the primary forms, with
-`link(±dim, target)` reserved for the literal-target case.
+**Public operations are named.** `break` isolates, `new` allocates and `link` names an existing
+target. Optional absence crosses C++ API boundaries. Wire/on-disk representations do not become
+numeric public allocation/isolation targets. Literal cell zero is refused.
 
 ### 7.3 `><` links along `d.clone`, and the master is the leftmost operand
 
@@ -2758,10 +2195,14 @@ has always had, and the reason the two content accessors became one primitive �
 
 ### 7.5 `d.cache` is a pinned island
 
-§1 memoises off the origin along `+d.cache`. The origin is in the Root Set, so §5's sweep can never
-reach a conclusion about the cache: it is unreachable-by-design from the collector and grows without
-bound. Moving it to the query cursor would fix the leak by destroying the cache — a compiled NFA
-that dies with the query that compiled it has memoised nothing.
+**Proposed lifetime policy:** the collector, dedicated cache pins and reclamation behavior below are
+unbuilt. Current link severing does not reclaim cells or bound memory. The path examples in this
+section are design sketches, not part of the runnable conformance corpus.
+
+A cache rooted at the origin along `+d.cache` would stay reachable. In the proposed Root Set, a
+sweep could never reach a conclusion about the cache: it is unreachable-by-design from the collector
+and grows without bound. Moving it to the query cursor would fix the leak by destroying the cache —
+a compiled NFA that dies with the query that compiled it has memoised nothing.
 
 A cache wants a third lifetime: longer than a query, shorter than the process. It gets one by being
 **deliberately detached from the origin and pinned by a cursor of its own**.
@@ -2781,9 +2222,9 @@ rank: entries are ordered, so eviction is a `break` at the tail, and whatever su
 entry referenced goes with it.
 
 Give each cache its own island and its own pin, **named the way every other cursor is named**: a
-cell on the pin's `d.name` rank, exactly as §6.1 names a worker with
-`$worker/d.name = "HTTP_WORKER"`. A pinning cursor is a cursor, so it is addressed like one, and
-finding a cache or dropping one is an ordinary path expression:
+cell on the pin's `d.name` rank, for example a worker named `HTTP_WORKER`. A pinning cursor is a
+cursor, so it is addressed like one, and finding a cache or dropping one is an ordinary path
+expression:
 
 ```
 ##/d.pinning-cursors[d.name = "regex_compile"]/d.cache                       (: the entries :)
@@ -2801,7 +2242,7 @@ The last two lines are different operations and both are worth having. Breaking 
 link drops the island and keeps the pin, so the cache refills without being re-created. Breaking the
 pin off `d.pinning-cursors` makes the pin unreachable too, and it takes the island with it.
 
-§6.2's example changes shape accordingly: `##/d.cache[. = "regex_compile"]` becomes
+The proposed lookup changes accordingly: `##/d.cache[. = "regex_compile"]` becomes
 `##/d.pinning-cursors[d.name = "regex_compile"]/d.cache`.
 
 **Pins are deliberately not on `d.cursors`.** `^` streams the scheduler's rank, so
@@ -2855,6 +2296,11 @@ ______________________________________________________________________
 
 ## Appendix: Versioning and Change History
 
+Version 16.1 makes engine support explicit, refuses non-equivalent compilation, separates project
+from apply_shape, specifies stream comparisons/quantifiers and clone collision behavior, retires
+public numeric link targets, corrects immutable evidence and adds a file-backed corpus plus a
+measured performance/ABI spike. Earlier entries record design history, not current support.
+
 **The version means something from here on.** It had not: both this document and its companion sat
 at "5.0.0 — Xanalogical Revision" through a dozen changes that moved primitives and retired
 operators, because nobody was bumping it. The history below is reconstituted from the commits that
@@ -2895,7 +2341,7 @@ table.
 | 14.0    | `381972e` | 2026-10-20 | **First-class shapes `{...}`**, Boolean wildcard algebra (`{}`, `*`, `!*`, `~`), shape derivation (`{ $shape, !d }`), dynamic embedding `{ func(.) }`, nested shapes, dimension extraction (`$shape/d`, `$s[d]`), short-form shape predicates `[{...}]`, shape masking/projection replacing `@lens`, `~dim` bidirectional prefix, sprout morphisms `key => val` and `key => list(...)`, symmetric destructuring `:`, path lambdas `\(.) ...`, `sort_into(dim, by: ...)`, and UDF `def`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | 15.0    | `f1d7b71` | 2026-10-20 | **Federated Docuverse & Sovereign Discovery Anchors**: Sovereign discovery anchors (`btpk`, `topic`, `citing`, `find`, `btih`, `ledger`, `system`), federated hops `/##`, private dimension mounts `mount ... as +d.dim`, zero-copy transclusion `<~` with in-band transcopyright micropayments, perspective-preserving quantum clone ranks `@persp: ±d.dim => val`, "No Remote Mutation" invariant with `d.ctl` action cells, reactive `watch` via ZZ9P `Zwatch`, and $O(1)$ dynamic virtual lenses (`<=>`, `:=`, `(get:, put:)`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | 15.1    | `current` | 2026-10-20 | **First-Class Stores, Slices, Root Step Selectors, Functional Lenses & UFCS**: Stores, Slices, and Xanadocs as first-class runtime types; functional generators (`current()`, `local()`, `topic()`, `btpk()`, etc.); Uniform Function Call Syntax (UFCS) context propagation (`$store/slices("name")` $\equiv$ `slices($store, "name")`); universal `lens(type, args...)` primitive returning `Stream<Slice>`; root operator step selectors on slice contexts (`$slice/#`, `$slice/##`, `$slice/^`, `$slice/^^`, `$slice/^NAME`, `$slice/^^NAME`); multi-slice stream cursor filtering (`$slices/^foo`); bidirectional Anything-to-ZigZag Lens architecture (`ProjectionLens` / `ProjectionSession`) with canonical generic dimensions (`d.contains`, `d.seq`, `d.ref`, `d.clone`), character-level span provenance, and bidirectional unprojection; hypertime version pinning (`@(v1, v2)`) streaming living manifold folds; cell-level version pinning (`##@(v1, v2)`); first-class `MicroversionId` literals (`@2a9`); stack-inline hypertime arithmetic (`+`, `-`, `/`, `..`); 16-byte `HyperHandle` in-register lowerings; and strict equality operator reconciliation (`=` for comparison, `:=` for assignment/def, `!=` for inequality). |
-| 16.0    | `current` | 2026-10-21 | **Structural Typing, Unified Shape Contracts & Topological Functors**: Gradual structural type system with atomic handles (`Cell`, `Dim`, `Store`, `Slice`, `Version`), `Dim` renaming; `Doc` unified into `Slice`; unified shape contracts enabling seamless coexistence of destructuring, type contracts, defaults, and parameter aliasing (`$v: Cell { +d.codec: $c: String }`); first-class point-free traversal functors (`/+d.parent / /+d.title`); 24-byte POD `CurriedMorphism` lowering passing in 3 SysV registers with zero heap allocation; and specialized `TRAVERSE_CURRIED_DIM` opcode execution.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| 16.0    | `current` | 2026-10-21 | **Structural Typing, Unified Shape Contracts & Topological Functors**: Gradual structural type system with atomic handles (`Cell`, `Dim`, `Store`, `Slice`, `Version`), `Dim` renaming; `Doc` unified into `Slice`; unified shape contracts enabling seamless coexistence of destructuring, type contracts, defaults, and parameter aliasing (`$v: Cell { +d.codec: $c: String }`); first-class point-free traversal functors (`/+d.parent / /+d.title`); proposed packed CurriedMorphism layout and specialized traversal lowering (unbuilt; no ABI or timing guarantee).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 
 [toc-01]: #1-architectural-foundations--operational-invariants
 [toc-02]: #2-syntactic-token--structural-shorthand-matrix
@@ -2903,9 +2349,6 @@ table.
 [toc-04]: #44-result-materialization-topological-return-weaving
 [toc-05]: #which-cell-the-first-attachment-gets-and-why-it-stopped-being-obvious
 [toc-06]: #5-memory-management--topological-garbage-collection
-[toc-07]: #61-deep-structural-navigation-with-zero-copy-slice
-[toc-08]: #62-topological-regex-compilation-with-star-pivot-caching
-[toc-09]: #64-in-place-graph-rewriting--edge-re-targeting
 [toc-10]: #72--is-the-origin-cell-but-the-origin-is-not-cell-zero
 [toc-11]: #73--links-along-dclone-and-the-master-is-the-leftmost-operand
 [toc-12]: #74-valuereplacement-offset-length-is-one-operation-on-a-persistent-cell
@@ -2916,8 +2359,6 @@ table.
 [toc-17]: #484-the-bidirectional-tilde-operator-
 [toc-18]: #485-context-preserving-polymorphic-morphisms-
 [toc-19]: #487-generalized-sorting-sort_into-and-path-lambdas
-[toc-20]: #65-context-preserving-sprout-and-generalized-sorting
-[toc-21]: #66-conditional-shape-morphisms-and-lens-masking
 [toc-22]: #489-nested-shapes-and-dimension-extraction
 [toc-23]: #488-user-defined-functions-def-returning-dynamic-shapes
 [toc-24]: #49-distributed-swarm-execution-zz9p-protocol--universal-docuverse
@@ -2932,8 +2373,6 @@ table.
 [toc-33]: #4102-virtual-computed-dimensions
 [toc-34]: #4103-bidirectional-morphisms-putget-lenses
 [toc-35]: #4104-systems-lowering-dynamiclensmatrix-and-simd-evaluation
-[toc-36]: #67-distributed-job-orchestration-and-multi-machine-aggregation
-[toc-37]: #68-cross-store-transclusion-pipeline-with-transcopyright-settlement
 [toc-38]: #411-first-class-stores-slices-hypertime-pinning--version-arithmetic
 [toc-39]: #4111-first-class-store-slice-dim-and-hypertime-types
 [toc-40]: #4112-functional-generators-slice-enumeration--root-step-selectors
@@ -2941,8 +2380,6 @@ table.
 [toc-42]: #4114-hypertime-version-pinning-across-folds
 [toc-43]: #4115-microversionid-literals-and-hypertime-arithmetic
 [toc-44]: #4116-systems-lowering-hyperhandle-lca-time-travel-and-open-addressing-pinning
-[toc-45]: #69-multi-store-swarm-navigation-and-dynamic-slice-filtering
-[toc-46]: #610-hypertime-pinning-manifold-folds--microversion-arithmetic
 [toc-47]: #412-structural-typing-unified-shape-contracts--topological-functors
 [toc-48]: #4121-the-gradual-type-system-and-atomic-handles
 [toc-49]: #4122-unified-shape-contracts-coexistence-of-typing-and-destructuring

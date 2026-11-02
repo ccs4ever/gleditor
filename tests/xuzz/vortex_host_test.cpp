@@ -190,8 +190,8 @@ TEST(VortexHostTest, VQLCompilationAndAttachmentToArena) {
   auto &arena = host.arena();
 
   CellRef root = arena.makeCell("Target Node");
-  auto result  = host.compileAndAttachVQL("/d.1/d.2", root, "d.spin",
-                                          DimVector::POS, false);
+  auto result  = host.compileAndAttachVQL("##/+d.created%\"Compiled\"", root,
+                                          "d.spin", DimVector::POS, false);
   ASSERT_TRUE(result.success) << result.errorMessage;
   ASSERT_TRUE(result.entryOpcode);
 
@@ -210,8 +210,9 @@ TEST(VortexHostTest, VQLCompilationPromotionToStore) {
   auto manifold = store.rebuildManifold(parent);
   VortexHost host(&manifold);
 
-  auto result = host.compileAndAttachVQL("/d.1/d.2", targetCell, "d.spin",
-                                         DimVector::POS, false);
+  auto result =
+      host.compileAndAttachVQL("##/+d.created%\"Compiled\"", targetCell,
+                               "d.spin", DimVector::POS, false);
   ASSERT_TRUE(result.success) << result.errorMessage;
   ASSERT_NE(result.entryOpcode, noCell);
 

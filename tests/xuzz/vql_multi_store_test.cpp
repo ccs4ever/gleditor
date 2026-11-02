@@ -330,27 +330,19 @@ TEST(VQLMultiStoreTest, ContainsAnswersAtTheTopLevel) {
   EXPECT_EQ(coord.core().render(no[0]), zigzag::vortex::CellValue(false));
 }
 
-TEST(VQLMultiStoreTest, DeltaDefaultsButExplicitMissingTargetHasNoValue) {
+TEST(VQLMultiStoreTest, DeltaRefusesWithoutLiveObservation) {
   MultiStoreCoordinator coord;
   xanadu::vql::VQLEngine engine(coord);
-  const auto defaultDelta =
-      engine.execute("let $value := delta(); return $value");
-  ASSERT_EQ(defaultDelta.size(), 1U);
-  EXPECT_EQ(coord.core().render(defaultDelta.front()),
-            zigzag::vortex::CellValue(std::string("modified")));
-  EXPECT_TRUE(
-      engine.execute("let $value := delta($missing); return $value").empty());
-  EXPECT_TRUE(engine.execute("let $value := delta(0); return $value").empty());
-  EXPECT_TRUE(
-      engine.execute("let $value := delta(false); return $value").empty());
-  EXPECT_TRUE(
-      engine.execute(R"(let $value := delta(""); return $value)").empty());
-  EXPECT_TRUE(engine.execute(R"(%subject/delta(0))").empty());
-  EXPECT_TRUE(engine.execute(R"(%subject/delta($missing))").empty());
-  const auto targetDelta = engine.execute(R"(%subject/delta())");
-  ASSERT_EQ(targetDelta.size(), 1U);
-  EXPECT_EQ(coord.core().render(targetDelta.front()),
-            zigzag::vortex::CellValue(std::string("modified")));
+  for (const auto *query :
+       {"let $value := delta(); return $value",
+        "let $value := delta($missing); return $value",
+        "let $value := delta(0); return $value",
+        "let $value := delta(false); return $value",
+        R"(let $value := delta(""); return $value)", R"(%subject/delta(0))",
+        R"(%subject/delta($missing))", R"(%subject/delta())"}) {
+    EXPECT_THROW(std::ignore = engine.execute(query), std::runtime_error)
+        << query;
+  }
 }
 
 // Answering nothing for a function nobody defined reads as "no match".

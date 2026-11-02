@@ -109,6 +109,7 @@ QueryExpression Parser::parseQuery() {
   }
 
   ScriptBody body = parseScriptBody();
+  consume(TokenKind::EndOfFile, "Expected end of query");
 
   std::variant<ExecutionBlock, PathExpression> expr;
   if (!body.statements.empty()) {
@@ -1526,7 +1527,7 @@ FunctionInvocation Parser::parseFunctionInvocation() {
 
   if (!check(TokenKind::CloseParen)) {
     while (true) {
-      args.push_back(parseValueExpr());
+      args.push_back(parseValueOrComparisonExpr());
       if (!match(TokenKind::Comma)) {
         break;
       }
