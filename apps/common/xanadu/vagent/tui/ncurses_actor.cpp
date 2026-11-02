@@ -163,6 +163,14 @@ NCursesActor::NCursesActor() : NCursesActor(Options{}) {}
 NCursesActor::NCursesActor(Options options)
     : options_(options), headless_(probeHeadless(options.forceHeadless)),
       screen_(options.defaultWidth, options.defaultHeight) {
+  if (options.pid) {
+    pid_ = *options.pid;
+  } else {
+    pid_ = identity::ActorPid{.node          = "local",
+                              .cursor        = "tui/ncurses",
+                              .epoch         = 1,
+                              .spawnSequence = 1};
+  }
   if (!headless_) {
     cursesState_      = std::make_unique<CursesState>();
     cursesState_->win = initscr();
@@ -324,10 +332,67 @@ std::optional<KeyEvent> NCursesActor::pollInput() {
   case 10:
   case 13:
     return KeyEvent{KeyCode::Enter, '\n'};
-  case 27:
+  case 27: {
+    int next = wgetch(stdscr);
+    if (next == ERR) {
+      return KeyEvent{KeyCode::Escape, '\0'};
+    }
+    if (next == '1') return KeyEvent{KeyCode::F1, '1', false, false, true};
+    if (next == '2') return KeyEvent{KeyCode::F2, '2', false, false, true};
+    if (next == '3') return KeyEvent{KeyCode::F3, '3', false, false, true};
+    if (next == 9) return KeyEvent{KeyCode::Tab, '\t', false, false, true};
+    if (next == '[' || next == 'O') {
+      int seq = wgetch(stdscr);
+      if (seq == 'Z') {
+        KeyEvent ev{KeyCode::Tab, '\t'};
+        ev.shift = true;
+        return ev;
+      }
+      if (seq == '9') {
+        while (seq != ERR && seq != 'u' && seq != '~') {
+          seq = wgetch(stdscr);
+        }
+        return KeyEvent{KeyCode::Tab, '\t'};
+      }
+      if (seq == '1' || seq == '2' || seq == '3') {
+        int seq2 = wgetch(stdscr);
+        if (seq == '1' && (seq2 == '~' || seq2 == 'P'))
+          return KeyEvent{KeyCode::F1, '\0'};
+        if (seq == '2' && (seq2 == '~' || seq2 == 'Q'))
+          return KeyEvent{KeyCode::F2, '\0'};
+        if (seq == '3' && (seq2 == '~' || seq2 == 'R'))
+          return KeyEvent{KeyCode::F3, '\0'};
+        while (seq2 != ERR && seq2 != '~' && seq2 != 'u' && seq2 != 'z') {
+          seq2 = wgetch(stdscr);
+        }
+      }
+      if (seq == 'A') return KeyEvent{KeyCode::Up, '\0'};
+      if (seq == 'B') return KeyEvent{KeyCode::Down, '\0'};
+      if (seq == 'C') return KeyEvent{KeyCode::Right, '\0'};
+      if (seq == 'D') return KeyEvent{KeyCode::Left, '\0'};
+      while (seq != ERR && seq >= 0x20 && seq <= 0x3f) {
+        seq = wgetch(stdscr);
+      }
+    }
     return KeyEvent{KeyCode::Escape, '\0'};
+  }
   case 9:
+  case KEY_STAB:
+  case KEY_CTAB:
+  case KEY_CATAB:
     return KeyEvent{KeyCode::Tab, '\t'};
+  case KEY_BTAB: {
+    KeyEvent ev{KeyCode::Tab, '\t'};
+    ev.shift = true;
+    return ev;
+  }
+  case 14: // Ctrl+N
+    return KeyEvent{KeyCode::Tab, '\t'};
+  case 16: { // Ctrl+P
+    KeyEvent ev{KeyCode::Tab, '\t'};
+    ev.shift = true;
+    return ev;
+  }
   case KEY_F(1):
     return KeyEvent{KeyCode::F1, '\0'};
   case KEY_F(2):

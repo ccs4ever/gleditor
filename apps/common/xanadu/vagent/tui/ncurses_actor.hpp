@@ -13,6 +13,8 @@
 #include <string_view>
 #include <vector>
 
+#include "common/xanadu/identity/identity_layout.hpp"
+
 namespace xanadu::vagent::tui {
 
 enum class KeyCode {
@@ -129,6 +131,7 @@ public:
     bool forceHeadless{false};
     int defaultWidth{120};
     int defaultHeight{30};
+    std::optional<identity::ActorPid> pid;
   };
 
   NCursesActor();
@@ -139,6 +142,9 @@ public:
   NCursesActor &operator=(const NCursesActor &) = delete;
   NCursesActor(NCursesActor &&) noexcept;
   NCursesActor &operator=(NCursesActor &&) noexcept;
+
+  [[nodiscard]] const identity::ActorPid &pid() const noexcept { return pid_; }
+  void setPid(identity::ActorPid pid) { pid_ = std::move(pid); }
 
   [[nodiscard]] bool isHeadless() const noexcept;
   [[nodiscard]] TerminalDimensions dimensions() const;
@@ -168,6 +174,7 @@ private:
   std::unique_ptr<CursesState> cursesState_;
   Options options_;
   bool headless_{true};
+  identity::ActorPid pid_{};
   VirtualScreenBuffer screen_;
   std::deque<KeyEvent> inputQueue_;
 };

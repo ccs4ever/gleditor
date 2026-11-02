@@ -166,18 +166,29 @@ TEST(AgentTuiTest, MonitoringPaneReflectsLiveActorState) {
   tui.setPane(Pane::Monitoring);
 
   auto rows = tui.refreshActorTable();
-  ASSERT_EQ(rows.size(), 1U);
-  EXPECT_EQ(rows[0].pid, pid);
-  EXPECT_EQ(rows[0].name, "tracker-1");
-  EXPECT_EQ(rows[0].agentType, "Tracker");
-  EXPECT_EQ(rows[0].status, "QUIESCENT");
-  EXPECT_GT(rows[0].fuelRemaining, 0U);
+  ASSERT_EQ(rows.size(), 2U);
+  auto trackerIt =
+      std::ranges::find_if(rows, [&](const auto &r) { return r.pid == pid; });
+  ASSERT_NE(trackerIt, rows.end());
+  EXPECT_EQ(trackerIt->name, "tracker-1");
+  EXPECT_EQ(trackerIt->agentType, "Tracker");
+  EXPECT_EQ(trackerIt->status, "QUIESCENT");
+  EXPECT_GT(trackerIt->fuelRemaining, 0U);
+
+  auto tuiIt = std::ranges::find_if(
+      rows, [&](const auto &r) { return r.pid == actor->pid(); });
+  ASSERT_NE(tuiIt, rows.end());
+  EXPECT_EQ(tuiIt->name, "tui");
+  EXPECT_EQ(tuiIt->agentType, "NCursesActor");
+  EXPECT_EQ(tuiIt->programRef, "native:ncurses");
+  EXPECT_EQ(tuiIt->status, "RUNNING");
 
   // Render to virtual screen and verify contents
   tui.render();
   const auto &buf = actor->screen();
   EXPECT_TRUE(buf.contains("Live Actor Table"));
   EXPECT_TRUE(buf.contains("Tracker"));
+  EXPECT_TRUE(buf.contains("NCursesActor"));
   EXPECT_TRUE(buf.contains("QUIESCENT"));
   EXPECT_TRUE(buf.contains("[1: Monitoring]"));
 }
@@ -273,8 +284,11 @@ TEST(AgentTuiTest, OrchestratingPaneCommandsAndLifecycle) {
   EXPECT_TRUE(spawnCmdRes->find("scout1") != std::string::npos);
 
   auto rows = tui.refreshActorTable();
-  ASSERT_EQ(rows.size(), 1U);
-  const auto pid = rows[0].pid;
+  ASSERT_EQ(rows.size(), 2U);
+  auto scoutIt = std::ranges::find_if(
+      rows, [](const auto &r) { return r.name == "scout1"; });
+  ASSERT_NE(scoutIt, rows.end());
+  const auto pid = scoutIt->pid;
 
   // 3. Percept injection command
   auto perceptCmdRes = tui.executeCommand("percept scout1 Ping");
@@ -298,8 +312,11 @@ TEST(AgentTuiTest, OrchestratingPaneCommandsAndLifecycle) {
   ASSERT_TRUE(stopCmdRes.has_value());
 
   rows = tui.refreshActorTable();
-  ASSERT_EQ(rows.size(), 1U);
-  EXPECT_EQ(rows[0].status, "STOPPED");
+  ASSERT_EQ(rows.size(), 2U);
+  scoutIt = std::ranges::find_if(
+      rows, [](const auto &r) { return r.name == "scout1"; });
+  ASSERT_NE(scoutIt, rows.end());
+  EXPECT_EQ(scoutIt->status, "STOPPED");
 
   // Render orchestrating pane
   tui.render();
@@ -339,14 +356,52 @@ TEST(AgentTuiTest, KeyboardNavigationCyclesPanesAndInputs) {
   tui.handleInput(KeyEvent{KeyCode::Tab, '\t'});
   EXPECT_EQ(tui.activePane(), Pane::Monitoring);
 
+  // Shift-Tab backward cycling
+  tui.handleInput(KeyEvent{KeyCode::Tab, '\t', true});
+  EXPECT_EQ(tui.activePane(), Pane::Orchestrating);
+  tui.handleInput(KeyEvent{KeyCode::Tab, '\t', true});
+  EXPECT_EQ(tui.activePane(), Pane::Querying);
+  tui.handleInput(KeyEvent{KeyCode::Tab, '\t', true});
+  EXPECT_EQ(tui.activePane(), Pane::Monitoring);
+
+  // Switch directly via '2' from Monitoring
+  tui.handleInput(KeyEvent{KeyCode::Char, '2'});
+  EXPECT_EQ(tui.activePane(), Pane::Querying);
+
+  // While in Querying with empty input, '3' switches to Orchestrating
+  tui.handleInput(KeyEvent{KeyCode::Char, '3'});
+  EXPECT_EQ(tui.activePane(), Pane::Orchestrating);
+
+  // While in Orchestrating with empty input, '1' switches to Monitoring
+  tui.handleInput(KeyEvent{KeyCode::Char, '1'});
+  EXPECT_EQ(tui.activePane(), Pane::Monitoring);
+
+  // Switch to Querying via Alt+2
+  tui.handleInput(KeyEvent{KeyCode::Char, '2', false, false, true});
+  EXPECT_EQ(tui.activePane(), Pane::Querying);
+
+  // Type in query including digits 1, 2, 3
+  tui.handleInput(KeyEvent{KeyCode::Char, 'a'});
+  tui.handleInput(KeyEvent{KeyCode::Char, 't'});
+  tui.handleInput(KeyEvent{KeyCode::Char, '1'});
+  // Escape clears typed query without switching pane
+  tui.handleInput(KeyEvent{KeyCode::Escape, '\0'});
+  EXPECT_EQ(tui.activePane(), Pane::Querying);
+
+  // Second Escape when empty returns to Monitoring
+  tui.handleInput(KeyEvent{KeyCode::Escape, '\0'});
+  EXPECT_EQ(tui.activePane(), Pane::Monitoring);
+
+  // Switch back to Querying and test Tab switching while typing
+  tui.handleInput(KeyEvent{KeyCode::Char, '2'});
+  EXPECT_EQ(tui.activePane(), Pane::Querying);
+  tui.handleInput(KeyEvent{KeyCode::Char, 'x'});
+  tui.handleInput(KeyEvent{KeyCode::Tab, '\t'});
+  EXPECT_EQ(tui.activePane(), Pane::Orchestrating);
+
   // Switch directly via F2
   tui.handleInput(KeyEvent{KeyCode::F2, '\0'});
   EXPECT_EQ(tui.activePane(), Pane::Querying);
-
-  // Type in query
-  tui.handleInput(KeyEvent{KeyCode::Char, 'a'});
-  tui.handleInput(KeyEvent{KeyCode::Char, 't'});
-  tui.handleInput(KeyEvent{KeyCode::Enter, '\n'});
 
   // Switch to Orchestrating via F3
   tui.handleInput(KeyEvent{KeyCode::F3, '\0'});
@@ -357,9 +412,8 @@ TEST(AgentTuiTest, KeyboardNavigationCyclesPanesAndInputs) {
   tui.tick();
   EXPECT_GE(tui.actionLog().size(), 1U);
 
-  // Quit request
-  tui.handleInput(KeyEvent{KeyCode::Escape, '\0'});
   // Escape from orchestrating goes to monitoring
+  tui.handleInput(KeyEvent{KeyCode::Escape, '\0'});
   EXPECT_EQ(tui.activePane(), Pane::Monitoring);
   tui.handleInput(KeyEvent{KeyCode::Char, 'q'});
   EXPECT_TRUE(tui.shouldExit());
@@ -395,8 +449,11 @@ TEST(AgentTuiTest, LiveUpgradeViaTui) {
   EXPECT_TRUE(upgradeRes.has_value()) << (upgradeRes ? "" : upgradeRes.error());
 
   auto rows = tui.refreshActorTable();
-  ASSERT_EQ(rows.size(), 1U);
-  EXPECT_EQ(rows[0].programRef, held2->programRef());
+  ASSERT_EQ(rows.size(), 2U);
+  auto liveIt =
+      std::ranges::find_if(rows, [&](const auto &r) { return r.pid == pid; });
+  ASSERT_NE(liveIt, rows.end());
+  EXPECT_EQ(liveIt->programRef, held2->programRef());
 }
 
 } // namespace
