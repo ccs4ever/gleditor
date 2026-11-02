@@ -71,7 +71,7 @@ TEST(ScreenOverlayFocusTest, replacingFocusedControlWithLabelClearsFocusDraw) {
   auto registration = manager.registerScope(overlay);
   ASSERT_EQ(manager.focusedNode(), 1U);
   overlay.drawFrame(context);
-  EXPECT_EQ(drawn, 5U); // One control surface and four focus edges.
+  EXPECT_EQ(drawn, 9U); // Surface, four control edges and four focus edges.
 
   overlay.setModel({.id = 1, .model = Label{""}});
   static_cast<void>(
@@ -140,6 +140,31 @@ TEST(ScreenOverlayFocusTest, defaultAndExplicitInitialFocusUseWidgetMetadata) {
   EXPECT_EQ(manager.focusedNode(), 20U);
 }
 
+TEST(ScreenOverlayFocusTest, multilineReturnPrecedesDefaultDialogAction) {
+  auto model                                             = focusPanel();
+  std::get<TextField>(model.children[1].model).multiline = true;
+  ScreenOverlay overlay(std::move(model));
+  const UiMetrics metrics{.screenWidth = 960, .screenHeight = 720};
+  static_cast<void>(overlay.prepare(metrics, Theme{}));
+  FocusManager manager;
+  auto handle = manager.registerScope(
+      overlay, {.initial = FocusTarget::ExplicitNode, .initialNode = 20});
+  std::vector<WidgetAction> actions;
+  overlay.setActionHandler(
+      [&](const auto &action) { actions.push_back(action); });
+  ASSERT_TRUE(manager.dispatchKey({.key = Key::Return}));
+  ASSERT_EQ(actions.size(), 1U);
+  EXPECT_EQ(actions.back().action, "edit");
+  EXPECT_EQ(actions.back().value, "initial\n");
+  ASSERT_TRUE(manager.dispatchText("second"));
+  EXPECT_EQ(actions.back().value, "initial\nsecond");
+  EXPECT_EQ(overlay.prepare(metrics, Theme{})->find(20)->value,
+            "initial\nsecond");
+  ASSERT_TRUE(manager.focusNode(12));
+  ASSERT_TRUE(manager.dispatchKey({.key = Key::Return}));
+  EXPECT_EQ(actions.back().action, "accept");
+}
+
 TEST(ScreenOverlayFocusTest,
      onlyFocusedTextFieldsReceiveComposedTextAndImeArea) {
   ScreenOverlay overlay(focusPanel());
@@ -164,6 +189,129 @@ TEST(ScreenOverlayFocusTest,
   EXPECT_EQ(overlay.prepare(metrics, Theme{})->find(20)->value, "initial +é");
   ASSERT_TRUE(manager.focusNode(10));
   EXPECT_FALSE(manager.textArea());
+}
+
+TEST(ScreenOverlayFocusTest,
+     sensitiveFieldAccessibilityExposesOnlyMaskedValue) {
+  const std::string secret = "token-\xC3\xA9";
+  ScreenOverlay overlay({.id    = 1,
+                         .model = TextField{.value       = secret,
+                                            .placeholder = "Password",
+                                            .caret       = secret.size(),
+                                            .sensitive   = true}});
+  static_cast<void>(
+      overlay.prepare({.screenWidth = 960, .screenHeight = 720}, Theme{}));
+  gleditor::a11y::Tree tree;
+  gleditor::a11y::Builder builder(tree, 16);
+  overlay.describe(builder);
+  ASSERT_FALSE(tree.nodes.empty());
+  const auto node =
+      std::ranges::find(tree.nodes, builder.id(1), &gleditor::a11y::Node::id);
+  ASSERT_NE(node, tree.nodes.end());
+  EXPECT_EQ(node->role, gleditor::a11y::Role::PasswordInput);
+  EXPECT_EQ(node->label, "Password");
+  EXPECT_EQ(node->value, "•••••••");
+  for (const auto &entry : tree.nodes) {
+    EXPECT_EQ(entry.value.find(secret), std::string::npos);
+    EXPECT_EQ(entry.description.find(secret), std::string::npos);
+  }
+}
+
+TEST(ScreenOverlayFocusTest,
+     protectedModalInputRejectsCrLfPasteWithoutChangingTheSecret) {
+  const std::string secret = "token-abc";
+  ScreenOverlay overlay(
+      {.id       = 1,
+       .model    = Modal{"Connect"},
+       .children = {{.id    = 2,
+                     .model = TextField{.value       = secret,
+                                        .placeholder = "Password",
+                                        .action      = "secret",
+                                        .caret       = secret.size(),
+                                        .sensitive   = true}}}});
+  const UiMetrics metrics{.screenWidth = 640, .screenHeight = 480};
+  static_cast<void>(overlay.prepare(metrics, Theme{}));
+  std::size_t notifications = 0;
+  overlay.setActionHandler([&](const auto &) { ++notifications; });
+
+  bool accepted = true;
+  EXPECT_NO_THROW(accepted = overlay.typeInto(2, "\nadditional"));
+  EXPECT_FALSE(accepted);
+  accepted = true;
+  EXPECT_NO_THROW(accepted = overlay.typeInto(2, "\radditional"));
+  EXPECT_FALSE(accepted);
+  const auto scene = overlay.prepare(metrics, Theme{});
+  ASSERT_NE(scene->find(2), nullptr);
+  EXPECT_EQ(scene->find(2)->value, "•••••••••");
+  EXPECT_EQ(notifications, 0U);
+}
+
+TEST(ScreenOverlayFocusTest,
+     multilineFieldAccessibilityExposesItsCompleteEditableValue) {
+  const std::string value = "recipient@example.test\nsecond@example.test";
+  ScreenOverlay overlay({.id        = 1,
+                         .model     = TextField{.value       = value,
+                                                .placeholder = "Recipients",
+                                                .caret       = value.size(),
+                                                .multiline   = true},
+                         .preferred = {300, 100}});
+  static_cast<void>(
+      overlay.prepare({.screenWidth = 960, .screenHeight = 720}, Theme{}));
+  gleditor::a11y::Tree tree;
+  gleditor::a11y::Builder builder(tree, 16);
+  overlay.describe(builder);
+  const auto node =
+      std::ranges::find(tree.nodes, builder.id(1), &gleditor::a11y::Node::id);
+  ASSERT_NE(node, tree.nodes.end());
+  EXPECT_EQ(node->role, gleditor::a11y::Role::TextInput);
+  EXPECT_EQ(node->label, "Recipients");
+  EXPECT_EQ(node->value, value);
+}
+
+TEST(ScreenOverlayFocusTest,
+     multilineWheelScrollIsReportedAndSurvivesPanelModelReplacement) {
+  const std::string value =
+      "one two three four five six seven eight nine ten eleven twelve "
+      "thirteen fourteen fifteen sixteen seventeen eighteen";
+  const UiMetrics metrics{.screenWidth = 640, .screenHeight = 480};
+  ScreenOverlay overlay({.id        = 1,
+                         .model     = TextField{.value       = value,
+                                                .placeholder = "Body",
+                                                .caret       = value.size(),
+                                                .multiline   = true},
+                         .preferred = {180, 72}});
+  const auto initial = overlay.prepare(metrics, Theme{});
+  ASSERT_NE(initial->find(1), nullptr);
+  ASSERT_NE(initial->layout.find(1), nullptr);
+  ASSERT_GT(initial->find(1)->verticalTextOffsetPx, 0.0F);
+  const auto originalScroll = initial->find(1)->verticalTextOffsetPx;
+  const auto *box           = initial->layout.find(1);
+  const auto x              = box->rect.left + box->rect.width * 0.5F;
+  const auto y = static_cast<float>(metrics.screenHeight) - box->rect.bottom -
+                 box->rect.height * 0.5F;
+  std::optional<WidgetAction> action;
+  overlay.setActionHandler([&](const auto &update) { action = update; });
+  ASSERT_TRUE(overlay.pointerEvent(
+      {.phase = PointerPhase::Wheel, .x = x, .y = y, .deltaY = 1.0F}));
+  ASSERT_TRUE(action.has_value());
+  ASSERT_TRUE(action->verticalScrollPx.has_value());
+  ASSERT_TRUE(action->followCaret.has_value());
+  EXPECT_FALSE(*action->followCaret);
+  EXPECT_LT(*action->verticalScrollPx, originalScroll);
+
+  overlay.setModel(
+      {.id        = 1,
+       .model     = TextField{.value            = action->value,
+                              .placeholder      = "Body",
+                              .caret            = *action->caret,
+                              .multiline        = true,
+                              .followCaret      = *action->followCaret,
+                              .verticalScrollPx = *action->verticalScrollPx},
+       .preferred = {180, 72}});
+  const auto replaced = overlay.prepare(metrics, Theme{});
+  ASSERT_NE(replaced->find(1), nullptr);
+  EXPECT_FLOAT_EQ(replaced->find(1)->verticalTextOffsetPx,
+                  *action->verticalScrollPx);
 }
 
 TEST(ScreenOverlayFocusTest, arrowsMoveWithinButtonGroupsAndSpaceActivates) {

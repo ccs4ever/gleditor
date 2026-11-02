@@ -20,6 +20,30 @@ Widget *findWidget(Widget &widget, WidgetId id) {
     if (auto *found = findWidget(child, id)) return found;
   return nullptr;
 }
+void refreshTextLayoutState(Widget &widget, const WidgetScene &scene) {
+  if (auto *input = std::get_if<TextField>(&widget.model)) {
+    input->visualLineStarts.clear();
+    input->visualLineEnds.clear();
+    if (input->multiline && !input->sensitive) {
+      if (const auto *visual = scene.find(widget.id)) {
+        input->scrollPx         = visual->textOffsetPx;
+        input->verticalScrollPx = visual->verticalTextOffsetPx;
+        if (!input->value.empty()) {
+          for (const auto &line : visual->fitted.shaping.lines) {
+            const auto begin = static_cast<std::size_t>(line.byteStart);
+            auto end = begin + static_cast<std::size_t>(line.byteLength);
+            if (end > begin && input->value[end - 1] == '\n') --end;
+            input->visualLineStarts.push_back(begin);
+            input->visualLineEnds.push_back(end);
+          }
+        }
+      }
+    } else if (const auto *visual = scene.find(widget.id)) {
+      input->scrollPx = visual->textOffsetPx;
+    }
+  }
+  for (auto &child : widget.children) refreshTextLayoutState(child, scene);
+}
 } // namespace
 ScreenOverlay::ScreenOverlay(Widget model)
     : model_(std::move(model)), identity_(identities++) {
@@ -80,6 +104,7 @@ ScreenOverlay::prepare(const UiMetrics &metrics, const Theme &theme) {
     auto next = std::make_shared<WidgetScene>(
         layoutWidgets(model_, bounds_.value_or(metrics.pixelSafeArea()),
                       metrics, theme, shaping_));
+    refreshTextLayoutState(model_, *next);
     scene_   = std::move(next);
     metrics_ = metrics;
     theme_   = theme;
@@ -141,10 +166,18 @@ bool ScreenOverlay::typeInto(WidgetId id, std::string_view text) {
     auto *widget = findWidget(model_, id);
     auto *input  = widget ? std::get_if<TextField>(&widget->model) : nullptr;
     if (!visible_ || !input) return false;
+    if (input->sensitive && (text.find('\n') != std::string_view::npos ||
+                             text.find('\r') != std::string_view::npos))
+      return false;
     input->insert(text);
+    input->followCaret = true;
     changed();
-    action   = {id, input->action, input->value, 0, input->caret};
-    callback = actionHandler_;
+    action = {id, input->action, input->value, 0, input->caret};
+    action.horizontalScrollPx = input->scrollPx;
+    action.verticalScrollPx   = input->verticalScrollPx;
+    action.preferredColumn    = input->preferredColumn;
+    action.followCaret        = input->followCaret;
+    callback                  = actionHandler_;
   }
   if (callback) callback(action);
   return true;
@@ -157,9 +190,14 @@ bool ScreenOverlay::keyInto(WidgetId id, Key key, KeyMods mods) {
     auto *widget = findWidget(model_, id);
     auto *input  = widget ? std::get_if<TextField>(&widget->model) : nullptr;
     if (!visible_ || !input || !input->key(key, mods)) return false;
+    input->followCaret = true;
     changed();
-    action   = {id, input->action, input->value, 0, input->caret};
-    callback = actionHandler_;
+    action = {id, input->action, input->value, 0, input->caret};
+    action.horizontalScrollPx = input->scrollPx;
+    action.verticalScrollPx   = input->verticalScrollPx;
+    action.preferredColumn    = input->preferredColumn;
+    action.followCaret        = input->followCaret;
+    callback                  = actionHandler_;
   }
   if (callback) callback(action);
   return true;
@@ -285,6 +323,8 @@ bool ScreenOverlay::pointerEvent(const PointerEvent &event) {
   double fraction = 0;
   float scroll    = 0;
   bool handled    = false;
+  std::function<void(const WidgetAction &)> callback;
+  WidgetAction textScrollAction;
   {
     const std::scoped_lock lock(guard_);
     if (!visible_ || !scene_) return false;
@@ -297,8 +337,8 @@ bool ScreenOverlay::pointerEvent(const PointerEvent &event) {
     const auto *visual = hit ? scene_->find(hit->id) : nullptr;
     if (event.phase == PointerPhase::Wheel) {
       if (visual) {
-        const auto *owner = findWidget(model_, visual->ownerId);
-        const auto *list  = owner ? std::get_if<List>(&owner->model) : nullptr;
+        auto *owner      = findWidget(model_, visual->ownerId);
+        const auto *list = owner ? std::get_if<List>(&owner->model) : nullptr;
         if (list) {
           scrollId = owner->id;
           const auto pitch =
@@ -307,6 +347,29 @@ bool ScreenOverlay::pointerEvent(const PointerEvent &event) {
                   : std::max(theme_.type.minTouchPx,
                              metrics_.px(theme_.type.minTouchPx));
           scroll = -event.deltaY * pitch;
+        } else if (auto *input =
+                       owner ? std::get_if<TextField>(&owner->model) : nullptr;
+                   input && input->multiline && !input->sensitive) {
+          const auto *box = scene_->layout.find(visual->id);
+          const auto maxScroll =
+              box ? std::max(0.0F,
+                             visual->fitted.heightPx - box->contentRect.height)
+                  : 0.0F;
+          const auto lineStep = visual->font->metrics().lineHeight *
+                                (1.0F + theme_.type.lineGapEm);
+          input->verticalScrollPx =
+              std::clamp(input->verticalScrollPx - event.deltaY * lineStep,
+                         0.0F, maxScroll);
+          input->followCaret = false;
+          changed();
+          handled          = true;
+          textScrollAction = {owner->id, input->action, input->value, 0,
+                              input->caret};
+          textScrollAction.horizontalScrollPx = input->scrollPx;
+          textScrollAction.verticalScrollPx   = input->verticalScrollPx;
+          textScrollAction.preferredColumn    = input->preferredColumn;
+          textScrollAction.followCaret        = input->followCaret;
+          callback                            = actionHandler_;
         }
       }
     } else if (event.phase == PointerPhase::Press && event.button == 1) {
@@ -340,6 +403,7 @@ bool ScreenOverlay::pointerEvent(const PointerEvent &event) {
   }
   if (scrollId) return scrollList(scrollId, scroll);
   if (activateId) return activate(activateId, fraction);
+  if (callback) callback(textScrollAction);
   return handled;
 }
 void ScreenOverlay::deviceReady(render::RenderDevice &device,
@@ -382,6 +446,21 @@ void ScreenOverlay::rebuildCanvas(RenderState &state,
               : theme_.colours.surface);
       background_->addRect(box->rect.left, box->rect.bottom, box->rect.width,
                            box->rect.height, fill);
+      if (visual.textInput || visual.accessibilityRole == a11y::Role::Button) {
+        const auto &rect  = box->rect;
+        const auto stroke = std::min(
+            {std::max(1.0F, metrics_.px(theme_.buttonMetrics.seamWidthPx)),
+             rect.width, rect.height});
+        const auto border = rgba(theme_.colours.border);
+        background_->addRect(rect.left, rect.bottom, rect.width, stroke,
+                             border);
+        background_->addRect(rect.left, rect.bottom + rect.height - stroke,
+                             rect.width, stroke, border);
+        background_->addRect(rect.left, rect.bottom, stroke, rect.height,
+                             border);
+        background_->addRect(rect.left + rect.width - stroke, rect.bottom,
+                             stroke, rect.height, border);
+      }
     }
     if (visual.scrubber) {
       background_->setTag(render::tagKindOverlay, visual.pickingId);
@@ -409,9 +488,17 @@ void ScreenOverlay::rebuildCanvas(RenderState &state,
     canvas->pushClip(box->contentRect);
     auto textBox = box->contentRect;
     if (visual.textInput) {
-      textBox.left -= visual.textOffsetPx;
-      textBox.width =
-          std::max(textBox.width + visual.textOffsetPx, visual.fitted.widthPx);
+      if (visual.multilineTextInput) {
+        textBox.left   = box->contentRect.left;
+        textBox.width  = box->contentRect.width;
+        textBox.height = visual.fitted.heightPx;
+        textBox.bottom = box->contentRect.bottom + box->contentRect.height -
+                         visual.verticalTextOffsetPx - textBox.height;
+      } else {
+        textBox.left -= visual.textOffsetPx;
+        // Keep a single-line input at the origin used by caret geometry.
+        textBox.width = visual.fitted.widthPx;
+      }
     }
     canvas->addText(state, textBox, visual.fitted, colour,
                     visual.selected ? rgba(theme_.colours.accent)
@@ -452,14 +539,19 @@ void ScreenOverlay::rebuildFocusCanvas(const WidgetScene &scene) {
                             colour);
       focusCanvas_->addRect(rect.left + rect.width - stroke, rect.bottom,
                             stroke, rect.height, colour);
-      if (visual && visual->textInput && visual->caretOffsetPx) {
+      if (visual && visual->textInput && visual->caretOffsetPx &&
+          (!visual->multilineTextInput || visual->caretOffsetYPx)) {
         const auto &content    = box->contentRect;
         const auto caretStroke = std::min(stroke, content.width);
         const auto x =
             std::clamp(content.left + *visual->caretOffsetPx, content.left,
                        content.left + content.width - caretStroke);
-        focusCanvas_->addRect(x, content.bottom, caretStroke, content.height,
-                              colour);
+        const auto caretY = visual->caretOffsetYPx
+                                ? content.bottom + *visual->caretOffsetYPx
+                                : content.bottom;
+        const auto caretHeight =
+            visual->caretOffsetYPx ? visual->caretHeightPx : content.height;
+        focusCanvas_->addRect(x, caretY, caretStroke, caretHeight, colour);
       }
       focusCanvas_->popClip();
     }
@@ -589,9 +681,14 @@ bool ScreenOverlay::performAction(std::uint64_t id, a11y::Action action,
       next.value.clear();
       next.caret = 0;
       next.insert(value);
-      *input = std::move(next);
+      *input             = std::move(next);
+      input->followCaret = true;
       changed();
       notification = {widgetId, input->action, input->value, 0, input->caret};
+      notification.horizontalScrollPx = input->scrollPx;
+      notification.verticalScrollPx   = input->verticalScrollPx;
+      notification.preferredColumn    = input->preferredColumn;
+      notification.followCaret        = input->followCaret;
     } else if (auto *scrubber = std::get_if<Scrubber>(&widget->model)) {
       double number{};
       const auto parsed =
