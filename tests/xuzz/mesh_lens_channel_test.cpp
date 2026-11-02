@@ -32,7 +32,7 @@ TEST(MeshLensChannelTest, SimulatedTwoPeerMaterializationHop) {
 
   // 3. Server serves peer requests
   std::size_t providerCalls = 0;
-  auto provider             = [&providerCalls](
+  auto provider = [&providerCalls](
                       std::string_view cellName) -> std::optional<std::string> {
     ++providerCalls;
     if (cellName == "proc/42/status") {

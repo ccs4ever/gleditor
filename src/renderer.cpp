@@ -468,14 +468,14 @@ bool Renderer::update(RenderState &state, const bool settled) {
         .screenHeight   = screenHeight,
         .timeline       = timeline,
         .settledChrome  = lastChrome,
-        .metrics        = {.contentScale = this->state->contentScale.load(),
-                           .userScale    = this->state->uiScale.load(),
-                           .fontScale    = this->state->fontScale.load(),
-                           .screenWidth  = screenWidth,
-                           .screenHeight = screenHeight,
-                           .marginShare  = this->state->uiSafeMarginShare.load()},
-        .theme          = theme ? *theme : gleditor::ui::defaultTheme(),
-        .contentRegion  = contentRegion};
+        .metrics       = {.contentScale = this->state->contentScale.load(),
+                          .userScale    = this->state->uiScale.load(),
+                          .fontScale    = this->state->fontScale.load(),
+                          .screenWidth  = screenWidth,
+                          .screenHeight = screenHeight,
+                          .marginShare  = this->state->uiSafeMarginShare.load()},
+        .theme         = theme ? *theme : gleditor::ui::defaultTheme(),
+        .contentRegion = contentRegion};
     for (auto *const contributor : frameContributors) {
       ctx.metrics.chrome = ctx.chrome;
       contributor->drawFrame(ctx);

@@ -1402,9 +1402,9 @@ int XuzzApp::run(const int argc, char **argv) {
       };
       const auto targetEdges = pageEdges(*focusedFrame);
       const auto sourceEdges = pageEdges(*companionFrame);
-      const auto gap         = focusedFrame->marginPx *
+      const auto gap = focusedFrame->marginPx *
                        glm::length(glm::vec3(focusedFrame->localToWorld[0]));
-      auto model = companion.modelMatrix();
+      auto model     = companion.modelMatrix();
       model[3].y += point->y - otherPoint->y;
       model[3].x += otherPoint->x >= point->x
                         ? targetEdges[1].x + gap - sourceEdges[0].x
@@ -2276,10 +2276,10 @@ int XuzzApp::run(const int argc, char **argv) {
                   [&session, &bindZigzag, &map, zigzagPresentation, target,
                    anchorCell, index, parent, &pairedDocument,
                    note = answers.front().answer()](RenderState &rState) {
-                    auto &store         = session->store(index);
-                    auto head           = store.annotateVersion(parent, target,
-                                                                {.description = note});
-                    auto folded         = store.rebuildManifold(head);
+                    auto &store = session->store(index);
+                    auto head   = store.annotateVersion(parent, target,
+                                                        {.description = note});
+                    auto folded = store.rebuildManifold(head);
                     const auto targetOp = store.segmentedOps().indexOf(target);
                     if (!targetOp || *targetOp == 0) return;
                     const auto handle = folded.findOpHandle(*targetOp);
@@ -2342,7 +2342,7 @@ int XuzzApp::run(const int argc, char **argv) {
     const auto &openView = session->views()[docIdx];
     const auto &st       = session->store(openView.storeIndex);
     const auto spans     = st.rebuild(openView.version, openView.selection)
-                           .spansFor(selStart, selEnd - selStart);
+                               .spansFor(selStart, selEnd - selStart);
     if (spans.empty()) {
       return false;
     }
@@ -3286,7 +3286,7 @@ int XuzzApp::run(const int argc, char **argv) {
              {},
              CaretMotion::DocumentEnd,
              "to the end of the document"},
-        };
+    };
     for (const auto &[move, select, motion, where] : motions) {
       app.commands().registerAction(
           std::string(move), std::string("move the caret ") + where,
@@ -3486,7 +3486,7 @@ int XuzzApp::run(const int argc, char **argv) {
       const auto docIdx   = where.doc;
       const auto storeIdx = session->storeIndexOf(docIdx);
       const auto ver      = session->versionOf(docIdx);
-      const auto spans    = session->store(storeIdx)
+      const auto spans = session->store(storeIdx)
                              .rebuild(ver, session->views()[docIdx].selection)
                              .spansFor(where.start, where.end - where.start);
       if (spans.empty()) {
@@ -3539,7 +3539,7 @@ int XuzzApp::run(const int argc, char **argv) {
       const auto docIdx   = where.doc;
       const auto storeIdx = session->storeIndexOf(docIdx);
       const auto ver      = session->versionOf(docIdx);
-      const auto spans    = session->store(storeIdx)
+      const auto spans = session->store(storeIdx)
                              .rebuild(ver, session->views()[docIdx].selection)
                              .spansFor(where.start, where.end - where.start);
       if (spans.empty()) {

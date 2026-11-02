@@ -4,6 +4,7 @@
 #include <ranges>
 #include <string_view>
 
+#include "common/xanadu/vagent/runtime/checker.hpp"
 #include "common/xanadu/vagent/runtime/parser.hpp"
 #include "common/xanadu/vagent/runtime/upgrade_schema.hpp"
 
@@ -15,7 +16,11 @@ UpgradeSchema schema(std::string_view source) {
   EXPECT_TRUE(unit) << (unit ? "" : formatParseError(unit.error()));
   if (!unit) return {};
   auto checked = check(*unit);
-  EXPECT_TRUE(checked);
+  EXPECT_TRUE(checked) << (checked ? ""
+                                   : (checked.error().empty()
+                                          ? ""
+                                          : formatCheckError(
+                                                checked.error().front())));
   if (!checked) return {};
   auto result = makeUpgradeSchema(*checked);
   EXPECT_TRUE(result);
@@ -24,11 +29,11 @@ UpgradeSchema schema(std::string_view source) {
 
 TEST(VagentUpgradeSchemaTest, PredicateKeyAndOrderedTypeChangesAreBreaking) {
   const auto oldSchema = schema(R"(
-predicate position(key who: Agent, x: Int, y: Float)
+predicate position(key who: Agent, key loc: Str, x: Int)
 agent Worker {}
 )");
   const auto changed   = schema(R"(
-predicate position(x: Int, key who: Agent, y: Float)
+predicate position(key who: Agent, loc: Str, x: Int)
 agent Worker {}
 )");
   const auto changes   = compareUpgradeSchemas(oldSchema, changed);

@@ -157,9 +157,9 @@ VkCommandBuffer DeviceVK::beginSecondary(RecordSlot &slot) {
   inherit.framebuffer = framebuffer;
 
   VkCommandBufferBeginInfo begin{};
-  begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-  begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT |
-                VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT;
+  begin.sType            = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+  begin.flags            = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT |
+                           VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT;
   begin.pInheritanceInfo = &inherit;
   check(vkBeginCommandBuffer(commands, &begin),
         "vkBeginCommandBuffer (secondary)");

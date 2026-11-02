@@ -146,9 +146,9 @@ TEST(MeshVortexArtifactTest, VagentDepthOpcodeCannotEnterPureArtifacts) {
 
   auto sealed = sealVortexProgram(addition());
   ASSERT_TRUE(sealed) << sealed.error();
-  auto body = xanadu::bencode::decode(
-                  xanadu::bencode::decode(*sealed).find("body")->asString())
-                  .asDict();
+  auto body         = xanadu::bencode::decode(
+                          xanadu::bencode::decode(*sealed).find("body")->asString())
+                          .asDict();
   auto instructions = body.at("instructions").asList();
   auto first        = instructions.front().asDict();
   first["opcode"] =
@@ -169,9 +169,9 @@ TEST(MeshVortexArtifactTest, ExtendedOpcodesRemainOutsidePureArtifacts) {
 
     auto sealed = sealVortexProgram(addition());
     ASSERT_TRUE(sealed) << sealed.error();
-    auto body = xanadu::bencode::decode(
-                    xanadu::bencode::decode(*sealed).find("body")->asString())
-                    .asDict();
+    auto body            = xanadu::bencode::decode(
+                               xanadu::bencode::decode(*sealed).find("body")->asString())
+                               .asDict();
     auto instructions    = body.at("instructions").asList();
     auto first           = instructions.front().asDict();
     first["opcode"]      = Wire::integer(static_cast<std::int64_t>(opcode));

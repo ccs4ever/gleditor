@@ -86,9 +86,9 @@ protected:
     // messages and grants stamped far from real time.
     const auto base = std::chrono::floor<std::chrono::seconds>(
         std::chrono::system_clock::now());
-    startMillis = std::chrono::duration_cast<std::chrono::milliseconds>(
-                      base.time_since_epoch())
-                      .count();
+    startMillis        = std::chrono::duration_cast<std::chrono::milliseconds>(
+                             base.time_since_epoch())
+                             .count();
     options.clock.wall = [base] { return base; };
     host = std::make_unique<LocalHost>(std::move(*program), options);
   }
@@ -306,7 +306,7 @@ agent Metronome {
 )vagent";
   const std::string cmd = "build/vagent run " + path.string() +
                           " --agent Metronome --advance 1s --advance 2s 2>&1";
-  FILE *pipe = popen(cmd.c_str(), "r");
+  FILE *pipe            = popen(cmd.c_str(), "r");
   ASSERT_NE(pipe, nullptr);
   std::string output;
   char buffer[256];

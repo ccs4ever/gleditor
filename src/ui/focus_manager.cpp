@@ -169,8 +169,8 @@ struct FocusManager::State {
       std::erase_if(captures, [&](const auto &capture) {
         const auto captured = find(capture.second);
         const bool lost     = !captured || !captured->active ||
-                          (selected.policy.modal && selected.id &&
-                           captured->id != selected.id);
+                              (selected.policy.modal && selected.id &&
+                               captured->id != selected.id);
         if (lost && captured && captured->scope) {
           cancelled.emplace_back(captured->scope, capture.first);
         }
@@ -230,9 +230,9 @@ struct FocusManager::State {
           const std::lock_guard lock(mutex);
           auto it = std::ranges::find(entries, selected.id, &Entry::id);
           retry   = it == entries.end() || focused != selected.id ||
-                  it->sequence != selected.sequence ||
-                  it->node != selected.node ||
-                  it->nodeSequence != selected.nodeSequence;
+                    it->sequence != selected.sequence ||
+                    it->node != selected.node ||
+                    it->nodeSequence != selected.nodeSequence;
           if (!retry) {
             nodeChanged = it->node != node ||
                           (node && it->nodeSequence != selected.sequence);
@@ -250,9 +250,9 @@ struct FocusManager::State {
         const std::lock_guard lock(mutex);
         auto it = std::ranges::find(entries, selected.id, &Entry::id);
         retry   = it == entries.end() || focused != selected.id ||
-                it->sequence != selected.sequence ||
-                it->node != selected.node ||
-                it->nodeSequence != selected.nodeSequence;
+                  it->sequence != selected.sequence ||
+                  it->node != selected.node ||
+                  it->nodeSequence != selected.nodeSequence;
         if (!retry) {
           it->node.reset();
           selected = *it;

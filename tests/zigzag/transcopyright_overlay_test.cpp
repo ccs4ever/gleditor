@@ -242,12 +242,12 @@ TEST_F(TranscopyrightOverlayTest,
   draw();
   const auto captured = state.overlayPickScene.widgetOverlays.front();
   render::PickingResult pick;
-  pick.requestId       = 1;
-  pick.tag             = {.kind     = render::tagKindOverlay,
-                          .docIndex = (captured.identity >> render::tagPageBits) &
-                                      ((1U << render::tagDocBits) - 1U),
-                          .pageIndex    = 0,
-                          .clusterIndex = 1};
+  pick.requestId = 1;
+  pick.tag       = {.kind         = render::tagKindOverlay,
+                    .docIndex     = (captured.identity >> render::tagPageBits) &
+                                    ((1U << render::tagDocBits) - 1U),
+                    .pageIndex    = 0,
+                    .clusterIndex = 1};
   pick.overlayWidgetId = captured.targets->front();
   std::ranges::reverse(holes);
   ++generation;
@@ -294,10 +294,10 @@ TEST_F(TranscopyrightOverlayTest, RemovedBadgesCannotRetargetCapturedPicks) {
   ++generation;
   draw();
   render::PickingResult pick;
-  pick.requestId    = 2;
-  pick.tag.kind     = render::tagKindOverlay;
-  pick.tag.docIndex = (captured.identity >> render::tagPageBits) &
-                      ((1U << render::tagDocBits) - 1U);
+  pick.requestId        = 2;
+  pick.tag.kind         = render::tagKindOverlay;
+  pick.tag.docIndex     = (captured.identity >> render::tagPageBits) &
+                          ((1U << render::tagDocBits) - 1U);
   pick.tag.clusterIndex = 1;
   pick.overlayWidgetId  = oldId;
   EXPECT_FALSE(overlay.picked(pick, state));

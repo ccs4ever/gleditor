@@ -1178,7 +1178,7 @@ TEST_F(VagentEpistemicIngress, TheTimeWindowsWidenByUncertaintyAndSkew) {
   const double now = std::chrono::duration<double>(
                          std::chrono::system_clock::now().time_since_epoch())
                          .count();
-  auto old                = reading(kP1, "old", 1, 1.0);
+  auto old         = reading(kP1, "old", 1, 1.0);
   old.acquiredUncertainty = 2.0;
   old.acquiredAt          = now - 11.0; // inside max_age + uncertainty
   observe(old);

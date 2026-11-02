@@ -376,8 +376,8 @@ CellRef ArenaManifold::proxyFor(const std::uint32_t space,
     return it->second;
   }
 
-  const auto bits = (static_cast<std::uint64_t>(space) << 32) |
-                    static_cast<std::uint64_t>(foreignIndex);
+  const auto bits     = (static_cast<std::uint64_t>(space) << 32) |
+                        static_cast<std::uint64_t>(foreignIndex);
   const CellRef proxy = mintSlot(xanadu::ValueKind::ExternRef, bits, {});
 
   const auto dimStoreRefs = ensureDimension("d.store-refs");
@@ -2382,11 +2382,11 @@ std::optional<Promoted> promoteOverlay(const ArenaManifold &from,
         minted = store.makeCell(out.version, spans.front());
     } else if (xanadu::ValueKind::OpHandle == kind) {
       const auto target = *from.handleTarget(arena);
-      minted            = store.makeOpHandle(out.version,
+      minted = store.makeOpHandle(out.version,
                                   (isEphemeral(target) || from.holdsOwn(target))
-                                                 ? real.at(target)
-                                                 : target,
-                                             from.textOf(arena));
+                                      ? real.at(target)
+                                      : target,
+                                  from.textOf(arena));
     } else if (xanadu::ValueKind::ForeignOpHandle == kind) {
       const auto target = xanadu::foreignOpTarget(from, arena);
       minted            = store.makeForeignOpHandle(out.version, *target);
@@ -2429,7 +2429,7 @@ std::optional<Promoted> promoteOverlay(const ArenaManifold &from,
           spans.empty() ? xanadu::PrimediaSpan{} : spans.front(),
           xanadu::ValueKind::OpHandle,
           (isEphemeral(target) || from.holdsOwn(target)) ? real.at(target)
-                                                               : target);
+                                                         : target);
       std::uint64_t offset = spans.empty() ? 0 : spans.front().length;
       for (std::size_t i = 1; i < spans.size(); ++i) {
         out.version =

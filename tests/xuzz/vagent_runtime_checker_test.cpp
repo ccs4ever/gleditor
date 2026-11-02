@@ -866,6 +866,17 @@ TEST(VagentCheckerTruth, GoalClauseIsACondition) {
   neg("goal G2() achieve {\n  succeed when believe seen(\"a\", 1)\n}\n",
       C::ImpureCondition, 2);
 }
+TEST(VagentCheckerTruth, UnboundVariableInNegatedBeliefIsRejected) {
+  neg("predicate at(who: Str, x: Float, y: Float)\n"
+      "agent A {\n"
+      "  on Ping {\n"
+      "    if not believes at(?x, 10.0, 20.0) then {\n"
+      "      let y := 1\n"
+      "    }\n"
+      "  }\n"
+      "}\n",
+      C::FlounderedNegation, 4);
+}
 TEST(VagentCheckerTruth, AnswerMayNotWriteAField) {
   neg("agent A {\n  var total: Int := 0\n  answer depth(item: Str): Int {\n    "
       "total := 1\n    1\n  }\n}\n",
@@ -940,6 +951,10 @@ TEST(VagentCheckerPositions, EffectStatementInAHandlerIsStaged) {
   expectClean(std::string(prelude) +
                   "agent A {\n  uses Motor\n  on Ping { spin(1.0) }\n}\n",
               "effect statement");
+}
+TEST(VagentCheckerPositions, EffectReturnValueInAHandlerCannotSuspend) {
+  neg("agent A {\n  uses Motor\n  on Ping {\n    let x := spin(1.0)\n  }\n}\n",
+      C::CannotSuspend, 4);
 }
 TEST(VagentCheckerPositions, ReturnOutsideAMethod) {
   neg("agent A {\n  on Ping {\n    return\n  }\n}\n", C::ReturnOutsideMethod,
@@ -1072,6 +1087,11 @@ agent A(units: Int) {
 }
 )vagent",
               "a read-only answer");
+}
+
+TEST(VagentCheckerBelief, KeyParameterMustPrecedeNonKey) {
+  expectOnly("predicate invalid_key(a: Str, key b: Int)\nagent A {}\n",
+             C::KeyMustPrecede, 1);
 }
 
 } // namespace

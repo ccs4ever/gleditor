@@ -46,13 +46,13 @@ TEST(PanelConfigTest, bigModalGeometryIsSeededAndValidatedInSystemUi) {
   EXPECT_EQ(config.telescopeModal, defaults.telescopeModal);
   EXPECT_EQ(config.hypertimeModal, defaults.hypertimeModal);
   auto head = store.primaryCurrentVersion();
-  head      = xanadu::setSetting(store, head,
-                                 xanadu::settings::kQuotationModalWidthPx, 900.);
-  head      = xanadu::setSetting(store, head,
-                                 xanadu::settings::kTelescopeModalHeightPx, 700.);
-  head      = xanadu::setSetting(store, head,
-                                 xanadu::settings::kHypertimeModalMaxWidthShare, 8.);
-  head      = xanadu::setSetting(
+  head = xanadu::setSetting(store, head,
+                            xanadu::settings::kQuotationModalWidthPx, 900.);
+  head = xanadu::setSetting(store, head,
+                            xanadu::settings::kTelescopeModalHeightPx, 700.);
+  head = xanadu::setSetting(store, head,
+                            xanadu::settings::kHypertimeModalMaxWidthShare, 8.);
+  head = xanadu::setSetting(
       store, head, xanadu::settings::kHypertimeModalMaxHeightShare, .01);
   head = xanadu::setSetting(store, head,
                             xanadu::settings::kQuotationModalHeightPx, -1.);

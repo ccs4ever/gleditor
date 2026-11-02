@@ -1,7 +1,3 @@
-/**
- * @file vagent_cli_test.cpp
- * @brief Runs the built `vagent` program: exit codes and diagnostic format.
- */
 #include <gtest/gtest.h>
 
 #include <cstdio>
@@ -9,6 +5,8 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+
+#include "common/xanadu/vagent/cluster/package_format.hpp"
 
 namespace {
 
@@ -300,6 +298,164 @@ agent A {
       << res.output;
   fs::remove(p1);
   fs::remove(p2);
+}
+
+TEST(VagentCli, NativeSealGeneratesArtifactAndRef) {
+  REQUIRE_VAGENT(bin);
+  const auto modPath = fs::temp_directory_path() / "sample_plugin.so";
+  {
+    std::ofstream out(modPath, std::ios::binary);
+    out << "ELF-MOCK-BINARY-BYTES-123456";
+  }
+  const auto vagentComp = fs::temp_directory_path() / "sample_plugin.vagent";
+  {
+    std::ofstream out(vagentComp);
+    out << "module demo:plugin\nagent PluginAgent {}\n";
+  }
+  const auto outProg = fs::temp_directory_path() / "sample_plugin.vnprog";
+
+  const auto res = runProcess(bin + " native seal " + modPath.string() +
+                              " -o " + outProg.string());
+  EXPECT_EQ(res.exitCode, 0) << res.output;
+  EXPECT_TRUE(fs::exists(outProg));
+
+  std::ifstream in(outProg, std::ios::binary);
+  std::string content((std::istreambuf_iterator<char>(in)), {});
+  EXPECT_TRUE(
+      content.starts_with(xanadu::vagent::cluster::kNativeProgramMagic));
+
+  auto decoded = xanadu::vagent::cluster::decodeVnprog(content);
+  ASSERT_TRUE(decoded.has_value());
+  EXPECT_EQ(decoded->moduleFilename, "sample_plugin.so");
+  EXPECT_FALSE(decoded->programRef.empty());
+  EXPECT_NE(res.output.find(decoded->programRef), std::string::npos);
+
+  fs::remove(modPath);
+  fs::remove(vagentComp);
+  fs::remove(outProg);
+}
+
+TEST(VagentCli, NativeApproveAndWithdrawManageAuthorityLedger) {
+  REQUIRE_VAGENT(bin);
+  const auto ledgerDir = fs::temp_directory_path() / "test_ledger_dir";
+  fs::remove_all(ledgerDir);
+
+  const std::string dummyRef =
+      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+  const auto appRes = runProcess(bin + " native approve " + dummyRef +
+                                 " --kind terminal --ledger " +
+                                 ledgerDir.string() + " --as deployer");
+  EXPECT_EQ(appRes.exitCode, 0) << appRes.output;
+  EXPECT_NE(appRes.output.find("approved"), std::string::npos);
+  EXPECT_TRUE(xanadu::vagent::cluster::isApproved(ledgerDir.string(), dummyRef,
+                                                  "terminal"));
+
+  const auto withRes = runProcess(bin + " native withdraw " + dummyRef +
+                                  " --kind terminal --ledger " +
+                                  ledgerDir.string() + " --as deployer");
+  EXPECT_EQ(withRes.exitCode, 0) << withRes.output;
+  EXPECT_NE(withRes.output.find("withdrawn"), std::string::npos);
+  EXPECT_FALSE(xanadu::vagent::cluster::isApproved(ledgerDir.string(), dummyRef,
+                                                   "terminal"));
+
+  fs::remove_all(ledgerDir);
+}
+
+TEST(VagentCli, PackageBuildsAndInspectsPureClusterPackage) {
+  REQUIRE_VAGENT(bin);
+  const auto srcPath = fs::temp_directory_path() / "cluster_app.vagent";
+  {
+    std::ofstream out(srcPath);
+    out << "module demo:cluster\nagent ClusterRunner {}\n";
+  }
+  const auto outPkg = fs::temp_directory_path() / "cluster_app.vnpkg";
+
+  const auto pkgRes = runProcess(bin + " package " + srcPath.string() + " -o " +
+                                 outPkg.string());
+  EXPECT_EQ(pkgRes.exitCode, 0) << pkgRes.output;
+  EXPECT_TRUE(fs::exists(outPkg));
+
+  std::ifstream in(outPkg, std::ios::binary);
+  std::string content((std::istreambuf_iterator<char>(in)), {});
+  EXPECT_TRUE(content.starts_with(xanadu::vagent::cluster::kPackageMagic));
+
+  const auto inspRes = runProcess(bin + " package inspect " + outPkg.string());
+  EXPECT_EQ(inspRes.exitCode, 0) << inspRes.output;
+  EXPECT_NE(inspRes.output.find("Package Format:    vagent-package-1"),
+            std::string::npos);
+  EXPECT_NE(inspRes.output.find("Kind:              pure"), std::string::npos);
+  EXPECT_NE(inspRes.output.find("Logical Ref:       sha256:"),
+            std::string::npos);
+
+  fs::remove(srcPath);
+  fs::remove(outPkg);
+}
+
+TEST(VagentCli, PackageValidatesSonameAllowlistAndShadowing) {
+  REQUIRE_VAGENT(bin);
+  const auto srcPath = fs::temp_directory_path() / "dummy_app.vagent";
+  {
+    std::ofstream out(srcPath);
+    out << "module demo:dummy\nagent Dummy {}\n";
+  }
+  const auto outPkg = fs::temp_directory_path() / "dummy_app.vnpkg";
+
+  const auto shadowPath = fs::temp_directory_path() / "libc.so.6";
+  {
+    std::ofstream out(shadowPath);
+    out << "dummy libc";
+  }
+  const auto shadowRes =
+      runProcess(bin + " package " + srcPath.string() +
+                 " --bundle-lib x86_64-linux-gnu=" + shadowPath.string() +
+                 " -o " + outPkg.string());
+  EXPECT_EQ(shadowRes.exitCode, 1) << shadowRes.output;
+  EXPECT_NE(shadowRes.output.find("SystemLibraryShadowingForbidden"),
+            std::string::npos)
+      << shadowRes.output;
+
+  fs::remove(srcPath);
+  fs::remove(shadowPath);
+  fs::remove(outPkg);
+}
+
+TEST(VagentCli, RunExecutesVnprogAndVnpkg) {
+  REQUIRE_VAGENT(bin);
+  const auto srcPath = fs::temp_directory_path() / "runnable.vagent";
+  {
+    std::ofstream out(srcPath);
+    out << "module demo:runnable\nagent RunnableAgent {}\n";
+  }
+  const auto outPkg = fs::temp_directory_path() / "runnable.vnpkg";
+  const auto pkgRes = runProcess(bin + " package " + srcPath.string() + " -o " +
+                                 outPkg.string());
+  EXPECT_EQ(pkgRes.exitCode, 0) << pkgRes.output;
+
+  const auto runRes = runProcess(bin + " run " + outPkg.string());
+  EXPECT_EQ(runRes.exitCode, 0) << runRes.output;
+
+  const auto ledgerDir = fs::temp_directory_path() / "test_run_ledger";
+  fs::remove_all(ledgerDir);
+  const auto denyRun =
+      runProcess(bin + " run " + outPkg.string() +
+                 " --grant-policy approved --ledger " + ledgerDir.string());
+  EXPECT_EQ(denyRun.exitCode, 1) << denyRun.output;
+  EXPECT_NE(denyRun.output.find("authority not approved"), std::string::npos)
+      << denyRun.output;
+
+  const auto appRes =
+      runProcess(bin + " native approve " + outPkg.string() +
+                 " --kind terminal --ledger " + ledgerDir.string());
+  EXPECT_EQ(appRes.exitCode, 0) << appRes.output;
+
+  const auto okRun =
+      runProcess(bin + " run " + outPkg.string() +
+                 " --grant-policy approved --ledger " + ledgerDir.string());
+  EXPECT_EQ(okRun.exitCode, 0) << okRun.output;
+
+  fs::remove(srcPath);
+  fs::remove(outPkg);
+  fs::remove_all(ledgerDir);
 }
 
 } // namespace

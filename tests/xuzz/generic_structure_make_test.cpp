@@ -124,8 +124,8 @@ TEST(GenericStructureMakeTest,
   const auto doc1    = store.makeXanadoc(store.latest(), "Doc1");
   const auto birthD1 = store.segmentedOps().indexOf(doc1).value();
 
-  const auto cell1   = store.makeCell(store.latest(), "cell1",
-                                      store.segmentedOps().idOf(birthS1).value());
+  const auto cell1 = store.makeCell(store.latest(), "cell1",
+                                    store.segmentedOps().idOf(birthS1).value());
   const auto birthC1 = store.segmentedOps().indexOf(cell1).value();
 
   const auto slice2  = store.makeSlice(store.latest(), "Slice2", cell1);

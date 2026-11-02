@@ -141,9 +141,9 @@ void Views::frameForReading(const gleditor::FrameContext &ctx) {
                           glm::vec4(frame->leftPx, frame->topPx, 0.0F, 1.0F));
   const glm::vec3 topRight(frame->localToWorld *
                            glm::vec4(frame->rightPx, frame->topPx, 0.0F, 1.0F));
-  const float halfH = *distance * std::tan(glm::radians(view.fov) * 0.5F);
-  const float halfW = halfH * static_cast<float>(view.screenWidth) /
-                      static_cast<float>(view.screenHeight);
+  const float halfH       = *distance * std::tan(glm::radians(view.fov) * 0.5F);
+  const float halfW       = halfH * static_cast<float>(view.screenWidth) /
+                            static_cast<float>(view.screenHeight);
   const float x           = topRight.x - topLeft.x <= 2.0F * halfW
                                 ? 0.5F * (topLeft.x + topRight.x)
                                 : topLeft.x + halfW;
@@ -794,12 +794,12 @@ void Views::publishCurrent(const std::string &salt) {
                         "the caret is what gets published.");
       return;
     }
-    auto *const caret   = renderer->editCaret();
-    const auto which    = nullptr != caret && caret->active() &&
-                               caret->documentIndex() < session.views().size()
-                              ? caret->documentIndex()
-                              : 0U;
-    const auto version  = session.versionOf(which);
+    auto *const caret  = renderer->editCaret();
+    const auto which   = nullptr != caret && caret->active() &&
+                                 caret->documentIndex() < session.views().size()
+                             ? caret->documentIndex()
+                             : 0U;
+    const auto version = session.versionOf(which);
     const auto storeIdx = session.storeIndexOf(which);
     const auto who      = session.author();
 
@@ -1806,7 +1806,7 @@ void Views::exportOsmic() {
     }
     auto *const caret   = renderer->editCaret();
     const auto which    = (nullptr != caret && caret->active() &&
-                        caret->documentIndex() < session.views().size())
+                           caret->documentIndex() < session.views().size())
                               ? caret->documentIndex()
                               : 0U;
     const auto storeIdx = session.storeIndexOf(which);
@@ -1830,11 +1830,11 @@ void Views::importFile(const std::string &filePath) {
                             std::istreambuf_iterator<char>());
     auto *const caret   = renderer->editCaret();
     const auto docIdx   = (nullptr != caret && caret->active() &&
-                         caret->documentIndex() < session.views().size())
+                           caret->documentIndex() < session.views().size())
                               ? caret->documentIndex()
                               : 0U;
     const auto at       = (nullptr != caret && caret->active() &&
-                     caret->documentIndex() == docIdx)
+                           caret->documentIndex() == docIdx)
                               ? caret->byteOffset()
                               : 0U;
     const auto detected = gleditor::MimeDetector::detectFile(filePath);

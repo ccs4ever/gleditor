@@ -170,8 +170,8 @@ TEST(VagentEpistemicPolicy, ContinuousRequirementsAndVarianceDomain) {
   constexpr auto invalid = CheckErrorCode::InvalidEpistemicPolicy;
   const auto variance    = [&](std::string_view lo, std::string_view hi) {
     return with(", cluster_tolerance: 0.5, frame: \"enu\", units: \"m\", "
-                      "min_variance: " +
-                   std::string(lo) + ", max_variance: " + std::string(hi));
+                "min_variance: " +
+                std::string(lo) + ", max_variance: " + std::string(hi));
   };
   EXPECT_TRUE(refuses(variance("1e-200", "1.0"), invalid));
   EXPECT_TRUE(refuses(variance("1.0", "1e200"), invalid));

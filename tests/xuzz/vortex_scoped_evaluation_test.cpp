@@ -179,11 +179,11 @@ protected:
     const auto childFrame      = frameReg;
     auto field                 = [&](std::string_view name) {
       std::vector<std::pair<std::string, CellRef>> values{
-                          {"name", arena.makeCell(name)},
-                          {"kind", arena.makeCell(strings ? "Str" : "Float")}};
+          {"name", arena.makeCell(name)},
+          {"kind", arena.makeCell(strings ? "Str" : "Float")}};
       if (strings)
         values.emplace_back("max_bytes",
-                                            arena.makeScalarCell(std::int64_t{512}));
+                            arena.makeScalarCell(std::int64_t{512}));
       return codec.record("ScopeFieldSchema", values);
     };
     auto bind = [&](CellRef reg, std::string_view target,
@@ -1230,10 +1230,10 @@ TEST_F(ScopedEvaluationTest, NumericConstantFlagCannotLaunderDefaultZero) {
   setup();
   auto invocation       = codec.wing(invoke, DimVector::POS);
   auto descriptorFields = codec.fields(invocation[3]);
-  auto field            = codec.record("ScopeFieldSchema",
-                                       {{"name", arena.makeCell("x")},
-                                        {"kind", arena.makeCell("Float")},
-                                        {"constant", arena.makeScalarCell(true)}});
+  auto field = codec.record("ScopeFieldSchema",
+                            {{"name", arena.makeCell("x")},
+                             {"kind", arena.makeCell("Float")},
+                             {"constant", arena.makeScalarCell(true)}});
   auto resultSchema =
       codec.record("ScopeRecordSchema", {{"fields", list({field})}});
   codec.replaceRecord(invocation[3],

@@ -165,10 +165,10 @@ private:
     o.principal   = s.principal;
     o.incarnation = s.incarnation;
     o.eventId     = s.alias + ":" + std::to_string(s.incarnation) + ":" +
-                std::to_string(++s.events);
-    o.sequence  = ++s.sequence;
-    o.predicate = "at";
-    o.tuple     = {WireValue::text("target"), WireValue::real(x)};
+                    std::to_string(++s.events);
+    o.sequence    = ++s.sequence;
+    o.predicate   = "at";
+    o.tuple       = {WireValue::text("target"), WireValue::real(x)};
     o.acquiredAt =
         wallStart_ + now() + s.skew + (chance(kForwardJump) ? 30.0 : 0.0);
     o.acquiredUncertainty = 0.01;

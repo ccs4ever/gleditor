@@ -233,9 +233,9 @@ Token Lexer::scanNumber() {
     return t;
   }
 
-  Token t = makeToken(num.isFloat ? TokenKind::RealLiteral
-                                  : TokenKind::IntegerLiteral,
-                      loc, start);
+  Token t      = makeToken(num.isFloat ? TokenKind::RealLiteral
+                                       : TokenKind::IntegerLiteral,
+                           loc, start);
   t.intValue   = num.intValue;
   t.floatValue = num.floatValue;
   return t;

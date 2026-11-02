@@ -165,8 +165,8 @@ Token Lexer::scanNumber() {
     while (isDigitFor(peekChar())) {
       advanceChar();
     }
-    Token t           = makeToken(TokenKind::IntegerLiteral,
-                                  source().substr(start, position() - start), loc);
+    Token t = makeToken(TokenKind::IntegerLiteral,
+                        source().substr(start, position() - start), loc);
     const auto digits = source().substr(digitsStart, position() - digitsStart);
     const int radix   = base == 'x' ? 16 : base == 'o' ? 8 : 2;
     const auto result = std::from_chars(
@@ -183,17 +183,17 @@ Token Lexer::scanNumber() {
   // exponent parts and classifies int vs float.
   const auto scanned = scanNumberLiteral();
   if (!scanned) {
-    Token error       = makeToken(TokenKind::Error,
-                                  source().substr(start, position() - start), loc);
+    Token error = makeToken(TokenKind::Error,
+                            source().substr(start, position() - start), loc);
     error.stringValue = scanned.error();
     return error;
   }
   const auto &num = *scanned;
   Token t         = makeToken(num.isFloat ? TokenKind::FloatLiteral
                                           : TokenKind::IntegerLiteral,
-                      source().substr(start, position() - start), loc);
-  t.intValue   = num.intValue;
-  t.floatValue = num.floatValue;
+                              source().substr(start, position() - start), loc);
+  t.intValue      = num.intValue;
+  t.floatValue    = num.floatValue;
   return t;
 }
 
@@ -213,8 +213,8 @@ Token Lexer::scanChar() {
   advanceChar(); // opening quote
   std::string value;
   const auto unterminated = [&] {
-    Token error       = makeToken(TokenKind::Error,
-                                  source().substr(start, position() - start), loc);
+    Token error = makeToken(TokenKind::Error,
+                            source().substr(start, position() - start), loc);
     error.stringValue = "unterminated character literal";
     return error;
   };

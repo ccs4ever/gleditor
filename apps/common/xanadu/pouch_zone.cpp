@@ -267,9 +267,9 @@ PouchItem PouchManager::dropSpan(const std::string_view zoneId,
               : (origin.document ? origin.document->version : currentVersion_),
       .originDocIndex  = 0,
       .originCharStart = origin.source ? origin.source->start : 0,
-      .originCharEnd   = origin.source ? origin.source->end
-                                       : static_cast<std::uint32_t>(span.length),
-      .timestampUtc    = static_cast<std::uint64_t>(
+      .originCharEnd = origin.source ? origin.source->end
+                                     : static_cast<std::uint32_t>(span.length),
+      .timestampUtc  = static_cast<std::uint64_t>(
           std::chrono::duration_cast<std::chrono::seconds>(
               std::chrono::system_clock::now().time_since_epoch())
               .count()),

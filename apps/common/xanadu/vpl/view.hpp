@@ -321,8 +321,8 @@ public:
     if (axes_.size() == 1) {
       auto sh                            = shape(arena);
       std::optional<zigzag::CellRef> cur = origin_;
-      std::size_t limit                  = sh.empty() ? arena.cellCount() + 1
-                                                      : std::min(sh[0], arena.cellCount() + 1);
+      std::size_t limit = sh.empty() ? arena.cellCount() + 1
+                                     : std::min(sh[0], arena.cellCount() + 1);
       while (cur && limit-- > 0) {
         cells.push_back(*cur);
         cur = arena.linked(*cur, axes_[0].dim, axes_[0].dir);

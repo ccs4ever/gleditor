@@ -1640,7 +1640,7 @@ importPackage(std::span<const std::uint8_t> archiveBytes,
         return std::unexpected(SessionValidationError::InvalidFieldFormat);
       }
       const std::string sha = entryStr.substr(p3 + 1);
-      const std::string fn  = "scroll_" + std::to_string(sId) + "_" +
+      const std::string fn = "scroll_" + std::to_string(sId) + "_" +
                              std::to_string(start) + "_" + std::to_string(len) +
                              ".slice";
       if (!targetEntries.contains(fn)) {

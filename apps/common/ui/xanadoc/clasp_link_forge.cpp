@@ -332,18 +332,18 @@ void LinkForgeWidget::rebuildModel(const gleditor::ui::UiMetrics &metrics,
   relation.preferred.width = metrics.logical(column);
   relation.children        = {
       {.id        = typeIdentity_,
-              .model     = Button{std::string(linkTypeName(selectedType_)), "type"},
-              .preferred = {0, buttonHeight}},
+       .model     = Button{std::string(linkTypeName(selectedType_)), "type"},
+       .preferred = {0, buttonHeight}},
       {.id = tierIdentity_,
-              .model =
-                  Button{"Tier: " + std::string(prominenceTierName(selectedTier_)),
+       .model =
+           Button{"Tier: " + std::string(prominenceTierName(selectedTier_)),
                   "tier"},
-              .preferred = {0, buttonHeight}},
+       .preferred = {0, buttonHeight}},
       {.id        = id(),
-              .model     = Button{canForge() ? "Forge Clasp" : "Empty Slots", "forge",
-                              canForge()},
-              .preferred = {0, buttonHeight},
-              .defaultAction = true}};
+       .model     = Button{canForge() ? "Forge Clasp" : "Empty Slots", "forge",
+                           canForge()},
+       .preferred = {0, buttonHeight},
+       .defaultAction = true}};
   Widget row{
       .id       = rowId,
       .model    = ButtonFlow{},
@@ -374,9 +374,9 @@ LinkForgeWidget::prepareBench(const gleditor::ui::UiMetrics &metrics,
                          preparedBounds_->bottom != bounds.bottom ||
                          preparedBounds_->width != bounds.width ||
                          preparedBounds_->height != bounds.height;
-  const bool style = !preparedMetrics_ || *preparedMetrics_ != metrics ||
-                     !preparedTheme_ || *preparedTheme_ != theme ||
-                     !preparedCompact_ || *preparedCompact_ != compact;
+  const bool style     = !preparedMetrics_ || *preparedMetrics_ != metrics ||
+                         !preparedTheme_ || *preparedTheme_ != theme ||
+                         !preparedCompact_ || *preparedCompact_ != compact;
   if (preparedCompact_ && *preparedCompact_ != compact) modelDirty_ = true;
   if (!modelDirty_ && !style && !placement) return snapshot();
   compactMode_              = compact;

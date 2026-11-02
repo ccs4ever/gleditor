@@ -475,7 +475,7 @@ TEST(VortexStdLibTest, FunctionalModuleMapFilterFoldZip) {
                                    return x * x;
                                  })
                             .value();
-  auto squaredVec = h.stdlib.listToVector(squaredHead, outDim);
+  auto squaredVec     = h.stdlib.listToVector(squaredHead, outDim);
   ASSERT_EQ(squaredVec.size(), 5u);
   EXPECT_EQ(squaredVec[0], CellValue(static_cast<std::int64_t>(1)));
   EXPECT_EQ(squaredVec[1], CellValue(static_cast<std::int64_t>(4)));
@@ -491,7 +491,7 @@ TEST(VortexStdLibTest, FunctionalModuleMapFilterFoldZip) {
                                     return std::get<std::int64_t>(v) % 2 == 0;
                                   })
                           .value();
-  auto evensVec = h.stdlib.listToVector(evensHead, filterDim);
+  auto evensVec     = h.stdlib.listToVector(evensHead, filterDim);
   ASSERT_EQ(evensVec.size(), 2u);
   EXPECT_EQ(evensVec[0], CellValue(static_cast<std::int64_t>(4)));
   EXPECT_EQ(evensVec[1], CellValue(static_cast<std::int64_t>(16)));

@@ -64,7 +64,7 @@ TEST(UiMetricsTest, ImpossibleChromeStillProducesContainedEmptyArea) {
       .screenWidth  = 100,
       .screenHeight = 50,
       .chrome       = {
-                .top = 200.0F, .bottom = 200.0F, .left = 500.0F, .right = 500.0F}};
+          .top = 200.0F, .bottom = 200.0F, .left = 500.0F, .right = 500.0F}};
   const auto area = metrics.pixelSafeArea();
   expectContained(area, {0.0F, 0.0F, 100.0F, 50.0F});
   EXPECT_FLOAT_EQ(area.width, 0.0F);

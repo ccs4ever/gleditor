@@ -23,9 +23,9 @@ protected:
       {.path = "words", .data = "Alice's words"}};
   void SetUp() override {
     static std::atomic<unsigned> serial{};
-    root = fs::temp_directory_path() /
-           ("xudu-retention-" + std::to_string(getpid()) + "-" +
-            std::to_string(serial++));
+    root    = fs::temp_directory_path() /
+              ("xudu-retention-" + std::to_string(getpid()) + "-" +
+               std::to_string(serial++));
     torrent = xanadu::makeTorrent(files, "source");
     (void)xanadu::writeTorrentSeed(root / "source", torrent, files);
   }

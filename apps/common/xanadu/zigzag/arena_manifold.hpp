@@ -441,6 +441,9 @@ public:
     return scratch_.size() < *scratchLimit_ ? *scratchLimit_ - scratch_.size()
                                             : 0;
   }
+  [[nodiscard]] std::size_t scratchBytes() const noexcept {
+    return scratch_.size();
+  }
   [[nodiscard]] std::size_t remainingCellAllowance() const noexcept {
     return slots_.size() < allocationLimit_ ? allocationLimit_ - slots_.size()
                                             : 0;

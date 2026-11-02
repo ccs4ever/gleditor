@@ -211,8 +211,8 @@ SwarmTelescopeOverlay::prepare(const ui::UiMetrics &metrics,
   const auto gap        = font->metrics().lineHeight * theme_.gapEm;
   const auto control    = controlHeight();
   const auto tabControl = tabsHeight();
-  rowHeight_            = std::ceil(std::max(touch, font->metrics().lineHeight *
-                                                        (1 + theme_.paddingEm))) +
+  rowHeight_ = std::ceil(std::max(touch, font->metrics().lineHeight *
+                                             (1 + theme_.paddingEm))) +
                2;
   listRowHeight_.fill(rowHeight_);
   listRowHeight_[2] =
@@ -278,7 +278,7 @@ SwarmTelescopeOverlay::prepare(const ui::UiMetrics &metrics,
   model.children.push_back(
       {.id        = searchId_,
        .model     = ui::TextField{searchQuery_, "Search publications", "search",
-                              searchCaret_},
+                                  searchCaret_},
        .preferred = {0, logical(control)},
        .fontRole  = ui::FontRole::Caption});
   ui::Tabs categories{{{categoryTabIds_[0], "Topics", "category"},
@@ -297,7 +297,7 @@ SwarmTelescopeOverlay::prepare(const ui::UiMetrics &metrics,
        .model     = ui::Tabs{{{pageTabIds_[0], "Channels", "page"},
                               {pageTabIds_[1], "Publications", "page"},
                               {pageTabIds_[2], "Inspector", "page"}},
-                         page_},
+                             page_},
        .preferred = {0, logical(tabControl)},
        .fontRole  = ui::FontRole::Caption});
   const auto viewport =

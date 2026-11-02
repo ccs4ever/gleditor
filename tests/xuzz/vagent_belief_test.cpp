@@ -959,4 +959,152 @@ TEST(VagentBelief, TheCoordinatorGathersEveryPartitionOnceAndCompletes) {
                               Str("beta-1"), Str("alpha-2"), Str("beta-2")}));
 }
 
+TEST(VagentBelief, AssertFromAddsFactWithExplicitSourceAndRetractRemovesIt) {
+  Harness h;
+  ASSERT_TRUE(h.compile(program(R"(
+  var added: Int := 0
+  var dropped: Int := 0
+  on +color(?c) { added := added + 1 }
+  on -color(?c) { dropped := dropped + 1 }
+  on Ping { assert color("blue") from "sensor:camera" }
+  on Tick { retract color("blue") from "sensor:camera" }
+)"),
+                        "A"))
+      << h.lastError;
+  ASSERT_TRUE(h.dispatch("Ping", {{"n", I(1)}}));
+  EXPECT_EQ(h.facts("color"), (std::vector<Fact>{{Str("blue")}}));
+  const auto cls = h.clauses("color");
+  ASSERT_EQ(cls.size(), 1U);
+  EXPECT_EQ(h.sources(cls[0]), std::vector<std::string>{"sensor:camera"});
+  EXPECT_EQ(h.intField("added"), 1);
+
+  ASSERT_TRUE(h.dispatch("Tick", {{"x", I(1)}}));
+  EXPECT_TRUE(h.facts("color").empty());
+  EXPECT_EQ(h.intField("dropped"), 1);
+}
+
+TEST(VagentBelief, MultiSourceSpatialTrackingAndExcision) {
+  Harness h;
+  ASSERT_TRUE(h.compile(program(R"(
+  var posGpsX: Float := 0.0
+  var posGpsY: Float := 0.0
+  var posScoutX: Float := 0.0
+  var posScoutY: Float := 0.0
+  var posSelfX: Float := 0.0
+  var posSelfY: Float := 0.0
+  on Tick {
+    assert at("scout", 10.0, 20.0) from "sensor:gps"
+    assert at("scout", 10.0, 20.0) from "scout"
+    assert at("scout", 11.0, 22.0) from "self"
+  }
+  on Ping {
+    assert at("scout", 13.0, 41.0) from "sensor:gps"
+    if believes at("scout", ?gx, ?gy) from "sensor:gps" then {
+      posGpsX := gx
+      posGpsY := gy
+    }
+    if believes at("scout", ?sx, ?sy) from "scout" then {
+      posScoutX := sx
+      posScoutY := sy
+    }
+    if believes at("scout", ?mx, ?my) from "self" then {
+      posSelfX := mx
+      posSelfY := my
+    }
+  }
+  on Tock {
+    retract at("scout", 10.0, 20.0) from "scout"
+  }
+)"),
+                        "A"))
+      << h.lastError;
+
+  ASSERT_TRUE(h.dispatch("Tick", {{"x", I(1)}}));
+  auto cls = h.clauses("at");
+  ASSERT_EQ(cls.size(), 2U);
+  EXPECT_EQ(h.sources(cls[0]),
+            (std::vector<std::string>{"sensor:gps", "scout"}));
+  EXPECT_EQ(h.termArgs(cls[0]), (Fact{Str("scout"), F(10.0), F(20.0)}));
+  EXPECT_EQ(h.sources(cls[1]), (std::vector<std::string>{"self"}));
+  EXPECT_EQ(h.termArgs(cls[1]), (Fact{Str("scout"), F(11.0), F(22.0)}));
+
+  ASSERT_TRUE(h.dispatch("Ping", {{"n", I(1)}}));
+  cls = h.clauses("at");
+  ASSERT_EQ(cls.size(), 3U);
+  EXPECT_DOUBLE_EQ(std::get<double>(h.field("posGpsX")), 13.0);
+  EXPECT_DOUBLE_EQ(std::get<double>(h.field("posGpsY")), 41.0);
+  EXPECT_DOUBLE_EQ(std::get<double>(h.field("posScoutX")), 10.0);
+  EXPECT_DOUBLE_EQ(std::get<double>(h.field("posScoutY")), 20.0);
+  EXPECT_DOUBLE_EQ(std::get<double>(h.field("posSelfX")), 11.0);
+  EXPECT_DOUBLE_EQ(std::get<double>(h.field("posSelfY")), 22.0);
+
+  // Verify 1D rank connectivity invariant
+  CellRef predCell = h.predicate("at");
+  CellRef cur      = predCell;
+  for (CellRef c : cls) {
+    EXPECT_EQ(h.arena.linked(cur, h.core.dims().clause, DimVector::POS), c);
+    EXPECT_EQ(h.arena.linked(c, h.core.dims().clause, DimVector::NEG), cur);
+    cur = c;
+  }
+
+  // Tock retracts scout's reading
+  ASSERT_TRUE(h.dispatch("Tock", {{"y", I(1)}}));
+  cls = h.clauses("at");
+  ASSERT_EQ(cls.size(), 2U);
+  cur = predCell;
+  for (CellRef c : cls) {
+    EXPECT_EQ(h.arena.linked(cur, h.core.dims().clause, DimVector::POS), c);
+    EXPECT_EQ(h.arena.linked(c, h.core.dims().clause, DimVector::NEG), cur);
+    cur = c;
+  }
+}
+
+TEST(VagentBelief, FindallAndForBelievesWithFromFiltering) {
+  Harness h;
+  ASSERT_TRUE(h.compile(program(R"(
+  var sumGps: Float := 0.0
+  var countGps: Int := 0
+  var namesGps: [Str] := []
+  on Tick {
+    assert at("scout", 10.0, 20.0) from "sensor:gps"
+    assert at("drone", 30.0, 40.0) from "sensor:gps"
+    assert at("base", 0.0, 0.0) from "self"
+  }
+  on Ping {
+    namesGps := findall(?who, at(?who, _, _) from "sensor:gps")
+    for believes at(?who, ?x, ?y) from "sensor:gps" do {
+      sumGps := sumGps + x
+      countGps := countGps + 1
+    }
+  }
+)"),
+                        "A"))
+      << h.lastError;
+  ASSERT_TRUE(h.dispatch("Tick", {{"x", I(1)}}));
+  ASSERT_TRUE(h.dispatch("Ping", {{"n", I(1)}}));
+  EXPECT_DOUBLE_EQ(std::get<double>(h.field("sumGps")), 40.0);
+  EXPECT_EQ(h.intField("countGps"), 2);
+  EXPECT_EQ(h.listValues(h.fieldCell("namesGps")),
+            (std::vector<CellValue>{Str("scout"), Str("drone")}));
+}
+
+TEST(VagentBelief, SetIdempotentSourceAssertion) {
+  Harness h;
+  ASSERT_TRUE(h.compile(program(R"(
+  var added: Int := 0
+  on +color(?c) { added := added + 1 }
+  on Tick {
+    assert color("gold") from "sensor:cam"
+    assert color("gold") from "sensor:cam"
+  }
+)"),
+                        "A"))
+      << h.lastError;
+  ASSERT_TRUE(h.dispatch("Tick", {{"x", I(1)}}));
+  const auto cls = h.clauses("color");
+  ASSERT_EQ(cls.size(), 1U);
+  EXPECT_EQ(h.sources(cls[0]), std::vector<std::string>{"sensor:cam"});
+  EXPECT_EQ(h.intField("added"), 1);
+}
+
 } // namespace

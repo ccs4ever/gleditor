@@ -539,9 +539,9 @@ TEST(PouchTest, BackedBySystemStore) {
 TEST(PouchTest, ExactSourceIdentityAndRepeatedRangeSurviveReload) {
   auto perma = std::make_shared<UserPermascroll>();
   Store source(perma);
-  auto version    = source.insert({}, 0, "same -");
-  version         = source.insertSpan(version, 6,
-                                      source.rebuild(version).spansFor(0, 5).front());
+  auto version = source.insert({}, 0, "same -");
+  version = source.insertSpan(version, 6,
+                              source.rebuild(version).spansFor(0, 5).front());
   const auto span = source.rebuild(version).spansFor(6, 5).front();
   Store pouch(perma);
   PouchManager manager(pouch);
@@ -747,8 +747,8 @@ TEST(PouchTest, PresentMalformedOptionalSourceCellIsRefused) {
     const auto sourceVersion = sourceStore.makeCell(genesis, "source");
     const auto sourceCell    = sourceStore.cellRefOf(sourceVersion).value();
     const auto span          = sourceStore.rebuildManifold(sourceVersion)
-                          .contentOf(sourceCell)
-                          .front();
+                                   .contentOf(sourceCell)
+                                   .front();
 
     Store pouchStore(permascroll);
     initializeSystemStore(pouchStore, SystemDocKind::Pouches);

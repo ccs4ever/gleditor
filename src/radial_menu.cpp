@@ -341,10 +341,10 @@ void RadialMenu::rebuildLayout(const float screenW, const float screenH) {
   metrics.screenWidth  = static_cast<int>(screenW);
   metrics.screenHeight = static_cast<int>(screenH);
   const auto safe      = metrics.pixelSafeArea();
-  const auto line      = font_ ? font_->metrics().lineHeight
-                               : metrics.fontPixels(ui::FontRole::Label, theme_);
-  const auto padding   = line * theme_.paddingEm;
-  const auto border    = std::max(1.0F, metrics.px(1));
+  const auto line    = font_ ? font_->metrics().lineHeight
+                             : metrics.fontPixels(ui::FontRole::Label, theme_);
+  const auto padding = line * theme_.paddingEm;
+  const auto border  = std::max(1.0F, metrics.px(1));
   const auto available =
       std::max(0.0F, std::min(safe.width, safe.height) * .5F);
   const auto plateRadius = std::min(
@@ -1000,7 +1000,7 @@ void RadialMenu::describe(a11y::Builder &into) {
     const auto &rect = box->rect;
     const auto height =
         static_cast<double>(metrics_.screenHeight > 0 ? metrics_.screenHeight
-                            : lastScreenHeight_ > 0   ? lastScreenHeight_
+                            : lastScreenHeight_ > 0 ? lastScreenHeight_
                                                     : kFallbackScreenHeightPx);
     return a11y::Rect{rect.left, height - rect.bottom - rect.height,
                       rect.left + rect.width, height - rect.bottom};

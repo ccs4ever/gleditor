@@ -327,8 +327,8 @@ ui::WidgetId QuotationBuilderOverlay::allocate() {
 }
 ui::WidgetId QuotationBuilderOverlay::contentId(std::string_view name,
                                                 zigzag::CellRef ref) {
-  const auto key = std::to_string(page_) + ":" + std::string(name) + ":" +
-                   std::to_string(ref);
+  const auto key   = std::to_string(page_) + ":" + std::string(name) + ":" +
+                     std::to_string(ref);
   const auto found = contentIds_.find(key);
   if (found != contentIds_.end()) return found->second;
   const auto id = allocate();
@@ -394,7 +394,7 @@ QuotationBuilderOverlay::prepare(const ui::UiMetrics &metrics,
     // Include nested flow padding and rounding slack. Compact Preview reserves
     // two complete candidate rows alongside its inspector.
     return std::max(t * 5 + p * 8 + g * 4 + 16,
-                       t * 4 + line + p * 10 + g * 3 + 16);
+                    t * 4 + line + p * 10 + g * 3 + 16);
   };
   float factor = 1;
   if (required(factor) > height) {
@@ -540,12 +540,12 @@ QuotationBuilderOverlay::prepare(const ui::UiMetrics &metrics,
            .preferred = {0, metrics.logical(listHeight_)}});
     }
   } else if (page_ == 2) {
-    const auto budget = std::to_string(preview.cells.size()) + " cells / " +
-                        std::to_string(preview.totalOpBytes) + " B ops · ";
+    const auto budget     = std::to_string(preview.cells.size()) + " cells / " +
+                            std::to_string(preview.totalOpBytes) + " B ops · ";
     std::string inspector = budget + "No cell focused";
     if (preview.isValid && preview.focusedIndex < preview.cells.size()) {
       const auto &cell = preview.cells[preview.focusedIndex];
-      inspector        = budget + "Cell #" + std::to_string(cell.foreignCell) +
+      inspector = budget + "Cell #" + std::to_string(cell.foreignCell) +
                   " · Op " + cell.birthRef.produces.str() + " · Degree " +
                   std::to_string(cell.outboundEdges.size()) + " · " + cell.text;
     }

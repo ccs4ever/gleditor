@@ -1089,5 +1089,203 @@ TEST_F(VagentEffectsResume, ALocalHostOffersBindingsAndPercepts) {
   EXPECT_EQ(a->pump(), 2U) << "the first turn, then the percept's wake";
 }
 
+// -- End-to-end compiled native skill effects (P18.6) -----------------------
+
+constexpr const char *kRoverProgram = R"vagent(
+capacity RoverHardware {
+  effect def drive(distance: Float): Float within 5s
+  effect preempts def emergencyHalt() within 1s
+}
+
+native skill RoverDriver implements RoverHardware
+
+event StartMove { dist: Float }
+event StopMove {}
+
+agent Rover {
+  uses RoverHardware
+  var stopped: Bool := false
+  var last_error: Str := ""
+
+  on StartMove as sm {
+    drive(sm.dist)
+  }
+
+  on StopMove {
+    emergencyHalt()
+    stopped := true
+  }
+
+  on EffectFailed as ef {
+    last_error := ef.cause
+  }
+}
+)vagent";
+
+class MockRoverDevice final : public NativeSkill {
+public:
+  struct Call {
+    std::uint64_t token{};
+    std::string method;
+    WireList args;
+  };
+  std::vector<Call> calls;
+  std::vector<std::uint64_t> cancelledTokens;
+  std::map<std::uint64_t, EffectCompletion> pendingCompletions;
+
+  void start(const EffectRequest &request, EffectCompletion done) override {
+    calls.push_back({request.token, request.method, request.args});
+    pendingCompletions[request.token] = std::move(done);
+  }
+
+  void cancel(std::uint64_t token) override {
+    cancelledTokens.push_back(token);
+  }
+
+  void complete(std::uint64_t token, EffectResult result) {
+    auto it = pendingCompletions.find(token);
+    if (it != pendingCompletions.end()) {
+      it->second(std::move(result));
+      pendingCompletions.erase(it);
+    }
+  }
+};
+
+TEST(VagentNativeSkillEffectEndToEnd,
+     HandlerDispatchesEffectToDeviceAndFailureDeliversEvent) {
+  auto program = CompiledProgram::fromSource(kRoverProgram);
+  ASSERT_TRUE(program) << (program ? "" : program.error());
+
+  LocalHost::Options options;
+  options.manualClock = true;
+  LocalHost host(std::move(*program), options);
+
+  auto device = std::make_shared<MockRoverDevice>();
+  host.bindings().bind("RoverDriver", device);
+
+  const auto pid = host.launch("Rover", "r");
+  ASSERT_TRUE(pid);
+  host.pump();
+
+  // Send StartMove to trigger drive(dist)
+  Envelope start;
+  start.kind = "event";
+  start.type = "StartMove";
+  start.fields.set("dist", WireValue::real(42.5));
+  auto sent = host.send(*pid, std::move(start));
+  ASSERT_TRUE(sent) << "send error: " << static_cast<int>(sent.error());
+  host.pump();
+
+  // Verify effect request reached mock device
+  ASSERT_EQ(device->calls.size(), 1U);
+  EXPECT_EQ(device->calls[0].method, "drive");
+  ASSERT_EQ(device->calls[0].args.size(), 1U);
+  EXPECT_EQ(device->calls[0].args[0], WireValue::real(42.5));
+  const auto token = device->calls[0].token;
+
+  // Host completes effect with failure
+  device->complete(token, EffectResult::failure("motor_stalled"));
+
+  // Pump host to deliver EffectFailed event
+  host.pump();
+
+  // Verify EffectFailed event was delivered to agent and last_error was set
+  auto &c              = *host.executor().context(*pid);
+  const auto &vd       = valueDims(c.core);
+  const auto agentCell = *host.executor().agentCell(*pid);
+  const auto errCell   = fieldValue(c.arena, vd, agentCell, "last_error");
+  ASSERT_TRUE(errCell);
+  const auto errVal = readValue(c.arena, vd, *errCell);
+  ASSERT_TRUE(errVal);
+  EXPECT_EQ(*errVal, WireValue::text("motor_stalled"));
+}
+
+TEST(VagentNativeSkillEffectEndToEnd, PreemptingEffectCancelsInFlightEffect) {
+  auto program = CompiledProgram::fromSource(kRoverProgram);
+  ASSERT_TRUE(program) << (program ? "" : program.error());
+
+  LocalHost::Options options;
+  options.manualClock = true;
+  LocalHost host(std::move(*program), options);
+
+  auto device = std::make_shared<MockRoverDevice>();
+  host.bindings().bind("RoverDriver", device);
+
+  const auto pid = host.launch("Rover", "r");
+  ASSERT_TRUE(pid);
+  host.pump();
+
+  // Start navigation
+  Envelope start;
+  start.kind = "event";
+  start.type = "StartMove";
+  start.fields.set("dist", WireValue::real(100.0));
+  ASSERT_TRUE(host.send(*pid, std::move(start)));
+  host.pump();
+
+  ASSERT_EQ(device->calls.size(), 1U);
+  const auto inFlightToken = device->calls[0].token;
+  EXPECT_EQ(device->calls[0].method, "drive");
+
+  // Send preempting StopMove
+  Envelope stop;
+  stop.kind = "event";
+  stop.type = "StopMove";
+  ASSERT_TRUE(host.send(*pid, std::move(stop)));
+  host.pump();
+
+  // Verify that in-flight effect was cancelled on device
+  EXPECT_TRUE(std::ranges::contains(device->cancelledTokens, inFlightToken));
+  EXPECT_GE(device->calls.size(), 2U);
+  EXPECT_EQ(device->calls[1].method, "emergencyHalt");
+
+  // Complete the emergency halt
+  device->complete(device->calls[1].token, EffectResult::success());
+  host.pump();
+
+  auto &c              = *host.executor().context(*pid);
+  const auto &vd       = valueDims(c.core);
+  const auto agentCell = *host.executor().agentCell(*pid);
+  const auto stopCell  = fieldValue(c.arena, vd, agentCell, "stopped");
+  ASSERT_TRUE(stopCell);
+  const auto stopVal = readValue(c.arena, vd, *stopCell);
+  ASSERT_TRUE(stopVal);
+  EXPECT_EQ(*stopVal, WireValue::boolean(true));
+}
+
+TEST(VagentNativeSkillEffectEndToEnd,
+     DeadlineWatchdogTimesOutEffectAndCancelsOnHost) {
+  auto program = CompiledProgram::fromSource(kRoverProgram);
+  ASSERT_TRUE(program) << (program ? "" : program.error());
+
+  LocalHost::Options options;
+  options.manualClock = true;
+  LocalHost host(std::move(*program), options);
+
+  auto device = std::make_shared<MockRoverDevice>();
+  host.bindings().bind("RoverDriver", device);
+
+  const auto pid = host.launch("Rover", "r");
+  ASSERT_TRUE(pid);
+  host.pump();
+
+  // Start navigation with 5s deadline
+  Envelope start;
+  start.kind = "event";
+  start.type = "StartMove";
+  start.fields.set("dist", WireValue::real(50.0));
+  ASSERT_TRUE(host.send(*pid, std::move(start)));
+  host.pump();
+
+  ASSERT_EQ(device->calls.size(), 1U);
+  const auto inFlightToken = device->calls[0].token;
+
+  // Advance time past deadline (6 seconds)
+  host.advance(6000ms);
+
+  // Verify that deadline watchdog triggered cancel on device
+  EXPECT_TRUE(std::ranges::contains(device->cancelledTokens, inFlightToken));
+}
+
 } // namespace
 } // namespace xanadu::vagent::runtime

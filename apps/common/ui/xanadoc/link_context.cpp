@@ -223,14 +223,14 @@ std::vector<xanadu::Visit> LinkContext::forwardChoices() const {
 
 xanadu::ReadingPosition LinkContext::reading() const {
   xanadu::ReadingPosition position;
-  const auto current  = navigator.currentVisit();
-  const auto visit    = current
-                            ? activity.find(*current)
-                            : gleditor::cpp26::optional<const xanadu::Visit &>{};
+  const auto current = navigator.currentVisit();
+  const auto visit   = current
+                           ? activity.find(*current)
+                           : gleditor::cpp26::optional<const xanadu::Visit &>{};
   const auto selected = navigator.selection();
   position.entered    = visit && selected &&
-                     xanadu::Arrival::EnteredEndpoint == visit->arrival &&
-                     visit->link && visit->link->key == selected->key;
+                        xanadu::Arrival::EnteredEndpoint == visit->arrival &&
+                        visit->link && visit->link->key == selected->key;
   const bool inCell =
       visit && std::holds_alternative<xanadu::CellSite>(visit->target);
   if (inCell) {
@@ -284,9 +284,9 @@ std::string LinkContext::previewVisit(const VisitId id) const {
               0, std::vector<PrimediaSpan>(spans.begin(), spans.end()));
         } else {
           const auto view = viewIndexOf(site);
-          text            = store.rebuild(site.version,
+          text = store.rebuild(site.version,
                                view ? session.views()[*view].selection
-                                               : XanadocSelection::automatic());
+                                    : XanadocSelection::automatic());
         }
         if (site.range.end < site.range.start || site.range.end > text.length())
           return "Unavailable saved range";
