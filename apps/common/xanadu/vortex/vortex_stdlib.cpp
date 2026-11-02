@@ -788,8 +788,19 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
     return true;
   }
 
-  // Negation as failure: \+ Goal
-  if (goalFunctor == "\\+" && goalArgs.size() == 1) {
+  // Negation as failure: \+ Goal or not Goal
+  if ((goalFunctor == "\\+" || goalFunctor == "not") && goalArgs.size() == 1) {
+    std::vector<CellRef> checkVars;
+    std::unordered_set<CellRef> seenVars;
+    collectVariables(stdlib, goalArgs[0], checkVars, seenVars);
+    for (CellRef v : checkVars) {
+      CellRef actual = stdlib.deref(v);
+      if (stdlib.isVar(actual)) {
+        throw std::runtime_error(
+            "floundered_negation: unbound variable in negation");
+      }
+    }
+
     auto mark                  = core.arena().mark();
     std::size_t subCount       = 0;
     bool hasSubSolution        = false;
@@ -2236,6 +2247,101 @@ std::vector<CellValue> VortexStdLib::call(CellRef fnOp,
         ++iterations;
       }
       return {iterations};
+    }
+    if (opName == "#GOAL_TAB") {
+      const auto res = args.size() >= 2
+                           ? scanTab(toInt64(args[1]),
+                                     static_cast<CellRef>(toInt64(args[0])))
+                           : scanTab(args.empty() ? 0 : toInt64(args[0]));
+      return res.has_value() ? std::vector<CellValue>{*res}
+                             : std::vector<CellValue>{};
+    }
+    if (opName == "#GOAL_MOVE") {
+      const auto res = args.size() >= 2
+                           ? scanMove(toInt64(args[1]),
+                                      static_cast<CellRef>(toInt64(args[0])))
+                           : scanMove(args.empty() ? 0 : toInt64(args[0]));
+      return res.has_value() ? std::vector<CellValue>{*res}
+                             : std::vector<CellValue>{};
+    }
+    if (opName == "#GOAL_MATCH") {
+      const auto getStr = [](const CellValue &v) -> std::string {
+        return std::holds_alternative<std::string>(v) ? std::get<std::string>(v)
+                                                      : "";
+      };
+      const auto res = args.size() >= 2
+                           ? scanMatch(getStr(args[1]),
+                                       static_cast<CellRef>(toInt64(args[0])))
+                           : scanMatch(args.empty() ? "" : getStr(args[0]));
+      return res.has_value() ? std::vector<CellValue>{*res}
+                             : std::vector<CellValue>{};
+    }
+    if (opName == "#GOAL_FIND") {
+      const auto getStr = [](const CellValue &v) -> std::string {
+        return std::holds_alternative<std::string>(v) ? std::get<std::string>(v)
+                                                      : "";
+      };
+      const auto matches =
+          args.size() >= 2 ? scanFind(getStr(args[1]),
+                                      static_cast<CellRef>(toInt64(args[0])))
+                           : scanFind(args.empty() ? "" : getStr(args[0]));
+      std::vector<CellValue> items;
+      items.reserve(matches.size());
+      for (const auto m : matches) items.emplace_back(m);
+      return {static_cast<std::int64_t>(createList(items))};
+    }
+    if (opName == "#GOAL_UPTO") {
+      const auto getStr = [](const CellValue &v) -> std::string {
+        return std::holds_alternative<std::string>(v) ? std::get<std::string>(v)
+                                                      : "";
+      };
+      const auto matches =
+          args.size() >= 2 ? scanUpto(getStr(args[1]),
+                                      static_cast<CellRef>(toInt64(args[0])))
+                           : scanUpto(args.empty() ? "" : getStr(args[0]));
+      std::vector<CellValue> items;
+      items.reserve(matches.size());
+      for (const auto m : matches) items.emplace_back(m);
+      return {static_cast<std::int64_t>(createList(items))};
+    }
+    if (opName == "#GOAL_ANY") {
+      const auto getStr = [](const CellValue &v) -> std::string {
+        return std::holds_alternative<std::string>(v) ? std::get<std::string>(v)
+                                                      : "";
+      };
+      const auto res =
+          args.size() >= 2
+              ? scanAny(getStr(args[1]), static_cast<CellRef>(toInt64(args[0])))
+              : scanAny(args.empty() ? "" : getStr(args[0]));
+      return res.has_value() ? std::vector<CellValue>{*res}
+                             : std::vector<CellValue>{};
+    }
+    if (opName == "#GOAL_MANY") {
+      const auto getStr = [](const CellValue &v) -> std::string {
+        return std::holds_alternative<std::string>(v) ? std::get<std::string>(v)
+                                                      : "";
+      };
+      const auto res = args.size() >= 2
+                           ? scanMany(getStr(args[1]),
+                                      static_cast<CellRef>(toInt64(args[0])))
+                           : scanMany(args.empty() ? "" : getStr(args[0]));
+      return res.has_value() ? std::vector<CellValue>{*res}
+                             : std::vector<CellValue>{};
+    }
+    if (opName == "#GOAL_BAL") {
+      const auto getStr = [](const CellValue &v) -> std::string {
+        return std::holds_alternative<std::string>(v) ? std::get<std::string>(v)
+                                                      : "";
+      };
+      const std::string cset  = args.empty() ? "" : getStr(args[0]);
+      const std::string open  = args.size() > 1 ? getStr(args[1]) : "(";
+      const std::string close = args.size() > 2 ? getStr(args[2]) : ")";
+      const auto matches =
+          scanBal(cset, open.empty() ? "(" : open, close.empty() ? ")" : close);
+      std::vector<CellValue> items;
+      items.reserve(matches.size());
+      for (const auto m : matches) items.emplace_back(m);
+      return {static_cast<std::int64_t>(createList(items))};
     }
   }
   auto it = routineBindings_.find(fnOp);
@@ -3796,6 +3902,16 @@ void VortexStdLib::buildGoalModule(CellRef mod) {
               {operand(), operand(), operand(), operand(), operand()},
               operand());
 
+  // String scanning built-ins (§3.3, P18.4)
+  hostRoutine("tab", "#GOAL_TAB", {operand()}, operand());
+  hostRoutine("move", "#GOAL_MOVE", {operand()}, operand());
+  hostRoutine("match", "#GOAL_MATCH", {operand()}, operand());
+  hostRoutine("find", "#GOAL_FIND", {operand()}, operand());
+  hostRoutine("upto", "#GOAL_UPTO", {operand()}, operand());
+  hostRoutine("any", "#GOAL_ANY", {operand()}, operand());
+  hostRoutine("many", "#GOAL_MANY", {operand()}, operand());
+  hostRoutine("bal", "#GOAL_BAL", {operand(), operand(), operand()}, operand());
+
   GLEDITOR_LOG_DEBUG("vortex.stdlib",
                      "std:goal woven: generators, limit, cmp, scan plumbing");
 }
@@ -3969,6 +4085,277 @@ bool VortexStdLib::scanSetPos(const std::int64_t pos) {
         return core_.writeValue(cursor, 0, std::nullopt, pos);
       })
       .has_value();
+}
+
+std::optional<std::int64_t>
+VortexStdLib::scanPos(std::optional<std::int64_t> target,
+                      std::optional<CellRef> cursor) {
+  const CellRef cur =
+      cursor.has_value() ? *cursor : scanCursor().value_or(noCell);
+  if (cur == noCell || !core_.arena().contains(cur)) {
+    return std::nullopt;
+  }
+  const auto maybePos = core_.arena().asInt64(cur);
+  if (!maybePos.has_value()) {
+    return std::nullopt;
+  }
+  const std::int64_t currentPos = *maybePos;
+  if (!target.has_value()) {
+    return currentPos;
+  }
+  const auto maybeSubj = zigzag::hop(core_.arena(), core_.dims().grab)(cur);
+  if (!maybeSubj.has_value() || !core_.arena().contains(*maybeSubj)) {
+    return std::nullopt;
+  }
+  const std::string subjStr = core_.arena().textOf(*maybeSubj);
+  const std::int64_t len    = static_cast<std::int64_t>(subjStr.size());
+  const std::int64_t norm   = *target <= 0 ? (len + 1 + *target) : *target;
+  if (norm < 1 || norm > len + 1) {
+    return std::nullopt;
+  }
+  if (currentPos == norm) {
+    return norm;
+  }
+  return std::nullopt;
+}
+
+std::optional<std::string>
+VortexStdLib::scanTab(const std::int64_t targetPos,
+                      std::optional<CellRef> cursor) {
+  const CellRef cur =
+      cursor.has_value() ? *cursor : scanCursor().value_or(noCell);
+  if (cur == noCell || !core_.arena().contains(cur)) {
+    return std::nullopt;
+  }
+  const auto maybeSubj = zigzag::hop(core_.arena(), core_.dims().grab)(cur);
+  if (!maybeSubj.has_value() || !core_.arena().contains(*maybeSubj)) {
+    return std::nullopt;
+  }
+  const auto maybePos = core_.arena().asInt64(cur);
+  if (!maybePos.has_value()) {
+    return std::nullopt;
+  }
+  const std::int64_t currentPos = *maybePos;
+  const std::string subjStr     = core_.arena().textOf(*maybeSubj);
+  const std::int64_t len        = static_cast<std::int64_t>(subjStr.size());
+  const std::int64_t norm = targetPos <= 0 ? (len + 1 + targetPos) : targetPos;
+  if (norm < 1 || norm > len + 1) {
+    return std::nullopt;
+  }
+  const std::int64_t lo     = std::min(currentPos, norm);
+  const std::int64_t hi     = std::max(currentPos, norm);
+  const std::int64_t count  = hi - lo;
+  const std::int64_t offset = lo - 1;
+  std::string traversed     = count > 0 && offset >= 0 && offset < len
+                                  ? subjStr.substr(static_cast<std::size_t>(offset),
+                                                   static_cast<std::size_t>(count))
+                                  : "";
+  core_.value(cur, 0, -1, norm);
+  return traversed;
+}
+
+std::optional<std::string>
+VortexStdLib::scanMove(const std::int64_t offset,
+                       std::optional<CellRef> cursor) {
+  const CellRef cur =
+      cursor.has_value() ? *cursor : scanCursor().value_or(noCell);
+  if (cur == noCell || !core_.arena().contains(cur)) {
+    return std::nullopt;
+  }
+  const auto maybePos = core_.arena().asInt64(cur);
+  if (!maybePos.has_value()) {
+    return std::nullopt;
+  }
+  return scanTab(*maybePos + offset, cursor);
+}
+
+std::optional<std::int64_t>
+VortexStdLib::scanMatch(const std::string_view prefix,
+                        std::optional<CellRef> cursor) {
+  const CellRef cur =
+      cursor.has_value() ? *cursor : scanCursor().value_or(noCell);
+  if (cur == noCell || !core_.arena().contains(cur)) {
+    return std::nullopt;
+  }
+  const auto maybeSubj = zigzag::hop(core_.arena(), core_.dims().grab)(cur);
+  if (!maybeSubj.has_value() || !core_.arena().contains(*maybeSubj)) {
+    return std::nullopt;
+  }
+  const auto maybePos = core_.arena().asInt64(cur);
+  if (!maybePos.has_value()) {
+    return std::nullopt;
+  }
+  const std::int64_t currentPos = *maybePos;
+  const std::string subjStr     = core_.arena().textOf(*maybeSubj);
+  const std::int64_t pos0       = currentPos - 1;
+  if (pos0 < 0 ||
+      static_cast<std::size_t>(pos0) + prefix.size() > subjStr.size()) {
+    return std::nullopt;
+  }
+  if (std::string_view(subjStr).substr(static_cast<std::size_t>(pos0),
+                                       prefix.size()) == prefix) {
+    return currentPos + static_cast<std::int64_t>(prefix.size());
+  }
+  return std::nullopt;
+}
+
+std::vector<std::int64_t>
+VortexStdLib::scanFind(const std::string_view needle,
+                       std::optional<CellRef> cursor) {
+  std::vector<std::int64_t> matches;
+  const CellRef cur =
+      cursor.has_value() ? *cursor : scanCursor().value_or(noCell);
+  if (cur == noCell || !core_.arena().contains(cur)) {
+    return matches;
+  }
+  const auto maybeSubj = zigzag::hop(core_.arena(), core_.dims().grab)(cur);
+  if (!maybeSubj.has_value() || !core_.arena().contains(*maybeSubj)) {
+    return matches;
+  }
+  const auto maybePos = core_.arena().asInt64(cur);
+  if (!maybePos.has_value()) {
+    return matches;
+  }
+  const std::string subjStr = core_.arena().textOf(*maybeSubj);
+  const std::int64_t pos0   = std::max<std::int64_t>(0, *maybePos - 1);
+  if (needle.empty()) {
+    matches.push_back(*maybePos);
+    return matches;
+  }
+  std::size_t idx = static_cast<std::size_t>(pos0);
+  while ((idx = subjStr.find(needle, idx)) != std::string::npos) {
+    matches.push_back(static_cast<std::int64_t>(idx + 1));
+    ++idx;
+  }
+  return matches;
+}
+
+std::vector<std::int64_t>
+VortexStdLib::scanUpto(const std::string_view cset,
+                       std::optional<CellRef> cursor) {
+  std::vector<std::int64_t> matches;
+  const CellRef cur =
+      cursor.has_value() ? *cursor : scanCursor().value_or(noCell);
+  if (cur == noCell || !core_.arena().contains(cur)) {
+    return matches;
+  }
+  const auto maybeSubj = zigzag::hop(core_.arena(), core_.dims().grab)(cur);
+  if (!maybeSubj.has_value() || !core_.arena().contains(*maybeSubj)) {
+    return matches;
+  }
+  const auto maybePos = core_.arena().asInt64(cur);
+  if (!maybePos.has_value()) {
+    return matches;
+  }
+  const std::string subjStr = core_.arena().textOf(*maybeSubj);
+  const std::int64_t pos0   = std::max<std::int64_t>(0, *maybePos - 1);
+  for (std::size_t i = static_cast<std::size_t>(pos0); i < subjStr.size();
+       ++i) {
+    if (cset.find(subjStr[i]) != std::string_view::npos) {
+      matches.push_back(static_cast<std::int64_t>(i + 1));
+    }
+  }
+  return matches;
+}
+
+std::optional<std::int64_t>
+VortexStdLib::scanAny(const std::string_view cset,
+                      std::optional<CellRef> cursor) {
+  const CellRef cur =
+      cursor.has_value() ? *cursor : scanCursor().value_or(noCell);
+  if (cur == noCell || !core_.arena().contains(cur)) {
+    return std::nullopt;
+  }
+  const auto maybeSubj = zigzag::hop(core_.arena(), core_.dims().grab)(cur);
+  if (!maybeSubj.has_value() || !core_.arena().contains(*maybeSubj)) {
+    return std::nullopt;
+  }
+  const auto maybePos = core_.arena().asInt64(cur);
+  if (!maybePos.has_value()) {
+    return std::nullopt;
+  }
+  const std::int64_t pos0   = *maybePos - 1;
+  const std::string subjStr = core_.arena().textOf(*maybeSubj);
+  if (pos0 < 0 || static_cast<std::size_t>(pos0) >= subjStr.size()) {
+    return std::nullopt;
+  }
+  if (cset.find(subjStr[static_cast<std::size_t>(pos0)]) !=
+      std::string_view::npos) {
+    return *maybePos + 1;
+  }
+  return std::nullopt;
+}
+
+std::optional<std::int64_t>
+VortexStdLib::scanMany(const std::string_view cset,
+                       std::optional<CellRef> cursor) {
+  const CellRef cur =
+      cursor.has_value() ? *cursor : scanCursor().value_or(noCell);
+  if (cur == noCell || !core_.arena().contains(cur)) {
+    return std::nullopt;
+  }
+  const auto maybeSubj = zigzag::hop(core_.arena(), core_.dims().grab)(cur);
+  if (!maybeSubj.has_value() || !core_.arena().contains(*maybeSubj)) {
+    return std::nullopt;
+  }
+  const auto maybePos = core_.arena().asInt64(cur);
+  if (!maybePos.has_value()) {
+    return std::nullopt;
+  }
+  const std::int64_t pos0   = *maybePos - 1;
+  const std::string subjStr = core_.arena().textOf(*maybeSubj);
+  if (pos0 < 0 || static_cast<std::size_t>(pos0) >= subjStr.size()) {
+    return std::nullopt;
+  }
+  if (cset.find(subjStr[static_cast<std::size_t>(pos0)]) ==
+      std::string_view::npos) {
+    return std::nullopt;
+  }
+  std::size_t p = static_cast<std::size_t>(pos0) + 1;
+  while (p < subjStr.size() &&
+         cset.find(subjStr[p]) != std::string_view::npos) {
+    ++p;
+  }
+  return static_cast<std::int64_t>(p + 1);
+}
+
+std::vector<std::int64_t> VortexStdLib::scanBal(const std::string_view cset,
+                                                const std::string_view open,
+                                                const std::string_view close,
+                                                std::optional<CellRef> cursor) {
+  std::vector<std::int64_t> matches;
+  const CellRef cur =
+      cursor.has_value() ? *cursor : scanCursor().value_or(noCell);
+  if (cur == noCell || !core_.arena().contains(cur)) {
+    return matches;
+  }
+  const auto maybeSubj = zigzag::hop(core_.arena(), core_.dims().grab)(cur);
+  if (!maybeSubj.has_value() || !core_.arena().contains(*maybeSubj)) {
+    return matches;
+  }
+  const auto maybePos = core_.arena().asInt64(cur);
+  if (!maybePos.has_value()) {
+    return matches;
+  }
+  const std::string subjStr = core_.arena().textOf(*maybeSubj);
+  const std::int64_t pos0   = std::max<std::int64_t>(0, *maybePos - 1);
+  std::int64_t depth        = 0;
+  for (std::size_t i = static_cast<std::size_t>(pos0); i < subjStr.size();
+       ++i) {
+    const char ch = subjStr[i];
+    if (depth == 0 && cset.find(ch) != std::string_view::npos) {
+      matches.push_back(static_cast<std::int64_t>(i + 1));
+    }
+    if (open.find(ch) != std::string_view::npos) {
+      ++depth;
+    } else if (close.find(ch) != std::string_view::npos) {
+      if (depth <= 0) {
+        break;
+      }
+      --depth;
+    }
+  }
+  return matches;
 }
 
 void VortexStdLib::buildArrayModule(CellRef mod) {

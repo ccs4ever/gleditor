@@ -2,7 +2,8 @@
 
 **Status:** Approved Specification (Proposals P17.1–P17.5 approved; Open Questions 1–3 resolved with
 Option B; companion to [`vagent-agent-language.md`](vagent-agent-language.md) v3.12, §11.1, §11.2,
-and §18 `U-A14`)
+and §18 `U-A14`, [`vagent-native-agent.md`](vagent-native-agent.md) P20, and
+[`vagent-cluster-packaging.md`](vagent-cluster-packaging.md) P21)
 
 The runtime from `46402f26` is integrated under `apps/common/xanadu/vagent/runtime/`, namespace
 `xanadu::vagent::runtime`. Its shared-program and upgrade tests accompany the existing frontend and
@@ -167,6 +168,9 @@ into a frozen `zigzag::Manifold` (`programManifold`).
      snapshot and $V_2$'s `Manifold` snapshot coexist simultaneously in memory on the same
      `LocalHost` while some agents run $V_1$ and upgraded agents run $V_2$. Base manifolds are
      retained in an LRU cache bounded by `LocalHost::Options::maxCachedPrograms` (default 32).
+     On-demand internode distribution of uncached `programRef` packages and companion native modules
+     over `MeshSwarmTransport` (`PendingProgramFetch`, `.vnpkg`) is specified in
+     [`vagent-cluster-packaging.md`](vagent-cluster-packaging.md) (P21.1–P21.8).
 
 ### 2.2 Exact Layout of the Sealed Program Manifold
 

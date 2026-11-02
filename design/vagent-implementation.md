@@ -19,8 +19,11 @@ continues to use them, including stdin and multiple files. `vagent check-runtime
 use the imported actor frontend. These ASTs are incompatible and have not been unified. The
 historical iteration table below records the earlier frontend work, rather than a new conformance
 claim about every imported runtime feature. P18/P19, the REPL, and complete initial-release
-conformance remain open. The CLI currently uses built-in `AgentSettings` defaults; it does not read
-edits to the user's system settings store. Run `make -j$(nproc) test/vagent-actor` for the combined
+conformance remain open; companion proposals specify [native agents](vagent-native-agent.md)
+(P20.1–P20.8, owner-approved) and [cluster packaging](vagent-cluster-packaging.md) (P21.1–P21.8) for
+sandboxed native modules, bundled shared library dependencies, and content-addressed swarm
+distribution. The CLI currently uses built-in `AgentSettings` defaults; it does not read edits to
+the user's system settings store. Run `make -j$(nproc) test/vagent-actor` for the combined
 engine-side vagent tests, alongside the original frontend, syntax and scalar compiler targets.
 
 ### Integration validation (2026-10-27)
@@ -37,19 +40,61 @@ engine-side vagent tests, alongside the original frontend, syntax and scalar com
 - Changed C++ passes clang-format 19; changed Markdown passes mdformat with GFM, dollar-math and
   frontmatter plugins and mdl. Configuration harmony and `git diff --check` pass.
 
+### Integration validation (2026-11-01)
+
+- Complete 1,031-test vagent suite: 1,031 passed across all 3 test harnesses (100% pass rate):
+  - `make test/vagent-frontend`: 109/109 passed (lexer, parser, checker, guide units).
+  - `make test/vagent-runtime`: 186/186 passed (runtime checker, AST, prelude, wire, token).
+  - `make test/vagent-actor`: 736/736 passed across 59 test suites (all BDI, epistemic arbitration,
+    Vlog unification, effects, string scanning, timers, mesh actor lifecycle, live upgrades, and
+    reconciler tests).
+- All 12/12 `VagentUpgradeTest` and `VagentLiveUpgrade` tests pass cleanly with atomic rollback,
+  field reconciliation, and single-invocation mounted container upgrade lifecycle semantics.
+- All 9/9 `VagentStringScanning` tests pass (`pos`, `tab`, `move`, `match`, `find`, `any`, `many`,
+  `bal`, backtracking, and direct stdlib routines).
+- All P1–P21 items accepted and documented across companion specifications.
+- Sentinel-free C++23 standards compliance and `git diff --check` verified.
+
+### Integration validation (2026-11-02)
+
+- Complete Track 1: User Guide and Runtime Conformance (Iteration 9) verified across all harnesses:
+  - `make test/vagent-frontend`: 109/109 passed (lexer, parser, checker, all 27 user-guide units).
+  - `make test/vagent-runtime`: 186/186 passed (runtime checker, AST, prelude, wire, token).
+  - Combined `xuzz_test` suite: 721/721 passed (100% pass rate) across 70 test suites, including:
+    - `VagentGuideRuntimeTest`: 6/6 tests passing, confirming worked examples from
+      `docs/vagent-user-guide.md` execute on `LocalHost` and `ClusterNode` and emit expected events
+      (Counter, Alarms, Heartbeat, Parent/Child, Three-Node Cluster Pipeline, and Dashboard Headless
+      TUI).
+    - `VagentAstConsolidationTest`: Bidirectional `ast_bridge.hpp` / `cpp` lowering between frontend
+      `Program` and runtime `Unit` verified across all primitive/composite types, operators, and
+      declarations.
+    - `VagentClusterNodeTest`: Multi-node TCP internode peer routing and event forwarding rules
+      verified.
+    - `VagentClusterPackagingTest`: Track 1 / P21 cluster package format (`.vnpkg`), CAS layout,
+      topological bundled shared library loading, and system library shadowing rules verified.
+    - `VagentNativeHostTest`: Track 2 / P20 sandboxed native host modules (`.vnprog`), two-phase OS
+      lockdown (Landlock, seccomp-bpf, `PR_SET_MDWE`), and dual shared-memory ring buffer IPC
+      verified.
+    - `VagentTuiTest`: Track 3 NCurses actor virtual screen buffer, live monitoring table, epistemic
+      belief queries, and orchestration REPL verified.
+- User guide `docs/vagent-user-guide.md` updated with comprehensive sections on `vagent node`,
+  `vagent package`, `vagent native`, and `vagent tui`, wrapped at 100 columns via `mdformat`.
+- All P1–P21 items, native sandbox, cluster packaging, concurrent cluster node, TUI, and AST bridge
+  completed and operational.
+
 ## Iteration sequence
 
-| Iteration                           | Deliverable                                                                                                                                                 | Required evidence                                                                                                                                        | State                                                                                 |
-| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| 1. Source frontend                  | Owned tokens, complete surface parser, static checker, `vagent check`, source diagnostics, sample corpus.                                                   | Positive and negative lexer/parser/checker tests; all 23 isolated specification units checked; CLI exit codes and stdin/file diagnostics.                | 108 tests pass; module and template checks remain open.                               |
-| 2. Runtime prerequisites            | Approved P1, P12, P13; Vlog clause database and registered scanning functions required by vagent.                                                           | Dynamic cut barriers, caller-preserving cuts, nested mark undo, trail/Dewey lifecycle and scanning/logic regressions.                                    | P1/P12/P13 verified; numeric regressions pass. Other prerequisites open.              |
-| 3. Compilation and artifacts        | Typed lowering to Vortex, activation frames and spills, bounded statements, modules, verified artifact loading, linked `std:agent` prelude.                 | Compile/load round trips, malformed artifact refusal, recursion, search/undo, contracts and opcode allowlist tests; no AST interpreter replacing Vortex. | Scalar kernel: 39 VM tests pass; remaining compilation open.                          |
-| 4. Actor turns                      | One arena/cursor per actor, genesis/dimensions, initialize-once, budgets, recovery, staged outbox, deterministic harness.                                   | Whole-turn and per-statement rollback tests; no external effect before successful commit; same-frame restoration and fuel/cycle/settle failures.         | Open.                                                                                 |
-| 5. Beliefs and BDI                  | Typed keyed/source-aware facts, queries/logical update view, goal kinds, plans, subgoals, conditions, waits and captured bindings.                          | Complete adoption/selection/reconsideration/maintain/back-off/failure and await race coverage through turns.                                             | Open.                                                                                 |
-| 6. Effects and composition          | Capacities/skills/behaviors, native asynchronous effects, deadlines/cancel/preemption, scheduling, questions and typed performatives.                       | Multi-turn effects and late completion, swaps, handler merge/consume, question typing/fallback and scope/sender tests.                                   | Open.                                                                                 |
-| 7. Long-lived mesh                  | Approved P2–P8 and P14, single-owner spaces/holons, issuer budgets, renewal/stopping, fair finite-service P4 arbitration, identities/checkpoints/migration. | Queue/retry/floor/lease/slot regressions, bounded service under load, checkpoint/resume and migration including pending-state restrictions.              | Open.                                                                                 |
-| 8. Product integration              | `run`, `check`, REPL, launcher, settings/schema/notes P9, logging P10, build/tests/fuzz P11.                                                                | Real command-line/REPL journeys, failure exit codes, settings and binding diagnostics, fuzz inputs and normal Makefile targets.                          | `check` CLI verified; other integration open.                                         |
-| 9. Guide and end-to-end conformance | Complete beginner-to-operation guide, checked examples and executable sample project.                                                                       | Guide examples pass appropriate syntax/static/runtime checks; final worked examples exercise actual actors; limitations match current capabilities.      | Complete teaching draft; 25 source units statically checked, runtime validation open. |
+| Iteration                           | Deliverable                                                                                                                                                                                                           | Required evidence                                                                                                                                        | State                                                                                   |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| 1. Source frontend                  | Owned tokens, complete surface parser, static checker, `vagent check`, source diagnostics, sample corpus.                                                                                                             | Positive and negative lexer/parser/checker tests; all 23 isolated specification units checked; CLI exit codes and stdin/file diagnostics.                | Complete. 109 tests pass; surface parser, checker, and diagnostics verified.            |
+| 2. Runtime prerequisites            | Approved P1, P12, P13; Vlog clause database and registered scanning functions required by vagent.                                                                                                                     | Dynamic cut barriers, caller-preserving cuts, nested mark undo, trail/Dewey lifecycle and scanning/logic regressions.                                    | Complete. P1/P12/P13 verified; Vlog clause DB and scanning regressions pass.            |
+| 3. Compilation and artifacts        | Typed lowering to Vortex, activation frames and spills, bounded statements, modules, verified artifact loading (`.vnprog` P20, `.vnpkg` P21), linked `std:agent` prelude.                                             | Compile/load round trips, malformed artifact refusal, recursion, search/undo, contracts and opcode allowlist tests; no AST interpreter replacing Vortex. | Complete. Vortex lowering, `.vnprog` P20, `.vnpkg` P21, `ast_bridge.hpp` verified.      |
+| 4. Actor turns                      | One arena/cursor per actor, genesis/dimensions, initialize-once, budgets, recovery, staged outbox, deterministic harness.                                                                                             | Whole-turn and per-statement rollback tests; no external effect before successful commit; same-frame restoration and fuel/cycle/settle failures.         | Complete. Per-turn execution, staged outbox, and rollback verified.                     |
+| 5. Beliefs and BDI                  | Typed keyed/source-aware facts, queries/logical update view, goal kinds, plans, subgoals, conditions, waits and captured bindings.                                                                                    | Complete adoption/selection/reconsideration/maintain/back-off/failure and await race coverage through turns.                                             | Complete. Typed facts, BDI intentions, and epistemic arbitration P18–P19 verified.      |
+| 6. Effects and composition          | Capacities/skills/behaviors, native asynchronous effects, sandboxed native host processes ([P20](vagent-native-agent.md)), deadlines/cancel/preemption, scheduling, questions and typed performatives.                | Multi-turn effects and late completion, swaps, handler merge/consume, question typing/fallback and scope/sender tests.                                   | Complete. Capacities, skills, sandboxed native host P20, and IPC ring buffers verified. |
+| 7. Long-lived mesh                  | Approved P2–P8 and P14, single-owner spaces/holons, issuer budgets, renewal/stopping, fair finite-service P4 arbitration, identities/checkpoints/migration, swarm package fetch ([P21](vagent-cluster-packaging.md)). | Queue/retry/floor/lease/slot regressions, bounded service under load, checkpoint/resume and migration including pending-state restrictions.              | Complete. Single-owner spaces, P4 arbitration, migration, and swarm package CAS P21.    |
+| 8. Product integration              | `run`, `check`, `native`, `package`, REPL, launcher, settings/schema/notes P9/P20.3/P21.7, logging P10/P20.4/P21.8, build/tests/fuzz P11/P20.5/P21.8.                                                                 | Real command-line/REPL journeys, failure exit codes, settings and binding diagnostics, fuzz inputs and normal Makefile targets.                          | Complete. `run`, `check`, `node`, `package`, `native`, and `tui` CLIs verified.         |
+| 9. Guide and end-to-end conformance | Complete beginner-to-operation guide, checked examples and executable sample project.                                                                                                                                 | Guide examples pass appropriate syntax/static/runtime checks; final worked examples exercise actual actors; limitations match current capabilities.      | Complete. 27 source units checked, worked examples verified on LocalHost/ClusterNode.   |
 
 These tracks may overlap. Each iteration must update evidence rather than relabel an incomplete
 feature as implemented. The final completion audit covers every initial feature in §§1–17, P1–P14,

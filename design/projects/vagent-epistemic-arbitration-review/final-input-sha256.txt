@@ -1,0 +1,6 @@
+SHA-256; delivered approved v1.4 and preserved review inputs
+
+06ec9fbc38acc1b73869cb5f1c9e17c4f30d45257b98dfa6356997b145e04cb8  design/vagent-dynamic-source-weighting-and-epistemic-arbitration.md
+c4c9506fd39f40f673931b35f37a6abac6e0510d0ec176507167dcafe050693f  design/projects/vagent-epistemic-arbitration-review/r6-input-v1.3-approved.txt
+551856398f7ac45135ea09092528feb3671e23abc8fed59ed987dde640d14f91  design/projects/vagent-epistemic-arbitration-review/baseline-v1.2.txt
+fbbb3c5dd7d0316cf823e29c9c4aaec5df1ec8cbdbd813b0dc0efa7e73d274a6  design/projects/vagent-epistemic-arbitration-review/workflow-source.txt

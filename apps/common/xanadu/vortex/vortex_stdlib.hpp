@@ -436,6 +436,48 @@ public:
   [[nodiscard]] std::optional<CellRef> scanSubject() const;
   /// &pos: the current cursor's content as a 1-based position.
   [[nodiscard]] std::optional<std::int64_t> scanPos() const;
+  /// Test &pos against @p target (normalizing negative indices: i <= 0 -> len +
+  /// 1 + i), or return current &pos when target is nullopt.
+  std::optional<std::int64_t>
+  scanPos(std::optional<std::int64_t> target,
+          std::optional<CellRef> cursor = std::nullopt);
+  /// tab: moves 1-based &pos to @p targetPos (normalizing non-positive: len + 1
+  /// + i), producing the traversed substring. Fails (nullopt) and leaves &pos
+  /// unchanged if targetPos is out of bounds (< 1 || > len + 1).
+  std::optional<std::string>
+  scanTab(std::int64_t targetPos, std::optional<CellRef> cursor = std::nullopt);
+  /// move: relative tab(&pos + offset), producing traversed substring.
+  std::optional<std::string>
+  scanMove(std::int64_t offset, std::optional<CellRef> cursor = std::nullopt);
+  /// match: tests if subject starting at &pos begins with @p prefix.
+  /// If match: returns &pos + prefix.size() WITHOUT advancing &pos.
+  std::optional<std::int64_t>
+  scanMatch(std::string_view prefix,
+            std::optional<CellRef> cursor = std::nullopt);
+  /// find: generates 1-based start positions in subject at or after &pos where
+  /// @p needle occurs, WITHOUT advancing &pos.
+  std::vector<std::int64_t>
+  scanFind(std::string_view needle,
+           std::optional<CellRef> cursor = std::nullopt);
+  /// upto: generates 1-based positions in subject at or after &pos whose
+  /// character is in @p cset, WITHOUT advancing &pos.
+  std::vector<std::int64_t>
+  scanUpto(std::string_view cset, std::optional<CellRef> cursor = std::nullopt);
+  /// any: tests if character at &pos is in @p cset. If so, returns &pos + 1
+  /// WITHOUT advancing &pos.
+  std::optional<std::int64_t>
+  scanAny(std::string_view cset, std::optional<CellRef> cursor = std::nullopt);
+  /// many: matches longest non-empty run of characters from @p cset starting
+  /// at &pos. Returns 1-based position past matched run WITHOUT advancing &pos.
+  std::optional<std::int64_t>
+  scanMany(std::string_view cset, std::optional<CellRef> cursor = std::nullopt);
+  /// bal: generates 1-based positions in subject at or after &pos where a
+  /// character from @p cset occurs outside balanced open/close delimiters,
+  /// WITHOUT advancing &pos.
+  std::vector<std::int64_t>
+  scanBal(std::string_view cset, std::string_view open = "(",
+          std::string_view close        = ")",
+          std::optional<CellRef> cursor = std::nullopt);
   /// Set &pos on the current cursor. A write under a live mark is trailed,
   /// so an enclosing #Fail restores it (spec section 6.2). false when no
   /// scan is open.

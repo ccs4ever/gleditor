@@ -9,10 +9,10 @@ Q2 (latches for life, decayed counters) is taken as given; this reviews how it i
 
 - The update `c <- c*2^(-max(0,t-t_c)/h) + n` is a correct exponentially weighted event count; the
   value at a later time is exact without writing (section 3.2). Steady state `lambda*h/ln2` is the
-  correct kernel integral (checked: 1 Hz at 5% gives 4.33). "Burst of 10 falls below 3 in about
-  105 s" checks: 60*log2(10/3) = 104.2 s.
-- Not decaying `refused_count`, and charging relayed copies only to it (`agent_executor.cpp:829-837`),
-  is right: a relay cannot make a victim SUSPECT.
+  correct kernel integral (checked: 1 Hz at 5% gives 4.33). "Burst of 10 falls below 3 in about 105
+  s" checks: 60\*log2(10/3) = 104.2 s.
+- Not decaying `refused_count`, and charging relayed copies only to it
+  (`agent_executor.cpp:829-837`), is right: a relay cannot make a victim SUSPECT.
 - Deriving SUSPECT rather than storing it, and having queries recompute and never write, is the
   correct shape. Keeping time as a turn input keeps replay deterministic.
 - Resume without decay over downtime is the conservative, defensible choice (see MINOR 3).
@@ -41,8 +41,9 @@ above the mean. Simulation (Bernoulli per second, 2e6 s, threshold 3, no hystere
 So the "NOMINAL at 3%" source reads SUSPECT a third of the time and changes state every 50 s. Since
 the state is stamped on every record (section 4), the same source yields a mix of NOMINAL and
 SUSPECT records, and I4 would apply covariance inflation 4 (spec 5.1) to a random third of its
-readings. For a periodic refusal pattern the peak, not the mean, decides: one refusal every T s peaks
-at `1/(1-2^(-T/h))`, which crosses 3 at T = 60*log2(1.5) = 35.1 s, not the "29 s" the text gives.
+readings. For a periodic refusal pattern the peak, not the mean, decides: one refusal every T s
+peaks at `1/(1-2^(-T/h))`, which crosses 3 at T = 60\*log2(1.5) = 35.1 s, not the "29 s" the text
+gives.
 
 Remedy: replace the sensitivity sentence with the simulated table (or the honest statement that the
 threshold detects a rate of order 0.03/s with a false-alarm fraction that is steep between 1% and 5%
@@ -79,7 +80,7 @@ inflation only.
 buffer of old readings, or a link with a clock-offset episode, produces a burst of these. The design
 charges the batch at full weight, each event at the newest event's time (`Charge::content` counted
 and one `contact`; section 3.4). A flush of 1000 stale readings reads 1000 and stays SUSPECT for
-60*log2(1000/3) = 503 s; 10 readings for 104 s. That is a transport episode being scored as a
+60\*log2(1000/3) = 503 s; 10 readings for 104 s. That is a transport episode being scored as a
 device-quality signal, and it is unbounded per pump (the range argument in 3.2 bounds `c` only for a
 minimum spacing Δ; for Δ=0 the bound is infinite: at 1 ms spacing the bound is 86,562, section 3.2's
 formula).
@@ -87,59 +88,59 @@ formula).
 Remedy: cap the weight any one bookkeeping turn can add (for example `n` saturating at the
 threshold, so one episode is at most one "SUSPECT-worth"), or charge episodes (a refusal after a
 gap) rather than events; at least exclude `StaleObservation` from the decayed counter when the
-refusal is a late arrival of a previously valid stream, leaving it in `refused_count`. Add a test:
-a 1000-reading stale flush from a good sensor.
+refusal is a late arrival of a previously valid stream, leaving it in `refused_count`. Add a test: a
+1000-reading stale flush from a good sensor.
 
 ## MINOR
 
-1. **Out-of-order clamp (3.2).** The clamp is sound but needlessly inexact: when `t < t_c` the
-   exact update is `c <- c + n*2^(-(t_c-t)/h)` with `t_c` unchanged, a one-line change in the same
+1. **Out-of-order clamp (3.2).** The clamp is sound but needlessly inexact: when `t < t_c` the exact
+   update is `c <- c + n*2^(-(t_c-t)/h)` with `t_c` unchanged, a one-line change in the same
    routine. Errors for the clamp: 1 ms late 1.2e-5, 1 s late 1.2%, 10 s 12%, 60 s 100%. The "below
    1e-4, milliseconds" bound assumes a one-pump delay; the coalescing window is until the worker
    runs the bookkeeping turn (`agent_executor.cpp:696`), unbounded under backpressure, and a batch
-   is all stamped with the newest `at`, so older members are also over-weighted by their span.
-   Use the exact form, or bound `h` below (see 2). Both cost nothing.
+   is all stamped with the newest `at`, so older members are also over-weighted by their span. Use
+   the exact form, or bound `h` below (see 2). Both cost nothing.
 1. **Domain of `h`.** `(0, 31 years]` lets `h` below the coalescing delay, where the clamp error is
    order 1, and denormal `h` where `Δ/h` overflows (gives 0 correctly, but only by luck of
-   `Exp(-inf)`). Give a lower bound, for example 1 s, and test `Exp` at -inf and at x=600
-   (2.4e-181, fine). 31 years is arbitrary; say it is "finite and below 2^30 s".
+   `Exp(-inf)`). Give a lower bound, for example 1 s, and test `Exp` at -inf and at x=600 (2.4e-181,
+   fine). 31 years is arbitrary; say it is "finite and below 2^30 s".
 1. **Resume rule (3.5).** Agree with it: not decaying over downtime is the right asymmetry (a false
    SUSPECT costs inflation 4 for minutes; laundering costs trust in a faulty source). Two
    observations. It couples recovery to *uptime*, so a deployment that restarts more often than
    `h/ln(…)` cannot decay past threshold: say so in the notes. And checkpointed `t_c` on a profile
    never charged is absent, which is correct; test that rebasing leaves absent absent.
-1. **Hysteresis (open question 1).** Not recommended as stored state: M1 shows flapping *is*
-   present near threshold, but a two-threshold rule needs the previous state and breaks "derived,
-   never stored" and query-time purity. Simulated with clear-at-1.5: transitions drop for p=3%
-   from 72/h to 15/h but the SUSPECT fraction doubles (34% to 69%): it trades false alarm for slow
-   clearing, not worth it. Better: fix the threshold (M1) and let I4 consume the *continuous*
-   decayed value as a soft penalty (inflation as a function of `c`), reserving the discrete state
-   for display. State this as the I4 contract.
+1. **Hysteresis (open question 1).** Not recommended as stored state: M1 shows flapping *is* present
+   near threshold, but a two-threshold rule needs the previous state and breaks "derived, never
+   stored" and query-time purity. Simulated with clear-at-1.5: transitions drop for p=3% from 72/h
+   to 15/h but the SUSPECT fraction doubles (34% to 69%): it trades false alarm for slow clearing,
+   not worth it. Better: fix the threshold (M1) and let I4 consume the *continuous* decayed value as
+   a soft penalty (inflation as a function of `c`), reserving the discrete state for display. State
+   this as the I4 contract.
 1. **Stamp versus query-time.** The record stamp is the health at `received_steady`, correct for
    audit and calibration eligibility. But I4's scoring must recompute health at query time (section
    4 says so) and must not read the stamp: a stamped NOMINAL on a record from before a source went
    SUSPECT is stale evidence. Write this as a hard rule in section 4, and note that the stamp
-   reflects only refusals already charged, so a refusal received before the record but charged
-   after (coalescing) is missed: the stamp is pump-order dependent, not just time dependent.
+   reflects only refusals already charged, so a refusal received before the record but charged after
+   (coalescing) is missed: the stamp is pump-order dependent, not just time dependent.
 1. **Feedback hazard for I4.** SUSPECT derived from refusals is independent of calibration residuals
    today. When `reject_count` joins (I4), excluding SUSPECT readings from calibration while
    suspicion depends on innovation rejections creates a selection loop (a drifting sensor is
-   excluded, so calibration never learns the drift, so it keeps being rejected). I3-2 is fine; record
-   a requirement in section 9 that I4 train calibration on readings regardless of health stamp, or
-   on gate-passed readings only.
+   excluded, so calibration never learns the drift, so it keeps being rejected). I3-2 is fine;
+   record a requirement in section 9 that I4 train calibration on readings regardless of health
+   stamp, or on gate-passed readings only.
 1. **`degrade` has no operator inverse (open question 2).** Stat view: reset also clears calibration
-   to the declared prior (P19 5.1) and retires all readings, which is a large loss of learned
-   state to clear what is a metadata flag (a degradation reason says nothing about the learned
-   bias). Operators will reset to clear a stale warning and forget months of calibration. Recommend a
+   to the declared prior (P19 5.1) and retires all readings, which is a large loss of learned state
+   to clear what is a metadata flag (a degradation reason says nothing about the learned bias).
+   Operators will reset to clear a stale warning and forget months of calibration. Recommend a
    fourth action (clear one reason by code, no effect on learned state) though P19 lists three and
    this needs the owner's approval; at minimum say so in section 6.3 and make `reset`'s cost
    explicit in the operator documentation.
 1. **Reset and calibration (6.3, P19 5.1).** The design is correct that I4 must clear calibration to
-   the declared prior in the same turn, and that dedup floors and streams survive. One addition:
-   the `rejection_streak`, both decayed counters and their `t_c` must all clear (set `t_c` absent,
-   not leave stale), and I4's reset test must assert that an accepted-after-reset reading is
-   weighted from the prior, not from the pre-reset calibration. As 2b ships before calibration
-   exists, add an `I4-owes` line to the carried list so this is not lost.
+   the declared prior in the same turn, and that dedup floors and streams survive. One addition: the
+   `rejection_streak`, both decayed counters and their `t_c` must all clear (set `t_c` absent, not
+   leave stale), and I4's reset test must assert that an accepted-after-reset reading is weighted
+   from the prior, not from the pre-reset calibration. As 2b ships before calibration exists, add an
+   `I4-owes` line to the carried list so this is not lost.
 
 ## Answers to section 10
 

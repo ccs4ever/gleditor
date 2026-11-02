@@ -1,8 +1,7 @@
 # Round 1 critique: Vortex & Spool-Mesh Expert
 
-Document under review: `design/vagent-dynamic-source-weighting-and-epistemic-arbitration.md`
-Paths below are relative to the repository root.
-Tally: 3 BLOCKING, 4 MAJOR, 3 MINOR.
+Document under review: `design/vagent-dynamic-source-weighting-and-epistemic-arbitration.md` Paths
+below are relative to the repository root. Tally: 3 BLOCKING, 4 MAJOR, 3 MINOR.
 
 ## Status of previous BLOCKING/MAJOR findings (Rounds 2+ only)
 
@@ -25,8 +24,8 @@ minted during `believes truest` arbitration are cleanly reclaimed by calling `ar
 > artifacts in bulk. If no clause satisfies the query, `arena.release(m_0)` unwinds all state
 > without leaving orphaned cells." (§5.4)
 
-This contradicts the actual implementation of `ArenaManifold::discard` in the repository.
-In `apps/common/xanadu/zigzag/arena_manifold.cpp:1612–1628`:
+This contradicts the actual implementation of `ArenaManifold::discard` in the repository. In
+`apps/common/xanadu/zigzag/arena_manifold.cpp:1612–1628`:
 
 ```cpp
 ArenaManifold *ArenaManifold::discard(const Mark &m) noexcept {
@@ -77,11 +76,11 @@ Intermediate arbitration calculations must not be minted as persistent cells in 
    ephemeral registers (which are unlinked at turn end in `AgentExecutor::runTurnOnce`,
    `agent_executor.cpp:1506–1508`), minting only the final winning result cell.
 1. **Two-Phase Isolation via Nested Frame / Sub-Cursor**: Run candidate scoring in an isolated
-   subroutine frame. Once the winning `CellRef` and argmax score are identified and copied to
-   caller registers, call `arena.release(m_0)` to truncate **all** intermediate calculation cells,
-   and only then execute `#Unify` on the caller frame against the winning clause.
+   subroutine frame. Once the winning `CellRef` and argmax score are identified and copied to caller
+   registers, call `arena.release(m_0)` to truncate **all** intermediate calculation cells, and only
+   then execute `#Unify` on the caller frame against the winning clause.
 
----
+______________________________________________________________________
 
 ### 2. (§3.1, line 322; §3.3, line 379; §3.4, line 418; §8.2, line 906) Non-existent `#Exp` opcode
 
@@ -99,10 +98,9 @@ And Proposal P19.1 (§8.1, line 885) explicitly claims:
 
 However, checking `apps/common/xanadu/vortex/vortex_vm.hpp:27–91` and `vortex_vm.cpp:366–1028`
 demonstrates that `#Exp` **does not exist** in Vortex. The arithmetic and math opcodes in
-`OpcodeKind` are strictly:
-`Add`, `Sub`, `Mul`, `Div`, `DivMod`, `Mod`, `Neg`, `Abs`, `Min`, `Max`, `Clamp`, `Trim`,
-`ToLower`, `ToUpper` (`vortex_vm.hpp:28–76`).
-There is no `#Exp`, no `#Sqrt`, no `#Pow`, and no `#Ln` in `OpcodeKind` or `vortex_vm.cpp`.
+`OpcodeKind` are strictly: `Add`, `Sub`, `Mul`, `Div`, `DivMod`, `Mod`, `Neg`, `Abs`, `Min`, `Max`,
+`Clamp`, `Trim`, `ToLower`, `ToUpper` (`vortex_vm.hpp:28–76`). There is no `#Exp`, no `#Sqrt`, no
+`#Pow`, and no `#Ln` in `OpcodeKind` or `vortex_vm.cpp`.
 
 Yet the core mathematical models in §3 depend entirely on these non-existent instructions:
 
@@ -124,8 +122,8 @@ intrinsics.
 - `design/vagent-dynamic-source-weighting-and-epistemic-arbitration.md:906`: claims `#Exp` opcode is
   standard.
 - `apps/common/xanadu/vortex/vortex_vm.hpp:27–91`: Full `OpcodeKind` confirms `#Exp` is absent.
-- `apps/common/xanadu/vortex/vortex_vm.cpp:366–1028`: VM instruction switch handles arithmetic up
-  to `Neg` and math extensions (`Abs`, `Min`, `Max`, `Clamp`), with no exponential or square root.
+- `apps/common/xanadu/vortex/vortex_vm.cpp:366–1028`: VM instruction switch handles arithmetic up to
+  `Neg` and math extensions (`Abs`, `Min`, `Max`, `Clamp`), with no exponential or square root.
 
 **Fix:**
 
@@ -138,7 +136,7 @@ Either:
    `#Sub`, `#Mul`, `#Div`, and accurately re-price the cycle cost (e.g. 150–250 cycles per
    evaluation instead of $< 50$).
 
----
+______________________________________________________________________
 
 ### 3. (§2.3; §4.3; §7.1) Turn failure rolls back reputation penalties via `arena.release(m0)`
 
@@ -156,9 +154,9 @@ executes:
       }
 ```
 
-The comment states: "Beacon not found at destination. Reputations penalized."
-However, in `apps/common/xanadu/vagent/agent_executor.cpp:1390–1502`, every agent turn executes
-under an initial choice point mark:
+The comment states: "Beacon not found at destination. Reputations penalized." However, in
+`apps/common/xanadu/vagent/agent_executor.cpp:1390–1502`, every agent turn executes under an initial
+choice point mark:
 
 ```cpp
 const auto m0 = arena.mark();
@@ -177,12 +175,11 @@ if (failure || spec.readOnly) {
 
 `ArenaManifold::release(m0)` (`apps/common/xanadu/zigzag/arena_manifold.cpp:1631–1680`) replays the
 trail in reverse, resetting all modified cell slots below `m0` to their initial values and
-truncating all cells minted during the turn.
-Because `SourceProfile` cells reside in the agent's overlay manifold prior to the turn, the in-place
-scalar write performed by `refute` records a `TrailEntry` on `arena.trail_`. When `fail(...)`
-aborts the turn, **`arena.release(m0)` undoes the reputation update!**
-The source's $\beta$ counter reverts to its pre-turn value, and the learned weights revert to their
-prior state. The reputation penalty is silently lost.
+truncating all cells minted during the turn. Because `SourceProfile` cells reside in the agent's
+overlay manifold prior to the turn, the in-place scalar write performed by `refute` records a
+`TrailEntry` on `arena.trail_`. When `fail(...)` aborts the turn, **`arena.release(m0)` undoes the
+reputation update!** The source's $\beta$ counter reverts to its pre-turn value, and the learned
+weights revert to their prior state. The reputation penalty is silently lost.
 
 **Evidence:**
 
@@ -205,7 +202,7 @@ if that body also calls `fail(...)`. The specification must mandate that:
 1. A dedicated non-reverting epistemic outbox rank (`d.epistemic_feedback`) stages feedback tokens
    that the executor drains into source profiles *after* `arena.release(m0)` runs.
 
----
+______________________________________________________________________
 
 ## MAJOR
 
@@ -217,10 +214,10 @@ Full title: Generic `MeshActorRuntime` confused with `vagent` settle routines an
 
 Proposal P19.5 (§8.5, lines 955–959) states:
 
-> "In `agent_executor.cpp`, intercept plan completion in the turn settle loop
-> (`rtSettle_` / `drainPosted`). If the plan succeeded and the goal was achieved, trigger positive
-> reinforcement ($y = 1.0$) for all sources in the token. If the plan failed with unhandled physical
-> failure, trigger refutation ($y = 0.0$)."
+> "In `agent_executor.cpp`, intercept plan completion in the turn settle loop (`rtSettle_` /
+> `drainPosted`). If the plan succeeded and the goal was achieved, trigger positive reinforcement
+> ($y = 1.0$) for all sources in the token. If the plan failed with unhandled physical failure,
+> trigger refutation ($y = 0.0$)."
 
 And the diagram in §6.2 (line 685) names:
 
@@ -263,7 +260,7 @@ specify that outcome backpropagation is emitted:
 1. In C++ within `AgentExecutor::runTurn` (`agent_executor.cpp:1348–1355`) when an intention fails,
    invoking the `failStepEntry` handler with the token's contributing sources.
 
----
+______________________________________________________________________
 
 ### 5. (§6.1, lines 663–665; §4.4, line 577) Dangling `kTokenClause` raw `CellRef` across turns
 
@@ -313,7 +310,7 @@ Do not store a raw `CellRef` to an ephemeral clause. Instead, structure the
 This guarantees that attribution remains valid even if the underlying clause cell is excised,
 compacted, or replaced before plan completion.
 
----
+______________________________________________________________________
 
 ### 6. (§4.4; §8.2; §8.4) Fuel exhaustion risk from unpriced graph traversals
 
@@ -338,9 +335,9 @@ According to §4.4 and §5.1, evaluating `believes truest P(args)` over $C$ cand
 
 In Vortex bytecode, just invoking a standard library routine takes multiple instructions (`#Bind`,
 `#Link`, `#Call`, `#Resolve`, `#Return`). A 5-dimensional dot product alone is 9 arithmetic opcodes
-plus register loads. Traversing ranks in bytecode requires explicit step and branch loops.
-For $C=5$ candidates, $K=2$ sources, and $S=20$ registered sources, this pipeline executes hundreds
-of cell dereferences and easily consumes 1,500–3,000 VM cycles.
+plus register loads. Traversing ranks in bytecode requires explicit step and branch loops. For $C=5$
+candidates, $K=2$ sources, and $S=20$ registered sources, this pipeline executes hundreds of cell
+dereferences and easily consumes 1,500–3,000 VM cycles.
 
 Under `ActorGrant::maxInstructions` (`apps/common/xanadu/vortex/mesh_actor.hpp:50`) and default
 `vagent.condition_fuel` (1,000 steps, P18 §2.5 line 470), evaluating `believes truest` will exhaust
@@ -363,7 +360,7 @@ instruction fuel and trigger `kFailFuel` (`agent_executor.cpp:1489`), aborting t
 1. Specify that predicates with `arbitrated by` policies require an increased default
    `vagent.condition_fuel` grant (e.g. 5,000 instructions) in `runtime_abi.hpp`.
 
----
+______________________________________________________________________
 
 ### 7. (§4.1; §5.2) Backtracking in `for believes ranked` unwinds imperative loop body state
 
@@ -388,8 +385,8 @@ setCursorOpcode(cursor, cp.altOp);
 If the body of `for believes ranked` contains imperative statements (e.g. updating local variables,
 asserting auxiliary facts, modifying records) before hitting a failure condition (e.g.
 `attempt_approach(loc)` returning false in §4.1, line 501), `#Fail` triggers
-`arena.release(cp.mark)`.
-This silently unwinds and erases **all** arena mutations made by the failed loop iteration.
+`arena.release(cp.mark)`. This silently unwinds and erases **all** arena mutations made by the
+failed loop iteration.
 
 Even worse, if the loop body executed an external effect or sent a Spool-Mesh message (e.g.
 `send(...)`), that message was staged to the outbox or emitted over the wire. External messages
@@ -413,7 +410,7 @@ The specification must explicitly define the execution discipline of `for believ
 1. If imperative actions are permitted, clarify that outbox staging and intention step updates are
    held in a speculative staging buffer and only flushed to the runtime outbox upon loop exit.
 
----
+______________________________________________________________________
 
 ## MINOR
 
@@ -422,10 +419,10 @@ The specification must explicitly define the execution discipline of `for believ
 **Problem:**
 
 The source registry on `+d.trust` indexes sources by bare string identifiers (e.g.
-`"peer:scout_1"`). In Spool-Mesh (`identity_layout.hpp:57–110, 304–330`),
-messages arrive with authenticated 40-hex `Fingerprint` credentials and `ActorPid`. If belief
-provenance uses arbitrary strings, a Byzantine peer can forge source names or cycle through fresh
-string names to evade reputation penalties, bypassing the Sybil protection claimed in §6.3.
+`"peer:scout_1"`). In Spool-Mesh (`identity_layout.hpp:57–110, 304–330`), messages arrive with
+authenticated 40-hex `Fingerprint` credentials and `ActorPid`. If belief provenance uses arbitrary
+strings, a Byzantine peer can forge source names or cycle through fresh string names to evade
+reputation penalties, bypassing the Sybil protection claimed in §6.3.
 
 **Fix:**
 
@@ -433,7 +430,7 @@ Specify that for inter-agent messages, the canonical source identifier string on
 prefixed with or derived from the sender's authenticated Ed25519 `Fingerprint`
 (`peer:<40-hex-fingerprint>`), verified by `MeshActorRuntime::receive`.
 
----
+______________________________________________________________________
 
 ### 9. (§2.2, line 284; §8.1, line 886) Memory pricing omission for vector weight lists
 
@@ -450,14 +447,18 @@ a 1-element weight. For $d \in [5, 8]$, each profile requires $14 + 2d$ cells (~
 Update the memory accounting in §8.1 to explicitly include the $d$ scalar cells on `+d.step` for
 feature weights.
 
----
+______________________________________________________________________
 
 ### 10. (§5.3; §8.2) Division-by-zero vulnerability in continuous consensus fusion
 
 **Problem:**
 
 In §5.3 (line 633), the continuous consensus formula calculates:
-$$\hat{x}_{\text{consensus}} = \frac{\sum_{i=1}^N w_i x_i}{\sum_{i=1}^N w_i}$$
+
+$$
+\hat{x}_{\text{consensus}} = \frac{\sum_{i=1}^N w_i x_i}{\sum_{i=1}^N w_i}
+$$
+
 If all asserting sources have decayed ($\Phi \to 0$) or have near-zero reputation, $\sum w_i$ can
 underflow to 0.0, causing an IEEE 754 division-by-zero (`NaN` or `Inf` in R6 scalar bits) or `#Div`
 trap in Vortex bytecode.
@@ -468,6 +469,6 @@ Add an epsilon smoothing factor $\epsilon = 10^{-6}$ to the denominator or speci
 $\sum w_i < w_{\min}$, consensus arbitration fails the query (`#Fail`) or falls back to an
 unweighted prior mean.
 
----
+______________________________________________________________________
 
 VERDICT: NOT CONVERGED

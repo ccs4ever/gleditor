@@ -2,11 +2,9 @@
 
 You are one of six critics reviewing a design specification in the gleditor repository:
 
-- **Document**:
-  `/data/git/gleditor-restore/.claude/worktrees/bridge-cse_01JyeD4AMjEywzundTw7BvJ7/design/vagent-shared-program-and-live-upgrade.md`
-- **Repo root**: `/data/git/gleditor-restore/.claude/worktrees/bridge-cse_01JyeD4AMjEywzundTw7BvJ7`
-- **Workflow skill**:
-  `/data/git/gleditor-restore/.claude/worktrees/bridge-cse_01JyeD4AMjEywzundTw7BvJ7/.claude/skills/vortex-design-critique/SKILL.md`
+- **Document**: `/data/git/gleditor/design/vagent-shared-program-and-live-upgrade.md`
+- **Repo root**: `/data/git/gleditor`
+- **Workflow skill**: `/data/git/gleditor/.agents/skills/vortex-design-critique/SKILL.md`
 
 The specification proposes:
 
@@ -31,8 +29,12 @@ The specification proposes:
   dimensions.
 - Strict 2-degree ZigZag rank invariant: `A.pos(d) = B <=> B.neg(d) = A`; no uncloned fan-in on a
   single `(dim, direction)`.
-- No sentinels in APIs (`std::optional` / `std::expected`). No arbitrary small ceilings that force
-  workarounds.
+- **SENTINELS ARE STRICTLY BANNED**: `noCell`, `noIndex`, `noAxis`, `-1`, or reserved integers/empty
+  strings must not appear anywhere in APIs, manifold structures, design documents, or specs. In an
+  API, absence is `std::optional` or `std::expected`. In manifold structures, absence is unlinked
+  (empty slot / `std::nullopt`). `noCell` should NOT appear anywhere outside the lowest-level
+  on-disk/wire format header.
+- No arbitrary small ceilings that force workarounds.
 - New C++ must justify why it is not Vortex.
 - Any change to existing C++ engine/core/runtime code must be isolated in the Proposal Register
   (`P17.*`) with exact `file:line` scope, justification, price, and fallback.
@@ -42,7 +44,7 @@ The specification proposes:
 
 - **Do NOT edit the target design document or any existing repository file.** You may only write
   your assigned critique file under
-  `/data/git/gleditor-restore/.claude/worktrees/bridge-cse_01JyeD4AMjEywzundTw7BvJ7/design/projects/vagent-shared-program-review/`.
+  `/data/git/gleditor/design/projects/vagent-shared-program-review/`.
 - Verify every claim against the code and sibling docs yourself (`view_file` / `run_command` with
   `grep`); cite `file:line` for evidence. Do not guess — if you could not verify something, say so.
 - Write your full critique to your assigned output file as Markdown with numbered findings ordered
