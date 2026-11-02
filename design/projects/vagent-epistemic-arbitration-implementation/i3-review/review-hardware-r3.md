@@ -75,7 +75,7 @@ None.
 
 ## MINOR
 
-5. `max_variance` has no checker ceiling. A policy of 1e300 satisfies "0 < min \<= max" but does not
+1. `max_variance` has no checker ceiling. A policy of 1e300 satisfies "0 < min \<= max" but does not
    protect I4's arithmetic. Require `max_variance` below a named safe constant, or state what I4
    proves for an in-range value.
 1. The per-principal share is 8 of 64, so 8 babbling principals still fill the actor queue. Consider

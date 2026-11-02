@@ -1,10 +1,14 @@
-# Round 1 critique: Vortex & Spool-Mesh Expert (design/vagent-extended-capabilities-and-belief-vlog-unification.md)
+# Round 1 critique: Vortex & Spool-Mesh Expert
+
+Reviewed document: `design/vagent-extended-capabilities-and-belief-vlog-unification.md`
 
 Paths below are relative to the repo root. Tally: 2 BLOCKING, 5 MAJOR, 2 MINOR.
 
 ## BLOCKING
 
-### 1. (§2.1, line 194; line 224) Horn rule body conjunction chained on `+d.step` contradicts Vlog §6.1, `vprolog`, and `vortex_stdlib.cpp` (`+d.spin`)
+### 1. Horn rule body conjunction chained on `+d.step` contradicts Vlog §6.1 and `vortex_stdlib.cpp`
+
+(§2.1, line 194; line 224)
 
 Full title: Horn rule body conjunction chained along `+d.step` breaks goal resolution in Vlog §6.1,
 `vprolog`, and `vortex_stdlib.cpp`
@@ -75,7 +79,9 @@ along `+d.step` off `+d.grab`, but clause body goals are an instruction rank cha
 
 ______________________________________________________________________
 
-### 2. (§2.5, lines 348–377; §2.8, lines 451–465; §5.2, line 831) Incoherent execution model between C++ runtime solver and VM bytecode, and inverted trail safety formula
+### 2. Incoherent execution model between C++ solver and VM bytecode, and an inverted trail formula
+
+(§2.5, lines 348–377; §2.8, lines 451–465; §5.2, line 831)
 
 Full title: Incoherent execution model between C++ runtime solver and Vortex VM bytecode, and
 mathematically inverted trail safety formula in §2.8
@@ -93,9 +99,9 @@ resolution:
    emit `#ChoiceDepth` into a bytecode register to barrier an out-of-VM C++ recursive call.
 1. In §2.8 line 464, the trail safety formula is stated as:
 
-$$
+```math
 \text{Trail safety condition: } \quad \forall t \in \text{QueryTrail}, \quad t.\mathit{dense} \ge m_0.\mathit{cellCount}
-$$
+```
 
 This inequality is inverted relative to the WAM conditional trail implementation in
 `ArenaManifold::trail()` (`apps/common/xanadu/zigzag/arena_manifold.cpp:1530`):
@@ -148,9 +154,9 @@ an actor variable, it would produce an entry with $t.\mathit{dense} < m_0.\mathi
      bound to the caller's registers.
 1. Replace the inverted trail safety formula in §2.8 line 464 with the correct invariant:
 
-$$
+```math
 \forall t \in \text{QueryTrail}, \quad t.\mathit{dense} \notin \text{ActorMutableSlots} \quad \land \quad \text{replayed}(\text{QueryTrail}) \subseteq \{ i \mid i > m_0.\mathit{trailSize} \}
-$$
+```
 
 stating that query-local backtracking must only replay trail entries pushed above $m_0$'s trail
 floor, leaving actor variable slots untouched.
@@ -159,7 +165,9 @@ ______________________________________________________________________
 
 ## MAJOR
 
-### 3. (§3.5, lines 636–637) Lowering multi-solution scanning generators via `#Call`/`#Return` breaks generator resumption
+### 3. Lowering multi-solution scanning generators via `#Call`/`#Return` breaks generator resumption
+
+(§3.5, lines 636–637)
 
 Full title: Emitting `#Call`/`#Return` for multi-solution string scanning generators violates the
 Vortex generator protocol
@@ -207,7 +215,9 @@ Vortex generator protocol
 
 ______________________________________________________________________
 
-### 4. (§3.4, lines 609–628; §3.5) Scanning cursor rank leak on successful scan completion due to missing success-path `#Unlink`
+### 4. Scanning cursor rank leak on successful scan completion due to missing success-path `#Unlink`
+
+(§3.4, lines 609–628; §3.5)
 
 Full title: Scanning cursor cell leaks on `+d.scan` rank upon successful completion of `s ? e`
 
@@ -239,7 +249,9 @@ cursor accumulation across turns.
 
 ______________________________________________________________________
 
-### 5. (§4.3, lines 728, 757; Executive Summary line 48) Erroneous turn-yielding instruction specified as `#Return` instead of `#Halt`
+### 5. Erroneous turn-yielding instruction specified as `#Return` instead of `#Halt`
+
+(§4.3, lines 728, 757; Executive Summary line 48)
 
 Full title: Turn suspension erroneously specified as `#Return` instead of `#Halt` (`haltOp_`)
 
@@ -288,7 +300,9 @@ with `jump(haltOp_)` (`OpcodeKind::Halt`) following `emitFramePop()` and `callLa
 
 ______________________________________________________________________
 
-### 6. (§4.5, lines 778–783) Preemption dispatch misattributed to adapter instead of `HostBindings::start` pipeline causing duplicate cancellation/races
+### 6. Preemption dispatch misattributed to adapter instead of `HostBindings::start`, causing races
+
+(§4.5, lines 778–783)
 
 Full title: Preemption dispatch misattributed to adapter instead of `HostBindings::start` pipeline
 causing duplicate cancellation and race conditions
@@ -346,7 +360,9 @@ draining `posts_` in `AgentExecutor::finishEffect`.
 
 ______________________________________________________________________
 
-### 7. (§2.7, line 429; §5.2, lines 824–845) Hallucinated `ContractViolationKind::floundered_negation` omitted from `vortex_core.hpp` and Proposal Register
+### 7. Hallucinated `ContractViolationKind::floundered_negation` is absent from `vortex_core.hpp`
+
+(§2.7, line 429; §5.2, lines 824–845)
 
 Full title: Floundered negation contract violation enum value does not exist and is omitted from
 Proposal Register P18.2
@@ -384,7 +400,9 @@ ______________________________________________________________________
 
 ## MINOR
 
-### 8. (§2.5, line 396; §5.2) SLD resolution step budget lacks explicit `core.arena().consumeWork()` accounting against `ActorGrant`
+### 8. SLD resolution step budget lacks `core.arena().consumeWork()` accounting against `ActorGrant`
+
+(§2.5, line 396; §5.2)
 
 **Problem:** §2.5 line 396 sets a depth bound of `vagent.condition_fuel` (default 1,000 steps).
 However, within the actor runtime, `ActorGrant` defines `maxInstructions` and `maxCells`

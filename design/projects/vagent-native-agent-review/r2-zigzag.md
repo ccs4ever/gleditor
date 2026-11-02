@@ -25,7 +25,9 @@ that the declaration is authoritative and the manifest copy is hashed but never 
 
 ## MAJOR
 
-### R2.1 (§10.5) Decision-to-approval and decision-to-purpose relations are unspecified, and the obvious encoding is fan-in
+### R2.1 Decision-to-approval and decision-to-purpose relations are unspecified; encoding fans in
+
+(§10.5)
 
 The ledger says a decision records "program, kind ... purpose (transcluded from the approval's
 purpose text)" but never says how a decision refers to the approval cell that justified it. The

@@ -1,4 +1,6 @@
-# Round 2 critique: Xanadu / ZigZag Purist (vagent-dynamic-source-weighting-and-epistemic-arbitration.md)
+# Round 2 critique: Xanadu / ZigZag Purist
+
+Reviewed document: `vagent-dynamic-source-weighting-and-epistemic-arbitration.md`
 
 Paths below are relative to the repo root. Tally: 0 BLOCKING, 0 MAJOR, 4 MINOR.
 
@@ -81,7 +83,10 @@ be only 2 cells).
 - `apps/common/xanadu/compact_op.hpp:78`: `static_assert(sizeof(CompactOpNode) == 64);`
 
 **Fix:** Update the pricing line to:
-`- Pricing: 1 token cell + 3 field cells per active intention frame (~256 bytes, +64 bytes per additional corroborating source).`
+
+```text
+- Pricing: 1 token cell + 3 field cells per active intention frame (~256 bytes, +64 bytes per additional corroborating source).
+```
 
 ______________________________________________________________________
 

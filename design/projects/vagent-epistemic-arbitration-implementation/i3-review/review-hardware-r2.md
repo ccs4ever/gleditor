@@ -84,7 +84,7 @@ None.
 
 ## MINOR
 
-6. **Ingress-level refusals for bound sources** (frame/units, time, variance, backpressure) happen
+1. **Ingress-level refusals for bound sources** (frame/units, time, variance, backpressure) happen
    before any turn, and the bookkeeping write is described only for turn failures. A bound device
    failing validation at `observe()` therefore does not update reject count or last contact, and
    I3-3 will see it as silent. Also, a first-ever refused observation has no profile to update. Fix:

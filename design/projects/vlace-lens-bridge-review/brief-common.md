@@ -1,11 +1,18 @@
 # Shared brief — vlace-lens-bridge review round 1
 
 - Target doc: `design/vlace-lens-bridge.md` (repo-relative)
+
 - Repo root: `/data/git/gleditor-restore/.worktrees/sql-to-zigzag` (branch `design/sql-to-zigzag`)
+
 - Sibling context: `design/anything-to-zigzag-lens.md`, `design/vlace-functional-language.md`,
   `design/ux_workflow_lenses.md`, `design/audit-2026-10-23-ux-lenses.md`
-- Key sources: `apps/common/xanadu/vlace/{compiler,types,driver}.cpp`,
-  `apps/common/xanadu/zigzag/{lens_repl,projection_session,projection_lens, lens_uri,router_lens,filesystem_lens,meta_lens,arena_manifold}.*`
+
+- Key sources:
+
+  ```text
+  apps/common/xanadu/vlace/{compiler,types,driver}.cpp
+  apps/common/xanadu/zigzag/{lens_repl,projection_session,projection_lens, lens_uri,router_lens,filesystem_lens,meta_lens,arena_manifold}.*
+  ```
 
 ## House rules every critic enforces
 

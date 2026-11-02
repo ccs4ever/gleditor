@@ -53,7 +53,7 @@ simulation class; the owner or I4 can pick) or state that SUSPECT is deliberatel
 design must declare the sample-rate interpretation P19 5.1 requires; at present it declares only a
 rate in events per second.
 
-### M2. "Same evidence count as three consecutive rejections" is not true; the thresholds are not comparable
+### M2. "Same evidence count as three consecutive rejections" is false; thresholds aren't comparable
 
 Section 3.3 equates "three refusals within much less than a half-life" with P19's "three consecutive
 rejections". A streak is conditioned on adjacency (no accepted reading between) and so is a

@@ -111,8 +111,8 @@ Static review of the diff and surrounding code. I did not rebuild or run tests.
    - Untested: `Deref` for Str, Bool and non-finite Float; `Link target` (including the positive
      case); the reach cap (`ResourceLimit`); nested scopes taking a parent's reached cells; a
      hostile cyclic `vars` record (`Cyclic or oversized record`); `Cursor` as an `arg.` binding (the
-     `Cursor bindings must be temps` check is only hit via
-     result.`); same-register in/out for `Point\`.
+     `Cursor bindings must be temps` check is only hit via `result`); same-register in/out for
+     `Point`.
    - `AReferenceCannotBeLaunderedAcrossPinRoots` still refuses (for the wrong reason) if the reach
      feature is removed, because without reach any non-pin reference mismatches. Only
      `SelectsAReachedObservation...` guards reach.

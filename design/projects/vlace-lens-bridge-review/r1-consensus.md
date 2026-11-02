@@ -9,7 +9,7 @@ Verdicts: all six NOT CONVERGED.
 | C3  | meta: claim wrong — openLensUri has no meta branch; silent FilesystemLens fallthrough      | —      | —      | B        | —         | M    | m      |
 | C4  | no Proposal Register (rule 6)                                                              | —      | —      | B        | —         | —    | —      |
 | C5  | "pure reads, ordering doesn't matter" false — refresh/mount mutate arena; lazy memoization | —      | B      | —        | M         | B    | M      |
-| C6  | IO Cell/Bool/Int discard expected<string>; Cell 0 sentinel                                 | —      | M      | —        | m         | B    | M      |
+| C6  | IO Cell/Bool/Int discard `expected<string>`; Cell 0 sentinel                               | —      | M      | —        | m         | B    | M      |
 | C7  | session resolution by keyFor misses attribute cells                                        | —      | M      | —        | M         | m    | M      |
 | C8  | refresh() missing from mutating-op semantics                                               | —      | —      | M        | m         | —    | M      |
 | C9  | sessions\_ unbounded; "forgetting releases" false — die with Compiler                      | —      | m      | —        | M         | m    | m      |

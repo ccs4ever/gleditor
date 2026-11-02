@@ -36,7 +36,9 @@ with the set it knew (price it against C8), and states how a sub-intention resol
 root, or scope the grant to the staging intention and say that a plan's `achieve` subgoal opening a
 terminal loses it when the subgoal ends. Add the failed-hard and drop cascade cases to the N13 gate.
 
-### 2. (N13 vs §13.1 `curses_keep`, §13.2 steps 8-9, §11.6) Intention-scoped grants contradict the tests and the ReadKey example
+### 2. Intention-scoped grants contradict the tests and the ReadKey example
+
+(N13 vs §13.1 `curses_keep`, §13.2 steps 8-9, §11.6)
 
 **Problem:** `curses_keep` "keeps its terminal in an agent `var screen`" and "does not close it".
 Under N13 the grant is revoked with `intention_ended` the moment the `Greet` intention ends (its

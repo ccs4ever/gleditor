@@ -10,7 +10,9 @@ None.
 
 ## MAJOR
 
-### M1. The default SUSPECT rule is unreachable for slow sources and misses "three in a row" (design 3.2, 3.3)
+### M1. The default SUSPECT rule is unreachable for slow sources and misses "three in a row"
+
+(design 3.2, 3.3)
 
 The design says three refusals "within much less than a half-life is the same evidence count" as
 P19's three consecutive rejections. For a sampled source it is not. With `h = 60 s`, the decayed sum
@@ -39,7 +41,9 @@ policy; `h = c * expected_period`, floor at the system setting); (b) a threshold
 decayed counter for accepted events; (c) at minimum, change the default threshold to 2.5 (so three
 at 1 Hz trips), state the 35 s limit in the schema notes, and add tests at 0.01, 0.1, 1 and 100 Hz.
 
-### M2. Health actions can be ordered wrongly against source changes and already-queued work (design 6.2, 6.3)
+### M2. Health actions can be ordered wrongly against source changes and already-queued work
+
+(design 6.2, 6.3)
 
 The design says `healthAction` "queues a health turn with `pushControl`, so it keeps call order with
 source changes". Two code facts defeat that as written.
@@ -63,7 +67,9 @@ check at `:3790` (queued ingestions older than the epoch refuse `Undelivered`) a
 for the principal at call time. Add the test "observation queued, then reset, then pump: no current
 record".
 
-### M3. Isolate (the safety action) is gated by the budgets a broken source exhausts (design 6.3 last paragraph)
+### M3. Isolate (the safety action) is gated by the budgets a broken source exhausts
+
+(design 6.3 last paragraph)
 
 `deliverHost` returns `ArenaExhausted` before any epistemic turn once `cellCount >= arenaSlots`
 (`agent_executor.cpp:1776-1782`), and `admit` refuses `EpistemicBudget` for ingestion and
@@ -77,7 +83,9 @@ net-reduce or hold cells), and Isolate needs either a slot reserve above `arenaS
 quarantine set consulted in `observe()` that takes effect at call time, independent of the arena.
 The host-side set also closes the window between the call and the pump.
 
-### M4. Reasons can be exhausted into a state only a destructive reset clears, and they cost half the cell budget (design 5, Q2 in 10)
+### M4. Reasons exhaust into a state only a destructive reset clears, and cost half the cell budget
+
+(design 5, Q2 in 10)
 
 - The bound refuses `EpistemicBudget` past 8 reasons and nothing deduplicates, so a retrying script
   or a careless operator with a Degrade grant fills a profile with repeats of one code; a legitimate
@@ -93,7 +101,9 @@ Remedy: deduplicate by (kind, code, issuer); bound reasons per profile at 2 to 4
 a per-actor total counted in the budget; bound grant `id` explicitly; add a non-destructive clear
 (below, Q2).
 
-### M5. The grant check authenticates nothing a careless host does not already hold (design 6.1, 6.2)
+### M5. The grant check authenticates nothing a careless host does not already hold
+
+(design 6.1, 6.2)
 
 `request.issuer` is "checked equal to the grant's", but the issuer is in the grant the host
 installed and the grant ID is written into every reason (`grant`, `issuer` fields, section 5),
@@ -109,7 +119,9 @@ arena) that the request must present; the ID stays an audit label. Stamp `at_wal
 in a bounded host-side audit ring, because Reset deletes the latch provenance and the reasons it
 clears, so a compromised operator's reset leaves no trace of the isolate it undid.
 
-### M6. Backlog and clock-fault bursts are charged as content refusals and recover slowly (design 3.1, 3.3)
+### M6. Backlog and clock-fault bursts are charged as content refusals and recover slowly
+
+(design 3.1, 3.3)
 
 `isContentRefusal` includes `StaleObservation` and `ObservationTimeMismatch`
 (`agent_executor.cpp:846-849`). A direct sender that buffers during a link outage (a data logger)
@@ -128,7 +140,9 @@ itself (for example at 8x threshold, bounding recovery at 3 half-lives); do not 
 already logged), or weight it. State the stall bound in the tests: charge a note after a simulated
 10 minute pump stall.
 
-### M7. The `-pred` handler wedge hits reset exactly when the source is faulty (design 6.3, Q3 in 10)
+### M7. The `-pred` handler wedge hits reset exactly when the source is faulty
+
+(design 6.3, Q3 in 10)
 
 A garbage reading (divide by zero, out-of-range index) is the likeliest cause of a failing `-pred`
 handler, and it is the faulty source whose supports Reset must drop through `rtBDrop`. The reset

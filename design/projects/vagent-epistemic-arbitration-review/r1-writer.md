@@ -4,7 +4,9 @@ Paths below are relative to the repo root. Tally: 4 BLOCKING, 7 MAJOR, 5 MINOR.
 
 ## BLOCKING
 
-### 1. (§7.1–§7.4, lines 751–768, 786–801, 824–832, 856–863) Hallucinated Plan Declaration Syntax in All Worked Examples
+### 1. Hallucinated Plan Declaration Syntax in All Worked Examples
+
+(§7.1–§7.4, lines 751–768, 786–801, 824–832, 856–863)
 
 Full title: Hallucinated plan declaration syntax
 (`plan Name(...) { goal: ... where: ... body: ... }`) across all worked examples
@@ -77,7 +79,9 @@ plan NavigateToWaypoint for reach_waypoint(dest_x, dest_y)
 }
 ```
 
-### 2. (§8.2, line 906; §3.1, line 322; §3.3, line 379) Citing Non-Existent `#Exp` Opcode While Asserting "Zero New VM Opcodes"
+### 2. Citing Non-Existent `#Exp` Opcode While Asserting "Zero New VM Opcodes"
+
+(§8.2, line 906; §3.1, line 322; §3.3, line 379)
 
 Full title: Citing non-existent `#Exp` VM opcode in P19.2 while asserting "Zero new VM opcodes" in
 P19.1
@@ -127,7 +131,9 @@ impossible.
    functions in `VortexStdLib` (`mathPow` / `mathExp` in
    \[`apps/common/xanadu/vortex/vortex_stdlib.cpp:2840`\](file:///data/git/gleditor/apps/common/xanadu/vortex/vortex_stdlib.cpp#L2840)).
 
-### 3. (§4.1, lines 473–480; §4.2, lines 523–540; §4.3, lines 550–561; §8.4, lines 938–942) Undefined Non-Terminals and Missing Directive Grammar in Section 4
+### 3. Undefined Non-Terminals and Missing Directive Grammar in Section 4
+
+(§4.1, lines 473–480; §4.2, lines 523–540; §4.3, lines 550–561; §8.4, lines 938–942)
 
 Full title: Undefined `FusionParams` and missing EBNF productions for `ArbitrationPolicy`,
 `confirm`, `refute`, and `reinforce`
@@ -182,7 +188,9 @@ PenalizeStmt          = 'penalize' 'source' Expr ',' Expr ;
 Update P19.4 in §8.4 to include `reinforce`, `penalize`, and `source` in the registered keyword
 list.
 
-### 4. (§2.1, line 260; §2.2, line 284; §2.3, lines 289–293) Direct Contradiction Between Diagram String Serialization and R6 Scalar Float Layout
+### 4. Direct Contradiction Between Diagram String Serialization and R6 Scalar Float Layout
+
+(§2.1, line 260; §2.2, line 284; §2.3, lines 289–293)
 
 Full title: Contradiction between Mermaid diagram serializing `$weights` as a string cell and §2.3
 mandating R6 IEEE 754 scalar layout
@@ -231,7 +239,9 @@ ______________________________________________________________________
 
 ## MAJOR
 
-### 5. (§3.1–§3.5, lines 313–463; §5.1, lines 587–610) Missing Mathematical Formulation for Composite Source Weight $w_S$
+### 5. Missing Mathematical Formulation for Composite Source Weight $w_S$
+
+(§3.1–§3.5, lines 313–463; §5.1, lines 587–610)
 
 Full title: Undefined synthesis formula combining temporal decay $\Phi$, reputation $\mu$,
 contextual ML $\hat{y}$, and bandit UCB into source weight $w_S$
@@ -270,7 +280,9 @@ where $\text{Score}_{\text{model}}(S)$ is determined by the declared arbitration
 - `online_sgd`: $\sigma(\mathbf{w}_S^T \mathbf{x} + b_S)$
 - `bandit_ucb`: $\min(1.0, \mu_S + c \sigma_S)$
 
-### 6. (§3.3, lines 362–404; §4.1, lines 473–480; §7.3, lines 810–833) Missing Surface Binding and Normalization for Context Vector $\mathbf{x}$
+### 6. Missing Surface Binding and Normalization for Context Vector $\mathbf{x}$
+
+(§3.3, lines 362–404; §4.1, lines 473–480; §7.3, lines 810–833)
 
 Full title: Missing specification for context vector extraction, declaration, and feature
 normalization in online SGD
@@ -306,7 +318,9 @@ compiler will "Typecheck arbitration parameters and context vectors ($O(\text{pa
 `arbitrated by truest(model: online_sgd, context: [ambient_lux / 1000.0])`), specify feature vector
 normalization rules, and update Example 3 to pass the normalized context explicitly.
 
-### 7. (§2.1, lines 234–235, 263–266; §8.1, lines 879–883) Incomplete Specification of `d.epistemic` Manifold Topology and Precedence
+### 7. Incomplete Specification of `d.epistemic` Manifold Topology and Precedence
+
+(§2.1, lines 234–235, 263–266; §8.1, lines 879–883)
 
 Full title: Missing cell layout, multi-source rank topology, and lookup precedence for predicate
 calibration overrides on `d.epistemic`
@@ -338,7 +352,9 @@ calibration overrides. However:
 whether override cells clone the master source profile cell along `+d.clone`, detail how multiple
 overriding sources chain on `+d.trust`, and define the exact fallback lookup order in §4.4 and §5.1.
 
-### 8. (§4.3, lines 545–562; §6.2, lines 669–702; §7.1, lines 758–766) Double-Counting Conflict Between Imperative Directives and Turn Settle Loop
+### 8. Double-Counting Conflict Between Imperative Directives and Turn Settle Loop
+
+(§4.3, lines 545–562; §6.2, lines 669–702; §7.1, lines 758–766)
 
 Full title: Double-counting hazard between imperative `confirm`/`refute` statements and automatic
 deliberation outcome backpropagation
@@ -378,7 +394,9 @@ were actively utilized in deliberated intentions.
 the turn settle loop. Correct Example 1 so it confirms the utilized belief coordinates
 `at(self, cur_x, cur_y)` rather than unasserted destination coordinates.
 
-### 9. (§8.6, lines 973–977; §7.4, lines 845–855) Undefined `EpistemicModel` Prelude Capacity and Contradictory Worked Example
+### 9. Undefined `EpistemicModel` Prelude Capacity and Contradictory Worked Example
+
+(§8.6, lines 973–977; §7.4, lines 845–855)
 
 Full title: Missing prelude method signatures for `capacity EpistemicModel` and mismatched
 `SceneVerifier` example
@@ -421,7 +439,9 @@ capacity EpistemicModel {
 
 Align Example 4 so `LocalONNXRuntime` implements `EpistemicModel`.
 
-### 10. (§8.5, lines 956–957) Runtime Boundary Conflation Between Compiler Label `rtSettle_` and Host Adapter Method `drainPosted`
+### 10. Runtime Boundary Conflation Between Compiler Label `rtSettle_` and Host Method `drainPosted`
+
+(§8.5, lines 956–957)
 
 Full title: Conflation of compiler bytecode label `rtSettle_` with C++ host method `drainPosted()`
 
@@ -433,7 +453,7 @@ Full title: Conflation of compiler bytecode label `rtSettle_` with C++ host meth
 This confuses two distinct execution environments:
 
 1. `rtSettle_` is an internal Vortex bytecode subroutine label compiled in
-   \[`apps/common/xanadu/vagent/compiler.cpp:1148, 6233`\](file:///data/git/gleditor/apps/common/xanadu/vagent/compiler.cpp#L1148)
+   \[`apps/common/xanadu/vagent/compiler.cpp:1148,6233`\](file:///data/git/gleditor/apps/common/xanadu/vagent/compiler.cpp#L1148)
    that executes in the VM inside the actor turn before `#Halt`.
 1. `drainPosted` is a C++ host method in
    \[`apps/common/xanadu/vagent/agent_executor.cpp:2496`\](file:///data/git/gleditor/apps/common/xanadu/vagent/agent_executor.cpp#L2496)
@@ -467,7 +487,9 @@ Decision U-C2) or via C++ host code.
 into bytecode calls to `std:epistemic` emitted inside `rtSettle_` in `compiler.cpp`, while
 `agent_executor.cpp` only handles host delivery wakes and outbox draining in `drainPosted()`.
 
-### 11. (Entire Document; Standing Rule 1) Zero `file:line` Citations Across the Entire Specification
+### 11. Zero `file:line` Citations Across the Entire Specification
+
+(Entire Document; Standing Rule 1)
 
 Full title: Total omission of exact repository line numbers (`file:line`) violating Standing Rule 1
 
@@ -497,7 +519,9 @@ ______________________________________________________________________
 
 ## MINOR
 
-### 12. (§Contents vs Headings, lines 73–118, 1029–1067) Discrepancies Between Table of Contents Titles and Heading Text
+### 12. Discrepancies Between Table of Contents Titles and Heading Text
+
+(§Contents vs Headings, lines 73–118, 1029–1067)
 
 **Problem:** Twelve TOC entries have titles that diverge from their actual section headings:
 
@@ -529,7 +553,9 @@ ______________________________________________________________________
 **Fix:** Synchronize all TOC item titles with the exact text of their corresponding section
 headings.
 
-### 13. (§Contents, lines 116–117; §9, line 996; line 1064) Unnumbered Section 9 Subsection, Stray Horizontal Rule, and Skipped Link Label
+### 13. Unnumbered Section 9 Subsection, Stray Horizontal Rule, and Skipped Link Label
+
+(§Contents, lines 116–117; §9, line 996; line 1064)
 
 **Problem:**
 
@@ -546,7 +572,9 @@ headings.
 rule on line 994, update TOC line 117 to `- [9.1 Acceptance Verification Battery][toc-36]`, and
 define `[toc-36]: #91-acceptance-verification-battery`.
 
-### 14. (§4.1, lines 488, 513; §7.1–§7.3, lines 501, 759, 781, 792) Syntax Errors in Conditionals, Operators, Logging, and Failure Statements
+### 14. Syntax Errors in Conditionals, Operators, Logging, and Failure Statements
+
+(§4.1, lines 488, 513; §7.1–§7.3, lines 501, 759, 781, 792)
 
 **Problem:**
 
@@ -568,7 +596,9 @@ define `[toc-36]: #91-acceptance-verification-battery`.
 **Fix:** Replace `do` and bare `{` with `then {`, replace `and` with `&`, replace `fail("...")` with
 `fail`, and remove unescaped interpolation braces.
 
-### 15. (§1.1, line 139; §4.1, lines 488, 500, 513; §7.1–§7.4) Use of `let x, let y` Instead of Canonical `?x, ?y` for Query Logic Variables
+### 15. Use of `let x, let y` Instead of Canonical `?x, ?y` for Query Logic Variables
+
+(§1.1, line 139; §4.1, lines 488, 500, 513; §7.1–§7.4)
 
 **Problem:** Query expressions repeatedly write `believes at("rover", let x, let y)`,
 `believes truest at(self, let cur_x, let cur_y)`, and

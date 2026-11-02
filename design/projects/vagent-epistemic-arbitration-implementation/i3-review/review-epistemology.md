@@ -41,7 +41,7 @@ Reviewed: i3-design.md against P19 v1.5 sections 2.1, 3.1, 4, 5.1, 6.3 and rtBSe
 
 ## MAJOR
 
-3. **"New value, same key, same source" is unspecified, and the likely implementation loses
+1. **"New value, same key, same source" is unspecified, and the likely implementation loses
    history.** Section 4 covers a new event with the same tuple. The ordinary case is a sensor
    reporting a new value for the same key. A non-replace `rtBSet` would add a second clause and
    support for the same source and key, giving two "current" records. A replace drops the source's
@@ -84,7 +84,7 @@ Reviewed: i3-design.md against P19 v1.5 sections 2.1, 3.1, 4, 5.1, 6.3 and rtBSe
 
 ## MINOR
 
-8. Profile `lastSequence` is per principal while grants are per predicate. A principal reporting
+1. Profile `lastSequence` is per principal while grants are per predicate. A principal reporting
    several predicates or keys with non-global sequences gets spurious `StaleSequence`. Define the
    sequence scope (per principal/incarnation/predicate) and record it in the grant or profile.
 

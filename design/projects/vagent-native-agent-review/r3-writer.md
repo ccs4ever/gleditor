@@ -21,7 +21,9 @@ Tally: 0 BLOCKING, 2 MAJOR, 3 MINOR. Verdict below.
 bullet, 104 columns). `make format-check` and `make lint` are blocking CI gates. Fix: run
 `mdformat --wrap 100` with the three extensions (the diff is only lines 101-104).
 
-### 2. (11.2 vs 11.4) The worked sequence does not match the declaration it claims to be checked against
+### 2. The worked sequence does not match the declaration it claims to be checked against
+
+(11.2 vs 11.4)
 
 11.2 declares `mvinnstr(y, x, s: cstring_out(n), n: c_int)` (four parameters). 11.4 calls
 `mvinnstr(y, x, len(text))` (three arguments) and rule 1 says "Arguments are positional" and "every

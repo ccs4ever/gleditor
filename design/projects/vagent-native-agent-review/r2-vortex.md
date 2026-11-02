@@ -30,7 +30,9 @@ code paths are under `apps/common/xanadu/`. Tally: 1 BLOCKING, 4 MAJOR, 5 MINOR.
 
 ## BLOCKING
 
-### 1. (N1, N4, C3, §10.1, §11.2, §13.1) The actor compiler cannot lower effects or native skills, and no proposal builds that
+### 1. The actor compiler cannot lower effects or native skills, and no proposal builds that
+
+(N1, N4, C3, §10.1, §11.2, §13.1)
 
 **Problem:** The whole design rests on "a native program is a `CompiledProgram`" whose synthesized
 `capacity … effect def … within`, `native skill … implements …` and effect calls are "checked and
@@ -75,7 +77,9 @@ test's graph stages an outbox entry the drain accepts (capacity and deadline pre
 
 ## MAJOR
 
-### 2. (§12.3 vs §10.3, §12.4, P20.6) A checkpoint is a snapshot of a live agent, yet the doc both keeps and revokes its grants
+### 2. A checkpoint is a snapshot of a live agent, yet the doc both keeps and revokes its grants
+
+(§12.3 vs §10.3, §12.4, P20.6)
 
 **Problem:** §12.3 says the host "may stay alive across a checkpoint, and the running agent keeps
 its grants". §10.3 (`agent_ended`: "checkpointed for migration") and §12.4 (`checkpointed(pid)`:
@@ -95,7 +99,9 @@ agent, the copy's stale tokens come from the pid binding, and grants end at `sto
 `terminate` after a migration). Remove "checkpointed for migration" from `agent_ended` and
 `checkpointed(pid)` from P20.6, or keep it as information only with no supervisor action.
 
-### 3. (§12.1, §12.5, §7.3) Nothing handles the control plane dying: hosts, ptys and staging directories are orphaned
+### 3. Nothing handles the control plane dying: hosts, ptys and staging directories are orphaned
+
+(§12.1, §12.5, §7.3)
 
 **Problem:** Every lifecycle row assumes a live supervisor. If the node process dies, each
 `vagent-native-host` is left running with a blocked library thread, the pty slave, and a staging
@@ -114,7 +120,9 @@ the supervisor must spawn from one long-lived thread). Key the staging directory
 sweep directories of earlier epochs when the supervisor starts. Add a gate: SIGKILL the test's
 control plane process and assert the host is gone and the directory is swept after restart.
 
-### 4. (N1, §12.3, §10.2) Live upgrade is claimed to work unchanged, but a new `programRef` changes the module, the manifest and the approvals under a running host
+### 4. Live upgrade can't be unchanged: a new `programRef` changes module, manifest and approvals
+
+(N1, §12.3, §10.2)
 
 **Problem:** N1 lists "live upgrade (`AgentExecutor::upgrade` takes a `CompiledProgram`)" among what
 works unchanged. For a native program a new ref can carry a different module digest, binding

@@ -28,7 +28,7 @@ None.
 
 ## MAJOR
 
-### 1. (§12.3 vs §12.4, §10.3) Does a checkpoint revoke grants?
+### 1. (§12.3 vs §12.4, §10.3) Whether a checkpoint revokes grants
 
 **Problem:** §12.3 says "Its native host may stay alive across a checkpoint, and the running agent
 keeps its grants." §12.4 says on `checkpointed(pid)` the supervisor "revokes the agent's grants

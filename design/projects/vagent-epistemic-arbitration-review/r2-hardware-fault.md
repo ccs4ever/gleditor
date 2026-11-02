@@ -82,7 +82,11 @@ However, the health state machine remains a disconnected stub:
    - In
      \[§5.1\](file:///data/git/gleditor/design/vagent-dynamic-source-weighting-and-epistemic-arbitration.md#L593-L615)
      (`truest` selection pipeline), the flowchart and pipeline steps proceed:
-     `Collect -> FilterSources -> EvalScores -> Decay -> CloneDeref -> LogOdds -> RegSGD -> GateCheck`.
+
+     ```text
+     Collect -> FilterSources -> EvalScores -> Decay -> CloneDeref -> LogOdds -> RegSGD -> GateCheck
+     ```
+
      The pipeline **never inspects `$status`**. If a sensor is marked `FAULTED` ($3$), its profile
      is still scored via historical Bayesian evidence ($\alpha / (\alpha + \beta)$) and decay. A
      sensor that operated reliably for 10 hours and then suffered catastrophic hardware failure
@@ -90,6 +94,7 @@ However, the health state machine remains a disconnected stub:
      ($\alpha = 500, \beta = 5 \implies
      \mu = 0.99$) and will continue to win `believes truest` arbitration over healthy fallback
      sensors!
+
    - In
      \[§5.3\](file:///data/git/gleditor/design/vagent-dynamic-source-weighting-and-epistemic-arbitration.md#L628-L661)
      (`consensus` fusion), measurements from a `FAULTED` sensor are still admitted into the
@@ -271,7 +276,9 @@ credibility.
 
 ______________________________________________________________________
 
-### 4. (§4.1, §5.3, §8.2) Ingestion Gap for Nominal Covariance ($R_i$) and Discarded Fused Covariance
+### 4. Ingestion Gap for Nominal Covariance ($R_i$) and Discarded Fused Covariance
+
+(§4.1, §5.3, §8.2)
 
 Full title: Continuous Consensus Provides No Mechanism to Supply Nominal Covariance ($R_i$) and
 Discards Posterior Covariance Output

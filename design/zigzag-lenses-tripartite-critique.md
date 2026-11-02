@@ -66,9 +66,9 @@ intersection of two dimensions, preserving $\text{deg}^\pm \le 1$ everywhere.
 
 In §1, the proposal equates:
 
-$$
+```math
 \text{Hierarchical path strings } (/net/tcp/0/data) \iff \text{Dimensional Hops } (\text{hop}(cell, +d.net, +d.tcp, +d.data))
-$$
+```
 
 Slashes in a directory path are not dimensions! In Zigzag, a dimension is a **universal coordinate
 axis of variation** (time, author, category, priority, version), not a single-step path hierarchy
@@ -224,9 +224,9 @@ Applying both links locally breaks $\text{deg}^+(C, d) \le 1$.\
 - **Strategy A: Deterministic Rank Sequence Splice (RGA-like)**: For sequential ranks (`d.contents`,
   `d.threads`), use a total ordering over operations:
 
-  $$
+  ```math
   \text{Key}(op) = \langle \text{parentMicroversion}, \text{GlobalOpRef}(op), \text{authorKey} \rangle
-  $$
+  ```
 
   Serialize into: $C \xrightarrow{+d} A_1 \xrightarrow{+d} B_1$.
 
@@ -257,9 +257,9 @@ BEP 46 lookups over the DHT take 200 ms to 3,000 ms; frame budgets are 8.33 ms (
 
 Foreign cells must follow a non-blocking state machine:
 
-$$
+```math
 \text{Unmaterialized} \longrightarrow \text{Resolving} \longrightarrow \text{Active} \longleftrightarrow \text{Disconnected / Tombstone}
-$$
+```
 
 Traversing a rank containing disconnected proxies **never blocks the UI thread**. The cell is
 yielded with an explicit disconnection indicator (e.g. broken tendon), and traversal continues
@@ -269,9 +269,9 @@ smoothly.
 
 - Control commands must carry a signed capability token:
 
-  $$
+  ```math
   \text{Cap} = \text{Sign}_{K_{\text{owner}}}(\text{TargetPID}, \text{AllowedVerbs}, \text{Nonce}, \text{ExpiresAt})
-  $$
+  ```
 
 - Allowed verbs are fine-grained: $\text{Inspect} \neq \text{Pause} \neq \text{Kill}$.
 

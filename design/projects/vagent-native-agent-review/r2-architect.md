@@ -26,7 +26,9 @@ Tally: 0 BLOCKING, 3 MAJOR, 5 MINOR. Verdict: sound, revise first (the three MAJ
 
 ## New findings
 
-### M1. (§8.3) The seccomp allowlist is not enumerated, and a default of `ENOSYS` breaks glibc and ncurses as written
+### M1. The seccomp allowlist is not enumerated, and a default `ENOSYS` breaks glibc and ncurses
+
+(§8.3)
 
 **Problem:** The "Allowed" list names memory management, `clone` with `CLONE_THREAD`, futexes,
 `read`/`write`/`readv`/`writev`/`pread64`/`pwrite64`/`sendmsg`/`recvmsg`, `openat`, `close`,
@@ -61,7 +63,9 @@ Reject x32 numbers. Add a probe: a 32-bit `int 0x80` `execve` stub in the escape
 only). Also state the int-versus-64-bit register compare for the pid arguments, and that the rule is
 "allow if equal, else `EPERM`".
 
-### M3. (§10.5) The ledger store does not say which permascroll it writes, and the default is the wrong one
+### M3. The ledger store does not say which permascroll it writes, and the default is the wrong one
+
+(§10.5)
 
 **Problem:** A `Store` is handed a `UserPermascroll`, and every Structure cell with content spools
 primedia into it. The ledger holds a purpose text spooled "once per program", agent names, programs

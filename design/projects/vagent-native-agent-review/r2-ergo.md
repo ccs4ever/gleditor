@@ -27,7 +27,9 @@ built or run.
 
 ## BLOCKING
 
-### 1. (§6.1–6.2, §13.1) `vn_api` cannot build the first test's own agent, and is not specified as "the whole ABI"
+### 1. `vn_api` cannot build the first test's own agent, and is not specified as "the whole ABI"
+
+(§6.1–6.2, §13.1)
 
 **Problem:** The setters cover str/int/float/bool/child/append, but `ast.hpp` has slot classes the
 table cannot reach:
@@ -67,7 +69,9 @@ and which flags the layer sets.
 
 ## MAJOR
 
-### 2. (§11.4, §13.1, `parser.cpp:1466-1499`) The `else` recovery the failure design depends on does not exist in the front end
+### 2. The `else` recovery the failure design depends on does not exist in the front end
+
+(§11.4, §13.1, `parser.cpp:1466-1499`)
 
 **Problem:** `ECall` has no `orElse`. Only `EAchieve`, `EAsk` and `EAwait` carry one
 (`ast.hpp:233-246`), and `parseOptionalElse` is called only for those. The specification's

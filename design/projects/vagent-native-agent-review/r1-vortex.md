@@ -5,7 +5,9 @@ code paths are under `apps/common/xanadu/`. Tally: 1 BLOCKING, 10 MAJOR, 3 MINOR
 
 ## BLOCKING
 
-### 1. (§4 N4, §6.3, §14.2 P20.2) "Splice each fragment where the compiler would have lowered a body" has no seam to splice into
+### 1. "Splice each fragment where the compiler lowered a body" has no seam to splice into
+
+(§4 N4, §6.3, §14.2 P20.2)
 
 **Problem:** N4 (lines 148-157) rests on a "new compiler entry point beside `compileAgent`" that
 replays declarations through the actor compiler's scaffolding and splices opcode fragments in place
@@ -82,7 +84,9 @@ contain raw `#Call`, `#Return`, `#Halt`, `#Jump`, `#Choice` or `#Cut`. They cont
 `vn_ret`, `vn_end` and `vn_alt`, which replay lowers with the `Nop` continuation and a settle jump.
 Add the retargeting pass explicitly and cite P17.2 as its owner.
 
-### 3. (§7.2 step 3, §7.3, C2, C8) The opcode-kind allowlist does not establish "can do nothing a vagent program cannot"
+### 3. The opcode-kind allowlist does not establish "can do nothing a vagent program cannot"
+
+(§7.2 step 3, §7.3, C2, C8)
 
 **Problem:** Line 360 claims verification "establishes that the graph can do nothing a vagent
 program cannot". Line 370-376 then concedes the staging path is "not airtight". An allowlist of
@@ -110,7 +114,9 @@ a closed vocabulary whose operand shapes are fixed: control-flow ops take only l
 `rd` shape the compiler emits. Say plainly that a fragment can still corrupt its own agent's arena
 and outbox, and that the drain, the authorizer and effect-signature checks are what bound that.
 
-### 4. (§4 N5, §5 "Load", §16) "Replay once per `programRef` per node" is not what the executor does today
+### 4. "Replay once per `programRef` per node" is not what the executor does today
+
+(§4 N5, §5 "Load", §16)
 
 **Problem:** N5 and §5 say replay is paid once per `programRef` and retained, "as
 `CompiledProgram::fromSource` does". But `fromSource` produces a sealed `programStore_` and
@@ -131,7 +137,9 @@ P17.2/P17.3 land, price replay per agent and per resume, and say which `Compiled
 `instantiate` returns (overlay or base). Add a gate: N agents of one native program cost one replay,
 not N, once the base is wired.
 
-### 5. (§12.2, C6, §14.2 tail) The C6 reachability check is defined against a base that the running code lacks, and is placed in the wrong file
+### 5. The C6 reachability check targets a base the running code lacks, and sits in the wrong file
+
+(§12.2, C6, §14.2 tail)
 
 **Problem:** C6 says the walk "enters a program cell of the shared base" (line 692). Today each
 agent's program lives in its own arena, so the test has no meaning. Under P17 it is meaningful, but
@@ -157,7 +165,9 @@ path") are both wrong.
 depends on P17.1/P17.3. State what happens today: the check is vacuous without a base, and the gate
 test would pass on a non-test.
 
-### 6. (§4 N11, §11.4, P20.1) Binding-level `Contention::Queue` serialises every agent of the node on one library
+### 6. Binding-level `Contention::Queue` serialises every agent of the node on one library
+
+(§4 N11, §11.4, P20.1)
 
 **Problem:** N11/§11.4 bind `Curses` once in `HostBindings` with `Contention::Queue` "so the control
 plane's view matches the host's", and N10 gives each agent its own host. Contention is per binding
@@ -173,7 +183,9 @@ P20.1 adds only an `agent` field; it does not touch contention.
 already serialises per-library threads). Or make P20.1 key contention by `(binding, agent)`. Say
 which, and add a two-agent gate test.
 
-### 7. (§2 "incarnation", §10.3, §12.2) Incarnation is an in-memory counter, so stale names can alias live ones
+### 7. Incarnation is an in-memory counter, so stale names can alias live ones
+
+(§2 "incarnation", §10.3, §12.2)
 
 **Problem:** An incarnation is "a counter the control plane bumps each time it starts a native host
 for an agent" (line 87), and grants and handles are `{incarnation, id}`. §12.2 says that after
@@ -214,7 +226,9 @@ and the broker table keeps entries for a dead agent.
 `checkpointed`) and state the supervisor's reaction to each. Or have the supervisor poll
 `live(state)`, and say so and price it.
 
-### 9. (§1 item 5, §5, §15) "Leverages Vortex's multiprocess support" is met by analogy only, and the cheapest alternative is not refused
+### 9. "Leverages Vortex's multiprocess support" holds by analogy only; cheapest option not refused
+
+(§1 item 5, §5, §15)
 
 **Problem:** The owner asked to leverage Vortex's multiprocess support to isolate native code. §1.5
 says the supervisor works "in the manner of" `MeshHost`, `mesh_cli` and incarnation epochs, and that
@@ -236,7 +250,9 @@ leverage, so this design builds a sibling that borrows its conventions (the owne
 implement the host side as a `MeshHostTransport` peer and reuse the actor codec. Add the
 refused-alternative row with its price.
 
-### 10. (§4 N6, §7.1) `programRef` construction is ambiguous, and the module digest is not bound to the module that runs
+### 10. `programRef` construction is ambiguous and the digest isn't bound to the running module
+
+(§4 N6, §7.1)
 
 **Problem:** N6 says the ref is `sha256(fmt ‖ 0 ‖ opLog ‖ 0 ‖ manifest ‖ 0 ‖ sha256(module))`, "the
 same construction as `refOf(source)`".
@@ -256,7 +272,9 @@ same construction as `refOf(source)`".
 module, check the digest, and pass an fd (sealed `memfd` or checked descriptor) to the host, so the
 digest and the code that runs are the same bytes.
 
-### 11. (§6.1-6.3, §13.1) The "whole ABI" is not specified, and the first test does not exercise the fragment path it claims to
+### 11. The "whole ABI" is unspecified, and the first test skips the claimed fragment path
+
+(§6.1-6.3, §13.1)
 
 **Problem:** §6.1 says `vagent_native.h` is "the whole ABI a module sees", but §6.2 lists only
 declaration ops and §6.3 only statement framing. The example in §13.1 uses `vn->local`, `vn->str`,

@@ -41,7 +41,10 @@ A vicon program should be able to write, in its own terms:
 - **materialize** a deferred page, and let sessions go out of scope.
 
 Acceptance journey:
-`open dir → kids() listing → mount git under the repo cell → walk commits → unmount → keep walking → open sql: → browse → edit+commit → revert a refused edit → materialize a page → program ends`.
+
+```text
+open dir → kids() listing → mount git under the repo cell → walk commits → unmount → keep walking → open sql: → browse → edit+commit → revert a refused edit → materialize a page → program ends
+```
 
 ## 2. Current surface (already in the build)
 
@@ -188,7 +191,7 @@ the D2 produce-time read, not a trailed cell; `if lmount(c) then …` guards. Th
 refusal-is-empty relation: a refused gesture cannot be mistaken for an empty walk. Icon's
 `&errortext` shape.
 
-### D4 — Re-firing is Icon's effect contract — and the arena half of a gesture write is what backtracks
+### D4 — Re-firing is Icon's effect contract; the arena half of a gesture write backtracks
 
 VQL needed a static positional rule because its relation re-evaluates *silently*. vicon's rule is
 simpler: **a request fires each time control passes through its call site** — every re-fire has a
@@ -322,7 +325,7 @@ any of these names is silently shadowed are the typed spellings — `open(filena
 selects the lens type. The price paid either way is canonical-identity dedupe (D2): normalization
 lives in the registry open path, not in the argument's shape.
 
-### D7 — The write funnel is inside `ArenaManifold`, not `VortexCore`; vicon's own surface is scope-wiring
+### D7 — The write funnel is inside `ArenaManifold`, not `VortexCore`; vicon's surface is wiring
 
 v1.0 enumerated the funnel wrong. `core_.link` is a thin wrapper over `arena_.link`
 (`vortex_core.cpp:128-167`), and the compiled surface writes the arena **everywhere**: `New`

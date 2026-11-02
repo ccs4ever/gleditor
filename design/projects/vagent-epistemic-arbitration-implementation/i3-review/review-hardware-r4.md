@@ -62,7 +62,7 @@ None.
 
 ## MINOR
 
-3. **Duplicate contact is inconsistent.** Section 6 step 3 says `Duplicate` "refreshes and commits
+1. **Duplicate contact is inconsistent.** Section 6 step 3 says `Duplicate` "refreshes and commits
    nothing", and step 7 refreshes contact only for committed events. The 1b test row still says
    "retry `Duplicate` refreshes only contact". A device whose receipts were lost and which
    retransmits only duplicates will look silent to I3-3. Decide one rule and fix the test row.

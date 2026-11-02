@@ -25,7 +25,9 @@ Paths below are relative to the repo root. Runtime files are under
 
 ## BLOCKING
 
-### 1. (§4 N4, §14.1, P20.2) There is no scaffolding-compiler entry to call, and the proposal does not price creating one
+### 1. There is no scaffolding-compiler entry to call, and the proposal does not price creating one
+
+(§4 N4, §14.1, P20.2)
 
 **Problem:** N4 rests on "the control plane replays declarations through the actor compiler's own
 scaffolding ... splices each fragment in where that compiler would have lowered a body", and P20.2
@@ -55,7 +57,9 @@ to body nodes as an opaque `RawBody` AST variant, which touches `ast.hpp`, `chec
 gates the declarations. The current fallback ("a second scaffolding implementation") contradicts
 N4's own reason for existing.
 
-### 2. (§3 C12, §7.3, §14.2 P20.6) The drain skips a malformed entry today; C12 "Unchanged" is false, P20.6 is not conditional, and its mechanism is not a drain change
+### 2. The drain skips a malformed entry; C12 "Unchanged" is false and P20.6 is not conditional
+
+(§3 C12, §7.3, §14.2 P20.6)
 
 **Problem:** The table says C12 is "Unchanged; the drain additionally treats a malformed outbox
 entry as a hard failure", and §7.3/P20.6 say the proposal is "withdrawn" if the drain already fails
@@ -76,7 +80,9 @@ List the cost (an extra outbox walk per turn for every program, or only when `pr
 and note that `kStatMalformed` stays for compiled programs or is made unreachable. Make it
 unconditional in the register.
 
-### 3. (§1 part 5, N10, §8.1) "Leverages Vortex's multiprocess support ... in the manner of the Spool-Mesh worker lifecycle (`MeshHost`, `mesh_cli`, incarnation epochs)" cites a process model that does not exist
+### 3. The claimed Spool-Mesh process model (`MeshHost`, `mesh_cli`, epochs) does not exist
+
+(§1 part 5, N10, §8.1)
 
 **Problem:** The doc claims the supervisor is modelled on mesh worker-process lifecycle. The tree
 has no worker-process supervision in `vortex/`.
@@ -98,7 +104,9 @@ implements it.
 
 ## MAJOR
 
-### 4. (§4 N5, §5 "Load", §16 "Load-time replay") Per-programRef replay cost is wrong: `instantiate` recompiles per agent, per resume
+### 4. Per-programRef replay cost is wrong: `instantiate` recompiles per agent, per resume
+
+(§4 N5, §5 "Load", §16 "Load-time replay")
 
 **Problem:** N5 says "replay costs O(ops) at load, paid once per `programRef` per node under P17's
 shared base". Today a program's `instantiate` builds the agent into each agent's own arena every
@@ -118,7 +126,9 @@ define a new mode that clones from the promoted base (a change to what `Compiled
 hence a proposal). The `sound(...)` cell checks at `agent_executor.cpp:1180-1186` bound what the
 returned `CompiledAgent` must hold; list that as part of the contract.
 
-### 5. (§13.2, §10.2, §14.2 P20.3, §14.3) Several existing files need changes that P20.x does not list: `LocalHost`, `AgentSettings`, `apps/vagent/main.cpp`
+### 5. Files need changes P20.x does not list: `LocalHost`, `AgentSettings`, `apps/vagent/main.cpp`
+
+(§13.2, §10.2, §14.2 P20.3, §14.3)
 
 **Problem:** The test plan and the settings plan assume plumbing that is absent.
 
@@ -145,7 +155,9 @@ second test harness), for `agent_executor.hpp` (`AgentSettings` or a sibling `Na
 and who fills it from `system://settings`), and for `apps/vagent/main.cpp` (`seal`, running a
 `.vnprog`, the approval callback). Say which of them §13 needs before the first test.
 
-### 6. (§10.1, §14.2) The `std:native` prelude capacity, record and event need `prelude.cpp`, the checker and the compiler, and are not in the register
+### 6. `std:native` prelude capacity, record and event need files the proposal register omits
+
+(§10.1, §14.2)
 
 **Problem:** §10.1 declares `capacity std:native/Authorities`, `record Grant` and
 `event std:native/AuthorityRevoked` as "prelude declarations for native programs only". The prelude
@@ -163,7 +175,9 @@ compiler alike" (`prelude.hpp:5-7`), so a native-only addition touches `checker.
 present, so it needs no prelude change, or add a proposal for the prelude/checker/compiler extension
 with the same gating. Add `scope: Str` to `Grant`, or remove its uses.
 
-### 7. (§12.2, §14.2 closing paragraph) The C6 checkpoint walk edits `agent_executor.{hpp,cpp}` and should be a registered proposal now, not "P20.7 at that point"
+### 7. The C6 checkpoint walk edits `agent_executor.{hpp,cpp}` and should be a registered proposal
+
+(§12.2, §14.2 closing paragraph)
 
 **Problem:** The walk needs a new refusal, a `toString` case and an edit to `checkpoint()`.
 
@@ -220,7 +234,9 @@ different quantity from ops in a native build log. `program_cells` has no stated
 derive them (measure the cell count of a compiled program such as the existing compiler tests) or
 state they are placeholders, as §14.3's last paragraph partly does.
 
-### 11. (§7.2 step 3) The allowlist "the actor compiler emits" cannot be computed by the compiler today
+### 11. The allowlist "the actor compiler emits" cannot be computed by the compiler today
+
+(§7.2 step 3)
 
 There is no table of emitted opcode kinds; `Gen` emits at hundreds of sites. If P20.2 chooses the
 refactor route of finding 1, say how the set is produced (an instrumented sweep of the compiler test

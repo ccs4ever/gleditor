@@ -83,7 +83,9 @@ ______________________________________________________________________
 
 ## MINOR
 
-### 1. (§8.1, lines 856–857) Explicit Reconciliation Phase Ordering: Source Profiles Before Belief Clauses
+### 1. Explicit Reconciliation Phase Ordering: Source Profiles Before Belief Clauses
+
+(§8.1, lines 856–857)
 
 **Problem:** In §8.1 (Proposal P19.1), `reconciler.cpp:465–480` `fromDims` and live upgrade
 migration logic are mandated to preserve source profiles on `+d.trust`. However, the document does

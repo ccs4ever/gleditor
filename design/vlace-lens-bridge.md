@@ -25,7 +25,10 @@ A vlace program should be able to write, in its own types:
 - **materialize** a deferred page, and let sessions go out of scope.
 
 Acceptance journey:
-`open dir → walk listing → mount git under the repo cell → read commits → release mount → keep walking the dir → edit+commit on a sql: lens → revert a refused edit → program ends`.
+
+```text
+open dir → walk listing → mount git under the repo cell → read commits → release mount → keep walking the dir → edit+commit on a sql: lens → revert a refused edit → program ends
+```
 
 ## 2. Current surface (already in the build)
 

@@ -28,7 +28,7 @@ mechanism gaps; all ACCEPTED:
 - P7 attribution: xuzz bypasses LensRepl/session_ops (its own 3 gesture copies,
   xuzz_app.cpp:691-769); P5's dirty-preserving restate is the real fix for xuzz's clobber -- noted,
   xuzz stays a third copy.
-- session_ops contract: ExternalKey-based args; sessionNextPage(session, optional<ExternalKey>
+- session_ops contract: ExternalKey-based args; `sessionNextPage(session, optional<ExternalKey>`
   scope).
 - D4: fs: isn't a scheme (dir:/bare-path); sessions\_ unique_ptr; re-open duplicates projection.
 - D3: setLink doesn't mint (drop from mint list).
@@ -49,7 +49,7 @@ mechanism gaps; all ACCEPTED:
 - lensRevert primitive: confirmed needed (dirty\_.erase + refresh() after dirty-preserving
   restateContent lands — ordering noted).
 - RouterLens mount->WindowedLens accessor: confirmed needed.
-- Result String vs typed LensError ADT: justified (String matches expected<string> throughout; a
+- Result String vs typed LensError ADT: justified (String matches `expected<string>` throughout; a
   LensError ADT is a later refinement).
 - §5 exercises only open/walk/mount/unmount: noted — edit/commit/ revert/stub/dirty/cellKey/cellEq
   shown in §4 semantics + P-register; a fuller worked program is a documentation follow-up.

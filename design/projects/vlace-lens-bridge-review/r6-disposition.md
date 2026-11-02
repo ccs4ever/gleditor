@@ -16,7 +16,7 @@ Codebase: CONVERGED (0B/0M/5m). Others NOT CONVERGED on narrow items:
 - canApply probe has no owning layer (architect M2): P5 gains ProjectionLens::canApply(key)
   (default-refuse; Sql/Config override; RouterLens routes via Mount::owns; UnionLens first-success).
 - lensCommit "keys attempted" no producing API (vortex m3, architect m1): commit() returns
-  expected<void> -> P5 changes it to expected\<int,string> returning the applied count.
+  `expected<void>` -> P5 changes it to `expected<int,string>` returning the applied count.
 - §5 stray `)` STILL present (ergo M1): `"))))"` -> `")))"` (3 opens, 3 closes).
 - Char in == set (writer, codebase m2, ergo m1, architect m5): Char typechecks as Con "Char" but
   evals as Int; {Int,Float,String,Char} for ==/!=.

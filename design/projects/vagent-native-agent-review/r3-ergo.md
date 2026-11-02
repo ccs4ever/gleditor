@@ -21,7 +21,9 @@ None.
 
 ## MAJOR
 
-### 1. (§11.6, `checker.cpp:1557-1563, 2659`; `parser.cpp:777-786`) The `ReadKey` example does not type-check
+### 1. The `ReadKey` example does not type-check
+
+(§11.6, `checker.cpp:1557-1563, 2659`; `parser.cpp:777-786`)
 
 **Problem:** Checked against the real parser and checker, the snippet fails in three places.
 
@@ -54,7 +56,9 @@ tolerates `ERR` (or a `getch` wrapper returning `Int` with no `fail_if`); and dr
 `as r`. State in §13.1 that the keeper and `ReadKey` need not share an intention only because the
 keeper is long-lived.
 
-### 2. (§13.2 steps 8-9, N13, §13.1) `curses_keep` contradicts the intention-scoped grant it is meant to test
+### 2. `curses_keep` contradicts the intention-scoped grant it is meant to test
+
+(§13.2 steps 8-9, N13, §13.1)
 
 **Problem:** Step 8 says "the original's terminal still works" after a checkpoint and resume, and
 step 9 expects, for `curses_keep` after the original stops, a `granted` decision and one

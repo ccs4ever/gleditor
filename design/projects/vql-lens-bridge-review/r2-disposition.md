@@ -11,7 +11,7 @@ on mechanism gaps, all ACCEPTED:
   currentCells; cloneGenerator appends d.clone on the target; performCreates checks attachPoint too.
 - D7's guard had no register row (architect M2, writer M2, codebase M1): Q8 added.
 - lensbrowse under-specified (architect M3, vortex m4, ergo m5): sessionBrowseAt(session,key,table)
-  with mount-scoped routing; browse->expected<void> so the yield needs a SqlLens root accessor;
+  with mount-scoped routing; `browse->expected<void>` so the yield needs a SqlLens root accessor;
   session_ops.cpp keeps SqlLens out of the header.
 - $lens rebinds wrong session (vortex M3): registry's most recent open; # literal anchors reach any
   cell across lines.
@@ -46,6 +46,5 @@ on mechanism gaps, all ACCEPTED:
 - M3 wrong-tree read: projection_session.cpp is 556 lines here (not 114); session_ops.hpp 175 lines
   exists; main.cpp:526 IS setVariable("lens"). Cite corrections from main discarded.
 - "at most one mutating step per path; reads may follow" rule.
-- # is Root not LiteralCellId (bare IntegerLiteral); let uses :=;
-  path/lensmount mints `lensmount` not `d.lensmount`; dedupe arg variance first-wins; prose parens
-  drift.
+- `#` is Root not LiteralCellId (bare IntegerLiteral); let uses :=; path/lensmount mints `lensmount`
+  not `d.lensmount`; dedupe arg variance first-wins; prose parens drift.

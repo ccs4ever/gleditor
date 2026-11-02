@@ -32,7 +32,9 @@ signature table of every call the example uses: argument types, return type, the
 or enums. Replace the "condensed" §13.1 with a module that compiles against that header. The ABI
 header is the artifact a reader of this doc most needs and it is the thing missing.
 
-### 2. (§10.1, §10.4, §11.5, §13.1) The example reads `t.scope` that `Grant` and `request` do not have
+### 2. The example reads `t.scope` that `Grant` and `request` do not have
+
+(§10.1, §10.4, §11.5, §13.1)
 
 **Problem:** The example passes `"newterm(t.scope, $0, $1)"` where `t` is the `Grant` local. §10.1
 declares `record Grant { kind: Str, id: Int, incarnation: Int }` and
@@ -60,7 +62,11 @@ staging.
 
 **Problem:** `effect def batch(steps: [Step]): [Result]` uses `Step`, `Arg`, `Value` and
 `{result_of: Int}`. §8.7 (`vagent-agent-language.md:1260-1270`) has
-`Int, Float, Str, Bool, (), Duration, Time, Agent, Space, Intention, Timer, Event, Opt<T>, [T], Map<K,V>`
+
+```text
+Int, Float, Str, Bool, (), Duration, Time, Agent, Space, Intention, Timer, Event, Opt<T>, [T], Map<K,V>
+```
+
 and declared events and records. There is no sum type (`Arg`: literal or reference), no dynamic
 `Value`, and no anonymous record literal. `Map` is homogeneous and `WireValue` has no map kind
 (`wire.hpp:73-76`). The example then does `vn->field(vn->index(r, 5), "value")` and emits it into
@@ -78,7 +84,9 @@ agent sees an ordinary typed effect. Refused alternative to record: `[Step]` as 
 surface. Keep the generic list form only if a use case needs runtime-built sequences, and then give
 it a real declared `Arg` encoding (a record with optional fields, using `Opt<T>`).
 
-### 4. (§11.2, §11.5, §13.1) Failure semantics contradict each other, and the example leaks on failure
+### 4. Failure semantics contradict each other, and the example leaks on failure
+
+(§11.2, §11.5, §13.1)
 
 **Problem:** §11.2 says `ok_if` "turns a C error convention into effect failure (`ffi_error` …) so a
 plan's `else` handles a failed `refresh`". §11.5 says a batch "stops at the first failure, and the
@@ -98,7 +106,9 @@ the requesting intention: when the intention ends (success, failure, drop, stop)
 its grants and the runner closes its `consumed`-pending handles. `release` stays for early release.
 Show the example with `else` recovery.
 
-### 5. (§6.1) The ABI is not versionable or checkable as specified, and uses C features unusable from Rust
+### 5. The ABI is not versionable or checkable as specified, and uses C features unusable from Rust
+
+(§6.1)
 
 **Problem:** (a) "a module built against API version 1 runs on any host that still offers version 1,
 and a host refuses a module that asks for a version it lacks" (`:271`), but the module never asks:

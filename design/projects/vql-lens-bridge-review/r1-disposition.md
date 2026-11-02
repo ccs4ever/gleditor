@@ -26,7 +26,7 @@ All six critics NOT CONVERGED; strong consensus, all ACCEPTED:
 - evaluateValueExpr renders cells: cell args via cellsOfValueExpr.
 - ?fn() PredicateTest::FunctionInvocation dead arm: Q2 dispatch.
 - $lens binds roots().front(): vector setVariable overload.
-- sessionUnmountAt yields expected<void>: mountBoundary->cellFor before unmount.
+- sessionUnmountAt yields `expected<void>`: mountBoundary->cellFor before unmount.
 - lensnext/lensstub scoping: cell->keyFor->mountBoundary->scope; nullopt=session-level.
 - Multi-cell args: per-cell map semantics.
 - lensclose deferred marked; union: semantics; attr-cell no-key; register column P->Q;

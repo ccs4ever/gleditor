@@ -28,7 +28,7 @@ Sources: i3-design.md (sections 2-8), spec 2.1, 3.2, 5.1, 5.2, 7, 8.1.
 
 ## MAJOR
 
-3. **Sequence scope is undefined.** A profile holds one `last sequence`, but a grant covers one
+1. **Sequence scope is undefined.** A profile holds one `last sequence`, but a grant covers one
    predicate and one principal can hold several grants (a GNSS receiver reporting position and
    velocity). Two interleaved streams sharing one strict `>` check refuse each other. Fix: scope
    sequence to (principal, incarnation, predicate), or require one counter per principal and say so.
@@ -96,32 +96,32 @@ Sources: i3-design.md (sections 2-8), spec 2.1, 3.2, 5.1, 5.2, 7, 8.1.
 
 ## MINOR
 
-11. **Frame and unit refusals** (`ObservationFrameMismatch`) before any turn leave no trace. After a
-    device swap with a different frame, this misconfiguration is invisible. Count them per principal
-    (see 7).
+1. **Frame and unit refusals** (`ObservationFrameMismatch`) before any turn leave no trace. After a
+   device swap with a different frame, this misconfiguration is invisible. Count them per principal
+   (see 7).
 
-01. **Profile is too thin for I3-2 and I3-3.** Needed beyond the initial fields:
+1. **Profile is too thin for I3-2 and I3-3.** Needed beyond the initial fields:
 
-    - a FAULTED latch distinct from the displayed state;
-    - separate timeout and freeze flags;
-    - heartbeat interval and deadline;
-    - last acquisition time, epoch and mapping version;
-    - degraded and suspect reasons list;
-    - correction epoch;
-    - calibration-record head (required by 2.1).
+   - a FAULTED latch distinct from the displayed state;
+   - separate timeout and freeze flags;
+   - heartbeat interval and deadline;
+   - last acquisition time, epoch and mapping version;
+   - degraded and suspect reasons list;
+   - correction epoch;
+   - calibration-record head (required by 2.1).
 
-    I2U refuses populated roots and there is no translator, so adding these later forces a
-    migration. Create the full set at profile creation.
+   I2U refuses populated roots and there is no translator, so adding these later forces a migration.
+   Create the full set at profile creation.
 
-01. **Grant `expiresAt` uses `system_clock`**, which steps under NTP. Use a monotonic or actor
-    basis. The grant has no revoke call, so `unbind` should exist.
+1. **Grant `expiresAt` uses `system_clock`**, which steps under NTP. Use a monotonic or actor basis.
+   The grant has no revoke call, so `unbind` should exist.
 
-01. **Section 4 order.** Idempotency then sequence then profile creation: a retry of an old event
-    whose profile is already at the `max_sources` budget still evaluates correctly, but state this
-    explicitly.
+1. **Section 4 order.** Idempotency then sequence then profile creation: a retry of an old event
+   whose profile is already at the `max_sources` budget still evaluates correctly, but state this
+   explicitly.
 
-01. **`receivedAt` is host-supplied and trusted for liveness.** Stamp it on the actor side at
-    `observe()`, or document the host as trusted.
+1. **`receivedAt` is host-supplied and trusted for liveness.** Stamp it on the actor side at
+   `observe()`, or document the host as trusted.
 
 ## Tally
 
