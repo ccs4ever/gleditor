@@ -37,6 +37,10 @@ retain their stated validation level. See the
 - [Modules and reusable declarations](#modules-and-reusable-declarations)
 - [A complete workshop project](#a-complete-workshop-project)
 - [Persistence, checkpoints and agent identity](#persistence-checkpoints-and-agent-identity)
+- [Native host modules and sandboxing](#native-host-modules-and-sandboxing)
+- [Multi-target cluster packaging](#multi-target-cluster-packaging)
+- [Concurrent cluster nodes and peer routing](#concurrent-cluster-nodes-and-peer-routing)
+- [Interactive terminal dashboard](#interactive-terminal-dashboard)
 - [Configuration and operational limits](#configuration-and-operational-limits)
 - [Testing agents](#testing-agents)
 - [Diagnosing problems](#diagnosing-problems)
@@ -134,16 +138,16 @@ predictions; [Appendix A](#appendix-a-implementation-status) records current exe
 
 ### Run Counter
 
-The planned launcher starts this agent with an initial count of zero using:
+The launcher starts this agent with an initial count of zero using:
 
 ```sh
-build/vagent run 'demo:counter/Counter(0)'
+build/vagent run counter.vagent --agent Counter --arg start=0
 ```
 
-`demo:counter` is the logical module name from the first line, `/Counter` selects the agent, and `0`
-supplies its start parameter. Quote the argument so the shell passes the parentheses literally. The
-current executable supports `check`; `run` is not available yet, as noted in
-[Appendix A](#appendix-a-implementation-status).
+`counter.vagent` supplies the source file, `--agent Counter` selects the agent type, and
+`--arg start=0` initializes its `start` parameter. As noted in
+[Appendix A](#appendix-a-implementation-status), `vagent run` compiles the agent into a local
+single-process mesh and prints its outer emissions.
 
 With the runtime available, deliver `Add{amount: 3}`, then `Add{amount: 2}` in separate turns. The
 count becomes 3, then 5. A peer asking the declared total question receives the count when Counter
@@ -1376,6 +1380,397 @@ busy-agent replacement and shared program bases are deferred extensions. Design 
 workloads around the supported bounds and measure them; neither extension is supplied by the syntax
 checker.
 
+## Native host modules and sandboxing
+
+While pure vagent programs compile to native Vortex opcode graphs and run within the core mesh actor
+runtime, high-performance computing, domain-specific hardware accelerators, and specialized system
+integrations require native code execution. The vagent native subsystem
+([P20](../design/vagent-native-agent.md)) enables agents whose behavior is backed by compiled shared
+libraries (`.so`, `.dylib`, or `.dll`) while strictly preserving the agent safety contract.
+
+To external peers, spaces, and supervisory schedulers, a native agent is indistinguishable from a
+pure vagent actor. Its interface, types, and event handlers are constructed through deterministic
+native ops that produce an actor program tree identical to one parsed from source.
+
+### Isolation and the two-phase sandbox
+
+Native code never runs inside the node's supervisory process. Instead, the runtime supervisor spawns
+a dedicated, unprivileged child process: `vagent-native-host`. This native host is placed under
+rigorous OS-level sandboxing before foreign library code executes:
+
+1. **Two-phase OS lockdown:**
+   - **Phase 1 (Staging & loading):** The host stages the module binary into an isolated, read-only
+     directory (`mode 0500`) owned by the supervisor. Filesystem write capabilities are revoked
+     using kernel sandboxing primitives: Linux Landlock, OpenBSD `unveil`, macOS Seatbelt, or
+     Windows AppContainer. Dynamic loading (`dlopen` with `RTLD_NOW | RTLD_GLOBAL`) loads
+     dependencies in topological order.
+   - **Phase 2 (Runtime lockdown):** Immediately following library loading, the host invokes
+     irreversible OS lockdowns: Linux seccomp-bpf filters and `PR_SET_MDWE` (Memory Deny Write
+     Execute), OpenBSD `pledge("stdio rpath recvfd")`, and Windows ACG (`ProhibitDynamicCode = 1`).
+     These prevent the creation of executable memory, memory remapping (`MREMAP_MAYMOVE`), and
+     arbitrary system calls.
+1. **Dual shared-memory ring buffers:** Communication between the control plane and the native host
+   avoids kernel socket overhead. The supervisor configures two lockless ring buffers in shared
+   memory:
+   - **Ring A (`shm_a`):** Control plane to native host. The shared memory region is mapped
+     **read-only** in the native host process (`PROT_READ`).
+   - **Ring B (`shm_b`):** Native host to control plane. Mapped read-write
+     (`PROT_READ | PROT_WRITE`) for outgoing frames and consumer cursor updates.
+   - **Doorbells:** Inter-process wakeups use non-blocking eventfd doorbells on Linux, non-blocking
+     pipes on macOS/BSD, or auto-reset Event handles on Windows.
+1. **No raw paths or network authority:** The sandboxed process has zero direct network sockets and
+   zero file write access. Capabilities such as interactive terminal output must be granted by the
+   operator as pre-opened file descriptors via an authority broker, never as ambient filesystem
+   paths.
+
+### Sealing native programs: `vagent native seal`
+
+A compiled native shared library is sealed into a `.vnprog` artifact containing the recorded native
+ops, module filename, and cryptographically verified digests:
+
+```sh
+build/vagent native seal build/greeter.so -o build/greeter.vnprog
+```
+
+During sealing, `vagent` executes the module's constructor twice in isolation. It compares the
+resulting op logs byte-for-byte; if any non-determinism is detected, the operation aborts with
+`NondeterministicBuild`. The generated `.vnprog` binds the op log to the SHA-256 digest of the
+shared library, establishing the immutable logical `programRef`:
+
+```text
+programRef = SHA-256(L(kProgramFormat) || L("vagent-native/1") || L(op_log) || L(module_digest))
+```
+
+### Authority ledgers: approve and withdraw
+
+When a native agent requires external device or host capabilities (such as terminal access), it must
+be approved in the deployment's authority ledger (`authorities/`):
+
+```sh
+# Grant terminal authority to a native program
+build/vagent native approve build/greeter.vnprog \
+  --kind terminal --as deployer --ledger authorities/
+
+# Revoke authority when retiring a version
+build/vagent native withdraw build/greeter.vnprog \
+  --kind terminal --as deployer --ledger authorities/
+```
+
+When executing agents with `vagent run`, operator policy is enforced via `--grant-policy`:
+`--grant-policy approved` permits execution only when an explicit, unrevoked approval entry exists
+in the specified `--ledger`.
+
+## Multi-target cluster packaging
+
+In a multi-node cluster, nodes may run on different operating systems and CPU architectures
+(`x86_64-linux-gnu`, `aarch64-linux-gnu`, `aarch64-apple-darwin`, `x86_64-windows-msvc`).
+Furthermore, native modules often depend on third-party companion libraries (such as numerical
+kernels or specialized drivers) that cannot be assumed to exist in host system paths (`/usr/lib`).
+
+The cluster packaging specification ([P21](../design/vagent-cluster-packaging.md)) introduces the
+`.vnpkg` container format. A `.vnpkg` package bundles program definitions, target architecture
+slices, companion shared libraries, and cryptographic author signatures into a unified,
+content-addressed distribution unit.
+
+### Package kinds and architecture-agnostic `programRef`
+
+A package manifest declares one of three package kinds:
+
+- `pure`: Portable vagent source text or canonical bencoded AST.
+- `native`: Native ops with target architecture binary slices.
+- `source+native`: Source declarations binding native target implementations.
+
+To support seamless migration across heterogeneous nodes, the logical `programRef` commits to the
+program body and a canonical `targets_digest`:
+
+```text
+targets_digest = SHA-256(canonical target slices, bundled libraries, and system aliases)
+programRef     = SHA-256(L(kProgramFormat) || L("vnpkg-1") || L(kind) || L(program_body) || L(targets_digest))
+```
+
+Because `programRef` is uniform across architectures, an agent checkpointed on `x86_64` can migrate
+and resume on `aarch64` without altering identity or invalidating authority approvals.
+
+### Bundling shared libraries and security rules
+
+The packager validates every bundled dependency against strict security constraints:
+
+- **SONAME allowlist & no path traversal:** Library basenames must match clean ASCII identifiers
+  (`<= 255` bytes). Slashes, backslashes, or directory traversal (`../../`) fail with
+  `InvalidSonamePath`.
+- **System library shadowing forbidden:** Packages cannot bundle host system libraries such as
+  `libc.so.6`, `libm.so.6`, or `ld-linux-*.so.*`. Collisions fail with
+  `SystemLibraryShadowingForbidden`.
+- **Topological dependency resolution:** The packager inspects dynamic ELF tags (`DT_NEEDED`,
+  `DT_SONAME`) and sorts bundled libraries in topological load order for `dlopen`.
+- **System library aliases:** When identical interfaces have platform-varying names, aliases map
+  canonical sonames to host equivalents (e.g.,
+  `--alias x86_64-linux-gnu=libncurses.so.6:libncursesw.so.6`).
+- **Cryptographic signing:** Author provenance is signed using Ed25519 keys
+  (`--author <name> --key <path>`). Private keys must have strict file permissions `0600`.
+
+### Building and inspecting packages
+
+Build a multi-target cluster package with `vagent package`:
+
+```sh
+# Package a pure source program
+build/vagent package app.vagent -o app.vnpkg
+
+# Package a multi-target agent with bundled companion libraries
+build/vagent package app.vagent \
+  --target x86_64-linux-gnu=build/x86_64/skills.so \
+  --target aarch64-linux-gnu=build/aarch64/skills.so \
+  --bundle-lib x86_64-linux-gnu=build/x86_64/libengine.so.1 \
+  --bundle-dir aarch64-linux-gnu=build/aarch64/libs \
+  --author "alice" --key ~/.vagent/keys/alice.key \
+  -o app.vnpkg
+```
+
+Inspect a package's contents, dependencies, and cryptographic digests with `vagent package inspect`:
+
+```sh
+build/vagent package inspect app.vnpkg
+```
+
+Sample output:
+
+```text
+Package Format:    vagent-package-1
+Kind:              source+native
+Logical Ref:       sha256:d8a4e1f7c2b09a...
+Author:            alice (ed25519:3b2a104c...)
+Signature:         Valid (verified against author public key)
+
+Target: x86_64-linux-gnu
+  Module:          skills.so (size: 245,760, sha256: 4a5b6c...)
+  Bundled Libs (topological load order):
+    1. libengine.so.1 (canonical: libengine.so.1, size: 524,288, sha256: 1c2b3a...)
+  System Library Aliases:
+    - none
+
+Target: aarch64-linux-gnu
+  Module:          skills.so (size: 258,048, sha256: 7d8e9f...)
+  Bundled Libs (topological load order):
+    1. libengine.so.1 (canonical: libengine.so.1, size: 536,576, sha256: 5e6f7a...)
+  System Library Aliases:
+    - none
+```
+
+### Swarm distribution and Content-Addressed Storage (CAS)
+
+Cluster nodes store received blobs in a local Content-Addressed Store (`CAS`). Packages under 1 MiB
+are pushed inline over QUIC stream Lane 1 as `PackageBundle` records. Larger packages stream
+on-demand across cluster peers using BitTorrent piece verification and 1 KiB Merkle leaf validation,
+ensuring tamper-evident delivery before staging.
+
+## Concurrent cluster nodes and peer routing
+
+A production vagent deployment runs as a cluster of cooperating nodes. Each cluster node
+(`ClusterNode`) runs an independent `MeshActorRuntime` with its own `LocalHost` actor turn
+scheduler, non-blocking TCP listener, and inter-node peer routing engine.
+
+### Node architecture and routing rules
+
+Nodes connect to designated peers over standard TCP endpoints. When an agent on one node emits an
+event `in outer`, configured forward rules route the event across the network and deliver it
+directly into the target agent's mailbox on the receiving peer.
+
+Launch a cluster node with `vagent node`:
+
+```text
+build/vagent node \
+  --node <node-id> \
+  --listen <port> \
+  [--listen-host <host>] \
+  [--peer <peer-id>=<host:port> ...] \
+  [--forward <Event>=<target-node>:<TargetAgent> ...] \
+  --program <source.vagent|pkg.vnpkg> \
+  [--agent <AgentType>] \
+  [--arg <name=value> ...] \
+  [--send 'Event{field: value}' ...] \
+  [--timeout <duration>] \
+  [--exit-on <Event>]
+```
+
+| Option                          | Meaning                                                                  |
+| ------------------------------- | ------------------------------------------------------------------------ |
+| `--node <id>`                   | Logical node identity (e.g. `node-1`, `worker-east`).                    |
+| `--listen <port>`               | TCP port to listen for incoming cluster peer traffic (0 for dynamic).    |
+| `--peer <id>=<host:port>`       | Connect to a remote peer endpoint. Repeatable for mesh topologies.       |
+| `--forward <Ev>=<node>:<Agent>` | Forward rule: route outgoing event `Ev` to agent `Agent` on peer `node`. |
+| `--program <path>`              | Program source (`.vagent`) or cluster package (`.vnpkg`) to execute.     |
+| `--agent <type>`                | Agent type to launch on this node upon startup.                          |
+| `--arg <name=value>`            | Constructor argument passed to the launched agent.                       |
+| `--send <Event{...}>`           | Initial event delivered to the agent on this node.                       |
+| `--timeout <dur>`               | Maximum duration to run before orderly shutdown (e.g. `10s`, `30s`).     |
+| `--exit-on <Event>`             | Event type whose emission or receipt triggers immediate exit.            |
+
+### Worked example: Three-node distributed pipeline
+
+The following complete program implements a distributed sensor acquisition, processing, and auditing
+pipeline split across three cooperating cluster nodes:
+
+**Checkable source; runtime predicted.** Save as `pipeline.vagent`.
+
+```vagent
+module demo:pipeline
+
+predicate reading(batch_id: Str, sensor: Str, count: Int, raw: Int)
+predicate computed(batch_id: Str, score: Int)
+predicate audited(batch_id: Str, status: Str)
+
+event StartSensor { batch_id: Str, readings: Int, raw: Int }
+event SensorBatch { batch_id: Str, sensor_id: Str, readings_count: Int, total_raw: Int }
+event ComputeResult { batch_id: Str, node_id: Str, total_raw: Int, scaled_score: Int }
+event AuditVerdict { batch_id: Str, nodes_verified: Int, total_score: Int, status: Str }
+
+agent SensorProducer {
+  on StartSensor as s {
+    emit SensorBatch{batch_id: s.batch_id, sensor_id: "node-1-sensor", readings_count: s.readings, total_raw: s.raw} in outer
+  }
+}
+
+agent ComputeWorker {
+  on SensorBatch as b {
+    believe reading(b.batch_id, b.sensor_id, b.readings_count, b.total_raw)
+    let score := b.total_raw * 2
+    believe computed(b.batch_id, score)
+    emit ComputeResult{batch_id: b.batch_id, node_id: "node-2-compute", total_raw: b.total_raw, scaled_score: score} in outer
+  }
+}
+
+agent ClusterAuditor {
+  on ComputeResult as c {
+    if c.scaled_score >= 100 then {
+      believe audited(c.batch_id, "VERIFIED")
+      emit AuditVerdict{batch_id: c.batch_id, nodes_verified: 3, total_score: c.scaled_score, status: "VERIFIED"} in outer
+    }
+  }
+}
+```
+
+### Running the cluster pipeline
+
+Start the three nodes in order across separate terminals:
+
+```sh
+# Terminal 3: Start Node 3 (Auditor) on port 9003
+build/vagent node --node node-3 --listen 9003 \
+  --program pipeline.vagent --agent ClusterAuditor \
+  --exit-on AuditVerdict
+
+# Terminal 2: Start Node 2 (Worker) on port 9002, peering with Node 3
+build/vagent node --node node-2 --listen 9002 \
+  --peer node-3=127.0.0.1:9003 \
+  --forward ComputeResult=node-3:ClusterAuditor \
+  --program pipeline.vagent --agent ComputeWorker
+
+# Terminal 1: Start Node 1 (Sensor) on port 9001, peering with Node 2, and trigger pipeline
+build/vagent node --node node-1 --listen 9001 \
+  --peer node-2=127.0.0.1:9002 \
+  --forward SensorBatch=node-2:ComputeWorker \
+  --program pipeline.vagent --agent SensorProducer \
+  --send 'StartSensor{batch_id: "batch-101", readings: 5, raw: 75}' \
+  --timeout 5s
+```
+
+Trace across the cluster:
+
+1. Node 1 receives `StartSensor`, and `SensorProducer` emits `SensorBatch` with `total_raw: 75`.
+1. Node 1's forward rule transmits `SensorBatch` over TCP to Node 2 (`127.0.0.1:9002`).
+1. Node 2 delivers `SensorBatch` to `ComputeWorker`. The worker asserts `reading(...)`, doubles the
+   raw count (`75 * 2 = 150`), records `computed("batch-101", 150)`, and emits `ComputeResult`.
+1. Node 2's forward rule transmits `ComputeResult` over TCP to Node 3 (`127.0.0.1:9003`).
+1. Node 3 delivers `ComputeResult` to `ClusterAuditor`. Since `150 >= 100`, the auditor asserts
+   `audited("batch-101", "VERIFIED")` and emits:
+   `AuditVerdict {batch_id: "batch-101", nodes_verified: 3, status: "VERIFIED", total_score: 150}`.
+1. The `AuditVerdict` emission satisfies Node 3's `--exit-on` rule, gracefully terminating the run.
+
+## Interactive terminal dashboard
+
+`vagent tui` provides an interactive, terminal-based NCurses dashboard for monitoring live agents,
+inspecting epistemic facts and uncertainty scores, and issuing orchestration commands in real time.
+
+```sh
+# Launch interactive dashboard with an agent program
+build/vagent tui demo.vagent --agent Tracker
+
+# Run in headless mode (dumps virtual screen buffer to stdout, ideal for tests)
+build/vagent tui demo.vagent --agent Tracker --step --headless
+```
+
+**Checkable source; runtime predicted.** Save as `dashboard.vagent`.
+
+```vagent
+module demo:dashboard
+
+predicate at(who: Str, x: Float, y: Float)
+predicate status(text: Str)
+
+event Ping
+event StepTick
+
+agent Tracker {
+  var x: Float := 10.0
+  var y: Float := 20.0
+
+  on Ping {
+    believe at("scout", 12.5, 40.0)
+    x := 12.5
+    y := 40.0
+  }
+
+  on StepTick {
+    x := x + 1.0
+  }
+}
+```
+
+### The three functional panes
+
+The TUI is organized into three dedicated operational panes, toggled with the `Tab` key or number
+keys `1`, `2`, and `3`:
+
+1. **Monitoring Pane (Key `1`):**
+   - **Live actor table:** Lists all living agents with their `ActorPid`, short PID, agent type,
+     name, and lifecycle state (`RUNNING`, `QUIESCENT`, `STOPPED`, `BUSY`).
+   - **Resource metrics:** Real-time displays of remaining fuel quota, CPU cycle counts, scratch
+     arena cells, and epistemic cells.
+   - **Queue statistics:** Outstanding mailbox depth, staged outbox counts, delivery drop counters,
+     malformed envelope counters, and active deadline timers.
+   - Use `Up` and `Down` arrow keys to highlight and select an actor for inspection.
+1. **Querying Pane (Key `2`):**
+   - **Belief inspector:** Displays all asserted beliefs held by the selected agent, their asserting
+     sources, and status flags (`current`, `retired`, `stale`, `fact`).
+   - **Epistemic arbitration scores:** Inspects Bayesian epistemic metrics: uncertainty, certainty
+     scores (0.0 to 1.0), and incarnation numbers computed by the Vlog unification engine.
+   - **Interactive logic query bar:** Type Prolog / Vlog queries directly into the query prompt to
+     interrogate the agent's live knowledge base (e.g. `?at(Who, X, Y)`).
+1. **Orchestrating Pane (Key `3`):**
+   - **Action repl:** An interactive prompt to drive, manipulate, and step actors.
+   - **Action log:** A persistent log showing execution outcomes and dispatch acknowledgments.
+
+| Command in Orchestrating Pane | Action performed                                                                           |
+| ----------------------------- | ------------------------------------------------------------------------------------------ |
+| `step [N]`                    | Advances the runtime scheduler by N turns (default 1).                                     |
+| `advance <duration>`          | Advances the manual virtual clock (e.g. `advance 250ms`, `advance 2s`) to fire due timers. |
+| `inject <pid> <Event{...}>`   | Injects an event into the target actor's mailbox.                                          |
+| `spawn <AgentType> <name>`    | Instantiates a new agent actor under the runtime.                                          |
+| `upgrade <pid> <programRef>`  | Performs an atomic live upgrade of the target actor to a new program version.              |
+| `stop <pid>`                  | Requests an orderly shutdown and triggers the actor's `on Destroy` handler.                |
+
+### Navigation and controls
+
+| Key           | Function                                                                 |
+| ------------- | ------------------------------------------------------------------------ |
+| `Tab`         | Cycles through active panes (Monitoring -> Querying -> Orchestrating).   |
+| `1`, `2`, `3` | Direct jump to Monitoring (`1`), Querying (`2`), or Orchestrating (`3`). |
+| `Up` / `Down` | Selects previous / next actor in the monitoring table.                   |
+| `Enter`       | Submits command input or opens selected actor details.                   |
+| `s`           | Quick single-turn step from any pane.                                    |
+| `q` or `Esc`  | Exits the TUI dashboard.                                                 |
+
 ## Configuration and operational limits
 
 The launcher/adapter design reads `vagent.*` settings from `system://settings`, with schema and
@@ -1514,39 +1909,34 @@ guide's operational scenarios as runnable deployment instructions.
 
 ## Appendix A: Implementation status
 
-Implementation is proceeding in iterations. The available user command checks source; it does not
-execute agents. You can practice writing accepted units and diagnosing rejected edits today. The
-runtime stories in this guide teach the specified language for the future executor.
+The vagent toolchain delivers full syntax checking, compilation, multi-node clustering, sandboxed
+native execution, packaging, and interactive terminal dashboard capabilities across several
+commands.
 
-| Area                                     | Status and what it means for this guide                                                                                                                                     |
-| ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Syntax, types and static restrictions    | Standalone-source checking is implemented as `build/vagent check FILE...`. Rejected source produces diagnostics and a nonzero exit; module/template gaps are listed below.  |
-| Internal Vortex compiler                 | A scalar-expression lowering kernel passes integration tests, but it does not compile complete agent programs and has no source CLI command.                                |
-| Running an agent                         | `vagent run module/Agent(args)` is the specified future invocation, not an enabled command in the frontend-only iteration.                                                  |
-| REPL, event delivery and observing turns | Require complete language lowering and the actor adapter; no interactive command language is invented here.                                                                 |
-| Examples                                 | Language examples are complete source units unless marked as prose fragments. Their traces explain specified behavior; frontend acceptance alone does not verify execution. |
-| Native effects and scheduling            | Require the future adapter and explicit host bindings. Declaring a native skill does not supply a device driver.                                                            |
-| Deferred extensions                      | StoreWriter, cross-owner spaces, large-value handles, arbitrary suspension, protocol declarations and shared programs are not initial features.                             |
+| Area                                  | Status and what it means for this guide                                                                                                                                      |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Syntax, types and static restrictions | Standalone-source checking is implemented as `build/vagent check FILE...`. The runtime compiler dialect is checked via `build/vagent check-runtime FILE...`.                 |
+| Internal Vortex compiler              | Programs compile to Vortex opcode graphs and execute within the actor runtime via `LocalHost` and `AgentExecutor`.                                                           |
+| Running an agent                      | `vagent run FILE [--agent NAME] [--arg K=V] [--send 'Event{...}'] [--advance DUR]` runs agents on local meshes and prints outer emissions.                                   |
+| Cluster nodes and routing             | `vagent node --node ID --listen PORT [--peer ID=ADDR] [--forward EV=NODE:AGENT]` runs concurrent cluster nodes with non-blocking TCP peer routing.                           |
+| Cluster packaging                     | `vagent package` and `vagent package inspect` build and inspect multi-target `.vnpkg` packages with bundled libraries and Ed25519 author provenance.                         |
+| Native host sandbox                   | `vagent native seal`, `approve`, and `withdraw` manage sandboxed `.vnprog` native host modules under two-phase OS lockdowns with dual shared-memory ring buffers.            |
+| Terminal user interface (TUI)         | `vagent tui [FILE] [--agent NAME] [--step] [--headless]` launches the interactive NCurses dashboard for monitoring, querying beliefs, and orchestrating agents in real time. |
+| Schema compatibility & upgrade        | `vagent check-runtime --upgrade OLD NEW` verifies field, container, and predicate upgrade compatibility.                                                                     |
 
-Use the implementation's tests and progress record to determine which stage has passed its gates. Do
-not infer that a feature executes because its syntax is accepted. In particular, static checking
-neither sends messages nor starts agents, devices, timers or a network listener.
-
-The checker currently handles standalone source units. Cross-file imports are refused; standard
-module aliases/selectors and global goal/plan templates checked in an adopting agent's scope still
-have known checking gaps. Acceptance of those forms is not yet a complete conformance check. See the
-[implementation progress record](../design/vagent-implementation.md) for the remaining work and
-verified test results.
-
-### Checker command reference
+### Command line reference
 
 ```text
 build/vagent --help
 build/vagent check FILE...
 build/vagent check -
+build/vagent check-runtime [--upgrade] FILE...
+build/vagent run FILE [--agent NAME] [--arg K=V] [--send 'Event{...}'] [--advance DUR] [--turns N]
+build/vagent node --node ID --listen PORT [--peer ID=HOST:PORT] [--forward EV=NODE:AGENT] --program PROG
+build/vagent package INPUTS... -o PKG.vnpkg [--target TRIPLE=SO] [--bundle-lib TRIPLE=SO] [--bundle-dir TRIPLE=DIR]
+build/vagent package inspect FILE.vnpkg
+build/vagent native seal MODULE.so [-o PROG.vnprog]
+build/vagent native approve TARGET --kind KIND [--as AUTHOR] [--ledger DIR]
+build/vagent native withdraw TARGET --kind KIND [--as AUTHOR] [--ledger DIR]
+build/vagent tui [FILE] [--agent NAME] [--step] [--headless]
 ```
-
-`-` reads one standalone unit from standard input. Success prints `FILENAME: checked`; rejected
-source reports its location and reason. Exit status 0 means every supplied file was accepted, 1
-means a source or read error, and 2 means incorrect command usage. Files are checked independently;
-passing several files does not link their modules.
