@@ -711,9 +711,13 @@ bool SegmentedOpsSpool::flush() {
     // MinGW's io.h has no fsync(); _commit() is its file-durability
     // equivalent.
 #ifdef _WIN32
-    ::_commit(*activeFd);
+    if (::_commit(*activeFd) != 0) {
+      return false;
+    }
 #else
-    ::fsync(*activeFd);
+    if (::fsync(*activeFd) != 0) {
+      return false;
+    }
 #endif
   }
   return true;
