@@ -11,7 +11,9 @@
 #include <string>
 #include <vector>
 
+#include "common/xanadu/vagent/checker.hpp"
 #include "common/xanadu/vagent/cluster/cluster_node.hpp"
+#include "common/xanadu/vagent/parser.hpp"
 #include "common/xanadu/vagent/runtime/agent_executor.hpp"
 #include "common/xanadu/vagent/runtime/program.hpp"
 #include "common/xanadu/vagent/runtime/wire.hpp"
@@ -491,6 +493,68 @@ TEST(VagentGuideRuntimeTest, DashboardHeadlessRenderAndMonitoring) {
   EXPECT_GT(screen.frameCount(), 0U);
   EXPECT_TRUE(screen.contains("VAGENT"));
   EXPECT_TRUE(screen.contains("Tracker"));
+}
+
+// ----------------------------------------------------------------------------
+// 7. Workshop: BDI Dispatcher & Delegation (docs/vagent-user-guide.md §"Worked
+// example: Deliberation and delegation")
+// ----------------------------------------------------------------------------
+constexpr const char *kGuideWorkshopSource = R"vagent(
+module demo:workshop
+
+predicate delivered(order_id: Str)
+question stock(item: Str): Int
+
+event Order { order_id: Str, item: Str, count: Int }
+event Completed { order_id: Str }
+
+goal Handle(order_id: Str, item: Str, count: Int) perform
+goal Fetch(order_id: Str, item: Str, count: Int) perform
+
+agent Warehouse(units: Int) {
+  answer stock(item: Str): Int { units }
+}
+
+agent Courier {
+  plan fetch for Fetch { tell parent delivered(order_id) }
+}
+
+agent Dispatcher(units: Int, deadline: Duration) {
+  var warehouse: Opt<Agent> := none
+  var courier: Opt<Agent> := none
+  var completed: Int := 0
+
+  on Initialize {
+    warehouse := spawn Warehouse(units) in inner
+    courier := spawn Courier() in inner
+  }
+  on Order as o { adopt Handle(o.order_id, o.item, o.count) }
+
+  plan handle for Handle {
+    let available := ask warehouse.stock(item) within deadline else 0
+    if available < count then fail
+    achieve Fetch(order_id, item, count) by courier within deadline
+    await delivered(order_id) within deadline
+    completed := completed + 1
+    emit Completed{order_id: order_id}
+  }
+}
+)vagent";
+
+TEST(VagentGuideRuntimeTest, WorkshopWorkedExampleParsesAndChecksAsDocumented) {
+  xanadu::vagent::Parser parser(kGuideWorkshopSource);
+  auto program = parser.parseProgram();
+  ASSERT_TRUE(program.has_value())
+      << xanadu::vagent::formatDiagnostic(program.error());
+
+  auto result = xanadu::vagent::check(*program);
+  if (!result) {
+    std::string errors;
+    for (const auto &diagnostic : result.error()) {
+      errors += xanadu::vagent::formatDiagnostic(diagnostic) + '\n';
+    }
+    FAIL() << errors;
+  }
 }
 
 } // namespace
