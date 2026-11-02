@@ -29,6 +29,14 @@ The items marked `DECISION` in [findings-r2.md](i3-2-review/findings-r2.md):
 
 The merged owner questions in findings-r2.md section 4 take their recommended answers.
 
+Revision 3's author asked for confirmation of four choices; the lead confirms them, subject to the
+round-3 reviews: the F27 reserve is charged per existing profile, with `validate()` bounding the
+worst case at `max_sources` profiles under the checkpoint limit; 2c1 ships a stub health turn that
+answers `HealthUnavailable` and 2c2 follows it before any release; a failed settle event is reported
+on the committed change (`SettleReport`), and the executor-side discard is justified only as the
+recovery path when the settle turn itself cannot run; cycle prices are estimates that each slice
+measures before acceptance.
+
 ## 2. Plan decisions
 
 For [remaining-plan.md](remaining-plan.md) section 7 and the plan reviews in
@@ -48,14 +56,17 @@ For [remaining-plan.md](remaining-plan.md) section 7 and the plan reviews in
 | O10  | (New, ML plan-review M4: five consecutive gate rejections latch FAULTED on noise.) I4-D settles with the ML and hardware reviewers; a change to the spec default is a proposed amendment.                                                                                               |
 | E1   | Minimal: a private header for the code generator's declaration so new epistemic code lives in new files; no bulk move of existing bodies. The plan revision states the boundary.                                                                                                        |
 | T0   | Share the upgrade guards across both entry points now. Collapsing the two state copiers is the translator's design (T1), not T0.                                                                                                                                                        |
+| D1   | (Plan draft 2, 7.2 item 1.) Replay is bit-equal on one host; across hosts results agree within a stated tolerance, and decisions near a threshold carry a declared margin.                                                                                                              |
+| D2   | (Plan draft 2, 7.2 item 2.) V-D settles durability of an acknowledged verification under checkpoint rollback and double resume with the distributed reviewer. Leaning: state it as a limit, with a host lineage lease that refuses a second live resume of one checkpoint.              |
+| D3   | (T0 codebase review.) Source bindings keep the policy they were bound under after an upgrade. T1-D decides whether a policy change rebinds, refuses or migrates them.                                                                                                                   |
 
 ## 3. Proposed amendments (pending owner ratification)
 
-| #   | Spec section | Amendment                                                                                                                                                                                  | Source            |
-| --- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------- |
-| A1  | 5.1          | `clear` removes operator-placed degradation reasons; it never unlatches FAULTED and never touches calibration.                                                                             | owner, I3-2 rev 1 |
-| A2  | 5.1          | Health thresholds are actor-wide settings, not policy fields; SUSPECT from content refusals is an event-indexed decayed fraction (owner Q2); consecutive streaks stay for gate rejections. | owner Q2, F33     |
-| A3  | 2.1, 5.1     | A source needs a durable or fresh incarnation; one without cannot be an arbitrated source.                                                                                                 | F22               |
-| A4  | 5.1          | A program whose own handler for an arbitrated predicate always fails cannot ingest that predicate; an operator isolate or reset unwedges it.                                               | F11               |
+| #   | Spec section | Amendment                                                                                                                                                                      | Source            |
+| --- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------- |
+| A1  | 5.1          | `clear` removes operator-placed degradation reasons; it never unlatches FAULTED and never touches calibration.                                                                 | owner, I3-2 rev 1 |
+| A2  | 5.1          | Health thresholds are actor-wide settings, not policy fields; SUSPECT from content refusals is an event-indexed decayed fraction (owner Q2); gate rejections are I4-D's (O10). | owner Q2, F33     |
+| A3  | 2.1, 5.1     | A source needs a durable or fresh incarnation; one without cannot be an arbitrated source.                                                                                     | F22               |
+| A4  | 5.1          | A program whose own handler for an arbitrated predicate always fails cannot ingest that predicate; an operator isolate or reset unwedges it.                                   | F11               |
 
 Later decisions append rows here.
