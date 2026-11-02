@@ -303,6 +303,30 @@ public:
     hostSink_ = std::move(sink);
     return this;
   }
+  /// The installed sink, so a second observer can chain onto it instead of
+  /// replacing what the launcher already collects.
+  [[nodiscard]] const HostSink &hostSink() const noexcept { return hostSink_; }
+
+  /// A descriptor that becomes readable when another thread posts a percept,
+  /// an observation or an effect result, so a reactor can `poll(2)` instead of
+  /// spinning. Absent where the platform offers no such descriptor; the caller
+  /// then bounds its wait. The executor owns it.
+  [[nodiscard]] std::optional<int> notificationDescriptor() const;
+  /// Clear the readable state after `poll(2)` reported it. Posted work is run
+  /// by the next `tick` or `pumpUntilIdle`.
+  void drainNotifications();
+  /// The soonest wall-clock moment this executor has something to do on its
+  /// own: a timer or waiting-intention deadline, a delivery's retry or
+  /// deadline, or a lease's renewal. Nullopt when it is waiting on input only.
+  [[nodiscard]] std::optional<std::chrono::system_clock::time_point>
+  earliestDeadline() const;
+  /// Move the executor's clock forward by @p delta without waiting for it, in
+  /// steps that stop at every deadline so each timer fires in order and every
+  /// lease is renewed before it lapses. Runs what falls due at each step and
+  /// returns the turns run. Stops early, leaving the clock where it had
+  /// reached, once @p maxTurns are spent.
+  std::size_t advanceSimulatedTime(std::chrono::milliseconds delta,
+                                   std::size_t maxTurns = 100);
   /// Deliver an event to a launched agent as the host: an `ActorSend` from
   /// the host pid, received like any peer's. Run `pumpUntilIdle` to process it.
   [[nodiscard]] std::expected<void, zigzag::vortex::mesh::ActorError>
@@ -708,8 +732,10 @@ private:
   [[nodiscard]] std::size_t epistemicCellsWithin(const State &state,
                                                  std::size_t ceiling) const;
   [[nodiscard]] std::chrono::system_clock::time_point wallNow() const {
-    return clock_.wall();
+    return clock_.wall() + simulatedOffset_;
   }
+  [[nodiscard]] std::chrono::system_clock::time_point
+  leaseRenewAt(const State &state) const;
 
   zigzag::vortex::mesh::MeshActorRuntime &runtime_;
   CapabilityIssuer &issuer_;
@@ -732,6 +758,8 @@ private:
   std::uint64_t launches_{0};
   std::uint64_t hostSends_{0};
   HostSink hostSink_;
+  /// What `advanceSimulatedTime` has added to the injected wall clock.
+  std::chrono::milliseconds simulatedOffset_{0};
   std::map<std::string, std::unique_ptr<State>> states_;
   std::map<std::string, Outstanding> outstanding_;
   std::vector<identity::ActorPid> needsFirstTurn_;

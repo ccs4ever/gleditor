@@ -28,6 +28,11 @@
 #include <tuple>
 #include <unordered_map>
 
+#if defined(__linux__)
+#include <sys/eventfd.h>
+#endif
+#include <unistd.h>
+
 namespace xanadu::vagent::runtime {
 namespace {
 
@@ -582,10 +587,51 @@ struct AgentExecutor::PostBox {
   };
   mutable std::mutex mutex;
   std::deque<Item> items;
+  /// An `eventfd` a reactor can `poll(2)`, made on first request. It is
+  /// written under the same lock as the queue so a wakeup is never lost
+  /// between a post and the reactor's next wait.
+  std::optional<int> notifyFd;
+
+  PostBox()                           = default;
+  PostBox(const PostBox &)            = delete;
+  PostBox &operator=(const PostBox &) = delete;
+  ~PostBox() {
+    if (notifyFd) ::close(*notifyFd);
+  }
 
   void push(Item item) {
     const std::lock_guard lock(mutex);
     items.push_back(std::move(item));
+    if (notifyFd) {
+      const std::uint64_t one = 1;
+      (void)!::write(*notifyFd, &one, sizeof one);
+    }
+  }
+  [[nodiscard]] std::optional<int> descriptor() {
+    const std::lock_guard lock(mutex);
+    if (!notifyFd) {
+#if defined(__linux__)
+      const int fd = ::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+      if (fd < 0) return std::nullopt;
+      notifyFd = fd;
+      // Anything posted before the descriptor existed must still wake.
+      if (!items.empty()) {
+        const std::uint64_t one = 1;
+        (void)!::write(fd, &one, sizeof one);
+      }
+#else
+      // No eventfd: the reactor falls back to a bounded poll timeout.
+      return std::nullopt;
+#endif
+    }
+    return notifyFd;
+  }
+  void drainDescriptor() {
+    const std::lock_guard lock(mutex);
+    if (!notifyFd) return;
+    std::uint64_t count = 0;
+    while (::read(*notifyFd, &count, sizeof count) > 0) {
+    }
   }
   std::deque<Item> take() {
     const std::lock_guard lock(mutex);
@@ -3061,6 +3107,66 @@ void AgentExecutor::upkeepDeliveries(
   }
 }
 
+std::optional<int> AgentExecutor::notificationDescriptor() const {
+  return posts_->descriptor();
+}
+
+void AgentExecutor::drainNotifications() { posts_->drainDescriptor(); }
+
+std::chrono::system_clock::time_point
+AgentExecutor::leaseRenewAt(const State &state) const {
+  const auto end = state.grant->expiresAt;
+  return state.leaseSeen +
+         std::chrono::duration_cast<std::chrono::system_clock::duration>(
+             (end - state.leaseSeen) * settings_.renewFraction);
+}
+
+std::optional<std::chrono::system_clock::time_point>
+AgentExecutor::earliestDeadline() const {
+  std::optional<std::chrono::system_clock::time_point> best;
+  const auto consider = [&best](std::chrono::system_clock::time_point at) {
+    if (!best || at < *best) best = at;
+  };
+  for (const auto &[key, owned] : states_) {
+    State &state = *owned;
+    if (!live(state)) continue;
+    deriveSchedule(state);
+    if (!state.schedule.deadlines.empty()) {
+      consider(std::chrono::system_clock::time_point{
+          std::chrono::duration_cast<std::chrono::system_clock::duration>(
+              std::chrono::milliseconds(state.schedule.deadlines.front().at))});
+    }
+    if (state.grant) consider(leaseRenewAt(state));
+  }
+  for (const auto &[id, sent] : outstanding_) {
+    consider(sent.lastSent + settings_.sendRetryInterval);
+    if (sent.deadline) consider(*sent.deadline);
+  }
+  return best;
+}
+
+std::size_t AgentExecutor::advanceSimulatedTime(std::chrono::milliseconds delta,
+                                                std::size_t maxTurns) {
+  std::size_t turns = 0;
+  auto remaining    = delta;
+  while (true) {
+    // Settle what is already due before moving, and again after each step.
+    tick(wallNow());
+    if (turns < maxTurns) turns += pumpUntilIdle(maxTurns - turns);
+    if (remaining.count() <= 0 || turns >= maxTurns) break;
+    auto step = remaining;
+    if (const auto next = earliestDeadline(); next && *next > wallNow()) {
+      // Round up, so the step lands on the deadline rather than a hair short.
+      const auto until =
+          std::chrono::ceil<std::chrono::milliseconds>(*next - wallNow());
+      step = std::min(step, std::max(until, std::chrono::milliseconds(1)));
+    }
+    simulatedOffset_ += step;
+    remaining -= step;
+  }
+  return turns;
+}
+
 void AgentExecutor::upkeepLeases(std::chrono::system_clock::time_point now) {
   for (auto &[key, owned] : states_) {
     State &state = *owned;
@@ -3074,11 +3180,7 @@ void AgentExecutor::upkeepLeases(std::chrono::system_clock::time_point now) {
                   kCauseLease);
       continue;
     }
-    const auto renewAt =
-        state.leaseSeen +
-        std::chrono::duration_cast<std::chrono::system_clock::duration>(
-            (end - state.leaseSeen) * settings_.renewFraction);
-    if (now >= renewAt) (void)renewLease(state, now);
+    if (now >= leaseRenewAt(state)) (void)renewLease(state, now);
   }
 }
 

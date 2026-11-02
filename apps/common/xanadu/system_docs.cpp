@@ -1018,6 +1018,35 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .schemas = {{.expectedTypes = {"integer"},
                       .defaultValues =
                           {vagent::runtime::kDefaultEpistemicArenaSlots}}}},
+        {.name    = std::string(settings::kVagentTuiBorders),
+         .notes   = "vagent tui: border glyphs; rounded, single or ascii. "
+                    "Unset picks unicode where the locale is UTF-8",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"rounded"}}}}},
+        {.name    = std::string(settings::kVagentTuiHistorySize),
+         .notes   = "vagent tui: command and query history entries kept; "
+                    "positive",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues = {std::int64_t{100}}}}},
+        {.name    = std::string(settings::kVagentTuiSplitThreshold),
+         .notes   = "vagent tui: terminal columns from which the registry "
+                    "and work surface share the screen; positive",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues = {std::int64_t{110}}}}},
+        {.name    = std::string(settings::kVagentTuiMaxLogEntries),
+         .notes   = "vagent tui: action log entries kept; positive",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues = {std::int64_t{500}}}}},
+        {.name    = std::string(settings::kVagentTuiQuerySolutionLimit),
+         .notes   = "vagent tui: solutions one REPL query resolves into its "
+                    "page buffer; positive",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues = {std::int64_t{50}}}}},
+        {.name    = std::string(settings::kVagentTuiInspectDepth),
+         .notes   = "vagent tui: deepest compound term the belief view "
+                    "renders; positive",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues = {std::int64_t{32}}}}},
     };
     break;
 

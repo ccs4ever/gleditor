@@ -316,6 +316,17 @@ inline constexpr std::string_view kVagentEpistemicIngestPerWake =
     "vagent.epistemic_ingest_per_wake";
 inline constexpr std::string_view kVagentEpistemicArenaSlots =
     "vagent.epistemic_arena_slots";
+inline constexpr std::string_view kVagentTuiBorders = "vagent.tui.borders";
+inline constexpr std::string_view kVagentTuiHistorySize =
+    "vagent.tui.history_size";
+inline constexpr std::string_view kVagentTuiSplitThreshold =
+    "vagent.tui.split_threshold";
+inline constexpr std::string_view kVagentTuiMaxLogEntries =
+    "vagent.tui.max_log_entries";
+inline constexpr std::string_view kVagentTuiQuerySolutionLimit =
+    "vagent.tui.query_solution_limit";
+inline constexpr std::string_view kVagentTuiInspectDepth =
+    "vagent.tui.inspect_depth";
 
 // UI
 inline constexpr std::string_view kTabBarVisible       = "tabBarVisible";
