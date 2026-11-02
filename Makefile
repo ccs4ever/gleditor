@@ -562,11 +562,14 @@ ifdef GLEDITOR_HAVE_SYSTEMD
 override CXXFLAGS += -DGLEDITOR_HAVE_SYSTEMD=1 $(SYSTEMD_CFLAGS)
 endif
 
-XUDU_LIBS := $(shell pkg-config $(STATIC) --libs $(XUDU_PKGS)) $(PG_LIBS) $(SYSTEMD_LIBS)
+NCURSES_CFLAGS := $(shell pkg-config --cflags ncursesw 2>/dev/null || echo "")
+NCURSES_LIBS   := $(shell pkg-config --libs ncursesw 2>/dev/null || echo "-lncursesw")
+override CXXFLAGS += $(NCURSES_CFLAGS)
+
+XUDU_LIBS := $(shell pkg-config $(STATIC) --libs $(XUDU_PKGS)) $(PG_LIBS) $(SYSTEMD_LIBS) $(NCURSES_LIBS)
 # Matches XUDU_PKGS because ZIGZAG_SHARED_CORE_OBJS is XUDU_CORE_OBJS: zigzag
-# links the whole xanalogical engine, so it needs whatever that engine needs.
 ZIGZAG_PKGS := $(XUDU_PKGS)
-ZIGZAG_LIBS := $(shell pkg-config $(STATIC) --libs $(ZIGZAG_PKGS)) $(PG_LIBS) $(SYSTEMD_LIBS)
+ZIGZAG_LIBS := $(shell pkg-config $(STATIC) --libs $(ZIGZAG_PKGS)) $(PG_LIBS) $(SYSTEMD_LIBS) $(NCURSES_LIBS)
 
 # glslangValidator is the traditional name and glslang the current one; which
 # of the two a distribution installs varies, so both are tried.
@@ -675,6 +678,9 @@ VICONC_SRCS     := $(shell find apps/viconc -name '*.cpp' 2>/dev/null)
 VICONC_OBJS     := $(call obj,$(VICONC_SRCS))
 VAGENT_SRCS     := $(shell find apps/vagent -name '*.cpp' 2>/dev/null)
 VAGENT_OBJS     := $(call obj,$(VAGENT_SRCS))
+VAGENT_NATIVE_HOST_SRCS := $(shell find apps/vagent-native-host -name '*.cpp' 2>/dev/null)
+VAGENT_NATIVE_HOST_OBJS := $(call obj,$(VAGENT_NATIVE_HOST_SRCS))
+VAGENT_NATIVE_HOST_LIB_OBJS := $(call obj,apps/vagent-native-host/sandbox_linux.cpp apps/vagent-native-host/loader.cpp)
 VAGENT_FRONTEND_SRCS := $(addprefix apps/common/xanadu/vagent/,token.cpp lexer.cpp parser.cpp checker.cpp)
 VAGENT_FRONTEND_OBJS := $(call obj,$(VAGENT_FRONTEND_SRCS))
 VAGENT_FRONTEND_TEST_SRCS := $(addprefix tests/xuzz/,vagent_lexer_test.cpp vagent_parser_test.cpp vagent_checker_test.cpp vagent_guide_test.cpp)
@@ -749,7 +755,7 @@ endif
 ALL_OBJS := $(sort $(LIB_OBJS) $(GLEDITOR_OBJS) $(XUDU_CORE_OBJS) $(XUZZ_OBJS) \
 	$(ZIGZAG_CORE_OBJS) $(ZIGZAG_TEST_OBJS) $(COMMON_UI_OBJS) \
 	$(LIB_TEST_OBJS) $(XUDU_TEST_OBJS) $(XUZZ_TEST_OBJS) $(SWARM_PEER_OBJS) \
-	$(GENERATE_SAMPLE_XANADOCS_OBJS) $(VQUERYC_OBJS) $(VQUERY_OBJS) $(VPROLOG_OBJS) $(VPLC_OBJS) $(VPL_OBJS) $(VLACE_OBJS) $(VLACEC_OBJS) $(VICON_OBJS) $(VICONC_OBJS) $(VAGENT_OBJS) \
+	$(GENERATE_SAMPLE_XANADOCS_OBJS) $(VQUERYC_OBJS) $(VQUERY_OBJS) $(VPROLOG_OBJS) $(VPLC_OBJS) $(VPL_OBJS) $(VLACE_OBJS) $(VLACEC_OBJS) $(VICON_OBJS) $(VICONC_OBJS) $(VAGENT_OBJS) $(VAGENT_NATIVE_HOST_OBJS) \
 	$(UI_TEXT_BASELINE_OBJS) $(LINK_STRESS_OBJS) $(SPIKE_OBJS))
 ALL_OBJ_DIRS := $(sort $(OBJDIR)/ $(OBJDIR)/tmp/ $(dir $(ALL_OBJS)))
 DEPS := $(sort $(patsubst %.o,%.dep,$(ALL_OBJS)))
@@ -784,7 +790,7 @@ endif
 GLSL_SOURCES := $(wildcard assets/shaders/*.glsl)
 SPIRV := $(patsubst assets/shaders/%.glsl,assets/shaders/vulkan/%.spv,$(GLSL_SOURCES))
 
-all: lib gleditor xudu xuzz zigzag store-dump xudu-dump vqueryc vquery vprolog vplc vpl vlace vlacec vicon viconc vagent gleditor_test xuzz_test xudu_test zigzag_test $(OBJDIR)/compile_commands.json
+all: lib gleditor xudu xuzz zigzag store-dump xudu-dump vqueryc vquery vprolog vplc vpl vlace vlacec vicon viconc vagent vagent-native-host gleditor_test xuzz_test xudu_test zigzag_test $(OBJDIR)/compile_commands.json
 ifdef GLEDITOR_ENABLE_VULKAN
 all: shaders
 endif
@@ -976,8 +982,8 @@ xuzz_test: $(OBJDIR)/xuzz_test
 # lens_file_picker.o sits with the UI sources (it is a FocusScope), but it is
 # deliberately engine-only at link time -- no renderer, no Canvas -- so the
 # headless xuzz_test can drive it.
-$(OBJDIR)/xuzz_test: $(XUZZ_TEST_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o $(OBJDIR)/apps/common/ui/lens_file_picker.o
-	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS) $(TEST_LIBS)
+$(OBJDIR)/xuzz_test: $(XUZZ_TEST_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o $(OBJDIR)/apps/common/ui/lens_file_picker.o $(VAGENT_NATIVE_HOST_LIB_OBJS)
+	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS) $(TEST_LIBS) -lseccomp -ldl
 
 xudu_test: $(OBJDIR)/xudu_test
 $(OBJDIR)/xudu_test: $(OBJDIR)/xuzz_test
@@ -1126,6 +1132,12 @@ vagent: $(OBJDIR)/vagent
 $(OBJDIR)/vagent: $(VAGENT_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS)
 
+.PHONY: vagent-native-host
+vagent-native-host: $(OBJDIR)/vagent-native-host
+$(OBJDIR)/vagent-native-host: $(VAGENT_NATIVE_HOST_OBJS) $(OBJDIR)/apps/common/xanadu/vagent/native/ipc.o
+	@$(MKDIR) -p $(@D)
+	$(CXX) $(LDFLAGS) -o $@ $^ -lseccomp -ldl -lpthread
+
 vagent_frontend_test: $(OBJDIR)/vagent_frontend_test
 $(OBJDIR)/vagent_frontend_test: $(VAGENT_FRONTEND_TEST_OBJS) $(VAGENT_FRONTEND_OBJS)
 	$(CXX) $(LDFLAGS) -o $@ $^ $(TEST_LIBS)
@@ -1157,8 +1169,8 @@ VAGENT_ACTOR_TEST_SRCS := $(filter tests/xuzz/vagent_%,$(XUZZ_TEST_SRCS)) tests/
 VAGENT_ACTOR_TEST_OBJS := $(call obj,$(VAGENT_ACTOR_TEST_SRCS))
 .PHONY: vagent_actor_test test/vagent-actor
 vagent_actor_test: $(OBJDIR)/vagent_actor_test
-$(OBJDIR)/vagent_actor_test: $(VAGENT_ACTOR_TEST_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
-	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS) $(TEST_LIBS)
+$(OBJDIR)/vagent_actor_test: $(VAGENT_ACTOR_TEST_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o $(VAGENT_NATIVE_HOST_LIB_OBJS)
+	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS) $(TEST_LIBS) -lseccomp -ldl
 
 test/vagent-actor: vagent vagent_actor_test
 	$(OBJDIR)/vagent_actor_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
@@ -1332,9 +1344,9 @@ TEST_FILTER ?= -$(SWARM_NETNS_TESTS)
 # under build/), so a fresh checkout's `make test` builds them rather than
 # failing with "binary not found".
 TEST_PROGRAMS := $(addprefix $(OBJDIR)/,gleditor xudu xuzz zigzag xudu-dump \
-	xudu-swarm-peer vquery vpl vplc vprolog vlace vlacec vicon viconc vagent)
+	xudu-swarm-peer vquery vpl vplc vprolog vlace vlacec vicon viconc vagent vagent-native-host)
 
-.PHONY: test test/all test/integration test/e2e-orchestration
+.PHONY: test test/all test/integration test/e2e-orchestration test/vagent-docker-e2e test/e2e-vagent-cluster
 test: $(TEST_PROGRAMS) $(OBJDIR)/gleditor_test $(OBJDIR)/xuzz_test $(OBJDIR)/zigzag_test
 	$(OBJDIR)/gleditor_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
 	$(OBJDIR)/xuzz_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
@@ -1347,9 +1359,14 @@ test: $(TEST_PROGRAMS) $(OBJDIR)/gleditor_test $(OBJDIR)/xuzz_test $(OBJDIR)/zig
 test/all: test
 
 
-test/integration: test/e2e-orchestration
+test/integration: test/e2e-orchestration test/vagent-docker-e2e
 test/e2e-orchestration: $(OBJDIR)/xuzz $(OBJDIR)/xuzz_test
 	tools/xudu-e2e-orchestration.sh
+
+test/vagent-docker-e2e: vagent
+	tools/vagent-docker-cluster-test.sh
+
+test/e2e-vagent-cluster: test/vagent-docker-e2e
 
 # produces gleditor_test.prof (a human-readable code coverage report) and
 # coverage.lcov (a coverage report in lcov format) suitable for feeding into other tools like NeoVim
