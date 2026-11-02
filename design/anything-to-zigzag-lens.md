@@ -377,19 +377,19 @@ dimension** every lens maps onto (`d.contains`/`d.seq`/`d.ref`/`d.clone`), or a 
 named attribute rank** the framework recognizes (`d.role`/`d.mime`) that is not in the enum but is
 pinned by name across lenses.
 
-| dimension      | kind           | xanadoc meaning            | filesystem meaning              |
-| -------------- | -------------- | -------------------------- | ------------------------------- |
-| `d.contains`   | generic (enum) | document → paragraph       | directory → entry               |
-| `d.seq`        | generic (enum) | reading order              | sibling order within a dir      |
-| `d.ref`        | generic (enum) | xanalink                   | symlink / hardlink target       |
-| `d.clone`      | generic (enum) | shared-span clone          | identical-content files (dedup) |
-| `d.role`       | generic (attr) | `role` attribute cell      | `file`/`dir`/`symlink` kind     |
-| `d.mime`       | generic (attr) | MIME attribute cell        | libmagic MIME of file           |
-| `d.transclude` | xanadoc custom | overlapping primedia spans | — (no analogue)                 |
-| `d.version`    | xanadoc custom | microversion lineage       | — (no analogue)                 |
-| `d.size`       | fs custom      | —                          | file size in bytes (scalar)     |
-| `d.mtime`      | fs custom      | —                          | mtime (scalar / ISO-8601 cell)  |
-| `d.perm`       | fs custom      | —                          | mode bits (scalar)              |
+| dimension      | kind           | xanadoc meaning            | filesystem meaning             |
+| -------------- | -------------- | -------------------------- | ------------------------------ |
+| `d.contains`   | generic (enum) | document → paragraph       | directory → entry              |
+| `d.seq`        | generic (enum) | reading order              | sibling order within a dir     |
+| `d.ref`        | generic (enum) | xanalink                   | symlink / hardlink target      |
+| `d.clone`      | generic (enum) | shared-span clone          | explicit shared authority only |
+| `d.role`       | generic (attr) | `role` attribute cell      | `file`/`dir`/`symlink` kind    |
+| `d.mime`       | generic (attr) | MIME attribute cell        | libmagic MIME of file          |
+| `d.transclude` | xanadoc custom | overlapping primedia spans | — (no analogue)                |
+| `d.version`    | xanadoc custom | microversion lineage       | — (no analogue)                |
+| `d.size`       | fs custom      | —                          | file size in bytes (scalar)    |
+| `d.mtime`      | fs custom      | —                          | mtime (scalar / ISO-8601 cell) |
+| `d.perm`       | fs custom      | —                          | mode bits (scalar)             |
 
 The four `GenericDim` values plus the two pinned attribute ranks are the vocabulary a visualizer and
 a query rely on across every lens; `d.role` / `d.mime` are the attribute ranks already named in the
@@ -874,7 +874,9 @@ all of them are needed before the trait can safely *write back* to a structured 
 - **Edges must carry properties and order (HIGH).** `SourceEdge` is `{from, to, dimension, dir}`. A
   foreign key *is* a labelled, actioned relationship (`ON DELETE CASCADE`, a constraint name); an
   ordered many-to-many needs a per-edge sort key. Without a field for either, a lens must reify
-  every non-trivial edge as a phantom node — the awkward encoding that signals a missing hook. Add
+  every non-trivial edge as a phantom node — an addressable occurrence when it needs its own
+  annotations. Edge properties alone do not make a relationship annotatable; retain
+  incidence/occurrence cells for that purpose. For compact unannotated transport, add
   `std::vector<std::pair<std::string,std::string>> properties;` and `std::uint64_t order{0};` to
   `SourceEdge`, and an `applyEdgeChange(from, to, dim, properties)` method so an edge's own
   attributes round-trip.
