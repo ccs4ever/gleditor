@@ -970,6 +970,19 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
             settings::kQuotationModalMaxHeightShare,
             "Quotation modal maximum share of safe height, range 0.1 to 1",
             modals.quotationModal.maxHeightShare),
+        lengthSpec(settings::kEvidenceModalWidthPx,
+                   "Evidence modal preferred width in logical pixels",
+                   modals.evidenceModal.widthPx),
+        lengthSpec(settings::kEvidenceModalHeightPx,
+                   "Evidence modal preferred height in logical pixels",
+                   modals.evidenceModal.heightPx),
+        lengthSpec(settings::kEvidenceModalMaxWidthShare,
+                   "Evidence modal maximum share of safe width, range 0.1 to 1",
+                   modals.evidenceModal.maxWidthShare),
+        lengthSpec(
+            settings::kEvidenceModalMaxHeightShare,
+            "Evidence modal maximum share of safe height, range 0.1 to 1",
+            modals.evidenceModal.maxHeightShare),
         lengthSpec(settings::kTelescopeModalWidthPx,
                    "Telescope modal preferred width in logical pixels",
                    modals.telescopeModal.widthPx),
@@ -1245,6 +1258,10 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .notes   = "Function key to toggle swarm telescope overlay",
          .schemas = {{.expectedTypes = {"string"},
                       .defaultValues = {std::string{"F3"}}}}},
+        {.name    = std::string(settings::kKeymapEvidenceCase),
+         .notes   = "Shortcut to open the private evidence case panel",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Alt+Shift+E"}}}}},
         {.name    = std::string(settings::kKeymapPublicationDiscovery),
          .notes   = "Browse signed publications by author key or topic",
          .schemas = {{.expectedTypes = {"string"},
@@ -2922,6 +2939,8 @@ constexpr ActionAlias kActionAliases[] = {
     {.legacy = "telescope-toggle", .canonical = "std:xuzz/telescope_toggle"},
     {.legacy    = "telescope-toggle-f3",
      .canonical = "std:xuzz/telescope_toggle_f3"},
+    {.legacy    = "evidence-case-toggle",
+     .canonical = "std:xuzz/evidence_case_toggle"},
     {.legacy    = "tension-physics-toggle",
      .canonical = "std:xuzz/tension_physics_toggle"},
     {.legacy    = "unlock-transcopyright",
@@ -3542,6 +3561,14 @@ UIConfig UIConfig::fromStore(const Store &store) {
   cfg.quotationModal.maxHeightShare =
       panelShare(settings::kQuotationModalMaxHeightShare,
                  cfg.quotationModal.maxHeightShare);
+  cfg.evidenceModal.widthPx =
+      panelLength(settings::kEvidenceModalWidthPx, cfg.evidenceModal.widthPx);
+  cfg.evidenceModal.heightPx =
+      panelLength(settings::kEvidenceModalHeightPx, cfg.evidenceModal.heightPx);
+  cfg.evidenceModal.maxWidthShare = panelShare(
+      settings::kEvidenceModalMaxWidthShare, cfg.evidenceModal.maxWidthShare);
+  cfg.evidenceModal.maxHeightShare = panelShare(
+      settings::kEvidenceModalMaxHeightShare, cfg.evidenceModal.maxHeightShare);
   cfg.telescopeModal.widthPx =
       panelLength(settings::kTelescopeModalWidthPx, cfg.telescopeModal.widthPx);
   cfg.telescopeModal.heightPx = panelLength(settings::kTelescopeModalHeightPx,

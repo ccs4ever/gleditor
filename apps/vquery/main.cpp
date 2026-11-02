@@ -22,6 +22,7 @@
 #include <utility>
 #include <vector>
 
+#include "common/xanadu/evidence/evidence_controller.hpp"
 #include "common/xanadu/multi_store.hpp"
 #include "common/xanadu/result_slice.hpp"
 #include "common/xanadu/scalar.hpp"
@@ -36,6 +37,7 @@
 #include "common/xanadu/vql/parser.hpp"
 #include "common/xanadu/vql/vql_engine.hpp"
 #include "common/xanadu/zigzag/lens_repl.hpp"
+#include "protected_credential_prompt.hpp"
 
 namespace {
 
@@ -123,6 +125,13 @@ void printHelpREPL() {
       << zigzag::LensRepl::helpText
       << "  :ast <query>          Print AST dump for query\n"
       << "  :asm <query>          Print compiled bytecode for query\n"
+      << "  :evidence [command]   Private evidence case (use :evidence help)\n"
+      << "  :evidence mail-credential \"NAME\" LIFETIME_MS  Bind IMAP "
+         "credentials privately\n"
+      << "  :evidence mail-submit-credential \"INTENT_ID\" LIFETIME_MS  Bind "
+         "SMTP credentials privately\n"
+      << "  :evidence irc-credential \"NAME\" LIFETIME_MS  Bind IRC SASL "
+         "credentials privately\n"
       << "  :help                 Show this help message\n"
       << "  :quit / :exit         Exit REPL\n";
 }
@@ -650,6 +659,7 @@ int main(int argc, char *argv[]) {
   }
 
   // Interactive REPL Mode
+  xanadu::evidence::EvidenceController evidence(permascroll);
   std::cout << "VQL Interactive REPL (vquery v1.0.0)\n"
             << "Type queries or :help for commands. Press Ctrl+D to exit.\n";
 
@@ -668,6 +678,13 @@ int main(int argc, char *argv[]) {
     }
     if (line == ":help") {
       printHelpREPL();
+    } else if (vquery::isMailCredentialCommand(line)) {
+      vquery::handleMailCredentialCommand(evidence, line, std::cout, std::cerr);
+    } else if (line == ":evidence" || line.starts_with(":evidence ")) {
+      const bool success = evidence.execute(line);
+      const auto state   = evidence.snapshot();
+      std::cout << (success ? "" : "Evidence error: ") << state.status << "\n";
+      for (const auto &detail : state.details) std::cout << detail << "\n";
     } else if (line == ":ascii") {
       format = (format == "ascii") ? "text" : "ascii";
       std::cout << "Output mode set to: " << format << "\n";

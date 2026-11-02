@@ -45,12 +45,14 @@ investigating missing headers under `thirdparty/`. Those directories are git sub
 pointer rather than their contents.
 
 The build needs a C++23 compiler, Make, pkg-config, FreeType, HarfBuzz, libunibreak, FriBidi,
-Fontconfig, GLM, spdlog, SDL2 or SDL3, libtorrent-rasterbar, OpenSSL, LMDB, and the OpenGL headers.
-GoogleTest and GoogleMock are needed for tests. Vulkan and `glslangValidator` are used when
-available; AccessKit is optional unless explicitly required. `gnupg` is needed at run time for
-signed publication. For Ubuntu, the
+Fontconfig, GLM, spdlog, SDL2 or SDL3, libtorrent-rasterbar, OpenSSL, LMDB, SQLite, libcurl,
+LibEtPan, GMime 3, and the OpenGL headers. GoogleTest and GoogleMock are needed for tests. Vulkan
+and `glslangValidator` are used when available; AccessKit is optional unless explicitly required.
+`gnupg` is needed at run time for signed publication. For Ubuntu, the
 [CI build job's apt package list](.github/workflows/c-cpp.yml#L134) is a tested Linux dependency
-set; other distributions use their equivalent library and tool packages.
+set; other distributions use their equivalent library and tool packages. Native external-source
+adapters require libcurl with asynchronous DNS support; an unsupported resolver is refused
+explicitly.
 
 ```sh
 make -j$(nproc) lib       # shared library
@@ -109,6 +111,17 @@ The [Xanadu and Xuzz reference](docs/xanadu.md) describes the store formats, hyp
 and link identities, publishing and reader layers, system configuration, and language runtimes. See
 its [disposable-store and backup steps](docs/xanadu.md#create-and-back-up-a-disposable-store) to
 seed, reopen, and back up a scratch store with its permascroll.
+
+VQL has a direct evaluator and a restricted Vortex compiler. The
+[VQL conformance matrix](design/vql-conformance.md) lists supported engine subsets and links the
+executable corpus. Unsupported compiled semantics fail explicitly. The
+[VQL performance spike](design/vql-performance-spike.md), built with
+`make -j$(nproc) vql-spike vql-spike-abi`, measures real traversal/allocation costs and records ABI
+evidence separately from proposed runtime layouts.
+
+The [private evidence case guide](design/vql-evidence-case.md) covers read-only SQLite and REST
+capture, retained field and span annotations, offline reopen, refresh comparison and selected local
+export. Open the Xuzz panel with Ctrl+Alt+Shift+E or use `:evidence help` in the `vquery` REPL.
 
 ## ZigZag and Xuzz presentation
 

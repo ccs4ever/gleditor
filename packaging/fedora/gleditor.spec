@@ -24,6 +24,10 @@ BuildRequires:  pkgconfig(gl)
 BuildRequires:  pkgconfig(vulkan)
 BuildRequires:  glm-devel
 BuildRequires:  openssl-devel
+BuildRequires:  pkgconfig(libcurl)
+BuildRequires:  pkgconfig(sqlite3)
+BuildRequires:  pkgconfig(gmime-3.0)
+BuildRequires:  pkgconfig(libetpan)
 BuildRequires:  lmdb-devel
 BuildRequires:  rnp-devel
 BuildRequires:  pkgconfig(libtorrent-rasterbar)

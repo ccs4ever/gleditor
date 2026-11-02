@@ -275,12 +275,22 @@ TEST_PKGS := gmock_main
 # thing this program is for. Better to fail at configure time than to ship a
 # xanadoc editor that quietly cannot publish.
 # OpenSSL is required for in-process Ed25519 signing and X.509 v3 device delegation.
-XUDU_PKGS := libtorrent-rasterbar openssl lmdb libmagic sqlite3 spdlog libzstd libblake3 libzmq libngtcp2 libngtcp2_crypto_ossl
+XUDU_PKGS := libtorrent-rasterbar openssl lmdb libmagic sqlite3 libcurl gmime-3.0 libetpan spdlog libzstd libblake3 libzmq libngtcp2 libngtcp2_crypto_ossl
 ifneq (,$(filter-out $(NO_SDL_GOALS),$(or $(MAKECMDGOALS),all)))
 ifneq ($(shell pkg-config --exists libtorrent-rasterbar && echo 1),1)
 $(error libtorrent-rasterbar was not found by pkg-config. It is required: \
 install libtorrent-rasterbar-dev (Debian, Ubuntu), libtorrent-rasterbar-devel \
 (Fedora), or libtorrent-rasterbar (Arch, Homebrew).)
+endif
+ifneq ($(shell pkg-config --exists gmime-3.0 && echo 1),1)
+$(error GMime 3 was not found by pkg-config. Install libgmime-3.0-dev \
+(Debian, Ubuntu), gmime30-devel (Fedora), gmime3 (Arch), or gmime \
+(Homebrew), or set PKG_CONFIG_PATH for a local installation.)
+endif
+ifneq ($(shell pkg-config --exists libetpan && echo 1),1)
+$(error LibEtPan was not found by pkg-config. Install libetpan-dev \
+(Debian, Ubuntu), libetpan-devel (Fedora), or libetpan (Arch, Homebrew), \
+or set PKG_CONFIG_PATH for a local installation.)
 endif
 endif
 
@@ -789,6 +799,15 @@ ifdef GLEDITOR_ENABLE_VULKAN
 all: shaders
 endif
 
+# Native source adapters share curl's bounded connection and TLS support.
+EVIDENCE_CURL_ADAPTERS := capture fediverse_transport irc_transport mail_transport smtp_transport
+$(foreach adapter,$(EVIDENCE_CURL_ADAPTERS),$(addprefix $(OBJDIR)/apps/common/xanadu/evidence/$(adapter),.o .j .dep)): private CXXFLAGS += $(shell pkg-config --cflags libcurl)
+$(foreach test,evidence_imap_transport_test evidence_smtp_transport_test,$(addprefix $(OBJDIR)/tests/xuzz/$(test),.o .j .dep)): private CXXFLAGS += $(shell pkg-config --cflags libcurl)
+$(addprefix $(OBJDIR)/apps/common/xanadu/evidence/mail_transport,.o .j .dep): private CXXFLAGS += $(shell pkg-config --cflags libetpan)
+EVIDENCE_GMIME_ADAPTERS := mime mail_draft
+$(addprefix $(OBJDIR)/tests/xuzz/evidence_mail_draft_test,.o .j .dep): private CXXFLAGS += $(shell pkg-config --cflags gmime-3.0)
+$(foreach adapter,$(EVIDENCE_GMIME_ADAPTERS),$(addprefix $(OBJDIR)/apps/common/xanadu/evidence/$(adapter),.o .j .dep)): private CXXFLAGS += $(shell pkg-config --cflags gmime-3.0)
+
 # cannot unveil a nonexistant directory, have to remove the sandbox for
 # just the directory creation
 $(ALL_OBJ_DIRS): private .UNSANDBOXED = 1
@@ -998,6 +1017,9 @@ $(OBJDIR)/zigzag_test: $(ZIGZAG_TEST_OBJS) $(ZIGZAG_SHARED_CORE_OBJS) $(COMMON_U
 FUZZ_OBJDIR   := $(OBJDIR)/fuzz
 FUZZ_FLAGS    := -fsanitize=fuzzer-no-link,address,undefined
 FUZZ_CORE_OBJS := $(patsubst %.cpp,$(FUZZ_OBJDIR)/%.o,$(XUDU_CORE_SRCS))
+$(foreach adapter,$(EVIDENCE_CURL_ADAPTERS),$(FUZZ_OBJDIR)/apps/common/xanadu/evidence/$(adapter).o): private CXXFLAGS += $(shell pkg-config --cflags libcurl)
+$(FUZZ_OBJDIR)/apps/common/xanadu/evidence/mail_transport.o: private CXXFLAGS += $(shell pkg-config --cflags libetpan)
+$(foreach adapter,$(EVIDENCE_GMIME_ADAPTERS),$(FUZZ_OBJDIR)/apps/common/xanadu/evidence/$(adapter).o): private CXXFLAGS += $(shell pkg-config --cflags gmime-3.0)
 # scroll.cpp and publication.cpp (both under XUDU_CORE_SRCS above) now call
 # into MimeType and SourceGrounder, which live under src/ rather than
 # apps/common/xanadu/ and so are not swept up by XUDU_CORE_SRCS. Needed here for
@@ -1669,6 +1691,7 @@ install: $(OBJDIR)/gleditor $(OBJDIR)/xuzz $(OBJDIR)/xudu $(OBJDIR)/zigzag
 ifdef GLEDITOR_ENABLE_VULKAN
 install: shaders
 endif
+
 install:
 	$(INSTALL) -d $(DESTDIR)$(bindir)
 	$(INSTALL) -m 755 $(OBJDIR)/gleditor $(DESTDIR)$(bindir)/gleditor

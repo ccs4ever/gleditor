@@ -333,6 +333,14 @@ inline constexpr std::string_view kQuotationModalMaxWidthShare =
     "quotationModal.maxWidthShare";
 inline constexpr std::string_view kQuotationModalMaxHeightShare =
     "quotationModal.maxHeightShare";
+inline constexpr std::string_view kEvidenceModalWidthPx =
+    "evidenceModal.widthPx";
+inline constexpr std::string_view kEvidenceModalHeightPx =
+    "evidenceModal.heightPx";
+inline constexpr std::string_view kEvidenceModalMaxWidthShare =
+    "evidenceModal.maxWidthShare";
+inline constexpr std::string_view kEvidenceModalMaxHeightShare =
+    "evidenceModal.maxHeightShare";
 inline constexpr std::string_view kTelescopeModalWidthPx =
     "telescopeModal.widthPx";
 inline constexpr std::string_view kTelescopeModalHeightPx =
@@ -409,6 +417,8 @@ inline constexpr std::string_view kKeymapTelescopeToggle =
     "std:xuzz/telescope_toggle";
 inline constexpr std::string_view kKeymapTelescopeToggleF3 =
     "std:xuzz/telescope_toggle_f3";
+inline constexpr std::string_view kKeymapEvidenceCase =
+    "std:xuzz/evidence_case_toggle";
 inline constexpr std::string_view kKeymapTensionPhysicsToggle =
     "std:xuzz/tension_physics_toggle";
 inline constexpr std::string_view kKeymapUnlockTranscopyrightF5 =
@@ -1282,6 +1292,7 @@ struct UIConfig {
   QuotationTetherConfig tether;
   WorldCardConfig hullCard{260.0F, 46.0F};
   ModalPresentationConfig quotationModal;
+  ModalPresentationConfig evidenceModal{840.0F, 720.0F, 0.95F, 0.9F};
   ModalPresentationConfig telescopeModal{860.0F, 560.0F};
   ModalPresentationConfig hypertimeModal{640.0F, 460.0F};
 

@@ -38,7 +38,8 @@ jobs:
           libfreetype-dev libharfbuzz-dev libfribidi-dev \
           libunibreak-dev libfontconfig-dev \
           libsdl2-dev libsdl2-image-dev libgl-dev libglm-dev \
-          libvulkan-dev libtorrent-rasterbar-dev libssl-dev liblmdb-dev libspdlog-dev glslang-tools
+          libvulkan-dev libtorrent-rasterbar-dev libcurl4-openssl-dev libsqlite3-dev \
+          libgmime-3.0-dev libetpan-dev libssl-dev liblmdb-dev libspdlog-dev glslang-tools
 
     # dpkg-buildpackage wants debian/ at the root of the tree it is building.
     # It lives under packaging/ in the repository so that four packaging
@@ -98,7 +99,8 @@ jobs:
           freetype-devel harfbuzz-devel fribidi-devel \
           libunibreak-devel fontconfig-devel \
           SDL3-devel SDL3_image-devel mesa-libGL-devel glm-devel \
-          vulkan-loader-devel glslang openssl-devel lmdb-devel \
+          vulkan-loader-devel glslang openssl-devel libcurl-devel \
+          sqlite-devel gmime30-devel libetpan-devel lmdb-devel \
           desktop-file-utils libappstream-glib python3
         # rb_libtorrent is the Fedora package name; the upstream project and
         # everything else in this file call it libtorrent-rasterbar, so this
@@ -172,7 +174,7 @@ jobs:
         pacman -Syu --noconfirm --needed \
           git pkgconf make gcc freetype2 harfbuzz fribidi libunibreak fontconfig \
           sdl3 sdl3_image libglvnd glm vulkan-headers vulkan-icd-loader \
-          openssl lmdb libtorrent-rasterbar boost spdlog glslang python
+          openssl curl sqlite gmime3 libetpan lmdb libtorrent-rasterbar boost spdlog glslang python
 
     - uses: actions/checkout@v7
       with:
@@ -342,6 +344,8 @@ jobs:
         pkgs="$pkgs $(resolve sdl3 sdl3 SDL3)"
         pkgs="$pkgs $(resolve sdl3.image sdl3-image sdl3_image SDL3_image)"
         pkgs="$pkgs $(resolve openssl openssl)"
+        pkgs="$pkgs $(resolve curl curl)"
+        pkgs="$pkgs $(resolve sqlite3 sqlite3) $(resolve gmime gmime3) $(resolve libetpan libetpan)"
         pkgs="$pkgs $(resolve lmdb lmdb)"
         pkgs="$pkgs $(resolve libtorrent-rasterbar libtorrent-rasterbar rb-libtorrent)"
         echo "installing:$pkgs"
@@ -596,7 +600,8 @@ jobs:
     - name: install build dependencies
       run: |
         brew install make freetype harfbuzz fribidi libunibreak fontconfig \
-          sdl3 sdl3_image glm libtorrent-rasterbar lmdb boost openssl@3 pkgconf googletest \
+          sdl3 sdl3_image glm libtorrent-rasterbar lmdb boost openssl@3 \
+          curl sqlite gmime libetpan pkgconf googletest \
           vulkan-loader molten-vk glslang spdlog
 
     # AccessKit is what reports the user interface to screen readers --
