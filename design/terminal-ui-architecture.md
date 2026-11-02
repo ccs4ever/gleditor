@@ -2,8 +2,8 @@
 
 | field         | value                                                                                                                                                                  |
 | :------------ | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| version       | 0.4                                                                                                                                                                    |
-| status        | Draft for review (Vortex Design Critique Round 4); companion to [vagent TUI dashboard](vagent-tui-dashboard.md)                                                        |
+| version       | 0.5                                                                                                                                                                    |
+| status        | Implemented (P22.1–P22.4, P22.9 landed; reactor loop and foundation in place); companion to [vagent TUI dashboard](vagent-tui-dashboard.md)                            |
 | prerequisites | Modern C++23, zero-sentinel conventions (`std::optional`, `std::expected`), headless testing invariant                                                                 |
 | companion to  | [vagent TUI dashboard](vagent-tui-dashboard.md), [vagent agent language](vagent-agent-language.md), [system settings](system-xanadocs-customization-and-metasystem.md) |
 | rests on      | `VirtualScreenBuffer`, `TerminalDevice`, `KeyEvent`, `Style`, `MeshActorRuntime`, `AgentExecutor`                                                                      |
@@ -591,6 +591,13 @@ ______________________________________________________________________
 
 ## Change History
 
+- **v0.5 (2026-11-02)**: Implementation landed. The foundation lives in `apps/common/ui/tui/`
+  (`tui_types.hpp`, `screen_buffer.{hpp,cpp}`, `viewport.hpp`, `terminal_device.{hpp,cpp}`) in
+  namespace `xanadu::ui::tui`; `apps/common/xanadu/vagent/tui/ncurses_actor.hpp` is now a thin
+  back-compat shim re-exporting the foundation types over `TerminalDevice`. P22.9's executor
+  descriptors/deadlines/clock-advance were already present on `AgentExecutor`; the `poll(2)` reactor
+  loop (P22.3) is implemented in `apps/vagent/main.cpp` `runTui`. Generic foundation tests are in
+  `tests/xuzz/tui_foundation_test.cpp`.
 - **v0.4 (2026-11-02)**: Addressed Round 3 Vortex Design Critique:
   - Formatted all GFM tables with standard multi-line layout and unescaped pipe delimiters.
   - Added evidential `file:line` citations throughout (§1.1, §5.1, §6).

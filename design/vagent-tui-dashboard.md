@@ -2,8 +2,8 @@
 
 | field         | value                                                                                                                                                                                             |
 | :------------ | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| version       | 0.4                                                                                                                                                                                               |
-| status        | Draft for review (Vortex Design Critique Round 4); companion to [terminal UI architecture](terminal-ui-architecture.md)                                                                           |
+| version       | 0.5                                                                                                                                                                                               |
+| status        | Implemented (P22.5–P22.10 landed); companion to [terminal UI architecture](terminal-ui-architecture.md)                                                                                           |
 | prerequisites | Modern C++23, zero-sentinel conventions, [terminal UI architecture](terminal-ui-architecture.md) (P22.1–P22.4, P22.9, P22.10)                                                                     |
 | companion to  | [terminal UI architecture](terminal-ui-architecture.md), [vagent agent language](vagent-agent-language.md), [epistemic arbitration](vagent-dynamic-source-weighting-and-epistemic-arbitration.md) |
 | rests on      | `AgentTui`, `TerminalDevice`, `VirtualScreenBuffer`, `MeshActorRuntime`, `AgentExecutor`, `ArenaManifold`, `vprolog::Compiler`                                                                    |
@@ -387,6 +387,15 @@ ______________________________________________________________________
 
 ## Change History
 
+- **v0.5 (2026-11-02)**: Implementation landed. `AgentTui`
+  (`apps/common/xanadu/vagent/tui/agent_tui.{hpp,cpp}`) was rebuilt on the shared `xanadu::ui::tui`
+  foundation: modal input with `[NAV]`/`[EDIT]` badge and history/draft (P22.8),
+  viewport-virtualized registry and beliefs (P22.4), scoped mark/release Vlog frame with 5-at-a-time
+  pagination (P22.7), bounded action-log ring with dirty flags and chained `HostSink` wiring in
+  `runTui` (P22.5), responsive master-detail layout and Unicode/ASCII certainty gauges (P22.6), and
+  a `TuiSettings`/`TuiSettings::fromModel` binding for the six `vagent.tui.*` keys in
+  `system://settings` (P22.10). All five §9 escape probes are covered by
+  `tests/xuzz/vagent_tui_test.cpp` (`AgentTuiEscapeProbes.*`, `AgentTuiSettings.*`).
 - **v0.4 (2026-11-02)**: Addressed Round 3 Vortex Design Critique:
   - Formatted all GFM tables with standard multi-line layout and unescaped pipe delimiters.
   - Specified scalar argument extraction (`asDouble()`, `asInt64()`, `formatTerm()`) in §4.2.

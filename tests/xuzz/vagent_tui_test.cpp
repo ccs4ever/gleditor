@@ -710,7 +710,8 @@ TEST(AgentTuiSettings, FromModelOverridesDefaultsAndDashboardHonorsThem) {
   for (int i = 1; i <= 50; ++i) {
     tui.appendActionLog(std::format("e-{}", i));
   }
-  EXPECT_EQ(tui.actionLog().size(), 3U); // bounded by overridden max_log_entries
+  EXPECT_EQ(tui.actionLog().size(),
+            3U); // bounded by overridden max_log_entries
   EXPECT_EQ(tui.actionLog().back(), "e-50");
 }
 
