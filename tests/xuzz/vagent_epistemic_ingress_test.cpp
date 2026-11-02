@@ -3,6 +3,7 @@
  * @brief P19 I3-1b: checked observations recorded under source supports.
  */
 #include <gtest/gtest.h>
+#include <poll.h>
 
 #include <chrono>
 #include <cmath>
@@ -1333,6 +1334,208 @@ TEST_F(VagentEpistemicIngress, BindingAnUnknownActorIsRefused) {
   const auto bound = host->executor().bindSource(nobody, grant(kP1, "x"));
   ASSERT_FALSE(bound);
   EXPECT_EQ(bound.error(), EpistemicRefusal::UnknownActor);
+}
+
+// A reactor that polls with no timeout sleeps through any post that leaves its
+// descriptor unreadable, so each enqueue path must signal it. The probe drains
+// between paths, so it shows each path writes, not how many writes it makes.
+TEST_F(VagentEpistemicIngress, EveryEnqueuePathMakesTheWakeDescriptorReadable) {
+  host->pump();
+  const auto fd = host->executor().notificationDescriptor();
+  ASSERT_TRUE(fd);
+  const auto readable = [&] {
+    pollfd probe{*fd, POLLIN, 0};
+    return ::poll(&probe, 1, 0) == 1 && (probe.revents & POLLIN) != 0;
+  };
+  // After a drain nothing is left to read.
+  const auto drained = [&] {
+    host->executor().drainNotifications();
+    return !readable();
+  };
+  ASSERT_TRUE(drained());
+
+  const std::string kP3(64, '3');
+  ASSERT_TRUE(host->executor().bindSource(pid, grant(kP3, "sensor:x")));
+  EXPECT_TRUE(readable()) << "bindSource queues a control item";
+  ASSERT_TRUE(drained());
+
+  ASSERT_TRUE(host->executor().retireSource(pid, kP3));
+  EXPECT_TRUE(readable()) << "retireSource queues a control item";
+  ASSERT_TRUE(drained());
+
+  host->pump();
+  ASSERT_TRUE(drained());
+  ASSERT_TRUE(host->executor().observe(pid, reading(kP1, "w1", 1, 1.0)));
+  EXPECT_TRUE(readable()) << "an ordinary post still signals";
+}
+
+// Each item signalled when it was posted and is drained again once its actor
+// can take it, so a put-back that signalled would only make a reactor spin on
+// an item that stays kept.
+TEST_F(VagentEpistemicIngress, APutBackDoesNotWakeTheReactor) {
+  auto program = CompiledProgram::fromSource(kProgram);
+  ASSERT_TRUE(program) << program.error();
+  LocalHost other(std::move(*program));
+  const auto launched = other.executor().launch("A", "b");
+  ASSERT_TRUE(launched);
+  const auto fd = other.executor().notificationDescriptor();
+  ASSERT_TRUE(fd);
+  const auto readable = [&] {
+    pollfd probe{*fd, POLLIN, 0};
+    return ::poll(&probe, 1, 0) == 1 && (probe.revents & POLLIN) != 0;
+  };
+  // Launched, but its first turn has not run: the post cannot be placed yet.
+  ASSERT_TRUE(other.executor().bindSource(*launched, grant(kP1, "sensor:gps")));
+  other.executor().drainNotifications();
+  ASSERT_FALSE(readable());
+  for (int pass = 0; pass < 3; ++pass) {
+    other.executor().tick();
+    EXPECT_FALSE(readable()) << "pass " << pass;
+  }
+  // Kept, not lost: the first turn frees it.
+  EXPECT_FALSE(other.executor().sourceChangeOutcome(*launched, kP1));
+  other.pump();
+  EXPECT_TRUE(other.executor().sourceChangeOutcome(*launched, kP1));
+}
+
+TEST_F(VagentEpistemicIngress, AStoppedActorsUnplacedPostsAreAbandoned) {
+  auto program = CompiledProgram::fromSource(kProgram);
+  ASSERT_TRUE(program) << program.error();
+  LocalHost other(std::move(*program));
+  const auto launched = other.executor().launch("A", "b");
+  ASSERT_TRUE(launched);
+  const auto fd = other.executor().notificationDescriptor();
+  ASSERT_TRUE(fd);
+  const auto readable = [&] {
+    pollfd probe{*fd, POLLIN, 0};
+    return ::poll(&probe, 1, 0) == 1 && (probe.revents & POLLIN) != 0;
+  };
+  ASSERT_TRUE(other.executor().bindSource(*launched, grant(kP1, "sensor:gps")));
+  // It dies before its first turn, as a failed preparation leaves it.
+  ASSERT_TRUE(other.runtime().stop(*launched));
+  other.executor().drainNotifications();
+  other.executor().tick();
+  const auto outcome = other.executor().sourceChangeOutcome(*launched, kP1);
+  ASSERT_TRUE(outcome) << "the post was kept, not abandoned";
+  EXPECT_EQ(outcome->kind, IngestOutcome::Kind::Refused);
+  EXPECT_FALSE(readable());
+}
+
+class VagentEpistemicUpgrade : public VagentEpistemicIngress {
+protected:
+  /// A distinct program version of the same agent, for each call.
+  CompiledProgram next() {
+    ++versions;
+    auto program = CompiledProgram::fromSource(std::string(kProgram) +
+                                               std::string(versions, '\n'));
+    EXPECT_TRUE(program) << program.error();
+    return std::move(*program);
+  }
+  std::size_t versions{};
+
+  struct Before {
+    std::size_t profiles;
+    const zigzag::vortex::WorkerContext *context;
+    std::string programRef;
+  };
+  Before before() {
+    return {profiles().size(), host->executor().context(pid),
+            std::string(*host->executor().programRef(pid))};
+  }
+  void expectUnchanged(const Before &was) {
+    EXPECT_EQ(profiles().size(), was.profiles);
+    EXPECT_EQ(host->executor().context(pid), was.context);
+    EXPECT_EQ(*host->executor().programRef(pid), was.programRef);
+  }
+  void settle() {
+    host->pump();
+    host->executor().drainNotifications();
+  }
+};
+
+TEST_F(VagentEpistemicUpgrade, APopulatedProfileRefusesEveryUpgradeEntryPoint) {
+  settle();
+  observe(reading(kP1, "e1", 1, 1.0));
+  ASSERT_EQ(profiles().size(), 1U);
+  // The latch lives in the profile; set it as an operator's isolate will.
+  const auto faulted = value(profiles()[0], kProfileFaulted);
+  ASSERT_TRUE(faulted);
+  ASSERT_TRUE(arena().setValueBits(*faulted, xanadu::ValueKind::Bool, 1));
+  const auto was = before();
+
+  auto held = host->retainProgram(next());
+  ASSERT_TRUE(held);
+  const auto shared = host->upgrade(pid, held);
+  ASSERT_FALSE(shared);
+  EXPECT_EQ(shared.error(), zigzag::vortex::mesh::ActorError::ExecutionFailed);
+  expectUnchanged(was);
+
+  const auto byValue = host->upgrade(pid, next());
+  ASSERT_FALSE(byValue);
+  EXPECT_EQ(byValue.error(), shared.error());
+  expectUnchanged(was);
+
+  // The executor's own overloads are the entry points the host wraps.
+  auto direct       = next();
+  const auto viaRef = host->executor().upgrade(pid, direct);
+  ASSERT_FALSE(viaRef);
+  EXPECT_EQ(viaRef.error(), shared.error());
+  expectUnchanged(was);
+
+  EXPECT_EQ(flag(profiles()[0], kProfileFaulted), true);
+  EXPECT_EQ(clauses().size(), 1U);
+}
+
+TEST_F(VagentEpistemicUpgrade,
+       TheReconcilerRefusesAPopulatedProfileWithATranslator) {
+  settle();
+  observe(reading(kP1, "e1", 1, 1.0));
+  ASSERT_EQ(profiles().size(), 1U);
+  // The reconciler never runs the translator, so registering one must not
+  // let it shed what the translator exists to carry.
+  host->executor().setOwnedStateTranslator(
+      [](const CompiledProgram &, const CompiledProgram &,
+         const zigzag::ArenaManifold &, zigzag::CellRef,
+         zigzag::vortex::WorkerContext &, zigzag::CellRef,
+         std::map<zigzag::CellRef, zigzag::CellRef> &, std::uint64_t &) {
+        return std::expected<void, zigzag::vortex::mesh::ActorError>{};
+      });
+  const auto was    = before();
+  auto direct       = next();
+  const auto viaRef = host->executor().upgrade(pid, direct);
+  ASSERT_FALSE(viaRef);
+  EXPECT_EQ(viaRef.error(), zigzag::vortex::mesh::ActorError::ExecutionFailed);
+  expectUnchanged(was);
+}
+
+TEST_F(VagentEpistemicUpgrade, AQueuedSourceChangeIsNotQuiescent) {
+  // SetUp bound two sources and nothing has run them yet.
+  ASSERT_TRUE(host->runtime().pending(pid) == 0U);
+  const auto was     = before();
+  const auto byValue = host->upgrade(pid, next());
+  ASSERT_FALSE(byValue);
+  EXPECT_EQ(byValue.error(), zigzag::vortex::mesh::ActorError::NotQuiescent);
+  expectUnchanged(was);
+
+  auto held = host->retainProgram(next());
+  ASSERT_TRUE(held);
+  const auto shared = host->upgrade(pid, held);
+  ASSERT_FALSE(shared);
+  EXPECT_EQ(shared.error(), zigzag::vortex::mesh::ActorError::NotQuiescent);
+  expectUnchanged(was);
+}
+
+TEST_F(VagentEpistemicUpgrade, AnEmptyEpistemicRootStillUpgradesBothWays) {
+  settle();
+  ASSERT_TRUE(profiles().empty());
+  auto held = host->retainProgram(next());
+  ASSERT_TRUE(held);
+  const auto shared = host->upgrade(pid, held);
+  EXPECT_TRUE(shared) << (shared ? 0 : static_cast<int>(shared.error()));
+  EXPECT_EQ(*host->executor().programRef(pid), held->programRef());
+  settle();
+  const auto byValue = host->upgrade(pid, next());
+  EXPECT_TRUE(byValue) << (byValue ? 0 : static_cast<int>(byValue.error()));
 }
 
 TEST(VagentEpistemicIngressPlain, AProgramWithoutArbitrationCannotBind) {

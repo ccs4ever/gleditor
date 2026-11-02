@@ -599,13 +599,17 @@ struct AgentExecutor::PostBox {
     if (notifyFd) ::close(*notifyFd);
   }
 
+  /// Caller holds `mutex`. Every enqueue path ends here so none can leave a
+  /// reactor blocked on a queue that is no longer empty.
+  void signalLocked() {
+    if (!notifyFd) return;
+    const std::uint64_t one = 1;
+    (void)!::write(*notifyFd, &one, sizeof one);
+  }
   void push(Item item) {
     const std::lock_guard lock(mutex);
     items.push_back(std::move(item));
-    if (notifyFd) {
-      const std::uint64_t one = 1;
-      (void)!::write(*notifyFd, &one, sizeof one);
-    }
+    signalLocked();
   }
   [[nodiscard]] std::optional<int> descriptor() {
     const std::lock_guard lock(mutex);
@@ -645,8 +649,13 @@ struct AgentExecutor::PostBox {
       return waiting.sourceChange.has_value();
     });
     items.insert(after, std::move(item));
+    signalLocked();
   }
   /// Put back, ahead of anything newer, what the owner could not yet place.
+  /// Deliberately silent: each item signalled when it was posted, and the
+  /// owner drains again after the first turn or turn end that frees it. A
+  /// signal here would wake the reactor to find nothing new, every pass,
+  /// for as long as the item stays kept.
   void putBack(std::vector<Item> kept) {
     const std::lock_guard lock(mutex);
     items.insert(items.begin(), std::make_move_iterator(kept.begin()),
@@ -3869,6 +3878,13 @@ void AgentExecutor::drainPosted() {
       continue;
     }
     State &state = stateFor(item.pid);
+    // A stopped actor never prepares, so an item kept for its first turn
+    // would wait forever (a failed first turn stops it before `prepared`).
+    if (!state.prepared && runtime_.isStopped(item.pid)) {
+      GLEDITOR_LOG_DEBUG(kLog, "{} is stopped; dropping a post", state.name);
+      abandon(item);
+      continue;
+    }
     if (!state.prepared || (state.inTurn && live(state) && epistemic(item))) {
       kept.push_back(std::move(item));
       continue;
@@ -5049,6 +5065,40 @@ AgentExecutor::resume(const AgentCheckpoint &checkpoint) {
   return pid;
 }
 
+std::optional<ActorError>
+AgentExecutor::upgradeRefusal(const identity::ActorPid &pid, const State &old,
+                              UpgradeRoute route) const {
+  // Every live-upgrade entry point asks this before it mutates anything, so
+  // two routes cannot disagree about what an upgrade may discard.
+  if (old.inTurn || !old.hostEvents.empty() || posts_->pendingFor(pid) ||
+      old.context->vm.choiceDepth() != 0 ||
+      old.context->arena.outstandingMarks() != 0)
+    return ActorError::NotQuiescent;
+  // The schema route is strict about what the reconciler carries across by
+  // design (in-flight asks, staged outbox and pending entries).
+  if (route == UpgradeRoute::Schema &&
+      (!old.flights.empty() || !old.requests.empty() ||
+       std::ranges::any_of(outstanding_,
+                           [&](const auto &entry) {
+                             return entry.second.ownerKey == pidKey(pid);
+                           }) ||
+       old.context->arena.linked(old.agent.agentCell, old.dims.outbox) ||
+       old.context->arena.linked(old.agent.agentCell, old.dims.pending)))
+    return ActorError::NotQuiescent;
+  // Populated trust/epistemic roots cannot be silently erased: the copiers
+  // carry neither the source profiles nor their faulted latch and incarnation
+  // floors. Only the schema route has a translator to hand them to, and only
+  // once one is registered. The reconciler never calls it, nor compares
+  // policy or shape, so it refuses whether or not one is.
+  const bool translates =
+      route == UpgradeRoute::Schema && ownedStateTranslator_;
+  if (!translates &&
+      (old.context->arena.linked(old.agent.agentCell, old.dims.trust) ||
+       old.context->arena.linked(old.agent.agentCell, old.dims.epistemic)))
+    return ActorError::ExecutionFailed;
+  return std::nullopt;
+}
+
 std::expected<void, ActorError>
 AgentExecutor::upgrade(const identity::ActorPid &pid,
                        std::shared_ptr<CompiledProgram> program,
@@ -5065,17 +5115,9 @@ AgentExecutor::upgrade(const identity::ActorPid &pid,
     return std::unexpected(ActorError::NotAuthorized);
   const auto previous = std::dynamic_pointer_cast<CompiledProgram>(old.program);
   if (!previous) return std::unexpected(ActorError::ExecutionFailed);
-  if (old.inTurn || !old.hostEvents.empty() || posts_->pendingFor(pid) ||
-      !old.flights.empty() || !old.requests.empty() ||
-      std::ranges::any_of(outstanding_,
-                          [&](const auto &entry) {
-                            return entry.second.ownerKey == pidKey(pid);
-                          }) ||
-      old.context->vm.choiceDepth() != 0 ||
-      old.context->arena.outstandingMarks() != 0 ||
-      old.context->arena.linked(old.agent.agentCell, old.dims.outbox) ||
-      old.context->arena.linked(old.agent.agentCell, old.dims.pending))
-    return std::unexpected(ActorError::NotQuiescent);
+  if (const auto refused = upgradeRefusal(pid, old, UpgradeRoute::Schema)) {
+    return std::unexpected(*refused);
+  }
   // This compiler cannot lower/resume BDI plans yet. Refuse rather than
   // misbinding saved plan PCs or silently dropping an existing intention.
   if (old.context->arena.linked(old.agent.agentCell, old.dims.intention))
@@ -5311,13 +5353,6 @@ AgentExecutor::upgrade(const identity::ActorPid &pid,
               containers(old.agent.behaviors, next.agent.behaviors,
                          before->behaviors, after->behaviors, old.dims.behavior,
                          next.dims.behavior);
-              // P19's typed translator owns trust/epistemic graphs. Until
-              // registered, populated roots cannot be silently erased by this
-              // baseline copier.
-              if (!ownedStateTranslator_ &&
-                  (source.linked(old.agent.agentCell, old.dims.trust) ||
-                   source.linked(old.agent.agentCell, old.dims.epistemic)))
-                return std::unexpected(ActorError::ExecutionFailed);
               graph.preflight();
               graph.copy();
               for (const auto &field : fields)
@@ -5423,8 +5458,9 @@ AgentExecutor::upgrade(const identity::ActorPid &pid,
     return std::unexpected(ActorError::UnknownProcess);
   }
   State &state = *found->second;
-  if (state.inTurn) {
-    return std::unexpected(ActorError::NotQuiescent);
+  if (const auto refused =
+          upgradeRefusal(pid, state, UpgradeRoute::Reconciler)) {
+    return std::unexpected(*refused);
   }
 
   const auto *fromProgram =

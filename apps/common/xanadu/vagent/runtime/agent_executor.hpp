@@ -688,6 +688,16 @@ private:
   [[nodiscard]] bool renewLease(State &state,
                                 std::chrono::system_clock::time_point now);
   [[nodiscard]] bool live(const State &state) const;
+  /// The two live-upgrade routes: the schema-checked swap, which is the one
+  /// that can carry a registered typed translator's state across, and the
+  /// reconciler's, which carries asks and staged effects but no epistemic
+  /// state.
+  enum class UpgradeRoute : std::uint8_t { Schema, Reconciler };
+  /// Why a live upgrade of `old` must be refused before anything changes,
+  /// or nullopt: the guards every `upgrade` overload shares.
+  [[nodiscard]] std::optional<zigzag::vortex::mesh::ActorError>
+  upgradeRefusal(const identity::ActorPid &pid, const State &old,
+                 UpgradeRoute route) const;
   void drain(State &state, zigzag::vortex::WorkerContext &context,
              std::uint64_t turn, const TurnSpec &spec);
   [[nodiscard]] std::vector<OutboxItem>
