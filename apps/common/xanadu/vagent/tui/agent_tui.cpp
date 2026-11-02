@@ -1,6 +1,6 @@
 /**
  * @file agent_tui.cpp
- * @brief Implementation of AgentTui dashboard.
+ * @brief Terminal User Interface dashboard implementation for vagent agents.
  */
 #include "common/xanadu/vagent/tui/agent_tui.hpp"
 
@@ -10,19 +10,20 @@
 #include <format>
 #include <sstream>
 
+#include "common/ui/tui/viewport.hpp"
+#include "common/xanadu/identity/identity_layout.hpp"
+#include "common/xanadu/system_docs.hpp"
 #include "common/xanadu/vagent/runtime/program.hpp"
 #include "common/xanadu/vagent/runtime/runtime_abi.hpp"
+#include "common/xanadu/vagent/runtime/wire.hpp"
 #include "common/xanadu/vprolog/compiler.hpp"
+#include "common/xanadu/vprolog/parser.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
 
 namespace xanadu::vagent::tui {
 
 namespace {
-
-using zigzag::ArenaManifold;
-using zigzag::CellRef;
-using zigzag::noCell;
 
 std::vector<std::string> tokenize(std::string_view line) {
   std::vector<std::string> tokens;
@@ -31,22 +32,24 @@ std::vector<std::string> tokenize(std::string_view line) {
   for (char c : line) {
     if (c == '"') {
       inQuote = !inQuote;
-    } else if (std::isspace(static_cast<unsigned char>(c)) && !inQuote) {
+    } else if (c == ' ' && !inQuote) {
       if (!cur.empty()) {
-        tokens.push_back(cur);
+        tokens.push_back(std::move(cur));
         cur.clear();
       }
     } else {
       cur.push_back(c);
     }
   }
-  if (!cur.empty()) {
-    tokens.push_back(cur);
-  }
+  if (!cur.empty()) tokens.push_back(std::move(cur));
   return tokens;
 }
 
 runtime::WireValue parseWireValue(std::string_view s) {
+  if (s.empty()) return runtime::WireValue::text("");
+  if (s.front() == '"' && s.back() == '"' && s.size() >= 2) {
+    return runtime::WireValue::text(std::string(s.substr(1, s.size() - 2)));
+  }
   if (s == "true") return runtime::WireValue::boolean(true);
   if (s == "false") return runtime::WireValue::boolean(false);
 
@@ -88,51 +91,104 @@ runtime::WireRecord parseFields(const std::vector<std::string> &args,
 
 } // namespace
 
+std::string formatCellArg(const zigzag::ArenaManifold &arena,
+                          zigzag::CellRef cell) {
+  if (auto d = arena.asDouble(cell)) return std::format("{:.2f}", *d);
+  if (auto i = arena.asInt64(cell)) return std::to_string(*i);
+  auto txt = arena.textOf(cell);
+  if (!txt.empty()) return txt;
+  return std::format("#{}", cell);
+}
+
+std::string renderCertaintyGauge(double score, int width, bool unicode) {
+  score            = std::clamp(score, 0.0, 1.0);
+  const int filled = static_cast<int>(std::round(score * width));
+  std::string bar;
+  bar.reserve(static_cast<std::size_t>(width * 3 + 10));
+  bar += '[';
+  for (int i = 0; i < width; ++i) {
+    if (i < filled) {
+      bar += (unicode ? "\xe2\x96\x88" : "="); // █ or =
+    } else {
+      bar += (unicode ? "\xe2\x96\x91" : "."); // ░ or .
+    }
+  }
+  bar += std::format("] {:3.0f}%", score * 100.0);
+  return bar;
+}
+
+TuiSettings TuiSettings::fromModel(const SystemStoreModel &model) {
+  TuiSettings s;
+  s.borders = model.getString(xanadu::settings::kVagentTuiBorders, s.borders);
+  s.historySize = static_cast<std::size_t>(
+      model.getInt64(xanadu::settings::kVagentTuiHistorySize,
+                     static_cast<std::int64_t>(s.historySize)));
+  s.splitThreshold = static_cast<int>(model.getInt64(
+      xanadu::settings::kVagentTuiSplitThreshold, s.splitThreshold));
+  s.maxLogEntries  = static_cast<std::size_t>(
+      model.getInt64(xanadu::settings::kVagentTuiMaxLogEntries,
+                     static_cast<std::int64_t>(s.maxLogEntries)));
+  s.querySolutionLimit = static_cast<std::size_t>(
+      model.getInt64(xanadu::settings::kVagentTuiQuerySolutionLimit,
+                     static_cast<std::int64_t>(s.querySolutionLimit)));
+  s.inspectDepth = static_cast<std::size_t>(
+      model.getInt64(xanadu::settings::kVagentTuiInspectDepth,
+                     static_cast<std::int64_t>(s.inspectDepth)));
+  return s;
+}
+
 AgentTui::AgentTui(zigzag::vortex::mesh::MeshActorRuntime &runtime,
                    runtime::AgentExecutor &executor,
-                   std::shared_ptr<NCursesActor> actor)
-    : runtime_(runtime), executor_(executor), actor_(std::move(actor)) {
+                   std::shared_ptr<NCursesActor> actor, TuiSettings settings)
+    : runtime_(runtime), executor_(executor), actor_(std::move(actor)),
+      settings_(std::move(settings)) {
   if (!actor_) {
     actor_ = std::make_shared<NCursesActor>();
   }
   refreshActorTable();
   if (!actorRows_.empty()) {
     std::size_t initialIdx = 0;
-    if (actor_ && actorRows_.size() > 1 && actorRows_[0].pid == actor_->pid()) {
-      initialIdx = 1;
+    for (std::size_t i = 0; i < actorRows_.size(); ++i) {
+      if (actorRows_[i].status == "RUNNING" ||
+          actorRows_[i].status == "QUIESCENT") {
+        initialIdx = i;
+        break;
+      }
     }
     selectedIndex_ = initialIdx;
     selectedPid_   = actorRows_[selectedIndex_].pid;
+  }
+  if (selectedPid_) {
     cachedBeliefs_ = inspectBeliefs(*selectedPid_);
     cachedScores_  = epistemicScores(*selectedPid_);
   }
-  actionLog_.emplace_back("vagent TUI initialised. Ready for interaction.");
+  actorViewport_.visibleRows     = 15;
+  beliefViewport_.visibleRows    = 10;
+  actionLogViewport_.visibleRows = 20;
 }
 
 void AgentTui::setPane(Pane pane) {
   activePane_ = pane;
-  if (activePane_ == Pane::Querying) {
-    if (!selectedPid_ && !actorRows_.empty()) {
-      selectedIndex_ = 0;
-      selectedPid_   = actorRows_[0].pid;
-    }
-    if (selectedPid_) {
-      cachedBeliefs_ = inspectBeliefs(*selectedPid_);
-      cachedScores_  = epistemicScores(*selectedPid_);
-    }
+  inputMode_  = InputMode::Navigation;
+  if (activePane_ == Pane::Querying && selectedPid_) {
+    cachedBeliefs_ = inspectBeliefs(*selectedPid_);
+    cachedScores_  = epistemicScores(*selectedPid_);
   }
+  markDirty();
 }
 
 void AgentTui::selectActor(const identity::ActorPid &pid) {
-  selectedPid_ = pid;
   for (std::size_t i = 0; i < actorRows_.size(); ++i) {
     if (actorRows_[i].pid == pid) {
       selectedIndex_ = i;
-      break;
+      selectedPid_   = pid;
+      cachedBeliefs_ = inspectBeliefs(pid);
+      cachedScores_  = epistemicScores(pid);
+      actorViewport_.scrollTo(static_cast<int>(i));
+      markDirty();
+      return;
     }
   }
-  cachedBeliefs_ = inspectBeliefs(pid);
-  cachedScores_  = epistemicScores(pid);
 }
 
 void AgentTui::selectNextActor() {
@@ -141,18 +197,19 @@ void AgentTui::selectNextActor() {
   selectedPid_   = actorRows_[selectedIndex_].pid;
   cachedBeliefs_ = inspectBeliefs(*selectedPid_);
   cachedScores_  = epistemicScores(*selectedPid_);
+  actorViewport_.scrollTo(static_cast<int>(selectedIndex_));
+  markDirty();
 }
 
 void AgentTui::selectPrevActor() {
   if (actorRows_.empty()) return;
-  if (selectedIndex_ == 0) {
-    selectedIndex_ = actorRows_.size() - 1;
-  } else {
-    --selectedIndex_;
-  }
+  selectedIndex_ =
+      (selectedIndex_ == 0) ? actorRows_.size() - 1 : selectedIndex_ - 1;
   selectedPid_   = actorRows_[selectedIndex_].pid;
   cachedBeliefs_ = inspectBeliefs(*selectedPid_);
   cachedScores_  = epistemicScores(*selectedPid_);
+  actorViewport_.scrollTo(static_cast<int>(selectedIndex_));
+  markDirty();
 }
 
 std::optional<identity::ActorPid> AgentTui::selectedActor() const {
@@ -160,42 +217,23 @@ std::optional<identity::ActorPid> AgentTui::selectedActor() const {
 }
 
 std::vector<ActorRow> AgentTui::refreshActorTable() {
-  std::vector<identity::ActorPid> pids = executor_.activeActors();
-  auto runtimePids                     = runtime_.actorPids();
-  for (const auto &rpid : runtimePids) {
-    if (!std::ranges::contains(pids, rpid)) {
-      pids.push_back(rpid);
-    }
-  }
-  if (actor_) {
-    const auto &tuiPid = actor_->pid();
-    if (!std::ranges::contains(pids, tuiPid)) {
-      pids.push_back(tuiPid);
-    }
-  }
-
   std::vector<ActorRow> rows;
-  rows.reserve(pids.size());
+  auto pids = executor_.activeActors();
 
   for (const auto &pid : pids) {
-    if (actor_ && pid == actor_->pid()) {
+    if (runtime_.isStopped(pid)) {
       ActorRow row;
-      row.pid      = pid;
-      row.shortPid = pid.cursor.empty() ? pid.node : pid.cursor;
-      if (row.shortPid.size() > 10) {
-        row.shortPid = row.shortPid.substr(0, 10);
-      }
-
-      row.name          = "tui";
-      row.agentType     = "NCursesActor";
-      row.programRef    = "native:ncurses";
-      row.status        = "RUNNING";
-      row.fuelRemaining = 1'000'000'000;
-      row.cycleCount    = actor_->screen().frameCount();
-      row.scratchCells =
-          actor_->dimensions().width * actor_->dimensions().height;
+      row.pid                = pid;
+      row.shortPid           = pid.cursor.empty() ? pid.node : pid.cursor;
+      row.name               = executor_.agentName(pid).value_or("");
+      row.agentType          = executor_.agentType(pid).value_or("unknown");
+      row.programRef         = executor_.programRef(pid).value_or("");
+      row.status             = "STOPPED";
+      row.fuelRemaining      = 0;
+      row.cycleCount         = 0;
+      row.scratchCells       = 0;
       row.epistemicCells     = 0;
-      row.mailboxDepth       = actor_->hasPendingInput() ? 1 : 0;
+      row.mailboxDepth       = 0;
       row.outboxCount        = 0;
       row.statDropped        = 0;
       row.statMalformed      = 0;
@@ -256,7 +294,34 @@ std::vector<ActorRow> AgentTui::refreshActorTable() {
     rows.push_back(std::move(row));
   }
 
-  actorRows_ = rows;
+  // Include the host TUI actor in the monitor list if not already present
+  if (actor_) {
+    const auto &hostPid = actor_->pid();
+    bool foundHost      = false;
+    for (const auto &r : rows) {
+      if (r.pid == hostPid) {
+        foundHost = true;
+        break;
+      }
+    }
+    if (!foundHost) {
+      ActorRow hostRow;
+      hostRow.pid      = hostPid;
+      hostRow.shortPid = hostPid.cursor.empty() ? hostPid.node : hostPid.cursor;
+      hostRow.name     = "tui";
+      hostRow.agentType     = "NCursesActor";
+      hostRow.programRef    = "native:ncurses";
+      hostRow.status        = "RUNNING";
+      hostRow.cycleCount    = totalTurns_;
+      hostRow.fuelRemaining = 1'000'000;
+      rows.push_back(std::move(hostRow));
+    }
+  }
+
+  actorRows_               = rows;
+  actorViewport_.totalRows = static_cast<int>(actorRows_.size());
+  actorViewport_.clamp();
+
   if (selectedPid_) {
     bool found = false;
     for (std::size_t i = 0; i < actorRows_.size(); ++i) {
@@ -275,10 +340,15 @@ std::vector<ActorRow> AgentTui::refreshActorTable() {
     selectedPid_   = actorRows_.front().pid;
   }
 
+  markDirty();
   return actorRows_;
 }
 
 std::vector<std::string> AgentTui::queryVlog(std::string_view query) {
+  queryPagination_.activeQuery = std::string(query);
+  queryPagination_.solutionBuffer.clear();
+  queryPagination_.windowOffset = 0;
+
   if (!selectedPid_) {
     return {"Error: No actor selected for query"};
   }
@@ -288,32 +358,64 @@ std::vector<std::string> AgentTui::queryVlog(std::string_view query) {
     return {"Error: Selected actor has no execution context"};
   }
 
+  // Scoped evaluation frame: preserve arena marks and choice depth across turns
+  // (P22.7)
+  const auto mark = ctx->arena.mark();
   try {
     vprolog::Compiler compiler(ctx->core);
     auto compiledQuery = compiler.compileQuery(query);
-    auto solutions     = compiler.solve(compiledQuery);
+    auto solutions =
+        compiler.solve(compiledQuery, settings_.querySolutionLimit);
 
     if (solutions.empty()) {
-      return {"false."};
-    }
-
-    std::vector<std::string> results;
-    for (const auto &sol : solutions) {
-      if (sol.formatted.empty()) {
-        results.push_back("true.");
-      } else {
-        std::string line;
-        for (const auto &[var, val] : sol.formatted) {
-          if (!line.empty()) line += ", ";
-          line += var + " = " + val;
+      queryPagination_.solutionBuffer.push_back("false.");
+    } else {
+      for (const auto &sol : solutions) {
+        if (sol.formatted.empty()) {
+          queryPagination_.solutionBuffer.push_back("true.");
+        } else {
+          std::string line;
+          for (const auto &[var, val] : sol.formatted) {
+            if (!line.empty()) line += ", ";
+            line += var + " = " + val;
+          }
+          queryPagination_.solutionBuffer.push_back(line);
         }
-        results.push_back(line);
       }
     }
-    return results;
   } catch (const std::exception &e) {
-    return {std::format("Query error: {}", e.what())};
+    queryPagination_.solutionBuffer.push_back(
+        std::format("Query error: {}", e.what()));
   }
+  ctx->arena.release(mark);
+
+  std::vector<std::string> page;
+  const auto &buf = queryPagination_.solutionBuffer;
+  for (std::size_t i = 0;
+       i < std::min(buf.size(), QueryPaginationState::pageSize); ++i) {
+    page.push_back(buf[i]);
+  }
+  queryResults_ = page;
+  markDirty();
+  return page;
+}
+
+void AgentTui::nextQueryPage() {
+  const auto &buf = queryPagination_.solutionBuffer;
+  if (buf.empty()) return;
+  queryPagination_.windowOffset += QueryPaginationState::pageSize;
+  if (queryPagination_.windowOffset >= buf.size()) {
+    queryPagination_.windowOffset = 0;
+  }
+  std::vector<std::string> page;
+  const std::size_t end =
+      std::min(buf.size(),
+               queryPagination_.windowOffset + QueryPaginationState::pageSize);
+  for (std::size_t i = queryPagination_.windowOffset; i < end; ++i) {
+    page.push_back(buf[i]);
+  }
+  queryResults_ = page;
+  markDirty();
 }
 
 std::vector<BeliefRecord>
@@ -323,10 +425,10 @@ AgentTui::inspectBeliefs(const identity::ActorPid &pid) {
   auto agentCellOpt = executor_.agentCell(pid);
   if (!ctx || !agentCellOpt) return records;
 
-  auto &arena       = const_cast<ArenaManifold &>(ctx->arena);
-  auto dims         = runtime::registerDimensions(arena);
-  auto values       = runtime::valueDims(ctx->core);
-  CellRef agentCell = *agentCellOpt;
+  auto &arena               = const_cast<zigzag::ArenaManifold &>(ctx->arena);
+  auto dims                 = runtime::registerDimensions(arena);
+  auto values               = runtime::valueDims(ctx->core);
+  zigzag::CellRef agentCell = *agentCellOpt;
 
   for (const auto pred : zigzag::rankAfter(arena, agentCell, dims.belief)) {
     std::string predName  = arena.textOf(pred);
@@ -334,6 +436,16 @@ AgentTui::inspectBeliefs(const identity::ActorPid &pid) {
 
     for (const auto clause :
          zigzag::rankAfter(arena, pred, ctx->core.dims().clause)) {
+      // Step compound arguments along +d.step after +d.grab (P22.6)
+      std::string argsStr;
+      if (const auto term = arena.linked(clause, ctx->core.dims().grab)) {
+        for (const auto arg :
+             zigzag::rank(arena, *term, ctx->core.dims().step)) {
+          if (!argsStr.empty()) argsStr += ", ";
+          argsStr += formatCellArg(arena, arg);
+        }
+      }
+
       bool hasSupports = false;
       for (const auto support : zigzag::rankAfter(arena, clause, dims.source)) {
         hasSupports              = true;
@@ -362,17 +474,12 @@ AgentTui::inspectBeliefs(const identity::ActorPid &pid) {
           double score = 1.0 / (1.0 + std::max(0.0, unc));
           BeliefRecord br;
           br.predicate           = predName;
+          br.key                 = argsStr;
           br.source              = src;
           br.status              = st;
           br.acquiredUncertainty = unc;
           br.certaintyScore      = score;
           br.incarnation         = inc;
-
-          const auto term = arena.linked(clause, ctx->core.dims().grab);
-          if (term) {
-            const auto first = arena.linked(*term, ctx->core.dims().grab);
-            if (first) br.key = arena.textOf(*first);
-          }
 
           br.details = std::format(
               "{}({}) from {} [unc={:.3f}, certainty={:.2f}%, {}]", predName,
@@ -383,15 +490,11 @@ AgentTui::inspectBeliefs(const identity::ActorPid &pid) {
         if (!hasEpistemicRecords) {
           BeliefRecord br;
           br.predicate           = predName;
+          br.key                 = argsStr;
           br.source              = src;
           br.status              = "current";
           br.acquiredUncertainty = 0.0;
           br.certaintyScore      = 1.0;
-          const auto term        = arena.linked(clause, ctx->core.dims().grab);
-          if (term) {
-            const auto first = arena.linked(*term, ctx->core.dims().grab);
-            if (first) br.key = arena.textOf(*first);
-          }
           br.details =
               std::format("{}({}) from {} [certainty=100.0%, current]",
                           predName, br.key.empty() ? "_" : br.key, src);
@@ -400,24 +503,21 @@ AgentTui::inspectBeliefs(const identity::ActorPid &pid) {
       }
 
       if (!hasSupports && !hasEpistemicHead) {
-        std::string termStr;
-        const auto term = arena.linked(clause, ctx->core.dims().grab);
-        if (term) {
-          termStr = arena.textOf(*term);
-        }
         BeliefRecord br;
         br.predicate      = predName;
-        br.key            = termStr;
+        br.key            = argsStr;
         br.source         = "local";
         br.status         = "fact";
         br.certaintyScore = 1.0;
         br.details        = std::format("{}({}) [fact]", predName,
-                                        termStr.empty() ? "" : termStr);
+                                        argsStr.empty() ? "" : argsStr);
         records.push_back(std::move(br));
       }
     }
   }
 
+  beliefViewport_.totalRows = static_cast<int>(records.size());
+  beliefViewport_.clamp();
   return records;
 }
 
@@ -446,15 +546,17 @@ AgentTui::spawn(std::string_view agentType, std::string_view name,
                 runtime::WireRecord args) {
   auto result = executor_.launch(agentType, name, std::move(args));
   if (!result) {
-    std::string err = "Spawn failed: actor error";
-    actionLog_.push_back(err);
+    std::string err = std::format("Spawn failed: error code {}",
+                                  static_cast<int>(result.error()));
+    appendActionLog(err);
     return std::unexpected(err);
   }
   identity::ActorPid pid = *result;
-  actionLog_.push_back(std::format("Spawned agent '{}' of type '{}' (pid: {})",
-                                   name, agentType, pid.cursor));
+  appendActionLog(std::format("Spawned agent '{}' of type '{}' (pid: {})", name,
+                              agentType, pid.cursor));
   refreshActorTable();
   selectActor(pid);
+  markDirty();
   return pid;
 }
 
@@ -463,8 +565,9 @@ AgentTui::injectPercept(const identity::ActorPid &pid,
                         std::string_view eventType,
                         runtime::WireRecord fields) {
   executor_.percept(pid, std::string(eventType), std::move(fields));
-  actionLog_.push_back(
+  appendActionLog(
       std::format("Injected percept '{}' into pid {}", eventType, pid.cursor));
+  markDirty();
   return {};
 }
 
@@ -476,12 +579,14 @@ AgentTui::injectEvent(const identity::ActorPid &pid, std::string_view eventType,
   envelope.fields = std::move(fields);
   auto res        = executor_.deliver(pid, std::move(envelope));
   if (!res) {
-    std::string err = "Event delivery failed";
-    actionLog_.push_back(err);
+    std::string err = std::format("Event delivery failed: error code {}",
+                                  static_cast<int>(res.error()));
+    appendActionLog(err);
     return std::unexpected(err);
   }
-  actionLog_.push_back(
+  appendActionLog(
       std::format("Injected event '{}' into pid {}", eventType, pid.cursor));
+  markDirty();
   return {};
 }
 
@@ -489,27 +594,28 @@ std::size_t AgentTui::step(std::size_t turns) {
   executor_.tick();
   std::size_t ran = executor_.pumpUntilIdle(turns);
   totalTurns_ += ran;
-  actionLog_.push_back(
+  appendActionLog(
       std::format("Stepped {} turn(s) (total: {})", ran, totalTurns_));
   refreshActorTable();
   if (selectedPid_) {
     cachedBeliefs_ = inspectBeliefs(*selectedPid_);
     cachedScores_  = epistemicScores(*selectedPid_);
   }
+  markDirty();
   return ran;
 }
 
 std::size_t AgentTui::advanceClock(std::chrono::milliseconds ms) {
-  executor_.tick();
-  std::size_t ran = executor_.pumpUntilIdle();
+  auto ran = executor_.advanceSimulatedTime(ms);
   totalTurns_ += ran;
-  actionLog_.push_back(
+  appendActionLog(
       std::format("Advanced clock by {}ms, ran {} turn(s)", ms.count(), ran));
   refreshActorTable();
   if (selectedPid_) {
     cachedBeliefs_ = inspectBeliefs(*selectedPid_);
     cachedScores_  = epistemicScores(*selectedPid_);
   }
+  markDirty();
   return ran;
 }
 
@@ -519,13 +625,13 @@ AgentTui::upgrade(const identity::ActorPid &pid,
   auto prog = executor_.resolveProgram(newProgramRef);
   if (!prog) {
     std::string err = std::format("Program ref '{}' not found", newProgramRef);
-    actionLog_.push_back(err);
+    appendActionLog(err);
     return std::unexpected(err);
   }
   auto compiledProg = std::dynamic_pointer_cast<runtime::CompiledProgram>(prog);
   if (!compiledProg) {
     std::string err = "Program cannot be cast to CompiledProgram";
-    actionLog_.push_back(err);
+    appendActionLog(err);
     return std::unexpected(err);
   }
 
@@ -544,41 +650,55 @@ AgentTui::upgrade(const identity::ActorPid &pid,
   if (!res) {
     std::string err = std::format("Live upgrade failed: error code {}",
                                   static_cast<int>(res.error()));
-    actionLog_.push_back(err);
+    appendActionLog(err);
     return std::unexpected(err);
   }
-  actionLog_.push_back(std::format("Upgraded actor {} to programRef '{}'",
-                                   pid.cursor, newProgramRef));
+  appendActionLog(std::format("Upgraded actor {} to programRef '{}'",
+                              pid.cursor, newProgramRef));
   refreshActorTable();
+  markDirty();
   return {};
 }
 
 std::expected<void, std::string> AgentTui::stop(const identity::ActorPid &pid) {
   if (actor_ && pid == actor_->pid()) {
-    actionLog_.push_back(std::format("Stopping TUI actor {}", pid.cursor));
+    appendActionLog(std::format("Stopping TUI actor {}", pid.cursor));
     requestExit();
     return {};
   }
   auto res = runtime_.stop(pid);
   if (!res) {
     std::string err = "Failed to stop actor";
-    actionLog_.push_back(err);
+    appendActionLog(err);
     return std::unexpected(err);
   }
-  actionLog_.push_back(std::format("Stopped actor {}", pid.cursor));
+  appendActionLog(std::format("Stopped actor {}", pid.cursor));
   refreshActorTable();
+  markDirty();
   return {};
+}
+
+void AgentTui::appendActionLog(std::string entry) {
+  if (actionLog_.size() >= settings_.maxLogEntries) {
+    actionLog_.erase(actionLog_.begin(),
+                     actionLog_.begin() +
+                         (actionLog_.size() - settings_.maxLogEntries + 1));
+  }
+  actionLog_.push_back(std::move(entry));
+  actionLogViewport_.totalRows = static_cast<int>(actionLog_.size());
+  actionLogViewport_.scrollTo(static_cast<int>(actionLog_.size()) - 1);
+  markDirty();
 }
 
 std::optional<identity::ActorPid>
 AgentTui::resolveTarget(std::string_view targetStr) const {
-  if (targetStr.empty() || targetStr == "@selected") {
+  if (targetStr == "self" || targetStr == "selected") {
     return selectedPid_;
   }
-  for (const auto &row : actorRows_) {
-    if (row.name == targetStr || row.shortPid == targetStr ||
-        row.pid.cursor == targetStr) {
-      return row.pid;
+  for (const auto &r : actorRows_) {
+    if (r.shortPid == targetStr || r.name == targetStr ||
+        r.pid.cursor == targetStr) {
+      return r.pid;
     }
   }
   return std::nullopt;
@@ -592,7 +712,7 @@ AgentTui::executeCommand(std::string_view cmdLine) {
   const auto &cmd = tokens[0];
   if (cmd == "spawn") {
     if (tokens.size() < 3) {
-      return std::unexpected("Usage: spawn <agentType> <name> [key=val ...]");
+      return std::unexpected("Usage: spawn <type> <name> [arg=val ...]");
     }
     auto args = parseFields(tokens, 3);
     auto res  = spawn(tokens[1], tokens[2], std::move(args));
@@ -672,7 +792,6 @@ AgentTui::executeCommand(std::string_view cmdLine) {
     }
     std::string q = std::string(cmdLine.substr(6));
     auto sols     = queryVlog(q);
-    queryResults_ = sols;
     std::string summary;
     for (const auto &s : sols) {
       if (!summary.empty()) summary += "; ";
@@ -680,11 +799,18 @@ AgentTui::executeCommand(std::string_view cmdLine) {
     }
     return summary;
   }
+  if (cmd == "clear") {
+    actionLog_.clear();
+    actionLogViewport_.totalRows = 0;
+    actionLogViewport_.clamp();
+    markDirty();
+    return "Action log cleared";
+  }
   if (cmd == "help") {
     return "Commands: spawn <type> <name>, percept <target> <evt>, send "
            "<target> <evt>, "
            "step [N], advance <ms>, upgrade <target> <ref>, stop <target>, "
-           "query <vlog>, quit";
+           "query <vlog>, clear, quit";
   }
   if (cmd == "quit" || cmd == "exit") {
     requestExit();
@@ -696,42 +822,33 @@ AgentTui::executeCommand(std::string_view cmdLine) {
 }
 
 void AgentTui::handleInput(const KeyEvent &event) {
-  if (event.code == KeyCode::Escape) {
-    if (activePane_ == Pane::Monitoring) {
-      requestExit();
-    } else if (activePane_ == Pane::Querying) {
-      if (!queryInput_.empty()) {
-        queryInput_.clear();
-      } else {
-        setPane(Pane::Monitoring);
-      }
-    } else if (activePane_ == Pane::Orchestrating) {
-      if (!commandInput_.empty()) {
-        commandInput_.clear();
-      } else {
-        setPane(Pane::Monitoring);
-      }
-    }
-    return;
-  }
+  const char c = event.charValue();
 
-  // F1-F3 or Alt+1..3 pane switching
-  if (event.code == KeyCode::F1 || (event.alt && event.ch == '1')) {
+  // Global Pane Switching via F1-F3 or Alt+1..3
+  if (event.code == KeyCode::F1 ||
+      (event.alt && (c == '1' || event.codepoint == U'1'))) {
+    setInputMode(InputMode::Navigation);
     setPane(Pane::Monitoring);
     return;
   }
-  if (event.code == KeyCode::F2 || (event.alt && event.ch == '2')) {
+  if (event.code == KeyCode::F2 ||
+      (event.alt && (c == '2' || event.codepoint == U'2'))) {
+    setInputMode(InputMode::Navigation);
     setPane(Pane::Querying);
     return;
   }
-  if (event.code == KeyCode::F3 || (event.alt && event.ch == '3')) {
+  if (event.code == KeyCode::F3 ||
+      (event.alt && (c == '3' || event.codepoint == U'3'))) {
+    setInputMode(InputMode::Navigation);
     setPane(Pane::Orchestrating);
     return;
   }
 
   // Global Tab / Shift-Tab cycling across panes
-  if (event.code == KeyCode::Tab || event.ch == '\t') {
-    if (event.shift) {
+  if (event.code == KeyCode::Tab || c == '\t' ||
+      event.code == KeyCode::Backtab) {
+    setInputMode(InputMode::Navigation);
+    if (event.shift || event.code == KeyCode::Backtab) {
       if (activePane_ == Pane::Monitoring)
         setPane(Pane::Orchestrating);
       else if (activePane_ == Pane::Querying)
@@ -749,116 +866,275 @@ void AgentTui::handleInput(const KeyEvent &event) {
     return;
   }
 
-  if (activePane_ == Pane::Monitoring) {
-    if (event.code == KeyCode::Up) {
-      selectPrevActor();
-    } else if (event.code == KeyCode::Down) {
-      selectNextActor();
-    } else if (event.code == KeyCode::Char) {
-      if (event.ch == '1')
-        setPane(Pane::Monitoring);
-      else if (event.ch == '2')
-        setPane(Pane::Querying);
-      else if (event.ch == '3')
-        setPane(Pane::Orchestrating);
-      else if (event.ch == 's')
-        step(1);
-      else if (event.ch == 'q')
+  // NAVIGATION MODE DISPATCH (Invariant T4)
+  if (inputMode_ == InputMode::Navigation) {
+    if (event.code == KeyCode::Escape) {
+      if (activePane_ == Pane::Monitoring) {
         requestExit();
-      else if (event.ch == 'r')
+      } else {
+        setPane(Pane::Monitoring);
+      }
+      return;
+    }
+
+    if (event.code == KeyCode::Char) {
+      if (c == '1') {
+        setPane(Pane::Monitoring);
+        return;
+      }
+      if (c == '2') {
+        setPane(Pane::Querying);
+        return;
+      }
+      if (c == '3') {
+        setPane(Pane::Orchestrating);
+        return;
+      }
+      if (c == 'q') {
+        requestExit();
+        return;
+      }
+      if (c == 's') {
+        step(1);
+        return;
+      }
+      if (c == 'r') {
         refreshActorTable();
-    }
-  } else if (activePane_ == Pane::Querying) {
-    if (event.code == KeyCode::Enter) {
-      if (!queryInput_.empty()) {
-        queryResults_ = queryVlog(queryInput_);
-        queryInput_.clear();
+        return;
       }
-    } else if (event.code == KeyCode::Backspace) {
-      if (!queryInput_.empty()) queryInput_.pop_back();
-    } else if (event.code == KeyCode::Char) {
-      if (queryInput_.empty()) {
-        if (event.ch == '1') {
-          setPane(Pane::Monitoring);
-          return;
+      if (c == 'i' || c == ':') {
+        if (activePane_ == Pane::Querying ||
+            activePane_ == Pane::Orchestrating) {
+          setInputMode(InputMode::Edit);
         }
-        if (event.ch == '2') {
-          return;
-        }
-        if (event.ch == '3') {
-          setPane(Pane::Orchestrating);
-          return;
-        }
-        if (event.ch == 'q') {
-          requestExit();
-          return;
-        }
-        if (event.ch == 's') {
-          step(1);
-          return;
-        }
-        if (event.ch == 'r') {
-          refreshActorTable();
-          return;
-        }
+        return;
       }
-      queryInput_.push_back(event.ch);
-    } else if (event.code == KeyCode::Up) {
-      selectPrevActor();
-    } else if (event.code == KeyCode::Down) {
-      selectNextActor();
+      if (c == 'j') {
+        if (activePane_ == Pane::Monitoring)
+          selectNextActor();
+        else if (activePane_ == Pane::Querying)
+          beliefViewport_.scrollDown(1);
+        else if (activePane_ == Pane::Orchestrating)
+          actionLogViewport_.scrollDown(1);
+        markDirty();
+        return;
+      }
+      if (c == 'k') {
+        if (activePane_ == Pane::Monitoring)
+          selectPrevActor();
+        else if (activePane_ == Pane::Querying)
+          beliefViewport_.scrollUp(1);
+        else if (activePane_ == Pane::Orchestrating)
+          actionLogViewport_.scrollUp(1);
+        markDirty();
+        return;
+      }
+      if (c == ';') {
+        if (activePane_ == Pane::Querying) {
+          nextQueryPage();
+        }
+        return;
+      }
+      if (activePane_ == Pane::Querying) {
+        setInputMode(InputMode::Edit);
+        if (c != '\0') queryInput_.push_back(c);
+        markDirty();
+        return;
+      }
+      if (activePane_ == Pane::Orchestrating) {
+        setInputMode(InputMode::Edit);
+        if (c != '\0') commandInput_.push_back(c);
+        markDirty();
+        return;
+      }
     }
-  } else if (activePane_ == Pane::Orchestrating) {
+
     if (event.code == KeyCode::Enter) {
-      if (!commandInput_.empty()) {
-        auto res = executeCommand(commandInput_);
-        if (res) {
-          actionLog_.push_back(std::format("> {}", commandInput_));
-          if (!res->empty()) actionLog_.push_back(*res);
+      if (activePane_ == Pane::Querying || activePane_ == Pane::Orchestrating) {
+        setInputMode(InputMode::Edit);
+      }
+      return;
+    }
+
+    if (event.code == KeyCode::Down) {
+      if (activePane_ == Pane::Monitoring)
+        selectNextActor();
+      else if (activePane_ == Pane::Querying)
+        beliefViewport_.scrollDown(1);
+      else if (activePane_ == Pane::Orchestrating)
+        actionLogViewport_.scrollDown(1);
+      markDirty();
+      return;
+    }
+    if (event.code == KeyCode::Up) {
+      if (activePane_ == Pane::Monitoring)
+        selectPrevActor();
+      else if (activePane_ == Pane::Querying)
+        beliefViewport_.scrollUp(1);
+      else if (activePane_ == Pane::Orchestrating)
+        actionLogViewport_.scrollUp(1);
+      markDirty();
+      return;
+    }
+    if (event.code == KeyCode::PageDown) {
+      if (activePane_ == Pane::Querying)
+        beliefViewport_.pageDown();
+      else if (activePane_ == Pane::Orchestrating)
+        actionLogViewport_.pageDown();
+      markDirty();
+      return;
+    }
+    if (event.code == KeyCode::PageUp) {
+      if (activePane_ == Pane::Querying)
+        beliefViewport_.pageUp();
+      else if (activePane_ == Pane::Orchestrating)
+        actionLogViewport_.pageUp();
+      markDirty();
+      return;
+    }
+    return;
+  }
+
+  // EDIT MODE DISPATCH (Invariant T4)
+  if (inputMode_ == InputMode::Edit) {
+    if (event.code == KeyCode::Escape) {
+      if (activePane_ == Pane::Querying) {
+        if (!queryInput_.empty()) {
+          queryInput_.clear();
         } else {
-          actionLog_.push_back(
-              std::format("> {} [ERROR: {}]", commandInput_, res.error()));
-        }
-        commandInput_.clear();
-      }
-    } else if (event.code == KeyCode::Backspace) {
-      if (!commandInput_.empty()) commandInput_.pop_back();
-    } else if (event.code == KeyCode::Char) {
-      if (commandInput_.empty()) {
-        if (event.ch == '1') {
           setPane(Pane::Monitoring);
-          return;
         }
-        if (event.ch == '2') {
-          setPane(Pane::Querying);
-          return;
-        }
-        if (event.ch == '3') {
-          return;
-        }
-        if (event.ch == 'q') {
-          requestExit();
-          return;
-        }
-        if (event.ch == 's') {
-          step(1);
-          return;
-        }
-        if (event.ch == 'r') {
-          refreshActorTable();
-          return;
+      } else if (activePane_ == Pane::Orchestrating) {
+        if (!commandInput_.empty()) {
+          commandInput_.clear();
+        } else {
+          setPane(Pane::Monitoring);
         }
       }
-      commandInput_.push_back(event.ch);
-    } else if (event.code == KeyCode::Up) {
-      selectPrevActor();
-    } else if (event.code == KeyCode::Down) {
-      selectNextActor();
+      setInputMode(InputMode::Navigation);
+      markDirty();
+      return;
+    }
+
+    if (activePane_ == Pane::Querying) {
+      if (event.code == KeyCode::Enter) {
+        if (!queryInput_.empty()) {
+          queryHistory_.push_back(queryInput_);
+          queryHistoryIndex_ = queryHistory_.size();
+          queryDraft_.clear();
+          (void)queryVlog(queryInput_);
+          queryInput_.clear();
+        }
+        // Invariant T4: Retain EDIT mode upon Enter
+        markDirty();
+        return;
+      }
+      if (event.code == KeyCode::Backspace) {
+        if (!queryInput_.empty()) {
+          queryInput_.pop_back();
+          markDirty();
+        }
+        return;
+      }
+      if (event.code == KeyCode::Up) {
+        if (!queryHistory_.empty()) {
+          if (queryHistoryIndex_ == queryHistory_.size()) {
+            queryDraft_ = queryInput_;
+          }
+          if (queryHistoryIndex_ > 0) {
+            queryHistoryIndex_--;
+            queryInput_ = queryHistory_[queryHistoryIndex_];
+            markDirty();
+          }
+        }
+        return;
+      }
+      if (event.code == KeyCode::Down) {
+        if (!queryHistory_.empty() &&
+            queryHistoryIndex_ < queryHistory_.size()) {
+          queryHistoryIndex_++;
+          if (queryHistoryIndex_ == queryHistory_.size()) {
+            queryInput_ = queryDraft_;
+          } else {
+            queryInput_ = queryHistory_[queryHistoryIndex_];
+          }
+          markDirty();
+        }
+        return;
+      }
+      if (event.code == KeyCode::Char) {
+        if (c != '\0') {
+          queryInput_.push_back(c);
+          markDirty();
+        }
+        return;
+      }
+    } else if (activePane_ == Pane::Orchestrating) {
+      if (event.code == KeyCode::Enter) {
+        if (!commandInput_.empty()) {
+          commandHistory_.push_back(commandInput_);
+          commandHistoryIndex_ = commandHistory_.size();
+          commandDraft_.clear();
+          const std::string cmd = std::move(commandInput_);
+          commandInput_.clear();
+          appendActionLog(std::format("> {}", cmd));
+          auto res = executeCommand(cmd);
+          if (res) {
+            if (!res->empty()) appendActionLog(*res);
+          } else {
+            appendActionLog(std::format("[ERROR: {}]", res.error()));
+          }
+        }
+        // Invariant T4: Retain EDIT mode upon Enter
+        markDirty();
+        return;
+      }
+      if (event.code == KeyCode::Backspace) {
+        if (!commandInput_.empty()) {
+          commandInput_.pop_back();
+          markDirty();
+        }
+        return;
+      }
+      if (event.code == KeyCode::Up) {
+        if (!commandHistory_.empty()) {
+          if (commandHistoryIndex_ == commandHistory_.size()) {
+            commandDraft_ = commandInput_;
+          }
+          if (commandHistoryIndex_ > 0) {
+            commandHistoryIndex_--;
+            commandInput_ = commandHistory_[commandHistoryIndex_];
+            markDirty();
+          }
+        }
+        return;
+      }
+      if (event.code == KeyCode::Down) {
+        if (!commandHistory_.empty() &&
+            commandHistoryIndex_ < commandHistory_.size()) {
+          commandHistoryIndex_++;
+          if (commandHistoryIndex_ == commandHistory_.size()) {
+            commandInput_ = commandDraft_;
+          } else {
+            commandInput_ = commandHistory_[commandHistoryIndex_];
+          }
+          markDirty();
+        }
+        return;
+      }
+      if (event.code == KeyCode::Char) {
+        if (c != '\0') {
+          commandInput_.push_back(c);
+          markDirty();
+        }
+        return;
+      }
     }
   }
 }
 
 void AgentTui::tick() {
+  refreshActorTable();
   while (auto ev = actor_->pollInput()) {
     handleInput(*ev);
   }
@@ -868,51 +1144,180 @@ void AgentTui::tick() {
 void AgentTui::renderHeader() {
   int w = actor_->dimensions().width;
   actor_->print(0, 0, std::string(w, ' '), Style{.reverse = true});
-  actor_->print(2, 0, " VAGENT TUI ", Style{.bold = true, .reverse = true});
+  actor_->print(1, 0, "VAGENT DASHBOARD", Style{.bold = true, .reverse = true});
 
-  Style sMon = {.bold    = (activePane_ == Pane::Monitoring),
-                .reverse = (activePane_ != Pane::Monitoring)};
-  Style sQry = {.bold    = (activePane_ == Pane::Querying),
-                .reverse = (activePane_ != Pane::Querying)};
-  Style sOrc = {.bold    = (activePane_ == Pane::Orchestrating),
-                .reverse = (activePane_ != Pane::Orchestrating)};
+  Style sMon = (activePane_ == Pane::Monitoring)
+                   ? Style{.fg = Color::Cyan, .bold = true, .reverse = true}
+                   : Style{.reverse = true};
+  Style sQry = (activePane_ == Pane::Querying)
+                   ? Style{.fg = Color::Cyan, .bold = true, .reverse = true}
+                   : Style{.reverse = true};
+  Style sOrc = (activePane_ == Pane::Orchestrating)
+                   ? Style{.fg = Color::Cyan, .bold = true, .reverse = true}
+                   : Style{.reverse = true};
 
-  actor_->print(16, 0, "[1: Monitoring]", sMon);
-  actor_->print(34, 0, "[2: Querying]", sQry);
-  actor_->print(50, 0, "[3: Orchestration]", sOrc);
+  actor_->print(18, 0, "[1: Monitoring]", sMon);
+  actor_->print(35, 0, "[2: Querying]", sQry);
+  actor_->print(50, 0, "[3: Orchestrating]", sOrc);
+
+  // Mode badge (Invariant T4)
+  const std::string modeStr =
+      (inputMode_ == InputMode::Navigation) ? "[NAV]" : "[EDIT]";
+  Style modeStyle =
+      (inputMode_ == InputMode::Navigation)
+          ? Style{.fg = Color::Green, .bold = true, .reverse = true}
+          : Style{.fg = Color::Yellow, .bold = true, .reverse = true};
+  actor_->print(70, 0, modeStr, modeStyle);
+
   if (w > 85) {
-    actor_->print(72, 0, "[Tab: Next Pane]", Style{.reverse = true});
+    actor_->print(78, 0, std::format("Turns: {}", totalTurns_),
+                  Style{.reverse = true});
   }
   actor_->print(w - 10, 0, "[q: Quit]", Style{.reverse = true});
 }
 
 void AgentTui::renderMonitoringPane(int top, int bottom) {
-  int w           = actor_->dimensions().width;
-  int tableHeight = (bottom - top) * 2 / 3;
-  if (tableHeight < 6) tableHeight = 6;
+  int w = actor_->dimensions().width;
+  int h = bottom - top;
+  if (h <= 0) return;
 
-  actor_->drawBox(1, top, w - 2, tableHeight, "Live Actor Table");
+  // Responsive Master-Detail Layout (P22.6) for width >= 110 cols
+  if (w >= settings_.splitThreshold) {
+    const int masterW = 38;
+    const int detailW = w - masterW - 1;
 
-  // Table headers
+    // Left Panel: Master Actor Table
+    actor_->drawBox(0, top, masterW, h, BorderStyle::UnicodeRounded, {},
+                    "Live Actor Table");
+    actor_->print(2, top + 1, "PID", Style{.fg = Color::Cyan, .bold = true});
+    actor_->print(14, top + 1, "TYPE", Style{.fg = Color::Cyan, .bold = true});
+    actor_->print(28, top + 1, "STATUS",
+                  Style{.fg = Color::Cyan, .bold = true});
+    actor_->drawHLine(1, top + 2, masterW - 2);
+
+    const int maxVisible       = h - 4;
+    actorViewport_.visibleRows = maxVisible;
+    actorViewport_.clamp();
+
+    for (int i = 0; i < maxVisible && (actorViewport_.topIndex + i) <
+                                          static_cast<int>(actorRows_.size());
+         ++i) {
+      const int rowIdx = actorViewport_.topIndex + i;
+      const auto &row  = actorRows_[rowIdx];
+      const bool isSel = (selectedPid_ && row.pid == *selectedPid_);
+      const int y      = top + 3 + i;
+
+      Style rowStyle =
+          isSel ? Style{.fg = Color::Cyan, .bold = true, .reverse = true}
+                : Style{};
+      actor_->print(1, y, isSel ? ">" : " ", rowStyle);
+      actor_->print(2, y, row.shortPid, rowStyle);
+
+      std::string t = row.agentType;
+      if (t.size() > 12) t = t.substr(0, 12);
+      actor_->print(14, y, t, rowStyle);
+
+      Color statusCol = Color::Green;
+      if (row.status == "STOPPED")
+        statusCol = Color::Red;
+      else if (row.status == "BUSY")
+        statusCol = Color::Yellow;
+      else if (row.status == "RUNNING")
+        statusCol = Color::Cyan;
+
+      Style stStyle = rowStyle;
+      if (!isSel) stStyle.fg = statusCol;
+      actor_->print(28, y, row.status, stStyle);
+    }
+
+    // Right Panel: Detailed Metrics Card
+    actor_->drawBox(masterW, top, detailW, h, BorderStyle::UnicodeRounded, {},
+                    "Actor Details");
+    if (selectedPid_) {
+      int dy = top + 1;
+      actor_->print(masterW + 2, dy++,
+                    std::format("Node: {} | Cursor: {}", selectedPid_->node,
+                                selectedPid_->cursor),
+                    Style{.bold = true});
+      if (selectedIndex_ < actorRows_.size()) {
+        const auto &r = actorRows_[selectedIndex_];
+        actor_->print(masterW + 2, dy++,
+                      std::format("Name: {}  Type: {}  Status: {}",
+                                  r.name.empty() ? "(unnamed)" : r.name,
+                                  r.agentType, r.status));
+        actor_->print(masterW + 2, dy++,
+                      std::format("Program Ref: {}", r.programRef));
+        actor_->print(masterW + 2, dy++,
+                      std::format("Cycles: {} | Fuel Remaining: {}",
+                                  r.cycleCount, r.fuelRemaining));
+        actor_->print(masterW + 2, dy++,
+                      std::format("Scratch Cells: {} | Epistemic Cells: {}",
+                                  r.scratchCells, r.epistemicCells));
+        actor_->print(masterW + 2, dy++,
+                      std::format("Mailbox Depth: {} | Outbox Count: {}",
+                                  r.mailboxDepth, r.outboxCount));
+        actor_->print(
+            masterW + 2, dy++,
+            std::format("Stats: dropped={} malformed={} deliveryFailed={}",
+                        r.statDropped, r.statMalformed, r.statDeliveryFailed));
+        actor_->print(masterW + 2, dy++,
+                      std::format("Next Deadline: {}",
+                                  r.deadlineMs
+                                      ? std::format("{}ms", *r.deadlineMs)
+                                      : "none"));
+
+        dy++;
+        actor_->drawHLine(masterW + 1, dy++, detailW - 2);
+        actor_->print(masterW + 2, dy++,
+                      "Active Beliefs & Epistemic Cert:", Style{.bold = true});
+        const int maxBeliefPreview = h - (dy - top) - 1;
+        for (int b = 0; b < maxBeliefPreview &&
+                        b < static_cast<int>(cachedBeliefs_.size());
+             ++b) {
+          const auto &rec         = cachedBeliefs_[b];
+          const std::string gauge = renderCertaintyGauge(rec.certaintyScore, 8);
+          std::string bStr = std::format("{} {}({}) [{}]", gauge, rec.predicate,
+                                         rec.key, rec.source);
+          if (static_cast<int>(bStr.size()) > detailW - 4) {
+            bStr = bStr.substr(0, static_cast<std::size_t>(detailW - 4));
+          }
+          actor_->print(masterW + 2, dy++, bStr);
+        }
+      }
+    } else {
+      actor_->print(masterW + 2, top + 1, "No actor selected.");
+    }
+    return;
+  }
+
+  // Single full-width layout for width < 110
+  actor_->drawBox(0, top, w, h, BorderStyle::UnicodeRounded, {},
+                  "Live Actor Table");
   int y = top + 1;
-  actor_->print(3, y, "PID", Style{.fg = Color::Cyan, .bold = true});
+  actor_->print(2, y, "PID", Style{.fg = Color::Cyan, .bold = true});
   actor_->print(14, y, "TYPE/NAME", Style{.fg = Color::Cyan, .bold = true});
   actor_->print(32, y, "PROGRAM REF", Style{.fg = Color::Cyan, .bold = true});
-  actor_->print(52, y, "STATUS", Style{.fg = Color::Cyan, .bold = true});
-  actor_->print(63, y, "MBOX", Style{.fg = Color::Cyan, .bold = true});
-  actor_->print(70, y, "OUTBOX", Style{.fg = Color::Cyan, .bold = true});
-  actor_->print(78, y, "FUEL", Style{.fg = Color::Cyan, .bold = true});
-  actor_->print(88, y, "MEMORY", Style{.fg = Color::Cyan, .bold = true});
-  actor_->print(98, y, "DEADLINE", Style{.fg = Color::Cyan, .bold = true});
+  actor_->print(50, y, "STATUS", Style{.fg = Color::Cyan, .bold = true});
+  actor_->print(60, y, "MBOX", Style{.fg = Color::Cyan, .bold = true});
+  actor_->print(67, y, "OUTBOX", Style{.fg = Color::Cyan, .bold = true});
+  actor_->print(75, y, "FUEL", Style{.fg = Color::Cyan, .bold = true});
+  actor_->print(85, y, "CELLS", Style{.fg = Color::Cyan, .bold = true});
+  actor_->print(95, y, "DEADLINE", Style{.fg = Color::Cyan, .bold = true});
 
-  actor_->drawHLine(2, y + 1, w - 4);
-
+  actor_->drawHLine(1, y + 1, w - 2);
   y += 2;
-  int maxRows = tableHeight - 4;
-  for (int i = 0; i < maxRows && i < static_cast<int>(actorRows_.size()); ++i) {
-    const auto &row = actorRows_[i];
-    bool selected   = (selectedPid_ && row.pid == *selectedPid_);
-    Style style     = {.reverse = selected};
+
+  const int maxRows          = h - 4;
+  actorViewport_.visibleRows = maxRows;
+  actorViewport_.clamp();
+
+  for (int i = 0; i < maxRows && (actorViewport_.topIndex + i) <
+                                     static_cast<int>(actorRows_.size());
+       ++i) {
+    const int rowIdx    = actorViewport_.topIndex + i;
+    const auto &row     = actorRows_[rowIdx];
+    const bool selected = (selectedPid_ && row.pid == *selectedPid_);
+    Style style         = selected ? Style{.reverse = true} : Style{};
 
     Color statusCol = Color::Green;
     if (row.status == "STOPPED")
@@ -922,182 +1327,159 @@ void AgentTui::renderMonitoringPane(int top, int bottom) {
     else if (row.status == "RUNNING")
       statusCol = Color::Cyan;
 
-    actor_->print(3, y + i, row.shortPid, style);
+    actor_->print(2, y + i, row.shortPid, style);
 
     std::string typeName = row.agentType;
     if (!row.name.empty() && row.name != row.agentType) {
-      if (row.agentType.size() + row.name.size() + 3 <= 17) {
+      if (row.agentType.size() + row.name.size() + 3 <= 16) {
         typeName += " (" + row.name + ")";
       }
     }
-    if (typeName.size() > 17) typeName = typeName.substr(0, 17);
+    if (typeName.size() > 16) typeName = typeName.substr(0, 16);
     actor_->print(14, y + i, typeName, style);
 
     std::string pRef = row.programRef;
-    if (pRef.size() > 18) pRef = pRef.substr(0, 18);
+    if (pRef.size() > 16) pRef = pRef.substr(0, 16);
     actor_->print(32, y + i, pRef, style);
 
     Style stStyle = style;
     if (!selected) stStyle.fg = statusCol;
-    actor_->print(52, y + i, row.status, stStyle);
+    actor_->print(50, y + i, row.status, stStyle);
 
-    actor_->print(63, y + i, std::to_string(row.mailboxDepth), style);
-    actor_->print(70, y + i, std::to_string(row.outboxCount), style);
+    actor_->print(60, y + i, std::to_string(row.mailboxDepth), style);
+    actor_->print(67, y + i, std::to_string(row.outboxCount), style);
 
-    std::string fuelStr;
-    if (row.fuelRemaining >= 1'000'000'000) {
-      fuelStr =
-          std::format("{:.1f}G", static_cast<double>(row.fuelRemaining) / 1e9);
-    } else if (row.fuelRemaining >= 1'000'000) {
+    std::string fuelStr = std::to_string(row.fuelRemaining);
+    if (row.fuelRemaining >= 1'000'000) {
       fuelStr =
           std::format("{:.1f}M", static_cast<double>(row.fuelRemaining) / 1e6);
-    } else if (row.fuelRemaining >= 10'000) {
-      fuelStr = std::format("{}k", row.fuelRemaining / 1000);
-    } else {
-      fuelStr = std::to_string(row.fuelRemaining);
     }
-    actor_->print(78, y + i, fuelStr, style);
-    actor_->print(88, y + i,
+    actor_->print(75, y + i, fuelStr, style);
+    actor_->print(85, y + i,
                   std::format("{}c/{}e", row.scratchCells, row.epistemicCells),
                   style);
 
     std::string dl =
         row.deadlineMs ? std::format("{}ms", *row.deadlineMs) : "none";
-    actor_->print(98, y + i, dl, style);
-  }
-
-  // Details box for selected actor
-  int detailTop = top + tableHeight;
-  int detailH   = bottom - detailTop;
-  if (detailH > 3) {
-    actor_->drawBox(1, detailTop, w - 2, detailH,
-                    "Selected Actor Metrics & Stats");
-    if (selectedPid_) {
-      int dy = detailTop + 1;
-      actor_->print(3, dy,
-                    std::format("Full PID: {}:{}", selectedPid_->node,
-                                selectedPid_->cursor),
-                    Style{.bold = true});
-      dy++;
-      if (selectedIndex_ < actorRows_.size()) {
-        const auto &r = actorRows_[selectedIndex_];
-        actor_->print(
-            3, dy,
-            std::format(
-                "Cycles: {} | Dropped: {} | Malformed: {} | DeliveryFailed: {}",
-                r.cycleCount, r.statDropped, r.statMalformed,
-                r.statDeliveryFailed));
-      }
-    } else {
-      actor_->print(3, detailTop + 1, "No actor selected.");
-    }
+    actor_->print(95, y + i, dl, style);
   }
 }
 
 void AgentTui::renderQueryingPane(int top, int bottom) {
-  int w             = actor_->dimensions().width;
-  int beliefsHeight = (bottom - top) * 3 / 5;
-  if (beliefsHeight < 6) beliefsHeight = 6;
+  int w = actor_->dimensions().width;
+  int h = bottom - top;
+  if (h <= 0) return;
 
-  actor_->drawBox(1, top, w - 2, beliefsHeight,
+  int beliefsHeight = std::max(6, (h * 3) / 5);
+  actor_->drawBox(0, top, w, beliefsHeight, BorderStyle::UnicodeRounded, {},
                   "Agent Beliefs & Epistemic Certainty Scores (P18/P19)");
 
   int y = top + 1;
-  actor_->print(3, y, "PREDICATE / KEY",
+  actor_->print(2, y, "PREDICATE / KEY",
                 Style{.fg = Color::Cyan, .bold = true});
-  actor_->print(28, y, "SOURCE", Style{.fg = Color::Cyan, .bold = true});
-  actor_->print(46, y, "UNCERTAINTY", Style{.fg = Color::Cyan, .bold = true});
-  actor_->print(60, y, "CERTAINTY SCORE",
+  actor_->print(30, y, "SOURCE", Style{.fg = Color::Cyan, .bold = true});
+  actor_->print(48, y, "CERTAINTY GAUGE",
                 Style{.fg = Color::Cyan, .bold = true});
-  actor_->print(78, y, "STATUS", Style{.fg = Color::Cyan, .bold = true});
-  actor_->print(88, y, "INCARNATION", Style{.fg = Color::Cyan, .bold = true});
+  actor_->print(70, y, "STATUS", Style{.fg = Color::Cyan, .bold = true});
+  actor_->print(82, y, "INCARNATION", Style{.fg = Color::Cyan, .bold = true});
 
-  actor_->drawHLine(2, y + 1, w - 4);
+  actor_->drawHLine(1, y + 1, w - 2);
   y += 2;
 
-  int maxB = beliefsHeight - 4;
-  for (int i = 0; i < maxB && i < static_cast<int>(cachedBeliefs_.size());
+  const int maxB              = beliefsHeight - 4;
+  beliefViewport_.visibleRows = maxB;
+  beliefViewport_.clamp();
+
+  for (int i = 0; i < maxB && (beliefViewport_.topIndex + i) <
+                                  static_cast<int>(cachedBeliefs_.size());
        ++i) {
-    const auto &b = cachedBeliefs_[i];
+    const int bIdx = beliefViewport_.topIndex + i;
+    const auto &b  = cachedBeliefs_[bIdx];
     std::string predKey =
         b.key.empty() ? b.predicate : std::format("{}({})", b.predicate, b.key);
-    if (predKey.size() > 23) predKey = predKey.substr(0, 23);
+    if (predKey.size() > 26) predKey = predKey.substr(0, 26);
 
-    actor_->print(3, y + i, predKey);
-    actor_->print(28, y + i, b.source.substr(0, 16));
+    actor_->print(2, y + i, predKey);
+    actor_->print(30, y + i, b.source.substr(0, 16));
 
-    if (b.acquiredUncertainty) {
-      actor_->print(46, y + i, std::format("{:.3f}", *b.acquiredUncertainty));
-    } else {
-      actor_->print(46, y + i, "0.000");
-    }
-
-    // Certainty bar / score
-    Color scoreCol = Color::Green;
+    // Certainty bar gauge (P22.6)
+    const std::string gauge = renderCertaintyGauge(b.certaintyScore, 10);
+    Color scoreCol          = Color::Green;
     if (b.certaintyScore < 0.6)
       scoreCol = Color::Red;
     else if (b.certaintyScore < 0.85)
       scoreCol = Color::Yellow;
+    actor_->print(48, y + i, gauge, Style{.fg = scoreCol, .bold = true});
 
-    actor_->print(60, y + i,
-                  std::format("{:5.1f}% [{:.3f}]", b.certaintyScore * 100.0,
-                              b.certaintyScore),
-                  Style{.fg = scoreCol, .bold = true});
-    actor_->print(78, y + i, b.status);
-    actor_->print(88, y + i,
+    actor_->print(70, y + i, b.status);
+    actor_->print(82, y + i,
                   b.incarnation ? std::to_string(*b.incarnation) : "-");
   }
 
   if (cachedBeliefs_.empty()) {
     actor_->print(
-        3, y,
+        2, y,
         "No beliefs or epistemic observations registered for this actor.");
   }
 
-  // Vlog Query REPL box
+  // Vlog Query REPL Box
   int replTop = top + beliefsHeight;
   int replH   = bottom - replTop;
-  if (replH > 5) {
-    actor_->drawBox(1, replTop, w - 2, replH, "Vlog Deductive Query REPL");
-    actor_->print(3, replTop + 1, "Query: ?- " + queryInput_ + "_",
-                  Style{.bold = true});
-    actor_->print(3, replTop + 2,
-                  "[Enter: Run | Esc: Clear/Back | Tab: Switch Pane | 1: "
-                  "Monitor | 3: Orchestrate]",
-                  Style{.dim = true});
-    actor_->drawHLine(2, replTop + 3, w - 4);
+  if (replH > 3) {
+    actor_->drawBox(0, replTop, w, replH, BorderStyle::UnicodeRounded, {},
+                    "Vlog Deductive Query REPL [; for next page]");
 
-    int ry = replTop + 4;
-    actor_->print(3, ry, "Results:", Style{.fg = Color::Yellow});
-    ry++;
-    int maxRes = replH - 6;
+    const std::string prompt =
+        "?- " + queryInput_ + (inputMode_ == InputMode::Edit ? "_" : "");
+    actor_->print(2, replTop + 1, prompt, Style{.bold = true});
+
+    actor_->drawHLine(1, replTop + 2, w - 2);
+
+    int ry                      = replTop + 3;
+    const std::size_t totalSols = queryPagination_.solutionBuffer.size();
+    actor_->print(
+        2, ry++,
+        std::format("Solutions (page {} of {}):",
+                    totalSols == 0 ? 0
+                                   : (queryPagination_.windowOffset /
+                                          QueryPaginationState::pageSize +
+                                      1),
+                    totalSols == 0
+                        ? 0
+                        : (totalSols + QueryPaginationState::pageSize - 1) /
+                              QueryPaginationState::pageSize),
+        Style{.fg = Color::Yellow});
+
+    const int maxRes = replH - 5;
     for (int i = 0; i < maxRes && i < static_cast<int>(queryResults_.size());
          ++i) {
-      actor_->print(5, ry + i, queryResults_[i], Style{.fg = Color::Green});
+      actor_->print(4, ry + i, queryResults_[i], Style{.fg = Color::Green});
     }
-  } else if (replH > 3) {
-    actor_->drawBox(1, replTop, w - 2, replH, "Vlog Deductive Query REPL");
-    actor_->print(3, replTop + 1, "Query: ?- " + queryInput_ + "_",
-                  Style{.bold = true});
   }
 }
 
 void AgentTui::renderOrchestratingPane(int top, int bottom) {
-  int w         = actor_->dimensions().width;
-  int logHeight = (bottom - top) - 5;
-  if (logHeight < 4) logHeight = 4;
+  int w = actor_->dimensions().width;
+  int h = bottom - top;
+  if (h <= 0) return;
 
-  actor_->drawBox(1, top, w - 2, logHeight, "Orchestration Action Log");
+  const int promptH   = 4;
+  const int logHeight = std::max(4, h - promptH);
 
-  int y        = top + 1;
-  int maxLog   = logHeight - 2;
-  int startIdx = 0;
-  if (static_cast<int>(actionLog_.size()) > maxLog) {
-    startIdx = static_cast<int>(actionLog_.size()) - maxLog;
-  }
-  for (int i = 0;
-       startIdx + i < static_cast<int>(actionLog_.size()) && i < maxLog; ++i) {
-    const auto &entry = actionLog_[startIdx + i];
+  actor_->drawBox(0, top, w, logHeight, BorderStyle::UnicodeRounded, {},
+                  "Orchestration Action Log");
+
+  int y                          = top + 1;
+  const int maxLog               = logHeight - 2;
+  actionLogViewport_.visibleRows = maxLog;
+  actionLogViewport_.totalRows   = static_cast<int>(actionLog_.size());
+  actionLogViewport_.clamp();
+
+  for (int i = 0; i < maxLog && (actionLogViewport_.topIndex + i) <
+                                    static_cast<int>(actionLog_.size());
+       ++i) {
+    const int entryIdx = actionLogViewport_.topIndex + i;
+    const auto &entry  = actionLog_[entryIdx];
     Style st;
     if (entry.find("[ERROR") != std::string::npos)
       st.fg = Color::Red;
@@ -1105,30 +1487,21 @@ void AgentTui::renderOrchestratingPane(int top, int bottom) {
       st.fg = Color::Cyan;
     else
       st.fg = Color::White;
-    actor_->print(3, y + i, entry, st);
+
+    actor_->print(2, y + i, entry, st);
   }
 
   // Command prompt box
   int promptTop = top + logHeight;
-  int promptH   = bottom - promptTop;
-  if (promptH >= 5) {
-    actor_->drawBox(1, promptTop, w - 2, promptH, "Command Input");
-    actor_->print(3, promptTop + 1, "command> " + commandInput_ + "_",
-                  Style{.bold = true});
-    actor_->print(3, promptTop + 2,
-                  "[Enter: Execute | Esc: Clear/Back | Tab: Switch Pane | 1: "
-                  "Monitor | 2: Query]",
-                  Style{.dim = true});
-    actor_->print(
-        3, promptTop + 3,
-        "spawn <type> <name> | percept <pid> <evt> | send <pid> <evt> "
-        "| step [N] | advance <ms> | upgrade <pid> <ref> | stop <pid>",
-        Style{.dim = true});
-  } else if (promptH > 2) {
-    actor_->drawBox(1, promptTop, w - 2, promptH, "Command Input");
-    actor_->print(3, promptTop + 1, "command> " + commandInput_ + "_",
-                  Style{.bold = true});
-  }
+  actor_->drawBox(0, promptTop, w, promptH, BorderStyle::UnicodeRounded, {},
+                  "Command Input");
+  const std::string prompt =
+      "command> " + commandInput_ + (inputMode_ == InputMode::Edit ? "_" : "");
+  actor_->print(2, promptTop + 1, prompt, Style{.bold = true});
+  actor_->print(2, promptTop + 2,
+                "spawn <type> <name> | percept <pid> <evt> | send <pid> <evt> "
+                "| step [N] | advance <ms> | upgrade <pid> <ref> | stop <pid>",
+                Style{.dim = true});
 }
 
 void AgentTui::renderStatusBar() {
@@ -1136,11 +1509,12 @@ void AgentTui::renderStatusBar() {
   int h = actor_->dimensions().height;
   actor_->print(0, h - 1, std::string(w, ' '), Style{.reverse = true});
 
-  std::string status =
-      std::format(" Actors: {} | Total Turns: {} | Selected: {} | [Tab: Cycle "
-                  "Panes | 1/2/3: Panes | Esc: Back | q: Quit]",
-                  actorRows_.size(), totalTurns_,
-                  selectedPid_ ? selectedPid_->cursor : "none");
+  std::string status = std::format(
+      " Mode: {} │ Actors: {} │ Selected: {} │ [Tab]: Switch Pane │ [i]: Edit "
+      "│ [s]: Step │ [r]: Refresh │ [q]: Quit",
+      inputMode_ == InputMode::Navigation ? "NAV" : "EDIT", actorRows_.size(),
+      selectedPid_ ? selectedPid_->cursor : "none");
+
   if (static_cast<int>(status.size()) > w - 2) {
     status = status.substr(0, static_cast<std::size_t>(w - 2));
   }
@@ -1152,7 +1526,7 @@ void AgentTui::render() {
   renderHeader();
 
   int top    = 1;
-  int bottom = actor_->dimensions().height - 2;
+  int bottom = actor_->dimensions().height - 1;
 
   switch (activePane_) {
   case Pane::Monitoring:
@@ -1168,6 +1542,7 @@ void AgentTui::render() {
 
   renderStatusBar();
   actor_->refresh();
+  clearDirty();
 }
 
 } // namespace xanadu::vagent::tui

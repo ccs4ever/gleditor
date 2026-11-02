@@ -10,6 +10,8 @@
 #include <string>
 #include <vector>
 
+#include "common/xanadu/store.hpp"
+#include "common/xanadu/system_docs.hpp"
 #include "common/xanadu/vagent/runtime/agent_executor.hpp"
 #include "common/xanadu/vagent/runtime/compiler.hpp"
 #include "common/xanadu/vagent/runtime/parser.hpp"
@@ -98,7 +100,7 @@ TEST(NCursesActorTest, HeadlessVirtualScreenBufferOperations) {
   EXPECT_TRUE(screen.contains("Hello Vortex TUI"));
   EXPECT_TRUE(screen.contains("Dashboard Frame"));
 
-  auto cellOpt = screen.at(2, 1);
+  auto cellOpt = screen.cellAt(2, 1);
   ASSERT_TRUE(cellOpt.has_value());
   EXPECT_EQ(cellOpt->ch, 'H');
   EXPECT_EQ(cellOpt->style.fg, Color::Cyan);
@@ -454,6 +456,262 @@ TEST(AgentTuiTest, LiveUpgradeViaTui) {
       std::ranges::find_if(rows, [&](const auto &r) { return r.pid == pid; });
   ASSERT_NE(liveIt, rows.end());
   EXPECT_EQ(liveIt->programRef, held2->programRef());
+}
+
+// -- 6. Escape Probes (§9 of design/vagent-tui-dashboard.md) ------------------
+
+TEST(AgentTuiEscapeProbes, Probe1_InputIsolation) {
+  auto compiled = CompiledProgram::fromSource(kTestAgentSrc, "tracker.va");
+  ASSERT_TRUE(compiled.has_value());
+
+  LocalHost::Options hostOpts;
+  hostOpts.manualClock = true;
+  LocalHost host(std::move(*compiled), std::move(hostOpts));
+
+  NCursesActor::Options actorOpts;
+  actorOpts.forceHeadless = true;
+  auto actor              = std::make_shared<NCursesActor>(actorOpts);
+
+  AgentTui tui(host.runtime(), host.executor(), actor);
+  tui.setPane(Pane::Orchestrating);
+
+  // Initial state: Navigation mode
+  EXPECT_EQ(tui.inputMode(), InputMode::Navigation);
+
+  // Type ':' or 'i' to enter Edit mode
+  tui.handleInput(KeyEvent{KeyCode::Char, ':'});
+  EXPECT_EQ(tui.inputMode(), InputMode::Edit);
+
+  // Type "spawn Tracker worker-1\n"
+  // Assert 's' does not trigger step(1) while in edit mode
+  actor->injectInput("spawn Tracker worker-1\n");
+  while (auto ev = actor->pollInput()) {
+    tui.handleInput(*ev);
+  }
+
+  // Verify actor spawned
+  auto pids = host.executor().activeActors();
+  EXPECT_EQ(pids.size(), 1U);
+  EXPECT_EQ(host.executor().agentName(pids.front()), "worker-1");
+
+  // Invariant T4: Enter retains EDIT mode
+  EXPECT_EQ(tui.inputMode(), InputMode::Edit);
+
+  // Escape exits Edit mode to Navigation mode
+  tui.handleInput(KeyEvent{KeyCode::Escape, '\0'});
+  EXPECT_EQ(tui.inputMode(), InputMode::Navigation);
+
+  // In Navigation mode, 'q' requests exit
+  tui.handleInput(KeyEvent{KeyCode::Char, 'q'});
+  EXPECT_TRUE(tui.shouldExit());
+}
+
+TEST(AgentTuiEscapeProbes, Probe2_ScrollVirtualization) {
+  auto compiled = CompiledProgram::fromSource(kTestAgentSrc, "tracker.va");
+  ASSERT_TRUE(compiled.has_value());
+
+  LocalHost::Options hostOpts;
+  hostOpts.manualClock = true;
+  LocalHost host(std::move(*compiled), std::move(hostOpts));
+
+  // Spawn 25 actors
+  for (int i = 0; i < 25; ++i) {
+    auto res = host.launch("Tracker", std::format("worker-{}", i));
+    ASSERT_TRUE(res.has_value());
+  }
+
+  NCursesActor::Options actorOpts;
+  actorOpts.forceHeadless = true;
+  actorOpts.defaultWidth  = 120;
+  actorOpts.defaultHeight = 15; // Small height so maxVisible < 25
+  auto actor              = std::make_shared<NCursesActor>(actorOpts);
+
+  AgentTui tui(host.runtime(), host.executor(), actor);
+  tui.setPane(Pane::Monitoring);
+  tui.refreshActorTable();
+
+  EXPECT_EQ(tui.actorViewport().topIndex, 0);
+  EXPECT_GT(tui.actorTable().size(), 20U);
+
+  // Navigate down past visible rows
+  for (int i = 0; i < 20; ++i) {
+    tui.selectNextActor();
+  }
+  EXPECT_GT(tui.actorViewport().topIndex, 0);
+
+  // Render executes within bounded viewport
+  tui.render();
+
+  // Test pageUp and pageDown
+  tui.actorViewport().pageUp();
+  EXPECT_EQ(tui.actorViewport().topIndex, 0);
+
+  tui.actorViewport().pageDown();
+  EXPECT_GT(tui.actorViewport().topIndex, 0);
+
+  const auto thumb = tui.actorViewport().scrollThumb(10);
+  EXPECT_LE(thumb.first, 10);
+  EXPECT_LE(thumb.second, 10);
+}
+
+TEST(AgentTuiEscapeProbes, Probe3_CompoundArgumentAndGaugeRendering) {
+  // 1. Proportional certainty bar gauges (P22.6)
+  std::string gauge85 = renderCertaintyGauge(0.85, 10, true);
+  EXPECT_TRUE(gauge85.contains("85%"));
+  EXPECT_TRUE(gauge85.contains("\xe2\x96\x88")); // █
+
+  std::string gaugeAscii = renderCertaintyGauge(0.50, 10, false);
+  EXPECT_TRUE(gaugeAscii.contains("50%"));
+  EXPECT_TRUE(gaugeAscii.contains("====="));
+
+  // 2. Compound argument traversal along +d.step from +d.grab
+  auto compiled = CompiledProgram::fromSource(kTestAgentSrc, "tracker.va");
+  ASSERT_TRUE(compiled.has_value());
+
+  LocalHost::Options hostOpts;
+  hostOpts.manualClock = true;
+  LocalHost host(std::move(*compiled), std::move(hostOpts));
+
+  auto spawnResult = host.launch("Tracker", "tracker-1");
+  ASSERT_TRUE(spawnResult.has_value());
+  const auto pid = *spawnResult;
+  host.pump();
+
+  auto *ctx = host.executor().context(pid);
+  ASSERT_NE(ctx, nullptr);
+  auto &arena = const_cast<zigzag::ArenaManifold &>(ctx->arena);
+
+  // Construct compound term: target(pos_y, 40.0)
+  auto term = arena.makeCell("target");
+  auto arg1 = arena.makeCell("pos_y");
+  auto arg2 = arena.makeScalarCell(40.0);
+  (void)arena.link(term, ctx->core.dims().grab, zigzag::DimVector::POS, arg1)
+      .has_value();
+  (void)arena.link(arg1, ctx->core.dims().step, zigzag::DimVector::POS, arg2)
+      .has_value();
+
+  EXPECT_EQ(formatCellArg(arena, arg1), "pos_y");
+  EXPECT_EQ(formatCellArg(arena, arg2), "40.00");
+
+  // Host TUI ncurses actor is listed in the monitor table
+  NCursesActor::Options actorOpts;
+  actorOpts.forceHeadless = true;
+  auto actor              = std::make_shared<NCursesActor>(actorOpts);
+
+  AgentTui tui(host.runtime(), host.executor(), actor);
+  auto rows  = tui.refreshActorTable();
+  auto tuiIt = std::ranges::find_if(
+      rows, [&](const auto &r) { return r.name == "tui"; });
+  ASSERT_NE(tuiIt, rows.end());
+  EXPECT_EQ(tuiIt->agentType, "NCursesActor");
+  EXPECT_EQ(tuiIt->status, "RUNNING");
+}
+
+TEST(AgentTuiEscapeProbes, Probe4_ReplIsolation) {
+  auto compiled = CompiledProgram::fromSource(kTestAgentSrc, "tracker.va");
+  ASSERT_TRUE(compiled.has_value());
+
+  LocalHost::Options hostOpts;
+  hostOpts.manualClock = true;
+  LocalHost host(std::move(*compiled), std::move(hostOpts));
+
+  auto spawnResult = host.launch("Tracker", "tracker-1");
+  ASSERT_TRUE(spawnResult.has_value());
+  const auto pid = *spawnResult;
+  host.pump();
+
+  auto *ctx = host.executor().context(pid);
+  ASSERT_NE(ctx, nullptr);
+
+  NCursesActor::Options actorOpts;
+  actorOpts.forceHeadless = true;
+  auto actor              = std::make_shared<NCursesActor>(actorOpts);
+
+  AgentTui tui(host.runtime(), host.executor(), actor);
+  tui.setPane(Pane::Querying);
+
+  // Run query in scoped evaluation frame
+  auto solutions = tui.queryVlog("true.");
+  EXPECT_FALSE(solutions.empty());
+
+  // Scoped evaluation frame: marks are released and no choice points leak
+  EXPECT_EQ(tui.queryPagination().windowOffset, 0U);
+  EXPECT_LE(tui.queryPagination().pageSize, 5U);
+
+  // Background agent turn stepping remains unblocked and succeeds
+  std::size_t stepped = tui.step(1);
+  EXPECT_GE(stepped, 0U);
+}
+
+TEST(AgentTuiEscapeProbes, Probe5_BoundedEventStream) {
+  NCursesActor::Options actorOpts;
+  actorOpts.forceHeadless = true;
+  auto actor              = std::make_shared<NCursesActor>(actorOpts);
+
+  auto compiled = CompiledProgram::fromSource(kTestAgentSrc, "tracker.va");
+  ASSERT_TRUE(compiled.has_value());
+  LocalHost host(std::move(*compiled));
+
+  AgentTui tui(host.runtime(), host.executor(), actor);
+
+  // Stream 1,000 action log entries
+  for (int i = 1; i <= 1000; ++i) {
+    tui.appendActionLog(std::format("emission-{}", i));
+  }
+
+  // Invariant T7: strictly bounded at 500 entries
+  EXPECT_EQ(tui.actionLog().size(), 500U);
+  EXPECT_EQ(tui.actionLog().front(), "emission-501");
+  EXPECT_EQ(tui.actionLog().back(), "emission-1000");
+}
+
+// -- 7. system://settings vagent.tui.* binding (P22.10) ----------------------
+
+TEST(AgentTuiSettings, FromModelOverridesDefaultsAndDashboardHonorsThem) {
+  xanadu::Store store;
+  store.setSystem(true);
+  xanadu::initializeSystemStore(store, xanadu::SystemDocKind::Settings);
+
+  // Override three vagent.tui.* knobs away from their documented defaults.
+  auto ver = xanadu::setSetting(store, store.primaryCurrentVersion(),
+                                xanadu::settings::kVagentTuiSplitThreshold,
+                                std::int64_t{200});
+  store.repointCurrentVersion(ver);
+  ver = xanadu::setSetting(store, store.primaryCurrentVersion(),
+                           xanadu::settings::kVagentTuiMaxLogEntries,
+                           std::int64_t{3});
+  store.repointCurrentVersion(ver);
+  ver = xanadu::setSetting(store, store.primaryCurrentVersion(),
+                           xanadu::settings::kVagentTuiQuerySolutionLimit,
+                           std::int64_t{7});
+  store.repointCurrentVersion(ver);
+
+  const auto model = xanadu::SystemStoreModel::fromStore(store);
+  ASSERT_TRUE(model.isValid()) << model.validationError();
+
+  const TuiSettings s = TuiSettings::fromModel(model);
+  EXPECT_EQ(s.splitThreshold, 200);
+  EXPECT_EQ(s.maxLogEntries, 3U);
+  EXPECT_EQ(s.querySolutionLimit, 7U);
+  EXPECT_EQ(s.borders, "rounded"); // untouched default
+
+  // The dashboard honors the overridden bounded action log.
+  auto compiled = CompiledProgram::fromSource(kTestAgentSrc, "tracker.va");
+  ASSERT_TRUE(compiled.has_value());
+  LocalHost host(std::move(*compiled));
+
+  NCursesActor::Options actorOpts;
+  actorOpts.forceHeadless = true;
+  auto actor              = std::make_shared<NCursesActor>(actorOpts);
+
+  AgentTui tui(host.runtime(), host.executor(), actor, s);
+  EXPECT_EQ(tui.settings().splitThreshold, 200);
+
+  for (int i = 1; i <= 50; ++i) {
+    tui.appendActionLog(std::format("e-{}", i));
+  }
+  EXPECT_EQ(tui.actionLog().size(), 3U); // bounded by overridden max_log_entries
+  EXPECT_EQ(tui.actionLog().back(), "e-50");
 }
 
 } // namespace

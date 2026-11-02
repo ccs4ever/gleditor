@@ -96,18 +96,34 @@ struct KeyEvent {
   /// Only meaningful for the mouse codes.
   int mouseX{0};
   int mouseY{0};
+  char ch{'\0'};
+
+  [[nodiscard]] constexpr char charValue() const noexcept {
+    return ch != '\0' ? ch
+                      : (codepoint < 128 ? static_cast<char>(codepoint) : '\0');
+  }
 
   /// What a byte typed at a terminal means when no escape sequence is involved.
   [[nodiscard]] static KeyEvent fromChar(char c) {
-    if (c == '\n' || c == '\r') return {KeyCode::Enter, U'\n'};
-    if (c == '\t') return {KeyCode::Tab, U'\t'};
-    if (c == 27) return {KeyCode::Escape, 0};
-    if (c == 127 || c == 8) return {KeyCode::Backspace, 0};
+    if (c == '\n' || c == '\r')
+      return {KeyCode::Enter, U'\n', false, false, false, 0, 0, '\n'};
+    if (c == '\t')
+      return {KeyCode::Tab, U'\t', false, false, false, 0, 0, '\t'};
+    if (c == 27) return {KeyCode::Escape, 0, false, false, false, 0, 0, '\0'};
+    if (c == 127 || c == 8)
+      return {KeyCode::Backspace, 0, false, false, false, 0, 0, '\0'};
     return {KeyCode::Char,
-            static_cast<char32_t>(static_cast<unsigned char>(c))};
+            static_cast<char32_t>(static_cast<unsigned char>(c)),
+            false,
+            false,
+            false,
+            0,
+            0,
+            c};
   }
   [[nodiscard]] static KeyEvent character(char32_t cp) {
-    return {KeyCode::Char, cp};
+    return {KeyCode::Char, cp, false, false,
+            false,         0,  0,     static_cast<char>(cp < 128 ? cp : '\0')};
   }
   [[nodiscard]] static KeyEvent click(int x, int y) {
     KeyEvent event{KeyCode::MouseClick};

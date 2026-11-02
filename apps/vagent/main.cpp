@@ -25,11 +25,13 @@
 #include <iostream>
 #include <iterator>
 #include <optional>
+#include <poll.h>
 #include <sstream>
 #include <string>
 #include <string_view>
 #include <sys/stat.h>
 #include <thread>
+#include <unistd.h>
 #include <variant>
 #include <vector>
 
@@ -1246,7 +1248,22 @@ int runTui(const argparse::ArgumentParser &command) {
   actorOpts.forceHeadless = headless;
   auto actor = std::make_shared<xanadu::vagent::tui::NCursesActor>(actorOpts);
 
-  xanadu::vagent::tui::AgentTui tui(host.runtime(), host.executor(), actor);
+  // vagent.tui.* configuration (Proposal P22.10). vagent does not open the
+  // user's system store, so these are the documented defaults from
+  // defaultSettingSpecs(); a host that has a SystemStoreModel can override them
+  // via xanadu::vagent::tui::TuiSettings::fromModel before construction.
+  xanadu::vagent::tui::TuiSettings tuiSettings;
+
+  xanadu::vagent::tui::AgentTui tui(host.runtime(), host.executor(), actor,
+                                    tuiSettings);
+
+  // Wire HostSink emissions into the TUI action log (Proposal P22.5)
+  const auto priorSink = host.executor().hostSink();
+  host.executor().setHostSink([priorSink, &tui](const Envelope &envelope) {
+    if (priorSink) priorSink(envelope);
+    tui.appendActionLog(
+        std::format("[{}] {}", envelope.from, renderEmission(envelope)));
+  });
 
   if (step) {
     tui.step(1);
@@ -1258,9 +1275,80 @@ int runTui(const argparse::ArgumentParser &command) {
     return exitOk;
   }
 
+  // Reactive poll(2) reactor loop (Proposal P22.3, Invariant T2)
+  const std::optional<int> notifyFd = host.executor().notificationDescriptor();
+  struct pollfd fds[2];
+  bool stdinActive = isatty(STDIN_FILENO);
+
+  tui.render();
+
   while (!tui.shouldExit()) {
-    tui.tick();
-    std::this_thread::sleep_for(std::chrono::milliseconds(30));
+    // 1. Drain pending input keys
+    while (auto key = actor->pollInput()) {
+      tui.handleInput(*key);
+    }
+    if (actor->isEof()) {
+      tui.requestExit();
+      break;
+    }
+
+    // 2. Dispatch pending actor turns and timers
+    const auto now = std::chrono::system_clock::now();
+    host.executor().tick(now);
+    host.executor().pumpUntilIdle();
+
+    // 3. Render damaged regions
+    if (tui.isDirty()) {
+      tui.render();
+    }
+
+    // 4. Compute poll timeout from nearest actor timer deadline
+    int timeoutMs = -1;
+    if (actor->hasPendingInput()) {
+      timeoutMs = 0;
+    } else if (auto deadline = host.executor().earliestDeadline()) {
+      if (*deadline <= now) {
+        timeoutMs = 0;
+      } else {
+        const auto diff = std::chrono::duration_cast<std::chrono::milliseconds>(
+            *deadline - now);
+        timeoutMs = static_cast<int>(std::min<int64_t>(diff.count(), 250));
+      }
+    }
+
+    // 5. Configure descriptors
+    int nfds = 0;
+    if (stdinActive) {
+      fds[nfds].fd      = STDIN_FILENO;
+      fds[nfds].events  = POLLIN;
+      fds[nfds].revents = 0;
+      nfds++;
+    }
+    if (notifyFd) {
+      fds[nfds].fd      = *notifyFd;
+      fds[nfds].events  = POLLIN;
+      fds[nfds].revents = 0;
+      nfds++;
+    }
+
+    // 6. Block until an event or deadline arrives
+    const int ret = ::poll(fds, nfds, timeoutMs);
+    if (ret < 0) {
+      if (errno == EINTR) continue;
+      break;
+    }
+
+    // 7. Check descriptors
+    for (int i = 0; i < nfds; ++i) {
+      if (fds[i].fd == STDIN_FILENO && (fds[i].revents & (POLLHUP | POLLERR))) {
+        stdinActive = false;
+        tui.requestExit();
+      }
+      if (notifyFd && fds[i].fd == *notifyFd && (fds[i].revents & POLLIN)) {
+        host.executor().drainNotifications();
+        tui.markDirty();
+      }
+    }
   }
 
   return exitOk;

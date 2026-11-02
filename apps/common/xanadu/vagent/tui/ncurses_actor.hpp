@@ -5,125 +5,28 @@
 #ifndef COMMON_XANADU_VAGENT_TUI_NCURSES_ACTOR_HPP
 #define COMMON_XANADU_VAGENT_TUI_NCURSES_ACTOR_HPP
 
-#include <cstdint>
-#include <deque>
 #include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
-#include <vector>
 
+#include "common/ui/tui/screen_buffer.hpp"
+#include "common/ui/tui/terminal_device.hpp"
+#include "common/ui/tui/tui_types.hpp"
 #include "common/xanadu/identity/identity_layout.hpp"
 
 namespace xanadu::vagent::tui {
 
-enum class KeyCode {
-  None,
-  Char,
-  Enter,
-  Backspace,
-  Tab,
-  Escape,
-  Up,
-  Down,
-  Left,
-  Right,
-  PageUp,
-  PageDown,
-  Home,
-  End,
-  Delete,
-  F1,
-  F2,
-  F3,
-  F4,
-  F5,
-  F6,
-  F7,
-  F8,
-  F9,
-  F10,
-  F11,
-  F12
-};
-
-struct KeyEvent {
-  KeyCode code{KeyCode::None};
-  char ch{'\0'};
-  bool shift{false};
-  bool ctrl{false};
-  bool alt{false};
-
-  static KeyEvent fromChar(char c) {
-    if (c == '\n' || c == '\r') return {KeyCode::Enter, '\n'};
-    if (c == '\t') return {KeyCode::Tab, '\t'};
-    if (c == 27) return {KeyCode::Escape, '\0'};
-    if (c == 127 || c == 8) return {KeyCode::Backspace, '\0'};
-    return {KeyCode::Char, c};
-  }
-
-  bool operator==(const KeyEvent &) const = default;
-};
-
-enum class Color {
-  Default,
-  Black,
-  Red,
-  Green,
-  Yellow,
-  Blue,
-  Magenta,
-  Cyan,
-  White
-};
-
-struct Style {
-  Color fg{Color::Default};
-  Color bg{Color::Default};
-  bool bold{false};
-  bool dim{false};
-  bool underline{false};
-  bool reverse{false};
-
-  bool operator==(const Style &) const = default;
-};
-
-struct ScreenCell {
-  char ch{' '};
-  Style style{};
-
-  bool operator==(const ScreenCell &) const = default;
-};
-
-class VirtualScreenBuffer {
-public:
-  VirtualScreenBuffer(int width = 120, int height = 30);
-
-  void resize(int width, int height);
-  void clear();
-  void putChar(int x, int y, char ch, Style style = {});
-  void putString(int x, int y, std::string_view str, Style style = {});
-
-  [[nodiscard]] int width() const noexcept { return width_; }
-  [[nodiscard]] int height() const noexcept { return height_; }
-  [[nodiscard]] std::optional<ScreenCell> at(int x, int y) const;
-  [[nodiscard]] std::string line(int y) const;
-  [[nodiscard]] std::string dump() const;
-  [[nodiscard]] bool contains(std::string_view text) const;
-  [[nodiscard]] std::size_t frameCount() const noexcept { return frameCount_; }
-  void markFrame();
-
-private:
-  int width_{120};
-  int height_{30};
-  std::vector<std::vector<ScreenCell>> grid_;
-  std::size_t frameCount_{0};
-};
-
-struct TerminalDimensions {
-  int width{120};
-  int height{30};
-};
+// Re-export common TUI types in vagent::tui namespace for backward
+// compatibility
+using KeyCode             = xanadu::ui::tui::KeyCode;
+using KeyEvent            = xanadu::ui::tui::KeyEvent;
+using Color               = xanadu::ui::tui::Color;
+using Style               = xanadu::ui::tui::Style;
+using ScreenCell          = xanadu::ui::tui::ScreenCell;
+using VirtualScreenBuffer = xanadu::ui::tui::VirtualScreenBuffer;
+using TerminalDimensions  = xanadu::ui::tui::TerminalDimensions;
+using BorderStyle         = xanadu::ui::tui::BorderStyle;
 
 class NCursesActor {
 public:
@@ -146,37 +49,74 @@ public:
   [[nodiscard]] const identity::ActorPid &pid() const noexcept { return pid_; }
   void setPid(identity::ActorPid pid) { pid_ = std::move(pid); }
 
-  [[nodiscard]] bool isHeadless() const noexcept;
-  [[nodiscard]] TerminalDimensions dimensions() const;
+  [[nodiscard]] bool isHeadless() const noexcept {
+    return device_.isHeadless();
+  }
+  [[nodiscard]] TerminalDimensions dimensions() const {
+    return device_.dimensions();
+  }
 
-  void clear();
-  void print(int x, int y, std::string_view text, Style style = {});
-  void drawBox(int x, int y, int w, int h, std::string_view title = "",
-               Style style = {});
-  void drawHLine(int x, int y, int w, Style style = {});
-  void drawVLine(int x, int y, int h, Style style = {});
-  void refresh();
+  void clear(Style style = {}) { device_.clear(style); }
+  void print(int x, int y, std::string_view text, Style style = {}) {
+    device_.print(x, y, text, style);
+  }
+  void drawBox(int x, int y, int w, int h,
+               BorderStyle border = BorderStyle::UnicodeRounded,
+               Style style = {}, std::string_view title = "") {
+    device_.drawBox(x, y, w, h, border, style, title);
+  }
+  void drawBox(int x, int y, int w, int h, std::string_view title,
+               Style style = {}) {
+    device_.drawBox(x, y, w, h, BorderStyle::UnicodeRounded, style, title);
+  }
+  void drawHLine(int x, int y, int w,
+                 BorderStyle border = BorderStyle::UnicodeRounded,
+                 Style style        = {}) {
+    device_.drawHLine(x, y, w, border, style);
+  }
+  void drawHLine(int x, int y, int w, Style style) {
+    device_.drawHLine(x, y, w, BorderStyle::UnicodeRounded, style);
+  }
+  void drawVLine(int x, int y, int h,
+                 BorderStyle border = BorderStyle::UnicodeRounded,
+                 Style style        = {}) {
+    device_.drawVLine(x, y, h, border, style);
+  }
+  void drawVLine(int x, int y, int h, Style style) {
+    device_.drawVLine(x, y, h, BorderStyle::UnicodeRounded, style);
+  }
+  void refresh() { device_.refresh(); }
 
-  [[nodiscard]] std::optional<KeyEvent> pollInput();
-  void injectInput(const KeyEvent &event);
-  void injectInput(std::string_view text);
-  [[nodiscard]] bool hasPendingInput() const noexcept;
+  [[nodiscard]] std::optional<KeyEvent> pollInput() {
+    return device_.pollInput();
+  }
+  void injectInput(const KeyEvent &event) { device_.injectInput(event); }
+  void injectInput(std::string_view text) { device_.injectInput(text); }
+  [[nodiscard]] bool hasPendingInput() const noexcept {
+    return device_.hasPendingInput();
+  }
+  [[nodiscard]] bool isEof() const noexcept { return device_.isEof(); }
 
   [[nodiscard]] const VirtualScreenBuffer &screen() const noexcept {
-    return screen_;
+    return device_.screen();
   }
-  [[nodiscard]] VirtualScreenBuffer &screen() noexcept { return screen_; }
+  [[nodiscard]] VirtualScreenBuffer &screen() noexcept {
+    return device_.screen();
+  }
 
-  void shutdown();
+  [[nodiscard]] xanadu::ui::tui::TerminalDevice &device() noexcept {
+    return device_;
+  }
+  [[nodiscard]] const xanadu::ui::tui::TerminalDevice &device() const noexcept {
+    return device_;
+  }
+
+  void shutdown() { device_.shutdown(); }
 
 private:
-  struct CursesState;
-  std::unique_ptr<CursesState> cursesState_;
   Options options_;
-  bool headless_{true};
   identity::ActorPid pid_{};
-  VirtualScreenBuffer screen_;
-  std::deque<KeyEvent> inputQueue_;
+  xanadu::ui::tui::TerminalDevice device_;
 };
 
 } // namespace xanadu::vagent::tui

@@ -649,6 +649,8 @@ LIB_OBJS        := $(call obj,$(LIB_SRCS)) $(call objc,$(LIB_SRCS_C)) $(CHOREOGR
 GLEDITOR_OBJS   := $(call obj,$(GLEDITOR_SRCS))
 COMMON_XANADU_OBJS := $(call obj,$(COMMON_XANADU_SRCS))
 COMMON_UI_OBJS     := $(call obj,$(COMMON_UI_SRCS))
+COMMON_UI_TUI_SRCS := $(shell find apps/common/ui/tui -name '*.cpp' 2>/dev/null)
+COMMON_UI_TUI_OBJS := $(call obj,$(COMMON_UI_TUI_SRCS))
 XUDU_CORE_OBJS  := $(COMMON_XANADU_OBJS)
 XUZZ_OBJS       := $(call obj,$(XUZZ_SRCS))
 LIB_TEST_OBJS   := $(call obj,$(LIB_TEST_SRCS))
@@ -982,7 +984,7 @@ xuzz_test: $(OBJDIR)/xuzz_test
 # lens_file_picker.o sits with the UI sources (it is a FocusScope), but it is
 # deliberately engine-only at link time -- no renderer, no Canvas -- so the
 # headless xuzz_test can drive it.
-$(OBJDIR)/xuzz_test: $(XUZZ_TEST_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o $(OBJDIR)/apps/common/ui/lens_file_picker.o $(VAGENT_NATIVE_HOST_LIB_OBJS)
+$(OBJDIR)/xuzz_test: $(XUZZ_TEST_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o $(OBJDIR)/apps/common/ui/lens_file_picker.o $(COMMON_UI_TUI_OBJS) $(VAGENT_NATIVE_HOST_LIB_OBJS)
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS) $(TEST_LIBS) -lseccomp -ldl
 
 xudu_test: $(OBJDIR)/xudu_test
@@ -1129,7 +1131,7 @@ $(OBJDIR)/viconc: $(VICONC_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OB
 .PHONY: vagent vagent_frontend_test vagent_syntax_test vagent_runtime_test test/vagent-frontend test/vagent-syntax test/vagent-runtime
 vagent: $(OBJDIR)/vagent
 # Source checking retains the existing frontend; run/check-runtime use the actor backend.
-$(OBJDIR)/vagent: $(VAGENT_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
+$(OBJDIR)/vagent: $(VAGENT_OBJS) $(XUDU_CORE_OBJS) $(COMMON_UI_TUI_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS)
 
 .PHONY: vagent-native-host
@@ -1165,11 +1167,11 @@ test/vagent-compiler: vagent_compiler_test
 	$(OBJDIR)/vagent_compiler_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
 
 # The actor integration suite includes both frontend generations and their VM boundary tests.
-VAGENT_ACTOR_TEST_SRCS := $(filter tests/xuzz/vagent_%,$(XUZZ_TEST_SRCS)) tests/xuzz/mesh_actor_vagent_test.cpp
+VAGENT_ACTOR_TEST_SRCS := $(filter tests/xuzz/vagent_%,$(XUZZ_TEST_SRCS)) tests/xuzz/mesh_actor_vagent_test.cpp tests/xuzz/tui_foundation_test.cpp
 VAGENT_ACTOR_TEST_OBJS := $(call obj,$(VAGENT_ACTOR_TEST_SRCS))
 .PHONY: vagent_actor_test test/vagent-actor
 vagent_actor_test: $(OBJDIR)/vagent_actor_test
-$(OBJDIR)/vagent_actor_test: $(VAGENT_ACTOR_TEST_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o $(VAGENT_NATIVE_HOST_LIB_OBJS)
+$(OBJDIR)/vagent_actor_test: $(VAGENT_ACTOR_TEST_OBJS) $(XUDU_CORE_OBJS) $(COMMON_UI_TUI_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o $(VAGENT_NATIVE_HOST_LIB_OBJS)
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS) $(TEST_LIBS) -lseccomp -ldl
 
 test/vagent-actor: vagent vagent_actor_test
