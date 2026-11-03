@@ -21,6 +21,17 @@ bool pascalCase(std::string_view name) {
   return !name.empty() && name.front() >= 'A' && name.front() <= 'Z';
 }
 
+// The label scan in parseCodeBody runs on literal text before the lexer —
+// it needs the identifier charset directly (the lexer's copies live in
+// lexer.cpp's own anonymous namespace).
+bool identifierStart(char c) noexcept {
+  return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
+}
+
+bool identifierPart(char c) noexcept {
+  return identifierStart(c) || (c >= '0' && c <= '9');
+}
+
 struct Operator {
   int precedence;
   bool rightAssociative{false};
@@ -274,6 +285,85 @@ std::expected<ExprPtr, Diagnostic> Parser::parseExpression() {
     auto result = expression();
     separators();
     if (!at(TokenKind::EndOfFile)) fail("unexpected input after expression");
+    return result;
+  } catch (const Diagnostic &diagnostic) {
+    return std::unexpected(diagnostic);
+  }
+}
+
+std::expected<CodeBody, Diagnostic>
+Parser::parseCodeBody(std::string_view text, ParseLimits limits) {
+  // §5.1: '#' is not a vagent token, so a leading '#label' is consumed
+  // textually before the inner lex runs. The consumed span is blanked
+  // rather than removed, so every SourceLocation the inner parse produces
+  // stays relative to the literal's own text — the offset the
+  // src:m:l:c+o:c diagnostic convention reports.
+  std::string source{text};
+  std::size_t cursor = 0;
+  while (cursor < source.size()) {
+    const char c = source[cursor];
+    if (c != ' ' && c != '\t' && c != '\v' && c != '\f' && c != '\n' &&
+        c != '\r') {
+      break;
+    }
+    ++cursor;
+  }
+  std::optional<std::string> label;
+  if (cursor < source.size() && source[cursor] == '#') {
+    // The '#' position, tracked by hand because the inner lexer never
+    // sees it — this is the error location if no identifier follows.
+    SourceLocation hash{.line = 1, .column = 1, .offset = cursor};
+    for (std::size_t i = 0; i < cursor; ++i) {
+      const char c = source[i];
+      if (c == '\n' ||
+          (c == '\r' && (i + 1 >= cursor || source[i + 1] != '\n'))) {
+        ++hash.line;
+        hash.column = 1;
+      } else {
+        ++hash.column;
+      }
+    }
+    source[cursor] = ' ';
+    ++cursor;
+    const auto start = cursor;
+    if (cursor >= source.size() || !identifierStart(source[cursor])) {
+      return std::unexpected(
+          Diagnostic{DiagnosticCode::Syntax,
+                     "a '#' label in a code literal is '#' followed by an "
+                     "identifier",
+                     hash});
+    }
+    while (cursor < source.size() && identifierPart(source[cursor])) {
+      ++cursor;
+    }
+    label = source.substr(start, cursor - start);
+    for (std::size_t i = start; i < cursor; ++i) source[i] = ' ';
+  }
+  Parser inner(source, limits);
+  auto parsed = inner.codeBody();
+  if (!parsed) return std::unexpected(std::move(parsed.error()));
+  parsed->label = std::move(label);
+  return parsed;
+}
+
+std::expected<CodeBody, Diagnostic> Parser::codeBody() {
+  if (lexicalError_) return std::unexpected(*lexicalError_);
+  try {
+    CodeBody result;
+    layout();
+    if (at(TokenKind::Identifier) && peek(1).kind == TokenKind::Colon) {
+      // [CodeParams '|'] — a leading 'Ident :' opens the parameter header
+      // unambiguously: no Expr can begin with a type annotation, exactly
+      // the way 'Ident {' resolves to a record literal (§5.1).
+      result.parameters = parameters();
+      expect(TokenKind::Alternation,
+             "'|' after the code parameter header");
+    }
+    result.body = expression();
+    separators();
+    if (!at(TokenKind::EndOfFile)) {
+      fail("unexpected input after a code body expression");
+    }
     return result;
   } catch (const Diagnostic &diagnostic) {
     return std::unexpected(diagnostic);
@@ -737,7 +827,8 @@ ExprPtr Parser::prefix() {
   return postfix(primary());
 }
 
-ExprPtr Parser::postfix(ExprPtr base) {
+ExprPtr Parser::postfix(ExprPtr base, TokenKind *lastSuffix) {
+  TokenKind last = TokenKind::EndOfFile;
   for (;;) {
     expressionLayout();
     if (accept(TokenKind::OpenParen)) {
@@ -746,6 +837,10 @@ ExprPtr Parser::postfix(ExprPtr base) {
       auto args = arguments();
       for (auto &arg : args) call->children.push_back(std::move(arg));
       base = finish(std::move(call));
+      // Assigned after the nested parses so a postfix chain inside an
+      // argument or index cannot masquerade as this chain's outermost
+      // suffix — 'splice' peeling reads only this level's answer.
+      last = TokenKind::OpenParen;
     } else if (accept(TokenKind::OpenBracket)) {
       Mode newlines(significantNewlines_, false);
       Mode records(allowRecord_, true);
@@ -755,14 +850,17 @@ ExprPtr Parser::postfix(ExprPtr base) {
       indexed->children.push_back(expression());
       expect(TokenKind::CloseBracket, "']' after index");
       base = finish(std::move(indexed));
+      last = TokenKind::OpenBracket;
     } else if (accept(TokenKind::Dot)) {
       const auto field = anyWord();
       auto accessed    = make(ExprKind::Field, base->loc, field.text);
       accessed->children.push_back(std::move(base));
       base = finish(std::move(accessed));
+      last = TokenKind::Dot;
     } else
       break;
   }
+  if (lastSuffix != nullptr) *lastSuffix = last;
   return finish(std::move(base));
 }
 
@@ -847,11 +945,17 @@ ExprPtr Parser::primary() {
     return make(ExprKind::String, token.loc, token.stringValue);
   case TokenKind::PrefixedStringLiteral: {
     take();
-    const auto quote = token.text.find('"');
-    if (token.text.substr(0, quote) != "cells")
-      fail("unknown string prefix '" + token.text.substr(0, quote) +
-           "' (supported: cells)");
-    return make(ExprKind::Cells, token.loc, token.stringValue);
+    const auto quote  = token.text.find('"');
+    const auto prefix = token.text.substr(0, quote);
+    if (prefix == "cells")
+      return make(ExprKind::Cells, token.loc, token.stringValue);
+    // §5.1: code"…" keeps the decoded inner text raw — expand runs
+    // parseCodeBody per literal, so a malformed body is a diagnostic at
+    // the literal's own position, not a parse error here.
+    if (prefix == "code")
+      return make(ExprKind::Code, token.loc, token.stringValue);
+    fail("unknown string prefix '" + std::string(prefix) +
+         "' (supported: cells, code)");
   }
   case TokenKind::DurationLiteral:
     take();
@@ -926,6 +1030,39 @@ ExprPtr Parser::primary() {
     expect(TokenKind::Comma, "',' between findall template and term");
     result->children.push_back(term());
     expect(TokenKind::CloseParen, "')' after findall");
+    return finish(std::move(result));
+  }
+  // §5.1: 'splice' and 'static' are contextual prefix forms wherever an
+  // operand can follow — they stay legal as member names after '.' and
+  // everywhere an identifier cannot reach, but a bare one in operand
+  // position is a parse error. The decl/binding name refusals that makes
+  // permanent are the checker's reservedName, not this production's.
+  if (word("splice")) {
+    const auto splice = take();
+    if (expressionEndsHere()) fail("'splice' requires an operand");
+    // 'splice' Postfix — and when the operand's outermost postfix ends in
+    // '( args )' the arglist belongs to the splice (the peeling rule):
+    // splice inc(count) instantiates inc with count rather than splicing
+    // a call result; any other call-shaped operand is a check error.
+    TokenKind last = TokenKind::EndOfFile;
+    auto operand   = postfix(primary(), &last);
+    if (operand->kind == ExprKind::Call && last == TokenKind::OpenParen) {
+      operand->kind = ExprKind::Splice;
+      operand->loc  = splice.loc;
+      return operand;
+    }
+    auto result = make(ExprKind::Splice, splice.loc);
+    result->children.push_back(std::move(operand));
+    return finish(std::move(result));
+  }
+  if (word("static")) {
+    const auto staged = take();
+    if (expressionEndsHere()) fail("'static' requires an operand");
+    // 'static' Unary — the operand binds at unary level, so the folded
+    // form is written parenthesized: static (60 * 1000) folds the product
+    // while static 60 * 1000 folds 60 and multiplies the result (§5.5).
+    auto result = make(ExprKind::Static, staged.loc);
+    result->children.push_back(expression(11));
     return finish(std::move(result));
   }
   if (token.kind == TokenKind::Keyword && token.text != "self") {

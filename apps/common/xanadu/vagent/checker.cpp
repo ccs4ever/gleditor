@@ -1,6 +1,7 @@
 #include "common/xanadu/vagent/checker.hpp"
 
 #include "common/xanadu/vagent/cell_path.hpp"
+#include "common/xanadu/vagent/code_path.hpp"
 
 #include <algorithm>
 #include <charconv>
@@ -104,7 +105,11 @@ enum class Body {
   Answer,
   Initializer,
   Lifecycle,
-  Condition
+  Condition,
+  // A code"…" literal's body (§5.1): `return` and the plan-suspension
+  // forms are refused because they name positions a fragment never has;
+  // `:=` still gates on the incoming bounded flag.
+  Fragment
 };
 struct Context {
   const Decl *owner{};
@@ -128,23 +133,47 @@ struct Function {
   const Decl *declaration{};
 };
 
+// What check() computes per fragment record (§7.1's per-literal tables):
+// the body's checked result type T, its purity, and the declared parameter
+// count — the fields phase 3's fragment descriptor carries.
+struct FragmentInfo {
+  Type result;
+  bool pure{false};
+  std::size_t arity{0};
+};
+
 class Checker {
 public:
-  explicit Checker(const Program &program, CheckLimits limits)
-      : program_(program), limits_(limits),
+  Checker(const Program &program, CheckLimits limits,
+          const FragmentTable &fragments)
+      : program_(program), limits_(limits), fragments_(fragments),
         inheritanceWork_(limits.maxInheritanceWork),
         purityWork_(limits.maxPurityWork),
         resolutionWork_(limits.maxResolutionWork) {}
   std::expected<void, std::vector<Diagnostic>> run();
 
 private:
+  // Inside a code"…" body every node loc is literal-relative, so one
+  // innerDiagnostic arm per enclosing literal lands the src:m:l:c+o:c
+  // chain — outermost literal's own loc first (§5.1).
+  Diagnostic mapInner(Diagnostic diagnostic) const {
+    for (auto it = innerLiterals_.rbegin(); it != innerLiterals_.rend(); ++it)
+      diagnostic = innerDiagnostic(std::move(diagnostic), *it);
+    return diagnostic;
+  }
   void report(DiagnosticCode code, std::string detail, SourceLocation loc) {
-    diagnostics_.push_back({code, std::move(detail), loc});
+    diagnostics_.push_back(mapInner(Diagnostic{code, std::move(detail), loc}));
   }
   void require(bool condition, DiagnosticCode code, std::string detail,
                SourceLocation loc) {
     if (!condition) report(code, std::move(detail), loc);
   }
+  // §5.1's reservation rule: splice/static (and run/value_of once std:meta
+  // is imported) are contextual keywords, so declarations and bindings
+  // that would shadow them are refused; `$`-bearing names on user-supplied
+  // decls are refused too — the expand stage owns the cap$N namespace and
+  // snake() accepts '$' today.
+  void reservedName(std::string_view name, SourceLocation loc);
   void preflight() const;
   void buildResolutionIndex();
   bool sameSignature(const Decl &left, const Decl &right) const;
@@ -203,6 +232,13 @@ private:
 
   const Program &program_;
   CheckLimits limits_;
+  const FragmentTable &fragments_;
+  std::map<FragmentKey, FragmentInfo> fragmentInfo_;
+  // Enclosing code"…" literals' locs, outermost first — each a position in
+  // its parent's text coordinates. Body diagnostics wrap through
+  // innerDiagnostic per level when they surface.
+  std::vector<SourceLocation> innerLiterals_;
+  bool metaImported_{false};
   Symbols globals_;
   std::vector<Diagnostic> diagnostics_;
   std::map<const Decl *, bool> pure_;
@@ -526,6 +562,24 @@ bool Checker::subtype(std::string_view actual,
   return inherits(actual, expected, DeclKind::Event);
 }
 
+void Checker::reservedName(std::string_view name, SourceLocation loc) {
+  if (name.find('$') != std::string_view::npos) {
+    report(DiagnosticCode::InvalidIdentifier,
+           "name '" + std::string(name) +
+               "' may not contain '$'; the expand stage owns the cap$N "
+               "namespace",
+           loc);
+  }
+  if (name == "splice" || name == "static" ||
+      (metaImported_ && (name == "run" || name == "value_of"))) {
+    report(DiagnosticCode::InvalidIdentifier,
+           "'" + std::string(name) +
+               "' is a reserved contextual keyword; declarations and "
+               "bindings may not shadow it",
+           loc);
+  }
+}
+
 bool Checker::compatible(const Type &actual, const Type &expected) const {
   if (actual == bottom || actual == unknown || expected == unknown ||
       actual == any || expected == any)
@@ -536,6 +590,12 @@ bool Checker::compatible(const Type &actual, const Type &expected) const {
       return compatible(actual.arguments.front(), expected.arguments.front());
     return compatible(actual, expected.arguments.front());
   }
+  // Bare Code is the §6.1 parameterized wildcard: it accepts a fragment of
+  // any result type, while Code<T> stays invariant in T (§5.2 — a
+  // Code<Int> never fits a Str slot or a Code<Str>).
+  if (expected.name == "Code" && expected.arguments.empty() &&
+      actual.name == "Code")
+    return true;
   if (actual.name != expected.name) return subtype(actual.name, expected.name);
   if (actual.arguments.size() != expected.arguments.size()) return false;
   for (std::size_t i = 0; i < actual.arguments.size(); ++i) {
@@ -553,16 +613,20 @@ void Checker::expectType(const Type &actual, const Type &expected,
 void Checker::validateType(const Type &type, SourceLocation loc) {
   static const std::set<std::string_view> scalars{
       "Int",   "Float", "Str",       "Bool",  "()",    "Duration", "Time",
-      "Agent", "Space", "Intention", "Timer", "Event", "Cell"};
+      "Agent", "Space", "Intention", "Timer", "Event", "Cell",     "Code"};
   const auto *decl = global(type.name);
   const bool user =
       decl && (decl->kind == DeclKind::Record || decl->kind == DeclKind::Event);
   std::size_t arity = type.name == "List" || type.name == "Opt" ? 1U
                       : type.name == "Map"                      ? 2U
                                                                 : 0U;
-  require(scalars.contains(type.name) || user || arity != 0,
+  // §5.2's arity chain: Code maps to 0-or-1 — Code<T> the typed fragment,
+  // bare Code the §6.1 wildcard.
+  const bool codeArity = type.name == "Code" && type.arguments.size() <= 1;
+  require(scalars.contains(type.name) || user || arity != 0 || codeArity,
           DiagnosticCode::UnknownName, "unknown type '" + type.name + "'", loc);
-  require(type.arguments.size() == arity, DiagnosticCode::TypeMismatch,
+  require(codeArity || type.arguments.size() == arity,
+          DiagnosticCode::TypeMismatch,
           "wrong number of type arguments for '" + type.name + "'", loc);
   for (const auto &argument : type.arguments) validateType(argument, loc);
 }
@@ -604,6 +668,7 @@ void Checker::parameters(const Decl &decl) {
     validateType(parameter.type, parameter.loc);
     require(snake(parameter.name), DiagnosticCode::InvalidIdentifier,
             "parameter/field names must be snake_case", parameter.loc);
+    reservedName(parameter.name, parameter.loc);
     require(names.insert(parameter.name).second, DiagnosticCode::DuplicateName,
             "duplicate parameter/field '" + parameter.name + "'",
             parameter.loc);
@@ -863,6 +928,16 @@ bool Checker::pureBody(const Expr &expression, const Decl *owner) {
     const auto path = parseCellsPath(expression.text, expression.loc);
     return !(path && path->mutating);
   }
+  case ExprKind::Code:
+    // §5.2: the literal itself is a pure value — it produces a fragment and
+    // has no run-time arena effect, whatever the body's own purity is.
+    return true;
+  case ExprKind::Splice:
+  case ExprKind::Static:
+    // Unexpanded forms never type as pure — expand refuses them before
+    // check in the real pipeline, and a direct-check caller gets the same
+    // conservative answer.
+    return false;
   default:
     break;
   }
@@ -1015,9 +1090,10 @@ Type Checker::term(const Expr &expression, Environment &env, Context context,
       }
       auto found = env.find(argument.text);
       if (found == env.end()) {
-        if (bind)
+        if (bind) {
+          reservedName(argument.text, argument.loc);
           env[argument.text] = {expected, true, context.depth};
-        else
+        } else
           report(DiagnosticCode::UnknownName,
                  "asserted facts must be ground; unbound '" + argument.text +
                      "'",
@@ -1374,6 +1450,7 @@ Type Checker::infer(const Expr &expression, Environment &env, Context context) {
     require(snake(expression.text) && expression.text != "_",
             DiagnosticCode::InvalidIdentifier,
             "local names must be snake_case and cannot be '_'", expression.loc);
+    reservedName(expression.text, expression.loc);
     auto rhs    = operand(context);
     rhs.bounded = context.bounded && !expression.children.empty() &&
                   directWaitPosition(*expression.children.front());
@@ -1514,6 +1591,7 @@ Type Checker::infer(const Expr &expression, Environment &env, Context context) {
     if (expression.binding && *expression.binding != "_") {
       require(snake(*expression.binding), DiagnosticCode::InvalidIdentifier,
               "loop binding must be snake_case", expression.loc);
+      reservedName(*expression.binding, expression.loc);
       local[*expression.binding] = {element, true, context.depth + 1};
     }
     if (expression.children.size() > 1)
@@ -1658,8 +1736,10 @@ Type Checker::infer(const Expr &expression, Environment &env, Context context) {
               "unknown awaited event '" + expression.text + "'",
               expression.loc);
       result = named(expression.text);
-      if (expression.binding)
+      if (expression.binding) {
+        reservedName(*expression.binding, expression.loc);
         env[*expression.binding] = {result, true, context.depth};
+      }
     }
     if (expression.guard) condition(*expression.guard, env, operand(context));
     return recover(expression, result, env, context);
@@ -1716,6 +1796,74 @@ Type Checker::infer(const Expr &expression, Environment &env, Context context) {
     return unit;
   case ExprKind::Fail:
     return bottom;
+  case ExprKind::Code: {
+    // §5.2/§7.1: a code"…" literal is a pure Code<T> value; T is the body's
+    // checked result type, computed at the literal's position under the
+    // checker's own env walk (still the scope truth until phase 2's
+    // stamp-honoring). The record lookup keys on the literal's
+    // SourceLocation plus stamp ordinal, so cloneExpr'd copies share it.
+    const FragmentKey key{expression.loc, expression.stamp
+                                              ? expression.stamp->ordinal
+                                              : std::nullopt};
+    const auto found = fragments_.find(key);
+    if (found == fragments_.end()) {
+      report(DiagnosticCode::InvalidDeclaration,
+             "code\"…\" literal has no fragment-table record; the expand "
+             "stage must run before check",
+             expression.loc);
+      return unknown;
+    }
+    const auto &record = found->second;
+    if (!record.body) return unknown; // expand already reported the body
+    // Every loc in the record is literal-relative; pushing the literal's
+    // own loc makes report() qualify body diagnostics in the
+    // src:m:l:c+o:c convention (§5.1), nesting included.
+    innerLiterals_.push_back(expression.loc);
+    // The body binds its declared CodeParams in a copy of the literal's
+    // env — writable locals, same as let-bound names — and checks as
+    // ordinary code in the literal's own position mask, with the fragment
+    // body kind so `return` and the suspension forms stay refused (§5.1,
+    // M6) no matter which position the literal sits in.
+    auto local = copyEnvironment(env, expression.loc);
+    auto &info = fragmentInfo_[key];
+    info.arity = record.parameters.size();
+    std::set<std::string> names;
+    for (const auto &parameter : record.parameters) {
+      validateType(parameter.type, parameter.loc);
+      require(snake(parameter.name), DiagnosticCode::InvalidIdentifier,
+              "parameter/field names must be snake_case", parameter.loc);
+      reservedName(parameter.name, parameter.loc);
+      require(
+          names.insert(parameter.name).second, DiagnosticCode::DuplicateName,
+          "duplicate code parameter '" + parameter.name + "'", parameter.loc);
+      local[parameter.name] = {parameter.type, true, context.depth + 1};
+    }
+    auto bodyContext        = context;
+    bodyContext.body        = Body::Fragment;
+    bodyContext.suspend     = false;
+    bodyContext.stageEffect = false;
+    bodyContext.result      = std::nullopt;
+    bodyContext.discard     = false;
+    auto result             = infer(*record.body, local, bodyContext);
+    // A body that can never produce (always fails) types as Code<()>.
+    info.result = result == bottom ? unit : result;
+    info.pure   = pureBody(*record.body, context.owner);
+    innerLiterals_.pop_back();
+    return {"Code", {info.result}};
+  }
+  case ExprKind::Splice:
+  case ExprKind::Static:
+    // The pipeline refuses both kinds in expand, so check never meets them;
+    // a direct check() on an unexpanded tree gets the same named refusal —
+    // the env-walk fallback keeps old callers working, it does not revive
+    // forms that must not reach lowering.
+    report(DiagnosticCode::Unsupported,
+           "'" +
+               std::string(expression.kind == ExprKind::Splice ? "splice"
+                                                               : "static") +
+               "' is refused by the phase-1 expand skeleton",
+           expression.loc);
+    return unknown;
   }
   report(DiagnosticCode::InvalidDeclaration, "unknown expression kind",
          expression.loc);
@@ -1814,6 +1962,7 @@ void Checker::declaration(const Decl &decl, const Decl *owner) {
   if (valueNameDeclaration)
     require(snake(decl.name), DiagnosticCode::InvalidIdentifier,
             "value/method/plan names must be snake_case", decl.loc);
+  reservedName(decl.name, decl.loc);
   parameters(decl);
   if (decl.result) validateType(*decl.result, decl.loc);
   if (decl.kind == DeclKind::Event || decl.kind == DeclKind::Capacity) {
@@ -1960,6 +2109,7 @@ void Checker::declaration(const Decl &decl, const Decl *owner) {
         for (const auto &name : *decl.planBindings) {
           require(bindings.insert(name).second, DiagnosticCode::DuplicateName,
                   "duplicate plan binding '" + name + "'", decl.loc);
+          reservedName(name, decl.loc);
           resolutionWork(decl.loc);
           const auto &parameters = parameterIndex_.at(target);
           auto parameter         = parameters.find(name);
@@ -1995,6 +2145,7 @@ void Checker::declaration(const Decl &decl, const Decl *owner) {
       if (decl.binding) {
         require(snake(*decl.binding), DiagnosticCode::InvalidIdentifier,
                 "handler binding must be snake_case", decl.loc);
+        reservedName(*decl.binding, decl.loc);
         env[*decl.binding] = {named(decl.name), true, 1};
       }
     }
@@ -2061,14 +2212,19 @@ std::expected<void, std::vector<Diagnostic>> Checker::run() try {
   for (const auto &imported : program_.imports) {
     const bool supported =
         imported.path == "std:agent" || imported.path == "std:goal";
+    // §5.1: run/value_of become reserved names under the meta import. The
+    // import itself is refused below until the package machinery lands —
+    // both diagnostics are wanted, not either/or.
+    metaImported_ = metaImported_ || imported.path == "std:meta";
     require(supported, DiagnosticCode::InvalidDeclaration,
             "module loading is not available for import '" + imported.path +
                 "'",
             imported.loc);
   }
   static const std::set<std::string_view> builtinTypes{
-      "Int",   "Float",     "Str",   "Bool",  "Duration", "Time", "Agent",
-      "Space", "Intention", "Timer", "Event", "List",     "Map",  "Opt"};
+      "Int",   "Float", "Str",   "Bool",      "Duration",
+      "Time",  "Agent", "Space", "Intention", "Timer",
+      "Event", "List",  "Map",   "Opt",       "Code"};
   for (const auto &decl : program_.declarations) {
     require(!builtinTypes.contains(decl.name), DiagnosticCode::DuplicateName,
             "declaration shadows built-in type '" + decl.name + "'", decl.loc);
@@ -2103,15 +2259,24 @@ std::expected<void, std::vector<Diagnostic>> Checker::run() try {
   if (!diagnostics_.empty()) return std::unexpected(std::move(diagnostics_));
   return {};
 } catch (const Diagnostic &diagnostic) {
-  diagnostics_.push_back(diagnostic);
+  diagnostics_.push_back(mapInner(diagnostic));
   return std::unexpected(std::move(diagnostics_));
 }
 
 } // namespace
 
+std::expected<void, std::vector<Diagnostic>>
+check(const Program &program, const FragmentTable &fragments,
+      CheckLimits limits) {
+  return Checker(program, limits, fragments).run();
+}
+
 std::expected<void, std::vector<Diagnostic>> check(const Program &program,
                                                    CheckLimits limits) {
-  return Checker(program, limits).run();
+  // The env-walk fallback: callers that never ran resolve/expand check
+  // against an empty table; stamps are not yet consumed either way, and a
+  // Code node found with no record is a named refusal in both paths.
+  return check(program, FragmentTable{}, limits);
 }
 
 } // namespace xanadu::vagent

@@ -2,7 +2,11 @@
 #define COMMON_XANADU_VAGENT_CHECKER_HPP
 
 #include <cstddef>
+#include <cstdint>
 #include <expected>
+#include <map>
+#include <optional>
+#include <tuple>
 #include <vector>
 
 #include "common/xanadu/vagent/ast.hpp"
@@ -24,8 +28,37 @@ struct CheckLimits {
   std::size_t maxTypeDepth{256};
   // Includes declarations, expressions and type nodes in the preflight.
   std::size_t maxAstNodes{1'000'000};
+  // §5.6 per-compile expansion counters (design/vagent-metaprogramming.md):
+  // each nested code"…" body spawns a fresh Parser whose own limits would
+  // not accumulate, so literal nesting and substitution totals live here
+  // and the expand stage threads them through its per-literal work.
+  std::size_t maxExpansionDepth{64};
+  std::size_t maxSplices{10'000};
 };
 
+// The §5.6 fragment table: one parsed CodeBody per code"…" literal —
+// expand's per-literal parseCodeBody output (the optional '#' label, the
+// optional CodeParams '|' header, and the body's parsed AST, all locs
+// literal-relative), keyed by the literal's FragmentKey so cloneExpr'd
+// copies share the record. check() computes the checked result type T,
+// the body's purity, and the declared arity from a record — the
+// per-literal data §7.1's fragment tables and, later, the phase-3
+// fragment descriptor read. A null body means the literal's body failed
+// to parse; expand already reported it, so check() skips it quietly.
+using FragmentTable = std::map<FragmentKey, CodeBody>;
+
+// The phase-1 signature (r1-disposition I3): the fragment table produced by
+// expand lands with its consumer — a Code node whose key has no record is a
+// named refusal, because a table-less check() can only mean the pipeline
+// skipped expand.
+[[nodiscard]] std::expected<void, std::vector<Diagnostic>>
+check(const Program &program, const FragmentTable &fragments,
+      CheckLimits limits = {});
+
+// The un-stamped/records-absent entry point. check() is a public API whose
+// existing callers parse but never resolve or expand, so the env walk
+// covers absent resolve stamps (the F2 env-walk fallback); a Code node with
+// no matching record is still a named refusal.
 [[nodiscard]] std::expected<void, std::vector<Diagnostic>>
 check(const Program &program, CheckLimits limits = {});
 

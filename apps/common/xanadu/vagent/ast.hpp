@@ -5,6 +5,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -98,15 +99,34 @@ using ExprPtr = std::unique_ptr<Expr>;
 // resolved in — carried on every Expr, not only Identifier, so expand can
 // seed a code"…" body subtree from its literal's own scope — and `ordinal`
 // identifies one binding within that scope, present on Identifier and
-// LogicVariable nodes only, so two bindings in one scope never share a
-// stamp. Absent until resolve runs; cloneExpr and cloneDecl preserve it
-// verbatim because kernel side tables key on `const Expr *` — a
-// pointer-keyed stamp table would die under cloning.
+// LogicVariable nodes. A Code node's ordinal is a *fragment* ordinal
+// instead — minted program-wide, it distinguishes two literals that share
+// a SourceLocation coordinate space (nested literals in different bodies)
+// — so (loc, ordinal) stays a unique fragment identity. Absent until
+// resolve runs; cloneExpr and cloneDecl preserve it verbatim because
+// kernel side tables key on `const Expr *` — a pointer-keyed stamp table
+// would die under cloning.
 struct ScopeStamp {
   std::uint64_t scope{0};
   std::optional<std::uint64_t> ordinal;
   bool operator==(const ScopeStamp &) const = default;
 };
+
+// The §5.6 fragment-table key: a code"…" literal's SourceLocation plus the
+// fragment ordinal its ScopeStamp carries (absent for a literal resolve
+// never env-walked — a stampScopeOnly'd subtree — where loc alone is the
+// key). cloneExpr preserves both fields, so every clone of one literal
+// resolves to the original's record.
+struct FragmentKey {
+  SourceLocation loc{};
+  std::optional<std::uint64_t> ordinal;
+};
+[[nodiscard]] inline bool operator<(const FragmentKey &left,
+                                    const FragmentKey &right) {
+  return std::tie(left.loc.line, left.loc.column, left.loc.offset,
+                  left.ordinal) < std::tie(right.loc.line, right.loc.column,
+                                           right.loc.offset, right.ordinal);
+}
 
 // Fixed-role optional expressions avoid positional sentinels for scope,
 // recipients, deadline, guard and recovery in actions. Ordinary operands are
@@ -132,6 +152,20 @@ struct Parameter {
   Type type;
   bool key{false};
   SourceLocation loc{};
+};
+
+// §5.1's CodeBody (design/vagent-metaprogramming.md) — the parsed inner
+// text of a code"…" literal, produced by Parser::parseCodeBody. `label`
+// is the optional '#'-prefixed user label on the fragment head (§6.7);
+// `parameters` the optional 'Ident : Type {,…} |' template signature;
+// `body` the fragment expression. Every SourceLocation inside is a
+// literal-relative inner offset — the src:m:l:c+o:c convention qualifies
+// them with the literal's own loc at report time (code_path's
+// innerDiagnostic).
+struct CodeBody {
+  std::optional<std::string> label;
+  std::vector<Parameter> parameters;
+  ExprPtr body;
 };
 
 struct Contract {

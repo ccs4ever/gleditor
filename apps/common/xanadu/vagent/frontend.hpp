@@ -22,14 +22,14 @@ struct FrontendLimits {
 // The §5.6 pipeline driver (design/vagent-metaprogramming.md) — parse →
 // resolve → expand → check — owning invocation order for one standalone
 // source unit. The returned Program is parsed, resolve-stamped (a
-// ScopeStamp on every evaluated Expr) and checked; a stage's diagnostics end
-// the pipeline, and the parser's single Diagnostic arrives as a one-element
-// vector so callers see one error stream.
+// ScopeStamp on every evaluated Expr), expanded and checked; a stage's
+// diagnostics end the pipeline, and the parser's single Diagnostic
+// arrives as a one-element vector so callers see one error stream.
 //
-// Phase 0 ships parse → resolve → check: the expand stage is sequenced
-// under its final name in frontend.cpp — expand.cpp lands the skeleton in
-// phase 1 and the real Program → Program composition stage in phase 2, and
-// per-literal resolve seeding for code"…" bodies lands with it.
+// Phase 1 runs the expand skeleton: literal bodies are parsed and
+// seed-resolved, splice/static are uniformly refused, and the fragment
+// table expand emits flows into check(program, table). Phase 2 fills the
+// real Program → Program composition stage.
 [[nodiscard]] std::expected<Program, std::vector<Diagnostic>>
 compile(std::string_view source, FrontendLimits limits = {});
 

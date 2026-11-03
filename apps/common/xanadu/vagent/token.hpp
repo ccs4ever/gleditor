@@ -72,12 +72,21 @@ enum class DiagnosticCode : std::uint8_t {
   ImpureCondition,
   MissingDeadline,
   InvalidDeclaration,
+  // A construct the grammar accepts but the current pipeline phase refuses
+  // — the phase-1 expand skeleton's answer to every Splice/Static node.
+  Unsupported,
 };
 
 struct Diagnostic {
   DiagnosticCode code{DiagnosticCode::Syntax};
   std::string detail;
   SourceLocation loc{};
+  // §5.1 inner offsets (design/vagent-metaprogramming.md): a diagnostic
+  // raised inside a code"…" body is reported at the literal's own loc
+  // qualified by each enclosing level's '+<off-line>:<off-col>' arm,
+  // outermost first — the src:m:l:c+o:c convention. Built by code_path's
+  // innerDiagnostic; empty for every other diagnostic.
+  std::vector<SourceLocation> inner;
 };
 
 [[nodiscard]] std::string_view diagnosticCodeName(DiagnosticCode code) noexcept;

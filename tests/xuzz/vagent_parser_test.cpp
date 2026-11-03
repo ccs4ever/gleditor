@@ -550,6 +550,194 @@ TEST(VAgentParserTest, UnknownStringPrefixIsRefused) {
             std::string::npos);
 }
 
+TEST(VAgentParserTest, CodeStringParsesAsADedicatedExpression) {
+  auto parsed = Parser(R"(code"x + w")").parseExpression();
+  ASSERT_TRUE(parsed) << formatDiagnostic(parsed.error());
+  ASSERT_TRUE(*parsed);
+  EXPECT_EQ((*parsed)->kind, ExprKind::Code);
+  // The literal keeps its decoded inner text raw — expand runs
+  // parseCodeBody per literal, not the parser.
+  EXPECT_EQ((*parsed)->text, "x + w");
+}
+
+TEST(VAgentParserTest, SpliceParsesAPrefixedPostfixOperand) {
+  auto parsed = Parser("splice c").parseExpression();
+  ASSERT_TRUE(parsed) << formatDiagnostic(parsed.error());
+  ASSERT_EQ((*parsed)->kind, ExprKind::Splice);
+  ASSERT_EQ((*parsed)->children.size(), 1U);
+  EXPECT_EQ((*parsed)->children[0]->kind, ExprKind::Identifier);
+  EXPECT_EQ((*parsed)->children[0]->text, "c");
+}
+
+TEST(VAgentParserTest, SpliceCallPeelsTheArglist) {
+  // §5.1's peeling rule: the operand's outermost postfix ends in parens,
+  // so the arglist belongs to the splice — children[0] is the fragment
+  // name, the rest its actuals.
+  auto parsed = Parser("splice inc(count)").parseExpression();
+  ASSERT_TRUE(parsed) << formatDiagnostic(parsed.error());
+  ASSERT_EQ((*parsed)->kind, ExprKind::Splice);
+  ASSERT_EQ((*parsed)->children.size(), 2U);
+  EXPECT_EQ((*parsed)->children[0]->kind, ExprKind::Identifier);
+  EXPECT_EQ((*parsed)->children[0]->text, "inc");
+  EXPECT_EQ((*parsed)->children[1]->kind, ExprKind::Identifier);
+  EXPECT_EQ((*parsed)->children[1]->text, "count");
+}
+
+TEST(VAgentParserTest, SpliceParenthesizedCallStaysCallShaped) {
+  // 'splice (f(x))' splices a call result — the arglist never reached the
+  // operand's outermost postfix, so it stays a call-shaped operand for
+  // the checker to refuse.
+  auto parsed = Parser("splice (inc(count))").parseExpression();
+  ASSERT_TRUE(parsed) << formatDiagnostic(parsed.error());
+  ASSERT_EQ((*parsed)->kind, ExprKind::Splice);
+  ASSERT_EQ((*parsed)->children.size(), 1U);
+  EXPECT_EQ((*parsed)->children[0]->kind, ExprKind::Call);
+}
+
+TEST(VAgentParserTest, SpliceFieldOrIndexOperandDoesNotPeel) {
+  auto field = Parser("splice inc(count).frag").parseExpression();
+  ASSERT_TRUE(field) << formatDiagnostic(field.error());
+  ASSERT_EQ((*field)->kind, ExprKind::Splice);
+  ASSERT_EQ((*field)->children.size(), 1U);
+  EXPECT_EQ((*field)->children[0]->kind, ExprKind::Field);
+  auto indexed = Parser("splice fragments[0]").parseExpression();
+  ASSERT_TRUE(indexed) << formatDiagnostic(indexed.error());
+  ASSERT_EQ((*indexed)->kind, ExprKind::Splice);
+  ASSERT_EQ((*indexed)->children.size(), 1U);
+  EXPECT_EQ((*indexed)->children[0]->kind, ExprKind::Index);
+}
+
+TEST(VAgentParserTest, SpliceRequiresAnOperand) {
+  EXPECT_FALSE(Parser("splice").parseExpression());
+  // A newline after 'splice' refuses rather than swallowing the next
+  // statement's expression as the operand.
+  EXPECT_FALSE(Parser("splice\nc + 1").parseExpression());
+}
+
+TEST(VAgentParserTest, SpliceAndStaticStayLegalMemberNames) {
+  // Contextual words: any Word may follow '.', so members named splice or
+  // static remain callable.
+  auto parsed = Parser("x.splice(3) + y.static").parseExpression();
+  ASSERT_TRUE(parsed) << formatDiagnostic(parsed.error());
+  EXPECT_EQ((*parsed)->kind, ExprKind::Binary);
+}
+
+TEST(VAgentParserTest, StaticParsesAUnaryPrefixedOperand) {
+  auto folded = Parser("static (60 * 1000)").parseExpression();
+  ASSERT_TRUE(folded) << formatDiagnostic(folded.error());
+  ASSERT_EQ((*folded)->kind, ExprKind::Static);
+  ASSERT_EQ((*folded)->children.size(), 1U);
+  EXPECT_EQ((*folded)->children[0]->kind, ExprKind::Binary);
+  // 'static' is Unary-prefixed: the operand binds at unary level, so
+  // 'static 60 * 1000' folds 60 and multiplies the result (§5.5).
+  auto unparenthesized = Parser("static 60 * 1000").parseExpression();
+  ASSERT_TRUE(unparenthesized) << formatDiagnostic(unparenthesized.error());
+  ASSERT_EQ((*unparenthesized)->kind, ExprKind::Binary);
+  EXPECT_EQ((*unparenthesized)->text, "*");
+  ASSERT_EQ((*unparenthesized)->children.size(), 2U);
+  EXPECT_EQ((*unparenthesized)->children[0]->kind, ExprKind::Static);
+  EXPECT_EQ((*unparenthesized)->children[0]->children[0]->kind,
+            ExprKind::Integer);
+}
+
+TEST(VAgentParserTest, StaticRequiresAnOperand) {
+  EXPECT_FALSE(Parser("static").parseExpression());
+  EXPECT_FALSE(Parser("static\n60 * 1000").parseExpression());
+}
+
+TEST(VAgentParserTest, CodeTypeSyntaxParsesTypedAndBareForms) {
+  // 'Code<T>' and bare 'Code' parse through the ordinary type production —
+  // the 0-or-1 arity chain is the checker's (§5.2).
+  auto parsed = Parser::parseCodeBody("f: Code<Int>, g: Code | splice f");
+  ASSERT_TRUE(parsed) << formatDiagnostic(parsed.error());
+  ASSERT_EQ(parsed->parameters.size(), 2U);
+  EXPECT_EQ(typeName(parsed->parameters[0].type), "Code<Int>");
+  EXPECT_EQ(typeName(parsed->parameters[1].type), "Code");
+  EXPECT_EQ(parsed->body->kind, ExprKind::Splice);
+}
+
+TEST(VAgentParserTest, ParseCodeBodyParsesPlainLabelledAndParameterized) {
+  auto plain = Parser::parseCodeBody("x + w");
+  ASSERT_TRUE(plain) << formatDiagnostic(plain.error());
+  EXPECT_FALSE(plain->label);
+  EXPECT_TRUE(plain->parameters.empty());
+  ASSERT_TRUE(plain->body);
+  EXPECT_EQ(plain->body->kind, ExprKind::Binary);
+
+  auto labelled = Parser::parseCodeBody("#inc n: Int | n + 1");
+  ASSERT_TRUE(labelled) << formatDiagnostic(labelled.error());
+  ASSERT_TRUE(labelled->label);
+  EXPECT_EQ(*labelled->label, "inc");
+  ASSERT_EQ(labelled->parameters.size(), 1U);
+  EXPECT_EQ(labelled->parameters[0].name, "n");
+  EXPECT_EQ(labelled->parameters[0].type.name, "Int");
+  ASSERT_TRUE(labelled->body);
+  EXPECT_EQ(labelled->body->kind, ExprKind::Binary);
+
+  auto two = Parser::parseCodeBody("w: Int, b: Bool | if b then w + 1 else w");
+  ASSERT_TRUE(two) << formatDiagnostic(two.error());
+  EXPECT_FALSE(two->label);
+  ASSERT_EQ(two->parameters.size(), 2U);
+  EXPECT_EQ(two->parameters[1].name, "b");
+  EXPECT_EQ(two->parameters[1].type.name, "Bool");
+  EXPECT_EQ(two->body->kind, ExprKind::If);
+}
+
+TEST(VAgentParserTest, ParseCodeBodyReportsLiteralRelativeLocations) {
+  // The '#'-strip blanks the consumed span, so a syntax error inside the
+  // literal reports literal-relative inner coordinates — the reporter
+  // qualifies them into src:m:l:c+o:c (code_path's innerDiagnostic).
+  auto parsed = Parser::parseCodeBody("#lab x + )");
+  ASSERT_FALSE(parsed);
+  EXPECT_EQ(parsed.error().loc.line, 1U);
+  EXPECT_EQ(parsed.error().loc.column, 10U);
+  EXPECT_TRUE(parsed.error().inner.empty());
+}
+
+TEST(VAgentParserTest, ParseCodeBodyRefusesMalformedLabelsAndTrailing) {
+  EXPECT_FALSE(Parser::parseCodeBody("#"));
+  EXPECT_FALSE(Parser::parseCodeBody("#9x e"));
+  EXPECT_FALSE(Parser::parseCodeBody("# e"));
+  EXPECT_FALSE(Parser::parseCodeBody("x y"));
+  EXPECT_FALSE(Parser::parseCodeBody(""));
+}
+
+TEST(VAgentParserTest, ParseCodeBodyParsesSpliceAndStaticInside) {
+  auto splice = Parser::parseCodeBody("x + splice c");
+  ASSERT_TRUE(splice) << formatDiagnostic(splice.error());
+  ASSERT_EQ(splice->body->children.size(), 2U);
+  EXPECT_EQ(splice->body->children[1]->kind, ExprKind::Splice);
+  auto staged = Parser::parseCodeBody("splice inc(static (2 * 3000))");
+  ASSERT_TRUE(staged) << formatDiagnostic(staged.error());
+  ASSERT_EQ(staged->body->kind, ExprKind::Splice);
+  ASSERT_EQ(staged->body->children.size(), 2U);
+  EXPECT_EQ(staged->body->children[1]->kind, ExprKind::Static);
+  // The inner grammar is the vagent grammar, so a nested code"…" literal
+  // parses as an inner literal — escaped one level in the source spelling.
+  auto nested =
+      Parser::parseCodeBody("x + splice code\"n: Int | n + 1\"(x)");
+  ASSERT_TRUE(nested) << formatDiagnostic(nested.error());
+  ASSERT_EQ(nested->body->kind, ExprKind::Binary);
+  const auto &inner = *nested->body->children[1];
+  ASSERT_EQ(inner.kind, ExprKind::Splice);
+  ASSERT_EQ(inner.children.size(), 2U);
+  EXPECT_EQ(inner.children[0]->kind, ExprKind::Code);
+  EXPECT_EQ(inner.children[0]->text, "n: Int | n + 1");
+}
+
+TEST(VAgentParserTest, ParseCodeBodyParsesHeaderlessAndEmptyForms) {
+  auto unit = Parser::parseCodeBody("()");
+  ASSERT_TRUE(unit) << formatDiagnostic(unit.error());
+  EXPECT_EQ(unit->body->kind, ExprKind::Unit);
+  auto block = Parser::parseCodeBody("{ x := 1; x }");
+  ASSERT_TRUE(block) << formatDiagnostic(block.error());
+  EXPECT_EQ(block->body->kind, ExprKind::Block);
+  // An assignment body is a legal Expr — its impurity is the checker's.
+  auto assign = Parser::parseCodeBody("w := 3");
+  ASSERT_TRUE(assign) << formatDiagnostic(assign.error());
+  EXPECT_EQ(assign->body->kind, ExprKind::Binary);
+}
+
 TEST(VAgentParserTest, ConfiguredLimitsBoundRecursionAndConstructedTrees) {
   ParseLimits limits;
   limits.maxDepth = 12;

@@ -43,13 +43,20 @@ struct WalkContext {
 
 class Resolver {
 public:
-  Resolver(Program &program, ResolveLimits limits)
-      : program_(program), limits_(limits) {}
+  // `shared` is the pipeline's id space and literal-seed sink: null means a
+  // standalone resolve (checker tests) and a private space is used, so the
+  // stamps are still consistent within this run.
+  Resolver(Program &program, ResolveLimits limits, LiteralSeeds *shared)
+      : program_(program), limits_(limits),
+        shared_(shared == nullptr ? &internal_ : shared),
+        record_(shared != nullptr) {}
   std::expected<void, std::vector<Diagnostic>> run();
+  std::expected<void, std::vector<Diagnostic>>
+  fragment(Expr &body, const LiteralSeed &seed);
 
 private:
   void work(SourceLocation loc, std::size_t amount = 1) const;
-  std::uint64_t freshId() { return ++lastScopeId_; }
+  std::uint64_t freshId() { return ++shared_->nextScope; }
   Scope copy(const Scope &scope, SourceLocation loc);
   ScopeStamp &mint(Scope &scope, const std::string &name, SourceLocation loc);
   void buildIndexes();
@@ -87,7 +94,9 @@ private:
       parameterIndex_;
   std::set<std::pair<const Decl *, const Decl *>> checkedGoals_;
   std::set<const Decl *> checkedGoalDeclarations_;
-  std::uint64_t lastScopeId_{0};
+  LiteralSeeds internal_;
+  LiteralSeeds *shared_;
+  bool record_;
   mutable std::size_t resolutionWork_{limits_.maxResolutionWork};
 };
 
@@ -654,6 +663,32 @@ void Resolver::walk(Expr &expression, Scope &env, WalkContext context,
     for (auto &child : expression.children)
       stampScopeOnly(*child, env.id, depth + 1);
     return;
+  case ExprKind::Code:
+    // The literal takes its enclosing scope plus a program-wide fragment
+    // ordinal — (loc, ordinal) is the fragment-table key the skeleton
+    // emits under and check() reads back, and cloneExpr'd copies share
+    // both, so clones resolve to the original's record (§5.6). The body
+    // text stays unresolved until expand parses it and resumes here via
+    // resolveFragment; the env snapshot recorded now is that call's seed.
+    expression.stamp = ScopeStamp{env.id, shared_->nextOrdinal++};
+    if (record_) {
+      work(expression.loc, env.bindings.size());
+      shared_->byLiteral.try_emplace(
+          FragmentKey{expression.loc, expression.stamp->ordinal},
+          LiteralSeed{*expression.stamp, context.owner, env.bindings});
+    }
+    return;
+  case ExprKind::Splice:
+  case ExprKind::Static:
+    // Phase 1's expand refuses both before check ever meets them; resolve
+    // still walks the operand so the subtree reads as visited and stamped.
+    for (auto &child : expression.children)
+      if (child) walk(*child, env, operand, depth + 1);
+    for (const auto *slot :
+         {&expression.scope, &expression.recipients, &expression.deadline,
+          &expression.guard, &expression.recovery})
+      if (*slot) walk(**slot, env, operand, depth + 1);
+    return;
   }
   // Unhandled kinds are the checker's "unknown expression kind" refusal;
   // the scope stamp above is all resolve owes them.
@@ -795,11 +830,31 @@ std::expected<void, std::vector<Diagnostic>> Resolver::run() try {
   return std::unexpected(std::vector{diagnostic});
 }
 
+std::expected<void, std::vector<Diagnostic>>
+Resolver::fragment(Expr &body, const LiteralSeed &seed) try {
+  buildIndexes();
+  // A fresh scope under the shared id space, pre-bound with the literal's
+  // env snapshot: free names keep their literal-position binding
+  // identities while bindings minted inside the body get scope ids the
+  // program never issued.
+  Scope env{freshId(), seed.bindings, 0};
+  walk(body, env, WalkContext{seed.owner, false}, 1);
+  return {};
+} catch (const Diagnostic &diagnostic) {
+  return std::unexpected(std::vector{diagnostic});
+}
+
 } // namespace
 
-std::expected<void, std::vector<Diagnostic>> resolve(Program &program,
-                                                     ResolveLimits limits) {
-  return Resolver(program, limits).run();
+std::expected<void, std::vector<Diagnostic>>
+resolve(Program &program, LiteralSeeds *seeds, ResolveLimits limits) {
+  return Resolver(program, limits, seeds).run();
+}
+
+std::expected<void, std::vector<Diagnostic>>
+resolveFragment(Program &program, Expr &body, const LiteralSeed &seed,
+                LiteralSeeds &shared, ResolveLimits limits) {
+  return Resolver(program, limits, &shared).fragment(body, seed);
 }
 
 } // namespace xanadu::vagent
