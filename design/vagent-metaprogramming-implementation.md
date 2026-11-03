@@ -5,9 +5,10 @@ P15/P16 approvals). That document is the *what* and *why*; this is the *order*. 
 dependency-sorted so each ships a usable capability and leaves the tree green. Section numbers (`§`)
 refer to the design doc; `P15`/`P16`/`P17` to its §10.2 register; `U-M*` to its §15 deferred list.
 v2 repartitioned per the round-1 review (`r1-disposition.md` under
-`design/projects/vagent-metaprogramming-impl-review/`); v3 applies the round-2 disposition
-(`r2-disposition.md`, same directory) — genesis (e)'s dim-record arm, the re-genesis loop's
-producer, and a minor bundle.
+`design/projects/vagent-metaprogramming-impl-review/`); v3 applied the round-2 disposition — genesis
+(e)'s dim-record arm, the re-genesis loop's producer, and a minor bundle; v4 applies the round-3
+disposition (`r3-disposition.md`, same directory) — `splice`'s call-by-value marshalling, the
+re-genesis loop's promote-visible mutation class and root, and a minor bundle.
 
 Ordering logic: nothing runtime-mutating lands before the frontend can represent fragments; nothing
 durable lands before mutation exists; the phase-5↔6 boundary is *transport*, not *genesis* —
@@ -73,8 +74,8 @@ of duplicating it.
   scope-id on every `Expr`, plus binding-ordinal on `Identifier`s — `expand` seeds a body subtree
   from its literal's `Expr`, so the scope-id cannot live on `Identifier` alone.
 - `ast_clone.{hpp,cpp}` — `cloneExpr`/`cloneDecl`/`cloneProgram` deep copy covering every `Expr`
-  field — the `ExprPtr` children (scope/recipients/ deadline/guard/recovery/parallel names) and the
-  value fields (`text`, `names`, `annotation`, `binding`, `loc`; `loc` is what keeps `+o:c`
+  field — the `ExprPtr` children (scope, `recipients`/`deadline`/`guard`/`recovery`, parallel names)
+  and the value fields (`text`, `names`, `annotation`, `binding`, `loc`; `loc` is what keeps `+o:c`
   inner-offset diagnostics alive through substitution). `Decl`-granularity for M13.
 - `frontend.{hpp,cpp}` — the driver sequencing parse → resolve → expand → check; owns invocation
   order and per-literal resolve seeding (§5.6, §10.1). It sequences an `expand` seam phase 1 fills
@@ -99,8 +100,11 @@ the field exists to serve.
 pipeline — with `splice`/`static` uniformly refused. Compile-time surface only.
 
 - `parser.cpp`: `code` in the `PrefixedStringLiteral` gate (:848-855 precedent from `cells"…"`);
-  `Primary`/`Type` productions; `parseCodeBody` (#label/CodeParams header, inner-offset diagnostics,
-  `#` stripped pre-lex).
+  `Primary`/`Type` productions; the `splice`/`static` prefix *productions* themselves — `static`
+  `Unary`-prefixed with a mandatory operand (spec :960-961), `splice` wherever an operand can follow
+  (§5.1) — without them the skeleton's refusal exercises parse errors, not the named
+  `DiagnosticCode`; `parseCodeBody` (#label/CodeParams header, inner-offset diagnostics, `#`
+  stripped pre-lex).
 - `ast.hpp`: `ExprKind::{Code,Splice,Static}` + the `Expr` scope-stamp field (additive — see phase
   0's ordering note).
 - `code_path.{hpp,cpp}` — narrowing + `src:m:l:c+o:c` diagnostic mapping (mirrors `cell_path`);
@@ -122,10 +126,10 @@ pipeline — with `splice`/`static` uniformly refused. Compile-time surface only
 - `checker.cpp`: `Code` scalar + 0-or-1 arity chain (arity 0 = wildcard; bare `Code` = parameterized
   wildcard); `Code` joins the `builtinTypes` shadow set (`checker.cpp:2069`); `check` gains the
   fragment-table parameter — `check(program, table)` lands *with its producer*; the signature change
-  ripples to `vagent_checker_test.cpp`'s ~10 `check(*program)` call sites (the suite bypasses
-  resolve/expand — a defaulted parameter, or a test-file edit beside `main.cpp`'s); the `Code` arm
-  looks the record up and checks the body under the checker's own env walk (still the scope truth
-  until phase 2's stamp-honoring) to compute `T`, purity and arity (§5.2, §7.1);
+  ripples to `vagent_checker_test.cpp`'s ~25 `check(*program)` call sites (the suite bypasses
+  resolve/expand — a defaulted parameter, or a test-file edit, beside the `main.cpp` rewiring); the
+  `Code` arm looks the record up and checks the body under the checker's own env walk (still the
+  scope truth until phase 2's stamp-honoring) to compute `T`, purity and arity (§5.2, §7.1);
   `CheckLimits::maxExpansionDepth`/ `maxSplices` threaded counters (`checker.hpp:12-27`);
   `$`-bearing user-name refusal; §5.1's reserved-name refusals — `def`/`method`/
   `let`/`var`/parameter declarations named `splice` or `static`, which must land in the same phase
@@ -151,50 +155,60 @@ evaluation — with zero runtime mutation. This is the "compile time" half of th
 independently shippable.
 
 - `expand.{hpp,cpp}` — the real stage's composition semantics (§5.6): scope walk over resolve's
-  stamps, `cap$N` aliasing + env records, `$`-anchor rewriting, splice substitution via `cloneExpr`,
-  `Code`-splice `def` expansion (its refusal edges: the named `recursive-template` `DiagnosticCode`,
-  the control-flow bar in template bodies — `return`/`yield`/`consume`/ `terminate`, and the
-  `effect`/`native`/`capacity`/`graft_method` bar), residual-splice check, the statically-known
-  judgment (transitive, post-substitution, §5.2) — and **dead-`let` erasure** (§5.4): a `let` left
-  dead by full substitution is erased, or refused where erasure is unsafe; mandatory for splice-only
-  literals and for §9.1/§9.4's `let x := code"…"` residue. The fragment table is already emitted by
-  phase 1's skeleton; this phase extends it to clones and splices and re-clones each record's body
-  per emission — the `Emitter`'s per-`compileStatement` tables key on `const Expr *`
-  (`compiler.cpp:884-891`), so a second emission of the same nodes would double-register
-  `localReferences_`.
+  stamps, `cap$N` aliasing + env records, `$`-anchor rewriting, splice substitution via `cloneExpr`
+  **call-by-value** (§5.4): each argument binds a fresh `let` local at the expanded body's head,
+  evaluated once in argument order — the `{ let p0 := count; p0 + 1 }` shape §9.1 spells — with
+  parameter references re-pointed at the synthesized bindings; M13's non-`Code` args marshal
+  identically, and the synthesized `let` is the design's only one — `cap$N` remains a pure alias
+  (§5.3 — textual substitution would yield observable multi-eval on impure actuals). `Code`-splice
+  `def` expansion (its refusal edges: the named `recursive-template` `DiagnosticCode`, the
+  control-flow bar in template bodies — `return`/`yield`/`consume`/ `terminate`, the
+  `effect`/`native`/`capacity`/`graft_method` bar, opaque `Code` actuals, and `splice c := 3` —
+  cap$N is not re-assignable, spec :464-470), residual-splice check, the statically-known judgment
+  (transitive, post-substitution, §5.2) — and **dead-`let` erasure** (§5.4): a `let` left dead by
+  full substitution is erased, or refused where erasure is unsafe; mandatory for splice-only
+  literals and for §9.1/§9.4's `let x := code"…"` residue. A `Code`-parameterized (splice-only)
+  literal is refused in evaluated positions — never a `let`/`var` initializer or call argument — and
+  emits no head and no descriptor (§5.4 :924-934; the `run`/`graft` refusal arm lands with the
+  member surface in phase 3). The fragment table is already emitted by phase 1's skeleton; this
+  phase extends it to clones and splices and re-clones each record's body per emission — the
+  `Emitter`'s per-`compileStatement` tables key on `const Expr *` (`compiler.cpp:884-891`), so a
+  second emission of the same nodes would double-register `localReferences_`.
 - `checker.cpp`: `static`'s checker-side refusal set, all four §5.5 arms — the `pureBody` impurity
   bar, the arena-reading *form* bar (`cells"…"` any mode, `believes`, `findall`, `run`, the implicit
   `self`/`parent`/`inner`/`outer`/`occurrence` names), the literal-expressible result-type rule
   (`Int`/`Float`/`Str`/`Bool`/`()` — a `Cell`/`Code` result is a stale-handle refusal), and
   closedness; position-mask re-verification; stamp-honoring (resolve owns name truth) — the
   un-stamped-input rule resolves to **env-walk fallback**: `check()` is a public API
-  (`checker.hpp:30`) whose ~10 existing `vagent_checker_test.cpp` call sites never run resolve, so
+  (`checker.hpp:30`) whose ~25 existing `vagent_checker_test.cpp` call sites never run resolve, so
   refusing un-stamped `Identifier`s breaks the suite — stamps are honored where present, the env
   walk covers their absence; a `Code` node with no table record is a named refusal. **Per-fragment
   arity/purity/`closed` tables** (§5.6) — `closed` is computed here off the per-fragment
-  *outside-reference classification* `expand` leaves behind: `cap$N` captures and name-resolvable
-  program refs both count *toward* `closed`; a program-side ref carrying neither is the refused
-  class that clears it (§6.1's glossary, spec :158). The flag lands in these tables —
-  `compileFragment` reads it into the descriptor in phase 3; `learn` re-verifies it in phase 4. Body
-  `run(`/resolver calls stay illegal-but-uncheckable until phase 3's member surface — refuse them as
-  unknown names, a noted interim limitation, not a regression.
+  *outside-reference classification* `expand` leaves behind: state-side refs (`cap$N` captures,
+  `cells"…"`-path ref-box `int64` slots) and name-resolvable program refs count *toward* `closed`; a
+  program-side ref carrying neither is the refused class that clears it (the §2 glossary, spec
+  :158). The flag lands in these tables — `compileFragment` reads it into the descriptor in phase 3;
+  `learn` re-verifies it in phase 4. Body `run(`/resolver calls stay illegal-but-uncheckable until
+  phase 3's member surface — refuse them as unknown names, a noted interim limitation, not a
+  regression.
 - `compiler.cpp`: merged-AST lowering — a surviving `ExprKind::Code` or `Splice` (a `let`-bound
   literal not fully substituted, a `code` value passed to `run`) gets a named compile refusal, never
-  an unhandled-kind path; `static` evaluation — no-mark `vm_.run(cursor, staticFuel)`, cursor
-  unlink, post-run `choiceDepth`/`outstandingMarks` baseline check (`compiler.cpp:108-110`
-  precedent); **`staticFuel` joins `ScalarCompilerLimits`** (`compiler.hpp:23-26`, spec :3070-3072 —
-  the sibling of phase 1's `CheckLimits` budgets; without it a divergent `static` loops the
-  compile); `cap$N` `CompilerBindings` emission (cap$N lookups bypass `binding()`'s unvalued render
-  check and read `externalReferences_` directly — §5.3, `compiler.cpp:160-181`), including the
-  `CompilerBinding` **state-side marker bit** §10.1 adds for `closed`'s provenance (spec :2958-2959
-  — the struct is `{cell, type}` today, `compiler.hpp:15-18`; the bit is new work here, not an
-  existing field).
+  an unhandled-kind path; `static` evaluation — no-mark `vm_.run(cursor, staticFuel)`, the
+  type-matched `result`-cell read (`CellValue`, mismatch is its own refusal), cursor unlink, the
+  value emitted as `literal()` in the enclosing graph, and the post-run
+  `choiceDepth`/`outstandingMarks` baseline check (`compiler.cpp:108-110` precedent, spec :952-955);
+  **`staticFuel` joins `ScalarCompilerLimits`** (`compiler.hpp:23-26`, spec :3070-3072 — the sibling
+  of phase 1's `CheckLimits` budgets; without it a divergent `static` loops the compile); `cap$N`
+  `CompilerBindings` emission (cap$N lookups bypass `binding()`'s unvalued render check and read
+  `externalReferences_` directly — §5.3, `compiler.cpp:160-181`), including the `CompilerBinding`
+  **state-side marker bit** §10.1 adds for `closed`'s provenance (spec :2958-2959 — the struct is
+  `{cell, type}` today, `compiler.hpp:15-18`; the bit is new work here, not an existing field).
 
 **Requires:** the scalar kernel only; kernel-simulable in `xuzz_test`-linked harnesses (`static`
 runs the VM, so `vagent check` cannot exercise it — the binary links no kernel, Makefile:1147).
 
 **Exit:** §9.1 expands → checks → lowers → runs under the ScalarHarness shape
-(`tests/xuzz/vagent_compiler_test.cpp:18-46`); §9.4 expand+check only — its `plan`/`where`/`emit`
+(`tests/xuzz/vagent_compiler_test.cpp:22-53`); §9.4 expand+check only — its `plan`/`where`/`emit`
 are outside today's scalar subset (spec :2905-2907), so assert the merged AST/fragment table via a
 test accessor; hygiene tests (§5.3 — merged-code `cap$N` resolution; capture-liveness and dead-frame
 rules need phase-3 `run`); expansion-depth/splice-limit refusals; `static` refusals per §5.5 arm —
@@ -207,47 +221,57 @@ in a kernel-linked test.
 recipe — and `std:meta`'s non-mutation half is reachable through `import std:meta`. Runtime
 structure, still session scope.
 
-- `fragment.{hpp,cpp}` — `compileFragment`: head cell, descriptor — the signature-as-cells: ordered
-  `(name, type)` parameter cells (count = arity), the result type name, the `pure`/`closed` flags,
-  `effect`-ness, and the `result`/`produced` records `run` derefs through `+d.values` (§6.1, spec
-  :914-920, :1377-1384); it carries phase 2's computed `closed` flag off the per-fragment tables,
-  with the `CompilerBinding` marker bit phase 2 adds as its provenance — `+d.refs` mark rank,
-  `+d.recipe` emission around the kernel (§6.1, §10.1). The **`+d.refs`/ `+d.recipe` record schema
-  is this phase's emission contract**, stated in full: the `+d.name`-on-record name-record vs
-  ref-record discriminator, the `+d.grab→"call"/"run"` role labels, the `+d.refFor` slot pairing,
-  `+d.name` on a `+d.recipe` member reserved to the `dim` field's dim-name channel — consumed by
-  phase 4's `closed` re-verification and phase 5's (e) rebind, and regenerated by `reify` to the
-  same schema. Capture-slot wing emission (§5.3: the operand wraps the binding cell on its wing,
-  decoded via `masterOf(slot)`). Kernel-glob TU under `apps/common/xanadu/vagent/` — §10.1's tree
-  (spec :2944) — no Makefile edit (Makefile:643); the `vagent/` placement is load-bearing, since the
-  `vagent_runtime_test` filter-out removes only that directory.
+- `fragment.{hpp,cpp}` — `compileFragment`: head cell, descriptor — the signature-as-cells: the
+  parameter cells chaining `+d.step` off the descriptor's `+d.grab` in declaration order — the same
+  cells `+d.vars` entries name, each `+d.name`-labelled and `+d.values`-typed (spec :914-917) — the
+  result type name, the `pure`/`closed` flags, `effect`-ness, and the `result`/`produced` records
+  `run` derefs through `+d.values` (§6.1, spec :914-920, :1377-1384); it carries phase 2's computed
+  `closed` flag off the per-fragment tables, with the `CompilerBinding` marker bit phase 2 adds as
+  its provenance — `+d.refs` mark rank, `+d.recipe` emission around the kernel (§6.1, §10.1). Body
+  `Static` nodes ride phase 2's eval machinery inside `compileFragment`: a `static` inside a
+  parameterized fragment is judged in the context the parameter lands in, and `static(param)` in a
+  fragment emitted for `run`/`graft` errors at emission, the operand unvalued there (spec :968-972).
+  The **`+d.refs`/ `+d.recipe` record schema is this phase's emission contract**, stated in full:
+  the `+d.name`-on-record name-record vs ref-record discriminator, the `+d.grab→"call"/"run"` role
+  labels, the `+d.refFor` slot pairing, `+d.name` on a `+d.recipe` record reserved to the dim-name
+  channel — on `dim`-field members and on `+d.refFor`-paired ref-capture dim records alike (spec
+  :1964-1967, :2393-2395) — consumed by phase 4's `closed` re-verification and phase 5's (e) rebind,
+  and regenerated by `reify` to the same schema. Capture-slot wing emission (§5.3: the operand wraps
+  the binding cell on its wing, decoded via `masterOf(slot)`). Kernel-glob TU under
+  `apps/common/xanadu/vagent/` — §10.1's tree (spec :2944) — no Makefile edit (Makefile:643); the
+  `vagent/` placement is load-bearing, since the `vagent_runtime_test` filter-out removes only that
+  directory.
 - **The `programRef` bind record's emission half** — the recorded image extent `E_ops` plus the
   recorded instruction enumeration (`produces` `MicroversionId`s or canonical post-fold positions,
-  spec :3057-3058, :2311-2326), written at emission beside `compileFragment`'s marking; consumed by
-  phase 4's P15 registration pass, phase 5's (a) comparand and (b) re-registration, and `learn`'s
-  `≤E_ops` sideness bound.
+  spec :3057-3058, :2311-2326), written once per program at image finalization (not per fragment —
+  the image record `compileFragment`'s marking feeds); consumed by phase 4's P15 registration pass,
+  phase 5's (a) comparand and (b) re-registration, and `learn`'s `≤E_ops` sideness bound.
 - **`std:meta` scaffolding + the non-mutation surface** — the spec's *read group* proper is the pure
   top half; `run` (opaque-impure) and `reify` (impure) ride the same side of the *functional* split
   — checker import-allowlist gains `std:meta` (`checker.cpp:2061-2067`); the builtin
-  member-signature table gains the read rows (`checker.cpp:765-779`); a prelude-source skeleton in
-  the `std:agent` style (prelude sources live beside the frontend — `vagent/prelude/`; nothing loads
-  them yet — execution through a *linked* prelude awaits vagent iteration 3, so this phase's tests
-  drive the routines engine-level). Members: `program`, `agent_cell`, `module_named`,
-  `symbol_named`, `clauses_of`, `test_of`, `body_of`, `plan_named`, `code_named`, `label_of` (the
-  `reflect` family, §6.1/§6.7 — the qualified-name space, first-`:` split, `code_named`'s two-space
-  rule); `test_of`/`body_of` memoize clause-side — the `clause +d.code → +d.step` record chain, each
-  record carrying `+d.values →` the wrapper head, `+d.name →` the memo-kind label (a fresh text cell
-  per record — an interned label could hold only one `-d.name` edge), and `+d.grab →` a fresh
-  content-compared scalar key cell; a label-less attach cell gets no record at all (spec :311-331 —
-  unmemoized wrappers leak a ~6-cell head per call); `validate` (the §7.2 per-op `maxCycles`-bounded
-  walk on `d.validate` — `graft`/`learn`'s accept gate); `weight_of`, `value_of`, `next_rand`;
-  `run(c, [args])` as the checker special form **under the import** — unimported, a user `def run`
-  still resolves to the user's decl; `reify` over literal-born fragments replaying `+d.recipe` — its
-  `reify:<src>:<serial>` label mints off the agent cell's `d.vars` counter, the same counter
-  `patch:<n>` draws (spec :2504-2509), and its capture-slot re-clone palette is
-  `New`/`Link`/`Value`, never `Clone` (U-M7's foreign-graph case stays deferred). The `run`-target
-  head-vs-op discriminator — resolve an op directly, follow `+d.entry` once on a head (spec
-  :1141-1144) — is a read rule and lands here with the readers, not with the verbs.
+  member-signature table gains the read rows (`checker.cpp:770-779`); a prelude-source skeleton in
+  the `std:agent` style (convention: `vagent/prelude/` beside the frontend — `vlace/prelude.hpp`'s
+  sibling-file shape is the in-tree precedent; nothing loads it yet — execution through a *linked*
+  prelude awaits vagent iteration 3, so this phase's tests drive the routines engine-level).
+  Members: `program`, `agent_cell`, `module_named`, `symbol_named`, `clauses_of`, `test_of`,
+  `body_of`, `plan_named`, `code_named`, `label_of` (the `reflect` family, §6.1/§6.7 — the
+  qualified-name space, first-`:` split, `code_named`'s two-space rule); `test_of`/`body_of` memoize
+  clause-side — the `clause +d.code → +d.step` record chain, each record carrying `+d.values →` the
+  wrapper head, `+d.name →` the memo-kind label (a fresh text cell per record — an interned label
+  could hold only one `-d.name` edge), and `+d.grab →` a fresh content-compared scalar key cell; a
+  label-less attach cell gets no record at all (spec :311-331 — unmemoized wrappers leak a ~6-cell
+  head per call); `validate` (the §7.2 per-op `maxCycles`-bounded walk on `d.validate` —
+  `graft`/`learn`'s accept gate); `weight_of`, `value_of`, `next_rand`; `run(c, [args])` as the
+  checker special form **under the import** — unimported, a user `def run` still resolves to the
+  user's decl — spilling *and restoring* `result`/`produced` around the call and failing when
+  `produced` is false (spec :262-264); `run`/`graft` on a `Code`-parameterized (splice-only)
+  fragment is a named refusal — it has no value-level parameter to receive (§5.4 :924-934); `reify`
+  over literal-born fragments replaying `+d.recipe` — its `reify:<src>:<serial>` label mints off the
+  agent cell's `d.vars` counter, the same counter `patch:<n>` draws (spec :2504-2509), and its
+  capture-slot re-clone palette is `New`/`Link`/`Value`, never `Clone` (U-M7's foreign-graph case
+  stays deferred). The `run`-target head-vs-op discriminator — resolve an op directly, follow
+  `+d.entry` once on a head (spec :1141-1144) — is a read rule and lands here with the readers, not
+  with the verbs.
 - **The adapter bind set, harness-supplied in this phase** — `std:meta`'s runtime roots: the program
   root cell, `agent_cell()`, the twelve data-minted apparatus dims
   `d.code`/`d.patch`/`d.weight`/`d.synapse`/
@@ -264,8 +288,11 @@ structure, still session scope.
   kernel-simulable under the harness. The coverage floor is nullary plus positional args bound
   name-keyed on the frame; the statement of *which binding classes are frame-bound* lands before the
   capture-slot refusal rules — `def`/plan/handler parameters *and* `let` locals are frame-bound
-  under §5.8 (spec :847-854), and frame-bound captures are the class the `cap$N` anchor rules refuse
-  (§5.3). §11.1's full frame discipline remains owed.
+  under the language spec's §5.8 (design doc :847-854), and frame-bound captures are the class the
+  `cap$N` anchor rules refuse (§5.3) — the named arm lands here with the classification; pre-phase-3
+  a `$cap$N` anchor resolves under the single-activation shape or fails the kernel's generic
+  `bindings_` lookup (`compiler.cpp:475-483`), an accepted interim. §11.1's full frame discipline
+  remains owed.
 - Reserved-name refusals, this phase's half: `run`/`value_of` declarations and bindings refused
   *when `std:meta` is imported* (§5.1 — unimported, a user `def run` stays legal); the
   `src:`/`reify:`/`patch:` reserved-prefix refusal at module declaration (§6.7 :2500-2504 — those
@@ -283,7 +310,7 @@ convention's coverage floor; fragment shape tests asserting the full record sche
 ref-record, role labels, `+d.refFor`); resolver tests incl. qualified-name and headless-`run`
 refusal (engine-level, not through a linked prelude); `import std:meta` accepted and non-mutation
 calls check; a `reify` mint-under-marks refusal test. Test home: `tests/xuzz/vagent_meta_test.cpp`
-under `xuzz_test` — `vagent_runtime_test` filter-outs all `vagent/` objects (Makefile:698-699) and
+under `xuzz_test` — `vagent_runtime_test` filter-outs all `vagent/` objects (Makefile:698) and
 cannot link this code.
 
 ## Phase 4 — runtime mutation, P15, and the session `learn_*` records
@@ -356,34 +383,57 @@ itself.
   itself sits at :1418/:1425); without the pair every artifact-local span name dead-reads `""`.
 - **Dim filing** — the minted-dim vocabulary on the kept lineage `Store`'s persistent `d.dims` rank
   before the folded base is pinned, through `getOrCreate`/`Store::makeDimension` (spec :3020-3026 —
-  the same mechanism `:194-217` runs), enumerated off the arena's recorded **name table** (the
-  `ensureDimension`-written, `dimensionNamed`-read surface, base∪`arenaDims_`,
-  `arena_manifold.cpp:34-46`) plus the fixed list — filing is name-table entries, not cells: **the
+  the same mechanism `:194-217` runs), enumerated off `dimensions()`' base∪`arenaDims_` surface —
+  names read off each dim cell's interned content, `dimensions()` yielding `DimRef`s
+  (`arena_manifold.cpp:34-46`, `:87-88`) — *never* the arena-local `d.dims` rank, which appends only
+  under a resolvable `home` (`:92-103`), so a rank enumeration would miss exactly the session-minted
+  class filing exists to cover. Plus the fixed list — filing is name-table entries, not cells: **the
   bind set's name-bearing members** — the twelve apparatus dims — file here, while its bound non-dim
   members (program root, agent cell, `validate` constants) bind at (c) and never file; the **17
   system dims** `initGenesis` mints (`d.grab`…`d.role`, `vortex_core.cpp:50-69`) plus the
-  `home`/`d.dims` genesis pair beside (`:35`,`:44`) — nineteen cells all told; the thirteen V10
+  `home`/`d.dims` genesis pair beside (`:35`,`:44`) — nineteen names all told; the thirteen V10
   `std:agent` dims the adapter `ensureDimension`-mints *before* filing runs
   (`vagent-agent-language.md` V10); `attach()`'s `d.store-refs` (`arena_manifold.cpp:289-290`);
-  every `dimConstant`/`findOrMintDimension` mint (`compiler.cpp:769-772`). The emit lineage obeys
-  the twin rule — the artifact's own image emission files the same vocabulary before *its* compile
-  arena's `initGenesis` (`vortex_core.cpp:14` — the ctor's call; the body at `:29-70`) — an
+  every `dimConstant`/`findOrMintDimension` mint (`compiler.cpp:769-772`). Filing re-enumerates per
+  cycle — the same name-table sweep runs before each `rebuildManifold`, filing only what the rank
+  lacks, so session mints *and* the (b)/(e) genesis re-mints file rather than orphan per fold (each
+  `makeDimension` is a permanent rank append, so the sweep is idempotent by name). The emit lineage
+  obeys the twin rule — the artifact's own image emission files the same vocabulary before *its*
+  compile arena's `initGenesis` (`vortex_core.cpp:14` — the ctor's call; the body at `:29-70`) — an
   owed-substrate note, the artifact-emission pipeline being outside this plan. Coverage is names
   whose edges can fold; an unfiled session-minted dim accretes one `dimensionNamed`-invisible orphan
-  per checkpoint — the honest residual (spec :2397-2402; today's unfiled session mints are
-  `d.op-label` at `mesh_value.cpp:473` and `or_parallel`'s four —
-  `d.or`/`d.branch`/`d.frontier`/`d.submission` at `or_parallel.cpp:181-184`).
+  per checkpoint — the honest residual (spec :2397-2402; today's unfiled session mints include
+  `d.op-label` at `mesh_value.cpp:473`, `or_parallel`'s four —
+  `d.or`/`d.branch`/`d.frontier`/`d.submission` at `or_parallel.cpp:181-184` — `dim_cap.cpp:83-85`'s
+  `d.actor`/`d.ticket`/`d.signature`, `command_transaction.cpp:16-18`'s
+  `d.target`/`d.action`/`d.reply`, and `sql_promotion.cpp:140`'s `d.promoted`).
 - **The genesis (a)–(e) driver** — §1's priced `std:agent` genesis hook: the orchestrated pass,
   harness-invoked in this phase, wired to the real spawn/resume paths in phase 6; (f) is turns and
-  stays out of scope here. The harness's **re-genesis loop** is named machinery: session mutations
-  live in the `ArenaManifold` overlay and append no ops, so each cycle promotes them into the fold —
-  `promote(Store&, parent, arena, root)` (`arena_manifold.hpp:845-847`, into `arena.base()->store()`
+  stays out of scope here. The driver lives in a kernel-glob TU under `vagent/` — the
+  `genesis.{hpp,cpp}` shape, glob-picked like `fragment.cpp` — so phase 6's adapter executor TU
+  invokes the same artifact these tests instantiate (spec :3110 puts the ceremony in the adapter's
+  own executor TU). The harness's **re-genesis loop** is named machinery: session mutations live in
+  the `ArenaManifold` overlay and append no ops, so each cycle promotes them into the fold —
+  `promote(Store&, parent, arena, root)` (`arena_manifold.hpp:844-846`, into `arena.base()->store()`
   — the publish-destination shape) → `Store::rebuildManifold` over the new head → re-attach through
-  a fresh `WorkerContext(base, reader)` (`worker_context.hpp:52-54` — fresh because (b)'s
-  `setOpcodeKind` writes `opcodeMap_` on the context's `VortexVM`) → re-run (a)–(e). A same-`Store`
-  cycle needs no `sealLocalSpool` — op records and local spans ride verbatim; the initial image band
-  comes from `promote` of the compile arena or `adoptOpRecords` (`store.cpp:3836-3940`). In spec
-  order:
+  a fresh `WorkerContext` over the rebuilt fold (`worker_context.hpp:52-54` — fresh because the
+  context's `arena` pins `base` at construction and the bundle is non-movable; the fresh VM's empty
+  `opcodeMap_` is what (b) then re-fills) → re-run (a)–(e). The **promote-visible mutation class**
+  bounds what a cycle can carry: `promote` emits content ops only for `isEphemeral` cells and
+  link-writes on `holdsOwn` cells — a shadowed base cell gets no content op, and a removed base edge
+  is never un-emitted (`arena_manifold.cpp:1867-1870`, `:2020-2053`). So durable counters and scalar
+  writes take mint-and-repoint form — the `d.vars` serial counter bumps a *fresh ephemeral* the rank
+  repoints at, never an in-place `writeValue`, which would rewind `patch:<n>` at fold 2 into exactly
+  the ABA the durable bullet forbids — and `set_weight`'s `+d.weight` value writes ride the same
+  discipline; base-edge unlinks (`learn_plan`'s supersede, `unlearn`'s record drop) survive only via
+  (d) replay or tombstone-form records. `root` is the **agent cell** (spec :375, :635-636 — program
+  cells never republish; they ride the folded prefix and (d) re-enacts), and session mutations span
+  two disjoint roots — `program()`/`agent_cell()` are distinct adapter-bound roots never
+  `+d`-reached from each other (spec :2265-2266) — so the cycle promotes once per runtime root, or
+  under a harness session root linked to both (`promote` folds only its `root`'s reachable subgraph,
+  `arena_manifold.hpp:837-846` — anything unreached drops silently). A same-`Store` cycle needs no
+  `sealLocalSpool` — op records and local spans ride verbatim; the initial image band comes from
+  `promote` of the compile arena or `adoptOpRecords` (`store.cpp:3836-4018`). In spec order:
   - (a) **lineage bind** — the ops-record order comparand over the decoded `1..E_ops` band (every
     *non-scroll* post-fold `OpRecord` field verbatim, post-remap, plus scroll *identity* by key —
     `globalKeyOf`'s arm set minus `localScroll`: `breakMarkerKey` for sealed break-marker spans,
@@ -391,7 +441,7 @@ itself.
     per-cell `≤E_ops`/`>E_ops` classification; fail-closed on a prefix-less lineage. The comparand
     is *pairwise* — adopted lineage band vs received band (spec :2228-2232); a single-store fixture
     degenerates it, so its refusal arms exercise a second `historyFromSeal`/`adoptOpRecords`
-    "received" store (foreign band or missing prefix, spec :2249-2258).
+    "received" store (foreign band or missing prefix, spec :2249-2258, :2290-2292).
   - (b) **two arms, not one scope**: `ensureDimension` find-or-mint over the dim *names* (filed name
     → canonical cell, unfiled → re-mint — spec :2294-2299, :2401-2402 — the V10 sweep included), and
     `setOpcodeKind` re-registration over the phase-3 recorded *instruction enumeration* (op cells,
@@ -415,23 +465,30 @@ itself.
     endpoint source and the slot takes `Int64` of the resolved `DimRef`, not the donor's promoted
     twin (spec :2364-2372). Replay hands (e) its install set — the copies hang off program-side
     anchors no head-only traversal reaches.
-  - (e) **`+d.refs` rehydration — last pass, three record arms** — the name-record role-split rebind
-    (`call`-role `int64(entryOp)` vs `run`-role `int64(head)`) over registered heads *and*
-    replay-installed copies' regenerated records; and the **dim-record arm** — `+d.name`-bearing
-    `+d.recipe` records (ref-capture dim records and `dim`-field members alike) write
-    `Int64(DimRef)` re-resolved through `ensureDimension`'s name arm into the `+d.refFor`-paired
-    slot or the member cell itself — a filed-cell rebind, *never* the promoted twin `*handleTarget`
-    names (spec :2395-2406, esp. :2397-2398). Emission-time `DimRef`s are stale compile-arena ids,
-    so unlike the ref arm this is *not* a no-op pre-P16 — it runs at every genesis off the filed
-    rank. It runs after (d) precisely so name-record rebinds see post-installation symbols (the R7-B
-    ordering, spec :2435-2439). The ref-record arm — per-record `Int64(*handleTarget)` writebacks —
-    stays phase 6 with P16: a no-op here because nothing mints `OpHandle`-kind cells pre-P16
-    (`writeValue` covers Int64/Double/Bool/None only, `vortex_core.cpp:196-229`); the re-kind is
-    phase 6's marker ceremony.
+  - (e) **`+d.refs` rehydration — last pass; the sweep's three arms, two run here** — the
+    name-record role-split rebind over registered heads *and* replay-installed copies' regenerated
+    records: a `call`-role record resolves `module:Owner.name` through `symbol_named`'s
+    module-`d.vars` walk → `+d.values` → the op-or-head hop → `int64(entryOp)`; a `run`-role record
+    resolves its `src:`/`reify:`/`#label` through the program-image label→head lookup →
+    `int64(head)` (spec :3110); and the **dim-record arm** — `+d.name`-bearing `+d.recipe` records
+    (ref-capture dim records and `dim`-field members alike) write `Int64(DimRef)` re-resolved
+    through `ensureDimension`'s name arm into the `+d.refFor`-paired slot or the member cell itself
+    — a filed-cell rebind (re-mint for unfiled names, spec :2401-2402), *never* the promoted twin
+    `*handleTarget` names (spec :2395-2406, esp. :2397-2398). Emission-time `DimRef`s are stale
+    compile-arena ids, so unlike the ref arm this is *not* a no-op pre-P16 — it runs at every
+    genesis off the filed rank. It runs after (d) precisely so name-record rebinds see
+    post-installation symbols (the R7-B ordering, spec :2435-2439). The ref-record arm — per-record
+    `Int64(*handleTarget)` writebacks — stays phase 6 with P16: a no-op here because emission writes
+    `Int64` ref slots and `reify`'s `New`/`Link`/`Value` palette cannot mint handle-kind cells, so
+    the arm's kind-guard finds nothing to re-kind (spec :2430-2432 — `OpHandle` cells do exist
+    today, `mesh_evaluator.cpp:733`, just never in a fragment ref slot); it must *stay* kind-guarded
+    post-replay, palette-minted copy slots arriving `Int64` while checkpoint-re-kinded donors arrive
+    `OpHandle`. The re-kind is phase 6's marker ceremony.
 - **Durable semantics** — the properties phase 4's records must exhibit across genesis: `patch:<n>`
   monotone serial off the agent cell's `d.vars` counter — never rank positions, never recycled after
-  `unlearn` or a replay-drop (no-ABA); the user alias separate and un-minted; `d.code`'s two-copy
-  rule and the program-side-original-never-registered invariant.
+  `unlearn` or a replay-drop (no-ABA); the recorded target name (user alias or `learn_method`'s
+  functional lookup name) separate and un-minted; `d.code`'s two-copy rule and the
+  program-side-original-never-registered invariant.
 
 **Requires:** phases 3–4's emission contract, bind set and session records; a local `Store` plus
 `promote`, `rebuildManifold` and a fresh `WorkerContext` per cycle — all in-tree, and
@@ -476,22 +533,26 @@ are the citable units; the repo's list style renders every marker `1.`.)
    `d.mesh.relocation→"cell"` marker *per ref cell* (sharing impossible — `link` evicts the first
    edge; `mesh_evaluator.cpp:735` precedent), including `reify`'s regenerated records; the deferred
    ref-record arm of spec-(e) lands here inside the same driver — per-ref-record
-   `Int64(*handleTarget)` writebacks, the `OpHandle`→`Int64` restore — the arm that genuinely
-   requires this step's flag machinery; the flag-driven re-kind/restore windows inside the adapter's
-   own `Executor` callback in `pumpOne` (`mesh_actor.cpp:473-477`) — arm the window on
-   mailbox-empty-at-turn-end (spec :2165-2169; `pending(pid)==1` is the queue-depth proxy — a
-   flagged turn that self-sends breaks it), an empty-mailbox checkpoint mints a P4 wake turn, and
-   **no turn of either kind runs between the flagged turn's end and `publishValue`** (issued
-   synchronously from the same callback — the no-interleave discipline, spec :2171-2179); the
-   three-state flag and the kind-guarded restore on every exit path.
+   `Int64(*handleTarget)` writebacks *minus the `+d.name`-bearing records the dim arm owns* (spec
+   :2394-2396 — a literal per-record reading would double-write them with the forbidden promoted
+   twin), the `OpHandle`→`Int64` restore — the arm that genuinely requires this step's flag
+   machinery; the flag-driven re-kind/restore windows inside the adapter's own `Executor` callback
+   in `pumpOne` — the message pops before the callback runs (`mailbox.pop_front()` at
+   `mesh_actor.cpp:468`, the `executor_` invocation at `:473-477`), so mailbox-empty-at-turn-end is
+   `pending(pid)==0` sampled inside the callback; `pending(pid)==1` is the *flag-time* queue-depth
+   test — flagged message sole-queued — with the end-of-turn empty re-check the veto a self-send
+   trips (spec :2165-2169). An empty-mailbox checkpoint mints a P4 wake turn, and **no turn of
+   either kind runs between the flagged turn's end and `publishValue`** (issued synchronously from
+   the same callback — the no-interleave discipline, spec :2171-2179); the three-state flag and the
+   kind-guarded restore on every exit path.
 
 **Requires:** the actor executor + adapter `Executor` callback — adapter-gated, except (iv)'s
 `wake`/`std::optional` mesh change, which is implemented and mesh-testable here and only consumed by
 the ceremony later.
 
-**Exit:** the P16 acceptance test — learn → checkpoint → resume → learn → checkpoint round-trip;
-comparand-refusal test on permuted lineage; orphan-twin test asserting exactly one cell per filed
-dim name after resume (the V10 test extended to the bind set).
+**Exit:** the P16 acceptance test — learn → checkpoint → resume → learn → checkpoint → resume
+round-trip; comparand-refusal test on permuted lineage; orphan-twin test asserting exactly one cell
+per filed dim name after resume (the V10 test extended to the bind set).
 
 ## Phase 7 — plasticity surface exercises
 
@@ -527,11 +588,12 @@ machinery).
   where all engine-level metaprogramming tests sit. Frontend unit tests join
   `VAGENT_FRONTEND_TEST_SRCS` (explicit list, Makefile:692) for `vagent_frontend_test`, or land in
   the same `tests/xuzz/` glob. `vagent_runtime_test` **filter-outs everything under
-  `apps/common/xanadu/vagent/`** (Makefile:698-699 — it isolates shared VM prerequisites) and cannot
+  `apps/common/xanadu/vagent/`** (Makefile:698 — it isolates shared VM prerequisites) and cannot
   link `fragment`/`compiler`/`expand` at all: no metaprogramming test belongs there. `make test`
-  runs `gleditor_test`, `xuzz_test`, `zigzag_test` only (Makefile:1348-1351) — phase exits run under
-  `make test` exactly insofar as they live in `xuzz_test`; the `vagent_*_test` binaries run through
-  their own `test/vagent-*` targets.
+  runs `gleditor_test`, `xuzz_test`, `zigzag_test` (Makefile:1348-1351), behind the
+  `test/ux-journey-plans` prerequisite (Makefile:1330-1334) — phase exits run under `make test`
+  exactly insofar as they live in `xuzz_test`; the `vagent_*_test` binaries run through their own
+  `test/vagent-*` targets.
 - Logging: name the spdlog categories up front — `vagent.expand` for substitution/`cap$N` renames,
   `vortex.meta` for P15's per-site refusals, `vortex.genesis` for replay/filing, `xanadu.adapter`
   for the P16 windows — so each phase adds `SPDLOG_LEVEL`-gated diagnostics instead of inventing
