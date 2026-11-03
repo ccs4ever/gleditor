@@ -2,7 +2,7 @@
 
 | field         | value                                                                                                                                                                                                                                   |
 | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| version       | 1.18 (see [Appendix](#appendix-versioning-and-change-history))                                                                                                                                                                          |
+| version       | 1.19 (see [Appendix](#appendix-versioning-and-change-history))                                                                                                                                                                          |
 | status        | Design draft. Nothing here is implemented. It rests on vagent v3.9, whose own implementation is in progress: the source frontend and the scalar lowering kernel exist; the actor executor does not.                                     |
 | compiles to   | Vortex opcode graphs held in the agent's private `ArenaManifold`; a fragment is the same object `compileStatement` already produces (`vagent/compiler.hpp:28-34`)                                                                       |
 | rests on      | vagent ([specification](vagent-agent-language.md)), Vortex ([runtime](vortex-hyperstructural-runtime.md)), `ArenaManifold`'s mark/trail/discard, the `cells"…"` embedded-VQL subset, the Spool-Mesh checkpoint/promotion machinery      |
@@ -90,8 +90,8 @@ ABI, actor turns and `std:agent` are owed there and so are owed here.
 | Grafting                                 | `graft_*`/`prune` verbs attaching fragment heads at `+d.grab`/`+d.spin`/`d.clause`/symbol points; head→entry on `d.entry`                                                                                                                                                                           | **owed** (`std:meta` over existing ops)                  |
 | Durable mutation                         | `learn_*` verbs + `d.patch` rank + genesis re-application — **conditional on P16** (§6.6)                                                                                                                                                                                                           | **owed** (`std:meta` + `std:agent` genesis hook)         |
 | Session code identity                    | `d.code` registry (learn-side only — the §6.6 reachability invariant) + `d.name` labels; `code_named` re-resolution                                                                                                                                                                                 | **owed**                                                 |
-| Kind immutability                        | every VM write to an `opcodeMap_`-registered cell refused — P15                                                                                                                                                                                                                                     | **proposed**                                             |
-| Fragment reference relocation            | adapter-side ceremony around `publishValue` on the adapter-kept lineage `Store` (§4.5, §10.1), run inside the adapter's own `Executor` callback: end-of-turn `OpHandle` re-kind + head-of-turn `Int64` restore + genesis rehydration; emission-side `+d.refs`/`d.ref`/`d.mesh.relocation` marks — P16, **no core change**                                                                                                  | **proposed** (adapter + emitter duty)                    |
+| Kind immutability                        | every VM write to an `opcodeMap_`-registered cell refused — P15                                                                                                                                                                                                                                     | **approved**                                             |
+| Fragment reference relocation            | adapter-side ceremony around `publishValue` on the adapter-kept lineage `Store` (§4.5, §10.1), run inside the adapter's own `Executor` callback: end-of-turn `OpHandle` re-kind + head-of-turn `Int64` restore + genesis rehydration; emission-side `+d.refs`/`d.ref`/`d.mesh.relocation` marks — P16, **no core change**                                                                                                  | **approved** (adapter + emitter duty)                    |
 | Weights and synapses                     | `d.weight`, `d.synapse` junction cells, `d.code`, `d.patch`, `d.entry`, `d.patch-head`, `d.validate`, `d.refs`, `d.ref`, `d.recipe`, `d.refFor`, `d.mesh.relocation` minted as data (`ensureDimension`, V10 mechanism) — minted only with no marks outstanding, and filed on the persistent `d.dims` rank before the lineage's first dim resolution (§10.1) | **owed** (adapter duty, no core change)                  |
 | Plasticity search                        | reify → graft → score → backtrack-drain, all in-turn under the trail                                                                                                                                                                                                                                | **owed** (`std:meta` composition, no new mechanism)      |
 | Metacircular compiler (vagent in vagent) | a compiler written in vagent/Vortex                                                                                                                                                                                                                                                                 | deferred, U-M1                                           |
@@ -3073,7 +3073,7 @@ resolution) — owed by vagent §11.1 itself, not new debt here. `static` needs 
 
 ### 10.2 Proposed changes to existing code
 
-Continuing vagent's register after P14. **P15 and P16 are proposed, not approved** — and P16's
+Continuing vagent's register after P14. **P15 and P16 are approved** — and P16's
 adapter half rides on the lineage-store seam §6.6 names: the adapter constructs/keeps the lineage
 `Store` — the spawn-side lineage anchor, never the verify destination, which is the
 received-band store `arena.base()->store()` —
@@ -4115,3 +4115,10 @@ their rank edges — not `dimensionNamed` base-arm visibility. Retro-edits confe
 entry's "the V10 `mintNamedDimension` names" annotated as the mislabeled system-dim set, and
 the 1.17 entry's own R17-B narration annotated on all three counts — the circular
 `d.dims`-rank walk, the same system/V10 mislabel, and the name-table-visibility attribution.
+
+**1.19 — Approvals recorded.** P15 (kind immutability at the VM write funnel) and P16 (the
+adapter-side fragment-reference relocation ceremony, with its named adapter-API seams — spawn
+base-injection, `resume` take-or-verify, the conditional segment-apply surface, and the
+`documentId`-adoption arm) move from proposed to approved; §1's mechanism table and §10.2's
+register header say so. P17 stays deferred-not-registered: it was recorded as a contingency,
+never proposed. No mechanism text changes.
