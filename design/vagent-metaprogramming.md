@@ -2,7 +2,7 @@
 
 | field         | value                                                                                                                                                                                                                                   |
 | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| version       | 1.8 (see [Appendix](#appendix-versioning-and-change-history))                                                                                                                                                                           |
+| version       | 1.9 (see [Appendix](#appendix-versioning-and-change-history))                                                                                                                                                                           |
 | status        | Design draft. Nothing here is implemented. It rests on vagent v3.9, whose own implementation is in progress: the source frontend and the scalar lowering kernel exist; the actor executor does not.                                     |
 | compiles to   | Vortex opcode graphs held in the agent's private `ArenaManifold`; a fragment is the same object `compileStatement` already produces (`vagent/compiler.hpp:28-34`)                                                                       |
 | rests on      | vagent ([specification](vagent-agent-language.md)), Vortex ([runtime](vortex-hyperstructural-runtime.md)), `ArenaManifold`'s mark/trail/discard, the `cells"…"` embedded-VQL subset, the Spool-Mesh checkpoint/promotion machinery      |
@@ -370,8 +370,9 @@ fragment's internal references would silently alias unrelated cells. **P16** is 
 adapter-side, needing no new mechanism beyond P4's already-approved wake (the empty-mailbox arm
 mints a wake turn — the
 register's approved-but-unimplemented `mesh_actor` change, `vagent-agent-language.md:1670`) **plus
-the named lineage-store seam** — the adapter constructs and keeps the publish `Store` (§6.6, §10.1)
-and `resume` takes or verifies it, owed adapter-API surface like P4's wake, not assumed — the
+the named lineage-store seam** — the adapter constructs and keeps the publish `Store` (§6.6, §10.1),
+base-injected at `spawn` like `resume` already does, and `resume` takes or verifies it, owed
+adapter-API surface like P4's wake, not assumed — the
 `mesh_evaluator.cpp:723-735` publication precedent already does *both* halves
 `isCellRelocationHandle` tests for: `setValueBits(OpHandle, target)` *and* a `d.mesh.relocation`→
 `"cell"` marker edge (`foreign_op_handle.cpp:98-117`; an unmarked `OpHandle` fails `promote`
@@ -598,29 +599,35 @@ Three rows deserve emphasis. Program cells do not *republish*: `promote` walks o
 cell reaches, so the skeleton never enters the promoted set — that is V12 working as intended.
 What carries the image is the **store lineage itself**, and the object is named: the adapter
 constructs and *keeps* the agent's publish `Store` itself, seeded at load with the artifact's
-**sealed ops segment** — the `ops.nodes` the toolchain emits once per artifact, applied into the
-fresh store by `applyOpsSegment` (`publication.cpp:1030+`) — as its low prefix, *position-stable,
-not byte-identical*: a segment's scroll table remaps into the receiving store's `ScrollId` space
-(`publication.cpp:981-1008`, `:1030+`), so the requirement is the same op sequence at `1..E` plus
-resolvable scroll names, not identical stored bytes (the `job.base` shared-store pattern,
-`mesh_jobs.cpp:303-318`). Artifact bytes are shared; **store objects never are** — two agents off
-one artifact each hold their own `Store` (they do still share the artifact's
-`storeId`/`documentId` lineage under `job.base`, publishing divergent histories under one store
-identity — a pre-existing exposure the pattern carries, not a new one), and a new artifact is a
-new `programRef`, so the
-continuation pin (`grant->programRef == continuation->programRef`, `mesh_actor.cpp:215`) makes an
-upgrade respawn, never migrate mid-chain. Checkpoints append above the prefix, and `sealLocalSpool`
-seals the whole spool in the checkpoint path — `publishValue` passes the default
-`opsAlreadySealed = 0`, so the sealed segment covers `[0..opsTotal)` (`mesh_value.cpp:227-228`,
-`:241`; `publication.cpp:611-617`, `:664-672`) — so the prefix's positions `1..E` ride inside every
-checkpoint's ops segment and fold back verbatim — `rebuildManifold` assigns `birthOp = opIndex`
-(`manifold.cpp:427-442`; a persistent `CellRef` *is* a spool position, `manifold.hpp:295`). That is
-why session grafts are ephemeral and `learn` needs `d.patch`. Ref-box ints are *session
-handles*: `promote` mints store cells in reachability order, not mint order (the BFS at
-`arena_manifold.cpp:1744-1788`, structure at `arena_manifold.hpp:235-240`), and `resume` rebuilds an
-arena whose dense numbering need not match the old one — a stale `Int` can name the wrong cell
-silently. And the last column is the one v1.0 missed: the same int-content mechanism is *inside*
-every fragment graph, so a promoted fragment that survived reachability still executes garbage until
+**sealed `ops` segment** (`sealedOpsName`, `provenance.hpp:286`), applied into the
+fresh store by `historyFromSeal` (`publication.cpp:1093-1099` — `applyOpsSegment`, `:1030+`, is
+its file-local per-segment step, gating on the `\x7fXSO\x01` magic at `:1033`; `ops.nodes`, the
+native `CompactOpNode` spool, is a different serialization and fails that gate) — as its low
+prefix, *position-stable, not byte-identical*: a segment's scroll table remaps into the receiving
+store's `ScrollId` space (`publication.cpp:1048-1086`, `:1030+`), so the requirement is the same
+op sequence at `1..E_ops` plus resolvable scroll names, not identical stored bytes (the
+`job.base` shared-store pattern, `mesh_jobs.cpp:304-318`). Artifact bytes are shared; **store
+objects never are** — two agents off one artifact each hold their own `Store`, and whether they
+share the artifact's `storeId`/`documentId` lineage is a *construction choice*: `documentId_` is
+`Store`-ctor state (`store.hpp:133`,`:1435`; the segment apply carries ops, never identity), so
+`historyFromSeal`'s fresh mint makes each agent its own document lineage, while adopting the
+artifact's id — `Store(userPermascroll, artifactDocumentId)`, `restorePublication`'s precedent
+(`publication.cpp:1127-1128`) — reproduces the divergent-histories-under-one-identity exposure
+`job.base` already carries (a pre-existing exposure of the pattern, not a new one). A new artifact
+is a new `programRef`, so the continuation pin (`grant->programRef == continuation->programRef`,
+`mesh_actor.cpp:215`) makes an upgrade respawn, never migrate mid-chain. Checkpoints append above
+the prefix, and `sealLocalSpool` seals the whole spool in the checkpoint path — `publishValue`
+passes the default `opsAlreadySealed = 0`, so the sealed segment covers `1..opsTotal`
+(`mesh_value.cpp:227-228`, `:241`; `publication.cpp:611-617`, `:664-672`) — so the prefix's
+positions `1..E_ops` ride inside every checkpoint's ops segment and fold back verbatim —
+`rebuildManifold` assigns `birthOp = opIndex` (`manifold.cpp:427-442`; a persistent `CellRef` *is*
+a spool position, `manifold.hpp:295`). That is why session grafts are ephemeral and `learn` needs
+`d.patch`. Ref-box ints are *session handles*: `promote` mints store cells in reachability order,
+not mint order (the BFS at `arena_manifold.cpp:1744-1788`, structure at
+`arena_manifold.hpp:235-240`), and `resume` rebuilds an arena whose dense numbering need not match
+the old one — a stale `Int` can name the wrong cell silently. And the last column is the one v1.0
+missed: the same int-content mechanism is *inside* every fragment graph, so a promoted fragment
+that survived reachability still executes garbage until
 P16 relocates its ref cells — `closed` constrains links, not int content. Durable references are
 therefore structural — links, `d.name` labels, and *names* (the `+d.refs` name-records of §6.6,
 re-resolved at genesis) — never stored ints. `Cell` values already
@@ -960,8 +967,9 @@ Diagnostics across the stage boundary keep attribution honest: `cap$N` renders i
 captured *name* (`'cap$3'` is unactionable); site-context re-verification failures name the splice
 site *and* the fragment's own `src:m:l:c+o:c` position — `cloneExpr` retains `loc` on every copied
 node so the +offset mapping survives substitution, and nested literals chain offsets `+o:c` per
-level; `learn`'s closedness refusal names the offending captures or name-refs; and template-body
-errors report the call site with the `def`'s location noted (M13).
+level; `learn`'s closedness refusal names the offending captures or name-refs — its lineage
+refusal reports *no program lineage*, distinct from closedness (§6.6's fail-closed arm) — and
+template-body errors report the call site with the `def`'s location noted (M13).
 
 ______________________________________________________________________
 
@@ -1047,9 +1055,9 @@ group sits in the top half — `reflect` names the program-structure subset of i
 | `clauses_of(cell: Cell): [Cell]`                                                   | pure                       | `[Cell]`                              | the `+d.clause` rank — plans of a goal, handlers of an event type                                                                                                                               |
 | `test_of(clause: Cell): Opt<Code<Cell>>`                                           | pure                       | `Opt<Code<Cell>>`                     | wraps the clause's `+d.grab` graph as a `Code` handle — wrapper memoized clause-side, keyed by the current attach cell (§6.1)                                                                    |
 | `body_of(clause: Cell): Opt<Code<Cell>>`                                           | pure                       | `Opt<Code<Cell>>`                     | wraps the clause's `+d.spin` graph (same session-side memoization)                                                                                                                             |
-| `plan_named(qualified: Str): Opt<Cell>`                                            | pure                       | `Opt<Cell>`                           | a clause cell by its qualified `module:Agent.plan` name — matches every clause `+d.name` label verbatim, event-handler clauses included (§6.7)                                                                                                                              |
+| `plan_named(qualified: Str): Opt<Cell>`                                            | pure                       | `Opt<Cell>`                           | a clause cell by its qualified `module:Agent.plan` name — matches every clause `+d.name` label verbatim — learned handler clauses included; declared handlers carry no `+d.name` to match (§6.6, spec V15)                                                                   |
 | `code_named(label: Str): Opt<Code<Cell>>`                                          | pure                       | `Opt<Code<Cell>>`                     | `d.code` rank lookup by `d.name` label, falling through on a miss to the program-image label walk — so literal heads re-resolve by the same call (§6.7)                                                                                                                  |
-| `label_of(c: Cell): Opt<Str>`                                                      | pure                       | `Opt<Str>`                            | reads a head's `+d.name`                                                                                                                                                                        |
+| `label_of(c: Cell): Opt<Str>`                                                      | pure                       | `Opt<Str>`                            | reads a head's `+d.name` — the head reaching the `Cell` parameter through `cells"…"` (`cells"##/+d.code"` for a registered head, `cells"$clause/+d.spin"` for an installed one), since the head-producing reads yield `Code<Cell>` and no `Code`→`Cell` coercion exists (M3)     |
 | `validate(c: Cell): Bool`                                                          | pure                       | `Bool`                                | the well-formedness walk of §7.2 — per-op `maxCycles`-bounded, seen-set on `d.validate`                                                                                                         |
 | `weight_of(cell: Cell): Opt<Float>`                                                | pure                       | `Opt<Float>`                          | a `d.weight`/`d.vars` scalar read (§8)                                                                                                                                                          |
 | `value_of(c: Cell): any`                                                           | pure                       | `any`                                 | reads a `Cell`'s content — the `Code<Cell>` companion: `run` yields the produced cell, `value_of` reads its bits (§6.2)                                                                           |
@@ -1104,10 +1112,14 @@ transclusion-instance that aliases the original, not a copy. A `reify` of non-li
 A grafted plan alternative must carry a **name**, because intentions record plans by qualified name
 (`vagent-agent-language.md` §5.7: `module:Agent.travel`, and `tried` is a name set). Grafted clauses
 take `name` parameters, held on a `d.name` label — learned ones are conventionally named
-`patch:<n>` — and
+`patch:<n>`, `<n>` the patch's `d.patch` ordinal, and `patch:` is refused as a user-supplied
+`name` at `graft_*`/`learn_*` emission (the same reservation §6.7 gives it at module
+declaration) — and
 `graft_method`/`learn_plan` dedupe by name: an existing same-named symbol or clause is unlinked
 first (redefinition-as-replacement, since the `d.vars` name walk is first-match-wins,
-`vortex_core.cpp:100-127`).
+`vortex_core.cpp:100-127`). `learn_handler` is deliberately additive instead — a second
+same-named handler clause *appends* beside the first, so `plan_named(name)`'s first-hit stays
+ambiguous between them and `priority` is the differentiator.
 
 Every read function is honest about what the graph can prove: `test_of` returns `Code<Cell>` because
 a program-side test graph has no compiler-emitted descriptor — its produced value's type is not
@@ -1143,8 +1155,8 @@ unwind a method failure causes. A fragment whose tail parks on `Halt` instead of
 refusal: `run` of a head-less program `def` *symbol* — one whose `+d.values` names an entry op,
 never a fragment head — cannot satisfy the head-valued slot convention at all, so the call is
 refused at the descriptor lookup, not bound and then failed (§6.6's rebind arm hits the same
-class). A `plan_named`/`symbol_named` result lands in this class by intent and can never reach
-`run` at all — both builtins return `Opt<Cell>` where `run` demands `Code<T>`, and M3 bars the
+class). A `plan_named`/`symbol_named` result belongs to this class only by analogy — it can never
+reach `run` at all: both builtins return `Opt<Cell>` where `run` demands `Code<T>`, and M3 bars the
 `Cell`→`Code` upgrade — so the session-side surface for it is the type error, and the durable-side
 one the record refusal of §6.6. `value_of(c: Cell): any` is the companion for
 `Code<Cell>` results — `run` on a reflected graph yields a `Cell` handle to the produced cell, and
@@ -1294,8 +1306,9 @@ map keeps the old kind. The trail does not cover the map. The rule and its enfor
 
 1. **Runtime code never rewrites an op cell's content.** `std:meta` verbs only link and mint;
    `New`+`Value` mints fresh op cells, which decode through `asInt64` — and whose rewriting is
-   *consistent* precisely because no map entry exists (their content is their kind). **Post-resume
-   registration:** `opcodeMap_` is VM-private per `WorkerContext` and empty after `resume`; the
+   *consistent* precisely because no map entry exists (their content is their kind). **Registration
+   on the image bind:** `opcodeMap_` is VM-private per `WorkerContext` and empty on every fresh
+   context — at the spawn-time injection as after `resume`; the
    folded image's op cells are re-registered by a `setOpcodeKind` pass over the folded cells at
    genesis (`vortex_vm.cpp:98-100`, the same `ensureDimension` window — genesis step (b), §6.6).
    Re-running `mintOpcode` is the one wrong shape: it *mints* a fresh ephemeral cell
@@ -1363,39 +1376,66 @@ the V12 failure with the roles reversed. The disciplines:
   discriminator is ref-space ordering, not a timestamp, and it stands on a **named store
   lineage** — and the object is named too: the program image lives as the agent store's **low ops
   prefix**, and the store that carries it is **the adapter's own**. The adapter constructs and
-  *keeps* the publish `Store` itself, seeded at spawn-time with the artifact's **sealed ops
-  segment** — the `ops.nodes` the toolchain emits once per artifact, applied into the fresh store
-  by `applyOpsSegment` (`publication.cpp:1030+`), *position-stable, not byte-identical*: a
-  segment's scroll table remaps into the receiving store's `ScrollId` space
-  (`publication.cpp:981-1008`, `:1030+`), so the requirement is the same op sequence at `1..E`
-  plus resolvable scroll names, not identical stored bytes — the `job.base` shared-store pattern
-  (`mesh_jobs.cpp:303-318`). The runtime never hands that object out: `spawn()` creates and
-  accepts no store (`mesh_actor.cpp:156`), `resume()` builds one internally and keeps it private
+  *keeps* the publish `Store` itself, seeded at spawn-time with the artifact's **sealed `ops`
+  segment** (`sealedOpsName`, `provenance.hpp:286`), applied into the fresh store by
+  `historyFromSeal` (`publication.cpp:1093-1099` — `applyOpsSegment`, `:1030+`, is its
+  file-local per-segment step; `ops.nodes`, the native `CompactOpNode` spool, is the other
+  serialization and fails its `\x7fXSO\x01` gate, `:1033`), *position-stable, not
+  byte-identical*: a segment's scroll table remaps into the receiving store's `ScrollId` space
+  (`publication.cpp:1048-1086`, `:1030+`), so the requirement is the same op sequence at
+  `1..E_ops` plus resolvable scroll names, not identical stored bytes — the `job.base`
+  shared-store pattern
+  (`mesh_jobs.cpp:304-318`). The seeded store's identity is a construction choice named at
+  §10.1's step: `documentId_` is `Store`-ctor state (`store.hpp:133`,`:1435` — the segment apply
+  carries ops, never identity), so `historyFromSeal`'s fresh mint makes each agent its own
+  document lineage, while adopting the artifact's id — `Store(userPermascroll,
+  artifactDocumentId)`, `restorePublication`'s precedent (`publication.cpp:1127-1128`) — puts
+  every agent off one artifact under a single document identity, the divergent-histories
+  exposure `job.base` already carries. The runtime never hands the store object out:
+  `spawn()` creates and
+  accepts no store (its signature, `mesh_actor.cpp:119-122`/`mesh_actor.hpp:132-135`; the
+  `WorkerContext` mint at `:156`), `resume()` builds one internally and keeps it private
   in `Actor` (`mesh_actor.cpp:260-269`), and neither `checkpointView` nor the `Executor`
   signature exposes a store (`mesh_actor.hpp:102-106`, `:113-116`) — so the adapter's seeding is
-  the §10.1 step that owns the store, installed into the arena by `attach(Space)`
-  (`arena_manifold.cpp:274-287` installs `base_`/`store_` when unset), and at `resume` the
-  adapter **supplies the same lineage store to the replay path, or verifies the rebuilt one's
-  `1..E` band against it** — owed adapter-API surface, a named seam change like P4's wake (§10.2),
-  not silently assumed. Positions coincide across the adapter's store and the runtime's because a
+  the §10.1 step that owns the store, bound **before the `WorkerContext`/`initGenesis` freeze**:
+  `initGenesis` runs inside the `VortexCore` ctor (`vortex_core.cpp:14`) and adopts
+  `*base->home()` and the base dims only when a base already exists (`:30-43`), and
+  `initGenesis`/`home_` are private with no re-genesis door (`vortex_core.hpp:268`,`:282`,`:287`)
+  — so a post-construction `attach(Space)` (`arena_manifold.cpp:274-287` installs
+  `base_`/`store_` when unset) delivers the arena pointers but cannot re-run genesis, leaving
+  `core.home()`, the session dims and `opcodeMap_` anchored to the base-less arena for the whole
+  first incarnation. The spawn arm therefore takes **resume's own injection shape**: the seeded
+  store folded to a `Manifold` the adapter pins for the arena's life, constructing
+  `WorkerContext(base, reader)` (`mesh_actor.cpp:270-271`, `worker_context.hpp:52-55`) — after
+  which `initGenesis` adopts the image's home/dims identically at spawn and `resume`, and the
+  asymmetry collapses to the `resume` arm, where the adapter **supplies the same lineage store
+  as the rebuild's backing store, or verifies the rebuilt one's `1..E_ops` band against it** — the
+  verify comparand being the canonical post-remap form (op kind plus non-scroll fields; a
+  node-byte compare would refuse every honest resume under the `ScrollId` remap,
+  `publication.cpp:1048-1086`,`:1030+`), and "supply" meaning the runtime folds the adapter's
+  store rather than re-applying segments into a second one — owed adapter-API surface, a named
+  seam change like P4's wake (§10.2), not silently assumed. Positions coincide across the
+  adapter's store and the runtime's because a
   persistent `CellRef` *is* a spool position, not an object identity (`manifold.hpp:295`) — so
-  the image occupies persistent positions `1..E` before any state
+  the image occupies persistent positions `1..E_ops` before any state
   op is written (`noCell == 0`, `dim_vector.hpp:23`, is the only ref below them). Checkpoints
   inherit the prefix position-by-construction: `promote` appends state ops above it and
   `sealLocalSpool` seals the whole spool in the checkpoint path — `publishValue` passes the
-  default `opsAlreadySealed = 0`, so the segment covers `[0..opsTotal)`
-  (`mesh_value.cpp:227-228`, `:241`; `publication.cpp:611-617`, `:664-672`) — `1..E` ships inside
-  every checkpoint's ops segment and folds back verbatim — `rebuildManifold` assigns
-  `birthOp = opIndex` (`manifold.cpp:427-442`). The extent `E` is the image prefix length,
-  recorded once at load on the adapter's
-  `programRef` bind record — chain-stable because the continuation pins the artifact
-  (`grant->programRef == continuation->programRef`, `mesh_actor.cpp:199,215-216`) — asserted at
+  default `opsAlreadySealed = 0`, so the segment covers `1..opsTotal`
+  (`mesh_value.cpp:227-228`, `:241`; `publication.cpp:611-617`, `:664-672`) — `1..E_ops` ships
+  inside every checkpoint's ops segment and folds back verbatim — `rebuildManifold` assigns
+  `birthOp = opIndex` (`manifold.cpp:427-442`). The extent `E_ops` is the image prefix length
+  **in ops**, the ref-space ordering bound: a cell's persistent ref is its
+  *birth-op* position (`manifold.hpp:295`, `store.hpp:677-681`), never the band's op count, and
+  the image's tail ops are links and values rather than births — recorded once at load on the
+  adapter's `programRef` bind record — chain-stable because the continuation pins the artifact
+  (`grant->programRef == continuation->programRef`, `mesh_actor.cpp:199,215-216`) — consumed at
   genesis step (a), never re-derived (the received manifold already holds every promoted cell; a
   per-incarnation extent would absorb them all). Positions therefore classify by construction:
-  program cells return at `1..E` on every resume, before the checkpointed state in the numbering
-  and before any `learn`-replay mints one — while a flat append after state would land them above
-  it and invert the test, which is exactly why the prefix is a load-time commitment rather than a
-  genesis step. Every ref classifies by position: an arena mint's
+  program cells return at refs `≤ E_ops` on every resume, before the checkpointed state in the
+  numbering and before any `learn`-replay mints one — while a flat append after state would land
+  them above it and invert the test, which is exactly why the prefix is a load-time commitment
+  rather than a genesis step. Every ref classifies by position: an arena mint's
   ref is `ephemeralBit | dense` (`refOf`, `arena_manifold.hpp:468-470`; `manifold.hpp:154-158`),
   never satisfying the persistent arm, so grafted, learned and other runtime cells stay
   classifiable — a `learn`ed clause sitting on a program `d.clause` rank does not become
@@ -1408,18 +1448,27 @@ the V12 failure with the roles reversed. The disciplines:
   **adapter invariant on publish**, not an assertion: `publishValue` runs against the adapter's
   own lineage store — the `Store` it seeded at spawn and supplies, or verifies the rebuilt
   counterpart of, at `resume`; a persistent `CellRef` is a spool position, so the adapter's copy
-  and the runtime's rebuilt store carry the same `1..E` band — and a
+  and the runtime's rebuilt store carry the same `1..E_ops` band — and a
   prefix-less lineage (a publish off a foreign or fresh store, an `importValue` ingress of
   ephemeral twins, a sibling manifold) reports an empty program-side set, under which the
   discriminator **fails closed**: `learn` is refused outright — an admitted `learn` would link
   the skeleton into every checkpoint under the `closed` flag, the V12 failure with the roles
   reversed — and a `programRef` that names no cell of the received manifold is a genesis bind
-  refusal. Fresh-store publication is therefore the fail-closed arm **by detection**, not by
-  construction: the platform holds no store accessor that could prevent it — and it is already
-  the only publish path exercised today, `mesh_actor_resume_test.cpp:125`'s fresh `Store` —
-  while `promote`'s own encoding presumes the continuing store (link ops emit non-ephemeral
-  targets verbatim, `arena_manifold.cpp:1950`,`:1996`, so a fresh-store publish over a persistent
-  base writes ops naming positions that never existed in it). "State-side" is
+  refusal. Fresh-store publication is therefore the fail-closed arm **by detection**, and
+  detection needs no new surface: `ArenaManifold::store()` is already public
+  (`arena_manifold.hpp:269-271`, falling through to `base_->store()`), so the verify arm can
+  read `arena.store()`'s band today — what the platform withholds is *enforcement*:
+  `publishValue` takes any `Store&` (`mesh_value.hpp:69-74`) and nothing compares it to
+  `arena.store()` (a de-facto supply shape even exists — `Manifold::store()` is `const
+  noexcept` returning non-const `Store*`, `manifold.hpp:486` — so the owed seam is *sanctioned*
+  supply/verification, not raw reachability). It is already the only publish path the actor
+  ceremony exercises today, `mesh_actor_resume_test.cpp:125`'s fresh `Store` —
+  while `promote`'s own encoding presumes the continuing store (link and handle-value ops
+  alike emit non-ephemeral targets verbatim — `setLink` writes `real.at`'s output,
+  `arena_manifold.cpp:2035`, and persistent refs identity-map through `real`, `:1864-1867`,
+  the same translation that ships `OpHandle` targets at `:1947-1954`,`:1992-1996` — so a
+  fresh-store publish over a persistent base writes ops naming positions that never existed in
+  it). "State-side" is
   link-reachable *from the agent cell* — in either direction, as `promote` walks — **without
   transiting a program-side cell** (the walk prunes at the program-side boundary — its own root
   exempt: a program-side `agent_cell()` cannot prune the durable set) and not itself
@@ -1435,11 +1484,14 @@ the V12 failure with the roles reversed. The disciplines:
   is the store's first MakeCell (`manifold.cpp:450-451`), a pre-extent persistent ref — or
   arena-minted on a base-less genesis. The frames stay out of the durable
   set because `home` is not link-*reachable from* the agent cell — the invariant is about
-  *paths*, not one edge direction: no link path runs from the agent cell to `home`, the
+  *paths*, not one edge direction: no *system-minted* edge creates a link path from the agent
+  cell to `home`, the
   `+d.cursors` rank or any `d.stack` cell (the membership edges run `rankTail +d → member` —
   `home`→cursor, cursor→frame, `vortex_vm.cpp:157-160`,`:206` — outbound from the chains, and
-  `##` anchors are ref-box ints, invisible to the link walk either way) — so even a persistent
-  post-resume `home` cannot expose the frames behind it; and were `home` itself to classify
+  `##` anchors are ref-box ints, invisible to the link walk either way) — and the prune is what
+  excludes the frames in every case: `promote`'s BFS prunes at any non-`holdsOwn` persistent
+  cell (`arena_manifold.cpp:1755-1757`), so even a persistent `home` a session `Link` managed
+  to reach cannot expose the frames behind it; and were `home` itself to classify
   program-side the prune would exclude the same frames, so the conclusion holds either way.
   Frame-bound captures are refused by binding class ahead of
   the sideness test — the `closed` account below details the refusal. The walk is
@@ -1503,9 +1555,10 @@ record by eviction; `unlearn` and genesis replay resolve each name through `code
 target descriptor records the target's resolved name, and the convention has two arms: the
 **qualified** `[<module>:][<Agent>.]<member>` spelling for program-original clause and member
 targets (intentions' qualified names — two-part `module:Name` for goals and events, three-part
-where an `Agent.` member segment applies), and the **verbatim `patch:<n>` clause label** for
-learned-clause targets — a learned clause's name lives on its `+d.name` verbatim, so the record
-stores `patch:<n>` exactly, never a canonicalized `<module>:<Agent>.patch:<n>` the `plan_named`
+where an `Agent.` member segment applies), and the clause's **verbatim `+d.name`** —
+conventionally `patch:<n>` — for learned-clause targets: a learned clause's name lives on its
+`+d.name` verbatim, so the record stores it exactly, never a canonicalized
+`<module>:<Agent>.patch:<n>` the `plan_named`
 match would then miss (§6.7). For graft verbs the descriptor also carries the parent the clause
 attaches under — the `goal`/`event` name replay needs to re-run the attach. *Where the name is
 read off* splits by verb, because the
@@ -1521,7 +1574,12 @@ cannot be re-found at genesis is a patch that lies — and the gap reaches decla
 a kernel-emitted handler clause is anonymous under spec V15 (`on Event [guard] { }` mints no
 `+d.name` — only plan clauses are named), so `learn_where`/`learn_body` on a *declared* handler
 hits the same refusal — durable guard/body patching works on named plans and on learned handlers
-(`graft_handler`/`learn_handler` mint named clauses), never on declared ones.
+(`graft_handler`/`learn_handler` mint named clauses), never on declared ones, which are likewise
+un-*replaceable* and un-*removable* durably: dedupe-by-name cannot match a nameless clause, so
+`learn_handler` on the same event is always additive — it coexists with the declared clause
+under `priority` ordering rather than superseding it — `unlearn` has no recorded name to match,
+and `prune` is session-only; post-resume the image folds the declared clause back while the
+learned shadow replays alongside it.
 `unlearn(clause_or_symbol)` *matches* by the
 patch target's resolved name: the argument's clause/symbol cell resolves to its name by the
 reverse read — the clause's `+d.name` label cell, the symbol cell's own content — and the
@@ -1563,9 +1621,16 @@ structure — and `run` targets inside a learnable fragment must be *name-resolv
 opaque session `Code` handle is not durable either — the emitter name-records every
 statically-known `run` operand on a `run`-role record: a literal operand → the head's actual
 `+d.name` label — a `code"#label …"` literal's user label, else its `src:`; a `code_named(L)`
-operand with `L` a string literal → `L` verbatim — including a qualified-looking `L`, the only
-route a `run`-role record has to the qualified resolution path (it fails `code_named`'s `d.code`
-walk in session, but the record it leaves resolves — or drops — at genesis); there is **no
+operand with `L` a string literal → `L` verbatim — a name, not a call: the emitter resolves `L`
+through `code_named`'s two-space lookup at emission and writes `int64(head)` into the slot on a
+hit, while an `L` it cannot resolve — a qualified spelling like `demo:Forager.f` that no head
+label can carry, or a `reify:`/`d.code` label the emission set cannot yet contain — leaves the
+slot head-less while still recording `L`, so the session `run` refuses it at the §6.2 descriptor
+check *until the record's genesis rebind fills the slot* (the genesis `int64(head)` write needs
+this static-slot reading — there is no per-`run` `code_named` evaluation to fail or mask it).
+The qualified `L` is thereby the only route a `run`-role record has to the qualified resolution
+path; when the qualified name resolves head-less (a `def` symbol) the record stays unresolvable —
+the documented headless-`run` refusal, the patch dropping like an unresolved name. There is **no
 `plan_named`/`symbol_named` arm** — both builtins return `Opt<Cell>` where `run` demands `Code<T>`
 and M3 bars the silent `Cell`→`Code` upgrade, so such a `run` never typechecks and nothing is
 recorded — the head-less `def` symbol it would name is the headless-`run` refusal class (§6.2); a
@@ -1623,8 +1688,9 @@ all. A *label* — `src:`,
 `reify:` or a user `#label`, which is what `run`-target and fragment-identity records carry —
 rebinds through the **program-image label→head lookup**: the same outbound `program()`
 structural walk the sideness test runs, matching `+d.name` verbatim but only over cells in the
-head layout (`+d.entry` plus the descriptor `+d.values` — the shape restriction that keeps the
-qualified strings clause `+d.name` labels carry on the same dim from matching; symbol names need
+head layout (`+d.entry` plus the descriptor `+d.values` — the shape restriction that keeps
+clause `+d.name` labels — `patch:<n>` their largest producer — and the qualified strings they
+carry on the same dim from matching; symbol names need
 no such guard, they live as cell *content*, never on `+d.name`), →
 `writeValue(slot, int64(head))` — the head itself, no `+d.entry` hop, because the slot is
 head-valued; `learn`-registered heads live state-side, outside the program
@@ -1647,9 +1713,12 @@ learned clause survives where an int64 callee id would not.
 already-approved wake turn (the empty-mailbox arm below mints one;
 `vagent-agent-language.md:1670`, an approved but unimplemented `mesh_actor` change) **and the
 lineage-store seam** §6.6's invariant stands on — the adapter constructs and keeps the publish
-`Store`, seeded at spawn (§10.1), and at `resume` supplies it to the replay path or verifies the
-rebuilt store's `1..E` band against it; `spawn()` has no store to seed and `resume` keeps its
-internally built one private (`mesh_actor.cpp:156`, `:260-269`), so this is owed adapter-API
+`Store`, seeded at spawn *by base-injection* (the seeded store's folded manifold constructing
+`WorkerContext(base, reader)` before `initGenesis` freezes `home_`/dims — `mesh_actor.cpp:270-271`,
+`vortex_core.cpp:14`,`:29-70`; §10.1), and at `resume` supplies it as the rebuild's backing store
+or verifies the rebuilt store's `1..E_ops` band against it in canonical post-remap form; `spawn()`
+has no store to seed and `resume` keeps its internally built one private
+(`mesh_actor.cpp:119-122`,`:156`, `:260-269`), so this is owed adapter-API
 surface named like P4's wake, not silently assumed. `checkpointView` yields a
 view over `const ArenaManifold&` (`mesh_actor.cpp:668-694`, `mesh_actor.hpp:102-105`) and
 `publishValue` takes `const ArenaManifold&` (`mesh_value.hpp:69-74`), so the re-kind/restore cannot
@@ -1726,48 +1795,67 @@ At genesis, the persistent manifold **arrives — it is not constructed**: `rece
 `rebuildManifold(version)` over the checkpoint's own sealed spool (`mesh_actor.cpp:260-271`
 installs it as the arena's `const` base; `manifold.cpp:427-442` assigns `birthOp = opIndex`
 verbatim, index-for-index), so under the store lineage above the fold already reproduces the
-whole `[image 1..E][state >E]` band in one pass. Genesis *binds* what arrived — the ordering is
-fixed, and nothing in it re-materializes an image:
+whole `[image 1..E_ops][state >E_ops]` band in one pass. Genesis *binds* what arrived — the
+ordering is fixed, and nothing in it re-materializes an image:
 
 - **(a) lineage bind.** Genesis asserts the received manifold's image band is the recorded
-  program image — **positionally**, since the count alone would pass a scrambled one: every cell
-  the `program()` structural walk reaches must hold a persistent ref `≤ E`, and the walk's
-  maximum must equal `E` — the image prefix length on the adapter's `programRef` bind record —
-  so an image twin minted above `E`, or any non-image cell inside `1..E`, refuses genesis. A
-  merged or re-seeded lineage (`mergeValues` promotes imported twins into a fresh store in
-  discovery order, `mesh_value.cpp:512-545` — `mesh_host.cpp:484-530` publishes it) fails closed
-  the same way, not merely a prefix absent outright; and the stronger optional comparand is the
-  adapter's own record — it holds the artifact's ops segment it seeded, so asserting the
-  received ops `1..E` equal the recorded image is the same test one level down. The lineage
-  itself is a load-time
-  commitment (the artifact's sealed ops segment, applied into the adapter's own `Store` —
-  position-stable, not byte-identical; §10.1's seeding step owns the store — the `job.base`
-  pattern, `mesh_jobs.cpp:303-318`), inherited by every checkpoint
+  program image on **two distinct landmarks**, because one comparand conflated them: the band
+  bound is `E_ops`, the image prefix length *in ops* — while a cell's persistent ref is its
+  *birth-op* position (`manifold.hpp:295`, `store.hpp:677-681`), and the image's last op is
+  never a birth (`promote` emits links last, `arena_manifold.cpp:2010-2017`; `exportSymbol`
+  likewise closes with the `+d.values` and rank links, `vortex_core.cpp:119-127`), so no walk
+  maximum can ever equal `E_ops` and none is asserted. The bind is instead an **ops-segment
+  content comparand**, mandatory rather than optional: the adapter holds the artifact's seeded
+  segment, and asserts the received store's ops `1..E_ops` decode to the same op sequence —
+  compared in canonical post-remap form, op kind plus non-scroll fields, since `CompactOp`
+  bytes legitimately differ under the `ScrollId` remap (`publication.cpp:1048-1086`,`:1030+`).
+  The comparand is the only stated test that detects permutation and scramble *inside* the
+  band — a reachable shape, since `adoptOpRecords` topologically re-sorts adopted records with
+  a `produces`-hash tie-break (`store.cpp:3836-3940`), so a branched segment can land image
+  cells permuted within `1..E_ops` while every positional bound still passes — and it is the
+  arm that refuses a merged or re-seeded lineage: `mergeValues` promotes imported twins in
+  `(contentHash, authorKey, parent)` order (`mesh_value.cpp:519-523`) into its destination
+  store — the fresh-destination, no-`job.base` arm (`mesh_host.cpp:509-510`) carries no prefix
+  and fails the comparand outright, while under `job.base` the merge appends above the base's
+  own prefix (`:507`) and the band survives legitimately. The walk's remaining role is
+  **per-cell classification, not refusal**: each cell the `program()` structural walk reaches
+  — the walk rooted at the adapter-recorded program root resolved on the received fold, (c)
+  re-binding it for in-arena use — tests its own persistent ref against `E_ops`: `≤ E_ops`
+  classifies program-side, `> E_ops` state-side — so cells the walk legitimately reaches beyond
+  the band through `+d.code`, `d.vars` or `d.belief` (registered heads, member state) are
+  classified state-side, never refused, and non-image ingress is detected exactly as
+  misclassification: an image twin minted above `E_ops` reads as state, and a non-image cell
+  inside `1..E_ops` is what the comparand just excluded. The lineage itself is a load-time
+  commitment (the artifact's sealed `ops` segment, applied into the adapter's own `Store` by
+  `historyFromSeal` — position-stable, not byte-identical; §10.1's seeding step owns the
+  store — the `job.base` pattern, `mesh_jobs.cpp:304-318`), inherited by every checkpoint
   because checkpoints append and `sealLocalSpool` seals the whole spool in the checkpoint path
   (`mesh_value.cpp:227-228`,`:241`; `publication.cpp:611-617`); a prefix-less lineage is the
-  fail-closed arm above — `learn`
-  refused, and a `programRef` naming no cell of the received manifold a genesis bind refusal.
-  The arena then overlays the base with ephemeral session cells; the overlay adds nothing
-  persistent.
+  fail-closed arm above — `learn` refused (the §5.6 *no program lineage* diagnostic), and a
+  `programRef` naming no cell of the received manifold is a genesis bind refusal. The arena
+  then overlays the base with ephemeral session cells; the overlay adds nothing persistent.
 - **(b) `ensureDimension` find-or-mint + `setOpcodeKind` re-registration** — dims resolve from
   base/cache before any mint (`arena_manifold.cpp:78-105`), no marks outstanding; and the folded
-  image's op cells — every op cell in the `1..E` band the walk of (a) just asserted —
+  image's op cells — every op cell in the `1..E_ops` band the comparand of (a) just verified —
   re-register into `opcodeMap_` through `setOpcodeKind`
   (`vortex_vm.cpp:98-100`) — a registration *pass* over the folded cells, never a re-run of
   `mintOpcode`, which would mint ephemeral twins and register the wrong cells (§6.5). The
   dependency is the empty map, not stale indices: `opcodeMap_` is per-`WorkerContext` and empty
-  after `resume`, and the consumer that truly needs map *membership* is §6.5's write-guard —
+  at the spawn-time image bind as after `resume`, so the pass runs at both — and the consumer
+  that truly needs map *membership* is §6.5's write-guard —
   `getOpcodeKind` decodes folded ops fine through its `asInt64` fallback
   (`vortex_vm.cpp:102-114`), but the P15 refusal tests `opcodeMap_.contains(masterOf(cell))`,
   so without this pass the folded skeleton's op cells are absent from the map and surgically
-  writable (the §6.5 exemption covers them); `code` re-emission needs it filled too — the
-  program image's *own* op map, keyed on the folded refs.
+  writable (the §6.5 exemption is what leaves them writable); `code` re-emission needs it
+  filled too — the program image's *own* op map, keyed on the folded refs.
 - **(c) `programRef → the program root` bind** by the V10 mechanism — the artifact binds its own
   program artifact so `code_named`/patch name resolution has a root to walk.
 - **(d) `d.patch` replay in ordinal order** — replay does not re-record (replayed grafts mint no
   patch cells). Each replayed install `reify`s a `d.code`-registered head into the installed
-  copy, and the copy inherits the registered head's slot contents at mint — the copy-inheritance
-  that decides (e)'s position — **and the replay hands (e) its install set**: per patch, the
+  copy, and the copy's ref slots derive from the *capture-record endpoints* at replay — the
+  copy-inheritance that decides (e)'s position, its rehydration source being the record rather
+  than the donor cell's live value (§6.1's recorded-template rule) — **and the replay hands (e)
+  its install set**: per patch, the
   minted install copy plus the `+d.refs` records `reify` regenerated on it. The hand-off is
   needed because the copies hang off program-side install sites — the `d.clause`/attachment
   anchors the publish-time walk prunes — so no traversal over registered heads alone reaches
@@ -1782,13 +1870,17 @@ fixed, and nothing in it re-materializes an image:
   `resume`/`genesis` receives the `OpHandle`-kind cells verbatim — handles carrying their
   *promoted* targets (`arena_manifold.cpp:1947-1951` writes `real.at(target)`) — and rehydration
   `writeValue(slot, Int64)`s each marked cell back with the promoted target. The sweep runs last
-  for two reasons that meet at copy-inheritance. First, coverage: a replayed install mints its
-  slots with the registered head's *current* contents — `reify`'s `New`/`Link`/`Value` replay
-  cannot mint handle-kind cells, so a source `OpHandle` slot contributes its handle *target* as
-  plain Int64 and the copy's ref slots arrive pre-rehydrated (the ref arm's kind-guard makes it
-  a no-op on them) — while operand slots carry the head's last write, so the copies'
-  *name-record* slots still need the rebind arm; and those records live on copies a head-only
-  sweep cannot reach, which is why (d) hands its install set over. Second, ordering: a
+  for two reasons — coverage first, ordering second. Coverage: a replayed install derives its
+  ref-box slots from the regenerated ref-records' **capture endpoints** — §6.1's recipe encodes
+  endpoints as cells (each record's `+d.values` names the referent, never a census integer), and
+  at replay the referent endpoint is the fold cell at the promoted position, so `Value`-
+  replaying `int64(endpoint)` writes the identical bits `*handleTarget` on the donor slot names —
+  the copy's ref slots arrive pre-rehydrated with no handle-kind read (`reify`'s
+  `New`/`Link`/`Value` palette cannot mint handle-kind cells, and the ref arm's kind-guard makes
+  it a no-op on them), while a naive replay of the donor's recorded literal is the stale-alias
+  bug the endpoint derivation exists to preclude — and the copies' *name-record* slots still
+  need the rebind arm; those records live on copies a head-only
+  sweep cannot reach, which is why (d) hands its install set over. Ordering: a
   name-record's rebind must see **post-installation** symbols — under the naive pre-replay
   position a `learn_method`/`learn_plan` install-or-repoint replayed at (d) was invisible to it,
   so a call to a patch-replaced symbol bound the pre-replacement image binding and a call naming
@@ -1801,7 +1893,7 @@ Two discipline rules keep the checkpoint boundary honest:
   kernel-emitted clause cannot keep the prior attachment on the patch — that edge would be
   state→program-skeleton, exactly the link V12 exists to exclude. The patch records the new head
   only; `unlearn` of such a patch detaches it, and genesis restores the program's own attachment
-  for free because the image prefix folds the skeleton back verbatim at `1..E`. (Unlearning a
+  for free because the image prefix folds the skeleton back verbatim at `1..E_ops`. (Unlearning a
   *previously learned* replace does record a prior head — a closed fragment is safe to link.)
 - **Replay is monotonic but not cumulative-garbage.** Genesis walks `d.patch` in ordinal order and
   re-runs each graft; a patch whose target no longer resolves (renamed plan, pruned clause) is
@@ -1828,7 +1920,8 @@ since `resolveCell`'s check is dense-range only). The durable layer on top:
   prefix *replaces* it (the user label wins outright, it is not a suffix). A *nested* literal —
   a `code"…"` appearing inside another `code"…"` body — labels from the **outermost** enclosing
   literal's `src:` site and chains `+o:c` descending inward per level: `src:m:l:c+o:c…` where
-  each `+o:` arm is the next-inner literal's offset position §5.1 uses inside its enclosing
+  each `+o:` arm is the next-inner literal's offset position — the `+<off-line>:<off-col>` pair
+  §5.1's diagnostics use inside its enclosing
   body — the first arm sits inside the `src:` literal's body, the last names the labelled
   literal's own spot in its immediate parent — so the outermost origin plus the full descent is
   the unique key. A literal
@@ -1866,7 +1959,9 @@ since `resolveCell`'s check is dense-range only). The durable layer on top:
   lives (never `d.code`-registered, so the two spaces are disjoint and no rank-order tie-break
   is ever needed); that fallthrough is what gives a literal head a re-resolution spelling at
   all — and a `reify:<src>:<serial>` label is read off a live head with `label_of`, never
-  constructed by hand. A `code"…"` head living in *another* artifact's image has no
+  constructed by hand — the head reached as a `Cell` through `cells"…"` (§6.1's row names the
+  paths), since `label_of` takes `Cell` and the head-producing reads yield `Code<Cell>` (M3
+  bars the coercion). A `code"…"` head living in *another* artifact's image has no
   re-resolution spelling
   at all this round — both walks cover the bound `programRef`'s lineage only, and a foreign head
   outside it takes §6.6's fail-closed arm as a cell outside the bound `programRef` lineage —
@@ -2293,12 +2388,20 @@ apps/common/xanadu/vagent/
   stdmeta prelude sources      // std:meta routines in vagent/Vortex, linked like std:agent
 apps/vagent:                   // no new commands; `check` gains code"…" coverage
 adapter:                       // CONSTRUCTS and KEEPS the agent's publish Store (per-agent,
-                               //   never shared) — seeds it on the artifact's ops segment at
-                               //   load, position-stable as the lineage's low prefix (the
-                               //   job.base pattern, §4.5/§6.6; spawn() takes no store today,
-                               //   mesh_actor.cpp:156 — this step owns that gap) — supplies the
-                               //   same lineage store to resume's replay path, or verifies the
-                               //   rebuilt store's 1..E band against it — and binds program
+                               //   never shared) — seeds it on the artifact's sealed ops
+                               //   segment at load (historyFromSeal, publication.cpp:1093-1099),
+                               //   position-stable as the lineage's low prefix (the
+                               //   job.base pattern, §4.5/§6.6) — binds it by BASE-INJECTION:
+                               //   the folded Manifold (which it must pin for the arena's
+                               //   life — rebuildManifold returns it by value, store.hpp:450-457)
+                               //   + the store as reader constructing WorkerContext(base,
+                               //   reader) before initGenesis freezes home_/dims
+                               //   (vortex_core.cpp:14,:29-70; a post-construction attach(Space)
+                               //   cannot re-deliver them; spawn() takes no store today,
+                               //   mesh_actor.cpp:119-122,:156 — this step owns that gap) —
+                               //   supplies the same lineage store as resume's rebuild backing,
+                               //   or verifies the rebuilt store's 1..E_ops band in canonical
+                               //   post-remap form — and binds program
                                //   root + agent cell +
                                //   d.code/d.patch/d.weight/
                                //   d.synapse/d.entry/d.patch-head/d.validate/d.refs/d.ref/
@@ -2324,16 +2427,20 @@ resolution) — owed by vagent §11.1 itself, not new debt here. `static` needs 
 
 Continuing vagent's register after P14. **P15 and P16 are proposed, not approved** — and P16's
 adapter half rides on the lineage-store seam §6.6 names: the adapter constructs/keeps the publish
-`Store` and `resume` must take or verify it (`spawn()` accepts none, `resume()` keeps its private
-one, `mesh_actor.cpp:156`,`:260-269`; `ActorCheckpointView` hands the adapter arena/root/
-continuation but no store, `mesh_actor.hpp:102-106`) — owed adapter-API surface alongside P4's
+`Store`, `spawn` binds it by **base-injection** before `initGenesis` (the `WorkerContext(base,
+reader)` shape `mesh_actor.cpp:270-271` uses at `resume` — supply-side, not a store parameter),
+and `resume` must take or verify it (`spawn()` accepts none, `resume()` keeps its private
+one, `mesh_actor.cpp:119-122`,`:260-269`; `ActorCheckpointView` hands the adapter arena/root/
+continuation but no store, `mesh_actor.hpp:102-106` — while `ArenaManifold::store()` already
+exposes the band for verification, `arena_manifold.hpp:269`, so only sanctioned *supply* is
+owed) — owed adapter-API surface alongside P4's
 approved wake change, not silently assumed. P17 is recorded
 below the register as deferred-not-registered.
 
 | No. | Change                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | Where                                                                                                                                                                     | Why it cannot live in `std:meta` or the adapter                                                                                                                                                                                                                                                                                                                                                                                                                                                              | Without it                                                                                                                                                                                                                                                                                                              | Used by         |
 | --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------- |
 | P15 | Every VM write into an `opcodeMap_`-registered cell is refused — kind-immutability at the write funnel: `VortexCore::writeValue`/`splice` take a VM-installed kind predicate (`opcodeMap_.contains(masterOf(cell))`), covering `executeOpcodeBody`'s `Value`/`Splice` cases, `step()`'s memo-hit and generic output writebacks, and both `runPipeline` writes; refusal is a typed `success=false` per site. Exempt by construction: `setCursorOpcode`, `Call` frame writes (the frame-cell carve-out), `mintOpcode`'s `setContent`, every write to a fresh (unregistered) cell. Post-resume the folded image's op cells re-register by a `setOpcodeKind` pass (`vortex_vm.cpp:98-100`), repopulating the empty per-`WorkerContext` map — `mintOpcode` would mint ephemeral twins, not register the folded cells (§6.5).                                                                                                                               | `vortex_core.cpp:196-254` (`writeValue`/`splice` funnel + installed predicate); call sites `vortex_vm.cpp:771-806`, `:1269-1273`, `:1287-1294`, `:337`, `:343-346`; tests | `opcodeMap_` is private VM state (`vortex_vm.hpp:186`). No Vortex opcode can see the map, and the adapter runs between turns, not between opcodes. Every non-structural op restates bound outputs' content through `writeValue` — a wing re-point (this document's whole subject) can aim an output at an op cell and rewrite its `int64` with no `Value`/`Splice` involvement; the map claims the old kind while the cell names a new one, and the trail cannot undo it because the map is not arena state. | Any write to a registered op cell silently changes what the cell *means* — a stale-kind divergence invisible to every `std:meta` guarantee, making "the graph says X" unverifiable. The only alternative would be refusing all program-side writes, which is `cells"…"`'s ordinary content write and cannot be refused. | M10, §6.5, §7.2 |
-| P16 | Checkpoint-time relocation of fragment-owned int64 reference cells — an **adapter-side ceremony needing no mechanism beyond two named seams: P4's already-approved wake (`vagent-agent-language.md:1670`) plus the lineage-store seam §6.6 names — the adapter-owned publish `Store`, supplied or verified at `resume`** (`spawn`/`resume` expose neither today, `mesh_actor.cpp:156`,`:260-269`): emission marks every fragment-owned int64 ref cell whose `+d.refs` record carries no `+d.name` with *its own* `d.mesh.relocation→"cell"` marker cell (one per ref, `mesh_evaluator.cpp:735` precedent) plus a `+d.ref` record on `+d.refs`; `+d.name` on a record makes it a name-record — no marker, never re-kinded, genesis rebinds by *record slot role*: a `call`-role record resolves the qualified `module:Owner.name` through `symbol_named`'s module-`d.vars` walk → `+d.values` → the op-or-head hop → `writeValue(slot, int64(entryOp))` (Call-operand slots are entry-valued), a `run`-role record resolves its `src:`/`reify:`/`#label` through the program-image label→head lookup → `writeValue(slot, int64(head))` — a *qualified* `run`-role `+d.name` (`code_named(L)` with a qualified `L` is the only producer) resolves through the same qualified path but must land on a head, since run-target/`Code` slots are head-valued — `run` derefs `+d.entry`/`+d.values` — and a head-less resolution (a `def` symbol) is the headless-`run` refusal, learned labels falling back to `code_named`. The mutable seam is the adapter's own `Executor` callback inside `pumpOne` (flag-driven: `pending(pid)==1` arms the window, an empty-mailbox checkpoint mints P4's wake turn; end-of-turn re-kind `Int64`→`OpHandle` on the mutable arena, `publishValue` immediately after the flagged turn's end on `const&`, head-of-next-turn `Int64` restore on every exit path); genesis rehydrates in the post-`d.patch`-replay `+d.refs` sweep — registered heads' *and* replay-installed copies' records (§6.6 step (e); resume skips `importValue`, `mesh_actor.cpp:260-271`). Acceptance: a learn → checkpoint → resume → learn → checkpoint round-trip test. Scope: fragment-owned ref cells only. | emission-side marking: `vagent/fragment.{hpp,cpp}` (kernel-glob TU, §10.1); the flag/checkpoint/genesis ceremony: the adapter's own executor TU plus P4's approved `mesh_actor` wake change and the lineage-store seam (`spawn` store parameter, `resume` store supply/verify); the rest reuses `foreign_op_handle`/`publishValue`/`checkpointView` as-is | `promote` copies Int64 content verbatim and translates only links and `OpHandle`/`ForeignOpHandle` values (`arena_manifold.cpp:1934-1954`, the handle-translation arm covering both); no opcode can write `OpHandle` kind (`writeValue` covers Int64/Double/Bool/None, `vortex_core.cpp:196-229`), and `resume` bypasses `importValue` — so only the adapter (which owns emission and checkpoint timing) can run the ceremony; it needs no VM change because `isCellRelocationHandle` and the promote path already exist.                                                                                                                                                                                       | Every promoted fragment's wing slots and `Jump`/`Call`/`Branch`/`Choice` targets stay stale dense ids after `resume` — silent aliasing into unrelated cells; `learn`/`d.patch`/`d.code` durability is impossible and must degrade to session-only.                                                                      | M11, §4.5, §6.6 |
+| P16 | Checkpoint-time relocation of fragment-owned int64 reference cells — an **adapter-side ceremony needing no mechanism beyond two named seams: P4's already-approved wake (`vagent-agent-language.md:1670`) plus the lineage-store seam §6.6 names — the adapter-owned publish `Store`, base-injected at `spawn` and supplied or verified at `resume`** (`spawn`/`resume` expose neither today, `mesh_actor.cpp:119-122`,`:156`,`:260-269`): emission marks every fragment-owned int64 ref cell whose `+d.refs` record carries no `+d.name` with *its own* `d.mesh.relocation→"cell"` marker cell (one per ref, `mesh_evaluator.cpp:735` precedent) plus a `+d.ref` record on `+d.refs`; `+d.name` on a record makes it a name-record — no marker, never re-kinded, genesis rebinds by *record slot role*: a `call`-role record resolves the qualified `module:Owner.name` through `symbol_named`'s module-`d.vars` walk → `+d.values` → the op-or-head hop → `writeValue(slot, int64(entryOp))` (Call-operand slots are entry-valued), a `run`-role record resolves its `src:`/`reify:`/`#label` through the program-image label→head lookup → `writeValue(slot, int64(head))` — a *qualified* `run`-role `+d.name` (`code_named(L)` with a qualified `L` is the only producer) resolves through the same qualified path but must land on a head, since run-target/`Code` slots are head-valued — `run` derefs `+d.entry`/`+d.values` — and a head-less resolution (a `def` symbol) is the headless-`run` refusal, learned labels falling back to `code_named`. The mutable seam is the adapter's own `Executor` callback inside `pumpOne` (flag-driven: `pending(pid)==1` arms the window, an empty-mailbox checkpoint mints P4's wake turn; end-of-turn re-kind `Int64`→`OpHandle` on the mutable arena, `publishValue` immediately after the flagged turn's end on `const&`, head-of-next-turn `Int64` restore on every exit path); genesis rehydrates in the post-`d.patch`-replay `+d.refs` sweep — registered heads' *and* replay-installed copies' records (§6.6 step (e); resume skips `importValue`, `mesh_actor.cpp:260-271`). Acceptance: a learn → checkpoint → resume → learn → checkpoint round-trip test. Scope: fragment-owned ref cells only. | emission-side marking: `vagent/fragment.{hpp,cpp}` (kernel-glob TU, §10.1); the flag/checkpoint/genesis ceremony: the adapter's own executor TU plus P4's approved `mesh_actor` wake change and the lineage-store seam (spawn-side base-injection of the seeded store — the `WorkerContext(base, reader)` shape `resume` already uses, supply-side not a store parameter; `resume` store supply/verify); the rest reuses `foreign_op_handle`/`publishValue`/`checkpointView` as-is | `promote` copies Int64 content verbatim and translates only links and `OpHandle`/`ForeignOpHandle` values (`arena_manifold.cpp:1934-1954`, the handle-translation arm covering both); no opcode can write `OpHandle` kind (`writeValue` covers Int64/Double/Bool/None, `vortex_core.cpp:196-229`), and `resume` bypasses `importValue` — so only the adapter (which owns emission and checkpoint timing) can run the ceremony; it needs no VM change because `isCellRelocationHandle` and the promote path already exist.                                                                                                                                                                                       | Every promoted fragment's wing slots and `Jump`/`Call`/`Branch`/`Choice` targets stay stale dense ids after `resume` — silent aliasing into unrelated cells; `learn`/`d.patch`/`d.code` durability is impossible and must degrade to session-only.                                                                      | M11, §4.5, §6.6 |
 
 P17 — `opcodeMap_`/`cursorPC_`/`arenaDims_` eviction or resync on `release` — is **deferred, not
 registered**: the containment discipline (drain idiom, no bare `release` under live marks, no-marks
@@ -2440,8 +2547,8 @@ ______________________________________________________________________
 ## 13. Breakages and costs
 
 - **One new core proposal plus an adapter ceremony** (P15; P16 needs no mechanism beyond P4's
-  already-approved wake plus the lineage-store seam §6.6 names — adapter-owned `Store` at `spawn`,
-  supplied or verified at `resume`). P15 changes
+  already-approved wake plus the lineage-store seam §6.6 names — adapter-owned `Store` base-injected
+  at `spawn`, supplied or verified at `resume`). P15 changes
   what any VM write may target (one `opcodeMap_` hash hit per write into a non-fresh cell, once per
   bound-output writeback at most); programs that *deliberately* wrote `int64` into registered op
   cells would now fail — no such program exists in the tree (the compiler mints ops via
@@ -2747,7 +2854,7 @@ installed-copy durability phrasing.
 **1.7 — Seventh review revision (r7 disposition).** Re-roots the checkpoint model in a **named
 store lineage**, replacing the recorded-extent construction the three converging lanes (vortex,
 architect, zigzag) found unmechanized. The program image is the agent store's **low ops prefix**,
-anchored at load on the `job.base` shared-base pattern (`mesh_jobs.cpp:303-318`) — the artifact's
+anchored at load on the `job.base` shared-base pattern (`mesh_jobs.cpp:304-318`) — the artifact's
 ops segment loaded byte-identical, since positions are only stable when the prefix is — so the
 image occupies persistent positions `1..E` before any state op is written. `receiveValue` already
 folds the whole `[image 1..E][state >E]` band inside `rebuildManifold`
@@ -2803,7 +2910,7 @@ model was missing (R8-A): **the adapter constructs and keeps it** — `spawn()` 
 is owed adapter-API surface alongside P4's approved wake, stated at §6.6, §10.1's adapter step,
 §10.2's preamble and P16's register row. Seeding is **position-stable, not byte-identical** —
 `applyOpsSegment` remaps `ScrollId`s when the artifact's sealed ops segment lands in the agent's
-store (`publication.cpp:981-1008`,`:1030+`), so what the lineage preserves is identical op
+store (`publication.cpp:1048-1086`,`:1030+`), so what the lineage preserves is identical op
 positions and sequence, and v1.7's "byte-identical" gloss is corrected (per-agent `Store` objects
 are never shared even when artifact bytes are; an artifact upgrade is a new `programRef` and a
 respawn, never a mid-chain migration — spec §4.4's arena-load wording marked superseded). Fresh-
@@ -2833,8 +2940,9 @@ symbol names are content, never `+d.name`; `mailbox.front()`/`pop_front()` cited
 beside the `publication.cpp:611-617`,`:664-672` machinery; the `getOpcodeKind` rationale moved to
 §6.5's write-guard (map *membership* is what P15's refusal and re-emission need; `asInt64` decode
 already answers kind); `home` reachability stated as no link *path* in either direction; the
-"name-record sweep" shorthand dropped — the sweep covers ref-records too; the focus-slot
-hazard's `(link eviction, §4.3)` cross-reference corrected — eviction is §6.1/M14/`link`'s
+"name-record sweep" shorthand dropped — the sweep covers ref-records too; the `+d.refs`
+diagram's genesis-rewrite slot line had its `(link eviction, §4.3)` cross-reference corrected —
+eviction is §6.1/M14/`link`'s
 `arena_manifold.cpp:1347-1377`, not the trail section; `run(inc, …)`'s cost spelled a `#Call`
 frame plus spill (never a `Call`-opcode operand); P16's row gains the seam pair and the
 qualified-run trigger; and `arena_manifold.cpp:1952-1954` widened to `:1934-1954` (the
@@ -2842,3 +2950,53 @@ translation arm covers both handle kinds). Chronicles belatedly the still-unreco
 v1.7's memo keyless-record sentence (§3: a label-less attach cell appends no memo record, since a
 keyless record could never hit) and v1.6's `module vars`→`member vars` rename plus `cap$N` alias
 rephrase.
+
+**1.9 — Ninth review revision (r9 disposition).** Repairs genesis (a)'s landmark conflation
+(R9-A): `E` was the ops-segment *length* while cell refs are birth-op *positions*
+(`store.hpp:677-681`, `manifold.cpp:434`) and `promote` emits links last
+(`arena_manifold.cpp:2010-2017`), so `walk-max == E` refused every honest artifact and the
+un-pruned walk's `>E` reaches (`+d.code`/`d.vars`/`d.belief` state) refused every stateful one —
+replaced by the two distinct landmarks: `E_ops`, the image prefix length *in ops* and the
+ref-space ordering bound, and per-walk-cell *classification* (each `program()`-walk cell tests
+its own ref against `E_ops`; `>E_ops` classifies state-side, never refused). Merged-lineage
+detection moves to a **mandatory ops-segment content comparand** — canonical post-remap form,
+op kind plus non-scroll fields — the only stated test that catches within-band permutation
+(`adoptOpRecords`' topo-resort, `store.cpp:3836-3940`); the per-cell test detects non-image
+ingress; and (b)'s registration scope now keys on the comparand-verified band, widened to the
+spawn-time image bind since `opcodeMap_` is equally empty there. Respawns the spawn-side store
+seam (R9-B): the seeded store is bound **before** the `WorkerContext`/`initGenesis` freeze by
+resume's own base-injection shape (`mesh_actor.cpp:270-271`, `worker_context.hpp:52-55` — a
+post-construction `attach(Space)` cannot re-deliver the `home_`/dims/`opcodeMap_` frozen at
+`vortex_core.cpp:14`,`:29-70`), collapsing the asymmetry to `resume`-side supply-or-verify;
+`ArenaManifold::store()` is already public (`arena_manifold.hpp:269-271`), so detection needs
+no new surface and only sanctioned *supply* is owed; the seeded store's `documentId` handling
+is stated (`store.hpp:133`,`:1435`, `restorePublication`'s `Store(userPermascroll, storeId)`
+precedent at `publication.cpp:1127-1128`); and the verify comparand is named the canonical
+post-remap form (op kind plus non-scroll fields — `CompactOp` bytes differ under the `ScrollId`
+remap, `publication.cpp:1048-1086`). Restates copy pre-rehydration (R9-C): a replayed install's
+ref slots derive from the regenerated ref-records' **capture endpoints** — each record's
+`+d.values` naming the referent fold cell at the promoted position, the identical bits
+`*handleTarget` carries — never the donor's "current contents" nor a replayed stale literal,
+reconciling §6.1's recorded-template rule; the "two reasons" header is relabelled
+coverage/ordering. Applies the minor batch: `ops.nodes` corrected to the sealed `ops` segment
+(`sealedOpsName`, `provenance.hpp:286`; `applyOpsSegment` is file-local, `historyFromSeal` the
+public apply seam, `publication.cpp:1030`,`:1093-1099`, `\x7fXSO\x01` gate `:1033`); the P16-row
+"spawn store parameter" reconciled to supply-side base-injection; the link-emission cite moved
+off the `OpHandle` *value* arms to `setLink` plus the `real` identity map
+(`arena_manifold.cpp:2035`,`:1864-1867`); `mergeValues`' order named `(contentHash, authorKey,
+parent)` (`mesh_value.cpp:519-523`) with the fresh-store destination scoped to the
+no-`job.base` arm (`mesh_host.cpp:507` vs `:509-510`); `plan_named`'s row stops claiming
+declared event-handler clauses (spec V15 mints them no `+d.name`); `code_named(L)`'s
+unresolved-at-emission convention stated — the slot stays head-less and name-recorded, `run`
+refusing at the descriptor check until the record's genesis rebind, a head-less qualified
+resolution being the documented headless-`run` refusal; the anonymous-handler gap extended to
+durable replace/remove (`learn_handler` coexists under `priority`, `unlearn` has no name to
+match); `label_of`'s `cells"…"` acquisition path named (`Code<Cell>`→`Cell` has no coercion);
+`patch:<n>`'s `<n>` pinned to the `d.patch` ordinal with `patch:` refused as a user `name` at
+`graft_*`/`learn_*` emission; `learn_handler` noted additive-not-deduped; the sealed band
+corrected to `1..opsTotal`; and the residual nits — the `spawn()` signature cite
+(`mesh_actor.cpp:119-122`/`mesh_actor.hpp:132-135`), the `d.code`-band's `1..opsTotal` arm, the
+`home` claim's weight moved to the prune (`arena_manifold.cpp:1755-1757`), the `+o:` arm's
+`<off-line>:<off-col>` unit, the §5.6 *no program lineage* diagnostic, the `+d.refs`-diagram
+eviction xref relabelled, `mesh_jobs.cpp:304-318`, and the `program()` walk's root named at
+(a).
