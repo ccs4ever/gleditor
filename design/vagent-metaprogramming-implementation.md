@@ -8,7 +8,10 @@ v2 repartitioned per the round-1 review (`r1-disposition.md` under
 `design/projects/vagent-metaprogramming-impl-review/`); v3 applied the round-2 disposition — genesis
 (e)'s dim-record arm, the re-genesis loop's producer, and a minor bundle; v4 applies the round-3
 disposition (`r3-disposition.md`, same directory) — `splice`'s call-by-value marshalling, the
-re-genesis loop's promote-visible mutation class and root, and a minor bundle.
+re-genesis loop's promote-visible mutation class and root, and a minor bundle; v5 applies the
+round-4 disposition (`r4-disposition.md`, same directory) — `promote`'s root is the agent cell
+*alone* (program-side is never a promote root; program-side persistence is (d) replay's job), the
+first-fold orphan residual re-scoped, `unlink`-vs-tombstone for `unlearn` drops, and cite fixes.
 
 Ordering logic: nothing runtime-mutating lands before the frontend can represent fragments; nothing
 durable lands before mutation exists; the phase-5↔6 boundary is *transport*, not *genesis* —
@@ -101,10 +104,11 @@ pipeline — with `splice`/`static` uniformly refused. Compile-time surface only
 
 - `parser.cpp`: `code` in the `PrefixedStringLiteral` gate (:848-855 precedent from `cells"…"`);
   `Primary`/`Type` productions; the `splice`/`static` prefix *productions* themselves — `static`
-  `Unary`-prefixed with a mandatory operand (spec :960-961), `splice` wherever an operand can follow
-  (§5.1) — without them the skeleton's refusal exercises parse errors, not the named
-  `DiagnosticCode`; `parseCodeBody` (#label/CodeParams header, inner-offset diagnostics, `#`
-  stripped pre-lex).
+  `Unary`-prefixed with a mandatory operand (spec :960-961), `splice` as `'splice' Postfix` with the
+  peeling rule that re-attaches `splice f(args)`'s arglist (spec :736-738 — without it §9.1's
+  `splice inc(count)` parses as a call-shaped-operand refusal) — without them the skeleton's refusal
+  exercises parse errors, not the named `DiagnosticCode`; `parseCodeBody` (#label/ CodeParams
+  header, inner-offset diagnostics, `#` stripped pre-lex).
 - `ast.hpp`: `ExprKind::{Code,Splice,Static}` + the `Expr` scope-stamp field (additive — see phase
   0's ordering note).
 - `code_path.{hpp,cpp}` — narrowing + `src:m:l:c+o:c` diagnostic mapping (mirrors `cell_path`);
@@ -163,17 +167,19 @@ independently shippable.
   (§5.3 — textual substitution would yield observable multi-eval on impure actuals). `Code`-splice
   `def` expansion (its refusal edges: the named `recursive-template` `DiagnosticCode`, the
   control-flow bar in template bodies — `return`/`yield`/`consume`/ `terminate`, the
-  `effect`/`native`/`capacity`/`graft_method` bar, opaque `Code` actuals, and `splice c := 3` —
-  cap$N is not re-assignable, spec :464-470), residual-splice check, the statically-known judgment
-  (transitive, post-substitution, §5.2) — and **dead-`let` erasure** (§5.4): a `let` left dead by
-  full substitution is erased, or refused where erasure is unsafe; mandatory for splice-only
-  literals and for §9.1/§9.4's `let x := code"…"` residue. A `Code`-parameterized (splice-only)
-  literal is refused in evaluated positions — never a `let`/`var` initializer or call argument — and
-  emits no head and no descriptor (§5.4 :924-934; the `run`/`graft` refusal arm lands with the
-  member surface in phase 3). The fragment table is already emitted by phase 1's skeleton; this
-  phase extends it to clones and splices and re-clones each record's body per emission — the
-  `Emitter`'s per-`compileStatement` tables key on `const Expr *` (`compiler.cpp:884-891`), so a
-  second emission of the same nodes would double-register `localReferences_`.
+  `effect`/`native`/`capacity`/`graft_method` bar, opaque `Code` actuals — spec :456-470 — plus
+  `splice c := 3`, §5.2's "a `splice` is never a place" rule applying to *all* splices, ordinary
+  `let`-bound or `Code`-splice alike (spec :784-786 — cap$N is not re-assignable)), residual-splice
+  check, the statically-known judgment (transitive, post-substitution, §5.2) — and **dead-`let`
+  erasure** (§5.4): a `let` left dead by full substitution is erased, or refused where erasure is
+  unsafe; mandatory for splice-only literals and for §9.1/§9.4's `let x := code"…"` residue. A
+  `Code`-parameterized (splice-only) literal is refused in evaluated positions — never a `let`/`var`
+  initializer or call argument — and emits no head and no descriptor (§5.4 :924-934; the `run`
+  refusal arm lands with the member surface in phase 3, the `graft` arm with the mutation verbs in
+  phase 4). The fragment table is already emitted by phase 1's skeleton; this phase extends it to
+  clones and splices and re-clones each record's body per emission — the `Emitter`'s
+  per-`compileStatement` tables key on `const Expr *` (`compiler.cpp:884-891`), so a second emission
+  of the same nodes would double-register `localReferences_`.
 - `checker.cpp`: `static`'s checker-side refusal set, all four §5.5 arms — the `pureBody` impurity
   bar, the arena-reading *form* bar (`cells"…"` any mode, `believes`, `findall`, `run`, the implicit
   `self`/`parent`/`inner`/`outer`/`occurrence` names), the literal-expressible result-type rule
@@ -196,7 +202,7 @@ independently shippable.
   an unhandled-kind path; `static` evaluation — no-mark `vm_.run(cursor, staticFuel)`, the
   type-matched `result`-cell read (`CellValue`, mismatch is its own refusal), cursor unlink, the
   value emitted as `literal()` in the enclosing graph, and the post-run
-  `choiceDepth`/`outstandingMarks` baseline check (`compiler.cpp:108-110` precedent, spec :952-955);
+  `choiceDepth`/`outstandingMarks` baseline check (`compiler.cpp:108-110` precedent, spec :952-960);
   **`staticFuel` joins `ScalarCompilerLimits`** (`compiler.hpp:23-26`, spec :3070-3072 — the sibling
   of phase 1's `CheckLimits` budgets; without it a divergent `static` loops the compile); `cap$N`
   `CompilerBindings` emission (cap$N lookups bypass `binding()`'s unvalued render check and read
@@ -386,24 +392,27 @@ itself.
   the same mechanism `:194-217` runs), enumerated off `dimensions()`' base∪`arenaDims_` surface —
   names read off each dim cell's interned content, `dimensions()` yielding `DimRef`s
   (`arena_manifold.cpp:34-46`, `:87-88`) — *never* the arena-local `d.dims` rank, which appends only
-  under a resolvable `home` (`:92-103`), so a rank enumeration would miss exactly the session-minted
+  under `dimDims && home` (`:91-103`), so a rank enumeration would miss exactly the session-minted
   class filing exists to cover. Plus the fixed list — filing is name-table entries, not cells: **the
   bind set's name-bearing members** — the twelve apparatus dims — file here, while its bound non-dim
   members (program root, agent cell, `validate` constants) bind at (c) and never file; the **17
   system dims** `initGenesis` mints (`d.grab`…`d.role`, `vortex_core.cpp:50-69`) plus the
-  `home`/`d.dims` genesis pair beside (`:35`,`:44`) — nineteen names all told; the thirteen V10
-  `std:agent` dims the adapter `ensureDimension`-mints *before* filing runs
-  (`vagent-agent-language.md` V10); `attach()`'s `d.store-refs` (`arena_manifold.cpp:289-290`);
-  every `dimConstant`/`findOrMintDimension` mint (`compiler.cpp:769-772`). Filing re-enumerates per
-  cycle — the same name-table sweep runs before each `rebuildManifold`, filing only what the rank
-  lacks, so session mints *and* the (b)/(e) genesis re-mints file rather than orphan per fold (each
-  `makeDimension` is a permanent rank append, so the sweep is idempotent by name). The emit lineage
-  obeys the twin rule — the artifact's own image emission files the same vocabulary before *its*
-  compile arena's `initGenesis` (`vortex_core.cpp:14` — the ctor's call; the body at `:29-70`) — an
-  owed-substrate note, the artifact-emission pipeline being outside this plan. Coverage is names
-  whose edges can fold; an unfiled session-minted dim accretes one `dimensionNamed`-invisible orphan
-  per checkpoint — the honest residual (spec :2397-2402; today's unfiled session mints include
-  `d.op-label` at `mesh_value.cpp:473`, `or_parallel`'s four —
+  `home`/`d.dims` genesis pair beside (`:35`,`:44`) — nineteen cells, eighteen filed names (`home`
+  is a plain genesis cell, not a dimension); the thirteen V10 `std:agent` dims the adapter
+  `ensureDimension`-mints *before* filing runs (`vagent-agent-language.md` V10); `attach()`'s
+  `d.store-refs` (`arena_manifold.cpp:289-290`); every `dimConstant`/`findOrMintDimension` mint
+  (`compiler.cpp:769-772`). Filing re-enumerates per cycle — the same name-table sweep runs before
+  each `rebuildManifold`, filing only what the rank lacks, so session mints *and* the (b)/(e)
+  genesis re-mints file rather than orphan per fold (each `makeDimension` is a permanent rank
+  append, so the sweep is idempotent by name). The emit lineage obeys the twin rule — the artifact's
+  own image emission files the same vocabulary before *its* compile arena's `initGenesis`
+  (`vortex_core.cpp:14` — the ctor's call; the body at `:29-70`) — an owed-substrate note, the
+  artifact-emission pipeline being outside this plan. Coverage is names whose edges can fold; an
+  unfiled session-minted dim costs one `dimensionNamed`-invisible orphan at its *first* fold — the
+  first-use edge split: `makeDimension`'s store cell `B` while the session's edges named arena cell
+  `A`, and `discover`→promote mints `A'` carrying them (`store.cpp:1066`,
+  `arena_manifold.cpp:1781`,`:2030-2042`) — not a per-checkpoint accrual (spec :2397-2402; today's
+  unfiled session mints include `d.op-label` at `mesh_value.cpp:473`, `or_parallel`'s four —
   `d.or`/`d.branch`/`d.frontier`/`d.submission` at `or_parallel.cpp:181-184` — `dim_cap.cpp:83-85`'s
   `d.actor`/`d.ticket`/`d.signature`, `command_transaction.cpp:16-18`'s
   `d.target`/`d.action`/`d.reply`, and `sql_promotion.cpp:140`'s `d.promoted`).
@@ -422,18 +431,25 @@ itself.
   bounds what a cycle can carry: `promote` emits content ops only for `isEphemeral` cells and
   link-writes on `holdsOwn` cells — a shadowed base cell gets no content op, and a removed base edge
   is never un-emitted (`arena_manifold.cpp:1867-1870`, `:2020-2053`). So durable counters and scalar
-  writes take mint-and-repoint form — the `d.vars` serial counter bumps a *fresh ephemeral* the rank
-  repoints at, never an in-place `writeValue`, which would rewind `patch:<n>` at fold 2 into exactly
-  the ABA the durable bullet forbids — and `set_weight`'s `+d.weight` value writes ride the same
-  discipline; base-edge unlinks (`learn_plan`'s supersede, `unlearn`'s record drop) survive only via
-  (d) replay or tombstone-form records. `root` is the **agent cell** (spec :375, :635-636 — program
-  cells never republish; they ride the folded prefix and (d) re-enacts), and session mutations span
-  two disjoint roots — `program()`/`agent_cell()` are distinct adapter-bound roots never
-  `+d`-reached from each other (spec :2265-2266) — so the cycle promotes once per runtime root, or
-  under a harness session root linked to both (`promote` folds only its `root`'s reachable subgraph,
-  `arena_manifold.hpp:837-846` — anything unreached drops silently). A same-`Store` cycle needs no
-  `sealLocalSpool` — op records and local spans ride verbatim; the initial image band comes from
-  `promote` of the compile arena or `adoptOpRecords` (`store.cpp:3836-4018`). In spec order:
+  writes take mint-and-repoint form — the `d.vars` serial counter bumps a *fresh ephemeral* the
+  keying record's `+d.values` edge repoints at (spec :1300), never an in-place `writeValue`, which
+  would rewind `patch:<n>` at fold 2 into exactly the ABA the durable bullet forbids — and
+  `set_weight`'s `+d.weight` value writes ride the same discipline; base-edge unlinks survive only
+  via (d) replay or tombstone-form records — `unlearn`'s mid-rank record drops are repoints
+  (link-writes, `unlink` = `link(…,nullopt)` does no chain repair, `arena_manifold.hpp:616-618`)
+  that promote fine, but its *tail* drop is a true removal where replay is the resurrection hazard
+  and only tombstone form works. `root` is the **agent cell** alone (spec :375, :634-635):
+  program-side state is *never* a promote root — bare grafts must die with the incarnation (spec
+  :375-377, :1791-1799 — that boundary is what makes `learn` = graft + record a distinction),
+  graft-adds would carry without prune-removes, and replay-installed copies would double under (d),
+  whose alias re-match can't see a promoted `patch:<n>` label (spec :1322-1324). `promote` folds
+  only its `root`'s reachable subgraph (`arena_manifold.hpp:833-836`) — but nothing durable drops
+  silently: all durable state already hangs on the agent cell's ranks
+  (`d.code`/`d.patch`/`d.synapse`/`d.vars`, spec :1870-1871, :2465), and spec :2265-2266's two-root
+  vocabulary belongs to (a)'s classification walk, not to promote. The only program-rooted promote
+  is the one-time image seed named below. A same-`Store` cycle needs no `sealLocalSpool` — op
+  records and local spans ride verbatim; the initial image band comes from `promote` of the compile
+  arena or `adoptOpRecords` (`store.cpp:3836-4018`). In spec order:
   - (a) **lineage bind** — the ops-record order comparand over the decoded `1..E_ops` band (every
     *non-scroll* post-fold `OpRecord` field verbatim, post-remap, plus scroll *identity* by key —
     `globalKeyOf`'s arm set minus `localScroll`: `breakMarkerKey` for sealed break-marker spans,
