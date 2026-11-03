@@ -2,7 +2,7 @@
 
 | field         | value                                                                                                                                                                                                                                   |
 | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| version       | 1.16 (see [Appendix](#appendix-versioning-and-change-history))                                                                                                                                                                          |
+| version       | 1.17 (see [Appendix](#appendix-versioning-and-change-history))                                                                                                                                                                          |
 | status        | Design draft. Nothing here is implemented. It rests on vagent v3.9, whose own implementation is in progress: the source frontend and the scalar lowering kernel exist; the actor executor does not.                                     |
 | compiles to   | Vortex opcode graphs held in the agent's private `ArenaManifold`; a fragment is the same object `compileStatement` already produces (`vagent/compiler.hpp:28-34`)                                                                       |
 | rests on      | vagent ([specification](vagent-agent-language.md)), Vortex ([runtime](vortex-hyperstructural-runtime.md)), `ArenaManifold`'s mark/trail/discard, the `cells"…"` embedded-VQL subset, the Spool-Mesh checkpoint/promotion machinery      |
@@ -92,7 +92,7 @@ ABI, actor turns and `std:agent` are owed there and so are owed here.
 | Session code identity                    | `d.code` registry (learn-side only — the §6.6 reachability invariant) + `d.name` labels; `code_named` re-resolution                                                                                                                                                                                 | **owed**                                                 |
 | Kind immutability                        | every VM write to an `opcodeMap_`-registered cell refused — P15                                                                                                                                                                                                                                     | **proposed**                                             |
 | Fragment reference relocation            | adapter-side ceremony around `publishValue` on the adapter-kept lineage `Store` (§4.5, §10.1), run inside the adapter's own `Executor` callback: end-of-turn `OpHandle` re-kind + head-of-turn `Int64` restore + genesis rehydration; emission-side `+d.refs`/`d.ref`/`d.mesh.relocation` marks — P16, **no core change**                                                                                                  | **proposed** (adapter + emitter duty)                    |
-| Weights and synapses                     | `d.weight`, `d.synapse` junction cells, `d.code`, `d.patch`, `d.entry`, `d.patch-head`, `d.validate`, `d.refs`, `d.ref`, `d.recipe`, `d.refFor`, `d.mesh.relocation` minted as data (`ensureDimension`, V10 mechanism) — minted only with no marks outstanding, and filed on the persistent `d.dims` rank at image-seal (§10.1) | **owed** (adapter duty, no core change)                  |
+| Weights and synapses                     | `d.weight`, `d.synapse` junction cells, `d.code`, `d.patch`, `d.entry`, `d.patch-head`, `d.validate`, `d.refs`, `d.ref`, `d.recipe`, `d.refFor`, `d.mesh.relocation` minted as data (`ensureDimension`, V10 mechanism) — minted only with no marks outstanding, and filed on the persistent `d.dims` rank before the lineage's first dim resolution (§10.1) | **owed** (adapter duty, no core change)                  |
 | Plasticity search                        | reify → graft → score → backtrack-drain, all in-turn under the trail                                                                                                                                                                                                                                | **owed** (`std:meta` composition, no new mechanism)      |
 | Metacircular compiler (vagent in vagent) | a compiler written in vagent/Vortex                                                                                                                                                                                                                                                                 | deferred, U-M1                                           |
 | Remote code mobility                     | sending `Code<T>` between agents with portable identity                                                                                                                                                                                                                                             | deferred, U-M2 (needs U-A2 authority)                    |
@@ -110,10 +110,16 @@ about a ceremony, not a diff), and it adds no `CompactOpNode` change, no `System
 field, no new `OpcodeKind` member. Every new dimension is minted as data through `ensureDimension`,
 the V10 mechanism, which keeps the arena name table and `dimensions()` in agreement — but is **not**
 mark-covered (`Mark` records no dimension field, `arena_manifold.hpp:170-186`), so dimensions are
-minted only when no mark is outstanding (the adapter's genesis path) and are filed on the
-persistent `d.dims` rank at image-seal — the §10.1 spawn-seed step `promote`'s `d.dims` skip
-(`arena_manifold.cpp:1766`,`:2030-2033`) makes necessary, lest a session-minted dim fold to an
-orphan twin — the same discipline §4.2 rules
+minted only when no mark is outstanding (the adapter's genesis path) and the whole minted-dim
+vocabulary — the `d.dims`-rank member set `dimensions()` walks (`manifold.cpp:771-775`), every
+mint path appending there: `initGenesis`'s `mintNamedDimension` V10 names
+(`vortex_core.cpp:50-69`), the `ensureDimension` apparatus names, and
+`dimConstant`/`findOrMintDimension`'s mints (`compiler.cpp:769-772`) — is filed on the
+persistent `d.dims` rank before the lineage's first dim resolution: at emit before `initGenesis`,
+at the spawn-seed before the folded base is pinned (`getOrCreate`'s rebuilt fold is the injected
+base, `dimension_registry.cpp:194-217`) — the filing `promote`'s `d.dims` skip
+(`arena_manifold.cpp:1766`,`:2030-2033`) makes necessary, lest an unfiled session-minted dim fold
+to an orphan twin — the same discipline §4.2 rules
 for opcode minting. Most of what this document owes lives in vagent's own front end and in a
 `std:meta` prelude written in Vortex — the two places vagent §11 says new capabilities must be tried
 first, before the adapter and before existing code.
@@ -384,8 +390,10 @@ cell whose `+d.refs` record carries no `+d.name`, and every `+d.recipe` field ce
 source-cell position — the uniform rule of §6.6 — with the inert marker
 edge plus its inventory record — a `+d.ref` record on the head's `+d.refs` rank, the **one**
 marking inventory: every marked cell, slot or `+d.recipe` field, carries its `+d.ref` record
-there, the `+d.recipe` member staying the field's *schema* record (name → tuple position), never
-a second marking rank — the adapter's flag-driven ceremony inside
+there, the `+d.recipe` member staying the field's *schema* record (name → tuple position, the
+member's `+d.step` position in the chain carrying the field identity — `+d.name` on a member
+reserved to the dim-name channel), never a second marking rank — the adapter's flag-driven
+ceremony inside
 its own `Executor` callback re-kinds each marked cell `OpHandle` at the checkpoint-terminating
 turn's end, `publishValue` runs between turns on `const&`, and a head-of-next-turn pass writes
 `Int64(*handleTarget)` back so the continuing incarnation executes intact (the full protocol is
@@ -541,9 +549,11 @@ Two cache consequences are load-bearing for this document:
    (`arena_manifold.hpp:170-186`) — so `ensureDimension` mints `d.code`/`d.patch`/`d.entry`/
    `d.patch-head`/`d.validate`/`d.weight`/`d.synapse`/`d.refs`/`d.ref`/`d.recipe`/`d.refFor`/
    `d.mesh.relocation` only on the no-marks
-   genesis path (each name filed on the persistent `d.dims` rank at image-seal — §10.1's
-   spawn-seed step — because `promote` emits no `d.dims` links, `arena_manifold.cpp:1766`,
-   `:2030-2033`, so an unfiled session-minted dim folds to a `dimensionNamed`-invisible orphan
+   genesis path (the whole minted-dim vocabulary filed on the persistent `d.dims` rank before
+   the lineage's first dim resolution — §10.1's spawn-seed step files before the folded base is
+   pinned, the emit lineage before `initGenesis` — because `promote` emits no `d.dims` links,
+   `arena_manifold.cpp:1766`,`:2030-2033`, so an unfiled session-minted dim folds to a
+   `dimensionNamed`-invisible orphan
    twin); a `dimensionNamed` hit on a mark-released mint would alias a wrong cell the same
    way. §6.4 states the rule; P15 closes the user-level half of it.
 
@@ -833,8 +843,9 @@ correction is the honest version of the claim:
    (`compiler.cpp:475-483`), so anchors are supported for stable captures only. Captured cells
    are referenced by *links* — the emission wraps the binding cell in a capture-slot cell on the
    operand's wing, decoded by `wingOf`'s operand lambda (`asInt64` fails → `masterOf(slot)` —
-   the `-d.clone` backlink read of `cloneMaster`'s `rankEnd` NEG-ward,
-   `vortex_core.cpp:358-365`) — and the reason is `closed`-verifiability: a linked capture is
+   the `-d.clone` backlink read of `cloneMaster`'s `rankEnd` NEG-ward
+   (`vortex_core.cpp:358-365`; `cloneMaster` itself `arena_manifold.cpp:1009-1012`)) — and the
+   reason is `closed`-verifiability: a linked capture is
    discoverable by edge at `learn`'s re-verification, while an int needs a record to be found
    (the link is the *checkable* form; P16 would relocate a marked int too, but links are what the
    closed walk reads). `cap$N` aliases bypass `binding()`'s render check (`compiler.cpp:160-181` —
@@ -1064,17 +1075,22 @@ fragment head H
   │                  run-role — the +d.name *shape* picks only the resolution
   │                  path: qualified or verbatim-label — §6.6)
   │                  +d.name absent           ⇒ REF-record (full P16 ceremony)
-  ├─(+d.recipe)─► reify recipe chain — per-field records (link tuples — every
+  ├─(+d.recipe)─► reify recipe chain — per-field records (link tuples — four
+  │                +d.step-consecutive members in (from, dim, dir, to) order,
+  │                the member's chain position its field identity — every
   │                source-naming field a marked int64 ref cell — the field
   │                cell IS its +d.recipe member, the member record carrying
   │                the field's schema (name → tuple position), its +d.ref
   │                record on +d.refs the inventory pairing every marked cell gets; the
   │                tuple `dim` field alone name-keyed: +d.name→the dim name,
-  │                re-resolved ensureDimension at replay like the dimConstant
-  │                arm, never position-keyed; +d.values on a
+  │                +d.name on a +d.recipe member reserved to that dim-name
+  │                channel, re-resolved ensureDimension at replay like the
+  │                dimConstant arm, never position-keyed; +d.values on a
   │                tuple record decorative, never load-bearing — + literals
   │                + capture records + ref-capture records — one per +d.refs
-  │                ref-record: +d.refFor→the same slot cell its +d.ref names
+  │                SLOT ref-record (a +d.recipe field's ref-record pairs with
+  │                nothing, the member its own endpoint record — no +d.refFor):
+  │                +d.refFor→the same slot cell its +d.ref names
   │                (dedicated dim — a first-position input slot's -d.grab is the
   │                opcode's wing edge; +d.grab here would evict it); the referent
   │                rides CONTENT, never an edge into it — internal: the slot's
@@ -1100,7 +1116,9 @@ the recipe's source-naming fields into the same rank beside the slots' —
 records exist per marked cell because the marker alone is undiscoverable
 (no per-cell dimension enumeration, U-M7) and the record alone is not relocation machinery.
 Name-records skip both halves:
-no marker, no re-kind — `+d.name`'s presence is the discriminator the pre-pass reads.
+no marker, no re-kind — `+d.name`'s presence **on a `+d.refs` record** is the discriminator the
+pre-pass reads; on a `+d.recipe` member `+d.name` is the `dim` field's dim-name channel alone,
+the member still marked like every field (§6.6 step 1).
 
 `+d.grab` and `+d.spin` are deliberately *not* used on the head: those dims are the op cells' wing
 convention (`bindInput`/`bindOutput`, `vortex_core.cpp:354-414`), and `link` evicts the occupied
@@ -1166,14 +1184,18 @@ a reconstruction template — the `(from, dim, dir, to)` link tuples, every fiel
 cell carrying that cell's ref position as `int64` content under the *same* marked carrier the
 ref-capture arm below states — an emitter-minted int64 ref cell marked under the P16 rule, the
 field cell *itself* the `+d.recipe` member — the member record carrying the field's schema,
-name → tuple position, rather than any second record cell — its `+d.ref` record on the head's
+name → tuple position, the member's own `+d.step` position in the chain carrying the field
+identity — a link tuple's fields four `+d.step`-consecutive members in `(from, dim, dir, to)`
+order — rather than any second record cell — its `+d.ref` record on the head's
 `+d.refs` rank the inventory pairing every marked
 cell gets, never a second marking rank — so the field reads the live position in-session and
 `*handleTarget`, the endpoint's promoted position, at (d): one position keyspace for the old→new
 map to translate either way (an op cell is `to` of one tuple and `from` of the next, so shared
 endpoints are routine and re-join on the same key at replay). The tuple `dim` endpoint field is
 the lone exception to the position keyspace: it carries the dim *name* — `+d.name` on its recipe
-record — and replay resolves `ensureDimension(name)` exactly as the `dimConstant` arm below does,
+record — `+d.name` on a `+d.recipe` member is that dim-name channel alone, so every other
+member's field identity needs no name edge — and replay resolves `ensureDimension(name)` exactly
+as the `dimConstant` arm below does,
 because a dim's identity is name-keyed, never a cell position the old→new map could translate
 (§6.6's `d.dims` exclusion — a session-minted dim's promoted twin is an orphan). The record's
 `+d.values` *may*
@@ -1181,7 +1203,9 @@ name the endpoint for self-description under the same one-record-one-edge rule �
 `-d.values` taking no edge — and is decorative, never load-bearing: replay resolves the content
 channel alone, the mark keeping the field a ref position across checkpoint rather than a bare
 census integer (renumbered dense ids, §4.5) — the literal contents, the capture records, and the
-**ref-capture records** — one per `+d.refs` ref-record, pairing the slot with its referent:
+**ref-capture records** — one per `+d.refs` *slot* ref-record (a `+d.recipe` field's ref-record
+pairs with nothing, the member its own endpoint record — no `+d.refFor`), pairing the slot with
+its referent:
 `+d.refFor → the same slot cell` the ref-record names by `+d.ref` — a **dedicated correlation
 dim**, because every reusable candidate evicts live structure: a second `+d.ref` cannot correlate
 them (the slot's `-d.ref` backlink is single-occupancy, M14's rule), and `+d.grab` is worse —
@@ -1215,7 +1239,8 @@ The recipe's tuple `dim` endpoint field rides this same name channel — `+d.nam
 `+d.recipe` record — because the dim cell position means nothing across a checkpoint:
 `promote` emits no `d.dims` links (`arena_manifold.cpp:1766`,`:2030-2033`), so a session-minted
 dim's promoted twin is an orphan the name alone re-resolves (`ensureDimension` find-or-mints on
-the persistent rank — the minted-dim set is filed there at image-seal, §10.1).
+the persistent rank — the whole minted-dim vocabulary is filed there before the lineage's first
+dim resolution, §10.1).
 The frontier stays enumerable — `closed` reads each ref-capture endpoint through the paired
 slot's own content (§6.6), a `+d.name`-bearing record's endpoint re-resolving to the named dim
 rather than carried as a cell position and counting as name-resolved — and `reify`
@@ -1229,7 +1254,11 @@ by `Link`, the `Clone` op's own append shape (`vortex_vm.cpp:816-825`; the §11 
 `Clone` as the *graph* copy primitive, not the capture-slot mint where the alias is the
 semantics) — and internal referents name the copy's own twins
 through the old→new map, so the copy is `closed` iff the source was. `reify`
-regenerates the copy's `+d.refs` (records remapped to the new ref cells, name-records re-linked)
+regenerates the copy's `+d.refs` (records remapped to the new ref cells, name-records re-linked
+to **fresh verbatim name cells** — every `+d.name` name cell re-minted per copy under the
+`patch:<n>` label rule genesis (d) states, never re-linked off the donor's name cell: the name
+cell's `-d.name` backlink is single-occupancy, so re-linking evicts the donor's edge and drops
+its name arm — the `dim`-field member's dim-name cell re-minted the same way)
 and `+d.recipe` (a self-describing recipe for the copy, endpoints remapped — its position fields
 marked under the same rule), and mints the copy's
 label `reify:<src>:<serial>` — registration refuses duplicate labels (§6.7). v1 replays the
@@ -1572,9 +1601,10 @@ the V12 failure with the roles reversed. The disciplines:
   skeleton hangs on is in the walk — `d.dims` is the one named exclusion, matching the checkpoint
   rule (`promote` skips `d.dims` edges, `arena_manifold.cpp:1766`; genesis's `ensureDimension` is
   find-or-mint — `dimensionNamed` resolves base dims and the `arenaDims_` cache before any mint,
-  `arena_manifold.cpp:78-105`, so a *rank-resident* dim re-binds rather than re-mints — while a
-  session-minted dim's promoted twin re-mints: it folds off `d.dims`, which is why the
-  minted-dim set is filed on the persistent rank at image-seal, §10.1/genesis (b)) — and the
+  `arena_manifold.cpp:78-105`, so a *rank-resident* dim re-binds rather than re-mints — while an
+  unfiled session-minted dim's promoted twin re-mints: it folds off `d.dims`, which is why the
+  whole minted-dim vocabulary is filed on the persistent rank before the lineage's first dim
+  resolution, §10.1/genesis (b)) — and the
   vocabulary spans **two roots**: `program()` and `agent_cell()` are distinct adapter-bound roots
   (§6.1's binding list) never `+d`-reached from each other, so the agent cell's own legs —
   `+d.code` and its rank dims (`d.patch`, `d.synapse`, `d.vars`, `d.belief` and the
@@ -1913,9 +1943,11 @@ cell and not itself program-side under the sideness test above; (b) a *name-reco
 `+d.refs`: `+d.ref → the operand's slot
 cell` plus `+d.name → the callee's qualified name` — or, on a `run`-target record, the target
 head's label; or (c) a dim referent name-recorded on its paired *ref-capture*
-record's `+d.name` — the endpoint re-resolving to the named dim rather than carried as a cell
+record's `+d.name` — or, for a `dim` tuple field, on the field's own `+d.recipe` member's
+`+d.name` — the endpoint re-resolving to the named dim rather than carried as a cell
 position and counting as
-name-resolved, the slot's own `+d.refs` record staying a REF-record (a `+d.name` there would
+name-resolved, the slot's — or the member's — own `+d.refs` record staying a REF-record (a
+`+d.name` there would
 make it a name-record and skip the marker ceremony) — and a `cap$N` link or an unnamed slot
 landing on a *program-side* cell (an artifact-initial binding cell) carries none of the three,
 the refused class on every arm: arm (a) admits only state-side cells and arms (b)/(c) require
@@ -1996,7 +2028,8 @@ operand cell is an emitter-minted int64 slot holding `int64(calleeEntryOp)` at e
 (`vortex_vm.cpp:854-856` executes `toInt(inputs[0])`), so in-session the call executes the
 emission-time binding directly. What makes it *durable* is the `+d.refs` name-record alongside:
 `+d.ref → that very slot cell` plus `+d.name → the callee's qualified name`. **`+d.name` present is
-the discriminator**: a record with `+d.name` is a *name-record* — it gets **no** `d.mesh.relocation`
+the discriminator**: a `+d.refs` record with `+d.name` is a *name-record* — it gets **no**
+`d.mesh.relocation`
 marker and is **never** re-kinded `OpHandle`, because a program-cell target must never reach
 `promote`'s relocation path (which enqueues `handleTarget` into `seen`/`frontier` —
 `arena_manifold.cpp:1759-1764` — and gates on it at `:1797-1809`, either dragging the program
@@ -2084,7 +2117,8 @@ flag-driven across the checkpoint-terminating turn:
    name-bound `Call` operand is still an emitter-minted int64 ref cell, but its record carries
    `+d.name`, so it gets the record and no marker — that is, both wing slots, `reference()` cells,
    and dimension-constant slots (`compiler.cpp:769-772`'s `dimConstant` emission mints ref cells
-   too — the uniform rule is *every* `makeScalarCell(int64(ref))` the emitter writes) — gets **its
+   too — the uniform rule is *every* `makeScalarCell(int64(ref))` the emitter writes, a `DimRef`
+   counting) — gets **its
    own** inert `d.mesh.relocation→"cell"` marker edge plus a `+d.ref` record on the head's `+d.refs`
    rank: one freshly minted marker cell per ref cell, as `mesh_evaluator.cpp:735` does inside its
    per-reference loop — a shared marker cannot exist, since `link` gives each cell one `-d`
@@ -2095,10 +2129,12 @@ flag-driven across the checkpoint-terminating turn:
    alike — are marked identically, and the marking inventory is **one rank**: every marked cell,
    slot or `+d.recipe` field, carries its `+d.ref` record on the head's `+d.refs` rank —
    the `+d.recipe` member *is* the field cell, the member record carrying the field's schema
-   (name → tuple position), never a second marking rank — so the re-kind, restore and genesis
+   (name → tuple position, the member's `+d.step` position its field identity — `+d.name` on a
+   member reserved to the `dim` field's dim-name channel), never a second marking rank — so the
+   re-kind, restore and genesis
    passes below all
    stay `+d.refs`-bounded
-   (§6.1's uniform position keyspace). The
+   under the one-rank inventory. The
    mark is the inventory record (`+d.ref` on `+d.refs`) plus
    `d.mesh.relocation` on the cell — not `+d.values`, because
    `+d.values` has
@@ -2214,7 +2250,8 @@ ordering is fixed, and nothing in it re-materializes an image:
   cell's own `+d.clone →` the fragment's `cap$N`
   slot on a *first* capture, the prior clone's on a chained one —
   (`Clone` appends it at the master's posward tail, `vortex_vm.cpp:816-825`) — image-sealed
-  for a declared fragment, never runtime-grown, and running state→program on a `d.clone` dim the
+  for a declared fragment, never runtime-grown, and running state→program on a first capture
+  (program→program on a chained one) on a `d.clone` dim the
   walk's `+d` vocabulary does not list besides — while the slot's `masterOf` resolution is the
   operand decode §5.3 states (`cloneMaster` = `rankEnd` NEG-ward,
   `arena_manifold.cpp:1009-1012`) — a `-d.clone` *backlink* traversal on a dim outside the
@@ -2237,8 +2274,15 @@ ordering is fixed, and nothing in it re-materializes an image:
   then overlays the base with ephemeral session cells; the overlay adds nothing persistent.
 - **(b) `ensureDimension` find-or-mint + `setOpcodeKind` re-registration** — dims resolve from
   base/cache before any mint (`arena_manifold.cpp:78-105`), the find landing on the canonical
-  cell rather than re-minting an orphan twin because the minted-dim set was filed on the
-  persistent `d.dims` rank at image-seal — §10.1's spawn-seed step (`promote` emits no `d.dims`
+  cell rather than re-minting an orphan twin because the whole minted-dim vocabulary — the
+  `d.dims`-rank member set `dimensions()` walks (`manifold.cpp:771-775`): `initGenesis`'s
+  `mintNamedDimension` V10 names (`vortex_core.cpp:50-69`), the `ensureDimension` apparatus
+  names, and `dimConstant`/`findOrMintDimension`'s mints (`compiler.cpp:769-772`) — was filed on
+  the persistent `d.dims` rank before the lineage's first dim resolution: §10.1's spawn-seed
+  step files it on the kept lineage `Store` before the folded base is pinned — `getOrCreate`'s
+  rebuilt fold IS the injected base (`dimension_registry.cpp:194-217`) — and the artifact's own
+  emission files the same vocabulary before its compile arena's `initGenesis`
+  (`vortex_core.cpp:14,:29-70`; `promote` emits no `d.dims`
   links, `arena_manifold.cpp:1766`,`:2030-2033`, so an unfiled session-minted dim is
   `dimensionNamed`-invisible) — no marks outstanding; and the folded
   image's op cells re-register into `opcodeMap_` through `setOpcodeKind`
@@ -2302,7 +2346,9 @@ ordering is fixed, and nothing in it re-materializes an image:
   only ever annotating an internal endpoint, the internal/external split itself read off map
   membership (§6.1) — and never the endpoint value, the `+d.name`-bearing dim record excepted:
   there the record's `+d.name` *is* the endpoint source and the slot takes `Int64` of the
-  resolved `DimRef`, not the donor's promoted twin (§6.1's recorded-template rule) — **and the
+  resolved `DimRef`, not the donor's promoted twin — the `dim`-field member's own cell taking
+  the same `Int64(DimRef)`, the member *being* its field cell (§6.1's recorded-template rule) —
+  **and the
   replay hands (e)
   its install set**: per patch, the
   minted install copy plus the `+d.refs` and `+d.recipe` records `reify` regenerated on it. The
@@ -2319,15 +2365,19 @@ ordering is fixed, and nothing in it re-materializes an image:
   position for internal and external endpoints alike, the endpoint riding the slot's — or the
   `+d.recipe` field's — content under §6.1's
   content-carried rule — the ref-capture record paired to it by `+d.refFor` → the same slot
-  cell, a marked cell whose `+d.recipe` side bears `+d.name` — the `dim`-field member itself,
+  cell where the ref-record names a slot (a `+d.recipe` field's ref-record pairs with nothing —
+  the member its own endpoint record, no `+d.refFor`), a marked cell whose `+d.recipe` side
+  bears `+d.name` — the `dim`-field member itself,
   or the slot's `+d.refFor`-paired ref-capture record — exempt from this arm; the
   `+d.name`-bearing `+d.recipe` record — the ref-capture dim record or the `dim`-field
   record alike — instead writes `Int64` of the `DimRef`
   `ensureDimension`'s name arm re-resolves (`arena_manifold.cpp:78-105`), into the record's
-  `+d.refFor`-paired slot or its own field cell respectively — `Linked` binds a
-  `DimRef`, never the promoted twin `*handleTarget` names, a session-minted dim in use accreting
-  one such orphan per checkpoint off the folded `d.dims` rank (`arena_manifold.cpp:1764-1768`),
-  dead weight beside the re-minted canonical cell the name arm re-resolves; the write arm keys
+  `+d.refFor`-paired slot or the member cell itself respectively — `Linked` binds a
+  `DimRef`, never the promoted twin `*handleTarget` names, an *unfiled* session-minted dim in
+  use accreting one such orphan per checkpoint off the folded `d.dims` rank
+  (`arena_manifold.cpp:1764-1768`),
+  dead weight beside the canonical cell the name arm re-resolves — re-bound off the filed rank
+  for a filed name, re-minted only for an unfiled one (§10.1/genesis (b)); the write arm keys
   on the record's `+d.name`, never the
   sideness test (§6.1's enumeration);
   per name-record the role-split rebind above. Rehydration is needed
@@ -2572,11 +2622,15 @@ stated as deferrals.
   program-side, so a state-side `d.weight`/`d.vars` edge *to* one is the V12 edge. A
   clause-correlated weight is a record on the agent's own `d.vars` keyed by the clause's qualified
   `d.name` string: the verbs dispatch on the target first — a **junction** (a `+d.weight`-bearing
-  member of the agent's `+d.synapse` rank, §8.3) keys off its own `+d.weight` scalar, never a
+  member of the agent's `+d.synapse` rank — the junction the next bullet and the glossary's
+  `synapse` row define) keys off its own `+d.weight` scalar, never a
   `d.vars` record — and only a **clause** target resolves `clause → +d.name → qualified string`
   then reads/writes the agent-`d.vars` record carrying that name (the same name `learn`'s patch
   records
-  and `plan_named` resolves) — a `+d.name`-less *clause* target, a declared handler clause
+  and `plan_named` resolves) — a `+d.name`-bearing target that is neither junction nor clause (a
+  fragment head's label) keys a `d.vars` record by that label verbatim, the clause arm's
+  qualified spelling one label form among them — and a `+d.name`-less *clause* target, a
+  declared handler clause
   (spec V15), resolves no key and is refused like any unresolved focus-slot verb: only named
   clauses key —
   declared plans, `patch:<n>`-labelled learned clauses. `weight_of` disengages on no record; a
@@ -2923,14 +2977,38 @@ adapter:                       // CONSTRUCTS and KEEPS the agent's lineage Store
                                //   d.synapse/d.entry/d.patch-head/d.validate/d.refs/d.ref/
                                //   d.recipe/d.refFor/d.mesh.relocation + the validate ceiling, arity
                                //   & impure-kind cells (V10 mechanism, no-marks path) —
-                               //   the spawn-seed step FILES the minted-dim set on the
-                               //   persistent `d.dims` rank — d.patch/d.code/d.refs/d.recipe/
-                               //   d.refFor/d.entry/d.weight/d.synapse and every other
-                               //   ensureDimension-minted name — DimensionRegistry::getOrCreate
+                               //   the spawn-seed step FILES the whole minted-dim
+                               //   vocabulary on the kept lineage Store's persistent
+                               //   `d.dims` rank — every name the lineage's arenas can
+                               //   resolve: the bind set above plus attach()'s
+                               //   d.store-refs (arena_manifold.cpp:289-290),
+                               //   initGenesis's mintNamedDimension V10 names
+                               //   (vortex_core.cpp:50-69), and every
+                               //   dimConstant/findOrMintDimension mint
+                               //   (compiler.cpp:769-772) — the d.dims-rank member
+                               //   set dimensions() walks (manifold.cpp:771-775),
+                               //   every mint path appending there —
+                               //   DimensionRegistry::getOrCreate
                                //   → Store::makeDimension per name on the kept lineage Store
                                //   (the vql/compiler.cpp:1128-1141 "replicate dimensions"
-                               //   precedent — the artifact's own image emission files its
-                               //   dims the same way at seal), because `promote` never emits
+                               //   precedent) BEFORE the folded base is pinned —
+                               //   getOrCreate move-assigns its Manifold& argument
+                               //   (dimension_registry.cpp:194-217), so the rebuilt
+                               //   fold the filing returns IS the base-injected fold;
+                               //   a filing after the pin is invisible to
+                               //   dimensionNamed's base arm and the arena mints
+                               //   twins regardless. The artifact's own image
+                               //   emission files the same vocabulary the same way
+                               //   before ITS lineage's first resolution — before
+                               //   the compile arena's initGenesis
+                               //   (vortex_core.cpp:14,:29-70), every source-named
+                               //   dimConstant name included — the invariant being
+                               //   "file before first resolution" on both lineages,
+                               //   so int64(DimRef) operands and dim-keyed edges
+                               //   seal naming persistent cells; a name first
+                               //   minted mid-session stays outside the filed set —
+                               //   its orphan accretion the honest residual
+                               //   (§6.6 (e)) — because `promote` never emits
                                //   `d.dims` links (arena_manifold.cpp:1766,:2030-2033) and an
                                //   unfiled session-minted dim folds to a
                                //   `dimensionNamed`-invisible orphan twin — filing is what
@@ -2989,7 +3067,7 @@ below the register as deferred-not-registered.
 | No. | Change                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | Where                                                                                                                                                                     | Why it cannot live in `std:meta` or the adapter                                                                                                                                                                                                                                                                                                                                                                                                                                                              | Without it                                                                                                                                                                                                                                                                                                              | Used by         |
 | --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------- |
 | P15 | Every VM write into an `opcodeMap_`-registered cell is refused — kind-immutability at the write funnel: `VortexCore::writeValue`/`splice` take a VM-installed kind predicate (`opcodeMap_.contains(masterOf(cell))`), covering `executeOpcodeBody`'s `Value`/`Splice` cases, `step()`'s memo-hit and generic output writebacks, and both `runPipeline` writes; refusal is a typed `success=false` per site. Exempt by construction: `setCursorOpcode`, `Call` frame writes (the frame-cell carve-out), `mintOpcode`'s `setContent`, every write to a fresh (unregistered) cell. Post-resume the folded image's op cells re-register by a `setOpcodeKind` pass (`vortex_vm.cpp:98-100`) over exactly the recorded instruction enumeration — repopulating the image-op entries in the per-`WorkerContext` map, never a value scan — `mintOpcode` would mint ephemeral twins, not register the folded cells (§6.5).                                                                                                                               | `vortex_core.cpp:196-254` (`writeValue`/`splice` funnel + installed predicate); call sites `vortex_vm.cpp:771-806`, `:1269-1273`, `:1287-1294`, `:337`, `:343-346`; tests | `opcodeMap_` is private VM state (`vortex_vm.hpp:186`). No Vortex opcode can see the map, and the adapter runs between turns, not between opcodes. Every non-structural op restates bound outputs' content through `writeValue` — a wing re-point (this document's whole subject) can aim an output at an op cell and rewrite its `int64` with no `Value`/`Splice` involvement; the map claims the old kind while the cell names a new one, and the trail cannot undo it because the map is not arena state. | Any write to a registered op cell silently changes what the cell *means* — a stale-kind divergence invisible to every `std:meta` guarantee, making "the graph says X" unverifiable. The only alternative would be refusing all program-side writes, which is `cells"…"`'s ordinary content write and cannot be refused. | M10, §6.5, §7.2 |
-| P16 | Checkpoint-time relocation of fragment-owned int64 reference cells — an **adapter-side ceremony needing no mechanism beyond two named seams: P4's already-approved wake (`vagent-agent-language.md:1670`) plus the lineage-store seam §6.6 names — the adapter-owned lineage `Store` (spawn-side anchor; the verify destination is the received-band store, `arena.base()->store()`), base-injected at `spawn` and supplied or verified at `resume`** (`spawn` takes no store and `resume` keeps its rebuilt one private, `mesh_actor.cpp:119-122`,`:156`,`:260-269` — though `resume` already transports a caller `Store` inside `ReceivedValue checkpoint`, `mesh_actor.cpp:182`, first read at `:188`'s `!checkpoint.store` guard, `:261`, read only for `userPermascrollPtr()` and dropped before `receiveValue`'s rebuild): emission marks every inventoried fragment-owned int64 ref cell — a `+d.refs` record carrying no `+d.name`, or a `+d.recipe` member field cell itself source-naming — with *its own* `d.mesh.relocation→"cell"` marker cell (one per ref, `mesh_evaluator.cpp:735` precedent), every marked cell's `+d.ref` record on `+d.refs` the ceremony's **one** inventory rank (the `+d.recipe` member staying the field's schema, never a marking rank); `+d.name` on a record makes it a name-record — no marker, never re-kinded, genesis rebinds by *record slot role*: a `call`-role record resolves the qualified `module:Owner.name` through `symbol_named`'s module-`d.vars` walk → `+d.values` → the op-or-head hop → `writeValue(slot, int64(entryOp))` (Call-operand slots are entry-valued), a `run`-role record resolves its `src:`/`reify:`/`#label` through the program-image label→head lookup → `writeValue(slot, int64(head))` — a *qualified* `run`-role `+d.name` (`code_named(L)` with a qualified `L` is the only producer) resolves through the same qualified path but must land on a head, since run-target/`Code` slots are head-valued — `run` derefs `+d.entry`/`+d.values` — and a head-less resolution (a `def` symbol) is the headless-`run` refusal, learned labels falling back to `code_named`. The mutable seam is the adapter's own `Executor` callback inside `pumpOne` (flag-driven: `pending(pid)==1` arms the window, an empty-mailbox checkpoint mints P4's wake turn; end-of-turn re-kind `Int64`→`OpHandle` on the mutable arena, `publishValue` immediately after the flagged turn's end on `const&`, head-of-next-turn `Int64` restore on every exit path); genesis rehydrates in the post-`d.patch`-replay `+d.refs` sweep — registered heads' *and* replay-installed copies' records (§6.6 step (e); resume skips `importValue`, `mesh_actor.cpp:260-271`). Acceptance: a learn → checkpoint → resume → learn → checkpoint round-trip test. Scope: fragment-owned ref cells only. | emission-side marking: `vagent/fragment.{hpp,cpp}` (kernel-glob TU, §10.1); the flag/checkpoint/genesis ceremony: the adapter's own executor TU plus P4's approved `mesh_actor` wake change and the lineage-store seam (spawn-side base-injection of the seeded store — the `WorkerContext` ctor, `worker_context.hpp:52-54` — `resume` passes `base` alone and installs the reader post-construction via `arena.setDefaultSpanReader`, `mesh_actor.cpp:271-273`; the spawn arm supplies both at construction, supply-side not a store parameter; `resume` store supply/verify); the rest reuses `foreign_op_handle`/`publishValue`/`checkpointView` as-is | `promote` copies Int64 content verbatim and translates only links and `OpHandle`/`ForeignOpHandle` values (`arena_manifold.cpp:1934-1954`, the handle-translation arm covering both); no opcode can write `OpHandle` kind (`writeValue` covers Int64/Double/Bool/None, `vortex_core.cpp:196-229`), and `resume` bypasses `importValue` — so only the adapter (which owns emission and checkpoint timing) can run the ceremony; it needs no VM change because `isCellRelocationHandle` and the promote path already exist.                                                                                                                                                                                       | Every promoted fragment's wing slots and `Jump`/`Call`/`Branch`/`Choice` targets stay stale dense ids after `resume` — silent aliasing into unrelated cells; `learn`/`d.patch`/`d.code` durability is impossible and must degrade to session-only.                                                                      | M11, §4.5, §6.6 |
+| P16 | Checkpoint-time relocation of fragment-owned int64 reference cells — an **adapter-side ceremony needing no mechanism beyond two named seams: P4's already-approved wake (`vagent-agent-language.md:1670`) plus the lineage-store seam §6.6 names — the adapter-owned lineage `Store` (spawn-side anchor; the verify destination is the received-band store, `arena.base()->store()`), base-injected at `spawn` and supplied or verified at `resume`** (`spawn` takes no store and `resume` keeps its rebuilt one private, `mesh_actor.cpp:119-122`,`:156`,`:260-269` — though `resume` already transports a caller `Store` inside `ReceivedValue checkpoint`, `mesh_actor.cpp:182`, first read at `:188`'s `!checkpoint.store` guard, `:261`, read only for `userPermascrollPtr()` and dropped before `receiveValue`'s rebuild): emission marks every inventoried fragment-owned int64 ref cell — a `+d.refs` record carrying no `+d.name`, or a `+d.recipe` member field cell itself source-naming — with *its own* `d.mesh.relocation→"cell"` marker cell (one per ref, `mesh_evaluator.cpp:735` precedent), every marked cell's `+d.ref` record on `+d.refs` the ceremony's **one** inventory rank (the `+d.recipe` member staying the field's schema, never a marking rank); `+d.name` on a `+d.refs` record makes it a name-record — no marker, never re-kinded — while `+d.name` on a `+d.recipe` member is the `dim` field's dim-name channel alone, the member still marked; genesis rebinds by *record slot role*: a `call`-role record resolves the qualified `module:Owner.name` through `symbol_named`'s module-`d.vars` walk → `+d.values` → the op-or-head hop → `writeValue(slot, int64(entryOp))` (Call-operand slots are entry-valued), a `run`-role record resolves its `src:`/`reify:`/`#label` through the program-image label→head lookup → `writeValue(slot, int64(head))` — a *qualified* `run`-role `+d.name` (`code_named(L)` with a qualified `L` is the only producer) resolves through the same qualified path but must land on a head, since run-target/`Code` slots are head-valued — `run` derefs `+d.entry`/`+d.values` — and a head-less resolution (a `def` symbol) is the headless-`run` refusal, learned labels falling back to `code_named`. The mutable seam is the adapter's own `Executor` callback inside `pumpOne` (flag-driven: `pending(pid)==1` arms the window, an empty-mailbox checkpoint mints P4's wake turn; end-of-turn re-kind `Int64`→`OpHandle` on the mutable arena, `publishValue` immediately after the flagged turn's end on `const&`, head-of-next-turn `Int64` restore on every exit path); genesis rehydrates in the post-`d.patch`-replay `+d.refs` sweep — registered heads' *and* replay-installed copies' records (§6.6 step (e); resume skips `importValue`, `mesh_actor.cpp:260-271`). Acceptance: a learn → checkpoint → resume → learn → checkpoint round-trip test. Scope: fragment-owned ref cells only. | emission-side marking: `vagent/fragment.{hpp,cpp}` (kernel-glob TU, §10.1); the flag/checkpoint/genesis ceremony: the adapter's own executor TU plus P4's approved `mesh_actor` wake change and the lineage-store seam (spawn-side base-injection of the seeded store — the `WorkerContext` ctor, `worker_context.hpp:52-54` — `resume` passes `base` alone and installs the reader post-construction via `arena.setDefaultSpanReader`, `mesh_actor.cpp:271-273`; the spawn arm supplies both at construction, supply-side not a store parameter; `resume` store supply/verify); the rest reuses `foreign_op_handle`/`publishValue`/`checkpointView` as-is | `promote` copies Int64 content verbatim and translates only links and `OpHandle`/`ForeignOpHandle` values (`arena_manifold.cpp:1934-1954`, the handle-translation arm covering both); no opcode can write `OpHandle` kind (`writeValue` covers Int64/Double/Bool/None, `vortex_core.cpp:196-229`), and `resume` bypasses `importValue` — so only the adapter (which owns emission and checkpoint timing) can run the ceremony; it needs no VM change because `isCellRelocationHandle` and the promote path already exist.                                                                                                                                                                                       | Every promoted fragment's wing slots and `Jump`/`Call`/`Branch`/`Choice` targets stay stale dense ids after `resume` — silent aliasing into unrelated cells; `learn`/`d.patch`/`d.code` durability is impossible and must degrade to session-only.                                                                      | M11, §4.5, §6.6 |
 
 P17 — `opcodeMap_`/`cursorPC_`/`arenaDims_` eviction or resync on `release` — is **deferred, not
 registered**: the containment discipline (drain idiom, no bare `release` under live marks, no-marks
@@ -3178,8 +3256,9 @@ ______________________________________________________________________
   `d.patch-head`, `d.validate`, `d.refs`, `d.ref`, `d.recipe`, `d.refFor`, `d.mesh.relocation`
   are minted as
   data through `ensureDimension`, which also records them in the arena's name table — the V10
-  discipline, not a `SystemDimensions` field — and filed on the persistent `d.dims` rank at
-  image-seal (§10.1's spawn-seed step; `promote` emits no `d.dims` links,
+  discipline, not a `SystemDimensions` field — and the whole minted-dim vocabulary filed on the
+  persistent `d.dims` rank before the lineage's first dim resolution
+  (§10.1's spawn-seed step; `promote` emits no `d.dims` links,
   `arena_manifold.cpp:1766`,`:2030-2033`), because a dim is a cell like any other and an unfiled
   mint folds to a `dimensionNamed`-invisible orphan twin; the no-marks minting rule keeps
   `arenaDims_`
@@ -3737,7 +3816,8 @@ on the agent cell's own `±d.vars` rank — no cross-root edge admits them to th
 at all (the capture's only edge is the `d.clone` rank's posward-tail append — the binding
 cell's `+d.clone →` the `cap$N` slot on a first capture, the prior clone's on a chained one —
 running
-state→program on a dim outside the walk's vocabulary, and the slot's `masterOf` is a `-d.clone`
+state→program on a first capture (clone→clone, program→program, on a chained one) on a dim
+outside the walk's vocabulary, and the slot's `masterOf` is a `-d.clone`
 backlink traversal on that dim, never a `+d` step this walk can take), a ref-capture record
 contributing none either since its referent
 rides slot *content* — so they are unreached under the sealed image and classify state-side
@@ -3756,7 +3836,8 @@ agent cell's own `±d.vars` rank — the agent cell the `program()` walk never `
 and which nothing sealed admits to it: the capture's only edge is the `d.clone` rank's
 posward-tail append — the binding cell's own
 `+d.clone →` the `cap$N` slot on a first capture, the prior clone's on a chained one —
-image-sealed for a declared fragment, running state→program on
+image-sealed for a declared fragment, running state→program on a first capture
+(program→program on a chained one) on
 a dim the walk's `+d` vocabulary does not list — and the slot's `masterOf` is a `-d.clone`
 backlink traversal on that dim, never a `+d` step this walk can take; a ref-capture record
 contributes no reach either, its referent
@@ -3802,7 +3883,8 @@ edge leads, and the sealed image offers none — the capture's only edge is the 
 rank's posward-tail append — the binding cell's
 own `+d.clone →` the `cap$N` slot on a first capture, the prior clone's on a chained one —
 image-sealed for a declared fragment and running
-state→program on a `d.clone` dim the `+d` vocabulary does not list, while the slot's `masterOf`
+state→program on a first capture (program→program on a chained one) on a `d.clone` dim the `+d`
+vocabulary does not list, while the slot's `masterOf`
 is a `-d.clone` backlink traversal on that dim
 (`cloneMaster` = `rankEnd` NEG-ward, `arena_manifold.cpp:1009-1012`;
 the append itself `vortex_vm.cpp:816-825`), never a `+d` step this walk can take — so the legs
@@ -3847,7 +3929,8 @@ qualifier on the record shape dropped to "dim referents" for the same reason.
 rank** (R16-A — writer + zigzag majors, vortex concurring): every marked int64
 field cell — a slot or a `+d.recipe` field alike — carries its `+d.ref` record on the head's
 `+d.refs` rank, the `+d.recipe` member remaining the field's *schema* record (name → tuple
-position), never a second marking rank; the re-kind, restore and genesis (e) passes stay
+position — the member's `+d.step` position itself the carrier, 1.17's pin), never a second
+marking rank; the re-kind, restore and genesis (e) passes stay
 `+d.refs`-bounded *because* the inventory is one rank — v1.15's "the field cell's own `+d.recipe`
 record" left recipe fields unreachable to the `+d.refs`-bounded walks — and (e)'s sweep is now
 stated covering both arms: ordinary marked slots *and* the `+d.recipe` field cells' own
@@ -3859,8 +3942,11 @@ re-resolved through `ensureDimension` at replay exactly as the `dimConstant` arm
 dim cell's promoted position names nothing — `promote` emits no `d.dims` links
 (`arena_manifold.cpp:1766`,`:2030-2033`), so a session-minted dim's promoted twin is an orphan;
 and the minted-dim set — `d.patch`/`d.code`/`d.refs`/`d.recipe`/`d.refFor`/`d.entry`/`d.weight`/
-`d.synapse` (the whole `ensureDimension`-minted apparatus beside) — is filed on the persistent
-`d.dims` rank at image-seal through `DimensionRegistry::getOrCreate` → `Store::makeDimension`
+`d.synapse` (the whole `ensureDimension`-minted apparatus beside — widened by 1.17 to the whole
+minted-dim vocabulary: the V10 `mintNamedDimension` names and `dimConstant` mints included) — is
+filed on the persistent `d.dims` rank before the lineage's first dim resolution (1.17's ordering
+pin; the "at image-seal" phrasing it replaced under-specified both lineages) through
+`DimensionRegistry::getOrCreate` → `Store::makeDimension`
 (the `vql/compiler.cpp:1128-1141` "replicate dimensions" precedent), named as part of §10.1's
 spawn-seed ceremony on the adapter-kept lineage `Store`, so genesis (b)'s find-or-mint re-binds
 the canonical cell rather than re-minting an orphan twin. Applies the minors: `masterOf`/
@@ -3891,3 +3977,52 @@ rule — and its `wingOf` `:373` "correction" reversed as above; (d)'s install s
 `+d.recipe` records beside `+d.refs`; the 1.5 entry's "genesis re-mints them" scoped to unfiled
 twins; and the 1.9/1.10/1.11 entries' `+d.values`-carrier
 narrations annotated superseded rather than rewritten.
+
+**1.17 — Seventeenth review revision (r17 disposition).** Pins the `+d.recipe` member's
+field-schema carrier (R17-A — zigzag + codebase majors, ergo + meta + writer minors across
+five lanes): a link tuple's fields are four `+d.step`-consecutive members in `(from, dim, dir,
+to)` order, the member's `+d.step` chain position its field identity — the schema name carried
+by tuple order, never by an edge — and `+d.name` on a `+d.recipe` member is reserved to the
+`dim` field's dim-name channel alone, so the dim arm cannot mis-key `from`/`dir`/`to` members
+as dim endpoints nor M14-collide with the one member's dim name; the name-record discriminator
+"`+d.name` on a record makes it a name-record" is scoped to `+d.refs` records in §6.1's prose
+and the P16 register row alike, the member staying marked like every field cell. States the
+`d.dims` filing's coverage and ordering (R17-B — vortex + architect majors, meta concurring):
+the filed set is the whole minted-dim vocabulary — the `d.dims`-rank member set `dimensions()`
+walks (`manifold.cpp:771-775`), every mint path appending there — `initGenesis`'s
+`mintNamedDimension` V10 names (`vortex_core.cpp:50-69`), the `ensureDimension` apparatus
+names (the spawn-seed bind set plus `attach()`'s `d.store-refs`,
+`arena_manifold.cpp:289-290`), and `dimConstant`/`findOrMintDimension`'s mints
+(`compiler.cpp:769-772`) — replacing the under-covering "every other `ensureDimension`-minted
+name"; and the ordering is pinned on both lineages — file-before-pin at spawn-seed
+(`getOrCreate` move-assigns its `Manifold&`, so the rebuilt fold the filing returns IS the
+base-injected fold, `dimension_registry.cpp:194-217`; a post-pin filing is invisible to
+`dimensionNamed`'s base arm) and file-before-first-resolution at emit (before the compile
+arena's `initGenesis`, `vortex_core.cpp:14,:29-70`), a name first minted mid-session staying
+honestly unfiled. Applies the minors: genesis (e)'s "re-minted canonical cell" corrected to
+re-bound off the filed rank — re-mint only for an unfiled name — the accretion bound scoped to
+unfiled session mints; `closed`'s arm (c) gains the `dim`-field member form the glossary row
+and re-verification already carried; `reify`'s regenerated records re-mint every `+d.name`
+name cell verbatim (the `patch:<n>` label rule) — never re-linked off the donor's occupied
+`-d.name` — the `dim` member's dim-name cell covered; the `+d.clone →` direction qualifier
+scoped to first capture in the §6.6 restatement and all three changelog echoes — chained
+captures run clone→clone (program→program); `set_weight`'s dispatch states the third case — a
+`+d.name`-bearing non-junction non-clause target (a fragment head's label) keys a `d.vars`
+record by that label verbatim; the stale `:836` `cloneMaster` cite split — the operand lambda
+at `vortex_core.cpp:358-365`, `cloneMaster` itself at `arena_manifold.cpp:1009-1012`; (e)'s
+member writeback reads "the member cell itself" for the self-referential "its own field cell";
+(d)'s `+d.name` exception mirrored for the `dim`-field member, which writes the same
+`Int64(DimRef)` into the member cell; the `set_weight` junction parenthetical re-pointed from
+§8.3 to §8.1's own synapse bullet and the glossary; the stale "(§6.1's uniform position
+keyspace)" dropped — `+d.refs`-boundedness follows the one-rank inventory, the `dim` field
+being the keyspace's named exception; a `DimRef` is noted as *counting* as an int64 ref under
+the uniform rule, the `dim`-field member name-bearing but marked; ref-capture records scoped
+to *slot* ref-records — a `+d.recipe` field's ref-record pairs with nothing (the member its
+own endpoint record, no `+d.refFor`) — in the head diagram, §6.1 and (e); and the filed-set
+enumeration raised beside the bind list it had under-covered
+(`d.patch-head`/`d.validate`/`d.ref`/`d.mesh.relocation`/`d.store-refs` and the V10 set).
+Retro-edits confessed: the 1.13/1.14/1.15 entries' "running state→program" direction qualifier
+scoped to first capture as above; the 1.16 entry's "(name → tuple position)" annotated with the
+`+d.step`-position carrier pin, its "every `ensureDimension`-minted name" filing claim widened
+to the whole minted-dim vocabulary, and its "at image-seal" ordering replaced by
+before-first-resolution on both lineages.
