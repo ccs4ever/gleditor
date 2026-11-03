@@ -2,7 +2,7 @@
 
 #include <gleditor/text/diagnostics.hpp>
 #include <gleditor/text/fit.hpp>
-#include <gleditor/text/font_manager.hpp>
+#include <gleditor/text/font.hpp>
 #include <gleditor/ui/button_metrics.hpp>
 #include <gleditor/ui/overlay.hpp>
 #include <gleditor/ui/recessed_well.hpp>
