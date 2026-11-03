@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 
 #include "common/xanadu/store.hpp"
@@ -40,6 +41,11 @@ TEST(VagentSettingsTest, DefaultFallbacksFromEmptyStore) {
   EXPECT_EQ(settings.epistemic.cells, 24576U);
   EXPECT_EQ(settings.epistemic.ingestPerWake, 4U);
   EXPECT_EQ(settings.epistemic.arenaSlots, std::size_t{1} << 30);
+  EXPECT_EQ(settings.epistemic.healthHalfLife, 32);
+  EXPECT_DOUBLE_EQ(settings.epistemic.suspectFraction, 0.25);
+  EXPECT_EQ(settings.epistemic.suspectMinEvents, 8);
+  EXPECT_EQ(settings.epistemic.healthReplayRing, 8);
+  EXPECT_EQ(settings.epistemic.healthSequenceGap, 1024);
 
   const auto hostOptions = LocalHost::Options::fromStore(store);
   EXPECT_EQ(hostOptions.settings, settings);
@@ -247,6 +253,117 @@ TEST(VagentSettingsTest, InvalidValuesFallBackToDefaults) {
 
   const auto hostOpts = LocalHost::Options::fromStore(store);
   EXPECT_EQ(hostOpts.maxInstructions, 10'000'000U);
+}
+
+namespace {
+/// A settings store holding @p apply's changes over the defaults.
+template <typename Apply> AgentSettings healthSettings(Apply &&apply) {
+  Store store;
+  store.setSystem(true);
+  initializeSystemStore(store, SystemDocKind::Settings);
+  auto v = store.primaryCurrentVersion();
+  v      = apply(store, v);
+  store.repointCurrentVersion(v);
+  return AgentSettings::fromStore(store);
+}
+} // namespace
+
+TEST(VagentSettingsTest, HealthSettingsLoadEachField) {
+  const auto s = healthSettings([](Store &store, auto v) {
+    v = setSetting(store, v, settings::kVagentEpistemicHealthHalfLife,
+                   std::int64_t{64});
+    v = setSetting(store, v, settings::kVagentEpistemicSuspectFraction, 0.4);
+    v = setSetting(store, v, settings::kVagentEpistemicSuspectMinEvents,
+                   std::int64_t{20});
+    v = setSetting(store, v, settings::kVagentEpistemicHealthReplayRing,
+                   std::int64_t{16});
+    v = setSetting(store, v, settings::kVagentEpistemicHealthSequenceGap,
+                   std::int64_t{4096});
+    return v;
+  });
+  EXPECT_EQ(s.epistemic.healthHalfLife, 64);
+  EXPECT_DOUBLE_EQ(s.epistemic.suspectFraction, 0.4);
+  EXPECT_EQ(s.epistemic.suspectMinEvents, 20);
+  EXPECT_EQ(s.epistemic.healthReplayRing, 16);
+  EXPECT_EQ(s.epistemic.healthSequenceGap, 4096);
+}
+
+TEST(VagentSettingsTest,
+     AnInvalidHealthSettingKeepsTheDefaultsForTheWholeBlock) {
+  // A half-life past its domain, a fraction outside (0, 1], a min_events
+  // above 90% of the weight bound at H = 4 (floor(0.9 / (1 - b)) = 5), a ring
+  // or a gap past its bound: each also resets the unrelated max_sources,
+  // which is the whole-block fallback of decision F30(A).
+  const auto bad = [](auto apply) {
+    return healthSettings([&](Store &store, auto v) {
+      v = setSetting(store, v, settings::kVagentMaxSources, std::int64_t{256});
+      return apply(store, v);
+    });
+  };
+  const auto check = [&](const AgentSettings &s, const char *what) {
+    EXPECT_EQ(s.epistemic, EpistemicLimits{}) << what;
+  };
+  check(bad([](Store &store, auto v) {
+          return setSetting(store, v, settings::kVagentEpistemicHealthHalfLife,
+                            std::int64_t{2'000'000});
+        }),
+        "half-life");
+  check(bad([](Store &store, auto v) {
+          return setSetting(store, v, settings::kVagentEpistemicSuspectFraction,
+                            1.5);
+        }),
+        "fraction above 1");
+  check(bad([](Store &store, auto v) {
+          return setSetting(store, v, settings::kVagentEpistemicSuspectFraction,
+                            0.0);
+        }),
+        "fraction of 0");
+  check(bad([](Store &store, auto v) {
+          v = setSetting(store, v, settings::kVagentEpistemicHealthHalfLife,
+                         std::int64_t{4});
+          return setSetting(store, v,
+                            settings::kVagentEpistemicSuspectMinEvents,
+                            std::int64_t{8});
+        }),
+        "min_events above the weight bound");
+  check(bad([](Store &store, auto v) {
+          return setSetting(store, v,
+                            settings::kVagentEpistemicHealthReplayRing,
+                            std::int64_t{5000});
+        }),
+        "ring");
+  check(bad([](Store &store, auto v) {
+          return setSetting(store, v,
+                            settings::kVagentEpistemicHealthSequenceGap,
+                            std::int64_t{1} << 40);
+        }),
+        "gap");
+  // A non-positive Int is skipped before validate(), so it neither warns nor
+  // resets the block: only that field keeps its default.
+  const auto skipped = bad([](Store &store, auto v) {
+    return setSetting(store, v, settings::kVagentEpistemicHealthHalfLife,
+                      std::int64_t{-5});
+  });
+  EXPECT_EQ(skipped.epistemic.healthHalfLife, 32);
+  EXPECT_EQ(skipped.epistemic.maxSources, 256U);
+}
+
+TEST(VagentSettingsTest, AHalfLifeBelowTheQueueShareIsValidAndWarns) {
+  // The relation H >= ingress_queue_per_source is a construction-time WARN,
+  // not a refusal (R3-2): the setting loads.
+  const auto s = healthSettings([](Store &store, auto v) {
+    v = setSetting(store, v, settings::kVagentEpistemicIngressQueue,
+                   std::int64_t{64});
+    v = setSetting(store, v, settings::kVagentEpistemicIngressQueuePerSource,
+                   std::int64_t{16});
+    return setSetting(store, v, settings::kVagentEpistemicHealthHalfLife,
+                      std::int64_t{8});
+  });
+  EXPECT_EQ(s.epistemic.healthHalfLife, 8);
+  EXPECT_EQ(s.epistemic.ingressQueuePerSource, 16U);
+  EXPECT_TRUE(s.epistemic.validate());
+  // Both numbers the warning prints: the order error is 2^(16/8) = 4.
+  EXPECT_DOUBLE_EQ(std::exp2(16.0 / 8.0), 4.0);
 }
 
 } // namespace xanadu::vagent::runtime

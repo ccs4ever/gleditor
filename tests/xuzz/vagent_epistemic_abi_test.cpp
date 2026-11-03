@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <stdexcept>
 
@@ -62,6 +63,88 @@ TEST(VagentEpistemicAbi, ResourceSettingsRejectInvalidSignedValues) {
   EXPECT_EQ((EpistemicLimits{1, 0}.validate().error()),
             EpistemicLimitError::InvalidCandidates);
 }
+TEST(VagentEpistemicAbi, HealthSettingsAreValidatedByName) {
+  const EpistemicLimits defaults;
+  EXPECT_EQ(defaults.healthHalfLife, 32);
+  EXPECT_DOUBLE_EQ(defaults.suspectFraction, 0.25);
+  EXPECT_EQ(defaults.suspectMinEvents, 8);
+  EXPECT_EQ(defaults.healthReplayRing, 8);
+  EXPECT_EQ(defaults.healthSequenceGap, 1024);
+  const auto refused = [](auto change) {
+    EpistemicLimits limits;
+    change(limits);
+    return limits.validate();
+  };
+  EXPECT_EQ(refused([](auto &l) { l.healthHalfLife = 0; }).error(),
+            EpistemicLimitError::InvalidHealthHalfLife);
+  EXPECT_EQ(refused([](auto &l) { l.healthHalfLife = 1'000'001; }).error(),
+            EpistemicLimitError::InvalidHealthHalfLife);
+  EXPECT_TRUE(refused([](auto &l) { l.healthHalfLife = 1'000'000; }));
+  for (const double bad : {0.0, -0.1, 1.0001, std::nan(""),
+                           std::numeric_limits<double>::infinity()})
+    EXPECT_EQ(refused([&](auto &l) { l.suspectFraction = bad; }).error(),
+              EpistemicLimitError::InvalidSuspectFraction)
+        << bad;
+  EXPECT_TRUE(refused([](auto &l) { l.suspectFraction = 1.0; }));
+  // floor(0.9 / (1 - b)) is 42 at H = 32.
+  EXPECT_TRUE(refused([](auto &l) { l.suspectMinEvents = 42; }));
+  EXPECT_EQ(refused([](auto &l) { l.suspectMinEvents = 43; }).error(),
+            EpistemicLimitError::InvalidSuspectMinEvents);
+  EXPECT_EQ(refused([](auto &l) { l.suspectMinEvents = 0; }).error(),
+            EpistemicLimitError::InvalidSuspectMinEvents);
+  EXPECT_EQ(refused([](auto &l) { l.healthReplayRing = 0; }).error(),
+            EpistemicLimitError::InvalidHealthReplayRing);
+  EXPECT_EQ(refused([](auto &l) { l.healthReplayRing = 4097; }).error(),
+            EpistemicLimitError::InvalidHealthReplayRing);
+  EXPECT_EQ(refused([](auto &l) { l.healthSequenceGap = 0; }).error(),
+            EpistemicLimitError::InvalidHealthSequenceGap);
+  EXPECT_EQ(refused([](auto &l) {
+              l.healthSequenceGap = std::int64_t{1} << 31;
+            }).error(),
+            EpistemicLimitError::InvalidHealthSequenceGap);
+  // No capacity relation: a half-life below the queue share is legitimate.
+  EXPECT_TRUE(refused([](auto &l) {
+    l.healthHalfLife        = 8; // the documented floor with min_events 8
+    l.ingressQueue          = 64;
+    l.ingressQueuePerSource = 40;
+  }));
+  // A half-life too small for the default min_events is refused by name.
+  EXPECT_EQ(refused([](auto &l) { l.healthHalfLife = 4; }).error(),
+            EpistemicLimitError::InvalidSuspectMinEvents);
+  EXPECT_EQ(
+      epistemicLimitErrorName(EpistemicLimitError::InvalidSuspectFraction),
+      "InvalidSuspectFraction");
+}
+
+TEST(VagentEpistemicAbi, HealthNamesAndOrdersArePinned) {
+  EXPECT_EQ(kProfileHealthRefusedWeight, "health_refused_weight");
+  EXPECT_EQ(kProfileHealthWeight, "health_weight");
+  EXPECT_EQ(kObsHealthSuspect, "SUSPECT");
+  EXPECT_EQ(kObsHealthDegraded, "DEGRADED");
+  EXPECT_EQ(kObsHealthFraction, "health_fraction");
+  EXPECT_EQ(kRefusalHealth, "health");
+  EXPECT_EQ(kRefusalPassed, "passed");
+  EXPECT_EQ(kRefusalHalfLife, "half_life");
+  EXPECT_EQ(kIngestHalfLife, "half_life");
+  EXPECT_EQ(kIngestSuspectFraction, "suspect_fraction");
+  EXPECT_EQ(kIngestMinEvents, "min_events");
+  EXPECT_EQ(kIngestCounts, "counts");
+  EXPECT_EQ(kTurnResultClockEpochRegression, "ClockEpochRegression");
+  EXPECT_EQ(kTurnResultClockMappingRegression, "ClockMappingRegression");
+  // The record grows by one field, right after the health stamp.
+  EXPECT_EQ(kObservationOrder.size(), 24U);
+  EXPECT_EQ(kObservationOrder[observationPosition(kObsHealth) + 1],
+            kObsHealthFraction);
+  EXPECT_EQ(epistemicRefusalName(EpistemicRefusal::InvalidValue),
+            "InvalidValue");
+  EXPECT_EQ(epistemicRefusalName(EpistemicRefusal::InvalidAcquisition),
+            "InvalidAcquisition");
+  EXPECT_EQ(outcomeClassOf("InvalidValue"), OutcomeClass::Terminal);
+  EXPECT_EQ(outcomeClassOf("InvalidAcquisition"), OutcomeClass::Terminal);
+  EXPECT_EQ(outcomeClassOf("ClockEpochRegression"), OutcomeClass::Terminal);
+  EXPECT_EQ(outcomeClassOf("ClockMappingRegression"), OutcomeClass::Terminal);
+}
+
 TEST(VagentEpistemicAbi, ScopeNestingSettingsRejectInvalidSignedValues) {
   const auto defaults = checkedEpistemicLimits(
       kDefaultEpistemicMaxSources, kDefaultEpistemicMaxCandidates,

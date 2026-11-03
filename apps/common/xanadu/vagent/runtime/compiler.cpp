@@ -3595,6 +3595,15 @@ void Gen::emitObserveRefusal(CellRef entryLabel) {
     branchIfZero(out, malformed);
   }
   field(kRefusalContact, contact);
+  // The counted health refusals and pass credits, and the half-life they
+  // update under, all written by the host with every note.
+  const CellRef health = reg(), passed = reg(), halfLife = reg();
+  for (const auto &[name, out] :
+       {std::pair{kRefusalHealth, health}, std::pair{kRefusalPassed, passed},
+        std::pair{kRefusalHalfLife, halfLife}}) {
+    field(name, out);
+    branchIfZero(out, malformed);
+  }
   // A bound source's first refusal earns it a profile, as a commit would
   // have: the binding is the host's authorization either way, and health
   // must not start clean for a source wrong from its first event. An unbound
@@ -3620,19 +3629,49 @@ void Gen::emitObserveRefusal(CellRef entryLabel) {
   endObservation(kTurnResultNoProfile);
   place(found);
   const CellRef sum = reg();
+  // Find or create: a revived bare tombstone and a profile an operator left
+  // without counters are chargeable, so a refusal is never lost (F8).
   const auto charge = [&](std::string_view counter, CellRef by) {
     mov(S(a0_), S(prof));
     movC(a1_, cStr(std::string(counter)));
     callLabel(rtFind_);
-    const CellRef v = reg();
+    const CellRef v = reg(), absent = newLabel(), charged = newLabel();
     mov(S(v), S(r0_));
-    branchIfZero(v, malformed);
+    branchIfZero(v, absent);
     emit(OpcodeKind::Add, "n+", {D(v), D(by)}, {sum});
     mov(D(v), S(sum));
+    jump(charged);
+    place(absent);
+    CellRef fresh;
+    callSetField(prof, std::string(counter), std::nullopt, fresh);
+    mov(D(fresh), D(by));
+    place(charged);
   };
   charge(kProfileContentRefusals, content);
   charge(kProfileRefusedCount, other);
-  putScalar(prof, kProfileLastRefusal, D(code));
+  {
+    const CellRef k = reg(), c = reg(), h = reg(), n = reg(), any = reg(),
+                  none = newLabel();
+    mov(S(k), D(health));
+    mov(S(c), D(passed));
+    mov(S(h), D(halfLife));
+    emit(OpcodeKind::Add, "n", {S(k), S(c)}, {n});
+    emit(OpcodeKind::Gt, "n>0?", {S(n), S(zero_)}, {any});
+    requireTrue(any, none);
+    callHealthUpdate(prof, k, c, h);
+    place(none);
+  }
+  {
+    // A note of pass credits alone charges no refusal, so it has no code to
+    // show; `last_refusal` keeps the newest real one.
+    const CellRef refusals = reg(), any = reg(), none = newLabel();
+    emit(OpcodeKind::Add, "refusals", {D(content), D(other)}, {refusals});
+    emit(OpcodeKind::Add, "refusals", {S(refusals), D(health)}, {refusals});
+    emit(OpcodeKind::Gt, "any?", {S(refusals), S(zero_)}, {any});
+    requireTrue(any, none);
+    putScalar(prof, kProfileLastRefusal, D(code));
+    place(none);
+  }
   const CellRef unseen = newLabel();
   branchIfZero(contact, unseen);
   {
@@ -4034,7 +4073,10 @@ void Gen::emitObserve(CellRef entryLabel) {
                 relayed = global(), historyLimit = global(),
                 keysLimit = global(), acquiredAt = global(),
                 acquiredUnc = global(), clockEpoch = global(),
-                mapping = global(), view = global(), health = global();
+                mapping = global(), view = global(), health = global(),
+                healthFraction = global(), halfLife = global(),
+                suspectFraction = global(), minEvents = global(),
+                counts = global();
   // Records are read in one walk in the order their writer used, checking
   // each name, rather than by a field search per read: the search was most
   // of an ingestion's cost.
@@ -4086,6 +4128,7 @@ void Gen::emitObserve(CellRef entryLabel) {
   readInOrder(obs, kObservationOrder,
               {{kObsProfile, view},
                {kObsHealth, health},
+               {kObsHealthFraction, healthFraction},
                {kObsPredicate, ty},
                {kObsSource, who},
                {kObsTuple, tuple},
@@ -4120,15 +4163,28 @@ void Gen::emitObserve(CellRef entryLabel) {
   callLabel(rtFind_);
   mov(S(ingest), S(r0_));
   branchIfZero(ingest, malformed);
-  static constexpr std::array<std::string_view, 4> kIngestOrder{
-      kIngestMaxSources, kIngestDedup, kIngestHistory, kIngestKeysPerSource};
+  static constexpr std::array<std::string_view, 8> kIngestOrder{
+      kIngestMaxSources,    kIngestDedup,    kIngestHistory,
+      kIngestKeysPerSource, kIngestHalfLife, kIngestSuspectFraction,
+      kIngestMinEvents,     kIngestCounts};
   readInOrder(ingest, kIngestOrder,
               {{kIngestMaxSources, maxSources},
                {kIngestDedup, dedupWindow},
                {kIngestHistory, historyLimit},
-               {kIngestKeysPerSource, keysLimit}},
+               {kIngestKeysPerSource, keysLimit},
+               {kIngestHalfLife, halfLife},
+               {kIngestSuspectFraction, suspectFraction},
+               {kIngestMinEvents, minEvents},
+               {kIngestCounts, counts}},
               cursor);
 
+  // The estimator's settings as values: the routines take values, and the
+  // record's fields are read as refs.
+  const CellRef halfLifeValue = global(), suspectValue = global(),
+                minEventsValue = global();
+  mov(S(halfLifeValue), D(halfLife));
+  mov(S(suspectValue), D(suspectFraction));
+  mov(S(minEventsValue), D(minEvents));
   // 1. The source's profile: found by its token on `$agent +d.trust`, or
   //    created within the principal budget.
   const CellRef prof = global();
@@ -4223,15 +4279,18 @@ void Gen::emitObserve(CellRef entryLabel) {
     requireTrue(stale, advancing);
     endObservation(kTurnResultStaleSequence);
     place(advancing);
+    // An epoch that went backwards is a clock fault of the device (counted
+    // by the estimator); a mapping version that did, within one epoch, is the
+    // host's (design 3.1).
     emit(OpcodeKind::Lt, "epoch<?", {D(clockEpoch), D(lastEpoch)}, {stale});
     requireTrue(stale, sameEpoch);
-    endObservation(kTurnResultObservationTimeMismatch);
+    endObservation(kTurnResultClockEpochRegression);
     place(sameEpoch);
     emit(OpcodeKind::Eq, "epoch=?", {D(clockEpoch), D(lastEpoch)}, {stale});
     requireTrue(stale, ordered);
     emit(OpcodeKind::Lt, "map<?", {D(mapping), D(lastMapping)}, {stale});
     requireTrue(stale, ordered);
-    endObservation(kTurnResultObservationTimeMismatch);
+    endObservation(kTurnResultClockMappingRegression);
     place(ordered);
     place(fresh);
   }
@@ -4369,18 +4428,17 @@ void Gen::emitObserve(CellRef entryLabel) {
     const CellRef rec = reg();
     breakOp(D(obsName), core_.dims().values);
     mov(S(rec), S(obs));
-    // Status, verdict and pinned arrive at their initial values; health is
-    // NOMINAL unless the profile's latch says otherwise.
-    {
-      const CellRef faulted = reg(), noted = newLabel();
-      profileField(kProfileFaulted, faulted);
-      branchIfZero(faulted, noted);
-      emit(OpcodeKind::Eq, "faulted?", {D(faulted), S(true_)}, {eq});
-      requireTrue(eq, noted);
-      mov(D(health), S(cStr(std::string(kObsHealthFaulted))));
-      place(noted);
-    }
     bookkeeping(rec);
+    // Status, verdict and pinned arrive at their initial values. Health is
+    // stamped from the estimator after this event's own update, so the
+    // record describes the source including the reading it carries.
+    {
+      const CellRef counted = reg();
+      emit(OpcodeKind::Eq, "counts?", {D(counts), S(true_)}, {counted});
+      callHealth(prof, halfLifeValue, suspectValue, minEventsValue, counted);
+      mov(D(health), S(r0_));
+      mov(D(healthFraction), S(a2_));
+    }
     // The source's previous current record on this key is superseded, unless
     // the new reading was acquired before it by more than both uncertainties
     // and the policy's skew in the same clock epoch: arrival order must never

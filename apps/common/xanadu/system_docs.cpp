@@ -1018,6 +1018,56 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .schemas = {{.expectedTypes = {"integer"},
                       .defaultValues =
                           {vagent::runtime::kDefaultEpistemicArenaSlots}}}},
+        {.name    = std::string(settings::kVagentEpistemicHealthHalfLife),
+         .notes   = "vagent: counted events over which a source's refusal "
+                    "fraction forgets half of its history, 1 to 1000000. The "
+                    "state is indexed by events, so a source that reports once "
+                    "an hour stays SUSPECT for about 64 hours after it is "
+                    "repaired at the default; only a reset shortens that. A "
+                    "value below the per-source queue share logs a warning "
+                    "because notes then apply out of order by up to 2^(share / "
+                    "half-life). An invalid health setting keeps the defaults "
+                    "for the whole epistemic block",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues =
+                          {vagent::runtime::kDefaultEpistemicHealthHalfLife}}}},
+        {.name  = std::string(settings::kVagentEpistemicSuspectFraction),
+         .notes = "vagent: fraction in (0, 1] of a source's counted outcomes "
+                  "that were unusable at or above which it reads SUSPECT. "
+                  "Counted outcomes are refusals decided on the device's own "
+                  "signed fields and epoch; host-time refusals (stale, time "
+                  "mismatch, uncertain acquisition, mapping regression) are "
+                  "not counted. Between 15% and 25% the state is noisy by "
+                  "nature",
+         .schemas =
+             {{.expectedTypes = {"float"},
+               .defaultValues =
+                   {vagent::runtime::kDefaultEpistemicSuspectFraction}}}},
+        {.name  = std::string(settings::kVagentEpistemicSuspectMinEvents),
+         .notes = "vagent: estimator weight (not a count of events) below "
+                  "which the refusal fraction does not decide. At most 90% "
+                  "of 1 / (1 - 2^(-1 / half-life)), 42 at the default "
+                  "half-life",
+         .schemas =
+             {{.expectedTypes = {"integer"},
+               .defaultValues =
+                   {vagent::runtime::kDefaultEpistemicSuspectMinEvents}}}},
+        {.name  = std::string(settings::kVagentEpistemicHealthReplayRing),
+         .notes = "vagent: counted refusal sequences remembered per stream "
+                  "above its high-water mark, 1 to 4096, so a replayed "
+                  "refusal counts once",
+         .schemas =
+             {{.expectedTypes = {"integer"},
+               .defaultValues =
+                   {vagent::runtime::kDefaultEpistemicHealthReplayRing}}}},
+        {.name  = std::string(settings::kVagentEpistemicHealthSequenceGap),
+         .notes = "vagent: how far above its stream's mark a dropped "
+                  "reading's sequence may sit and still be credited as "
+                  "accepted, 1 to 2147483647",
+         .schemas =
+             {{.expectedTypes = {"integer"},
+               .defaultValues =
+                   {vagent::runtime::kDefaultEpistemicHealthSequenceGap}}}},
         {.name    = std::string(settings::kVagentTuiBorders),
          .notes   = "vagent tui: border glyphs; rounded, single or ascii. "
                     "Unset picks unicode where the locale is UTF-8",

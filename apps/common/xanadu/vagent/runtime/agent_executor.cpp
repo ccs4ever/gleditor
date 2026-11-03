@@ -563,6 +563,27 @@ struct IngestKey {
   /// relayed copy never shows the device alive, and holds a relay's share.
   std::optional<std::string> relay;
   double receivedSteady{};
+  /// The origin's sequence, for the estimator's high-water mark.
+  std::uint64_t sequence{};
+  /// Whether the estimator counts this reading, decided in `observe` under
+  /// the ingress lock (design 3.2): deciding at commit against a mark that a
+  /// later credited reading had raised would count an earlier one as stale.
+  bool counts{false};
+};
+
+/// Refusals not yet charged, by pid and principal. They coalesce, so a flood
+/// of refused events costs one bookkeeping turn, not one each. Declared before
+/// the post box because a closed charge travels in its note (R3-4).
+struct IngressCharge {
+  std::int64_t content{};
+  std::int64_t other{};
+  /// Health refusals and pass credits the host has already de-duplicated by
+  /// the stream's high-water mark: increments for the estimator, not tallies.
+  std::int64_t health{};
+  std::int64_t passed{};
+  /// The newest charged refusal; a charge exists only once one is made.
+  std::string code;
+  std::optional<double> contact;
 };
 
 /// An incarnation advance or a retirement for one principal (P19 I3-1c).
@@ -585,6 +606,9 @@ struct AgentExecutor::PostBox {
     std::optional<IngestKey> ingest;
     /// A principal with refusals waiting to be charged to its profile.
     std::optional<std::string> refusalsOf;
+    /// The charge this note carries once an accept for the principal queued
+    /// behind it closed it; absent, the drain takes the open charge.
+    std::optional<IngressCharge> charge;
     /// Runs before anything queued for the agent.
     std::optional<SourceChange> sourceChange;
     std::int64_t effect{};
@@ -665,6 +689,20 @@ struct AgentExecutor::PostBox {
     const std::lock_guard lock(mutex);
     items.insert(items.begin(), std::make_move_iterator(kept.begin()),
                  std::make_move_iterator(kept.end()));
+  }
+  /// Close @p charge into the first waiting note of @p principal that has
+  /// none, so refusals decided before an accept are charged ahead of it.
+  /// False when no such note waits (the drain took it); the caller then keeps
+  /// the charge open.
+  bool attachCharge(const identity::ActorPid &pid, const std::string &principal,
+                    IngressCharge charge) {
+    const std::lock_guard lock(mutex);
+    for (auto &item : items)
+      if (item.pid == pid && item.refusalsOf == principal && !item.charge) {
+        item.charge = std::move(charge);
+        return true;
+      }
+    return false;
   }
   bool pendingFor(const identity::ActorPid &pid) const {
     const std::lock_guard lock(mutex);
@@ -757,16 +795,25 @@ struct AgentExecutor::Ingress {
   std::map<SourceKey, Floor> floors;
   /// The newest advance or retire turn's outcome per source.
   std::map<SourceKey, IngestOutcome> changes;
-  /// Refusals not yet charged, by pid and principal. They coalesce, so a
-  /// flood of refused events costs one bookkeeping turn, not one each.
-  struct Charge {
-    std::int64_t content{};
-    std::int64_t other{};
-    /// The newest charged refusal; a charge exists only once one is made.
-    std::string code;
-    std::optional<double> contact;
-  };
+  using Charge = IngressCharge;
   std::map<SourceKey, Charge> charges;
+  /// A stream's estimator state (design 3.2): the newest sequence a commit or
+  /// a pass credit moved the estimator past, and the sequences of counted
+  /// refusals above it. Host memory, lost with the host.
+  struct EstimatorMark {
+    /// Raised only by a commit or a pass credit, never by a refusal: a
+    /// refusal's sequence is any Int64 the device chose, so a mark it raised
+    /// could freeze the estimator for the life of the incarnation.
+    std::optional<std::uint64_t> mark;
+    /// Oldest first; at most `healthReplayRing`.
+    std::deque<std::uint64_t> counted;
+  };
+  using StreamKey =
+      std::tuple<std::string, std::string, std::uint64_t, std::string>;
+  std::map<StreamKey, EstimatorMark> marks;
+  /// Chargeable refusals the estimator did not count since the source last
+  /// committed.
+  std::map<SourceKey, std::uint64_t> uncounted;
   /// Unknown until the host's time service reports: a wall-basis reading
   /// taken before then cannot be placed in time.
   bool wallSynchronised{false};
@@ -827,6 +874,29 @@ struct AgentExecutor::Ingress {
     }
     return true;
   }
+  /// Whether the estimator would count a reading of @p stream at @p sequence:
+  /// above the mark (or the stream has none) and not already counted.
+  [[nodiscard]] bool estimatorCounts(const StreamKey &stream,
+                                     std::uint64_t sequence) const {
+    const auto found = marks.find(stream);
+    if (found == marks.end()) return true;
+    const auto &m = found->second;
+    if (m.mark && sequence <= *m.mark) return false;
+    return std::ranges::find(m.counted, sequence) == m.counted.end();
+  }
+  /// Remember a counted refusal's sequence, the oldest leaving at @p ring.
+  void rememberCounted(const StreamKey &stream, std::uint64_t sequence,
+                       std::size_t ring) {
+    auto &counted = marks[stream].counted;
+    counted.push_back(sequence);
+    while (counted.size() > ring) counted.pop_front();
+  }
+  /// Raise the mark (a commit or a credit) and drop the refusals it passed.
+  void raiseMark(const StreamKey &stream, std::uint64_t sequence) {
+    auto &m = marks[stream];
+    if (!m.mark || sequence > *m.mark) m.mark = sequence;
+    std::erase_if(m.counted, [&](auto s) { return s <= *m.mark; });
+  }
   /// The share of the actor queue one principal or relay may hold: the
   /// per-source bound, shrunk so every bound source keeps a slot.
   [[nodiscard]] std::size_t share(const std::string &pid, std::size_t queue,
@@ -885,20 +955,32 @@ struct AgentExecutor::Ingress {
     std::erase_if(floors, mine);
     std::erase_if(changes, mine);
     std::erase_if(charges, mine);
+    std::erase_if(uncounted, mine);
+    std::erase_if(marks, [&](const auto &entry) {
+      return std::get<0>(entry.first) == pid;
+    });
   }
   /// Record one refusal against @p principal; true when it is the first
   /// since the last bookkeeping turn, so the caller posts a note for it.
+  /// @p lifetime is `firstCharge`'s answer and feeds the lifetime counters and
+  /// the contact stamp; @p health is the estimator's own, already gated by the
+  /// stream's mark (R3-3): the two never share a mechanism.
   bool charge(const std::string &pid, const std::string &principal,
-              std::string_view code, bool relayed, double receivedSteady) {
-    if (!chargeable(code)) return false;
+              std::string_view code, bool relayed, double receivedSteady,
+              bool lifetime, bool health) {
+    if (!chargeable(code) || (!lifetime && !health)) return false;
     auto [it, fresh] = charges.try_emplace({pid, principal});
     auto &c          = it->second;
-    if (!relayed && isContentRefusal(code)) {
-      ++c.content;
-      c.contact = std::max(c.contact.value_or(receivedSteady), receivedSteady);
-    } else {
-      ++c.other;
+    if (lifetime) {
+      if (!relayed && isContentRefusal(code)) {
+        ++c.content;
+        c.contact =
+            std::max(c.contact.value_or(receivedSteady), receivedSteady);
+      } else {
+        ++c.other;
+      }
     }
+    if (health) ++c.health;
     c.code = std::string(code);
     return fresh;
   }
@@ -909,7 +991,16 @@ struct AgentExecutor::Ingress {
   static bool isContentRefusal(std::string_view code) {
     return code == "ObservationFrameMismatch" || code == "MissingVariance" ||
            code == "InvalidVariance" || code == "ObservationTimeMismatch" ||
-           code == "UncertainAcquisition" || code == "StaleObservation";
+           code == "UncertainAcquisition" || code == "StaleObservation" ||
+           code == "InvalidValue" || code == "InvalidAcquisition" ||
+           code == kTurnResultClockEpochRegression ||
+           code == kTurnResultClockMappingRegression;
+  }
+  /// Whether a refusal moves the estimator (design 3.1): decided on the
+  /// device's own bytes or epoch. A relayed copy counts only when decided on
+  /// signed fields, so a hostile relay cannot fabricate refusals.
+  static bool isHealthRefusal(std::string_view code, bool relayed) {
+    return isHealthRefusalCode(code, relayed);
   }
   /// The host's own conditions, its pending actions and runtime defects are
   /// never the source's.
@@ -1002,6 +1093,18 @@ AgentExecutor::AgentExecutor(zigzag::vortex::mesh::MeshActorRuntime &runtime,
                       settings_.epistemic.arenaSlots / kSlotReserveDivisor,
                       static_cast<std::size_t>(zigzag::ephemeralBit));
   }
+  // A note applies its counts in queue order, which can displace a refusal
+  // decided in the arena by up to the per-source queue share; the error is
+  // 2^(share / half-life). Legitimate to configure, so a warning (R3-2).
+  if (const auto &ep = settings_.epistemic;
+      ep.healthHalfLife < static_cast<std::int64_t>(ep.ingressQueuePerSource))
+    GLEDITOR_LOG_WARN(kLog,
+                      "health half-life {} is below the per-source queue "
+                      "share {}: arena-decided refusals can be displaced, "
+                      "weighted off by up to {:.2f}",
+                      ep.healthHalfLife, ep.ingressQueuePerSource,
+                      std::exp2(static_cast<double>(ep.ingressQueuePerSource) /
+                                static_cast<double>(ep.healthHalfLife)));
 }
 
 bool AgentExecutor::retainProgram(std::shared_ptr<AgentProgram> program) {
@@ -1968,13 +2071,34 @@ void AgentExecutor::finishIngest(State &state, const IngestKey &ingest,
       held != nullptr && held->outcome.kind == IngestOutcome::Kind::Committed;
   ingress_->log(source, settings_.epistemic.outcomeLog, ingest.incarnation,
                 ingest.eventId, logged);
+  const Ingress::StreamKey stream{pid, ingest.principal, ingest.incarnation,
+                                  ingest.predicate};
+  if (logged.kind == IngestOutcome::Kind::Committed) {
+    // A commit moves the estimator past its sequence and shows the source
+    // working: the streak of refusals the estimator could not see ends.
+    ingress_->raiseMark(stream, ingest.sequence);
+    ingress_->uncounted.erase(source);
+  }
   if (logged.kind == IngestOutcome::Kind::Refused) {
     GLEDITOR_LOG_DEBUG(kIngressLog, "ingestion refused: {}", *logged.code);
-    if (!retry &&
-        ingress_->firstCharge(source, ingest.incarnation, ingest.eventId,
-                              *logged.code, ingest.relay.has_value()) &&
-        ingress_->charge(pid, ingest.principal, *logged.code,
-                         ingest.relay.has_value(), ingest.receivedSteady))
+    const bool relayed = ingest.relay.has_value();
+    const bool lifetime =
+        !retry && ingress_->firstCharge(source, ingest.incarnation,
+                                        ingest.eventId, *logged.code, relayed);
+    // An arena-decided health refusal (ClockEpochRegression) counts under the
+    // decision the item carried, rechecked against the ring so two queued
+    // copies of one sequence count once.
+    const bool health = !retry && ingest.counts &&
+                        Ingress::isHealthRefusal(*logged.code, relayed) &&
+                        ingress_->estimatorCounts(stream, ingest.sequence);
+    if (health)
+      ingress_->rememberCounted(
+          stream, ingest.sequence,
+          static_cast<std::size_t>(settings_.epistemic.healthReplayRing));
+    else if (lifetime && Ingress::chargeable(*logged.code))
+      ++ingress_->uncounted[source];
+    if (ingress_->charge(pid, ingest.principal, *logged.code, relayed,
+                         ingest.receivedSteady, lifetime, health))
       postRefusals(state.pid, ingest.principal);
   }
 }
@@ -2062,6 +2186,18 @@ void AgentExecutor::finishSourceChange(State &state, const SourceChange &change,
   ingress_->changes.insert_or_assign(source, std::move(published));
   if (code != kTurnResultCommitted)
     GLEDITOR_LOG_DEBUG(kIngressLog, "source change refused: {}", code);
+  if (code == kTurnResultCommitted) {
+    // Marks describe events of an incarnation: a retire ends them all, a
+    // committed advance ends the lower incarnations'.
+    std::erase_if(ingress_->marks, [&](const auto &entry) {
+      const auto &[markPid, markPrincipal, markIncarnation, predicate] =
+          entry.first;
+      return markPid == pid && markPrincipal == change.principal &&
+             (change.retire ||
+              (change.incarnation && markIncarnation < *change.incarnation));
+    });
+    if (change.retire) ingress_->uncounted.erase(source);
+  }
   if (change.retire || !change.incarnation) return;
   auto &floor = ingress_->floors[source];
   if (code == kTurnResultCommitted) {
@@ -3478,6 +3614,94 @@ AgentExecutor::epistemicCells(const identity::ActorPid &pid) const {
                               std::numeric_limits<std::size_t>::max() - 1);
 }
 
+const AgentExecutor::State *
+AgentExecutor::readableState(const identity::ActorPid &pid) const {
+  const auto found = states_.find(pidKey(pid));
+  if (found == states_.end()) return nullptr;
+  const State &state = *found->second;
+  if (!state.prepared || !state.context || state.inTurn || !live(state))
+    return nullptr;
+  return &state;
+}
+
+SourceHealth AgentExecutor::readSourceHealth(const State &state,
+                                             zigzag::CellRef profile) const {
+  const auto &arena  = state.context->arena;
+  const auto &vd     = state.vd;
+  const auto integer = [&](std::string_view name) {
+    return intFieldOf(arena, vd, profile, name).value_or(0);
+  };
+  const auto real = [&](std::string_view name) {
+    const auto cell = fieldValue(arena, vd, profile, name);
+    return cell ? arena.asDouble(*cell).value_or(0.0) : 0.0;
+  };
+  const auto flag = [&](std::string_view name) {
+    const auto cell = fieldValue(arena, vd, profile, name);
+    return cell && arena.asBool(*cell).value_or(false);
+  };
+  SourceHealth out;
+  out.principal   = arena.textOf(profile);
+  out.faulted     = flag(kProfileFaulted);
+  out.tombstone   = flag(kProfileRetired);
+  out.incarnation = static_cast<std::uint64_t>(integer(kProfileIncarnation));
+  out.contentRefusals = integer(kProfileContentRefusals);
+  out.refusedCount    = integer(kProfileRefusedCount);
+  out.rejectCount     = integer(kProfileRejectCount);
+  out.rejectionStreak = integer(kProfileRejectionStreak);
+  if (const auto cell = fieldValue(arena, vd, profile, kProfileLastRefusal))
+    out.lastRefusal = arena.textOf(*cell);
+  // The rescale of design 3.2, read-only: a changed half-life shows the same
+  // fraction the next update would keep.
+  const auto &limits = settings_.epistemic;
+  double refused     = real(kProfileHealthRefusedWeight);
+  double weight      = real(kProfileHealthWeight);
+  const double cap   = healthWeightCap(limits.healthHalfLife);
+  if (weight > cap) {
+    refused = refused * cap / weight;
+    weight  = cap;
+  }
+  out.weight          = weight;
+  out.refusalFraction = weight > 0.0 ? refused / weight : 0.0;
+  if (out.faulted) {
+    out.state      = HealthState::Faulted;
+    out.reasonCode = std::string(kHealthCodeFaulted);
+  } else if (weight >= static_cast<double>(limits.suspectMinEvents) &&
+             out.refusalFraction >= limits.suspectFraction) {
+    out.state      = HealthState::Suspect;
+    out.reasonCode = std::string(kHealthCodeFraction);
+  }
+  const std::lock_guard lock(ingress_->mutex);
+  if (const auto found =
+          ingress_->uncounted.find({pidKey(state.pid), out.principal});
+      found != ingress_->uncounted.end())
+    out.uncountedSinceCommit = found->second;
+  return out;
+}
+
+std::optional<SourceHealth>
+AgentExecutor::sourceHealth(const identity::ActorPid &pid,
+                            std::string_view principal) const {
+  const State *state = readableState(pid);
+  if (state == nullptr) return std::nullopt;
+  const auto &arena = state->context->arena;
+  for (const auto profile :
+       zigzag::rankAfter(arena, state->agent.agentCell, state->dims.trust))
+    if (arena.textOf(profile) == principal)
+      return readSourceHealth(*state, profile);
+  return std::nullopt;
+}
+
+std::vector<SourceHealth>
+AgentExecutor::sourceHealths(const identity::ActorPid &pid) const {
+  std::vector<SourceHealth> all;
+  const State *state = readableState(pid);
+  if (state == nullptr) return all;
+  for (const auto profile : zigzag::rankAfter(
+           state->context->arena, state->agent.agentCell, state->dims.trust))
+    all.push_back(readSourceHealth(*state, profile));
+  return all;
+}
+
 namespace {
 bool isPrincipalToken(std::string_view principal) {
   return principal.size() == 64 && std::ranges::all_of(principal, [](char c) {
@@ -3726,11 +3950,24 @@ AgentExecutor::observe(const identity::ActorPid &target,
       ingress_->log(source, settings_.epistemic.outcomeLog, o.incarnation,
                     o.eventId,
                     {IngestOutcome::Kind::Refused, name, outcomeClassOf(name)});
-    if (!kept &&
-        ingress_->firstCharge(source, o.incarnation, o.eventId, name,
-                              o.relayedBy.has_value()) &&
-        ingress_->charge(pid, o.principal, name, o.relayedBy.has_value(),
-                         receivedSteady))
+    const bool relayed = o.relayedBy.has_value();
+    const bool lifetime =
+        !kept &&
+        ingress_->firstCharge(source, o.incarnation, o.eventId, name, relayed);
+    // The estimator counts a refusal by its stream's mark and ring and by
+    // nothing in the outcome log, which a relay can rotate (R3-3, R3-5).
+    const Ingress::StreamKey stream{pid, o.principal, o.incarnation,
+                                    o.predicate};
+    const bool health = !kept && Ingress::isHealthRefusal(name, relayed) &&
+                        ingress_->estimatorCounts(stream, o.sequence);
+    if (health)
+      ingress_->rememberCounted(
+          stream, o.sequence,
+          static_cast<std::size_t>(settings_.epistemic.healthReplayRing));
+    else if (lifetime && Ingress::chargeable(name))
+      ++ingress_->uncounted[source];
+    if (ingress_->charge(pid, o.principal, name, relayed, receivedSteady,
+                         lifetime, health))
       postRefusals(target, o.principal);
     return std::unexpected(code);
   };
@@ -3742,14 +3979,18 @@ AgentExecutor::observe(const identity::ActorPid &target,
   const auto fits = [](std::uint64_t v) {
     return std::in_range<std::int64_t>(v);
   };
+  // InvalidObservation keeps only what is wrong with the request itself. A
+  // bad number is the device's (or the host mapping's) and feeds its health.
   if (o.eventId.empty() || !fits(o.incarnation) || !fits(o.sequence) ||
       !fits(o.clockEpoch) || !fits(o.clockMappingVersion) ||
-      !std::isfinite(o.acquiredAt) || !std::isfinite(o.acquiredUncertainty) ||
-      o.acquiredUncertainty < 0 || o.tuple.size() != b.params.size())
+      o.tuple.size() != b.params.size())
     return refuse(EpistemicRefusal::InvalidObservation);
+  if (!std::isfinite(o.acquiredAt) || !std::isfinite(o.acquiredUncertainty) ||
+      o.acquiredUncertainty < 0)
+    return refuse(EpistemicRefusal::InvalidAcquisition);
   for (std::size_t i = 0; i < o.tuple.size(); ++i)
     if (!fitsKind(b.params[i], o.tuple[i]))
-      return refuse(EpistemicRefusal::InvalidObservation);
+      return refuse(EpistemicRefusal::InvalidValue);
   if (o.clockBasis != clockName(policy.clock))
     return refuse(EpistemicRefusal::ObservationTimeMismatch);
   if (policy.clock == ObservationClock::Wall && !wallSynchronised)
@@ -3814,6 +4055,7 @@ AgentExecutor::observe(const identity::ActorPid &target,
   r.set(std::string(kObsProfile), WireValue::text(o.principal));
   r.set(std::string(kObsHealth),
         WireValue::text(std::string(kObsHealthNominal)));
+  r.set(std::string(kObsHealthFraction), WireValue::real(0.0));
   r.set(std::string(kObsPredicate), WireValue::text(o.predicate));
   r.set(std::string(kObsSource), WireValue::text(o.principal));
   r.set(std::string(kObsTuple), WireValue::record(std::move(tuple)));
@@ -3859,8 +4101,8 @@ AgentExecutor::observe(const identity::ActorPid &target,
   PostBox::Item item;
   item.pid         = target;
   item.observation = std::move(r);
-  item.ingest      = IngestKey{o.principal, o.incarnation, o.eventId,
-                               o.predicate, o.relayedBy,   receivedSteady};
+  item.ingest = IngestKey{o.principal, o.incarnation,  o.eventId, o.predicate,
+                          o.relayedBy, receivedSteady, o.sequence};
   {
     const std::lock_guard lock(ingress_->mutex);
     // Each principal, and each relay, gets a fair share of the actor queue,
@@ -3878,14 +4120,37 @@ AgentExecutor::observe(const identity::ActorPid &target,
         held(ingress_->queuedBy, source) >= share ||
         (o.relayedBy && held(ingress_->queuedVia,
                              Ingress::SourceKey{pid, *o.relayedBy}) >= share);
+    const Ingress::StreamKey stream{pid, o.principal, o.incarnation,
+                                    o.predicate};
     if (!full) {
+      item.ingest->counts = ingress_->estimatorCounts(stream, o.sequence);
       posts_->push(std::move(item));
       ++ingress_->queued[pid];
       ++ingress_->queuedBy[source];
       if (o.relayedBy) ++ingress_->queuedVia[{pid, *o.relayedBy}];
       ingress_->log(source, settings_.epistemic.outcomeLog, o.incarnation,
                     o.eventId, IngestOutcome{});
+      // Refusals decided before this accept are charged ahead of it, in
+      // queue order: the open charge closes into its waiting note (R3-4).
+      if (const auto open = ingress_->charges.find(source);
+          open != ingress_->charges.end() &&
+          posts_->attachCharge(target, o.principal, open->second))
+        ingress_->charges.erase(open);
       return TransportReceipt{o.eventId};
+    }
+    // A reading that passed every check but meets a full queue stands for an
+    // accepted event the load dropped: credited once, and only on a stream
+    // that already committed, within the gap of its mark (design 3.2).
+    if (const auto found = ingress_->marks.find(stream);
+        found != ingress_->marks.end() && found->second.mark &&
+        ingress_->estimatorCounts(stream, o.sequence) &&
+        o.sequence <=
+            *found->second.mark + static_cast<std::uint64_t>(
+                                      settings_.epistemic.healthSequenceGap)) {
+      ingress_->raiseMark(stream, o.sequence);
+      auto [open, fresh] = ingress_->charges.try_emplace(source);
+      ++open->second.passed;
+      if (fresh) postRefusals(target, o.principal);
     }
   }
   return refuse(EpistemicRefusal::IngressBackpressure);
@@ -3929,6 +4194,10 @@ std::string_view epistemicRefusalName(EpistemicRefusal refusal) noexcept {
     return "InvalidVariance";
   case EpistemicRefusal::IngressBackpressure:
     return "IngressBackpressure";
+  case EpistemicRefusal::InvalidValue:
+    return "InvalidValue";
+  case EpistemicRefusal::InvalidAcquisition:
+    return "InvalidAcquisition";
   }
   return "Unknown";
 }
@@ -3972,7 +4241,10 @@ void AgentExecutor::drainPosted() {
                     item.ingest->eventId,
                     outcomeOfCode(kTurnResultUndelivered));
     }
-    if (item.refusalsOf) ingress_->charges.erase({pid, *item.refusalsOf});
+    // A note that carries its closed charge leaves the open one to the note
+    // queued behind it.
+    if (item.refusalsOf && !item.charge)
+      ingress_->charges.erase({pid, *item.refusalsOf});
     if (item.sourceChange)
       ingress_->changes.insert_or_assign({pid, item.sourceChange->principal},
                                          outcomeOfCode(kTurnResultUndelivered));
@@ -4043,7 +4315,9 @@ void AgentExecutor::drainPosted() {
       state.hostEvents.insert(after, std::move(turn));
     } else if (item.refusalsOf) {
       Ingress::Charge charge;
-      {
+      if (item.charge) {
+        charge = std::move(*item.charge);
+      } else {
         const std::lock_guard lock(ingress_->mutex);
         const auto found =
             ingress_->charges.find({pidKey(item.pid), *item.refusalsOf});
@@ -4058,6 +4332,10 @@ void AgentExecutor::drainPosted() {
                WireValue::integer(charge.content));
       note.set(std::string(kRefusalOther), WireValue::integer(charge.other));
       note.set(std::string(kRefusalCode), WireValue::text(charge.code));
+      note.set(std::string(kRefusalHealth), WireValue::integer(charge.health));
+      note.set(std::string(kRefusalPassed), WireValue::integer(charge.passed));
+      note.set(std::string(kRefusalHalfLife),
+               WireValue::integer(settings_.epistemic.healthHalfLife));
       note.set(std::string(kIngestMaxSources),
                WireValue::integer(
                    static_cast<std::int64_t>(settings_.epistemic.maxSources)));
@@ -4138,6 +4416,14 @@ void AgentExecutor::drainPosted() {
       limits.set(std::string(kIngestKeysPerSource),
                  WireValue::integer(static_cast<std::int64_t>(
                      settings_.epistemic.keysPerSource)));
+      limits.set(std::string(kIngestHalfLife),
+                 WireValue::integer(settings_.epistemic.healthHalfLife));
+      limits.set(std::string(kIngestSuspectFraction),
+                 WireValue::real(settings_.epistemic.suspectFraction));
+      limits.set(std::string(kIngestMinEvents),
+                 WireValue::integer(settings_.epistemic.suspectMinEvents));
+      limits.set(std::string(kIngestCounts),
+                 WireValue::boolean(item.ingest && item.ingest->counts));
       ingest.turnFields.set(std::string(kTurnIngest),
                             WireValue::record(std::move(limits)));
       state.hostEvents.push_back(std::move(ingest));
@@ -5803,9 +6089,31 @@ AgentSettings AgentSettings::fromModel(const xanadu::SystemStoreModel &model) {
   loadPositive(xanadu::settings::kVagentEpistemicIngestPerWake,
                ep.ingestPerWake);
   loadPositive(xanadu::settings::kVagentEpistemicArenaSlots, ep.arenaSlots);
+  // The health fields are signed counts so that a value past its domain
+  // reaches validate() and is named, instead of wrapping in a size_t.
+  const auto loadSigned = [&](const std::string_view name,
+                              std::int64_t &target) {
+    const auto val = model.getInt64(name, target);
+    if (val > 0) target = val;
+  };
+  loadSigned(xanadu::settings::kVagentEpistemicHealthHalfLife,
+             ep.healthHalfLife);
+  // A non-finite value is kept as read so validate() refuses it by name.
+  ep.suspectFraction = model.getDouble(
+      xanadu::settings::kVagentEpistemicSuspectFraction, ep.suspectFraction);
+  loadSigned(xanadu::settings::kVagentEpistemicSuspectMinEvents,
+             ep.suspectMinEvents);
+  loadSigned(xanadu::settings::kVagentEpistemicHealthReplayRing,
+             ep.healthReplayRing);
+  loadSigned(xanadu::settings::kVagentEpistemicHealthSequenceGap,
+             ep.healthSequenceGap);
 
-  if (ep.validate().has_value()) {
+  if (const auto checked = ep.validate(); checked.has_value()) {
     settings.epistemic = ep;
+  } else {
+    GLEDITOR_LOG_WARN(
+        kLog, "epistemic settings refused ({}); keeping the defaults for all",
+        epistemicLimitErrorName(checked.error()));
   }
 
   return settings;

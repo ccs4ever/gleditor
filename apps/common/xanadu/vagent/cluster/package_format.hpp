@@ -80,7 +80,7 @@ struct PackageManifest {
   std::int64_t apiVersion{1};
   std::string format{"vagent-package-1"};
   std::string kind{"pure"}; // "pure", "source+native", "native"
-  std::string compilerFormat{"vagent-program-3"};
+  std::string compilerFormat{"vagent-program-4"};
   std::string programBody;
   std::map<std::string, PackageTarget> targets;
   PackageProvenance provenance;

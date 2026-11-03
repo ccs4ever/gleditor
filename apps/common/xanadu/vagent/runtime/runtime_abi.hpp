@@ -39,6 +39,7 @@
 #include <string_view>
 #include <vector>
 
+#include "common/xanadu/vagent/runtime/epistemic_abi_health.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
 
 namespace xanadu::vagent::runtime {
@@ -603,7 +604,7 @@ inline constexpr std::string_view kObsProfile = "profile";
 /// with their initial values (a refused turn undoes the whole record), so
 /// status and pinned sit at fixed positions for every later walk. Optional
 /// fields (variance, relay) and the identity stamps follow, unordered.
-inline constexpr std::array<std::string_view, 23> kObservationOrder{
+inline constexpr std::array<std::string_view, 24> kObservationOrder{
     kObsStatus,
     kObsVerdict,
     kObsVerdictEpoch,
@@ -611,6 +612,7 @@ inline constexpr std::array<std::string_view, 23> kObservationOrder{
     kObsPinned,
     kObsProfile,
     kObsHealth,
+    kObsHealthFraction,
     kObsPredicate,
     kObsSource,
     kObsTuple,

@@ -182,6 +182,11 @@ TEST(SystemDocsTest, VagentSettingsSeedWithDesignDefaults) {
       {"vagent.epistemic_cells", std::int64_t{24576}},
       {"vagent.epistemic_ingest_per_wake", std::int64_t{4}},
       {"vagent.epistemic_arena_slots", std::int64_t{1} << 30},
+      {"vagent.epistemic_health_half_life", std::int64_t{32}},
+      {"vagent.epistemic_suspect_fraction", 0.25},
+      {"vagent.epistemic_suspect_min_events", std::int64_t{8}},
+      {"vagent.epistemic_health_replay_ring", std::int64_t{8}},
+      {"vagent.epistemic_health_sequence_gap", std::int64_t{1024}},
   };
   for (const auto &[name, value] : expected) {
     const auto it = find(name);

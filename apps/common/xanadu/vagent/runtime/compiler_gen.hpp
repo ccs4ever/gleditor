@@ -90,9 +90,9 @@ inline Ty tyOf(Ty::K k) {
 // Dimension-independent protocol constants
 // -------------------------------------
 
-constexpr std::int64_t kPos                  = 1;
-constexpr std::int64_t kNeg                  = -1;
-constexpr std::string_view kEventFieldOfTurn = kTurnEvent;
+inline constexpr std::int64_t kPos                  = 1;
+inline constexpr std::int64_t kNeg                  = -1;
+inline constexpr std::string_view kEventFieldOfTurn = kTurnEvent;
 
 /// An operand: a static cell, or (`pointer`) the cell whose ref is held in the
 /// register `cell`.
@@ -417,6 +417,9 @@ private:
   std::vector<Emitter> pendingRoutines_;
   std::optional<CellRef> rtSetField_, rtClearField_, rtEqual_, rtRaiseHostEv_,
       rtStrLen_;
+  /// Source health (I3-2), minted only for a program with an arbitrated
+  /// predicate, because only its ingestion and bookkeeping routines call them.
+  std::optional<CellRef> rtHealthUpdate_, rtHealth_;
   CellRef routineLabel(std::optional<CellRef> &label, Emitter emit) {
     if (!label) {
       label = newLabel();
@@ -1166,6 +1169,32 @@ private:
   /// `settleEntry` (P19 I3-2b), defined in epistemic_emit_health.cpp: settle
   /// the head of `d.pending` alone, in one turn.
   void emitSettleEntry(CellRef entryLabel);
+  /// `rtHealthUpdate_(profile, refusals, credits, half_life)`: apply one
+  /// note's counted events to the profile's `R` and `N`
+  /// (epistemic_emit_health).
+  void emitRtHealthUpdate();
+  /// `rtHealth_(profile, half_life, suspect_fraction, min_events, accepted)`:
+  /// the derived state in `r0_`, the code that decided it in `r1_` and the
+  /// refusal fraction in `a2_`.
+  void emitRtHealth();
+  /// Reads `R` and `N` of @p profile (0 when absent) into @p r and @p n and
+  /// rescales them with the cap in force before anything else uses them
+  /// (R3-9). @p x receives `-ln2 / H`, @p b the decay `b`, @p omb `1 - b` and
+  /// @p cap `1 / (1-b)`; @p vcR and @p vcN receive the field value cells, 0
+  /// when absent.
+  void emitHealthRescaled(CellRef profile, CellRef halfLife, CellRef r,
+                          CellRef n, CellRef x, CellRef b, CellRef omb,
+                          CellRef cap, CellRef vcR, CellRef vcN);
+  /// Write @p r and @p n back to @p profile, creating either field if absent.
+  void emitHealthStore(CellRef profile, CellRef r, CellRef n, CellRef vcR,
+                       CellRef vcN);
+  /// The arguments are values (counts and the half-life), not value-cell refs.
+  void callHealthUpdate(CellRef profile, CellRef refusals, CellRef credits,
+                        CellRef halfLife);
+  /// @p accepted is a register holding a Bool: when true the accept update
+  /// runs first, in the same read of `R` and `N` that derives the state.
+  void callHealth(CellRef profile, CellRef halfLife, CellRef suspectFraction,
+                  CellRef minEvents, CellRef accepted);
   /// Re-attach a detached history (@p moved, zero when none) to support
   /// @p sc, and return @p sc in r1.
   void finishSupport(CellRef sc, CellRef moved);

@@ -234,7 +234,9 @@ LocalHost &sharedHost() {
 /// Refusals the executor answers by return value only, without logging.
 bool unlogged(EpistemicRefusal refusal) {
   return refusal == EpistemicRefusal::UnknownSource ||
-         refusal == EpistemicRefusal::InvalidObservation;
+         refusal == EpistemicRefusal::InvalidObservation ||
+         refusal == EpistemicRefusal::InvalidValue ||
+         refusal == EpistemicRefusal::InvalidAcquisition;
 }
 
 std::string codeOf(const IngestOutcome &o) {
@@ -320,9 +322,10 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data,
       if (report)
         std::fprintf(stderr, "outcome %s\n",
                      epistemicRefusalName(receipt.error()).data());
-      // Beliefs only for InvalidObservation, which is also the logged
-      // refusal of a bound source's bad tuple, charged and able to earn a
-      // profile; an unbound source changes nothing at all.
+      // Beliefs only for InvalidObservation, InvalidValue and
+      // InvalidAcquisition, which are also the logged refusals of a bound
+      // source's bad request, tuple or acquisition, charged and able to earn
+      // a profile; an unbound source changes nothing at all.
       require(after.snapshot().beliefs == snapshot.beliefs,
               "a refusal before queueing changes no belief");
       if (receipt.error() == EpistemicRefusal::UnknownSource)

@@ -139,7 +139,7 @@ TEST(VagentSwarmPackagingTest, PublishPackageManifestPureAndStandalone) {
   manifest.apiVersion     = 1;
   manifest.format         = "vagent-package-1";
   manifest.kind           = "pure";
-  manifest.compilerFormat = "vagent-program-3";
+  manifest.compilerFormat = "vagent-program-4";
   manifest.programBody    = "(agent greeter (on start (say \"hello\")))";
 
   const std::string expectedProgRef =
@@ -186,7 +186,7 @@ TEST(VagentSwarmPackagingTest, PublishPackageFileLoadsAndIngests) {
   manifest.apiVersion     = 1;
   manifest.format         = "vagent-package-1";
   manifest.kind           = "native";
-  manifest.compilerFormat = "vagent-program-3";
+  manifest.compilerFormat = "vagent-program-4";
   manifest.programBody    = "oplog-binary-bytes";
 
   const std::string modData = "mock module ELF binary data";
@@ -345,7 +345,7 @@ TEST(VagentSwarmPackagingTest, ProgramRefMismatchRejectedBeforeCasCommit) {
   manifest.apiVersion     = 1;
   manifest.format         = "vagent-package-1";
   manifest.kind           = "pure";
-  manifest.compilerFormat = "vagent-program-3";
+  manifest.compilerFormat = "vagent-program-4";
   manifest.programBody    = "legitimate body";
 
   const std::string encoded = encodePackageManifest(manifest, true);

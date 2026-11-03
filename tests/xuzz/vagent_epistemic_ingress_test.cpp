@@ -273,15 +273,14 @@ TEST_F(VagentEpistemicIngress, MalformedObservationsAreRefusedAtIngress) {
   EXPECT_EQ(refusedAtIngress(shortTuple), EpistemicRefusal::InvalidObservation);
   auto wrongType  = reading(kP1, "x3", 3, 1.0);
   wrongType.tuple = {WireValue::text("self"), WireValue::text("one")};
-  EXPECT_EQ(refusedAtIngress(wrongType), EpistemicRefusal::InvalidObservation);
+  EXPECT_EQ(refusedAtIngress(wrongType), EpistemicRefusal::InvalidValue);
   // A non-finite reading, found by the ingress fuzzer: the wire encoder
   // would refuse it, so ingress refuses it first, and logs it.
   for (const double x : {std::numeric_limits<double>::quiet_NaN(),
                          std::numeric_limits<double>::infinity()}) {
     const auto nonFinite = reading(kP1, "x4", 4, x);
-    EXPECT_EQ(refusedAtIngress(nonFinite),
-              EpistemicRefusal::InvalidObservation);
-    EXPECT_EQ(outcomeOf(nonFinite)->code, "InvalidObservation");
+    EXPECT_EQ(refusedAtIngress(nonFinite), EpistemicRefusal::InvalidValue);
+    EXPECT_EQ(outcomeOf(nonFinite)->code, "InvalidValue");
   }
   EXPECT_TRUE(clauses().empty());
   EXPECT_EQ(intField("adds"), 0);
@@ -299,7 +298,7 @@ TEST_F(VagentEpistemicIngress,
   bad.acquiredAt     = std::numeric_limits<double>::quiet_NaN();
   const auto receipt = host->executor().observe(pid, bad);
   ASSERT_FALSE(receipt);
-  EXPECT_EQ(receipt.error(), EpistemicRefusal::InvalidObservation);
+  EXPECT_EQ(receipt.error(), EpistemicRefusal::InvalidAcquisition);
   auto huge =
       reading(kP1, "n2", std::numeric_limits<std::uint64_t>::max(), 1.0);
   EXPECT_FALSE(host->executor().observe(pid, huge));
@@ -986,13 +985,13 @@ TEST_F(VagentEpistemicIngress, ClockEpochsAndMappingsNeverRegress) {
   olderEpoch.tuple      = {WireValue::text("other"), WireValue::real(2.0)};
   olderEpoch.clockEpoch = 4;
   observe(olderEpoch);
-  EXPECT_EQ(outcomeOf(olderEpoch)->code, "ObservationTimeMismatch");
+  EXPECT_EQ(outcomeOf(olderEpoch)->code, "ClockEpochRegression");
   auto olderMapping       = reading(kP1, "e3", 3, 3.0);
   olderMapping.tuple      = {WireValue::text("other"), WireValue::real(3.0)};
   olderMapping.clockEpoch = 5;
   olderMapping.clockMappingVersion = 1;
   observe(olderMapping);
-  EXPECT_EQ(outcomeOf(olderMapping)->code, "ObservationTimeMismatch");
+  EXPECT_EQ(outcomeOf(olderMapping)->code, "ClockMappingRegression");
   // A newer epoch resets the per-key order: its times are a new scale.
   auto rebased       = reading(kP1, "e4", 4, 4.0);
   rebased.clockEpoch = 6;

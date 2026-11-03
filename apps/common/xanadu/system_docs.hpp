@@ -316,6 +316,16 @@ inline constexpr std::string_view kVagentEpistemicIngestPerWake =
     "vagent.epistemic_ingest_per_wake";
 inline constexpr std::string_view kVagentEpistemicArenaSlots =
     "vagent.epistemic_arena_slots";
+inline constexpr std::string_view kVagentEpistemicHealthHalfLife =
+    "vagent.epistemic_health_half_life";
+inline constexpr std::string_view kVagentEpistemicSuspectFraction =
+    "vagent.epistemic_suspect_fraction";
+inline constexpr std::string_view kVagentEpistemicSuspectMinEvents =
+    "vagent.epistemic_suspect_min_events";
+inline constexpr std::string_view kVagentEpistemicHealthReplayRing =
+    "vagent.epistemic_health_replay_ring";
+inline constexpr std::string_view kVagentEpistemicHealthSequenceGap =
+    "vagent.epistemic_health_sequence_gap";
 inline constexpr std::string_view kVagentTuiBorders = "vagent.tui.borders";
 inline constexpr std::string_view kVagentTuiHistorySize =
     "vagent.tui.history_size";

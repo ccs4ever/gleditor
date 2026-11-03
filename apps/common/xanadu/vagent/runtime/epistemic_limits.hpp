@@ -8,9 +8,13 @@
 #include "common/xanadu/zigzag/manifold.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <limits>
+#include <numbers>
+#include <string_view>
 #include <utility>
 
 namespace xanadu::vagent::runtime {
@@ -46,6 +50,25 @@ inline constexpr std::int64_t kDefaultEpistemicIngestPerWake = 4;
 inline constexpr std::int64_t kDefaultEpistemicArenaSlots = std::int64_t{1}
                                                             << 30;
 
+// Source health (I3-2 design section 3.3). The half-life is in counted events,
+// not seconds: a slow source keeps its fraction through silence.
+inline constexpr std::int64_t kDefaultEpistemicHealthHalfLife = 32;
+inline constexpr std::int64_t kMaxEpistemicHealthHalfLife     = 1'000'000;
+inline constexpr double kDefaultEpistemicSuspectFraction      = 0.25;
+// The weight N at which the fraction starts to decide: N is 7.43 after eight
+// events at the default half-life, so the ninth reading is the first that can
+// read SUSPECT.
+inline constexpr std::int64_t kDefaultEpistemicSuspectMinEvents = 8;
+// As many refusals as the per-source queue share can hold at once.
+inline constexpr std::int64_t kDefaultEpistemicHealthReplayRing  = 8;
+inline constexpr std::int64_t kMaxEpistemicHealthReplayRing      = 4096;
+inline constexpr std::int64_t kDefaultEpistemicHealthSequenceGap = 1024;
+inline constexpr std::int64_t kMaxEpistemicHealthSequenceGap =
+    std::numeric_limits<std::int32_t>::max();
+// `validate()` caps min events at this share of the estimator's weight bound
+// 1/(1-b): a larger value would disable SUSPECT without a trace.
+inline constexpr double kSuspectMinEventsWeightShare = 0.9;
+
 // Wire bounds on one checked observation, checked before anything is
 // stored: an event ID is an identifier and a name is a name, not a payload.
 inline constexpr std::size_t kMaxEventIdBytes           = 256;
@@ -58,7 +81,50 @@ enum class EpistemicLimitError : std::uint8_t {
   InvalidScopeDepth,
   InvalidNestedScopes,
   InvalidIngestionBound,
+  InvalidHealthHalfLife,
+  InvalidSuspectFraction,
+  InvalidSuspectMinEvents,
+  InvalidHealthReplayRing,
+  InvalidHealthSequenceGap,
 };
+
+[[nodiscard]] constexpr std::string_view
+epistemicLimitErrorName(EpistemicLimitError error) noexcept {
+  switch (error) {
+  case EpistemicLimitError::InvalidSources:
+    return "InvalidSources";
+  case EpistemicLimitError::InvalidCandidates:
+    return "InvalidCandidates";
+  case EpistemicLimitError::InvalidScopeDepth:
+    return "InvalidScopeDepth";
+  case EpistemicLimitError::InvalidNestedScopes:
+    return "InvalidNestedScopes";
+  case EpistemicLimitError::InvalidIngestionBound:
+    return "InvalidIngestionBound";
+  case EpistemicLimitError::InvalidHealthHalfLife:
+    return "InvalidHealthHalfLife";
+  case EpistemicLimitError::InvalidSuspectFraction:
+    return "InvalidSuspectFraction";
+  case EpistemicLimitError::InvalidSuspectMinEvents:
+    return "InvalidSuspectMinEvents";
+  case EpistemicLimitError::InvalidHealthReplayRing:
+    return "InvalidHealthReplayRing";
+  case EpistemicLimitError::InvalidHealthSequenceGap:
+    return "InvalidHealthSequenceGap";
+  }
+  return "Unknown";
+}
+
+/// The per-event decay `b = 2^(-1/H)`, computed as the IR does
+/// (`Exp(-ln2 / H)`) so the host and the estimator routine agree.
+[[nodiscard]] inline double healthDecay(std::int64_t halfLife) {
+  return std::exp(-std::numbers::ln2_v<double> / static_cast<double>(halfLife));
+}
+
+/// The largest `N` the estimator can reach, `1 / (1 - b)`.
+[[nodiscard]] inline double healthWeightCap(std::int64_t halfLife) {
+  return 1.0 / (1.0 - healthDecay(halfLife));
+}
 
 /// The settle reserve is one 64th of the slot allowance.
 inline constexpr std::size_t kSlotReserveDivisor = 64;
@@ -105,6 +171,22 @@ struct EpistemicLimits {
       static_cast<std::size_t>(kDefaultEpistemicIngestPerWake)};
   /// `vagent.epistemic_arena_slots`: the actor's arena slot allowance.
   std::size_t arenaSlots{static_cast<std::size_t>(kDefaultEpistemicArenaSlots)};
+  /// `vagent.epistemic_health_half_life`: counted events over which a source's
+  /// refusal fraction halves its memory. Appended after `arenaSlots`:
+  /// `checkedEpistemicLimits` initialises the leading fields positionally.
+  std::int64_t healthHalfLife{kDefaultEpistemicHealthHalfLife};
+  /// `vagent.epistemic_suspect_fraction`: the fraction of counted outcomes
+  /// that were unusable at or above which a source reads SUSPECT.
+  double suspectFraction{kDefaultEpistemicSuspectFraction};
+  /// `vagent.epistemic_suspect_min_events`: the estimator weight below which
+  /// the fraction does not decide.
+  std::int64_t suspectMinEvents{kDefaultEpistemicSuspectMinEvents};
+  /// `vagent.epistemic_health_replay_ring`: counted refusal sequences kept per
+  /// stream above its high-water mark, so a replayed refusal counts once.
+  std::int64_t healthReplayRing{kDefaultEpistemicHealthReplayRing};
+  /// `vagent.epistemic_health_sequence_gap`: how far above its mark a dropped
+  /// reading's sequence may sit and still be credited.
+  std::int64_t healthSequenceGap{kDefaultEpistemicHealthSequenceGap};
 
   /// Slots past `arenaSlots` that only settle turns may use, so a batch of
   /// belief events still settles when the allowance is spent. Zero for a tiny
@@ -139,6 +221,24 @@ struct EpistemicLimits {
         return std::unexpected(EpistemicLimitError::InvalidIngestionBound);
     if (ingressQueuePerSource > ingressQueue)
       return std::unexpected(EpistemicLimitError::InvalidIngestionBound);
+    if (healthHalfLife < 1 || healthHalfLife > kMaxEpistemicHealthHalfLife)
+      return std::unexpected(EpistemicLimitError::InvalidHealthHalfLife);
+    if (!std::isfinite(suspectFraction) || suspectFraction <= 0.0 ||
+        suspectFraction > 1.0)
+      return std::unexpected(EpistemicLimitError::InvalidSuspectFraction);
+    // The relation H >= ingress_queue_per_source is deliberately not checked:
+    // a legitimate configuration can break it, and it only sizes an order
+    // error (design 3.2), so construction warns instead (R3-2).
+    if (suspectMinEvents < 1 || static_cast<double>(suspectMinEvents) >
+                                    std::floor(kSuspectMinEventsWeightShare *
+                                               healthWeightCap(healthHalfLife)))
+      return std::unexpected(EpistemicLimitError::InvalidSuspectMinEvents);
+    if (healthReplayRing < 1 ||
+        healthReplayRing > kMaxEpistemicHealthReplayRing)
+      return std::unexpected(EpistemicLimitError::InvalidHealthReplayRing);
+    if (healthSequenceGap < 1 ||
+        healthSequenceGap > kMaxEpistemicHealthSequenceGap)
+      return std::unexpected(EpistemicLimitError::InvalidHealthSequenceGap);
     return {};
   }
 

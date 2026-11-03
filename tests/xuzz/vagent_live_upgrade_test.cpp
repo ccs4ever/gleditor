@@ -84,7 +84,7 @@ TEST(VagentLiveUpgrade, MetadataShapeUsesNewProgramFormatIdentity) {
   oldMaterial.push_back('\0');
   oldMaterial += initial;
   const auto oldRef = xanadu::toHex32(xanadu::sha256Digest(oldMaterial));
-  EXPECT_EQ(kProgramFormat, "vagent-program-3");
+  EXPECT_EQ(kProgramFormat, "vagent-program-4");
   EXPECT_NE(compiled->programRef(), oldRef);
   LocalHost host(std::move(*compiled));
   const auto refused = host.executor().launch("A", "old-format", {}, oldRef);

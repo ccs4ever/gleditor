@@ -35,6 +35,7 @@
 #include <vector>
 
 #include "common/xanadu/resolver.hpp"
+#include "common/xanadu/vagent/runtime/epistemic_health.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_ingress.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_limits.hpp"
 #include "common/xanadu/vagent/runtime/host_bindings.hpp"
@@ -382,6 +383,16 @@ public:
   /// history. What the ingestion budget admits against.
   [[nodiscard]] std::optional<std::size_t>
   epistemicCells(const identity::ActorPid &pid) const;
+  /// A source's health as the arena holds it, derived by the rule the emitted
+  /// `rtHealth_` applies. Read-only, and like `bindSource` only on the thread
+  /// that pumps; nullopt for an unknown actor, an actor in a turn, or a
+  /// principal with no profile. C++ and not a turn because a read-only turn
+  /// would spend arena slots, which are never reused, on every poll.
+  [[nodiscard]] std::optional<SourceHealth>
+  sourceHealth(const identity::ActorPid &pid, std::string_view principal) const;
+  /// Every live and retired profile of the actor, in the arena's order.
+  [[nodiscard]] std::vector<SourceHealth>
+  sourceHealths(const identity::ActorPid &pid) const;
 
   /// Post an event of type @p type to @p target as a percept (§7.5): a host
   /// delivery with no source, run in a wake turn of its own, in arrival order
@@ -752,6 +763,10 @@ private:
   /// Counts at most `ceiling + 1` cells, so admission stays bounded.
   [[nodiscard]] std::size_t epistemicCellsWithin(const State &state,
                                                  std::size_t ceiling) const;
+  [[nodiscard]] SourceHealth readSourceHealth(const State &state,
+                                              zigzag::CellRef profile) const;
+  /// The state the actor can be read in, or null (`sourceHealth`).
+  [[nodiscard]] const State *readableState(const identity::ActorPid &pid) const;
   [[nodiscard]] std::chrono::system_clock::time_point wallNow() const {
     return clock_.wall() + simulatedOffset_;
   }

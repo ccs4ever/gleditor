@@ -94,6 +94,12 @@ enum class EpistemicRefusal : std::uint8_t {
   MissingVariance,
   InvalidVariance,
   IngressBackpressure,
+  /// A tuple that is mistyped or carries a non-finite number: decided on the
+  /// origin's signed fields, so it counts for source health even relayed.
+  InvalidValue,
+  /// A non-finite `acquiredAt` or uncertainty, or a negative uncertainty:
+  /// decided on host-mapped fields, so only a direct copy counts.
+  InvalidAcquisition,
 };
 
 /// What the host may do with a refused event.
