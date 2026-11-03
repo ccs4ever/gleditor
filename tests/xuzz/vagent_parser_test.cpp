@@ -531,6 +531,21 @@ TEST(VAgentParserTest, PropagatesLexicalFailureWithoutPartialProgram) {
   EXPECT_EQ(parsed.error().code, DiagnosticCode::Lexical);
 }
 
+TEST(VAgentParserTest, CellsStringParsesAsADedicatedExpression) {
+  auto parsed = Parser(R"(cells"##/d.items")").parseExpression();
+  ASSERT_TRUE(parsed) << formatDiagnostic(parsed.error());
+  ASSERT_TRUE(*parsed);
+  EXPECT_EQ((*parsed)->kind, ExprKind::Cells);
+  EXPECT_EQ((*parsed)->text, "##/d.items");
+}
+
+TEST(VAgentParserTest, UnknownStringPrefixIsRefused) {
+  auto parsed = Parser(R"(vql"##")").parseExpression();
+  ASSERT_FALSE(parsed);
+  EXPECT_NE(parsed.error().detail.find("unknown string prefix"),
+            std::string::npos);
+}
+
 TEST(VAgentParserTest, ConfiguredLimitsBoundRecursionAndConstructedTrees) {
   ParseLimits limits;
   limits.maxDepth = 12;

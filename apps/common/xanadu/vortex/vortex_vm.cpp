@@ -107,7 +107,7 @@ std::optional<OpcodeKind> VortexVM::getOpcodeKind(CellRef opCell) const {
   auto val = core_.arena().asInt64(opCell);
   if (val && *val >= 0 &&
       static_cast<std::uint64_t>(*val) <=
-          static_cast<std::uint64_t>(OpcodeKind::ChoiceDepth)) {
+          static_cast<std::uint64_t>(OpcodeKind::Linked)) {
     return static_cast<OpcodeKind>(*val);
   }
   return std::nullopt;
@@ -338,7 +338,8 @@ void VortexVM::runPipeline(CellRef paramCell) {
       }
     } else {
       if (kind != OpcodeKind::New && kind != OpcodeKind::Clone &&
-          kind != OpcodeKind::Link && kind != OpcodeKind::Break) {
+          kind != OpcodeKind::Link && kind != OpcodeKind::Break &&
+          kind != OpcodeKind::Linked) {
         for (std::size_t i = 0; i < std::min(outCells.size(), outVals.size());
              ++i) {
           core_.writeValue(outCells[i], 0, std::nullopt, outVals[i]);
@@ -644,6 +645,76 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
       if (c) {
         auto res = core_.breakLink(*c, d, neg);
         outputs.emplace_back(res ? *res : noCell);
+      } else {
+        outputs.emplace_back(noCell);
+      }
+    }
+    break;
+  }
+  case OpcodeKind::Linked: {
+    // #LINKED subject dim neg [follow] [filterDim filterNeg]: walks the whole
+    // rank from the subject and rebuilds, under the bound output head, a
+    // +d.grab/+d.step list of ref-boxes (int content holding each member's
+    // CellRef). With follow, the subject box's int content names the real
+    // subject, which is how a stored traversal result feeds a later step.
+    // With a filter pair, a member must have its own link on filterDim to be
+    // included.
+    std::vector<CellRef> inCells  = core_.inputsOf(opcode);
+    std::vector<CellRef> outCells = core_.outputsOf(opcode);
+    if (inCells.size() >= 3 || inputs.size() >= 3) {
+      auto subject = resolveCell(inCells, inputs, 0, core_.arena());
+      if (subject && inputs.size() >= 4 &&
+          VortexCore::evaluateTruthiness(inputs[3])) {
+        const auto referenced = static_cast<CellRef>(toInt(inputs[0]));
+        subject               = core_.arena().contains(referenced)
+                                    ? std::optional<CellRef>(referenced)
+                                    : std::nullopt;
+      }
+      const DimRef dim       = inputs.size() >= 2 ? toInt(inputs[1]) : 0;
+      const bool neg         = inputs.size() >= 3 && toInt(inputs[2]) < 0;
+      const bool filter      = inputs.size() >= 6;
+      const DimRef filterDim = filter ? toInt(inputs[4]) : 0;
+      const bool filterNeg   = filter && toInt(inputs[5]) < 0;
+      if (!outCells.empty()) {
+        const CellRef head = outCells.front();
+        // A previous materialization is replaced: unlink the old ref-boxes.
+        // Runs even when the subject is gone, or a re-execution would keep a
+        // stale rank instead of yielding an empty list.
+        if (const auto first =
+                core_.arena().linked(head, core_.dims().grab, false)) {
+          for (auto box = std::optional<CellRef>(*first); box;) {
+            core_.arena().consumeWork();
+            // The successor is read before the unlink: breaking first would
+            // orphan the rest of the rank and leak every box after it.
+            const auto next =
+                core_.arena().linked(*box, core_.dims().step, false);
+            core_.breakLink(*box, core_.dims().step, false);
+            box = next;
+          }
+          core_.breakLink(head, core_.dims().grab, false);
+        }
+        if (subject) {
+          CellRef tail = head;
+          bool first   = true;
+          std::unordered_set<CellRef> seen{*subject};
+          for (auto member = core_.arena().linked(*subject, dim, neg);
+               member && seen.insert(*member).second;
+               member = core_.arena().linked(*member, dim, neg)) {
+            core_.arena().consumeWork();
+            if (filter && !core_.arena().linked(*member, filterDim, filterNeg))
+              continue;
+            const CellRef box = core_.arena().makeScalarCell(
+                static_cast<std::int64_t>(*member));
+            zigzag::expectWritten(core_.arena().link(
+                tail, first ? core_.dims().grab : core_.dims().step, false,
+                box));
+            tail  = box;
+            first = false;
+          }
+          outputs.emplace_back(static_cast<std::int64_t>(head));
+        } else {
+          outputs.emplace_back(noCell);
+        }
       } else {
         outputs.emplace_back(noCell);
       }
@@ -1213,8 +1284,10 @@ ExecutionResult VortexVM::step(CellRef cursor) {
     }
 
     // Write outputs for non-structural opcodes
+
     if (kind != OpcodeKind::New && kind != OpcodeKind::Clone &&
-        kind != OpcodeKind::Link && kind != OpcodeKind::Break) {
+        kind != OpcodeKind::Link && kind != OpcodeKind::Break &&
+        kind != OpcodeKind::Linked) {
       for (std::size_t i = 0; i < std::min(outCells.size(), newOutputs.size());
            ++i) {
         core_.writeValue(outCells[i], 0, std::nullopt, newOutputs[i]);

@@ -632,4 +632,273 @@ TEST(VAgentCompilerTest,
   EXPECT_EQ(h.core.render(value), CellValue(std::int64_t{8}));
 }
 
+struct CellsHarness : ScalarHarness {
+  // A [Cell] result is a head cell whose +d.grab/+d.step rank holds
+  // ref-boxes: scalar cells whose int content names each member.
+  std::vector<CellRef> members(CellRef head) {
+    std::vector<CellRef> result;
+    for (auto box = arena.linked(head, core.dims().grab, false); box;
+         box      = arena.linked(*box, core.dims().step, false)) {
+      const auto value = core.render(*box).value();
+      EXPECT_TRUE(std::holds_alternative<std::int64_t>(value));
+      result.push_back(static_cast<CellRef>(std::get<std::int64_t>(value)));
+    }
+    return result;
+  }
+};
+
+TEST(VAgentCompilerTest, CellsHomeAnchorYieldsTheHomeCell) {
+  CellsHarness h;
+  auto statement = h.compile(R"(cells"##")");
+  ASSERT_TRUE(statement) << (statement ? ""
+                                       : formatDiagnostic(statement.error()));
+  EXPECT_EQ(statement->resultType, (Type{"List", {Type{"Cell", {}}}}));
+  h.run(*statement);
+  EXPECT_TRUE(h.produced(*statement));
+  EXPECT_EQ(h.members(statement->result), std::vector<CellRef>{h.core.home()});
+}
+
+TEST(VAgentCompilerTest, CellsLiteralAnchorResolvesAPlainCellId) {
+  CellsHarness h;
+  const auto target = h.arena.makeCell("anchor");
+  const auto source = "cells\"" + std::to_string(target) + "\"";
+  auto statement    = h.compile(source);
+  ASSERT_TRUE(statement);
+  h.run(*statement);
+  EXPECT_TRUE(h.produced(*statement));
+  EXPECT_EQ(h.members(statement->result), std::vector<CellRef>{target});
+}
+
+TEST(VAgentCompilerTest, CellsVariableAnchorReadsThroughTheBindingBox) {
+  CellsHarness h;
+  const auto member = h.arena.makeCell("payload");
+  const auto box    = h.arena.makeScalarCell(static_cast<std::int64_t>(member));
+  const CompilerBindings bindings{{"target", {box, Type{"Cell", {}}}}};
+  auto statement = h.compile(R"(cells"$target")", bindings);
+  ASSERT_TRUE(statement);
+  h.run(*statement);
+  EXPECT_TRUE(h.produced(*statement));
+  EXPECT_EQ(h.members(statement->result), std::vector<CellRef>{member});
+}
+
+TEST(VAgentCompilerTest, CellsCreationAppendsContentAndReportsMembers) {
+  CellsHarness h;
+  auto statement = h.compile(R"(cells"##/+d.items%\"first\"%\"second\"")");
+  ASSERT_TRUE(statement);
+  h.run(*statement);
+  EXPECT_TRUE(h.produced(*statement));
+  const auto members = h.members(statement->result);
+  ASSERT_EQ(members.size(), 2U);
+  EXPECT_EQ(h.core.render(members[0]), CellValue(std::string("first")));
+  EXPECT_EQ(h.core.render(members[1]), CellValue(std::string("second")));
+  const auto items = h.core.findOrMintDimension("d.items");
+  EXPECT_EQ(h.arena.linked(h.core.home(), items, false),
+            std::optional<CellRef>(members[0]));
+  EXPECT_EQ(h.arena.linked(members[0], items, false),
+            std::optional<CellRef>(members[1]));
+}
+
+TEST(VAgentCompilerTest, CellsTraversalMaterializesTheRankInOrder) {
+  CellsHarness h;
+  auto plant = h.compile(R"(cells"##/+d.items%\"a\"%\"b\"")");
+  ASSERT_TRUE(plant);
+  h.run(*plant);
+  const auto planted = h.members(plant->result);
+  ASSERT_EQ(planted.size(), 2U);
+
+  auto walk = h.compile(R"(cells"##/d.items")");
+  ASSERT_TRUE(walk);
+  h.run(*walk);
+  EXPECT_TRUE(h.produced(*walk));
+  EXPECT_EQ(h.members(walk->result), planted);
+
+  // Ranks are not circular: home's negward side is empty, while walking
+  // negward from the tail yields the whole prefix including the head.
+  auto empty = h.compile(R"(cells"##/-d.items")");
+  ASSERT_TRUE(empty);
+  h.run(*empty);
+  EXPECT_TRUE(h.members(empty->result).empty());
+
+  const auto source = "cells\"" + std::to_string(planted[1]) + "/-d.items\"";
+  auto back         = h.compile(source);
+  ASSERT_TRUE(back);
+  h.run(*back);
+  EXPECT_EQ(h.members(back->result),
+            (std::vector<CellRef>{planted[0], h.core.home()}));
+}
+
+TEST(VAgentCompilerTest, CellsTraversalAfterCreateStepsUsesTheCreatedCell) {
+  CellsHarness h;
+  // %b hangs off %a's d.next; the traversal that follows starts at %a.
+  auto statement = h.compile(R"(cells"##/+d.items%\"a\"/+d.next%\"b\"")");
+  ASSERT_TRUE(statement);
+  h.run(*statement);
+  EXPECT_TRUE(h.produced(*statement));
+  const auto members = h.members(statement->result);
+  ASSERT_EQ(members.size(), 1U);
+  EXPECT_EQ(h.core.render(members[0]), CellValue(std::string("b")));
+
+  const auto items = h.core.findOrMintDimension("d.items");
+  const auto a     = h.arena.linked(h.core.home(), items, false);
+  ASSERT_TRUE(a.has_value());
+  const auto source = "cells\"" + std::to_string(*a) + "/d.next\"";
+  auto walk         = h.compile(source);
+  ASSERT_TRUE(walk);
+  h.run(*walk);
+  EXPECT_EQ(h.members(walk->result), members);
+}
+
+TEST(VAgentCompilerTest, CellsAStepAfterMultiCreationIsRefused) {
+  CellsHarness h;
+  const auto before = h.arena.cellCount();
+  EXPECT_FALSE(h.compile(R"(cells"##/+d.items%\"a\"%\"b\"/d.next")"));
+  EXPECT_EQ(h.arena.cellCount(), before);
+}
+
+TEST(VAgentCompilerTest, CellsFilterKeepsOnlyMembersLinkedOnTheFilterDim) {
+  CellsHarness h;
+  const auto items = h.core.findOrMintDimension("d.items");
+  const auto flag  = h.core.findOrMintDimension("d.flag");
+  const auto a     = h.arena.makeCell("a");
+  const auto b     = h.arena.makeCell("b");
+  ASSERT_TRUE(h.arena.link(h.core.home(), items, zigzag::DimVector::POS, a));
+  ASSERT_TRUE(h.arena.link(a, items, zigzag::DimVector::POS, b));
+  ASSERT_TRUE(h.arena.link(b, flag, zigzag::DimVector::POS,
+                           h.arena.makeCell("flagged")));
+
+  auto statement = h.compile(R"(cells"##/d.items[{+d.flag}]")");
+  ASSERT_TRUE(statement) << (statement ? ""
+                                       : formatDiagnostic(statement.error()));
+  h.run(*statement);
+  EXPECT_TRUE(h.produced(*statement));
+  EXPECT_EQ(h.members(statement->result), std::vector<CellRef>{b});
+}
+
+TEST(VAgentCompilerTest, CellsTraversalOfAnEmptyRankProducesAnEmptyList) {
+  CellsHarness h;
+  auto statement = h.compile(R"(cells"##/d.missing")");
+  ASSERT_TRUE(statement);
+  h.run(*statement);
+  EXPECT_TRUE(h.produced(*statement));
+  EXPECT_TRUE(h.members(statement->result).empty());
+}
+
+TEST(VAgentCompilerTest, CellsTraversalRebuildsAStaleMaterialization) {
+  CellsHarness h;
+  const auto items = h.core.findOrMintDimension("d.items");
+  const auto a     = h.arena.makeCell("a");
+  ASSERT_TRUE(h.arena.link(h.core.home(), items, zigzag::DimVector::POS, a));
+  auto statement = h.compile(R"(cells"##/d.items")");
+  ASSERT_TRUE(statement);
+  const auto cursor = h.run(*statement);
+  EXPECT_EQ(h.members(statement->result), std::vector<CellRef>{a});
+  const auto stale = h.arena.linked(statement->result, h.core.dims().grab,
+                                    zigzag::DimVector::POS);
+  ASSERT_TRUE(stale.has_value());
+
+  const auto b = h.arena.makeCell("b");
+  ASSERT_TRUE(h.arena.link(a, items, zigzag::DimVector::POS, b));
+  h.run(*statement, cursor);
+  EXPECT_EQ(h.members(statement->result), (std::vector<CellRef>{a, b}));
+  EXPECT_NE(h.arena.linked(statement->result, h.core.dims().grab,
+                           zigzag::DimVector::POS),
+            stale);
+}
+
+TEST(VAgentCompilerTest, CellsBindingsCompareByCellIdentity) {
+  CellsHarness h;
+  const auto member = h.arena.makeCell("same");
+  const auto other  = h.arena.makeCell("different");
+  const CompilerBindings bindings{
+      {"a",
+       {h.arena.makeScalarCell(static_cast<std::int64_t>(member)),
+        Type{"Cell", {}}}},
+      {"b",
+       {h.arena.makeScalarCell(static_cast<std::int64_t>(member)),
+        Type{"Cell", {}}}},
+      {"c",
+       {h.arena.makeScalarCell(static_cast<std::int64_t>(other)),
+        Type{"Cell", {}}}}};
+  auto same = h.compile("a == b", bindings);
+  ASSERT_TRUE(same);
+  h.run(*same);
+  EXPECT_TRUE(h.produced(*same));
+  auto different = h.compile("a != c", bindings);
+  ASSERT_TRUE(different);
+  h.run(*different);
+  EXPECT_TRUE(h.produced(*different));
+}
+
+TEST(VAgentCompilerTest, CellsPathsRefuseUnsupportedOrUnboundSources) {
+  CellsHarness h;
+  const auto before = h.arena.cellCount();
+  for (const auto source :
+       {R"(cells"##/d.x/d.y")",           // a second traversal step
+        R"(cells"##[+d.x]")",             // anchor predicates
+        R"(cells"##/d.x{+d.f}")",         // shape projections
+        R"(cells"%%")",                   // creation anchors
+        R"(cells"$ghost")",               // unbound variable anchor
+        R"(cells"18446744073709551615")", // absent literal cell
+        R"(cells"$")",                    // malformed embedded source
+        R"(cells"#9")",                   // '#' alone is not a literal anchor
+        R"(cells")",                      // empty embedded source
+        R"x(cells"##")x"
+        " == 1"}) {
+    SCOPED_TRACE(source);
+    EXPECT_FALSE(h.compile(source));
+  }
+  EXPECT_EQ(h.arena.cellCount(), before);
+}
+
+TEST(VAgentCompilerTest, CellsCreationIsImpureInsideConditions) {
+  CellsHarness h;
+  const auto before = h.arena.cellCount();
+  EXPECT_FALSE(h.compile(R"(if cells"##/+d.x%\"y\" then 1 else 2)"));
+  EXPECT_FALSE(
+      h.compile(R"({ let x := 1; if cells"##/+d.x%\"y\" then x else x })"));
+  EXPECT_EQ(h.arena.cellCount(), before);
+}
+
+TEST(VAgentCompilerTest, CellsVariableAnchorsCannotCreate) {
+  CellsHarness h;
+  const auto member = h.arena.makeCell("payload");
+  const auto box    = h.arena.makeScalarCell(static_cast<std::int64_t>(member));
+  const CompilerBindings bindings{{"target", {box, Type{"Cell", {}}}}};
+  const auto before = h.arena.cellCount();
+  EXPECT_FALSE(h.compile(R"(cells"$target/+d.x%\"y\"")", bindings));
+  EXPECT_EQ(h.arena.cellCount(), before);
+}
+
+TEST(VAgentCompilerTest, CellsAssignmentMaterializesUnderTheBindingHead) {
+  CellsHarness h;
+  const auto items = h.core.findOrMintDimension("d.items");
+  const auto a     = h.arena.makeCell("a");
+  ASSERT_TRUE(h.arena.link(h.core.home(), items, zigzag::DimVector::POS, a));
+  // A [Cell] binding is a head cell; the path writes the rank under it.
+  const auto head = h.arena.makeCell();
+  const CompilerBindings bindings{
+      {"found", {head, Type{"List", {Type{"Cell", {}}}}}}};
+  auto statement = h.compile(R"({ found <- cells"##/d.items" })", bindings);
+  ASSERT_TRUE(statement) << (statement ? ""
+                                       : formatDiagnostic(statement.error()));
+  h.run(*statement);
+  EXPECT_TRUE(h.produced(*statement));
+  EXPECT_EQ(h.members(head), std::vector<CellRef>{a});
+}
+
+TEST(VAgentCompilerTest, CellsVariableAnchorTraversesTheReferredCell) {
+  CellsHarness h;
+  const auto items  = h.core.findOrMintDimension("d.items");
+  const auto member = h.arena.makeCell("payload");
+  const auto child  = h.arena.makeCell("child");
+  ASSERT_TRUE(h.arena.link(member, items, zigzag::DimVector::POS, child));
+  const auto box = h.arena.makeScalarCell(static_cast<std::int64_t>(member));
+  const CompilerBindings bindings{{"target", {box, Type{"Cell", {}}}}};
+  auto statement = h.compile(R"(cells"$target/d.items")", bindings);
+  ASSERT_TRUE(statement);
+  h.run(*statement);
+  EXPECT_TRUE(h.produced(*statement));
+  EXPECT_EQ(h.members(statement->result), std::vector<CellRef>{child});
+}
+
 } // namespace

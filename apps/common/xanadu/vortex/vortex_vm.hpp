@@ -85,6 +85,11 @@ enum class OpcodeKind : std::uint8_t {
   Fail,
   Cut,
   ChoiceDepth,
+
+  // Rank traversal: reads every cell linked from the subject on one
+  // dimension and materializes them as a ref-box rank under the bound
+  // output head. Appended last: opcode kind ints are cell content.
+  Linked,
 };
 
 struct ChoicePoint {

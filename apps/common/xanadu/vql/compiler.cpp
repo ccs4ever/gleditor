@@ -169,6 +169,8 @@ VQLCompiler::opcodeMnemonic(zigzag::vortex::OpcodeKind kind) noexcept {
     return "NOT";
   case OpcodeKind::Link:
     return "LINK";
+  case OpcodeKind::Linked:
+    return "LINKED";
   case OpcodeKind::Break:
     return "BREAK";
   case OpcodeKind::New:

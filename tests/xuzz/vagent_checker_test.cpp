@@ -930,4 +930,44 @@ TEST(VagentCheckerTest, ManyGlobalGoalsRetainConcreteCheckedOwnerContexts) {
   EXPECT_TRUE(result.has_value()) << (result ? "" : describe(result.error()));
 }
 
+TEST(VagentCheckerTest, CellsPathsTypeAsCellLists) {
+  const auto errors = diagnostics(R"(
+    event Tick
+    agent A {
+      var head: [Cell] := cells"##"
+      def members(target: Cell): [Cell] { cells"$target" }
+      on Tick { let found := cells"##/d.items" }
+    }
+  )");
+  EXPECT_TRUE(errors.empty()) << describe(errors);
+}
+
+TEST(VagentCheckerTest, CellsPathsCheckAnchorsAgainstTheEnvironment) {
+  rejects(R"(agent A { def members(target: Int): [Cell] { cells"$target" } })",
+          DiagnosticCode::TypeMismatch);
+  rejects(R"(agent A { def members(): [Cell] { cells"$ghost" } })",
+          DiagnosticCode::UnknownName);
+}
+
+TEST(VagentCheckerTest, CellsCreationIsImpure) {
+  rejects(R"(event Tick agent A { on Tick [cells"##/+d.x%\"y\""] {} })",
+          DiagnosticCode::ImpureCondition);
+  rejects(R"(question members(): [Cell]
+             agent A { answer members(): [Cell] { cells"##/+d.x%\"y\"" } })",
+          DiagnosticCode::ImpureCondition);
+  const auto traversal = diagnostics(R"(
+    question members(): [Cell]
+    agent A { answer members(): [Cell] { cells"##/d.x" } }
+  )");
+  EXPECT_TRUE(traversal.empty()) << describe(traversal);
+}
+
+TEST(VagentCheckerTest, CellsPathsReportEmbeddedSyntaxAndUnsupportedForms) {
+  rejects(R"(agent A { var v: [Cell] := cells"##/d.x/d.y" })",
+          DiagnosticCode::InvalidDeclaration);
+  rejects(R"(agent A { var v: [Cell] := cells"(((" })", DiagnosticCode::Syntax);
+  rejects(R"(agent A { var v: [Cell] := cells"##[+d.x]" })",
+          DiagnosticCode::InvalidDeclaration);
+}
+
 } // namespace

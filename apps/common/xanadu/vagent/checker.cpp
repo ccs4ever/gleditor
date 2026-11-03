@@ -1,5 +1,7 @@
 #include "common/xanadu/vagent/checker.hpp"
 
+#include "common/xanadu/vagent/cell_path.hpp"
+
 #include <algorithm>
 #include <charconv>
 #include <cmath>
@@ -550,8 +552,8 @@ void Checker::expectType(const Type &actual, const Type &expected,
 }
 void Checker::validateType(const Type &type, SourceLocation loc) {
   static const std::set<std::string_view> scalars{
-      "Int",  "Float", "Str",   "Bool",      "()",    "Duration",
-      "Time", "Agent", "Space", "Intention", "Timer", "Event"};
+      "Int",   "Float", "Str",       "Bool",  "()",    "Duration", "Time",
+      "Agent", "Space", "Intention", "Timer", "Event", "Cell"};
   const auto *decl = global(type.name);
   const bool user =
       decl && (decl->kind == DeclKind::Record || decl->kind == DeclKind::Event);
@@ -856,6 +858,11 @@ bool Checker::pureBody(const Expr &expression, const Decl *owner) {
   case ExprKind::Yield:
   case ExprKind::Consume:
     return false;
+  case ExprKind::Cells: {
+    // A path that creates is an arena write; traversal alone is pure.
+    const auto path = parseCellsPath(expression.text, expression.loc);
+    return !(path && path->mutating);
+  }
   default:
     break;
   }
@@ -1399,6 +1406,25 @@ Type Checker::infer(const Expr &expression, Environment &env, Context context) {
         expectType(value, element, item->loc);
     }
     return list(element);
+  }
+  case ExprKind::Cells: {
+    const auto path = parseCellsPath(expression.text, expression.loc);
+    if (!path) {
+      report(path.error().code, path.error().detail, expression.loc);
+      return unknown;
+    }
+    if (path->mutating) actionAllowed(expression, context);
+    if (path->anchor.kind == CellsPath::Anchor::Kind::Variable) {
+      const auto &name   = path->anchor.variable;
+      const auto binding = env.find(name);
+      if (binding == env.end()) {
+        report(DiagnosticCode::UnknownName,
+               "cells anchor '$" + name + "' is not bound", expression.loc);
+      } else {
+        expectType(read(binding->second.type), named("Cell"), expression.loc);
+      }
+    }
+    return list(named("Cell"));
   }
   case ExprKind::Record: {
     auto *decl = global(expression.text);

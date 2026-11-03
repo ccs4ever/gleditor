@@ -41,9 +41,21 @@ sources are included once in `xuzz_test`. Runtime tests stay beside the engine. 
 checks standalone units; cross-file module resolution, lowering, running and the REPL remain
 separate tracked work until verified.
 
-`ChoiceDepth` is appended after `Cut`; the existing pure-job artifact allowlist and range check
-remain unchanged. Existing opcode numbers, `CompactOpNode`, the on-disk store and fixtures retain
-their layout. New VM functionality needs runtime tests, not merely successful frontend parsing.
+`ChoiceDepth` is appended after `Cut` and `Linked` after it; the pure-job artifact allowlist gained
+`Linked` alongside them, and the serialized-kind range check follows the new last member. Existing
+opcode numbers, `CompactOpNode`, the on-disk store and fixtures retain their layout. New VM
+functionality needs runtime tests, not merely successful frontend parsing.
+
+The `cells"…"` literal embeds VQL path source behind a prefix token so the embedded grammar never
+meets vagent's operator table. `vagent/cell_path.cpp` reuses the real `vql::Parser` and then narrows
+its `PathExpression` to one subset — `##`, literal-id or `$binding` anchors, signed dimension steps,
+posward `%` creations and one link-presence shape filter — refusing everything else with a source
+diagnostic instead of interpreting it. The checker applies the same validation for typing (`[Cell]`)
+and purity (a `%` step is an arena write). The scalar kernel lowers the subset onto `New`/`Value`
+for creations and `Linked` for the one allowed rank traversal; `Linked` materializes members as
+ref-boxes under the bound output head's `+d.grab`/`+d.step` rank, replacing the previous
+materialization on re-execution, guarding against cycles with a seen set, and honouring the arena
+work budget via `consumeWork`.
 
 ## First iteration commands and evidence
 

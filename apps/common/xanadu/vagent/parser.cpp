@@ -845,6 +845,14 @@ ExprPtr Parser::primary() {
   case TokenKind::StringLiteral:
     take();
     return make(ExprKind::String, token.loc, token.stringValue);
+  case TokenKind::PrefixedStringLiteral: {
+    take();
+    const auto quote = token.text.find('"');
+    if (token.text.substr(0, quote) != "cells")
+      fail("unknown string prefix '" + token.text.substr(0, quote) +
+           "' (supported: cells)");
+    return make(ExprKind::Cells, token.loc, token.stringValue);
+  }
   case TokenKind::DurationLiteral:
     take();
     return make(ExprKind::Duration, token.loc, token.text);

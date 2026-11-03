@@ -229,6 +229,7 @@ bool pureOpcode(OpcodeKind opcode) {
   case OpcodeKind::Choice:
   case OpcodeKind::Fail:
   case OpcodeKind::Cut:
+  case OpcodeKind::Linked:
     return true;
   case OpcodeKind::ChoiceDepth:
     return false;

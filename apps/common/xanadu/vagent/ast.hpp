@@ -52,6 +52,7 @@ enum class ExprKind : std::uint8_t {
   Field,
   Block,
   List,
+  Cells,
   Record,
   If,
   While,

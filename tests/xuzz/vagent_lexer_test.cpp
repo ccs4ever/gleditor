@@ -233,4 +233,35 @@ TEST(VagentLexerTest, EmptyInputStillHasLocatedEndToken) {
   EXPECT_EQ(result->front().loc.offset, 0U);
 }
 
+TEST(VagentLexerTest, PrefixedStringKeepsPrefixAndDecodesBody) {
+  auto result = Lexer(R"(cells"##/+d.items%\"x\"")").tokenize();
+  ASSERT_TRUE(result) << result.error().detail;
+  ASSERT_EQ(result->size(), 2U);
+  const auto &token = result->front();
+  EXPECT_EQ(token.kind, TokenKind::PrefixedStringLiteral);
+  EXPECT_EQ(token.text, R"(cells"##/+d.items%\"x\"")");
+  EXPECT_EQ(token.stringValue, R"(##/+d.items%"x")");
+}
+
+TEST(VagentLexerTest, PrefixedStringRequiresAnAdjacentIdentifierPrefix) {
+  // A space keeps the identifier and the string literal apart.
+  auto spaced = Lexer(R"(cells "##")").tokenize();
+  ASSERT_TRUE(spaced);
+  ASSERT_EQ(spaced->size(), 3U);
+  EXPECT_EQ(spaced->front().kind, TokenKind::Identifier);
+  EXPECT_EQ((*spaced)[1].kind, TokenKind::StringLiteral);
+
+  // Reserved words cannot carry a literal: 'if"x"' is a keyword, a string.
+  auto keyword = Lexer(R"(if"x")").tokenize();
+  ASSERT_TRUE(keyword);
+  EXPECT_EQ(keyword->front().kind, TokenKind::Keyword);
+  EXPECT_EQ((*keyword)[1].kind, TokenKind::StringLiteral);
+}
+
+TEST(VagentLexerTest, UnterminatedPrefixedStringIsLexicalError) {
+  auto result = Lexer(R"(cells"##)").tokenize();
+  ASSERT_FALSE(result);
+  EXPECT_EQ(result.error().code, DiagnosticCode::Lexical);
+}
+
 } // namespace

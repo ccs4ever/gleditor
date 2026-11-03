@@ -1,5 +1,7 @@
 #include "common/xanadu/vagent/compiler.hpp"
 
+#include "common/xanadu/vagent/cell_path.hpp"
+
 #include <algorithm>
 #include <charconv>
 #include <cmath>
@@ -25,15 +27,28 @@ using zigzag::vortex::OpcodeKind;
 using zigzag::vortex::VortexCore;
 using zigzag::vortex::VortexVM;
 
-enum class Scalar : std::uint8_t { Int, Float, Str, Bool, Unit, Bottom };
+enum class Scalar : std::uint8_t {
+  Int,
+  Float,
+  Str,
+  Bool,
+  Unit,
+  Cell,
+  CellList,
+  Bottom
+};
 
 std::optional<Scalar> scalarType(const Type &type) {
+  if (type.name == "List" && type.arguments.size() == 1 &&
+      type.arguments.front() == Type{"Cell", {}})
+    return Scalar::CellList;
   if (!type.arguments.empty()) return std::nullopt;
   if (type.name == "Int") return Scalar::Int;
   if (type.name == "Float") return Scalar::Float;
   if (type.name == "Str") return Scalar::Str;
   if (type.name == "Bool") return Scalar::Bool;
   if (type.name == "()") return Scalar::Unit;
+  if (type.name == "Cell") return Scalar::Cell;
   return std::nullopt;
 }
 
@@ -49,6 +64,10 @@ std::optional<Type> resultType(Scalar type) {
     return Type{"Bool", {}};
   case Scalar::Unit:
     return Type{"()", {}};
+  case Scalar::Cell:
+    return Type{"Cell", {}};
+  case Scalar::CellList:
+    return Type{"List", {Type{"Cell", {}}}};
   case Scalar::Bottom:
     return std::nullopt;
   }
@@ -148,7 +167,14 @@ private:
         (*type == Scalar::Bool && std::holds_alternative<bool>(value)) ||
         (*type == Scalar::Str && std::holds_alternative<std::string>(value)) ||
         (*type == Scalar::Unit && std::holds_alternative<std::string>(value) &&
-         std::get<std::string>(value).empty());
+         std::get<std::string>(value).empty()) ||
+        // A list head carries no value contract; the rank under +d.grab is
+        // what the type describes.
+        *type == Scalar::CellList ||
+        // A Cell binding is a ref-box: the int content must name a live cell.
+        (*type == Scalar::Cell && std::holds_alternative<std::int64_t>(value) &&
+         core_.arena().contains(
+             static_cast<CellRef>(std::get<std::int64_t>(value))));
     if (!matches)
       refuse(expression, DiagnosticCode::TypeMismatch,
              "binding value does not have its declared scalar type");
@@ -300,6 +326,12 @@ private:
       const auto rightType = preflight(right, false, depth + 1, pure);
       if (assignment) {
         requireSame(expression, leftType, rightType);
+        // Only a cells literal can write a list head under the binding; a
+        // generic CellList value would copy content and drop the rank.
+        if (rightType == Scalar::CellList && right.kind != ExprKind::Cells)
+          refuse(expression, DiagnosticCode::InvalidDeclaration,
+                 "cell lists assign only from a cells path, which writes the "
+                 "rank under the binding cell");
         type = rightType == Scalar::Bottom ? Scalar::Bottom : Scalar::Unit;
       } else if (op == "&") {
         conditionValue(left, leftType);
@@ -315,6 +347,9 @@ private:
         const auto effective =
             leftType == Scalar::Bottom ? rightType : leftType;
         if (comparison(op)) {
+          if (effective == Scalar::CellList)
+            refuse(expression, DiagnosticCode::TypeMismatch,
+                   "cell lists do not support comparison; compare elements");
           if (op != "==" && op != "!=" && effective != Scalar::Bottom &&
               effective != Scalar::Int && effective != Scalar::Float &&
               effective != Scalar::Str)
@@ -425,6 +460,41 @@ private:
         refuse(expression, DiagnosticCode::TypeMismatch,
                "value-producing conditional arms require a common type");
       type = thenType == Scalar::Bottom ? elseType : thenType;
+      break;
+    }
+    case ExprKind::Cells: {
+      arity(0);
+      auto path = parseCellsPath(expression.text, expression.loc);
+      if (!path) {
+        const auto diagnostic = path.error();
+        refuse(expression, diagnostic.code, diagnostic.detail);
+      }
+      if (pure && path->mutating)
+        refuse(expression, DiagnosticCode::InvalidPosition,
+               "cells paths that create are not allowed in conditions");
+      if (path->anchor.kind == CellsPath::Anchor::Kind::Variable) {
+        const auto found = bindings_.find(path->anchor.variable);
+        if (found == bindings_.end())
+          refuse(expression, DiagnosticCode::UnknownName,
+                 "cells anchor '$" + path->anchor.variable + "' is not bound");
+        if (scalarType(found->second.type) != Scalar::Cell)
+          refuse(expression, DiagnosticCode::TypeMismatch,
+                 "cells anchor '$" + path->anchor.variable +
+                     "' must be declared Cell");
+        if (path->mutating)
+          refuse(expression, DiagnosticCode::InvalidDeclaration,
+                 "cells paths anchored on variables cannot create");
+        if (!core_.arena().contains(found->second.cell))
+          refuse(expression, DiagnosticCode::UnknownName,
+                 "binding cell is not present in this arena");
+        externalReferences_[&expression] = found->second.cell;
+      }
+      if (path->anchor.kind == CellsPath::Anchor::Kind::LiteralCell &&
+          !core_.arena().contains(CellRef(path->anchor.cellId)))
+        refuse(expression, DiagnosticCode::UnknownName,
+               "cells anchor cell is not present in this arena");
+      paths_[&expression] = std::move(*path);
+      type                = Scalar::CellList;
       break;
     }
     default:
@@ -571,6 +641,12 @@ private:
         return emit(left, leftValue, emit(right, output, continuation));
       const auto rightValue = temporary();
       if (op == ":=" || op == "<-") {
+        // A cells path materializes its rank under the bound head itself, so
+        // assigning one runs it with the binding cell as the head instead of
+        // copying a head's content.
+        if (types_.at(&right) == Scalar::CellList)
+          return emit(right, resolved(left),
+                      copy(output, cells_->unit, continuation));
         return emit(right, rightValue,
                     copy(resolved(left), rightValue,
                          copy(output, cells_->unit, continuation)));
@@ -624,6 +700,8 @@ private:
             i + 1 == expression.children.size() ? output : temporary(), next);
       return next;
     }
+    case ExprKind::Cells:
+      return emitCells(expression, output, continuation);
     case ExprKind::Let:
       return emit(*expression.children.front(), resolved(expression),
                   copy(output, cells_->unit, continuation));
@@ -647,6 +725,125 @@ private:
       // Preflight has already refused every non-scalar constructor.
       return jump(cells_->fail);
     }
+  }
+
+  // Link boxes under `head` as a +d.grab/+d.step rank at emit time. The
+  // head cell is minted by the caller and has no prior rank, so direct
+  // links are safe.
+  void materialize(CellRef head, const std::vector<CellRef> &elements) {
+    CellRef tail = head;
+    for (const CellRef element : elements) {
+      zigzag::expectWritten(core_.arena().link(
+          tail, tail == head ? core_.dims().grab : core_.dims().step,
+          zigzag::DimVector::POS, element));
+      tail = element;
+    }
+  }
+
+  CellRef emitCells(const Expr &expression, CellRef output,
+                    CellRef continuation) {
+    const auto &path = paths_.at(&expression);
+    std::optional<CellRef> subject;
+    bool follow = false;
+    switch (path.anchor.kind) {
+    case CellsPath::Anchor::Kind::Home:
+      subject = core_.home();
+      break;
+    case CellsPath::Anchor::Kind::LiteralCell:
+      subject = CellRef(path.anchor.cellId);
+      break;
+    case CellsPath::Anchor::Kind::Variable:
+      // The binding is a ref-box; the runtime reads through it.
+      subject = externalReferences_.at(&expression);
+      follow  = true;
+      break;
+    }
+
+    // Creation output cells are minted up front so a later step can subject
+    // itself to a cell an earlier step only links at run time.
+    std::vector<std::vector<CellRef>> created(path.steps.size());
+    for (std::size_t i = 0; i < path.steps.size(); ++i)
+      for (std::size_t j = 0; j < path.steps[i].literals.size(); ++j)
+        created[i].push_back(temporary());
+
+    const auto dimConstant = [this](std::string_view name) {
+      return literal(
+          static_cast<std::int64_t>(core_.findOrMintDimension(name)));
+    };
+
+    std::vector<CellRef> ops;
+    for (std::size_t i = 0; i < path.steps.size(); ++i) {
+      const auto &step = path.steps[i];
+      if (!step.create) {
+        const auto op = mint(OpcodeKind::Linked);
+        core_.bindInput(op, *subject);
+        core_.bindInput(op, dimConstant(step.dim));
+        core_.bindInput(op, step.neg ? cells_->minusOne : cells_->zero);
+        if (follow || step.hasFilter) core_.bindInput(op, literal(follow));
+        if (step.hasFilter) {
+          core_.bindInput(op, dimConstant(step.filterDim));
+          core_.bindInput(op, step.filterNeg ? cells_->minusOne : cells_->zero);
+        }
+        core_.bindOutput(op, output);
+        ops.push_back(op);
+        continue;
+      }
+      for (std::size_t j = 0; j < step.literals.size(); ++j) {
+        const CellRef fresh = created[i][j];
+        const auto create   = mint(OpcodeKind::New);
+        core_.bindInput(create, *subject);
+        core_.bindInput(create, dimConstant(step.dim));
+        core_.bindInput(create, step.neg ? cells_->minusOne : cells_->zero);
+        core_.bindInput(create, literal(true));
+        core_.bindOutput(create, fresh);
+        ops.push_back(create);
+        // A bare % mints an unnamed cell; writing "" would leave empty-
+        // string content instead of no content.
+        if (!step.literals[j].empty()) {
+          const auto write = mint(OpcodeKind::Value);
+          core_.bindInput(write, fresh);
+          core_.bindInput(write, cells_->zero);
+          core_.bindInput(write, cells_->minusOne);
+          core_.bindInput(write, literal(step.literals[j]));
+          ops.push_back(write);
+        }
+        // Several creations on one step are rank siblings off the subject;
+        // a single creation hands itself to the next step as subject.
+        if (step.literals.size() == 1) subject = fresh;
+      }
+    }
+
+    if (path.steps.empty() || path.steps.back().create) {
+      // No traversal step: the result is known at emit time, so the boxes
+      // are linked under the head statically.
+      std::vector<CellRef> elements;
+      if (path.steps.empty()) {
+        if (follow) {
+          // cells"$v": copy the ref out of the binding box at run time.
+          const auto box  = temporary();
+          const auto read = mint(OpcodeKind::Value);
+          core_.bindInput(read, box);
+          core_.bindInput(read, cells_->zero);
+          core_.bindInput(read, cells_->minusOne);
+          core_.bindInput(read, *subject);
+          ops.push_back(read);
+          elements.push_back(box);
+        } else {
+          elements.push_back(reference(*subject));
+        }
+      } else {
+        for (const CellRef cell : created.back())
+          elements.push_back(reference(cell));
+      }
+      materialize(output, elements);
+    }
+
+    CellRef entry = continuation;
+    for (std::size_t i = ops.size(); i-- > 0;) {
+      spin(ops[i], jump(entry));
+      entry = ops[i];
+    }
+    return ops.empty() ? jump(entry) : entry;
   }
 
   CompiledStatement emitStatement(const Expr &expression, Scalar type) {
@@ -691,6 +888,7 @@ private:
   std::unordered_set<const Expr *> discarded_;
   std::unordered_map<const Expr *, Scalar> types_;
   std::unordered_map<const Expr *, CellValue> literals_;
+  std::unordered_map<const Expr *, CellsPath> paths_;
   struct EmissionCells {
     CellRef zero;
     CellRef minusOne;

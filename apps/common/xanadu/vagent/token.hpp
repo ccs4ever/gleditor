@@ -19,6 +19,7 @@ enum class TokenKind : std::uint8_t {
   IntegerLiteral,
   FloatLiteral,
   StringLiteral,
+  PrefixedStringLiteral,
   DurationLiteral,
   Newline,
   OpenParen,
