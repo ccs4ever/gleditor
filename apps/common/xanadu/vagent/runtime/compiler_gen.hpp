@@ -1140,6 +1140,8 @@ private:
   /// support's observation history over to the surviving support.
   CellRef keepHistG_{};
   CellRef rtBRaise_{}, rtHasSrc_{}, rtBDrop_{}, rtBSet_{}, rtSettle_{};
+  /// `rtSourceDrop_(profile, incBelow, retained)`: see emitRtSourceDrop.
+  CellRef rtSourceDrop_{};
 
   void mintPredicates();
   const PredInfo &predOf(const Term &t);
@@ -1154,6 +1156,16 @@ private:
   void emitProfileFor(CellRef who, CellRef inc, CellRef maxSources,
                       CellRef prof);
   void emitSourceChange(CellRef entryLabel);
+  /// The negward head of @p from's run on @p dim, into @p out.
+  void headOf(CellRef from, DimRef dim, CellRef out);
+  /// Retire every record of @p profile below an incarnation, move its support
+  /// to the profile's retired chain, drop the emptied supports through
+  /// `rtBDrop_` (which queues `-pred` without settling) and trim the retired
+  /// chain. a0 = profile, a1 = incBelow, a2 = retained.
+  void emitRtSourceDrop();
+  /// `settleEntry` (P19 I3-2b), defined in epistemic_emit_health.cpp: settle
+  /// the head of `d.pending` alone, in one turn.
+  void emitSettleEntry(CellRef entryLabel);
   /// Re-attach a detached history (@p moved, zero when none) to support
   /// @p sc, and return @p sc in r1.
   void finishSupport(CellRef sc, CellRef moved);

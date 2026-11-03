@@ -3655,6 +3655,138 @@ void Gen::emitObserveRefusal(CellRef entryLabel) {
   endObservation(kTurnResultIngestionFault);
 }
 
+void Gen::headOf(CellRef from, DimRef dim, CellRef out) {
+  const CellRef p = reg(), loop = newLabel(), done = newLabel();
+  mov(S(out), S(from));
+  place(loop);
+  mov(S(p), S(rd(D(out), dim, true)));
+  branchIfZero(p, done);
+  mov(S(out), S(p));
+  jump(loop);
+  place(done);
+}
+
+/// The drop body shared by the advance and (from I3-2c2) isolate and reset.
+/// A belief means a current boot asserts it, so each support left with no
+/// current record is dropped through rtBDrop, which only queues `-pred`: the
+/// events are settled after the change commits. The records move to the
+/// profile's retired history, where calibration still finds them, bounded
+/// below by @c retained.
+void Gen::emitRtSourceDrop() {
+  beginInternal(rtSourceDrop_);
+  const CellRef prof = reg(), incBelow = reg(), retained = reg();
+  const CellRef v = reg(), rec = reg(), ri = reg(), st = reg(), t = reg(),
+                bad = newLabel();
+  mov(S(prof), S(a0_));
+  mov(S(incBelow), S(a1_));
+  mov(S(retained), S(a2_));
+  const auto find = [&](CellRef record, std::string_view name, CellRef out) {
+    mov(S(a0_), S(record));
+    movC(a1_, cStr(std::string(name)));
+    callLabel(rtFind_);
+    mov(S(out), S(r0_));
+  };
+  // A clone occurrence is the value of its record's `profile` field.
+  const auto recordOf = [&](CellRef view, CellRef out) {
+    const CellRef name = reg();
+    mov(S(name), S(rd(D(view), core_.dims().values, true)));
+    // An occurrence no record names is a broken rank, not a record.
+    branchIfZero(name, bad);
+    headOf(name, core_.dims().vars, out);
+  };
+  {
+    const CellRef walk = newLabel(), next = newLabel(), done = newLabel();
+    mov(S(v), S(rd(D(prof), core_.dims().clone)));
+    place(walk);
+    branchIfZero(v, done);
+    recordOf(v, rec);
+    find(rec, kObsIncarnation, ri);
+    branchIfZero(ri, next);
+    emit(OpcodeKind::Lt, "older?", {D(ri), D(incBelow)}, {t});
+    requireTrue(t, next);
+    find(rec, kObsStatus, st);
+    branchIfZero(st, next);
+    mov(D(st), S(cStr(std::string(kObsStatusRetired))));
+    place(next);
+    mov(S(v), S(rd(D(v), core_.dims().clone)));
+    jump(walk);
+    place(done);
+  }
+  {
+    const CellRef sup = reg(), cl = reg(), pred = reg(), nm = reg(),
+                  chain = reg(), is = reg();
+    const CellRef walk = newLabel(), next = newLabel(), done = newLabel();
+    mov(S(v), S(rd(D(prof), core_.dims().clone)));
+    place(walk);
+    branchIfZero(v, done);
+    recordOf(v, rec);
+    // Only a record this call retired is dropped; a live one stays.
+    find(rec, kObsStatus, st);
+    branchIfZero(st, next);
+    emit(OpcodeKind::Eq, "retired?",
+         {D(st), S(cStr(std::string(kObsStatusRetired)))}, {is});
+    requireTrue(is, next);
+    // Moved already (its head is the profile) or detached: nothing to do.
+    headOf(rec, dims_.epistemic, sup);
+    mov(S(cl), S(rd(D(sup), dims_.source, true)));
+    branchIfZero(cl, next);
+    mov(S(chain), S(rd(D(sup), dims_.epistemic)));
+    breakOp(D(sup), dims_.epistemic);
+    emitAppendTail(D(prof), dims_.epistemic, dims_.epistemic, chain);
+    headOf(sup, dims_.source, cl);
+    headOf(cl, core_.dims().clause, pred);
+    mov(S(nm), D(sup));
+    mov(S(a0_), S(pred));
+    mov(S(a1_), S(cl));
+    mov(S(a2_), S(nm));
+    callLabel(rtBDrop_);
+    place(next);
+    mov(S(v), S(rd(D(v), core_.dims().clone)));
+    jump(walk);
+    place(done);
+  }
+  {
+    // The retired history keeps the newest `retained` records; the oldest
+    // unpinned go first, with their clone occurrences.
+    const CellRef n = reg(), r = reg(), over = reg(), pin = reg(), view = reg();
+    const CellRef tally = newLabel(), counted = newLabel(), trim = newLabel(),
+                  scan = newLabel(), nextRec = newLabel(), trimmed = newLabel(),
+                  noView = newLabel();
+    movC(n, zero_);
+    mov(S(r), S(rd(D(prof), dims_.epistemic)));
+    place(tally);
+    branchIfZero(r, counted);
+    emit(OpcodeKind::Add, "n+", {S(n), S(one_)}, {n});
+    mov(S(r), S(rd(D(r), dims_.epistemic)));
+    jump(tally);
+    place(counted);
+    place(trim);
+    emit(OpcodeKind::Gt, "over?", {S(n), D(retained)}, {over});
+    requireTrue(over, trimmed);
+    mov(S(r), S(rd(D(prof), dims_.epistemic)));
+    place(scan);
+    branchIfZero(r, trimmed);
+    find(r, kObsPinned, pin);
+    branchIfZero(pin, nextRec);
+    emit(OpcodeKind::Eq, "pinned?", {D(pin), S(true_)}, {t});
+    branch(S(t), nextRec);
+    find(r, kObsProfile, view);
+    branchIfZero(view, noView);
+    unlinkFromRank(view, core_.dims().clone);
+    place(noView);
+    unlinkFromRank(r, dims_.epistemic);
+    emit(OpcodeKind::Sub, "n-", {S(n), S(one_)}, {n});
+    jump(trim);
+    place(nextRec);
+    mov(S(r), S(rd(D(r), dims_.epistemic)));
+    jump(scan);
+    place(trimmed);
+  }
+  ret();
+  place(bad);
+  endObservation(kTurnResultIngestionFault);
+}
+
 /// `sourceChangeEntry` (P19 I3-1c): advance a principal to the incarnation
 /// a new binding carries, or retire it for the operator. The arena is the
 /// authority on the replay floor, so a binding the host accepted may still
@@ -3665,8 +3797,9 @@ void Gen::emitObserveRefusal(CellRef entryLabel) {
 /// clears the dedup window and the streams, whose sequences restart. The
 /// latches (faulted, the counters) stay: a restart cannot shed them.
 ///
-/// A retirement drops the principal's supports through `rtBDrop`, settling
-/// `-pred`, excises its unpinned records with their clone occurrences, and
+/// A retirement drops the principal's supports through `rtBDrop`, queueing
+/// `-pred` for `settleEntry`, excises its unpinned records with their clone
+/// occurrences, and
 /// leaves the profile cell as a tombstone with the higher of the two
 /// incarnations. Records are reached from the profile master's `d.clone`
 /// rank, one occurrence per record: O(K * H) cells.
@@ -3711,16 +3844,8 @@ void Gen::emitSourceChange(CellRef entryLabel) {
   const auto setField = [&](CellRef record, std::string_view name, Opd v) {
     putScalar(record, name, v);
   };
-  // The negward head of @p from's run on @p dim.
   const auto head = [&](CellRef from, DimRef dim, CellRef out) {
-    const CellRef p = reg(), loop = newLabel(), done = newLabel();
-    mov(S(out), S(from));
-    place(loop);
-    mov(S(p), S(rd(D(out), dim, true)));
-    branchIfZero(p, done);
-    mov(S(out), S(p));
-    jump(loop);
-    place(done);
+    headOf(from, dim, out);
   };
   // A clone occurrence is the value of its record's `profile` field.
   const auto recordOf = [&](CellRef view, CellRef out) {
@@ -3815,93 +3940,13 @@ void Gen::emitSourceChange(CellRef entryLabel) {
     endObservation(kTurnResultCommitted);
     place(advance);
     mov(D(profInc), D(inc));
-    const CellRef v = reg(), rec = reg(), ri = reg(), st = reg();
-    const CellRef walk = newLabel(), next = newLabel(), done = newLabel();
-    mov(S(v), S(rd(D(prof), core_.dims().clone)));
-    place(walk);
-    branchIfZero(v, done);
-    recordOf(v, rec);
-    find(rec, kObsIncarnation, ri);
-    branchIfZero(ri, next);
-    emit(OpcodeKind::Lt, "older?", {D(ri), D(inc)}, {t});
-    requireTrue(t, next);
-    find(rec, kObsStatus, st);
-    branchIfZero(st, next);
-    mov(D(st), S(cStr(std::string(kObsStatusRetired))));
-    place(next);
-    mov(S(v), S(rd(D(v), core_.dims().clone)));
-    jump(walk);
-    place(done);
-    // The predecessor's supports now hold no current reading. A belief
-    // means a current boot asserts it, so each is dropped through rtBDrop,
-    // settling -pred; its records move to the profile's retired history,
-    // where calibration still finds them, bounded below.
-    {
-      const CellRef sup = reg(), cl = reg(), pred = reg(), nm = reg(),
-                    chain = reg();
-      const CellRef walk2 = newLabel(), next2 = newLabel(), done2 = newLabel();
-      mov(S(v), S(rd(D(prof), core_.dims().clone)));
-      place(walk2);
-      branchIfZero(v, done2);
-      recordOf(v, rec);
-      // Moved already (its head is the profile) or detached: nothing to do.
-      head(rec, dims_.epistemic, sup);
-      mov(S(cl), S(rd(D(sup), dims_.source, true)));
-      branchIfZero(cl, next2);
-      mov(S(chain), S(rd(D(sup), dims_.epistemic)));
-      breakOp(D(sup), dims_.epistemic);
-      emitAppendTail(D(prof), dims_.epistemic, dims_.epistemic, chain);
-      head(sup, dims_.source, cl);
-      head(cl, core_.dims().clause, pred);
-      mov(S(nm), D(sup));
-      mov(S(a0_), S(pred));
-      mov(S(a1_), S(cl));
-      mov(S(a2_), S(nm));
-      callLabel(rtBDrop_);
-      place(next2);
-      mov(S(v), S(rd(D(v), core_.dims().clone)));
-      jump(walk2);
-      place(done2);
-    }
-    {
-      // The retired history keeps the newest `retained` records; the oldest
-      // unpinned go first, with their clone occurrences.
-      const CellRef n = reg(), r = reg(), over = reg(), pin = reg(),
-                    view  = reg();
-      const CellRef tally = newLabel(), counted = newLabel(), trim = newLabel(),
-                    scan = newLabel(), nextRec = newLabel(),
-                    trimmed = newLabel(), noView = newLabel();
-      movC(n, zero_);
-      mov(S(r), S(rd(D(prof), dims_.epistemic)));
-      place(tally);
-      branchIfZero(r, counted);
-      emit(OpcodeKind::Add, "n+", {S(n), S(one_)}, {n});
-      mov(S(r), S(rd(D(r), dims_.epistemic)));
-      jump(tally);
-      place(counted);
-      place(trim);
-      emit(OpcodeKind::Gt, "over?", {S(n), D(retained)}, {over});
-      requireTrue(over, trimmed);
-      mov(S(r), S(rd(D(prof), dims_.epistemic)));
-      place(scan);
-      branchIfZero(r, trimmed);
-      find(r, kObsPinned, pin);
-      branchIfZero(pin, nextRec);
-      emit(OpcodeKind::Eq, "pinned?", {D(pin), S(true_)}, {t});
-      branch(S(t), nextRec);
-      find(r, kObsProfile, view);
-      branchIfZero(view, noView);
-      unlinkFromRank(view, core_.dims().clone);
-      place(noView);
-      unlinkFromRank(r, dims_.epistemic);
-      emit(OpcodeKind::Sub, "n-", {S(n), S(one_)}, {n});
-      jump(trim);
-      place(nextRec);
-      mov(S(r), S(rd(D(r), dims_.epistemic)));
-      jump(scan);
-      place(trimmed);
-    }
-    callLabel(rtSettle_);
+    mov(S(a0_), S(prof));
+    mov(S(a1_), S(inc));
+    mov(S(a2_), S(retained));
+    callLabel(rtSourceDrop_);
+    // No settle here: the `-pred` events the drop queued are settled one per
+    // turn after this change commits (settleEntry), so a failing handler
+    // cannot undo the advance.
     freshWindows(prof);
     endObservation(kTurnResultCommitted);
   }
@@ -3948,7 +3993,6 @@ void Gen::emitSourceChange(CellRef entryLabel) {
     mov(S(v), S(nextV));
     jump(walk);
     place(done);
-    callLabel(rtSettle_);
     callClearField(prof, std::string(kProfileDedup));
     callClearField(prof, std::string(kProfileStreams));
     setField(prof, kProfileRetired, S(true_));
@@ -6281,6 +6325,7 @@ CompiledAgent Gen::run() {
   rtBDrop_       = newLabel();
   rtBSet_        = newLabel();
   rtSettle_      = newLabel();
+  rtSourceDrop_  = newLabel();
   rtCapFind_     = newLabel();
   a3_            = global();
   keepHistG_     = global();
@@ -6344,6 +6389,9 @@ CompiledAgent Gen::run() {
   out.haltOp        = haltOp_;
   out.failOp        = failOp_;
   emitSettle();
+  if (std::ranges::any_of(preds_,
+                          [](const auto &p) { return p.second.arbitrated; }))
+    emitRtSourceDrop();
   emitInit(out.initEntry);
   emitDispatch(out.dispatchEntry);
   if (std::ranges::any_of(preds_,
@@ -6354,6 +6402,8 @@ CompiledAgent Gen::run() {
     emitObserveRefusal(*out.observeRefusalEntry);
     out.sourceChangeEntry = newLabel();
     emitSourceChange(*out.sourceChangeEntry);
+    out.settleEntry = newLabel();
+    emitSettleEntry(*out.settleEntry);
   }
   for (const auto &member : agent_->members) {
     if (const auto *field = std::get_if<VarDecl>(&member))

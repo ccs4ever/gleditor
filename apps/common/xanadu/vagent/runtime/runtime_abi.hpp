@@ -528,6 +528,10 @@ inline constexpr std::string_view kFieldTurnResult     = "$turn_result";
 inline constexpr std::string_view kTurnResultCommitted = "Committed";
 /// The stat prefix a refused typed outcome is counted under, after the undo.
 inline constexpr std::string_view kStatRefusedPrefix = "refused.";
+/// A queued belief event whose settle turn failed and was discarded (P19
+/// I3-2b). A stat and log label only: never an outcome code, never charged.
+inline constexpr std::string_view kSettleFailedLabel   = "SettleFailed";
+inline constexpr std::string_view kStatSettleDiscarded = "refused.SettleFailed";
 
 // -- Checked ingestion (P19 I3-1b) --------------------------------------------
 // The adapter passes one checked observation to `observeEntry` as
@@ -877,6 +881,9 @@ struct CompiledAgent {
   /// Advances or retires a principal per `$turn.source_change` (P19 I3-1c);
   /// present exactly when `observeEntry` is.
   std::optional<zigzag::CellRef> sourceChangeEntry{};
+  /// Settles the head event of `d.pending` and everything it raises, in one
+  /// turn (P19 I3-2b); present exactly when `observeEntry` is.
+  std::optional<zigzag::CellRef> settleEntry{};
   std::map<std::string, zigzag::CellRef, std::less<>> fieldDefaults;
   std::map<std::string, CompiledContainer, std::less<>> skills;
   std::map<std::string, CompiledContainer, std::less<>> behaviors;

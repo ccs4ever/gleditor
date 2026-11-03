@@ -5,6 +5,7 @@
 #include "common/xanadu/system_docs.hpp"
 #include "common/xanadu/vagent/runtime/program.hpp"
 #include "common/xanadu/vagent/runtime/reconciler.hpp"
+#include "common/xanadu/vagent/runtime/settle_discard.hpp"
 #include "common/xanadu/vagent/runtime/upgrade_schema.hpp"
 #include "common/xanadu/zigzag/manifold.hpp"
 
@@ -442,6 +443,10 @@ std::string_view toString(CheckpointRefusal refusal) noexcept {
     return "stopped";
   case CheckpointRefusal::HostDeliveryPending:
     return "host delivery pending";
+  case CheckpointRefusal::SettlePending:
+    return "settle pending";
+  case CheckpointRefusal::TurnInProgress:
+    return "turn in progress";
   case CheckpointRefusal::MailboxNotEmpty:
     return "mailbox not empty";
   case CheckpointRefusal::SendsIncomplete:
@@ -915,7 +920,7 @@ struct AgentExecutor::Ingress {
            code != kTurnResultArenaExhausted &&
            code != kTurnResultEpistemicBudget &&
            code != kTurnResultUnboundIncarnation &&
-           code != kTurnResultUndelivered;
+           code != kTurnResultUndelivered && code != kSettleFailedLabel;
   }
 };
 
@@ -986,6 +991,16 @@ AgentExecutor::AgentExecutor(zigzag::vortex::mesh::MeshActorRuntime &runtime,
       std::shared_ptr<AgentProgram>(&program, [](AgentProgram *) {}));
   if (!settings_.epistemic.validate()) {
     throw std::invalid_argument("invalid epistemic admission limits");
+  }
+  if (settings_.epistemic.slotReserveClamped()) {
+    GLEDITOR_LOG_WARN(kLog,
+                      "epistemic arena slots {} leave a settle reserve of {}, "
+                      "below the usual {}: the allowance is near the arena's "
+                      "ref space ({})",
+                      settings_.epistemic.arenaSlots,
+                      settings_.epistemic.slotReserve(),
+                      settings_.epistemic.arenaSlots / kSlotReserveDivisor,
+                      static_cast<std::size_t>(zigzag::ephemeralBit));
   }
 }
 
@@ -1287,7 +1302,8 @@ bool AgentExecutor::prepare(State &state, WorkerContext &context,
         !sound(compiled->dispatchEntry) || !sound(compiled->haltOp) ||
         !sound(compiled->failOp) ||
         (compiled->continueEntry && !sound(*compiled->continueEntry)) ||
-        (compiled->failStepEntry && !sound(*compiled->failStepEntry))) {
+        (compiled->failStepEntry && !sound(*compiled->failStepEntry)) ||
+        (compiled->settleEntry && !sound(*compiled->settleEntry))) {
       GLEDITOR_LOG_DEBUG(kLog, "instantiate returned a cell the arena lacks");
       return false;
     }
@@ -1894,8 +1910,29 @@ AgentExecutor::TurnOutcome AgentExecutor::deliverHost(State &state,
             ? std::string(kTurnResultTurnExhausted)
             : std::string(kTurnResultIngestionFault));
     if (event.ingest) finishIngest(state, *event.ingest, code);
-    if (event.sourceChange)
-      finishSourceChange(state, *event.sourceChange, code);
+    if (event.sourceChange) {
+      // The change has committed with its belief events still queued; they
+      // settle here, before any other item or turn for this actor, and the
+      // outcome is published once, after them. It is published on every
+      // exit, so a throw out of the loop leaves no change Pending.
+      SettleReport report;
+      const auto publish = [&] {
+        finishSourceChange(state, *event.sourceChange, code,
+                           report.settled == 0 && report.discarded == 0
+                               ? std::nullopt
+                               : std::optional<SettleReport>(report));
+      };
+      if (code == kTurnResultCommitted && state.agent.settleEntry &&
+          state.context) {
+        try {
+          settleQueued(state, cursor, grant, context, report);
+        } catch (...) {
+          publish();
+          throw;
+        }
+      }
+      publish();
+    }
     return outcome;
   }
   Envelope envelope;
@@ -1942,12 +1979,87 @@ void AgentExecutor::finishIngest(State &state, const IngestKey &ingest,
   }
 }
 
+void AgentExecutor::settleQueued(State &state, CellRef cursor,
+                                 const ActorGrant &grant,
+                                 WorkerContext &context, SettleReport &report) {
+  auto &arena          = context.arena;
+  const auto agentCell = state.agent.agentCell;
+  const auto pending   = state.dims.pending;
+  const auto head      = [&] { return arena.linked(agentCell, pending); };
+  // Each iteration removes one top-level event, settled or discarded, and
+  // only a settle turn adds events (consumed by that turn or undone with
+  // it), so the queue length bounds the loop. A turn cannot be trusted to
+  // shrink it by construction: the bound is what ends a defect. The count is
+  // bounded too, by the cells the arena holds, so a chain that loops back
+  // on itself does not hang the actor.
+  std::size_t queued = 0;
+  for (auto at = head(); at && queued < arena.cellCount();
+       at      = arena.linked(*at, pending))
+    ++queued;
+  for (; queued != 0 && state.context && head(); --queued) {
+    const auto first = *head();
+    bool settled     = false;
+    // Settle turns use a reserve beyond the allowance, so a batch of events
+    // still settles after ordinary entries are refused; nothing here can
+    // exceed the grant's own cell budget.
+    const auto slots =
+        settings_.epistemic.arenaSlots + settings_.epistemic.slotReserve();
+    if (arena.cellCount() < slots) {
+      TurnSpec spec;
+      spec.entry         = state.agent.settleEntry;
+      const auto outcome = runTurn(state, cursor, grant, context, spec);
+      settled            = outcome.committed;
+      // Counted before the exit: the turn ran whether or not the actor is
+      // still alive to carry on.
+      if (settled) ++report.settled;
+      if (!state.context) return;
+    }
+    if (settled) continue;
+    // Recovery from a failed VM turn must not depend on the VM budget that
+    // just ran out: unlink the head in C++. It mints no cell and cannot fail
+    // for a ref read from this arena; if it does, the whole queue goes.
+    const auto before = report.discarded;
+    const auto result = discardQueueHead(arena, agentCell, pending, first,
+                                         arena.linked(first, pending), report);
+    if (result == DiscardResult::Stuck) return;
+    // `inTurn` holds for the whole wake, so this only queues the count and
+    // the wake's own flush writes it: the discard path mints no cell, which
+    // is why it cannot fail at the cell limit.
+    bumpStat(state, kStatSettleDiscarded, report.discarded - before);
+    GLEDITOR_LOG_DEBUG(kLog, "{} discards {} belief event(s)", state.name,
+                       report.discarded - before);
+    if (result == DiscardResult::WholeQueue) return;
+  }
+}
+
 void AgentExecutor::finishSourceChange(State &state, const SourceChange &change,
-                                       std::string_view code) {
+                                       std::string_view code,
+                                       std::optional<SettleReport> settle) {
   const auto pid = pidKey(state.pid);
   const Ingress::SourceKey source{pid, change.principal};
   const std::lock_guard lock(ingress_->mutex);
-  ingress_->changes.insert_or_assign(source, outcomeOfCode(code));
+  auto published   = outcomeOfCode(code);
+  published.settle = std::move(settle);
+  // A principal bound on several predicates is advanced once and then
+  // "advanced" again by each further bind, which changes nothing and queues
+  // nothing. Those must not erase the report of the advance, so a committed
+  // change that does not raise the incarnation adds to the one before it.
+  // The floor is read before this change moves it.
+  const auto floorHeld = ingress_->floors.find(source);
+  const bool advances  = change.retire || !change.incarnation ||
+                        floorHeld == ingress_->floors.end() ||
+                        *change.incarnation > floorHeld->second.incarnation;
+  if (!advances && code == kTurnResultCommitted) {
+    if (const auto prior = ingress_->changes.find(source);
+        prior != ingress_->changes.end() &&
+        prior->second.kind == IngestOutcome::Kind::Committed &&
+        prior->second.settle) {
+      auto merged = *prior->second.settle;
+      if (published.settle) merged.merge(*published.settle);
+      published.settle = std::move(merged);
+    }
+  }
+  ingress_->changes.insert_or_assign(source, std::move(published));
   if (code != kTurnResultCommitted)
     GLEDITOR_LOG_DEBUG(kIngressLog, "source change refused: {}", code);
   if (change.retire || !change.incarnation) return;
@@ -4952,8 +5064,18 @@ AgentExecutor::checkpoint(const identity::ActorPid &pid) {
   }
   State &state = *found->second;
   if (!live(state)) return std::unexpected(CheckpointRefusal::Stopped);
+  // A host callback run while a wake drains finds the host events moved out
+  // and the belief queue between turns, so neither check below sees the
+  // work the wake still owes.
+  if (state.inTurn) return std::unexpected(CheckpointRefusal::TurnInProgress);
   if (!state.hostEvents.empty() || posts_->pendingFor(pid)) {
     return std::unexpected(CheckpointRefusal::HostDeliveryPending);
+  }
+  // After 2b only a crash inside the settle loop leaves belief events linked
+  // between wakes, and a checkpoint must not preserve them.
+  if (state.context &&
+      state.context->arena.linked(state.agent.agentCell, state.dims.pending)) {
+    return std::unexpected(CheckpointRefusal::SettlePending);
   }
   if (runtime_.pending(pid) != 0) {
     return std::unexpected(CheckpointRefusal::MailboxNotEmpty);

@@ -133,6 +133,9 @@ CompiledProgram::fromUnit(Unit unit, std::string_view name,
       persistentAgent.sourceChangeEntry =
           remap(*stagingAgent.sourceChangeEntry);
     }
+    if (stagingAgent.settleEntry) {
+      persistentAgent.settleEntry = remap(*stagingAgent.settleEntry);
+    }
     if (stagingAgent.observeRefusalEntry) {
       persistentAgent.observeRefusalEntry =
           remap(*stagingAgent.observeRefusalEntry);

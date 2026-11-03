@@ -9,6 +9,9 @@
 #ifndef COMMON_XANADU_VAGENT_RUNTIME_EPISTEMIC_INGRESS_HPP
 #define COMMON_XANADU_VAGENT_RUNTIME_EPISTEMIC_INGRESS_HPP
 
+#include <gleditor/cpp26_inplace_vector.hpp>
+
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <optional>
@@ -104,6 +107,40 @@ enum class OutcomeClass : std::uint8_t {
   NeedsHostAction,
 };
 
+/// What the settle loop did after a source change committed (P19 I3-2b).
+struct SettleReport {
+  /// Top-level belief events whose settle turn committed. A handler that
+  /// failed inside its own choice point is contained and still counts here.
+  std::uint32_t settled{};
+  /// Top-level belief events whose settle turn failed and were dropped.
+  std::uint32_t discarded{};
+  /// The first four distinct event types discarded, in order; `discarded`
+  /// counts all of them, so a fifth distinct type is counted but not named.
+  gleditor::cpp26::inplace_vector<std::string, 4> names;
+
+  /// Count one discarded event and name its type if there is room for it.
+  SettleReport &discard(std::string_view type) {
+    ++discarded;
+    name(type);
+    return *this;
+  }
+  /// Add @p other's counts and the names this report lacks, up to four.
+  SettleReport &merge(const SettleReport &other) {
+    settled += other.settled;
+    discarded += other.discarded;
+    for (const auto &type : other.names) name(type);
+    return *this;
+  }
+  bool operator==(const SettleReport &) const = default;
+
+private:
+  void name(std::string_view type) {
+    if (names.size() < names.capacity() &&
+        std::ranges::find(names, type) == names.end())
+      names.push_back(std::string(type));
+  }
+};
+
 /// One event's ingestion outcome as the host's outcome log records it.
 struct IngestOutcome {
   enum class Kind : std::uint8_t { Pending, Committed, Duplicate, Refused };
@@ -111,6 +148,10 @@ struct IngestOutcome {
   /// The refusal code, present exactly when `kind` is `Refused`.
   std::optional<std::string> code;
   std::optional<OutcomeClass> outcomeClass;
+  /// A committed source change that queued belief events: how they settled.
+  /// Absent when it queued none, so a change that only moved a floor reads
+  /// as before.
+  std::optional<SettleReport> settle;
   bool operator==(const IngestOutcome &) const = default;
 };
 

@@ -175,6 +175,8 @@ enum class CheckpointRefusal : std::uint8_t {
   UnknownAgent,        ///< no such pid, or it has not had its first turn
   Stopped,             ///< stopped, or on its way out
   HostDeliveryPending, ///< the adapter holds an event it has yet to run
+  SettlePending,       ///< belief events are queued on `d.pending` unsettled
+  TurnInProgress,      ///< called from inside a wake, as from a host sink
   MailboxNotEmpty,
   SendsIncomplete, ///< a message this agent sent has no reply yet
   EffectInFlight,  ///< a native skill is still running an effect it started
@@ -577,7 +579,16 @@ private:
   /// An advance or retire turn's end: record it, move the host's floor, and
   /// revoke a binding the arena refused.
   void finishSourceChange(State &state, const SourceChange &change,
-                          std::string_view code);
+                          std::string_view code,
+                          std::optional<SettleReport> settle = std::nullopt);
+  /// Settle the belief events a committed change queued on `d.pending`, one
+  /// top-level event per turn, discarding any whose turn fails (P19 I3-2b).
+  /// @p report fills in as the loop runs, so a caller that unwinds from it
+  /// still publishes what was done.
+  void settleQueued(State &state, zigzag::CellRef cursor,
+                    const zigzag::vortex::mesh::ActorGrant &grant,
+                    zigzag::vortex::WorkerContext &context,
+                    SettleReport &report);
   /// Discard host events that cannot run, accounting for every ingestion.
   void dropHostEvents(State &state);
   /// Drop a stopped actor's bindings, queue counts, outcome log and charges.

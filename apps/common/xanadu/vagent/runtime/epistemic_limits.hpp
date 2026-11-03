@@ -5,6 +5,9 @@
 #ifndef COMMON_XANADU_VAGENT_RUNTIME_EPISTEMIC_LIMITS_HPP
 #define COMMON_XANADU_VAGENT_RUNTIME_EPISTEMIC_LIMITS_HPP
 
+#include "common/xanadu/zigzag/manifold.hpp"
+
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -57,6 +60,9 @@ enum class EpistemicLimitError : std::uint8_t {
   InvalidIngestionBound,
 };
 
+/// The settle reserve is one 64th of the slot allowance.
+inline constexpr std::size_t kSlotReserveDivisor = 64;
+
 /// Logical admission bounds; actor cell, byte and fuel grants remain
 /// independent.
 struct EpistemicLimits {
@@ -99,6 +105,23 @@ struct EpistemicLimits {
       static_cast<std::size_t>(kDefaultEpistemicIngestPerWake)};
   /// `vagent.epistemic_arena_slots`: the actor's arena slot allowance.
   std::size_t arenaSlots{static_cast<std::size_t>(kDefaultEpistemicArenaSlots)};
+
+  /// Slots past `arenaSlots` that only settle turns may use, so a batch of
+  /// belief events still settles when the allowance is spent. Zero for a tiny
+  /// allowance, and clamped to the room below the arena's ref space: a ref
+  /// with a dense index past `ephemeralBit` aliases a lower slot silently, so
+  /// a large setting must not let a turn start near that limit.
+  [[nodiscard]] std::size_t slotReserve() const noexcept {
+    constexpr std::size_t refSpace = zigzag::ephemeralBit;
+    const std::size_t room = arenaSlots < refSpace ? refSpace - arenaSlots : 0;
+    return std::min(arenaSlots / kSlotReserveDivisor, room);
+  }
+
+  /// True when `slotReserve()` is smaller than the divisor rule gives, so the
+  /// host can say once that the allowance is too close to the ref space.
+  [[nodiscard]] bool slotReserveClamped() const noexcept {
+    return slotReserve() < arenaSlots / kSlotReserveDivisor;
+  }
 
   [[nodiscard]] std::expected<void, EpistemicLimitError> validate() const {
     if (maxSources == 0)
