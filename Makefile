@@ -685,7 +685,7 @@ VICONC_SRCS     := $(shell find apps/viconc -name '*.cpp' 2>/dev/null)
 VICONC_OBJS     := $(call obj,$(VICONC_SRCS))
 VAGENT_SRCS     := $(shell find apps/vagent -name '*.cpp' 2>/dev/null)
 VAGENT_OBJS     := $(call obj,$(VAGENT_SRCS))
-VAGENT_FRONTEND_SRCS := $(addprefix apps/common/xanadu/vagent/,token.cpp lexer.cpp parser.cpp checker.cpp cell_path.cpp) \
+VAGENT_FRONTEND_SRCS := $(addprefix apps/common/xanadu/vagent/,token.cpp lexer.cpp parser.cpp checker.cpp cell_path.cpp resolve.cpp frontend.cpp ast_clone.cpp) \
     $(addprefix apps/common/xanadu/vql/,lexer.cpp parser.cpp) \
     apps/common/xanadu/scanner_base.cpp
 VAGENT_FRONTEND_OBJS := $(call obj,$(VAGENT_FRONTEND_SRCS))

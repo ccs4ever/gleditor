@@ -85,10 +85,28 @@ enum class ExprKind : std::uint8_t {
   Yield,
   Consume,
   Fail,
+  Code,
+  Splice,
+  Static,
 };
 
 struct Expr;
 using ExprPtr = std::unique_ptr<Expr>;
+
+// The resolve-only pass's binding-identity stamp (§5.6 of
+// design/vagent-metaprogramming.md). `scope` identifies the scope the node
+// resolved in — carried on every Expr, not only Identifier, so expand can
+// seed a code"…" body subtree from its literal's own scope — and `ordinal`
+// identifies one binding within that scope, present on Identifier and
+// LogicVariable nodes only, so two bindings in one scope never share a
+// stamp. Absent until resolve runs; cloneExpr and cloneDecl preserve it
+// verbatim because kernel side tables key on `const Expr *` — a
+// pointer-keyed stamp table would die under cloning.
+struct ScopeStamp {
+  std::uint64_t scope{0};
+  std::optional<std::uint64_t> ordinal;
+  bool operator==(const ScopeStamp &) const = default;
+};
 
 // Fixed-role optional expressions avoid positional sentinels for scope,
 // recipients, deadline, guard and recovery in actions. Ordinary operands are
@@ -106,6 +124,7 @@ struct Expr {
   ExprPtr guard;
   ExprPtr recovery;
   std::optional<std::string> binding;
+  std::optional<ScopeStamp> stamp;
 };
 
 struct Parameter {

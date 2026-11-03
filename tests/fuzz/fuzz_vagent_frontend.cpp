@@ -8,7 +8,7 @@
 #include <string_view>
 #include <tuple>
 
-#include "common/xanadu/vagent/checker.hpp"
+#include "common/xanadu/vagent/frontend.hpp"
 #include "common/xanadu/vagent/lexer.hpp"
 #include "common/xanadu/vagent/parser.hpp"
 
@@ -44,8 +44,11 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data,
   }
 
   const xanadu::vagent::ParseLimits limits{maxHarnessTokens, maxHarnessDepth};
-  auto program = xanadu::vagent::Parser(source, limits).parseProgram();
-  if (program) std::ignore = xanadu::vagent::check(*program);
+  // compile() covers parse → resolve → check, so the resolve pass's stamp
+  // walk is fuzzed over the same inputs the checker sees.
+  xanadu::vagent::FrontendLimits frontendLimits{};
+  frontendLimits.parse = limits;
+  std::ignore          = xanadu::vagent::compile(source, frontendLimits);
   std::ignore = xanadu::vagent::Parser(source, limits).parseExpression();
   return 0;
 }

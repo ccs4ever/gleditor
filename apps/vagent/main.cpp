@@ -4,8 +4,7 @@
 #include <string>
 #include <string_view>
 
-#include "common/xanadu/vagent/checker.hpp"
-#include "common/xanadu/vagent/parser.hpp"
+#include "common/xanadu/vagent/frontend.hpp"
 #include "common/xanadu/vagent/token.hpp"
 
 namespace {
@@ -43,16 +42,11 @@ bool checkFile(std::string_view path) {
     }
   }
 
-  xanadu::vagent::Parser parser(source);
-  auto program = parser.parseProgram();
+  // The staged frontend pipeline — parse → resolve → expand → check — owns
+  // invocation order; expand is the seam later phases fill.
+  auto program = xanadu::vagent::compile(source);
   if (!program) {
-    std::cerr << path << ':'
-              << xanadu::vagent::formatDiagnostic(program.error()) << '\n';
-    return false;
-  }
-  auto checked = xanadu::vagent::check(*program);
-  if (!checked) {
-    for (const auto &diagnostic : checked.error()) {
+    for (const auto &diagnostic : program.error()) {
       std::cerr << path << ':' << xanadu::vagent::formatDiagnostic(diagnostic)
                 << '\n';
     }

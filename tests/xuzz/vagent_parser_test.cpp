@@ -1,11 +1,15 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <memory>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 #include <gtest/gtest.h>
 
+#include "common/xanadu/vagent/ast_clone.hpp"
 #include "common/xanadu/vagent/parser.hpp"
 
 namespace {
@@ -561,6 +565,205 @@ TEST(VAgentParserTest, ConfiguredLimitsBoundRecursionAndConstructedTrees) {
   EXPECT_FALSE(Parser(fields, limits).parseExpression());
   limits.maxTokens = 2;
   EXPECT_FALSE(Parser("event E", limits).parseProgram());
+}
+
+ExprPtr makeExpr(ExprKind kind, std::string text = {}) {
+  auto result  = std::make_unique<Expr>();
+  result->kind = kind;
+  result->text = std::move(text);
+  return result;
+}
+
+void expectSameLocation(const SourceLocation &expected,
+                        const SourceLocation &actual) {
+  EXPECT_EQ(expected.line, actual.line);
+  EXPECT_EQ(expected.column, actual.column);
+  EXPECT_EQ(expected.offset, actual.offset);
+}
+
+// Structural equality plus pointer-distinctness: a clone shares no node with
+// its source, because kernel side tables key on `const Expr *`.
+void expectSameExpr(const Expr &expected, const Expr &actual) {
+  EXPECT_NE(&expected, &actual);
+  EXPECT_EQ(expected.kind, actual.kind);
+  EXPECT_EQ(expected.text, actual.text);
+  expectSameLocation(expected.loc, actual.loc);
+  EXPECT_EQ(expected.names, actual.names);
+  EXPECT_EQ(expected.annotation, actual.annotation);
+  EXPECT_EQ(expected.binding, actual.binding);
+  EXPECT_EQ(expected.stamp, actual.stamp);
+  ASSERT_EQ(expected.children.size(), actual.children.size());
+  for (std::size_t i = 0; i < expected.children.size(); ++i)
+    expectSameExpr(*expected.children[i], *actual.children[i]);
+  const auto metadata = [](const ExprPtr &left, const ExprPtr &right) {
+    ASSERT_EQ(left == nullptr, right == nullptr);
+    if (left != nullptr) expectSameExpr(*left, *right);
+  };
+  metadata(expected.scope, actual.scope);
+  metadata(expected.recipients, actual.recipients);
+  metadata(expected.deadline, actual.deadline);
+  metadata(expected.guard, actual.guard);
+  metadata(expected.recovery, actual.recovery);
+}
+
+void expectSameOptionalExpr(const ExprPtr &expected, const ExprPtr &actual) {
+  ASSERT_EQ(expected == nullptr, actual == nullptr);
+  if (expected != nullptr) expectSameExpr(*expected, *actual);
+}
+
+void expectSameDecl(const Decl &expected, const Decl &actual) {
+  EXPECT_NE(&expected, &actual);
+  EXPECT_EQ(expected.kind, actual.kind);
+  EXPECT_EQ(expected.name, actual.name);
+  expectSameLocation(expected.loc, actual.loc);
+  ASSERT_EQ(expected.parameters.size(), actual.parameters.size());
+  for (std::size_t i = 0; i < expected.parameters.size(); ++i) {
+    EXPECT_EQ(expected.parameters[i].name, actual.parameters[i].name);
+    EXPECT_EQ(expected.parameters[i].type, actual.parameters[i].type);
+    EXPECT_EQ(expected.parameters[i].key, actual.parameters[i].key);
+    expectSameLocation(expected.parameters[i].loc, actual.parameters[i].loc);
+  }
+  EXPECT_EQ(expected.result, actual.result);
+  EXPECT_EQ(expected.names, actual.names);
+  EXPECT_EQ(expected.target, actual.target);
+  EXPECT_EQ(expected.goalKind, actual.goalKind);
+  EXPECT_EQ(expected.planBindings, actual.planBindings);
+  ASSERT_EQ(expected.contracts.size(), actual.contracts.size());
+  for (std::size_t i = 0; i < expected.contracts.size(); ++i) {
+    EXPECT_EQ(expected.contracts[i].postcondition,
+              actual.contracts[i].postcondition);
+    expectSameLocation(expected.contracts[i].loc, actual.contracts[i].loc);
+    expectSameOptionalExpr(expected.contracts[i].condition,
+                           actual.contracts[i].condition);
+  }
+  ASSERT_EQ(expected.goalClauses.size(), actual.goalClauses.size());
+  for (std::size_t i = 0; i < expected.goalClauses.size(); ++i) {
+    EXPECT_EQ(expected.goalClauses[i].kind, actual.goalClauses[i].kind);
+    expectSameLocation(expected.goalClauses[i].loc, actual.goalClauses[i].loc);
+    expectSameOptionalExpr(expected.goalClauses[i].condition,
+                           actual.goalClauses[i].condition);
+  }
+  ASSERT_EQ(expected.members.size(), actual.members.size());
+  for (std::size_t i = 0; i < expected.members.size(); ++i)
+    expectSameDecl(expected.members[i], actual.members[i]);
+  expectSameOptionalExpr(expected.body, actual.body);
+  expectSameOptionalExpr(expected.guard, actual.guard);
+  expectSameOptionalExpr(expected.initializer, actual.initializer);
+  expectSameOptionalExpr(expected.trigger, actual.trigger);
+  expectSameOptionalExpr(expected.deadline, actual.deadline);
+  EXPECT_EQ(expected.binding, actual.binding);
+  EXPECT_EQ(expected.priority, actual.priority);
+  EXPECT_EQ(expected.native, actual.native);
+  EXPECT_EQ(expected.effect, actual.effect);
+  EXPECT_EQ(expected.preempts, actual.preempts);
+}
+
+void expectSameProgram(const Program &expected, const Program &actual) {
+  EXPECT_EQ(expected.module, actual.module);
+  ASSERT_EQ(expected.imports.size(), actual.imports.size());
+  for (std::size_t i = 0; i < expected.imports.size(); ++i) {
+    EXPECT_EQ(expected.imports[i].path, actual.imports[i].path);
+    EXPECT_EQ(expected.imports[i].alias, actual.imports[i].alias);
+    EXPECT_EQ(expected.imports[i].symbols, actual.imports[i].symbols);
+    expectSameLocation(expected.imports[i].loc, actual.imports[i].loc);
+  }
+  ASSERT_EQ(expected.declarations.size(), actual.declarations.size());
+  for (std::size_t i = 0; i < expected.declarations.size(); ++i)
+    expectSameDecl(expected.declarations[i], actual.declarations[i]);
+}
+
+TEST(VAgentAstCloneTest, CloneExprCopiesEveryFieldAndOwnsEveryNode) {
+  Expr original;
+  original.kind       = ExprKind::AwaitEvent;
+  original.text       = "Ping";
+  original.loc        = SourceLocation{3, 7, 42};
+  original.names      = {"first", "second"};
+  original.annotation = Type{"List", {Type{"Int", {}}}};
+  original.binding    = "pong";
+  original.stamp      = ScopeStamp{.scope = 11, .ordinal = 4};
+  original.children.push_back(makeExpr(ExprKind::Integer, "1"));
+  original.children.back()->stamp = ScopeStamp{.scope = 11};
+  original.scope                  = makeExpr(ExprKind::Identifier, "inner");
+  original.recipients             = makeExpr(ExprKind::Identifier, "parent");
+  original.deadline               = makeExpr(ExprKind::Duration, "1s");
+  original.guard                  = makeExpr(ExprKind::Boolean, "true");
+  original.recovery               = makeExpr(ExprKind::Integer, "0");
+
+  const auto copy = cloneExpr(original);
+  ASSERT_TRUE(copy);
+  expectSameExpr(original, *copy);
+  // An absent metadata child clones to nullptr rather than a fresh node.
+  EXPECT_EQ(cloneExpr(ExprPtr{}), nullptr);
+}
+
+TEST(VAgentAstCloneTest, CloneDeclCopiesNestedMembersClausesAndFlags) {
+  // The population is intentionally ungrammatical — one Decl carrying every
+  // field at once, so the coverage does not depend on any one declaration
+  // kind's real shape.
+  Decl original;
+  original.kind         = DeclKind::Goal;
+  original.name         = "Enough";
+  original.loc          = SourceLocation{9, 2, 100};
+  original.parameters   = {Parameter{.name = "minimum",
+                                     .type = Type{"Int", {}},
+                                     .key  = true,
+                                     .loc  = SourceLocation{9, 13, 111}}};
+  original.result       = Type{"Bool", {}};
+  original.names        = {"Base", "Mixin"};
+  original.target       = "parentGoal";
+  original.goalKind     = GoalKind::Maintain;
+  original.planBindings = std::vector<std::string>{"bound", "names"};
+  Contract contract;
+  contract.postcondition = true;
+  contract.loc           = SourceLocation{10, 3, 120};
+  contract.condition     = makeExpr(ExprKind::Boolean, "true");
+  original.contracts.push_back(std::move(contract));
+  GoalClause clause;
+  clause.kind      = GoalClause::Kind::Drop;
+  clause.loc       = SourceLocation{11, 3, 140};
+  clause.condition = makeExpr(ExprKind::Believes);
+  clause.condition->children.push_back(makeExpr(ExprKind::Term, "level"));
+  clause.condition->scope = makeExpr(ExprKind::Identifier, "self");
+  original.goalClauses.push_back(std::move(clause));
+  Decl member;
+  member.kind        = DeclKind::Field;
+  member.name        = "watch";
+  member.result      = Type{"Opt", {Type{"Int", {}}}};
+  member.initializer = makeExpr(ExprKind::None);
+  original.members.push_back(std::move(member));
+  original.body     = makeExpr(ExprKind::Block);
+  original.guard    = makeExpr(ExprKind::Identifier, "ready");
+  original.trigger  = makeExpr(ExprKind::Term, "started");
+  original.deadline = makeExpr(ExprKind::Duration, "2s");
+  original.binding  = "alias";
+  original.priority = 7;
+  original.native   = true;
+  original.effect   = true;
+  original.preempts = true;
+
+  const auto copy = cloneDecl(original);
+  expectSameDecl(original, copy);
+}
+
+TEST(VAgentAstCloneTest, CloneProgramRoundTripsEverySpecificationSample) {
+  const std::filesystem::path directory("tests/samples/vagent");
+  ASSERT_TRUE(std::filesystem::is_directory(directory));
+  std::size_t clonedCount = 0;
+  for (const auto &entry : std::filesystem::directory_iterator(directory)) {
+    if (entry.path().extension() != ".vagent" ||
+        !entry.path().filename().string().starts_with("mini_"))
+      continue;
+    SCOPED_TRACE(entry.path().string());
+    std::ifstream stream(entry.path());
+    const std::string source(std::istreambuf_iterator<char>(stream), {});
+    auto parsed = Parser(source).parseProgram();
+    ASSERT_TRUE(parsed.has_value())
+        << (parsed ? "" : formatDiagnostic(parsed.error()));
+    const auto copy = cloneProgram(*parsed);
+    expectSameProgram(*parsed, copy);
+    ++clonedCount;
+  }
+  EXPECT_EQ(clonedCount, 23U);
 }
 
 } // namespace
