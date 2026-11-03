@@ -6,6 +6,25 @@ owner's earlier decisions. A decision that changes what the spec says is also li
 amendments". Those are folded into spec v1.6 at F1, marked pending, and take effect as spec text
 only when the owner ratifies them. Reviewers may contest any decision with evidence.
 
+## 0. Review cadence (owner steering, 2026-11-02)
+
+The owner directed that work is not reviewed after every small change. From here:
+
+- Each iteration's design is reviewed by its personas until no BLOCKING or MAJOR finding is open. A
+  fix that implements a lead ruling or a MINOR point is verified by the lead, without a confirmation
+  round.
+- Implementation slices land on the lead's build and the full headless suites. Code findings are
+  fixed by a worker and verified by the lead with tests.
+- Each iteration gets one multi-persona implementation review before acceptance. For ML-related work
+  the ML expert is in it, and an open ML MAJOR finding closes only on the ML expert's confirmation
+  (the README gate).
+
+Acceptances under this rule: the I3-2 design, revision 4, proceeds to implementation (round 4 PASS
+from architect, distributed and codebase; ML, epistemology, hardware and security confirm their
+round-3 findings in the I3-2 implementation review). Remaining-plan draft 3 is the working plan
+(round-2 MAJOR findings resolved by P2-1 to P2-6; open MINOR points are fixed in later updates). E1
+is accepted (codebase and architect PASS); its MINOR m1 (`inline constexpr`) goes to 2a.
+
 ## 1. I3-2 round-2 decisions
 
 The items marked `DECISION` in [findings-r2.md](i3-2-review/findings-r2.md):
