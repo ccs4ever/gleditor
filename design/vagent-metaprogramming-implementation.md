@@ -105,7 +105,7 @@ pipeline — with `splice`/`static` uniformly refused. Compile-time surface only
 - `parser.cpp`: `code` in the `PrefixedStringLiteral` gate (:848-855 precedent from `cells"…"`);
   `Primary`/`Type` productions; the `splice`/`static` prefix *productions* themselves — `static`
   `Unary`-prefixed with a mandatory operand (spec :960-961), `splice` as `'splice' Postfix` with the
-  peeling rule that re-attaches `splice f(args)`'s arglist (spec :736-738 — without it §9.1's
+  peeling rule that re-attaches `splice f(args)`'s arglist (spec :736-739 — without it §9.1's
   `splice inc(count)` parses as a call-shaped-operand refusal) — without them the skeleton's refusal
   exercises parse errors, not the named `DiagnosticCode`; `parseCodeBody` (#label/ CodeParams
   header, inner-offset diagnostics, `#` stripped pre-lex).
@@ -270,14 +270,14 @@ structure, still session scope.
   `graft`/`learn`'s accept gate); `weight_of`, `value_of`, `next_rand`; `run(c, [args])` as the
   checker special form **under the import** — unimported, a user `def run` still resolves to the
   user's decl — spilling *and restoring* `result`/`produced` around the call and failing when
-  `produced` is false (spec :262-264); `run`/`graft` on a `Code`-parameterized (splice-only)
-  fragment is a named refusal — it has no value-level parameter to receive (§5.4 :924-934); `reify`
-  over literal-born fragments replaying `+d.recipe` — its `reify:<src>:<serial>` label mints off the
-  agent cell's `d.vars` counter, the same counter `patch:<n>` draws (spec :2504-2509), and its
-  capture-slot re-clone palette is `New`/`Link`/`Value`, never `Clone` (U-M7's foreign-graph case
-  stays deferred). The `run`-target head-vs-op discriminator — resolve an op directly, follow
-  `+d.entry` once on a head (spec :1141-1144) — is a read rule and lands here with the readers, not
-  with the verbs.
+  `produced` is false (spec :262-264); `run` on a `Code`-parameterized (splice-only) fragment is a
+  named refusal — it has no value-level parameter to receive (§5.4 :924-934 — the `graft` arm lands
+  with the mutation verbs in phase 4); `reify` over literal-born fragments replaying `+d.recipe` —
+  its `reify:<src>:<serial>` label mints off the agent cell's `d.vars` counter, the same counter
+  `patch:<n>` draws (spec :2504-2509), and its capture-slot re-clone palette is
+  `New`/`Link`/`Value`, never `Clone` (U-M7's foreign-graph case stays deferred). The `run`-target
+  head-vs-op discriminator — resolve an op directly, follow `+d.entry` once on a head (spec
+  :1141-1144) — is a read rule and lands here with the readers, not with the verbs.
 - **The adapter bind set, harness-supplied in this phase** — `std:meta`'s runtime roots: the program
   root cell, `agent_cell()`, the twelve data-minted apparatus dims
   `d.code`/`d.patch`/`d.weight`/`d.synapse`/
@@ -334,7 +334,8 @@ and the resolvers read them immediately.
   `resume`**: `opcodeMap_` is per-`WorkerContext` and holds none of the folded image's ops at either
   (spec :2335-2343). Registered by P15 here; exercised at genesis (b) — phase 5.
 - `std:meta` mutation surface: signature-table rows and prelude routines for
-  `graft_plan`/`graft_handler`/`graft_where`/`graft_body`/`graft_method`, `prune`,
+  `graft_plan`/`graft_handler`/`graft_where`/`graft_body`/`graft_method` (carrying the phase-2
+  splice-only-`graft` refusal arm), `prune`,
   `learn_plan`/`learn_method`/`learn_handler`/`learn_where`/ `learn_body` — all five `graft_*`
   durable twins (§6.1 :1168-1174; §9.2's worked example calls `learn_where`) — `unlearn`,
   `set_weight` with its full dispatch (junction arm writes its own `+d.weight` scalar; clause arm
@@ -411,7 +412,8 @@ itself.
   unfiled session-minted dim costs one `dimensionNamed`-invisible orphan at its *first* fold — the
   first-use edge split: `makeDimension`'s store cell `B` while the session's edges named arena cell
   `A`, and `discover`→promote mints `A'` carrying them (`store.cpp:1066`,
-  `arena_manifold.cpp:1781`,`:2030-2042`) — not a per-checkpoint accrual (spec :2397-2402; today's
+  `arena_manifold.cpp:1781`,`:2030-2042`) — not a per-checkpoint accrual (spec :2397-2402's
+  per-checkpoint figure is the once-only-filing case; the per-cycle sweep bounds it — today's
   unfiled session mints include `d.op-label` at `mesh_value.cpp:473`, `or_parallel`'s four —
   `d.or`/`d.branch`/`d.frontier`/`d.submission` at `or_parallel.cpp:181-184` — `dim_cap.cpp:83-85`'s
   `d.actor`/`d.ticket`/`d.signature`, `command_transaction.cpp:16-18`'s
@@ -427,29 +429,30 @@ itself.
   — the publish-destination shape) → `Store::rebuildManifold` over the new head → re-attach through
   a fresh `WorkerContext` over the rebuilt fold (`worker_context.hpp:52-54` — fresh because the
   context's `arena` pins `base` at construction and the bundle is non-movable; the fresh VM's empty
-  `opcodeMap_` is what (b) then re-fills) → re-run (a)–(e). The **promote-visible mutation class**
-  bounds what a cycle can carry: `promote` emits content ops only for `isEphemeral` cells and
-  link-writes on `holdsOwn` cells — a shadowed base cell gets no content op, and a removed base edge
-  is never un-emitted (`arena_manifold.cpp:1867-1870`, `:2020-2053`). So durable counters and scalar
-  writes take mint-and-repoint form — the `d.vars` serial counter bumps a *fresh ephemeral* the
-  keying record's `+d.values` edge repoints at (spec :1300), never an in-place `writeValue`, which
-  would rewind `patch:<n>` at fold 2 into exactly the ABA the durable bullet forbids — and
-  `set_weight`'s `+d.weight` value writes ride the same discipline; base-edge unlinks survive only
-  via (d) replay or tombstone-form records — `unlearn`'s mid-rank record drops are repoints
-  (link-writes, `unlink` = `link(…,nullopt)` does no chain repair, `arena_manifold.hpp:616-618`)
-  that promote fine, but its *tail* drop is a true removal where replay is the resurrection hazard
-  and only tombstone form works. `root` is the **agent cell** alone (spec :375, :634-635):
-  program-side state is *never* a promote root — bare grafts must die with the incarnation (spec
-  :375-377, :1791-1799 — that boundary is what makes `learn` = graft + record a distinction),
-  graft-adds would carry without prune-removes, and replay-installed copies would double under (d),
-  whose alias re-match can't see a promoted `patch:<n>` label (spec :1322-1324). `promote` folds
-  only its `root`'s reachable subgraph (`arena_manifold.hpp:833-836`) — but nothing durable drops
-  silently: all durable state already hangs on the agent cell's ranks
-  (`d.code`/`d.patch`/`d.synapse`/`d.vars`, spec :1870-1871, :2465), and spec :2265-2266's two-root
-  vocabulary belongs to (a)'s classification walk, not to promote. The only program-rooted promote
-  is the one-time image seed named below. A same-`Store` cycle needs no `sealLocalSpool` — op
-  records and local spans ride verbatim; the initial image band comes from `promote` of the compile
-  arena or `adoptOpRecords` (`store.cpp:3836-4018`). In spec order:
+  `opcodeMap_` is what (b) then re-fills) → re-run the filing sweep → re-run (a)–(e). The
+  **promote-visible mutation class** bounds what a cycle can carry: `promote` emits content ops only
+  for `isEphemeral` cells and link-writes on `holdsOwn` cells — a shadowed base cell gets no content
+  op, and a removed base edge is never un-emitted (`arena_manifold.cpp:1867-1870`, `:2020-2053`). So
+  durable counters and scalar writes take mint-and-repoint form — the `d.vars` serial counter bumps
+  a *fresh ephemeral* the keying record's `+d.values` edge repoints at (spec :1300), never an
+  in-place `writeValue`, which would rewind `patch:<n>` at fold 2 into exactly the ABA the durable
+  bullet forbids — and `set_weight`'s `+d.weight` value writes ride the same discipline; base-edge
+  unlinks survive only via (d) replay or tombstone-form records — `unlearn`'s mid-rank record drops
+  are repoints (link-writes, `unlink` = `link(…,nullopt)` does no chain repair,
+  `arena_manifold.hpp:616-618`) that promote fine, but its *tail* drop is a true removal where
+  replay is the resurrection hazard and only tombstone form works. `root` is the **agent cell**
+  alone (spec :375, :635-636): program-side cells are *never* under a promote root — bare grafts
+  must die with the incarnation (spec :375-377, :1791-1799 — that boundary is what makes `learn` =
+  graft + record a distinction), graft-adds would carry without prune-removes, and replay-installed
+  copies would double under (d), whose alias re-match can't see a promoted `patch:<n>` label (spec
+  :1322-1324). `promote` emits only its `root`'s reachable subgraph (`arena_manifold.hpp:833-836` —
+  the fold is `rebuildManifold`'s) — but nothing durable drops silently: all durable state already
+  hangs on the agent cell's ranks (`d.code`/`d.patch`/`d.synapse`/`d.vars`, spec :1870-1871, :2465,
+  :1294-1295), and spec :2265-2266's two-root vocabulary belongs to (a)'s classification walk, not
+  to promote. The only program-rooted promote is the one-time image seed named below. A same-`Store`
+  cycle needs no `sealLocalSpool` — op records and local spans ride verbatim; the initial image band
+  comes from `promote` of the compile arena or `adoptOpRecords` (`store.cpp:3836-4018`). In spec
+  order:
   - (a) **lineage bind** — the ops-record order comparand over the decoded `1..E_ops` band (every
     *non-scroll* post-fold `OpRecord` field verbatim, post-remap, plus scroll *identity* by key —
     `globalKeyOf`'s arm set minus `localScroll`: `breakMarkerKey` for sealed break-marker spans,
@@ -508,9 +511,9 @@ itself.
 
 **Requires:** phases 3–4's emission contract, bind set and session records; a local `Store` plus
 `promote`, `rebuildManifold` and a fresh `WorkerContext` per cycle — all in-tree, and
-`overlay.cpp:46-82` runs the identical mint→rebuild→re-pin loop with no actor executor.
-Kernel-simulable: the whole exit through a test-owned genesis driver. Adapter-gated: the production
-hook (the driver invoked on real spawn/resume paths) — phase 6 wires it.
+`overlay.cpp:46-82` runs the same mint→rebuild→re-pin loop with no actor executor. Kernel-simulable:
+the whole exit through a test-owned genesis driver. Adapter-gated: the production hook (the driver
+invoked on real spawn/resume paths) — phase 6 wires it.
 
 **Exit:** learn→re-genesis→learn cycles — **≥2 re-geneses**, since a re-linking (rather than
 re-minting) implementation only drops `patch:<n>` at the second fold; dedupe/no-ABA tests; a rebind
@@ -557,7 +560,7 @@ are the citable units; the repo's list style renders every marker `1.`.)
    `mesh_actor.cpp:468`, the `executor_` invocation at `:473-477`), so mailbox-empty-at-turn-end is
    `pending(pid)==0` sampled inside the callback; `pending(pid)==1` is the *flag-time* queue-depth
    test — flagged message sole-queued — with the end-of-turn empty re-check the veto a self-send
-   trips (spec :2165-2169). An empty-mailbox checkpoint mints a P4 wake turn, and **no turn of
+   trips (spec :2163-2172). An empty-mailbox checkpoint mints a P4 wake turn, and **no turn of
    either kind runs between the flagged turn's end and `publishValue`** (issued synchronously from
    the same callback — the no-interleave discipline, spec :2171-2179); the three-state flag and the
    kind-guarded restore on every exit path.
