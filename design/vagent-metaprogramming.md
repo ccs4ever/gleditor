@@ -2,7 +2,7 @@
 
 | field         | value                                                                                                                                                                                                                                   |
 | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| version       | 1.6 (see [Appendix](#appendix-versioning-and-change-history))                                                                                                                                                                           |
+| version       | 1.7 (see [Appendix](#appendix-versioning-and-change-history))                                                                                                                                                                           |
 | status        | Design draft. Nothing here is implemented. It rests on vagent v3.9, whose own implementation is in progress: the source frontend and the scalar lowering kernel exist; the actor executor does not.                                     |
 | compiles to   | Vortex opcode graphs held in the agent's private `ArenaManifold`; a fragment is the same object `compileStatement` already produces (`vagent/compiler.hpp:28-34`)                                                                       |
 | rests on      | vagent ([specification](vagent-agent-language.md)), Vortex ([runtime](vortex-hyperstructural-runtime.md)), `ArenaManifold`'s mark/trail/discard, the `cells"…"` embedded-VQL subset, the Spool-Mesh checkpoint/promotion machinery      |
@@ -235,15 +235,18 @@ nowhere else — evaluated in order and bound on the `#Call` frame by parameter 
 arguments are (`vagent-agent-language.md` §5.8 — values, not ref-boxes; there is no `Cell`-boxing
 surface in the language and none is added). When the fragment is statically known the checker
 verifies arity and element types at the call; otherwise the descriptor comparison of §7.2 applies at
-run time. `run` emits a `#Call` to the entry op reached through the head's `+d.entry`, pushes the
-§5.8 frame — argument cells are frame-bound per activation, so recursion is safe — spills and
-restores the fragment's `result`/`produced` cells (recorded on the descriptor, §6.1) around it, and
-yields `T` — `()` for `Code<()>` — or fails when `produced` is false. The descriptor's parameter
-cells are signature data for `validate`, never argument receivers. Two distinct failure paths exist
-and are kept separate: `produced` false is expression failure; a fragment graph that hits the shared
-`Fail` op backtracks *through* the `run` into the caller's choice structure (the stack-top relink at
-`vortex_vm.cpp:238-243` is what makes the unwind sound). Fragment tails are `Return`, not `Halt`: a
-`Halt` would park the cursor mid-statement (`vortex_vm.cpp:1220-1225`) without popping the frame.
+run time. `run` reads the head's `+d.entry` itself — the operand slot is head-valued (§6.2) — and
+pushes the §5.8 `#Call` **frame**: the call/frame convention, not a `Call`-opcode operand — `Call`
+executes `toInt(inputs[0])` (`vortex_vm.cpp:854-856`), an entry-valued slot that cannot name a head.
+Argument cells are frame-bound per activation, so recursion is safe; `run` spills and
+restores the fragment's `result`/`produced` cells (recorded on the descriptor, §6.1) around the
+call, and yields `T` — `()` for `Code<()>` — or fails when `produced` is false. The descriptor's
+parameter cells are signature data for `validate`, never argument receivers. Two distinct failure
+paths exist and are kept separate: `produced` false is expression failure; a fragment graph that
+hits the shared `Fail` op backtracks *through* the `run` into the caller's choice structure (the
+stack-top relink at `vortex_vm.cpp:238-243` is what makes the unwind sound). Fragment tails are
+`Return`, not `Halt`: a `Halt` would park the cursor mid-statement (`vortex_vm.cpp:1220-1225`)
+without popping the frame.
 Suspending statements — `await`, `achieve`, `ask`, `yield`, effect calls — are refused inside
 `code"…"` because a fragment has no step path (V4); U-M6 records the continuation future. `adopt`,
 `emit`, `believe`, `install`, `graft`, `run` itself (a nested `run` pays a frame per level) and the
@@ -252,8 +255,8 @@ creation-bearing graphs: a fragment containing `cells"…%"` creations lowers to
 statically bound output (`compiler.cpp:793-799`), and `New` refuses a second use in append form and
 re-links silently in non-append form (`vortex_vm.cpp:736-744`); the spill restores values, not
 links, so `validate` refuses bound-output `New`s in any repeatedly-executable fragment (§7.2).
-*Realist wins.* *Price:* a `run` costs a frame, O(arity) frame writes, a spill of two cells and a
-`Call` — same as a method call; recursion pays a frame per level and dies at fuel.
+*Realist wins.* *Price:* a `run` costs a frame, O(arity) frame writes and a spill of two cells —
+same as a method call; recursion pays a frame per level and dies at fuel.
 
 **M7. Runtime mutation is ordinary structural ops on program cells, packaged as `std:meta` verbs —
 `run`, `reify`, `graft_*`, `prune`, `learn_*`, `unlearn` — under the existing purity and position
@@ -275,22 +278,25 @@ discipline.* *Price:* grafts are O(1) link ops plus O(rank) appends — ranks ke
 
 **M8. Reflection is `std:meta`'s `reflect` family — read functions returning `Cell` and `Code<Cell>`
 handles over program structure, with the program root bound by the adapter.** The program's module
-symbol table, `d.clause` ranks, `+d.grab`/`+d.spin` attachments and `d.vars` slots are all arena
-cells; `cells"…"` walks them, with multi-hop navigation through `$` anchors (`cells"##/+d.stdlib"`
-then `cells"$c/+d.vars"`). The adapter hands `std:meta` the program-root cell the artifact loader
-registered — the same binding mechanism V10 uses for the thirteen dimensions. Read functions are
-pure and allowed in conditions; `test_of`/`body_of` wrap raw clause graphs as `Code<Cell>` (a `run`
-on them yields a `Cell` handle to the produced cell — the honest type at an unchecked boundary), and
-the wrapper heads carry `+d.entry → the wrapped graph's root op` like every head — they are
-session-side and unpromotable by construction, so the uniform head convention costs nothing. The
-memoization is *clause-side*: a `clause +d.code → +d.step` chain of memo **records**, each
+symbol table, `d.clause` ranks, `+d.grab`/`+d.spin` attachments and `d.vars` slots are all cells of
+the persistent base manifold — the program image folded from the artifact's low ops prefix (§4.5) —
+which the arena reads through and shadows on write; `cells"…"` walks them, with multi-hop navigation
+through `$` anchors (`cells"##/+d.stdlib"` then `cells"$c/+d.vars"`). The adapter hands `std:meta`
+the program-root cell the artifact loader registered — the same binding mechanism V10 uses for the
+thirteen dimensions. Read functions are pure and allowed in conditions; `test_of`/`body_of` wrap raw
+clause graphs as `Code<Cell>` (a `run` on them yields a `Cell` handle to the produced cell — the
+honest type at an unchecked boundary), and the wrapper heads carry `+d.entry → the wrapped graph's
+root op` like every head — they are session-side and unpromotable by construction, so the uniform
+head convention costs nothing. The memoization is *clause-side*: a `clause +d.code → +d.step` chain
+of memo **records**, each
 `{+d.values → the wrapper head, +d.name → the memo-kind label ("test"/"body") — a fresh text
 cell per record (the makeCell(name) precedent, vortex_stdlib.cpp:4051), since an interned
 label cell could hold only one `-d.name` edge and the second memo's would evict the first's,
 +d.grab → a fresh scalar key cell holding the attach cell's identifying label}` — the
 identifying label is the attach cell's `+d.name` text where it carries one; a label-less attach
-cell (a bare op under §6.1's pre-head convention) has no key to write, so its wrapper never
-memo-hits and is re-minted per call — the key is *content* compared by value, never a link to
+cell (a bare op under the op-or-head resolution rule §6.1 states) has no key to write, so its
+wrapper never memo-hits and is re-minted per call — and no memo record is appended for it either,
+since a keyless record could never hit — the key is *content* compared by value, never a link to
 the attach cell, because the attach cell's single `-d.name` slot could hold only one memo's key
 edge and the other memo would evict it; and the record's `+d.values` occupies the wrapper's
 single `-d.values` slot, safe because a builtin-minted wrapper carries no emission-record anchor
@@ -299,8 +305,8 @@ records only, so a wrapper's own `+d.step` never enters `validate`'s op-graph wa
 a key-mismatching memo is unlinked at re-wrap — so repeated reflection does not mint a fresh
 ~6-cell head per call, and `test_of`/`body_of` memos coexist on the chain rather than evicting each
 other. The memo chain is never on the agent's `d.code` rank (§6.7): clause cells are program-side,
-so the transit clause keeps wrappers off the durable set — they die with the program at `resume`,
-matching the session-handle rule they already are.
+so the transit clause keeps wrappers off the durable set — they die with the incarnation at
+`resume`, matching the session-handle rule they already are.
 *Price:* one adapter binding, memoized wrapper cells, and rank walks at O(length) per hop.
 
 **M9. Mutation under execution is legal, deterministic and bounded — the VM reads links at step
@@ -346,17 +352,19 @@ registers it.
 **M11. Durable mutation is a patch list: `learn` = graft + a `d.patch` record, genesis re-applies
 patches in order — and it is conditional on P16.** V12's rule that no state cell links into the
 program exists because the checkpoint promotes what is reachable from the agent cell
-(`vagent-agent-language.md` §4.3, §V12); program cells therefore do not checkpoint, so a session
-graft is gone at `resume`. This document amends V12 **narrowly**: state may link to a *closed
-fragment graph* (the `closed` descriptor flag — a fragment whose every outside reference is a
+(`vagent-agent-language.md` §4.3, §V12); program cells are therefore never *republished* — they ride
+the shared base lineage the checkpoint's spool prefixes onto (§4.5) — so a session graft is gone at
+`resume`. This document amends V12 **narrowly**: state may link to a *closed fragment graph* (the
+`closed` descriptor flag — a fragment whose every outside reference is a
 state-side binding cell or a name-bound program symbol, so linking it drags only the fragment, its
 state captures and name-records the program can re-resolve — never the program skeleton). But the
 link skeleton is not enough: a fragment's operand slots and `Jump`/`Call`/`Branch`/`Choice`
 targets are `int64` *content* (`makeScalarCell(int64(target))`, `compiler.cpp:516-525`;
 `vortex_core.cpp:384,402`), and `promote` copies Int64 content verbatim while translating only links
-and `OpHandle` values (`arena_manifold.cpp:1934-1954`) — a promoted fragment's internal references
-would silently alias unrelated cells. **P16** is the fix, and it is adapter-side, needing no new
-mechanism beyond P4's already-approved wake (the empty-mailbox arm mints a wake turn — the
+and handle-kind values (`OpHandle`/`ForeignOpHandle`, `arena_manifold.cpp:1934-1954`) — a promoted
+fragment's internal references would silently alias unrelated cells. **P16** is the fix, and it is
+adapter-side, needing no new mechanism beyond P4's already-approved wake (the empty-mailbox arm
+mints a wake turn — the
 register's approved-but-unimplemented `mesh_actor` change, `vagent-agent-language.md:1670`) — the
 `mesh_evaluator.cpp:723-735` publication precedent already does *both* halves
 `isCellRelocationHandle` tests for: `setValueBits(OpHandle, target)` *and* a `d.mesh.relocation`→
@@ -367,9 +375,10 @@ edge plus a `+d.ref` record on the head's `+d.refs` rank; the adapter's flag-dri
 its own `Executor` callback re-kinds each marked cell `OpHandle` at the checkpoint-terminating
 turn's end, `publishValue` runs between turns on `const&`, and a head-of-next-turn pass writes
 `Int64(*handleTarget)` back so the continuing incarnation executes intact (the full protocol is
-§6.6's); genesis rehydrates `Int64(*handleTarget)` per marked cell on each `learn`-registered
-head's records —
-`resume` overlays without `importValue`'s remap (`mesh_actor.cpp:260-271`) — then replays `d.patch`.
+§6.6's); genesis replays `d.patch` **first**, then rehydrates `Int64(*handleTarget)` per marked
+cell across each `learn`-registered head's records *and* the replay-installed copies' regenerated
+records — the sweep runs last so name-records rebind post-installation symbols
+(`resume` overlays the folded manifold without `importValue`'s remap, `mesh_actor.cpp:260-271`).
 Without P16, `learn`/`d.patch`/`d.code` are session-only and the document says so wherever
 they appear. A patch entry on `d.patch` holds the ordinal, target descriptor, a `+d.patch-head`
 chain of recorded head *names* and a `+d.name` label; `std:agent`'s genesis re-runs each graft after
@@ -576,11 +585,18 @@ as `projects/vagent-review/r10-vortex.md` records.
 | --------------------------- | -------------------------- | ------------------------------------------------- | -------------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
 | backtrack inside a mark     | trailed → restored         | minted-under-mark copies die; older ones restored | trailed write → restored               | as written                     | trailed → restored                                                                                                 |
 | turn commit (`discard(m0)`) | persist                    | persist                                           | persist                                | persist                        | persist                                                                                                            |
-| checkpoint (`publishValue`) | **not** promoted (V12)     | promoted iff reachable (e.g. `d.code`)            | **stale**: int names a dense id        | promoted (state cells)         | Int64 promoted verbatim (`arena_manifold.cpp:1934-1936`) — stale without P16                                       |
-| `resume`                    | reloaded from `programRef` | rebuilt if promoted; fresh ids                    | **meaningless**: stale or aliased ints | present; re-grafted at genesis | **aliased**: names whatever cell landed at the old dense id — rehydrated by P16's genesis pass, garbage without it |
+| checkpoint (`publishValue`) | **not** republished — rides the shared base lineage | promoted iff reachable (e.g. `d.code`)            | **stale**: int names a dense id        | promoted (state cells)         | Int64 promoted verbatim (`arena_manifold.cpp:1934-1936`) — stale without P16                                       |
+| `resume`                    | folded back verbatim with the lineage's image prefix | rebuilt if promoted; fresh ids                    | **meaningless**: stale or aliased ints | present; re-grafted at genesis | **aliased**: names whatever cell landed at the old dense id — rehydrated by P16's genesis pass, garbage without it |
 
-Three rows deserve emphasis. Program cells do not checkpoint — that is V12 working as intended, and
-it is why session grafts are ephemeral and `learn` needs `d.patch`. Ref-box ints are *session
+Three rows deserve emphasis. Program cells do not *republish*: `promote` walks only what the agent
+cell reaches, so the skeleton never enters the promoted set — that is V12 working as intended.
+What carries the image is the **store lineage itself**: the agent's store is anchored on the
+artifact's ops as its low prefix at load (the `job.base` shared-store pattern,
+`mesh_jobs.cpp:303-318`), checkpoints append above it, and `sealLocalSpool` seals the whole spool
+(`publication.cpp:611-617`), so the prefix's positions `1..E` ride inside every checkpoint's ops
+segment and fold back verbatim — `rebuildManifold` assigns `birthOp = opIndex`
+(`manifold.cpp:427-442`; a persistent `CellRef` *is* a spool position, `manifold.hpp:295`). That is
+why session grafts are ephemeral and `learn` needs `d.patch`. Ref-box ints are *session
 handles*: `promote` mints store cells in reachability order, not mint order (the BFS at
 `arena_manifold.cpp:1744-1788`, structure at `arena_manifold.hpp:235-240`), and `resume` rebuilds an
 arena whose dense numbering need not match the old one — a stale `Int` can name the wrong cell
@@ -966,8 +982,10 @@ fragment head H
   │                  +d.ref→the slot cell genesis must rewrite  (+d.ref, never +d.values:
   │                  a later +d.values write could evict the marker — link eviction, §4.3)
   │                  +d.name→qualified name or head label ⇒ NAME-record (no marker,
-  │                  never re-kinded; genesis writes int64(entryOp) for qualified
-  │                  records, int64(head) for label records — §6.6)
+  │                  never re-kinded; +d.grab→"call"/"run" role label picks the
+  │                  writeback — int64(entryOp) for call-role, int64(head) for
+  │                  run-role — the +d.name *shape* picks only the resolution
+  │                  path: qualified or verbatim-label — §6.6)
   │                  +d.name absent           ⇒ REF-record (full P16 ceremony)
   ├─(+d.recipe)─► reify recipe chain — per-field records (link tuples + literals
   │                + capture records), each field its own record cell          -- §6.1 reify
@@ -1101,7 +1119,11 @@ hard `Fail` in the fragment backtracks *through* the `run` into the caller's alt
 unwind a method failure causes. A fragment whose tail parks on `Halt` instead of `Return` is not
 `run`-nable — `Halt` parks the cursor without popping the frame (`vortex_vm.cpp:1220-1225`), so
 `run` refuses it at the descriptor/`validate` check; a `Code` value that needs `Halt` semantics
-(a program `def` tail) is reflected, not `run`. `value_of(c: Cell): any` is the companion for
+(a program `def` tail) is reflected, not `run`. The same check names the **headless-`run`**
+refusal: `run` of a head-less program `def` *symbol* — one whose `+d.values` names an entry op,
+never a fragment head — cannot satisfy the head-valued slot convention at all, so the call is
+refused at the descriptor lookup, not bound and then failed (§6.6's rebind arm hits the same
+class). `value_of(c: Cell): any` is the companion for
 `Code<Cell>` results — `run` on a reflected graph yields a `Cell` handle to the produced cell, and
 `value_of` reads its bits (the focus-slot read, §6.1).
 
@@ -1251,11 +1273,14 @@ map keeps the old kind. The trail does not cover the map. The rule and its enfor
    `New`+`Value` mints fresh op cells, which decode through `asInt64` — and whose rewriting is
    *consistent* precisely because no map entry exists (their content is their kind). **Post-resume
    registration:** `opcodeMap_` is VM-private per `WorkerContext` and empty after `resume`; the
-   artifact's own op cells are re-registered by the program load path re-running `mintOpcode` at
-   genesis (the same `ensureDimension`/`exportSymbol` window). A kind rewrite of a
-   *never-registered* cell is not refused — but it is also harmless-by-decode (content-is-kind), so
-   the guard's
-   coverage gap is exactly the set of cells where a desync cannot form.
+   folded image's op cells are re-registered by a `setOpcodeKind` pass over the folded cells at
+   genesis (`vortex_vm.cpp:98-100`, the same `ensureDimension` window — genesis step (b), §6.6).
+   Re-running `mintOpcode` is the one wrong shape: it *mints* a fresh ephemeral cell
+   (`vortex_vm.cpp:73-82`), so it would register twins of the program ops rather than the folded
+   cells themselves, leaving every persistent op cell outside P15's membership test. A kind rewrite
+   of a *never-registered* cell is not refused — but it is also harmless-by-decode
+   (content-is-kind), so the guard's coverage gap is exactly the set of cells where a desync cannot
+   form.
 
 1. **P15 makes the VM enforce it at the write funnel**: `VortexCore::writeValue`/`splice`
    (`vortex_core.cpp:196-254`) take a VM-installed kind predicate — the target is refused when
@@ -1300,50 +1325,74 @@ the V12 failure with the roles reversed. The disciplines:
   one for the installed attachment — and the argument head is left untouched. *Sideness test:*
   "program-side" means *both* reachable from `program()` by a bounded, **outbound-following** walk
   over the program's **full structural dim vocabulary** — `d.stdlib`, `d.vars`, `d.clause`,
-  `d.extends`, `+d.values`, `+d.code`, `+d.entry`, `+d.name`, `d.name`, `+d.refs`, `+d.recipe`,
+  `d.extends`, `+d.values`, `+d.code`, `+d.entry`, `+d.name`, `+d.refs`, `+d.recipe`,
   `+d.grab`, `+d.spin`, `+d.step`, `d.contract`, `d.belief`, `d.source` — every edge outbound
-  (`+d`); the bare `d.` spellings are the *rank* dims, whose membership edges run
+  (`+d`); the bare `d.` spellings in this list are the *rank* dims, whose membership edges run
   `rankTail +d → member` like the named `+d.` cell edges (`vortex_core.cpp:113-126`), the
-  shorthand naming the dim, not a direction — every dim the program
+  shorthand naming the dim, not a direction — `d.name` is not one: it is a single-link label dim
+  (`vortex_core.cpp:61`), already covered as `+d.name` — every dim the program
   skeleton hangs on is in the walk — `d.dims` is the one named exclusion, matching the checkpoint
   rule (`promote` skips `d.dims` edges, `arena_manifold.cpp:1766`; genesis's `ensureDimension` is
   find-or-mint — `dimensionNamed` resolves base dims and the `arenaDims_` cache before any mint,
   `arena_manifold.cpp:78-105`, so a promoted dim cell re-binds rather than re-mints) — and the
   bound is at least skeleton depth — *and* the cell's ref is a **persistent (non-`ephemeralBit`)
   ref at or below the recorded program-image extent**. The
-  discriminator is ref-space ordering, not a timestamp: the extent is the maximum persistent
-  `CellRef` minted at program load, recorded once at load **on the `programRef` bind record** —
-  adapter-side durable state, stable across geneses of the same checkpoint — and bound by genesis
-  step (c); it is never re-marked per genesis, since the overlay already contains every promoted
-  cell and a per-incarnation extent would absorb them all. The boundary discriminates only
-  because genesis restores the image *first*, ref-preserved (step (a) below): program cells
-  return with the checkpoint's own numbering — the image's ops are the spool's low prefix and
-  the ops-spool indices *are* the persistent refs — before the checkpointed state joins the
-  numbering and before any `learn`-replay mints one, so they land below the extent by
-  construction; a flat append after state would land them above it and invert the test, and an
-  image arriving through `importValue` ingress or a sibling manifold reports an empty
-  program-side set by design. Every ref classifies by position: an arena mint's
+  discriminator is ref-space ordering, not a timestamp, and it stands on a **named store
+  lineage**: the program image lives as the agent store's **low ops prefix**, anchored at load —
+  the adapter seeds the agent's store with the artifact's ops segment, loaded verbatim
+  (byte-identical, or no position is stable), the `job.base` shared-store pattern
+  (`mesh_jobs.cpp:303-318`) — so the image occupies persistent positions `1..E` before any state
+  op is written (`noCell == 0`, `dim_vector.hpp:23`, is the only ref below them). Checkpoints
+  inherit the prefix position-by-construction: `promote` appends state ops above it and
+  `sealLocalSpool` seals the whole spool (`publication.cpp:611-617`), so `1..E` ships inside
+  every checkpoint's ops segment and folds back verbatim — `rebuildManifold` assigns
+  `birthOp = opIndex` (`manifold.cpp:427-442`), and a persistent `CellRef` *is* a spool position
+  (`manifold.hpp:295`). The extent `E` is the image prefix length, recorded once at load on the
+  adapter's `programRef` bind record — chain-stable because the continuation pins the artifact
+  (`grant->programRef == continuation->programRef`, `mesh_actor.cpp:199,215-216`) — asserted at
+  genesis step (a), never re-derived (the received manifold already holds every promoted cell; a
+  per-incarnation extent would absorb them all). Positions therefore classify by construction:
+  program cells return at `1..E` on every resume, before the checkpointed state in the numbering
+  and before any `learn`-replay mints one — while a flat append after state would land them above
+  it and invert the test, which is exactly why the prefix is a load-time commitment rather than a
+  genesis step. Every ref classifies by position: an arena mint's
   ref is `ephemeralBit | dense` (`refOf`, `arena_manifold.hpp:468-470`; `manifold.hpp:154-158`),
-  always above the boundary, so grafted, learned and other runtime cells stay classifiable — a
-  `learn`ed clause sitting on a program `d.clause` rank does not become "program-side" (its
-  durability rides the registered twin and patch replay, not its own promotion) — while a shadow
+  never satisfying the persistent arm, so grafted, learned and other runtime cells stay
+  classifiable — a `learn`ed clause sitting on a program `d.clause` rank does not become
+  "program-side" (its durability rides the registered twin and patch replay, not its own
+  promotion) — while a shadow
   cell names its *base* ref
   (`arena_manifold.cpp:1489-1490`), so a shadow whose base ref is persistent and pre-extent
   classifies program-side **by design**: it is the resurrected program image — and a promoted
-  cell's post-extent persistent ref keeps it state-side across `resume`. "State-side" is
+  cell's post-extent persistent ref keeps it state-side across `resume`. Prefix maintenance is an
+  **adapter invariant on publish**, not an assertion: `publishValue` runs against the store
+  lineage that carries the prefix — the store backing the arena's base manifold — and a
+  prefix-less lineage (a publish off a foreign or fresh store, an `importValue` ingress of
+  ephemeral twins, a sibling manifold) reports an empty program-side set, under which the
+  discriminator **fails closed**: `learn` is refused outright — an admitted `learn` would link
+  the skeleton into every checkpoint under the `closed` flag, the V12 failure with the roles
+  reversed — and a `programRef` that names no cell of the received manifold is a genesis bind
+  refusal. "State-side" is
   link-reachable *from the agent cell* — in either direction, as `promote` walks — **without
   transiting a program-side cell** (the walk prunes at the program-side boundary — its own root
   exempt: a program-side `agent_cell()` cannot prune the durable set) and not itself
   program-side; `closed`'s state-side arm uses the same test. The pruning is load-bearing: memo
-  records, reflect wrappers, installed `learn` copies and program-side capture wings sit behind
+  records, reflect wrappers, installed `learn` copies and capture-linked binding cells sit behind
   program-side anchors (the clause's `+d.code` memo chain, the installed `d.clause` edge, a
   program-side capture wing) and must not promote under
-  the state banner — they die with the skeleton as specified. Live frame cells are the
+  the state banner — they die with the incarnation at `resume`. Live frame cells are the
   different case: `d.stack` hangs off *cursor* cells (`vortex_vm.cpp:206`, `:865-887`), never
-  `home` — the cursors sit on `home`'s `+d.cursors` rank (`vortex_vm.cpp:159-160`), and `home`
-  is arena-minted and ephemeral, not a program-side anchor; the frames stay out of the durable
-  set because `home` carries no link the agent cell can reach — `##` anchors are ref-box ints,
-  invisible to the link walk — and frame-bound captures are refused by binding class ahead of
+  `home` — the cursors sit on `home`'s `+d.cursors` rank (`vortex_vm.cpp:157-160`), and `home`
+  is the session's cursor anchor: the checkpoint's own persistent `home` whenever the base has
+  one — `initGenesis` adopts `*base->home()` (`vortex_core.cpp:30-36`), and the base's `home_`
+  is the store's first MakeCell (`manifold.cpp:450-451`), a pre-extent persistent ref — or
+  arena-minted on a base-less genesis. The frames stay out of the durable
+  set because `home` is not link-*reachable from* the agent cell — the invariant is directional:
+  nothing mints a `+d` edge *into* `home` (the `+d.cursors`/`+d.stack` chains point outward, and
+  `##` anchors are ref-box ints, invisible to the link walk either way) — so even a persistent
+  post-resume `home` cannot expose the frames behind it; and were `home` itself to classify
+  program-side the prune would exclude the same frames, so the conclusion holds either way.
+  Frame-bound captures are refused by binding class ahead of
   the sideness test (below). The walk is
   link-bounded: a program cell reachable only through int64 content — `Jump`/`Call`/`Branch`/
   `Choice` control-flow targets — is invisible to it, and an outside edge to one is a §11-door
@@ -1403,12 +1452,19 @@ record by eviction; `unlearn` and genesis replay resolve each name through `code
 `plan_named` (§6.7). An `unlearn` re-point never installs the named head in place — it installs a
 `reify` of the named prior head, per the same never-graft-a-registered-head rule (§6.3). The
 target descriptor records the target's **resolved qualified name** — `<module>:<Agent>.<member>`,
-the three-part name intentions use — read off the clause's `d.name` label through the
-`plan_named` resolution path; a `learn_*`
+the three-part name intentions use — but *where that name is read off* splits by verb, because the
+name lives on different dims for a clause than for a method/symbol. A **clause** target
+(`learn_plan`, `learn_where`, `learn_body`, `learn_handler`) resolves through `plan_named`:
+`plan_named` matches the clause's verbatim `+d.name` label (§6.7). A **method or symbol** target
+(`learn_method`) resolves through `symbol_named`:
+the qualified spelling is walked `module_named` on the qualifier, `symbol_named` on the module
+and the dotted remainder against the module's `d.vars` (§6.7's owner rule) — a method has no
+`+d.name` label to match, so `plan_named` cannot name it. A `learn_*`
 whose target has no resolvable name (an anonymous grafted clause) is refused, because a patch that
 cannot be re-found at genesis is a patch that lies. `unlearn(clause_or_symbol)` *matches* by the
-patch target's resolved name: the argument's symbol/clause cell resolves to its qualified name, and
-the latest patch whose recorded target name equals it is undone.
+patch target's resolved name: the argument's symbol/clause cell resolves to its qualified name
+through the same split — clause args by `plan_named`, symbol args by `symbol_named` — and the
+latest patch whose recorded target name equals it is undone.
 
 **`closed`, correctly.** A fragment is `closed` iff **no program-side reference lacks a
 `+d.refs` name-record**: every reference out of its own graph is either (a) a link to a *state-side*
@@ -1444,10 +1500,13 @@ time — it walks those records and links checking each endpoint is state-side o
 because an emission flag can be forged and a `reflect`-spliced fragment can smuggle program
 structure — and `run` targets inside a learnable fragment must be *name-resolved* (a `run` of an
 opaque session `Code` handle is not durable either — the emitter name-records every
-statically-known `run` operand — a literal operand → its `src:` label, a `code_named`-resolved
-operand → its `d.name` label — while a `reflect`-born operand is a session-side wrapper with no
-durable referent, so an opaque or `reflect`-born `run` target in a learnable fragment is a
-closedness refusal at emission). A non-`closed` fragment — e.g., a
+statically-known `run` operand on a `run`-role record: a literal operand → the head's actual
+`+d.name` label — a `code"#label …"` literal's user label, else its `src:`; a `code_named(L)`
+operand with `L` a string literal → `L`; a `plan_named`/`symbol_named` operand spelled with a
+literal qualified name → that qualified name; a `reflect`-born operand is a session-side wrapper
+with no durable referent, and any operand reached through a non-syntactic path — a `let` alias, a
+computed argument — is opaque, so an opaque or `reflect`-born `run` target in a learnable fragment
+is a closedness refusal at emission). A non-`closed` fragment — e.g., a
 `reflect`-wrapped program-side graph — is refused, because linking it from `d.patch` would drag the
 program skeleton into every checkpoint. Such graphs can be `graft`ed for the session; making them
 durable requires `reify` into a closed copy first — and `reify` of non-literal graphs is deferred
@@ -1467,26 +1526,38 @@ marker and is **never** re-kinded `OpHandle`, because a program-cell target must
 `arena_manifold.cpp:1759-1764` — and gates on it at `:1797-1809`, either dragging the program
 skeleton in or returning `nullopt` when the target is excluded). A record without `+d.name` is an
 ordinary ref-record and gets the full P16 marker +
-`OpHandle` + rehydrate ceremony. At genesis, a name-record's `+d.name` rebinds **by shape** — and
-the writeback splits with it, because the two slot conventions differ: a `Call`-operand slot is
-entry-valued (`Call` executes `toInt(inputs[0])`, `vortex_vm.cpp:854-856`), while a `run`-target
-or `Code`-valued operand (fragment-identity) slot is head-valued — `run` derefs the head's
-`+d.entry` *and* `+d.values` at run time (§6.2), so an op cell written there would kill the
-fragment on first `run`. The shape test itself splits on the first `:` *and requires the first
-segment to resolve as a module* on `programRef`'s walk, else the whole string is a verbatim
-label — and call records always carry the `module:`-qualified spelling, so a label's `src:`/
-`reify:` prefix reaches the label channel unless a module literally takes that name (which
-degrades to a dropped patch, never a wrong bind). A
-qualified name resolves through the §6.7 split (`module_named` on the module qualifier,
+`OpHandle` + rehydrate ceremony. Within name-records, the genesis writeback keys on **the record's
+slot role**, carried on the record itself — a `+d.grab → "call"`/`"run"` role label cell, the same
+fresh-scalar convention the memo key uses (M8) — never derived from name shape, because the two
+slot conventions differ in kind, not in spelling: a `call`-role record writes `int64(entryOp)` — a
+`Call`-operand slot is entry-valued (`Call` executes `toInt(inputs[0])`, `vortex_vm.cpp:854-856`) —
+while a `run`-role record writes `int64(head)`, because a `run`-target or `Code`-valued operand
+(fragment-identity) slot is head-valued — `run` derefs the head's `+d.entry` *and* `+d.values` at
+run time (§6.2), so an op cell written there would kill the fragment on first `run`. The
+`+d.name` *shape* selects only the resolution path: the test splits on the first `:` *and requires
+the first segment to resolve as a module* on `programRef`'s walk, else the whole string is a
+verbatim label — and call records always carry the `module:`-qualified spelling while label
+records carry `src:`/`reify:`/`#label` head-label spellings, which the reserved-prefix rule of
+§6.7 keeps disjoint (`src:`/`reify:`/`patch:` can name no module — `patch:` is a *clause*-label
+prefix that patch-target names use, never a head label — and a user `#label` cannot spell `:`).
+A qualified name resolves through the §6.7 split (`module_named` on the module qualifier,
 `symbol_named` on the module and the dotted remainder — §6.7's owner rule) → the symbol's
 `+d.values` → **apply §6.1's head/op discriminator at the hop**: the
 resolved cell is the entry op when it is an op (`exportSymbol` binds `sym +d.values → entryOp`
-directly, `vortex_core.cpp:119-127`), else follow its `+d.entry` once (a head) →
-`writeValue(slot, int64(entryOp))` on the `+d.ref`'d slot — the same op-or-head hop wherever a
-call record's chain lands on a symbol, genesis and patch replay alike. A *label* — `src:`,
+directly, `vortex_core.cpp:119-127`), else follow its `+d.entry` once (a head) — the same
+op-or-head hop wherever a call record's chain lands on a symbol, genesis and patch replay alike —
+then the role decides the payload: `call` writes `int64(entryOp)` through the hop; `run` writes
+`int64(head)` and therefore requires the hop to land on a head — a `run`-role record whose
+qualified name resolves head-less (a program `def` symbol, whose `+d.values` names an entry op,
+never a fragment head) is the **headless-`run`** refusal class: the record is malformed, the patch
+drops like an unresolved name, and `run` itself refuses the same target at the descriptor check
+(§6.2) — a `run` of a head-less program `def` symbol cannot receive the slot's head convention at
+all. A *label* — `src:`,
 `reify:` or a user `#label`, which is what `run`-target and fragment-identity records carry —
 rebinds through the **program-image label→head lookup**: the same outbound `program()`
-structural walk the sideness test runs, matching each fragment head's `+d.name` verbatim, →
+structural walk the sideness test runs, matching `+d.name` verbatim but only over cells in the
+head layout (`+d.entry` plus the descriptor `+d.values` — the shape restriction that keeps clause
+labels and qualified symbol names on the same dim from matching), →
 `writeValue(slot, int64(head))` — the head itself, no `+d.entry` hop, because the slot is
 head-valued; `learn`-registered heads live state-side, outside the program
 image, so the lookup falls back to `code_named`'s `d.code` walk for them, writing `int64(head)`
@@ -1495,7 +1566,9 @@ faults/drops the patch like a dead `d.patch` record — genesis does not install
 bind. **Divergence
 clause:** a session `run` retains the *emission-time* binding, while a resumed genesis rebinds
 through the durable name and therefore follows *post-resume* redefinitions — a `graft_method`
-re-point between checkpoint and resume is picked up by genesis's rewrite, not by the session copy.
+re-point between checkpoint and resume is picked up by genesis's rewrite, not by the session copy —
+and a *learned* re-point replayed at genesis step (d) is picked up exactly because the `+d.refs`
+sweep runs after replay (step (e) above).
 §9.3's `learn_plan` works by exactly this design: the `Call` to `navigate_to` inside the learned
 body `code"{ navigate_to(\"water\") }"` is a name-recorded `Call` — `+d.name →` the *callee's*
 qualified name `"demo:Forager.navigate_to"`, while `"water"` is just the argument — rebound at
@@ -1535,16 +1608,19 @@ flag-driven across the checkpoint-terminating turn:
    mints a P4 `wake` turn so the flag has a window (P4 is the register's approved-but-unimplemented
    `mesh_actor` change, `vagent-agent-language.md:1670` — the only part of this ceremony outside
    current code). **No turn — message or P4 wake — runs between the flagged turn's end and
-   `publishValue`**: the publish path enqueues its wake turns itself, and the pump orders publish
-   ahead of all queued turns while the flag is armed — a ready-intention or due-timer wake queued
-   before the flagged turn's end is held behind publish the same way — so the window is
-   "immediately after the flagged turn's end", never interleaved. The flag is a three-state
-   marker — *re-kind pending → restore pending → drained* — and the callback owns it: it clears
-   only once publish has succeeded *and* the head-of-turn restore has run — the restore itself is
-   unconditional on marked cells still in `OpHandle` kind and runs on every exit path, so a
-   `publishValue` failure or refusal still restores while the flag stays armed for the next
-   attempt, and `ActorDown` clears it outright (a stopped actor never re-enters `pumpOne`, so no
-   restore is owed there either).
+   `publishValue`**: the ceremony claims the ordering itself — the flag's `publishValue` call is
+   issued from the same `Executor` callback that ended the flagged turn, synchronously, before the
+   pump's next `pumpOne` decision can dequeue anything — current `pumpOne` gives no such ordering
+   on its own (it dequeues whatever is pending, `:659-672`), so the no-interleaving property is
+   *proposed adapter discipline*, not an attribution to the pump (changelog v1.7): a
+   ready-intention or due-timer wake queued before the flagged turn's end is held behind publish
+   the same way — so the window is "immediately after the flagged turn's end", never interleaved.
+   The flag is a three-state marker — *re-kind pending → restore pending → drained* — and the
+   callback owns it: it clears only once publish has succeeded *and* the head-of-turn restore has
+   run — the restore itself is unconditional on marked cells still in `OpHandle` kind and runs on
+   every exit path, so a `publishValue` failure or refusal still restores while the flag stays
+   armed for the next attempt, and `ActorDown` clears it outright (a stopped actor never re-enters
+   `pumpOne`, so no restore is owed there either).
 1. **End of that turn, before `publishValue`**, the `Executor` callback — on the mutable arena —
    walks each registered head's `+d.refs` ref-records and `setValueBits(OpHandle, target)`s every
    marked ref cell, skipping any already in `OpHandle` kind (idempotent; the kind check is cheap and
@@ -1571,47 +1647,66 @@ flag-driven across the checkpoint-terminating turn:
    excludes it, and restore writes its Int64 back unchanged — the round-trip test
    *learn → checkpoint → resume → learn → checkpoint* is the acceptance fixture.
 
-At genesis, ordering is fixed — and it is **image-first**: (a) **re-materialize the program image
-into the persistent manifold first and ref-preserved** — re-`import` the prelude and replay the
-program artifact's own spool: the image's ops are the spool's low
-prefix and the ops-spool indices *are* the persistent `CellRef`s (`birthOp == CellRef`,
-`manifold.hpp:295`), so re-materializing from the same spool preserves ids — program cells return
-at their recorded positions `0..E`, below the recorded extent by construction — *before* the
-checkpointed state joins the numbering and before any `learn`-replay mints a cell; a program
-image arriving by `importValue` ingress (ephemeral twins) or a sibling manifold instead reports
-an empty program-side set by design, not an error (§6.6); (b) **arena overlay** — the
-checkpointed state cells join the persistent numbering above the extent (persistent positions
-are stable across the rebuild, so promoted cells always land above the boundary) — then
-**re-point `opcodeMap_`**: the program-image artifact's own op map is what `code` re-emission and
-`getOpcodeKind` (`vortex_vm.cpp:102-114`) consult, and the overlay carries stale indices into it;
-(c) `ensureDimension` for every data-minted dimension — find-or-mint (dims resolve from
-base/cache; only absent names mint, `arena_manifold.cpp:78-105`), no marks outstanding — and
-**bind the recorded program-image extent**: the maximum persistent `CellRef` the loader minted at
-program load, recorded once at load as a field on the adapter-side `programRef` bind record and
-stable across geneses of the same checkpoint, is the sideness boundary §6.6's test compares
-against; this step asserts it, it never re-derives it (the overlay already holds the promoted
-cells); (d) bind `programRef → the program root` by the V10
-mechanism — the artifact binds its own program artifact so `code_named`/patch name resolution has
-a root to walk; (e) `+d.refs` rehydration over **each `learn`-registered head's** records —
-per ref-record `Int64(*handleTarget)`, per name-record the shape-split rebind chain above —
-because `resume` overlays the received arena without `importValue`'s remapping
-(`mesh_actor.cpp:260-271`) — the two paths differ in kind, not just order: `importValue` re-mints
-each relocation-marked cell `OpHandle`-kind naming the *local* twin of its promoted target and
-demotes unmarked `OpHandle` cells to `None` (`mesh_value.cpp:485-501`), while `resume`/`genesis`
-receives the `OpHandle`-kind cells verbatim — handles carrying their *promoted* targets
-(`arena_manifold.cpp:1947-1951` writes `real.at(target)`) — and rehydration
-`writeValue(slot, Int64)`s each marked cell back with the promoted target;
-(f) `d.patch` replay in ordinal order (replay does not re-record — replayed grafts mint no patch
-cells); (g) turns.
+At genesis, the persistent manifold **arrives — it is not constructed**: `receiveValue` runs
+`rebuildManifold(version)` over the checkpoint's own sealed spool (`mesh_actor.cpp:260-271`
+installs it as the arena's `const` base; `manifold.cpp:427-442` assigns `birthOp = opIndex`
+verbatim, index-for-index), so under the store lineage above the fold already reproduces the
+whole `[image 1..E][state >E]` band in one pass. Genesis *binds* what arrived — the ordering is
+fixed, and nothing in it re-materializes an image:
+
+- **(a) lineage bind.** Genesis asserts the received manifold's image band is the recorded
+  program image — the persistent high-water below which program cells sit equals `E`, the image
+  prefix length on the adapter's `programRef` bind record. The lineage itself is a load-time
+  commitment (the artifact's ops segment, loaded verbatim, seeded as the agent store's low
+  prefix — the `job.base` pattern, `mesh_jobs.cpp:303-318`), inherited by every checkpoint
+  because checkpoints append and `sealLocalSpool` seals the whole spool
+  (`publication.cpp:611-617`); a prefix-less lineage is the fail-closed arm above — `learn`
+  refused, and a `programRef` naming no cell of the received manifold a genesis bind refusal.
+  The arena then overlays the base with ephemeral session cells; the overlay adds nothing
+  persistent.
+- **(b) `ensureDimension` find-or-mint + `setOpcodeKind` re-registration** — dims resolve from
+  base/cache before any mint (`arena_manifold.cpp:78-105`), no marks outstanding; and the folded
+  image's op cells re-register into `opcodeMap_` through `setOpcodeKind`
+  (`vortex_vm.cpp:98-100`) — a registration *pass* over the folded cells, never a re-run of
+  `mintOpcode`, which would mint ephemeral twins and register the wrong cells (§6.5). The
+  dependency is the empty map, not stale indices: `opcodeMap_` is per-`WorkerContext` and empty
+  after `resume`, and this pass is what `code` re-emission and `getOpcodeKind`
+  (`vortex_vm.cpp:102-114`) need filled — the program image's *own* op map, keyed on the folded
+  refs.
+- **(c) `programRef → the program root` bind** by the V10 mechanism — the artifact binds its own
+  program artifact so `code_named`/patch name resolution has a root to walk.
+- **(d) `d.patch` replay in ordinal order** — replay does not re-record (replayed grafts mint no
+  patch cells). Each replayed install `reify`s a `d.code`-registered head into the installed
+  copy, and the copy inherits the registered head's slot contents at mint — the copy-inheritance
+  that decides (e)'s position.
+- **(e) `+d.refs` rehydration, last** — a single sweep over every `learn`-registered head's
+  records **and every replay-installed copy's regenerated records**: per ref-record
+  `Int64(*handleTarget)`; per name-record the role-split rebind above. Rehydration is needed
+  because `resume` overlays the received manifold without `importValue`'s remapping
+  (`mesh_actor.cpp:260-271`) — the two paths differ in kind, not just order: `importValue`
+  re-mints each relocation-marked cell `OpHandle`-kind naming the *local* twin of its promoted
+  target and demotes unmarked `OpHandle` cells to `None` (`mesh_value.cpp:485-501`), while
+  `resume`/`genesis` receives the `OpHandle`-kind cells verbatim — handles carrying their
+  *promoted* targets (`arena_manifold.cpp:1947-1951` writes `real.at(target)`) — and rehydration
+  `writeValue(slot, Int64)`s each marked cell back with the promoted target. The sweep runs last
+  for two reasons that meet at copy-inheritance. A replayed install mints its ref and operand
+  slots with the registered head's *current* contents — an `OpHandle`-kind source slot yields an
+  `OpHandle`-kind copy, an int64 operand the head's last-written value — so a head-only sweep
+  cannot reach the copies' slots; the sweep must cover the records `reify` regenerated on them.
+  And a name-record's rebind must see **post-installation** symbols: under the naive pre-replay
+  position a `learn_method`/`learn_plan` install-or-repoint replayed at (d) was invisible to it,
+  so a call to a patch-replaced symbol bound the pre-replacement image binding and a call naming
+  a patch-installed symbol dropped the patch — the misbind/drop class the reorder removes.
+- **(f) turns.**
 
 Two discipline rules keep the checkpoint boundary honest:
 
 - **Replaces of program-original attachments record no prior head.** A `learn_where` on a
   kernel-emitted clause cannot keep the prior attachment on the patch — that edge would be
   state→program-skeleton, exactly the link V12 exists to exclude. The patch records the new head
-  only; `unlearn` of such a patch detaches it, and genesis restores the program's own attachment for
-  free because `programRef` reloads the skeleton. (Unlearning a *previously learned* replace does
-  record a prior head — a closed fragment is safe to link.)
+  only; `unlearn` of such a patch detaches it, and genesis restores the program's own attachment
+  for free because the image prefix folds the skeleton back verbatim at `1..E`. (Unlearning a
+  *previously learned* replace does record a prior head — a closed fragment is safe to link.)
 - **Replay is monotonic but not cumulative-garbage.** Genesis walks `d.patch` in ordinal order and
   re-runs each graft; a patch whose target no longer resolves (renamed plan, pruned clause) is
   dropped after recording a `ConditionFault`-style fault — compaction, not a ceiling — so dead
@@ -1632,21 +1727,28 @@ since `resolveCell`'s check is dense-range only). The durable layer on top:
   stay session handles until learned. Registration refuses a second head carrying an existing
   `d.name` label — the duplicate-label refusal `reify`'s `reify:` serial exists to avoid (§6.1):
   labels are the re-resolution key, so a duplicate would make `code_named` ambiguous.
-- `d.name` labels: `code"…"` heads carry an automatic `src:<module>:<line>:<col>` label — a
-  literal cloned by M13 expansion takes its *expansion site's* position plus a clone ordinal,
-  `src:<module>:<line>:<col>+n` (the same `+`-suffix convention the `+o:c` inner-offset positions
-  use, §5.1), so cloned literals cannot collide — a
-  `code"#label …"` inner-grammar prefix overrides it, and `reify` labels `reify:<src>:<serial>`
-  (`<src>` is the reified head's own label, `<serial>` the duplicate disambiguator). User
-  `#label`s are uniqueness-checked **at emission** — a duplicate is a compile-time refusal, since
+- `d.name` labels: `code"…"` heads carry an automatic `src:<module>:<line>:<col>` label — the
+  emitter's default, not an overridable property of the head: a `code"#label …"` inner-grammar
+  prefix *replaces* it (the user label wins outright, it is not a suffix). A *nested* literal —
+  a `code"…"` appearing inside another `code"…"` body — labels from its **innermost** `src:` site
+  and chains `+o:c` per nesting level: `src:m:l:c+o:c'…` where each `+o:` arm is the inner-offset
+  position §5.1 uses, so the full innermost origin plus the chain is the unique key. A literal
+  cloned by M13 expansion takes its *expansion site's* position plus a clone ordinal,
+  `src:<module>:<line>:<col>+n` — the ordinal appends to whatever chain the site produced, and a
+  clone of a nested literal keeps its `+o:c` arms — so cloned literals cannot collide. `reify`
+  labels `reify:<src>:<serial>` (`<src>` is the reified head's own label, `<serial>` the
+  duplicate disambiguator). User
+  `#label`s are uniqueness-checked **at emission across the merged program emission set** —
+  literals, splices, M13 clones — a duplicate is a compile-time refusal, since
   labels are the re-resolution key and a duplicate would misbind — and all
   three are *opaque label strings*, matched verbatim; the *user* `#label` alone cannot spell `:`
   or `"` (the `'#' Ident` grammar, §5.1). First-`:` splitting applies only to
   qualified-name lookups — `plan_named`, `symbol_named`, patch target names: `demo:` is treated
   as a module qualifier only when it resolves as a module on `programRef`'s walk, otherwise the
-  whole string is the name — never to `code_named`, where `patch:near_water` is just a label —
-  and the emitter's automatic prefixes (`src:`, `reify:`) are label-reserved, so no module can
-  take those names and reroute a label down the qualified path.
+  whole string is the name — never to `code_named`, where `patch:near_water` is just a label.
+  The emitter's automatic prefixes are **reserved at module declaration**: `src:`, `reify:` and
+  `patch:` may name no module — a module declaration carrying one is a compile-time refusal — so
+  the shape test's module arm can never reroute a label down the qualified path.
   `reify`'s `<serial>` comes from a *durable per-agent
   counter* on `d.vars`, not a per-incarnation one, so reified labels never collide with a promoted
   registration's after `resume`. `code_named(label)` resolves label → live head per incarnation —
@@ -1657,17 +1759,23 @@ since `resolveCell`'s check is dense-range only). The durable layer on top:
   the program image and is found by the label→head structural walk of §6.6's name-record rebind
   (never `d.code`-registered, so no rank-order tie-break is ever needed); a caller re-resolving a
   literal head by label goes through `run`'s record path or the same program-image walk, not
-  `code_named`.
+  `code_named`. A `code"…"` head living in *another* artifact's image has no re-resolution spelling
+  at all this round — both walks cover the bound `programRef`'s lineage only, and a foreign head
+  outside it classifies prefix-less (§6.6's fail-closed arm, never a silent alias); the
+  cross-artifact spelling is deferred as U-M11.
 - `symbol_named(owner, name)` / `plan_named` resolve qualified names — the grammar is
   `[<module> ':'] [<Agent> '.'] <member>`: the first `:` separates the module qualifier — `owner`
   is the module *only*, and `demo:` is treated as a module only when it resolves on `programRef`'s
   walk, otherwise the whole string is the name — and the remaining dotted prefix is part of the
-  stored name itself. The two lookups walk different ranks: `symbol_named` reads the resolved
-  module's `d.vars` (spec §5.7 — goals and events as bare names, agent members under the
-  `Agent.member` spelling), so the `Agent.` segment names no separate `d.vars` cell — there is
-  no agent-owner arm — while `plan_named` matches the qualified `module:Agent.plan` string
-  against clause `+d.name` labels (a plan's qualified name lives on its clause's `+d.name`, not
-  in a `d.vars` symbol). Both match labels verbatim.
+  stored name itself. The two lookups walk different ranks and match **different representations**
+  of the name: `symbol_named` reads the resolved module's `d.vars` (spec §5.7 — goals and events
+  as bare names, agent members under the `Agent.member` spelling), where the name lives as the
+  symbol cell's *content* — `exportSymbol` mints `makeCell(name)` (`vortex_core.cpp:119-127`), no
+  `+d.name` edge — so the `Agent.` segment names no separate `d.vars` cell and there is no
+  agent-owner arm; `plan_named` matches the qualified `module:Agent.plan` string against clause
+  `+d.name` label *cells* (a plan's qualified name lives on its clause's `+d.name`, not in a
+  `d.vars` symbol). Both compare the name string verbatim — it is the cell carrying it that
+  differs.
 - `d.patch` (agent → patch records): the mutation EDL of §6.6.
 
 The rule for programmers mirrors `Cell`'s existing caveat: **`Code`/`Cell` in a `var` field is a
@@ -1799,8 +1907,9 @@ stated as deferrals.
   naming the same `to` label; fan-out likewise. `sprout_synapse(from, to, w)` mints one; pruning
   unlinks it.
 - **Session vs durable**: the junction, its labels and its weight are state-side — reachable from
-  the agent cell, so they promote and survive `resume`. What is *not* durable is the endpoint cell a
-  label resolves to this incarnation (program cells die at `resume`; session handles alias) — a
+  the agent cell, so they promote and survive `resume`. What is *not* durable is the incarnation
+  binding a label resolves to — program cells return refolded from the lineage's image prefix
+  (§4.5), but session *handles* alias, so the junction stores the name, not the endpoint — a
   synapse naming a program-side clause is exactly as durable as that clause's qualified name.
   Weights therefore live state-side from the start; `d.synapse` itself is adapter-minted data (V10),
   no `SystemDimensions` field, no core change.
@@ -2075,12 +2184,15 @@ apps/common/xanadu/vagent/
                                //   cell_path) — joins VAGENT_FRONTEND_SRCS
   stdmeta prelude sources      // std:meta routines in vagent/Vortex, linked like std:agent
 apps/vagent:                   // no new commands; `check` gains code"…" coverage
-adapter:                       // binds program root + agent cell + d.code/d.patch/d.weight/
+adapter:                       // seeds the agent's store on the artifact's ops segment at load —
+                               //   verbatim, as the lineage's low prefix (the job.base pattern,
+                               //   §4.5) — and binds program root + agent cell +
+                               //   d.code/d.patch/d.weight/
                                //   d.synapse/d.entry/d.patch-head/d.validate/d.refs/d.ref/
                                //   d.recipe/d.mesh.relocation + the validate ceiling, arity
                                //   & impure-kind cells (V10 mechanism, no-marks path); the
                                //   programRef bind record carries the recorded program-image
-                               //   extent field genesis (c) asserts (§6.6); owns
+                               //   extent field genesis (a) asserts (§6.6); owns
                                //   P16's flag/re-kind/restore/rehydrate ceremony
 Makefile:                      // VAGENT_FRONTEND_SRCS gains expand.cpp, resolve.cpp,
                                //   ast_clone.cpp, code_path.cpp, frontend.cpp
@@ -2102,8 +2214,8 @@ below the register as deferred-not-registered.
 
 | No. | Change                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | Where                                                                                                                                                                     | Why it cannot live in `std:meta` or the adapter                                                                                                                                                                                                                                                                                                                                                                                                                                                              | Without it                                                                                                                                                                                                                                                                                                              | Used by         |
 | --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------- |
-| P15 | Every VM write into an `opcodeMap_`-registered cell is refused — kind-immutability at the write funnel: `VortexCore::writeValue`/`splice` take a VM-installed kind predicate (`opcodeMap_.contains(masterOf(cell))`), covering `executeOpcodeBody`'s `Value`/`Splice` cases, `step()`'s memo-hit and generic output writebacks, and both `runPipeline` writes; refusal is a typed `success=false` per site. Exempt by construction: `setCursorOpcode`, `Call` frame writes (the frame-cell carve-out), `mintOpcode`'s `setContent`, every write to a fresh (unregistered) cell. Post-resume the program load path re-runs `mintOpcode` at genesis, repopulating the empty per-`WorkerContext` map.                                                                                                                               | `vortex_core.cpp:196-254` (`writeValue`/`splice` funnel + installed predicate); call sites `vortex_vm.cpp:771-806`, `:1269-1273`, `:1287-1294`, `:337`, `:343-346`; tests | `opcodeMap_` is private VM state (`vortex_vm.hpp:186`). No Vortex opcode can see the map, and the adapter runs between turns, not between opcodes. Every non-structural op restates bound outputs' content through `writeValue` — a wing re-point (this document's whole subject) can aim an output at an op cell and rewrite its `int64` with no `Value`/`Splice` involvement; the map claims the old kind while the cell names a new one, and the trail cannot undo it because the map is not arena state. | Any write to a registered op cell silently changes what the cell *means* — a stale-kind divergence invisible to every `std:meta` guarantee, making "the graph says X" unverifiable. The only alternative would be refusing all program-side writes, which is `cells"…"`'s ordinary content write and cannot be refused. | M10, §6.5, §7.2 |
-| P16 | Checkpoint-time relocation of fragment-owned int64 reference cells — an **adapter-side ceremony needing no mechanism beyond P4's already-approved wake** (`vagent-agent-language.md:1670`): emission marks every fragment-owned int64 ref cell whose `+d.refs` record carries no `+d.name` with *its own* `d.mesh.relocation→"cell"` marker cell (one per ref, `mesh_evaluator.cpp:735` precedent) plus a `+d.ref` record on `+d.refs`; `+d.name` on a record makes it a name-record — no marker, never re-kinded, genesis rebinds by shape *with the writeback splitting with it*: a qualified `module:Owner.name` through `symbol_named`'s module-`d.vars` walk → `writeValue(slot, int64(entryOp))` (Call-operand slots are entry-valued), a `src:`/`reify:`/`#label` through the program-image label→head lookup → `writeValue(slot, int64(head))` (run-target/`Code` slots are head-valued — `run` derefs `+d.entry`/`+d.values`), learned labels falling back to `code_named`. The mutable seam is the adapter's own `Executor` callback inside `pumpOne` (flag-driven: `pending(pid)==1` arms the window, an empty-mailbox checkpoint mints P4's wake turn; end-of-turn re-kind `Int64`→`OpHandle` on the mutable arena, `publishValue` immediately after the flagged turn's end on `const&`, head-of-next-turn `Int64` restore on every exit path); genesis rehydrates each `learn`-registered head's records before `d.patch` replay (resume skips `importValue`, `mesh_actor.cpp:260-271`). Acceptance: a learn → checkpoint → resume → learn → checkpoint round-trip test. Scope: fragment-owned ref cells only. | emission-side marking: `vagent/fragment.{hpp,cpp}` (kernel-glob TU, §10.1); the flag/checkpoint/genesis ceremony: the adapter's own executor TU plus P4's approved `mesh_actor` wake change; the rest reuses `foreign_op_handle`/`publishValue`/`checkpointView` as-is | `promote` copies Int64 content verbatim and translates only links and `OpHandle` values (`arena_manifold.cpp:1934-1954`); no opcode can write `OpHandle` kind (`writeValue` covers Int64/Double/Bool/None, `vortex_core.cpp:196-229`), and `resume` bypasses `importValue` — so only the adapter (which owns emission and checkpoint timing) can run the ceremony; it needs no VM change because `isCellRelocationHandle` and the promote path already exist.                                                                                                                                                                                       | Every promoted fragment's wing slots and `Jump`/`Call`/`Branch`/`Choice` targets stay stale dense ids after `resume` — silent aliasing into unrelated cells; `learn`/`d.patch`/`d.code` durability is impossible and must degrade to session-only.                                                                      | M11, §4.5, §6.6 |
+| P15 | Every VM write into an `opcodeMap_`-registered cell is refused — kind-immutability at the write funnel: `VortexCore::writeValue`/`splice` take a VM-installed kind predicate (`opcodeMap_.contains(masterOf(cell))`), covering `executeOpcodeBody`'s `Value`/`Splice` cases, `step()`'s memo-hit and generic output writebacks, and both `runPipeline` writes; refusal is a typed `success=false` per site. Exempt by construction: `setCursorOpcode`, `Call` frame writes (the frame-cell carve-out), `mintOpcode`'s `setContent`, every write to a fresh (unregistered) cell. Post-resume the folded image's op cells re-register by a `setOpcodeKind` pass (`vortex_vm.cpp:98-100`), repopulating the empty per-`WorkerContext` map — `mintOpcode` would mint ephemeral twins, not register the folded cells (§6.5).                                                                                                                               | `vortex_core.cpp:196-254` (`writeValue`/`splice` funnel + installed predicate); call sites `vortex_vm.cpp:771-806`, `:1269-1273`, `:1287-1294`, `:337`, `:343-346`; tests | `opcodeMap_` is private VM state (`vortex_vm.hpp:186`). No Vortex opcode can see the map, and the adapter runs between turns, not between opcodes. Every non-structural op restates bound outputs' content through `writeValue` — a wing re-point (this document's whole subject) can aim an output at an op cell and rewrite its `int64` with no `Value`/`Splice` involvement; the map claims the old kind while the cell names a new one, and the trail cannot undo it because the map is not arena state. | Any write to a registered op cell silently changes what the cell *means* — a stale-kind divergence invisible to every `std:meta` guarantee, making "the graph says X" unverifiable. The only alternative would be refusing all program-side writes, which is `cells"…"`'s ordinary content write and cannot be refused. | M10, §6.5, §7.2 |
+| P16 | Checkpoint-time relocation of fragment-owned int64 reference cells — an **adapter-side ceremony needing no mechanism beyond P4's already-approved wake** (`vagent-agent-language.md:1670`): emission marks every fragment-owned int64 ref cell whose `+d.refs` record carries no `+d.name` with *its own* `d.mesh.relocation→"cell"` marker cell (one per ref, `mesh_evaluator.cpp:735` precedent) plus a `+d.ref` record on `+d.refs`; `+d.name` on a record makes it a name-record — no marker, never re-kinded, genesis rebinds by *record slot role*: a `call`-role record resolves the qualified `module:Owner.name` through `symbol_named`'s module-`d.vars` walk → `+d.values` → the op-or-head hop → `writeValue(slot, int64(entryOp))` (Call-operand slots are entry-valued), a `run`-role record resolves its `src:`/`reify:`/`#label` through the program-image label→head lookup → `writeValue(slot, int64(head))` (run-target/`Code` slots are head-valued — `run` derefs `+d.entry`/`+d.values` — and a head-less resolution is the headless-`run` refusal), learned labels falling back to `code_named`. The mutable seam is the adapter's own `Executor` callback inside `pumpOne` (flag-driven: `pending(pid)==1` arms the window, an empty-mailbox checkpoint mints P4's wake turn; end-of-turn re-kind `Int64`→`OpHandle` on the mutable arena, `publishValue` immediately after the flagged turn's end on `const&`, head-of-next-turn `Int64` restore on every exit path); genesis rehydrates in the post-`d.patch`-replay `+d.refs` sweep — registered heads' *and* replay-installed copies' records (§6.6 step (e); resume skips `importValue`, `mesh_actor.cpp:260-271`). Acceptance: a learn → checkpoint → resume → learn → checkpoint round-trip test. Scope: fragment-owned ref cells only. | emission-side marking: `vagent/fragment.{hpp,cpp}` (kernel-glob TU, §10.1); the flag/checkpoint/genesis ceremony: the adapter's own executor TU plus P4's approved `mesh_actor` wake change; the rest reuses `foreign_op_handle`/`publishValue`/`checkpointView` as-is | `promote` copies Int64 content verbatim and translates only links and `OpHandle`/`ForeignOpHandle` values (`arena_manifold.cpp:1934-1954`, the handle-translation arm covering both); no opcode can write `OpHandle` kind (`writeValue` covers Int64/Double/Bool/None, `vortex_core.cpp:196-229`), and `resume` bypasses `importValue` — so only the adapter (which owns emission and checkpoint timing) can run the ceremony; it needs no VM change because `isCellRelocationHandle` and the promote path already exist.                                                                                                                                                                                       | Every promoted fragment's wing slots and `Jump`/`Call`/`Branch`/`Choice` targets stay stale dense ids after `resume` — silent aliasing into unrelated cells; `learn`/`d.patch`/`d.code` durability is impossible and must degrade to session-only.                                                                      | M11, §4.5, §6.6 |
 
 P17 — `opcodeMap_`/`cursorPC_`/`arenaDims_` eviction or resync on `release` — is **deferred, not
 registered**: the containment discipline (drain idiom, no bare `release` under live marks, no-marks
@@ -2331,6 +2443,13 @@ are the document's open-questions apparatus (§7.3, last item).
   `run` a certified-pure fragment — is deferred with its validation cost recorded: it needs a
   *complete* purity walk over the target graph (the unknown-flagged wrapper case included) before
   `pureBody` may admit it, which is §7.2's walk plus a flag-trust rule, not free.
+- **U-M11 — Foreign literal heads from other artifacts.** A `code"…"` head living in *another*
+  artifact's image — a second program loaded beside this agent's, or a library artifact grafted
+  cross-store — has **no re-resolution spelling in this round**: `code_named` walks this agent's
+  `d.code` only, the program-image label→head walk of §6.6 covers the *bound* `programRef`'s
+  lineage, and a literal head outside that lineage classifies prefix-less — the fail-closed arm,
+  never a silent alias. Re-resolving a foreign artifact's heads needs a second lineage bind and a
+  namespaced label space; recorded as a direction, not claimed.
 
 ______________________________________________________________________
 
@@ -2502,3 +2621,53 @@ without a name-record is the refused class on both arms); and the nit bundle —
 `manifold.hpp` ref range, the glossary `closed` run-target arm, "left dead" → "left untouched",
 per-record memo label freshness, label-less (bare-op) attach cells never memo-hitting, and the
 installed-copy durability phrasing.
+
+**1.7 — Seventh review revision (r7 disposition).** Re-roots the checkpoint model in a **named
+store lineage**, replacing the recorded-extent construction the three converging lanes (vortex,
+architect, zigzag) found unmechanized. The program image is the agent store's **low ops prefix**,
+anchored at load on the `job.base` shared-base pattern (`mesh_jobs.cpp:303-318`) — the artifact's
+ops segment loaded byte-identical, since positions are only stable when the prefix is — so the
+image occupies persistent positions `1..E` before any state op is written. `receiveValue` already
+folds the whole `[image 1..E][state >E]` band inside `rebuildManifold`
+(`mesh_actor.cpp:260-271`, `manifold.cpp:427-442`), and `sealLocalSpool` seals the complete spool
+(`publication.cpp:611-617`), so every checkpoint inherits the prefix position-by-construction and
+`WorkerContext` receives the folded manifold const — genesis *binds* what arrived; it cannot
+sequence "image first", and the v1.6 image-first narration is withdrawn in favour of (a) lineage
+bind, (b) `ensureDimension` find-or-mint + `setOpcodeKind` re-registration of the folded image's
+op cells (rationale moved off "stale indices": `opcodeMap_` is empty per `WorkerContext` after
+`resume`, and re-running `mintOpcode` would mint ephemeral twins, not register the folded cells),
+(c) `programRef` bind, (d) `d.patch` replay, **(e) the `+d.refs` name-record sweep last** — the
+r7-B reorder, moved after replay so rebinds see post-installation symbols and the replay-minted
+installed copies' regenerated records (copy-inheritance is the named dependency: a replayed
+install's slots inherit the registered head's current contents). `E` is the image prefix length
+recorded on the adapter's `programRef` bind record, chain-stable through the continuation's
+`programRef` pin (`mesh_actor.cpp:199,215-216`). Prefix maintenance is an **adapter publish
+invariant**, not an assertion: a prefix-less lineage (foreign ingress, sibling manifold, a
+publish off a foreign store) yields an empty program-side set and the discriminator **fails
+closed** — `learn` refused, never a silent state→skeleton admission; a `programRef` naming no
+cell of the received manifold is a genesis bind refusal. "Program cells do not checkpoint"
+becomes "not *republished* per agent — they ride the shared base lineage" throughout. Applies the
+minor batch: the name-record writeback keys on the **record's slot role** (`+d.grab` "call"/"run"
+label), `+d.name` shape selecting only the resolution path — a qualified `plan_named`/
+`symbol_named` `run` operand writes `int64(head)` like a label record, and `run` of a head-less
+`def` symbol is the named **headless-`run`** refusal; `src:`/`reify:`/`patch:` are reserved at
+module declaration (the "module literally takes that name" arm deleted); `plan_named` unified as
+verbatim clause `+d.name` matching, never `d.vars`; `home` after `resume` is the persistent base
+home `initGenesis` adopts (`vortex_core.cpp:30-36`, `manifold.cpp:450-451`), and frames stay out
+because no `+d` edge reaches *into* `home`, not because home is ephemeral; P16's promote clause
+names `OpHandle`/`ForeignOpHandle` translation (`arena_manifold.cpp:1952-1954`); `d.name`
+corrected to a single-link label dim, not a rank; the `#Call` convention reconciled as frame +
+head-valued slot, not a `Call`-opcode operand; foreign `code"…"` heads from other artifacts named
+as having no re-resolution spelling this round (new U-M11); nested literals label by innermost
+`src:` plus chained `+o:c` arms with clone ordinals appended; patch target descriptors split —
+clause targets via `plan_named`, method/symbol targets via `symbol_named`'s module-`d.vars` walk;
+and the nit bundle — the P16 row's op-or-head hop restored, the capture-wing doubling removed
+(the cells a wing anchors are the items, the wing the anchor), the dangling "pre-head convention"
+phrase resolved to the §6.1 op-or-head rule, the pump-ordering claim re-scoped as proposed
+adapter discipline (the ceremony issues `publishValue` synchronously from the flagging callback;
+`pumpOne` supplies no ordering on its own), `src:` shorthand clarified against `#label` overrides,
+the `code_named` record-key made literal-`L`-only, the label→head walk restricted to
+fragment-head layout, user `#label` uniqueness scoped to the merged program emission set, the
+"Both match labels verbatim" gloss split by representation (symbol names live as cell content,
+clause names as `+d.name` label cells), the `extent` comparand named as the image prefix length
+with the `programRef` pin as its stability source, and `0..E` corrected to `1..E`.
