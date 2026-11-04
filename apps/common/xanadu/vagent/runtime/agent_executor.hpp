@@ -849,6 +849,9 @@ private:
   mutable std::mutex healthMutex_;
   std::map<std::uint64_t, std::shared_ptr<PendingHealthRecord>> pendingHealth_;
   std::map<std::string, std::deque<HealthOutcomeRecord>> healthOutcomeRing_;
+  /// Per actor, the last `HealthAudit::actionSeq` handed out. Host memory:
+  /// it restarts from 1 on a resume, and the instance names the epoch.
+  std::map<std::string, std::uint64_t> healthActionSeq_;
   mutable std::mutex auditSinkMutex_;
   HealthAuditSink healthAuditSink_;
 };

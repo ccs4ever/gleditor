@@ -21,6 +21,12 @@
  * actor, which terminates at the end and takes its ingress state with it.
  * The limits are fixed and small, so eviction and budget paths are reached.
  *
+ * Health actions (P19 I3-2c1) are steps too: each of isolate, degrade, clear,
+ * reset and the isolate batch is issued under a valid grant, a revoked one
+ * and one of the wrong kind. A request the grant does not allow is refused at
+ * the call and queues nothing; one it allows finishes with a typed outcome,
+ * and, the health turn being a stub until I3-2c2, changes no belief.
+ *
  * Set FUZZ_EPISTEMIC_REPORT to print each outcome code, for checking that a
  * corpus reaches every refusal.
  */
@@ -79,6 +85,10 @@ constexpr std::string_view kKeyless[]    = {"level"};
 const std::array<std::string, 4> kPrincipals{
     std::string(64, '1'), std::string(64, '2'), std::string(64, '3'),
     std::string(64, '4')};
+// Never a bound source, or the grants would be refused as self-certifying.
+const std::string kOperator(64, '9');
+// A grant names at most `maxSources` sources, which the harness sets to 2.
+constexpr std::size_t kGrantedSources = 2;
 const std::array<std::string, 5> kAliases{"gps", "odo", "door", "relay",
                                           "spare"};
 
@@ -255,6 +265,66 @@ std::string codeOf(const IngestOutcome &o) {
   return "?";
 }
 
+/// The three tokens each health step is issued under.
+struct HealthTokens {
+  std::optional<HealthGrantToken> valid;
+  std::optional<HealthGrantToken> revoked;
+  /// Allows only `Degrade`, so every other kind is the wrong kind.
+  std::optional<HealthGrantToken> wrongKind;
+};
+
+HealthTokens makeHealthTokens(AgentExecutor &executor,
+                              const xanadu::identity::ActorPid &pid) {
+  const auto make = [&](std::string id,
+                        std::initializer_list<HealthActionKind> kinds) {
+    EpistemicHealthGrant g{
+        std::move(id),
+        *HealthIssuer::fromPrincipal(kOperator),
+        {kPrincipals.begin(), kPrincipals.begin() + kGrantedSources},
+        {},
+        std::chrono::hours(1),
+        kMaxHealthGrantActions};
+    for (const auto kind : kinds) g.actions.push_back(kind);
+    return executor.grantHealth(pid, g);
+  };
+  HealthTokens tokens;
+  if (auto t =
+          make("valid", {HealthActionKind::Isolate, HealthActionKind::Degrade,
+                         HealthActionKind::Clear, HealthActionKind::Reset}))
+    tokens.valid = std::move(*t);
+  if (auto t =
+          make("revoked", {HealthActionKind::Isolate, HealthActionKind::Degrade,
+                           HealthActionKind::Clear, HealthActionKind::Reset})) {
+    tokens.revoked = std::move(*t);
+    require(executor.revokeHealthGrant(pid, "revoked").has_value(),
+            "a fresh grant revokes");
+  }
+  if (auto t = make("wrong", {HealthActionKind::Degrade}))
+    tokens.wrongKind = std::move(*t);
+  require(tokens.valid && tokens.revoked && tokens.wrongKind,
+          "the harness's own grants are accepted");
+  return tokens;
+}
+
+HealthAction pickHealthAction(FuzzedDataProvider &in) {
+  // The last code is malformed on purpose.
+  constexpr std::array codes{"operator", "x", "bad code!"};
+  const std::string code =
+      codes[in.ConsumeIntegralInRange<std::size_t>(0, codes.size() - 1)];
+  switch (in.ConsumeIntegralInRange(0, 4)) {
+  case 0:
+    return Isolate{code};
+  case 1:
+    return Degrade{code};
+  case 2:
+    return Clear{};
+  case 3:
+    return Clear{code};
+  default:
+    return Reset{in.ConsumeIntegralInRange<std::uint64_t>(0, 2)};
+  }
+}
+
 } // namespace
 
 extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data,
@@ -281,6 +351,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data,
   };
   std::optional<Committed> last;
   std::array<SourceState, 4> sources{};
+  const auto tokens = makeHealthTokens(executor, *pid);
   // Executor-wide, so it must not carry over from the previous input.
   executor.setWallClockSynchronised(true);
   for (std::size_t i = 0; i < kPrincipals.size(); ++i)
@@ -369,7 +440,61 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data,
        ++step) {
     const auto which     = in.ConsumeIntegralInRange<std::size_t>(0, 3);
     const auto principal = kPrincipals[which];
-    switch (in.ConsumeIntegralInRange(0, 13)) {
+    switch (in.ConsumeIntegralInRange(0, 15)) {
+    case 14:
+    case 15: {
+      const auto which3 = in.ConsumeIntegralInRange(0, 2);
+      const auto &token = which3 == 0   ? *tokens.valid
+                          : which3 == 1 ? *tokens.revoked
+                                        : *tokens.wrongKind;
+      const EpistemicView before(executor, *pid, kPredicates, kKeyless);
+      const auto snapshot = before.snapshot();
+      std::optional<HealthReceipt> receipt;
+      bool allowed = false;
+      if (in.ConsumeIntegralInRange(0, 5) == 0) {
+        HealthBatchRequest batch{token, {}, Isolate{"operator"}};
+        bool named = true;
+        for (int i = in.ConsumeIntegralInRange(1, 3); i > 0; --i) {
+          const auto k = in.ConsumeIntegralInRange<std::size_t>(0, 3);
+          named        = named && k < kGrantedSources;
+          batch.principals.push_back(kPrincipals[k]);
+        }
+        allowed = which3 == 0 && named;
+        if (const auto r = executor.healthActionBatch(*pid, batch))
+          receipt = *r;
+      } else {
+        auto action     = pickHealthAction(in);
+        const auto kind = actionKindOf(action);
+        allowed =
+            which < kGrantedSources &&
+            (which3 == 0 || (which3 == 2 && kind == HealthActionKind::Degrade));
+        if (const auto r = executor.healthAction(
+                *pid, HealthActionRequest{token, principal, action}))
+          receipt = *r;
+      }
+      host.pump();
+      // A revoked or wrong-kind token never gets a receipt.
+      if (!allowed)
+        require(!receipt.has_value(), "a grant refuses what it does not allow");
+      if (receipt) {
+        const auto view = executor.healthOutcome(*pid, *receipt);
+        require(view.state == HealthOutcomeView::State::Known &&
+                    !view.items.empty(),
+                "a health action has an outcome after a pump");
+        for (const auto &item : view.items) {
+          require(item.outcome.kind != IngestOutcome::Kind::Pending,
+                  "no health outcome is left pending");
+          if (report)
+            std::fprintf(stderr, "health %s\n", codeOf(item.outcome).c_str());
+        }
+      }
+      const EpistemicView after(executor, *pid, kPredicates, kKeyless);
+      require(!after.violation(), "ingestion invariants after a health action");
+      require(after.snapshot().beliefs == snapshot.beliefs,
+              "a health action changes no belief");
+      require(*executor.epistemicCells(*pid) <= limits.cells, "cell ceiling");
+      break;
+    }
     case 12:
     case 13: {
       // Scripted steps into states random bytes rarely reach: a principal

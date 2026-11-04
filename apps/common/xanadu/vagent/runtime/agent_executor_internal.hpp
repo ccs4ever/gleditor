@@ -362,6 +362,23 @@ struct AgentExecutor::Ingress {
   /// multiset the reset call snapshots.
   std::map<SourceKey, std::map<std::string, std::multiset<std::int64_t>>>
       inFlight;
+  /// A reset call that would change something takes the next generation;
+  /// readings queued after it carry that generation, those before carry less.
+  std::uint64_t requestReset(const SourceKey &source) {
+    return ++resetMarks[source].requested;
+  }
+  /// Raised only by a committed reset, so a failed, revoked, stubbed or
+  /// `NoChange` reset supersedes nothing (F19).
+  void commitReset(const SourceKey &source, std::uint64_t generation) {
+    auto &mark     = resetMarks[source];
+    mark.committed = std::max(mark.committed, generation);
+  }
+  /// Whether a reading queued at @p generation predates a committed reset.
+  [[nodiscard]] bool supersededByReset(const SourceKey &source,
+                                       std::uint64_t generation) const {
+    const auto found = resetMarks.find(source);
+    return found != resetMarks.end() && generation < found->second.committed;
+  }
   using Charge = IngressCharge;
   std::map<SourceKey, Charge> charges;
   /// A stream's estimator state (design 3.2): the newest sequence a commit or

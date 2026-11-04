@@ -254,13 +254,13 @@ AgentExecutor::healthAction(const identity::ActorPid &target,
   qh.record  = record;
 
   if (actionKind == HealthActionKind::Reset) {
-    const std::lock_guard lock(ingress_->mutex);
+    // `sourceHealth` takes the ingress lock itself, so the snapshot is read
+    // before this scope holds it.
     const auto snapshot = sourceHealth(target, request.principal);
+    const std::lock_guard lock(ingress_->mutex);
     if (snapshot && wouldChangeHealth(request.action, *snapshot, target,
                                       request.principal)) {
-      auto &rm = ingress_->resetMarks[{pid, request.principal}];
-      ++rm.requested;
-      qh.generation = rm.requested;
+      qh.generation = ingress_->requestReset({pid, request.principal});
 
       const auto it = ingress_->inFlight.find({pid, request.principal});
       if (it != ingress_->inFlight.end()) {
@@ -473,9 +473,18 @@ void AgentExecutor::finishHealthItem(const identity::ActorPid &target,
     outcome.outcomeClass = outcomeClassOf(code);
   }
 
+  if (outcome.kind == IngestOutcome::Kind::Committed &&
+      std::holds_alternative<Reset>(qh.action)) {
+    const std::lock_guard lock(ingress_->mutex);
+    ingress_->commitReset({pidKey(target), qh.principal}, qh.generation);
+  }
+
   HealthAudit audit;
-  audit.instance  = qh.receipt.instance;
-  audit.actionSeq = 0;
+  audit.instance = qh.receipt.instance;
+  if (outcome.kind != IngestOutcome::Kind::NoChange) {
+    const std::lock_guard lock(healthMutex_);
+    audit.actionSeq = ++healthActionSeq_[pidKey(target)];
+  }
   audit.principal = qh.principal;
   audit.kind      = actionKindOf(qh.action);
   std::visit(

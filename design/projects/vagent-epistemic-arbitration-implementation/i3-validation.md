@@ -182,7 +182,44 @@ one full review follows the whole implementation.
   a link error in the TUI objects (`TerminalDevice` undefined in `build/vagent`'s link), a state
   that predates this slice.
 
-Open, to be closed before the final review: tests for queued-item ordering (isolate behind a held
-item, `putBack`, reset snapshot), resume and in-process upgrade of grant state, fuzzer steps for
-health actions, the `FuzzTarget` update, the `HealthAudit::actionSeq` field (currently 0), and the
-`traceability.md` rows 4-18 and 8.2-4c, which stay open until then.
+Closed in the completion pass (no per-slice review, by the lead's instruction):
+
+- **Behaviour fixed.** `healthAction` held the ingress lock while `sourceHealth` took it again for a
+  reset, so every reset against a source with a profile deadlocked; the snapshot is now read before
+  the lock. `wouldChangeHealth` read the in-flight set without the ingress lock in the turn path
+  and now takes it. A committed reset raised no floor, because nothing ever wrote
+  `ResetMark::committed`; `Ingress::requestReset`, `commitReset` and `supersededByReset` now hold
+  the three steps, `finishHealthItem` commits a reset's generation when the turn commits, and the
+  queued-reading check uses the predicate. `HealthAudit::actionSeq` is a per-actor counter starting
+  at 1, taken for every audited outcome (a `NoChange` is not audited and takes none) and dropped
+  with the actor.
+- **Resume and upgrade.** A resume loses grants and their tokens, bindings and aliases, the outcome
+  logs, the reset marks, the in-flight set, the estimator marks and the audit sequence (it restarts
+  at 1 under the new instance label); it keeps what the arena holds, so a replay of the profile's
+  last sequence is refused `StaleSequence` after a rebind and a bind below the profile's
+  incarnation is refused (matrix 1-10). An in-process upgrade keeps the pid, so the grant and its
+  token, the binding, the health outcome ring and the audit sequence stay. Both are tested.
+- **Tests.** `vagent_epistemic_grants_test.cpp` grew from 10 to 22 cases: the post order at the
+  `PostBox` (an isolate behind a held item, `putBack` keeping control first, which calls wake the
+  reactor), the reset floor at the `Ingress` (the snapshot decides, nothing is superseded until a
+  reset commits, a late commit does not lower the floor, the floor is erased with the actor), a
+  revoked token queued ahead of its turn, a refused action spending no receipt, audit or allowance,
+  quota exhaustion not keeping an isolate or reset out (12 of 16 slots for degrade and clear), the
+  control cap deferring without dropping, `actionSeq`, the upgrade and the resume.
+- **Fuzzer.** `fuzz_epistemic_ingress.cpp` has a health step: isolate, degrade, clear (with and
+  without a code), reset and the isolate batch, each under a valid, a revoked and a wrong-kind
+  grant, requiring no receipt for what the grant forbids, a typed outcome for what it allows, and no
+  belief change from the stub. The harness has no `FuzzTarget` type; its header comment is the
+  statement of what it checks and was updated.
+- **Result.** `vagent_actor_test`: 929 passed. `xuzz_test`: 3098 passed, the E2E tests included,
+  because the full `make` now links (it exited 0). `make fuzz_epistemic_ingress` built after one
+  Makefile line added the shared TUI objects to `FUZZ_CORE_OBJS`, which every core-linking fuzz
+  target lacked since the vagent TUI joined the core sources; 416 inputs in 60 s ran clean, with
+  `ASAN_OPTIONS=alloc_dealloc_mismatch=0` for a libstdc++ `stable_sort` temporary-buffer report
+  that is the toolchain's and not ours.
+- **Limitations.** The reset floor is tested at the `Ingress` and not end to end, because the stub
+  cannot commit a reset; 2c2 adds the end-to-end case when `healthEntry` can. The control cap is
+  tested for "defers, does not drop" and not for the wake boundary, which the public API does not
+  expose. A reset against a source with a profile always has weight or a reading to change, so the
+  "idle reset is `NoChange`" case needs a profile with zero weight, which only 2c2's arena records
+  can make. The `traceability.md` rows 4-18 and 8.2-4c are the lead's to close.

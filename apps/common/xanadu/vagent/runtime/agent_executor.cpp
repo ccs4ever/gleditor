@@ -1459,8 +1459,14 @@ AgentExecutor::TurnOutcome AgentExecutor::deliverHost(State &state,
         return outcome;
       }
       const auto snapshot = sourceHealth(state.pid, event.health->principal);
-      if (snapshot && !wouldChangeHealth(event.health->action, *snapshot,
-                                         state.pid, event.health->principal)) {
+      const bool changes  = [&] {
+        if (!snapshot) return true;
+        // `wouldChangeHealth` reads the in-flight set, which ingestion edits.
+        const std::lock_guard lock(ingress_->mutex);
+        return wouldChangeHealth(event.health->action, *snapshot, state.pid,
+                                  event.health->principal);
+      }();
+      if (!changes) {
         finishHealthItem(state.pid, *event.health, "NoChange");
         TurnOutcome outcome;
         outcome.result = std::string("NoChange");
@@ -3812,8 +3818,12 @@ std::string_view epistemicRefusalName(EpistemicRefusal refusal) noexcept {
 }
 
 void AgentExecutor::forgetIngress(const identity::ActorPid &pid) {
-  const std::lock_guard lock(ingress_->mutex);
-  ingress_->forget(pidKey(pid));
+  {
+    const std::lock_guard lock(ingress_->mutex);
+    ingress_->forget(pidKey(pid));
+  }
+  const std::lock_guard health(healthMutex_);
+  healthActionSeq_.erase(pidKey(pid));
 }
 
 void AgentExecutor::postRefusals(const identity::ActorPid &target,
@@ -4027,10 +4037,9 @@ void AgentExecutor::drainPosted() {
       if (item.ingest) {
         {
           const std::lock_guard lock(ingress_->mutex);
-          const auto rmIt = ingress_->resetMarks.find(
-              {pidKey(item.pid), item.ingest->principal});
-          if (rmIt != ingress_->resetMarks.end() &&
-              item.ingest->generation < rmIt->second.committed) {
+          if (ingress_->supersededByReset(
+                  {pidKey(item.pid), item.ingest->principal},
+                  item.ingest->generation)) {
             ingress_->release(pidKey(item.pid), item.ingest->principal,
                               item.ingest->relay);
             auto &predMap =

@@ -1015,6 +1015,8 @@ FUZZ_CORE_OBJS += $(FUZZ_OBJDIR)/src/mimetype.o $(FUZZ_OBJDIR)/src/source_ground
 # The engine also calls the generic Layoutfilade and focus manager, which the
 # test binaries link explicitly for the same reason.
 FUZZ_CORE_OBJS += $(FUZZ_OBJDIR)/src/enfilade/layoutfilade.o $(FUZZ_OBJDIR)/src/ui/focus_manager.o
+# The vagent TUI objects in XUDU_CORE_SRCS call the shared terminal device.
+FUZZ_CORE_OBJS += $(patsubst %.cpp,$(FUZZ_OBJDIR)/%.o,$(COMMON_UI_TUI_SRCS))
 
 # Header dependencies, as the regular objects have: without them a changed
 # struct layout leaves stale sanitizer objects that disagree with fresh ones,
