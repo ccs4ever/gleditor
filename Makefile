@@ -1198,6 +1198,28 @@ $(OBJDIR)/vagent_mutation_test: $(call obj,tests/xuzz/vagent_p15_test.cpp tests/
 test/vagent-mutation: vagent_mutation_test
 	$(OBJDIR)/vagent_mutation_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
 
+# Phase-5 lineage plumbing + genesis (a)-(e) ceremony: two dedicated
+# kernel-linked binaries in the vagent_fragment_test shape — the pair
+# splits along the seam in vagent/lineage.hpp, so each half links and
+# runs without the other half's test file having landed yet. Both
+# suites exercise vagent/ objects vagent_runtime_test filters out
+# (lineage.cpp is glob-picked into XUDU_CORE_OBJS like fragment.cpp).
+.PHONY: vagent_lineage_test test/vagent-lineage
+vagent_lineage_test: $(OBJDIR)/vagent_lineage_test
+$(OBJDIR)/vagent_lineage_test: $(call obj,tests/xuzz/vagent_lineage_test.cpp) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
+	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS) $(TEST_LIBS)
+
+test/vagent-lineage: vagent_lineage_test
+	$(OBJDIR)/vagent_lineage_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
+
+.PHONY: vagent_genesis_test test/vagent-genesis
+vagent_genesis_test: $(OBJDIR)/vagent_genesis_test
+$(OBJDIR)/vagent_genesis_test: $(call obj,tests/xuzz/vagent_genesis_test.cpp) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
+	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS) $(TEST_LIBS)
+
+test/vagent-genesis: vagent_genesis_test
+	$(OBJDIR)/vagent_genesis_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
+
 test/vagent-frontend: vagent vagent_frontend_test
 	$(OBJDIR)/vagent_frontend_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
 
