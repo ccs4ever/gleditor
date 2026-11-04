@@ -4,8 +4,7 @@
 #include <iterator>
 #include <string>
 
-#include "common/xanadu/vagent/checker.hpp"
-#include "common/xanadu/vagent/parser.hpp"
+#include "common/xanadu/vagent/frontend.hpp"
 #include "common/xanadu/vagent/token.hpp"
 
 namespace {
@@ -23,11 +22,10 @@ TEST(VagentGuideTest, EveryCompleteSourceExampleParsesAndChecks) {
     ASSERT_NE(end, std::string::npos);
     const auto source = guide.substr(start, end - start);
     SCOPED_TRACE("guide example " + std::to_string(++examples));
-    xanadu::vagent::Parser parser(source);
-    auto program = parser.parseProgram();
-    ASSERT_TRUE(program.has_value())
-        << xanadu::vagent::formatDiagnostic(program.error());
-    auto result = xanadu::vagent::check(*program);
+    // compile() runs the same parse → resolve → expand → check pipeline as
+    // `vagent check`, so a guide example is verified exactly as the CLI
+    // verifies it — including the metaprogramming expansion stage.
+    auto result = xanadu::vagent::compile(source);
     if (!result) {
       std::string errors;
       for (const auto &diagnostic : result.error()) {
