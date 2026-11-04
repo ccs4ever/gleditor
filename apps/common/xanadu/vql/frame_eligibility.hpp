@@ -30,6 +30,8 @@ struct FrameEligibilityError {
 };
 
 /// Classify definitions safe to lower to reusable activation-frame graphs.
+/// Structural contract captures enter lexical scope only after their complete
+/// match; aliases used by defaults must already exist before that match.
 /// Unsupported or open definitions have a refusal reason. Malformed/cyclic
 /// ASTs and traversal-budget exhaustion are hard errors, so they cannot fall
 /// through to recursive inline expansion.

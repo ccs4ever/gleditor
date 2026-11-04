@@ -55,7 +55,10 @@ public:
       if (parameter.isVariadic)
         refuse("variadic definitions remain on inline graph lowering");
       if (parameter.defaultValue) value(*parameter.defaultValue, scope, 2);
-      if (parameter.type) type(*parameter.type, scope, 2);
+      if (parameter.type) {
+        auto captures = type(*parameter.type, scope, 2);
+        scope.insert(captures.begin(), captures.end());
+      }
 
       if (const auto *name = std::get_if<std::string>(&parameter.target)) {
         if (name->empty() || !scope.insert(*name).second)
@@ -66,14 +69,14 @@ public:
         contextParameterSeen = true;
       } else {
         const auto &pattern = std::get<DestructurePattern>(parameter.target);
-        refuse("destructured parameters remain on inline graph lowering");
-        destructure(pattern, scope, 2);
+        auto captures       = contractPattern(pattern, scope, 2);
+        scope.insert(captures.begin(), captures.end());
       }
     }
 
     if (definition.returnType) {
       auto returnScope = scope;
-      type(*definition.returnType, returnScope, 1);
+      (void)type(*definition.returnType, returnScope, 1);
     }
     if (const auto *body =
             std::get_if<std::shared_ptr<ValueExpr>>(&definition.body)) {
@@ -603,9 +606,45 @@ private:
         });
   }
 
-  void primaryType(const PrimaryType &primary, Scope &scope,
-                   const std::size_t depth) {
+  void contractDefault(const std::shared_ptr<ValueExpr> &defaultValue,
+                       const Scope &scope, const std::size_t depth) {
+    if (!defaultValue) throw ScanFailure("contract default is missing");
+    pointer(defaultValue, depth,
+            [&](const ValueExpr &expr, const std::size_t nestedDepth) {
+              const auto *literal = std::get_if<ScalarLiteral>(&expr.kind);
+              const auto *alias   = std::get_if<std::string>(&expr.kind);
+              if (!literal && !alias)
+                refuse(
+                    "path and call contract defaults are not frame eligible");
+              value(expr, scope, nestedDepth);
+            });
+  }
+
+  Scope contractPattern(const DestructurePattern &pattern, const Scope &scope,
+                        const std::size_t depth) {
+    Scope captures;
+    sequence(pattern.fields, depth,
+             [&](const DestructureField &field, const std::size_t childDepth) {
+               if (field.defaultValue)
+                 contractDefault(field.defaultValue, scope, childDepth);
+               if (field.type) {
+                 pointer(field.type, childDepth,
+                         [&](const TypeExpr &typeExpr,
+                             const std::size_t nestedDepth) {
+                           auto nested = type(typeExpr, scope, nestedDepth);
+                           captures.insert(nested.begin(), nested.end());
+                         });
+               }
+               if (field.isContext) captures.insert(".");
+               if (!field.varName.empty()) captures.insert(field.varName);
+             });
+    return captures;
+  }
+
+  Scope primaryType(const PrimaryType &primary, const Scope &scope,
+                    const std::size_t depth) {
     tick(depth);
+    Scope captures;
     std::visit(
         [&](const auto &kind) {
           using Kind = std::remove_cvref_t<decltype(kind)>;
@@ -625,28 +664,36 @@ private:
             if (kind.name != "Stream")
               refuse("contextual generic types are not frame eligible");
           } else if constexpr (std::same_as<Kind, ShapeType>) {
-            refuse("shape contracts are not frame eligible");
-            destructure(kind.pattern, scope, depth + 1);
+            captures = contractPattern(kind.pattern, scope, depth + 1);
           } else if constexpr (std::same_as<Kind, std::shared_ptr<TypeExpr>>) {
             pointer(kind, depth + 1,
                     [&](const TypeExpr &nested, const std::size_t nestedDepth) {
-                      type(nested, scope, nestedDepth);
+                      auto nestedCaptures = type(nested, scope, nestedDepth);
+                      captures.insert(nestedCaptures.begin(),
+                                      nestedCaptures.end());
                     });
           }
         },
         primary.kind);
     if (primary.refinement) {
-      refuse("shape contracts are not frame eligible");
-      destructure(primary.refinement->pattern, scope, depth + 1);
+      auto refined =
+          contractPattern(primary.refinement->pattern, scope, depth + 1);
+      if (!std::holds_alternative<GenericType>(primary.kind))
+        captures.insert(refined.begin(), refined.end());
     }
+    return captures;
   }
 
-  void type(const TypeExpr &expr, Scope &scope, const std::size_t depth) {
+  Scope type(const TypeExpr &expr, const Scope &scope,
+             const std::size_t depth) {
     tick(depth);
+    Scope captures;
     sequence(expr.unionType.members, depth + 1,
              [&](const PrimaryType &primary, const std::size_t childDepth) {
-               primaryType(primary, scope, childDepth);
+               auto armCaptures = primaryType(primary, scope, childDepth);
+               captures.insert(armCaptures.begin(), armCaptures.end());
              });
+    return captures;
   }
 
   void pathLambda(const PathLambda &lambda, const Scope &outer,

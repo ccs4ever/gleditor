@@ -458,3 +458,28 @@ variadics, nonliteral field defaults and mutation contracts remain open for reus
 
 Logs: `/tmp/vql-context-frames-build.log`, `/tmp/vql-context-frames-tests.log`,
 `/tmp/vql-context-frames-format.log`.
+
+## Iteration 16: closed structural-contract frames
+
+Closed structural annotations and destructured formals now use reusable native frames. A declared
+parameter type matches before its target pattern; parameter mismatch returns empty, and return
+promises retain their error behavior. Match captures and context-fallback outputs are frame locals,
+so recursive invocations keep independent bindings while external parent/field identities survive.
+
+Eligibility resolves every field-default alias against the lexical scope before its whole match,
+including nested types, base/refinement pairs and independent union arms. Completed parameter
+captures become available to later parameters. Generic element/refinement captures stay private,
+while their defaults and AST structure are still scanned. Nested field types retain pointer-cycle,
+depth and query-wide work guards. Free aliases and transitive inline-only callees retain compiled
+inline lowering. Nonliteral field defaults still require graph continuations and are not enabled.
+
+Validation: full `make -j$(nproc)` passed. All 514 affected tests from 49 suites passed, including
+thirteen new structural-frame tests, all four contract modes, literal and lexical defaults,
+parameter filters and return errors, scope/cycle regressions, stream identity/order/duplicates,
+context restoration, recursive fresh-VM Store export/reload, and host/mesh Vquery source routes.
+Independent Luna architecture and senior/profiler reviews accepted this bounded stage. Repository
+formatting passed with clang-format 19. No performance improvement or full-suite pass is claimed.
+The broader sweep's known Prolog resolution gaps remain unchanged. Full §4.12 remains incomplete.
+
+Logs: `/tmp/vql-structural-frames-build.log`, `/tmp/vql-structural-frames-tests.log`,
+`/tmp/vql-structural-frames-format.log`.

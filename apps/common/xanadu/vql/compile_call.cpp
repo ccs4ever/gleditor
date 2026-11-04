@@ -451,7 +451,8 @@ void VQLCompiler::compileFrameDefinition(const DefDeclaration &definition) {
   spec.resultPorts.emplace_back(resultSlot, FramePortKind::Stream);
   for (const auto &parameter : definition.params) {
     if (!std::holds_alternative<std::string>(parameter.target) &&
-        !std::holds_alternative<bool>(parameter.target))
+        !std::holds_alternative<bool>(parameter.target) &&
+        !std::holds_alternative<DestructurePattern>(parameter.target))
       throw std::invalid_argument(
           "frame definition has an unsupported parameter target");
     const CellRef slot = core_.arena().makeCell();
@@ -527,7 +528,13 @@ void VQLCompiler::compileFrameDefinition(const DefDeclaration &definition) {
       appendOpcode(skip);
     }
     if (parameter.type) emitMatch(*parameter.type, {slot});
-    if (const auto *name = std::get_if<std::string>(&parameter.target)) {
+    if (const auto *pattern =
+            std::get_if<DestructurePattern>(&parameter.target)) {
+      TypeExpr shape{
+          .unionType = UnionType{.members = {PrimaryType{
+                                     .kind = ShapeType{.pattern = *pattern}}}}};
+      emitMatch(shape, {slot});
+    } else if (const auto *name = std::get_if<std::string>(&parameter.target)) {
       streamBindings_[*name] = {slot};
       varBindings_[*name]    = slot;
     } else {

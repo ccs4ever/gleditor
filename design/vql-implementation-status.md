@@ -317,3 +317,14 @@ affected tests passed, including host/mesh source and fresh-VM export. See
 [iteration 15](projects/vortex-vm-only-iterations.md). Structural captures/destructuring, free
 closure inputs, functors, variadics and nonliteral field-default continuations remain open; this
 does not complete §4.12.
+
+## Closed structural-contract frames
+
+Closed structural annotations and destructured formals now use reusable native frame graphs,
+including nested/optional/union matches, reference captures, context capture, literal defaults and
+earlier lexical aliases. Every default alias resolves before its whole match; generic element and
+refinement captures stay private. Open defaults retain compiled inline lowering. Recursive
+structural graphs survive Store export/reload into a fresh VM. Full build and all 514 affected tests
+passed, with independent Luna architecture and senior/profiler gates. See
+[iteration 16](projects/vortex-vm-only-iterations.md). Free closure inputs, functors, variadics,
+nonliteral field-default continuations and mutation contracts remain open; §4.12 is incomplete.
