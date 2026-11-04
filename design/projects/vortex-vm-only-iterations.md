@@ -505,3 +505,30 @@ incomplete.
 
 Logs: `/tmp/vql-loop-frames-build.log`, `/tmp/vql-loop-frames-tests.log`,
 `/tmp/vql-loop-frames-format.log`.
+
+## Iteration 18: graph-native scalar string conversion
+
+`string(expr)` now compiles to the appended native `VqlString` instruction. One positional argument
+is normalized as a complete runtime stream; zero or multiple values refuse rather than truncating.
+The shared query scalar reader preserves typed Int64/Double/Bool bits over misleading text,
+including foreign cells and clone masters. Text passes through unchanged; numeric and Boolean values
+use canonical scalar formatting from their stored bits, including normalized zero. Structural
+handles refuse explicitly. User-defined `string` functions retain precedence over the builtin.
+
+The primitive stages its result before publication, validates output shape, and charges member
+visits and shared scalar reads. Pipeline/condition/pre-postcondition/memo combinations and raw
+StdLib calls with incompatible operands refuse explicitly. VM and sealed-artifact opcode bounds are
+updated without renumbering existing instructions. Sealed scalar artifacts execute the primitive;
+sealed stream/frame artifact limitations remain separate work. No runtime AST or evaluator fallback
+is introduced. Lazy parameter-expression defaults may call `string`; nonliteral contract-field
+defaults still require graph continuations and refuse.
+
+Validation: full `make -j$(nproc)` and all 533 affected tests from 52 suites passed, including
+eleven new scalar-string tests, serialized-opcode boundary validation, budget recovery, caller/frame
+scope, source-AST destruction and Store reload into a fresh VM, host/mesh Vquery sources and sealed
+Vortex scalar artifacts. Independent Luna architecture and senior/profiler reviews accepted this
+bounded stage. Repository formatting passed with clang-format 19. No performance improvement or
+full-suite pass is claimed. Additive scalar/string expressions and the remaining §4.12 work are
+incomplete.
+
+Logs: `/tmp/vql-string-build.log`, `/tmp/vql-string-tests.log`, `/tmp/vql-string-format.log`.

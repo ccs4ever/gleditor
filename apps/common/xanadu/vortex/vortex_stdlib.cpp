@@ -635,6 +635,10 @@ std::vector<CellValue> VortexStdLib::call(CellRef fnOp,
     throw std::invalid_argument(
         "stdlib raw calls do not support activation-frame opcodes");
   }
+  if (vm_.getOpcodeKind(fnOp) == OpcodeKind::VqlString) {
+    throw std::invalid_argument(
+        "stdlib raw calls do not support VqlString reference-slot operands");
+  }
   std::string opName = core_.arena().textOf(fnOp);
   if (opName.starts_with("#ARRAY_")) {
     if (opName == "#ARRAY_IOTA") {

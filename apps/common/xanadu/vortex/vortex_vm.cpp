@@ -124,7 +124,7 @@ std::optional<OpcodeKind> VortexVM::getOpcodeKind(CellRef opCell) const {
   auto val = core_.arena().asInt64(opCell);
   if (val && *val >= 0 &&
       static_cast<std::uint64_t>(*val) <=
-          static_cast<std::uint64_t>(OpcodeKind::ReturnFrame)) {
+          static_cast<std::uint64_t>(OpcodeKind::VqlString)) {
     return static_cast<OpcodeKind>(*val);
   }
   return std::nullopt;
@@ -512,6 +512,9 @@ void VortexVM::runPipeline(CellRef paramCell) {
       throw std::invalid_argument(
           "ProbeLink cannot run in a parameter pipeline");
     }
+    if (kind == OpcodeKind::VqlString)
+      throw std::invalid_argument(
+          "VqlString cannot run in a parameter pipeline");
     if (kind == OpcodeKind::InvokeFrame || kind == OpcodeKind::ReturnFrame)
       throw std::invalid_argument(
           "activation-frame opcodes cannot run in parameter pipelines");
@@ -530,9 +533,8 @@ void VortexVM::runPipeline(CellRef paramCell) {
 
     std::vector<CellRef> inCells = inputsOf(*pipeOp);
     std::vector<CellValue> inVals;
-    if (kind == OpcodeKind::VqlCompare) {
-      // The comparison handler reads these registers directly so it can
-      // distinguish a missing reference from an ordinary scalar value.
+    if (kind == OpcodeKind::VqlCompare || kind == OpcodeKind::VqlString) {
+      // These VQL scalar leaves resolve raw VM slots themselves.
     } else if (inCells.empty()) {
       inVals.push_back(inputValue(paramCell));
     } else {
@@ -589,13 +591,15 @@ bool VortexVM::evaluateCondition(CellRef clause,
   }
   if (kind == OpcodeKind::ProbeLink)
     throw std::invalid_argument("ProbeLink cannot run as a condition");
+  if (kind == OpcodeKind::VqlString)
+    throw std::invalid_argument("VqlString cannot run as a condition");
   if (kind == OpcodeKind::InvokeFrame || kind == OpcodeKind::ReturnFrame)
     throw std::invalid_argument(
         "activation-frame opcodes cannot run as conditions");
   std::vector<CellRef> inCells = inputsOf(actualClause);
   std::vector<CellValue> inVals;
-  if (kind == OpcodeKind::VqlCompare) {
-    // Its handler resolves raw slots and must observe missing references.
+  if (kind == OpcodeKind::VqlCompare || kind == OpcodeKind::VqlString) {
+    // Their handlers resolve raw slots and must observe missing references.
   } else if (!inCells.empty()) {
     for (CellRef c : inCells) {
       inVals.push_back(inputValue(c));
@@ -643,6 +647,8 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
     return executeResumeSet(opcode, inputs, cursor);
   case OpcodeKind::VqlCompare:
     return executeVqlCompare(opcode, outputs);
+  case OpcodeKind::VqlString:
+    return executeVqlString(opcode, outputs);
   case OpcodeKind::ProbeLink:
     return executeProbeLink(opcode, outputs);
   case OpcodeKind::Add: {
@@ -1468,6 +1474,14 @@ ExecutionResult VortexVM::step(CellRef cursor) {
       return getOpcodeKind(actual) == OpcodeKind::ProbeLink;
     });
   };
+  const auto hasVqlStringCondition = [this](const auto &clauses) {
+    return std::ranges::any_of(clauses, [this](const CellRef clause) {
+      const CellRef actual = core_.arena()
+                                 .cloneMaster(clause, core_.dims().clone)
+                                 .value_or(clause);
+      return getOpcodeKind(actual) == OpcodeKind::VqlString;
+    });
+  };
   const auto hasFrameCondition = [this](const auto &clauses) {
     return std::ranges::any_of(clauses, [this](const CellRef clause) {
       const CellRef actual = core_.arena()
@@ -1482,6 +1496,11 @@ ExecutionResult VortexVM::step(CellRef cursor) {
       hasProbeLinkCondition(core_.postconditionsOf(*op))) {
     return {.success      = false,
             .errorMessage = "ProbeLink cannot run as a condition"};
+  }
+  if (hasVqlStringCondition(core_.preconditionsOf(*op)) ||
+      hasVqlStringCondition(core_.postconditionsOf(*op))) {
+    return {.success      = false,
+            .errorMessage = "VqlString cannot run as a condition"};
   }
   if (hasFrameCondition(core_.preconditionsOf(*op)) ||
       hasFrameCondition(core_.postconditionsOf(*op))) {
@@ -1514,6 +1533,24 @@ ExecutionResult VortexVM::step(CellRef cursor) {
     }
     if (isMemoized(*op))
       return {.success = false, .errorMessage = "ProbeLink cannot be memoized"};
+  }
+  if (kind == OpcodeKind::VqlString) {
+    if (!core_.preconditionsOf(*op).empty() ||
+        !core_.postconditionsOf(*op).empty()) {
+      return {.success      = false,
+              .errorMessage = "VqlString does not support pre/postconditions"};
+    }
+    if (std::ranges::any_of(
+            inputCells,
+            [&](const CellRef input) { return core_.hasPipeline(input); }) ||
+        std::ranges::any_of(outCells, [&](const CellRef output) {
+          return core_.hasPipeline(output);
+        })) {
+      return {.success      = false,
+              .errorMessage = "VqlString does not support pipelines"};
+    }
+    if (isMemoized(*op))
+      return {.success = false, .errorMessage = "VqlString cannot be memoized"};
   }
   if (contractOp) {
     if (!core_.preconditionsOf(*op).empty() ||
@@ -1633,7 +1670,8 @@ ExecutionResult VortexVM::step(CellRef cursor) {
           kind == OpcodeKind::ClearCellRefs ||
           kind == OpcodeKind::MatchContract ||
           kind == OpcodeKind::RequireContract ||
-          kind == OpcodeKind::VqlCompare || kind == OpcodeKind::ProbeLink) {
+          kind == OpcodeKind::VqlCompare || kind == OpcodeKind::VqlString ||
+          kind == OpcodeKind::ProbeLink) {
         oldInputs.emplace_back(false);
       } else {
         oldInputs.push_back(inputValue(paramCell));
@@ -1655,8 +1693,9 @@ ExecutionResult VortexVM::step(CellRef cursor) {
       kind != OpcodeKind::RequireContract && kind != OpcodeKind::CopyCellRefs &&
       kind != OpcodeKind::ClearCellRefs &&
       kind != OpcodeKind::BranchFalseCell && kind != OpcodeKind::VqlCompare &&
-      kind != OpcodeKind::ResumeInit && kind != OpcodeKind::ResumeSet &&
-      kind != OpcodeKind::ProbeLink && !stateful;
+      kind != OpcodeKind::VqlString && kind != OpcodeKind::ResumeInit &&
+      kind != OpcodeKind::ResumeSet && kind != OpcodeKind::ProbeLink &&
+      !stateful;
   if (memoizable && isMemoized(*op)) {
     if (const auto key = getMemoKey(*op)) {
       CellRef pin = core_.getOrCreateMemoPin(*key);

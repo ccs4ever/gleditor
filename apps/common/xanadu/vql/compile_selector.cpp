@@ -197,6 +197,14 @@ std::vector<CellRef> VQLCompiler::compileSelector(const PathStep &step,
       }
 
       nextStream = std::move(attachedClones);
+    } else if (!definitions_.contains(fn.name) && fn.name == "string") {
+      for (const auto current : stream) {
+        const auto result = compileBuiltinInvocation(
+            fn, hasContext ? std::optional{current} : std::nullopt);
+        if (!result)
+          throw std::logic_error("string builtin dispatch unexpectedly failed");
+        nextStream.push_back(*result);
+      }
     } else if (const auto definition = definitions_.find(fn.name);
                definition != definitions_.end()) {
       requirePositionalArguments(fn);

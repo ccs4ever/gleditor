@@ -112,6 +112,7 @@ enum class OpcodeKind : std::uint8_t {
   ProbeLink,
   InvokeFrame,
   ReturnFrame,
+  VqlString,
 };
 
 struct FrameDescriptorError {
@@ -342,6 +343,8 @@ private:
   void pruneResumeState() noexcept;
   ExecutionResult executeVqlCompare(CellRef opcode,
                                     std::vector<CellValue> &outputs);
+  ExecutionResult executeVqlString(CellRef opcode,
+                                   std::vector<CellValue> &outputs);
   ExecutionResult executeProbeLink(CellRef opcode,
                                    std::vector<CellValue> &outputs);
   ExecutionResult executeTypeContract(OpcodeKind kind, CellRef opcode,

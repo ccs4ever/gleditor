@@ -151,6 +151,9 @@ private:
   std::vector<zigzag::CellRef>
   compileArgument(const ValueExpr &argument,
                   std::optional<zigzag::CellRef> context);
+  std::optional<zigzag::CellRef>
+  compileBuiltinInvocation(const FunctionInvocation &invocation,
+                           std::optional<zigzag::CellRef> context);
   std::vector<zigzag::CellRef> emitContractDefaultSlots(const TypeExpr &type);
   std::unordered_map<std::string, DefDeclaration> definitions_;
   struct FrameDefinitionState {

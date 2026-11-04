@@ -339,3 +339,14 @@ Full build and all 521 affected tests passed with independent Luna gates; see
 [iteration 17](projects/vortex-vm-only-iterations.md). The documented scalar/string expression
 bodies, free closures, variadics, lazy field-default continuations and mutation contracts still
 prevent §4.12 completion.
+
+## Native scalar string conversion
+
+`string(expr)` emits a native Vortex scalar conversion with full argument cardinality checks and
+shared typed/foreign/clone reads. Text stays unchanged; typed values use canonical scalar
+formatting. Nested frames, lazy parameter defaults, saved graphs and source/host/mesh routes passed,
+including a sealed scalar artifact. Full build and all 533 affected tests passed with independent
+Luna gates; see [iteration 18](projects/vortex-vm-only-iterations.md). Additive expressions are
+still required by the documented contract examples. Nonliteral field-default thunks, mutation
+boundaries, free closures, complete functors/variadics and remaining lifecycle routes still prevent
+§4.12 completion.

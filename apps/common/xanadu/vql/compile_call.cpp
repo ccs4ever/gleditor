@@ -61,6 +61,28 @@ VQLCompiler::emitContractDefaultSlots(const TypeExpr &type) {
   return slots;
 }
 
+std::optional<CellRef>
+VQLCompiler::compileBuiltinInvocation(const FunctionInvocation &invocation,
+                                      const std::optional<CellRef> context) {
+  if (invocation.name != "string" || definitions_.contains(invocation.name))
+    return std::nullopt;
+  if (invocation.isSliceRead)
+    throw std::invalid_argument("string() does not support slice reads");
+  requirePositionalArguments(invocation);
+  if (invocation.args.size() != 1)
+    throw std::invalid_argument("string() requires exactly one argument");
+  if (functorArgument(invocation.args.front()))
+    throw std::invalid_argument("string() does not accept path functors");
+
+  const auto argument = compileArgument(invocation.args.front(), context);
+  const CellRef input = normalizeFrameStream(argument);
+  const CellRef op    = emitOp(OpcodeKind::VqlString, "#STRING");
+  emitInput(op, input);
+  const CellRef result = core_.arena().makeCell();
+  emitOutput(op, result);
+  return result;
+}
+
 std::vector<CellRef>
 VQLCompiler::compileArgument(const ValueExpr &argument,
                              std::optional<CellRef> context) {
@@ -83,6 +105,10 @@ VQLCompiler::compileArgument(const ValueExpr &argument,
   }
   if (const auto *function =
           std::get_if<std::shared_ptr<FunctionInvocation>>(&argument.kind)) {
+    if (!*function)
+      throw std::invalid_argument("null compiled function invocation");
+    if (const auto builtin = compileBuiltinInvocation(**function, context))
+      return {*builtin};
     const auto found = definitions_.find((*function)->name);
     if (found == definitions_.end())
       throw std::invalid_argument("unknown compiled function: " +

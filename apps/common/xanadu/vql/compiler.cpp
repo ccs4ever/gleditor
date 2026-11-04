@@ -117,6 +117,8 @@ VQLCompiler::opcodeMnemonic(zigzag::vortex::OpcodeKind kind) noexcept {
     return "INVOKE_FRAME";
   case OpcodeKind::ReturnFrame:
     return "RETURN_FRAME";
+  case OpcodeKind::VqlString:
+    return "VQL_STRING";
   case OpcodeKind::RankBegin:
     return "RANK_BEGIN";
   case OpcodeKind::IteratorNext:
@@ -740,6 +742,8 @@ std::optional<CellRef> VQLCompiler::compileValueExpr(const ValueExpr &expr,
         } else if constexpr (std::is_same_v<
                                  T, std::shared_ptr<FunctionInvocation>>) {
           if (!val) return std::nullopt;
+          if (const auto builtin = compileBuiltinInvocation(*val, ctxCell))
+            return builtin;
           const auto definition = definitions_.find(val->name);
           if (definition == definitions_.end())
             throw std::invalid_argument("unknown compiled function: " +
