@@ -17,6 +17,7 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <stdexcept>
@@ -785,6 +786,192 @@ TEST(ArenaManifoldTest, promotingAnOverlayMintsOnlyWhatTheEvaluationInvented) {
   EXPECT_EQ(after.linked(doc.first, doc.dim, DimVector::POS),
             promoted->cells.front());
   EXPECT_EQ(after.textOf(promoted->cells.front(), doc.store), "answer");
+  EXPECT_EQ(after.refusedOps(), 0U);
+}
+
+// -- durable edge clears (delta-completeness §4.1) ----------------------------
+//
+// promote() commits only additive setLink deltas by default; a caller that opts
+// a shadowed persistent cell into ShadowCommit::Clears also gets its dropped
+// edges emitted as setLink(..., std::nullopt). These pin that boundary.
+
+/// A document with two disjoint pos links on one dimension.
+struct TwoLinkDocument {
+  Store store;
+  MicroversionId at;
+  DimRef dim{noCell};
+  CellRef a{noCell};
+  CellRef b{noCell};
+  CellRef c{noCell};
+  CellRef d{noCell};
+
+  TwoLinkDocument() {
+    at                = store.sliceGenesis(MicroversionId{});
+    const auto minted = store.makeDimension(at, "d.step");
+    at                = minted.version;
+    dim               = minted.dim;
+    at                = store.makeCell(at, "a");
+    a                 = store.cellRefOf(at).value();
+    at                = store.makeCell(at, "b");
+    b                 = store.cellRefOf(at).value();
+    at                = store.makeCell(at, "c");
+    c                 = store.cellRefOf(at).value();
+    at                = store.makeCell(at, "d");
+    d                 = store.cellRefOf(at).value();
+    at                = store.setLink(at, a, dim, DimVector::POS, b);
+    at                = store.setLink(at, c, dim, DimVector::POS, d);
+  }
+
+  [[nodiscard]] Manifold manifold() const { return store.rebuildManifold(at); }
+};
+
+TEST(ArenaManifoldTest, promotingAnOverlayCommitsADroppedEdge) {
+  Document doc;
+  const auto base = doc.manifold();
+  ArenaManifold arena{&base};
+  // Shadow first and clear its pos edge: first ->dim-> second is gone locally.
+  ASSERT_TRUE(arena.unlink(doc.first, doc.dim, DimVector::POS));
+  ASSERT_EQ(arena.linked(doc.first, doc.dim, DimVector::POS), std::nullopt);
+
+  zigzag::PromotionBudget budget{};
+  const auto predicate  = zigzag::commitStateSide(0); // every persistent shadow
+  budget.commitShadowed = predicate;                  // reads "> 0" -> Clears
+
+  const auto promoted =
+      zigzag::promote(doc.store, doc.at, arena, doc.first, budget);
+  ASSERT_TRUE(promoted.has_value());
+
+  const auto after = doc.store.rebuildManifold(promoted->version);
+  // The clear committed durably, and the fold repaired second's backlink.
+  EXPECT_EQ(after.linked(doc.first, doc.dim, DimVector::POS), std::nullopt);
+  EXPECT_EQ(after.linked(doc.second, doc.dim, DimVector::NEG), std::nullopt);
+  EXPECT_EQ(after.refusedOps(), 0U);
+}
+
+TEST(ArenaManifoldTest, commitShadowedNulloptKeepsAdditiveOnly) {
+  Document doc;
+  const auto base = doc.manifold();
+  ArenaManifold arena{&base};
+  ASSERT_TRUE(arena.unlink(doc.first, doc.dim, DimVector::POS));
+
+  // No commitShadowed: the legacy additive path leaves the base edge alone.
+  const auto promoted = zigzag::promote(doc.store, doc.at, arena, doc.first);
+  ASSERT_TRUE(promoted.has_value());
+
+  const auto after = doc.store.rebuildManifold(promoted->version);
+  EXPECT_EQ(after.linked(doc.first, doc.dim, DimVector::POS), doc.second);
+  EXPECT_EQ(after.refusedOps(), 0U);
+}
+
+TEST(ArenaManifoldTest, predicateSelectivityCommitsOnlyTheAdmittedShadow) {
+  TwoLinkDocument doc;
+  const auto base = doc.manifold();
+  ArenaManifold arena{&base};
+  ASSERT_TRUE(arena.unlink(doc.a, doc.dim, DimVector::POS));
+  ASSERT_TRUE(arena.unlink(doc.c, doc.dim, DimVector::POS));
+
+  // Both a and c carry dropped edges; the predicate admits only a.
+  zigzag::PromotionBudget budget{};
+  const auto predicate = [admit = doc.a](const CellRef c) {
+    return c == admit ? zigzag::ShadowCommit::Clears
+                      : zigzag::ShadowCommit::Additive;
+  };
+  budget.commitShadowed = predicate;
+  // Root at a; pull c in via extraRoots so both shadows are in scope.
+  const std::array extras{doc.c};
+  const auto promoted =
+      zigzag::promote(doc.store, doc.at, arena, doc.a, budget, extras);
+  ASSERT_TRUE(promoted.has_value());
+
+  const auto after = doc.store.rebuildManifold(promoted->version);
+  EXPECT_EQ(after.linked(doc.a, doc.dim, DimVector::POS), std::nullopt);
+  EXPECT_EQ(after.linked(doc.c, doc.dim, DimVector::POS), doc.d);
+  EXPECT_EQ(after.refusedOps(), 0U);
+}
+
+TEST(ArenaManifoldTest, suppressEmitsNothingNotEvenAdds) {
+  Document doc;
+  const auto base = doc.manifold();
+  ArenaManifold arena{&base};
+  // Re-point first onto a fresh cell -- an add/repoint, not a clear. Suppress
+  // must suppress that too, not only clears.
+  const auto fresh = arena.makeCell("fresh");
+  ASSERT_TRUE(arena.link(doc.first, doc.dim, DimVector::POS, fresh));
+
+  zigzag::PromotionBudget budget{};
+  const auto predicate = [](const CellRef) {
+    return zigzag::ShadowCommit::Suppress;
+  };
+  budget.commitShadowed = predicate;
+
+  const auto promoted =
+      zigzag::promote(doc.store, doc.at, arena, doc.first, budget);
+  ASSERT_TRUE(promoted.has_value());
+
+  const auto after = doc.store.rebuildManifold(promoted->version);
+  // first's repoint never committed: the base edge is still to second.
+  EXPECT_EQ(after.linked(doc.first, doc.dim, DimVector::POS), doc.second);
+  EXPECT_EQ(after.refusedOps(), 0U);
+}
+
+TEST(ArenaManifoldTest, netIdenticalShadowEmitsNothing) {
+  Document doc;
+  const auto base = doc.manifold();
+  ArenaManifold arena{&base};
+  // Shadow first but leave it pointing at second -- a copied-but-identical
+  // shadow must emit no ops at all.
+  ASSERT_TRUE(arena.link(doc.first, doc.dim, DimVector::POS, doc.second));
+
+  zigzag::PromotionBudget budget{};
+  const auto predicate  = zigzag::commitStateSide(0);
+  budget.commitShadowed = predicate;
+
+  const auto promoted =
+      zigzag::promote(doc.store, doc.at, arena, doc.first, budget);
+  ASSERT_TRUE(promoted.has_value());
+  // Nothing emitted: the version is the parent unchanged.
+  EXPECT_EQ(promoted->version, doc.at);
+}
+
+TEST(ArenaManifoldTest, crossStoreBaseIsRefusedWhenCommitting) {
+  Document doc; // doc.store owns the base manifold
+  Store dest;   // a different destination store
+  const auto base = doc.manifold();
+  ArenaManifold arena{&base};
+  ASSERT_TRUE(arena.unlink(doc.first, doc.dim, DimVector::POS));
+
+  zigzag::PromotionBudget budget{};
+  const auto predicate  = zigzag::commitStateSide(0);
+  budget.commitShadowed = predicate;
+  const auto destAt     = dest.sliceGenesis(MicroversionId{});
+  // base()->store() == &doc.store != &dest: a planning-time refusal.
+  EXPECT_FALSE(
+      zigzag::promote(dest, destAt, arena, doc.first, budget).has_value());
+}
+
+TEST(ArenaManifoldTest, promotingAnOverlayDoesNotDoubleEmitARepoint) {
+  Document doc;
+  const auto base = doc.manifold();
+  ArenaManifold arena{&base};
+  // Re-point first onto an unoccupied fresh target. (An occupied one would
+  // trigger the designed-for redundant displaced-occupant clear, M5.)
+  const auto fresh = arena.makeCell("fresh");
+  ASSERT_TRUE(arena.link(doc.first, doc.dim, DimVector::POS, fresh));
+
+  zigzag::PromotionBudget budget{};
+  const auto predicate  = zigzag::commitStateSide(0);
+  budget.commitShadowed = predicate;
+
+  const auto promoted =
+      zigzag::promote(doc.store, doc.at, arena, doc.first, budget);
+  ASSERT_TRUE(promoted.has_value());
+
+  const auto after = doc.store.rebuildManifold(promoted->version);
+  // The repoint committed cleanly: first ->dim-> fresh, second detached.
+  EXPECT_EQ(after.linked(doc.first, doc.dim, DimVector::POS),
+            promoted->cells.front());
+  EXPECT_EQ(after.linked(doc.second, doc.dim, DimVector::NEG), std::nullopt);
+  EXPECT_EQ(after.textOf(promoted->cells.front(), doc.store), "fresh");
   EXPECT_EQ(after.refusedOps(), 0U);
 }
 

@@ -229,8 +229,69 @@ void expectWritten(
     const ArenaResult &result,
     std::source_location where = std::source_location::current()) noexcept;
 
+/// What a shadowed persistent cell may emit during promote(), per cell.
+/// Flags compose: a caller may allow clears but not values, or vice versa.
+/// See design/arena-promotion-delta-completeness.md §4.0.
+enum class ShadowCommit : std::uint8_t {
+  Additive = 0,      ///< adds + repoints only (the legacy behavior)
+  Clears   = 1 << 0, ///< + edge clears (e.pos == noCell on a changed edge)
+  Values   = 1 << 1, ///< + value/content restatement (the deferred stage)
+  Suppress = 1 << 2, ///< emit nothing for this cell (not even adds)
+};
+
+[[nodiscard]] constexpr ShadowCommit operator|(const ShadowCommit a,
+                                               const ShadowCommit b) noexcept {
+  return static_cast<ShadowCommit>(static_cast<std::uint8_t>(a) |
+                                   static_cast<std::uint8_t>(b));
+}
+[[nodiscard]] constexpr ShadowCommit operator&(const ShadowCommit a,
+                                               const ShadowCommit b) noexcept {
+  return static_cast<ShadowCommit>(static_cast<std::uint8_t>(a) &
+                                   static_cast<std::uint8_t>(b));
+}
+[[nodiscard]] constexpr ShadowCommit operator~(const ShadowCommit a) noexcept {
+  return static_cast<ShadowCommit>(
+      static_cast<std::uint8_t>(~static_cast<std::uint8_t>(a)) &
+      0x0fU); // mask to the defined bits
+}
+constexpr ShadowCommit &operator|=(ShadowCommit &a,
+                                   const ShadowCommit b) noexcept {
+  return a = a | b;
+}
+constexpr ShadowCommit &operator&=(ShadowCommit &a,
+                                   const ShadowCommit b) noexcept {
+  return a = a & b;
+}
+
+/// Is flag `f` set in flag set `p`?
+[[nodiscard]] constexpr bool policyHas(const ShadowCommit p,
+                                       const ShadowCommit f) noexcept {
+  return (p & f) != ShadowCommit::Additive;
+}
+
+/// The common per-cell policy: state-side cells (a ref above the program-image
+/// `extent`) commit edge-clears; image-side and everything else stays
+/// additive. `ref > extent` is the same sideness test regenesisCycle applies
+/// when seeding extraRoots (lineage.cpp). isEphemeral/isProxy/!holdsOwn cells
+/// never reach the predicate -- promote() consults it only for persistent
+/// shadowed cells, so an ephemeralBit-set ref cannot read "> extent" here.
+[[nodiscard]] inline auto commitStateSide(const CellRef extent) noexcept {
+  return [extent](const CellRef ref) noexcept {
+    return ref > extent ? ShadowCommit::Clears : ShadowCommit::Additive;
+  };
+}
+
 struct PromotionBudget {
-  std::uint32_t maxOps{65536};
+  std::uint32_t maxOps{65536}; ///< reachable-cell bound (NOT an op count)
+  /// Per-cell emission policy for shadowed persistent cells.
+  /// std::nullopt (the default) is the legacy additive-everything path,
+  /// bit-identical to the behavior before this field existed. When set, it
+  /// governs all emission for a shadowed cell: Additive = adds/repoints,
+  /// Clears = +clears, Values = +value/content, Suppress = nothing.
+  /// Borrowed, not owned -- call-scoped only.
+  gleditor::cpp26::optional<
+      gleditor::cpp26::function_ref<ShadowCommit(CellRef)>>
+      commitShadowed{};
 };
 
 /// What promote() produced: the state the store reached, and the real CellRef

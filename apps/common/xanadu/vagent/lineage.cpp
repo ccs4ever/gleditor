@@ -193,8 +193,16 @@ regenesisCycle(Store &lineage, ArenaManifold &arena, const CellRef agentRoot,
       durable.push_back(ref);
     }
   }
-  auto promoted =
-      zigzag::promote(lineage, lineage.latest(), arena, agentRoot, {}, durable);
+  // Opt the same state-side shadows into committing edge-clears: the
+  // `d.patch`/`d.code` rank unlinks unlearn/de-registration drop can now be
+  // durable removals, not only tombstone reads. The sideness test is the same
+  // one the extraRoots above use; session-only value slots get Clears but
+  // never Values and carry no edge-drops, so they stay additive.
+  const auto commitPolicy = zigzag::commitStateSide(imageExtent);
+  zigzag::PromotionBudget budget{};
+  budget.commitShadowed = commitPolicy;
+  auto promoted = zigzag::promote(lineage, lineage.latest(), arena, agentRoot,
+                                  budget, durable);
   if (!promoted) {
     return std::unexpected(
         "regenesisCycle: promote refused the agent cell's subgraph "
