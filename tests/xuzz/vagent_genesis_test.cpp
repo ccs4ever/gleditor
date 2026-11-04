@@ -22,6 +22,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <format>
 #include <map>
 #include <memory>
 #include <optional>
@@ -1040,6 +1041,148 @@ TEST(VagentGenesisTest, SessionLearnRegenesisLearnCycles) {
        zigzag::rankAfter(a2, c2->agentCell, out2->binds.dims.patch))
     ++patchRank;
   EXPECT_EQ(patchRank, 2U);
+}
+
+// The meta serial counter is durable state-side, and promote never commits an
+// in-place value write on a shadowed scalar — only the additive re-point a
+// minted replacement carries. An in-place increment rewinds at every fold and
+// re-mints `patch:<n>` serials already handed out. learn → cycle → learn
+// across three sessions: the clause serials must stay strictly increasing.
+TEST(VagentGenesisTest, MetaSerialStaysMonotoneAcrossCycles) {
+  ProgramImage f;
+  buildProgramImage(f);
+  const auto serialOf = [](std::string_view label) {
+    const auto colon = label.rfind(':');
+    EXPECT_NE(colon, std::string_view::npos);
+    return colon == std::string_view::npos
+               ? -1
+               : std::stoll(std::string{label.substr(colon + 1)});
+  };
+
+  auto fold = std::make_unique<zigzag::Manifold>(
+      f.store.rebuildManifold(f.store.latest()));
+  auto ctx          = std::make_unique<WorkerContext>(fold.get(), &f.store);
+  CellRef agent     = ctx->arena.makeCell("agent");
+  std::int64_t last = -1;
+  for (std::size_t round = 0; round < 3; ++round) {
+    auto &arena = ctx->arena;
+    auto binds  = mintMetaBindSet(arena, ctx->core, f.programRoot, agent);
+    ASSERT_TRUE(binds.has_value()) << (binds ? "" : binds.error());
+    binds->ownModule = f.sysModule;
+    binds->lineage   = MetaLineage{
+        .programRef  = f.programRoot,
+        .imageExtent = f.imageExtent,
+    };
+    MetaRuntime meta(ctx->core, ctx->vm, *binds);
+    const auto clause = meta.learnPlan("boot", std::format("m{}", round),
+                                       f.progHeadA, f.progHeadB);
+    ASSERT_TRUE(clause.has_value()) << (clause ? "" : clause.error());
+    const std::string label = meta.labelOf(*clause).value_or("");
+    ASSERT_TRUE(label.starts_with("patch:")) << "label: " << label;
+    const auto serial = serialOf(label);
+    EXPECT_GT(serial, last) << "serial rewound on round " << round;
+    last = serial;
+
+    auto cycle = regenesisCycle(f.store, arena, agent, f.imageExtent);
+    ASSERT_TRUE(cycle.has_value()) << (cycle ? "" : cycle.error());
+    GenesisRoots roots{
+        .programRoot = f.programRoot,
+        .agentCell   = cycle->agentCell,
+        .ownModule   = f.sysModule,
+        .imageRecord = f.imageRecord,
+        .imageExtent = f.imageExtent,
+    };
+    auto out = runGenesis(f.store, f.store, cycle->context->arena,
+                          cycle->context->core, cycle->context->vm, roots);
+    ASSERT_TRUE(out.has_value()) << (out ? "" : out.error());
+    // The fresh context's arena points raw into cycle->fold — both must
+    // outlive the loop's RegenesisResult or the next round's base dangles.
+    fold  = std::move(cycle->fold);
+    ctx   = std::move(cycle->context);
+    agent = cycle->agentCell;
+  }
+}
+
+// A clean unlearn must stay retired across a fold: promote never commits the
+// unlink, so the patch and clause physically resurrect on the rank — only the
+// `unlearn:<label>` tombstone keeps genesis's replay and the name surface
+// from re-running them. learn_plan → cycle → unlearn → cycle.
+TEST(VagentGenesisTest, UnlearnedPatchStaysOutOfReplay) {
+  ProgramImage f;
+  buildProgramImage(f);
+
+  auto fold0 = std::make_unique<zigzag::Manifold>(
+      f.store.rebuildManifold(f.store.latest()));
+  auto ctx0            = std::make_unique<WorkerContext>(fold0.get(), &f.store);
+  auto &a0             = ctx0->arena;
+  const auto agentCell = a0.makeCell("agent");
+  auto binds0 = mintMetaBindSet(a0, ctx0->core, f.programRoot, agentCell);
+  ASSERT_TRUE(binds0.has_value()) << (binds0 ? "" : binds0.error());
+  binds0->ownModule = f.sysModule;
+  binds0->lineage   = MetaLineage{
+      .programRef  = f.programRoot,
+      .imageExtent = f.imageExtent,
+  };
+  MetaRuntime meta0(ctx0->core, ctx0->vm, *binds0);
+  const auto clause = meta0.learnPlan("boot", "main", f.progHeadA, f.progHeadB);
+  ASSERT_TRUE(clause.has_value()) << (clause ? "" : clause.error());
+  const std::string label = meta0.labelOf(*clause).value_or("");
+  ASSERT_TRUE(label.starts_with("patch:"));
+
+  auto c1 = regenesisCycle(f.store, a0, agentCell, f.imageExtent);
+  ASSERT_TRUE(c1.has_value()) << (c1 ? "" : c1.error());
+  GenesisRoots roots{
+      .programRoot = f.programRoot,
+      .agentCell   = c1->agentCell,
+      .ownModule   = f.sysModule,
+      .imageRecord = f.imageRecord,
+      .imageExtent = f.imageExtent,
+  };
+  auto &a1  = c1->context->arena;
+  auto out1 = runGenesis(f.store, f.store, a1, c1->context->core,
+                         c1->context->vm, roots);
+  ASSERT_TRUE(out1.has_value()) << (out1 ? "" : out1.error());
+  EXPECT_EQ(out1->patchesReplayed, 1U);
+
+  // Session 2: the replayed clause resolves, then unlearn retires it.
+  auto binds1 =
+      mintMetaBindSet(a1, c1->context->core, f.programRoot, c1->agentCell);
+  ASSERT_TRUE(binds1.has_value());
+  binds1->ownModule = f.sysModule;
+  binds1->lineage   = MetaLineage{
+      .programRef  = f.programRoot,
+      .imageExtent = f.imageExtent,
+  };
+  MetaRuntime meta1(c1->context->core, c1->context->vm, *binds1);
+  const auto live = meta1.planNamed(label);
+  ASSERT_TRUE(live.has_value()) << "replayed clause did not resolve";
+  const auto removed = meta1.unlearn(*live);
+  ASSERT_TRUE(removed.has_value()) << (removed ? "" : removed.error());
+
+  auto c2 = regenesisCycle(f.store, a1, c1->agentCell, f.imageExtent);
+  ASSERT_TRUE(c2.has_value()) << (c2 ? "" : c2.error());
+  auto &a2  = c2->context->arena;
+  auto out2 = runGenesis(f.store, f.store, a2, c2->context->core,
+                         c2->context->vm, roots);
+  ASSERT_TRUE(out2.has_value()) << (out2 ? "" : out2.error());
+  // The tombstoned patch stays out of replay even though its rank record
+  // physically resurrected with the fold.
+  EXPECT_EQ(out2->patchesReplayed, 0U)
+      << "the unlearned patch re-ran at genesis";
+
+  // The resurrected clause cell stays name-dead on the meta surface — the
+  // suppression, not the (uncommitted) unlink, is the durable retirement.
+  auto binds2 =
+      mintMetaBindSet(a2, c2->context->core, f.programRoot, c2->agentCell);
+  ASSERT_TRUE(binds2.has_value());
+  binds2->ownModule = f.sysModule;
+  binds2->lineage   = MetaLineage{
+      .programRef  = f.programRoot,
+      .imageExtent = f.imageExtent,
+  };
+  MetaRuntime meta2(c2->context->core, c2->context->vm, *binds2);
+  EXPECT_FALSE(meta2.planNamed(label).has_value())
+      << "the unlearned clause still resolves after genesis";
 }
 
 } // namespace

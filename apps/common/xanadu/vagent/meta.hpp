@@ -597,6 +597,13 @@ private:
   /// Mint or find the `+d.vars` record keyed @p key on @p owner.
   [[nodiscard]] std::optional<CellRef>
   varsRecord(CellRef owner, std::string_view key, bool mint) const;
+  /// Tombstone @p label: mint the `unlearn:<label>` record the genesis
+  /// tombstone arm and the name surfaces consult. Promote never commits a
+  /// removal, so an unlearned patch/clause/symbol physically resurrects on
+  /// the next fold — this record, not the unlink, is the durable retirement.
+  void markUnlearned(std::string_view label) const;
+  /// Whether @p label carries an `unlearn:` tombstone.
+  [[nodiscard]] bool unlearned(std::string_view label) const;
   /// The `test_of`/`body_of` shared wrap+memo walk.
   [[nodiscard]] std::optional<CellRef> wrap(CellRef clause, DimRef attachDim,
                                             std::string_view memoKind);

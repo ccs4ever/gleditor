@@ -762,7 +762,8 @@ TEST(VagentPlasticityTest, ProgramSearchIsCellSearch) {
   EXPECT_NE(*candidate, baseRule.head);
   EXPECT_TRUE(h.rt().labelOf(*candidate).value_or("").starts_with("reify:"));
   EXPECT_TRUE(h.rt().verifyClosed(*candidate).closed)
-      << "the candidate is a closed copy — §8.5's first step";
+      << "the candidate is a closed copy — §8.5's first step; detail: "
+      << h.rt().verifyClosed(*candidate).detail;
 
   // -- Attempt A: score < incumbent → fail, backtrack drains ----------
   const auto mark = h.arena.mark();

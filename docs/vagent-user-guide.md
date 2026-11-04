@@ -1397,11 +1397,11 @@ and ordered comparison is a type error. A `cells"path"` expression navigates the
 `[Cell]` — a list, even for one result, so callers index or `for` down to a single `Cell`.
 
 The path body is VQL path source, embedded behind the `cells` prefix because `#`, `/`, `%`, `?` and
-braces collide with vagent's own operators. The supported subset is one anchor followed by signed
-dimension steps: `##` is the arena home cell, `$name` names a `Cell`-typed binding followed at run
-time, `+d.name`/`-d.name` traverse a dimension edge, and `%` mints a cell. At most one traversal
-step is allowed and it must be last. A path containing `%` is an arena write — refused wherever
-actions are, like a condition or a pure initializer.
+braces collide with vagent's own operators. The supported subset is one anchor followed by steps:
+`##` is the arena home cell, `$name` names a `Cell`-typed binding followed at run time, `+d.name`/
+`-d.name` traverse a dimension edge, and `%` mints a cell. Creation (`%`) steps may repeat, but at
+most one traversal (`+d`/`-d`) step is allowed and it must be last. A path containing `%` is an
+arena write — refused wherever actions are, like a condition or a pure initializer.
 
 **Checkable source; runtime predicted.** Save as `cells.vagent`.
 
@@ -1423,6 +1423,12 @@ Most metaprogramming code does not spell `cells"…"` itself — `program()`, `a
 walk a rank directly, for example `cells"$a/+d.code"` over the agent cell's registered-fragment
 rank.
 
+A `Cell` (or `Code`) handle is *session-local*. The `var head: [Cell]` above is fine inside one
+incarnation, but a handle stored across a checkpoint either dies or aliases a different cell after
+resume — arena positions are not stable across genesis. Bank a *name* (`label_of`, a qualified
+symbol, a `#label`) and re-resolve it with `code_named`/`plan_named`/`symbol_named` when you need a
+reference that outlives an incarnation; only the durable records on the agent's ranks survive.
+
 ### The `code"…"` literal: a fragment value
 
 A `code"…"` literal is source carried as a value. Like `cells"…"`, the prefix is part of one token —
@@ -1441,7 +1447,8 @@ The result has type `Code<T>`: `code"n: Int | n + 1"` is a `Code<Int>` — a fra
 an `Int` when it runs; `code"{ … }"` is a `Code<()>` — a fragment that acts. A bare `Code` in a
 parameter is a wildcard accepting `Code<T>` for any `T`. Creating the literal is a *pure* value — it
 produces a fragment and has no arena effect, whatever the body's own purity. A fragment's free names
-bind where the literal is written, which is what makes capture predictable.
+bind where the literal is written, and a captured `Cell` is held by *identity* — the fragment keeps
+the cell itself, not a copy of its contents — which is what makes capture predictable.
 
 ### `splice`: compile-time substitution
 
@@ -1497,8 +1504,8 @@ resolved is refused at expand time rather than left to fail at run time.
 `static e` evaluates `e` in the compile arena and substitutes the literal result — a compile-time
 constant the language computes rather than you hand-writing it. The operand must be pure, *closed*
 (every name bound to a literal or another `static` value — a `var` or a handler local is not) and of
-a literal-expressible type: `Int`, `Float`, `Str`, `Bool`, `()`, `Duration`, `Time`, or a list or
-record of those. It may not call methods, host functions, `run`, or read cells.
+a literal-expressible type: `Int`, `Float`, `Str`, `Bool` or `()`. It may not call methods, host
+functions, `run`, or read cells.
 
 **Checkable source; runtime predicted.** Save as `static_fold.vagent`.
 
@@ -1547,11 +1554,12 @@ imported, the following are available — the reads are `pure`, the rest impure:
 | `run(c)` / `run(c, [args])`           | `T`               | run a fragment in its own frame; `args` a list literal             |
 | `reify(c)`                            | `Code<T>`         | mint a fresh closed copy of a fragment                             |
 
-Two honest types recur here. `Opt<…>` results do not auto-unwrap in argument position — read them
-with the `if [x] then …` idiom, which both tests presence and hands the value to the body. And
-`Code<Cell>` is the type the reflect-wrapped graphs carry (`test_of`, `body_of`, `code_named`):
-their produced value's type is not statically known, so `run` on one yields a `Cell` whose bits
-`value_of` reads — not a statically-typed `Int`.
+Two honest types recur here. `Opt<…>` is a *presence guard*, not an auto-unwrapping argument —
+`module_named`/`symbol_named`/`plan_named`/`code_named`/`weight_of`/`test_of`/`body_of`/`label_of`
+all return one, so read them with `if [x] then … else …`, which tests presence and binds the
+unwrapped value for the `then` body. And `Code<Cell>` is the type the reflect-wrapped graphs carry
+(`test_of`, `body_of`, `code_named`): their produced value's type is not statically known, so `run`
+on one yields a `Cell` whose bits `value_of` reads — not a statically-typed `Int`.
 
 **Checkable source; runtime predicted.** Save as `meta_read.vagent`.
 
@@ -1572,11 +1580,12 @@ agent Probe {
 ### `run` and `reify`: executing a fragment at run time
 
 `run(c, [args])` executes a fragment now, in its own frame at the same cursor — same-cursor
-execution, not a separate intention. It is *opaque-impure*: the checker cannot see inside the
-fragment, so `run` is refused in a `where` test, a pure method or a read-only answer — anywhere a
-guaranteed-pure computation is required. `reify(c)` makes a fresh, independently-installable copy of
-a fragment, which matters because a grafted head is *consumed* — you cannot graft the same head
-twice.
+execution, not a separate intention. It is *observational*: the temporary frame and argument
+bindings are torn down afterwards, leaving the caller's cursor state untouched. It is
+*opaque-impure*: the checker cannot see inside the fragment, so `run` is refused in a `where` test,
+a pure method or a read-only answer — anywhere a guaranteed-pure computation is required. `reify(c)`
+makes a fresh, independently-installable copy of a fragment, which matters because a grafted head is
+*consumed* — you cannot graft the same head twice.
 
 **Checkable source; runtime predicted.** Save as `reify.vagent`.
 
@@ -1608,6 +1617,13 @@ change dies when the agent does or a checkpoint resumes. `learn_*` does the same
 a durable patch on the agent's `d.patch` rank, so genesis re-derives the change after a
 checkpoint/resume — this is what "learned" means: it persists.
 
+The two verb families gate differently. `graft_*` *validates* the fragment — it must be well-formed
+so the runtime can run it. `learn_*` additionally requires the fragment to be *closed*: every
+outbound reference it makes must resolve to a cell inside the fragment or carry a `+d.name`
+re-resolution, so the patch can be replayed on a fresh arena after a checkpoint. A fragment that
+reaches out to an arbitrary program-side cell without naming it is refused — `learn_*` is a
+closedness gate, not merely a well-formedness check.
+
 | Verb                                         | Effect                                                                         |
 | -------------------------------------------- | ------------------------------------------------------------------------------ |
 | `graft_plan(goal, name, test, body)`         | mint a named clause, `test` as `where`, `body` as the plan; append to the goal |
@@ -1627,6 +1643,7 @@ value — `prune`/`unlearn`/`graft_where`/`set_weight`/`test_of` all take the cl
 **Checkable source; runtime predicted.** Save as `tighten.vagent`.
 
 ```vagent
+module demo:guard
 import std:meta
 
 event Attack
@@ -1647,12 +1664,12 @@ agent Guard {
 }
 ```
 
-`plan_named` resolves the clause by its qualified `demo:Guard.cautious` name; `learn_where`
-validates the new test, re-points the clause's `where` at it and records the patch. Because the
-replaced test is program-original, resuming restores the skeleton's own attachment and re-applies
-the learned test on top — the change affects the *next* plan selection, since `where` is evaluated
-per selection. A `?t` bound inside the test stays inside it: a grafted test cannot export
-`?`-bindings to the clause body.
+`plan_named` resolves the clause by its qualified `demo:Guard.cautious` name (the `module demo`
+header is what makes that module exist); `learn_where` requires the new test to be closed, re-points
+the clause's `where` at it and records the patch. Because the replaced test is program-original,
+resuming restores the skeleton's own attachment and re-applies the learned test on top — the change
+affects the *next* plan selection, since `where` is evaluated per selection. A `?t` bound inside the
+test stays inside it: a grafted test cannot export `?`-bindings to the clause body.
 
 `learn_plan` grows a clause rather than re-pointing one:
 `learn_plan("Feed", "near_water", test, body)` appends a fresh clause to `Feed`'s rank, mints its
@@ -1672,6 +1689,7 @@ returns its `Cell`.
 **Checkable source; runtime predicted.** Save as `hebbian.vagent`.
 
 ```vagent
+module demo:forager
 import std:meta
 
 event Sighting
@@ -1714,11 +1732,14 @@ cannot itself act — the action lives in the `Code<()>` body.
 
 `learn_*` records are what makes a mutation durable. Graft edits are session-local; a `learn_*`
 additionally writes a patch record to the agent's `d.patch` rank, and genesis replays those patches
-in ordinal order after a resume — so the learned `near_water` clause, the tightened `where` and the
-junction weights all come back without re-running the handler. This is the distinction the
+in ordinal order after a resume — so the learned `near_water` clause and the tightened `where` come
+back without re-running the handler. Weights and synapses are different: `set_weight` and
+`sprout_synapse` write *state-side* records (`d.weight`/`d.vars` and `d.synapse`), which survive a
+resume directly on the agent's ranks — they need no patch, because they are state rather than
+re-derived program structure. This is the distinction the
 [Persistence](#persistence-checkpoints-and-agent-identity) section's checkpoint story applies to
 program structure as well as state: installed copies die with the incarnation, but the *patch
-records* that re-derive them are durable.
+records* that re-derive them — and the state-side weight and synapse records — are durable.
 
 Checking today verifies everything in these units: the `code"…"` literal parses as vagent source,
 `Code<T>` types are checked, `splice`/`static` are expanded in the real pipeline, `std:meta` calls

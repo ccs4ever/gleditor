@@ -9,6 +9,7 @@
 #include "common/xanadu/vagent/genesis.hpp"
 
 #include <bit>
+#include <charconv>
 #include <format>
 #include <set>
 #include <string>
@@ -60,6 +61,19 @@ void unlinkRank(zigzag::ArenaManifold &arena, CellRef cell, DimRef dim) {
     else
       zigzag::expectWritten(arena.unlink(*pred, dim, Posward));
   }
+}
+
+/// Parse a patch-record field as int64. `std::stoll` throws on a malformed
+/// record — a crash mid-ceremony — so fields read through this stay a
+/// `std::nullopt` the caller can fall back or fault on.
+[[nodiscard]] std::optional<std::int64_t>
+toInt64(std::string_view text) noexcept {
+  std::int64_t value   = 0;
+  const auto *first    = text.data();
+  const auto *last     = first + text.size();
+  const auto [ptr, ec] = std::from_chars(first, last, value);
+  if (ec != std::errc{} || ptr != last) return std::nullopt;
+  return value;
 }
 
 /// Mint or find the `+d.vars` record keyed @p key on @p owner.
@@ -378,10 +392,9 @@ replayPatch(MetaRuntime &meta, zigzag::ArenaManifold &arena,
               patchField(arena, meta.core(), patch, "priority", false))
         if (const auto rec = varsRecord(arena, meta.core(), clause, "priority",
                                         /*mint=*/true))
-          zigzag::expectWritten(
-              arena.link(*rec, dims.values, Posward,
-                         arena.makeScalarCell(static_cast<std::int64_t>(
-                             std::stoll(*priority)))));
+          if (const auto parsed = toInt64(*priority))
+            zigzag::expectWritten(arena.link(*rec, dims.values, Posward,
+                                             arena.makeScalarCell(*parsed)));
     zigzag::expectWritten(
         arena.link(zigzag::rankTail(arena, *host, dims.clause), dims.clause,
                    Posward, clause));
@@ -502,6 +515,10 @@ rebindRefs(MetaRuntime &meta, zigzag::ArenaManifold &arena, CellRef head,
                                                    label.substr(colon + 1)))
             if (const auto target = arena.linked(*symbol, dims.values, Posward))
               endpoint = meta.graphRoot(*target);
+        // A call into a registered `code"…"` head carries no module: symbol —
+        // fall back to the same d.code label walk run-role records take
+        // before the arm gives up on the slot.
+        if (!endpoint) endpoint = meta.codeNamed(label);
       } else {
         // run-role and ordinary name-records rebind through the
         // image/d.code label walk — Int64(head) verbatim.
@@ -632,7 +649,7 @@ runGenesis(const xanadu::Store &lineage, const xanadu::Store &received,
          zigzag::rankAfter(arena, roots.agentCell, binds->dims.patch)) {
       std::int64_t ordinal = index;
       if (const auto field = patchField(arena, core, patch, "ordinal", false))
-        ordinal = std::stoll(*field);
+        if (const auto parsed = toInt64(*field)) ordinal = *parsed;
       queue.emplace_back(patch, ordinal);
       ++index;
     }
@@ -642,11 +659,14 @@ runGenesis(const xanadu::Store &lineage, const xanadu::Store &received,
   for (const auto &[patch, ordinal] : queue) {
     const auto label = meta.labelOf(patch).value_or("");
     // The tombstone arm: a record already dropped once (its fault
-    // record persists) stays out of replay — a resurrected tail-record
-    // never re-runs.
+    // record persists) or retired by a clean unlearn stays out of
+    // replay — a resurrected tail-record never re-runs.
     if (!label.empty()) {
-      const std::string faultKey = std::format("fault:{}", label);
+      const std::string faultKey   = std::format("fault:{}", label);
+      const std::string unlearnKey = std::format("unlearn:{}", label);
       if (varsRecord(arena, core, roots.agentCell, faultKey, /*mint=*/false)
+              .has_value() ||
+          varsRecord(arena, core, roots.agentCell, unlearnKey, /*mint=*/false)
               .has_value())
         continue;
     }

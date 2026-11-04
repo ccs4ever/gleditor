@@ -193,14 +193,27 @@ std::optional<CellRef> MetaRuntime::symbolNamed(std::string_view owner,
     }
   }
   if (!module) return std::nullopt;
+  // The qualified `module:name` — the spelling unlearn tombstones — is what
+  // the suppression check keys on, so a resurrected learn_method symbol stays
+  // unresolvable even though its d.vars link never persisted as removed.
+  const auto moduleName = arena().textOf(*module);
   for (const auto symbol :
        zigzag::rankAfter(arena(), *module, core_.dims().vars))
-    if (arena().textOf(symbol) == name) return symbol;
+    if (arena().textOf(symbol) == name &&
+        !unlearned(std::format("{}:{}", moduleName, name)))
+      return symbol;
   return std::nullopt;
 }
 
 std::vector<CellRef> MetaRuntime::clausesOf(CellRef cell) const {
-  return collect(zigzag::rankAfter(arena(), cell, core_.dims().clause));
+  std::vector<CellRef> out;
+  for (const auto clause :
+       zigzag::rankAfter(arena(), cell, core_.dims().clause))
+    // A resurrected-but-tombstoned clause stays unresolvable: promote never
+    // committed its unlink, so rank membership alone cannot name it dead —
+    // the `unlearn:` record can.
+    if (!unlearned(labelOf(clause).value_or(""))) out.push_back(clause);
+  return out;
 }
 
 std::optional<std::string> MetaRuntime::labelOf(CellRef cell) const {
@@ -311,6 +324,22 @@ MetaRuntime::varsRecord(CellRef owner, std::string_view key, bool mint) const {
   return record;
 }
 
+void MetaRuntime::markUnlearned(std::string_view label) const {
+  if (label.empty()) return;
+  // varsRecord dedupes on the key, so a re-tombstoned label is a no-op and
+  // a single `unlearn:patch:<n>` retires both the patch and the plan/handler
+  // clause that shares its label.
+  (void)varsRecord(binds_.agentCell, std::format("unlearn:{}", label),
+                   /*mint=*/true);
+}
+
+bool MetaRuntime::unlearned(std::string_view label) const {
+  return !label.empty() &&
+         varsRecord(binds_.agentCell, std::format("unlearn:{}", label),
+                    /*mint=*/false)
+             .has_value();
+}
+
 std::expected<std::int64_t, std::string> MetaRuntime::nextSerial() const {
   auto &arena = core_.arena();
   const auto record =
@@ -328,9 +357,12 @@ std::expected<std::int64_t, std::string> MetaRuntime::nextSerial() const {
   const auto current = arena.asInt64(*value);
   if (!current)
     return std::unexpected("meta serial: counter cell is not an int64");
-  zigzag::expectWritten(
-      arena.setValueBits(*value, xanadu::ValueKind::Int64,
-                         std::bit_cast<std::uint64_t>(*current + 1)));
+  // Mint-and-repoint, never an in-place value write: promote commits only
+  // additive setLink deltas on a shadowed base cell, so a setValueBits here
+  // rewinds to the folded value at the next genesis — every verb would
+  // re-mint patch:<n> serials that already shipped.
+  zigzag::expectWritten(arena.link(*record, core_.dims().values, Posward,
+                                   arena.makeScalarCell(*current + 1)));
   return *current;
 }
 
@@ -689,6 +721,11 @@ MetaRunOutcome MetaRuntime::runFragment(CellRef head,
   const auto spillProduced = core_.render(*producedCell);
 
   const auto cur = cursor.value_or(vm_.spawnCursor(*entry));
+  // The pre-run rank heads: a faulted run never reaches the Return that
+  // would pop the frame, and the bound args outlive their use — both are
+  // restored below so a caller-supplied cursor survives `run` unchanged.
+  const auto priorStack = arena.linked(cur, dims.stack, Posward);
+  const auto priorVars  = arena.linked(cur, dims.vars, Posward);
   // The `vortex_vm.cpp:854-893` frame shape: an Int64 cell holding the
   // successor op, pushed on the cursor's `+d.stack`. For a kernel-side
   // run the successor is a fresh Halt — `Return` pops the frame and
@@ -723,6 +760,19 @@ MetaRunOutcome MetaRuntime::runFragment(CellRef head,
 
   vm_.setCursorOpcode(cur, *entry);
   const auto outcome = vm_.run(cur, maxCycles);
+
+  // `run` is an observation — a caller-supplied cursor must survive it
+  // unchanged. The bound args always sit on `+d.vars` afterward, and a
+  // faulted run never reaches the Return that pops the frame, so both ranks
+  // are repointed at their pre-run heads rather than relying on the unwind.
+  const auto restoreRank = [&](DimRef dim, const std::optional<CellRef> &top) {
+    if (top)
+      zigzag::expectWritten(arena.link(cur, dim, Posward, *top));
+    else
+      zigzag::expectWritten(arena.unlink(cur, dim, Posward));
+  };
+  restoreRank(dims.stack, priorStack);
+  restoreRank(dims.vars, priorVars);
 
   const auto produced = arena.asBool(*producedCell).value_or(false);
   MetaRunOutcome report;
@@ -1482,7 +1532,14 @@ MetaRuntime::MetaMutation MetaRuntime::prune(CellRef clause) {
 bool MetaRuntime::imageRef(CellRef cell) const {
   const auto extent = binds_.lineage ? binds_.lineage->imageExtent : 0u;
   if (zigzag::isEphemeral(cell))
-    return arena().denseOf(cell).value_or(0) < extent;
+    // Dense ids only line up with the image extent in a flat arena. On a
+    // checkpoint overlay an ephemeral cell is session-minted above the base —
+    // always post-image — so the dense-id test must not run: it reads a
+    // fresh dense index that does not correspond to a spool position and
+    // would classify a reified copy as image (program-side), letting it
+    // graft/learn closed-unchecked.
+    return arena().base() == nullptr &&
+           arena().denseOf(cell).value_or(0) < extent;
   // A persistent ref names its spool position; image cells sit at or
   // before the image's op extent.
   return cell <= extent;
@@ -1960,6 +2017,15 @@ MetaRuntime::MetaMutation MetaRuntime::undoPatch(CellRef patch) {
       if (const auto registered = codeNamed(headName);
           registered && codeRegistered(*registered))
         unlinkRank(*registered, binds_.dims.code);
+
+  // Promote never commits a removal, so every unlink above resurrects on the
+  // next fold. Tombstone the names that must stay dead: the patch's own
+  // label (genesis's tombstone arm skips its replay — and for plan/handler
+  // the clause shares `patch:<n>`, so the same record retires it) and, for
+  // the method arm, the symbol's module:Agent.method. A where/body unlearn
+  // keeps its clause live — only the patch tombstone lands for it.
+  markUnlearned(labelOf(patch).value_or(""));
+  if (verb == "learn_method") markUnlearned(target);
   return {};
 }
 
@@ -2057,10 +2123,13 @@ MetaClosedReport MetaRuntime::verifyClosed(CellRef head) const {
     return report;
   };
 
-  // The recipe-covered internal set: every position a member names —
-  // literals, tuple endpoints, capture slots, dim anchors — plus the
-  // head. Ref-records whose marked cell resolves inside it are
-  // internal by construction.
+  // The recipe-covered internal set: the positions members name as covered
+  // cells — literals, tuple endpoints, capture slots — plus the head.
+  // Ref-records whose marked cell resolves inside it are internal by
+  // construction. Only *ephemeral* positions join: a `±1` direction flag and
+  // a persistent dim-anchor are program-side apparatus, and letting `1`
+  // (the home cell) or a low dim ref count as covered would hand an
+  // outbound program-side referent a free pass through the check below.
   std::set<CellRef> internal{head};
   std::map<CellRef, CellRef> captureFor;
   for (const auto member :
@@ -2068,7 +2137,8 @@ MetaClosedReport MetaRuntime::verifyClosed(CellRef head) const {
     if (const auto slot = arena.linked(member, binds_.dims.refFor, Posward))
       captureFor[*slot] = member;
     if (const auto pos = arena.asInt64(member))
-      internal.insert(static_cast<CellRef>(*pos));
+      if (*pos >= 0 && zigzag::isEphemeral(static_cast<CellRef>(*pos)))
+        internal.insert(static_cast<CellRef>(*pos));
   }
 
   const auto program     = programCells();
@@ -2141,6 +2211,14 @@ MetaClosedReport MetaRuntime::verifyClosed(CellRef head) const {
               static_cast<std::uint64_t>(*binding)));
         continue;
       }
+    } else {
+      // `marked` is a recipe member cell, not a ref-slot: a dim anchor
+      // re-resolves by name through its own `+d.name`, and a bare `±1`
+      // direction flag is a field value, not a referent — neither is an
+      // outbound edge.
+      if (arena.linked(*marked, core_.dims().name, Posward).has_value())
+        continue;
+      if (pos && (*pos == 1 || *pos == -1)) continue;
     }
     if (!pos) {
       // An unwritten ref-record slot carries no referent to smuggle —
