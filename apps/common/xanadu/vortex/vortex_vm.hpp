@@ -11,6 +11,7 @@
 #define COMMON_XANADU_VORTEX_VM_HPP
 
 #include <cstdint>
+#include <expected>
 #include <functional>
 #include <optional>
 #include <span>
@@ -108,6 +109,10 @@ struct ChoicePoint {
 class VortexVM {
 public:
   explicit VortexVM(VortexCore &core);
+  /// The funnel predicate this VM installed captures `this`; a core
+  /// that outlives the VM must never run a dangling guard, so the
+  /// slot is released when this VM installed it.
+  ~VortexVM();
 
   [[nodiscard]] VortexCore &core() noexcept { return core_; }
   [[nodiscard]] const VortexCore &core() const noexcept { return core_; }
@@ -117,6 +122,44 @@ public:
   std::optional<CellRef> assembleSequence(std::span<const OpcodeKind> ops);
   void setOpcodeKind(CellRef opCell, OpcodeKind op);
   [[nodiscard]] std::optional<OpcodeKind> getOpcodeKind(CellRef opCell) const;
+  /// P15's membership test (spec §6.5/M10): true only when @p opCell is
+  /// *registered* in this context's opcodeMap_. getOpcodeKind decodes
+  /// int64 content as a kind too — but only a map entry means a content
+  /// write would desync the recorded kind, so the funnel's kind
+  /// predicate tests membership, never decodability.
+  [[nodiscard]] bool hasOpcodeKind(CellRef opCell) const {
+    return opcodeMap_.contains(opCell);
+  }
+  /// Install this VM's kind predicate on the core's write funnel —
+  /// P15's `opcodeMap_.contains(masterOf(cell))`. The constructor calls
+  /// it; re-call it when a second VM over the same core re-installed
+  /// its own map's view (production contexts are one VM per core).
+  VortexVM *installWriteGuard();
+
+  // -- P15 Image Re-Registration ----------------------------------------------
+  /// §6.5/P15's registration pass — genesis step (b) (spec :2335-2343).
+  /// opcodeMap_ is per-context and holds none of a folded image's op
+  /// cells at any fresh-context bind — at the spawn-time injection as
+  /// after resume — so the recorded instruction enumeration
+  /// re-registers here. @p enumeration is the image record's ops rank:
+  /// recorded cell positions, never a value scan (a scan of the band
+  /// would claim dimConstant operand cells and put honest data inside
+  /// the P15 refusal). The kind reads off each recorded cell's own
+  /// asInt64 — safe for a recorded cell. Returns the count registered,
+  /// or a named refusal when a member names no arena cell or carries
+  /// no decodable kind.
+  [[nodiscard]] std::expected<std::size_t, std::string>
+  registerProgramOps(std::span<const CellRef> enumeration);
+  /// The programRef bind-record half: walks @p imageRecord's "ops"
+  /// +d.vars record — fragment.cpp's finalizeProgramImage shape — for
+  /// its +d.step-chained rank of int64 op positions, then registers
+  /// through registerProgramOps. The call site every fresh-context
+  /// image bind uses: the genesis (b) harness calls
+  /// `vm.registerProgramImage(image)` inside or_parallel's
+  /// `bindProgramOpcodes` worker hook at spawn and on the
+  /// mesh_actor resume path's fresh WorkerContext.
+  [[nodiscard]] std::expected<std::size_t, std::string>
+  registerProgramImage(CellRef imageRecord);
 
   // -- Cursor Creation & Process Scheduler ------------------------------------
   CellRef spawnCursor(CellRef entryOpcode, std::string_view name = {});
@@ -168,7 +211,12 @@ public:
   void setCursorOpcode(CellRef cursor, std::optional<CellRef> op);
 
   // -- Pipeline Execution Helper ----------------------------------------------
-  void runPipeline(CellRef paramCell);
+  /// Runs the preprocessing/postprocessing chain off a parameter cell.
+  /// A P15 refusal inside a pipeline op's body or at either writeback
+  /// surfaces as the same typed `success=false` the step loop returns
+  /// (spec §6.5); pre-P15 failures inside the chain keep the legacy
+  /// swallowed-failure shape.
+  [[nodiscard]] ExecutionResult runPipeline(CellRef paramCell);
 
 private:
   // Internal execution phases
@@ -192,6 +240,10 @@ private:
   std::size_t oracleCursor_{0};
   std::uint64_t totalCycles_{0};
   std::function<void(std::string_view deweyPrefix)> cutCallback_;
+  /// Tracks the funnel-guard slot's owner so ~VortexVM only releases
+  /// what this VM installed — a second VM over the same core that
+  /// never installed leaves the first's guard in place.
+  bool guardInstalled_{false};
 };
 
 } // namespace zigzag::vortex

@@ -60,6 +60,11 @@ enum class ContractViolationKind : std::uint8_t {
   None,
   Precondition,
   Postcondition,
+  /// P15 (design/vagent-metaprogramming.md §6.5/M10): the write funnel
+  /// refused a program-value write aimed at an opcodeMap_-registered
+  /// cell's clone master — kind immutability, which no trail could
+  /// undo because the map is not arena state.
+  KindImmutability,
 };
 
 struct ExecutionResult {
@@ -67,6 +72,26 @@ struct ExecutionResult {
   ContractViolationKind contractViolation{ContractViolationKind::None};
   std::optional<CellRef> failingClause;
   std::string errorMessage;
+};
+
+/**
+ * @brief The typed arm of a writeValue/splice refusal (P15).
+ *
+ * The funnel's other nullopt — "the arena cannot reach the target" —
+ * carries no fault; a write *refused* by the installed kind predicate
+ * names why through this channel so each call site can surface a typed
+ * `success=false` ExecutionResult.
+ */
+enum class WriteFault : std::uint8_t {
+  /// No refusal — either the write landed or the target is simply not
+  /// an arena cell (the legacy nullopt arm).
+  None,
+  /// The VM-installed kind predicate claimed the target's resolved
+  /// clone master: the cell is opcodeMap_-registered, so restating its
+  /// content would desync the registered kind (spec §6.5/M10). Fresh
+  /// cells are never claimed — an unregistered cell's content is its
+  /// kind and cannot desync.
+  OpcodeKind,
 };
 
 /**
@@ -156,9 +181,24 @@ public:
   std::optional<CellRef>
   readValue(CellRef cell, std::int64_t offset = 0,
             std::optional<std::int64_t> length = std::nullopt);
+  /// The write funnel P15 guards (spec §6.5/M10): every program-value
+  /// write resolves through this arm. When @p fault is non-null it is
+  /// always written — WriteFault::None for a landed write or the
+  /// legacy "not an arena cell" nullopt, WriteFault::OpcodeKind when
+  /// the installed kind predicate refuses — so the VM can map the
+  /// refusal to a typed `success=false` ExecutionResult per site.
   std::optional<CellRef> writeValue(CellRef cell, std::int64_t offset,
                                     std::optional<std::int64_t> length,
-                                    const CellValue &replacement);
+                                    const CellValue &replacement,
+                                    WriteFault *fault = nullptr);
+  /// Install the kind predicate the funnel consults on the resolved
+  /// clone master — P15's `opcodeMap_.contains(masterOf(cell))`. The
+  /// VortexVM over this core installs it at construction; a second VM
+  /// sharing the core re-installs its own map's view.
+  VortexCore *setWriteGuard(std::function<bool(CellRef master)> guard) {
+    writeGuard_ = std::move(guard);
+    return this;
+  }
 
   // -- Named Vocabulary Helpers -----------------------------------------------
   std::optional<CellRef> newCell(CellRef cell, DimRef dim,
@@ -191,12 +231,16 @@ public:
   }
 
   std::optional<CellRef> splice(CellRef cell, std::int64_t offset,
-                                std::int64_t length, const CellValue &val);
+                                std::int64_t length, const CellValue &val,
+                                WriteFault *fault = nullptr);
   std::optional<CellRef> insert(CellRef cell, std::int64_t offset,
-                                const CellValue &val);
-  std::optional<CellRef> append(CellRef cell, const CellValue &val);
+                                const CellValue &val,
+                                WriteFault *fault = nullptr);
+  std::optional<CellRef> append(CellRef cell, const CellValue &val,
+                                WriteFault *fault = nullptr);
   std::optional<CellRef> erase(CellRef cell, std::int64_t offset,
-                               std::int64_t length);
+                               std::int64_t length,
+                               WriteFault *fault = nullptr);
 
   /// Mints a new named dimension and links it to the d.dims rank tail.
   CellRef mintDimension(std::string_view name);
@@ -286,6 +330,10 @@ private:
   ArenaManifold &arena_;
   CellRef home_{noCell};
   SystemDimensions dims_{};
+  /// P15's installed predicate (spec §6.5/M10): consulted on the
+  /// resolved clone master inside writeValue — empty while no VortexVM
+  /// over this core has installed one.
+  std::function<bool(CellRef)> writeGuard_;
 };
 
 } // namespace zigzag::vortex

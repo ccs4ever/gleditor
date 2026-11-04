@@ -6,11 +6,13 @@
 
 #include <chrono>
 #include <cmath>
+#include <expected>
 #include <iostream>
 #include <limits>
 #include <ranges>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <unordered_set>
 
 #include <gleditor/logging.hpp>
@@ -68,7 +70,90 @@ std::optional<CellRef> resolveCell(const std::vector<CellRef> &inCells,
 
 } // namespace
 
-VortexVM::VortexVM(VortexCore &core) : core_(core) {}
+VortexVM::VortexVM(VortexCore &core) : core_(core) { installWriteGuard(); }
+
+VortexVM::~VortexVM() {
+  // The installed predicate captures this VM — releasing the slot keeps
+  // a longer-lived core from invoking a dangling guard.
+  if (guardInstalled_) {
+    core_.setWriteGuard(nullptr);
+  }
+}
+
+VortexVM *VortexVM::installWriteGuard() {
+  // P15 (spec §6.5/M10): the funnel's kind predicate tests *this*
+  // context's opcodeMap_ membership of the resolved clone master —
+  // masterOf rather than the raw target, because a clone of a
+  // registered op is unregistered yet writes the registered master's
+  // bits. Fresh cells are never claimed: an unregistered cell's
+  // content is its kind and cannot desync the map.
+  core_.setWriteGuard(
+      [this](const CellRef master) { return hasOpcodeKind(master); });
+  guardInstalled_ = true;
+  return this;
+}
+
+std::expected<std::size_t, std::string>
+VortexVM::registerProgramOps(std::span<const CellRef> enumeration) {
+  std::size_t registered = 0;
+  for (const CellRef opCell : enumeration) {
+    if (!core_.arena().contains(opCell)) {
+      return std::unexpected("registerProgramOps: recorded op cell " +
+                             std::to_string(opCell) + " is not in the arena");
+    }
+    // The kind reads off the recorded cell's own content — safe for a
+    // *recorded* cell (spec :2326). Never a value scan: an
+    // asInt64 ≤ Linked sweep of the band would register dimConstant
+    // operand cells and every other small-int data cell too.
+    const auto kind = core_.arena().asInt64(opCell);
+    if (!kind || *kind < 0 ||
+        static_cast<std::uint64_t>(*kind) >
+            static_cast<std::uint64_t>(OpcodeKind::Linked)) {
+      return std::unexpected("registerProgramOps: recorded cell " +
+                             std::to_string(opCell) +
+                             " does not decode to an opcode kind");
+    }
+    setOpcodeKind(opCell, static_cast<OpcodeKind>(*kind));
+    ++registered;
+  }
+  return registered;
+}
+
+std::expected<std::size_t, std::string>
+VortexVM::registerProgramImage(CellRef imageRecord) {
+  if (!core_.arena().contains(imageRecord)) {
+    return std::unexpected(
+        "registerProgramImage: image record is not an arena cell");
+  }
+  const auto &dims = core_.dims();
+  // The "ops" +d.vars record — fragment.cpp's varsRecord shape: record
+  // content is the key verbatim, +d.values the rank head.
+  std::optional<CellRef> opsHead;
+  for (const auto record :
+       zigzag::rankAfter(core_.arena(), imageRecord, dims.vars)) {
+    if (core_.arena().textOf(record) == "ops") {
+      opsHead = core_.arena().linked(record, dims.values, DimVector::POS);
+      break;
+    }
+  }
+  if (!opsHead) {
+    return std::unexpected(
+        "registerProgramImage: image record carries no \"ops\" rank");
+  }
+  std::vector<CellRef> enumeration;
+  for (const auto member :
+       zigzag::rankAfter(core_.arena(), *opsHead, dims.step)) {
+    const auto position = core_.arena().asInt64(member);
+    if (!position || *position <= 0 ||
+        static_cast<std::uint64_t>(*position) >
+            std::numeric_limits<CellRef>::max()) {
+      return std::unexpected(
+          "registerProgramImage: ops member does not name a cell");
+    }
+    enumeration.push_back(static_cast<CellRef>(*position));
+  }
+  return registerProgramOps(enumeration);
+}
 
 CellRef VortexVM::mintOpcode(OpcodeKind op, std::string_view label) {
   CellRef opCell = core_.arena().makeScalarCell(static_cast<std::int64_t>(op));
@@ -307,7 +392,18 @@ VortexVM::setCutCallback(std::function<void(std::string_view deweyPrefix)> cb) {
   return this;
 }
 
-void VortexVM::runPipeline(CellRef paramCell) {
+ExecutionResult VortexVM::runPipeline(CellRef paramCell) {
+  // The funnel's refusal mapped to the per-site typed failure — the
+  // executing pipeline op is the failing clause, like the numeric
+  // contract faults' convention.
+  const auto kindImmutabilityFault = [](CellRef executing) {
+    return ExecutionResult{
+        .success           = false,
+        .contractViolation = ContractViolationKind::KindImmutability,
+        .failingClause     = executing,
+        .errorMessage      = "P15: pipeline write to a registered "
+                             "opcode cell refused (kind immutability)"};
+  };
   auto pipeOp       = core_.getPipelineHead(paramCell);
   std::size_t limit = 1000;
   while (pipeOp && limit-- > 0) {
@@ -329,12 +425,24 @@ void VortexVM::runPipeline(CellRef paramCell) {
 
     std::vector<CellValue> outVals;
     bool jumped = false;
-    executeOpcodeBody(kind, *pipeOp, inVals, outVals, std::nullopt, jumped);
+    const auto execRes =
+        executeOpcodeBody(kind, *pipeOp, inVals, outVals, std::nullopt, jumped);
+    // Pre-P15 pipeline failures keep the legacy swallowed shape; the
+    // P15 refusal — a Value/Splice body inside the chain aiming at a
+    // registered op cell — is a real fault and surfaces per site.
+    if (execRes.contractViolation == ContractViolationKind::KindImmutability) {
+      return execRes;
+    }
 
     std::vector<CellRef> outCells = core_.outputsOf(*pipeOp);
     if (outCells.empty()) {
       if (!outVals.empty()) {
-        core_.writeValue(paramCell, 0, std::nullopt, outVals[0]);
+        WriteFault fault = WriteFault::None;
+        std::ignore =
+            core_.writeValue(paramCell, 0, std::nullopt, outVals[0], &fault);
+        if (fault == WriteFault::OpcodeKind) {
+          return kindImmutabilityFault(*pipeOp);
+        }
       }
     } else {
       if (kind != OpcodeKind::New && kind != OpcodeKind::Clone &&
@@ -342,13 +450,22 @@ void VortexVM::runPipeline(CellRef paramCell) {
           kind != OpcodeKind::Linked) {
         for (std::size_t i = 0; i < std::min(outCells.size(), outVals.size());
              ++i) {
-          core_.writeValue(outCells[i], 0, std::nullopt, outVals[i]);
+          WriteFault fault = WriteFault::None;
+          std::ignore      = core_.writeValue(outCells[i], 0, std::nullopt,
+                                              outVals[i], &fault);
+          if (fault == WriteFault::OpcodeKind) {
+            return kindImmutabilityFault(*pipeOp);
+          }
         }
       }
     }
 
     pipeOp = core_.arena().linked(*pipeOp, core_.dims().spin, false);
   }
+  return ExecutionResult{.success           = true,
+                         .contractViolation = ContractViolationKind::None,
+                         .failingClause     = std::nullopt,
+                         .errorMessage      = ""};
 }
 
 bool VortexVM::evaluateCondition(CellRef clause,
@@ -399,6 +516,18 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
                                ContractViolationKind::Precondition,
                            .failingClause = opcode,
                            .errorMessage = "Signed integer overflow in opcode"};
+  };
+  // P15's typed refusal (spec §6.5/M10): the funnel reports
+  // WriteFault::OpcodeKind when a program-value write aims at an
+  // opcodeMap_-registered cell's clone master — surfaced per site as
+  // `success=false`, classified like the numeric contract faults.
+  const auto kindImmutabilityFault = [opcode] {
+    return ExecutionResult{
+        .success           = false,
+        .contractViolation = ContractViolationKind::KindImmutability,
+        .failingClause     = opcode,
+        .errorMessage      = "P15: write to a registered opcode cell "
+                             "refused (kind immutability)"};
   };
   constexpr auto minInt = std::numeric_limits<std::int64_t>::min();
   switch (kind) {
@@ -780,9 +909,17 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
                                           ? std::optional<CellValue>(inputs[3])
                                           : std::nullopt;
       if (c) {
-        auto res = repl ? core_.writeValue(*c, off, len, *repl)
-                        : core_.readValue(*c, off, len);
-        outputs.emplace_back(res ? *res : noCell);
+        if (repl) {
+          WriteFault fault = WriteFault::None;
+          const auto res   = core_.writeValue(*c, off, len, *repl, &fault);
+          if (fault == WriteFault::OpcodeKind) {
+            return kindImmutabilityFault();
+          }
+          outputs.emplace_back(res ? *res : noCell);
+        } else {
+          const auto res = core_.readValue(*c, off, len);
+          outputs.emplace_back(res ? *res : noCell);
+        }
       } else {
         outputs.emplace_back(noCell);
       }
@@ -796,7 +933,11 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
       std::int64_t off = toInt(inputs[1]);
       std::int64_t len = toInt(inputs[2]);
       if (c) {
-        auto res = core_.splice(*c, off, len, inputs[3]);
+        WriteFault fault = WriteFault::None;
+        const auto res   = core_.splice(*c, off, len, inputs[3], &fault);
+        if (fault == WriteFault::OpcodeKind) {
+          return kindImmutabilityFault();
+        }
         outputs.emplace_back(res ? *res : noCell);
       } else {
         outputs.emplace_back(noCell);
@@ -1243,7 +1384,10 @@ ExecutionResult VortexVM::step(CellRef cursor) {
   std::unordered_set<CellRef> processedIn;
   for (CellRef paramCell : inputCells) {
     if (processedIn.insert(paramCell).second && core_.hasPipeline(paramCell)) {
-      runPipeline(paramCell);
+      const auto pipelineResult = runPipeline(paramCell);
+      if (!pipelineResult.success) {
+        return pipelineResult;
+      }
     }
   }
 
@@ -1259,6 +1403,18 @@ ExecutionResult VortexVM::step(CellRef cursor) {
   bool memoHit                  = false;
   std::vector<CellValue> newOutputs;
 
+  // P15's typed refusal (spec §6.5/M10): a funnel write aimed at an
+  // opcodeMap_-registered cell's clone master fails the step — the
+  // executing op is the failing clause, matching the numeric faults.
+  const auto kindImmutabilityFault = [](CellRef executing) {
+    return ExecutionResult{
+        .success           = false,
+        .contractViolation = ContractViolationKind::KindImmutability,
+        .failingClause     = executing,
+        .errorMessage      = "P15: write to a registered opcode cell "
+                             "refused (kind immutability)"};
+  };
+
   if (isMemoized(*op)) {
     if (const auto key = getMemoKey(*op)) {
       CellRef pin = core_.getOrCreateMemoPin(*key);
@@ -1268,7 +1424,12 @@ ExecutionResult VortexVM::step(CellRef cursor) {
         newOutputs = *cached;
         for (std::size_t i = 0;
              i < std::min(outCells.size(), newOutputs.size()); ++i) {
-          core_.writeValue(outCells[i], 0, std::nullopt, newOutputs[i]);
+          WriteFault fault = WriteFault::None;
+          std::ignore      = core_.writeValue(outCells[i], 0, std::nullopt,
+                                              newOutputs[i], &fault);
+          if (fault == WriteFault::OpcodeKind) {
+            return kindImmutabilityFault(*op);
+          }
         }
       }
     }
@@ -1290,7 +1451,12 @@ ExecutionResult VortexVM::step(CellRef cursor) {
         kind != OpcodeKind::Linked) {
       for (std::size_t i = 0; i < std::min(outCells.size(), newOutputs.size());
            ++i) {
-        core_.writeValue(outCells[i], 0, std::nullopt, newOutputs[i]);
+        WriteFault fault = WriteFault::None;
+        std::ignore      = core_.writeValue(outCells[i], 0, std::nullopt,
+                                            newOutputs[i], &fault);
+        if (fault == WriteFault::OpcodeKind) {
+          return kindImmutabilityFault(*op);
+        }
       }
     }
 
@@ -1298,7 +1464,10 @@ ExecutionResult VortexVM::step(CellRef cursor) {
     std::unordered_set<CellRef> processedOut;
     for (CellRef outCell : outCells) {
       if (processedOut.insert(outCell).second && core_.hasPipeline(outCell)) {
-        runPipeline(outCell);
+        const auto pipelineResult = runPipeline(outCell);
+        if (!pipelineResult.success) {
+          return pipelineResult;
+        }
       }
     }
   }

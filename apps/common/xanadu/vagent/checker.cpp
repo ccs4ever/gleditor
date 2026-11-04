@@ -973,6 +973,36 @@ std::optional<Function> Checker::function(const Expr &callee, const Decl *owner,
       return builtin({named("Cell")}, optional(named("Float")));
     if (name == "value_of") return builtin({named("Cell")}, any);
     if (name == "next_rand") return builtin({named("Cell")}, named("Int"));
+    // §6.1's mutation half (phase 4): the graft verbs, their durable
+    // learn_* twins — the "conditional on P16" flag means transport of
+    // the patch records is phase 6's seam, while the session machinery
+    // is this surface — plus prune/unlearn, set_weight and
+    // sprout_synapse. Every one is impure: each writes arena edges.
+    // A bare `Code` parameter is the parameterized wildcard —
+    // `Type{"Code", {}}` accepts `Code<T>` for any T (`compatible`'s
+    // empty-argument arm); `body` pins `Code<()>` explicitly.
+    const auto fragment = Type{"Code", {}};
+    const auto bodyCode = code(unit);
+    if (name == "graft_plan" || name == "learn_plan")
+      return builtin({named("Str"), named("Str"), fragment, bodyCode}, unit,
+                     false);
+    if (name == "graft_handler" || name == "learn_handler")
+      return builtin(
+          {named("Str"), named("Str"), fragment, bodyCode, named("Int")}, unit,
+          false);
+    if (name == "graft_where" || name == "learn_where")
+      return builtin({named("Cell"), fragment}, unit, false);
+    if (name == "graft_body" || name == "learn_body")
+      return builtin({named("Cell"), bodyCode}, unit, false);
+    if (name == "graft_method" || name == "learn_method")
+      return builtin({named("Str"), named("Str"), fragment}, unit, false);
+    if (name == "prune" || name == "unlearn")
+      return builtin({named("Cell")}, unit, false);
+    if (name == "set_weight")
+      return builtin({named("Cell"), named("Float")}, unit, false);
+    if (name == "sprout_synapse")
+      return builtin({named("Str"), named("Str"), named("Float")},
+                     named("Cell"), false);
   }
   if (diagnose)
     report(DiagnosticCode::UnknownName,

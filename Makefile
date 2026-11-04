@@ -1184,6 +1184,20 @@ $(OBJDIR)/vagent_fragment_test: $(call obj,tests/xuzz/vagent_fragment_test.cpp t
 test/vagent-fragment: vagent_fragment_test
 	$(OBJDIR)/vagent_fragment_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
 
+# Phase-4 runtime mutation + P15's kind-immutability funnel share one
+# dedicated kernel-linked binary (the vagent_fragment_test shape):
+# mutation covers the graft/prune/learn_* verbs; P15 covers the
+# write-funnel's typed refusals and the program-image registration
+# pass — both suites exercise vagent/ objects vagent_runtime_test
+# filters out.
+.PHONY: vagent_mutation_test test/vagent-mutation
+vagent_mutation_test: $(OBJDIR)/vagent_mutation_test
+$(OBJDIR)/vagent_mutation_test: $(call obj,tests/xuzz/vagent_p15_test.cpp tests/xuzz/vagent_mutation_test.cpp) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
+	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS) $(TEST_LIBS)
+
+test/vagent-mutation: vagent_mutation_test
+	$(OBJDIR)/vagent_mutation_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
+
 test/vagent-frontend: vagent vagent_frontend_test
 	$(OBJDIR)/vagent_frontend_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
 

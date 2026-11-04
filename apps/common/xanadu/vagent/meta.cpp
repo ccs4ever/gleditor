@@ -932,9 +932,23 @@ std::expected<CellRef, std::string> MetaRuntime::reify(CellRef head) {
     const auto name   = arena.linked(rec, dims.name, Posward);
     if (!target)
       return std::unexpected("reify: +d.refs record has no +d.ref cell");
+    // The referent: an internal cell re-points to its member twin. An
+    // *external* one cannot be re-marked verbatim — `+d.ref` is a
+    // single-link dim, so the copy's edge would evict the original
+    // record's — the copy marks a fresh ref-box carrying the same
+    // content instead. A name-record's slot is bookkeeping; a
+    // ref-record's still names the same position.
+    const auto markedCopy = [&] {
+      if (const auto found = fresh.find(*target); found != fresh.end())
+        return found->second;
+      const auto refbox = arena.makeCell();
+      if (const auto content = core_.render(*target))
+        core_.writeValue(refbox, 0, std::nullopt, *content);
+      return refbox;
+    }();
     const auto copy = arena.makeCell();
     zigzag::expectWritten(
-        arena.link(copy, binds_.dims.ref, Posward, mapped(*target)));
+        arena.link(copy, binds_.dims.ref, Posward, markedCopy));
     if (name) {
       zigzag::expectWritten(arena.link(copy, dims.name, Posward,
                                        arena.makeCell(arena.textOf(*name))));
@@ -942,9 +956,8 @@ std::expected<CellRef, std::string> MetaRuntime::reify(CellRef head) {
         zigzag::expectWritten(arena.link(copy, dims.grab, Posward,
                                          arena.makeCell(arena.textOf(*role))));
     } else {
-      zigzag::expectWritten(arena.link(mapped(*target),
-                                       binds_.dims.meshRelocation, Posward,
-                                       arena.makeCell("cell")));
+      zigzag::expectWritten(arena.link(markedCopy, binds_.dims.meshRelocation,
+                                       Posward, arena.makeCell("cell")));
     }
     appendRef(copy);
   }
@@ -1023,6 +1036,1115 @@ std::expected<CellRef, std::string> MetaRuntime::reify(CellRef head) {
       newHead, dims.name, Posward,
       arena.makeCell(std::format("reify:{}:{}", sourceLabel, *serial))));
   return newHead;
+}
+
+// ---------------------------------------------------------------------------
+// Mutation surface (§6.1, §6.3, §6.4, §6.6 — the phase-4 half)
+// ---------------------------------------------------------------------------
+//
+// Every write below is an ordinary trailed arena link/unlink/value —
+// §6.4's session arm needs nothing else: under live marks the trail
+// restores the pre-mutation graph on release, so no session verb needs
+// a marks guard of its own. The under-execution/turn-boundary arm is
+// the adapter's, not this surface's: mutation mid-spin (a live
+// `#Call` frame or choice structure on the *target*) is deferred to
+// the next turn boundary by whoever drives the VM, and the kernel
+// never sees it. P15's opcode-kind write guard is the sibling's lane —
+// the verbs here write edges and fresh cells, never an op's kind.
+
+namespace {
+
+/// The structural-dimension vocabulary `program()` reachability walks —
+/// §6.6's promotion set: `d.source` and `d.dims` stay out (the source
+/// text is not structure; the dim rank is promotion-exempt).
+[[nodiscard]] std::vector<DimRef>
+programVocabulary(const xanadu::vagent::MetaBindSet &binds,
+                  const zigzag::vortex::VortexCore &core) {
+  const auto &dims = core.dims();
+  std::vector<DimRef> vocab{
+      dims.stdlib,   dims.vars,        dims.clause,     dims.values,
+      dims.name,     dims.grab,        dims.spin,       dims.step,
+      dims.contract, binds.dims.entry, binds.dims.refs, binds.dims.recipe};
+  if (const auto extends = core.arena().dimensionNamed("d.extends"))
+    vocab.push_back(*extends);
+  return vocab;
+}
+
+/// The `+d.step`-linked chain that follows a single lead edge — the
+/// `d.refs`/`d.recipe`/`d.patch-head` shape.
+[[nodiscard]] std::vector<CellRef> stepChain(zigzag::ArenaManifold &arena,
+                                             CellRef host, DimRef lead,
+                                             DimRef step) {
+  std::vector<CellRef> out;
+  for (auto cell                           = arena.linked(host, lead, Posward);
+       cell && arena.contains(*cell); cell = arena.linked(*cell, step, Posward))
+    out.push_back(*cell);
+  return out;
+}
+
+} // namespace
+
+MetaRuntime::MetaSignature MetaRuntime::signatureOf(CellRef head) const {
+  MetaSignature sig;
+  const auto descriptor = arena().linked(head, core_.dims().values, Posward);
+  if (!descriptor || !arena().contains(*descriptor)) return sig;
+  sig.descriptor = true;
+  for (const auto param : parameterCells(*descriptor)) {
+    const auto name = labelOf(param);
+    const auto type = arena().linked(param, core_.dims().values, Posward);
+    sig.params.emplace_back(name.value_or(""),
+                            type ? arena().textOf(*type) : std::string{});
+  }
+  if (const auto result = descriptorField(*descriptor, "result")) {
+    const auto type = arena().linked(*result, core_.dims().name, Posward);
+    if (type) sig.resultType = arena().textOf(*type);
+  }
+  if (const auto pure = descriptorField(*descriptor, "pure")) {
+    const auto flag = arena().linked(*pure, core_.dims().values, Posward);
+    if (flag)
+      sig.pure = arena().asBool(*flag).value_or(false) ||
+                 arena().asInt64(*flag).value_or(0) != 0;
+  }
+  return sig;
+}
+
+std::expected<CellRef, std::string>
+MetaRuntime::clauseHost(std::string_view name) const {
+  // First-`:` split is a module arm only when the qualifier resolves;
+  // a bare name walks the agent's own module's d.vars. The host is the
+  // goal/event *symbol* — its +d.clause rank owns the attachment.
+  std::optional<CellRef> module;
+  std::string_view symbol = name;
+  if (const auto colon = name.find(':'); colon != std::string_view::npos)
+    if ((module = moduleNamed(name.substr(0, colon))))
+      symbol = name.substr(colon + 1);
+  if (!module) {
+    if (binds_.ownModule == noCell || !arena().contains(binds_.ownModule))
+      return std::unexpected(
+          std::format("graft host '{}': no own module bound for a bare "
+                      "name",
+                      name));
+    module = binds_.ownModule;
+  }
+  for (const auto candidate :
+       zigzag::rankAfter(arena(), *module, core_.dims().vars))
+    if (arena().textOf(candidate) == symbol) return candidate;
+  return std::unexpected(
+      std::format("graft host '{}': no such symbol on the resolved "
+                  "module",
+                  name));
+}
+
+std::expected<std::pair<CellRef, std::string>, std::string>
+MetaRuntime::agentOwner(std::string_view owner) const {
+  if (const auto colon = owner.find(':'); colon != std::string_view::npos)
+    if (const auto module = moduleNamed(owner.substr(0, colon)))
+      return std::pair{*module, std::string{owner.substr(colon + 1)}};
+  if (binds_.ownModule == noCell || !arena().contains(binds_.ownModule))
+    return std::unexpected(std::format(
+        "graft owner '{}': no own module bound for a bare name", owner));
+  return std::pair{binds_.ownModule, std::string{owner}};
+}
+
+bool MetaRuntime::installed(CellRef head) const {
+  auto &arena      = core_.arena();
+  const auto &dims = core_.dims();
+  // M14's occupancy test verbatim — any install-dim backlink marks the
+  // head consumed. No "still on a rank" refinement: a replaced
+  // method's dead symbol keeps its +d.values→head wing, and that edge
+  // *is* the evidence the head was installed (occupancy, not
+  // destruction).
+  return arena.linked(head, dims.grab, Negward).has_value() ||
+         arena.linked(head, dims.spin, Negward).has_value() ||
+         arena.linked(head, dims.values, Negward).has_value();
+}
+
+bool MetaRuntime::codeRegistered(CellRef head) const {
+  return arena().rankContains(binds_.agentCell, head, binds_.dims.code);
+}
+
+std::expected<CellRef, std::string> MetaRuntime::installable(CellRef head) {
+  // A d.code-resident head is a durable registration — grafting it in
+  // place would couple the registry to the session rank, so the graft
+  // installs a fresh reified copy (§6.3).
+  if (!codeRegistered(head)) return head;
+  return reify(head);
+}
+
+MetaRuntime::MetaMutation MetaRuntime::headShape(CellRef head,
+                                                 bool pureRequired,
+                                                 std::string_view role) const {
+  auto &arena = core_.arena();
+  if (!arena.contains(head))
+    return std::unexpected(std::format("graft {}: operand is not an arena "
+                                       "cell",
+                                       role));
+  if (isOpCell(head))
+    return std::unexpected(
+        std::format("graft {}: operand is an op cell — attach heads, never ops "
+                    "(op wings are single-occupancy)",
+                    role));
+  if (!arena.linked(head, binds_.dims.entry, Posward).has_value())
+    return std::unexpected(std::format(
+        "graft {}: operand carries no +d.entry — not a fragment head", role));
+  const auto sig = signatureOf(head);
+  if (pureRequired && (!sig.descriptor || !sig.pure))
+    return std::unexpected(
+        std::format("graft {}: attachment is pure-required and the head's "
+                    "descriptor does not flag it pure",
+                    role));
+  return {};
+}
+
+MetaRuntime::MetaMutation MetaRuntime::graftable(CellRef head,
+                                                 bool pureRequired,
+                                                 std::string_view role) const {
+  if (const auto ok = headShape(head, pureRequired, role); !ok) return ok;
+  if (installed(head))
+    return std::unexpected(
+        std::format("graft {}: head is already installed — a grafted head is "
+                    "consumed",
+                    role));
+  const auto report =
+      validate(head, MetaValidateOptions{.runReachable = true,
+                                         .expectPure   = pureRequired});
+  if (!report.ok)
+    return std::unexpected(std::format("graft {}: {}", role, report.detail));
+  return {};
+}
+
+MetaRuntime::MetaMutation MetaRuntime::learnGate(CellRef head,
+                                                 bool pureRequired,
+                                                 std::string_view role) const {
+  // No validate arm: the durable twin's gate is closedness, and a
+  // run-role record this session cannot resolve is §6.6's
+  // fail-until-resume class — admitted here, judged at genesis.
+  if (const auto ok = headShape(head, pureRequired, role); !ok) return ok;
+  if (installed(head))
+    return std::unexpected(std::format(
+        "learn {}: head is already installed — an installed head is "
+        "consumed (M14)",
+        role));
+  return learnable(head);
+}
+
+MetaRuntime::MetaSignature MetaRuntime::clauseFormals(CellRef host) const {
+  for (const auto clause : clausesOf(host)) {
+    const auto attach = arena().linked(clause, core_.dims().grab, Posward);
+    if (!attach) continue;
+    const auto sig = signatureOf(*attach);
+    if (sig.descriptor) return sig;
+  }
+  return {};
+}
+
+MetaRuntime::MetaMutation
+MetaRuntime::matchAttach(CellRef clause, DimRef dim, CellRef head,
+                         std::string_view role) const {
+  const auto sig = signatureOf(head);
+  if (!sig.descriptor)
+    return std::unexpected(std::format(
+        "graft {}: head carries no descriptor signature to compare", role));
+  const bool bodyArm = dim == core_.dims().spin;
+  if (bodyArm && sig.resultType != "()")
+    return std::unexpected(
+        std::format("graft {}: a body must be Code<()>-shaped (result '{}')",
+                    role, sig.resultType));
+  const auto attach = arena().linked(clause, dim, Posward);
+  if (!attach) return {}; // a clause with no current attach has no formals
+  const auto canonical = signatureOf(*attach);
+  if (!canonical.descriptor) return {};
+  if (sig.params != canonical.params || sig.resultType != canonical.resultType)
+    return std::unexpected(std::format(
+        "graft {}: signature does not match the clause's formals", role));
+  return {};
+}
+
+void MetaRuntime::unlinkRank(CellRef cell, DimRef dim) const {
+  auto &arena     = core_.arena();
+  const auto pred = arena.linked(cell, dim, Negward);
+  const auto succ = arena.linked(cell, dim, Posward);
+  // Drop the cell's forward edge first so the successor's backlink is
+  // free before the predecessor repair rewires it.
+  if (succ) zigzag::expectWritten(arena.unlink(cell, dim, Posward));
+  if (pred) {
+    if (succ)
+      zigzag::expectWritten(arena.link(*pred, dim, Posward, *succ));
+    else
+      zigzag::expectWritten(arena.unlink(*pred, dim, Posward));
+  }
+}
+
+MetaRuntime::MetaMutation MetaRuntime::graftWhere(CellRef clause,
+                                                  CellRef test) {
+  if (const auto ok = graftable(test, /*pureRequired=*/true, "test"); !ok)
+    return ok;
+  if (const auto ok = matchAttach(clause, core_.dims().grab, test, "test"); !ok)
+    return ok;
+  const auto head = installable(test);
+  if (!head) return std::unexpected(head.error());
+  // One trailed re-point — link() evicts the clause's old +d.grab; the
+  // old graph stays allocated but detached.
+  zigzag::expectWritten(
+      arena().link(clause, core_.dims().grab, Posward, *head));
+  return {};
+}
+
+MetaRuntime::MetaMutation MetaRuntime::graftBody(CellRef clause, CellRef body) {
+  if (const auto ok = graftable(body, /*pureRequired=*/false, "body"); !ok)
+    return ok;
+  if (const auto ok = matchAttach(clause, core_.dims().spin, body, "body"); !ok)
+    return ok;
+  const auto head = installable(body);
+  if (!head) return std::unexpected(head.error());
+  zigzag::expectWritten(
+      arena().link(clause, core_.dims().spin, Posward, *head));
+  return {};
+}
+
+std::expected<CellRef, std::string>
+MetaRuntime::graftPlan(std::string_view goal, std::string_view name,
+                       CellRef test, CellRef body) {
+  if (reservedName(name))
+    return std::unexpected(
+        std::format("graft_plan: name '{}' is reserved", name));
+  const auto host = clauseHost(goal);
+  if (!host) return std::unexpected(host.error());
+  if (const auto ok = graftable(test, true, "test"); !ok)
+    return std::unexpected(ok.error());
+  if (const auto ok = graftable(body, false, "body"); !ok)
+    return std::unexpected(ok.error());
+
+  // The goal's canonical clause formals: the first clause whose
+  // +d.grab attach carries a descriptor supplies them — a plan's
+  // clauses share one formal list.
+  const auto canonical = clauseFormals(*host);
+  const auto matchSig  = [&](CellRef head, std::string_view role,
+                             bool testArm) -> MetaMutation {
+    const auto sig = signatureOf(head);
+    if (!sig.descriptor)
+      return std::unexpected(std::format(
+          "graft_plan: {} head carries no descriptor signature", role));
+    if (!testArm && sig.resultType != "()")
+      return std::unexpected(
+          std::format("graft_plan: {} must be Code<()>-shaped (result '{}')",
+                      role, sig.resultType));
+    if (!canonical.descriptor) return {};
+    if (sig.params != canonical.params ||
+        (testArm && sig.resultType != canonical.resultType))
+      return std::unexpected(std::format(
+          "graft_plan: {} signature does not match the goal's clause "
+          "formals",
+          role));
+    return {};
+  };
+  if (const auto ok = matchSig(test, "test", true); !ok)
+    return std::unexpected(ok.error());
+  if (const auto ok = matchSig(body, "body", false); !ok)
+    return std::unexpected(ok.error());
+
+  const auto testHead = installable(test);
+  if (!testHead) return std::unexpected(testHead.error());
+  const auto bodyHead = installable(body);
+  if (!bodyHead) return std::unexpected(bodyHead.error());
+
+  auto &arena       = core_.arena();
+  const auto clause = arena.makeCell();
+  zigzag::expectWritten(
+      arena.link(clause, core_.dims().name, Posward, arena.makeCell(name)));
+  zigzag::expectWritten(
+      arena.link(clause, core_.dims().grab, Posward, *testHead));
+  zigzag::expectWritten(
+      arena.link(clause, core_.dims().spin, Posward, *bodyHead));
+  zigzag::expectWritten(
+      arena.link(zigzag::rankTail(arena, *host, core_.dims().clause),
+                 core_.dims().clause, Posward, clause));
+  return clause;
+}
+
+std::expected<CellRef, std::string>
+MetaRuntime::graftHandler(std::string_view event, std::string_view name,
+                          CellRef guard, CellRef body, std::int64_t priority) {
+  if (reservedName(name))
+    return std::unexpected(
+        std::format("graft_handler: name '{}' is reserved", name));
+  const auto host = clauseHost(event);
+  if (!host) return std::unexpected(host.error());
+  if (const auto ok = graftable(guard, true, "guard"); !ok)
+    return std::unexpected(ok.error());
+  if (const auto ok = graftable(body, false, "body"); !ok)
+    return std::unexpected(ok.error());
+  // A handler's guard binds `occurrence` — the canonical formals come
+  // off the event's existing clauses the way graft_plan's do.
+  const auto canonical = clauseFormals(*host);
+  const auto guardSig  = signatureOf(guard);
+  const auto bodySig   = signatureOf(body);
+  if (canonical.descriptor) {
+    if (guardSig.descriptor && guardSig.params != canonical.params)
+      return std::unexpected(
+          "graft_handler: guard signature does not match the event's "
+          "clause formals");
+    if (bodySig.descriptor && bodySig.params != canonical.params)
+      return std::unexpected(
+          "graft_handler: body signature does not match the event's "
+          "clause formals");
+  }
+  if (bodySig.descriptor && bodySig.resultType != "()")
+    return std::unexpected("graft_handler: body must be Code<()>-shaped");
+
+  const auto guardHead = installable(guard);
+  if (!guardHead) return std::unexpected(guardHead.error());
+  const auto bodyHead = installable(body);
+  if (!bodyHead) return std::unexpected(bodyHead.error());
+
+  auto &arena       = core_.arena();
+  const auto clause = arena.makeCell();
+  zigzag::expectWritten(
+      arena.link(clause, core_.dims().name, Posward, arena.makeCell(name)));
+  zigzag::expectWritten(
+      arena.link(clause, core_.dims().grab, Posward, *guardHead));
+  zigzag::expectWritten(
+      arena.link(clause, core_.dims().spin, Posward, *bodyHead));
+  // The handler's priority rides clause-side as a keyed d.vars record —
+  // session-visible like a clause weight, never a patch field.
+  const auto rec = varsRecord(clause, "priority", /*mint=*/true);
+  if (rec)
+    zigzag::expectWritten(arena.link(*rec, core_.dims().values, Posward,
+                                     arena.makeScalarCell(priority)));
+  zigzag::expectWritten(
+      arena.link(zigzag::rankTail(arena, *host, core_.dims().clause),
+                 core_.dims().clause, Posward, clause));
+  return clause;
+}
+
+std::expected<CellRef, std::string>
+MetaRuntime::graftMethod(std::string_view owner, std::string_view name,
+                         CellRef code) {
+  if (reservedName(name))
+    return std::unexpected(
+        std::format("graft_method: name '{}' is reserved", name));
+  const auto resolved = agentOwner(owner);
+  if (!resolved) return std::unexpected(resolved.error());
+  const auto &[module, agentName] = *resolved;
+  if (const auto ok = graftable(code, false, "code"); !ok)
+    return std::unexpected(ok.error());
+  // The declared-signature match against the host member is the
+  // adapter's arm — the engine cannot read a capacity's decl — so an
+  // effect-mismatch refusal never reaches this layer.
+
+  const auto head = installable(code);
+  if (!head) return std::unexpected(head.error());
+
+  auto &arena          = core_.arena();
+  const auto qualified = std::format("{}.{}", agentName, name);
+  // Redefinition is replacement: symbol lookup is first-match-wins, so
+  // any existing same-named symbol unlinks first.
+  for (const auto symbol : zigzag::rankAfter(arena, module, core_.dims().vars))
+    if (arena.textOf(symbol) == qualified) {
+      unlinkRank(symbol, core_.dims().vars);
+      break;
+    }
+  const auto symbol = arena.makeCell(qualified);
+  zigzag::expectWritten(
+      arena.link(symbol, core_.dims().values, Posward, *head));
+  zigzag::expectWritten(
+      arena.link(zigzag::rankTail(arena, module, core_.dims().vars),
+                 core_.dims().vars, Posward, symbol));
+  return symbol;
+}
+
+MetaRuntime::MetaMutation MetaRuntime::prune(CellRef clause) {
+  auto &arena = core_.arena();
+  if (!arena.linked(clause, core_.dims().clause, Negward).has_value() &&
+      !arena.linked(clause, core_.dims().clause, Posward).has_value())
+    return std::unexpected("prune: operand is not on a clause rank");
+  unlinkRank(clause, core_.dims().clause);
+  return {};
+}
+
+// ---------------------------------------------------------------------------
+// learn_* — durable twins
+// ---------------------------------------------------------------------------
+
+bool MetaRuntime::imageRef(CellRef cell) const {
+  const auto extent = binds_.lineage ? binds_.lineage->imageExtent : 0u;
+  if (zigzag::isEphemeral(cell))
+    return arena().denseOf(cell).value_or(0) < extent;
+  // A persistent ref names its spool position; image cells sit at or
+  // before the image's op extent.
+  return cell <= extent;
+}
+
+bool MetaRuntime::hasProgramLineage() const {
+  // §6.6's conjunction, kernel-simulable half: a bound lineage record
+  // whose program() is an image-side ref. The reachability half is
+  // programCells() — the gate refuses closed without a lineage record
+  // at all.
+  if (!binds_.lineage) return false;
+  const auto ref = binds_.lineage->programRef;
+  if (ref == noCell || !arena().contains(ref)) return false;
+  return imageRef(ref);
+}
+
+std::set<CellRef> MetaRuntime::programCells() const {
+  // Outbound walk over the structural vocabulary — image cells join
+  // unconditionally (the persistent-image arm), then everything the
+  // walk reaches is program-side too (a state→program link would make
+  // program structure reachable, and this set is how the closed walk
+  // refuses to smuggle one back).
+  std::set<CellRef> program{binds_.programRoot};
+  std::deque<CellRef> frontier{binds_.programRoot};
+  const auto vocab  = programVocabulary(binds_, core_);
+  std::size_t steps = 0;
+  const auto bound  = arena().traversalBound();
+  while (!frontier.empty() && steps++ < bound) {
+    const auto cell = frontier.front();
+    frontier.pop_front();
+    for (const auto dim : vocab)
+      for (const auto next : zigzag::rankAfter(arena(), cell, dim))
+        if (program.insert(next).second) frontier.push_back(next);
+  }
+  return program;
+}
+
+MetaRuntime::MetaMutation MetaRuntime::learnable(CellRef head) const {
+  if (!hasProgramLineage())
+    return std::unexpected(
+        "learn refuses: no program lineage — the bind set carries no "
+        "image-bound program() record (§6.6)");
+  const auto report = verifyClosed(head);
+  if (!report.closed)
+    return std::unexpected(std::format("learn refuses: {}", report.detail));
+  return {};
+}
+
+std::expected<MetaRuntime::MetaLearnCopies, std::string>
+MetaRuntime::learnCopies(CellRef head) {
+  // Two reifications: the registered head and the installed copy — the
+  // original program-side fragment is never registered or installed.
+  // The carve-out: an argument already d.code-registered reuses itself
+  // as the registered head, and only the installed copy reifies.
+  if (codeRegistered(head)) {
+    auto installed = reify(head);
+    if (!installed) return std::unexpected(installed.error());
+    return MetaLearnCopies{head, *installed};
+  }
+  auto registered = reify(head);
+  if (!registered) return std::unexpected(registered.error());
+  auto installed = reify(head);
+  if (!installed) return std::unexpected(installed.error());
+  return MetaLearnCopies{*registered, *installed};
+}
+
+MetaRuntime::MetaMutation MetaRuntime::registerHead(CellRef head) const {
+  auto &arena      = core_.arena();
+  const auto label = labelOf(head).value_or("");
+  for (const auto member :
+       zigzag::rankAfter(arena, binds_.agentCell, binds_.dims.code))
+    if (labelOf(member).value_or("") == label)
+      return std::unexpected(std::format(
+          "d.code registration refuses a second head carrying label "
+          "'{}'",
+          label));
+  if (!codeRegistered(head))
+    zigzag::expectWritten(
+        arena.link(zigzag::rankTail(arena, binds_.agentCell, binds_.dims.code),
+                   binds_.dims.code, Posward, head));
+  return {};
+}
+
+std::optional<std::string> MetaRuntime::patchField(CellRef patch,
+                                                   std::string_view key,
+                                                   bool descriptor) const {
+  auto &arena      = core_.arena();
+  const auto owner = descriptor
+                         ? arena.linked(patch, core_.dims().values, Posward)
+                         : std::optional{patch};
+  if (!owner || !arena.contains(*owner)) return std::nullopt;
+  for (const auto record : zigzag::rankAfter(arena, *owner, core_.dims().vars))
+    if (arena.textOf(record) == key) {
+      const auto value = arena.linked(record, core_.dims().values, Posward);
+      if (!value) return std::nullopt;
+      if (const auto number = arena.asInt64(*value))
+        return std::to_string(*number);
+      return arena.textOf(*value);
+    }
+  return std::nullopt;
+}
+
+std::vector<std::string> MetaRuntime::patchHeadNames(CellRef patch) const {
+  auto &arena = core_.arena();
+  std::vector<std::string> names;
+  for (const auto record :
+       stepChain(arena, patch, binds_.dims.patchHead, core_.dims().step)) {
+    const auto name = arena.linked(record, core_.dims().values, Posward);
+    names.emplace_back(name ? arena.textOf(*name) : std::string{});
+  }
+  return names;
+}
+
+std::optional<std::string>
+MetaRuntime::priorAttachName(std::string_view clauseName,
+                             DimRef attachDim) const {
+  // Latest patch recording this clause walks back: a learn_plan /
+  // learn_handler chain is [test, body], a replace chain [installed,
+  // prior?] — so the prior for a grab attach is always index 0 of the
+  // newest clause-touching patch; for a spin attach index 1 of a
+  // plan/handler patch, index 0 of a learn_body patch.
+  auto &arena = core_.arena();
+  const auto rank =
+      collect(zigzag::rankAfter(arena, binds_.agentCell, binds_.dims.patch));
+  for (const auto patch : rank | std::views::reverse) {
+    if (patchField(patch, "target", true).value_or("") != clauseName) continue;
+    const auto verb  = patchField(patch, "verb", true).value_or("");
+    const auto names = patchHeadNames(patch);
+    if (attachDim == core_.dims().grab) {
+      if (verb == "learn_plan" || verb == "learn_handler" ||
+          verb == "learn_where")
+        if (!names.empty()) return names.front();
+    } else {
+      if ((verb == "learn_plan" || verb == "learn_handler") && names.size() > 1)
+        return names[1];
+      if (verb == "learn_body" && !names.empty()) return names[0];
+    }
+  }
+  return std::nullopt;
+}
+
+std::expected<CellRef, std::string> MetaRuntime::mintPatch(
+    std::string_view label, std::int64_t ordinal, std::string_view verb,
+    std::string_view target, std::optional<std::string_view> parent,
+    std::optional<std::string_view> alias, std::optional<std::int64_t> priority,
+    const std::vector<std::string> &headNames) {
+  auto &arena      = core_.arena();
+  const auto patch = arena.makeCell();
+  zigzag::expectWritten(
+      arena.link(patch, core_.dims().name, Posward, arena.makeCell(label)));
+  const auto descriptor = arena.makeCell();
+  zigzag::expectWritten(
+      arena.link(patch, core_.dims().values, Posward, descriptor));
+  const auto field = [&](CellRef owner, std::string_view key, CellRef value) {
+    const auto rec = arena.makeCell(key);
+    zigzag::expectWritten(arena.link(rec, core_.dims().values, Posward, value));
+    zigzag::expectWritten(
+        arena.link(zigzag::rankTail(arena, owner, core_.dims().vars),
+                   core_.dims().vars, Posward, rec));
+    return rec;
+  };
+  field(descriptor, "target", arena.makeCell(target));
+  field(descriptor, "verb", arena.makeCell(verb));
+  if (parent) field(descriptor, "parent", arena.makeCell(*parent));
+  field(patch, "ordinal", arena.makeScalarCell(ordinal));
+  if (alias) field(patch, "alias", arena.makeCell(*alias));
+  if (priority) field(patch, "priority", arena.makeScalarCell(*priority));
+
+  // The patch-head chain: one name record per registered head this
+  // patch installed, +d.values → a fresh text cell (the re-resolution
+  // key at genesis — durable identities are names, never CellRefs).
+  std::optional<CellRef> chainTail;
+  for (const auto &headName : headNames) {
+    const auto record = arena.makeCell();
+    zigzag::expectWritten(arena.link(record, core_.dims().values, Posward,
+                                     arena.makeCell(headName)));
+    if (!chainTail)
+      zigzag::expectWritten(
+          arena.link(patch, binds_.dims.patchHead, Posward, record));
+    else
+      zigzag::expectWritten(
+          arena.link(*chainTail, core_.dims().step, Posward, record));
+    chainTail = record;
+  }
+  zigzag::expectWritten(
+      arena.link(zigzag::rankTail(arena, binds_.agentCell, binds_.dims.patch),
+                 binds_.dims.patch, Posward, patch));
+  return patch;
+}
+
+std::expected<CellRef, std::string>
+MetaRuntime::learnPlan(std::string_view goal, std::string_view alias,
+                       CellRef test, CellRef body) {
+  if (reservedName(alias))
+    return std::unexpected(
+        std::format("learn_plan: alias '{}' is reserved", alias));
+  const auto host = clauseHost(goal);
+  if (!host) return std::unexpected(host.error());
+  if (const auto ok = learnGate(test, true, "test"); !ok)
+    return std::unexpected(ok.error());
+  if (const auto ok = learnGate(body, false, "body"); !ok)
+    return std::unexpected(ok.error());
+
+  const auto testCopies = learnCopies(test);
+  if (!testCopies) return std::unexpected(testCopies.error());
+  const auto bodyCopies = learnCopies(body);
+  if (!bodyCopies) return std::unexpected(bodyCopies.error());
+  if (const auto ok = registerHead(testCopies->registered); !ok)
+    return std::unexpected(ok.error());
+  if (const auto ok = registerHead(bodyCopies->registered); !ok)
+    return std::unexpected(ok.error());
+
+  auto &arena = core_.arena();
+  // Verbatim alias dedupe on the install rank only — a declared clause
+  // carrying the alias label unlinks first (the durable replacement
+  // the patch records; learned clauses are patch:<n>-labelled and
+  // unreachable by alias).
+  for (const auto clause : clausesOf(*host))
+    if (labelOf(clause).value_or("") == alias)
+      unlinkRank(clause, core_.dims().clause);
+
+  // One serial for the pair — the clause's +d.name and the patch
+  // record's +d.name are the same patch:<n> label.
+  const auto serial = nextSerial();
+  if (!serial) return std::unexpected(serial.error());
+  const auto patchLabel = std::format("patch:{}", *serial);
+
+  const auto clause = arena.makeCell();
+  zigzag::expectWritten(arena.link(clause, core_.dims().name, Posward,
+                                   arena.makeCell(patchLabel)));
+  zigzag::expectWritten(
+      arena.link(clause, core_.dims().grab, Posward, testCopies->installed));
+  zigzag::expectWritten(
+      arena.link(clause, core_.dims().spin, Posward, bodyCopies->installed));
+  zigzag::expectWritten(
+      arena.link(zigzag::rankTail(arena, *host, core_.dims().clause),
+                 core_.dims().clause, Posward, clause));
+
+  const auto patch = mintPatch(patchLabel, *serial, "learn_plan", patchLabel,
+                               goal, alias, std::nullopt,
+                               {labelOf(testCopies->registered).value_or(""),
+                                labelOf(bodyCopies->registered).value_or("")});
+  if (!patch) return std::unexpected(patch.error());
+  return clause;
+}
+
+std::expected<CellRef, std::string>
+MetaRuntime::learnHandler(std::string_view event, std::string_view alias,
+                          CellRef guard, CellRef body, std::int64_t priority) {
+  if (reservedName(alias))
+    return std::unexpected(
+        std::format("learn_handler: alias '{}' is reserved", alias));
+  const auto host = clauseHost(event);
+  if (!host) return std::unexpected(host.error());
+  if (const auto ok = learnGate(guard, true, "guard"); !ok)
+    return std::unexpected(ok.error());
+  if (const auto ok = learnGate(body, false, "body"); !ok)
+    return std::unexpected(ok.error());
+
+  const auto guardCopies = learnCopies(guard);
+  if (!guardCopies) return std::unexpected(guardCopies.error());
+  const auto bodyCopies = learnCopies(body);
+  if (!bodyCopies) return std::unexpected(bodyCopies.error());
+  if (const auto ok = registerHead(guardCopies->registered); !ok)
+    return std::unexpected(ok.error());
+  if (const auto ok = registerHead(bodyCopies->registered); !ok)
+    return std::unexpected(ok.error());
+
+  auto &arena       = core_.arena();
+  const auto serial = nextSerial();
+  if (!serial) return std::unexpected(serial.error());
+  const auto patchLabel = std::format("patch:{}", *serial);
+
+  // Additive: learn_handler carries no alias dedupe — a second
+  // same-alias clause appends under its own patch:<n>.
+  const auto clause = arena.makeCell();
+  zigzag::expectWritten(arena.link(clause, core_.dims().name, Posward,
+                                   arena.makeCell(patchLabel)));
+  zigzag::expectWritten(
+      arena.link(clause, core_.dims().grab, Posward, guardCopies->installed));
+  zigzag::expectWritten(
+      arena.link(clause, core_.dims().spin, Posward, bodyCopies->installed));
+  if (const auto rec = varsRecord(clause, "priority", /*mint=*/true))
+    zigzag::expectWritten(arena.link(*rec, core_.dims().values, Posward,
+                                     arena.makeScalarCell(priority)));
+  zigzag::expectWritten(
+      arena.link(zigzag::rankTail(arena, *host, core_.dims().clause),
+                 core_.dims().clause, Posward, clause));
+
+  const auto patch = mintPatch(patchLabel, *serial, "learn_handler", patchLabel,
+                               event, alias, priority,
+                               {labelOf(guardCopies->registered).value_or(""),
+                                labelOf(bodyCopies->registered).value_or("")});
+  if (!patch) return std::unexpected(patch.error());
+  return clause;
+}
+
+MetaRuntime::MetaMutation MetaRuntime::learnWhere(CellRef clause,
+                                                  CellRef test) {
+  auto &arena     = core_.arena();
+  const auto name = labelOf(clause);
+  if (!name)
+    return std::unexpected(
+        "learn_where: the target clause carries no +d.name — the "
+        "durable record needs a resolvable key");
+  if (const auto ok = learnGate(test, true, "test"); !ok) return ok;
+  if (const auto ok = matchAttach(clause, core_.dims().grab, test, "test"); !ok)
+    return ok;
+
+  const auto copies = learnCopies(test);
+  if (!copies) return std::unexpected(copies.error());
+  if (const auto ok = registerHead(copies->registered); !ok) return ok;
+
+  const auto serial = nextSerial();
+  if (!serial) return std::unexpected(serial.error());
+  const auto prior = priorAttachName(*name, core_.dims().grab);
+  zigzag::expectWritten(
+      arena.link(clause, core_.dims().grab, Posward, copies->installed));
+  std::vector<std::string> heads{labelOf(copies->registered).value_or("")};
+  if (prior) heads.push_back(*prior);
+  const auto patch =
+      mintPatch(std::format("patch:{}", *serial), *serial, "learn_where", *name,
+                std::nullopt, std::nullopt, std::nullopt, heads);
+  if (!patch) return std::unexpected(patch.error());
+  return {};
+}
+
+MetaRuntime::MetaMutation MetaRuntime::learnBody(CellRef clause, CellRef body) {
+  auto &arena     = core_.arena();
+  const auto name = labelOf(clause);
+  if (!name)
+    return std::unexpected(
+        "learn_body: the target clause carries no +d.name — the "
+        "durable record needs a resolvable key");
+  if (const auto ok = learnGate(body, false, "body"); !ok) return ok;
+  if (const auto ok = matchAttach(clause, core_.dims().spin, body, "body"); !ok)
+    return ok;
+
+  const auto copies = learnCopies(body);
+  if (!copies) return std::unexpected(copies.error());
+  if (const auto ok = registerHead(copies->registered); !ok) return ok;
+
+  const auto serial = nextSerial();
+  if (!serial) return std::unexpected(serial.error());
+  const auto prior = priorAttachName(*name, core_.dims().spin);
+  zigzag::expectWritten(
+      arena.link(clause, core_.dims().spin, Posward, copies->installed));
+  std::vector<std::string> heads{labelOf(copies->registered).value_or("")};
+  if (prior) heads.push_back(*prior);
+  const auto patch =
+      mintPatch(std::format("patch:{}", *serial), *serial, "learn_body", *name,
+                std::nullopt, std::nullopt, std::nullopt, heads);
+  if (!patch) return std::unexpected(patch.error());
+  return {};
+}
+
+std::expected<CellRef, std::string>
+MetaRuntime::learnMethod(std::string_view owner, std::string_view name,
+                         CellRef code) {
+  if (reservedName(name))
+    return std::unexpected(
+        std::format("learn_method: name '{}' is reserved", name));
+  const auto resolved = agentOwner(owner);
+  if (!resolved) return std::unexpected(resolved.error());
+  const auto &[module, agentName] = *resolved;
+  if (const auto ok = learnGate(code, false, "code"); !ok)
+    return std::unexpected(ok.error());
+
+  const auto copies = learnCopies(code);
+  if (!copies) return std::unexpected(copies.error());
+  if (const auto ok = registerHead(copies->registered); !ok)
+    return std::unexpected(ok.error());
+
+  auto &arena          = core_.arena();
+  const auto qualified = std::format("{}.{}", agentName, name);
+  for (const auto symbol : zigzag::rankAfter(arena, module, core_.dims().vars))
+    if (arena.textOf(symbol) == qualified) {
+      unlinkRank(symbol, core_.dims().vars);
+      break;
+    }
+  const auto symbol = arena.makeCell(qualified);
+  zigzag::expectWritten(
+      arena.link(symbol, core_.dims().values, Posward, copies->installed));
+  zigzag::expectWritten(
+      arena.link(zigzag::rankTail(arena, module, core_.dims().vars),
+                 core_.dims().vars, Posward, symbol));
+
+  // The record's target is the composed module:Agent.member spelling —
+  // unlearn's symbol arm recomposes it from the rank head.
+  const auto moduleName = arena.textOf(module);
+  const auto serial     = nextSerial();
+  if (!serial) return std::unexpected(serial.error());
+  const auto patch = mintPatch(
+      std::format("patch:{}", *serial), *serial, "learn_method",
+      std::format("{}:{}", moduleName, qualified), moduleName, std::nullopt,
+      std::nullopt, {labelOf(copies->registered).value_or("")});
+  if (!patch) return std::unexpected(patch.error());
+  return symbol;
+}
+
+MetaRuntime::MetaMutation MetaRuntime::undoPatch(CellRef patch) {
+  auto &arena       = core_.arena();
+  const auto verb   = patchField(patch, "verb", true).value_or("");
+  const auto target = patchField(patch, "target", true).value_or("");
+  const auto heads  = patchHeadNames(patch);
+
+  const auto dropDead = [&](std::string_view why) -> MetaMutation {
+    // A patch whose install can no longer be resolved is dead — drop
+    // it and leave a ConditionFault-shaped fault record on the agent,
+    // the way a dropped d.patch names its own failure.
+    unlinkRank(patch, binds_.dims.patch);
+    if (const auto rec =
+            varsRecord(binds_.agentCell,
+                       std::format("fault:{}", labelOf(patch).value_or("")),
+                       /*mint=*/true))
+      zigzag::expectWritten(arena.link(*rec, core_.dims().values, Posward,
+                                       arena.makeCell(std::string{why})));
+    return std::unexpected(
+        std::format("unlearn: dead patch dropped — {}", why));
+  };
+
+  if (verb == "learn_plan" || verb == "learn_handler") {
+    const auto clause = planNamed(target);
+    if (!clause) return dropDead("the learned clause no longer resolves");
+    unlinkRank(*clause, core_.dims().clause);
+  } else if (verb == "learn_method") {
+    // Recompose module:Agent.member → symbolNamed walks the module's
+    // d.vars for the Agent.member content.
+    const auto colon = target.find(':');
+    if (colon == std::string::npos) return dropDead("malformed method target");
+    const auto symbol =
+        symbolNamed(target.substr(0, colon), target.substr(colon + 1));
+    if (!symbol) return dropDead("the learned symbol no longer resolves");
+    unlinkRank(*symbol, core_.dims().vars);
+  } else if (verb == "learn_where" || verb == "learn_body") {
+    const auto clause = planNamed(target);
+    if (!clause) return dropDead("the patched clause no longer resolves");
+    const auto dim =
+        verb == "learn_where" ? core_.dims().grab : core_.dims().spin;
+    if (heads.size() > 1) {
+      // A recorded prior: re-point through a fresh reify of the named
+      // registered head — a closed copy is safe to link state-side.
+      const auto prior = codeNamed(heads[1]);
+      if (!prior)
+        return dropDead("the recorded prior head no longer resolves on d.code");
+      auto copy = reify(*prior);
+      if (!copy) return std::unexpected(copy.error());
+      zigzag::expectWritten(arena.link(*clause, dim, Posward, *copy));
+    } else {
+      // Program-original attachment: never recorded, never restored
+      // through a state→program link — detach and let genesis's image
+      // replay put the original back.
+      zigzag::expectWritten(arena.unlink(*clause, dim, Posward));
+    }
+  } else {
+    return dropDead("patch carries no replayable verb");
+  }
+
+  // The patch drops; every head name it recorded — installs and prior
+  // names alike — loses one namer, and a registration no surviving
+  // patch still names drops with it (a where/body chain's prior name
+  // rides exactly for this undo, so it counts as a namer too).
+  const auto survivors =
+      collect(zigzag::rankAfter(arena, binds_.agentCell, binds_.dims.patch));
+  const auto stillNamed = [&](std::string_view headName) {
+    for (const auto other : survivors)
+      if (other != patch)
+        for (const auto &named : patchHeadNames(other))
+          if (named == headName) return true;
+    return false;
+  };
+  unlinkRank(patch, binds_.dims.patch);
+  for (const auto &headName : heads)
+    if (!stillNamed(headName))
+      if (const auto registered = codeNamed(headName);
+          registered && codeRegistered(*registered))
+        unlinkRank(*registered, binds_.dims.code);
+  return {};
+}
+
+MetaRuntime::MetaMutation MetaRuntime::unlearn(CellRef clauseOrSymbol) {
+  auto &arena = core_.arena();
+  if (!arena.contains(clauseOrSymbol))
+    return std::unexpected("unlearn: operand is not an arena cell");
+  // A d.patch record rides the same rank it would undo — refuse it by
+  // its backlink before any name resolution.
+  if (arena.linked(clauseOrSymbol, binds_.dims.patch, Negward).has_value())
+    return std::unexpected(
+        "unlearn: a d.patch record is not a learnable attachment");
+
+  std::string name;
+  if (const auto label = labelOf(clauseOrSymbol)) {
+    name = *label;
+  } else if (arena.linked(clauseOrSymbol, core_.dims().vars, Negward)
+                 .has_value()) {
+    // The symbol arm: the rank head supplies the module: prefix.
+    const auto head =
+        zigzag::rankTail(arena, clauseOrSymbol, core_.dims().vars, Negward);
+    const auto owner = arena.textOf(head);
+    if (owner.empty() || arena.textOf(clauseOrSymbol).empty())
+      return std::unexpected(
+          "unlearn: symbol operand's rank head carries no module name");
+    name = std::format("{}:{}", owner, arena.textOf(clauseOrSymbol));
+  } else {
+    return std::unexpected(
+        "unlearn: operand names no learnable attachment — neither a "
+        "+d.name clause nor a d.vars symbol");
+  }
+
+  const auto rank =
+      collect(zigzag::rankAfter(arena, binds_.agentCell, binds_.dims.patch));
+  for (const auto patch : rank | std::views::reverse)
+    if (patchField(patch, "target", true).value_or("") == name)
+      return undoPatch(patch);
+  return std::unexpected(
+      std::format("unlearn: no d.patch records target '{}'", name));
+}
+
+MetaRuntime::MetaMutation MetaRuntime::setWeight(CellRef cell, double weight) {
+  auto &arena = core_.arena();
+  if (!arena.contains(cell))
+    return std::unexpected("set_weight: operand is not an arena cell");
+  // Junction arm: the cell's own +d.weight edge takes a fresh scalar —
+  // mint-and-repoint, never an in-place write, so a shared scalar is
+  // never mutated under a reader.
+  if (arena.linked(cell, binds_.dims.weight, Posward).has_value()) {
+    zigzag::expectWritten(arena.link(cell, binds_.dims.weight, Posward,
+                                     arena.makeScalarCell(weight)));
+    return {};
+  }
+  // Clause arm: the agent's keyed d.vars record — minted on first
+  // write, keyed by the clause's +d.name verbatim.
+  if (const auto label = labelOf(cell)) {
+    const auto record = varsRecord(binds_.agentCell, *label, /*mint=*/true);
+    if (!record)
+      return std::unexpected(
+          "set_weight: could not mint the agent's d.vars record");
+    zigzag::expectWritten(arena.link(*record, core_.dims().values, Posward,
+                                     arena.makeScalarCell(weight)));
+    return {};
+  }
+  return std::unexpected(
+      "set_weight: a name-less clause carries no weight channel — it "
+      "has neither +d.weight nor +d.name");
+}
+
+std::expected<CellRef, std::string>
+MetaRuntime::sproutSynapse(std::string_view from, std::string_view to,
+                           double weight) {
+  auto &arena         = core_.arena();
+  const auto junction = arena.makeCell();
+  zigzag::expectWritten(arena.link(junction, binds_.dims.weight, Posward,
+                                   arena.makeScalarCell(weight)));
+  if (const auto rec = varsRecord(junction, "from", /*mint=*/true))
+    zigzag::expectWritten(
+        arena.link(*rec, core_.dims().values, Posward, arena.makeCell(from)));
+  if (const auto rec = varsRecord(junction, "to", /*mint=*/true))
+    zigzag::expectWritten(
+        arena.link(*rec, core_.dims().values, Posward, arena.makeCell(to)));
+  zigzag::expectWritten(
+      arena.link(zigzag::rankTail(arena, binds_.agentCell, binds_.dims.synapse),
+                 binds_.dims.synapse, Posward, junction));
+  return junction;
+}
+
+MetaClosedReport MetaRuntime::verifyClosed(CellRef head) const {
+  auto &arena = core_.arena();
+  MetaClosedReport report;
+  const auto fail = [&](std::string detail) {
+    report.closed = false;
+    report.detail = std::move(detail);
+    return report;
+  };
+
+  // The recipe-covered internal set: every position a member names —
+  // literals, tuple endpoints, capture slots, dim anchors — plus the
+  // head. Ref-records whose marked cell resolves inside it are
+  // internal by construction.
+  std::set<CellRef> internal{head};
+  std::map<CellRef, CellRef> captureFor;
+  for (const auto member :
+       stepChain(arena, head, binds_.dims.recipe, core_.dims().step)) {
+    if (const auto slot = arena.linked(member, binds_.dims.refFor, Posward))
+      captureFor[*slot] = member;
+    if (const auto pos = arena.asInt64(member))
+      internal.insert(static_cast<CellRef>(*pos));
+  }
+
+  const auto program     = programCells();
+  const auto programSide = [&](CellRef cell) {
+    return imageRef(cell) || program.contains(cell);
+  };
+
+  // A run/call name-record's rebind class: qualified names re-resolve
+  // through module→symbol→+d.values; labels through code_named. A
+  // resolved head (or a call record's op) is fine; a run record
+  // landing head-less is fail-forever; unresolved is
+  // fail-until-resume — the emission-fixed slot only genesis fills.
+  const auto rebindClass = [&](std::string_view name,
+                               std::string_view role) -> std::string {
+    std::optional<CellRef> target;
+    if (const auto colon = name.find(':'); colon != std::string_view::npos)
+      if (moduleNamed(name.substr(0, colon)))
+        if (const auto symbol =
+                symbolNamed(name.substr(0, colon), name.substr(colon + 1)))
+          target = arena.linked(*symbol, core_.dims().values, Posward);
+    if (target && arena.contains(*target)) {
+      const bool head =
+          arena.linked(*target, binds_.dims.entry, Posward).has_value();
+      if (role == "run" && !head)
+        return std::format(
+            "run-role record '{}' resolves head-less — fail-forever", name);
+      return {};
+    }
+    if (codeNamed(name).has_value()) return {};
+    return std::format("{}-role record '{}' unresolved — "
+                       "fail-until-resume",
+                       role, name);
+  };
+
+  for (const auto record :
+       stepChain(arena, head, binds_.dims.refs, core_.dims().step)) {
+    const auto marked   = arena.linked(record, binds_.dims.ref, Posward);
+    const auto nameCell = arena.linked(record, core_.dims().name, Posward);
+    if (nameCell) {
+      // NAME-record: resolved by name at genesis. Only run/call-role
+      // records classify a refusal future — an ordinary name-record
+      // always rebinds verbatim.
+      const auto roleCell = arena.linked(record, core_.dims().grab, Posward);
+      const auto role     = roleCell ? arena.textOf(*roleCell) : std::string{};
+      if (role == "run" || role == "call") {
+        const auto kind = rebindClass(arena.textOf(*nameCell), role);
+        if (!kind.empty()) {
+          if (kind.ends_with("fail-forever"))
+            return fail(std::format("closed violation: {}", kind));
+          report.notes.push_back(kind);
+        }
+      }
+      continue;
+    }
+    if (!marked || !arena.contains(*marked))
+      return fail("closed: +d.refs record has no +d.ref cell");
+    const auto pos = arena.asInt64(*marked);
+    if (pos && internal.contains(static_cast<CellRef>(*pos))) continue;
+    // A slot's int64 is the referent; the paired ref-capture record
+    // classifies dim and cap$N endpoints.
+    const auto member = captureFor.find(*marked);
+    if (member != captureFor.end()) {
+      if (arena.linked(member->second, core_.dims().name, Posward).has_value())
+        continue; // dimension referent — re-resolves by name
+      if (const auto binding =
+              arena.linked(member->second, core_.dims().values, Posward)) {
+        if (programSide(*binding))
+          return fail(std::format(
+              "closed violation: cap$N capture binds program-side cell {}",
+              static_cast<std::uint64_t>(*binding)));
+        continue;
+      }
+    }
+    if (!pos) {
+      // An unwritten ref-record slot carries no referent to smuggle —
+      // the emission-fixed unwritten-slot arm rides verbatim.
+      report.notes.push_back(
+          "ref-record slot carries no referent — emission-fixed "
+          "unwritten slot");
+      continue;
+    }
+    if (programSide(static_cast<CellRef>(*pos)))
+      return fail(std::format(
+          "closed violation: outbound edge to program-side cell {} lacks "
+          "name-resolution",
+          *pos));
+  }
+  report.closed = true;
+  return report;
 }
 
 } // namespace xanadu::vagent

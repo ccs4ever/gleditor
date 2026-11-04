@@ -9,9 +9,12 @@
  * mechanism — data-minted cells and dimensions, never C++ registration).
  * This TU is the kernel-side implementation those routines run: the read
  * group (`program` through `label_of`, `validate`, `weight_of`, `value_of`,
- * `next_rand`), `run`'s `#Call` frame convention, and `reify`'s `+d.recipe`
- * replay. The mutation verbs (`graft_*`, `learn_*`, `prune`, `unlearn`,
- * `set_weight`, `sprout_synapse`) are phase 4 and are not here.
+ * `next_rand`), `run`'s `#Call` frame convention, `reify`'s `+d.recipe`
+ * replay, and phase 4's mutation surface — the `graft_*` session verbs,
+ * their durable `learn_*` twins, `prune`/`unlearn`, `set_weight` and
+ * `sprout_synapse`. The `learn_*` verbs write `d.patch` records and
+ * `d.code` registrations an incarnation-local EDL can replay; crossing
+ * a store boundary is phase 6's transport seam, not this surface.
  *
  * The bind set is harness-supplied in this phase: `mintMetaBindSet` performs
  * the no-marks mint the adapter performs at genesis — the twelve apparatus
@@ -27,6 +30,7 @@
 #include <cstdint>
 #include <expected>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -92,12 +96,30 @@ struct MetaValidateConstants {
   CellRef impureKinds{noCell};
 };
 
+/// The program-lineage record `learn_*`'s sideness gate consumes
+/// (§6.6): `programRef` is the phase-3 bind record's `program()` — a
+/// persistent image ref no later than `imageExtent`, the image's op
+/// extent — and `imageExtent` is the bound image refs compare against.
+/// An ephemeral arena model compares its dense id instead; a
+/// persistent incarnation compares the spool position. Absent, every
+/// `learn_*` refuses closed as "no program lineage".
+struct MetaLineage {
+  CellRef programRef{noCell};
+  std::uint32_t imageExtent{0};
+};
+
 /// `std:meta`'s runtime roots — everything the resolvers start from.
 struct MetaBindSet {
   CellRef programRoot{noCell}; ///< `program()` — the program root cell.
   CellRef agentCell{noCell};   ///< `agent_cell()` — this agent's own cell.
+  /// The agent's own module cell — the home bare `goal`/`owner` names in
+  /// `graft_*`/`learn_*` resolve against before any `module:` split.
+  CellRef ownModule{noCell};
   MetaDimensions dims{};
   MetaValidateConstants validate{};
+  /// `learn_*`'s sideness/closedness gate — absent binds refuse the
+  /// durable verbs fail-closed (§6.6).
+  std::optional<MetaLineage> lineage;
 };
 
 /// The phase-3 harness mint: files the twelve apparatus dims (V10's
@@ -135,6 +157,17 @@ struct MetaRunOutcome {
 struct MetaValidateReport {
   bool ok{false};
   std::string detail;
+};
+
+/// `verifyClosed`'s report (§6.6): `closed` false carries the first
+/// refusal class in `detail` (an unnamed program-side reference, a
+/// fail-forever run-record); `notes` collect the admitted-but-flagged
+/// classes — fail-until-resume name-records ride to genesis, they are
+/// not refusals.
+struct MetaClosedReport {
+  bool closed{false};
+  std::string detail;
+  std::vector<std::string> notes;
 };
 
 /// The options §7.2's walk needs from the calling context: whether the
@@ -303,7 +336,249 @@ public:
   /// `validate`'s pass serial share.
   [[nodiscard]] std::expected<std::int64_t, std::string> nextSerial() const;
 
+  // -- Mutation surface (§6.1's phase-4 half) ------------------------------
+
+  /// Unit-returning mutation arms name their refusal class in the
+  /// error string, never a thrown `Diagnostic`.
+  using MetaMutation = std::expected<void, std::string>;
+
+  /// `graft_plan(goal, name, test, body)`: append a `+d.name`-labelled
+  /// clause at the goal symbol's `+d.clause` rank tail — `+d.grab` the
+  /// test head, `+d.spin` the body head. The test must be pure and its
+  /// descriptor signature must match the goal's canonical clause
+  /// formals; the body must be `Code<()>`-shaped. Session-only: no
+  /// `d.patch` record, no `d.code` registration.
+  [[nodiscard]] std::expected<CellRef, std::string>
+  graftPlan(std::string_view goal, std::string_view name, CellRef test,
+            CellRef body);
+
+  /// `graft_handler(event, name, guard, body, priority)`: the event arm
+  /// of `graft_plan` — appends additive (no alias dedupe) and carries
+  /// `priority` as a `d.vars` record on the minted clause.
+  [[nodiscard]] std::expected<CellRef, std::string>
+  graftHandler(std::string_view event, std::string_view name, CellRef guard,
+               CellRef body, std::int64_t priority);
+
+  /// `graft_where(clause, test)`: one trailed re-point of the clause's
+  /// `+d.grab` at the test head. The old graph stays allocated but
+  /// detached. The test is pure-required.
+  [[nodiscard]] MetaMutation graftWhere(CellRef clause, CellRef test);
+
+  /// `graft_body(clause, body)`: one trailed re-point of `+d.spin` at
+  /// the `Code<()>`-shaped body head.
+  [[nodiscard]] MetaMutation graftBody(CellRef clause, CellRef body);
+
+  /// `graft_method(owner, name, code)`: unlink any existing
+  /// `owner.name` symbol on the resolved module's `d.vars` (redefinition
+  /// is replacement — symbol lookup is first-match-wins), then mint a
+  /// symbol cell whose content is the dotted `Agent.member` spelling and
+  /// whose `+d.values` names the head.
+  [[nodiscard]] std::expected<CellRef, std::string>
+  graftMethod(std::string_view owner, std::string_view name, CellRef code);
+
+  /// `prune(clause)`: unlink a clause off its `d.clause` rank with
+  /// predecessor→successor repair; the clause and its attach graphs
+  /// stay allocated but unranked.
+  [[nodiscard]] MetaMutation prune(CellRef clause);
+
+  /// `learn_plan(goal, alias, test, body)`: the durable twin —
+  /// re-verify lineage and `closed`, reify a registered head per
+  /// argument (reused when the argument is already `d.code`-registered)
+  /// plus a fresh installed copy, dedupe the alias verbatim against the
+  /// goal's own clause labels, install under a minted `patch:<n>`
+  /// label, and append a `d.patch` record carrying the alias.
+  [[nodiscard]] std::expected<CellRef, std::string>
+  learnPlan(std::string_view goal, std::string_view alias, CellRef test,
+            CellRef body);
+
+  /// `learn_handler(event, alias, guard, body, priority)`: additive
+  /// like `graft_handler`; the record carries `priority` beside the
+  /// alias.
+  [[nodiscard]] std::expected<CellRef, std::string>
+  learnHandler(std::string_view event, std::string_view alias, CellRef guard,
+               CellRef body, std::int64_t priority);
+
+  /// `learn_where(clause, test)`: reify a registered plus an installed
+  /// test copy, re-point `+d.grab` at the copy, and record the install
+  /// — the patch's `+d.patch-head` chain names the registered head and
+  /// any prior learned head the same clause carried. A clause with no
+  /// `+d.name` is refused (the durable record needs a resolvable key).
+  [[nodiscard]] MetaMutation learnWhere(CellRef clause, CellRef test);
+
+  /// `learn_body(clause, body)`: the `+d.spin` twin of `learn_where`.
+  [[nodiscard]] MetaMutation learnBody(CellRef clause, CellRef body);
+
+  /// `learn_method(owner, name, code)`: `graft_method`'s durable twin —
+  /// `name` is the functional lookup name verbatim (never minted), the
+  /// record's target is the composed `module:Agent.member` spelling.
+  [[nodiscard]] std::expected<CellRef, std::string>
+  learnMethod(std::string_view owner, std::string_view name, CellRef code);
+
+  /// `unlearn(clause_or_symbol)`: undo the latest `d.patch` whose
+  /// recorded target is the argument's name — a `+d.name`-bearing cell
+  /// reads as a clause key, a `d.vars` symbol composes `module:content`
+  /// off its rank head. Refuses a `d.patch` record argument by its
+  /// `-d.patch` backlink. Clause arms unlink the learned clause or
+  /// symbol; replace arms re-point through a reified prior head (a
+  /// program-original attachment simply detaches — genesis restores
+  /// it), then the patch drops and the `d.code` registration it solely
+  /// named follows. A dead patch drops with a fault record.
+  [[nodiscard]] MetaMutation unlearn(CellRef clauseOrSymbol);
+
+  /// `set_weight(cell, w)`: a `+d.weight`-bearing cell takes a fresh
+  /// scalar on that edge; a `+d.name`-bearing cell finds-or-mints the
+  /// agent's `d.vars` record keyed by the label and re-points its value
+  /// slot — the mint-and-repoint discipline, never an in-place write.
+  /// A name-less, weight-less target is refused.
+  [[nodiscard]] MetaMutation setWeight(CellRef cell, double weight);
+
+  /// `sprout_synapse(from, to, w)`: mint a junction on the agent's
+  /// `+d.synapse` rank carrying `from`/`to` qualified-name strings and
+  /// its own `+d.weight` scalar.
+  [[nodiscard]] std::expected<CellRef, std::string>
+  sproutSynapse(std::string_view from, std::string_view to, double weight);
+
+  /// `learn_*`'s closedness re-verification (§6.6): walks the head's
+  /// `+d.refs`/`+d.recipe` frontier — name-records resolve by label,
+  /// ref-records must name internal recipe positions or state-side
+  /// cells, cap$N bindings must be state-side. Run-role records
+  /// classify fail-until-resume (admitted, rides to genesis) versus
+  /// fail-forever (refused — a guaranteed-dead patch).
+  [[nodiscard]] MetaClosedReport verifyClosed(CellRef head) const;
+
 private:
+  /// A descriptor's declared signature: ordered `(name, type)` pairs
+  /// off the `+d.grab → +d.step` parameter chain, the `result` record's
+  /// `+d.name` type spelling, and the `pure` flag.
+  struct MetaSignature {
+    bool descriptor{false};
+    std::vector<std::pair<std::string, std::string>> params;
+    std::string resultType;
+    bool pure{false};
+  };
+  /// The two reified copies a `learn_*` installs: `registered` lives on
+  /// the agent's `d.code`, `installed` is the session-attached twin.
+  struct MetaLearnCopies {
+    CellRef registered{noCell};
+    CellRef installed{noCell};
+  };
+
+  /// Read @p head's descriptor signature; `descriptor` false when the
+  /// head carries no `+d.values` descriptor (a reflect wrapper).
+  [[nodiscard]] MetaSignature signatureOf(CellRef head) const;
+  /// Resolve a `goal`/`event` name to its clause-rank host: first-`:`
+  /// split when the qualifier resolves as a module, else the bare name
+  /// on the agent's own module's `d.vars`.
+  [[nodiscard]] std::expected<CellRef, std::string>
+  clauseHost(std::string_view name) const;
+  /// Resolve a method `owner` (`Agent` or `module:Agent`) to
+  /// `{module, agentName}` — bare owners take the agent's own module.
+  [[nodiscard]] std::expected<std::pair<CellRef, std::string>, std::string>
+  agentOwner(std::string_view owner) const;
+  /// The shared fragment-head shape gate: the operand must be an arena
+  /// cell, must carry `+d.entry` (a head, never an op-cell attach — op
+  /// wings are single-occupancy), and `pureRequired` arms need the
+  /// descriptor's `pure` flag.
+  [[nodiscard]] MetaMutation headShape(CellRef head, bool pureRequired,
+                                       std::string_view role) const;
+  /// `graft_*`'s head gate: `headShape` plus M14's consumption test and
+  /// `validate` — the run-reachability arm belongs here, not in
+  /// `learnGate`, because a grafted head runs in-session while a
+  /// learned one's unresolved `run` records are §6.6's
+  /// fail-until-resume class.
+  [[nodiscard]] MetaMutation graftable(CellRef head, bool pureRequired,
+                                       std::string_view role) const;
+  /// `learn_*`'s head gate: `headShape`, the M14 consumption test
+  /// (`learn` of an installed head refuses exactly like a second
+  /// `graft_*`), and `learnable` — lineage plus closedness
+  /// re-verified at accept (§6.6). Deliberately no `validate`: a
+  /// `run`-role name-record unresolved in-session is deferred work
+  /// the durable arm admits, never the structural invalidity
+  /// `validate` judges.
+  [[nodiscard]] MetaMutation learnGate(CellRef head, bool pureRequired,
+                                       std::string_view role) const;
+  /// The goal/event's canonical clause formals: the first clause whose
+  /// `+d.grab` attach carries a descriptor — a plan's clauses share one
+  /// formal list. `descriptor` false when nothing comparable exists.
+  [[nodiscard]] MetaSignature clauseFormals(CellRef host) const;
+  /// A replace-arm signature check: the candidate's declared params
+  /// and result must match the clause's current attach on @p dim when
+  /// that attach carries a descriptor (the clause's standard formals);
+  /// a descriptor-less attach leaves the check unverifiable and the
+  /// candidate's own declaration stands.
+  [[nodiscard]] MetaMutation matchAttach(CellRef clause, DimRef dim,
+                                         CellRef head,
+                                         std::string_view role) const;
+  /// Whether @p head is already installed — M14's occupancy test
+  /// verbatim: any of the `-d.grab`/`-d.spin`/`-d.values` install-dim
+  /// backlinks is occupied. The `+d.values` arm is the `graft_method`
+  /// symbol convention (and a `test_of` memo record's `+d.values →
+  /// wrapper` edge marks the wrapper installed — correct, since a
+  /// reflect wrapper is already wired in). A `code"…"` literal's head
+  /// keeps no backlink: emission anchors it through an int64 ref-box,
+  /// never a direct `+d.values` edge, so a fresh literal stays
+  /// graftable. Replacement (`learn_method`'s unlink-first) does not
+  /// free the consumed head: the dead symbol's stale `+d.values` edge
+  /// keeps the backlink occupied, which is exactly "install is
+  /// occupancy, not destruction".
+  [[nodiscard]] bool installed(CellRef head) const;
+  /// @p head on the agent's `+d.code` rank?
+  [[nodiscard]] bool codeRegistered(CellRef head) const;
+  /// The install candidate: reify first when @p head is `d.code`-
+  /// registered (a registered head is never mutated in place).
+  [[nodiscard]] std::expected<CellRef, std::string> installable(CellRef head);
+  /// Append @p head on the agent's `d.code` rank; refuses a second
+  /// head carrying an existing `d.name` label.
+  [[nodiscard]] MetaMutation registerHead(CellRef head) const;
+  /// `learn_*`'s two reifications — the `d.code`-registered argument
+  /// reuse carve-out installs a single fresh copy.
+  [[nodiscard]] std::expected<MetaLearnCopies, std::string>
+  learnCopies(CellRef head);
+  /// The durable-verb preconditions: program lineage, then per-head
+  /// `closed` re-verification.
+  [[nodiscard]] MetaMutation learnable(CellRef head) const;
+  /// `true` while a bound lineage record names an image-bound `program()`.
+  [[nodiscard]] bool hasProgramLineage() const;
+  /// An image-side ref — inside `imageExtent` (dense id for ephemeral
+  /// refs, the persistent spool position otherwise).
+  [[nodiscard]] bool imageRef(CellRef cell) const;
+  /// The program-side cells: `imageRef` plus everything `program()`
+  /// reaches outbound over the structural-dimension vocabulary.
+  [[nodiscard]] std::set<CellRef> programCells() const;
+  /// Unlink @p cell off a same-dim rank with predecessor→successor
+  /// repair (the `prune`/`unlearn` unlink idiom).
+  void unlinkRank(CellRef cell, DimRef dim) const;
+  /// Append a `+d.name → "patch:<n>"` record on the agent's `d.patch`
+  /// rank: descriptor `{target, verb, parent?}`, `+d.patch-head` chain
+  /// of name records, `d.vars` `{ordinal, alias?, priority?}`. The
+  /// caller draws the serial so a clause-installing patch shares one
+  /// `patch:<n>` label with its clause.
+  [[nodiscard]] std::expected<CellRef, std::string>
+  mintPatch(std::string_view label, std::int64_t ordinal, std::string_view verb,
+            std::string_view target, std::optional<std::string_view> parent,
+            std::optional<std::string_view> alias,
+            std::optional<std::int64_t> priority,
+            const std::vector<std::string> &headNames);
+  /// The patch record's `d.vars`/`+d.values` field texts, and the
+  /// `+d.patch-head` chain's recorded head names in order.
+  [[nodiscard]] std::optional<std::string>
+  patchField(CellRef patch, std::string_view key, bool descriptor) const;
+  [[nodiscard]] std::vector<std::string> patchHeadNames(CellRef patch) const;
+  /// The registered head a prior patch on @p clauseName left attached on
+  /// @p attachDim (`d.grab`/`d.spin`), for `learn_where`/`learn_body`'s
+  /// prior-head recording.
+  [[nodiscard]] std::optional<std::string>
+  priorAttachName(std::string_view clauseName, DimRef attachDim) const;
+  /// Undo one patch: clause arms unlink, replace arms re-point through
+  /// a reified prior or detach, then the patch drops and un-named
+  /// `d.code` registrations follow.
+  [[nodiscard]] MetaMutation undoPatch(CellRef patch);
+  /// `name` reserved for apparatus labels (`patch:<n>` is minted, never
+  /// an argument).
+  [[nodiscard]] static bool reservedName(std::string_view name) noexcept {
+    return name.starts_with("patch:");
+  }
+
   /// A descriptor's `+d.vars` record whose content is @p key verbatim.
   [[nodiscard]] std::optional<CellRef>
   descriptorField(CellRef descriptor, std::string_view key) const;

@@ -5,6 +5,8 @@
 #include <ranges>
 #include <utility>
 
+#include <gleditor/logging.hpp>
+
 #include "common/xanadu/scalar.hpp"
 #include "common/xanadu/truthiness.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
@@ -195,11 +197,32 @@ VortexCore::readValue(CellRef cell, const std::int64_t offset,
 std::optional<CellRef>
 VortexCore::writeValue(CellRef cell, const std::int64_t offset,
                        const std::optional<std::int64_t> length,
-                       const CellValue &replacement) {
+                       const CellValue &replacement, WriteFault *fault) {
+  if (fault != nullptr) {
+    *fault = WriteFault::None;
+  }
   if (!arena_.contains(cell)) {
     return std::nullopt;
   }
   const CellRef master = masterOf(cell);
+  // P15 (spec §6.5/M10): kind immutability. The VM-installed predicate
+  // tests opcodeMap_ membership of the resolved master — a clone of a
+  // registered op is unregistered but writes the registered master's
+  // bits, so the master is the cell to test. Restating a registered
+  // cell's content would desync the map's recorded kind, and the map
+  // is VM-private — no trail can undo it. A write to an unregistered
+  // cell stays free: its content is its kind, which is exactly how
+  // New+Value mints runtime ops.
+  if (writeGuard_ && writeGuard_(master)) {
+    if (fault != nullptr) {
+      *fault = WriteFault::OpcodeKind;
+    }
+    GLEDITOR_LOG_DEBUG("vortex.meta",
+                       "P15: program-value write to opcode-kind cell {} "
+                       "refused",
+                       master);
+    return std::nullopt;
+  }
   if (std::holds_alternative<double>(replacement)) {
     zigzag::expectWritten(arena_.setValueBits(
         master, xanadu::ValueKind::Double,
@@ -250,16 +273,19 @@ std::optional<CellRef> VortexCore::breakLink(CellRef cell, DimRef dim,
 
 std::optional<CellRef> VortexCore::splice(CellRef cell, std::int64_t offset,
                                           std::int64_t length,
-                                          const CellValue &val) {
-  return writeValue(cell, offset, length, val);
+                                          const CellValue &val,
+                                          WriteFault *fault) {
+  return writeValue(cell, offset, length, val, fault);
 }
 
 std::optional<CellRef> VortexCore::insert(CellRef cell, std::int64_t offset,
-                                          const CellValue &val) {
-  return writeValue(cell, offset, 0, val);
+                                          const CellValue &val,
+                                          WriteFault *fault) {
+  return writeValue(cell, offset, 0, val, fault);
 }
 
-std::optional<CellRef> VortexCore::append(CellRef cell, const CellValue &val) {
+std::optional<CellRef> VortexCore::append(CellRef cell, const CellValue &val,
+                                          WriteFault *fault) {
   const auto cur = render(cell);
   if (!cur) {
     return std::nullopt;
@@ -268,12 +294,13 @@ std::optional<CellRef> VortexCore::append(CellRef cell, const CellValue &val) {
   if (std::holds_alternative<std::string>(*cur)) {
     end = static_cast<std::int64_t>(std::get<std::string>(*cur).size());
   }
-  return writeValue(cell, end, 0, val);
+  return writeValue(cell, end, 0, val, fault);
 }
 
 std::optional<CellRef> VortexCore::erase(CellRef cell, std::int64_t offset,
-                                         std::int64_t length) {
-  return writeValue(cell, offset, length, CellValue(std::string{}));
+                                         std::int64_t length,
+                                         WriteFault *fault) {
+  return writeValue(cell, offset, length, CellValue(std::string{}), fault);
 }
 
 std::optional<CellValue> VortexCore::get(CellRef cell, std::int64_t offset,

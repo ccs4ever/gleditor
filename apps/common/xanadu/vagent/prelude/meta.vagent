@@ -22,9 +22,17 @@
 //                                     returns the operand's own
 //                                     Code<T> identity.
 //
-// The mutation verbs — graft_in, graft_out, learn, unlearn, prune,
-// set_weight, sprout_synapse, capture_slot_clone — are phase 4 and are
-// deliberately absent.
+// Phase 4 adds the mutation half. The graft verbs are session-only —
+// they link, unlink and re-point through the ordinary trailed writes,
+// so under live marks a release restores the pre-mutation graph (§6.4's
+// session arm); the under-execution/turn-boundary arm is the adapter's
+// deferral, not a refusal this surface can express. The learn_* verbs
+// are the same installs with a durable tail: a fresh head reified onto
+// the agent's d.code rank, a fresh installed copy at the attachment,
+// and a d.patch record carrying the minted patch:<n> label, the
+// recorded target/alias, and the patch-head chain of head names —
+// §6.1's "conditional on P16" flag means the *transport* of those
+// records is phase 6's seam, not that the machinery waits on it.
 module std:meta
 
 capacity Meta {
@@ -51,4 +59,38 @@ capacity Meta {
   def validate(cell: Cell): Bool
   def weight_of(cell: Cell): Opt<Float>
   def next_rand(seed: Cell): Int
+
+  // The mutation half — every member impure (each writes arena edges).
+  // A bare `Code` parameter is the parameterized wildcard `Code<T>`;
+  // `Code<()>` pins the body/test shape the attachment expects.
+  // graft_plan/graft_handler append a named clause at rank tail;
+  // graft_where/graft_body re-point a clause's +d.grab/+d.spin;
+  // graft_method unlinks a same-named symbol first, then installs
+  // `owner.name` on the resolved module's d.vars.
+  def graft_plan(goal_name: Str, name: Str, test: Code, body: Code<()>)
+  def graft_handler(event_name: Str, name: Str, guard: Code, body: Code<()>,
+                    priority: Int)
+  def graft_where(clause: Cell, test: Code)
+  def graft_body(clause: Cell, body: Code<()>)
+  def graft_method(owner: Str, name: Str, fragment: Code)
+  def prune(clause: Cell)
+
+  // The durable twins. `learn_*` re-verifies closed at accept time and
+  // refuses fail-closed when no program lineage binds; a learned clause
+  // is labelled patch:<n> (the alias rides the patch record, never the
+  // clause), a learned method's `name` is the functional lookup name
+  // verbatim.
+  def learn_plan(goal_name: Str, name: Str, test: Code, body: Code<()>)
+  def learn_handler(event_name: Str, name: Str, guard: Code, body: Code<()>,
+                    priority: Int)
+  def learn_where(clause: Cell, test: Code)
+  def learn_body(clause: Cell, body: Code<()>)
+  def learn_method(owner: Str, name: Str, fragment: Code)
+  def unlearn(clause_or_symbol: Cell)
+
+  // Weights and synapses. `set_weight` dispatches on the target's kind —
+  // a junction's own +d.weight scalar, else the agent's d.vars record
+  // keyed by the clause's +d.name (a name-less clause is refused).
+  def set_weight(cell: Cell, w: Float)
+  def sprout_synapse(from_name: Str, to_name: Str, w: Float): Cell
 }
