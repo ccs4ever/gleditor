@@ -307,3 +307,13 @@ resolution failures. Shape contracts, context-dot targets, explicit free capture
 variadics still need reusable frame lowering. Nonliteral contract-field defaults and atomic mutation
 contracts remain incomplete. See [iteration 14](projects/vortex-vm-only-iterations.md); this is not
 a full §4.12 pass.
+
+## Context-formal frames
+
+A single explicit `.` parameter now lowers to a native frame Stream port, including supported type
+annotations and lazy expression defaults. It overrides the separate inherited context even when
+explicitly empty; UFCS, nested calls and recursion preserve identity/order. Full build and all 501
+affected tests passed, including host/mesh source and fresh-VM export. See
+[iteration 15](projects/vortex-vm-only-iterations.md). Structural captures/destructuring, free
+closure inputs, functors, variadics and nonliteral field-default continuations remain open; this
+does not complete §4.12.

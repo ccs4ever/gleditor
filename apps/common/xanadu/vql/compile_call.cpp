@@ -450,8 +450,8 @@ void VQLCompiler::compileFrameDefinition(const DefDeclaration &definition) {
   spec.argumentPorts.emplace_back(contextSlot, FramePortKind::Stream);
   spec.resultPorts.emplace_back(resultSlot, FramePortKind::Stream);
   for (const auto &parameter : definition.params) {
-    const auto *name = std::get_if<std::string>(&parameter.target);
-    if (!name)
+    if (!std::holds_alternative<std::string>(parameter.target) &&
+        !std::holds_alternative<bool>(parameter.target))
       throw std::invalid_argument(
           "frame definition has an unsupported parameter target");
     const CellRef slot = core_.arena().makeCell();
@@ -506,7 +506,6 @@ void VQLCompiler::compileFrameDefinition(const DefDeclaration &definition) {
 
   for (std::size_t index = 0; index < definition.params.size(); ++index) {
     const auto &parameter = definition.params[index];
-    const auto &name      = std::get<std::string>(parameter.target);
     const CellRef slot    = parameterSlots[index];
     if (parameter.defaultValue) {
       const CellRef notPresent = core_.arena().makeCell();
@@ -528,8 +527,14 @@ void VQLCompiler::compileFrameDefinition(const DefDeclaration &definition) {
       appendOpcode(skip);
     }
     if (parameter.type) emitMatch(*parameter.type, {slot});
-    streamBindings_[name] = {slot};
-    varBindings_[name]    = slot;
+    if (const auto *name = std::get_if<std::string>(&parameter.target)) {
+      streamBindings_[*name] = {slot};
+      varBindings_[*name]    = slot;
+    } else {
+      streamBindings_["."] = {slot};
+      varBindings_["."]    = slot;
+      ambientContext_      = slot;
+    }
   }
 
   const CellRef clearResult =

@@ -436,3 +436,25 @@ field-default thunks, mutation boundaries, and the remaining functor/variadic/li
 
 Logs: `/tmp/vql-recursive-build.log`, `/tmp/vql-recursive-tests.log`,
 `/tmp/vql-recursive-vm-tests.log`, `/tmp/vql-recursive-cli.log`, `/tmp/vql-recursive-format.log`.
+
+## Iteration 15: explicit context-formal frames
+
+One explicit `.` formal now uses reusable frame lowering, including primitive/Stream annotations and
+closed expression defaults. Its positional Stream port remains separate from the hidden caller
+context port. Defaults and contracts execute before the formal rebinds `.`, so a default can read
+the prior hidden context or an earlier named parameter; an explicitly empty argument still overrides
+that hidden context. UFCS retains the existing implicit positional argument-zero rule. Nested calls
+restore their caller context, and recursive dot calls preserve actual cell identities and order.
+
+Validation: full `make -j$(nproc)` and all 501 affected tests from 48 suites passed. Eight new tests
+cover scalar/multiple/empty dot values, omission and default presence, type filtering, prior/hidden
+context defaults, UFCS, nested/recursive calls, host and mesh Vquery source routes, and fresh-VM
+Store export/reload. Luna architecture and independent senior/profiler gates accepted the bounded
+stage. No ABI or performance improvement is claimed; the previously measured frame costs remain. The
+broader VM sweep's known missing Prolog resolution work is unchanged; no full-suite pass is claimed.
+Multiple explicit dot formals, structural captures/destructuring, free captures, functors,
+variadics, nonliteral field defaults and mutation contracts remain open for reusable lowering. Full
+§4.12 remains incomplete.
+
+Logs: `/tmp/vql-context-frames-build.log`, `/tmp/vql-context-frames-tests.log`,
+`/tmp/vql-context-frames-format.log`.

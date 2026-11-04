@@ -49,6 +49,7 @@ public:
       refuse("weave definitions are not reusable frame candidates");
 
     Scope scope;
+    bool contextParameterSeen = false;
     for (const auto &parameter : definition.params) {
       tick(1);
       if (parameter.isVariadic)
@@ -59,9 +60,10 @@ public:
       if (const auto *name = std::get_if<std::string>(&parameter.target)) {
         if (name->empty() || !scope.insert(*name).second)
           refuse("frame parameters must have unique variable names");
-      } else if (const auto *context = std::get_if<bool>(&parameter.target)) {
-        (void)context;
-        refuse("context parameters remain on inline graph lowering");
+      } else if (std::holds_alternative<bool>(parameter.target)) {
+        if (contextParameterSeen)
+          refuse("multiple context parameters remain on inline graph lowering");
+        contextParameterSeen = true;
       } else {
         const auto &pattern = std::get<DestructurePattern>(parameter.target);
         refuse("destructured parameters remain on inline graph lowering");
