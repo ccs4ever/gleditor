@@ -2,9 +2,9 @@
 
 #include "common/xanadu/identity/identity_serialization.hpp"
 #include "common/xanadu/provenance.hpp"
-#include "common/xanadu/vagent/p16.hpp"
 #include "common/xanadu/vortex/mesh_checkpoint.hpp"
 #include "common/xanadu/vortex/mesh_value.hpp"
+#include "common/xanadu/vortex/p16_ceremony.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -50,9 +50,9 @@ struct MeshActorRuntime::Actor {
   std::size_t wakes{0};
   std::map<std::string, Remembered> remembered;
   // P16 seam: the adapter-installed ceremony and the flag the pump drives
-  // around the flagged turn (vagent/p16.hpp).
-  xanadu::vagent::P16Ceremony *p16{nullptr};
-  xanadu::vagent::P16Flag p16Flag{xanadu::vagent::P16Flag::Clear};
+  // around the flagged turn (vortex/p16_ceremony.hpp).
+  P16Ceremony *p16{nullptr};
+  P16Flag p16Flag{P16Flag::Clear};
   bool stopped{false};
   bool running{false};
 };
@@ -509,7 +509,6 @@ MeshActorRuntime::receive(const xanadu::identity::Fingerprint &identity,
 
 std::expected<bool, ActorError>
 MeshActorRuntime::pumpOne(std::chrono::system_clock::time_point wallNow) {
-  namespace vagent = xanadu::vagent;
   for (auto &[key, actor] : actors_) {
     if (actor->stopped || (actor->mailbox.empty() && actor->wakes == 0)) {
       continue;
@@ -533,12 +532,12 @@ MeshActorRuntime::pumpOne(std::chrono::system_clock::time_point wallNow) {
     // Sole-queued per the P16 contract: pending(pid)==0 after the pop —
     // the flag-time "pending==1" test the adapter sampled before arming.
     const bool soleQueued = actor->mailbox.empty();
-    if (actor->p16Flag == vagent::P16Flag::Checkpoint) {
+    if (actor->p16Flag == P16Flag::Checkpoint) {
       // A restore pending from an aborted flagged window drains at the
       // head of the next turn; the ceremony's kind guard makes it
       // idempotent when nothing stayed re-kinded.
       if (actor->p16) actor->p16->restoreAll();
-      actor->p16Flag = vagent::P16Flag::Clear;
+      actor->p16Flag = P16Flag::Clear;
     }
     std::expected<std::string, ActorError> result =
         std::unexpected(ActorError::ExecutionFailed);
@@ -559,7 +558,7 @@ MeshActorRuntime::pumpOne(std::chrono::system_clock::time_point wallNow) {
     // executor-callback frame so the ceremony's synchronous publish cannot
     // be interleaved by another turn of either kind.
     if (result && soleQueued && actor->p16 != nullptr &&
-        actor->p16Flag == vagent::P16Flag::Raised) {
+        actor->p16Flag == P16Flag::Raised) {
       bool rekinded = false;
       try {
         rekinded = actor->p16->onFlagged();
@@ -567,7 +566,7 @@ MeshActorRuntime::pumpOne(std::chrono::system_clock::time_point wallNow) {
         rekinded = false;
       }
       if (rekinded) {
-        actor->p16Flag = vagent::P16Flag::Checkpoint;
+        actor->p16Flag = P16Flag::Checkpoint;
         if (actor->mailbox.empty()) {
           // The pending(pid)==0 re-check passed; a self-send inside the
           // flagged turn is the veto this samples for.
@@ -578,16 +577,16 @@ MeshActorRuntime::pumpOne(std::chrono::system_clock::time_point wallNow) {
             published = false;
           }
           if (published) {
-            actor->p16Flag = vagent::P16Flag::Clear;
+            actor->p16Flag = P16Flag::Clear;
           } else {
             // Publish refused or failed: restore what the re-kind touched
             // and keep the flag armed for the next attempt.
             actor->p16->restoreAll();
-            actor->p16Flag = vagent::P16Flag::Raised;
+            actor->p16Flag = P16Flag::Raised;
           }
         } else {
           actor->p16->restoreAll();
-          actor->p16Flag = vagent::P16Flag::Raised;
+          actor->p16Flag = P16Flag::Raised;
         }
       } else {
         actor->p16->restoreAll();
@@ -613,7 +612,7 @@ MeshActorRuntime::pumpOne(std::chrono::system_clock::time_point wallNow) {
     if (!result) {
       // ActorDown clears the flag outright — a stopped actor never
       // re-enters pumpOne, so no restore is owed.
-      actor->p16Flag = vagent::P16Flag::Clear;
+      actor->p16Flag = P16Flag::Clear;
       actor->stopped = true;
     }
     return true;
@@ -795,14 +794,14 @@ std::size_t MeshActorRuntime::pendingWakes(const ActorPid &pid) const {
 
 std::expected<MeshActorRuntime *, ActorError>
 MeshActorRuntime::setP16Ceremony(const ActorPid &pid,
-                                 xanadu::vagent::P16Ceremony *const ceremony) {
+                                 P16Ceremony *const ceremony) {
   auto *actor = find(pid);
   if (!actor) return std::unexpected(ActorError::UnknownProcess);
   actor->p16 = ceremony;
   return this;
 }
 
-xanadu::vagent::P16Ceremony *
+P16Ceremony *
 MeshActorRuntime::p16Ceremony(const ActorPid &pid) const {
   const auto *actor = find(pid);
   return actor ? actor->p16 : nullptr;
@@ -814,13 +813,13 @@ MeshActorRuntime::raiseP16Flag(const ActorPid &pid) {
   if (!actor || actor->stopped) {
     return std::unexpected(ActorError::UnknownProcess);
   }
-  actor->p16Flag = xanadu::vagent::P16Flag::Raised;
+  actor->p16Flag = P16Flag::Raised;
   return {};
 }
 
-xanadu::vagent::P16Flag MeshActorRuntime::p16Flag(const ActorPid &pid) const {
+P16Flag MeshActorRuntime::p16Flag(const ActorPid &pid) const {
   const auto *actor = find(pid);
-  return actor ? actor->p16Flag : xanadu::vagent::P16Flag::Clear;
+  return actor ? actor->p16Flag : P16Flag::Clear;
 }
 std::optional<CellRef>
 MeshActorRuntime::localCursor(const ActorPid &pid) const {

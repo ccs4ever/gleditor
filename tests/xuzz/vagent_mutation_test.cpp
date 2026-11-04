@@ -10,6 +10,7 @@
 #include "common/xanadu/vagent/frontend.hpp"
 #include "common/xanadu/vagent/meta.hpp"
 #include "common/xanadu/vagent/parser.hpp"
+#include "common/xanadu/vagent/records.hpp"
 
 namespace {
 using namespace xanadu::vagent;
@@ -855,6 +856,78 @@ TEST(VagentMutationTest, SproutSynapseShape) {
     EXPECT_TRUE(seen) << key;
   }
   EXPECT_EQ(h.rt().weightOf(*junction), 0.5);
+}
+
+// A covered recipe member naming a *persistent* image-side position is
+// internal — the closed walk must not mistake it for an outbound
+// program-side edge. An image-resident `code"…"` head records exactly this
+// shape (its members sit at ≤ imageExtent); the ephemeral-only internal
+// set regressed it to a false refusal.
+TEST(VagentMutationTest, VerifyClosedTreatsPersistentCoveredMemberAsInternal) {
+  MutationHarness h(true);
+  const auto head = mintFragmentHead(h, OpcodeKind::Return, "f", true, "Bool");
+  // Append a recipe member storing a persistent position inside the image
+  // band (≤ imageExtent) to the recipe's +d.step tail — a covered cell an
+  // image-resident fragment legitimately names.
+  const auto covered = h.arena.makeScalarCell(std::int64_t{2});
+  auto tail          = *h.arena.linked(head.head, h.binds.dims.recipe, Posward);
+  for (auto next = h.arena.linked(tail, h.core.dims().step, Posward);
+       next && h.arena.contains(*next);
+       next = h.arena.linked(tail, h.core.dims().step, Posward))
+    tail = *next;
+  zigzag::expectWritten(
+      h.arena.link(tail, h.core.dims().step, Posward, covered));
+  // Its ref-record marks the member — the closed walk resolves pos=2 to
+  // internal, not "outbound edge to program-side cell".
+  appendRefs(h, head.head, refRecord(h, covered, std::nullopt, std::nullopt));
+  const auto report = h.rt().verifyClosed(head.head);
+  EXPECT_TRUE(report.closed) << report.detail;
+}
+
+// The converse: a recipe member that is NOT covered — a bare program-side
+// referent a caller smuggles onto the refs chain — is refused. Positions
+// the recipe never covered stay outbound.
+TEST(VagentMutationTest, VerifyClosedRefusesUncoveredProgramSideMember) {
+  MutationHarness h(true);
+  const auto demo = h.mintModule("demo");
+  (void)h.mintSymbol(demo, "Feed");
+  const auto head = mintFragmentHead(h, OpcodeKind::Return, "f", true, "Bool");
+  // A ref-record marking a member whose pos names a program-side cell the
+  // recipe never covered — outbound, refused.
+  const auto smuggled =
+      h.arena.makeScalarCell(static_cast<std::int64_t>(demo));
+  appendRefs(h, head.head, refRecord(h, smuggled, std::nullopt, std::nullopt));
+  const auto report = h.rt().verifyClosed(head.head);
+  EXPECT_FALSE(report.closed);
+  EXPECT_NE(report.detail.find("outbound"), std::string::npos)
+      << report.detail;
+}
+
+// A malformed patch/vars field parses to nullopt rather than throwing —
+// the std::stoll site it replaced crashed genesis mid-ceremony on a
+// non-numeric record.
+TEST(VagentMutationTest, ToInt64RefusesMalformedText) {
+  EXPECT_EQ(toInt64("42"), 42);
+  EXPECT_EQ(toInt64("-7"), -7);
+  EXPECT_EQ(toInt64("0"), 0);
+  EXPECT_FALSE(toInt64("notanumber").has_value());
+  EXPECT_FALSE(toInt64("12abc").has_value()); // trailing junk rejected
+  EXPECT_FALSE(toInt64("").has_value());
+  EXPECT_FALSE(toInt64("  9").has_value()); // no whitespace tolerance
+}
+
+// The recipe's `±1` direction flag is a field value, not a referent —
+// verifyClosed must not read it as an outbound edge to the home cell,
+// nor must it count pos=1/pos=-1 covered.
+TEST(VagentMutationTest, VerifyClosedDirectionFlagIsNotAReferent) {
+  MutationHarness h(true);
+  const auto head = mintFragmentHead(h, OpcodeKind::Return, "f", true, "Bool");
+  // mark the direction member itself (pos=1) — it should classify as a
+  // direction field, never "outbound edge to program-side cell 1".
+  const auto dirMember = h.arena.makeScalarCell(std::int64_t{1});
+  appendRefs(h, head.head, refRecord(h, dirMember, std::nullopt, std::nullopt));
+  const auto report = h.rt().verifyClosed(head.head);
+  EXPECT_TRUE(report.closed) << report.detail;
 }
 
 TEST(VagentMutationTest, LearnHandlerIsAdditiveWithPriority) {

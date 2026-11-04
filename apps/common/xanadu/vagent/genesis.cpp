@@ -9,7 +9,6 @@
 #include "common/xanadu/vagent/genesis.hpp"
 
 #include <bit>
-#include <charconv>
 #include <format>
 #include <set>
 #include <string>
@@ -21,6 +20,7 @@
 #include "common/xanadu/scroll.hpp"
 #include "common/xanadu/spool.hpp"
 #include "common/xanadu/vagent/lineage.hpp"
+#include "common/xanadu/vagent/records.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
 #include "common/xanadu/zigzag/manifold.hpp"
 
@@ -33,98 +33,9 @@ using zigzag::Negward;
 using zigzag::Posward;
 
 // ---------------------------------------------------------------------------
-// Rank/record helpers — meta.cpp's private shapes, needed here at ceremony
-// distance: same structure, local copies (meta.cpp is a sibling TU's lane).
+// Rank/record helpers come from records.hpp — the `+d.vars`/`+d.patch`/
+// `+d.recipe` shapes shared with meta.cpp.
 // ---------------------------------------------------------------------------
-
-/// The `+d.step`-linked chain that follows a single lead edge — the
-/// `d.refs`/`d.recipe`/`d.patch-head` shape.
-[[nodiscard]] std::vector<CellRef> stepChain(zigzag::ArenaManifold &arena,
-                                             CellRef origin, DimRef leadDim,
-                                             DimRef step) {
-  std::vector<CellRef> out;
-  for (auto cell = arena.linked(origin, leadDim, Posward);
-       cell && arena.contains(*cell); cell = arena.linked(*cell, step, Posward))
-    out.push_back(*cell);
-  return out;
-}
-
-/// Unlink @p cell off a same-dim rank with predecessor→successor repair
-/// (the `prune`/`unlearn` unlink idiom).
-void unlinkRank(zigzag::ArenaManifold &arena, CellRef cell, DimRef dim) {
-  const auto pred = arena.linked(cell, dim, Negward);
-  const auto succ = arena.linked(cell, dim, Posward);
-  if (succ) zigzag::expectWritten(arena.unlink(cell, dim, Posward));
-  if (pred) {
-    if (succ)
-      zigzag::expectWritten(arena.link(*pred, dim, Posward, succ));
-    else
-      zigzag::expectWritten(arena.unlink(*pred, dim, Posward));
-  }
-}
-
-/// Parse a patch-record field as int64. `std::stoll` throws on a malformed
-/// record — a crash mid-ceremony — so fields read through this stay a
-/// `std::nullopt` the caller can fall back or fault on.
-[[nodiscard]] std::optional<std::int64_t>
-toInt64(std::string_view text) noexcept {
-  std::int64_t value   = 0;
-  const auto *first    = text.data();
-  const auto *last     = first + text.size();
-  const auto [ptr, ec] = std::from_chars(first, last, value);
-  if (ec != std::errc{} || ptr != last) return std::nullopt;
-  return value;
-}
-
-/// Mint or find the `+d.vars` record keyed @p key on @p owner.
-[[nodiscard]] std::optional<CellRef> varsRecord(zigzag::ArenaManifold &arena,
-                                                VortexCore &core, CellRef owner,
-                                                std::string_view key,
-                                                bool mint) {
-  const auto vars = core.dims().vars;
-  for (const auto record : zigzag::rankAfter(arena, owner, vars))
-    if (arena.textOf(record) == key) return record;
-  if (!mint) return std::nullopt;
-  const auto record = arena.makeCell(key);
-  zigzag::expectWritten(
-      arena.link(zigzag::rankTail(arena, owner, vars), vars, Posward, record));
-  return record;
-}
-
-/// A patch record's field text/int: `descriptor` selects the `+d.values`
-/// descriptor's `d.vars` chain (target/verb/parent), false selects the
-/// patch cell's own (ordinal/alias/priority).
-[[nodiscard]] std::optional<std::string>
-patchField(zigzag::ArenaManifold &arena, VortexCore &core, CellRef patch,
-           std::string_view key, bool descriptor) {
-  const auto owner = descriptor
-                         ? arena.linked(patch, core.dims().values, Posward)
-                         : std::optional{patch};
-  if (!owner || !arena.contains(*owner)) return std::nullopt;
-  for (const auto record : zigzag::rankAfter(arena, *owner, core.dims().vars)) {
-    if (arena.textOf(record) == key) {
-      const auto value = arena.linked(record, core.dims().values, Posward);
-      if (!value) return std::nullopt;
-      if (const auto number = arena.asInt64(*value))
-        return std::to_string(*number);
-      return arena.textOf(*value);
-    }
-  }
-  return std::nullopt;
-}
-
-/// The `+d.patch-head` chain's recorded head names, in order.
-[[nodiscard]] std::vector<std::string>
-patchHeadNames(zigzag::ArenaManifold &arena, VortexCore &core, CellRef patch,
-               DimRef patchHead) {
-  std::vector<std::string> names;
-  for (const auto record :
-       stepChain(arena, patch, patchHead, core.dims().step)) {
-    const auto name = arena.linked(record, core.dims().values, Posward);
-    names.emplace_back(name ? arena.textOf(*name) : std::string{});
-  }
-  return names;
-}
 
 /// `ensureDimension`'s resolution with meta.cpp's two-table arm: the
 /// core's `d.dims` rank first (where rank-filed names live), then the
@@ -141,12 +52,6 @@ resolveDimension(zigzag::ArenaManifold &arena, VortexCore &core,
                     "minted under live marks",
                     name));
   return arena.ensureDimension(name);
-}
-
-/// `writeInt` — an int64 value write leaving content alone.
-void writeInt(zigzag::ArenaManifold &arena, CellRef cell, std::int64_t value) {
-  zigzag::expectWritten(arena.setValueBits(
-      cell, xanadu::ValueKind::Int64, std::bit_cast<std::uint64_t>(value)));
 }
 
 // ---------------------------------------------------------------------------
@@ -571,16 +476,17 @@ runGenesis(const xanadu::Store &lineage, const xanadu::Store &received,
   // (a) — lineage bind: the pairwise band comparand runs before any
   // root resolves; a permuted, foreign or prefix-less received band
   // fails closed.
-  if (roots.imageExtent == 0)
+  if (!roots.imageExtent)
     return std::unexpected(
         "genesis: the roots record names no image extent — nothing to "
         "bind a lineage against");
-  if (const auto ok = verifyLineageBand(lineage, received, roots.imageExtent);
+  if (const auto ok =
+          verifyLineageBand(lineage, received, *roots.imageExtent);
       !ok)
     return std::unexpected(ok.error());
 
   GenesisOutcome out;
-  out.opsCompared = roots.imageExtent;
+  out.opsCompared = *roots.imageExtent;
 
   // Root sanity before (b): a root naming no cell of the received fold
   // is a bind refusal — every later arm resolves through it.
@@ -603,7 +509,7 @@ runGenesis(const xanadu::Store &lineage, const xanadu::Store &received,
   // programRef is an image-side ref: a persistent position inside the
   // band — an ephemeral ref or one past the extent is no lineage.
   if (zigzag::isEphemeral(roots.programRoot) ||
-      roots.programRoot > roots.imageExtent)
+      roots.programRoot > *roots.imageExtent)
     return std::unexpected(
         "genesis (c): program root is not an image-side persistent ref");
 
@@ -633,7 +539,7 @@ runGenesis(const xanadu::Store &lineage, const xanadu::Store &received,
   binds->ownModule = roots.ownModule;
   binds->lineage   = MetaLineage{
       .programRef  = roots.programRoot,
-      .imageExtent = roots.imageExtent,
+      .imageExtent = *roots.imageExtent,
   };
   out.binds = *binds;
 

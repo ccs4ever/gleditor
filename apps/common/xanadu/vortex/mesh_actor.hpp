@@ -18,14 +18,15 @@ namespace xanadu {
 class ContentSource;
 class SpanReader;
 class Store;
-namespace vagent {
+} // namespace xanadu
+
+namespace zigzag::vortex {
 class P16Ceremony;
 // Opaque-enum declaration: the fixed underlying type makes P16Flag a
 // complete type for members and by-value signatures; the enumerators stay
-// in vagent/p16.hpp, which the adapter includes.
+// in vortex/p16_ceremony.hpp, which the adapter includes.
 enum class P16Flag : std::uint8_t;
-}
-} // namespace xanadu
+} // namespace zigzag::vortex
 
 namespace zigzag::vortex::mesh {
 
@@ -224,16 +225,15 @@ public:
   /// from inside the Executor callback. The runtime calls its hooks at the
   /// contract windows around the flagged turn; it never constructs one.
   [[nodiscard]] std::expected<MeshActorRuntime *, ActorError>
-  setP16Ceremony(const ActorPid &pid, xanadu::vagent::P16Ceremony *ceremony);
-  [[nodiscard]] xanadu::vagent::P16Ceremony *
-  p16Ceremony(const ActorPid &pid) const;
+  setP16Ceremony(const ActorPid &pid, P16Ceremony *ceremony);
+  [[nodiscard]] P16Ceremony *p16Ceremony(const ActorPid &pid) const;
   /// Arms the relocate-before-checkpoint flag — the adapter's half of the
   /// request step: set when the next turn is the one whose end publishes.
   /// Re-arming while Checkpoint is pending is allowed; the pending
   /// restore still drains first at the next turn's head.
   [[nodiscard]] std::expected<void, ActorError>
   raiseP16Flag(const ActorPid &pid);
-  [[nodiscard]] xanadu::vagent::P16Flag p16Flag(const ActorPid &pid) const;
+  [[nodiscard]] P16Flag p16Flag(const ActorPid &pid) const;
 
   [[nodiscard]] std::expected<void, ActorError>
   send(std::string destinationNode, ActorMessage message);

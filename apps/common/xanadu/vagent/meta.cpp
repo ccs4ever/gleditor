@@ -1,5 +1,7 @@
 #include "common/xanadu/vagent/meta.hpp"
 
+#include "common/xanadu/vagent/records.hpp"
+
 #include <bit>
 #include <deque>
 #include <format>
@@ -314,14 +316,7 @@ std::optional<CellRef> MetaRuntime::graphRoot(CellRef attach) const {
 
 std::optional<CellRef>
 MetaRuntime::varsRecord(CellRef owner, std::string_view key, bool mint) const {
-  const auto vars = core_.dims().vars;
-  for (const auto record : zigzag::rankAfter(arena(), owner, vars))
-    if (arena().textOf(record) == key) return record;
-  if (!mint) return std::nullopt;
-  const auto record = arena().makeCell(key);
-  zigzag::expectWritten(arena().link(zigzag::rankTail(arena(), owner, vars),
-                                     vars, Posward, record));
-  return record;
+  return vagent::varsRecord(arena(), core_, owner, key, mint);
 }
 
 void MetaRuntime::markUnlearned(std::string_view label) const {
@@ -758,9 +753,6 @@ MetaRunOutcome MetaRuntime::runFragment(CellRef head,
     zigzag::expectWritten(arena.link(cur, dims.vars, Posward, variable));
   }
 
-  vm_.setCursorOpcode(cur, *entry);
-  const auto outcome = vm_.run(cur, maxCycles);
-
   // `run` is an observation — a caller-supplied cursor must survive it
   // unchanged. The bound args always sit on `+d.vars` afterward, and a
   // faulted run never reaches the Return that pops the frame, so both ranks
@@ -771,8 +763,22 @@ MetaRunOutcome MetaRuntime::runFragment(CellRef head,
     else
       zigzag::expectWritten(arena.unlink(cur, dim, Posward));
   };
-  restoreRank(dims.stack, priorStack);
-  restoreRank(dims.vars, priorVars);
+  const auto restore = [&] {
+    restoreRank(dims.stack, priorStack);
+    restoreRank(dims.vars, priorVars);
+  };
+
+  vm_.setCursorOpcode(cur, *entry);
+  zigzag::vortex::ExecutionResult outcome;
+  try {
+    outcome = vm_.run(cur, maxCycles);
+  } catch (...) {
+    // A thrown fault (budget exhaustion, an arena invariant) must not
+    // strand the pushed frame and bound args on a caller's cursor.
+    restore();
+    throw;
+  }
+  restore();
 
   const auto produced = arena.asBool(*producedCell).value_or(false);
   MetaRunOutcome report;
@@ -880,10 +886,7 @@ std::expected<CellRef, std::string> MetaRuntime::reify(CellRef head) {
     return twin;
   };
   const auto writeInt = [&](CellRef cell, std::int64_t value) {
-    // Arena cells carry no clone-master indirection — setValueBits
-    // takes the cell itself.
-    zigzag::expectWritten(arena.setValueBits(
-        cell, xanadu::ValueKind::Int64, std::bit_cast<std::uint64_t>(value)));
+    vagent::writeInt(arena, cell, value);
   };
   const auto mapped = [&](CellRef source) {
     const auto found = fresh.find(source);
@@ -1133,18 +1136,6 @@ programVocabulary(const xanadu::vagent::MetaBindSet &binds,
   return vocab;
 }
 
-/// The `+d.step`-linked chain that follows a single lead edge — the
-/// `d.refs`/`d.recipe`/`d.patch-head` shape.
-[[nodiscard]] std::vector<CellRef> stepChain(zigzag::ArenaManifold &arena,
-                                             CellRef host, DimRef lead,
-                                             DimRef step) {
-  std::vector<CellRef> out;
-  for (auto cell                           = arena.linked(host, lead, Posward);
-       cell && arena.contains(*cell); cell = arena.linked(*cell, step, Posward))
-    out.push_back(*cell);
-  return out;
-}
-
 } // namespace
 
 MetaRuntime::MetaSignature MetaRuntime::signatureOf(CellRef head) const {
@@ -1324,18 +1315,7 @@ MetaRuntime::matchAttach(CellRef clause, DimRef dim, CellRef head,
 }
 
 void MetaRuntime::unlinkRank(CellRef cell, DimRef dim) const {
-  auto &arena     = core_.arena();
-  const auto pred = arena.linked(cell, dim, Negward);
-  const auto succ = arena.linked(cell, dim, Posward);
-  // Drop the cell's forward edge first so the successor's backlink is
-  // free before the predecessor repair rewires it.
-  if (succ) zigzag::expectWritten(arena.unlink(cell, dim, Posward));
-  if (pred) {
-    if (succ)
-      zigzag::expectWritten(arena.link(*pred, dim, Posward, *succ));
-    else
-      zigzag::expectWritten(arena.unlink(*pred, dim, Posward));
-  }
+  vagent::unlinkRank(arena(), cell, dim);
 }
 
 MetaRuntime::MetaMutation MetaRuntime::graftWhere(CellRef clause,
@@ -1626,31 +1606,11 @@ MetaRuntime::MetaMutation MetaRuntime::registerHead(CellRef head) const {
 std::optional<std::string> MetaRuntime::patchField(CellRef patch,
                                                    std::string_view key,
                                                    bool descriptor) const {
-  auto &arena      = core_.arena();
-  const auto owner = descriptor
-                         ? arena.linked(patch, core_.dims().values, Posward)
-                         : std::optional{patch};
-  if (!owner || !arena.contains(*owner)) return std::nullopt;
-  for (const auto record : zigzag::rankAfter(arena, *owner, core_.dims().vars))
-    if (arena.textOf(record) == key) {
-      const auto value = arena.linked(record, core_.dims().values, Posward);
-      if (!value) return std::nullopt;
-      if (const auto number = arena.asInt64(*value))
-        return std::to_string(*number);
-      return arena.textOf(*value);
-    }
-  return std::nullopt;
+  return vagent::patchField(arena(), core_, patch, key, descriptor);
 }
 
 std::vector<std::string> MetaRuntime::patchHeadNames(CellRef patch) const {
-  auto &arena = core_.arena();
-  std::vector<std::string> names;
-  for (const auto record :
-       stepChain(arena, patch, binds_.dims.patchHead, core_.dims().step)) {
-    const auto name = arena.linked(record, core_.dims().values, Posward);
-    names.emplace_back(name ? arena.textOf(*name) : std::string{});
-  }
-  return names;
+  return vagent::patchHeadNames(arena(), core_, patch, binds_.dims.patchHead);
 }
 
 std::optional<std::string>
@@ -1950,13 +1910,16 @@ MetaRuntime::MetaMutation MetaRuntime::undoPatch(CellRef patch) {
     // A patch whose install can no longer be resolved is dead — drop
     // it and leave a ConditionFault-shaped fault record on the agent,
     // the way a dropped d.patch names its own failure.
+    const auto label = labelOf(patch).value_or("");
     unlinkRank(patch, binds_.dims.patch);
     if (const auto rec =
-            varsRecord(binds_.agentCell,
-                       std::format("fault:{}", labelOf(patch).value_or("")),
+            varsRecord(binds_.agentCell, std::format("fault:{}", label),
                        /*mint=*/true))
       zigzag::expectWritten(arena.link(*rec, core_.dims().values, Posward,
                                        arena.makeCell(std::string{why})));
+    // The unlink resurrects at the next fold like every removal — without
+    // the unlearn tombstone a clause sharing `patch:<n>` comes back live.
+    markUnlearned(label);
     return std::unexpected(
         std::format("unlearn: dead patch dropped — {}", why));
   };
@@ -2126,18 +2089,20 @@ MetaClosedReport MetaRuntime::verifyClosed(CellRef head) const {
   // The recipe-covered internal set: the positions members name as covered
   // cells — literals, tuple endpoints, capture slots — plus the head.
   // Ref-records whose marked cell resolves inside it are internal by
-  // construction. Only *ephemeral* positions join: a `±1` direction flag and
-  // a persistent dim-anchor are program-side apparatus, and letting `1`
-  // (the home cell) or a low dim ref count as covered would hand an
-  // outbound program-side referent a free pass through the check below.
+  // construction. Covered positions are persistent *or* ephemeral — an
+  // image-resident fragment's members name image-side cells — so ephemerality
+  // cannot discriminate; the lone non-position is the `±1` direction flag.
   std::set<CellRef> internal{head};
   std::map<CellRef, CellRef> captureFor;
   for (const auto member :
        stepChain(arena, head, binds_.dims.recipe, core_.dims().step)) {
     if (const auto slot = arena.linked(member, binds_.dims.refFor, Posward))
       captureFor[*slot] = member;
+    // Every member value is a covered position — persistent or ephemeral
+    // alike (an image-resident fragment's members name image-side cells) —
+    // except the link-tuple direction flag, the lone member storing ±1.
     if (const auto pos = arena.asInt64(member))
-      if (*pos >= 0 && zigzag::isEphemeral(static_cast<CellRef>(*pos)))
+      if (*pos != 1 && *pos != -1)
         internal.insert(static_cast<CellRef>(*pos));
   }
 

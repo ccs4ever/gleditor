@@ -58,8 +58,9 @@ using Actuals = std::map<BindingId, const Expr *>;
 struct Substitution {
   const std::vector<Parameter> *params{};
   // The expand-minted scope id parameter references carry — the record's
-  // canonical param identity, shared by every clone of the body.
-  std::uint64_t paramScope{~0ull};
+  // canonical param identity, shared by every clone of the body. Absent
+  // for a body declaring no parameters.
+  std::optional<std::uint64_t> paramScope;
   std::map<std::size_t, std::string> letNames;
   std::map<std::size_t, ScopeStamp> letStamps;
   std::map<std::size_t, const Expr *> actuals;
@@ -73,16 +74,13 @@ struct Substitution {
 // template Code-parameter actuals; `enclosingParams` is the enclosing
 // literal bodies' parameter lists, innermost first — a name in one is an
 // outer fragment parameter, resolvable only through the subst chain.
-// `watermark` is the current body's scope watermark: binding stamps with
-// scope above it are body-internal.
 struct Site {
   const Decl *owner{};
   const std::vector<Parameter> *params{};
-  std::uint64_t paramScope{~0ull};
+  std::optional<std::uint64_t> paramScope;
   std::shared_ptr<const Substitution> subst;
   const Actuals *actuals{};
   std::vector<const std::vector<Parameter> *> enclosingParams;
-  std::uint64_t watermark{~0ull};
   LiteralChain chain;
   std::size_t depth{};
   Expr *currentBlock{};
@@ -465,7 +463,9 @@ private:
       case ExprKind::LogicVariable: {
         if (node.text.starts_with("cap$")) return;
         if (const auto index = paramIndex(node)) {
-          node.stamp = ScopeStamp{meta.paramScope, *index};
+          // A matched parameter means the body declared params, so the
+          // canonical scope was minted for it.
+          node.stamp = ScopeStamp{*meta.paramScope, *index};
           return;
         }
         if (outside(node)) {
@@ -610,7 +610,6 @@ private:
     if (site.params)
       body.enclosingParams.insert(body.enclosingParams.begin(),
                                   site.params);
-    body.watermark  = meta.scopeWatermark;
     body.chain      = chain;
     body.depth      = site.depth + 1;
     body.insideBody = true;
@@ -855,6 +854,59 @@ private:
   // bindings §5.4 requires at its head, the parameter references
   // re-pointed, and the body's own nested splices expanded where it
   // lands.
+  // Judge every Code parameter's actual through the same transitive
+  // fragment judgment, recording fragment actuals on `subst`. Returns
+  // (pending, failed): a Pending actual defers to the enclosing
+  // template's instantiation, a non-Fragment fails already reported.
+  template <typename Context>
+  std::pair<bool, bool>
+  judgeCodeActuals(Substitution &subst, Expr &node,
+                   const std::vector<Parameter> &params, Site &site,
+                   Context &&context) {
+    bool pending = false, failed = false;
+    for (std::size_t i = 0; i < params.size(); ++i) {
+      const auto &parameter = params[i];
+      ExprPtr &arg          = node.children[i + 1];
+      if (!codeType(parameter.type)) continue;
+      const Judged actual = judgeOperand(*arg, site, context(parameter.name));
+      if (actual.kind == Judged::Kind::Pending) {
+        pending = true;
+        continue;
+      }
+      if (actual.kind != Judged::Kind::Fragment) {
+        failed = true;
+        continue;
+      }
+      subst.actuals[i] = actual.literal;
+    }
+    return {pending, failed};
+  }
+
+  // One call-by-value `let p<k> := <arg>` — name, stamp, parent slot and
+  // SynthRecord minted together so a `splice` and a template call build
+  // the same binding shape for a value parameter.
+  ExprPtr synthesizeValueLet(Substitution &subst, Expr &node, std::size_t i,
+                             const Parameter &parameter,
+                             std::uint64_t synthScope, std::size_t synthOrd) {
+    ExprPtr &arg                = node.children[i + 1];
+    const std::string synthName = "p" + std::to_string(synthCounter_++);
+    const ScopeStamp synthStamp{synthScope, synthOrd};
+    auto let        = std::make_unique<Expr>();
+    let->kind       = ExprKind::Let;
+    let->text       = synthName;
+    let->loc        = node.loc;
+    let->annotation = parameter.type;
+    let->stamp      = ScopeStamp{synthScope, std::nullopt};
+    Expr *argNode   = arg.get();
+    let->children.push_back(std::move(arg));
+    parentSlot_[argNode] = &let->children.back();
+    subst.letNames[i]    = synthName;
+    subst.letStamps[i]   = synthStamp;
+    synthesized_.push_back(
+        SynthRecord{synthStamp, synthName, parameter.name, node.loc});
+    return let;
+  }
+
   void substitute(ExprPtr &slot, const Expr &literalExpr,
                   const Expr *consumed, Site &site) {
     Expr &node = *slot;
@@ -888,30 +940,16 @@ private:
     subst->params     = &record.body.parameters;
     subst->paramScope = meta.paramScope;
     subst->outer      = site.subst;
-    bool pending      = false;
-    bool failed       = false;
-    for (std::size_t i = 0; i < arity; ++i) {
-      const auto &parameter = record.body.parameters[i];
-      ExprPtr &arg          = node.children[i + 1];
-      if (!codeType(parameter.type)) continue;
-      // A Code actual must be statically known — the same transitive
-      // judgment as the splice operand itself. A pending actual makes
-      // the whole splice pending: it resolves where the enclosing
-      // template is instantiated.
-      const Judged actual =
-          judgeOperand(*arg, site,
-                       "splice argument for Code parameter '" +
-                           parameter.name + "'");
-      if (actual.kind == Judged::Kind::Pending) {
-        pending = true;
-        continue;
-      }
-      if (actual.kind != Judged::Kind::Fragment) {
-        failed = true;
-        continue;
-      }
-      subst->actuals[i] = actual.literal;
-    }
+    // A Code actual must be statically known — the same transitive
+    // judgment as the splice operand itself. A pending actual makes
+    // the whole splice pending: it resolves where the enclosing
+    // template is instantiated.
+    const auto [pending, failed] = judgeCodeActuals(
+        *subst, node, record.body.parameters, site,
+        [](std::string_view name) {
+          return "splice argument for Code parameter '" +
+                 std::string{name} + "'";
+        });
     // Pending resolves per-site inside a clone (or vanishes with the
     // template that owns it); failed already reported — neither should
     // see the residual scan's generic refusal.
@@ -924,26 +962,11 @@ private:
     std::vector<ExprPtr> lets;
     for (std::size_t i = 0; i < arity; ++i) {
       const auto &parameter = record.body.parameters[i];
-      ExprPtr &arg          = node.children[i + 1];
       if (codeType(parameter.type)) continue;
       // Call-by-value: one fresh `let p<k> := <arg>` per value argument,
       // evaluated once in argument order at the expanded body's head.
-      const std::string synthName = "p" + std::to_string(synthCounter_++);
-      const ScopeStamp synthStamp{synthScope, synthOrd++};
-      auto let        = std::make_unique<Expr>();
-      let->kind       = ExprKind::Let;
-      let->text       = synthName;
-      let->loc        = node.loc;
-      let->annotation = parameter.type;
-      let->stamp      = ScopeStamp{synthScope, std::nullopt};
-      Expr *argNode   = arg.get();
-      let->children.push_back(std::move(arg));
-      parentSlot_[argNode] = &let->children.back();
-      subst->letNames[i]   = synthName;
-      subst->letStamps[i]  = synthStamp;
-      synthesized_.push_back(
-          SynthRecord{synthStamp, synthName, parameter.name, node.loc});
-      lets.push_back(std::move(let));
+      lets.push_back(
+          synthesizeValueLet(*subst, node, i, parameter, synthScope, synthOrd++));
     }
     auto cloned = cloneExpr(*record.body.body);
     remapScopes(*cloned, meta.scopeWatermark, meta.paramScope);
@@ -958,7 +981,6 @@ private:
       sub.enclosingParams.insert(sub.enclosingParams.begin(),
                                  site.params);
     sub.enclosingParams.insert(sub.enclosingParams.begin(), sub.params);
-    sub.watermark  = meta.scopeWatermark;
     sub.chain      = site.chain;
     sub.depth      = site.depth + 1;
     sub.insideBody = true;
@@ -1029,7 +1051,7 @@ private:
   // fragment ordinals on Code nodes are untouched — (loc, ordinal)
   // resolves every clone of one literal to the original's record.
   void remapScopes(Expr &node, std::uint64_t watermark,
-                   std::uint64_t exempt) {
+                   std::optional<std::uint64_t> exempt) {
     std::map<std::uint64_t, std::uint64_t> remap;
     const auto visit = [&](this auto &&visit, Expr &node2) -> void {
       if (node2.stamp && node2.stamp->scope > watermark &&
@@ -1237,28 +1259,14 @@ private:
     }
     auto subst        = std::make_shared<Substitution>();
     subst->params     = &def->parameters;
-    subst->paramScope = s_d.value_or(~0ull);
+    subst->paramScope = s_d;
     subst->outer      = site.subst;
-    bool pending      = false;
-    bool failed       = false;
-    for (std::size_t i = 0; i < def->parameters.size(); ++i) {
-      const auto &parameter = def->parameters[i];
-      ExprPtr &arg          = node.children[i + 1];
-      if (!codeType(parameter.type)) continue;
-      const Judged actual =
-          judgeOperand(*arg, site,
-                       "Code argument '" + parameter.name + "' to '" +
-                           def->name + "'");
-      if (actual.kind == Judged::Kind::Pending) {
-        pending = true;
-        continue;
-      }
-      if (actual.kind != Judged::Kind::Fragment) {
-        failed = true;
-        continue;
-      }
-      subst->actuals[i] = actual.literal;
-    }
+    const auto [pending, failed] = judgeCodeActuals(
+        *subst, node, def->parameters, site,
+        [&](std::string_view name) {
+          return "Code argument '" + std::string{name} + "' to '" +
+                 def->name + "'";
+        });
     if (pending || failed) return;
     auto actuals = std::make_shared<Actuals>();
     const auto synthScope = ++seeds_.nextScope;
@@ -1266,27 +1274,12 @@ private:
     std::vector<ExprPtr> lets;
     for (std::size_t i = 0; i < def->parameters.size(); ++i) {
       const auto &parameter = def->parameters[i];
-      ExprPtr &arg          = node.children[i + 1];
       if (codeType(parameter.type)) {
         if (s_d) (*actuals)[BindingId{*s_d, i}] = subst->actuals.at(i);
         continue;
       }
-      const std::string synthName = "p" + std::to_string(synthCounter_++);
-      const ScopeStamp synthStamp{synthScope, synthOrd++};
-      auto let        = std::make_unique<Expr>();
-      let->kind       = ExprKind::Let;
-      let->text       = synthName;
-      let->loc        = node.loc;
-      let->annotation = parameter.type;
-      let->stamp      = ScopeStamp{synthScope, std::nullopt};
-      Expr *argNode   = arg.get();
-      let->children.push_back(std::move(arg));
-      parentSlot_[argNode] = &let->children.back();
-      subst->letNames[i]   = synthName;
-      subst->letStamps[i]  = synthStamp;
-      synthesized_.push_back(
-          SynthRecord{synthStamp, synthName, parameter.name, node.loc});
-      lets.push_back(std::move(let));
+      lets.push_back(
+          synthesizeValueLet(*subst, node, i, parameter, synthScope, synthOrd++));
     }
     auto cloned = cloneExpr(*def->body);
     // Parameter references re-point at the actuals and the synthesized

@@ -64,7 +64,9 @@ struct CaptureRecord {
 // position, and emits no head and no descriptor.
 struct FragmentMeta {
   std::uint64_t scopeWatermark{0};
-  std::uint64_t paramScope{~0ull};
+  // The canonical param scope id — absent when the literal declares no
+  // parameters (no scope is minted for an empty param list).
+  std::optional<std::uint64_t> paramScope;
   bool spliceOnly{false};
   // The body references an enclosing fragment body's parameter by name —
   // a frame-bound outside reference the alias map cannot express (the

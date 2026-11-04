@@ -86,8 +86,9 @@ struct GenesisRoots {
   CellRef ownModule{noCell};
   CellRef imageRecord{noCell};
   /// `E_ops` — the image band's op extent (the `MetaLineage::imageExtent`
-  /// the bind set's `≤` classification compares against).
-  std::uint32_t imageExtent{0};
+  /// the bind set's `≤` classification compares against). Absent names no
+  /// program image — genesis refuses to bind a lineage without one.
+  std::optional<std::uint32_t> imageExtent;
 };
 
 /// Per-arm tallies and the reconstructed bind set. `installedCopies`
