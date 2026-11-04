@@ -49,6 +49,13 @@ namespace zigzag::vortex {
  * hold one by pointer or in a node-stable container.
  */
 struct WorkerContext {
+  // Phase-6 pin shape: `baseManifold` is the folded lineage Manifold (the
+  // spawn/resume lineages inject it here, never a Store* — the arena
+  // reaches the fold's Store through base->store()), and `reader` is the
+  // lineage Store itself bound as the arena's default span reader.
+  // initGenesis's first-resolution runs inside `core`'s construction, so
+  // the fold must already carry its filed vocabulary at this point —
+  // mint/file → fold → pin/inject → first-resolution.
   explicit WorkerContext(const Manifold *baseManifold     = nullptr,
                          const xanadu::SpanReader *reader = nullptr)
       : arena(baseManifold), core(*arena.setDefaultSpanReader(reader)),

@@ -47,6 +47,9 @@ protected:
   WorkerContext *previousContext{};
   std::size_t resumedExecutions{};
   std::vector<ActorMessage> replies;
+  // [0] = spawn path, [1] = resume path — the genesis hook must run on both
+  // before any turn.
+  std::size_t genesisWires[2]{};
 
   ~MeshActorResumeTest() override { std::filesystem::remove_all(directory); }
 
@@ -79,6 +82,20 @@ protected:
       return true;
     });
     auto *runtimePointer = &runtime;
+    runtime.setGenesisHook(
+        [&, resuming](const ActorGenesis &genesis, WorkerContext &context)
+            -> std::expected<void, ActorError> {
+          ++genesisWires[resuming ? 1 : 0];
+          EXPECT_EQ(genesis.transported != nullptr, resuming);
+          if (resuming) {
+            // The retained lineage is the rebuild behind the fresh base —
+            // distinct from the transported comparand but the same content.
+            const auto *base = context.arena.base();
+            EXPECT_NE(base, nullptr);
+            EXPECT_NE(base->store(), nullptr);
+          }
+          return {};
+        });
     runtime.setExecutor(
         [&, resuming, runtimePointer](
             const ActorExecution &execution,
@@ -161,6 +178,7 @@ TEST_F(MeshActorResumeTest, ReactivationPreservesStateDedupAndChangesPid) {
   const auto pid = resumed.resume(owner, freshRequest(), std::move(*checkpoint),
                                   source, wall);
   ASSERT_TRUE(pid);
+  EXPECT_EQ(genesisWires[1], 1U);
   EXPECT_EQ(pid->node, "new-device-node");
   EXPECT_EQ(pid->epoch, 11);
   EXPECT_NE(*pid, continuation->pid);

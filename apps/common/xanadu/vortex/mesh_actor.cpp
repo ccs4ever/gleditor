@@ -2,6 +2,7 @@
 
 #include "common/xanadu/identity/identity_serialization.hpp"
 #include "common/xanadu/provenance.hpp"
+#include "common/xanadu/vagent/p16.hpp"
 #include "common/xanadu/vortex/mesh_checkpoint.hpp"
 #include "common/xanadu/vortex/mesh_value.hpp"
 
@@ -44,7 +45,14 @@ struct MeshActorRuntime::Actor {
   std::optional<CellRef> stateRoot;
   std::deque<std::pair<ActorMessage, std::size_t>> mailbox;
   std::size_t mailboxBytes{};
+  // P4 local wakes — counted, never mailbox entries: a queued wake owes
+  // one executor turn with an absent message and costs no slot.
+  std::size_t wakes{0};
   std::map<std::string, Remembered> remembered;
+  // P16 seam: the adapter-installed ceremony and the flag the pump drives
+  // around the flagged turn (vagent/p16.hpp).
+  xanadu::vagent::P16Ceremony *p16{nullptr};
+  xanadu::vagent::P16Flag p16Flag{xanadu::vagent::P16Flag::Clear};
   bool stopped{false};
   bool running{false};
 };
@@ -94,6 +102,10 @@ MeshActorRuntime *MeshActorRuntime::setSender(Sender sender) {
   sender_ = std::move(sender);
   return this;
 }
+MeshActorRuntime *MeshActorRuntime::setGenesisHook(GenesisHook hook) {
+  genesisHook_ = std::move(hook);
+  return this;
+}
 MeshActorRuntime *
 MeshActorRuntime::trustNode(std::string node,
                             xanadu::identity::Fingerprint identity) {
@@ -119,8 +131,13 @@ MeshActorRuntime::find(const ActorPid &pid) const {
 std::expected<ActorPid, ActorError>
 MeshActorRuntime::spawn(const xanadu::identity::Fingerprint &identity,
                         const ActorMessage &request,
-                        std::chrono::system_clock::time_point wallNow) {
+                        std::chrono::system_clock::time_point wallNow,
+                        std::optional<ActorLineage> lineage) {
   if (!request.isValid() || request.type != MessageType::ActorSpawn) {
+    return std::unexpected(ActorError::InvalidMessage);
+  }
+  if (lineage && lineage->base != nullptr &&
+      lineage->base->store() == nullptr) {
     return std::unexpected(ActorError::InvalidMessage);
   }
   const auto owner = trustedNodes_.find(request.source->node);
@@ -153,7 +170,13 @@ MeshActorRuntime::spawn(const xanadu::identity::Fingerprint &identity,
   actor->owner        = identity;
   actor->grant        = *grant;
   actor->spawnRequest = request;
-  actor->context      = std::make_unique<WorkerContext>();
+  // Phase-6 (i): the pin on the spawn lineage — the folded lineage
+  // manifold as the arena's base, the lineage Store as its span reader,
+  // both through the two-argument WorkerContext ctor before initGenesis's
+  // first-resolution ran inside VortexCore's construction.
+  actor->context = std::make_unique<WorkerContext>(
+      lineage ? lineage->base : nullptr,
+      lineage ? lineage->reader : nullptr);
   // The opaque handle is derived from immutable spawn identity, never from
   // an arena address. Restart epoch and monotonic sequence prevent ABA reuse.
   actor->pid         = ActorPid{node_, content, epoch_, nextSpawn_++};
@@ -174,6 +197,17 @@ MeshActorRuntime::spawn(const xanadu::identity::Fingerprint &identity,
     return std::unexpected(ActorError::ResourceLimit);
   }
   const auto pid = actor->pid;
+  if (genesisHook_) {
+    try {
+      if (const auto wired =
+              genesisHook_(ActorGenesis{pid, nullptr}, context);
+          !wired) {
+        return std::unexpected(wired.error());
+      }
+    } catch (const std::exception &) {
+      return std::unexpected(ActorError::ExecutionFailed);
+    }
+  }
   actors_.emplace(pidKey(pid), std::move(actor));
   spawns_.emplace(requestKey, std::pair{content, pid});
   return pid;
@@ -267,10 +301,12 @@ std::expected<ActorPid, ActorError> MeshActorRuntime::resume(
     actor->spawnRequest = request;
     actor->sourceLease  = std::move(sourceLease);
     actor->checkpoint   = std::make_unique<ReceivedValue>(std::move(*verified));
-    actor->context =
-        std::make_unique<WorkerContext>(actor->checkpoint->manifold.get());
+    // Same pin shape as the spawn lineage (phase-6 (ii)): the rebuilt fold
+    // as base, the rebuilt Store as the default span reader — both through
+    // the two-argument ctor rather than a post-construction bind.
+    actor->context = std::make_unique<WorkerContext>(
+        actor->checkpoint->manifold.get(), actor->checkpoint->store.get());
     auto &context = *actor->context;
-    context.arena.setDefaultSpanReader(actor->checkpoint->store.get());
     const auto initial = context.arena.cellCount();
     if (grant->maxCells >= ephemeralBit - initial) {
       return std::unexpected(ActorError::ResourceLimit);
@@ -293,6 +329,21 @@ std::expected<ActorPid, ActorError> MeshActorRuntime::resume(
       actor->remembered.emplace(
           record.requestId,
           Actor::Remembered{record.contentHash, std::move(response)});
+    }
+    if (genesisHook_) {
+      try {
+        // `checkpoint.store` is the caller-transported Store — the
+        // take-or-verify comparand; the retained lineage is the rebuild in
+        // `actor->checkpoint->store`, reachable from the hook as
+        // `context.arena.base()->store()`.
+        if (const auto wired = genesisHook_(
+                ActorGenesis{actor->pid, checkpoint.store.get()}, context);
+            !wired) {
+          return std::unexpected(wired.error());
+        }
+      } catch (const std::exception &) {
+        return std::unexpected(ActorError::ExecutionFailed);
+      }
     }
     const auto pid = actor->pid;
     actors_.emplace(pidKey(pid), std::move(actor));
@@ -458,15 +509,37 @@ MeshActorRuntime::receive(const xanadu::identity::Fingerprint &identity,
 
 std::expected<bool, ActorError>
 MeshActorRuntime::pumpOne(std::chrono::system_clock::time_point wallNow) {
+  namespace vagent = xanadu::vagent;
   for (auto &[key, actor] : actors_) {
-    if (actor->stopped || actor->mailbox.empty()) continue;
+    if (actor->stopped || (actor->mailbox.empty() && actor->wakes == 0)) {
+      continue;
+    }
     if (wallNow >= actor->grant.expiresAt) {
       actor->stopped = true;
       return std::unexpected(ActorError::NotAuthorized);
     }
-    auto [message, size] = std::move(actor->mailbox.front());
-    actor->mailbox.pop_front();
-    actor->mailboxBytes -= size;
+    std::optional<ActorMessage> message;
+    if (actor->mailbox.empty()) {
+      // P4 wake: a queued wake consumes no mailbox slot and carries no
+      // request id — the executor sees `message` absent and no reply is
+      // owed. The same lease check above already applied.
+      --actor->wakes;
+    } else {
+      auto [popped, size] = std::move(actor->mailbox.front());
+      actor->mailbox.pop_front();
+      actor->mailboxBytes -= size;
+      message = std::move(popped);
+    }
+    // Sole-queued per the P16 contract: pending(pid)==0 after the pop —
+    // the flag-time "pending==1" test the adapter sampled before arming.
+    const bool soleQueued = actor->mailbox.empty();
+    if (actor->p16Flag == vagent::P16Flag::Checkpoint) {
+      // A restore pending from an aborted flagged window drains at the
+      // head of the next turn; the ceremony's kind guard makes it
+      // idempotent when nothing stayed re-kinded.
+      if (actor->p16) actor->p16->restoreAll();
+      actor->p16Flag = vagent::P16Flag::Clear;
+    }
     std::expected<std::string, ActorError> result =
         std::unexpected(ActorError::ExecutionFailed);
     actor->running = true;
@@ -481,24 +554,68 @@ MeshActorRuntime::pumpOne(std::chrono::system_clock::time_point wallNow) {
     if (result && result->size() > actor->grant.maxOutputBytes) {
       result = std::unexpected(ActorError::ResourceLimit);
     }
-    ActorMessage response;
-    response.type =
-        result ? MessageType::ActorDeliverValue : MessageType::ActorDown;
-    response.requestId = message.requestId;
-    response.source    = actor->pid;
-    response.target    = message.source;
-    if (result)
-      response.value = std::move(*result);
-    else
-      response.reason = "execution failed";
-    // Result delivery and monitor notifications are mailbox events, never
-    // requests for another result. Replying to replies creates an unbounded
-    // ping-pong between otherwise bounded actors.
-    if (message.type == MessageType::ActorSend) {
-      actor->remembered.at(message.requestId).response = response;
-      if (message.source) emit(message.source->node, response);
+    // P16 end-of-turn windows (spec :2163-2179): only a flagged turn that
+    // was sole-queued when it ran counts; the hooks run inside this
+    // executor-callback frame so the ceremony's synchronous publish cannot
+    // be interleaved by another turn of either kind.
+    if (result && soleQueued && actor->p16 != nullptr &&
+        actor->p16Flag == vagent::P16Flag::Raised) {
+      bool rekinded = false;
+      try {
+        rekinded = actor->p16->onFlagged();
+      } catch (const std::exception &) {
+        rekinded = false;
+      }
+      if (rekinded) {
+        actor->p16Flag = vagent::P16Flag::Checkpoint;
+        if (actor->mailbox.empty()) {
+          // The pending(pid)==0 re-check passed; a self-send inside the
+          // flagged turn is the veto this samples for.
+          bool published = false;
+          try {
+            published = actor->p16->onFlaggedTurnEnd().has_value();
+          } catch (const std::exception &) {
+            published = false;
+          }
+          if (published) {
+            actor->p16Flag = vagent::P16Flag::Clear;
+          } else {
+            // Publish refused or failed: restore what the re-kind touched
+            // and keep the flag armed for the next attempt.
+            actor->p16->restoreAll();
+            actor->p16Flag = vagent::P16Flag::Raised;
+          }
+        } else {
+          actor->p16->restoreAll();
+          actor->p16Flag = vagent::P16Flag::Raised;
+        }
+      } else {
+        actor->p16->restoreAll();
+      }
     }
-    if (!result) actor->stopped = true;
+    if (message && message->type == MessageType::ActorSend) {
+      ActorMessage response;
+      response.type =
+          result ? MessageType::ActorDeliverValue : MessageType::ActorDown;
+      response.requestId = message->requestId;
+      response.source    = actor->pid;
+      response.target    = message->source;
+      if (result)
+        response.value = std::move(*result);
+      else
+        response.reason = "execution failed";
+      // Result delivery and monitor notifications are mailbox events,
+      // never requests for another result. Replying to replies creates an
+      // unbounded ping-pong between otherwise bounded actors.
+      actor->remembered.at(message->requestId).response = response;
+      if (message->source) emit(message->source->node, response);
+    }
+    if (!result) {
+      // ActorDown clears the flag outright — a stopped actor never
+      // re-enters pumpOne, so no restore is owed.
+      actor->p16Flag = vagent::P16Flag::Clear;
+      actor->stopped = true;
+    }
     return true;
   }
   return false;
@@ -660,6 +777,51 @@ std::size_t MeshActorRuntime::pending(const ActorPid &pid) const {
   const auto *actor = find(pid);
   return actor ? actor->mailbox.size() : 0;
 }
+
+std::expected<void, ActorError>
+MeshActorRuntime::wake(const ActorPid &pid) {
+  auto *actor = find(pid);
+  if (!actor || actor->stopped) {
+    return std::unexpected(ActorError::UnknownProcess);
+  }
+  ++actor->wakes;
+  return {};
+}
+
+std::size_t MeshActorRuntime::pendingWakes(const ActorPid &pid) const {
+  const auto *actor = find(pid);
+  return actor ? actor->wakes : 0;
+}
+
+std::expected<MeshActorRuntime *, ActorError>
+MeshActorRuntime::setP16Ceremony(const ActorPid &pid,
+                                 xanadu::vagent::P16Ceremony *const ceremony) {
+  auto *actor = find(pid);
+  if (!actor) return std::unexpected(ActorError::UnknownProcess);
+  actor->p16 = ceremony;
+  return this;
+}
+
+xanadu::vagent::P16Ceremony *
+MeshActorRuntime::p16Ceremony(const ActorPid &pid) const {
+  const auto *actor = find(pid);
+  return actor ? actor->p16 : nullptr;
+}
+
+std::expected<void, ActorError>
+MeshActorRuntime::raiseP16Flag(const ActorPid &pid) {
+  auto *actor = find(pid);
+  if (!actor || actor->stopped) {
+    return std::unexpected(ActorError::UnknownProcess);
+  }
+  actor->p16Flag = xanadu::vagent::P16Flag::Raised;
+  return {};
+}
+
+xanadu::vagent::P16Flag MeshActorRuntime::p16Flag(const ActorPid &pid) const {
+  const auto *actor = find(pid);
+  return actor ? actor->p16Flag : xanadu::vagent::P16Flag::Clear;
+}
 std::optional<CellRef>
 MeshActorRuntime::localCursor(const ActorPid &pid) const {
   const auto *actor = find(pid);
@@ -670,7 +832,7 @@ MeshActorRuntime::checkpointView(const ActorPid &pid, CellRef stateRoot) const {
   const auto *actor = find(pid);
   if (!actor) return std::unexpected(ActorError::UnknownProcess);
   if (actor->stopped || actor->running || !actor->mailbox.empty() ||
-      actor->context->vm.choiceDepth() != 0 ||
+      actor->wakes != 0 || actor->context->vm.choiceDepth() != 0 ||
       actor->context->arena.outstandingMarks() != 0 ||
       !actor->context->arena.contains(stateRoot)) {
     return std::unexpected(ActorError::NotQuiescent);

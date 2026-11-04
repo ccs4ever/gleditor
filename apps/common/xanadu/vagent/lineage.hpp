@@ -85,29 +85,35 @@ struct LineageStore {
 };
 
 /// Construct and seed the lineage store: historyFromSeal over the
-/// artifact's sealed ops (Store() with no id — publication.cpp:1097),
-/// then setContentSource + bindPublishedLocalScroll(addScroll(from))
+/// artifact's sealed ops, then setContentSource +
+/// bindPublishedLocalScroll(addScroll(from))
 /// (publication.cpp:1129-1131; store.cpp:1418/:1425) — without the
 /// pair, artifact-local span names dead-read "".
 ///
-/// @param segments the sealableOps() segments, oldest first.
-/// @param from     the scroll the ops were sealed beside — what their
-///                 ScrollId zero means.
-/// @param scrolls  the seal's scroll table (foreign keys → Scroll).
-/// @param source   the content source `from`'s bytes resolve through;
-///                 borrowed, must outlive the store. May be null when
-///                 the bytes arrive another way (setExternalLiveBytes,
-///                 a later real source) — the bind still happens.
+/// @param segments   the sealableOps() segments, oldest first.
+/// @param from       the scroll the ops were sealed beside — what their
+///                   ScrollId zero means.
+/// @param scrolls    the seal's scroll table (foreign keys → Scroll).
+/// @param source     the content source `from`'s bytes resolve through;
+///                   borrowed, must outlive the store. May be null when
+///                   the bytes arrive another way (setExternalLiveBytes,
+///                   a later real source) — the bind still happens.
+/// @param documentId phase-6 (v): the artifact's persisted identity —
+///                   adopt it on a resume-side re-seed so the document
+///                   keeps one DocumentId across checkpoint cycles; null
+///                   mints a fresh id as before.
 [[nodiscard]] std::expected<LineageStore, std::string>
 seedLineageStore(std::span<const std::string_view> segments, const Scroll &from,
                  const std::map<std::string, Scroll> &scrolls,
-                 const ContentSource *source);
+                 const ContentSource *source,
+                 const DocumentId *documentId = nullptr);
 
 /// The single-segment spelling: the artifact was sealed at once.
 [[nodiscard]] std::expected<LineageStore, std::string>
 seedLineageStore(std::string_view sealed, const Scroll &from,
                  const std::map<std::string, Scroll> &scrolls,
-                 const ContentSource *source);
+                 const ContentSource *source,
+                 const DocumentId *documentId = nullptr);
 
 /// The one-time program-rooted promote — how an unsealed compile arena's
 /// image band reaches the lineage store (adoptOpRecords,

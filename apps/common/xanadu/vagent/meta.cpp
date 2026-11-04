@@ -839,15 +839,28 @@ std::expected<CellRef, std::string> MetaRuntime::reify(CellRef head) {
     const auto found = fresh.find(source);
     return found != fresh.end() ? found->second : source;
   };
+  // A recorded position may arrive OpHandle-kind: a checkpoint-re-kinded
+  // donor's marked cells keep `*handleTarget` naming the promoted
+  // position of the cell the int64 spelled in-session (spec :2422-2428 —
+  // the donor stays re-kinded through (d), (e) rehydrating last), while
+  // palette-minted copy cells and in-session recipes stay Int64. Reading
+  // either kind through one arm keeps the replay kind-guarded the same
+  // way (e)'s ref arm is.
+  const auto posOf = [&](CellRef cell) -> std::optional<std::int64_t> {
+    if (arena.valueKindOf(cell) == xanadu::ValueKind::OpHandle)
+      if (const auto target = arena.handleTarget(cell))
+        return static_cast<std::int64_t>(*target);
+    return arena.asInt64(cell);
+  };
 
   // Pass 2 — replay: tuples relink through the map, literals copy
   // content, ref-capture slots rebind after every cell exists.
   for (std::size_t i = 0; i < members.size(); ++i) {
     const auto m = members[i];
     if (kinds[i] == Kind::DimAnchor) {
-      const auto fromPos = arena.asInt64(members[i - 1]);
-      const auto dirPos  = arena.asInt64(members[i + 1]);
-      const auto toPos   = arena.asInt64(members[i + 2]);
+      const auto fromPos = posOf(members[i - 1]);
+      const auto dirPos  = posOf(members[i + 1]);
+      const auto toPos   = posOf(members[i + 2]);
       if (!fromPos || !dirPos || !toPos)
         return std::unexpected(
             "reify: link tuple member is not an int64 position");
@@ -861,7 +874,7 @@ std::expected<CellRef, std::string> MetaRuntime::reify(CellRef head) {
       continue;
     }
     if (kinds[i] == Kind::RefCapture || consumed.contains(i)) continue;
-    const auto pos = arena.asInt64(m);
+    const auto pos = posOf(m);
     if (!pos)
       return std::unexpected(
           "reify: unclassified recipe member is not a position");
@@ -887,7 +900,7 @@ std::expected<CellRef, std::string> MetaRuntime::reify(CellRef head) {
       if (!dim) return std::unexpected(dim.error());
       writeInt(newSlot, static_cast<std::int64_t>(*dim));
     } else {
-      const auto referent = arena.asInt64(*slot);
+      const auto referent = posOf(*slot);
       if (!referent)
         return std::unexpected("reify: ref-capture slot has no int64 referent");
       writeInt(newSlot, static_cast<std::int64_t>(
@@ -999,7 +1012,7 @@ std::expected<CellRef, std::string> MetaRuntime::reify(CellRef head) {
       break;
     }
     case Kind::Data: {
-      const auto pos = arena.asInt64(m);
+      const auto pos = posOf(m);
       if (!pos)
         return std::unexpected(
             "reify: unclassified recipe member on the copy pass");

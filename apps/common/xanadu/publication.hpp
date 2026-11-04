@@ -596,20 +596,27 @@ localiseOpRef(const Store &store, const GlobalOpRef &ref,
  * one: their history is theirs. What links it to this machine's own documents
  * is the content, which both point at by the same global addresses.
  *
- * @param segments the bytes of each seal's operations file, oldest first.
- * @param from     the scroll those operations were sealed beside, which is
- *                 what their ScrollId zero means.
+ * @param segments   the bytes of each seal's operations file, oldest first.
+ * @param from       the scroll those operations were sealed beside, which is
+ *                   what their ScrollId zero means.
+ * @param documentId the artifact's persisted identity — adopted when
+ *                   supplied (phase-6 (v): the same document re-seeded on
+ *                   resume keeps one DocumentId across lineage cycles);
+ *                   when null the store mints a fresh one, the historical
+ *                   behaviour.
  * @throws std::runtime_error if any segment's bytes are not a sealed
  *         operations file, or name a scroll the seal does not carry.
  */
 [[nodiscard]] std::unique_ptr<Store>
 historyFromSeal(std::span<const std::string_view> segments, const Scroll &from,
-                const std::map<std::string, Scroll> &scrolls);
+                const std::map<std::string, Scroll> &scrolls,
+                const DocumentId *documentId = nullptr);
 
 /// Convenience for the single-seal case: everything was sealed at once.
 [[nodiscard]] std::unique_ptr<Store>
 historyFromSeal(std::string_view sealed, const Scroll &from,
-                const std::map<std::string, Scroll> &scrolls);
+                const std::map<std::string, Scroll> &scrolls,
+                const DocumentId *documentId = nullptr);
 
 /// What taking a publication in produced.
 struct Adopted {

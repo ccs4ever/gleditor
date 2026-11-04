@@ -20,9 +20,10 @@ namespace {
 [[nodiscard]] std::expected<LineageStore, std::string>
 sealToStore(const std::span<const std::string_view> segments,
             const Scroll &from, const std::map<std::string, Scroll> &scrolls,
-            const ContentSource *const source) {
+            const ContentSource *const source,
+            const DocumentId *const documentId) {
   try {
-    auto store = xanadu::historyFromSeal(segments, from, scrolls);
+    auto store = xanadu::historyFromSeal(segments, from, scrolls, documentId);
     store->setContentSource(source);
     // addScroll dedups on sameContentAs — the history already holds `from`
     // at selfScrollInHistory, so this re-asks for the id rather than
@@ -75,17 +76,19 @@ std::expected<LineageStore, std::string>
 seedLineageStore(const std::span<const std::string_view> segments,
                  const Scroll &from,
                  const std::map<std::string, Scroll> &scrolls,
-                 const ContentSource *const source) {
-  return sealToStore(segments, from, scrolls, source);
+                 const ContentSource *const source,
+                 const DocumentId *const documentId) {
+  return sealToStore(segments, from, scrolls, source, documentId);
 }
 
 std::expected<LineageStore, std::string>
 seedLineageStore(const std::string_view sealed, const Scroll &from,
                  const std::map<std::string, Scroll> &scrolls,
-                 const ContentSource *const source) {
+                 const ContentSource *const source,
+                 const DocumentId *const documentId) {
   const std::array<std::string_view, 1> one{sealed};
   return sealToStore(std::span<const std::string_view>{one}, from, scrolls,
-                     source);
+                     source, documentId);
 }
 
 std::expected<Promoted, std::string>

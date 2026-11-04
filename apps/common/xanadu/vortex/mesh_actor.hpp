@@ -4,6 +4,7 @@
 #include "common/xanadu/vortex/worker_context.hpp"
 
 #include <chrono>
+#include <cstdint>
 #include <deque>
 #include <expected>
 #include <functional>
@@ -15,7 +16,16 @@
 
 namespace xanadu {
 class ContentSource;
+class SpanReader;
+class Store;
+namespace vagent {
+class P16Ceremony;
+// Opaque-enum declaration: the fixed underlying type makes P16Flag a
+// complete type for members and by-value signatures; the enumerators stay
+// in vagent/p16.hpp, which the adapter includes.
+enum class P16Flag : std::uint8_t;
 }
+} // namespace xanadu
 
 namespace zigzag::vortex::mesh {
 
@@ -78,9 +88,31 @@ struct ActorDiscoveryEvidence {
 struct ActorExecution {
   ActorPid pid;
   ActorGrant grant;
-  ActorMessage message;
+  /// Absent on a P4 local wake turn — the executor runs with no mailbox
+  /// message and sends no reply (vagent-agent-language.md:1670).
+  std::optional<ActorMessage> message;
   CellRef cursor;
   std::optional<CellRef> stateRoot;
+};
+
+/// Phase-6 (i): the spawn-lineage pin. `base` is the Manifold folded over
+/// the seeded AND filed lineage Store — `rebuildManifold`'s product, whose
+/// `store()` attachment is what lets the fresh context's first-resolution
+/// resolve filed dimension names instead of minting orphan twins. `reader`
+/// is the lineage Store itself (`Store` is a `SpanReader`), bound as the
+/// arena's default span reader so artifact-local span names resolve.
+struct ActorLineage {
+  const Manifold *base{nullptr};
+  const xanadu::SpanReader *reader{nullptr};
+};
+
+/// What the genesis hook sees on each lineage: the actor's fresh pid and,
+/// on resume only, the caller-transported Store the checkpoint arrived
+/// with — the take-or-verify comparand the (a)-arm verifies against the
+/// rebuilt fold's `arena.base()->store()` (phase-6 (ii)). Null on spawn.
+struct ActorGenesis {
+  ActorPid pid;
+  const xanadu::Store *transported{nullptr};
 };
 
 struct ActorCheckpointRecord {
@@ -115,6 +147,14 @@ public:
   using Executor   = std::function<std::expected<std::string, ActorError>(
       const ActorExecution &, WorkerContext &)>;
   using Sender = std::function<bool(std::string_view, const ActorMessage &)>;
+  /// The adapter-installed (a)-(e) driver — invoked once per actor on the
+  /// spawn and resume paths, after the fresh context is minted and before
+  /// any turn runs. `context` is that actor's own WorkerContext: the hook
+  /// binds dimensions, registers the program image on the fresh VM, and
+  /// verifies (or adopts) `genesis.transported`. A refusal aborts the
+  /// spawn/resume with the hook's error.
+  using GenesisHook = std::function<std::expected<void, ActorError>(
+      const ActorGenesis &, WorkerContext &)>;
 
   MeshActorRuntime(std::string node, std::uint64_t epoch,
                    ActorOptions options = {});
@@ -125,14 +165,23 @@ public:
   MeshActorRuntime *setAuthorizer(Authorizer authorizer);
   MeshActorRuntime *setExecutor(Executor executor);
   MeshActorRuntime *setSender(Sender sender);
+  MeshActorRuntime *setGenesisHook(GenesisHook hook);
   /// Install only after verifying the node's device delegation to this master.
   MeshActorRuntime *trustNode(std::string node,
                               xanadu::identity::Fingerprint identity);
 
+  /// @param lineage the spawn-lineage pin (phase-6 (i)): when present, the
+  ///        actor's WorkerContext is constructed over `lineage->base` with
+  ///        `lineage->reader` as its default span reader — the ordering is
+  ///        mint/file → fold → pin/inject → first-resolution, so the fold
+  ///        must already carry the filed vocabulary. A `lineage->base`
+  ///        with no `store()` attached is refused: first-resolution would
+  ///        mint dimension twins the next filing can never file.
   [[nodiscard]] std::expected<ActorPid, ActorError>
   spawn(const xanadu::identity::Fingerprint &identity,
         const ActorMessage &request,
-        std::chrono::system_clock::time_point wallNow);
+        std::chrono::system_clock::time_point wallNow,
+        std::optional<ActorLineage> lineage = std::nullopt);
 
   /// Re-admit a signed message-boundary checkpoint under a fresh capability.
   /// The new grant must name the exact checkpoint content hash as its base.
@@ -154,11 +203,37 @@ public:
           const ActorMessage &message, ActorTime now,
           std::chrono::system_clock::time_point wallNow);
 
-  /// Executes at most one message and emits a value or DOWN. Limits on VM
-  /// instructions/solutions must be applied by the configured program adapter;
-  /// allocation, mailbox, output and retention limits are applied here.
+  /// Executes at most one turn — a mailbox message or a queued P4 wake —
+  /// and emits a value or DOWN (message turns only). Limits on VM
+  /// instructions/solutions must be applied by the configured program
+  /// adapter; allocation, mailbox, output and retention limits are applied
+  /// here.
   [[nodiscard]] std::expected<bool, ActorError>
   pumpOne(std::chrono::system_clock::time_point wallNow);
+
+  /// P4's local wake (vagent-agent-language.md:1670): queues the executor
+  /// to run once with `ActorExecution::message` absent. No mailbox slot,
+  /// no remembered entry, no reply. The lease check in pumpOne still
+  /// applies to the wake turn. Local-only — wakes are never wire messages
+  /// and never survive a checkpoint.
+  [[nodiscard]] std::expected<void, ActorError> wake(const ActorPid &pid);
+  [[nodiscard]] std::size_t pendingWakes(const ActorPid &pid) const;
+
+  /// P16 ceremony seam (vagent/p16.hpp): the sibling-owned ceremony object
+  /// installs itself per actor — typically bound to that actor's arena
+  /// from inside the Executor callback. The runtime calls its hooks at the
+  /// contract windows around the flagged turn; it never constructs one.
+  [[nodiscard]] std::expected<MeshActorRuntime *, ActorError>
+  setP16Ceremony(const ActorPid &pid, xanadu::vagent::P16Ceremony *ceremony);
+  [[nodiscard]] xanadu::vagent::P16Ceremony *
+  p16Ceremony(const ActorPid &pid) const;
+  /// Arms the relocate-before-checkpoint flag — the adapter's half of the
+  /// request step: set when the next turn is the one whose end publishes.
+  /// Re-arming while Checkpoint is pending is allowed; the pending
+  /// restore still drains first at the next turn's head.
+  [[nodiscard]] std::expected<void, ActorError>
+  raiseP16Flag(const ActorPid &pid);
+  [[nodiscard]] xanadu::vagent::P16Flag p16Flag(const ActorPid &pid) const;
 
   [[nodiscard]] std::expected<void, ActorError>
   send(std::string destinationNode, ActorMessage message);
@@ -186,7 +261,7 @@ public:
   [[nodiscard]] std::size_t pending(const ActorPid &pid) const;
   [[nodiscard]] std::optional<CellRef> localCursor(const ActorPid &pid) const;
   /// Owner-thread borrow: publish before resuming execution. Refuses pending
-  /// mailboxes, outstanding replies and choice stacks.
+  /// mailboxes, queued wakes, outstanding replies and choice stacks.
   [[nodiscard]] std::expected<ActorCheckpointView, ActorError>
   checkpointView(const ActorPid &pid, CellRef stateRoot) const;
 
@@ -208,6 +283,7 @@ private:
   Authorizer authorizer_;
   Executor executor_;
   Sender sender_;
+  GenesisHook genesisHook_;
   std::map<std::string, std::unique_ptr<Actor>> actors_;
   std::map<std::string, std::pair<std::string, ActorPid>> spawns_;
   std::map<std::string, Monitor> monitors_;

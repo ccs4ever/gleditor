@@ -29,6 +29,8 @@
 
 #include <cstdint>
 #include <expected>
+#include <functional>
+#include <memory>
 #include <optional>
 #include <set>
 #include <string>
@@ -36,6 +38,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "common/xanadu/vagent/p16.hpp"
 #include "common/xanadu/vortex/vortex_core.hpp"
 #include "common/xanadu/vortex/vortex_vm.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
@@ -602,6 +605,42 @@ private:
   VortexVM &vm_;
   MetaBindSet binds_;
 };
+
+// ---------------------------------------------------------------------------
+// P16 — the checkpoint ceremony's construction seam
+// ---------------------------------------------------------------------------
+//
+// `vagent/p16.hpp` pins the hook contract the mesh's `pumpOne` drives
+// (flag → re-kind → publish → restore, plus the every-exit-path drain);
+// p16.cpp holds the concrete object this factory hands back. The adapter
+// installs one per actor (`MeshActorRuntime::setP16Ceremony`) and drives
+// the three hooks from its `Executor` callback frame.
+
+/// The publish command `onFlaggedTurnEnd` issues synchronously from the
+/// flagged turn's end-of-callback window — the mesh binds its own
+/// `publishValue` (lineage `Store`, parent id, state root, keys, origin)
+/// at install. The command runs while the marked ref cells are
+/// `OpHandle`-kind, so the checkpoint's handles name promoted positions.
+using P16Publish = std::function<std::expected<void, std::string>()>;
+
+/// Construct the session-side ceremony object over one bound set.
+///
+/// The marked inventory mirrors genesis (e)'s sweep exactly: the
+/// `+d.refs` ref-record chains (records carrying no `+d.name`) of every
+/// `+d.code`-registered head on `binds.agentCell`, plus
+/// `installedCopies` — the session-side half of the set (e) draws from
+/// its replay — empty sweeps the `+d.code` rank alone. The object needs
+/// no more: `name`/`step` come from `core.dims()`, `code`/`refs`/`ref`
+/// from `binds.dims`.
+///
+/// `publish` must marshal the arena reachable state while the marked
+/// cells are `OpHandle`-kind — `onFlaggedTurnEnd` issues it *before* its
+/// `Int64(*handleTarget)` restore, so a publish that runs after the
+/// restore would ship unrestored positions.
+[[nodiscard]] std::unique_ptr<P16Ceremony>
+makeP16Ceremony(zigzag::ArenaManifold &arena, VortexCore &core,
+                const MetaBindSet &binds, P16Publish publish,
+                std::vector<CellRef> installedCopies = {});
 
 } // namespace xanadu::vagent
 
