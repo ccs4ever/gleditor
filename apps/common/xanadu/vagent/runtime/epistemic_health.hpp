@@ -50,6 +50,8 @@ struct SourceHealth {
   /// source last committed. The sign of a failure the estimator cannot see
   /// (design 3.1) until I3-3 reinstates the host-time class.
   std::uint64_t uncountedSinceCommit{};
+  /// Host memory: readings the latch cache refused since the last reset.
+  std::uint64_t refusedWhileFaulted{};
   /// Durable arena state: how many resets the profile has had.
   std::uint64_t resetEpoch{0};
   /// The live reasons, oldest first.

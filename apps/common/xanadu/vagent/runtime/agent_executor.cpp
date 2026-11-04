@@ -536,6 +536,22 @@ AgentExecutor::AgentExecutor(zigzag::vortex::mesh::MeshActorRuntime &runtime,
                       settings_.epistemic.arenaSlots / kSlotReserveDivisor,
                       static_cast<std::size_t>(zigzag::ephemeralBit));
   }
+  // Not a `validate()` rule, because small legitimate settings break it: a
+  // full complement of sources at their health bound would not fit.
+  if (const auto &ep = settings_.epistemic;
+      ep.maxSources * (static_cast<std::size_t>(
+                           healthBound(ep.healthReasons, ep.healthActions)) +
+                       kProfileBaseCells) >
+      ep.cells)
+    GLEDITOR_LOG_WARN(
+        kLog,
+        "epistemic cells {} cannot hold {} sources at their health bound "
+        "({} cells each with the profile): ingestion refuses EpistemicBudget "
+        "once the reserve does not fit",
+        ep.cells, ep.maxSources,
+        static_cast<std::size_t>(
+            healthBound(ep.healthReasons, ep.healthActions)) +
+            kProfileBaseCells);
   // A note applies its counts in queue order, which can displace a refusal
   // decided in the arena by up to the per-source queue share; the error is
   // 2^(share / half-life). Legitimate to configure, so a warning (R3-2).
@@ -1452,17 +1468,33 @@ AgentExecutor::TurnOutcome AgentExecutor::deliverHost(State &state,
     TurnSpec spec;
     spec.entry      = event.entry;
     spec.turnFields = event.turnFields;
+    if (event.refusalsOf && event.charge) {
+      // A reset that committed after this note's refusals were decided
+      // repaired what they were about: their share of the estimator goes,
+      // the lifetime counts stay.
+      auto charge     = *event.charge;
+      bool superseded = false;
+      {
+        const std::lock_guard lock(ingress_->mutex);
+        superseded = ingress_->supersededByReset(
+            {pidKey(state.pid), *event.refusalsOf}, charge.generation);
+      }
+      if (superseded) {
+        charge.health = 0;
+        charge.passed = 0;
+        charge.contact.reset();
+        if (charge.content == 0 && charge.other == 0) return TurnOutcome{};
+      }
+      spec.turnFields.set(
+          std::string(kTurnRefusal),
+          WireValue::record(refusalNote(state.pid, *event.refusalsOf, charge)));
+    }
     // Admission is net: the routine has already excised what it may. A
     // bookkeeping turn may create a profile, so it is admitted too; a
     // source change is not, or a full budget would pin a source to its old
     // boot.
     if (event.ingest || event.entry == state.agent.observeRefusalEntry)
-      spec.admit = [this, &state]() -> std::optional<std::string> {
-        const auto ceiling = settings_.epistemic.cells;
-        if (epistemicCellsWithin(state, ceiling) > ceiling)
-          return std::string(kTurnResultEpistemicBudget);
-        return std::nullopt;
-      };
+      spec.admit = [this, &state]() { return admitCells(state, false); };
     if (event.health) {
       bool authorized = false;
       {
@@ -1551,7 +1583,8 @@ AgentExecutor::TurnOutcome AgentExecutor::deliverHost(State &state,
           }
         }
       }
-      if (context.arena.cellCount() >= settings_.epistemic.arenaSlots) {
+      if (context.arena.cellCount() >=
+          settings_.epistemic.arenaSlots + settings_.epistemic.slotReserve()) {
         finishHealthItem(state.pid, *event.health, kTurnResultArenaExhausted);
         TurnOutcome exhausted;
         exhausted.result = std::string(kTurnResultArenaExhausted);
@@ -1630,12 +1663,13 @@ AgentExecutor::TurnOutcome AgentExecutor::deliverHost(State &state,
           floors.set(predicate, WireValue::integer(highest));
         healthRec.set(std::string(kHealthTurnFloors),
                       WireValue::record(std::move(floors)));
-        // Closed charges are split at the call by a later slice; until then
-        // none is dropped.
+        // The charge closed at the call: a commit drops its estimator share
+        // and keeps these counts in the lifetime counters.
+        const auto &closed = event.health->closed;
         healthRec.set(std::string(kHealthTurnDroppedContent),
-                      WireValue::integer(0));
+                      WireValue::integer(closed ? closed->content : 0));
         healthRec.set(std::string(kHealthTurnDroppedOther),
-                      WireValue::integer(0));
+                      WireValue::integer(closed ? closed->other : 0));
       }
       if (ingress_->wallSynchronised) {
         healthRec.set(std::string(kHealthTurnWall),
@@ -1643,7 +1677,15 @@ AgentExecutor::TurnOutcome AgentExecutor::deliverHost(State &state,
       }
       spec.turnFields.set(std::string(kTurnHealth),
                           WireValue::record(std::move(healthRec)));
-      spec.entry   = state.agent.healthEntry;
+      spec.entry = state.agent.healthEntry;
+      // A degrade is admitted like an ingestion; everything else, and every
+      // action on a tombstone, draws on the headroom.
+      const bool exempt =
+          !std::holds_alternative<Degrade>(event.health->action) ||
+          (snapshot && snapshot->tombstone);
+      spec.admit = [this, &state, exempt]() {
+        return admitCells(state, exempt);
+      };
       auto outcome = runTurn(state, cursor, grant, context, spec);
       const auto code =
           outcome.result.value_or(std::string(kTurnResultHealthUnavailable));
@@ -1757,6 +1799,8 @@ void AgentExecutor::finishIngest(State &state, const IngestKey &ingest,
     ingress_->uncounted.erase(source);
   }
   if (logged.kind == IngestOutcome::Kind::Refused) {
+    if (*logged.code == kTurnResultSourceFaulted)
+      ingress_->latched.insert(source);
     GLEDITOR_LOG_DEBUG(kIngressLog, "ingestion refused: {}", *logged.code);
     const bool relayed = ingest.relay.has_value();
     const bool lifetime =
@@ -1807,7 +1851,9 @@ void AgentExecutor::settleQueued(State &state, CellRef cursor,
         settings_.epistemic.arenaSlots + settings_.epistemic.slotReserve();
     if (arena.cellCount() < slots) {
       TurnSpec spec;
-      spec.entry         = state.agent.settleEntry;
+      spec.entry = state.agent.settleEntry;
+      // A settle that would pass the headroom is a failed settle.
+      spec.admit         = [this, &state]() { return admitCells(state, true); };
       const auto outcome = runTurn(state, cursor, grant, context, spec);
       settled            = outcome.committed;
       // Counted before the exit: the turn ran whether or not the actor is
@@ -3306,6 +3352,38 @@ std::size_t AgentExecutor::epistemicCellsWithin(const State &state,
   return seen.size();
 }
 
+std::size_t AgentExecutor::epistemicReserve(const State &state) const {
+  const auto &arena   = state.context->arena;
+  const auto bound    = healthBound(settings_.epistemic.healthReasons,
+                                    settings_.epistemic.healthActions);
+  std::size_t reserve = 0;
+  for (const auto profile :
+       zigzag::rankAfter(arena, state.agent.agentCell, state.dims.trust)) {
+    // A tombstone holds only what it holds; nothing reserves for it.
+    if (const auto retired =
+            fieldValue(arena, state.vd, profile, kProfileRetired);
+        retired && arena.asBool(*retired).value_or(false))
+      continue;
+    const auto held =
+        intFieldOf(arena, state.vd, profile, kProfileHealthCells).value_or(0);
+    reserve +=
+        static_cast<std::size_t>(std::max<std::int64_t>(bound - held, 0));
+  }
+  return reserve;
+}
+
+std::optional<std::string> AgentExecutor::admitCells(const State &state,
+                                                     bool exempt) const {
+  const auto ceiling = settings_.epistemic.cells;
+  // Past the ceiling by a sixteenth, so an isolate or a reset on a full
+  // arena can still land.
+  const auto limit = exempt ? ceiling + ceiling / kHeadroomDivisor : ceiling;
+  const auto used  = epistemicCellsWithin(state, limit);
+  if (used + (exempt ? 0 : epistemicReserve(state)) > limit)
+    return std::string(kTurnResultEpistemicBudget);
+  return std::nullopt;
+}
+
 std::optional<std::size_t>
 AgentExecutor::epistemicCells(const identity::ActorPid &pid) const {
   const auto found = states_.find(pidKey(pid));
@@ -3423,6 +3501,10 @@ SourceHealth AgentExecutor::readSourceHealth(const State &state,
           ingress_->uncounted.find({pidKey(state.pid), out.principal});
       found != ingress_->uncounted.end())
     out.uncountedSinceCommit = found->second;
+  if (const auto found = ingress_->refusedWhileFaulted.find(
+          {pidKey(state.pid), out.principal});
+      found != ingress_->refusedWhileFaulted.end())
+    out.refusedWhileFaulted = found->second;
   return out;
 }
 
@@ -3691,6 +3773,12 @@ AgentExecutor::observe(const identity::ActorPid &target,
       GLEDITOR_LOG_DEBUG(kIngressLog, "observation for an unbound source");
       return std::unexpected(EpistemicRefusal::UnknownSource);
     }
+    // Before the queue and unlogged: a babbler must not spend a turn, a log
+    // slot or a charge per reading. The arena still decides every other case.
+    if (ingress_->latched.contains(source)) {
+      ++ingress_->refusedWhileFaulted[source];
+      return std::unexpected(EpistemicRefusal::SourceFaulted);
+    }
     b                = binding->second;
     wallSynchronised = ingress_->wallSynchronised;
   }
@@ -3914,7 +4002,10 @@ AgentExecutor::observe(const identity::ActorPid &target,
       ingress_->raiseMark(stream, o.sequence);
       auto [open, fresh] = ingress_->charges.try_emplace(source);
       ++open->second.passed;
-      if (fresh) postRefusals(target, o.principal);
+      if (fresh) {
+        open->second.generation = ingress_->resetMarks[source].requested;
+        postRefusals(target, o.principal);
+      }
     }
   }
   return refuse(EpistemicRefusal::IngressBackpressure);
@@ -3976,8 +4067,23 @@ std::string_view epistemicRefusalName(EpistemicRefusal refusal) noexcept {
     return "SelfCertification";
   case EpistemicRefusal::EntropyUnavailable:
     return "EntropyUnavailable";
+  case EpistemicRefusal::SourceFaulted:
+    return "SourceFaulted";
   }
   return "Unknown";
+}
+
+bool AgentExecutor::sourceLatchCached(const identity::ActorPid &pid,
+                                      std::string_view principal) const {
+  const std::lock_guard lock(ingress_->mutex);
+  return ingress_->latched.contains({pidKey(pid), std::string(principal)});
+}
+
+void AgentExecutor::clearLatchCache(const identity::ActorPid &pid) {
+  const auto key = pidKey(pid);
+  const std::lock_guard lock(ingress_->mutex);
+  std::erase_if(ingress_->latched,
+                [&](const auto &source) { return source.first == key; });
 }
 
 void AgentExecutor::forgetIngress(const identity::ActorPid &pid) {
@@ -3987,6 +4093,37 @@ void AgentExecutor::forgetIngress(const identity::ActorPid &pid) {
   }
   const std::lock_guard health(healthMutex_);
   healthActionSeq_.erase(pidKey(pid));
+}
+
+WireRecord AgentExecutor::refusalNote(const identity::ActorPid &pid,
+                                      const std::string &principal,
+                                      const IngressCharge &charge) const {
+  WireRecord note;
+  note.set(std::string(kObsSource), WireValue::text(principal));
+  note.set(std::string(kRefusalContent), WireValue::integer(charge.content));
+  note.set(std::string(kRefusalOther), WireValue::integer(charge.other));
+  note.set(std::string(kRefusalCode), WireValue::text(charge.code));
+  note.set(std::string(kRefusalHealth), WireValue::integer(charge.health));
+  note.set(std::string(kRefusalPassed), WireValue::integer(charge.passed));
+  note.set(std::string(kRefusalHalfLife),
+           WireValue::integer(settings_.epistemic.healthHalfLife));
+  note.set(std::string(kIngestMaxSources),
+           WireValue::integer(
+               static_cast<std::int64_t>(settings_.epistemic.maxSources)));
+  {
+    // Bound now: the profile it may earn starts at the binding's boot.
+    const std::lock_guard lock(ingress_->mutex);
+    std::optional<std::uint64_t> bound;
+    for (const auto &[key, binding] : ingress_->bindings)
+      if (std::get<0>(key) == pidKey(pid) && std::get<1>(key) == principal)
+        bound = std::max(bound.value_or(0), binding.incarnation);
+    if (bound)
+      note.set(std::string(kObsIncarnation),
+               WireValue::integer(static_cast<std::int64_t>(*bound)));
+  }
+  if (charge.contact)
+    note.set(std::string(kRefusalContact), WireValue::real(*charge.contact));
+  return note;
 }
 
 void AgentExecutor::postRefusals(const identity::ActorPid &target,
@@ -4163,38 +4300,12 @@ void AgentExecutor::drainPosted() {
         ingress_->charges.erase(found);
       }
       if (!state.agent.observeRefusalEntry) continue;
-      WireRecord note;
-      note.set(std::string(kObsSource), WireValue::text(*item.refusalsOf));
-      note.set(std::string(kRefusalContent),
-               WireValue::integer(charge.content));
-      note.set(std::string(kRefusalOther), WireValue::integer(charge.other));
-      note.set(std::string(kRefusalCode), WireValue::text(charge.code));
-      note.set(std::string(kRefusalHealth), WireValue::integer(charge.health));
-      note.set(std::string(kRefusalPassed), WireValue::integer(charge.passed));
-      note.set(std::string(kRefusalHalfLife),
-               WireValue::integer(settings_.epistemic.healthHalfLife));
-      note.set(std::string(kIngestMaxSources),
-               WireValue::integer(
-                   static_cast<std::int64_t>(settings_.epistemic.maxSources)));
-      {
-        // Bound now: the profile it may earn starts at the binding's boot.
-        const std::lock_guard lock(ingress_->mutex);
-        std::optional<std::uint64_t> bound;
-        for (const auto &[key, binding] : ingress_->bindings)
-          if (std::get<0>(key) == pidKey(item.pid) &&
-              std::get<1>(key) == *item.refusalsOf)
-            bound = std::max(bound.value_or(0), binding.incarnation);
-        if (bound)
-          note.set(std::string(kObsIncarnation),
-                   WireValue::integer(static_cast<std::int64_t>(*bound)));
-      }
-      if (charge.contact)
-        note.set(std::string(kRefusalContact),
-                 WireValue::real(*charge.contact));
+      // The note is written when it runs, so a reset that commits between
+      // here and there can still take the estimator's share out of it.
       HostEvent bookkeeping;
-      bookkeeping.entry = state.agent.observeRefusalEntry;
-      bookkeeping.turnFields.set(std::string(kTurnRefusal),
-                                 WireValue::record(std::move(note)));
+      bookkeeping.entry      = state.agent.observeRefusalEntry;
+      bookkeeping.refusalsOf = *item.refusalsOf;
+      bookkeeping.charge     = std::move(charge);
       state.hostEvents.push_back(std::move(bookkeeping));
     } else if (item.observation) {
       if (item.ingest) {
@@ -5696,6 +5807,7 @@ AgentExecutor::upgrade(const identity::ActorPid &pid,
   } catch (const std::exception &) {
     return std::unexpected(ActorError::ResourceLimit);
   }
+  clearLatchCache(pid);
   State &committed = *found->second;
   liftLimits(*committed.context);
   TurnSpec spec;
@@ -5769,6 +5881,7 @@ AgentExecutor::upgrade(const identity::ActorPid &pid,
     return res;
   }
 
+  clearLatchCache(pid);
   state.context = runtime_.context(pid);
   state.grant   = newGrant;
   if (const auto resolved = resolveProgram(newProgram.programRef())) {

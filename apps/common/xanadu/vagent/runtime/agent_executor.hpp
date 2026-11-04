@@ -402,6 +402,11 @@ public:
   /// would spend arena slots, which are never reused, on every poll.
   [[nodiscard]] std::optional<SourceHealth>
   sourceHealth(const identity::ActorPid &pid, std::string_view principal) const;
+  /// Whether the host's latch cache refuses this source's readings before
+  /// they reach the queue. A negative cache that the arena's latch outranks,
+  /// exposed so a test or an operator can tell a refusal that spent no turn.
+  [[nodiscard]] bool sourceLatchCached(const identity::ActorPid &pid,
+                                       std::string_view principal) const;
   /// Every live and retired profile of the actor, in the arena's order.
   [[nodiscard]] std::vector<SourceHealth>
   sourceHealths(const identity::ActorPid &pid) const;
@@ -638,8 +643,15 @@ private:
   void dropHostEvents(State &state);
   /// Drop a stopped actor's bindings, queue counts, outcome log and charges.
   void forgetIngress(const identity::ActorPid &pid);
+  /// Empty the actor's latch cache and its refusal count: an upgrade keeps the
+  /// pid, and the arena's latch is the authority the cache re-learns from.
+  void clearLatchCache(const identity::ActorPid &pid);
   /// Ask for a bookkeeping turn charging @p principal's waiting refusals.
   void postRefusals(const identity::ActorPid &target, std::string principal);
+  /// The `$turn.refusal` record of one bookkeeping note.
+  [[nodiscard]] WireRecord refusalNote(const identity::ActorPid &pid,
+                                       const std::string &principal,
+                                       const IngressCharge &charge) const;
   void startEffect(State &state, const OutboxItem &item);
   void cancelEffect(State &state, std::int64_t id);
   void cancelFlights(State &state);
@@ -797,6 +809,16 @@ private:
   /// Counts at most `ceiling + 1` cells, so admission stays bounded.
   [[nodiscard]] std::size_t epistemicCellsWithin(const State &state,
                                                  std::size_t ceiling) const;
+  /// Cells the live profiles may still grow by before their health bound
+  /// (design 6.6): `healthBound - health_cells` summed over every profile
+  /// that is not a tombstone.
+  [[nodiscard]] std::size_t epistemicReserve(const State &state) const;
+  /// The admission test run between a turn's halt and its commit. Ordinary
+  /// entries (ingestion, bookkeeping, a degrade) must fit the ceiling with the
+  /// live profiles' reserve; exempt entries (isolate, clear, reset, settle,
+  /// any action on a tombstone) only the headroom above it (design 6.6).
+  [[nodiscard]] std::optional<std::string> admitCells(const State &state,
+                                                      bool exempt) const;
   [[nodiscard]] SourceHealth readSourceHealth(const State &state,
                                               zigzag::CellRef profile) const;
   /// The state the actor can be read in, or null (`sourceHealth`).

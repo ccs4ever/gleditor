@@ -92,7 +92,25 @@ inline constexpr std::string_view kProfileActionSeq  = "action_seq";
 /// the profile is not latched.
 inline constexpr std::string_view kProfileFaultSeq = "fault_seq";
 inline constexpr std::string_view kProfileReasons  = "reasons";
-inline constexpr std::string_view kProfileActions  = "actions";
+/// The cells the health structure may occupy at its current population
+/// (design 6.6): `kHealthFixedCells` plus a worst-case entry for each reason
+/// and action. Worst case, not measured, so the admission reserve
+/// `healthBound - health_cells` never undercounts what an entry can grow to.
+inline constexpr std::string_view kProfileHealthCells = "health_cells";
+inline constexpr std::string_view kProfileActions     = "actions";
+
+// Cells of the health structure (design 6.1): scalars and list headers, and a
+// worst-case reason and action entry. Pinned by a test that counts a full
+// structure against them.
+inline constexpr std::int64_t kHealthFixedCells = 14;
+inline constexpr std::int64_t kReasonCells      = 16;
+inline constexpr std::int64_t kActionCells      = 20;
+
+/// The most cells a profile's health structure may reach under the limits.
+[[nodiscard]] constexpr std::int64_t
+healthBound(std::int64_t reasons, std::int64_t actions) noexcept {
+  return kHealthFixedCells + kReasonCells * reasons + kActionCells * actions;
+}
 
 // Fields of one `reasons` entry and one `actions` entry. `wall` is present
 // only when the executor's wall clock was synchronised; `removed` only on a

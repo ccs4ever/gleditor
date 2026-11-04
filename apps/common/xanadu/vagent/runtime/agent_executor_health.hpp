@@ -51,6 +51,19 @@ struct HealthOutcomeRecord {
   std::uint64_t checkpointProducedAtCommit{0};
 };
 
+/// The refusals decided for one source since its last bookkeeping note.
+/// `generation` is the reset generation they were decided under: a committed
+/// reset supersedes a charge below it.
+struct IngressCharge {
+  std::int64_t content{};
+  std::int64_t other{};
+  std::int64_t health{};
+  std::int64_t passed{};
+  std::string code;
+  std::optional<double> contact;
+  std::uint64_t generation{0};
+};
+
 struct QueuedHealth {
   std::array<std::byte, 32> tokenDigest{};
   std::string principal;
@@ -59,6 +72,10 @@ struct QueuedHealth {
   std::string grantId;
   std::optional<HealthIssuer> issuer;
   std::uint64_t generation{0};
+  /// A reset's open charge, closed at the call: the commit drops it from the
+  /// estimator and adds its counts to the lifetime counters; any other
+  /// outcome reopens it, so a failed reset loses no refusal.
+  std::optional<IngressCharge> closed;
   std::map<std::string, std::int64_t> inFlightSnapshot;
   std::shared_ptr<PendingHealthRecord> record;
 };

@@ -133,6 +133,12 @@ TEST(VagentEpistemicAbi, HealthNamesAndOrdersArePinned) {
   EXPECT_EQ(kTurnResultClockMappingRegression, "ClockMappingRegression");
   // The health turn (2c2): profile scalars, lists, entry fields, markers.
   EXPECT_EQ(kProfileResetEpoch, "reset_epoch");
+  EXPECT_EQ(kProfileHealthCells, "health_cells");
+  EXPECT_EQ(kHealthFixedCells, 14);
+  EXPECT_EQ(kReasonCells, 16);
+  EXPECT_EQ(kActionCells, 20);
+  EXPECT_EQ(healthBound(3, 4), 142);
+  EXPECT_EQ(kHeadroomDivisor, 16U);
   EXPECT_EQ(kProfileActionSeq, "action_seq");
   EXPECT_EQ(kProfileFaultSeq, "fault_seq");
   EXPECT_EQ(kProfileReasons, "reasons");

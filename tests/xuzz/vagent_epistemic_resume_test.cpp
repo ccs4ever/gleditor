@@ -15,6 +15,7 @@
 #include <string_view>
 #include <vector>
 
+#include "common/xanadu/vagent/runtime/health_grants.hpp"
 #include "common/xanadu/vagent/runtime/program.hpp"
 #include "common/xanadu/vagent/runtime/runtime_abi.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
@@ -359,6 +360,95 @@ TEST_F(VagentEpistemicResume, AFullEpistemicBudgetStillCheckpoints) {
   ASSERT_TRUE(resumeOnB());
   EXPECT_EQ(*b.executor().epistemicCells(b.pid) + 2 * b.profiles().size(),
             *a.executor().epistemicCells(a.pid));
+}
+
+/// One health action through a fresh grant on @p side, and its outcome.
+std::string act(Side &side, HealthAction action, const std::string &principal) {
+  static int grants = 0;
+  EpistemicHealthGrant g{"resume-" + std::to_string(++grants),
+                         *HealthIssuer::fromPrincipal(std::string(64, 'b')),
+                         {principal},
+                         {},
+                         std::chrono::hours(1),
+                         16};
+  for (const auto kind : {HealthActionKind::Isolate, HealthActionKind::Degrade,
+                          HealthActionKind::Clear, HealthActionKind::Reset})
+    g.actions.push_back(kind);
+  const auto token = side.executor().grantHealth(side.pid, g);
+  if (!token) return "no grant";
+  const auto receipt = side.executor().healthAction(
+      side.pid, {*token, principal, std::move(action)});
+  if (!receipt) return std::string(epistemicRefusalName(receipt.error()));
+  side.host->pump();
+  const auto view = side.executor().healthOutcome(side.pid, *receipt);
+  if (view.state != HealthOutcomeView::State::Known || view.items.empty())
+    return "NoChange";
+  const auto &outcome = view.items.front().outcome;
+  return outcome.kind == IngestOutcome::Kind::Committed
+             ? "Committed"
+             : outcome.code.value_or("?");
+}
+
+TEST_F(VagentEpistemicResume, HealthLatchReasonsAndActionsCrossAResume) {
+  populate();
+  ASSERT_EQ(act(a, Isolate{"stuck"}, kP1), "Committed");
+  ASSERT_EQ(act(a, Degrade{"slow"}, kP2), "Committed");
+  const auto before = a.executor().sourceHealth(a.pid, kP1);
+  ASSERT_TRUE(before);
+  ASSERT_TRUE(resumeOnB());
+  b.bind(kP1);
+  b.bind(kP2);
+  const auto latched = b.executor().sourceHealth(b.pid, kP1);
+  ASSERT_TRUE(latched);
+  EXPECT_TRUE(latched->faulted);
+  EXPECT_EQ(latched->faultSeq, before->faultSeq);
+  EXPECT_EQ(latched->faultCode, "stuck");
+  EXPECT_EQ(latched->state, HealthState::Faulted);
+  const auto slow = b.executor().sourceHealth(b.pid, kP2);
+  ASSERT_TRUE(slow);
+  ASSERT_EQ(slow->reasons.size(), 1U);
+  EXPECT_EQ(slow->reasons.front().code, "slow");
+  EXPECT_EQ(slow->state, HealthState::Degraded);
+  // The audit window is arena state: both entries are there, and the
+  // action sequence continues after them.
+  const auto actions = [&](const std::string &principal) {
+    std::size_t n   = 0;
+    const auto list = b.value(*b.profile(principal), kProfileActions);
+    for (auto e =
+             list ? zigzag::step(b.arena(), *list, valueDims(b.ctx().core).grab)
+                  : std::nullopt;
+         e; e = zigzag::step(b.arena(), *e, valueDims(b.ctx().core).step))
+      ++n;
+    return n;
+  };
+  EXPECT_EQ(actions(kP1), 1U);
+  EXPECT_EQ(actions(kP2), 1U);
+  EXPECT_EQ(b.counter(*b.profile(kP1), kProfileActionSeq), 1);
+  // The host cache starts empty on the new pid; the arena refuses the first
+  // reading and the cache learns it.
+  EXPECT_FALSE(b.executor().sourceLatchCached(b.pid, kP1));
+  const auto refused = b.observe(reading(kP1, "left", 30, 1.0));
+  ASSERT_TRUE(refused);
+  EXPECT_EQ(refused->code, std::string("SourceFaulted"));
+  EXPECT_TRUE(b.executor().sourceLatchCached(b.pid, kP1));
+}
+
+TEST_F(VagentEpistemicResume, AResetEpochAndItsRepairCrossAResume) {
+  populate();
+  ASSERT_EQ(act(a, Isolate{"stuck"}, kP1), "Committed");
+  ASSERT_EQ(act(a, Reset{0}, kP1), "Committed");
+  ASSERT_TRUE(resumeOnB());
+  b.bind(kP1);
+  const auto repaired = b.executor().sourceHealth(b.pid, kP1);
+  ASSERT_TRUE(repaired);
+  EXPECT_FALSE(repaired->faulted);
+  EXPECT_EQ(repaired->resetEpoch, 1U);
+  // A retry under the old epoch is stale on the new host too, and the cache
+  // has nothing to refuse: the first new reading commits.
+  EXPECT_EQ(act(b, Reset{0}, kP1), "StaleHealthState");
+  EXPECT_FALSE(b.executor().sourceLatchCached(b.pid, kP1));
+  EXPECT_EQ(b.observe(reading(kP1, "left", 40, 1.0))->kind,
+            IngestOutcome::Kind::Committed);
 }
 
 } // namespace

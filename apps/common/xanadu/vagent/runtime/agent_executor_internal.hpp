@@ -65,15 +65,6 @@ struct IngestKey {
   std::uint64_t generation{0};
 };
 
-struct IngressCharge {
-  std::int64_t content{};
-  std::int64_t other{};
-  std::int64_t health{};
-  std::int64_t passed{};
-  std::string code;
-  std::optional<double> contact;
-};
-
 struct SourceChange {
   std::string principal;
   std::optional<std::uint64_t> incarnation;
@@ -379,6 +370,14 @@ struct AgentExecutor::Ingress {
     const auto found = resetMarks.find(source);
     return found != resetMarks.end() && generation < found->second.committed;
   }
+  /// The host's negative cache of latched sources (design 6.5): a babbler
+  /// costs no turn once the arena has refused it, or an isolate has
+  /// committed. Never an authority: the arena refuses the same readings, so
+  /// a stale entry only refuses what the arena would, and a missing one
+  /// costs one turn.
+  std::set<SourceKey> latched;
+  /// Readings the cache refused since the last committed reset; host-only.
+  std::map<SourceKey, std::uint64_t> refusedWhileFaulted;
   using Charge = IngressCharge;
   std::map<SourceKey, Charge> charges;
   /// A stream's estimator state (design 3.2): the newest sequence a commit or
@@ -541,6 +540,9 @@ struct AgentExecutor::Ingress {
     std::erase_if(charges, mine);
     healthGrants.erase(pid);
     std::erase_if(resetMarks, mine);
+    std::erase_if(refusedWhileFaulted, mine);
+    std::erase_if(latched,
+                  [&](const SourceKey &key) { return key.first == pid; });
     std::erase_if(inFlight, mine);
     std::erase_if(uncounted, mine);
     std::erase_if(marks, [&](const auto &entry) {
@@ -558,6 +560,7 @@ struct AgentExecutor::Ingress {
     if (!chargeable(code) || (!lifetime && !health)) return false;
     auto [it, fresh] = charges.try_emplace({pid, principal});
     auto &c          = it->second;
+    if (fresh) c.generation = resetMarks[{pid, principal}].requested;
     if (lifetime) {
       if (!relayed && isContentRefusal(code)) {
         ++c.content;

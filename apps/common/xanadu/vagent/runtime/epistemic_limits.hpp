@@ -159,6 +159,15 @@ epistemicLimitErrorName(EpistemicLimitError error) noexcept {
 /// The settle reserve is one 64th of the slot allowance.
 inline constexpr std::size_t kSlotReserveDivisor = 64;
 
+/// Exempt entries (isolate, clear, reset, settle, any action on a tombstone)
+/// may take the cell ceiling this fraction past it: a repair must land on an
+/// arena that ingestion has filled.
+inline constexpr std::size_t kHeadroomDivisor = 16;
+
+/// Cells a live profile costs before its records and its health reserve: the
+/// 44 measured in I3-1 plus the two health weights.
+inline constexpr std::size_t kProfileBaseCells = 48;
+
 /// Logical admission bounds; actor cell, byte and fuel grants remain
 /// independent.
 struct EpistemicLimits {

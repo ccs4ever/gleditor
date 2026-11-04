@@ -20,6 +20,7 @@
 #include <numbers>
 #include <optional>
 #include <random>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -1592,6 +1593,394 @@ TEST_F(VagentEpistemicHealthActions, ASixteenRecordResetFitsHalfTheGrant) {
                static_cast<unsigned long long>(kHalf));
   EXPECT_FALSE(health()->faulted);
   EXPECT_LT(spent, kHalf);
+}
+
+// -- Slice 2c3: the host latch cache (design 6.5) ---------------------------
+
+TEST_F(VagentEpistemicHealthActions, ABabblingLatchedSourceCostsNoTurns) {
+  start();
+  ASSERT_TRUE(ex().bindSource(
+      pid, {"sensor:other", kP2, 1, "at", std::chrono::hours(1)}));
+  EXPECT_EQ(act(Isolate{"babble"}), "Committed");
+  EXPECT_TRUE(ex().sourceLatchCached(pid, kP1));
+  host->pump();
+  const auto cycles = ctx().vm.totalCycles();
+  const auto slots  = arena().cellCount();
+  // A flood with no pump between: nothing reaches the queue, so nothing is
+  // ever delivered, logged or charged.
+  const auto babble = reading("k");
+  for (int i = 0; i < 500; ++i) {
+    const auto queued = ex().observe(pid, babble);
+    ASSERT_FALSE(queued);
+    EXPECT_EQ(queued.error(), EpistemicRefusal::SourceFaulted);
+  }
+  // Another source's readings are still accepted and committed.
+  for (int i = 0; i < 8; ++i) {
+    auto o            = reading("k" + std::to_string(i));
+    o.principal       = kP2;
+    const auto queued = ex().observe(pid, o);
+    ASSERT_TRUE(queued) << epistemicRefusalName(queued.error());
+    host->pump();
+  }
+  EXPECT_EQ(health()->refusedWhileFaulted, 500U);
+  EXPECT_EQ(health()->contentRefusals, 0);
+  EXPECT_EQ(health()->refusedCount, 0);
+  EXPECT_FALSE(health()->lastRefusal);
+  EXPECT_EQ(ex().sourceHealth(pid, kP2)->state, HealthState::Nominal);
+  EXPECT_GT(ctx().vm.totalCycles(), cycles);
+  EXPECT_GT(arena().cellCount(), slots);
+  // The babbler's own turns: none. Only the 8 healthy readings ran.
+  const auto healthy = ctx().vm.totalCycles() - cycles;
+  const auto before  = ctx().vm.totalCycles();
+  for (int i = 0; i < 500; ++i) (void)ex().observe(pid, babble);
+  host->pump();
+  EXPECT_EQ(ctx().vm.totalCycles(), before);
+  EXPECT_GT(healthy, 0U);
+}
+
+TEST_F(VagentEpistemicHealthActions,
+       TheLatchCacheIsSetByAnIsolateAndClearedByAReset) {
+  start();
+  EXPECT_FALSE(ex().sourceLatchCached(pid, kP1));
+  EXPECT_EQ(send(reading("a")), "Committed");
+  EXPECT_EQ(act(Isolate{"x"}), "Committed");
+  EXPECT_TRUE(ex().sourceLatchCached(pid, kP1));
+  EXPECT_EQ(send(reading("a")), "SourceFaulted");
+  EXPECT_EQ(health()->refusedWhileFaulted, 1U);
+  // The cache never refuses what the arena would accept: a committed reset
+  // empties it, and the next reading commits.
+  EXPECT_EQ(act(Reset{0}), "Committed");
+  EXPECT_FALSE(ex().sourceLatchCached(pid, kP1));
+  EXPECT_EQ(health()->refusedWhileFaulted, 0U);
+  EXPECT_EQ(send(reading("a")), "Committed");
+  // A reset that commits nothing leaves it alone.
+  EXPECT_EQ(act(Isolate{"again"}), "Committed");
+  EXPECT_EQ(act(Reset{0}), "StaleHealthState");
+  EXPECT_TRUE(ex().sourceLatchCached(pid, kP1));
+  EXPECT_EQ(send(reading("a")), "SourceFaulted");
+}
+
+TEST_F(VagentEpistemicHealthActions, AnArenaRefusalSetsTheCacheAfterAResume) {
+  start();
+  EXPECT_EQ(act(Isolate{"x"}), "Committed");
+  // A resume is a new pid with a new ingress entry: the cache starts empty
+  // and the arena, which carries the latch, decides the first reading.
+  auto other = resumeElsewhere();
+  ASSERT_TRUE(other.host);
+  auto &second = other.host->executor();
+  ASSERT_TRUE(second.bindSource(other.pid, bindingFor(1)));
+  second.setWallClockSynchronised(true);
+  other.host->pump();
+  EXPECT_FALSE(second.sourceLatchCached(other.pid, kP1));
+  const auto turns = second.context(other.pid)->vm.totalCycles();
+  auto first       = reading("k");
+  ASSERT_TRUE(second.observe(other.pid, first));
+  other.host->pump();
+  EXPECT_GT(second.context(other.pid)->vm.totalCycles(), turns);
+  EXPECT_TRUE(second.sourceLatchCached(other.pid, kP1));
+  const auto spent = second.context(other.pid)->vm.totalCycles();
+  const auto again = second.observe(other.pid, reading("k"));
+  ASSERT_FALSE(again);
+  EXPECT_EQ(again.error(), EpistemicRefusal::SourceFaulted);
+  other.host->pump();
+  EXPECT_EQ(second.context(other.pid)->vm.totalCycles(), spent);
+}
+
+TEST_F(VagentEpistemicHealthActions, AnActorStopForgetsTheCache) {
+  start();
+  EXPECT_EQ(act(Isolate{"x"}), "Committed");
+  ASSERT_TRUE(ex().sourceLatchCached(pid, kP1));
+  ASSERT_TRUE(ex().retire(pid));
+  EXPECT_FALSE(ex().sourceLatchCached(pid, kP1));
+}
+
+TEST_F(VagentEpistemicHealthActions, ARefusedUpgradeLeavesTheLatchAndTheCache) {
+  start();
+  EXPECT_EQ(act(Isolate{"x"}), "Committed");
+  ASSERT_TRUE(ex().sourceLatchCached(pid, kP1));
+  auto next = CompiledProgram::fromSource(std::string(kActionProgram) + "\n");
+  ASSERT_TRUE(next) << next.error();
+  auto held = host->retainProgram(std::move(*next));
+  ASSERT_TRUE(held);
+  // A profile in the arena makes the in-process upgrade refuse, so an upgrade
+  // that empties the cache can only meet an arena with no latch to re-learn;
+  // the latch itself survives the refusal.
+  EXPECT_FALSE(host->upgrade(pid, held));
+  host->pump();
+  EXPECT_TRUE(ex().sourceLatchCached(pid, kP1));
+  EXPECT_TRUE(health()->faulted);
+  EXPECT_EQ(send(reading("k")), "SourceFaulted");
+}
+
+// -- Slice 2c3: closed charges at a reset (design 5.4, 6.4) ----------------
+
+TEST_F(VagentEpistemicHealthActions, AResetDropsTheChargeClosedAtTheCall) {
+  start();
+  EXPECT_EQ(send(reading("a")), "Committed");
+  const auto bad = [&] {
+    auto o     = reading("a");
+    o.variance = -1.0;
+    return o;
+  };
+  // Refusals are charged when `observe` decides them, so three are open when
+  // the reset is called, and a fourth opens a fresh charge after it.
+  for (int i = 0; i < 3; ++i) EXPECT_FALSE(ex().observe(pid, bad()));
+  const auto receipt = ex().healthAction(pid, {*token, kP1, Reset{0}});
+  ASSERT_TRUE(receipt);
+  EXPECT_FALSE(ex().observe(pid, bad()));
+  host->pump();
+  const auto view = ex().healthOutcome(pid, *receipt);
+  ASSERT_EQ(view.items.size(), 1U);
+  EXPECT_EQ(view.items.front().outcome.kind, IngestOutcome::Kind::Committed);
+  const auto h = health();
+  ASSERT_TRUE(h);
+  // The three predate the repair: counted in the lifetime counters, absent
+  // from the estimator. The fourth is the new evidence.
+  EXPECT_EQ(h->contentRefusals, 4);
+  EXPECT_NEAR(h->weight, 1.0, 1e-9);
+  EXPECT_NEAR(h->refusalFraction, 1.0, 1e-9);
+  EXPECT_EQ(h->rejectionStreak, 0);
+}
+
+TEST_F(VagentEpistemicHealthActions, AResetDropsAnEarlierClosedNoteToo) {
+  start();
+  EXPECT_EQ(send(reading("a")), "Committed");
+  auto bad = [&] {
+    auto o     = reading("a");
+    o.variance = -1.0;
+    return o;
+  };
+  // Two refusals, then an accepted reading closes their charge into a note
+  // that is still waiting; one more refusal is open at the call.
+  EXPECT_FALSE(ex().observe(pid, bad()));
+  EXPECT_FALSE(ex().observe(pid, bad()));
+  const auto queued = reading("b");
+  ASSERT_TRUE(ex().observe(pid, queued));
+  EXPECT_FALSE(ex().observe(pid, bad()));
+  ASSERT_TRUE(ex().healthAction(pid, {*token, kP1, Reset{0}}));
+  host->pump();
+  // The queued reading predates the repair, and so do all three refusals.
+  EXPECT_EQ(ex().ingestOutcome(pid, kP1, 1, queued.eventId)->code,
+            std::optional<std::string>("SupersededByReset"));
+  const auto h = health();
+  ASSERT_TRUE(h);
+  EXPECT_EQ(h->contentRefusals, 3);
+  EXPECT_EQ(h->weight, 0.0);
+  EXPECT_EQ(h->refusalFraction, 0.0);
+  EXPECT_EQ(h->resetEpoch, 1U);
+}
+
+TEST_F(VagentEpistemicHealthActions, AResetThatCommitsNothingReopensItsCharge) {
+  start();
+  EXPECT_EQ(send(reading("a")), "Committed");
+  const auto weightBefore = health()->weight;
+  for (int i = 0; i < 2; ++i) {
+    auto o     = reading("a");
+    o.variance = -1.0;
+    EXPECT_FALSE(ex().observe(pid, o));
+  }
+  // A stale epoch changes nothing, so nothing may be dropped.
+  const auto receipt = ex().healthAction(pid, {*token, kP1, Reset{7}});
+  ASSERT_TRUE(receipt);
+  host->pump();
+  EXPECT_EQ(ex().healthOutcome(pid, *receipt).items.front().outcome.code,
+            std::optional<std::string>("StaleHealthState"));
+  const auto h = health();
+  ASSERT_TRUE(h);
+  EXPECT_EQ(h->contentRefusals, 2);
+  EXPECT_GT(h->refusalFraction, 0.5);
+  EXPECT_NE(h->weight, weightBefore);
+  EXPECT_EQ(h->resetEpoch, 0U);
+}
+
+// -- Slice 2c3: budgets and reserves (design 6.6) ---------------------------
+
+TEST_F(VagentEpistemicHealthActions,
+       HealthCellsFollowThePopulationWithinTheBound) {
+  start();
+  EXPECT_EQ(send(reading("a")), "Committed");
+  const auto p = profile();
+  ASSERT_TRUE(p);
+  // Never written until the first committed action.
+  EXPECT_EQ(integer(*p, "health_cells"), -1);
+  EXPECT_EQ(act(Degrade{"x"}), "Committed");
+  EXPECT_EQ(integer(*p, "health_cells"),
+            kHealthFixedCells + kReasonCells + kActionCells);
+  EXPECT_EQ(act(Degrade{"y"}), "Committed");
+  EXPECT_EQ(act(Isolate{"stuck"}), "Committed");
+  EXPECT_EQ(act(Clear{std::string("y")}), "Committed");
+  // Two live entries fewer after the clear and a reset; four actions at the
+  // bound, one reason left.
+  EXPECT_EQ(integer(*p, "health_cells"),
+            kHealthFixedCells + kReasonCells + 4 * kActionCells);
+  addDeviceReason("suspect", "d1");
+  addDeviceReason("suspect", "d2");
+  // A structure at R = 3 and A = 4 stays within the bound the reserve is
+  // computed from, counting every cell the profile's health fields hold.
+  std::size_t used = 0;
+  std::set<CellRef> seen;
+  const auto dims = vd();
+  const std::array walk{dims.vars, dims.values, dims.grab, dims.step};
+  std::vector<CellRef> stack;
+  for (const auto *name : {"reset_epoch", "action_seq", "fault_seq",
+                           "health_cells", "reasons", "actions"}) {
+    // `reset_epoch` and `fault_seq` exist only once a reset or an isolate has
+    // written them; the bound counts them anyway.
+    const auto value = field(*p, name);
+    if (!value) continue;
+    ++used; // the field's name cell
+    stack.push_back(*value);
+  }
+  while (!stack.empty()) {
+    const auto cell = stack.back();
+    stack.pop_back();
+    if (!seen.insert(cell).second) continue;
+    ++used;
+    for (const auto dim : walk)
+      if (const auto next = arena().linked(cell, dim)) stack.push_back(*next);
+  }
+  std::fprintf(stderr, "MEASURE health structure at R=3 A=4: %zu of %lld\n",
+               used, static_cast<long long>(healthBound(3, 4)));
+  EXPECT_LE(static_cast<std::int64_t>(used), healthBound(3, 4));
+}
+
+TEST_F(VagentEpistemicHealthActions, OrdinaryAdmissionReservesTheHealthBound) {
+  // The cells one record costs, measured with room to spare.
+  start();
+  EXPECT_EQ(send(reading("a")), "Committed");
+  const auto census = *ex().epistemicCells(pid);
+  const auto bound  = static_cast<std::size_t>(healthBound(3, 4));
+  EXPECT_EQ(bound, 142U);
+
+  LocalHost::Options tight;
+  tight.settings.epistemic.cells = census + bound - 1;
+  start(kActionProgram, tight);
+  // One cell short of the census plus the reserve: refused, writing nothing.
+  EXPECT_EQ(send(reading("a")), "EpistemicBudget");
+  EXPECT_EQ(*ex().epistemicCells(pid), 0U);
+
+  LocalHost::Options exact;
+  exact.settings.epistemic.cells = census + bound;
+  start(kActionProgram, exact);
+  EXPECT_EQ(send(reading("a")), "Committed");
+  // A degrade takes cells and gives back the reserve it writes into, so it
+  // fits where the next reading, which grows the census alone, does not.
+  EXPECT_EQ(send(reading("b")), "EpistemicBudget");
+  EXPECT_EQ(act(Degrade{"x"}), "Committed");
+}
+
+TEST_F(VagentEpistemicHealthActions,
+       ExemptEntriesLandInTheHeadroomOfAFullBudget) {
+  start();
+  EXPECT_EQ(send(reading("a")), "Committed");
+  const auto census = *ex().epistemicCells(pid);
+  LocalHost::Options exact;
+  exact.settings.epistemic.cells =
+      census + static_cast<std::size_t>(healthBound(3, 4));
+  start(kActionProgram, exact);
+  EXPECT_EQ(send(reading("a")), "Committed");
+  EXPECT_EQ(send(reading("b")), "EpistemicBudget");
+  // The isolate and the reset are not ordinary entries: nothing the reserve
+  // is charged for stands in their way.
+  EXPECT_EQ(act(Isolate{"x"}), "Committed");
+  EXPECT_EQ(act(Reset{0}), "Committed");
+}
+
+TEST_F(VagentEpistemicHealthActions,
+       LatchedTombstonesFillTheHeadroomAndThenRefuse) {
+  LocalHost::Options small;
+  small.settings.epistemic.cells = 1000;
+  start(kActionProgram, small);
+  constexpr int kPrincipals = 40;
+  std::vector<std::string> principals;
+  for (int i = 0; i < kPrincipals; ++i) {
+    char digit[3];
+    std::snprintf(digit, sizeof digit, "%02x", i + 16);
+    principals.push_back(std::string(62, 'c') + digit);
+  }
+  auto g          = grant("tomb");
+  g.sources       = principals;
+  g.maxActions    = 64;
+  const auto wide = ex().grantHealth(pid, g);
+  ASSERT_TRUE(wide);
+  int landed = 0;
+  std::string last;
+  for (const auto &principal : principals) {
+    ASSERT_TRUE(ex().bindSource(pid, {"s:" + principal.substr(60), principal, 1,
+                                      "at", std::chrono::hours(1)}));
+    const auto receipt =
+        ex().healthAction(pid, {*wide, principal, Isolate{"gone"}});
+    ASSERT_TRUE(receipt);
+    host->pump();
+    const auto view = ex().healthOutcome(pid, *receipt);
+    ASSERT_EQ(view.items.size(), 1U);
+    last = view.items.front().outcome.code.value_or("Committed");
+    if (last != "Committed") break;
+    ++landed;
+    ASSERT_TRUE(ex().retireSource(pid, principal));
+    host->pump();
+  }
+  // About 1,062 / 82 latched tombstones, then the headroom is spent.
+  EXPECT_EQ(last, "EpistemicBudget");
+  EXPECT_GT(landed, 5);
+  EXPECT_LT(landed, kPrincipals);
+  EXPECT_LE(*ex().epistemicCells(pid),
+            small.settings.epistemic.cells +
+                small.settings.epistemic.cells / kHeadroomDivisor);
+}
+
+TEST_F(VagentEpistemicHealthActions,
+       ManyBareTombstonesLeaveIngestionAndActionsWorking) {
+  start();
+  for (int i = 0; i < 400; ++i) {
+    char hex[5];
+    std::snprintf(hex, sizeof hex, "%04x", i + 4096);
+    const std::string principal = std::string(60, 'd') + hex;
+    ASSERT_TRUE(ex().bindSource(pid, {"s:" + std::string(hex), principal, 1,
+                                      "at", std::chrono::hours(1)}));
+    ASSERT_TRUE(ex().retireSource(pid, principal));
+    if (i % 50 == 49) host->pump();
+  }
+  host->pump();
+  EXPECT_EQ(send(reading("a")), "Committed");
+  EXPECT_EQ(act(Degrade{"x"}), "Committed");
+  EXPECT_TRUE(ex().checkpoint(pid));
+}
+
+TEST_F(VagentEpistemicHealthActions, AtTheSlotReserveEveryHealthEntryRefuses) {
+  // A reserve of one 64th must hold a whole action, so the allowance has to
+  // be large; ordinary readings spend it until they are refused.
+  start();
+  const auto baseline = arena().cellCount();
+  LocalHost::Options small;
+  small.settings.epistemic.arenaSlots = baseline + 800;
+  ASSERT_TRUE(small.settings.epistemic.validate());
+  start(kActionProgram, small);
+  int sent = 0;
+  while (send(reading("k" + std::to_string(sent % 4))) == "Committed" &&
+         ++sent < 4000) {
+  }
+  EXPECT_EQ(send(reading("z")), "ArenaExhausted");
+  const auto reserve = small.settings.epistemic.slotReserve();
+  EXPECT_GT(reserve, 0U);
+  // Isolate and reset still run past the allowance, and end at the reserve.
+  const auto atAllowance = arena().cellCount();
+  int landed             = 0;
+  std::string last       = "Committed";
+  for (int i = 0; i < 400 && last == "Committed"; ++i) {
+    last = act(Isolate{"x"});
+    if (last == "Committed") {
+      ++landed;
+      last = act(Reset{health()->resetEpoch});
+      if (last == "Committed") ++landed;
+    }
+  }
+  EXPECT_GT(landed, 0);
+  EXPECT_EQ(last, "ArenaExhausted");
+  EXPECT_GE(arena().cellCount(), small.settings.epistemic.arenaSlots);
+  // A turn that starts below the reserve may end a little above it.
+  EXPECT_LE(arena().cellCount(), small.settings.epistemic.arenaSlots + reserve +
+                                     (atAllowance - baseline));
 }
 
 } // namespace

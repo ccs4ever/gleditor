@@ -108,6 +108,9 @@ enum class EpistemicRefusal : std::uint8_t {
   UnknownGrant,
   SelfCertification,
   EntropyUnavailable,
+  /// The host's negative cache says the source is isolated; the arena would
+  /// refuse the reading the same way, so no turn is spent on it.
+  SourceFaulted,
 };
 
 /// What the host may do with a refused event.

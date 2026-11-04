@@ -312,3 +312,74 @@ Not done in this slice, with the reason:
   claims are tested in the health test.
 - `wouldChange(Clear {code})` is true when any `degraded` reason holds the code, so a code held only
   by a device reason still runs the turn and answers `NotOperatorReason`, as the design wants.
+
+## I3-2c3: latch cache, budgets, dropped charges
+
+Implemented from the I3-2 design (revision 4) without a per-slice review, by the lead's instruction.
+This closes the items 2c2 left out; what is still open is listed at the end.
+
+- **Latch cache (6.5).** `Ingress::latched` is a set of (actor, principal) and `refusedWhileFaulted`
+  a count, both host memory and both erased by `forget`. `observe` refuses `SourceFaulted` (a new
+  `EpistemicRefusal`, class `NeedsHostAction`) right after the binding check, before the queue, and
+  logs, charges and posts nothing. The set is filled by an arena `SourceFaulted` refusal reaching
+  `finishIngest` and by a committed (or `NoChange`) isolate in `finishHealthItem`; a committed reset
+  empties it and zeroes the count; an actor stop and an in-process upgrade empty it (a resume is a
+  new pid, so it starts empty). `SourceHealth::refusedWhileFaulted` shows the count, and
+  `sourceLatchCached` reads the set for tests and operators. The arena stays the authority: the
+  cache only ever refuses what the arena would.
+- **Dropped charges (5.4, 6.4).** `IngressCharge` carries the reset generation it was opened under
+  and moved to `agent_executor_health.hpp`. A reset call that would change something detaches the
+  open charge into `QueuedHealth::closed` (the split: a refusal after the call opens a fresh charge
+  under the new generation); the turn passes its `content` and `other` as `dropped_content` and
+  `dropped_other`, and the IR adds them to the lifetime counters, now creating the counter when an
+  isolate-made profile has none. A reset that does not commit (`StaleHealthState`, `NoChange`,
+  revoked) puts the charge back, merged into whatever opened since. A note already holding a charge
+  of a lower generation than a committed reset runs as lifetime-only: `health`, `passed` and
+  `contact` are dropped when it runs, so a note drained before the commit is caught too. The note
+  record is now built when the note runs (`refusalNote`), not when it is drained.
+- **Budgets (6.6).** The health turn writes `health_cells` (`kHealthFixedCells` 14 plus
+  `kReasonCells` 16 and `kActionCells` 20 per live entry) before every commit. `epistemicReserve`
+  sums `healthBound - health_cells` over live profiles and skips tombstones; `admitCells` is the one
+  hook: ordinary entries (ingestion, bookkeeping, a degrade on a live profile) need census plus
+  reserve within `cells`, exempt ones (isolate, clear, reset, any action on a tombstone, settle
+  turns) need the census within `cells + cells / 16` (`kHeadroomDivisor`). The health slot gate is
+  now `arenaSlots + slotReserve()`. A construction WARN prints `maxSources x (healthBound +
+  kProfileBaseCells)` against `cells`; the checkpoint-limit relation is not warned because
+  `kMaxEpistemicCheckpointCells` does not exist yet (see limits).
+- **Incarnation bound.** The `max Int64` handed to `rtSourceDrop_` is a genuine numeric maximum
+  (records below the bound are retired, so an isolate and a reset retire every boot's); it is not an
+  absence marker. Both call sites now say why.
+- **Tests.** Health test (+17): a babbler of 500 readings costs no cycles and leaves another source
+  committing, set by isolate, cleared by reset (the next reading commits), a reset that commits
+  nothing leaves it, set by an arena refusal after a resume, forgotten by an actor stop, a refused
+  upgrade leaves latch and cache; three dropped-charge cases (call-time charge dropped with the new
+  one kept, an earlier closed note dropped too and a queued reading superseded, a stale reset
+  reopens its charge); `health_cells` per population and a full structure counted against the
+  constants (129 cells measured at R = 3, A = 4 against the bound 142); reserve threshold (one cell
+  short refuses, exact commits, a degrade still fits where a reading does not); an isolate and a
+  reset land on a full budget; latched tombstones fill the headroom and then refuse
+  `EpistemicBudget`; 400 bare tombstones leave a reading, a degrade and a checkpoint working; at the
+  slot reserve isolate and reset run past the allowance and end `ArenaExhausted`. Settle test: the
+  second half of the wedge test (after a reset one non-replacing reading per key commits and the
+  next replacing one refuses again). Resume test: latch, reasons, audit entries, `action_seq` and
+  `reset_epoch` cross a checkpoint and resume, the cache starts empty and the arena refusal sets
+  it, and a retry under the old epoch is stale on the new host. ABI test pins the new names.
+- **Result.** `vagent_actor_test`: 960 passed. `xuzz_test`: 3,128 passed, plus the E2E drag test,
+  which failed once under load and passed alone (the known flake). The full `make` exited 0 and
+  `make fuzz_epistemic_ingress` built.
+- **Ambiguities and how they were read.** (1) `health_cells` is the worst-case size of the live
+  entries, not the measured cells, so the reserve never undercounts what an entry can grow to; the
+  census of a profile can only be below it. (2) A degrade on a tombstone draws on the headroom (the
+  design says every action on a tombstone does). (3) A closed charge is detached at the call rather
+  than copied into its note, because a copy would have to be undone when the reset fails; the
+  reopened charge can reorder its effect on `R` and `N` against refusals decided in between, which
+  is bounded by the per-source queue share and was already accepted for notes (R3-2). (4) The
+  construction WARN covers one of the two capacity relations.
+- **Limits.** The upgrade row of the cache table is tested only as a refusal: a latched profile
+  leaves the arena non-empty, and the in-process upgrade needs it empty, so no upgrade that
+  empties the cache can meet a latch today. `kMaxEpistemicCheckpointCells` and the "fill to the hard
+  ceiling and checkpoint" test (6.6) do not exist; the full-budget checkpoint tests of I3-1 pass
+  unchanged. The 100 Hz, eight-babbler acceptance figure (29 percent without the cache) is a
+  throughput claim; the test shows the cause (no turn, no queue slot) and not the rate. The
+  runbook test of 6.6 (revoke, isolate, drain, checkpoint, resume) is not written.
+  I3-2 is complete apart from those three and the I4-1b version-bump sites listed under 2c2.

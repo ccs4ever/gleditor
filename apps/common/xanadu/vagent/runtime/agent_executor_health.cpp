@@ -269,12 +269,13 @@ AgentExecutor::healthAction(const identity::ActorPid &target,
         }
       }
 
-      auto chargeIt = ingress_->charges.find({pid, request.principal});
-      if (chargeIt != ingress_->charges.end()) {
-        if (posts_->attachCharge(target, request.principal,
-                                 std::move(chargeIt->second))) {
-          ingress_->charges.erase(chargeIt);
-        }
+      // The open charge predates the reset, so it leaves the map here: a
+      // refusal after the call opens a fresh charge under the new
+      // generation, and the two never coalesce.
+      if (auto chargeIt = ingress_->charges.find({pid, request.principal});
+          chargeIt != ingress_->charges.end()) {
+        qh.closed = std::move(chargeIt->second);
+        ingress_->charges.erase(chargeIt);
       }
     }
   }
@@ -491,7 +492,41 @@ void AgentExecutor::finishHealthItem(const identity::ActorPid &target,
   if (outcome.kind == IngestOutcome::Kind::Committed &&
       std::holds_alternative<Reset>(qh.action)) {
     const std::lock_guard lock(ingress_->mutex);
-    ingress_->commitReset({pidKey(target), qh.principal}, qh.generation);
+    const Ingress::SourceKey source{pidKey(target), qh.principal};
+    ingress_->commitReset(source, qh.generation);
+    ingress_->latched.erase(source);
+    ingress_->refusedWhileFaulted.erase(source);
+  }
+  // A reset that did not commit has dropped nothing: its closed charge goes
+  // back, merged into whatever opened since. An undelivered item belongs to
+  // an actor that is going away, whose host memory goes with it.
+  if (std::holds_alternative<Reset>(qh.action) && qh.closed &&
+      outcome.kind != IngestOutcome::Kind::Committed &&
+      code != kTurnResultUndelivered) {
+    const Ingress::SourceKey source{pidKey(target), qh.principal};
+    const std::lock_guard lock(ingress_->mutex);
+    auto [open, fresh] = ingress_->charges.try_emplace(source);
+    auto &charge       = open->second;
+    if (fresh) {
+      charge.code       = qh.closed->code;
+      charge.generation = qh.closed->generation;
+    }
+    charge.content += qh.closed->content;
+    charge.other += qh.closed->other;
+    charge.health += qh.closed->health;
+    charge.passed += qh.closed->passed;
+    charge.generation = std::min(charge.generation, qh.closed->generation);
+    if (qh.closed->contact)
+      charge.contact = std::max(charge.contact.value_or(*qh.closed->contact),
+                                *qh.closed->contact);
+    if (fresh) postRefusals(target, qh.principal);
+  }
+  // A `NoChange` isolate means the snapshot already read the latch.
+  if ((outcome.kind == IngestOutcome::Kind::Committed ||
+       outcome.kind == IngestOutcome::Kind::NoChange) &&
+      std::holds_alternative<Isolate>(qh.action)) {
+    const std::lock_guard lock(ingress_->mutex);
+    ingress_->latched.insert({pidKey(target), qh.principal});
   }
 
   HealthAudit audit;

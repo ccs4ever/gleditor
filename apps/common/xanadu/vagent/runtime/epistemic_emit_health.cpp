@@ -261,6 +261,8 @@ void Gen::emitHealthEntry(CellRef entryLabel) {
     putScalar(prof, kProfileFaulted, S(true_));
     putScalar(prof, kProfileFaultSeq, S(seq));
     mov(S(a0_), S(prof));
+    // A real maximum: the drop retires records whose incarnation is below
+    // this bound, and an isolate or a reset retires every boot's.
     loadRef(a1_, cInt(std::numeric_limits<std::int64_t>::max()));
     mov(S(a2_), S(vcRetained));
     movC(a3_, cStr(std::string(kRetiredByIsolate)));
@@ -396,15 +398,25 @@ void Gen::emitHealthEntry(CellRef entryLabel) {
     for (const auto &[counter, dropped] :
          {std::pair{kProfileContentRefusals, vcDropC},
           std::pair{kProfileRefusedCount, vcDropO}}) {
-      const CellRef vc = reg(), sum = reg(), skip = newLabel();
+      // A profile an isolate created has no counter yet, and the dropped
+      // count must not be lost with it.
+      const CellRef vc = reg(), held = reg(), sum = reg(), skip = newLabel(),
+                    have = newLabel(), summed = newLabel();
       branchIfZero(dropped, skip);
       find(prof, counter, vc);
-      branchIfZero(vc, skip);
-      emit(OpcodeKind::Add, "dropped+", {D(vc), D(dropped)}, {sum});
-      mov(D(vc), S(sum));
+      branchIfZero(vc, have);
+      mov(S(held), D(vc));
+      jump(summed);
+      place(have);
+      movC(held, zero_);
+      place(summed);
+      emit(OpcodeKind::Add, "dropped+", {S(held), D(dropped)}, {sum});
+      putScalar(prof, counter, S(sum));
       place(skip);
     }
     mov(S(a0_), S(prof));
+    // A real maximum: the drop retires records whose incarnation is below
+    // this bound, and an isolate or a reset retires every boot's.
     loadRef(a1_, cInt(std::numeric_limits<std::int64_t>::max()));
     mov(S(a2_), S(vcRetained));
     movC(a3_, cStr(std::string(kRetiredByReset)));
@@ -550,6 +562,28 @@ void Gen::emitHealthEntry(CellRef entryLabel) {
     callListPush(actions, entry);
     place(settled);
     place(committed);
+    // The reserve of design 6.6 is the bound less this, so it is written by
+    // every committed action, after the lists have taken their final shape.
+    {
+      const CellRef nr = reg(), na = reg(), sum = reg(), part = reg(),
+                    reasonsDone = newLabel(), actionsDone = newLabel();
+      movC(nr, zero_);
+      forEach(reasons, reasonsDone, [&](CellRef, CellRef) {
+        emit(OpcodeKind::Add, "nr+", {S(nr), S(one_)}, {nr});
+      });
+      movC(na, zero_);
+      forEach(actions, actionsDone, [&](CellRef, CellRef) {
+        emit(OpcodeKind::Add, "na+", {S(na), S(one_)}, {na});
+      });
+      emit(OpcodeKind::Mul, "reason cells", {S(nr), S(cInt(kReasonCells))},
+           {part});
+      emit(OpcodeKind::Add, "fixed+", {S(part), S(cInt(kHealthFixedCells))},
+           {sum});
+      emit(OpcodeKind::Mul, "action cells", {S(na), S(cInt(kActionCells))},
+           {part});
+      emit(OpcodeKind::Add, "cells", {S(sum), S(part)}, {sum});
+      putScalar(prof, kProfileHealthCells, S(sum));
+    }
     endObservation(kTurnResultCommitted);
   }
   place(malformed);

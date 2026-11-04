@@ -18,6 +18,7 @@
 #include <string_view>
 #include <vector>
 
+#include "common/xanadu/vagent/runtime/health_grants.hpp"
 #include "common/xanadu/vagent/runtime/program.hpp"
 #include "common/xanadu/vagent/runtime/runtime_abi.hpp"
 #include "common/xanadu/vagent/runtime/settle_discard.hpp"
@@ -497,7 +498,37 @@ TEST_F(VagentEpistemicSettle,
   EXPECT_EQ(out.kind, IngestOutcome::Kind::Committed);
   ASSERT_TRUE(out.settle);
   EXPECT_EQ(out.settle->discarded, 1U);
-  // (An operator reset admitting one non-replacing reading needs 2c2.)
+}
+
+TEST_F(VagentEpistemicSettle, AResetAdmitsOneNonReplacingReadingPerKeyOnly) {
+  start(kCounting, {"at"}, {}, {}, kBoom);
+  EXPECT_EQ(observe(reading(kP1, "self", 1.0)).kind,
+            IngestOutcome::Kind::Committed);
+  EXPECT_EQ(observe(reading(kP1, "self", 2.0)).code,
+            std::optional<std::string>("IngestionFault"));
+  EpistemicHealthGrant g{"wedge",
+                         *HealthIssuer::fromPrincipal(std::string(64, 'b')),
+                         {kP1},
+                         {},
+                         std::chrono::hours(1),
+                         8};
+  g.actions.push_back(HealthActionKind::Reset);
+  const auto token = host->executor().grantHealth(pid, g);
+  ASSERT_TRUE(token);
+  ASSERT_TRUE(host->executor().healthAction(pid, {*token, kP1, Reset{0}}));
+  host->pump();
+  // The reset withdrew the support, so a reading of the key no longer
+  // replaces one, raises no `-at`, and commits; so does a fresh key.
+  EXPECT_EQ(observe(reading(kP1, "self", 3.0)).kind,
+            IngestOutcome::Kind::Committed);
+  EXPECT_EQ(observe(reading(kP1, "other", 1.0)).kind,
+            IngestOutcome::Kind::Committed);
+  // The next reading that replaces a key meets the handler again.
+  const auto wedged = observe(reading(kP1, "self", 4.0));
+  EXPECT_EQ(wedged.kind, IngestOutcome::Kind::Refused);
+  EXPECT_EQ(wedged.code, std::optional<std::string>("IngestionFault"));
+  EXPECT_EQ(observe(reading(kP1, "other", 2.0)).code,
+            std::optional<std::string>("IngestionFault"));
 }
 
 TEST_F(VagentEpistemicSettle, ACheckpointRefusesLinkedPendingEvents) {
