@@ -9,6 +9,9 @@
 namespace xanadu::vql {
 namespace {
 using zigzag::CellRef;
+using zigzag::vortex::CellValue;
+using zigzag::vortex::FrameDescriptorSpec;
+using zigzag::vortex::FramePortKind;
 using zigzag::vortex::OpcodeKind;
 
 template <class Action> struct RestoreScope {
@@ -95,6 +98,31 @@ std::vector<CellRef>
 VQLCompiler::compileCall(const DefDeclaration &definition,
                          const std::vector<ValueExpr> &arguments,
                          std::optional<CellRef> context, bool ufcs) {
+  bool hasStaticFunctor = false;
+  std::size_t functorIndex =
+      ufcs && context && definition.params.size() > arguments.size() ? 1 : 0;
+  for (const auto &argument : arguments) {
+    if (functorIndex < definition.params.size()) {
+      const auto &parameter = definition.params[functorIndex];
+      if (!parameter.type && !parameter.isVariadic &&
+          std::holds_alternative<std::string>(parameter.target) &&
+          functorArgument(argument)) {
+        hasStaticFunctor = true;
+        break;
+      }
+    }
+    ++functorIndex;
+  }
+  if (reusableFrameDefinitions_.contains(definition.name) &&
+      !hasStaticFunctor) {
+    if (compilingFrameDefinition_ && activeCalls_.size() > 1 &&
+        activeCalls_.back() != compilingFrameDefinitionName_ &&
+        std::ranges::contains(activeCalls_, definition.name))
+      throw std::invalid_argument(
+          "recursive cycle crosses an inline-only definition: " +
+          definition.name);
+    return compileReusableFrameCall(definition, arguments, context, ufcs);
+  }
   if (std::ranges::contains(activeCalls_, definition.name))
     throw std::invalid_argument(
         "recursive compiled call requires a VM frame: " + definition.name);
@@ -276,5 +304,294 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
   allOps_.push_back(end);
   lastResultCells_ = results;
   return results;
+}
+
+CellRef
+VQLCompiler::normalizeFrameStream(const std::span<const CellRef> cells) {
+  const CellRef stream = emitStreamClear();
+  emitAppendStream(stream, cells);
+  return stream;
+}
+
+std::vector<CellRef> VQLCompiler::compileReusableFrameCall(
+    const DefDeclaration &definition, const std::vector<ValueExpr> &arguments,
+    const std::optional<CellRef> context, const bool ufcs) {
+  auto state = frameDefinitions_.find(definition.name);
+  if (state == frameDefinitions_.end()) {
+    const auto reserved = vm_.reserveFrameDescriptor();
+    if (!reserved) throw std::invalid_argument(reserved.error().message);
+    state = frameDefinitions_
+                .emplace(definition.name,
+                         FrameDefinitionState{.descriptor = *reserved})
+                .first;
+  }
+  const CellRef descriptor = state->second.descriptor;
+  if (!state->second.queued && !state->second.compiled) {
+    state->second.queued = true;
+    pendingFrameDefinitions_.push_back(definition.name);
+  }
+
+  std::vector<std::vector<CellRef>> actuals;
+  if (ufcs && context && definition.params.size() > arguments.size())
+    actuals.push_back({*context});
+  for (const auto &argument : arguments)
+    actuals.push_back(compileArgument(argument, context));
+
+  const CellRef contextStream =
+      context ? normalizeFrameStream(std::span{&*context, std::size_t{1}})
+              : normalizeFrameStream(std::span<const CellRef>{});
+  std::vector<CellRef> argumentStreams;
+  std::vector<std::optional<CellRef>> presenceFlags;
+  argumentStreams.reserve(definition.params.size());
+  presenceFlags.reserve(definition.params.size());
+  for (std::size_t index = 0; index < definition.params.size(); ++index) {
+    const std::vector<CellRef> empty;
+    const bool present = index < actuals.size();
+    const auto &actual = present ? actuals[index] : empty;
+    argumentStreams.push_back(normalizeFrameStream(actual));
+    presenceFlags.push_back(
+        definition.params[index].defaultValue
+            ? std::optional{emitConstant(CellValue(present))}
+            : std::nullopt);
+  }
+  const CellRef resultStream = emitStreamClear();
+  const CellRef invoke =
+      emitOp(OpcodeKind::InvokeFrame, "#INVOKE_FRAME " + definition.name);
+  emitInput(invoke, descriptor);
+  emitInput(invoke, contextStream);
+
+  for (std::size_t index = 0; index < definition.params.size(); ++index) {
+    emitInput(invoke, argumentStreams[index]);
+    if (presenceFlags[index]) emitInput(invoke, *presenceFlags[index]);
+  }
+  emitOutput(invoke, resultStream);
+  dynamicStreams_.insert(resultStream);
+  lastResultCells_ = {resultStream};
+  return lastResultCells_;
+}
+
+void VQLCompiler::compilePendingFrameDefinitions() {
+  for (std::size_t index = 0; index < pendingFrameDefinitions_.size();
+       ++index) {
+    const auto name  = pendingFrameDefinitions_[index];
+    const auto state = frameDefinitions_.find(name);
+    if (state == frameDefinitions_.end() || state->second.compiled) continue;
+    const auto definition = definitions_.find(name);
+    if (definition == definitions_.end())
+      throw std::invalid_argument("missing frame definition: " + name);
+    compileFrameDefinition(definition->second);
+  }
+}
+
+void VQLCompiler::compileFrameDefinition(const DefDeclaration &definition) {
+  struct SavedCompilerState {
+    std::optional<CellRef> entry;
+    std::optional<CellRef> current;
+    std::unordered_map<std::string, std::optional<CellRef>> variables;
+    std::unordered_map<std::string, std::vector<CellRef>> streams;
+    std::unordered_map<std::string, std::vector<PathStep>> functors;
+    std::optional<CellRef> context;
+    std::vector<CellRef> results;
+    std::unordered_set<CellRef> dynamicStreams;
+    std::unordered_set<CellRef> frameMutableSlots;
+    std::vector<std::string> activeCalls;
+    bool compilingFrameDefinition;
+    std::string compilingFrameDefinitionName;
+  } saved{entryOp_,
+          currentOp_,
+          varBindings_,
+          streamBindings_,
+          functorBindings_,
+          ambientContext_,
+          lastResultCells_,
+          dynamicStreams_,
+          frameMutableSlots_,
+          activeCalls_,
+          compilingFrameDefinition_,
+          compilingFrameDefinitionName_};
+  const auto restore = RestoreScope{[&] {
+    entryOp_                  = saved.entry;
+    currentOp_                = saved.current;
+    varBindings_              = std::move(saved.variables);
+    streamBindings_           = std::move(saved.streams);
+    functorBindings_          = std::move(saved.functors);
+    ambientContext_           = saved.context;
+    lastResultCells_          = std::move(saved.results);
+    dynamicStreams_           = std::move(saved.dynamicStreams);
+    frameMutableSlots_        = std::move(saved.frameMutableSlots);
+    activeCalls_              = std::move(saved.activeCalls);
+    compilingFrameDefinition_ = saved.compilingFrameDefinition;
+    compilingFrameDefinitionName_ =
+        std::move(saved.compilingFrameDefinitionName);
+  }};
+
+  const CellRef descriptor = frameDefinitions_.at(definition.name).descriptor;
+  entryOp_.reset();
+  currentOp_.reset();
+  lastResultCells_.clear();
+  varBindings_.clear();
+  streamBindings_.clear();
+  functorBindings_.clear();
+  dynamicStreams_.clear();
+  frameMutableSlots_.clear();
+  ambientContext_.reset();
+  compilingFrameDefinition_     = true;
+  compilingFrameDefinitionName_ = definition.name;
+  activeCalls_.push_back(definition.name);
+
+  FrameDescriptorSpec spec;
+  const CellRef contextSlot = core_.arena().makeCell();
+  const CellRef resultSlot  = core_.arena().makeCell();
+  std::vector<CellRef> parameterSlots;
+  std::vector<std::optional<CellRef>> presenceSlots;
+  parameterSlots.reserve(definition.params.size());
+  presenceSlots.reserve(definition.params.size());
+  spec.locals = {contextSlot, resultSlot};
+  spec.argumentPorts.emplace_back(contextSlot, FramePortKind::Stream);
+  spec.resultPorts.emplace_back(resultSlot, FramePortKind::Stream);
+  for (const auto &parameter : definition.params) {
+    const auto *name = std::get_if<std::string>(&parameter.target);
+    if (!name)
+      throw std::invalid_argument(
+          "frame definition has an unsupported parameter target");
+    const CellRef slot = core_.arena().makeCell();
+    parameterSlots.push_back(slot);
+    presenceSlots.push_back(std::nullopt);
+    spec.locals.push_back(slot);
+    spec.argumentPorts.emplace_back(slot, FramePortKind::Stream);
+    if (parameter.defaultValue) {
+      const CellRef present = core_.arena().makeCell();
+      presenceSlots.back()  = present;
+      spec.locals.push_back(present);
+      spec.argumentPorts.emplace_back(present, FramePortKind::Cell);
+    }
+  }
+
+  streamBindings_["."] = {contextSlot};
+  varBindings_["."]    = contextSlot;
+  ambientContext_      = contextSlot;
+  dynamicStreams_.insert(contextSlot);
+  for (const auto slot : parameterSlots) {
+    dynamicStreams_.insert(slot);
+  }
+  dynamicStreams_.insert(resultSlot);
+
+  const CellRef returnOpcode = vm_.mintOpcode(
+      OpcodeKind::ReturnFrame, "#RETURN_FRAME " + definition.name);
+  core_.bindInput(returnOpcode, descriptor);
+  const auto emitMatch = [&](const TypeExpr &type,
+                             const std::vector<CellRef> &subjects) {
+    const auto defaultSlots = emitContractDefaultSlots(type);
+    const auto typeCell     = emitConstant(encodeTypeDescriptor(type));
+    const auto match        = emitOp(OpcodeKind::MatchContract, "#FRAME_MATCH");
+    emitInput(match, typeCell);
+    emitInputConstant(match, static_cast<std::int64_t>(subjects.size()));
+    for (const auto subject : subjects) emitInput(match, subject);
+    for (const auto fallback : defaultSlots) emitInput(match, fallback);
+    const CellRef matched = core_.arena().makeCell();
+    emitOutput(match, matched);
+    for (const auto &capture : ContractMatcher::contractCaptureNames(type)) {
+      const CellRef captureSlot = core_.arena().makeCell();
+      emitOutput(match, captureSlot);
+      streamBindings_[capture] = {captureSlot};
+      varBindings_[capture]    = captureSlot;
+      if (capture == ".")
+        ambientContext_ = emitContextFallback(captureSlot, ambientContext_);
+    }
+    const CellRef branch =
+        emitOp(OpcodeKind::BranchFalseCell, "#FRAME_PARAM_FILTER");
+    emitInput(branch, matched);
+    emitInput(branch, returnOpcode);
+  };
+
+  for (std::size_t index = 0; index < definition.params.size(); ++index) {
+    const auto &parameter = definition.params[index];
+    const auto &name      = std::get<std::string>(parameter.target);
+    const CellRef slot    = parameterSlots[index];
+    if (parameter.defaultValue) {
+      const CellRef notPresent = core_.arena().makeCell();
+      const CellRef negate     = emitOp(OpcodeKind::Not, "#FRAME_DEFAULT_TEST");
+      emitInput(negate, *presenceSlots[index]);
+      emitOutput(negate, notPresent);
+      const CellRef skip =
+          vm_.mintOpcode(OpcodeKind::Nop, "#FRAME_DEFAULT_SKIP");
+      const CellRef branch =
+          emitOp(OpcodeKind::BranchFalseCell, "#FRAME_DEFAULT_MISSING");
+      emitInput(branch, notPresent);
+      emitInput(branch, skip);
+      const auto defaultCells =
+          compileArgument(*parameter.defaultValue, ambientContext_);
+      const CellRef clear =
+          emitOp(OpcodeKind::StreamClear, "#FRAME_DEFAULT_CLEAR");
+      emitOutput(clear, slot);
+      if (!defaultCells.empty()) emitAppendStream(slot, defaultCells);
+      appendOpcode(skip);
+    }
+    if (parameter.type) emitMatch(*parameter.type, {slot});
+    streamBindings_[name] = {slot};
+    varBindings_[name]    = slot;
+  }
+
+  const CellRef clearResult =
+      emitOp(OpcodeKind::StreamClear, "#FRAME_RESULT_CLEAR");
+  emitOutput(clearResult, resultSlot);
+  std::vector<CellRef> bodyResults;
+  if (const auto *value =
+          std::get_if<std::shared_ptr<ValueExpr>>(&definition.body)) {
+    bodyResults = compileArgument(**value, ambientContext_);
+  } else {
+    const auto &body = *std::get<std::shared_ptr<ScriptBody>>(definition.body);
+    for (const auto &statement : body.statements) {
+      lastResultCells_.clear();
+      if (const auto *block = std::get_if<ExecutionBlock>(&statement))
+        compileExecutionBlock(*block);
+      else if (const auto *path = std::get_if<PathExpression>(&statement))
+        compilePathExpression(*path, ambientContext_.value_or(core_.home()));
+      else
+        throw std::invalid_argument(
+            "frame definition body contains an unsupported statement");
+      bodyResults = lastResultCells_;
+    }
+  }
+  if (!bodyResults.empty()) emitAppendStream(resultSlot, bodyResults);
+
+  if (definition.returnType) {
+    const auto defaultSlots = emitContractDefaultSlots(*definition.returnType);
+    const auto typeCell =
+        emitConstant(encodeTypeDescriptor(*definition.returnType));
+    const CellRef require =
+        emitOp(OpcodeKind::RequireContract, "#FRAME_RETURN_TYPE");
+    emitInput(require, typeCell);
+    emitInputConstant(require, definition.name);
+    emitInputConstant(require, std::int64_t{1});
+    emitInput(require, resultSlot);
+    for (const auto fallback : defaultSlots) emitInput(require, fallback);
+  }
+
+  if (!entryOp_)
+    throw std::invalid_argument("frame definition emitted no entry opcode");
+  const CellRef bodyEntry = *entryOp_;
+  appendOpcode(returnOpcode);
+  std::unordered_set<CellRef> localSet(spec.locals.begin(), spec.locals.end());
+  std::vector<CellRef> mutableSlots(frameMutableSlots_.begin(),
+                                    frameMutableSlots_.end());
+  std::ranges::sort(mutableSlots);
+  for (const auto output : mutableSlots) {
+    if (core_.arena().contains(output) && !vm_.getOpcodeKind(output) &&
+        localSet.insert(output).second) {
+      if (core_.hasPipeline(output))
+        throw std::invalid_argument(
+            "reusable frame body produced a pipelined local slot");
+      spec.locals.push_back(output);
+    }
+  }
+  spec.entry           = bodyEntry;
+  const auto finalized = vm_.finalizeFrameDescriptor(descriptor, spec);
+  if (!finalized) throw std::invalid_argument(finalized.error().message);
+  auto &finalizedState    = frameDefinitions_.at(definition.name);
+  finalizedState.entry    = bodyEntry;
+  finalizedState.compiled = true;
+  finalizedState.queued   = false;
+  (void)restore;
 }
 } // namespace xanadu::vql

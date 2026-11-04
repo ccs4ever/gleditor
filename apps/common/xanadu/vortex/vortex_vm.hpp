@@ -280,6 +280,10 @@ public:
   void setCursorOpcode(CellRef cursor, std::optional<CellRef> op);
   [[nodiscard]] std::expected<CellRef, FrameDescriptorError>
   makeFrameDescriptor(const FrameDescriptorSpec &spec);
+  [[nodiscard]] std::expected<CellRef, FrameDescriptorError>
+  reserveFrameDescriptor();
+  [[nodiscard]] std::expected<VortexVM *, FrameDescriptorError>
+  finalizeFrameDescriptor(CellRef reserved, const FrameDescriptorSpec &spec);
   [[nodiscard]] std::expected<FrameDescriptor, FrameDescriptorError>
   frameDescriptor(CellRef descriptor) const;
   VortexVM *setFrameLimits(FrameLimits limits);

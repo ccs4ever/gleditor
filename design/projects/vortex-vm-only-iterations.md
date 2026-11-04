@@ -396,3 +396,43 @@ ordinary test runs and is available with `--gtest_also_run_disabled_tests` and
 
 Logs: `/tmp/vql-frames-build.log`, `/tmp/vql-frames-tests.log`, `/tmp/vql-frames-vm-tests.log`,
 `/tmp/vql-frames-profile.log`, `/tmp/vql-frames-format.log`.
+
+## Iteration 14: reusable closed-function graphs
+
+Eligible closed primitive/Stream calls now compile to `InvokeFrame` and one reusable body graph per
+function in the query. Reserved descriptor roots support forward self/mutual references; finalizing
+one is atomic and refuses duplicate finalization. The compiler prepares actual arguments in caller
+scope before invoking, passes context and ordered formal streams explicitly, and distinguishes an
+omitted default from an explicitly empty argument through presence ports. Defaults run lazily in the
+callee and can call the same reusable function without expanding its AST recursively. Parameter
+mismatch returns an empty stream; successful body results pass their return contract before return.
+
+Function bodies have separate instruction chains, with only their mutable output registers and
+explicit ports designated local. Constants and actual external cells stay shared. Export inspection
+now follows descriptor entries and graph branch targets, and a self-recursive traversal survives
+Store save/reload after the compiling VM and AST are destroyed. Host and mesh Vquery source routes
+execute these real graphs. Sealed Vortex frame artifacts remain explicitly unsupported as in the
+previous stage.
+
+A bounded, query-wide AST analysis selects the reusable subset before recursive signature/type
+consumers run. Cyclic/malformed ASTs and budget exhaustion are hard errors. Free captures, shape
+contracts, context-dot targets, functors, variadics and other unlowered forms keep the existing
+compiled inline path; this is a second graph lowering strategy, not direct execution. Ineligibility
+propagates through user-call dependencies using a budgeted reverse-edge queue, preserving outer
+bindings for an otherwise closed wrapper that calls an inline-only helper. Eligible recursive
+components remain reusable. Recursive cycles involving excluded forms still refuse explicitly.
+
+Validation: full `make -j$(nproc)` passed. All 493 affected tests from 47 suites passed, including
+finite self/mutual recursion, identity, defaults, depth Budget errors, indirect outer captures,
+forward descriptor rollback/retry, cyclic ASTs, host/mesh source execution, and fresh-VM recursive
+export. A headless CLI query created a three-cell chain and recursively returned `third`. The
+broader VM/language sweep passed 244 of 271 tests, retaining the same 27 missing-Prolog- resolution
+failures recorded in iteration 13. No full-suite pass or speedup is claimed. The native backing
+allocation policy and measured costs from iteration 13 still apply. Independent Luna architecture
+and senior/profiler gates assess this bounded stage; full §4.12 remains incomplete.
+
+Next: expand the formal/context/capture ABI, then structural matching continuations and real graph
+field-default thunks, mutation boundaries, and the remaining functor/variadic/lifecycle semantics.
+
+Logs: `/tmp/vql-recursive-build.log`, `/tmp/vql-recursive-tests.log`,
+`/tmp/vql-recursive-vm-tests.log`, `/tmp/vql-recursive-cli.log`, `/tmp/vql-recursive-format.log`.

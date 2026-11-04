@@ -162,20 +162,15 @@ TEST(VQLVariadicParityTest, NestedCallsEvaluateBeforeCallerActivation) {
   }
 }
 
-TEST(VQLVariadicParityTest, RecursiveBodiesAndDefaultsStillRefuseInVortex) {
+TEST(VQLVariadicParityTest, EligibleRecursionRunsAndStopsAtFrameDepthLimit) {
   VariadicHarness h;
   QueryExecutor executor(h.engine, h.vm, {.mode = QueryExecutionMode::Vortex});
-  for (const auto query : {
-           "def recurse(): Int := recurse(); recurse()",
-           "def recurse($value: Int := recurse()): Int := $value; recurse()",
-       }) {
-    SCOPED_TRACE(query);
-    const auto result = executor.execute(query);
-    ASSERT_FALSE(result);
-    EXPECT_EQ(result.error().category, QueryExecutionError::Category::Compile);
-    EXPECT_NE(result.error().message.find("recursive compiled call"),
-              std::string::npos);
-  }
+  h.vm.setFrameLimits({.maxDepth = 8});
+  const auto result =
+      executor.execute("def recurse(): Int := recurse(); recurse()");
+  ASSERT_FALSE(result);
+  EXPECT_EQ(result.error().category, QueryExecutionError::Category::Budget);
+  EXPECT_NE(result.error().message.find("frame depth"), std::string::npos);
 }
 
 TEST(VQLVariadicParityTest, ReturnPromiseChecksFlattenedBodyResults) {

@@ -103,13 +103,29 @@ void compileExportReloadAndRun(const Case &testCase, const fs::path &root) {
       reopenedCore.home(), reopenedCore.dims().spin, DimVector::POS);
   ASSERT_TRUE(entry) << "exported Store has no executable entry in +d.spin";
 
-  // The branch target is an actual instruction cell in the persisted spin
-  // chain, rather than a process-local PC or a stale CellRef.
+  // Function bodies are separate spin chains reached through descriptors.
   std::unordered_set<CellRef> instructions;
-  auto instruction = entry;
-  while (instruction && instructions.insert(*instruction).second) {
-    instruction = reopenedArena.linked(*instruction, reopenedCore.dims().spin,
-                                       DimVector::POS);
+  std::vector<CellRef> pending{*entry};
+  while (!pending.empty()) {
+    const auto instruction = pending.back();
+    pending.pop_back();
+    if (!instructions.insert(instruction).second) continue;
+    if (const auto next = reopenedArena.linked(
+            instruction, reopenedCore.dims().spin, DimVector::POS))
+      pending.push_back(*next);
+    const auto kind = reopenedVm.getOpcodeKind(instruction);
+    if (kind == OpcodeKind::InvokeFrame || kind == OpcodeKind::ReturnFrame) {
+      const auto inputs = reopenedCore.inputsOf(instruction);
+      ASSERT_FALSE(inputs.empty());
+      const auto descriptor = reopenedVm.frameDescriptor(inputs.front());
+      ASSERT_TRUE(descriptor) << descriptor.error().message;
+      ASSERT_TRUE(descriptor->entry);
+      pending.push_back(*descriptor->entry);
+    } else if (kind == OpcodeKind::BranchFalseCell) {
+      const auto inputs = reopenedCore.inputsOf(instruction);
+      ASSERT_EQ(inputs.size(), 2u);
+      pending.push_back(inputs[1]);
+    }
   }
   bool sawParameterBranch = false;
   bool sawMatchContract   = false;
@@ -122,9 +138,10 @@ void compileExportReloadAndRun(const Case &testCase, const fs::path &root) {
     const auto inputs  = reopenedCore.inputsOf(opcode);
     ASSERT_EQ(inputs.size(), 2u);
     EXPECT_TRUE(instructions.contains(inputs[1]));
-    EXPECT_TRUE(reopenedVm.getOpcodeKind(inputs[1]) == OpcodeKind::Nop ||
-                reopenedVm.getOpcodeKind(inputs[1]) ==
-                    OpcodeKind::IteratorNext);
+    EXPECT_TRUE(
+        reopenedVm.getOpcodeKind(inputs[1]) == OpcodeKind::Nop ||
+        reopenedVm.getOpcodeKind(inputs[1]) == OpcodeKind::ReturnFrame ||
+        reopenedVm.getOpcodeKind(inputs[1]) == OpcodeKind::IteratorNext);
   }
   if (testCase.expectContract) {
     EXPECT_TRUE(sawMatchContract)

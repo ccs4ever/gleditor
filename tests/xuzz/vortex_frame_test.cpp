@@ -594,6 +594,52 @@ TEST(VortexFrameTest, DescriptorLabelsRefuseOversizedTextBeforeReadingPayload) {
   EXPECT_NE(parsed.error().message.find("label"), std::string::npos);
 }
 
+TEST(VortexFrameTest, ForwardDescriptorIsUnexecutableUntilFinalizedOnce) {
+  Harness h;
+  const auto reserved = h.vm.reserveFrameDescriptor();
+  ASSERT_TRUE(reserved);
+  const auto argument = h.arena.makeCell();
+  const auto ret      = h.op(OpcodeKind::ReturnFrame);
+  h.core.bindInput(ret, *reserved);
+  const FrameDescriptorSpec spec{.entry         = ret,
+                                 .locals        = {argument},
+                                 .argumentPorts = {argument},
+                                 .resultPorts   = {argument}};
+  const auto input  = h.arena.makeScalarCell(std::int64_t{73});
+  const auto output = h.arena.makeCell();
+  const auto call   = h.invoke(*reserved, input, output);
+  const auto cursor = h.entry(call);
+  const auto before = h.arena.cellCount();
+  EXPECT_FALSE(h.vm.step(cursor).success);
+  EXPECT_EQ(h.arena.cellCount(), before);
+  EXPECT_EQ(h.vm.activationDepth(cursor), 0u);
+  ASSERT_TRUE(h.vm.finalizeFrameDescriptor(*reserved, spec));
+  EXPECT_FALSE(h.vm.finalizeFrameDescriptor(*reserved, spec));
+  const auto execution = h.vm.run(cursor, 20);
+  ASSERT_TRUE(execution.success) << execution.errorMessage;
+  EXPECT_EQ(h.vm.resultCell(cursor, output), input);
+}
+
+TEST(VortexFrameTest, PartialDescriptorFinalizationRollsBackAndCanRetry) {
+  Harness h;
+  const auto reserved = h.vm.reserveFrameDescriptor();
+  ASSERT_TRUE(reserved);
+  const auto argument = h.arena.makeCell();
+  const auto ret      = h.op(OpcodeKind::ReturnFrame);
+  const FrameDescriptorSpec spec{.entry         = ret,
+                                 .locals        = {argument},
+                                 .argumentPorts = {argument},
+                                 .resultPorts   = {argument}};
+  const auto before = h.arena.cellCount();
+  h.arena.setAllocationLimitForTesting(before + 1);
+  EXPECT_FALSE(h.vm.finalizeFrameDescriptor(*reserved, spec));
+  EXPECT_EQ(h.arena.cellCount(), before);
+  EXPECT_FALSE(h.vm.frameDescriptor(*reserved));
+  h.arena.setAllocationLimitForTesting(before + 100);
+  ASSERT_TRUE(h.vm.finalizeFrameDescriptor(*reserved, spec));
+  EXPECT_TRUE(h.vm.frameDescriptor(*reserved));
+}
+
 TEST(VortexFrameTest, DescriptorRejectsLocalLimitAndZeroDepthRejectsCall) {
   Harness h;
   const auto argument = h.arena.makeCell("argument");

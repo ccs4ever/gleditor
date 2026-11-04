@@ -16,6 +16,7 @@
 
 #include "common/xanadu/vql/contract_codec.hpp"
 #include "common/xanadu/vql/contracts.hpp"
+#include "common/xanadu/vql/frame_eligibility.hpp"
 #include "common/xanadu/vql/lexer.hpp"
 #include "common/xanadu/vql/parser.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
@@ -195,6 +196,7 @@ void VQLCompiler::emitInput(CellRef op, CellRef operand) {
 
 void VQLCompiler::emitOutput(CellRef op, CellRef target) {
   core_.bindOutput(op, target);
+  if (compilingFrameDefinition_) frameMutableSlots_.insert(target);
 }
 
 CellRef VQLCompiler::emitConstant(const CellValue &val,
@@ -225,6 +227,12 @@ CompilationResult VQLCompiler::compile(const QueryExpression &query,
     varBindings_[name] =
         cells.empty() ? std::nullopt : std::optional{cells.front()};
   definitions_.clear();
+  frameDefinitions_.clear();
+  reusableFrameDefinitions_.clear();
+  pendingFrameDefinitions_.clear();
+  frameMutableSlots_.clear();
+  compilingFrameDefinition_ = false;
+  compilingFrameDefinitionName_.clear();
   activeCalls_.clear();
   contextInputs_  = options.contextCells;
   ambientContext_ = std::nullopt;
@@ -234,6 +242,7 @@ CompilationResult VQLCompiler::compile(const QueryExpression &query,
 
   try {
     const auto resultCell = compileQuery(query);
+    compilePendingFrameDefinitions();
     if (lastResultCells_.empty() && resultCell) {
       lastResultCells_.push_back(*resultCell);
     }
@@ -265,6 +274,9 @@ CompilationResult VQLCompiler::compile(const QueryExpression &query,
   }
 
   std::string dis = disassemble(entryOp_);
+  for (const auto &[name, state] : frameDefinitions_)
+    if (state.entry)
+      dis += "\nFRAME " + name + ":\n" + disassemble(state.entry);
   CompilationResult result{
       .success          = true,
       .entryOpcode      = entryOp_,
@@ -320,6 +332,10 @@ CompilationResult VQLCompiler::compile(std::string_view queryString,
 }
 
 std::optional<CellRef> VQLCompiler::compileQuery(const QueryExpression &query) {
+  const auto frameEligibility = analyzeFrameEligibility(query);
+  if (!frameEligibility)
+    throw std::invalid_argument(frameEligibility.error().message);
+  reusableFrameDefinitions_ = frameEligibility->reusableDefinitions;
   try {
     for (const auto &definition : query.defs)
       validateFunctionSignature(definition);

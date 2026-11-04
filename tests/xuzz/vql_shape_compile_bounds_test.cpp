@@ -49,7 +49,13 @@ void expectBoundedRefusal(Harness &h, const ShapeLiteral &shape) {
   const auto before = h.arena.cellCount();
   const auto result = h.compiler.compile(queryFor(shape));
   EXPECT_FALSE(result.success);
-  EXPECT_NE(result.errorMessage.find("shape"), std::string::npos);
+  const bool shapeBound =
+      result.errorMessage.find("shape") != std::string::npos;
+  const bool astBound =
+      result.errorMessage.find("frame eligibility") != std::string::npos &&
+      (result.errorMessage.find("budget") != std::string::npos ||
+       result.errorMessage.find("cyclic") != std::string::npos);
+  EXPECT_TRUE(shapeBound || astBound) << result.errorMessage;
   EXPECT_EQ(h.arena.cellCount(), before);
   EXPECT_EQ(h.arena.outstandingMarks(), 0u);
 }

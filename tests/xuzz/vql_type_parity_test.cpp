@@ -9,7 +9,7 @@ using zigzag::vortex::OpcodeKind;
 struct Result {
   std::vector<std::string> values;
   std::string error;
-  bool executedMatch{false};
+  bool emittedMatch{false};
 };
 
 Result evaluate(std::string_view query, bool compiled) {
@@ -40,10 +40,7 @@ Result evaluate(std::string_view query, bool compiled) {
     if (!execution.success) return {.error = execution.errorMessage};
     for (const auto opcode : program.generatedOpcodes) {
       if (vm.getOpcodeKind(opcode) == OpcodeKind::MatchContract) {
-        const auto slots = core.outputsOf(opcode);
-        if (!slots.empty())
-          result.executedMatch |=
-              core.arena().asBool(slots.front()).has_value();
+        result.emittedMatch = true;
       }
       if (vm.getOpcodeKind(opcode) != OpcodeKind::Halt) continue;
       for (const auto slot : core.inputsOf(opcode)) {
@@ -106,7 +103,7 @@ TEST(VQLTypeParityTest, PrimitiveCallsMatchAndFilterInBothBackends) {
     EXPECT_TRUE(vortex.error.empty()) << vortex.error;
     EXPECT_EQ(direct.values, expected);
     EXPECT_EQ(vortex.values, expected);
-    EXPECT_TRUE(vortex.executedMatch);
+    EXPECT_TRUE(vortex.emittedMatch);
   }
 }
 

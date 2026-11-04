@@ -14,6 +14,7 @@
 #include "common/xanadu/multi_store.hpp"
 #include "common/xanadu/vql/compiler.hpp"
 #include "common/xanadu/vql/contracts.hpp"
+#include "common/xanadu/vql/frame_eligibility.hpp"
 #include "common/xanadu/vql/parser.hpp"
 #include "common/xanadu/vql/vql_engine.hpp"
 
@@ -38,7 +39,8 @@ bool budgetFailure(const std::string_view message) {
   });
   return lowered.find("budget") != std::string::npos ||
          lowered.find("max cycles") != std::string::npos ||
-         lowered.find("work limit") != std::string::npos;
+         lowered.find("work limit") != std::string::npos ||
+         lowered.find("activation frame depth limit") != std::string::npos;
 }
 
 QueryExecutionError runtimeError(const std::exception &error) {
@@ -90,6 +92,11 @@ QueryExecutor::execute(const QueryExpression &query,
     });
   }
   try {
+    const auto eligibility = analyzeFrameEligibility(query);
+    if (!eligibility)
+      return std::unexpected(QueryExecutionError{
+          .category = QueryExecutionError::Category::Compile,
+          .message  = eligibility.error().message});
     validateSignatures(query);
   } catch (const TypeContractError &error) {
     return std::unexpected(QueryExecutionError{

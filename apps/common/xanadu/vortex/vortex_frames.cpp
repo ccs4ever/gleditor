@@ -15,7 +15,8 @@
 namespace zigzag::vortex {
 namespace {
 
-constexpr std::string_view descriptorTag = "VORTEX_FRAME/1";
+constexpr std::string_view descriptorTag         = "VORTEX_FRAME/1";
+constexpr std::string_view reservedDescriptorTag = "VORTEX_FRAME/RESERVED/1";
 
 FrameDescriptorError descriptorError(std::string message) {
   return {.message = std::move(message)};
@@ -23,6 +24,95 @@ FrameDescriptorError descriptorError(std::string message) {
 
 bool validPortKind(const FramePortKind kind) {
   return kind == FramePortKind::Cell || kind == FramePortKind::Stream;
+}
+
+std::expected<void, FrameDescriptorError>
+validateFrameSpec(const VortexVM &vm, const FrameDescriptorSpec &spec) {
+  const auto &arena = vm.core().arena();
+  const auto fail =
+      [](std::string message) -> std::expected<void, FrameDescriptorError> {
+    return std::unexpected(descriptorError(std::move(message)));
+  };
+  if (!spec.entry || !arena.contains(*spec.entry) ||
+      !vm.getOpcodeKind(*spec.entry))
+    return fail("frame descriptor entry is not a valid opcode");
+  const auto limits = vm.frameLimits();
+  if (spec.locals.size() > limits.maxLocalsPerFrame)
+    return fail("frame descriptor exceeds the local-slot limit");
+  if (limits.maxDescriptorRecords == 0 ||
+      spec.locals.size() > limits.maxDescriptorRecords - 1 ||
+      spec.argumentPorts.size() >
+          limits.maxDescriptorRecords - 1 - spec.locals.size() ||
+      spec.resultPorts.size() > limits.maxDescriptorRecords - 1 -
+                                    spec.locals.size() -
+                                    spec.argumentPorts.size())
+    return fail("frame descriptor exceeds the descriptor-record limit");
+
+  std::unordered_set<CellRef> locals;
+  locals.reserve(spec.locals.size());
+  for (const auto local : spec.locals) {
+    if (local == noCell || !arena.contains(local) ||
+        !locals.insert(local).second || vm.getOpcodeKind(local))
+      return fail("frame descriptor locals must be unique non-opcode cells");
+  }
+  const auto validPorts = [&locals](const std::vector<FramePort> &ports) {
+    std::unordered_set<CellRef> seen;
+    for (const auto &port : ports)
+      if (!validPortKind(port.kind) || !locals.contains(port.slot) ||
+          !seen.insert(port.slot).second)
+        return false;
+    return true;
+  };
+  if (!validPorts(spec.argumentPorts))
+    return fail("frame argument ports must uniquely name local slots");
+  if (!validPorts(spec.resultPorts))
+    return fail("frame result ports must uniquely name local slots");
+  return {};
+}
+
+void appendDescriptorRecords(VortexCore &core, const CellRef descriptor,
+                             const FrameDescriptorSpec &spec) {
+  auto &arena          = core.arena();
+  CellRef tail         = descriptor;
+  bool first           = true;
+  const auto addRecord = [&](const std::string_view role, const CellRef target,
+                             CellRef &recordTail, bool &isFirst) {
+    const CellRef record = arena.makeCell(role);
+    zigzag::expectWritten(arena.setValueBits(
+        record, xanadu::ValueKind::Int64, static_cast<std::uint64_t>(target)));
+    zigzag::expectWritten(
+        arena.link(recordTail, isFirst ? core.dims().grab : core.dims().step,
+                   DimVector::POS, record));
+    isFirst    = false;
+    recordTail = record;
+  };
+  addRecord("ref.entry", *spec.entry, tail, first);
+  for (const auto local : spec.locals)
+    addRecord("ref.local", local, tail, first);
+  for (const auto &port : spec.argumentPorts)
+    addRecord(port.kind == FramePortKind::Cell ? "ref.argument-cell"
+                                               : "ref.argument-stream",
+              port.slot, tail, first);
+  for (const auto &port : spec.resultPorts)
+    addRecord(port.kind == FramePortKind::Cell ? "ref.result-cell"
+                                               : "ref.result-stream",
+              port.slot, tail, first);
+}
+
+std::optional<std::string> boundedCellText(const zigzag::ArenaManifold &arena,
+                                           const CellRef cell,
+                                           const std::size_t limit) {
+  std::size_t bytes = 0;
+  const auto spans  = arena.contentOf(cell);
+  if (spans.size() > limit) return std::nullopt;
+  for (const auto &span : spans) {
+    arena.consumeWork();
+    if (span.length > limit - bytes) return std::nullopt;
+    bytes += static_cast<std::size_t>(span.length);
+    for (std::uint64_t index = 0; index < span.length; ++index)
+      arena.consumeWork();
+  }
+  return arena.textOf(cell);
 }
 
 } // namespace
@@ -39,64 +129,62 @@ VortexVM::makeFrameDescriptor(const FrameDescriptorSpec &spec) {
       [](std::string message) -> std::expected<CellRef, FrameDescriptorError> {
     return std::unexpected(descriptorError(std::move(message)));
   };
-  if (!spec.entry || !arena.contains(*spec.entry) ||
-      !getOpcodeKind(*spec.entry))
-    return fail("frame descriptor entry is not a valid opcode");
-  if (spec.locals.size() > frameLimits_.maxLocalsPerFrame)
-    return fail("frame descriptor exceeds the local-slot limit");
-  const auto recordCount = 1 + spec.locals.size() + spec.argumentPorts.size() +
-                           spec.resultPorts.size();
-  if (recordCount > frameLimits_.maxDescriptorRecords)
-    return fail("frame descriptor exceeds the descriptor-record limit");
-  std::unordered_set<CellRef> locals;
-  locals.reserve(spec.locals.size());
-  for (const auto local : spec.locals) {
-    if (local == noCell || !arena.contains(local) ||
-        !locals.insert(local).second || getOpcodeKind(local))
-      return fail("frame descriptor locals must be unique non-opcode cells");
-  }
-  const auto validPorts = [&locals](const std::vector<FramePort> &ports) {
-    std::unordered_set<CellRef> seen;
-    for (const auto &port : ports) {
-      if (!validPortKind(port.kind) || !locals.contains(port.slot) ||
-          !seen.insert(port.slot).second)
-        return false;
-    }
-    return true;
-  };
-  if (!validPorts(spec.argumentPorts))
-    return fail("frame argument ports must uniquely name local slots");
-  if (!validPorts(spec.resultPorts))
-    return fail("frame result ports must uniquely name local slots");
+  if (const auto valid = validateFrameSpec(*this, spec); !valid)
+    return fail(valid.error().message);
 
   try {
     zigzag::ArenaSavepoint savepoint(core_.arena());
-    const CellRef descriptor = arena.makeCell(descriptorTag);
-    CellRef tail             = descriptor;
-    bool first               = true;
-    auto addRecord = [&](const std::string_view role, const CellRef target) {
-      const CellRef record = arena.makeCell(role);
-      zigzag::expectWritten(
-          arena.setValueBits(record, xanadu::ValueKind::Int64,
-                             static_cast<std::uint64_t>(target)));
-      zigzag::expectWritten(
-          arena.link(tail, first ? core_.dims().grab : core_.dims().step,
-                     DimVector::POS, record));
-      first = false;
-      tail  = record;
-    };
-    addRecord("ref.entry", *spec.entry);
-    for (const auto local : spec.locals) addRecord("ref.local", local);
-    for (const auto &port : spec.argumentPorts)
-      addRecord(port.kind == FramePortKind::Cell ? "ref.argument-cell"
-                                                 : "ref.argument-stream",
-                port.slot);
-    for (const auto &port : spec.resultPorts)
-      addRecord(port.kind == FramePortKind::Cell ? "ref.result-cell"
-                                                 : "ref.result-stream",
-                port.slot);
+    const CellRef descriptor = arena.makeCell(reservedDescriptorTag);
+    appendDescriptorRecords(core_, descriptor, spec);
+    const auto header = arena.intern(descriptorTag);
+    zigzag::expectWritten(arena.setContent(
+        descriptor, std::span<const xanadu::PrimediaSpan>{&header, 1}));
     savepoint.commit();
     return descriptor;
+  } catch (const std::exception &error) {
+    return fail(error.what());
+  }
+}
+
+std::expected<CellRef, FrameDescriptorError>
+VortexVM::reserveFrameDescriptor() {
+  try {
+    zigzag::ArenaSavepoint savepoint(core_.arena());
+    const CellRef descriptor = core_.arena().makeCell(reservedDescriptorTag);
+    savepoint.commit();
+    return descriptor;
+  } catch (const std::exception &error) {
+    return std::unexpected(descriptorError(error.what()));
+  }
+}
+
+std::expected<VortexVM *, FrameDescriptorError>
+VortexVM::finalizeFrameDescriptor(const CellRef reserved,
+                                  const FrameDescriptorSpec &spec) {
+  auto &arena     = core_.arena();
+  const auto fail = [](std::string message)
+      -> std::expected<VortexVM *, FrameDescriptorError> {
+    return std::unexpected(descriptorError(std::move(message)));
+  };
+  if (!arena.contains(reserved))
+    return fail("frame descriptor root is not reserved or was finalized");
+  const auto header =
+      boundedCellText(arena, reserved, reservedDescriptorTag.size());
+  if (!header || *header != reservedDescriptorTag ||
+      arena.linked(reserved, core_.dims().grab, DimVector::POS))
+    return fail("frame descriptor root is not reserved or was finalized");
+  if (const auto valid = validateFrameSpec(*this, spec); !valid)
+    return fail(valid.error().message);
+  if (std::ranges::find(spec.locals, reserved) != spec.locals.end())
+    return fail("frame descriptor cannot list its own root as a local");
+  try {
+    zigzag::ArenaSavepoint savepoint(arena);
+    appendDescriptorRecords(core_, reserved, spec);
+    const auto header = arena.intern(descriptorTag);
+    zigzag::expectWritten(arena.setContent(
+        reserved, std::span<const xanadu::PrimediaSpan>{&header, 1}));
+    savepoint.commit();
+    return this;
   } catch (const std::exception &error) {
     return fail(error.what());
   }
@@ -109,25 +197,9 @@ VortexVM::frameDescriptor(const CellRef descriptor) const {
       -> std::expected<FrameDescriptor, FrameDescriptorError> {
     return std::unexpected(descriptorError(std::move(message)));
   };
-  const auto boundedText =
-      [&arena](const CellRef cell,
-               const std::size_t limit) -> std::optional<std::string> {
-    std::size_t bytes = 0;
-    const auto spans  = arena.contentOf(cell);
-    // Bound even zero-length fragmentation before reading metadata.
-    if (spans.size() > limit) return std::nullopt;
-    for (const auto &span : spans) {
-      arena.consumeWork();
-      if (span.length > limit - bytes) return std::nullopt;
-      bytes += static_cast<std::size_t>(span.length);
-      for (std::uint64_t index = 0; index < span.length; ++index)
-        arena.consumeWork();
-    }
-    return arena.textOf(cell);
-  };
   if (!arena.contains(descriptor))
     return fail("invalid Vortex frame descriptor header or version");
-  const auto header = boundedText(descriptor, descriptorTag.size());
+  const auto header = boundedCellText(arena, descriptor, descriptorTag.size());
   if (!header || *header != descriptorTag)
     return fail("invalid Vortex frame descriptor header or version");
 
@@ -154,8 +226,8 @@ VortexVM::frameDescriptor(const CellRef descriptor) const {
         arena.valueKindOf(*record) != xanadu::ValueKind::Int64)
       return fail("frame descriptor record has no valid target");
     const CellRef target = static_cast<CellRef>(*targetValue);
-    const auto label =
-        boundedText(*record, std::string_view("ref.argument-stream").size());
+    const auto label     = boundedCellText(
+        arena, *record, std::string_view("ref.argument-stream").size());
     if (!label)
       return fail("frame descriptor record label exceeds its byte limit");
     const auto &role = *label;

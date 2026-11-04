@@ -292,3 +292,18 @@ stream frames retain the existing single active stream cursor policy. Lazy field
 continuations, mutation boundaries and full functor/parameter semantics remain open. See
 [iteration 13](projects/vortex-vm-only-iterations.md) for scope, gates and measured resource costs;
 full §4.12 remains incomplete.
+
+## Reusable closed-function graphs
+
+Closed primitive/Stream functions now compile once per query to reusable native frame bodies,
+including self/mutual recursion and lazy parameter-expression defaults. Presence ports distinguish
+omitted from explicitly empty arguments. A bounded AST/call-graph analysis protects lexical scope
+and rejects malformed cycles before signature validation. Indirect open helpers retain compiled
+inline lowering, preserving caller bindings. A self-recursive saved graph runs in a fresh VM, and
+host/mesh Vquery source routes pass.
+
+Full build and 493 affected tests passed; the broader sweep retains the 27 existing missing-Prolog-
+resolution failures. Shape contracts, context-dot targets, explicit free captures, functors and
+variadics still need reusable frame lowering. Nonliteral contract-field defaults and atomic mutation
+contracts remain incomplete. See [iteration 14](projects/vortex-vm-only-iterations.md); this is not
+a full §4.12 pass.

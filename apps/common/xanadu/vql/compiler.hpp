@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -140,10 +141,30 @@ private:
               const std::vector<ValueExpr> &arguments,
               std::optional<zigzag::CellRef> context, bool ufcs);
   std::vector<zigzag::CellRef>
+  compileReusableFrameCall(const DefDeclaration &definition,
+                           const std::vector<ValueExpr> &arguments,
+                           std::optional<zigzag::CellRef> context, bool ufcs);
+  void compilePendingFrameDefinitions();
+  void compileFrameDefinition(const DefDeclaration &definition);
+  [[nodiscard]] zigzag::CellRef
+  normalizeFrameStream(std::span<const zigzag::CellRef> cells);
+  std::vector<zigzag::CellRef>
   compileArgument(const ValueExpr &argument,
                   std::optional<zigzag::CellRef> context);
   std::vector<zigzag::CellRef> emitContractDefaultSlots(const TypeExpr &type);
   std::unordered_map<std::string, DefDeclaration> definitions_;
+  struct FrameDefinitionState {
+    zigzag::CellRef descriptor;
+    std::optional<zigzag::CellRef> entry;
+    bool queued{false};
+    bool compiled{false};
+  };
+  std::unordered_map<std::string, FrameDefinitionState> frameDefinitions_;
+  std::unordered_set<std::string> reusableFrameDefinitions_;
+  std::vector<std::string> pendingFrameDefinitions_;
+  std::unordered_set<zigzag::CellRef> frameMutableSlots_;
+  bool compilingFrameDefinition_{false};
+  std::string compilingFrameDefinitionName_;
   std::vector<std::string> activeCalls_;
   std::optional<zigzag::CellRef> ambientContext_;
   std::vector<zigzag::CellRef> contextInputs_;
