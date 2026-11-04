@@ -45,10 +45,13 @@ investigating missing headers under `thirdparty/`. Those directories are git sub
 pointer rather than their contents.
 
 The build needs a C++23 compiler, Make, pkg-config, FreeType, HarfBuzz, libunibreak, FriBidi,
-Fontconfig, GLM, spdlog, SDL2 or SDL3, libtorrent-rasterbar, OpenSSL, LMDB, SQLite, libcurl,
-LibEtPan, GMime 3, and the OpenGL headers. GoogleTest and GoogleMock are needed for tests. Vulkan
-and `glslangValidator` are used when available; AccessKit is optional unless explicitly required.
-`gnupg` is needed at run time for signed publication. For Ubuntu, the
+Fontconfig, GLM, spdlog, SDL2 or SDL3, libtorrent-rasterbar, OpenSSL, LMDB, SQLite, libcurl, and the
+OpenGL headers. GoogleTest and GoogleMock are needed for tests. Vulkan and `glslangValidator` are
+used when available; AccessKit is optional unless explicitly required. Mail evidence (IMAP capture,
+MIME parsing, draft serialization) wants LibEtPan and GMime 3 and probes for them at configure time;
+without them those adapters compile refusing stubs and the rest of the tree builds normally.
+`GLEDITOR_MAIL=1` makes them required, `GLEDITOR_MAIL=0` skips the probes entirely. `gnupg` is
+needed at run time for signed publication. For Ubuntu, the
 [CI build job's apt package list](.github/workflows/c-cpp.yml#L134) is a tested Linux dependency
 set; other distributions use their equivalent library and tool packages. Native external-source
 adapters require libcurl with asynchronous DNS support; an unsupported resolver is refused

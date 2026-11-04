@@ -1,4 +1,15 @@
+/**
+ * @file mime.cpp
+ * @brief GMime-backed MIME parsing behind the GLEDITOR_MAIL probe. One TU,
+ *        two halves (the pg_backend pattern): GLEDITOR_HAVE_GMIME compiles
+ *        the real parser; without it parseMimeMessage returns an empty
+ *        evidence record -- unreachable in practice, since the IMAP session
+ *        that fetched raw messages is stubbed out alongside it.
+ */
+
 #include "common/xanadu/evidence/mime.hpp"
+
+#ifdef GLEDITOR_HAVE_GMIME
 
 #include <cstring>
 #include <memory>
@@ -205,3 +216,19 @@ MailMessageEvidence parseMimeMessage(std::string_view rawMessage,
 }
 
 } // namespace xanadu::evidence
+
+#else // !GLEDITOR_HAVE_GMIME -- the refusing stub
+
+namespace xanadu::evidence {
+
+MailMessageEvidence parseMimeMessage(const std::string_view /*rawMessage*/,
+                                     const std::uint64_t /*uidValidity*/,
+                                     const std::uint32_t /*uid*/,
+                                     const std::uint32_t /*sequenceNumber*/,
+                                     const MimeParseLimits & /*limits*/) {
+  return {};
+}
+
+} // namespace xanadu::evidence
+
+#endif // GLEDITOR_HAVE_GMIME

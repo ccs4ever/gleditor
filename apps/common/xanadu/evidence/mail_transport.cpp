@@ -1,10 +1,23 @@
+/**
+ * @file mail_transport.cpp
+ * @brief IMAP session transport behind the GLEDITOR_MAIL probe
+ *        (pg_backend pattern). The credential lease machinery, endpoint
+ *        canonicalization, curl helpers, validators and the draft
+ *        fingerprint are library-free and compile unconditionally; only the
+ *        libetpan session plumbing and readImapMailbox's body are gated, and
+ *        without GLEDITOR_HAVE_MAIL the entry point returns a Failed
+ *        observation carrying the rebuild instructions.
+ */
+
 #include "common/xanadu/evidence/mail_transport.hpp"
 
 #include <curl/curl.h>
+#ifdef GLEDITOR_HAVE_MAIL
 #include <libetpan/charconv.h>
 #include <libetpan/mailimap.h>
 #include <libetpan/mailimap_types_helper.h>
 #include <libetpan/mailstream.h>
+#endif
 #include <openssl/crypto.h>
 #include <openssl/evp.h>
 
@@ -49,6 +62,7 @@ bool hasUrlPart(CURLU *url, CURLUPart part) {
   return true;
 }
 
+#ifdef GLEDITOR_HAVE_MAIL
 std::optional<std::string> curlConnectOnlyUrl(const MailEndpoint &endpoint) {
   CURLU *raw = curl_url();
   if (!raw) return {};
@@ -66,6 +80,7 @@ std::optional<std::string> curlConnectOnlyUrl(const MailEndpoint &endpoint) {
   curl_free(value);
   return result;
 }
+#endif // GLEDITOR_HAVE_MAIL
 
 std::string lower(std::string value) {
   std::ranges::transform(value, value.begin(), [](unsigned char ch) {
@@ -409,6 +424,8 @@ constexpr std::size_t maxImapMessages     = 4096;
 constexpr std::size_t maxImapMessageBytes = 32 * 1024 * 1024;
 constexpr std::size_t maxImapTotalBytes   = 128 * 1024 * 1024;
 constexpr long maxImapTimeoutMilliseconds = 300000;
+
+#ifdef GLEDITOR_HAVE_MAIL
 constexpr std::size_t maxImapControlBytes = 1024 * 1024;
 
 struct CurlCloser {
@@ -562,6 +579,7 @@ mailstream_low_driver curlMailStreamDriver{curlMailStreamRead,
                                            nullptr,
                                            nullptr,
                                            nullptr};
+#endif // GLEDITOR_HAVE_MAIL
 
 std::optional<std::string> quoteMailbox(const std::string_view mailbox) {
   if (mailbox.empty() || mailbox.size() > 1024 ||
@@ -577,6 +595,7 @@ std::optional<std::string> quoteMailbox(const std::string_view mailbox) {
   return result;
 }
 
+#ifdef GLEDITOR_HAVE_MAIL
 std::string
 framedIdentity(const std::initializer_list<std::string_view> components) {
   std::string result;
@@ -742,6 +761,7 @@ bool captureImapBody(const int attributeType,
   capture.totalBytes += length;
   return true;
 }
+#endif // GLEDITOR_HAVE_MAIL
 
 template <typename State>
 bool validLeaseFor(State &state, const MailEndpoint &endpoint,
@@ -803,6 +823,7 @@ imapServerAuthority(const std::string_view serverUrl) {
   return endpoint->authority;
 }
 
+#ifdef GLEDITOR_HAVE_MAIL
 MailObservation readImapMailbox(const ImapReadProfile &profile,
                                 const ImapReadRequest &request,
                                 const MailCredentialLease &credential,
@@ -1385,9 +1406,9 @@ MailObservation readImapMailbox(const ImapReadProfile &profile,
     mimeLimits.maxHeaders      = 4096;
     mimeLimits.maxRecipients   = request.retentionBounds.maxRecords;
     try {
-      auto message            = parseMimeMessage(body.bytes, uidValidity, uid,
-                                                 attributes->att_number, mimeLimits);
-      message.flags           = std::move(flags);
+      auto message  = parseMimeMessage(body.bytes, uidValidity, uid,
+                                       attributes->att_number, mimeLimits);
+      message.flags = std::move(flags);
       std::size_t recordsUsed = 1 + observation.gaps.size();
       for (const auto &prior : observation.messages)
         recordsUsed += retainedMailMessageRecordCount(prior);
@@ -1420,6 +1441,39 @@ MailObservation readImapMailbox(const ImapReadProfile &profile,
   if (preflight()) static_cast<void>(mailimap_logout(session.get()));
   return observation;
 }
+
+#else // !GLEDITOR_HAVE_MAIL -- the refusing stub
+
+MailObservation readImapMailbox(const ImapReadProfile &profile,
+                                const ImapReadRequest &request,
+                                const MailCredentialLease & /*credential*/,
+                                const std::atomic_bool & /*cancellation*/) {
+  MailObservation observation;
+  observation.state    = CaptureState::Failed;
+  observation.bounds   = request.retentionBounds;
+  observation.coverage = "No mailbox coverage established";
+  std::optional<MailEndpoint> resolvedEndpoint;
+  if (const auto problem = imapProblem(profile, request, &resolvedEndpoint)) {
+    observation.gaps.push_back({"profile", *problem, {}});
+    return observation;
+  }
+  // Identity fields mirror the real path: a refused read still names the
+  // mailbox it would have covered.
+  observation.serverAuthority = resolvedEndpoint->authority;
+  observation.accountScope    = profile.accountScope;
+  observation.mailbox         = profile.mailbox;
+  // The read path needs both halves: etpan for the session, gmime to
+  // parse what it fetches -- the Makefile lights GLEDITOR_HAVE_MAIL only
+  // when both probe, so reaching here names exactly that absence.
+  observation.gaps.push_back(
+      {"transport",
+       "this build has no IMAP transport -- rebuild with GLEDITOR_MAIL=1 "
+       "(the Makefile probes pkg-config libetpan and gmime-3.0)",
+       {}});
+  return observation;
+}
+
+#endif // GLEDITOR_HAVE_MAIL
 
 std::string mailDraftFingerprint(const SerializedMailDraft &draft) {
   std::array<unsigned char, EVP_MAX_MD_SIZE> digest{};

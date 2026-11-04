@@ -1,4 +1,15 @@
+/**
+ * @file mail_draft.cpp
+ * @brief GMime-backed MIME draft serialization behind the GLEDITOR_MAIL
+ *        probe. One TU, two halves (the pg_backend pattern):
+ *        GLEDITOR_HAVE_GMIME compiles the real serializer; without it
+ *        buildMimeDraft throws the same std::invalid_argument the ops layer
+ *        already surfaces for validation failures.
+ */
+
 #include "common/xanadu/evidence/mail_transport.hpp"
+
+#ifdef GLEDITOR_HAVE_GMIME
 
 #include <algorithm>
 #include <array>
@@ -292,3 +303,21 @@ SerializedMailDraft buildMimeDraft(const MailDraftInput &draft,
 }
 
 } // namespace xanadu::evidence
+
+#else // !GLEDITOR_HAVE_GMIME -- the refusing stub
+
+#include <stdexcept>
+#include <string>
+
+namespace xanadu::evidence {
+
+SerializedMailDraft buildMimeDraft(const MailDraftInput & /*draft*/,
+                                   const std::string /*correlationId*/) {
+  throw std::invalid_argument(
+      "mail-draft: this build has no GMime 3 -- rebuild with "
+      "GLEDITOR_MAIL=1 (the Makefile probes pkg-config gmime-3.0)");
+}
+
+} // namespace xanadu::evidence
+
+#endif // GLEDITOR_HAVE_GMIME

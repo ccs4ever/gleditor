@@ -275,24 +275,56 @@ TEST_PKGS := gmock_main
 # thing this program is for. Better to fail at configure time than to ship a
 # xanadoc editor that quietly cannot publish.
 # OpenSSL is required for in-process Ed25519 signing and X.509 v3 device delegation.
-XUDU_PKGS := libtorrent-rasterbar openssl lmdb libmagic sqlite3 libcurl gmime-3.0 libetpan spdlog libzstd libblake3 libzmq libngtcp2 libngtcp2_crypto_ossl
+XUDU_PKGS := libtorrent-rasterbar openssl lmdb libmagic sqlite3 libcurl spdlog libzstd libblake3 libzmq libngtcp2 libngtcp2_crypto_ossl
 ifneq (,$(filter-out $(NO_SDL_GOALS),$(or $(MAKECMDGOALS),all)))
 ifneq ($(shell pkg-config --exists libtorrent-rasterbar && echo 1),1)
 $(error libtorrent-rasterbar was not found by pkg-config. It is required: \
 install libtorrent-rasterbar-dev (Debian, Ubuntu), libtorrent-rasterbar-devel \
 (Fedora), or libtorrent-rasterbar (Arch, Homebrew).)
 endif
-ifneq ($(shell pkg-config --exists gmime-3.0 && echo 1),1)
-$(error GMime 3 was not found by pkg-config. Install libgmime-3.0-dev \
-(Debian, Ubuntu), gmime30-devel (Fedora), gmime3 (Arch), or gmime \
-(Homebrew), or set PKG_CONFIG_PATH for a local installation.)
 endif
-ifneq ($(shell pkg-config --exists libetpan && echo 1),1)
-$(error LibEtPan was not found by pkg-config. Install libetpan-dev \
-(Debian, Ubuntu), libetpan-devel (Fedora), or libetpan (Arch, Homebrew), \
-or set PKG_CONFIG_PATH for a local installation.)
+
+# Mail evidence needs gmime-3.0 (MIME parse + draft serialization) and
+# libetpan (the IMAP session); smtp_transport is curl-only and needs
+# neither, so the send path survives an etpan-less build. GLEDITOR_MAIL=0
+# disables both probes, =1 requires both libraries, unset probes each on
+# its own -- the gated TUs compile refusing stubs (the pg_backend shape),
+# so the ops exist and fail with an actionable answer.
+ifneq ($(GLEDITOR_MAIL),0)
+ifeq ($(shell pkg-config --exists gmime-3.0 && echo 1),1)
+GLEDITOR_HAVE_GMIME := 1
+endif
+ifeq ($(shell pkg-config --exists libetpan && echo 1),1)
+GLEDITOR_HAVE_ETPAN := 1
+endif
+ifeq ($(GLEDITOR_MAIL),1)
+ifndef GLEDITOR_HAVE_GMIME
+$(error GLEDITOR_MAIL=1 was asked for but GMime 3 was not found by \
+pkg-config. Install libgmime-3.0-dev (Debian, Ubuntu), gmime30-devel \
+(Fedora), gmime3 (Arch), gmime (Homebrew), or build GLEDITOR_MAIL=0.)
+endif
+ifndef GLEDITOR_HAVE_ETPAN
+$(error GLEDITOR_MAIL=1 was asked for but libetpan was not found by \
+pkg-config. Install libetpan-dev (Debian, Ubuntu), libetpan-devel (Fedora), \
+or libetpan (Arch, Homebrew), or build GLEDITOR_MAIL=0.)
 endif
 endif
+endif
+ifdef GLEDITOR_HAVE_GMIME
+override CXXFLAGS += -DGLEDITOR_HAVE_GMIME=1
+MAIL_PKGS += gmime-3.0
+endif
+ifdef GLEDITOR_HAVE_ETPAN
+override CXXFLAGS += -DGLEDITOR_HAVE_ETPAN=1
+MAIL_PKGS += libetpan
+endif
+# The IMAP session needs both halves -- etpan for the connection, gmime to
+# parse what it fetches -- so only the conjunction lights readImapMailbox's
+# real body; everything else gates on its own library's flag.
+ifneq ($(and $(GLEDITOR_HAVE_GMIME),$(GLEDITOR_HAVE_ETPAN)),)
+override CXXFLAGS += -DGLEDITOR_HAVE_MAIL=1
+endif
+MAIL_LIBS := $(if $(MAIL_PKGS),$(shell pkg-config $(STATIC) --libs $(MAIL_PKGS)))
 
 # Which platform this is. Up here because the accessibility block below needs
 # it, and it is wanted again further down for what a shared library is called.
@@ -572,11 +604,11 @@ ifdef GLEDITOR_HAVE_SYSTEMD
 override CXXFLAGS += -DGLEDITOR_HAVE_SYSTEMD=1 $(SYSTEMD_CFLAGS)
 endif
 
-XUDU_LIBS := $(shell pkg-config $(STATIC) --libs $(XUDU_PKGS)) $(PG_LIBS) $(SYSTEMD_LIBS)
+XUDU_LIBS := $(shell pkg-config $(STATIC) --libs $(XUDU_PKGS)) $(PG_LIBS) $(SYSTEMD_LIBS) $(MAIL_LIBS)
 # Matches XUDU_PKGS because ZIGZAG_SHARED_CORE_OBJS is XUDU_CORE_OBJS: zigzag
 # links the whole xanalogical engine, so it needs whatever that engine needs.
 ZIGZAG_PKGS := $(XUDU_PKGS)
-ZIGZAG_LIBS := $(shell pkg-config $(STATIC) --libs $(ZIGZAG_PKGS)) $(PG_LIBS) $(SYSTEMD_LIBS)
+ZIGZAG_LIBS := $(shell pkg-config $(STATIC) --libs $(ZIGZAG_PKGS)) $(PG_LIBS) $(SYSTEMD_LIBS) $(MAIL_LIBS)
 
 # glslangValidator is the traditional name and glslang the current one; which
 # of the two a distribution installs varies, so both are tried.
@@ -647,6 +679,19 @@ XUZZ_SRCS      := $(shell find apps/xuzz -name '*.cpp' 2>/dev/null)
 LIB_TEST_SRCS  := $(shell find tests/lib -name '*.cpp' 2>/dev/null)
 ZIGZAG_TEST_SRCS := $(shell find tests/zigzag -name '*.cpp' 2>/dev/null)
 XUZZ_TEST_SRCS := $(shell find tests/xuzz -name '*.cpp' 2>/dev/null)
+# Mail tests exercise the real libraries; under the refusing-stub builds the
+# behaviors they pin (draft bytes, parsed messages, live session failures)
+# are exactly the ones that are off, so they drop with their libraries.
+ifndef GLEDITOR_HAVE_GMIME
+XUZZ_TEST_SRCS := $(filter-out tests/xuzz/evidence_mime_test.cpp \
+                  tests/xuzz/evidence_mail_draft_test.cpp \
+                  tests/xuzz/evidence_smtp_transport_test.cpp \
+                  tests/xuzz/effect_communications_test.cpp,$(XUZZ_TEST_SRCS))
+endif
+ifndef GLEDITOR_HAVE_MAIL
+XUZZ_TEST_SRCS := $(filter-out tests/xuzz/evidence_imap_transport_test.cpp \
+                  tests/xuzz/evidence_mail_controller_test.cpp,$(XUZZ_TEST_SRCS))
+endif
 
 OBJDIR := build/
 obj = $(addprefix $(OBJDIR)/,$(patsubst %.cpp,%.o,$(1)))
@@ -805,10 +850,14 @@ endif
 EVIDENCE_CURL_ADAPTERS := capture fediverse_transport irc_transport mail_transport smtp_transport
 $(foreach adapter,$(EVIDENCE_CURL_ADAPTERS),$(addprefix $(OBJDIR)/apps/common/xanadu/evidence/$(adapter),.o .j .dep)): private CXXFLAGS += $(shell pkg-config --cflags libcurl)
 $(foreach test,evidence_imap_transport_test evidence_smtp_transport_test,$(addprefix $(OBJDIR)/tests/xuzz/$(test),.o .j .dep)): private CXXFLAGS += $(shell pkg-config --cflags libcurl)
+ifdef GLEDITOR_HAVE_ETPAN
 $(addprefix $(OBJDIR)/apps/common/xanadu/evidence/mail_transport,.o .j .dep): private CXXFLAGS += $(shell pkg-config --cflags libetpan)
+endif
 EVIDENCE_GMIME_ADAPTERS := mime mail_draft
+ifdef GLEDITOR_HAVE_GMIME
 $(addprefix $(OBJDIR)/tests/xuzz/evidence_mail_draft_test,.o .j .dep): private CXXFLAGS += $(shell pkg-config --cflags gmime-3.0)
 $(foreach adapter,$(EVIDENCE_GMIME_ADAPTERS),$(addprefix $(OBJDIR)/apps/common/xanadu/evidence/$(adapter),.o .j .dep)): private CXXFLAGS += $(shell pkg-config --cflags gmime-3.0)
+endif
 
 # cannot unveil a nonexistant directory, have to remove the sandbox for
 # just the directory creation
@@ -1020,8 +1069,12 @@ FUZZ_OBJDIR   := $(OBJDIR)/fuzz
 FUZZ_FLAGS    := -fsanitize=fuzzer-no-link,address,undefined
 FUZZ_CORE_OBJS := $(patsubst %.cpp,$(FUZZ_OBJDIR)/%.o,$(XUDU_CORE_SRCS))
 $(foreach adapter,$(EVIDENCE_CURL_ADAPTERS),$(FUZZ_OBJDIR)/apps/common/xanadu/evidence/$(adapter).o): private CXXFLAGS += $(shell pkg-config --cflags libcurl)
+ifdef GLEDITOR_HAVE_ETPAN
 $(FUZZ_OBJDIR)/apps/common/xanadu/evidence/mail_transport.o: private CXXFLAGS += $(shell pkg-config --cflags libetpan)
+endif
+ifdef GLEDITOR_HAVE_GMIME
 $(foreach adapter,$(EVIDENCE_GMIME_ADAPTERS),$(FUZZ_OBJDIR)/apps/common/xanadu/evidence/$(adapter).o): private CXXFLAGS += $(shell pkg-config --cflags gmime-3.0)
+endif
 # scroll.cpp and publication.cpp (both under XUDU_CORE_SRCS above) now call
 # into MimeType and SourceGrounder, which live under src/ rather than
 # apps/common/xanadu/ and so are not swept up by XUDU_CORE_SRCS. Needed here for
