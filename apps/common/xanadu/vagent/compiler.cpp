@@ -1,6 +1,8 @@
 #include "common/xanadu/vagent/compiler.hpp"
 
 #include "common/xanadu/vagent/cell_path.hpp"
+#include "common/xanadu/vagent/fragment.hpp"
+#include "common/xanadu/zigzag/cell_views.hpp"
 
 #include <algorithm>
 #include <charconv>
@@ -105,8 +107,10 @@ OpcodeKind operation(std::string_view op) {
 class Emitter {
 public:
   Emitter(VortexCore &core, VortexVM &vm, const CompilerBindings &bindings,
-          ScalarCompilerLimits limits)
-      : core_(core), vm_(vm), bindings_(bindings), limits_(limits) {}
+          ScalarCompilerLimits limits, const FragmentContext *fragments,
+          Compiler *compiler, bool recordOps)
+      : core_(core), vm_(vm), bindings_(bindings), limits_(limits),
+        fragments_(fragments), compiler_(compiler), recordOps_(recordOps) {}
 
   std::expected<CompiledStatement, Diagnostic> compile(const Expr &expression,
                                                        ResultUse use) {
@@ -119,6 +123,42 @@ public:
                "assemble a statement before opening turn marks or choices");
       const auto type = preflight(expression, true, 0, false, false, use);
       return emitStatement(expression, type);
+    } catch (const Diagnostic &diagnostic) {
+      return std::unexpected(diagnostic);
+    }
+  }
+
+  // §6.1's fragment emission seam: the body is preflighted with its
+  // declared parameters seeded as frame-bound locals (indices 0..n-1 —
+  // the prologue's per-name #RESOLVE ops fill them off the call frame's
+  // d.vars/d.values channel), then emitted under the statement wrapper
+  // with a #Return tail and the spill/publish records run relies on.
+  std::expected<FragmentBody, Diagnostic>
+  compileFragment(const Expr &body, const std::vector<Parameter> &parameters,
+                  ResultUse use) {
+    try {
+      if (&vm_.core() != &core_)
+        refuse(body, DiagnosticCode::InvalidDeclaration,
+               "compiler core and VM do not share an arena");
+      if (vm_.choiceDepth() != 0 || core_.arena().outstandingMarks() != 0)
+        refuse(body, DiagnosticCode::InvalidPosition,
+               "assemble a fragment before opening turn marks or choices");
+      scopes_.emplace_back();
+      paramNames_.reserve(parameters.size());
+      for (const auto &parameter : parameters) {
+        const auto scalar = scalarType(parameter.type);
+        if (!scalar)
+          refuse(body, DiagnosticCode::InvalidDeclaration,
+                 "fragment parameter type is outside the scalar lowering "
+                 "subset: " +
+                     typeName(parameter.type));
+        scopes_.back().emplace(parameter.name, Local{localCount_, *scalar});
+        paramNames_.push_back(parameter.name);
+        ++localCount_;
+      }
+      paramCount_     = parameters.size();
+      const auto type = preflight(body, true, 0, false, false, use);
+      return emitFragmentBody(body, type);
     } catch (const Diagnostic &diagnostic) {
       return std::unexpected(diagnostic);
     }
@@ -199,6 +239,12 @@ private:
       if (!matches)
         refuse(expression, DiagnosticCode::TypeMismatch,
                "binding value does not have its declared scalar type");
+    } else {
+      // §5.3's capture class: references to a cap$N alias carry the
+      // captured binding's own cell — operand wings for it are capture
+      // slots (unvalued cells appended to the binding's +d.clone rank
+      // tail, decoded via masterOf at run time), never int64 snapshots.
+      captureCells_.insert(found->second.cell);
     }
     externalReferences_[&expression] = found->second.cell;
     return *type;
@@ -419,6 +465,14 @@ private:
       }
       scopes_.pop_back();
       if (failed) type = Scalar::Bottom;
+      // A block's semantic result type is its last statement's — a
+      // `run` or code"…" tail carries the richer Type, not the scalar.
+      if (!expression.children.empty()) {
+        const auto &last = *expression.children.back();
+        if (const auto found = resultTypes_.find(&last);
+            found != resultTypes_.end())
+          resultTypes_[&expression] = found->second;
+      }
       break;
     }
     case ExprKind::Let: {
@@ -540,16 +594,119 @@ private:
         refuse(expression, DiagnosticCode::TypeMismatch,
                "'static' operand must have a literal-expressible scalar "
                "type (Int, Float, Str, Bool or ())");
+      // §5.5 inside a fragment: a `static` is judged in the context the
+      // parameter lands in, and a parameter is unvalued there — the
+      // run/graft emission has no activation to evaluate against, so
+      // `static(param)` is a named emission refusal.
+      if (paramCount_ != 0 && referencesParam(*expression.children.front()))
+        refuse(expression, DiagnosticCode::InvalidPosition,
+               "'static' operand inside a fragment references a "
+               "parameter — parameters are unvalued at the run/graft "
+               "emission the operand is judged in");
       type = value;
       break;
     }
-    case ExprKind::Code:
-      // A surviving code"…" literal — a let-bound literal never fully
-      // substituted or a code value at runtime position — cannot be
-      // scalar-lowered; the fragment descriptor path lands in phase 3.
-      refuse(expression, DiagnosticCode::InvalidDeclaration,
-             "a surviving code\"…\" literal cannot be scalar-lowered; "
-             "expand substitutes fragments before compile");
+    case ExprKind::Code: {
+      // §6.1: a surviving code"…" literal lowers to a real fragment
+      // object — head + descriptor + body graph — minted by
+      // compileFragment at emit time and read as a head-valued ref.
+      arity(0);
+      if (!fragments_)
+        refuse(expression, DiagnosticCode::InvalidDeclaration,
+               "a code\"…\" literal reached lowering without the "
+               "expansion/check tables — supply the FragmentContext");
+      const auto record = fragmentRecord(expression);
+      if (!record)
+        refuse(expression, DiagnosticCode::InvalidDeclaration,
+               "code\"…\" literal has no fragment-table record; the "
+               "expand stage must run before compile");
+      const auto *meta = fragmentMeta(expression);
+      if (meta && meta->spliceOnly)
+        refuse(expression, DiagnosticCode::InvalidDeclaration,
+               "a splice-only fragment (parameterized by a Code "
+               "parameter) emits no head and no descriptor — it may "
+               "appear only as a splice or template actual");
+      const auto *info = fragmentInfo(expression);
+      if (!info)
+        refuse(expression, DiagnosticCode::InvalidDeclaration,
+               "code\"…\" literal has no checked fragment info; the "
+               "check stage must run before compile");
+      // A Code value is a ref-box: the cell content int64 names the
+      // fragment head, so it rides the Cell scalar mechanically while
+      // the descriptor carries the real Code<T>.
+      resultTypes_[&expression] = Type{"Code", {info->result}};
+      type                      = Scalar::Cell;
+      break;
+    }
+    case ExprKind::Call: {
+      // §6.2's `run` special form — the only call the scalar kernel
+      // lowers; every other callee stays unsupported.
+      const auto &callee = *expression.children.front();
+      if (callee.kind != ExprKind::Identifier || callee.text != "run")
+        refuse(expression, DiagnosticCode::InvalidDeclaration,
+               "scalar lowering does not yet support calls — only the "
+               "'run' special form");
+      if (pure)
+        refuse(expression, DiagnosticCode::InvalidPosition,
+               "'run' is opaque-impure — it cannot appear in a "
+               "condition");
+      if (!fragments_)
+        refuse(expression, DiagnosticCode::InvalidDeclaration,
+               "'run' reached lowering without the expansion/check "
+               "tables — supply the FragmentContext");
+      if (expression.children.size() < 2 || expression.children.size() > 3)
+        refuse(expression, DiagnosticCode::InvalidDeclaration,
+               "'run' takes a fragment and an optional argument list");
+      const auto &operandExpr = *expression.children[1];
+      if (operandExpr.kind != ExprKind::Code)
+        refuse(operandExpr, DiagnosticCode::InvalidDeclaration,
+               "'run' operand must be a code\"…\" literal in this "
+               "lowering — name-bound and opaque Code values are the "
+               "§11.1 call ABI's owed surface");
+      const auto operandType = preflight(operandExpr, false, depth + 1, pure);
+      (void)operandType; // the Code arm already checked its record
+      const auto *record = fragmentRecord(operandExpr);
+      const auto *info   = fragmentInfo(operandExpr);
+      const auto *meta   = fragmentMeta(operandExpr);
+      if (meta && meta->spliceOnly)
+        refuse(expression, DiagnosticCode::InvalidDeclaration,
+               "'run' cannot execute a splice-only fragment — it has "
+               "no value-level parameter to receive");
+      const std::size_t declared = record->body.parameters.size();
+      if (expression.children.size() == 3) {
+        const auto &argsExpr = *expression.children[2];
+        if (argsExpr.kind != ExprKind::List)
+          refuse(argsExpr, DiagnosticCode::TypeMismatch,
+                 "'run' argument list must be a list literal");
+        if (argsExpr.children.size() != declared)
+          refuse(expression, DiagnosticCode::TypeMismatch,
+                 "'run' argument count differs from the fragment's "
+                 "declared arity");
+        // §6.2: the argument list is heterogeneous — each element is
+        // typed per-element by `any`, so no common-type join applies.
+        for (const auto &item : argsExpr.children)
+          preflight(*item, false, depth + 1, pure);
+      } else if (declared != 0) {
+        refuse(expression, DiagnosticCode::TypeMismatch,
+               "'run' argument count differs from the fragment's "
+               "declared arity");
+      }
+      const auto resultScalar   = scalarType(info->result);
+      resultTypes_[&expression] = info->result;
+      if (resultScalar) {
+        type = *resultScalar;
+      } else if (info->result.name == "Code") {
+        // A fragment whose result is itself Code — the produced value
+        // is a head-valued ref, carried as a Cell scalar.
+        type = Scalar::Cell;
+      } else {
+        refuse(expression, DiagnosticCode::TypeMismatch,
+               "'run' result type is outside the scalar lowering "
+               "subset: " +
+                   typeName(info->result));
+      }
+      break;
+    }
     case ExprKind::Splice:
       refuse(expression, DiagnosticCode::InvalidDeclaration,
              "a residual splice reached lowering; the expand stage "
@@ -566,50 +723,275 @@ private:
     return type;
   }
 
-  CellRef mint(OpcodeKind kind) {
-    return vm_.mintOpcode(kind, "vagent.scalar");
+  // -- Emission bookkeeping (§6.1) ------------------------------------
+  // Every cell this Emitter mints lands in own_ so a bound operand's
+  // referent class resolves to internal (rebinds through the old→new
+  // reify map) versus external/state-side (carried verbatim) — the
+  // map-membership discriminator the recipe replays on.
+  CellRef own(CellRef cell) {
+    own_.insert(cell);
+    return cell;
   }
-  CellRef temporary() { return core_.arena().makeCell(); }
+  // The +d.recipe link-tuple source — recorded only while a fragment
+  // body is being emitted (body_ is set); a statement image leaves the
+  // cells unrecorded, matching the unmarked program refs they are. The
+  // `from` endpoint may be an external/state-side cell (a materialized
+  // cells-path rank under a binding head) — the tuple still records,
+  // with referent classification distinguishing endpoints at replay.
+  void recLink(CellRef from, zigzag::DimRef dim, bool neg, CellRef to) {
+    if (body_)
+      body_->links.push_back(
+          {from, dim, neg, to, std::string{linkDimName(dim)}});
+  }
+  // Recipe link tuples carry the dim's *name* — identity re-resolves
+  // by name at genesis. The emission only ever links on core dims and
+  // every canonical name is the mintNamedDimension filing verbatim.
+  std::string_view linkDimName(zigzag::DimRef dim) const {
+    const auto &d = core_.dims();
+    if (dim == d.grab) return "d.grab";
+    if (dim == d.step) return "d.step";
+    if (dim == d.spin) return "d.spin";
+    if (dim == d.values) return "d.values";
+    if (dim == d.clone) return "d.clone";
+    if (dim == d.vars) return "d.vars";
+    if (dim == d.name) return "d.name";
+    if (dim == d.stack) return "d.stack";
+    return {};
+  }
+  void recLiteral(CellRef cell, const CellValue &value) {
+    if (body_) body_->literals.push_back({cell, value});
+  }
+  void recRef(CellRef cell, EmissionRef::Referent referent, std::int64_t target,
+              std::string dimName = {}) {
+    if (body_)
+      body_->refs.push_back(
+          {cell, std::nullopt, {}, referent, target, std::move(dimName)});
+  }
+  void recRefNamed(CellRef cell, std::string name, std::string role,
+                   std::int64_t target) {
+    if (!body_) return;
+    // A cell that carries the same re-resolvable ref twice does not
+    // get two name-records.
+    for (const auto &entry : body_->refs)
+      if (entry.cell == cell && entry.name && *entry.name == name &&
+          entry.role == role)
+        return;
+    // Name-record referents classify like every other ref: the head a
+    // callsite names is external to this body's coverage set (its own
+    // fragment object), so the rebind is verbatim and the +d.name label
+    // is the genesis re-resolution channel.
+    body_->refs.push_back({cell,
+                           std::move(name),
+                           std::move(role),
+                           classify(static_cast<CellRef>(target)),
+                           target,
+                           {}});
+  }
+
+  // VortexCore::bindInput/bindOutput's shapes with the slot + wing links
+  // recorded — bindInput mints an int64 slot naming the operand, links
+  // it +d.grab-first then +d.step-chained on the wing.
+  CellRef bindIn(CellRef op, CellRef operand) {
+    const auto slot =
+        own(core_.arena().makeScalarCell(static_cast<std::int64_t>(operand)));
+    wing(op, slot, false);
+    recRef(slot, classify(operand), static_cast<std::int64_t>(operand));
+    return slot;
+  }
+  CellRef bindOut(CellRef op, CellRef operand) {
+    const auto slot =
+        own(core_.arena().makeScalarCell(static_cast<std::int64_t>(operand)));
+    wing(op, slot, true);
+    recRef(slot, classify(operand), static_cast<std::int64_t>(operand));
+    return slot;
+  }
+  // §5.3's capture slot: an int64(binding) slot appended to the
+  // binding's own +d.clone rank tail — wingOf decodes the int64 at run
+  // time exactly like an ordinary slot, and the clone-rank membership
+  // is what reify replays (the ref-capture record's +d.values→binding
+  // arm re-appends the slot twin onto the *same* binding — a captured
+  // cell is shared, never copied). The clone-rank append itself is
+  // bookkeeping, not a recipe link tuple.
+  CellRef bindInCapture(CellRef op, CellRef binding) {
+    const auto slot =
+        own(core_.arena().makeScalarCell(static_cast<std::int64_t>(binding)));
+    const auto tail =
+        zigzag::rankTail(core_.arena(), binding, core_.dims().clone);
+    zigzag::expectWritten(core_.arena().link(tail, core_.dims().clone,
+                                             zigzag::DimVector::POS, slot));
+    wing(op, slot, false);
+    if (body_) body_->captures.push_back({slot, binding});
+    return slot;
+  }
+  void wing(CellRef op, CellRef slot, bool output) {
+    const auto &dims = core_.dims();
+    const auto dir   = output ? zigzag::DimVector::NEG : zigzag::DimVector::POS;
+    const auto first = core_.arena().linked(op, dims.grab, dir);
+    if (!first) {
+      recLink(op, dims.grab, output, slot);
+      zigzag::expectWritten(core_.arena().link(op, dims.grab, dir, slot));
+      return;
+    }
+    const auto tail = zigzag::rankTail(core_.arena(), *first, dims.step);
+    recLink(tail, dims.step, false, slot);
+    zigzag::expectWritten(
+        core_.arena().link(tail, dims.step, zigzag::DimVector::POS, slot));
+  }
+  EmissionRef::Referent classify(CellRef operand) const {
+    if (const auto dim = dimNames_.find(operand); dim != dimNames_.end())
+      return EmissionRef::Referent::Dim;
+    if (!own_.contains(operand)) return EmissionRef::Referent::External;
+    return EmissionRef::Referent::Internal;
+  }
+
+  CellRef mint(OpcodeKind kind) {
+    const auto op = own(vm_.mintOpcode(kind, "vagent.scalar"));
+    recLiteral(op, static_cast<std::int64_t>(kind));
+    if (recordOps_ && compiler_) compiler_->recordProgramOp(op);
+    return op;
+  }
+  CellRef temporary() {
+    const auto cell = own(core_.arena().makeCell());
+    // An unvalued literal record — every own_-minted cell must reach
+    // the recipe or a ref-capture so reify twins it; a slot would
+    // otherwise rebind to the *original* temp.
+    if (body_) body_->literals.push_back({cell, std::nullopt});
+    return cell;
+  }
+  CellRef scalar(std::int64_t value) {
+    const auto cell = own(core_.arena().makeScalarCell(value));
+    recLiteral(cell, value);
+    return cell;
+  }
+  CellRef scalar(bool value) {
+    const auto cell = own(core_.arena().makeScalarCell(value));
+    recLiteral(cell, value);
+    return cell;
+  }
+  CellRef scalar(double value) {
+    const auto cell = own(core_.arena().makeScalarCell(value));
+    recLiteral(cell, value);
+    return cell;
+  }
+  CellRef textCell(std::string_view text) {
+    const auto cell = own(core_.arena().makeCell(text));
+    recLiteral(cell, std::string(text));
+    return cell;
+  }
   CellRef reference(CellRef target) {
-    return core_.arena().makeScalarCell(static_cast<std::int64_t>(target));
+    const auto cell =
+        own(core_.arena().makeScalarCell(static_cast<std::int64_t>(target)));
+    recRef(cell, classify(target), static_cast<std::int64_t>(target));
+    return cell;
+  }
+  // A head-valued convention cell — the operand slot that stays
+  // int64(head), never the Call operand itself. `role` is the
+  // name-record's +d.grab label: "run" (head-valued) or "call"
+  // (entryOp-valued writeback).
+  CellRef namedRef(CellRef target, std::string name, std::string role) {
+    const auto cell =
+        own(core_.arena().makeScalarCell(static_cast<std::int64_t>(target)));
+    recRefNamed(cell, std::move(name), std::move(role),
+                static_cast<std::int64_t>(target));
+    return cell;
+  }
+  // An int64(dim) constant — a dim referent: its ref-capture record
+  // carries +d.name→the dim name so genesis re-resolves by name.
+  CellRef dimRef(zigzag::DimRef dim, std::string_view name) {
+    const auto cell =
+        own(core_.arena().makeScalarCell(static_cast<std::int64_t>(dim)));
+    dimNames_[cell] = std::string(name);
+    recRef(cell, EmissionRef::Referent::Dim, static_cast<std::int64_t>(dim),
+           std::string(name));
+    return cell;
   }
   void spin(CellRef from, CellRef to) {
+    recLink(from, core_.dims().spin, false, to);
     zigzag::expectWritten(core_.arena().link(from, core_.dims().spin,
                                              zigzag::DimVector::POS, to));
   }
+  void link(CellRef from, zigzag::DimRef dim, bool neg, CellRef to) {
+    recLink(from, dim, neg, to);
+    zigzag::expectWritten(core_.arena().link(
+        from, dim, neg ? zigzag::DimVector::NEG : zigzag::DimVector::POS, to));
+  }
   CellRef jump(CellRef target) {
     const auto op = mint(OpcodeKind::Jump);
-    core_.bindInput(op, reference(target));
+    bindIn(op, reference(target));
     return op;
   }
   CellRef copy(CellRef target, CellRef source, CellRef continuation) {
+    return copyValue(target, source, continuation, false);
+  }
+  CellRef copyValue(CellRef target, CellRef source, CellRef continuation,
+                    bool captureSource) {
     const auto op = mint(OpcodeKind::Value);
-    core_.bindInput(op, target);
-    core_.bindInput(op, cells_->zero);
-    core_.bindInput(op, cells_->minusOne);
-    core_.bindInput(op, source);
+    bindIn(op, target);
+    bindIn(op, cells_->zero);
+    bindIn(op, cells_->minusOne);
+    if (captureSource)
+      bindInCapture(op, source);
+    else
+      bindIn(op, source);
+    // §7.2's canonical wing table makes Value four-in/one-out; the
+    // write result itself is discardable.
+    bindOut(op, temporary());
     spin(op, jump(continuation));
     return op;
   }
   CellRef arithmetic(OpcodeKind kind, CellRef left, CellRef right,
                      CellRef output, CellRef continuation) {
     const auto op = mint(kind);
-    core_.bindInput(op, left);
-    core_.bindInput(op, right);
-    core_.bindOutput(op, output);
+    bindIn(op, left);
+    bindIn(op, right);
+    bindOut(op, output);
     spin(op, jump(continuation));
     return op;
   }
   CellRef gate(CellRef condition, CellRef onTrue, CellRef onFalse) {
     const auto branch = mint(OpcodeKind::Branch);
-    core_.bindInput(branch, condition);
-    core_.bindInput(branch, reference(onTrue));
+    bindIn(branch, condition);
+    bindIn(branch, reference(onTrue));
     spin(branch, jump(onFalse));
     return branch;
   }
   CellRef cut(CellRef depth, CellRef continuation) {
     const auto op = mint(OpcodeKind::Cut);
-    core_.bindInput(op, depth);
+    bindIn(op, depth);
+    spin(op, jump(continuation));
+    return op;
+  }
+  // #BIND name value — the d.vars/d.values name-keyed channel the run
+  // convention binds arguments through. The canonical wing table makes
+  // Bind two-in/one-out; the bound cell itself is discardable.
+  CellRef bindOp(std::string_view name, CellRef value, CellRef continuation) {
+    const auto op = mint(OpcodeKind::Bind);
+    bindIn(op, textCell(name));
+    bindIn(op, value);
+    bindOut(op, temporary());
+    spin(op, jump(continuation));
+    return op;
+  }
+  // #RESOLVE name → bound output — the name-keyed read half.
+  CellRef resolveOp(std::string_view name, CellRef output,
+                    CellRef continuation) {
+    const auto op = mint(OpcodeKind::Resolve);
+    bindIn(op, textCell(name));
+    bindOut(op, output);
+    spin(op, jump(continuation));
+    return op;
+  }
+  // #LINKED subject dim + follow — the runtime hop that materializes a
+  // rank of ref-boxes under `output` through the subject's own link.
+  CellRef linkedOp(CellRef subject, zigzag::DimRef dim,
+                   std::string_view dimName, CellRef output,
+                   CellRef continuation) {
+    const auto op = mint(OpcodeKind::Linked);
+    bindIn(op, subject);
+    bindIn(op, dimRef(dim, dimName));
+    bindIn(op, cells_->zero);
+    bindIn(op, scalar(true));
+    bindOut(op, output);
     spin(op, jump(continuation));
     return op;
   }
@@ -618,11 +1000,19 @@ private:
         [&](const auto &item) -> CellRef {
           if constexpr (std::is_same_v<std::decay_t<decltype(item)>,
                                        std::string>)
-            return core_.arena().makeCell(item);
+            return own(core_.arena().makeCell(item));
           else
-            return core_.arena().makeScalarCell(item);
+            return own(core_.arena().makeScalarCell(item));
         },
         value);
+  }
+  // `literal` without the recipe literal record — for cells whose
+  // content is an int64 reference (slots, ref cells) or recipe-internal
+  // data that must not be replayed as a literal value write.
+  CellRef literalCell(const CellValue &value) {
+    const auto cell = literal(value);
+    recLiteral(cell, value);
+    return cell;
   }
 
   CellRef resolved(const Expr &expression) const {
@@ -632,14 +1022,52 @@ private:
                : externalReferences_.at(&expression);
   }
 
+  // A subtree scan for fragment-parameter references — `static`
+  // operands inside a parameterized fragment must not read a frame-
+  // bound local (indices below paramCount_).
+  bool referencesParam(const Expr &expression) const {
+    if (expression.kind == ExprKind::Identifier) {
+      if (const auto found = localReferences_.find(&expression);
+          found != localReferences_.end() && found->second < paramCount_)
+        return true;
+    }
+    for (const auto &child : expression.children)
+      if (child && referencesParam(*child)) return true;
+    for (const ExprPtr *meta :
+         {&expression.scope, &expression.recipients, &expression.deadline,
+          &expression.guard, &expression.recovery})
+      if (*meta && referencesParam(**meta)) return true;
+    return false;
+  }
+
+  // The §5.6 table lookups — same loc+ordinal key the checker builds.
+  FragmentKey keyOf(const Expr &expression) const {
+    return fragmentKeyOf(expression);
+  }
+  const FragmentRecord *fragmentRecord(const Expr &expression) const {
+    if (!fragments_ || !fragments_->fragments) return nullptr;
+    const auto found = fragments_->fragments->find(keyOf(expression));
+    return found != fragments_->fragments->end() ? &found->second : nullptr;
+  }
+  const FragmentMeta *fragmentMeta(const Expr &expression) const {
+    if (!fragments_ || !fragments_->meta) return nullptr;
+    const auto found = fragments_->meta->find(keyOf(expression));
+    return found != fragments_->meta->end() ? &found->second : nullptr;
+  }
+  const FragmentInfo *fragmentInfo(const Expr &expression) const {
+    if (!fragments_ || !fragments_->info) return nullptr;
+    const auto found = fragments_->info->find(keyOf(expression));
+    return found != fragments_->info->end() ? &found->second : nullptr;
+  }
+
   CellRef bounded(const Expr &expression, CellRef output,
                   CellRef continuation) {
-    const auto depth  = core_.arena().makeScalarCell(std::int64_t{0});
+    const auto depth  = scalar(std::int64_t{0});
     const auto choice = mint(OpcodeKind::Choice);
-    core_.bindInput(choice, reference(cells_->fail));
+    bindIn(choice, reference(cells_->fail));
     spin(choice, emit(expression, output, cut(depth, continuation)));
     const auto readDepth = mint(OpcodeKind::ChoiceDepth);
-    core_.bindOutput(readDepth, depth);
+    bindOut(readDepth, depth);
     spin(readDepth, choice);
     return readDepth;
   }
@@ -655,29 +1083,34 @@ private:
                     CellRef continuation) {
     if (const auto value = literals_.find(&expression);
         value != literals_.end())
-      return copy(output, literal(value->second), continuation);
+      return copy(output, literalCell(value->second), continuation);
     switch (expression.kind) {
     case ExprKind::Unit:
       return copy(output, cells_->unit, continuation);
-    case ExprKind::Identifier:
-      return copy(output, resolved(expression), continuation);
+    case ExprKind::Identifier: {
+      const auto source = resolved(expression);
+      // A cap$N operand wraps its binding cell in a capture slot —
+      // masterOf(slot) at run time — never an int64 snapshot.
+      return copyValue(output, source, continuation,
+                       captureCells_.contains(source));
+    }
     case ExprKind::Fail:
       return jump(cells_->fail);
     case ExprKind::Unary: {
       const auto input = temporary();
       if (expression.text == "-") {
         const auto op = mint(OpcodeKind::Neg);
-        core_.bindInput(op, input);
-        core_.bindOutput(op, output);
+        bindIn(op, input);
+        bindOut(op, output);
         spin(op, jump(continuation));
         return emit(*expression.children.front(), input, op);
       }
-      const auto depth     = core_.arena().makeScalarCell(std::int64_t{0});
+      const auto depth     = scalar(std::int64_t{0});
       const auto readDepth = mint(OpcodeKind::ChoiceDepth);
-      core_.bindOutput(readDepth, depth);
+      bindOut(readDepth, depth);
       const auto choice  = mint(OpcodeKind::Choice);
       const auto success = copy(output, cells_->unit, continuation);
-      core_.bindInput(choice, reference(success));
+      bindIn(choice, reference(success));
       spin(readDepth, choice);
       spin(choice,
            emit(*expression.children.front(), input, cut(depth, cells_->fail)));
@@ -689,7 +1122,7 @@ private:
       const auto &op    = expression.text;
       if (op == "|") {
         const auto choice = mint(OpcodeKind::Choice);
-        core_.bindInput(choice, reference(emit(right, output, continuation)));
+        bindIn(choice, reference(emit(right, output, continuation)));
         spin(choice, emit(left, output, continuation));
         return choice;
       }
@@ -727,8 +1160,8 @@ private:
             const auto leftMin          = temporary();
             const auto rightNegativeOne = temporary();
             const auto overflows        = temporary();
-            const auto minimum          = core_.arena().makeScalarCell(
-                std::numeric_limits<std::int64_t>::min());
+            const auto minimum =
+                scalar(std::numeric_limits<std::int64_t>::min());
             const auto both = arithmetic(
                 OpcodeKind::And, leftMin, rightNegativeOne, overflows,
                 gate(overflows, cells_->fail, operationEntry));
@@ -737,9 +1170,8 @@ private:
                 arithmetic(OpcodeKind::Eq, rightValue, cells_->minusOne,
                            rightNegativeOne, both));
           }
-          const auto zero = effective == Scalar::Float
-                                ? core_.arena().makeScalarCell(0.0)
-                                : cells_->zero;
+          const auto zero =
+              effective == Scalar::Float ? scalar(0.0) : cells_->zero;
           operationEntry =
               arithmetic(OpcodeKind::Eq, rightValue, zero, isZero,
                          gate(isZero, cells_->fail, operationEntry));
@@ -763,15 +1195,15 @@ private:
       return emit(*expression.children.front(), resolved(expression),
                   copy(output, cells_->unit, continuation));
     case ExprKind::If: {
-      const auto depth     = core_.arena().makeScalarCell(std::int64_t{0});
+      const auto depth     = scalar(std::int64_t{0});
       const auto readDepth = mint(OpcodeKind::ChoiceDepth);
-      core_.bindOutput(readDepth, depth);
+      bindOut(readDepth, depth);
       const auto choice = mint(OpcodeKind::Choice);
       const auto onFalse =
           expression.children.size() == 3
               ? emit(*expression.children[2], output, continuation)
               : copy(output, cells_->unit, continuation);
-      core_.bindInput(choice, reference(onFalse));
+      bindIn(choice, reference(onFalse));
       const auto onTrue = emit(*expression.children[1], output, continuation);
       spin(choice,
            emit(*expression.children[0], temporary(), cut(depth, onTrue)));
@@ -784,9 +1216,11 @@ private:
       // outstanding, then fold the type-matched result cell in as a
       // literal. The eval residue — dead graph, cursor cell,
       // temporaries — stays in the compile arena, which is discarded;
-      // none of it reaches the sealed artifact.
+      // none of it reaches the sealed artifact. recordOps=false keeps
+      // the residue out of the program image's op sequence.
       const auto expected = types_.at(expression.children.front().get());
-      Emitter eval(core_, vm_, bindings_, limits_);
+      Emitter eval(core_, vm_, bindings_, limits_, fragments_, compiler_,
+                   false);
       auto lowered =
           eval.compile(*expression.children.front(), ResultUse::Value);
       if (!lowered)
@@ -832,12 +1266,20 @@ private:
       if (!matches)
         refuse(expression, DiagnosticCode::TypeMismatch,
                "'static' result does not match its checked type");
-      return copy(output, literal(*value), continuation);
+      return copy(output, literalCell(*value), continuation);
     }
-    case ExprKind::Code:
-      refuse(expression, DiagnosticCode::InvalidDeclaration,
-             "a surviving code\"…\" literal cannot be scalar-lowered; "
-             "expand substitutes fragments before compile");
+    case ExprKind::Code: {
+      // §6.1: mint (or reuse) this literal's fragment object — head +
+      // descriptor + body graph — and yield the Code value as a
+      // head-valued ref-box. The head ref carries a "run"-role
+      // name-record (label → head writeback) — a fragment-owned ref
+      // naming a labelled head is name-resolved, not program-side.
+      const auto head = emitFragmentObject(expression);
+      return copy(output, namedRef(head, fragmentLabel(expression), "run"),
+                  continuation);
+    }
+    case ExprKind::Call:
+      return emitRun(expression, output, continuation);
     case ExprKind::Splice:
       refuse(expression, DiagnosticCode::InvalidDeclaration,
              "a residual splice reached lowering; the expand stage "
@@ -854,9 +1296,10 @@ private:
   void materialize(CellRef head, const std::vector<CellRef> &elements) {
     CellRef tail = head;
     for (const CellRef element : elements) {
-      zigzag::expectWritten(core_.arena().link(
-          tail, tail == head ? core_.dims().grab : core_.dims().step,
-          zigzag::DimVector::POS, element));
+      const auto dim = tail == head ? core_.dims().grab : core_.dims().step;
+      recLink(tail, dim, false, element);
+      zigzag::expectWritten(
+          core_.arena().link(tail, dim, zigzag::DimVector::POS, element));
       tail = element;
     }
   }
@@ -887,9 +1330,18 @@ private:
       for (std::size_t j = 0; j < path.steps[i].literals.size(); ++j)
         created[i].push_back(temporary());
 
-    const auto dimConstant = [this](std::string_view name) {
-      return literal(
-          static_cast<std::int64_t>(core_.findOrMintDimension(name)));
+    const auto dimConstant = [this](std::string_view name) -> CellRef {
+      const auto dim = core_.findOrMintDimension(name);
+      return dimRef(dim, name);
+    };
+
+    // A cells path subject that is a capture binding reads through a
+    // capture slot like any other operand.
+    const auto subjectSlot = [this, &subject](CellRef op) {
+      if (captureCells_.contains(*subject))
+        bindInCapture(op, *subject);
+      else
+        bindIn(op, *subject);
     };
 
     std::vector<CellRef> ops;
@@ -897,35 +1349,38 @@ private:
       const auto &step = path.steps[i];
       if (!step.create) {
         const auto op = mint(OpcodeKind::Linked);
-        core_.bindInput(op, *subject);
-        core_.bindInput(op, dimConstant(step.dim));
-        core_.bindInput(op, step.neg ? cells_->minusOne : cells_->zero);
-        if (follow || step.hasFilter) core_.bindInput(op, literal(follow));
+        subjectSlot(op);
+        bindIn(op, dimConstant(step.dim));
+        bindIn(op, step.neg ? cells_->minusOne : cells_->zero);
+        // The canonical wing table makes Linked exactly four-in: the
+        // follow operand is always bound even when false.
+        bindIn(op, literalCell(follow));
         if (step.hasFilter) {
-          core_.bindInput(op, dimConstant(step.filterDim));
-          core_.bindInput(op, step.filterNeg ? cells_->minusOne : cells_->zero);
+          bindIn(op, dimConstant(step.filterDim));
+          bindIn(op, step.filterNeg ? cells_->minusOne : cells_->zero);
         }
-        core_.bindOutput(op, output);
+        bindOut(op, output);
         ops.push_back(op);
         continue;
       }
       for (std::size_t j = 0; j < step.literals.size(); ++j) {
         const CellRef fresh = created[i][j];
         const auto create   = mint(OpcodeKind::New);
-        core_.bindInput(create, *subject);
-        core_.bindInput(create, dimConstant(step.dim));
-        core_.bindInput(create, step.neg ? cells_->minusOne : cells_->zero);
-        core_.bindInput(create, literal(true));
-        core_.bindOutput(create, fresh);
+        subjectSlot(create);
+        bindIn(create, dimConstant(step.dim));
+        bindIn(create, step.neg ? cells_->minusOne : cells_->zero);
+        bindIn(create, literalCell(true));
+        bindOut(create, fresh);
         ops.push_back(create);
         // A bare % mints an unnamed cell; writing "" would leave empty-
         // string content instead of no content.
         if (!step.literals[j].empty()) {
           const auto write = mint(OpcodeKind::Value);
-          core_.bindInput(write, fresh);
-          core_.bindInput(write, cells_->zero);
-          core_.bindInput(write, cells_->minusOne);
-          core_.bindInput(write, literal(step.literals[j]));
+          bindIn(write, fresh);
+          bindIn(write, cells_->zero);
+          bindIn(write, cells_->minusOne);
+          bindIn(write, literalCell(step.literals[j]));
+          bindOut(write, temporary());
           ops.push_back(write);
         }
         // Several creations on one step are rank siblings off the subject;
@@ -943,10 +1398,14 @@ private:
           // cells"$v": copy the ref out of the binding box at run time.
           const auto box  = temporary();
           const auto read = mint(OpcodeKind::Value);
-          core_.bindInput(read, box);
-          core_.bindInput(read, cells_->zero);
-          core_.bindInput(read, cells_->minusOne);
-          core_.bindInput(read, *subject);
+          bindIn(read, box);
+          bindIn(read, cells_->zero);
+          bindIn(read, cells_->minusOne);
+          if (captureCells_.contains(*subject))
+            bindInCapture(read, *subject);
+          else
+            bindIn(read, *subject);
+          bindOut(read, temporary());
           ops.push_back(read);
           elements.push_back(box);
         } else {
@@ -967,29 +1426,186 @@ private:
     return ops.empty() ? jump(entry) : entry;
   }
 
+  // The shared statement/fragment wrapper shape: produced=false entry
+  // copy → [prologue] → ChoiceDepth read → Choice(fail-arm) → body →
+  // Cut → produced=true → tail. `emitTail` supplies the tail op —
+  // Halt for a statement, Return for a fragment body. `prologue` maps
+  // the readDepth continuation to any op chain that must run first —
+  // the fragment parameter resolves; identity for a statement.
+  template <typename MakeTail, typename MakePrologue>
+  CellRef emitWrapped(const Expr &expression, CellRef output, CellRef produced,
+                      MakeTail &&emitTail, MakePrologue &&prologue) {
+    const auto falseValue = scalar(false);
+    const auto trueValue  = scalar(true);
+    const auto depth      = scalar(std::int64_t{0});
+    const auto tail       = emitTail();
+    const auto onFailure  = copy(produced, falseValue, tail);
+    const auto onSuccess  = cut(depth, copy(produced, trueValue, tail));
+    const auto choice     = mint(OpcodeKind::Choice);
+    bindIn(choice, reference(onFailure));
+    spin(choice, emit(expression, output, onSuccess));
+    const auto readDepth = mint(OpcodeKind::ChoiceDepth);
+    bindOut(readDepth, depth);
+    spin(readDepth, choice);
+    return copy(produced, falseValue, prologue(readDepth));
+  }
+
   CompiledStatement emitStatement(const Expr &expression, Scalar type) {
-    cells_ = EmissionCells{core_.arena().makeScalarCell(std::int64_t{0}),
-                           core_.arena().makeScalarCell(std::int64_t{-1}),
+    cells_ = EmissionCells{scalar(std::int64_t{0}), scalar(std::int64_t{-1}),
                            temporary(), mint(OpcodeKind::Fail)};
     localCells_.reserve(localCount_);
     for (std::size_t i = 0; i < localCount_; ++i)
       localCells_.push_back(temporary());
-    const auto falseValue = core_.arena().makeScalarCell(false);
-    const auto trueValue  = core_.arena().makeScalarCell(true);
-    const auto output     = temporary();
-    const auto produced   = core_.arena().makeScalarCell(false);
-    const auto depth      = core_.arena().makeScalarCell(std::int64_t{0});
-    const auto halt       = mint(OpcodeKind::Halt);
-    const auto onFailure  = copy(produced, falseValue, halt);
-    const auto onSuccess  = cut(depth, copy(produced, trueValue, halt));
-    const auto choice     = mint(OpcodeKind::Choice);
-    core_.bindInput(choice, reference(onFailure));
-    spin(choice, emit(expression, output, onSuccess));
-    const auto readDepth = mint(OpcodeKind::ChoiceDepth);
-    core_.bindOutput(readDepth, depth);
-    spin(readDepth, choice);
-    const auto entry = copy(produced, falseValue, readDepth);
+    const auto output   = temporary();
+    const auto produced = scalar(false);
+    const auto entry    = emitWrapped(
+        expression, output, produced, [&] { return mint(OpcodeKind::Halt); },
+        [](CellRef next) { return next; });
+    // A `run`/code"…" node's semantic type (Code<T>, the fragment's T)
+    // beats the scalar arm's Cell — the callsite and the descriptor
+    // report the same Type the checker computed (§5.4/:696's map).
+    if (const auto rich = resultTypes_.find(&expression);
+        rich != resultTypes_.end())
+      return {entry, output, produced, rich->second};
     return {entry, output, produced, resultType(type)};
+  }
+
+  // §6.1's body emission: same wrapper as a statement but with a
+  // #Return tail and the name-keyed #RESOLVE prologue that fills the
+  // declared parameters' locals off the cursor's +d.vars channel (the
+  // run callsite's #BIND ops land them there — the VM's one vars
+  // channel, since a pushed frame holds only the return op). The
+  // body's own output / produced cells double as the
+  // descriptor-published result/produced cells — the descriptor's
+  // "result"/"produced" fields point at them, so no epilogue copy is
+  // needed.
+  FragmentBody emitFragmentBody(const Expr &body, Scalar type) {
+    FragmentBody fragment;
+    body_  = &fragment;
+    cells_ = EmissionCells{scalar(std::int64_t{0}), scalar(std::int64_t{-1}),
+                           temporary(), mint(OpcodeKind::Fail)};
+    localCells_.reserve(localCount_);
+    for (std::size_t i = 0; i < localCount_; ++i)
+      localCells_.push_back(temporary());
+    const auto output   = temporary();
+    const auto produced = scalar(false);
+    const auto entry    = emitWrapped(
+        body, output, produced, [&] { return mint(OpcodeKind::Return); },
+        [&](CellRef next) {
+          // RESOLVE p0 → RESOLVE p1 → … → next, declaration order.
+          for (std::size_t i = paramCount_; i-- > 0;)
+            next = resolveOp(paramNames_[i], localCells_[i], next);
+          return next;
+        });
+    fragment.entry      = entry;
+    fragment.result     = output;
+    fragment.produced   = produced;
+    fragment.resultType = resultType(type);
+    body_               = nullptr;
+    return fragment;
+  }
+
+  // Mint or reuse the fragment object for a surviving code"…" literal
+  // — compileFragment (fragment.cpp) owns the head/descriptor/record
+  // emission and the per-literal cache on the context.
+  CellRef emitFragmentObject(const Expr &expression) {
+    auto object =
+        xanadu::vagent::compileFragment(expression, *fragments_, *compiler_);
+    if (!object) refuse(expression, object.error().code, object.error().detail);
+    return object->head;
+  }
+
+  // §6.2's `run` callsite on the caller's own cursor: evaluate each
+  // argument left-to-right into a temp, #BIND each declared parameter
+  // name to its argument value, #CALL the fragment's entry op, and —
+  // the VM lands Return on the Call's +d.spin target — gate on the
+  // descriptor-published produced flag, then copy the published result
+  // out. Convention/name cells pair the callsite into +d.refs: the
+  // Call operand slot carries a "call"-role name record whose referent
+  // is the entry op; a head-valued convention cell carries the
+  // "run"-role record whose referent is the head.
+  CellRef emitRun(const Expr &expression, CellRef output,
+                  CellRef continuation) {
+    const auto &operandExpr = *expression.children[1];
+    const auto *record      = fragmentRecord(operandExpr);
+    auto object =
+        xanadu::vagent::compileFragment(operandExpr, *fragments_, *compiler_);
+    if (!object) refuse(expression, object.error().code, object.error().detail);
+
+    // The entry/result/produced cells live in the callee's own graph;
+    // from this emission's perspective they are external referents.
+    const auto producedCell = object->produced;
+    const auto resultCell   = object->result;
+    const auto entryOp      = object->entry;
+    const auto head         = object->head;
+
+    // Continuation the #CALL's frame lands on (the VM lands Return on
+    // the Call's +d.spin target): produced? copy the published result
+    // to this expression's output : fail.
+    const auto afterCall = gate(
+        producedCell, copy(output, resultCell, continuation), cells_->fail);
+
+    const auto callOp = mint(OpcodeKind::Call);
+    const auto label  = fragmentLabel(operandExpr);
+    // The Call operand decodes like Jump/Branch's: a slot naming a
+    // ref-box cell whose int64 content is the entry op's position —
+    // the VM renders the decoded cell and toInt()s it (vortex_vm.cpp:
+    // 854-856), so the op cell itself must never sit in the operand
+    // slot. The slot gets the "call"-role name record; the head-valued
+    // convention cell rides the Call op's +d.values edge and gets the
+    // "run"-role record. Together they are the §6.2 callsite pair.
+    bindInNamed(callOp, reference(entryOp), label, "call", entryOp);
+    const auto convention = namedRef(head, label, "run");
+    link(callOp, core_.dims().values, false, convention);
+    spin(callOp, afterCall);
+
+    // #BIND pname argN in declaration order before the call — the
+    // callee's #RESOLVE prologue reads them off the cursor's +d.vars
+    // (the VM's one vars channel). Arguments evaluate left-to-right.
+    const std::size_t arity = record->body.parameters.size();
+    std::vector<CellRef> argTemps(arity);
+    for (auto &temp : argTemps) temp = temporary();
+    CellRef tail = callOp;
+    for (std::size_t i = arity; i-- > 0;)
+      tail = bindOp(record->body.parameters[i].name, argTemps[i], tail);
+    if (arity != 0) {
+      const auto &argsExpr = *expression.children[2];
+      for (std::size_t i = arity; i-- > 0;)
+        tail = emit(*argsExpr.children[i], argTemps[i], tail);
+    }
+    return tail;
+  }
+
+  // The callsite label for +d.refs name-records — the fragment's own
+  // label (declared #label verbatim, else the deterministic position
+  // key) so genesis re-resolves the head by name. Same string
+  // fragment.cpp hangs on the head's +d.name.
+  std::string fragmentLabel(const Expr &expression) {
+    const auto *record = fragmentRecord(expression);
+    return fragmentLabelOf(
+        keyOf(expression),
+        record ? record->body.label : std::optional<std::string>{},
+        fragments_ ? fragments_->module : std::optional<std::string>{});
+  }
+
+  // bindIn with a name-record on the slot: used for the `run` Call
+  // operand so genesis can re-resolve the callsite's entry referent.
+  // `operand` is the cell the slot names (the ref-box); `referent` is
+  // what the name-record's re-resolution stands for — the callee's
+  // entry op.
+  CellRef bindInNamed(CellRef op, CellRef operand, std::string name,
+                      std::string role, CellRef referent) {
+    const auto slot =
+        own(core_.arena().makeScalarCell(static_cast<std::int64_t>(operand)));
+    wing(op, slot, false);
+    if (body_)
+      body_->refs.push_back({slot,
+                             std::move(name),
+                             std::move(role),
+                             classify(referent),
+                             static_cast<std::int64_t>(referent),
+                             {}});
+    return slot;
   }
 
   VortexCore &core_;
@@ -1017,14 +1633,62 @@ private:
     CellRef fail;
   };
   std::optional<EmissionCells> cells_;
+
+  // ---- Fragment-emission state (§6.1) ---------------------------------
+  const FragmentContext *fragments_{nullptr};
+  Compiler *compiler_{nullptr};
+  bool recordOps_{false};
+  // Every cell this Emitter minted — the internal/external referent
+  // discriminator (map membership) the recipe replay keys on.
+  std::unordered_set<CellRef> own_;
+  // The live bookkeeping accumulator while a fragment body emits; null
+  // on a statement image — statements record no recipe.
+  FragmentBody *body_{nullptr};
+  // Declared-parameter bookkeeping: parameters are locals 0..n-1,
+  // resolved by name in the prologue; `referencesParam` refuses a
+  // `static` that reads one.
+  std::size_t paramCount_{0};
+  std::vector<std::string> paramNames_;
+  // Binding cells referenced through cap$N aliases — operands on them
+  // lower to capture slots (clone-rank members + ref-capture records),
+  // never plain ref reads.
+  std::unordered_set<CellRef> captureCells_;
+  // int64(dim) cells minted by dimRef — the dim-name channel for the
+  // ref-capture record's +d.name edge.
+  std::unordered_map<CellRef, std::string> dimNames_;
+  // Semantic (rich) result types for `run` and code"…" nodes — the
+  // scalar arm keeps Cell while the descriptor and callsite types
+  // carry Code<T>/T.
+  std::unordered_map<const Expr *, Type> resultTypes_;
 };
 
 } // namespace
 
 std::expected<CompiledStatement, Diagnostic>
 Compiler::compileStatement(const Expr &statement,
-                           const CompilerBindings &bindings, ResultUse use) {
-  return Emitter(core_, vm_, bindings, limits_).compile(statement, use);
+                           const CompilerBindings &bindings, ResultUse use,
+                           const FragmentContext *fragments) {
+  noteEmissionStart();
+  return Emitter(core_, vm_, bindings, limits_, fragments, this,
+                 /*recordOps=*/true)
+      .compile(statement, use);
+}
+
+std::expected<FragmentBody, Diagnostic>
+Compiler::compileFragmentBody(const FragmentBodyRequest &request) {
+  if (!request.body)
+    return std::unexpected(
+        Diagnostic{DiagnosticCode::InvalidDeclaration,
+                   "compileFragmentBody called without a body",
+                   {}});
+  noteEmissionStart();
+  static const CompilerBindings kEmptyBindings;
+  Emitter emitter(core_, vm_,
+                  request.bindings ? *request.bindings : kEmptyBindings,
+                  limits_, request.fragments, this,
+                  /*recordOps=*/true);
+  return emitter.compileFragment(*request.body, request.parameters,
+                                 request.use);
 }
 
 } // namespace xanadu::vagent

@@ -64,13 +64,26 @@ struct FragmentRecord {
 // so check() skips it quietly.
 using FragmentTable = std::map<FragmentKey, FragmentRecord>;
 
+// What check() computes per fragment record (§7.1's per-literal tables):
+// the body's checked result type T, its purity, the declared parameter
+// count, and the record's outside-reference `closed` classification —
+// the fields phase 3's fragment descriptor carries.
+struct FragmentInfo {
+  Type result;
+  bool pure{false};
+  bool closed{false};
+  std::size_t arity{0};
+};
+using FragmentInfoMap = std::map<FragmentKey, FragmentInfo>;
+
 // The phase-1 signature (r1-disposition I3): the fragment table produced by
 // expand lands with its consumer — a Code node whose key has no record is a
 // named refusal, because a table-less check() can only mean the pipeline
-// skipped expand.
+// skipped expand. `infoOut`, when given, receives the per-fragment tables
+// phase 3's compileFragment reads into descriptors.
 [[nodiscard]] std::expected<void, std::vector<Diagnostic>>
 check(const Program &program, const FragmentTable &fragments,
-      CheckLimits limits = {});
+      CheckLimits limits = {}, FragmentInfoMap *infoOut = nullptr);
 
 // The un-stamped/records-absent entry point. check() is a public API whose
 // existing callers parse but never resolve or expand, so the env walk

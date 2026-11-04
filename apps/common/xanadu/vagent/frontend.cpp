@@ -6,8 +6,8 @@
 
 namespace xanadu::vagent {
 
-std::expected<Program, std::vector<Diagnostic>> compile(std::string_view source,
-                                                        FrontendLimits limits) {
+std::expected<CompileArtifacts, std::vector<Diagnostic>>
+compileArtifacts(std::string_view source, FrontendLimits limits) {
   // Stage 1 — parse the whole unit.
   Parser parser(source, limits.parse);
   auto program = parser.parseProgram();
@@ -35,9 +35,20 @@ std::expected<Program, std::vector<Diagnostic>> compile(std::string_view source,
       entry.second.env[alias] = capture.captured;
   // Stage 4 — check the merged tree once, with the fragment table the
   // expand stage produced so a record-less literal is a named refusal.
-  auto checked = check(*program, expanded->fragments, limits.check);
+  // `info` collects the per-fragment result/purity/closed/arity table
+  // phase 3's descriptors carry.
+  FragmentInfoMap info;
+  auto checked = check(*program, expanded->fragments, limits.check, &info);
   if (!checked) return std::unexpected(std::move(checked.error()));
-  return std::move(*program);
+  return CompileArtifacts{std::move(*program), std::move(*expanded),
+                          std::move(info)};
+}
+
+std::expected<Program, std::vector<Diagnostic>> compile(std::string_view source,
+                                                        FrontendLimits limits) {
+  auto artifacts = compileArtifacts(source, limits);
+  if (!artifacts) return std::unexpected(std::move(artifacts.error()));
+  return std::move(artifacts->program);
 }
 
 } // namespace xanadu::vagent

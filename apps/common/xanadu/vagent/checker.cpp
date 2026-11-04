@@ -152,17 +152,6 @@ struct Function {
   const Decl *declaration{};
 };
 
-// What check() computes per fragment record (§7.1's per-literal tables):
-// the body's checked result type T, its purity, the declared parameter
-// count, and the record's outside-reference `closed` classification —
-// the fields phase 3's fragment descriptor carries.
-struct FragmentInfo {
-  Type result;
-  bool pure{false};
-  bool closed{false};
-  std::size_t arity{0};
-};
-
 class Checker {
 public:
   Checker(const Program &program, CheckLimits limits,
@@ -172,6 +161,9 @@ public:
         purityWork_(limits.maxPurityWork),
         resolutionWork_(limits.maxResolutionWork) {}
   std::expected<void, std::vector<Diagnostic>> run();
+  // check()'s infoOut seam: the per-fragment tables phase 3's descriptor
+  // emission consumes — valid after a successful run().
+  const FragmentInfoMap &fragmentInfo() const { return fragmentInfo_; }
 
 private:
   // Inside a code"…" body every node loc is literal-relative, so one
@@ -271,6 +263,14 @@ private:
   Type recover(const Expr &expression, Type value, Environment &env,
                Context context);
   void actionAllowed(const Expr &expression, Context context);
+  // std:meta's checker-level special forms (§6.1, phase 3): `run` and
+  // `reify` are not signature rows — run's second operand is the
+  // language's only heterogeneous argument list, and reify returns the
+  // operand's own Code<T> identity rather than a fixed row.
+  enum class MetaForm : std::uint8_t { None, Run, Reify };
+  MetaForm metaForm(const Expr &callee) const;
+  Type metaRun(const Expr &call, Environment &env, Context context);
+  Type metaReify(const Expr &call, Environment &env, Context context);
   static Context operand(Context context) {
     context.bounded     = false;
     context.suspend     = false;
@@ -933,6 +933,47 @@ std::optional<Function> Checker::function(const Expr &callee, const Decl *owner,
     if (name == "subject") return builtin({}, named("Str"));
     if (name == "pos") return builtin({}, named("Int"));
   }
+  // §6.1's read surface: the reflect family plus the value reads, keyed
+  // by the std:meta import exactly like std:goal's member rows.
+  // `run`/`reify` are special forms in call(), not rows — run's second
+  // operand is the language's only heterogeneous argument list.
+  bool metaCallable = false;
+  for (const auto &imported : program_.imports) {
+    resolutionWork(imported.loc, 1 + imported.symbols.size());
+    if (imported.path != "std:meta") continue;
+    const bool selected =
+        imported.symbols.empty() ||
+        std::ranges::find(imported.symbols, name) != imported.symbols.end();
+    const bool qualified =
+        !qualifier || *qualifier == imported.alias.value_or("std:meta");
+    metaCallable = metaCallable || (selected && qualified);
+  }
+  if (metaCallable) {
+    const auto code = [](Type element) {
+      return Type{"Code", {std::move(element)}};
+    };
+    if (name == "program" || name == "agent_cell")
+      return builtin({}, named("Cell"));
+    if (name == "module_named")
+      return builtin({named("Str")}, optional(named("Cell")));
+    if (name == "symbol_named")
+      return builtin({named("Str"), named("Str")}, optional(named("Cell")));
+    if (name == "clauses_of")
+      return builtin({named("Cell")}, list(named("Cell")));
+    if (name == "test_of" || name == "body_of")
+      return builtin({named("Cell")}, optional(code(named("Cell"))));
+    if (name == "plan_named")
+      return builtin({named("Str")}, optional(named("Cell")));
+    if (name == "code_named")
+      return builtin({named("Str")}, optional(code(named("Cell"))));
+    if (name == "label_of")
+      return builtin({named("Cell")}, optional(named("Str")));
+    if (name == "validate") return builtin({named("Cell")}, named("Bool"));
+    if (name == "weight_of")
+      return builtin({named("Cell")}, optional(named("Float")));
+    if (name == "value_of") return builtin({named("Cell")}, any);
+    if (name == "next_rand") return builtin({named("Cell")}, named("Int"));
+  }
   if (diagnose)
     report(DiagnosticCode::UnknownName,
            "unknown method/function '" + name + "'", callee.loc);
@@ -1049,11 +1090,132 @@ void Checker::arguments(const Expr &expression, const std::vector<Type> &types,
       expectType(actual, types[i], expression.children[i + 1]->loc);
   }
 }
+Checker::MetaForm Checker::metaForm(const Expr &callee) const {
+  std::string_view name;
+  std::optional<std::string_view> qualifier;
+  if (callee.kind == ExprKind::Identifier) {
+    name = callee.text;
+  } else if (callee.kind == ExprKind::Field && !callee.children.empty() &&
+             callee.children.front()->kind == ExprKind::Identifier) {
+    name      = callee.text;
+    qualifier = callee.children.front()->text;
+  } else {
+    return MetaForm::None;
+  }
+  const bool run   = name == "run";
+  const bool reify = name == "reify";
+  if (!run && !reify) return MetaForm::None;
+  for (const auto &imported : program_.imports) {
+    if (imported.path != "std:meta") continue;
+    const bool selected =
+        imported.symbols.empty() ||
+        std::ranges::find(imported.symbols, name) != imported.symbols.end();
+    const bool qualified =
+        !qualifier || *qualifier == imported.alias.value_or("std:meta");
+    if (selected && qualified) return run ? MetaForm::Run : MetaForm::Reify;
+  }
+  return MetaForm::None;
+}
+
+Type Checker::metaRun(const Expr &expression, Environment &env,
+                      Context context) {
+  // §6.1's `run(c, [args])` — the only call whose argument list is
+  // heterogeneous, which is why it is a special form: each element
+  // types on its own, and a statically-known fragment checks arity
+  // and element types now; anything else defers to the runtime
+  // descriptor.
+  const auto argc = expression.children.size() - 1;
+  require(argc == 1 || argc == 2, DiagnosticCode::TypeMismatch,
+          "run takes a fragment and an optional argument list", expression.loc);
+  if (argc == 0) return unknown;
+  const Expr &operandExpr = *expression.children[1];
+  const auto operandType  = infer(operandExpr, env, operand(context));
+  const bool codeShaped =
+      operandType.name == "Code" && operandType.arguments.size() <= 1;
+  require(codeShaped, DiagnosticCode::TypeMismatch,
+          "run's operand must be a Code fragment", operandExpr.loc);
+
+  const Expr *argsExpr = argc == 2 ? expression.children[2].get() : nullptr;
+  std::vector<const Expr *> argExprs;
+  std::vector<Type> argTypes;
+  if (argsExpr) {
+    require(argsExpr->kind == ExprKind::List, DiagnosticCode::TypeMismatch,
+            "run's argument list must be a list literal", argsExpr->loc);
+    if (argsExpr->kind == ExprKind::List) {
+      for (const auto &item : argsExpr->children) {
+        argExprs.push_back(item.get());
+        argTypes.push_back(infer(*item, env, operand(context)));
+      }
+    }
+  }
+
+  if (operandExpr.kind == ExprKind::Code) {
+    const FragmentKey key{operandExpr.loc, operandExpr.stamp
+                                               ? operandExpr.stamp->ordinal
+                                               : std::nullopt};
+    if (const auto found = fragments_.find(key);
+        found != fragments_.end() && found->second.body.body) {
+      const auto &parameters = found->second.body.parameters;
+      for (const auto &parameter : parameters)
+        if (parameter.type.name == "Code")
+          report(DiagnosticCode::InvalidDeclaration,
+                 "run of a Code-parameterized fragment: '" + parameter.name +
+                     "' is splice-only — it has no value-level "
+                     "argument to receive",
+                 parameter.loc);
+      require(argTypes.size() == parameters.size(),
+              DiagnosticCode::TypeMismatch,
+              "run argument count differs from the fragment's "
+              "declared arity",
+              expression.loc);
+      for (std::size_t i = 0; i < argExprs.size() && i < parameters.size(); ++i)
+        expectType(argTypes[i], parameters[i].type, argExprs[i]->loc);
+    }
+  }
+  // run executes; a pure or read-only position refuses it like every
+  // other action.
+  actionAllowed(expression, context);
+  // The §6.1 row: `run` gives back T under Code<T>, unknown under the
+  // bare-Code wildcard.
+  if (!codeShaped || operandType.arguments.empty()) return unknown;
+  return operandType.arguments.front();
+}
+
+Type Checker::metaReify(const Expr &expression, Environment &env,
+                        Context context) {
+  const auto argc = expression.children.size() - 1;
+  require(argc == 1, DiagnosticCode::TypeMismatch,
+          "reify takes exactly one fragment", expression.loc);
+  if (argc == 0) return unknown;
+  const auto operandType =
+      infer(*expression.children[1], env, operand(context));
+  const bool codeShaped =
+      operandType.name == "Code" && operandType.arguments.size() <= 1;
+  require(codeShaped, DiagnosticCode::TypeMismatch,
+          "reify's operand must be a Code fragment",
+          expression.children[1]->loc);
+  actionAllowed(expression, context);
+  return codeShaped ? operandType : unknown;
+}
+
 Type Checker::call(const Expr &expression, Environment &env, Context context) {
   if (expression.children.empty()) {
     report(DiagnosticCode::InvalidDeclaration, "call has no callee",
            expression.loc);
     return unknown;
+  }
+  // The std:meta special forms intercept before ordinary callee
+  // resolution so an unimported `run`/`reify` still resolves as a
+  // user decl.
+  if (metaImported_) {
+    switch (metaForm(*expression.children.front())) {
+    case MetaForm::Run:
+      return metaRun(expression, env, context);
+    case MetaForm::Reify:
+      return metaReify(expression, env, context);
+    case MetaForm::None:
+      break;
+    }
   }
   auto signature = function(*expression.children.front(), context.owner);
   if (!signature) {
@@ -2497,16 +2659,32 @@ std::expected<void, std::vector<Diagnostic>> Checker::run() try {
   preflight();
   buildResolutionIndex();
   for (const auto &imported : program_.imports) {
-    const bool supported =
-        imported.path == "std:agent" || imported.path == "std:goal";
-    // §5.1: run/value_of become reserved names under the meta import. The
-    // import itself is refused below until the package machinery lands —
-    // both diagnostics are wanted, not either/or.
+    const bool supported = imported.path == "std:agent" ||
+                           imported.path == "std:goal" ||
+                           imported.path == "std:meta";
+    // §5.1: run/value_of become reserved names under the meta import.
     metaImported_ = metaImported_ || imported.path == "std:meta";
     require(supported, DiagnosticCode::InvalidDeclaration,
             "module loading is not available for import '" + imported.path +
                 "'",
             imported.loc);
+  }
+  // §6.7: `src:`, `reify:` and `patch:` are minted-label prefixes, so a
+  // module path heading into any of them could reroute a first-`:`
+  // qualified lookup onto the module arm — user labels stay opaque.
+  if (program_.module) {
+    const auto &path = *program_.module;
+    const auto colon = path.find(':');
+    const auto head  = std::string_view{path}.substr(
+        0, colon == std::string::npos ? path.size() : colon);
+    require(head != "src" && head != "reify" && head != "patch",
+            DiagnosticCode::InvalidIdentifier,
+            "module path begins with the reserved label prefix '" +
+                std::string(head) + ":'",
+            program_.imports.empty() ? (program_.declarations.empty()
+                                            ? SourceLocation{}
+                                            : program_.declarations.front().loc)
+                                     : program_.imports.front().loc);
   }
   static const std::set<std::string_view> builtinTypes{
       "Int",   "Float", "Str",   "Bool",      "Duration",
@@ -2554,8 +2732,11 @@ std::expected<void, std::vector<Diagnostic>> Checker::run() try {
 
 std::expected<void, std::vector<Diagnostic>>
 check(const Program &program, const FragmentTable &fragments,
-      CheckLimits limits) {
-  return Checker(program, limits, fragments).run();
+      CheckLimits limits, FragmentInfoMap *infoOut) {
+  Checker checker(program, limits, fragments);
+  auto result = checker.run();
+  if (result && infoOut) *infoOut = checker.fragmentInfo();
+  return result;
 }
 
 std::expected<void, std::vector<Diagnostic>> check(const Program &program,

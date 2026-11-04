@@ -1527,8 +1527,45 @@ private:
     for (const auto &decl : program_.declarations) scanDecl(decl);
   }
 
+  // `run`/`reify` under `std:meta` are the evaluated positions that DO
+  // receive a fragment (§6.1): the operand literal reaches checking —
+  // where the named Code-parameter refusal, arity and element-type
+  // arms live — so the splice-only gate does not fire on it.
+  bool metaFormOperand(std::string_view name,
+                       const std::optional<std::string> &qualifier) const {
+    if (name != "run" && name != "reify") return false;
+    for (const auto &imported : program_.imports) {
+      if (imported.path != "std:meta") continue;
+      const bool selected =
+          imported.symbols.empty() ||
+          std::ranges::find(imported.symbols, name) !=
+              imported.symbols.end();
+      const bool qualified =
+          !qualifier || *qualifier == imported.alias.value_or("std:meta");
+      if (selected && qualified) return true;
+    }
+    return false;
+  }
+
+  // Whether @p child is the operand of @p parent — the first argument
+  // of a `run`/`reify` special-form call.
+  bool runOperandOf(const Expr &parent, const Expr &child) const {
+    if (parent.kind != ExprKind::Call || parent.children.size() < 2 ||
+        parent.children[1].get() != &child || !parent.children.front())
+      return false;
+    const Expr &callee = *parent.children.front();
+    if (callee.kind == ExprKind::Identifier)
+      return metaFormOperand(callee.text, std::nullopt);
+    if (callee.kind == ExprKind::Field && !callee.children.empty() &&
+        callee.children.front()->kind == ExprKind::Identifier)
+      return metaFormOperand(callee.text,
+                             callee.children.front()->text);
+    return false;
+  }
+
   void residualExpr(const Expr &node, const LiteralChain &chain,
-                    std::set<const Expr *> &seen) {
+                    std::set<const Expr *> &seen,
+                    const bool runOperand = false) {
     if (!seen.insert(&node).second) return;
     switch (node.kind) {
     case ExprKind::Splice:
@@ -1549,7 +1586,7 @@ private:
                                        : std::nullopt};
       const auto meta = metas_.find(key);
       if (meta != metas_.end()) {
-        if (meta->second.spliceOnly)
+        if (meta->second.spliceOnly && !runOperand)
           report(Diagnostic{
                      DiagnosticCode::InvalidPosition,
                      "a Code-parameterized literal is splice-only — it "
@@ -1582,7 +1619,8 @@ private:
       break;
     }
     for (const auto &child : node.children)
-      if (child) residualExpr(*child, chain, seen);
+      if (child)
+        residualExpr(*child, chain, seen, runOperandOf(node, *child));
     for (const ExprPtr *meta : {&node.scope, &node.recipients,
                                 &node.deadline, &node.guard,
                                 &node.recovery})

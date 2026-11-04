@@ -1173,6 +1173,17 @@ $(OBJDIR)/vagent_compiler_test: $(call obj,tests/xuzz/vagent_compiler_test.cpp) 
 test/vagent-compiler: vagent_compiler_test
 	$(OBJDIR)/vagent_compiler_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
 
+# Phase-3 fragment emission + the sibling's std:meta surface share one
+# dedicated binary: both suites exercise the emitted head/descriptor/
+# +d.refs/+d.recipe schema and the `run` convention engine-side.
+.PHONY: vagent_fragment_test test/vagent-fragment
+vagent_fragment_test: $(OBJDIR)/vagent_fragment_test
+$(OBJDIR)/vagent_fragment_test: $(call obj,tests/xuzz/vagent_fragment_test.cpp tests/xuzz/vagent_meta_test.cpp) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
+	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS) $(TEST_LIBS)
+
+test/vagent-fragment: vagent_fragment_test
+	$(OBJDIR)/vagent_fragment_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
+
 test/vagent-frontend: vagent vagent_frontend_test
 	$(OBJDIR)/vagent_frontend_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
 
