@@ -1085,47 +1085,47 @@ swarm-image:
 
 .PHONY: vqueryc
 vqueryc: $(OBJDIR)/vqueryc
-$(OBJDIR)/vqueryc: $(VQUERYC_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
+$(OBJDIR)/vqueryc: $(VQUERYC_OBJS) $(XUDU_CORE_OBJS) $(COMMON_UI_TUI_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS)
 
 .PHONY: vquery
 vquery: $(OBJDIR)/vquery
-$(OBJDIR)/vquery: $(VQUERY_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
+$(OBJDIR)/vquery: $(VQUERY_OBJS) $(XUDU_CORE_OBJS) $(COMMON_UI_TUI_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS)
 
 .PHONY: vprolog
 vprolog: $(OBJDIR)/vprolog
-$(OBJDIR)/vprolog: $(VPROLOG_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
+$(OBJDIR)/vprolog: $(VPROLOG_OBJS) $(XUDU_CORE_OBJS) $(COMMON_UI_TUI_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS)
 
 .PHONY: vplc
 vplc: $(OBJDIR)/vplc
-$(OBJDIR)/vplc: $(VPLC_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
+$(OBJDIR)/vplc: $(VPLC_OBJS) $(XUDU_CORE_OBJS) $(COMMON_UI_TUI_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS)
 
 .PHONY: vpl
 vpl: $(OBJDIR)/vpl
-$(OBJDIR)/vpl: $(VPL_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
+$(OBJDIR)/vpl: $(VPL_OBJS) $(XUDU_CORE_OBJS) $(COMMON_UI_TUI_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS)
 
 .PHONY: vlace
 vlace: $(OBJDIR)/vlace
-$(OBJDIR)/vlace: $(VLACE_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
+$(OBJDIR)/vlace: $(VLACE_OBJS) $(XUDU_CORE_OBJS) $(COMMON_UI_TUI_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS)
 
 .PHONY: vlacec
 vlacec: $(OBJDIR)/vlacec
-$(OBJDIR)/vlacec: $(VLACEC_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
+$(OBJDIR)/vlacec: $(VLACEC_OBJS) $(XUDU_CORE_OBJS) $(COMMON_UI_TUI_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS)
 
 .PHONY: vicon
 vicon: $(OBJDIR)/vicon
-$(OBJDIR)/vicon: $(VICON_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
+$(OBJDIR)/vicon: $(VICON_OBJS) $(XUDU_CORE_OBJS) $(COMMON_UI_TUI_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS)
 
 .PHONY: viconc
 viconc: $(OBJDIR)/viconc
-$(OBJDIR)/viconc: $(VICONC_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
+$(OBJDIR)/viconc: $(VICONC_OBJS) $(XUDU_CORE_OBJS) $(COMMON_UI_TUI_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS)
 
 .PHONY: vagent vagent_frontend_test vagent_syntax_test vagent_runtime_test test/vagent-frontend test/vagent-syntax test/vagent-runtime
