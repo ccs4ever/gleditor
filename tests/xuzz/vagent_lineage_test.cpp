@@ -246,7 +246,7 @@ TEST(VagentLineageTest, RegenesisPreservesSessionMutationsAcrossFolds) {
       a0.link(zigzag::rankTail(a0, agent, vars), vars, Posward, record));
 
   // Cycle 1: the agent cell and its record fold in.
-  auto c1 = regenesisCycle(h.lineage, a0, agent);
+  auto c1 = regenesisCycle(h.lineage, a0, agent, 0);
   ASSERT_TRUE(c1.has_value()) << (c1 ? "" : c1.error());
   auto &a1 = c1->context->arena;
   ASSERT_TRUE(a1.contains(c1->agentCell));
@@ -269,7 +269,7 @@ TEST(VagentLineageTest, RegenesisPreservesSessionMutationsAcrossFolds) {
   zigzag::expectWritten(a1.link(rec1, values1, Posward, serial7));
 
   // Cycle 2: the repoint folds — the record reads 7 on the new arena.
-  auto c2 = regenesisCycle(h.lineage, a1, c1->agentCell);
+  auto c2 = regenesisCycle(h.lineage, a1, c1->agentCell, 0);
   ASSERT_TRUE(c2.has_value()) << (c2 ? "" : c2.error());
   auto &a2 = c2->context->arena;
   EXPECT_EQ(c2->agentCell, c1->agentCell)
@@ -292,7 +292,7 @@ TEST(VagentLineageTest, SessionMintFilesOnceWithNoVisibleTwin) {
   auto &a0         = h.arena();
   const auto agent = a0.makeCell("agent");
 
-  auto c1 = regenesisCycle(h.lineage, a0, agent);
+  auto c1 = regenesisCycle(h.lineage, a0, agent, 0);
   ASSERT_TRUE(c1.has_value()) << (c1 ? "" : c1.error());
   auto &a1 = c1->context->arena;
 
@@ -302,7 +302,7 @@ TEST(VagentLineageTest, SessionMintFilesOnceWithNoVisibleTwin) {
   const auto note       = a1.makeCell("note");
   zigzag::expectWritten(a1.link(c1->agentCell, sessionDim, Posward, note));
 
-  auto c2 = regenesisCycle(h.lineage, a1, c1->agentCell);
+  auto c2 = regenesisCycle(h.lineage, a1, c1->agentCell, 0);
   ASSERT_TRUE(c2.has_value()) << (c2 ? "" : c2.error());
 
   // The once-only bound: exactly one rank cell reads "d.session-mint" —
@@ -321,7 +321,7 @@ TEST(VagentLineageTest, SessionMintFilesOnceWithNoVisibleTwin) {
   const auto clean = a2.makeCell("clean");
   zigzag::expectWritten(a2.link(c2->agentCell, *filed, Posward, clean));
 
-  auto c3 = regenesisCycle(h.lineage, a2, c2->agentCell);
+  auto c3 = regenesisCycle(h.lineage, a2, c2->agentCell, 0);
   ASSERT_TRUE(c3.has_value()) << (c3 ? "" : c3.error());
   auto &a3 = c3->context->arena;
 
@@ -370,7 +370,7 @@ TEST(VagentLineageTest, LearnedClauseCallsLearnedMethodAcrossFolds) {
   zigzag::expectWritten(
       a0.link(zigzag::rankTail(a0, agent, vars), vars, Posward, method));
 
-  auto c1 = regenesisCycle(h.lineage, a0, agent);
+  auto c1 = regenesisCycle(h.lineage, a0, agent, 0);
   ASSERT_TRUE(c1.has_value()) << (c1 ? "" : c1.error());
   auto &a1 = c1->context->arena;
 
@@ -400,7 +400,7 @@ TEST(VagentLineageTest, LearnedClauseCallsLearnedMethodAcrossFolds) {
   const auto entry1 = a1.makeCell("entry:1");
   zigzag::expectWritten(a1.link(method1, values1, Posward, entry1));
 
-  auto c2 = regenesisCycle(h.lineage, a1, c1->agentCell);
+  auto c2 = regenesisCycle(h.lineage, a1, c1->agentCell, 0);
   ASSERT_TRUE(c2.has_value()) << (c2 ? "" : c2.error());
   auto &a2           = c2->context->arena;
   const auto patch2  = a2.dimensionNamed("d.patch").value();
@@ -437,7 +437,7 @@ TEST(VagentLineageTest, DimensionFieldRecipeReadsFiledDimRefAfterFold) {
   const auto marker = a0.makeCell("marker");
   zigzag::expectWritten(a0.link(agent, minted, Posward, marker));
 
-  auto c1 = regenesisCycle(h.lineage, a0, agent);
+  auto c1 = regenesisCycle(h.lineage, a0, agent, 0);
   ASSERT_TRUE(c1.has_value()) << (c1 ? "" : c1.error());
   auto &a1 = c1->context->arena;
 
@@ -453,7 +453,7 @@ TEST(VagentLineageTest, DimensionFieldRecipeReadsFiledDimRefAfterFold) {
   zigzag::expectWritten(a1.link(zigzag::rankTail(a1, c1->agentCell, recipe1),
                                 recipe1, Posward, scalar));
 
-  auto c2 = regenesisCycle(h.lineage, a1, c1->agentCell);
+  auto c2 = regenesisCycle(h.lineage, a1, c1->agentCell, 0);
   ASSERT_TRUE(c2.has_value()) << (c2 ? "" : c2.error());
   auto &a2 = c2->context->arena;
 
@@ -483,7 +483,7 @@ TEST(VagentLineageTest, RegenesisRefusesABaseOnAnotherStore) {
   zigzag::ArenaManifold alien(&foreignFold);
   const auto agent = alien.makeCell("agent");
 
-  auto refused = regenesisCycle(h.lineage, alien, agent);
+  auto refused = regenesisCycle(h.lineage, alien, agent, 0);
   EXPECT_FALSE(refused.has_value());
 }
 
@@ -496,7 +496,7 @@ TEST(VagentLineageTest, RegenesisRefusesAnAlienRoot) {
   // promote's contains() is the boundary that says so.
   const auto alien = ArenaManifold::refOf(
       static_cast<std::uint32_t>(h.arena().cellCount()) + 64);
-  auto refused = regenesisCycle(h.lineage, h.arena(), alien);
+  auto refused = regenesisCycle(h.lineage, h.arena(), alien, 0);
   EXPECT_FALSE(refused.has_value());
 }
 

@@ -775,7 +775,8 @@ TEST(VagentGenesisTest, SecondGenesisReplaysTheWholeEdl) {
 
   // Fold the genesis session's promote-visible state — the fault
   // tombstone is the only durable residue installs leave behind.
-  auto cycle = regenesisCycle(f.store, gc.context->arena, f.agentCell);
+  auto cycle =
+      regenesisCycle(f.store, gc.context->arena, f.agentCell, f.imageExtent);
   ASSERT_TRUE(cycle.has_value()) << (cycle ? "" : cycle.error());
   EXPECT_EQ(cycle->agentCell, f.agentCell)
       << "a base-cell root keeps its persistent name";
@@ -938,7 +939,7 @@ TEST(VagentGenesisTest, SessionLearnRegenesisLearnCycles) {
 
   // Cycle 1: promote the agent root, then the ceremony over the fresh
   // context — the session's patch record replays.
-  auto c1 = regenesisCycle(f.store, a0, agentCell);
+  auto c1 = regenesisCycle(f.store, a0, agentCell, f.imageExtent);
   ASSERT_TRUE(c1.has_value()) << (c1 ? "" : c1.error());
   GenesisRoots roots{
       .programRoot = f.programRoot,
@@ -1001,7 +1002,7 @@ TEST(VagentGenesisTest, SessionLearnRegenesisLearnCycles) {
   ASSERT_TRUE(replaced.has_value()) << (replaced ? "" : replaced.error());
 
   // Cycle 2: another fold — both patch records ride it.
-  auto c2 = regenesisCycle(f.store, a1, c1->agentCell);
+  auto c2 = regenesisCycle(f.store, a1, c1->agentCell, f.imageExtent);
   ASSERT_TRUE(c2.has_value()) << (c2 ? "" : c2.error());
   auto &a2  = c2->context->arena;
   auto out2 = runGenesis(f.store, f.store, a2, c2->context->core,

@@ -359,8 +359,8 @@ CellRef ArenaManifold::proxyFor(const std::uint32_t space,
     return it->second;
   }
 
-  const auto bits = (static_cast<std::uint64_t>(space) << 32) |
-                    static_cast<std::uint64_t>(foreignIndex);
+  const auto bits     = (static_cast<std::uint64_t>(space) << 32) |
+                        static_cast<std::uint64_t>(foreignIndex);
   const CellRef proxy = mintSlot(xanadu::ValueKind::ExternRef, bits, {});
 
   const auto dimStoreRefs = ensureDimension("d.store-refs");
@@ -1733,7 +1733,8 @@ ArenaResult ArenaManifold::compact() {
 std::optional<Promoted> promote(xanadu::Store &store,
                                 const xanadu::MicroversionId &parent,
                                 const ArenaManifold &from, const CellRef root,
-                                const PromotionBudget budget) {
+                                const PromotionBudget budget,
+                                const std::span<const CellRef> extraRoots) {
   if (!from.contains(root) || from.isProvenanceCell(root)) {
     return std::nullopt;
   }
@@ -1745,6 +1746,18 @@ std::optional<Promoted> promote(xanadu::Store &store,
   std::vector<CellRef> frontier{root};
   std::unordered_set<CellRef> seen{root};
   std::unordered_set<CellRef> queued{root};
+  // extraRoots seed the walk with cells the caller knows hold writes the
+  // root walk cannot reach — a shadowed base cell behind an unshadowed
+  // one. Only held cells qualify: expanding an unshadowed base would
+  // recurse into the document the terminal condition exists to avoid.
+  for (const CellRef extra : extraRoots) {
+    if (!from.contains(extra) || from.isProvenanceCell(extra) ||
+        !from.holdsOwn(extra)) {
+      continue;
+    }
+    if (seen.insert(extra).second) order.push_back(extra);
+    if (queued.insert(extra).second) frontier.push_back(extra);
+  }
   for (std::size_t i = 0; i < frontier.size(); i++) {
     const CellRef current = frontier[i];
     // A base cell only read through the overlay is an existing endpoint, not

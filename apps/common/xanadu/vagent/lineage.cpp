@@ -72,12 +72,10 @@ fileNameSet(Store &lineage, MicroversionId head,
 // seed
 // ---------------------------------------------------------------------------
 
-std::expected<LineageStore, std::string>
-seedLineageStore(const std::span<const std::string_view> segments,
-                 const Scroll &from,
-                 const std::map<std::string, Scroll> &scrolls,
-                 const ContentSource *const source,
-                 const DocumentId *const documentId) {
+std::expected<LineageStore, std::string> seedLineageStore(
+    const std::span<const std::string_view> segments, const Scroll &from,
+    const std::map<std::string, Scroll> &scrolls,
+    const ContentSource *const source, const DocumentId *const documentId) {
   return sealToStore(segments, from, scrolls, source, documentId);
 }
 
@@ -167,7 +165,8 @@ fileDimensionNames(Store &lineage, MicroversionId head,
 // ---------------------------------------------------------------------------
 
 std::expected<RegenesisResult, std::string>
-regenesisCycle(Store &lineage, ArenaManifold &arena, const CellRef agentRoot) {
+regenesisCycle(Store &lineage, ArenaManifold &arena, const CellRef agentRoot,
+               const std::uint32_t imageExtent) {
   // The promote destination is arena.base()->store() by contract — a
   // lineage mix would silently graft one document's state onto another,
   // so a base that names a different store is a refusal, not a warning.
@@ -181,8 +180,21 @@ regenesisCycle(Store &lineage, ArenaManifold &arena, const CellRef agentRoot) {
 
   // 1. The session's promote-visible mutations ride the agent cell's
   //    reachable subgraph — ephemeral cells mint persistent twins,
-  //    holdsOwn cells' link-writes become SetLink ops.
-  auto promoted = zigzag::promote(lineage, lineage.latest(), arena, agentRoot);
+  //    holdsOwn cells' link-writes become SetLink ops. The state-side
+  //    shadows join as extraRoots: a rank append at depth ≥2 sits on a
+  //    shadowed cell behind unshadowed base records, which the root
+  //    walk deliberately never traverses. Program-side shadows — refs
+  //    at or below the image band — are verb-replayed writes genesis
+  //    re-derives; seeding them would promote the installed copy the
+  //    replay then re-mints.
+  std::vector<CellRef> durable;
+  for (const CellRef ref : arena.shadowOrder()) {
+    if (!zigzag::isEphemeral(ref) && ref > imageExtent) {
+      durable.push_back(ref);
+    }
+  }
+  auto promoted =
+      zigzag::promote(lineage, lineage.latest(), arena, agentRoot, {}, durable);
   if (!promoted) {
     return std::unexpected(
         "regenesisCycle: promote refused the agent cell's subgraph "

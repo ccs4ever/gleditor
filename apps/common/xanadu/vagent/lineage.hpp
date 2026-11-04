@@ -207,6 +207,13 @@ struct RegenesisResult {
 ///      arena.base()->store()'s successor band; `agentRoot` is the agent
 ///      cell alone, never a program-side cell. A same-Store cycle needs
 ///      no sealLocalSpool — op records and local spans ride verbatim.
+///      The shadowed cells at or below `imageExtent` stay out of
+///      extraRoots: program-side writes are verb-replayed state — a
+///      learn_* install or a graft_* link — which genesis re-derives
+///      and must not also promote (a promoted install plus its replay
+///      twin is a double-install). The durable session cells — patch,
+///      vars and synapse records — all hold refs above the image band,
+///      so the ref-space boundary is the sideness test.
 ///   2. the filing sweep re-runs on the still-live session arena —
 ///      enumerating its session mints — BEFORE the rebuild seals the
 ///      fold, so the names ride this fold rather than landing outside it.
@@ -215,6 +222,9 @@ struct RegenesisResult {
 ///      `base` at construction, so each cycle is a new bundle — the fresh
 ///      VM's empty opcodeMap_ is what genesis (b) then re-fills).
 ///
+/// `imageExtent` is the recorded program-image band size the lineage
+/// was seeded with — 0 for a lineage that holds no image prefix.
+///
 /// The caller then re-runs the (a)-(e) ceremony over the result.
 /// Promote-visible mutations only: content ops for isEphemeral cells,
 /// link-writes on holdsOwn cells — a shadowed base cell's rewritten
@@ -222,7 +232,8 @@ struct RegenesisResult {
 /// :1867-1870, :2020-2053), which is why durable counters take the
 /// mint-and-repoint form.
 [[nodiscard]] std::expected<RegenesisResult, std::string>
-regenesisCycle(Store &lineage, ArenaManifold &arena, CellRef agentRoot);
+regenesisCycle(Store &lineage, ArenaManifold &arena, CellRef agentRoot,
+               std::uint32_t imageExtent);
 
 } // namespace xanadu::vagent
 

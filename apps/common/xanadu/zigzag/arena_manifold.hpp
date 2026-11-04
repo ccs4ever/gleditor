@@ -456,6 +456,15 @@ public:
     return shadowOrder_.size();
   }
 
+  /// The base cells this arena has shadowed, in write order. A promote()
+  /// call folding session mutations passes this as @p extraRoots so a
+  /// shadowed cell reachable only through an unshadowed base cell's
+  /// persistent edges — which the root walk deliberately does not
+  /// traverse — still folds.
+  [[nodiscard]] std::span<const CellRef> shadowOrder() const noexcept {
+    return shadowOrder_;
+  }
+
   // -- read path: the same questions Manifold answers ------------------------
 
   /// The dense id for @p ref, or nullopt. Arithmetic, not a lookup: an arena
@@ -834,6 +843,12 @@ private:
  *        along any dimension is promoted -- a failed branch's cells are not
  *        reachable from an answer, which is what makes "promote the answer,
  *        not the search" a graph walk rather than a bookkeeping problem.
+ * @param extraRoots additional cells to promote as if reachable. Only cells
+ *        this arena holds (minted or shadowed) qualify; an unshadowed base
+ *        cell is skipped because expanding it would walk the base document
+ *        the walk is written to avoid. Session-mutation folding passes
+ *        shadowOrder(): a rank append sitting on a shadowed cell behind
+ *        unshadowed base records is invisible to the root walk alone.
  * @return nothing, having written nothing, when the reachable subgraph exceeds
  *         @p budget, or when @p root is not a cell of @p from.
  *
@@ -843,7 +858,8 @@ private:
  */
 [[nodiscard]] std::optional<Promoted>
 promote(xanadu::Store &store, const xanadu::MicroversionId &parent,
-        const ArenaManifold &from, CellRef root, PromotionBudget budget = {});
+        const ArenaManifold &from, CellRef root, PromotionBudget budget = {},
+        std::span<const CellRef> extraRoots = {});
 
 [[nodiscard]] std::string
 encodeArenaPrefix(const ArenaManifold::PrefixSnapshot &snapshot);

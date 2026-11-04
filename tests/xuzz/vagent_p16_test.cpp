@@ -629,7 +629,7 @@ TEST(VagentP16Test, LearnCheckpointResumeLearnCheckpointResume) {
   std::optional<RegenesisResult> cycle;
   auto c1 = makeP16Ceremony(
       a0, co0, s0.binds, [&](void) -> std::expected<void, std::string> {
-        auto c = regenesisCycle(f.store, a0, s0.agentCell);
+        auto c = regenesisCycle(f.store, a0, s0.agentCell, f.imageExtent);
         if (!c) return std::unexpected(c.error());
         cycle = std::move(*c);
         return {};
@@ -707,7 +707,7 @@ TEST(VagentP16Test, LearnCheckpointResumeLearnCheckpointResume) {
   auto c2 = makeP16Ceremony(
       a1, cycle->context->core, *binds1,
       [&](void) -> std::expected<void, std::string> {
-        auto c = regenesisCycle(f.store, a1, cycle->agentCell);
+        auto c = regenesisCycle(f.store, a1, cycle->agentCell, f.imageExtent);
         if (!c) return std::unexpected(c.error());
         cycle2 = std::move(*c);
         return {};
