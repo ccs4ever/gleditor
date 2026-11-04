@@ -339,3 +339,60 @@ activation frames and resumable default thunks are the next dependencies.
 
 Logs: `/tmp/vql-contract-scalar-build.log`, `/tmp/vql-contract-scalar-tests.log`,
 `/tmp/vql-contract-scalar-format.log`.
+
+## Iteration 13: native activation-frame foundation
+
+Native `InvokeFrame` and `ReturnFrame` instructions use versioned graph descriptors with explicit
+local, argument and result records. Each invocation maps logical local registers to fresh arena
+backing; graph constants and external cell identities remain shared. Cell ports accept zero or one
+cell, while Stream ports preserve order and duplicates and accept scalar singletons. Caller result
+slots resolve before activation. Per-cursor activation metadata participates in choice snapshots,
+and explicit cursor close clears its live frame maps while saved choices can restore their state.
+
+Descriptor reference records carry tagged full-width Int64 targets. Executable export validates and
+relocates those records while preserving their role text; ordinary integer data stays numeric data.
+Live activation export, framed stdlib entry, and unsupported condition/pipeline composition refuse
+explicitly. Mesh frame artifacts still refuse until their descriptor/lifecycle route is implemented.
+
+This stage does not yet lower VQL definitions to reusable frames: the compiler still inlines calls
+and refuses recursive expansion. The next iteration must migrate argument/default/context/capture
+and result streams to reusable function graphs, followed by resumable contract-field default thunks.
+Full §4.12 remains incomplete.
+
+Return publication, frame removal and cursor changes commit under one arena savepoint and restore
+all affected VM maps on failure. Frame depth, local count, descriptor records and cumulative backing
+cells have configurable limits. Backing cells remain alive because returned values may refer to
+them; the default cumulative backing-cell cap is 1,048,576 and successful allocations are not
+refunded by return or backtracking. Stream frames retain the existing one-active-stream-cursor
+policy. Malformed frame bodies that halt or fall off without returning fail explicitly. Descriptor
+header/role bytes and span fragmentation are bounded before materialization and charged as work.
+
+Validation: full `make -j$(nproc)` and repository formatting passed. The affected matrix passed all
+477 tests from 45 suites, including real recursive graphs, nested results, identity, streams, choice
+restoration, cancellation, budget refusal/retry, malformed metadata and fresh-VM export. The broader
+VM/language sweep passed 242 of 269 tests; the remaining 27 exercise Prolog execution routes already
+refused by committed code because VM resolution lowering is absent. Its stale serialized-opcode
+boundary assertion was updated for the appended opcodes. No full-suite pass is claimed. Independent
+Luna architecture and engineering/profiler gates reviewed this bounded stage.
+
+An opt-in native-call probe ran headlessly in isolation on an AMD Ryzen Threadripper 1950X with the
+repository's Clang `-O3 -g` build. Each sample invokes the same identity frame 32 times; setup is
+outside the timed interval. The following are single observations, not speedup or latency promises.
+
+| Locals | Unrelated reference registers | Elapsed (µs) | Arena cells allocated |
+| ------ | ----------------------------- | ------------ | --------------------- |
+| 2      | 0                             | 255          | 64                    |
+| 2      | 100                           | 346          | 64                    |
+| 32     | 0                             | 516          | 1,024                 |
+| 32     | 100                           | 779          | 1,024                 |
+| 256    | 0                             | 3,438        | 8,192                 |
+| 256    | 100                           | 3,816        | 8,192                 |
+
+Arena backing grows with locals times calls. Descriptor parsing and rollback-map snapshots remain
+measurable costs; the probe does not count heap allocations and unrelated-register setup also grows
+the arena. No optimization or fixed per-call cost is established. The probe remains disabled during
+ordinary test runs and is available with `--gtest_also_run_disabled_tests` and
+`--gtest_filter='*DISABLED_NativeInvokeScaling'`.
+
+Logs: `/tmp/vql-frames-build.log`, `/tmp/vql-frames-tests.log`, `/tmp/vql-frames-vm-tests.log`,
+`/tmp/vql-frames-profile.log`, `/tmp/vql-frames-format.log`.

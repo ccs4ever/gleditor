@@ -87,8 +87,8 @@ void VortexVM::forEachResultCell(
 ExecutionResult VortexVM::executeCellRefCopy(const OpcodeKind kind,
                                              const CellRef opcode,
                                              std::vector<CellValue> &outputs) {
-  const auto sourceSlots = core_.inputsOf(opcode);
-  const auto targetSlots = core_.outputsOf(opcode);
+  const auto sourceSlots = inputsOf(opcode);
+  const auto targetSlots = outputsOf(opcode);
   struct SourceSnapshot {
     enum class Kind { Scalar, Stream, Iterator } kind{Kind::Scalar};
     std::optional<CellRef> scalar;
@@ -166,8 +166,8 @@ VortexVM::executeStreamOpcode(const OpcodeKind kind, const CellRef opcode,
         "stream and iterator opcodes require a VM cursor");
   }
   requireStreamCursor(*cursor);
-  const auto inputs = core_.inputsOf(opcode);
-  const auto slots  = core_.outputsOf(opcode);
+  const auto inputs = inputsOf(opcode);
+  const auto slots  = outputsOf(opcode);
   if (slots.empty())
     return invalidStreamOperation(
         "stream and iterator opcodes require output registers");

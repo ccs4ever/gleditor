@@ -30,8 +30,8 @@ VortexVM::ContractCoordinator VortexVM::contractCoordinator() const noexcept {
 
 ExecutionResult VortexVM::executeTypeContract(OpcodeKind kind, CellRef opcode,
                                               std::vector<CellValue> &outputs) {
-  const auto inputs                   = core_.inputsOf(opcode);
-  const auto slots                    = core_.outputsOf(opcode);
+  const auto inputs                   = inputsOf(opcode);
+  const auto slots                    = outputsOf(opcode);
   const bool required                 = kind == OpcodeKind::RequireContract;
   const std::size_t subjectCountIndex = required ? 2 : 1;
   const std::size_t firstSubject      = subjectCountIndex + 1;

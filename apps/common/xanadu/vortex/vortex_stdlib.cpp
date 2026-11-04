@@ -624,8 +624,16 @@ std::vector<CellValue> VortexStdLib::call(std::string_view path,
 
 std::vector<CellValue> VortexStdLib::call(CellRef fnOp,
                                           const std::vector<CellValue> &args) {
+  if (vm_.hasActiveFrames())
+    throw std::invalid_argument(
+        "stdlib calls cannot run during activation-frame execution");
   if (fnOp == noCell) {
     return {};
+  }
+  if (const auto kind = vm_.getOpcodeKind(fnOp);
+      kind == OpcodeKind::InvokeFrame || kind == OpcodeKind::ReturnFrame) {
+    throw std::invalid_argument(
+        "stdlib raw calls do not support activation-frame opcodes");
   }
   std::string opName = core_.arena().textOf(fnOp);
   if (opName.starts_with("#ARRAY_")) {

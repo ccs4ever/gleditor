@@ -33,8 +33,8 @@ ExecutionResult
 VortexVM::executeResumeInit(const CellRef opcode,
                             const std::vector<CellValue> &inputs,
                             const std::optional<CellRef> cursor) {
-  const auto inputSlots  = core_.inputsOf(opcode);
-  const auto outputSlots = core_.outputsOf(opcode);
+  const auto inputSlots  = inputsOf(opcode);
+  const auto outputSlots = outputsOf(opcode);
   if (!cursor) return resumeFailure(opcode, "ResumeInit requires a cursor");
   if (inputSlots.size() != 1 || inputs.size() != 1 || outputSlots.size() != 1)
     return resumeFailure(opcode, "ResumeInit expects one input and one output");
@@ -105,10 +105,10 @@ ExecutionResult
 VortexVM::executeResumeSet(const CellRef opcode,
                            const std::vector<CellValue> &inputs,
                            const std::optional<CellRef> cursor) {
-  const auto inputSlots = core_.inputsOf(opcode);
+  const auto inputSlots = inputsOf(opcode);
   if (!cursor) return resumeFailure(opcode, "ResumeSet requires a cursor");
   if (inputSlots.size() != 2 || inputs.size() != 2 ||
-      !core_.outputsOf(opcode).empty()) {
+      !outputsOf(opcode).empty()) {
     return resumeFailure(opcode, "ResumeSet expects two inputs and no outputs");
   }
   if (!isResumeScalar(inputs[1]))

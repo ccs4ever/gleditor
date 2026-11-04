@@ -22,6 +22,9 @@ exportProgram(const VortexCore &core, const VortexVM &vm,
   if (arena.base())
     throw std::runtime_error(
         "export of a base-backed query requires a source binding");
+  if (vm.hasActiveFrames())
+    throw std::runtime_error(
+        "export of a live activation frame requires persisted runtime state");
 
   // Validate before appending operations. A dimension operand is a reference
   // encoded as a scalar, whereas ordinary integer payloads must stay integers.
@@ -50,6 +53,15 @@ exportProgram(const VortexCore &core, const VortexVM &vm,
         referenceOperands.emplace(*slot, static_cast<CellRef>(*target));
         slot = arena.linked(*slot, core.dims().step, DimVector::POS);
       }
+    }
+    if (*kind == OpcodeKind::InvokeFrame || *kind == OpcodeKind::ReturnFrame) {
+      const auto inputs = core.inputsOf(opcode);
+      if (inputs.empty())
+        throw std::runtime_error("InvokeFrame has no descriptor operand");
+      const auto descriptor = vm.frameDescriptor(inputs.front());
+      if (!descriptor) throw std::runtime_error(descriptor.error().message);
+      for (const auto &[record, target] : descriptor->referenceCells)
+        referenceOperands.emplace(record, target);
     }
     if (*kind == OpcodeKind::Link || *kind == OpcodeKind::New ||
         *kind == OpcodeKind::Break || *kind == OpcodeKind::RankBegin ||
@@ -138,8 +150,10 @@ exportProgram(const VortexCore &core, const VortexVM &vm,
   // Parameter wings and cursor PCs use explicit reference slots. Relocate
   // them only after every target has a persistent birth, including cycles.
   for (const auto &[source, target] : referenceOperands) {
-    version = store.setScalar(version, cells.at(source),
-                              static_cast<std::int64_t>(cells.at(target)));
+    const auto content = store.userPermascroll().append(arena.textOf(source));
+    version            = store.setValue(version, cells.at(source), content,
+                                        xanadu::ValueKind::Int64,
+                                        static_cast<std::uint64_t>(cells.at(target)));
   }
   for (const auto &slot : arena.cells()) {
     const auto source = slot.birthOp;

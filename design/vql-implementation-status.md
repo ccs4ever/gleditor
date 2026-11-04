@@ -276,3 +276,19 @@ run, plus one disabled test). All 256 ZigZag tests also passed. The full build a
 passed; lint remains blocked by the same two unchanged UI defaults. No library or rootless swarm
 stage was rerun for these engine-only changes. Logs: `/tmp/vql-iterations-full-xuzz.log`,
 `/tmp/vql-iterations-zigzag.log`, `/tmp/vql-iterations-lint.log`.
+
+## Native activation-frame foundation
+
+Vortex now has graph-native versioned call descriptors and cursor-owned activation stacks. Local
+registers receive separate backing per invocation, and Cell/Stream arguments and results preserve
+actual identities and ordering. Choice points restore frames, explicit close cleans their runtime
+maps, return publication is atomic, and cumulative backing allocation is bounded. Export relocates
+tagged descriptor references with their role text intact and runs in a fresh VM. The affected
+477-test matrix passed; the broader sweep retains 27 existing missing-Prolog-lowering failures.
+
+This foundation still leaves VQL definitions compiled inline, with recursive expansion refused.
+Reusable recursive function graph lowering is next. Mesh frame artifacts explicitly refuse, and
+stream frames retain the existing single active stream cursor policy. Lazy field-default
+continuations, mutation boundaries and full functor/parameter semantics remain open. See
+[iteration 13](projects/vortex-vm-only-iterations.md) for scope, gates and measured resource costs;
+full §4.12 remains incomplete.

@@ -124,7 +124,7 @@ std::optional<OpcodeKind> VortexVM::getOpcodeKind(CellRef opCell) const {
   auto val = core_.arena().asInt64(opCell);
   if (val && *val >= 0 &&
       static_cast<std::uint64_t>(*val) <=
-          static_cast<std::uint64_t>(OpcodeKind::ProbeLink)) {
+          static_cast<std::uint64_t>(OpcodeKind::ReturnFrame)) {
     return static_cast<OpcodeKind>(*val);
   }
   return std::nullopt;
@@ -166,7 +166,23 @@ void VortexVM::setCursorOpcode(CellRef cursor, std::optional<CellRef> op) {
         "an opcode reference must be a cell or nullopt");
   }
   cursorPC_[cursor] = op;
-  if (!op) clearResumeState(cursor);
+  if (!op) {
+    clearResumeState(cursor);
+    if (const auto found = activationFrames_.find(cursor);
+        found != activationFrames_.end()) {
+      for (const auto &frame : found->second) {
+        for (const auto &[logical, backing] : frame->localBacking) {
+          (void)logical;
+          cellReferences_.erase(backing);
+          streams_.erase(backing);
+          iterators_.erase(backing);
+          streamSlots_.erase(backing);
+          iteratorSlots_.erase(backing);
+        }
+      }
+      activationFrames_.erase(found);
+    }
+  }
   if (core_.arena().contains(cursor)) {
     if (op) {
       zigzag::expectWritten(core_.arena().setValueBits(
@@ -257,8 +273,8 @@ ExecutionResult VortexVM::executeProbeLink(const CellRef opcode,
                            .errorMessage  = std::move(message)};
   };
   try {
-    const auto inputs = core_.inputsOf(opcode);
-    const auto slots  = core_.outputsOf(opcode);
+    const auto inputs = inputsOf(opcode);
+    const auto slots  = outputsOf(opcode);
     if (inputs.size() != 3 || slots.size() != 1)
       return fail("ProbeLink expects three inputs and one output");
     if (std::ranges::find(inputs, slots.front()) != inputs.end())
@@ -349,27 +365,37 @@ void VortexVM::pushChoicePoint(const std::optional<CellRef> cursor,
     stackFrame = core_.arena().linked(*cursor, core_.dims().stack, false);
   }
   std::vector<std::uint16_t> altDewey;
+  auto nextDewey = currentDeweyPath_;
   if (!oraclePath_.empty() || cutCallback_) {
     altDewey = currentDeweyPath_;
     altDewey.push_back(1);
-    currentDeweyPath_.push_back(0);
+    nextDewey.push_back(0);
   }
   choiceStack_.push_back(ChoicePoint{
-      .cursor          = cursor,
-      .altOp           = altOp,
-      .mark            = core_.arena().mark(),
-      .stackFrame      = stackFrame,
-      .cutBarrier      = choiceStack_.size(),
-      .deweyPath       = std::move(altDewey),
-      .nextAltIndex    = 1,
-      .cyclesSinceRoot = totalCycles_,
-      .cellReferences  = cellReferences_,
-      .streams         = streams_,
-      .iterators       = iterators_,
-      .streamSlots     = streamSlots_,
-      .iteratorSlots   = iteratorSlots_,
-      .streamCursor    = streamCursor_,
+      .cursor           = cursor,
+      .altOp            = altOp,
+      .mark             = {},
+      .stackFrame       = stackFrame,
+      .cutBarrier       = choiceStack_.size(),
+      .deweyPath        = std::move(altDewey),
+      .nextAltIndex     = 1,
+      .cyclesSinceRoot  = totalCycles_,
+      .cellReferences   = cellReferences_,
+      .streams          = streams_,
+      .iterators        = iterators_,
+      .streamSlots      = streamSlots_,
+      .iteratorSlots    = iteratorSlots_,
+      .streamCursor     = streamCursor_,
+      .activationFrames = activationFrames_,
   });
+  // Finish all allocating snapshots before taking a LIFO arena mark.
+  try {
+    choiceStack_.back().mark = core_.arena().mark();
+  } catch (...) {
+    choiceStack_.pop_back();
+    throw;
+  }
+  currentDeweyPath_ = std::move(nextDewey);
 }
 
 bool VortexVM::backtrack(const std::optional<CellRef> cursor) {
@@ -381,12 +407,13 @@ bool VortexVM::backtrack(const std::optional<CellRef> cursor) {
     choiceStack_.pop_back();
     if (!cursor || cp.cursor == cursor || !cp.cursor) {
       core_.arena().release(cp.mark);
-      cellReferences_ = std::move(cp.cellReferences);
-      streams_        = std::move(cp.streams);
-      iterators_      = std::move(cp.iterators);
-      streamSlots_    = std::move(cp.streamSlots);
-      iteratorSlots_  = std::move(cp.iteratorSlots);
-      streamCursor_   = cp.streamCursor;
+      cellReferences_   = std::move(cp.cellReferences);
+      streams_          = std::move(cp.streams);
+      iterators_        = std::move(cp.iterators);
+      streamSlots_      = std::move(cp.streamSlots);
+      iteratorSlots_    = std::move(cp.iteratorSlots);
+      streamCursor_     = cp.streamCursor;
+      activationFrames_ = std::move(cp.activationFrames);
       pruneResumeState();
       if (!oraclePath_.empty() || cutCallback_) {
         currentDeweyPath_ = cp.deweyPath;
@@ -485,20 +512,23 @@ void VortexVM::runPipeline(CellRef paramCell) {
       throw std::invalid_argument(
           "ProbeLink cannot run in a parameter pipeline");
     }
+    if (kind == OpcodeKind::InvokeFrame || kind == OpcodeKind::ReturnFrame)
+      throw std::invalid_argument(
+          "activation-frame opcodes cannot run in parameter pipelines");
     if (streamStateOpcode(kind)) {
       throw std::invalid_argument(
           "stream and iterator opcodes cannot run in parameter pipelines");
     }
     if ((kind == OpcodeKind::CopyCellRefs ||
          kind == OpcodeKind::ClearCellRefs) &&
-        std::ranges::any_of(core_.inputsOf(*pipeOp), [&](const CellRef input) {
+        std::ranges::any_of(inputsOf(*pipeOp), [&](const CellRef input) {
           return streamSlots_.contains(input) || iteratorSlots_.contains(input);
         })) {
       throw std::invalid_argument(
           "stream and iterator registers cannot run in parameter pipelines");
     }
 
-    std::vector<CellRef> inCells = core_.inputsOf(*pipeOp);
+    std::vector<CellRef> inCells = inputsOf(*pipeOp);
     std::vector<CellValue> inVals;
     if (kind == OpcodeKind::VqlCompare) {
       // The comparison handler reads these registers directly so it can
@@ -515,7 +545,7 @@ void VortexVM::runPipeline(CellRef paramCell) {
     bool jumped = false;
     executeOpcodeBody(kind, *pipeOp, inVals, outVals, std::nullopt, jumped);
 
-    std::vector<CellRef> outCells = core_.outputsOf(*pipeOp);
+    std::vector<CellRef> outCells = outputsOf(*pipeOp);
     if ((kind == OpcodeKind::Link || kind == OpcodeKind::Break ||
          kind == OpcodeKind::Value || kind == OpcodeKind::CopyCellRefs ||
          kind == OpcodeKind::ClearCellRefs) &&
@@ -559,7 +589,10 @@ bool VortexVM::evaluateCondition(CellRef clause,
   }
   if (kind == OpcodeKind::ProbeLink)
     throw std::invalid_argument("ProbeLink cannot run as a condition");
-  std::vector<CellRef> inCells = core_.inputsOf(actualClause);
+  if (kind == OpcodeKind::InvokeFrame || kind == OpcodeKind::ReturnFrame)
+    throw std::invalid_argument(
+        "activation-frame opcodes cannot run as conditions");
+  std::vector<CellRef> inCells = inputsOf(actualClause);
   std::vector<CellValue> inVals;
   if (kind == OpcodeKind::VqlCompare) {
     // Its handler resolves raw slots and must observe missing references.
@@ -592,6 +625,9 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
                             const std::vector<CellValue> &inputs,
                             std::vector<CellValue> &outputs,
                             const std::optional<CellRef> cursor, bool &jumped) {
+  if (kind == OpcodeKind::InvokeFrame || kind == OpcodeKind::ReturnFrame)
+    return {.success      = false,
+            .errorMessage = "activation-frame opcodes require a VM cursor"};
   const auto overflowFailure = [opcode] {
     return ExecutionResult{.success = false,
                            .contractViolation =
@@ -821,7 +857,7 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
     break;
   }
   case OpcodeKind::Link: {
-    std::vector<CellRef> inCells = core_.inputsOf(opcode);
+    std::vector<CellRef> inCells = inputsOf(opcode);
     if (inCells.size() >= 3 || inputs.size() >= 3) {
       const auto c =
           resolveCell(inCells, inputs, cellReferences_, 0, core_.arena());
@@ -846,7 +882,7 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
     break;
   }
   case OpcodeKind::Break: {
-    std::vector<CellRef> inCells = core_.inputsOf(opcode);
+    std::vector<CellRef> inCells = inputsOf(opcode);
     if (inCells.size() >= 3 || inputs.size() >= 3) {
       const auto c =
           resolveCell(inCells, inputs, cellReferences_, 0, core_.arena());
@@ -862,8 +898,8 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
     break;
   }
   case OpcodeKind::New: {
-    std::vector<CellRef> inCells  = core_.inputsOf(opcode);
-    std::vector<CellRef> outCells = core_.outputsOf(opcode);
+    std::vector<CellRef> inCells  = inputsOf(opcode);
+    std::vector<CellRef> outCells = outputsOf(opcode);
     if (inCells.size() >= 3 || inputs.size() >= 3) {
       const auto c =
           resolveCell(inCells, inputs, cellReferences_, 0, core_.arena());
@@ -885,7 +921,7 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
     break;
   }
   case OpcodeKind::Value: {
-    std::vector<CellRef> inCells = core_.inputsOf(opcode);
+    std::vector<CellRef> inCells = inputsOf(opcode);
     if (!inCells.empty() || !inputs.empty()) {
       const auto c =
           resolveCell(inCells, inputs, cellReferences_, 0, core_.arena());
@@ -907,7 +943,7 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
     break;
   }
   case OpcodeKind::Splice: {
-    std::vector<CellRef> inCells = core_.inputsOf(opcode);
+    std::vector<CellRef> inCells = inputsOf(opcode);
     if (inCells.size() >= 4 || inputs.size() >= 4) {
       const auto c =
           resolveCell(inCells, inputs, cellReferences_, 0, core_.arena());
@@ -923,8 +959,8 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
     break;
   }
   case OpcodeKind::Clone: {
-    std::vector<CellRef> inCells  = core_.inputsOf(opcode);
-    std::vector<CellRef> outCells = core_.outputsOf(opcode);
+    std::vector<CellRef> inCells  = inputsOf(opcode);
+    std::vector<CellRef> outCells = outputsOf(opcode);
     if (!inCells.empty() || !inputs.empty()) {
       const auto c =
           resolveCell(inCells, inputs, cellReferences_, 0, core_.arena());
@@ -961,7 +997,7 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
     return executeCellRefCopy(kind, opcode, outputs);
   }
   case OpcodeKind::BranchFalseCell: {
-    const auto inCells = core_.inputsOf(opcode);
+    const auto inCells = inputsOf(opcode);
     if (inputs.empty() || inCells.size() != 2 || !cursor ||
         !core_.arena().contains(inCells[1])) {
       return {.success = false, .errorMessage = "invalid cell branch operands"};
@@ -1192,7 +1228,7 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
     break;
   }
   case OpcodeKind::Unify: {
-    std::vector<CellRef> inCells = core_.inputsOf(opcode);
+    std::vector<CellRef> inCells = inputsOf(opcode);
     const auto a =
         resolveCell(inCells, inputs, cellReferences_, 0, core_.arena());
     const auto b =
@@ -1210,7 +1246,7 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
     break;
   }
   case OpcodeKind::IsVar: {
-    std::vector<CellRef> inCells = core_.inputsOf(opcode);
+    std::vector<CellRef> inCells = inputsOf(opcode);
     const auto c =
         resolveCell(inCells, inputs, cellReferences_, 0, core_.arena());
     if (c) {
@@ -1244,7 +1280,7 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
         functor = std::to_string(toInt(inputs[0]));
       }
     }
-    std::vector<CellRef> inCells = core_.inputsOf(opcode);
+    std::vector<CellRef> inCells = inputsOf(opcode);
     std::vector<CellRef> args;
     std::size_t maxArgs = std::max(inCells.size(), inputs.size());
     for (std::size_t i = 1; i < maxArgs; ++i) {
@@ -1270,7 +1306,7 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
     break;
   }
   case OpcodeKind::Deref: {
-    std::vector<CellRef> inCells = core_.inputsOf(opcode);
+    std::vector<CellRef> inCells = inputsOf(opcode);
     const auto c =
         resolveCell(inCells, inputs, cellReferences_, 0, core_.arena());
     if (c) {
@@ -1359,6 +1395,9 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
 ExecutionResult VortexVM::step(CellRef cursor) {
   const auto op = getCursorOpcode(cursor);
   if (!op) {
+    if (activationDepth(cursor) != 0)
+      return {.success      = false,
+              .errorMessage = "activation frame lost its cursor continuation"};
     return ExecutionResult{.success           = true,
                            .contractViolation = ContractViolationKind::None,
                            .failingClause     = std::nullopt,
@@ -1368,10 +1407,21 @@ ExecutionResult VortexVM::step(CellRef cursor) {
   auto kindOpt    = getOpcodeKind(*op);
   OpcodeKind kind = kindOpt ? *kindOpt : OpcodeKind::Nop;
   if (kind == OpcodeKind::Halt) {
+    if (activationDepth(cursor) != 0)
+      return {.success      = false,
+              .errorMessage = "Halt reached with an active activation frame"};
     return ExecutionResult{.success           = true,
                            .contractViolation = ContractViolationKind::None,
                            .failingClause     = std::nullopt,
                            .errorMessage      = "Halted"};
+  }
+
+  if (activationDepth(cursor) != 0 && kind != OpcodeKind::ReturnFrame &&
+      kind != OpcodeKind::Jump && kind != OpcodeKind::Branch &&
+      kind != OpcodeKind::BranchFalseCell && kind != OpcodeKind::Call &&
+      !core_.arena().linked(*op, core_.dims().spin, DimVector::POS)) {
+    return {.success      = false,
+            .errorMessage = "activation-frame body ended without ReturnFrame"};
   }
 
   struct ActiveCursorScope {
@@ -1392,8 +1442,18 @@ ExecutionResult VortexVM::step(CellRef cursor) {
     }
   }
 
-  const auto inputCells = core_.inputsOf(*op);
-  const auto outCells   = core_.outputsOf(*op);
+  if (kind == OpcodeKind::InvokeFrame || kind == OpcodeKind::ReturnFrame) {
+    ++totalCycles_;
+    try {
+      core_.arena().consumeWork();
+      return executeFrameOpcode(kind, *op, cursor);
+    } catch (const std::exception &error) {
+      return {.success = false, .errorMessage = error.what()};
+    }
+  }
+
+  const auto inputCells = inputsOf(*op);
+  const auto outCells   = outputsOf(*op);
   const bool stateful   = streamStateOpcode(kind);
   const bool contractOp =
       kind == OpcodeKind::MatchContract || kind == OpcodeKind::RequireContract;
@@ -1408,10 +1468,26 @@ ExecutionResult VortexVM::step(CellRef cursor) {
       return getOpcodeKind(actual) == OpcodeKind::ProbeLink;
     });
   };
+  const auto hasFrameCondition = [this](const auto &clauses) {
+    return std::ranges::any_of(clauses, [this](const CellRef clause) {
+      const CellRef actual = core_.arena()
+                                 .cloneMaster(clause, core_.dims().clone)
+                                 .value_or(clause);
+      const auto conditionKind = getOpcodeKind(actual);
+      return conditionKind == OpcodeKind::InvokeFrame ||
+             conditionKind == OpcodeKind::ReturnFrame;
+    });
+  };
   if (hasProbeLinkCondition(core_.preconditionsOf(*op)) ||
       hasProbeLinkCondition(core_.postconditionsOf(*op))) {
     return {.success      = false,
             .errorMessage = "ProbeLink cannot run as a condition"};
+  }
+  if (hasFrameCondition(core_.preconditionsOf(*op)) ||
+      hasFrameCondition(core_.postconditionsOf(*op))) {
+    return {.success = false,
+            .errorMessage =
+                "activation-frame opcodes cannot run as conditions"};
   }
   if (probeLinkOp) {
     if (!core_.preconditionsOf(*op).empty() ||
@@ -1536,7 +1612,9 @@ ExecutionResult VortexVM::step(CellRef cursor) {
 
   // 2. Input Parameter Preprocessing (+d.grab -> +d.spin)
   std::unordered_set<CellRef> processedIn;
-  for (CellRef paramCell : inputCells) {
+  for (std::size_t index = 0; index < inputCells.size(); ++index) {
+    const CellRef paramCell = inputCells[index];
+    if (kind == OpcodeKind::BranchFalseCell && index == 1) continue;
     if (processedIn.insert(paramCell).second && core_.hasPipeline(paramCell)) {
       try {
         runPipeline(paramCell);
@@ -1685,6 +1763,10 @@ ExecutionResult VortexVM::step(CellRef cursor) {
   // 9. Advance Cursor
   if (!jumped) {
     const auto nextOp = core_.arena().linked(*op, core_.dims().spin, false);
+    if (!nextOp && activationDepth(cursor) != 0)
+      return {.success = false,
+              .errorMessage =
+                  "activation-frame body ended without ReturnFrame"};
     setCursorOpcode(cursor, nextOp);
   }
 
@@ -1696,7 +1778,7 @@ ExecutionResult VortexVM::step(CellRef cursor) {
 
 ExecutionResult VortexVM::prepareTypeContract(OpcodeKind kind, CellRef opcode) {
   if (kind != OpcodeKind::MatchContract) return {.success = true};
-  const auto slots = core_.outputsOf(opcode);
+  const auto slots = outputsOf(opcode);
   if (slots.empty()) {
     return {.success = false, .errorMessage = "invalid contract output slots"};
   }
@@ -1744,6 +1826,10 @@ ExecutionResult VortexVM::run(CellRef cursor, std::size_t maxCycles,
     }
     const auto op = getCursorOpcode(cursor);
     if (!op) {
+      if (activationDepth(cursor) != 0)
+        return {.success = false,
+                .errorMessage =
+                    "activation frame lost its cursor continuation"};
       return ExecutionResult{.success           = true,
                              .contractViolation = ContractViolationKind::None,
                              .failingClause     = std::nullopt,
@@ -1751,6 +1837,9 @@ ExecutionResult VortexVM::run(CellRef cursor, std::size_t maxCycles,
     }
     auto kind = getOpcodeKind(*op);
     if (kind && *kind == OpcodeKind::Halt) {
+      if (activationDepth(cursor) != 0)
+        return {.success      = false,
+                .errorMessage = "Halt reached with an active activation frame"};
       return ExecutionResult{.success           = true,
                              .contractViolation = ContractViolationKind::None,
                              .failingClause     = std::nullopt,

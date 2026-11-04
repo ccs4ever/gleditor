@@ -249,6 +249,8 @@ bool pureOpcode(OpcodeKind opcode) {
   case OpcodeKind::ResumeSet:
     return false;
   case OpcodeKind::ChoiceDepth:
+  case OpcodeKind::InvokeFrame:
+  case OpcodeKind::ReturnFrame:
     return false;
   }
   return false;
@@ -284,6 +286,10 @@ void validateProgram(const VortexProgram &program, SyntaxLimits limits) {
             program.cells[instruction.cell].value))
       throw std::runtime_error(
           "Vortex instruction cell cannot alias a reference/dimension");
+    if (instruction.opcode == OpcodeKind::InvokeFrame ||
+        instruction.opcode == OpcodeKind::ReturnFrame)
+      throw std::runtime_error(
+          "Vortex mesh does not support activation-frame descriptors");
     if (!pureOpcode(instruction.opcode) ||
         !instructions.insert(instruction.cell).second)
       throw std::runtime_error(
@@ -487,7 +493,8 @@ VortexProgram decodeProgram(std::string_view bytes, SyntaxLimits limits) {
   for (const auto &item : instructions) {
     dictionary(item, 5);
     const auto opcode = required(item, "opcode").asInteger();
-    if (opcode < 0 || opcode > static_cast<std::int64_t>(OpcodeKind::ProbeLink))
+    if (opcode < 0 ||
+        opcode > static_cast<std::int64_t>(OpcodeKind::ReturnFrame))
       throw std::runtime_error("Unknown Vortex artifact opcode");
     const auto &next = required(item, "next").asList();
     if (next.size() > 1)

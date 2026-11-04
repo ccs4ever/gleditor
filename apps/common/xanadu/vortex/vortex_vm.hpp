@@ -110,6 +110,44 @@ enum class OpcodeKind : std::uint8_t {
   ResumeInit,
   ResumeSet,
   ProbeLink,
+  InvokeFrame,
+  ReturnFrame,
+};
+
+struct FrameDescriptorError {
+  std::string message;
+};
+
+enum class FramePortKind : std::uint8_t { Cell, Stream };
+
+struct FramePort {
+  CellRef slot;
+  FramePortKind kind{FramePortKind::Cell};
+
+  FramePort(CellRef cell, FramePortKind portKind = FramePortKind::Cell)
+      : slot(cell), kind(portKind) {}
+};
+
+struct FrameDescriptorSpec {
+  std::optional<CellRef> entry;
+  std::vector<CellRef> locals;
+  std::vector<FramePort> argumentPorts;
+  std::vector<FramePort> resultPorts;
+};
+
+struct FrameDescriptor {
+  std::optional<CellRef> entry;
+  std::vector<CellRef> locals;
+  std::vector<FramePort> argumentPorts;
+  std::vector<FramePort> resultPorts;
+  std::vector<std::pair<CellRef, CellRef>> referenceCells;
+};
+
+struct FrameLimits {
+  std::size_t maxDepth{128};
+  std::size_t maxLocalsPerFrame{4096};
+  std::size_t maxDescriptorRecords{8192};
+  std::size_t maxBackingCells{1'048'576};
 };
 
 enum class VqlComparisonKind : std::int64_t {
@@ -144,6 +182,19 @@ using StreamMap =
     std::unordered_map<CellRef, std::shared_ptr<std::vector<CellRef>>>;
 using IteratorMap = std::unordered_map<CellRef, std::shared_ptr<IteratorState>>;
 
+struct ActivationFrame {
+  explicit ActivationFrame(const CellRef frameDescriptor)
+      : descriptor(frameDescriptor) {}
+
+  CellRef descriptor;
+  std::optional<CellRef> returnOpcode;
+  std::vector<CellRef> parentResultSlots;
+  std::unordered_map<CellRef, CellRef> localBacking;
+  std::vector<FramePort> resultPorts;
+};
+
+using ActivationStack = std::vector<std::shared_ptr<const ActivationFrame>>;
+
 struct ChoicePoint {
   std::optional<CellRef> cursor;
   CellRef altOp{noCell};
@@ -159,6 +210,7 @@ struct ChoicePoint {
   std::unordered_set<CellRef> streamSlots;
   std::unordered_set<CellRef> iteratorSlots;
   std::optional<CellRef> streamCursor;
+  std::unordered_map<CellRef, ActivationStack> activationFrames;
 };
 
 [[nodiscard]] std::string formatDeweyPath(std::span<const std::uint16_t> path);
@@ -226,6 +278,20 @@ public:
   // -- Cursor PC Tracking ----------------------------------------------------
   [[nodiscard]] std::optional<CellRef> getCursorOpcode(CellRef cursor) const;
   void setCursorOpcode(CellRef cursor, std::optional<CellRef> op);
+  [[nodiscard]] std::expected<CellRef, FrameDescriptorError>
+  makeFrameDescriptor(const FrameDescriptorSpec &spec);
+  [[nodiscard]] std::expected<FrameDescriptor, FrameDescriptorError>
+  frameDescriptor(CellRef descriptor) const;
+  VortexVM *setFrameLimits(FrameLimits limits);
+  [[nodiscard]] FrameLimits frameLimits() const noexcept {
+    return frameLimits_;
+  }
+  [[nodiscard]] std::size_t activationDepth(CellRef cursor) const noexcept;
+  [[nodiscard]] bool hasActiveFrames() const noexcept;
+  [[nodiscard]] std::optional<CellRef> resultCell(CellRef cursor,
+                                                  CellRef slot) const;
+  [[nodiscard]] std::vector<CellRef> resultCells(CellRef cursor,
+                                                 CellRef slot) const;
   /// The cell handle produced in an opcode output slot, when that output is a
   /// structural reference such as the result of a Link read.
   [[nodiscard]] std::optional<CellRef>
@@ -252,6 +318,11 @@ public:
   void runPipeline(CellRef paramCell);
 
 private:
+  ExecutionResult executeFrameOpcode(OpcodeKind kind, CellRef opcode,
+                                     CellRef cursor);
+  [[nodiscard]] CellRef runtimeSlot(CellRef slot) const;
+  [[nodiscard]] std::vector<CellRef> inputsOf(CellRef opcode) const;
+  [[nodiscard]] std::vector<CellRef> outputsOf(CellRef opcode) const;
   ExecutionResult prepareTypeContract(OpcodeKind kind, CellRef opcode);
   ExecutionResult executeResumeInit(CellRef opcode,
                                     const std::vector<CellValue> &inputs,
@@ -317,6 +388,9 @@ private:
   std::optional<CellRef> streamCursor_;
   std::unordered_map<CellRef, std::string> memoizedOps_;
   std::unordered_map<CellRef, std::optional<CellRef>> cursorPC_;
+  std::unordered_map<CellRef, ActivationStack> activationFrames_;
+  FrameLimits frameLimits_;
+  std::size_t frameBackingCellsAllocated_{};
   std::vector<ChoicePoint> choiceStack_;
   std::vector<std::uint16_t> currentDeweyPath_;
   std::vector<std::uint16_t> oraclePath_;

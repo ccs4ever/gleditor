@@ -184,7 +184,7 @@ ExecutionResult VortexVM::executeVqlCompare(const CellRef opcode,
                            .errorMessage  = std::move(message)};
   };
   try {
-    const auto inputs = core_.inputsOf(opcode);
+    const auto inputs = inputsOf(opcode);
     if (inputs.size() != 3) return fail("invalid VQL comparison operands");
     const auto selector = inputValue(inputs[0]);
     const auto *code    = std::get_if<std::int64_t>(&selector);

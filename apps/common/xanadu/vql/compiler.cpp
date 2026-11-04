@@ -112,6 +112,10 @@ VQLCompiler::opcodeMnemonic(zigzag::vortex::OpcodeKind kind) noexcept {
     return "RESUME_SET";
   case OpcodeKind::ProbeLink:
     return "PROBE_LINK";
+  case OpcodeKind::InvokeFrame:
+    return "INVOKE_FRAME";
+  case OpcodeKind::ReturnFrame:
+    return "RETURN_FRAME";
   case OpcodeKind::RankBegin:
     return "RANK_BEGIN";
   case OpcodeKind::IteratorNext:
