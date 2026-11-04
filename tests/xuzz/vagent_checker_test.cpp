@@ -970,4 +970,277 @@ TEST(VagentCheckerTest, CellsPathsReportEmbeddedSyntaxAndUnsupportedForms) {
           DiagnosticCode::InvalidDeclaration);
 }
 
+// ---- §5.5 'static' staged evaluation ------------------------------------
+
+std::vector<Diagnostic> diagnostics(const Program &program,
+                                    const FragmentTable &fragments) {
+  auto result = check(program, fragments);
+  return result ? std::vector<Diagnostic>{} : std::move(result.error());
+}
+
+const Expr *findKind(const Expr &expression, ExprKind kind) {
+  if (expression.kind == kind) return &expression;
+  for (const auto &child : expression.children)
+    if (child)
+      if (const auto *hit = findKind(*child, kind)) return hit;
+  for (const ExprPtr *slot :
+       {&expression.scope, &expression.recipients, &expression.deadline,
+        &expression.guard, &expression.recovery})
+    if (*slot)
+      if (const auto *hit = findKind(**slot, kind)) return hit;
+  return nullptr;
+}
+
+const Expr *findKind(const Decl &decl, ExprKind kind) {
+  for (const ExprPtr *slot : {&decl.initializer, &decl.body, &decl.guard,
+                              &decl.trigger, &decl.deadline})
+    if (*slot)
+      if (const auto *hit = findKind(**slot, kind)) return hit;
+  for (const auto &contract : decl.contracts)
+    if (contract.condition)
+      if (const auto *hit = findKind(*contract.condition, kind)) return hit;
+  for (const auto &clause : decl.goalClauses)
+    if (clause.condition)
+      if (const auto *hit = findKind(*clause.condition, kind)) return hit;
+  for (const auto &member : decl.members)
+    if (const auto *hit = findKind(member, kind)) return hit;
+  return nullptr;
+}
+
+const Expr *findKind(const Program &program, ExprKind kind) {
+  for (const auto &decl : program.declarations)
+    if (const auto *hit = findKind(decl, kind)) return hit;
+  return nullptr;
+}
+
+// A code"…" record keyed on the literal's own loc — the shape expand's
+// fragment table carries, minted here without an expand pass.
+FragmentRecord codeRecord(std::string_view inner, bool closed = true) {
+  auto body = Parser::parseCodeBody(inner);
+  EXPECT_TRUE(body.has_value()) << (body ? "" : formatDiagnostic(body.error()));
+  FragmentRecord record;
+  if (body) record.body = std::move(*body);
+  record.closed = closed;
+  return record;
+}
+
+TEST(VagentCheckerTest, StaticFoldsPureClosedScalars) {
+  const auto errors = diagnostics(R"(
+    event Tick
+    agent A {
+      var started: Int := static (2 * 3)
+      var count: Int := 0
+      def measure(): Int { static (60 * 1000) }
+      def offset(): Int {
+        let base := 5
+        let shifted := static (base * 2)
+        let folded := static (static (3) + 1)
+        shifted + folded + count + static { let a := 2; a * 3 }
+      }
+      on Tick [static (1 < 2)] { count := count + 1 }
+    }
+  )");
+  EXPECT_TRUE(errors.empty()) << describe(errors);
+}
+
+TEST(VagentCheckerTest, StaticOperandMustBePure) {
+  rejects(R"(agent A { var count: Int := 0
+             def f(): Int { static (count := 1) } })",
+          DiagnosticCode::ImpureCondition);
+  rejects(R"(agent A { var count: Int := 0
+             def f(): Int { static (count <- 1) } })",
+          DiagnosticCode::ImpureCondition);
+  // A mutating cells"…" is impure and an arena read — both arms name it.
+  const auto errors = diagnostics(
+      R"(agent A { def f(): Int { static (cells"##/+d.x%\"y\"") } })");
+  EXPECT_TRUE(std::ranges::any_of(errors, [](const Diagnostic &error) {
+    return error.code == DiagnosticCode::ImpureCondition;
+  })) << describe(errors);
+}
+
+TEST(VagentCheckerTest, StaticOperandBarsArenaReadingAndRuntimeForms) {
+  // Non-mutating traversal is pureBody-pure yet still an arena read.
+  rejects(R"(agent A { def f(): Int { static (cells"##/d.x") } })",
+          DiagnosticCode::InvalidPosition);
+  rejects(R"(predicate p() agent A { def f(): Int { static (believes p()) } })",
+          DiagnosticCode::InvalidPosition);
+  rejects(R"(predicate p(x: Int)
+             agent A { def f(): Int { static (findall(?x, p(?x))) } })",
+          DiagnosticCode::InvalidPosition);
+  // Stage-0 eval has no callables — even a pure def call is not closed.
+  rejects(R"(agent A { def g(): Int { 1 }
+             def f(): Int { static (g()) } })",
+          DiagnosticCode::InvalidPosition);
+  rejects(R"(agent A { def f(): Int { static (run(f)) } })",
+          DiagnosticCode::InvalidPosition);
+  // The implicit names name arena positions, not values.
+  rejects(R"(agent A { var count: Int := 0
+             def f(): Int { static (self.count) } })",
+          DiagnosticCode::InvalidPosition);
+  rejects(R"(event Tick agent A {
+             on Tick { let n := static (occurrence); n }
+           })",
+          DiagnosticCode::InvalidPosition);
+}
+
+TEST(VagentCheckerTest, StaticOperandBarsRuntimeBoundNames) {
+  // var fields, parameters and lets of run-time values are not closed.
+  rejects(R"(agent A { var count: Int := 0
+             def f(): Int { static (count) } })",
+          DiagnosticCode::InvalidPosition);
+  rejects(R"(agent A { def f(target: Int): Int { static (target) } })",
+          DiagnosticCode::InvalidPosition);
+  rejects(R"(agent A { var count: Int := 0
+             def f(): Int { let a := count; static (a) } })",
+          DiagnosticCode::InvalidPosition);
+  rejects(R"(agent A { def g(): Int { 1 }
+             def f(): Int { let a := g(); static (a) } })",
+          DiagnosticCode::InvalidPosition);
+}
+
+TEST(VagentCheckerTest, StaticResultMustBeLiteralExpressible) {
+  // A Cell-typed name is also not closed; the type arm still names itself.
+  const auto cell = diagnostics(
+      R"(agent A { def f(target: Cell): Int { static (target) } })");
+  EXPECT_TRUE(std::ranges::any_of(cell, [](const Diagnostic &error) {
+    return error.code == DiagnosticCode::TypeMismatch;
+  })) << describe(cell);
+  rejects(R"(agent A { def f(): Int { static ([1, 2]) } })",
+          DiagnosticCode::TypeMismatch);
+  rejects(R"(agent A { def f(): Int { static (1s) } })",
+          DiagnosticCode::TypeMismatch);
+  rejects(R"(agent A { def f(): Int { static (fail) } })",
+          DiagnosticCode::TypeMismatch);
+}
+
+TEST(VagentCheckerTest, ResidualSpliceIsANamedRefusal) {
+  rejects(R"(agent A { def f(): Int { splice x } })",
+          DiagnosticCode::Unsupported);
+}
+
+TEST(VagentCheckerTest, CodeLiteralWithoutAFragmentRecordIsANamedRefusal) {
+  // check() without a table cannot honor a code"…" literal — the expand
+  // stage's record is the literal's checked shape.
+  rejects(R"(agent A { def f(): Int { static { code"1"; 5 } } })",
+          DiagnosticCode::InvalidDeclaration);
+  rejects(R"(agent A { def f(): Int { let c := code"1"; 5 } })",
+          DiagnosticCode::InvalidDeclaration);
+}
+
+TEST(VagentCheckerTest, StaticOperandEmbedsOnlyClosedFragments) {
+  const std::string source =
+      R"(agent A { def f(): Int { static { code"1"; 5 } } })";
+  auto program = Parser(source).parseProgram();
+  ASSERT_TRUE(program.has_value()) << formatDiagnostic(program.error());
+  const auto *literal = findKind(*program, ExprKind::Code);
+  ASSERT_NE(literal, nullptr);
+  FragmentTable table;
+  table[{literal->loc, std::nullopt}] = codeRecord("1", false);
+  const auto errors                   = diagnostics(*program, table);
+  EXPECT_TRUE(std::ranges::any_of(errors, [](const Diagnostic &error) {
+    return error.code == DiagnosticCode::InvalidPosition;
+  })) << describe(errors);
+}
+
+TEST(VagentCheckerTest, StaticOperandReadsClosedFragments) {
+  const std::string source =
+      R"(agent A { def f(): Int { static { code"1"; 5 } } })";
+  auto program = Parser(source).parseProgram();
+  ASSERT_TRUE(program.has_value()) << formatDiagnostic(program.error());
+  const auto *literal = findKind(*program, ExprKind::Code);
+  ASSERT_NE(literal, nullptr);
+  FragmentTable table;
+  table[{literal->loc, std::nullopt}] = codeRecord("1", true);
+  const auto errors                   = diagnostics(*program, table);
+  EXPECT_TRUE(errors.empty()) << describe(errors);
+}
+
+TEST(VagentCheckerTest, StaticOnACodeLiteralIsATypeRefusal) {
+  // A closed fragment is a fine *operand member*; a code"…" *result* is not
+  // literal-expressible — the value type arm, not closedness, refuses it.
+  const std::string source = R"(agent A { def f(): Int { static (code"1") } })";
+  auto program             = Parser(source).parseProgram();
+  ASSERT_TRUE(program.has_value()) << formatDiagnostic(program.error());
+  const auto *literal = findKind(*program, ExprKind::Code);
+  ASSERT_NE(literal, nullptr);
+  FragmentTable table;
+  table[{literal->loc, std::nullopt}] = codeRecord("1", true);
+  const auto errors                   = diagnostics(*program, table);
+  EXPECT_TRUE(std::ranges::any_of(errors, [](const Diagnostic &error) {
+    return error.code == DiagnosticCode::TypeMismatch;
+  })) << describe(errors);
+}
+
+// ---- §5.3 env records (cap$N capture aliases) ---------------------------
+
+std::unique_ptr<Expr> makeExpr(ExprKind kind, std::string text = {}) {
+  auto expr  = std::make_unique<Expr>();
+  expr->kind = kind;
+  expr->text = std::move(text);
+  return expr;
+}
+
+TEST(VagentCheckerTest, EnvRecordsSeedCapAliasesIntoTheBody) {
+  const std::string source = R"(agent A {
+    var count: Int := 0
+    def f(): Int { let c := code"ignored"; count }
+  })";
+  auto program             = Parser(source).parseProgram();
+  ASSERT_TRUE(program.has_value()) << formatDiagnostic(program.error());
+  const auto *literal = findKind(*program, ExprKind::Code);
+  ASSERT_NE(literal, nullptr);
+  // The record's env names 'cap$0' as the alias of 'count'; the body reads
+  // the alias as count's own binding.
+  auto sum = makeExpr(ExprKind::Binary, "+");
+  sum->children.push_back(makeExpr(ExprKind::Identifier, "cap$0"));
+  sum->children.push_back(makeExpr(ExprKind::Integer, "1"));
+  auto record         = codeRecord("1");
+  record.body.body    = std::move(sum);
+  record.env["cap$0"] = "count";
+  FragmentTable table;
+  table[{literal->loc, std::nullopt}] = std::move(record);
+  const auto errors                   = diagnostics(*program, table);
+  EXPECT_TRUE(errors.empty()) << describe(errors);
+}
+
+TEST(VagentCheckerTest, CapAliasesAreReadOnlyAndUnvaluedInStatic) {
+  const std::string source = R"(agent A {
+    var count: Int := 0
+    def f(): Int { let c := code"ignored"; count }
+  })";
+  auto program             = Parser(source).parseProgram();
+  ASSERT_TRUE(program.has_value()) << formatDiagnostic(program.error());
+  const auto *literal = findKind(*program, ExprKind::Code);
+  ASSERT_NE(literal, nullptr);
+
+  const auto recordWith = [&](ExprPtr body) {
+    auto record         = codeRecord("1");
+    record.body.body    = std::move(body);
+    record.env["cap$0"] = "count";
+    FragmentTable table;
+    table[{literal->loc, std::nullopt}] = std::move(record);
+    return diagnostics(*program, table);
+  };
+
+  // A capture is never a place — splice substitution never writes one.
+  {
+    auto assign = makeExpr(ExprKind::Binary, ":=");
+    assign->children.push_back(makeExpr(ExprKind::Identifier, "cap$0"));
+    assign->children.push_back(makeExpr(ExprKind::Integer, "3"));
+    const auto errors = recordWith(std::move(assign));
+    EXPECT_TRUE(std::ranges::any_of(errors, [](const Diagnostic &error) {
+      return error.code == DiagnosticCode::InvalidPosition;
+    })) << describe(errors);
+  }
+  // The capture names a cell, not a literal value — unvalued for 'static'.
+  {
+    auto staged = makeExpr(ExprKind::Static);
+    staged->children.push_back(makeExpr(ExprKind::Identifier, "cap$0"));
+    const auto errors = recordWith(std::move(staged));
+    EXPECT_TRUE(std::ranges::any_of(errors, [](const Diagnostic &error) {
+      return error.code == DiagnosticCode::InvalidPosition;
+    })) << describe(errors);
+  }
+}
+
 } // namespace

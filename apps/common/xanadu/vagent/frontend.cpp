@@ -26,6 +26,13 @@ std::expected<Program, std::vector<Diagnostic>> compile(std::string_view source,
   auto expanded =
       expand(*program, seeds, {limits.parse, limits.resolve, limits.check});
   if (!expanded) return std::unexpected(std::move(expanded.error()));
+  // §5.3's env records ride the fragment table into check(): expand's
+  // capture set is program-wide (one cap$N alias per captured binding,
+  // aliases reused across literals), so each record's env names every
+  // capture — an alias only ever appears where the rename placed it.
+  for (auto &entry : expanded->fragments)
+    for (const auto &[alias, capture] : expanded->captures)
+      entry.second.env[alias] = capture.captured;
   // Stage 4 — check the merged tree once, with the fragment table the
   // expand stage produced so a record-less literal is a named refusal.
   auto checked = check(*program, expanded->fragments, limits.check);

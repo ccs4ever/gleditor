@@ -45,6 +45,13 @@ bool comparison(std::string_view op) {
 bool numeric(const Type &type) {
   return type.name == "Int" || type.name == "Float";
 }
+// §5.5's literal-expressible scalars — the only types a `static` may fold
+// to; a Cell or Code result would bake a compile-arena handle into the
+// sealed artifact as artifact data.
+bool literalExpressible(const Type &type) {
+  return type.name == "Int" || type.name == "Float" || type.name == "Str" ||
+         type.name == "Bool" || type.name == "()";
+}
 bool sameDeadline(const Expr *left, const Expr *right) {
   if (!left || !right) return left == right;
   if (left->kind != ExprKind::Duration || right->kind != ExprKind::Duration)
@@ -95,6 +102,18 @@ struct Binding {
   Type type;
   bool writable{true};
   std::size_t depth{};
+  // §5.5's static-operand closedness: true when the name was minted by a
+  // `let` whose initializer is itself closed — a literal, a `static`
+  // value, or a composite of closed parts — so its value is determinable
+  // at compile time. Fields, parameters, loop/query/recovery bindings and
+  // `var`-bound names stay false: they only have values at run time.
+  bool closed{false};
+  // A code"…" CodeParam or a cap$N capture alias (§5.3): name-resolvable
+  // but unvalued inside `static` — a parameter has no value until
+  // instantiation and a capture names a cell, not a literal. The
+  // closedness walk cites it as the refusal reason rather than the
+  // generic "not closed".
+  bool unvalued{false};
 };
 using Environment = std::map<std::string, Binding, std::less<>>;
 using Symbols     = std::map<std::string, const Decl *, std::less<>>;
@@ -134,11 +153,13 @@ struct Function {
 };
 
 // What check() computes per fragment record (§7.1's per-literal tables):
-// the body's checked result type T, its purity, and the declared parameter
-// count — the fields phase 3's fragment descriptor carries.
+// the body's checked result type T, its purity, the declared parameter
+// count, and the record's outside-reference `closed` classification —
+// the fields phase 3's fragment descriptor carries.
 struct FragmentInfo {
   Type result;
   bool pure{false};
+  bool closed{false};
   std::size_t arity{0};
 };
 
@@ -167,6 +188,24 @@ private:
   void require(bool condition, DiagnosticCode code, std::string detail,
                SourceLocation loc) {
     if (!condition) report(code, std::move(detail), loc);
+  }
+  // §5.3's readability rule: a cap$N alias renders in messages as the
+  // captured name, never 'cap$3'. The env records of every enclosing
+  // literal — innermost first — map each alias one hop toward its
+  // origin, so nested captures chase back to the source name.
+  std::string_view displayName(std::string_view name) const {
+    for (std::size_t hops = 0; hops < 16; ++hops) {
+      bool mapped = false;
+      for (auto it = envRecords_.rbegin(); it != envRecords_.rend(); ++it) {
+        if (const auto found = (*it)->find(name); found != (*it)->end()) {
+          name   = found->second;
+          mapped = true;
+          break;
+        }
+      }
+      if (!mapped) return name;
+    }
+    return name;
   }
   // §5.1's reservation rule: splice/static (and run/value_of once std:meta
   // is imported) are contextual keywords, so declarations and bindings
@@ -207,6 +246,16 @@ private:
   bool pureBody(const Expr &expression, const Decl *owner);
   void derivePurity();
   void purityWork(SourceLocation loc);
+  // §5.5's form-level closedness judgment: true when the expression can
+  // be evaluated at compile time — every free name resolves to a binding
+  // that is itself closed (a `let` of a literal or `static` value) and
+  // nothing reads the arena (cells"…" in any mode, believes, findall,
+  // run or any call), names an implicit name or an unvalued binding
+  // (a CodeParam or a cap$N capture), or embeds a code"…" record
+  // classified not-closed. `diagnose` reports the refusal reason at the
+  // offending node; the let-initializer walk passes false — a non-closed
+  // value is legal to bind, it only leaves the name unclosed.
+  bool staticClosed(const Expr &expression, Environment &env, bool diagnose);
   Type infer(const Expr &expression, Environment &env, Context context);
   Type condition(const Expr &expression, Environment &env, Context context);
   Type place(const Expr &expression, Environment &env, Context context);
@@ -238,6 +287,14 @@ private:
   // its parent's text coordinates. Body diagnostics wrap through
   // innerDiagnostic per level when they surface.
   std::vector<SourceLocation> innerLiterals_;
+  // The same enclosing literals' §5.3 env records — cap$N alias →
+  // captured name — innermost last, parallel to innerLiterals_. The
+  // checker resolves cap$N names through these maps: they materialize
+  // the stamped binding identity expand assigned the alias (a
+  // stamp→binding table needs resolve internals the merged tree does
+  // not carry, so the name channel is the resolution surface here).
+  std::vector<const std::map<std::string, std::string, std::less<>> *>
+      envRecords_;
   bool metaImported_{false};
   Symbols globals_;
   std::vector<Diagnostic> diagnostics_;
@@ -933,11 +990,16 @@ bool Checker::pureBody(const Expr &expression, const Decl *owner) {
     // has no run-time arena effect, whatever the body's own purity is.
     return true;
   case ExprKind::Splice:
-  case ExprKind::Static:
-    // Unexpanded forms never type as pure — expand refuses them before
-    // check in the real pipeline, and a direct-check caller gets the same
-    // conservative answer.
+    // An unexpanded splice never types as pure — expand substitutes or
+    // refuses it before check in the real pipeline, and a direct-check
+    // caller gets the same conservative answer.
     return false;
+  case ExprKind::Static:
+    // §5.5: the folded node is pure exactly when its operand is — the
+    // operand's own purity is what the 'static' arm verifies, so the
+    // same answer serves derivePurity, conditions and this check alike.
+    return !expression.children.empty() && expression.children.front() &&
+           pureBody(*expression.children.front(), owner);
   default:
     break;
   }
@@ -1030,7 +1092,8 @@ Type Checker::place(const Expr &expression, Environment &env, Context context) {
     const auto found = env.find(expression.text);
     if (found == env.end()) {
       report(DiagnosticCode::UnknownName,
-             "unknown assignment target '" + expression.text + "'",
+             "unknown assignment target '" +
+                 std::string(displayName(expression.text)) + "'",
              expression.loc);
       return unknown;
     }
@@ -1194,6 +1257,161 @@ Type Checker::recover(const Expr &expression, Type value, Environment &env,
   return value;
 }
 
+bool Checker::staticClosed(const Expr &expression, Environment &env,
+                           bool diagnose) {
+  resolutionWork(expression.loc);
+  const auto refuse = [&](std::string detail) {
+    if (diagnose)
+      report(DiagnosticCode::InvalidPosition, std::move(detail),
+             expression.loc);
+    return false;
+  };
+  bool closed = true;
+  // Fixed-role metadata walks in the ambient env except the recovery
+  // arm, which binds `cause` for its own expression.
+  for (const ExprPtr *slot : {&expression.scope, &expression.recipients,
+                              &expression.deadline, &expression.guard})
+    if (*slot) closed &= staticClosed(**slot, env, diagnose);
+  if (expression.recovery) {
+    auto local     = copyEnvironment(env, expression.loc);
+    local["cause"] = {named("Str"), false, 0};
+    closed = closed && staticClosed(*expression.recovery, local, diagnose);
+  }
+  switch (expression.kind) {
+  case ExprKind::Integer:
+  case ExprKind::Float:
+  case ExprKind::String:
+  case ExprKind::Duration:
+  case ExprKind::Boolean:
+  case ExprKind::None:
+  case ExprKind::Unit:
+    return closed;
+  case ExprKind::Identifier:
+  case ExprKind::LogicVariable: {
+    // The implicit names name arena positions — refused as a form even
+    // where an env binding exists for them.
+    if (expression.text == "self" || expression.text == "parent" ||
+        expression.text == "inner" || expression.text == "outer" ||
+        expression.text == "occurrence")
+      return refuse("'static' operand may not name the implicit '" +
+                    std::string(expression.text) + "'");
+    const auto found = env.find(expression.text);
+    if (found == env.end()) return false; // infer's unknown-name covers it
+    if (found->second.unvalued)
+      return refuse("'static' operand name '" +
+                    std::string(displayName(expression.text)) +
+                    "' is unvalued at expansion — code parameters and "
+                    "cap$N captures have no value until instantiation");
+    if (!found->second.closed)
+      return refuse("'static' operand name '" +
+                    std::string(displayName(expression.text)) +
+                    "' is not closed — it is bound at run time, not to a "
+                    "literal or a static value");
+    return closed;
+  }
+  case ExprKind::Cells:
+    // Any mode — a non-mutating cells"…" is pureBody-pure but would read
+    // the compile arena at evaluation time.
+    return refuse("'static' operand may not read the arena through cells\"…\"");
+  case ExprKind::Term:
+  case ExprKind::Believes:
+  case ExprKind::FindAll:
+  case ExprKind::ForBelieves:
+    return refuse("'static' operand may not read beliefs");
+  case ExprKind::Call:
+    // `run`, host and effect calls, and every other call alike — a
+    // stage-0 eval has no callables; program-side names are not closed.
+    return refuse(
+        "'static' operand may not call methods or host/effect functions "
+        "('run' included)");
+  case ExprKind::Code: {
+    // §5.6's per-fragment classification is the literal's
+    // outside-reference verdict — a not-closed record leaves the whole
+    // operand not-closed; a missing record is infer's named refusal.
+    const FragmentKey key{expression.loc, expression.stamp
+                                              ? expression.stamp->ordinal
+                                              : std::nullopt};
+    const auto found = fragments_.find(key);
+    if (found == fragments_.end()) return false;
+    if (!found->second.closed)
+      return refuse("'static' operand's code\"…\" literal is not "
+                    "closed — it references program-side names or cells");
+    return closed;
+  }
+  case ExprKind::Static:
+    // The inner static's operand must be closed for its own
+    // evaluation; its own arms are verified when infer reaches it.
+    for (const auto &child : expression.children)
+      if (child) closed &= staticClosed(*child, env, diagnose);
+    return closed;
+  case ExprKind::Splice:
+    // A residual splice is the pipeline's named refusal elsewhere.
+    return false;
+  case ExprKind::Let: {
+    const auto value =
+        expression.children.empty() || !expression.children.front()
+            ? false
+            : staticClosed(*expression.children.front(), env, diagnose);
+    env[expression.text] = {unit, true, 0, value};
+    return closed && value;
+  }
+  case ExprKind::If: {
+    // Each arm is judged in its own env copy, as infer's branches are.
+    for (const auto &child : expression.children) {
+      auto local = copyEnvironment(env, expression.loc);
+      if (child) closed &= staticClosed(*child, local, diagnose);
+    }
+    return closed;
+  }
+  case ExprKind::While: {
+    auto local = copyEnvironment(env, expression.loc);
+    for (const auto &child : expression.children)
+      if (child) closed &= staticClosed(*child, local, diagnose);
+    return closed;
+  }
+  case ExprKind::For: {
+    auto local = copyEnvironment(env, expression.loc);
+    if (!expression.children.empty() && expression.children.front())
+      closed &= staticClosed(*expression.children.front(), local, diagnose);
+    if (expression.binding && *expression.binding != "_")
+      local[*expression.binding] = {unknown, true, 0};
+    for (std::size_t i = 1; i < expression.children.size(); ++i)
+      if (expression.children[i])
+        closed &= staticClosed(*expression.children[i], local, diagnose);
+    return closed;
+  }
+  // Impure statement forms — the pureBody arm names them; they are not
+  // arena-reading *forms*, so the walk only marks them not-closed.
+  case ExprKind::Emit:
+  case ExprKind::Tell:
+  case ExprKind::Untell:
+  case ExprKind::Believe:
+  case ExprKind::Forget:
+  case ExprKind::Revise:
+  case ExprKind::Spawn:
+  case ExprKind::Adopt:
+  case ExprKind::Achieve:
+  case ExprKind::Ask:
+  case ExprKind::AwaitTerm:
+  case ExprKind::AwaitEvent:
+  case ExprKind::Drop:
+  case ExprKind::Install:
+  case ExprKind::Uninstall:
+  case ExprKind::Mount:
+  case ExprKind::Unmount:
+  case ExprKind::Stop:
+  case ExprKind::Terminate:
+  case ExprKind::Yield:
+  case ExprKind::Consume:
+  case ExprKind::Return:
+    return false;
+  default:
+    for (const auto &child : expression.children)
+      if (child) closed &= staticClosed(*child, env, diagnose);
+    return closed;
+  }
+}
+
 Type Checker::infer(const Expr &expression, Environment &env, Context context) {
   const auto child = [&](std::size_t index, Context mode) {
     if (index >= expression.children.size()) {
@@ -1237,7 +1455,8 @@ Type Checker::infer(const Expr &expression, Environment &env, Context context) {
     auto found = env.find(expression.text);
     if (found != env.end()) return read(found->second.type);
     report(DiagnosticCode::UnknownName,
-           "unknown name '" + expression.text + "'", expression.loc);
+           "unknown name '" + std::string(displayName(expression.text)) + "'",
+           expression.loc);
     return unknown;
   }
   case ExprKind::Unary: {
@@ -1470,7 +1689,16 @@ Type Checker::infer(const Expr &expression, Environment &env, Context context) {
     require(previous == env.end() || previous->second.depth != context.depth,
             DiagnosticCode::DuplicateName,
             "duplicate local '" + expression.text + "'", expression.loc);
-    env[expression.text] = {value, true, context.depth};
+    // §5.5's rewritten closedness: a `let` name is closed for `static`
+    // operands when its initializer is itself closed — a literal, a
+    // `static`-bound value, or a composite of closed names. The walk is
+    // quiet here: a non-closed value is legal to bind, it only leaves
+    // the name unavailable to staged evaluation.
+    const auto closed =
+        expression.children.empty()
+            ? false
+            : staticClosed(*expression.children.front(), env, false);
+    env[expression.text] = {value, true, context.depth, closed};
     return unit;
   }
   case ExprKind::List: {
@@ -1814,21 +2042,55 @@ Type Checker::infer(const Expr &expression, Environment &env, Context context) {
       return unknown;
     }
     const auto &record = found->second;
-    if (!record.body) return unknown; // expand already reported the body
+    const auto &parsed = record.body;
+    if (!parsed.body) return unknown; // expand already reported the body
     // Every loc in the record is literal-relative; pushing the literal's
     // own loc makes report() qualify body diagnostics in the
     // src:m:l:c+o:c convention (§5.1), nesting included.
     innerLiterals_.push_back(expression.loc);
+    envRecords_.push_back(&record.env);
     // The body binds its declared CodeParams in a copy of the literal's
     // env — writable locals, same as let-bound names — and checks as
     // ordinary code in the literal's own position mask, with the fragment
     // body kind so `return` and the suspension forms stay refused (§5.1,
     // M6) no matter which position the literal sits in.
     auto local = copyEnvironment(env, expression.loc);
-    auto &info = fragmentInfo_[key];
-    info.arity = record.parameters.size();
+    // §5.3's env records: each cap$N alias resolves to the binding its
+    // captured name resolves to here — the env record is the
+    // materialized content of the stamped identity the renamed
+    // Identifier carries. The alias is a read-only capture (a splice is
+    // never a place) and unvalued for `static` operands; a captured name
+    // that is itself an alias resolves transitively, so seeding repeats
+    // until no record remains unresolved.
+    for (bool seeded = true; seeded;) {
+      seeded = false;
+      for (const auto &[alias, captured] : record.env) {
+        if (const auto capturedIt = local.find(captured);
+            capturedIt != local.end()) {
+          // The cells"…" $-anchor spelling names the same capture —
+          // vql's $var charset is [alnum_], so expand rewrites anchors
+          // to cap_N while identifiers read cap$N (§5.3).
+          const std::string *names[] = {&alias, nullptr};
+          std::string anchor         = alias;
+          const auto dollar          = anchor.find('$');
+          if (dollar != std::string::npos) {
+            anchor[dollar] = '_';
+            names[1]       = &anchor;
+          }
+          for (const auto *name : names) {
+            if (!name || local.contains(*name)) continue;
+            local[*name] = {capturedIt->second.type, false, context.depth + 1,
+                            false, true};
+            seeded       = true;
+          }
+        }
+      }
+    }
+    auto &info  = fragmentInfo_[key];
+    info.arity  = parsed.parameters.size();
+    info.closed = record.closed;
     std::set<std::string> names;
-    for (const auto &parameter : record.parameters) {
+    for (const auto &parameter : parsed.parameters) {
       validateType(parameter.type, parameter.loc);
       require(snake(parameter.name), DiagnosticCode::InvalidIdentifier,
               "parameter/field names must be snake_case", parameter.loc);
@@ -1836,7 +2098,8 @@ Type Checker::infer(const Expr &expression, Environment &env, Context context) {
       require(
           names.insert(parameter.name).second, DiagnosticCode::DuplicateName,
           "duplicate code parameter '" + parameter.name + "'", parameter.loc);
-      local[parameter.name] = {parameter.type, true, context.depth + 1};
+      local[parameter.name] = {parameter.type, true, context.depth + 1, false,
+                               true};
     }
     auto bodyContext        = context;
     bodyContext.body        = Body::Fragment;
@@ -1844,26 +2107,50 @@ Type Checker::infer(const Expr &expression, Environment &env, Context context) {
     bodyContext.stageEffect = false;
     bodyContext.result      = std::nullopt;
     bodyContext.discard     = false;
-    auto result             = infer(*record.body, local, bodyContext);
+    auto result             = infer(*parsed.body, local, bodyContext);
     // A body that can never produce (always fails) types as Code<()>.
     info.result = result == bottom ? unit : result;
-    info.pure   = pureBody(*record.body, context.owner);
+    info.pure   = pureBody(*parsed.body, context.owner);
+    envRecords_.pop_back();
     innerLiterals_.pop_back();
     return {"Code", {info.result}};
   }
   case ExprKind::Splice:
-  case ExprKind::Static:
-    // The pipeline refuses both kinds in expand, so check never meets them;
-    // a direct check() on an unexpanded tree gets the same named refusal —
-    // the env-walk fallback keeps old callers working, it does not revive
-    // forms that must not reach lowering.
+    // The pipeline refuses every splice in expand, so check never meets
+    // one; a direct check() on an unexpanded tree gets the same named
+    // refusal — the env-walk fallback keeps old callers working, it does
+    // not revive forms that must not reach lowering.
     report(DiagnosticCode::Unsupported,
-           "'" +
-               std::string(expression.kind == ExprKind::Splice ? "splice"
-                                                               : "static") +
-               "' is refused by the phase-1 expand skeleton",
-           expression.loc);
+           "'splice' is refused by the expand stage", expression.loc);
     return unknown;
+  case ExprKind::Static: {
+    // §5.5 staged evaluation — the only compile-time eval. Four
+    // refusals: the operand must be pureBody-pure, carry no
+    // arena-reading *form* or non-closed name, produce a
+    // literal-expressible scalar, and embed no not-closed fragment.
+    if (expression.children.size() != 1 || !expression.children.front()) {
+      report(DiagnosticCode::InvalidDeclaration,
+             "'static' requires exactly one operand", expression.loc);
+      return unknown;
+    }
+    const auto &operandExpr = *expression.children.front();
+    // The operand is re-verified in the site's own position mask —
+    // `static` is legal anywhere a pure value is, and the operand
+    // keeps the site's obligations.
+    auto value = infer(operandExpr, env, operand(context));
+    require(pureBody(operandExpr, context.owner),
+            DiagnosticCode::ImpureCondition, "'static' operand must be pure",
+            operandExpr.loc);
+    auto closedEnv = copyEnvironment(env, expression.loc);
+    (void)staticClosed(operandExpr, closedEnv, true);
+    require(value == unknown || literalExpressible(value),
+            DiagnosticCode::TypeMismatch,
+            "'static' result must be a literal-expressible scalar (Int, "
+            "Float, Str, Bool or ()), not " +
+                typeName(value),
+            expression.loc);
+    return value;
+  }
   }
   report(DiagnosticCode::InvalidDeclaration, "unknown expression kind",
          expression.loc);
@@ -2042,7 +2329,7 @@ void Checker::declaration(const Decl &decl, const Decl *owner) {
     for (const auto &name : decl.names) {
       const auto *capacity = global(name);
       const bool builtin   = name == "Clock" || name == "Schedules" ||
-                           name == "Logging" || name == "Accepts";
+                             name == "Logging" || name == "Accepts";
       require(builtin || (capacity && capacity->kind == DeclKind::Capacity),
               DiagnosticCode::UnknownName,
               "unknown used capacity '" + name + "'", decl.loc);

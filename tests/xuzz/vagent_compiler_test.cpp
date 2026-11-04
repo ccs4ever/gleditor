@@ -901,4 +901,187 @@ TEST(VAgentCompilerTest, CellsVariableAnchorTraversesTheReferredCell) {
   EXPECT_EQ(h.members(statement->result), std::vector<CellRef>{child});
 }
 
+// ---- §5.5 'static' staged evaluation -------------------------------------
+
+TEST(VAgentCompilerTest, StaticFoldsScalarValuesIntoTheEnclosingGraph) {
+  ScalarHarness h;
+  auto folded = h.compile("static (2 * 3) + 1");
+  ASSERT_TRUE(folded) << (folded ? "" : formatDiagnostic(folded.error()));
+  EXPECT_EQ(folded->resultType, (Type{"Int", {}}));
+  h.run(*folded);
+  EXPECT_TRUE(h.produced(*folded));
+  EXPECT_EQ(h.core.render(folded->result), CellValue(std::int64_t{7}));
+  auto text = h.compile(R"(static ("pre" ++ "fix"))");
+  ASSERT_TRUE(text);
+  h.run(*text);
+  EXPECT_EQ(h.core.render(text->result), CellValue(std::string("prefix")));
+  auto real = h.compile("static (1.5 * 2.0)");
+  ASSERT_TRUE(real);
+  h.run(*real);
+  EXPECT_EQ(h.core.render(real->result), CellValue(3.0));
+  auto truth = h.compile("static (true)");
+  ASSERT_TRUE(truth);
+  h.run(*truth);
+  EXPECT_EQ(h.core.render(truth->result), CellValue(true));
+  auto nothing = h.compile("static ()");
+  ASSERT_TRUE(nothing);
+  h.run(*nothing);
+  EXPECT_TRUE(h.produced(*nothing));
+  EXPECT_EQ(h.core.render(nothing->result), CellValue(std::string{}));
+}
+
+TEST(VAgentCompilerTest, NestedStaticEvaluatesTheInnerStageFirst) {
+  ScalarHarness h;
+  // static (static (3) + 1): the inner fold lands a literal the outer
+  // operand's graph reads — staging composes at check time.
+  auto statement = h.compile("static (static (3) + 1)");
+  ASSERT_TRUE(statement);
+  h.run(*statement);
+  EXPECT_TRUE(h.produced(*statement));
+  EXPECT_EQ(h.core.render(statement->result), CellValue(std::int64_t{4}));
+}
+
+TEST(VAgentCompilerTest, StaticOperandBlocksBindTheirOwnLocals) {
+  ScalarHarness h;
+  // A block operand's let-bound locals live in the eval graph's own
+  // local cells — the fold still reads only the produced result.
+  auto statement = h.compile("static { let a := 2; a * 3 }");
+  ASSERT_TRUE(statement) << (statement ? ""
+                                       : formatDiagnostic(statement.error()));
+  h.run(*statement);
+  EXPECT_TRUE(h.produced(*statement));
+  EXPECT_EQ(h.core.render(statement->result), CellValue(std::int64_t{6}));
+}
+
+TEST(VAgentCompilerTest, StaticEvaluationKeepsItsResidueOutOfTheRunState) {
+  ScalarHarness h;
+  EXPECT_TRUE(h.vm.activeCursors().empty());
+  auto statement = h.compile("static (2 * 3) + static (4)");
+  ASSERT_TRUE(statement);
+  // The staged eval's cursor was unlinked from home's +d.cursors rank —
+  // only dead residue stays in the compile arena.
+  EXPECT_TRUE(h.vm.activeCursors().empty());
+  EXPECT_EQ(h.vm.choiceDepth(), 0U);
+  EXPECT_EQ(h.arena.outstandingMarks(), 0U);
+  h.run(*statement);
+  EXPECT_TRUE(h.produced(*statement));
+  EXPECT_EQ(h.core.render(statement->result), CellValue(std::int64_t{10}));
+  EXPECT_EQ(h.vm.choiceDepth(), 0U);
+  EXPECT_EQ(h.arena.outstandingMarks(), 0U);
+}
+
+TEST(VAgentCompilerTest, AStaticOperandThatProducesNoValueIsRefused) {
+  ScalarHarness h;
+  // 1 / 0 lowers fine but fails at eval: no value to fold in.
+  auto refused = h.compile("static (1 / 0)");
+  ASSERT_FALSE(refused);
+  EXPECT_EQ(refused.error().code, DiagnosticCode::InvalidDeclaration);
+  EXPECT_EQ(h.vm.choiceDepth(), 0U);
+  EXPECT_EQ(h.arena.outstandingMarks(), 0U);
+}
+
+TEST(VAgentCompilerTest, StaticEvaluationHonoursTheFuelBound) {
+  ScalarHarness h;
+  Compiler starved{h.core, h.vm, ScalarCompilerLimits{.staticFuel = 0}};
+  auto operand = Parser("static (1 + 1)").parseExpression();
+  ASSERT_TRUE(operand);
+  auto refused = starved.compileStatement(**operand);
+  ASSERT_FALSE(refused);
+  EXPECT_EQ(refused.error().code, DiagnosticCode::InvalidDeclaration);
+  // The same operand folds under the default budget.
+  auto folded = h.compile("static (1 + 1)");
+  ASSERT_TRUE(folded);
+  h.run(*folded);
+  EXPECT_EQ(h.core.render(folded->result), CellValue(std::int64_t{2}));
+}
+
+TEST(VAgentCompilerTest, ResidualCodeAndSpliceAreNamedCompileRefusals) {
+  ScalarHarness h;
+  auto code = h.compile(R"(code"1 + 2")");
+  ASSERT_FALSE(code);
+  EXPECT_EQ(code.error().code, DiagnosticCode::InvalidDeclaration);
+  auto splice = h.compile("splice x");
+  ASSERT_FALSE(splice);
+  EXPECT_EQ(splice.error().code, DiagnosticCode::InvalidDeclaration);
+}
+
+// ---- §5.3 cap$N capture bindings -----------------------------------------
+
+// A cap$N name never lexes — '$' is reserved — so expand-minted alias
+// expressions are hand-built, the same shape the binding table receives.
+std::unique_ptr<Expr> makeExpr(ExprKind kind, std::string text = {}) {
+  auto expr  = std::make_unique<Expr>();
+  expr->kind = kind;
+  expr->text = std::move(text);
+  return expr;
+}
+
+std::unique_ptr<Expr> capIdentifier(std::string alias) {
+  return makeExpr(ExprKind::Identifier, std::move(alias));
+}
+
+TEST(VAgentCompilerTest, CapAliasesBypassRenderValidationAndKeepIdentity) {
+  ScalarHarness h;
+  // A capture is unvalued at emit time — the cell fills per activation —
+  // so the alias skips the unvalued render check but keeps cell identity:
+  // what runs is a read of the capture cell, not a snapshot.
+  const auto capture = h.arena.makeCell();
+  CompilerBindings bindings{{"cap$0", {capture, Type{"Int", {}}}}};
+  auto sum = makeExpr(ExprKind::Binary, "+");
+  sum->children.push_back(capIdentifier("cap$0"));
+  sum->children.push_back(makeExpr(ExprKind::Integer, "1"));
+  auto statement = h.compiler.compileStatement(*sum, bindings);
+  ASSERT_TRUE(statement) << (statement ? ""
+                                       : formatDiagnostic(statement.error()));
+  ASSERT_TRUE(
+      h.core.writeValue(capture, 0, std::nullopt, CellValue(std::int64_t{41})));
+  h.run(*statement);
+  EXPECT_TRUE(h.produced(*statement));
+  EXPECT_EQ(h.core.render(statement->result), CellValue(std::int64_t{42}));
+}
+
+TEST(VAgentCompilerTest, CapAliasesResolveThroughCellIdentityNotSnapshots) {
+  ScalarHarness h;
+  const auto capture = h.arena.makeScalarCell(std::int64_t{1});
+  CompilerBindings bindings{{"cap$7", {capture, Type{"Int", {}}}}};
+  auto product = makeExpr(ExprKind::Binary, "*");
+  product->children.push_back(capIdentifier("cap$7"));
+  product->children.push_back(makeExpr(ExprKind::Integer, "3"));
+  auto statement = h.compiler.compileStatement(*product, bindings);
+  ASSERT_TRUE(statement);
+  const auto cursor = h.run(*statement);
+  EXPECT_EQ(h.core.render(statement->result), CellValue(std::int64_t{3}));
+  // Same statement, new capture value — the graph reads the cell again.
+  ASSERT_TRUE(
+      h.core.writeValue(capture, 0, std::nullopt, CellValue(std::int64_t{9})));
+  h.run(*statement, cursor);
+  EXPECT_EQ(h.core.render(statement->result), CellValue(std::int64_t{27}));
+}
+
+TEST(VAgentCompilerTest, CapAnchorsResolveOnlyOnStateSideCaptures) {
+  CellsHarness h;
+  const auto items  = h.core.findOrMintDimension("d.items");
+  const auto member = h.arena.makeCell("payload");
+  const auto child  = h.arena.makeCell("child");
+  ASSERT_TRUE(h.arena.link(member, items, zigzag::DimVector::POS, child));
+  const auto box = h.arena.makeScalarCell(static_cast<std::int64_t>(member));
+  // A frame-bound capture has no emission-time cell to name — the
+  // state-side bit is what an anchor requires. `$cap_0` is the anchor
+  // spelling of the `cap$0` env alias (vql's $var charset is [alnum_]).
+  CompilerBindings frame{{"cap_0", {box, Type{"Cell", {}}}}};
+  auto refused = h.compiler.compileStatement(
+      *makeExpr(ExprKind::Cells, "$cap_0/d.items"), frame);
+  ASSERT_FALSE(refused);
+  EXPECT_EQ(refused.error().code, DiagnosticCode::InvalidDeclaration);
+  // The same cell marked state-side anchors the traversal.
+  CompilerBindings stable{{"cap_0", {box, Type{"Cell", {}}, true}}};
+  auto statement = h.compiler.compileStatement(
+      *makeExpr(ExprKind::Cells, "$cap_0/d.items"), stable);
+  ASSERT_TRUE(statement) << (statement ? ""
+                                       : formatDiagnostic(statement.error()));
+  h.run(*statement);
+  EXPECT_TRUE(h.produced(*statement));
+  EXPECT_EQ(h.members(statement->result), std::vector<CellRef>{child});
+}
+
 } // namespace

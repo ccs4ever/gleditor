@@ -79,6 +79,15 @@ bool comparison(std::string_view op) {
          op == ">=";
 }
 
+// §5.3's capture-alias namespaces: `cap$N` marks an expand-minted
+// identifier rename ('$' never lexes), `cap_N` the cells"…" $-anchor
+// spelling (vql's `$var` charset is [alnum_]) — either prefix marks a
+// binding-table entry standing for a captured binding's own cell.
+bool capName(std::string_view name) {
+  return name.size() > 4 &&
+         (name.starts_with("cap$") || name.starts_with("cap_"));
+}
+
 OpcodeKind operation(std::string_view op) {
   if (op == "+" || op == "++") return OpcodeKind::Add;
   if (op == "-") return OpcodeKind::Sub;
@@ -160,24 +169,37 @@ private:
     if (!core_.arena().contains(found->second.cell))
       refuse(expression, DiagnosticCode::UnknownName,
              "binding cell is not present in this arena");
-    const auto value = core_.render(found->second.cell).value();
-    const bool matches =
-        (*type == Scalar::Int && std::holds_alternative<std::int64_t>(value)) ||
-        (*type == Scalar::Float && std::holds_alternative<double>(value)) ||
-        (*type == Scalar::Bool && std::holds_alternative<bool>(value)) ||
-        (*type == Scalar::Str && std::holds_alternative<std::string>(value)) ||
-        (*type == Scalar::Unit && std::holds_alternative<std::string>(value) &&
-         std::get<std::string>(value).empty()) ||
-        // A list head carries no value contract; the rank under +d.grab is
-        // what the type describes.
-        *type == Scalar::CellList ||
-        // A Cell binding is a ref-box: the int content must name a live cell.
-        (*type == Scalar::Cell && std::holds_alternative<std::int64_t>(value) &&
-         core_.arena().contains(
-             static_cast<CellRef>(std::get<std::int64_t>(value))));
-    if (!matches)
-      refuse(expression, DiagnosticCode::TypeMismatch,
-             "binding value does not have its declared scalar type");
+    // §5.3: a cap$N capture alias names the captured binding's own cell.
+    // Capture cells are compile-time-unvalued — frame cells fill per
+    // activation — and the checker already proved the type, so the
+    // unvalued render check is skipped; the alias resolves straight into
+    // externalReferences_ (cell identity, never a value snapshot).
+    if (!capName(expression.text)) {
+      const auto rendered = core_.render(found->second.cell);
+      const auto value    = rendered.value_or(CellValue{});
+      const bool matches =
+          (*type == Scalar::Int &&
+           std::holds_alternative<std::int64_t>(value)) ||
+          (*type == Scalar::Float && std::holds_alternative<double>(value)) ||
+          (*type == Scalar::Bool && std::holds_alternative<bool>(value)) ||
+          (*type == Scalar::Str &&
+           std::holds_alternative<std::string>(value)) ||
+          (*type == Scalar::Unit &&
+           std::holds_alternative<std::string>(value) &&
+           std::get<std::string>(value).empty()) ||
+          // A list head carries no value contract; the rank under +d.grab
+          // is what the type describes.
+          *type == Scalar::CellList ||
+          // A Cell binding is a ref-box: the int content must name a live
+          // cell.
+          (*type == Scalar::Cell &&
+           std::holds_alternative<std::int64_t>(value) &&
+           core_.arena().contains(
+               static_cast<CellRef>(std::get<std::int64_t>(value))));
+      if (!matches)
+        refuse(expression, DiagnosticCode::TypeMismatch,
+               "binding value does not have its declared scalar type");
+    }
     externalReferences_[&expression] = found->second.cell;
     return *type;
   }
@@ -487,6 +509,14 @@ private:
         if (!core_.arena().contains(found->second.cell))
           refuse(expression, DiagnosticCode::UnknownName,
                  "binding cell is not present in this arena");
+        // §5.3: cap_N anchors resolve only on stable captures — a
+        // frame-bound capture has no emission-time cell to name, so the
+        // state-side bit is the discriminator.
+        if (capName(path->anchor.variable) && !found->second.stateSide)
+          refuse(expression, DiagnosticCode::InvalidDeclaration,
+                 "cells anchor '$" + path->anchor.variable +
+                     "' names a frame-bound capture; anchors resolve on "
+                     "stable captures only");
         externalReferences_[&expression] = found->second.cell;
       }
       if (path->anchor.kind == CellsPath::Anchor::Kind::LiteralCell &&
@@ -497,6 +527,33 @@ private:
       type                = Scalar::CellList;
       break;
     }
+    case ExprKind::Static: {
+      // §5.5: the operand was checked pure+closed with a
+      // literal-expressible scalar type; the kernel re-verifies the type
+      // arm and evaluates at emit time.
+      arity(1);
+      const auto value =
+          preflight(*expression.children.front(), false, depth + 1, pure);
+      if (value != Scalar::Int && value != Scalar::Float &&
+          value != Scalar::Str && value != Scalar::Bool &&
+          value != Scalar::Unit)
+        refuse(expression, DiagnosticCode::TypeMismatch,
+               "'static' operand must have a literal-expressible scalar "
+               "type (Int, Float, Str, Bool or ())");
+      type = value;
+      break;
+    }
+    case ExprKind::Code:
+      // A surviving code"…" literal — a let-bound literal never fully
+      // substituted or a code value at runtime position — cannot be
+      // scalar-lowered; the fragment descriptor path lands in phase 3.
+      refuse(expression, DiagnosticCode::InvalidDeclaration,
+             "a surviving code\"…\" literal cannot be scalar-lowered; "
+             "expand substitutes fragments before compile");
+    case ExprKind::Splice:
+      refuse(expression, DiagnosticCode::InvalidDeclaration,
+             "a residual splice reached lowering; the expand stage "
+             "substitutes every splice before compile");
     default:
       refuse(expression, DiagnosticCode::InvalidDeclaration,
              "construct is not supported by the scalar lowering iteration");
@@ -721,6 +778,70 @@ private:
       spin(readDepth, choice);
       return readDepth;
     }
+    case ExprKind::Static: {
+      // §5.5 staged evaluation: lower the operand into its own graph,
+      // run it in the compile arena under staticFuel with no mark
+      // outstanding, then fold the type-matched result cell in as a
+      // literal. The eval residue — dead graph, cursor cell,
+      // temporaries — stays in the compile arena, which is discarded;
+      // none of it reaches the sealed artifact.
+      const auto expected = types_.at(expression.children.front().get());
+      Emitter eval(core_, vm_, bindings_, limits_);
+      auto lowered =
+          eval.compile(*expression.children.front(), ResultUse::Value);
+      if (!lowered)
+        refuse(expression, lowered.error().code,
+               "'static' operand does not lower: " + lowered.error().detail);
+      const auto cursor = vm_.spawnCursor(lowered->entry, "vagent.static");
+      vm_.setCursorOpcode(cursor, lowered->entry);
+      const auto outcome = vm_.run(cursor, limits_.staticFuel);
+      // spawnCursor registered the eval cursor on home's +d.cursors
+      // rank; unlink it there so the eval leaves only dead graph behind.
+      zigzag::expectWritten(core_.arena().unlink(cursor, core_.dims().cursors,
+                                                 zigzag::DimVector::NEG));
+      zigzag::expectWritten(core_.arena().unlink(cursor, core_.dims().cursors,
+                                                 zigzag::DimVector::POS));
+      if (!outcome.success)
+        refuse(expression, DiagnosticCode::InvalidDeclaration,
+               "'static' operand did not evaluate: " + outcome.errorMessage);
+      // The compiler.cpp:108-110 invariant holds across eval: a `static`
+      // that leaves the VM off its no-choice, no-mark baseline would
+      // refuse the next compileStatement anyway — refuse it here.
+      if (vm_.choiceDepth() != 0 || core_.arena().outstandingMarks() != 0)
+        refuse(expression, DiagnosticCode::InvalidDeclaration,
+               "'static' evaluation left the VM off its no-choice, "
+               "no-mark baseline");
+      const auto flag = core_.render(lowered->produced);
+      if (!flag || !std::holds_alternative<bool>(*flag) ||
+          !std::get<bool>(*flag))
+        refuse(expression, DiagnosticCode::InvalidDeclaration,
+               "'static' operand produced no value");
+      const auto value = core_.render(lowered->result);
+      const bool matches =
+          value &&
+          ((expected == Scalar::Int &&
+            std::holds_alternative<std::int64_t>(*value)) ||
+           (expected == Scalar::Float &&
+            std::holds_alternative<double>(*value)) ||
+           (expected == Scalar::Str &&
+            std::holds_alternative<std::string>(*value)) ||
+           (expected == Scalar::Bool && std::holds_alternative<bool>(*value)) ||
+           (expected == Scalar::Unit &&
+            std::holds_alternative<std::string>(*value) &&
+            std::get<std::string>(*value).empty()));
+      if (!matches)
+        refuse(expression, DiagnosticCode::TypeMismatch,
+               "'static' result does not match its checked type");
+      return copy(output, literal(*value), continuation);
+    }
+    case ExprKind::Code:
+      refuse(expression, DiagnosticCode::InvalidDeclaration,
+             "a surviving code\"…\" literal cannot be scalar-lowered; "
+             "expand substitutes fragments before compile");
+    case ExprKind::Splice:
+      refuse(expression, DiagnosticCode::InvalidDeclaration,
+             "a residual splice reached lowering; the expand stage "
+             "substitutes every splice before compile");
     default:
       // Preflight has already refused every non-scalar constructor.
       return jump(cells_->fail);
