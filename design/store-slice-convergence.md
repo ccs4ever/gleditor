@@ -1911,9 +1911,11 @@ came back byte-identical across every regenerated fixture.
      unmodified base cells and treats dimension refs as edge names unless they are also reached by
      an ordinary link; otherwise one answer can pull in the Vortex library behind `d.clone`.
 
-   Not covered: promoting a shadow's *content* change back (its links are written, a restatement of
-   its text is not), and an arena whose base is mutated underneath it — a shadow copies a cell, not
-   a promise about one.
+   Not covered: promoting a shadow's *content* change back (its links are written — adds and
+   repoints always, and dropped edges as durable `setLink(…, std::nullopt)` clears for the shadowed
+   cells an explicit `commitShadowed` policy admits, per
+   `design/arena-promotion-delta-completeness.md` — but a restatement of its text is not), and an
+   arena whose base is mutated underneath it — a shadow copies a cell, not a promise about one.
 
 ______________________________________________________________________
 

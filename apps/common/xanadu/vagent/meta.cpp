@@ -211,9 +211,10 @@ std::vector<CellRef> MetaRuntime::clausesOf(CellRef cell) const {
   std::vector<CellRef> out;
   for (const auto clause :
        zigzag::rankAfter(arena(), cell, core_.dims().clause))
-    // A resurrected-but-tombstoned clause stays unresolvable: promote never
-    // committed its unlink, so rank membership alone cannot name it dead —
-    // the `unlearn:` record can.
+    // A resurrected-but-tombstoned clause stays unresolvable: promote commits
+    // the unlink only for lineages written under commitShadowed (Clears) —
+    // older stores carry the shadow-drop without the clear, so rank
+    // membership alone cannot name it dead; the `unlearn:` record can.
     if (!unlearned(labelOf(clause).value_or(""))) out.push_back(clause);
   return out;
 }
@@ -352,10 +353,11 @@ std::expected<std::int64_t, std::string> MetaRuntime::nextSerial() const {
   const auto current = arena.asInt64(*value);
   if (!current)
     return std::unexpected("meta serial: counter cell is not an int64");
-  // Mint-and-repoint, never an in-place value write: promote commits only
-  // additive setLink deltas on a shadowed base cell, so a setValueBits here
-  // rewinds to the folded value at the next genesis — every verb would
-  // re-mint patch:<n> serials that already shipped.
+  // Mint-and-repoint, never an in-place value write: promote restates cell
+  // content only under ShadowCommit::Values — a stage no consumer opts into
+  // (delta-completeness §4.2) — so a setValueBits here rewinds to the folded
+  // value at the next genesis and every verb would re-mint patch:<n>
+  // serials that already shipped.
   zigzag::expectWritten(arena.link(*record, core_.dims().values, Posward,
                                    arena.makeScalarCell(*current + 1)));
   return *current;
@@ -1917,8 +1919,9 @@ MetaRuntime::MetaMutation MetaRuntime::undoPatch(CellRef patch) {
                        /*mint=*/true))
       zigzag::expectWritten(arena.link(*rec, core_.dims().values, Posward,
                                        arena.makeCell(std::string{why})));
-    // The unlink resurrects at the next fold like every removal — without
-    // the unlearn tombstone a clause sharing `patch:<n>` comes back live.
+    // The unlink commits under regenesisCycle's Clears policy; the unlearn
+    // tombstone still matters — a clause sharing `patch:<n>` on an older
+    // lineage folded without clears would otherwise come back live.
     markUnlearned(label);
     return std::unexpected(
         std::format("unlearn: dead patch dropped — {}", why));
@@ -1981,11 +1984,13 @@ MetaRuntime::MetaMutation MetaRuntime::undoPatch(CellRef patch) {
           registered && codeRegistered(*registered))
         unlinkRank(*registered, binds_.dims.code);
 
-  // Promote never commits a removal, so every unlink above resurrects on the
-  // next fold. Tombstone the names that must stay dead: the patch's own
-  // label (genesis's tombstone arm skips its replay — and for plan/handler
-  // the clause shares `patch:<n>`, so the same record retires it) and, for
-  // the method arm, the symbol's module:Agent.method. A where/body unlearn
+  // regenesisCycle's commitShadowed policy (Clears on state-side shadows)
+  // now commits the unlinks above durably; the tombstone still retires the
+  // names that must stay dead — for lineages folded before the clears, and
+  // as the replay-time belt-and-suspenders: the patch's own label (genesis's
+  // tombstone arm skips its replay — and for plan/handler the clause shares
+  // `patch:<n>`, so the same record retires it) and, for the method arm, the
+  // symbol's module:Agent.method. A where/body unlearn
   // keeps its clause live — only the patch tombstone lands for it.
   markUnlearned(labelOf(patch).value_or(""));
   if (verb == "learn_method") markUnlearned(target);
@@ -2102,8 +2107,7 @@ MetaClosedReport MetaRuntime::verifyClosed(CellRef head) const {
     // alike (an image-resident fragment's members name image-side cells) —
     // except the link-tuple direction flag, the lone member storing ±1.
     if (const auto pos = arena.asInt64(member))
-      if (*pos != 1 && *pos != -1)
-        internal.insert(static_cast<CellRef>(*pos));
+      if (*pos != 1 && *pos != -1) internal.insert(static_cast<CellRef>(*pos));
   }
 
   const auto program     = programCells();

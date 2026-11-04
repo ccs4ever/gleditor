@@ -775,7 +775,7 @@ TEST(VagentGenesisTest, SecondGenesisReplaysTheWholeEdl) {
   ASSERT_TRUE(o1.has_value()) << (o1 ? "" : o1.error());
 
   // Fold the genesis session's promote-visible state — the fault
-  // tombstone is the only durable residue installs leave behind.
+  // tombstone is the durable residue installs leave behind.
   auto cycle =
       regenesisCycle(f.store, gc.context->arena, f.agentCell, f.imageExtent);
   ASSERT_TRUE(cycle.has_value()) << (cycle ? "" : cycle.error());
@@ -786,8 +786,10 @@ TEST(VagentGenesisTest, SecondGenesisReplaysTheWholeEdl) {
   auto o2   = runGenesis(f.store, f.store, ar2, cycle->context->core,
                          cycle->context->vm, gc.roots);
   ASSERT_TRUE(o2.has_value()) << (o2 ? "" : o2.error());
-  // The dead patch is back on the rank (its unlink never crossed), but
-  // the promoted tombstone suppresses it before replay.
+  // The dead tail patch's unlink now crosses: regenesisCycle's Clears
+  // policy commits its predecessor's dropped rank edge. The promoted
+  // tombstone remains the retired marker regardless — genesis consults
+  // it before replay.
   EXPECT_EQ(o2->patchesReplayed, 4U);
   EXPECT_EQ(o2->patchesDropped, 0U);
 
@@ -1103,10 +1105,13 @@ TEST(VagentGenesisTest, MetaSerialStaysMonotoneAcrossCycles) {
   }
 }
 
-// A clean unlearn must stay retired across a fold: promote never commits the
-// unlink, so the patch and clause physically resurrect on the rank — only the
-// `unlearn:<label>` tombstone keeps genesis's replay and the name surface
-// from re-running them. learn_plan → cycle → unlearn → cycle.
+// A clean unlearn must stay retired across a fold. Under regenesisCycle's
+// commitShadowed (Clears on state-side shadows) the d.patch/d.clause rank
+// unlinks commit durably — the records no longer resurrect — while the
+// `unlearn:<label>` tombstone remains the retired marker: it is still what
+// retires lineages folded before clears existed, and it keeps genesis's
+// replay and the name surface from re-running them. learn_plan → cycle →
+// unlearn → cycle.
 TEST(VagentGenesisTest, UnlearnedPatchStaysOutOfReplay) {
   ProgramImage f;
   buildProgramImage(f);
@@ -1165,13 +1170,14 @@ TEST(VagentGenesisTest, UnlearnedPatchStaysOutOfReplay) {
   auto out2 = runGenesis(f.store, f.store, a2, c2->context->core,
                          c2->context->vm, roots);
   ASSERT_TRUE(out2.has_value()) << (out2 ? "" : out2.error());
-  // The tombstoned patch stays out of replay even though its rank record
-  // physically resurrected with the fold.
+  // The tombstoned patch stays out of replay; under clears its rank record
+  // no longer even resurrects with the fold.
   EXPECT_EQ(out2->patchesReplayed, 0U)
       << "the unlearned patch re-ran at genesis";
 
-  // The resurrected clause cell stays name-dead on the meta surface — the
-  // suppression, not the (uncommitted) unlink, is the durable retirement.
+  // The clause cell stays name-dead on the meta surface — the committed
+  // unlink removes it, and the tombstone remains the retired marker for
+  // lineages folded before clears.
   auto binds2 =
       mintMetaBindSet(a2, c2->context->core, f.programRoot, c2->agentCell);
   ASSERT_TRUE(binds2.has_value());

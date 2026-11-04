@@ -432,27 +432,30 @@ itself.
   `opcodeMap_` is what (b) then re-fills) → re-run the filing sweep → re-run (a)–(e). The
   **promote-visible mutation class** bounds what a cycle can carry: `promote` emits content ops only
   for `isEphemeral` cells and link-writes on `holdsOwn` cells — a shadowed base cell gets no content
-  op, and a removed base edge is never un-emitted (`arena_manifold.cpp:1867-1870`, `:2020-2053`). So
+  op, and a removed base edge emits a durable `setLink(…, std::nullopt)` clear only for shadowed
+  cells the caller's `commitShadowed` policy returns `ShadowCommit::Clears` for; `regenesisCycle`
+  opts exactly its state-side (`> imageExtent`) shadows in via `commitStateSide`
+  (`arena_manifold.cpp`, `lineage.cpp`, design/arena-promotion-delta-completeness.md §4.1). So
   durable counters and scalar writes take mint-and-repoint form — the `d.vars` serial counter bumps
   a *fresh ephemeral* the keying record's `+d.values` edge repoints at (spec :1300), never an
   in-place `writeValue`, which would rewind `patch:<n>` at fold 2 into exactly the ABA the durable
   bullet forbids — and `set_weight`'s `+d.weight` value writes ride the same discipline; base-edge
-  unlinks survive only via (d) replay or tombstone-form records — `unlearn`'s mid-rank record drops
-  are repoints (link-writes, `unlink` = `link(…,nullopt)` does no chain repair,
-  `arena_manifold.hpp:616-618`) that promote fine, but its *tail* drop is a true removal where
-  replay is the resurrection hazard and only tombstone form works. `root` is the **agent cell**
-  alone (spec :375, :635-636): program-side cells are *never* under a promote root — bare grafts
-  must die with the incarnation (spec :375-377, :1791-1799 — that boundary is what makes `learn` =
-  graft + record a distinction), graft-adds would carry without prune-removes, and replay-installed
-  copies would double under (d), whose alias re-match can't see a promoted `patch:<n>` label (spec
-  :1322-1324). `promote` emits only its `root`'s reachable subgraph (`arena_manifold.hpp:833-836` —
-  the fold is `rebuildManifold`'s) — but nothing durable drops silently: all durable state already
-  hangs on the agent cell's ranks (`d.code`/`d.patch`/`d.synapse`/`d.vars`, spec :1870-1871, :2465,
-  :1294-1295), and spec :2265-2266's two-root vocabulary belongs to (a)'s classification walk, not
-  to promote. The only program-rooted promote is the one-time image seed named below. A same-`Store`
-  cycle needs no `sealLocalSpool` — op records and local spans ride verbatim; the initial image band
-  comes from `promote` of the compile arena or `adoptOpRecords` (`store.cpp:3836-4018`). In spec
-  order:
+  unlinks on admitted shadows now commit as real removals — `unlearn`'s mid-rank record drops are
+  repoints (link-writes, `unlink` = `link(…,nullopt)` does no chain repair,
+  `arena_manifold.hpp:616-618`) that promote fine, and its *tail* drop — the `d.patch`/`d.code` rank
+  unlink — commits as a durable clear under the cycle's `Clears` predicate, with the tombstone
+  record coexisting as a retired marker for old lineages. `root` is the **agent cell** alone (spec
+  :375, :635-636): program-side cells are *never* under a promote root — bare grafts must die with
+  the incarnation (spec :375-377, :1791-1799 — that boundary is what makes `learn` = graft + record
+  a distinction), graft-adds would carry without prune-removes, and replay-installed copies would
+  double under (d), whose alias re-match can't see a promoted `patch:<n>` label (spec :1322-1324).
+  `promote` emits only its `root`'s reachable subgraph (`arena_manifold.hpp:833-836` — the fold is
+  `rebuildManifold`'s) — but nothing durable drops silently: all durable state already hangs on the
+  agent cell's ranks (`d.code`/`d.patch`/`d.synapse`/`d.vars`, spec :1870-1871, :2465, :1294-1295),
+  and spec :2265-2266's two-root vocabulary belongs to (a)'s classification walk, not to promote.
+  The only program-rooted promote is the one-time image seed named below. A same-`Store` cycle needs
+  no `sealLocalSpool` — op records and local spans ride verbatim; the initial image band comes from
+  `promote` of the compile arena or `adoptOpRecords` (`store.cpp:3836-4018`). In spec order:
   - (a) **lineage bind** — the ops-record order comparand over the decoded `1..E_ops` band (every
     *non-scroll* post-fold `OpRecord` field verbatim, post-remap, plus scroll *identity* by key —
     `globalKeyOf`'s arm set minus `localScroll`: `breakMarkerKey` for sealed break-marker spans,
