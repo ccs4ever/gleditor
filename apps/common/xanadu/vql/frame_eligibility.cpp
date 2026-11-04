@@ -738,8 +738,9 @@ private:
                  const std::size_t depth) {
     pathExpression(clause.inPath, scope, depth + 1);
     if (clause.destructurePattern) {
-      refuse("destructured for-bindings are not frame eligible");
-      destructure(*clause.destructurePattern, scope, depth + 1);
+      auto captures =
+          contractPattern(*clause.destructurePattern, scope, depth + 1);
+      scope.insert(captures.begin(), captures.end());
     } else if (!clause.varName.empty()) {
       scope.insert(clause.varName);
     }
@@ -844,20 +845,29 @@ private:
 
   void executionBlock(const ExecutionBlock &block, Scope &scope,
                       const std::size_t depth) {
+    Scope workingScope = scope;
+    bool loopStarted   = false;
     sequence(block.bindings, depth + 1,
              [&](const auto &binding, const std::size_t childDepth) {
                std::visit(
                    [&](const auto &part) {
                      using Part = std::remove_cvref_t<decltype(part)>;
-                     if constexpr (std::same_as<Part, ForClause>)
-                       forClause(part, scope, childDepth);
-                     else
-                       letClause(part, scope, childDepth);
+                     if constexpr (std::same_as<Part, ForClause>) {
+                       if (!loopStarted) {
+                         scope       = workingScope;
+                         loopStarted = true;
+                       }
+                       forClause(part, workingScope, childDepth);
+                     } else {
+                       letClause(part, workingScope, childDepth);
+                     }
                    },
                    binding);
              });
-    if (block.where) booleanExpr(block.where->condition, scope, depth + 1);
-    actionClause(block.action, scope, depth + 1);
+    if (block.where)
+      booleanExpr(block.where->condition, workingScope, depth + 1);
+    actionClause(block.action, workingScope, depth + 1);
+    if (!loopStarted) scope = std::move(workingScope);
   }
 
   void statement(const Statement &statement, Scope &scope,

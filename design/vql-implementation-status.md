@@ -328,3 +328,14 @@ structural graphs survive Store export/reload into a fresh VM. Full build and al
 passed, with independent Luna architecture and senior/profiler gates. See
 [iteration 16](projects/vortex-vm-only-iterations.md). Free closure inputs, functors, variadics,
 nonliteral field-default continuations and mutation contracts remain open; §4.12 is incomplete.
+
+## Destructured loops in reusable frames
+
+Closed destructured loops now lower inside reusable functions using existing native graph
+instructions. The scanner preserves prefix `let` bindings and restores loop-local names at block
+exit, keeping later caller-only aliases on compiled inline lowering. Nested and recursive loops,
+missing fields/defaults, caller identity, fresh-VM export/reload and host/mesh source routes passed.
+Full build and all 521 affected tests passed with independent Luna gates; see
+[iteration 17](projects/vortex-vm-only-iterations.md). The documented scalar/string expression
+bodies, free closures, variadics, lazy field-default continuations and mutation contracts still
+prevent §4.12 completion.

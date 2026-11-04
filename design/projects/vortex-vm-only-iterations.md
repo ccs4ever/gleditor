@@ -483,3 +483,25 @@ The broader sweep's known Prolog resolution gaps remain unchanged. Full §4.12 r
 
 Logs: `/tmp/vql-structural-frames-build.log`, `/tmp/vql-structural-frames-tests.log`,
 `/tmp/vql-structural-frames-format.log`.
+
+## Iteration 17: destructured loops and lexical frame boundaries
+
+Closed destructured `for` bindings now use reusable frames through the existing native loop and
+contract graph lowering. Per-member captures, literal/earlier-lexical defaults, typed filtering and
+untyped missing-field empty bindings retain their established behavior. Nested loops preserve order
+and duplicate identities; recursive loop graphs survive Store export/reload into a fresh VM.
+
+Eligibility now mirrors the compiler's scope restoration: prefix `let` bindings before the first
+loop remain visible to later script statements, while loop bindings and subsequent `let` bindings
+remain local to the iteration. This also fixes false closedness for named loops: a later reference
+to a caller-only alias keeps compiled inline lowering rather than losing the caller's binding.
+Patterns still resolve defaults against their pre-match scope and publish captures afterward.
+
+Validation: full `make -j$(nproc)` and all 521 affected tests from 50 suites passed, including seven
+new loop-frame tests and real host/mesh Vquery source results. Independent Luna architecture and
+senior/profiler gates accepted the bounded stage. Repository formatting passed with clang-format 19.
+No runtime ABI, performance improvement or full-suite pass is claimed. Full §4.12 remains
+incomplete.
+
+Logs: `/tmp/vql-loop-frames-build.log`, `/tmp/vql-loop-frames-tests.log`,
+`/tmp/vql-loop-frames-format.log`.
