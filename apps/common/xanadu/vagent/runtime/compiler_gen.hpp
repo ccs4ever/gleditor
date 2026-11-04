@@ -384,8 +384,6 @@ public:
     return std::move(frameBodies_);
   }
 
-  friend void emitHealthEntry(Gen &g, CellRef entryLabel);
-
 private:
   // -- primitives ------------------------------------------------------------
   zigzag::vortex::VortexCore &core_;
@@ -1171,6 +1169,9 @@ private:
   /// `settleEntry` (P19 I3-2b), defined in epistemic_emit_health.cpp: settle
   /// the head of `d.pending` alone, in one turn.
   void emitSettleEntry(CellRef entryLabel);
+  /// `healthEntry` (P19 I3-2c2), defined in epistemic_emit_health.cpp: one
+  /// operator action (isolate, degrade, clear or reset) on one source.
+  void emitHealthEntry(CellRef entryLabel);
   /// `rtHealthUpdate_(profile, refusals, credits, half_life)`: apply one
   /// note's counted events to the profile's `R` and `N`
   /// (epistemic_emit_health).
@@ -1275,10 +1276,6 @@ private:
   std::vector<TellSeq> emitTellTests(CellRef ty, CellRef eq);
   void emitTellBodies(const std::vector<TellSeq> &seqs, CellRef end);
 };
-
-/// `healthEntry` stub (P19 I3-2c1), defined in epistemic_emit_health.cpp:
-/// answers `HealthUnavailable` so the authorization surface can be reviewed.
-void emitHealthEntry(Gen &g, CellRef entryLabel);
 
 } // namespace xanadu::vagent::runtime::codegen
 

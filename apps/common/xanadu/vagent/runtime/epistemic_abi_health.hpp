@@ -25,8 +25,8 @@ inline constexpr std::string_view kObsHealthDegraded = "DEGRADED";
 /// after `health` in the record.
 inline constexpr std::string_view kObsHealthFraction = "health_fraction";
 
-// The codes that decide a derived state. A latched profile reads `faulted`
-// until slice 2c2 gives the latch a code of its own.
+// The code a latched profile reads. The fault's own code lives on its
+// `isolate` audit entry, found by `fault_seq`.
 inline constexpr std::string_view kHealthCodeFaulted  = "faulted";
 inline constexpr std::string_view kHealthCodeFraction = "refusal_fraction";
 
@@ -83,6 +83,51 @@ inline constexpr std::string_view kTurnResultSupersededByReset =
     "SupersededByReset";
 inline constexpr std::string_view kTurnResultUnauthorizedHealthAction =
     "UnauthorizedHealthAction";
+
+// Profile fields of the health turn (P19 I3-2c2), all absent until first
+// written and read as 0 or empty then.
+inline constexpr std::string_view kProfileResetEpoch = "reset_epoch";
+inline constexpr std::string_view kProfileActionSeq  = "action_seq";
+/// The `seq` of the `isolate` entry that latched the profile; absent or 0 when
+/// the profile is not latched.
+inline constexpr std::string_view kProfileFaultSeq = "fault_seq";
+inline constexpr std::string_view kProfileReasons  = "reasons";
+inline constexpr std::string_view kProfileActions  = "actions";
+
+// Fields of one `reasons` entry and one `actions` entry. `wall` is present
+// only when the executor's wall clock was synchronised; `removed` only on a
+// `clear` or `reset` entry.
+inline constexpr std::string_view kReasonKind           = "kind";
+inline constexpr std::string_view kReasonCode           = "code";
+inline constexpr std::string_view kReasonOrigin         = "origin";
+inline constexpr std::string_view kReasonGrant          = "grant";
+inline constexpr std::string_view kReasonIssuer         = "issuer";
+inline constexpr std::string_view kReasonIncarnation    = "incarnation";
+inline constexpr std::string_view kReasonWall           = "wall";
+inline constexpr std::string_view kActionSeq            = "seq";
+inline constexpr std::string_view kActionCount          = "count";
+inline constexpr std::string_view kActionRemoved        = "removed";
+inline constexpr std::string_view kReasonKindDegraded   = "degraded";
+inline constexpr std::string_view kReasonKindSuspect    = "suspect";
+inline constexpr std::string_view kReasonOriginOperator = "operator";
+inline constexpr std::string_view kReasonOriginDevice   = "device";
+
+/// Named field appended to a record after the positional ones, by whatever
+/// retired it. Absent means superseded by a newer reading.
+inline constexpr std::string_view kObsRetiredBy     = "retired_by";
+inline constexpr std::string_view kRetiredByAdvance = "advance";
+inline constexpr std::string_view kRetiredByRetire  = "retire";
+inline constexpr std::string_view kRetiredByIsolate = "isolate";
+inline constexpr std::string_view kRetiredByReset   = "reset";
+
+inline constexpr std::string_view kTurnResultSourceFaulted = "SourceFaulted";
+inline constexpr std::string_view kTurnResultStaleHealthState =
+    "StaleHealthState";
+inline constexpr std::string_view kTurnResultNotOperatorReason =
+    "NotOperatorReason";
+inline constexpr std::string_view kTurnResultHealthReasonsFull =
+    "HealthReasonsFull";
+inline constexpr std::string_view kTurnResultNoChange = "NoChange";
 
 inline constexpr std::string_view kStatAuditCalls  = "health.audit.calls";
 inline constexpr std::string_view kStatAuditThrows = "health.audit.throws";

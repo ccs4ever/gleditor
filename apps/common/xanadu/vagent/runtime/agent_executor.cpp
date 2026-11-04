@@ -177,6 +177,46 @@ std::string optionalTextOf(const ArenaManifold &arena, const ValueDims &dims,
   return held ? arena.textOf(*held) : std::string{};
 }
 
+/// The bounded text a `clear` or `reset` entry keeps of what it removed (F28):
+/// whole items, each at most 64 bytes, until the next would pass 1,024 bytes,
+/// then `+N` for the N omitted. Host formatting of data already read.
+std::string composeRemoved(const HealthAction &action,
+                           const SourceHealth &snapshot) {
+  constexpr std::size_t kItemBytes  = 64;
+  constexpr std::size_t kTotalBytes = 1024;
+  // Room for the `+N` suffix of a count that fits a size_t.
+  constexpr std::size_t kSuffixBytes = 22;
+  std::vector<std::string> items;
+  const auto capped = [&](std::string item) {
+    if (item.size() > kItemBytes) item.resize(kItemBytes);
+    return item;
+  };
+  if (const auto *clear = std::get_if<Clear>(&action)) {
+    for (const auto &reason : snapshot.reasons)
+      if (reason.kind == kReasonKindDegraded &&
+          reason.origin == kReasonOriginOperator &&
+          (!clear->code || reason.code == *clear->code))
+        items.push_back(capped(reason.code));
+  } else if (std::holds_alternative<Reset>(action)) {
+    if (snapshot.faulted)
+      items.push_back(capped("fault=" + snapshot.faultCode + "/" +
+                             snapshot.faultIssuer + "/" + snapshot.faultGrant +
+                             "/" + std::to_string(snapshot.faultIncarnation)));
+    for (const auto &reason : snapshot.reasons)
+      items.push_back(capped(reason.kind + ":" + reason.code));
+  }
+  std::string text;
+  std::size_t used = 0;
+  for (; used < items.size(); ++used) {
+    const auto extra = items[used].size() + (text.empty() ? 0 : 1);
+    if (text.size() + extra + kSuffixBytes > kTotalBytes) break;
+    if (!text.empty()) text += ';';
+    text += items[used];
+  }
+  if (used < items.size()) text += "+" + std::to_string(items.size() - used);
+  return text;
+}
+
 bool contains(const std::vector<std::string> &names, std::string_view name) {
   return std::ranges::find(names, name) != names.end();
 }
@@ -1391,6 +1431,24 @@ AgentExecutor::TurnOutcome AgentExecutor::deliverHost(State &state,
                                                       WorkerContext &context,
                                                       const HostEvent &event) {
   if (event.entry) {
+    if (event.ingest) {
+      // A reset that committed after this reading left the queue supersedes
+      // it too: it predates the repair and must never count as the new
+      // eligible observation. The turn does not run.
+      bool superseded = false;
+      {
+        const std::lock_guard lock(ingress_->mutex);
+        superseded = ingress_->supersededByReset(
+            {pidKey(state.pid), event.ingest->principal},
+            event.ingest->generation);
+      }
+      if (superseded) {
+        finishIngest(state, *event.ingest, kTurnResultSupersededByReset);
+        TurnOutcome outcome;
+        outcome.result = std::string(kTurnResultSupersededByReset);
+        return outcome;
+      }
+    }
     TurnSpec spec;
     spec.entry      = event.entry;
     spec.turnFields = event.turnFields;
@@ -1458,13 +1516,22 @@ AgentExecutor::TurnOutcome AgentExecutor::deliverHost(State &state,
         outcome.result = std::string(kTurnResultUnauthorizedHealthAction);
         return outcome;
       }
-      const auto snapshot = sourceHealth(state.pid, event.health->principal);
-      const bool changes  = [&] {
+      // Read from the state in hand: `sourceHealth` refuses a state that is
+      // in a turn, and this one is.
+      const auto snapshot = [&]() -> std::optional<SourceHealth> {
+        if (!state.context) return std::nullopt;
+        for (const auto profile : zigzag::rankAfter(
+                 state.context->arena, state.agent.agentCell, state.dims.trust))
+          if (state.context->arena.textOf(profile) == event.health->principal)
+            return readSourceHealth(state, profile);
+        return std::nullopt;
+      }();
+      const bool changes = [&] {
         if (!snapshot) return true;
         // `wouldChangeHealth` reads the in-flight set, which ingestion edits.
         const std::lock_guard lock(ingress_->mutex);
         return wouldChangeHealth(event.health->action, *snapshot, state.pid,
-                                  event.health->principal);
+                                 event.health->principal);
       }();
       if (!changes) {
         finishHealthItem(state.pid, *event.health, "NoChange");
@@ -1533,6 +1600,43 @@ AgentExecutor::TurnOutcome AgentExecutor::deliverHost(State &state,
                         settings_.epistemic.keysPerSource)));
       healthRec.set(std::string(kHealthTurnSequenceGap),
                     WireValue::integer(settings_.epistemic.healthSequenceGap));
+      healthRec.set(std::string(kHealthTurnReasons),
+                    WireValue::integer(settings_.epistemic.healthReasons));
+      healthRec.set(std::string(kHealthTurnActions),
+                    WireValue::integer(settings_.epistemic.healthActions));
+      {
+        // The bound incarnation lets an isolate or a degrade create the
+        // profile of a source that has not yet sent anything.
+        const std::lock_guard lock(ingress_->mutex);
+        std::optional<std::uint64_t> bound;
+        for (const auto &[key, binding] : ingress_->bindings)
+          if (std::get<0>(key) == pidKey(state.pid) &&
+              std::get<1>(key) == event.health->principal)
+            bound = std::max(bound.value_or(0), binding.incarnation);
+        if (bound)
+          healthRec.set(std::string(kHealthTurnIncarnation),
+                        WireValue::integer(static_cast<std::int64_t>(*bound)));
+      }
+      if (snapshot) {
+        if (const auto removed =
+                composeRemoved(event.health->action, *snapshot);
+            !removed.empty())
+          healthRec.set(std::string(kHealthTurnRemoved),
+                        WireValue::text(removed));
+      }
+      if (std::holds_alternative<Reset>(event.health->action)) {
+        WireRecord floors;
+        for (const auto &[predicate, highest] : event.health->inFlightSnapshot)
+          floors.set(predicate, WireValue::integer(highest));
+        healthRec.set(std::string(kHealthTurnFloors),
+                      WireValue::record(std::move(floors)));
+        // Closed charges are split at the call by a later slice; until then
+        // none is dropped.
+        healthRec.set(std::string(kHealthTurnDroppedContent),
+                      WireValue::integer(0));
+        healthRec.set(std::string(kHealthTurnDroppedOther),
+                      WireValue::integer(0));
+      }
       if (ingress_->wallSynchronised) {
         healthRec.set(std::string(kHealthTurnWall),
                       WireValue::real(toSeconds(wallNow().time_since_epoch())));
@@ -1543,6 +1647,19 @@ AgentExecutor::TurnOutcome AgentExecutor::deliverHost(State &state,
       auto outcome = runTurn(state, cursor, grant, context, spec);
       const auto code =
           outcome.result.value_or(std::string(kTurnResultHealthUnavailable));
+      // An isolate or a reset withdraws supports and queues their `-pred`
+      // events; they settle here, after the change has committed, so a
+      // handler that always fails costs its own event and never the action.
+      if (code == kTurnResultCommitted && state.agent.settleEntry &&
+          state.context) {
+        SettleReport report;
+        try {
+          settleQueued(state, cursor, grant, context, report);
+        } catch (...) {
+          finishHealthItem(state.pid, *event.health, code);
+          throw;
+        }
+      }
       finishHealthItem(state.pid, *event.health, code);
       return outcome;
     }
@@ -3247,13 +3364,59 @@ SourceHealth AgentExecutor::readSourceHealth(const State &state,
   }
   out.weight          = weight;
   out.refusalFraction = weight > 0.0 ? refused / weight : 0.0;
+  out.resetEpoch      = static_cast<std::uint64_t>(integer(kProfileResetEpoch));
+  out.faultSeq        = static_cast<std::uint64_t>(integer(kProfileFaultSeq));
+  out.livenessPresent =
+      fieldValue(arena, vd, profile, kProfileLastReceive).has_value() ||
+      fieldValue(arena, vd, profile, kProfileLastContact).has_value();
+  const auto textOf = [&](zigzag::CellRef entry, std::string_view name) {
+    const auto cell = fieldValue(arena, vd, entry, name);
+    return cell ? arena.textOf(*cell) : std::string{};
+  };
+  if (const auto list = fieldValue(arena, vd, profile, kProfileReasons)) {
+    for (auto entry = zigzag::step(arena, *list, vd.grab); entry;
+         entry      = zigzag::step(arena, *entry, vd.step))
+      out.reasons.push_back({textOf(*entry, kReasonKind),
+                                  textOf(*entry, kReasonCode),
+                                  textOf(*entry, kReasonOrigin)});
+  }
+  if (out.faultSeq != 0) {
+    if (const auto list = fieldValue(arena, vd, profile, kProfileActions)) {
+      for (auto entry = zigzag::step(arena, *list, vd.grab); entry;
+           entry      = zigzag::step(arena, *entry, vd.step)) {
+        const auto seq = intFieldOf(arena, vd, *entry, kActionSeq);
+        if (seq != static_cast<std::int64_t>(out.faultSeq)) continue;
+        out.faultCode        = textOf(*entry, kReasonCode);
+        out.faultIssuer      = textOf(*entry, kReasonIssuer);
+        out.faultGrant       = textOf(*entry, kReasonGrant);
+        out.faultIncarnation = static_cast<std::uint64_t>(
+            intFieldOf(arena, vd, *entry, kReasonIncarnation).value_or(0));
+        break;
+      }
+    }
+  }
+  // The order of design 3.4: the latch, then a suspect reason or the
+  // fraction, then a degraded reason.
+  const auto reasonOfKind = [&](std::string_view kind) {
+    return std::ranges::find_if(out.reasons, [&](const HealthReason &reason) {
+      return reason.kind == kind;
+    });
+  };
+  const auto suspectReason  = reasonOfKind(kReasonKindSuspect);
+  const auto degradedReason = reasonOfKind(kReasonKindDegraded);
   if (out.faulted) {
     out.state      = HealthState::Faulted;
     out.reasonCode = std::string(kHealthCodeFaulted);
+  } else if (suspectReason != out.reasons.end()) {
+    out.state      = HealthState::Suspect;
+    out.reasonCode = suspectReason->code;
   } else if (weight >= static_cast<double>(limits.suspectMinEvents) &&
              out.refusalFraction >= limits.suspectFraction) {
     out.state      = HealthState::Suspect;
     out.reasonCode = std::string(kHealthCodeFraction);
+  } else if (degradedReason != out.reasons.end()) {
+    out.state      = HealthState::Degraded;
+    out.reasonCode = degradedReason->code;
   }
   const std::lock_guard lock(ingress_->mutex);
   if (const auto found =
@@ -5810,6 +5973,8 @@ AgentSettings AgentSettings::fromModel(const xanadu::SystemStoreModel &model) {
              ep.healthPendingPerGrant);
   loadSigned(xanadu::settings::kVagentEpistemicControlPerWake,
              ep.controlPerWake);
+  loadSigned(xanadu::settings::kVagentEpistemicHealthReasons, ep.healthReasons);
+  loadSigned(xanadu::settings::kVagentEpistemicHealthActions, ep.healthActions);
 
   if (const auto checked = ep.validate(); checked.has_value()) {
     settings.epistemic = ep;

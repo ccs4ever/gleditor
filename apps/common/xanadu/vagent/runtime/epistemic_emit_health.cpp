@@ -14,6 +14,8 @@
  * handler that always fails costs only its own event and can no longer undo
  * the advance, the retire or (from 2c2) the reset that raised it.
  */
+#include <functional>
+#include <limits>
 #include <numbers>
 
 #include "common/xanadu/vagent/runtime/compiler_gen.hpp"
@@ -46,11 +48,512 @@ void Gen::emitSettleEntry(CellRef entryLabel) {
   endObservation(kTurnResultCommitted);
 }
 
-void emitHealthEntry(Gen &g, CellRef entryLabel) {
-  g.tail_  = std::nullopt;
-  g.frame_ = nullptr;
-  g.place(entryLabel);
-  g.endObservation(kTurnResultHealthUnavailable);
+/// `healthEntry` (P19 I3-2c2): one operator action on one source, from
+/// `$turn.health`. Every kind repeats the host's `wouldChange` test, so a
+/// divergence costs a wasted turn and never a wrong state. A turn that ends
+/// in anything but `Committed` is undone whole, which is why state may be
+/// written before the last refusal test.
+///
+/// The profile carries `reset_epoch`, `action_seq` and `fault_seq` (Int,
+/// absent reading 0), the `reasons` list and the `actions` audit list. A
+/// safety entry (isolate, reset) can evict an ordinary one but never the
+/// reverse, and the entry that is the live fault is never evicted.
+void Gen::emitHealthEntry(CellRef entryLabel) {
+  tail_  = std::nullopt;
+  frame_ = nullptr;
+  place(entryLabel);
+  const FieldInfo &turn   = fields_.at(std::string(kFieldTurn));
+  const auto &vars        = core_.dims().vars;
+  const auto &values      = core_.dims().values;
+  const auto &grab        = core_.dims().grab;
+  const auto &step        = core_.dims().step;
+  const CellRef malformed = newLabel(), record = newLabel();
+  const auto find = [&](CellRef rec, std::string_view name, CellRef out) {
+    mov(S(a0_), S(rec));
+    movC(a1_, cStr(std::string(name)));
+    callLabel(rtFind_);
+    mov(S(out), S(r0_));
+  };
+  const auto isText = [&](CellRef vc, std::string_view text, CellRef out) {
+    emit(OpcodeKind::Eq, "is?", {D(vc), S(cStr(std::string(text)))}, {out});
+  };
+
+  const CellRef tp = reg(), hr = reg();
+  mov(S(tp), S(rd(S(turn.nameCell), values)));
+  find(tp, kTurnHealth, hr);
+  branchIfZero(hr, malformed);
+  const CellRef who = reg(), vcKind = reg(), vcGrant = reg(), vcIssuer = reg(),
+                vcMax = reg(), vcRetained = reg(), vcGap = reg(),
+                vcReasons = reg(), vcActions = reg();
+  for (const auto &[name, out] :
+       {std::pair{kHealthTurnSource, who}, std::pair{kHealthTurnKind, vcKind},
+        std::pair{kHealthTurnGrant, vcGrant},
+        std::pair{kHealthTurnIssuer, vcIssuer},
+        std::pair{kHealthTurnMaxSources, vcMax},
+        std::pair{kHealthTurnRetained, vcRetained},
+        std::pair{kHealthTurnSequenceGap, vcGap},
+        std::pair{kHealthTurnReasons, vcReasons},
+        std::pair{kHealthTurnActions, vcActions}}) {
+    find(hr, name, out);
+    branchIfZero(out, malformed);
+  }
+  const CellRef vcCode = reg(), vcWall = reg(), vcInc = reg(), vcExpect = reg(),
+                vcFloors = reg(), vcRemoved = reg(), vcDropC = reg(),
+                vcDropO = reg(), codeV = reg();
+  for (const auto &[name, out] :
+       {std::pair{kHealthTurnCode, vcCode}, std::pair{kHealthTurnWall, vcWall},
+        std::pair{kHealthTurnIncarnation, vcInc},
+        std::pair{kHealthTurnExpectResetEpoch, vcExpect},
+        std::pair{kHealthTurnFloors, vcFloors},
+        std::pair{kHealthTurnRemoved, vcRemoved},
+        std::pair{kHealthTurnDroppedContent, vcDropC},
+        std::pair{kHealthTurnDroppedOther, vcDropO}})
+    find(hr, name, out);
+  {
+    const CellRef has = newLabel(), done = newLabel();
+    branchIfZero(vcCode, has);
+    mov(S(codeV), D(vcCode));
+    jump(done);
+    place(has);
+    movC(codeV, cStr(std::string()));
+    place(done);
+  }
+  const CellRef isIso = reg(), isDeg = reg(), isClr = reg(), isRst = reg();
+  isText(vcKind, kHealthKindIsolate, isIso);
+  isText(vcKind, kHealthKindDegrade, isDeg);
+  isText(vcKind, kHealthKindClear, isClr);
+  isText(vcKind, kHealthKindReset, isRst);
+
+  // The profile. A bound source can be isolated or degraded before its first
+  // reading, so those two create it (within the principal budget) when the
+  // host names the bound incarnation; every other case needs one already.
+  const CellRef prof = reg();
+  {
+    const CellRef lookup = newLabel(), create = newLabel(), found = newLabel(),
+                  absent = newLabel(), loop = newLabel();
+    branchIfZero(vcInc, lookup);
+    branch(S(isIso), create);
+    branch(S(isDeg), create);
+    jump(lookup);
+    place(create);
+    emitProfileFor(who, vcInc, vcMax, prof);
+    jump(found);
+    place(lookup);
+    const CellRef same = reg();
+    mov(S(prof), S(rd(S(agentCell_), dims_.trust)));
+    place(loop);
+    branchIfZero(prof, absent);
+    emit(OpcodeKind::Eq, "who?", {D(prof), D(who)}, {same});
+    branch(S(same), found);
+    mov(S(prof), S(rd(D(prof), dims_.trust)));
+    jump(loop);
+    place(absent);
+    endObservation(kTurnResultNoProfile);
+    place(found);
+  }
+
+  const auto intField = [&](std::string_view name, CellRef out) {
+    const CellRef vc = reg(), none = newLabel(), done = newLabel();
+    find(prof, name, vc);
+    branchIfZero(vc, none);
+    mov(S(out), D(vc));
+    jump(done);
+    place(none);
+    movC(out, zero_);
+    place(done);
+  };
+  const auto ensureList = [&](std::string_view name, CellRef out) {
+    const CellRef vc = reg(), fresh = newLabel(), done = newLabel();
+    find(prof, name, vc);
+    branchIfZero(vc, fresh);
+    mov(S(out), S(vc));
+    jump(done);
+    place(fresh);
+    alloc(out);
+    mov(D(out), S(cStr(std::string(kListContent))));
+    CellRef field;
+    callSetField(prof, std::string(name), out, field);
+    place(done);
+  };
+  // Walks @p list oldest first. The successor is read before the body runs,
+  // so the body may remove its entry. @p exit is placed after the loop; a
+  // body may jump to it to stop early.
+  const auto forEach = [&](CellRef list, CellRef exit,
+                           const std::function<void(CellRef, CellRef)> &body) {
+    const CellRef e = reg(), nxt = reg(), loop = newLabel(), next = newLabel();
+    mov(S(e), S(rd(D(list), grab)));
+    place(loop);
+    branchIfZero(e, exit);
+    mov(S(nxt), S(rd(D(e), step)));
+    body(e, next);
+    place(next);
+    mov(S(e), S(nxt));
+    jump(loop);
+    place(exit);
+  };
+  const auto removeEntry = [&](CellRef list, CellRef e) {
+    const CellRef prev = reg(), nxt = reg(), first = newLabel(),
+                  tailEnd = newLabel(), done = newLabel(),
+                  lastFirst = newLabel();
+    mov(S(prev), S(rd(D(e), step, true)));
+    mov(S(nxt), S(rd(D(e), step)));
+    branchIfZero(prev, first);
+    branchIfZero(nxt, tailEnd);
+    linkOp(D(prev), step, D(nxt));
+    jump(done);
+    place(tailEnd);
+    breakOp(D(prev), step);
+    jump(done);
+    place(first);
+    breakOp(D(list), grab);
+    branchIfZero(nxt, lastFirst);
+    breakOp(D(e), step);
+    linkOp(D(list), grab, D(nxt));
+    place(lastFirst);
+    place(done);
+  };
+  const auto fieldIs = [&](CellRef e, std::string_view name, Opd expected,
+                           CellRef out) {
+    const CellRef vc = reg();
+    find(e, name, vc);
+    emit(OpcodeKind::Eq, "field?", {D(vc), expected}, {out});
+  };
+  const auto setTo = [&](CellRef rec, std::string_view name, Opd value) {
+    CellRef vc;
+    callSetField(rec, std::string(name), std::nullopt, vc);
+    mov(D(vc), value);
+  };
+  const auto setIfPresent = [&](CellRef rec, std::string_view name,
+                                CellRef source) {
+    const CellRef skip = newLabel();
+    branchIfZero(source, skip);
+    setTo(rec, name, D(source));
+    place(skip);
+  };
+
+  const CellRef reasons = reg(), actions = reg(), actionSeq = reg(),
+                seq = reg(), epoch = reg();
+  ensureList(kProfileReasons, reasons);
+  ensureList(kProfileActions, actions);
+  intField(kProfileActionSeq, actionSeq);
+  emit(OpcodeKind::Add, "seq", {S(actionSeq), S(one_)}, {seq});
+  intField(kProfileResetEpoch, epoch);
+
+  const CellRef doDegrade = newLabel(), doClear = newLabel(),
+                doReset = newLabel(), stateful = newLabel();
+  branch(S(isDeg), doDegrade);
+  branch(S(isClr), doClear);
+  branch(S(isRst), doReset);
+  branchIfZero(isIso, malformed);
+
+  // -- isolate: latch, withdraw every support, refute nothing. The readings
+  //    stay as history; later readings refuse `SourceFaulted`.
+  {
+    const CellRef vcFaulted = reg(), flag = reg(), open = newLabel();
+    find(prof, kProfileFaulted, vcFaulted);
+    branchIfZero(vcFaulted, open);
+    emit(OpcodeKind::Eq, "latched?", {D(vcFaulted), S(true_)}, {flag});
+    requireTrue(flag, open);
+    endObservation(kTurnResultNoChange);
+    place(open);
+    // I4-1b: a committed isolate changes the latch; bump the epistemic-state
+    // version here.
+    putScalar(prof, kProfileFaulted, S(true_));
+    putScalar(prof, kProfileFaultSeq, S(seq));
+    mov(S(a0_), S(prof));
+    loadRef(a1_, cInt(std::numeric_limits<std::int64_t>::max()));
+    mov(S(a2_), S(vcRetained));
+    movC(a3_, cStr(std::string(kRetiredByIsolate)));
+    callLabel(rtSourceDrop_);
+    jump(record);
+  }
+
+  // -- degrade: one operator `degraded` reason per code.
+  place(doDegrade);
+  {
+    const CellRef opCount = reg(), limit = reg(), full = reg();
+    const CellRef scan = newLabel(), counted = newLabel();
+    forEach(reasons, scan, [&](CellRef e, CellRef next) {
+      const CellRef a = reg(), b = reg(), c = reg();
+      fieldIs(e, kReasonOrigin, S(cStr(std::string(kReasonOriginOperator))), a);
+      requireTrue(a, next);
+      fieldIs(e, kReasonKind, S(cStr(std::string(kReasonKindDegraded))), b);
+      requireTrue(b, next);
+      fieldIs(e, kReasonCode, S(codeV), c);
+      requireTrue(c, next);
+      endObservation(kTurnResultNoChange);
+    });
+    movC(opCount, zero_);
+    forEach(reasons, counted, [&](CellRef e, CellRef next) {
+      const CellRef a = reg();
+      fieldIs(e, kReasonOrigin, S(cStr(std::string(kReasonOriginOperator))), a);
+      requireTrue(a, next);
+      emit(OpcodeKind::Add, "ops+", {S(opCount), S(one_)}, {opCount});
+    });
+    // One slot stays free for the evidence-driven reasons I3-3 adds.
+    emit(OpcodeKind::Sub, "R-1", {D(vcReasons), S(one_)}, {limit});
+    emit(OpcodeKind::Gte, "full?", {S(opCount), S(limit)}, {full});
+    const CellRef room = newLabel();
+    requireTrue(full, room);
+    endObservation(kTurnResultHealthReasonsFull);
+    place(room);
+    // I4-1b: a committed degrade changes the reasons; bump the
+    // epistemic-state version here.
+    const CellRef entry = reg();
+    alloc(entry);
+    mov(D(entry), S(cStr("Reason")));
+    markRecord(entry);
+    setTo(entry, kReasonKind, S(cStr(std::string(kReasonKindDegraded))));
+    setTo(entry, kReasonCode, S(codeV));
+    setTo(entry, kReasonOrigin, S(cStr(std::string(kReasonOriginOperator))));
+    setTo(entry, kReasonGrant, D(vcGrant));
+    setTo(entry, kReasonIssuer, D(vcIssuer));
+    setIfPresent(entry, kReasonIncarnation, vcInc);
+    setIfPresent(entry, kReasonWall, vcWall);
+    callListPush(reasons, entry);
+    jump(record);
+  }
+
+  // -- clear: operator `degraded` reasons only; the latch, `suspect` and
+  //    `device` reasons, readings and calibration are untouched.
+  place(doClear);
+  {
+    const CellRef other = reg(), removedAny = reg();
+    const CellRef some = newLabel(), byCode = newLabel(), allDone = newLabel(),
+                  codeDone = newLabel();
+    movC(removedAny, zero_);
+    movC(other, zero_);
+    branchIfZero(vcCode, some);
+    jump(byCode);
+    place(some);
+    forEach(reasons, allDone, [&](CellRef e, CellRef next) {
+      const CellRef a = reg(), b = reg();
+      fieldIs(e, kReasonOrigin, S(cStr(std::string(kReasonOriginOperator))), a);
+      requireTrue(a, next);
+      fieldIs(e, kReasonKind, S(cStr(std::string(kReasonKindDegraded))), b);
+      requireTrue(b, next);
+      removeEntry(reasons, e);
+      movC(removedAny, one_);
+    });
+    const CellRef nothing = newLabel();
+    branchIfZero(removedAny, nothing);
+    jump(stateful);
+    place(nothing);
+    endObservation(kTurnResultNoChange);
+    place(byCode);
+    forEach(reasons, codeDone, [&](CellRef e, CellRef next) {
+      const CellRef a = reg(), b = reg(), c = reg();
+      fieldIs(e, kReasonKind, S(cStr(std::string(kReasonKindDegraded))), a);
+      requireTrue(a, next);
+      fieldIs(e, kReasonCode, S(codeV), b);
+      requireTrue(b, next);
+      fieldIs(e, kReasonOrigin, S(cStr(std::string(kReasonOriginOperator))), c);
+      const CellRef mine = newLabel();
+      branch(S(c), mine);
+      movC(other, one_);
+      jump(next);
+      place(mine);
+      removeEntry(reasons, e);
+      jump(stateful);
+    });
+    const CellRef plain = newLabel();
+    branchIfZero(other, plain);
+    endObservation(kTurnResultNotOperatorReason);
+    place(plain);
+    endObservation(kTurnResultNoChange);
+  }
+  // I4-1b: a committed clear changes the reasons; bump the epistemic-state
+  // version here.
+  place(stateful);
+  jump(record);
+
+  // -- reset: the repair. Latch, reasons, R, N, the streak and the liveness
+  //    stamps go; dedup, the streams (raised to a floor), the diagnostic
+  //    counters and the audit list stay.
+  place(doReset);
+  {
+    const CellRef same = reg();
+    branchIfZero(vcExpect, malformed);
+    emit(OpcodeKind::Eq, "epoch?", {D(vcExpect), S(epoch)}, {same});
+    const CellRef current = newLabel();
+    branch(S(same), current);
+    endObservation(kTurnResultStaleHealthState);
+    place(current);
+    // I4-1b: a committed reset changes the latch, the reasons and the reset
+    // epoch; bump the epistemic-state version here.
+    putScalar(prof, kProfileFaulted, S(false_));
+    putScalar(prof, kProfileFaultSeq, S(zero_));
+    breakOp(D(reasons), grab);
+    putScalar(prof, kProfileHealthRefusedWeight, S(cFloat(0.0)));
+    putScalar(prof, kProfileHealthWeight, S(cFloat(0.0)));
+    putScalar(prof, kProfileRejectionStreak, S(zero_));
+    const CellRef next = reg();
+    emit(OpcodeKind::Add, "epoch+", {S(epoch), S(one_)}, {next});
+    putScalar(prof, kProfileResetEpoch, S(next));
+    callClearField(prof, std::string(kProfileLastReceive));
+    callClearField(prof, std::string(kProfileLastContact));
+    // The closed charges the commit discards stay in the lifetime counters.
+    for (const auto &[counter, dropped] :
+         {std::pair{kProfileContentRefusals, vcDropC},
+          std::pair{kProfileRefusedCount, vcDropO}}) {
+      const CellRef vc = reg(), sum = reg(), skip = newLabel();
+      branchIfZero(dropped, skip);
+      find(prof, counter, vc);
+      branchIfZero(vc, skip);
+      emit(OpcodeKind::Add, "dropped+", {D(vc), D(dropped)}, {sum});
+      mov(D(vc), S(sum));
+      place(skip);
+    }
+    mov(S(a0_), S(prof));
+    loadRef(a1_, cInt(std::numeric_limits<std::int64_t>::max()));
+    mov(S(a2_), S(vcRetained));
+    movC(a3_, cStr(std::string(kRetiredByReset)));
+    callLabel(rtSourceDrop_);
+    // Raise each stream's floor to the highest sequence in flight at the
+    // call, never past the last sequence plus the gap, so one corrupt
+    // reading cannot lock the repaired device out.
+    const CellRef streamsRec = reg(), noFloors = newLabel();
+    branchIfZero(vcFloors, noFloors);
+    find(prof, kProfileStreams, streamsRec);
+    branchIfZero(streamsRec, noFloors);
+    const CellRef floorsDone = newLabel();
+    const CellRef f = reg(), loop = newLabel();
+    mov(S(f), S(rd(D(vcFloors), vars)));
+    place(loop);
+    mov(S(f), S(rd(D(f), vars)));
+    branchIfZero(f, floorsDone);
+    {
+      const CellRef floorV = reg(), stream = reg(), seqV = reg(), cur = reg(),
+                    cap = reg(), want = reg(), higher = reg(),
+                    fresh = newLabel(), advanced = newLabel();
+      mov(S(floorV), S(rd(D(f), values)));
+      branchIfZero(floorV, advanced);
+      mov(S(a0_), S(streamsRec));
+      mov(S(a1_), D(f));
+      callLabel(rtFind_);
+      mov(S(stream), S(r0_));
+      branchIfZero(stream, fresh);
+      find(stream, kObsSequence, seqV);
+      branchIfZero(seqV, malformed);
+      mov(S(cur), D(seqV));
+      emit(OpcodeKind::Add, "last+gap", {S(cur), D(vcGap)}, {cap});
+      emit(OpcodeKind::Min, "floor", {D(floorV), S(cap)}, {want});
+      emit(OpcodeKind::Gt, "higher?", {S(want), S(cur)}, {higher});
+      requireTrue(higher, advanced);
+      mov(D(seqV), S(want));
+      jump(advanced);
+      place(fresh);
+      // No stream yet: clock epoch 0 and mapping 0, so no later epoch is
+      // refused as a regression.
+      const CellRef created = reg();
+      alloc(created);
+      mov(D(created), S(cStr(std::string(kProfileStreams))));
+      markRecord(created);
+      emit(OpcodeKind::Min, "floor", {D(floorV), D(vcGap)}, {want});
+      setTo(created, kObsSequence, S(want));
+      setTo(created, kObsClockEpoch, S(zero_));
+      setTo(created, kObsClockMappingVersion, S(zero_));
+      mov(S(a0_), S(streamsRec));
+      mov(S(a1_), D(f));
+      mov(S(a2_), S(created));
+      callLabel(routineLabel(rtSetField_, &Gen::emitRtSetField));
+      place(advanced);
+    }
+    jump(loop);
+    place(floorsDone);
+    place(noFloors);
+  }
+
+  // -- the audit entry, common to the four kinds.
+  place(record);
+  {
+    putScalar(prof, kProfileActionSeq, S(seq));
+    const CellRef safety = newLabel(), scanned = newLabel(),
+                  committed = newLabel(), victimDone = newLabel(),
+                  settled = newLabel();
+    branch(S(isIso), safety);
+    branch(S(isRst), safety);
+    // An ordinary entry equal to a stored one in (kind, code, issuer) merges
+    // into it, so a repeated degrade cannot push an isolate out.
+    forEach(actions, scanned, [&](CellRef e, CellRef next) {
+      const CellRef a = reg(), b = reg(), c = reg();
+      fieldIs(e, kReasonKind, D(vcKind), a);
+      requireTrue(a, next);
+      fieldIs(e, kReasonCode, S(codeV), b);
+      requireTrue(b, next);
+      fieldIs(e, kReasonIssuer, D(vcIssuer), c);
+      requireTrue(c, next);
+      const CellRef vc = reg(), bumped = reg();
+      find(e, kActionCount, vc);
+      emit(OpcodeKind::Add, "count+", {D(vc), S(one_)}, {bumped});
+      mov(D(vc), S(bumped));
+      jump(committed);
+    });
+    place(safety);
+    const CellRef n = reg(), over = reg(), victim = reg();
+    const CellRef counted = newLabel(), append = newLabel();
+    movC(n, zero_);
+    forEach(actions, counted, [&](CellRef, CellRef) {
+      emit(OpcodeKind::Add, "n+", {S(n), S(one_)}, {n});
+    });
+    emit(OpcodeKind::Gte, "full?", {S(n), D(vcActions)}, {over});
+    requireTrue(over, append);
+    // At the bound: the oldest ordinary entry goes first.
+    movC(victim, zero_);
+    forEach(actions, victimDone, [&](CellRef e, CellRef next) {
+      const CellRef a = reg(), b = reg();
+      fieldIs(e, kReasonKind, S(cStr(std::string(kHealthKindIsolate))), a);
+      branch(S(a), next);
+      fieldIs(e, kReasonKind, S(cStr(std::string(kHealthKindReset))), b);
+      branch(S(b), next);
+      mov(S(victim), S(e));
+      jump(victimDone);
+    });
+    const CellRef haveVictim = newLabel(), noVictim = newLabel();
+    branchIfZero(victim, noVictim);
+    jump(haveVictim);
+    place(noVictim);
+    // Nothing ordinary is stored: an ordinary entry is dropped, though its
+    // action took effect; a safety entry replaces the oldest that is not the
+    // live fault.
+    branch(S(isDeg), settled);
+    branch(S(isClr), settled);
+    {
+      const CellRef faultSeq = reg(), found = newLabel();
+      intField(kProfileFaultSeq, faultSeq);
+      forEach(actions, found, [&](CellRef e, CellRef next) {
+        const CellRef vc = reg(), live = reg();
+        find(e, kActionSeq, vc);
+        emit(OpcodeKind::Eq, "live?", {D(vc), S(faultSeq)}, {live});
+        branch(S(live), next);
+        mov(S(victim), S(e));
+        jump(found);
+      });
+      branchIfZero(victim, settled);
+    }
+    place(haveVictim);
+    removeEntry(actions, victim);
+    place(append);
+    const CellRef entry = reg();
+    alloc(entry);
+    mov(D(entry), S(cStr("Action")));
+    markRecord(entry);
+    setTo(entry, kActionSeq, S(seq));
+    setTo(entry, kReasonKind, D(vcKind));
+    setTo(entry, kReasonCode, S(codeV));
+    setTo(entry, kReasonGrant, D(vcGrant));
+    setTo(entry, kReasonIssuer, D(vcIssuer));
+    setIfPresent(entry, kReasonIncarnation, vcInc);
+    setTo(entry, kActionCount, S(one_));
+    setIfPresent(entry, kReasonWall, vcWall);
+    setIfPresent(entry, kActionRemoved, vcRemoved);
+    callListPush(actions, entry);
+    place(settled);
+    place(committed);
+    endObservation(kTurnResultCommitted);
+  }
+  place(malformed);
+  endObservation(kTurnResultIngestionFault);
 }
 
 void Gen::emitHealthRescaled(CellRef prof, CellRef halfLife, CellRef r,
@@ -141,6 +644,9 @@ void Gen::emitHealthStore(CellRef prof, CellRef r, CellRef n, CellRef vcR,
 /// For k = 1, c = 0 it is the single-refusal update; for k = 0, c = 1 the
 /// accept update, which `rtHealth_` applies without the `Exp` and `Div`.
 void Gen::emitRtHealthUpdate() {
+  // I4-1b: bump the epistemic-state version here when the derived state class
+  // (read through rtHealth_) differs before and after the update, never on
+  // an R or N change inside a class.
   beginInternal(*rtHealthUpdate_);
   const CellRef prof = reg(), k = reg(), c = reg(), halfLife = reg();
   mov(S(prof), S(a0_));
@@ -184,8 +690,8 @@ void Gen::emitRtHealthUpdate() {
 /// NOMINAL. With @p accepted false it reads `R` and `N` through the rescale
 /// and writes nothing, so an eligibility check at query time and the stamp
 /// agree; ingestion passes true for a counted commit so one read of the
-/// weights serves both the update and the stamp. DEGRADED needs the reasons
-/// list that slice 2c2 mints; until then no profile can reach it.
+/// weights serves both the update and the stamp. A `suspect` reason decides
+/// SUSPECT and a `degraded` one DEGRADED, each with its own code.
 void Gen::emitRtHealth() {
   beginInternal(*rtHealth_);
   const CellRef prof = reg(), halfLife = reg(), suspect = reg(),
@@ -215,6 +721,37 @@ void Gen::emitRtHealth() {
   emit(OpcodeKind::Div, "f", {S(r), S(w)}, {f});
   const CellRef notSuspect = newLabel(), out = newLabel(),
                 unlatched = newLabel();
+  // The first reason of a kind decides the state with its own code.
+  const CellRef reasonList = reg();
+  const auto reasonOf = [&](std::string_view kind, std::string_view state) {
+    const CellRef e = reg(), vk = reg(), vc = reg(), hit = reg(),
+                  loop = newLabel(), next = newLabel(), none = newLabel();
+    mov(S(a0_), S(prof));
+    movC(a1_, cStr(std::string(kProfileReasons)));
+    callLabel(rtFind_);
+    mov(S(reasonList), S(r0_));
+    branchIfZero(reasonList, none);
+    mov(S(e), S(rd(D(reasonList), core_.dims().grab)));
+    place(loop);
+    branchIfZero(e, none);
+    mov(S(a0_), S(e));
+    movC(a1_, cStr(std::string(kReasonKind)));
+    callLabel(rtFind_);
+    mov(S(vk), S(r0_));
+    emit(OpcodeKind::Eq, "kind?", {D(vk), S(cStr(std::string(kind)))}, {hit});
+    requireTrue(hit, next);
+    mov(S(a0_), S(e));
+    movC(a1_, cStr(std::string(kReasonCode)));
+    callLabel(rtFind_);
+    mov(S(vc), S(r0_));
+    movC(r0_, cStr(std::string(state)));
+    mov(S(r1_), D(vc));
+    jump(out);
+    place(next);
+    mov(S(e), S(rd(D(e), core_.dims().step)));
+    jump(loop);
+    place(none);
+  };
   mov(S(a0_), S(prof));
   movC(a1_, cStr(std::string(kProfileFaulted)));
   callLabel(rtFind_);
@@ -226,6 +763,7 @@ void Gen::emitRtHealth() {
   movC(r1_, cStr(std::string(kHealthCodeFaulted)));
   jump(out);
   place(unlatched);
+  reasonOf(kReasonKindSuspect, kObsHealthSuspect);
   emit(OpcodeKind::Gte, "N>=min?", {S(w), S(minEvents)}, {flag});
   requireTrue(flag, notSuspect);
   emit(OpcodeKind::Gte, "f>=sf?", {S(f), S(suspect)}, {flag});
@@ -234,6 +772,7 @@ void Gen::emitRtHealth() {
   movC(r1_, cStr(std::string(kHealthCodeFraction)));
   jump(out);
   place(notSuspect);
+  reasonOf(kReasonKindDegraded, kObsHealthDegraded);
   movC(r0_, cStr(std::string(kObsHealthNominal)));
   movC(r1_, cStr(std::string()));
   place(out);

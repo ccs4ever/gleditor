@@ -131,6 +131,38 @@ TEST(VagentEpistemicAbi, HealthNamesAndOrdersArePinned) {
   EXPECT_EQ(kIngestCounts, "counts");
   EXPECT_EQ(kTurnResultClockEpochRegression, "ClockEpochRegression");
   EXPECT_EQ(kTurnResultClockMappingRegression, "ClockMappingRegression");
+  // The health turn (2c2): profile scalars, lists, entry fields, markers.
+  EXPECT_EQ(kProfileResetEpoch, "reset_epoch");
+  EXPECT_EQ(kProfileActionSeq, "action_seq");
+  EXPECT_EQ(kProfileFaultSeq, "fault_seq");
+  EXPECT_EQ(kProfileReasons, "reasons");
+  EXPECT_EQ(kProfileActions, "actions");
+  EXPECT_EQ(kReasonKind, "kind");
+  EXPECT_EQ(kReasonCode, "code");
+  EXPECT_EQ(kReasonOrigin, "origin");
+  EXPECT_EQ(kReasonGrant, "grant");
+  EXPECT_EQ(kReasonIssuer, "issuer");
+  EXPECT_EQ(kReasonIncarnation, "incarnation");
+  EXPECT_EQ(kReasonWall, "wall");
+  EXPECT_EQ(kActionSeq, "seq");
+  EXPECT_EQ(kActionCount, "count");
+  EXPECT_EQ(kActionRemoved, "removed");
+  EXPECT_EQ(kReasonKindDegraded, "degraded");
+  EXPECT_EQ(kReasonKindSuspect, "suspect");
+  EXPECT_EQ(kReasonOriginOperator, "operator");
+  EXPECT_EQ(kReasonOriginDevice, "device");
+  EXPECT_EQ(kObsRetiredBy, "retired_by");
+  EXPECT_EQ(kRetiredByAdvance, "advance");
+  EXPECT_EQ(kRetiredByRetire, "retire");
+  EXPECT_EQ(kRetiredByIsolate, "isolate");
+  EXPECT_EQ(kRetiredByReset, "reset");
+  EXPECT_EQ(kTurnResultSourceFaulted, "SourceFaulted");
+  EXPECT_EQ(kTurnResultStaleHealthState, "StaleHealthState");
+  EXPECT_EQ(kTurnResultNotOperatorReason, "NotOperatorReason");
+  EXPECT_EQ(kTurnResultHealthReasonsFull, "HealthReasonsFull");
+  EXPECT_EQ(kTurnResultNoChange, "NoChange");
+  // The named field follows the positional ones, so the order is unchanged.
+  EXPECT_EQ(std::ranges::count(kObservationOrder, kObsRetiredBy), 0);
   // The record grows by one field, right after the health stamp.
   EXPECT_EQ(kObservationOrder.size(), 24U);
   EXPECT_EQ(kObservationOrder[observationPosition(kObsHealth) + 1],

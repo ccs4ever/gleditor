@@ -223,3 +223,92 @@ Closed in the completion pass (no per-slice review, by the lead's instruction):
   expose. A reset against a source with a profile always has weight or a reading to change, so the
   "idle reset is `NoChange`" case needs a profile with zero weight, which only 2c2's arena records
   can make. The `traceability.md` rows 4-18 and 8.2-4c are the lead's to close.
+
+## I3-2c2: health records and the Vortex health turn
+
+Implemented from the I3-2 design (revision 4) without a per-slice review, by the lead's instruction:
+one full review follows the whole implementation.
+
+- **Added.** `healthEntry` is real IR in `epistemic_emit_health.cpp` (`Gen::emitHealthEntry`),
+  replacing the `HealthUnavailable` stub. It finds the principal's profile (an isolate or a degrade
+  creates it for a bound source, using the bound incarnation the host now passes; any other kind
+  without a profile ends `NoProfile`) and runs one of four bodies. Isolate latches `faulted`,
+  records `fault_seq` and withdraws every support. Degrade adds an operator `degraded` reason,
+  unique by (kind, code, origin), with at most `R - 1` operator reasons. Clear removes operator
+  `degraded` reasons only, by code or all, never touches the latch, and refuses `NotOperatorReason`
+  when the code is held by another origin. Reset checks `expect_reset_epoch`, clears the latch,
+  reasons, `R`, `N`, the rejection streak and the two liveness stamps, adds the closed charges to
+  the lifetime counters, withdraws supports, raises each stream's sequence floor to
+  `min(in-flight maximum, last sequence + sequence_gap)` (creating the stream when absent) and
+  increments `reset_epoch`. All four end in one shared audit-entry routine with the eviction rules
+  of design 6.5: merge an ordinary entry equal in (kind, code, issuer), let a safety entry evict the
+  oldest ordinary one, never evict the entry that is the live fault, and drop an ordinary entry
+  that finds only safety entries.
+- **`rtSourceDrop_`** takes a `cause` (`a3`) and stamps `retired_by` (`advance`, `isolate`,
+  `reset`) on each record it retires; a record a newer reading had already superseded is left
+  without it. Retire keeps its own walk and stamps `retire` only on a pinned record, because the
+  others are excised and a stamp on them cost enough to push a 12-record retire past the grant the
+  settle tests use. The drop is shared by advance, isolate and reset.
+- **Ingestion** refuses `SourceFaulted` right after finding the profile (class `NeedsHostAction`,
+  never charged), and writes the profile's `reset_epoch` into the new record's `calibration_epoch`
+  (the host still writes 0, which stays when the profile was never reset).
+- **`rtHealth_`** now reads the reasons: a `suspect` reason, else the fraction, decides SUSPECT; a
+  `degraded` reason gives DEGRADED with its own code. The host `readSourceHealth` applies the same
+  order and fills `reasons`, `resetEpoch`, `faultSeq`, the fault's code, issuer, grant and
+  incarnation, and whether a liveness stamp is present.
+- **Host.** `deliverHost` reads the snapshot from the state in hand (`sourceHealth` refuses a state
+  that is in a turn, so the 2c1 `NoChange` pre-check never ran and every no-op cost a turn),
+  passes `reasons`, `actions`, `incarnation`, the `floors` record from the in-flight snapshot and
+  the bounded `removed` text (items of at most 64 bytes, 1,024 in all, ending `+N`), and settles the
+  queued `-pred` events after a committed health turn exactly as after a source change, so a failing
+  handler cannot undo an isolate or a reset. It also rechecks a queued ingestion against the
+  committed reset mark before its turn and finishes it `SupersededByReset`, which 2c1 had only in
+  `drainPosted`. `wouldChangeHealth` now knows reasons, the liveness stamps and the epoch.
+- **Limits.** `vagent.epistemic_health_reasons` (default 3, range 2 to 16) and
+  `vagent.epistemic_health_actions` (default 4, range 2 to 64) in `epistemic_limits.hpp`,
+  `validate()`, `defaultSettingSpecs()` and `AgentSettings::fromModel`.
+- **Tests.** `vagent_epistemic_health_test.cpp` gains `VagentEpistemicHealthActions` (14 cases):
+  isolate before the first reading (sticks, refuses `SourceFaulted` after a resume, writes no
+  counter and no cell), isolate drops supports and stamps `retired_by`, an advance stamps
+  `advance`, latch/reasons/actions survive an advance, a retire and revive and a checkpoint,
+  degrade unique and bounded, clear scope and `NotOperatorReason`, reset clears and keeps the right
+  things and bumps the calibration epoch, a reset with a failing handler commits, a reset stamps
+  what it withdraws, the idle reset is `NoChange`, repeated actions never evict the fault, a sensor
+  cannot clear its own latch (4-20), and a 16-record reset against half the grant. The grants test
+  has the end-to-end reset floor (a reading queued before a committed reset is superseded and its
+  resend is `StaleSequence`; one queued after commits) and the tests that asserted
+  `HealthUnavailable` now assert the real outcome. The ABI test pins the new names.
+- **Fuel.** A reset of 16 records (16 keys, 16 `-at` handlers) costs 13,438 VM cycles including its
+  16 settle turns, against a 5,000,000 grant (half the default): 0.27 percent of it.
+- **Result.** `vagent_actor_test`: 943 passed. See the lead's report for `xuzz_test` and the full
+  `make`.
+
+State-version bump sites (R3-11; no version cell is written here). Each carries a comment naming
+I4-1b, and I4-1b must bump the epistemic-state version at every one when it creates the cell:
+
+1. `emitHealthEntry`, the isolate body (latch changes).
+1. `emitHealthEntry`, the degrade body (reasons change).
+1. `emitHealthEntry`, the clear body (reasons change).
+1. `emitHealthEntry`, the reset body (latch, reasons and `reset_epoch` change).
+1. `emitRtSourceDrop`, which withdraws supports for an advance, an isolate and a reset.
+1. The retire tail in `emitSourceChange` (withdraws supports).
+1. `emitRtHealthUpdate`, when the derived state class differs before and after (never on `R` or `N`
+   drift inside a class).
+1. The ingestion routine, where a reading supersedes a current record.
+
+Not done in this slice, with the reason:
+
+- The host latch cache (`Ingress::latched`, design 6.5 R3-13) is not built: the arena refuses a
+  latched source's readings, so correctness does not depend on it, but a babbler still costs a turn
+  per reading until it exists.
+- The second admission hook (the headroom ceiling for exempt entries), the live-profile reserve and
+  `health_cells` (design 6.6) are not built; nothing writes `health_cells`. Reasons, actions and
+  `retired_by` are therefore uncounted by any reserve, and the tombstone budget tests of 6.8 are
+  not written.
+- `dropped_content` and `dropped_other` are passed as 0: splitting a coalesced charge at the reset
+  call is not done, so the closed charges are not yet discarded or counted.
+- The second half of the wedge test (after a reset one non-replacing reading per key commits) is
+  not written, and `vagent_epistemic_resume_test.cpp` has no new case; the checkpoint and resume
+  claims are tested in the health test.
+- `wouldChange(Clear {code})` is true when any `degraded` reason holds the code, so a code held only
+  by a device reason still runs the turn and answers `NotOperatorReason`, as the design wants.

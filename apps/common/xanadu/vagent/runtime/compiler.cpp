@@ -3705,7 +3705,10 @@ void Gen::headOf(CellRef from, DimRef dim, CellRef out) {
   place(done);
 }
 
-/// The drop body shared by the advance and (from I3-2c2) isolate and reset.
+/// The drop body shared by the advance, isolate and reset (a3 = the cause
+/// written to `retired_by`).
+// I4-1b: every caller withdraws supports, so each one bumps the
+// epistemic-state version once it exists.
 /// A belief means a current boot asserts it, so each support left with no
 /// current record is dropped through rtBDrop, which only queues `-pred`: the
 /// events are settled after the change commits. The records move to the
@@ -3713,12 +3716,13 @@ void Gen::headOf(CellRef from, DimRef dim, CellRef out) {
 /// below by @c retained.
 void Gen::emitRtSourceDrop() {
   beginInternal(rtSourceDrop_);
-  const CellRef prof = reg(), incBelow = reg(), retained = reg();
+  const CellRef prof = reg(), incBelow = reg(), retained = reg(), cause = reg();
   const CellRef v = reg(), rec = reg(), ri = reg(), st = reg(), t = reg(),
                 bad = newLabel();
   mov(S(prof), S(a0_));
   mov(S(incBelow), S(a1_));
   mov(S(retained), S(a2_));
+  mov(S(cause), S(a3_));
   const auto find = [&](CellRef record, std::string_view name, CellRef out) {
     mov(S(a0_), S(record));
     movC(a1_, cStr(std::string(name)));
@@ -3745,7 +3749,13 @@ void Gen::emitRtSourceDrop() {
     requireTrue(t, next);
     find(rec, kObsStatus, st);
     branchIfZero(st, next);
+    // Only a record that was current is retired by this call; one a newer
+    // reading already superseded keeps no `retired_by` (absent means that).
+    emit(OpcodeKind::Eq, "current?",
+         {D(st), S(cStr(std::string(kObsStatusCurrent)))}, {t});
+    requireTrue(t, next);
     mov(D(st), S(cStr(std::string(kObsStatusRetired))));
+    putScalar(rec, kObsRetiredBy, S(cause));
     place(next);
     mov(S(v), S(rd(D(v), core_.dims().clone)));
     jump(walk);
@@ -3982,6 +3992,7 @@ void Gen::emitSourceChange(CellRef entryLabel) {
     mov(S(a0_), S(prof));
     mov(S(a1_), S(inc));
     mov(S(a2_), S(retained));
+    movC(a3_, cStr(std::string(kRetiredByAdvance)));
     callLabel(rtSourceDrop_);
     // No settle here: the `-pred` events the drop queued are settled one per
     // turn after this change commits (settleEntry), so a failing handler
@@ -3992,7 +4003,8 @@ void Gen::emitSourceChange(CellRef entryLabel) {
   place(doRetire);
   {
     const CellRef v = reg(), nextV = reg(), rec = reg(), sup = reg(),
-                  cl = reg(), pred = reg(), nm = reg(), st = reg(), pin = reg();
+                  cl = reg(), pred = reg(), nm = reg(), st = reg(), pin = reg(),
+                  wasCurrent = reg();
     const CellRef walk = newLabel(), detached = newLabel(), kept = newLabel(),
                   next = newLabel(), done = newLabel();
     mov(S(v), S(rd(D(prof), core_.dims().clone)));
@@ -4003,10 +4015,14 @@ void Gen::emitSourceChange(CellRef entryLabel) {
     find(rec, kObsStatus, st);
     {
       const CellRef none = newLabel();
+      movC(wasCurrent, false_);
       branchIfZero(st, none);
+      emit(OpcodeKind::Eq, "current?",
+           {D(st), S(cStr(std::string(kObsStatusCurrent)))}, {wasCurrent});
       mov(D(st), S(cStr(std::string(kObsStatusRetired))));
       place(none);
     }
+    // I4-1b: a retire withdraws supports; bump the epistemic-state version.
     // The record's support, dropped from its clause once; a support no
     // longer on a source rank is already detached.
     head(rec, dims_.epistemic, sup);
@@ -4024,7 +4040,18 @@ void Gen::emitSourceChange(CellRef entryLabel) {
     find(rec, kObsPinned, pin);
     branchIfZero(pin, kept);
     emit(OpcodeKind::Eq, "pinned?", {D(pin), S(true_)}, {t});
-    branch(S(t), next);
+    {
+      // Only a pinned record outlives the retirement, so only it is stamped
+      // (and only if a newer reading had not already superseded it): the rest
+      // are excised and a stamp on them would cost a field each.
+      const CellRef excise = newLabel(), stamped = newLabel();
+      requireTrue(t, excise);
+      requireTrue(wasCurrent, stamped);
+      putScalar(rec, kObsRetiredBy, S(cStr(std::string(kRetiredByRetire))));
+      place(stamped);
+      jump(next);
+      place(excise);
+    }
     place(kept);
     unlinkFromRank(v, core_.dims().clone);
     unlinkFromRank(rec, dims_.epistemic);
@@ -4195,6 +4222,17 @@ void Gen::emitObserve(CellRef entryLabel) {
     callLabel(rtFind_);
     mov(S(out), S(r0_));
   };
+  {
+    // A latched profile takes no reading, and the refusal reads and writes
+    // nothing else: it is the host's, never charged to the source.
+    const CellRef latch = reg(), flag = reg(), open = newLabel();
+    profileField(kProfileFaulted, latch);
+    branchIfZero(latch, open);
+    emit(OpcodeKind::Eq, "faulted?", {D(latch), S(true_)}, {flag});
+    requireTrue(flag, open);
+    endObservation(kTurnResultSourceFaulted);
+    place(open);
+  }
   // 2. The observation carries exactly the profile's incarnation. Ingress
   //    already requires the binding's, and an advance turn runs before any
   //    observation under a new binding, so this is defensive: only binding
@@ -4428,6 +4466,21 @@ void Gen::emitObserve(CellRef entryLabel) {
     const CellRef rec = reg();
     breakOp(D(obsName), core_.dims().values);
     mov(S(rec), S(obs));
+    {
+      // The reset epoch the record was taken under, so a label learned
+      // before a repair keys differently from the repaired learner's. The
+      // host writes 0, which stays when the profile has never been reset.
+      const CellRef epoch = reg(), slot = reg(), none = newLabel();
+      profileField(kProfileResetEpoch, epoch);
+      branchIfZero(epoch, none);
+      mov(S(a0_), S(rec));
+      movC(a1_, cStr(std::string(kObsCalibrationEpoch)));
+      callLabel(rtFind_);
+      mov(S(slot), S(r0_));
+      branchIfZero(slot, invalid);
+      mov(D(slot), D(epoch));
+      place(none);
+    }
     bookkeeping(rec);
     // Status, verdict and pinned arrive at their initial values. Health is
     // stamped from the estimator after this event's own update, so the
@@ -4439,6 +4492,8 @@ void Gen::emitObserve(CellRef entryLabel) {
       mov(D(health), S(r0_));
       mov(D(healthFraction), S(a2_));
     }
+    // I4-1b: a reading that supersedes a current record changes the
+    // supports; bump the epistemic-state version here.
     // The source's previous current record on this key is superseded, unless
     // the new reading was acquired before it by more than both uncertainties
     // and the policy's skew in the same clock epoch: arrival order must never
@@ -6463,7 +6518,7 @@ CompiledAgent Gen::run() {
     out.settleEntry = newLabel();
     emitSettleEntry(*out.settleEntry);
     out.healthEntry = newLabel();
-    emitHealthEntry(*this, *out.healthEntry);
+    emitHealthEntry(*out.healthEntry);
   }
   for (const auto &member : agent_->members) {
     if (const auto *field = std::get_if<VarDecl>(&member))

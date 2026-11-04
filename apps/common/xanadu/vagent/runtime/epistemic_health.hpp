@@ -12,10 +12,19 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace xanadu::vagent::runtime {
 
 enum class HealthState : std::uint8_t { Nominal, Degraded, Suspect, Faulted };
+
+/// One live reason as the arena holds it (2c2).
+struct HealthReason {
+  std::string kind;
+  std::string code;
+  std::string origin;
+  bool operator==(const HealthReason &) const = default;
+};
 
 /// A source profile as the arena derives it. The state comes from the same
 /// rule the emitted `rtHealth_` applies; a view that disagrees with the stamp
@@ -41,8 +50,20 @@ struct SourceHealth {
   /// source last committed. The sign of a failure the estimator cannot see
   /// (design 3.1) until I3-3 reinstates the host-time class.
   std::uint64_t uncountedSinceCommit{};
-  /// Durable arena state (2c2); 0 until then.
+  /// Durable arena state: how many resets the profile has had.
   std::uint64_t resetEpoch{0};
+  /// The live reasons, oldest first.
+  std::vector<HealthReason> reasons;
+  /// The `seq` of the isolate entry holding the latch; 0 when not latched.
+  std::uint64_t faultSeq{0};
+  /// What the isolate entry holding the latch recorded; empty when not
+  /// latched. A reset's `removed` text quotes them.
+  std::string faultCode;
+  std::string faultIssuer;
+  std::string faultGrant;
+  std::uint64_t faultIncarnation{0};
+  /// Whether `last_receive` or `last_contact` is present.
+  bool livenessPresent{false};
   /// Host audit sink call and throw counts for the actor (R3-10).
   std::uint64_t auditCalls{0};
   std::uint64_t auditThrows{0};

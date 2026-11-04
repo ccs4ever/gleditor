@@ -71,6 +71,15 @@ inline constexpr std::int64_t kMaxEpistemicHealthPending             = 4096;
 inline constexpr std::int64_t kDefaultEpistemicHealthPendingPerGrant = 2;
 inline constexpr std::int64_t kDefaultEpistemicControlPerWake        = 32;
 inline constexpr std::int64_t kMaxEpistemicControlPerWake = 1'000'000;
+// Reasons and audit entries a profile keeps (2c2). One reason slot is always
+// left for evidence-driven reasons, so the floor is 2: an operator then holds
+// at least one.
+inline constexpr std::int64_t kDefaultEpistemicHealthReasons = 3;
+inline constexpr std::int64_t kMinEpistemicHealthReasons     = 2;
+inline constexpr std::int64_t kMaxEpistemicHealthReasons     = 16;
+inline constexpr std::int64_t kDefaultEpistemicHealthActions = 4;
+inline constexpr std::int64_t kMinEpistemicHealthActions     = 2;
+inline constexpr std::int64_t kMaxEpistemicHealthActions     = 64;
 // `validate()` caps min events at this share of the estimator's weight bound
 // 1/(1-b): a larger value would disable SUSPECT without a trace.
 inline constexpr double kSuspectMinEventsWeightShare = 0.9;
@@ -95,6 +104,8 @@ enum class EpistemicLimitError : std::uint8_t {
   InvalidHealthPending,
   InvalidHealthPendingPerGrant,
   InvalidControlPerWake,
+  InvalidHealthReasons,
+  InvalidHealthActions,
 };
 
 [[nodiscard]] constexpr std::string_view
@@ -126,6 +137,10 @@ epistemicLimitErrorName(EpistemicLimitError error) noexcept {
     return "InvalidHealthPendingPerGrant";
   case EpistemicLimitError::InvalidControlPerWake:
     return "InvalidControlPerWake";
+  case EpistemicLimitError::InvalidHealthReasons:
+    return "InvalidHealthReasons";
+  case EpistemicLimitError::InvalidHealthActions:
+    return "InvalidHealthActions";
   }
   return "Unknown";
 }
@@ -210,6 +225,10 @@ struct EpistemicLimits {
   /// `vagent.epistemic_control_per_wake`: control turns one wake may run before
   /// yielding to other actors.
   std::int64_t controlPerWake{kDefaultEpistemicControlPerWake};
+  /// `vagent.epistemic_health_reasons`: live reasons a profile keeps.
+  std::int64_t healthReasons{kDefaultEpistemicHealthReasons};
+  /// `vagent.epistemic_health_actions`: audit entries a profile keeps.
+  std::int64_t healthActions{kDefaultEpistemicHealthActions};
 
   /// Slots past `arenaSlots` that only settle turns may use, so a batch of
   /// belief events still settles when the allowance is spent. Zero for a tiny
@@ -268,6 +287,12 @@ struct EpistemicLimits {
       return std::unexpected(EpistemicLimitError::InvalidHealthPendingPerGrant);
     if (controlPerWake < 1 || controlPerWake > kMaxEpistemicControlPerWake)
       return std::unexpected(EpistemicLimitError::InvalidControlPerWake);
+    if (healthReasons < kMinEpistemicHealthReasons ||
+        healthReasons > kMaxEpistemicHealthReasons)
+      return std::unexpected(EpistemicLimitError::InvalidHealthReasons);
+    if (healthActions < kMinEpistemicHealthActions ||
+        healthActions > kMaxEpistemicHealthActions)
+      return std::unexpected(EpistemicLimitError::InvalidHealthActions);
     return {};
   }
 

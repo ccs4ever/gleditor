@@ -332,6 +332,10 @@ inline constexpr std::string_view kVagentEpistemicHealthPendingPerGrant =
     "vagent.epistemic_health_pending_per_grant";
 inline constexpr std::string_view kVagentEpistemicControlPerWake =
     "vagent.epistemic_control_per_wake";
+inline constexpr std::string_view kVagentEpistemicHealthReasons =
+    "vagent.epistemic_health_reasons";
+inline constexpr std::string_view kVagentEpistemicHealthActions =
+    "vagent.epistemic_health_actions";
 inline constexpr std::string_view kVagentTuiBorders = "vagent.tui.borders";
 inline constexpr std::string_view kVagentTuiHistorySize =
     "vagent.tui.history_size";

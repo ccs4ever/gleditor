@@ -25,7 +25,9 @@
  * reset and the isolate batch is issued under a valid grant, a revoked one
  * and one of the wrong kind. A request the grant does not allow is refused at
  * the call and queues nothing; one it allows finishes with a typed outcome,
- * and, the health turn being a stub until I3-2c2, changes no belief.
+ * or is a `NoChange` that never ran. Only a committed action may change a
+ * belief (an isolate or a reset withdraws supports), and a refused one
+ * changes nothing.
  *
  * Set FUZZ_EPISTEMIC_REPORT to print each outcome code, for checking that a
  * corpus reaches every refusal.
@@ -476,22 +478,26 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data,
       // A revoked or wrong-kind token never gets a receipt.
       if (!allowed)
         require(!receipt.has_value(), "a grant refuses what it does not allow");
+      bool committed = false;
       if (receipt) {
         const auto view = executor.healthOutcome(*pid, *receipt);
-        require(view.state == HealthOutcomeView::State::Known &&
-                    !view.items.empty(),
-                "a health action has an outcome after a pump");
+        // An action that would change nothing finishes without a turn and
+        // leaves no logged outcome.
+        require(view.state != HealthOutcomeView::State::Pending,
+                "no health outcome is left pending");
         for (const auto &item : view.items) {
           require(item.outcome.kind != IngestOutcome::Kind::Pending,
                   "no health outcome is left pending");
+          committed =
+              committed || item.outcome.kind == IngestOutcome::Kind::Committed;
           if (report)
             std::fprintf(stderr, "health %s\n", codeOf(item.outcome).c_str());
         }
       }
       const EpistemicView after(executor, *pid, kPredicates, kKeyless);
       require(!after.violation(), "ingestion invariants after a health action");
-      require(after.snapshot().beliefs == snapshot.beliefs,
-              "a health action changes no belief");
+      require(committed || after.snapshot().beliefs == snapshot.beliefs,
+              "only a committed health action changes a belief");
       require(*executor.epistemicCells(*pid) <= limits.cells, "cell ceiling");
       break;
     }

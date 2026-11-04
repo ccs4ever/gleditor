@@ -1086,6 +1086,17 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .schemas = {{.expectedTypes = {"integer"},
                       .defaultValues =
                           {vagent::runtime::kDefaultEpistemicControlPerWake}}}},
+        {.name    = std::string(settings::kVagentEpistemicHealthReasons),
+         .notes   = "vagent: live health reasons kept per source, 2 to 16; one "
+                    "slot is kept for evidence-driven reasons",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues =
+                          {vagent::runtime::kDefaultEpistemicHealthReasons}}}},
+        {.name    = std::string(settings::kVagentEpistemicHealthActions),
+         .notes   = "vagent: health audit entries kept per source, 2 to 64",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues =
+                          {vagent::runtime::kDefaultEpistemicHealthActions}}}},
         {.name    = std::string(settings::kVagentTuiBorders),
          .notes   = "vagent tui: border glyphs; rounded, single or ascii. "
                     "Unset picks unicode where the locale is UTF-8",

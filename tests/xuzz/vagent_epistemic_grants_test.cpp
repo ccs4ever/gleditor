@@ -230,7 +230,7 @@ TEST_F(VagentEpistemicGrants, RevokedTokenIsRefusedAndCountsCancelled) {
   EXPECT_EQ(again.error(), EpistemicRefusal::UnknownGrant);
 }
 
-TEST_F(VagentEpistemicGrants, StubAnswersHealthUnavailableAndChangesNothing) {
+TEST_F(VagentEpistemicGrants, AnIsolateCommitsAndLatchesTheProfile) {
   const auto token = ex().grantHealth(pid, grant("g1"));
   ASSERT_TRUE(token);
   const auto receipt =
@@ -240,8 +240,11 @@ TEST_F(VagentEpistemicGrants, StubAnswersHealthUnavailableAndChangesNothing) {
   const auto view = ex().healthOutcome(pid, *receipt);
   ASSERT_EQ(view.state, HealthOutcomeView::State::Known);
   ASSERT_EQ(view.items.size(), 1U);
-  EXPECT_EQ(view.items.front().outcome.kind, IngestOutcome::Kind::Refused);
-  EXPECT_EQ(refusalOf(view), std::string(kTurnResultHealthUnavailable));
+  EXPECT_EQ(view.items.front().outcome.kind, IngestOutcome::Kind::Committed);
+  const auto health = ex().sourceHealth(pid, kP1);
+  ASSERT_TRUE(health);
+  EXPECT_TRUE(health->faulted);
+  EXPECT_EQ(health->state, HealthState::Faulted);
 }
 
 TEST_F(VagentEpistemicGrants, AuditSinkSeesEveryCommittedOrRefusedAction) {
@@ -379,7 +382,7 @@ TEST(VagentEpistemicResetFloor,
   EXPECT_FALSE(ingress.supersededByReset(source, before));
 }
 
-TEST_F(VagentEpistemicGrants, AStubbedResetSupersedesNoQueuedReading) {
+TEST_F(VagentEpistemicGrants, AReadingQueuedBeforeACommittedResetIsSuperseded) {
   const auto token = ex().grantHealth(pid, grant("g1"));
   ASSERT_TRUE(token);
   commitOne(*host, pid, 1);
@@ -390,12 +393,55 @@ TEST_F(VagentEpistemicGrants, AStubbedResetSupersedesNoQueuedReading) {
   const auto reset = ex().healthAction(pid, request(*token, kP1, Reset{0}));
   ASSERT_TRUE(reset);
   host->pump();
-  EXPECT_EQ(refusalOf(ex().healthOutcome(pid, *reset)),
-            std::string(kTurnResultHealthUnavailable));
-  // The stub committed nothing, so no floor was raised for the reading.
-  const auto out = ex().ingestOutcome(pid, kP1, 1, "e2");
-  ASSERT_TRUE(out);
-  EXPECT_EQ(out->kind, IngestOutcome::Kind::Committed);
+  const auto resetView = ex().healthOutcome(pid, *reset);
+  ASSERT_EQ(resetView.state, HealthOutcomeView::State::Known);
+  EXPECT_EQ(resetView.items.front().outcome.kind,
+            IngestOutcome::Kind::Committed)
+      << resetView.items.front().outcome.code.value_or("none");
+  const auto cut = ex().ingestOutcome(pid, kP1, 1, "e2");
+  ASSERT_TRUE(cut);
+  EXPECT_EQ(cut->kind, IngestOutcome::Kind::Refused);
+  EXPECT_EQ(cut->code, std::string(kTurnResultSupersededByReset));
+
+  // A resend of the superseded reading is below the floor the reset raised.
+  auto resend    = reading(2, 1.0);
+  resend.eventId = "e2-again";
+  ASSERT_TRUE(ex().observe(pid, resend));
+  host->pump();
+  const auto stale = ex().ingestOutcome(pid, kP1, 1, "e2-again");
+  ASSERT_TRUE(stale);
+  EXPECT_EQ(stale->code, std::string(kTurnResultStaleSequence));
+
+  // A reading queued after the reset call is not superseded, and is the
+  // source's first new one.
+  ASSERT_TRUE(ex().observe(pid, reading(3, 1.0)));
+  host->pump();
+  const auto fresh = ex().ingestOutcome(pid, kP1, 1, "e3");
+  ASSERT_TRUE(fresh);
+  EXPECT_EQ(fresh->kind, IngestOutcome::Kind::Committed);
+}
+
+TEST_F(VagentEpistemicGrants, AnIdleResetOfAZeroWeightProfileIsNoChange) {
+  const auto token = ex().grantHealth(pid, grant("g1"));
+  ASSERT_TRUE(token);
+  // A degrade creates the profile without a reading: weight 0, no stamps.
+  const auto made = ex().healthAction(pid, request(*token, kP1, Degrade{"x"}));
+  ASSERT_TRUE(made);
+  host->pump();
+  const auto cleared = ex().healthAction(pid, request(*token, kP1, Clear{}));
+  ASSERT_TRUE(cleared);
+  host->pump();
+  const auto health = ex().sourceHealth(pid, kP1);
+  ASSERT_TRUE(health);
+  ASSERT_TRUE(health->reasons.empty());
+  const auto reset =
+      ex().healthAction(pid, request(*token, kP1, Reset{health->resetEpoch}));
+  ASSERT_TRUE(reset);
+  host->pump();
+  // A no-op finishes without a turn, so it leaves no logged outcome.
+  EXPECT_EQ(ex().healthOutcome(pid, *reset).state,
+            HealthOutcomeView::State::Unknown);
+  EXPECT_EQ(ex().sourceHealth(pid, kP1)->resetEpoch, 0U);
 }
 
 TEST_F(VagentEpistemicGrants, ARevokedTokenQueuedAheadOfItsTurnIsRefused) {
@@ -444,8 +490,10 @@ TEST_F(VagentEpistemicGrants, ARefusedActionChangesNothing) {
   ASSERT_TRUE(first);
   EXPECT_EQ(first->counter, 1U) << "refusals spend no receipt counter";
   host->pump();
-  EXPECT_EQ(refusalOf(ex().healthOutcome(pid, *first)),
-            std::string(kTurnResultHealthUnavailable));
+  const auto firstView = ex().healthOutcome(pid, *first);
+  ASSERT_EQ(firstView.items.size(), 1U);
+  EXPECT_EQ(firstView.items.front().outcome.kind,
+            IngestOutcome::Kind::Committed);
 
   // maxActions is 1 and the run spent it: the next request is refused.
   const auto spent = ex().healthAction(pid, request(*token, kP1, Isolate{"x"}));
@@ -511,13 +559,13 @@ TEST(VagentEpistemicControlCap, EveryHealthTurnCountsAndTheRestWaitsForAWake) {
                          {},
                          std::chrono::hours(1),
                          8};
-  g.actions.push_back(HealthActionKind::Isolate);
+  g.actions.push_back(HealthActionKind::Degrade);
   const auto token = ex.grantHealth(*launched, g);
   ASSERT_TRUE(token);
   std::vector<HealthReceipt> receipts;
   for (int i = 0; i < 5; ++i) {
     const auto r = ex.healthAction(
-        *launched, {*token, kP1, Isolate{"c" + std::to_string(i)}});
+        *launched, {*token, kP1, Degrade{"c" + std::to_string(i)}});
     ASSERT_TRUE(r) << i;
     receipts.push_back(*r);
   }
@@ -535,11 +583,13 @@ TEST_F(VagentEpistemicGrants, ActionSeqIsMonotonicPerActor) {
   const auto token = ex().grantHealth(pid, grant("g1"));
   ASSERT_TRUE(token);
   host->pump();
+  // The third degrade finds the operator slots full and is refused at the
+  // turn; it takes its number all the same.
   for (int i = 0; i < 3; ++i) {
-    ASSERT_TRUE(ex().healthAction(pid, request(*token, kP1, Isolate{"x"})));
+    ASSERT_TRUE(ex().healthAction(
+        pid, request(*token, kP1, Degrade{"d" + std::to_string(i)})));
     host->pump();
   }
-  // A refused-at-the-turn action takes the next number too.
   ASSERT_TRUE(ex().healthAction(pid, request(*token, kP1, Isolate{"x"})));
   ASSERT_TRUE(ex().revokeHealthGrant(pid, "g1"));
   host->pump();
@@ -555,8 +605,10 @@ TEST_F(VagentEpistemicGrants,
   const auto token = ex().grantHealth(pid, grant("g1"));
   ASSERT_TRUE(token);
   host->pump();
-  const auto before =
-      ex().healthAction(pid, request(*token, kP1, Isolate{"x"}));
+  // A clear of a source with no profile is refused `NoProfile` and leaves the
+  // arena empty, which an upgrade needs; it takes a sequence number all the
+  // same.
+  const auto before = ex().healthAction(pid, request(*token, kP1, Clear{}));
   ASSERT_TRUE(before);
   host->pump();
   ASSERT_EQ(audits.size(), 1U);
@@ -573,7 +625,7 @@ TEST_F(VagentEpistemicGrants,
   // the binding (a reading is accepted without a rebind) all stay.
   EXPECT_EQ(ex().healthOutcome(pid, *before).state,
             HealthOutcomeView::State::Known);
-  const auto after = ex().healthAction(pid, request(*token, kP1, Isolate{"y"}));
+  const auto after = ex().healthAction(pid, request(*token, kP1, Clear{}));
   ASSERT_TRUE(after);
   host->pump();
   ASSERT_EQ(audits.size(), 2U);
@@ -591,7 +643,7 @@ TEST_F(VagentEpistemicGrants,
   ASSERT_TRUE(token);
   commitOne(*host, pid, 5);
   const auto receipt =
-      ex().healthAction(pid, request(*token, kP1, Isolate{"x"}));
+      ex().healthAction(pid, request(*token, kP1, Degrade{"x"}));
   ASSERT_TRUE(receipt);
   host->pump();
   ASSERT_EQ(ex().healthOutcome(pid, *receipt).state,
@@ -609,7 +661,7 @@ TEST_F(VagentEpistemicGrants,
 
   // Grants are host memory: the old token authorizes nothing on the new pid.
   const auto denied =
-      ex2.healthAction(*resumed, request(*token, kP1, Isolate{"x"}));
+      ex2.healthAction(*resumed, request(*token, kP1, Degrade{"x"}));
   ASSERT_FALSE(denied);
   EXPECT_EQ(denied.error(), EpistemicRefusal::UnauthorizedHealthAction);
   // The receipt names the old instance and is unknown here.
@@ -646,7 +698,7 @@ TEST_F(VagentEpistemicGrants,
   ex2.setHealthAuditSink([&](const HealthAudit &a) { audits.push_back(a); });
   const auto fresh = ex2.grantHealth(*resumed, grant("g1"));
   ASSERT_TRUE(fresh);
-  ASSERT_TRUE(ex2.healthAction(*resumed, request(*fresh, kP1, Isolate{"x"})));
+  ASSERT_TRUE(ex2.healthAction(*resumed, request(*fresh, kP1, Degrade{"z"})));
   other->pump();
   ASSERT_EQ(audits.size(), 1U);
   EXPECT_EQ(audits.front().actionSeq, 1U);

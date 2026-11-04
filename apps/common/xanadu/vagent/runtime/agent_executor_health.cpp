@@ -428,31 +428,46 @@ bool AgentExecutor::wouldChangeHealth(const HealthAction &action,
                                       const SourceHealth &snapshot,
                                       const identity::ActorPid &target,
                                       std::string_view principal) const {
+  const auto operatorDegraded = [&](const std::optional<std::string> &code) {
+    return std::ranges::any_of(
+        snapshot.reasons, [&](const HealthReason &reason) {
+          return reason.kind == kReasonKindDegraded &&
+                 reason.origin == kReasonOriginOperator &&
+                 (!code || reason.code == *code);
+        });
+  };
   return std::visit(
       [&](const auto &act) -> bool {
         using T = std::decay_t<decltype(act)>;
         if constexpr (std::is_same_v<T, Isolate>) {
           return !snapshot.faulted;
         } else if constexpr (std::is_same_v<T, Degrade>) {
-          return true;
+          return !operatorDegraded(act.code);
         } else if constexpr (std::is_same_v<T, Clear>) {
-          if (!act.code) return true;
-          return false;
+          // A reason of another origin under the code is a refusal the arena
+          // names, so it is not a no-op.
+          if (!act.code) return operatorDegraded(std::nullopt);
+          return std::ranges::any_of(
+              snapshot.reasons, [&](const HealthReason &reason) {
+                return reason.kind == kReasonKindDegraded &&
+                       reason.code == *act.code;
+              });
         } else if constexpr (std::is_same_v<T, Reset>) {
           if (act.expectResetEpoch != snapshot.resetEpoch) return true;
-          if (snapshot.faulted) return true;
-          if (snapshot.reasonCode.has_value() && !snapshot.reasonCode->empty())
+          if (snapshot.faulted || !snapshot.reasons.empty() ||
+              snapshot.livenessPresent)
             return true;
+          // Weighted, or a streak: a SUSPECT-by-fraction profile with no
+          // current record still changes, so a reset meant to cut the queue
+          // is never skipped.
           if (snapshot.refusalFraction != 0.0 || snapshot.weight != 0.0 ||
               snapshot.rejectionStreak != 0)
             return true;
           const auto it =
               ingress_->inFlight.find({pidKey(target), std::string(principal)});
-          if (it != ingress_->inFlight.end() && !it->second.empty()) {
-            for (const auto &[pred, mset] : it->second) {
+          if (it != ingress_->inFlight.end())
+            for (const auto &[pred, mset] : it->second)
               if (!mset.empty()) return true;
-            }
-          }
           return false;
         }
       },

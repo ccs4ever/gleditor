@@ -16,6 +16,7 @@
 #include <cstdio>
 #include <limits>
 #include <map>
+#include <memory>
 #include <numbers>
 #include <optional>
 #include <random>
@@ -24,6 +25,7 @@
 
 #include "common/xanadu/scalar.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_health.hpp"
+#include "common/xanadu/vagent/runtime/health_grants.hpp"
 #include "common/xanadu/vagent/runtime/program.hpp"
 #include "common/xanadu/vagent/runtime/runtime_abi.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
@@ -1048,6 +1050,548 @@ TEST_F(VagentEpistemicHealth, MeasureTheCostOfAnIngestionAndABookkeepingTurn) {
                static_cast<unsigned long long>(refusal),
                static_cast<std::size_t>(refusalSlots),
                static_cast<std::size_t>(slotsAtLaunch));
+}
+
+// -- Slice 2c2: the health turn ---------------------------------------------
+
+constexpr auto kActionProgram = R"vagent(
+predicate at(key who: Str, x: Float)
+  arbitrated by truest(model: "beta_reputation", min_confidence: 0.5,
+    prior_alpha: 1, prior_beta: 1, clock: "wall", max_age: 10s,
+    cluster_tolerance: 0.5, frame: "enu", units: "m",
+    min_variance: 0.0001, max_variance: 100.0)
+predicate boom(n: Int)
+event Quit { }
+agent A {
+  var adds: Int := 0
+  var drops: Int := 0
+  on Quit { terminate }
+  on +at(?w, ?x) { adds := adds + 1 }
+  on -at(?w, ?x) { drops := drops + 1 }
+}
+)vagent";
+
+constexpr auto kFailingDropProgram = R"vagent(
+predicate at(key who: Str, x: Float)
+  arbitrated by truest(model: "beta_reputation", min_confidence: 0.5,
+    prior_alpha: 1, prior_beta: 1, clock: "wall", max_age: 10s,
+    cluster_tolerance: 0.5, frame: "enu", units: "m",
+    min_variance: 0.0001, max_variance: 100.0)
+predicate boom(n: Int)
+event Quit { }
+agent A {
+  var drops: Int := 0
+  on Quit { terminate }
+  on -at(?w, ?x) { believe boom(1) }
+  on +boom(?n) { believe boom(n + 1) }
+}
+)vagent";
+
+const std::string kOperatorPrincipal(64, 'b');
+
+class VagentEpistemicHealthActions : public ::testing::Test {
+protected:
+  std::optional<LocalHost> host;
+  ActorPid pid;
+  std::uint64_t seq{0};
+  std::optional<HealthGrantToken> token;
+  // Entry labels of the arena's reasons and actions, read back.
+  struct Entry {
+    std::string kind, code, origin;
+    std::int64_t seq{0}, count{0};
+    std::string removed;
+  };
+
+  void start(std::string_view source    = kActionProgram,
+             LocalHost::Options options = {}) {
+    auto program = CompiledProgram::fromSource(std::string(source));
+    ASSERT_TRUE(program) << program.error();
+    host.emplace(std::move(*program), std::move(options));
+    const auto launched = host->launch("A", "a");
+    ASSERT_TRUE(launched);
+    pid = *launched;
+    host->pump();
+    host->executor().setWallClockSynchronised(true);
+    ASSERT_TRUE(ex().bindSource(pid, bindingFor(1)));
+    auto granted = ex().grantHealth(pid, grant("g1"));
+    ASSERT_TRUE(granted);
+    token.emplace(*granted);
+  }
+
+  AgentExecutor &ex() { return host->executor(); }
+  static EpistemicSourceGrant bindingFor(std::uint64_t incarnation) {
+    return {"sensor:gps", kP1, incarnation, "at", std::chrono::hours(1)};
+  }
+  static EpistemicHealthGrant
+  grant(std::string id,
+        std::vector<HealthActionKind> kinds = {
+            HealthActionKind::Isolate, HealthActionKind::Degrade,
+            HealthActionKind::Clear, HealthActionKind::Reset}) {
+    EpistemicHealthGrant g{std::move(id),
+                           *HealthIssuer::fromPrincipal(kOperatorPrincipal),
+                           {kP1},
+                           {},
+                           std::chrono::hours(1),
+                           64};
+    for (const auto kind : kinds) g.actions.push_back(kind);
+    return g;
+  }
+
+  static double wall() {
+    return std::chrono::duration<double>(
+               std::chrono::system_clock::now().time_since_epoch())
+        .count();
+  }
+  CheckedObservation reading(std::string key, std::uint64_t incarnation = 1) {
+    ++seq;
+    CheckedObservation o;
+    o.principal   = kP1;
+    o.incarnation = incarnation;
+    o.eventId     = "e" + std::to_string(seq);
+    o.sequence    = seq;
+    o.predicate   = "at";
+    o.tuple       = {WireValue::text(std::move(key)), WireValue::real(1.0)};
+    o.acquiredAt  = wall() - 5.0 + 0.01 * static_cast<double>(seq);
+    o.acquiredUncertainty = 0.01;
+    o.clockBasis          = "wall";
+    o.frame               = "enu";
+    o.units               = "m";
+    o.variance            = 0.25;
+    return o;
+  }
+  /// The outcome code of a reading, "Committed" or the refusal.
+  std::string send(const CheckedObservation &o) {
+    const auto queued = ex().observe(pid, o);
+    if (!queued) return std::string(epistemicRefusalName(queued.error()));
+    host->pump();
+    const auto out =
+        ex().ingestOutcome(pid, o.principal, o.incarnation, o.eventId);
+    if (!out) return "none";
+    return out->kind == IngestOutcome::Kind::Committed
+               ? "Committed"
+               : out->code.value_or("?");
+  }
+  /// "Committed", the refusal code, or "NoChange" for an action that never ran.
+  std::string act(HealthAction action) {
+    const auto receipt =
+        ex().healthAction(pid, {*token, kP1, std::move(action)});
+    if (!receipt) return std::string(epistemicRefusalName(receipt.error()));
+    host->pump();
+    const auto view = ex().healthOutcome(pid, *receipt);
+    if (view.state != HealthOutcomeView::State::Known || view.items.empty())
+      return "NoChange";
+    const auto &outcome = view.items.front().outcome;
+    return outcome.kind == IngestOutcome::Kind::Committed
+               ? "Committed"
+               : outcome.code.value_or("?");
+  }
+  std::optional<SourceHealth> health() { return ex().sourceHealth(pid, kP1); }
+
+  const zigzag::vortex::WorkerContext &ctx() { return *ex().context(pid); }
+  zigzag::ArenaManifold &arena() {
+    return const_cast<zigzag::ArenaManifold &>(ctx().arena);
+  }
+  ValueDims vd() { return valueDims(ctx().core); }
+  std::optional<CellRef> profile() {
+    const auto dims = registerDimensions(arena());
+    for (const auto p :
+         zigzag::rankAfter(arena(), *ex().agentCell(pid), dims.trust))
+      if (arena().textOf(p) == kP1) return p;
+    return std::nullopt;
+  }
+  std::optional<CellRef> field(CellRef record, std::string_view name) {
+    return fieldValue(ctx().arena, vd(), record, name);
+  }
+  std::int64_t integer(CellRef record, std::string_view name) {
+    const auto cell = field(record, name);
+    return cell ? ctx().arena.asInt64(*cell).value_or(-1) : -1;
+  }
+  std::string text(CellRef record, std::string_view name) {
+    const auto cell = field(record, name);
+    return cell ? ctx().arena.textOf(*cell) : std::string("<absent>");
+  }
+  std::int64_t agentInt(std::string_view name) {
+    const auto cell = fieldValue(ctx().arena, vd(), *ex().agentCell(pid), name);
+    return cell ? ctx().arena.asInt64(*cell).value_or(-1) : -1;
+  }
+  std::vector<CellRef> listOf(std::string_view name) {
+    std::vector<CellRef> out;
+    const auto p = profile();
+    if (!p) return out;
+    const auto head = field(*p, name);
+    if (!head) return out;
+    for (auto e = zigzag::step(ctx().arena, *head, vd().grab); e;
+         e      = zigzag::step(ctx().arena, *e, vd().step))
+      out.push_back(*e);
+    return out;
+  }
+  std::vector<Entry> entries(std::string_view name) {
+    std::vector<Entry> out;
+    for (const auto e : listOf(name))
+      out.push_back({text(e, "kind"), text(e, "code"), text(e, "origin"),
+                     integer(e, "seq"), integer(e, "count"),
+                     text(e, "removed")});
+    return out;
+  }
+  /// Every record of the profile's retired chain.
+  std::vector<CellRef> retiredRecords() {
+    const auto dims = registerDimensions(arena());
+    const auto p    = profile();
+    if (!p) return {};
+    return zigzag::rankAfter(arena(), *p, dims.epistemic) |
+           std::ranges::to<std::vector<CellRef>>();
+  }
+  /// A reason the device would add (I3-3), written straight into the arena.
+  void addDeviceReason(std::string_view kind, std::string_view code) {
+    WireRecord r;
+    r.type = "Reason";
+    r.set("kind", WireValue::text(std::string(kind)));
+    r.set("code", WireValue::text(std::string(code)));
+    r.set("origin", WireValue::text("device"));
+    r.set("grant", WireValue::text(""));
+    r.set("issuer", WireValue::text(""));
+    const auto cell = writeValue(arena(), vd(), WireValue::record(r));
+    const auto p    = profile();
+    ASSERT_TRUE(p);
+    const auto head = field(*p, "reasons");
+    ASSERT_TRUE(head);
+    CellRef tail = *head;
+    auto dim     = vd().grab;
+    while (const auto next = arena().linked(tail, dim)) {
+      tail = *next;
+      dim  = vd().step;
+    }
+    ASSERT_TRUE(arena().link(tail, dim, zigzag::DimVector::POS, cell));
+  }
+  /// A second executor resumed from this actor's checkpoint.
+  struct Resumed {
+    std::unique_ptr<LocalHost> host;
+    ActorPid pid;
+  };
+  Resumed resumeElsewhere() {
+    Resumed r;
+    const auto saved = ex().checkpoint(pid);
+    EXPECT_TRUE(saved);
+    auto program = CompiledProgram::fromSource(kActionProgram);
+    EXPECT_TRUE(program);
+    r.host =
+        std::make_unique<LocalHost>(std::move(*program), LocalHost::Options{});
+    const auto resumed = r.host->executor().resume(*saved);
+    EXPECT_TRUE(resumed);
+    r.pid = *resumed;
+    r.host->pump();
+    return r;
+  }
+};
+
+TEST_F(VagentEpistemicHealthActions, IsolateBeforeTheFirstReadingSticks) {
+  start();
+  EXPECT_EQ(act(Isolate{"stuck"}), "Committed");
+  auto h = health();
+  ASSERT_TRUE(h);
+  EXPECT_TRUE(h->faulted);
+  EXPECT_EQ(h->state, HealthState::Faulted);
+  EXPECT_NE(h->faultSeq, 0U);
+  EXPECT_EQ(h->faultCode, "stuck");
+  // The arena refuses the reading itself, and writes nothing else.
+  EXPECT_EQ(send(reading("k")), "SourceFaulted");
+  const auto slots = arena().cellCount();
+  EXPECT_EQ(send(reading("k")), "SourceFaulted");
+  EXPECT_EQ(arena().cellCount(), slots);
+  h = health();
+  EXPECT_EQ(h->contentRefusals, 0);
+  EXPECT_EQ(h->refusedCount, 0);
+  EXPECT_FALSE(h->lastRefusal);
+  EXPECT_EQ(act(Isolate{"again"}), "NoChange");
+  // A resume carries the latch with the arena.
+  auto other = resumeElsewhere();
+  ASSERT_TRUE(other.host);
+  ASSERT_TRUE(other.host->executor().bindSource(other.pid, bindingFor(1)));
+  other.host->pump();
+  other.host->executor().setWallClockSynchronised(true);
+  const auto again = reading("k2");
+  ASSERT_TRUE(other.host->executor().observe(other.pid, again));
+  other.host->pump();
+  const auto out =
+      other.host->executor().ingestOutcome(other.pid, kP1, 1, again.eventId);
+  ASSERT_TRUE(out);
+  EXPECT_EQ(out->code, std::string("SourceFaulted"));
+  EXPECT_EQ(out->outcomeClass, OutcomeClass::NeedsHostAction);
+}
+
+TEST_F(VagentEpistemicHealthActions, IsolateDropsSupportsAndStampsRetiredBy) {
+  start();
+  EXPECT_EQ(send(reading("a")), "Committed");
+  EXPECT_EQ(send(reading("b")), "Committed");
+  // A superseded record never carries `retired_by`.
+  EXPECT_EQ(send(reading("a")), "Committed");
+  EXPECT_EQ(act(Isolate{"x"}), "Committed");
+  EXPECT_EQ(agentInt("drops"), 2);
+  std::size_t isolate = 0, superseded = 0;
+  for (const auto record : retiredRecords()) {
+    const auto by = text(record, "retired_by");
+    if (by == "isolate") ++isolate;
+    if (by == "<absent>") ++superseded;
+  }
+  EXPECT_EQ(isolate, 2U);
+  EXPECT_EQ(superseded, 1U);
+  // No refutation, label or calibration moved.
+  EXPECT_FALSE(health()->lastRefusal);
+}
+
+TEST_F(VagentEpistemicHealthActions, AnAdvanceStampsItsRecordsAdvance) {
+  start();
+  EXPECT_EQ(send(reading("a")), "Committed");
+  ASSERT_TRUE(ex().bindSource(pid, bindingFor(2)));
+  host->pump();
+  const auto records = retiredRecords();
+  ASSERT_EQ(records.size(), 1U);
+  EXPECT_EQ(text(records.front(), "retired_by"), "advance");
+}
+
+TEST_F(VagentEpistemicHealthActions, LatchReasonsAndActionsSurviveEverything) {
+  start();
+  EXPECT_EQ(send(reading("a")), "Committed");
+  EXPECT_EQ(act(Degrade{"slow"}), "Committed");
+  EXPECT_EQ(act(Isolate{"x"}), "Committed");
+  const auto check = [&](const SourceHealth &h, const char *when) {
+    EXPECT_TRUE(h.faulted) << when;
+    ASSERT_EQ(h.reasons.size(), 1U) << when;
+    EXPECT_EQ(h.reasons.front().code, "slow") << when;
+    EXPECT_EQ(h.faultCode, "x") << when;
+  };
+  check(*health(), "before");
+  const auto actionsBefore = entries("actions");
+  ASSERT_EQ(actionsBefore.size(), 2U);
+  // A reboot (advance) keeps them.
+  ASSERT_TRUE(ex().bindSource(pid, bindingFor(2)));
+  host->pump();
+  check(*health(), "advance");
+  // So does a retire and a revive.
+  ASSERT_TRUE(ex().retireSource(pid, kP1));
+  host->pump();
+  ASSERT_TRUE(ex().bindSource(pid, bindingFor(3)));
+  host->pump();
+  check(*health(), "retire and revive");
+  EXPECT_EQ(entries("actions").size(), actionsBefore.size());
+  // And a checkpoint resumed elsewhere.
+  auto other         = resumeElsewhere();
+  const auto resumed = other.host->executor().sourceHealth(other.pid, kP1);
+  ASSERT_TRUE(resumed);
+  check(*resumed, "resume");
+}
+
+TEST_F(VagentEpistemicHealthActions, DegradeIsUniqueByKindCodeAndOrigin) {
+  start();
+  EXPECT_EQ(act(Degrade{"x"}), "Committed");
+  EXPECT_EQ(act(Degrade{"x"}), "NoChange");
+  EXPECT_EQ(act(Degrade{"y"}), "Committed");
+  // Three slots, one kept for the device: the third operator reason refuses.
+  EXPECT_EQ(act(Degrade{"z"}), "HealthReasonsFull");
+  const auto h = health();
+  ASSERT_TRUE(h);
+  ASSERT_EQ(h->reasons.size(), 2U);
+  EXPECT_EQ(h->state, HealthState::Degraded);
+  EXPECT_EQ(h->reasonCode, "x");
+  // A device reason of the same code is a different reason.
+  addDeviceReason("degraded", "x");
+  EXPECT_EQ(health()->reasons.size(), 3U);
+}
+
+TEST_F(VagentEpistemicHealthActions, ClearRemovesOnlyOperatorDegradedReasons) {
+  start();
+  EXPECT_EQ(act(Degrade{"x"}), "Committed");
+  EXPECT_EQ(act(Degrade{"y"}), "Committed");
+  EXPECT_EQ(act(Isolate{"stuck"}), "Committed");
+  EXPECT_EQ(act(Clear{std::string("x")}), "Committed");
+  ASSERT_EQ(health()->reasons.size(), 1U);
+  EXPECT_EQ(health()->reasons.front().code, "y");
+  EXPECT_EQ(act(Clear{std::string("x")}), "NoChange");
+  EXPECT_EQ(act(Clear{}), "Committed");
+  EXPECT_TRUE(health()->reasons.empty());
+  // Never the latch.
+  EXPECT_TRUE(health()->faulted);
+  EXPECT_EQ(act(Clear{}), "NoChange");
+  // A device reason survives `Clear {}` and refuses by code.
+  addDeviceReason("degraded", "d");
+  EXPECT_EQ(act(Clear{}), "NoChange");
+  EXPECT_EQ(act(Clear{std::string("d")}), "NotOperatorReason");
+  EXPECT_EQ(health()->reasons.size(), 1U);
+  EXPECT_TRUE(health()->faulted);
+}
+
+TEST_F(VagentEpistemicHealthActions,
+       ResetClearsTheRepairedStateAndKeepsTheRest) {
+  start();
+  EXPECT_EQ(send(reading("a")), "Committed");
+  EXPECT_EQ(send(reading("b")), "Committed");
+  EXPECT_EQ(act(Degrade{"slow"}), "Committed");
+  EXPECT_EQ(act(Isolate{"stuck"}), "Committed");
+  const auto p = profile();
+  ASSERT_TRUE(p);
+  const auto dedupBefore = listOf("dedup").size();
+  EXPECT_GT(dedupBefore, 0U);
+  ASSERT_TRUE(health()->livenessPresent);
+  // A stale expected epoch commits nothing, and a retry cannot destroy what
+  // a first reset repaired.
+  EXPECT_EQ(act(Reset{7}), "StaleHealthState");
+  EXPECT_TRUE(health()->faulted);
+  EXPECT_EQ(act(Reset{0}), "Committed");
+  const auto h = health();
+  ASSERT_TRUE(h);
+  EXPECT_FALSE(h->faulted);
+  EXPECT_TRUE(h->reasons.empty());
+  EXPECT_EQ(h->state, HealthState::Nominal);
+  EXPECT_EQ(h->weight, 0.0);
+  EXPECT_EQ(h->refusalFraction, 0.0);
+  EXPECT_EQ(h->rejectionStreak, 0);
+  EXPECT_EQ(h->resetEpoch, 1U);
+  EXPECT_FALSE(h->livenessPresent);
+  EXPECT_EQ(act(Reset{0}), "StaleHealthState");
+  // Dedup and the audit list stay, and the reset says what it removed.
+  EXPECT_EQ(listOf("dedup").size(), dedupBefore);
+  const auto actions = entries("actions");
+  ASSERT_EQ(actions.size(), 3U);
+  EXPECT_EQ(actions.back().kind, "reset");
+  EXPECT_NE(actions.back().removed.find("fault=stuck"), std::string::npos)
+      << actions.back().removed;
+  EXPECT_NE(actions.back().removed.find("degraded:slow"), std::string::npos);
+  // The streams stay: a resend of a counted sequence is still stale.
+  auto resend     = reading("a");
+  resend.sequence = 1;
+  resend.eventId  = "resent";
+  EXPECT_EQ(send(resend), "StaleSequence");
+  // Eligible only after a new reading, whose record carries the epoch.
+  EXPECT_FALSE(health()->livenessPresent);
+  EXPECT_EQ(send(reading("a")), "Committed");
+  EXPECT_TRUE(health()->livenessPresent);
+  const auto chain = retiredRecords();
+  ASSERT_FALSE(chain.empty());
+  // The isolate had already withdrawn the supports, so the reset retired
+  // nothing and the records keep what the isolate said.
+  EXPECT_EQ(text(chain.front(), "retired_by"), "isolate");
+  EXPECT_EQ(integer(chain.front(), "calibration_epoch"), 0);
+  std::int64_t newest = -1;
+  const auto dims     = registerDimensions(arena());
+  for (const auto pred :
+       zigzag::rankAfter(arena(), *ex().agentCell(pid), dims.belief))
+    for (const auto clause :
+         zigzag::rankAfter(arena(), pred, ctx().core.dims().clause))
+      for (const auto support : zigzag::rankAfter(arena(), clause, dims.source))
+        for (const auto record :
+             zigzag::rankAfter(arena(), support, dims.epistemic))
+          newest = integer(record, "calibration_epoch");
+  EXPECT_EQ(newest, 1);
+}
+
+TEST_F(VagentEpistemicHealthActions, AResetStampsTheRecordsItWithdraws) {
+  start();
+  EXPECT_EQ(send(reading("a")), "Committed");
+  EXPECT_EQ(act(Reset{0}), "Committed");
+  EXPECT_EQ(agentInt("drops"), 1);
+  const auto records = retiredRecords();
+  ASSERT_EQ(records.size(), 1U);
+  EXPECT_EQ(text(records.front(), "retired_by"), "reset");
+}
+
+TEST_F(VagentEpistemicHealthActions, AResetWithAFailingHandlerStillCommits) {
+  start(kFailingDropProgram);
+  EXPECT_EQ(send(reading("a")), "Committed");
+  EXPECT_EQ(act(Isolate{"x"}), "Committed");
+  EXPECT_EQ(act(Reset{0}), "Committed");
+  EXPECT_FALSE(health()->faulted);
+  EXPECT_EQ(health()->resetEpoch, 1U);
+  EXPECT_EQ(ex().stat(pid, std::string(kStatSettleDiscarded)), 1U);
+}
+
+TEST_F(VagentEpistemicHealthActions,
+       AnIdleResetOfAZeroWeightProfileIsNoChange) {
+  start();
+  EXPECT_EQ(act(Degrade{"x"}), "Committed");
+  EXPECT_EQ(act(Clear{}), "Committed");
+  EXPECT_EQ(act(Reset{0}), "NoChange");
+  EXPECT_EQ(health()->resetEpoch, 0U);
+}
+
+TEST_F(VagentEpistemicHealthActions,
+       RepeatedOrdinaryActionsNeverEvictTheFault) {
+  start();
+  EXPECT_EQ(act(Isolate{"stuck"}), "Committed");
+  for (int i = 0; i < 6; ++i) {
+    EXPECT_EQ(act(Degrade{"x"}), "Committed");
+    EXPECT_EQ(act(Clear{std::string("x")}), "Committed");
+  }
+  const auto actions = entries("actions");
+  ASSERT_EQ(actions.size(), 3U);
+  EXPECT_EQ(actions[0].kind, "isolate");
+  EXPECT_EQ(actions[1].kind, "degrade");
+  EXPECT_EQ(actions[1].count, 6);
+  EXPECT_EQ(actions[2].kind, "clear");
+  EXPECT_EQ(actions[2].count, 6);
+  // seq counts every accepted action, merged or not.
+  const auto p = profile();
+  EXPECT_EQ(integer(*p, "action_seq"), 13);
+  // Fill the list with safety entries: a reset evicts the oldest ordinary
+  // entry, and a degrade finds no ordinary entry to evict.
+  EXPECT_EQ(act(Reset{0}), "Committed");
+  EXPECT_EQ(act(Isolate{"again"}), "Committed");
+  EXPECT_EQ(act(Reset{1}), "Committed");
+  const auto after = entries("actions");
+  ASSERT_EQ(after.size(), 4U);
+  for (const auto &entry : after)
+    EXPECT_TRUE(entry.kind == "isolate" || entry.kind == "reset");
+  EXPECT_EQ(act(Degrade{"y"}), "Committed");
+  EXPECT_EQ(entries("actions").size(), 4U);
+  EXPECT_EQ(entries("actions").back().kind, "reset");
+}
+
+TEST_F(VagentEpistemicHealthActions, ASensorCannotClearItsOwnLatch) {
+  start();
+  const auto isolateOnly =
+      ex().grantHealth(pid, grant("iso", {HealthActionKind::Isolate}));
+  ASSERT_TRUE(isolateOnly);
+  ASSERT_TRUE(ex().healthAction(pid, {*isolateOnly, kP1, Isolate{"babble"}}));
+  host->pump();
+  ASSERT_TRUE(health()->faulted);
+  // Its own readings neither unlatch it nor are recorded.
+  EXPECT_EQ(send(reading("k")), "SourceFaulted");
+  EXPECT_EQ(send(reading("k")), "SourceFaulted");
+  // A grant without reset authority refuses a reset, and so does a token the
+  // sensor invented.
+  const auto narrow = ex().healthAction(pid, {*isolateOnly, kP1, Reset{0}});
+  ASSERT_FALSE(narrow);
+  EXPECT_EQ(narrow.error(), EpistemicRefusal::UnauthorizedHealthAction);
+  const auto forged =
+      HealthGrantToken::fromBytes(std::array<std::byte, 16>{std::byte{7}});
+  if (forged) {
+    const auto refused = ex().healthAction(pid, {*forged, kP1, Reset{0}});
+    ASSERT_FALSE(refused);
+  }
+  // The issuer principal cannot be bound as a source at all.
+  EXPECT_FALSE(ex().bindSource(pid, {"sensor:self", kOperatorPrincipal, 1, "at",
+                                     std::chrono::hours(1)}));
+  EXPECT_TRUE(health()->faulted);
+}
+
+TEST_F(VagentEpistemicHealthActions, ASixteenRecordResetFitsHalfTheGrant) {
+  constexpr std::uint64_t kHalf = 5'000'000;
+  EXPECT_EQ(LocalHost::Options{}.maxInstructions, 2 * kHalf);
+  LocalHost::Options options;
+  options.maxInstructions                  = kHalf;
+  options.settings.epistemic.keysPerSource = 16;
+  start(kActionProgram, options);
+  for (int i = 0; i < 16; ++i)
+    EXPECT_EQ(send(reading("k" + std::to_string(i))), "Committed");
+  EXPECT_EQ(act(Isolate{"x"}), "Committed");
+  const auto before = ctx().vm.totalCycles();
+  EXPECT_EQ(act(Reset{0}), "Committed");
+  const auto spent = ctx().vm.totalCycles() - before;
+  RecordProperty("reset16_cycles_including_settle", static_cast<int>(spent));
+  std::fprintf(stderr, "MEASURE reset of 16 records: %llu cycles of %llu\n",
+               static_cast<unsigned long long>(spent),
+               static_cast<unsigned long long>(kHalf));
+  EXPECT_FALSE(health()->faulted);
+  EXPECT_LT(spent, kHalf);
 }
 
 } // namespace
