@@ -187,6 +187,9 @@ TEST(SystemDocsTest, VagentSettingsSeedWithDesignDefaults) {
       {"vagent.epistemic_suspect_min_events", std::int64_t{8}},
       {"vagent.epistemic_health_replay_ring", std::int64_t{8}},
       {"vagent.epistemic_health_sequence_gap", std::int64_t{1024}},
+      {"vagent.epistemic_health_pending", std::int64_t{16}},
+      {"vagent.epistemic_health_pending_per_grant", std::int64_t{2}},
+      {"vagent.epistemic_control_per_wake", std::int64_t{32}},
   };
   for (const auto &[name, value] : expected) {
     const auto it = find(name);

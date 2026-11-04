@@ -1068,6 +1068,24 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
              {{.expectedTypes = {"integer"},
                .defaultValues =
                    {vagent::runtime::kDefaultEpistemicHealthSequenceGap}}}},
+        {.name    = std::string(settings::kVagentEpistemicHealthPending),
+         .notes   = "vagent: health actions queued per actor, 1 to 4096",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues =
+                          {vagent::runtime::kDefaultEpistemicHealthPending}}}},
+        {.name  = std::string(settings::kVagentEpistemicHealthPendingPerGrant),
+         .notes = "vagent: health actions queued per grant on one actor, "
+                  "1 to health_pending",
+         .schemas =
+             {{.expectedTypes = {"integer"},
+               .defaultValues =
+                   {vagent::runtime::kDefaultEpistemicHealthPendingPerGrant}}}},
+        {.name    = std::string(settings::kVagentEpistemicControlPerWake),
+         .notes   = "vagent: control turns one wake may run before yielding to "
+                    "other actors, 1 to 1000000",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues =
+                          {vagent::runtime::kDefaultEpistemicControlPerWake}}}},
         {.name    = std::string(settings::kVagentTuiBorders),
          .notes   = "vagent tui: border glyphs; rounded, single or ascii. "
                     "Unset picks unicode where the locale is UTF-8",
@@ -1333,9 +1351,9 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
         {.name    = std::string(settings::kRadialMenuInnerRadius),
          .notes   = "Inner deadzone radius of radial menu in pixels",
          .schemas = {{.expectedTypes = {"float"}, .defaultValues = {42.0}}}},
-        {.name  = std::string(settings::kLinkPanelFont),
-         .notes = "Typography role name (caption, label, body, title, mono); "
-                  "empty follows label; legacy font descriptions are accepted",
+        {.name    = std::string(settings::kLinkPanelFont),
+         .notes   = "Typography role name (caption, label, body, title, mono); "
+                    "empty follows label; legacy font descriptions are accepted",
          .schemas = {{.expectedTypes = {"string"},
                       .defaultValues = {panel.font}}}},
         {.name    = std::string(settings::kLinkPanelMaxLines),
@@ -2276,9 +2294,9 @@ initializeSystemStoreGenesis(Store &store, const SystemDocKind kind,
     const std::string storeNoteText = "Sovereign system store managing " +
                                       std::string(systemDocName(kind)) +
                                       " configuration.";
-    cur                             = store.makeCell(cur, storeNoteText);
-    const auto noteRef              = store.cellRefOf(cur).value();
-    manifold                        = store.rebuildManifold(cur);
+    cur                = store.makeCell(cur, storeNoteText);
+    const auto noteRef = store.cellRefOf(cur).value();
+    manifold           = store.rebuildManifold(cur);
     cur = store.setLink(cur, home, notesDim, zigzag::DimVector::POS, noteRef);
     manifold = store.rebuildManifold(cur);
   }
@@ -2402,10 +2420,10 @@ MicroversionId ensureSetting(Store &store,
       if (matched) {
         currentGroup = *matched;
       } else {
-        const auto lastSub = firstChild
-                                 ? zigzag::rankTail(*m, *firstChild, groupsDim)
-                                 : currentGroup;
-        cur                = store.makeCell(cur, subName);
+        const auto lastSub    = firstChild
+                                    ? zigzag::rankTail(*m, *firstChild, groupsDim)
+                                    : currentGroup;
+        cur                   = store.makeCell(cur, subName);
         const auto matchedSub = store.cellRefOf(cur).value();
         folded                = store.rebuildManifold(cur);
         m                     = &folded.value();
@@ -2755,7 +2773,7 @@ SystemStoreModel::fromManifold(const ManifoldT &manifold,
         .memberSettingNames = zigzag::rankAfter(manifold, gCell, varsDim) |
                               std::views::transform(text) |
                               std::ranges::to<std::vector>(),
-        .childSubgroups     = std::move(childSubgroups),
+        .childSubgroups = std::move(childSubgroups),
     };
   };
 
@@ -2804,9 +2822,9 @@ SystemStoreModel::fromManifold(const ManifoldT &manifold,
     // Active values along d.values
     entry.value.valueCells = zigzag::rankAfter(manifold, setCell, valuesDim) |
                              std::ranges::to<std::vector>();
-    entry.value.elements   = entry.value.valueCells |
-                             std::views::transform(valueOf) |
-                             std::ranges::to<std::vector>();
+    entry.value.elements = entry.value.valueCells |
+                           std::views::transform(valueOf) |
+                           std::ranges::to<std::vector>();
 
     // Validate
     std::string err;
@@ -3495,7 +3513,7 @@ LayoutConfig LayoutConfig::fromStore(const Store &store) {
       settings::kPhysicsMaxForce, static_cast<double>(cfg.physics.maxForce)));
   cfg.physics.maxVelocity             = static_cast<float>(
       model.getDouble(settings::kPhysicsMaxVelocity,
-                      static_cast<double>(cfg.physics.maxVelocity)));
+                                  static_cast<double>(cfg.physics.maxVelocity)));
   cfg.physics.timeStep = static_cast<float>(model.getDouble(
       settings::kPhysicsTimeStep, static_cast<double>(cfg.physics.timeStep)));
 

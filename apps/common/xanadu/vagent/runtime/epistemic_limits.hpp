@@ -65,6 +65,12 @@ inline constexpr std::int64_t kMaxEpistemicHealthReplayRing      = 4096;
 inline constexpr std::int64_t kDefaultEpistemicHealthSequenceGap = 1024;
 inline constexpr std::int64_t kMaxEpistemicHealthSequenceGap =
     std::numeric_limits<std::int32_t>::max();
+// Health actions and queue bounds (2c1).
+inline constexpr std::int64_t kDefaultEpistemicHealthPending         = 16;
+inline constexpr std::int64_t kMaxEpistemicHealthPending             = 4096;
+inline constexpr std::int64_t kDefaultEpistemicHealthPendingPerGrant = 2;
+inline constexpr std::int64_t kDefaultEpistemicControlPerWake        = 32;
+inline constexpr std::int64_t kMaxEpistemicControlPerWake = 1'000'000;
 // `validate()` caps min events at this share of the estimator's weight bound
 // 1/(1-b): a larger value would disable SUSPECT without a trace.
 inline constexpr double kSuspectMinEventsWeightShare = 0.9;
@@ -86,6 +92,9 @@ enum class EpistemicLimitError : std::uint8_t {
   InvalidSuspectMinEvents,
   InvalidHealthReplayRing,
   InvalidHealthSequenceGap,
+  InvalidHealthPending,
+  InvalidHealthPendingPerGrant,
+  InvalidControlPerWake,
 };
 
 [[nodiscard]] constexpr std::string_view
@@ -111,6 +120,12 @@ epistemicLimitErrorName(EpistemicLimitError error) noexcept {
     return "InvalidHealthReplayRing";
   case EpistemicLimitError::InvalidHealthSequenceGap:
     return "InvalidHealthSequenceGap";
+  case EpistemicLimitError::InvalidHealthPending:
+    return "InvalidHealthPending";
+  case EpistemicLimitError::InvalidHealthPendingPerGrant:
+    return "InvalidHealthPendingPerGrant";
+  case EpistemicLimitError::InvalidControlPerWake:
+    return "InvalidControlPerWake";
   }
   return "Unknown";
 }
@@ -187,6 +202,14 @@ struct EpistemicLimits {
   /// `vagent.epistemic_health_sequence_gap`: how far above its mark a dropped
   /// reading's sequence may sit and still be credited.
   std::int64_t healthSequenceGap{kDefaultEpistemicHealthSequenceGap};
+  /// `vagent.epistemic_health_pending`: health actions queued per actor.
+  std::int64_t healthPending{kDefaultEpistemicHealthPending};
+  /// `vagent.epistemic_health_pending_per_grant`: health actions queued per
+  /// grant on one actor.
+  std::int64_t healthPendingPerGrant{kDefaultEpistemicHealthPendingPerGrant};
+  /// `vagent.epistemic_control_per_wake`: control turns one wake may run before
+  /// yielding to other actors.
+  std::int64_t controlPerWake{kDefaultEpistemicControlPerWake};
 
   /// Slots past `arenaSlots` that only settle turns may use, so a batch of
   /// belief events still settles when the allowance is spent. Zero for a tiny
@@ -239,6 +262,12 @@ struct EpistemicLimits {
     if (healthSequenceGap < 1 ||
         healthSequenceGap > kMaxEpistemicHealthSequenceGap)
       return std::unexpected(EpistemicLimitError::InvalidHealthSequenceGap);
+    if (healthPending < 1 || healthPending > kMaxEpistemicHealthPending)
+      return std::unexpected(EpistemicLimitError::InvalidHealthPending);
+    if (healthPendingPerGrant < 1 || healthPendingPerGrant > healthPending)
+      return std::unexpected(EpistemicLimitError::InvalidHealthPendingPerGrant);
+    if (controlPerWake < 1 || controlPerWake > kMaxEpistemicControlPerWake)
+      return std::unexpected(EpistemicLimitError::InvalidControlPerWake);
     return {};
   }
 

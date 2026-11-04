@@ -100,6 +100,14 @@ enum class EpistemicRefusal : std::uint8_t {
   /// A non-finite `acquiredAt` or uncertainty, or a negative uncertainty:
   /// decided on host-mapped fields, so only a direct copy counts.
   InvalidAcquisition,
+  /// Health actions and grants (P19 I3-2c1).
+  InvalidHealthGrant,
+  UnauthorizedHealthAction,
+  InvalidHealthCode,
+  InvalidHealthRequest,
+  UnknownGrant,
+  SelfCertification,
+  EntropyUnavailable,
 };
 
 /// What the host may do with a refused event.
@@ -149,7 +157,13 @@ private:
 
 /// One event's ingestion outcome as the host's outcome log records it.
 struct IngestOutcome {
-  enum class Kind : std::uint8_t { Pending, Committed, Duplicate, Refused };
+  enum class Kind : std::uint8_t {
+    Pending,
+    Committed,
+    Duplicate,
+    Refused,
+    NoChange
+  };
   Kind kind{Kind::Pending};
   /// The refusal code, present exactly when `kind` is `Refused`.
   std::optional<std::string> code;

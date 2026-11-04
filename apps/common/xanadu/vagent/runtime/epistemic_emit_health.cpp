@@ -46,6 +46,13 @@ void Gen::emitSettleEntry(CellRef entryLabel) {
   endObservation(kTurnResultCommitted);
 }
 
+void emitHealthEntry(Gen &g, CellRef entryLabel) {
+  g.tail_  = std::nullopt;
+  g.frame_ = nullptr;
+  g.place(entryLabel);
+  g.endObservation(kTurnResultHealthUnavailable);
+}
+
 void Gen::emitHealthRescaled(CellRef prof, CellRef halfLife, CellRef r,
                              CellRef n, CellRef x, CellRef b, CellRef omb,
                              CellRef cap, CellRef vcR, CellRef vcN) {

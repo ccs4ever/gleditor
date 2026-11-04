@@ -159,3 +159,30 @@ Carried, recorded in design section 14:
 - the fuzzer launches an actor per input.
 
 I3-1b, I3-1c and I3-1d are accepted.
+
+## I3-2c1: health grants, host API, post order and stub turn
+
+Implemented from the I3-2 design (revision 4) without a per-slice review, by the lead's instruction:
+one full review follows the whole implementation.
+
+- **Added.** `health_grants.{hpp,cpp}` (grant, token, request, receipt, outcome and audit types),
+  `agent_executor_health.{hpp,cpp}` (`grantHealth`, `revokeHealthGrant`, `healthAction`,
+  `healthActionBatch`, `healthOutcome`, `setHealthAuditSink`, the in-flight reset snapshot),
+  `agent_executor_internal.hpp` (executor-private types moved out of `agent_executor.cpp`), the
+  `healthEntry` stub (`HealthUnavailable`) in `epistemic_emit_health.cpp`, and the limits
+  `epistemic_health_pending`, `_pending_per_grant` and `epistemic_control_per_wake`.
+- **Fix during completion.** The earlier partial work had rewritten the `Ingress` bookkeeping while
+  moving it, which broke seven existing tests (relayed-refusal charging, content-refusal counters).
+  The original bodies and comments were restored and only the new members were added.
+- **Tests.** `tests/xuzz/vagent_epistemic_grants_test.cpp`: refused grants, duplicate ids, unknown
+  actor, issuer as a bound or named source, token distinctness, wrong token, unnamed source and
+  kind, revocation, the stub outcome, audit sink and a throwing sink, unknown receipt.
+- **Result.** `vagent_actor_test`: 917 passed. `xuzz_test`: all failures (38) are E2E tests that
+  need the `vpl`, `vprolog` and `vquery` binaries, which are absent because the full `make` stops at
+  a link error in the TUI objects (`TerminalDevice` undefined in `build/vagent`'s link), a state
+  that predates this slice.
+
+Open, to be closed before the final review: tests for queued-item ordering (isolate behind a held
+item, `putBack`, reset snapshot), resume and in-process upgrade of grant state, fuzzer steps for
+health actions, the `FuzzTarget` update, the `HealthAudit::actionSeq` field (currently 0), and the
+`traceability.md` rows 4-18 and 8.2-4c, which stay open until then.

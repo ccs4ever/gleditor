@@ -192,9 +192,9 @@ CheckedObservation pickObservation(FuzzedDataProvider &in, double now,
   }
   constexpr std::array offsets{-5.0, -1.0,  -0.5, -0.01, 0.0,
                                -9.9, -11.0, 0.5,  30.0,  -1000.0};
-  o.acquiredAt = in.ConsumeIntegralInRange(0, 7) == 0
-                     ? pickDouble(in)
-                     : now + offsets[in.ConsumeIntegralInRange<std::size_t>(
+  o.acquiredAt          = in.ConsumeIntegralInRange(0, 7) == 0
+                              ? pickDouble(in)
+                              : now + offsets[in.ConsumeIntegralInRange<std::size_t>(
                                  0, offsets.size() - 1)];
   o.acquiredUncertainty = in.ConsumeIntegralInRange(0, 7) == 0
                               ? pickDouble(in)
@@ -249,6 +249,8 @@ std::string codeOf(const IngestOutcome &o) {
     return "Duplicate";
   case IngestOutcome::Kind::Refused:
     return o.code.value_or("Refused");
+  case IngestOutcome::Kind::NoChange:
+    return "NoChange";
   }
   return "?";
 }
@@ -301,8 +303,8 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data,
     // report mode reads it from its stat.
     const auto conflictStat = std::string(kStatRefusedPrefix) +
                               std::string(kTurnResultConflictingEvent);
-    const auto conflicts    = executor.stat(*pid, conflictStat);
-    const auto receipt      = executor.observe(*pid, o);
+    const auto conflicts = executor.stat(*pid, conflictStat);
+    const auto receipt   = executor.observe(*pid, o);
     host.pump();
     if (report && !receipt)
       std::fprintf(stderr, "receipt %s\n",

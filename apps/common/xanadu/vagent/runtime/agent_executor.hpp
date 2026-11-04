@@ -35,9 +35,11 @@
 #include <vector>
 
 #include "common/xanadu/resolver.hpp"
+#include "common/xanadu/vagent/runtime/agent_executor_health.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_health.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_ingress.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_limits.hpp"
+#include "common/xanadu/vagent/runtime/health_grants.hpp"
 #include "common/xanadu/vagent/runtime/host_bindings.hpp"
 #include "common/xanadu/vagent/runtime/runtime_abi.hpp"
 #include "common/xanadu/vagent/runtime/wire.hpp"
@@ -234,6 +236,16 @@ struct SourceChange;
 
 class AgentExecutor {
 public:
+  struct TurnSpec;
+  struct TurnOutcome;
+  struct OutboxItem;
+  struct HostEvent;
+  struct PostBox;
+  struct Flight;
+  struct PendingRequest;
+  struct State;
+  struct Ingress;
+
   AgentExecutor(zigzag::vortex::mesh::MeshActorRuntime &runtime,
                 CapabilityIssuer &issuer, AgentProgram &program,
                 identity::Fingerprint owner, std::string localNode,
@@ -394,6 +406,36 @@ public:
   [[nodiscard]] std::vector<SourceHealth>
   sourceHealths(const identity::ActorPid &pid) const;
 
+  /// Grant an operator authority to perform health actions on an actor's
+  /// sources (P19 I3-2c1). Returns the 16-byte secret token.
+  [[nodiscard]] std::expected<HealthGrantToken, EpistemicRefusal>
+  grantHealth(const identity::ActorPid &target,
+              const EpistemicHealthGrant &grant);
+
+  /// Revoke a health grant by its audit id. Returns the lower bound on
+  /// queued requests cancelled (not yet started), or UnknownGrant.
+  [[nodiscard]] std::expected<std::size_t, EpistemicRefusal>
+  revokeHealthGrant(const identity::ActorPid &target, std::string_view id);
+
+  /// Queue one operator health action under a grant token.
+  [[nodiscard]] std::expected<HealthReceipt, EpistemicRefusal>
+  healthAction(const identity::ActorPid &target,
+               const HealthActionRequest &request);
+
+  /// Queue an atomic batch of Isolate actions across multiple sources.
+  [[nodiscard]] std::expected<HealthReceipt, EpistemicRefusal>
+  healthActionBatch(const identity::ActorPid &target,
+                    const HealthBatchRequest &request);
+
+  /// Query the outcome of a health action by its receipt.
+  [[nodiscard]] HealthOutcomeView
+  healthOutcome(const identity::ActorPid &target,
+                const HealthReceipt &receipt) const;
+
+  /// Install a host callback for committed health actions and turn-time
+  /// refusals (R3-10). Chaining.
+  AgentExecutor *setHealthAuditSink(HealthAuditSink sink);
+
   /// Post an event of type @p type to @p target as a percept (§7.5): a host
   /// delivery with no source, run in a wake turn of its own, in arrival order
   /// with the other host deliveries. It takes no mailbox slot. Callable from
@@ -508,7 +550,6 @@ public:
   [[nodiscard]] bool isPrepared(const identity::ActorPid &pid) const;
 
 private:
-  struct State;
   struct Outstanding {
     std::string ownerKey;
     std::string node;
@@ -526,13 +567,6 @@ private:
     std::optional<identity::ActorPid> parent;
     WireRecord args;
   };
-  struct TurnSpec;
-  struct TurnOutcome;
-  struct OutboxItem;
-  struct HostEvent;
-  struct PostBox;
-  struct Flight;
-  struct PendingRequest;
 
   [[nodiscard]] std::optional<SpawnInfo>
   readSpawn(const zigzag::vortex::mesh::ActorMessage &request) const;
@@ -788,7 +822,6 @@ private:
   OwnedStateTranslator ownedStateTranslator_;
   std::shared_ptr<PostBox> posts_;
   /// Ingress authorization and execution outcomes; never learned state.
-  struct Ingress;
   std::shared_ptr<Ingress> ingress_;
   identity::ActorPid hostPid_;
   std::uint64_t launches_{0};
@@ -804,6 +837,20 @@ private:
   /// Per resumed pid, what the arena does not hold: whether the launcher had
   /// adopted it. Consumed by `prepare`.
   std::map<std::string, bool> resumeAdopted_;
+
+  void finishHealthItem(const identity::ActorPid &target,
+                        const QueuedHealth &qh, std::string_view code);
+  [[nodiscard]] bool wouldChangeHealth(const HealthAction &action,
+                                       const SourceHealth &snapshot,
+                                       const identity::ActorPid &target,
+                                       std::string_view principal) const;
+
+  std::atomic<std::uint64_t> nextHealthCounter_{1};
+  mutable std::mutex healthMutex_;
+  std::map<std::uint64_t, std::shared_ptr<PendingHealthRecord>> pendingHealth_;
+  std::map<std::string, std::deque<HealthOutcomeRecord>> healthOutcomeRing_;
+  mutable std::mutex auditSinkMutex_;
+  HealthAuditSink healthAuditSink_;
 };
 
 } // namespace xanadu::vagent::runtime

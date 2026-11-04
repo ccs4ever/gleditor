@@ -1909,7 +1909,7 @@ std::optional<Ty> Gen::capacityCall(const ECall &c, CellRef out,
   const auto arity       = [&](std::size_t n) {
     if (c.args.size() != n) {
       bail(CompileError::BadArity,
-           cap + "." + fn + " takes " + std::to_string(n) + " arguments", loc);
+                 cap + "." + fn + " takes " + std::to_string(n) + " arguments", loc);
     }
   };
   CellRef vc;
@@ -6462,6 +6462,8 @@ CompiledAgent Gen::run() {
     emitSourceChange(*out.sourceChangeEntry);
     out.settleEntry = newLabel();
     emitSettleEntry(*out.settleEntry);
+    out.healthEntry = newLabel();
+    emitHealthEntry(*this, *out.healthEntry);
   }
   for (const auto &member : agent_->members) {
     if (const auto *field = std::get_if<VarDecl>(&member))

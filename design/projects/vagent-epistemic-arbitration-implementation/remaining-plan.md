@@ -1564,6 +1564,10 @@ T1-D, is a design slice (section 4.4).*
 
 ## 5. Review gates
 
+**Superseded for scheduling** by [decisions.md section 0.1](decisions.md) (2026-11-04): reviews run
+once per milestone with at most three personas and no confirmation rounds. The table below still
+names the concerns each slice raises; the milestone reviewers cover them.
+
 Personas: **ML** machine-learning expert; **NUM** numerics; **ARCH** architect; **DIST** distributed
 systems; **CODE** codebase and compiler; **VM** Vortex and VM; **EPI** epistemology; **SENS**
 sensor-fault and hardware; **SEC** security. The README rule holds: the ML expert reads the design

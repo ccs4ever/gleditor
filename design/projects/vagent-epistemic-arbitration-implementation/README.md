@@ -16,7 +16,8 @@ observation/label epoch migration, learning/correction replay and native model c
 as online SGD. No ML-related iteration is accepted or enabled while a BLOCKING or MAJOR finding is
 open. A failed gate is fixed and reviewed again; passing tests alone does not close it. Review
 records identify the exact iteration input and evidence. The expert does not implement what they
-review. Reports stay in this project or the existing review record.
+review. Reviews run per milestone, not per slice, under [decisions.md section 0.1](decisions.md).
+Reports stay in this project or the existing review record.
 
 ## Iterations and evidence
 

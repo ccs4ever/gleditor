@@ -1,4 +1,5 @@
 #include "common/xanadu/vagent/runtime/agent_executor.hpp"
+#include "common/xanadu/vagent/runtime/agent_executor_internal.hpp"
 
 #include "common/xanadu/provenance.hpp"
 #include "common/xanadu/store.hpp"
@@ -468,604 +469,6 @@ AgentClock AgentClock::system() {
                     .steady = [] { return std::chrono::steady_clock::now(); }};
 }
 
-struct AgentExecutor::Flight {
-  std::uint64_t token{};
-  std::string skill;
-  std::string capacity;
-  std::string method;
-  std::optional<std::int64_t> intention;
-  std::int64_t deadline{};
-};
-
-/// An `ask` or delegated `achieve` this agent sent and has not yet settled.
-/// Adapter-side only: a wait that outlives a checkpoint fails as migrated.
-struct AgentExecutor::PendingRequest {
-  bool ask{true};
-  std::int64_t intention{};
-  std::int64_t key{};
-  /// The delegate, whom only an outcome or refusal may speak for.
-  std::string to;
-};
-
-struct AgentExecutor::State {
-  identity::ActorPid pid;
-  std::string name;
-  std::string parentName;
-  std::string agentType;
-  std::string prefix;
-  std::optional<identity::ActorPid> parentPid;
-  std::shared_ptr<AgentProgram> program;
-  CompiledAgent agent{};
-  AgentDims dims{};
-  ValueDims vd{};
-  WorkerContext *context{};
-  bool prepared{false};
-  std::map<std::string, std::string> floors;
-  std::map<std::string, std::uint64_t, std::less<>> pendingStats;
-  std::size_t sinceCompact{0};
-  /// Events the host raises for the agent, run as turns of their own.
-  std::vector<AgentExecutor::HostEvent> hostEvents;
-  /// True inside `execute`: the arena is the runtime's and mid-turn.
-  bool inTurn{false};
-  /// The next wake only refreshes the lease and runs no dispatch.
-  bool quietWake{false};
-  /// What the last `execute` was given, so the adapter can run a turn between
-  /// executor calls (lease end) and knows when the lease runs out.
-  std::optional<zigzag::vortex::mesh::ActorGrant> grant;
-  CellRef cursor{};
-  std::chrono::system_clock::time_point leaseSeen;
-  /// Re-parented to the launcher by `Orphaned`: its `ChildStopping` goes to
-  /// the host sink, since the launcher is no actor.
-  bool adopted{false};
-  /// `$turn.time` of the turn in progress, so the drain files a timer against
-  /// the same instant the handler saw.
-  std::int64_t turnMillis{0};
-  /// Rebuilt by `resume`: the first executor call announces `Moved`.
-  bool resumed{false};
-  /// Effects started and not yet reported, by the id the agent gave them.
-  std::map<std::int64_t, AgentExecutor::Flight> flights;
-  /// Requests awaiting a reply, by the request id they were sent under (which
-  /// is also a delegation's correlation id).
-  std::map<std::string, AgentExecutor::PendingRequest> requests;
-  /// The intention the next wake turn continues, set by `wakeReady` just
-  /// before it asks the runtime for the wake.
-  std::optional<std::int64_t> wakeIntention;
-  /// Wake turns since the agent's last message turn (`ready_per_message`).
-  std::size_t wakesSinceMessage{0};
-
-  struct ReadyIntention {
-    std::int64_t id{};
-    std::int64_t since{};
-  };
-  enum class DeadlineKind : std::uint8_t { Waiting, Timer, Effect };
-  struct Deadline {
-    std::int64_t at{};
-    DeadlineKind kind{};
-    std::int64_t id{};
-  };
-  /// Functions of cells (§5.6): never trusted across a `resume`.
-  struct Schedule {
-    std::vector<ReadyIntention> ready;
-    /// A min-heap on `at`.
-    std::vector<Deadline> deadlines;
-  } schedule;
-};
-
-/// Where the host's threads leave what the owner thread will deliver: the
-/// percepts of §7.5 and the results of effects (§5.3).
-/// The event a queued ingestion stands for, so its outcome can be logged.
-struct IngestKey {
-  std::string principal;
-  std::uint64_t incarnation{};
-  std::string eventId;
-  std::string predicate;
-  /// The transport principal when it differs from the origin signer: a
-  /// relayed copy never shows the device alive, and holds a relay's share.
-  std::optional<std::string> relay;
-  double receivedSteady{};
-  /// The origin's sequence, for the estimator's high-water mark.
-  std::uint64_t sequence{};
-  /// Whether the estimator counts this reading, decided in `observe` under
-  /// the ingress lock (design 3.2): deciding at commit against a mark that a
-  /// later credited reading had raised would count an earlier one as stale.
-  bool counts{false};
-};
-
-/// Refusals not yet charged, by pid and principal. They coalesce, so a flood
-/// of refused events costs one bookkeeping turn, not one each. Declared before
-/// the post box because a closed charge travels in its note (R3-4).
-struct IngressCharge {
-  std::int64_t content{};
-  std::int64_t other{};
-  /// Health refusals and pass credits the host has already de-duplicated by
-  /// the stream's high-water mark: increments for the estimator, not tallies.
-  std::int64_t health{};
-  std::int64_t passed{};
-  /// The newest charged refusal; a charge exists only once one is made.
-  std::string code;
-  std::optional<double> contact;
-};
-
-/// An incarnation advance or a retirement for one principal (P19 I3-1c).
-struct SourceChange {
-  std::string principal;
-  /// Absent for the retirement of a principal no binding names: the turn
-  /// then keeps whatever floor the arena already holds.
-  std::optional<std::uint64_t> incarnation;
-  bool retire{false};
-};
-
-struct AgentExecutor::PostBox {
-  struct Item {
-    identity::ActorPid pid;
-    bool percept{false};
-    std::string type;
-    WireRecord fields;
-    /// A checked observation for the agent's ingestion turn.
-    std::optional<WireRecord> observation;
-    std::optional<IngestKey> ingest;
-    /// A principal with refusals waiting to be charged to its profile.
-    std::optional<std::string> refusalsOf;
-    /// The charge this note carries once an accept for the principal queued
-    /// behind it closed it; absent, the drain takes the open charge.
-    std::optional<IngressCharge> charge;
-    /// Runs before anything queued for the agent.
-    std::optional<SourceChange> sourceChange;
-    std::int64_t effect{};
-    EffectResult result;
-  };
-  mutable std::mutex mutex;
-  std::deque<Item> items;
-  /// An `eventfd` a reactor can `poll(2)`, made on first request. It is
-  /// written under the same lock as the queue so a wakeup is never lost
-  /// between a post and the reactor's next wait.
-  std::optional<int> notifyFd;
-
-  PostBox()                           = default;
-  PostBox(const PostBox &)            = delete;
-  PostBox &operator=(const PostBox &) = delete;
-  ~PostBox() {
-    if (notifyFd) ::close(*notifyFd);
-  }
-
-  /// Caller holds `mutex`. Every enqueue path ends here so none can leave a
-  /// reactor blocked on a queue that is no longer empty.
-  void signalLocked() {
-    if (!notifyFd) return;
-    const std::uint64_t one = 1;
-    (void)!::write(*notifyFd, &one, sizeof one);
-  }
-  void push(Item item) {
-    const std::lock_guard lock(mutex);
-    items.push_back(std::move(item));
-    signalLocked();
-  }
-  [[nodiscard]] std::optional<int> descriptor() {
-    const std::lock_guard lock(mutex);
-    if (!notifyFd) {
-#if defined(__linux__)
-      const int fd = ::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
-      if (fd < 0) return std::nullopt;
-      notifyFd = fd;
-      // Anything posted before the descriptor existed must still wake.
-      if (!items.empty()) {
-        const std::uint64_t one = 1;
-        (void)!::write(fd, &one, sizeof one);
-      }
-#else
-      // No eventfd: the reactor falls back to a bounded poll timeout.
-      return std::nullopt;
-#endif
-    }
-    return notifyFd;
-  }
-  void drainDescriptor() {
-    const std::lock_guard lock(mutex);
-    if (!notifyFd) return;
-    std::uint64_t count = 0;
-    while (::read(*notifyFd, &count, sizeof count) > 0) {
-    }
-  }
-  std::deque<Item> take() {
-    const std::lock_guard lock(mutex);
-    return std::exchange(items, {});
-  }
-  /// A source change: ahead of every other post, behind the source changes
-  /// already waiting, so two calls for one principal run in call order.
-  void pushControl(Item item) {
-    const std::lock_guard lock(mutex);
-    const auto after = std::ranges::find_if_not(items, [](const Item &waiting) {
-      return waiting.sourceChange.has_value();
-    });
-    items.insert(after, std::move(item));
-    signalLocked();
-  }
-  /// Put back, ahead of anything newer, what the owner could not yet place.
-  /// Deliberately silent: each item signalled when it was posted, and the
-  /// owner drains again after the first turn or turn end that frees it. A
-  /// signal here would wake the reactor to find nothing new, every pass,
-  /// for as long as the item stays kept.
-  void putBack(std::vector<Item> kept) {
-    const std::lock_guard lock(mutex);
-    items.insert(items.begin(), std::make_move_iterator(kept.begin()),
-                 std::make_move_iterator(kept.end()));
-  }
-  /// Close @p charge into the first waiting note of @p principal that has
-  /// none, so refusals decided before an accept are charged ahead of it.
-  /// False when no such note waits (the drain took it); the caller then keeps
-  /// the charge open.
-  bool attachCharge(const identity::ActorPid &pid, const std::string &principal,
-                    IngressCharge charge) {
-    const std::lock_guard lock(mutex);
-    for (auto &item : items)
-      if (item.pid == pid && item.refusalsOf == principal && !item.charge) {
-        item.charge = std::move(charge);
-        return true;
-      }
-    return false;
-  }
-  bool pendingFor(const identity::ActorPid &pid) const {
-    const std::lock_guard lock(mutex);
-    return std::ranges::any_of(
-        items, [&](const Item &item) { return item.pid == pid; });
-  }
-};
-
-struct AgentExecutor::TurnSpec {
-  /// Nullopt: no routine runs (a relay the host does not also handle).
-  std::optional<CellRef> entry;
-  /// The intention a wake turn continues, or the one a recovery turn records
-  /// the failure of; `cause` is set for the recovery turn alone.
-  std::optional<std::int64_t> intention;
-  std::string cause;
-  /// A received event to expose as `$turn.event`, and the space it came by.
-  const Envelope *event{};
-  std::string space;
-  /// An emission this agent hosts a space for, to fan out after the turn.
-  const Envelope *relayed{};
-  bool markInitialized{false};
-  /// An `answer` turn (§7.1): read `$answer`, then undo the turn whether or
-  /// not it succeeded, so the answer cannot have written anything.
-  bool readOnly{false};
-  /// The private upgrade transaction commits effects only after runtime swap.
-  bool deferDrain{false};
-  /// Extra fields of `$turn`, for a turn that needs more than `time`.
-  WireRecord turnFields;
-  /// Checked after a routine reports `Committed` and before the commit; a
-  /// code turns the turn into that refusal (ingestion's cell budget).
-  std::function<std::optional<std::string>()> admit;
-};
-
-struct AgentExecutor::TurnOutcome {
-  bool committed{false};
-  std::string cause;
-  /// The value a `readOnly` turn left in `$answer`.
-  std::optional<WireValue> answer;
-  /// The code a routine left in `$turn_result`. Anything but `Committed` is a
-  /// typed refusal: the turn was undone and the code is all that remains.
-  std::optional<std::string> result;
-};
-
-struct AgentExecutor::Ingress {
-  struct Binding {
-    std::string alias;
-    std::uint64_t incarnation{};
-    zigzag::vortex::mesh::ActorTime expiresAt;
-    ArbitrationPolicy policy;
-    std::vector<Type::Kind> params;
-    /// The predicate's name and arity with its policy hash, stamped on
-    /// every record ingested under the binding.
-    std::string domain;
-  };
-  /// One event's entry in its source's outcome log.
-  struct Logged {
-    std::uint64_t incarnation{};
-    std::string eventId;
-    IngestOutcome outcome;
-    /// The refusal this event was last charged for, kept while the entry
-    /// moves on, so a resend meeting it again is not charged twice.
-    std::optional<std::string> charged;
-    /// Whether a directly received copy was among those charged: a relayed
-    /// copy charged first must not hide the device's own.
-    bool chargedDirect{false};
-  };
-  /// The lowest incarnation a new binding may present, as far as the host
-  /// knows: the arena's floor reaches the host only through the turns that
-  /// set it, so the advance turn still has the last word.
-  struct Floor {
-    std::uint64_t incarnation{};
-    /// A tombstone's or a refused advance's floor must be exceeded; a live
-    /// profile's may be met again (a rebind of the same boot).
-    bool strict{false};
-  };
-  using SourceKey = std::pair<std::string, std::string>; // pid, principal
-
-  mutable std::mutex mutex;
-  /// By pid, principal and predicate.
-  std::map<std::tuple<std::string, std::string, std::string>, Binding> bindings;
-  /// By pid and alias: the principal an alias routes to.
-  std::map<SourceKey, std::string> aliases;
-  /// Ingestions queued or running per actor, per origin principal and per
-  /// relay, counted until their turn completes.
-  std::map<std::string, std::size_t> queued;
-  std::map<SourceKey, std::size_t> queuedBy;
-  std::map<SourceKey, std::size_t> queuedVia;
-  /// Per source, so no source's flood evicts another's outcomes.
-  std::map<SourceKey, std::deque<Logged>> outcomes;
-  std::map<SourceKey, Floor> floors;
-  /// The newest advance or retire turn's outcome per source.
-  std::map<SourceKey, IngestOutcome> changes;
-  using Charge = IngressCharge;
-  std::map<SourceKey, Charge> charges;
-  /// A stream's estimator state (design 3.2): the newest sequence a commit or
-  /// a pass credit moved the estimator past, and the sequences of counted
-  /// refusals above it. Host memory, lost with the host.
-  struct EstimatorMark {
-    /// Raised only by a commit or a pass credit, never by a refusal: a
-    /// refusal's sequence is any Int64 the device chose, so a mark it raised
-    /// could freeze the estimator for the life of the incarnation.
-    std::optional<std::uint64_t> mark;
-    /// Oldest first; at most `healthReplayRing`.
-    std::deque<std::uint64_t> counted;
-  };
-  using StreamKey =
-      std::tuple<std::string, std::string, std::uint64_t, std::string>;
-  std::map<StreamKey, EstimatorMark> marks;
-  /// Chargeable refusals the estimator did not count since the source last
-  /// committed.
-  std::map<SourceKey, std::uint64_t> uncounted;
-  /// Unknown until the host's time service reports: a wall-basis reading
-  /// taken before then cannot be placed in time.
-  bool wallSynchronised{false};
-  /// Names this executor's steady clock: received_steady and last_contact
-  /// stamps are comparable only between records that carry the same one.
-  std::string clockInstance = [] {
-    std::random_device device;
-    std::uint64_t bits = (std::uint64_t{device()} << 32) | device();
-    char out[17];
-    std::snprintf(out, sizeof out, "%016llx",
-                  static_cast<unsigned long long>(bits));
-    return std::string(out);
-  }();
-
-  /// One entry per event, updated in place as the event moves on. A
-  /// committed event stays committed: a later resend, relay or refusal of
-  /// the same key is a retry of an event the store already holds.
-  void log(const SourceKey &source, std::size_t bound,
-           std::uint64_t incarnation, std::string_view eventId,
-           IngestOutcome outcome) {
-    auto &q = outcomes[source];
-    for (auto &entry : q)
-      if (entry.incarnation == incarnation && entry.eventId == eventId) {
-        if (entry.outcome.kind != IngestOutcome::Kind::Committed &&
-            entry.outcome.kind != IngestOutcome::Kind::Duplicate)
-          entry.outcome = std::move(outcome);
-        return;
-      }
-    q.push_back({incarnation, std::string(eventId), std::move(outcome)});
-    while (q.size() > bound) q.pop_front();
-  }
-  [[nodiscard]] const Logged *find(const SourceKey &source,
-                                   std::uint64_t incarnation,
-                                   std::string_view eventId) const {
-    const auto q = outcomes.find(source);
-    if (q == outcomes.end()) return nullptr;
-    for (const auto &entry : q->second)
-      if (entry.incarnation == incarnation && entry.eventId == eventId)
-        return &entry;
-    return nullptr;
-  }
-  /// Whether a refusal of this event is charged: once per code, and once
-  /// more for the first direct copy after relayed ones. Call after logging
-  /// the event, so its entry exists.
-  bool firstCharge(const SourceKey &source, std::uint64_t incarnation,
-                   std::string_view eventId, std::string_view code,
-                   bool relayed) {
-    const auto q = outcomes.find(source);
-    if (q == outcomes.end()) return true;
-    for (auto &entry : q->second) {
-      if (entry.incarnation != incarnation || entry.eventId != eventId)
-        continue;
-      if (entry.charged == code && (entry.chargedDirect || relayed))
-        return false;
-      entry.charged = std::string(code);
-      entry.chargedDirect |= !relayed;
-      return true;
-    }
-    return true;
-  }
-  /// Whether the estimator would count a reading of @p stream at @p sequence:
-  /// above the mark (or the stream has none) and not already counted.
-  [[nodiscard]] bool estimatorCounts(const StreamKey &stream,
-                                     std::uint64_t sequence) const {
-    const auto found = marks.find(stream);
-    if (found == marks.end()) return true;
-    const auto &m = found->second;
-    if (m.mark && sequence <= *m.mark) return false;
-    return std::ranges::find(m.counted, sequence) == m.counted.end();
-  }
-  /// Remember a counted refusal's sequence, the oldest leaving at @p ring.
-  void rememberCounted(const StreamKey &stream, std::uint64_t sequence,
-                       std::size_t ring) {
-    auto &counted = marks[stream].counted;
-    counted.push_back(sequence);
-    while (counted.size() > ring) counted.pop_front();
-  }
-  /// Raise the mark (a commit or a credit) and drop the refusals it passed.
-  void raiseMark(const StreamKey &stream, std::uint64_t sequence) {
-    auto &m = marks[stream];
-    if (!m.mark || sequence > *m.mark) m.mark = sequence;
-    std::erase_if(m.counted, [&](auto s) { return s <= *m.mark; });
-  }
-  /// The share of the actor queue one principal or relay may hold: the
-  /// per-source bound, shrunk so every bound source keeps a slot.
-  [[nodiscard]] std::size_t share(const std::string &pid, std::size_t queue,
-                                  std::size_t perSource) const {
-    std::set<std::string> sources;
-    for (const auto &[key, binding] : bindings)
-      if (std::get<0>(key) == pid) sources.insert(std::get<1>(key));
-    const auto fair = queue / std::max<std::size_t>(sources.size(), 1);
-    return std::clamp<std::size_t>(fair, 1, perSource);
-  }
-  /// Release one queued ingestion's slots.
-  void release(const std::string &pid, const std::string &principal,
-               const std::optional<std::string> &relay) {
-    const auto down = [](auto &map, const auto &key) {
-      if (const auto it = map.find(key); it != map.end() && --it->second == 0)
-        map.erase(it);
-    };
-    down(queued, pid);
-    down(queuedBy, SourceKey{pid, principal});
-    if (relay) down(queuedVia, SourceKey{pid, *relay});
-  }
-  /// Unbind one (principal, predicate), keeping its alias while another
-  /// binding of the same principal still routes by it.
-  void unbind(const std::string &pid, const std::string &principal,
-              const std::string &predicate) {
-    const auto found = bindings.find({pid, principal, predicate});
-    if (found == bindings.end()) return;
-    const auto alias = found->second.alias;
-    bindings.erase(found);
-    const bool stillUsed = std::ranges::any_of(bindings, [&](const auto &b) {
-      return std::get<0>(b.first) == pid && std::get<1>(b.first) == principal &&
-             b.second.alias == alias;
-    });
-    if (!stillUsed) aliases.erase({pid, alias});
-  }
-  void unbindAll(const std::string &pid, const std::string &principal) {
-    std::vector<std::string> predicates;
-    for (const auto &[key, binding] : bindings)
-      if (std::get<0>(key) == pid && std::get<1>(key) == principal)
-        predicates.push_back(std::get<2>(key));
-    for (const auto &predicate : predicates) unbind(pid, principal, predicate);
-  }
-  /// Drop everything held for a stopped actor: its bindings authorize
-  /// nothing now, and nothing will query or drain its queues again.
-  void forget(const std::string &pid) {
-    std::erase_if(bindings,
-                  [&](const auto &b) { return std::get<0>(b.first) == pid; });
-    const auto mine = [&](const auto &entry) {
-      return entry.first.first == pid;
-    };
-    std::erase_if(aliases, mine);
-    queued.erase(pid);
-    std::erase_if(queuedBy, mine);
-    std::erase_if(queuedVia, mine);
-    std::erase_if(outcomes, mine);
-    std::erase_if(floors, mine);
-    std::erase_if(changes, mine);
-    std::erase_if(charges, mine);
-    std::erase_if(uncounted, mine);
-    std::erase_if(marks, [&](const auto &entry) {
-      return std::get<0>(entry.first) == pid;
-    });
-  }
-  /// Record one refusal against @p principal; true when it is the first
-  /// since the last bookkeeping turn, so the caller posts a note for it.
-  /// @p lifetime is `firstCharge`'s answer and feeds the lifetime counters and
-  /// the contact stamp; @p health is the estimator's own, already gated by the
-  /// stream's mark (R3-3): the two never share a mechanism.
-  bool charge(const std::string &pid, const std::string &principal,
-              std::string_view code, bool relayed, double receivedSteady,
-              bool lifetime, bool health) {
-    if (!chargeable(code) || (!lifetime && !health)) return false;
-    auto [it, fresh] = charges.try_emplace({pid, principal});
-    auto &c          = it->second;
-    if (lifetime) {
-      if (!relayed && isContentRefusal(code)) {
-        ++c.content;
-        c.contact =
-            std::max(c.contact.value_or(receivedSteady), receivedSteady);
-      } else {
-        ++c.other;
-      }
-    }
-    if (health) ++c.health;
-    c.code = std::string(code);
-    return fresh;
-  }
-  /// Frame, unit, variance and time refusals: the device demonstrably sent
-  /// what the policy cannot use. Charging is host bookkeeping about the
-  /// transport (which counter a refusal lands in), not a judgement of the
-  /// reading, so it stays with the ingress that classified the refusal.
-  static bool isContentRefusal(std::string_view code) {
-    return code == "ObservationFrameMismatch" || code == "MissingVariance" ||
-           code == "InvalidVariance" || code == "ObservationTimeMismatch" ||
-           code == "UncertainAcquisition" || code == "StaleObservation" ||
-           code == "InvalidValue" || code == "InvalidAcquisition" ||
-           code == kTurnResultClockEpochRegression ||
-           code == kTurnResultClockMappingRegression;
-  }
-  /// Whether a refusal moves the estimator (design 3.1): decided on the
-  /// device's own bytes or epoch. A relayed copy counts only when decided on
-  /// signed fields, so a hostile relay cannot fabricate refusals.
-  static bool isHealthRefusal(std::string_view code, bool relayed) {
-    return isHealthRefusalCode(code, relayed);
-  }
-  /// The host's own conditions, its pending actions and runtime defects are
-  /// never the source's.
-  static bool chargeable(std::string_view code) {
-    return code != "ClockUnsynchronised" && code != "IngressBackpressure" &&
-           code != "UnknownSource" && code != kTurnResultIngestionFault &&
-           code != kTurnResultTurnExhausted &&
-           code != kTurnResultArenaExhausted &&
-           code != kTurnResultEpistemicBudget &&
-           code != kTurnResultUnboundIncarnation &&
-           code != kTurnResultUndelivered && code != kSettleFailedLabel;
-  }
-};
-
-struct AgentExecutor::HostEvent {
-  std::string type;
-  WireRecord fields;
-  std::optional<IngestKey> ingest;
-  std::optional<SourceChange> sourceChange;
-  /// A routine other than the dispatcher, run with `turnFields` as extra
-  /// `$turn` fields and no event (an ingestion turn).
-  std::optional<CellRef> entry;
-  WireRecord turnFields;
-};
-
-struct AgentExecutor::OutboxItem {
-  std::string kind;
-  // event
-  Envelope envelope;
-  std::string space;
-  std::vector<std::string> forNames;
-  bool hasFor{false};
-  // spawn
-  std::string agentType;
-  std::string childName;
-  WireRecord args;
-  // stop
-  bool keepChildren{false};
-  // timer, timer_cancel
-  std::int64_t timerId{0};
-  std::int64_t delayMs{0};
-  std::int64_t periodMs{0};
-  // log
-  std::string level;
-  std::string message;
-  // effect, effect_cancel
-  std::int64_t effectId{0};
-  std::string skill;
-  std::string capacity;
-  std::string method;
-  WireList effectArgs;
-  std::int64_t deadlineMs{0};
-  std::optional<std::int64_t> intention;
-  bool preempts{false};
-  // ask, achieve, cancel, outcome, refuse
-  std::int64_t reqId{0};
-  std::string reqTo;
-  std::string reqName;
-  WireRecord reqArgs;
-  std::int64_t reqDeadlineMs{0};
-  std::string correlation;
-  std::string status;
-  std::string cause;
-};
-
 AgentExecutor::AgentExecutor(zigzag::vortex::mesh::MeshActorRuntime &runtime,
                              CapabilityIssuer &issuer, AgentProgram &program,
                              identity::Fingerprint owner, std::string localNode,
@@ -1105,6 +508,11 @@ AgentExecutor::AgentExecutor(zigzag::vortex::mesh::MeshActorRuntime &runtime,
                       ep.healthHalfLife, ep.ingressQueuePerSource,
                       std::exp2(static_cast<double>(ep.ingressQueuePerSource) /
                                 static_cast<double>(ep.healthHalfLife)));
+  if (settings_.epistemic.healthPending <= 4)
+    GLEDITOR_LOG_WARN(kLog,
+                      "epistemic health pending {} is at or below 4: no "
+                      "reserved lane for isolate and reset",
+                      settings_.epistemic.healthPending);
 }
 
 bool AgentExecutor::retainProgram(std::shared_ptr<AgentProgram> program) {
@@ -1406,7 +814,8 @@ bool AgentExecutor::prepare(State &state, WorkerContext &context,
         !sound(compiled->failOp) ||
         (compiled->continueEntry && !sound(*compiled->continueEntry)) ||
         (compiled->failStepEntry && !sound(*compiled->failStepEntry)) ||
-        (compiled->settleEntry && !sound(*compiled->settleEntry))) {
+        (compiled->settleEntry && !sound(*compiled->settleEntry)) ||
+        (compiled->healthEntry && !sound(*compiled->healthEntry))) {
       GLEDITOR_LOG_DEBUG(kLog, "instantiate returned a cell the arena lacks");
       return false;
     }
@@ -1618,8 +1027,8 @@ AgentExecutor::execute(const ActorExecution &execution,
     // run a dispatch with no event.
     const auto intention = std::exchange(state.wakeIntention, std::nullopt);
     const bool plain     = !justInitialised && !state.quietWake &&
-                           state.hostEvents.empty() && !intention;
-    state.quietWake      = false;
+                       state.hostEvents.empty() && !intention;
+    state.quietWake = false;
     if (intention && state.agent.continueEntry) {
       continueIntention(state, *intention, execution.grant, context);
     } else if (plain) {
@@ -1996,6 +1405,141 @@ AgentExecutor::TurnOutcome AgentExecutor::deliverHost(State &state,
           return std::string(kTurnResultEpistemicBudget);
         return std::nullopt;
       };
+    if (event.health) {
+      bool authorized = false;
+      {
+        const std::lock_guard lock(ingress_->mutex);
+        const auto it = ingress_->healthGrants.find(pidKey(state.pid));
+        if (it != ingress_->healthGrants.end()) {
+          for (auto &g : it->second) {
+            if (!g.revoked &&
+                CRYPTO_memcmp(g.tokenDigest.data(),
+                              event.health->tokenDigest.data(), 32) == 0) {
+              if (clock_.steady() <= g.expiresAt && g.remainingActions > 0 &&
+                  std::ranges::find(g.sources, event.health->principal) !=
+                      g.sources.end() &&
+                  std::ranges::find(g.actions,
+                                    actionKindOf(event.health->action)) !=
+                      g.actions.end()) {
+                bool f14Pass = true;
+                if (g.issuer &&
+                    std::ranges::find(g.sources, g.issuer->asString()) !=
+                        g.sources.end())
+                  f14Pass = false;
+                for (const auto &[key, _] : ingress_->bindings) {
+                  if (g.issuer && std::get<1>(key) == g.issuer->asString())
+                    f14Pass = false;
+                }
+                for (const auto &[actorKey, statePtr] : states_) {
+                  if (statePtr && statePtr->context && statePtr->prepared) {
+                    const auto &arena = statePtr->context->arena;
+                    for (const auto prof :
+                         zigzag::rankAfter(arena, statePtr->agent.agentCell,
+                                           statePtr->dims.trust)) {
+                      if (g.issuer &&
+                          arena.textOf(prof) == g.issuer->asString())
+                        f14Pass = false;
+                    }
+                  }
+                }
+                if (f14Pass) {
+                  authorized = true;
+                  break;
+                }
+              }
+            }
+          }
+        }
+      }
+      if (!authorized) {
+        finishHealthItem(state.pid, *event.health,
+                         kTurnResultUnauthorizedHealthAction);
+        TurnOutcome outcome;
+        outcome.result = std::string(kTurnResultUnauthorizedHealthAction);
+        return outcome;
+      }
+      const auto snapshot = sourceHealth(state.pid, event.health->principal);
+      if (snapshot && !wouldChangeHealth(event.health->action, *snapshot,
+                                         state.pid, event.health->principal)) {
+        finishHealthItem(state.pid, *event.health, "NoChange");
+        TurnOutcome outcome;
+        outcome.result = std::string("NoChange");
+        return outcome;
+      }
+      {
+        const std::lock_guard lock(ingress_->mutex);
+        auto &actorGrants = ingress_->healthGrants[pidKey(state.pid)];
+        for (auto &g : actorGrants) {
+          if (!g.revoked &&
+              CRYPTO_memcmp(g.tokenDigest.data(),
+                            event.health->tokenDigest.data(), 32) == 0) {
+            if (g.remainingActions > 0) g.remainingActions--;
+            break;
+          }
+        }
+      }
+      if (context.arena.cellCount() >= settings_.epistemic.arenaSlots) {
+        finishHealthItem(state.pid, *event.health, kTurnResultArenaExhausted);
+        TurnOutcome exhausted;
+        exhausted.result = std::string(kTurnResultArenaExhausted);
+        return exhausted;
+      }
+      WireRecord healthRec;
+      healthRec.set(std::string(kHealthTurnSource),
+                    WireValue::text(event.health->principal));
+      healthRec.set(std::string(kHealthTurnKind),
+                    WireValue::text(std::string(healthActionKindName(
+                        actionKindOf(event.health->action)))));
+      std::visit(
+          [&](const auto &a) {
+            using T = std::decay_t<decltype(a)>;
+            if constexpr (std::is_same_v<T, Isolate>) {
+              if (!a.code.empty())
+                healthRec.set(std::string(kHealthTurnCode),
+                              WireValue::text(a.code));
+            } else if constexpr (std::is_same_v<T, Degrade>) {
+              if (!a.code.empty())
+                healthRec.set(std::string(kHealthTurnCode),
+                              WireValue::text(a.code));
+            } else if constexpr (std::is_same_v<T, Clear>) {
+              if (a.code)
+                healthRec.set(std::string(kHealthTurnCode),
+                              WireValue::text(*a.code));
+            } else if constexpr (std::is_same_v<T, Reset>) {
+              healthRec.set(std::string(kHealthTurnExpectResetEpoch),
+                            WireValue::integer(
+                                static_cast<std::int64_t>(a.expectResetEpoch)));
+            }
+          },
+          event.health->action);
+      healthRec.set(std::string(kHealthTurnGrant),
+                    WireValue::text(event.health->grantId));
+      healthRec.set(std::string(kHealthTurnIssuer),
+                    WireValue::text(event.health->issuer
+                                        ? event.health->issuer->asString()
+                                        : ""));
+      healthRec.set(std::string(kHealthTurnMaxSources),
+                    WireValue::integer(static_cast<std::int64_t>(
+                        settings_.epistemic.maxSources)));
+      healthRec.set(std::string(kHealthTurnRetained),
+                    WireValue::integer(static_cast<std::int64_t>(
+                        settings_.epistemic.history *
+                        settings_.epistemic.keysPerSource)));
+      healthRec.set(std::string(kHealthTurnSequenceGap),
+                    WireValue::integer(settings_.epistemic.healthSequenceGap));
+      if (ingress_->wallSynchronised) {
+        healthRec.set(std::string(kHealthTurnWall),
+                      WireValue::real(toSeconds(wallNow().time_since_epoch())));
+      }
+      spec.turnFields.set(std::string(kTurnHealth),
+                          WireValue::record(std::move(healthRec)));
+      spec.entry   = state.agent.healthEntry;
+      auto outcome = runTurn(state, cursor, grant, context, spec);
+      const auto code =
+          outcome.result.value_or(std::string(kTurnResultHealthUnavailable));
+      finishHealthItem(state.pid, *event.health, code);
+      return outcome;
+    }
     // Slots are never reused, so past the allowance only a checkpoint and
     // resume helps; no epistemic turn runs, rather than fail mid-turn.
     if (context.arena.cellCount() >= settings_.epistemic.arenaSlots) {
@@ -2004,6 +1548,8 @@ AgentExecutor::TurnOutcome AgentExecutor::deliverHost(State &state,
       if (event.ingest) finishIngest(state, *event.ingest, *exhausted.result);
       if (event.sourceChange)
         finishSourceChange(state, *event.sourceChange, *exhausted.result);
+      if (event.health)
+        finishHealthItem(state.pid, *event.health, *exhausted.result);
       return exhausted;
     }
     auto outcome = runTurn(state, cursor, grant, context, spec);
@@ -2013,6 +1559,7 @@ AgentExecutor::TurnOutcome AgentExecutor::deliverHost(State &state,
             ? std::string(kTurnResultTurnExhausted)
             : std::string(kTurnResultIngestionFault));
     if (event.ingest) finishIngest(state, *event.ingest, code);
+    if (event.health) finishHealthItem(state.pid, *event.health, code);
     if (event.sourceChange) {
       // The change has committed with its belief events still queued; they
       // settle here, before any other item or turn for this actor, and the
@@ -2064,6 +1611,13 @@ void AgentExecutor::finishIngest(State &state, const IngestKey &ingest,
   const Ingress::SourceKey source{pid, ingest.principal};
   const std::lock_guard lock(ingress_->mutex);
   ingress_->release(pid, ingest.principal, ingest.relay);
+  auto &predMap = ingress_->inFlight[source];
+  auto pIt      = predMap.find(ingest.predicate);
+  if (pIt != predMap.end()) {
+    auto sIt = pIt->second.find(static_cast<std::int64_t>(ingest.sequence));
+    if (sIt != pIt->second.end()) pIt->second.erase(sIt);
+    if (pIt->second.empty()) predMap.erase(pIt);
+  }
   const auto *held = ingress_->find(source, ingest.incarnation, ingest.eventId);
   // A refusal of an event already committed (a resend past the window) is a
   // retry, not the device's fault.
@@ -2223,27 +1777,48 @@ void AgentExecutor::finishSourceChange(State &state, const SourceChange &change,
 
 void AgentExecutor::dropHostEvents(State &state) {
   for (const auto &event : std::exchange(state.hostEvents, {})) {
-    if (event.ingest)
+    if (event.ingest) {
+      const std::lock_guard lock(ingress_->mutex);
+      auto &predMap =
+          ingress_->inFlight[{pidKey(state.pid), event.ingest->principal}];
+      auto pIt = predMap.find(event.ingest->predicate);
+      if (pIt != predMap.end()) {
+        auto sIt =
+            pIt->second.find(static_cast<std::int64_t>(event.ingest->sequence));
+        if (sIt != pIt->second.end()) pIt->second.erase(sIt);
+        if (pIt->second.empty()) predMap.erase(pIt);
+      }
       finishIngest(state, *event.ingest, kTurnResultUndelivered);
+    }
     if (event.sourceChange) {
       const std::lock_guard lock(ingress_->mutex);
       ingress_->changes.insert_or_assign(
           {pidKey(state.pid), event.sourceChange->principal},
           outcomeOfCode(kTurnResultUndelivered));
     }
+    if (event.health) {
+      finishHealthItem(state.pid, *event.health, kTurnResultUndelivered);
+    }
   }
 }
 
 void AgentExecutor::settle(State &state, CellRef cursor,
                            const ActorGrant &grant, WorkerContext &context) {
-  std::size_t ingested = 0;
+  std::size_t ingested     = 0;
+  std::size_t controlTurns = 0;
   for (std::size_t round = 0; round < kMaxHostEventRounds && state.context &&
                               !state.hostEvents.empty();
        ++round) {
     auto batch = std::exchange(state.hostEvents, {});
     for (std::size_t k = 0; k < batch.size(); ++k) {
-      // Ingestions are bounded per wake so a flooded actor yields the pump;
-      // the rest wait at the front for its next wake.
+      if (isControl(batch[k]) &&
+          controlTurns >=
+              static_cast<std::size_t>(settings_.epistemic.controlPerWake)) {
+        state.hostEvents.insert(state.hostEvents.begin(),
+                                std::make_move_iterator(batch.begin() + k),
+                                std::make_move_iterator(batch.end()));
+        break;
+      }
       if (batch[k].ingest && ingested == settings_.epistemic.ingestPerWake) {
         state.hostEvents.insert(state.hostEvents.begin(),
                                 std::make_move_iterator(batch.begin() + k),
@@ -2251,9 +1826,13 @@ void AgentExecutor::settle(State &state, CellRef cursor,
         break;
       }
       if (batch[k].ingest) ++ingested;
+      if (isControl(batch[k])) ++controlTurns;
       deliverHost(state, cursor, grant, context, batch[k]);
     }
-    if (ingested == settings_.epistemic.ingestPerWake) break;
+    if (controlTurns >=
+            static_cast<std::size_t>(settings_.epistemic.controlPerWake) ||
+        ingested == settings_.epistemic.ingestPerWake)
+      break;
   }
   if (!state.context) return;
   const auto &arena = context.arena;
@@ -2273,10 +1852,10 @@ void AgentExecutor::orderlyStop(State &state, CellRef cursor,
                                 bool announce) {
   GLEDITOR_LOG_DEBUG(kLog, "agent {} stops: {}", state.name, cause);
   // Whatever was waiting is moot once the agent is on its way out.
-  state.hostEvents.clear();
+  dropHostEvents(state);
   deliverHost(state, cursor, grant, context,
               HostEvent{std::string(kEventDestroy), {}});
-  state.hostEvents.clear();
+  dropHostEvents(state);
   // Lease end and init failure carry no statement to choose, so they reap
   // (the default of `keepChildren`).
   std::uint64_t position = 0;
@@ -3750,7 +3329,10 @@ OutcomeClass outcomeClassOf(std::string_view code) noexcept {
   // cost the same.
   if (code == kTurnResultEpistemicBudget || code == kTurnResultArenaExhausted ||
       code == kTurnResultUnboundIncarnation ||
-      code == kTurnResultTurnExhausted || code == kTurnResultIngestionFault)
+      code == kTurnResultTurnExhausted || code == kTurnResultIngestionFault ||
+      code == "SourceFaulted" || code == "UnauthorizedHealthAction" ||
+      code == "NoProfile" || code == "HealthReasonsFull" ||
+      code == "HealthUnavailable")
     return OutcomeClass::NeedsHostAction;
   return OutcomeClass::Terminal;
 }
@@ -3765,6 +3347,16 @@ AgentExecutor::bindSource(const identity::ActorPid &target,
     return std::unexpected(EpistemicRefusal::InvalidIncarnation);
   if (!states_.contains(pidKey(target)) && !runtime_.localCursor(target))
     return std::unexpected(EpistemicRefusal::UnknownActor);
+  {
+    const std::lock_guard lock(ingress_->mutex);
+    for (const auto &[_, grants] : ingress_->healthGrants) {
+      for (const auto &g : grants) {
+        if (!g.revoked && clock_.steady() <= g.expiresAt && g.issuer &&
+            g.issuer->asString() == grant.principal)
+          return std::unexpected(EpistemicRefusal::SelfCertification);
+      }
+    }
+  }
   // The program this agent runs, or the root program before its first turn.
   const AgentProgram *program = &program_;
   if (const auto found = states_.find(pidKey(target));
@@ -4123,7 +3715,10 @@ AgentExecutor::observe(const identity::ActorPid &target,
     const Ingress::StreamKey stream{pid, o.principal, o.incarnation,
                                     o.predicate};
     if (!full) {
-      item.ingest->counts = ingress_->estimatorCounts(stream, o.sequence);
+      item.ingest->counts     = ingress_->estimatorCounts(stream, o.sequence);
+      item.ingest->generation = ingress_->resetMarks[source].requested;
+      ingress_->inFlight[source][o.predicate].insert(
+          static_cast<std::int64_t>(o.sequence));
       posts_->push(std::move(item));
       ++ingress_->queued[pid];
       ++ingress_->queuedBy[source];
@@ -4198,6 +3793,20 @@ std::string_view epistemicRefusalName(EpistemicRefusal refusal) noexcept {
     return "InvalidValue";
   case EpistemicRefusal::InvalidAcquisition:
     return "InvalidAcquisition";
+  case EpistemicRefusal::InvalidHealthGrant:
+    return "InvalidHealthGrant";
+  case EpistemicRefusal::UnauthorizedHealthAction:
+    return "UnauthorizedHealthAction";
+  case EpistemicRefusal::InvalidHealthCode:
+    return "InvalidHealthCode";
+  case EpistemicRefusal::InvalidHealthRequest:
+    return "InvalidHealthRequest";
+  case EpistemicRefusal::UnknownGrant:
+    return "UnknownGrant";
+  case EpistemicRefusal::SelfCertification:
+    return "SelfCertification";
+  case EpistemicRefusal::EntropyUnavailable:
+    return "EntropyUnavailable";
   }
   return "Unknown";
 }
@@ -4236,6 +3845,14 @@ void AgentExecutor::drainPosted() {
     const std::lock_guard lock(ingress_->mutex);
     if (item.ingest) {
       ingress_->release(pid, item.ingest->principal, item.ingest->relay);
+      auto &predMap = ingress_->inFlight[{pid, item.ingest->principal}];
+      auto pIt      = predMap.find(item.ingest->predicate);
+      if (pIt != predMap.end()) {
+        auto sIt =
+            pIt->second.find(static_cast<std::int64_t>(item.ingest->sequence));
+        if (sIt != pIt->second.end()) pIt->second.erase(sIt);
+        if (pIt->second.empty()) predMap.erase(pIt);
+      }
       ingress_->log({pid, item.ingest->principal},
                     settings_.epistemic.outcomeLog, item.ingest->incarnation,
                     item.ingest->eventId,
@@ -4248,9 +3865,26 @@ void AgentExecutor::drainPosted() {
     if (item.sourceChange)
       ingress_->changes.insert_or_assign({pid, item.sourceChange->principal},
                                          outcomeOfCode(kTurnResultUndelivered));
+    if (item.health) {
+      finishHealthItem(item.pid, *item.health, kTurnResultUndelivered);
+    }
+    if (item.healthBatch) {
+      for (const auto &p : item.healthBatch->principals) {
+        QueuedHealth qh;
+        qh.tokenDigest = item.healthBatch->tokenDigest;
+        qh.principal   = p;
+        qh.action      = item.healthBatch->action;
+        qh.receipt     = item.healthBatch->receipt;
+        qh.grantId     = item.healthBatch->grantId;
+        qh.issuer      = item.healthBatch->issuer;
+        qh.record      = item.healthBatch->record;
+        finishHealthItem(item.pid, qh, kTurnResultUndelivered);
+      }
+    }
   };
   const auto epistemic = [](const PostBox::Item &item) {
-    return item.ingest || item.refusalsOf || item.sourceChange;
+    return item.ingest || item.refusalsOf || item.sourceChange || item.health ||
+           item.healthBatch;
   };
   for (auto &item : items) {
     // A pid the runtime has never heard of gets nothing; one posted between a
@@ -4305,14 +3939,44 @@ void AgentExecutor::drainPosted() {
       turn.sourceChange = std::move(item.sourceChange);
       turn.turnFields.set(std::string(kTurnSourceChange),
                           WireValue::record(std::move(change)));
-      // Ahead of the agent's pending ingestions and queries, so nothing runs
-      // between supersession and the advance; behind the source changes
-      // already waiting, so two changes for one principal keep their order.
       const auto after = std::ranges::find_if_not(
-          state.hostEvents, [](const HostEvent &event) {
-            return event.sourceChange.has_value();
-          });
+          state.hostEvents,
+          [](const HostEvent &event) { return isControl(event); });
       state.hostEvents.insert(after, std::move(turn));
+    } else if (item.health) {
+      if (!state.agent.healthEntry) {
+        abandon(item);
+        continue;
+      }
+      HostEvent turn;
+      turn.entry       = state.agent.healthEntry;
+      turn.health      = std::move(item.health);
+      const auto after = std::ranges::find_if_not(
+          state.hostEvents,
+          [](const HostEvent &event) { return isControl(event); });
+      state.hostEvents.insert(after, std::move(turn));
+    } else if (item.healthBatch) {
+      if (!state.agent.healthEntry) {
+        abandon(item);
+        continue;
+      }
+      for (const auto &p : item.healthBatch->principals) {
+        QueuedHealth qh;
+        qh.tokenDigest = item.healthBatch->tokenDigest;
+        qh.principal   = p;
+        qh.action      = item.healthBatch->action;
+        qh.receipt     = item.healthBatch->receipt;
+        qh.grantId     = item.healthBatch->grantId;
+        qh.issuer      = item.healthBatch->issuer;
+        qh.record      = item.healthBatch->record;
+        HostEvent turn;
+        turn.entry       = state.agent.healthEntry;
+        turn.health      = std::move(qh);
+        const auto after = std::ranges::find_if_not(
+            state.hostEvents,
+            [](const HostEvent &event) { return isControl(event); });
+        state.hostEvents.insert(after, std::move(turn));
+      }
     } else if (item.refusalsOf) {
       Ingress::Charge charge;
       if (item.charge) {
@@ -4361,6 +4025,30 @@ void AgentExecutor::drainPosted() {
       state.hostEvents.push_back(std::move(bookkeeping));
     } else if (item.observation) {
       if (item.ingest) {
+        {
+          const std::lock_guard lock(ingress_->mutex);
+          const auto rmIt = ingress_->resetMarks.find(
+              {pidKey(item.pid), item.ingest->principal});
+          if (rmIt != ingress_->resetMarks.end() &&
+              item.ingest->generation < rmIt->second.committed) {
+            ingress_->release(pidKey(item.pid), item.ingest->principal,
+                              item.ingest->relay);
+            auto &predMap =
+                ingress_->inFlight[{pidKey(item.pid), item.ingest->principal}];
+            auto pIt = predMap.find(item.ingest->predicate);
+            if (pIt != predMap.end()) {
+              auto sIt = pIt->second.find(
+                  static_cast<std::int64_t>(item.ingest->sequence));
+              if (sIt != pIt->second.end()) pIt->second.erase(sIt);
+              if (pIt->second.empty()) predMap.erase(pIt);
+            }
+            ingress_->log({pidKey(item.pid), item.ingest->principal},
+                          settings_.epistemic.outcomeLog,
+                          item.ingest->incarnation, item.ingest->eventId,
+                          outcomeOfCode(kTurnResultSupersededByReset));
+            continue;
+          }
+        }
         // Revoked, expired or superseded while queued: the binding no longer
         // authorizes it. These are the host's doing, never charged.
         std::optional<std::string> refused;
@@ -4947,9 +4635,9 @@ void AgentExecutor::receiveCancel(State &state, const Envelope &envelope) {
   const auto nowMillis = std::chrono::duration_cast<std::chrono::milliseconds>(
                              wallNow().time_since_epoch())
                              .count();
-  const auto window    = static_cast<std::int64_t>(settings_.sendRetries) *
-                         settings_.sendRetryInterval.count();
-  auto list            = readCancelled(state);
+  const auto window = static_cast<std::int64_t>(settings_.sendRetries) *
+                      settings_.sendRetryInterval.count();
+  auto list = readCancelled(state);
   std::erase_if(
       list, [&](const WireValue &entry) { return expired(entry, nowMillis); });
   while (list.size() >= kMaxCancelled) list.erase(list.begin());
@@ -4998,8 +4686,8 @@ AgentExecutor::receiveAchieve(State &state, const ActorExecution &execution,
   const auto nowMillis = std::chrono::duration_cast<std::chrono::milliseconds>(
                              wallNow().time_since_epoch())
                              .count();
-  auto cancelled       = readCancelled(state);
-  const auto before    = cancelled.size();
+  auto cancelled    = readCancelled(state);
+  const auto before = cancelled.size();
   // Expired ids first: one past its window is an ordinary `achieve` again.
   std::erase_if(cancelled, [&](const WireValue &entry) {
     return expired(entry, nowMillis);
@@ -5414,6 +5102,7 @@ AgentExecutor::checkpoint(const identity::ActorPid &pid) {
   out.contentHash =
       xanadu::sha256Hex(zigzag::vortex::mesh::encodeValue(seed->value));
   out.seed = std::move(*seed);
+  state.checkpointsProduced++;
   return out;
 }
 
@@ -6107,6 +5796,11 @@ AgentSettings AgentSettings::fromModel(const xanadu::SystemStoreModel &model) {
              ep.healthReplayRing);
   loadSigned(xanadu::settings::kVagentEpistemicHealthSequenceGap,
              ep.healthSequenceGap);
+  loadSigned(xanadu::settings::kVagentEpistemicHealthPending, ep.healthPending);
+  loadSigned(xanadu::settings::kVagentEpistemicHealthPendingPerGrant,
+             ep.healthPendingPerGrant);
+  loadSigned(xanadu::settings::kVagentEpistemicControlPerWake,
+             ep.controlPerWake);
 
   if (const auto checked = ep.validate(); checked.has_value()) {
     settings.epistemic = ep;

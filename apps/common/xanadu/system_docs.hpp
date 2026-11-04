@@ -326,6 +326,12 @@ inline constexpr std::string_view kVagentEpistemicHealthReplayRing =
     "vagent.epistemic_health_replay_ring";
 inline constexpr std::string_view kVagentEpistemicHealthSequenceGap =
     "vagent.epistemic_health_sequence_gap";
+inline constexpr std::string_view kVagentEpistemicHealthPending =
+    "vagent.epistemic_health_pending";
+inline constexpr std::string_view kVagentEpistemicHealthPendingPerGrant =
+    "vagent.epistemic_health_pending_per_grant";
+inline constexpr std::string_view kVagentEpistemicControlPerWake =
+    "vagent.epistemic_control_per_wake";
 inline constexpr std::string_view kVagentTuiBorders = "vagent.tui.borders";
 inline constexpr std::string_view kVagentTuiHistorySize =
     "vagent.tui.history_size";

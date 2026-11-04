@@ -51,6 +51,42 @@ inline constexpr std::string_view kTurnResultClockEpochRegression =
 inline constexpr std::string_view kTurnResultClockMappingRegression =
     "ClockMappingRegression";
 
+// `$turn.health` (P19 I3-2c1) fields, action kinds, turn results and stats.
+inline constexpr std::string_view kTurnHealth            = "health";
+inline constexpr std::string_view kHealthTurnSource      = "source";
+inline constexpr std::string_view kHealthTurnKind        = "kind";
+inline constexpr std::string_view kHealthTurnCode        = "code";
+inline constexpr std::string_view kHealthTurnGrant       = "grant";
+inline constexpr std::string_view kHealthTurnIssuer      = "issuer";
+inline constexpr std::string_view kHealthTurnWall        = "wall";
+inline constexpr std::string_view kHealthTurnIncarnation = "incarnation";
+inline constexpr std::string_view kHealthTurnRetained    = "retained";
+inline constexpr std::string_view kHealthTurnMaxSources  = "max_sources";
+inline constexpr std::string_view kHealthTurnReasons     = "reasons";
+inline constexpr std::string_view kHealthTurnActions     = "actions";
+inline constexpr std::string_view kHealthTurnSequenceGap = "sequence_gap";
+inline constexpr std::string_view kHealthTurnExpectResetEpoch =
+    "expect_reset_epoch";
+inline constexpr std::string_view kHealthTurnFloors         = "floors";
+inline constexpr std::string_view kHealthTurnRemoved        = "removed";
+inline constexpr std::string_view kHealthTurnDroppedContent = "dropped_content";
+inline constexpr std::string_view kHealthTurnDroppedOther   = "dropped_other";
+
+inline constexpr std::string_view kHealthKindIsolate = "isolate";
+inline constexpr std::string_view kHealthKindDegrade = "degrade";
+inline constexpr std::string_view kHealthKindClear   = "clear";
+inline constexpr std::string_view kHealthKindReset   = "reset";
+
+inline constexpr std::string_view kTurnResultHealthUnavailable =
+    "HealthUnavailable";
+inline constexpr std::string_view kTurnResultSupersededByReset =
+    "SupersededByReset";
+inline constexpr std::string_view kTurnResultUnauthorizedHealthAction =
+    "UnauthorizedHealthAction";
+
+inline constexpr std::string_view kStatAuditCalls  = "health.audit.calls";
+inline constexpr std::string_view kStatAuditThrows = "health.audit.throws";
+
 } // namespace xanadu::vagent::runtime
 
 #endif // COMMON_XANADU_VAGENT_RUNTIME_EPISTEMIC_ABI_HEALTH_HPP

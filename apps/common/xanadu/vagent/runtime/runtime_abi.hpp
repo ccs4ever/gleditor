@@ -886,6 +886,9 @@ struct CompiledAgent {
   /// Settles the head event of `d.pending` and everything it raises, in one
   /// turn (P19 I3-2b); present exactly when `observeEntry` is.
   std::optional<zigzag::CellRef> settleEntry{};
+  /// Runs one operator health action per `$turn.health` (P19 I3-2c1);
+  /// present exactly when `observeEntry` is.
+  std::optional<zigzag::CellRef> healthEntry{};
   std::map<std::string, zigzag::CellRef, std::less<>> fieldDefaults;
   std::map<std::string, CompiledContainer, std::less<>> skills;
   std::map<std::string, CompiledContainer, std::less<>> behaviors;

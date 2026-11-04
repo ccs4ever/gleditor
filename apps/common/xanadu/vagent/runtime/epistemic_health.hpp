@@ -41,6 +41,11 @@ struct SourceHealth {
   /// source last committed. The sign of a failure the estimator cannot see
   /// (design 3.1) until I3-3 reinstates the host-time class.
   std::uint64_t uncountedSinceCommit{};
+  /// Durable arena state (2c2); 0 until then.
+  std::uint64_t resetEpoch{0};
+  /// Host audit sink call and throw counts for the actor (R3-10).
+  std::uint64_t auditCalls{0};
+  std::uint64_t auditThrows{0};
 };
 
 /// Bumped when the set of codes below changes.

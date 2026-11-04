@@ -136,6 +136,9 @@ CompiledProgram::fromUnit(Unit unit, std::string_view name,
     if (stagingAgent.settleEntry) {
       persistentAgent.settleEntry = remap(*stagingAgent.settleEntry);
     }
+    if (stagingAgent.healthEntry) {
+      persistentAgent.healthEntry = remap(*stagingAgent.healthEntry);
+    }
     if (stagingAgent.observeRefusalEntry) {
       persistentAgent.observeRefusalEntry =
           remap(*stagingAgent.observeRefusalEntry);

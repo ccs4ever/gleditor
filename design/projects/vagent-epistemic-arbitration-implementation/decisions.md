@@ -25,6 +25,50 @@ round-3 findings in the I3-2 implementation review). Remaining-plan draft 3 is t
 (round-2 MAJOR findings resolved by P2-1 to P2-6; open MINOR points are fixed in later updates). E1
 is accepted (codebase and architect PASS); its MINOR m1 (`inline constexpr`) goes to 2a.
 
+### 0.1 Milestone reviews (owner steering, 2026-11-04)
+
+The 2026-11-02 rule still produced four review rounds of up to seven personas for I3-2 alone, about
+1.1 MB of reports, and the lead ran out of budget before I3-2c1 closed. The owner directed a further
+cut. This section supersedes the per-slice gate table in `remaining-plan.md` section 5 and the "fix,
+then re-review" procedure under it. The README's ML gate is unchanged: the ML expert reads each ML
+design before implementation and the source before acceptance, and no ML work is accepted with an ML
+BLOCKING or MAJOR finding open. It is now applied per milestone, not per slice.
+
+- **The slice is the commit unit, not the review unit.** A slice lands when the lead's
+  `make -j$(nproc)` and the full headless suites pass. No persona reads a single slice.
+- **One review round per milestone**, at most three personas, run in parallel. Each reads the git
+  range for the milestone and the design sections it names, and nothing else whole:
+  `remaining-plan.md`, `traceability.md`, the design files and earlier review folders are searched
+  by slice ID, not read. A report holds findings only (severity, `file:line`, failure scenario,
+  fix), at most 200 lines, and no restatement of the design.
+- **No confirmation rounds.** A worker fixes the findings; the lead verifies them with tests. Only
+  an ML BLOCKING or MAJOR finding goes back to a reviewer, and then only to the ML expert, who reads
+  that finding and the fix diff. A non-ML BLOCKING finding is rechecked by the persona that raised
+  it, on that finding alone. MINOR findings are fixed or recorded without review.
+- **No separate response or findings documents.** The lead records each finding's disposition as a
+  table row in the milestone's validation file.
+- **Designs still in the plan** (I3-3D, I4-D2, V-D, I5-D, I6-D) get one round with at most two
+  personas, ML being one where ML is in scope. Drafted designs awaiting review (T1-D, I4-D1) are
+  reviewed in their milestone's design round.
+- **`traceability.md` is updated once per milestone**, at acceptance, not per slice.
+
+| Milestone | Slices                                | Design read first | Reviewers                   |
+| --------- | ------------------------------------- | ----------------- | --------------------------- |
+| M1        | I3-2c1, I3-2c2, T1                    | T1-D              | ML (named items), DIST, SEC |
+| M2        | I3-3a to I3-3d                        | I3-3D             | SENS, SEC, ML               |
+| M3        | I4-1a, I4-1b, I4-2, I5-1a, I4-3, I4-4 | I4-D1, I4-D2      | ML, NUM, EPI                |
+| M4        | I4-5, I4-6, I4-7a, I4-7b, W1          | none              | VM, ARCH, ML                |
+| M5        | I3-4a to I3-4c, I5-1b, W2             | V-D               | DIST, SEC, ML               |
+| M6        | I4-8 to I4-11                         | none              | ML, NUM, SENS               |
+| M7        | I5-2 to I5-5                          | I5-D              | ML, NUM, DIST               |
+| M8        | I6-1, I6-2, T2                        | I6-D              | ML, DIST, SEC               |
+| Final     | F1, F2                                | none              | ML (whole system), ARCH     |
+
+M1's round also carries the owed I3-2 confirmations: the lead lists the open round-3 findings from
+ML, epistemology, hardware and security, and the M1 reviewers check them against the code. Those
+personas do not each run a separate round. This is about 30 reports for the remaining work, where
+the section 5 table implied more than 200.
+
 ## 1. I3-2 round-2 decisions
 
 The items marked `DECISION` in [findings-r2.md](i3-2-review/findings-r2.md):

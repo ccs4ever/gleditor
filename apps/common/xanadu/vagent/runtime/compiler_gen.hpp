@@ -384,6 +384,8 @@ public:
     return std::move(frameBodies_);
   }
 
+  friend void emitHealthEntry(Gen &g, CellRef entryLabel);
+
 private:
   // -- primitives ------------------------------------------------------------
   zigzag::vortex::VortexCore &core_;
@@ -1273,6 +1275,10 @@ private:
   std::vector<TellSeq> emitTellTests(CellRef ty, CellRef eq);
   void emitTellBodies(const std::vector<TellSeq> &seqs, CellRef end);
 };
+
+/// `healthEntry` stub (P19 I3-2c1), defined in epistemic_emit_health.cpp:
+/// answers `HealthUnavailable` so the authorization surface can be reviewed.
+void emitHealthEntry(Gen &g, CellRef entryLabel);
 
 } // namespace xanadu::vagent::runtime::codegen
 
