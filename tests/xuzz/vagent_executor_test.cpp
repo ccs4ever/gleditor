@@ -370,6 +370,68 @@ TEST(VagentExecutorTest, EmitMarshalsRecordFieldsOntoThePayload) {
   EXPECT_EQ(arena.outstandingMarks(), 0u);
 }
 
+TEST(VagentExecutorTest, OnHandlerGuardEvaluatesBeforeTheBody) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  // The [guard] is a real filter now — before this, dispatch ran every
+  // clause's body unconditionally. `emit` makes the selection visible:
+  // const-false's handler stages nothing, const-true's does.
+  const auto image = h.lower(
+      "module demo\nevent Tick\nevent Fired\nevent Nope\n"
+      "agent A {\n"
+      "  on Tick [2 > 3] { emit Nope{} }\n"
+      "  on Tick [1 < 2] { emit Fired{} }\n"
+      "}");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  const auto outbox =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  ASSERT_EQ(outbox.size(), 1u);
+  EXPECT_EQ(outbox[0].payload, "Fired");
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
+TEST(VagentExecutorTest, OnHandlerGuardArityBindsFromTheDeliveredPayload) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  // A param'd event's clause declares the event's fields as its guard
+  // head's params — `where true` on Ping is arity 1, not arity 0. A
+  // name-only percept can't satisfy the contract, so dispatch reads
+  // the arity refusal as a falsy guard and skips the clause; the
+  // delivered record supplies `n` by name and the handler fires.
+  const auto image = h.lower(
+      "module demo\nevent Ping { n: Int }\nevent Fired\n"
+      "agent A { on Ping { emit Fired{} } }");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+
+  ASSERT_TRUE(exec(h.execution("Ping"), h.ctx));
+  auto outbox =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  EXPECT_TRUE(outbox.empty())
+      << "name-only Ping can't bind the declared field — handler "
+         "skips, not faults";
+
+  const auto term  = arena.makeCell("Ping");
+  const auto field = arena.makeCell("5");
+  zigzag::expectWritten(arena.link(field, h.ctx.core.dims().name,
+                                   DimVector::POS, arena.makeCell("n")));
+  zigzag::expectWritten(
+      arena.link(zigzag::rankTail(arena, term, h.ctx.core.dims().step),
+                 h.ctx.core.dims().step, DimVector::POS, field));
+  exec.deliver(arena, h.ctx.core,
+               Delivery{.agent       = image->agentCell,
+                        .percept     = "Ping",
+                        .payloadCell = term});
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+  outbox = VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  ASSERT_EQ(outbox.size(), 1u);
+  EXPECT_EQ(outbox[0].payload, "Fired");
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
 TEST(VagentExecutorTest, EmitInAndForMarshalOntoSeparateFields) {
   ExecutorHarness h;
   VagentExecutor exec;

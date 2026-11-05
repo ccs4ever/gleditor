@@ -704,36 +704,134 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
 
   // A clause carrying +d.step members runs its §3.5 segment spine:
   // fragment members through runFragment, host-step cells through the
-  // verb table — in order, inside m0.
-  const auto runSpine = [&](CellRef clause) -> bool {
+  // verb table — in order, inside m0. `args` are the host call's
+  // bound values — empty for `on` dispatch, the intention's for plans.
+  const auto runSpine = [&](CellRef clause,
+                            const std::vector<CellValue> &args) -> bool {
     for (const CellRef member :
          zigzag::rankAfter(arena, clause, core.dims().step)) {
       if (arena.linked(member, dims.verb, DimVector::POS).has_value()) {
         if (!runHostStep(member, noCell)) return false;
       } else {
         const auto outcome =
-            meta.runFragment(member, {}, exec.cursor, maxCycles);
+            meta.runFragment(member, args, exec.cursor, maxCycles);
         if (outcome.refusal != MetaRunOutcome::Refusal::None) return false;
       }
     }
     return true;
   };
 
-  auto dispatchEvent = [&](std::string_view name) -> bool {
+  // `seen` is the percept's journal record — its `grab` scalar ref
+  // resolves to the delivered payload term. A name-only percept
+  // supplies no payload; a param'd handler can't bind its declared
+  // fields then, and its guard arity-refuses — which reads as a falsy
+  // `where`, not a turn fault.
+  auto dispatchEvent = [&](std::string_view name, CellRef seen) -> bool {
     const auto eventSym = eventSymbolNamed(arena, core, programRoot, name);
     if (!eventSym) return true;
+    CellRef payload{noCell};
+    if (seen != noCell)
+      if (const auto rec = varsRecord(arena, core, seen, "grab", false))
+        if (const auto v =
+                arena.linked(*rec, core.dims().values, DimVector::POS))
+          if (const auto r = arena.asInt64(*v))
+            payload = static_cast<CellRef>(*r);
+    // marshalTerm stores literals as text cells, so a field's cell
+    // type can't recover its literal kind — coerce the text for the
+    // fragment binder, which wants typed values. A string field that
+    // spells a number coerces wrongly until the emit envelope labels
+    // literal kind; that's a marshal fidelity gap, not this read's.
+    const auto boundValue = [&](CellRef c) -> CellValue {
+      if (const auto n = arena.asInt64(c)) return CellValue{*n};
+      if (const auto d = arena.asDouble(c)) return CellValue{*d};
+      if (const auto b = arena.asBool(c)) return CellValue{*b};
+      if (!zigzag::rankAfter(arena, c, core.dims().step).empty())
+        return CellValue{static_cast<std::int64_t>(c)};
+      const std::string text{arena.textOf(c)};
+      if (!text.empty()) {
+        char *end  = nullptr;
+        errno      = 0;
+        const auto n = std::strtoll(text.c_str(), &end, 10);
+        if (errno == 0 && end == text.c_str() + text.size())
+          return CellValue{n};
+        const auto f = std::strtod(text.c_str(), &end);
+        if (errno == 0 && end == text.c_str() + text.size())
+          return CellValue{f};
+      }
+      if (text == "true" || text == "false")
+        return CellValue{text == "true"};
+      return CellValue{text};
+    };
+    // Name-keyed binding: emit labels each payload field +d.name, and
+    // the clause descriptor's param chain carries the declared order —
+    // `emit P{b: 1, a: 2}` binds b to `a`'s slot positionally no
+    // longer. A param no field matches leaves the vector short →
+    // arity refusal → falsy guard.
+    const auto eventArgs = [&](CellRef head) -> std::vector<CellValue> {
+      std::vector<CellValue> args;
+      if (payload == noCell) return args;
+      const auto descriptor =
+          arena.linked(head, core.dims().values, DimVector::POS);
+      if (!descriptor) return args;
+      for (auto p = arena.linked(*descriptor, core.dims().grab,
+                               DimVector::POS);
+           p && arena.contains(*p);
+           p = arena.linked(*p, core.dims().step, DimVector::POS)) {
+        const auto pname = arena.linked(*p, core.dims().name, DimVector::POS);
+        if (!pname) break;
+        CellRef field{noCell};
+        for (const CellRef child :
+             zigzag::rankAfter(arena, payload, core.dims().step))
+          if (const auto cn =
+                  arena.linked(child, core.dims().name, DimVector::POS);
+              cn && arena.textOf(*cn) == arena.textOf(*pname)) {
+            field = child;
+            break;
+          }
+        if (field == noCell) return args;
+        args.push_back(boundValue(field));
+      }
+      return args;
+    };
     for (const CellRef clause : meta.clausesOf(*eventSym)) {
+      // The clause's +d.grab guard evaluates before the body — an
+      // `on` handler's `[guard]` is a real filter, not decoration.
+      // Refusals read as falsy, same as selectClause.
+      const auto guard =
+          arena.linked(clause, core.dims().grab, DimVector::POS);
+      const auto args =
+          guard ? eventArgs(*guard) : std::vector<CellValue>{};
+      if (guard) {
+        const auto outcome =
+            meta.runFragment(*guard, args, exec.cursor, maxCycles);
+        bool pass = outcome.refusal == MetaRunOutcome::Refusal::None &&
+                    outcome.produced && outcome.result.has_value();
+        if (pass) {
+          const auto &v = *outcome.result;
+          if (const auto *b = std::get_if<bool>(&v))
+            pass = *b;
+          else if (const auto *n = std::get_if<std::int64_t>(&v))
+            pass = *n != 0;
+          else if (const auto *d = std::get_if<double>(&v))
+            pass = *d != 0.0;
+          else
+            pass = std::get<std::string>(v) == "true";
+        }
+        if (!pass) continue;
+      }
       if (!zigzag::rankAfter(arena, clause, core.dims().step).empty()) {
-        if (!runSpine(clause)) return false;
+        if (!runSpine(clause, args)) return false;
         continue;
       }
       const auto spin = arena.linked(clause, core.dims().spin, DimVector::POS);
       if (!spin) continue;
-      auto outcome = meta.runFragment(*spin, {}, exec.cursor, maxCycles);
+      auto outcome =
+          meta.runFragment(*spin, args, exec.cursor, maxCycles);
       if (outcome.refusal == MetaRunOutcome::Refusal::NotAHead ||
           outcome.refusal == MetaRunOutcome::Refusal::NoDescriptor) {
         if (const auto head = meta.bodyOf(clause))
-          outcome = meta.runFragment(*head, {}, exec.cursor, maxCycles);
+          outcome =
+              meta.runFragment(*head, args, exec.cursor, maxCycles);
       }
       // consumeWork exhaustion and VM faults surface as refusals — a
       // turn fault (§3.2's fail path). An unproductive result (an empty
@@ -754,9 +852,10 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
 
   if (!agentStopped && exec.message) {
     const std::string &eventName = exec.message->value;
-    journalAppend(arena, agent, arena.makeCell(eventName), dims.seen,
+    const auto seen            = arena.makeCell(eventName);
+    journalAppend(arena, agent, seen, dims.seen,
                   static_cast<std::size_t>(setting("vagent.journal_size", 64)));
-    if (!dispatchEvent(eventName)) return failTurn();
+    if (!dispatchEvent(eventName, seen)) return failTurn();
   }
 
   // §3.2 settle: drain +d.pending internal events — each enqueued cell
@@ -774,8 +873,16 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
     }
     if (!head) break;
     const auto name = std::string{arena.textOf(*head)};
+    // The pending cell's `grab` record names its journal entry — read
+    // it before the unlink drops the records with the cell.
+    CellRef seen{noCell};
+    if (const auto rec = varsRecord(arena, core, *head, "grab", false))
+      if (const auto v =
+              arena.linked(*rec, core.dims().values, DimVector::POS))
+        if (const auto r = arena.asInt64(*v))
+          seen = static_cast<CellRef>(*r);
     unlinkRank(arena, *head, dims.pending);
-    if (!dispatchEvent(name)) return failTurn();
+    if (!dispatchEvent(name, seen)) return failTurn();
   }
 
   // The receiver half of tell/untell: each +d.inbox record is a
@@ -1495,9 +1602,17 @@ void VagentExecutor::deliver(zigzag::ArenaManifold &arena,
   journalAppend(arena, delivery.agent, seen, core.findOrMintDimension("d.seen"),
                 static_cast<std::size_t>(setting("vagent.journal_size", 64)));
   const auto pending = core.findOrMintDimension("d.pending");
-  zigzag::expectWritten(
-      arena.link(zigzag::rankTail(arena, delivery.agent, pending), pending,
-                 DimVector::POS, arena.makeCell(delivery.percept)));
+  const auto pend    = arena.makeCell(delivery.percept);
+  // The pending trigger points back at its own seen record — the
+  // drain hands the guard eval the delivered payload's ref, not just
+  // the name, so `where` on the handler sees the event's args.
+  if (const auto rec = varsRecord(arena, core, pend, "grab", true))
+    zigzag::expectWritten(arena.link(
+        *rec, core.dims().values, DimVector::POS,
+        arena.makeScalarCell(static_cast<std::int64_t>(seen))));
+  zigzag::expectWritten(arena.link(
+      zigzag::rankTail(arena, delivery.agent, pending), pending,
+      DimVector::POS, pend));
 }
 
 } // namespace xanadu::vagent
