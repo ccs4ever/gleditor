@@ -35,6 +35,7 @@ struct ExecutorDims {
   DimRef outbox{noCell};
   DimRef skill{noCell};
   DimRef capacity{noCell};
+  DimRef behavior{noCell};
 };
 
 /// `home +d.dirs → directory +d.agents → agent` — walked, never cached,
@@ -117,6 +118,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
   dims.outbox    = core.findOrMintDimension("d.outbox");
   dims.skill     = core.findOrMintDimension("d.skill");
   dims.capacity  = core.findOrMintDimension("d.capacity");
+  dims.behavior  = core.findOrMintDimension("d.behavior");
 
   MetaBindSet binds;
   const CellRef programRoot = core.home();
@@ -876,7 +878,8 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
         unlinkRank(arena, clause, core.dims().clause);
       return meta.believe(pred, term, agent, turn).has_value();
     }
-    if (verb == "install" || verb == "uninstall" || verb == "capcall") {
+    if (verb == "install" || verb == "uninstall" || verb == "capcall" ||
+        verb == "mount" || verb == "unmount") {
       // §5.3's frame+instance structure: `install` mints a clone
       // master and one instance per capacity the skill implements —
       // inherited ones count, so the descriptor's +d.capacity rank is
@@ -884,7 +887,10 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       // first. `uninstall` runs `on uninstall`, splices the instances
       // off both ranks, and orphans the frame. `capcall` walks the
       // agent's instances for the one whose +d.capacity name matches
-      // the qualifier and runs its frame's qualified method.
+      // the qualifier and runs its frame's qualified method. `mount`
+      // mints a behavior instance onto +d.behavior and seeds its
+      // fields the same way; `unmount` splices it off the rank —
+      // §5.7's merge then skips its clauses for later triggers.
       const auto frameOf = [&](CellRef instance) -> CellRef {
         const auto master = arena.cloneMaster(instance, core.dims().clone);
         return master ? *master : noCell;
@@ -992,8 +998,64 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
         // Nothing installed provides the capacity — an honest refuse.
         return false;
       }
+      // A descriptor's "fields" term: each slot's init head runs
+      // against the mount/install arguments and lands on the owner's
+      // vars — frames and behavior instances seed the same way.
+      const auto seedFields = [&](CellRef owner, CellRef descriptor,
+                                  const std::vector<CellValue> &args) {
+        if (const auto rec =
+                varsRecord(arena, core, descriptor, "fields", false))
+          if (const auto list =
+                  arena.linked(*rec, core.dims().values, DimVector::POS))
+            for (const CellRef slot :
+                 zigzag::rankAfter(arena, *list, core.dims().step)) {
+              const auto frec = varsRecord(arena, core, owner,
+                                           arena.textOf(slot), true);
+              if (!frec) continue;
+              const auto head =
+                  arena.linked(slot, core.dims().values, DimVector::POS);
+              if (!head) continue;
+              const auto outcome =
+                  meta.runFragment(*head, args, exec.cursor, maxCycles);
+              // A refused or empty init leaves the slot standing —
+              // the same honesty rule as an uninitialised agent var.
+              if (outcome.refusal == MetaRunOutcome::Refusal::None &&
+                  outcome.produced && outcome.result)
+                storeVar(*frec, *outcome.result);
+            }
+      };
+      if (verb == "unmount") {
+        const auto name = field("name");
+        if (name == noCell) return false;
+        for (const CellRef inst :
+             zigzag::rankAfter(arena, agent, dims.behavior) |
+                 std::ranges::to<std::vector>())
+          if (arena.textOf(inst) == arena.textOf(name)) {
+            unlinkRank(arena, inst, dims.behavior);
+            return true;
+          }
+        // Removing a behavior that isn't mounted is an honest no.
+        return false;
+      }
       const auto payload = field("payload");
       if (payload == noCell) return false;
+      if (verb == "mount") {
+        const auto desc = skillRecord(payload);
+        if (desc == noCell) return false;
+        const auto inst = arena.makeCell(arena.textOf(payload));
+        // The instance's "behavior" record points at its descriptor
+        // — dispatch and unmount resolve it through that.
+        if (const auto rec = varsRecord(arena, core, inst, "behavior", true))
+          zigzag::expectWritten(
+              arena.link(*rec, core.dims().values, DimVector::POS,
+                         arena.makeScalarCell(
+                             static_cast<std::int64_t>(desc))));
+        seedFields(inst, desc, argValuesOf(payload));
+        zigzag::expectWritten(
+            arena.link(zigzag::rankTail(arena, agent, dims.behavior),
+                       dims.behavior, DimVector::POS, inst));
+        return true;
+      }
       const auto skillRec = skillRecord(payload);
       if (skillRec == noCell) return false;
       const auto capNames = zigzag::rankAfter(arena, skillRec, dims.capacity) |
@@ -1026,25 +1088,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
         zigzag::expectWritten(
             arena.link(*rec, core.dims().values, DimVector::POS, payload));
       const auto args = argValuesOf(payload);
-      if (const auto rec = varsRecord(arena, core, skillRec, "fields", false))
-        if (const auto list =
-                arena.linked(*rec, core.dims().values, DimVector::POS))
-          for (const CellRef slot :
-               zigzag::rankAfter(arena, *list, core.dims().step)) {
-            const auto frec =
-                varsRecord(arena, core, frame, arena.textOf(slot), true);
-            if (!frec) continue;
-            const auto head =
-                arena.linked(slot, core.dims().values, DimVector::POS);
-            if (!head) continue;
-            const auto outcome =
-                meta.runFragment(*head, args, exec.cursor, maxCycles);
-            // A refused or empty init leaves the slot standing —
-            // the same honesty rule as an uninitialised agent var.
-            if (outcome.refusal == MetaRunOutcome::Refusal::None &&
-                outcome.produced && outcome.result)
-              storeVar(*frec, *outcome.result);
-          }
+      seedFields(frame, skillRec, args);
       for (const CellRef cn : capNames) {
         const auto inst = arena.makeCell(arena.textOf(cn));
         zigzag::expectWritten(
@@ -1153,6 +1197,31 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
     // earlier — then source/declaration order, which the stable sort
     // leaves as clausesOf's rank walk for equal priorities.
     auto clauses = meta.clausesOf(*eventSym);
+    // §5.7's behavior merge: each mounted instance's descriptor
+    // contributes its per-event clauses after the agent's own, in
+    // +d.behavior mount order — the stable sort keeps this append
+    // order for equal priorities.
+    for (const CellRef inst :
+         zigzag::rankAfter(arena, agent, dims.behavior)) {
+      const auto rec = varsRecord(arena, core, inst, "behavior", false);
+      if (!rec) continue;
+      const auto ref =
+          arena.linked(*rec, core.dims().values, DimVector::POS);
+      const auto desc = ref ? arena.asInt64(*ref) : std::nullopt;
+      if (!desc) continue;
+      const auto table = varsRecord(arena, core,
+                                    static_cast<CellRef>(*desc), "handlers",
+                                    false);
+      if (!table) continue;
+      const auto term =
+          arena.linked(*table, core.dims().values, DimVector::POS);
+      if (!term) continue;
+      for (const CellRef child :
+           zigzag::rankAfter(arena, *term, core.dims().step))
+        if (arena.textOf(child) == name)
+          for (const CellRef clause : meta.clausesOf(child))
+            clauses.push_back(clause);
+    }
     const auto priorityOf = [&](CellRef clause) -> std::int64_t {
       if (const auto rec =
               varsRecord(arena, core, clause, "priority", false))
@@ -1237,6 +1306,14 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       zigzag::expectWritten(arena.link(*rec, core.dims().values,
                                      DimVector::POS,
                                      arena.makeScalarCell(std::int64_t{1})));
+      // §8.5's creation order: `install`/`behavior` members run before
+      // `on Initialize` — their steps sit on the $create clause the
+      // lowerer collected in declaration order.
+      if (const auto create =
+              varsRecord(arena, core, agent, "$create", false))
+        if (const auto clause = arena.linked(*create, core.dims().values,
+                                             DimVector::POS))
+          if (!runSpine(*clause, {})) return failTurn();
       const auto init = arena.makeCell("Initialize");
       journalAppend(arena, agent, init, dims.seen,
                     static_cast<std::size_t>(

@@ -49,12 +49,14 @@ enum class DeclDisposition : std::uint8_t { Lower, Stub, Refuse };
 //
 //   Agent/Event/Goal/Predicate/Plan/Method/Answer/Handler → Lower
 //   Field/Record/Belief/Question                          → Lower
-//   Skill/Capacity/Behavior/Lifecycle                     → Stub
-//   Uses/Install/BehaviorUse                              → Refuse
+//   Skill/Capacity/Behavior                               → Lower
+//   Uses/Install/BehaviorUse                              → Lower
+//   Lifecycle                                             → Stub
 //
-// Stubs mint the symbol so the module vocabulary is complete — the
-// deferred semantics are M2+'s — while the three composition
-// directives have no image shape to reserve and refuse instead.
+// Lifecycle lowers inside its owning skill's member loop — the
+// disposition only ever meets it as a stub. Stubs mint the symbol so
+// the module vocabulary is complete — the deferred semantics are
+// M2+'s.
 [[nodiscard]] DeclDisposition declDisposition(DeclKind kind) noexcept;
 
 // The roots genesis (c) binds on, plus the emission inventory tests

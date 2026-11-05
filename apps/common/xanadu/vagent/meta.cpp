@@ -1029,6 +1029,31 @@ MetaRuntime::selectClause(CellRef host,
     double weight;
   };
   auto clauses = clausesOf(host);
+  // §5.7's plan list is the agent's plans, then each mounted
+  // behavior's in +d.behavior order — the descriptor's "plans" table
+  // keys per-goal clause ranks, so a mounted behavior contributes
+  // without its clauses ever filing on the shared goal symbol.
+  if (binds_.agentCell != noCell) {
+    const auto bDim = core_.findOrMintDimension("d.behavior");
+    for (const CellRef inst :
+         zigzag::rankAfter(arena, binds_.agentCell, bDim)) {
+      const auto rec = varsRecord(inst, "behavior", /*mint=*/false);
+      if (!rec) continue;
+      const auto ref = arena.linked(*rec, core_.dims().values, Posward);
+      const auto desc = ref ? arena.asInt64(*ref) : std::nullopt;
+      if (!desc) continue;
+      const auto table = varsRecord(static_cast<CellRef>(*desc), "plans",
+                                    /*mint=*/false);
+      if (!table) continue;
+      const auto term = arena.linked(*table, core_.dims().values, Posward);
+      if (!term) continue;
+      for (const CellRef child :
+           zigzag::rankAfter(arena, *term, core_.dims().step))
+        if (arena.textOf(child) == arena.textOf(host))
+          for (const CellRef clause : clausesOf(child))
+            clauses.push_back(clause);
+    }
+  }
   std::vector<Candidate> candidates;
   candidates.reserve(clauses.size());
   for (const auto clause : clauses)

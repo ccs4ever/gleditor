@@ -37,15 +37,14 @@ DeclDisposition declDisposition(DeclKind kind) noexcept {
   case DeclKind::Question:
   case DeclKind::Skill:
   case DeclKind::Capacity:
-    return DeclDisposition::Lower;
   case DeclKind::Behavior:
+    return DeclDisposition::Lower;
   case DeclKind::Lifecycle:
     return DeclDisposition::Stub;
   case DeclKind::Uses:
-    return DeclDisposition::Lower;
   case DeclKind::Install:
   case DeclKind::BehaviorUse:
-    return DeclDisposition::Refuse;
+    return DeclDisposition::Lower;
   }
   return DeclDisposition::Refuse;
 }
@@ -197,6 +196,8 @@ struct Lowerer {
     case ExprKind::Adopt:
     case ExprKind::Install:
     case ExprKind::Uninstall:
+    case ExprKind::Mount:
+    case ExprKind::Unmount:
       return true;
     case ExprKind::Emit:
     case ExprKind::AwaitEvent:
@@ -371,6 +372,27 @@ struct Lowerer {
                     Type{"<any>"});
   }
 
+  // A named call `F(a1, a2)` → a term cell named F whose +d.step
+  // children are the marshaled args — the payload shape the
+  // install/mount verbs and creation members all marshal to.
+  std::expected<CellRef, Diagnostic>
+  marshalCallPayload(const Expr &call) {
+    if (call.children.empty() ||
+        call.children.front()->kind != ExprKind::Identifier)
+      return std::unexpected(Diagnostic{DiagnosticCode::InvalidPosition,
+                                        "operand is not a named call",
+                                        call.loc});
+    auto payload = arena.makeCell(call.children.front()->text);
+    for (std::size_t i = 1; i < call.children.size(); ++i) {
+      auto arg = marshalArg(*call.children[i]);
+      if (!arg) return std::unexpected(arg.error());
+      zigzag::expectWritten(
+          arena.link(zigzag::rankTail(arena, payload, dims().step),
+                     dims().step, DimVector::POS, *arg));
+    }
+    return payload;
+  }
+
   std::expected<CellRef, Diagnostic>
   mintHostStep(const Expr &expr, const Decl &decl,
                const std::vector<Parameter> &params,
@@ -422,6 +444,12 @@ struct Lowerer {
       break;
     case ExprKind::Uninstall:
       verb = "uninstall";
+      break;
+    case ExprKind::Mount:
+      verb = "mount";
+      break;
+    case ExprKind::Unmount:
+      verb = "unmount";
       break;
     case ExprKind::Emit:
       verb = "emit";
@@ -595,37 +623,26 @@ struct Lowerer {
       return step;
     }
 
-    // install S(args) — the call marshals as a payload term exactly
-    // like achieve's: functor is the skill name, +d.step children
-    // carry the install arguments the runtime binds to the skill's
-    // parameters when it seeds the frame.
-    if (expr.kind == ExprKind::Install) {
-      const auto &call = *expr.children.front();
-      if (call.children.empty() ||
-          call.children.front()->kind != ExprKind::Identifier)
-        return std::unexpected(
-            Diagnostic{DiagnosticCode::InvalidPosition,
-                       "install's operand is not a skill name", expr.loc});
-      auto payload = arena.makeCell(call.children.front()->text);
-      for (std::size_t i = 1; i < call.children.size(); ++i) {
-        auto arg = marshalArg(*call.children[i]);
-        if (!arg) return std::unexpected(arg.error());
-        zigzag::expectWritten(
-            arena.link(zigzag::rankTail(arena, payload, dims().step),
-                       dims().step, DimVector::POS, *arg));
-      }
+    // install S(args) / mount B(args) — the call marshals as a
+    // payload term exactly like achieve's: functor is the skill or
+    // behavior name, +d.step children carry the arguments the runtime
+    // binds to the declared parameters when it seeds the frame or
+    // instance.
+    if (expr.kind == ExprKind::Install || expr.kind == ExprKind::Mount) {
+      const auto payload = marshalCallPayload(*expr.children.front());
+      if (!payload) return std::unexpected(payload.error());
       const auto step = arena.makeCell();
       zigzag::expectWritten(arena.link(step, verbDim(), DimVector::POS,
                                        arena.makeCell(std::string{verb})));
       if (const auto rec = varsRecord(arena, core, step, "payload", true))
         zigzag::expectWritten(
-            arena.link(*rec, dims().values, DimVector::POS, payload));
+            arena.link(*rec, dims().values, DimVector::POS, *payload));
       return step;
     }
 
-    // uninstall S — the bare skill name is the whole operand; the
-    // runtime finds the frame among the installed instances by it.
-    if (expr.kind == ExprKind::Uninstall) {
+    // uninstall S / unmount B — the bare name is the whole operand;
+    // the runtime finds the frame or instance by it.
+    if (expr.kind == ExprKind::Uninstall || expr.kind == ExprKind::Unmount) {
       const auto step = arena.makeCell();
       zigzag::expectWritten(arena.link(step, verbDim(), DimVector::POS,
                                        arena.makeCell(std::string{verb})));
@@ -847,10 +864,16 @@ struct Lowerer {
   }
   DimRef verbDim_{zigzag::noCell};
 
-  // The skill-name prefix method members qualify under — "S" while a
-  // `skill S` decl lowers its members, empty elsewhere — and the
-  // capacity dim the descriptor's name rank rides.
-  std::string skillPrefix_;
+  // The owner prefix method/answer members qualify under — "S" while
+  // a `skill S` or `behavior B` lowers its members, empty elsewhere.
+  // behaviorDesc_ is the descriptor record member clauses and `uses`
+  // file against while a behavior lowers; creationSteps_ collects the
+  // install/mount host steps an agent's creation members marshal to,
+  // in declaration order.
+  std::string memberPrefix_;
+  CellRef behaviorDesc_{noCell};
+  CellRef usesTarget_{noCell};
+  std::vector<CellRef> creationSteps_;
   DimRef capacityDim() {
     if (capacityDim_ == zigzag::noCell)
       capacityDim_ = core.findOrMintDimension("d.capacity");
@@ -994,6 +1017,11 @@ struct Lowerer {
   void lowerClauseBody(const Decl &decl, CellRef host,
                        const std::vector<Parameter> &params,
                        std::string_view clauseName);
+  void lowerFieldSlot(CellRef descriptor, const Decl &member,
+                      const std::vector<Parameter> &ownerParams,
+                      std::string_view ownerName);
+  CellRef clauseTableChild(CellRef descriptor, std::string_view table,
+                           std::string_view key);
 };
 
 // One clause = a guard head (+d.grab) plus a body head (+d.spin). A
@@ -1031,6 +1059,68 @@ void Lowerer::lowerClauseBody(const Decl &decl, CellRef host,
   // rank is non-empty (§3.8).
   if (decl.body && bodyHasHostVerb(*decl.body))
     emitSpine(decl, clause, params, clauseName);
+}
+
+// A skill/behavior `var` member: a name cell on the descriptor's
+// "fields" term, +d.values → an init head taking the owner's
+// parameters — install/mount runs each against the call's arguments
+// to seed the frame's or instance's vars records.
+void Lowerer::lowerFieldSlot(
+    CellRef descriptor, const Decl &member,
+    const std::vector<Parameter> &ownerParams,
+    std::string_view ownerName) {
+  CellRef list = noCell;
+  if (const auto r =
+          varsRecord(arena, core, descriptor, "fields", true)) {
+    if (const auto v = arena.linked(*r, dims().values, DimVector::POS))
+      list = *v;
+    else {
+      list = arena.makeCell("fields");
+      zigzag::expectWritten(
+          arena.link(*r, dims().values, DimVector::POS, list));
+    }
+  }
+  const auto slot = arena.makeCell(member.name);
+  zigzag::expectWritten(arena.link(zigzag::rankTail(arena, list, dims().step),
+                                 dims().step, DimVector::POS, slot));
+  if (member.initializer) {
+    auto head =
+        emitDeclHead(member, *member.initializer, ownerParams,
+                     std::format("{}:field:{}", label(ownerName), member.name),
+                     member.result.value_or(Type{"<any>"}), false);
+    if (!head) {
+      errors.push_back(head.error());
+      return;
+    }
+    zigzag::expectWritten(
+        arena.link(slot, dims().values, DimVector::POS, *head));
+  }
+}
+
+// A behavior's per-event (handlers) or per-goal (plans) clause table:
+// the descriptor's `table` vars record holds a term whose +d.step
+// children are keyed cells, each heading the +d.clause rank dispatch
+// merges for that trigger.
+CellRef Lowerer::clauseTableChild(CellRef descriptor,
+                                  std::string_view table,
+                                  std::string_view key) {
+  CellRef term = noCell;
+  if (const auto r = varsRecord(arena, core, descriptor, table, true)) {
+    if (const auto v = arena.linked(*r, dims().values, DimVector::POS))
+      term = *v;
+    else {
+      term = arena.makeCell(table);
+      zigzag::expectWritten(
+          arena.link(*r, dims().values, DimVector::POS, term));
+    }
+  }
+  for (const CellRef child :
+       zigzag::rankAfter(arena, term, dims().step))
+    if (arena.textOf(child) == key) return child;
+  const auto child = arena.makeCell(key);
+  zigzag::expectWritten(arena.link(zigzag::rankTail(arena, term, dims().step),
+                                 dims().step, DimVector::POS, child));
+  return child;
 }
 
 void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
@@ -1098,6 +1188,22 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
       if (member.kind == DeclKind::Field) lowerDecl(member, true);
     for (const auto &member : decl.members)
       if (member.kind != DeclKind::Field) lowerDecl(member, true);
+    // §8.5's creation order materializes as a spine: the `install`/
+    // `behavior` members' host steps sit on a $create clause the
+    // executor runs inside the $initialized turn, before `on
+    // Initialize` dispatches.
+    if (!creationSteps_.empty()) {
+      const auto clause = arena.makeCell("$create");
+      for (const CellRef step : creationSteps_)
+        zigzag::expectWritten(
+            arena.link(zigzag::rankTail(arena, clause, dims().step),
+                       dims().step, DimVector::POS, step));
+      if (const auto rec =
+              varsRecord(arena, core, image.agentCell, "$create", true))
+        zigzag::expectWritten(
+            arena.link(*rec, dims().values, DimVector::POS, clause));
+      creationSteps_.clear();
+    }
     return;
   }
   case DeclKind::Record: {
@@ -1350,12 +1456,12 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
       refuse(decl, std::format("'{}' declares no body", name));
       return;
     }
-    // A method inside `skill S` claims the qualified `S.m` symbol —
-    // §5.3's dispatch resolves skill methods by that name; an answer
-    // (never a skill member) keeps its flat name.
+    // A method inside `skill S` or `behavior B` claims the qualified
+    // `S.m`/`B.m` symbol — §5.3's dispatch resolves skill methods by
+    // that name; an answer (never a skill member) keeps its flat name.
     const std::string symName =
-        decl.kind == DeclKind::Method && !skillPrefix_.empty()
-            ? skillPrefix_ + "." + name
+        decl.kind == DeclKind::Method && !memberPrefix_.empty()
+            ? memberPrefix_ + "." + name
             : std::string{name};
     // An answer legitimately shares its symbol — the matching
     // `question` decl minted it — while a `def` that lands on an
@@ -1393,17 +1499,47 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
     return;
   }
   case DeclKind::Uses: {
-    // §5.3: the agent's +d.uses rank records one cell per imported
-    // capacity. The checker did the resolution; the rank is durable
-    // evidence of what the agent claimed to import.
-    if (!insideAgent || image.agentCell == noCell) {
+    // §5.3: the +d.uses rank records one cell per imported capacity —
+    // on the agent for its own `uses`, on the descriptor while a
+    // skill/behavior lowers. The checker did the resolution; the rank
+    // is durable evidence of what the owner claimed to import.
+    const auto owner = usesTarget_ != noCell ? usesTarget_ : image.agentCell;
+    if (owner == noCell) {
       refuse(decl, "'uses' lowers inside an agent only");
       return;
     }
     for (const auto &used : decl.names)
       zigzag::expectWritten(
-          arena.link(zigzag::rankTail(arena, image.agentCell, usesDim()),
-                     usesDim(), DimVector::POS, arena.makeCell(used)));
+          arena.link(zigzag::rankTail(arena, owner, usesDim()), usesDim(),
+                     DimVector::POS, arena.makeCell(used)));
+    return;
+  }
+  case DeclKind::Install:
+  case DeclKind::BehaviorUse: {
+    // §8.5's creation order: `install S(args)`/`behavior B(args)`
+    // members marshal to the same host steps the action forms do and
+    // collect on the agent's creation spine — the executor runs it
+    // on the first turn, before `on Initialize`. `believe` members
+    // still land at image time, so a `believe` declared after one of
+    // these runs marginally earlier than strict declaration order.
+    if (image.agentCell == noCell || !decl.initializer) {
+      refuse(decl, "creation members lower inside an agent");
+      return;
+    }
+    const auto payload = marshalCallPayload(*decl.initializer);
+    if (!payload) {
+      errors.push_back(payload.error());
+      return;
+    }
+    const auto step = arena.makeCell();
+    zigzag::expectWritten(
+        arena.link(step, verbDim(), DimVector::POS,
+                   arena.makeCell(decl.kind == DeclKind::Install ? "install"
+                                                                : "mount")));
+    if (const auto rec = varsRecord(arena, core, step, "payload", true))
+      zigzag::expectWritten(
+          arena.link(*rec, dims().values, DimVector::POS, *payload));
+    creationSteps_.push_back(step);
     return;
   }
   case DeclKind::Skill: {
@@ -1450,40 +1586,13 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
         zigzag::expectWritten(
             arena.link(*r, dims().values, DimVector::POS,
                        arena.makeScalarCell(std::int64_t{1})));
-    const std::string prevPrefix = skillPrefix_;
-    skillPrefix_                 = name;
+    const std::string prevPrefix = memberPrefix_;
+    const CellRef prevUses       = usesTarget_;
+    memberPrefix_                = name;
+    usesTarget_                  = rec;
     for (const auto &member : decl.members) {
       if (member.kind == DeclKind::Field) {
-        // The fields term's +d.step children: a name cell per var,
-        // +d.values → an init head taking the skill's parameters —
-        // install runs each against the call's arguments to seed the
-        // frame's vars records.
-        CellRef list = noCell;
-        if (const auto r = varsRecord(arena, core, rec, "fields", true)) {
-          if (const auto v = arena.linked(*r, dims().values, DimVector::POS))
-            list = *v;
-          else {
-            list = arena.makeCell("fields");
-            zigzag::expectWritten(
-                arena.link(*r, dims().values, DimVector::POS, list));
-          }
-        }
-        const auto slot = arena.makeCell(member.name);
-        zigzag::expectWritten(
-            arena.link(zigzag::rankTail(arena, list, dims().step), dims().step,
-                       DimVector::POS, slot));
-        if (member.initializer) {
-          auto head =
-              emitDeclHead(member, *member.initializer, decl.parameters,
-                           std::format("{}:field:{}", label(name), member.name),
-                           member.result.value_or(Type{"<any>"}), false);
-          if (!head) {
-            errors.push_back(head.error());
-            continue;
-          }
-          zigzag::expectWritten(
-              arena.link(slot, dims().values, DimVector::POS, *head));
-        }
+        lowerFieldSlot(rec, member, decl.parameters, name);
         continue;
       }
       if (member.kind == DeclKind::Lifecycle) {
@@ -1527,7 +1636,59 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
       }
       lowerDecl(member, insideAgent);
     }
-    skillPrefix_ = prevPrefix;
+    memberPrefix_ = prevPrefix;
+    usesTarget_   = prevUses;
+    return;
+  }
+  case DeclKind::Behavior: {
+    // §5.7: a behavior's program contributes its own ranks — its
+    // handler clauses sit on a per-event table off the descriptor,
+    // its plan clauses on a per-goal one, and dispatch merges them in
+    // mount order rather than filing onto the shared symbols. The
+    // descriptor mirrors the skill record's shape: params, fields as
+    // init heads, qualified `B.m` methods.
+    if (symbols.contains(name)) {
+      refuse(decl, std::format("duplicate symbol '{}'", name));
+      return;
+    }
+    const auto sym = mintSymbol(name);
+    signatures.emplace(name, decl.parameters);
+    const auto rec = arena.makeCell(name);
+    zigzag::expectWritten(
+        arena.link(sym, dims().values, DimVector::POS, rec));
+    if (!decl.parameters.empty()) {
+      const auto list = arena.makeCell("params");
+      for (const auto &p : decl.parameters)
+        zigzag::expectWritten(
+            arena.link(zigzag::rankTail(arena, list, dims().step),
+                       dims().step, DimVector::POS, arena.makeCell(p.name)));
+      if (const auto r = varsRecord(arena, core, rec, "params", true))
+        zigzag::expectWritten(
+            arena.link(*r, dims().values, DimVector::POS, list));
+    }
+    const std::string prevPrefix = memberPrefix_;
+    const CellRef prevDesc       = behaviorDesc_;
+    const CellRef prevUses       = usesTarget_;
+    memberPrefix_                = name;
+    behaviorDesc_                = rec;
+    usesTarget_                  = rec;
+    for (const auto &member : decl.members) {
+      if (member.kind == DeclKind::Field) {
+        lowerFieldSlot(rec, member, decl.parameters, name);
+        continue;
+      }
+      if (member.kind == DeclKind::Goal) {
+        // Behavior-owned goal semantics — where the goal cell lives
+        // and whose bank selects it — is outside M0's merge.
+        image.stubbed.push_back(
+            std::format("{}:{}", name, member.name));
+        continue;
+      }
+      lowerDecl(member, insideAgent);
+    }
+    memberPrefix_ = prevPrefix;
+    behaviorDesc_ = prevDesc;
+    usesTarget_   = prevUses;
     return;
   }
   case DeclKind::Plan: {
@@ -1541,9 +1702,14 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
     }
     // A plan for an undeclared goal declares the goal implicitly —
     // clauseHost needs a symbol to hang the clause on either way.
-    const auto host = symbols.contains(*decl.target) ? symbols[*decl.target]
-                                                     : mintSymbol(*decl.target);
-    if (insideAgent) mintHolder(host);
+    auto host = symbols.contains(*decl.target) ? symbols[*decl.target]
+                                               : mintSymbol(*decl.target);
+    // A behavior's plan files on its descriptor's per-goal table —
+    // §5.7's mount-order merge — not the shared goal rank.
+    if (behaviorDesc_ != noCell)
+      host = clauseTableChild(behaviorDesc_, "plans", *decl.target);
+    else if (insideAgent)
+      mintHolder(host);
     lowerClauseBody(decl, host, paramsOf(decl, *decl.target), name);
     return;
   }
@@ -1558,8 +1724,13 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
       return;
     }
     // 'on Tick' declares Tick when no event decl did.
-    const auto host = symbols.contains(name) ? symbols[name] : mintSymbol(name);
-    if (insideAgent) mintHolder(host);
+    auto host = symbols.contains(name) ? symbols[name] : mintSymbol(name);
+    // The behavior's handler files on its descriptor's per-event
+    // table — dispatch merges instance ranks at run time.
+    if (behaviorDesc_ != noCell)
+      host = clauseTableChild(behaviorDesc_, "handlers", name);
+    else if (insideAgent)
+      mintHolder(host);
     const auto n = ++clauseCounts[host];
     const auto clause =
         n == 1 ? std::format("on:{}", name) : std::format("on:{}#{}", name, n);

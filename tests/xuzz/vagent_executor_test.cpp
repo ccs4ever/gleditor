@@ -3123,4 +3123,137 @@ TEST(VagentExecutorTest, CapcallWithoutAnInstalledSkillRefusesTheStep) {
   EXPECT_EQ(meta.intentionField(parked.front(), "faulted"), 1);
 }
 
+TEST(VagentExecutorTest, BehaviorMemberMountsAtCreationAndUnmounts) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image = h.lower(
+      "module demo\nevent Tick\nevent Remove\nevent Counted\n"
+      "behavior Reporter {\n"
+      "  on Tick { emit Counted{} }\n"
+      "}\n"
+      "agent Host {\n"
+      "  behavior Reporter\n"
+      "  on Remove { unmount Reporter }\n"
+      "}");
+  ASSERT_TRUE(image);
+  auto &arena      = h.ctx.arena;
+  const auto bDim  = h.ctx.core.findOrMintDimension("d.behavior");
+  const auto count = [&] {
+    return VagentExecutor::drainOutbox(arena, h.ctx.core,
+                                     image->agentCell)
+        .size();
+  };
+
+  // Turn 1 mounts the member (the $create spine) before the Tick
+  // dispatches — the behavior's own clause answers it.
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  const auto instances =
+      zigzag::rankAfter(arena, image->agentCell, bDim) |
+      std::ranges::to<std::vector>();
+  ASSERT_EQ(instances.size(), 1u);
+  EXPECT_EQ(arena.textOf(instances.front()), "Reporter");
+  EXPECT_EQ(count(), 1u);
+
+  // §5.7's merge runs the mounted clause on every later Tick…
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  EXPECT_EQ(count(), 2u);
+
+  // …until unmount splices the instance: the next Tick contributes
+  // nothing.
+  ASSERT_TRUE(exec(h.execution("Remove"), h.ctx));
+  EXPECT_TRUE(
+      zigzag::rankAfter(arena, image->agentCell, bDim).empty());
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  EXPECT_EQ(count(), 2u);
+}
+
+TEST(VagentExecutorTest, MountedBehaviorContributesAPlanToTheGoal) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image = h.lower(
+      "module demo\nevent Tick\nevent Helped\n"
+      "goal Work() perform\n"
+      "behavior Helper {\n"
+      "  plan h for Work { emit Helped{} }\n"
+      "}\n"
+      "agent A {\n"
+      "  on Tick { mount Helper() ; adopt Work() }\n"
+      "}");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+
+  // mount and adopt are two spine members of the Tick clause; the
+  // adopt's selectClause already merges the mounted instance's
+  // per-goal table — the agent itself declares no plan for Work.
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  // The adopted intention settles its plan body on the next turn.
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+
+  const auto outbox =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  ASSERT_EQ(outbox.size(), 1u);
+  EXPECT_EQ(outbox[0].payload, "Helped");
+}
+
+TEST(VagentExecutorTest, InstallMemberRunsBeforeInitialize) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image = h.lower(
+      "module demo\nevent Installed\nevent Init\n"
+      "capacity Navigation { def goto(x: Int): Int }\n"
+      "skill Walker(level: Int) implements Navigation {\n"
+      "  var speed: Int := level\n"
+      "  on install { emit Installed{} }\n"
+      "  def goto(x: Int): Int { x }\n"
+      "}\n"
+      "agent A {\n"
+      "  uses Navigation\n"
+      "  install Walker(7)\n"
+      "  on Initialize { emit Init{} }\n"
+      "}");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+
+  // §8.5's creation order: the $create spine installs before
+  // Initialize dispatches — even on a message-less first turn.
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+
+  const auto skillDim = h.ctx.core.findOrMintDimension("d.skill");
+  const auto instances =
+      zigzag::rankAfter(arena, image->agentCell, skillDim) |
+      std::ranges::to<std::vector>();
+  ASSERT_EQ(instances.size(), 1u);
+  const auto frame =
+      arena.cloneMaster(instances.front(), h.ctx.core.dims().clone);
+  ASSERT_TRUE(frame);
+  const auto speed =
+      varsRecord(arena, h.ctx.core, *frame, "speed", false);
+  ASSERT_TRUE(speed);
+  const auto sv =
+      arena.linked(*speed, h.ctx.core.dims().values, DimVector::POS);
+  ASSERT_TRUE(sv);
+  EXPECT_EQ(arena.asInt64(*sv), 7);
+
+  const auto outbox =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  ASSERT_EQ(outbox.size(), 2u);
+  EXPECT_EQ(outbox[0].payload, "Installed");
+  EXPECT_EQ(outbox[1].payload, "Init");
+}
+
+TEST(VagentExecutorTest, UnmountOfAMissingBehaviorRefusesTheTurn) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image = h.lower(
+      "module demo\nevent Tick\n"
+      "behavior Helper { on Tick { emit Tick{} } }\n"
+      "agent A {\n"
+      "  on Tick { unmount Helper }\n"
+      "}");
+  ASSERT_TRUE(image);
+  // Nothing mounted — the verb's honest no faults the turn, the same
+  // contract a refused `stop` or `uninstall` keeps.
+  EXPECT_FALSE(exec(h.execution("Tick"), h.ctx));
+}
+
 } // namespace
