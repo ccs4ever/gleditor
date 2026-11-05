@@ -1,8 +1,8 @@
 # vagent Actor Executor: Turn-Level Runtime Design
 
-**Document Version:** 0.3 (review round-2 revised) **Status:** round-2 freeze dispositions landed
-(`projects/vagent-actor-executor-review/`); three owner-ratified rulings + three r2 spec-level
-rulings flagged for owner confirmation (§3.8, §9)
+**Document Version:** 0.4 (review round-3 revised) **Status:** round-3 dispositions landed — the
+exit protocol rests on no unstated invariant (base CP pushed before `m0`); three owner-ratified
+rulings + three r2 spec-level rulings flagged for owner confirmation (§3.8, §9)
 
 > **Dialectic outcome (two rounds, three lenses — CONVERGED):** the turn-level executor is
 > implementable on today's substrate with two mesh changes (deficit-counter arbitration, P8 scan
@@ -167,10 +167,13 @@ durable program.
 ### 3.2 The turn — one mark, one decision
 
 ```
-1. m0 = mark(); setExecutionLimits(remaining grant, m0-relative)
-2. base:   push the turn's base choice point (the fail_step landing pad — its
-           entry lives inside m0's span so a failed turn releases it too);
-           reset the Dewey path; establish per-turn scope (cursor +d.vars/+d.stack)
+1. base:   push the turn's base choice point (the fail_step landing pad — pushed
+           BEFORE m0 so its mark mB sits below m0's floor; release(m0) is then
+           unconditionally well-nested, no zero-write-gap invariant required);
+           reset the Dewey path
+2. m0 = mark(); setExecutionLimits(remaining grant, m0-relative);
+           establish per-turn scope (cursor +d.vars/+d.stack — trailed under m0,
+           rolled back on failure)
 3. decode: message→bencode→event cell (immutable; +d.name type,
            d.vars fields, implicit source/space/time/ordinal; sequence==0 for ActorSend)
    or wake→adapter delivery queue drain (coalesced, §4.1)
@@ -191,17 +194,19 @@ durable program.
          for the §11.3 harness
 ```
 
-- **Failure inside 2–7** → `cut(1)` (pops every per-statement CP *above* the base, releasing their
-  marks — the base CP **survives**), then `release(m0)` (rolls back all writes incl. the step-2
-  scope edges and the staged outbox), then `backtrack(cursor)` — lands on the surviving base CP's
-  failure alternative where `fail_step` runs on **reserved fuel** (§4.3). This is
-  `vagent-agent-language.md:341`'s drain idiom; `clearChoicePoints()` is *never* used on the failure
-  path — `cut(0)` would destroy the landing pad it just preserved (and a bare `release(m0)` under
-  live CP marks would self-inflict the §5.1 wedge). Init/fatal failures take the spec's own arms
-  (`ChildStopping` + stopped actor — `vagent-agent-language.md:369-372`), not the intention ladder.
-  Nothing propagates: `consumeWork` throws `std::runtime_error` — the callback must translate it to
-  a turn fault or `pumpOne` maps it to `ExecutionFailed` and the actor stops forever
-  (`mesh_actor.cpp:549-551`).
+- **Failure inside 3–7** → `cut(1)` (discards every per-statement CP *above* the base, releasing
+  their marks — the base CP **survives**), then `release(m0)` — unconditionally well-nested because
+  `mB` sits below `m0`'s floor and the popped marks sat above it — rolls back all writes incl. the
+  step-2 scope edges and the staged outbox; then `backtrack(cursor)` — lands on the surviving base
+  CP's failure alternative where `fail_step` runs on **reserved fuel** (§4.3), consuming the base CP
+  (popping its mark). A failure inside step 2 itself is pre-CP work: bare `release(m0)` (safe — no
+  inner mark exists yet). The drain idiom is `vagent-metaprogramming.md` §6.4's
+  (`vortex_stdlib.cpp:3789-3801` the live precedent); a bare `release(m0)` under live
+  *per-statement* CP marks would self-inflict the §5.1 wedge — `cut(1)` removes them first.
+  Init/fatal failures take the spec's own arms (`ChildStopping` + stopped actor —
+  `vagent-agent-language.md:369-372`), not the intention ladder. Nothing propagates: `consumeWork`
+  throws `std::runtime_error` — the callback must translate it to a turn fault or `pumpOne` maps it
+  to `ExecutionFailed` and the actor stops forever (`mesh_actor.cpp:549-551`).
 - **Auto-reply**: `pumpOne` replies to every `ActorSend` with the executor's returned string — the
   adapter encodes the language-level reply there (≤ `grant.maxOutputBytes`).
 - **One message per turn is ratified**: batching merges failure domains; the settle loop inside `m0`
@@ -340,9 +345,12 @@ Three rulings the r2 pass forced (spec-level, flagged for owner ratification):
 - **Belief channel.** The where-evaluator binds the **agent cell** into fragment scope on `+d.vars`
   (implicit arg), so the inlined clause-walk reads `agent +d.belief → predicate → +d.clause` ranks
   directly — belief facts are clause-shaped cells whose `+d.grab` term heads are `#Unify`-consumable
-  (the M2 emission contract names the term-cell encoding). Multi-agent modules: each clause carries
-  `+d.owner → <agent symbol>` (M0 emits it; dispatch keys on it — no silent cross-agent handler
-  stealing).
+  (the M2 emission contract names the term-cell encoding). Multi-agent modules: each goal/event
+  **symbol** carries `+d.holder → <agent>` (r3 — `d.owner` collides with the store link-property
+  vocabulary, and per-clause stamping would leave mid-turn `learn_*` mints ownerless; symbol-side
+  ownership is emitted once by M0 and learned clauses inherit it through their host symbol —
+  program→program edge, no V12 letter). Dispatch keys on it — no silent cross-agent handler
+  stealing.
 
 ## 4. Boundaries, budgets, invariants
 
@@ -475,13 +483,14 @@ per-step sets is a reasonable optimization, not a correctness gate — measure b
   shape); each `plan`/`on`/`def`/`method` → clause/symbol cells with `compileFragment`-shaped heads
   — **with declared body-head names** (§3.5's recorded identity needs them for image-original
   bodies); predicate decls → `d.belief` hosts; agent cell + `$`-reserved seeds + directory cell +
-  `+d.dirs`/`+d.agents`; each clause cell carries `+d.owner → <agent symbol>` for multi-agent
-  dispatch; file `d.agents`/`d.dirs`/`d.seen`/`d.evidence`/`d.verb`/`d.owner`/`d.clone`/recipe dims
-  in `kAgentDimensionNames`; `finalizeProgramImage` + `seedProgramImage` + lineage seed. **Plus a
-  `DeclKind` disposition table** — every one of the 19 `DeclKind`s gets an explicit
-  lower/stub/refuse ruling (r1: ~11 were undisposed, `var` fields included); the `std:agent` prelude
-  ships here; each body lowering starts as a single-segment stub (the scalar Emitter refuses agent
-  statement kinds — real segmentation is M2's).
+  `+d.dirs`/`+d.agents`; each goal/event symbol carries `+d.holder → <agent>` for multi-agent
+  dispatch; file `d.agents`/`d.dirs`/`d.seen`/`d.evidence`/`d.verb`/`d.holder` in
+  `kAgentDimensionNames` (`d.clone` and the recipe dims are already filed — r3);
+  `finalizeProgramImage` + `seedProgramImage` + lineage seed. **Plus a `DeclKind` disposition
+  table** — every one of the 19 `DeclKind`s gets an explicit lower/stub/refuse ruling (r1: ~11 were
+  undisposed, `var` fields included); the `std:agent` prelude ships here; each body lowering starts
+  as a single-segment stub (the scalar Emitter refuses agent statement kinds — real segmentation is
+  M2's).
 - **M0.5 — mesh seams + adjacent defects**: deficit-counter arbitration + P8 scan rotation;
   `ActorExecution` gains the arbitration counters (§4.7 — runtime state, not config); grant gains
   `maxLiveCells`; arena gains `liveCells()`; the `vagent.*` tunables land in `defaultSettingSpecs`;
