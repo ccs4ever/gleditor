@@ -909,6 +909,27 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
     return false;
   }();
 
+  // §8.5's creation order lands the member asserts at image time, so
+  // the first exec turn is where `on Initialize` runs — once, ahead
+  // of the turn's own percept. The $-namespaced flag record is
+  // durable, so a checkpoint/resume or a later stop does not re-fire
+  // initialization.
+  if (!agentStopped)
+    if (const auto rec =
+            varsRecord(arena, core, agent, "$initialized", true);
+        rec.has_value() &&
+        !arena.linked(*rec, core.dims().values, DimVector::POS)
+             .has_value()) {
+      zigzag::expectWritten(arena.link(*rec, core.dims().values,
+                                     DimVector::POS,
+                                     arena.makeScalarCell(std::int64_t{1})));
+      const auto init = arena.makeCell("Initialize");
+      journalAppend(arena, agent, init, dims.seen,
+                    static_cast<std::size_t>(
+                        setting("vagent.journal_size", 64)));
+      if (!dispatchEvent("Initialize", init)) return failTurn();
+    }
+
   if (!agentStopped && exec.message) {
     const std::string &eventName = exec.message->value;
     const auto seen            = arena.makeCell(eventName);

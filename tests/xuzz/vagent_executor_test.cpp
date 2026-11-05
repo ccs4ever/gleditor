@@ -82,9 +82,14 @@ TEST(VagentExecutorTest, WakeTurnBumpsTurnAndLeavesNoResiduals) {
   EXPECT_EQ(*outcome, "ok");
   EXPECT_EQ(h.turnOf(image->agentCell), 1);
   EXPECT_EQ(h.ctx.arena.outstandingMarks(), 0u);
-  // A wake journals no percept.
+  // A wake journals no new percept — the lone entry is the first
+  // turn's Initialize.
   const auto seen = h.ctx.core.findOrMintDimension("d.seen");
-  EXPECT_TRUE(zigzag::rankAfter(h.ctx.arena, image->agentCell, seen).empty());
+  const auto journal =
+      zigzag::rankAfter(h.ctx.arena, image->agentCell, seen) |
+      std::ranges::to<std::vector>();
+  ASSERT_EQ(journal.size(), 1u);
+  EXPECT_EQ(h.ctx.arena.textOf(journal.front()), "Initialize");
 }
 
 TEST(VagentExecutorTest, MessageTurnJournalsThePerceptAndDispatches) {
@@ -105,8 +110,11 @@ TEST(VagentExecutorTest, MessageTurnJournalsThePerceptAndDispatches) {
            std::ranges::to<std::vector>();
   };
   auto journal = journalOf();
-  ASSERT_EQ(journal.size(), 1u);
-  EXPECT_EQ(h.ctx.arena.textOf(journal.front()), "Tick");
+  // [Initialize, Tick]: creation's percept journals ahead of the
+  // message's on the first turn.
+  ASSERT_EQ(journal.size(), 2u);
+  EXPECT_EQ(h.ctx.arena.textOf(journal.front()), "Initialize");
+  EXPECT_EQ(h.ctx.arena.textOf(journal[1]), "Tick");
   // Bound enforced on the next turn: the head drops, newest survives.
   ASSERT_TRUE(exec(h.execution("Tock"), h.ctx));
   ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
@@ -150,9 +158,14 @@ TEST(VagentExecutorTest, PendingEventsDrainDuringSettleWithoutJournaling) {
   const auto outcome = exec(h.execution(), h.ctx);
   ASSERT_TRUE(outcome) << static_cast<int>(outcome.error());
   EXPECT_TRUE(zigzag::rankAfter(arena, image->agentCell, pend).empty());
-  // Internal events are not percepts — the journal stays empty.
+  // Internal events are not percepts — the journal holds only the
+  // first turn's Initialize.
   const auto seen = h.ctx.core.findOrMintDimension("d.seen");
-  EXPECT_TRUE(zigzag::rankAfter(arena, image->agentCell, seen).empty());
+  const auto journal =
+      zigzag::rankAfter(arena, image->agentCell, seen) |
+      std::ranges::to<std::vector>();
+  ASSERT_EQ(journal.size(), 1u);
+  EXPECT_EQ(arena.textOf(journal.front()), "Initialize");
   EXPECT_EQ(arena.outstandingMarks(), 0u);
 }
 
@@ -1578,6 +1591,37 @@ TEST(VagentExecutorTest, InitialBeliefSatisfiesMaintainMonitors) {
   EXPECT_EQ(arena.outstandingMarks(), 0u);
 }
 
+TEST(VagentExecutorTest, OnInitializeFiresOnceAheadOfTheFirstPercept) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image =
+      h.lower("module demo\nevent Tick\nevent Ready\nevent Ping\n"
+              "agent A {\n"
+              "  on Initialize { emit Ready{} }\n"
+              "  on Tick { emit Ping{} }\n"
+              "}");
+  ASSERT_TRUE(image);
+
+  // Creation order lands `on Initialize` on the agent's first exec
+  // turn, ahead of that turn's own percept — the outbox reads
+  // [Ready, Ping], not [Ping, Ready].
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  auto out = VagentExecutor::drainOutbox(h.ctx.arena, h.ctx.core,
+                                       image->agentCell);
+  ASSERT_EQ(out.size(), 2u);
+  EXPECT_EQ(out[0].payload, "Ready");
+  EXPECT_EQ(out[1].payload, "Ping");
+
+  // The $initialized flag record is durable — later turns never
+  // re-fire it.
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  out = VagentExecutor::drainOutbox(h.ctx.arena, h.ctx.core,
+                                    image->agentCell);
+  ASSERT_EQ(out.size(), 3u);
+  EXPECT_EQ(out[2].payload, "Ping");
+  EXPECT_EQ(h.ctx.arena.outstandingMarks(), 0u);
+}
+
 TEST(VagentExecutorTest, RecordLiteralsEmitAndFieldAccessReads) {
   ExecutorHarness h;
   VagentExecutor exec;
@@ -2036,10 +2080,11 @@ TEST(VagentExecutorTest, StopSelfHaltsEveryLaterTurn) {
       VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
   ASSERT_EQ(outbox.size(), 1u);
   EXPECT_EQ(outbox[0].payload, "Done");
+  // [Initialize, Tick] — the creation percept journals first.
   EXPECT_EQ((zigzag::rankAfter(arena, image->agentCell, jDim) |
              std::ranges::to<std::vector>())
                 .size(),
-            1u);
+            2u);
 
   // Turn 2 — a delivered Tick is neither journaled nor dispatched:
   // the stopped agent's turn is a clean no-op.
@@ -2047,7 +2092,7 @@ TEST(VagentExecutorTest, StopSelfHaltsEveryLaterTurn) {
   EXPECT_EQ((zigzag::rankAfter(arena, image->agentCell, jDim) |
              std::ranges::to<std::vector>())
                 .size(),
-            1u);
+            2u);
   outbox = VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
   EXPECT_EQ(outbox.size(), 1u);
   EXPECT_EQ(arena.outstandingMarks(), 0u);
