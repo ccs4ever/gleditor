@@ -482,6 +482,48 @@ TEST(VagentExecutorTest, HandlerPriorityOrdersBeforeDeclarationOrder) {
   EXPECT_EQ(arena.outstandingMarks(), 0u);
 }
 
+TEST(VagentExecutorTest, AgentVarReadsInGuardsAndWritesThroughBodies) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  // The guide's counting shape: `var` mints the agent's state slot,
+  // the guard reads it live, and `high := high + 1` writes through
+  // the record's holder at run time — durable across turns.
+  const auto image = h.lower(
+      "module demo\nevent Tick\nevent Done\n"
+      "agent A {\n"
+      "  var high: Int := 0\n"
+      "  on Tick [high < 2] { high := high + 1; emit Done{} }\n"
+      "}");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+  const auto highOf = [&]() -> std::int64_t {
+    const auto rec = varsRecord(arena, h.ctx.core, image->agentCell,
+                                "high", false);
+    if (!rec) return -1;
+    const auto holder =
+        arena.linked(*rec, h.ctx.core.dims().values, DimVector::POS);
+    if (!holder) return -1;
+    const auto rendered = h.ctx.core.render(*holder);
+    if (!rendered) return -1;
+    if (const auto *n = std::get_if<std::int64_t>(&*rendered))
+      return *n;
+    return -1;
+  };
+
+  // Ticks 1-2 satisfy high<2 and count; tick 3 fails the guard, so
+  // neither the write nor the emit happens.
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  EXPECT_EQ(highOf(), 2);
+  const auto outbox =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  ASSERT_EQ(outbox.size(), 2u);
+  EXPECT_EQ(outbox[0].payload, "Done");
+  EXPECT_EQ(outbox[1].payload, "Done");
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
 TEST(VagentExecutorTest, EmitInAndForMarshalOntoSeparateFields) {
   ExecutorHarness h;
   VagentExecutor exec;

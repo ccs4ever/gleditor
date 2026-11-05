@@ -214,7 +214,12 @@ private:
     // activation — and the checker already proved the type, so the
     // unvalued render check is skipped; the alias resolves straight into
     // externalReferences_ (cell identity, never a value snapshot).
-    if (!capName(expression.text)) {
+    // State-side slots are compile-time-unvalued like captures — a
+    // `var`'s record exists before any body writes it, so the render
+    // check's value contract would refuse legitimate write-before-
+    // read state. The fragment reads/writes the record's +d.values at
+    // run time; the checker already proved the declared type.
+    if (!capName(expression.text) && !found->second.stateSide) {
       const auto rendered = core_.render(found->second.cell);
       const auto value    = rendered.value_or(CellValue{});
       const bool matches =
@@ -239,11 +244,14 @@ private:
       if (!matches)
         refuse(expression, DiagnosticCode::TypeMismatch,
                "binding value does not have its declared scalar type");
-    } else {
+    } else if (capName(expression.text)) {
       // §5.3's capture class: references to a cap$N alias carry the
       // captured binding's own cell — operand wings for it are capture
       // slots (unvalued cells appended to the binding's +d.clone rank
       // tail, decoded via masterOf at run time), never int64 snapshots.
+      // A state-side slot is NOT a capture — its recipe capture-record
+      // would re-aim +d.values at the holder and evict the var
+      // record's own edge (fragment.cpp's capture arm).
       captureCells_.insert(found->second.cell);
     }
     externalReferences_[&expression] = found->second.cell;

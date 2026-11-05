@@ -27,6 +27,8 @@ DeclDisposition declDisposition(DeclKind kind) noexcept {
   case DeclKind::Answer:
   case DeclKind::Handler:
     return DeclDisposition::Lower;
+  case DeclKind::Field:
+    return DeclDisposition::Lower;
   case DeclKind::Record:
   case DeclKind::Question:
   case DeclKind::Skill:
@@ -34,7 +36,6 @@ DeclDisposition declDisposition(DeclKind kind) noexcept {
   case DeclKind::Behavior:
   case DeclKind::Belief:
   case DeclKind::Lifecycle:
-  case DeclKind::Field:
     return DeclDisposition::Stub;
   case DeclKind::Uses:
   case DeclKind::Install:
@@ -1014,7 +1015,13 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
             arena.link(*rec, dims().values, DimVector::POS,
                        arena.makeScalarCell(std::int64_t{0})));
     }
-    for (const auto &member : decl.members) lowerDecl(member, true);
+    // Var records mint before any body emits — a member fragment
+    // binds `var` names through the bindings table at compile time,
+    // whatever order the declarations list them in.
+    for (const auto &member : decl.members)
+      if (member.kind == DeclKind::Field) lowerDecl(member, true);
+    for (const auto &member : decl.members)
+      if (member.kind != DeclKind::Field) lowerDecl(member, true);
     return;
   }
   case DeclKind::Event:
@@ -1226,6 +1233,66 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
     const auto clause =
         n == 1 ? std::format("on:{}", name) : std::format("on:{}#{}", name, n);
     lowerClauseBody(decl, host, paramsOf(decl, name), clause);
+    return;
+  }
+  case DeclKind::Field: {
+    if (!insideAgent) {
+      // Module-scope vars are a different bank — nothing mints for a
+      // member-less field outside the agent.
+      image.stubbed.push_back(name);
+      return;
+    }
+    // The agent's state slot: a vars record whose +d.values child is
+    // the value-holder the bindings table names state-side — a member
+    // fragment's Value op reads and writes the holder's content at
+    // run time, so `x :=` lands in the durable record, never a
+    // compile-time snapshot. A non-literal initializer can't mint a
+    // value; the holder stands empty (reads fault honestly) and the
+    // name files under stubbed so the image's degraded surface stays
+    // truthful.
+    const auto rec = varsRecord(arena, core, image.agentCell, name, true);
+    if (!rec) {
+      refuse(decl, std::format("var '{}' record could not mint", name));
+      return;
+    }
+    const auto holder = arena.makeCell();
+    zigzag::expectWritten(
+        arena.link(*rec, dims().values, DimVector::POS, holder));
+    // The "var.slot" name marks this as a declared slot rather than a
+    // repointable value cell: the `x := verb` hoists write through a
+    // marked holder instead of swapping the record's +d.values edge —
+    // a repoint would orphan the cell the fragment bindings resolved.
+    zigzag::expectWritten(arena.link(holder, dims().name, DimVector::POS,
+                                     arena.makeCell("var.slot")));
+    if (decl.initializer) {
+      const auto &init = *decl.initializer;
+      switch (init.kind) {
+      case ExprKind::Integer:
+        core.writeValue(holder, 0, std::nullopt,
+                        CellValue{std::stoll(init.text)});
+        break;
+      case ExprKind::Float:
+        core.writeValue(holder, 0, std::nullopt,
+                        CellValue{std::stod(init.text)});
+        break;
+      case ExprKind::Boolean:
+        core.writeValue(holder, 0, std::nullopt,
+                        CellValue{init.text == "true"});
+        break;
+      case ExprKind::String:
+        core.writeValue(holder, 0, std::nullopt, CellValue{init.text});
+        break;
+      case ExprKind::None:
+        break;
+      default:
+        image.stubbed.push_back(name);
+        break;
+      }
+    }
+    bindings.emplace(
+        name,
+        CompilerBinding{holder, decl.result.value_or(Type{"<any>"}),
+                        /*stateSide=*/true});
     return;
   }
   default:

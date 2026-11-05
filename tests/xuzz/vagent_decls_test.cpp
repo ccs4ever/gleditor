@@ -69,13 +69,13 @@ TEST(VagentDeclsTest, DispositionTableDisposesEveryDeclKind) {
       ++refuses;
       break;
     }
-  EXPECT_EQ(lowers, 8);
-  EXPECT_EQ(stubs, 8);
+  EXPECT_EQ(lowers, 9);
+  EXPECT_EQ(stubs, 7);
   EXPECT_EQ(refuses, 3);
 
   EXPECT_EQ(declDisposition(DeclKind::Agent), DeclDisposition::Lower);
   EXPECT_EQ(declDisposition(DeclKind::Handler), DeclDisposition::Lower);
-  EXPECT_EQ(declDisposition(DeclKind::Field), DeclDisposition::Stub);
+  EXPECT_EQ(declDisposition(DeclKind::Field), DeclDisposition::Lower);
   EXPECT_EQ(declDisposition(DeclKind::Uses), DeclDisposition::Refuse);
   EXPECT_EQ(declDisposition(DeclKind::Install), DeclDisposition::Refuse);
   EXPECT_EQ(declDisposition(DeclKind::BehaviorUse), DeclDisposition::Refuse);

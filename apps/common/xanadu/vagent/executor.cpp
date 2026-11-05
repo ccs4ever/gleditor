@@ -323,6 +323,34 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
     return chain ? argValuesOf(*chain) : std::vector<CellValue>{};
   };
 
+  // Store a var record's value: a declared `var`'s +d.values names one
+  // stable "var.slot" holder — write through it so the cell fragment
+  // bindings resolved stays the store (a repoint would orphan it).
+  // Unmarked records keep the mint-and-repoint idiom — content writes
+  // don't restate under the serial promote, fresh scalars do.
+  const auto storeVar = [&](CellRef rec, const CellValue &val) {
+    if (const auto holder =
+            arena.linked(rec, core.dims().values, DimVector::POS)) {
+      const auto mark =
+          arena.linked(*holder, core.dims().name, DimVector::POS);
+      if (mark && arena.textOf(*mark) == "var.slot") {
+        core.writeValue(*holder, 0, std::nullopt, val);
+        return;
+      }
+    }
+    const auto value = std::visit(
+        [&](const auto &v) -> CellRef {
+          using V = std::decay_t<decltype(v)>;
+          if constexpr (std::is_same_v<V, std::string>)
+            return arena.makeCell(v);
+          else
+            return arena.makeScalarCell(v);
+        },
+        val);
+    zigzag::expectWritten(
+        arena.link(rec, core.dims().values, DimVector::POS, value));
+  };
+
   // The fault arm of §3.5's ladder: count the fault and park for the
   // backoff window; the walker's faulted block owns retry and the
   // drop-when reconsideration at the cap. ready=1 because the ladder
@@ -397,9 +425,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       if (const auto bound = field("result"); bound != noCell)
         if (const auto rec =
                 varsRecord(arena, core, agent, arena.textOf(bound), true))
-          zigzag::expectWritten(arena.link(
-              *rec, core.dims().values, DimVector::POS,
-              arena.makeScalarCell(static_cast<std::int64_t>(*child))));
+          storeVar(*rec, CellValue{static_cast<std::int64_t>(*child)});
       return true;
     }
     if (verb == "emit") {
@@ -516,9 +542,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       if (const auto bound = field("result"); bound != noCell)
         if (const auto rec =
                 varsRecord(arena, core, agent, arena.textOf(bound), true))
-          zigzag::expectWritten(arena.link(
-              *rec, core.dims().values, DimVector::POS,
-              arena.makeScalarCell(static_cast<std::int64_t>(child))));
+          storeVar(*rec, CellValue{static_cast<std::int64_t>(child)});
       return true;
     }
     if (verb == "ask") {
