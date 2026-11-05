@@ -633,6 +633,23 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
     const auto sym = mintSymbol(name);
     signatures.emplace(name, decl.parameters);
     if (insideAgent && decl.kind != DeclKind::Predicate) mintHolder(sym);
+    // The pure `drop when` lowers to a named Bool head keyed off the
+    // goal's vars record — §3.5's ladder reaches it at the fault cap:
+    // truthy drops the intention, falsy leaves it parked.
+    if (decl.kind == DeclKind::Goal)
+      for (const auto &gc : decl.goalClauses) {
+        if (gc.kind != GoalClause::Kind::Drop || !gc.condition) continue;
+        auto head = emitDeclHead(decl, *gc.condition, paramsOf(decl, name),
+                                 std::format("{}:drop", label(name)),
+                                 Type{"Bool"}, true);
+        if (!head) {
+          errors.push_back(head.error());
+          return;
+        }
+        if (const auto rec = varsRecord(arena, core, sym, "dropTest", true))
+          zigzag::expectWritten(
+              arena.link(*rec, dims().values, DimVector::POS, *head));
+      }
     for (const auto &member : decl.members) lowerDecl(member, insideAgent);
     return;
   }

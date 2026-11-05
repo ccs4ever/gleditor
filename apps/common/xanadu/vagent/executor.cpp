@@ -347,6 +347,17 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
     if (!dispatchEvent(name)) return failTurn();
   }
 
+  // The fault arm of §3.5's ladder: count the fault and park for the
+  // backoff window; the walker's faulted block owns retry and the
+  // drop-when reconsideration at the cap.
+  const auto faultIntention = [&](CellRef i) {
+    const auto faults = meta.intentionField(i, "faults").value_or(0);
+    meta.setIntentionField(i, "faults", faults + 1);
+    meta.setIntentionField(i, "faulted", 1);
+    meta.setIntentionField(i, "blocked_until",
+                           turn + setting("vagent.intention_backoff", 2));
+  };
+
   // §3.5: ready intentions advance one spine step per settle — record
   // stepping, never cursor state. body_replaced is checked against the
   // adoption-time +d.spin name before any member runs.
@@ -389,7 +400,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
         meta.setIntentionField(intention, "ready", 1);
       } else if (turn >= deadline) {
         meta.setIntentionField(intention, "waiting", 0);
-        meta.setIntentionField(intention, "faulted", 1);
+        faultIntention(intention);
       }
       if (!matched) continue;
     }
@@ -397,7 +408,51 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
     const auto faulted = meta.intentionField(intention, "faulted").value_or(0);
     const auto blockedTill =
         meta.intentionField(intention, "blocked_until").value_or(0);
-    if (ready == 0 || faulted != 0 || blockedTill > turn) continue;
+    if (ready == 0) continue;
+    if (faulted != 0) {
+      // §3.5's ladder: a fault parks for vagent.intention_backoff
+      // turns, then retries; at the vagent.max_intention_faults cap
+      // the goal's dropTest is the reconsideration boundary — truthy
+      // drops the record off the rank, falsy (or absent) leaves it
+      // faulted for inspection.
+      if (blockedTill > turn) continue;
+      const auto faults = meta.intentionField(intention, "faults").value_or(0);
+      if (faults >= setting("vagent.max_intention_faults", 3)) {
+        const auto goal = [&]() -> CellRef {
+          if (const auto rec =
+                  varsRecord(arena, core, intention, "goal", false))
+            if (const auto v =
+                    arena.linked(*rec, core.dims().values, DimVector::POS))
+              return *v;
+          return noCell;
+        }();
+        bool dropped = false;
+        if (goal != noCell)
+          if (const auto rec = varsRecord(arena, core, goal, "dropTest", false))
+            if (const auto head =
+                    arena.linked(*rec, core.dims().values, DimVector::POS)) {
+              const auto outcome =
+                  meta.runFragment(*head, {}, exec.cursor, maxCycles);
+              if (outcome.refusal == MetaRunOutcome::Refusal::None &&
+                  outcome.produced && outcome.result) {
+                const auto &v = *outcome.result;
+                if (const auto *b = std::get_if<bool>(&v))
+                  dropped = *b;
+                else if (const auto *n = std::get_if<std::int64_t>(&v))
+                  dropped = *n != 0;
+                else if (const auto *r = std::get_if<double>(&v))
+                  dropped = *r != 0.0;
+                else
+                  dropped = std::get<std::string>(v) == "true";
+              }
+            }
+        if (dropped) unlinkRank(arena, intention, dims.intention);
+        continue;
+      }
+      // Backoff expired below the cap — retry the same member.
+      meta.setIntentionField(intention, "faulted", 0);
+    }
+    if (blockedTill > turn) continue;
 
     const auto planCell = [&]() -> CellRef {
       if (const auto rec = varsRecord(arena, core, intention, "plan", false))
@@ -415,7 +470,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       return {};
     }();
     if (planCell == noCell) {
-      meta.setIntentionField(intention, "faulted", 1);
+      faultIntention(intention);
       continue;
     }
     // body_replaced: the clause's +d.spin target re-pointed since
@@ -428,7 +483,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
               arena.linked(*head, core.dims().name, DimVector::POS))
         liveName = std::string{arena.textOf(*name)};
     if (liveName != bodyName) {
-      meta.setIntentionField(intention, "faulted", 1);
+      faultIntention(intention);
       continue;
     }
 
@@ -444,7 +499,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
         const auto head =
             arena.linked(planCell, core.dims().spin, DimVector::POS);
         if (!head) {
-          meta.setIntentionField(intention, "faulted", 1);
+          faultIntention(intention);
           continue;
         }
         const auto outcome =
@@ -462,7 +517,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       }
     }
     if (!ok) {
-      meta.setIntentionField(intention, "faulted", 1);
+      faultIntention(intention);
       continue;
     }
     const auto next = stepIdx + 1;

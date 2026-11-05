@@ -476,6 +476,54 @@ TEST(VagentExecutorTest, AwaitSuspendsAndTheWakeResumes) {
   EXPECT_EQ(arena.outstandingMarks(), 0u);
 }
 
+TEST(VagentExecutorTest, FaultBackoffRetriesThenDropWhenCancels) {
+  ExecutorHarness h;
+  // backoff=0 turns the park into a next-turn retry; the cap of two
+  // faults reaches the drop boundary on the third settle.
+  VagentExecutor exec{[](std::string_view key) -> std::optional<std::int64_t> {
+    if (key == "vagent.intention_backoff") return 0;
+    if (key == "vagent.max_intention_faults") return 2;
+    return std::nullopt;
+  }};
+  const auto image = h.lower("module demo\nevent Tick\n"
+                             "goal Work() perform { drop when true == true }\n"
+                             "goal Missing() perform\n"
+                             "agent A {\n"
+                             "  on Tick { adopt Work() }\n"
+                             "  plan w for Work { adopt Missing() }\n"
+                             "}");
+  ASSERT_TRUE(image);
+  auto &arena     = h.ctx.arena;
+  const auto iDim = h.ctx.core.findOrMintDimension("d.intention");
+
+  const auto field = [&](std::string_view name) {
+    const auto parked = zigzag::rankAfter(arena, image->agentCell, iDim) |
+                        std::ranges::to<std::vector>();
+    if (parked.empty()) return std::optional<std::int64_t>{};
+    auto binds =
+        mintMetaBindSet(arena, h.ctx.core, h.ctx.core.home(), image->agentCell);
+    MetaRuntime meta(h.ctx.core, h.ctx.vm, *binds);
+    return meta.intentionField(parked.front(), name);
+  };
+
+  // Turn 1 — adopt runs; the plan's adopt of a plan-less goal fails:
+  // faults=1, faulted, blocked_until=turn (backoff 0).
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  EXPECT_EQ(field("faults"), 1);
+  EXPECT_EQ(field("faulted"), 1);
+
+  // Turn 2 — backoff expired: the same member retries and fails,
+  // faults=2 — at the cap next settle.
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+  EXPECT_EQ(field("faults"), 2);
+
+  // Turn 3 — at the cap the goal's `drop when true` is the
+  // reconsideration boundary: the intention drops off the rank.
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+  EXPECT_TRUE(zigzag::rankAfter(arena, image->agentCell, iDim).empty());
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
 // -- §3.1/§3.8 belief store: predicate banks, provenance, the four verbs ------
 
 TEST(VagentBeliefTest, BelieveBelievesForgetReviseRoundTrip) {
