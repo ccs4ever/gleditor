@@ -340,6 +340,10 @@ public:
   /// marshaled terms outside the belief bank (the wake match's
   /// structural `await price("oil", 4)`).
   [[nodiscard]] bool termEquals(CellRef a, CellRef b) const;
+  /// Pattern matching for `believes`-style holds queries: '?'-prefixed
+  /// pattern cells (marshaled logic variables) match any fact cell.
+  /// Existence checking only — no substitution is recorded.
+  [[nodiscard]] bool termUnifies(CellRef pattern, CellRef fact) const;
   /// `believe`: append the fact clause — `+d.grab → term`, `+d.source →`
   /// a `{peer, turn}` record, `+d.evidence →` the journaled percept when
   /// supplied. Clause-bank bounds (`vagent.max_clauses_per_predicate`)

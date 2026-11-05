@@ -747,7 +747,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
   const auto goalOf = [&](CellRef i) -> CellRef {
     if (const auto rec = varsRecord(arena, core, i, "goal", false))
       if (const auto v = arena.linked(*rec, core.dims().values, DimVector::POS))
-        return *v;
+        if (const auto n = arena.asInt64(*v)) return static_cast<CellRef>(*n);
     return noCell;
   };
 
@@ -953,11 +953,79 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
     }
     if (blockedTill > turn) continue;
 
+    // A maintain intention is a monitor, never a spine-runner:
+    // delegator==0 marks it — each settle re-evals holds and a lapse
+    // fires a restorer child through the ordinary delegation
+    // machinery (+d.subgoal, delegated park, retire write-back). The
+    // child is an ordinary intention and runs the plan; its retire
+    // readies the monitor for the re-check. maintain_backoff bounds
+    // the refire rate after an unsuccessful pass.
+    const auto goalCell = goalOf(intention);
+    const auto goalKind = [&]() -> std::int64_t {
+      if (goalCell == noCell) return 0;
+      if (const auto rec =
+              varsRecord(arena, core, goalCell, "goalKind", false))
+        if (const auto v =
+                arena.linked(*rec, core.dims().values, DimVector::POS))
+          if (const auto n = arena.asInt64(*v)) return *n;
+      return 0;
+    }();
+    if (goalKind == 2 &&
+        meta.intentionField(intention, "delegator").value_or(0) == 0) {
+      bool holds = true;
+      if (goalCell != noCell) {
+        // `holds believes p(...)` lowers to a unification pattern
+        // under holdsBelief — answered against the bank; anything
+        // else lowers to a scalar holdsTest head for evalBool.
+        if (const auto rec =
+                varsRecord(arena, core, goalCell, "holdsBelief", false)) {
+          if (const auto pattern =
+                  arena.linked(*rec, core.dims().values, DimVector::POS)) {
+            holds = false;
+            for (const auto clause : meta.beliefsOf(arena.textOf(*pattern)))
+              if (const auto fact = arena.linked(clause, core.dims().grab,
+                                                 DimVector::POS);
+                  fact && meta.termUnifies(*pattern, *fact)) {
+                holds = true;
+                break;
+              }
+          }
+        } else if (const auto rec = varsRecord(arena, core, goalCell,
+                                               "holdsTest", false)) {
+          if (const auto head =
+                  arena.linked(*rec, core.dims().values, DimVector::POS))
+            holds = evalBool(*head);
+        }
+      }
+      if (!holds) {
+        auto child = meta.adoptGoal(
+            goalCell, turn,
+            static_cast<std::size_t>(
+                setting("vagent.condition_turn_fuel", 256)));
+        if (!child) {
+          faultIntention(intention);
+          continue;
+        }
+        meta.setIntentionField(*child, "delegator",
+                               static_cast<std::int64_t>(intention));
+        zigzag::expectWritten(
+            arena.link(zigzag::rankTail(arena, intention, dims.subgoal),
+                       dims.subgoal, DimVector::POS, *child));
+        meta.setIntentionField(intention, "delegated", 1);
+        meta.setIntentionField(intention, "ready", 0);
+        meta.setIntentionField(
+            intention, "blocked_until",
+            turn + setting("vagent.maintain_backoff", 1));
+      }
+      continue;
+    }
+
     const auto planCell = [&]() -> CellRef {
       if (const auto rec = varsRecord(arena, core, intention, "plan", false))
         if (const auto v =
                 arena.linked(*rec, core.dims().values, DimVector::POS))
-          return *v;
+          if (const auto n = arena.asInt64(*v))
+            return static_cast<CellRef>(*n);
       return noCell;
     }();
     const auto bodyName = [&]() -> std::string {

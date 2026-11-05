@@ -862,6 +862,23 @@ bool MetaRuntime::termEquals(CellRef a, CellRef b) const {
   return beliefTermEquals(core_.arena(), core_.dims().step, a, b);
 }
 
+bool MetaRuntime::termUnifies(CellRef pattern, CellRef fact) const {
+  auto &arena     = core_.arena();
+  const auto text = arena.textOf(pattern);
+  // A '?'-prefixed pattern cell marshals a logic variable: it matches
+  // anything and binds nothing — the holds check needs existence only.
+  if (!text.empty() && text.front() == '?') return true;
+  if (text != arena.textOf(fact)) return false;
+  const auto pChildren = std::ranges::to<std::vector>(
+      zigzag::rankAfter(arena, pattern, core_.dims().step));
+  const auto fChildren = std::ranges::to<std::vector>(
+      zigzag::rankAfter(arena, fact, core_.dims().step));
+  if (pChildren.size() != fChildren.size()) return false;
+  for (std::size_t i = 0; i < pChildren.size(); ++i)
+    if (!termUnifies(pChildren[i], fChildren[i])) return false;
+  return true;
+}
+
 std::expected<CellRef, std::string>
 MetaRuntime::believe(std::string_view predicate, CellRef term, CellRef peer,
                      std::int64_t turn, std::optional<CellRef> evidence) {
@@ -1052,8 +1069,12 @@ MetaRuntime::adoptGoal(CellRef goal, std::int64_t turn, std::size_t whereFuel) {
 
   intField("id", *serial);
   field("kind", arena.makeCell("adopt"));
-  field("goal", goal);
-  field("plan", clause);
+  // goal/plan are shared program-image cells: an edge here is the
+  // single inbound +d.values slot a second adoption of the same goal
+  // (a maintain monitor's restorer, say) would evict. Scalar refs
+  // ride the delegator convention instead.
+  intField("goal", static_cast<std::int64_t>(goal));
+  intField("plan", static_cast<std::int64_t>(clause));
   field("tried", arena.makeCell());
   intField("step", 0);
   intField("waiting", 0);

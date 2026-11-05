@@ -268,6 +268,35 @@ struct Lowerer {
     }
   }
 
+  // marshalTerm's pattern form: LogicVariable arguments marshal as
+  // '?'-prefixed text cells — MetaRuntime::termUnifies reads them as
+  // wildcards. Used for `believes`-shaped goal conditions, which the
+  // scalar emitter cannot lower and emitDeclHead would otherwise stub
+  // to a vacuous `true`.
+  std::expected<CellRef, Diagnostic> marshalPattern(const Expr &expr) {
+    if (expr.kind == ExprKind::LogicVariable) {
+      const auto text = expr.text.starts_with('?')
+                            ? expr.text
+                            : std::format("?{}", expr.text);
+      return arena.makeCell(text);
+    }
+    // marshalTerm recurses on itself, so a Term carrying a variable
+    // anywhere below the root would still refuse — the pattern walk
+    // re-does the Term case with itself as the child step.
+    if (expr.kind == ExprKind::Term) {
+      const auto cell = arena.makeCell(expr.text);
+      for (const auto &child : expr.children) {
+        auto arg = marshalPattern(*child);
+        if (!arg) return arg;
+        zigzag::expectWritten(
+            arena.link(zigzag::rankTail(arena, cell, dims().step), dims().step,
+                       DimVector::POS, *arg));
+      }
+      return cell;
+    }
+    return marshalTerm(expr);
+  }
+
   // The host-step cell: +d.verb names the MetaRuntime entry point, the
   // +d.vars record marshals the call's arguments under their parameter
   // names — for the belief verbs that is exactly `term`. Peer and
@@ -902,6 +931,46 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
         else if (gc.kind == GoalClause::Kind::Holds)
           field = "holdsTest";
         if (!field) continue;
+        // `holds believes p(...) [from self]` is a bank query, not a
+        // scalar condition — emitHead cannot lower it and the stub
+        // fallback would mint a vacuous `true`. The pure-belief form
+        // marshals a unification pattern instead; the executor's
+        // monitor rung answers it against the bank directly. A
+        // non-self scope names a remote bank the turn cannot reach —
+        // refused rather than silently held.
+        if (gc.kind == GoalClause::Kind::Holds &&
+            gc.condition->kind == ExprKind::Believes) {
+          const auto &query = *gc.condition;
+          if (query.scope) {
+            const bool local =
+                query.scope->kind == ExprKind::Identifier &&
+                (query.scope->text == "self" || query.scope->text == "0");
+            if (!local) {
+              errors.push_back(
+                  Diagnostic{DiagnosticCode::InvalidDeclaration,
+                             "holds believes ... from <peer> queries a "
+                             "remote bank the turn cannot evaluate",
+                             query.scope->loc});
+              return;
+            }
+          }
+          if (query.children.empty()) {
+            errors.push_back(Diagnostic{DiagnosticCode::InvalidDeclaration,
+                                        "holds believes carries no term",
+                                        query.loc});
+            return;
+          }
+          auto pattern = marshalPattern(*query.children.front());
+          if (!pattern) {
+            errors.push_back(pattern.error());
+            return;
+          }
+          if (const auto rec =
+                  varsRecord(arena, core, sym, "holdsBelief", true))
+            zigzag::expectWritten(arena.link(*rec, dims().values,
+                                             DimVector::POS, *pattern));
+          continue;
+        }
         auto head = emitDeclHead(decl, *gc.condition, paramsOf(decl, name),
                                  std::format("{}:{}", label(name), field),
                                  Type{"Bool"}, true);

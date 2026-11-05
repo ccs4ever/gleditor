@@ -1031,6 +1031,101 @@ TEST(VagentExecutorTest, BeliefAwaitSatisfiedImmediatelyNeverParks) {
   EXPECT_EQ(arena.outstandingMarks(), 0u);
 }
 
+TEST(VagentExecutorTest, MaintainMonitorsHoldsAndFiresARestorer) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image =
+      h.lower("module demo\nevent Tick\nevent Drop\n"
+              "predicate level(value: Int)\n"
+              "goal Enough() maintain { holds believes level(?v) from self }\n"
+              "agent A {\n"
+              "  on Tick { adopt Enough() }\n"
+              "  on Drop { forget level(9) }\n"
+              "  plan restore for Enough { believe level(9) }\n"
+              "}");
+  ASSERT_TRUE(image);
+  auto &arena             = h.ctx.arena;
+  const auto intentionDim = h.ctx.core.findOrMintDimension("d.intention");
+  auto binds =
+      mintMetaBindSet(arena, h.ctx.core, h.ctx.core.home(), image->agentCell);
+  ASSERT_TRUE(binds) << binds.error();
+  MetaRuntime meta(h.ctx.core, h.ctx.vm, *binds);
+  const auto levelHolds = [&](std::string_view value) {
+    const auto t = arena.makeCell("level");
+    zigzag::expectWritten(arena.link(t, h.ctx.core.dims().step, DimVector::POS,
+                                     arena.makeCell(std::string{value})));
+    return meta.believes("level", t);
+  };
+
+  // The monitor mints on Tick; the same settle sees the empty bank
+  // and fires the restorer as a delegated subgoal.
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  EXPECT_EQ((zigzag::rankAfter(arena, image->agentCell, intentionDim) |
+             std::ranges::to<std::vector>())
+                .size(),
+            2u);
+
+  // The restorer runs the plan and retires — its delegator write-
+  // back readies the monitor, whose re-check now sees the fact.
+  ASSERT_TRUE(exec(h.execution(std::nullopt), h.ctx));
+  ASSERT_TRUE(exec(h.execution(std::nullopt), h.ctx));
+  EXPECT_TRUE(levelHolds("9"));
+
+  // Only the monitor survives — the child is off the rank and no
+  // new restorer fired once holds was satisfied.
+  const auto live = zigzag::rankAfter(arena, image->agentCell, intentionDim) |
+                    std::ranges::to<std::vector>();
+  ASSERT_EQ(live.size(), 1u);
+
+  // A lapse refires the cycle: forget removes the fact, the next
+  // settle's monitor sees holds fail and fires another restorer.
+  ASSERT_TRUE(exec(h.execution("Drop"), h.ctx));
+  ASSERT_TRUE(exec(h.execution(std::nullopt), h.ctx));
+  ASSERT_TRUE(exec(h.execution(std::nullopt), h.ctx));
+  EXPECT_TRUE(levelHolds("9"));
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
+TEST(VagentExecutorTest, MaintainStaysDormantWhileHoldsIsTrue) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image =
+      h.lower("module demo\nevent Tick\n"
+              "predicate level(value: Int)\n"
+              "goal Enough() maintain { holds believes level(?v) from self }\n"
+              "agent A {\n"
+              "  on Tick { believe level(9); adopt Enough() }\n"
+              "  plan restore for Enough { believe level(0) }\n"
+              "}");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+
+  // The fact already held at adoption — the monitor never fires the
+  // restorer: one intention, no delegation, no level(0) belief.
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  ASSERT_TRUE(exec(h.execution(std::nullopt), h.ctx));
+  const auto live =
+      zigzag::rankAfter(arena, image->agentCell,
+                        h.ctx.core.findOrMintDimension("d.intention")) |
+      std::ranges::to<std::vector>();
+  ASSERT_EQ(live.size(), 1u);
+  const auto subgoal = h.ctx.core.findOrMintDimension("d.subgoal");
+  EXPECT_TRUE(zigzag::rankAfter(arena, live.front(), subgoal).empty());
+  auto binds =
+      mintMetaBindSet(arena, h.ctx.core, h.ctx.core.home(), image->agentCell);
+  ASSERT_TRUE(binds) << binds.error();
+  MetaRuntime meta(h.ctx.core, h.ctx.vm, *binds);
+  const auto levelHolds = [&](std::string_view value) {
+    const auto t = arena.makeCell("level");
+    zigzag::expectWritten(arena.link(t, h.ctx.core.dims().step, DimVector::POS,
+                                     arena.makeCell(std::string{value})));
+    return meta.believes("level", t);
+  };
+  EXPECT_TRUE(levelHolds("9"));
+  EXPECT_FALSE(levelHolds("0"));
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
 TEST(VagentExecutorTest, BoundAskWakesOnDeliveredAnswerAndBindsIt) {
   ExecutorHarness h;
   VagentExecutor exec;
