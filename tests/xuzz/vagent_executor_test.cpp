@@ -655,6 +655,107 @@ TEST(VagentExecutorTest, TellStagesACrossAgentAssertionInTheOutbox) {
   EXPECT_EQ(h.ctx.arena.outstandingMarks(), 0u);
 }
 
+TEST(VagentExecutorTest, BoundAdoptAndDropTaskRoundTripTheHandle) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image =
+      h.lower("module demo\nevent Start\nevent Cancel\nevent Done\n"
+              "event Grant\n"
+              "goal Work() perform\n"
+              "agent A {\n"
+              "  var task: Opt<Intention> := none\n"
+              "  on Start { task := adopt Work() }\n"
+              "  on Cancel { drop task; emit Done{} }\n"
+              "  plan w for Work { await Grant as g within 9s }\n"
+              "}");
+  ASSERT_TRUE(image);
+  auto &arena     = h.ctx.arena;
+  const auto iDim = h.ctx.core.findOrMintDimension("d.intention");
+
+  // Turn 1 — `task := adopt` hoists: the child intention is adopted
+  // AND the agent's vars record `task` holds its ref as a scalar.
+  ASSERT_TRUE(exec(h.execution("Start"), h.ctx));
+  const auto parked = zigzag::rankAfter(arena, image->agentCell, iDim) |
+                      std::ranges::to<std::vector>();
+  ASSERT_EQ(parked.size(), 1u);
+  const auto taskRec =
+      varsRecord(arena, h.ctx.core, image->agentCell, "task", false);
+  ASSERT_TRUE(taskRec.has_value());
+  const auto handle =
+      arena.linked(*taskRec, h.ctx.core.dims().values, DimVector::POS);
+  ASSERT_TRUE(handle.has_value());
+  EXPECT_EQ(arena.asInt64(*handle).value_or(-1),
+            static_cast<std::int64_t>(parked.front()));
+
+  // Turn 2 — `drop task` resolves the handle back to the record and
+  // cancels it; the same spine still emits Done.
+  ASSERT_TRUE(exec(h.execution("Cancel"), h.ctx));
+  EXPECT_TRUE(zigzag::rankAfter(arena, image->agentCell, iDim).empty());
+  const auto outbox =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  ASSERT_EQ(outbox.size(), 1u);
+  EXPECT_EQ(outbox[0].payload, "Done");
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
+TEST(VagentExecutorTest, SpawnMintsTheChildAndRouteResolvesIt) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image = h.lower("module demo\nevent Boot\nevent Ping\n"
+                             "agent A {\n"
+                             "  var child: Opt<Agent> := none\n"
+                             "  on Boot { child := spawn A() in inner;\n"
+                             "            emit Ping{} for child }\n"
+                             "}");
+  ASSERT_TRUE(image);
+  auto &arena       = h.ctx.arena;
+  const auto agents = h.ctx.core.findOrMintDimension("d.agents");
+  const auto dirs   = h.ctx.core.findOrMintDimension("d.dirs");
+
+  ASSERT_TRUE(exec(h.execution("Boot"), h.ctx));
+
+  // The spawn minted a real directory member with its own $-seeds.
+  CellRef dirCell = noCell;
+  for (const CellRef d : zigzag::rankAfter(arena, h.ctx.core.home(), dirs))
+    dirCell = d;
+  ASSERT_NE(dirCell, noCell);
+  // A's static image member plus the spawned instance sit on the
+  // directory rank — M0 lowers one agent decl, so the spawned child
+  // is a second instance of A's own declaration.
+  const auto members = zigzag::rankAfter(arena, dirCell, agents) |
+                       std::ranges::to<std::vector>();
+  ASSERT_EQ(members.size(), 2u);
+  const auto childRec =
+      varsRecord(arena, h.ctx.core, image->agentCell, "child", false);
+  ASSERT_TRUE(childRec.has_value());
+  const auto bound =
+      arena.linked(*childRec, h.ctx.core.dims().values, DimVector::POS);
+  ASSERT_TRUE(bound.has_value());
+  const auto spawned = static_cast<CellRef>(arena.asInt64(*bound).value_or(-1));
+  // The bound handle is the spawned member — an A-named cell that
+  // isn't the running agent's own cell.
+  const auto spawnedName =
+      arena.linked(spawned, h.ctx.core.dims().name, DimVector::POS);
+  ASSERT_TRUE(spawnedName.has_value());
+  EXPECT_EQ(arena.textOf(*spawnedName), "A");
+  EXPECT_NE(spawned, image->agentCell);
+
+  // The staged emit resolves `for child` to the member's name at
+  // stage time; route matches every A-named member — sender and
+  // spawned child both receive the percept.
+  const auto outbox =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  ASSERT_EQ(outbox.size(), 1u);
+  const auto deliveries = VagentExecutor::route(
+      arena, h.ctx.core, h.ctx.core.home(), outbox.front());
+  EXPECT_EQ(deliveries.size(), 2u);
+  EXPECT_TRUE(std::ranges::any_of(
+      deliveries, [&](const Delivery &d) { return d.agent == spawned; }));
+  EXPECT_TRUE(std::ranges::all_of(
+      deliveries, [](const Delivery &d) { return d.percept == "Ping"; }));
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
 TEST(VagentExecutorTest, AchieveByStagesRemotelyAndWithinBoundsTheWait) {
   ExecutorHarness h;
   VagentExecutor exec;

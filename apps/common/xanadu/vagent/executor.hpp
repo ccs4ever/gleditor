@@ -36,6 +36,15 @@ struct OutboxEntry {
   std::string scope;
 };
 
+/// One staged delivery the adapter owes a receiver: the directory-
+/// resolved agent cell and the percept name it should see. Routing
+/// is the adapter's name-resolution half — the receiver's own turn
+/// still owns journaling, dispatch and belief mutation.
+struct Delivery {
+  zigzag::CellRef agent{zigzag::noCell};
+  std::string percept;
+};
+
 class VagentExecutor {
 public:
   /// The same settings-layer read channel the runtime holds (§4.1) —
@@ -61,6 +70,14 @@ public:
   [[nodiscard]] static std::vector<OutboxEntry>
   drainOutbox(zigzag::ArenaManifold &arena, zigzag::vortex::VortexCore &core,
               zigzag::CellRef agent);
+
+  /// Resolve one outbox entry into the deliveries it owes. `target`
+  /// names a directory agent; "0"/empty means every member
+  /// (broadcast). Payload carries the percept's functor name — a
+  /// term cell's text, which is all the receiver's dispatch needs.
+  [[nodiscard]] static std::vector<Delivery>
+  route(zigzag::ArenaManifold &arena, zigzag::vortex::VortexCore &core,
+        zigzag::CellRef programRoot, const OutboxEntry &entry);
 
 private:
   [[nodiscard]] std::int64_t setting(std::string_view key,

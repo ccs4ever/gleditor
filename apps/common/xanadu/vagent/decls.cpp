@@ -198,10 +198,29 @@ struct Lowerer {
     case ExprKind::Untell:
     case ExprKind::Stop:
     case ExprKind::Ask:
+    case ExprKind::Drop:
+    case ExprKind::Spawn:
       return true;
     default:
       return false;
     }
+  }
+
+  // The host verb a statement lowers to — the statement itself, or
+  // the verb hoisted out of `x := <verb>` / `let x := <verb>`. The
+  // two callers (the spine gate and the emitter) must agree on this
+  // or a bound verb lowers as dead scalar code.
+  static const Expr *hostVerbOf(const Expr &stmt) {
+    if (isHostVerb(stmt.kind)) return &stmt;
+    if (stmt.kind == ExprKind::Binary && stmt.text == ":=" &&
+        stmt.children.size() == 2 &&
+        stmt.children[0]->kind == ExprKind::Identifier &&
+        isHostVerb(stmt.children[1]->kind))
+      return stmt.children[1].get();
+    if (stmt.kind == ExprKind::Let && stmt.children.size() == 1 &&
+        isHostVerb(stmt.children.front()->kind))
+      return stmt.children.front().get();
+    return nullptr;
   }
 
   // Any host-verb statement among the body's top level (a bare verb as
@@ -209,10 +228,10 @@ struct Lowerer {
   static bool bodyHasHostVerb(const Expr &body) {
     if (body.kind == ExprKind::Block) {
       for (const auto &child : body.children)
-        if (isHostVerb(child->kind)) return true;
+        if (hostVerbOf(*child)) return true;
       return false;
     }
-    return isHostVerb(body.kind);
+    return hostVerbOf(body) != nullptr;
   }
 
   // A `+d.grab`-shaped term cell: functor name as content, args on
@@ -290,6 +309,12 @@ struct Lowerer {
     case ExprKind::Ask:
       verb = "ask";
       break;
+    case ExprKind::Drop:
+      verb = "drop";
+      break;
+    case ExprKind::Spawn:
+      verb = "spawn";
+      break;
     default:
       return std::unexpected(Diagnostic{DiagnosticCode::InvalidPosition,
                                         "statement is not a host verb",
@@ -366,6 +391,53 @@ struct Lowerer {
       field("payload", payload);
       field("deadline", arena.makeScalarCell(static_cast<std::int64_t>(
                             std::stoll(expr.deadline->text))));
+      return step;
+    }
+
+    // drop's operand is the Intention handle a bound adopt wrote —
+    // the vars record's name marshals; the runtime resolves it back
+    // to the record's cell. Expressions refusing to be plain names
+    // (drop <call>) don't lower.
+    if (expr.kind == ExprKind::Drop) {
+      if (expr.children.empty() ||
+          expr.children.front()->kind != ExprKind::Identifier)
+        return std::unexpected(Diagnostic{DiagnosticCode::InvalidPosition,
+                                          "drop's operand is not a handle name",
+                                          expr.loc});
+      const auto step = arena.makeCell();
+      zigzag::expectWritten(arena.link(step, verbDim(), DimVector::POS,
+                                       arena.makeCell(std::string{verb})));
+      if (const auto rec = varsRecord(arena, core, step, "handle", true))
+        zigzag::expectWritten(
+            arena.link(*rec, dims().values, DimVector::POS,
+                       arena.makeCell(expr.children.front()->text)));
+      return step;
+    }
+
+    // spawn Name() [in <space>] — the child's declared name and the
+    // scope name marshal; the result binding rides the hoist's
+    // `result` field.
+    if (expr.kind == ExprKind::Spawn) {
+      const auto &call = *expr.children.front();
+      if (call.children.empty() ||
+          call.children.front()->kind != ExprKind::Identifier)
+        return std::unexpected(
+            Diagnostic{DiagnosticCode::InvalidPosition,
+                       "spawn's operand is not an agent name", expr.loc});
+      if (expr.scope && expr.scope->kind != ExprKind::Identifier)
+        return std::unexpected(Diagnostic{DiagnosticCode::InvalidPosition,
+                                          "spawn's in-scope is not a name",
+                                          expr.loc});
+      const auto step = arena.makeCell();
+      zigzag::expectWritten(arena.link(step, verbDim(), DimVector::POS,
+                                       arena.makeCell(std::string{verb})));
+      const auto field = [&](std::string_view name, CellRef value) {
+        if (const auto rec = varsRecord(arena, core, step, name, true))
+          zigzag::expectWritten(
+              arena.link(*rec, dims().values, DimVector::POS, value));
+      };
+      field("name", arena.makeCell(call.children.front()->text));
+      if (expr.scope) field("scope", arena.makeCell(expr.scope->text));
       return step;
     }
 
@@ -603,9 +675,24 @@ struct Lowerer {
     };
 
     for (const auto *stmt : statements) {
-      if (isHostVerb(stmt->kind)) {
+      // Expression-position verbs hoist: `x := adopt G()` and
+      // `let x := ask ...` mint the verb's own host step plus a
+      // `result` field naming the bound var — the value lands on the
+      // agent's vars record at run time, durable like any other
+      // agent state.
+      const Expr *verbStmt = hostVerbOf(*stmt);
+      std::string bound;
+      if (verbStmt != stmt) {
+        bound = stmt->kind == ExprKind::Binary ? stmt->children[0]->text
+                                               : stmt->text;
+      }
+      if (verbStmt) {
         flushRun();
-        auto step = mintHostStep(*stmt);
+        auto step = mintHostStep(*verbStmt);
+        if (step && !bound.empty())
+          if (const auto rec = varsRecord(arena, core, *step, "result", true))
+            zigzag::expectWritten(arena.link(
+                *rec, dims().values, DimVector::POS, arena.makeCell(bound)));
         if (step) {
           linkMember(*step);
           continue;
