@@ -34,8 +34,8 @@ DeclDisposition declDisposition(DeclKind kind) noexcept {
   case DeclKind::Field:
   case DeclKind::Record:
   case DeclKind::Belief:
-    return DeclDisposition::Lower;
   case DeclKind::Question:
+    return DeclDisposition::Lower;
   case DeclKind::Skill:
   case DeclKind::Capacity:
   case DeclKind::Behavior:
@@ -936,7 +936,6 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
     // complete even where the semantics are still deferred; the
     // Lifecycle member decl has no symbol shape to claim.
     switch (decl.kind) {
-    case DeclKind::Question:
     case DeclKind::Skill:
     case DeclKind::Capacity:
     case DeclKind::Behavior:
@@ -1239,12 +1238,15 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
   }
   case DeclKind::Method:
   case DeclKind::Answer: {
-    if (symbols.contains(name)) {
-      refuse(decl, std::format("duplicate symbol '{}'", name));
-      return;
-    }
     if (!decl.body) {
       refuse(decl, std::format("'{}' declares no body", name));
+      return;
+    }
+    // An answer legitimately shares its symbol — the matching
+    // `question` decl minted it — while a `def` that lands on an
+    // existing name is the collision the old check caught.
+    if (decl.kind == DeclKind::Method && symbols.contains(name)) {
+      refuse(decl, std::format("duplicate symbol '{}'", name));
       return;
     }
     const auto head =
@@ -1254,9 +1256,17 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
       errors.push_back(head.error());
       return;
     }
-    const auto sym = mintSymbol(name);
+    const auto sym =
+        symbols.contains(name) ? symbols[name] : mintSymbol(name);
     zigzag::expectWritten(
         arena.link(sym, dims().values, DimVector::POS, *head));
+    return;
+  }
+  case DeclKind::Question: {
+    // A question's whole image is the askable symbol plus the
+    // signature `ask` checks against — the runtime never runs it.
+    if (!symbols.contains(name)) mintSymbol(name);
+    signatures.emplace(name, decl.parameters);
     return;
   }
   case DeclKind::Plan: {

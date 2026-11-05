@@ -2057,29 +2057,27 @@ TEST(VagentExecutorTest, BoundAskWakesOnDeliveredAnswerAndBindsIt) {
 
   // The adapter's answer lands through route's write half — a
   // correlated journal entry plus a pending trigger on the
-  // receiver's own ranks; the correlation is the request's outbox id.
+  // receiver's own ranks; the correlation is the request's outbox
+  // id, and the answer value rides the payload cell.
   const auto request =
       VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
   exec.deliver(arena, h.ctx.core,
                Delivery{.agent       = image->agentCell,
                         .percept     = "stock",
+                        .payloadCell =
+                            arena.makeScalarCell(std::int64_t{7}),
                         .correlation = request.front().id});
   ASSERT_TRUE(exec(h.execution(), h.ctx));
 
   // The seen entry matched the parked ask, the pending entry
-  // dispatched, and the bound name holds the answer's handle.
-  CellRef answer = noCell;
-  for (const CellRef s : zigzag::rankAfter(
-           arena, image->agentCell, h.ctx.core.findOrMintDimension("d.seen")))
-    if (arena.textOf(s) == "stock") answer = s;
-  ASSERT_NE(answer, noCell);
+  // dispatched, and the bound name holds the answer's value — a
+  // correlated reply binds what the receiver produced, not a handle.
   const auto rRec = varsRecord(arena, h.ctx.core, image->agentCell, "r", false);
   ASSERT_TRUE(rRec.has_value());
   const auto rVal =
       arena.linked(*rRec, h.ctx.core.dims().values, DimVector::POS);
   ASSERT_TRUE(rVal.has_value());
-  EXPECT_EQ(arena.asInt64(*rVal).value_or(-1),
-            static_cast<std::int64_t>(answer));
+  EXPECT_EQ(arena.asInt64(*rVal).value_or(-1), 7);
 
   // The spine resumed into emit and the intention retired.
   const auto outbox =
@@ -2239,6 +2237,200 @@ TEST(VagentExecutorTest, AskStagesTheQuestionAndWakesOnTheAnswer) {
       VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
   ASSERT_EQ(after.size(), 2u);
   EXPECT_EQ(after[1].payload, "Done");
+  EXPECT_TRUE(zigzag::rankAfter(arena, image->agentCell, iDim).empty());
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
+TEST(VagentExecutorTest, AskRunsTheReceiversAnswerAndBindsTheReply) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  // The §7.1 round trip: the request lands in the receiver's inbox,
+  // its own turn runs `answer stock` and stages the reply, and the
+  // sender's wake binds the produced value to `r`.
+  const auto image =
+      h.lower("module demo\nevent Tick\nevent Done\n"
+              "question stock(item: Str): Int\n"
+              "goal Outer() perform\n"
+              "agent A {\n"
+              "  on Tick { adopt Outer() }\n"
+              "  answer stock(item: Str): Int { 42 }\n"
+              "  plan o for Outer { let r := ask self.stock(\"oil\") "
+              "within 9s else -1;\n"
+              "                     emit Done{} }\n"
+              "}");
+  ASSERT_TRUE(image);
+  auto &arena     = h.ctx.arena;
+  const auto iDim = h.ctx.core.findOrMintDimension("d.intention");
+
+  // Turn 1 — the ask stages and parks on the request id.
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  auto outbox =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  ASSERT_EQ(outbox.size(), 1u);
+  EXPECT_EQ(outbox[0].kind, "ask");
+  EXPECT_EQ(outbox[0].target, "A");
+
+  // The adapter delivers the request; the receiver's own turn runs
+  // the answer head and stages the correlated reply.
+  const auto requests = VagentExecutor::route(
+      arena, h.ctx.core, h.ctx.core.home(), outbox[0]);
+  ASSERT_EQ(requests.size(), 1u);
+  exec.deliver(arena, h.ctx.core, requests.front());
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+  outbox =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  ASSERT_EQ(outbox.size(), 2u);
+  EXPECT_EQ(outbox[1].kind, "answer");
+  EXPECT_EQ(outbox[1].percept, "stock");
+  EXPECT_EQ(outbox[1].correlation, outbox[0].id);
+  EXPECT_TRUE(outbox[1].fault.empty());
+
+  const auto replies = VagentExecutor::route(
+      arena, h.ctx.core, h.ctx.core.home(), outbox[1]);
+  ASSERT_EQ(replies.size(), 1u);
+  EXPECT_EQ(replies[0].percept, "stock");
+  EXPECT_EQ(replies[0].correlation, outbox[0].id);
+  exec.deliver(arena, h.ctx.core, replies.front());
+
+  // Turn 3 — the wake binds the answer's VALUE: `r` reads 42, not a
+  // handle, and the resumed spine emits Done.
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+  const auto r =
+      varsRecord(arena, h.ctx.core, image->agentCell, "r", false);
+  ASSERT_TRUE(r.has_value());
+  const auto rv = arena.linked(*r, h.ctx.core.dims().values, DimVector::POS);
+  ASSERT_TRUE(rv.has_value());
+  EXPECT_EQ(arena.asInt64(*rv).value_or(0), 42);
+  outbox =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  EXPECT_TRUE(std::ranges::any_of(outbox, [](const OutboxEntry &e) {
+    return e.payload == "Done";
+  }));
+  EXPECT_TRUE(zigzag::rankAfter(arena, image->agentCell, iDim).empty());
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
+TEST(VagentExecutorTest, AskToAnUnansweredQuestionRepliesWithTheFault) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  // No `answer ghost` exists — §7.1's receiver default replies the
+  // fault `unanswered`, which runs the asker's `else` with that cause
+  // rather than binding a payload.
+  const auto image =
+      h.lower("module demo\nevent Tick\nevent Done\n"
+              "question ghost(item: Str): Str\n"
+              "goal Outer() perform\n"
+              "agent A {\n"
+              "  on Tick { adopt Outer() }\n"
+              "  plan o for Outer { let r := ask self.ghost(\"x\") "
+              "within 9s else cause;\n"
+              "                     emit Done{} }\n"
+              "}");
+  ASSERT_TRUE(image);
+  auto &arena     = h.ctx.arena;
+  const auto iDim = h.ctx.core.findOrMintDimension("d.intention");
+
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  auto outbox =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  ASSERT_EQ(outbox.size(), 1u);
+  const auto requests = VagentExecutor::route(
+      arena, h.ctx.core, h.ctx.core.home(), outbox[0]);
+  ASSERT_EQ(requests.size(), 1u);
+  exec.deliver(arena, h.ctx.core, requests.front());
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+  outbox =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  ASSERT_EQ(outbox.size(), 2u);
+  EXPECT_EQ(outbox[1].kind, "answer");
+  EXPECT_EQ(outbox[1].fault, "unanswered");
+
+  const auto replies = VagentExecutor::route(
+      arena, h.ctx.core, h.ctx.core.home(), outbox[1]);
+  ASSERT_EQ(replies.size(), 1u);
+  exec.deliver(arena, h.ctx.core, replies.front());
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+  // The else bound `r` to the cause text, and the wait completed
+  // without faulting the intention — the readied spine resumes on
+  // the next settle like every else recovery.
+  const auto r =
+      varsRecord(arena, h.ctx.core, image->agentCell, "r", false);
+  ASSERT_TRUE(r.has_value());
+  const auto rv = arena.linked(*r, h.ctx.core.dims().values, DimVector::POS);
+  ASSERT_TRUE(rv.has_value());
+  EXPECT_EQ(arena.textOf(*rv), "unanswered");
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+  outbox =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  EXPECT_TRUE(std::ranges::any_of(outbox, [](const OutboxEntry &e) {
+    return e.payload == "Done";
+  }));
+  EXPECT_TRUE(zigzag::rankAfter(arena, image->agentCell, iDim).empty());
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
+TEST(VagentExecutorTest, AskWithAMalformedTermAnswersRemoteFault) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  // A request whose term arity mismatches the answer head refuses
+  // the fragment — the reply is the typed fault `remote_fault`, not
+  // silence the asker would wait out on the deadline.
+  const auto image =
+      h.lower("module demo\nevent Tick\nevent Done\n"
+              "question stock(item: Str): Str\n"
+              "goal Outer() perform\n"
+              "agent A {\n"
+              "  on Tick { adopt Outer() }\n"
+              "  answer stock(item: Str): Str { \"full\" }\n"
+              "  plan o for Outer { let r := ask self.stock(\"oil\") "
+              "within 9s else cause;\n"
+              "                     emit Done{} }\n"
+              "}");
+  ASSERT_TRUE(image);
+  auto &arena     = h.ctx.arena;
+  const auto iDim = h.ctx.core.findOrMintDimension("d.intention");
+
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  auto outbox =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  ASSERT_EQ(outbox.size(), 1u);
+  // A two-arg `stock` term: one arg over the declared arity.
+  const auto bad = arena.makeCell("stock");
+  for (const auto arg : {"a", "b"})
+    zigzag::expectWritten(
+        arena.link(zigzag::rankTail(arena, bad, h.ctx.core.dims().step),
+                   h.ctx.core.dims().step, DimVector::POS,
+                   arena.makeCell(arg)));
+  exec.deliver(arena, h.ctx.core,
+               Delivery{.agent       = image->agentCell,
+                        .id          = outbox[0].id,
+                        .kind        = "ask",
+                        .payloadCell = bad,
+                        .sender      = image->agentCell});
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+  outbox =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  ASSERT_EQ(outbox.size(), 2u);
+  EXPECT_EQ(outbox[1].kind, "answer");
+  EXPECT_EQ(outbox[1].fault, "remote_fault");
+
+  const auto replies = VagentExecutor::route(
+      arena, h.ctx.core, h.ctx.core.home(), outbox[1]);
+  ASSERT_EQ(replies.size(), 1u);
+  exec.deliver(arena, h.ctx.core, replies.front());
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+  const auto r =
+      varsRecord(arena, h.ctx.core, image->agentCell, "r", false);
+  ASSERT_TRUE(r.has_value());
+  const auto rv = arena.linked(*r, h.ctx.core.dims().values, DimVector::POS);
+  ASSERT_TRUE(rv.has_value());
+  EXPECT_EQ(arena.textOf(*rv), "remote_fault");
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+  outbox =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  EXPECT_TRUE(std::ranges::any_of(outbox, [](const OutboxEntry &e) {
+    return e.payload == "Done";
+  }));
   EXPECT_TRUE(zigzag::rankAfter(arena, image->agentCell, iDim).empty());
   EXPECT_EQ(arena.outstandingMarks(), 0u);
 }

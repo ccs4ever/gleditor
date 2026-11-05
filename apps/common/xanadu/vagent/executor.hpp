@@ -45,6 +45,18 @@ struct OutboxEntry {
   // the receiver-side adoption points the child's delegator field
   // back at it. noCell for every other kind.
   zigzag::CellRef delegator{zigzag::noCell};
+  // An ask reply's wake name — the question functor the sender's
+  // parked `await` matches on, which the payload cell's own text
+  // cannot supply (the answer is a bare value). Empty for other
+  // kinds, which take their percept name from the payload term.
+  std::string percept;
+  // The asker's request id an "answer" echoes back — the wake
+  // match's `awaitCorr` token. Empty for uncorrelated kinds.
+  std::string correlation;
+  // A typed fault the reply carries instead of an answer —
+  // "unanswered"/"remote_fault" — which fails the sender's wait
+  // through its `else` cause rather than binding a value.
+  std::string fault;
 };
 
 /// One staged delivery the adapter owes a receiver: the directory-
@@ -71,6 +83,10 @@ struct Delivery {
   // The delegating intention an "achieve" delivery answers to —
   // the receiver adoption writes it as the child's delegator.
   zigzag::CellRef delegator{zigzag::noCell};
+  // The typed fault an "answer" delivery carries — journaled as a
+  // `fault` record on the percept so the wake match takes the
+  // sender's `else` cause instead of binding a payload.
+  std::string fault;
 };
 
 class VagentExecutor {

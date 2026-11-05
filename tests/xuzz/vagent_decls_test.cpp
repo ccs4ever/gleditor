@@ -69,8 +69,8 @@ TEST(VagentDeclsTest, DispositionTableDisposesEveryDeclKind) {
       ++refuses;
       break;
     }
-  EXPECT_EQ(lowers, 11);
-  EXPECT_EQ(stubs, 5);
+  EXPECT_EQ(lowers, 12);
+  EXPECT_EQ(stubs, 4);
   EXPECT_EQ(refuses, 3);
 
   EXPECT_EQ(declDisposition(DeclKind::Agent), DeclDisposition::Lower);
@@ -186,9 +186,10 @@ TEST(VagentDeclsTest, StubKindsMintSymbolsAndRecord) {
   ASSERT_TRUE(image.has_value());
   if (!image) return;
   const auto &dims = h.core.dims();
-  // `q` is still a stub; `S` lowers — its field schema is the
-  // signature and there is nothing deferred left to reserve.
-  EXPECT_THAT(image->stubbed, ::testing::IsSupersetOf({"q"}));
+  // `q` lowers — the symbol and signature are its whole image; `S`
+  // lowers for its field schema. Nothing here defers to a stub.
+  EXPECT_THAT(image->stubbed,
+              ::testing::Not(::testing::Contains("q")));
   EXPECT_THAT(image->stubbed,
               ::testing::Not(::testing::Contains("S")));
   EXPECT_TRUE(h.named(image->ownModule, dims.vars, "S").has_value());

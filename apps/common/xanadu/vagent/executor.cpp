@@ -226,7 +226,10 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
   const auto stageOutbox = [&](std::string_view kind, CellRef payload,
                                std::string_view target,
                                std::string_view scope = {},
-                               CellRef delegator      = noCell) -> std::string {
+                               CellRef delegator      = noCell,
+                               std::string_view correlation = {},
+                               std::string_view percept     = {},
+                               std::string_view fault       = {}) -> std::string {
     const auto position = std::ranges::to<std::vector>(
                               zigzag::rankAfter(arena, agent, dims.outbox))
                               .size();
@@ -254,6 +257,16 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
                arena.makeScalarCell(static_cast<std::int64_t>(payload)));
     outField("target", arena.makeCell(std::string{target}));
     if (!scope.empty()) outField("scope", arena.makeCell(std::string{scope}));
+    // The ask-reply fields route reads: `percept` overrides the
+    // payload cell's own text because the reply's payload is a bare
+    // answer value whose text is the value, not the question name;
+    // `correlation` echoes the request id the asker parked on.
+    if (!correlation.empty())
+      outField("correlation", arena.makeCell(std::string{correlation}));
+    if (!percept.empty())
+      outField("percept", arena.makeCell(std::string{percept}));
+    if (!fault.empty())
+      outField("fault", arena.makeCell(std::string{fault}));
     if (delegator != noCell)
       outField("delegator",
                arena.makeScalarCell(static_cast<std::int64_t>(delegator)));
@@ -1101,6 +1114,61 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
                        dims.subgoal, DimVector::POS, *child));
         continue;
       }
+      if (k == "ask") {
+        // §7.1's receiver half: run this agent's `answer q` head and
+        // reply through the outbox. The reply's percept is the
+        // question name (the asker's awaitEvent text), its
+        // correlation the request id `deliver` journaled — and a
+        // fault instead of a payload when there is no answer or the
+        // head refuses, which the spec names `unanswered` and
+        // `remote_fault`.
+        std::string requestId;
+        if (const auto rec =
+                varsRecord(arena, core, *head, "correlation", false))
+          if (const auto v =
+                  arena.linked(*rec, core.dims().values, DimVector::POS))
+            requestId = std::string{arena.textOf(*v)};
+        std::string senderName;
+        if (const auto n =
+                arena.linked(sender, core.dims().name, DimVector::POS))
+          senderName = std::string{arena.textOf(*n)};
+        CellRef answerHead = noCell;
+        if (const auto sym =
+                eventSymbolNamed(arena, core, programRoot, pred))
+          if (const auto h =
+                  arena.linked(*sym, core.dims().values, DimVector::POS))
+            answerHead = *h;
+        if (answerHead == noCell || senderName.empty()) {
+          stageOutbox("answer", term, senderName, {}, noCell, requestId,
+                      pred, "unanswered");
+          continue;
+        }
+        const auto outcome =
+            meta.runFragment(answerHead, argValuesOf(term), exec.cursor,
+                             maxCycles);
+        if (outcome.refusal != MetaRunOutcome::Refusal::None ||
+            !outcome.produced || !outcome.result) {
+          stageOutbox("answer", term, senderName, {}, noCell, requestId,
+                      pred, "remote_fault");
+          continue;
+        }
+        // The produced value is marshaled as a bare cell — scalar or
+        // text answers copy, a structured answer (a record term)
+        // rides as the cell itself so the asker's `r.field` reads
+        // through #FIND.
+        const auto value = std::visit(
+            [&](const auto &x) -> CellRef {
+              using T = std::decay_t<decltype(x)>;
+              if constexpr (std::is_same_v<T, std::string>)
+                return arena.makeCell(x);
+              else
+                return arena.makeScalarCell(x);
+            },
+            *outcome.result);
+        stageOutbox("answer", value, senderName, {}, noCell, requestId,
+                    pred);
+        continue;
+      }
       if (k == "untell") {
         (void)meta.forget(pred, term);
       } else if (!meta.believe(pred, term, sender, turn)) {
@@ -1187,7 +1255,8 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
   // `as r`/`r :=` destination and completes the wait rather than
   // faulting; refusal or non-production reports false so the caller
   // takes the ordinary fault ladder.
-  const auto runElse = [&](CellRef intention) -> bool {
+  const auto runElse = [&](CellRef intention,
+                           std::string_view cause = "deadline") -> bool {
     CellRef head = noCell;
     if (const auto rec =
             varsRecord(arena, core, intention, "awaitElse", false))
@@ -1202,7 +1271,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
     std::size_t position = 0;
     for (const auto &pname : paramNames) {
       if (pname == "cause") {
-        args.emplace_back(std::string{"deadline"});
+        args.emplace_back(std::string{cause});
         continue;
       }
       if (position >= stored.size()) return false;
@@ -1271,12 +1340,14 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       // the percept carries an envelope — `r.field` reads it through
       // #FIND in the resumed body exactly as the guard saw it.
       CellRef matchDelivered = noCell;
+      // awaitCorr's request id survives the block — an `r := ask`
+      // bind tells answers from `as g` envelopes by its presence.
+      std::string corr;
       if (awaitEvent != noCell) {
         const auto wanted = arena.textOf(awaitEvent);
         // awaitCorr narrows the match to the answer carrying this
         // request's id — the adapter echoes the outbox entry's id on
         // the journal cell's `correlation` record.
-        std::string corr;
         if (const auto rec =
                 varsRecord(arena, core, intention, "awaitCorr", false))
           if (const auto v =
@@ -1379,6 +1450,21 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
           }
       }
       if (matched) {
+        // An "answer" delivery's typed fault runs the `else` ladder
+        // with the reply's cause instead of binding — `unanswered`
+        // and `remote_fault` are the receiver-side names for it.
+        std::string replyFault;
+        if (const auto rec =
+                varsRecord(arena, core, matchCell, "fault", false))
+          if (const auto v =
+                  arena.linked(*rec, core.dims().values, DimVector::POS))
+            replyFault = std::string{arena.textOf(*v)};
+        if (!replyFault.empty()) {
+          meta.setIntentionField(intention, "waiting", 0);
+          if (!runElse(intention, replyFault))
+            faultIntention(intention, replyFault);
+          continue;
+        }
         // awaitBind carries the `as g`/`r := ask` destination across
         // the park — the occurrence lands agent-side, the same
         // Intention/Agent-ref shape adopt/spawn bind. The journal
@@ -1395,9 +1481,30 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
                     arena.unlink(*dst, core.dims().values, DimVector::POS));
               const auto bound =
                   matchDelivered != noCell ? matchDelivered : matchCell;
-              zigzag::expectWritten(arena.link(
-                  *dst, core.dims().values, DimVector::POS,
-                  arena.makeScalarCell(static_cast<std::int64_t>(bound))));
+              // An ask reply (`corr` set) delivers the bare answer
+              // cell: a leaf answer binds its value so `r` reads 42,
+              // not a handle — a structured answer stays a ref for
+              // `r.field`/#FIND. An `as g` binding always takes the
+              // ref: its value is the term to Find on.
+              CellRef stored = noCell;
+              if (!corr.empty() && bound != noCell) {
+                if (const auto n = arena.asInt64(bound))
+                  stored = arena.makeScalarCell(*n);
+                else if (const auto d = arena.asDouble(bound))
+                  stored = arena.makeScalarCell(*d);
+                else if (const auto b = arena.asBool(bound))
+                  stored = arena.makeScalarCell(*b);
+                else if (zigzag::rankAfter(arena, bound,
+                                           core.dims().step)
+                             .empty())
+                  stored = arena.makeCell(arena.textOf(bound));
+              }
+              if (stored == noCell)
+                stored = arena.makeScalarCell(
+                    static_cast<std::int64_t>(bound));
+              zigzag::expectWritten(
+                  arena.link(*dst, core.dims().values, DimVector::POS,
+                             stored));
             }
         meta.setIntentionField(intention, "waiting", 0);
         meta.setIntentionField(intention, "ready", 1);
@@ -1802,7 +1909,10 @@ VagentExecutor::drainOutbox(zigzag::ArenaManifold &arena,
                     .scope       = read("scope"),
                     .payloadCell = payloadCell,
                     .sender      = agent,
-                    .delegator   = refField("delegator")});
+                    .delegator   = refField("delegator"),
+                    .percept     = read("percept"),
+                    .correlation = read("correlation"),
+                    .fault       = read("fault")});
   }
   return entries;
 }
@@ -1832,13 +1942,19 @@ std::vector<Delivery> VagentExecutor::route(zigzag::ArenaManifold &arena,
       if (const auto n = arena.linked(member, core.dims().name, DimVector::POS))
         name = std::string{arena.textOf(*n)};
       if (entry.target == "0" || entry.target.empty() || name == entry.target)
-        deliveries.push_back(Delivery{.agent       = member,
-                                      .percept     = entry.payload,
-                                      .id          = entry.id,
-                                      .kind        = entry.kind,
-                                      .payloadCell = entry.payloadCell,
-                                      .sender      = entry.sender,
-                                      .delegator   = entry.delegator});
+        deliveries.push_back(Delivery{
+            .agent = member,
+            // An ask reply overrides the percept name — its payload
+            // is the bare answer value, so the question name rides
+            // the entry's own `percept` field instead.
+            .percept = entry.percept.empty() ? entry.payload : entry.percept,
+            .id          = entry.id,
+            .kind        = entry.kind,
+            .payloadCell = entry.payloadCell,
+            .correlation = entry.correlation,
+            .sender      = entry.sender,
+            .delegator   = entry.delegator,
+            .fault       = entry.fault});
     }
   return deliveries;
 }
@@ -1864,7 +1980,7 @@ void VagentExecutor::deliver(zigzag::ArenaManifold &arena,
   }
 
   if (delivery.kind == "tell" || delivery.kind == "untell" ||
-      delivery.kind == "achieve") {
+      delivery.kind == "achieve" || delivery.kind == "ask") {
     // A cross-agent effect isn't a percept — it lands as an inbox
     // record the receiver's own settle processes (assert/retract for
     // tell/untell, subgoal adoption for achieve). Every cell
@@ -1889,6 +2005,15 @@ void VagentExecutor::deliver(zigzag::ArenaManifold &arena,
     refField("grab", delivery.payloadCell);
     refField("sender", delivery.sender);
     refField("delegator", delivery.delegator);
+    // For kind "ask" the delivery id is the asker's correlation
+    // token — the inbox drain echoes it on the reply's percept so
+    // the sender's wake match resolves exactly one request.
+    if (delivery.kind == "ask" && !delivery.id.empty())
+      if (const auto rec =
+              varsRecord(arena, core, record, "correlation", true))
+        zigzag::expectWritten(
+            arena.link(*rec, core.dims().values, DimVector::POS,
+                       arena.makeCell(delivery.id)));
     return;
   }
 
@@ -1903,6 +2028,13 @@ void VagentExecutor::deliver(zigzag::ArenaManifold &arena,
     if (const auto rec = varsRecord(arena, core, seen, "correlation", true))
       zigzag::expectWritten(arena.link(*rec, core.dims().values, DimVector::POS,
                                        arena.makeCell(delivery.correlation)));
+  // An ask reply's typed fault: the wake match reads it before the
+  // payload and takes the sender's `else` cause instead of binding.
+  if (!delivery.fault.empty())
+    if (const auto rec = varsRecord(arena, core, seen, "fault", true))
+      zigzag::expectWritten(arena.link(*rec, core.dims().values,
+                                       DimVector::POS,
+                                       arena.makeCell(delivery.fault)));
   // The term envelope rides as a scalar ref — the durable record of
   // what the percept carried. AwaitTerm is belief-form (the checker's
   // term() requires a predicate), so nothing consumes it today; the
