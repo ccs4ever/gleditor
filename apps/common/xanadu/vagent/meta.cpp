@@ -2,6 +2,7 @@
 
 #include "common/xanadu/vagent/records.hpp"
 
+#include <algorithm>
 #include <bit>
 #include <deque>
 #include <format>
@@ -918,6 +919,64 @@ MetaRuntime::revise(std::string_view predicate, CellRef oldTerm,
                     std::optional<CellRef> evidence) {
   (void)forget(predicate, oldTerm);
   return believe(predicate, newTerm, peer, turn, evidence);
+}
+
+// ---------------------------------------------------------------------------
+// Selection — §6.3-amended virtual weight-order (actor-executor §3.4)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// A produced value's truthiness: bools as-is, numbers by zero, text
+/// by the "true" spelling the Boolean literal emits.
+bool truthy(const CellValue &value) {
+  if (const auto *flag = std::get_if<bool>(&value)) return *flag;
+  if (const auto *bits = std::get_if<std::int64_t>(&value)) return *bits != 0;
+  if (const auto *real = std::get_if<double>(&value)) return *real != 0.0;
+  return std::get<std::string>(value) == "true";
+}
+
+} // namespace
+
+std::expected<std::optional<CellRef>, std::string>
+MetaRuntime::selectClause(CellRef host,
+                          const std::unordered_set<CellRef> &tried,
+                          std::size_t whereFuel) {
+  auto &arena = core_.arena();
+  if (!arena.contains(host))
+    return std::unexpected("selectClause: host is not an arena cell");
+
+  // Weight snapshot once per selection — the O(V + C) walk over the
+  // keyed ledger — then a stable order by (weight desc, rank asc).
+  // Rank position falls out of clausesOf's walk order: index is the
+  // tie-break, which is exactly the stable_sort.
+  struct Candidate {
+    CellRef clause;
+    double weight;
+  };
+  auto clauses = clausesOf(host);
+  std::vector<Candidate> candidates;
+  candidates.reserve(clauses.size());
+  for (const auto clause : clauses)
+    candidates.push_back(Candidate{clause, weightOf(clause).value_or(0.0)});
+  std::stable_sort(candidates.begin(), candidates.end(),
+                   [](const Candidate &a, const Candidate &b) {
+                     return a.weight > b.weight;
+                   });
+
+  for (const auto &candidate : candidates) {
+    const auto clause = candidate.clause;
+    if (tried.contains(clause)) continue;
+    const auto guard = arena.linked(clause, core_.dims().grab, Posward);
+    if (!guard.has_value()) continue;
+    // A refused guard is a failed `where`, never a selection fault —
+    // the next clause still gets its turn.
+    const auto outcome = runFragment(*guard, {}, std::nullopt, whereFuel);
+    if (outcome.refusal != MetaRunOutcome::Refusal::None) continue;
+    if (!outcome.produced || !outcome.result.has_value()) continue;
+    if (truthy(*outcome.result)) return clause;
+  }
+  return std::optional<CellRef>{std::nullopt};
 }
 
 // ---------------------------------------------------------------------------

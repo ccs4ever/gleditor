@@ -36,6 +36,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "common/xanadu/vagent/p16.hpp"
@@ -351,6 +352,24 @@ public:
   revise(std::string_view predicate, CellRef oldTerm, CellRef newTerm,
          CellRef peer, std::int64_t turn,
          std::optional<CellRef> evidence = std::nullopt);
+
+  // -- §6.3-amended selection (actor-executor §3.4)
+  // -----------------------------
+  //
+  // Virtual weight-order: the weight ledger rides the agent's keyed
+  // `d.vars` records, so ordering is a snapshot taken once per
+  // selection — O(V + C) over the rank — never an eager order rank.
+  // Candidates sort by (weight descending, `+d.clause` rank position
+  // ascending); the first not in @p tried whose `+d.grab` head produces
+  // a truthy cell is selected. `where` evaluation runs each guard
+  // through `runFragment` under @p whereFuel cycles — a refusal counts
+  // as a failed guard and skips the clause, never faults selection.
+  //
+  // `tried` is the caller's — an intention's tried-set in M4; the
+  // empty default means nothing tried.
+  [[nodiscard]] std::expected<std::optional<CellRef>, std::string>
+  selectClause(CellRef host, const std::unordered_set<CellRef> &tried = {},
+               std::size_t whereFuel = 256);
 
   /// `reify(c)`'s recipe replay (§6.1): walks the head's `+d.recipe`
   /// chain — `(from, dim, dir, to)` tuples anchored on the `+d.name`-

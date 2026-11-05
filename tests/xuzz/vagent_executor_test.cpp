@@ -209,6 +209,92 @@ TEST(VagentExecutorTest, HostVerbStatementRunsThroughTheSegmentSpine) {
   EXPECT_EQ(arena.outstandingMarks(), 0u);
 }
 
+// -- §6.3-amended selection: virtual weight-order, where fuel, tried ----------
+
+struct SelectorFixture {
+  ExecutorHarness h;
+  std::unique_ptr<MetaRuntime> meta;
+
+  CellRef symbol(std::string_view name) {
+    for (const CellRef module : zigzag::rankAfter(
+             h.ctx.arena, h.ctx.core.home(), h.ctx.core.dims().stdlib))
+      for (const CellRef sym :
+           zigzag::rankAfter(h.ctx.arena, module, h.ctx.core.dims().vars))
+        if (h.ctx.arena.textOf(sym) == name) return sym;
+    return zigzag::noCell;
+  }
+
+  void setup(std::string_view source) {
+    const auto image = h.lower(source);
+    EXPECT_TRUE(image.has_value());
+    if (!image) return;
+    auto binds = mintMetaBindSet(h.ctx.arena, h.ctx.core, h.ctx.core.home(),
+                                 image->agentCell);
+    EXPECT_TRUE(binds.has_value());
+    if (!binds) return;
+    meta = std::make_unique<MetaRuntime>(h.ctx.core, h.ctx.vm, *binds);
+  }
+
+  std::vector<CellRef> clauses(std::string_view goal) {
+    return zigzag::rankAfter(h.ctx.arena, symbol(goal),
+                             h.ctx.core.dims().clause) |
+           std::ranges::to<std::vector>();
+  }
+};
+
+TEST(VagentSelectTest, WhereGuardsSkipFailingClauses) {
+  SelectorFixture f;
+  f.setup("module demo\ngoal Work() perform\n"
+          "agent A {\n"
+          "  plan slow for Work where true == false { }\n"
+          "  plan fast for Work { }\n"
+          "}");
+  ASSERT_TRUE(f.meta);
+  const auto bank = f.clauses("Work");
+  ASSERT_EQ(bank.size(), 2u);
+  // Rank order puts slow first, but its where-guard produces false —
+  // selection lands on fast.
+  const auto picked = f.meta->selectClause(f.symbol("Work"));
+  ASSERT_TRUE(picked) << picked.error();
+  ASSERT_TRUE(picked->has_value());
+  EXPECT_EQ(**picked, bank[1]);
+}
+
+TEST(VagentSelectTest, WeightsOrderSelectionAndTriedSkips) {
+  SelectorFixture f;
+  f.setup("module demo\ngoal Other() perform\n"
+          "agent A {\n"
+          "  plan heavy for Other { }\n"
+          "  plan light for Other { }\n"
+          "}");
+  ASSERT_TRUE(f.meta);
+  const auto bank = f.clauses("Other");
+  ASSERT_EQ(bank.size(), 2u);
+
+  // Equal (absent) weights — rank position breaks the tie.
+  auto picked = f.meta->selectClause(f.symbol("Other"));
+  ASSERT_TRUE(picked && picked->has_value());
+  EXPECT_EQ(**picked, bank[0]);
+
+  // A d.vars weight record flips the order — the virtual order reads
+  // the ledger, no relinking.
+  ASSERT_TRUE(f.meta->setWeight(bank[1], 5.0).has_value());
+  picked = f.meta->selectClause(f.symbol("Other"));
+  ASSERT_TRUE(picked && picked->has_value());
+  EXPECT_EQ(**picked, bank[1]);
+
+  // The tried-set skips the leader — selection falls to the next
+  // untried clause whose guard holds.
+  picked = f.meta->selectClause(f.symbol("Other"), {bank[1]});
+  ASSERT_TRUE(picked && picked->has_value());
+  EXPECT_EQ(**picked, bank[0]);
+
+  // Everything tried — exhaustion is an honest empty.
+  picked = f.meta->selectClause(f.symbol("Other"), {bank[0], bank[1]});
+  ASSERT_TRUE(picked);
+  EXPECT_FALSE(picked->has_value());
+}
+
 // -- §3.1/§3.8 belief store: predicate banks, provenance, the four verbs ------
 
 TEST(VagentBeliefTest, BelieveBelievesForgetReviseRoundTrip) {
