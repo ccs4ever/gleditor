@@ -57,6 +57,10 @@ struct ActorGrant {
   std::string baseRef;
   std::uint64_t maxInstructions{};
   std::uint32_t maxCells{};
+  /// Live-cell ceiling measured at a turn boundary — the
+  /// `vagent.max_live_cells` bound of actor-executor §4.6. Zero means
+  /// unbounded (pre-M0.5 grants carried no field).
+  std::uint32_t maxLiveCells{};
   std::size_t maxOutputBytes{};
   std::size_t maxSolutions{};
   std::size_t maxMailboxBytes{};
@@ -94,6 +98,11 @@ struct ActorExecution {
   std::optional<ActorMessage> message;
   CellRef cursor;
   std::optional<CellRef> stateRoot;
+  /// The §4.1 arbitration counters as this turn was picked — runtime
+  /// state, not config: consecutive same-source services before this
+  /// one. The replay record (§4.7) reads them verbatim.
+  std::size_t wakeStreak{0};
+  std::size_t msgStreak{0};
 };
 
 /// Phase-6 (i): the spawn-lineage pin. `base` is the Manifold folded over
@@ -167,6 +176,11 @@ public:
   MeshActorRuntime *setExecutor(Executor executor);
   MeshActorRuntime *setSender(Sender sender);
   MeshActorRuntime *setGenesisHook(GenesisHook hook);
+  /// The settings-layer read channel for `vagent.*` tunables
+  /// (actor-executor §4.1); the adapter binds `system://settings` reads.
+  /// Unset readers fall back to the compiled-in defaults.
+  MeshActorRuntime *setSettingReader(
+      std::function<std::optional<std::int64_t>(std::string_view)> reader);
   /// Install only after verifying the node's device delegation to this master.
   MeshActorRuntime *trustNode(std::string node,
                               xanadu::identity::Fingerprint identity);
@@ -284,6 +298,15 @@ private:
   Executor executor_;
   Sender sender_;
   GenesisHook genesisHook_;
+  /// The settings-layer read channel the adapter installs — the
+  /// `vagent.*` tunables of actor-executor §4.1/§4.2. Pump-side policy
+  /// (`ready_per_message`) reads through it rather than ActorOptions,
+  /// which is mesh-level and carries no language policy.
+  std::function<std::optional<std::int64_t>(std::string_view)> settingReader_;
+  /// P8 rotating pump-scan cursor — the pid key served last, so each
+  /// pumpOne resumes the busy-actor scan where the previous call
+  /// stopped instead of restarting at actors_.begin().
+  std::string scanCursorKey_;
   std::map<std::string, std::unique_ptr<Actor>> actors_;
   std::map<std::string, std::pair<std::string, ActorPid>> spawns_;
   std::map<std::string, Monitor> monitors_;

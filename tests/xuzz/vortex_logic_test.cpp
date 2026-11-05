@@ -39,6 +39,27 @@ TEST(VortexLogicTest, GenesisMintsDClauseDimension) {
   EXPECT_EQ(h.core.arena().textOf(h.core.dims().clause), "d.clause");
 }
 
+TEST(VortexLogicTest, PruneCursorsUnlinksDeadTwins) {
+  LogicHarness h;
+  // §5.2: dead twins earlier incarnations left on home+d.cursors unlink,
+  // with the predecessor repair keeping the surviving cursor reachable.
+  const CellRef op = h.vm.mintOpcode(OpcodeKind::New);
+  const CellRef c1 = h.vm.spawnCursor(op, "one");
+  const CellRef c2 = h.vm.spawnCursor(op, "two");
+  const CellRef c3 = h.vm.spawnCursor(op, "three");
+  EXPECT_EQ(h.vm.activeCursors(), (std::vector<CellRef>{c1, c2, c3}));
+  h.vm.pruneCursors(c3);
+  EXPECT_EQ(h.vm.activeCursors(), (std::vector<CellRef>{c3}));
+  // Idempotent, and keeping a mid-rank cursor repairs both sides.
+  h.vm.pruneCursors(c3);
+  EXPECT_EQ(h.vm.activeCursors().size(), 1u);
+  const CellRef c4 = h.vm.spawnCursor(op, "four");
+  const CellRef c5 = h.vm.spawnCursor(op, "five");
+  EXPECT_EQ(h.vm.activeCursors(), (std::vector<CellRef>{c3, c4, c5}));
+  h.vm.pruneCursors(c4);
+  EXPECT_EQ(h.vm.activeCursors(), (std::vector<CellRef>{c4}));
+}
+
 TEST(VortexLogicTest, OpcodeUnifyAtomsAndScalarNumbers) {
   LogicHarness h;
 

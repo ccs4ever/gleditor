@@ -547,6 +547,11 @@ public:
 
   [[nodiscard]] std::size_t cellCount() const noexcept { return slots_.size(); }
 
+  /// Live arena-local cells for the grant's `vagent.max_live_cells` bound —
+  /// minted minus rolled-back (release() truncates dead tail slots). Durable
+  /// base cells are not live allocations, so the count stays arena-local.
+  [[nodiscard]] std::size_t liveCells() const noexcept { return cellCount(); }
+
   /// How many cells a walk through this arena could visit: its own and every
   /// base cell it reads through. cellCount() alone would cut a walk over base
   /// cells short at the arena's own size.

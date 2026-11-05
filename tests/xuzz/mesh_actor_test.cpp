@@ -31,6 +31,7 @@ ActorGrant grantFor(const ActorMessage &request) {
           "sha256:immutable-base",
           100000,
           10000,
+          0,
           32768,
           100,
           65536,
@@ -522,6 +523,81 @@ TEST(MeshActorTest,
   ASSERT_TRUE(stateful);
   EXPECT_EQ(runtime.redispatch(*stateful, "replacement").error(),
             ActorError::NotImmutable);
+}
+
+TEST(MeshActorTest, WakeStarvationBoundedByReadyPerMessage) {
+  // §4.1: ready_per_message consecutive mailbox services force one wake
+  // service even while the mailbox stays full.
+  MeshActorRuntime runtime("worker", 1);
+  Fingerprint identity;
+  authorize(runtime, identity);
+  runtime.setSettingReader(
+      [](std::string_view key) -> std::optional<std::int64_t> {
+        if (key == "vagent.ready_per_message") return 2;
+        return std::nullopt;
+      });
+  const auto pid = runtime.spawn(identity, spawnRequest(), wall);
+  ASSERT_TRUE(pid);
+  std::vector<std::string> order;
+  std::vector<std::size_t> wakeStreaks, msgStreaks;
+  runtime.setExecutor(
+      [&](const ActorExecution &ex,
+          WorkerContext &) -> std::expected<std::string, ActorError> {
+        order.push_back(ex.message ? "msg" : "wake");
+        wakeStreaks.push_back(ex.wakeStreak);
+        msgStreaks.push_back(ex.msgStreak);
+        return "ok";
+      });
+  ASSERT_TRUE(runtime.wake(*pid));
+  ASSERT_TRUE(runtime.receive(identity, sendTo(*pid, "m1"), ActorTime{}, wall));
+  ASSERT_TRUE(runtime.receive(identity, sendTo(*pid, "m2"), ActorTime{}, wall));
+  ASSERT_TRUE(runtime.receive(identity, sendTo(*pid, "m3"), ActorTime{}, wall));
+  for (int i = 0; i < 4; ++i) {
+    EXPECT_EQ(runtime.pumpOne(wall), true);
+  }
+  // Two message services push msgStreak to the bound; the third pick is the
+  // forced wake, after which message service resumes.
+  EXPECT_EQ(order, (std::vector<std::string>{"msg", "msg", "wake", "msg"}));
+  // The replay record reads the streaks as each turn was picked.
+  EXPECT_EQ(msgStreaks, (std::vector<std::size_t>{0, 1, 2, 0}));
+  EXPECT_EQ(wakeStreaks, (std::vector<std::size_t>{0, 0, 0, 1}));
+  EXPECT_EQ(runtime.pumpOne(wall), false);
+}
+
+TEST(MeshActorTest, PumpScanRotatesAcrossBusyActors) {
+  // P8: the busy-actor scan resumes after the last-served key, so a busy
+  // actor is reached within |actors| pump calls — no first-actor bias.
+  MeshActorRuntime runtime("worker", 4);
+  Fingerprint identity;
+  authorize(runtime, identity);
+  const auto first  = runtime.spawn(identity, spawnRequest(), wall);
+  const auto second = runtime.spawn(identity, spawnRequest("spawn-2"), wall);
+  ASSERT_TRUE(first);
+  ASSERT_TRUE(second);
+  std::vector<std::string> served;
+  runtime.setExecutor(
+      [&](const ActorExecution &ex,
+          WorkerContext &) -> std::expected<std::string, ActorError> {
+        served.push_back(ex.pid.cursor);
+        return "ok";
+      });
+  for (int i = 0; i < 2; ++i) {
+    ASSERT_TRUE(runtime.receive(
+        identity, sendTo(*first, "a" + std::to_string(i)), ActorTime{}, wall));
+    ASSERT_TRUE(runtime.receive(
+        identity, sendTo(*second, "b" + std::to_string(i)), ActorTime{}, wall));
+  }
+  for (int i = 0; i < 4; ++i) {
+    EXPECT_EQ(runtime.pumpOne(wall), true);
+  }
+  ASSERT_EQ(served.size(), 4u);
+  // Alternation: no actor serves twice while the other waits.
+  for (std::size_t i = 1; i < served.size(); ++i) {
+    EXPECT_NE(served[i], served[i - 1]);
+  }
+  EXPECT_EQ(std::ranges::count(served, first->cursor), 2);
+  EXPECT_EQ(std::ranges::count(served, second->cursor), 2);
+  EXPECT_EQ(runtime.pumpOne(wall), false);
 }
 } // namespace
 } // namespace zigzag::vortex::mesh

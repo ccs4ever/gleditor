@@ -164,6 +164,10 @@ public:
   // -- Cursor Creation & Process Scheduler ------------------------------------
   CellRef spawnCursor(CellRef entryOpcode, std::string_view name = {});
   [[nodiscard]] std::vector<CellRef> activeCursors() const;
+  /// §5.2: unlink every home+d.cursors rank member other than @p keep — the
+  /// dead twins earlier incarnations leave behind on a resumed image. Called
+  /// at cursor spawn sites before further work can accrete another twin.
+  void pruneCursors(CellRef keep);
 
   // -- Opt-In Memoization -----------------------------------------------------
   void enableMemoization(CellRef opcode, std::string_view memoKey);

@@ -48,6 +48,10 @@ struct MeshActorRuntime::Actor {
   // P4 local wakes — counted, never mailbox entries: a queued wake owes
   // one executor turn with an absent message and costs no slot.
   std::size_t wakes{0};
+  // §4.1 deficit counters — consecutive same-source services; the pump
+  // resets the opposite streak on each pick.
+  std::size_t wakeStreak{0};
+  std::size_t msgStreak{0};
   std::map<std::string, Remembered> remembered;
   // P16 seam: the adapter-installed ceremony and the flag the pump drives
   // around the flagged turn (vortex/p16_ceremony.hpp).
@@ -104,6 +108,11 @@ MeshActorRuntime *MeshActorRuntime::setSender(Sender sender) {
 }
 MeshActorRuntime *MeshActorRuntime::setGenesisHook(GenesisHook hook) {
   genesisHook_ = std::move(hook);
+  return this;
+}
+MeshActorRuntime *MeshActorRuntime::setSettingReader(
+    std::function<std::optional<std::int64_t>(std::string_view)> reader) {
+  settingReader_ = std::move(reader);
   return this;
 }
 MeshActorRuntime *
@@ -193,6 +202,10 @@ MeshActorRuntime::spawn(const xanadu::identity::Fingerprint &identity,
   try {
     const auto entry = context.arena.makeCell("actor:await-message");
     actor->cursor    = context.vm.spawnCursor(entry, actor->pid.cursor);
+    // §5.2: on a resumed image the rank still carries prior incarnations'
+    // dead cursor cells; prune them before this incarnation's work can
+    // accrete another twin under the next promote.
+    context.vm.pruneCursors(actor->cursor);
   } catch (const std::exception &) {
     return std::unexpected(ActorError::ResourceLimit);
   }
@@ -322,6 +335,9 @@ std::expected<ActorPid, ActorError> MeshActorRuntime::resume(
     }
     const auto entry = context.arena.makeCell("actor:await-message");
     actor->cursor    = context.vm.spawnCursor(entry, actor->pid.cursor);
+    // §5.2: the persisted rank carries the previous incarnation's dead
+    // cursor twin; the fresh cursor is the only live member.
+    context.vm.pruneCursors(actor->cursor);
     actor->stateRoot = actor->checkpoint->root;
     for (const auto &record : continuation->completed) {
       auto response = record.response;
@@ -509,25 +525,58 @@ MeshActorRuntime::receive(const xanadu::identity::Fingerprint &identity,
 
 std::expected<bool, ActorError>
 MeshActorRuntime::pumpOne(std::chrono::system_clock::time_point wallNow) {
-  for (auto &[key, actor] : actors_) {
+  // §4.1 deficit arbitration: ready_per_message consecutive mailbox
+  // services force one wake service, so P4 wakes cannot starve behind a
+  // busy mailbox. P8 rotates the busy-actor scan off the last-served key,
+  // so every actor is reached within |actors_| pump calls.
+  const std::size_t readyPerMessage = [this] {
+    constexpr std::int64_t fallback = 4;
+    if (!settingReader_) return static_cast<std::size_t>(fallback);
+    const auto value = settingReader_("vagent.ready_per_message");
+    return (value && *value > 0) ? static_cast<std::size_t>(*value)
+                                 : static_cast<std::size_t>(fallback);
+  }();
+  const auto scanFrom = actors_.upper_bound(scanCursorKey_);
+  auto it             = scanFrom;
+  do {
+    if (it == actors_.end()) {
+      it = actors_.begin();
+      continue;
+    }
+    auto &[key, actor] = *it;
+    ++it; // advance before service — the callback may spawn actors
     if (actor->stopped || (actor->mailbox.empty() && actor->wakes == 0)) {
       continue;
     }
     if (wallNow >= actor->grant.expiresAt) {
       actor->stopped = true;
+      scanCursorKey_ = key;
       return std::unexpected(ActorError::NotAuthorized);
     }
+    // The streaks as this turn was picked — the replay record reads them
+    // verbatim, so the service updates them only after the snapshot.
+    const std::size_t pickedWakeStreak = actor->wakeStreak;
+    const std::size_t pickedMsgStreak  = actor->msgStreak;
     std::optional<ActorMessage> message;
-    if (actor->mailbox.empty()) {
+    // An idle actor never reaches here, so an empty mailbox implies wakes
+    // pending; with both sources live the deficit rule decides.
+    const bool serveWake =
+        actor->mailbox.empty() ||
+        (actor->wakes > 0 && actor->msgStreak >= readyPerMessage);
+    if (serveWake) {
       // P4 wake: a queued wake consumes no mailbox slot and carries no
       // request id — the executor sees `message` absent and no reply is
       // owed. The same lease check above already applied.
       --actor->wakes;
+      ++actor->wakeStreak;
+      actor->msgStreak = 0;
     } else {
       auto [popped, size] = std::move(actor->mailbox.front());
       actor->mailbox.pop_front();
       actor->mailboxBytes -= size;
       message = std::move(popped);
+      ++actor->msgStreak;
+      actor->wakeStreak = 0;
     }
     // Sole-queued per the P16 contract: pending(pid)==0 after the pop —
     // the flag-time "pending==1" test the adapter sampled before arming.
@@ -544,7 +593,8 @@ MeshActorRuntime::pumpOne(std::chrono::system_clock::time_point wallNow) {
     actor->running = true;
     try {
       result = executor_(ActorExecution{actor->pid, actor->grant, message,
-                                        actor->cursor, actor->stateRoot},
+                                        actor->cursor, actor->stateRoot,
+                                        pickedWakeStreak, pickedMsgStreak},
                          *actor->context);
     } catch (const std::exception &) {
       result = std::unexpected(ActorError::ExecutionFailed);
@@ -615,8 +665,9 @@ MeshActorRuntime::pumpOne(std::chrono::system_clock::time_point wallNow) {
       actor->p16Flag = P16Flag::Clear;
       actor->stopped = true;
     }
+    scanCursorKey_ = key;
     return true;
-  }
+  } while (it != scanFrom);
   return false;
 }
 

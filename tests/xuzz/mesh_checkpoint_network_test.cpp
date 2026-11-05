@@ -151,6 +151,7 @@ protected:
                             fresh ? checkpointHash : "initial-counter-base",
                             100000,
                             10000,
+                            0,
                             32768,
                             100,
                             65536,

@@ -265,6 +265,26 @@ inline constexpr std::string_view kVortexParallelThreshold =
 inline constexpr std::string_view kVortexOrParallelSearch =
     "vortex.or_parallel_search";
 
+// Vagent actor-executor policy (design/vagent-actor-executor.md §4.1/§4.2)
+inline constexpr std::string_view kVagentReadyPerMessage =
+    "vagent.ready_per_message";
+inline constexpr std::string_view kVagentJournalSize = "vagent.journal_size";
+inline constexpr std::string_view kVagentConditionTurnFuel =
+    "vagent.condition_turn_fuel";
+inline constexpr std::string_view kVagentMaxIntentions =
+    "vagent.max_intentions";
+inline constexpr std::string_view kVagentMaxTimers  = "vagent.max_timers";
+inline constexpr std::string_view kVagentMaxPending = "vagent.max_pending";
+inline constexpr std::string_view kVagentMaxHostDeliveries =
+    "vagent.max_host_deliveries";
+inline constexpr std::string_view kVagentMaxClausesPerPredicate =
+    "vagent.max_clauses_per_predicate";
+inline constexpr std::string_view kVagentMaxClausesPerGoal =
+    "vagent.max_clauses_per_goal";
+inline constexpr std::string_view kVagentReclaimDeadline =
+    "vagent.reclaim_deadline";
+inline constexpr std::string_view kVagentMaxLiveCells = "vagent.max_live_cells";
+
 // UI
 inline constexpr std::string_view kTabBarVisible       = "tabBarVisible";
 inline constexpr std::string_view kStatusBarVisible    = "statusBarVisible";

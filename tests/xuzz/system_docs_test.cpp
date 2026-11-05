@@ -159,6 +159,33 @@ TEST(SystemDocsTest, KeymapScopesFollowTheActionFamily) {
   EXPECT_EQ(xanadu::keymapScope("std:xuzz/link_next"), "");
 }
 
+TEST(SystemDocsTest, VagentPolicySettingsFileUnderSettings) {
+  // The actor-executor §4.1/§4.2 tunables live in system://settings, not in
+  // mesh ActorOptions — each name and integer default seeds the store.
+  const auto specs = xanadu::defaultSettingSpecs(SystemDocKind::Settings);
+  const auto names = specs | std::views::transform(&xanadu::SettingSpec::name) |
+                     std::ranges::to<std::set>();
+  for (const std::string_view key :
+       {xanadu::settings::kVagentReadyPerMessage,
+        xanadu::settings::kVagentJournalSize,
+        xanadu::settings::kVagentConditionTurnFuel,
+        xanadu::settings::kVagentMaxIntentions,
+        xanadu::settings::kVagentMaxTimers, xanadu::settings::kVagentMaxPending,
+        xanadu::settings::kVagentMaxHostDeliveries,
+        xanadu::settings::kVagentMaxClausesPerPredicate,
+        xanadu::settings::kVagentMaxClausesPerGoal,
+        xanadu::settings::kVagentReclaimDeadline,
+        xanadu::settings::kVagentMaxLiveCells}) {
+    const auto it = names.find(std::string(key));
+    ASSERT_NE(it, names.end()) << key;
+    const auto spec = std::ranges::find(specs, *it, &xanadu::SettingSpec::name);
+    ASSERT_NE(spec, specs.end());
+    ASSERT_FALSE(spec->schemas.empty());
+    EXPECT_EQ(spec->schemas.front().expectedTypes,
+              std::vector<std::string>{"integer"});
+  }
+}
+
 TEST(SystemDocsTest, MetadataAndUriRoundTrips) {
   EXPECT_EQ(xanadu::systemDocName(SystemDocKind::Keymap), "keymap");
   EXPECT_EQ(xanadu::systemDocName(SystemDocKind::Settings), "settings");

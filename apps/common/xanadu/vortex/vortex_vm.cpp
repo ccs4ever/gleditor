@@ -251,6 +251,27 @@ std::vector<CellRef> VortexVM::activeCursors() const {
          std::ranges::to<std::vector>();
 }
 
+void VortexVM::pruneCursors(CellRef keep) {
+  const DimRef dim = core_.dims().cursors;
+  for (const CellRef member : activeCursors()) {
+    if (member == keep) continue;
+    // Same-dim rank unlink: forward edge first so the successor's backlink
+    // frees before the predecessor repair rewires it.
+    const auto pred = core_.arena().linked(member, dim, zigzag::Negward);
+    const auto succ = core_.arena().linked(member, dim, zigzag::Posward);
+    if (succ)
+      zigzag::expectWritten(core_.arena().unlink(member, dim, zigzag::Posward));
+    if (pred) {
+      if (succ)
+        zigzag::expectWritten(
+            core_.arena().link(*pred, dim, zigzag::Posward, *succ));
+      else
+        zigzag::expectWritten(
+            core_.arena().unlink(*pred, dim, zigzag::Posward));
+    }
+  }
+}
+
 void VortexVM::enableMemoization(CellRef opcode, std::string_view memoKey) {
   memoizedOps_[opcode] = std::string(memoKey);
 }
