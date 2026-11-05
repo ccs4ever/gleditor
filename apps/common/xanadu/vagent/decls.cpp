@@ -190,6 +190,8 @@ struct Lowerer {
     case ExprKind::Revise:
     case ExprKind::Adopt:
       return true;
+    case ExprKind::Emit:
+      return true;
     default:
       return false;
     }
@@ -259,6 +261,9 @@ struct Lowerer {
     case ExprKind::Adopt:
       verb = "adopt";
       break;
+    case ExprKind::Emit:
+      verb = "emit";
+      break;
     default:
       return std::unexpected(Diagnostic{DiagnosticCode::InvalidPosition,
                                         "statement is not a host verb",
@@ -287,6 +292,39 @@ struct Lowerer {
         zigzag::expectWritten(
             arena.link(*rec, dims().values, DimVector::POS,
                        arena.makeCell(call.children.front()->text)));
+      return step;
+    }
+
+    if (expr.kind == ExprKind::Emit) {
+      // emit's operand is an event value — Identifier or Call naming a
+      // declared event; the name marshals as payload and the §3.7
+      // record's kind/target/id fill at run time. Argument-carrying
+      // emits and in/for targets still refuse — marshal machinery
+      // M4b brings.
+      if (expr.scope || expr.recipients)
+        return std::unexpected(
+            Diagnostic{DiagnosticCode::InvalidPosition,
+                       "emit's in/for targets do not lower yet", expr.loc});
+      const auto &operand          = *expr.children.front();
+      const std::string *eventName = nullptr;
+      if (operand.kind == ExprKind::Identifier)
+        eventName = &operand.text;
+      else if (operand.kind == ExprKind::Record && operand.children.empty())
+        // emit Name{} — field-carrying payloads are the marshal work
+        // the operand's in/for arm names.
+        eventName = &operand.text;
+      else if (operand.kind == ExprKind::Call && !operand.children.empty() &&
+               operand.children.front()->kind == ExprKind::Identifier &&
+               operand.children.size() == 1)
+        eventName = &operand.children.front()->text;
+      if (!eventName)
+        return std::unexpected(Diagnostic{DiagnosticCode::InvalidPosition,
+                                          "emit's operand is not a bare "
+                                          "event name",
+                                          expr.loc});
+      if (const auto rec = varsRecord(arena, core, step, "payload", true))
+        zigzag::expectWritten(arena.link(*rec, dims().values, DimVector::POS,
+                                         arena.makeCell(*eventName)));
       return step;
     }
 
@@ -354,6 +392,21 @@ struct Lowerer {
         auto step = mintHostStep(*stmt);
         if (step) {
           linkMember(*step);
+          continue;
+        }
+        // A host verb whose args don't marshal (field-carrying emits,
+        // variable-bearing terms) degrades to a stub segment — M0's
+        // refused-body semantics at member granularity: the spine and
+        // its named head land, only the graph is empty.
+        Expr stub;
+        stub.kind = ExprKind::Unit;
+        stub.loc  = stmt->loc;
+        auto head = emitDeclHead(
+            decl, stub, params,
+            std::format("{}:seg{}", label(clauseName), member),
+            Type{"()"}, false);
+        if (head) {
+          linkMember(*head);
         } else {
           errors.push_back(step.error());
         }

@@ -153,13 +153,13 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
     if (const auto value =
             arena.linked(*rec, core.dims().values, DimVector::POS)) {
       if (const auto current = arena.asInt64(*value)) {
-        turn = *current;
+        turn = *current + 1;
         zigzag::expectWritten(
             arena.unlink(*rec, core.dims().values, DimVector::POS));
       }
     }
     zigzag::expectWritten(arena.link(*rec, core.dims().values, DimVector::POS,
-                                     arena.makeScalarCell(turn + 1)));
+                                     arena.makeScalarCell(turn)));
   }
 
   // Journal + dispatch. A wake turn (message absent) carries no percept:
@@ -206,6 +206,32 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
                      static_cast<std::size_t>(
                          setting("vagent.condition_turn_fuel", 256)))
           .has_value();
+    }
+    if (verb == "emit") {
+      const auto payload = field("payload");
+      if (payload == noCell) return false;
+      // §3.7's cell-legible entry: {kind,target,payload,id} on
+      // +d.outbox — the post-commit drain is the adapter's (C++ reads,
+      // consumeWork-free), the turn just mints the record. id carries
+      // the deterministic turn:position pair of the spec's triple —
+      // the sender is implicit in the owning rank.
+      const auto position = std::ranges::to<std::vector>(
+                                zigzag::rankAfter(arena, agent, dims.outbox))
+                                .size();
+      const auto entry    = arena.makeCell();
+      zigzag::expectWritten(
+          arena.link(zigzag::rankTail(arena, agent, dims.outbox), dims.outbox,
+                     DimVector::POS, entry));
+      const auto outField = [&](std::string_view name, CellRef value) {
+        if (const auto rec = varsRecord(arena, core, entry, name, true))
+          zigzag::expectWritten(
+              arena.link(*rec, core.dims().values, DimVector::POS, value));
+      };
+      outField("kind", arena.makeCell("emit"));
+      outField("payload", payload);
+      outField("target", arena.makeScalarCell(std::int64_t{0}));
+      outField("id", arena.makeCell(std::format("{}:{}", turn, position)));
+      return true;
     }
     const auto term = field("term");
     if (term == noCell) return false;

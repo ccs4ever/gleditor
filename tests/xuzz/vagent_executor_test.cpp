@@ -295,6 +295,35 @@ TEST(VagentSelectTest, WeightsOrderSelectionAndTriedSkips) {
   EXPECT_FALSE(picked->has_value());
 }
 
+TEST(VagentExecutorTest, EmitMintsAnOutboxRecord) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image = h.lower("module demo\nevent Tick\nevent Tock\n"
+                             "agent A { on Tick { emit Tock{} } }");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+
+  const auto outcome = exec(h.execution("Tick"), h.ctx);
+  ASSERT_TRUE(outcome) << static_cast<int>(outcome.error());
+
+  // §3.7: one cell-legible entry on +d.outbox — kind/payload/id
+  // fields readable through the vars records.
+  const auto outbox  = h.ctx.core.findOrMintDimension("d.outbox");
+  const auto entries = zigzag::rankAfter(arena, image->agentCell, outbox) |
+                       std::ranges::to<std::vector>();
+  ASSERT_EQ(entries.size(), 1u);
+  const auto fieldOf = [&](std::string_view name) -> CellRef {
+    const auto rec = varsRecord(arena, h.ctx.core, entries[0], name, false);
+    if (!rec) return zigzag::noCell;
+    const auto v = arena.linked(*rec, h.ctx.core.dims().values, DimVector::POS);
+    return v ? *v : zigzag::noCell;
+  };
+  EXPECT_EQ(arena.textOf(fieldOf("kind")), "emit");
+  EXPECT_EQ(arena.textOf(fieldOf("payload")), "Tock");
+  EXPECT_EQ(arena.textOf(fieldOf("id")), "1:0");
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
 TEST(VagentExecutorTest, AdoptMintsAnIntentionAndRunsItsSpine) {
   ExecutorHarness h;
   VagentExecutor exec;
