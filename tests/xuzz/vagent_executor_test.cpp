@@ -327,6 +327,41 @@ TEST(VagentExecutorTest, EmitMintsAnOutboxRecord) {
   EXPECT_EQ(arena.outstandingMarks(), 0u);
 }
 
+TEST(VagentExecutorTest, EmitMarshalsRecordFieldsOntoThePayload) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image = h.lower("module demo\nevent Tick\nevent Seen { v: Int }\n"
+                             "agent A { on Tick { emit Seen{v: 1} } }");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+
+  const auto outcome = exec(h.execution("Tick"), h.ctx);
+  ASSERT_TRUE(outcome) << static_cast<int>(outcome.error());
+
+  // The payload cell carries the event name; fields marshal as
+  // +d.step children each +d.name-labeled — textOf still reads Seen.
+  const auto outbox  = h.ctx.core.findOrMintDimension("d.outbox");
+  const auto entries = zigzag::rankAfter(arena, image->agentCell, outbox) |
+                       std::ranges::to<std::vector>();
+  ASSERT_EQ(entries.size(), 1u);
+  const auto rec = varsRecord(arena, h.ctx.core, entries[0], "payload", false);
+  ASSERT_TRUE(rec.has_value());
+  const auto payload =
+      arena.linked(*rec, h.ctx.core.dims().values, DimVector::POS);
+  ASSERT_TRUE(payload.has_value());
+  EXPECT_EQ(arena.textOf(*payload), "Seen");
+  const auto fields =
+      zigzag::rankAfter(arena, *payload, h.ctx.core.dims().step) |
+      std::ranges::to<std::vector>();
+  ASSERT_EQ(fields.size(), 1u);
+  const auto fname =
+      arena.linked(fields[0], h.ctx.core.dims().name, DimVector::POS);
+  ASSERT_TRUE(fname.has_value());
+  EXPECT_EQ(arena.textOf(*fname), "v");
+  EXPECT_EQ(arena.textOf(fields[0]), "1");
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
 TEST(VagentExecutorTest, DrainReadsTheOutboxAndDuplicatesAreDetectable) {
   ExecutorHarness h;
   VagentExecutor exec;

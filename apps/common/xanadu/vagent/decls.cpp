@@ -353,24 +353,42 @@ struct Lowerer {
                        "emit's in/for targets do not lower yet", expr.loc});
       const auto &operand          = *expr.children.front();
       const std::string *eventName = nullptr;
+      const Expr *record           = nullptr;
       if (operand.kind == ExprKind::Identifier)
         eventName = &operand.text;
-      else if (operand.kind == ExprKind::Record && operand.children.empty())
-        // emit Name{} — field-carrying payloads are the marshal work
-        // the operand's in/for arm names.
+      else if (operand.kind == ExprKind::Record) {
         eventName = &operand.text;
-      else if (operand.kind == ExprKind::Call && !operand.children.empty() &&
-               operand.children.front()->kind == ExprKind::Identifier &&
-               operand.children.size() == 1)
+        if (!operand.children.empty()) record = &operand;
+      } else if (operand.kind == ExprKind::Call && !operand.children.empty() &&
+                 operand.children.front()->kind == ExprKind::Identifier &&
+                 operand.children.size() == 1)
         eventName = &operand.children.front()->text;
       if (!eventName)
         return std::unexpected(Diagnostic{DiagnosticCode::InvalidPosition,
-                                          "emit's operand is not a bare "
-                                          "event name",
+                                          "emit's operand is not an event "
+                                          "value",
                                           expr.loc});
+      const auto payload = arena.makeCell(*eventName);
+      if (record) {
+        // Field-carrying payload: values marshal as +d.step children
+        // (the term-cell convention), each labeled +d.name with its
+        // record field name — textOf(payload) still reads the event
+        // name for drain and await matching.
+        for (std::size_t i = 0; i < record->children.size(); ++i) {
+          auto value = marshalTerm(*record->children[i]);
+          if (!value) return std::unexpected(value.error());
+          if (i < record->names.size())
+            zigzag::expectWritten(arena.link(*value, dims().name,
+                                             DimVector::POS,
+                                             arena.makeCell(record->names[i])));
+          zigzag::expectWritten(
+              arena.link(zigzag::rankTail(arena, payload, dims().step),
+                         dims().step, DimVector::POS, *value));
+        }
+      }
       if (const auto rec = varsRecord(arena, core, step, "payload", true))
-        zigzag::expectWritten(arena.link(*rec, dims().values, DimVector::POS,
-                                         arena.makeCell(*eventName)));
+        zigzag::expectWritten(
+            arena.link(*rec, dims().values, DimVector::POS, payload));
       return step;
     }
 
