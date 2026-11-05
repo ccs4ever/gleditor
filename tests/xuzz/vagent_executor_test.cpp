@@ -949,6 +949,58 @@ TEST(VagentExecutorTest, AchieveByStagesRemotelyAndWithinBoundsTheWait) {
   EXPECT_EQ(arena.outstandingMarks(), 0u);
 }
 
+TEST(VagentExecutorTest, RemoteAchieveAdoptsReceiverSideAndCompletes) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image =
+      h.lower("module demo\nevent Tick\nevent ChildDone\nevent Done\n"
+              "goal Deliver() perform\n"
+              "goal Outer() perform\n"
+              "agent A {\n"
+              "  on Tick { adopt Outer() }\n"
+              "  plan d for Deliver { emit ChildDone{} }\n"
+              "  plan o for Outer { achieve Deliver() by self within 9s;\n"
+              "                     emit Done{} }\n"
+              "}");
+  ASSERT_TRUE(image);
+  auto &arena     = h.ctx.arena;
+  const auto iDim = h.ctx.core.findOrMintDimension("d.intention");
+
+  // Turn 1 — the remote achieve stages with `self` resolved to the
+  // member name and the parent's ref riding `delegator`.
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  const auto outbox =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  ASSERT_EQ(outbox.size(), 1u);
+  EXPECT_EQ(outbox[0].kind, "achieve");
+  EXPECT_EQ(outbox[0].target, "A");
+  EXPECT_EQ(outbox[0].payload, "Deliver");
+  const auto parentRef = outbox[0].delegator;
+  ASSERT_NE(parentRef, noCell);
+
+  // The adapter routes and delivers the delegation — the receiver's
+  // own turn owns the adoption.
+  const auto deliveries = VagentExecutor::route(
+      arena, h.ctx.core, h.ctx.core.home(), outbox.front());
+  ASSERT_EQ(deliveries.size(), 1u);
+  exec.deliver(arena, h.ctx.core, deliveries.front());
+
+  // Turn 2 — the inbox drain adopts Deliver as the parked parent's
+  // subgoal; the child runs in the same settle, emits ChildDone and
+  // retires, which readies the parent.
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+
+  // Turn 3 — the parent resumes its spine into emit Done.
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+  const auto after =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  ASSERT_EQ(after.size(), 3u);
+  EXPECT_EQ(after[1].payload, "ChildDone");
+  EXPECT_EQ(after[2].payload, "Done");
+  EXPECT_TRUE(zigzag::rankAfter(arena, image->agentCell, iDim).empty());
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
 TEST(VagentExecutorTest, AskStagesTheQuestionAndWakesOnTheAnswer) {
   ExecutorHarness h;
   VagentExecutor exec;

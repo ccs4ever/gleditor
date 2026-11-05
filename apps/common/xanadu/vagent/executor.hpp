@@ -41,6 +41,10 @@ struct OutboxEntry {
   // The agent whose outbox the entry drained from — the provenance
   // peer a delivered fact cites.
   zigzag::CellRef sender{zigzag::noCell};
+  // The parked parent intention behind a kind "achieve" record —
+  // the receiver-side adoption points the child's delegator field
+  // back at it. noCell for every other kind.
+  zigzag::CellRef delegator{zigzag::noCell};
 };
 
 /// One staged delivery the adapter owes a receiver: the directory-
@@ -61,6 +65,9 @@ struct Delivery {
   std::string correlation;
   // The sender's member cell — the belief's +d.source peer.
   zigzag::CellRef sender{zigzag::noCell};
+  // The delegating intention an "achieve" delivery answers to —
+  // the receiver adoption writes it as the child's delegator.
+  zigzag::CellRef delegator{zigzag::noCell};
 };
 
 class VagentExecutor {

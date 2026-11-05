@@ -179,8 +179,8 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
   // deterministic idempotence triple so a duplicate drain is
   // detectable by key rather than by cell identity.
   const auto stageOutbox = [&](std::string_view kind, CellRef payload,
-                               CellRef target,
-                               CellRef scope = noCell) -> std::string {
+                               CellRef target, CellRef scope = noCell,
+                               CellRef delegator = noCell) -> std::string {
     const auto position = std::ranges::to<std::vector>(
                               zigzag::rankAfter(arena, agent, dims.outbox))
                               .size();
@@ -200,6 +200,9 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
     outField("payload", payload);
     outField("target", target);
     if (scope != noCell) outField("scope", scope);
+    if (delegator != noCell)
+      outField("delegator",
+               arena.makeScalarCell(static_cast<std::int64_t>(delegator)));
     const auto id = std::format("{}:{}:{}", std::hash<std::string>{}(sender),
                                 turn, position);
     outField("id", arena.makeCell(id));
@@ -492,7 +495,11 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       const auto goalName = field("goal");
       if (goalName == noCell) return false;
       if (const auto peer = field("peer"); peer != noCell) {
-        stageOutbox("achieve", goalName, resolvePeer(peer));
+        // The parent intention's ref rides the record so the
+        // receiver-side adoption can point the child's delegator
+        // back — cross-agent delegation is the same cell-link
+        // mechanism the local +d.subgoal path uses.
+        stageOutbox("achieve", goalName, resolvePeer(peer), noCell, intention);
         meta.setIntentionField(intention, "delegated", 1);
         meta.setIntentionField(intention, "ready", 0);
         const auto dl      = field("deadline");
@@ -654,7 +661,35 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
           if (const auto ref = arena.asInt64(*v))
             sender = static_cast<CellRef>(*ref);
       const auto pred = arena.textOf(*term);
-      if (arena.textOf(*kind) == "untell") {
+      const auto k    = arena.textOf(*kind);
+      if (k == "achieve") {
+        // Remote delegation: the named goal must exist in the
+        // receiver's own program; a miss is an honest no-adopt and
+        // the delegator's deadline faults it rather than a success
+        // nobody earned. The child points back at the sender's
+        // parked intention — retire and drop write it the same as
+        // local delegation, and +d.subgoal on the parent lets the
+        // deadline rung drop the remote child.
+        CellRef delegator = noCell;
+        if (const auto rec = varsRecord(arena, core, *head, "delegator", false))
+          if (const auto v =
+                  arena.linked(*rec, core.dims().values, DimVector::POS))
+            if (const auto ref = arena.asInt64(*v))
+              delegator = static_cast<CellRef>(*ref);
+        const auto goal = eventSymbolNamed(arena, core, programRoot, pred);
+        if (!goal || delegator == noCell) continue;
+        auto child = meta.adoptGoal(*goal, turn,
+                                    static_cast<std::size_t>(setting(
+                                        "vagent.condition_turn_fuel", 256)));
+        if (!child) continue;
+        meta.setIntentionField(*child, "delegator",
+                               static_cast<std::int64_t>(delegator));
+        zigzag::expectWritten(
+            arena.link(zigzag::rankTail(arena, delegator, dims.subgoal),
+                       dims.subgoal, DimVector::POS, *child));
+        continue;
+      }
+      if (k == "untell") {
         (void)meta.forget(pred, *term);
       } else if (!meta.believe(pred, *term, sender, turn)) {
         return failTurn();
@@ -982,19 +1017,26 @@ VagentExecutor::drainOutbox(zigzag::ArenaManifold &arena,
       const auto value = arena.linked(*rec, core.dims().values, DimVector::POS);
       return value ? std::string{arena.textOf(*value)} : std::string{};
     };
-    const auto payloadCell = [&]() -> CellRef {
-      const auto rec = varsRecord(arena, core, entry, "payload", false);
+    const auto cellField = [&](std::string_view name) -> CellRef {
+      const auto rec = varsRecord(arena, core, entry, name, false);
       if (!rec) return noCell;
       const auto value = arena.linked(*rec, core.dims().values, DimVector::POS);
       return value ? *value : noCell;
+    };
+    const auto delegator = [&]() -> CellRef {
+      const auto value = cellField("delegator");
+      if (value == noCell) return noCell;
+      const auto ref = arena.asInt64(value);
+      return ref ? static_cast<CellRef>(*ref) : noCell;
     }();
     entries.push_back(OutboxEntry{.kind        = read("kind"),
                                   .target      = read("target"),
                                   .payload     = read("payload"),
                                   .id          = read("id"),
                                   .scope       = read("scope"),
-                                  .payloadCell = payloadCell,
-                                  .sender      = agent});
+                                  .payloadCell = cellField("payload"),
+                                  .sender      = agent,
+                                  .delegator   = delegator});
   }
   return entries;
 }
@@ -1028,7 +1070,8 @@ std::vector<Delivery> VagentExecutor::route(zigzag::ArenaManifold &arena,
                                       .percept     = entry.payload,
                                       .kind        = entry.kind,
                                       .payloadCell = entry.payloadCell,
-                                      .sender      = entry.sender});
+                                      .sender      = entry.sender,
+                                      .delegator   = entry.delegator});
     }
   return deliveries;
 }
@@ -1038,12 +1081,14 @@ void VagentExecutor::deliver(zigzag::ArenaManifold &arena,
                              const Delivery &delivery) const {
   if (delivery.agent == noCell) return;
 
-  if (delivery.kind == "tell" || delivery.kind == "untell") {
-    // A cross-agent assertion isn't a percept — it lands as an inbox
-    // record the receiver's own settle asserts/retracts. The term
-    // rides +d.grab and the kind rides +d.verb, because the payload
-    // cell's -d.values inbound is already taken by the sender's
-    // outbox field — a second +d.values link would evict it.
+  if (delivery.kind == "tell" || delivery.kind == "untell" ||
+      delivery.kind == "achieve") {
+    // A cross-agent effect isn't a percept — it lands as an inbox
+    // record the receiver's own settle processes (assert/retract for
+    // tell/untell, subgoal adoption for achieve). The term rides
+    // +d.grab and the kind rides +d.verb, because the payload cell's
+    // -d.values inbound is already taken by the sender's outbox
+    // field — a second +d.values link would evict it.
     const auto inbox  = core.findOrMintDimension("d.inbox");
     const auto record = arena.makeCell();
     zigzag::expectWritten(
@@ -1055,11 +1100,15 @@ void VagentExecutor::deliver(zigzag::ArenaManifold &arena,
     if (delivery.payloadCell != noCell)
       zigzag::expectWritten(arena.link(record, core.dims().grab, DimVector::POS,
                                        delivery.payloadCell));
-    if (delivery.sender != noCell)
-      if (const auto rec = varsRecord(arena, core, record, "sender", true))
-        zigzag::expectWritten(arena.link(
-            *rec, core.dims().values, DimVector::POS,
-            arena.makeScalarCell(static_cast<std::int64_t>(delivery.sender))));
+    const auto refField = [&](std::string_view name, CellRef ref) {
+      if (ref == noCell) return;
+      if (const auto rec = varsRecord(arena, core, record, name, true))
+        zigzag::expectWritten(
+            arena.link(*rec, core.dims().values, DimVector::POS,
+                       arena.makeScalarCell(static_cast<std::int64_t>(ref))));
+    };
+    refField("sender", delivery.sender);
+    refField("delegator", delivery.delegator);
     return;
   }
 
