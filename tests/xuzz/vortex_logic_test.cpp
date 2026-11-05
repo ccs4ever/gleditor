@@ -282,6 +282,34 @@ TEST(VortexLogicTest, AnonymousChoicePointRemainsBacktrackable) {
   EXPECT_EQ(h.arena.outstandingMarks(), 0U);
 }
 
+TEST(VortexLogicTest, BacktrackStopsAtForeignCursorChoicePoint) {
+  LogicHarness h;
+  const auto altOp = h.vm.mintOpcode(OpcodeKind::Halt);
+  const auto curA  = h.vm.spawnCursor(altOp, "a");
+  const auto curB  = h.vm.spawnCursor(altOp, "b");
+
+  h.vm.pushChoicePoint(curA, altOp); // A's own point, below
+  h.vm.pushChoicePoint(curB, altOp); // foreign point, on top
+  const auto marksBefore = h.arena.outstandingMarks();
+  ASSERT_EQ(marksBefore, 2U);
+  ASSERT_EQ(h.vm.choiceDepth(), 2U);
+
+  // A's backtrack must stop at B's point: not consumed, mark not leaked.
+  EXPECT_FALSE(h.vm.backtrack(curA));
+  EXPECT_EQ(h.vm.choiceDepth(), 2U);
+  EXPECT_EQ(h.arena.outstandingMarks(), marksBefore);
+
+  // B's own backtrack consumes it and releases its mark.
+  EXPECT_TRUE(h.vm.backtrack(curB));
+  EXPECT_EQ(h.vm.choiceDepth(), 1U);
+  EXPECT_EQ(h.arena.outstandingMarks(), 1U);
+
+  // A's point is then reachable and drains cleanly.
+  EXPECT_TRUE(h.vm.backtrack(curA));
+  EXPECT_EQ(h.vm.choiceDepth(), 0U);
+  EXPECT_EQ(h.arena.outstandingMarks(), 0U);
+}
+
 TEST(VortexLogicTest, MemoKeyLookupDistinguishesEmptyKeyFromMiss) {
   LogicHarness h;
   const auto unregistered = h.vm.mintOpcode(OpcodeKind::Nop);

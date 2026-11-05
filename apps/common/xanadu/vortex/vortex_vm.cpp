@@ -312,25 +312,30 @@ bool VortexVM::backtrack(const std::optional<CellRef> cursor) {
   if (cursor && *cursor == noCell) {
     throw std::invalid_argument("backtrack cursor must be a cell or nullopt");
   }
-  while (!choiceStack_.empty()) {
-    ChoicePoint cp = choiceStack_.back();
-    choiceStack_.pop_back();
-    if (!cursor || cp.cursor == cursor || !cp.cursor) {
-      core_.arena().release(cp.mark);
-      if (!oraclePath_.empty() || cutCallback_) {
-        currentDeweyPath_ = cp.deweyPath;
-      }
-      if (cursor) {
-        setCursorOpcode(*cursor, cp.altOp);
-        if (cp.stackFrame && core_.arena().contains(*cursor)) {
-          zigzag::expectWritten(core_.arena().link(*cursor, core_.dims().stack,
-                                                   false, *cp.stackFrame));
-        }
-      }
-      return true;
+  if (choiceStack_.empty()) {
+    return false;
+  }
+  // A choice point owned by a different activation is never this cursor's to
+  // unwind: consuming it would drop its mark (and the rollback it guards)
+  // outright. Stop instead -- the caller's own points sit below it.
+  const ChoicePoint &top = choiceStack_.back();
+  if (cursor && top.cursor && *top.cursor != *cursor) {
+    return false;
+  }
+  ChoicePoint cp = top;
+  choiceStack_.pop_back();
+  core_.arena().release(cp.mark);
+  if (!oraclePath_.empty() || cutCallback_) {
+    currentDeweyPath_ = cp.deweyPath;
+  }
+  if (cursor) {
+    setCursorOpcode(*cursor, cp.altOp);
+    if (cp.stackFrame && core_.arena().contains(*cursor)) {
+      zigzag::expectWritten(core_.arena().link(*cursor, core_.dims().stack,
+                                               false, *cp.stackFrame));
     }
   }
-  return false;
+  return true;
 }
 
 void VortexVM::cut(std::size_t cutBarrier) {
