@@ -1,10 +1,12 @@
 #include "common/xanadu/vagent/decls.hpp"
 
+#include <bit>
 #include <format>
 #include <map>
 #include <string_view>
 #include <utility>
 
+#include "common/xanadu/scalar.hpp"
 #include "common/xanadu/vagent/ast_clone.hpp"
 #include "common/xanadu/vagent/fragment.hpp"
 #include "common/xanadu/vagent/records.hpp"
@@ -744,8 +746,34 @@ struct Lowerer {
         // record field name — textOf(payload) still reads the event
         // name for drain and await matching.
         for (std::size_t i = 0; i < record->children.size(); ++i) {
-          auto value = marshalTerm(*record->children[i]);
+          const auto &fieldExpr = *record->children[i];
+          auto value = marshalTerm(fieldExpr);
           if (!value) return std::unexpected(value.error());
+          // Dual-channel literals: the text stays for the term walks
+          // (textOf equality is beliefTermEquals's whole basis), and
+          // the typed bits let #FIND/eventArgs read the field's value
+          // kind back instead of coercing text. setValueBits leaves
+          // content alone, so both channels describe one cell.
+          switch (fieldExpr.kind) {
+          case ExprKind::Integer:
+            zigzag::expectWritten(arena.setValueBits(
+                *value, xanadu::ValueKind::Int64,
+                std::bit_cast<std::uint64_t>(
+                    static_cast<std::int64_t>(std::stoll(fieldExpr.text)))));
+            break;
+          case ExprKind::Float:
+            zigzag::expectWritten(arena.setValueBits(
+                *value, xanadu::ValueKind::Double,
+                xanadu::canonicalDoubleBits(std::stod(fieldExpr.text))));
+            break;
+          case ExprKind::Boolean:
+            zigzag::expectWritten(arena.setValueBits(
+                *value, xanadu::ValueKind::Bool,
+                fieldExpr.text == "true" ? 1 : 0));
+            break;
+          default:
+            break;
+          }
           if (i < record->names.size())
             zigzag::expectWritten(arena.link(*value, dims().name,
                                              DimVector::POS,
@@ -1232,7 +1260,25 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
     const auto n = ++clauseCounts[host];
     const auto clause =
         n == 1 ? std::format("on:{}", name) : std::format("on:{}#{}", name, n);
-    lowerClauseBody(decl, host, paramsOf(decl, name), clause);
+    auto params = paramsOf(decl, name);
+    // The event term itself binds for field access: the checker scopes
+    // `occurrence` (always) and the `as` alias under the event's type —
+    // at descriptor level both are Cell ref-boxes dispatch fills with
+    // int64(payload-term). The Cell type-text is eventArgs's cue to
+    // bind the term rather than a missing payload field. A declared
+    // field already carrying the name wins — the field param binds it.
+    const auto named = [&](std::string_view want) {
+      for (const auto &p : params)
+        if (p.name == want) return true;
+      return false;
+    };
+    if (!named("occurrence"))
+      params.push_back(
+          Parameter{.name = "occurrence", .type = Type{"Cell"}});
+    if (decl.binding && !named(*decl.binding))
+      params.push_back(Parameter{.name = *decl.binding,
+                                 .type = Type{"Cell"}});
+    lowerClauseBody(decl, host, params, clause);
     return;
   }
   case DeclKind::Field: {

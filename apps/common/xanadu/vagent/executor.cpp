@@ -771,11 +771,16 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
                 arena.linked(*rec, core.dims().values, DimVector::POS))
           if (const auto r = arena.asInt64(*v))
             payload = static_cast<CellRef>(*r);
-    // marshalTerm stores literals as text cells, so a field's cell
-    // type can't recover its literal kind — coerce the text for the
-    // fragment binder, which wants typed values. A string field that
-    // spells a number coerces wrongly until the emit envelope labels
-    // literal kind; that's a marshal fidelity gap, not this read's.
+    // A name-only percept is its own term: the seen cell's text is the
+    // functor and its +d.step rank is empty — occurrence binds it,
+    // field params still arity-refuse for want of children.
+    if (payload == noCell) payload = seen;
+    // Emit's dual-channel literal fields carry typed bits, read first;
+    // a text-only cell (marshalTerm's bare convention — strings and
+    // non-literal members) coerces its text for the fragment binder,
+    // which wants typed values. A string field spelling a number still
+    // coerces wrongly — the fidelity gap is the text channel's, not
+    // this read's.
     const auto boundValue = [&](CellRef c) -> CellValue {
       if (const auto n = arena.asInt64(c)) return CellValue{*n};
       if (const auto d = arena.asDouble(c)) return CellValue{*d};
@@ -823,8 +828,20 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
             field = child;
             break;
           }
-        if (field == noCell) return args;
-        args.push_back(boundValue(field));
+        if (field != noCell) {
+          args.push_back(boundValue(field));
+          continue;
+        }
+        // No payload field by that name: a Cell-typed param is the
+        // occurrence/`as` binding — the whole term, not a field.
+        const auto ptype =
+            arena.linked(*p, core.dims().values, DimVector::POS);
+        if (ptype && arena.textOf(*ptype) == "Cell") {
+          args.push_back(
+              CellValue{static_cast<std::int64_t>(payload)});
+          continue;
+        }
+        return args;
       }
       return args;
     };

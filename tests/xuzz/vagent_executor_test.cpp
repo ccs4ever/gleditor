@@ -432,6 +432,68 @@ TEST(VagentExecutorTest, OnHandlerGuardArityBindsFromTheDeliveredPayload) {
   EXPECT_EQ(arena.outstandingMarks(), 0u);
 }
 
+TEST(VagentExecutorTest, OnHandlerFieldAccessReadsTheDeliveredPayload) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  // `as a` binds the delivered term and `a.severity` lowers to #FIND —
+  // a name-keyed hop over the payload's +d.step rank. A loud alarm
+  // fires; a quiet one fails the guard; a bare name-only percept can't
+  // bind `severity` at all and the clause skips without faulting.
+  const auto image = h.lower(
+      "module demo\nevent Alarm { severity: Int }\nevent Loud\n"
+      "agent A { on Alarm as a [a.severity > 5] { emit Loud{} } }");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+
+  const auto alarm = [&](std::string_view text, std::int64_t bits) {
+    const auto term  = arena.makeCell(text);
+    const auto field = arena.makeCell(text);
+    zigzag::expectWritten(arena.setValueBits(
+        field, xanadu::ValueKind::Int64,
+        std::bit_cast<std::uint64_t>(bits)));
+    zigzag::expectWritten(
+        arena.link(field, h.ctx.core.dims().name, DimVector::POS,
+                   arena.makeCell("severity")));
+    zigzag::expectWritten(
+        arena.link(zigzag::rankTail(arena, term, h.ctx.core.dims().step),
+                   h.ctx.core.dims().step, DimVector::POS, field));
+    return term;
+  };
+  exec.deliver(arena, h.ctx.core,
+               Delivery{.agent       = image->agentCell,
+                        .percept     = "Alarm",
+                        .payloadCell = alarm("Alarm", 9)});
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+  auto outbox =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  ASSERT_EQ(outbox.size(), 1u);
+  EXPECT_EQ(outbox[0].payload, "Loud");
+
+  // drainOutbox reads without consuming — a failed guard shows as the
+  // count *not* growing, not as an empty rank.
+  exec.deliver(arena, h.ctx.core,
+               Delivery{.agent       = image->agentCell,
+                        .percept     = "Alarm",
+                        .payloadCell = alarm("Alarm", 2)});
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+  outbox =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  EXPECT_EQ(outbox.size(), 1u) << "severity 2 must fail the guard";
+
+  // A name-only percept can't bind the declared `severity` param —
+  // the arity refusal skips the clause before the guard runs, and the
+  // turn still completes cleanly.
+  exec.deliver(arena, h.ctx.core,
+               Delivery{.agent       = image->agentCell,
+                        .percept     = "Alarm",
+                        .payloadCell = arena.makeCell("Alarm")});
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+  outbox =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  EXPECT_EQ(outbox.size(), 1u);
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
 TEST(VagentExecutorTest, ConsumeSpendsTheEventForLaterHandlersOnly) {
   ExecutorHarness h;
   VagentExecutor exec;

@@ -589,6 +589,20 @@ private:
       type                = Scalar::CellList;
       break;
     }
+    case ExprKind::Field: {
+      // `term.field` — the base is a cell ref-box whose +d.step rank the
+      // #FIND op walks for the member's +d.name. The emitted value is
+      // whatever the member renders, so the static type is Bottom: the
+      // checker already proved the field exists on the declared type.
+      arity(1);
+      const auto base =
+          preflight(*expression.children.front(), false, depth + 1, pure);
+      if (base != Scalar::Cell && base != Scalar::Bottom)
+        refuse(expression, DiagnosticCode::TypeMismatch,
+               "field access requires a cell-bound base");
+      type = Scalar::Bottom;
+      break;
+    }
     case ExprKind::Static: {
       // §5.5: the operand was checked pure+closed with a
       // literal-expressible scalar type; the kernel re-verifies the type
@@ -989,6 +1003,17 @@ private:
     spin(op, jump(continuation));
     return op;
   }
+  // #FIND subject name → member's rendered value — the name-keyed
+  // child hop `term.field` lowers to.
+  CellRef findOp(CellRef subject, std::string_view field, CellRef output,
+                 CellRef continuation) {
+    const auto op = mint(OpcodeKind::Find);
+    bindIn(op, subject);
+    bindIn(op, textCell(field));
+    bindOut(op, output);
+    spin(op, jump(continuation));
+    return op;
+  }
   // #LINKED subject dim + follow — the runtime hop that materializes a
   // rank of ref-boxes under `output` through the subject's own link.
   CellRef linkedOp(CellRef subject, zigzag::DimRef dim,
@@ -1196,6 +1221,17 @@ private:
             *expression.children[i],
             i + 1 == expression.children.size() ? output : temporary(), next);
       return next;
+    }
+    case ExprKind::Field: {
+      // `term.field`: evaluate the base into a ref-box temp, #FIND its
+      // +d.step member by +d.name, and the member's rendered value is
+      // the expression's — the op yields false on a missing field so a
+      // guard reads absent data as falsy rather than faulting.
+      const auto subject = temporary();
+      const auto member  = temporary();
+      return emit(*expression.children.front(), subject,
+                  findOp(subject, expression.text, member,
+                         copy(output, member, continuation)));
     }
     case ExprKind::Cells:
       return emitCells(expression, output, continuation);

@@ -91,6 +91,13 @@ enum class OpcodeKind : std::uint8_t {
   // dimension and materializes them as a ref-box rank under the bound
   // output head. Appended last: opcode kind ints are cell content.
   Linked,
+
+  // Named-member lookup: the subject's int names a term cell whose
+  // +d.step rank the op walks for the member carrying a matching
+  // +d.name label — `term.field` in one hop, where Linked would need
+  // a materialize-then-scan loop the scalar emitter has no loop for.
+  // Appended last for the same persisted-kind reason.
+  Find,
 };
 
 struct ChoicePoint {

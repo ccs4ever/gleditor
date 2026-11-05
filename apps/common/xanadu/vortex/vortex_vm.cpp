@@ -103,12 +103,12 @@ VortexVM::registerProgramOps(std::span<const CellRef> enumeration) {
     }
     // The kind reads off the recorded cell's own content — safe for a
     // *recorded* cell (spec :2326). Never a value scan: an
-    // asInt64 ≤ Linked sweep of the band would register dimConstant
+    // asInt64 ≤ Find sweep of the band would register dimConstant
     // operand cells and every other small-int data cell too.
     const auto kind = core_.arena().asInt64(opCell);
     if (!kind || *kind < 0 ||
         static_cast<std::uint64_t>(*kind) >
-            static_cast<std::uint64_t>(OpcodeKind::Linked)) {
+            static_cast<std::uint64_t>(OpcodeKind::Find)) {
       return std::unexpected("registerProgramOps: recorded cell " +
                              std::to_string(opCell) +
                              " does not decode to an opcode kind");
@@ -192,7 +192,7 @@ std::optional<OpcodeKind> VortexVM::getOpcodeKind(CellRef opCell) const {
   auto val = core_.arena().asInt64(opCell);
   if (val && *val >= 0 &&
       static_cast<std::uint64_t>(*val) <=
-          static_cast<std::uint64_t>(OpcodeKind::Linked)) {
+          static_cast<std::uint64_t>(OpcodeKind::Find)) {
     return static_cast<OpcodeKind>(*val);
   }
   return std::nullopt;
@@ -873,6 +873,36 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
       } else {
         outputs.emplace_back(noCell);
       }
+    }
+    break;
+  }
+  case OpcodeKind::Find: {
+    // #FIND subject name: the subject operand's int names a term cell;
+    // walk its +d.step rank for the member whose +d.name text matches
+    // and yield that member's rendered value — `term.field` in one op.
+    // A missing member or unbound subject yields false so a guard's
+    // `a.missing > n` fails the clause instead of faulting the turn.
+    if (inputs.size() >= 2) {
+      const auto referenced = static_cast<CellRef>(toInt(inputs[0]));
+      const std::string wanted =
+          std::holds_alternative<std::string>(inputs[1])
+              ? std::get<std::string>(inputs[1])
+              : std::string{};
+      CellValue found{false};
+      if (core_.arena().contains(referenced)) {
+        const auto &dims = core_.dims();
+        for (const CellRef member :
+             zigzag::rankAfter(core_.arena(), referenced, dims.step)) {
+          core_.arena().consumeWork();
+          const auto label =
+              core_.arena().linked(member, dims.name, DimVector::POS);
+          if (label && core_.arena().textOf(*label) == wanted) {
+            if (const auto rendered = core_.render(member)) found = *rendered;
+            break;
+          }
+        }
+      }
+      outputs.push_back(found);
     }
     break;
   }
