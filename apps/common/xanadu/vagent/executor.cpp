@@ -974,28 +974,42 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
         meta.intentionField(intention, "delegator").value_or(0) == 0) {
       bool holds = true;
       if (goalCell != noCell) {
-        // `holds believes p(...)` lowers to a unification pattern
-        // under holdsBelief — answered against the bank; anything
-        // else lowers to a scalar holdsTest head for evalBool.
+        // holdsBelief is a container whose +d.grab rank carries one
+        // unification pattern per `believes` conjunct — every pattern
+        // must match some bank fact; holdsTest is the peeled scalar
+        // remainder evalBool'd. The two AND: belief existence AND
+        // scalar truth.
         if (const auto rec =
                 varsRecord(arena, core, goalCell, "holdsBelief", false)) {
-          if (const auto pattern =
+          if (const auto container =
                   arena.linked(*rec, core.dims().values, DimVector::POS)) {
-            holds = false;
-            for (const auto clause : meta.beliefsOf(arena.textOf(*pattern)))
-              if (const auto fact = arena.linked(clause, core.dims().grab,
-                                                 DimVector::POS);
-                  fact && meta.termUnifies(*pattern, *fact)) {
-                holds = true;
+            // +d.grab membership, not +d.step: a pattern's own
+            // +d.step args ride the same chain, so +d.step cannot
+            // tell sibling patterns from a pattern's arguments.
+            for (const auto pattern :
+                 zigzag::rankAfter(arena, *container, core.dims().grab)) {
+              const auto pred = arena.textOf(pattern);
+              bool       any  = false;
+              for (const auto clause : meta.beliefsOf(pred))
+                if (const auto fact = arena.linked(clause, core.dims().grab,
+                                                   DimVector::POS);
+                    fact && meta.termUnifies(pattern, *fact)) {
+                  any = true;
+                  break;
+                }
+              if (!any) {
+                holds = false;
                 break;
               }
+            }
           }
-        } else if (const auto rec = varsRecord(arena, core, goalCell,
-                                               "holdsTest", false)) {
-          if (const auto head =
-                  arena.linked(*rec, core.dims().values, DimVector::POS))
-            holds = evalBool(*head);
         }
+        if (holds)
+          if (const auto rec = varsRecord(arena, core, goalCell, "holdsTest",
+                                          false))
+            if (const auto head =
+                    arena.linked(*rec, core.dims().values, DimVector::POS))
+              holds = evalBool(*head);
       }
       if (!holds) {
         auto child = meta.adoptGoal(

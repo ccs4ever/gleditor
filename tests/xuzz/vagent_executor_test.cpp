@@ -1126,6 +1126,73 @@ TEST(VagentExecutorTest, MaintainStaysDormantWhileHoldsIsTrue) {
   EXPECT_EQ(arena.outstandingMarks(), 0u);
 }
 
+TEST(VagentExecutorTest, MaintainHoldsConjunctsAndTheScalarHalf) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image =
+      h.lower("module demo\nevent Tick\n"
+              "predicate level(value: Int)\n"
+              "goal Fails() maintain { holds believes level(?v) from self & "
+              "3 > 4 }\n"
+              "goal Passes() maintain { holds believes level(?v) from self "
+              "& 3 > 2 }\n"
+              "agent A {\n"
+              "  on Tick { believe level(9); adopt Fails(); adopt Passes() }\n"
+              "  plan fix for Fails { believe level(0) }\n"
+              "  plan noop for Passes { }\n"
+              "}");
+  ASSERT_TRUE(image);
+  auto &arena             = h.ctx.arena;
+  const auto intentionDim = h.ctx.core.findOrMintDimension("d.intention");
+  auto binds =
+      mintMetaBindSet(arena, h.ctx.core, h.ctx.core.home(), image->agentCell);
+  ASSERT_TRUE(binds) << binds.error();
+  MetaRuntime meta(h.ctx.core, h.ctx.vm, *binds);
+  const auto levelHolds = [&](std::string_view value) {
+    const auto t = arena.makeCell("level");
+    zigzag::expectWritten(arena.link(t, h.ctx.core.dims().step, DimVector::POS,
+                                     arena.makeCell(std::string{value})));
+    return meta.believes("level", t);
+  };
+
+  // level(9) already held at adoption: Passes's `& 3 > 2` remainder
+  // keeps it dormant while Fails's `& 3 > 4` fires its restorer
+  // anyway — the scalar half ANDs with the belief conjunct.
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  EXPECT_EQ((zigzag::rankAfter(arena, image->agentCell, intentionDim) |
+             std::ranges::to<std::vector>())
+                .size(),
+            3u);
+  ASSERT_TRUE(exec(h.execution(std::nullopt), h.ctx));
+  EXPECT_TRUE(levelHolds("0"));
+
+  // The scalar half still fails on the re-check — Fails refires on
+  // the next settle rather than staying dormant.
+  ASSERT_TRUE(exec(h.execution(std::nullopt), h.ctx));
+  EXPECT_EQ((zigzag::rankAfter(arena, image->agentCell, intentionDim) |
+             std::ranges::to<std::vector>())
+                .size(),
+            3u);
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
+TEST(VagentExecutorTest, UnlowerableBooleanConditionsRefuseNotStub) {
+  ExecutorHarness h;
+  // `v` is bound by the belief conjunct — the scalar remainder has
+  // no meaning for it and must refuse rather than stub `true`.
+  EXPECT_FALSE(h.lower(
+      "module demo\npredicate level(value: Int)\n"
+      "goal Enough() maintain { holds believes level(?v) from self & "
+      "v >= 1 }\n"
+      "agent A { plan fix for Enough { believe level(9) } }"));
+  // A `where` guard is the same Boolean test position — a belief
+  // query there refuses instead of silently passing selection.
+  EXPECT_FALSE(h.lower(
+      "module demo\nevent Tick\npredicate p(value: Int)\n"
+      "goal Work() achieve { succeed when 1 == 1 }\n"
+      "agent A { plan p for Work where believes p(?x) { } }"));
+}
+
 TEST(VagentExecutorTest, BoundAskWakesOnDeliveredAnswerAndBindsIt) {
   ExecutorHarness h;
   VagentExecutor exec;

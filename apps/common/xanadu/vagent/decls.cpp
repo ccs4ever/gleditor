@@ -804,9 +804,12 @@ void Lowerer::lowerClauseBody(const Decl &decl, CellRef host,
   trueGuard.loc         = decl.loc;
   const Expr &guardExpr = decl.guard ? *decl.guard : trueGuard;
 
-  const auto test = emitDeclHead(decl, guardExpr, params,
-                                 std::format("{}:guard", label(clauseName)),
-                                 Type{"Bool"}, true);
+  // A Boolean test position must never take emitDeclHead's stub —
+  // an unlowerable `where` is a refusal, not a vacuous `true` the
+  // selector would silently pass.
+  const auto test = emitHead(decl, guardExpr, params,
+                             std::format("{}:guard", label(clauseName)),
+                             Type{"Bool"});
   if (!test) {
     errors.push_back(test.error());
     return;
@@ -933,47 +936,105 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
         if (!field) continue;
         // `holds believes p(...) [from self]` is a bank query, not a
         // scalar condition — emitHead cannot lower it and the stub
-        // fallback would mint a vacuous `true`. The pure-belief form
-        // marshals a unification pattern instead; the executor's
-        // monitor rung answers it against the bank directly. A
-        // non-self scope names a remote bank the turn cannot reach —
-        // refused rather than silently held.
-        if (gc.kind == GoalClause::Kind::Holds &&
-            gc.condition->kind == ExprKind::Believes) {
-          const auto &query = *gc.condition;
-          if (query.scope) {
-            const bool local =
-                query.scope->kind == ExprKind::Identifier &&
-                (query.scope->text == "self" || query.scope->text == "0");
-            if (!local) {
-              errors.push_back(
-                  Diagnostic{DiagnosticCode::InvalidDeclaration,
-                             "holds believes ... from <peer> queries a "
-                             "remote bank the turn cannot evaluate",
-                             query.scope->loc});
-              return;
+        // fallback would mint a vacuous `true`. Top-level `&`
+        // conjuncts split: belief conjuncts marshal as unification
+        // patterns on a holdsBelief container's +d.step, the scalar
+        // remainder lowers as holdsTest, and the monitor rung ANDs
+        // the two. Variables a pattern captures bind nothing — a
+        // remainder that names one refuses through the scalar
+        // emitter's ordinary path. A non-self scope names a remote
+        // bank the turn cannot reach — refused, not silently held.
+        const Expr *condition = gc.condition.get();
+        if (gc.kind == GoalClause::Kind::Holds) {
+          std::vector<const Expr *> beliefs;
+          std::vector<const Expr *> scalars;
+          const std::function<void(const Expr &)> peel =
+              [&](const Expr &e) {
+                if (e.kind == ExprKind::Believes) {
+                  beliefs.push_back(&e);
+                  return;
+                }
+                if (e.kind == ExprKind::Binary && e.text == "&") {
+                  for (const auto &c : e.children)
+                    if (c) peel(*c);
+                  return;
+                }
+                scalars.push_back(&e);
+              };
+          peel(*condition);
+          if (!beliefs.empty()) {
+            const auto container = arena.makeCell("holdsBeliefs");
+            for (const Expr *bexpr : beliefs) {
+              const auto &query = *bexpr;
+              if (query.scope) {
+                const bool local =
+                    query.scope->kind == ExprKind::Identifier &&
+                    (query.scope->text == "self" ||
+                     query.scope->text == "0");
+                if (!local) {
+                  errors.push_back(Diagnostic{
+                      DiagnosticCode::InvalidDeclaration,
+                      "holds believes ... from <peer> queries a remote "
+                      "bank the turn cannot evaluate",
+                      query.scope->loc});
+                  return;
+                }
+              }
+              if (query.children.empty()) {
+                errors.push_back(
+                    Diagnostic{DiagnosticCode::InvalidDeclaration,
+                               "holds believes carries no term", query.loc});
+                return;
+              }
+              auto pattern = marshalPattern(*query.children.front());
+              if (!pattern) {
+                errors.push_back(pattern.error());
+                return;
+              }
+              // +d.grab is the membership dim — the patterns'
+              // +d.step args share its chain, so +d.step itself
+              // cannot separate sibling patterns.
+              zigzag::expectWritten(arena.link(
+                  zigzag::rankTail(arena, container, dims().grab),
+                  dims().grab, DimVector::POS, *pattern));
             }
+            if (const auto rec =
+                    varsRecord(arena, core, sym, "holdsBelief", true))
+              zigzag::expectWritten(arena.link(*rec, dims().values,
+                                               DimVector::POS, container));
           }
-          if (query.children.empty()) {
-            errors.push_back(Diagnostic{DiagnosticCode::InvalidDeclaration,
-                                        "holds believes carries no term",
-                                        query.loc});
+          if (scalars.empty()) continue;
+          // A leftover scalar half is an ordinary holdsTest — the
+          // peeled conjuncts re-join under `&` so emitHead sees one
+          // expression.
+          const Expr *remainder = scalars.front();
+          Expr rebuilt;
+          if (scalars.size() > 1) {
+            rebuilt.kind = ExprKind::Binary;
+            rebuilt.text = "&";
+            rebuilt.loc  = condition->loc;
+            for (const Expr *s : scalars)
+              rebuilt.children.push_back(cloneExpr(*s));
+            remainder = &rebuilt;
+          }
+          auto head = emitHead(decl, *remainder, paramsOf(decl, name),
+                               std::format("{}:holdsTest", label(name)),
+                               Type{"Bool"});
+          if (!head) {
+            errors.push_back(head.error());
             return;
           }
-          auto pattern = marshalPattern(*query.children.front());
-          if (!pattern) {
-            errors.push_back(pattern.error());
-            return;
-          }
-          if (const auto rec =
-                  varsRecord(arena, core, sym, "holdsBelief", true))
+          if (const auto rec = varsRecord(arena, core, sym, "holdsTest", true))
             zigzag::expectWritten(arena.link(*rec, dims().values,
-                                             DimVector::POS, *pattern));
+                                             DimVector::POS, *head));
           continue;
         }
-        auto head = emitDeclHead(decl, *gc.condition, paramsOf(decl, name),
-                                 std::format("{}:{}", label(name), field),
-                                 Type{"Bool"}, true);
+        // drop/succeed conditions are pure scalar tests — emitHead
+        // direct so an unlowerable condition refuses instead of
+        // stubbing `true`.
+        auto head = emitHead(decl, *condition, paramsOf(decl, name),
+                             std::format("{}:{}", label(name), field),
+                             Type{"Bool"});
         if (!head) {
           errors.push_back(head.error());
           return;
