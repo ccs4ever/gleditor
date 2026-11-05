@@ -1753,6 +1753,54 @@ TEST(VagentExecutorTest, GoalFailedRaisesOnceAtTheFaultCap) {
   EXPECT_EQ(h.ctx.arena.outstandingMarks(), 0u);
 }
 
+TEST(VagentExecutorTest, ConditionFaultRaisesOnceAcrossRefusals) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image =
+      h.lower("module demo\nevent Start\nevent Grant\n"
+              "goal G() achieve { succeed when 1 > 0 }\n"
+              "agent A {\n"
+              "  on Start { adopt G() }\n"
+              "  plan p for G { await Grant as g within 9s }\n"
+              "}");
+  ASSERT_TRUE(image);
+  const auto seenDim = h.ctx.core.findOrMintDimension("d.seen");
+  const auto journal = [&] {
+    std::vector<std::string> names;
+    for (const CellRef cell :
+         zigzag::rankAfter(h.ctx.arena, image->agentCell, seenDim))
+      names.emplace_back(h.ctx.arena.textOf(cell));
+    return names;
+  };
+
+  // Turn 1: adopt parks on the await.
+  ASSERT_TRUE(exec(h.execution("Start"), h.ctx));
+
+  // Turn 2: Grant wakes the spine past its end, where the succeedTest
+  // runs under a starved grant — a VmFault, not a failure — so §6.4's
+  // isolation parks the intention "unchanged" and raises
+  // ConditionFault once.
+  auto starved = h.execution("Grant");
+  starved.grant.maxInstructions = 1;
+  ASSERT_TRUE(exec(starved, h.ctx));
+
+  // Turn 3: still starved, the re-test refuses again — the flag gates
+  // the second raise. (No `on` handler exists for either lifecycle
+  // event, so the pending drain runs no fragments a starved turn
+  // could fault on.)
+  starved                     = h.execution(std::nullopt);
+  starved.grant.maxInstructions = 1;
+  ASSERT_TRUE(exec(starved, h.ctx));
+  EXPECT_EQ(std::ranges::count(journal(), "ConditionFault"), 1);
+
+  // Turn 4: clean grant — the test produces, the intention retires.
+  ASSERT_TRUE(exec(h.execution(std::nullopt), h.ctx));
+  const auto names = journal();
+  EXPECT_EQ(std::ranges::count(names, "ConditionFault"), 1);
+  EXPECT_EQ(std::ranges::count(names, "GoalAchieved"), 1);
+  EXPECT_EQ(h.ctx.arena.outstandingMarks(), 0u);
+}
+
 TEST(VagentExecutorTest, RecordLiteralsEmitAndFieldAccessReads) {
   ExecutorHarness h;
   VagentExecutor exec;
@@ -2204,26 +2252,60 @@ TEST(VagentExecutorTest, StopSelfHaltsEveryLaterTurn) {
   auto &arena     = h.ctx.arena;
   const auto jDim = h.ctx.core.findOrMintDimension("d.seen");
 
-  // Turn 1 — the spine completes: stop writes the flag, emit still
-  // lands (statement-boundary semantics).
+  // Turn 1 — the spine completes: stop marks destroying and raises
+  // Destroy, emit still lands (statement-boundary semantics).
   ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
   auto outbox =
       VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
   ASSERT_EQ(outbox.size(), 1u);
   EXPECT_EQ(outbox[0].payload, "Done");
-  // [Initialize, Tick] — the creation percept journals first.
+  // [Initialize, Tick, Destroy] — the orderly stop journals its
+  // percept like any other.
   EXPECT_EQ((zigzag::rankAfter(arena, image->agentCell, jDim) |
              std::ranges::to<std::vector>())
                 .size(),
-            2u);
+            3u);
 
   // Turn 2 — a delivered Tick is neither journaled nor dispatched:
-  // the stopped agent's turn is a clean no-op.
+  // the destroying agent drains nothing and lands the stop.
   ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
   EXPECT_EQ((zigzag::rankAfter(arena, image->agentCell, jDim) |
              std::ranges::to<std::vector>())
                 .size(),
-            2u);
+            3u);
+  const auto rec = varsRecord(arena, h.ctx.core, image->agentCell,
+                              "stopped", false);
+  ASSERT_TRUE(rec);
+  const auto flag =
+      arena.linked(*rec, h.ctx.core.dims().values, DimVector::POS);
+  ASSERT_TRUE(flag && arena.asInt64(*flag).value_or(0) != 0);
+  outbox = VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  EXPECT_EQ(outbox.size(), 1u);
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
+TEST(VagentExecutorTest, StopRunsOnDestroyBeforeHalting) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image =
+      h.lower("module demo\nevent Tick\nevent Bye\n"
+              "agent A {\n"
+              "  on Tick { stop self }\n"
+              "  on Destroy { emit Bye{} }\n"
+              "}");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+
+  // Turn 1 — stop raises Destroy and the drain dispatches it in the
+  // same turn: §4.5's "run `on Destroy`, then stop".
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  auto outbox =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  ASSERT_EQ(outbox.size(), 1u);
+  EXPECT_EQ(outbox[0].payload, "Bye");
+
+  // Later turns no-op — the stop landed once Destroy ran.
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
   outbox = VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
   EXPECT_EQ(outbox.size(), 1u);
   EXPECT_EQ(arena.outstandingMarks(), 0u);

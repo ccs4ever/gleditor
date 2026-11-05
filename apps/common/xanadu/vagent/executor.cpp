@@ -360,8 +360,8 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
   // clear of the intention walk.
   // Fields marshal as +d.step children labelled +d.name —
   // the event-payload shape emit and `term.field` already read.
-  const auto raise =
-      [&](std::string_view name,
+  const auto raiseOn =
+      [&](CellRef target, std::string_view name,
           std::initializer_list<std::pair<std::string_view, CellRef>>
               fields) {
         const auto payload = arena.makeCell(name);
@@ -375,7 +375,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
                                          arena.makeCell(key)));
         }
         const auto seen = arena.makeCell(name);
-        journalAppend(arena, agent, seen, dims.seen,
+        journalAppend(arena, target, seen, dims.seen,
                       static_cast<std::size_t>(
                           setting("vagent.journal_size", 64)));
         if (const auto rec = varsRecord(arena, core, seen, "grab", true))
@@ -388,9 +388,13 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
               *rec, core.dims().values, DimVector::POS,
               arena.makeScalarCell(static_cast<std::int64_t>(seen))));
         zigzag::expectWritten(
-            arena.link(zigzag::rankTail(arena, agent, dims.pending),
+            arena.link(zigzag::rankTail(arena, target, dims.pending),
                        dims.pending, DimVector::POS, pend));
       };
+  const auto raise =
+      [&](std::string_view name,
+          std::initializer_list<std::pair<std::string_view, CellRef>>
+              fields) { raiseOn(agent, name, fields); };
 
   const auto goalNameOf = [&](CellRef i) {
     const auto goal = meta.intentionField(i, "goal").value_or(0);
@@ -512,11 +516,11 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       return true;
     }
     if (verb == "stop") {
-      // The stopped flag lives on the target agent's vars record;
-      // the turn protocol checks it before dispatch and settles
-      // nothing for a stopped agent. `self` resolves to the running
-      // agent — the current spine still finishes (statement-boundary
-      // semantics); every later turn is a no-op.
+      // §4.5's orderly stop runs `on Destroy` before the stop lands:
+      // `destroying` parks every later phase but the pending drain,
+      // where the Destroy dispatch flips the record to `stopped`.
+      // `self` resolves to the running agent — the current spine
+      // still finishes (statement-boundary semantics).
       const auto peer = field("peer");
       if (peer == noCell) return false;
       const auto want = arena.textOf(peer);
@@ -533,10 +537,20 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
               target = peer_;
       }
       if (target == noCell) return false;
-      if (const auto rec = varsRecord(arena, core, target, "stopped", true))
+      const auto flagged = [&](std::string_view which) {
+        if (const auto rec = varsRecord(arena, core, target, which, false))
+          if (const auto v =
+                  arena.linked(*rec, core.dims().values, DimVector::POS))
+            if (const auto flag = arena.asInt64(*v)) return *flag != 0;
+        return false;
+      };
+      if (flagged("stopped") || flagged("destroying")) return true;
+      if (const auto rec =
+              varsRecord(arena, core, target, "destroying", true))
         zigzag::expectWritten(
             arena.link(*rec, core.dims().values, DimVector::POS,
                        arena.makeScalarCell(std::int64_t{1})));
+      raiseOn(target, "Destroy", {});
       return true;
     }
     if (verb == "drop") {
@@ -954,20 +968,24 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
   };
 
   // A stopped agent's turn is a clean no-op — no journal, dispatch,
-  // drain or settle; the record state persists untouched.
-  const auto agentStopped = [&] {
-    if (const auto rec = varsRecord(arena, core, agent, "stopped", false))
+  // drain or settle; the record state persists untouched. A
+  // destroying agent only keeps the pending drain: `on Destroy` is
+  // the last work it ever dispatches.
+  const auto flagOn = [&](std::string_view which) {
+    if (const auto rec = varsRecord(arena, core, agent, which, false))
       if (const auto v = arena.linked(*rec, core.dims().values, DimVector::POS))
         if (const auto flag = arena.asInt64(*v)) return *flag != 0;
     return false;
-  }();
+  };
+  const auto agentStopped    = flagOn("stopped");
+  const auto agentDestroying = flagOn("destroying");
 
   // §8.5's creation order lands the member asserts at image time, so
   // the first exec turn is where `on Initialize` runs — once, ahead
   // of the turn's own percept. The $-namespaced flag record is
   // durable, so a checkpoint/resume or a later stop does not re-fire
   // initialization.
-  if (!agentStopped)
+  if (!agentStopped && !agentDestroying)
     if (const auto rec =
             varsRecord(arena, core, agent, "$initialized", true);
         rec.has_value() &&
@@ -983,7 +1001,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       if (!dispatchEvent("Initialize", init)) return failTurn();
     }
 
-  if (!agentStopped && exec.message) {
+  if (!agentStopped && !agentDestroying && exec.message) {
     const std::string &eventName = exec.message->value;
     const auto seen            = arena.makeCell(eventName);
     journalAppend(arena, agent, seen, dims.seen,
@@ -1016,7 +1034,17 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
           seen = static_cast<CellRef>(*r);
     unlinkRank(arena, *head, dims.pending);
     if (!dispatchEvent(name, seen)) return failTurn();
+    // §4.5: `on Destroy` is the orderly stop's last act — nothing
+    // behind it on the rank dispatches.
+    if (name == "Destroy") break;
   }
+  // Whether the drain just ran `on Destroy` or nothing was queued, a
+  // destroying agent is done at this boundary.
+  if (agentDestroying)
+    if (const auto rec = varsRecord(arena, core, agent, "stopped", true))
+      zigzag::expectWritten(
+          arena.link(*rec, core.dims().values, DimVector::POS,
+                     arena.makeScalarCell(std::int64_t{1})));
 
   // The receiver half of tell/untell: each +d.inbox record is a
   // cross-agent assertion the adapter staged — the belief mutation
@@ -1025,7 +1053,8 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
   // pending.
   {
     const auto inboxDim = core.findOrMintDimension("d.inbox");
-    for (std::size_t drained = 0; !agentStopped && drained < drainBound;
+    for (std::size_t drained = 0;
+         !agentStopped && !agentDestroying && drained < drainBound;
          ++drained) {
       std::optional<CellRef> head;
       for (const CellRef cell : zigzag::rankAfter(arena, agent, inboxDim)) {
@@ -1109,13 +1138,48 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
   // the produced value — `a == b` yields `b` even when `b` is `0` or
   // `false`, which is why the checker bars bare Bool conditions from
   // these positions. Refusal and non-production are the only failures.
-  const auto succeeds = [&](CellRef head, CellRef i,
-                            std::optional<std::vector<CellValue>> args =
-                                std::nullopt) -> bool {
-    const auto outcome = meta.runFragment(
-        head, args.value_or(intentionArgs(i)), exec.cursor, maxCycles);
+  const auto runCondition =
+      [&](CellRef head, CellRef i,
+          std::optional<std::vector<CellValue>> args =
+              std::nullopt) -> MetaRunOutcome {
+    return meta.runFragment(head, args.value_or(intentionArgs(i)),
+                            exec.cursor, maxCycles);
+  };
+  const auto produces = [](const MetaRunOutcome &outcome) {
     return outcome.refusal == MetaRunOutcome::Refusal::None &&
            outcome.produced;
+  };
+  // §6.4's isolation rule: a refused condition is "unchanged", never a
+  // drop, success or restorer — and raises ConditionFault exactly once,
+  // flagged on the intention until the condition next evaluates
+  // cleanly (production or clean failure both clear it).
+  const auto condFault = [&](CellRef i, const MetaRunOutcome &outcome) {
+    const auto field = "conditionFaulted";
+    if (outcome.refusal == MetaRunOutcome::Refusal::None) {
+      if (meta.intentionField(i, field).value_or(0) != 0)
+        meta.setIntentionField(i, field, 0);
+      return;
+    }
+    if (meta.intentionField(i, field).value_or(0) != 0) return;
+    const auto cause = [&] {
+      switch (outcome.refusal) {
+      case MetaRunOutcome::Refusal::VmFault:
+        return outcome.detail.empty() ? std::string{"fuel"}
+                                      : outcome.detail;
+      case MetaRunOutcome::Refusal::ArityMismatch:
+        return std::string{"arity"};
+      case MetaRunOutcome::Refusal::NotAHead:
+      case MetaRunOutcome::Refusal::NoDescriptor:
+        return std::string{"no_condition"};
+      case MetaRunOutcome::Refusal::None:
+        break;
+      }
+      return std::string{};
+    }();
+    raise("ConditionFault",
+          {{"intention", arena.makeScalarCell(std::int64_t{i})},
+           {"cause", arena.makeCell(cause)}});
+    meta.setIntentionField(i, field, 1);
   };
 
   // §3.5's deadline recovery: a parked `else` head evaluates with
@@ -1179,9 +1243,10 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
   // stepping, never cursor state. body_replaced is checked against the
   // adoption-time +d.spin name before any member runs.
   for (const CellRef intention :
-       agentStopped ? std::vector<CellRef>{}
-                    : zigzag::rankAfter(arena, agent, dims.intention) |
-                          std::ranges::to<std::vector>()) {
+       agentStopped || agentDestroying
+           ? std::vector<CellRef>{}
+           : zigzag::rankAfter(arena, agent, dims.intention) |
+                 std::ranges::to<std::vector>()) {
     const auto waiting = meta.intentionField(intention, "waiting").value_or(0);
     if (waiting != 0) {
       // §3.5/§3.6 resume: the journal holds the percept the awaited
@@ -1262,8 +1327,8 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
                 CellValue{static_cast<std::int64_t>(delivered)});
           const auto go = meta.runFragment(awaitGuard, gArgs,
                                            exec.cursor, maxCycles);
-          return go.refusal == MetaRunOutcome::Refusal::None &&
-                 go.produced;
+          condFault(intention, go);
+          return produces(go);
         };
         if (beliefForm && awaitTerm != noCell) {
           for (const CellRef clause : meta.beliefsOf(arena.textOf(awaitTerm)))
@@ -1383,8 +1448,11 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
         if (goal != noCell)
           if (const auto rec = varsRecord(arena, core, goal, "dropTest", false))
             if (const auto head =
-                    arena.linked(*rec, core.dims().values, DimVector::POS))
-              dropped = succeeds(*head, intention);
+                    arena.linked(*rec, core.dims().values, DimVector::POS)) {
+              const auto outcome = runCondition(*head, intention);
+              condFault(intention, outcome);
+              dropped = produces(outcome);
+            }
         if (dropped) {
           // A dropped subgoal fails the parent's achieve — the fault
           // ladder decides retry vs. drop there too.
@@ -1485,7 +1553,12 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
             if (it == env.end()) return false;
             args.push_back(it->second);
           }
-          return succeeds(holdsHead, intention, args);
+          const auto outcome = runCondition(holdsHead, intention, args);
+          condFault(intention, outcome);
+          // §6.4: a refused condition is "unchanged" — no restorer
+          // fires on a lapse the runtime never actually proved.
+          return outcome.refusal != MetaRunOutcome::Refusal::None ||
+                 outcome.produced;
         };
         const std::function<bool(std::size_t, decltype(seededEnv))>
             solve = [&](std::size_t i,
@@ -1616,12 +1689,26 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
           return 0;
         }();
         if (kind == 1) {
+          bool refused   = false;
           bool succeeded = true;
           if (const auto rec =
                   varsRecord(arena, core, goal, "succeedTest", false))
             if (const auto head =
-                    arena.linked(*rec, core.dims().values, DimVector::POS))
-              succeeded = succeeds(*head, intention);
+                    arena.linked(*rec, core.dims().values, DimVector::POS)) {
+              const auto outcome = runCondition(*head, intention);
+              condFault(intention, outcome);
+              refused   = outcome.refusal != MetaRunOutcome::Refusal::None;
+              succeeded = produces(outcome);
+            }
+          // §6.4: a refused succeedTest is "unchanged" — the intention
+          // parks past the spine end so the next settle re-tests the
+          // condition rather than re-running the last member, and
+          // never faults on a verdict it never got.
+          if (refused) {
+            meta.setIntentionField(intention, "step",
+                                   static_cast<std::int64_t>(next));
+            continue;
+          }
           if (!succeeded) {
             faultIntention(intention, "succeed_unmet");
             continue;
