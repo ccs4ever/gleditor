@@ -1,8 +1,8 @@
 # vagent Actor Executor: Turn-Level Runtime Design
 
-**Document Version:** 0.2 (review round-1 revised) **Status:** revised after a 7-lane critique panel
-(`projects/vagent-actor-executor-review/` — 8 blocking findings dispositioned); three spec-level
-rulings taken by the owner (§9)
+**Document Version:** 0.3 (review round-2 revised) **Status:** round-2 freeze dispositions landed
+(`projects/vagent-actor-executor-review/`); three owner-ratified rulings + three r2 spec-level
+rulings flagged for owner confirmation (§3.8, §9)
 
 > **Dialectic outcome (two rounds, three lenses — CONVERGED):** the turn-level executor is
 > implementable on today's substrate with two mesh changes (deficit-counter arbitration, P8 scan
@@ -167,36 +167,40 @@ durable program.
 ### 3.2 The turn — one mark, one decision
 
 ```
-0. base:   push the turn's base choice point (the fail_step landing pad);
-           reset the Dewey path; establish per-turn scope (cursor +d.vars/+d.stack)
 1. m0 = mark(); setExecutionLimits(remaining grant, m0-relative)
-2. decode: message→bencode→event cell (immutable; +d.name type,
+2. base:   push the turn's base choice point (the fail_step landing pad — its
+           entry lives inside m0's span so a failed turn releases it too);
+           reset the Dewey path; establish per-turn scope (cursor +d.vars/+d.stack)
+3. decode: message→bencode→event cell (immutable; +d.name type,
            d.vars fields, implicit source/space/time/ordinal; sequence==0 for ActorSend)
    or wake→adapter delivery queue drain (coalesced, §4.1)
-3. bind $turn / journal: append event cell to d.seen ring (bounded K, closed through agent)
-4. dispatch: event type symbol → d.clause handlers (priority→mount→position merge);
+4. bind $turn / journal: append event cell to d.seen ring (bounded K, closed through agent)
+5. dispatch: event type symbol → d.clause handlers (priority→mount→position merge);
              each body = runFragment on the actor cursor under per-statement choice points
-5. settle: drain d.pending internal events; belief-event rounds ≤ belief_event_depth,
+6. settle: drain d.pending internal events; belief-event rounds ≤ belief_event_depth,
            all drawing one aggregate condition-fuel account (§4.3)
-6. ready: service ready intentions/timers (bounded by arbitration counters)
-7. commit: discard(m0) → writes keep, marks release; assert choiceDepth==0 && marks==0
-8. drain: C++-only rankAfter walk of +d.outbox — host bindings dispatch
+7. ready: service ready intentions/timers (bounded by arbitration counters)
+8. commit: clearChoicePoints() (cut(0) — pops the base CP too, releasing its
+           mark; success needs no landing pad) → discard(m0) → writes keep;
+           assert choiceDepth==0 && marks==0
+9. drain: C++-only rankAfter walk of +d.outbox — host bindings dispatch
           (send/spawn/effect), consumeWork-free by construction (§4.4)
-9. post: unlink the per-turn scope edges (+d.vars/+d.stack — otherwise they leak
+10. post: unlink the per-turn scope edges (+d.vars/+d.stack — otherwise they leak
          onto the cursor rank every turn); update ready/timer derivations; every
          compact_every turns run arena compact(); expose staged outbox + stats
          for the §11.3 harness
 ```
 
-- **Failure inside 1–6** → `clearChoicePoints()` (backtrack-drain to the step-0 base CP, which
-  releases every per-statement mark), **then** `release(m0)` — never a bare `release(m0)` under live
-  marks: that leaves `outstandingMarks_` elevated and `choiceStack_` retaining dead marks (the §5.1
-  wedge, self-inflicted; sibling specs prescribe this idiom verbatim —
-  `vagent-agent-language.md:341-343`, `vagent-metaprogramming.md` §6.4). Outbox cells die with the
-  mark; the intention records the named fault; `fail_step` runs against the surviving base CP with
-  **reserved fuel** (§4.3). Non-intention failures (init/fatal) take the `$stats`-drop arm. Nothing
-  propagates: `consumeWork` throws `std::runtime_error` — the callback must translate it to a turn
-  fault or `pumpOne` maps it to `ExecutionFailed` and the actor stops forever
+- **Failure inside 2–7** → `cut(1)` (pops every per-statement CP *above* the base, releasing their
+  marks — the base CP **survives**), then `release(m0)` (rolls back all writes incl. the step-2
+  scope edges and the staged outbox), then `backtrack(cursor)` — lands on the surviving base CP's
+  failure alternative where `fail_step` runs on **reserved fuel** (§4.3). This is
+  `vagent-agent-language.md:341`'s drain idiom; `clearChoicePoints()` is *never* used on the failure
+  path — `cut(0)` would destroy the landing pad it just preserved (and a bare `release(m0)` under
+  live CP marks would self-inflict the §5.1 wedge). Init/fatal failures take the spec's own arms
+  (`ChildStopping` + stopped actor — `vagent-agent-language.md:369-372`), not the intention ladder.
+  Nothing propagates: `consumeWork` throws `std::runtime_error` — the callback must translate it to
+  a turn fault or `pumpOne` maps it to `ExecutionFailed` and the actor stops forever
   (`mesh_actor.cpp:549-551`).
 - **Auto-reply**: `pumpOne` replies to every `ActorSend` with the executor's returned string — the
   adapter encodes the language-level reply there (≤ `grant.maxOutputBytes`).
@@ -298,7 +302,7 @@ in-turn, infallible-or-refusing operations). Two call positions get two lowering
 - **Fragment position** (`believes …` inside a `where`/`code"…"` fragment, e.g. the §9.2
   `code"believes threat(?t) & t > 0.9"` graft payload): lowers to the **inlined clause-walk graph**
   — the pure-arena belief-match subcircuit the reference spec prescribes for `where` evaluation
-  (`vagent-metaprogramming.md` §9.1's clause-walk lowering). No host call leaves the fragment
+  (`vagent-agent-language.md:1479-1500`'s clause-walk lowering). No host call leaves the fragment
   boundary; `runFragment` executes it under the caller's fuel.
 - **Statement position** (`learn_*`, `set_weight`, `clauses_of` heads of `for`, `believe`/`forget`
   in a handler or plan body): lowers as a **statement-boundary host step** — the emitted segment
@@ -318,7 +322,27 @@ bound on the cursor's `+d.vars` under the call's parameter names; the executor r
 results back onto `+d.vars` under the callee-visible result names, and resumes at the continuation
 segment — or translates a refused/`expected`-error verb into the statement-level failure path
 (choice-point backtrack → `fail_step`). Halt vs host-step is discriminated by the segment descriptor
-the emitter wrote.
+the emitter wrote. `d.verb` joins M0's filed-dim list (it is used mid-turn, inside `m0`).
+
+Three rulings the r2 pass forced (spec-level, flagged for owner ratification):
+
+- **Expression-position calls hoist (ANF).** A verb nested inside an expression —
+  `learn_where(plan_named("demo:Guard.cautious"), code"…")`, `if believes threat(?t)`,
+  `for c in clauses_of(symbol_named("demo","Feed"))` — lowers by **ANF-hoisting**: each nested call
+  becomes its own statement-boundary host step producing a temp binding, and the enclosing
+  expression consumes the temp. `if believes …` → `let ?b := believes(…); if ?b …`. No verb ever
+  evaluates mid-expression; the boundary discipline is uniform.
+- **Fragments are pure (amends M6).** `code"…"` payloads and `where` clauses may contain only pure
+  verbs — `believes` reads, never `believe`/`graft`/`emit`/`learn_*` (those refuse at check time).
+  This narrows the reference spec's M6 allowance for impure verbs in `code"…"` — required, because a
+  `where` fragment must be safely re-runnable under rollback and `learn_where`'s payload itself is
+  stored code.
+- **Belief channel.** The where-evaluator binds the **agent cell** into fragment scope on `+d.vars`
+  (implicit arg), so the inlined clause-walk reads `agent +d.belief → predicate → +d.clause` ranks
+  directly — belief facts are clause-shaped cells whose `+d.grab` term heads are `#Unify`-consumable
+  (the M2 emission contract names the term-cell encoding). Multi-agent modules: each clause carries
+  `+d.owner → <agent symbol>` (M0 emits it; dispatch keys on it — no silent cross-agent handler
+  stealing).
 
 ## 4. Boundaries, budgets, invariants
 
@@ -451,9 +475,10 @@ per-step sets is a reasonable optimization, not a correctness gate — measure b
   shape); each `plan`/`on`/`def`/`method` → clause/symbol cells with `compileFragment`-shaped heads
   — **with declared body-head names** (§3.5's recorded identity needs them for image-original
   bodies); predicate decls → `d.belief` hosts; agent cell + `$`-reserved seeds + directory cell +
-  `+d.dirs`/`+d.agents`; file `d.agents`/`d.dirs`/`d.seen`/`d.evidence`/`d.clone`/recipe dims in
-  `kAgentDimensionNames`; `finalizeProgramImage` + `seedProgramImage` + lineage seed. **Plus a
-  `DeclKind` disposition table** — every one of the 18 `DeclKind`s gets an explicit
+  `+d.dirs`/`+d.agents`; each clause cell carries `+d.owner → <agent symbol>` for multi-agent
+  dispatch; file `d.agents`/`d.dirs`/`d.seen`/`d.evidence`/`d.verb`/`d.owner`/`d.clone`/recipe dims
+  in `kAgentDimensionNames`; `finalizeProgramImage` + `seedProgramImage` + lineage seed. **Plus a
+  `DeclKind` disposition table** — every one of the 19 `DeclKind`s gets an explicit
   lower/stub/refuse ruling (r1: ~11 were undisposed, `var` fields included); the `std:agent` prelude
   ships here; each body lowering starts as a single-segment stub (the scalar Emitter refuses agent
   statement kinds — real segmentation is M2's).
@@ -461,15 +486,19 @@ per-step sets is a reasonable optimization, not a correctness gate — measure b
   `ActorExecution` gains the arbitration counters (§4.7 — runtime state, not config); grant gains
   `maxLiveCells`; arena gains `liveCells()`; the `vagent.*` tunables land in `defaultSettingSpecs`;
   **the §5.1 backtrack fix and §5.2 cursor-accretion fix land here** (owned, not orphaned).
-- **M1 — wake + handler dispatch**: the Executor callback skeleton (steps 0–9 of §3.2 — base CP,
+- **M1 — wake + handler dispatch**: the Executor callback skeleton (steps 1–10 of §3.2 — base CP,
   Dewey reset, per-turn scope, scope unlink, `compact_every` all included) — mark → decode →
   `$turn`/`d.seen` → `on Event` dispatch via `clausesOf` + `runFragment` on the actor cursor →
-  commit/**clearChoicePoints→release** → C++ drain → zero-residual assert. Translates `consumeWork`
-  → turn fault; no second-cursor speculation under open CPs; §11.3 harness shape.
+  commit(**cut(0)→discard**) / fail(**cut(1)→release→backtrack**) → C++ drain → zero-residual
+  assert. Translates `consumeWork` → turn fault; no second-cursor speculation under open CPs; §11.3
+  harness shape.
 - **M2 — beliefs + the host-step seam**: statement-segmented body lowering lands **here** (r1 — the
-  belief verbs need it before M3 consumes selection): segment spine emission, the §3.8 ABI
-  (`+d.verb` naming, `+d.vars` arg/result marshaling, refused→fail_step translation), and the
-  fragment-position `believes` clause-walk lowering. `d.belief`/`d.seen`/`d.evidence` ranks live;
+  belief verbs need it before M3 consumes selection): segment spine emission with the resume-side
+  contract (the `$step` read channel + per-segment Return-tail — r2: a descriptor param fails
+  `signatureOf`/arity checks, so `$step` reads through the segment descriptor, not a formal), the
+  §3.8 ABI (`+d.verb` naming, `+d.vars` arg/result marshaling, refused→`fail_step` translation), the
+  fragment-position `believes` clause-walk lowering, and the **belief term-cell encoding**
+  (`+d.grab` term heads in `#Unify`-consumable shape). `d.belief`/`d.seen`/`d.evidence` ranks live;
   `believes`/`believe`/`forget`/`revise` host verbs; `d.pending` internal events through settle.
 - **M3 — plan selection**: adoption → `clausesOf` → weight-snapshot + virtual order → per-candidate
   `where` under condition fuel → `tried`. Tests exercise **adopted intentions only** (no suspension
