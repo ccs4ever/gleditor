@@ -82,9 +82,12 @@ struct Harness {
     return executor.execute(source, context);
   }
 
-  std::size_t invokeCount(const std::string_view source) {
+  std::size_t invokeCount(const std::string_view source,
+                          ContractBindings bindings = {}) {
     VQLCompiler compiler(coordinator, vm);
-    const auto result = compiler.compile(source);
+    CompilationOptions options;
+    options.initialBindings = std::move(bindings);
+    const auto result       = compiler.compile(source, options);
     EXPECT_TRUE(result.success) << result.errorMessage;
     std::size_t count = 0;
     for (const CellRef opcode : result.generatedOpcodes)
@@ -245,6 +248,11 @@ TEST(VQLStructuralFrameTest,
             bindings);
   ASSERT_TRUE(unionResult) << unionResult.error().message;
   EXPECT_TRUE(unionResult->empty());
+  EXPECT_GT(h.invokeCount("def pure read($item: Cell { +d.mark: $leak: String, "
+                          "+d.absent: Cell } | Cell): Cell? := $leak; "
+                          "read(##/d.items[1])",
+                          bindings),
+            0u);
 
   const auto genericResult =
       h.run("def pure pass($prior: String, "
@@ -268,10 +276,11 @@ TEST(VQLStructuralFrameTest,
             ContractBindings{{"leak", {caller}}});
   ASSERT_TRUE(callerOnly) << callerOnly.error().message;
   EXPECT_EQ(*callerOnly, (std::vector<CellRef>{caller}));
-  EXPECT_EQ(
+  EXPECT_GT(
       h.invokeCount("def pure pass($items: Stream<Cell { +d.mark: String }>, "
                     "$fallback: String := $leak): String := $fallback; "
-                    "pass(##/d.items)"),
+                    "pass(##/d.items)",
+                    ContractBindings{{"leak", {caller}}}),
       0u);
 
   const auto optional = h.run(
@@ -318,9 +327,11 @@ TEST(VQLStructuralFrameTest,
           .parseQuery();
   const auto open = analyzeFrameEligibility(query);
   ASSERT_TRUE(open) << open.error().message;
-  EXPECT_FALSE(open->reusableDefinitions.contains("pass"));
-  EXPECT_NE(open->refusalReasons.at("pass").find("$outside"),
-            std::string::npos);
+  EXPECT_TRUE(open->reusableDefinitions.contains("pass"));
+  EXPECT_EQ(open->freeCaptureNames.at("pass"),
+            (std::vector<std::string>{"outside"}));
+  EXPECT_EQ(open->requiredDefaultCaptureBindings.at("pass"),
+            (std::vector<std::string>{"outside"}));
 
   auto root     = query.defs.front().params.front().type;
   auto &primary = root->unionType.members.front();
@@ -339,9 +350,11 @@ TEST(VQLStructuralFrameTest, SamePatternDefaultCannotCaptureItsOwnMatch) {
           .parseQuery();
   const auto result = analyzeFrameEligibility(query);
   ASSERT_TRUE(result);
-  EXPECT_FALSE(result->reusableDefinitions.contains("read"));
-  EXPECT_NE(result->refusalReasons.at("read").find("$first"),
-            std::string::npos);
+  EXPECT_TRUE(result->reusableDefinitions.contains("read"));
+  EXPECT_EQ(result->freeCaptureNames.at("read"),
+            (std::vector<std::string>{"first"}));
+  EXPECT_EQ(result->requiredDefaultCaptureBindings.at("read"),
+            (std::vector<std::string>{"first"}));
 }
 
 TEST(VQLStructuralFrameTest, UnionArmCaptureDoesNotScopeAnotherArmsDefault) {
@@ -352,9 +365,11 @@ TEST(VQLStructuralFrameTest, UnionArmCaptureDoesNotScopeAnotherArmsDefault) {
           .parseQuery();
   const auto result = analyzeFrameEligibility(query);
   ASSERT_TRUE(result);
-  EXPECT_FALSE(result->reusableDefinitions.contains("read"));
-  EXPECT_NE(result->refusalReasons.at("read").find("$outside"),
-            std::string::npos);
+  EXPECT_TRUE(result->reusableDefinitions.contains("read"));
+  EXPECT_EQ(result->freeCaptureNames.at("read"),
+            (std::vector<std::string>{"outside"}));
+  EXPECT_EQ(result->requiredDefaultCaptureBindings.at("read"),
+            (std::vector<std::string>{"outside"}));
 }
 
 TEST(VQLStructuralFrameTest,

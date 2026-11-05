@@ -235,6 +235,8 @@ CompilationResult VQLCompiler::compile(const QueryExpression &query,
   definitions_.clear();
   frameDefinitions_.clear();
   reusableFrameDefinitions_.clear();
+  frameFreeCaptureNames_.clear();
+  frameRequiredDefaultCaptureBindings_.clear();
   pendingFrameDefinitions_.clear();
   frameMutableSlots_.clear();
   compilingFrameDefinition_ = false;
@@ -342,6 +344,9 @@ std::optional<CellRef> VQLCompiler::compileQuery(const QueryExpression &query) {
   if (!frameEligibility)
     throw std::invalid_argument(frameEligibility.error().message);
   reusableFrameDefinitions_ = frameEligibility->reusableDefinitions;
+  frameFreeCaptureNames_    = frameEligibility->freeCaptureNames;
+  frameRequiredDefaultCaptureBindings_ =
+      frameEligibility->requiredDefaultCaptureBindings;
   try {
     for (const auto &definition : query.defs)
       validateFunctionSignature(definition);

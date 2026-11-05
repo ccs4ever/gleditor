@@ -143,8 +143,26 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
     }
     ++functorIndex;
   }
+  bool hasInlineCapture = false;
+  if (const auto captures = frameFreeCaptureNames_.find(definition.name);
+      captures != frameFreeCaptureNames_.end()) {
+    hasInlineCapture =
+        std::ranges::any_of(captures->second, [this](const std::string &name) {
+          if (functorBindings_.contains(name)) return true;
+          if (const auto stream = streamBindings_.find(name);
+              stream != streamBindings_.end()) {
+            return std::ranges::any_of(stream->second, [this](CellRef cell) {
+              return core_.hasPipeline(cell);
+            });
+          }
+          if (const auto scalar = varBindings_.find(name);
+              scalar != varBindings_.end() && scalar->second)
+            return core_.hasPipeline(*scalar->second);
+          return false;
+        });
+  }
   if (reusableFrameDefinitions_.contains(definition.name) &&
-      !hasStaticFunctor) {
+      !hasStaticFunctor && !hasInlineCapture) {
     if (compilingFrameDefinition_ && activeCalls_.size() > 1 &&
         activeCalls_.back() != compilingFrameDefinitionName_ &&
         std::ranges::contains(activeCalls_, definition.name))
@@ -346,20 +364,32 @@ VQLCompiler::normalizeFrameStream(const std::span<const CellRef> cells) {
 std::vector<CellRef> VQLCompiler::compileReusableFrameCall(
     const DefDeclaration &definition, const std::vector<ValueExpr> &arguments,
     const std::optional<CellRef> context, const bool ufcs) {
-  auto state = frameDefinitions_.find(definition.name);
-  if (state == frameDefinitions_.end()) {
-    const auto reserved = vm_.reserveFrameDescriptor();
-    if (!reserved) throw std::invalid_argument(reserved.error().message);
-    state = frameDefinitions_
-                .emplace(definition.name,
-                         FrameDefinitionState{.descriptor = *reserved})
-                .first;
-  }
-  const CellRef descriptor = state->second.descriptor;
-  if (!state->second.queued && !state->second.compiled) {
-    state->second.queued = true;
-    pendingFrameDefinitions_.push_back(definition.name);
-  }
+  const auto callerCaptureCells = [this](const std::string &name) {
+    if (const auto found = streamBindings_.find(name);
+        found != streamBindings_.end())
+      return found->second;
+    if (const auto found = varBindings_.find(name);
+        found != varBindings_.end() && found->second)
+      return std::vector<CellRef>{*found->second};
+    return std::vector<CellRef>{};
+  };
+  const CellRef descriptor = [&] {
+    auto state = frameDefinitions_.find(definition.name);
+    if (state == frameDefinitions_.end()) {
+      const auto reserved = vm_.reserveFrameDescriptor();
+      if (!reserved) throw std::invalid_argument(reserved.error().message);
+      state = frameDefinitions_
+                  .emplace(definition.name,
+                           FrameDefinitionState{.descriptor = *reserved})
+                  .first;
+    }
+    const CellRef frameDescriptor = state->second.descriptor;
+    if (!state->second.queued && !state->second.compiled) {
+      state->second.queued = true;
+      pendingFrameDefinitions_.push_back(definition.name);
+    }
+    return frameDescriptor;
+  }();
 
   std::vector<std::vector<CellRef>> actuals;
   if (ufcs && context && definition.params.size() > arguments.size())
@@ -367,9 +397,51 @@ std::vector<CellRef> VQLCompiler::compileReusableFrameCall(
   for (const auto &argument : arguments)
     actuals.push_back(compileArgument(argument, context));
 
+  if (const auto required =
+          frameRequiredDefaultCaptureBindings_.find(definition.name);
+      required != frameRequiredDefaultCaptureBindings_.end()) {
+    for (const auto &name : required->second) {
+      if (functorBindings_.contains(name))
+        throw std::invalid_argument("contract default $" + name +
+                                    " cannot capture a path functor");
+      if (const auto stream = streamBindings_.find(name);
+          stream != streamBindings_.end()) {
+        if (stream->second.size() > 1)
+          throw std::invalid_argument("contract default $" + name +
+                                      " must resolve to at most one cell");
+        if (!stream->second.empty() &&
+            core_.hasPipeline(stream->second.front()))
+          throw std::invalid_argument(
+              "contract default aliases cannot depend on parameter pipelines");
+        continue;
+      }
+      if (const auto scalar = varBindings_.find(name);
+          scalar != varBindings_.end() && scalar->second) {
+        if (core_.hasPipeline(*scalar->second))
+          throw std::invalid_argument(
+              "contract default aliases cannot depend on parameter pipelines");
+        continue;
+      }
+      throw std::invalid_argument("contract default $" + name +
+                                  " has no prior lexical binding");
+    }
+  }
+
+  std::vector<std::vector<CellRef>> capturedValues;
+  if (const auto captures = frameFreeCaptureNames_.find(definition.name);
+      captures != frameFreeCaptureNames_.end()) {
+    capturedValues.reserve(captures->second.size());
+    for (const auto &name : captures->second)
+      capturedValues.push_back(callerCaptureCells(name));
+  }
+
   const CellRef contextStream =
       context ? normalizeFrameStream(std::span{&*context, std::size_t{1}})
               : normalizeFrameStream(std::span<const CellRef>{});
+  std::vector<CellRef> captureStreams;
+  captureStreams.reserve(capturedValues.size());
+  for (const auto &capture : capturedValues)
+    captureStreams.push_back(normalizeFrameStream(capture));
   std::vector<CellRef> argumentStreams;
   std::vector<std::optional<CellRef>> presenceFlags;
   argumentStreams.reserve(definition.params.size());
@@ -389,6 +461,7 @@ std::vector<CellRef> VQLCompiler::compileReusableFrameCall(
       emitOp(OpcodeKind::InvokeFrame, "#INVOKE_FRAME " + definition.name);
   emitInput(invoke, descriptor);
   emitInput(invoke, contextStream);
+  for (const auto capture : captureStreams) emitInput(invoke, capture);
 
   for (std::size_t index = 0; index < definition.params.size(); ++index) {
     emitInput(invoke, argumentStreams[index]);
@@ -472,6 +545,7 @@ void VQLCompiler::compileFrameDefinition(const DefDeclaration &definition) {
   FrameDescriptorSpec spec;
   const CellRef contextSlot = core_.arena().makeCell();
   const CellRef resultSlot  = core_.arena().makeCell();
+  std::vector<CellRef> captureSlots;
   std::vector<CellRef> parameterSlots;
   std::vector<std::optional<CellRef>> presenceSlots;
   parameterSlots.reserve(definition.params.size());
@@ -479,6 +553,16 @@ void VQLCompiler::compileFrameDefinition(const DefDeclaration &definition) {
   spec.locals = {contextSlot, resultSlot};
   spec.argumentPorts.emplace_back(contextSlot, FramePortKind::Stream);
   spec.resultPorts.emplace_back(resultSlot, FramePortKind::Stream);
+  if (const auto captures = frameFreeCaptureNames_.find(definition.name);
+      captures != frameFreeCaptureNames_.end()) {
+    captureSlots.reserve(captures->second.size());
+    for (std::size_t index = 0; index < captures->second.size(); ++index) {
+      const CellRef slot = core_.arena().makeCell();
+      captureSlots.push_back(slot);
+      spec.locals.push_back(slot);
+      spec.argumentPorts.emplace_back(slot, FramePortKind::Stream);
+    }
+  }
   for (const auto &parameter : definition.params) {
     if (!std::holds_alternative<std::string>(parameter.target) &&
         !std::holds_alternative<bool>(parameter.target) &&
@@ -502,6 +586,16 @@ void VQLCompiler::compileFrameDefinition(const DefDeclaration &definition) {
   varBindings_["."]    = contextSlot;
   ambientContext_      = contextSlot;
   dynamicStreams_.insert(contextSlot);
+  if (const auto captures = frameFreeCaptureNames_.find(definition.name);
+      captures != frameFreeCaptureNames_.end()) {
+    for (std::size_t index = 0; index < captures->second.size(); ++index) {
+      const auto &name      = captures->second[index];
+      const CellRef slot    = captureSlots[index];
+      streamBindings_[name] = {slot};
+      varBindings_[name]    = slot;
+      dynamicStreams_.insert(slot);
+    }
+  }
   for (const auto slot : parameterSlots) {
     dynamicStreams_.insert(slot);
   }

@@ -15,6 +15,24 @@ namespace {
 
 using Scope = std::unordered_set<std::string>;
 
+struct CallSite {
+  std::string callee;
+  Scope visibleNames;
+  bool inParameterDefault{false};
+};
+
+struct CaptureDependency {
+  std::string caller;
+  Scope visibleNames;
+  bool inParameterDefault{false};
+};
+
+struct PendingCapture {
+  std::string definition;
+  std::string name;
+  bool requiredDefaultBinding{false};
+};
+
 struct ScanFailure : std::runtime_error {
   using std::runtime_error::runtime_error;
 };
@@ -29,6 +47,10 @@ struct TraversalBudget {
   void tick(const std::size_t depth) {
     if (depth > limits.maxDepth)
       throw ScanFailure("frame eligibility AST depth budget exhausted");
+    charge();
+  }
+
+  void charge() {
     if (nodes >= limits.maxNodes)
       throw ScanFailure("frame eligibility AST node budget exhausted");
     ++nodes;
@@ -54,7 +76,12 @@ public:
       tick(1);
       if (parameter.isVariadic)
         refuse("variadic definitions remain on inline graph lowering");
-      if (parameter.defaultValue) value(*parameter.defaultValue, scope, 2);
+      if (parameter.defaultValue) {
+        const bool prior          = scanningParameterDefault_;
+        scanningParameterDefault_ = true;
+        value(*parameter.defaultValue, scope, 2);
+        scanningParameterDefault_ = prior;
+      }
       if (parameter.type) {
         auto captures = type(*parameter.type, scope, 2);
         scope.insert(captures.begin(), captures.end());
@@ -74,10 +101,7 @@ public:
       }
     }
 
-    if (definition.returnType) {
-      auto returnScope = scope;
-      (void)type(*definition.returnType, returnScope, 1);
-    }
+    Scope returnScope = scope;
     if (const auto *body =
             std::get_if<std::shared_ptr<ValueExpr>>(&definition.body)) {
       pointer(*body, 1, [&](const ValueExpr &expr, const std::size_t depth) {
@@ -88,15 +112,26 @@ public:
           std::get<std::shared_ptr<ScriptBody>>(definition.body);
       pointer(scriptRoot, 1,
               [&](const ScriptBody &script, const std::size_t depth) {
-                scriptBody(script, scope, depth);
+                returnScope = scriptBody(script, scope, depth);
               });
     }
+    if (definition.returnType)
+      (void)type(*definition.returnType, returnScope, 1);
     return refusal_;
   }
 
   [[nodiscard]] const std::unordered_set<std::string> &
-  calledDefinitions() const noexcept {
-    return calledDefinitions_;
+  freeCaptureNames() const noexcept {
+    return freeCaptureNames_;
+  }
+
+  [[nodiscard]] const std::unordered_set<std::string> &
+  requiredDefaultCaptureBindings() const noexcept {
+    return requiredDefaultCaptureBindings_;
+  }
+
+  [[nodiscard]] std::vector<CallSite> takeCallSites() && {
+    return std::move(callSites_);
   }
 
   void validateQueryNodes(const QueryExpression &query) {
@@ -151,11 +186,17 @@ private:
     if (!refusal_) refusal_ = std::move(message);
   }
 
-  void variable(const std::string &name, const Scope &scope) {
+  void variable(const std::string &name, const Scope &scope,
+                const bool requiredDefaultBinding = false) {
     tick(0);
-    if (name.empty() || !scope.contains(name))
-      refuse("definition has a free lexical variable" +
-             (name.empty() ? std::string{} : " $" + name));
+    if (name.empty()) {
+      refuse("frame eligibility found an empty lexical variable");
+      return;
+    }
+    if (!scope.contains(name)) {
+      freeCaptureNames_.insert(name);
+      if (requiredDefaultBinding) requiredDefaultCaptureBindings_.insert(name);
+    }
   }
 
   template <class T, class Action>
@@ -243,7 +284,14 @@ private:
   void invocation(const FunctionInvocation &call, const Scope &scope,
                   const std::size_t depth) {
     tick(depth);
-    calledDefinitions_.insert(call.name);
+    Scope visibleNames;
+    for (const auto &name : scope) {
+      budget_.charge();
+      visibleNames.insert(name);
+    }
+    callSites_.push_back({.callee             = call.name,
+                          .visibleNames       = std::move(visibleNames),
+                          .inParameterDefault = scanningParameterDefault_});
     if (call.isSliceRead) refuse("slice reads are not reusable frame calls");
     if (std::ranges::any_of(call.argNames, [](const std::string &name) {
           return !name.empty();
@@ -632,7 +680,10 @@ private:
               if (!literal && !alias)
                 refuse(
                     "path and call contract defaults are not frame eligible");
-              value(expr, scope, nestedDepth);
+              if (alias)
+                variable(*alias, scope, true);
+              else
+                value(expr, scope, nestedDepth);
             });
   }
 
@@ -927,16 +978,20 @@ private:
         statement);
   }
 
-  void scriptBody(const ScriptBody &body, Scope scope,
-                  const std::size_t depth) {
+  Scope scriptBody(const ScriptBody &body, Scope scope,
+                   const std::size_t depth) {
     sequence(body.statements, depth + 1,
              [&](const Statement &item, const std::size_t childDepth) {
                statement(item, scope, childDepth);
              });
+    return scope;
   }
 
   TraversalBudget &budget_;
-  std::unordered_set<std::string> calledDefinitions_;
+  std::unordered_set<std::string> freeCaptureNames_;
+  std::unordered_set<std::string> requiredDefaultCaptureBindings_;
+  std::vector<CallSite> callSites_;
+  bool scanningParameterDefault_{false};
   std::optional<std::string> refusal_;
 };
 
@@ -950,6 +1005,13 @@ analyzeFrameEligibility(const QueryExpression &query,
   try {
     TraversalBudget budget(limits);
     std::unordered_map<std::string, std::vector<std::string>> callersByCallee;
+    std::unordered_map<std::string, std::vector<CaptureDependency>>
+        captureCallersByCallee;
+    std::unordered_map<std::string, std::string> lazyDefaultRefusals;
+    std::unordered_map<std::string, std::unordered_set<std::string>>
+        freeCaptureSets;
+    std::unordered_map<std::string, std::unordered_set<std::string>>
+        requiredDefaultCaptureSets;
     for (const auto &definition : query.defs) {
       budget.tick(1);
       if (definition.name.empty())
@@ -960,15 +1022,95 @@ analyzeFrameEligibility(const QueryExpression &query,
     for (const auto &definition : query.defs) {
       DefinitionScanner scanner(budget);
       const auto reason = scanner.scan(definition);
-      for (const auto &callee : scanner.calledDefinitions()) {
+      freeCaptureSets.emplace(definition.name, scanner.freeCaptureNames());
+      requiredDefaultCaptureSets.emplace(
+          definition.name, scanner.requiredDefaultCaptureBindings());
+      auto callSites = std::move(scanner).takeCallSites();
+      for (auto &callSite : callSites) {
+        if (!names.contains(callSite.callee)) continue;
         budget.tick(1);
-        if (names.contains(callee))
-          callersByCallee[callee].push_back(definition.name);
+        callersByCallee[callSite.callee].push_back(definition.name);
+        captureCallersByCallee[callSite.callee].push_back(
+            {.caller             = definition.name,
+             .visibleNames       = std::move(callSite.visibleNames),
+             .inParameterDefault = callSite.inParameterDefault});
       }
       if (reason)
         result.refusalReasons.emplace(definition.name, *reason);
       else
         result.reusableDefinitions.insert(definition.name);
+    }
+
+    std::deque<PendingCapture> pendingCaptures;
+    std::unordered_map<std::string, std::unordered_set<std::string>>
+        queuedFreeCaptures;
+    std::unordered_map<std::string, std::unordered_set<std::string>>
+        queuedRequiredDefaultCaptures;
+    const auto enqueueCapture = [&](const std::string &definition,
+                                    const std::string &name,
+                                    const bool requiredDefaultBinding) {
+      auto &queued = requiredDefaultBinding
+                         ? queuedRequiredDefaultCaptures[definition]
+                         : queuedFreeCaptures[definition];
+      if (queued.contains(name)) return;
+      budget.tick(1);
+      queued.insert(name);
+      pendingCaptures.push_back({definition, name, requiredDefaultBinding});
+    };
+    for (const auto &definition : query.defs) {
+      const auto &freeCaptures = freeCaptureSets.at(definition.name);
+      const auto &defaultCaptures =
+          requiredDefaultCaptureSets.at(definition.name);
+      for (const auto &name : freeCaptures)
+        enqueueCapture(definition.name, name, defaultCaptures.contains(name));
+    }
+
+    while (!pendingCaptures.empty()) {
+      budget.tick(1);
+      auto current = std::move(pendingCaptures.front());
+      pendingCaptures.pop_front();
+      const auto callers = captureCallersByCallee.find(current.definition);
+      if (callers == captureCallersByCallee.end()) continue;
+      for (const auto &callSite : callers->second) {
+        budget.tick(1);
+        if (callSite.visibleNames.contains(current.name)) continue;
+        if (current.requiredDefaultBinding && callSite.inParameterDefault) {
+          lazyDefaultRefusals.try_emplace(
+              callSite.caller,
+              "a required field-default capture is unavailable inside a "
+              "lazy parameter default");
+          continue;
+        }
+
+        const bool newFreeCapture =
+            freeCaptureSets[callSite.caller].insert(current.name).second;
+        const bool newDefaultCapture =
+            current.requiredDefaultBinding &&
+            requiredDefaultCaptureSets[callSite.caller]
+                .insert(current.name)
+                .second;
+        if (newFreeCapture || newDefaultCapture)
+          enqueueCapture(callSite.caller, current.name,
+                         current.requiredDefaultBinding);
+      }
+    }
+
+    for (const auto &definition : query.defs) {
+      auto &freeCaptures  = result.freeCaptureNames[definition.name];
+      const auto &freeSet = freeCaptureSets.at(definition.name);
+      freeCaptures.assign(freeSet.begin(), freeSet.end());
+      std::ranges::sort(freeCaptures);
+
+      auto &requiredDefaults =
+          result.requiredDefaultCaptureBindings[definition.name];
+      const auto &requiredSet = requiredDefaultCaptureSets.at(definition.name);
+      requiredDefaults.assign(requiredSet.begin(), requiredSet.end());
+      std::ranges::sort(requiredDefaults);
+    }
+
+    for (const auto &[caller, reason] : lazyDefaultRefusals) {
+      if (result.reusableDefinitions.erase(caller))
+        result.refusalReasons.emplace(caller, reason);
     }
 
     std::deque<std::string> ineligible;

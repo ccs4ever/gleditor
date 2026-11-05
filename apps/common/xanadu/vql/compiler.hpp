@@ -156,6 +156,10 @@ private:
                            std::optional<zigzag::CellRef> context);
   std::vector<zigzag::CellRef> emitContractDefaultSlots(const TypeExpr &type);
   std::unordered_map<std::string, DefDeclaration> definitions_;
+  std::unordered_map<std::string, std::vector<std::string>>
+      frameFreeCaptureNames_;
+  std::unordered_map<std::string, std::vector<std::string>>
+      frameRequiredDefaultCaptureBindings_;
   struct FrameDefinitionState {
     zigzag::CellRef descriptor;
     std::optional<zigzag::CellRef> entry;

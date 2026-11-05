@@ -3,6 +3,7 @@
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "common/xanadu/multi_store.hpp"
 #include "common/xanadu/vql/compiler.hpp"
@@ -13,7 +14,8 @@
 namespace xanadu::vql {
 namespace {
 
-TEST(VQLFrameEligibilityTest, RecursiveClosedBodiesAndFreeCapturesAreDistinct) {
+TEST(VQLFrameEligibilityTest,
+     RecursiveClosedBodiesAndFreeCapturesBecomeReusable) {
   const auto query =
       Parser("def pure closed($node: Cell): Cell := closed($node); "
              "def pure open($node: Cell): Cell := $outside; closed(##)")
@@ -21,10 +23,9 @@ TEST(VQLFrameEligibilityTest, RecursiveClosedBodiesAndFreeCapturesAreDistinct) {
   const auto analysis = analyzeFrameEligibility(query);
   ASSERT_TRUE(analysis) << analysis.error().message;
   EXPECT_TRUE(analysis->reusableDefinitions.contains("closed"));
-  EXPECT_FALSE(analysis->reusableDefinitions.contains("open"));
-  ASSERT_TRUE(analysis->refusalReasons.contains("open"));
-  EXPECT_NE(analysis->refusalReasons.at("open").find("outside"),
-            std::string::npos);
+  EXPECT_TRUE(analysis->reusableDefinitions.contains("open"));
+  EXPECT_EQ(analysis->freeCaptureNames.at("open"),
+            (std::vector<std::string>{"outside"}));
 }
 
 TEST(VQLFrameEligibilityTest, FunctorBindingsRemainOnInlineGraphPath) {
@@ -37,14 +38,18 @@ TEST(VQLFrameEligibilityTest, FunctorBindingsRemainOnInlineGraphPath) {
   EXPECT_TRUE(analysis->refusalReasons.contains("apply"));
 }
 
-TEST(VQLFrameEligibilityTest, TransitiveOuterCaptureStaysOnInlineGraphPath) {
+TEST(VQLFrameEligibilityTest, TransitiveOuterCapturePropagatesToFrames) {
   const auto query = Parser("def helper(): Cell := $outside; "
                             "def wrapper(): Cell := helper(); wrapper()")
                          .parseQuery();
   const auto analysis = analyzeFrameEligibility(query);
   ASSERT_TRUE(analysis) << analysis.error().message;
-  EXPECT_FALSE(analysis->reusableDefinitions.contains("helper"));
-  EXPECT_FALSE(analysis->reusableDefinitions.contains("wrapper"));
+  EXPECT_TRUE(analysis->reusableDefinitions.contains("helper"));
+  EXPECT_TRUE(analysis->reusableDefinitions.contains("wrapper"));
+  EXPECT_EQ(analysis->freeCaptureNames.at("helper"),
+            (std::vector<std::string>{"outside"}));
+  EXPECT_EQ(analysis->freeCaptureNames.at("wrapper"),
+            (std::vector<std::string>{"outside"}));
   zigzag::ArenaManifold arena;
   zigzag::vortex::VortexCore core(arena);
   MultiStoreCoordinator coordinator(core);
@@ -56,7 +61,7 @@ TEST(VQLFrameEligibilityTest, TransitiveOuterCaptureStaysOnInlineGraphPath) {
   EXPECT_EQ(*result, (std::vector<zigzag::CellRef>{external}));
 }
 
-TEST(VQLFrameEligibilityTest, DefaultsOnlyCapturePriorFormals) {
+TEST(VQLFrameEligibilityTest, DefaultsUsePriorFormalsOrCallerCaptures) {
   const auto query =
       Parser("def prior($first: Int, $second: Int := $first): Int := $second; "
              "def later($first: Int := $second, $second: Int := 1): Int := "
@@ -66,7 +71,9 @@ TEST(VQLFrameEligibilityTest, DefaultsOnlyCapturePriorFormals) {
   const auto analysis = analyzeFrameEligibility(query);
   ASSERT_TRUE(analysis) << analysis.error().message;
   EXPECT_TRUE(analysis->reusableDefinitions.contains("prior"));
-  EXPECT_FALSE(analysis->reusableDefinitions.contains("later"));
+  EXPECT_TRUE(analysis->reusableDefinitions.contains("later"));
+  EXPECT_EQ(analysis->freeCaptureNames.at("later"),
+            (std::vector<std::string>{"second"}));
 }
 
 TEST(VQLFrameEligibilityTest, CyclicASTIsHardErrorInsteadOfInlineFallback) {

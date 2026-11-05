@@ -578,3 +578,44 @@ mutation boundaries, free closure inputs and remaining §4.12 work stay incomple
 
 Logs: `/tmp/vql-additive-build.log`, `/tmp/vql-additive-tests.log`, `/tmp/vql-additive-format.log`,
 `/tmp/vql-additive-cli.log`.
+
+## Iteration 20: caller-bound free capture ports
+
+Reusable definitions now carry free scalar/stream bindings through sorted hidden Stream ports after
+the inherited context port. Explicit actual arguments compile in caller scope first; capture streams
+then preserve the current caller bindings, identities, order, duplicates and empty values. Frame
+bodies seed hidden aliases before ordered formal defaults/matches, so completed parameter captures
+shadow them in the same order as inline lowering. Wrapper formals can supply a callee's free name
+without making that name an outer capture of the wrapper. Direct/mutual recursion uses real frames.
+
+The analyzer records original lexical scope at each callsite and propagates missing free names and
+required field-default bindings through a budgeted work queue. Scope copies are charged before
+insertion; capture metadata is sorted. Free-name discovery never invents a lexical binding. Union,
+generic-element, prematch field-default and loop scopes retain their established behavior. Return
+promises scan against the body's final escaping scope, allowing body-prefix lets to supply defaults.
+
+Missing ordinary free values can remain empty. Missing field-default aliases still compile-refuse,
+even when a field is present; explicit empty bindings retain their old semantics. Static multi-cell,
+functor and pipeline default-alias refusals remain. A required free field-default dependency inside
+a lazy parameter-default call conservatively keeps the enclosing definition inline, preserving the
+explicit-actual path that skips that default. Known captured functors or pipelined values also use
+existing compiled inline graphs. No direct evaluator, closure callback, new VM opcode or frame
+descriptor version is introduced.
+
+Validation: full `make -j$(nproc)` and all 560 affected tests from 54 suites passed, including
+thirteen new capture cases. Tests cover native scalar/ordered-stream capture, per-call rebinding,
+shadowing, transitive/formal forwarding, prematch/default/return scopes, recursion/depth refusal,
+conservative inline boundaries, and host/mesh Vquery source routes. A captured recursive query
+exported from a pure arena, then ran after source VM/AST destruction and Store reload with captured
+identity intact. Base-backed export still requires the separately unimplemented source binding. Real
+headless CLI checks returned `kept` through recursion and `first`, `second` after same-query
+rebinding. Independent Luna architecture and senior/profiler gates accepted this bounded stage.
+Repository formatting passed with clang-format 19; no runtime speedup or full-suite pass is claimed.
+
+This does not implement first-class functor/lambda capture ABI, native variadics, lazy field-default
+continuations, mutation-boundary contracts or the remaining route/lifecycle work. Full §4.12 remains
+incomplete.
+
+Logs: `/tmp/vql-capture-frames-build.log`, `/tmp/vql-capture-frames-tests.log`,
+`/tmp/vql-capture-frames-format.log`, `/tmp/vql-capture-frames-cli.log`,
+`/tmp/vql-capture-frames-rebind-cli.log`.

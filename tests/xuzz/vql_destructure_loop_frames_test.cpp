@@ -185,8 +185,7 @@ TEST(VQLDestructureLoopFrameTest, NoForLetAndPrefixLetRemainInFrameScope) {
   EXPECT_EQ(h.arena.asInt64(result->front()), 7);
 }
 
-TEST(VQLDestructureLoopFrameTest,
-     DestructureAndNamedLoopBindingsDoNotCaptureCallerAliases) {
+TEST(VQLDestructureLoopFrameTest, LoopBindingsDoNotShadowCallerCapturePorts) {
   Harness h;
   const CellRef alice = h.person("Alice");
   h.person("Bob");
@@ -198,7 +197,7 @@ TEST(VQLDestructureLoopFrameTest,
       "def pure after($people: Stream<Cell>): Cell := { "
       "for { +d.tag: $tag } in $people return $tag; return $tag; }; "
       "after($people)";
-  EXPECT_EQ(h.invokeCount(destructured, destructureBindings), 0u);
+  EXPECT_GT(h.invokeCount(destructured, destructureBindings), 0u);
   const auto destructuredResult = h.run(destructured, destructureBindings);
   ASSERT_TRUE(destructuredResult) << destructuredResult.error().message;
   EXPECT_EQ(*destructuredResult, (std::vector<CellRef>{callerTag}));
@@ -209,7 +208,7 @@ TEST(VQLDestructureLoopFrameTest,
   const std::string named =
       "def pure after($people: Stream<Cell>): Cell := { "
       "for $item in $people return $item; return $item; }; after($people)";
-  EXPECT_EQ(h.invokeCount(named, namedBindings), 0u);
+  EXPECT_GT(h.invokeCount(named, namedBindings), 0u);
   const auto namedResult = h.run(named, namedBindings);
   ASSERT_TRUE(namedResult) << namedResult.error().message;
   EXPECT_EQ(*namedResult, (std::vector<CellRef>{callerItem}));
@@ -220,7 +219,7 @@ TEST(VQLDestructureLoopFrameTest,
       "def pure after($people: Stream<Cell>): Cell := { "
       "for $item in $people let $later := $item return $later; "
       "return $later; }; after($people)";
-  EXPECT_EQ(h.invokeCount(afterLoopLet, letBindings), 0u);
+  EXPECT_GT(h.invokeCount(afterLoopLet, letBindings), 0u);
   const auto letResult = h.run(afterLoopLet, letBindings);
   ASSERT_TRUE(letResult) << letResult.error().message;
   EXPECT_EQ(*letResult, (std::vector<CellRef>{callerLater}));

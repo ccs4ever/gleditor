@@ -364,3 +364,16 @@ tests passed with independent Luna gates; see [iteration 19](projects/vortex-vm-
 Return-item/top-level grammar, legacy direct consumer routing, sealed normalized-stream artifacts,
 lazy field-default continuations, mutation contracts, free closures and remaining
 functor/variadic/lifecycle work still prevent §4.12 completion.
+
+## Caller-bound free captures in native frames
+
+Named definitions can receive free scalar/stream values through explicit hidden frame ports,
+including recursive and mutually recursive graphs. Callsite scope analysis preserves wrapper
+formals, prematch defaults, loop restoration, return-contract locals and caller-time rebinding.
+Required field-default aliases retain their missing/empty distinction. Functor/pipeline captures and
+lazy parameter defaults with unavailable required-field aliases remain on compiled inline paths.
+Full build and all 560 affected tests passed with independent Luna gates; pure-arena export and
+fresh-VM reload, real CLI recursion/rebinding and host/mesh source routes passed. See
+[iteration 20](projects/vortex-vm-only-iterations.md). First-class functor/lambda captures, native
+variadics, nonliteral field-default continuations, mutation contracts and remaining grammar/route/
+lifecycle work still prevent §4.12 completion.

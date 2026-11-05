@@ -373,7 +373,7 @@ TEST(VQLAdditiveVMTest, FramesCapturesDefaultsAndRealQueryBodiesUseNativeAdd) {
             {{"outside", {outside}}});
   ASSERT_TRUE(capture.compiled) << capture.error;
   ASSERT_TRUE(capture.executed) << capture.error;
-  EXPECT_EQ(capture.frameOps, 0u);
+  EXPECT_GT(capture.frameOps, 0u);
   ASSERT_EQ(capture.values.size(), 1u);
   EXPECT_EQ(h.arena.asInt64(capture.values.front()), 12);
 
