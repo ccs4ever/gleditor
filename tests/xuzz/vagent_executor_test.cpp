@@ -2599,6 +2599,42 @@ TEST(VagentExecutorTest, AskToAnUnansweredQuestionRepliesWithTheFault) {
   EXPECT_EQ(arena.outstandingMarks(), 0u);
 }
 
+TEST(VagentExecutorTest, AnswerOverThe32KiBBoundAnswersRemoteFault) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  // §7.1: the answer must fit 32 KiB — the wire's ActorSend value
+  // cap. A bigger inline result replies `remote_fault` rather than
+  // shipping a frame the adapter must refuse anyway.
+  const auto big = std::string(33 * 1024, 'x');
+  const auto image =
+      h.lower("module demo\nevent Tick\nevent Done\n"
+              "question big(): Str\n"
+              "goal Outer() perform\n"
+              "agent A {\n"
+              "  on Tick { adopt Outer() }\n"
+              "  answer big(): Str { \"" + big + "\" }\n"
+              "  plan o for Outer { ask self.big() within 9s; emit Done{} }\n"
+              "}");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  auto outbox =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  ASSERT_EQ(outbox.size(), 1u);
+  const auto requests = VagentExecutor::route(
+      arena, h.ctx.core, h.ctx.core.home(), outbox[0]);
+  ASSERT_EQ(requests.size(), 1u);
+  exec.deliver(arena, h.ctx.core, requests.front());
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+  outbox =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  ASSERT_EQ(outbox.size(), 2u);
+  EXPECT_EQ(outbox[1].kind, "answer");
+  EXPECT_EQ(outbox[1].fault, "remote_fault");
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
 TEST(VagentExecutorTest, AskWithAMalformedTermAnswersRemoteFault) {
   ExecutorHarness h;
   VagentExecutor exec;

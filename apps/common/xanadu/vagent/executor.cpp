@@ -1220,6 +1220,16 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
                       pred, "remote_fault");
           continue;
         }
+        // §7.1: the answer must fit 32 KiB — the ActorSend value cap.
+        // A structured answer already crosses as a ref handle, so the
+        // bound only bites on an inline string body; over it the
+        // reply is the same `remote_fault` a refusal earns.
+        if (const auto *text = std::get_if<std::string>(&*outcome.result);
+            text && text->size() > 32 * 1024) {
+          stageOutbox("answer", term, senderName, {}, noCell, requestId,
+                      pred, "remote_fault");
+          continue;
+        }
         // The produced value is marshaled as a bare cell — scalar or
         // text answers copy, a structured answer (a record term)
         // rides as the cell itself so the asker's `r.field` reads
