@@ -336,6 +336,10 @@ public:
   /// children, recursively); unification of variable-bearing patterns is
   /// the fragment-lowering path's job (§3.8's inlined clause walk).
   [[nodiscard]] bool believes(std::string_view predicate, CellRef term) const;
+  /// The same structural equality `believes` uses, for callers matching
+  /// marshaled terms outside the belief bank (the wake match's
+  /// structural `await price("oil", 4)`).
+  [[nodiscard]] bool termEquals(CellRef a, CellRef b) const;
   /// `believe`: append the fact clause — `+d.grab → term`, `+d.source →`
   /// a `{peer, turn}` record, `+d.evidence →` the journaled percept when
   /// supplied. Clause-bank bounds (`vagent.max_clauses_per_predicate`)

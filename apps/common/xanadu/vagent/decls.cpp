@@ -872,6 +872,13 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
     const auto sym = mintSymbol(name);
     signatures.emplace(name, decl.parameters);
     if (insideAgent && decl.kind != DeclKind::Predicate) mintHolder(sym);
+    // `await ready(x)` on a predicate is the belief form — it tests
+    // the bank rather than the journal. The grammar can't tell it
+    // from an event term, so the marker rides the symbol.
+    if (decl.kind == DeclKind::Predicate)
+      if (const auto rec = varsRecord(arena, core, sym, "symKind", true))
+        zigzag::expectWritten(arena.link(*rec, dims().values, DimVector::POS,
+                                         arena.makeCell("predicate")));
     // The goal's clauses lower to named Bool heads keyed off its vars
     // record — dropTest is §3.5's reconsideration boundary, succeedTest
     // the achieve-goal completion check, holdsTest the maintain

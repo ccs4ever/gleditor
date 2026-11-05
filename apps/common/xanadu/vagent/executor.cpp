@@ -481,12 +481,41 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       // resume, and the absolute deadline rides on the intention.
       // The marshaled event cell is shared step state — a second run
       // of this spine would find its binding evicted if the record
-      // edge-linked it. Text copy, same as ask's.
+      // edge-linked it. The name goes as a text copy; a term with
+      // +d.step children (AwaitTerm) also parks its ref so the wake
+      // match can compare fields structurally.
+      const auto structured =
+          !zigzag::rankAfter(arena, event, core.dims().step).empty();
+      // `await ready(x)` on a predicate is the belief form — it tests
+      // what the bank already holds, and a satisfied fact means no
+      // suspension at all (the guide's "tests what is already
+      // present"). symKind on the symbol is the only predicate-vs-
+      // event marker the grammar leaves behind.
+      bool beliefForm = false;
+      if (const auto sym =
+              eventSymbolNamed(arena, core, programRoot, arena.textOf(event)))
+        if (const auto rec = varsRecord(arena, core, *sym, "symKind", false))
+          if (const auto v =
+                  arena.linked(*rec, core.dims().values, DimVector::POS))
+            beliefForm = arena.textOf(*v) == "predicate";
+      if (beliefForm && meta.believes(arena.textOf(event), event)) return true;
       if (const auto rec =
               varsRecord(arena, core, intention, "awaitEvent", true))
         zigzag::expectWritten(arena.link(*rec, core.dims().values,
                                          DimVector::POS,
                                          arena.makeCell(arena.textOf(event))));
+      if (structured || beliefForm)
+        if (const auto rec =
+                varsRecord(arena, core, intention, "awaitTerm", true))
+          zigzag::expectWritten(arena.link(
+              *rec, core.dims().values, DimVector::POS,
+              arena.makeScalarCell(static_cast<std::int64_t>(event))));
+      if (beliefForm)
+        if (const auto rec =
+                varsRecord(arena, core, intention, "awaitForm", true))
+          zigzag::expectWritten(arena.link(*rec, core.dims().values,
+                                           DimVector::POS,
+                                           arena.makeCell("belief")));
       // `await X as g`: the bound name survives the park the same way
       // ask's result does — the wake match writes the fired event's
       // handle under it.
@@ -775,24 +804,68 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
           if (const auto v =
                   arena.linked(*rec, core.dims().values, DimVector::POS))
             corr = std::string{arena.textOf(*v)};
-        for (const CellRef percept :
-             zigzag::rankAfter(arena, agent, dims.seen)) {
-          if (arena.textOf(percept) != wanted) continue;
-          if (!corr.empty()) {
-            bool same = false;
-            if (const auto prec =
-                    varsRecord(arena, core, percept, "correlation", false))
-              if (const auto v =
-                      arena.linked(*prec, core.dims().values, DimVector::POS))
-                same = arena.textOf(*v) == corr;
-            if (!same) continue;
-          }
-          zigzag::expectWritten(
-              arena.link(intention, dims.evidence, DimVector::POS, percept));
-          matched   = true;
-          matchCell = percept;
-          break;
+        // A structural AwaitTerm parks its marshaled term as a scalar
+        // ref; the percept's `grab` ref carries the delivered
+        // envelope. A percept with no envelope compares as its own
+        // 0-child term, so `await Foo()` still matches name-only.
+        const auto awaitTerm = [&]() -> CellRef {
+          if (const auto rec =
+                  varsRecord(arena, core, intention, "awaitTerm", false))
+            if (const auto v =
+                    arena.linked(*rec, core.dims().values, DimVector::POS))
+              if (const auto r = arena.asInt64(*v))
+                return static_cast<CellRef>(*r);
+          return noCell;
+        }();
+        // The belief form's satisfaction set is the bank, not the
+        // journal: a matching fact clause is the wake's evidence.
+        bool beliefForm = false;
+        if (const auto rec =
+                varsRecord(arena, core, intention, "awaitForm", false))
+          if (const auto v =
+                  arena.linked(*rec, core.dims().values, DimVector::POS))
+            beliefForm = arena.textOf(*v) == "belief";
+        if (beliefForm && awaitTerm != noCell) {
+          for (const CellRef clause : meta.beliefsOf(arena.textOf(awaitTerm)))
+            if (const auto head =
+                    arena.linked(clause, core.dims().grab, DimVector::POS);
+                head && meta.termEquals(awaitTerm, *head)) {
+              zigzag::expectWritten(
+                  arena.link(intention, dims.evidence, DimVector::POS, clause));
+              matched   = true;
+              matchCell = clause;
+              break;
+            }
         }
+        if (!beliefForm)
+          for (const CellRef percept :
+               zigzag::rankAfter(arena, agent, dims.seen)) {
+            if (arena.textOf(percept) != wanted) continue;
+            if (awaitTerm != noCell) {
+              CellRef delivered = percept;
+              if (const auto rec =
+                      varsRecord(arena, core, percept, "grab", false))
+                if (const auto v =
+                        arena.linked(*rec, core.dims().values, DimVector::POS))
+                  if (const auto r = arena.asInt64(*v))
+                    delivered = static_cast<CellRef>(*r);
+              if (!meta.termEquals(awaitTerm, delivered)) continue;
+            }
+            if (!corr.empty()) {
+              bool same = false;
+              if (const auto prec =
+                      varsRecord(arena, core, percept, "correlation", false))
+                if (const auto v =
+                        arena.linked(*prec, core.dims().values, DimVector::POS))
+                  same = arena.textOf(*v) == corr;
+              if (!same) continue;
+            }
+            zigzag::expectWritten(
+                arena.link(intention, dims.evidence, DimVector::POS, percept));
+            matched   = true;
+            matchCell = percept;
+            break;
+          }
       }
       if (matched) {
         // awaitBind carries the `as g`/`r := ask` destination across
@@ -1142,6 +1215,16 @@ void VagentExecutor::deliver(zigzag::ArenaManifold &arena,
     if (const auto rec = varsRecord(arena, core, seen, "correlation", true))
       zigzag::expectWritten(arena.link(*rec, core.dims().values, DimVector::POS,
                                        arena.makeCell(delivery.correlation)));
+  // The term envelope rides as a scalar ref — the durable record of
+  // what the percept carried. AwaitTerm is belief-form (the checker's
+  // term() requires a predicate), so nothing consumes it today; the
+  // schema is what a future field-matching event await reads.
+  if (delivery.payloadCell != noCell)
+    if (const auto rec = varsRecord(arena, core, seen, "grab", true))
+      zigzag::expectWritten(
+          arena.link(*rec, core.dims().values, DimVector::POS,
+                     arena.makeScalarCell(
+                         static_cast<std::int64_t>(delivery.payloadCell))));
   journalAppend(arena, delivery.agent, seen, core.findOrMintDimension("d.seen"),
                 static_cast<std::size_t>(setting("vagent.journal_size", 64)));
   const auto pending = core.findOrMintDimension("d.pending");

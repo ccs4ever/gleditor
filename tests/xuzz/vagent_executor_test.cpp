@@ -899,6 +899,96 @@ TEST(VagentExecutorTest, AwaitAsBindsTheFiredPerceptAgentSide) {
   EXPECT_EQ(arena.outstandingMarks(), 0u);
 }
 
+TEST(VagentExecutorTest, BeliefAwaitTestsTheBankAndWakesOnTheFact) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image =
+      h.lower("module demo\nevent Tick\nevent Done\n"
+              "predicate price(item: Str, qty: Int)\n"
+              "goal Work() perform\n"
+              "agent A {\n"
+              "  on Tick { adopt Work() }\n"
+              "  plan w for Work { await price(\"oil\", 4) within 9s;\n"
+              "                    emit Done{} }\n"
+              "}");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+
+  // Tick parks the intention — the price bank is empty.
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  const auto intentionDim = h.ctx.core.findOrMintDimension("d.intention");
+  const auto parked = zigzag::rankAfter(arena, image->agentCell, intentionDim) |
+                      std::ranges::to<std::vector>();
+  ASSERT_EQ(parked.size(), 1u);
+
+  // A price("oil", 5) fact doesn't satisfy the structural match —
+  // the marshal's own tell-term minting makes the delivered cell.
+  const auto tell = [&](std::string_view qty) {
+    const auto term = arena.makeCell("price");
+    zigzag::expectWritten(arena.link(
+        zigzag::rankTail(arena, term, h.ctx.core.dims().step),
+        h.ctx.core.dims().step, DimVector::POS, arena.makeCell("oil")));
+    zigzag::expectWritten(
+        arena.link(zigzag::rankTail(arena, term, h.ctx.core.dims().step),
+                   h.ctx.core.dims().step, DimVector::POS,
+                   arena.makeCell(std::string{qty})));
+    exec.deliver(arena, h.ctx.core,
+                 Delivery{.agent       = image->agentCell,
+                          .kind        = "tell",
+                          .payloadCell = term,
+                          .sender      = image->agentCell});
+  };
+  tell("5");
+  ASSERT_TRUE(exec(h.execution(std::nullopt), h.ctx));
+  EXPECT_TRUE(zigzag::rankAfter(arena, image->agentCell,
+                                h.ctx.core.findOrMintDimension("d.outbox"))
+                  .empty());
+
+  // The matching fact wakes the park into the emit — receiver-side
+  // belief assertion and the belief-form scan run in the same settle.
+  tell("4");
+  ASSERT_TRUE(exec(h.execution(std::nullopt), h.ctx));
+  const auto out =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  ASSERT_EQ(out.size(), 1u);
+  EXPECT_EQ(out.front().payload, "Done");
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
+TEST(VagentExecutorTest, BeliefAwaitSatisfiedImmediatelyNeverParks) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image =
+      h.lower("module demo\nevent Tick\nevent Done\n"
+              "predicate price(item: Str, qty: Int)\n"
+              "goal Work() perform\n"
+              "agent A {\n"
+              "  on Tick { believe price(\"oil\", 4); adopt Work() }\n"
+              "  plan w for Work { await price(\"oil\", 4) within 9s;\n"
+              "                    emit Done{} }\n"
+              "}");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+
+  // The handler's believe asserts the fact; the adopted plan's await
+  // step sees it in the Tick settle and advances without parking —
+  // but §3.5's one-member-per-settle stepping means the emit rides
+  // the next settle.
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  EXPECT_TRUE(zigzag::rankAfter(arena, image->agentCell,
+                                h.ctx.core.findOrMintDimension("d.outbox"))
+                  .empty());
+  ASSERT_TRUE(exec(h.execution(std::nullopt), h.ctx));
+  const auto out =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  ASSERT_EQ(out.size(), 1u);
+  EXPECT_EQ(out.front().payload, "Done");
+  EXPECT_TRUE(zigzag::rankAfter(arena, image->agentCell,
+                                h.ctx.core.findOrMintDimension("d.intention"))
+                  .empty());
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
 TEST(VagentExecutorTest, BoundAskWakesOnDeliveredAnswerAndBindsIt) {
   ExecutorHarness h;
   VagentExecutor exec;

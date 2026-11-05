@@ -858,6 +858,10 @@ bool MetaRuntime::believes(std::string_view predicate, CellRef term) const {
   return false;
 }
 
+bool MetaRuntime::termEquals(CellRef a, CellRef b) const {
+  return beliefTermEquals(core_.arena(), core_.dims().step, a, b);
+}
+
 std::expected<CellRef, std::string>
 MetaRuntime::believe(std::string_view predicate, CellRef term, CellRef peer,
                      std::int64_t turn, std::optional<CellRef> evidence) {
