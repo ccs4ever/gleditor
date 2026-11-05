@@ -155,6 +155,60 @@ TEST(VagentExecutorTest, PendingEventsDrainDuringSettleWithoutJournaling) {
   EXPECT_EQ(arena.outstandingMarks(), 0u);
 }
 
+TEST(VagentExecutorTest, HostVerbStatementRunsThroughTheSegmentSpine) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image =
+      h.lower("module demo\nevent Tick\npredicate weather(s: Str)\n"
+              "agent A { on Tick { believe weather(\"cloudy\") } }");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+
+  // The clause carries a +d.step spine: one host-step member.
+  const auto step   = h.ctx.core.dims().step;
+  const auto clause = [&]() -> CellRef {
+    for (const CellRef module :
+         zigzag::rankAfter(arena, h.ctx.core.home(), h.ctx.core.dims().stdlib))
+      for (const CellRef sym :
+           zigzag::rankAfter(arena, module, h.ctx.core.dims().vars))
+        if (arena.textOf(sym) == "Tick")
+          return *zigzag::rankAfter(arena, sym, h.ctx.core.dims().clause)
+                      .begin();
+    return zigzag::noCell;
+  }();
+  ASSERT_NE(clause, zigzag::noCell);
+  const auto spine =
+      zigzag::rankAfter(arena, clause, step) | std::ranges::to<std::vector>();
+  ASSERT_EQ(spine.size(), 1u);
+  const auto verbDim  = h.ctx.core.findOrMintDimension("d.verb");
+  const auto verbCell = arena.linked(spine[0], verbDim, DimVector::POS);
+  ASSERT_TRUE(verbCell.has_value());
+  EXPECT_EQ(arena.textOf(*verbCell), "believe");
+
+  const auto outcome = exec(h.execution("Tick"), h.ctx);
+  ASSERT_TRUE(outcome) << static_cast<int>(outcome.error());
+
+  // The host step ran between segments: the weather bank holds
+  // weather(cloudy), and the journal still saw the percept.
+  auto binds =
+      mintMetaBindSet(arena, h.ctx.core, h.ctx.core.home(), image->agentCell);
+  ASSERT_TRUE(binds) << binds.error();
+  MetaRuntime meta(h.ctx.core, h.ctx.vm, *binds);
+  const auto bank = meta.beliefBank("weather");
+  ASSERT_TRUE(bank.has_value());
+  const auto facts = meta.beliefsOf("weather");
+  ASSERT_EQ(facts.size(), 1u);
+  const auto grab =
+      arena.linked(facts[0], h.ctx.core.dims().grab, DimVector::POS);
+  ASSERT_TRUE(grab.has_value());
+  EXPECT_EQ(arena.textOf(*grab), "weather");
+  const auto arg =
+      zigzag::rankAfter(arena, *grab, step) | std::ranges::to<std::vector>();
+  ASSERT_EQ(arg.size(), 1u);
+  EXPECT_EQ(arena.textOf(arg[0]), "cloudy");
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
 // -- §3.1/§3.8 belief store: predicate banks, provenance, the four verbs ------
 
 TEST(VagentBeliefTest, BelieveBelievesForgetReviseRoundTrip) {

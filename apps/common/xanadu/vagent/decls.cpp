@@ -177,6 +177,171 @@ struct Lowerer {
     return clause;
   }
 
+  // -- §3.8 host steps: statement-position verbs lower as spine cells ---------
+
+  // The kinds that become host steps in M2 — believe/forget/revise.
+  // Everything else statement-side stays on the single-fragment path
+  // (Emit/Tell/… need marshal machinery M4 brings, so a Block mixing
+  // them still refuses through the stub-head fallback).
+  static bool isHostVerb(ExprKind kind) {
+    switch (kind) {
+    case ExprKind::Believe:
+    case ExprKind::Forget:
+    case ExprKind::Revise:
+      return true;
+    default:
+      return false;
+    }
+  }
+
+  // Any host-verb statement among the body's top level (a bare verb as
+  // the whole body counts as a one-member spine).
+  static bool bodyHasHostVerb(const Expr &body) {
+    if (body.kind == ExprKind::Block) {
+      for (const auto &child : body.children)
+        if (isHostVerb(child->kind)) return true;
+      return false;
+    }
+    return isHostVerb(body.kind);
+  }
+
+  // A `+d.grab`-shaped term cell: functor name as content, args on
+  // +d.step. V1 marshals ground terms only — LogicVariable patterns
+  // (forget's `?x`) need unification, which is the fragment-position
+  // clause-walk's job, not the host step's.
+  std::expected<CellRef, Diagnostic> marshalTerm(const Expr &expr) {
+    switch (expr.kind) {
+    case ExprKind::Term: {
+      const auto cell = arena.makeCell(expr.text);
+      for (const auto &child : expr.children) {
+        auto arg = marshalTerm(*child);
+        if (!arg) return arg;
+        zigzag::expectWritten(
+            arena.link(zigzag::rankTail(arena, cell, dims().step), dims().step,
+                       DimVector::POS, *arg));
+      }
+      return cell;
+    }
+    case ExprKind::String:
+    case ExprKind::Integer:
+    case ExprKind::Float:
+    case ExprKind::Boolean:
+      // Literals marshal as text cells so the host-side term walk's
+      // textOf equality covers them — scalar cells would need a
+      // value-typed compare the V1 walker doesn't carry.
+      return arena.makeCell(expr.text);
+    default:
+      return std::unexpected(Diagnostic{
+          DiagnosticCode::InvalidPosition,
+          std::format("host-step term argument does not lower: kind {}",
+                      static_cast<int>(expr.kind)),
+          expr.loc});
+    }
+  }
+
+  // The host-step cell: +d.verb names the MetaRuntime entry point, the
+  // +d.vars record marshals the call's arguments under their parameter
+  // names — for the belief verbs that is exactly `term`. Peer and
+  // assertion turn are implicit, supplied by the executor at run time.
+  std::expected<CellRef, Diagnostic> mintHostStep(const Expr &expr) {
+    std::string_view verb;
+    switch (expr.kind) {
+    case ExprKind::Believe:
+      verb = "believe";
+      break;
+    case ExprKind::Forget:
+      verb = "forget";
+      break;
+    case ExprKind::Revise:
+      verb = "revise";
+      break;
+    default:
+      return std::unexpected(Diagnostic{DiagnosticCode::InvalidPosition,
+                                        "statement is not a host verb",
+                                        expr.loc});
+    }
+    if (expr.children.empty())
+      return std::unexpected(Diagnostic{DiagnosticCode::InvalidPosition,
+                                        std::format("{} carries no term", verb),
+                                        expr.loc});
+    auto term = marshalTerm(*expr.children.front());
+    if (!term) return term;
+
+    const auto step = arena.makeCell();
+    zigzag::expectWritten(arena.link(step, verbDim(), DimVector::POS,
+                                     arena.makeCell(std::string{verb})));
+    if (const auto rec = varsRecord(arena, core, step, "term", true))
+      zigzag::expectWritten(
+          arena.link(*rec, dims().values, DimVector::POS, *term));
+    return step;
+  }
+
+  DimRef verbDim() {
+    if (verbDim_ == zigzag::noCell)
+      verbDim_ = core.findOrMintDimension("d.verb");
+    return verbDim_;
+  }
+  DimRef verbDim_{zigzag::noCell};
+
+  // Split the body at host-verb statements: each run of ordinary
+  // statements lowers to one fragment segment, each verb to a host
+  // step, and the sequence lands on clause +d.step — the spine the
+  // executor walks (§3.5's resumable-graph shape; the $step resume
+  // index itself is M4's intention machinery). `+d.spin` keeps a
+  // descriptor-bearing head on top for signatureOf.
+  void emitSpine(const Decl &decl, CellRef clause,
+                 const std::vector<Parameter> &params,
+                 std::string_view clauseName) {
+    std::vector<const Expr *> statements;
+    if (decl.body->kind == ExprKind::Block)
+      for (const auto &child : decl.body->children)
+        statements.push_back(child.get());
+    else
+      statements.push_back(decl.body.get());
+
+    std::size_t member    = 0;
+    const auto linkMember = [&](CellRef cell) {
+      zigzag::expectWritten(
+          arena.link(zigzag::rankTail(arena, clause, dims().step), dims().step,
+                     DimVector::POS, cell));
+      ++member;
+    };
+
+    std::vector<const Expr *> run;
+    const auto flushRun = [&]() {
+      if (run.empty()) return;
+      Expr segment;
+      segment.kind = ExprKind::Block;
+      segment.loc  = decl.loc;
+      for (const auto *stmt : run) segment.children.push_back(cloneExpr(*stmt));
+      run.clear();
+      auto head =
+          emitDeclHead(decl, segment, params,
+                       std::format("{}:seg{}", label(clauseName), member),
+                       Type{"()"}, false);
+      if (head) {
+        linkMember(*head);
+      } else {
+        errors.push_back(head.error());
+      }
+    };
+
+    for (const auto *stmt : statements) {
+      if (isHostVerb(stmt->kind)) {
+        flushRun();
+        auto step = mintHostStep(*stmt);
+        if (step) {
+          linkMember(*step);
+        } else {
+          errors.push_back(step.error());
+        }
+      } else {
+        run.push_back(stmt);
+      }
+    }
+    flushRun();
+  }
+
   std::vector<Parameter> paramsOf(const Decl &decl, std::string_view host) {
     if (const auto it = signatures.find(std::string{host});
         it != signatures.end())
@@ -246,7 +411,12 @@ void Lowerer::lowerClauseBody(const Decl &decl, CellRef host,
     errors.push_back(body.error());
     return;
   }
-  mintClause(host, clauseName, *test, *body, decl.priority);
+  const auto clause = mintClause(host, clauseName, *test, *body, decl.priority);
+  // A body with statement-position verbs gets the segment spine
+  // alongside its spin head — the executor prefers +d.step when the
+  // rank is non-empty (§3.8).
+  if (decl.body && bodyHasHostVerb(*decl.body))
+    emitSpine(decl, clause, params, clauseName);
 }
 
 void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {

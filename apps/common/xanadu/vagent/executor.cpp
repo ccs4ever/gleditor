@@ -173,10 +173,63 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
   // symbol's +d.clause bank runs — M0 clauses through their +d.spin
   // head directly, learn-clause graphs lacking the descriptor through
   // body_of's session wrapper. False means a refusal — the turn faults.
+
+  // §3.8 host step: +d.verb names the MetaRuntime entry, +d.vars holds
+  // the marshaled args. Peer and turn are implicit — a belief an agent
+  // asserts is asserted by that agent on that turn.
+  const auto runHostStep = [&](CellRef step) -> bool {
+    const auto verbCell = arena.linked(step, dims.verb, DimVector::POS);
+    if (!verbCell) return false;
+    const auto verb = arena.textOf(*verbCell);
+    CellRef term    = noCell;
+    if (const auto rec = varsRecord(arena, core, step, "term", false))
+      if (const auto value =
+              arena.linked(*rec, core.dims().values, DimVector::POS))
+        term = *value;
+    if (term == noCell) return false;
+    const auto pred = arena.textOf(term);
+    if (verb == "believe")
+      return meta.believe(pred, term, agent, turn).has_value();
+    if (verb == "forget") {
+      // forget is infallible — zero matches is a legal no-op.
+      (void)meta.forget(pred, term);
+      return true;
+    }
+    if (verb == "revise") {
+      // The language's revise takes one term: the predicate's bank
+      // becomes exactly that fact — clear then assert.
+      for (const CellRef clause : meta.beliefsOf(pred))
+        unlinkRank(arena, clause, core.dims().clause);
+      return meta.believe(pred, term, agent, turn).has_value();
+    }
+    return false;
+  };
+
+  // A clause carrying +d.step members runs its §3.5 segment spine:
+  // fragment members through runFragment, host-step cells through the
+  // verb table — in order, inside m0.
+  const auto runSpine = [&](CellRef clause) -> bool {
+    for (const CellRef member :
+         zigzag::rankAfter(arena, clause, core.dims().step)) {
+      if (arena.linked(member, dims.verb, DimVector::POS).has_value()) {
+        if (!runHostStep(member)) return false;
+      } else {
+        const auto outcome =
+            meta.runFragment(member, {}, exec.cursor, maxCycles);
+        if (outcome.refusal != MetaRunOutcome::Refusal::None) return false;
+      }
+    }
+    return true;
+  };
+
   auto dispatchEvent = [&](std::string_view name) -> bool {
     const auto eventSym = eventSymbolNamed(arena, core, programRoot, name);
     if (!eventSym) return true;
     for (const CellRef clause : meta.clausesOf(*eventSym)) {
+      if (!zigzag::rankAfter(arena, clause, core.dims().step).empty()) {
+        if (!runSpine(clause)) return false;
+        continue;
+      }
       const auto spin = arena.linked(clause, core.dims().spin, DimVector::POS);
       if (!spin) continue;
       auto outcome = meta.runFragment(*spin, {}, exec.cursor, maxCycles);
