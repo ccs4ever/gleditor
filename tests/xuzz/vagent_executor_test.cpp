@@ -8,6 +8,7 @@
 #include "../../apps/common/xanadu/vagent/decls.hpp"
 #include "../../apps/common/xanadu/vagent/executor.hpp"
 #include "../../apps/common/xanadu/vagent/frontend.hpp"
+#include "../../apps/common/xanadu/vagent/meta.hpp"
 #include "../../apps/common/xanadu/vagent/records.hpp"
 
 namespace {
@@ -126,6 +127,123 @@ TEST(VagentExecutorTest, NoAgentCellIsATurnFault) {
   EXPECT_FALSE(outcome);
   EXPECT_EQ(outcome.error(), zigzag::vortex::mesh::ActorError::ExecutionFailed);
   EXPECT_EQ(h.ctx.arena.outstandingMarks(), 0u);
+}
+
+// -- §3.1/§3.8 belief store: predicate banks, provenance, the four verbs ------
+
+TEST(VagentBeliefTest, BelieveBelievesForgetReviseRoundTrip) {
+  ExecutorHarness h;
+  const auto image =
+      h.lower("module demo\nevent Tick\nagent A { on Tick { } }");
+  ASSERT_TRUE(image);
+  auto binds = mintMetaBindSet(h.ctx.arena, h.ctx.core, h.ctx.core.home(),
+                               image->agentCell);
+  ASSERT_TRUE(binds) << binds.error();
+  MetaRuntime meta(h.ctx.core, h.ctx.vm, *binds);
+
+  auto &arena     = h.ctx.arena;
+  const auto wet  = arena.makeCell("cloudy");
+  const auto dry  = arena.makeCell("sunny");
+  const auto peer = arena.makeCell("peer-a");
+
+  const auto clause = meta.believe("weather", wet, peer, 7);
+  ASSERT_TRUE(clause) << clause.error();
+  EXPECT_TRUE(meta.believes("weather", wet));
+  EXPECT_FALSE(meta.believes("weather", dry));
+  EXPECT_EQ(meta.beliefsOf("weather").size(), 1u);
+
+  // §3.1 shape: the clause sits on the bank's +d.clause rank with
+  // +d.grab → term and +d.source → the {peer, turn} record.
+  const auto bank = meta.beliefBank("weather");
+  ASSERT_TRUE(bank.has_value());
+  EXPECT_EQ(arena.textOf(*bank), "weather");
+  const auto grab =
+      arena.linked(*clause, h.ctx.core.dims().grab, DimVector::POS);
+  ASSERT_TRUE(grab.has_value());
+  EXPECT_EQ(*grab, wet);
+  const auto sourceDim = h.ctx.core.findDimension("d.source");
+  ASSERT_TRUE(sourceDim.has_value());
+  const auto source = arena.linked(*clause, *sourceDim, DimVector::POS);
+  ASSERT_TRUE(source.has_value());
+  const auto peerSlot = varsRecord(arena, h.ctx.core, *source, "peer", false);
+  ASSERT_TRUE(peerSlot.has_value());
+  EXPECT_EQ(arena.linked(*peerSlot, h.ctx.core.dims().values, DimVector::POS),
+            std::optional{peer});
+  const auto turnSlot = varsRecord(arena, h.ctx.core, *source, "turn", false);
+  ASSERT_TRUE(turnSlot.has_value());
+  const auto turnCell =
+      arena.linked(*turnSlot, h.ctx.core.dims().values, DimVector::POS);
+  ASSERT_TRUE(turnCell.has_value());
+  EXPECT_EQ(arena.asInt64(*turnCell), 7);
+
+  // forget unlinks the matching clause; revise swaps the term in one call.
+  EXPECT_EQ(meta.forget("weather", wet), 1u);
+  EXPECT_FALSE(meta.believes("weather", wet));
+  ASSERT_TRUE(meta.believe("weather", wet, peer, 8));
+  ASSERT_TRUE(meta.revise("weather", wet, dry, peer, 9));
+  EXPECT_FALSE(meta.believes("weather", wet));
+  EXPECT_TRUE(meta.believes("weather", dry));
+  EXPECT_EQ(meta.beliefsOf("weather").size(), 1u);
+}
+
+TEST(VagentBeliefTest, CompoundTermsMatchStructurallyNotByIdentity) {
+  ExecutorHarness h;
+  const auto image =
+      h.lower("module demo\nevent Tick\nagent A { on Tick { } }");
+  ASSERT_TRUE(image);
+  auto binds = mintMetaBindSet(h.ctx.arena, h.ctx.core, h.ctx.core.home(),
+                               image->agentCell);
+  ASSERT_TRUE(binds) << binds.error();
+  MetaRuntime meta(h.ctx.core, h.ctx.vm, *binds);
+
+  auto &arena     = h.ctx.arena;
+  const auto step = h.ctx.core.dims().step;
+  // Two distinct cells encoding the same functor tree threat(fang).
+  const auto makeTerm = [&]() {
+    const auto t = arena.makeCell("threat");
+    zigzag::expectWritten(
+        arena.link(t, step, DimVector::POS, arena.makeCell("fang")));
+    return t;
+  };
+  const auto first = makeTerm();
+  const auto twin  = makeTerm();
+  const auto other = [&]() {
+    const auto t = arena.makeCell("threat");
+    zigzag::expectWritten(
+        arena.link(t, step, DimVector::POS, arena.makeCell("swarm")));
+    return t;
+  }();
+  const auto peer = arena.makeCell("peer-a");
+
+  ASSERT_TRUE(meta.believe("alert", first, peer, 1));
+  EXPECT_TRUE(meta.believes("alert", twin));
+  EXPECT_FALSE(meta.believes("alert", other));
+  // Equality is order- and arity-sensitive.
+  EXPECT_EQ(meta.forget("alert", other), 0u);
+  EXPECT_EQ(meta.forget("alert", twin), 1u);
+}
+
+TEST(VagentBeliefTest, EvidenceEdgeLinksTheJournaledPercept) {
+  ExecutorHarness h;
+  const auto image =
+      h.lower("module demo\nevent Tick\nagent A { on Tick { } }");
+  ASSERT_TRUE(image);
+  auto binds = mintMetaBindSet(h.ctx.arena, h.ctx.core, h.ctx.core.home(),
+                               image->agentCell);
+  ASSERT_TRUE(binds) << binds.error();
+  MetaRuntime meta(h.ctx.core, h.ctx.vm, *binds);
+
+  auto &arena        = h.ctx.arena;
+  const auto term    = arena.makeCell("rain");
+  const auto peer    = arena.makeCell("peer-b");
+  const auto percept = arena.makeCell("percept:1");
+
+  const auto clause = meta.believe("weather", term, peer, 3, percept);
+  ASSERT_TRUE(clause) << clause.error();
+  const auto evidenceDim = h.ctx.core.findDimension("d.evidence");
+  ASSERT_TRUE(evidenceDim.has_value());
+  EXPECT_EQ(arena.linked(*clause, *evidenceDim, DimVector::POS),
+            std::optional{percept});
 }
 
 } // namespace

@@ -311,6 +311,47 @@ public:
          std::optional<CellRef> cursor = std::nullopt,
          std::size_t maxCycles         = 100'000);
 
+  // -- The belief store (actor-executor §3.1/§3.8)
+  // ------------------------------
+  //
+  // Facts are clause cells on a `d.belief` predicate bank — the same
+  // shape the event/goal clause banks use: `agent +d.belief → predicate
+  // cell +d.clause → fact`, the fact's head term on `+d.grab`, provenance
+  // on `+d.source` (a {peer, turn} record), an optional `+d.evidence`
+  // edge to the journaled percept. These are the §3.8 host-routine
+  // verbs: the statement-position `believes`/`believe`/`forget`/`revise`
+  // call them by name; the fragment-position inlined clause-walk is the
+  // compiler's lowering, not duplicated here.
+
+  /// The predicate cell on the agent's `+d.belief` rank whose content is
+  /// @p predicate, minted on miss when @p mint.
+  [[nodiscard]] std::optional<CellRef> beliefBank(std::string_view predicate,
+                                                  bool mint = false);
+  /// The fact clauses on @p predicate's bank — the bank's `+d.clause` rank.
+  [[nodiscard]] std::vector<CellRef>
+  beliefsOf(std::string_view predicate) const;
+  /// `believes`: a fact on the bank whose `+d.grab` term equals @p term.
+  /// V1 matching is structural term equality (content + `+d.step`
+  /// children, recursively); unification of variable-bearing patterns is
+  /// the fragment-lowering path's job (§3.8's inlined clause walk).
+  [[nodiscard]] bool believes(std::string_view predicate, CellRef term) const;
+  /// `believe`: append the fact clause — `+d.grab → term`, `+d.source →`
+  /// a `{peer, turn}` record, `+d.evidence →` the journaled percept when
+  /// supplied. Clause-bank bounds (`vagent.max_clauses_per_predicate`)
+  /// are the caller's to enforce — the verb has no settings channel.
+  [[nodiscard]] std::expected<CellRef, std::string>
+  believe(std::string_view predicate, CellRef term, CellRef peer,
+          std::int64_t turn, std::optional<CellRef> evidence = std::nullopt);
+  /// `forget`: unlink every fact clause whose `+d.grab` term equals
+  /// @p term; the unlinked count comes back.
+  [[nodiscard]] std::size_t forget(std::string_view predicate, CellRef term);
+  /// `revise`: forget the old term, believe the new — same clause
+  /// contract, one call.
+  [[nodiscard]] std::expected<CellRef, std::string>
+  revise(std::string_view predicate, CellRef oldTerm, CellRef newTerm,
+         CellRef peer, std::int64_t turn,
+         std::optional<CellRef> evidence = std::nullopt);
+
   /// `reify(c)`'s recipe replay (§6.1): walks the head's `+d.recipe`
   /// chain — `(from, dim, dir, to)` tuples anchored on the `+d.name`-
   /// bearing `dim` member, literal-content members, `+d.refFor` ref-

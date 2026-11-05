@@ -16,15 +16,32 @@ using zigzag::vortex::WorkerContext;
 using zigzag::vortex::mesh::ActorError;
 using zigzag::vortex::mesh::ActorExecution;
 
-/// The agent cell reachable on the actor's image: the M0 directory —
+/// The dims the turn walks — every one resolved *before* the base CP:
+/// a mint under a live mark is the P17 desync the pre-mark block exists
+/// to prevent (§3.2; `findOrMintDimension` files the `d.dims` rank, and
+/// even a trailed mint rolls back on `release(m0)`, leaving a DimRef
+/// the next turn resolves to a fresh cell).
+struct ExecutorDims {
+  DimRef dirs{noCell};
+  DimRef agents{noCell};
+  DimRef seen{noCell};
+  DimRef belief{noCell};
+  DimRef source{noCell};
+  DimRef evidence{noCell};
+  DimRef pending{noCell};
+  DimRef verb{noCell};
+  DimRef intention{noCell};
+  DimRef subgoal{noCell};
+  DimRef outbox{noCell};
+};
+
 /// `home +d.dirs → directory +d.agents → agent` — walked, never cached,
 /// so the read survives re-genesis.
 [[nodiscard]] std::optional<CellRef>
-agentCellOf(zigzag::ArenaManifold &arena, zigzag::vortex::VortexCore &core) {
-  const auto dirs   = core.findOrMintDimension("d.dirs");
-  const auto agents = core.findOrMintDimension("d.agents");
-  for (const CellRef dir : zigzag::rankAfter(arena, core.home(), dirs))
-    for (const CellRef agent : zigzag::rankAfter(arena, dir, agents))
+agentCellOf(zigzag::ArenaManifold &arena, zigzag::vortex::VortexCore &core,
+            const ExecutorDims &dims) {
+  for (const CellRef dir : zigzag::rankAfter(arena, core.home(), dims.dirs))
+    for (const CellRef agent : zigzag::rankAfter(arena, dir, dims.agents))
       return agent;
   return std::nullopt;
 }
@@ -45,10 +62,8 @@ eventSymbolNamed(zigzag::ArenaManifold &arena, zigzag::vortex::VortexCore &core,
 /// Append @p entry to the agent's +d.seen journal and drop the oldest
 /// heads while the rank exceeds @p bound — the ringrank's bounded form
 /// (§3.1's percept journal; provenance +d.evidence edges are M2).
-void journalAppend(zigzag::ArenaManifold &arena,
-                   zigzag::vortex::VortexCore &core, CellRef agent,
-                   CellRef entry, std::size_t bound) {
-  const auto seen = core.findOrMintDimension("d.seen");
+void journalAppend(zigzag::ArenaManifold &arena, CellRef agent, CellRef entry,
+                   DimRef seen, std::size_t bound) {
   zigzag::expectWritten(arena.link(zigzag::rankTail(arena, agent, seen), seen,
                                    DimVector::POS, entry));
   const auto members =
@@ -79,9 +94,24 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
   // Everything that mints dims or resolves the bind set happens before
   // any mark: arenaDims_ is untrailed (meta.hpp's P17 hazard), and
   // mintMetaBindSet refuses while marks are outstanding.
+  // The whole vocabulary the actor language walks resolves here —
+  // the M2+ dims come pre-filed so no verb ever mints one under m0.
+  ExecutorDims dims;
+  dims.dirs      = core.findOrMintDimension("d.dirs");
+  dims.agents    = core.findOrMintDimension("d.agents");
+  dims.seen      = core.findOrMintDimension("d.seen");
+  dims.belief    = core.findOrMintDimension("d.belief");
+  dims.source    = core.findOrMintDimension("d.source");
+  dims.evidence  = core.findOrMintDimension("d.evidence");
+  dims.pending   = core.findOrMintDimension("d.pending");
+  dims.verb      = core.findOrMintDimension("d.verb");
+  dims.intention = core.findOrMintDimension("d.intention");
+  dims.subgoal   = core.findOrMintDimension("d.subgoal");
+  dims.outbox    = core.findOrMintDimension("d.outbox");
+
   MetaBindSet binds;
   const CellRef programRoot = core.home();
-  if (const auto agent = agentCellOf(arena, core); agent) {
+  if (const auto agent = agentCellOf(arena, core, dims); agent) {
     if (auto minted = mintMetaBindSet(arena, core, programRoot, *agent)) {
       binds = std::move(*minted);
       // The agent's own module: the first +d.stdlib member — the same
@@ -137,7 +167,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
   MetaRuntime meta(core, vm, binds);
   if (exec.message) {
     const std::string &eventName = exec.message->value;
-    journalAppend(arena, core, agent, arena.makeCell(eventName),
+    journalAppend(arena, agent, arena.makeCell(eventName), dims.seen,
                   static_cast<std::size_t>(setting("vagent.journal_size", 64)));
     const auto eventSym = eventSymbolNamed(arena, core, programRoot, eventName);
     if (eventSym) {

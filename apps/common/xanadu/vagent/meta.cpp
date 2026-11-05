@@ -800,6 +800,127 @@ MetaRunOutcome MetaRuntime::runFragment(CellRef head,
 }
 
 // ---------------------------------------------------------------------------
+// The belief store — §3.1 predicate banks, §3.8 host-routine verbs
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// `d.grab`-term equality: identical content plus pairwise `+d.step`
+/// children — atoms and functor trees alike. Unification over
+/// variable-bearing patterns is the inlined clause-walk's job (§3.8);
+/// the host verb stays on the decidable fragment.
+bool beliefTermEquals(zigzag::ArenaManifold &arena, DimRef step, CellRef a,
+                      CellRef b) {
+  if (arena.textOf(a) != arena.textOf(b)) return false;
+  const auto aChildren =
+      std::ranges::to<std::vector>(zigzag::rankAfter(arena, a, step));
+  const auto bChildren =
+      std::ranges::to<std::vector>(zigzag::rankAfter(arena, b, step));
+  if (aChildren.size() != bChildren.size()) return false;
+  for (std::size_t i = 0; i < aChildren.size(); ++i)
+    if (!beliefTermEquals(arena, step, aChildren[i], bChildren[i]))
+      return false;
+  return true;
+}
+
+} // namespace
+
+std::optional<CellRef> MetaRuntime::beliefBank(std::string_view predicate,
+                                               bool mint) {
+  if (binds_.agentCell == noCell) return std::nullopt;
+  auto &arena    = core_.arena();
+  const auto dim = core_.findOrMintDimension("d.belief");
+  for (const auto bank : zigzag::rankAfter(arena, binds_.agentCell, dim))
+    if (arena.textOf(bank) == predicate) return bank;
+  if (!mint) return std::nullopt;
+  const auto bank = arena.makeCell(std::string(predicate));
+  zigzag::expectWritten(arena.link(bank, dim, Negward, binds_.agentCell));
+  return bank;
+}
+
+std::vector<CellRef> MetaRuntime::beliefsOf(std::string_view predicate) const {
+  const auto bank = const_cast<MetaRuntime *>(this)->beliefBank(predicate);
+  if (!bank.has_value()) return {};
+  return std::ranges::to<std::vector>(
+      zigzag::rankAfter(core_.arena(), *bank, core_.dims().clause));
+}
+
+bool MetaRuntime::believes(std::string_view predicate, CellRef term) const {
+  auto &arena     = core_.arena();
+  const auto grab = core_.dims().grab;
+  const auto step = core_.dims().step;
+  for (const auto clause : beliefsOf(predicate)) {
+    const auto head = arena.linked(clause, grab, Posward);
+    if (head.has_value() && beliefTermEquals(arena, step, *head, term))
+      return true;
+  }
+  return false;
+}
+
+std::expected<CellRef, std::string>
+MetaRuntime::believe(std::string_view predicate, CellRef term, CellRef peer,
+                     std::int64_t turn, std::optional<CellRef> evidence) {
+  auto &arena     = core_.arena();
+  const auto bank = beliefBank(predicate, /*mint=*/true);
+  if (!bank.has_value())
+    return std::unexpected(
+        std::format("believe: no agent cell bound for '{}'", predicate));
+
+  const auto clause = arena.makeCell();
+  zigzag::expectWritten(
+      arena.link(clause, core_.dims().clause, Negward, *bank));
+  zigzag::expectWritten(arena.link(clause, core_.dims().grab, Posward, term));
+
+  // +d.source → the {peer, turn} provenance record — the same keyed
+  // varsRecord shape the weight ledger uses.
+  {
+    const auto source = arena.makeCell();
+    zigzag::expectWritten(arena.link(
+        clause, core_.findOrMintDimension("d.source"), Posward, source));
+    if (const auto slot = varsRecord(source, "peer", true))
+      zigzag::expectWritten(
+          arena.link(*slot, core_.dims().values, Posward, peer));
+    if (const auto slot = varsRecord(source, "turn", true))
+      zigzag::expectWritten(arena.link(*slot, core_.dims().values, Posward,
+                                       arena.makeScalarCell(turn)));
+  }
+  // +d.evidence → the journaled percept the belief grounds in — the
+  // edge owns the cell through promote's frontier (§3.6).
+  if (evidence.has_value())
+    zigzag::expectWritten(arena.link(
+        clause, core_.findOrMintDimension("d.evidence"), Posward, *evidence));
+  return clause;
+}
+
+std::size_t MetaRuntime::forget(std::string_view predicate, CellRef term) {
+  auto &arena     = core_.arena();
+  const auto grab = core_.dims().grab;
+  const auto step = core_.dims().step;
+  const auto bank = beliefBank(predicate);
+  if (!bank.has_value()) return 0;
+  // The member snapshot precedes unlinking — unlinkRank repairs
+  // predecessor/successor pairings as it goes, which a live walk would
+  // read mid-mutation.
+  std::size_t removed = 0;
+  for (const auto clause : beliefsOf(predicate)) {
+    const auto head = arena.linked(clause, grab, Posward);
+    if (head.has_value() && beliefTermEquals(arena, step, *head, term)) {
+      unlinkRank(clause, core_.dims().clause);
+      ++removed;
+    }
+  }
+  return removed;
+}
+
+std::expected<CellRef, std::string>
+MetaRuntime::revise(std::string_view predicate, CellRef oldTerm,
+                    CellRef newTerm, CellRef peer, std::int64_t turn,
+                    std::optional<CellRef> evidence) {
+  (void)forget(predicate, oldTerm);
+  return believe(predicate, newTerm, peer, turn, evidence);
+}
+
+// ---------------------------------------------------------------------------
 // reify — the +d.recipe replay
 // ---------------------------------------------------------------------------
 
