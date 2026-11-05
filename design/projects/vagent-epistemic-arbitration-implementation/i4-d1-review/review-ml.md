@@ -136,3 +136,59 @@ Beta counts use only verified labels, so a source that tells the truth when chec
 not is invisible to reputation (selective reporting); nothing in I4-D1 can fix it, but the O9 "fresh
 source contributes 0" rule makes the first labelled stretch the whole of the cold-start defence. The
 Beta(1,1) prior is neutral only for binary claims; for K-way categories 1/K is the chance level.
+
+## Round-1 confirmation
+
+Checked against revision 2 at 72ce6145 (sections 4.5, 7.1 to 7.6, 12, 13 and the files named below).
+Nothing from the design's numbers was taken on trust where I could rerun it.
+
+### ML-1: CLOSED
+
+- **Simulation spot-check (own runs of the committed `ar.c`, other seeds).** At rho 0.99, 1e9
+  events, seed 7: old rule 63,167 latches (first at 12,102), new rule 0. At rho 0.995, 5e8 events:
+  old 95,114, new 0. At rho 0.998, 5e8 events: old 189,402, new 0. The design's 8e9-event old-rule
+  count at 0.99 is 503,379, which is 63,000 per 1e9 and agrees. The 0-latch claim reproduces.
+- **Bound spot-check (`slow_bound.py` under `/tmp/p19venv`).** H=4096, theta=0.7, m=199 to 200:
+  p=0.05 gives 1e-30 and p=0.10 gives 1e-18; m=400 gives 1e-11 and 1e-5. These match the 7.4.2
+  slow-pair table, and 1e-11 is the stated bound at (p=0.05, rho=0.995). Block length
+  m=(1+rho)/(1-rho) is the correct effective-sample-size mapping for an AR(1) mean.
+- The guarantee is now stated as conditional (rho \<= 0.99, or \<= 0.995 at p \<= 0.05), the region
+  is printed up to where it fails (rho 0.998 prints ">1"), start-ups are counted as (K+R) starts,
+  and the user-guide wording is specified. At 0.998 the simulation latches 0 times although the
+  bound is vacuous; the bound is conservative there, not wrong.
+- The rule changes the failure from "a lag-1 correlation of 0.99 latches in minutes" to "a
+  correlation time above about 400 events is not claimed". It does not remove the dependence, and
+  the design says so. A reference that is wrong for longer than the slow window (a few thousand
+  events) still latches a lone source (n_t = 1, no guard possible); that is the stated residual and
+  is consistent with spec 5.2 ("inconsistency, not which sensor").
+- ML-3, ML-4, ML-5a and ML-6 residue (not asked, noted): profile-level counters, the
+  nominal-variance gate, the flap table (537 changes per 1e4 events at rate 0.30, hysteresis
+  declined with cost stated), the differential test and the pinned AR(1) file are all present. I did
+  not re-run `gate_flap.py` or `gate_startup_slow.py`.
+
+### ML-2: CLOSED
+
+`check_vectors.py all` under `/tmp/p19venv` on the committed 704-case file: host and perturb pass
+with 0 failures (largest perturb ratio 0.77, no vector at 1.000); the mutant mode rejects all six
+mutants by their target routine (`lcb` 243, `decay_naive` 14, `logit_diff` 33, `sum_plain` 23 on
+`sum` plus 8 on `fusion`, `var_old` 31, `eps_const` 142). A surviving mutant fails the run, as
+specified. The plain-sum mutant still does not fail `pool` (design 3.5 gives the reason: the pool's
+libm-dominated bound, 1.9e-13, exceeds the plain-sum error on that vector). That is honest and `sum`
+is the targeted routine; it is not a gap in the claim "the compensated sum is exercised". 3 ulp is
+rejected at the libm probe, so the ML-7 slack concern is closed as well.
+
+### New findings introduced by the fix
+
+None MAJOR. One MINOR:
+
+- **N-1 (MINOR, section 7.2).** The latch now needs 2,515 events from a clean start (6,812 from f_s
+  = 0.05), against the spec 5.1 default of five consecutive rejections. Spec 5.1 and 5.2 state the
+  intent as "a rejection establishes inconsistency, not which sensor is wrong" and the latch as
+  recoverable only by `reset`; they set no latency requirement, and the safety property that matters
+  (a rejected reading enters no fusion) does not wait on the latch. SUSPECT with inflation 4 arrives
+  at the 18th event. The cost is wall-clock: 25 s at 100 Hz, 42 min at 1 Hz, about 7 h at 0.1 Hz,
+  during which a source that is wrong but intermittently accepted (rejection rate 0.5 to 0.7) stays
+  SUSPECT and its accepted readings are used at 1/4 weight. Fix (documentation only): state in the
+  user guide that FAULTED from the gate is an event-count latch, and that a low-rate sensor should
+  be isolated by the health-timer or operator path instead; list the 0.1 Hz figure beside the 1 Hz
+  one.

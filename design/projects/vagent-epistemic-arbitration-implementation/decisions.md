@@ -75,8 +75,14 @@ the section 5 table implied more than 200.
   resolves all seven; the lead verified the two code claims it rests on (`RemovedPredicate` absent
   from `upgradeChangeRequiresRefusal`, two ingress scopes in `observe`). T1-D revision 2 is
   accepted; T1 lands as T1a, T1b1, T1b2 and T1c (about 3,400 lines).
-- 2026-11-04: I4-D1 round 1 (ML FAIL 2 MAJOR, NUM FAIL 3 MAJOR; [reports](i4-d1-review/)). Revision
-  in progress; the ML MAJOR fixes return to the ML expert.
+- 2026-11-04: I4-D1 round 1 (ML FAIL 2 MAJOR, NUM FAIL 3 MAJOR; [reports](i4-d1-review/)).
+  Revision 2 resolves all five. The ML expert confirmed ML-1 and ML-2 closed on re-run simulations
+  and the vector checker, with no new MAJOR; the lead accepts the three NUM fixes (NUM-M3 in part:
+  the host identity is printed by the checker, not stored). I4-D1 revision 2 is accepted. Open for
+  the owner: the latch latency the slow fraction costs (about 2,515 events, 25 s at 100 Hz) against
+  spec 5.1's five consecutive rejections (ML MINOR N-1, design Q1).
+- 2026-11-05: I3-2a-r (I4-D1 section 12: parameterised fraction cells, `b` by series, burst tests)
+  lands after T1 and before I3-3.
 
 ## 1. I3-2 round-2 decisions
 
