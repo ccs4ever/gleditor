@@ -13,6 +13,7 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <tuple>
@@ -59,6 +60,37 @@ TEST(UserPermascrollTest, BasicAppendAndRead) {
   EXPECT_EQ(scroll.read(span2), "Permascroll!");
   EXPECT_EQ(scroll.readView(span2), "Permascroll!");
   EXPECT_EQ(scroll.bytes(), "Hello Permascroll!");
+}
+
+TEST(UserPermascrollTest,
+     CheckedAppendPublishesItsPreflightedAddressOnlyOnSuccess) {
+  UserPermascroll scroll;
+  PrimediaSpan acceptedCandidate;
+  const auto before = scroll.size();
+
+  const auto accepted =
+      scroll.appendChecked("checked", [&](const PrimediaSpan candidate) {
+        acceptedCandidate = candidate;
+        EXPECT_EQ(scroll.size(), before);
+      });
+
+  EXPECT_EQ(accepted, acceptedCandidate);
+  EXPECT_EQ(accepted.start, before);
+  EXPECT_EQ(scroll.read(accepted), "checked");
+
+  const auto afterAccepted = scroll.size();
+  PrimediaSpan rejectedCandidate;
+  EXPECT_THROW(scroll.appendChecked("rejected",
+                                    [&](const PrimediaSpan candidate) {
+                                      rejectedCandidate = candidate;
+                                      throw std::runtime_error(
+                                          "preflight refused");
+                                    }),
+               std::runtime_error);
+  EXPECT_EQ(rejectedCandidate.start, afterAccepted);
+  EXPECT_EQ(rejectedCandidate.length, 8U);
+  EXPECT_EQ(scroll.size(), afterAccepted);
+  EXPECT_EQ(scroll.bytes(), "checked");
 }
 
 TEST(UserPermascrollTest, MultipleStoresSharingOnePermascroll) {

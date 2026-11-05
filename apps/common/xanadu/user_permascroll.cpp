@@ -408,6 +408,16 @@ PrimediaSpan UserPermascroll::append(const std::string_view text) {
   return spool_.append(text);
 }
 
+PrimediaSpan UserPermascroll::appendChecked(
+    const std::string_view text,
+    const gleditor::cpp26::function_ref<void(PrimediaSpan)> preflight) {
+  std::scoped_lock lock(appendMutex_);
+  const PrimediaSpan candidate{
+      .scroll = localScroll, .start = spool_.size(), .length = text.size()};
+  preflight(candidate);
+  return spool_.append(text);
+}
+
 // -- the lock-free read path --------------------------------------------------
 //
 // These four take no lock, which is what they always claimed to do and for two

@@ -18,6 +18,8 @@
 #include <string_view>
 #include <vector>
 
+#include <gleditor/cpp26.hpp>
+
 #include "identity/identity_engine.hpp"
 #include "identity/identity_layout.hpp"
 #include "identity/standard_crypto_engine.hpp"
@@ -133,6 +135,17 @@ public:
    * offset.
    */
   PrimediaSpan append(std::string_view text);
+
+  /**
+   * @brief Run a span-address preflight while holding the append lock, then
+   *        append and return the exact span that was checked.
+   *
+   * A refusal from @p preflight leaves the spool untouched. The callback must
+   * not reenter a lock-taking API on this permascroll.
+   */
+  PrimediaSpan
+  appendChecked(std::string_view text,
+                gleditor::cpp26::function_ref<void(PrimediaSpan)> preflight);
 
   // findExistingSpan used to live here: a flat search of the whole
   // permascroll for text about to be appended, so an insert could point at an

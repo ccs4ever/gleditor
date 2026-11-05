@@ -632,6 +632,8 @@ public:
    *
    * An empty @p text with a nonzero @p removing is a delete; a zero
    * @p removing with text is an insert; both together is a replacement.
+   * @throws std::length_error if the operation fields or resulting content
+   *         run exceed their encoded widths.
    */
   MicroversionId
   spliceCell(const MicroversionId &parent, zigzag::CellRef cell,
@@ -640,7 +642,8 @@ public:
 
   /// Splice an existing address into @p cell rather than newly typed text --
   /// a transclusion into a cell, which shares the quoted bytes rather than
-  /// copying them.
+  /// copying them. Throws std::length_error if the operation fields or
+  /// resulting content run exceed their encoded widths.
   MicroversionId
   spliceCellSpan(const MicroversionId &parent, zigzag::CellRef cell,
                  std::uint64_t at, std::uint64_t removing,
@@ -1402,6 +1405,14 @@ private:
   applyScalar(const MicroversionId &parent, std::optional<zigzag::CellRef> cell,
               const ScalarValue &value,
               std::optional<MicroversionId> context = std::nullopt);
+
+  MicroversionId spliceCellSpanPrepared(const MicroversionId &parent,
+                                        zigzag::CellRef cell, std::uint64_t at,
+                                        std::uint64_t removing,
+                                        const PrimediaSpan &quoted,
+                                        std::optional<MicroversionId> context,
+                                        const zigzag::Manifold &current,
+                                        std::uint32_t previousOp);
 
   /// @throws std::invalid_argument if @p ref does not name a Structure
   ///         operation, which is what a CellRef is. @p what names the parameter

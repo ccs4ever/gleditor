@@ -186,6 +186,7 @@ enum class FoldRefusal : std::uint8_t {
                     ///< Slice/Xanadoc Make
   WrongContextKind, ///< Operation applied to an incompatible context kind (e.g.
                     ///< PageBreak on Cell)
+  ContentRunTooLong, ///< A cell's content count does not fit CellSlot
 };
 
 [[nodiscard]] constexpr std::string_view
@@ -209,6 +210,8 @@ toString(const FoldRefusal refusal) noexcept {
     return "invalid make kind";
   case FoldRefusal::WrongContextKind:
     return "wrong context kind";
+  case FoldRefusal::ContentRunTooLong:
+    return "content run too long";
   }
   return "unknown refusal";
 }
@@ -419,6 +422,18 @@ public:
   /// convenience over it.
   [[nodiscard]] std::span<const xanadu::PrimediaSpan>
   contentOf(CellRef ref) const noexcept;
+
+  /**
+   * @brief Splice @p inserted into an existing span run using fold semantics.
+   *
+   * This is the canonical piece-table transform shared with Store-side
+   * capacity checks. It preserves the existing split, insertion placement,
+   * empty-piece removal, and contiguous-address coalescing rules.
+   */
+  [[nodiscard]] static std::vector<xanadu::PrimediaSpan>
+  splicedContent(std::span<const xanadu::PrimediaSpan> existing,
+                 std::uint64_t at, std::uint64_t removing,
+                 const xanadu::PrimediaSpan &inserted);
 
   /// The content of @p ref, read through @p reader.
   ///
@@ -765,6 +780,8 @@ public:
   [[nodiscard]] bool equivalentTo(const Manifold &other) const;
 
 private:
+  friend struct ManifoldTestAccess;
+
   /// Count @p why and hand it back as the fold's answer.
   FoldResult refuse(const FoldRefusal why) noexcept {
     refusedOps_++;
@@ -787,14 +804,14 @@ private:
 
   /// Replace @p dense's content run with @p spans, growing or relocating the
   /// arena as needed.
-  void setContent(std::uint32_t dense,
-                  std::span<const xanadu::PrimediaSpan> spans);
+  FoldResult setContent(std::uint32_t dense,
+                        std::span<const xanadu::PrimediaSpan> spans);
 
   /// Replace [@p at, @p at + @p removing) of @p dense's content with
   /// @p inserted, keeping the addresses of everything either side.
-  void spliceContent(std::uint32_t dense, std::uint64_t at,
-                     std::uint64_t removing,
-                     const xanadu::PrimediaSpan &inserted);
+  FoldResult spliceContent(std::uint32_t dense, std::uint64_t at,
+                           std::uint64_t removing,
+                           const xanadu::PrimediaSpan &inserted);
 
   std::vector<CellSlot> slots;
   /// The CSR arena. A cell's run is grown in place when it is the arena's

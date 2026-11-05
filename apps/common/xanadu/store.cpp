@@ -60,6 +60,26 @@ void requireAddressable(const PrimediaSpan &span, const std::string_view what) {
   }
 }
 
+void requireSpliceContentFits(const std::span<const PrimediaSpan> existing,
+                              const std::uint64_t at,
+                              const std::uint64_t removing,
+                              const PrimediaSpan &inserted) {
+  const auto rebuilt =
+      zigzag::Manifold::splicedContent(existing, at, removing, inserted);
+  if (rebuilt.size() > zigzag::maxCellContentSpanCount) {
+    throw std::length_error("cell content run exceeds CellSlot capacity");
+  }
+}
+
+void requireSpliceOffsetsRepresentable(const std::uint64_t at,
+                                       const std::uint64_t removing) {
+  constexpr auto maxOffset = std::numeric_limits<std::uint32_t>::max();
+  if (at > maxOffset || removing > maxOffset) {
+    throw std::length_error(
+        "splice offset and length must fit CompactOpNode fields");
+  }
+}
+
 void canonicalizeAnnotationTimestamp(VersionAnnotation &annotation) {
   if (annotation.timestamp.empty()) return;
   TimestampInstant parsed{};
@@ -878,6 +898,7 @@ MicroversionId Store::spliceCellSpan(const MicroversionId &parent,
                                      const std::uint64_t removing,
                                      const PrimediaSpan &quoted,
                                      std::optional<MicroversionId> context) {
+  requireSpliceOffsetsRepresentable(at, removing);
   if (zigzag::noCell == cell || zigzag::isEphemeral(cell)) {
     throw std::invalid_argument("spliceCell needs a cell an operation minted");
   }
@@ -893,7 +914,23 @@ MicroversionId Store::spliceCellSpan(const MicroversionId &parent,
     current = &folded.value();
   }
 
-  const auto spans             = current->contentOf(cell);
+  const auto spans = current->contentOf(cell);
+  requireSpliceContentFits(spans, at, removing, quoted);
+  const auto previous = lastOpOnCell(parent, cell);
+  if (!previous) {
+    throw std::invalid_argument("cell " + std::to_string(cell) +
+                                " is absent from parent " + parent.str());
+  }
+  return spliceCellSpanPrepared(parent, cell, at, removing, quoted, context,
+                                *current, *previous);
+}
+
+MicroversionId Store::spliceCellSpanPrepared(
+    const MicroversionId &parent, const zigzag::CellRef cell,
+    const std::uint64_t at, const std::uint64_t removing,
+    const PrimediaSpan &quoted, std::optional<MicroversionId> context,
+    const zigzag::Manifold &current, const std::uint32_t previousOp) {
+  const auto spans             = current.contentOf(cell);
   std::uint64_t existingLength = 0;
   for (const auto &piece : spans) existingLength += piece.length;
   const auto insertionAt     = std::min(at, existingLength);
@@ -903,7 +940,7 @@ MicroversionId Store::spliceCellSpan(const MicroversionId &parent,
   if (remainingLength <= maxInferredScalarTextBytes &&
       quoted.length <= maxInferredScalarTextBytes - remainingLength) {
     try {
-      auto text = current->textOf(cell, *this);
+      auto text = current.textOf(cell, *this);
       text.replace(static_cast<std::size_t>(insertionAt),
                    static_cast<std::size_t>(removed), read(quoted));
       inferred = inferTextValue(text);
@@ -918,16 +955,11 @@ MicroversionId Store::spliceCellSpan(const MicroversionId &parent,
   op.flags = structureFlags(StructureVerb::Splice, false, inferred.kind);
   // The one Structure verb whose `at` is not zero: it is an offset inside the
   // cell's own content, which is the frame this operation edits within.
-  op.at               = static_cast<std::uint32_t>(at);
-  op.length           = static_cast<std::uint32_t>(removing);
-  op.span             = quoted;
-  op.value            = inferred.bits;
-  const auto previous = lastOpOnCell(parent, cell);
-  if (!previous) {
-    throw std::invalid_argument("cell " + std::to_string(cell) +
-                                " is absent from parent " + parent.str());
-  }
-  op.source = opsSpool.idOf(*previous).value();
+  op.at     = static_cast<std::uint32_t>(at);
+  op.length = static_cast<std::uint32_t>(removing);
+  op.span   = quoted;
+  op.value  = inferred.bits;
+  op.source = opsSpool.idOf(previousOp).value();
   if (context) {
     op.context = *context;
   } else {
@@ -942,12 +974,37 @@ MicroversionId Store::spliceCell(const MicroversionId &parent,
                                  const std::uint64_t removing,
                                  const std::string_view text,
                                  std::optional<MicroversionId> context) {
-  // Into the permascroll first, and only what was actually typed -- which is
-  // the difference this verb exists to make. setCellText() appends the whole
-  // cell however little of it changed.
+  requireSpliceOffsetsRepresentable(at, removing);
+  if (zigzag::noCell == cell || zigzag::isEphemeral(cell)) {
+    throw std::invalid_argument("spliceCell needs a cell an operation minted");
+  }
+  requireCellOp(cell, "the cell being edited");
+
+  std::optional<zigzag::Manifold> folded;
+  const zigzag::Manifold *current = nullptr;
+  if (const auto m = manifoldAt(parent); m.has_value()) {
+    current = *m;
+  } else {
+    folded  = rebuildManifold(parent);
+    current = &folded.value();
+  }
+
+  const auto previous = lastOpOnCell(parent, cell);
+  if (!previous) {
+    throw std::invalid_argument("cell " + std::to_string(cell) +
+                                " is absent from parent " + parent.str());
+  }
+  const auto spans = current->contentOf(cell);
+
+  // Into the permascroll only after the operation's resulting run is known to
+  // fit. The callback runs under the append lock so its candidate address is
+  // the address the bytes will receive.
   const auto span =
-      text.empty() ? PrimediaSpan{} : userPermascroll_->append(text);
-  return spliceCellSpan(parent, cell, at, removing, span, context);
+      userPermascroll_->appendChecked(text, [&](const PrimediaSpan candidate) {
+        requireSpliceContentFits(spans, at, removing, candidate);
+      });
+  return spliceCellSpanPrepared(parent, cell, at, removing, span, context,
+                                *current, *previous);
 }
 
 MicroversionId Store::setCellText(const MicroversionId &parent,

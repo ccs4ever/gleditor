@@ -792,3 +792,36 @@ Validation: full `make -j$(nproc)`, repository formatting with clang-format 19 a
 tests from 60 suites passed, including the persistent Manifold baseline and four new arena boundary
 cases. Logs: `/tmp/vql-span-count-build.log`, `/tmp/vql-span-count-tests.log`,
 `/tmp/vql-span-count-format.log`.
+
+## Iteration 26: persistent content-run preflight and fold refusal
+
+Persistent content commits now return `FoldRefusal::ContentRunTooLong` before modifying a run when
+its normalized span count cannot fit `CellSlot`. A single pure splice normalizer supplies both
+folding and Store-side preflight. Its coalescing pass keeps ordered addresses and removes empty or
+contiguous pieces with one scan. Insert/Delete/Rearrange/Splice/SetValue routes publish target
+metadata only after successful content commit. Multi-span Transclude prepares its complete result in
+temporary storage and commits once, avoiding partially published target content on refusal.
+
+Local `spliceCellSpan` checks capacity before authoring an operation. `spliceCell` checks its exact
+candidate address under the permascroll's existing append mutex before publishing bytes, through
+`appendChecked`; the callback is borrowed and never retained. Parent-manifold preparation stays
+outside that lock. A prepared operation helper preserves scalar inference without duplicating the
+capacity check. Both splice writers reject offsets/removal lengths outside the operation's 32-bit
+wire fields before append, so preflight and folding cannot disagree through truncation.
+
+Preflight adds a normalized-run allocation for Store splices; no performance improvement is claimed.
+Multi-span transclusion retains repeated normalization work. This stage concerns content count
+refusal in folding and these two local writers. General mutation contracts, other writer failure
+atomicity, aggregate arena offset capacity and prefix hydration remain open; no full §4.12
+completion follows.
+
+Validation: full `make -j$(nproc)`, repository formatting with clang-format 19 and all 725 affected
+tests from 68 suites passed. Six new cases cover exact-limit normalization, long contiguous runs
+with empty pieces, fold refusal without target/by-ref publication, Store span/text/offset refusals
+without operations or bytes, multi-span transclusion with an earlier fitting fragment, and checked
+append candidate identity/exception rollback. Existing permascroll suites join the prior VQL/VM and
+persistent Manifold matrix. Independent Luna architecture and senior/profiler gates accepted the
+bounded implementation and coverage; no full-suite or speedup claim is made.
+
+Logs: `/tmp/vql-persistent-spans-build.log`, `/tmp/vql-persistent-spans-tests.log`,
+`/tmp/vql-persistent-spans-format.log`.

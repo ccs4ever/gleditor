@@ -17,8 +17,10 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <optional>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <tuple>
@@ -35,6 +37,23 @@
 #include "common/xanadu/zigzag/arena_manifold.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
 #include "common/xanadu/zigzag/manifold.hpp"
+
+namespace zigzag {
+
+/// Seed one representable maximum-size run without building quadratic history.
+struct ManifoldTestAccess {
+  static bool
+  seedMaxContentRun(Manifold &manifold, const CellRef cell,
+                    const std::span<const xanadu::PrimediaSpan> spans) {
+    if (spans.size() != maxCellContentSpanCount) {
+      return false;
+    }
+    const auto dense = manifold.denseOf(cell);
+    return dense && manifold.setContent(*dense, spans).has_value();
+  }
+};
+
+} // namespace zigzag
 
 namespace {
 
@@ -952,6 +971,202 @@ TEST(ManifoldTest, adjacentPiecesCoalesceWithoutLosingAnAddress) {
       << "two contiguous pieces of one scroll stayed apart";
   EXPECT_EQ(run.front().start, original.start);
   EXPECT_EQ(run.front().length, original.length);
+}
+
+TEST(ManifoldTest, aSpliceCoalescesAtTheMaximumRepresentableRunLength) {
+  std::vector<PrimediaSpan> existing(zigzag::maxCellContentSpanCount,
+                                     PrimediaSpan{.start = 0, .length = 1});
+  const PrimediaSpan appended{.start = 1, .length = 1};
+
+  const auto rebuilt = Manifold::splicedContent(existing, 1, 0, appended);
+
+  ASSERT_EQ(rebuilt.size(), zigzag::maxCellContentSpanCount);
+  EXPECT_EQ(rebuilt.front(), (PrimediaSpan{.start = 0, .length = 2}));
+  EXPECT_EQ(rebuilt.back(), existing.back());
+}
+
+TEST(ManifoldTest, aLongContiguousRunCoalescesAcrossEmptyPieces) {
+  constexpr std::size_t adjacentPieces = 65'535;
+  std::vector<PrimediaSpan> existing;
+  existing.reserve(adjacentPieces + 2);
+  existing.emplace_back(PrimediaSpan{.start = 0, .length = 0});
+  for (std::size_t i = 0; i < adjacentPieces; ++i) {
+    existing.emplace_back(PrimediaSpan{.start = i, .length = 1});
+  }
+  existing.emplace_back(PrimediaSpan{.start = adjacentPieces, .length = 0});
+
+  const auto rebuilt =
+      Manifold::splicedContent(existing, adjacentPieces, 0, PrimediaSpan{});
+
+  ASSERT_THAT(rebuilt, testing::ElementsAre(
+                           PrimediaSpan{.start = 0, .length = adjacentPieces}));
+}
+
+TEST(ManifoldTest, anOversizedSpliceRefusalLeavesTheFoldedCellIntact) {
+  Slice slice;
+  const auto dim  = slice.dimension("d.boundary");
+  const auto cell = slice.cell("ab");
+  const auto peer = slice.cell("peer");
+  slice.link(cell, dim, DimVector::POS, peer);
+
+  auto manifold       = slice.store.rebuildManifold(slice.at);
+  const auto original = manifold.contentOf(cell).front();
+  std::vector<PrimediaSpan> saturated(zigzag::maxCellContentSpanCount,
+                                      original);
+  ASSERT_TRUE(
+      zigzag::ManifoldTestAccess::seedMaxContentRun(manifold, cell, saturated));
+  const auto originalSlot = *manifold.slot(cell);
+  const std::vector<PrimediaSpan> originalContent{
+      manifold.contentOf(cell).begin(), manifold.contentOf(cell).end()};
+  const std::vector<zigzag::DimLink> originalLinks{
+      manifold.dimensionsOf(cell).begin(), manifold.dimensionsOf(cell).end()};
+  const auto beforeFoldedThrough = manifold.foldedThrough();
+  const auto beforeRefusals      = manifold.refusedOps();
+
+  xanadu::CompactOpNode node{};
+  node.kind          = OpKind::Structure;
+  node.flags         = xanadu::structureFlags(StructureVerb::Splice);
+  node.sourceOpIndex = originalSlot.lastOp;
+  node.at            = 1;
+  node.length        = 0;
+  node.setSpan(PrimediaSpan{
+      .scroll = original.scroll, .start = original.start + 2, .length = 1});
+  const auto refusedIndex = beforeFoldedThrough + 1;
+
+  const auto refused = manifold.applyStructure(refusedIndex, node);
+
+  ASSERT_FALSE(refused);
+  EXPECT_EQ(refused.error(), zigzag::FoldRefusal::ContentRunTooLong);
+  EXPECT_EQ(manifold.refusedOps(), beforeRefusals + 1);
+  EXPECT_EQ(manifold.foldedThrough(), refusedIndex);
+  ASSERT_TRUE(manifold.slot(cell));
+  EXPECT_EQ(*manifold.slot(cell), originalSlot);
+  EXPECT_THAT(manifold.contentOf(cell),
+              testing::ElementsAreArray(originalContent));
+  EXPECT_THAT(manifold.dimensionsOf(cell),
+              testing::ElementsAreArray(originalLinks));
+  EXPECT_EQ(manifold.slot(refusedIndex), std::nullopt);
+  EXPECT_EQ(manifold.structureBirth(refusedIndex), std::nullopt);
+}
+
+TEST(ManifoldTest, StoreSplicesPreflightCapacityAndAllowExactLimitCoalescing) {
+  {
+    Slice slice;
+    const auto cell     = slice.cell("ab");
+    auto manifold       = slice.store.rebuildManifold(slice.at);
+    const auto original = manifold.contentOf(cell).front();
+    std::vector<PrimediaSpan> saturated(zigzag::maxCellContentSpanCount,
+                                        original);
+    saturated.front() = original.slice(0, 1);
+    ASSERT_TRUE(zigzag::ManifoldTestAccess::seedMaxContentRun(manifold, cell,
+                                                              saturated));
+
+    const auto opsBefore   = slice.store.opCount();
+    const auto bytesBefore = slice.store.userPermascroll().size();
+    const auto version =
+        slice.store.spliceCellSpan(slice.at, cell, 1, 0, original.slice(1, 1));
+
+    EXPECT_NE(version, slice.at);
+    EXPECT_EQ(slice.store.opCount(), opsBefore + 1);
+    EXPECT_EQ(slice.store.userPermascroll().size(), bytesBefore);
+    ASSERT_TRUE(manifold.advance(slice.store, version));
+    ASSERT_EQ(manifold.contentOf(cell).size(), zigzag::maxCellContentSpanCount);
+    EXPECT_EQ(manifold.contentOf(cell).front(),
+              (PrimediaSpan{.start = original.start, .length = 2}));
+  }
+
+  Slice slice;
+  const auto cell     = slice.cell("ab");
+  auto manifold       = slice.store.rebuildManifold(slice.at);
+  const auto original = manifold.contentOf(cell).front();
+  const auto quoted   = slice.store.userPermascroll().append("z");
+  std::vector<PrimediaSpan> saturated(zigzag::maxCellContentSpanCount,
+                                      original);
+  ASSERT_TRUE(
+      zigzag::ManifoldTestAccess::seedMaxContentRun(manifold, cell, saturated));
+  const auto originalSlot = *manifold.slot(cell);
+  const std::vector<PrimediaSpan> originalContent{
+      manifold.contentOf(cell).begin(), manifold.contentOf(cell).end()};
+  const auto opsBefore   = slice.store.opCount();
+  const auto bytesBefore = slice.store.userPermascroll().size();
+
+  EXPECT_THROW(slice.store.spliceCellSpan(slice.at, cell, 1, 0, quoted),
+               std::length_error);
+  EXPECT_EQ(slice.store.opCount(), opsBefore);
+  EXPECT_EQ(slice.store.userPermascroll().size(), bytesBefore);
+  EXPECT_THROW(slice.store.spliceCell(slice.at, cell, 1, 0, "x"),
+               std::length_error);
+  EXPECT_EQ(slice.store.opCount(), opsBefore);
+  EXPECT_EQ(slice.store.userPermascroll().size(), bytesBefore);
+  EXPECT_THROW(
+      slice.store.spliceCell(slice.at, cell,
+                             static_cast<std::uint64_t>(
+                                 std::numeric_limits<std::uint32_t>::max()) +
+                                 1,
+                             0, "x"),
+      std::length_error);
+  EXPECT_EQ(slice.store.opCount(), opsBefore);
+  EXPECT_EQ(slice.store.userPermascroll().size(), bytesBefore);
+  ASSERT_TRUE(manifold.slot(cell));
+  EXPECT_EQ(*manifold.slot(cell), originalSlot);
+  EXPECT_THAT(manifold.contentOf(cell),
+              testing::ElementsAreArray(originalContent));
+}
+
+TEST(ManifoldTest, aMultiSpanTransclusionRefusalDoesNotPartiallyAppend) {
+  Store store;
+  auto at                  = store.sliceGenesis(MicroversionId{});
+  at                       = store.makeCell(at, "target");
+  const auto target        = store.cellRefOf(at).value();
+  const auto targetContext = store.segmentedOps().idOf(target).value();
+
+  const auto sourceContext = store.makeXanadoc(at, "source");
+  const auto sourceBirth = store.segmentedOps().indexOf(sourceContext).value();
+  at                     = sourceContext;
+  const auto sourceStart = store.userPermascroll().size();
+  at                     = store.insert(at, 0, "AB", sourceContext);
+  std::ignore            = store.userPermascroll().append("gap");
+  at                     = store.insert(at, 1, "C", sourceContext);
+  const auto sourceVersion = store.segmentedOps().indexOf(at).value();
+  const auto sourceDoc     = store.rebuildFromIndex(sourceVersion, sourceBirth);
+  const auto sourcePieces  = sourceDoc.spansFor(0, 3);
+  ASSERT_EQ(sourcePieces.size(), 3U);
+  EXPECT_EQ(sourcePieces[0].start, sourceStart);
+  EXPECT_EQ(sourcePieces[1].start, sourceStart + 5);
+
+  auto manifold = store.rebuildManifold(at);
+  std::vector<PrimediaSpan> saturated(
+      zigzag::maxCellContentSpanCount,
+      PrimediaSpan{.scroll = xanadu::localScroll,
+                   .start  = sourceStart - 1,
+                   .length = 1});
+  ASSERT_TRUE(zigzag::ManifoldTestAccess::seedMaxContentRun(manifold, target,
+                                                            saturated));
+  const auto originalSlot = *manifold.slot(target);
+  const std::vector<PrimediaSpan> originalContent{
+      manifold.contentOf(target).begin(), manifold.contentOf(target).end()};
+  const auto parentIndex    = store.segmentedOps().indexOf(at).value();
+  const auto beforeRefusals = manifold.refusedOps();
+  const auto refusedIndex   = parentIndex + 1;
+
+  Op op;
+  op.kind         = OpKind::Transclude;
+  op.at           = zigzag::maxCellContentSpanCount;
+  op.sourceAt     = 0;
+  op.sourceLength = 3;
+  const auto node = xanadu::CompactOpNode::fromOp(
+      op, parentIndex, sourceVersion, 0,
+      store.segmentedOps().indexOf(targetContext).value());
+  const auto refused = manifold.applyStructure(refusedIndex, node);
+
+  ASSERT_FALSE(refused);
+  EXPECT_EQ(refused.error(), zigzag::FoldRefusal::ContentRunTooLong);
+  EXPECT_EQ(manifold.refusedOps(), beforeRefusals + 1);
+  EXPECT_EQ(manifold.slot(target), originalSlot);
+  EXPECT_THAT(manifold.contentOf(target),
+              testing::ElementsAreArray(originalContent));
+  EXPECT_EQ(manifold.slot(refusedIndex), std::nullopt);
+  EXPECT_EQ(manifold.structureBirth(refusedIndex), std::nullopt);
 }
 
 TEST(ManifoldTest, splicingFoldsTheSameIncrementallyAsCold) {

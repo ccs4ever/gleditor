@@ -207,8 +207,13 @@ Manifold::contentOf(const CellRef ref) const noexcept {
                                                cell.spanCount};
 }
 
-void Manifold::setContent(const std::uint32_t dense,
-                          const std::span<const xanadu::PrimediaSpan> spans) {
+FoldResult
+Manifold::setContent(const std::uint32_t dense,
+                     const std::span<const xanadu::PrimediaSpan> spans) {
+  if (spans.size() > maxCellContentSpanCount) {
+    return std::unexpected{FoldRefusal::ContentRunTooLong};
+  }
+
   auto &cell = slots[dense];
   liveContent -= cell.spanCount;
 
@@ -234,16 +239,17 @@ void Manifold::setContent(const std::uint32_t dense,
   if (content.size() > 2 * liveContent + compactionSlack) {
     compact();
   }
+  return {};
 }
 
-void Manifold::spliceContent(const std::uint32_t dense, const std::uint64_t at,
-                             const std::uint64_t removing,
-                             const xanadu::PrimediaSpan &inserted) {
+std::vector<xanadu::PrimediaSpan>
+Manifold::splicedContent(const std::span<const xanadu::PrimediaSpan> existing,
+                         const std::uint64_t at, const std::uint64_t removing,
+                         const xanadu::PrimediaSpan &inserted) {
   // Version's algorithm, over the arena rather than over a vector per cell.
   // splitAt() cuts a piece so that a boundary exists where the edit lands, and
   // the pieces on either side keep the addresses they had -- which is the whole
   // point: an edit must not move the text it did not touch.
-  const auto existing = contentOf(slots[dense].birthOp);
   std::vector<xanadu::PrimediaSpan> rebuilt;
   rebuilt.reserve(existing.size() + 2);
 
@@ -284,18 +290,31 @@ void Manifold::spliceContent(const std::uint32_t dense, const std::uint64_t at,
   // keeps distinct however identical their content; it says nothing about the
   // pieces within one. Merging also gives a canonical form, so a cell edited
   // and edited back matches one that was never touched.
-  std::erase_if(rebuilt, [](const auto &piece) { return piece.empty(); });
-  for (std::size_t i = 0; i + 1 < rebuilt.size();) {
-    if (rebuilt[i].scroll == rebuilt[i + 1].scroll &&
-        rebuilt[i].end() == rebuilt[i + 1].start) {
-      rebuilt[i].length += rebuilt[i + 1].length;
-      rebuilt.erase(rebuilt.begin() + static_cast<std::ptrdiff_t>(i) + 1);
+  std::size_t coalesced = 0;
+  for (std::size_t i = 0; i < rebuilt.size(); i++) {
+    const auto piece = rebuilt[i];
+    if (piece.empty()) {
       continue;
     }
-    i++;
+    if (coalesced > 0 && rebuilt[coalesced - 1].scroll == piece.scroll &&
+        rebuilt[coalesced - 1].end() == piece.start) {
+      rebuilt[coalesced - 1].length += piece.length;
+    } else {
+      rebuilt[coalesced++] = piece;
+    }
   }
+  rebuilt.resize(coalesced);
 
-  setContent(dense, rebuilt);
+  return rebuilt;
+}
+
+FoldResult Manifold::spliceContent(const std::uint32_t dense,
+                                   const std::uint64_t at,
+                                   const std::uint64_t removing,
+                                   const xanadu::PrimediaSpan &inserted) {
+  const auto existing = contentOf(slots[dense].birthOp);
+  const auto rebuilt  = splicedContent(existing, at, removing, inserted);
+  return setContent(dense, rebuilt);
 }
 
 FoldResult
@@ -315,29 +334,50 @@ Manifold::applyStructure(const std::uint32_t opIndex,
         return refuse(FoldRefusal::ScratchAddress);
       }
       if (xanadu::OpKind::Insert == node.kind) {
-        spliceContent(d, node.at, 0, node.span());
+        if (const auto result = spliceContent(d, node.at, 0, node.span());
+            !result) {
+          return refuse(result.error());
+        }
         slots[d].lastOp = opIndex;
         byRef.emplace(opIndex, d);
         return {};
       }
       if (xanadu::OpKind::Delete == node.kind) {
-        spliceContent(d, node.at, node.length, xanadu::PrimediaSpan{});
+        if (const auto result =
+                spliceContent(d, node.at, node.length, xanadu::PrimediaSpan{});
+            !result) {
+          return refuse(result.error());
+        }
         slots[d].lastOp = opIndex;
         byRef.emplace(opIndex, d);
         return {};
       }
       if (xanadu::OpKind::Transclude == node.kind) {
         if (!node.span().empty()) {
-          spliceContent(d, node.at, 0, node.span());
+          if (const auto result = spliceContent(d, node.at, 0, node.span());
+              !result) {
+            return refuse(result.error());
+          }
         } else if (store_ && node.sourceOpIndex > 0) {
           const auto srcBirth = store_->editedBirthOf(node.sourceOpIndex);
           const auto srcDoc =
               store_->rebuildFromIndex(node.sourceOpIndex, srcBirth);
           const auto spans = srcDoc.spansFor(node.sourceAt, node.sourceLength);
-          auto currentAt   = node.at;
+          const auto current = contentOf(slots[d].birthOp);
+          std::vector<xanadu::PrimediaSpan> rebuilt(current.begin(),
+                                                    current.end());
+          auto currentAt = node.at;
           for (const auto &sp : spans) {
-            spliceContent(d, currentAt, 0, sp);
+            rebuilt = splicedContent(rebuilt, currentAt, 0, sp);
             currentAt += sp.length;
+          }
+          if (!spans.empty()) {
+            if (rebuilt.size() > maxCellContentSpanCount) {
+              return refuse(FoldRefusal::ContentRunTooLong);
+            }
+            if (const auto result = setContent(d, rebuilt); !result) {
+              return refuse(result.error());
+            }
           }
         }
         slots[d].lastOp = opIndex;
@@ -351,7 +391,9 @@ Manifold::applyStructure(const std::uint32_t opIndex,
           tmpVer.insert(tmpVer.length(), sp);
         }
         tmpVer.rearrange(node.at, node.length, node.to);
-        setContent(d, tmpVer.pieces());
+        if (const auto result = setContent(d, tmpVer.pieces()); !result) {
+          return refuse(result.error());
+        }
         slots[d].lastOp = opIndex;
         byRef.emplace(opIndex, d);
         return {};
@@ -442,7 +484,11 @@ Manifold::applyStructure(const std::uint32_t opIndex,
     byRef.emplace(opIndex, dense);
     if (!node.span().empty()) {
       const auto only = node.span();
-      setContent(dense, std::span<const xanadu::PrimediaSpan>{&only, 1});
+      if (const auto result = setContent(
+              dense, std::span<const xanadu::PrimediaSpan>{&only, 1});
+          !result) {
+        return refuse(result.error());
+      }
     }
     // Genesis mints home first and d.dims second, by fiat, because linking the
     // first dimension onto the d.dims rank needs d.dims to be nameable
@@ -533,7 +579,10 @@ Manifold::applyStructure(const std::uint32_t opIndex,
       return refuse(FoldRefusal::UnknownSubject);
     }
     const auto d = *dense;
-    spliceContent(d, node.at, node.length, node.span());
+    if (const auto result = spliceContent(d, node.at, node.length, node.span());
+        !result) {
+      return refuse(result.error());
+    }
     auto &cell     = slots[d];
     cell.valueKind = static_cast<std::uint8_t>(xanadu::valueKindOf(node.flags));
     cell.valueBits = node.value;
@@ -552,9 +601,13 @@ Manifold::applyStructure(const std::uint32_t opIndex,
     // make the fold depend on the order two branches were folded in.
     const auto restated = node.span();
     const auto d        = *dense;
-    setContent(d, restated.empty()
-                      ? std::span<const xanadu::PrimediaSpan>{}
-                      : std::span<const xanadu::PrimediaSpan>{&restated, 1});
+    if (const auto result = setContent(
+            d, restated.empty()
+                   ? std::span<const xanadu::PrimediaSpan>{}
+                   : std::span<const xanadu::PrimediaSpan>{&restated, 1});
+        !result) {
+      return refuse(result.error());
+    }
     auto &cell     = slots[d];
     cell.valueKind = static_cast<std::uint8_t>(xanadu::valueKindOf(node.flags));
     cell.valueBits = node.value;

@@ -456,3 +456,21 @@ establish mutation-contract enforcement or complete §4.12.
 The full build, repository formatting and all 688 affected tests from 60 suites passed, including
 persistent Manifold baseline coverage. Independent Luna architecture and senior/profiler gates
 accepted this bounded stage. No full-suite or speedup claim is made.
+
+## Persistent content-run capacity enforcement
+
+Persistent folds now refuse normalized runs larger than `CellSlot` can represent before publishing
+target content, value, operation identity or last-operation metadata. Multi-span transclusion
+prepares then commits its complete target run. Both local splice writers reuse the fold normalizer
+for preflight; text edits check their exact candidate address under the permascroll append mutex
+before publishing bytes. Wire-field offsets are checked before narrowing. See
+[iteration 26](projects/vortex-vm-only-iterations.md).
+
+The bounded guarantee covers count refusal in folding and these local splice APIs. It leaves general
+mutation-contract enforcement, broader post-append failure atomicity, aggregate offset capacity and
+prefix hydration open. No performance or full §4.12 completion claim follows.
+
+Full build, repository formatting and all 725 affected tests from 68 suites passed with independent
+Luna architecture and senior/profiler gates. Tests include exact-limit acceptance, unchanged bytes
+and operations on refusal, and a multi-span transclusion whose early fragment fits but later ones
+overflow. No full-suite pass or speedup is claimed.

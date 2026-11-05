@@ -302,5 +302,6 @@ A malformed fragment fixture exposed a pre-existing content-run narrowing issue:
 spans. Keep this separate from the field-probe work: audit the public span-accepting mutation/mint
 paths and add atomic refusal before changing content or shadows. Native probe tests use a
 representable fragmented run and independently enforce aggregate name-byte bounds. The arena
-count-width boundary is now fixed in VM-only iteration 25. Persistent fold/writer defense, aggregate
-offset capacity and prefix hydration remain unfinished integrity work.
+count-width boundary is fixed in VM-only iteration 25; iteration 26 adds persistent fold refusal and
+local splice preflight. Aggregate offset capacity, prefix hydration and broader mutation atomicity
+remain unfinished integrity work.
