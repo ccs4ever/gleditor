@@ -258,6 +258,34 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       stageOutbox(verb, payload, peer);
       return true;
     }
+    if (verb == "stop") {
+      // The stopped flag lives on the target agent's vars record;
+      // the turn protocol checks it before dispatch and settles
+      // nothing for a stopped agent. `self` resolves to the running
+      // agent — the current spine still finishes (statement-boundary
+      // semantics); every later turn is a no-op.
+      const auto peer = field("peer");
+      if (peer == noCell) return false;
+      const auto want = arena.textOf(peer);
+      CellRef target  = noCell;
+      if (want == "self") {
+        target = agent;
+      } else {
+        for (const CellRef dir :
+             zigzag::rankAfter(arena, programRoot, dims.dirs))
+          for (const CellRef peer_ : zigzag::rankAfter(arena, dir, dims.agents))
+            if (const auto name =
+                    arena.linked(peer_, core.dims().name, DimVector::POS);
+                name && arena.textOf(*name) == want)
+              target = peer_;
+      }
+      if (target == noCell) return false;
+      if (const auto rec = varsRecord(arena, core, target, "stopped", true))
+        zigzag::expectWritten(
+            arena.link(*rec, core.dims().values, DimVector::POS,
+                       arena.makeScalarCell(std::int64_t{1})));
+      return true;
+    }
     if (verb == "await") {
       // Suspension needs a record to park — await in an `on` handler's
       // dispatch spine has nothing to suspend, so it refuses there.
@@ -282,10 +310,24 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
     if (verb == "achieve") {
       // §3.5's synchronous delegation: the parent adopts the child
       // goal and parks — the child rides +d.subgoal, and its retire
-      // (or drop) writes the parent's ready flag back.
+      // (or drop) writes the parent's ready flag back. The `by` form
+      // is remote: the goal stages onto the outbox for the named
+      // peer (delivery is adapter work) and the parent parks on the
+      // grammar-required within bound — its expiry is the
+      // delegated-deadline rung in the settle.
       if (intention == noCell) return false;
       const auto goalName = field("goal");
       if (goalName == noCell) return false;
+      if (const auto peer = field("peer"); peer != noCell) {
+        stageOutbox("achieve", goalName, peer);
+        meta.setIntentionField(intention, "delegated", 1);
+        meta.setIntentionField(intention, "ready", 0);
+        const auto dl      = field("deadline");
+        const auto dlTurns = dl != noCell ? arena.asInt64(dl) : std::nullopt;
+        if (!dlTurns) return false; // `by` without `within` doesn't parse
+        meta.setIntentionField(intention, "awaitDeadline", turn + *dlTurns);
+        return true;
+      }
       const auto goal =
           eventSymbolNamed(arena, core, programRoot, arena.textOf(goalName));
       if (!goal) return false;
@@ -304,6 +346,17 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
                              static_cast<std::int64_t>(intention));
       meta.setIntentionField(intention, "delegated", 1);
       meta.setIntentionField(intention, "ready", 0);
+      // within bounds the delegation in turns — the same scalar clock
+      // await's deadline rides on; the settle's delegated-deadline
+      // rung faults the parent and drops the unfinished child. A
+      // deadline-free re-delegation clears the field so the previous
+      // bound can't fire early on the new child.
+      if (const auto dl = field("deadline"); dl != noCell)
+        if (const auto turns = arena.asInt64(dl)) {
+          meta.setIntentionField(intention, "awaitDeadline", turn + *turns);
+          return true;
+        }
+      meta.setIntentionField(intention, "awaitDeadline", 0);
       return true;
     }
     const auto term = field("term");
@@ -367,7 +420,16 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
     return true;
   };
 
-  if (exec.message) {
+  // A stopped agent's turn is a clean no-op — no journal, dispatch,
+  // drain or settle; the record state persists untouched.
+  const auto agentStopped = [&] {
+    if (const auto rec = varsRecord(arena, core, agent, "stopped", false))
+      if (const auto v = arena.linked(*rec, core.dims().values, DimVector::POS))
+        if (const auto flag = arena.asInt64(*v)) return *flag != 0;
+    return false;
+  }();
+
+  if (!agentStopped && exec.message) {
     const std::string &eventName = exec.message->value;
     journalAppend(arena, agent, arena.makeCell(eventName), dims.seen,
                   static_cast<std::size_t>(setting("vagent.journal_size", 64)));
@@ -380,7 +442,8 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
   // starving the actor; the remainder carries to the next turn.
   const auto drainBound =
       static_cast<std::size_t>(setting("vagent.max_pending", 64));
-  for (std::size_t drained = 0; drained < drainBound; ++drained) {
+  for (std::size_t drained = 0; !agentStopped && drained < drainBound;
+       ++drained) {
     std::optional<CellRef> head;
     for (const CellRef cell : zigzag::rankAfter(arena, agent, dims.pending)) {
       head = cell;
@@ -394,11 +457,14 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
 
   // The fault arm of §3.5's ladder: count the fault and park for the
   // backoff window; the walker's faulted block owns retry and the
-  // drop-when reconsideration at the cap.
+  // drop-when reconsideration at the cap. ready=1 because the ladder
+  // only examines ready intentions — a suspension-point fault
+  // (await/delegation deadline) would otherwise park forever.
   const auto faultIntention = [&](CellRef i) {
     const auto faults = meta.intentionField(i, "faults").value_or(0);
     meta.setIntentionField(i, "faults", faults + 1);
     meta.setIntentionField(i, "faulted", 1);
+    meta.setIntentionField(i, "ready", 1);
     meta.setIntentionField(i, "blocked_until",
                            turn + setting("vagent.intention_backoff", 2));
   };
@@ -430,8 +496,9 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
   // stepping, never cursor state. body_replaced is checked against the
   // adoption-time +d.spin name before any member runs.
   for (const CellRef intention :
-       zigzag::rankAfter(arena, agent, dims.intention) |
-           std::ranges::to<std::vector>()) {
+       agentStopped ? std::vector<CellRef>{}
+                    : zigzag::rankAfter(arena, agent, dims.intention) |
+                          std::ranges::to<std::vector>()) {
     const auto waiting = meta.intentionField(intention, "waiting").value_or(0);
     if (waiting != 0) {
       // §3.5/§3.6 resume: the journal holds the percept the awaited
@@ -471,6 +538,27 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
         faultIntention(intention);
       }
       if (!matched) continue;
+    }
+    const auto delegated =
+        meta.intentionField(intention, "delegated").value_or(0);
+    if (delegated != 0) {
+      // achieve within: the delegation's own deadline. Expiry drops
+      // the unfinished +d.subgoal children — the delegator's
+      // notification path must not fire on them afterwards — then
+      // the parent rides the ordinary fault ladder.
+      const auto deadline =
+          meta.intentionField(intention, "awaitDeadline").value_or(0);
+      if (deadline != 0 && turn >= deadline) {
+        for (const CellRef child :
+             zigzag::rankAfter(arena, intention, dims.subgoal) |
+                 std::ranges::to<std::vector>())
+          unlinkRank(arena, child, dims.intention);
+        zigzag::expectWritten(
+            arena.unlink(intention, dims.subgoal, DimVector::POS));
+        meta.setIntentionField(intention, "delegated", 0);
+        faultIntention(intention);
+      }
+      continue;
     }
     const auto ready   = meta.intentionField(intention, "ready").value_or(0);
     const auto faulted = meta.intentionField(intention, "faulted").value_or(0);
@@ -605,6 +693,15 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
             continue;
           }
         }
+      }
+      // A spine ending on a delegated achieve can't retire — the
+      // record stays parked until the child's retire (or the
+      // deadline rung) resolves the delegation; the wake re-enters
+      // here with step already past the end and retires then.
+      if (meta.intentionField(intention, "delegated").value_or(0) != 0) {
+        meta.setIntentionField(intention, "step",
+                               static_cast<std::int64_t>(next));
+        continue;
       }
       // The intention retires; a delegating parent's achieve resumes
       // on this completion.

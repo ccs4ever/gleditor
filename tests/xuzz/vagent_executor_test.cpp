@@ -653,6 +653,83 @@ TEST(VagentExecutorTest, TellStagesACrossAgentAssertionInTheOutbox) {
   EXPECT_EQ(h.ctx.arena.outstandingMarks(), 0u);
 }
 
+TEST(VagentExecutorTest, AchieveByStagesRemotelyAndWithinBoundsTheWait) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image =
+      h.lower("module demo\nevent Tick\n"
+              "goal Outer() perform\n"
+              "goal Inner() perform\n"
+              "agent A {\n"
+              "  on Tick { adopt Outer() }\n"
+              "  plan o for Outer { achieve Inner() by parent within 2s }\n"
+              "}");
+  ASSERT_TRUE(image);
+  auto &arena     = h.ctx.arena;
+  const auto iDim = h.ctx.core.findOrMintDimension("d.intention");
+  auto binds =
+      mintMetaBindSet(arena, h.ctx.core, h.ctx.core.home(), image->agentCell);
+  ASSERT_TRUE(binds) << binds.error();
+  MetaRuntime meta(h.ctx.core, h.ctx.vm, *binds);
+
+  // Turn 1 — the remote achieve stages {kind,target,payload,id} for
+  // the adapter and parks the parent delegated on the within bound.
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  const auto outbox =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  ASSERT_EQ(outbox.size(), 1u);
+  EXPECT_EQ(outbox[0].kind, "achieve");
+  EXPECT_EQ(outbox[0].target, "parent");
+  EXPECT_EQ(outbox[0].payload, "Inner");
+  const auto live = zigzag::rankAfter(arena, image->agentCell, iDim) |
+                    std::ranges::to<std::vector>();
+  ASSERT_EQ(live.size(), 1u); // the delegating parent alone — no local child
+  EXPECT_EQ(meta.intentionField(live.front(), "delegated"), 1);
+  EXPECT_EQ(meta.intentionField(live.front(), "awaitDeadline"), 3);
+
+  // Turns 2–3 — the bound expires without a delivered completion:
+  // the parent un-parks into the fault ladder.
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+  EXPECT_EQ(meta.intentionField(live.front(), "delegated"), 1);
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+  EXPECT_EQ(meta.intentionField(live.front(), "delegated"), 0);
+  EXPECT_EQ(meta.intentionField(live.front(), "faulted"), 1);
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
+TEST(VagentExecutorTest, StopSelfHaltsEveryLaterTurn) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image = h.lower("module demo\nevent Tick\nevent Done\n"
+                             "agent A { on Tick { stop self; emit Done{} } }");
+  ASSERT_TRUE(image);
+  auto &arena     = h.ctx.arena;
+  const auto jDim = h.ctx.core.findOrMintDimension("d.seen");
+
+  // Turn 1 — the spine completes: stop writes the flag, emit still
+  // lands (statement-boundary semantics).
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  auto outbox =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  ASSERT_EQ(outbox.size(), 1u);
+  EXPECT_EQ(outbox[0].payload, "Done");
+  EXPECT_EQ((zigzag::rankAfter(arena, image->agentCell, jDim) |
+             std::ranges::to<std::vector>())
+                .size(),
+            1u);
+
+  // Turn 2 — a delivered Tick is neither journaled nor dispatched:
+  // the stopped agent's turn is a clean no-op.
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  EXPECT_EQ((zigzag::rankAfter(arena, image->agentCell, jDim) |
+             std::ranges::to<std::vector>())
+                .size(),
+            1u);
+  outbox = VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  EXPECT_EQ(outbox.size(), 1u);
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
 // -- §3.1/§3.8 belief store: predicate banks, provenance, the four verbs ------
 
 TEST(VagentBeliefTest, BelieveBelievesForgetReviseRoundTrip) {

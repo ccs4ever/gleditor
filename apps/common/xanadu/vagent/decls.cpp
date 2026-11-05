@@ -196,6 +196,7 @@ struct Lowerer {
     case ExprKind::Achieve:
     case ExprKind::Tell:
     case ExprKind::Untell:
+    case ExprKind::Stop:
       return true;
     default:
       return false;
@@ -282,6 +283,9 @@ struct Lowerer {
     case ExprKind::Untell:
       verb = "untell";
       break;
+    case ExprKind::Stop:
+      verb = "stop";
+      break;
     default:
       return std::unexpected(Diagnostic{DiagnosticCode::InvalidPosition,
                                         "statement is not a host verb",
@@ -290,15 +294,16 @@ struct Lowerer {
     // tell/untell stage cross-agent assertions through the outbox:
     // peer by name, fact as a marshaled term. The receiver-side
     // assert is the adapter's delivery work — the turn just stages
-    // the record like emit does.
-    if (expr.kind == ExprKind::Tell || expr.kind == ExprKind::Untell) {
-      if (expr.children.size() < 2 ||
+    // the record like emit does. stop's operand is the same kind of
+    // Agent-typed bare name (self/parent or a bound agent var).
+    if (expr.kind == ExprKind::Tell || expr.kind == ExprKind::Untell ||
+        expr.kind == ExprKind::Stop) {
+      const bool stops = expr.kind == ExprKind::Stop;
+      if (expr.children.size() < (stops ? 1 : 2) ||
           expr.children[0]->kind != ExprKind::Identifier)
         return std::unexpected(Diagnostic{DiagnosticCode::InvalidPosition,
-                                          "tell's peer is not a name",
+                                          "peer operand is not a name",
                                           expr.loc});
-      auto term = marshalTerm(*expr.children[1]);
-      if (!term) return std::unexpected(term.error());
       const auto step = arena.makeCell();
       zigzag::expectWritten(arena.link(step, verbDim(), DimVector::POS,
                                        arena.makeCell(std::string{verb})));
@@ -308,18 +313,32 @@ struct Lowerer {
               arena.link(*rec, dims().values, DimVector::POS, value));
       };
       field("peer", arena.makeCell(expr.children[0]->text));
-      field("payload", *term);
+      if (!stops) {
+        auto term = marshalTerm(*expr.children[1]);
+        if (!term) return std::unexpected(term.error());
+        field("payload", *term);
+      }
       return step;
     }
 
     // achieve shares adopt's goal-name marshal — the delegation the
-    // runtime resolves on the parent intention. `by`/within/else arms
-    // refuse at marshal and degrade to stub segments.
+    // runtime resolves on the parent intention. The grammar's only
+    // deadline form is the remote one — `by <agent> within <dur>` —
+    // which stages an outbox record and parks the parent on the
+    // bound; else still refuses.
     if (expr.kind == ExprKind::Achieve) {
-      if (expr.recipients || expr.deadline || expr.recovery)
+      if (expr.recovery)
+        return std::unexpected(
+            Diagnostic{DiagnosticCode::InvalidPosition,
+                       "achieve's else arm does not lower yet", expr.loc});
+      if (expr.recipients && expr.recipients->kind != ExprKind::Identifier)
+        return std::unexpected(Diagnostic{DiagnosticCode::InvalidPosition,
+                                          "achieve's by-target is not a name",
+                                          expr.loc});
+      if (expr.deadline && expr.deadline->kind != ExprKind::Duration)
         return std::unexpected(Diagnostic{
             DiagnosticCode::InvalidPosition,
-            "achieve's by/within/else arms do not lower yet", expr.loc});
+            "achieve's within deadline must be a duration", expr.loc});
       if (expr.children.empty() || expr.children.front()->children.empty() ||
           expr.children.front()->children.front()->kind != ExprKind::Identifier)
         return std::unexpected(
@@ -328,10 +347,17 @@ struct Lowerer {
       const auto step = arena.makeCell();
       zigzag::expectWritten(arena.link(step, verbDim(), DimVector::POS,
                                        arena.makeCell(std::string{verb})));
-      if (const auto rec = varsRecord(arena, core, step, "goal", true))
-        zigzag::expectWritten(arena.link(
-            *rec, dims().values, DimVector::POS,
-            arena.makeCell(expr.children.front()->children.front()->text)));
+      const auto field = [&](std::string_view name, CellRef value) {
+        if (const auto rec = varsRecord(arena, core, step, name, true))
+          zigzag::expectWritten(
+              arena.link(*rec, dims().values, DimVector::POS, value));
+      };
+      field("goal",
+            arena.makeCell(expr.children.front()->children.front()->text));
+      if (expr.recipients) field("peer", arena.makeCell(expr.recipients->text));
+      if (expr.deadline)
+        field("deadline", arena.makeScalarCell(static_cast<std::int64_t>(
+                              std::stoll(expr.deadline->text))));
       return step;
     }
 
