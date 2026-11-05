@@ -32,7 +32,7 @@ std::vector<CellRef> VQLCompiler::emitClamp(std::span<const CellRef> inputs,
   emitIteratorLoop(iteratorFor(), [&](CellRef) {
     arithmetic(OpcodeKind::Add, count, one, count);
   });
-  const auto end      = vm_.mintOpcode(OpcodeKind::Nop, "#CLAMP_END");
+  const auto end      = mintOpcode(OpcodeKind::Nop, "#CLAMP_END");
   const auto nonempty = arithmetic(OpcodeKind::Gt, count, zero);
   const auto empty    = emitOp(OpcodeKind::BranchFalseCell, "#CLAMP_EMPTY");
   emitInput(empty, nonempty);
@@ -58,7 +58,7 @@ std::vector<CellRef> VQLCompiler::emitClamp(std::span<const CellRef> inputs,
     const auto lower    = arithmetic(OpcodeKind::Gte, index, from);
     const auto upper    = arithmetic(OpcodeKind::Lte, index, to);
     const auto included = arithmetic(OpcodeKind::And, lower, upper);
-    const auto skip     = vm_.mintOpcode(OpcodeKind::Nop, "#CLAMP_SKIP");
+    const auto skip     = mintOpcode(OpcodeKind::Nop, "#CLAMP_SKIP");
     const auto branch   = emitOp(OpcodeKind::BranchFalseCell, "#CLAMP_FILTER");
     emitInput(branch, included);
     emitInput(branch, skip);

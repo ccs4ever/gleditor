@@ -335,6 +335,8 @@ VPLCompiler::opcodeMnemonic(zigzag::vortex::OpcodeKind kind) noexcept {
     return "CHOICE";
   case OpcodeKind::ScopedChoice:
     return "SCOPEDCHOICE";
+  case OpcodeKind::VqlFieldProbe:
+    return "VQLFIELDPROBE";
   case OpcodeKind::Fail:
     return "FAIL";
   case OpcodeKind::Cut:

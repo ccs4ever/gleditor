@@ -2315,8 +2315,9 @@ explicit refusals. The rulings below describe the intended semantics.
   instructions with full operand cardinality checks. Computed `string()` and `+` values are
   materialized into fresh cells at runtime so successive loop results remain distinct; variable/path
   aliases keep their identities. Return-item/top-level grammar and legacy direct-consumer routing
-  remain incomplete; unsupported routes refuse explicitly. Nonliteral contract-field defaults still
-  require graph continuations. See [iterations 18–19](projects/vortex-vm-only-iterations.md).
+  remain incomplete; unsupported routes refuse explicitly. Computed contract-field defaults now use
+  scoped graph continuations in inline calls and loop destructuring; affected recursive definitions
+  still require frame eligibility. See [iterations 18–23](projects/vortex-vm-only-iterations.md).
 
 - **A default is used only when the field is absent**, and passing a cell or a path never mints: the
   bound cell is the linked one. A literal field default mints its scalar only when it is used;
@@ -2334,14 +2335,15 @@ explicit refusals. The rulings below describe the intended semantics.
 
 - **Block bindings run per member.** Nested `for` bindings preserve source order and duplicates;
   `where` and conditional actions branch in the VM. Untyped missing destructure fields bind empty,
-  while explicit types determine whether absence is accepted. Literal field defaults are lazy.
-  Variable-alias field defaults capture prior lexical VM slots and preserve cell identity when a
-  field is absent; a present field never reads its fallback. This lowering accepts zero or one
-  fallback cell, with explicit refusal of larger streams and defaults requiring path/call thunks.
-  Context fields accept a type and alias, and their captures establish the callee's context.
-  `VQL_CONTRACT/4` records explicit subject counts and ordered fallback slots as well as the
-  context-capture layout. Its output layout excludes names inside stream element contracts and
-  refinements; older descriptors are refused.
+  while explicit types determine whether absence is accepted. Supported field defaults are lazy.
+  Variable-alias field defaults capture prior lexical VM slots, preserving identity for zero or one
+  fallback cell; larger direct-alias streams refuse. Path/call defaults execute compiled graphs only
+  when absent and preserve full result order and duplicates. Literal defaults mint fresh values only
+  on that branch. Defaults see the original lexical environment and the exact owning nested cell,
+  rather than earlier captures from the same pattern. Context fields accept a type and alias, and
+  their captures establish the callee's context. `VQL_CONTRACT/4` records explicit subject counts
+  and ordered fallback slots as well as the context-capture layout. Its output layout excludes names
+  inside stream element contracts and refinements; older descriptors are refused.
 
 - **The compiler uses real VM instructions.** Bound point-free steps lower to Vortex traversals;
   typed calls use shared matching, capture slots, mismatch branches, body instructions and return
@@ -2370,9 +2372,10 @@ explicit refusals. The rulings below describe the intended semantics.
   refuse explicitly. Runtime rank iterators and eager sequence registers now support per-member
   typed filtering, stream cardinality, predicates and integer index clamps. Foreign neighbors
   resolve through canonical arena proxies; choice points restore iterator state and proxy minting.
-  Universal lazy streaming, recursive functor/variadic frames, path/call contract-field default
-  thunks, mutation enforcement, and complete frontend/parallel parity remain open; compiled
-  execution never silently calls the direct evaluator as a fallback.
+  Computed defaults currently keep their outer definition on compiled inline graphs; eligible closed
+  helpers may use recursive frames. Native frame eligibility for these outer definitions, universal
+  lazy streaming, recursive functor/variadic frames, mutation enforcement and complete frontend/
+  parallel parity remain open. Compiled execution never silently calls a direct evaluator.
 
 ______________________________________________________________________
 

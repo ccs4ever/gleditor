@@ -408,3 +408,20 @@ with independent Luna architecture and senior/profiler gates. See
 The graph backend has not yet been wired, so path/call field-default thunks still refuse in compiled
 contracts. Mutation contracts, functor ABI and remaining grammar/route/lifecycle work also keep
 §4.12 incomplete. This refactor adds no runtime interpreter fallback or measured speedup.
+
+## Lazy computed field-default graphs
+
+Computed field defaults now lower through the shared driver into scoped Vortex graphs for inline
+calls, return checks and loop destructuring. Path/call defaults run only on absence with the exact
+owner and prematch lexical environment, preserve full result streams, and roll back failed arms or
+validation-only success. Direct aliases retain zero/one constraints; lazy literal boxing preserves
+identity across loop iterations. Runtime named field probes and request-abort cleanup restore
+arena/VM state without refunding fuel; raw stops stay resumable. See
+[iteration 23](projects/vortex-vm-only-iterations.md).
+
+Full build and all 612 affected tests from 58 suites passed, with fresh-VM export/reload, host/mesh
+source routes and a real headless CLI returning `lazy`. Independent Luna architecture and
+senior/profiler gates accepted this bounded slice. Outer functions with computed defaults remain
+inline-only; their recursive/native-frame route is next. Sealed artifacts, mutation enforcement,
+complete functor/variadic behavior and remaining route/lifecycle work still prevent §4.12
+completion. No speedup or full-suite pass is claimed.

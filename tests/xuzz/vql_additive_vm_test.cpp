@@ -388,8 +388,10 @@ TEST(VQLAdditiveVMTest, FramesCapturesDefaultsAndRealQueryBodiesUseNativeAdd) {
   const auto fieldDefault = h.run(
       "def pure inspect($item: Cell { +d.sum: $sum: Int := 1 + 2 }): Int := "
       "$sum; inspect(##)");
-  EXPECT_FALSE(fieldDefault.compiled);
-  EXPECT_NE(fieldDefault.error.find("default expression"), std::string::npos);
+  ASSERT_TRUE(fieldDefault.compiled) << fieldDefault.error;
+  ASSERT_TRUE(fieldDefault.executed) << fieldDefault.error;
+  ASSERT_EQ(fieldDefault.values.size(), 1u);
+  EXPECT_EQ(h.arena.asInt64(fieldDefault.values.front()), 3);
 }
 
 TEST(VQLAdditiveVMTest, LoopAddResultsAreBoxedPerIterationAndRemainStable) {

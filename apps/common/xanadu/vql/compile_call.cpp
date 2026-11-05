@@ -215,8 +215,7 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
 
   const auto clear =
       emitOp(OpcodeKind::ClearCellRefs, "#CALL_CLEAR " + definition.name);
-  const auto end =
-      vm_.mintOpcode(OpcodeKind::Nop, "#CALL_END " + definition.name);
+  const auto end  = mintOpcode(OpcodeKind::Nop, "#CALL_END " + definition.name);
   const auto bind = [&](const std::string &name, std::vector<CellRef> cells) {
     functorBindings_.erase(name);
     streamBindings_[name] = cells;
@@ -226,26 +225,7 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
   const auto check = [&](const TypeExpr &type,
                          const std::vector<CellRef> &subjects,
                          const bool bindCaptures) {
-    const auto defaultSlots = emitContractDefaultSlots(type);
-    const auto descriptor   = emitConstant(encodeTypeDescriptor(type));
-    const auto match =
-        emitOp(OpcodeKind::MatchContract, "#MATCH " + definition.name);
-    emitInput(match, descriptor);
-    emitInputConstant(match, static_cast<std::int64_t>(subjects.size()));
-    for (const auto subject : subjects) emitInput(match, subject);
-    for (const auto slot : defaultSlots) emitInput(match, slot);
-    const auto matched = core_.arena().makeCell();
-    emitOutput(match, matched);
-    for (const auto &name : ContractMatcher::contractCaptureNames(type)) {
-      const auto capture = core_.arena().makeCell();
-      emitOutput(match, capture);
-      if (bindCaptures) {
-        bind(name, {capture});
-        if (name == ".") {
-          ambientContext_ = emitContextFallback(capture, ambientContext_);
-        }
-      }
-    }
+    const CellRef matched = emitContractMatch(type, subjects, bindCaptures);
     const auto branch = emitOp(OpcodeKind::BranchFalseCell, "#PARAM_FILTER");
     emitInput(branch, matched);
     emitInput(branch, end);
@@ -324,16 +304,8 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
     }
   }
   if (definition.returnType) {
-    const auto defaultSlots = emitContractDefaultSlots(*definition.returnType);
-    const auto descriptor =
-        emitConstant(encodeTypeDescriptor(*definition.returnType));
-    const auto require =
-        emitOp(OpcodeKind::RequireContract, "#RETURN_TYPE " + definition.name);
-    emitInput(require, descriptor);
-    emitInputConstant(require, definition.name);
-    emitInputConstant(require, static_cast<std::int64_t>(bodyResults.size()));
-    for (const auto result : bodyResults) emitInput(require, result);
-    for (const auto slot : defaultSlots) emitInput(require, slot);
+    emitRequiredContractMatch(*definition.returnType, bodyResults,
+                              definition.name);
   }
   std::vector<CellRef> results;
   const auto copy =
@@ -601,8 +573,8 @@ void VQLCompiler::compileFrameDefinition(const DefDeclaration &definition) {
   }
   dynamicStreams_.insert(resultSlot);
 
-  const CellRef returnOpcode = vm_.mintOpcode(
-      OpcodeKind::ReturnFrame, "#RETURN_FRAME " + definition.name);
+  const CellRef returnOpcode =
+      mintOpcode(OpcodeKind::ReturnFrame, "#RETURN_FRAME " + definition.name);
   core_.bindInput(returnOpcode, descriptor);
   const auto emitMatch = [&](const TypeExpr &type,
                              const std::vector<CellRef> &subjects) {
@@ -637,8 +609,7 @@ void VQLCompiler::compileFrameDefinition(const DefDeclaration &definition) {
       const CellRef negate     = emitOp(OpcodeKind::Not, "#FRAME_DEFAULT_TEST");
       emitInput(negate, *presenceSlots[index]);
       emitOutput(negate, notPresent);
-      const CellRef skip =
-          vm_.mintOpcode(OpcodeKind::Nop, "#FRAME_DEFAULT_SKIP");
+      const CellRef skip = mintOpcode(OpcodeKind::Nop, "#FRAME_DEFAULT_SKIP");
       const CellRef branch =
           emitOp(OpcodeKind::BranchFalseCell, "#FRAME_DEFAULT_MISSING");
       emitInput(branch, notPresent);

@@ -6,9 +6,6 @@
 #include <type_traits>
 #include <utility>
 
-#include "common/xanadu/vql/contract_codec.hpp"
-#include "common/xanadu/vql/contracts.hpp"
-
 namespace xanadu::vql {
 namespace {
 
@@ -37,12 +34,6 @@ TypeExpr destructureContract(const DestructurePattern &source) {
       .unionType =
           UnionType{.members = {PrimaryType{
                         .kind = ShapeType{.pattern = std::move(pattern)}}}}};
-  try {
-    ContractMatcher::validateType(contract);
-    (void)encodeTypeDescriptor(contract);
-  } catch (const std::exception &error) {
-    throw std::invalid_argument(error.what());
-  }
   return contract;
 }
 
@@ -133,8 +124,7 @@ VQLCompiler::compileExecutionBlock(const ExecutionBlock &block) {
               throw std::invalid_argument(
                   "conditional action has no compiled predicate");
             }
-            const CellRef otherwise =
-                vm_.mintOpcode(OpcodeKind::Nop, "#IF_ELSE");
+            const CellRef otherwise = mintOpcode(OpcodeKind::Nop, "#IF_ELSE");
             const CellRef branch =
                 emitOp(OpcodeKind::BranchFalseCell, "#IF_FALSE");
             emitInput(branch, *condition);
@@ -154,7 +144,7 @@ VQLCompiler::compileExecutionBlock(const ExecutionBlock &block) {
             };
             if (clause.thenClause) compileScopedAction(*clause.thenClause);
             if (clause.elseClause) {
-              const CellRef done = vm_.mintOpcode(OpcodeKind::Nop, "#IF_DONE");
+              const CellRef done = mintOpcode(OpcodeKind::Nop, "#IF_DONE");
               const CellRef join =
                   emitOp(OpcodeKind::BranchFalseCell, "#IF_JOIN");
               emitInputConstant(join, false);
@@ -184,7 +174,7 @@ VQLCompiler::compileExecutionBlock(const ExecutionBlock &block) {
       if (!predicate) {
         throw std::invalid_argument("where clause has no compiled predicate");
       }
-      const CellRef skip = vm_.mintOpcode(OpcodeKind::Nop, "#WHERE_SKIP");
+      const CellRef skip = mintOpcode(OpcodeKind::Nop, "#WHERE_SKIP");
       const CellRef branch =
           emitOp(OpcodeKind::BranchFalseCell, "#WHERE_FALSE");
       emitInput(branch, *predicate);
@@ -226,30 +216,10 @@ VQLCompiler::compileExecutionBlock(const ExecutionBlock &block) {
 
       std::optional<CellRef> skip;
       if (loop.destructurePattern) {
-        const auto contract     = destructureContract(*loop.destructurePattern);
-        const auto defaultSlots = emitContractDefaultSlots(contract);
-        const auto names = ContractMatcher::contractCaptureNames(contract);
-        const CellRef descriptor = emitConstant(encodeTypeDescriptor(contract));
-        const CellRef match = emitOp(OpcodeKind::MatchContract, "#FOR_MATCH");
-        emitInput(match, descriptor);
-        emitInputConstant(match, std::int64_t{1});
-        emitInput(match, item);
-        for (const auto slot : defaultSlots) emitInput(match, slot);
-        const CellRef matched = core_.arena().makeCell();
-        emitOutput(match, matched);
-        for (const auto &name : names) {
-          const CellRef capture = core_.arena().makeCell();
-          emitOutput(match, capture);
-          CellRef boundCapture = capture;
-          if (name == ".") {
-            boundCapture    = emitContextFallback(capture, ambientContext_);
-            ambientContext_ = boundCapture;
-          }
-          functorBindings_.erase(name);
-          streamBindings_[name] = {boundCapture};
-          varBindings_[name]    = boundCapture;
-        }
-        skip = vm_.mintOpcode(OpcodeKind::Nop, "#FOR_PATTERN_SKIP");
+        const auto contract = destructureContract(*loop.destructurePattern);
+        const CellRef matched =
+            emitContractMatch(contract, std::span{&item, std::size_t{1}}, true);
+        skip = mintOpcode(OpcodeKind::Nop, "#FOR_PATTERN_SKIP");
         const CellRef branch =
             emitOp(OpcodeKind::BranchFalseCell, "#FOR_PATTERN_FALSE");
         emitInput(branch, matched);

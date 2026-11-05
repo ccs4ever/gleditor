@@ -635,6 +635,9 @@ std::vector<CellValue> VortexStdLib::call(CellRef fnOp,
     throw std::invalid_argument(
         "stdlib raw calls do not support activation-frame opcodes");
   }
+  if (vm_.getOpcodeKind(fnOp) == OpcodeKind::VqlFieldProbe)
+    throw std::invalid_argument(
+        "stdlib raw calls do not support named field probes");
   if (vm_.getOpcodeKind(fnOp) == OpcodeKind::ScopedChoice)
     throw std::invalid_argument(
         "stdlib raw calls do not support scoped choices");

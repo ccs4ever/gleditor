@@ -125,6 +125,8 @@ VQLCompiler::opcodeMnemonic(zigzag::vortex::OpcodeKind kind) noexcept {
     return "VQL_BOX_SCALAR";
   case OpcodeKind::ScopedChoice:
     return "SCOPED_CHOICE";
+  case OpcodeKind::VqlFieldProbe:
+    return "VQL_FIELD_PROBE";
   case OpcodeKind::RankBegin:
     return "RANK_BEGIN";
   case OpcodeKind::IteratorNext:
@@ -184,8 +186,25 @@ VQLCompiler::VQLCompiler(MultiStoreCoordinator &coordinator,
   vm_.setContractCoordinator(coordinator);
 }
 
+void VQLCompiler::chargeContractEmission() {
+  if (!compilingGraphContract_) return;
+  if (remainingContractEmissions_ == 0)
+    throw std::invalid_argument(
+        "compiled contract graph emission budget exhausted");
+  --remainingContractEmissions_;
+}
+
+CellRef VQLCompiler::mintOpcode(OpcodeKind kind, std::string_view label) {
+  chargeContractEmission();
+  return vm_.mintOpcode(kind, label);
+}
+
+CellRef VQLCompiler::mintContractLabel(std::string_view label) {
+  return mintOpcode(OpcodeKind::Nop, label);
+}
+
 CellRef VQLCompiler::emitOp(OpcodeKind kind, std::string_view label) {
-  CellRef op = vm_.mintOpcode(kind, label);
+  CellRef op = mintOpcode(kind, label);
   if (!entryOp_) {
     entryOp_ = op;
   }
@@ -223,6 +242,8 @@ CellRef VQLCompiler::emitInputConstant(CellRef op, const CellValue &val) {
 CompilationResult VQLCompiler::compile(const QueryExpression &query,
                                        const CompilationOptions &options) {
   zigzag::vortex::AssemblyTransaction transaction(vm_);
+  remainingContractEmissions_             = options.maxContractEmissions;
+  compilingGraphContract_                 = false;
   remainingShapePredicateRules_           = maxCompiledShapePredicateRules;
   remainingShapePredicateValidationNodes_ = maxCompiledShapePredicateRules;
   shapeTargetConstants_.clear();
@@ -422,7 +443,7 @@ VQLCompiler::compilePathExpression(const PathExpression &path,
       emitOutput(clear, result);
       auto condition = compileBooleanExpr(predicate, candidate);
       if (!condition) condition = emitConstant(false);
-      const auto end    = vm_.mintOpcode(OpcodeKind::Nop, "#ANCHOR_FILTER_END");
+      const auto end    = mintOpcode(OpcodeKind::Nop, "#ANCHOR_FILTER_END");
       const auto branch = emitOp(OpcodeKind::BranchFalseCell, "#ANCHOR_FILTER");
       emitInput(branch, *condition);
       emitInput(branch, end);
@@ -595,7 +616,7 @@ std::optional<CellRef> VQLCompiler::compileBooleanExpr(const BooleanExpr &expr,
   const auto initialize = emitOp(OpcodeKind::CopyCellRefs, "#BOOL_FALSE");
   emitInput(initialize, falseValue);
   emitOutput(initialize, result);
-  const auto end    = vm_.mintOpcode(OpcodeKind::Nop, "#BOOL_END");
+  const auto end    = mintOpcode(OpcodeKind::Nop, "#BOOL_END");
   const auto append = [&](CellRef opcode) {
     zigzag::expectWritten(
         core_.arena().link(*currentOp_, core_.dims().spin, false, opcode));
@@ -605,7 +626,7 @@ std::optional<CellRef> VQLCompiler::compileBooleanExpr(const BooleanExpr &expr,
   // False factors skip the remainder of their conjunction; a true term skips
   // all later alternatives, including effects and return-contract checks.
   for (const auto &term : expr.terms) {
-    const auto nextTerm = vm_.mintOpcode(OpcodeKind::Nop, "#BOOL_NEXT_TERM");
+    const auto nextTerm = mintOpcode(OpcodeKind::Nop, "#BOOL_NEXT_TERM");
     for (const auto &factor : term.factors) {
       std::optional<CellRef> factCell;
       if (std::holds_alternative<ComparisonExpr>(factor.test)) {

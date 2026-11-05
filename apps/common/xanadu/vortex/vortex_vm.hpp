@@ -116,6 +116,7 @@ enum class OpcodeKind : std::uint8_t {
   VqlAdd,
   VqlBoxScalar,
   ScopedChoice,
+  VqlFieldProbe,
 };
 
 struct FrameDescriptorError {
@@ -256,6 +257,9 @@ public:
   void pushChoicePoint(std::optional<CellRef> cursor, CellRef altOp);
   bool backtrack(std::optional<CellRef> cursor);
   void cut(std::size_t cutBarrier = 0);
+  /// Restore and discard choice points owned by a failed, nonresumable request.
+  /// The caller must immediately close the cursor before executing again.
+  VortexVM *abortScopedChoices(CellRef cursor) noexcept;
   [[nodiscard]] std::size_t choiceDepth() const noexcept;
   void clearChoicePoints();
   VortexVM *setScopedChoiceLimits(ScopedChoiceLimits limits);
@@ -367,6 +371,8 @@ private:
                                       std::vector<CellValue> &outputs);
   ExecutionResult executeProbeLink(CellRef opcode,
                                    std::vector<CellValue> &outputs);
+  ExecutionResult executeVqlFieldProbe(CellRef opcode,
+                                       std::vector<CellValue> &outputs);
   ExecutionResult executeTypeContract(OpcodeKind kind, CellRef opcode,
                                       std::vector<CellValue> &outputs);
   xanadu::MultiStoreCoordinator *contractCoordinator_{nullptr};

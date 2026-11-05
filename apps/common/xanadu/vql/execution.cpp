@@ -152,8 +152,10 @@ QueryExecutor::executeVortex(const QueryExpression &query,
 
     // A frontend request has no resume handle. Keep raw VM stops resumable,
     // but release this request's cursor on success, failure, or exception.
-    const RestoreScope finishRequest{
-        [this, id = cursor] { vm_.setCursorOpcode(id, std::nullopt); }};
+    const RestoreScope finishRequest{[this, id = cursor] {
+      vm_.abortScopedChoices(id);
+      vm_.setCursorOpcode(id, std::nullopt);
+    }};
     const auto execution = vm_.run(cursor, options_.maxCycles);
     if (!execution.success) {
       const auto category =

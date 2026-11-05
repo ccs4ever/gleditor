@@ -9,6 +9,7 @@ using zigzag::DimVector;
 using zigzag::vortex::OpcodeKind;
 
 void VQLCompiler::appendOpcode(CellRef opcode) {
+  chargeContractEmission();
   if (currentOp_)
     zigzag::expectWritten(
         core_.arena().link(*currentOp_, core_.dims().spin, false, opcode));
@@ -34,7 +35,7 @@ void VQLCompiler::emitIteratorLoop(
   const auto present = core_.arena().makeCell();
   emitOutput(next, item);
   emitOutput(next, present);
-  const auto end = vm_.mintOpcode(OpcodeKind::Nop, "#ITERATOR_END");
+  const auto end = mintOpcode(OpcodeKind::Nop, "#ITERATOR_END");
   const auto branch =
       emitOp(OpcodeKind::BranchFalseCell, "#ITERATOR_EXHAUSTED");
   emitInput(branch, present);
@@ -70,7 +71,7 @@ CellRef VQLCompiler::emitDereference(CellRef candidate) {
   const auto neighbor = core_.arena().makeCell();
   emitOutput(terminal, neighbor);
   const auto repeated = emitCellPresence(neighbor);
-  const auto end      = vm_.mintOpcode(OpcodeKind::Nop, "#MASTER_END");
+  const auto end      = mintOpcode(OpcodeKind::Nop, "#MASTER_END");
   const auto branch   = emitOp(OpcodeKind::BranchFalseCell, "#MASTER_CYCLE");
   emitInput(branch, repeated);
   emitInput(branch, end);
@@ -193,7 +194,7 @@ VQLCompiler::emitContextFallback(const CellRef candidate,
   }
 
   const auto present = emitCellPresence(candidate);
-  const auto end     = vm_.mintOpcode(OpcodeKind::Nop, "#CONTEXT_CAPTURE_END");
+  const auto end     = mintOpcode(OpcodeKind::Nop, "#CONTEXT_CAPTURE_END");
   const auto branch  = emitOp(OpcodeKind::BranchFalseCell, "#CONTEXT_TEST");
   emitInput(branch, present);
   emitInput(branch, end);

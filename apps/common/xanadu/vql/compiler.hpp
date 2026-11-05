@@ -45,6 +45,7 @@ struct CompilationOptions {
   bool optimize{false};                 ///< Enable optimizations
   std::vector<zigzag::CellRef> contextCells;
   std::unordered_map<std::string, std::vector<zigzag::CellRef>> initialBindings;
+  std::size_t maxContractEmissions{65536};
 };
 
 struct CompilationResult {
@@ -91,6 +92,8 @@ public:
 
 private:
   // Emission helpers
+  zigzag::CellRef mintOpcode(zigzag::vortex::OpcodeKind kind,
+                             std::string_view label = {});
   zigzag::CellRef emitOp(zigzag::vortex::OpcodeKind kind,
                          std::string_view label = {});
   void emitInput(zigzag::CellRef op, zigzag::CellRef operand);
@@ -155,6 +158,15 @@ private:
   compileBuiltinInvocation(const FunctionInvocation &invocation,
                            std::optional<zigzag::CellRef> context);
   std::vector<zigzag::CellRef> emitContractDefaultSlots(const TypeExpr &type);
+  zigzag::CellRef emitContractMatch(const TypeExpr &type,
+                                    std::span<const zigzag::CellRef> subjects,
+                                    bool bindCaptures);
+  void emitRequiredContractMatch(const TypeExpr &type,
+                                 std::span<const zigzag::CellRef> subjects,
+                                 std::string_view functionName);
+  void chargeContractEmission();
+  zigzag::CellRef mintContractLabel(std::string_view label);
+  class ContractGraphBackend;
   std::unordered_map<std::string, DefDeclaration> definitions_;
   std::unordered_map<std::string, std::vector<std::string>>
       frameFreeCaptureNames_;
@@ -217,6 +229,8 @@ private:
   std::size_t remainingShapePredicateRules_{maxCompiledShapePredicateRules};
   std::size_t remainingShapePredicateValidationNodes_{
       maxCompiledShapePredicateRules};
+  std::size_t remainingContractEmissions_{};
+  bool compilingGraphContract_{false};
   std::unordered_map<const ValueExpr *, zigzag::CellRef> shapeTargetConstants_;
   zigzag::CellRef compileShapePredicateImpl(const ShapeLiteral &shape,
                                             zigzag::CellRef candidate);

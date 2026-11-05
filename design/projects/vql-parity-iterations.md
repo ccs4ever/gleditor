@@ -294,3 +294,12 @@ still stops at the same two unchanged UI typography defaults. The library and ro
 were not rerun for these engine-only changes; their preceding successful runs are recorded above.
 Logs: `/tmp/vql-iterations-full-xuzz.log`, `/tmp/vql-iterations-zigzag.log`,
 `/tmp/vql-iterations-lint.log`. Full §4.12 remains incomplete.
+
+## Mutation-boundary follow-up found during lazy-default validation
+
+A malformed fragment fixture exposed a pre-existing content-run narrowing issue:
+`ArenaManifold::setContentAt` casts the span count to `uint16_t` without refusing more than 65,535
+spans. Keep this separate from the field-probe work: audit the public span-accepting mutation/mint
+paths and add atomic refusal before changing content or shadows. Native probe tests use a
+representable fragmented run and independently enforce aggregate name-byte bounds. This issue
+remains unfinished mutation/data-integrity work.

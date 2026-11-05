@@ -334,7 +334,7 @@ TEST(VQLStringVMTest, UserDefinitionNamedStringTakesPrecedence) {
   EXPECT_EQ(h.arena.textOf(result.values.front()), "user definition");
 }
 
-TEST(VQLStringVMTest, ParameterDefaultCanCallStringButFieldDefaultRefuses) {
+TEST(VQLStringVMTest, ParameterAndFieldDefaultsCanCallString) {
   Harness h;
   const auto parameterDefault =
       h.run("def pure choose($value: String := string(7)): String := $value; "
@@ -349,8 +349,11 @@ TEST(VQLStringVMTest, ParameterDefaultCanCallStringButFieldDefaultRefuses) {
       h.run("def pure choose($fallback: Int, $item: Cell { +d.name: "
             "$name: String := string($fallback) }): String := $name; "
             "choose(7, ##)");
-  EXPECT_FALSE(fieldDefault.compiled);
-  EXPECT_NE(fieldDefault.error.find("default expression"), std::string::npos);
+  ASSERT_TRUE(fieldDefault.compiled) << fieldDefault.error;
+  ASSERT_TRUE(fieldDefault.executed) << fieldDefault.error;
+  EXPECT_GT(fieldDefault.stringOps, 0u);
+  ASSERT_EQ(fieldDefault.values.size(), 1u);
+  EXPECT_EQ(h.arena.textOf(fieldDefault.values.front()), "7");
 }
 
 TEST(VQLStringVMTest, EmptyMultiAndStructuralInputsRefuseWithoutTruncation) {

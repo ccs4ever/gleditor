@@ -135,13 +135,8 @@ TEST(VQLAliasDefaultVMTest, EmptyAliasStaysEmptyWhenFieldIsMissing) {
   EXPECT_TRUE(result->empty());
 }
 
-TEST(VQLAliasDefaultVMTest, UnsupportedDefaultExpressionsRefuseCompilation) {
+TEST(VQLAliasDefaultVMTest, MissingAndFunctorDefaultAliasesRefuseCompilation) {
   const std::vector<std::string> queries{
-      "def choose($item: Cell { +d.value: $value: Cell := ##/d.value }): "
-      "Cell := $value; choose(##/d.item)",
-      "def fallback(): Cell := ##/d.value; def choose($item: Cell { "
-      "+d.value: $value: Cell := fallback() }): Cell := $value; "
-      "choose(##/d.item)",
       "def choose($item: Cell { +d.value: $value: Cell := $missing }): Cell "
       ":= $value; choose(##/d.item)",
       "def choose($item: Cell { +d.value: $value: Cell := $fallback }): "
@@ -154,6 +149,27 @@ TEST(VQLAliasDefaultVMTest, UnsupportedDefaultExpressionsRefuseCompilation) {
     ASSERT_FALSE(result);
     EXPECT_EQ(result.error().category, QueryExecutionError::Category::Compile);
     EXPECT_FALSE(result.error().message.empty());
+  }
+}
+
+TEST(VQLAliasDefaultVMTest, PathAndCallDefaultsPreserveFallbackIdentity) {
+  const std::vector<std::string> queries{
+      "def choose($item: Cell { +d.value: $value: Cell := ##/d.value }): "
+      "Cell := $value; choose(##/d.item)",
+      "def fallback(): Cell := ##/d.value; def choose($item: Cell { "
+      "+d.value: $value: Cell := fallback() }): Cell := $value; "
+      "choose(##/d.item)",
+  };
+  for (const auto &query : queries) {
+    SCOPED_TRACE(query);
+    Harness h;
+    const auto item     = h.arena.makeCell("item");
+    const auto fallback = h.arena.makeCell("fallback");
+    addRank(h, h.core.home(), "d.item", item);
+    addRank(h, h.core.home(), "d.value", fallback);
+    const auto result = run(h, query);
+    ASSERT_TRUE(result) << result.error().message;
+    EXPECT_EQ(*result, (std::vector<CellRef>{fallback}));
   }
 }
 

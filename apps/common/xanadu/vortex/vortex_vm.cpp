@@ -15,6 +15,9 @@
 
 #include <gleditor/logging.hpp>
 
+#include "common/xanadu/multi_store.hpp"
+#include "common/xanadu/vql/contract_codec.hpp"
+#include "common/xanadu/zigzag/arena_savepoint.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
 #include "common/xanadu/zigzag/vlog.hpp"
 
@@ -187,7 +190,7 @@ std::optional<OpcodeKind> VortexVM::getOpcodeKind(CellRef opCell) const {
   auto val = core_.arena().asInt64(opCell);
   if (val && *val >= 0 &&
       static_cast<std::uint64_t>(*val) <=
-          static_cast<std::uint64_t>(OpcodeKind::ScopedChoice)) {
+          static_cast<std::uint64_t>(OpcodeKind::VqlFieldProbe)) {
     return static_cast<OpcodeKind>(*val);
   }
   return std::nullopt;
@@ -386,6 +389,108 @@ ExecutionResult VortexVM::executeProbeLink(const CellRef opcode,
                      *directionValue > 0 ? DimVector::POS : DimVector::NEG)
                : std::nullopt;
     outputs.emplace_back(static_cast<std::int64_t>(neighbor.value_or(noCell)));
+    return {};
+  } catch (const std::exception &error) {
+    return fail(error.what());
+  }
+}
+
+ExecutionResult
+VortexVM::executeVqlFieldProbe(const CellRef opcode,
+                               std::vector<CellValue> &outputs) {
+  const auto fail = [opcode](std::string message) {
+    return ExecutionResult{.success       = false,
+                           .failingClause = opcode,
+                           .errorMessage  = std::move(message)};
+  };
+  try {
+    const auto inputs = inputsOf(opcode);
+    const auto slots  = outputsOf(opcode);
+    if (inputs.size() != 3 || slots.size() != 1)
+      return fail("VqlFieldProbe expects owner, dimension name, direction, and "
+                  "one output");
+    if (std::ranges::find(inputs, slots.front()) != inputs.end())
+      return fail("VqlFieldProbe output must not alias an input");
+    if (isMemoized(opcode)) return fail("VqlFieldProbe cannot be memoized");
+    if (!core_.preconditionsOf(opcode).empty() ||
+        !core_.postconditionsOf(opcode).empty())
+      return fail("VqlFieldProbe does not support pre/postconditions");
+
+    const auto typed = [this](const CellRef slot) {
+      return streamSlots_.contains(slot) || iteratorSlots_.contains(slot);
+    };
+    if (std::ranges::any_of(inputs, typed) || typed(slots.front()))
+      return fail("VqlFieldProbe requires scalar reference slots");
+    if (std::ranges::any_of(
+            inputs,
+            [&](const CellRef slot) { return core_.hasPipeline(slot); }) ||
+        core_.hasPipeline(slots.front()))
+      return fail("VqlFieldProbe does not support parameter pipelines");
+    for (const CellRef slot : inputs) {
+      if (!core_.arena().contains(slot))
+        return fail("VqlFieldProbe input slot is missing");
+    }
+    if (!core_.arena().contains(slots.front()))
+      return fail("VqlFieldProbe output slot is missing");
+
+    if (cellReferences_.contains(inputs[1]) ||
+        cellReferences_.contains(inputs[2]))
+      return fail("VqlFieldProbe name and direction must be scalar values");
+    if (core_.arena().valueKindOf(inputs[1]) != xanadu::ValueKind::None)
+      return fail("VqlFieldProbe dimension name must be text");
+    const auto direction = core_.arena().asInt64(inputs[2]);
+    if (!direction || (*direction != 1 && *direction != -1))
+      return fail("VqlFieldProbe direction must be exactly +1 or -1");
+
+    const xanadu::vql::ContractDescriptorLimits limits{};
+    const auto fragments = core_.arena().contentOf(inputs[1]);
+    if (fragments.size() > limits.maxBytes)
+      return fail("VqlFieldProbe dimension name has too many text fragments");
+    std::size_t nameBytes = 0;
+    for (const auto &fragment : fragments) {
+      core_.arena().consumeWork();
+      if (fragment.length > limits.maxBytes - nameBytes)
+        return fail("VqlFieldProbe dimension name exceeds the text limit");
+      nameBytes += static_cast<std::size_t>(fragment.length);
+    }
+    for (std::size_t byte = 0; byte < nameBytes; ++byte)
+      core_.arena().consumeWork();
+    const std::string name = core_.arena().textOf(inputs[1]);
+    if (name.empty()) return fail("VqlFieldProbe dimension name is empty");
+
+    const auto owner =
+        resolveCell(inputs, {}, cellReferences_, 0, core_.arena());
+    zigzag::ArenaSavepoint savepoint(core_.arena());
+    xanadu::MultiStoreCoordinator fallback(core_);
+    auto &coordinator = contractCoordinator_ ? *contractCoordinator_ : fallback;
+    const auto dimension = coordinator.resolveDimension(name);
+    const auto neighbor =
+        owner ? core_.arena().linkedMinting(*owner, dimension,
+                                            *direction > 0 ? DimVector::POS
+                                                           : DimVector::NEG)
+              : std::nullopt;
+    const std::vector<CellValue> reference{
+        static_cast<std::int64_t>(neighbor.value_or(noCell))};
+    const auto outputSlot = slots.front();
+    const auto prior      = cellReferences_.find(outputSlot);
+    const bool hadPrior   = prior != cellReferences_.end();
+    const std::optional<CellRef> priorReference =
+        hadPrior ? prior->second : std::nullopt;
+    try {
+      writeCellReferences(slots, reference);
+      outputs.emplace_back(reference.front());
+    } catch (...) {
+      if (hadPrior) {
+        if (const auto found = cellReferences_.find(outputSlot);
+            found != cellReferences_.end()) {
+          found->second = priorReference;
+        }
+      } else {
+        cellReferences_.erase(outputSlot);
+      }
+      throw;
+    }
+    savepoint.commit();
     return {};
   } catch (const std::exception &error) {
     return fail(error.what());
@@ -595,6 +700,35 @@ void VortexVM::cut(std::size_t cutBarrier) {
   }
 }
 
+VortexVM *VortexVM::abortScopedChoices(const CellRef cursor) noexcept {
+  const auto outer =
+      std::ranges::find_if(choiceStack_, [cursor](const ChoicePoint &choice) {
+        return choice.scoped && choice.cursor == cursor;
+      });
+  if (outer == choiceStack_.end()) return this;
+
+  const auto outerIndex =
+      static_cast<std::size_t>(std::distance(choiceStack_.begin(), outer));
+  ChoicePoint saved = std::move(*outer);
+  while (choiceStack_.size() > outerIndex + 1) {
+    core_.arena().discard(choiceStack_.back().mark);
+    choiceStack_.pop_back();
+  }
+  choiceStack_.pop_back();
+  core_.arena().release(saved.mark);
+
+  cellReferences_.swap(saved.cellReferences);
+  streams_.swap(saved.streams);
+  iterators_.swap(saved.iterators);
+  streamSlots_.swap(saved.streamSlots);
+  iteratorSlots_.swap(saved.iteratorSlots);
+  activationFrames_.swap(saved.activationFrames);
+  currentDeweyPath_.swap(saved.deweyPath);
+  streamCursor_ = saved.streamCursor;
+  pruneResumeState();
+  return this;
+}
+
 std::size_t VortexVM::choiceDepth() const noexcept {
   return choiceStack_.size();
 }
@@ -662,9 +796,9 @@ void VortexVM::runPipeline(CellRef paramCell) {
       throw std::invalid_argument(
           "ScopedChoice cannot run in a parameter pipeline");
     }
-    if (kind == OpcodeKind::ProbeLink) {
+    if (kind == OpcodeKind::ProbeLink || kind == OpcodeKind::VqlFieldProbe) {
       throw std::invalid_argument(
-          "ProbeLink cannot run in a parameter pipeline");
+          "ProbeLink/VqlFieldProbe cannot run in a parameter pipeline");
     }
     if (kind == OpcodeKind::VqlString || kind == OpcodeKind::VqlAdd ||
         kind == OpcodeKind::VqlBoxScalar)
@@ -747,8 +881,9 @@ bool VortexVM::evaluateCondition(CellRef clause,
   }
   if (kind == OpcodeKind::ScopedChoice)
     throw std::invalid_argument("ScopedChoice cannot run as a condition");
-  if (kind == OpcodeKind::ProbeLink)
-    throw std::invalid_argument("ProbeLink cannot run as a condition");
+  if (kind == OpcodeKind::ProbeLink || kind == OpcodeKind::VqlFieldProbe)
+    throw std::invalid_argument(
+        "ProbeLink/VqlFieldProbe cannot run as conditions");
   if (kind == OpcodeKind::VqlString || kind == OpcodeKind::VqlAdd ||
       kind == OpcodeKind::VqlBoxScalar)
     throw std::invalid_argument("VQL scalar opcodes cannot run as conditions");
@@ -815,6 +950,8 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
     return executeVqlBoxScalar(opcode, outputs);
   case OpcodeKind::ProbeLink:
     return executeProbeLink(opcode, outputs);
+  case OpcodeKind::VqlFieldProbe:
+    return executeVqlFieldProbe(opcode, outputs);
   case OpcodeKind::Add: {
     if (inputs.size() >= 2) {
       if (std::holds_alternative<std::string>(inputs[0]) &&
@@ -1296,11 +1433,22 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
     break;
   }
   case OpcodeKind::Assert: {
-    if (inputs.empty() || !VortexCore::evaluateTruthiness(inputs[0])) {
+    if (inputs.size() > 2 ||
+        (inputs.size() == 2 &&
+         !std::holds_alternative<std::string>(inputs[1]))) {
       return ExecutionResult{.success           = false,
                              .contractViolation = ContractViolationKind::None,
                              .failingClause     = opcode,
-                             .errorMessage      = "Assertion failed"};
+                             .errorMessage =
+                                 "Assert accepts an optional text diagnostic"};
+    }
+    if (inputs.empty() || !VortexCore::evaluateTruthiness(inputs[0])) {
+      return ExecutionResult{
+          .success           = false,
+          .contractViolation = ContractViolationKind::None,
+          .failingClause     = opcode,
+          .errorMessage = inputs.size() == 2 ? std::get<std::string>(inputs[1])
+                                             : "Assertion failed"};
     }
     break;
   }
@@ -1687,12 +1835,15 @@ ExecutionResult VortexVM::step(CellRef cursor) {
   const bool resumeStateOp =
       kind == OpcodeKind::ResumeInit || kind == OpcodeKind::ResumeSet;
   const bool probeLinkOp           = kind == OpcodeKind::ProbeLink;
+  const bool fieldProbeOp          = kind == OpcodeKind::VqlFieldProbe;
   const auto hasProbeLinkCondition = [this](const auto &clauses) {
     return std::ranges::any_of(clauses, [this](const CellRef clause) {
       const CellRef actual = core_.arena()
                                  .cloneMaster(clause, core_.dims().clone)
                                  .value_or(clause);
-      return getOpcodeKind(actual) == OpcodeKind::ProbeLink;
+      const auto clauseKind = getOpcodeKind(actual);
+      return clauseKind == OpcodeKind::ProbeLink ||
+             clauseKind == OpcodeKind::VqlFieldProbe;
     });
   };
   const auto hasVqlScalarCondition = [this](const auto &clauses) {
@@ -1726,7 +1877,7 @@ ExecutionResult VortexVM::step(CellRef cursor) {
   if (hasProbeLinkCondition(core_.preconditionsOf(*op)) ||
       hasProbeLinkCondition(core_.postconditionsOf(*op))) {
     return {.success      = false,
-            .errorMessage = "ProbeLink cannot run as a condition"};
+            .errorMessage = "ProbeLink/VqlFieldProbe cannot run as conditions"};
   }
   if (hasVqlScalarCondition(core_.preconditionsOf(*op)) ||
       hasVqlScalarCondition(core_.postconditionsOf(*op))) {
@@ -1744,11 +1895,12 @@ ExecutionResult VortexVM::step(CellRef cursor) {
     return {.success      = false,
             .errorMessage = "ScopedChoice cannot run as a condition"};
   }
-  if (probeLinkOp) {
+  if (probeLinkOp || fieldProbeOp) {
     if (!core_.preconditionsOf(*op).empty() ||
         !core_.postconditionsOf(*op).empty()) {
-      return {.success      = false,
-              .errorMessage = "ProbeLink does not support pre/postconditions"};
+      return {.success = false,
+              .errorMessage =
+                  "ProbeLink/VqlFieldProbe do not support pre/postconditions"};
     }
     if (std::ranges::any_of(
             inputCells,
@@ -1756,19 +1908,22 @@ ExecutionResult VortexVM::step(CellRef cursor) {
         std::ranges::any_of(outCells, [&](const CellRef output) {
           return core_.hasPipeline(output);
         })) {
-      return {.success      = false,
-              .errorMessage = "ProbeLink does not support parameter pipelines"};
+      return {.success = false,
+              .errorMessage =
+                  "ProbeLink/VqlFieldProbe do not support parameter pipelines"};
     }
     const auto isTypedSlot = [this](const CellRef slot) {
       return streamSlots_.contains(slot) || iteratorSlots_.contains(slot);
     };
     if (std::ranges::any_of(inputCells, isTypedSlot) ||
         std::ranges::any_of(outCells, isTypedSlot)) {
-      return {.success      = false,
-              .errorMessage = "ProbeLink requires scalar reference slots"};
+      return {.success = false,
+              .errorMessage =
+                  "ProbeLink/VqlFieldProbe require scalar reference slots"};
     }
     if (isMemoized(*op))
-      return {.success = false, .errorMessage = "ProbeLink cannot be memoized"};
+      return {.success      = false,
+              .errorMessage = "ProbeLink/VqlFieldProbe cannot be memoized"};
   }
   if (kind == OpcodeKind::VqlString || kind == OpcodeKind::VqlAdd ||
       kind == OpcodeKind::VqlBoxScalar) {
@@ -1912,7 +2067,8 @@ ExecutionResult VortexVM::step(CellRef cursor) {
           kind == OpcodeKind::RequireContract ||
           kind == OpcodeKind::VqlCompare || kind == OpcodeKind::VqlString ||
           kind == OpcodeKind::VqlAdd || kind == OpcodeKind::VqlBoxScalar ||
-          kind == OpcodeKind::ProbeLink || kind == OpcodeKind::ScopedChoice) {
+          kind == OpcodeKind::ProbeLink || kind == OpcodeKind::ScopedChoice ||
+          kind == OpcodeKind::VqlFieldProbe) {
         oldInputs.emplace_back(false);
       } else {
         oldInputs.push_back(inputValue(paramCell));
@@ -1937,7 +2093,8 @@ ExecutionResult VortexVM::step(CellRef cursor) {
       kind != OpcodeKind::VqlString && kind != OpcodeKind::VqlAdd &&
       kind != OpcodeKind::VqlBoxScalar && kind != OpcodeKind::ScopedChoice &&
       kind != OpcodeKind::ResumeInit && kind != OpcodeKind::ResumeSet &&
-      kind != OpcodeKind::ProbeLink && !stateful;
+      kind != OpcodeKind::ProbeLink && kind != OpcodeKind::VqlFieldProbe &&
+      !stateful;
   if (memoizable && isMemoized(*op)) {
     if (const auto key = getMemoKey(*op)) {
       CellRef pin = core_.getOrCreateMemoPin(*key);
@@ -2017,8 +2174,8 @@ ExecutionResult VortexVM::step(CellRef cursor) {
     // Structural reads and value reads return cell handles. Preserve identity
     // so later operations consume the target cell, not the result slot.
     if (kind == OpcodeKind::MatchContract || kind == OpcodeKind::ResumeInit ||
-        kind == OpcodeKind::ResumeSet) {
-      // The contract handler atomically publishes its Bool and capture refs.
+        kind == OpcodeKind::ResumeSet || kind == OpcodeKind::VqlFieldProbe) {
+      // These handlers atomically publish their reference or scalar outputs.
     } else if (stateful) {
       // Stateful registers write their runtime state and output refs directly.
     } else if (kind == OpcodeKind::Link || kind == OpcodeKind::Break ||

@@ -694,3 +694,51 @@ remain in that matrix. No performance improvement or full-suite pass is claimed.
 
 Logs: `/tmp/vql-contract-driver-build.log`, `/tmp/vql-contract-driver-tests.log`,
 `/tmp/vql-contract-driver-format.log`.
+
+## Iteration 23: lazy computed field defaults in real graphs
+
+Contracts containing computed defaults now compile through the same structural driver into Vortex
+control-flow graphs. Literal/alias-only contracts retain the atomic descriptor path. The graph
+backend covers unions, optionals, nested shapes/refinements and generic streams, with exact
+cardinality checks, staged stream captures and replacement on repeated aliases. Default expressions
+compile in the original lexical environment with the actual nested owner. Present fields skip their
+fallback entirely, including invalid runtime expressions. Path/call defaults preserve full ordered
+results and duplicates; direct aliases keep their established zero/one constraint. Literal fields
+inside graph contracts use lazy `VqlBoxScalar` so successive uses retain distinct identities.
+
+`VqlFieldProbe` resolves dimension names at runtime under scoped rollback, then reads one hop.
+Direction remains a full-width signed choice; names are bounded and charged before materialization.
+A local savepoint covers dimension/proxy minting and reference publication. `Assert` accepts an
+optional text diagnostic for dynamic alias-cardinality errors, preserving its one-input behavior.
+Shared continuations, `ScopedChoice`, `ChoiceDepth`, `Cut`, `Fail` and direct graph branches
+implement commit and rollback-on-success policies without nested VM runs, retained ASTs or matcher
+replay. Return validation rolls temporary effects back on both outcomes and preserves named
+postconditions.
+
+Inline parameter annotations/targets, return promises and `for` destructuring use the helper. The
+existing eligibility refusal for computed-default outer definitions deliberately remains: those
+functions compile inline, and affected outer recursion still refuses explicitly. Eligible closed
+helpers can execute and recurse through `InvokeFrame`. This stage does not establish native-frame
+computed-default parity or sealed mesh-artifact support; mesh Vquery source compilation works.
+
+A configurable query-wide budget defaults to 65,536 graph emission units. Every compiler opcode mint
+passes one budget-aware helper, including labels emitted by ordinary path/expression helpers;
+appending reserved labels also charges assembly work. Units conservatively count construction work,
+not exact instructions. Default compilation borrows the unchanged lexical environment instead of
+cloning every binding. Runtime request failure now aborts owned scopes before closing its cursor,
+restoring arena and VM maps without running alternatives, refunding fuel or pruning caller choices.
+Raw VM stops remain resumable.
+
+Validation: full `make -j$(nproc)` and all 612 affected tests from 58 suites passed. Cases cover
+lazy false-valued fields, nested owners, prematch aliases, fresh literal identities, union rollback,
+generic success rollback, multi-result defaults, dynamic alias refusal only on absence, return
+errors, request recovery, loop BindEmpty semantics, helper recursion, deliberate outer-recursion
+refusal, pure-arena export/reload after source VM/AST destruction, and host/mesh Vquery sources.
+Native tests cover signed probes, bounded/fragmented names, partial-work rollback, scope abort and
+raw-cycle resumption. Earlier string/addition/path refusal tests now assert successful values and
+identity. A real isolated headless CLI returned `lazy`, with `VQL_FIELD_PROBE` and `INVOKE_FRAME` in
+its disassembly. Independent Luna architecture and senior/profiler gates accepted the bounded
+implementation subject to these validations. No speedup or full-suite pass is claimed.
+
+Logs: `/tmp/vql-lazy-contract-build.log`, `/tmp/vql-lazy-contract-tests.log`,
+`/tmp/vql-lazy-contract-cli.log`, `/tmp/vql-lazy-contract-format.log`.

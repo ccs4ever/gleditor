@@ -148,8 +148,8 @@ CellRef VQLCompiler::compileShapePredicateImpl(const ShapeLiteral &shape,
   const auto falseCell = emitConstant(false);
   const auto trueCell  = emitConstant(true);
   const auto result    = core_.arena().makeCell();
-  const auto failed    = vm_.mintOpcode(OpcodeKind::Nop, "#SHAPE_FAILED");
-  const auto done      = vm_.mintOpcode(OpcodeKind::Nop, "#SHAPE_DONE");
+  const auto failed    = mintOpcode(OpcodeKind::Nop, "#SHAPE_FAILED");
+  const auto done      = mintOpcode(OpcodeKind::Nop, "#SHAPE_DONE");
   const auto probe     = [&](const DimRef dimension, const DimVector direction,
                          const CellRef anchor) {
     const auto op = emitOp(OpcodeKind::ProbeLink, "#SHAPE_PROBE");
@@ -200,7 +200,7 @@ CellRef VQLCompiler::compileShapePredicateImpl(const ShapeLiteral &shape,
     const auto copyNo = emitOp(OpcodeKind::CopyCellRefs, "#SHAPE_TARGET_NO");
     emitInput(copyNo, falseCell);
     emitOutput(copyNo, answer);
-    const auto done = vm_.mintOpcode(OpcodeKind::Nop, "#SHAPE_TARGET_DONE");
+    const auto done = mintOpcode(OpcodeKind::Nop, "#SHAPE_TARGET_DONE");
     branchFalse(presence, done);
 
     CellRef matches;
@@ -261,9 +261,8 @@ CellRef VQLCompiler::compileShapePredicateImpl(const ShapeLiteral &shape,
       branchFalse(matched, nextDirection);
     };
     if (rule->isBidir) {
-      const auto tryNegative =
-          vm_.mintOpcode(OpcodeKind::Nop, "#SHAPE_TRY_NEG");
-      const auto matched = vm_.mintOpcode(OpcodeKind::Nop, "#SHAPE_MATCHED");
+      const auto tryNegative = mintOpcode(OpcodeKind::Nop, "#SHAPE_TRY_NEG");
+      const auto matched     = mintOpcode(OpcodeKind::Nop, "#SHAPE_MATCHED");
       tryDirection(DimVector::POS, tryNegative);
       branchTrue(matched);
       appendOpcode(tryNegative);

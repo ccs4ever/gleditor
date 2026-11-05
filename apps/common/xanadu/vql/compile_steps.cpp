@@ -45,8 +45,8 @@ std::vector<CellRef> VQLCompiler::compileSteps(std::span<const PathStep> steps,
     // User calls may produce a value without a flowing context. Preserve the
     // direct evaluator's one context-free call when the input stream is empty.
     if (userCall) {
-      const auto empty = vm_.mintOpcode(OpcodeKind::Nop, "#EMPTY_CALL");
-      const auto end   = vm_.mintOpcode(OpcodeKind::Nop, "#EMPTY_CALL_END");
+      const auto empty = mintOpcode(OpcodeKind::Nop, "#EMPTY_CALL");
+      const auto end   = mintOpcode(OpcodeKind::Nop, "#EMPTY_CALL_END");
       const auto choose =
           emitOp(OpcodeKind::BranchFalseCell, "#EMPTY_CALL_TEST");
       emitInput(choose, *present);
@@ -75,7 +75,7 @@ std::vector<CellRef> VQLCompiler::compileSteps(std::span<const PathStep> steps,
         emitOutput(clear, result);
         auto condition = compileBooleanExpr(predicate, candidate);
         if (!condition) condition = emitConstant(false);
-        const auto end = vm_.mintOpcode(OpcodeKind::Nop, "#FILTER_END");
+        const auto end = mintOpcode(OpcodeKind::Nop, "#FILTER_END");
         const auto branch =
             emitOp(OpcodeKind::BranchFalseCell, "#FILTER_BRANCH");
         emitInput(branch, *condition);
@@ -94,7 +94,7 @@ std::vector<CellRef> VQLCompiler::compileSteps(std::span<const PathStep> steps,
         const auto clear  = emitOp(OpcodeKind::ClearCellRefs, "#SHAPE_CLEAR");
         emitOutput(clear, result);
         const auto condition = compileShapePredicate(shape, candidate);
-        const auto end = vm_.mintOpcode(OpcodeKind::Nop, "#SHAPE_FILTER_END");
+        const auto end       = mintOpcode(OpcodeKind::Nop, "#SHAPE_FILTER_END");
         const auto branch =
             emitOp(OpcodeKind::BranchFalseCell, "#SHAPE_FILTER");
         emitInput(branch, condition);
