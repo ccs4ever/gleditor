@@ -2,6 +2,7 @@
 
 #include "common/xanadu/vagent/cell_path.hpp"
 #include "common/xanadu/vagent/fragment.hpp"
+#include "common/xanadu/vagent/marshal.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
 
 #include <algorithm>
@@ -284,7 +285,8 @@ private:
     if (expression.scope || expression.recipients || expression.deadline ||
         expression.guard || expression.recovery || expression.binding ||
         (expression.annotation && expression.kind != ExprKind::Let) ||
-        !expression.names.empty())
+        (!expression.names.empty() &&
+         expression.kind != ExprKind::Record))
       refuse(expression, DiagnosticCode::InvalidDeclaration,
              "scalar lowering does not yet support expression metadata");
     for (const auto &child : expression.children)
@@ -587,6 +589,22 @@ private:
                "cells anchor cell is not present in this arena");
       paths_[&expression] = std::move(*path);
       type                = Scalar::CellList;
+      break;
+    }
+    case ExprKind::Record: {
+      // `S{f: v, …}` — the value is the marshaled term cell's ref: a
+      // cell whose +d.step rank carries +d.name-labelled field cells,
+      // the shape #FIND reads and belief facts unify against. The
+      // marshal is static — literals and nested terms/records only,
+      // emit's operand marshal holds the same boundary — so the cell
+      // mints here and emit copies its ref out.
+      auto marshaled =
+          marshalTermExpr(core_.arena(), core_, expression);
+      if (!marshaled)
+        refuse(expression, marshaled.error().code,
+               marshaled.error().detail);
+      recordCells_[&expression] = *marshaled;
+      type = Scalar::Cell;
       break;
     }
     case ExprKind::Field: {
@@ -1233,6 +1251,14 @@ private:
                   findOp(subject, expression.text, member,
                          copy(output, member, continuation)));
     }
+    case ExprKind::Record:
+      // The value is the ref to the term cell preflight marshaled —
+      // one image-side cell the whole run shares, like a string
+      // literal; writes through it are not a construct yet.
+      return copy(output,
+                  literalCell(CellValue{static_cast<std::int64_t>(
+                      recordCells_.at(&expression))}),
+                  continuation);
     case ExprKind::Cells:
       return emitCells(expression, output, continuation);
     case ExprKind::Let:
@@ -1670,6 +1696,7 @@ private:
   std::unordered_map<const Expr *, Scalar> types_;
   std::unordered_map<const Expr *, CellValue> literals_;
   std::unordered_map<const Expr *, CellsPath> paths_;
+  std::unordered_map<const Expr *, CellRef> recordCells_;
   struct EmissionCells {
     CellRef zero;
     CellRef minusOne;

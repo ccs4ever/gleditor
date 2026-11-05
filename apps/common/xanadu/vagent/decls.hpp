@@ -48,9 +48,9 @@ enum class DeclDisposition : std::uint8_t { Lower, Stub, Refuse };
 // The M0 disposition table — one ruling per DeclKind:
 //
 //   Agent/Event/Goal/Predicate/Plan/Method/Answer/Handler → Lower
-//   Record/Question/Skill/Capacity/Behavior/Belief/
-//   Lifecycle/Field                                      → Stub
-//   Uses/Install/BehaviorUse                             → Refuse
+//   Field/Record                                          → Lower
+//   Question/Skill/Capacity/Behavior/Belief/Lifecycle     → Stub
+//   Uses/Install/BehaviorUse                              → Refuse
 //
 // Stubs mint the symbol so the module vocabulary is complete — the
 // deferred semantics are M2+'s — while the three composition

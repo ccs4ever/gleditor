@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <limits>
 #include <map>
 #include <optional>
@@ -1330,18 +1331,21 @@ Type Checker::term(const Expr &expression, Environment &env, Context context,
   require(expression.children.size() == predicate->parameters.size(),
           DiagnosticCode::TypeMismatch, "wrong number of predicate arguments",
           expression.loc);
-  for (std::size_t i = 0; i < expression.children.size(); ++i) {
-    const auto &argument = *expression.children[i];
-    const auto expected  = i < predicate->parameters.size()
-                               ? predicate->parameters[i].type
-                               : unknown;
+  // An argument binds a `?name` into env at its declared position
+  // type; inside a record literal the same rule applies field by
+  // field, the record's declared field list supplying each position's
+  // type. A record in a term spells the whole shape — the marshal is
+  // positional, so a field set short of the declaration could never
+  // unify and is refused like infer's record arm.
+  const std::function<void(const Expr &, const Type &)> bindArgument =
+      [&](const Expr &argument, const Type &expected) {
     if (argument.kind == ExprKind::LogicVariable) {
       require(snake(argument.text), DiagnosticCode::InvalidIdentifier,
               "query bindings must be snake_case", argument.loc);
       if (argument.text == "_") {
         require(bind, DiagnosticCode::InvalidPosition,
                 "asserted facts cannot contain a wildcard", argument.loc);
-        continue;
+        return;
       }
       auto found = env.find(argument.text);
       if (found == env.end()) {
@@ -1355,13 +1359,48 @@ Type Checker::term(const Expr &expression, Environment &env, Context context,
                  argument.loc);
       } else
         expectType(read(found->second.type), expected, argument.loc);
-    } else if (argument.kind == ExprKind::Identifier && argument.text == "_") {
+      return;
+    }
+    if (argument.kind == ExprKind::Identifier && argument.text == "_") {
       require(bind, DiagnosticCode::InvalidPosition,
               "asserted facts cannot contain a wildcard", argument.loc);
-    } else {
-      expectType(infer(argument, env, operand(context)), expected,
-                 argument.loc);
+      return;
     }
+    if (argument.kind == ExprKind::Record)
+      if (const auto *decl = global(argument.text);
+          decl && decl->kind == DeclKind::Record) {
+        std::set<std::string> supplied;
+        for (std::size_t f = 0;
+             f < argument.children.size() && f < argument.names.size(); ++f) {
+          const Type *fieldType = nullptr;
+          for (const auto &param : decl->parameters)
+            if (param.name == argument.names[f]) {
+              fieldType = &param.type;
+              break;
+            }
+          if (!fieldType) {
+            report(DiagnosticCode::UnknownName,
+                   "unknown record field '" + argument.names[f] + "'",
+                   argument.loc);
+            continue;
+          }
+          supplied.insert(argument.names[f]);
+          bindArgument(*argument.children[f], *fieldType);
+        }
+        for (const auto &param : decl->parameters)
+          require(supplied.contains(param.name),
+                  DiagnosticCode::TypeMismatch,
+                  "missing record field '" + param.name + "'", argument.loc);
+        return;
+      }
+    expectType(infer(argument, env, operand(context)), expected,
+               argument.loc);
+  };
+  for (std::size_t i = 0; i < expression.children.size(); ++i) {
+    const auto expected = i < predicate->parameters.size()
+                              ? predicate->parameters[i].type
+                              : unknown;
+    bindArgument(*expression.children[i], expected);
   }
   return unit;
 }

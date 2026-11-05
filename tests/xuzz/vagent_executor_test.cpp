@@ -1545,6 +1545,66 @@ TEST(VagentExecutorTest, MaintainHoldsVariablesConstrainShareAndWild) {
   EXPECT_EQ(arena.outstandingMarks(), 0u);
 }
 
+TEST(VagentExecutorTest, RecordLiteralsEmitAndFieldAccessReads) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image =
+      h.lower("module demo\nevent Tick\nevent Hit\n"
+              "record Point { x: Int, y: Int }\n"
+              "agent A {\n"
+              "  on Tick [Point{x: 9, y: 0}.x > 5] { emit Hit{} }\n"
+              "  on Tick [Point{x: 2, y: 0}.x > 5] { emit Hit{} }\n"
+              "}");
+  ASSERT_TRUE(image);
+  auto &arena         = h.ctx.arena;
+  const auto outboxAt = h.ctx.core.findOrMintDimension("d.outbox");
+  const auto count    = [&] {
+    return (zigzag::rankAfter(arena, image->agentCell, outboxAt) |
+            std::ranges::to<std::vector>())
+        .size();
+  };
+  // The record literal mints a term cell (functor + +d.name-labelled
+  // +d.step fields); the guard's `.x` reads it through #FIND — the
+  // first guard's 9 > 5 fires, the second's 2 > 5 fails.
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  EXPECT_EQ(count(), 1u);
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
+TEST(VagentExecutorTest, RecordArgsMarshalIntoBeliefFacts) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image =
+      h.lower("module demo\nevent Tick\n"
+              "record Point { x: Int, y: Int }\n"
+              "predicate at(site: Point)\n"
+              "goal Near() maintain { holds believes at(Point{x: ?v, "
+              "y: ?w}) from self & v == 1 & w == 2 }\n"
+              "goal Far() maintain { holds believes at(Point{x: ?v, "
+              "y: ?w}) from self & v == 9 }\n"
+              "agent A {\n"
+              "  on Tick { believe at(Point{x: 1, y: 2}); "
+              "adopt Near(); adopt Far() }\n"
+              "  plan noop for Near { }\n"
+              "  plan fix for Far { }\n"
+              "}");
+  ASSERT_TRUE(image);
+  auto &arena             = h.ctx.arena;
+  const auto intentionDim = h.ctx.core.findOrMintDimension("d.intention");
+  const auto count        = [&] {
+    return (zigzag::rankAfter(arena, image->agentCell, intentionDim) |
+            std::ranges::to<std::vector>())
+        .size();
+  };
+  // The record fact at(Point{x:1,y:2}) flattens to the same +d.step
+  // spelling the pattern carries: ?v captures 1, ?w captures 2, and
+  // Near's scalar half holds while Far's `v == 9` fires its
+  // restorer — two monitors plus the delegated fix.
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  EXPECT_EQ(count(), 3u);
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
 TEST(VagentExecutorTest, PickedStreaksJournalOnStatsEachTurn) {
   ExecutorHarness h;
   VagentExecutor exec;

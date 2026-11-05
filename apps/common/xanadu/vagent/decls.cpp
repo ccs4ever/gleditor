@@ -9,6 +9,7 @@
 #include "common/xanadu/scalar.hpp"
 #include "common/xanadu/vagent/ast_clone.hpp"
 #include "common/xanadu/vagent/fragment.hpp"
+#include "common/xanadu/vagent/marshal.hpp"
 #include "common/xanadu/vagent/records.hpp"
 #include "common/xanadu/zigzag/zzcore.hpp"
 
@@ -30,8 +31,8 @@ DeclDisposition declDisposition(DeclKind kind) noexcept {
   case DeclKind::Handler:
     return DeclDisposition::Lower;
   case DeclKind::Field:
-    return DeclDisposition::Lower;
   case DeclKind::Record:
+    return DeclDisposition::Lower;
   case DeclKind::Question:
   case DeclKind::Skill:
   case DeclKind::Capacity:
@@ -243,33 +244,7 @@ struct Lowerer {
   // (forget's `?x`) need unification, which is the fragment-position
   // clause-walk's job, not the host step's.
   std::expected<CellRef, Diagnostic> marshalTerm(const Expr &expr) {
-    switch (expr.kind) {
-    case ExprKind::Term: {
-      const auto cell = arena.makeCell(expr.text);
-      for (const auto &child : expr.children) {
-        auto arg = marshalTerm(*child);
-        if (!arg) return arg;
-        zigzag::expectWritten(
-            arena.link(zigzag::rankTail(arena, cell, dims().step), dims().step,
-                       DimVector::POS, *arg));
-      }
-      return cell;
-    }
-    case ExprKind::String:
-    case ExprKind::Integer:
-    case ExprKind::Float:
-    case ExprKind::Boolean:
-      // Literals marshal as text cells so the host-side term walk's
-      // textOf equality covers them — scalar cells would need a
-      // value-typed compare the V1 walker doesn't carry.
-      return arena.makeCell(expr.text);
-    default:
-      return std::unexpected(Diagnostic{
-          DiagnosticCode::InvalidPosition,
-          std::format("host-step term argument does not lower: kind {}",
-                      static_cast<int>(expr.kind)),
-          expr.loc});
-    }
+    return marshalTermExpr(arena, core, expr);
   }
 
   // marshalTerm's pattern form: LogicVariable arguments marshal as
@@ -278,27 +253,7 @@ struct Lowerer {
   // scalar emitter cannot lower and emitDeclHead would otherwise stub
   // to a vacuous `true`.
   std::expected<CellRef, Diagnostic> marshalPattern(const Expr &expr) {
-    if (expr.kind == ExprKind::LogicVariable) {
-      const auto text = expr.text.starts_with('?')
-                            ? expr.text
-                            : std::format("?{}", expr.text);
-      return arena.makeCell(text);
-    }
-    // marshalTerm recurses on itself, so a Term carrying a variable
-    // anywhere below the root would still refuse — the pattern walk
-    // re-does the Term case with itself as the child step.
-    if (expr.kind == ExprKind::Term) {
-      const auto cell = arena.makeCell(expr.text);
-      for (const auto &child : expr.children) {
-        auto arg = marshalPattern(*child);
-        if (!arg) return arg;
-        zigzag::expectWritten(
-            arena.link(zigzag::rankTail(arena, cell, dims().step), dims().step,
-                       DimVector::POS, *arg));
-      }
-      return cell;
-    }
-    return marshalTerm(expr);
+    return marshalPatternExpr(arena, core, expr);
   }
 
   // A goal-call argument: literals keep their type (marshalTerm's
@@ -757,49 +712,17 @@ struct Lowerer {
                                           "emit's operand is not an event "
                                           "value",
                                           expr.loc});
-      const auto payload = arena.makeCell(*eventName);
+      // Field-carrying payload: values marshal as +d.step children
+      // (the term-cell convention), each labeled +d.name with its
+      // record field name — textOf(payload) still reads the event
+      // name for drain and await matching.
+      CellRef payload = noCell;
       if (record) {
-        // Field-carrying payload: values marshal as +d.step children
-        // (the term-cell convention), each labeled +d.name with its
-        // record field name — textOf(payload) still reads the event
-        // name for drain and await matching.
-        for (std::size_t i = 0; i < record->children.size(); ++i) {
-          const auto &fieldExpr = *record->children[i];
-          auto value = marshalTerm(fieldExpr);
-          if (!value) return std::unexpected(value.error());
-          // Dual-channel literals: the text stays for the term walks
-          // (textOf equality is beliefTermEquals's whole basis), and
-          // the typed bits let #FIND/eventArgs read the field's value
-          // kind back instead of coercing text. setValueBits leaves
-          // content alone, so both channels describe one cell.
-          switch (fieldExpr.kind) {
-          case ExprKind::Integer:
-            zigzag::expectWritten(arena.setValueBits(
-                *value, xanadu::ValueKind::Int64,
-                std::bit_cast<std::uint64_t>(
-                    static_cast<std::int64_t>(std::stoll(fieldExpr.text)))));
-            break;
-          case ExprKind::Float:
-            zigzag::expectWritten(arena.setValueBits(
-                *value, xanadu::ValueKind::Double,
-                xanadu::canonicalDoubleBits(std::stod(fieldExpr.text))));
-            break;
-          case ExprKind::Boolean:
-            zigzag::expectWritten(arena.setValueBits(
-                *value, xanadu::ValueKind::Bool,
-                fieldExpr.text == "true" ? 1 : 0));
-            break;
-          default:
-            break;
-          }
-          if (i < record->names.size())
-            zigzag::expectWritten(arena.link(*value, dims().name,
-                                             DimVector::POS,
-                                             arena.makeCell(record->names[i])));
-          zigzag::expectWritten(
-              arena.link(zigzag::rankTail(arena, payload, dims().step),
-                         dims().step, DimVector::POS, *value));
-        }
+        auto marshaled = marshalTerm(*record);
+        if (!marshaled) return std::unexpected(marshaled.error());
+        payload = *marshaled;
+      } else {
+        payload = arena.makeCell(*eventName);
       }
       if (const auto rec = varsRecord(arena, core, step, "payload", true))
         zigzag::expectWritten(
@@ -1012,7 +935,6 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
     // complete even where the semantics are still deferred; member
     // decls (Field/Belief/Lifecycle) have no symbol shape to claim.
     switch (decl.kind) {
-    case DeclKind::Record:
     case DeclKind::Question:
     case DeclKind::Skill:
     case DeclKind::Capacity:
@@ -1068,6 +990,19 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
       if (member.kind == DeclKind::Field) lowerDecl(member, true);
     for (const auto &member : decl.members)
       if (member.kind != DeclKind::Field) lowerDecl(member, true);
+    return;
+  }
+  case DeclKind::Record: {
+    // A record is a field schema, not a body — the symbol and the
+    // signature are its whole image work (the checker types literals
+    // against it; marshalTermExpr lays the values out). Nothing is
+    // deferred left to stub.
+    if (symbols.contains(name)) {
+      refuse(decl, std::format("duplicate symbol '{}'", name));
+      return;
+    }
+    (void)mintSymbol(name);
+    signatures.emplace(name, decl.parameters);
     return;
   }
   case DeclKind::Event:
@@ -1227,14 +1162,18 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
                                             .loc  = arg.loc});
                 continue;
               }
-              if (arg.kind == ExprKind::Term && !collect(arg))
+              if ((arg.kind == ExprKind::Term ||
+                   arg.kind == ExprKind::Record) &&
+                  !collect(arg))
                 return false;
             }
             return true;
           };
           for (const Expr *bexpr : beliefs)
             for (const auto &c : bexpr->children)
-              if (c && c->kind == ExprKind::Term && !collect(*c))
+              if (c && (c->kind == ExprKind::Term ||
+                        c->kind == ExprKind::Record) &&
+                  !collect(*c))
                 return;
           const Expr *remainder = scalars.front();
           Expr rebuilt;

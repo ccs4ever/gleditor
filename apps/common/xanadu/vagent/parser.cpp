@@ -896,7 +896,16 @@ ExprPtr Parser::record(Token name) {
     for (;;) {
       result->names.push_back(anyWord().text);
       expect(TokenKind::Colon, "':' after a record field name");
-      result->children.push_back(expression());
+      // A `?name` field value is a capture slot — the same termArgument
+      // arm predicate positions carry, so a record in a believes/
+      // forget pattern spells capture points field by field.
+      if (accept(TokenKind::Scan)) {
+        const auto var = identifier();
+        result->children.push_back(
+            make(ExprKind::LogicVariable, var.loc, var.text));
+      } else {
+        result->children.push_back(expression());
+      }
       if (!accept(TokenKind::Comma)) break;
       if (accept(TokenKind::CloseBrace)) return finish(std::move(result));
     }
