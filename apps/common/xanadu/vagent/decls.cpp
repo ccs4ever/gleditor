@@ -197,6 +197,7 @@ struct Lowerer {
     case ExprKind::Tell:
     case ExprKind::Untell:
     case ExprKind::Stop:
+    case ExprKind::Ask:
       return true;
     default:
       return false;
@@ -286,6 +287,9 @@ struct Lowerer {
     case ExprKind::Stop:
       verb = "stop";
       break;
+    case ExprKind::Ask:
+      verb = "ask";
+      break;
     default:
       return std::unexpected(Diagnostic{DiagnosticCode::InvalidPosition,
                                         "statement is not a host verb",
@@ -318,6 +322,50 @@ struct Lowerer {
         if (!term) return std::unexpected(term.error());
         field("payload", *term);
       }
+      return step;
+    }
+
+    // ask peer.q(args) within <dur> — suspension staged like the
+    // other cross-agent verbs: the question rides the payload as a
+    // marshaled term (functor + arg children), the peer by name, the
+    // within bound as the turn-clock scalar. `else` recovery still
+    // refuses — the fallback is an evaluated expression.
+    if (expr.kind == ExprKind::Ask) {
+      if (expr.recovery)
+        return std::unexpected(Diagnostic{DiagnosticCode::InvalidPosition,
+                                          "ask's else arm does not lower yet",
+                                          expr.loc});
+      if (!expr.deadline || expr.deadline->kind != ExprKind::Duration)
+        return std::unexpected(
+            Diagnostic{DiagnosticCode::InvalidPosition,
+                       "ask's within deadline must be a duration", expr.loc});
+      const auto &call   = *expr.children.front();
+      const auto &callee = *call.children.front();
+      if (callee.children.empty() ||
+          callee.children.front()->kind != ExprKind::Identifier)
+        return std::unexpected(Diagnostic{DiagnosticCode::InvalidPosition,
+                                          "ask's peer is not a name",
+                                          expr.loc});
+      auto payload = arena.makeCell(callee.text);
+      for (std::size_t i = 1; i < call.children.size(); ++i) {
+        auto arg = marshalTerm(*call.children[i]);
+        if (!arg) return std::unexpected(arg.error());
+        zigzag::expectWritten(
+            arena.link(zigzag::rankTail(arena, payload, dims().step),
+                       dims().step, DimVector::POS, *arg));
+      }
+      const auto step = arena.makeCell();
+      zigzag::expectWritten(arena.link(step, verbDim(), DimVector::POS,
+                                       arena.makeCell(std::string{verb})));
+      const auto field = [&](std::string_view name, CellRef value) {
+        if (const auto rec = varsRecord(arena, core, step, name, true))
+          zigzag::expectWritten(
+              arena.link(*rec, dims().values, DimVector::POS, value));
+      };
+      field("peer", arena.makeCell(callee.children.front()->text));
+      field("payload", payload);
+      field("deadline", arena.makeScalarCell(static_cast<std::int64_t>(
+                            std::stoll(expr.deadline->text))));
       return step;
     }
 

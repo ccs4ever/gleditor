@@ -697,6 +697,48 @@ TEST(VagentExecutorTest, AchieveByStagesRemotelyAndWithinBoundsTheWait) {
   EXPECT_EQ(arena.outstandingMarks(), 0u);
 }
 
+TEST(VagentExecutorTest, AskStagesTheQuestionAndWakesOnTheAnswer) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image =
+      h.lower("module demo\nevent Tick\nevent Done\n"
+              "question stock(item: Str): Int\n"
+              "goal Outer() perform\n"
+              "agent A {\n"
+              "  on Tick { adopt Outer() }\n"
+              "  plan o for Outer { ask parent.stock(\"oil\") within 2s;\n"
+              "                     emit Done{} }\n"
+              "}");
+  ASSERT_TRUE(image);
+  auto &arena     = h.ctx.arena;
+  const auto iDim = h.ctx.core.findOrMintDimension("d.intention");
+
+  // Turn 1 — the ask stages the {kind,target,payload,id} request and
+  // parks the intention waiting on a same-named answer percept.
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  const auto outbox =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  ASSERT_EQ(outbox.size(), 1u);
+  EXPECT_EQ(outbox[0].kind, "ask");
+  EXPECT_EQ(outbox[0].target, "parent");
+  EXPECT_EQ(outbox[0].payload, "stock");
+  ASSERT_EQ((zigzag::rankAfter(arena, image->agentCell, iDim) |
+             std::ranges::to<std::vector>())
+                .size(),
+            1u);
+
+  // Turn 2 — the adapter's answer arrives journaled under the
+  // question's name (the question symbol's empty clause bank
+  // dispatches nothing); the wake resumes the spine into emit.
+  ASSERT_TRUE(exec(h.execution("stock"), h.ctx));
+  const auto after =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  ASSERT_EQ(after.size(), 2u);
+  EXPECT_EQ(after[1].payload, "Done");
+  EXPECT_TRUE(zigzag::rankAfter(arena, image->agentCell, iDim).empty());
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
 TEST(VagentExecutorTest, StopSelfHaltsEveryLaterTurn) {
   ExecutorHarness h;
   VagentExecutor exec;

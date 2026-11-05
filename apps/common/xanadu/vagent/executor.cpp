@@ -286,6 +286,35 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
                        arena.makeScalarCell(std::int64_t{1})));
       return true;
     }
+    if (verb == "ask") {
+      // Question staging + suspension in one step: the request rides
+      // the outbox for the adapter, and the intention parks waiting
+      // on a journal percept under the question's name — the same
+      // functor-text match await uses. The within bound rides
+      // awaitDeadline; expiry takes the fault ladder.
+      if (intention == noCell) return false;
+      const auto peer     = field("peer");
+      const auto payload  = field("payload");
+      const auto deadline = field("deadline");
+      if (peer == noCell || payload == noCell || deadline == noCell)
+        return false;
+      const auto turns = arena.asInt64(deadline);
+      if (!turns) return false;
+      stageOutbox("ask", payload, peer);
+      // awaitEvent must not reuse the payload cell: -d.values pairs
+      // one inbound neighbor per cell, so a second link here would
+      // evict the outbox entry's payload edge (the +d.holder finding,
+      // again). The wake matcher only needs the functor's text.
+      if (const auto rec =
+              varsRecord(arena, core, intention, "awaitEvent", true))
+        zigzag::expectWritten(
+            arena.link(*rec, core.dims().values, DimVector::POS,
+                       arena.makeCell(arena.textOf(payload))));
+      meta.setIntentionField(intention, "awaitDeadline", turn + *turns);
+      meta.setIntentionField(intention, "waiting", 1);
+      meta.setIntentionField(intention, "ready", 0);
+      return true;
+    }
     if (verb == "await") {
       // Suspension needs a record to park — await in an `on` handler's
       // dispatch spine has nothing to suspend, so it refuses there.
