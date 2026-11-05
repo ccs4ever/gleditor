@@ -194,6 +194,8 @@ struct Lowerer {
     case ExprKind::AwaitEvent:
     case ExprKind::AwaitTerm:
     case ExprKind::Achieve:
+    case ExprKind::Tell:
+    case ExprKind::Untell:
       return true;
     default:
       return false;
@@ -274,11 +276,42 @@ struct Lowerer {
     case ExprKind::Achieve:
       verb = "achieve";
       break;
+    case ExprKind::Tell:
+      verb = "tell";
+      break;
+    case ExprKind::Untell:
+      verb = "untell";
+      break;
     default:
       return std::unexpected(Diagnostic{DiagnosticCode::InvalidPosition,
                                         "statement is not a host verb",
                                         expr.loc});
     }
+    // tell/untell stage cross-agent assertions through the outbox:
+    // peer by name, fact as a marshaled term. The receiver-side
+    // assert is the adapter's delivery work — the turn just stages
+    // the record like emit does.
+    if (expr.kind == ExprKind::Tell || expr.kind == ExprKind::Untell) {
+      if (expr.children.size() < 2 ||
+          expr.children[0]->kind != ExprKind::Identifier)
+        return std::unexpected(Diagnostic{DiagnosticCode::InvalidPosition,
+                                          "tell's peer is not a name",
+                                          expr.loc});
+      auto term = marshalTerm(*expr.children[1]);
+      if (!term) return std::unexpected(term.error());
+      const auto step = arena.makeCell();
+      zigzag::expectWritten(arena.link(step, verbDim(), DimVector::POS,
+                                       arena.makeCell(std::string{verb})));
+      const auto field = [&](std::string_view name, CellRef value) {
+        if (const auto rec = varsRecord(arena, core, step, name, true))
+          zigzag::expectWritten(
+              arena.link(*rec, dims().values, DimVector::POS, value));
+      };
+      field("peer", arena.makeCell(expr.children[0]->text));
+      field("payload", *term);
+      return step;
+    }
+
     // achieve shares adopt's goal-name marshal — the delegation the
     // runtime resolves on the parent intention. `by`/within/else arms
     // refuse at marshal and degrade to stub segments.
@@ -371,13 +404,28 @@ struct Lowerer {
     if (expr.kind == ExprKind::Emit) {
       // emit's operand is an event value — Identifier or Call naming a
       // declared event; the name marshals as payload and the §3.7
-      // record's kind/target/id fill at run time. Argument-carrying
-      // emits and in/for targets still refuse — marshal machinery
-      // M4b brings.
-      if (expr.scope || expr.recipients)
+      // record's kind/target/id fill at run time. in/for marshal a
+      // bare name each into the one `target` slot — both at once has
+      // no schema answer, and compound target expressions (lists,
+      // computed scopes) still refuse.
+      const auto targetOf = [](const Expr &e) -> const std::string * {
+        return e.kind == ExprKind::Identifier ? &e.text : nullptr;
+      };
+      const std::string *target = nullptr;
+      if (expr.scope && expr.recipients)
         return std::unexpected(
             Diagnostic{DiagnosticCode::InvalidPosition,
-                       "emit's in/for targets do not lower yet", expr.loc});
+                       "emit's in and for share one target slot — "
+                       "name one",
+                       expr.loc});
+      if (expr.scope && !(target = targetOf(*expr.scope)))
+        return std::unexpected(Diagnostic{DiagnosticCode::InvalidPosition,
+                                          "emit's in-target is not a name",
+                                          expr.loc});
+      if (expr.recipients && !(target = targetOf(*expr.recipients)))
+        return std::unexpected(Diagnostic{DiagnosticCode::InvalidPosition,
+                                          "emit's for-target is not a name",
+                                          expr.loc});
       const auto &operand          = *expr.children.front();
       const std::string *eventName = nullptr;
       const Expr *record           = nullptr;
@@ -416,6 +464,10 @@ struct Lowerer {
       if (const auto rec = varsRecord(arena, core, step, "payload", true))
         zigzag::expectWritten(
             arena.link(*rec, dims().values, DimVector::POS, payload));
+      if (target)
+        if (const auto rec = varsRecord(arena, core, step, "target", true))
+          zigzag::expectWritten(arena.link(*rec, dims().values, DimVector::POS,
+                                           arena.makeCell(*target)));
       return step;
     }
 

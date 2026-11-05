@@ -174,6 +174,35 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
   // head directly, learn-clause graphs lacking the descriptor through
   // body_of's session wrapper. False means a refusal — the turn faults.
 
+  // §3.7's staging point — the {kind,target,payload,id} record minted
+  // inside m0; the adapter's post-commit drain delivers it. id is the
+  // deterministic idempotence triple so a duplicate drain is
+  // detectable by key rather than by cell identity.
+  const auto stageOutbox = [&](std::string_view kind, CellRef payload,
+                               CellRef target) {
+    const auto position = std::ranges::to<std::vector>(
+                              zigzag::rankAfter(arena, agent, dims.outbox))
+                              .size();
+    const auto entry    = arena.makeCell();
+    zigzag::expectWritten(
+        arena.link(zigzag::rankTail(arena, agent, dims.outbox), dims.outbox,
+                   DimVector::POS, entry));
+    const auto outField = [&](std::string_view name, CellRef value) {
+      if (const auto rec = varsRecord(arena, core, entry, name, true))
+        zigzag::expectWritten(
+            arena.link(*rec, core.dims().values, DimVector::POS, value));
+    };
+    std::string sender;
+    if (const auto name = arena.linked(agent, core.dims().name, DimVector::POS))
+      sender = std::string{arena.textOf(*name)};
+    outField("kind", arena.makeCell(std::string{kind}));
+    outField("payload", payload);
+    outField("target", target);
+    outField("id", arena.makeCell(std::format("{}:{}:{}",
+                                              std::hash<std::string>{}(sender),
+                                              turn, position)));
+  };
+
   // §3.8 host step: +d.verb names the MetaRuntime entry, +d.vars holds
   // the marshaled args. Peer and turn are implicit — a belief an agent
   // asserts is asserted by that agent on that turn.
@@ -210,34 +239,23 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
     if (verb == "emit") {
       const auto payload = field("payload");
       if (payload == noCell) return false;
-      // §3.7's cell-legible entry: {kind,target,payload,id} on
-      // +d.outbox — the post-commit drain is the adapter's (C++ reads,
-      // consumeWork-free), the turn just mints the record. id is the
-      // spec's deterministic idempotence triple — sender-name hash +
-      // turn + outbox position — so a host binding detects a duplicate
-      // drain by key rather than by cell identity.
-      const auto position = std::ranges::to<std::vector>(
-                                zigzag::rankAfter(arena, agent, dims.outbox))
-                                .size();
-      const auto entry    = arena.makeCell();
-      zigzag::expectWritten(
-          arena.link(zigzag::rankTail(arena, agent, dims.outbox), dims.outbox,
-                     DimVector::POS, entry));
-      const auto outField = [&](std::string_view name, CellRef value) {
-        if (const auto rec = varsRecord(arena, core, entry, name, true))
-          zigzag::expectWritten(
-              arena.link(*rec, core.dims().values, DimVector::POS, value));
-      };
-      std::string sender;
-      if (const auto name =
-              arena.linked(agent, core.dims().name, DimVector::POS))
-        sender = std::string{arena.textOf(*name)};
-      outField("kind", arena.makeCell("emit"));
-      outField("payload", payload);
-      outField("target", arena.makeScalarCell(std::int64_t{0}));
-      outField("id", arena.makeCell(std::format(
-                         "{}:{}:{}", std::hash<std::string>{}(sender), turn,
-                         position)));
+      // in/for marshals a target name; an untargeted emit keeps the
+      // schema's 0 — the adapter reads a text target as a delivery
+      // address, 0 as broadcast/self.
+      const auto target = field("target");
+      stageOutbox("emit", payload,
+                  target != noCell ? target
+                                   : arena.makeScalarCell(std::int64_t{0}));
+      return true;
+    }
+    if (verb == "tell" || verb == "untell") {
+      // Same staging as emit: the peer name rides target, the fact
+      // rides payload — the receiver-side assert is the adapter's
+      // delivery work, not the turn's.
+      const auto peer    = field("peer");
+      const auto payload = field("payload");
+      if (peer == noCell || payload == noCell) return false;
+      stageOutbox(verb, payload, peer);
       return true;
     }
     if (verb == "await") {

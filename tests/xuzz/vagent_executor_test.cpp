@@ -362,6 +362,26 @@ TEST(VagentExecutorTest, EmitMarshalsRecordFieldsOntoThePayload) {
   EXPECT_EQ(arena.outstandingMarks(), 0u);
 }
 
+TEST(VagentExecutorTest, EmitForMarshalsTheTargetOntoTheRecord) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image = h.lower("module demo\nevent Tick\nevent Ping\n"
+                             "agent A { on Tick { emit Ping{} for parent } }");
+  ASSERT_TRUE(image);
+
+  const auto outcome = exec(h.execution("Tick"), h.ctx);
+  ASSERT_TRUE(outcome) << static_cast<int>(outcome.error());
+
+  const auto outbox =
+      VagentExecutor::drainOutbox(h.ctx.arena, h.ctx.core, image->agentCell);
+  ASSERT_EQ(outbox.size(), 1u);
+  EXPECT_EQ(outbox[0].payload, "Ping");
+  // The for-name rides the record's one target slot — the adapter
+  // reads it as the delivery address; untargeted emits carry 0.
+  EXPECT_EQ(outbox[0].target, "parent");
+  EXPECT_EQ(h.ctx.arena.outstandingMarks(), 0u);
+}
+
 TEST(VagentExecutorTest, DrainReadsTheOutboxAndDuplicatesAreDetectable) {
   ExecutorHarness h;
   VagentExecutor exec;
@@ -607,6 +627,30 @@ TEST(VagentExecutorTest, AchieveGoalFaultsWhenSucceedWhenFails) {
   EXPECT_EQ(meta.intentionField(live.front(), "faulted"), 1);
   EXPECT_EQ(meta.intentionField(live.front(), "faults"), 1);
   EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
+TEST(VagentExecutorTest, TellStagesACrossAgentAssertionInTheOutbox) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image =
+      h.lower("module demo\nevent Tick\n"
+              "predicate reading(s: Str, v: Int)\n"
+              "agent A { on Tick { tell parent reading(\"left\", 4) } }");
+  ASSERT_TRUE(image);
+
+  const auto outcome = exec(h.execution("Tick"), h.ctx);
+  ASSERT_TRUE(outcome) << static_cast<int>(outcome.error());
+
+  // §3.7 staging: the tell is an outbox record with the peer on
+  // target and the marshaled term on payload — receiver-side assert
+  // is the adapter's delivery work.
+  const auto outbox =
+      VagentExecutor::drainOutbox(h.ctx.arena, h.ctx.core, image->agentCell);
+  ASSERT_EQ(outbox.size(), 1u);
+  EXPECT_EQ(outbox[0].kind, "tell");
+  EXPECT_EQ(outbox[0].target, "parent");
+  EXPECT_EQ(outbox[0].payload, "reading");
+  EXPECT_EQ(h.ctx.arena.outstandingMarks(), 0u);
 }
 
 // -- §3.1/§3.8 belief store: predicate banks, provenance, the four verbs ------
