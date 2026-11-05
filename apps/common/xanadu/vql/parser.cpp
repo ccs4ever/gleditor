@@ -1448,6 +1448,18 @@ PredicateTest Parser::parsePredicateTest() {
 }
 
 ValueExpr Parser::parseValueExpr() {
+  ValueExpr expression = parseValueAtom();
+  while (match(TokenKind::Plus)) {
+    ValueExpr right = parseValueAtom();
+    auto addition   = std::make_shared<BinaryValueExpr>();
+    addition->left  = std::make_shared<ValueExpr>(std::move(expression));
+    addition->right = std::make_shared<ValueExpr>(std::move(right));
+    expression.kind = std::move(addition);
+  }
+  return expression;
+}
+
+ValueExpr Parser::parseValueAtom() {
   if (check(TokenKind::KwLens) && peekToken().is(TokenKind::OpenParen)) {
     return ValueExpr{.kind = std::make_shared<FunctionInvocation>(
                          parseFunctionInvocation())};

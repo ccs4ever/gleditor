@@ -350,3 +350,17 @@ Luna gates; see [iteration 18](projects/vortex-vm-only-iterations.md). Additive 
 still required by the documented contract examples. Nonliteral field-default thunks, mutation
 boundaries, free closures, complete functors/variadics and remaining lifecycle routes still prevent
 §4.12 completion.
+
+## Additive value-expression graphs
+
+Left-associative `+` now emits `VqlAdd` in existing value-expression positions. Text concatenates;
+typed Int64 addition checks overflow; Double arithmetic follows IEEE rules; mixed numeric operands
+require exact integer promotion. Full operand streams are checked without truncation. Computed
+`string()` and `+` results are materialized as fresh value cells so loop results cannot alias a
+reused register; ordinary aliases retain their identity. Allocation/publication rollback and retry
+preserve earlier results. The actual §4.12 formatting/destructuring bodies passed, together with
+saved graphs, host/mesh routes and a real CLI formatting query. Full build and all 547 affected
+tests passed with independent Luna gates; see [iteration 19](projects/vortex-vm-only-iterations.md).
+Return-item/top-level grammar, legacy direct consumer routing, sealed normalized-stream artifacts,
+lazy field-default continuations, mutation contracts, free closures and remaining
+functor/variadic/lifecycle work still prevent §4.12 completion.

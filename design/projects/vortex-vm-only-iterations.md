@@ -532,3 +532,49 @@ full-suite pass is claimed. Additive scalar/string expressions and the remaining
 incomplete.
 
 Logs: `/tmp/vql-string-build.log`, `/tmp/vql-string-tests.log`, `/tmp/vql-string-format.log`.
+
+## Iteration 19: native additive value expressions
+
+Existing value-expression positions accept left-associative `+`, including expression-bodied
+functions, arguments and comparison operands. Both child ASTs participate in the query-wide pointer,
+cycle, depth, node and lexical dependency analysis. Compilation prepares both complete operand
+streams in order and emits the appended `VqlAdd` opcode; no first-cell truncation or runtime AST
+evaluation is introduced. Legacy direct evaluator helpers explicitly refuse the new AST node.
+
+The native leaf shares cardinality and typed scalar reading with `VqlString`. Two text values
+concatenate without numeric inference. Two Int64 values use checked addition; two Double values use
+IEEE arithmetic. Mixed numeric addition requires an exactly representable Int64-to-Double promotion
+before IEEE arithmetic, using unsigned magnitude and bit widths rather than an unsafe cast back to
+Int64. Booleans, structural handles and mixed text/numeric values refuse. Existing exact comparison
+semantics are unchanged. Output is staged until validation succeeds; native VM guards and opcode
+bounds include the new leaf.
+
+Computed `string()` and `+` outputs immediately execute `VqlBoxScalar`, a narrow allocation
+primitive that publishes a fresh typed scalar or text cell through a reference slot. This fixes a
+real CLI failure where a loop returned `second`, `second` for `first`, `second` because both results
+aliased one mutable register. Variable/path aliases and immutable constants retain their identities.
+Allocation and reference publication share an arena savepoint; refusal restores the prior output
+reference and value without refunding work. Existing arena allocation limits apply to retained value
+cells. Numeric arena cells remain bits-only until rendering/promotion.
+
+Validation: full `make -j$(nproc)` and all 547 affected tests from 53 suites passed, including
+fourteen new additive and computed-value lifetime cases. The actual §4.12 `format_title` and
+`process_video` destructuring bodies execute in native frames. Tests cover overflow, exact/inexact
+mixed promotion, typed foreign/clone values, full cardinality, free bindings, lazy parameter
+defaults, cyclic AST refusal, fresh-VM Store reload, host/mesh Vquery sources and a sealed scalar
+artifact. A real headless `vquery` invocation returned `h264 @ 60fps`; dedicated CLI loops returned
+`first`, `second` and `first!`, `second!`. Lifetime tests check distinct output identities,
+unchanged earlier results, nested calls/defaults, work/allocation refusal with prior-reference
+preservation, retry and sealed boxed-result dereference. Independent Luna architecture and
+senior/profiler gates accepted the bounded compiler/VM scope. Repository formatting passed with
+clang-format 19. No speedup or full-suite pass is claimed.
+
+Support is bounded to existing value-expression positions: direct top-level arithmetic, return-item
+grammar and some path-led bindings still need integration. Direct interpreter consumers in dynamic
+views, sorting and store-anchor helpers remain routing debt and refuse this node rather than
+evaluate it. Sealed artifacts still refuse normalized stream instructions; the sealed scalar-opcode
+test does not establish compiler-generated graph artifact parity. Nonliteral field-default thunks,
+mutation boundaries, free closure inputs and remaining §4.12 work stay incomplete.
+
+Logs: `/tmp/vql-additive-build.log`, `/tmp/vql-additive-tests.log`, `/tmp/vql-additive-format.log`,
+`/tmp/vql-additive-cli.log`.

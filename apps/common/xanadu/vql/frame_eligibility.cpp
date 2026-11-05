@@ -219,6 +219,22 @@ private:
                 [&](const BooleanExpr &boolean, const std::size_t childDepth) {
                   booleanExpr(boolean, scope, childDepth);
                 });
+          } else if constexpr (std::same_as<Part,
+                                            std::shared_ptr<BinaryValueExpr>>) {
+            pointer(part, depth + 1,
+                    [&](const BinaryValueExpr &binary,
+                        const std::size_t childDepth) {
+                      pointer(binary.left, childDepth + 1,
+                              [&](const ValueExpr &left,
+                                  const std::size_t nestedDepth) {
+                                value(left, scope, nestedDepth);
+                              });
+                      pointer(binary.right, childDepth + 1,
+                              [&](const ValueExpr &right,
+                                  const std::size_t nestedDepth) {
+                                value(right, scope, nestedDepth);
+                              });
+                    });
           }
         },
         expr.kind);

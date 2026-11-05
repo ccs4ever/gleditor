@@ -80,7 +80,11 @@ VQLCompiler::compileBuiltinInvocation(const FunctionInvocation &invocation,
   emitInput(op, input);
   const CellRef result = core_.arena().makeCell();
   emitOutput(op, result);
-  return result;
+  const CellRef box = emitOp(OpcodeKind::VqlBoxScalar, "#BOX_SCALAR");
+  emitInput(box, result);
+  const CellRef boxed = core_.arena().makeCell();
+  emitOutput(box, boxed);
+  return boxed;
 }
 
 std::vector<CellRef>

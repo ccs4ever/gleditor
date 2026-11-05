@@ -43,6 +43,7 @@ struct RunResult {
   std::string error;
   std::vector<CellRef> values;
   std::size_t stringOps{0};
+  std::size_t boxOps{0};
 };
 
 struct TemporaryDirectory {
@@ -75,8 +76,11 @@ struct Harness {
       result.error = compiled.errorMessage;
       return result;
     }
-    for (const CellRef opcode : compiled.generatedOpcodes)
-      result.stringOps += vm.getOpcodeKind(opcode) == OpcodeKind::VqlString;
+    for (const CellRef opcode : compiled.generatedOpcodes) {
+      const auto kind = vm.getOpcodeKind(opcode);
+      result.stringOps += kind == OpcodeKind::VqlString;
+      result.boxOps += kind == OpcodeKind::VqlBoxScalar;
+    }
     if (!compiled.cursor) {
       result.error = "compiled VQL has no cursor";
       return result;
@@ -255,6 +259,69 @@ TEST(VQLStringVMTest, NestedFramesDefaultsAndCallerContextUseNativeOpcode) {
   EXPECT_EQ(h.arena.textOf(nestedBuiltin.values.front()), "42");
 }
 
+TEST(VQLStringVMTest, LoopResultsKeepDistinctImmutableScalarCells) {
+  Harness h;
+  const auto items     = h.coordinator.resolveDimension("d.items");
+  const CellRef first  = h.arena.makeCell("first");
+  const CellRef second = h.arena.makeCell("second");
+  const CellRef third  = h.arena.makeCell("first");
+  zigzag::expectWritten(
+      h.arena.link(h.core.home(), items, DimVector::POS, first));
+  zigzag::expectWritten(h.arena.link(first, items, DimVector::POS, second));
+  zigzag::expectWritten(h.arena.link(second, items, DimVector::POS, third));
+
+  const auto direct = h.run("for $item in ##/d.items return string($item)");
+  ASSERT_TRUE(direct.compiled) << direct.error;
+  ASSERT_TRUE(direct.executed) << direct.error;
+  EXPECT_GT(direct.stringOps, 0u);
+  EXPECT_GT(direct.boxOps, 0u);
+  ASSERT_EQ(direct.values.size(), 3u);
+  EXPECT_EQ(h.arena.textOf(direct.values[0]), "first");
+  EXPECT_EQ(h.arena.textOf(direct.values[1]), "second");
+  EXPECT_EQ(h.arena.textOf(direct.values[2]), "first");
+  EXPECT_NE(direct.values[0], direct.values[1]);
+  EXPECT_NE(direct.values[0], direct.values[2]);
+  EXPECT_NE(direct.values[1], direct.values[2]);
+
+  const auto framed =
+      h.run("def pure render($value: String := \"default\"): String := "
+            "string($value); for $item in ##/d.items return render($item)");
+  ASSERT_TRUE(framed.compiled) << framed.error;
+  ASSERT_TRUE(framed.executed) << framed.error;
+  ASSERT_EQ(framed.values.size(), 3u);
+  EXPECT_EQ(h.arena.textOf(framed.values[0]), "first");
+  EXPECT_EQ(h.arena.textOf(framed.values[1]), "second");
+  EXPECT_EQ(h.arena.textOf(framed.values[2]), "first");
+  EXPECT_NE(framed.values[0], framed.values[1]);
+  EXPECT_NE(framed.values[0], framed.values[2]);
+  EXPECT_NE(framed.values[1], framed.values[2]);
+
+  const auto repeatedDefault =
+      h.run("def pure render($value: String := \"default\"): String := "
+            "string($value); for $item in ##/d.items let $label := render() "
+            "return $label");
+  ASSERT_TRUE(repeatedDefault.compiled) << repeatedDefault.error;
+  ASSERT_TRUE(repeatedDefault.executed) << repeatedDefault.error;
+  ASSERT_EQ(repeatedDefault.values.size(), 3u);
+  for (std::size_t index = 0; index < repeatedDefault.values.size(); ++index) {
+    EXPECT_EQ(h.arena.textOf(repeatedDefault.values[index]), "default");
+    for (std::size_t prior = 0; prior < index; ++prior)
+      EXPECT_NE(repeatedDefault.values[index], repeatedDefault.values[prior]);
+  }
+
+  const auto later = h.run("for $item in ##/d.items return string($item)");
+  ASSERT_TRUE(later.compiled) << later.error;
+  ASSERT_TRUE(later.executed) << later.error;
+  ASSERT_EQ(later.values.size(), 3u);
+  for (std::size_t index = 0; index < direct.values.size(); ++index) {
+    EXPECT_EQ(h.arena.textOf(direct.values[index]),
+              index == 1 ? "second" : "first");
+    EXPECT_EQ(h.arena.textOf(framed.values[index]),
+              index == 1 ? "second" : "first");
+    EXPECT_NE(direct.values[index], later.values[index]);
+  }
+}
+
 TEST(VQLStringVMTest, UserDefinitionNamedStringTakesPrecedence) {
   Harness h;
   const auto result =
@@ -350,6 +417,57 @@ TEST(VQLStringVMTest, NativeOpcodeRecoversAfterWorkBudgetExhaustion) {
   EXPECT_EQ(h.arena.textOf(output), "42");
 }
 
+TEST(VQLStringVMTest, BoxScalarBudgetFailureDoesNotAllocateOrReplaceOutput) {
+  Harness h;
+  const CellRef opcode = h.vm.mintOpcode(OpcodeKind::VqlBoxScalar);
+  const CellRef input  = h.arena.makeScalarCell(std::int64_t{42});
+  const CellRef output = h.arena.makeCell("sentinel");
+  zigzag::expectWritten(
+      h.arena.link(opcode, h.core.dims().spin, DimVector::POS, opcode));
+  h.core.bindInput(opcode, input);
+  h.core.bindOutput(opcode, output);
+  const CellRef cursor = h.vm.spawnCursor(opcode, "vql-box-budget");
+
+  const auto initial = h.vm.step(cursor);
+  ASSERT_TRUE(initial.success) << initial.errorMessage;
+  const auto initialBox = h.vm.cellReferenceOf(output);
+  ASSERT_TRUE(initialBox);
+  ASSERT_NE(*initialBox, input);
+  EXPECT_EQ(h.arena.asInt64(*initialBox), 42);
+  const auto boxedCellCount = h.arena.cells().size();
+
+  zigzag::expectWritten(h.arena.setValueBits(
+      input, ValueKind::Int64, std::bit_cast<std::uint64_t>(INT64_C(7))));
+  h.arena.setExecutionLimits(1000, 0, 1000);
+  const auto refused = h.vm.step(cursor);
+  EXPECT_FALSE(refused.success);
+  EXPECT_EQ(h.arena.cells().size(), boxedCellCount);
+  EXPECT_EQ(h.vm.cellReferenceOf(output), initialBox);
+  EXPECT_EQ(h.arena.asInt64(*initialBox), 42);
+
+  h.arena.setExecutionLimits(1000, 1000, 1000);
+  h.arena.setAllocationLimitForTesting(
+      static_cast<std::uint32_t>(h.arena.cells().size()));
+  const auto allocationRefused = h.vm.step(cursor);
+  EXPECT_FALSE(allocationRefused.success);
+  EXPECT_EQ(h.arena.cells().size(), boxedCellCount);
+  EXPECT_EQ(h.vm.cellReferenceOf(output), initialBox);
+  EXPECT_EQ(h.arena.asInt64(*initialBox), 42);
+
+  h.arena.setAllocationLimitForTesting(
+      std::numeric_limits<std::uint32_t>::max());
+  const auto retried = h.vm.step(cursor);
+  ASSERT_TRUE(retried.success) << retried.errorMessage;
+  EXPECT_GT(h.arena.cells().size(), boxedCellCount);
+  const auto retriedBox = h.vm.cellReferenceOf(output);
+  ASSERT_TRUE(retriedBox);
+  EXPECT_NE(*retriedBox, *initialBox);
+  EXPECT_NE(*retriedBox, input);
+  EXPECT_EQ(h.arena.asInt64(*retriedBox), 7);
+  EXPECT_EQ(h.arena.asInt64(*initialBox), 42);
+  EXPECT_EQ(h.vm.resultCell(output), retriedBox);
+}
+
 TEST(VQLStringVMTest, NativeStringOpcodeSurvivesAstDestructionAndReload) {
   TemporaryDirectory temporary;
   auto scroll = std::make_shared<UserPermascroll>(
@@ -369,6 +487,7 @@ TEST(VQLStringVMTest, NativeStringOpcodeSurvivesAstDestructionAndReload) {
     }
     ASSERT_TRUE(compiled.success) << compiled.errorMessage;
     EXPECT_GT(countOpcode(sourceVm, compiled, OpcodeKind::VqlString), 0u);
+    EXPECT_GT(countOpcode(sourceVm, compiled, OpcodeKind::VqlBoxScalar), 0u);
     Store store(scroll);
     compiler.exportToStore(store);
     store.save((temporary.path / "program").string());
@@ -400,6 +519,7 @@ TEST(VQLStringVMTest, NativeStringOpcodeSurvivesAstDestructionAndReload) {
   const auto values = vm.resultCells(resultPorts.front());
   ASSERT_EQ(values.size(), 1u);
   EXPECT_EQ(arena.textOf(values.front()), "1");
+  EXPECT_EQ(arena.valueKindOf(values.front()), ValueKind::None);
 }
 
 TEST(VQLStringVMTest, SealedScalarOpcodeExecutesWithoutStreamMetadata) {
@@ -415,6 +535,46 @@ TEST(VQLStringVMTest, SealedScalarOpcodeExecutesWithoutStreamMetadata) {
                        {1, OpcodeKind::Halt, {}, {}, {}}},
       .entry        = 0,
       .outputs      = {{3}}};
+  const auto sealed = mesh::sealVortexProgram(program);
+  ASSERT_TRUE(sealed) << sealed.error();
+  const auto result = mesh::evaluate(mesh::Frontend::Vortex, *sealed,
+                                     {.maxCycles      = 10000,
+                                      .maxCells       = 10000,
+                                      .maxSolutions   = 16,
+                                      .maxOutputBytes = 1024 * 1024});
+  ASSERT_TRUE(result) << result.error();
+  auto &arena = result->context->arena;
+  std::optional<CellRef> items;
+  std::optional<CellRef> value;
+  for (const auto &cell : arena.cells()) {
+    if (arena.textOf(cell.birthOp) == "d.mesh.items") items = cell.birthOp;
+    if (arena.textOf(cell.birthOp) == "d.mesh.value") value = cell.birthOp;
+  }
+  ASSERT_TRUE(items);
+  ASSERT_TRUE(value);
+  const auto record = arena.linked(result->root, *items, DimVector::POS);
+  ASSERT_TRUE(record);
+  const auto output = arena.linked(*record, *value, DimVector::POS);
+  ASSERT_TRUE(output);
+  EXPECT_EQ(arena.textOf(*output), "9223372036854775807");
+}
+
+TEST(VQLStringVMTest, SealedStringResultCanBeBoxedAndDereferenced) {
+  namespace mesh = zigzag::vortex::mesh;
+  mesh::VortexProgram program{
+      .cells        = {{},
+                       {},
+                       {zigzag::vortex::CellValue{
+                     std::numeric_limits<std::int64_t>::max()},
+                        {}},
+                       {},
+                       {},
+                       {}},
+      .instructions = {{0, OpcodeKind::VqlString, {2}, {3}, 4},
+                       {4, OpcodeKind::VqlBoxScalar, {3}, {5}, 1},
+                       {1, OpcodeKind::Halt, {}, {}, {}}},
+      .entry        = 0,
+      .outputs      = {{5, true}}};
   const auto sealed = mesh::sealVortexProgram(program);
   ASSERT_TRUE(sealed) << sealed.error();
   const auto result = mesh::evaluate(mesh::Frontend::Vortex, *sealed,

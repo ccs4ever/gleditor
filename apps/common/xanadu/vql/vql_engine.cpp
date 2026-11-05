@@ -1474,6 +1474,10 @@ VQLEngine::evaluateValueExpr(const ValueExpr &expr,
     return zigzag::vortex::CellValue{evaluatePredicate(b, context)};
   }
 
+  if (std::holds_alternative<std::shared_ptr<BinaryValueExpr>>(expr.kind))
+    throw std::invalid_argument(
+        "binary value expressions require Vortex VM graph lowering");
+
   return std::nullopt;
 }
 

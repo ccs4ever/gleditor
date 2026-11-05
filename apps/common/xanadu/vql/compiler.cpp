@@ -119,6 +119,10 @@ VQLCompiler::opcodeMnemonic(zigzag::vortex::OpcodeKind kind) noexcept {
     return "RETURN_FRAME";
   case OpcodeKind::VqlString:
     return "VQL_STRING";
+  case OpcodeKind::VqlAdd:
+    return "VQL_ADD";
+  case OpcodeKind::VqlBoxScalar:
+    return "VQL_BOX_SCALAR";
   case OpcodeKind::RankBegin:
     return "RANK_BEGIN";
   case OpcodeKind::IteratorNext:
@@ -754,6 +758,27 @@ std::optional<CellRef> VQLCompiler::compileValueExpr(const ValueExpr &expr,
           return results.empty()
                      ? std::nullopt
                      : std::optional{emitFirstCell(results.front())};
+        } else if constexpr (std::is_same_v<T,
+                                            std::shared_ptr<BinaryValueExpr>>) {
+          if (!val || !val->left || !val->right)
+            throw std::invalid_argument("invalid binary value expression");
+          if (functorArgument(*val->left) || functorArgument(*val->right))
+            throw std::invalid_argument("VQL + does not accept path functors");
+
+          const auto leftValues     = compileArgument(*val->left, ctxCell);
+          const CellRef leftStream  = normalizeFrameStream(leftValues);
+          const auto rightValues    = compileArgument(*val->right, ctxCell);
+          const CellRef rightStream = normalizeFrameStream(rightValues);
+          const CellRef add         = emitOp(OpcodeKind::VqlAdd, "#VQL_ADD");
+          emitInput(add, leftStream);
+          emitInput(add, rightStream);
+          const CellRef result = core_.arena().makeCell();
+          emitOutput(add, result);
+          const CellRef box = emitOp(OpcodeKind::VqlBoxScalar, "#BOX_SCALAR");
+          emitInput(box, result);
+          const CellRef boxed = core_.arena().makeCell();
+          emitOutput(box, boxed);
+          return boxed;
         } else if constexpr (std::is_same_v<T, std::shared_ptr<BooleanExpr>>) {
           if (val) {
             return compileBooleanExpr(*val, ctxCell);

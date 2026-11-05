@@ -124,7 +124,7 @@ std::optional<OpcodeKind> VortexVM::getOpcodeKind(CellRef opCell) const {
   auto val = core_.arena().asInt64(opCell);
   if (val && *val >= 0 &&
       static_cast<std::uint64_t>(*val) <=
-          static_cast<std::uint64_t>(OpcodeKind::VqlString)) {
+          static_cast<std::uint64_t>(OpcodeKind::VqlBoxScalar)) {
     return static_cast<OpcodeKind>(*val);
   }
   return std::nullopt;
@@ -512,9 +512,10 @@ void VortexVM::runPipeline(CellRef paramCell) {
       throw std::invalid_argument(
           "ProbeLink cannot run in a parameter pipeline");
     }
-    if (kind == OpcodeKind::VqlString)
+    if (kind == OpcodeKind::VqlString || kind == OpcodeKind::VqlAdd ||
+        kind == OpcodeKind::VqlBoxScalar)
       throw std::invalid_argument(
-          "VqlString cannot run in a parameter pipeline");
+          "VQL scalar opcodes cannot run in a parameter pipeline");
     if (kind == OpcodeKind::InvokeFrame || kind == OpcodeKind::ReturnFrame)
       throw std::invalid_argument(
           "activation-frame opcodes cannot run in parameter pipelines");
@@ -533,7 +534,8 @@ void VortexVM::runPipeline(CellRef paramCell) {
 
     std::vector<CellRef> inCells = inputsOf(*pipeOp);
     std::vector<CellValue> inVals;
-    if (kind == OpcodeKind::VqlCompare || kind == OpcodeKind::VqlString) {
+    if (kind == OpcodeKind::VqlCompare || kind == OpcodeKind::VqlString ||
+        kind == OpcodeKind::VqlAdd || kind == OpcodeKind::VqlBoxScalar) {
       // These VQL scalar leaves resolve raw VM slots themselves.
     } else if (inCells.empty()) {
       inVals.push_back(inputValue(paramCell));
@@ -591,14 +593,16 @@ bool VortexVM::evaluateCondition(CellRef clause,
   }
   if (kind == OpcodeKind::ProbeLink)
     throw std::invalid_argument("ProbeLink cannot run as a condition");
-  if (kind == OpcodeKind::VqlString)
-    throw std::invalid_argument("VqlString cannot run as a condition");
+  if (kind == OpcodeKind::VqlString || kind == OpcodeKind::VqlAdd ||
+      kind == OpcodeKind::VqlBoxScalar)
+    throw std::invalid_argument("VQL scalar opcodes cannot run as conditions");
   if (kind == OpcodeKind::InvokeFrame || kind == OpcodeKind::ReturnFrame)
     throw std::invalid_argument(
         "activation-frame opcodes cannot run as conditions");
   std::vector<CellRef> inCells = inputsOf(actualClause);
   std::vector<CellValue> inVals;
-  if (kind == OpcodeKind::VqlCompare || kind == OpcodeKind::VqlString) {
+  if (kind == OpcodeKind::VqlCompare || kind == OpcodeKind::VqlString ||
+      kind == OpcodeKind::VqlAdd || kind == OpcodeKind::VqlBoxScalar) {
     // Their handlers resolve raw slots and must observe missing references.
   } else if (!inCells.empty()) {
     for (CellRef c : inCells) {
@@ -649,6 +653,10 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
     return executeVqlCompare(opcode, outputs);
   case OpcodeKind::VqlString:
     return executeVqlString(opcode, outputs);
+  case OpcodeKind::VqlAdd:
+    return executeVqlAdd(opcode, outputs);
+  case OpcodeKind::VqlBoxScalar:
+    return executeVqlBoxScalar(opcode, outputs);
   case OpcodeKind::ProbeLink:
     return executeProbeLink(opcode, outputs);
   case OpcodeKind::Add: {
@@ -1474,12 +1482,14 @@ ExecutionResult VortexVM::step(CellRef cursor) {
       return getOpcodeKind(actual) == OpcodeKind::ProbeLink;
     });
   };
-  const auto hasVqlStringCondition = [this](const auto &clauses) {
+  const auto hasVqlScalarCondition = [this](const auto &clauses) {
     return std::ranges::any_of(clauses, [this](const CellRef clause) {
       const CellRef actual = core_.arena()
                                  .cloneMaster(clause, core_.dims().clone)
                                  .value_or(clause);
-      return getOpcodeKind(actual) == OpcodeKind::VqlString;
+      const auto kind = getOpcodeKind(actual);
+      return kind == OpcodeKind::VqlString || kind == OpcodeKind::VqlAdd ||
+             kind == OpcodeKind::VqlBoxScalar;
     });
   };
   const auto hasFrameCondition = [this](const auto &clauses) {
@@ -1497,10 +1507,10 @@ ExecutionResult VortexVM::step(CellRef cursor) {
     return {.success      = false,
             .errorMessage = "ProbeLink cannot run as a condition"};
   }
-  if (hasVqlStringCondition(core_.preconditionsOf(*op)) ||
-      hasVqlStringCondition(core_.postconditionsOf(*op))) {
+  if (hasVqlScalarCondition(core_.preconditionsOf(*op)) ||
+      hasVqlScalarCondition(core_.postconditionsOf(*op))) {
     return {.success      = false,
-            .errorMessage = "VqlString cannot run as a condition"};
+            .errorMessage = "VQL scalar opcodes cannot run as conditions"};
   }
   if (hasFrameCondition(core_.preconditionsOf(*op)) ||
       hasFrameCondition(core_.postconditionsOf(*op))) {
@@ -1534,11 +1544,13 @@ ExecutionResult VortexVM::step(CellRef cursor) {
     if (isMemoized(*op))
       return {.success = false, .errorMessage = "ProbeLink cannot be memoized"};
   }
-  if (kind == OpcodeKind::VqlString) {
+  if (kind == OpcodeKind::VqlString || kind == OpcodeKind::VqlAdd ||
+      kind == OpcodeKind::VqlBoxScalar) {
     if (!core_.preconditionsOf(*op).empty() ||
         !core_.postconditionsOf(*op).empty()) {
-      return {.success      = false,
-              .errorMessage = "VqlString does not support pre/postconditions"};
+      return {.success = false,
+              .errorMessage =
+                  "VQL scalar opcodes do not support pre/postconditions"};
     }
     if (std::ranges::any_of(
             inputCells,
@@ -1547,10 +1559,11 @@ ExecutionResult VortexVM::step(CellRef cursor) {
           return core_.hasPipeline(output);
         })) {
       return {.success      = false,
-              .errorMessage = "VqlString does not support pipelines"};
+              .errorMessage = "VQL scalar opcodes do not support pipelines"};
     }
     if (isMemoized(*op))
-      return {.success = false, .errorMessage = "VqlString cannot be memoized"};
+      return {.success      = false,
+              .errorMessage = "VQL scalar opcodes cannot be memoized"};
   }
   if (contractOp) {
     if (!core_.preconditionsOf(*op).empty() ||
@@ -1671,6 +1684,7 @@ ExecutionResult VortexVM::step(CellRef cursor) {
           kind == OpcodeKind::MatchContract ||
           kind == OpcodeKind::RequireContract ||
           kind == OpcodeKind::VqlCompare || kind == OpcodeKind::VqlString ||
+          kind == OpcodeKind::VqlAdd || kind == OpcodeKind::VqlBoxScalar ||
           kind == OpcodeKind::ProbeLink) {
         oldInputs.emplace_back(false);
       } else {
@@ -1693,7 +1707,8 @@ ExecutionResult VortexVM::step(CellRef cursor) {
       kind != OpcodeKind::RequireContract && kind != OpcodeKind::CopyCellRefs &&
       kind != OpcodeKind::ClearCellRefs &&
       kind != OpcodeKind::BranchFalseCell && kind != OpcodeKind::VqlCompare &&
-      kind != OpcodeKind::VqlString && kind != OpcodeKind::ResumeInit &&
+      kind != OpcodeKind::VqlString && kind != OpcodeKind::VqlAdd &&
+      kind != OpcodeKind::VqlBoxScalar && kind != OpcodeKind::ResumeInit &&
       kind != OpcodeKind::ResumeSet && kind != OpcodeKind::ProbeLink &&
       !stateful;
   if (memoizable && isMemoized(*op)) {
@@ -1720,6 +1735,43 @@ ExecutionResult VortexVM::step(CellRef cursor) {
   }
 
   // 5. Opcode Body Execution & Output Write
+  std::optional<Mark> boxScalarMark;
+  std::optional<CellRef> boxScalarOutput;
+  bool boxReferenceSnapshotTaken = false;
+  bool hadBoxOutputReference     = false;
+  std::optional<CellRef> priorBoxOutputReference;
+  if (kind == OpcodeKind::VqlBoxScalar) {
+    if (outCells.size() != 1 || !core_.arena().contains(outCells.front()) ||
+        streamSlots_.contains(outCells.front()) ||
+        iteratorSlots_.contains(outCells.front())) {
+      return {.success       = false,
+              .failingClause = *op,
+              .errorMessage =
+                  "VqlBoxScalar output must be one scalar arena slot"};
+    }
+    boxScalarOutput = outCells.front();
+    try {
+      boxScalarMark = core_.arena().mark();
+    } catch (const std::exception &error) {
+      return {
+          .success = false, .failingClause = *op, .errorMessage = error.what()};
+    }
+  }
+  const auto rollbackBoxScalar = [&] {
+    if (!boxScalarMark) return;
+    core_.arena().release(*boxScalarMark);
+    boxScalarMark.reset();
+    if (boxReferenceSnapshotTaken) {
+      if (hadBoxOutputReference) {
+        if (const auto found = cellReferences_.find(*boxScalarOutput);
+            found != cellReferences_.end()) {
+          found->second = priorBoxOutputReference;
+        }
+      } else {
+        cellReferences_.erase(*boxScalarOutput);
+      }
+    }
+  };
   bool jumped = false;
   if (!memoHit) {
     ExecutionResult execRes;
@@ -1727,9 +1779,11 @@ ExecutionResult VortexVM::step(CellRef cursor) {
       execRes =
           executeOpcodeBody(kind, *op, oldInputs, newOutputs, cursor, jumped);
     } catch (const std::exception &error) {
+      rollbackBoxScalar();
       return {.success = false, .errorMessage = error.what()};
     }
     if (!execRes.success) {
+      rollbackBoxScalar();
       return execRes;
     }
 
@@ -1743,10 +1797,30 @@ ExecutionResult VortexVM::step(CellRef cursor) {
     } else if (kind == OpcodeKind::Link || kind == OpcodeKind::Break ||
                kind == OpcodeKind::Value || kind == OpcodeKind::CopyCellRefs ||
                kind == OpcodeKind::ClearCellRefs ||
-               kind == OpcodeKind::ProbeLink) {
-      writeCellReferences(outCells, newOutputs,
-                          kind == OpcodeKind::CopyCellRefs ||
-                              kind == OpcodeKind::ClearCellRefs);
+               kind == OpcodeKind::ProbeLink ||
+               kind == OpcodeKind::VqlBoxScalar) {
+      if (kind == OpcodeKind::VqlBoxScalar) {
+        if (const auto found = cellReferences_.find(*boxScalarOutput);
+            found != cellReferences_.end()) {
+          hadBoxOutputReference   = true;
+          priorBoxOutputReference = found->second;
+        }
+        boxReferenceSnapshotTaken = true;
+        try {
+          writeCellReferences(outCells, newOutputs);
+          core_.arena().discard(*boxScalarMark);
+          boxScalarMark.reset();
+        } catch (const std::exception &error) {
+          rollbackBoxScalar();
+          return {.success       = false,
+                  .failingClause = *op,
+                  .errorMessage  = error.what()};
+        }
+      } else {
+        writeCellReferences(outCells, newOutputs,
+                            kind == OpcodeKind::CopyCellRefs ||
+                                kind == OpcodeKind::ClearCellRefs);
+      }
     } else if (kind != OpcodeKind::New && kind != OpcodeKind::Clone) {
       for (std::size_t i = 0; i < std::min(outCells.size(), newOutputs.size());
            ++i) {

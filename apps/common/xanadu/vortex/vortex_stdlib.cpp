@@ -635,9 +635,11 @@ std::vector<CellValue> VortexStdLib::call(CellRef fnOp,
     throw std::invalid_argument(
         "stdlib raw calls do not support activation-frame opcodes");
   }
-  if (vm_.getOpcodeKind(fnOp) == OpcodeKind::VqlString) {
+  if (vm_.getOpcodeKind(fnOp) == OpcodeKind::VqlString ||
+      vm_.getOpcodeKind(fnOp) == OpcodeKind::VqlAdd ||
+      vm_.getOpcodeKind(fnOp) == OpcodeKind::VqlBoxScalar) {
     throw std::invalid_argument(
-        "stdlib raw calls do not support VqlString reference-slot operands");
+        "stdlib raw calls do not support VQL scalar reference-slot operands");
   }
   std::string opName = core_.arena().textOf(fnOp);
   if (opName.starts_with("#ARRAY_")) {

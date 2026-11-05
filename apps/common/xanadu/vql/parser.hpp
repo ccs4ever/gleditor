@@ -90,6 +90,7 @@ private:
   PredicateTest parsePredicateTest();
 
   ValueExpr parseValueExpr();
+  ValueExpr parseValueAtom();
   ValueExpr parseValueOrComparisonExpr();
   FunctionInvocation parseFunctionInvocation();
 

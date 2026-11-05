@@ -113,6 +113,8 @@ enum class OpcodeKind : std::uint8_t {
   InvokeFrame,
   ReturnFrame,
   VqlString,
+  VqlAdd,
+  VqlBoxScalar,
 };
 
 struct FrameDescriptorError {
@@ -345,6 +347,10 @@ private:
                                     std::vector<CellValue> &outputs);
   ExecutionResult executeVqlString(CellRef opcode,
                                    std::vector<CellValue> &outputs);
+  ExecutionResult executeVqlAdd(CellRef opcode,
+                                std::vector<CellValue> &outputs);
+  ExecutionResult executeVqlBoxScalar(CellRef opcode,
+                                      std::vector<CellValue> &outputs);
   ExecutionResult executeProbeLink(CellRef opcode,
                                    std::vector<CellValue> &outputs);
   ExecutionResult executeTypeContract(OpcodeKind kind, CellRef opcode,

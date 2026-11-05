@@ -2306,6 +2306,17 @@ explicit refusals. The rulings below describe the intended semantics.
   dimension table; `Slice` a registered store's home cell or the arena's own; `Store` a registered
   store's cell on `d.stores` or the coordinator origin.
 
+- **Compiled scalar expressions preserve stored scalar kinds.** `string(expr)` requires one scalar
+  cell, preserves text bytes, and formats typed numbers/booleans canonically. In existing
+  value-expression positions, `+` concatenates two text values, checks Int64 addition for overflow,
+  and uses IEEE Double addition. Mixed numeric addition requires exact Int64-to-Double promotion;
+  textual numeric constraints do not implicitly cast text into numbers. These graphs use native VM
+  instructions with full operand cardinality checks. Computed `string()` and `+` values are
+  materialized into fresh cells at runtime so successive loop results remain distinct; variable/path
+  aliases keep their identities. Return-item/top-level grammar and legacy direct-consumer routing
+  remain incomplete; unsupported routes refuse explicitly. Nonliteral contract-field defaults still
+  require graph continuations. See [iterations 18–19](projects/vortex-vm-only-iterations.md).
+
 - **A default is used only when the field is absent**, and passing a cell or a path never mints: the
   bound cell is the linked one. A literal field default mints its scalar only when it is used;
   omitted parameter expressions may also run supported nested calls and paths lazily. `let $y := $x`

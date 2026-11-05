@@ -82,6 +82,7 @@ struct EffectClause;
 struct ShapeLiteral;
 struct VersionExpr;
 struct PathLambda;
+struct BinaryValueExpr;
 struct Statement;
 struct ScriptBody;
 struct TypeExpr;
@@ -120,8 +121,14 @@ struct ValueExpr {
   std::variant<std::shared_ptr<PathExpression>, ScalarLiteral,
                std::string /*VariableRef*/, std::shared_ptr<FunctionInvocation>,
                std::shared_ptr<ShapeLiteral>, std::shared_ptr<VersionExpr>,
-               std::shared_ptr<PathLambda>, std::shared_ptr<BooleanExpr>>
+               std::shared_ptr<PathLambda>, std::shared_ptr<BooleanExpr>,
+               std::shared_ptr<BinaryValueExpr>>
       kind;
+};
+
+struct BinaryValueExpr {
+  std::shared_ptr<ValueExpr> left;
+  std::shared_ptr<ValueExpr> right;
 };
 
 struct FunctionInvocation {
