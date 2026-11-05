@@ -804,7 +804,23 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       }
       return args;
     };
-    for (const CellRef clause : meta.clausesOf(*eventSym)) {
+    // §3.5's merged order: priority first — a higher number runs
+    // earlier — then source/declaration order, which the stable sort
+    // leaves as clausesOf's rank walk for equal priorities.
+    auto clauses = meta.clausesOf(*eventSym);
+    const auto priorityOf = [&](CellRef clause) -> std::int64_t {
+      if (const auto rec =
+              varsRecord(arena, core, clause, "priority", false))
+        if (const auto v =
+                arena.linked(*rec, core.dims().values, DimVector::POS))
+          if (const auto n = arena.asInt64(*v)) return *n;
+      return 0;
+    };
+    std::stable_sort(clauses.begin(), clauses.end(),
+                     [&](CellRef a, CellRef b) {
+                       return priorityOf(a) > priorityOf(b);
+                     });
+    for (const CellRef clause : clauses) {
       // The clause's +d.grab guard evaluates before the body — an
       // `on` handler's `[guard]` is a real filter, not decoration.
       // Refusals read as falsy, same as selectClause.

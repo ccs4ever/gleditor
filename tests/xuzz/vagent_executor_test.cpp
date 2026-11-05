@@ -458,6 +458,30 @@ TEST(VagentExecutorTest, ConsumeSpendsTheEventForLaterHandlersOnly) {
   EXPECT_EQ(arena.outstandingMarks(), 0u);
 }
 
+TEST(VagentExecutorTest, HandlerPriorityOrdersBeforeDeclarationOrder) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  // §3.5's merged order: priority first (higher runs earlier), ties
+  // keep declaration order. The first-declared handler carries no
+  // priority, so priority 2's handler emits ahead of it.
+  const auto image = h.lower(
+      "module demo\nevent Tick\nevent Low\nevent High\n"
+      "agent A {\n"
+      "  on Tick { emit Low{} }\n"
+      "  on Tick priority 2 { emit High{} }\n"
+      "}");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  const auto outbox =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  ASSERT_EQ(outbox.size(), 2u);
+  EXPECT_EQ(outbox[0].payload, "High");
+  EXPECT_EQ(outbox[1].payload, "Low");
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
 TEST(VagentExecutorTest, EmitInAndForMarshalOntoSeparateFields) {
   ExecutorHarness h;
   VagentExecutor exec;
