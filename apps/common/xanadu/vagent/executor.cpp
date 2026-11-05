@@ -337,6 +337,12 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
                            turn + setting("vagent.intention_backoff", 2));
   };
 
+  // `consume`'s scratch flag: a handler-side host step sets it and
+  // dispatchEvent's clause loop breaks after the current handler —
+  // the event is spent for *later* handlers only. Turn-scoped, never
+  // written to the record; dispatch resets it on entry so a consume
+  // inside a plan body can't leak into the next event.
+  bool eventConsumed = false;
   // §3.8 host step: +d.verb names the MetaRuntime entry, +d.vars holds
   // the marshaled args. Peer and turn are implicit — a belief an agent
   // asserts is asserted by that agent on that turn.
@@ -363,6 +369,10 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
                                              DimVector::POS,
                                              arena.makeScalarCell(*n)));
     };
+    if (verb == "consume") {
+      eventConsumed = true;
+      return true;
+    }
     if (verb == "adopt") {
       const auto goalName = field("goal");
       if (goalName == noCell) return false;
@@ -729,6 +739,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
   auto dispatchEvent = [&](std::string_view name, CellRef seen) -> bool {
     const auto eventSym = eventSymbolNamed(arena, core, programRoot, name);
     if (!eventSym) return true;
+    eventConsumed = false;
     CellRef payload{noCell};
     if (seen != noCell)
       if (const auto rec = varsRecord(arena, core, seen, "grab", false))
@@ -821,22 +832,27 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       }
       if (!zigzag::rankAfter(arena, clause, core.dims().step).empty()) {
         if (!runSpine(clause, args)) return false;
-        continue;
+      } else {
+        const auto spin =
+            arena.linked(clause, core.dims().spin, DimVector::POS);
+        if (!spin) continue;
+        auto outcome =
+            meta.runFragment(*spin, args, exec.cursor, maxCycles);
+        if (outcome.refusal == MetaRunOutcome::Refusal::NotAHead ||
+            outcome.refusal == MetaRunOutcome::Refusal::NoDescriptor) {
+          if (const auto head = meta.bodyOf(clause))
+            outcome =
+                meta.runFragment(*head, args, exec.cursor, maxCycles);
+        }
+        // consumeWork exhaustion and VM faults surface as refusals — a
+        // turn fault (§3.2's fail path). An unproductive result (an
+        // empty or valueless body) is success, not a fault.
+        if (outcome.refusal != MetaRunOutcome::Refusal::None)
+          return false;
       }
-      const auto spin = arena.linked(clause, core.dims().spin, DimVector::POS);
-      if (!spin) continue;
-      auto outcome =
-          meta.runFragment(*spin, args, exec.cursor, maxCycles);
-      if (outcome.refusal == MetaRunOutcome::Refusal::NotAHead ||
-          outcome.refusal == MetaRunOutcome::Refusal::NoDescriptor) {
-        if (const auto head = meta.bodyOf(clause))
-          outcome =
-              meta.runFragment(*head, args, exec.cursor, maxCycles);
-      }
-      // consumeWork exhaustion and VM faults surface as refusals — a
-      // turn fault (§3.2's fail path). An unproductive result (an empty
-      // or valueless body) is success, not a fault.
-      if (outcome.refusal != MetaRunOutcome::Refusal::None) return false;
+      // `consume` inside the just-run handler spends the event for
+      // later clauses — the running handler's own body is unaffected.
+      if (eventConsumed) break;
     }
     return true;
   };

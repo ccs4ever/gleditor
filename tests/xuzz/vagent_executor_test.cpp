@@ -432,6 +432,32 @@ TEST(VagentExecutorTest, OnHandlerGuardArityBindsFromTheDeliveredPayload) {
   EXPECT_EQ(arena.outstandingMarks(), 0u);
 }
 
+TEST(VagentExecutorTest, ConsumeSpendsTheEventForLaterHandlersOnly) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  // The guide's consume contract: a matching handler that runs
+  // `consume` stops *later* handlers of the same event; statements
+  // after consume inside its own body still run, and a handler whose
+  // guard fails never consumes — later handlers still see the event.
+  const auto image = h.lower(
+      "module demo\nevent Tick\nevent Big\nevent Mid\nevent Small\n"
+      "agent A {\n"
+      "  on Tick [2 > 3] { emit Small{}; consume }\n"
+      "  on Tick { emit Big{}; consume; emit Mid{} }\n"
+      "  on Tick { emit Small{} }\n"
+      "}");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  const auto outbox =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  ASSERT_EQ(outbox.size(), 2u);
+  EXPECT_EQ(outbox[0].payload, "Big");
+  EXPECT_EQ(outbox[1].payload, "Mid");
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
 TEST(VagentExecutorTest, EmitInAndForMarshalOntoSeparateFields) {
   ExecutorHarness h;
   VagentExecutor exec;

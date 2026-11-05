@@ -200,6 +200,7 @@ struct Lowerer {
     case ExprKind::Ask:
     case ExprKind::Drop:
     case ExprKind::Spawn:
+    case ExprKind::Consume:
       return true;
     default:
       return false;
@@ -438,10 +439,22 @@ struct Lowerer {
     case ExprKind::Spawn:
       verb = "spawn";
       break;
+    case ExprKind::Consume:
+      verb = "consume";
+      break;
     default:
       return std::unexpected(Diagnostic{DiagnosticCode::InvalidPosition,
                                         "statement is not a host verb",
                                         expr.loc});
+    }
+    // consume carries no operands — the bare verb cell is the whole
+    // signal; dispatch reads it as "stop iterating this event's
+    // clause rank" once the handler that ran it completes.
+    if (expr.kind == ExprKind::Consume) {
+      const auto step = arena.makeCell();
+      zigzag::expectWritten(arena.link(step, verbDim(), DimVector::POS,
+                                       arena.makeCell(std::string{verb})));
+      return step;
     }
     // tell/untell stage cross-agent assertions through the outbox:
     // peer by name, fact as a marshaled term. The receiver-side
