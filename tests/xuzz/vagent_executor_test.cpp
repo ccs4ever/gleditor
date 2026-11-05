@@ -1545,6 +1545,39 @@ TEST(VagentExecutorTest, MaintainHoldsVariablesConstrainShareAndWild) {
   EXPECT_EQ(arena.outstandingMarks(), 0u);
 }
 
+TEST(VagentExecutorTest, InitialBeliefSatisfiesMaintainMonitors) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image =
+      h.lower("module demo\nevent Tick\n"
+              "predicate level(value: Int)\n"
+              "goal Low() maintain { holds believes level(5) from self }\n"
+              "agent A {\n"
+              "  believe level(5)\n"
+              "  on Tick { adopt Low() }\n"
+              "  plan restore for Low { believe level(9) }\n"
+              "}");
+  ASSERT_TRUE(image);
+  auto &arena             = h.ctx.arena;
+  const auto intentionDim = h.ctx.core.findOrMintDimension("d.intention");
+  const auto count        = [&] {
+    return (zigzag::rankAfter(arena, image->agentCell, intentionDim) |
+            std::ranges::to<std::vector>())
+        .size();
+  };
+
+  // The member `believe level(5)` minted at image time — the maintain
+  // check sees the creation fact and Low stays a dormant monitor:
+  // restore's restorer never fires. Without the initial fact the
+  // check would fail and the plan would spawn.
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  EXPECT_EQ(count(), 1u);
+  ASSERT_TRUE(exec(h.execution(std::nullopt), h.ctx));
+  ASSERT_TRUE(exec(h.execution(std::nullopt), h.ctx));
+  EXPECT_EQ(count(), 1u);
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
 TEST(VagentExecutorTest, RecordLiteralsEmitAndFieldAccessReads) {
   ExecutorHarness h;
   VagentExecutor exec;
@@ -2058,8 +2091,12 @@ TEST(VagentBeliefTest, BelieveBelievesForgetReviseRoundTrip) {
   ASSERT_TRUE(source.has_value());
   const auto peerSlot = varsRecord(arena, h.ctx.core, *source, "peer", false);
   ASSERT_TRUE(peerSlot.has_value());
-  EXPECT_EQ(arena.linked(*peerSlot, h.ctx.core.dims().values, DimVector::POS),
-            std::optional{peer});
+  // peer rides as scalar content — N clauses from one peer cannot
+  // share the peer cell's single -d.values edge.
+  const auto peerCell =
+      arena.linked(*peerSlot, h.ctx.core.dims().values, DimVector::POS);
+  ASSERT_TRUE(peerCell.has_value());
+  EXPECT_EQ(arena.asInt64(*peerCell), std::optional{std::int64_t(peer)});
   const auto turnSlot = varsRecord(arena, h.ctx.core, *source, "turn", false);
   ASSERT_TRUE(turnSlot.has_value());
   const auto turnCell =
@@ -2075,6 +2112,44 @@ TEST(VagentBeliefTest, BelieveBelievesForgetReviseRoundTrip) {
   EXPECT_FALSE(meta.believes("weather", wet));
   EXPECT_TRUE(meta.believes("weather", dry));
   EXPECT_EQ(meta.beliefsOf("weather").size(), 1u);
+}
+
+TEST(VagentBeliefTest, PeerProvenanceSurvivesSiblingClauses) {
+  ExecutorHarness h;
+  const auto image =
+      h.lower("module demo\nevent Tick\nagent A { on Tick { } }");
+  ASSERT_TRUE(image);
+  auto binds = mintMetaBindSet(h.ctx.arena, h.ctx.core, h.ctx.core.home(),
+                               image->agentCell);
+  ASSERT_TRUE(binds) << binds.error();
+  MetaRuntime meta(h.ctx.core, h.ctx.vm, *binds);
+
+  auto &arena     = h.ctx.arena;
+  const auto peer = arena.makeCell("peer-a");
+
+  // Two clauses sourced from the same peer. A live +d.values → peer
+  // edge would make them contend for the peer cell's single
+  // -d.values slot — the second write silently displacing the
+  // first's provenance. Scalar content keeps both.
+  const auto wetClause = meta.believe("weather", arena.makeCell("wet"),
+                                      peer, 1);
+  const auto dryClause = meta.believe("weather", arena.makeCell("dry"),
+                                      peer, 2);
+  ASSERT_TRUE(wetClause && dryClause);
+  const auto sourceDim = h.ctx.core.findDimension("d.source");
+  ASSERT_TRUE(sourceDim.has_value());
+  for (const auto *clause : {&*wetClause, &*dryClause}) {
+    const auto source = arena.linked(*clause, *sourceDim, DimVector::POS);
+    ASSERT_TRUE(source.has_value());
+    const auto slot =
+        varsRecord(arena, h.ctx.core, *source, "peer", false);
+    ASSERT_TRUE(slot.has_value());
+    const auto value =
+        arena.linked(*slot, h.ctx.core.dims().values, DimVector::POS);
+    ASSERT_TRUE(value.has_value());
+    EXPECT_EQ(arena.asInt64(*value),
+              std::optional{std::int64_t(peer)});
+  }
 }
 
 TEST(VagentBeliefTest, CompoundTermsMatchStructurallyNotByIdentity) {

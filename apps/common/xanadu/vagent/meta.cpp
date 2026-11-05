@@ -955,14 +955,18 @@ MetaRuntime::believe(std::string_view predicate, CellRef term, CellRef peer,
   zigzag::expectWritten(arena.link(clause, core_.dims().grab, Posward, term));
 
   // +d.source → the {peer, turn} provenance record — the same keyed
-  // varsRecord shape the weight ledger uses.
+  // varsRecord shape the weight ledger uses. peer rides as scalar
+  // content, not a live edge: N clauses sourced from one peer would
+  // each try to occupy the peer cell's -d.values slot and displace
+  // the previous provenance — the +d.owner/+d.holder convention.
   {
     const auto source = arena.makeCell();
     zigzag::expectWritten(arena.link(
         clause, core_.findOrMintDimension("d.source"), Posward, source));
     if (const auto slot = varsRecord(source, "peer", true))
-      zigzag::expectWritten(
-          arena.link(*slot, core_.dims().values, Posward, peer));
+      zigzag::expectWritten(arena.link(
+          *slot, core_.dims().values, Posward,
+          arena.makeScalarCell(static_cast<std::int64_t>(peer))));
     if (const auto slot = varsRecord(source, "turn", true))
       zigzag::expectWritten(arena.link(*slot, core_.dims().values, Posward,
                                        arena.makeScalarCell(turn)));

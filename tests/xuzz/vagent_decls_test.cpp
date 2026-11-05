@@ -69,8 +69,8 @@ TEST(VagentDeclsTest, DispositionTableDisposesEveryDeclKind) {
       ++refuses;
       break;
     }
-  EXPECT_EQ(lowers, 10);
-  EXPECT_EQ(stubs, 6);
+  EXPECT_EQ(lowers, 11);
+  EXPECT_EQ(stubs, 5);
   EXPECT_EQ(refuses, 3);
 
   EXPECT_EQ(declDisposition(DeclKind::Agent), DeclDisposition::Lower);
@@ -194,6 +194,57 @@ TEST(VagentDeclsTest, StubKindsMintSymbolsAndRecord) {
   EXPECT_TRUE(h.named(image->ownModule, dims.vars, "S").has_value());
   EXPECT_TRUE(h.named(image->ownModule, dims.vars, "q").has_value());
   EXPECT_TRUE(h.named(image->ownModule, dims.vars, "reading").has_value());
+}
+
+TEST(VagentDeclsTest, BeliefMembersMintCreationFactsIntoTheBank) {
+  DeclHarness h;
+  const auto image = h.lower("module demo\n"
+                             "predicate level(value: Int)\n"
+                             "predicate pair(a: Int, b: Int)\n"
+                             "agent A {\n"
+                             "  believe level(5)\n"
+                             "  believe pair(3, 4)\n"
+                             "}");
+  ASSERT_TRUE(image.has_value());
+  if (!image) return;
+
+  const auto &dims     = h.core.dims();
+  const auto beliefDim = h.core.findOrMintDimension("d.belief");
+  EXPECT_THAT(image->stubbed, ::testing::IsEmpty());
+
+  // Each member's predicate bank hangs off the agent's +d.belief rank.
+  const auto level = h.named(image->agentCell, beliefDim, "level");
+  const auto pair  = h.named(image->agentCell, beliefDim, "pair");
+  ASSERT_TRUE(level.has_value());
+  ASSERT_TRUE(pair.has_value());
+
+  // One clause apiece — +d.grab holds the marshaled ground term.
+  const auto clauses = h.rank(*level, dims.clause);
+  ASSERT_EQ(clauses.size(), 1u);
+  const auto term = h.arena.linked(clauses.front(), dims.grab, Posward);
+  ASSERT_TRUE(term.has_value());
+  EXPECT_EQ(h.arena.textOf(*term), "level");
+  const auto arg = h.arena.linked(*term, dims.step, Posward);
+  ASSERT_TRUE(arg.has_value());
+  EXPECT_EQ(h.arena.textOf(*arg), "5");
+
+  // +d.source records creation provenance: peer=self, turn=0.
+  const auto source = h.arena.linked(
+      clauses.front(), h.core.findOrMintDimension("d.source"), Posward);
+  ASSERT_TRUE(source.has_value());
+  const auto peer = varsRecord(h.arena, h.core, *source, "peer", false);
+  ASSERT_TRUE(peer.has_value());
+  // peer=self rides as scalar content — an edge could not be shared
+  // across clauses sourced from the same agent.
+  const auto peerCell = h.arena.linked(*peer, dims.values, Posward);
+  ASSERT_TRUE(peerCell.has_value());
+  EXPECT_EQ(h.arena.asInt64(*peerCell),
+            std::optional{static_cast<std::int64_t>(image->agentCell)});
+  const auto turn = varsRecord(h.arena, h.core, *source, "turn", false);
+  ASSERT_TRUE(turn.has_value());
+  const auto turnCell = h.arena.linked(*turn, dims.values, Posward);
+  ASSERT_TRUE(turnCell.has_value());
+  EXPECT_EQ(h.arena.asInt64(*turnCell), std::optional<std::int64_t>{0});
 }
 
 TEST(VagentDeclsTest, CompositionDirectivesRefuse) {

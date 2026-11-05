@@ -10,6 +10,7 @@
 #include "common/xanadu/vagent/ast_clone.hpp"
 #include "common/xanadu/vagent/fragment.hpp"
 #include "common/xanadu/vagent/marshal.hpp"
+#include "common/xanadu/vagent/meta.hpp"
 #include "common/xanadu/vagent/records.hpp"
 #include "common/xanadu/zigzag/zzcore.hpp"
 
@@ -32,12 +33,12 @@ DeclDisposition declDisposition(DeclKind kind) noexcept {
     return DeclDisposition::Lower;
   case DeclKind::Field:
   case DeclKind::Record:
+  case DeclKind::Belief:
     return DeclDisposition::Lower;
   case DeclKind::Question:
   case DeclKind::Skill:
   case DeclKind::Capacity:
   case DeclKind::Behavior:
-  case DeclKind::Belief:
   case DeclKind::Lifecycle:
     return DeclDisposition::Stub;
   case DeclKind::Uses:
@@ -932,8 +933,8 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
   case DeclDisposition::Stub:
     image.stubbed.push_back(name);
     // Named decls mint their symbol — the module vocabulary is
-    // complete even where the semantics are still deferred; member
-    // decls (Field/Belief/Lifecycle) have no symbol shape to claim.
+    // complete even where the semantics are still deferred; the
+    // Lifecycle member decl has no symbol shape to claim.
     switch (decl.kind) {
     case DeclKind::Question:
     case DeclKind::Skill:
@@ -1003,6 +1004,27 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
     }
     (void)mintSymbol(name);
     signatures.emplace(name, decl.parameters);
+    return;
+  }
+  case DeclKind::Belief: {
+    // `believe p(args)` as an agent member is a creation-order fact —
+    // the spec asserts it before `on Initialize`, so it mints into the
+    // bank while the image assembles. meta.believe hangs the clause
+    // and its {peer, turn} source exactly as the runtime verb does;
+    // peer=self and turn 0 mark "asserted at creation".
+    if (image.agentCell == noCell) {
+      refuse(decl, "initial beliefs lower inside an agent");
+      return;
+    }
+    auto term = marshalTerm(*decl.initializer);
+    if (!term) {
+      refuse(decl, term.error().detail);
+      return;
+    }
+    MetaRuntime meta(core, vm, MetaBindSet{.agentCell = image.agentCell});
+    if (auto clause = meta.believe(name, *term, image.agentCell, 0);
+        !clause)
+      refuse(decl, clause.error());
     return;
   }
   case DeclKind::Event:
