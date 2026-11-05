@@ -439,3 +439,20 @@ and recovery passed. See [iteration 24](projects/vortex-vm-only-iterations.md).
 This supersedes iteration 23's inline-only computed-default boundary. Sealed artifacts, mutation
 contracts, content-span overflow integrity, functor/variadic completion and remaining grammar/route/
 lifecycle work still prevent §4.12 completion. No speedup or full-suite pass is claimed.
+
+## Arena content-run count integrity
+
+Arena setters now refuse runs larger than the physical 16-bit content count before shadowing or
+trailing. Quote minting rejects them before consuming work or allocating cells; private content
+writes retain a defensive check. Boundary regressions cover 65,535 accepted entries, 65,536 refused
+entries, unchanged owned/base state, later rollback and preserved mint fuel. The shared bound
+derives from `CellSlot` rather than a second policy constant. See
+[iteration 25](projects/vortex-vm-only-iterations.md).
+
+Persistent fold/writer defense, aggregate offset capacity and prefix hydration still need work. This
+closes the arena count-narrowing defect recorded during lazy-contract validation; it does not
+establish mutation-contract enforcement or complete §4.12.
+
+The full build, repository formatting and all 688 affected tests from 60 suites passed, including
+persistent Manifold baseline coverage. Independent Luna architecture and senior/profiler gates
+accepted this bounded stage. No full-suite or speedup claim is made.

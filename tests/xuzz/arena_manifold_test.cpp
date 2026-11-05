@@ -382,6 +382,72 @@ TEST(ArenaManifoldTest, releaseRestoresContentRestatedUnderTheMark) {
   EXPECT_EQ(arena.m.textOf(cell), "before");
 }
 
+TEST(ArenaManifoldTest, contentRunAtTheUint16LimitIsPreserved) {
+  Arena arena;
+  const auto cell = arena.m.makeCell();
+  std::vector<PrimediaSpan> spans(65'535);
+  for (std::size_t i = 0; i < spans.size(); ++i) {
+    spans[i] = PrimediaSpan{.start = i, .length = i + 1};
+  }
+
+  ASSERT_TRUE(arena.m.setContent(cell, spans));
+
+  ASSERT_TRUE(arena.m.slot(cell));
+  EXPECT_EQ(arena.m.slot(cell)->spanCount, 65'535U);
+  EXPECT_THAT(arena.m.contentOf(cell), testing::ElementsAreArray(spans));
+}
+
+TEST(ArenaManifoldTest, oversizedContentRunRefusesBeforeChangingAnOwnCell) {
+  Arena arena;
+  const auto cell             = arena.m.makeCell("original");
+  const auto originalSlotView = arena.m.slot(cell);
+  ASSERT_TRUE(originalSlotView);
+  const zigzag::CellSlot originalSlot = *originalSlotView;
+  const std::vector<PrimediaSpan> originalContent{
+      arena.m.contentOf(cell).begin(), arena.m.contentOf(cell).end()};
+  const auto mark = arena.m.mark();
+  std::vector<PrimediaSpan> oversized(65'536);
+
+  const auto refused = arena.m.setContent(cell, oversized);
+
+  ASSERT_FALSE(refused);
+  EXPECT_EQ(refused.error(), zigzag::ArenaRefusal::ContentRunTooLong);
+  EXPECT_EQ(arena.m.cellCount(), mark.cellCount);
+  EXPECT_EQ(arena.m.cells()[*arena.m.denseOf(cell)], originalSlot);
+  EXPECT_THAT(arena.m.contentOf(cell),
+              testing::ElementsAreArray(originalContent));
+  EXPECT_EQ(arena.m.trailSize(), mark.trailSize);
+  EXPECT_EQ(arena.m.slot(cell)->spanOffset, originalSlot.spanOffset);
+  EXPECT_EQ(arena.m.slot(cell)->spanCount, originalSlot.spanCount);
+  const auto refusedState = arena.m.mark();
+  EXPECT_EQ(refusedState.contentSize, mark.contentSize);
+  EXPECT_EQ(refusedState.liveContent, mark.liveContent);
+  EXPECT_EQ(refusedState.trailSize, mark.trailSize);
+  arena.m.discard(refusedState);
+
+  // A later valid write under this same choice point still trails and rolls
+  // back normally; the refusal did not partially consume the run or trail.
+  const auto replacement = arena.m.intern("replacement");
+  ASSERT_TRUE(arena.m.setContent(cell, std::span{&replacement, 1}));
+  arena.m.release(mark);
+  EXPECT_THAT(arena.m.contentOf(cell),
+              testing::ElementsAreArray(originalContent));
+}
+
+TEST(ArenaManifoldTest, oversizedQuoteRefusesBeforeMintingOrSpendingWork) {
+  ArenaManifold arena;
+  arena.setExecutionLimits(8, 1, 0);
+  std::vector<PrimediaSpan> oversized(65'536);
+
+  EXPECT_THROW(arena.makeQuote(0, oversized), std::length_error);
+  EXPECT_EQ(arena.cellCount(), 0U);
+
+  // The one unit of work remains available because the rejected quote did not
+  // reach mintSlot()'s work consumption.
+  EXPECT_TRUE(isEphemeral(arena.makeCell()));
+  EXPECT_EQ(arena.cellCount(), 1U);
+}
+
 TEST(ArenaManifoldTest, marksNestAndReleaseInReverse) {
   Arena arena;
   const auto base = arena.m.makeCell("base");
@@ -814,6 +880,34 @@ struct Document {
 
   [[nodiscard]] Manifold manifold() const { return store.rebuildManifold(at); }
 };
+
+TEST(ArenaManifoldTest, oversizedContentRunDoesNotShadowABaseCell) {
+  Document doc;
+  const auto base = doc.manifold();
+  ArenaManifold arena{&base};
+  const std::vector<PrimediaSpan> originalContent{
+      base.contentOf(doc.first).begin(), base.contentOf(doc.first).end()};
+  const auto originalLink = base.linked(doc.first, doc.dim, DimVector::POS);
+  const auto mark         = arena.mark();
+  std::vector<PrimediaSpan> oversized(65'536);
+
+  const auto refused = arena.setContent(doc.first, oversized);
+
+  ASSERT_FALSE(refused);
+  EXPECT_EQ(refused.error(), zigzag::ArenaRefusal::ContentRunTooLong);
+  EXPECT_EQ(arena.cellCount(), 0U);
+  EXPECT_EQ(arena.shadowCount(), 0U);
+  EXPECT_FALSE(arena.holdsOwn(doc.first));
+  EXPECT_THAT(arena.contentOf(doc.first),
+              testing::ElementsAreArray(originalContent));
+  EXPECT_EQ(arena.linked(doc.first, doc.dim, DimVector::POS), originalLink);
+  const auto refusedState = arena.mark();
+  EXPECT_EQ(refusedState.contentSize, mark.contentSize);
+  EXPECT_EQ(refusedState.liveContent, mark.liveContent);
+  EXPECT_EQ(refusedState.shadowCount, mark.shadowCount);
+  arena.discard(refusedState);
+  arena.discard(mark);
+}
 
 TEST(ArenaManifoldTest, anOverlayReadsThroughToTheDocument) {
   Document doc;

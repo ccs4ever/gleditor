@@ -1181,6 +1181,9 @@ xanadu::PrimediaSpan ArenaManifold::intern(const std::string_view text) {
 CellRef
 ArenaManifold::mintSlot(const xanadu::ValueKind kind, const std::uint64_t bits,
                         const std::span<const xanadu::PrimediaSpan> content) {
+  if (content.size() > maxCellContentSpanCount) {
+    throw std::length_error("ArenaManifold content run exceeds CellSlot");
+  }
   consumeWork();
   if (slots_.size() >= allocationLimit_) {
     throw std::runtime_error(
@@ -1281,6 +1284,10 @@ CellRef ArenaManifold::makeScalarCell(const std::int64_t value) {
 void ArenaManifold::setContentAt(
     const std::uint32_t dense,
     const std::span<const xanadu::PrimediaSpan> spans) {
+  if (spans.size() > maxCellContentSpanCount) {
+    throw std::length_error("ArenaManifold content run exceeds CellSlot");
+  }
+
   auto &cell = slots_[dense];
   liveContent_ -= cell.spanCount;
 
@@ -1309,6 +1316,13 @@ void ArenaManifold::setContentAt(
 ArenaResult
 ArenaManifold::setContent(const CellRef cell,
                           const std::span<const xanadu::PrimediaSpan> spans) {
+  if (!contains(cell)) {
+    return std::unexpected{ArenaRefusal::UnknownCell};
+  }
+  if (spans.size() > maxCellContentSpanCount) {
+    return std::unexpected{ArenaRefusal::ContentRunTooLong};
+  }
+
   const auto dense = shadow(cell);
   if (!dense.has_value()) {
     return std::unexpected{ArenaRefusal::UnknownCell};

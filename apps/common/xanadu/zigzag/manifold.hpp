@@ -308,6 +308,11 @@ struct CellSlot {
 // being impossible.
 static_assert(sizeof(CellSlot) == 32);
 
+/// Physical CellSlot layout bound; a run cannot contain more entries than its
+/// spanCount field can name.
+inline constexpr std::size_t maxCellContentSpanCount =
+    std::numeric_limits<decltype(CellSlot::spanCount)>::max();
+
 /// A borrowed cell slot, or nothing: what slot() answers. A reference into the
 /// manifold's slot array, so valid until the next fold or write grows it.
 using SlotRef = gleditor::cpp26::optional<const CellSlot &>;

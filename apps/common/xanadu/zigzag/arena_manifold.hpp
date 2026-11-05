@@ -188,10 +188,11 @@ struct Mark {
 /// unbounded number of operations into a document.
 /// Why an ArenaManifold write changed nothing.
 enum class ArenaRefusal : std::uint8_t {
-  UnknownCell,      ///< the subject is not a cell this arena can reach
-  UnknownDimension, ///< the dimension is not a cell this arena can reach
-  UnknownTarget,    ///< the far end is not a cell this arena can reach
-  MarksOutstanding, ///< compact() inside a choice point would corrupt undo
+  UnknownCell,       ///< the subject is not a cell this arena can reach
+  UnknownDimension,  ///< the dimension is not a cell this arena can reach
+  UnknownTarget,     ///< the far end is not a cell this arena can reach
+  MarksOutstanding,  ///< compact() inside a choice point would corrupt undo
+  ContentRunTooLong, ///< a cell's CSR content count does not fit CellSlot
 };
 
 class ArenaManifold;
@@ -211,6 +212,8 @@ toString(const ArenaRefusal refusal) noexcept {
     return "unknown target";
   case ArenaRefusal::MarksOutstanding:
     return "marks outstanding";
+  case ArenaRefusal::ContentRunTooLong:
+    return "content run too long";
   }
   return "unknown refusal";
 }

@@ -771,3 +771,24 @@ return/mutual-recursion gaps now have passing cases. No speedup or full-suite pa
 
 Logs: `/tmp/vql-lazy-frames-build.log`, `/tmp/vql-lazy-frames-tests.log`,
 `/tmp/vql-lazy-frames-cli.log`, `/tmp/vql-lazy-frames-format.log`.
+
+## Iteration 25: refuse oversized arena content runs before mutation
+
+Arena content setters now return `ArenaRefusal::ContentRunTooLong` when an input run exceeds the
+physical `CellSlot::spanCount` width. The check precedes copy-on-write shadowing and trailing, so
+refused writes leave content, headers, counters and rollback state intact. Quote minting checks the
+same bound before consuming work or allocating a slot and throws `std::length_error`, consistent
+with its direct-return API. The private content writer also checks defensively. The shared physical
+bound derives from the count member's type beside `CellSlot`; no wire or store format changes.
+
+Boundary tests preserve all 65,535 entries and refuse 65,536 on owned/base cells, compare copied
+header/content snapshots, retain later valid-write rollback and prove rejected quotes consume no
+mint work. Independent Luna architecture and senior/profiler reviews accepted this count-only stage.
+This is constant-time preflight, with no speedup claim. Persistent folding/writer checks, aggregate
+32-bit offset capacity and prefix hydration remain follow-up work; this stage does not claim general
+mutation-contract enforcement or full §4.12 completion.
+
+Validation: full `make -j$(nproc)`, repository formatting with clang-format 19 and all 688 affected
+tests from 60 suites passed, including the persistent Manifold baseline and four new arena boundary
+cases. Logs: `/tmp/vql-span-count-build.log`, `/tmp/vql-span-count-tests.log`,
+`/tmp/vql-span-count-format.log`.
