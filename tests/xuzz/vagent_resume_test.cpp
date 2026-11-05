@@ -235,7 +235,7 @@ TEST_F(VagentResume, ARuntimeCannotResumeWhatItNeverStoppedOnTheSameEpoch) {
   ASSERT_TRUE(saved);
   const auto again = a->executor().resume(*saved);
   ASSERT_FALSE(again);
-  EXPECT_EQ(again.error(), ActorError::WrongEpoch);
+  EXPECT_EQ(again.error().actor, ActorError::WrongEpoch);
 }
 
 TEST_F(VagentResume, ANewerEpochOfTheSameDeviceResumes) {

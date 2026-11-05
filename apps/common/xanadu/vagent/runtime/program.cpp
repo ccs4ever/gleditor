@@ -318,12 +318,10 @@ LocalHost::LocalHost(CompiledProgram program, Options options)
         });
   }
   runtime_->setAuthorizer(
-      [this, instructions = options.maxInstructions,
-       life](const identity::Fingerprint &, const ActorMessage &request)
+      [this, life](const identity::Fingerprint &, const ActorMessage &request)
           -> std::expected<ActorGrant, ActorError> {
-        if (!programs_.contains(request.programRef)) {
-          return std::unexpected(ActorError::NotAuthorized);
-        }
+        const auto limits = grantLimits(request.programRef);
+        if (!limits) return std::unexpected(limits.error());
         // A resume request names the checkpoint its grant is based on.
         std::string base = "base";
         if (const auto parameters = issuer_->parametersOf(request.capability)) {
@@ -339,8 +337,8 @@ LocalHost::LocalHost(CompiledProgram program, Options options)
         }
         return ActorGrant{request.programRef,
                           base,
-                          instructions,
-                          kLocalMaxCells,
+                          limits->instructions,
+                          limits->maxCells,
                           kLocalMaxOutputBytes,
                           kLocalMaxSolutions,
                           kLocalMaxMailboxBytes,
@@ -352,6 +350,8 @@ LocalHost::LocalHost(CompiledProgram program, Options options)
       options.settings, std::move(options.clock));
   (void)executor_->retainProgram(program_);
   executor_->install()
+      ->setResumeGrantProbe(
+          [this](std::string_view ref) { return grantLimits(ref); })
       ->setBindings(&bindings_)
       ->setHostSink(
           [this](const Envelope &event) { emissions_.push_back(event); });
@@ -379,13 +379,22 @@ LocalHost::retainProgram(CompiledProgram program) {
   return held;
 }
 
-std::expected<void, ActorError>
+std::expected<ResumeLimits, ActorError>
+LocalHost::grantLimits(std::string_view programRef) const {
+  if (!programs_.contains(programRef))
+    return std::unexpected(ActorError::NotAuthorized);
+  return ResumeLimits{maxInstructions_, kLocalMaxCells};
+}
+
+std::expected<void, TransferRefusal>
 LocalHost::upgrade(const identity::ActorPid &pid,
                    std::shared_ptr<CompiledProgram> program,
                    std::optional<std::uint64_t> instructionLimit) {
   if (!program || !programs_.contains(program->programRef()) ||
       programs_.at(std::string(program->programRef())).get() != program.get()) {
-    return std::unexpected(ActorError::NotAuthorized);
+    return std::unexpected(TransferRefusal::make(TransferCode::Runtime,
+                                                 TransferRoute::UpgradeSchema,
+                                                 ActorError::NotAuthorized));
   }
   // The local host is the capability authority. The adapter validates every
   // state and schema condition before asking the runtime to install the grant.
@@ -401,10 +410,26 @@ LocalHost::upgrade(const identity::ActorPid &pid,
   return executor_->upgrade(pid, std::move(program), grant);
 }
 
-std::expected<void, ActorError>
+std::expected<void, TransferRefusal>
 LocalHost::upgrade(const identity::ActorPid &pid, CompiledProgram program) {
+  constexpr auto road = TransferRoute::UpgradeReconciler;
+  // A reference already retained names one program for ever: another schema
+  // under it is refused by name, not silently swapped for the held object.
+  if (const auto held = programs_.find(std::string(program.programRef()));
+      held != programs_.end() &&
+      !sameUpgradeSchema(held->second->upgradeSchema(),
+                         program.upgradeSchema()))
+    return std::unexpected(TransferRefusal::make(
+        TransferCode::ProgramReferenceReused, road, ActorError::NotAuthorized,
+        {.subject = std::string(program.programRef())}));
+  // Before `retainProgram`, so a refusal leaves both registries as they were.
+  if (auto refused = executor_->preflightUpgrade(
+          pid, program, AgentExecutor::UpgradeRoute::Reconciler))
+    return std::unexpected(std::move(*refused));
   auto held = retainProgram(std::move(program));
-  if (!held) return std::unexpected(ActorError::NotAuthorized);
+  if (!held)
+    return std::unexpected(TransferRefusal::make(TransferCode::Runtime, road,
+                                                 ActorError::NotAuthorized));
   return executor_->upgrade(pid, *held);
 }
 

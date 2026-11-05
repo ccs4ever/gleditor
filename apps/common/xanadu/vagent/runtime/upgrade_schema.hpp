@@ -4,12 +4,14 @@
 #include <expected>
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "common/xanadu/vagent/runtime/checker.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_policy.hpp"
+#include "common/xanadu/vagent/runtime/epistemic_refusal.hpp"
 
 namespace xanadu::vagent::runtime {
 
@@ -110,6 +112,32 @@ upgradeChangeRequiresRefusal(const UpgradeChange &change) noexcept;
 
 [[nodiscard]] std::string_view
 upgradeChangeName(UpgradeChangeKind kind) noexcept;
+
+/// A predicate as `name(Type, key Type)`, for a refusal to print. Display
+/// only: nothing compares or persists it.
+[[nodiscard]] std::string
+predicateSignatureText(std::string_view name,
+                       const UpgradePredicate &predicate);
+
+/// Whether two schemas declare the same things: no change either way and the
+/// same set of declarations, since `compareUpgradeSchemas` does not report an
+/// addition.
+[[nodiscard]] bool sameUpgradeSchema(const UpgradeSchema &a,
+                                     const UpgradeSchema &b);
+
+/// The predicate-level refusals every upgrade road shares, decided from the
+/// two schemas and the predicates with a live source binding, never from
+/// whether state exists: a binding creates no profile, so an empty agent can
+/// still hold an authorization for a predicate the new program drops. In
+/// order: a policy gained, lost or changed; a signature that differs; an
+/// arbitrated or bound predicate the new program lacks. The schema road
+/// refuses a signature change of any predicate, as it always has; the
+/// reconciler road only of one that is arbitrated or bound, so a plain
+/// agent's upgrade is unchanged.
+[[nodiscard]] std::optional<TransferRefusal>
+checkPredicateTransfer(const UpgradeSchema &was, const UpgradeSchema &now,
+                       const std::set<std::string, std::less<>> &bound,
+                       TransferRoute route);
 
 } // namespace xanadu::vagent::runtime
 

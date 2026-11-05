@@ -277,7 +277,7 @@ TEST(VagentLiveUpgrade, RefusesActiveArenaMarkAndQueuedSchemaChange) {
   const auto mark   = context->arena.mark();
   const auto status = host.upgrade(*pid, held);
   ASSERT_FALSE(status);
-  EXPECT_EQ(status.error(), ActorError::NotQuiescent);
+  EXPECT_EQ(status.error().actor, ActorError::NotQuiescent);
   context->arena.discard(mark);
   auto changed = CompiledProgram::fromSource(R"(
 event Ping { n: Int, extra: Int }

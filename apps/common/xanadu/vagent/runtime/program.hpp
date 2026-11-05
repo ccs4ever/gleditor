@@ -283,12 +283,20 @@ public:
   [[nodiscard]] std::shared_ptr<CompiledProgram>
   retainProgram(CompiledProgram program);
   /// Preserve pid and queued messages; failure leaves the old version active.
-  [[nodiscard]] std::expected<void, zigzag::vortex::mesh::ActorError>
+  [[nodiscard]] std::expected<void, TransferRefusal>
   upgrade(const identity::ActorPid &pid,
           std::shared_ptr<CompiledProgram> program,
           std::optional<std::uint64_t> instructionLimit = std::nullopt);
-  [[nodiscard]] std::expected<void, zigzag::vortex::mesh::ActorError>
+  /// The reconciler road: a non-epistemic agent carries its asks and staged
+  /// effects across. The program is retained only after the pre-flight, and a
+  /// reference already retained under another schema is refused by name.
+  [[nodiscard]] std::expected<void, TransferRefusal>
   upgrade(const identity::ActorPid &pid, CompiledProgram program);
+  /// The instruction and cell allowance a grant for @p programRef carries.
+  /// The authorizer and the executor's resume probe both read it, so the
+  /// pre-flight cannot drift from what the runtime would issue.
+  [[nodiscard]] std::expected<ResumeLimits, zigzag::vortex::mesh::ActorError>
+  grantLimits(std::string_view programRef) const;
   [[nodiscard]] const std::string &node() const noexcept { return node_; }
   [[nodiscard]] const xanadu::MutableKeys &deviceKeys() const noexcept {
     return keys_;

@@ -732,6 +732,83 @@ bool upgradeChangeRequiresRefusal(const UpgradeChange &change) noexcept {
   }
 }
 
+std::string predicateSignatureText(std::string_view name,
+                                   const UpgradePredicate &predicate) {
+  std::string out(name);
+  out += '(';
+  for (std::size_t i = 0; i < predicate.parameters.size(); ++i) {
+    if (i != 0) out += ", ";
+    if (predicate.parameters[i].key) out += "key ";
+    out += typeName(predicate.parameters[i].type);
+  }
+  out += ')';
+  return out;
+}
+
+bool sameUpgradeSchema(const UpgradeSchema &a, const UpgradeSchema &b) {
+  return a.agents.size() == b.agents.size() &&
+         a.skills.size() == b.skills.size() &&
+         a.behaviors.size() == b.behaviors.size() &&
+         a.predicates.size() == b.predicates.size() &&
+         a.records.size() == b.records.size() &&
+         a.events.size() == b.events.size() &&
+         a.plans.size() == b.plans.size() &&
+         compareUpgradeSchemas(a, b).empty() &&
+         compareUpgradeSchemas(b, a).empty();
+}
+
+std::optional<TransferRefusal>
+checkPredicateTransfer(const UpgradeSchema &was, const UpgradeSchema &now,
+                       const std::set<std::string, std::less<>> &bound,
+                       const TransferRoute route) {
+  using zigzag::vortex::mesh::ActorError;
+  const auto guarded = [&](const std::string &name) {
+    const auto found = was.predicates.find(name);
+    return bound.contains(name) ||
+           (found != was.predicates.end() && found->second.epistemicPolicy);
+  };
+  const auto changes = compareUpgradeSchemas(was, now);
+  const auto text = [](const std::string &value) -> std::optional<std::string> {
+    return value.empty() ? std::nullopt : std::optional{value};
+  };
+  for (const auto &change : changes)
+    if (change.kind == UpgradeChangeKind::EpistemicPolicy)
+      return TransferRefusal::make(TransferCode::PolicyChanged, route,
+                                   ActorError::ExecutionFailed,
+                                   {.subject = change.symbol,
+                                    .saved   = text(change.oldHash),
+                                    .current = text(change.newHash)});
+  for (const auto &change : changes) {
+    const bool signature =
+        change.kind == UpgradeChangeKind::PredicateArity ||
+        change.kind == UpgradeChangeKind::PredicateParameterType ||
+        change.kind == UpgradeChangeKind::PredicateKeyPositions;
+    if (!signature || change.owner != "predicate") continue;
+    if (route != TransferRoute::UpgradeSchema && !guarded(change.symbol))
+      continue;
+    return TransferRefusal::make(
+        TransferCode::PredicateIncompatible, route, ActorError::ExecutionFailed,
+        {.subject = change.symbol,
+         .saved   = predicateSignatureText(change.symbol,
+                                           was.predicates.at(change.symbol)),
+         .current = predicateSignatureText(change.symbol,
+                                           now.predicates.at(change.symbol))});
+  }
+  for (const auto &change : changes)
+    if (change.kind == UpgradeChangeKind::RemovedPredicate &&
+        change.owner == "predicate" && guarded(change.symbol)) {
+      const auto &predicate = was.predicates.at(change.symbol);
+      return TransferRefusal::make(
+          TransferCode::PredicateRemoved, route, ActorError::ExecutionFailed,
+          {.subject = change.symbol,
+           .saved   = predicate.epistemicPolicy
+                          ? std::optional{predicate.epistemicPolicy->hash}
+                          : std::optional{predicateSignatureText(change.symbol,
+                                                                 predicate)}});
+    }
+  return std::nullopt;
+}
+
 std::string_view upgradeChangeName(const UpgradeChangeKind kind) noexcept {
   switch (kind) {
   case UpgradeChangeKind::ContainerParameters:

@@ -715,4 +715,46 @@ TEST(AgentTuiSettings, FromModelOverridesDefaultsAndDashboardHonorsThem) {
   EXPECT_EQ(tui.actionLog().back(), "e-50");
 }
 
+TEST(AgentTuiTest, TheTuiPrintsTheTypedReason) {
+  // Two versions of one arbitrating agent whose policy differs: the schema
+  // road refuses, and the log names the code instead of an integer.
+  constexpr const char *kPolicy = R"vagent(
+predicate at(key who: Str, x: Float)
+  arbitrated by truest(model: "beta_reputation", min_confidence: 0.5,
+    prior_alpha: 1, prior_beta: 1, clock: "wall", max_age: AGE,
+    cluster_tolerance: 0.5, frame: "enu", units: "m",
+    min_variance: 0.0001, max_variance: 100.0)
+agent A { var n: Int := 0 }
+)vagent";
+  const auto source             = [&](std::string age) {
+    std::string text(kPolicy);
+    text.replace(text.find("AGE"), 3, age);
+    return text;
+  };
+  auto first  = CompiledProgram::fromSource(source("10s"));
+  auto second = CompiledProgram::fromSource(source("12s"));
+  ASSERT_TRUE(first.has_value());
+  ASSERT_TRUE(second.has_value());
+  LocalHost host(std::move(*first));
+  auto held = host.retainProgram(std::move(*second));
+  ASSERT_TRUE(held != nullptr);
+  const auto pid = host.launch("A", "a");
+  ASSERT_TRUE(pid.has_value());
+  host.pump();
+
+  NCursesActor::Options actorOpts;
+  actorOpts.forceHeadless = true;
+  auto actor              = std::make_shared<NCursesActor>(actorOpts);
+  AgentTui tui(host.runtime(), host.executor(), actor);
+
+  const auto refused = tui.upgrade(*pid, held->programRef());
+  ASSERT_FALSE(refused.has_value());
+  EXPECT_NE(refused.error().find("PolicyChanged(route=UpgradeSchema"),
+            std::string::npos)
+      << refused.error();
+  ASSERT_FALSE(tui.actionLog().empty());
+  EXPECT_NE(tui.actionLog().back().find("subject=at"), std::string::npos);
+  EXPECT_EQ(tui.actionLog().back().find("error code"), std::string::npos);
+}
+
 } // namespace

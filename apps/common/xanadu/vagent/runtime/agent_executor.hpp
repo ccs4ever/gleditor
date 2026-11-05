@@ -30,6 +30,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -39,6 +40,8 @@
 #include "common/xanadu/vagent/runtime/epistemic_health.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_ingress.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_limits.hpp"
+#include "common/xanadu/vagent/runtime/epistemic_preflight.hpp"
+#include "common/xanadu/vagent/runtime/epistemic_refusal.hpp"
 #include "common/xanadu/vagent/runtime/health_grants.hpp"
 #include "common/xanadu/vagent/runtime/host_bindings.hpp"
 #include "common/xanadu/vagent/runtime/runtime_abi.hpp"
@@ -285,12 +288,72 @@ public:
 
   /// Upgrade one prepared live actor under a replacement grant. The host must
   /// retain and authorize the new program before calling this owner-thread API.
-  [[nodiscard]] std::expected<void, zigzag::vortex::mesh::ActorError>
+  [[nodiscard]] std::expected<void, TransferRefusal>
   upgrade(const identity::ActorPid &pid,
           std::shared_ptr<CompiledProgram> program,
           const zigzag::vortex::mesh::ActorGrant &grant);
-  [[nodiscard]] std::expected<void, zigzag::vortex::mesh::ActorError>
+  [[nodiscard]] std::expected<void, TransferRefusal>
   upgrade(const identity::ActorPid &pid, CompiledProgram &newProgram);
+
+  /// The two live-upgrade routes: the schema-checked swap, which is the one
+  /// that can carry a registered typed translator's state across, and the
+  /// reconciler's, which carries asks and staged effects but no epistemic
+  /// state.
+  enum class UpgradeRoute : std::uint8_t { Schema, Reconciler };
+
+  /// Whether `upgrade` would refuse, and why, without changing anything. Both
+  /// `upgrade` overloads call this first, so the two entry points agree. The
+  /// schema road also checks a @p grant it is given. The host must serialise
+  /// `upgrade` with the mesh runtime's `receive`, since a message arriving
+  /// mid-swap is not covered by any lock here.
+  [[nodiscard]] std::optional<TransferRefusal> preflightUpgrade(
+      const identity::ActorPid &pid, const CompiledProgram &program,
+      UpgradeRoute route,
+      const std::optional<zigzag::vortex::mesh::ActorGrant> &grant =
+          std::nullopt) const;
+
+  /// What keeps an actor from being swapped, field by field. Counts, not
+  /// flags, so a controller can tell a queue that is draining from one that
+  /// is not.
+  struct QuiescenceReport {
+    bool turnInFlight{};
+    std::uint64_t hostEvents{}, posts{}, choiceDepth{}, marks{};
+    /// Only the schema road refuses these: the reconciler carries them.
+    std::uint64_t flights{}, requests{}, deliveries{}, stagedOutbox{},
+        pendingSettle{};
+
+    [[nodiscard]] bool quiet() const noexcept {
+      return !turnInFlight && hostEvents == 0 && posts == 0 &&
+             choiceDepth == 0 && marks == 0 && flights == 0 && requests == 0 &&
+             deliveries == 0 && stagedOutbox == 0 && pendingSettle == 0;
+    }
+    /// The first field that blocks @p route, in the order above.
+    [[nodiscard]] std::optional<std::pair<std::string_view, std::uint64_t>>
+    firstBusy(UpgradeRoute route) const noexcept;
+  };
+  [[nodiscard]] std::expected<QuiescenceReport, TransferRefusal>
+  quiescence(const identity::ActorPid &pid) const;
+
+  /// Whether `resume` would refuse @p checkpoint, and why, without changing
+  /// anything. It reads the received image through a bare arena view.
+  [[nodiscard]] std::optional<TransferRefusal>
+  preflightResume(const AgentCheckpoint &checkpoint) const;
+
+  /// What the grant a resume will be issued allows, asked of the host that
+  /// owns the authorizer, so the budgets can be decided before a pid exists.
+  /// A host without one leaves those budgets to the apply-time backstop.
+  using ResumeGrantProbe = std::function<
+      std::expected<ResumeLimits, zigzag::vortex::mesh::ActorError>(
+          std::string_view programRef)>;
+  AgentExecutor *setResumeGrantProbe(ResumeGrantProbe probe) {
+    resumeGrantProbe_ = std::move(probe);
+    return this;
+  }
+
+  /// The refusal that ended a resumed actor's first turn, for a host that
+  /// reached the apply-time backstop and holds the pid.
+  [[nodiscard]] std::optional<TransferRefusal>
+  lastRefusal(const identity::ActorPid &pid) const;
   [[nodiscard]] const AgentSettings &settings() const noexcept {
     return settings_;
   }
@@ -505,8 +568,7 @@ public:
   /// the saved state is copied onto it, so `Initialize` does not run again;
   /// the agent tells its peers where it went (`Moved`) on its first turn. The
   /// old actor is not stopped: `retire` it once the peers have been told.
-  [[nodiscard]] std::expected<identity::ActorPid,
-                              zigzag::vortex::mesh::ActorError>
+  [[nodiscard]] std::expected<identity::ActorPid, TransferRefusal>
   resume(const AgentCheckpoint &checkpoint);
 
   /// Stop an actor that has been resumed elsewhere, without the orderly
@@ -584,11 +646,13 @@ private:
   [[nodiscard]] bool prepare(State &state,
                              zigzag::vortex::WorkerContext &context,
                              const zigzag::vortex::mesh::ActorMessage &spawn,
+                             const zigzag::vortex::mesh::ActorGrant &grant,
                              std::optional<zigzag::CellRef> savedAgent);
   /// Copy the saved agent cell's state onto the freshly instantiated one:
   /// fields, beliefs, hosted spaces and children. Compiled routines address
   /// their own cells by ref, so the restored cells cannot be used in place.
-  void restoreState(State &state, zigzag::CellRef saved);
+  void restoreState(State &state, zigzag::CellRef saved,
+                    const zigzag::vortex::mesh::ActorGrant &grant);
   void announceMoved(State &state);
   void applyMoved(State &state,
                   const zigzag::vortex::mesh::ActorMessage &message,
@@ -756,16 +820,20 @@ private:
   [[nodiscard]] bool renewLease(State &state,
                                 std::chrono::system_clock::time_point now);
   [[nodiscard]] bool live(const State &state) const;
-  /// The two live-upgrade routes: the schema-checked swap, which is the one
-  /// that can carry a registered typed translator's state across, and the
-  /// reconciler's, which carries asks and staged effects but no epistemic
-  /// state.
-  enum class UpgradeRoute : std::uint8_t { Schema, Reconciler };
-  /// Why a live upgrade of `old` must be refused before anything changes,
-  /// or nullopt: the guards every `upgrade` overload shares.
-  [[nodiscard]] std::optional<zigzag::vortex::mesh::ActorError>
-  upgradeRefusal(const identity::ActorPid &pid, const State &old,
-                 UpgradeRoute route) const;
+  [[nodiscard]] std::expected<zigzag::vortex::mesh::ReceivedValue,
+                              TransferRefusal>
+  fetchImage(const AgentCheckpoint &checkpoint) const;
+  [[nodiscard]] std::optional<TransferRefusal>
+  resumeRefusal(const zigzag::vortex::mesh::ReceivedValue &received,
+                const AgentCheckpoint &checkpoint) const;
+  [[nodiscard]] QuiescenceReport quiescenceOf(const identity::ActorPid &pid,
+                                              const State &state) const;
+  /// The version an actor runs, when it was compiled in this process.
+  [[nodiscard]] const CompiledProgram *
+  previousProgram(const State &state) const;
+  /// The predicates with a live source binding for @p pid.
+  [[nodiscard]] std::set<std::string, std::less<>>
+  boundPredicates(const identity::ActorPid &pid) const;
   void drain(State &state, zigzag::vortex::WorkerContext &context,
              std::uint64_t turn, const TurnSpec &spec);
   [[nodiscard]] std::vector<OutboxItem>
@@ -859,6 +927,9 @@ private:
   /// Per resumed pid, what the arena does not hold: whether the launcher had
   /// adopted it. Consumed by `prepare`.
   std::map<std::string, bool> resumeAdopted_;
+  ResumeGrantProbe resumeGrantProbe_;
+  /// Per pid, the refusal that ended its first turn (see `lastRefusal`).
+  std::map<std::string, TransferRefusal> lastRefusals_;
 
   void finishHealthItem(const identity::ActorPid &target,
                         const QueuedHealth &qh, std::string_view code);

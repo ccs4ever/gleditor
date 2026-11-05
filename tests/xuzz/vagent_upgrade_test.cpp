@@ -350,7 +350,7 @@ agent ManagedAgent {
 
   // Live upgrade to V2
   auto upgraded = host.upgrade(*pid, std::move(*p2));
-  ASSERT_TRUE(upgraded) << static_cast<int>(upgraded.error());
+  ASSERT_TRUE(upgraded) << toString(upgraded.error());
   host.pump();
 
   // Query tag through the capacity method
@@ -422,7 +422,7 @@ agent Worker {
 
   // Upgrade to V2
   auto upgraded = host.upgrade(*pid, std::move(*p2));
-  ASSERT_TRUE(upgraded) << static_cast<int>(upgraded.error());
+  ASSERT_TRUE(upgraded) << toString(upgraded.error());
   host.pump();
 
   const auto &emissions = host.emissions();
@@ -615,7 +615,7 @@ agent Boss {
 
   // Live upgrade to V2 with identical plan
   auto upgraded = host.upgrade(*pid, std::move(*p2));
-  ASSERT_TRUE(upgraded) << static_cast<int>(upgraded.error());
+  ASSERT_TRUE(upgraded) << toString(upgraded.error());
   host.pump();
 
   // Deliver reply for in-flight ask
@@ -738,7 +738,7 @@ agent Boss {
 
   // Live upgrade to V2 with modified plan AST -> replans and stages $cancel
   auto upgraded = host.upgrade(*pid, std::move(*p2));
-  ASSERT_TRUE(upgraded) << static_cast<int>(upgraded.error());
+  ASSERT_TRUE(upgraded) << toString(upgraded.error());
   host.pump();
 
   // Verify $cancel was staged and dispatched to remote delegate
@@ -868,7 +868,7 @@ agent Boss {
   // Upgrade to V2 with modified plan -> reconciler cancels subgoals and stages
   // $cancel
   auto upgraded = host.upgrade(*pid, std::move(*p2));
-  ASSERT_TRUE(upgraded) << static_cast<int>(upgraded.error());
+  ASSERT_TRUE(upgraded) << toString(upgraded.error());
   host.pump();
 
   // Verify $cancel was dispatched for sub-corr-456
@@ -987,7 +987,7 @@ agent Worker {
   // Live upgrade to V2 where on Upgrade exhausts fuel
   auto upgraded = host.upgrade(*pid, std::move(*p2));
   EXPECT_FALSE(upgraded.has_value());
-  EXPECT_EQ(upgraded.error(), ActorError::ResourceLimit);
+  EXPECT_EQ(upgraded.error().actor, ActorError::ResourceLimit);
 
   // Verify actor rolled back cleanly and continues running under V1
   Envelope ping2;
@@ -1083,7 +1083,7 @@ agent Worker {
   // Live upgrade to V2 where on upgrade hook fails
   auto upgraded = host.upgrade(*pid, std::move(*p2));
   EXPECT_FALSE(upgraded.has_value());
-  EXPECT_EQ(upgraded.error(), ActorError::ExecutionFailed);
+  EXPECT_EQ(upgraded.error().actor, ActorError::ExecutionFailed);
 
   // Verify actor rolled back cleanly and continues running under V1
   Envelope ping2;

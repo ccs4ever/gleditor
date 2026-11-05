@@ -1178,7 +1178,7 @@ TEST_F(VagentEpistemicIngress, TheTimeWindowsWidenByUncertaintyAndSkew) {
   const double now = std::chrono::duration<double>(
                          std::chrono::system_clock::now().time_since_epoch())
                          .count();
-  auto old         = reading(kP1, "old", 1, 1.0);
+  auto old                = reading(kP1, "old", 1, 1.0);
   old.acquiredUncertainty = 2.0;
   old.acquiredAt          = now - 11.0; // inside max_age + uncertainty
   observe(old);
@@ -1466,19 +1466,20 @@ TEST_F(VagentEpistemicUpgrade, APopulatedProfileRefusesEveryUpgradeEntryPoint) {
   ASSERT_TRUE(held);
   const auto shared = host->upgrade(pid, held);
   ASSERT_FALSE(shared);
-  EXPECT_EQ(shared.error(), zigzag::vortex::mesh::ActorError::ExecutionFailed);
+  EXPECT_EQ(shared.error().actor,
+            zigzag::vortex::mesh::ActorError::ExecutionFailed);
   expectUnchanged(was);
 
   const auto byValue = host->upgrade(pid, next());
   ASSERT_FALSE(byValue);
-  EXPECT_EQ(byValue.error(), shared.error());
+  EXPECT_EQ(byValue.error().route, TransferRoute::UpgradeReconciler);
   expectUnchanged(was);
 
   // The executor's own overloads are the entry points the host wraps.
   auto direct       = next();
   const auto viaRef = host->executor().upgrade(pid, direct);
   ASSERT_FALSE(viaRef);
-  EXPECT_EQ(viaRef.error(), shared.error());
+  EXPECT_EQ(viaRef.error().code, TransferCode::RouteCarriesNoEpistemicState);
   expectUnchanged(was);
 
   EXPECT_EQ(flag(profiles()[0], kProfileFaulted), true);
@@ -1503,7 +1504,7 @@ TEST_F(VagentEpistemicUpgrade,
   auto direct       = next();
   const auto viaRef = host->executor().upgrade(pid, direct);
   ASSERT_FALSE(viaRef);
-  EXPECT_EQ(viaRef.error(), zigzag::vortex::mesh::ActorError::ExecutionFailed);
+  EXPECT_EQ(viaRef.error().code, TransferCode::RouteCarriesNoEpistemicState);
   expectUnchanged(was);
 }
 
@@ -1513,14 +1514,16 @@ TEST_F(VagentEpistemicUpgrade, AQueuedSourceChangeIsNotQuiescent) {
   const auto was     = before();
   const auto byValue = host->upgrade(pid, next());
   ASSERT_FALSE(byValue);
-  EXPECT_EQ(byValue.error(), zigzag::vortex::mesh::ActorError::NotQuiescent);
+  EXPECT_EQ(byValue.error().actor,
+            zigzag::vortex::mesh::ActorError::NotQuiescent);
   expectUnchanged(was);
 
   auto held = host->retainProgram(next());
   ASSERT_TRUE(held);
   const auto shared = host->upgrade(pid, held);
   ASSERT_FALSE(shared);
-  EXPECT_EQ(shared.error(), zigzag::vortex::mesh::ActorError::NotQuiescent);
+  EXPECT_EQ(shared.error().actor,
+            zigzag::vortex::mesh::ActorError::NotQuiescent);
   expectUnchanged(was);
 }
 
@@ -1530,11 +1533,11 @@ TEST_F(VagentEpistemicUpgrade, AnEmptyEpistemicRootStillUpgradesBothWays) {
   auto held = host->retainProgram(next());
   ASSERT_TRUE(held);
   const auto shared = host->upgrade(pid, held);
-  EXPECT_TRUE(shared) << (shared ? 0 : static_cast<int>(shared.error()));
+  EXPECT_TRUE(shared) << (shared ? "" : toString(shared.error()));
   EXPECT_EQ(*host->executor().programRef(pid), held->programRef());
   settle();
   const auto byValue = host->upgrade(pid, next());
-  EXPECT_TRUE(byValue) << (byValue ? 0 : static_cast<int>(byValue.error()));
+  EXPECT_TRUE(byValue) << (byValue ? "" : toString(byValue.error()));
 }
 
 TEST(VagentEpistemicIngressPlain, AProgramWithoutArbitrationCannotBind) {

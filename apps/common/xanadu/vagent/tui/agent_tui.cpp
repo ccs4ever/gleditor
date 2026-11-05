@@ -127,7 +127,7 @@ TuiSettings TuiSettings::fromModel(const SystemStoreModel &model) {
       xanadu::settings::kVagentTuiSplitThreshold, s.splitThreshold));
   s.maxLogEntries  = static_cast<std::size_t>(
       model.getInt64(xanadu::settings::kVagentTuiMaxLogEntries,
-                     static_cast<std::int64_t>(s.maxLogEntries)));
+                      static_cast<std::int64_t>(s.maxLogEntries)));
   s.querySolutionLimit = static_cast<std::size_t>(
       model.getInt64(xanadu::settings::kVagentTuiQuerySolutionLimit,
                      static_cast<std::int64_t>(s.querySolutionLimit)));
@@ -510,7 +510,7 @@ AgentTui::inspectBeliefs(const identity::ActorPid &pid) {
         br.status         = "fact";
         br.certaintyScore = 1.0;
         br.details        = std::format("{}({}) [fact]", predName,
-                                        argsStr.empty() ? "" : argsStr);
+                                 argsStr.empty() ? "" : argsStr);
         records.push_back(std::move(br));
       }
     }
@@ -648,8 +648,8 @@ AgentTui::upgrade(const identity::ActorPid &pid,
 
   auto res = executor_.upgrade(pid, compiledProg, grant);
   if (!res) {
-    std::string err = std::format("Live upgrade failed: error code {}",
-                                  static_cast<int>(res.error()));
+    std::string err =
+        std::format("Live upgrade failed: {}", toString(res.error()));
     appendActionLog(err);
     return std::unexpected(err);
   }
