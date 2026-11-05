@@ -1461,6 +1461,90 @@ TEST(VagentExecutorTest, MaintainHoldsConjunctsAndTheScalarHalf) {
   EXPECT_EQ(arena.outstandingMarks(), 0u);
 }
 
+TEST(VagentExecutorTest, MaintainHoldsCapturedNamesFeedTheScalarHalf) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image =
+      h.lower("module demo\nevent Tick\n"
+              "predicate level(value: Int)\n"
+              "goal Low() maintain { holds believes level(?v) from self & "
+              "v > 5 }\n"
+              "goal High() maintain { holds believes level(?v) from self "
+              "& v > 10 }\n"
+              "agent A {\n"
+              "  on Tick { believe level(9); adopt Low(); adopt High() }\n"
+              "  plan bump for High { believe level(11) }\n"
+              "  plan noop for Low { }\n"
+              "}");
+  ASSERT_TRUE(image);
+  auto &arena             = h.ctx.arena;
+  const auto intentionDim = h.ctx.core.findOrMintDimension("d.intention");
+  const auto count        = [&] {
+    return (zigzag::rankAfter(arena, image->agentCell, intentionDim) |
+            std::ranges::to<std::vector>())
+        .size();
+  };
+
+  // level(9): Low's `v > 5` holds — dormant monitor. High's `v > 10`
+  // rejects the same capture, so its restorer fires: two monitors
+  // plus the delegated bump intention.
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  EXPECT_EQ(count(), 3u);
+  ASSERT_TRUE(exec(h.execution(std::nullopt), h.ctx));
+
+  // bump asserted level(11) beside level(9): the re-check unifies
+  // ?v → 9, the scalar half rejects it, and the walk backtracks to
+  // level(11) — `v > 10` holds on the second env and High goes
+  // dormant instead of refiring forever.
+  ASSERT_TRUE(exec(h.execution(std::nullopt), h.ctx));
+  ASSERT_TRUE(exec(h.execution(std::nullopt), h.ctx));
+  EXPECT_EQ(count(), 2u);
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
+TEST(VagentExecutorTest, MaintainHoldsVariablesConstrainShareAndWild) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image =
+      h.lower("module demo\nevent Tick\n"
+              "predicate pair(a: Int, b: Int)\n"
+              "predicate tag(v: Int)\n"
+              "goal Same() maintain { holds believes pair(?v, ?v) from "
+              "self & believes tag(?v) from self }\n"
+              "goal Wild() maintain { holds believes pair(?_, ?w) from "
+              "self & w == 4 }\n"
+              "agent A {\n"
+              "  on Tick { believe pair(3, 4); believe tag(3); "
+              "adopt Same(); adopt Wild() }\n"
+              "  plan fix for Same { believe pair(3, 3) }\n"
+              "  plan noop for Wild { }\n"
+              "}");
+  ASSERT_TRUE(image);
+  auto &arena             = h.ctx.arena;
+  const auto intentionDim = h.ctx.core.findOrMintDimension("d.intention");
+  const auto count        = [&] {
+    return (zigzag::rankAfter(arena, image->agentCell, intentionDim) |
+            std::ranges::to<std::vector>())
+        .size();
+  };
+
+  // pair(3, 4): Same's second `?v` is a constraint, not a rebind —
+  // 4 ≠ 3 fails the conjunct, so its restorer fires. Wild's `?_`
+  // binds nothing, `?w` takes 4, and `w == 4` keeps Wild dormant:
+  // Same's monitor and restorer plus Wild's monitor.
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  EXPECT_EQ(count(), 3u);
+
+  // fix asserted pair(3, 3): now `?v` binds 3 at both positions and
+  // the shared env carries v = 3 into tag(?v), which tag(3)
+  // satisfies — the conjunction holds on the shared capture.
+  ASSERT_TRUE(exec(h.execution(std::nullopt), h.ctx));
+  ASSERT_TRUE(exec(h.execution(std::nullopt), h.ctx));
+  ASSERT_TRUE(exec(h.execution(std::nullopt), h.ctx));
+  EXPECT_EQ(count(), 2u);
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
 TEST(VagentExecutorTest, PickedStreaksJournalOnStatsEachTurn) {
   ExecutorHarness h;
   VagentExecutor exec;
@@ -1618,12 +1702,12 @@ TEST(VagentExecutorTest, AdoptArgsBindPositionallyIntoTheWhereGuard) {
 
 TEST(VagentExecutorTest, UnlowerableBooleanConditionsRefuseNotStub) {
   ExecutorHarness h;
-  // `v` is bound by the belief conjunct — the scalar remainder has
-  // no meaning for it and must refuse rather than stub `true`.
+  // `u` is bound by nothing — the scalar remainder has no meaning
+  // for it and must refuse rather than stub `true`.
   EXPECT_FALSE(h.lower(
       "module demo\npredicate level(value: Int)\n"
       "goal Enough() maintain { holds believes level(?v) from self & "
-      "v >= 1 }\n"
+      "u >= 1 }\n"
       "agent A { plan fix for Enough { believe level(9) } }"));
   // A `where` guard is the same Boolean test position — a belief
   // query there refuses instead of silently passing selection.

@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <bit>
+#include <cerrno>
+#include <cstdlib>
 #include <deque>
 #include <format>
 #include <map>
@@ -835,7 +837,10 @@ std::optional<CellRef> MetaRuntime::beliefBank(std::string_view predicate,
     if (arena.textOf(bank) == predicate) return bank;
   if (!mint) return std::nullopt;
   const auto bank = arena.makeCell(std::string(predicate));
-  zigzag::expectWritten(arena.link(bank, dim, Negward, binds_.agentCell));
+  // rankTail-append: a bare link would repoint the agent's +d.belief edge
+  // and orphan every bank already on the rank.
+  zigzag::expectWritten(arena.link(
+      zigzag::rankTail(arena, binds_.agentCell, dim), dim, Posward, bank));
   return bank;
 }
 
@@ -879,6 +884,59 @@ bool MetaRuntime::termUnifies(CellRef pattern, CellRef fact) const {
   return true;
 }
 
+CellValue MetaRuntime::factValue(CellRef cell) const {
+  auto &arena = core_.arena();
+  if (const auto n = arena.asInt64(cell)) return CellValue{*n};
+  if (const auto d = arena.asDouble(cell)) return CellValue{*d};
+  if (const auto b = arena.asBool(cell)) return CellValue{*b};
+  // Term args marshal flat on the +d.step chain — a leaf's own +d.step
+  // edge is its *next sibling*, not a child, so "has step links" cannot
+  // mark a cell compound. What a `?name` captures at an argument slot is
+  // always the leaf value; a whole-term capture is the unification
+  // caller's business (it holds the CellRef, not a CellValue).
+  const std::string text{arena.textOf(cell)};
+  if (!text.empty()) {
+    char *end = nullptr;
+    errno     = 0;
+    const auto n = std::strtoll(text.c_str(), &end, 10);
+    if (errno == 0 && end == text.c_str() + text.size())
+      return CellValue{n};
+    const auto f = std::strtod(text.c_str(), &end);
+    if (errno == 0 && end == text.c_str() + text.size())
+      return CellValue{f};
+  }
+  if (text == "true" || text == "false") return CellValue{text == "true"};
+  return CellValue{text};
+}
+
+bool MetaRuntime::unifyCollect(
+    CellRef pattern, CellRef fact,
+    std::map<std::string, CellValue, std::less<>> &env) const {
+  auto &arena     = core_.arena();
+  const auto text = arena.textOf(pattern);
+  if (!text.empty() && text.front() == '?') {
+    const std::string_view name = std::string_view{text}.substr(1);
+    if (name == "_") return true;
+    const auto bound = env.find(name);
+    if (bound == env.end()) {
+      env.emplace(name, factValue(fact));
+      return true;
+    }
+    // A bound name is a constraint, not a rebind: the adopted arg or
+    // an earlier conjunct's capture decides what the fact must be.
+    return bound->second == factValue(fact);
+  }
+  if (text != arena.textOf(fact)) return false;
+  const auto pChildren = std::ranges::to<std::vector>(
+      zigzag::rankAfter(arena, pattern, core_.dims().step));
+  const auto fChildren = std::ranges::to<std::vector>(
+      zigzag::rankAfter(arena, fact, core_.dims().step));
+  if (pChildren.size() != fChildren.size()) return false;
+  for (std::size_t i = 0; i < pChildren.size(); ++i)
+    if (!unifyCollect(pChildren[i], fChildren[i], env)) return false;
+  return true;
+}
+
 std::expected<CellRef, std::string>
 MetaRuntime::believe(std::string_view predicate, CellRef term, CellRef peer,
                      std::int64_t turn, std::optional<CellRef> evidence) {
@@ -889,8 +947,11 @@ MetaRuntime::believe(std::string_view predicate, CellRef term, CellRef peer,
         std::format("believe: no agent cell bound for '{}'", predicate));
 
   const auto clause = arena.makeCell();
+  // Same orphaning hazard on the bank's +d.clause rank — append so the
+  // earlier facts survive to unify against.
   zigzag::expectWritten(
-      arena.link(clause, core_.dims().clause, Negward, *bank));
+      arena.link(zigzag::rankTail(arena, *bank, core_.dims().clause),
+                 core_.dims().clause, Posward, clause));
   zigzag::expectWritten(arena.link(clause, core_.dims().grab, Posward, term));
 
   // +d.source → the {peer, turn} provenance record — the same keyed

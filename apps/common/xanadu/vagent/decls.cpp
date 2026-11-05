@@ -1114,12 +1114,14 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
         // scalar condition — emitHead cannot lower it and the stub
         // fallback would mint a vacuous `true`. Top-level `&`
         // conjuncts split: belief conjuncts marshal as unification
-        // patterns on a holdsBelief container's +d.step, the scalar
+        // patterns on a holdsBelief container's +d.grab, the scalar
         // remainder lowers as holdsTest, and the monitor rung ANDs
-        // the two. Variables a pattern captures bind nothing — a
-        // remainder that names one refuses through the scalar
-        // emitter's ordinary path. A non-self scope names a remote
-        // bank the turn cannot reach — refused, not silently held.
+        // the two under one substitution env. A `?name` the patterns
+        // capture becomes a holdsTest parameter, so the remainder
+        // reads the fact's bound value; a remainder name nothing
+        // captures refuses through the scalar emitter's ordinary
+        // path. A non-self scope names a remote bank the turn cannot
+        // reach — refused, not silently held.
         const Expr *condition = gc.condition.get();
         if (gc.kind == GoalClause::Kind::Holds) {
           std::vector<const Expr *> beliefs;
@@ -1182,7 +1184,58 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
           if (scalars.empty()) continue;
           // A leftover scalar half is an ordinary holdsTest — the
           // peeled conjuncts re-join under `&` so emitHead sees one
-          // expression.
+          // expression. Names a `?var` captures ride as extra params
+          // after the goal's own: the monitor rung's unification env
+          // fills them positionally, so the scalar half sees the
+          // fact's bound value, not just the belief's existence.
+          auto hparams = paramsOf(decl, name);
+          const auto declared = [&](std::string_view want) {
+            for (const auto &p : hparams)
+              if (p.name == want) return true;
+            return false;
+          };
+          // A `?name` argument's fragment type is the predicate's
+          // declared type at that position — the same `expected` the
+          // checker's term() binds the name at — looked up per
+          // argument index as the pattern tree walks. A capture whose
+          // type cannot be derived refuses the clause rather than
+          // minting an untyped param the scalar lowerer rejects.
+          const std::function<bool(const Expr &)> collect =
+              [&](const Expr &term) -> bool {
+            const auto sig = signatures.find(term.text);
+            for (std::size_t i = 0; i < term.children.size(); ++i) {
+              const auto &arg = *term.children[i];
+              if (arg.kind == ExprKind::LogicVariable) {
+                if (arg.text == "_") continue;
+                if (declared(arg.text)) continue;
+                Type type{};
+                if (sig != signatures.end() &&
+                    i < sig->second.size())
+                  type = sig->second[i].type;
+                if (type.name.empty()) {
+                  errors.push_back(Diagnostic{
+                      DiagnosticCode::InvalidDeclaration,
+                      std::format(
+                          "captured name '{}' has no declared predicate "
+                          "argument type at {} position {}",
+                          arg.text, term.text, i),
+                      arg.loc});
+                  return false;
+                }
+                hparams.push_back(Parameter{.name = std::string{arg.text},
+                                            .type = std::move(type),
+                                            .loc  = arg.loc});
+                continue;
+              }
+              if (arg.kind == ExprKind::Term && !collect(arg))
+                return false;
+            }
+            return true;
+          };
+          for (const Expr *bexpr : beliefs)
+            for (const auto &c : bexpr->children)
+              if (c && c->kind == ExprKind::Term && !collect(*c))
+                return;
           const Expr *remainder = scalars.front();
           Expr rebuilt;
           if (scalars.size() > 1) {
@@ -1193,7 +1246,7 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
               rebuilt.children.push_back(cloneExpr(*s));
             remainder = &rebuilt;
           }
-          auto head = emitHead(decl, *remainder, paramsOf(decl, name),
+          auto head = emitHead(decl, *remainder, hparams,
                                std::format("{}:holdsTest", label(name)),
                                Type{"Bool"});
           if (!head) {

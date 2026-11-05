@@ -30,6 +30,7 @@
 #include <cstdint>
 #include <expected>
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <set>
@@ -344,6 +345,20 @@ public:
   /// pattern cells (marshaled logic variables) match any fact cell.
   /// Existence checking only — no substitution is recorded.
   [[nodiscard]] bool termUnifies(CellRef pattern, CellRef fact) const;
+  /// The capturing form: a '?name' cell whose name has no env entry
+  /// records the fact child's value under it; one already bound
+  /// (a plan param or an earlier conjunct's capture) constrains the
+  /// match to that value. '?_' stays a pure wildcard.
+  [[nodiscard]] bool
+  unifyCollect(CellRef pattern, CellRef fact,
+               std::map<std::string, CellValue, std::less<>> &env) const;
+  /// A fact/payload cell's bound value: typed bits first, then text
+  /// coerced to a literal kind — marshalTerm's text-cells convention
+  /// makes "4" and 4 indistinguishable to a bound param without the
+  /// coerce. Under the flat +d.step sibling-chain encoding a leaf's
+  /// step edge is its next sibling, so step links cannot mark a cell
+  /// compound — a nested term resolves to its functor's text.
+  [[nodiscard]] CellValue factValue(CellRef cell) const;
   /// `believe`: append the fact clause — `+d.grab → term`, `+d.source →`
   /// a `{peer, turn}` record, `+d.evidence →` the journaled percept when
   /// supplied. Clause-bank bounds (`vagent.max_clauses_per_predicate`)

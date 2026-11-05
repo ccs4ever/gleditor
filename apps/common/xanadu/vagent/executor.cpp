@@ -785,33 +785,9 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
     // functor and its +d.step rank is empty — occurrence binds it,
     // field params still arity-refuse for want of children.
     if (payload == noCell) payload = seen;
-    // Emit's dual-channel literal fields carry typed bits, read first;
-    // a text-only cell (marshalTerm's bare convention — strings and
-    // non-literal members) coerces its text for the fragment binder,
-    // which wants typed values. A string field spelling a number still
-    // coerces wrongly — the fidelity gap is the text channel's, not
-    // this read's.
-    const auto boundValue = [&](CellRef c) -> CellValue {
-      if (const auto n = arena.asInt64(c)) return CellValue{*n};
-      if (const auto d = arena.asDouble(c)) return CellValue{*d};
-      if (const auto b = arena.asBool(c)) return CellValue{*b};
-      if (!zigzag::rankAfter(arena, c, core.dims().step).empty())
-        return CellValue{static_cast<std::int64_t>(c)};
-      const std::string text{arena.textOf(c)};
-      if (!text.empty()) {
-        char *end  = nullptr;
-        errno      = 0;
-        const auto n = std::strtoll(text.c_str(), &end, 10);
-        if (errno == 0 && end == text.c_str() + text.size())
-          return CellValue{n};
-        const auto f = std::strtod(text.c_str(), &end);
-        if (errno == 0 && end == text.c_str() + text.size())
-          return CellValue{f};
-      }
-      if (text == "true" || text == "false")
-        return CellValue{text == "true"};
-      return CellValue{text};
-    };
+    // A payload field's bound value is factValue's: typed bits first,
+    // then the text-channel coercion marshalTerm's convention needs.
+    const auto boundValue = [&](CellRef c) { return meta.factValue(c); };
     // Name-keyed binding: emit labels each payload field +d.name, and
     // the clause descriptor's param chain carries the declared order —
     // `emit P{b: 1, a: 2}` binds b to `a`'s slot positionally no
@@ -1041,9 +1017,28 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
   // A produced value's truthiness — the same contract meta.cpp's
   // file-local truthy gives selectClause: bools as-is, numbers by
   // zero, text by the "true" spelling.
-  const auto evalBool = [&](CellRef head, CellRef i) -> bool {
-    const auto outcome =
-        meta.runFragment(head, intentionArgs(i), exec.cursor, maxCycles);
+  // A fragment head's declared param names, descriptor order — the
+  // +d.values→(+d.grab/+d.step)+d.name chain meta.cpp's parameterCells
+  // reads; mirrored because the reader is private.
+  const auto paramNamesOf =
+      [&](CellRef head) -> std::vector<std::string> {
+    std::vector<std::string> names;
+    if (const auto descriptor =
+            arena.linked(head, core.dims().values, DimVector::POS))
+      for (auto p = arena.linked(*descriptor, core.dims().grab,
+                               DimVector::POS);
+           p && arena.contains(*p);
+           p = arena.linked(*p, core.dims().step, DimVector::POS))
+        if (const auto n = arena.linked(*p, core.dims().name,
+                                        DimVector::POS))
+          names.emplace_back(arena.textOf(*n));
+    return names;
+  };
+  const auto evalBool = [&](CellRef head, CellRef i,
+                            std::optional<std::vector<CellValue>> args =
+                                std::nullopt) -> bool {
+    const auto outcome = meta.runFragment(
+        head, args.value_or(intentionArgs(i)), exec.cursor, maxCycles);
     if (outcome.refusal != MetaRunOutcome::Refusal::None || !outcome.produced ||
         !outcome.result)
       return false;
@@ -1067,20 +1062,9 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
         if (const auto n = arena.asInt64(*v)) head = static_cast<CellRef>(*n);
     if (head == noCell) return false;
     // Params bind positionally like every clause head — `cause` is
-    // the one named exception the recovery's env declares. The
-    // descriptor's +d.grab/+d.step chain is the parameter signature
-    // meta.cpp's parameterCells reads — mirrored here because the
-    // reader is private.
-    std::vector<std::string> paramNames;
-    if (const auto descriptor =
-            arena.linked(head, core.dims().values, DimVector::POS))
-      for (auto p = arena.linked(*descriptor, core.dims().grab,
-                                 DimVector::POS);
-           p && arena.contains(*p);
-           p = arena.linked(*p, core.dims().step, DimVector::POS))
-        if (const auto n = arena.linked(*p, core.dims().name, DimVector::POS))
-          paramNames.emplace_back(arena.textOf(*n));
-    const auto stored = intentionArgs(intention);
+    // the one named exception the recovery's env declares.
+    const auto paramNames = paramNamesOf(head);
+    const auto stored     = intentionArgs(intention);
     std::vector<CellValue> args;
     std::size_t position = 0;
     for (const auto &pname : paramNames) {
@@ -1378,42 +1362,69 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
         meta.intentionField(intention, "delegator").value_or(0) == 0) {
       bool holds = true;
       if (goalCell != noCell) {
-        // holdsBelief is a container whose +d.grab rank carries one
-        // unification pattern per `believes` conjunct — every pattern
-        // must match some bank fact; holdsTest is the peeled scalar
-        // remainder evalBool'd. The two AND: belief existence AND
-        // scalar truth.
+        CellRef holdsHead = noCell;
         if (const auto rec =
-                varsRecord(arena, core, goalCell, "holdsBelief", false)) {
+                varsRecord(arena, core, goalCell, "holdsTest", false))
+          if (const auto h =
+                  arena.linked(*rec, core.dims().values, DimVector::POS))
+            holdsHead = *h;
+        const auto stored = intentionArgs(intention);
+        const auto pnames = holdsHead != noCell
+                                ? paramNamesOf(holdsHead)
+                                : std::vector<std::string>{};
+        // `?v` naming a goal param constrains the fact to the adopted
+        // value; a fresh `?name` captures the fact child's. Seeding the
+        // env with the bound args is what tells them apart.
+        std::map<std::string, CellValue, std::less<>> seededEnv;
+        for (std::size_t i = 0;
+             i < stored.size() && i < pnames.size(); ++i)
+          seededEnv.emplace(pnames[i], stored[i]);
+        // holdsBelief is a container whose +d.grab rank carries one
+        // unification pattern per `believes` conjunct (+d.grab
+        // membership, not +d.step: a pattern's own +d.step args ride
+        // the same chain). `holds` is existential over bindings: the
+        // scalar half may reject a captured env, so the walk
+        // backtracks each pattern through the bank until the whole
+        // conjunction — every belief matched AND the peeled
+        // remainder true — succeeds on one env. A captured `?name`
+        // that never bound (reachable only if the head's tail out-
+        // runs what the patterns captured) fails the leaf.
+        std::vector<CellRef> patterns;
+        if (const auto rec =
+                varsRecord(arena, core, goalCell, "holdsBelief", false))
           if (const auto container =
-                  arena.linked(*rec, core.dims().values, DimVector::POS)) {
-            // +d.grab membership, not +d.step: a pattern's own
-            // +d.step args ride the same chain, so +d.step cannot
-            // tell sibling patterns from a pattern's arguments.
-            for (const auto pattern :
-                 zigzag::rankAfter(arena, *container, core.dims().grab)) {
-              const auto pred = arena.textOf(pattern);
-              bool       any  = false;
-              for (const auto clause : meta.beliefsOf(pred))
-                if (const auto fact = arena.linked(clause, core.dims().grab,
-                                                   DimVector::POS);
-                    fact && meta.termUnifies(pattern, *fact)) {
-                  any = true;
-                  break;
-                }
-              if (!any) {
-                holds = false;
-                break;
-              }
+                  arena.linked(*rec, core.dims().values, DimVector::POS))
+            patterns = std::ranges::to<std::vector>(
+                zigzag::rankAfter(arena, *container, core.dims().grab));
+        const auto scalarHolds = [&](const auto &env) {
+          if (holdsHead == noCell) return true;
+          auto args = stored;
+          for (std::size_t i = stored.size(); i < pnames.size(); ++i) {
+            const auto it = env.find(pnames[i]);
+            if (it == env.end()) return false;
+            args.push_back(it->second);
+          }
+          return evalBool(holdsHead, intention, args);
+        };
+        const std::function<bool(std::size_t, decltype(seededEnv))>
+            solve = [&](std::size_t i,
+                        const decltype(seededEnv) &env) -> bool {
+          if (i == patterns.size()) return scalarHolds(env);
+          const auto &pattern = patterns[i];
+          const auto  pred    = arena.textOf(pattern);
+          for (const auto clause : meta.beliefsOf(pred)) {
+            if (const auto fact = arena.linked(clause, core.dims().grab,
+                                               DimVector::POS)) {
+              auto attempt = env;
+              if (meta.unifyCollect(pattern, *fact, attempt) &&
+                  solve(i + 1, attempt))
+                return true;
             }
           }
-        }
-        if (holds)
-          if (const auto rec = varsRecord(arena, core, goalCell, "holdsTest",
-                                          false))
-            if (const auto head =
-                    arena.linked(*rec, core.dims().values, DimVector::POS))
-              holds = evalBool(*head, intention);
+          return false;
+        };
+        if (!patterns.empty() || holdsHead != noCell)
+          holds = solve(0, seededEnv);
       }
       if (!holds) {
         // The restorer inherits the monitor's bound args — a

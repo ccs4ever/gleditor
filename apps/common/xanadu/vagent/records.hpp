@@ -65,16 +65,36 @@ toInt64(std::string_view text) noexcept {
 }
 
 /// Mint or find the `+d.vars` record keyed @p key on @p owner.
+///
+/// +d.vars is a shared rank — module symbols and their records ride
+/// the same chain, so a member's text alone cannot scope a key to its
+/// owner (a symbol missing 'holdsTest' would find the next symbol's).
+/// The record's +d.owner arm is the scope, as *scalar content* the way
+/// +d.holder carries the agent ref: N records pointing at one owner
+/// cannot share a live edge — the owner's -d.owner slot holds one.
+/// Members keyed for another owner are skipped, wherever they sit.
 [[nodiscard]] inline std::optional<CellRef>
 varsRecord(zigzag::ArenaManifold &arena, VortexCore &core, CellRef owner,
            std::string_view key, bool mint) {
   const auto vars = core.dims().vars;
+  const auto of   = core.findOrMintDimension("d.owner");
+  const auto owns = [&](CellRef record) {
+    const auto v = arena.linked(record, of, Posward);
+    // A record minted without +d.owner (test fixtures, pre-scope writes)
+    // is unscoped and matches any owner; a scoped record must name this
+    // one — that is what keeps sibling symbols' keys apart.
+    return !v || arena.asInt64(*v).value_or(-1) ==
+                     static_cast<std::int64_t>(owner);
+  };
   for (const auto record : zigzag::rankAfter(arena, owner, vars))
-    if (arena.textOf(record) == key) return record;
+    if (arena.textOf(record) == key && owns(record)) return record;
   if (!mint) return std::nullopt;
   const auto record = arena.makeCell(key);
   zigzag::expectWritten(
       arena.link(zigzag::rankTail(arena, owner, vars), vars, Posward, record));
+  zigzag::expectWritten(
+      arena.link(record, of, Posward,
+                 arena.makeScalarCell(static_cast<std::int64_t>(owner))));
   return record;
 }
 
