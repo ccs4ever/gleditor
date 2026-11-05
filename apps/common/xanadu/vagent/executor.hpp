@@ -54,6 +54,9 @@ struct OutboxEntry {
 struct Delivery {
   zigzag::CellRef agent{zigzag::noCell};
   std::string percept;
+  // The outbox entry's idempotence id — the receiver's +d.delivered
+  // journal keys on it so a re-drained record delivers once.
+  std::string id;
   // The staged record's kind — "tell"/"untell" deliver as receiver
   // inbox records (belief effects), everything else as a percept.
   std::string kind;

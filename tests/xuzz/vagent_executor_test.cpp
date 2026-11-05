@@ -899,6 +899,48 @@ TEST(VagentExecutorTest, AwaitAsBindsTheFiredPerceptAgentSide) {
   EXPECT_EQ(arena.outstandingMarks(), 0u);
 }
 
+TEST(VagentExecutorTest, DeliveredIdDeduplicatesRepeatedDelivery) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image = h.lower("module demo\nevent Tick\nevent Ping\n"
+                             "agent A { on Tick { emit Ping{} } }");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  const auto outbox =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  ASSERT_EQ(outbox.size(), 1u);
+  const auto deliveries = VagentExecutor::route(
+      arena, h.ctx.core, h.ctx.core.home(), outbox.front());
+  ASSERT_EQ(deliveries.size(), 1u);
+
+  // §3.7's at-least-once-then-detect: delivering the same entry
+  // twice journals the id and skips the second staging entirely.
+  exec.deliver(arena, h.ctx.core, deliveries.front());
+  exec.deliver(arena, h.ctx.core, deliveries.front());
+  const auto seen =
+      zigzag::rankAfter(arena, image->agentCell,
+                        h.ctx.core.findOrMintDimension("d.seen")) |
+      std::ranges::to<std::vector>();
+  const auto pending =
+      zigzag::rankAfter(arena, image->agentCell,
+                        h.ctx.core.findOrMintDimension("d.pending")) |
+      std::ranges::to<std::vector>();
+  const auto delivered =
+      zigzag::rankAfter(arena, image->agentCell,
+                        h.ctx.core.findOrMintDimension("d.delivered")) |
+      std::ranges::to<std::vector>();
+  // The journal also holds the Tick message itself — the duplicate
+  // check is on the Ping entries the delivery staged.
+  const auto pings = std::ranges::count_if(
+      seen, [&](CellRef c) { return arena.textOf(c) == "Ping"; });
+  EXPECT_EQ(pings, 1);
+  EXPECT_EQ(pending.size(), 1u);
+  ASSERT_EQ(delivered.size(), 1u);
+  EXPECT_EQ(arena.textOf(delivered.front()), outbox.front().id);
+}
+
 TEST(VagentExecutorTest, BeliefAwaitTestsTheBankAndWakesOnTheFact) {
   ExecutorHarness h;
   VagentExecutor exec;

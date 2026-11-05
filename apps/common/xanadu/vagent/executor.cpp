@@ -1162,6 +1162,7 @@ std::vector<Delivery> VagentExecutor::route(zigzag::ArenaManifold &arena,
       if (entry.target == "0" || entry.target.empty() || name == entry.target)
         deliveries.push_back(Delivery{.agent       = member,
                                       .percept     = entry.payload,
+                                      .id          = entry.id,
                                       .kind        = entry.kind,
                                       .payloadCell = entry.payloadCell,
                                       .sender      = entry.sender,
@@ -1174,6 +1175,21 @@ void VagentExecutor::deliver(zigzag::ArenaManifold &arena,
                              zigzag::vortex::VortexCore &core,
                              const Delivery &delivery) const {
   if (delivery.agent == noCell) return;
+
+  // §3.7's idempotence key, receiver-side: the entry's stable id
+  // journals onto +d.delivered, so a re-drained record or a double
+  // drain stages no second inbox/percept. The rank is deliberately
+  // unbounded — evicting an id is how a duplicate becomes a fresh
+  // delivery. An empty id isn't tracked.
+  if (!delivery.id.empty()) {
+    const auto delivered = core.findOrMintDimension("d.delivered");
+    for (const CellRef idCell :
+         zigzag::rankAfter(arena, delivery.agent, delivered))
+      if (arena.textOf(idCell) == delivery.id) return;
+    zigzag::expectWritten(
+        arena.link(zigzag::rankTail(arena, delivery.agent, delivered),
+                   delivered, DimVector::POS, arena.makeCell(delivery.id)));
+  }
 
   if (delivery.kind == "tell" || delivery.kind == "untell" ||
       delivery.kind == "achieve") {
