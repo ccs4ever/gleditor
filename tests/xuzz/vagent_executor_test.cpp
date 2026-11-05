@@ -42,9 +42,10 @@ struct ExecutorHarness {
     return image;
   }
 
-  ActorExecution execution(std::optional<std::string> event = std::nullopt) {
+  ActorExecution execution(std::optional<std::string> event = std::nullopt,
+                           std::uint64_t spawnSequence      = 1) {
     ActorExecution exec;
-    exec.pid   = ActorPid{"worker", "agent", 1, 1};
+    exec.pid   = ActorPid{"worker", "agent", 1, spawnSequence};
     exec.grant = ActorGrant{.programRef      = "sha256:p",
                             .baseRef         = "sha256:b",
                             .maxInstructions = 100'000,
@@ -319,7 +320,11 @@ TEST(VagentExecutorTest, EmitMintsAnOutboxRecord) {
     return v ? *v : zigzag::noCell;
   };
   EXPECT_EQ(arena.textOf(fieldOf("kind")), "emit");
-  EXPECT_EQ(arena.textOf(fieldOf("payload")), "Tock");
+  // The payload rides a scalar ref — program-image term cells take
+  // one inbound edge per dim, so records never edge-link them.
+  const auto payloadRef = arena.asInt64(fieldOf("payload"));
+  ASSERT_TRUE(payloadRef.has_value());
+  EXPECT_EQ(arena.textOf(static_cast<CellRef>(*payloadRef)), "Tock");
   // §3.7's idempotence triple: sender-name hash + turn + position.
   const auto expected =
       std::format("{}:{}:{}", std::hash<std::string>{}("A"), 1, 0);
@@ -346,12 +351,15 @@ TEST(VagentExecutorTest, EmitMarshalsRecordFieldsOntoThePayload) {
   ASSERT_EQ(entries.size(), 1u);
   const auto rec = varsRecord(arena, h.ctx.core, entries[0], "payload", false);
   ASSERT_TRUE(rec.has_value());
-  const auto payload =
+  const auto payloadScalar =
       arena.linked(*rec, h.ctx.core.dims().values, DimVector::POS);
-  ASSERT_TRUE(payload.has_value());
-  EXPECT_EQ(arena.textOf(*payload), "Seen");
+  ASSERT_TRUE(payloadScalar.has_value());
+  const auto payloadRef = arena.asInt64(*payloadScalar);
+  ASSERT_TRUE(payloadRef.has_value());
+  const auto payload = static_cast<CellRef>(*payloadRef);
+  EXPECT_EQ(arena.textOf(payload), "Seen");
   const auto fields =
-      zigzag::rankAfter(arena, *payload, h.ctx.core.dims().step) |
+      zigzag::rankAfter(arena, payload, h.ctx.core.dims().step) |
       std::ranges::to<std::vector>();
   ASSERT_EQ(fields.size(), 1u);
   const auto fname =
@@ -807,6 +815,51 @@ TEST(VagentExecutorTest, SpawnMintsTheChildAndRouteResolvesIt) {
   ASSERT_EQ(scoped.size(), 1u);
   EXPECT_EQ(scoped.front().agent, spawned);
   EXPECT_EQ(scoped.front().percept, "Pong");
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
+TEST(VagentExecutorTest, SpawnedMemberRunsItsOwnTurnOnItsSequence) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image = h.lower("module demo\nevent Boot\nevent Ping\nevent Done\n"
+                             "agent A {\n"
+                             "  var child: Opt<Agent> := none\n"
+                             "  on Boot { child := spawn A() in inner;\n"
+                             "            emit Ping{} for child }\n"
+                             "  on Ping { emit Done{} }\n"
+                             "}");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+
+  // Boot spawns the second member and emits at it; `for child`
+  // resolves to the A member name so both members get the percept.
+  ASSERT_TRUE(exec(h.execution("Boot"), h.ctx));
+  const auto outbox =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  ASSERT_EQ(outbox.size(), 1u);
+  const auto deliveries = VagentExecutor::route(
+      arena, h.ctx.core, h.ctx.core.home(), outbox.front());
+  ASSERT_EQ(deliveries.size(), 2u);
+  CellRef spawned = noCell;
+  for (const auto &d : deliveries) {
+    exec.deliver(arena, h.ctx.core, d);
+    if (d.agent != image->agentCell) spawned = d.agent;
+  }
+  ASSERT_NE(spawned, noCell);
+
+  // Sequence 1 is the declared agent; sequence 2 is the spawned
+  // member — each runs its own settle over its own ranks. Both
+  // dispatch the shared `on Ping` clause against their own outbox.
+  ASSERT_TRUE(exec(h.execution(std::nullopt, 1), h.ctx));
+  ASSERT_TRUE(exec(h.execution(std::nullopt, 2), h.ctx));
+  const auto firstOut =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  const auto spawnedOut =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, spawned);
+  ASSERT_EQ(firstOut.size(), 2u);
+  EXPECT_EQ(firstOut[1].payload, "Done");
+  ASSERT_EQ(spawnedOut.size(), 1u);
+  EXPECT_EQ(spawnedOut[0].payload, "Done");
   EXPECT_EQ(arena.outstandingMarks(), 0u);
 }
 

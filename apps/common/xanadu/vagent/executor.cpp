@@ -36,13 +36,18 @@ struct ExecutorDims {
 };
 
 /// `home +d.dirs → directory +d.agents → agent` — walked, never cached,
-/// so the read survives re-genesis.
+/// so the read survives re-genesis. `spawnSequence` selects the member:
+/// the declared agent is sequence 1, spawned members append in order —
+/// the directory rank is the spawn ledger. 0/1 both mean the head.
 [[nodiscard]] std::optional<CellRef>
 agentCellOf(zigzag::ArenaManifold &arena, zigzag::vortex::VortexCore &core,
-            const ExecutorDims &dims) {
-  for (const CellRef dir : zigzag::rankAfter(arena, core.home(), dims.dirs))
-    for (const CellRef agent : zigzag::rankAfter(arena, dir, dims.agents))
-      return agent;
+            const ExecutorDims &dims, std::uint64_t spawnSequence) {
+  const auto wanted = spawnSequence < 2 ? std::size_t{0} : spawnSequence - 1;
+  for (const CellRef dir : zigzag::rankAfter(arena, core.home(), dims.dirs)) {
+    const auto members = zigzag::rankAfter(arena, dir, dims.agents) |
+                         std::ranges::to<std::vector>();
+    if (wanted < members.size()) return members[wanted];
+  }
   return std::nullopt;
 }
 
@@ -111,7 +116,8 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
 
   MetaBindSet binds;
   const CellRef programRoot = core.home();
-  if (const auto agent = agentCellOf(arena, core, dims); agent) {
+  if (const auto agent = agentCellOf(arena, core, dims, exec.pid.spawnSequence);
+      agent) {
     if (auto minted = mintMetaBindSet(arena, core, programRoot, *agent)) {
       binds = std::move(*minted);
       // The agent's own module: the first +d.stdlib member — the same
@@ -179,8 +185,9 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
   // deterministic idempotence triple so a duplicate drain is
   // detectable by key rather than by cell identity.
   const auto stageOutbox = [&](std::string_view kind, CellRef payload,
-                               CellRef target, CellRef scope = noCell,
-                               CellRef delegator = noCell) -> std::string {
+                               std::string_view target,
+                               std::string_view scope = {},
+                               CellRef delegator      = noCell) -> std::string {
     const auto position = std::ranges::to<std::vector>(
                               zigzag::rankAfter(arena, agent, dims.outbox))
                               .size();
@@ -197,9 +204,17 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
     if (const auto name = arena.linked(agent, core.dims().name, DimVector::POS))
       sender = std::string{arena.textOf(*name)};
     outField("kind", arena.makeCell(std::string{kind}));
-    outField("payload", payload);
-    outField("target", target);
-    if (scope != noCell) outField("scope", scope);
+    // The payload is a program-image term cell: its -d.values slot
+    // already names it on the marshaled step, and -d.* admits one
+    // inbound edge per dim — an edge here would evict the step's own
+    // binding (and N entries naming one payload would evict each
+    // other). Cross-record references are scalars, like delegator;
+    // drainOutbox resolves the ref back to the cell.
+    if (payload != noCell)
+      outField("payload",
+               arena.makeScalarCell(static_cast<std::int64_t>(payload)));
+    outField("target", arena.makeCell(std::string{target}));
+    if (!scope.empty()) outField("scope", arena.makeCell(std::string{scope}));
     if (delegator != noCell)
       outField("delegator",
                arena.makeScalarCell(static_cast<std::int64_t>(delegator)));
@@ -212,10 +227,10 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
   // A marshaled peer/target name cell → the directory member name the
   // outbox should carry: `self` resolves to the running agent's
   // member, a bound vars name resolves through the handle the hoist
-  // wrote, anything else stays literal. Returns the resolved *cell*
-  // so stageOutbox can link it — never just the text.
-  const auto resolvePeer = [&](CellRef nameCell) -> CellRef {
-    if (nameCell == noCell) return noCell;
+  // wrote, anything else stays literal. Text only — the record never
+  // edge-links a name cell it didn't mint.
+  const auto resolvePeer = [&](CellRef nameCell) -> std::string {
+    if (nameCell == noCell) return {};
     const auto want = arena.textOf(nameCell);
     CellRef holder  = noCell;
     if (want == "self") {
@@ -225,9 +240,9 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
         if (const auto ref = arena.asInt64(*v))
           holder = static_cast<CellRef>(*ref);
     }
-    if (holder == noCell) return nameCell;
+    if (holder == noCell) return std::string{want};
     const auto n = arena.linked(holder, core.dims().name, DimVector::POS);
-    return n ? *n : nameCell;
+    return n ? std::string{arena.textOf(*n)} : std::string{want};
   };
 
   // The fault arm of §3.5's ladder: count the fault and park for the
@@ -297,9 +312,8 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       const auto target = field("target");
       const auto scope  = field("scope");
       stageOutbox("emit", payload,
-                  target != noCell ? resolvePeer(target)
-                                   : arena.makeScalarCell(std::int64_t{0}),
-                  scope);
+                  target != noCell ? resolvePeer(target) : std::string{"0"},
+                  scope != noCell ? arena.textOf(scope) : std::string_view{});
       return true;
     }
     if (verb == "tell" || verb == "untell") {
@@ -465,10 +479,14 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       // §3.5's park: the spine index advances past the await member
       // (the settle walker's step++ below), waiting/ready gate the
       // resume, and the absolute deadline rides on the intention.
+      // The marshaled event cell is shared step state — a second run
+      // of this spine would find its binding evicted if the record
+      // edge-linked it. Text copy, same as ask's.
       if (const auto rec =
               varsRecord(arena, core, intention, "awaitEvent", true))
-        zigzag::expectWritten(
-            arena.link(*rec, core.dims().values, DimVector::POS, event));
+        zigzag::expectWritten(arena.link(*rec, core.dims().values,
+                                         DimVector::POS,
+                                         arena.makeCell(arena.textOf(event))));
       // `await X as g`: the bound name survives the park the same way
       // ask's result does — the wake match writes the fired event's
       // handle under it.
@@ -499,7 +517,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
         // receiver-side adoption can point the child's delegator
         // back — cross-agent delegation is the same cell-link
         // mechanism the local +d.subgoal path uses.
-        stageOutbox("achieve", goalName, resolvePeer(peer), noCell, intention);
+        stageOutbox("achieve", goalName, resolvePeer(peer), {}, intention);
         meta.setIntentionField(intention, "delegated", 1);
         meta.setIntentionField(intention, "ready", 0);
         const auto dl      = field("deadline");
@@ -651,16 +669,20 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       }
       if (!head) break;
       const auto kind = arena.linked(*head, dims.verb, DimVector::POS);
-      const auto term = arena.linked(*head, core.dims().grab, DimVector::POS);
+      const auto ref  = [&](std::string_view name) -> CellRef {
+        const auto rec = varsRecord(arena, core, *head, name, false);
+        if (!rec) return noCell;
+        const auto v = arena.linked(*rec, core.dims().values, DimVector::POS);
+        if (!v) return noCell;
+        const auto r = arena.asInt64(*v);
+        return r ? static_cast<CellRef>(*r) : noCell;
+      };
+      const auto term = ref("grab");
       unlinkRank(arena, *head, inboxDim);
-      if (!kind || !term) continue;
+      if (!kind || term == noCell) continue;
       CellRef sender = agent;
-      if (const auto rec = varsRecord(arena, core, *head, "sender", false))
-        if (const auto v =
-                arena.linked(*rec, core.dims().values, DimVector::POS))
-          if (const auto ref = arena.asInt64(*v))
-            sender = static_cast<CellRef>(*ref);
-      const auto pred = arena.textOf(*term);
+      if (const auto s = ref("sender"); s != noCell) sender = s;
+      const auto pred = arena.textOf(term);
       const auto k    = arena.textOf(*kind);
       if (k == "achieve") {
         // Remote delegation: the named goal must exist in the
@@ -670,13 +692,8 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
         // parked intention — retire and drop write it the same as
         // local delegation, and +d.subgoal on the parent lets the
         // deadline rung drop the remote child.
-        CellRef delegator = noCell;
-        if (const auto rec = varsRecord(arena, core, *head, "delegator", false))
-          if (const auto v =
-                  arena.linked(*rec, core.dims().values, DimVector::POS))
-            if (const auto ref = arena.asInt64(*v))
-              delegator = static_cast<CellRef>(*ref);
-        const auto goal = eventSymbolNamed(arena, core, programRoot, pred);
+        const auto delegator = ref("delegator");
+        const auto goal      = eventSymbolNamed(arena, core, programRoot, pred);
         if (!goal || delegator == noCell) continue;
         auto child = meta.adoptGoal(*goal, turn,
                                     static_cast<std::size_t>(setting(
@@ -690,8 +707,8 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
         continue;
       }
       if (k == "untell") {
-        (void)meta.forget(pred, *term);
-      } else if (!meta.believe(pred, *term, sender, turn)) {
+        (void)meta.forget(pred, term);
+      } else if (!meta.believe(pred, term, sender, turn)) {
         return failTurn();
       }
     }
@@ -1023,20 +1040,24 @@ VagentExecutor::drainOutbox(zigzag::ArenaManifold &arena,
       const auto value = arena.linked(*rec, core.dims().values, DimVector::POS);
       return value ? *value : noCell;
     };
-    const auto delegator = [&]() -> CellRef {
-      const auto value = cellField("delegator");
+    const auto refField = [&](std::string_view name) -> CellRef {
+      const auto value = cellField(name);
       if (value == noCell) return noCell;
       const auto ref = arena.asInt64(value);
       return ref ? static_cast<CellRef>(*ref) : noCell;
-    }();
-    entries.push_back(OutboxEntry{.kind        = read("kind"),
-                                  .target      = read("target"),
-                                  .payload     = read("payload"),
-                                  .id          = read("id"),
-                                  .scope       = read("scope"),
-                                  .payloadCell = cellField("payload"),
-                                  .sender      = agent,
-                                  .delegator   = delegator});
+    };
+    const auto payloadCell = refField("payload");
+    entries.push_back(
+        OutboxEntry{.kind        = read("kind"),
+                    .target      = read("target"),
+                    .payload     = payloadCell != noCell
+                                       ? std::string{arena.textOf(payloadCell)}
+                                       : std::string{},
+                    .id          = read("id"),
+                    .scope       = read("scope"),
+                    .payloadCell = payloadCell,
+                    .sender      = agent,
+                    .delegator   = refField("delegator")});
   }
   return entries;
 }
@@ -1085,10 +1106,10 @@ void VagentExecutor::deliver(zigzag::ArenaManifold &arena,
       delivery.kind == "achieve") {
     // A cross-agent effect isn't a percept — it lands as an inbox
     // record the receiver's own settle processes (assert/retract for
-    // tell/untell, subgoal adoption for achieve). The term rides
-    // +d.grab and the kind rides +d.verb, because the payload cell's
-    // -d.values inbound is already taken by the sender's outbox
-    // field — a second +d.values link would evict it.
+    // tell/untell, subgoal adoption for achieve). Every cell
+    // reference rides a scalar — sender-side fanout means N records
+    // can name one program-image term, and -d.* holds a single
+    // inbound edge per dim.
     const auto inbox  = core.findOrMintDimension("d.inbox");
     const auto record = arena.makeCell();
     zigzag::expectWritten(
@@ -1097,9 +1118,6 @@ void VagentExecutor::deliver(zigzag::ArenaManifold &arena,
     zigzag::expectWritten(arena.link(record, core.findOrMintDimension("d.verb"),
                                      DimVector::POS,
                                      arena.makeCell(delivery.kind)));
-    if (delivery.payloadCell != noCell)
-      zigzag::expectWritten(arena.link(record, core.dims().grab, DimVector::POS,
-                                       delivery.payloadCell));
     const auto refField = [&](std::string_view name, CellRef ref) {
       if (ref == noCell) return;
       if (const auto rec = varsRecord(arena, core, record, name, true))
@@ -1107,6 +1125,7 @@ void VagentExecutor::deliver(zigzag::ArenaManifold &arena,
             arena.link(*rec, core.dims().values, DimVector::POS,
                        arena.makeScalarCell(static_cast<std::int64_t>(ref))));
     };
+    refField("grab", delivery.payloadCell);
     refField("sender", delivery.sender);
     refField("delegator", delivery.delegator);
     return;

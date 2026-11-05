@@ -1309,10 +1309,14 @@ TEST(VagentPlasticityTest, ActorExecutorRunsTheWorkedExamples) {
   const auto payloadRec =
       varsRecord(arena, ctx.core, outbox.front(), "payload", false);
   ASSERT_TRUE(payloadRec.has_value());
-  const auto payload =
+  const auto payloadScalar =
       arena.linked(*payloadRec, ctx.core.dims().values, zigzag::Posward);
+  ASSERT_TRUE(payloadScalar.has_value());
+  // The payload is a scalar ref — outbox records never edge-link the
+  // shared program-image term (one inbound edge per -d dim).
+  const auto payload = arena.asInt64(*payloadScalar);
   ASSERT_TRUE(payload.has_value());
-  EXPECT_EQ(arena.textOf(*payload), "Meal");
+  EXPECT_EQ(arena.textOf(static_cast<CellRef>(*payload)), "Meal");
 
   // The intention retired; the turn left no residual marks.
   const auto intentDim = ctx.core.findOrMintDimension("d.intention");
