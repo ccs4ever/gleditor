@@ -2928,4 +2928,199 @@ TEST(VagentBeliefTest, EvidenceEdgeLinksTheJournaledPercept) {
             std::optional{percept});
 }
 
+TEST(VagentExecutorTest, InstallMintsTheFrameAndRunsLifecycleAndCapcall) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image =
+      h.lower("module demo\nevent Tick\nevent Installed\nevent Done\n"
+              "goal Work() perform\n"
+              "capacity Navigation { def goto(x: Int): Int }\n"
+              "skill Walker(level: Int) implements Navigation {\n"
+              "  var speed: Int := level\n"
+              "  on install { emit Installed{} }\n"
+              "  def goto(x: Int): Int { x * 2 }\n"
+              "}\n"
+              "agent A {\n"
+              "  uses Navigation\n"
+              "  on Tick { adopt Work() }\n"
+              "  plan w for Work {\n"
+              "    install Walker(5)\n"
+              "    let r := Navigation.goto(21)\n"
+              "    emit Done{}\n"
+              "  }\n"
+              "}");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+  // One spine member per settle: Tick runs install, the two wakes run
+  // the capcall and the emit.
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+
+  // §5.3: one instance on +d.skill — +d.capacity names it a
+  // Navigation, and its clone master is the frame, holding the
+  // skill's name and the field the install arg seeded.
+  const auto skillDim  = h.ctx.core.findOrMintDimension("d.skill");
+  const auto capDim    = h.ctx.core.findOrMintDimension("d.capacity");
+  const auto instances = zigzag::rankAfter(arena, image->agentCell, skillDim) |
+                         std::ranges::to<std::vector>();
+  ASSERT_EQ(instances.size(), 1u);
+  const auto capName = arena.linked(instances.front(), capDim, DimVector::POS);
+  ASSERT_TRUE(capName);
+  EXPECT_EQ(arena.textOf(*capName), "Navigation");
+  const auto frame =
+      arena.cloneMaster(instances.front(), h.ctx.core.dims().clone);
+  ASSERT_TRUE(frame);
+  EXPECT_EQ(arena.textOf(*frame), "Walker");
+  const auto speed = varsRecord(arena, h.ctx.core, *frame, "speed", false);
+  ASSERT_TRUE(speed);
+  const auto speedValue =
+      arena.linked(*speed, h.ctx.core.dims().values, DimVector::POS);
+  ASSERT_TRUE(speedValue);
+  EXPECT_EQ(arena.asInt64(*speedValue), 5);
+
+  // `r := Navigation.goto(21)` dispatched through the instance to
+  // Walker.goto — the produced value lands on the agent's vars.
+  const auto r = varsRecord(arena, h.ctx.core, image->agentCell, "r", false);
+  ASSERT_TRUE(r);
+  const auto rv = arena.linked(*r, h.ctx.core.dims().values, DimVector::POS);
+  ASSERT_TRUE(rv);
+  EXPECT_EQ(arena.asInt64(*rv), 42);
+
+  // on install's emit staged before the plan's own Done.
+  const auto outbox =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  ASSERT_EQ(outbox.size(), 2u);
+  EXPECT_EQ(outbox[0].payload, "Installed");
+  EXPECT_EQ(outbox[1].payload, "Done");
+}
+
+TEST(VagentExecutorTest, InstallEvictsASkillSharingTheCapacityWhole) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image =
+      h.lower("module demo\nevent Tick\nevent Removed\nevent Done\n"
+              "goal Work() perform\n"
+              "capacity Navigation { def goto(x: Int): Int }\n"
+              "skill Slow implements Navigation {\n"
+              "  on uninstall { emit Removed{} }\n"
+              "  def goto(x: Int): Int { x }\n"
+              "}\n"
+              "skill Fast implements Navigation {\n"
+              "  def goto(x: Int): Int { x * 2 }\n"
+              "}\n"
+              "agent A {\n"
+              "  uses Navigation\n"
+              "  on Tick { adopt Work() }\n"
+              "  plan w for Work {\n"
+              "    install Slow()\n"
+              "    install Fast()\n"
+              "    let r := Navigation.goto(21)\n"
+              "    emit Done{}\n"
+              "  }\n"
+              "}");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+  // install / install / capcall / emit — four members, four settles.
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+
+  // §5.3's whole-removal: Fast shares Navigation, so Slow went
+  // before Fast landed — one instance remains and it answers with
+  // Fast.goto's doubling, not Slow's identity.
+  const auto skillDim  = h.ctx.core.findOrMintDimension("d.skill");
+  const auto instances = zigzag::rankAfter(arena, image->agentCell, skillDim) |
+                         std::ranges::to<std::vector>();
+  ASSERT_EQ(instances.size(), 1u);
+  const auto frame =
+      arena.cloneMaster(instances.front(), h.ctx.core.dims().clone);
+  ASSERT_TRUE(frame);
+  EXPECT_EQ(arena.textOf(*frame), "Fast");
+  const auto r = varsRecord(arena, h.ctx.core, image->agentCell, "r", false);
+  ASSERT_TRUE(r);
+  const auto rv = arena.linked(*r, h.ctx.core.dims().values, DimVector::POS);
+  ASSERT_TRUE(rv);
+  EXPECT_EQ(arena.asInt64(*rv), 42);
+  const auto outbox =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  ASSERT_EQ(outbox.size(), 2u);
+  EXPECT_EQ(outbox[0].payload, "Removed");
+  EXPECT_EQ(outbox[1].payload, "Done");
+}
+
+TEST(VagentExecutorTest, UninstallRunsTheLifecycleAndClearsTheInstances) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image =
+      h.lower("module demo\nevent Tick\nevent Installed\nevent Removed\n"
+              "event Done\n"
+              "goal Work() perform\n"
+              "capacity Navigation { def goto(x: Int): Int }\n"
+              "skill Walker implements Navigation {\n"
+              "  on install { emit Installed{} }\n"
+              "  on uninstall { emit Removed{} }\n"
+              "  def goto(x: Int): Int { x }\n"
+              "}\n"
+              "agent A {\n"
+              "  uses Navigation\n"
+              "  on Tick { adopt Work() }\n"
+              "  plan w for Work {\n"
+              "    install Walker()\n"
+              "    uninstall Walker\n"
+              "    emit Done{}\n"
+              "  }\n"
+              "}");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+  // install / uninstall / emit — three members, three settles.
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+
+  const auto skillDim = h.ctx.core.findOrMintDimension("d.skill");
+  EXPECT_TRUE(zigzag::rankAfter(arena, image->agentCell, skillDim).empty());
+  const auto outbox =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  ASSERT_EQ(outbox.size(), 3u);
+  EXPECT_EQ(outbox[0].payload, "Installed");
+  EXPECT_EQ(outbox[1].payload, "Removed");
+  EXPECT_EQ(outbox[2].payload, "Done");
+}
+
+TEST(VagentExecutorTest, CapcallWithoutAnInstalledSkillRefusesTheStep) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image = h.lower("module demo\nevent Tick\nevent Done\n"
+                             "goal Work() perform\n"
+                             "capacity Navigation { def goto(x: Int): Int }\n"
+                             "agent A {\n"
+                             "  uses Navigation\n"
+                             "  on Tick { adopt Work() }\n"
+                             "  plan w for Work {\n"
+                             "    let r := Navigation.goto(21)\n"
+                             "    emit Done{}\n"
+                             "  }\n"
+                             "}");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+
+  // Nothing installed provides Navigation — the step refuses, the
+  // intention faults, and Done never stages.
+  const auto outbox =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  EXPECT_TRUE(outbox.empty());
+  const auto iDim   = h.ctx.core.findOrMintDimension("d.intention");
+  const auto parked = zigzag::rankAfter(arena, image->agentCell, iDim) |
+                      std::ranges::to<std::vector>();
+  ASSERT_EQ(parked.size(), 1u);
+  auto binds =
+      mintMetaBindSet(arena, h.ctx.core, h.ctx.core.home(), image->agentCell);
+  ASSERT_TRUE(binds);
+  MetaRuntime meta(h.ctx.core, h.ctx.vm, *binds);
+  EXPECT_EQ(meta.intentionField(parked.front(), "faulted"), 1);
+}
+
 } // namespace

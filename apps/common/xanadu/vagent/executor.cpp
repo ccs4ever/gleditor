@@ -33,6 +33,8 @@ struct ExecutorDims {
   DimRef intention{noCell};
   DimRef subgoal{noCell};
   DimRef outbox{noCell};
+  DimRef skill{noCell};
+  DimRef capacity{noCell};
 };
 
 /// `home +d.dirs → directory +d.agents → agent` — walked, never cached,
@@ -113,6 +115,8 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
   dims.intention = core.findOrMintDimension("d.intention");
   dims.subgoal   = core.findOrMintDimension("d.subgoal");
   dims.outbox    = core.findOrMintDimension("d.outbox");
+  dims.skill     = core.findOrMintDimension("d.skill");
+  dims.capacity  = core.findOrMintDimension("d.capacity");
 
   MetaBindSet binds;
   const CellRef programRoot = core.home();
@@ -458,6 +462,11 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
   // written to the record; dispatch resets it on entry so a consume
   // inside a plan body can't leak into the next event.
   bool eventConsumed = false;
+  // runSpine sits behind std::function so a host step (install runs
+  // `on install`, which is itself a clause spine) can reach it —
+  // lambdas can't forward-reference, and the indirection also lets a
+  // lifecycle body's own host verbs recurse through runHostStep.
+  std::function<bool(CellRef, const std::vector<CellValue> &)> runSpine;
   // §3.8 host step: +d.verb names the MetaRuntime entry, +d.vars holds
   // the marshaled args. Peer and turn are implicit — a belief an agent
   // asserts is asserted by that agent on that turn.
@@ -847,22 +856,211 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       meta.setIntentionField(intention, "awaitDeadline", 0);
       return true;
     }
-    const auto term = field("term");
-    if (term == noCell) return false;
-    const auto pred = arena.textOf(term);
-    if (verb == "believe")
-      return meta.believe(pred, term, agent, turn).has_value();
-    if (verb == "forget") {
-      // forget is infallible — zero matches is a legal no-op.
-      (void)meta.forget(pred, term);
-      return true;
-    }
-    if (verb == "revise") {
+    if (verb == "believe" || verb == "forget" || verb == "revise") {
+      // The belief family shares the `term` field — gating here, not
+      // before the verb ladder, keeps a term-free verb (install,
+      // capcall, …) from being refused on a field it never claimed.
+      const auto term = field("term");
+      if (term == noCell) return false;
+      const auto pred = arena.textOf(term);
+      if (verb == "believe")
+        return meta.believe(pred, term, agent, turn).has_value();
+      if (verb == "forget") {
+        // forget is infallible — zero matches is a legal no-op.
+        (void)meta.forget(pred, term);
+        return true;
+      }
       // The language's revise takes one term: the predicate's bank
       // becomes exactly that fact — clear then assert.
       for (const CellRef clause : meta.beliefsOf(pred))
         unlinkRank(arena, clause, core.dims().clause);
       return meta.believe(pred, term, agent, turn).has_value();
+    }
+    if (verb == "install" || verb == "uninstall" || verb == "capcall") {
+      // §5.3's frame+instance structure: `install` mints a clone
+      // master and one instance per capacity the skill implements —
+      // inherited ones count, so the descriptor's +d.capacity rank is
+      // already closed — and a skill sharing any capacity goes whole
+      // first. `uninstall` runs `on uninstall`, splices the instances
+      // off both ranks, and orphans the frame. `capcall` walks the
+      // agent's instances for the one whose +d.capacity name matches
+      // the qualifier and runs its frame's qualified method.
+      const auto frameOf = [&](CellRef instance) -> CellRef {
+        const auto master = arena.cloneMaster(instance, core.dims().clone);
+        return master ? *master : noCell;
+      };
+      const auto skillRecord = [&](CellRef nameCell) -> CellRef {
+        if (const auto sym = eventSymbolNamed(arena, core, programRoot,
+                                              arena.textOf(nameCell)))
+          if (const auto v =
+                  arena.linked(*sym, core.dims().values, DimVector::POS))
+            return *v;
+        return noCell;
+      };
+      // A lifecycle clause runs like a handler body: the +d.step
+      // spine when the body carried host verbs, the +d.spin head
+      // otherwise.
+      const auto runLifecycle = [&](CellRef clause,
+                                    const std::vector<CellValue> &args) {
+        if (!zigzag::rankAfter(arena, clause, core.dims().step).empty()) {
+          (void)runSpine(clause, args);
+          return;
+        }
+        if (const auto spin =
+                arena.linked(clause, core.dims().spin, DimVector::POS))
+          (void)meta.runFragment(*spin, args, exec.cursor, maxCycles);
+      };
+      const auto uninstallFrame = [&](CellRef frame) {
+        // `on uninstall` replays the marshaled install args the frame
+        // kept — lifecycle bodies take the skill's parameters.
+        if (const auto rec = varsRecord(arena, core, frame, "skill", false))
+          if (const auto v =
+                  arena.linked(*rec, core.dims().values, DimVector::POS))
+            if (const auto ref = arena.asInt64(*v)) {
+              const auto skillRec = static_cast<CellRef>(*ref);
+              if (const auto h =
+                      varsRecord(arena, core, skillRec, "uninstall", false))
+                if (const auto clause =
+                        arena.linked(*h, core.dims().values, DimVector::POS)) {
+                  CellRef argCell = noCell;
+                  if (const auto p =
+                          varsRecord(arena, core, frame, "params", false))
+                    if (const auto pv = arena.linked(*p, core.dims().values,
+                                                     DimVector::POS))
+                      argCell = *pv;
+                  runLifecycle(*clause, argValuesOf(argCell));
+                }
+            }
+        for (const CellRef inst :
+             zigzag::rankAfter(arena, frame, core.dims().clone) |
+                 std::ranges::to<std::vector>()) {
+          unlinkRank(arena, inst, dims.skill);
+          if (arena.linked(inst, dims.capacity, DimVector::POS))
+            zigzag::expectWritten(
+                arena.unlink(inst, dims.capacity, DimVector::POS));
+          unlinkRank(arena, inst, core.dims().clone);
+        }
+      };
+      if (verb == "uninstall") {
+        const auto name = field("name");
+        if (name == noCell) return false;
+        for (const CellRef inst : zigzag::rankAfter(arena, agent, dims.skill) |
+                                      std::ranges::to<std::vector>()) {
+          const auto frame = frameOf(inst);
+          if (frame != noCell && arena.textOf(frame) == arena.textOf(name)) {
+            uninstallFrame(frame);
+            return true;
+          }
+        }
+        // Removing a skill that isn't installed is an honest no.
+        return false;
+      }
+      if (verb == "capcall") {
+        const auto cap     = field("capacity");
+        const auto method  = field("method");
+        const auto payload = field("payload");
+        if (cap == noCell || method == noCell || payload == noCell)
+          return false;
+        // §5.3: the call names the *capacity* — the agent's +d.skill
+        // instances yield the one whose +d.capacity matches, and the
+        // frame's skill name + method name pick the method head.
+        for (const CellRef inst : zigzag::rankAfter(arena, agent, dims.skill)) {
+          const auto cn = arena.linked(inst, dims.capacity, DimVector::POS);
+          if (!cn || arena.textOf(*cn) != arena.textOf(cap)) continue;
+          const auto frame = frameOf(inst);
+          if (frame == noCell) return false;
+          const auto sym = eventSymbolNamed(
+              arena, core, programRoot,
+              std::format("{}.{}", arena.textOf(frame), arena.textOf(method)));
+          if (!sym) return false;
+          const auto head =
+              arena.linked(*sym, core.dims().values, DimVector::POS);
+          if (!head) return false;
+          const auto outcome = meta.runFragment(*head, argValuesOf(payload),
+                                                exec.cursor, maxCycles);
+          if (outcome.refusal != MetaRunOutcome::Refusal::None ||
+              !outcome.produced || !outcome.result)
+            return false;
+          // `x := Cap.m(...)` — the produced value lands on the
+          // agent's vars under the bound name, the adopt convention.
+          if (const auto bound = field("result"); bound != noCell)
+            if (const auto rec =
+                    varsRecord(arena, core, agent, arena.textOf(bound), true))
+              storeVar(*rec, *outcome.result);
+          return true;
+        }
+        // Nothing installed provides the capacity — an honest refuse.
+        return false;
+      }
+      const auto payload = field("payload");
+      if (payload == noCell) return false;
+      const auto skillRec = skillRecord(payload);
+      if (skillRec == noCell) return false;
+      const auto capNames = zigzag::rankAfter(arena, skillRec, dims.capacity) |
+                            std::ranges::to<std::vector>();
+      std::set<std::string> caps;
+      for (const CellRef c : capNames) caps.emplace(arena.textOf(c));
+      std::set<CellRef> evict;
+      for (const CellRef inst : zigzag::rankAfter(arena, agent, dims.skill) |
+                                    std::ranges::to<std::vector>()) {
+        const auto frame = frameOf(inst);
+        if (frame == noCell) continue;
+        for (const CellRef peer :
+             zigzag::rankAfter(arena, frame, core.dims().clone)) {
+          const auto cn = arena.linked(peer, dims.capacity, DimVector::POS);
+          if (cn && caps.contains(std::string{arena.textOf(*cn)})) {
+            evict.insert(frame);
+            break;
+          }
+        }
+      }
+      for (const CellRef f : evict) uninstallFrame(f);
+      const auto frame = arena.makeCell(arena.textOf(payload));
+      if (const auto rec = varsRecord(arena, core, frame, "skill", true))
+        zigzag::expectWritten(arena.link(
+            *rec, core.dims().values, DimVector::POS,
+            arena.makeScalarCell(static_cast<std::int64_t>(skillRec))));
+      // The marshaled call term stays on the frame — `on uninstall`
+      // replays it for its own parameter binding.
+      if (const auto rec = varsRecord(arena, core, frame, "params", true))
+        zigzag::expectWritten(
+            arena.link(*rec, core.dims().values, DimVector::POS, payload));
+      const auto args = argValuesOf(payload);
+      if (const auto rec = varsRecord(arena, core, skillRec, "fields", false))
+        if (const auto list =
+                arena.linked(*rec, core.dims().values, DimVector::POS))
+          for (const CellRef slot :
+               zigzag::rankAfter(arena, *list, core.dims().step)) {
+            const auto frec =
+                varsRecord(arena, core, frame, arena.textOf(slot), true);
+            if (!frec) continue;
+            const auto head =
+                arena.linked(slot, core.dims().values, DimVector::POS);
+            if (!head) continue;
+            const auto outcome =
+                meta.runFragment(*head, args, exec.cursor, maxCycles);
+            // A refused or empty init leaves the slot standing —
+            // the same honesty rule as an uninitialised agent var.
+            if (outcome.refusal == MetaRunOutcome::Refusal::None &&
+                outcome.produced && outcome.result)
+              storeVar(*frec, *outcome.result);
+          }
+      for (const CellRef cn : capNames) {
+        const auto inst = arena.makeCell(arena.textOf(cn));
+        zigzag::expectWritten(
+            arena.link(zigzag::rankTail(arena, agent, dims.skill), dims.skill,
+                       DimVector::POS, inst));
+        zigzag::expectWritten(
+            arena.link(zigzag::rankTail(arena, frame, core.dims().clone),
+                       core.dims().clone, DimVector::POS, inst));
+        zigzag::expectWritten(arena.link(inst, dims.capacity, DimVector::POS,
+                                         arena.makeCell(arena.textOf(cn))));
+      }
+      if (const auto rec = varsRecord(arena, core, skillRec, "install", false))
+        if (const auto clause =
+                arena.linked(*rec, core.dims().values, DimVector::POS))
+          runLifecycle(*clause, args);
+      return true;
     }
     return false;
   };
@@ -871,8 +1069,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
   // fragment members through runFragment, host-step cells through the
   // verb table — in order, inside m0. `args` are the host call's
   // bound values — empty for `on` dispatch, the intention's for plans.
-  const auto runSpine = [&](CellRef clause,
-                            const std::vector<CellValue> &args) -> bool {
+  runSpine = [&](CellRef clause, const std::vector<CellValue> &args) -> bool {
     for (const CellRef member :
          zigzag::rankAfter(arena, clause, core.dims().step)) {
       if (arena.linked(member, dims.verb, DimVector::POS).has_value()) {

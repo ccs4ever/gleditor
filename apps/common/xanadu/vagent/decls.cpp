@@ -35,13 +35,14 @@ DeclDisposition declDisposition(DeclKind kind) noexcept {
   case DeclKind::Record:
   case DeclKind::Belief:
   case DeclKind::Question:
-    return DeclDisposition::Lower;
   case DeclKind::Skill:
   case DeclKind::Capacity:
+    return DeclDisposition::Lower;
   case DeclKind::Behavior:
   case DeclKind::Lifecycle:
     return DeclDisposition::Stub;
   case DeclKind::Uses:
+    return DeclDisposition::Lower;
   case DeclKind::Install:
   case DeclKind::BehaviorUse:
     return DeclDisposition::Refuse;
@@ -194,6 +195,8 @@ struct Lowerer {
     case ExprKind::Forget:
     case ExprKind::Revise:
     case ExprKind::Adopt:
+    case ExprKind::Install:
+    case ExprKind::Uninstall:
       return true;
     case ExprKind::Emit:
     case ExprKind::AwaitEvent:
@@ -212,19 +215,35 @@ struct Lowerer {
     }
   }
 
+  // A `Capacity.method(args)` call in statement position lowers as a
+  // host verb too — the `Ident.name` callee makes it syntactically
+  // unambiguous, and the runtime resolves the installed instance the
+  // capacity rides on. An unqualified `method(...)` keeps the scalar
+  // path: nothing here can tell it from an ordinary call.
+  static bool isCapacityCall(const Expr &expr) {
+    return expr.kind == ExprKind::Call && !expr.children.empty() &&
+           expr.children.front()->kind == ExprKind::Field &&
+           !expr.children.front()->children.empty() &&
+           expr.children.front()->children.front()->kind ==
+               ExprKind::Identifier;
+  }
+
   // The host verb a statement lowers to — the statement itself, or
   // the verb hoisted out of `x := <verb>` / `let x := <verb>`. The
   // two callers (the spine gate and the emitter) must agree on this
   // or a bound verb lowers as dead scalar code.
   static const Expr *hostVerbOf(const Expr &stmt) {
-    if (isHostVerb(stmt.kind)) return &stmt;
+    if (isHostVerb(stmt.kind) || isCapacityCall(stmt)) return &stmt;
+    const auto hoisted = [](const Expr &inner) {
+      return isHostVerb(inner.kind) || isCapacityCall(inner);
+    };
     if (stmt.kind == ExprKind::Binary && stmt.text == ":=" &&
         stmt.children.size() == 2 &&
         stmt.children[0]->kind == ExprKind::Identifier &&
-        isHostVerb(stmt.children[1]->kind))
+        hoisted(*stmt.children[1]))
       return stmt.children[1].get();
     if (stmt.kind == ExprKind::Let && stmt.children.size() == 1 &&
-        isHostVerb(stmt.children.front()->kind))
+        hoisted(*stmt.children.front()))
       return stmt.children.front().get();
     return nullptr;
   }
@@ -356,6 +375,34 @@ struct Lowerer {
   mintHostStep(const Expr &expr, const Decl &decl,
                const std::vector<Parameter> &params,
                std::string_view clauseName) {
+    // Capacity-qualified calls lower before the verb switch — Call is
+    // not a host-verb kind, the qualifier is what gave it away.
+    if (isCapacityCall(expr)) {
+      const Expr &callee = *expr.children.front();
+      const auto step    = arena.makeCell();
+      zigzag::expectWritten(arena.link(step, verbDim(), DimVector::POS,
+                                       arena.makeCell("capcall")));
+      const auto field = [&](std::string_view name, CellRef value) {
+        if (const auto rec = varsRecord(arena, core, step, name, true))
+          zigzag::expectWritten(
+              arena.link(*rec, dims().values, DimVector::POS, value));
+      };
+      field("capacity", arena.makeCell(callee.children.front()->text));
+      field("method", arena.makeCell(callee.text));
+      // Args marshal on a term cell named by the method — the
+      // executor's argValuesOf reads its +d.step children like every
+      // other staged payload.
+      const auto payload = arena.makeCell(callee.text);
+      for (std::size_t i = 1; i < expr.children.size(); ++i) {
+        auto arg = marshalArg(*expr.children[i]);
+        if (!arg) return std::unexpected(arg.error());
+        zigzag::expectWritten(
+            arena.link(zigzag::rankTail(arena, payload, dims().step),
+                       dims().step, DimVector::POS, *arg));
+      }
+      field("payload", payload);
+      return step;
+    }
     std::string_view verb;
     switch (expr.kind) {
     case ExprKind::Believe:
@@ -369,6 +416,12 @@ struct Lowerer {
       break;
     case ExprKind::Adopt:
       verb = "adopt";
+      break;
+    case ExprKind::Install:
+      verb = "install";
+      break;
+    case ExprKind::Uninstall:
+      verb = "uninstall";
       break;
     case ExprKind::Emit:
       verb = "emit";
@@ -539,6 +592,46 @@ struct Lowerer {
       };
       field("name", arena.makeCell(call.children.front()->text));
       if (expr.scope) field("scope", arena.makeCell(expr.scope->text));
+      return step;
+    }
+
+    // install S(args) — the call marshals as a payload term exactly
+    // like achieve's: functor is the skill name, +d.step children
+    // carry the install arguments the runtime binds to the skill's
+    // parameters when it seeds the frame.
+    if (expr.kind == ExprKind::Install) {
+      const auto &call = *expr.children.front();
+      if (call.children.empty() ||
+          call.children.front()->kind != ExprKind::Identifier)
+        return std::unexpected(
+            Diagnostic{DiagnosticCode::InvalidPosition,
+                       "install's operand is not a skill name", expr.loc});
+      auto payload = arena.makeCell(call.children.front()->text);
+      for (std::size_t i = 1; i < call.children.size(); ++i) {
+        auto arg = marshalArg(*call.children[i]);
+        if (!arg) return std::unexpected(arg.error());
+        zigzag::expectWritten(
+            arena.link(zigzag::rankTail(arena, payload, dims().step),
+                       dims().step, DimVector::POS, *arg));
+      }
+      const auto step = arena.makeCell();
+      zigzag::expectWritten(arena.link(step, verbDim(), DimVector::POS,
+                                       arena.makeCell(std::string{verb})));
+      if (const auto rec = varsRecord(arena, core, step, "payload", true))
+        zigzag::expectWritten(
+            arena.link(*rec, dims().values, DimVector::POS, payload));
+      return step;
+    }
+
+    // uninstall S — the bare skill name is the whole operand; the
+    // runtime finds the frame among the installed instances by it.
+    if (expr.kind == ExprKind::Uninstall) {
+      const auto step = arena.makeCell();
+      zigzag::expectWritten(arena.link(step, verbDim(), DimVector::POS,
+                                       arena.makeCell(std::string{verb})));
+      if (const auto rec = varsRecord(arena, core, step, "name", true))
+        zigzag::expectWritten(arena.link(*rec, dims().values, DimVector::POS,
+                                         arena.makeCell(expr.text)));
       return step;
     }
 
@@ -754,6 +847,23 @@ struct Lowerer {
   }
   DimRef verbDim_{zigzag::noCell};
 
+  // The skill-name prefix method members qualify under — "S" while a
+  // `skill S` decl lowers its members, empty elsewhere — and the
+  // capacity dim the descriptor's name rank rides.
+  std::string skillPrefix_;
+  DimRef capacityDim() {
+    if (capacityDim_ == zigzag::noCell)
+      capacityDim_ = core.findOrMintDimension("d.capacity");
+    return capacityDim_;
+  }
+  DimRef capacityDim_{zigzag::noCell};
+  DimRef usesDim() {
+    if (usesDim_ == zigzag::noCell)
+      usesDim_ = core.findOrMintDimension("d.uses");
+    return usesDim_;
+  }
+  DimRef usesDim_{zigzag::noCell};
+
   // Split the body at host-verb statements: each run of ordinary
   // statements lowers to one fragment segment, each verb to a host
   // step, and the sequence lands on clause +d.step — the spine the
@@ -936,8 +1046,6 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
     // complete even where the semantics are still deferred; the
     // Lifecycle member decl has no symbol shape to claim.
     switch (decl.kind) {
-    case DeclKind::Skill:
-    case DeclKind::Capacity:
     case DeclKind::Behavior:
       if (!symbols.contains(name)) mintSymbol(name);
       signatures.emplace(name, decl.parameters);
@@ -1242,22 +1350,29 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
       refuse(decl, std::format("'{}' declares no body", name));
       return;
     }
+    // A method inside `skill S` claims the qualified `S.m` symbol —
+    // §5.3's dispatch resolves skill methods by that name; an answer
+    // (never a skill member) keeps its flat name.
+    const std::string symName =
+        decl.kind == DeclKind::Method && !skillPrefix_.empty()
+            ? skillPrefix_ + "." + name
+            : std::string{name};
     // An answer legitimately shares its symbol — the matching
     // `question` decl minted it — while a `def` that lands on an
     // existing name is the collision the old check caught.
-    if (decl.kind == DeclKind::Method && symbols.contains(name)) {
-      refuse(decl, std::format("duplicate symbol '{}'", name));
+    if (decl.kind == DeclKind::Method && symbols.contains(symName)) {
+      refuse(decl, std::format("duplicate symbol '{}'", symName));
       return;
     }
     const auto head =
-        emitDeclHead(decl, *decl.body, decl.parameters, label(name),
+        emitDeclHead(decl, *decl.body, decl.parameters, label(symName),
                      decl.result.value_or(Type{"()"}), false);
     if (!head) {
       errors.push_back(head.error());
       return;
     }
     const auto sym =
-        symbols.contains(name) ? symbols[name] : mintSymbol(name);
+        symbols.contains(symName) ? symbols[symName] : mintSymbol(symName);
     zigzag::expectWritten(
         arena.link(sym, dims().values, DimVector::POS, *head));
     return;
@@ -1267,6 +1382,152 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
     // signature `ask` checks against — the runtime never runs it.
     if (!symbols.contains(name)) mintSymbol(name);
     signatures.emplace(name, decl.parameters);
+    return;
+  }
+  case DeclKind::Capacity: {
+    // Signatures only — §5.3's instance capacity-name matching reads
+    // the name off the skill's descriptor, not the capacity's image,
+    // and its bodiless method signatures are the checker's surface.
+    if (!symbols.contains(name)) mintSymbol(name);
+    signatures.emplace(name, decl.parameters);
+    return;
+  }
+  case DeclKind::Uses: {
+    // §5.3: the agent's +d.uses rank records one cell per imported
+    // capacity. The checker did the resolution; the rank is durable
+    // evidence of what the agent claimed to import.
+    if (!insideAgent || image.agentCell == noCell) {
+      refuse(decl, "'uses' lowers inside an agent only");
+      return;
+    }
+    for (const auto &used : decl.names)
+      zigzag::expectWritten(
+          arena.link(zigzag::rankTail(arena, image.agentCell, usesDim()),
+                     usesDim(), DimVector::POS, arena.makeCell(used)));
+    return;
+  }
+  case DeclKind::Skill: {
+    if (symbols.contains(name)) {
+      refuse(decl, std::format("duplicate symbol '{}'", name));
+      return;
+    }
+    const auto sym = mintSymbol(name);
+    signatures.emplace(name, decl.parameters);
+    // The descriptor `install` resolves at run time, riding the
+    // symbol's +d.values like a method head does: install params for
+    // positional binding, the closed capacity set (§5.3 counts
+    // capacities those extend as instances too) on +d.capacity, field
+    // initializers as heads taking the skill's own parameters, the
+    // native marker, and the on install/on uninstall bodies.
+    const auto rec = arena.makeCell(name);
+    zigzag::expectWritten(arena.link(sym, dims().values, DimVector::POS, rec));
+    if (!decl.parameters.empty()) {
+      const auto list = arena.makeCell("params");
+      for (const auto &p : decl.parameters)
+        zigzag::expectWritten(
+            arena.link(zigzag::rankTail(arena, list, dims().step), dims().step,
+                       DimVector::POS, arena.makeCell(p.name)));
+      if (const auto r = varsRecord(arena, core, rec, "params", true))
+        zigzag::expectWritten(
+            arena.link(*r, dims().values, DimVector::POS, list));
+    }
+    std::set<std::string> caps(decl.names.begin(), decl.names.end());
+    std::vector<std::string> work(decl.names.begin(), decl.names.end());
+    while (!work.empty()) {
+      const auto next = work.back();
+      work.pop_back();
+      for (const auto &d : program.declarations)
+        if (d.kind == DeclKind::Capacity && d.name == next)
+          for (const auto &base : d.names)
+            if (caps.insert(base).second) work.push_back(base);
+    }
+    for (const auto &cap : caps)
+      zigzag::expectWritten(
+          arena.link(zigzag::rankTail(arena, rec, capacityDim()), capacityDim(),
+                     DimVector::POS, arena.makeCell(cap)));
+    if (decl.native)
+      if (const auto r = varsRecord(arena, core, rec, "native", true))
+        zigzag::expectWritten(
+            arena.link(*r, dims().values, DimVector::POS,
+                       arena.makeScalarCell(std::int64_t{1})));
+    const std::string prevPrefix = skillPrefix_;
+    skillPrefix_                 = name;
+    for (const auto &member : decl.members) {
+      if (member.kind == DeclKind::Field) {
+        // The fields term's +d.step children: a name cell per var,
+        // +d.values → an init head taking the skill's parameters —
+        // install runs each against the call's arguments to seed the
+        // frame's vars records.
+        CellRef list = noCell;
+        if (const auto r = varsRecord(arena, core, rec, "fields", true)) {
+          if (const auto v = arena.linked(*r, dims().values, DimVector::POS))
+            list = *v;
+          else {
+            list = arena.makeCell("fields");
+            zigzag::expectWritten(
+                arena.link(*r, dims().values, DimVector::POS, list));
+          }
+        }
+        const auto slot = arena.makeCell(member.name);
+        zigzag::expectWritten(
+            arena.link(zigzag::rankTail(arena, list, dims().step), dims().step,
+                       DimVector::POS, slot));
+        if (member.initializer) {
+          auto head =
+              emitDeclHead(member, *member.initializer, decl.parameters,
+                           std::format("{}:field:{}", label(name), member.name),
+                           member.result.value_or(Type{"<any>"}), false);
+          if (!head) {
+            errors.push_back(head.error());
+            continue;
+          }
+          zigzag::expectWritten(
+              arena.link(slot, dims().values, DimVector::POS, *head));
+        }
+        continue;
+      }
+      if (member.kind == DeclKind::Lifecycle) {
+        if (!member.body) continue;
+        // Same clause shape a handler carries — +d.grab/+d.spin heads
+        // plus the +d.step spine when the body holds host verbs — so
+        // install/uninstall replay it through the executor's ordinary
+        // clause dispatch.
+        Expr trueGuard;
+        trueGuard.kind  = ExprKind::Boolean;
+        trueGuard.text  = "true";
+        trueGuard.loc   = member.loc;
+        const auto test = emitHead(
+            member, trueGuard, decl.parameters,
+            std::format("{}:{}:guard", label(name), member.name), Type{"Bool"});
+        if (!test) {
+          errors.push_back(test.error());
+          continue;
+        }
+        const auto body =
+            emitDeclHead(member, *member.body, decl.parameters,
+                         std::format("{}:{}:body", label(name), member.name),
+                         Type{"()"}, false);
+        if (!body) {
+          errors.push_back(body.error());
+          continue;
+        }
+        const auto clause = arena.makeCell();
+        zigzag::expectWritten(arena.link(clause, dims().name, DimVector::POS,
+                                         arena.makeCell(member.name)));
+        zigzag::expectWritten(
+            arena.link(clause, dims().grab, DimVector::POS, *test));
+        zigzag::expectWritten(
+            arena.link(clause, dims().spin, DimVector::POS, *body));
+        if (bodyHasHostVerb(*member.body))
+          emitSpine(member, clause, decl.parameters, member.name);
+        if (const auto r = varsRecord(arena, core, rec, member.name, true))
+          zigzag::expectWritten(
+              arena.link(*r, dims().values, DimVector::POS, clause));
+        continue;
+      }
+      lowerDecl(member, insideAgent);
+    }
+    skillPrefix_ = prevPrefix;
     return;
   }
   case DeclKind::Plan: {
