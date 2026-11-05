@@ -69,6 +69,15 @@ ML, epistemology, hardware and security, and the M1 reviewers check them against
 personas do not each run a separate round. This is about 30 reports for the remaining work, where
 the section 5 table implied more than 200.
 
+### 0.2 Records under the milestone rule
+
+- 2026-11-04: T1-D round 1 (ARCH FAIL 3 MAJOR, DIST FAIL 4 MAJOR; [reports](t1-review/)). Revision 2
+  resolves all seven; the lead verified the two code claims it rests on (`RemovedPredicate` absent
+  from `upgradeChangeRequiresRefusal`, two ingress scopes in `observe`). T1-D revision 2 is
+  accepted; T1 lands as T1a, T1b1, T1b2 and T1c (about 3,400 lines).
+- 2026-11-04: I4-D1 round 1 (ML FAIL 2 MAJOR, NUM FAIL 3 MAJOR; [reports](i4-d1-review/)). Revision
+  in progress; the ML MAJOR fixes return to the ML expert.
+
 ## 1. I3-2 round-2 decisions
 
 The items marked `DECISION` in [findings-r2.md](i3-2-review/findings-r2.md):
