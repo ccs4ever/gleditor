@@ -371,6 +371,31 @@ public:
   selectClause(CellRef host, const std::unordered_set<CellRef> &tried = {},
                std::size_t whereFuel = 256);
 
+  // -- §3.5 intentions — data, not cursors
+  // --------------------------------------
+  //
+  // An intention is a record cell on the agent's `+d.intention` rank —
+  // the spec'd closed schema {id,kind,goal,plan,tried,step,waiting,
+  // ready,blocked_until,faulted,frame,delegator} as `d.vars` fields —
+  // plus `bodyName`, the registered-head name §3.5's resume identity
+  // checks against `plan`'s `+d.spin` target on every resume.
+  //
+  // `adoptGoal` selects (§3.4's order, empty tried-set — a fresh
+  // adoption retries everything) and mints the record: `ready=1`,
+  // `step=0`, the `bodyName` snapshot taken at adoption. `std::nullopt`
+  // when no clause holds; the caller bounds concurrent intentions
+  // (`vagent.max_intentions`) since the verb sees no settings.
+  [[nodiscard]] std::expected<CellRef, std::string>
+  adoptGoal(CellRef goal, std::int64_t turn, std::size_t whereFuel = 256);
+  /// The intention record's integer field — `step`, `ready`, `faulted`,
+  /// `waiting`, `blocked_until`, `id` — absent field is `std::nullopt`.
+  [[nodiscard]] std::optional<std::int64_t>
+  intentionField(CellRef intention, std::string_view field) const;
+  /// Mint-and-repoint the integer field — the serial idiom, never an
+  /// in-place scalar write.
+  void setIntentionField(CellRef intention, std::string_view field,
+                         std::int64_t value);
+
   /// `reify(c)`'s recipe replay (§6.1): walks the head's `+d.recipe`
   /// chain — `(from, dim, dir, to)` tuples anchored on the `+d.name`-
   /// bearing `dim` member, literal-content members, `+d.refFor` ref-

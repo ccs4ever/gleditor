@@ -980,6 +980,90 @@ MetaRuntime::selectClause(CellRef host,
 }
 
 // ---------------------------------------------------------------------------
+// Intentions — §3.5's records, not cursors
+// ---------------------------------------------------------------------------
+
+std::optional<std::int64_t>
+MetaRuntime::intentionField(CellRef intention, std::string_view field) const {
+  const auto record = varsRecord(intention, field, /*mint=*/false);
+  if (!record) return std::nullopt;
+  const auto value = arena().linked(*record, core_.dims().values, Posward);
+  if (!value) return std::nullopt;
+  return arena().asInt64(*value);
+}
+
+void MetaRuntime::setIntentionField(CellRef intention, std::string_view field,
+                                    std::int64_t value) {
+  auto &arena    = core_.arena();
+  const auto rec = varsRecord(intention, field, /*mint=*/true);
+  if (!rec) return;
+  // Mint-and-repoint, never an in-place scalar write — content restates
+  // only under ShadowCommit::Values, which nothing opts into.
+  if (const auto old = arena.linked(*rec, core_.dims().values, Posward))
+    zigzag::expectWritten(arena.unlink(*rec, core_.dims().values, Posward));
+  zigzag::expectWritten(arena.link(*rec, core_.dims().values, Posward,
+                                   arena.makeScalarCell(value)));
+}
+
+std::expected<CellRef, std::string>
+MetaRuntime::adoptGoal(CellRef goal, std::int64_t turn, std::size_t whereFuel) {
+  auto &arena = core_.arena();
+  if (binds_.agentCell == noCell)
+    return std::unexpected("adopt: no agent cell bound");
+
+  const auto picked = selectClause(goal, {}, whereFuel);
+  if (!picked) return std::unexpected(picked.error());
+  if (!picked->has_value())
+    return std::unexpected(
+        "adopt: no clause on the goal's bank holds — the tried-set "
+        "and where-guards exhausted selection");
+  const auto clause = **picked;
+
+  // §3.5's resume identity: the registered-head name of the clause's
+  // body head, snapshotted at adoption — a grafted or pruned body
+  // re-points +d.spin and the names diverge, which resume reads as
+  // body_replaced, never a silent wrong-statement resume.
+  std::string bodyName;
+  if (const auto head = arena.linked(clause, core_.dims().spin, Posward))
+    if (const auto name = arena.linked(*head, core_.dims().name, Posward))
+      bodyName = arena.textOf(*name);
+
+  const auto serial = nextSerial();
+  if (!serial) return std::unexpected(serial.error());
+
+  const auto intention = arena.makeCell();
+  const auto intentDim = core_.findOrMintDimension("d.intention");
+  zigzag::expectWritten(
+      arena.link(zigzag::rankTail(arena, binds_.agentCell, intentDim),
+                 intentDim, Posward, intention));
+
+  const auto field = [&](std::string_view name, CellRef value) {
+    if (const auto rec = varsRecord(intention, name, /*mint=*/true))
+      zigzag::expectWritten(
+          arena.link(*rec, core_.dims().values, Posward, value));
+  };
+  const auto intField = [&](std::string_view name, std::int64_t v) {
+    field(name, arena.makeScalarCell(v));
+  };
+
+  intField("id", *serial);
+  field("kind", arena.makeCell("adopt"));
+  field("goal", goal);
+  field("plan", clause);
+  field("tried", arena.makeCell());
+  intField("step", 0);
+  intField("waiting", 0);
+  intField("ready", 1);
+  intField("blocked_until", 0);
+  intField("faulted", 0);
+  intField("frame", 0);
+  intField("delegator", 0);
+  field("bodyName", arena.makeCell(bodyName));
+  field("adoptedTurn", arena.makeScalarCell(turn));
+  return intention;
+}
+
+// ---------------------------------------------------------------------------
 // reify — the +d.recipe replay
 // ---------------------------------------------------------------------------
 

@@ -188,6 +188,7 @@ struct Lowerer {
     case ExprKind::Believe:
     case ExprKind::Forget:
     case ExprKind::Revise:
+    case ExprKind::Adopt:
       return true;
     default:
       return false;
@@ -255,6 +256,9 @@ struct Lowerer {
     case ExprKind::Revise:
       verb = "revise";
       break;
+    case ExprKind::Adopt:
+      verb = "adopt";
+      break;
     default:
       return std::unexpected(Diagnostic{DiagnosticCode::InvalidPosition,
                                         "statement is not a host verb",
@@ -264,12 +268,30 @@ struct Lowerer {
       return std::unexpected(Diagnostic{DiagnosticCode::InvalidPosition,
                                         std::format("{} carries no term", verb),
                                         expr.loc});
-    auto term = marshalTerm(*expr.children.front());
-    if (!term) return term;
 
     const auto step = arena.makeCell();
     zigzag::expectWritten(arena.link(step, verbDim(), DimVector::POS,
                                      arena.makeCell(std::string{verb})));
+
+    if (expr.kind == ExprKind::Adopt) {
+      // adopt's operand is a Call — children[0] is the goal's
+      // Identifier; the goal *name* marshals, resolution happens at
+      // run time against the agent's own module.
+      const auto &call = *expr.children.front();
+      if (call.children.empty() ||
+          call.children.front()->kind != ExprKind::Identifier)
+        return std::unexpected(Diagnostic{DiagnosticCode::InvalidPosition,
+                                          "adopt's operand is not a goal name",
+                                          expr.loc});
+      if (const auto rec = varsRecord(arena, core, step, "goal", true))
+        zigzag::expectWritten(
+            arena.link(*rec, dims().values, DimVector::POS,
+                       arena.makeCell(call.children.front()->text)));
+      return step;
+    }
+
+    auto term = marshalTerm(*expr.children.front());
+    if (!term) return term;
     if (const auto rec = varsRecord(arena, core, step, "term", true))
       zigzag::expectWritten(
           arena.link(*rec, dims().values, DimVector::POS, *term));

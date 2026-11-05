@@ -295,6 +295,39 @@ TEST(VagentSelectTest, WeightsOrderSelectionAndTriedSkips) {
   EXPECT_FALSE(picked->has_value());
 }
 
+TEST(VagentExecutorTest, AdoptMintsAnIntentionAndRunsItsSpine) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image =
+      h.lower("module demo\nevent Tick\npredicate weather(s: Str)\n"
+              "goal Work() perform\n"
+              "agent A {\n"
+              "  on Tick { adopt Work() }\n"
+              "  plan w for Work { believe weather(\"fog\") }\n"
+              "}");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+
+  const auto outcome = exec(h.execution("Tick"), h.ctx);
+  ASSERT_TRUE(outcome) << static_cast<int>(outcome.error());
+
+  // The adopt host step minted the intention; settle ran the plan's
+  // one-member spine — the belief landed, and the intention retired.
+  auto binds =
+      mintMetaBindSet(arena, h.ctx.core, h.ctx.core.home(), image->agentCell);
+  ASSERT_TRUE(binds) << binds.error();
+  MetaRuntime meta(h.ctx.core, h.ctx.vm, *binds);
+  EXPECT_TRUE(meta.believes("weather", [&] {
+    const auto t = arena.makeCell("weather");
+    zigzag::expectWritten(arena.link(t, h.ctx.core.dims().step, DimVector::POS,
+                                     arena.makeCell("fog")));
+    return t;
+  }()));
+  const auto intentDim = h.ctx.core.findOrMintDimension("d.intention");
+  EXPECT_TRUE(zigzag::rankAfter(arena, image->agentCell, intentDim).empty());
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
 // -- §3.1/§3.8 belief store: predicate banks, provenance, the four verbs ------
 
 TEST(VagentBeliefTest, BelieveBelievesForgetReviseRoundTrip) {

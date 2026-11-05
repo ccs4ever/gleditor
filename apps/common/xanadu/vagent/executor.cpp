@@ -180,12 +180,34 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
   const auto runHostStep = [&](CellRef step) -> bool {
     const auto verbCell = arena.linked(step, dims.verb, DimVector::POS);
     if (!verbCell) return false;
-    const auto verb = arena.textOf(*verbCell);
-    CellRef term    = noCell;
-    if (const auto rec = varsRecord(arena, core, step, "term", false))
-      if (const auto value =
-              arena.linked(*rec, core.dims().values, DimVector::POS))
-        term = *value;
+    const auto verb  = arena.textOf(*verbCell);
+    const auto field = [&](std::string_view name) -> CellRef {
+      if (const auto rec = varsRecord(arena, core, step, name, false))
+        if (const auto value =
+                arena.linked(*rec, core.dims().values, DimVector::POS))
+          return *value;
+      return noCell;
+    };
+    if (verb == "adopt") {
+      const auto goalName = field("goal");
+      if (goalName == noCell) return false;
+      const auto goal =
+          eventSymbolNamed(arena, core, programRoot, arena.textOf(goalName));
+      if (!goal) return false;
+      // Concurrent-intention bound — the verb sees no settings, so the
+      // caller enforces the rank-size cap here.
+      const auto live = zigzag::rankAfter(arena, agent, dims.intention) |
+                        std::ranges::to<std::vector>();
+      if (live.size() >=
+          static_cast<std::size_t>(setting("vagent.max_intentions", 32)))
+        return false;
+      return meta
+          .adoptGoal(*goal, turn,
+                     static_cast<std::size_t>(
+                         setting("vagent.condition_turn_fuel", 256)))
+          .has_value();
+    }
+    const auto term = field("term");
     if (term == noCell) return false;
     const auto pred = arena.textOf(term);
     if (verb == "believe")
@@ -269,6 +291,95 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
     const auto name = std::string{arena.textOf(*head)};
     unlinkRank(arena, *head, dims.pending);
     if (!dispatchEvent(name)) return failTurn();
+  }
+
+  // §3.5: ready intentions advance one spine step per settle — record
+  // stepping, never cursor state. body_replaced is checked against the
+  // adoption-time +d.spin name before any member runs.
+  for (const CellRef intention :
+       zigzag::rankAfter(arena, agent, dims.intention) |
+           std::ranges::to<std::vector>()) {
+    const auto ready   = meta.intentionField(intention, "ready").value_or(0);
+    const auto faulted = meta.intentionField(intention, "faulted").value_or(0);
+    const auto blockedTill =
+        meta.intentionField(intention, "blocked_until").value_or(0);
+    if (ready == 0 || faulted != 0 || blockedTill > turn) continue;
+
+    const auto planCell = [&]() -> CellRef {
+      if (const auto rec = varsRecord(arena, core, intention, "plan", false))
+        if (const auto v =
+                arena.linked(*rec, core.dims().values, DimVector::POS))
+          return *v;
+      return noCell;
+    }();
+    const auto bodyName = [&]() -> std::string {
+      if (const auto rec =
+              varsRecord(arena, core, intention, "bodyName", false))
+        if (const auto v =
+                arena.linked(*rec, core.dims().values, DimVector::POS))
+          return std::string{arena.textOf(*v)};
+      return {};
+    }();
+    if (planCell == noCell) {
+      meta.setIntentionField(intention, "faulted", 1);
+      continue;
+    }
+    // body_replaced: the clause's +d.spin target re-pointed since
+    // adoption — graft/prune — so resume refuses silently running the
+    // wrong segment.
+    std::string liveName;
+    if (const auto head =
+            arena.linked(planCell, core.dims().spin, DimVector::POS))
+      if (const auto name =
+              arena.linked(*head, core.dims().name, DimVector::POS))
+        liveName = std::string{arena.textOf(*name)};
+    if (liveName != bodyName) {
+      meta.setIntentionField(intention, "faulted", 1);
+      continue;
+    }
+
+    const auto spine   = zigzag::rankAfter(arena, planCell, core.dims().step) |
+                         std::ranges::to<std::vector>();
+    const auto stepIdx = static_cast<std::size_t>(
+        meta.intentionField(intention, "step").value_or(0));
+    bool ok = true;
+    if (spine.empty()) {
+      // A single-fragment clause: step 0 runs the spin head, then
+      // the intention retires.
+      if (stepIdx == 0) {
+        const auto head =
+            arena.linked(planCell, core.dims().spin, DimVector::POS);
+        if (!head) {
+          meta.setIntentionField(intention, "faulted", 1);
+          continue;
+        }
+        const auto outcome =
+            meta.runFragment(*head, {}, exec.cursor, maxCycles);
+        ok = outcome.refusal == MetaRunOutcome::Refusal::None;
+      }
+    } else if (stepIdx < spine.size()) {
+      const auto member = spine[stepIdx];
+      if (arena.linked(member, dims.verb, DimVector::POS).has_value())
+        ok = runHostStep(member);
+      else {
+        const auto outcome =
+            meta.runFragment(member, {}, exec.cursor, maxCycles);
+        ok = outcome.refusal == MetaRunOutcome::Refusal::None;
+      }
+    }
+    if (!ok) {
+      meta.setIntentionField(intention, "faulted", 1);
+      continue;
+    }
+    const auto next = stepIdx + 1;
+    if (next >= std::max<std::size_t>(spine.size(), 1)) {
+      // The body's last member ran — the intention retires; the
+      // record drops off +d.intention cleanly.
+      unlinkRank(arena, intention, dims.intention);
+    } else {
+      meta.setIntentionField(intention, "step",
+                             static_cast<std::int64_t>(next));
+    }
   }
 
   // Success: cut(0) drops the base CP too, discard(m0) keeps the turn.
