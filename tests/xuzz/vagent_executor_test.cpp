@@ -655,6 +655,49 @@ TEST(VagentExecutorTest, TellStagesACrossAgentAssertionInTheOutbox) {
   EXPECT_EQ(h.ctx.arena.outstandingMarks(), 0u);
 }
 
+TEST(VagentExecutorTest, ToldFactAssertsInTheReceiversOwnTurn) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image =
+      h.lower("module demo\nevent Tick\n"
+              "predicate reading(s: Str, v: Int)\n"
+              "agent A { on Tick { tell self reading(\"left\", 4) } }");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+
+  // `tell self` resolves the implicit to A's member name at stage
+  // time; route → deliver stages the inbox record; the receiver's
+  // own settle asserts the fact.
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  const auto outbox =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  ASSERT_EQ(outbox.size(), 1u);
+  EXPECT_EQ(outbox[0].target, "A");
+  const auto deliveries = VagentExecutor::route(
+      arena, h.ctx.core, h.ctx.core.home(), outbox.front());
+  ASSERT_EQ(deliveries.size(), 1u);
+  EXPECT_EQ(deliveries.front().kind, "tell");
+  exec.deliver(arena, h.ctx.core, deliveries.front());
+
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+  auto binds =
+      mintMetaBindSet(arena, h.ctx.core, h.ctx.core.home(), image->agentCell);
+  ASSERT_TRUE(binds) << binds.error();
+  MetaRuntime meta(h.ctx.core, h.ctx.vm, *binds);
+  const auto facts = meta.beliefsOf("reading");
+  ASSERT_EQ(facts.size(), 1u);
+  const auto grab =
+      arena.linked(facts[0], h.ctx.core.dims().grab, DimVector::POS);
+  ASSERT_TRUE(grab.has_value());
+  EXPECT_EQ(arena.textOf(*grab), "reading");
+  const auto args = zigzag::rankAfter(arena, *grab, h.ctx.core.dims().step) |
+                    std::ranges::to<std::vector>();
+  ASSERT_EQ(args.size(), 2u);
+  EXPECT_EQ(arena.textOf(args[0]), "left");
+  EXPECT_EQ(arena.textOf(args[1]), "4");
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
 TEST(VagentExecutorTest, BoundAdoptAndDropTaskRoundTripTheHandle) {
   ExecutorHarness h;
   VagentExecutor exec;
@@ -825,11 +868,15 @@ TEST(VagentExecutorTest, BoundAskWakesOnDeliveredAnswerAndBindsIt) {
       VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell).size(),
       1u);
 
-  // The adapter's answer lands through route's write half: a journal
-  // entry plus a pending trigger on the receiver's own ranks — no
-  // receiver state touched inside the sender's turn.
+  // The adapter's answer lands through route's write half — a
+  // correlated journal entry plus a pending trigger on the
+  // receiver's own ranks; the correlation is the request's outbox id.
+  const auto request =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
   exec.deliver(arena, h.ctx.core,
-               Delivery{.agent = image->agentCell, .percept = "stock"});
+               Delivery{.agent       = image->agentCell,
+                        .percept     = "stock",
+                        .correlation = request.front().id});
   ASSERT_TRUE(exec(h.execution(), h.ctx));
 
   // The seen entry matched the parked ask, the pending entry
@@ -932,10 +979,23 @@ TEST(VagentExecutorTest, AskStagesTheQuestionAndWakesOnTheAnswer) {
                 .size(),
             1u);
 
-  // Turn 2 — the adapter's answer arrives journaled under the
-  // question's name (the question symbol's empty clause bank
-  // dispatches nothing); the wake resumes the spine into emit.
-  ASSERT_TRUE(exec(h.execution("stock"), h.ctx));
+  // Turn 2 — the adapter's answer echoes the request id as its
+  // correlation; an uncorrelated same-named percept does NOT wake
+  // the asker first.
+  exec.deliver(arena, h.ctx.core,
+               Delivery{.agent = image->agentCell, .percept = "stock"});
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+  ASSERT_EQ((zigzag::rankAfter(arena, image->agentCell, iDim) |
+             std::ranges::to<std::vector>())
+                .size(),
+            1u)
+      << "uncorrelated percept must not wake the correlated ask";
+
+  exec.deliver(arena, h.ctx.core,
+               Delivery{.agent       = image->agentCell,
+                        .percept     = "stock",
+                        .correlation = outbox[0].id});
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
   const auto after =
       VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
   ASSERT_EQ(after.size(), 2u);

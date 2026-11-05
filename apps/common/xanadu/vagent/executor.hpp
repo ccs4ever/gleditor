@@ -34,6 +34,13 @@ struct OutboxEntry {
   std::string id;
   // `in`'s delivery scope — empty when the emit named none.
   std::string scope;
+  // The staged record's payload cell — the marshaled term with its
+  // +d.step field children, which tell/untell deliveries re-assert
+  // receiver-side. noCell when the field is absent.
+  zigzag::CellRef payloadCell{zigzag::noCell};
+  // The agent whose outbox the entry drained from — the provenance
+  // peer a delivered fact cites.
+  zigzag::CellRef sender{zigzag::noCell};
 };
 
 /// One staged delivery the adapter owes a receiver: the directory-
@@ -43,6 +50,17 @@ struct OutboxEntry {
 struct Delivery {
   zigzag::CellRef agent{zigzag::noCell};
   std::string percept;
+  // The staged record's kind — "tell"/"untell" deliver as receiver
+  // inbox records (belief effects), everything else as a percept.
+  std::string kind;
+  // The marshaled payload term — carried for tell/untell so the
+  // receiver asserts the same fact cell the sender marshaled.
+  zigzag::CellRef payloadCell{zigzag::noCell};
+  // The answer's correlation token — for kind "ask" the request
+  // entry's id, echoed onto the journal cell's `correlation` record.
+  std::string correlation;
+  // The sender's member cell — the belief's +d.source peer.
+  zigzag::CellRef sender{zigzag::noCell};
 };
 
 class VagentExecutor {

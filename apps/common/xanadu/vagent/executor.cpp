@@ -179,7 +179,8 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
   // deterministic idempotence triple so a duplicate drain is
   // detectable by key rather than by cell identity.
   const auto stageOutbox = [&](std::string_view kind, CellRef payload,
-                               CellRef target, CellRef scope = noCell) {
+                               CellRef target,
+                               CellRef scope = noCell) -> std::string {
     const auto position = std::ranges::to<std::vector>(
                               zigzag::rankAfter(arena, agent, dims.outbox))
                               .size();
@@ -199,9 +200,31 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
     outField("payload", payload);
     outField("target", target);
     if (scope != noCell) outField("scope", scope);
-    outField("id", arena.makeCell(std::format("{}:{}:{}",
-                                              std::hash<std::string>{}(sender),
-                                              turn, position)));
+    const auto id = std::format("{}:{}:{}", std::hash<std::string>{}(sender),
+                                turn, position);
+    outField("id", arena.makeCell(id));
+    return id;
+  };
+
+  // A marshaled peer/target name cell → the directory member name the
+  // outbox should carry: `self` resolves to the running agent's
+  // member, a bound vars name resolves through the handle the hoist
+  // wrote, anything else stays literal. Returns the resolved *cell*
+  // so stageOutbox can link it — never just the text.
+  const auto resolvePeer = [&](CellRef nameCell) -> CellRef {
+    if (nameCell == noCell) return noCell;
+    const auto want = arena.textOf(nameCell);
+    CellRef holder  = noCell;
+    if (want == "self") {
+      holder = agent;
+    } else if (const auto rec = varsRecord(arena, core, agent, want, false)) {
+      if (const auto v = arena.linked(*rec, core.dims().values, DimVector::POS))
+        if (const auto ref = arena.asInt64(*v))
+          holder = static_cast<CellRef>(*ref);
+    }
+    if (holder == noCell) return nameCell;
+    const auto n = arena.linked(holder, core.dims().name, DimVector::POS);
+    return n ? *n : nameCell;
   };
 
   // The fault arm of §3.5's ladder: count the fault and park for the
@@ -265,32 +288,15 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       if (payload == noCell) return false;
       // in names the scope, for the recipients; an untargeted emit
       // keeps the schema's 0 — the adapter reads a text target as a
-      // delivery address, 0 as broadcast/self. `for <bound var>`
-      // resolves the handle now: the record carries a directory
-      // address, not a sender-local var name that only this agent's
-      // env could dereference. `self` names the sender's member.
+      // delivery address, 0 as broadcast/self. resolvePeer turns
+      // `for <bound var>`/`self` into the member name the record
+      // must carry — a sender-local binding has no meaning off-agent.
       const auto target = field("target");
       const auto scope  = field("scope");
-      CellRef address =
-          target != noCell ? target : arena.makeScalarCell(std::int64_t{0});
-      if (target != noCell) {
-        const auto want = arena.textOf(target);
-        CellRef holder  = noCell;
-        if (want == "self") {
-          holder = agent;
-        } else if (const auto rec =
-                       varsRecord(arena, core, agent, want, false)) {
-          if (const auto v =
-                  arena.linked(*rec, core.dims().values, DimVector::POS))
-            if (const auto ref = arena.asInt64(*v))
-              holder = static_cast<CellRef>(*ref);
-        }
-        if (holder != noCell)
-          if (const auto n =
-                  arena.linked(holder, core.dims().name, DimVector::POS))
-            address = *n;
-      }
-      stageOutbox("emit", payload, address, scope);
+      stageOutbox("emit", payload,
+                  target != noCell ? resolvePeer(target)
+                                   : arena.makeScalarCell(std::int64_t{0}),
+                  scope);
       return true;
     }
     if (verb == "tell" || verb == "untell") {
@@ -300,7 +306,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       const auto peer    = field("peer");
       const auto payload = field("payload");
       if (peer == noCell || payload == noCell) return false;
-      stageOutbox(verb, payload, peer);
+      stageOutbox(verb, payload, resolvePeer(peer));
       return true;
     }
     if (verb == "stop") {
@@ -411,7 +417,16 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
         return false;
       const auto turns = arena.asInt64(deadline);
       if (!turns) return false;
-      stageOutbox("ask", payload, peer);
+      // The staged entry's id is the request's correlation token: the
+      // adapter echoes it on the answer's journal cell, and the wake
+      // match requires it — two outstanding `stock` asks can no
+      // longer cross-resolve.
+      const auto requestId = stageOutbox("ask", payload, resolvePeer(peer));
+      if (const auto rec =
+              varsRecord(arena, core, intention, "awaitCorr", true))
+        zigzag::expectWritten(arena.link(*rec, core.dims().values,
+                                         DimVector::POS,
+                                         arena.makeCell(requestId)));
       // awaitEvent must not reuse the payload cell: -d.values pairs
       // one inbound neighbor per cell, so a second link here would
       // evict the outbox entry's payload edge (the +d.holder finding,
@@ -477,7 +492,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       const auto goalName = field("goal");
       if (goalName == noCell) return false;
       if (const auto peer = field("peer"); peer != noCell) {
-        stageOutbox("achieve", goalName, peer);
+        stageOutbox("achieve", goalName, resolvePeer(peer));
         meta.setIntentionField(intention, "delegated", 1);
         meta.setIntentionField(intention, "ready", 0);
         const auto dl      = field("deadline");
@@ -613,6 +628,40 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
     if (!dispatchEvent(name)) return failTurn();
   }
 
+  // The receiver half of tell/untell: each +d.inbox record is a
+  // cross-agent assertion the adapter staged — the belief mutation
+  // happens here, in the receiver's own turn, with the sender's
+  // member cell as the +d.source peer. Same bounded drain shape as
+  // pending.
+  {
+    const auto inboxDim = core.findOrMintDimension("d.inbox");
+    for (std::size_t drained = 0; !agentStopped && drained < drainBound;
+         ++drained) {
+      std::optional<CellRef> head;
+      for (const CellRef cell : zigzag::rankAfter(arena, agent, inboxDim)) {
+        head = cell;
+        break;
+      }
+      if (!head) break;
+      const auto kind = arena.linked(*head, dims.verb, DimVector::POS);
+      const auto term = arena.linked(*head, core.dims().grab, DimVector::POS);
+      unlinkRank(arena, *head, inboxDim);
+      if (!kind || !term) continue;
+      CellRef sender = agent;
+      if (const auto rec = varsRecord(arena, core, *head, "sender", false))
+        if (const auto v =
+                arena.linked(*rec, core.dims().values, DimVector::POS))
+          if (const auto ref = arena.asInt64(*v))
+            sender = static_cast<CellRef>(*ref);
+      const auto pred = arena.textOf(*term);
+      if (arena.textOf(*kind) == "untell") {
+        (void)meta.forget(pred, *term);
+      } else if (!meta.believe(pred, *term, sender, turn)) {
+        return failTurn();
+      }
+    }
+  }
+
   // The intention's goal symbol, or noCell when the record lacks one.
   const auto goalOf = [&](CellRef i) -> CellRef {
     if (const auto rec = varsRecord(arena, core, i, "goal", false))
@@ -665,15 +714,32 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       CellRef matchCell = noCell;
       if (awaitEvent != noCell) {
         const auto wanted = arena.textOf(awaitEvent);
+        // awaitCorr narrows the match to the answer carrying this
+        // request's id — the adapter echoes the outbox entry's id on
+        // the journal cell's `correlation` record.
+        std::string corr;
+        if (const auto rec =
+                varsRecord(arena, core, intention, "awaitCorr", false))
+          if (const auto v =
+                  arena.linked(*rec, core.dims().values, DimVector::POS))
+            corr = std::string{arena.textOf(*v)};
         for (const CellRef percept :
              zigzag::rankAfter(arena, agent, dims.seen)) {
-          if (arena.textOf(percept) == wanted) {
-            zigzag::expectWritten(
-                arena.link(intention, dims.evidence, DimVector::POS, percept));
-            matched   = true;
-            matchCell = percept;
-            break;
+          if (arena.textOf(percept) != wanted) continue;
+          if (!corr.empty()) {
+            bool same = false;
+            if (const auto prec =
+                    varsRecord(arena, core, percept, "correlation", false))
+              if (const auto v =
+                      arena.linked(*prec, core.dims().values, DimVector::POS))
+                same = arena.textOf(*v) == corr;
+            if (!same) continue;
           }
+          zigzag::expectWritten(
+              arena.link(intention, dims.evidence, DimVector::POS, percept));
+          matched   = true;
+          matchCell = percept;
+          break;
         }
       }
       if (matched) {
@@ -916,11 +982,19 @@ VagentExecutor::drainOutbox(zigzag::ArenaManifold &arena,
       const auto value = arena.linked(*rec, core.dims().values, DimVector::POS);
       return value ? std::string{arena.textOf(*value)} : std::string{};
     };
-    entries.push_back(OutboxEntry{.kind    = read("kind"),
-                                  .target  = read("target"),
-                                  .payload = read("payload"),
-                                  .id      = read("id"),
-                                  .scope   = read("scope")});
+    const auto payloadCell = [&]() -> CellRef {
+      const auto rec = varsRecord(arena, core, entry, "payload", false);
+      if (!rec) return noCell;
+      const auto value = arena.linked(*rec, core.dims().values, DimVector::POS);
+      return value ? *value : noCell;
+    }();
+    entries.push_back(OutboxEntry{.kind        = read("kind"),
+                                  .target      = read("target"),
+                                  .payload     = read("payload"),
+                                  .id          = read("id"),
+                                  .scope       = read("scope"),
+                                  .payloadCell = payloadCell,
+                                  .sender      = agent});
   }
   return entries;
 }
@@ -950,8 +1024,11 @@ std::vector<Delivery> VagentExecutor::route(zigzag::ArenaManifold &arena,
       if (const auto n = arena.linked(member, core.dims().name, DimVector::POS))
         name = std::string{arena.textOf(*n)};
       if (entry.target == "0" || entry.target.empty() || name == entry.target)
-        deliveries.push_back(
-            Delivery{.agent = member, .percept = entry.payload});
+        deliveries.push_back(Delivery{.agent       = member,
+                                      .percept     = entry.payload,
+                                      .kind        = entry.kind,
+                                      .payloadCell = entry.payloadCell,
+                                      .sender      = entry.sender});
     }
   return deliveries;
 }
@@ -959,14 +1036,45 @@ std::vector<Delivery> VagentExecutor::route(zigzag::ArenaManifold &arena,
 void VagentExecutor::deliver(zigzag::ArenaManifold &arena,
                              zigzag::vortex::VortexCore &core,
                              const Delivery &delivery) const {
-  if (delivery.agent == noCell || delivery.percept.empty()) return;
+  if (delivery.agent == noCell) return;
+
+  if (delivery.kind == "tell" || delivery.kind == "untell") {
+    // A cross-agent assertion isn't a percept — it lands as an inbox
+    // record the receiver's own settle asserts/retracts. The term
+    // rides +d.grab and the kind rides +d.verb, because the payload
+    // cell's -d.values inbound is already taken by the sender's
+    // outbox field — a second +d.values link would evict it.
+    const auto inbox  = core.findOrMintDimension("d.inbox");
+    const auto record = arena.makeCell();
+    zigzag::expectWritten(
+        arena.link(zigzag::rankTail(arena, delivery.agent, inbox), inbox,
+                   DimVector::POS, record));
+    zigzag::expectWritten(arena.link(record, core.findOrMintDimension("d.verb"),
+                                     DimVector::POS,
+                                     arena.makeCell(delivery.kind)));
+    if (delivery.payloadCell != noCell)
+      zigzag::expectWritten(arena.link(record, core.dims().grab, DimVector::POS,
+                                       delivery.payloadCell));
+    if (delivery.sender != noCell)
+      if (const auto rec = varsRecord(arena, core, record, "sender", true))
+        zigzag::expectWritten(arena.link(
+            *rec, core.dims().values, DimVector::POS,
+            arena.makeScalarCell(static_cast<std::int64_t>(delivery.sender))));
+    return;
+  }
+
+  if (delivery.percept.empty()) return;
   // The message path's two effects, split for adapter staging: the
   // journal entry is what a parked await/ask matches against, the
   // pending entry is what the receiver's settle dispatches. Pending
   // stays journal-free for internal events — delivery journals
   // explicitly instead.
-  journalAppend(arena, delivery.agent, arena.makeCell(delivery.percept),
-                core.findOrMintDimension("d.seen"),
+  const auto seen = arena.makeCell(delivery.percept);
+  if (!delivery.correlation.empty())
+    if (const auto rec = varsRecord(arena, core, seen, "correlation", true))
+      zigzag::expectWritten(arena.link(*rec, core.dims().values, DimVector::POS,
+                                       arena.makeCell(delivery.correlation)));
+  journalAppend(arena, delivery.agent, seen, core.findOrMintDimension("d.seen"),
                 static_cast<std::size_t>(setting("vagent.journal_size", 64)));
   const auto pending = core.findOrMintDimension("d.pending");
   zigzag::expectWritten(
