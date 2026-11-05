@@ -6,7 +6,9 @@
 #include "common/xanadu/vortex/or_parallel.hpp"
 
 #include <algorithm>
+#include <limits>
 #include <ranges>
+#include <stdexcept>
 
 #include "common/xanadu/zigzag/cell_views.hpp"
 #include <gleditor/sentinel.hpp>
@@ -14,6 +16,8 @@
 namespace zigzag::vortex {
 
 namespace {
+
+constexpr std::size_t maxSparkPathSteps = 65'535;
 
 void writeU8(std::string &out, const std::uint8_t v) {
   out.push_back(static_cast<char>(v));
@@ -37,6 +41,9 @@ void writeU64(std::string &out, const std::uint64_t v) {
 }
 
 void writeStr(std::string &out, const std::string_view s) {
+  if (s.size() > std::numeric_limits<std::uint32_t>::max()) {
+    throw std::length_error("OR-parallel string exceeds its wire length field");
+  }
   writeU32(out, static_cast<std::uint32_t>(s.size()));
   out.append(s.data(), s.size());
 }
@@ -90,6 +97,9 @@ bool readStr(std::string_view &in, std::string &out) {
 } // namespace
 
 std::string encodeOrParallelSpark(const OrParallelSpark &spark) {
+  if (spark.deweyPath.size() > maxSparkPathSteps) {
+    throw std::length_error("OR-parallel path exceeds its wire limit");
+  }
   std::string out;
   out.append("ORSP", 4);
   writeU8(out, static_cast<std::uint8_t>(spark.model));
@@ -120,8 +130,9 @@ std::optional<OrParallelSpark> decodeOrParallelSpark(std::string_view bytes) {
   OrParallelSpark out{};
   std::uint8_t modelRaw = 0;
   std::uint32_t pathLen = 0;
-  if (!readU8(bytes, modelRaw) || !readU32(bytes, pathLen) ||
-      pathLen > 65535U) {
+  if (!readU8(bytes, modelRaw) ||
+      modelRaw > static_cast<std::uint8_t>(SparkModelKind::ShadowDeltaPrefix) ||
+      !readU32(bytes, pathLen) || pathLen > maxSparkPathSteps) {
     return std::nullopt;
   }
   out.model = (modelRaw == 0) ? SparkModelKind::OracleRecompute
@@ -142,7 +153,8 @@ std::optional<OrParallelSpark> decodeOrParallelSpark(std::string_view bytes) {
   out.cursor             = gleditor::fromSentinel<noCell>(cursor);
   out.stackFrame         = gleditor::fromSentinel<noCell>(stackFrame);
   std::uint8_t hasPrefix = 0;
-  if (!readU8(bytes, hasPrefix)) {
+  if (!readU8(bytes, hasPrefix) || hasPrefix > 1 ||
+      (hasPrefix == 1) != (out.model == SparkModelKind::ShadowDeltaPrefix)) {
     return std::nullopt;
   }
   if (hasPrefix != 0) {
@@ -156,6 +168,7 @@ std::optional<OrParallelSpark> decodeOrParallelSpark(std::string_view bytes) {
     }
     out.prefixSnapshot = std::move(*decoded);
   }
+  if (!bytes.empty()) return std::nullopt;
   return out;
 }
 
@@ -186,13 +199,31 @@ OrParallelCoordinator::OrParallelCoordinator(const Manifold *base,
   zigzag::expectWritten(arena_.link(core_.home(), dimOr_, false, goalRoot_));
 }
 
-std::optional<OrParallelSpark>
+std::expected<std::optional<OrParallelSpark>, ArenaRefusal>
 OrParallelCoordinator::exportSparkFromVictim(VortexVM &victimVm,
                                              const CellRef rootEntryOpcode) {
-  if (victimVm.hasResumeState()) return std::nullopt;
+  if (victimVm.hasResumeState()) return std::optional<OrParallelSpark>{};
+
+  const auto choices = victimVm.choiceStack();
+  if (choices.empty()) return std::optional<OrParallelSpark>{};
+
+  const auto &oldest = choices.front();
+  if (oldest.deweyPath.size() > maxSparkPathSteps) {
+    return std::unexpected{ArenaRefusal::PrefixLimitExceeded};
+  }
+  const bool shadowDelta = oldest.cyclesSinceRoot >= cycleThreshold_;
+  std::optional<ArenaManifold::PrefixSnapshot> prefixSnapshot;
+  if (shadowDelta) {
+    auto exported = victimVm.core().arena().exportPrefix(oldest.mark);
+    if (!exported) {
+      return std::unexpected{exported.error()};
+    }
+    prefixSnapshot = std::move(*exported);
+  }
+
   auto stolen = victimVm.stealNearRootChoicePoint();
   if (!stolen.has_value()) {
-    return std::nullopt;
+    return std::optional<OrParallelSpark>{};
   }
 
   OrParallelSpark spark{};
@@ -202,17 +233,17 @@ OrParallelCoordinator::exportSparkFromVictim(VortexVM &victimVm,
   spark.cursor          = stolen->cursor;
   spark.stackFrame      = stolen->stackFrame;
 
-  if (stolen->cyclesSinceRoot < cycleThreshold_) {
+  if (!shadowDelta) {
     spark.model       = SparkModelKind::OracleRecompute;
     spark.entryOpcode = rootEntryOpcode;
   } else {
     spark.model          = SparkModelKind::ShadowDeltaPrefix;
     spark.entryOpcode    = stolen->altOp;
-    spark.prefixSnapshot = victimVm.core().arena().exportPrefix(stolen->mark);
+    spark.prefixSnapshot = std::move(prefixSnapshot);
   }
 
   enqueueSpark(spark);
-  return spark;
+  return std::optional<OrParallelSpark>{std::move(spark)};
 }
 
 OrParallelCoordinator *
@@ -343,11 +374,40 @@ ExecutionResult OrParallelCoordinator::executeSparkOnWorker(
                            .errorMessage      = "Cancelled by cut"};
   }
 
+  if (spark.model != SparkModelKind::OracleRecompute &&
+      spark.model != SparkModelKind::ShadowDeltaPrefix) {
+    return ExecutionResult{.success           = false,
+                           .contractViolation = ContractViolationKind::None,
+                           .failingClause     = std::nullopt,
+                           .errorMessage = "Unknown OR-parallel spark model"};
+  }
+  if (spark.model == SparkModelKind::OracleRecompute && spark.prefixSnapshot) {
+    return ExecutionResult{.success           = false,
+                           .contractViolation = ContractViolationKind::None,
+                           .failingClause     = std::nullopt,
+                           .errorMessage =
+                               "Oracle spark carries a prefix snapshot"};
+  }
+
   ArenaManifold workerArena{base};
   VortexCore workerCore{workerArena};
-  if (spark.model == SparkModelKind::ShadowDeltaPrefix &&
-      spark.prefixSnapshot.has_value()) {
-    workerArena.hydratePrefix(*spark.prefixSnapshot);
+  if (spark.model == SparkModelKind::ShadowDeltaPrefix) {
+    if (!spark.prefixSnapshot.has_value()) {
+      return ExecutionResult{.success           = false,
+                             .contractViolation = ContractViolationKind::None,
+                             .failingClause     = std::nullopt,
+                             .errorMessage =
+                                 "ShadowDelta spark has no prefix snapshot"};
+    }
+    const auto hydrated = workerArena.hydratePrefix(*spark.prefixSnapshot);
+    if (!hydrated) {
+      return ExecutionResult{
+          .success           = false,
+          .contractViolation = ContractViolationKind::None,
+          .failingClause     = std::nullopt,
+          .errorMessage      = "Could not hydrate ShadowDelta prefix: " +
+                          std::string{zigzag::toString(hydrated.error())}};
+    }
   }
   VortexVM workerVm{workerCore};
   if (bindProgramOpcodes) {

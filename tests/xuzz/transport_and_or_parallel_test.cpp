@@ -2,9 +2,15 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <optional>
+#include <span>
+#include <stdexcept>
+#include <string>
+#include <string_view>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "common/xanadu/identity/identity_layout.hpp"
@@ -476,20 +482,22 @@ TEST(TransportAndOrParallelTest,
   ASSERT_TRUE(parentVm.step(cursor).success);
   ASSERT_EQ(parentVm.choiceDepth(), 1U);
 
-  auto exported = coordinator.exportSparkFromVictim(parentVm, entryOp);
-  ASSERT_TRUE(exported.has_value());
-  EXPECT_EQ(exported->model, SparkModelKind::OracleRecompute);
-  EXPECT_EQ(exported->deweyKey, "1");
-  EXPECT_FALSE(exported->prefixSnapshot.has_value());
+  auto exportedResult = coordinator.exportSparkFromVictim(parentVm, entryOp);
+  ASSERT_TRUE(exportedResult.has_value());
+  ASSERT_TRUE(exportedResult->has_value());
+  auto exported = **exportedResult;
+  EXPECT_EQ(exported.model, SparkModelKind::OracleRecompute);
+  EXPECT_EQ(exported.deweyKey, "1");
+  EXPECT_FALSE(exported.prefixSnapshot.has_value());
   EXPECT_EQ(parentVm.choiceDepth(), 0U);
 
   // Round-trip over wire encoding
-  const std::string wire = encodeOrParallelSpark(*exported);
+  const std::string wire = encodeOrParallelSpark(exported);
   auto decoded           = decodeOrParallelSpark(wire);
   ASSERT_TRUE(decoded.has_value());
   EXPECT_EQ(decoded->model, SparkModelKind::OracleRecompute);
   EXPECT_EQ(decoded->deweyKey, "1");
-  EXPECT_EQ(decoded->cursor, exported->cursor);
+  EXPECT_EQ(decoded->cursor, exported.cursor);
 
   // Finish parent's primary branch ("0")
   ASSERT_TRUE(parentVm.run(cursor).success);
@@ -543,6 +551,46 @@ TEST(TransportAndOrParallelTest, OrParallelSparkWireKeepsAbsentCursor) {
   EXPECT_EQ(decoded->entryOpcode, 7U);
   EXPECT_FALSE(decoded->cursor);
   EXPECT_FALSE(decoded->stackFrame);
+}
+
+TEST(TransportAndOrParallelTest, OrParallelSparkWireRejectsInconsistentTags) {
+  OrParallelSpark oracle;
+  oracle.entryOpcode       = 7;
+  const auto oracleWire    = encodeOrParallelSpark(oracle);
+  const auto decodedOracle = decodeOrParallelSpark(oracleWire);
+  ASSERT_TRUE(decodedOracle);
+  EXPECT_EQ(decodedOracle->model, SparkModelKind::OracleRecompute);
+
+  auto unknownModel = oracleWire;
+  unknownModel[4]   = 2;
+  EXPECT_FALSE(decodeOrParallelSpark(unknownModel));
+
+  auto invalidPresence   = oracleWire;
+  invalidPresence.back() = 2;
+  EXPECT_FALSE(decodeOrParallelSpark(invalidPresence));
+  EXPECT_FALSE(decodeOrParallelSpark(oracleWire + "junk"));
+
+  OrParallelSpark shadowWithoutPrefix;
+  shadowWithoutPrefix.model = SparkModelKind::ShadowDeltaPrefix;
+  EXPECT_FALSE(
+      decodeOrParallelSpark(encodeOrParallelSpark(shadowWithoutPrefix)));
+
+  ArenaManifold prefixSource;
+  const auto mark   = prefixSource.mark();
+  const auto prefix = prefixSource.exportPrefix(mark);
+  ASSERT_TRUE(prefix.has_value());
+  const auto prefixWire = zigzag::encodeArenaPrefix(*prefix);
+  EXPECT_FALSE(zigzag::decodeArenaPrefix(prefixWire + "junk"));
+  oracle.prefixSnapshot = *prefix;
+  EXPECT_FALSE(decodeOrParallelSpark(encodeOrParallelSpark(oracle)));
+}
+
+TEST(TransportAndOrParallelTest, SparkEncoderRefusesAPathBeyondItsWireLimit) {
+  OrParallelSpark spark;
+  spark.deweyPath.resize(65'536);
+
+  EXPECT_THROW(static_cast<void>(encodeOrParallelSpark(spark)),
+               std::length_error);
 }
 
 TEST(TransportAndOrParallelTest,
@@ -606,17 +654,21 @@ TEST(TransportAndOrParallelTest,
 
   // First steal takes depth-1 choice point; second steal takes depth-2 choice
   // point!
-  auto stolenDepth1 =
+  auto stolenDepth1Result =
       coordinator.exportSparkFromVictim(parentVm, firstChoiceAlt);
-  ASSERT_TRUE(stolenDepth1.has_value());
-  auto stolenDepth2 = coordinator.exportSparkFromVictim(parentVm, derefOp);
-  ASSERT_TRUE(stolenDepth2.has_value());
-  EXPECT_EQ(stolenDepth2->model, SparkModelKind::ShadowDeltaPrefix);
-  EXPECT_EQ(stolenDepth2->deweyKey, "0.1");
-  ASSERT_TRUE(stolenDepth2->prefixSnapshot.has_value());
+  ASSERT_TRUE(stolenDepth1Result.has_value());
+  ASSERT_TRUE(stolenDepth1Result->has_value());
+  auto stolenDepth2Result =
+      coordinator.exportSparkFromVictim(parentVm, derefOp);
+  ASSERT_TRUE(stolenDepth2Result.has_value());
+  ASSERT_TRUE(stolenDepth2Result->has_value());
+  auto stolenDepth2 = **stolenDepth2Result;
+  EXPECT_EQ(stolenDepth2.model, SparkModelKind::ShadowDeltaPrefix);
+  EXPECT_EQ(stolenDepth2.deweyKey, "0.1");
+  ASSERT_TRUE(stolenDepth2.prefixSnapshot.has_value());
 
   // Round-trip the Model 2 spark through wire serialization
-  const std::string wire = encodeOrParallelSpark(*stolenDepth2);
+  const std::string wire = encodeOrParallelSpark(stolenDepth2);
   auto decoded           = decodeOrParallelSpark(wire);
   ASSERT_TRUE(decoded.has_value());
   EXPECT_EQ(decoded->model, SparkModelKind::ShadowDeltaPrefix);
@@ -642,6 +694,107 @@ TEST(TransportAndOrParallelTest,
   ASSERT_EQ(solutions.size(), 1U);
   EXPECT_EQ(solutions[0].deweyKey, "0.1");
   EXPECT_EQ(solutions[0].value, "ancestor_bound");
+}
+
+TEST(TransportAndOrParallelTest,
+     PrefixExportRefusalLeavesTheVictimChoiceRunnable) {
+  ArenaManifold arena;
+  VortexCore core(arena);
+  VortexVM vm(core);
+  OrParallelCoordinator coordinator(nullptr, /*cycleThreshold=*/0);
+
+  const xanadu::PrimediaSpan quoteSpan{
+      .scroll = xanadu::localScroll, .start = 0, .length = 1};
+  const auto quote =
+      arena.makeQuote(0, std::span<const xanadu::PrimediaSpan>{&quoteSpan, 1});
+  const CellRef entry  = vm.mintOpcode(OpcodeKind::Halt, "quoted_entry");
+  const CellRef cursor = vm.spawnCursor(entry, "quoted_branch");
+  vm.pushChoicePoint(cursor, entry);
+  ASSERT_EQ(vm.choiceDepth(), 1U);
+  ASSERT_EQ(arena.outstandingMarks(), 1U);
+
+  const auto refused = coordinator.exportSparkFromVictim(vm, entry);
+
+  ASSERT_FALSE(refused.has_value());
+  EXPECT_EQ(refused.error(), zigzag::ArenaRefusal::UnsupportedPrefixState);
+  EXPECT_EQ(vm.choiceDepth(), 1U);
+  EXPECT_EQ(arena.outstandingMarks(), 1U);
+  ASSERT_TRUE(arena.setValueBits(quote, xanadu::ValueKind::Bool, 1));
+  EXPECT_TRUE(vm.run(cursor).success);
+  EXPECT_EQ(vm.choiceDepth(), 1U);
+  EXPECT_EQ(arena.outstandingMarks(), 1U);
+}
+
+TEST(TransportAndOrParallelTest,
+     OversizedDeweyPathRefusesBeforeStealingTheVictimChoice) {
+  ArenaManifold arena;
+  VortexCore core(arena);
+  VortexVM vm(core);
+  OrParallelCoordinator coordinator(nullptr, /*cycleThreshold=*/0);
+  vm.setCutCallback([](std::string_view) {});
+
+  const CellRef entry  = vm.mintOpcode(OpcodeKind::Halt, "long_path_entry");
+  const CellRef cursor = vm.spawnCursor(entry, "long_path_branch");
+  const std::vector<std::uint16_t> longPath(65'536, 1);
+  vm.setCurrentDeweyPath(longPath);
+  vm.pushChoicePoint(cursor, entry);
+  ASSERT_EQ(vm.choiceDepth(), 1U);
+  ASSERT_EQ(arena.outstandingMarks(), 1U);
+
+  const auto refused = coordinator.exportSparkFromVictim(vm, entry);
+
+  ASSERT_FALSE(refused.has_value());
+  EXPECT_EQ(refused.error(), zigzag::ArenaRefusal::PrefixLimitExceeded);
+  EXPECT_EQ(vm.choiceDepth(), 1U);
+  EXPECT_EQ(arena.outstandingMarks(), 1U);
+}
+
+TEST(TransportAndOrParallelTest,
+     WorkerStopsBeforeCallbacksWhenPrefixHydrationRefuses) {
+  ArenaManifold prefixSource;
+  const auto mark        = prefixSource.mark();
+  const auto validPrefix = prefixSource.exportPrefix(mark);
+  ASSERT_TRUE(validPrefix.has_value());
+  OrParallelCoordinator coordinator;
+  const auto assertStoppedBeforeCallbacks = [&](const OrParallelSpark &spark) {
+    bool bindCalled    = false;
+    bool extractCalled = false;
+    const auto result  = OrParallelCoordinator::executeSparkOnWorker(
+        spark, nullptr, [&](VortexCore &, VortexVM &) { bindCalled = true; },
+        [&](VortexCore &, VortexVM &) -> std::optional<std::string> {
+          extractCalled = true;
+          return std::nullopt;
+        },
+        coordinator);
+
+    EXPECT_FALSE(result.success);
+    EXPECT_FALSE(result.errorMessage.empty());
+    EXPECT_FALSE(bindCalled);
+    EXPECT_FALSE(extractCalled);
+    return result;
+  };
+
+  OrParallelSpark malformedPrefix;
+  malformedPrefix.model = SparkModelKind::ShadowDeltaPrefix;
+  malformedPrefix.prefixSnapshot.emplace();
+  malformedPrefix.prefixSnapshot->mark.cellCount = 1;
+  const auto malformedResult = assertStoppedBeforeCallbacks(malformedPrefix);
+  EXPECT_NE(malformedResult.errorMessage.find(
+                zigzag::toString(zigzag::ArenaRefusal::MalformedPrefix)),
+            std::string::npos);
+
+  OrParallelSpark missingPrefix;
+  missingPrefix.model = SparkModelKind::ShadowDeltaPrefix;
+  assertStoppedBeforeCallbacks(missingPrefix);
+
+  OrParallelSpark unknownModel;
+  unknownModel.model = static_cast<SparkModelKind>(2);
+  assertStoppedBeforeCallbacks(unknownModel);
+
+  OrParallelSpark oracleWithPrefix;
+  oracleWithPrefix.model          = SparkModelKind::OracleRecompute;
+  oracleWithPrefix.prefixSnapshot = *validPrefix;
+  assertStoppedBeforeCallbacks(oracleWithPrefix);
 }
 
 TEST(TransportAndOrParallelTest,

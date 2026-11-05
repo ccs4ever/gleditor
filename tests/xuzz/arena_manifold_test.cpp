@@ -18,7 +18,9 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <limits>
 #include <optional>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -29,6 +31,7 @@
 #include "common/xanadu/ops.hpp"
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
+#include "common/xanadu/zigzag/arena_prefix_wire.hpp"
 #include "common/xanadu/zigzag/manifold.hpp"
 
 namespace {
@@ -352,21 +355,44 @@ TEST(ArenaManifoldTest, repeatedScalarWritesRestoreAcrossNestedMarks) {
 
 TEST(ArenaManifoldTest, hydratedPrefixTrailsEmptyRunSlotHeaders) {
   ArenaManifold source;
-  const auto scalar   = source.makeScalarCell(std::int64_t{23});
-  const auto mark     = source.mark();
-  const auto snapshot = source.exportPrefix(mark);
+  const auto scalar = source.makeScalarCell(std::int64_t{23});
+  const auto outer  = source.mark();
+  ASSERT_TRUE(source.setValueBits(scalar, ValueKind::Int64, 31));
+  const auto mark = source.mark();
+  ASSERT_GT(mark.trailSize, 0U);
+  ASSERT_TRUE(source.setValueBits(scalar, ValueKind::Bool, 1));
+  ASSERT_GT(source.trailSize(), 0U);
+
+  const auto exported = source.exportPrefix(mark);
+  ASSERT_TRUE(exported.has_value())
+      << (exported ? "" : zigzag::toString(exported.error()));
+  EXPECT_EQ(exported->mark.trailSize, 0U);
   const auto decoded =
-      zigzag::decodeArenaPrefix(zigzag::encodeArenaPrefix(snapshot));
+      zigzag::decodeArenaPrefix(zigzag::encodeArenaPrefix(*exported));
   ASSERT_TRUE(decoded);
+  EXPECT_EQ(decoded->mark.trailSize, 0U);
 
   ArenaManifold hydrated;
-  hydrated.hydratePrefix(*decoded);
+  hydrated.makeCell("replaced destination");
+  hydrated.makeCell("also replaced");
+  ASSERT_TRUE(hydrated.hydratePrefix(*decoded));
+  EXPECT_EQ(hydrated.cellCount(), 1U);
   ASSERT_TRUE(hydrated.setValueBits(scalar, ValueKind::Bool, 1));
   hydrated.release(decoded->mark);
 
   EXPECT_EQ(hydrated.slot(scalar)->valueKind,
             static_cast<std::uint8_t>(ValueKind::Int64));
-  EXPECT_EQ(hydrated.slot(scalar)->valueBits, 23U);
+  EXPECT_EQ(hydrated.slot(scalar)->valueBits, 31U);
+  EXPECT_EQ(source.slot(scalar)->valueKind,
+            static_cast<std::uint8_t>(ValueKind::Bool));
+  source.release(mark);
+  EXPECT_EQ(source.slot(scalar)->valueKind,
+            static_cast<std::uint8_t>(ValueKind::Int64));
+  EXPECT_EQ(source.slot(scalar)->valueBits, 31U);
+  source.release(outer);
+  EXPECT_EQ(source.slot(scalar)->valueKind,
+            static_cast<std::uint8_t>(ValueKind::Int64));
+  EXPECT_EQ(source.slot(scalar)->valueBits, 23U);
 }
 
 TEST(ArenaManifoldTest, releaseRestoresContentRestatedUnderTheMark) {
@@ -520,9 +546,11 @@ TEST(ArenaManifoldTest, hydratedPrefixTreatsItsDimensionMapAsCommitted) {
   const auto mark      = source.mark();
   source.ensureDimension("d.after-mark");
 
-  const auto snapshot = source.exportPrefix(mark);
-  EXPECT_EQ(snapshot.mark.dimensionCount, 0U);
-  const auto wire = zigzag::encodeArenaPrefix(snapshot);
+  const auto exported = source.exportPrefix(mark);
+  ASSERT_TRUE(exported.has_value())
+      << (exported ? "" : zigzag::toString(exported.error()));
+  EXPECT_EQ(exported->mark.dimensionCount, 0U);
+  const auto wire = zigzag::encodeArenaPrefix(*exported);
   EXPECT_EQ(wire.substr(0, 4), "APF2");
   EXPECT_FALSE(zigzag::decodeArenaPrefix("APFX"));
   const auto decoded = zigzag::decodeArenaPrefix(wire);
@@ -530,12 +558,176 @@ TEST(ArenaManifoldTest, hydratedPrefixTreatsItsDimensionMapAsCommitted) {
   EXPECT_EQ(decoded->mark.dimensionCount, 0U);
 
   ArenaManifold hydrated;
-  hydrated.hydratePrefix(*decoded);
+  ASSERT_TRUE(hydrated.hydratePrefix(*decoded));
   EXPECT_EQ(hydrated.dimensionNamed("d.inherited"), inherited);
   EXPECT_EQ(hydrated.dimensionNamed("d.after-mark"), std::nullopt);
   const auto child = hydrated.mark();
   hydrated.release(child);
   EXPECT_EQ(hydrated.dimensionNamed("d.inherited"), inherited);
+}
+
+TEST(ArenaManifoldTest, malformedPrefixRefusesWithoutChangingAPopulatedArena) {
+  ArenaManifold source;
+  const auto first  = source.makeCell("first");
+  const auto second = source.makeCell("second");
+  const auto dim    = source.makeCell("d.snapshot");
+  ASSERT_TRUE(source.link(first, dim, DimVector::POS, second));
+  const auto sourceMark = source.mark();
+  const auto exported   = source.exportPrefix(sourceMark);
+  ASSERT_TRUE(exported.has_value())
+      << (exported ? "" : zigzag::toString(exported.error()));
+
+  const auto assertRejectedPreservingDestination =
+      [&](const ArenaManifold::PrefixSnapshot &malformed) {
+        ArenaManifold destination;
+        const auto keep    = destination.makeCell("keep");
+        const auto other   = destination.makeCell("other");
+        const auto linkDim = destination.makeCell("d.keep");
+        ASSERT_TRUE(destination.link(keep, linkDim, DimVector::POS, other));
+        const auto originalSlot = *destination.slot(keep);
+        const std::vector<PrimediaSpan> originalContent{
+            destination.contentOf(keep).begin(),
+            destination.contentOf(keep).end()};
+        const std::vector<zigzag::DimLink> originalLinks{
+            destination.dimensionsOf(keep).begin(),
+            destination.dimensionsOf(keep).end()};
+
+        const auto refused = destination.hydratePrefix(malformed);
+
+        ASSERT_FALSE(refused.has_value());
+        EXPECT_EQ(refused.error(), zigzag::ArenaRefusal::MalformedPrefix);
+        EXPECT_EQ(destination.cellCount(), 3U);
+        ASSERT_TRUE(destination.slot(keep));
+        EXPECT_EQ(*destination.slot(keep), originalSlot);
+        EXPECT_THAT(destination.contentOf(keep),
+                    testing::ElementsAreArray(originalContent));
+        EXPECT_THAT(destination.dimensionsOf(keep),
+                    testing::ElementsAreArray(originalLinks));
+        EXPECT_EQ(destination.linked(keep, linkDim, DimVector::POS), other);
+        EXPECT_EQ(destination.outstandingMarks(), 0U);
+      };
+
+  auto badFloor = *exported;
+  badFloor.mark.cellCount++;
+  assertRejectedPreservingDestination(badFloor);
+
+  auto badContentRange = *exported;
+  badContentRange.slots.front().spanOffset =
+      static_cast<std::uint32_t>(badContentRange.content.size() + 1);
+  assertRejectedPreservingDestination(badContentRange);
+
+  auto badLinkRange = *exported;
+  badLinkRange.slots.front().linkOffset =
+      static_cast<std::uint32_t>(badLinkRange.links.size() + 1);
+  assertRejectedPreservingDestination(badLinkRange);
+
+  auto badLastOp                 = *exported;
+  badLastOp.slots.front().lastOp = ArenaManifold::refOf(1);
+  assertRejectedPreservingDestination(badLastOp);
+
+  auto badLiveCount = *exported;
+  badLiveCount.mark.liveContent++;
+  assertRejectedPreservingDestination(badLiveCount);
+
+  auto badScratchRange = *exported;
+  ASSERT_FALSE(badScratchRange.content.empty());
+  ASSERT_FALSE(badScratchRange.scratch.empty());
+  badScratchRange.content.front().length = badScratchRange.scratch.size() + 1;
+  assertRejectedPreservingDestination(badScratchRange);
+
+  auto overlappingRuns                = *exported;
+  overlappingRuns.slots[1].spanOffset = overlappingRuns.slots[0].spanOffset;
+  assertRejectedPreservingDestination(overlappingRuns);
+}
+
+TEST(ArenaManifoldTest, prefixExportRefusesARealQuoteWithoutConsumingItsMark) {
+  ArenaManifold arena;
+  const PrimediaSpan quoteSpan{.start = 0, .length = 1};
+  const auto quote =
+      arena.makeQuote(0, std::span<const PrimediaSpan>{&quoteSpan, 1});
+  const auto mark = arena.mark();
+
+  const auto refused = arena.exportPrefix(mark);
+
+  ASSERT_FALSE(refused.has_value());
+  EXPECT_EQ(refused.error(), zigzag::ArenaRefusal::UnsupportedPrefixState);
+  EXPECT_EQ(arena.outstandingMarks(), 1U);
+  EXPECT_TRUE(arena.contains(quote));
+  ASSERT_TRUE(arena.setValueBits(quote, ValueKind::Bool, 1));
+  arena.release(mark);
+  EXPECT_EQ(arena.valueKindOf(quote), ValueKind::None);
+  EXPECT_THAT(arena.contentOf(quote), testing::ElementsAre(quoteSpan));
+}
+
+TEST(ArenaManifoldTest, prefixExportExcludesQuoteStateCreatedAfterItsMark) {
+  ArenaManifold arena;
+  const auto mark = arena.mark();
+  const PrimediaSpan quoteSpan{.start = 0, .length = 1};
+  const auto quote =
+      arena.makeQuote(0, std::span<const PrimediaSpan>{&quoteSpan, 1});
+
+  const auto exported = arena.exportPrefix(mark);
+
+  ASSERT_TRUE(exported.has_value())
+      << (exported ? "" : zigzag::toString(exported.error()));
+  EXPECT_EQ(exported->mark.cellCount, mark.cellCount);
+  EXPECT_EQ(exported->mark.quoteSpaceCount, 0U);
+  EXPECT_TRUE(exported->slots.empty());
+  EXPECT_TRUE(arena.contains(quote));
+  arena.release(mark);
+  EXPECT_FALSE(arena.contains(quote));
+}
+
+TEST(ArenaManifoldTest, arenaPrefixWireSizeChecksTheUint32FrameBoundary) {
+  constexpr std::uint64_t maxWireSize =
+      std::numeric_limits<std::uint32_t>::max();
+  const zigzag::detail::ArenaPrefixWireCounts exact{
+      .slots        = 1,
+      .scratchBytes = maxWireSize - 80 - 32,
+  };
+
+  const auto exactSize = zigzag::detail::arenaPrefixWireSize(exact);
+  ASSERT_TRUE(exactSize);
+  EXPECT_EQ(*exactSize, maxWireSize);
+
+  auto tooLarge = exact;
+  tooLarge.scratchBytes++;
+  EXPECT_FALSE(zigzag::detail::arenaPrefixWireSize(tooLarge));
+
+  const zigzag::detail::ArenaPrefixWireCounts unrepresentable{
+      .slots = std::numeric_limits<std::uint64_t>::max(),
+  };
+  EXPECT_FALSE(zigzag::detail::arenaPrefixWireSize(unrepresentable));
+}
+
+TEST(ArenaManifoldTest, arenaPrefixWireSizeMatchesAnEncodedSmallPrefix) {
+  ArenaManifold source;
+  const auto first  = source.makeCell("payload");
+  const auto second = source.makeCell("neighbor");
+  const auto dim    = source.ensureDimension("d.wire");
+  ASSERT_TRUE(source.link(first, dim, DimVector::POS, second));
+  const auto mark     = source.mark();
+  const auto exported = source.exportPrefix(mark);
+  ASSERT_TRUE(exported.has_value());
+
+  std::uint64_t dimensionNameBytes = 0;
+  for (const auto &entry : exported->arenaDims) {
+    dimensionNameBytes += entry.first.size();
+  }
+  const zigzag::detail::ArenaPrefixWireCounts counts{
+      .slots              = exported->slots.size(),
+      .links              = exported->links.size(),
+      .content            = exported->content.size(),
+      .scratchBytes       = exported->scratch.size(),
+      .shadows            = exported->shadowOrder.size(),
+      .dimensions         = exported->arenaDims.size(),
+      .dimensionNameBytes = dimensionNameBytes,
+  };
+  const auto predicted = zigzag::detail::arenaPrefixWireSize(counts);
+  ASSERT_TRUE(predicted);
+
+  const auto encoded = zigzag::encodeArenaPrefix(*exported);
+  EXPECT_EQ(*predicted, encoded.size());
 }
 
 TEST(ArenaManifoldTest, discardKeepsTheBindingsMadeUnderTheChoicePoint) {
@@ -880,6 +1072,83 @@ struct Document {
 
   [[nodiscard]] Manifold manifold() const { return store.rebuildManifold(at); }
 };
+
+TEST(ArenaManifoldTest,
+     baseBackedPrefixRoundTripRestoresShadowsAndRejectsDuplicates) {
+  Document doc;
+  const auto base = doc.manifold();
+  const auto originalFirstLink =
+      base.linked(doc.first, doc.dim, DimVector::POS);
+  const auto originalSecondLink =
+      base.linked(doc.second, doc.dim, DimVector::NEG);
+  ArenaManifold source{&base};
+  ASSERT_TRUE(source.setValueBits(doc.first, ValueKind::Int64, 41));
+  ASSERT_TRUE(source.setValueBits(doc.second, ValueKind::Int64, 73));
+  const auto mark     = source.mark();
+  const auto exported = source.exportPrefix(mark);
+  ASSERT_TRUE(exported.has_value())
+      << (exported ? "" : zigzag::toString(exported.error()));
+  ASSERT_THAT(exported->shadowOrder,
+              testing::ElementsAre(doc.first, doc.second));
+
+  const auto decoded =
+      zigzag::decodeArenaPrefix(zigzag::encodeArenaPrefix(*exported));
+  ASSERT_TRUE(decoded);
+
+  ArenaManifold hydrated{&base};
+  ASSERT_TRUE(hydrated.hydratePrefix(*decoded));
+  EXPECT_TRUE(hydrated.holdsOwn(doc.first));
+  EXPECT_TRUE(hydrated.holdsOwn(doc.second));
+  ASSERT_TRUE(hydrated.slot(doc.first));
+  EXPECT_EQ(hydrated.slot(doc.first)->valueKind,
+            static_cast<std::uint8_t>(ValueKind::Int64));
+  EXPECT_EQ(hydrated.slot(doc.first)->valueBits, 41U);
+  ASSERT_TRUE(hydrated.slot(doc.second));
+  EXPECT_EQ(hydrated.slot(doc.second)->valueKind,
+            static_cast<std::uint8_t>(ValueKind::Int64));
+  EXPECT_EQ(hydrated.slot(doc.second)->valueBits, 73U);
+  EXPECT_EQ(hydrated.linked(doc.first, doc.dim, DimVector::POS),
+            originalFirstLink);
+  EXPECT_EQ(hydrated.linked(doc.second, doc.dim, DimVector::NEG),
+            originalSecondLink);
+  EXPECT_EQ(base.linked(doc.first, doc.dim, DimVector::POS), doc.second);
+  EXPECT_EQ(base.linked(doc.second, doc.dim, DimVector::NEG), doc.first);
+
+  ASSERT_TRUE(hydrated.setValueBits(doc.first, ValueKind::Bool, 1));
+  ASSERT_TRUE(hydrated.setValueBits(doc.second, ValueKind::Bool, 1));
+  hydrated.release(decoded->mark);
+  EXPECT_EQ(hydrated.slot(doc.first)->valueKind,
+            static_cast<std::uint8_t>(ValueKind::Int64));
+  EXPECT_EQ(hydrated.slot(doc.first)->valueBits, 41U);
+  EXPECT_EQ(hydrated.slot(doc.second)->valueKind,
+            static_cast<std::uint8_t>(ValueKind::Int64));
+  EXPECT_EQ(hydrated.slot(doc.second)->valueBits, 73U);
+  EXPECT_EQ(base.linked(doc.first, doc.dim, DimVector::POS), doc.second);
+  EXPECT_EQ(base.linked(doc.second, doc.dim, DimVector::NEG), doc.first);
+
+  auto malformed        = *decoded;
+  malformed.shadowOrder = {doc.first, doc.first};
+  ArenaManifold destination{&base};
+  ASSERT_TRUE(destination.setValueBits(doc.first, ValueKind::Int64, 99));
+  const auto originalSlot = *destination.slot(doc.first);
+  const std::vector<PrimediaSpan> originalContent{
+      destination.contentOf(doc.first).begin(),
+      destination.contentOf(doc.first).end()};
+
+  const auto refused = destination.hydratePrefix(malformed);
+
+  ASSERT_FALSE(refused.has_value());
+  EXPECT_EQ(refused.error(), zigzag::ArenaRefusal::MalformedPrefix);
+  ASSERT_TRUE(destination.slot(doc.first));
+  EXPECT_EQ(*destination.slot(doc.first), originalSlot);
+  EXPECT_THAT(destination.contentOf(doc.first),
+              testing::ElementsAreArray(originalContent));
+  EXPECT_EQ(destination.slot(doc.first)->valueKind,
+            static_cast<std::uint8_t>(ValueKind::Int64));
+  EXPECT_EQ(destination.slot(doc.first)->valueBits, 99U);
+  EXPECT_EQ(destination.linked(doc.first, doc.dim, DimVector::POS), doc.second);
+  EXPECT_EQ(destination.outstandingMarks(), 0U);
+}
 
 TEST(ArenaManifoldTest, oversizedContentRunDoesNotShadowABaseCell) {
   Document doc;

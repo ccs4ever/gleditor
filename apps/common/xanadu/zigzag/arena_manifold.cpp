@@ -15,6 +15,7 @@
 #include "common/xanadu/publication.hpp"
 #include "common/xanadu/scalar.hpp"
 #include "common/xanadu/store.hpp"
+#include "common/xanadu/zigzag/arena_prefix_wire.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
 #include <gleditor/logging.hpp>
 
@@ -2101,14 +2102,259 @@ std::optional<Promoted> promote(xanadu::Store &store,
   return out;
 }
 
-ArenaManifold::PrefixSnapshot ArenaManifold::exportPrefix(const Mark &m) const {
+namespace {
+
+struct PrefixRunRange {
+  std::uint64_t begin{0};
+  std::uint64_t end{0};
+};
+
+struct ArenaPrefixCodecLimits {
+  static constexpr std::uint32_t maxSlots   = 1'000'000;
+  static constexpr std::uint32_t maxLinks   = 4'000'000;
+  static constexpr std::uint32_t maxContent = 4'000'000;
+  static constexpr std::uint32_t maxShadows = 1'000'000;
+  static constexpr std::uint32_t maxDims    = 100'000;
+};
+
+bool disjointRuns(std::vector<PrefixRunRange> &ranges) {
+  std::ranges::sort(ranges, {}, &PrefixRunRange::begin);
+  for (std::size_t i = 1; i < ranges.size(); i++) {
+    if (ranges[i].begin < ranges[i - 1].end) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool prefixHasRepresentableSizes(
+    const ArenaManifold::PrefixSnapshot &snapshot) noexcept {
+  constexpr auto maxSize = std::numeric_limits<std::uint32_t>::max();
+  return snapshot.slots.size() <= ephemeralBit &&
+         snapshot.links.size() <= maxSize &&
+         snapshot.content.size() <= maxSize &&
+         snapshot.scratch.size() <= maxSize &&
+         snapshot.shadowOrder.size() <= maxSize &&
+         snapshot.arenaDims.size() <= maxSize &&
+         std::ranges::all_of(snapshot.arenaDims, [&](const auto &entry) {
+           return entry.first.size() <= maxSize;
+         });
+}
+
+bool prefixWithinCodecLimits(
+    const ArenaManifold::PrefixSnapshot &snapshot) noexcept {
+  return snapshot.slots.size() <= ArenaPrefixCodecLimits::maxSlots &&
+         snapshot.links.size() <= ArenaPrefixCodecLimits::maxLinks &&
+         snapshot.content.size() <= ArenaPrefixCodecLimits::maxContent &&
+         snapshot.shadowOrder.size() <= ArenaPrefixCodecLimits::maxShadows &&
+         snapshot.arenaDims.size() <= ArenaPrefixCodecLimits::maxDims &&
+         snapshot.scratch.size() <= std::numeric_limits<std::uint32_t>::max() &&
+         std::ranges::all_of(snapshot.arenaDims, [&](const auto &entry) {
+           return entry.first.size() <=
+                  std::numeric_limits<std::uint32_t>::max();
+         });
+}
+
+std::optional<std::uint32_t>
+prefixWireSize(const ArenaManifold::PrefixSnapshot &snapshot) noexcept {
+  std::uint64_t dimensionNameBytes = 0;
+  for (const auto &[name, dim] : snapshot.arenaDims) {
+    std::ignore = dim;
+    if (name.size() >
+        std::numeric_limits<std::uint64_t>::max() - dimensionNameBytes) {
+      return std::nullopt;
+    }
+    dimensionNameBytes += name.size();
+  }
+  return detail::arenaPrefixWireSize(detail::ArenaPrefixWireCounts{
+      .slots              = snapshot.slots.size(),
+      .links              = snapshot.links.size(),
+      .content            = snapshot.content.size(),
+      .scratchBytes       = snapshot.scratch.size(),
+      .shadows            = snapshot.shadowOrder.size(),
+      .dimensions         = snapshot.arenaDims.size(),
+      .dimensionNameBytes = dimensionNameBytes,
+  });
+}
+
+bool prefixRefExists(const CellRef ref,
+                     const ArenaManifold::PrefixSnapshot &snapshot,
+                     const Manifold *base) noexcept {
+  if (ref == noCell) {
+    return true;
+  }
+  if (isEphemeral(ref)) {
+    const auto dense = ref & ~ephemeralBit;
+    return dense < snapshot.slots.size() &&
+           snapshot.slots[dense].birthOp == ref;
+  }
+  return base != nullptr && base->contains(ref);
+}
+
+bool prefixRunsAreWellFormed(
+    const ArenaManifold::PrefixSnapshot &snapshot, const Manifold *base,
+    std::unordered_map<CellRef, std::uint32_t> &overlay) {
+  std::vector<PrefixRunRange> linkRanges;
+  std::vector<PrefixRunRange> contentRanges;
+  linkRanges.reserve(snapshot.slots.size());
+  contentRanges.reserve(snapshot.slots.size());
+
+  std::uint64_t liveLinks   = 0;
+  std::uint64_t liveContent = 0;
+  for (std::size_t dense = 0; dense < snapshot.slots.size(); dense++) {
+    const auto &slot              = snapshot.slots[dense];
+    const std::uint64_t linkBegin = slot.linkOffset;
+    const std::uint64_t spanBegin = slot.spanOffset;
+    if (linkBegin > snapshot.links.size() ||
+        slot.linkCount > snapshot.links.size() - linkBegin ||
+        spanBegin > snapshot.content.size() ||
+        slot.spanCount > snapshot.content.size() - spanBegin) {
+      return false;
+    }
+    if (slot.linkCount > 0) {
+      linkRanges.push_back(
+          PrefixRunRange{linkBegin, linkBegin + slot.linkCount});
+    }
+    if (slot.spanCount > 0) {
+      contentRanges.push_back(
+          PrefixRunRange{spanBegin, spanBegin + slot.spanCount});
+    }
+    liveLinks += slot.linkCount;
+    liveContent += slot.spanCount;
+
+    if (isEphemeral(slot.birthOp)) {
+      if (slot.birthOp !=
+              ArenaManifold::refOf(static_cast<std::uint32_t>(dense)) ||
+          slot.lastOp != slot.birthOp) {
+        return false;
+      }
+    } else {
+      const auto baseSlot = base ? base->slot(slot.birthOp) : SlotRef{};
+      if (!baseSlot || baseSlot->birthOp != slot.birthOp ||
+          baseSlot->lastOp != slot.lastOp ||
+          !overlay.emplace(slot.birthOp, static_cast<std::uint32_t>(dense))
+               .second) {
+        return false;
+      }
+    }
+  }
+  if (!disjointRuns(linkRanges) || !disjointRuns(contentRanges) ||
+      liveLinks != snapshot.mark.liveLinks ||
+      liveContent != snapshot.mark.liveContent) {
+    return false;
+  }
+
+  for (const auto &edge : snapshot.links) {
+    if (edge.dim == noCell || !prefixRefExists(edge.dim, snapshot, base) ||
+        !prefixRefExists(edge.pos, snapshot, base) ||
+        !prefixRefExists(edge.neg, snapshot, base)) {
+      return false;
+    }
+  }
+  for (const auto &span : snapshot.content) {
+    if (span.length > std::numeric_limits<std::uint64_t>::max() - span.start) {
+      return false;
+    }
+    if (span.scroll == xanadu::scratchScroll &&
+        (span.start > snapshot.scratch.size() ||
+         span.length > snapshot.scratch.size() - span.start)) {
+      return false;
+    }
+  }
+  std::unordered_set<CellRef> shadowSet;
+  shadowSet.reserve(snapshot.shadowOrder.size());
+  for (const CellRef ref : snapshot.shadowOrder) {
+    if (isEphemeral(ref) || !base || !base->contains(ref) ||
+        !overlay.contains(ref) || !shadowSet.insert(ref).second) {
+      return false;
+    }
+  }
+  if (overlay.size() != shadowSet.size()) {
+    return false;
+  }
+  for (const auto &[name, dim] : snapshot.arenaDims) {
+    std::ignore = name;
+    if (dim == noCell || !prefixRefExists(dim, snapshot, base)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+} // namespace
+
+bool ArenaManifold::hasUnsupportedUntrackedPrefixIdentity() const noexcept {
+  return !spaces_.empty() || !spaceProxies_.empty() ||
+         !spaceStoreRefsTail_.empty() || !boundDimensions_.empty() ||
+         !provenanceCells_.empty() || authorshipRoot_.has_value() ||
+         storesRankTail_.has_value();
+}
+
+std::expected<ArenaManifold::PrefixSnapshot, ArenaRefusal>
+ArenaManifold::exportPrefix(const Mark &m) const {
+  if (m.cellCount > slots_.size() || m.linkSize > links_.size() ||
+      m.contentSize > content_.size() || m.scratchSize > scratch_.size() ||
+      m.trailSize > trail_.size() || m.shadowCount > shadowOrder_.size() ||
+      m.proxyCount > proxyOrder_.size() ||
+      m.quoteOccurrenceCount > quoteOccurrenceOrder_.size() ||
+      m.proxyShadowedEdgeCount > proxyShadowedEdgeOrder_.size() ||
+      m.quoteSpaceCount > quoteSpaceOrder_.size() ||
+      m.dimensionCount > dimensionOrder_.size() || m.cellCount > ephemeralBit ||
+      m.liveLinks > m.linkSize || m.liveContent > m.contentSize) {
+    return std::unexpected{ArenaRefusal::MalformedPrefix};
+  }
+  const auto prefixDimCount =
+      std::ranges::count_if(arenaDims_, [&](const auto &entry) {
+        const DimRef dim = entry.second;
+        return !isEphemeral(dim) || (dim & ~ephemeralBit) < m.cellCount;
+      });
+  if (m.cellCount > ArenaPrefixCodecLimits::maxSlots ||
+      m.linkSize > ArenaPrefixCodecLimits::maxLinks ||
+      m.contentSize > ArenaPrefixCodecLimits::maxContent ||
+      m.shadowCount > ArenaPrefixCodecLimits::maxShadows ||
+      prefixDimCount > ArenaPrefixCodecLimits::maxDims ||
+      m.scratchSize > std::numeric_limits<std::uint32_t>::max()) {
+    return std::unexpected{ArenaRefusal::PrefixLimitExceeded};
+  }
+  if (m.proxyCount != 0 || m.quoteOccurrenceCount != 0 ||
+      m.proxyShadowedEdgeCount != 0 || m.quoteSpaceCount != 0 ||
+      hasUnsupportedUntrackedPrefixIdentity()) {
+    return std::unexpected{ArenaRefusal::UnsupportedPrefixState};
+  }
+
+  std::uint64_t dimensionNameBytes = 0;
+  for (const auto &[name, dim] : arenaDims_) {
+    if (isEphemeral(dim) && (dim & ~ephemeralBit) >= m.cellCount) {
+      continue;
+    }
+    if (name.size() >
+        std::numeric_limits<std::uint32_t>::max() - dimensionNameBytes) {
+      return std::unexpected{ArenaRefusal::PrefixLimitExceeded};
+    }
+    dimensionNameBytes += name.size();
+  }
+  if (!detail::arenaPrefixWireSize(detail::ArenaPrefixWireCounts{
+          .slots              = m.cellCount,
+          .links              = m.linkSize,
+          .content            = m.contentSize,
+          .scratchBytes       = m.scratchSize,
+          .shadows            = m.shadowCount,
+          .dimensions         = static_cast<std::uint64_t>(prefixDimCount),
+          .dimensionNameBytes = dimensionNameBytes,
+      })) {
+    return std::unexpected{ArenaRefusal::PrefixLimitExceeded};
+  }
+
   PrefixSnapshot out{};
   out.mark = m;
   // The snapshot carries the full name map, so a hydrated worker starts with
   // no dimension-cache undo entries of its own.
+  // The trail itself is not serialized: the exported slots already contain
+  // the state at the mark, and therefore form a fresh rollback baseline.
+  out.mark.trailSize      = 0;
   out.mark.dimensionCount = 0;
 
-  const auto cellCount = std::min<std::size_t>(m.cellCount, slots_.size());
+  const auto cellCount = static_cast<std::size_t>(m.cellCount);
   out.slots.assign(slots_.begin(),
                    slots_.begin() + static_cast<std::ptrdiff_t>(cellCount));
   for (std::size_t i = trail_.size(); i > m.trailSize; --i) {
@@ -2118,22 +2364,19 @@ ArenaManifold::PrefixSnapshot ArenaManifold::exportPrefix(const Mark &m) const {
     }
   }
 
-  const auto linkSize = std::min<std::size_t>(m.linkSize, links_.size());
+  const auto linkSize = static_cast<std::size_t>(m.linkSize);
   out.links.assign(links_.begin(),
                    links_.begin() + static_cast<std::ptrdiff_t>(linkSize));
 
-  const auto contentSize =
-      std::min<std::size_t>(m.contentSize, content_.size());
+  const auto contentSize = static_cast<std::size_t>(m.contentSize);
   out.content.assign(content_.begin(),
                      content_.begin() +
                          static_cast<std::ptrdiff_t>(contentSize));
 
-  const auto scratchSize =
-      std::min<std::size_t>(m.scratchSize, scratch_.size());
+  const auto scratchSize = static_cast<std::size_t>(m.scratchSize);
   out.scratch.assign(scratch_.data(), scratchSize);
 
-  const auto shadowCount =
-      std::min<std::size_t>(m.shadowCount, shadowOrder_.size());
+  const auto shadowCount = static_cast<std::size_t>(m.shadowCount);
   out.shadowOrder.assign(shadowOrder_.begin(),
                          shadowOrder_.begin() +
                              static_cast<std::ptrdiff_t>(shadowCount));
@@ -2143,34 +2386,88 @@ ArenaManifold::PrefixSnapshot ArenaManifold::exportPrefix(const Mark &m) const {
       out.arenaDims.emplace(name, dim);
     }
   }
+  std::unordered_map<CellRef, std::uint32_t> overlay;
+  if (!prefixHasRepresentableSizes(out) || !prefixWithinCodecLimits(out) ||
+      !prefixWireSize(out) || !prefixRunsAreWellFormed(out, base_, overlay)) {
+    return std::unexpected{ArenaRefusal::MalformedPrefix};
+  }
   return out;
 }
 
-ArenaManifold *ArenaManifold::hydratePrefix(const PrefixSnapshot &snapshot) {
-  slots_       = snapshot.slots;
-  links_       = snapshot.links;
-  content_     = snapshot.content;
-  scratch_     = snapshot.scratch;
-  shadowOrder_ = snapshot.shadowOrder;
-  arenaDims_   = snapshot.arenaDims;
-  dimensionOrder_.clear();
-  liveLinks_   = snapshot.mark.liveLinks;
-  liveContent_ = snapshot.mark.liveContent;
-
-  overlay_.clear();
-  for (std::uint32_t dense = 0; dense < slots_.size(); ++dense) {
-    if (!isEphemeral(slots_[dense].birthOp)) {
-      overlay_[slots_[dense].birthOp] = dense;
-    }
+ArenaResult ArenaManifold::hydratePrefix(const PrefixSnapshot &snapshot) {
+  if (outstandingMarks_ != 0) {
+    return std::unexpected{ArenaRefusal::MarksOutstanding};
+  }
+  if (hasUnsupportedUntrackedPrefixIdentity() || !proxyOrder_.empty() ||
+      !occurrenceToCanonical_.empty() || !occurrenceToView_.empty() ||
+      !viewCanonicalToOccurrence_.empty() || !quoteOccurrenceOrder_.empty() ||
+      !quoteSpace_.empty() || !quoteSpaceOrder_.empty() ||
+      !proxyShadowedEdges_.empty() || !proxyShadowedEdgeOrder_.empty()) {
+    return std::unexpected{ArenaRefusal::UnsupportedPrefixState};
+  }
+  const auto &m = snapshot.mark;
+  if (m.proxyCount != 0 || m.quoteOccurrenceCount != 0 ||
+      m.proxyShadowedEdgeCount != 0 || m.quoteSpaceCount != 0) {
+    return std::unexpected{ArenaRefusal::UnsupportedPrefixState};
+  }
+  if (!prefixHasRepresentableSizes(snapshot) ||
+      !prefixWithinCodecLimits(snapshot) || !prefixWireSize(snapshot)) {
+    return std::unexpected{ArenaRefusal::PrefixLimitExceeded};
+  }
+  if (snapshot.slots.size() != m.cellCount ||
+      snapshot.links.size() != m.linkSize ||
+      snapshot.content.size() != m.contentSize ||
+      snapshot.scratch.size() != m.scratchSize ||
+      snapshot.shadowOrder.size() != m.shadowCount || m.trailSize != 0 ||
+      m.dimensionCount != 0 || m.cellCount > ephemeralBit ||
+      m.liveLinks > m.linkSize || m.liveContent > m.contentSize) {
+    return std::unexpected{ArenaRefusal::MalformedPrefix};
   }
 
+  std::unordered_map<CellRef, std::uint32_t> overlay;
+  overlay.reserve(snapshot.slots.size());
+  if (!prefixRunsAreWellFormed(snapshot, base_, overlay)) {
+    return std::unexpected{ArenaRefusal::MalformedPrefix};
+  }
+
+  std::vector<CellSlot> slots(snapshot.slots);
+  std::vector<DimLink> links(snapshot.links);
+  std::vector<xanadu::PrimediaSpan> content(snapshot.content);
+  std::string scratch(snapshot.scratch);
+  std::vector<CellRef> shadowOrder(snapshot.shadowOrder);
+  std::unordered_map<std::string, DimRef> arenaDims(snapshot.arenaDims);
+  std::vector<Floors> floors;
+  floors.push_back(Floors{
+      .cells = m.cellCount, .links = m.linkSize, .content = m.contentSize});
+
+  slots_.swap(slots);
+  links_.swap(links);
+  content_.swap(content);
+  scratch_.swap(scratch);
+  shadowOrder_.swap(shadowOrder);
+  arenaDims_.swap(arenaDims);
+  overlay_.swap(overlay);
   trail_.clear();
-  floors_.clear();
-  floors_.push_back(Floors{
-      .cells   = static_cast<std::uint32_t>(slots_.size()),
-      .links   = static_cast<std::uint32_t>(links_.size()),
-      .content = static_cast<std::uint32_t>(content_.size()),
-  });
+  dimensionOrder_.clear();
+  spaces_.clear();
+  spaceProxies_.clear();
+  spaceStoreRefsTail_.clear();
+  proxyOrder_.clear();
+  occurrenceToCanonical_.clear();
+  occurrenceToView_.clear();
+  viewCanonicalToOccurrence_.clear();
+  quoteOccurrenceOrder_.clear();
+  quoteSpace_.clear();
+  quoteSpaceOrder_.clear();
+  boundDimensions_.clear();
+  proxyShadowedEdges_.clear();
+  proxyShadowedEdgeOrder_.clear();
+  provenanceCells_.clear();
+  authorshipRoot_.reset();
+  storesRankTail_.reset();
+  floors_.swap(floors);
+  liveLinks_        = m.liveLinks;
+  liveContent_      = m.liveContent;
   outstandingMarks_ = 1;
   return this;
 }
@@ -2208,6 +2505,9 @@ void writeU64(std::string &out, const std::uint64_t v) {
 }
 
 void writeStr(std::string &out, const std::string_view s) {
+  if (s.size() > std::numeric_limits<std::uint32_t>::max()) {
+    throw std::length_error("APF2 string exceeds u32 length");
+  }
   writeU32(out, static_cast<std::uint32_t>(s.size()));
   out.append(s.data(), s.size());
 }
@@ -2261,6 +2561,10 @@ bool readStr(std::string_view &in, std::string &out) {
 } // namespace
 
 std::string encodeArenaPrefix(const ArenaManifold::PrefixSnapshot &snapshot) {
+  if (!prefixHasRepresentableSizes(snapshot) ||
+      !prefixWithinCodecLimits(snapshot) || !prefixWireSize(snapshot)) {
+    throw std::length_error("arena prefix exceeds APF2 codec limits");
+  }
   std::string out;
   out.append("APF2", 4);
   writeU32(out, snapshot.mark.cellCount);
@@ -2322,7 +2626,8 @@ std::string encodeArenaPrefix(const ArenaManifold::PrefixSnapshot &snapshot) {
 
 std::optional<ArenaManifold::PrefixSnapshot>
 decodeArenaPrefix(std::string_view bytes) {
-  if (bytes.size() < 4 || bytes.substr(0, 4) != "APF2") {
+  if (bytes.size() > std::numeric_limits<std::uint32_t>::max() ||
+      bytes.size() < 4 || bytes.substr(0, 4) != "APF2") {
     return std::nullopt;
   }
   bytes.remove_prefix(4);
@@ -2345,7 +2650,8 @@ decodeArenaPrefix(std::string_view bytes) {
   }
 
   std::uint32_t slotCount = 0;
-  if (!readU32(bytes, slotCount) || slotCount > 1000000U) {
+  if (!readU32(bytes, slotCount) ||
+      slotCount > ArenaPrefixCodecLimits::maxSlots) {
     return std::nullopt;
   }
   out.slots.resize(slotCount);
@@ -2361,7 +2667,8 @@ decodeArenaPrefix(std::string_view bytes) {
   }
 
   std::uint32_t linkCount = 0;
-  if (!readU32(bytes, linkCount) || linkCount > 4000000U) {
+  if (!readU32(bytes, linkCount) ||
+      linkCount > ArenaPrefixCodecLimits::maxLinks) {
     return std::nullopt;
   }
   out.links.resize(linkCount);
@@ -2374,7 +2681,8 @@ decodeArenaPrefix(std::string_view bytes) {
   }
 
   std::uint32_t contentCount = 0;
-  if (!readU32(bytes, contentCount) || contentCount > 4000000U) {
+  if (!readU32(bytes, contentCount) ||
+      contentCount > ArenaPrefixCodecLimits::maxContent) {
     return std::nullopt;
   }
   out.content.resize(contentCount);
@@ -2391,7 +2699,8 @@ decodeArenaPrefix(std::string_view bytes) {
   }
 
   std::uint32_t shadowCount = 0;
-  if (!readU32(bytes, shadowCount) || shadowCount > 1000000U) {
+  if (!readU32(bytes, shadowCount) ||
+      shadowCount > ArenaPrefixCodecLimits::maxShadows) {
     return std::nullopt;
   }
   out.shadowOrder.resize(shadowCount);
@@ -2402,7 +2711,7 @@ decodeArenaPrefix(std::string_view bytes) {
   }
 
   std::uint32_t dimCount = 0;
-  if (!readU32(bytes, dimCount) || dimCount > 100000U) {
+  if (!readU32(bytes, dimCount) || dimCount > ArenaPrefixCodecLimits::maxDims) {
     return std::nullopt;
   }
   for (std::uint32_t i = 0; i < dimCount; ++i) {
@@ -2411,7 +2720,12 @@ decodeArenaPrefix(std::string_view bytes) {
     if (!readStr(bytes, name) || !readU32(bytes, dim)) {
       return std::nullopt;
     }
-    out.arenaDims.emplace(std::move(name), dim);
+    if (!out.arenaDims.emplace(std::move(name), dim).second) {
+      return std::nullopt;
+    }
+  }
+  if (!bytes.empty()) {
+    return std::nullopt;
   }
   return out;
 }

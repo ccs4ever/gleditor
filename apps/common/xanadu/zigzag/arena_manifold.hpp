@@ -193,6 +193,9 @@ enum class ArenaRefusal : std::uint8_t {
   UnknownTarget,     ///< the far end is not a cell this arena can reach
   MarksOutstanding,  ///< compact() inside a choice point would corrupt undo
   ContentRunTooLong, ///< a cell's CSR content count does not fit CellSlot
+  MalformedPrefix,   ///< a prefix snapshot has inconsistent floors or ranges
+  UnsupportedPrefixState, ///< the prefix would omit foreign identity state
+  PrefixLimitExceeded,    ///< the prefix exceeds the APF2 decoder's size limits
 };
 
 class ArenaManifold;
@@ -214,6 +217,12 @@ toString(const ArenaRefusal refusal) noexcept {
     return "marks outstanding";
   case ArenaRefusal::ContentRunTooLong:
     return "content run too long";
+  case ArenaRefusal::MalformedPrefix:
+    return "malformed arena prefix";
+  case ArenaRefusal::UnsupportedPrefixState:
+    return "unsupported arena prefix state";
+  case ArenaRefusal::PrefixLimitExceeded:
+    return "arena prefix exceeds codec limits";
   }
   return "unknown refusal";
 }
@@ -701,19 +710,23 @@ public:
 
   /// Export the exact [0..m) arena prefix as of @p m without mutating this
   /// arena, replaying any newer trail entries in reverse onto the exported
-  /// slot copy.
-  [[nodiscard]] PrefixSnapshot exportPrefix(const Mark &m) const;
+  /// slot copy. Refuses marks whose prefix contains state this snapshot cannot
+  /// represent.
+  [[nodiscard]] std::expected<PrefixSnapshot, ArenaRefusal>
+  exportPrefix(const Mark &m) const;
 
-  /// Hydrate this arena with a parent's [0..m) prefix snapshot, rebuilding
-  /// overlay_ from shadowed base cells and pushing a split floor on floors_ so
-  /// subsequent child branch writes are trailed properly.
-  ArenaManifold *hydratePrefix(const PrefixSnapshot &snapshot);
+  /// Hydrate this arena with a parent's prefix snapshot, rebuilding overlay_
+  /// from shadowed base cells and pushing a split floor on floors_ so
+  /// subsequent child branch writes are trailed properly. A refusal leaves
+  /// this arena unchanged.
+  ArenaResult hydratePrefix(const PrefixSnapshot &snapshot);
 
   /// Evict the oldest mark floor when a near-root choice point is stolen by
   /// another OR-parallel worker and will never be backtracked locally.
   ArenaManifold *evictOldestMark() noexcept;
 
 private:
+  [[nodiscard]] bool hasUnsupportedUntrackedPrefixIdentity() const noexcept;
   [[nodiscard]] DimLink *existingLink(std::uint32_t dense, DimRef dim) noexcept;
   [[nodiscard]] DimLink *linkFor(std::uint32_t dense, DimRef dim);
   void setOneSide(std::uint32_t dense, DimRef dim, DimVector dir, CellRef to);

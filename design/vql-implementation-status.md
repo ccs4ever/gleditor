@@ -474,3 +474,19 @@ Full build, repository formatting and all 725 affected tests from 68 suites pass
 Luna architecture and senior/profiler gates. Tests include exact-limit acceptance, unchanged bytes
 and operations on refusal, and a multi-span transclusion whose early fragment fits but later ones
 overflow. No full-suite pass or speedup is claimed.
+
+## Validated parallel prefix baselines
+
+Prefix export/hydration now refuse malformed floors, runs, identities and omitted required state
+without publishing replacement arena data. Exported marks normalize journals that are absent from
+the snapshot; nested rollback restores correctly. Shadow-prefix preparation and wire-limit checks
+happen before stealing a victim choice, with no failed-prefix oracle fallback. Workers reject
+invalid snapshots before program callbacks or execution. Checked total APF2 sizing prevents nested
+32-bit frame-length truncation. See [iteration 27](projects/vortex-vm-only-iterations.md).
+
+Full build and all 736 affected tests from 68 suites passed with independent Luna architecture and
+senior/profiler gates. Tests include valid base-backed round-trip, duplicate-shadow refusal,
+populated-destination preservation and real encoded-length agreement. Snapshot copying, maps and
+range sorting remain costs; no speedup or full-suite pass is claimed. Omitted federation/provenance
+serialization, compatible worker bootstrap, aggregate mutation capacity, active mutation contracts
+and remaining functor/variadic/frame/stream/mesh lifecycle work still prevent §4.12 completion.

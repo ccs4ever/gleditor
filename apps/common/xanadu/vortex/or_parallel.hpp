@@ -8,6 +8,7 @@
 #define COMMON_XANADU_VORTEX_OR_PARALLEL_HPP
 
 #include <cstdint>
+#include <expected>
 #include <functional>
 #include <map>
 #include <mutex>
@@ -90,8 +91,8 @@ public:
   /// Steal the oldest (nearest-to-root) choice point from @p victimVm,
   /// selecting Model 1 (OracleRecompute) when cyclesSinceRoot < threshold and
   /// Model 2 (ShadowDeltaPrefix) when cyclesSinceRoot >= threshold.
-  std::optional<OrParallelSpark> exportSparkFromVictim(VortexVM &victimVm,
-                                                       CellRef rootEntryOpcode);
+  std::expected<std::optional<OrParallelSpark>, ArenaRefusal>
+  exportSparkFromVictim(VortexVM &victimVm, CellRef rootEntryOpcode);
 
   /// Enqueue a spark onto the coordinator's +d.frontier and +d.or/+d.branch
   /// topology.

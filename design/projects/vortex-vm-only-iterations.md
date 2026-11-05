@@ -825,3 +825,49 @@ bounded implementation and coverage; no full-suite or speedup claim is made.
 
 Logs: `/tmp/vql-persistent-spans-build.log`, `/tmp/vql-persistent-spans-tests.log`,
 `/tmp/vql-persistent-spans-format.log`.
+
+## Iteration 27: validated prefix baselines and non-destructive transfer refusal
+
+Arena prefix export and hydration now return typed failures. Export validates the source mark,
+restores its slot headers into the copied prefix, and normalizes omitted undo journals to a fresh
+baseline: `trailSize` and dimension-journal count are zero. A snapshot whose original mark had a
+nonzero trail count can be hydrated, changed and released without synthesizing dummy undo entries.
+Tracked quote state created after an earlier mark can be excluded; identity state required by the
+prefix but absent from its schema refuses explicitly. Untracked federation/bound-dimension/
+provenance context remains conservatively unsupported.
+
+Hydration checks normalized floors, live counts, disjoint CSR runs, scratch bounds, local birth and
+last-operation identities, base shadows, shadow-order uniqueness and dimension/link references. It
+prepares validation maps, payload copies and the floor locally, then swaps them into the arena. A
+malformed snapshot leaves an existing destination untouched; existing marks and incompatible
+identity state refuse. Export, encoding, hydration and decoding share the existing APF2 count caps.
+APF2 and spark readers reject trailing data, duplicate dimension names, unknown model/presence tags
+and inconsistent model/prefix combinations.
+
+A shared checked calculator accounts for the entire encoded APF2 payload, including headers, arrays
+and names, before export copies or choice removal. That total must fit the enclosing spark's 32-bit
+length field; fitting each section separately is insufficient. Encoders also check string and path
+lengths before narrowing. Synthetic scalar counts test the exact framing boundary without allocating
+a multi-gigabyte payload, and a small real encoding checks the size calculation.
+
+The OR-parallel producer prepares a required shadow prefix before removing the selected choice.
+Export or Dewey-path wire-limit refusal preserves that choice and its mark; it never converts a
+failed shadow export into oracle recomputation. Workers reject missing or refused prefixes before
+program binding or VM execution. The existing Core-before-hydration bootstrap is retained.
+
+Validation performs range sorting, map construction and full prefix copying; this stage makes no
+speedup, byte-memory bound or complete parallel-parity claim. General aggregate mutation capacity,
+serialization of omitted federation/provenance state, worker Core bootstrap identity and remaining
+frame/stream/mesh lifecycle parity remain open. Full §4.12 is incomplete.
+
+Validation: full `make -j$(nproc)` and all 736 affected tests from 68 suites passed. Eleven new
+cases cover populated-destination refusal, required versus post-mark quote state, base-shadow
+round-trip and duplicate rejection, total framing limits and real encoded size, malformed transport
+models, path-limit refusal before stealing, and worker callback suppression. The existing empty-run
+prefix regression now starts from a genuinely nonzero source trail and checks nested release
+restoration. Independent Luna architecture and senior/profiler gates accepted the final code and
+coverage; a fresh Luna writer completed the base-backed case after the previous writer reached a
+usage limit. No full-suite or speedup claim is made.
+
+Logs: `/tmp/vql-prefix-integrity-build.log`, `/tmp/vql-prefix-integrity-tests.log`,
+`/tmp/vql-prefix-integrity-format.log`.
