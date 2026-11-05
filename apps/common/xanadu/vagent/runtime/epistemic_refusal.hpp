@@ -38,8 +38,12 @@ enum class TransferCode : std::uint8_t {
   WorkBudget,
   ProgramReferenceReused,
   RouteCarriesNoEpistemicState,
-  UnknownShapeVersion,    ///< T1b1
-  PolicyEncodingChanged,  ///< T1b1
+  UnknownShapeVersion,        ///< T1b1
+  PolicyEncodingChanged,      ///< T1b1
+  NoTranslator,               ///< T1c
+  UnregisteredOwnedStructure, ///< T1c
+  ReplayStateUnavailable,     ///< T1c
+  StateInconsistent,          ///< T1c
 };
 
 /// Texts are cut here so a hostile program cannot make a refusal large. Only

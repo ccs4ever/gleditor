@@ -28,12 +28,17 @@ namespace xanadu::vagent::runtime {
 struct ResumeLimits {
   std::uint64_t instructions{};
   std::uint32_t maxCells{};
+  /// The scratch the new arena may hold, which an upgrade grant caps at 32 KiB.
+  /// Absent for a resume, whose arena is not so limited.
+  std::optional<std::uint64_t> maxBytes{};
 };
 
-/// Instruction charges a cell is expected to cost across a transfer's passes
-/// (the T1 design's estimate, 14, against the 10,000,000 default grant).
-/// The translation routine replaces it with a measured figure.
-inline constexpr std::uint64_t kTransferWorkPerCell = 14;
+/// Instruction charges a cell is expected to cost across a transfer's passes.
+/// The T1 design estimated 14; the routine's passes measure 14.84 a cell on a
+/// full 22,156-cell resume and 14.73 on a 1,062-cell upgrade, so this is the
+/// measured figure rounded up. Against the 10,000,000 default grant a full
+/// 26,112-cell graph costs 417,792, or 4.2%.
+inline constexpr std::uint64_t kTransferWorkPerCell = 16;
 
 /// Dimensions of a saved graph by name. A dimension the graph never links
 /// along is absent, and so is everything it would have carried.
@@ -76,17 +81,6 @@ struct ResumeAllowance {
 [[nodiscard]] std::optional<TransferRefusal>
 checkResumeState(const zigzag::ArenaManifold &arena, zigzag::CellRef root,
                  const DimTable &dims, const UpgradeSchema &into);
-
-/// Policy encoding, policy, signature and removal against the new program's
-/// schema, predicate by predicate.
-[[nodiscard]] std::optional<TransferRefusal>
-checkResumePolicy(const zigzag::ArenaManifold &arena, zigzag::CellRef root,
-                  const DimTable &dims, const UpgradeSchema &into);
-
-/// The cell and work budgets of copying the owned graph.
-[[nodiscard]] std::optional<TransferRefusal>
-checkResumeBudget(const zigzag::ArenaManifold &arena, zigzag::CellRef root,
-                  const DimTable &dims, const ResumeAllowance &allowance);
 
 /// An apply-time refusal travels out of `restoreState` as this, so `prepare`
 /// can store it for `AgentExecutor::lastRefusal`.

@@ -82,7 +82,7 @@ enum class UpgradeChangeKind {
   PlanHashVersion,
   /// A predicate gained, lost or changed its arbitration policy. Records
   /// scored under one policy must not be reinterpreted under another, so
-  /// this refuses until the typed epistemic translator exists.
+  /// this is refused on every road in T1 (D3); a typed migration is T2's.
   EpistemicPolicy,
 };
 

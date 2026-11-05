@@ -59,6 +59,14 @@ std::string_view toString(const TransferCode code) noexcept {
     return "UnknownShapeVersion";
   case TransferCode::PolicyEncodingChanged:
     return "PolicyEncodingChanged";
+  case TransferCode::NoTranslator:
+    return "NoTranslator";
+  case TransferCode::UnregisteredOwnedStructure:
+    return "UnregisteredOwnedStructure";
+  case TransferCode::ReplayStateUnavailable:
+    return "ReplayStateUnavailable";
+  case TransferCode::StateInconsistent:
+    return "StateInconsistent";
   }
   return "Unknown";
 }

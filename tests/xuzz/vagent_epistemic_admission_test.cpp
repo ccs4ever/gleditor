@@ -84,7 +84,8 @@ protected:
   std::uint64_t seq{0};
   /// The host's steady clock, which the test moves. Atomic: the real-thread
   /// tests read it from the producer.
-  std::chrono::steady_clock::time_point origin = std::chrono::steady_clock::now();
+  std::chrono::steady_clock::time_point origin =
+      std::chrono::steady_clock::now();
   std::atomic<std::int64_t> offsetMs{0};
 
   void SetUp() override { start(kSource); }
@@ -105,12 +106,6 @@ protected:
     ex().setWallClockSynchronised(true);
     // Populated state needs a translator, and this one carries nothing: the
     // tests are about the door, not the copy.
-    ex().setOwnedStateTranslator(
-        [](const CompiledProgram &, const CompiledProgram &,
-           const zigzag::ArenaManifold &, zigzag::CellRef,
-           zigzag::vortex::WorkerContext &, zigzag::CellRef,
-           std::map<zigzag::CellRef, zigzag::CellRef> &,
-           std::uint64_t &) { return std::expected<void, ActorError>{}; });
     if (source.find("predicate at") == std::string_view::npos) return;
     ASSERT_TRUE(ex().bindSource(pid, binding()));
     auto granted = ex().grantHealth(pid, healthGrant());
@@ -133,8 +128,9 @@ protected:
     EpistemicHealthGrant g{"g1",
                            *HealthIssuer::fromPrincipal(kOperator),
                            {kP1},
-                           {HealthActionKind::Isolate, HealthActionKind::Degrade,
-                            HealthActionKind::Clear, HealthActionKind::Reset},
+                           {HealthActionKind::Isolate,
+                            HealthActionKind::Degrade, HealthActionKind::Clear,
+                            HealthActionKind::Reset},
                            std::chrono::hours(1),
                            64};
     return g;
@@ -188,7 +184,8 @@ TEST_F(AdmissionTest, AdmissionClosedIsNamedAndRetryable) {
 }
 
 TEST_F(AdmissionTest, APostBeforeTheGateIsCountedAndAPostAfterItIsRefused) {
-  // Before the gate: a queued reading is in the post box, so the swap counts it.
+  // Before the gate: a queued reading is in the post box, so the swap counts
+  // it.
   const auto queued = reading();
   ASSERT_TRUE(ex().observe(pid, queued));
   const auto busy = report();
@@ -208,7 +205,7 @@ TEST_F(AdmissionTest, APostBeforeTheGateIsCountedAndAPostAfterItIsRefused) {
     if (point == Point::BetweenObserveSections)
       EXPECT_TRUE(ex().pauseAdmission(target, std::chrono::hours(1)));
   });
-  const auto late = reading();
+  const auto late  = reading();
   const auto raced = ex().observe(pid, late);
   ASSERT_FALSE(raced);
   EXPECT_EQ(raced.error(), EpistemicRefusal::AdmissionClosed);
@@ -246,7 +243,8 @@ TEST_F(AdmissionTest, APostBeforeTheGateIsCountedAndAPostAfterItIsRefused) {
   EXPECT_EQ(outcome->kind, IngestOutcome::Kind::Committed);
 }
 
-TEST_F(AdmissionTest, ThePauseRefusesEveryAdmittingCallAndQueuedReadingsStillRun) {
+TEST_F(AdmissionTest,
+       ThePauseRefusesEveryAdmittingCallAndQueuedReadingsStillRun) {
   ASSERT_TRUE(ex().observe(pid, reading()));
   ASSERT_TRUE(ex().pauseAdmission(pid, std::chrono::hours(1)));
   EXPECT_EQ(report().admission, AdmissionState::Paused);
@@ -313,7 +311,8 @@ TEST_F(AdmissionTest, AQueuedHealthTicketRefusesTheUpgrade) {
   // The item is in the post box, which the report names first.
   EXPECT_EQ(r.error().detail.subject, "posts");
   // A checkpoint that sees the item sees the ticket: they leave together.
-  EXPECT_EQ(ex().checkpoint(pid).error(), CheckpointRefusal::HostDeliveryPending);
+  EXPECT_EQ(ex().checkpoint(pid).error(),
+            CheckpointRefusal::HostDeliveryPending);
   settle();
   EXPECT_EQ(report().pendingHealth, 0U);
   EXPECT_EQ(ex().healthOutcome(pid, *receipt).state,
@@ -333,7 +332,8 @@ TEST_F(AdmissionTest, InFlightIsEmptyAtQuiescence) {
   EXPECT_TRUE(drained.quiet());
 }
 
-TEST_F(AdmissionTest, OpenChargesAndResetMarksSurviveAndCloseUnderTheNewProgram) {
+TEST_F(AdmissionTest,
+       OpenChargesAndResetMarksSurviveAndCloseUnderTheNewProgram) {
   // A refusal decided before the swap and a health action that committed.
   auto bad  = reading();
   bad.frame = "ecef";
@@ -414,25 +414,17 @@ TEST_F(AdmissionTest, AdmissionReopensOnEveryExit) {
   ASSERT_TRUE(ex().observe(pid, reading()));
   settle();
   ex().setOwnedStateTranslator(
-      [](const CompiledProgram &, const CompiledProgram &,
-         const zigzag::ArenaManifold &, zigzag::CellRef,
-         zigzag::vortex::WorkerContext &, zigzag::CellRef,
-         std::map<zigzag::CellRef, zigzag::CellRef> &,
-         std::uint64_t &) -> std::expected<void, ActorError> {
+      [](const TranslationPlan &, const ApplyRequest &)
+          -> std::expected<TranslationReport, TransferRefusal> {
         throw std::runtime_error("translator");
       });
   const auto thrown = host->upgrade(pid, retained());
   ASSERT_FALSE(thrown);
   EXPECT_EQ(thrown.error().actor, ActorError::ResourceLimit);
   EXPECT_EQ(report().admission, AdmissionState::Open);
+  ex().setOwnedStateTranslator(defaultEpistemicTranslator());
   EXPECT_TRUE(ex().observe(pid, reading()));
   settle();
-  ex().setOwnedStateTranslator(
-      [](const CompiledProgram &, const CompiledProgram &,
-         const zigzag::ArenaManifold &, zigzag::CellRef,
-         zigzag::vortex::WorkerContext &, zigzag::CellRef,
-         std::map<zigzag::CellRef, zigzag::CellRef> &,
-         std::uint64_t &) { return std::expected<void, ActorError>{}; });
 
   // After a commit.
   ASSERT_TRUE(host->upgrade(pid, retained()));
@@ -454,7 +446,8 @@ TEST_F(AdmissionTest, ThePauseIsKeptAcrossAnUpgradeAndTheGateLeavesItAlone) {
   // A paused actor still upgrades; the swap gate is separate from the pause.
   std::optional<AdmissionState> during;
   ex().setSwapObserver([&](Point point, const ActorPid &target) {
-    if (point == Point::DuringDrain) during = ex().quiescence(target)->admission;
+    if (point == Point::DuringDrain)
+      during = ex().quiescence(target)->admission;
   });
   ASSERT_TRUE(host->upgrade(pid, retained()));
   EXPECT_EQ(during, AdmissionState::Swapping);
@@ -525,11 +518,11 @@ TEST_F(AdmissionTest, ThePauseExpiresAndIsRenewedForTheDrain) {
   ASSERT_TRUE(host->send(pid, ping));
   ASSERT_TRUE(ex().pauseAdmission(pid));
   std::atomic<bool> moved{false};
-  ex().setTurnObserver(
-      [&](const ActorPid &, const zigzag::vortex::WorkerContext &,
-          zigzag::CellRef) {
-        if (!moved.exchange(true)) advance(std::chrono::seconds(60));
-      });
+  ex().setTurnObserver([&](const ActorPid &,
+                           const zigzag::vortex::WorkerContext &,
+                           zigzag::CellRef) {
+    if (!moved.exchange(true)) advance(std::chrono::seconds(60));
+  });
   const auto upgraded =
       host->upgradeQuiescing(pid, retained(), std::chrono::seconds(300));
   EXPECT_TRUE(upgraded) << (upgraded ? "" : toString(upgraded.error()));
@@ -606,8 +599,8 @@ TEST_F(AdmissionTest, AnObserveParkedBetweenItsSectionsIsRefusedByTheSwap) {
     }
   });
   const auto parkedReading = reading();
-  producer = std::thread(
-      [&] { result.emplace(ex().observe(pid, parkedReading)); });
+  producer =
+      std::thread([&] { result.emplace(ex().observe(pid, parkedReading)); });
   parked.wait();
   // Nothing of the producer's is in the post box yet: the swap finds quiet.
   EXPECT_TRUE(report().quiet());
@@ -638,7 +631,8 @@ TEST_F(AdmissionTest, AHealthActionParkedAfterItsGrantMatchIsRefusedByTheSwap) {
       producer.join();
     }
   });
-  producer = std::thread([&] { result.emplace(ex().healthAction(pid, isolate())); });
+  producer =
+      std::thread([&] { result.emplace(ex().healthAction(pid, isolate())); });
   parked.wait();
   ASSERT_TRUE(host->upgrade(pid, retained()));
   ASSERT_TRUE(result);

@@ -1380,6 +1380,52 @@ busy-agent replacement and shared program bases are deferred extensions. Design 
 workloads around the supported bounds and measure them; neither extension is supplied by the syntax
 checker.
 
+### Upgrading and resuming an agent that arbitrates
+
+An agent whose program has an `arbitrated by` predicate carries source profiles, observation
+histories and health records. Resume and the in-place schema upgrade carry all of it through one
+routine, `translateEpistemicState`; the reconciler road (`LocalHost::upgrade(pid, CompiledProgram)`)
+does not, and refuses populated state with `RouteCarriesNoEpistemicState` naming the other overload.
+Every refusal is a typed `TransferRefusal` decided before anything changes. An agent holding an
+active intention, a changed or removed policy, a different predicate signature, an unknown shape
+version or a state the registry does not own is refused by name.
+
+Quiet the agent first. A busy source never becomes quiescent on its own, so the operator path is:
+
+1. `pauseAdmission(pid, ttl)`, so readings and health actions are refused `AdmissionClosed`.
+1. Run the reactor until `quiescence(pid)->quiet()`.
+1. `upgrade(...)`.
+1. `resumeAdmission(pid)`.
+
+`LocalHost::upgradeQuiescing(pid, program, timeout)` is those four steps. The host must serialise
+mesh `receive` and `upgrade`; the executor counts a non-empty mailbox and refuses on it but cannot
+close it. A percept posted during the swap is consumed by the new program.
+
+An in-place upgrade copies into an arena whose scratch an upgrade grant caps at 32 KiB, so a profile
+graph with many distinct strings can be refused (`PeakCopyBudget` naming the scratch bytes, or a
+`Runtime` refusal with `ResourceLimit` when the clauses fill the rest) where a resume of the same
+agent succeeds. The refusal leaves the actor as it was.
+
+What the host keeps or loses across a swap (the same rows as `hostState()` in
+`epistemic_translate_registry.cpp`):
+
+| State                                          | In-process upgrade                      | Resume                                           |
+| ---------------------------------------------- | --------------------------------------- | ------------------------------------------------ |
+| Bindings and aliases                           | kept                                    | lost; the host rebinds                           |
+| Replay floors                                  | kept                                    | lost; relearned from the first stale advance     |
+| Outcome and change logs                        | kept                                    | lost; a resend meets the arena's dedup window    |
+| Queued readings, in-flight set                 | zero at quiescence                      | lost                                             |
+| Open charges, uncounted, refused-while-faulted | kept                                    | lost                                             |
+| Estimator replay marks                         | kept                                    | lost; one replay can count again                 |
+| Health grants                                  | kept                                    | lost; operators re-grant                         |
+| Reset marks                                    | kept                                    | lost; the arena's `reset_epoch` is authoritative |
+| Pending health tickets                         | zero at quiescence                      | refused earlier by `checkpoint`                  |
+| Health outcome ring                            | kept                                    | lost with the executor                           |
+| Health action sequence (host)                  | kept                                    | restarts; the profile's `action_seq` carries     |
+| Latch cache                                    | cleared after the commit                | the new executor's, empty                        |
+| `last_receive`, `last_contact`                 | kept                                    | cleared; liveness restarts at first contact      |
+| Admission record                               | kept until `resumeAdmission` or its ttl | not applicable                                   |
+
 ## Native host modules and sandboxing
 
 While pure vagent programs compile to native Vortex opcode graphs and run within the core mesh actor

@@ -1700,12 +1700,10 @@ TEST_F(VagentEpistemicHealthActions, ARefusedUpgradeLeavesTheLatchAndTheCache) {
   ASSERT_TRUE(ex().sourceLatchCached(pid, kP1));
   auto next = CompiledProgram::fromSource(std::string(kActionProgram) + "\n");
   ASSERT_TRUE(next) << next.error();
-  auto held = host->retainProgram(std::move(*next));
-  ASSERT_TRUE(held);
-  // A profile in the arena makes the in-process upgrade refuse, so an upgrade
-  // that empties the cache can only meet an arena with no latch to re-learn;
-  // the latch itself survives the refusal.
-  EXPECT_FALSE(host->upgrade(pid, held));
+  // A profile in the arena makes the reconciler road refuse (the schema road
+  // carries it since T1c), so an upgrade that empties the cache can only meet
+  // an arena with no latch to re-learn; the latch itself survives the refusal.
+  EXPECT_FALSE(host->upgrade(pid, std::move(*next)));
   host->pump();
   EXPECT_TRUE(ex().sourceLatchCached(pid, kP1));
   EXPECT_TRUE(health()->faulted);

@@ -1350,11 +1350,12 @@ TEST_FILTER ?= -$(SWARM_NETNS_TESTS)
 TEST_PROGRAMS := $(addprefix $(OBJDIR)/,gleditor xudu xuzz zigzag xudu-dump \
 	xudu-swarm-peer vquery vpl vplc vprolog vlace vlacec vicon viconc vagent vagent-native-host)
 
-.PHONY: test test/all test/integration test/e2e-orchestration test/vagent-docker-e2e test/e2e-vagent-cluster
+.PHONY: test test/all test/integration test/translator-coverage test/e2e-orchestration test/vagent-docker-e2e test/e2e-vagent-cluster
 test: $(TEST_PROGRAMS) $(OBJDIR)/gleditor_test $(OBJDIR)/xuzz_test $(OBJDIR)/zigzag_test
 	$(OBJDIR)/gleditor_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
 	$(OBJDIR)/xuzz_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
 	$(OBJDIR)/zigzag_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
+	$(MAKE) test/translator-coverage
 	@if [ -z "$(TEST_FILTER)" ] || [ "$(TEST_FILTER)" = "-$(SWARM_NETNS_TESTS)" ] || echo "$(TEST_FILTER)" | grep -qE 'Swarm|MutableName|PublicationOutboxNetwork|\*'; then \
 		tools/swarm-netns-test.sh && \
 		XUDU_SWARM_TEST_FILTER='PublicationOutboxNetworkTest.*:MeshCheckpointNetworkTest.*' tools/swarm-netns-test.sh; \
@@ -1362,6 +1363,12 @@ test: $(TEST_PROGRAMS) $(OBJDIR)/gleditor_test $(OBJDIR)/xuzz_test $(OBJDIR)/zig
 
 test/all: test
 
+
+# A source check, not a test: every agent dimension and every profile or
+# observation field constant must have an entry in the P19 owned-structure
+# registry, or a transfer would drop it silently. Not part of `make lint`.
+test/translator-coverage:
+	PYTHONDONTWRITEBYTECODE=1 python3 -B tools/check-translator-coverage.py
 
 test/integration: test/e2e-orchestration test/vagent-docker-e2e
 test/e2e-orchestration: $(OBJDIR)/xuzz $(OBJDIR)/xuzz_test

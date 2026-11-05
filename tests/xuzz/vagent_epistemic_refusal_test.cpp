@@ -130,7 +130,11 @@ TEST(TransferRefusalTest, RefusalVocabularyIsStable) {
       TransferCode::ProgramReferenceReused,
       TransferCode::RouteCarriesNoEpistemicState,
       TransferCode::UnknownShapeVersion,
-      TransferCode::PolicyEncodingChanged};
+      TransferCode::PolicyEncodingChanged,
+      TransferCode::NoTranslator,
+      TransferCode::UnregisteredOwnedStructure,
+      TransferCode::ReplayStateUnavailable,
+      TransferCode::StateInconsistent};
   std::set<std::string_view> names;
   for (const auto code : codes) {
     const auto name = toString(code);
@@ -489,14 +493,7 @@ protected:
             std::chrono::system_clock::now() + std::chrono::hours(1),
             true};
   }
-  static void registerTranslator(LocalHost &h) {
-    h.executor().setOwnedStateTranslator(
-        [](const CompiledProgram &, const CompiledProgram &,
-           const zigzag::ArenaManifold &, zigzag::CellRef,
-           zigzag::vortex::WorkerContext &, zigzag::CellRef,
-           std::map<zigzag::CellRef, zigzag::CellRef> &,
-           std::uint64_t &) { return std::expected<void, ActorError>{}; });
-  }
+  static void registerTranslator(LocalHost &) {}
 };
 
 TEST_F(RefusalUpgrade, EveryUpgradeRefusalIsTyped) {
@@ -711,10 +708,9 @@ TEST_F(RefusalUpgrade, ThePublicEntryPointsAgree) {
   EXPECT_EQ(byValue.error().code, TransferCode::RouteCarriesNoEpistemicState);
   EXPECT_EQ(byValue.error().detail.subject, "d.trust");
   EXPECT_EQ(byValue.error().detail.current, "the shared-pointer overload");
+  // The schema road carries it with the default translator (T1c).
   const auto shared = host->upgrade(pid, host->retainProgram(version()));
-  ASSERT_FALSE(shared);
-  EXPECT_EQ(shared.error().code, TransferCode::Runtime);
-  EXPECT_EQ(shared.error().actor, ActorError::ExecutionFailed);
+  EXPECT_TRUE(shared) << (shared ? "" : toString(shared.error()));
 }
 
 TEST_F(RefusalUpgrade, ASameReferenceDifferentProgramIsRefusedByName) {

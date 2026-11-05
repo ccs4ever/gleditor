@@ -189,3 +189,123 @@ persisted layout changes and no cells.
     still the I3-4 review's finding.
   - A percept posted during a swap is consumed by the new program, as the design records.
   - Nothing here drives `upgradeQuiescing` from the `vagent` command line; that is W1's.
+
+## T1c: the translation routine, the full-key matcher and the registry
+
+Source baseline: T1b2. Implemented from the design without a per-slice review. No persisted layout
+changes.
+
+- **Added.** `epistemic_translate.{hpp,cpp}`: `planTranslation` (read-only, the pre-flight),
+  `applyTranslation` (the only writer, four passes over one old-to-new map), `PredicateKey`,
+  `decodePolicy`, `PredicateMatcher<KeyDigest>`, `checkPredicateKeys`, `epistemicStateDigest` and
+  the default translator. `epistemic_translate_registry.{hpp,cpp}`: `OwnedStructure` (14 entries,
+  each with a `populate` hook), `notOwnedDimensions`, `hostState` and the three `owns*` queries.
+  `tools/check-translator-coverage.py` and the make target `test/translator-coverage`.
+  `TransferCode` gained `NoTranslator`, `UnregisteredOwnedStructure`, `ReplayStateUnavailable` and
+  `StateInconsistent`.
+- **The passes.** Pass 0 is `planTranslation`: shape and translator, then every predicate key
+  decoded from the graph, then the profiles (token, fields and dimensions against the registry,
+  incarnation, streams, dedup entries, clone chain), then every record (dimensions, fields, and that
+  its `profile` value is a clone occurrence of some profile), then the cell, scratch and work
+  budgets. Pass 1 copies each profile, its name cells, field values and clone chain, and appends it
+  to `d.trust`. Pass 2 copies each record to the mapped support or profile in its old order. Pass 3
+  checks that every edge of every cell the routine made has both ends mapped and the new cell holds
+  the same edge, and that it copied what the plan counted. Pass 4 clears `last_receive` and
+  `last_contact` on a resume. Stored value bits move as they are.
+- **The three copiers.** `restoreState` no longer copies profiles, compares policy or follows
+  `d.epistemic` and `d.clone`; it copies clauses with their supports and calls the routine through
+  `translateEpistemic`. The schema road's `UpgradeGraph` already skipped both dimensions; it now
+  always admits them and hands the seam its map. The reconciler road is unchanged: populated state
+  stays `RouteCarriesNoEpistemicState`.
+- **The refusal that lifted.** A populated schema-road upgrade, which T0 and T1a refused, now
+  upgrades with the default translator and keeps its profiles, latches, health records and
+  histories. The tests that pinned the refusal now pin the success, and the reconciler road's
+  refusal. The seam's signature is
+  `(TranslationPlan, ApplyRequest) -> expected<TranslationReport, TransferRefusal>`; an empty one
+  gives `NoTranslator`. No README text named the refusal.
+- **Measured work.** On a 22,156-cell resume the routine charged 328,857 instructions (14.84 a
+  cell); on a 1,062-cell in-place upgrade, 15,648 (14.73). The design's 14 was low, so
+  `kTransferWorkPerCell` is 16. A full 26,112-cell graph is 417,792, 4.2% of the default grant and
+  42% of the TUI's 1,000,000, under the half-grant rule. Pre-flight wall time on the full resume was
+  about 1.7 s, almost all of it the checkpoint decode in `fetchImage`; the plan itself runs twice on
+  resume (pre-flight and `restoreState`) and spends no grant.
+- **Tests.** New `tests/xuzz/vagent_epistemic_translate_test.cpp` (18 cases): the registry's
+  consistency; policy decode and round trip with every optional present and absent; the forced
+  collision; every registered structure populated on a live profile and compared by digest across
+  the source, a resume and an in-place upgrade; the latch and a reason on both roads; liveness
+  stamps by disposition; a `-0.0` on the upgrade road; 24 seeded random ingestion runs of up to 40
+  events (readings, rebinds, retire, isolate, clear); a failing translator rolling back; no
+  translator on both roads; the apply-time resume failure with its stored refusal; a record without
+  a profile; a missing `streams`; an unregistered dimension and an unregistered profile field; D3
+  (an unchanged policy keeps the binding, a changed one is refused and the binding still accepts);
+  the full-budget resume with its measurement; a measured in-place upgrade; and the coverage script
+  failing on an uncovered field constant and on an uncovered dimension.
+- **Result.** `vagent_actor_test`: 1031 passed. `xuzz_test`: 3200 passed (one benchmark timing
+  flaked once under build load and passed alone). Full `make` exits 0 and
+  `make fuzz_epistemic_ingress` builds.
+- **Deviations.**
+  - The seam takes the plan as well as the request, and the request carries `OwnedGraphDims` for the
+    old graph (optional refs) and a plain `DimBinding` for the new one, since the old graph may lack
+    a dimension and the new one cannot.
+  - The registry lists live in `epistemic_translate_registry.cpp`, not in the ABI headers: those
+    hold constants only and `populate` needs the wire layer. The script reads the constants' names
+    out of the registry file. It treats `kProfile*`, `kObs*`, `kReason*` and `kAction*` constants as
+    fields except the content values (statuses, health states, reason kinds and origins,
+    `retired_by` causes).
+  - The `health` and `health_fraction` stamps are record fields, not profile health scalars as the
+    design's table lists them; the registry has them under `record.fields`.
+  - Required replay state is the incarnation always, and `streams` and `dedup` unless the profile is
+    a tombstone. An advance writes fresh windows and a retirement clears them with `retired` set, so
+    requiring them of a tombstone refused real state.
+  - `Migratable` and the `Incompatible{part}` outcome type are not declared; the matcher answers
+    with an index or nothing and `checkPredicateKeys` classifies a miss as T1a's codes. The matcher
+    takes its digest as a template parameter, as designed.
+  - `NoTranslator` is decided in the plan, so the pre-flight, `restoreState` and the schema road
+    agree; the old `Runtime{ExecutionFailed}` for that case is gone.
+  - The reconciler road gets its policy, signature and removal comparison from T1a's
+    `checkPredicateTransfer`, not from the graph decode; only resume and the schema road decode.
+  - A checkpoint is encoded with canonical doubles and types numeric-looking text, so `-0.0` reaches
+    a resume as `0.0` and a field named `"0"` comes back as a number. The routine moves whatever
+    bits it is handed; the digest hashes names as text for that reason. `DoublesCrossByBitPattern`
+    tests the upgrade road, which reads the live arena.
+  - The destination arena interns each distinct text once. An upgrade grant caps the new arena's
+    scratch at 32 KiB (`MeshActorRuntime::upgrade`), which the design's cell bound did not account
+    for: at 22,156 cells the clauses and supports fill it before the translator runs, and the swap
+    fails with `Runtime{ResourceLimit}`, leaving the actor untouched, where a resume of the same
+    image succeeds. The plan refuses earlier, as `PeakCopyBudget{subject = "scratch bytes"}`, when
+    the distinct texts alone exceed the grant. The full-budget test therefore resumes at the bound
+    and upgrades a smaller graph.
+- **Limits.**
+  - The in-place road's real ceiling is the 32 KiB scratch, not 26,112 cells. Raising it is a change
+    to the mesh runtime that needs its own approval; an operator whose agent is that large resumes
+    instead.
+  - Pass 3 verifies edges only; tokens and intentions are copied there by later slices.
+  - The matcher decodes the policy but the feature schema, calibration and model epochs of the full
+    key arrive with I4-1b and I5-3.
+  - `TheCoverageScriptFailsOnAnUncoveredFieldOrDimension` runs the script from the repository root
+    and skips elsewhere.
+  - There is no test that fails the `on Upgrade` hook after the routine ran with populated state;
+    the existing hook-failure test covers the rollback for an agent without it.
+  - Resume of a program that is not a `CompiledProgram` carries no P19 state and refuses populated
+    state as `NoTranslator`.
+
+### T1 as a whole
+
+Complete: the typed refusal channel on resume and both upgrade roads (T1a), the shape header and the
+guard (T1b1), the admission gate, the quiescence report and the operator path (T1b2), and the
+routine, the full-key matcher, the digest and the owned-structure registry with its script (T1c). A
+populated agent resumes and upgrades in place with its profiles, histories, latches and health
+records, and every cause of refusal has a code.
+
+Knowingly open for the M1 review: the 32 KiB scratch ceiling on the in-place road; the reconciler
+road still refuses populated state rather than carrying it; no `Migratable` outcome, no token or
+intention copy and no continuation rules (T2 and later slices); the `ClusterNode::receive` thread
+question for the mesh mailbox (I3-4); the resume pre-flight reads the whole image, so its cost is
+the decode time; and the registry's `kHostState` text is prose, checked only by being the single
+source of the user guide's table.
+
+Lead verification (2026-11-05): full build, `vagent_actor_test` 1031 and `xuzz_test` 3200 pass.
+One full run, which overlapped another process using the same `build/xdg` state, failed
+`Translate.ResumeAndUpgradeAgreeOverRandomIngestion`; it then passed 10 repeats alone, 4 shuffled
+runs of the 897 vagent and epistemic tests and a clean full run. The failure text was not captured.
+It is carried into the M1 review as an unexplained intermittent.

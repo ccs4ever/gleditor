@@ -1452,7 +1452,7 @@ protected:
   }
 };
 
-TEST_F(VagentEpistemicUpgrade, APopulatedProfileRefusesEveryUpgradeEntryPoint) {
+TEST_F(VagentEpistemicUpgrade, APopulatedProfileUpgradesOnTheSchemaRoadOnly) {
   settle();
   observe(reading(kP1, "e1", 1, 1.0));
   ASSERT_EQ(profiles().size(), 1U);
@@ -1462,26 +1462,24 @@ TEST_F(VagentEpistemicUpgrade, APopulatedProfileRefusesEveryUpgradeEntryPoint) {
   ASSERT_TRUE(arena().setValueBits(*faulted, xanadu::ValueKind::Bool, 1));
   const auto was = before();
 
-  auto held = host->retainProgram(next());
-  ASSERT_TRUE(held);
-  const auto shared = host->upgrade(pid, held);
-  ASSERT_FALSE(shared);
-  EXPECT_EQ(shared.error().actor,
-            zigzag::vortex::mesh::ActorError::ExecutionFailed);
-  expectUnchanged(was);
-
+  // The reconciler road carries no P19 state and says so.
   const auto byValue = host->upgrade(pid, next());
   ASSERT_FALSE(byValue);
   EXPECT_EQ(byValue.error().route, TransferRoute::UpgradeReconciler);
+  EXPECT_EQ(byValue.error().code, TransferCode::RouteCarriesNoEpistemicState);
   expectUnchanged(was);
-
-  // The executor's own overloads are the entry points the host wraps.
   auto direct       = next();
   const auto viaRef = host->executor().upgrade(pid, direct);
   ASSERT_FALSE(viaRef);
   EXPECT_EQ(viaRef.error().code, TransferCode::RouteCarriesNoEpistemicState);
   expectUnchanged(was);
 
+  // The schema road carries it (T1c): the profile, its latch and its history.
+  auto held = host->retainProgram(next());
+  ASSERT_TRUE(held);
+  const auto shared = host->upgrade(pid, held);
+  ASSERT_TRUE(shared) << (shared ? "" : toString(shared.error()));
+  EXPECT_EQ(profiles().size(), 1U);
   EXPECT_EQ(flag(profiles()[0], kProfileFaulted), true);
   EXPECT_EQ(clauses().size(), 1U);
 }
@@ -1494,11 +1492,8 @@ TEST_F(VagentEpistemicUpgrade,
   // The reconciler never runs the translator, so registering one must not
   // let it shed what the translator exists to carry.
   host->executor().setOwnedStateTranslator(
-      [](const CompiledProgram &, const CompiledProgram &,
-         const zigzag::ArenaManifold &, zigzag::CellRef,
-         zigzag::vortex::WorkerContext &, zigzag::CellRef,
-         std::map<zigzag::CellRef, zigzag::CellRef> &, std::uint64_t &) {
-        return std::expected<void, zigzag::vortex::mesh::ActorError>{};
+      [](const TranslationPlan &, const ApplyRequest &) {
+        return std::expected<TranslationReport, TransferRefusal>{};
       });
   const auto was    = before();
   auto direct       = next();

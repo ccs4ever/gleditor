@@ -126,13 +126,15 @@ struct Live {
     host->pump();
     const auto base = wallSeconds();
     for (std::uint64_t i = 1; i <= 3; ++i) {
-      EXPECT_TRUE(
-          host->executor().observe(pid, reading("e" + std::to_string(i), i, base)));
+      EXPECT_TRUE(host->executor().observe(
+          pid, reading("e" + std::to_string(i), i, base)));
       host->pump();
     }
   }
 
-  zigzag::vortex::WorkerContext &ctx() { return *host->executor().context(pid); }
+  zigzag::vortex::WorkerContext &ctx() {
+    return *host->executor().context(pid);
+  }
   CellRef agent() { return *host->executor().agentCell(pid); }
 
   /// The cells of the agent's `d.epistemic` rank.
@@ -156,12 +158,12 @@ struct Live {
     const auto value = fieldValue(ctx().arena, valueDims(ctx().core), *header(),
                                   kShapeVersionField);
     ASSERT_TRUE(value);
-    ASSERT_TRUE(ctx().arena.setValueBits(
-        *value, xanadu::ValueKind::Int64, static_cast<std::uint64_t>(version)));
+    ASSERT_TRUE(ctx().arena.setValueBits(*value, xanadu::ValueKind::Int64,
+                                         static_cast<std::uint64_t>(version)));
   }
   /// The predicate's policy master.
   CellRef master(std::string_view predicate) {
-    auto &arena = ctx().arena;
+    auto &arena     = ctx().arena;
     const auto dims = registerDimensions(arena);
     for (const auto p : zigzag::rankAfter(arena, agent(), dims.belief))
       if (arena.textOf(p) == predicate) return *arena.linked(p, dims.epistemic);
@@ -169,7 +171,8 @@ struct Live {
     return 0;
   }
   void injectIntention() {
-    appendToRank(ctx().arena, agent(), registerDimensions(ctx().arena).intention,
+    appendToRank(ctx().arena, agent(),
+                 registerDimensions(ctx().arena).intention,
                  ctx().arena.makeCell("intention"));
   }
   AgentCheckpoint checkpoint() {
@@ -177,21 +180,14 @@ struct Live {
     EXPECT_TRUE(saved) << (saved ? "" : "checkpoint refused");
     return *saved;
   }
-  static void registerTranslator(LocalHost &h) {
-    h.executor().setOwnedStateTranslator(
-        [](const CompiledProgram &, const CompiledProgram &,
-           const zigzag::ArenaManifold &, zigzag::CellRef,
-           zigzag::vortex::WorkerContext &, zigzag::CellRef,
-           std::map<zigzag::CellRef, zigzag::CellRef> &,
-           std::uint64_t &) { return std::expected<void, ActorError>{}; });
-  }
+  static void registerTranslator(LocalHost &) {}
 };
 
 std::size_t versions = 0;
 CompiledProgram nextVersion(std::string_view source) {
   ++versions;
-  auto program =
-      CompiledProgram::fromSource(std::string(source) + std::string(versions, '\n'));
+  auto program = CompiledProgram::fromSource(std::string(source) +
+                                             std::string(versions, '\n'));
   EXPECT_TRUE(program) << program.error();
   return std::move(*program);
 }
@@ -261,14 +257,14 @@ TEST(EpistemicShapeTest, TheGuardIgnoresTheHeaderAndReadsTheRest) {
   EXPECT_FALSE(row(std::nullopt, true, one));
 
   Live plain(kPlain);
-  EXPECT_TRUE(
-      hasTranslatableEpistemicState(plain.probe(), TranslatorRegistry::of(false)));
+  EXPECT_TRUE(hasTranslatableEpistemicState(plain.probe(),
+                                            TranslatorRegistry::of(false)));
 
   Live empty(kSource);
   EXPECT_EQ(empty.probe().shape, 1);
   EXPECT_FALSE(empty.probe().populated);
-  EXPECT_TRUE(
-      hasTranslatableEpistemicState(empty.probe(), TranslatorRegistry::of(false)));
+  EXPECT_TRUE(hasTranslatableEpistemicState(empty.probe(),
+                                            TranslatorRegistry::of(false)));
 
   Live populated(kSource, "ref-1", true);
   EXPECT_EQ(populated.probe().shape, 1);
@@ -285,7 +281,8 @@ TEST(EpistemicShapeTest, TheGuardIgnoresTheHeaderAndReadsTheRest) {
   EXPECT_TRUE(empty.probe().populated);
 }
 
-TEST(EpistemicShapeTest, AnUnreadableHeaderWithStateRefusesByNumberOnEveryRoad) {
+TEST(EpistemicShapeTest,
+     AnUnreadableHeaderWithStateRefusesByNumberOnEveryRoad) {
   Live live(kSource, "ref-1", true);
   Live::registerTranslator(*live.host);
   live.host->executor().drainNotifications();
@@ -357,7 +354,7 @@ TEST(EpistemicShapeTest, AnArbitratingAgentWithNoProfileUpgradesAndResumes) {
   const auto saved = live.checkpoint();
   // The header does not make the agent populated: no translator is needed on
   // either road, and a resume carries it.
-  auto held = live.host->retainProgram(nextVersion(kSource));
+  auto held         = live.host->retainProgram(nextVersion(kSource));
   const auto shared = live.host->upgrade(live.pid, held);
   EXPECT_TRUE(shared) << (shared ? "" : toString(shared.error()));
   EXPECT_TRUE(live.host->upgrade(live.pid, nextVersion(kSource)));
@@ -371,8 +368,8 @@ TEST(EpistemicShapeTest, AnArbitratingAgentWithNoProfileUpgradesAndResumes) {
 TEST(EpistemicShapeTest, ANonArbitratingAgentUpgradesUnchangedAfterT1) {
   Live live(kPlain);
   EXPECT_TRUE(live.epistemicRank().empty());
-  const auto shared =
-      live.host->upgrade(live.pid, live.host->retainProgram(nextVersion(kPlain)));
+  const auto shared = live.host->upgrade(
+      live.pid, live.host->retainProgram(nextVersion(kPlain)));
   EXPECT_TRUE(shared) << (shared ? "" : toString(shared.error()));
   const auto byValue = live.host->upgrade(live.pid, nextVersion(kPlain));
   EXPECT_TRUE(byValue) << (byValue ? "" : toString(byValue.error()));
@@ -392,11 +389,12 @@ TEST(EpistemicShapeTest, TheSavedHeaderIsComparedAndNotCopied) {
   ASSERT_TRUE(resumed) << toString(resumed.error());
   b.pump();
   {
-    auto &ctx   = *b.executor().context(*resumed);
+    auto &ctx        = *b.executor().context(*resumed);
     const auto agent = *b.executor().agentCell(*resumed);
-    const auto rank  = zigzag::rankAfter(ctx.arena, agent,
-                                         registerDimensions(ctx.arena).epistemic) |
-                      std::ranges::to<std::vector<CellRef>>();
+    const auto rank =
+        zigzag::rankAfter(ctx.arena, agent,
+                          registerDimensions(ctx.arena).epistemic) |
+        std::ranges::to<std::vector<CellRef>>();
     ASSERT_EQ(rank.size(), 1U);
     // The program's own instantiation made it: the same cell a fresh launch
     // gets, not a clone of the saved one.
@@ -461,7 +459,8 @@ TEST(EpistemicShapeTest, ResumeOfAChangedSignatureIsPredicateIncompatible) {
 
 // -- intentions -------------------------------------------------------------
 
-TEST(EpistemicShapeTest, AnActiveIntentionRefusesOnEveryRoadForAnArbitratingAgent) {
+TEST(EpistemicShapeTest,
+     AnActiveIntentionRefusesOnEveryRoadForAnArbitratingAgent) {
   Live live(kSource);
   live.injectIntention();
 
@@ -488,10 +487,11 @@ TEST(EpistemicShapeTest, AnActiveIntentionRefusesOnEveryRoadForAnArbitratingAgen
   EXPECT_EQ(byValue.error().detail.savedCount, 1U);
 }
 
-TEST(EpistemicShapeTest, ANonArbitratingAgentStillResumesAndReconcilesWithAnIntention) {
+TEST(EpistemicShapeTest,
+     ANonArbitratingAgentStillResumesAndReconcilesWithAnIntention) {
   Live live(kPlain);
   live.injectIntention();
-  const auto saved = live.checkpoint();
+  const auto saved   = live.checkpoint();
   const auto byValue = live.host->upgrade(live.pid, nextVersion(kPlain));
   EXPECT_TRUE(byValue) << (byValue ? "" : toString(byValue.error()));
 

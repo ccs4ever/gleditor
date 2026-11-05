@@ -5053,6 +5053,59 @@ void AgentExecutor::stageResponse(State &state, const ActorGrant &grant,
 // rebuilt arena (a new agent cell, new registers) and `restoreState` copies the
 // saved values onto it. Nothing here needs handle operands (P16).
 
+void AgentExecutor::translateEpistemic(
+    State &state, const CellRef saved, const DimTable &savedDim,
+    const ActorGrant &grant, std::unordered_map<CellRef, CellRef> &copies) {
+  auto &arena      = state.context->arena;
+  const auto &core = state.context->core.dims();
+  const auto from  = OwnedGraphDims::byName(savedDim);
+  const auto *compiled =
+      dynamic_cast<const CompiledProgram *>(state.program.get());
+  if (compiled == nullptr) {
+    // No schema to compare with: an image that holds no P19 state is carried
+    // by the generic copiers alone, and one that does is not ours to guess.
+    if (probeEpistemicState(arena, saved, from).populated)
+      throw TransferRefusalError(TransferRefusal::make(
+          TransferCode::NoTranslator, TransferRoute::Resume,
+          ActorError::ExecutionFailed, {.subject = "d.trust"}));
+    return;
+  }
+  // The pre-flight asks the same before a pid exists; this is the backstop for
+  // a host that installed no grant probe.
+  const PlanRequest request{
+      .disposition = Disposition::Resume,
+      .route       = TransferRoute::Resume,
+      .from        = arena,
+      .fromAgent   = saved,
+      .fromDims    = from,
+      .intoSchema  = compiled->upgradeSchema(),
+      .registry    = TranslatorRegistry::of(ownedStateTranslator_ != nullptr),
+      .allowance   = ResumeAllowance{
+            .epistemicCells = static_cast<std::size_t>(settings_.epistemic.cells),
+            .grant = ResumeLimits{grant.maxInstructions, grant.maxCells}}};
+  const auto plan = planTranslation(request);
+  if (!plan) throw TransferRefusalError(plan.error());
+  if (!ownedStateTranslator_) return;
+  std::uint64_t work = grant.maxInstructions;
+  const auto applied = ownedStateTranslator_(
+      *plan, {.plan      = request,
+              .into      = arena,
+              .intoAgent = state.agent.agentCell,
+              .intoDims  = {.vars      = state.vd.vars,
+                            .values    = state.vd.values,
+                            .grab      = state.vd.grab,
+                            .step      = state.vd.step,
+                            .clone     = core.clone,
+                            .clause    = core.clause,
+                            .source    = state.dims.source,
+                            .belief    = state.dims.belief,
+                            .trust     = state.dims.trust,
+                            .epistemic = state.dims.epistemic},
+              .map       = copies,
+              .work      = work});
+  if (!applied) throw TransferRefusalError(applied.error());
+}
+
 void AgentExecutor::restoreState(State &state, CellRef saved,
                                  const ActorGrant &grant) {
   auto &arena      = state.context->arena;
@@ -5095,15 +5148,6 @@ void AgentExecutor::restoreState(State &state, CellRef saved,
              oldGrab = old("d.grab"), oldStep = old("d.step");
   GLEDITOR_LOG_DEBUG(kLog, "restoring {} from '{}': {} dimensions known",
                      state.name, text(arena, saved), savedDim.size());
-  // The pre-flight asks the same before a pid exists; this is the backstop
-  // for a host that installed no grant probe.
-  if (const auto refused = checkResumeBudget(
-          arena, saved, savedDim,
-          {.epistemicCells =
-               static_cast<std::size_t>(settings_.epistemic.cells),
-           .grant = ResumeLimits{grant.maxInstructions, grant.maxCells}}))
-    throw TransferRefusalError(*refused);
-
   const auto value = pairs({{oldVars, vd.vars},
                             {oldValues, vd.values},
                             {oldGrab, vd.grab},
@@ -5142,54 +5186,18 @@ void AgentExecutor::restoreState(State &state, CellRef saved,
                       std::ranges::to<std::vector<CellRef>>();
   };
 
-  // Source profiles, then beliefs (P19 I3-1d). One copy map covers both,
-  // so each history record's clone occurrence is the copy its profile's
-  // rank already made: the clone ranks come out rebuilt exactly once.
-  std::unordered_map<CellRef, CellRef> copies;
-  const auto oldEpistemic = old("d.epistemic"), oldClone = old("d.clone");
-  const auto epistemic = pairs({{oldVars, vd.vars},
-                                {oldValues, vd.values},
-                                {oldGrab, vd.grab},
-                                {oldStep, vd.step},
-                                {oldClone, core.clone},
-                                {oldEpistemic, state.dims.epistemic}});
-  for (const auto profile : ranked(saved, old("d.trust"))) {
-    const auto copy =
-        cloneGraph(arena, profile, epistemic.from, epistemic.into, &copies);
-    // Steady stamps from another executor's clock mean nothing here: liveness
-    // starts again from the first contact after the resume. Records keep
-    // theirs, tagged with the clock instance that made them.
-    for (const auto field : {kProfileLastReceive, kProfileLastContact})
-      if (fieldValue(arena, vd, copy, field))
-        setField(arena, vd, copy, field, std::nullopt);
-    appendToRank(arena, ac, state.dims.trust, copy);
-  }
   // Beliefs: the predicates are the new program's cells; the clauses, with
-  // their terms, sources and source histories, are copied under them.
+  // their terms and supports, are copied under them. The supports' histories,
+  // the profiles and the clone chains are P19 state and belong to the
+  // translation routine below, which finds the copies through this map.
+  std::unordered_map<CellRef, CellRef> copies;
   const auto belief          = pairs({{oldGrab, vd.grab},
                                       {oldStep, vd.step},
                                       {old("d.source"), state.dims.source},
-                                      {oldEpistemic, state.dims.epistemic},
                                       {oldVars, vd.vars},
-                                      {oldValues, vd.values},
-                                      {oldClone, core.clone}});
+                                      {oldValues, vd.values}});
   const auto freshPredicates = ranked(ac, state.dims.belief);
   const auto oldClause       = old("d.clause");
-  const auto policyHashOf =
-      [&](CellRef predicate,
-          std::optional<zigzag::DimRef> dim) -> std::optional<std::string> {
-    if (!dim) return std::nullopt;
-    const auto master = arena.linked(predicate, *dim);
-    if (!master) return std::nullopt;
-    const auto hash = fieldValue(arena,
-                                 oldVars ? ValueDims{.vars   = *oldVars,
-                                                     .values = *oldValues,
-                                                     .grab   = vd.grab,
-                                                     .step   = vd.step}
-                                         : vd,
-                                 *master, "hash");
-    return hash ? std::optional{arena.textOf(*hash)} : std::nullopt;
-  };
   for (const auto predicate : ranked(saved, old("d.belief"))) {
     const auto name = text(arena, predicate);
     const auto match =
@@ -5197,26 +5205,13 @@ void AgentExecutor::restoreState(State &state, CellRef saved,
           return text(arena, candidate) == name;
         });
     if (match == freshPredicates.end()) continue;
-    // A source's history was judged under its policy; a resume under
-    // another would score it by rules it was never checked against.
-    const auto was = policyHashOf(predicate, oldEpistemic);
-    const auto now = [&]() -> std::optional<std::string> {
-      const auto master = arena.linked(*match, state.dims.epistemic);
-      if (!master) return std::nullopt;
-      const auto hash = fieldValue(arena, vd, *master, "hash");
-      return hash ? std::optional{arena.textOf(*hash)} : std::nullopt;
-    }();
-    if (was != now)
-      throw TransferRefusalError(TransferRefusal::make(
-          TransferCode::PolicyChanged, TransferRoute::Resume,
-          ActorError::ExecutionFailed,
-          {.subject = name, .saved = was, .current = now}));
     for (const auto clause : ranked(predicate, oldClause)) {
       appendToRank(
           arena, *match, core.clause,
           cloneGraph(arena, clause, belief.from, belief.into, &copies));
     }
   }
+  translateEpistemic(state, saved, savedDim, grant, copies);
 
   // Hosted spaces and their members, then children.
   auto spaces = ranked(ac, state.dims.space);
@@ -5444,11 +5439,8 @@ std::optional<TransferRefusal> AgentExecutor::resumeRefusal(
   if (!program) return std::nullopt;
   const zigzag::ArenaManifold view(received.manifold.get());
   const auto dims = discoverDimensions(view, received.root);
-  if (auto refused = checkResumeState(view, received.root, dims,
-                                      program->upgradeSchema()))
-    return refused;
-  if (auto refused = checkResumePolicy(view, received.root, dims,
-                                       program->upgradeSchema()))
+  if (auto refused =
+          checkResumeState(view, received.root, dims, program->upgradeSchema()))
     return refused;
   ResumeAllowance allowance{
       .epistemicCells = static_cast<std::size_t>(settings_.epistemic.cells),
@@ -5458,7 +5450,18 @@ std::optional<TransferRefusal> AgentExecutor::resumeRefusal(
     if (!limits) return runtimeRefusal(TransferRoute::Resume, limits.error());
     allowance.grant = *limits;
   }
-  return checkResumeBudget(view, received.root, dims, allowance);
+  const auto registry =
+      TranslatorRegistry::of(ownedStateTranslator_ != nullptr);
+  const auto plan = planTranslation({.disposition = Disposition::Resume,
+                                     .route       = TransferRoute::Resume,
+                                     .from        = view,
+                                     .fromAgent   = received.root,
+                                     .fromDims   = OwnedGraphDims::byName(dims),
+                                     .intoSchema = program->upgradeSchema(),
+                                     .registry   = registry,
+                                     .allowance  = allowance});
+  if (!plan) return plan.error();
+  return std::nullopt;
 }
 
 std::optional<TransferRefusal>
@@ -5538,12 +5541,9 @@ AgentExecutor::QuiescenceReport::firstBusy(
   using Busy = std::pair<std::string_view, std::uint64_t>;
   if (turnInFlight) return Busy{"turnInFlight", 1};
   const std::array common{
-      Busy{"hostEvents", hostEvents},
-      Busy{"posts", posts},
-      Busy{"pendingHealth", pendingHealth},
-      Busy{"inFlight", inFlight},
-      Busy{"queued", queued},
-      Busy{"choiceDepth", choiceDepth},
+      Busy{"hostEvents", hostEvents}, Busy{"posts", posts},
+      Busy{"pendingHealth", pendingHealth}, Busy{"inFlight", inFlight},
+      Busy{"queued", queued}, Busy{"choiceDepth", choiceDepth},
       Busy{"marks", marks},
       // The executor cannot close the mesh mailbox: the count is the refusal,
       // so a controller can tell one that is draining from one that is not.
@@ -5562,19 +5562,20 @@ AgentExecutor::QuiescenceReport::firstBusy(
   return std::nullopt;
 }
 
-AgentExecutor::QuiescenceReport AgentExecutor::quiescenceLocked(
-    const identity::ActorPid &pid, const State &state, const bool arbitrating,
-    const HostLocks &locks) const {
+AgentExecutor::QuiescenceReport
+AgentExecutor::quiescenceLocked(const identity::ActorPid &pid,
+                                const State &state, const bool arbitrating,
+                                const HostLocks &locks) const {
   // The reference is the proof: it cannot be made without the locks.
   (void)locks;
   const auto &arena = state.context->arena;
   const auto key    = pidKey(pid);
   QuiescenceReport report;
-  report.turnInFlight = state.inTurn;
-  report.hostEvents   = state.hostEvents.size();
-  report.posts        = posts_->pendingFor(pid) ? 1U : 0U;
-  report.pendingHealth = static_cast<std::uint64_t>(std::ranges::count_if(
-      pendingHealth_, [&](const auto &entry) {
+  report.turnInFlight  = state.inTurn;
+  report.hostEvents    = state.hostEvents.size();
+  report.posts         = posts_->pendingFor(pid) ? 1U : 0U;
+  report.pendingHealth = static_cast<std::uint64_t>(
+      std::ranges::count_if(pendingHealth_, [&](const auto &entry) {
         return entry.second->target == pid;
       }));
   // A reading enters `queued` and `inFlight` when it is pushed and leaves both
@@ -5683,13 +5684,12 @@ std::optional<TransferRefusal> AgentExecutor::preflightUpgrade(
   const auto &before = previous->upgradeSchema();
   const auto &after  = program.upgradeSchema();
 
-  const auto &arena  = old.context->arena;
-  const auto probe   = probeEpistemicState(arena, old.agent.agentCell,
-                                           ownedDimsOf(old));
-  const auto current = programShape(after);
+  const auto &arena = old.context->arena;
+  const auto probe =
+      probeEpistemicState(arena, old.agent.agentCell, ownedDimsOf(old));
+  const auto current     = programShape(after);
   const bool arbitrating = probe.shape.has_value() || current.has_value();
-  if (const auto busy =
-          quiescenceOf(pid, old, arbitrating).firstBusy(route))
+  if (const auto busy = quiescenceOf(pid, old, arbitrating).firstBusy(route))
     return TransferRefusal::make(
         TransferCode::NotQuiescent, road, ActorError::NotQuiescent,
         {.subject = std::string(busy->first), .savedCount = busy->second});
@@ -5746,31 +5746,26 @@ std::optional<TransferRefusal> AgentExecutor::preflightUpgrade(
                         ? "d.trust"
                         : "d.epistemic",
          .current = "the shared-pointer overload"});
-  if (!hasTranslatableEpistemicState(
-          probe, TranslatorRegistry::of(ownedStateTranslator_ != nullptr)))
-    return runtime(ActorError::ExecutionFailed);
-
-  if (schema && grant) {
-    const std::size_t cells =
-        probe.populated ? epistemicCellsWithin(
-                        old, std::numeric_limits<std::size_t>::max() - 1)
-                  : 0;
-    const auto ceiling = static_cast<std::size_t>(settings_.epistemic.cells);
-    const auto allowed = ceiling + ceiling / kHeadroomDivisor;
-    const auto peak    = [&](std::uint64_t limit) {
-      return TransferRefusal::make(TransferCode::PeakCopyBudget, road,
-                                      ActorError::ResourceLimit,
-                                      {.savedCount = cells, .limit = limit});
-    };
-    if (cells > allowed) return peak(allowed);
-    if (cells > grant->maxCells) return peak(grant->maxCells);
-    const std::uint64_t work = upgradeSchemaCost(before) +
-                               upgradeSchemaCost(after) +
-                               cells * kTransferWorkPerCell;
-    if (work > grant->maxInstructions)
-      return TransferRefusal::make(
-          TransferCode::WorkBudget, road, ActorError::ResourceLimit,
-          {.savedCount = work, .limit = grant->maxInstructions});
+  if (schema) {
+    const auto registry =
+        TranslatorRegistry::of(ownedStateTranslator_ != nullptr);
+    std::optional<ResumeAllowance> allowance;
+    if (grant)
+      allowance = ResumeAllowance{
+          .epistemicCells = static_cast<std::size_t>(settings_.epistemic.cells),
+          .grant = ResumeLimits{grant->maxInstructions, grant->maxCells,
+                                grant->maxOutputBytes}};
+    const auto plan = planTranslation(
+        {.disposition = Disposition::Upgrade,
+         .route       = road,
+         .from        = arena,
+         .fromAgent   = old.agent.agentCell,
+         .fromDims    = ownedDimsOf(old),
+         .intoSchema  = after,
+         .registry    = registry,
+         .allowance   = allowance,
+         .fixedWork   = upgradeSchemaCost(before) + upgradeSchemaCost(after)});
+    if (!plan) return plan.error();
   }
   return std::nullopt;
 }
@@ -5779,9 +5774,9 @@ std::expected<AgentExecutor::SwapGate, TransferRefusal>
 AgentExecutor::acquireSwap(const identity::ActorPid &pid,
                            const CompiledProgram &program,
                            const UpgradeRoute route, const bool requirePaused) {
-  const auto road = route == UpgradeRoute::Schema
-                        ? TransferRoute::UpgradeSchema
-                        : TransferRoute::UpgradeReconciler;
+  const auto road  = route == UpgradeRoute::Schema
+                         ? TransferRoute::UpgradeSchema
+                         : TransferRoute::UpgradeReconciler;
   const auto found = states_.find(pidKey(pid));
   if (found == states_.end() || !live(*found->second))
     return std::unexpected(runtimeRefusal(road, ActorError::UnknownProcess));
@@ -5789,12 +5784,11 @@ AgentExecutor::acquireSwap(const identity::ActorPid &pid,
   const auto *before = previousProgram(old);
   if (before == nullptr)
     return std::unexpected(runtimeRefusal(road, ActorError::ExecutionFailed));
-  const auto probe = probeEpistemicState(
-      old.context->arena, old.agent.agentCell, ownedDimsOf(old));
+  const auto probe = probeEpistemicState(old.context->arena,
+                                         old.agent.agentCell, ownedDimsOf(old));
   const bool arbitrating =
       probe.shape.has_value() || programShape(program.upgradeSchema());
-  const auto notQuiescent = [&](std::string_view subject,
-                                std::uint64_t count) {
+  const auto notQuiescent = [&](std::string_view subject, std::uint64_t count) {
     return std::unexpected(TransferRefusal::make(
         TransferCode::NotQuiescent, road, ActorError::NotQuiescent,
         {.subject = std::string(subject), .savedCount = count}));
@@ -5816,17 +5810,17 @@ AgentExecutor::acquireSwap(const identity::ActorPid &pid,
     return notQuiescent(busy->first, busy->second);
   // A binding made before this scope is seen here and one made after is
   // refused, so a predicate cannot be bound to a program that drops it.
-  if (auto refused = checkPredicateTransfer(
-          before->upgradeSchema(), program.upgradeSchema(),
-          boundPredicatesLocked(pid), road))
+  if (auto refused = checkPredicateTransfer(before->upgradeSchema(),
+                                            program.upgradeSchema(),
+                                            boundPredicatesLocked(pid), road))
     return std::unexpected(std::move(*refused));
   ingress_->admission[key].swapping = true;
   return SwapGate(ingress_, key);
 }
 
-std::expected<AgentExecutor *, TransferRefusal>
-AgentExecutor::pauseAdmission(const identity::ActorPid &pid,
-                              const std::optional<std::chrono::milliseconds> ttl) {
+std::expected<AgentExecutor *, TransferRefusal> AgentExecutor::pauseAdmission(
+    const identity::ActorPid &pid,
+    const std::optional<std::chrono::milliseconds> ttl) {
   const auto found = states_.find(pidKey(pid));
   if (found == states_.end() || !live(*found->second))
     return std::unexpected(runtimeRefusal(TransferRoute::UpgradeSchema,
@@ -5882,6 +5876,7 @@ AgentExecutor::upgrade(const identity::ActorPid &pid,
     const auto &oldSchema = before->agents.at(old.agentType);
     const auto &newSchema = after->agents.at(old.agentType);
     std::unique_ptr<State> candidate;
+    std::optional<TransferRefusal> translationRefusal;
     const auto status = runtime_.upgrade(
         pid, grant, wallNow(),
         zigzag::vortex::mesh::MeshActorRuntime::PreparedStateReconciler{
@@ -5913,8 +5908,7 @@ AgentExecutor::upgrade(const identity::ActorPid &pid,
               const auto &was = old.context->core.dims();
               const auto &now = context.core.dims();
               UpgradeGraph graph(source, arena, grant.maxCells,
-                                 grant.maxOutputBytes, work,
-                                 static_cast<bool>(ownedStateTranslator_),
+                                 grant.maxOutputBytes, work, true,
                                  {{was.vars, now.vars},
                                   {was.values, now.values},
                                   {was.grab, now.grab},
@@ -6081,11 +6075,43 @@ AgentExecutor::upgrade(const identity::ActorPid &pid,
                                                  DimVector::POS,
                                                  graph.at(rank.first)));
               if (ownedStateTranslator_) {
-                auto mapping          = graph.translation();
+                const PlanRequest request{.disposition = Disposition::Upgrade,
+                                          .route       = road,
+                                          .from        = source,
+                                          .fromAgent   = old.agent.agentCell,
+                                          .fromDims    = ownedDimsOf(old),
+                                          .intoSchema  = *after,
+                                          .registry =
+                                              TranslatorRegistry::of(true),
+                                          .allowance = std::nullopt};
+                const auto plan = planTranslation(request);
+                if (!plan) {
+                  translationRefusal = plan.error();
+                  return std::unexpected(ActorError::ExecutionFailed);
+                }
+                std::unordered_map<CellRef, CellRef> mapping;
+                for (const auto &[from, into] : graph.translation())
+                  mapping.emplace(from, into);
                 const auto translated = ownedStateTranslator_(
-                    *previous, *program, source, old.agent.agentCell, context,
-                    ac, mapping, work);
-                if (!translated) return std::unexpected(translated.error());
+                    *plan, {.plan      = request,
+                            .into      = arena,
+                            .intoAgent = ac,
+                            .intoDims  = {.vars      = next.vd.vars,
+                                          .values    = next.vd.values,
+                                          .grab      = next.vd.grab,
+                                          .step      = next.vd.step,
+                                          .clone     = now.clone,
+                                          .clause    = now.clause,
+                                          .source    = next.dims.source,
+                                          .belief    = next.dims.belief,
+                                          .trust     = next.dims.trust,
+                                          .epistemic = next.dims.epistemic},
+                            .map       = mapping,
+                            .work      = work});
+                if (!translated) {
+                  translationRefusal = translated.error();
+                  return std::unexpected(translated.error().actor);
+                }
                 for (const auto &[from, into] : mapping) {
                   graph.charge();
                   if (!source.contains(from) || !arena.contains(into))
@@ -6138,7 +6164,11 @@ AgentExecutor::upgrade(const identity::ActorPid &pid,
               // halt.
               return ac;
             }});
-    if (!status) return std::unexpected(runtimeRefusal(road, status.error()));
+    if (!status) {
+      if (translationRefusal)
+        return std::unexpected(std::move(*translationRefusal));
+      return std::unexpected(runtimeRefusal(road, status.error()));
+    }
     // No allocations or user callbacks between the runtime's commit and the
     // adapter binding. The old state's context is never dereferenced again.
     found->second.swap(candidate);
@@ -6399,8 +6429,8 @@ AgentSettings AgentSettings::fromModel(const xanadu::SystemStoreModel &model) {
     settings.spawnStamp = stamp;
   }
 
-  const auto pauseMs = model.getInt64(
-      xanadu::settings::kVagentAdmissionPauseMs, kDefaultAdmissionPauseMs);
+  const auto pauseMs = model.getInt64(xanadu::settings::kVagentAdmissionPauseMs,
+                                      kDefaultAdmissionPauseMs);
   if (pauseMs >= kMinAdmissionPauseMs && pauseMs <= kMaxAdmissionPauseMs)
     settings.admissionPause = std::chrono::milliseconds(pauseMs);
   else

@@ -42,6 +42,7 @@
 #include "common/xanadu/vagent/runtime/epistemic_limits.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_preflight.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_refusal.hpp"
+#include "common/xanadu/vagent/runtime/epistemic_translate.hpp"
 #include "common/xanadu/vagent/runtime/health_grants.hpp"
 #include "common/xanadu/vagent/runtime/host_bindings.hpp"
 #include "common/xanadu/vagent/runtime/runtime_abi.hpp"
@@ -407,16 +408,10 @@ public:
     return settings_;
   }
 
-  /// A trusted typed translator may extend the owned graph with future ABI
-  /// records. It runs privately before hooks, shares the relocation map and
-  /// remaining work budget, and must stage no external effects. Without one,
-  /// populated extension dimensions refuse the upgrade.
-  using OwnedStateTranslator =
-      std::function<std::expected<void, zigzag::vortex::mesh::ActorError>(
-          const CompiledProgram &, const CompiledProgram &,
-          const zigzag::ArenaManifold &, zigzag::CellRef,
-          zigzag::vortex::WorkerContext &, zigzag::CellRef,
-          std::map<zigzag::CellRef, zigzag::CellRef> &, std::uint64_t &)>;
+  /// The translator that carries P19 state across resume and the schema
+  /// road. The default is registered at construction; a test injects another,
+  /// and an empty one leaves populated state with `NoTranslator`.
+  using OwnedStateTranslator = EpistemicTranslator;
   AgentExecutor *setOwnedStateTranslator(OwnedStateTranslator translator) {
     ownedStateTranslator_ = std::move(translator);
     return this;
@@ -700,6 +695,10 @@ private:
   /// Copy the saved agent cell's state onto the freshly instantiated one:
   /// fields, beliefs, hosted spaces and children. Compiled routines address
   /// their own cells by ref, so the restored cells cannot be used in place.
+  void translateEpistemic(
+      State &state, zigzag::CellRef saved, const DimTable &savedDim,
+      const zigzag::vortex::mesh::ActorGrant &grant,
+      std::unordered_map<zigzag::CellRef, zigzag::CellRef> &copies);
   void restoreState(State &state, zigzag::CellRef saved,
                     const zigzag::vortex::mesh::ActorGrant &grant);
   void announceMoved(State &state);
@@ -884,9 +883,10 @@ private:
   };
   /// The one computation of the report; every caller states how it got the
   /// locks, so the rules cannot drift between the advisory call and the gate.
-  [[nodiscard]] QuiescenceReport
-  quiescenceLocked(const identity::ActorPid &pid, const State &state,
-                   bool arbitrating, const HostLocks &locks) const;
+  [[nodiscard]] QuiescenceReport quiescenceLocked(const identity::ActorPid &pid,
+                                                  const State &state,
+                                                  bool arbitrating,
+                                                  const HostLocks &locks) const;
   [[nodiscard]] QuiescenceReport quiescenceOf(const identity::ActorPid &pid,
                                               const State &state,
                                               bool arbitrating) const;
@@ -985,7 +985,7 @@ private:
   TurnObserver observer_;
   IntentionObserver intentionObserver_;
   HostBindings *bindings_{};
-  OwnedStateTranslator ownedStateTranslator_;
+  OwnedStateTranslator ownedStateTranslator_{defaultEpistemicTranslator()};
   std::shared_ptr<PostBox> posts_;
   /// Ingress authorization and execution outcomes; never learned state.
   std::shared_ptr<Ingress> ingress_;
