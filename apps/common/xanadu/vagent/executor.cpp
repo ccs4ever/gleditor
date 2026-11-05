@@ -385,6 +385,29 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
                            turn + setting("vagent.intention_backoff", 2));
   };
 
+  // The intention's goal symbol, or noCell when the record lacks one.
+  const auto goalOf = [&](CellRef i) -> CellRef {
+    if (const auto rec = varsRecord(arena, core, i, "goal", false))
+      if (const auto v = arena.linked(*rec, core.dims().values, DimVector::POS))
+        return *v;
+    return noCell;
+  };
+
+  // A produced value's truthiness — the same contract meta.cpp's
+  // file-local truthy gives selectClause: bools as-is, numbers by
+  // zero, text by the "true" spelling.
+  const auto evalBool = [&](CellRef head) -> bool {
+    const auto outcome = meta.runFragment(head, {}, exec.cursor, maxCycles);
+    if (outcome.refusal != MetaRunOutcome::Refusal::None || !outcome.produced ||
+        !outcome.result)
+      return false;
+    const auto &v = *outcome.result;
+    if (const auto *b = std::get_if<bool>(&v)) return *b;
+    if (const auto *n = std::get_if<std::int64_t>(&v)) return *n != 0;
+    if (const auto *r = std::get_if<double>(&v)) return *r != 0.0;
+    return std::get<std::string>(v) == "true";
+  };
+
   // §3.5: ready intentions advance one spine step per settle — record
   // stepping, never cursor state. body_replaced is checked against the
   // adoption-time +d.spin name before any member runs.
@@ -445,34 +468,13 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       if (blockedTill > turn) continue;
       const auto faults = meta.intentionField(intention, "faults").value_or(0);
       if (faults >= setting("vagent.max_intention_faults", 3)) {
-        const auto goal = [&]() -> CellRef {
-          if (const auto rec =
-                  varsRecord(arena, core, intention, "goal", false))
-            if (const auto v =
-                    arena.linked(*rec, core.dims().values, DimVector::POS))
-              return *v;
-          return noCell;
-        }();
-        bool dropped = false;
+        const auto goal = goalOf(intention);
+        bool dropped    = false;
         if (goal != noCell)
           if (const auto rec = varsRecord(arena, core, goal, "dropTest", false))
             if (const auto head =
-                    arena.linked(*rec, core.dims().values, DimVector::POS)) {
-              const auto outcome =
-                  meta.runFragment(*head, {}, exec.cursor, maxCycles);
-              if (outcome.refusal == MetaRunOutcome::Refusal::None &&
-                  outcome.produced && outcome.result) {
-                const auto &v = *outcome.result;
-                if (const auto *b = std::get_if<bool>(&v))
-                  dropped = *b;
-                else if (const auto *n = std::get_if<std::int64_t>(&v))
-                  dropped = *n != 0;
-                else if (const auto *r = std::get_if<double>(&v))
-                  dropped = *r != 0.0;
-                else
-                  dropped = std::get<std::string>(v) == "true";
-              }
-            }
+                    arena.linked(*rec, core.dims().values, DimVector::POS))
+              dropped = evalBool(*head);
         if (dropped) {
           // A dropped subgoal fails the parent's achieve — the fault
           // ladder decides retry vs. drop there too.
@@ -560,8 +562,34 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
     }
     const auto next = stepIdx + 1;
     if (next >= std::max<std::size_t>(spine.size(), 1)) {
-      // The body's last member ran — the intention retires; a
-      // delegating parent's achieve resumes on this completion.
+      // The body's last member ran. For an achieve goal that is not
+      // success yet — the guide's contract is that a plan's end
+      // without `succeed when` counts as a failed plan: eval the
+      // goal's succeedTest, falsy goes back down the ladder.
+      const auto goal = goalOf(intention);
+      if (goal != noCell) {
+        const auto kind = [&]() -> std::int64_t {
+          if (const auto rec = varsRecord(arena, core, goal, "goalKind", false))
+            if (const auto v =
+                    arena.linked(*rec, core.dims().values, DimVector::POS))
+              if (const auto n = arena.asInt64(*v)) return *n;
+          return 0;
+        }();
+        if (kind == 1) {
+          bool succeeded = true;
+          if (const auto rec =
+                  varsRecord(arena, core, goal, "succeedTest", false))
+            if (const auto head =
+                    arena.linked(*rec, core.dims().values, DimVector::POS))
+              succeeded = evalBool(*head);
+          if (!succeeded) {
+            faultIntention(intention);
+            continue;
+          }
+        }
+      }
+      // The intention retires; a delegating parent's achieve resumes
+      // on this completion.
       const auto delegator =
           meta.intentionField(intention, "delegator").value_or(0);
       if (delegator != 0) {

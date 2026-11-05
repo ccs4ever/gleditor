@@ -660,23 +660,41 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
     const auto sym = mintSymbol(name);
     signatures.emplace(name, decl.parameters);
     if (insideAgent && decl.kind != DeclKind::Predicate) mintHolder(sym);
-    // The pure `drop when` lowers to a named Bool head keyed off the
-    // goal's vars record — §3.5's ladder reaches it at the fault cap:
-    // truthy drops the intention, falsy leaves it parked.
-    if (decl.kind == DeclKind::Goal)
+    // The goal's clauses lower to named Bool heads keyed off its vars
+    // record — dropTest is §3.5's reconsideration boundary, succeedTest
+    // the achieve-goal completion check, holdsTest the maintain
+    // restorer's condition. goalKind rides alongside so the retire
+    // path knows which check applies.
+    if (decl.kind == DeclKind::Goal) {
+      const auto kindCode = decl.goalKind == GoalKind::Achieve ? std::int64_t{1}
+                            : decl.goalKind == GoalKind::Maintain
+                                ? std::int64_t{2}
+                                : std::int64_t{0};
+      if (const auto rec = varsRecord(arena, core, sym, "goalKind", true))
+        zigzag::expectWritten(arena.link(*rec, dims().values, DimVector::POS,
+                                         arena.makeScalarCell(kindCode)));
       for (const auto &gc : decl.goalClauses) {
-        if (gc.kind != GoalClause::Kind::Drop || !gc.condition) continue;
+        if (!gc.condition) continue;
+        const char *field = nullptr;
+        if (gc.kind == GoalClause::Kind::Drop)
+          field = "dropTest";
+        else if (gc.kind == GoalClause::Kind::Succeed)
+          field = "succeedTest";
+        else if (gc.kind == GoalClause::Kind::Holds)
+          field = "holdsTest";
+        if (!field) continue;
         auto head = emitDeclHead(decl, *gc.condition, paramsOf(decl, name),
-                                 std::format("{}:drop", label(name)),
+                                 std::format("{}:{}", label(name), field),
                                  Type{"Bool"}, true);
         if (!head) {
           errors.push_back(head.error());
           return;
         }
-        if (const auto rec = varsRecord(arena, core, sym, "dropTest", true))
+        if (const auto rec = varsRecord(arena, core, sym, field, true))
           zigzag::expectWritten(
               arena.link(*rec, dims().values, DimVector::POS, *head));
       }
+    }
     for (const auto &member : decl.members) lowerDecl(member, insideAgent);
     return;
   }

@@ -580,6 +580,35 @@ TEST(VagentExecutorTest, AchieveDelegatesAndTheChildsRetireResumes) {
   EXPECT_EQ(arena.outstandingMarks(), 0u);
 }
 
+TEST(VagentExecutorTest, AchieveGoalFaultsWhenSucceedWhenFails) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image = h.lower("module demo\nevent Tick\n"
+                             "goal Work() achieve { succeed when 1 == 2 }\n"
+                             "agent A {\n"
+                             "  on Tick { adopt Work() }\n"
+                             "  plan w for Work { }\n"
+                             "}");
+  ASSERT_TRUE(image);
+  auto &arena     = h.ctx.arena;
+  const auto iDim = h.ctx.core.findOrMintDimension("d.intention");
+
+  // The empty plan "completes" — but an achieve goal's end without
+  // `succeed when` is a failed plan: the intention faults onto the
+  // ladder instead of retiring.
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  const auto live = zigzag::rankAfter(arena, image->agentCell, iDim) |
+                    std::ranges::to<std::vector>();
+  ASSERT_EQ(live.size(), 1u);
+  auto binds =
+      mintMetaBindSet(arena, h.ctx.core, h.ctx.core.home(), image->agentCell);
+  ASSERT_TRUE(binds);
+  MetaRuntime meta(h.ctx.core, h.ctx.vm, *binds);
+  EXPECT_EQ(meta.intentionField(live.front(), "faulted"), 1);
+  EXPECT_EQ(meta.intentionField(live.front(), "faults"), 1);
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
 // -- §3.1/§3.8 belief store: predicate banks, provenance, the four verbs ------
 
 TEST(VagentBeliefTest, BelieveBelievesForgetReviseRoundTrip) {
