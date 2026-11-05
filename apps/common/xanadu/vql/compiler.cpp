@@ -243,6 +243,7 @@ CompilationResult VQLCompiler::compile(const QueryExpression &query,
                                        const CompilationOptions &options) {
   zigzag::vortex::AssemblyTransaction transaction(vm_);
   remainingContractEmissions_             = options.maxContractEmissions;
+  nextContractValidatorId_                = 0;
   compilingGraphContract_                 = false;
   remainingShapePredicateRules_           = maxCompiledShapePredicateRules;
   remainingShapePredicateValidationNodes_ = maxCompiledShapePredicateRules;

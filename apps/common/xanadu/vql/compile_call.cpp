@@ -21,6 +21,65 @@ template <class Action> struct RestoreScope {
 
 } // namespace
 
+class VQLCompiler::IsolatedCompileState {
+public:
+  explicit IsolatedCompileState(VQLCompiler &compiler)
+      : compiler_(compiler), entry_(compiler.entryOp_),
+        current_(compiler.currentOp_), variables_(compiler.varBindings_),
+        streams_(compiler.streamBindings_),
+        functors_(compiler.functorBindings_),
+        context_(compiler.ambientContext_), results_(compiler.lastResultCells_),
+        dynamicStreams_(compiler.dynamicStreams_),
+        frameMutableSlots_(compiler.frameMutableSlots_),
+        activeCalls_(compiler.activeCalls_),
+        compilingFrameDefinition_(compiler.compilingFrameDefinition_),
+        compilingFrameDefinitionName_(compiler.compilingFrameDefinitionName_) {
+    compiler_.entryOp_.reset();
+    compiler_.currentOp_.reset();
+    compiler_.lastResultCells_.clear();
+    compiler_.varBindings_.clear();
+    compiler_.streamBindings_.clear();
+    compiler_.functorBindings_.clear();
+    compiler_.dynamicStreams_.clear();
+    compiler_.frameMutableSlots_.clear();
+    compiler_.ambientContext_.reset();
+  }
+
+  IsolatedCompileState(const IsolatedCompileState &)            = delete;
+  IsolatedCompileState &operator=(const IsolatedCompileState &) = delete;
+
+  ~IsolatedCompileState() {
+    compiler_.entryOp_                  = entry_;
+    compiler_.currentOp_                = current_;
+    compiler_.varBindings_              = std::move(variables_);
+    compiler_.streamBindings_           = std::move(streams_);
+    compiler_.functorBindings_          = std::move(functors_);
+    compiler_.ambientContext_           = context_;
+    compiler_.lastResultCells_          = std::move(results_);
+    compiler_.dynamicStreams_           = std::move(dynamicStreams_);
+    compiler_.frameMutableSlots_        = std::move(frameMutableSlots_);
+    compiler_.activeCalls_              = std::move(activeCalls_);
+    compiler_.compilingFrameDefinition_ = compilingFrameDefinition_;
+    compiler_.compilingFrameDefinitionName_ =
+        std::move(compilingFrameDefinitionName_);
+  }
+
+private:
+  VQLCompiler &compiler_;
+  std::optional<CellRef> entry_;
+  std::optional<CellRef> current_;
+  std::unordered_map<std::string, std::optional<CellRef>> variables_;
+  std::unordered_map<std::string, std::vector<CellRef>> streams_;
+  std::unordered_map<std::string, std::vector<PathStep>> functors_;
+  std::optional<CellRef> context_;
+  std::vector<CellRef> results_;
+  std::unordered_set<CellRef> dynamicStreams_;
+  std::unordered_set<CellRef> frameMutableSlots_;
+  std::vector<std::string> activeCalls_;
+  bool compilingFrameDefinition_;
+  std::string compilingFrameDefinitionName_;
+};
+
 std::vector<CellRef>
 VQLCompiler::emitContractDefaultSlots(const TypeExpr &type) {
   std::vector<CellRef> slots;
@@ -333,6 +392,173 @@ VQLCompiler::normalizeFrameStream(const std::span<const CellRef> cells) {
   return stream;
 }
 
+void VQLCompiler::finalizeNativeFrame(
+    const CellRef descriptor, FrameDescriptorSpec &spec,
+    const std::optional<std::string_view> definitionName) {
+  std::unordered_set<CellRef> localSet(spec.locals.begin(), spec.locals.end());
+  std::vector<CellRef> mutableSlots(frameMutableSlots_.begin(),
+                                    frameMutableSlots_.end());
+  std::ranges::sort(mutableSlots);
+  for (const auto output : mutableSlots) {
+    if (core_.arena().contains(output) && !vm_.getOpcodeKind(output) &&
+        localSet.insert(output).second) {
+      if (core_.hasPipeline(output))
+        throw std::invalid_argument(
+            "reusable frame body produced a pipelined local slot");
+      spec.locals.push_back(output);
+    }
+  }
+  spec.entry           = entryOp_;
+  const auto finalized = vm_.finalizeFrameDescriptor(descriptor, spec);
+  if (!finalized) throw std::invalid_argument(finalized.error().message);
+  if (definitionName) {
+    auto &state    = frameDefinitions_.at(std::string{*definitionName});
+    state.entry    = entryOp_;
+    state.compiled = true;
+    state.queued   = false;
+  }
+}
+
+CellRef VQLCompiler::emitNativeFrameReturn(const CellRef descriptor,
+                                           const std::string_view label) {
+  const CellRef opcode = mintOpcode(OpcodeKind::ReturnFrame, label);
+  emitInput(opcode, descriptor);
+  return opcode;
+}
+
+CellRef
+VQLCompiler::compileContractValidator(const TypeExpr &type,
+                                      const std::span<const CellRef> subjects) {
+  validateContractAliases(type);
+  struct FrozenInput {
+    std::string name;
+    std::vector<CellRef> cells;
+    bool hasPort{true};
+    std::optional<CellRef> slot;
+  };
+
+  std::vector<std::string> names;
+  names.reserve(streamBindings_.size() + varBindings_.size());
+  for (const auto &[name, _] : streamBindings_)
+    if (name != ".") names.push_back(name);
+  for (const auto &[name, _] : varBindings_)
+    if (name != "." && !streamBindings_.contains(name)) names.push_back(name);
+  std::ranges::sort(names);
+
+  const auto frozenFunctors = functorBindings_;
+  std::vector<FrozenInput> frozen;
+  frozen.reserve(names.size());
+  for (const auto &name : names) {
+    if (const auto stream = streamBindings_.find(name);
+        stream != streamBindings_.end()) {
+      frozen.push_back({name, stream->second, true, std::nullopt});
+      continue;
+    }
+    const auto variable = varBindings_.find(name);
+    if (variable == varBindings_.end() || !variable->second) {
+      frozen.push_back({name, {}, false, std::nullopt});
+      continue;
+    }
+    frozen.push_back({name, {*variable->second}, true, std::nullopt});
+  }
+
+  const auto reserved = vm_.reserveFrameDescriptor();
+  if (!reserved) throw std::invalid_argument(reserved.error().message);
+  const CellRef descriptor = *reserved;
+  FrameDescriptorSpec spec;
+  const CellRef contextSlot = core_.arena().makeCell();
+  const CellRef subjectSlot = core_.arena().makeCell();
+  spec.locals               = {contextSlot, subjectSlot};
+  spec.argumentPorts.emplace_back(contextSlot, FramePortKind::Stream);
+  spec.argumentPorts.emplace_back(subjectSlot, FramePortKind::Stream);
+  for (auto &input : frozen) {
+    if (!input.hasPort) {
+      continue;
+    }
+    const CellRef slot = core_.arena().makeCell();
+    spec.locals.push_back(slot);
+    spec.argumentPorts.emplace_back(slot, FramePortKind::Stream);
+    input.slot = slot;
+  }
+  const auto internalId = nextContractValidatorId_++;
+
+  {
+    IsolatedCompileState isolated(*this);
+    const std::size_t graphBegin = allOps_.size();
+    compilingFrameDefinition_    = true;
+    compilingFrameDefinitionName_ =
+        "#contract-validator-" + std::to_string(internalId);
+    activeCalls_.push_back(compilingFrameDefinitionName_);
+    streamBindings_["."] = {contextSlot};
+    varBindings_["."]    = contextSlot;
+    ambientContext_      = contextSlot;
+    dynamicStreams_.insert(contextSlot);
+    dynamicStreams_.insert(subjectSlot);
+    for (std::size_t index = 0; index < frozen.size(); ++index) {
+      const auto &input = frozen[index];
+      if (!input.slot) {
+        varBindings_[input.name] = std::nullopt;
+        continue;
+      }
+      const CellRef slot          = *input.slot;
+      streamBindings_[input.name] = {slot};
+      varBindings_[input.name]    = slot;
+      dynamicStreams_.insert(slot);
+    }
+    functorBindings_           = frozenFunctors;
+    const CellRef returnOpcode = emitNativeFrameReturn(
+        descriptor, "#RETURN_CONTRACT_VALIDATOR " + std::to_string(internalId));
+    const CellRef matched = emitContractGraphMatch(
+        type, std::span{&subjectSlot, std::size_t{1}}, false);
+    spec.resultPorts.emplace_back(matched, FramePortKind::Cell);
+    appendOpcode(returnOpcode);
+
+    std::unordered_set<CellRef> referencedInputs;
+    for (std::size_t index = graphBegin; index < allOps_.size(); ++index) {
+      for (const CellRef input : core_.inputsOf(allOps_[index]))
+        referencedInputs.insert(input);
+    }
+    std::unordered_set<CellRef> unusedSlots;
+    for (auto &input : frozen) {
+      if (!input.slot || referencedInputs.contains(*input.slot)) continue;
+      unusedSlots.insert(*input.slot);
+      input.slot.reset();
+    }
+    std::erase_if(spec.argumentPorts, [&](const auto &port) {
+      return unusedSlots.contains(port.slot);
+    });
+    std::erase_if(spec.locals, [&](const CellRef slot) {
+      return unusedSlots.contains(slot);
+    });
+    finalizeNativeFrame(descriptor, spec);
+  }
+
+  const CellRef contextStream =
+      ambientContext_
+          ? normalizeFrameStream(std::span{&*ambientContext_, std::size_t{1}})
+          : normalizeFrameStream(std::span<const CellRef>{});
+  const CellRef subjectStream = normalizeFrameStream(subjects);
+  std::vector<CellRef> callerStreams;
+  callerStreams.reserve(frozen.size());
+  for (const auto &input : frozen)
+    if (input.slot) callerStreams.push_back(normalizeFrameStream(input.cells));
+
+  const CellRef invoke =
+      emitOp(OpcodeKind::InvokeFrame,
+             "#INVOKE_CONTRACT_VALIDATOR " + std::to_string(internalId));
+  emitInput(invoke, descriptor);
+  emitInput(invoke, contextStream);
+  emitInput(invoke, subjectStream);
+  std::size_t callerIndex = 0;
+  for (const auto &input : frozen) {
+    if (!input.slot) continue;
+    emitInput(invoke, callerStreams[callerIndex++]);
+  }
+  const CellRef result = core_.arena().makeCell();
+  emitOutput(invoke, result);
+  return result;
+}
+
 std::vector<CellRef> VQLCompiler::compileReusableFrameCall(
     const DefDeclaration &definition, const std::vector<ValueExpr> &arguments,
     const std::optional<CellRef> context, const bool ufcs) {
@@ -448,69 +674,29 @@ std::vector<CellRef> VQLCompiler::compileReusableFrameCall(
 void VQLCompiler::compilePendingFrameDefinitions() {
   for (std::size_t index = 0; index < pendingFrameDefinitions_.size();
        ++index) {
-    const auto name  = pendingFrameDefinitions_[index];
-    const auto state = frameDefinitions_.find(name);
-    if (state == frameDefinitions_.end() || state->second.compiled) continue;
-    const auto definition = definitions_.find(name);
-    if (definition == definitions_.end())
+    const auto name = pendingFrameDefinitions_[index];
+    bool compiled   = false;
+    {
+      const auto state = frameDefinitions_.find(name);
+      compiled = state == frameDefinitions_.end() || state->second.compiled;
+    }
+    if (compiled) continue;
+    std::optional<DefDeclaration> definition;
+    {
+      const auto found = definitions_.find(name);
+      if (found != definitions_.end()) definition = found->second;
+    }
+    if (!definition)
       throw std::invalid_argument("missing frame definition: " + name);
-    compileFrameDefinition(definition->second);
+    compileFrameDefinition(*definition);
   }
 }
 
 void VQLCompiler::compileFrameDefinition(const DefDeclaration &definition) {
-  struct SavedCompilerState {
-    std::optional<CellRef> entry;
-    std::optional<CellRef> current;
-    std::unordered_map<std::string, std::optional<CellRef>> variables;
-    std::unordered_map<std::string, std::vector<CellRef>> streams;
-    std::unordered_map<std::string, std::vector<PathStep>> functors;
-    std::optional<CellRef> context;
-    std::vector<CellRef> results;
-    std::unordered_set<CellRef> dynamicStreams;
-    std::unordered_set<CellRef> frameMutableSlots;
-    std::vector<std::string> activeCalls;
-    bool compilingFrameDefinition;
-    std::string compilingFrameDefinitionName;
-  } saved{entryOp_,
-          currentOp_,
-          varBindings_,
-          streamBindings_,
-          functorBindings_,
-          ambientContext_,
-          lastResultCells_,
-          dynamicStreams_,
-          frameMutableSlots_,
-          activeCalls_,
-          compilingFrameDefinition_,
-          compilingFrameDefinitionName_};
-  const auto restore = RestoreScope{[&] {
-    entryOp_                  = saved.entry;
-    currentOp_                = saved.current;
-    varBindings_              = std::move(saved.variables);
-    streamBindings_           = std::move(saved.streams);
-    functorBindings_          = std::move(saved.functors);
-    ambientContext_           = saved.context;
-    lastResultCells_          = std::move(saved.results);
-    dynamicStreams_           = std::move(saved.dynamicStreams);
-    frameMutableSlots_        = std::move(saved.frameMutableSlots);
-    activeCalls_              = std::move(saved.activeCalls);
-    compilingFrameDefinition_ = saved.compilingFrameDefinition;
-    compilingFrameDefinitionName_ =
-        std::move(saved.compilingFrameDefinitionName);
-  }};
+  IsolatedCompileState isolated(*this);
 
-  const CellRef descriptor = frameDefinitions_.at(definition.name).descriptor;
-  entryOp_.reset();
-  currentOp_.reset();
-  lastResultCells_.clear();
-  varBindings_.clear();
-  streamBindings_.clear();
-  functorBindings_.clear();
-  dynamicStreams_.clear();
-  frameMutableSlots_.clear();
-  ambientContext_.reset();
-  compilingFrameDefinition_     = true;
+  const CellRef descriptor  = frameDefinitions_.at(definition.name).descriptor;
+  compilingFrameDefinition_ = true;
   compilingFrameDefinitionName_ = definition.name;
   activeCalls_.push_back(definition.name);
 
@@ -574,8 +760,7 @@ void VQLCompiler::compileFrameDefinition(const DefDeclaration &definition) {
   dynamicStreams_.insert(resultSlot);
 
   const CellRef returnOpcode =
-      mintOpcode(OpcodeKind::ReturnFrame, "#RETURN_FRAME " + definition.name);
-  core_.bindInput(returnOpcode, descriptor);
+      emitNativeFrameReturn(descriptor, "#RETURN_FRAME " + definition.name);
   const auto emitMatch = [&](const TypeExpr &type,
                              const std::vector<CellRef> &subjects) {
     const CellRef matched = emitContractMatch(type, subjects, true);
@@ -654,28 +839,7 @@ void VQLCompiler::compileFrameDefinition(const DefDeclaration &definition) {
 
   if (!entryOp_)
     throw std::invalid_argument("frame definition emitted no entry opcode");
-  const CellRef bodyEntry = *entryOp_;
   appendOpcode(returnOpcode);
-  std::unordered_set<CellRef> localSet(spec.locals.begin(), spec.locals.end());
-  std::vector<CellRef> mutableSlots(frameMutableSlots_.begin(),
-                                    frameMutableSlots_.end());
-  std::ranges::sort(mutableSlots);
-  for (const auto output : mutableSlots) {
-    if (core_.arena().contains(output) && !vm_.getOpcodeKind(output) &&
-        localSet.insert(output).second) {
-      if (core_.hasPipeline(output))
-        throw std::invalid_argument(
-            "reusable frame body produced a pipelined local slot");
-      spec.locals.push_back(output);
-    }
-  }
-  spec.entry           = bodyEntry;
-  const auto finalized = vm_.finalizeFrameDescriptor(descriptor, spec);
-  if (!finalized) throw std::invalid_argument(finalized.error().message);
-  auto &finalizedState    = frameDefinitions_.at(definition.name);
-  finalizedState.entry    = bodyEntry;
-  finalizedState.compiled = true;
-  finalizedState.queued   = false;
-  (void)restore;
+  finalizeNativeFrame(descriptor, spec, definition.name);
 }
 } // namespace xanadu::vql

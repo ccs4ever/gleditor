@@ -500,6 +500,35 @@ private:
 CellRef VQLCompiler::emitContractMatch(const TypeExpr &type,
                                        const std::span<const CellRef> subjects,
                                        const bool bindCaptures) {
+  validateContractAliases(type);
+
+  if (!hasComputedDefault(type)) {
+    const auto defaults      = emitContractDefaultSlots(type);
+    const CellRef descriptor = emitConstant(encodeTypeDescriptor(type));
+    const CellRef match = emitOp(OpcodeKind::MatchContract, "#MATCH_CONTRACT");
+    emitInput(match, descriptor);
+    emitInputConstant(match, static_cast<std::int64_t>(subjects.size()));
+    for (const CellRef subject : subjects) emitInput(match, subject);
+    for (const CellRef value : defaults) emitInput(match, value);
+    const CellRef matched = core_.arena().makeCell();
+    emitOutput(match, matched);
+    for (const auto &name : ContractMatcher::contractCaptureNames(type)) {
+      const CellRef capture = core_.arena().makeCell();
+      emitOutput(match, capture);
+      if (!bindCaptures) continue;
+      functorBindings_.erase(name);
+      streamBindings_[name] = {capture};
+      varBindings_[name]    = capture;
+      if (name == ".")
+        ambientContext_ = emitContextFallback(capture, ambientContext_);
+    }
+    return matched;
+  }
+
+  return emitContractGraphMatch(type, subjects, bindCaptures);
+}
+
+void VQLCompiler::validateContractAliases(const TypeExpr &type) {
   std::vector<std::string> aliases;
   collectDirectDefaultAliases(type, aliases);
   std::ranges::sort(aliases);
@@ -526,30 +555,13 @@ CellRef VQLCompiler::emitContractMatch(const TypeExpr &type,
             "contract default aliases cannot depend on parameter pipelines");
     }
   }
+}
 
-  if (!hasComputedDefault(type)) {
-    const auto defaults      = emitContractDefaultSlots(type);
-    const CellRef descriptor = emitConstant(encodeTypeDescriptor(type));
-    const CellRef match = emitOp(OpcodeKind::MatchContract, "#MATCH_CONTRACT");
-    emitInput(match, descriptor);
-    emitInputConstant(match, static_cast<std::int64_t>(subjects.size()));
-    for (const CellRef subject : subjects) emitInput(match, subject);
-    for (const CellRef value : defaults) emitInput(match, value);
-    const CellRef matched = core_.arena().makeCell();
-    emitOutput(match, matched);
-    for (const auto &name : ContractMatcher::contractCaptureNames(type)) {
-      const CellRef capture = core_.arena().makeCell();
-      emitOutput(match, capture);
-      if (!bindCaptures) continue;
-      functorBindings_.erase(name);
-      streamBindings_[name] = {capture};
-      varBindings_[name]    = capture;
-      if (name == ".")
-        ambientContext_ = emitContextFallback(capture, ambientContext_);
-    }
-    return matched;
-  }
-
+CellRef
+VQLCompiler::emitContractGraphMatch(const TypeExpr &type,
+                                    const std::span<const CellRef> subjects,
+                                    const bool bindCaptures) {
+  validateContractAliases(type);
   const bool savedGraph   = compilingGraphContract_;
   compilingGraphContract_ = true;
   const RestoreFlag restore{compilingGraphContract_, savedGraph};
@@ -620,9 +632,23 @@ void VQLCompiler::emitRequiredContractMatch(
   const bool savedGraph   = compilingGraphContract_;
   compilingGraphContract_ = true;
   const RestoreFlag restore{compilingGraphContract_, savedGraph};
-  const CellRef matched = emitContractMatch(type, subjects, false);
-  const CellRef failed  = mintContractLabel("#RETURN_CONTRACT_FAILED");
-  const CellRef done    = mintContractLabel("#RETURN_CONTRACT_DONE");
+  const auto hasAttachedPipeline = [&] {
+    if (ambientContext_ && core_.hasPipeline(*ambientContext_)) return true;
+    for (const auto &[_, cells] : streamBindings_)
+      if (std::ranges::any_of(cells, [this](const CellRef cell) {
+            return core_.hasPipeline(cell);
+          }))
+        return true;
+    for (const auto &[_, cell] : varBindings_)
+      if (cell && core_.hasPipeline(*cell)) return true;
+    return false;
+  };
+  const CellRef matched = [&] {
+    if (hasAttachedPipeline()) return emitContractMatch(type, subjects, false);
+    return compileContractValidator(type, subjects);
+  }();
+  const CellRef failed = mintContractLabel("#RETURN_CONTRACT_FAILED");
+  const CellRef done   = mintContractLabel("#RETURN_CONTRACT_DONE");
   const CellRef branch =
       emitOp(OpcodeKind::BranchFalseCell, "#RETURN_CONTRACT_BRANCH");
   emitInput(branch, matched);

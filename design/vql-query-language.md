@@ -2358,26 +2358,31 @@ explicit refusals. The rulings below describe the intended semantics.
   charges members before copying them into its matcher buffer, and matching charges recursive type
   visits and field probes. Failed shape and union attempts roll back arena defaults and minted
   dimensions; captures are staged until the full match succeeds. Return validation releases its
-  temporary defaults on both outcomes. Failed matching spends fuel even when its graph changes are
-  rolled back. Atomic enforcement of user mutations remains a separate milestone. Matching still
-  materializes subjects; no zero-copy or universal allocation guarantee follows. Step predicates
-  retain cell identity through guarded reference slots and Boolean control flow short-circuits.
-  Nonempty literal shape predicates lower directional presence/absence rules, scalar literal targets
-  and nested static shape targets to native one-hop probes and comparisons, including foreign
-  neighbors and self-links. Bidirectional targets accept either matching neighbor; negated rules
-  retain absence-only semantics and skip target evaluation. Dynamic targets still refuse. Scalar
-  predicates run before shape predicates and both precede the range clamp; the AST does not retain
-  their source interleaving. Empty/wildcard shapes and dynamic shape rules still require lowering.
-  Shape preflight rejects cycles, nesting beyond 128, and expanded shape work beyond 4096 units
-  across a compilation, accounting for duplicated bidirectional branches. Validation also permits at
-  most 4096 rule visits, including ignored targets and repeated shared subtrees. Unsupported cases
-  refuse explicitly. Runtime rank iterators and eager sequence registers now support per-member
-  typed filtering, stream cardinality, predicates and integer index clamps. Foreign neighbors
-  resolve through canonical arena proxies; choice points restore iterator state and proxy minting.
-  Computed defaults also execute inside eligible reusable frames, including self/mutual recursive
-  matching and return promises. Their temporary registers and captures are local to each activation.
-  Universal lazy streaming, recursive functor/variadic frames, mutation enforcement and complete
-  frontend/parallel parity remain open. Compiled execution never silently calls a direct evaluator.
+  temporary defaults on both outcomes. Computed return promises use reusable capture-free validator
+  frames with Boolean results and referenced lexical input ports; attached pipelines retain compiled
+  inline matching. Validators re-read the current owner instead of caching default results, while
+  noncomputed promises retain `RequireContract`. See
+  [iteration 28](projects/vortex-vm-only-iterations.md). Failed matching spends fuel even when its
+  graph changes are rolled back. Atomic enforcement of user mutations remains a separate milestone.
+  Matching still materializes subjects; no zero-copy or universal allocation guarantee follows. Step
+  predicates retain cell identity through guarded reference slots and Boolean control flow
+  short-circuits. Nonempty literal shape predicates lower directional presence/absence rules, scalar
+  literal targets and nested static shape targets to native one-hop probes and comparisons,
+  including foreign neighbors and self-links. Bidirectional targets accept either matching neighbor;
+  negated rules retain absence-only semantics and skip target evaluation. Dynamic targets still
+  refuse. Scalar predicates run before shape predicates and both precede the range clamp; the AST
+  does not retain their source interleaving. Empty/wildcard shapes and dynamic shape rules still
+  require lowering. Shape preflight rejects cycles, nesting beyond 128, and expanded shape work
+  beyond 4096 units across a compilation, accounting for duplicated bidirectional branches.
+  Validation also permits at most 4096 rule visits, including ignored targets and repeated shared
+  subtrees. Unsupported cases refuse explicitly. Runtime rank iterators and eager sequence registers
+  now support per-member typed filtering, stream cardinality, predicates and integer index clamps.
+  Foreign neighbors resolve through canonical arena proxies; choice points restore iterator state
+  and proxy minting. Computed defaults also execute inside eligible reusable frames, including
+  self/mutual recursive matching and return promises. Their temporary registers and captures are
+  local to each activation. Universal lazy streaming, recursive functor/variadic frames, mutation
+  enforcement and complete frontend/parallel parity remain open. Compiled execution never silently
+  calls a direct evaluator.
 
 ______________________________________________________________________
 

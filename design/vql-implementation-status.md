@@ -490,3 +490,20 @@ populated-destination preservation and real encoded-length agreement. Snapshot c
 range sorting remain costs; no speedup or full-suite pass is claimed. Omitted federation/provenance
 serialization, compatible worker bootstrap, aggregate mutation capacity, active mutation contracts
 and remaining functor/variadic/frame/stream/mesh lifecycle work still prevent §4.12 completion.
+
+## Reusable computed return validators
+
+Computed return promises use capture-free native validator frames built by the shared contract
+driver. Validators return a Boolean while the original result cells retain their identities; false
+raises the named return-contract error. Defaults remain lazy, observe the current owner and roll
+back on both outcomes. Noncomputed return checks retain the existing `RequireContract` path and
+attached pipelines retain compiled inline matching. See
+[iteration 28](projects/vortex-vm-only-iterations.md).
+
+Unused lexical inputs are pruned before frame finalization and caller normalization. The profile
+confirms removal of unused-stream copying, while validator invocation remains slower than the inline
+control in this small probe. Candidate environment preparation remains an open compile-time cost.
+Full build, formatting and all 745 affected tests from 69 suites passed, including source-free
+export/reload, recursion, lexical stream order and current-owner revalidation. Active mutation
+guards, atomic enforcement and the previously listed §4.12 gaps remain open; this is a bounded
+foundation.

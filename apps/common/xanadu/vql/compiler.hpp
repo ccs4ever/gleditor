@@ -149,6 +149,15 @@ private:
                            std::optional<zigzag::CellRef> context, bool ufcs);
   void compilePendingFrameDefinitions();
   void compileFrameDefinition(const DefDeclaration &definition);
+  class IsolatedCompileState;
+  zigzag::CellRef
+  compileContractValidator(const TypeExpr &type,
+                           std::span<const zigzag::CellRef> subjects);
+  void finalizeNativeFrame(
+      zigzag::CellRef descriptor, zigzag::vortex::FrameDescriptorSpec &spec,
+      std::optional<std::string_view> definitionName = std::nullopt);
+  zigzag::CellRef emitNativeFrameReturn(zigzag::CellRef descriptor,
+                                        std::string_view label);
   [[nodiscard]] zigzag::CellRef
   normalizeFrameStream(std::span<const zigzag::CellRef> cells);
   std::vector<zigzag::CellRef>
@@ -161,6 +170,11 @@ private:
   zigzag::CellRef emitContractMatch(const TypeExpr &type,
                                     std::span<const zigzag::CellRef> subjects,
                                     bool bindCaptures);
+  zigzag::CellRef
+  emitContractGraphMatch(const TypeExpr &type,
+                         std::span<const zigzag::CellRef> subjects,
+                         bool bindCaptures);
+  void validateContractAliases(const TypeExpr &type);
   void emitRequiredContractMatch(const TypeExpr &type,
                                  std::span<const zigzag::CellRef> subjects,
                                  std::string_view functionName);
@@ -230,6 +244,7 @@ private:
   std::size_t remainingShapePredicateValidationNodes_{
       maxCompiledShapePredicateRules};
   std::size_t remainingContractEmissions_{};
+  std::size_t nextContractValidatorId_{};
   bool compilingGraphContract_{false};
   std::unordered_map<const ValueExpr *, zigzag::CellRef> shapeTargetConstants_;
   zigzag::CellRef compileShapePredicateImpl(const ShapeLiteral &shape,

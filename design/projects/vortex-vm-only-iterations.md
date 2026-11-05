@@ -871,3 +871,46 @@ usage limit. No full-suite or speedup claim is made.
 
 Logs: `/tmp/vql-prefix-integrity-build.log`, `/tmp/vql-prefix-integrity-tests.log`,
 `/tmp/vql-prefix-integrity-format.log`.
+
+## Iteration 28: reusable computed return validators
+
+Computed return promises now compile a capture-free validation graph into a reusable native frame
+per static check site. The frame receives original subjects, context and referenced lexical streams,
+then returns a Boolean Cell port. The caller preserves its original result identities and raises the
+existing named return-contract error on false. Noncomputed promises retain `RequireContract`;
+attached parameter pipelines retain the existing inline graph route. No runtime AST execution or
+second matcher is introduced, and the existing frame ABI/export machinery is reused.
+
+The shared contract driver runs validators with rollback on success and failure. Present fields skip
+defaults; absent fields evaluate their compiled defaults against the current owning cell. Frozen
+lexical inputs preserve order, duplicates, explicit emptiness and unavailable aliases. They freeze
+references rather than cell payloads: a later cursor rechecks changed owner links instead of reusing
+a cached default result. Return captures never replace caller bindings. Native recursion and nested
+default calls retain their isolated active-call state.
+
+A first profile exposed eager copying of unused lexical streams. The compiler now discovers actual
+input references in the completed validator graph, prunes unused ports/locals, and emits caller
+normalizers only for retained inputs before invocation. A regression with 200 unused binding names
+passes with a 128-local frame limit. Temporary candidate slots and compile-time environment copies
+still occur before pruning; final frame limits are not a complete bound on that preparation cost.
+
+The opt-in probe runs 32/128 checks with zero/1,000 unused references. Before pruning, 1,000 unused
+references increased maximum stream-append arity to 1,000; after pruning every measured case has
+arity one, two validator arguments and 54 locals. Validator backing grows by 1,728/6,912 cells for
+32/128 calls. Post-pruning single observations were 7,378/6,994 microseconds at 32 calls and
+29,409/25,734 at 128 calls (zero/1,000 unused references). Inline controls were 4,714/5,029 and
+18,554/18,011 microseconds. These observations establish removal of the unrelated runtime copy
+dependency, not a general speedup; validator invocation still adds overhead.
+
+Validation: full `make -j$(nproc)`, repository formatting with clang-format 19 and all 745 affected
+tests from 69 suites passed. Nine new cases cover Boolean/result identity, absence-only defaults,
+optional empty and false results, lexical streams/capture isolation, fresh-cursor current-owner
+checks, recursion/failure recovery, exported graph reload after source destruction, pruned frame
+limits, and host/mesh source plus pipeline routes. A headless Vquery CLI returned `validator`
+through an emitted `#INVOKE_CONTRACT_VALIDATOR` instruction. Independent Luna architecture and
+senior/profiler gates review this bounded stage. Active mutation-contract registration, dispatch and
+atomic enforcement remain unimplemented; §4.12 remains incomplete.
+
+Logs: `/tmp/vql-validator-frames-build.log`, `/tmp/vql-validator-frames-tests.log`,
+`/tmp/vql-validator-frames-format.log`, `/tmp/vql-validator-frames-cli.log`,
+`/tmp/vql-validator-frames-profile-before.log`, `/tmp/vql-validator-frames-profile-after.log`.
