@@ -524,6 +524,62 @@ TEST(VagentExecutorTest, FaultBackoffRetriesThenDropWhenCancels) {
   EXPECT_EQ(arena.outstandingMarks(), 0u);
 }
 
+TEST(VagentExecutorTest, AchieveDelegatesAndTheChildsRetireResumes) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image =
+      h.lower("module demo\nevent Tick\nevent Done\n"
+              "goal Outer() perform\ngoal Inner() perform\n"
+              "agent A {\n"
+              "  on Tick { adopt Outer() }\n"
+              "  plan o for Outer { achieve Inner(); emit Done{} }\n"
+              "  plan i for Inner { }\n"
+              "}");
+  ASSERT_TRUE(image);
+  auto &arena     = h.ctx.arena;
+  const auto iDim = h.ctx.core.findOrMintDimension("d.intention");
+
+  // Turn 1 — adopt Outer; the spine's achieve parks the parent and
+  // mints the child: two records on the rank, Done not yet emitted.
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  {
+    const auto live = zigzag::rankAfter(arena, image->agentCell, iDim) |
+                      std::ranges::to<std::vector>();
+    ASSERT_EQ(live.size(), 2u);
+    auto binds =
+        mintMetaBindSet(arena, h.ctx.core, h.ctx.core.home(), image->agentCell);
+    MetaRuntime meta(h.ctx.core, h.ctx.vm, *binds);
+    // The parent (rank-first, adopted before the child was minted)
+    // is the delegated one.
+    EXPECT_EQ(meta.intentionField(live.front(), "delegated"), 1);
+    EXPECT_EQ(meta.intentionField(live.front(), "ready"), 0);
+  }
+  EXPECT_TRUE(
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell).empty());
+
+  // Turn 2 — the child's empty body retires and wakes the delegator;
+  // only the parent remains, ready to step.
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+  {
+    const auto live = zigzag::rankAfter(arena, image->agentCell, iDim) |
+                      std::ranges::to<std::vector>();
+    ASSERT_EQ(live.size(), 1u);
+    auto binds =
+        mintMetaBindSet(arena, h.ctx.core, h.ctx.core.home(), image->agentCell);
+    MetaRuntime meta(h.ctx.core, h.ctx.vm, *binds);
+    EXPECT_EQ(meta.intentionField(live.front(), "ready"), 1);
+  }
+
+  // Turn 3 — the resumed spine emits Done and the parent retires.
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+  EXPECT_TRUE(zigzag::rankAfter(arena, image->agentCell, iDim).empty());
+  const auto outbox =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  ASSERT_EQ(outbox.size(), 1u);
+  EXPECT_EQ(outbox[0].payload, "Done");
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
 // -- §3.1/§3.8 belief store: predicate banks, provenance, the four verbs ------
 
 TEST(VagentBeliefTest, BelieveBelievesForgetReviseRoundTrip) {

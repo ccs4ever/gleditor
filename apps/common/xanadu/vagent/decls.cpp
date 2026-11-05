@@ -193,6 +193,7 @@ struct Lowerer {
     case ExprKind::Emit:
     case ExprKind::AwaitEvent:
     case ExprKind::AwaitTerm:
+    case ExprKind::Achieve:
       return true;
     default:
       return false;
@@ -270,11 +271,37 @@ struct Lowerer {
     case ExprKind::AwaitTerm:
       verb = "await";
       break;
+    case ExprKind::Achieve:
+      verb = "achieve";
+      break;
     default:
       return std::unexpected(Diagnostic{DiagnosticCode::InvalidPosition,
                                         "statement is not a host verb",
                                         expr.loc});
     }
+    // achieve shares adopt's goal-name marshal — the delegation the
+    // runtime resolves on the parent intention. `by`/within/else arms
+    // refuse at marshal and degrade to stub segments.
+    if (expr.kind == ExprKind::Achieve) {
+      if (expr.recipients || expr.deadline || expr.recovery)
+        return std::unexpected(Diagnostic{
+            DiagnosticCode::InvalidPosition,
+            "achieve's by/within/else arms do not lower yet", expr.loc});
+      if (expr.children.empty() || expr.children.front()->children.empty() ||
+          expr.children.front()->children.front()->kind != ExprKind::Identifier)
+        return std::unexpected(
+            Diagnostic{DiagnosticCode::InvalidPosition,
+                       "achieve's operand is not a goal name", expr.loc});
+      const auto step = arena.makeCell();
+      zigzag::expectWritten(arena.link(step, verbDim(), DimVector::POS,
+                                       arena.makeCell(std::string{verb})));
+      if (const auto rec = varsRecord(arena, core, step, "goal", true))
+        zigzag::expectWritten(arena.link(
+            *rec, dims().values, DimVector::POS,
+            arena.makeCell(expr.children.front()->children.front()->text)));
+      return step;
+    }
+
     // await marshals its own fields before the generic term path —
     // AwaitEvent carries no children at all (name in `text`, binding
     // in `binding`), and `within`'s deadline must be a literal so the

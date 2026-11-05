@@ -261,6 +261,33 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       meta.setIntentionField(intention, "ready", 0);
       return true;
     }
+    if (verb == "achieve") {
+      // §3.5's synchronous delegation: the parent adopts the child
+      // goal and parks — the child rides +d.subgoal, and its retire
+      // (or drop) writes the parent's ready flag back.
+      if (intention == noCell) return false;
+      const auto goalName = field("goal");
+      if (goalName == noCell) return false;
+      const auto goal =
+          eventSymbolNamed(arena, core, programRoot, arena.textOf(goalName));
+      if (!goal) return false;
+      const auto live = zigzag::rankAfter(arena, agent, dims.intention) |
+                        std::ranges::to<std::vector>();
+      if (live.size() >=
+          static_cast<std::size_t>(setting("vagent.max_intentions", 32)))
+        return false;
+      auto child = meta.adoptGoal(
+          *goal, turn,
+          static_cast<std::size_t>(setting("vagent.condition_turn_fuel", 256)));
+      if (!child) return false;
+      zigzag::expectWritten(
+          arena.link(intention, dims.subgoal, DimVector::POS, *child));
+      meta.setIntentionField(*child, "delegator",
+                             static_cast<std::int64_t>(intention));
+      meta.setIntentionField(intention, "delegated", 1);
+      meta.setIntentionField(intention, "ready", 0);
+      return true;
+    }
     const auto term = field("term");
     if (term == noCell) return false;
     const auto pred = arena.textOf(term);
@@ -446,7 +473,18 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
                   dropped = std::get<std::string>(v) == "true";
               }
             }
-        if (dropped) unlinkRank(arena, intention, dims.intention);
+        if (dropped) {
+          // A dropped subgoal fails the parent's achieve — the fault
+          // ladder decides retry vs. drop there too.
+          const auto delegator =
+              meta.intentionField(intention, "delegator").value_or(0);
+          if (delegator != 0) {
+            meta.setIntentionField(static_cast<CellRef>(delegator), "delegated",
+                                   0);
+            faultIntention(static_cast<CellRef>(delegator));
+          }
+          unlinkRank(arena, intention, dims.intention);
+        }
         continue;
       }
       // Backoff expired below the cap — retry the same member.
@@ -522,8 +560,14 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
     }
     const auto next = stepIdx + 1;
     if (next >= std::max<std::size_t>(spine.size(), 1)) {
-      // The body's last member ran — the intention retires; the
-      // record drops off +d.intention cleanly.
+      // The body's last member ran — the intention retires; a
+      // delegating parent's achieve resumes on this completion.
+      const auto delegator =
+          meta.intentionField(intention, "delegator").value_or(0);
+      if (delegator != 0) {
+        meta.setIntentionField(static_cast<CellRef>(delegator), "delegated", 0);
+        meta.setIntentionField(static_cast<CellRef>(delegator), "ready", 1);
+      }
       unlinkRank(arena, intention, dims.intention);
     } else {
       meta.setIntentionField(intention, "step",
