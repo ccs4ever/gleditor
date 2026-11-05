@@ -58,6 +58,7 @@ CompiledProgram::fromUnit(Unit unit, std::string_view name,
   auto curHead      = programStore->sliceGenesis(xanadu::MicroversionId{});
   zigzag::vortex::WorkerContext stagingContext;
   Compiler compiler(stagingContext.core);
+  compiler.setPredicateSignatures(predicateSignatures(*schema));
   std::map<std::string, CompiledAgent> stagingAgents;
   for (const auto &[agentName, _] : checked->agents) {
     auto compiled = compiler.compileAgent(unit, agentName);
@@ -176,7 +177,8 @@ CompiledProgram::instantiate(zigzag::vortex::WorkerContext &context,
         std::format("unknown agent type '{}' in program", agentType));
   }
   Compiler compiler(context.core);
-  compiler.setBeliefEventDepth(beliefEventDepth_)
+  compiler.setPredicateSignatures(predicateSignatures(*schema_))
+      ->setBeliefEventDepth(beliefEventDepth_)
       ->setConditionFuel(conditionFuel_)
       ->setMaintainBackoffMs(maintainBackoffMs_);
   auto compiled = compiler.compileAgent(unit_, agentType);
@@ -390,6 +392,46 @@ std::expected<void, TransferRefusal>
 LocalHost::upgrade(const identity::ActorPid &pid,
                    std::shared_ptr<CompiledProgram> program,
                    std::optional<std::uint64_t> instructionLimit) {
+  return upgradeWith(pid, std::move(program), instructionLimit, false);
+}
+
+std::expected<void, TransferRefusal> LocalHost::upgradeQuiescing(
+    const identity::ActorPid &pid, std::shared_ptr<CompiledProgram> program,
+    const std::chrono::milliseconds timeout,
+    std::optional<std::uint64_t> instructionLimit) {
+  constexpr auto road = TransferRoute::UpgradeSchema;
+  const auto deadline = clock_.steady() + timeout;
+  if (const auto paused = executor_->pauseAdmission(pid, timeout); !paused)
+    return std::unexpected(paused.error());
+  const auto drained = [&]() -> std::expected<void, TransferRefusal> {
+    for (;;) {
+      const auto turns  = pump();
+      const auto report = executor_->quiescence(pid);
+      if (!report) return std::unexpected(report.error());
+      if (report->quiet()) return {};
+      // This host has one thread: a pump that ran nothing will not unblock
+      // the actor by itself, so waiting for the deadline would only spin.
+      if (turns == 0 || clock_.steady() >= deadline) {
+        const auto busy = report->firstBusy(AgentExecutor::UpgradeRoute::Schema);
+        return std::unexpected(TransferRefusal::make(
+            TransferCode::NotQuiescent, road, ActorError::NotQuiescent,
+            {.subject    = std::string(busy ? busy->first : "quiescence"),
+             .savedCount = busy ? busy->second : 0}));
+      }
+    }
+  }();
+  const auto result =
+      drained ? upgradeWith(pid, std::move(program), instructionLimit, true)
+              : drained;
+  executor_->resumeAdmission(pid);
+  return result;
+}
+
+std::expected<void, TransferRefusal>
+LocalHost::upgradeWith(const identity::ActorPid &pid,
+                       std::shared_ptr<CompiledProgram> program,
+                       std::optional<std::uint64_t> instructionLimit,
+                       const bool requirePaused) {
   if (!program || !programs_.contains(program->programRef()) ||
       programs_.at(std::string(program->programRef())).get() != program.get()) {
     return std::unexpected(TransferRefusal::make(TransferCode::Runtime,
@@ -407,7 +449,7 @@ LocalHost::upgrade(const identity::ActorPid &pid,
                    kLocalMaxMailboxBytes,
                    clock_.wall() + kLocalGrantLife,
                    true};
-  return executor_->upgrade(pid, std::move(program), grant);
+  return executor_->upgrade(pid, std::move(program), grant, requirePaused);
 }
 
 std::expected<void, TransferRefusal>

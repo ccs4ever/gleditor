@@ -316,6 +316,8 @@ inline constexpr std::string_view kVagentEpistemicIngestPerWake =
     "vagent.epistemic_ingest_per_wake";
 inline constexpr std::string_view kVagentEpistemicArenaSlots =
     "vagent.epistemic_arena_slots";
+inline constexpr std::string_view kVagentAdmissionPauseMs =
+    "vagent.admission_pause_ms";
 inline constexpr std::string_view kVagentEpistemicHealthHalfLife =
     "vagent.epistemic_health_half_life";
 inline constexpr std::string_view kVagentEpistemicSuspectFraction =

@@ -1097,6 +1097,15 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .schemas = {{.expectedTypes = {"integer"},
                       .defaultValues =
                           {vagent::runtime::kDefaultEpistemicHealthActions}}}},
+        {.name    = std::string(settings::kVagentAdmissionPauseMs),
+         .notes   = "vagent: milliseconds `pauseAdmission` closes an actor's "
+                    "door for when it is not given a ttl, 1000 to 600000. The "
+                    "pause lapses by itself, so a forgotten one cannot close "
+                    "a source for ever; `upgradeQuiescing` renews it across "
+                    "its drain",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues =
+                          {vagent::runtime::kDefaultAdmissionPauseMs}}}},
         {.name    = std::string(settings::kVagentTuiBorders),
          .notes   = "vagent tui: border glyphs; rounded, single or ascii. "
                     "Unset picks unicode where the locale is UTF-8",

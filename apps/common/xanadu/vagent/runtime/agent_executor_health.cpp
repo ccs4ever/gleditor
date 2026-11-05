@@ -155,9 +155,17 @@ AgentExecutor::healthAction(const identity::ActorPid &target,
   const auto tokenDigest = request.token.digest();
   const auto actionKind  = actionKindOf(request.action);
 
-  StoredHealthGrant *matchedGrant = nullptr;
+  // What the first scope learns about the grant is copied out: the grant is a
+  // vector element that `grantHealth` may reallocate once the scope ends, so
+  // no pointer to it survives, and the commit scope finds it again by id.
+  std::string grantId;
+  std::optional<HealthIssuer> issuer;
   {
     const std::lock_guard lock(ingress_->mutex);
+    // An early-out only; the test that counts is in the commit scope below.
+    if (admissionClosedLocked(target))
+      return std::unexpected(EpistemicRefusal::AdmissionClosed);
+    const StoredHealthGrant *matchedGrant = nullptr;
     auto it = ingress_->healthGrants.find(pid);
     if (it != ingress_->healthGrants.end()) {
       for (auto &g : it->second) {
@@ -180,7 +188,10 @@ AgentExecutor::healthAction(const identity::ActorPid &target,
     if (std::ranges::find(matchedGrant->actions, actionKind) ==
         matchedGrant->actions.end())
       return std::unexpected(EpistemicRefusal::UnauthorizedHealthAction);
+    grantId = matchedGrant->id;
+    issuer  = matchedGrant->issuer;
   }
+  swapPoint(SwapPoint::AfterGrantMatch, target);
 
   if (!isPrincipalToken(request.principal))
     return std::unexpected(EpistemicRefusal::InvalidPrincipal);
@@ -202,32 +213,50 @@ AgentExecutor::healthAction(const identity::ActorPid &target,
   if (!states_.contains(pid) && !runtime_.localCursor(target))
     return std::unexpected(EpistemicRefusal::UnknownActor);
 
-  {
-    const std::lock_guard hLock(healthMutex_);
-    std::size_t actorPending = 0;
-    std::size_t grantPending = 0;
-    for (const auto &[_, rec] : pendingHealth_) {
-      if (rec->target == target) {
-        actorPending++;
-        if (rec->grantId == matchedGrant->id) grantPending++;
-      }
-    }
-    if (actorPending >=
-        static_cast<std::size_t>(settings_.epistemic.healthPending))
-      return std::unexpected(EpistemicRefusal::IngressBackpressure);
-    if (grantPending >=
-        static_cast<std::size_t>(settings_.epistemic.healthPendingPerGrant))
-      return std::unexpected(EpistemicRefusal::IngressBackpressure);
+  // `sourceHealth` takes the ingress lock itself, so the snapshot is read
+  // before the commit scope holds it. It is read-only.
+  std::optional<SourceHealth> snapshot;
+  if (actionKind == HealthActionKind::Reset)
+    snapshot = sourceHealth(target, request.principal);
 
-    if (actionKind == HealthActionKind::Degrade ||
-        actionKind == HealthActionKind::Clear) {
-      const std::size_t degradeClearCap =
-          settings_.epistemic.healthPending > 4
-              ? settings_.epistemic.healthPending - 4
-              : 0;
-      if (actorPending >= degradeClearCap)
-        return std::unexpected(EpistemicRefusal::IngressBackpressure);
+  // One commit scope, ingress then health (the lock order): admission,
+  // back-pressure, receipt, ticket, reset generation, push. Every refusal
+  // precedes the ticket and nothing after it can refuse, so a refused call
+  // leaves no ticket against `healthPending`, burns no generation and takes
+  // no charge.
+  std::unique_lock lock(ingress_->mutex);
+  std::unique_lock hLock(healthMutex_);
+  if (admissionClosedLocked(target))
+    return std::unexpected(EpistemicRefusal::AdmissionClosed);
+  const auto grants = ingress_->healthGrants.find(pid);
+  if (grants == ingress_->healthGrants.end() ||
+      std::ranges::none_of(grants->second, [&](const StoredHealthGrant &g) {
+        return g.id == grantId && !g.revoked &&
+               CRYPTO_memcmp(g.tokenDigest.data(), tokenDigest.data(), 32) == 0;
+      }))
+    return std::unexpected(EpistemicRefusal::UnauthorizedHealthAction);
+  std::size_t actorPending = 0;
+  std::size_t grantPending = 0;
+  for (const auto &[_, rec] : pendingHealth_) {
+    if (rec->target == target) {
+      actorPending++;
+      if (rec->grantId == grantId) grantPending++;
     }
+  }
+  if (actorPending >=
+      static_cast<std::size_t>(settings_.epistemic.healthPending))
+    return std::unexpected(EpistemicRefusal::IngressBackpressure);
+  if (grantPending >=
+      static_cast<std::size_t>(settings_.epistemic.healthPendingPerGrant))
+    return std::unexpected(EpistemicRefusal::IngressBackpressure);
+  if (actionKind == HealthActionKind::Degrade ||
+      actionKind == HealthActionKind::Clear) {
+    const std::size_t degradeClearCap =
+        settings_.epistemic.healthPending > 4
+            ? settings_.epistemic.healthPending - 4
+            : 0;
+    if (actorPending >= degradeClearCap)
+      return std::unexpected(EpistemicRefusal::IngressBackpressure);
   }
 
   HealthReceipt receipt{ingress_->clockInstance, nextHealthCounter_++};
@@ -236,47 +265,38 @@ AgentExecutor::healthAction(const identity::ActorPid &target,
   record->receipt          = receipt;
   record->target           = target;
   record->tokenDigest      = tokenDigest;
-  record->grantId          = matchedGrant->id;
+  record->grantId          = grantId;
   record->totalMembers     = 1;
   record->remainingMembers = 1;
-  {
-    const std::lock_guard hLock(healthMutex_);
-    pendingHealth_[receipt.counter] = record;
-  }
+  pendingHealth_[receipt.counter] = record;
 
   QueuedHealth qh;
   qh.tokenDigest = tokenDigest;
   qh.principal   = request.principal;
   qh.action      = request.action;
   qh.receipt     = receipt;
-  qh.grantId = matchedGrant->id + "@" + ingress_->clockInstance.substr(0, 8);
-  qh.issuer  = matchedGrant->issuer;
-  qh.record  = record;
+  qh.grantId     = grantId + "@" + ingress_->clockInstance.substr(0, 8);
+  qh.issuer      = issuer;
+  qh.record      = record;
 
-  if (actionKind == HealthActionKind::Reset) {
-    // `sourceHealth` takes the ingress lock itself, so the snapshot is read
-    // before this scope holds it.
-    const auto snapshot = sourceHealth(target, request.principal);
-    const std::lock_guard lock(ingress_->mutex);
-    if (snapshot && wouldChangeHealth(request.action, *snapshot, target,
-                                      request.principal)) {
-      qh.generation = ingress_->requestReset({pid, request.principal});
+  if (actionKind == HealthActionKind::Reset && snapshot &&
+      wouldChangeHealth(request.action, *snapshot, target, request.principal)) {
+    qh.generation = ingress_->requestReset({pid, request.principal});
 
-      const auto it = ingress_->inFlight.find({pid, request.principal});
-      if (it != ingress_->inFlight.end()) {
-        for (const auto &[pred, mset] : it->second) {
-          if (!mset.empty()) qh.inFlightSnapshot[pred] = *mset.rbegin();
-        }
+    const auto it = ingress_->inFlight.find({pid, request.principal});
+    if (it != ingress_->inFlight.end()) {
+      for (const auto &[pred, mset] : it->second) {
+        if (!mset.empty()) qh.inFlightSnapshot[pred] = *mset.rbegin();
       }
+    }
 
-      // The open charge predates the reset, so it leaves the map here: a
-      // refusal after the call opens a fresh charge under the new
-      // generation, and the two never coalesce.
-      if (auto chargeIt = ingress_->charges.find({pid, request.principal});
-          chargeIt != ingress_->charges.end()) {
-        qh.closed = std::move(chargeIt->second);
-        ingress_->charges.erase(chargeIt);
-      }
+    // The open charge predates the reset, so it leaves the map here: a
+    // refusal after the call opens a fresh charge under the new
+    // generation, and the two never coalesce.
+    if (auto chargeIt = ingress_->charges.find({pid, request.principal});
+        chargeIt != ingress_->charges.end()) {
+      qh.closed = std::move(chargeIt->second);
+      ingress_->charges.erase(chargeIt);
     }
   }
 
@@ -294,9 +314,13 @@ AgentExecutor::healthActionBatch(const identity::ActorPid &target,
   const auto pid         = pidKey(target);
   const auto tokenDigest = request.token.digest();
 
-  StoredHealthGrant *matchedGrant = nullptr;
+  std::string grantId;
+  std::optional<HealthIssuer> issuer;
   {
     const std::lock_guard lock(ingress_->mutex);
+    if (admissionClosedLocked(target))
+      return std::unexpected(EpistemicRefusal::AdmissionClosed);
+    const StoredHealthGrant *matchedGrant = nullptr;
     auto it = ingress_->healthGrants.find(pid);
     if (it != ingress_->healthGrants.end()) {
       for (auto &g : it->second) {
@@ -321,7 +345,10 @@ AgentExecutor::healthActionBatch(const identity::ActorPid &target,
           matchedGrant->sources.end())
         return std::unexpected(EpistemicRefusal::UnauthorizedHealthAction);
     }
+    grantId = matchedGrant->id;
+    issuer  = matchedGrant->issuer;
   }
+  swapPoint(SwapPoint::AfterGrantMatch, target);
 
   if (request.principals.empty() ||
       request.principals.size() > settings_.epistemic.maxSources)
@@ -338,46 +365,52 @@ AgentExecutor::healthActionBatch(const identity::ActorPid &target,
   if (!states_.contains(pid) && !runtime_.localCursor(target))
     return std::unexpected(EpistemicRefusal::UnknownActor);
 
-  {
-    const std::lock_guard hLock(healthMutex_);
-    std::size_t actorPending = 0;
-    std::size_t grantPending = 0;
-    for (const auto &[_, rec] : pendingHealth_) {
-      if (rec->target == target) {
-        actorPending++;
-        if (rec->grantId == matchedGrant->id) grantPending++;
-      }
+  // The same commit scope as `healthAction`, for the same reasons.
+  std::unique_lock lock(ingress_->mutex);
+  std::unique_lock hLock(healthMutex_);
+  if (admissionClosedLocked(target))
+    return std::unexpected(EpistemicRefusal::AdmissionClosed);
+  const auto grants = ingress_->healthGrants.find(pid);
+  if (grants == ingress_->healthGrants.end() ||
+      std::ranges::none_of(grants->second, [&](const StoredHealthGrant &g) {
+        return g.id == grantId && !g.revoked &&
+               CRYPTO_memcmp(g.tokenDigest.data(), tokenDigest.data(), 32) == 0;
+      }))
+    return std::unexpected(EpistemicRefusal::UnauthorizedHealthAction);
+  std::size_t actorPending = 0;
+  std::size_t grantPending = 0;
+  for (const auto &[_, rec] : pendingHealth_) {
+    if (rec->target == target) {
+      actorPending++;
+      if (rec->grantId == grantId) grantPending++;
     }
-    if (actorPending >=
-        static_cast<std::size_t>(settings_.epistemic.healthPending))
-      return std::unexpected(EpistemicRefusal::IngressBackpressure);
-    if (grantPending >=
-        static_cast<std::size_t>(settings_.epistemic.healthPendingPerGrant))
-      return std::unexpected(EpistemicRefusal::IngressBackpressure);
   }
+  if (actorPending >=
+      static_cast<std::size_t>(settings_.epistemic.healthPending))
+    return std::unexpected(EpistemicRefusal::IngressBackpressure);
+  if (grantPending >=
+      static_cast<std::size_t>(settings_.epistemic.healthPendingPerGrant))
+    return std::unexpected(EpistemicRefusal::IngressBackpressure);
 
   HealthReceipt receipt{ingress_->clockInstance, nextHealthCounter_++};
 
-  auto record              = std::make_shared<PendingHealthRecord>();
-  record->receipt          = receipt;
-  record->target           = target;
-  record->tokenDigest      = tokenDigest;
-  record->grantId          = matchedGrant->id;
-  record->totalMembers     = request.principals.size();
-  record->remainingMembers = request.principals.size();
-  {
-    const std::lock_guard hLock(healthMutex_);
-    pendingHealth_[receipt.counter] = record;
-  }
+  auto record                     = std::make_shared<PendingHealthRecord>();
+  record->receipt                 = receipt;
+  record->target                  = target;
+  record->tokenDigest             = tokenDigest;
+  record->grantId                 = grantId;
+  record->totalMembers            = request.principals.size();
+  record->remainingMembers        = request.principals.size();
+  pendingHealth_[receipt.counter] = record;
 
   QueuedHealthBatch qb;
   qb.tokenDigest = tokenDigest;
   qb.principals  = request.principals;
   qb.action      = request.action;
   qb.receipt     = receipt;
-  qb.grantId = matchedGrant->id + "@" + ingress_->clockInstance.substr(0, 8);
-  qb.issuer  = matchedGrant->issuer;
-  qb.record  = record;
+  qb.grantId     = grantId + "@" + ingress_->clockInstance.substr(0, 8);
+  qb.issuer      = issuer;
+  qb.record      = record;
 
   PostBox::Item item;
   item.pid         = target;

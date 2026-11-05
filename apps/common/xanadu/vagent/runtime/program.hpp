@@ -287,6 +287,16 @@ public:
   upgrade(const identity::ActorPid &pid,
           std::shared_ptr<CompiledProgram> program,
           std::optional<std::uint64_t> instructionLimit = std::nullopt);
+  /// The operator path for an actor under steady ingestion, which is rarely
+  /// quiescent: pause admission (renewing the pause to cover @p timeout, so a
+  /// long drain cannot lapse it), pump the reactor until the actor is quiet,
+  /// upgrade with the pause required, and reopen admission whatever the
+  /// outcome. Refuses `NotQuiescent` when the drain makes no progress or runs
+  /// past @p timeout on the host's steady clock.
+  [[nodiscard]] std::expected<void, TransferRefusal> upgradeQuiescing(
+      const identity::ActorPid &pid, std::shared_ptr<CompiledProgram> program,
+      std::chrono::milliseconds timeout,
+      std::optional<std::uint64_t> instructionLimit = std::nullopt);
   /// The reconciler road: a non-epistemic agent carries its asks and staged
   /// effects across. The program is retained only after the pre-flight, and a
   /// reference already retained under another schema is refused by name.
@@ -309,6 +319,11 @@ public:
 
 private:
   class Issuer;
+  [[nodiscard]] std::expected<void, TransferRefusal>
+  upgradeWith(const identity::ActorPid &pid,
+              std::shared_ptr<CompiledProgram> program,
+              std::optional<std::uint64_t> instructionLimit,
+              bool requirePaused);
   std::shared_ptr<CompiledProgram> program_;
   std::map<std::string, std::shared_ptr<CompiledProgram>, std::less<>>
       programs_;

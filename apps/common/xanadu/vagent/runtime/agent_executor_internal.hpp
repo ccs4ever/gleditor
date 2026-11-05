@@ -370,6 +370,25 @@ struct AgentExecutor::Ingress {
     const auto found = resetMarks.find(source);
     return found != resetMarks.end() && generation < found->second.committed;
   }
+  /// Whether the host admits new posts for an actor. `pausedUntil` lapses
+  /// lazily against the steady clock, so no timer thread exists and a
+  /// forgotten pause cannot close a source for ever; `swapping` is set only
+  /// by `acquireSwap` and cleared only by the `SwapGate` it returns.
+  struct Admission {
+    std::optional<zigzag::vortex::mesh::ActorTime> pausedUntil;
+    bool swapping{false};
+  };
+  std::map<std::string, Admission> admission;
+  [[nodiscard]] AdmissionState
+  admissionOf(const std::string &pid,
+              zigzag::vortex::mesh::ActorTime now) const {
+    const auto found = admission.find(pid);
+    if (found == admission.end()) return AdmissionState::Open;
+    if (found->second.swapping) return AdmissionState::Swapping;
+    return found->second.pausedUntil && now <= *found->second.pausedUntil
+               ? AdmissionState::Paused
+               : AdmissionState::Open;
+  }
   /// The host's negative cache of latched sources (design 6.5): a babbler
   /// costs no turn once the arena has refused it, or an isolate has
   /// committed. Never an authority: the arena refuses the same readings, so
@@ -544,6 +563,7 @@ struct AgentExecutor::Ingress {
     std::erase_if(latched,
                   [&](const SourceKey &key) { return key.first == pid; });
     std::erase_if(inFlight, mine);
+    admission.erase(pid);
     std::erase_if(uncounted, mine);
     std::erase_if(marks, [&](const auto &entry) {
       return std::get<0>(entry.first) == pid;
@@ -645,6 +665,33 @@ struct AgentExecutor::OutboxItem {
   std::string correlation;
   std::string status;
   std::string cause;
+};
+
+/// The one way an upgrade closes the door. Constructed only by
+/// `AgentExecutor::acquireSwap`, held to the end of the upgrade function so the
+/// post-commit tail runs under it, and cleared in the destructor on every exit.
+class AgentExecutor::SwapGate {
+public:
+  ~SwapGate() {
+    if (!ingress_) return;
+    const std::lock_guard lock(ingress_->mutex);
+    const auto found = ingress_->admission.find(pid_);
+    if (found == ingress_->admission.end()) return;
+    found->second.swapping = false;
+    if (!found->second.pausedUntil) ingress_->admission.erase(found);
+  }
+  SwapGate(SwapGate &&other) noexcept
+      : ingress_(std::move(other.ingress_)), pid_(std::move(other.pid_)) {}
+  SwapGate(const SwapGate &)            = delete;
+  SwapGate &operator=(const SwapGate &) = delete;
+  SwapGate &operator=(SwapGate &&)      = delete;
+
+private:
+  friend class AgentExecutor;
+  SwapGate(std::shared_ptr<Ingress> ingress, std::string pid)
+      : ingress_(std::move(ingress)), pid_(std::move(pid)) {}
+  std::shared_ptr<Ingress> ingress_;
+  std::string pid_;
 };
 
 } // namespace xanadu::vagent::runtime

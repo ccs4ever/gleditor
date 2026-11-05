@@ -745,6 +745,20 @@ std::string predicateSignatureText(std::string_view name,
   return out;
 }
 
+std::string canonicalPredicateSignature(std::string_view name,
+                                        const UpgradePredicate &predicate) {
+  return std::string(kPredicateSignatureTag) + ' ' +
+         predicateSignatureText(name, predicate);
+}
+
+std::map<std::string, std::string, std::less<>>
+predicateSignatures(const UpgradeSchema &schema) {
+  std::map<std::string, std::string, std::less<>> out;
+  for (const auto &[name, predicate] : schema.predicates)
+    out.emplace(name, canonicalPredicateSignature(name, predicate));
+  return out;
+}
+
 bool sameUpgradeSchema(const UpgradeSchema &a, const UpgradeSchema &b) {
   return a.agents.size() == b.agents.size() &&
          a.skills.size() == b.skills.size() &&

@@ -111,6 +111,11 @@ enum class EpistemicRefusal : std::uint8_t {
   /// The host's negative cache says the source is isolated; the arena would
   /// refuse the reading the same way, so no turn is spent on it.
   SourceFaulted,
+  /// The host has closed this actor's door for an upgrade or a pause. Decided
+  /// in the scope that would have queued the post, so the device did nothing
+  /// wrong: nothing is logged, charged or noted, and the same bytes can be
+  /// resent once admission reopens.
+  AdmissionClosed,
 };
 
 /// What the host may do with a refused event.

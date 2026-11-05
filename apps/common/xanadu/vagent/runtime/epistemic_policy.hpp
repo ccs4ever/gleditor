@@ -97,6 +97,10 @@ checkArbitrationPolicy(const ArbitrationClause &clause, bool continuous);
 [[nodiscard]] std::string_view strategyName(ArbitrationStrategy s) noexcept;
 [[nodiscard]] std::string_view clockName(ObservationClock c) noexcept;
 
+/// The tag `canonicalPolicy` starts with. A policy master records it, so a
+/// checkpoint can tell a changed encoding from a changed field.
+inline constexpr std::string_view kPolicyEncoding = "vagent-policy-2";
+
 /// Canonical, versioned encoding of every field; equal policies encode
 /// equally and any changed field changes it.
 [[nodiscard]] std::string canonicalPolicy(const ArbitrationPolicy &policy);

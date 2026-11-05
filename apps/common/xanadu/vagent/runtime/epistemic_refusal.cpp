@@ -55,6 +55,10 @@ std::string_view toString(const TransferCode code) noexcept {
     return "ProgramReferenceReused";
   case TransferCode::RouteCarriesNoEpistemicState:
     return "RouteCarriesNoEpistemicState";
+  case TransferCode::UnknownShapeVersion:
+    return "UnknownShapeVersion";
+  case TransferCode::PolicyEncodingChanged:
+    return "PolicyEncodingChanged";
   }
   return "Unknown";
 }

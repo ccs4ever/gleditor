@@ -2,10 +2,14 @@
 
 #include <array>
 #include <limits>
+#include <ranges>
+#include <string_view>
 #include <unordered_set>
 #include <vector>
 
 #include "common/xanadu/vagent/runtime/epistemic_limits.hpp"
+#include "common/xanadu/vagent/runtime/epistemic_policy.hpp"
+#include "common/xanadu/vagent/runtime/epistemic_shape.hpp"
 #include "common/xanadu/vagent/runtime/wire.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
 
@@ -26,14 +30,17 @@ std::vector<CellRef> ranked(const zigzag::ArenaManifold &arena, CellRef owner,
              : std::vector<CellRef>{};
 }
 
-std::optional<std::string> savedHash(const zigzag::ArenaManifold &arena,
-                                     const ValueDims &vd, CellRef predicate,
-                                     const std::optional<DimRef> &epistemic) {
+/// One text field of the predicate's policy master, absent when the predicate
+/// has no master or the master has no such field.
+std::optional<std::string> masterText(const zigzag::ArenaManifold &arena,
+                                      const ValueDims &vd, CellRef predicate,
+                                      const std::optional<DimRef> &epistemic,
+                                      std::string_view field) {
   if (!epistemic) return std::nullopt;
   const auto master = arena.linked(predicate, *epistemic);
   if (!master) return std::nullopt;
-  const auto hash = fieldValue(arena, vd, *master, "hash");
-  return hash ? std::optional{arena.textOf(*hash)} : std::nullopt;
+  const auto value = fieldValue(arena, vd, *master, field);
+  return value ? std::optional{arena.textOf(*value)} : std::nullopt;
 }
 
 } // namespace
@@ -113,6 +120,28 @@ std::size_t countOwnedCells(const zigzag::ArenaManifold &arena, CellRef agent,
 }
 
 std::optional<TransferRefusal>
+checkResumeState(const zigzag::ArenaManifold &arena, CellRef root,
+                 const DimTable &table, const UpgradeSchema &into) {
+  const auto dims    = OwnedGraphDims::byName(table);
+  const auto probe   = probeEpistemicState(arena, root, dims);
+  const auto current = programShape(into);
+  if (probe.shape || current) {
+    const auto intention = table.find("d.intention");
+    const auto intentions =
+        intention == table.end()
+            ? std::size_t{0}
+            : std::ranges::distance(
+                  zigzag::rankAfter(arena, root, intention->second));
+    if (intentions != 0)
+      return TransferRefusal::make(
+          TransferCode::ActiveIntention, kTransferRoute,
+          zigzag::vortex::mesh::ActorError::ExecutionFailed,
+          {.savedCount = static_cast<std::uint64_t>(intentions)});
+  }
+  return checkShape(probe, current, kTransferRoute);
+}
+
+std::optional<TransferRefusal>
 checkResumePolicy(const zigzag::ArenaManifold &arena, CellRef root,
                   const DimTable &table, const UpgradeSchema &into) {
   const auto dims = OwnedGraphDims::byName(table);
@@ -123,7 +152,7 @@ checkResumePolicy(const zigzag::ArenaManifold &arena, CellRef root,
                      .step   = dims.step.value_or(*dims.vars)};
   for (const auto predicate : ranked(arena, root, dims.belief)) {
     const auto name = arena.textOf(predicate);
-    const auto was  = savedHash(arena, vd, predicate, dims.epistemic);
+    const auto was  = masterText(arena, vd, predicate, dims.epistemic, "hash");
     const auto next = into.predicates.find(name);
     if (next == into.predicates.end()) {
       // A plain predicate is dropped as it always was; one with a policy
@@ -138,6 +167,19 @@ checkResumePolicy(const zigzag::ArenaManifold &arena, CellRef root,
     const auto now = next->second.epistemicPolicy
                          ? std::optional{next->second.epistemicPolicy->hash}
                          : std::nullopt;
+    // A tag change changes the hash too, so the tag is read first: it names
+    // the cause where the hash only says that something differs.
+    if (was) {
+      const auto tag = masterText(arena, vd, predicate, dims.epistemic,
+                                  "encoding");
+      if (tag != std::optional<std::string>{kPolicyEncoding})
+        return TransferRefusal::make(
+            TransferCode::PolicyEncodingChanged, kTransferRoute,
+            zigzag::vortex::mesh::ActorError::ExecutionFailed,
+            {.subject = name,
+             .saved   = tag,
+             .current = std::string(kPolicyEncoding)});
+    }
     // A source's history was judged under its policy; a resume under another
     // would score it by rules it was never checked against.
     if (was != now)
@@ -145,6 +187,17 @@ checkResumePolicy(const zigzag::ArenaManifold &arena, CellRef root,
           TransferCode::PolicyChanged, kTransferRoute,
           zigzag::vortex::mesh::ActorError::ExecutionFailed,
           {.subject = name, .saved = was, .current = now});
+    if (was) {
+      const auto signature =
+          masterText(arena, vd, predicate, dims.epistemic, "signature");
+      const auto expected =
+          canonicalPredicateSignature(name, next->second);
+      if (signature != std::optional{expected})
+        return TransferRefusal::make(
+            TransferCode::PredicateIncompatible, kTransferRoute,
+            zigzag::vortex::mesh::ActorError::ExecutionFailed,
+            {.subject = name, .saved = signature, .current = expected});
+    }
   }
   return std::nullopt;
 }

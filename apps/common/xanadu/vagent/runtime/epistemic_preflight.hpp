@@ -70,7 +70,15 @@ struct ResumeAllowance {
   std::optional<ResumeLimits> grant;
 };
 
-/// Policy and removal against the new program's schema.
+/// Active intention and shape, in that order, before anything about the
+/// predicates is compared. An intention refuses only for an arbitrating agent
+/// (the saved image has a shape header, or the new program arbitrates).
+[[nodiscard]] std::optional<TransferRefusal>
+checkResumeState(const zigzag::ArenaManifold &arena, zigzag::CellRef root,
+                 const DimTable &dims, const UpgradeSchema &into);
+
+/// Policy encoding, policy, signature and removal against the new program's
+/// schema, predicate by predicate.
 [[nodiscard]] std::optional<TransferRefusal>
 checkResumePolicy(const zigzag::ArenaManifold &arena, zigzag::CellRef root,
                   const DimTable &dims, const UpgradeSchema &into);

@@ -15,6 +15,11 @@
 
 namespace xanadu::vagent::runtime {
 
+/// Versions the text of `canonicalPredicateSignature`, so a change to how a
+/// signature is written reads as a different signature and not as a change to
+/// the predicate.
+inline constexpr std::string_view kPredicateSignatureTag = "vagent-sig-1";
+
 struct UpgradeField {
   std::string name;
   Type type;
@@ -118,6 +123,19 @@ upgradeChangeName(UpgradeChangeKind kind) noexcept;
 [[nodiscard]] std::string
 predicateSignatureText(std::string_view name,
                        const UpgradePredicate &predicate);
+
+/// The signature a policy master stores and a resume compares: a version tag
+/// and the display text, which already names the predicate, its arity, its
+/// ordered types and its key positions, so one text serves the comparison and
+/// the refusal that prints it.
+[[nodiscard]] std::string
+canonicalPredicateSignature(std::string_view name,
+                            const UpgradePredicate &predicate);
+
+/// `canonicalPredicateSignature` of every predicate, for the compiler to write
+/// into the masters it mints.
+[[nodiscard]] std::map<std::string, std::string, std::less<>>
+predicateSignatures(const UpgradeSchema &schema);
 
 /// Whether two schemas declare the same things: no change either way and the
 /// same set of declarations, since `compareUpgradeSchemas` does not report an

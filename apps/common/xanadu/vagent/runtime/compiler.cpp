@@ -3169,18 +3169,26 @@ void Gen::mintPredicates() {
     if (!preds_.emplace(pd->name, std::move(pi)).second) {
       bail(CompileError::DuplicateName, "predicate " + pd->name, pd->loc);
     }
-    if (arbitration) mintPolicyMaster(cell, *arbitration);
+    if (arbitration) {
+      const auto signature = predicateSignatures_.find(pd->name);
+      mintPolicyMaster(cell, *arbitration,
+                       signature == predicateSignatures_.end()
+                           ? std::nullopt
+                           : std::optional{signature->second});
+    }
     zigzag::expectWritten(arena_.link(lastPred_.value_or(agentCell_),
                                       dims_.belief, DimVector::POS, cell));
     lastPred_ = cell;
   }
+  mintShapeHeader();
 }
 
 /// The predicate's policy master heads its `d.epistemic` rank: a record of
 /// typed constants that later calibration records take clone views of
 /// (P19 section 2.1). Durations are Int64 milliseconds; absent optional keys
 /// have no field rather than a sentinel value.
-void Gen::mintPolicyMaster(CellRef predicate, const ArbitrationPolicy &p) {
+void Gen::mintPolicyMaster(CellRef predicate, const ArbitrationPolicy &p,
+                           const std::optional<std::string> &signature) {
   const CellRef master = arena_.makeCell(std::string_view("EpistemicPolicy"));
   zigzag::expectWritten(
       arena_.link(predicate, dims_.epistemic, DimVector::POS, master));
@@ -3203,6 +3211,10 @@ void Gen::mintPolicyMaster(CellRef predicate, const ArbitrationPolicy &p) {
                         const std::optional<std::string> &v) {
     if (v) field(name, arena_.makeCell(std::string_view(*v)));
   };
+  // Shape 1 (epistemic_shape.hpp): the tag and the full signature are
+  // readable from a checkpoint, which the hash alone is not.
+  text("encoding", std::string(kPolicyEncoding));
+  text("signature", signature);
   text("strategy", std::string(strategyName(p.strategy)));
   text("model", p.model);
   real("min_confidence", p.minConfidence);
@@ -6576,6 +6588,12 @@ Compiler *Compiler::setConditionFuel(std::size_t fuel) noexcept {
   return this;
 }
 
+Compiler *Compiler::setPredicateSignatures(
+    std::map<std::string, std::string, std::less<>> signatures) {
+  predicateSignatures_ = std::move(signatures);
+  return this;
+}
+
 Compiler *Compiler::setMaintainBackoffMs(std::int64_t backoffMs) noexcept {
   maintainBackoffMs_ = backoffMs;
   return this;
@@ -6585,7 +6603,7 @@ std::expected<CompiledAgent, CompileFailure>
 Compiler::compileAgent(const Unit &unit, std::string_view agentType) {
   try {
     codegen::Gen g(core_, vm_, unit, agentType, beliefEventDepth_,
-                   conditionFuel_, maintainBackoffMs_);
+                   conditionFuel_, maintainBackoffMs_, predicateSignatures_);
     auto out     = g.run();
     frameBodies_ = g.takeFrameBodies();
     return out;

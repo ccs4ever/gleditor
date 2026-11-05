@@ -78,6 +78,12 @@ inline constexpr std::int64_t kDefaultEpistemicHealthReasons = 3;
 inline constexpr std::int64_t kMinEpistemicHealthReasons     = 2;
 inline constexpr std::int64_t kMaxEpistemicHealthReasons     = 16;
 inline constexpr std::int64_t kDefaultEpistemicHealthActions = 4;
+
+/// The default pause (P19 T1b2) outlasts an ordinary drain, and a pause that
+/// is forgotten lapses by itself: 1 s to 10 min bounds both mistakes.
+inline constexpr std::int64_t kDefaultAdmissionPauseMs = 30'000;
+inline constexpr std::int64_t kMinAdmissionPauseMs     = 1'000;
+inline constexpr std::int64_t kMaxAdmissionPauseMs     = 600'000;
 inline constexpr std::int64_t kMinEpistemicHealthActions     = 2;
 inline constexpr std::int64_t kMaxEpistemicHealthActions     = 64;
 // `validate()` caps min events at this share of the estimator's weight bound

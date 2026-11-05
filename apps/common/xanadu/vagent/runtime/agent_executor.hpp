@@ -71,6 +71,9 @@ struct AgentSettings {
   std::chrono::milliseconds maintainBackoff{30000};
   std::size_t sendRetries{5};
   std::chrono::milliseconds sendRetryInterval{1000};
+  /// `vagent.admission_pause_ms`: how long `pauseAdmission` closes a door
+  /// when it is not given a ttl, 1,000 to 600,000.
+  std::chrono::milliseconds admissionPause{kDefaultAdmissionPauseMs};
   double renewFraction{0.8};
   std::size_t readyPerMessage{4};
   std::size_t compactEvery{64};
@@ -233,6 +236,9 @@ struct AgentCheckpoint {
 
 class CompiledProgram;
 
+/// Whether the host admits new posts for an actor (P19 T1b2).
+enum class AdmissionState : std::uint8_t { Open, Paused, Swapping };
+
 // Ingress records, private to the executor (agent_executor.cpp).
 struct IngestKey;
 struct SourceChange;
@@ -248,6 +254,7 @@ public:
   struct PendingRequest;
   struct State;
   struct Ingress;
+  class SwapGate;
 
   AgentExecutor(zigzag::vortex::mesh::MeshActorRuntime &runtime,
                 CapabilityIssuer &issuer, AgentProgram &program,
@@ -288,12 +295,44 @@ public:
 
   /// Upgrade one prepared live actor under a replacement grant. The host must
   /// retain and authorize the new program before calling this owner-thread API.
+  ///
+  /// The swap gate (section 5.2 of the T1 design) closes admission for the
+  /// pid from the quiescence check to the end of the post-commit tail. With
+  /// @p requirePaused the call also refuses `NotQuiescent{admission}` when
+  /// admission is not paused, which is how `upgradeQuiescing` notices that its
+  /// pause lapsed during the drain.
   [[nodiscard]] std::expected<void, TransferRefusal>
   upgrade(const identity::ActorPid &pid,
           std::shared_ptr<CompiledProgram> program,
-          const zigzag::vortex::mesh::ActorGrant &grant);
+          const zigzag::vortex::mesh::ActorGrant &grant,
+          bool requirePaused = false);
   [[nodiscard]] std::expected<void, TransferRefusal>
   upgrade(const identity::ActorPid &pid, CompiledProgram &newProgram);
+
+  /// Refuse new posts for @p pid (`AdmissionClosed`) until the pause lapses or
+  /// `resumeAdmission`. An absent @p ttl is `AgentSettings::admissionPause`.
+  /// A pause only ever extends: it never shortens one already in force.
+  /// Readings already queued still run.
+  [[nodiscard]] std::expected<AgentExecutor *, TransferRefusal>
+  pauseAdmission(const identity::ActorPid &pid,
+                 std::optional<std::chrono::milliseconds> ttl = std::nullopt);
+  /// Idempotent; an unknown pid is a no-op. A swap in progress is not ended.
+  AgentExecutor *resumeAdmission(const identity::ActorPid &pid);
+
+  /// Where a test can run code at a named point of a racing call, so the
+  /// interleaving is chosen rather than hoped for. Empty in production.
+  enum class SwapPoint : std::uint8_t {
+    AfterGrantMatch,
+    BetweenObserveSections,
+    AfterCommit,
+    DuringDrain
+  };
+  using SwapObserver =
+      std::function<void(SwapPoint, const identity::ActorPid &)>;
+  AgentExecutor *setSwapObserver(SwapObserver observer) {
+    swapObserver_ = std::move(observer);
+    return this;
+  }
 
   /// The two live-upgrade routes: the schema-checked swap, which is the one
   /// that can carry a registered typed translator's state across, and the
@@ -317,15 +356,25 @@ public:
   /// is not.
   struct QuiescenceReport {
     bool turnInFlight{};
-    std::uint64_t hostEvents{}, posts{}, choiceDepth{}, marks{};
+    std::uint64_t hostEvents{}, posts{}, pendingHealth{}, inFlight{}, queued{},
+        choiceDepth{}, marks{};
+    /// The mesh mailbox. The executor cannot close it, so the count is the
+    /// refusal: only an arbitrating agent is refused for it (I3-4's
+    /// verification messages arrive there); others upgrade as before.
+    std::uint64_t mailbox{};
+    bool arbitrating{false};
     /// Only the schema road refuses these: the reconciler carries them.
     std::uint64_t flights{}, requests{}, deliveries{}, stagedOutbox{},
         pendingSettle{};
+    /// Informational: whether the door is open, paused or being swapped.
+    AdmissionState admission{AdmissionState::Open};
 
     [[nodiscard]] bool quiet() const noexcept {
       return !turnInFlight && hostEvents == 0 && posts == 0 &&
-             choiceDepth == 0 && marks == 0 && flights == 0 && requests == 0 &&
-             deliveries == 0 && stagedOutbox == 0 && pendingSettle == 0;
+             pendingHealth == 0 && inFlight == 0 && queued == 0 &&
+             choiceDepth == 0 && marks == 0 && (!arbitrating || mailbox == 0) &&
+             flights == 0 && requests == 0 && deliveries == 0 &&
+             stagedOutbox == 0 && pendingSettle == 0;
     }
     /// The first field that blocks @p route, in the order above.
     [[nodiscard]] std::optional<std::pair<std::string_view, std::uint64_t>>
@@ -826,8 +875,35 @@ private:
   [[nodiscard]] std::optional<TransferRefusal>
   resumeRefusal(const zigzag::vortex::mesh::ReceivedValue &received,
                 const AgentCheckpoint &checkpoint) const;
+  [[nodiscard]] static OwnedGraphDims ownedDimsOf(const State &state);
+  /// Proof that the ingress and then the health mutex are held, in the order
+  /// the lock-order comment above `healthMutex_` states.
+  struct HostLocks {
+    const std::unique_lock<std::mutex> &ingress;
+    const std::unique_lock<std::mutex> &health;
+  };
+  /// The one computation of the report; every caller states how it got the
+  /// locks, so the rules cannot drift between the advisory call and the gate.
+  [[nodiscard]] QuiescenceReport
+  quiescenceLocked(const identity::ActorPid &pid, const State &state,
+                   bool arbitrating, const HostLocks &locks) const;
   [[nodiscard]] QuiescenceReport quiescenceOf(const identity::ActorPid &pid,
-                                              const State &state) const;
+                                              const State &state,
+                                              bool arbitrating) const;
+  /// Takes both host mutexes, runs the quiescence report and the bound
+  /// predicate comparison, and only when all is quiet sets `swapping`, in one
+  /// scope: a post is either counted by the report or refused by the flag.
+  [[nodiscard]] std::expected<SwapGate, TransferRefusal>
+  acquireSwap(const identity::ActorPid &pid, const CompiledProgram &program,
+              UpgradeRoute route, bool requirePaused);
+  [[nodiscard]] std::set<std::string, std::less<>>
+  boundPredicatesLocked(const identity::ActorPid &pid) const;
+  void swapPoint(SwapPoint point, const identity::ActorPid &pid) const {
+    if (swapObserver_) swapObserver_(point, pid);
+  }
+  /// Whether the door is closed for @p pid now. Callers hold the ingress
+  /// mutex, in the scope that would push.
+  [[nodiscard]] bool admissionClosedLocked(const identity::ActorPid &pid) const;
   /// The version an actor runs, when it was compiled in this process.
   [[nodiscard]] const CompiledProgram *
   previousProgram(const State &state) const;
@@ -938,7 +1014,13 @@ private:
                                        const identity::ActorPid &target,
                                        std::string_view principal) const;
 
+  SwapObserver swapObserver_;
   std::atomic<std::uint64_t> nextHealthCounter_{1};
+  /// Lock order: the ingress mutex, then `healthMutex_`, then the post box's.
+  /// `revokeHealthGrant`, `acquireSwap` and the health commit scope take the
+  /// first two in that order; `observe`, `bindSource` and `retireSource` push
+  /// under the ingress mutex; nothing in `agent_executor*.cpp` takes the
+  /// ingress mutex while holding either of the others.
   mutable std::mutex healthMutex_;
   std::map<std::uint64_t, std::shared_ptr<PendingHealthRecord>> pendingHealth_;
   std::map<std::string, std::deque<HealthOutcomeRecord>> healthOutcomeRing_;

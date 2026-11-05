@@ -128,7 +128,9 @@ TEST(TransferRefusalTest, RefusalVocabularyIsStable) {
       TransferCode::PeakCopyBudget,
       TransferCode::WorkBudget,
       TransferCode::ProgramReferenceReused,
-      TransferCode::RouteCarriesNoEpistemicState};
+      TransferCode::RouteCarriesNoEpistemicState,
+      TransferCode::UnknownShapeVersion,
+      TransferCode::PolicyEncodingChanged};
   std::set<std::string_view> names;
   for (const auto code : codes) {
     const auto name = toString(code);

@@ -99,6 +99,13 @@ public:
   /// maintain goal's restorer fails.
   Compiler *setMaintainBackoffMs(std::int64_t backoffMs) noexcept;
 
+  /// The canonical signature of each predicate, written into the policy master
+  /// it mints so a checkpoint carries it. They come from the program's
+  /// `UpgradeSchema`, the one place a signature is decided; a predicate with
+  /// none gets no `signature` field.
+  Compiler *setPredicateSignatures(
+      std::map<std::string, std::string, std::less<>> signatures);
+
   /// The frame-run entries of the agent's method @p name, from the last
   /// successful `compileAgent`.
   [[nodiscard]] std::optional<FrameBody> frameBody(std::string_view name) const;
@@ -113,6 +120,7 @@ private:
   std::size_t conditionFuel_{kDefaultConditionFuel};
   std::int64_t maintainBackoffMs_{kDefaultMaintainBackoffMs};
   std::map<std::string, FrameBody, std::less<>> frameBodies_;
+  std::map<std::string, std::string, std::less<>> predicateSignatures_;
 };
 
 } // namespace xanadu::vagent::runtime

@@ -340,7 +340,7 @@ std::string_view clockName(ObservationClock c) noexcept {
 std::string canonicalPolicy(const ArbitrationPolicy &p) {
   // Length-prefixed fields in a fixed order; doubles by their exact bits so
   // the encoding never depends on decimal formatting.
-  std::string out("vagent-policy-2");
+  std::string out(kPolicyEncoding);
   out.push_back('\0');
   const auto put = [&](std::string_view tag, std::string_view value) {
     out += std::format("{}:{}:{};", tag, value.size(), value);

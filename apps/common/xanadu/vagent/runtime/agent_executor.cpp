@@ -5,6 +5,7 @@
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/system_docs.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_preflight.hpp"
+#include "common/xanadu/vagent/runtime/epistemic_shape.hpp"
 #include "common/xanadu/vagent/runtime/program.hpp"
 #include "common/xanadu/vagent/runtime/reconciler.hpp"
 #include "common/xanadu/vagent/runtime/settle_discard.hpp"
@@ -3317,19 +3318,22 @@ bool waitsOnReply(const ArenaManifold &arena, const ValueDims &vd,
 
 std::size_t AgentExecutor::epistemicCellsWithin(const State &state,
                                                 std::size_t ceiling) const {
+  return countOwnedCells(state.context->arena, state.agent.agentCell,
+                         ownedDimsOf(state), ceiling);
+}
+
+OwnedGraphDims AgentExecutor::ownedDimsOf(const State &state) {
   const auto &core = state.context->core.dims();
-  const OwnedGraphDims dims{.vars      = core.vars,
-                            .values    = core.values,
-                            .grab      = core.grab,
-                            .step      = core.step,
-                            .clone     = core.clone,
-                            .clause    = core.clause,
-                            .source    = state.dims.source,
-                            .belief    = state.dims.belief,
-                            .trust     = state.dims.trust,
-                            .epistemic = state.dims.epistemic};
-  return countOwnedCells(state.context->arena, state.agent.agentCell, dims,
-                         ceiling);
+  return {.vars      = core.vars,
+          .values    = core.values,
+          .grab      = core.grab,
+          .step      = core.step,
+          .clone     = core.clone,
+          .clause    = core.clause,
+          .source    = state.dims.source,
+          .belief    = state.dims.belief,
+          .trust     = state.dims.trust,
+          .epistemic = state.dims.epistemic};
 }
 
 std::size_t AgentExecutor::epistemicReserve(const State &state) const {
@@ -3553,7 +3557,7 @@ bool fitsKind(Type::Kind kind, const WireValue &value) {
 
 OutcomeClass outcomeClassOf(std::string_view code) noexcept {
   if (code == "IngressBackpressure" || code == "ClockUnsynchronised" ||
-      code == kTurnResultUndelivered)
+      code == "AdmissionClosed" || code == kTurnResultUndelivered)
     return OutcomeClass::Retryable;
   // A budget, an allowance or a binding the host must change first. An
   // exhausted turn is here, not retryable: the same bytes on the same state
@@ -3612,6 +3616,11 @@ AgentExecutor::bindSource(const identity::ActorPid &target,
                    policyHash(binding.policy);
   const auto pid = pidKey(target);
   const std::lock_guard lock(ingress_->mutex);
+  // In the scope that pushes: a bind that lands before the gate is seen by
+  // the swap's comparison with the new program's predicates, one after is
+  // refused here.
+  if (admissionClosedLocked(target))
+    return std::unexpected(EpistemicRefusal::AdmissionClosed);
   if (const auto routed = ingress_->aliases.find({pid, grant.alias});
       routed != ingress_->aliases.end() && routed->second != grant.principal)
     return std::unexpected(EpistemicRefusal::AliasInUse);
@@ -3666,6 +3675,8 @@ AgentExecutor::retireSource(const identity::ActorPid &target,
   const auto pid = pidKey(target);
   const std::string who(principal);
   const std::lock_guard lock(ingress_->mutex);
+  if (admissionClosedLocked(target))
+    return std::unexpected(EpistemicRefusal::AdmissionClosed);
   std::optional<std::uint64_t> highest;
   for (const auto &[k, held] : ingress_->bindings)
     if (std::get<0>(k) == pid && std::get<1>(k) == who)
@@ -3690,6 +3701,8 @@ AgentExecutor::retireSource(const identity::ActorPid &target,
 AgentExecutor *AgentExecutor::unbindSource(const identity::ActorPid &target,
                                            std::string_view principal,
                                            std::string_view predicate) {
+  // Deliberately not gated: revocation must always succeed. It takes the
+  // ingress mutex, so it is ordered against the gate and posts nothing.
   const std::lock_guard lock(ingress_->mutex);
   ingress_->unbind(pidKey(target), std::string(principal),
                    std::string(predicate));
@@ -3753,6 +3766,11 @@ AgentExecutor::observe(const identity::ActorPid &target,
       GLEDITOR_LOG_DEBUG(kIngressLog, "observation for an unbound source");
       return std::unexpected(EpistemicRefusal::UnknownSource);
     }
+    // An early-out only: the test that counts is in the second section, in
+    // the scope that pushes. Before the latch cache, which a closed door must
+    // not count a babbler against.
+    if (admissionClosedLocked(target))
+      return std::unexpected(EpistemicRefusal::AdmissionClosed);
     // Before the queue and unlogged: a babbler must not spend a turn, a log
     // slot or a charge per reading. The arena still decides every other case.
     if (ingress_->latched.contains(source)) {
@@ -3932,8 +3950,15 @@ AgentExecutor::observe(const identity::ActorPid &target,
   item.observation = std::move(r);
   item.ingest = IngestKey{o.principal, o.incarnation,  o.eventId, o.predicate,
                           o.relayedBy, receivedSteady, o.sequence};
+  swapPoint(SwapPoint::BetweenObserveSections, target);
   {
     const std::lock_guard lock(ingress_->mutex);
+    // The decision that counts: the same scope as `posts_->push`, so a reading
+    // is either in the post box when the swap counts it or refused here. It
+    // is not logged, charged or noted: the host closed the door, not the
+    // device.
+    if (admissionClosedLocked(target))
+      return std::unexpected(EpistemicRefusal::AdmissionClosed);
     // Each principal, and each relay, gets a fair share of the actor queue,
     // so neither a babbling source nor a relay replaying many principals'
     // signed events can starve the rest.
@@ -4049,6 +4074,8 @@ std::string_view epistemicRefusalName(EpistemicRefusal refusal) noexcept {
     return "EntropyUnavailable";
   case EpistemicRefusal::SourceFaulted:
     return "SourceFaulted";
+  case EpistemicRefusal::AdmissionClosed:
+    return "AdmissionClosed";
   }
   return "Unknown";
 }
@@ -5417,6 +5444,9 @@ std::optional<TransferRefusal> AgentExecutor::resumeRefusal(
   if (!program) return std::nullopt;
   const zigzag::ArenaManifold view(received.manifold.get());
   const auto dims = discoverDimensions(view, received.root);
+  if (auto refused = checkResumeState(view, received.root, dims,
+                                      program->upgradeSchema()))
+    return refused;
   if (auto refused = checkResumePolicy(view, received.root, dims,
                                        program->upgradeSchema()))
     return refused;
@@ -5507,9 +5537,17 @@ AgentExecutor::QuiescenceReport::firstBusy(
     const UpgradeRoute route) const noexcept {
   using Busy = std::pair<std::string_view, std::uint64_t>;
   if (turnInFlight) return Busy{"turnInFlight", 1};
-  const std::array common{Busy{"hostEvents", hostEvents}, Busy{"posts", posts},
-                          Busy{"choiceDepth", choiceDepth},
-                          Busy{"marks", marks}};
+  const std::array common{
+      Busy{"hostEvents", hostEvents},
+      Busy{"posts", posts},
+      Busy{"pendingHealth", pendingHealth},
+      Busy{"inFlight", inFlight},
+      Busy{"queued", queued},
+      Busy{"choiceDepth", choiceDepth},
+      Busy{"marks", marks},
+      // The executor cannot close the mesh mailbox: the count is the refusal,
+      // so a controller can tell one that is draining from one that is not.
+      Busy{"mailbox", arbitrating ? mailbox : 0}};
   // The schema route is strict about what the reconciler carries across by
   // design (in-flight asks, staged outbox and pending entries).
   const std::array schemaOnly{
@@ -5524,27 +5562,57 @@ AgentExecutor::QuiescenceReport::firstBusy(
   return std::nullopt;
 }
 
-AgentExecutor::QuiescenceReport
-AgentExecutor::quiescenceOf(const identity::ActorPid &pid,
-                            const State &state) const {
+AgentExecutor::QuiescenceReport AgentExecutor::quiescenceLocked(
+    const identity::ActorPid &pid, const State &state, const bool arbitrating,
+    const HostLocks &locks) const {
+  // The reference is the proof: it cannot be made without the locks.
+  (void)locks;
   const auto &arena = state.context->arena;
+  const auto key    = pidKey(pid);
   QuiescenceReport report;
   report.turnInFlight = state.inTurn;
   report.hostEvents   = state.hostEvents.size();
   report.posts        = posts_->pendingFor(pid) ? 1U : 0U;
-  report.choiceDepth  = state.context->vm.choiceDepth();
-  report.marks        = arena.outstandingMarks();
-  report.flights      = state.flights.size();
-  report.requests     = state.requests.size();
-  report.deliveries   = static_cast<std::uint64_t>(
+  report.pendingHealth = static_cast<std::uint64_t>(std::ranges::count_if(
+      pendingHealth_, [&](const auto &entry) {
+        return entry.second->target == pid;
+      }));
+  // A reading enters `queued` and `inFlight` when it is pushed and leaves both
+  // when its turn completes, so both are empty whenever the post box, the host
+  // events and the turn are. The report lists them anyway: a path that leaves
+  // one behind then refuses an upgrade instead of carrying a stale generation
+  // across the swap.
+  if (const auto held = ingress_->queued.find(key);
+      held != ingress_->queued.end())
+    report.queued = held->second;
+  for (const auto &[source, predicates] : ingress_->inFlight)
+    if (source.first == key)
+      for (const auto &[predicate, sequences] : predicates)
+        report.inFlight += sequences.size();
+  report.choiceDepth = state.context->vm.choiceDepth();
+  report.marks       = arena.outstandingMarks();
+  report.mailbox     = runtime_.pending(pid);
+  report.arbitrating = arbitrating;
+  report.flights     = state.flights.size();
+  report.requests    = state.requests.size();
+  report.deliveries  = static_cast<std::uint64_t>(
       std::ranges::count_if(outstanding_, [&](const auto &entry) {
-        return entry.second.ownerKey == pidKey(pid);
+        return entry.second.ownerKey == key;
       }));
   report.stagedOutbox =
       arena.linked(state.agent.agentCell, state.dims.outbox) ? 1U : 0U;
   report.pendingSettle =
       arena.linked(state.agent.agentCell, state.dims.pending) ? 1U : 0U;
+  report.admission = ingress_->admissionOf(key, clock_.steady());
   return report;
+}
+
+AgentExecutor::QuiescenceReport
+AgentExecutor::quiescenceOf(const identity::ActorPid &pid, const State &state,
+                            const bool arbitrating) const {
+  std::unique_lock ingress(ingress_->mutex);
+  std::unique_lock health(healthMutex_);
+  return quiescenceLocked(pid, state, arbitrating, {ingress, health});
 }
 
 std::expected<AgentExecutor::QuiescenceReport, TransferRefusal>
@@ -5554,7 +5622,10 @@ AgentExecutor::quiescence(const identity::ActorPid &pid) const {
       !live(*found->second))
     return std::unexpected(runtimeRefusal(TransferRoute::UpgradeSchema,
                                           ActorError::UnknownProcess));
-  return quiescenceOf(pid, *found->second);
+  const State &state = *found->second;
+  const auto probe   = probeEpistemicState(
+      state.context->arena, state.agent.agentCell, ownedDimsOf(state));
+  return quiescenceOf(pid, state, probe.shape.has_value());
 }
 
 const CompiledProgram *
@@ -5566,14 +5637,24 @@ AgentExecutor::previousProgram(const State &state) const {
 
 std::set<std::string, std::less<>>
 AgentExecutor::boundPredicates(const identity::ActorPid &pid) const {
+  const std::lock_guard lock(ingress_->mutex);
+  return boundPredicatesLocked(pid);
+}
+
+std::set<std::string, std::less<>>
+AgentExecutor::boundPredicatesLocked(const identity::ActorPid &pid) const {
   std::set<std::string, std::less<>> names;
   const auto key = pidKey(pid);
-  const std::lock_guard lock(ingress_->mutex);
   for (const auto &[bound, binding] : ingress_->bindings) {
     (void)binding;
     if (std::get<0>(bound) == key) names.insert(std::get<2>(bound));
   }
   return names;
+}
+
+bool AgentExecutor::admissionClosedLocked(const identity::ActorPid &pid) const {
+  return ingress_->admissionOf(pidKey(pid), clock_.steady()) !=
+         AdmissionState::Open;
 }
 
 std::optional<TransferRefusal> AgentExecutor::preflightUpgrade(
@@ -5602,7 +5683,13 @@ std::optional<TransferRefusal> AgentExecutor::preflightUpgrade(
   const auto &before = previous->upgradeSchema();
   const auto &after  = program.upgradeSchema();
 
-  if (const auto busy = quiescenceOf(pid, old).firstBusy(route))
+  const auto &arena  = old.context->arena;
+  const auto probe   = probeEpistemicState(arena, old.agent.agentCell,
+                                           ownedDimsOf(old));
+  const auto current = programShape(after);
+  const bool arbitrating = probe.shape.has_value() || current.has_value();
+  if (const auto busy =
+          quiescenceOf(pid, old, arbitrating).firstBusy(route))
     return TransferRefusal::make(
         TransferCode::NotQuiescent, road, ActorError::NotQuiescent,
         {.subject = std::string(busy->first), .savedCount = busy->second});
@@ -5624,10 +5711,11 @@ std::optional<TransferRefusal> AgentExecutor::preflightUpgrade(
           {.subject = "mailbox", .savedCount = pending});
   }
 
-  const auto &arena = old.context->arena;
   // This compiler cannot lower/resume BDI plans yet. Refuse rather than
-  // misbinding saved plan PCs or silently dropping an existing intention.
-  if (schema) {
+  // misbinding saved plan PCs or silently dropping an existing intention. The
+  // schema road has always refused any agent's; an arbitrating agent's is
+  // refused on every road, since intentions may later head query tokens.
+  if (schema || probe.shape || current) {
     const auto intentions =
         zigzag::rankAfter(arena, old.agent.agentCell, old.dims.intention) |
         std::ranges::to<std::vector<CellRef>>();
@@ -5636,6 +5724,7 @@ std::optional<TransferRefusal> AgentExecutor::preflightUpgrade(
                                    ActorError::ExecutionFailed,
                                    {.savedCount = intentions.size()});
   }
+  if (auto refused = checkShape(probe, current, road)) return refused;
 
   if (auto refused =
           checkPredicateTransfer(before, after, boundPredicates(pid), road))
@@ -5643,26 +5732,27 @@ std::optional<TransferRefusal> AgentExecutor::preflightUpgrade(
   if (std::ranges::any_of(changes, upgradeChangeRequiresRefusal))
     return runtime(ActorError::ExecutionFailed);
 
-  // Populated trust/epistemic roots cannot be silently erased: the copiers
+  // Populated trust/epistemic state cannot be silently erased: the copiers
   // carry neither the source profiles nor their faulted latch and incarnation
   // floors. Only the schema route has a translator to hand them to, and only
-  // once one is registered. The reconciler never calls it, so it refuses
-  // whether or not one is.
-  const bool trust =
-      arena.linked(old.agent.agentCell, old.dims.trust).has_value();
-  const bool populated =
-      trust || arena.linked(old.agent.agentCell, old.dims.epistemic);
-  if (populated && !schema)
-    return TransferRefusal::make(TransferCode::RouteCarriesNoEpistemicState,
-                                 road, ActorError::ExecutionFailed,
-                                 {.subject = trust ? "d.trust" : "d.epistemic",
-                                  .current = "the shared-pointer overload"});
-  if (populated && !ownedStateTranslator_)
+  // once one is registered for the saved shape. The reconciler never calls
+  // it, so it refuses whether or not one is. The shape header alone is not
+  // state: an arbitrating agent with no source yet upgrades on either road.
+  if (!schema && probe.populated)
+    return TransferRefusal::make(
+        TransferCode::RouteCarriesNoEpistemicState, road,
+        ActorError::ExecutionFailed,
+        {.subject = arena.linked(old.agent.agentCell, old.dims.trust)
+                        ? "d.trust"
+                        : "d.epistemic",
+         .current = "the shared-pointer overload"});
+  if (!hasTranslatableEpistemicState(
+          probe, TranslatorRegistry::of(ownedStateTranslator_ != nullptr)))
     return runtime(ActorError::ExecutionFailed);
 
   if (schema && grant) {
     const std::size_t cells =
-        populated ? epistemicCellsWithin(
+        probe.populated ? epistemicCellsWithin(
                         old, std::numeric_limits<std::size_t>::max() - 1)
                   : 0;
     const auto ceiling = static_cast<std::size_t>(settings_.epistemic.cells);
@@ -5685,10 +5775,85 @@ std::optional<TransferRefusal> AgentExecutor::preflightUpgrade(
   return std::nullopt;
 }
 
+std::expected<AgentExecutor::SwapGate, TransferRefusal>
+AgentExecutor::acquireSwap(const identity::ActorPid &pid,
+                           const CompiledProgram &program,
+                           const UpgradeRoute route, const bool requirePaused) {
+  const auto road = route == UpgradeRoute::Schema
+                        ? TransferRoute::UpgradeSchema
+                        : TransferRoute::UpgradeReconciler;
+  const auto found = states_.find(pidKey(pid));
+  if (found == states_.end() || !live(*found->second))
+    return std::unexpected(runtimeRefusal(road, ActorError::UnknownProcess));
+  const State &old   = *found->second;
+  const auto *before = previousProgram(old);
+  if (before == nullptr)
+    return std::unexpected(runtimeRefusal(road, ActorError::ExecutionFailed));
+  const auto probe = probeEpistemicState(
+      old.context->arena, old.agent.agentCell, ownedDimsOf(old));
+  const bool arbitrating =
+      probe.shape.has_value() || programShape(program.upgradeSchema());
+  const auto notQuiescent = [&](std::string_view subject,
+                                std::uint64_t count) {
+    return std::unexpected(TransferRefusal::make(
+        TransferCode::NotQuiescent, road, ActorError::NotQuiescent,
+        {.subject = std::string(subject), .savedCount = count}));
+  };
+
+  // Ingress, then health: the order every other site takes them in. A post
+  // that reaches either mutex first is counted by the report below; one that
+  // reaches it after finds `swapping` set. There is no third case.
+  std::unique_lock ingress(ingress_->mutex);
+  std::unique_lock health(healthMutex_);
+  const auto key   = pidKey(pid);
+  const auto state = ingress_->admissionOf(key, clock_.steady());
+  if (state == AdmissionState::Swapping ||
+      (requirePaused && state != AdmissionState::Paused))
+    return notQuiescent("admission", static_cast<std::uint64_t>(state));
+  const auto report =
+      quiescenceLocked(pid, old, arbitrating, HostLocks{ingress, health});
+  if (const auto busy = report.firstBusy(route))
+    return notQuiescent(busy->first, busy->second);
+  // A binding made before this scope is seen here and one made after is
+  // refused, so a predicate cannot be bound to a program that drops it.
+  if (auto refused = checkPredicateTransfer(
+          before->upgradeSchema(), program.upgradeSchema(),
+          boundPredicatesLocked(pid), road))
+    return std::unexpected(std::move(*refused));
+  ingress_->admission[key].swapping = true;
+  return SwapGate(ingress_, key);
+}
+
+std::expected<AgentExecutor *, TransferRefusal>
+AgentExecutor::pauseAdmission(const identity::ActorPid &pid,
+                              const std::optional<std::chrono::milliseconds> ttl) {
+  const auto found = states_.find(pidKey(pid));
+  if (found == states_.end() || !live(*found->second))
+    return std::unexpected(runtimeRefusal(TransferRoute::UpgradeSchema,
+                                          ActorError::UnknownProcess));
+  const auto until =
+      saturatingAdd(clock_.steady(), ttl.value_or(settings_.admissionPause));
+  const std::lock_guard lock(ingress_->mutex);
+  auto &admission = ingress_->admission[pidKey(pid)];
+  admission.pausedUntil =
+      std::max(admission.pausedUntil.value_or(until), until);
+  return this;
+}
+
+AgentExecutor *AgentExecutor::resumeAdmission(const identity::ActorPid &pid) {
+  const std::lock_guard lock(ingress_->mutex);
+  if (const auto found = ingress_->admission.find(pidKey(pid));
+      found != ingress_->admission.end()) {
+    found->second.pausedUntil.reset();
+    if (!found->second.swapping) ingress_->admission.erase(found);
+  }
+  return this;
+}
+
 std::expected<void, TransferRefusal>
 AgentExecutor::upgrade(const identity::ActorPid &pid,
                        std::shared_ptr<CompiledProgram> program,
-                       const ActorGrant &grant) {
+                       const ActorGrant &grant, const bool requirePaused) {
   constexpr auto road = TransferRoute::UpgradeSchema;
   const auto found    = states_.find(pidKey(pid));
   if (found == states_.end() || !found->second->prepared ||
@@ -5699,6 +5864,9 @@ AgentExecutor::upgrade(const identity::ActorPid &pid,
   if (auto refused =
           preflightUpgrade(pid, *program, UpgradeRoute::Schema, grant))
     return std::unexpected(std::move(*refused));
+  // Held to the end of the function: the tail after the commit runs under it.
+  auto gate = acquireSwap(pid, *program, UpgradeRoute::Schema, requirePaused);
+  if (!gate) return std::unexpected(std::move(gate.error()));
   const State &old    = *found->second;
   const auto previous = std::dynamic_pointer_cast<CompiledProgram>(old.program);
   if (!previous)
@@ -5977,16 +6145,28 @@ AgentExecutor::upgrade(const identity::ActorPid &pid,
   } catch (const std::exception &) {
     return std::unexpected(runtimeRefusal(road, ActorError::ResourceLimit));
   }
-  clearLatchCache(pid);
-  State &committed = *found->second;
-  liftLimits(*committed.context);
-  TurnSpec spec;
-  drain(committed, *committed.context, counter(committed, kFieldTurnCount),
-        spec);
-  setCounter(committed, kFieldTurnCount,
-             counter(committed, kFieldTurnCount) + 1);
-  flushStats(committed);
-  deriveSchedule(committed);
+  // The commit stands whatever happens below: the tail cannot be made
+  // transactional, so a failure is logged and the next turn re-derives the
+  // schedule. The gate opens only after it.
+  try {
+    swapPoint(SwapPoint::AfterCommit, pid);
+    clearLatchCache(pid);
+    State &committed = *found->second;
+    liftLimits(*committed.context);
+    TurnSpec spec;
+    swapPoint(SwapPoint::DuringDrain, pid);
+    drain(committed, *committed.context, counter(committed, kFieldTurnCount),
+          spec);
+    setCounter(committed, kFieldTurnCount,
+               counter(committed, kFieldTurnCount) + 1);
+    flushStats(committed);
+    deriveSchedule(committed);
+  } catch (const std::exception &error) {
+    GLEDITOR_LOG_WARN(kLog, "upgrade committed; its tail failed: {}",
+                      error.what());
+  } catch (...) {
+    GLEDITOR_LOG_WARN(kLog, "upgrade committed; its tail failed");
+  }
   return {};
 }
 
@@ -6013,6 +6193,8 @@ AgentExecutor::upgrade(const identity::ActorPid &pid,
   if (auto refused =
           preflightUpgrade(pid, newProgram, UpgradeRoute::Reconciler))
     return std::unexpected(std::move(*refused));
+  auto gate = acquireSwap(pid, newProgram, UpgradeRoute::Reconciler, false);
+  if (!gate) return std::unexpected(std::move(gate.error()));
 
   const auto *fromProgram = previousProgram(state);
   if (!fromProgram) {
@@ -6049,7 +6231,6 @@ AgentExecutor::upgrade(const identity::ActorPid &pid,
     return std::unexpected(runtimeRefusal(road, res.error()));
   }
 
-  clearLatchCache(pid);
   state.context = runtime_.context(pid);
   state.grant   = newGrant;
   if (const auto resolved = resolveProgram(newProgram.programRef())) {
@@ -6071,8 +6252,20 @@ AgentExecutor::upgrade(const identity::ActorPid &pid,
       }
     }
 
-    drain(state, *state.context, counter(state, kFieldTurnCount), TurnSpec{});
-    deriveSchedule(state);
+    try {
+      swapPoint(SwapPoint::AfterCommit, pid);
+      clearLatchCache(pid);
+      swapPoint(SwapPoint::DuringDrain, pid);
+      drain(state, *state.context, counter(state, kFieldTurnCount), TurnSpec{});
+      deriveSchedule(state);
+    } catch (const std::exception &error) {
+      GLEDITOR_LOG_WARN(kLog, "upgrade committed; its tail failed: {}",
+                        error.what());
+    } catch (...) {
+      GLEDITOR_LOG_WARN(kLog, "upgrade committed; its tail failed");
+    }
+  } else {
+    clearLatchCache(pid);
   }
 
   needsFirstTurn_.push_back(pid);
@@ -6205,6 +6398,16 @@ AgentSettings AgentSettings::fromModel(const xanadu::SystemStoreModel &model) {
   if (!stamp.empty()) {
     settings.spawnStamp = stamp;
   }
+
+  const auto pauseMs = model.getInt64(
+      xanadu::settings::kVagentAdmissionPauseMs, kDefaultAdmissionPauseMs);
+  if (pauseMs >= kMinAdmissionPauseMs && pauseMs <= kMaxAdmissionPauseMs)
+    settings.admissionPause = std::chrono::milliseconds(pauseMs);
+  else
+    GLEDITOR_LOG_WARN(kLog,
+                      "admission pause {} ms is outside {} to {}; keeping the "
+                      "default",
+                      pauseMs, kMinAdmissionPauseMs, kMaxAdmissionPauseMs);
 
   auto ep                 = settings.epistemic;
   const auto loadPositive = [&](const std::string_view name,

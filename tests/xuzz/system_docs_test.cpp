@@ -192,6 +192,7 @@ TEST(SystemDocsTest, VagentSettingsSeedWithDesignDefaults) {
       {"vagent.epistemic_control_per_wake", std::int64_t{32}},
       {"vagent.epistemic_health_reasons", std::int64_t{3}},
       {"vagent.epistemic_health_actions", std::int64_t{4}},
+      {"vagent.admission_pause_ms", std::int64_t{30000}},
   };
   for (const auto &[name, value] : expected) {
     const auto it = find(name);

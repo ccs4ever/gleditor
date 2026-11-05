@@ -268,6 +268,22 @@ template <typename Apply> AgentSettings healthSettings(Apply &&apply) {
 }
 } // namespace
 
+TEST(VagentSettingsTest, TheAdmissionPauseLoadsWithinItsRange) {
+  EXPECT_EQ(AgentSettings{}.admissionPause, std::chrono::milliseconds(30000));
+  const auto load = [](std::int64_t ms) {
+    return healthSettings([ms](Store &store, auto v) {
+      return setSetting(store, v, settings::kVagentAdmissionPauseMs, ms);
+    });
+  };
+  EXPECT_EQ(load(5000).admissionPause, std::chrono::milliseconds(5000));
+  EXPECT_EQ(load(1000).admissionPause, std::chrono::milliseconds(1000));
+  EXPECT_EQ(load(600000).admissionPause, std::chrono::milliseconds(600000));
+  // Out of range keeps the default rather than closing doors for ever or
+  // never.
+  EXPECT_EQ(load(999).admissionPause, std::chrono::milliseconds(30000));
+  EXPECT_EQ(load(600001).admissionPause, std::chrono::milliseconds(30000));
+}
+
 TEST(VagentSettingsTest, HealthSettingsLoadEachField) {
   const auto s = healthSettings([](Store &store, auto v) {
     v = setSetting(store, v, settings::kVagentEpistemicHealthHalfLife,

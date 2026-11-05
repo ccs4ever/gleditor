@@ -373,11 +373,13 @@ public:
       const Unit &unit, std::string_view agentType,
       std::size_t beliefEventDepth   = 8,
       std::uint64_t conditionFuel    = kDefaultConditionFuel,
-      std::int64_t maintainBackoffMs = kDefaultMaintainBackoffMs)
+      std::int64_t maintainBackoffMs = kDefaultMaintainBackoffMs,
+      std::map<std::string, std::string, std::less<>> predicateSignatures = {})
       : core_(core), vm_(vm), arena_(core.arena()), unit_(unit),
         agentType_(agentType), conditionFuel_(conditionFuel),
         maintainBackoffMs_(maintainBackoffMs),
-        beliefEventDepth_(beliefEventDepth) {}
+        beliefEventDepth_(beliefEventDepth),
+        predicateSignatures_(std::move(predicateSignatures)) {}
 
   CompiledAgent run();
   std::map<std::string, FrameBody, std::less<>> takeFrameBodies() {
@@ -1136,6 +1138,7 @@ private:
   };
 
   std::size_t beliefEventDepth_;
+  std::map<std::string, std::string, std::less<>> predicateSignatures_;
   std::unordered_map<std::string, PredInfo> preds_;
   std::optional<CellRef> lastPred_;
   CellRef a3_{}, a4_{}, roundsG_{};
@@ -1215,7 +1218,10 @@ private:
   void pushTail(CellRef listReg, CellRef tailReg, CellRef cell);
   void selfName(CellRef out);
   Ty believesExpr(const EBelieves &b, CellRef out);
-  void mintPolicyMaster(CellRef predicate, const ArbitrationPolicy &policy);
+  void mintPolicyMaster(CellRef predicate, const ArbitrationPolicy &policy,
+                        const std::optional<std::string> &signature);
+  /// The shape header of P19 T1b1, defined in epistemic_emit_shape.cpp.
+  void mintShapeHeader();
   Ty findallExpr(const EFindall &f, CellRef out, SourceLocation loc);
   Ty forBelieves(const EFor &f, CellRef out);
   Ty beliefChange(EBeliefChange::Kind kind, const Term &t,
