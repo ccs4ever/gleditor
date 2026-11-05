@@ -478,25 +478,20 @@ struct Lowerer {
     if (expr.kind == ExprKind::Emit) {
       // emit's operand is an event value — Identifier or Call naming a
       // declared event; the name marshals as payload and the §3.7
-      // record's kind/target/id fill at run time. in/for marshal a
-      // bare name each into the one `target` slot — both at once has
-      // no schema answer, and compound target expressions (lists,
-      // computed scopes) still refuse.
-      const auto targetOf = [](const Expr &e) -> const std::string * {
+      // record's kind/target/id fill at run time. `in` names the
+      // delivery scope and `for` the recipients — separate fields, so
+      // `emit E{} in s for t` carries both; compound/computed target
+      // expressions still refuse.
+      const auto nameOf = [](const Expr &e) -> const std::string * {
         return e.kind == ExprKind::Identifier ? &e.text : nullptr;
       };
+      const std::string *scope  = nullptr;
       const std::string *target = nullptr;
-      if (expr.scope && expr.recipients)
-        return std::unexpected(
-            Diagnostic{DiagnosticCode::InvalidPosition,
-                       "emit's in and for share one target slot — "
-                       "name one",
-                       expr.loc});
-      if (expr.scope && !(target = targetOf(*expr.scope)))
+      if (expr.scope && !(scope = nameOf(*expr.scope)))
         return std::unexpected(Diagnostic{DiagnosticCode::InvalidPosition,
-                                          "emit's in-target is not a name",
+                                          "emit's in-scope is not a name",
                                           expr.loc});
-      if (expr.recipients && !(target = targetOf(*expr.recipients)))
+      if (expr.recipients && !(target = nameOf(*expr.recipients)))
         return std::unexpected(Diagnostic{DiagnosticCode::InvalidPosition,
                                           "emit's for-target is not a name",
                                           expr.loc});
@@ -538,6 +533,10 @@ struct Lowerer {
       if (const auto rec = varsRecord(arena, core, step, "payload", true))
         zigzag::expectWritten(
             arena.link(*rec, dims().values, DimVector::POS, payload));
+      if (scope)
+        if (const auto rec = varsRecord(arena, core, step, "scope", true))
+          zigzag::expectWritten(arena.link(*rec, dims().values, DimVector::POS,
+                                           arena.makeCell(*scope)));
       if (target)
         if (const auto rec = varsRecord(arena, core, step, "target", true))
           zigzag::expectWritten(arena.link(*rec, dims().values, DimVector::POS,

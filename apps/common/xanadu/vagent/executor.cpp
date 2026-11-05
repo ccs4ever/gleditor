@@ -179,7 +179,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
   // deterministic idempotence triple so a duplicate drain is
   // detectable by key rather than by cell identity.
   const auto stageOutbox = [&](std::string_view kind, CellRef payload,
-                               CellRef target) {
+                               CellRef target, CellRef scope = noCell) {
     const auto position = std::ranges::to<std::vector>(
                               zigzag::rankAfter(arena, agent, dims.outbox))
                               .size();
@@ -198,6 +198,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
     outField("kind", arena.makeCell(std::string{kind}));
     outField("payload", payload);
     outField("target", target);
+    if (scope != noCell) outField("scope", scope);
     outField("id", arena.makeCell(std::format("{}:{}:{}",
                                               std::hash<std::string>{}(sender),
                                               turn, position)));
@@ -239,13 +240,15 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
     if (verb == "emit") {
       const auto payload = field("payload");
       if (payload == noCell) return false;
-      // in/for marshals a target name; an untargeted emit keeps the
-      // schema's 0 — the adapter reads a text target as a delivery
-      // address, 0 as broadcast/self.
+      // in names the scope, for the recipients; an untargeted emit
+      // keeps the schema's 0 — the adapter reads a text target as a
+      // delivery address, 0 as broadcast/self.
       const auto target = field("target");
+      const auto scope  = field("scope");
       stageOutbox("emit", payload,
                   target != noCell ? target
-                                   : arena.makeScalarCell(std::int64_t{0}));
+                                   : arena.makeScalarCell(std::int64_t{0}),
+                  scope);
       return true;
     }
     if (verb == "tell" || verb == "untell") {
@@ -784,7 +787,8 @@ VagentExecutor::drainOutbox(zigzag::ArenaManifold &arena,
     entries.push_back(OutboxEntry{.kind    = read("kind"),
                                   .target  = read("target"),
                                   .payload = read("payload"),
-                                  .id      = read("id")});
+                                  .id      = read("id"),
+                                  .scope   = read("scope")});
   }
   return entries;
 }

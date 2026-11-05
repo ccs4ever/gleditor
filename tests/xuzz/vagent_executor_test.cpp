@@ -362,11 +362,12 @@ TEST(VagentExecutorTest, EmitMarshalsRecordFieldsOntoThePayload) {
   EXPECT_EQ(arena.outstandingMarks(), 0u);
 }
 
-TEST(VagentExecutorTest, EmitForMarshalsTheTargetOntoTheRecord) {
+TEST(VagentExecutorTest, EmitInAndForMarshalOntoSeparateFields) {
   ExecutorHarness h;
   VagentExecutor exec;
-  const auto image = h.lower("module demo\nevent Tick\nevent Ping\n"
-                             "agent A { on Tick { emit Ping{} for parent } }");
+  const auto image =
+      h.lower("module demo\nevent Tick\nevent Ping\n"
+              "agent A { on Tick { emit Ping{} in inner for parent } }");
   ASSERT_TRUE(image);
 
   const auto outcome = exec(h.execution("Tick"), h.ctx);
@@ -376,8 +377,9 @@ TEST(VagentExecutorTest, EmitForMarshalsTheTargetOntoTheRecord) {
       VagentExecutor::drainOutbox(h.ctx.arena, h.ctx.core, image->agentCell);
   ASSERT_EQ(outbox.size(), 1u);
   EXPECT_EQ(outbox[0].payload, "Ping");
-  // The for-name rides the record's one target slot — the adapter
-  // reads it as the delivery address; untargeted emits carry 0.
+  // `in` is the delivery scope, `for` the recipients — the record
+  // carries both; the adapter reads target as the delivery address.
+  EXPECT_EQ(outbox[0].scope, "inner");
   EXPECT_EQ(outbox[0].target, "parent");
   EXPECT_EQ(h.ctx.arena.outstandingMarks(), 0u);
 }

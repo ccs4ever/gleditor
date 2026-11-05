@@ -32,6 +32,8 @@ struct OutboxEntry {
   std::string target;
   std::string payload;
   std::string id;
+  // `in`'s delivery scope — empty when the emit named none.
+  std::string scope;
 };
 
 class VagentExecutor {
