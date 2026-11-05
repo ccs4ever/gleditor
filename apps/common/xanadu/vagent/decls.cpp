@@ -301,7 +301,27 @@ struct Lowerer {
   // +d.vars record marshals the call's arguments under their parameter
   // names — for the belief verbs that is exactly `term`. Peer and
   // assertion turn are implicit, supplied by the executor at run time.
-  std::expected<CellRef, Diagnostic> mintHostStep(const Expr &expr) {
+  // A suspension verb's `else` arm lowers to an ordinary head whose
+  // extra param `cause` carries the expiry reason — the checker types
+  // the recovery against the awaited value and names `cause: Str`
+  // itself. The head is stored as a scalar ref: it is shared
+  // program-image state a second run of the spine must not evict.
+  std::expected<CellRef, Diagnostic>
+  marshalElse(const Decl &decl, const std::vector<Parameter> &params,
+              const Expr &recovery, std::string_view clauseName) {
+    auto ps = params;
+    ps.push_back(Parameter{.name = "cause",
+                           .type = Type{"Str"},
+                           .loc  = recovery.loc});
+    return emitHead(decl, recovery, ps,
+                    std::format("{}:else", label(clauseName)),
+                    Type{"<any>"});
+  }
+
+  std::expected<CellRef, Diagnostic>
+  mintHostStep(const Expr &expr, const Decl &decl,
+               const std::vector<Parameter> &params,
+               std::string_view clauseName) {
     std::string_view verb;
     switch (expr.kind) {
     case ExprKind::Believe:
@@ -382,13 +402,16 @@ struct Lowerer {
     // ask peer.q(args) within <dur> — suspension staged like the
     // other cross-agent verbs: the question rides the payload as a
     // marshaled term (functor + arg children), the peer by name, the
-    // within bound as the turn-clock scalar. `else` recovery still
-    // refuses — the fallback is an evaluated expression.
+    // within bound as the turn-clock scalar. The `else` recovery
+    // lowers to a `{cause: Str}`-param'd head the executor evaluates
+    // on expiry — the fallback is an evaluated expression.
     if (expr.kind == ExprKind::Ask) {
-      if (expr.recovery)
-        return std::unexpected(Diagnostic{DiagnosticCode::InvalidPosition,
-                                          "ask's else arm does not lower yet",
-                                          expr.loc});
+      CellRef elseHead = noCell;
+      if (expr.recovery) {
+        auto head = marshalElse(decl, params, *expr.recovery, clauseName);
+        if (!head) return std::unexpected(head.error());
+        elseHead = *head;
+      }
       if (!expr.deadline || expr.deadline->kind != ExprKind::Duration)
         return std::unexpected(
             Diagnostic{DiagnosticCode::InvalidPosition,
@@ -420,6 +443,9 @@ struct Lowerer {
       field("payload", payload);
       field("deadline", arena.makeScalarCell(static_cast<std::int64_t>(
                             std::stoll(expr.deadline->text))));
+      if (elseHead != noCell)
+        field("else", arena.makeScalarCell(
+                          static_cast<std::int64_t>(elseHead)));
       return step;
     }
 
@@ -474,12 +500,14 @@ struct Lowerer {
     // runtime resolves on the parent intention. The grammar's only
     // deadline form is the remote one — `by <agent> within <dur>` —
     // which stages an outbox record and parks the parent on the
-    // bound; else still refuses.
+    // bound; `else` rides the same expiry-evaluation path as ask's.
     if (expr.kind == ExprKind::Achieve) {
-      if (expr.recovery)
-        return std::unexpected(
-            Diagnostic{DiagnosticCode::InvalidPosition,
-                       "achieve's else arm does not lower yet", expr.loc});
+      CellRef elseHead = noCell;
+      if (expr.recovery) {
+        auto head = marshalElse(decl, params, *expr.recovery, clauseName);
+        if (!head) return std::unexpected(head.error());
+        elseHead = *head;
+      }
       if (expr.recipients && expr.recipients->kind != ExprKind::Identifier)
         return std::unexpected(Diagnostic{DiagnosticCode::InvalidPosition,
                                           "achieve's by-target is not a name",
@@ -507,6 +535,9 @@ struct Lowerer {
       if (expr.deadline)
         field("deadline", arena.makeScalarCell(static_cast<std::int64_t>(
                               std::stoll(expr.deadline->text))));
+      if (elseHead != noCell)
+        field("else", arena.makeScalarCell(
+                          static_cast<std::int64_t>(elseHead)));
       return step;
     }
 
@@ -515,10 +546,16 @@ struct Lowerer {
     // in `binding`), and `within`'s deadline must be a literal so the
     // runtime can hold blocked_until as a plain scalar.
     if (expr.kind == ExprKind::AwaitEvent || expr.kind == ExprKind::AwaitTerm) {
-      if (expr.guard || expr.recovery)
+      if (expr.guard)
         return std::unexpected(
             Diagnostic{DiagnosticCode::InvalidPosition,
-                       "await's guard/else arms do not lower yet", expr.loc});
+                       "await's guard arm does not lower yet", expr.loc});
+      CellRef elseHead = noCell;
+      if (expr.recovery) {
+        auto head = marshalElse(decl, params, *expr.recovery, clauseName);
+        if (!head) return std::unexpected(head.error());
+        elseHead = *head;
+      }
       // The turn protocol's only clock is turn-indexed — `within`'s
       // Duration marshals as its magnitude and expires in *turns*.
       // Wall-clock deadlines are the adapter's Timer capacity
@@ -547,6 +584,9 @@ struct Lowerer {
       }
       field("deadline", arena.makeScalarCell(static_cast<std::int64_t>(
                             std::stoll(expr.deadline->text))));
+      if (elseHead != noCell)
+        field("else", arena.makeScalarCell(
+                          static_cast<std::int64_t>(elseHead)));
       return step;
     }
 
@@ -717,7 +757,7 @@ struct Lowerer {
       }
       if (verbStmt) {
         flushRun();
-        auto step = mintHostStep(*verbStmt);
+        auto step = mintHostStep(*verbStmt, decl, params, clauseName);
         if (step && !bound.empty())
           if (const auto rec = varsRecord(arena, core, *step, "result", true))
             zigzag::expectWritten(arena.link(

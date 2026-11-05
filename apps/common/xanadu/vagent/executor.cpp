@@ -312,6 +312,18 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
           return *value;
       return noCell;
     };
+    // The step's `else` head marshals as a scalar ref; the park
+    // re-mints it — an edge to the marshaled cell is the same
+    // single-inbound-slot hazard awaitEvent's payload dodge covers.
+    const auto parkElse = [&] {
+      if (const auto e = field("else"); e != noCell)
+        if (const auto n = arena.asInt64(e))
+          if (const auto rec =
+                  varsRecord(arena, core, intention, "awaitElse", true))
+            zigzag::expectWritten(arena.link(*rec, core.dims().values,
+                                             DimVector::POS,
+                                             arena.makeScalarCell(*n)));
+    };
     if (verb == "adopt") {
       const auto goalName = field("goal");
       if (goalName == noCell) return false;
@@ -501,6 +513,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
           zigzag::expectWritten(
               arena.link(*rec, core.dims().values, DimVector::POS,
                          arena.makeCell(arena.textOf(bound))));
+      parkElse();
       meta.setIntentionField(intention, "awaitDeadline", turn + *turns);
       meta.setIntentionField(intention, "waiting", 1);
       meta.setIntentionField(intention, "ready", 0);
@@ -564,6 +577,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
           zigzag::expectWritten(
               arena.link(*rec, core.dims().values, DimVector::POS,
                          arena.makeCell(arena.textOf(bound))));
+      parkElse();
       meta.setIntentionField(intention, "awaitDeadline", turn + *turns);
       meta.setIntentionField(intention, "waiting", 1);
       meta.setIntentionField(intention, "ready", 0);
@@ -591,6 +605,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
         const auto dl      = field("deadline");
         const auto dlTurns = dl != noCell ? arena.asInt64(dl) : std::nullopt;
         if (!dlTurns) return false; // `by` without `within` doesn't parse
+        parkElse();
         meta.setIntentionField(intention, "awaitDeadline", turn + *dlTurns);
         return true;
       }
@@ -617,6 +632,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       // rung faults the parent and drops the unfinished child. A
       // deadline-free re-delegation clears the field so the previous
       // bound can't fire early on the new child.
+      parkElse();
       if (const auto dl = field("deadline"); dl != noCell)
         if (const auto turns = arena.asInt64(dl)) {
           meta.setIntentionField(intention, "awaitDeadline", turn + *turns);
@@ -805,6 +821,83 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
     return std::get<std::string>(v) == "true";
   };
 
+  // §3.5's deadline recovery: a parked `else` head evaluates with
+  // `cause` bound — production binds the value to the suspension's
+  // `as r`/`r :=` destination and completes the wait rather than
+  // faulting; refusal or non-production reports false so the caller
+  // takes the ordinary fault ladder.
+  const auto runElse = [&](CellRef intention) -> bool {
+    CellRef head = noCell;
+    if (const auto rec =
+            varsRecord(arena, core, intention, "awaitElse", false))
+      if (const auto v = arena.linked(*rec, core.dims().values, DimVector::POS))
+        if (const auto n = arena.asInt64(*v)) head = static_cast<CellRef>(*n);
+    if (head == noCell) return false;
+    // Params resolve by name: `cause` gets the expiry reason, the
+    // rest read the intention's vars records — a param with no
+    // readable value aborts the recovery to the fault path. The
+    // descriptor's +d.grab/+d.step chain is the parameter signature
+    // meta.cpp's parameterCells reads — mirrored here because the
+    // reader is private.
+    std::vector<std::string> paramNames;
+    if (const auto descriptor =
+            arena.linked(head, core.dims().values, DimVector::POS))
+      for (auto p = arena.linked(*descriptor, core.dims().grab,
+                                 DimVector::POS);
+           p && arena.contains(*p);
+           p = arena.linked(*p, core.dims().step, DimVector::POS))
+        if (const auto n = arena.linked(*p, core.dims().name, DimVector::POS))
+          paramNames.emplace_back(arena.textOf(*n));
+    std::vector<CellValue> args;
+    for (const auto &pname : paramNames) {
+      if (pname == "cause") {
+        args.emplace_back(std::string{"deadline"});
+        continue;
+      }
+      const auto rec = varsRecord(arena, core, intention, pname, false);
+      if (!rec) return false;
+      const auto v = arena.linked(*rec, core.dims().values, DimVector::POS);
+      if (!v) return false;
+      if (const auto n = arena.asInt64(*v))
+        args.emplace_back(*n);
+      else if (const auto b = arena.asBool(*v))
+        args.emplace_back(*b);
+      else if (const auto d = arena.asDouble(*v))
+        args.emplace_back(*d);
+      else
+        args.emplace_back(std::string{arena.textOf(*v)});
+    }
+    const auto outcome =
+        meta.runFragment(head, args, std::nullopt, maxCycles);
+    if (outcome.refusal != MetaRunOutcome::Refusal::None ||
+        !outcome.produced || !outcome.result)
+      return false;
+    const auto value = std::visit(
+        [&](const auto &x) -> CellRef {
+          using T = std::decay_t<decltype(x)>;
+          if constexpr (std::is_same_v<T, std::string>)
+            return arena.makeCell(x);
+          else
+            return arena.makeScalarCell(x);
+        },
+        *outcome.result);
+    if (const auto rec =
+            varsRecord(arena, core, intention, "awaitBind", false))
+      if (const auto v = arena.linked(*rec, core.dims().values, DimVector::POS))
+        if (const auto dst =
+                varsRecord(arena, core, agent, arena.textOf(*v), true)) {
+          if (arena.linked(*dst, core.dims().values, DimVector::POS))
+            zigzag::expectWritten(
+                arena.unlink(*dst, core.dims().values, DimVector::POS));
+          zigzag::expectWritten(arena.link(*dst, core.dims().values,
+                                           DimVector::POS, value));
+        }
+    meta.setIntentionField(intention, "waiting", 0);
+    meta.setIntentionField(intention, "delegated", 0);
+    meta.setIntentionField(intention, "ready", 1);
+    return true;
+  };
+
   // §3.5: ready intentions advance one spine step per settle — record
   // stepping, never cursor state. body_replaced is checked against the
   // adoption-time +d.spin name before any member runs.
@@ -927,7 +1020,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
         meta.setIntentionField(intention, "ready", 1);
       } else if (turn >= deadline) {
         meta.setIntentionField(intention, "waiting", 0);
-        faultIntention(intention);
+        if (!runElse(intention)) faultIntention(intention);
       }
       if (!matched) continue;
     }
@@ -948,7 +1041,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
         zigzag::expectWritten(
             arena.unlink(intention, dims.subgoal, DimVector::POS));
         meta.setIntentionField(intention, "delegated", 0);
-        faultIntention(intention);
+        if (!runElse(intention)) faultIntention(intention);
       }
       continue;
     }

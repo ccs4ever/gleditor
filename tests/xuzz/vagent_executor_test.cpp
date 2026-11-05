@@ -1214,6 +1214,99 @@ TEST(VagentExecutorTest, PickedStreaksJournalOnStatsEachTurn) {
   EXPECT_EQ(arena.outstandingMarks(), 0u);
 }
 
+TEST(VagentExecutorTest, AskElseSuppliesTheValueOnExpiry) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image =
+      h.lower("module demo\nevent Tick\nevent Done\n"
+              "question stock(item: Str): Int\n"
+              "goal Work() perform\n"
+              "agent A {\n"
+              "  on Tick { adopt Work() }\n"
+              "  plan w for Work { let r := ask self.stock(\"oil\") within 1s\n"
+              "                    else -1; emit Done{} }\n"
+              "}");
+  ASSERT_TRUE(image);
+  auto &arena     = h.ctx.arena;
+  const auto iDim = h.ctx.core.findOrMintDimension("d.intention");
+
+  // Turn 1 — adopt runs the spine's ask step: the request stages and
+  // the intention parks on awaitDeadline = turn+1.
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  {
+    const auto parked = zigzag::rankAfter(arena, image->agentCell, iDim) |
+                        std::ranges::to<std::vector>();
+    ASSERT_EQ(parked.size(), 1u);
+    auto binds =
+        mintMetaBindSet(arena, h.ctx.core, h.ctx.core.home(), image->agentCell);
+    ASSERT_TRUE(binds);
+    MetaRuntime meta(h.ctx.core, h.ctx.vm, *binds);
+    EXPECT_EQ(meta.intentionField(parked.front(), "awaitDeadline"), 2);
+  }
+
+  // Turn 2 — a bare wake at turn 2 meets the deadline: the else head
+  // produces -1, r binds it, and the wait completes rather than
+  // faulting.
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+  const auto r =
+      varsRecord(arena, h.ctx.core, image->agentCell, "r", false);
+  ASSERT_TRUE(r.has_value());
+  const auto rv = arena.linked(*r, h.ctx.core.dims().values, DimVector::POS);
+  ASSERT_TRUE(rv.has_value());
+  EXPECT_EQ(arena.asInt64(*rv).value_or(0), -1);
+
+  // Turn 3 — the readied spine advances and emits Done.
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+  EXPECT_TRUE(zigzag::rankAfter(arena, image->agentCell, iDim).empty());
+  const auto outbox =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  EXPECT_TRUE(std::ranges::any_of(
+      outbox, [](const OutboxEntry &e) {
+        return e.payload == "Done";
+      }));
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
+TEST(VagentExecutorTest, AwaitElseCompletesAnExpiredBareWait) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image =
+      h.lower("module demo\nevent Tick\nevent Grant\nevent Done\n"
+              "goal Work() perform\n"
+              "agent A {\n"
+              "  on Tick { adopt Work() }\n"
+              "  plan w for Work { await Grant as g within 1s else 0;\n"
+              "                    emit Done{} }\n"
+              "}");
+  ASSERT_TRUE(image);
+  auto &arena     = h.ctx.arena;
+  const auto iDim = h.ctx.core.findOrMintDimension("d.intention");
+
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  // Expiry runs the else for effect: the bound name gets the produced
+  // value and the plan completes — no fault lands on the record.
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+  {
+    const auto parked = zigzag::rankAfter(arena, image->agentCell, iDim) |
+                        std::ranges::to<std::vector>();
+    ASSERT_EQ(parked.size(), 1u);
+    auto binds =
+        mintMetaBindSet(arena, h.ctx.core, h.ctx.core.home(), image->agentCell);
+    ASSERT_TRUE(binds);
+    MetaRuntime meta(h.ctx.core, h.ctx.vm, *binds);
+    EXPECT_EQ(meta.intentionField(parked.front(), "faulted"), 0);
+  }
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+  EXPECT_TRUE(zigzag::rankAfter(arena, image->agentCell, iDim).empty());
+  const auto outbox =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  EXPECT_TRUE(std::ranges::any_of(
+      outbox, [](const OutboxEntry &e) {
+        return e.payload == "Done";
+      }));
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
 TEST(VagentExecutorTest, UnlowerableBooleanConditionsRefuseNotStub) {
   ExecutorHarness h;
   // `v` is bound by the belief conjunct — the scalar remainder has
