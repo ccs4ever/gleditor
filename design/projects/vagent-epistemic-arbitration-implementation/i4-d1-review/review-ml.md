@@ -1,36 +1,40 @@
 # ML review of I4-D1 (statistical soundness)
 
-**Verdict: FAIL** (2 MAJOR, 6 MINOR). No BLOCKING. Reproduced: the section 7.4 tables (own pure-Python
-Chernoff minimisation; all 15 cells agree to 2 digits, W = 92.83, p=0.60 and 0.55 bounds 1.7e-2 and
-1.3e-4), the `check_vectors.py` host, perturb and mutant runs, the section 7.2 event counts (18th and
-68th). `numpy` and `mpmath` are not installed here, so `nums.py`, `lcb_table.py`, `gate_bound*.py`
-and the reference generator were not re-run; those figures are checked by formula or by my own code.
-M4 to M7 are each addressed in substance (see findings for the residue).
+**Verdict: FAIL** (2 MAJOR, 6 MINOR). No BLOCKING. Reproduced: the section 7.4 tables (own
+pure-Python Chernoff minimisation; all 15 cells agree to 2 digits, W = 92.83, p=0.60 and 0.55 bounds
+1.7e-2 and 1.3e-4), the `check_vectors.py` host, perturb and mutant runs, the section 7.2 event
+counts (18th and 68th). `numpy` and `mpmath` are not installed here, so `nums.py`, `lcb_table.py`,
+`gate_bound*.py` and the reference generator were not re-run; those figures are checked by formula
+or by my own code. M4 to M7 are each addressed in substance (see findings for the residue).
 
 ## MAJOR
 
-### ML-1. Section 7.4 / 7.5: the "10^-6 per device-year" guarantee holds only under an independence that real gate residuals violate; the latch is for life
+### ML-1. Section 7.4 / 7.5
+
+**The "10^-6 per device-year" guarantee holds only under an independence that real gate residuals
+violate; the latch is for life.**
 
 The proof is correct for independent events or blocks of up to 6. Gate innovations from a real
 filter are autocorrelated (coloured sensor noise, unmodelled dynamics, a reference that lags a
-manoeuvre). The design's own region is m <= 4 at p <= 0.15, and the distribution-free bound it
+manoeuvre). The design's own region is m \<= 4 at p \<= 0.15, and the distribution-free bound it
 admits is 0.14 per event.
 
 Failure scenario (simulated, `/tmp/mlr/ar.py`, H=64, theta_F=0.70, N_F=48, gate at the 95% two-sided
 quantile, so the marginal rejection rate of a healthy source is exactly 5%): a stationary AR(1)
 Gaussian residual with lag-1 correlation 0.99 (decorrelation time about 1 s at 100 Hz) latches
-FAULTED at event 8,261 (83 s); at 0.999 at event 14,088. At 0.5 and 0.9 no latch in 2e6 events.
-So the headline holds for rho <= 0.9 and fails by many orders of magnitude at 0.99. Spec 5.2 already
+FAULTED at event 8,261 (83 s); at 0.999 at event 14,088. At 0.5 and 0.9 no latch in 2e6 events. So
+the headline holds for rho \<= 0.9 and fails by many orders of magnitude at 0.99. Spec 5.2 already
 says the nominal rate does not survive model mismatch. A reference excursion of about 70 events (0.7
 s) latches the whole predicate for life with n_t = 1 or 2, where the 7.5 guard (needs
->= max(2, ceil(n_t/2)) sources) cannot help a single source at all. The old streak of 5 was worse,
-but "proved" is claimed on a premise the section itself lists as unverified, and Q1 asks the lead to
-confirm the number without that caveat.
+
+> = max(2, ceil(n_t/2)) sources) cannot help a single source at all. The old streak of 5 was worse,
+> but "proved" is claimed on a premise the section itself lists as unverified, and Q1 asks the lead
+> to confirm the number without that caveat.
 
 Fix (any one, plus the test):
 
-- Restate the guarantee as conditional on a stated maximum residual autocorrelation (or run length
-  m <= 4), and put that condition in the user guide and in Q1.
+- Restate the guarantee as conditional on a stated maximum residual autocorrelation (or run length m
+  \<= 4), and put that condition in the user guide and in Q1.
 - Make the gate path unable to latch alone: FAULTED from `gate_fraction` requires f >= theta_F on
   two disjoint windows separated in time (for example H and 8H, or two reference epochs), or the
   latch is recoverable by hysteresis (clear at f < theta_S/2 after N_F events) with only
@@ -40,7 +44,9 @@ Fix (any one, plus the test):
 - Measure the run-length statistic (mean rejection-run length) at runtime and fall to SUSPECT-only
   when it exceeds the proved m.
 
-### ML-2. Section 4.5 / 3.5: the vectors do not test the compensated-sum claim; the plain-sum mutant passes
+### ML-2. Section 4.5 / 3.5
+
+**The vectors do not test the compensated-sum claim; the plain-sum mutant passes.**
 
 Section 3.5 and 3.1 justify `sumC` by the 128 mixed-sign logits (plain sum bound 2.5e-11 > guard
 7e-12). Running `check_vectors.py vectors.tsv mutant`: `pool` and `fusion` report 0 failures, ratio
@@ -56,7 +62,9 @@ assertion, including `sum`, and list the result per mutant in 4.5.
 
 ## MINOR
 
-### ML-3. Section 7.2 / 7.4.3: start-up and record multiplicity are not in the per-device-year figure
+### ML-3. Section 7.2 / 7.4.3
+
+**Start-up and record multiplicity are not in the per-device-year figure.**
 
 The 2.3e-7 at (p=0.10, m=4) is per start. A start is a new calibration record, a `reset`, or a new
 epoch (counters are per record and zeroed by reset, 7.3). A device with K predicate records and R
@@ -64,14 +72,16 @@ resets a year has K+R starts, each adding up to 2.3e-7 on top of the steady-stat
 the headline sums. At the headline region (p=0.15, m=4, 3.8e-7 steady) start-ups are comparable to
 the stated total. Fix: state the figure as steady-state plus per-start, with the start count in Q1.
 
-### ML-4. Section 7.2: no hysteresis, and the interaction of SUSPECT inflation (x4) with the gate is unspecified
+### ML-4. Section 7.2
+
+**No hysteresis, and the interaction of SUSPECT inflation (x4) with the gate is unspecified.**
 
 If the gate tests the inflated variance, a source at true rejection 0.40 goes SUSPECT, x4 inflation
 drops its rejection rate (for a 3-sigma bias roughly from 0.4 to about 0.1), f decays below 0.30, it
 returns to NOMINAL, and the cycle repeats with a period of tens of events: a flapping state (and an
 epistemic-state version bump each flip, I4-1b). It also means a moderately biased source can never
 reach 0.70. If the gate uses the uninflated variance, say so. Fix: state which variance the gate
-uses; add exit hysteresis (clear SUSPECT below 0.5*theta_S) and a flap test.
+uses; add exit hysteresis (clear SUSPECT below 0.5\*theta_S) and a flap test.
 
 ### ML-5. Section 7.5 / Q4: the common-cause guard and per-record counters can be gamed
 
@@ -79,21 +89,20 @@ uses; add exit hysteresis (clear SUSPECT below 0.5*theta_S) and a flap test.
 never reaches the minimum evidence; fan out bad readings over 50 predicates and none latches nor
 reads SUSPECT (its readings are still gate-rejected, so the harm is bounded, but the health state
 lies). Aggregate a profile-level counter (all records) beside the per-record one. (b) Guard
-threshold ceil(n_t/2): colluding or Sybil bad sources at half of the tested set suppress every
-latch on the predicate, including their own, and no guard exists for n_t = 1. State that the guard
-is a degrade (still inflated, still excluded when rejected) and bound the suppression duration so a
+threshold ceil(n_t/2): colluding or Sybil bad sources at half of the tested set suppress every latch
+on the predicate, including their own, and no guard exists for n_t = 1. State that the guard is a
+degrade (still inflated, still excluded when rejected) and bound the suppression duration so a
 permanent "reference_suspect" cannot hide a permanently bad source.
 
 ### ML-6. Section 7.6: the smoke test has low power against implementation errors
 
-"observed <= bound and >= bound/100" with observed 2.3e-3 vs bound 1.7e-2: a halved half-life or a
+"observed \<= bound and >= bound/100" with observed 2.3e-3 vs bound 1.7e-2: a halved half-life or a
 doubled `hit` weight still passes a one-sided Chernoff cap, and the lower bound is two decades
 loose. Fix: a differential test — feed the same seeded rejection sequences to the IR routine and to
 the reference and compare R, N bit-for-bit on T0 steps and within the `fracStep` cap otherwise —
 plus a two-sided binomial interval around the pinned Monte Carlo rate (4,000 chains give +-4%
 relative at 2.3e-3 only if events are counted once per chain; define the per-event frequency
-estimator, since chains stop at the first latch and events inside one chain are strongly
-dependent).
+estimator, since chains stop at the first latch and events inside one chain are strongly dependent).
 
 ### ML-7. Section 4.5: the perturb result contradicts the claim of slack
 
@@ -105,9 +114,9 @@ probe, not the vector bound, is what rejects a bad libm).
 
 ### ML-8. Section 3.3: the expm1 truncation claim
 
-"17 terms ... truncation under 1e-24 on |y| <= 1/2": the first omitted term after y^17/17! is
-0.5^18/18! = 6e-22 (1e-24 needs about 20 terms). Harmless against a 1e-16 bound, but a stated
-number that is false in a design that says everything was computed. Recompute or restate.
+"17 terms ... truncation under 1e-24 on |y| \<= 1/2": the first omitted term after y^17/17! is
+0.5^18/18! = 6e-22 (1e-24 needs about 20 terms). Harmless against a 1e-16 bound, but a stated number
+that is false in a design that says everything was computed. Recompute or restate.
 
 ## Checks that passed (not praise, scope record)
 
@@ -124,7 +133,6 @@ gated on `min_events` afterwards, equivalent to the design's text; the 18th/68th
 ## Not in scope of this document but affects the gate (record for I4-D2/spec)
 
 Beta counts use only verified labels, so a source that tells the truth when checked and lies when
-not is invisible to reputation (selective reporting); nothing in I4-D1 can fix it, but the O9
-"fresh source contributes 0" rule makes the first labelled stretch the whole of the cold-start
-defence. The Beta(1,1) prior is neutral only for binary claims; for K-way categories 1/K is the
-chance level.
+not is invisible to reputation (selective reporting); nothing in I4-D1 can fix it, but the O9 "fresh
+source contributes 0" rule makes the first labelled stretch the whole of the cold-start defence. The
+Beta(1,1) prior is neutral only for binary claims; for K-way categories 1/K is the chance level.
