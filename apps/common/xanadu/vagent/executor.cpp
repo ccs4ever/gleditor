@@ -168,6 +168,45 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
                                      arena.makeScalarCell(turn)));
   }
 
+  // §4.1's picked arbitration counters, journaled verbatim on $stats:
+  // the replay record (§4.7) reads them from agent state, not the
+  // transport. wakes/msgs accumulate the service mix across turns.
+  if (const auto rec = varsRecord(arena, core, agent, "$stats", false)) {
+    // The seeded value is a scalar placeholder; the first turn swaps
+    // it for a stats record cell that per-field vars hang off.
+    CellRef stats = noCell;
+    if (const auto v = arena.linked(*rec, core.dims().values, DimVector::POS))
+      if (!arena.asInt64(*v)) stats = *v;
+    if (stats == noCell) {
+      stats = arena.makeCell();
+      if (arena.linked(*rec, core.dims().values, DimVector::POS))
+        zigzag::expectWritten(
+            arena.unlink(*rec, core.dims().values, DimVector::POS));
+      zigzag::expectWritten(arena.link(*rec, core.dims().values,
+                                       DimVector::POS, stats));
+    }
+    const auto bump = [&](std::string_view name, std::int64_t value) {
+      if (const auto r = varsRecord(arena, core, stats, name, true)) {
+        if (arena.linked(*r, core.dims().values, DimVector::POS))
+          zigzag::expectWritten(
+              arena.unlink(*r, core.dims().values, DimVector::POS));
+        zigzag::expectWritten(arena.link(*r, core.dims().values,
+                                         DimVector::POS,
+                                         arena.makeScalarCell(value)));
+      }
+    };
+    const auto read = [&](std::string_view name) -> std::int64_t {
+      if (const auto r = varsRecord(arena, core, stats, name, false))
+        if (const auto v = arena.linked(*r, core.dims().values, DimVector::POS))
+          if (const auto n = arena.asInt64(*v)) return *n;
+      return 0;
+    };
+    bump("wakeStreak", static_cast<std::int64_t>(exec.wakeStreak));
+    bump("msgStreak", static_cast<std::int64_t>(exec.msgStreak));
+    bump("msgs", read("msgs") + (exec.message ? 1 : 0));
+    bump("wakes", read("wakes") + (exec.message ? 0 : 1));
+  }
+
   // Journal + dispatch. A wake turn (message absent) carries no percept:
   // it journals nothing and dispatches no `on` handler.
   MetaRuntime meta(core, vm, binds);

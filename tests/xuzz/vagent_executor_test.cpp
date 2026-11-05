@@ -1176,6 +1176,44 @@ TEST(VagentExecutorTest, MaintainHoldsConjunctsAndTheScalarHalf) {
   EXPECT_EQ(arena.outstandingMarks(), 0u);
 }
 
+TEST(VagentExecutorTest, PickedStreaksJournalOnStatsEachTurn) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image =
+      h.lower("module demo\nevent Tick\nagent A { on Tick { } }");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+
+  const auto statField = [&](std::string_view name) -> std::int64_t {
+    const auto rec =
+        varsRecord(arena, h.ctx.core, image->agentCell, "$stats", false);
+    if (!rec) return -1;
+    const auto cell =
+        arena.linked(*rec, h.ctx.core.dims().values, DimVector::POS);
+    if (!cell) return -1;
+    const auto field = varsRecord(arena, h.ctx.core, *cell, name, false);
+    if (!field) return -1;
+    const auto v =
+        arena.linked(*field, h.ctx.core.dims().values, DimVector::POS);
+    return v ? arena.asInt64(*v).value_or(-1) : -1;
+  };
+
+  auto turn = h.execution("Tick");
+  turn.wakeStreak = 0;
+  turn.msgStreak  = 2;
+  ASSERT_TRUE(exec(turn, h.ctx));
+  auto wake = h.execution(std::nullopt);
+  wake.wakeStreak = 1;
+  wake.msgStreak  = 0;
+  ASSERT_TRUE(exec(wake, h.ctx));
+
+  EXPECT_EQ(statField("wakeStreak"), 1);
+  EXPECT_EQ(statField("msgStreak"), 0);
+  EXPECT_EQ(statField("msgs"), 1);
+  EXPECT_EQ(statField("wakes"), 1);
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
 TEST(VagentExecutorTest, UnlowerableBooleanConditionsRefuseNotStub) {
   ExecutorHarness h;
   // `v` is bound by the belief conjunct — the scalar remainder has
