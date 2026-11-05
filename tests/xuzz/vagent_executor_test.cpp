@@ -2186,6 +2186,236 @@ TEST(VagentExecutorTest, RemoteAchieveAdoptsReceiverSideAndCompletes) {
   EXPECT_EQ(arena.outstandingMarks(), 0u);
 }
 
+TEST(VagentExecutorTest, SpawnSeedsParentLineageAndKinAcceptDelegation) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image =
+      h.lower("module demo\nevent Boot\nevent ChildDone\nevent Done\n"
+              "goal Deliver() perform\n"
+              "goal Outer() perform\n"
+              "agent A {\n"
+              "  var child: Opt<Agent> := none\n"
+              "  on Boot { child := spawn A(); adopt Outer() }\n"
+              "  plan d for Deliver { emit ChildDone{} }\n"
+              "  plan o for Outer { achieve Deliver() by child within 9s;\n"
+              "                     emit Done{} }\n"
+              "}");
+  ASSERT_TRUE(image);
+  auto &arena     = h.ctx.arena;
+  const auto iDim = h.ctx.core.findOrMintDimension("d.intention");
+
+  // Boot spawns the member and parks Outer on the delegation; the
+  // `by child` name resolves to A, so self and the spawned member
+  // both receive the achieve — and both accept it: self trivially,
+  // the spawned member because §7.1's default admits the parent.
+  ASSERT_TRUE(exec(h.execution("Boot"), h.ctx));
+  const auto outbox =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  ASSERT_EQ(outbox.size(), 1u);
+  EXPECT_EQ(outbox[0].kind, "achieve");
+  const auto deliveries = VagentExecutor::route(
+      arena, h.ctx.core, h.ctx.core.home(), outbox.front());
+  ASSERT_EQ(deliveries.size(), 2u);
+  CellRef spawned = noCell;
+  for (const auto &d : deliveries) {
+    exec.deliver(arena, h.ctx.core, d);
+    if (d.agent != image->agentCell) spawned = d.agent;
+  }
+  ASSERT_NE(spawned, noCell);
+
+  // The spawn seeded the lineage record the accepts default reads.
+  const auto parent =
+      varsRecord(arena, h.ctx.core, spawned, "$parent", false);
+  ASSERT_TRUE(parent.has_value());
+  const auto pv =
+      arena.linked(*parent, h.ctx.core.dims().values, DimVector::POS);
+  ASSERT_TRUE(pv.has_value());
+  EXPECT_EQ(arena.asInt64(*pv).value_or(0),
+            static_cast<std::int64_t>(image->agentCell));
+
+  // Sequence 2 is the spawned member: its turn adopts Deliver —
+  // the child runs the shared plan and finishes, which readies the
+  // delegating parent on the declared agent's rank.
+  ASSERT_TRUE(exec(h.execution(std::nullopt, 2), h.ctx));
+  const auto spawnedOut =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, spawned);
+  ASSERT_EQ(spawnedOut.size(), 1u);
+  EXPECT_EQ(spawnedOut[0].payload, "ChildDone");
+  EXPECT_TRUE(zigzag::rankAfter(arena, spawned, iDim).empty());
+
+  // The declared agent's own delivery adopted a local child the same
+  // way; its completion plus the remote child's ready the parent.
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+  const auto after =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  ASSERT_EQ(after.size(), 3u);
+  // Rank order settles the readied parent ahead of the freshly
+  // adopted local child — Done before its own ChildDone.
+  EXPECT_EQ(after[1].payload, "Done");
+  EXPECT_EQ(after[2].payload, "ChildDone");
+  EXPECT_TRUE(zigzag::rankAfter(arena, image->agentCell, iDim).empty());
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
+TEST(VagentExecutorTest, DelegatedAchieveRefusedByNonKinRunsTheElse) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  // §7.1: accepts(sender, goal_name) defaults to the lineage — a
+  // declared Stranger is no kin to A, so the delegation comes back
+  // `refused` through the same outbox the ask reply rides.
+  const auto image =
+      h.lower("module demo\nevent Tick\nevent Done\n"
+              "goal Work() perform\n"
+              "goal Outer() perform\n"
+              "agent A {\n"
+              "  var stranger: Opt<Agent> := none\n"
+              "  on Tick { adopt Outer() }\n"
+              "  plan w for Work { }\n"
+              "  plan o for Outer { achieve Work() by stranger "
+              "within 9s else cause;\n"
+              "                     emit Done{} }\n"
+              "}");
+  ASSERT_TRUE(image);
+  auto &arena     = h.ctx.arena;
+  const auto iDim = h.ctx.core.findOrMintDimension("d.intention");
+  auto binds =
+      mintMetaBindSet(arena, h.ctx.core, h.ctx.core.home(), image->agentCell);
+  ASSERT_TRUE(binds) << binds.error();
+  MetaRuntime meta(h.ctx.core, h.ctx.vm, *binds);
+
+  // M0 lowers one agent decl, so the non-kin member is a directory
+  // entry the adapter would have registered — a named rank member
+  // carrying no $parent lineage — and `by stranger` reaches it
+  // through the bound var exactly like a spawn-result handle.
+  const auto agents   = h.ctx.core.findOrMintDimension("d.agents");
+  const auto dirs     = h.ctx.core.findOrMintDimension("d.dirs");
+  CellRef dirCell     = noCell;
+  for (const CellRef d :
+       zigzag::rankAfter(arena, h.ctx.core.home(), dirs))
+    dirCell = d;
+  ASSERT_NE(dirCell, noCell);
+  const auto stranger = arena.makeCell();
+  zigzag::expectWritten(
+      arena.link(zigzag::rankTail(arena, dirCell, agents), agents,
+                 DimVector::POS, stranger));
+  zigzag::expectWritten(
+      arena.link(stranger, h.ctx.core.dims().name, DimVector::POS,
+                 arena.makeCell("Stranger")));
+  const auto var =
+      varsRecord(arena, h.ctx.core, image->agentCell, "stranger", true);
+  ASSERT_TRUE(var.has_value());
+  zigzag::expectWritten(
+      arena.link(*var, h.ctx.core.dims().values, DimVector::POS,
+                 arena.makeScalarCell(static_cast<std::int64_t>(stranger))));
+
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  const auto outbox =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  ASSERT_EQ(outbox.size(), 1u);
+  EXPECT_EQ(outbox[0].kind, "achieve");
+  const auto delegator = outbox[0].delegator;
+  ASSERT_NE(delegator, noCell);
+  const auto requests = VagentExecutor::route(
+      arena, h.ctx.core, h.ctx.core.home(), outbox[0]);
+  ASSERT_EQ(requests.size(), 1u);
+  EXPECT_EQ(requests.front().agent, stranger);
+  exec.deliver(arena, h.ctx.core, requests.front());
+
+  // Stranger's turn (sequence 2 — the second declared member): the
+  // accepts default admits no adoption, so instead of an intention
+  // its outbox carries a `refuse` addressed to the sender's name
+  // with the parked intention echoed as the delegator handle.
+  ASSERT_TRUE(exec(h.execution(std::nullopt, 2), h.ctx));
+  EXPECT_TRUE(zigzag::rankAfter(arena, stranger, iDim).empty());
+  const auto refusals =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, stranger);
+  ASSERT_EQ(refusals.size(), 1u);
+  EXPECT_EQ(refusals[0].kind, "refuse");
+  EXPECT_EQ(refusals[0].target, "A");
+  EXPECT_EQ(refusals[0].delegator, delegator);
+
+  const auto replies = VagentExecutor::route(
+      arena, h.ctx.core, h.ctx.core.home(), refusals[0]);
+  ASSERT_EQ(replies.size(), 1u);
+  exec.deliver(arena, h.ctx.core, replies.front());
+
+  // The refusal marks the parked intention; its settle runs the
+  // `else` with cause `refused` — recovery, not a fault — and the
+  // spine resumes on the next turn like every else path.
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+  EXPECT_EQ(meta.intentionField(delegator, "faulted").value_or(0), 0);
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+  const auto after =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  ASSERT_EQ(after.size(), 2u);
+  EXPECT_EQ(after[1].payload, "Done");
+  EXPECT_TRUE(zigzag::rankAfter(arena, image->agentCell, iDim).empty());
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
+TEST(VagentExecutorTest, StopTargetsOnlySelfOrSpawnedChildren) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image =
+      h.lower("module demo\nevent Boot\nevent Tock\nevent Done\n"
+              "agent A {\n"
+              "  var child: Opt<Agent> := none\n"
+              "  var stranger: Opt<Agent> := none\n"
+              "  on Boot { child := spawn A(); stop child; emit Done{} }\n"
+              "  on Tock { stop stranger }\n"
+              "}");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+  const auto agents = h.ctx.core.findOrMintDimension("d.agents");
+  const auto dirs   = h.ctx.core.findOrMintDimension("d.dirs");
+  CellRef dirCell   = noCell;
+  for (const CellRef d :
+       zigzag::rankAfter(arena, h.ctx.core.home(), dirs))
+    dirCell = d;
+  ASSERT_NE(dirCell, noCell);
+  const auto stranger = arena.makeCell();
+  zigzag::expectWritten(
+      arena.link(zigzag::rankTail(arena, dirCell, agents), agents,
+                 DimVector::POS, stranger));
+  zigzag::expectWritten(
+      arena.link(stranger, h.ctx.core.dims().name, DimVector::POS,
+                 arena.makeCell("Stranger")));
+  const auto var =
+      varsRecord(arena, h.ctx.core, image->agentCell, "stranger", true);
+  ASSERT_TRUE(var.has_value());
+  zigzag::expectWritten(
+      arena.link(*var, h.ctx.core.dims().values, DimVector::POS,
+                 arena.makeScalarCell(static_cast<std::int64_t>(stranger))));
+
+  // `stop child` — the spawned member's $parent is the running
+  // agent, so §4.5's orderly stop applies to it.
+  ASSERT_TRUE(exec(h.execution("Boot"), h.ctx));
+  CellRef spawned   = noCell;
+  for (const CellRef dir : zigzag::rankAfter(arena, h.ctx.core.home(), dirs))
+    for (const CellRef m : zigzag::rankAfter(arena, dir, agents))
+      if (m != image->agentCell &&
+          arena.textOf(*arena.linked(m, h.ctx.core.dims().name,
+                                     DimVector::POS)) == "A")
+        spawned = m;
+  ASSERT_NE(spawned, noCell);
+  const auto flag =
+      varsRecord(arena, h.ctx.core, spawned, "destroying", false);
+  ASSERT_TRUE(flag.has_value());
+  EXPECT_EQ(arena.asInt64(*arena.linked(*flag, h.ctx.core.dims().values,
+                                        DimVector::POS))
+                .value_or(0),
+            1);
+
+  // `stop stranger` — no lineage either way; the host step refuses
+  // and the member carries no destroy flag.
+  EXPECT_FALSE(exec(h.execution("Tock"), h.ctx));
+  EXPECT_FALSE(
+      varsRecord(arena, h.ctx.core, stranger, "destroying", false)
+          .has_value());
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
 TEST(VagentExecutorTest, AskStagesTheQuestionAndWakesOnTheAnswer) {
   ExecutorHarness h;
   VagentExecutor exec;

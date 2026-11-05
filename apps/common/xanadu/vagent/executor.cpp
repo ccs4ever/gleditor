@@ -297,6 +297,18 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
     return n ? std::string{arena.textOf(*n)} : std::string{want};
   };
 
+  // The member's $parent record → the member cell that spawned it —
+  // §7.1's accepts default and §4.5's parent-only stop both ask the
+  // lineage question; the top-level agent's record is absent.
+  const auto parentOf = [&](CellRef member) -> CellRef {
+    if (const auto rec = varsRecord(arena, core, member, "$parent", false))
+      if (const auto v = arena.linked(*rec, core.dims().values,
+                                      DimVector::POS))
+        if (const auto r = arena.asInt64(*v))
+          return static_cast<CellRef>(*r);
+    return noCell;
+  };
+
   // A marshaled term's +d.step children → positional CellValues for
   // runFragment: scalar cells keep their literal type, a structured
   // child (one carrying +d.step of its own) passes as its ref — the
@@ -541,13 +553,22 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       if (want == "self") {
         target = agent;
       } else {
-        for (const CellRef dir :
-             zigzag::rankAfter(arena, programRoot, dims.dirs))
-          for (const CellRef peer_ : zigzag::rankAfter(arena, dir, dims.agents))
-            if (const auto name =
-                    arena.linked(peer_, core.dims().name, DimVector::POS);
-                name && arena.textOf(*name) == want)
-              target = peer_;
+        // A bound member var names its cell directly — resolvePeer
+        // runs the same var-then-name order for delivery targets.
+        if (const auto rec = varsRecord(arena, core, agent, want, false))
+          if (const auto v =
+                  arena.linked(*rec, core.dims().values, DimVector::POS))
+            if (const auto ref = arena.asInt64(*v))
+              target = static_cast<CellRef>(*ref);
+        if (target == noCell)
+          for (const CellRef dir :
+               zigzag::rankAfter(arena, programRoot, dims.dirs))
+            for (const CellRef peer_ :
+                 zigzag::rankAfter(arena, dir, dims.agents))
+              if (const auto name =
+                      arena.linked(peer_, core.dims().name, DimVector::POS);
+                  name && arena.textOf(*name) == want)
+                target = peer_;
       }
       if (target == noCell) return false;
       const auto flagged = [&](std::string_view which) {
@@ -557,6 +578,10 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
             if (const auto flag = arena.asInt64(*v)) return *flag != 0;
         return false;
       };
+      // §7.1's stop performative is "accepted from the parent only" —
+      // self, and the members this agent spawned. A stop aimed
+      // anywhere else is refused, not silently dropped.
+      if (target != agent && parentOf(target) != agent) return false;
       if (flagged("stopped") || flagged("destroying")) return true;
       if (const auto rec =
               varsRecord(arena, core, target, "destroying", true))
@@ -627,6 +652,14 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
           zigzag::expectWritten(
               arena.link(*rec, core.dims().values, DimVector::POS,
                          arena.makeScalarCell(std::int64_t{0})));
+      // The lineage record §7.1's accepts default and §4.5's
+      // parent-only stop read — a scalar ref like every cross-record
+      // handle, since -d.* pairs one inbound edge per dim.
+      if (const auto rec = varsRecord(arena, core, child, "$parent", true))
+        zigzag::expectWritten(
+            arena.link(*rec, core.dims().values, DimVector::POS,
+                       arena.makeScalarCell(
+                           static_cast<std::int64_t>(agent))));
       if (const auto bound = field("result"); bound != noCell)
         if (const auto rec =
                 varsRecord(arena, core, agent, arena.textOf(bound), true))
@@ -1101,6 +1134,28 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
         // deadline rung drop the remote child.
         const auto delegator = ref("delegator");
         const auto goal      = eventSymbolNamed(arena, core, programRoot, pred);
+        // §7.1's receiver default: accepts(sender, goal_name) admits
+        // delegation from the parent and from children (and the
+        // degenerate `by self`), refusing everything else — the
+        // reply is a staged `refuse` the delegator hears through its
+        // own inbox, carrying the parked intention's ref back.
+        const auto accepted = sender == agent || parentOf(agent) == sender ||
+                              parentOf(sender) == agent;
+        if (!accepted && sender != noCell) {
+          std::string senderName;
+          if (const auto n =
+                  arena.linked(sender, core.dims().name, DimVector::POS))
+            senderName = std::string{arena.textOf(*n)};
+          std::string requestId;
+          if (const auto rec =
+                  varsRecord(arena, core, *head, "correlation", false))
+            if (const auto v =
+                    arena.linked(*rec, core.dims().values, DimVector::POS))
+              requestId = std::string{arena.textOf(*v)};
+          stageOutbox("refuse", term, senderName, {}, delegator,
+                      requestId);
+          continue;
+        }
         if (!goal || delegator == noCell) continue;
         auto child = meta.adoptGoal(*goal, turn,
                                     static_cast<std::size_t>(setting(
@@ -1112,6 +1167,19 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
         zigzag::expectWritten(
             arena.link(zigzag::rankTail(arena, delegator, dims.subgoal),
                        dims.subgoal, DimVector::POS, *child));
+        continue;
+      }
+      if (k == "refuse") {
+        // §7.1: the receiver's accepts said no. The parked delegator
+        // hears it through the settle's delegated rung, which runs
+        // the `else` ladder with cause `refused` — writing a flag
+        // here keeps fragment runs out of the drain.
+        if (const auto delegator = ref("delegator"); delegator != noCell)
+          if (const auto rec =
+                  varsRecord(arena, core, delegator, "refused", true))
+            zigzag::expectWritten(
+                arena.link(*rec, core.dims().values, DimVector::POS,
+                           arena.makeCell("refused")));
         continue;
       }
       if (k == "ask") {
@@ -1517,6 +1585,26 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
     const auto delegated =
         meta.intentionField(intention, "delegated").value_or(0);
     if (delegated != 0) {
+      // A staged `refuse` reply marks the wait — the receiver's
+      // accepts admitted no adoption, so there is no child to drop.
+      // The refusal is one-shot: clearing it before the else runs
+      // keeps a later re-delegation from inheriting the flag.
+      std::string refused;
+      if (const auto rec =
+              varsRecord(arena, core, intention, "refused", false))
+        if (const auto v =
+                arena.linked(*rec, core.dims().values, DimVector::POS))
+          refused = std::string{arena.textOf(*v)};
+      if (!refused.empty()) {
+        if (const auto rec =
+                varsRecord(arena, core, intention, "refused", false))
+          zigzag::expectWritten(
+              arena.unlink(*rec, core.dims().values, DimVector::POS));
+        meta.setIntentionField(intention, "delegated", 0);
+        if (!runElse(intention, refused))
+          faultIntention(intention, refused);
+        continue;
+      }
       // achieve within: the delegation's own deadline. Expiry drops
       // the unfinished +d.subgoal children — the delegator's
       // notification path must not fire on them afterwards — then
@@ -1980,7 +2068,8 @@ void VagentExecutor::deliver(zigzag::ArenaManifold &arena,
   }
 
   if (delivery.kind == "tell" || delivery.kind == "untell" ||
-      delivery.kind == "achieve" || delivery.kind == "ask") {
+      delivery.kind == "achieve" || delivery.kind == "ask" ||
+      delivery.kind == "refuse") {
     // A cross-agent effect isn't a percept — it lands as an inbox
     // record the receiver's own settle processes (assert/retract for
     // tell/untell, subgoal adoption for achieve). Every cell
@@ -2005,10 +2094,10 @@ void VagentExecutor::deliver(zigzag::ArenaManifold &arena,
     refField("grab", delivery.payloadCell);
     refField("sender", delivery.sender);
     refField("delegator", delivery.delegator);
-    // For kind "ask" the delivery id is the asker's correlation
-    // token — the inbox drain echoes it on the reply's percept so
-    // the sender's wake match resolves exactly one request.
-    if (delivery.kind == "ask" && !delivery.id.empty())
+    // The delivery id is the request's correlation token — "ask"
+    // echoes it on the reply's percept and "achieve" on the refuse
+    // reply, so either sender-side wait resolves exactly one request.
+    if (!delivery.id.empty())
       if (const auto rec =
               varsRecord(arena, core, record, "correlation", true))
         zigzag::expectWritten(
