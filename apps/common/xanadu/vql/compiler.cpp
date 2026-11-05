@@ -123,6 +123,8 @@ VQLCompiler::opcodeMnemonic(zigzag::vortex::OpcodeKind kind) noexcept {
     return "VQL_ADD";
   case OpcodeKind::VqlBoxScalar:
     return "VQL_BOX_SCALAR";
+  case OpcodeKind::ScopedChoice:
+    return "SCOPED_CHOICE";
   case OpcodeKind::RankBegin:
     return "RANK_BEGIN";
   case OpcodeKind::IteratorNext:

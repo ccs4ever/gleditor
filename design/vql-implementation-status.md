@@ -377,3 +377,19 @@ fresh-VM reload, real CLI recursion/rebinding and host/mesh source routes passed
 [iteration 20](projects/vortex-vm-only-iterations.md). First-class functor/lambda captures, native
 variadics, nonliteral field-default continuations, mutation contracts and remaining grammar/route/
 lifecycle work still prevent §4.12 completion.
+
+## Scoped graph rollback prerequisite
+
+`ScopedChoice` introduces an internal graph-targeted rollback alternative, isolated from logic
+oracle directives and work stealing. It is intended for compiled matching continuations: capturing
+matches commit successful defaults, while validation-only checks roll temporary defaults back on
+both outcomes. Full nonliteral field-default lowering still requires the shared matching driver and
+compiled thunk continuations; this substrate does not complete §4.12. See
+[iteration 21](projects/vortex-vm-only-iterations.md).
+
+The scope cap includes caller-prefix choices: defaults are 128 total outstanding choices and
+1,048,576 aggregate saved-snapshot entries, with per-entry work charging before copies. Internal
+cuts also suppress callbacks from nested ordinary choices. Full build, all 580 affected tests from
+56 suites and repository formatting passed with independent Luna architecture and senior/profiler
+gates. Fresh-VM export/reload and both rollback continuations passed. This establishes neither a
+byte-memory bound nor a runtime speedup; the shared driver and default thunk lowering remain next.

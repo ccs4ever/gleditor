@@ -1,5 +1,6 @@
 #include "common/xanadu/vortex/vortex_vm.hpp"
 
+#include <algorithm>
 #include <limits>
 #include <stdexcept>
 
@@ -48,8 +49,15 @@ void VortexVM::requireStreamCursor(const CellRef cursor) {
     streams_.clear();
     iterators_.clear();
   } else if (!owner && !choiceStack_.empty()) {
-    throw std::runtime_error(
-        "stream cursor ownership cannot start while choice points remain");
+    const bool scopedOwner =
+        hasScopedChoices() &&
+        std::ranges::all_of(choiceStack_, [cursor](const ChoicePoint &choice) {
+          return choice.cursor == cursor;
+        });
+    if (!scopedOwner) {
+      throw std::runtime_error("stream cursor ownership cannot start while "
+                               "ordinary choice points remain");
+    }
   }
   streamCursor_ = cursor;
 }

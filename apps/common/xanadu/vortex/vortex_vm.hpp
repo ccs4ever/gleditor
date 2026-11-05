@@ -115,6 +115,7 @@ enum class OpcodeKind : std::uint8_t {
   VqlString,
   VqlAdd,
   VqlBoxScalar,
+  ScopedChoice,
 };
 
 struct FrameDescriptorError {
@@ -151,6 +152,14 @@ struct FrameLimits {
   std::size_t maxLocalsPerFrame{4096};
   std::size_t maxDescriptorRecords{8192};
   std::size_t maxBackingCells{1'048'576};
+};
+
+// Both bounds include the caller prefix while any scope is open. Depth caps
+// all outstanding choices, including ordinary choices nested inside a scope.
+// Entries conservatively count shared payloads; this is not a byte budget.
+struct ScopedChoiceLimits {
+  std::size_t maxDepth{128};
+  std::size_t maxSnapshotEntries{1'048'576};
 };
 
 enum class VqlComparisonKind : std::int64_t {
@@ -214,6 +223,7 @@ struct ChoicePoint {
   std::unordered_set<CellRef> iteratorSlots;
   std::optional<CellRef> streamCursor;
   std::unordered_map<CellRef, ActivationStack> activationFrames;
+  bool scoped{false};
 };
 
 [[nodiscard]] std::string formatDeweyPath(std::span<const std::uint16_t> path);
@@ -248,6 +258,10 @@ public:
   void cut(std::size_t cutBarrier = 0);
   [[nodiscard]] std::size_t choiceDepth() const noexcept;
   void clearChoicePoints();
+  VortexVM *setScopedChoiceLimits(ScopedChoiceLimits limits);
+  [[nodiscard]] ScopedChoiceLimits scopedChoiceLimits() const noexcept {
+    return scopedChoiceLimits_;
+  }
 
   // -- Distributed / Intra-Node OR-Parallelism Extensions ---------------------
   // Path tracking is opt-in through a nonempty oracle or a cut callback.
@@ -384,6 +398,12 @@ private:
   ExecutionResult executeCellRefCopy(OpcodeKind kind, CellRef opcode,
                                      std::vector<CellValue> &outputs);
   void requireStreamCursor(CellRef cursor);
+  void pushChoicePointImpl(std::optional<CellRef> cursor, CellRef altOp,
+                           bool scoped);
+  [[nodiscard]] bool hasScopedChoices() const noexcept;
+  [[nodiscard]] bool
+  scopedChoicesOwnedBy(std::optional<CellRef> cursor) const noexcept;
+  void enforceScopedChoiceBudget(bool addScoped);
   [[nodiscard]] bool streamStateOpcode(OpcodeKind kind) const noexcept;
   void clearTypedRegister(CellRef slot);
   void writeCellReferences(std::span<const CellRef> outputSlots,
@@ -403,6 +423,7 @@ private:
   std::unordered_map<CellRef, std::optional<CellRef>> cursorPC_;
   std::unordered_map<CellRef, ActivationStack> activationFrames_;
   FrameLimits frameLimits_;
+  ScopedChoiceLimits scopedChoiceLimits_;
   std::size_t frameBackingCellsAllocated_{};
   std::vector<ChoicePoint> choiceStack_;
   std::vector<std::uint16_t> currentDeweyPath_;

@@ -1,5 +1,6 @@
 #include "common/xanadu/vortex/program_export.hpp"
 
+#include <algorithm>
 #include <limits>
 #include <map>
 #include <set>
@@ -26,6 +27,11 @@ exportProgram(const VortexCore &core, const VortexVM &vm,
     throw std::runtime_error(
         "export of a live activation frame requires persisted runtime state");
 
+  if (std::ranges::any_of(vm.choiceStack(),
+                          [](const auto &choice) { return choice.scoped; }))
+    throw std::runtime_error(
+        "export of a live scoped choice requires persisted runtime state");
+
   // Validate before appending operations. A dimension operand is a reference
   // encoded as a scalar, whereas ordinary integer payloads must stay integers.
   std::map<CellRef, DimRef> dimensionOperands;
@@ -33,6 +39,12 @@ exportProgram(const VortexCore &core, const VortexVM &vm,
   for (const auto opcode : opcodes) {
     const auto kind = vm.getOpcodeKind(opcode);
     if (!kind) throw std::runtime_error("cannot export an unknown opcode");
+    if (*kind == OpcodeKind::ScopedChoice) {
+      const auto inputs = core.inputsOf(opcode);
+      if (inputs.size() != 1 || !core.outputsOf(opcode).empty() ||
+          !vm.getOpcodeKind(inputs.front()))
+        throw std::runtime_error("invalid scoped choice graph target");
+    }
     if (*kind == OpcodeKind::Jump || *kind == OpcodeKind::Branch ||
         *kind == OpcodeKind::Call)
       throw std::runtime_error(

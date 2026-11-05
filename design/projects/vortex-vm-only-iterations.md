@@ -619,3 +619,47 @@ incomplete.
 Logs: `/tmp/vql-capture-frames-build.log`, `/tmp/vql-capture-frames-tests.log`,
 `/tmp/vql-capture-frames-format.log`, `/tmp/vql-capture-frames-cli.log`,
 `/tmp/vql-capture-frames-rebind-cli.log`.
+
+## Iteration 21: isolated graph rollback scopes
+
+The next lazy-matching prerequisite is a native `ScopedChoice` with a direct graph target. Unlike
+ordinary logic choices, internal rollback scopes must neither consume OR-worker oracle directives
+nor become stealable alternatives. Their snapshots retain the caller's Dewey path, and closing
+internal scopes must not publish branch-pruning callbacks. Graphs can use two nested scopes with
+`ChoiceDepth`, `Fail` and `Cut` to roll back a successful validation into a success continuation,
+while a failed attempt rolls back into a failure continuation. Caller choices below the recorded
+barrier remain available.
+
+This is a rollback substrate, not completed lazy field-default lowering. The shared matcher still
+requires compilation of its traversal and default continuations; path/call defaults, mutation
+contracts, functor ABI and route/lifecycle parity remain unfinished. No runtime AST evaluator or
+reentrant VM execution is introduced.
+
+The configurable limits default to 128 total outstanding choices while a scope is open, including
+caller-prefix choices and nested ordinary choices, and 1,048,576 aggregate saved-snapshot entries.
+The entry cap includes the prospective new snapshot and already-saved caller snapshots; borrowed
+views count them before copying maps or taking an arena mark. Shared stream/iterator/frame payloads
+are counted conservatively, and counted entries spend work that rollback does not refund. This is an
+entry policy, not a byte-memory or speed guarantee. Invalid scopes and exceeded limits refuse before
+adding a snapshot. Explicit cursor closure retains existing snapshots for same-cursor backtracking;
+running to Halt/falloff with an unclosed scope refuses. Cross-cursor execution, backtracking and new
+choices refuse while a scope is active. Owned scopes permit first stream use, including when
+ordinary choices are nested inside them.
+
+A scoped alternative's direct opcode target and successor chain are never executed as a parameter
+pipeline. Conditions, memoization, raw stdlib calls and pipeline invocation of the instruction
+refuse. Export relocates the direct target through the existing reference wings; live scoped
+snapshots refuse export before store writes. Sealed mesh artifacts still refuse scoped choices. Cuts
+suppress pruning callbacks for the entire scope-owned region, including nested ordinary choices;
+caller-prefix pruning outside that region retains its existing behavior.
+
+Validation: full `make -j$(nproc)` and all 580 affected tests from 56 suites passed, including
+twenty new scoped-choice cases. Regressions execute both validation continuations, preserve caller
+alternatives, restore fresh scalar allocations, references, streams and frame state, preserve oracle
+directives and parent Dewey paths, enforce depth/snapshot/work limits and cross-cursor refusals, and
+run relocated graphs after source-VM destruction and Store reload. Independent Luna architecture and
+senior/profiler gates accepted this bounded prerequisite. Repository formatting passed with
+clang-format 19. No speedup or full-suite pass is claimed.
+
+Logs: `/tmp/vql-scoped-choice-build.log`, `/tmp/vql-scoped-choice-tests.log`,
+`/tmp/vql-scoped-choice-format.log`.

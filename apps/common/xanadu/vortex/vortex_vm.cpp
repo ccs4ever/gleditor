@@ -22,6 +22,69 @@ namespace zigzag::vortex {
 
 namespace {
 
+// Views borrow snapshot collections so resource preflight never allocates them.
+struct ChoiceSnapshotView {
+  std::span<const std::uint16_t> deweyPath;
+  const CellReferenceMap &cellReferences;
+  const StreamMap &streams;
+  const IteratorMap &iterators;
+  const std::unordered_set<CellRef> &streamSlots;
+  const std::unordered_set<CellRef> &iteratorSlots;
+  const std::unordered_map<CellRef, ActivationStack> &activationFrames;
+};
+
+template <class Snapshot>
+std::size_t countSnapshotEntries(const Snapshot &snapshot, ArenaManifold &arena,
+                                 const std::size_t limit) {
+  std::size_t count = 1;
+  const auto add    = [&](const std::size_t amount) {
+    if (count > limit || amount > limit - count) {
+      throw std::length_error("scoped choice snapshot entry limit exceeded");
+    }
+    for (std::size_t index = 0; index < amount; ++index) {
+      arena.consumeWork();
+    }
+    count += amount;
+  };
+  add(0);
+  arena.consumeWork();
+  add(snapshot.deweyPath.size());
+  add(snapshot.cellReferences.size());
+  add(snapshot.streams.size());
+  for (const auto &[slot, stream] : snapshot.streams) {
+    (void)slot;
+    if (stream) add(stream->size());
+  }
+  add(snapshot.iterators.size());
+  for (const auto &[slot, iterator] : snapshot.iterators) {
+    (void)slot;
+    if (!iterator) continue;
+    if (const auto *rank = std::get_if<RankIteratorState>(iterator.get())) {
+      add(rank->seen.size());
+    } else if (const auto *sequence =
+                   std::get_if<SequenceIteratorState>(iterator.get())) {
+      add(sequence->chunks.size());
+      for (const auto &chunk : sequence->chunks) {
+        if (chunk) add(chunk->size());
+      }
+    }
+  }
+  add(snapshot.streamSlots.size());
+  add(snapshot.iteratorSlots.size());
+  add(snapshot.activationFrames.size());
+  for (const auto &[cursor, stack] : snapshot.activationFrames) {
+    (void)cursor;
+    add(stack.size());
+    for (const auto &frame : stack) {
+      if (!frame) continue;
+      add(frame->parentResultSlots.size());
+      add(frame->localBacking.size());
+      add(frame->resultPorts.size());
+    }
+  }
+  return count;
+}
+
 double toDouble(const CellValue &val) {
   if (std::holds_alternative<double>(val)) return std::get<double>(val);
   if (std::holds_alternative<std::int64_t>(val))
@@ -124,7 +187,7 @@ std::optional<OpcodeKind> VortexVM::getOpcodeKind(CellRef opCell) const {
   auto val = core_.arena().asInt64(opCell);
   if (val && *val >= 0 &&
       static_cast<std::uint64_t>(*val) <=
-          static_cast<std::uint64_t>(OpcodeKind::VqlBoxScalar)) {
+          static_cast<std::uint64_t>(OpcodeKind::ScopedChoice)) {
     return static_cast<OpcodeKind>(*val);
   }
   return std::nullopt;
@@ -352,6 +415,56 @@ std::string formatDeweyPath(std::span<const std::uint16_t> path) {
 
 void VortexVM::pushChoicePoint(const std::optional<CellRef> cursor,
                                const CellRef altOp) {
+  pushChoicePointImpl(cursor, altOp, false);
+}
+
+bool VortexVM::hasScopedChoices() const noexcept {
+  return std::ranges::any_of(
+      choiceStack_, [](const ChoicePoint &choice) { return choice.scoped; });
+}
+
+bool VortexVM::scopedChoicesOwnedBy(
+    const std::optional<CellRef> cursor) const noexcept {
+  return std::ranges::all_of(choiceStack_, [&](const ChoicePoint &choice) {
+    return !choice.scoped || choice.cursor == cursor;
+  });
+}
+
+void VortexVM::enforceScopedChoiceBudget(const bool addScoped) {
+  const auto scopes = static_cast<std::size_t>(std::ranges::count_if(
+      choiceStack_, [](const ChoicePoint &choice) { return choice.scoped; }));
+  if ((addScoped || scopes != 0) &&
+      choiceStack_.size() >= scopedChoiceLimits_.maxDepth) {
+    throw std::length_error("scoped choice total depth limit exceeded");
+  }
+  const ChoiceSnapshotView current{
+      currentDeweyPath_, cellReferences_, streams_,         iterators_,
+      streamSlots_,      iteratorSlots_,  activationFrames_};
+  // The current view is the prospective snapshot, not an additional copy.
+  std::size_t total = countSnapshotEntries(
+      current, core_.arena(), scopedChoiceLimits_.maxSnapshotEntries);
+  if (!addScoped && (!oraclePath_.empty() || cutCallback_)) {
+    if (total == scopedChoiceLimits_.maxSnapshotEntries)
+      throw std::length_error("scoped choice snapshot entry limit exceeded");
+    core_.arena().consumeWork();
+    ++total;
+  }
+  for (const auto &choice : choiceStack_) {
+    const auto entries = countSnapshotEntries(
+        choice, core_.arena(), scopedChoiceLimits_.maxSnapshotEntries);
+    if (entries > scopedChoiceLimits_.maxSnapshotEntries -
+                      std::min(total, scopedChoiceLimits_.maxSnapshotEntries)) {
+      throw std::length_error("scoped choice snapshot entry limit exceeded");
+    }
+    total += entries;
+  }
+  if (total > scopedChoiceLimits_.maxSnapshotEntries) {
+    throw std::length_error("scoped choice snapshot entry limit exceeded");
+  }
+}
+
+void VortexVM::pushChoicePointImpl(const std::optional<CellRef> cursor,
+                                   const CellRef altOp, const bool scoped) {
   if (cursor && *cursor == noCell) {
     throw std::invalid_argument(
         "choice-point cursor must be a cell or nullopt");
@@ -360,13 +473,21 @@ void VortexVM::pushChoicePoint(const std::optional<CellRef> cursor,
       !getOpcodeKind(altOp)) {
     throw std::invalid_argument("choice point requires a valid alternative");
   }
+  if ((scoped || hasScopedChoices()) &&
+      (!cursor || !scopedChoicesOwnedBy(cursor))) {
+    throw std::invalid_argument(
+        "choice point cursor does not match the active scoped choice");
+  }
+  if (scoped || hasScopedChoices()) enforceScopedChoiceBudget(scoped);
   std::optional<CellRef> stackFrame;
   if (cursor && core_.arena().contains(*cursor)) {
     stackFrame = core_.arena().linked(*cursor, core_.dims().stack, false);
   }
   std::vector<std::uint16_t> altDewey;
   auto nextDewey = currentDeweyPath_;
-  if (!oraclePath_.empty() || cutCallback_) {
+  if (scoped) {
+    altDewey = currentDeweyPath_;
+  } else if (!oraclePath_.empty() || cutCallback_) {
     altDewey = currentDeweyPath_;
     altDewey.push_back(1);
     nextDewey.push_back(0);
@@ -387,6 +508,7 @@ void VortexVM::pushChoicePoint(const std::optional<CellRef> cursor,
       .iteratorSlots    = iteratorSlots_,
       .streamCursor     = streamCursor_,
       .activationFrames = activationFrames_,
+      .scoped           = scoped,
   });
   // Finish all allocating snapshots before taking a LIFO arena mark.
   try {
@@ -402,6 +524,10 @@ bool VortexVM::backtrack(const std::optional<CellRef> cursor) {
   if (cursor && *cursor == noCell) {
     throw std::invalid_argument("backtrack cursor must be a cell or nullopt");
   }
+  if (hasScopedChoices() && (!cursor || !scopedChoicesOwnedBy(cursor))) {
+    throw std::invalid_argument(
+        "backtrack cursor does not match the active scoped choice");
+  }
   while (!choiceStack_.empty()) {
     ChoicePoint cp = choiceStack_.back();
     choiceStack_.pop_back();
@@ -415,7 +541,7 @@ bool VortexVM::backtrack(const std::optional<CellRef> cursor) {
       streamCursor_     = cp.streamCursor;
       activationFrames_ = std::move(cp.activationFrames);
       pruneResumeState();
-      if (!oraclePath_.empty() || cutCallback_) {
+      if (cp.scoped || !oraclePath_.empty() || cutCallback_) {
         currentDeweyPath_ = cp.deweyPath;
       }
       if (cursor) {
@@ -432,18 +558,36 @@ bool VortexVM::backtrack(const std::optional<CellRef> cursor) {
 }
 
 void VortexVM::cut(std::size_t cutBarrier) {
+  if (activeCursor_ &&
+      std::ranges::any_of(
+          choiceStack_.begin() + static_cast<std::ptrdiff_t>(
+                                     std::min(cutBarrier, choiceStack_.size())),
+          choiceStack_.end(), [&](const ChoicePoint &choice) {
+            return choice.scoped && choice.cursor != activeCursor_;
+          })) {
+    throw std::invalid_argument(
+        "cut cursor does not match the active scoped choice");
+  }
+  const auto firstScope = std::ranges::find_if(
+      choiceStack_, [](const ChoicePoint &choice) { return choice.scoped; });
+  const auto scopeBoundary =
+      static_cast<std::size_t>(std::distance(choiceStack_.begin(), firstScope));
+  bool removedOrdinary = false;
   while (choiceStack_.size() > cutBarrier) {
-    ChoicePoint cp = choiceStack_.back();
+    const bool internal = choiceStack_.size() > scopeBoundary;
+    ChoicePoint cp      = choiceStack_.back();
     choiceStack_.pop_back();
     core_.arena().discard(cp.mark);
-    if (cutCallback_ && !cp.deweyPath.empty()) {
+    removedOrdinary |= !internal;
+    if (!internal && cutCallback_ && !cp.deweyPath.empty()) {
       const auto parentSpan =
           std::span<const std::uint16_t>{cp.deweyPath}.subspan(
               0, cp.deweyPath.size() - 1);
       cutCallback_(formatDeweyPath(parentSpan));
     }
   }
-  if (cutCallback_ && choiceStack_.empty() && !currentDeweyPath_.empty()) {
+  if (removedOrdinary && cutCallback_ && choiceStack_.empty() &&
+      !currentDeweyPath_.empty()) {
     const auto parentSpan =
         std::span<const std::uint16_t>{currentDeweyPath_}.subspan(
             0, currentDeweyPath_.size() - 1);
@@ -456,6 +600,11 @@ std::size_t VortexVM::choiceDepth() const noexcept {
 }
 
 void VortexVM::clearChoicePoints() { cut(0); }
+
+VortexVM *VortexVM::setScopedChoiceLimits(const ScopedChoiceLimits limits) {
+  scopedChoiceLimits_ = limits;
+  return this;
+}
 
 VortexVM *VortexVM::setOraclePath(std::span<const std::uint16_t> path) {
   oraclePath_.assign(path.begin(), path.end());
@@ -470,7 +619,8 @@ VortexVM *VortexVM::setCurrentDeweyPath(std::span<const std::uint16_t> path) {
 }
 
 std::optional<ChoicePoint> VortexVM::stealNearRootChoicePoint() {
-  if (choiceStack_.empty() || !streams_.empty() || !iterators_.empty()) {
+  if (choiceStack_.empty() || hasScopedChoices() || !streams_.empty() ||
+      !iterators_.empty()) {
     return std::nullopt;
   }
   ChoicePoint stolen = std::move(choiceStack_.front());
@@ -507,6 +657,10 @@ void VortexVM::runPipeline(CellRef paramCell) {
     if (kind == OpcodeKind::ResumeInit || kind == OpcodeKind::ResumeSet) {
       throw std::invalid_argument(
           "resume-state opcodes cannot run in parameter pipelines");
+    }
+    if (kind == OpcodeKind::ScopedChoice) {
+      throw std::invalid_argument(
+          "ScopedChoice cannot run in a parameter pipeline");
     }
     if (kind == OpcodeKind::ProbeLink) {
       throw std::invalid_argument(
@@ -591,6 +745,8 @@ bool VortexVM::evaluateCondition(CellRef clause,
   if (kind == OpcodeKind::ResumeInit || kind == OpcodeKind::ResumeSet) {
     return false;
   }
+  if (kind == OpcodeKind::ScopedChoice)
+    throw std::invalid_argument("ScopedChoice cannot run as a condition");
   if (kind == OpcodeKind::ProbeLink)
     throw std::invalid_argument("ProbeLink cannot run as a condition");
   if (kind == OpcodeKind::VqlString || kind == OpcodeKind::VqlAdd ||
@@ -1382,6 +1538,25 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
     }
     break;
   }
+  case OpcodeKind::ScopedChoice: {
+    const auto targets = inputsOf(opcode);
+    if (!cursor || targets.size() != 1 ||
+        !core_.arena().contains(targets.front()) ||
+        !getOpcodeKind(targets.front())) {
+      return {.success       = false,
+              .failingClause = opcode,
+              .errorMessage  = "ScopedChoice requires one direct opcode target "
+                               "and a live cursor"};
+    }
+    try {
+      pushChoicePointImpl(cursor, targets.front(), true);
+    } catch (const std::exception &error) {
+      return {.success       = false,
+              .failingClause = opcode,
+              .errorMessage  = error.what()};
+    }
+    break;
+  }
   case OpcodeKind::Cut: {
     std::size_t barrier = 0;
     if (!inputs.empty()) {
@@ -1407,8 +1582,17 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
 }
 
 ExecutionResult VortexVM::step(CellRef cursor) {
+  if (hasScopedChoices() && !scopedChoicesOwnedBy(cursor)) {
+    return {.success = false,
+            .errorMessage =
+                "execution cursor does not match the active scoped choice"};
+  }
   const auto op = getCursorOpcode(cursor);
   if (!op) {
+    if (hasScopedChoices()) {
+      return {.success      = false,
+              .errorMessage = "cursor finished with an active scoped choice"};
+    }
     if (activationDepth(cursor) != 0)
       return {.success      = false,
               .errorMessage = "activation frame lost its cursor continuation"};
@@ -1421,6 +1605,10 @@ ExecutionResult VortexVM::step(CellRef cursor) {
   auto kindOpt    = getOpcodeKind(*op);
   OpcodeKind kind = kindOpt ? *kindOpt : OpcodeKind::Nop;
   if (kind == OpcodeKind::Halt) {
+    if (hasScopedChoices()) {
+      return {.success      = false,
+              .errorMessage = "Halt reached with an active scoped choice"};
+    }
     if (activationDepth(cursor) != 0)
       return {.success      = false,
               .errorMessage = "Halt reached with an active activation frame"};
@@ -1468,7 +1656,32 @@ ExecutionResult VortexVM::step(CellRef cursor) {
 
   const auto inputCells = inputsOf(*op);
   const auto outCells   = outputsOf(*op);
-  const bool stateful   = streamStateOpcode(kind);
+  if (kind == OpcodeKind::ScopedChoice) {
+    const auto failScoped = [op](const std::string_view message) {
+      return ExecutionResult{.success       = false,
+                             .failingClause = *op,
+                             .errorMessage  = std::string{message}};
+    };
+    if (inputCells.size() != 1 || !outCells.empty()) {
+      return failScoped(
+          "ScopedChoice requires one direct opcode target and no outputs");
+    }
+    if (!core_.preconditionsOf(*op).empty() ||
+        !core_.postconditionsOf(*op).empty() || isMemoized(*op)) {
+      return failScoped(
+          "ScopedChoice does not support conditions or memoization");
+    }
+    if (!core_.arena().contains(inputCells.front()) ||
+        !getOpcodeKind(inputCells.front())) {
+      return failScoped("ScopedChoice target must be a direct opcode cell");
+    }
+    if (streamSlots_.contains(inputCells.front()) ||
+        iteratorSlots_.contains(inputCells.front()) ||
+        cellReferences_.contains(inputCells.front())) {
+      return failScoped("ScopedChoice target cannot be a register");
+    }
+  }
+  const bool stateful = streamStateOpcode(kind);
   const bool contractOp =
       kind == OpcodeKind::MatchContract || kind == OpcodeKind::RequireContract;
   const bool resumeStateOp =
@@ -1502,6 +1715,14 @@ ExecutionResult VortexVM::step(CellRef cursor) {
              conditionKind == OpcodeKind::ReturnFrame;
     });
   };
+  const auto hasScopedChoiceCondition = [this](const auto &clauses) {
+    return std::ranges::any_of(clauses, [this](const CellRef clause) {
+      const CellRef actual = core_.arena()
+                                 .cloneMaster(clause, core_.dims().clone)
+                                 .value_or(clause);
+      return getOpcodeKind(actual) == OpcodeKind::ScopedChoice;
+    });
+  };
   if (hasProbeLinkCondition(core_.preconditionsOf(*op)) ||
       hasProbeLinkCondition(core_.postconditionsOf(*op))) {
     return {.success      = false,
@@ -1517,6 +1738,11 @@ ExecutionResult VortexVM::step(CellRef cursor) {
     return {.success = false,
             .errorMessage =
                 "activation-frame opcodes cannot run as conditions"};
+  }
+  if (hasScopedChoiceCondition(core_.preconditionsOf(*op)) ||
+      hasScopedChoiceCondition(core_.postconditionsOf(*op))) {
+    return {.success      = false,
+            .errorMessage = "ScopedChoice cannot run as a condition"};
   }
   if (probeLinkOp) {
     if (!core_.preconditionsOf(*op).empty() ||
@@ -1664,6 +1890,7 @@ ExecutionResult VortexVM::step(CellRef cursor) {
   std::unordered_set<CellRef> processedIn;
   for (std::size_t index = 0; index < inputCells.size(); ++index) {
     const CellRef paramCell = inputCells[index];
+    if (kind == OpcodeKind::ScopedChoice) continue;
     if (kind == OpcodeKind::BranchFalseCell && index == 1) continue;
     if (processedIn.insert(paramCell).second && core_.hasPipeline(paramCell)) {
       try {
@@ -1685,7 +1912,7 @@ ExecutionResult VortexVM::step(CellRef cursor) {
           kind == OpcodeKind::RequireContract ||
           kind == OpcodeKind::VqlCompare || kind == OpcodeKind::VqlString ||
           kind == OpcodeKind::VqlAdd || kind == OpcodeKind::VqlBoxScalar ||
-          kind == OpcodeKind::ProbeLink) {
+          kind == OpcodeKind::ProbeLink || kind == OpcodeKind::ScopedChoice) {
         oldInputs.emplace_back(false);
       } else {
         oldInputs.push_back(inputValue(paramCell));
@@ -1708,9 +1935,9 @@ ExecutionResult VortexVM::step(CellRef cursor) {
       kind != OpcodeKind::ClearCellRefs &&
       kind != OpcodeKind::BranchFalseCell && kind != OpcodeKind::VqlCompare &&
       kind != OpcodeKind::VqlString && kind != OpcodeKind::VqlAdd &&
-      kind != OpcodeKind::VqlBoxScalar && kind != OpcodeKind::ResumeInit &&
-      kind != OpcodeKind::ResumeSet && kind != OpcodeKind::ProbeLink &&
-      !stateful;
+      kind != OpcodeKind::VqlBoxScalar && kind != OpcodeKind::ScopedChoice &&
+      kind != OpcodeKind::ResumeInit && kind != OpcodeKind::ResumeSet &&
+      kind != OpcodeKind::ProbeLink && !stateful;
   if (memoizable && isMemoized(*op)) {
     if (const auto key = getMemoKey(*op)) {
       CellRef pin = core_.getOrCreateMemoPin(*key);
@@ -1930,6 +2157,11 @@ ExecutionResult VortexVM::prepareTypeContract(OpcodeKind kind, CellRef opcode) {
 
 ExecutionResult VortexVM::run(CellRef cursor, std::size_t maxCycles,
                               std::stop_token stopToken) {
+  if (hasScopedChoices() && !scopedChoicesOwnedBy(cursor)) {
+    return {.success = false,
+            .errorMessage =
+                "execution cursor does not match the active scoped choice"};
+  }
   for (std::size_t i = 0; i < maxCycles; ++i) {
     if (stopToken.stop_requested()) {
       return ExecutionResult{.success           = false,
@@ -1939,6 +2171,10 @@ ExecutionResult VortexVM::run(CellRef cursor, std::size_t maxCycles,
     }
     const auto op = getCursorOpcode(cursor);
     if (!op) {
+      if (hasScopedChoices()) {
+        return {.success      = false,
+                .errorMessage = "cursor finished with an active scoped choice"};
+      }
       if (activationDepth(cursor) != 0)
         return {.success = false,
                 .errorMessage =
@@ -1950,6 +2186,10 @@ ExecutionResult VortexVM::run(CellRef cursor, std::size_t maxCycles,
     }
     auto kind = getOpcodeKind(*op);
     if (kind && *kind == OpcodeKind::Halt) {
+      if (hasScopedChoices()) {
+        return {.success      = false,
+                .errorMessage = "Halt reached with an active scoped choice"};
+      }
       if (activationDepth(cursor) != 0)
         return {.success      = false,
                 .errorMessage = "Halt reached with an active activation frame"};
