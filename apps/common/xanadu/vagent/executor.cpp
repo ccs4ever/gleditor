@@ -367,6 +367,14 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       zigzag::expectWritten(
           arena.link(child, core.dims().name, DimVector::POS,
                      arena.makeCell(arena.textOf(nameField))));
+      // `in <space>` rides +d.space on the member — the flat
+      // directory's only space relation; route filters scoped emits
+      // by it. The declared agent carries none, so `in inner` never
+      // delivers back to the program's own agent.
+      if (const auto scopeField = field("scope"); scopeField != noCell)
+        zigzag::expectWritten(arena.link(
+            child, core.findOrMintDimension("d.space"), DimVector::POS,
+            arena.makeCell(arena.textOf(scopeField))));
       CellRef dir = noCell;
       for (const CellRef d : zigzag::rankAfter(arena, programRoot, dims.dirs)) {
         dir = d;
@@ -413,6 +421,15 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
         zigzag::expectWritten(
             arena.link(*rec, core.dims().values, DimVector::POS,
                        arena.makeCell(arena.textOf(payload))));
+      // `r := ask ...`: the hoist's result name survives the park on
+      // the intention — the wake match writes the answer percept's
+      // handle under it.
+      if (const auto bound = field("result"); bound != noCell)
+        if (const auto rec =
+                varsRecord(arena, core, intention, "awaitBind", true))
+          zigzag::expectWritten(
+              arena.link(*rec, core.dims().values, DimVector::POS,
+                         arena.makeCell(arena.textOf(bound))));
       meta.setIntentionField(intention, "awaitDeadline", turn + *turns);
       meta.setIntentionField(intention, "waiting", 1);
       meta.setIntentionField(intention, "ready", 0);
@@ -434,6 +451,15 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
               varsRecord(arena, core, intention, "awaitEvent", true))
         zigzag::expectWritten(
             arena.link(*rec, core.dims().values, DimVector::POS, event));
+      // `await X as g`: the bound name survives the park the same way
+      // ask's result does — the wake match writes the fired event's
+      // handle under it.
+      if (const auto bound = field("binding"); bound != noCell)
+        if (const auto rec =
+                varsRecord(arena, core, intention, "awaitBind", true))
+          zigzag::expectWritten(
+              arena.link(*rec, core.dims().values, DimVector::POS,
+                         arena.makeCell(arena.textOf(bound))));
       meta.setIntentionField(intention, "awaitDeadline", turn + *turns);
       meta.setIntentionField(intention, "waiting", 1);
       meta.setIntentionField(intention, "ready", 0);
@@ -635,7 +661,8 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       }();
       const auto deadline =
           meta.intentionField(intention, "awaitDeadline").value_or(0);
-      bool matched = false;
+      bool matched      = false;
+      CellRef matchCell = noCell;
       if (awaitEvent != noCell) {
         const auto wanted = arena.textOf(awaitEvent);
         for (const CellRef percept :
@@ -643,12 +670,29 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
           if (arena.textOf(percept) == wanted) {
             zigzag::expectWritten(
                 arena.link(intention, dims.evidence, DimVector::POS, percept));
-            matched = true;
+            matched   = true;
+            matchCell = percept;
             break;
           }
         }
       }
       if (matched) {
+        // awaitBind carries the `as g`/`r := ask` destination across
+        // the park — the matched percept's handle lands agent-side,
+        // the same Intention/Agent-ref shape adopt/spawn bind.
+        if (const auto rec =
+                varsRecord(arena, core, intention, "awaitBind", false))
+          if (const auto v =
+                  arena.linked(*rec, core.dims().values, DimVector::POS))
+            if (const auto dst =
+                    varsRecord(arena, core, agent, arena.textOf(*v), true)) {
+              if (arena.linked(*dst, core.dims().values, DimVector::POS))
+                zigzag::expectWritten(
+                    arena.unlink(*dst, core.dims().values, DimVector::POS));
+              zigzag::expectWritten(arena.link(
+                  *dst, core.dims().values, DimVector::POS,
+                  arena.makeScalarCell(static_cast<std::int64_t>(matchCell))));
+            }
         meta.setIntentionField(intention, "waiting", 0);
         meta.setIntentionField(intention, "ready", 1);
       } else if (turn >= deadline) {
@@ -891,9 +935,17 @@ std::vector<Delivery> VagentExecutor::route(zigzag::ArenaManifold &arena,
   // resolve as directory names only, which is why spawn binds a cell.
   const auto dirs   = core.findOrMintDimension("d.dirs");
   const auto agents = core.findOrMintDimension("d.agents");
+  const auto space  = core.findOrMintDimension("d.space");
   std::vector<Delivery> deliveries;
   for (const CellRef dir : zigzag::rankAfter(arena, programRoot, dirs))
     for (const CellRef member : zigzag::rankAfter(arena, dir, agents)) {
+      // `in <scope>` narrows the member set: only members spawned
+      // into that space match. A member with no +d.space edge (the
+      // declared agent) is outside every scope.
+      if (!entry.scope.empty()) {
+        const auto s = arena.linked(member, space, DimVector::POS);
+        if (!s || arena.textOf(*s) != entry.scope) continue;
+      }
       std::string name;
       if (const auto n = arena.linked(member, core.dims().name, DimVector::POS))
         name = std::string{arena.textOf(*n)};
@@ -902,6 +954,24 @@ std::vector<Delivery> VagentExecutor::route(zigzag::ArenaManifold &arena,
             Delivery{.agent = member, .percept = entry.payload});
     }
   return deliveries;
+}
+
+void VagentExecutor::deliver(zigzag::ArenaManifold &arena,
+                             zigzag::vortex::VortexCore &core,
+                             const Delivery &delivery) const {
+  if (delivery.agent == noCell || delivery.percept.empty()) return;
+  // The message path's two effects, split for adapter staging: the
+  // journal entry is what a parked await/ask matches against, the
+  // pending entry is what the receiver's settle dispatches. Pending
+  // stays journal-free for internal events — delivery journals
+  // explicitly instead.
+  journalAppend(arena, delivery.agent, arena.makeCell(delivery.percept),
+                core.findOrMintDimension("d.seen"),
+                static_cast<std::size_t>(setting("vagent.journal_size", 64)));
+  const auto pending = core.findOrMintDimension("d.pending");
+  zigzag::expectWritten(
+      arena.link(zigzag::rankTail(arena, delivery.agent, pending), pending,
+                 DimVector::POS, arena.makeCell(delivery.percept)));
 }
 
 } // namespace xanadu::vagent

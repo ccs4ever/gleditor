@@ -701,11 +701,12 @@ TEST(VagentExecutorTest, BoundAdoptAndDropTaskRoundTripTheHandle) {
 TEST(VagentExecutorTest, SpawnMintsTheChildAndRouteResolvesIt) {
   ExecutorHarness h;
   VagentExecutor exec;
-  const auto image = h.lower("module demo\nevent Boot\nevent Ping\n"
+  const auto image = h.lower("module demo\nevent Boot\nevent Ping\nevent Pong\n"
                              "agent A {\n"
                              "  var child: Opt<Agent> := none\n"
                              "  on Boot { child := spawn A() in inner;\n"
-                             "            emit Ping{} for child }\n"
+                             "            emit Ping{} for child;\n"
+                             "            emit Pong{} in inner }\n"
                              "}");
   ASSERT_TRUE(image);
   auto &arena       = h.ctx.arena;
@@ -745,7 +746,7 @@ TEST(VagentExecutorTest, SpawnMintsTheChildAndRouteResolvesIt) {
   // spawned child both receive the percept.
   const auto outbox =
       VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
-  ASSERT_EQ(outbox.size(), 1u);
+  ASSERT_EQ(outbox.size(), 2u);
   const auto deliveries = VagentExecutor::route(
       arena, h.ctx.core, h.ctx.core.home(), outbox.front());
   EXPECT_EQ(deliveries.size(), 2u);
@@ -753,6 +754,107 @@ TEST(VagentExecutorTest, SpawnMintsTheChildAndRouteResolvesIt) {
       deliveries, [&](const Delivery &d) { return d.agent == spawned; }));
   EXPECT_TRUE(std::ranges::all_of(
       deliveries, [](const Delivery &d) { return d.percept == "Ping"; }));
+
+  // `in inner` broadcasts into the space: the spawned member carries
+  // +d.space "inner", the declared agent carries none — only the
+  // child is in scope.
+  EXPECT_EQ(outbox[1].scope, "inner");
+  const auto scoped =
+      VagentExecutor::route(arena, h.ctx.core, h.ctx.core.home(), outbox[1]);
+  ASSERT_EQ(scoped.size(), 1u);
+  EXPECT_EQ(scoped.front().agent, spawned);
+  EXPECT_EQ(scoped.front().percept, "Pong");
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
+TEST(VagentExecutorTest, AwaitAsBindsTheFiredPerceptAgentSide) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image =
+      h.lower("module demo\nevent Tick\nevent Done\nevent Grant\n"
+              "goal Wait() perform\n"
+              "agent A {\n"
+              "  on Tick { adopt Wait() }\n"
+              "  plan w for Wait { await Grant as g within 9s;\n"
+              "                    emit Done{} }\n"
+              "}");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  ASSERT_TRUE(exec(h.execution("Grant"), h.ctx));
+
+  // `as g` lands the fired percept's handle on the agent's vars —
+  // the same cell the +d.seen journal holds.
+  CellRef seen = noCell;
+  for (const CellRef s : zigzag::rankAfter(
+           arena, image->agentCell, h.ctx.core.findOrMintDimension("d.seen")))
+    if (arena.textOf(s) == "Grant") seen = s;
+  ASSERT_NE(seen, noCell);
+  const auto gRec = varsRecord(arena, h.ctx.core, image->agentCell, "g", false);
+  ASSERT_TRUE(gRec.has_value());
+  const auto gVal =
+      arena.linked(*gRec, h.ctx.core.dims().values, DimVector::POS);
+  ASSERT_TRUE(gVal.has_value());
+  EXPECT_EQ(arena.asInt64(*gVal).value_or(-1), static_cast<std::int64_t>(seen));
+  EXPECT_TRUE(zigzag::rankAfter(arena, image->agentCell,
+                                h.ctx.core.findOrMintDimension("d.intention"))
+                  .empty());
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
+TEST(VagentExecutorTest, BoundAskWakesOnDeliveredAnswerAndBindsIt) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image = h.lower(
+      "module demo\nevent Tick\nevent Done\n"
+      "question stock(item: Str): Int\n"
+      "goal Outer() perform\n"
+      "agent A {\n"
+      "  on Tick { adopt Outer() }\n"
+      "  plan o for Outer { let r := ask parent.stock(\"oil\") within 9s;\n"
+      "                     emit Done{} }\n"
+      "}");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+
+  // Turn 1 — the ask stages and parks; `let r` hoisted its result
+  // name onto the step, which the park copies to awaitBind.
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  ASSERT_EQ(
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell).size(),
+      1u);
+
+  // The adapter's answer lands through route's write half: a journal
+  // entry plus a pending trigger on the receiver's own ranks — no
+  // receiver state touched inside the sender's turn.
+  exec.deliver(arena, h.ctx.core,
+               Delivery{.agent = image->agentCell, .percept = "stock"});
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+
+  // The seen entry matched the parked ask, the pending entry
+  // dispatched, and the bound name holds the answer's handle.
+  CellRef answer = noCell;
+  for (const CellRef s : zigzag::rankAfter(
+           arena, image->agentCell, h.ctx.core.findOrMintDimension("d.seen")))
+    if (arena.textOf(s) == "stock") answer = s;
+  ASSERT_NE(answer, noCell);
+  const auto rRec = varsRecord(arena, h.ctx.core, image->agentCell, "r", false);
+  ASSERT_TRUE(rRec.has_value());
+  const auto rVal =
+      arena.linked(*rRec, h.ctx.core.dims().values, DimVector::POS);
+  ASSERT_TRUE(rVal.has_value());
+  EXPECT_EQ(arena.asInt64(*rVal).value_or(-1),
+            static_cast<std::int64_t>(answer));
+
+  // The spine resumed into emit and the intention retired.
+  const auto outbox =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  ASSERT_EQ(outbox.size(), 2u);
+  EXPECT_EQ(outbox[1].payload, "Done");
+  EXPECT_TRUE(zigzag::rankAfter(arena, image->agentCell,
+                                h.ctx.core.findOrMintDimension("d.intention"))
+                  .empty());
   EXPECT_EQ(arena.outstandingMarks(), 0u);
 }
 

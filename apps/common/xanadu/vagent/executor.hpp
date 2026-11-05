@@ -75,9 +75,21 @@ public:
   /// names a directory agent; "0"/empty means every member
   /// (broadcast). Payload carries the percept's functor name — a
   /// term cell's text, which is all the receiver's dispatch needs.
+  /// A non-empty `scope` restricts delivery to members carrying that
+  /// `+d.space` name.
   [[nodiscard]] static std::vector<Delivery>
   route(zigzag::ArenaManifold &arena, zigzag::vortex::VortexCore &core,
         zigzag::CellRef programRoot, const OutboxEntry &entry);
+
+  /// Land one routed percept on the receiver: a `+d.seen` journal
+  /// entry (the evidence a parked await/ask matches) plus a
+  /// `+d.pending` trigger the receiver's own settle drains and
+  /// dispatches. Two cells, no receiver mutation inside the sender's
+  /// turn. Idempotence stays the caller's job: drain `id`s are
+  /// stable, and a host binding that delivers the same id twice
+  /// re-queues the percept.
+  void deliver(zigzag::ArenaManifold &arena, zigzag::vortex::VortexCore &core,
+               const Delivery &delivery) const;
 
 private:
   [[nodiscard]] std::int64_t setting(std::string_view key,
