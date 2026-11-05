@@ -651,6 +651,16 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
           zigzag::expectWritten(
               arena.link(*rec, core.dims().values, DimVector::POS,
                          arena.makeCell(arena.textOf(bound))));
+      // The `[guard]` head survives the park as a scalar ref — the
+      // wake rung evaluates it per candidate percept before the
+      // evidence link commits the match.
+      if (const auto guard = field("guard"); guard != noCell)
+        if (const auto g = arena.asInt64(guard))
+          if (const auto rec =
+                  varsRecord(arena, core, intention, "awaitGuard", true))
+            zigzag::expectWritten(
+                arena.link(*rec, core.dims().values, DimVector::POS,
+                           arena.makeScalarCell(*g)));
       parkElse();
       meta.setIntentionField(intention, "awaitDeadline", turn + *turns);
       meta.setIntentionField(intention, "waiting", 1);
@@ -1139,6 +1149,10 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
           meta.intentionField(intention, "awaitDeadline").value_or(0);
       bool matched      = false;
       CellRef matchCell = noCell;
+      // The occurrence `as g` binds is the delivered payload term when
+      // the percept carries an envelope — `r.field` reads it through
+      // #FIND in the resumed body exactly as the guard saw it.
+      CellRef matchDelivered = noCell;
       if (awaitEvent != noCell) {
         const auto wanted = arena.textOf(awaitEvent);
         // awaitCorr narrows the match to the answer carrying this
@@ -1171,11 +1185,46 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
           if (const auto v =
                   arena.linked(*rec, core.dims().values, DimVector::POS))
             beliefForm = arena.textOf(*v) == "belief";
+        // A parked guard head is a per-candidate wake filter — the
+        // `as` binding's arg is the delivered payload term, and a
+        // refusal or falsy verdict leaves the intention parked for
+        // the next match rather than faulting the turn.
+        const auto awaitGuard = [&]() -> CellRef {
+          if (const auto rec =
+                  varsRecord(arena, core, intention, "awaitGuard", false))
+            if (const auto v =
+                    arena.linked(*rec, core.dims().values, DimVector::POS))
+              if (const auto r = arena.asInt64(*v))
+                return static_cast<CellRef>(*r);
+          return noCell;
+        }();
+        const auto awaitHasBinding =
+            varsRecord(arena, core, intention, "awaitBind", false)
+                .has_value();
+        const auto guardPasses = [&](CellRef delivered) {
+          if (awaitGuard == noCell) return true;
+          auto gArgs = intentionArgs(intention);
+          if (awaitHasBinding)
+            gArgs.push_back(
+                CellValue{static_cast<std::int64_t>(delivered)});
+          const auto go = meta.runFragment(awaitGuard, gArgs,
+                                           exec.cursor, maxCycles);
+          if (go.refusal != MetaRunOutcome::Refusal::None ||
+              !go.produced || !go.result)
+            return false;
+          if (const auto *b = std::get_if<bool>(&*go.result)) return *b;
+          if (const auto *n = std::get_if<std::int64_t>(&*go.result))
+            return *n != 0;
+          if (const auto *d = std::get_if<double>(&*go.result))
+            return *d != 0.0;
+          return std::get<std::string>(*go.result) == "true";
+        };
         if (beliefForm && awaitTerm != noCell) {
           for (const CellRef clause : meta.beliefsOf(arena.textOf(awaitTerm)))
             if (const auto head =
                     arena.linked(clause, core.dims().grab, DimVector::POS);
                 head && meta.termEquals(awaitTerm, *head)) {
+              if (!guardPasses(clause)) continue;
               zigzag::expectWritten(
                   arena.link(intention, dims.evidence, DimVector::POS, clause));
               matched   = true;
@@ -1187,16 +1236,19 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
           for (const CellRef percept :
                zigzag::rankAfter(arena, agent, dims.seen)) {
             if (arena.textOf(percept) != wanted) continue;
-            if (awaitTerm != noCell) {
-              CellRef delivered = percept;
-              if (const auto rec =
-                      varsRecord(arena, core, percept, "grab", false))
-                if (const auto v =
-                        arena.linked(*rec, core.dims().values, DimVector::POS))
-                  if (const auto r = arena.asInt64(*v))
-                    delivered = static_cast<CellRef>(*r);
-              if (!meta.termEquals(awaitTerm, delivered)) continue;
-            }
+            // The delivered envelope: grab→payload when the percept
+            // carries one, the percept itself otherwise — the term
+            // an `as` binding's `r.field` reads through #FIND.
+            CellRef delivered = percept;
+            if (const auto rec =
+                    varsRecord(arena, core, percept, "grab", false))
+              if (const auto v =
+                      arena.linked(*rec, core.dims().values, DimVector::POS))
+                if (const auto r = arena.asInt64(*v))
+                  delivered = static_cast<CellRef>(*r);
+            if (awaitTerm != noCell &&
+                !meta.termEquals(awaitTerm, delivered))
+              continue;
             if (!corr.empty()) {
               bool same = false;
               if (const auto prec =
@@ -1206,17 +1258,21 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
                   same = arena.textOf(*v) == corr;
               if (!same) continue;
             }
+            if (!guardPasses(delivered)) continue;
             zigzag::expectWritten(
                 arena.link(intention, dims.evidence, DimVector::POS, percept));
-            matched   = true;
-            matchCell = percept;
+            matched        = true;
+            matchCell      = percept;
+            matchDelivered = delivered;
             break;
           }
       }
       if (matched) {
         // awaitBind carries the `as g`/`r := ask` destination across
-        // the park — the matched percept's handle lands agent-side,
-        // the same Intention/Agent-ref shape adopt/spawn bind.
+        // the park — the occurrence lands agent-side, the same
+        // Intention/Agent-ref shape adopt/spawn bind. The journal
+        // cell stays reachable through +d.evidence; what `as` names
+        // is the event term so `r.field` reads the payload's data.
         if (const auto rec =
                 varsRecord(arena, core, intention, "awaitBind", false))
           if (const auto v =
@@ -1226,9 +1282,11 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
               if (arena.linked(*dst, core.dims().values, DimVector::POS))
                 zigzag::expectWritten(
                     arena.unlink(*dst, core.dims().values, DimVector::POS));
+              const auto bound =
+                  matchDelivered != noCell ? matchDelivered : matchCell;
               zigzag::expectWritten(arena.link(
                   *dst, core.dims().values, DimVector::POS,
-                  arena.makeScalarCell(static_cast<std::int64_t>(matchCell))));
+                  arena.makeScalarCell(static_cast<std::int64_t>(bound))));
             }
         meta.setIntentionField(intention, "waiting", 0);
         meta.setIntentionField(intention, "ready", 1);

@@ -722,6 +722,75 @@ TEST(VagentExecutorTest, AwaitSuspendsAndTheWakeResumes) {
   EXPECT_EQ(arena.outstandingMarks(), 0u);
 }
 
+TEST(VagentExecutorTest, AwaitGuardFiltersTheWakePercept) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  // `await Grant as g [g.ok > 5]`: the bracket is a wake filter —
+  // a Grant whose `ok` fails the guard leaves the intention parked
+  // and the scan keeps looking, so a later matching percept still
+  // resumes the plan.
+  const auto image =
+      h.lower("module demo\nevent Tick\nevent Grant { ok: Int }\n"
+              "event Done\ngoal Work() perform\n"
+              "agent A {\n"
+              "  on Tick { adopt Work() }\n"
+              "  plan w for Work {"
+              " await Grant as g [g.ok > 5] within 9s; emit Done{} }\n"
+              "}");
+  ASSERT_TRUE(image);
+  auto &arena     = h.ctx.arena;
+  const auto iDim = h.ctx.core.findOrMintDimension("d.intention");
+
+  const auto grant = [&](std::int64_t ok) {
+    const auto term  = arena.makeCell("Grant");
+    const auto field = arena.makeCell(std::to_string(ok));
+    zigzag::expectWritten(arena.setValueBits(
+        field, xanadu::ValueKind::Int64,
+        std::bit_cast<std::uint64_t>(ok)));
+    zigzag::expectWritten(
+        arena.link(field, h.ctx.core.dims().name, DimVector::POS,
+                   arena.makeCell("ok")));
+    zigzag::expectWritten(
+        arena.link(zigzag::rankTail(arena, term, h.ctx.core.dims().step),
+                   h.ctx.core.dims().step, DimVector::POS, field));
+    return term;
+  };
+
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  ASSERT_EQ((zigzag::rankAfter(arena, image->agentCell, iDim) |
+             std::ranges::to<std::vector>())
+                .size(),
+            1u);
+
+  // Grant{ok: 2} fails the guard — still parked, no Done.
+  exec.deliver(arena, h.ctx.core,
+               Delivery{.agent       = image->agentCell,
+                        .percept     = "Grant",
+                        .payloadCell = grant(2)});
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+  EXPECT_EQ((zigzag::rankAfter(arena, image->agentCell, iDim) |
+             std::ranges::to<std::vector>())
+                .size(),
+            1u);
+  EXPECT_TRUE(
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell)
+          .empty());
+
+  // Grant{ok: 9} satisfies it — the scan skips the first percept on
+  // the guard and resumes on the second.
+  exec.deliver(arena, h.ctx.core,
+               Delivery{.agent       = image->agentCell,
+                        .percept     = "Grant",
+                        .payloadCell = grant(9)});
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+  EXPECT_TRUE(zigzag::rankAfter(arena, image->agentCell, iDim).empty());
+  const auto outbox =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  ASSERT_EQ(outbox.size(), 1u);
+  EXPECT_EQ(outbox[0].payload, "Done");
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
 TEST(VagentExecutorTest, FaultBackoffRetriesThenDropWhenCancels) {
   ExecutorHarness h;
   // backoff=0 turns the park into a next-turn retry; the cap of two

@@ -637,10 +637,25 @@ struct Lowerer {
     // in `binding`), and `within`'s deadline must be a literal so the
     // runtime can hold blocked_until as a plain scalar.
     if (expr.kind == ExprKind::AwaitEvent || expr.kind == ExprKind::AwaitTerm) {
-      if (expr.guard)
-        return std::unexpected(
-            Diagnostic{DiagnosticCode::InvalidPosition,
-                       "await's guard arm does not lower yet", expr.loc});
+      // The `[guard]` is a wake filter: it mints a Bool head whose
+      // params are the clause's plus the `as` binding (a Cell ref-box
+      // the runtime fills with the delivered payload term — `r.job`
+      // reaches it through #FIND like an `on` alias). A guard-false
+      // percept leaves the intention parked for the next match.
+      CellRef guardHead = noCell;
+      if (expr.guard) {
+        auto ps = params;
+        if (expr.binding)
+          ps.push_back(Parameter{.name = *expr.binding,
+                                 .type = Type{"Cell"},
+                                 .loc  = expr.loc});
+        auto head = emitHead(decl, *expr.guard, ps,
+                             std::format("{}:await:guard",
+                                         label(clauseName)),
+                             Type{"Bool"});
+        if (!head) return std::unexpected(head.error());
+        guardHead = *head;
+      }
       CellRef elseHead = noCell;
       if (expr.recovery) {
         auto head = marshalElse(decl, params, *expr.recovery, clauseName);
@@ -675,6 +690,9 @@ struct Lowerer {
       }
       field("deadline", arena.makeScalarCell(static_cast<std::int64_t>(
                             std::stoll(expr.deadline->text))));
+      if (guardHead != noCell)
+        field("guard", arena.makeScalarCell(
+                           static_cast<std::int64_t>(guardHead)));
       if (elseHead != noCell)
         field("else", arena.makeScalarCell(
                           static_cast<std::int64_t>(elseHead)));
