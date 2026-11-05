@@ -352,7 +352,12 @@ Three rulings the r2 pass forced (spec-level, flagged for owner ratification):
   ownership is emitted once by M0 and learned clauses inherit it through their host symbol —
   program→program edge, no V12 letter). `+d.holder` is single-valued; a symbol with no holder
   refuses dispatch rather than falling through to every agent. Dispatch keys on it — no silent
-  cross-agent handler stealing.
+  cross-agent handler stealing. **M0 implementation amendment (single-pairing):** `+d.holder` cannot
+  carry a live `→ <agent>` edge — `link` pairs one neighbor per (cell, dim, dir), so the agent's
+  `-d.holder` slot would pair at most one symbol and each later symbol's holder write would evict
+  the previous one. The edge lands on a fresh scalar cell whose int64 content is the agent `CellRef`
+  instead: `sym +d.holder → ⟨int64 agent⟩` keeps ownership symbol-side, single-edge-safe, and
+  dispatch-read identical (`linked` → `asInt64`).
 
 ## 4. Boundaries, budgets, invariants
 
