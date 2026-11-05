@@ -165,37 +165,57 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
   // Journal + dispatch. A wake turn (message absent) carries no percept:
   // it journals nothing and dispatches no `on` handler.
   MetaRuntime meta(core, vm, binds);
+  const auto maxCycles = static_cast<std::size_t>(std::min<std::uint64_t>(
+      exec.grant.maxInstructions == 0 ? 100'000 : exec.grant.maxInstructions,
+      std::uint64_t{1'000'000}));
+
+  // One dispatch for both turn kinds: every clause on the named event
+  // symbol's +d.clause bank runs — M0 clauses through their +d.spin
+  // head directly, learn-clause graphs lacking the descriptor through
+  // body_of's session wrapper. False means a refusal — the turn faults.
+  auto dispatchEvent = [&](std::string_view name) -> bool {
+    const auto eventSym = eventSymbolNamed(arena, core, programRoot, name);
+    if (!eventSym) return true;
+    for (const CellRef clause : meta.clausesOf(*eventSym)) {
+      const auto spin = arena.linked(clause, core.dims().spin, DimVector::POS);
+      if (!spin) continue;
+      auto outcome = meta.runFragment(*spin, {}, exec.cursor, maxCycles);
+      if (outcome.refusal == MetaRunOutcome::Refusal::NotAHead ||
+          outcome.refusal == MetaRunOutcome::Refusal::NoDescriptor) {
+        if (const auto head = meta.bodyOf(clause))
+          outcome = meta.runFragment(*head, {}, exec.cursor, maxCycles);
+      }
+      // consumeWork exhaustion and VM faults surface as refusals — a
+      // turn fault (§3.2's fail path). An unproductive result (an empty
+      // or valueless body) is success, not a fault.
+      if (outcome.refusal != MetaRunOutcome::Refusal::None) return false;
+    }
+    return true;
+  };
+
   if (exec.message) {
     const std::string &eventName = exec.message->value;
     journalAppend(arena, agent, arena.makeCell(eventName), dims.seen,
                   static_cast<std::size_t>(setting("vagent.journal_size", 64)));
-    const auto eventSym = eventSymbolNamed(arena, core, programRoot, eventName);
-    if (eventSym) {
-      const auto maxCycles = static_cast<std::size_t>(std::min<std::uint64_t>(
-          exec.grant.maxInstructions == 0 ? 100'000
-                                          : exec.grant.maxInstructions,
-          std::uint64_t{1'000'000}));
-      for (const CellRef clause : meta.clausesOf(*eventSym)) {
-        // M0 clauses carry a full compileFragment head on +d.spin — run
-        // it directly; learn-clause graphs lacking the descriptor go
-        // through body_of's session wrapper instead.
-        const auto spin =
-            arena.linked(clause, core.dims().spin, DimVector::POS);
-        if (!spin) continue;
-        auto outcome = meta.runFragment(*spin, {}, exec.cursor, maxCycles);
-        if (outcome.refusal == MetaRunOutcome::Refusal::NotAHead ||
-            outcome.refusal == MetaRunOutcome::Refusal::NoDescriptor) {
-          if (const auto head = meta.bodyOf(clause))
-            outcome = meta.runFragment(*head, {}, exec.cursor, maxCycles);
-        }
-        // consumeWork exhaustion and VM faults surface as refusals — a
-        // turn fault (§3.2's fail path). An unproductive result (an empty
-        // or valueless body) is success, not a fault.
-        if (outcome.refusal != MetaRunOutcome::Refusal::None) {
-          return failTurn();
-        }
-      }
+    if (!dispatchEvent(eventName)) return failTurn();
+  }
+
+  // §3.2 settle: drain +d.pending internal events — each enqueued cell
+  // names an event, pops off the rank head and dispatches. The per-turn
+  // bound (vagent.max_pending) keeps a self-requeueing loop from
+  // starving the actor; the remainder carries to the next turn.
+  const auto drainBound =
+      static_cast<std::size_t>(setting("vagent.max_pending", 64));
+  for (std::size_t drained = 0; drained < drainBound; ++drained) {
+    std::optional<CellRef> head;
+    for (const CellRef cell : zigzag::rankAfter(arena, agent, dims.pending)) {
+      head = cell;
+      break;
     }
+    if (!head) break;
+    const auto name = std::string{arena.textOf(*head)};
+    unlinkRank(arena, *head, dims.pending);
+    if (!dispatchEvent(name)) return failTurn();
   }
 
   // Success: cut(0) drops the base CP too, discard(m0) keeps the turn.

@@ -129,6 +129,32 @@ TEST(VagentExecutorTest, NoAgentCellIsATurnFault) {
   EXPECT_EQ(h.ctx.arena.outstandingMarks(), 0u);
 }
 
+TEST(VagentExecutorTest, PendingEventsDrainDuringSettleWithoutJournaling) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image = h.lower("module demo\nevent Poke\nevent Tick\n"
+                             "agent A { on Poke { } on Tick { } }");
+  ASSERT_TRUE(image);
+  auto &arena      = h.ctx.arena;
+  const auto pend  = h.ctx.core.findOrMintDimension("d.pending");
+  const auto queue = [&](std::string_view name) {
+    zigzag::expectWritten(
+        arena.link(zigzag::rankTail(arena, image->agentCell, pend), pend,
+                   DimVector::POS, arena.makeCell(std::string{name})));
+  };
+  queue("Poke");
+  queue("Tick");
+  queue("NoHandler"); // unknown events dispatch to nothing, still drain
+
+  const auto outcome = exec(h.execution(), h.ctx);
+  ASSERT_TRUE(outcome) << static_cast<int>(outcome.error());
+  EXPECT_TRUE(zigzag::rankAfter(arena, image->agentCell, pend).empty());
+  // Internal events are not percepts — the journal stays empty.
+  const auto seen = h.ctx.core.findOrMintDimension("d.seen");
+  EXPECT_TRUE(zigzag::rankAfter(arena, image->agentCell, seen).empty());
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
 // -- §3.1/§3.8 belief store: predicate banks, provenance, the four verbs ------
 
 TEST(VagentBeliefTest, BelieveBelievesForgetReviseRoundTrip) {
