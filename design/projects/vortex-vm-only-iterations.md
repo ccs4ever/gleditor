@@ -663,3 +663,34 @@ clang-format 19. No speedup or full-suite pass is claimed.
 
 Logs: `/tmp/vql-scoped-choice-build.log`, `/tmp/vql-scoped-choice-tests.log`,
 `/tmp/vql-scoped-choice-format.log`.
+
+## Iteration 22: one backend-driven structural matcher
+
+The shared matcher now uses an internal continuation driver. It owns ordered union, cardinality,
+shape, refinement, field-probe, lazy-default and capture-publication decisions; a synchronous arena
+backend supplies control scopes and domain leaves. Backend-associated subjects, contexts, bindings
+and compile-time continuations allow a later graph backend to consume the same walk. Callbacks run
+only during a matching/build call and never become VM runtime closures.
+
+This is a parity refactor, not nonliteral field-default support. Existing VM instructions still use
+versioned contract descriptors and the synchronous matcher; the graph backend and lazy thunk
+continuations remain to be implemented. No direct evaluator fallback is added.
+
+The arena backend borrows input spans and singleton views, retains each default result only through
+its immediate matching callback, and uses borrowed `function_ref` continuations. It introduces no
+whole-input copy before fuel checks. Its field/element/arm loops remain iterative; only structural
+type nesting recurses. Typed fields check before publishing their own aliases; bidirectional fields
+try the reverse only when the first neighbor is absent, and a present mismatched neighbor never uses
+a default. Null-capture nested checks roll back before an outer refinement executes, while captured
+nested checks retain their defaults. Generic validation rolls back its whole collection scope even
+on success. The original lexical default environment remains stable until whole-match publication.
+
+Validation: full `make -j$(nproc)` and all 588 affected tests from 56 suites passed, including eight
+new shared-matcher parity cases. Tests cover union/field/default order, prematch aliases,
+bidirectional presence versus type failure, ignored generic captures and successful rollback,
+shape/refinement overwrite order, exception atomicity, nested null-capture rollback timing and an
+8,192-field flat pattern. Existing VM, frame, export/reload, host/mesh and language regressions
+remain in that matrix. No performance improvement or full-suite pass is claimed.
+
+Logs: `/tmp/vql-contract-driver-build.log`, `/tmp/vql-contract-driver-tests.log`,
+`/tmp/vql-contract-driver-format.log`.

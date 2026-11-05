@@ -2294,7 +2294,8 @@ explicit refusals. The rulings below describe the intended semantics.
   Rest arguments preserve cell identity, order and duplicates, and their shape contracts introduce
   no capture bindings. Defaulted, dot and destructured variadic forms remain explicitly unsupported.
   Explicit argument expressions compile before callee activation, so finite nested calls of the same
-  definition are distinct from recursive body/default expansion, which still needs VM frames.
+  definition are distinct from recursive body/default execution. Reusable native frames execute
+  eligible named definitions, including recursion; deferred variadic and functor forms remain open.
 
 - **Scalars are read as comparisons read them (§4.3).** `Int`, `Float` and `Bool` accept a cell
   minted with those value bits and a text cell whose whole content reads as one. Stored text may
@@ -2343,17 +2344,18 @@ explicit refusals. The rulings below describe the intended semantics.
   refinements; older descriptors are refused.
 
 - **The compiler uses real VM instructions.** Bound point-free steps lower to Vortex traversals;
-  nonrecursive typed calls use shared matching, capture slots, mismatch branches, body instructions,
-  and return checks. Omitted parameter expressions compile after earlier parameter guards; explicit
-  arguments capture caller bindings, including untyped functor step vectors. Decorated functor
-  captures freeze their body across rebinding; application runs that body before applying the outer
-  predicates/clamp to the combined result. Query-time master dereference resolves foreign proxies,
-  charges each probe and returns the original cell on a cycle. Contract subject collection charges
-  members before copying them into its matcher buffer, and matching charges recursive type visits
-  and field probes. Failed shape and union attempts roll back arena defaults and minted dimensions;
-  captures are staged until the full match succeeds. Return validation releases its temporary
-  defaults on both outcomes. Failed matching spends fuel even when its graph changes are rolled
-  back. Atomic enforcement of user mutations remains a separate milestone. Matching still
+  typed calls use shared matching, capture slots, mismatch branches, body instructions and return
+  checks. Eligible named definitions use reusable recursive frames; other supported definitions use
+  compiled inline graphs. Omitted parameter expressions compile after earlier parameter guards;
+  explicit arguments capture caller bindings, including untyped functor step vectors. Decorated
+  functor captures freeze their body across rebinding; application runs that body before applying
+  the outer predicates/clamp to the combined result. Query-time master dereference resolves foreign
+  proxies, charges each probe and returns the original cell on a cycle. Contract subject collection
+  charges members before copying them into its matcher buffer, and matching charges recursive type
+  visits and field probes. Failed shape and union attempts roll back arena defaults and minted
+  dimensions; captures are staged until the full match succeeds. Return validation releases its
+  temporary defaults on both outcomes. Failed matching spends fuel even when its graph changes are
+  rolled back. Atomic enforcement of user mutations remains a separate milestone. Matching still
   materializes subjects; no zero-copy or universal allocation guarantee follows. Step predicates
   retain cell identity through guarded reference slots and Boolean control flow short-circuits.
   Nonempty literal shape predicates lower directional presence/absence rules, scalar literal targets
@@ -2368,9 +2370,9 @@ explicit refusals. The rulings below describe the intended semantics.
   refuse explicitly. Runtime rank iterators and eager sequence registers now support per-member
   typed filtering, stream cardinality, predicates and integer index clamps. Foreign neighbors
   resolve through canonical arena proxies; choice points restore iterator state and proxy minting.
-  Universal lazy streaming, recursive frames, path/call contract-field default thunks, mutation
-  enforcement, and complete frontend/parallel parity remain open; compiled execution never silently
-  calls the direct evaluator as a fallback.
+  Universal lazy streaming, recursive functor/variadic frames, path/call contract-field default
+  thunks, mutation enforcement, and complete frontend/parallel parity remain open; compiled
+  execution never silently calls the direct evaluator as a fallback.
 
 ______________________________________________________________________
 

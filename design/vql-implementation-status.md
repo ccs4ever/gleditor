@@ -42,11 +42,12 @@ explicitly. Syntax acceptance alone does not establish execution support.
 Runtime block loops, destructuring, `where`, conditional actions and ordered multi-return now use
 actual VM instructions. Typed context fields and implicit context captures use descriptor ABI
 `VQL_CONTRACT/4`; older descriptors refuse. Request execution restores its contract coordinator on
-every exit. The VM-only ledger records 238 passing focused tests for this bounded iteration;
-recursive frames, path/call field-default thunks and atomic mutation enforcement remain open.
-Variable-alias field defaults now capture prior lexical VM slots lazily, preserving identity for
-zero or one fallback cell. Larger streams refuse explicitly. This alias increment passes 261 focused
-tests; it does not establish general lazy-thunk support.
+every exit. The initial bounded VM-only iteration recorded 238 passing focused tests. Later
+iterations below add reusable recursive frames and free capture ports; path/call field-default
+thunks and atomic mutation enforcement remain open. Variable-alias field defaults now capture prior
+lexical VM slots lazily, preserving identity for zero or one fallback cell. Larger streams refuse
+explicitly. This alias increment passes 261 focused tests; it does not establish general lazy-thunk
+support.
 
 Scalar comparisons now lower to a dedicated Vortex instruction with exact Int64 and IEEE Double
 semantics, whole-token text inference and canonical text fallback. Typed bits override display text;
@@ -154,9 +155,9 @@ All 454 affected tests, the full build, formatting and Luna gates passed for thi
 - **§4.11:** the complete first-class Store/Slice/Dim register model, filesystem-opening generators,
   discovery catalogue, universal projection dispatch and 16-byte `HyperHandle` lowering remain
   incomplete. Invalid/unavailable pins yield no matches. Local mounts resolve registered stores.
-- **§4.12:** complete lazy/runtime stream semantics, recursive frames, variadic
-  defaults/dot/destructuring, nonliteral shape-field default thunks, mutation-boundary enforcement,
-  functor shape/pin/yield completeness, session-state/frontend parity, and specialized
+- **§4.12:** complete lazy/runtime stream semantics, recursive functor/variadic frame forms,
+  variadic defaults/dot/destructuring, nonliteral shape-field default thunks, mutation-boundary
+  enforcement, functor shape/pin/yield completeness, session-state/frontend parity, and specialized
   `CurriedMorphism`/`TRAVERSE_CURRIED_DIM` lowering remain incomplete. Qualified functor anchors
   refuse explicitly in compiled capture.
 - **§5:** arena lifetime and choice-point rollback exist; a VQL tracing/sweeping garbage collector
@@ -393,3 +394,17 @@ cuts also suppress callbacks from nested ordinary choices. Full build, all 580 a
 56 suites and repository formatting passed with independent Luna architecture and senior/profiler
 gates. Fresh-VM export/reload and both rollback continuations passed. This establishes neither a
 byte-memory bound nor a runtime speedup; the shared driver and default thunk lowering remain next.
+
+## Shared structural matcher driver
+
+An internal continuation driver now owns the single structural matching walk, with a synchronous
+arena backend preserving existing contract behavior. Borrowed subject spans and immediate callbacks
+avoid copying incoming streams before work checks; flat fields remain iterative. Nested
+validation/capture scopes, union order, lexical defaults and generic success rollback have dedicated
+parity coverage. Full build, all 588 affected tests from 56 suites and repository formatting passed
+with independent Luna architecture and senior/profiler gates. See
+[iteration 22](projects/vortex-vm-only-iterations.md).
+
+The graph backend has not yet been wired, so path/call field-default thunks still refuse in compiled
+contracts. Mutation contracts, functor ABI and remaining grammar/route/lifecycle work also keep
+§4.12 incomplete. This refactor adds no runtime interpreter fallback or measured speedup.

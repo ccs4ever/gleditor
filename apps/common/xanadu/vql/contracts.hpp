@@ -67,17 +67,6 @@ public:
   contractCaptureNames(const TypeExpr &type);
 
 private:
-  [[nodiscard]] bool satisfiesPrimary(const PrimaryType &type,
-                                      std::span<const zigzag::CellRef> cells,
-                                      ContractBindings *bindings,
-                                      DefaultEvaluator evaluateDefault);
-  [[nodiscard]] bool satisfiesAtom(const PrimaryType &type,
-                                   zigzag::CellRef cell,
-                                   ContractBindings *bindings,
-                                   DefaultEvaluator evaluateDefault);
-  [[nodiscard]] bool hasBasicType(const BasicType &type,
-                                  zigzag::CellRef cell) const;
-
   zigzag::vortex::VortexCore &core_;
   MultiStoreCoordinator &coordinator_;
 };
