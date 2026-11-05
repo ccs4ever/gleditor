@@ -191,6 +191,8 @@ struct Lowerer {
     case ExprKind::Adopt:
       return true;
     case ExprKind::Emit:
+    case ExprKind::AwaitEvent:
+    case ExprKind::AwaitTerm:
       return true;
     default:
       return false;
@@ -264,11 +266,55 @@ struct Lowerer {
     case ExprKind::Emit:
       verb = "emit";
       break;
+    case ExprKind::AwaitEvent:
+    case ExprKind::AwaitTerm:
+      verb = "await";
+      break;
     default:
       return std::unexpected(Diagnostic{DiagnosticCode::InvalidPosition,
                                         "statement is not a host verb",
                                         expr.loc});
     }
+    // await marshals its own fields before the generic term path —
+    // AwaitEvent carries no children at all (name in `text`, binding
+    // in `binding`), and `within`'s deadline must be a literal so the
+    // runtime can hold blocked_until as a plain scalar.
+    if (expr.kind == ExprKind::AwaitEvent || expr.kind == ExprKind::AwaitTerm) {
+      if (expr.guard || expr.recovery)
+        return std::unexpected(
+            Diagnostic{DiagnosticCode::InvalidPosition,
+                       "await's guard/else arms do not lower yet", expr.loc});
+      // The turn protocol's only clock is turn-indexed — `within`'s
+      // Duration marshals as its magnitude and expires in *turns*.
+      // Wall-clock deadlines are the adapter's Timer capacity
+      // ({Duration, Event} → Timer), not a field the intention record
+      // can compare; the approximation is honest because it is the
+      // only clock this layer owns.
+      if (!expr.deadline || expr.deadline->kind != ExprKind::Duration)
+        return std::unexpected(
+            Diagnostic{DiagnosticCode::InvalidPosition,
+                       "await's within deadline must be a duration", expr.loc});
+      const auto step = arena.makeCell();
+      zigzag::expectWritten(arena.link(step, verbDim(), DimVector::POS,
+                                       arena.makeCell(std::string{verb})));
+      const auto field = [&](std::string_view name, CellRef value) {
+        if (const auto rec = varsRecord(arena, core, step, name, true))
+          zigzag::expectWritten(
+              arena.link(*rec, dims().values, DimVector::POS, value));
+      };
+      if (expr.kind == ExprKind::AwaitEvent) {
+        field("event", arena.makeCell(expr.text));
+        if (expr.binding) field("binding", arena.makeCell(*expr.binding));
+      } else {
+        auto term = marshalTerm(*expr.children.front());
+        if (!term) return std::unexpected(term.error());
+        field("event", *term);
+      }
+      field("deadline", arena.makeScalarCell(static_cast<std::int64_t>(
+                            std::stoll(expr.deadline->text))));
+      return step;
+    }
+
     if (expr.children.empty())
       return std::unexpected(Diagnostic{DiagnosticCode::InvalidPosition,
                                         std::format("{} carries no term", verb),
@@ -401,10 +447,10 @@ struct Lowerer {
         Expr stub;
         stub.kind = ExprKind::Unit;
         stub.loc  = stmt->loc;
-        auto head = emitDeclHead(
-            decl, stub, params,
-            std::format("{}:seg{}", label(clauseName), member),
-            Type{"()"}, false);
+        auto head =
+            emitDeclHead(decl, stub, params,
+                         std::format("{}:seg{}", label(clauseName), member),
+                         Type{"()"}, false);
         if (head) {
           linkMember(*head);
         } else {

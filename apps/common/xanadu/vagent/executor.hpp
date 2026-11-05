@@ -16,11 +16,23 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "../vortex/mesh_actor.hpp"
 #include "../vortex/worker_context.hpp"
 
 namespace xanadu::vagent {
+
+/// One §3.7 outbox entry as the drain hands it to host bindings —
+/// `id` is the deterministic idempotence key (sender-name hash + turn
+/// + outbox position), which is what makes duplicate delivery
+/// detectable rather than invisible.
+struct OutboxEntry {
+  std::string kind;
+  std::string target;
+  std::string payload;
+  std::string id;
+};
 
 class VagentExecutor {
 public:
@@ -36,6 +48,17 @@ public:
   [[nodiscard]] std::expected<std::string, zigzag::vortex::mesh::ActorError>
   operator()(const zigzag::vortex::mesh::ActorExecution &exec,
              zigzag::vortex::WorkerContext &ctx);
+
+  /// The §3.7 drain: a pure `rankAfter`/`linked` read of the agent's
+  /// `+d.outbox` rank. ConsumeWork-free by construction — the adapter
+  /// calls it only post-commit, where no mark is open and nothing mints.
+  /// Entries persist on the rank; repeated drains return the same
+  /// ids, which is exactly what a host binding compares to detect a
+  /// duplicate (`EffectFailed{cause:"duplicate"}` — detectable, not
+  /// exactly-once, per §3.7's honest bound).
+  [[nodiscard]] static std::vector<OutboxEntry>
+  drainOutbox(zigzag::ArenaManifold &arena, zigzag::vortex::VortexCore &core,
+              zigzag::CellRef agent);
 
 private:
   [[nodiscard]] std::int64_t setting(std::string_view key,

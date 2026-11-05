@@ -177,7 +177,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
   // §3.8 host step: +d.verb names the MetaRuntime entry, +d.vars holds
   // the marshaled args. Peer and turn are implicit — a belief an agent
   // asserts is asserted by that agent on that turn.
-  const auto runHostStep = [&](CellRef step) -> bool {
+  const auto runHostStep = [&](CellRef step, CellRef intention) -> bool {
     const auto verbCell = arena.linked(step, dims.verb, DimVector::POS);
     if (!verbCell) return false;
     const auto verb  = arena.textOf(*verbCell);
@@ -212,9 +212,10 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       if (payload == noCell) return false;
       // §3.7's cell-legible entry: {kind,target,payload,id} on
       // +d.outbox — the post-commit drain is the adapter's (C++ reads,
-      // consumeWork-free), the turn just mints the record. id carries
-      // the deterministic turn:position pair of the spec's triple —
-      // the sender is implicit in the owning rank.
+      // consumeWork-free), the turn just mints the record. id is the
+      // spec's deterministic idempotence triple — sender-name hash +
+      // turn + outbox position — so a host binding detects a duplicate
+      // drain by key rather than by cell identity.
       const auto position = std::ranges::to<std::vector>(
                                 zigzag::rankAfter(arena, agent, dims.outbox))
                                 .size();
@@ -227,10 +228,37 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
           zigzag::expectWritten(
               arena.link(*rec, core.dims().values, DimVector::POS, value));
       };
+      std::string sender;
+      if (const auto name =
+              arena.linked(agent, core.dims().name, DimVector::POS))
+        sender = std::string{arena.textOf(*name)};
       outField("kind", arena.makeCell("emit"));
       outField("payload", payload);
       outField("target", arena.makeScalarCell(std::int64_t{0}));
-      outField("id", arena.makeCell(std::format("{}:{}", turn, position)));
+      outField("id", arena.makeCell(std::format(
+                         "{}:{}:{}", std::hash<std::string>{}(sender), turn,
+                         position)));
+      return true;
+    }
+    if (verb == "await") {
+      // Suspension needs a record to park — await in an `on` handler's
+      // dispatch spine has nothing to suspend, so it refuses there.
+      if (intention == noCell) return false;
+      const auto event    = field("event");
+      const auto deadline = field("deadline");
+      if (event == noCell || deadline == noCell) return false;
+      const auto turns = arena.asInt64(deadline);
+      if (!turns) return false;
+      // §3.5's park: the spine index advances past the await member
+      // (the settle walker's step++ below), waiting/ready gate the
+      // resume, and the absolute deadline rides on the intention.
+      if (const auto rec =
+              varsRecord(arena, core, intention, "awaitEvent", true))
+        zigzag::expectWritten(
+            arena.link(*rec, core.dims().values, DimVector::POS, event));
+      meta.setIntentionField(intention, "awaitDeadline", turn + *turns);
+      meta.setIntentionField(intention, "waiting", 1);
+      meta.setIntentionField(intention, "ready", 0);
       return true;
     }
     const auto term = field("term");
@@ -260,7 +288,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
     for (const CellRef member :
          zigzag::rankAfter(arena, clause, core.dims().step)) {
       if (arena.linked(member, dims.verb, DimVector::POS).has_value()) {
-        if (!runHostStep(member)) return false;
+        if (!runHostStep(member, noCell)) return false;
       } else {
         const auto outcome =
             meta.runFragment(member, {}, exec.cursor, maxCycles);
@@ -325,6 +353,46 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
   for (const CellRef intention :
        zigzag::rankAfter(arena, agent, dims.intention) |
            std::ranges::to<std::vector>()) {
+    const auto waiting = meta.intentionField(intention, "waiting").value_or(0);
+    if (waiting != 0) {
+      // §3.5/§3.6 resume: the journal holds the percept the awaited
+      // event journaled as; a match links +d.evidence — the provenance
+      // edge that owns the cell through promote — and readies the
+      // intention (the spine index already points past the await
+      // member). Missed + deadline → faulted, the failure ladder's rung
+      // before drop when.
+      const auto awaitEvent = [&]() -> CellRef {
+        if (const auto rec =
+                varsRecord(arena, core, intention, "awaitEvent", false))
+          if (const auto v =
+                  arena.linked(*rec, core.dims().values, DimVector::POS))
+            return *v;
+        return noCell;
+      }();
+      const auto deadline =
+          meta.intentionField(intention, "awaitDeadline").value_or(0);
+      bool matched = false;
+      if (awaitEvent != noCell) {
+        const auto wanted = arena.textOf(awaitEvent);
+        for (const CellRef percept :
+             zigzag::rankAfter(arena, agent, dims.seen)) {
+          if (arena.textOf(percept) == wanted) {
+            zigzag::expectWritten(
+                arena.link(intention, dims.evidence, DimVector::POS, percept));
+            matched = true;
+            break;
+          }
+        }
+      }
+      if (matched) {
+        meta.setIntentionField(intention, "waiting", 0);
+        meta.setIntentionField(intention, "ready", 1);
+      } else if (turn >= deadline) {
+        meta.setIntentionField(intention, "waiting", 0);
+        meta.setIntentionField(intention, "faulted", 1);
+      }
+      if (!matched) continue;
+    }
     const auto ready   = meta.intentionField(intention, "ready").value_or(0);
     const auto faulted = meta.intentionField(intention, "faulted").value_or(0);
     const auto blockedTill =
@@ -386,7 +454,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
     } else if (stepIdx < spine.size()) {
       const auto member = spine[stepIdx];
       if (arena.linked(member, dims.verb, DimVector::POS).has_value())
-        ok = runHostStep(member);
+        ok = runHostStep(member, intention);
       else {
         const auto outcome =
             meta.runFragment(member, {}, exec.cursor, maxCycles);
@@ -423,6 +491,31 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
     (void)arena.compact();
   }
   return std::string{"ok"};
+}
+
+std::vector<OutboxEntry>
+VagentExecutor::drainOutbox(zigzag::ArenaManifold &arena,
+                            zigzag::vortex::VortexCore &core,
+                            zigzag::CellRef agent) {
+  // Reads only — no marks, no consumeWork. The §3.7 contract makes
+  // this safe to call post-commit: entries stay on the rank and the
+  // host binding deduplicates by `id`. d.outbox is in the pre-mark
+  // turn vocabulary, so findOrMint resolves here, never mints.
+  const auto outboxDim = core.findOrMintDimension("d.outbox");
+  std::vector<OutboxEntry> entries;
+  for (const CellRef entry : zigzag::rankAfter(arena, agent, outboxDim)) {
+    auto read = [&](std::string_view field) -> std::string {
+      const auto rec = varsRecord(arena, core, entry, field, false);
+      if (!rec) return {};
+      const auto value = arena.linked(*rec, core.dims().values, DimVector::POS);
+      return value ? std::string{arena.textOf(*value)} : std::string{};
+    };
+    entries.push_back(OutboxEntry{.kind    = read("kind"),
+                                  .target  = read("target"),
+                                  .payload = read("payload"),
+                                  .id      = read("id")});
+  }
+  return entries;
 }
 
 } // namespace xanadu::vagent

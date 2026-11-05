@@ -320,8 +320,40 @@ TEST(VagentExecutorTest, EmitMintsAnOutboxRecord) {
   };
   EXPECT_EQ(arena.textOf(fieldOf("kind")), "emit");
   EXPECT_EQ(arena.textOf(fieldOf("payload")), "Tock");
-  EXPECT_EQ(arena.textOf(fieldOf("id")), "1:0");
+  // §3.7's idempotence triple: sender-name hash + turn + position.
+  const auto expected =
+      std::format("{}:{}:{}", std::hash<std::string>{}("A"), 1, 0);
+  EXPECT_EQ(arena.textOf(fieldOf("id")), expected);
   EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
+TEST(VagentExecutorTest, DrainReadsTheOutboxAndDuplicatesAreDetectable) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image = h.lower("module demo\nevent Tick\nevent Tock\n"
+                             "agent A { on Tick { emit Tock{} } }");
+  ASSERT_TRUE(image);
+
+  const auto outcome = exec(h.execution("Tick"), h.ctx);
+  ASSERT_TRUE(outcome) << static_cast<int>(outcome.error());
+
+  // §3.7's drain is adapter C++ — pure rankAfter/linked reads after
+  // commit, consumeWork-free by construction.
+  const auto first =
+      VagentExecutor::drainOutbox(h.ctx.arena, h.ctx.core, image->agentCell);
+  ASSERT_EQ(first.size(), 1u);
+  EXPECT_EQ(first[0].kind, "emit");
+  EXPECT_EQ(first[0].payload, "Tock");
+  EXPECT_EQ(first[0].id,
+            std::format("{}:{}:{}", std::hash<std::string>{}("A"), 1, 0));
+
+  // Entries persist: a re-drain returns the same id, which is what the
+  // host binding compares to flag a duplicate rather than double-act.
+  const auto second =
+      VagentExecutor::drainOutbox(h.ctx.arena, h.ctx.core, image->agentCell);
+  ASSERT_EQ(second.size(), 1u);
+  EXPECT_EQ(second[0].id, first[0].id);
+  EXPECT_EQ(h.ctx.arena.outstandingMarks(), 0u);
 }
 
 TEST(VagentExecutorTest, AdoptMintsAnIntentionAndRunsItsSpine) {
@@ -354,6 +386,58 @@ TEST(VagentExecutorTest, AdoptMintsAnIntentionAndRunsItsSpine) {
   }()));
   const auto intentDim = h.ctx.core.findOrMintDimension("d.intention");
   EXPECT_TRUE(zigzag::rankAfter(arena, image->agentCell, intentDim).empty());
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
+TEST(VagentExecutorTest, AwaitSuspendsAndTheWakeResumes) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image =
+      h.lower("module demo\nevent Tick\nevent Grant\nevent Done\n"
+              "goal Work() perform\n"
+              "agent A {\n"
+              "  on Tick { adopt Work() }\n"
+              "  plan w for Work { await Grant as g within 5s; emit Done{} }\n"
+              "}");
+  ASSERT_TRUE(image);
+  auto &arena     = h.ctx.arena;
+  const auto iDim = h.ctx.core.findOrMintDimension("d.intention");
+
+  // Turn 1 — Tick adopts; the spine's first member is the await host
+  // step: the intention parks (waiting, step index past the member)
+  // and Done does *not* emit yet.
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  {
+    const auto parked = zigzag::rankAfter(arena, image->agentCell, iDim) |
+                        std::ranges::to<std::vector>();
+    ASSERT_EQ(parked.size(), 1u);
+    auto binds =
+        mintMetaBindSet(arena, h.ctx.core, h.ctx.core.home(), image->agentCell);
+    ASSERT_TRUE(binds);
+    MetaRuntime meta(h.ctx.core, h.ctx.vm, *binds);
+    EXPECT_EQ(meta.intentionField(parked.front(), "waiting"), 1);
+    EXPECT_EQ(meta.intentionField(parked.front(), "ready"), 0);
+    EXPECT_EQ(meta.intentionField(parked.front(), "awaitDeadline"), 6);
+  }
+  EXPECT_TRUE(
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell).empty());
+
+  // Turn 2 — a bare wake finds no Grant in the journal: still parked.
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+  EXPECT_EQ((zigzag::rankAfter(arena, image->agentCell, iDim) |
+             std::ranges::to<std::vector>())
+                .size(),
+            1u);
+
+  // Turn 3 — Grant journals, dispatch finds no handler, and the settle
+  // walker's match links +d.evidence, readies the intention, and the
+  // resumed spine emits Done and retires.
+  ASSERT_TRUE(exec(h.execution("Grant"), h.ctx));
+  EXPECT_TRUE(zigzag::rankAfter(arena, image->agentCell, iDim).empty());
+  const auto outbox =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  ASSERT_EQ(outbox.size(), 1u);
+  EXPECT_EQ(outbox[0].payload, "Done");
   EXPECT_EQ(arena.outstandingMarks(), 0u);
 }
 
