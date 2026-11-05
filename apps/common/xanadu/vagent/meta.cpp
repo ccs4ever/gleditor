@@ -962,7 +962,8 @@ bool truthy(const CellValue &value) {
 std::expected<std::optional<CellRef>, std::string>
 MetaRuntime::selectClause(CellRef host,
                           const std::unordered_set<CellRef> &tried,
-                          std::size_t whereFuel) {
+                          std::size_t whereFuel,
+                          const std::vector<CellValue> &args) {
   auto &arena = core_.arena();
   if (!arena.contains(host))
     return std::unexpected("selectClause: host is not an arena cell");
@@ -992,7 +993,7 @@ MetaRuntime::selectClause(CellRef host,
     if (!guard.has_value()) continue;
     // A refused guard is a failed `where`, never a selection fault —
     // the next clause still gets its turn.
-    const auto outcome = runFragment(*guard, {}, std::nullopt, whereFuel);
+    const auto outcome = runFragment(*guard, args, std::nullopt, whereFuel);
     if (outcome.refusal != MetaRunOutcome::Refusal::None) continue;
     if (!outcome.produced || !outcome.result.has_value()) continue;
     if (truthy(*outcome.result)) return clause;
@@ -1027,12 +1028,14 @@ void MetaRuntime::setIntentionField(CellRef intention, std::string_view field,
 }
 
 std::expected<CellRef, std::string>
-MetaRuntime::adoptGoal(CellRef goal, std::int64_t turn, std::size_t whereFuel) {
+MetaRuntime::adoptGoal(CellRef goal, std::int64_t turn,
+                       std::size_t whereFuel,
+                       const std::vector<CellValue> &args) {
   auto &arena = core_.arena();
   if (binds_.agentCell == noCell)
     return std::unexpected("adopt: no agent cell bound");
 
-  const auto picked = selectClause(goal, {}, whereFuel);
+  const auto picked = selectClause(goal, {}, whereFuel, args);
   if (!picked) return std::unexpected(picked.error());
   if (!picked->has_value())
     return std::unexpected(
@@ -1085,6 +1088,28 @@ MetaRuntime::adoptGoal(CellRef goal, std::int64_t turn, std::size_t whereFuel) {
   intField("delegator", 0);
   field("bodyName", arena.makeCell(bodyName));
   field("adoptedTurn", arena.makeScalarCell(turn));
+  // The goal call's bound values, in order — clause heads bind them
+  // positionally (plan bindings rename the goal's parameters, so the
+  // position is the contract, not the name). Value cells are fresh
+  // mints: the caller's arg cells are shared marshal state.
+  if (!args.empty()) {
+    const auto chain = arena.makeCell();
+    for (const auto &arg : args) {
+      const auto cell = std::visit(
+          [&](const auto &v) -> CellRef {
+            using T = std::decay_t<decltype(v)>;
+            if constexpr (std::is_same_v<T, std::string>)
+              return arena.makeCell(v);
+            else
+              return arena.makeScalarCell(v);
+          },
+          arg);
+      zigzag::expectWritten(arena.link(
+          zigzag::rankTail(arena, chain, core_.dims().step),
+          core_.dims().step, Posward, cell));
+    }
+    field("args", chain);
+  }
   return intention;
 }
 

@@ -297,6 +297,80 @@ struct Lowerer {
     return marshalTerm(expr);
   }
 
+  // A goal-call argument: literals keep their type (marshalTerm's
+  // text-cells convention would make "4" and 4 indistinguishable to a
+  // bound param), a nested Call marshals functor + args like a Term —
+  // the bound value is the term's ref. Anything else (identifiers,
+  // operators) has no value the marshal can name and refuses loudly.
+  std::expected<CellRef, Diagnostic> marshalArg(const Expr &expr) {
+    switch (expr.kind) {
+    case ExprKind::Integer:
+      return arena.makeScalarCell(
+          static_cast<std::int64_t>(std::stoll(expr.text)));
+    case ExprKind::Float:
+      return arena.makeScalarCell(std::stod(expr.text));
+    case ExprKind::Boolean:
+      return arena.makeScalarCell(expr.text == "true");
+    case ExprKind::String:
+      return arena.makeCell(expr.text);
+    case ExprKind::Term:
+      return marshalTerm(expr);
+    case ExprKind::Call: {
+      if (expr.children.empty() ||
+          expr.children.front()->kind != ExprKind::Identifier)
+        return std::unexpected(
+            Diagnostic{DiagnosticCode::InvalidPosition,
+                       "goal-call argument is not a named call", expr.loc});
+      const auto cell = arena.makeCell(expr.children.front()->text);
+      for (std::size_t i = 1; i < expr.children.size(); ++i) {
+        auto arg = marshalArg(*expr.children[i]);
+        if (!arg) return arg;
+        zigzag::expectWritten(
+            arena.link(zigzag::rankTail(arena, cell, dims().step),
+                       dims().step, DimVector::POS, *arg));
+      }
+      return cell;
+    }
+    default:
+      return std::unexpected(Diagnostic{
+          DiagnosticCode::InvalidPosition,
+          std::format("goal-call argument does not marshal: kind {}",
+                      static_cast<int>(expr.kind)),
+          expr.loc});
+    }
+  }
+
+  // `verb G(a,…)` — the goal marshals as a term cell: functor name +
+  // marshaled args on +d.step. textOf still reads the name; the args
+  // ride the same cell so adopt and remote-achieve payloads carry the
+  // same shape. The goal's declared signature bounds the arity here —
+  // a mismatched call refuses before the runtime ever binds.
+  std::expected<CellRef, Diagnostic> marshalGoalCall(const Expr &call) {
+    if (call.kind != ExprKind::Call || call.children.empty() ||
+        call.children.front()->kind != ExprKind::Identifier)
+      return std::unexpected(Diagnostic{DiagnosticCode::InvalidPosition,
+                                        "goal operand is not a named call",
+                                        call.loc});
+    const auto &name = call.children.front()->text;
+    std::size_t arity = call.children.size() - 1;
+    if (const auto it = signatures.find(std::string{name});
+        it != signatures.end() && it->second.size() != arity)
+      return std::unexpected(Diagnostic{
+          DiagnosticCode::InvalidDeclaration,
+          std::format("goal '{}' takes {} argument(s), call carries {}",
+                      name, it->second.size(), arity),
+          call.loc});
+    const auto cell = arena.makeCell(name);
+    for (std::size_t i = 1; i < call.children.size(); ++i) {
+      auto arg = marshalArg(*call.children[i]);
+      if (!arg) return std::unexpected(arg.error());
+      zigzag::expectWritten(
+          arena.link(zigzag::rankTail(arena, cell, dims().step),
+                     dims().step, DimVector::POS, *arg));
+    }
+    return cell;
+  }
+
   // The host-step cell: +d.verb names the MetaRuntime entry point, the
   // +d.vars record marshals the call's arguments under their parameter
   // names — for the belief verbs that is exactly `term`. Peer and
@@ -529,8 +603,9 @@ struct Lowerer {
           zigzag::expectWritten(
               arena.link(*rec, dims().values, DimVector::POS, value));
       };
-      field("goal",
-            arena.makeCell(expr.children.front()->children.front()->text));
+      const auto goalTerm = marshalGoalCall(*expr.children.front());
+      if (!goalTerm) return std::unexpected(goalTerm.error());
+      field("goal", *goalTerm);
       if (expr.recipients) field("peer", arena.makeCell(expr.recipients->text));
       if (expr.deadline)
         field("deadline", arena.makeScalarCell(static_cast<std::int64_t>(
@@ -600,19 +675,14 @@ struct Lowerer {
                                      arena.makeCell(std::string{verb})));
 
     if (expr.kind == ExprKind::Adopt) {
-      // adopt's operand is a Call — children[0] is the goal's
-      // Identifier; the goal *name* marshals, resolution happens at
-      // run time against the agent's own module.
-      const auto &call = *expr.children.front();
-      if (call.children.empty() ||
-          call.children.front()->kind != ExprKind::Identifier)
-        return std::unexpected(Diagnostic{DiagnosticCode::InvalidPosition,
-                                          "adopt's operand is not a goal name",
-                                          expr.loc});
+      // adopt's operand is a Call — the goal marshals as a term cell:
+      // textOf reads the name, +d.step children carry the bound args
+      // for the runtime's positional binding.
+      const auto goalTerm = marshalGoalCall(*expr.children.front());
+      if (!goalTerm) return std::unexpected(goalTerm.error());
       if (const auto rec = varsRecord(arena, core, step, "goal", true))
         zigzag::expectWritten(
-            arena.link(*rec, dims().values, DimVector::POS,
-                       arena.makeCell(call.children.front()->text)));
+            arena.link(*rec, dims().values, DimVector::POS, *goalTerm));
       return step;
     }
 

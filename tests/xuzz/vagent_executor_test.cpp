@@ -1307,6 +1307,30 @@ TEST(VagentExecutorTest, AwaitElseCompletesAnExpiredBareWait) {
   EXPECT_EQ(arena.outstandingMarks(), 0u);
 }
 
+TEST(VagentExecutorTest, AdoptArgsBindPositionallyIntoTheWhereGuard) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image =
+      h.lower("module demo\nevent Tick\nevent High\nevent Low\n"
+              "goal Work(v: Int) perform\n"
+              "agent A {\n"
+              "  on Tick { adopt Work(4) }\n"
+              "  plan a for Work(v) where v > 3 { emit High{} }\n"
+              "  plan b for Work(v) where v <= 3 { emit Low{} }\n"
+              "}");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+
+  // Tick adopts Work(4): the args chain stores 4, selectClause binds
+  // it positionally into each where-guard — `v > 3` selects plan a.
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  const auto outbox =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  ASSERT_EQ(outbox.size(), 1u);
+  EXPECT_EQ(outbox[0].payload, "High");
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
 TEST(VagentExecutorTest, UnlowerableBooleanConditionsRefuseNotStub) {
   ExecutorHarness h;
   // `v` is bound by the belief conjunct — the scalar remainder has

@@ -374,10 +374,14 @@ public:
   // as a failed guard and skips the clause, never faults selection.
   //
   // `tried` is the caller's — an intention's tried-set in M4; the
-  // empty default means nothing tried.
+  // empty default means nothing tried. `args` binds the host call's
+  // values into each candidate's where-guard positionally (clause
+  // params are the plan's own bindings — names can differ from the
+  // goal's declared parameters, so position is the contract).
   [[nodiscard]] std::expected<std::optional<CellRef>, std::string>
   selectClause(CellRef host, const std::unordered_set<CellRef> &tried = {},
-               std::size_t whereFuel = 256);
+               std::size_t whereFuel                    = 256,
+               const std::vector<CellValue> &args       = {});
 
   // -- §3.5 intentions — data, not cursors
   // --------------------------------------
@@ -392,9 +396,13 @@ public:
   // adoption retries everything) and mints the record: `ready=1`,
   // `step=0`, the `bodyName` snapshot taken at adoption. `std::nullopt`
   // when no clause holds; the caller bounds concurrent intentions
-  // (`vagent.max_intentions`) since the verb sees no settings.
+  // (`vagent.max_intentions`) since the verb sees no settings. `args`
+  // are the goal call's bound values — recorded on the intention's
+  // `args` chain in order and bound positionally when any of the
+  // clause's heads (guard, condition tests, spine fragments) run.
   [[nodiscard]] std::expected<CellRef, std::string>
-  adoptGoal(CellRef goal, std::int64_t turn, std::size_t whereFuel = 256);
+  adoptGoal(CellRef goal, std::int64_t turn, std::size_t whereFuel = 256,
+            const std::vector<CellValue> &args = {});
   /// The intention record's integer field — `step`, `ready`, `faulted`,
   /// `waiting`, `blocked_until`, `id` — absent field is `std::nullopt`.
   [[nodiscard]] std::optional<std::int64_t>
