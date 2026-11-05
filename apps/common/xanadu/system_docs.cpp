@@ -877,6 +877,10 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
                     "carries none; 0 leaves the grant unbounded",
          .schemas = {{.expectedTypes = {"integer"},
                       .defaultValues = {std::int64_t{0}}}}},
+        {.name    = std::string(settings::kVagentCompactEvery),
+         .notes   = "Turns between post-commit arena compactions; 0 off",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues = {std::int64_t{0}}}}},
     };
     break;
 

@@ -284,6 +284,8 @@ inline constexpr std::string_view kVagentMaxClausesPerGoal =
 inline constexpr std::string_view kVagentReclaimDeadline =
     "vagent.reclaim_deadline";
 inline constexpr std::string_view kVagentMaxLiveCells = "vagent.max_live_cells";
+inline constexpr std::string_view kVagentCompactEvery =
+    "vagent.compact_every";
 
 // UI
 inline constexpr std::string_view kTabBarVisible       = "tabBarVisible";
