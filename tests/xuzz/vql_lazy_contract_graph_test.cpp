@@ -337,7 +337,7 @@ TEST(VQLLazyContractGraphTest,
 }
 
 TEST(VQLLazyContractGraphTest,
-     FiniteAffectedOuterCanCallRecursiveHelperButCannotBeRecursive) {
+     ComputedOuterAndRecursiveHelperUseFramesWithBoundedDepth) {
   Harness h;
   const CellRef item = h.arena.makeCell("item");
   const CellRef next = h.arena.makeCell("next");
@@ -362,9 +362,14 @@ TEST(VQLLazyContractGraphTest,
       "def pure fallback(): Cell := \"unused\"; "
       "def pure choose($item: Cell { +d.optional: Cell := fallback() }): "
       "Cell := choose($item); choose($item)";
+  const auto recursiveGraph = h.compile(recursiveOuter, {{"item", {item}}});
+  ASSERT_TRUE(recursiveGraph.success) << recursiveGraph.errorMessage;
+  h.vm.setFrameLimits({.maxDepth = 8});
   const auto refused = h.run(recursiveOuter, {{"item", {item}}});
   ASSERT_FALSE(refused);
-  EXPECT_EQ(refused.error().category, QueryExecutionError::Category::Compile);
+  EXPECT_EQ(refused.error().category, QueryExecutionError::Category::Budget);
+  EXPECT_FALSE(h.vm.hasActiveFrames());
+  EXPECT_EQ(h.arena.outstandingMarks(), 0u);
 }
 
 TEST(VQLLazyContractGraphTest, GraphRunsAfterSourceVmAstAndStoreReload) {

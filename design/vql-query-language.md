@@ -2316,8 +2316,10 @@ explicit refusals. The rulings below describe the intended semantics.
   materialized into fresh cells at runtime so successive loop results remain distinct; variable/path
   aliases keep their identities. Return-item/top-level grammar and legacy direct-consumer routing
   remain incomplete; unsupported routes refuse explicitly. Computed contract-field defaults now use
-  scoped graph continuations in inline calls and loop destructuring; affected recursive definitions
-  still require frame eligibility. See [iterations 18–23](projects/vortex-vm-only-iterations.md).
+  scoped graph continuations in eligible native frames, inline calls and loop destructuring.
+  Computed defaults can call the same or mutually recursive definitions through reusable VM frames;
+  eligibility and runtime limits still apply. See
+  [iterations 18–24](projects/vortex-vm-only-iterations.md).
 
 - **A default is used only when the field is absent**, and passing a cell or a path never mints: the
   bound cell is the linked one. A literal field default mints its scalar only when it is used;
@@ -2372,10 +2374,10 @@ explicit refusals. The rulings below describe the intended semantics.
   refuse explicitly. Runtime rank iterators and eager sequence registers now support per-member
   typed filtering, stream cardinality, predicates and integer index clamps. Foreign neighbors
   resolve through canonical arena proxies; choice points restore iterator state and proxy minting.
-  Computed defaults currently keep their outer definition on compiled inline graphs; eligible closed
-  helpers may use recursive frames. Native frame eligibility for these outer definitions, universal
-  lazy streaming, recursive functor/variadic frames, mutation enforcement and complete frontend/
-  parallel parity remain open. Compiled execution never silently calls a direct evaluator.
+  Computed defaults also execute inside eligible reusable frames, including self/mutual recursive
+  matching and return promises. Their temporary registers and captures are local to each activation.
+  Universal lazy streaming, recursive functor/variadic frames, mutation enforcement and complete
+  frontend/parallel parity remain open. Compiled execution never silently calls a direct evaluator.
 
 ______________________________________________________________________
 

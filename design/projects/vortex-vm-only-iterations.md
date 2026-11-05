@@ -742,3 +742,32 @@ implementation subject to these validations. No speedup or full-suite pass is cl
 
 Logs: `/tmp/vql-lazy-contract-build.log`, `/tmp/vql-lazy-contract-tests.log`,
 `/tmp/vql-lazy-contract-cli.log`, `/tmp/vql-lazy-contract-format.log`.
+
+## Iteration 24: native frames for computed structural contracts
+
+Eligible named definitions now compile computed field defaults inside reusable native frames. Frame
+parameter matches and return promises use the shared contract graph helper; captures, iterators,
+choice depths and nested-call results become activation locals through the existing output tracking.
+Return promises validate the completed result stream. Parameter mismatches still return empty before
+checking the return promise. The eligibility scanner removes only the blanket computed-default
+refusal: prematch lexical scope, earlier completed parameter captures, transitive callee
+eligibility, malformed-AST checks and query-wide budgets remain intact.
+
+Computed defaults can call the same or mutually recursive definitions without static expansion.
+Frame/backing, scoped-choice snapshot/depth, graph-emission and execution limits remain active;
+scoped-choice limit failures report the structured Budget category. Request cleanup restores pending
+scopes and closes activation maps. No new frame ABI, runtime AST evaluator or matcher was
+introduced.
+
+Validation: full `make -j$(nproc)` and all 623 affected tests from 59 suites passed. Eleven new
+cases prove outer `InvokeFrame` instructions for path/call/addition defaults, prematch free
+captures, earlier parameter aliases, generic success rollback, exact nested owners and
+caller-context restoration, fresh literal identities, parameter filtering, self/mutual default
+recursion, bounded failure/recovery, lazy named return-contract errors, recursive export/reload
+after source destruction and host/mesh Vquery source routes. Independent Luna architecture and
+senior/profiler source gates accepted this bounded stage subject to validation; their requested
+return/mutual-recursion gaps now have passing cases. No speedup or full-suite pass is claimed. Full
+§4.12 remains incomplete.
+
+Logs: `/tmp/vql-lazy-frames-build.log`, `/tmp/vql-lazy-frames-tests.log`,
+`/tmp/vql-lazy-frames-cli.log`, `/tmp/vql-lazy-frames-format.log`.

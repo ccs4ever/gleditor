@@ -40,7 +40,9 @@ bool budgetFailure(const std::string_view message) {
   return lowered.find("budget") != std::string::npos ||
          lowered.find("max cycles") != std::string::npos ||
          lowered.find("work limit") != std::string::npos ||
-         lowered.find("activation frame depth limit") != std::string::npos;
+         lowered.find("activation frame depth limit") != std::string::npos ||
+         (lowered.find("scoped choice") != std::string::npos &&
+          lowered.find("limit") != std::string::npos);
 }
 
 QueryExecutionError runtimeError(const std::exception &error) {

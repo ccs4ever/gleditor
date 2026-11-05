@@ -675,11 +675,7 @@ private:
     if (!defaultValue) throw ScanFailure("contract default is missing");
     pointer(defaultValue, depth,
             [&](const ValueExpr &expr, const std::size_t nestedDepth) {
-              const auto *literal = std::get_if<ScalarLiteral>(&expr.kind);
-              const auto *alias   = std::get_if<std::string>(&expr.kind);
-              if (!literal && !alias)
-                refuse(
-                    "path and call contract defaults are not frame eligible");
+              const auto *alias = std::get_if<std::string>(&expr.kind);
               if (alias)
                 variable(*alias, scope, true);
               else

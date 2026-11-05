@@ -578,23 +578,7 @@ void VQLCompiler::compileFrameDefinition(const DefDeclaration &definition) {
   core_.bindInput(returnOpcode, descriptor);
   const auto emitMatch = [&](const TypeExpr &type,
                              const std::vector<CellRef> &subjects) {
-    const auto defaultSlots = emitContractDefaultSlots(type);
-    const auto typeCell     = emitConstant(encodeTypeDescriptor(type));
-    const auto match        = emitOp(OpcodeKind::MatchContract, "#FRAME_MATCH");
-    emitInput(match, typeCell);
-    emitInputConstant(match, static_cast<std::int64_t>(subjects.size()));
-    for (const auto subject : subjects) emitInput(match, subject);
-    for (const auto fallback : defaultSlots) emitInput(match, fallback);
-    const CellRef matched = core_.arena().makeCell();
-    emitOutput(match, matched);
-    for (const auto &capture : ContractMatcher::contractCaptureNames(type)) {
-      const CellRef captureSlot = core_.arena().makeCell();
-      emitOutput(match, captureSlot);
-      streamBindings_[capture] = {captureSlot};
-      varBindings_[capture]    = captureSlot;
-      if (capture == ".")
-        ambientContext_ = emitContextFallback(captureSlot, ambientContext_);
-    }
+    const CellRef matched = emitContractMatch(type, subjects, true);
     const CellRef branch =
         emitOp(OpcodeKind::BranchFalseCell, "#FRAME_PARAM_FILTER");
     emitInput(branch, matched);
@@ -663,16 +647,9 @@ void VQLCompiler::compileFrameDefinition(const DefDeclaration &definition) {
   if (!bodyResults.empty()) emitAppendStream(resultSlot, bodyResults);
 
   if (definition.returnType) {
-    const auto defaultSlots = emitContractDefaultSlots(*definition.returnType);
-    const auto typeCell =
-        emitConstant(encodeTypeDescriptor(*definition.returnType));
-    const CellRef require =
-        emitOp(OpcodeKind::RequireContract, "#FRAME_RETURN_TYPE");
-    emitInput(require, typeCell);
-    emitInputConstant(require, definition.name);
-    emitInputConstant(require, std::int64_t{1});
-    emitInput(require, resultSlot);
-    for (const auto fallback : defaultSlots) emitInput(require, fallback);
+    emitRequiredContractMatch(*definition.returnType,
+                              std::span{&resultSlot, std::size_t{1}},
+                              definition.name);
   }
 
   if (!entryOp_)

@@ -425,3 +425,17 @@ senior/profiler gates accepted this bounded slice. Outer functions with computed
 inline-only; their recursive/native-frame route is next. Sealed artifacts, mutation enforcement,
 complete functor/variadic behavior and remaining route/lifecycle work still prevent §4.12
 completion. No speedup or full-suite pass is claimed.
+
+## Computed structural defaults in native frames
+
+Eligible named functions now execute computed field defaults and return contracts through reusable
+Vortex activation frames, including self/mutual recursion. The shared graph matcher retains prematch
+scope, exact owner context, full result streams, staged captures and validation rollback. Matcher
+registers are activation locals; existing compile/runtime bounds and request cleanup remain active.
+Full build and all 623 affected tests from 59 suites passed with independent Luna architecture and
+senior/profiler gates. Recursive graph export/reload, host/mesh source routes, named return failures
+and recovery passed. See [iteration 24](projects/vortex-vm-only-iterations.md).
+
+This supersedes iteration 23's inline-only computed-default boundary. Sealed artifacts, mutation
+contracts, content-span overflow integrity, functor/variadic completion and remaining grammar/route/
+lifecycle work still prevent §4.12 completion. No speedup or full-suite pass is claimed.
