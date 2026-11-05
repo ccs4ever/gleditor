@@ -266,8 +266,8 @@ TEST(VagentSelectTest, WhereGuardsSkipFailingClauses) {
   ASSERT_TRUE(f.meta);
   const auto bank = f.clauses("Work");
   ASSERT_EQ(bank.size(), 2u);
-  // Rank order puts slow first, but its where-guard produces false —
-  // selection lands on fast.
+  // Rank order puts slow first, but its where-guard fails to
+  // produce — selection lands on fast.
   const auto picked = f.meta->selectClause(f.symbol("Work"));
   ASSERT_TRUE(picked) << picked.error();
   ASSERT_TRUE(picked->has_value());
@@ -1619,6 +1619,137 @@ TEST(VagentExecutorTest, OnInitializeFiresOnceAheadOfTheFirstPercept) {
                                     image->agentCell);
   ASSERT_EQ(out.size(), 3u);
   EXPECT_EQ(out[2].payload, "Ping");
+  EXPECT_EQ(h.ctx.arena.outstandingMarks(), 0u);
+}
+
+TEST(VagentExecutorTest, GoalDroppedRaiseDispatchesTheHandlerNextTurn) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image =
+      h.lower("module demo\nevent Start\nevent Cancel\nevent Done\n"
+              "event Grant\nevent Down\n"
+              "goal Work() perform\n"
+              "agent A {\n"
+              "  var task: Opt<Intention> := none\n"
+              "  on Start { task := adopt Work() }\n"
+              "  on Cancel { drop task; emit Done{} }\n"
+              "  on GoalDropped [occurrence.goal == \"Work\"] { emit "
+              "Down{} }\n"
+              "  plan w for Work { await Grant as g within 9s }\n"
+              "}");
+  ASSERT_TRUE(image);
+
+  ASSERT_TRUE(exec(h.execution("Start"), h.ctx));
+  // Turn 2 — `drop task` unlinks the intention and raises GoalDropped:
+  // journaled now, enqueued on +d.pending so the handler dispatches
+  // through the drain rather than inside the settling spine. A raise
+  // during percept dispatch drains in this same turn — only raises
+  // inside the intention walk wait for the next.
+  ASSERT_TRUE(exec(h.execution("Cancel"), h.ctx));
+  auto out = VagentExecutor::drainOutbox(h.ctx.arena, h.ctx.core,
+                                       image->agentCell);
+  ASSERT_EQ(out.size(), 2u);
+  EXPECT_EQ(out[0].payload, "Done");
+  // The guard reads `goal` off the marshaled payload's named fields.
+  EXPECT_EQ(out[1].payload, "Down");
+  EXPECT_EQ(h.ctx.arena.outstandingMarks(), 0u);
+}
+
+TEST(VagentExecutorTest, GoalAchievedRaiseDispatchesOnRetire) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image =
+      h.lower("module demo\nevent Start\nevent Won\n"
+              "goal G() perform\n"
+              "agent A {\n"
+              "  on Start { adopt G() }\n"
+              "  on GoalAchieved [occurrence.goal == \"G\"] { emit "
+              "Won{} }\n"
+              "  plan p for G { }\n"
+              "}");
+  ASSERT_TRUE(image);
+
+  // The plan completes and the intention retires on the Start turn
+  // itself; GoalAchieved's handler runs the turn after.
+  ASSERT_TRUE(exec(h.execution("Start"), h.ctx));
+  auto out = VagentExecutor::drainOutbox(h.ctx.arena, h.ctx.core,
+                                       image->agentCell);
+  EXPECT_TRUE(out.empty());
+  ASSERT_TRUE(exec(h.execution(std::nullopt), h.ctx));
+  out = VagentExecutor::drainOutbox(h.ctx.arena, h.ctx.core,
+                                    image->agentCell);
+  ASSERT_EQ(out.size(), 1u);
+  EXPECT_EQ(out[0].payload, "Won");
+}
+
+TEST(VagentExecutorTest, PlanFailedRaiseCarriesTheFaultCause) {
+  ExecutorHarness h;
+  VagentExecutor exec{[](std::string_view key)
+                          -> std::optional<std::int64_t> {
+    if (key == "vagent.intention_backoff") return 0;
+    return std::nullopt;
+  }};
+  const auto image =
+      h.lower("module demo\nevent Start\nevent PF\n"
+              "goal Work() perform\n"
+              "goal Missing() perform\n"
+              "agent A {\n"
+              "  on Start { adopt Work() }\n"
+              "  on PlanFailed [occurrence.cause == \"body\"] { emit "
+              "PF{} }\n"
+              "  plan w for Work { adopt Missing() }\n"
+              "}");
+  ASSERT_TRUE(image);
+
+  // The plan body's adopt fails — the fault raises
+  // PlanFailed{intention, plan, cause} and the ladder parks for
+  // retry; the handler dispatches the turn after.
+  ASSERT_TRUE(exec(h.execution("Start"), h.ctx));
+  ASSERT_TRUE(exec(h.execution(std::nullopt), h.ctx));
+  const auto out = VagentExecutor::drainOutbox(h.ctx.arena, h.ctx.core,
+                                              image->agentCell);
+  ASSERT_EQ(out.size(), 1u);
+  EXPECT_EQ(out[0].payload, "PF");
+}
+
+TEST(VagentExecutorTest, GoalFailedRaisesOnceAtTheFaultCap) {
+  ExecutorHarness h;
+  VagentExecutor exec{[](std::string_view key)
+                          -> std::optional<std::int64_t> {
+    if (key == "vagent.intention_backoff") return 0;
+    if (key == "vagent.max_intention_faults") return 2;
+    return std::nullopt;
+  }};
+  const auto image =
+      h.lower("module demo\nevent Start\nevent GF\n"
+              "goal Work() perform\n"
+              "goal Missing() perform\n"
+              "agent A {\n"
+              "  on Start { adopt Work() }\n"
+              "  on GoalFailed [occurrence.goal == \"Work\"] { emit "
+              "GF{} }\n"
+              "  plan w for Work { adopt Missing() }\n"
+              "}");
+  ASSERT_TRUE(image);
+
+  // backoff 0 retries the member each settle; at the second fault the
+  // goal is out of plans — GoalFailed raises once (the parked record
+  // stays inspectable) and the handler fires next turn.
+  ASSERT_TRUE(exec(h.execution("Start"), h.ctx));
+  ASSERT_TRUE(exec(h.execution(std::nullopt), h.ctx));
+  ASSERT_TRUE(exec(h.execution(std::nullopt), h.ctx));
+  ASSERT_TRUE(exec(h.execution(std::nullopt), h.ctx));
+  auto out = VagentExecutor::drainOutbox(h.ctx.arena, h.ctx.core,
+                                       image->agentCell);
+  ASSERT_EQ(out.size(), 1u);
+  EXPECT_EQ(out[0].payload, "GF");
+
+  // The flag record gates the raise: later settles never re-fire it.
+  ASSERT_TRUE(exec(h.execution(std::nullopt), h.ctx));
+  ASSERT_TRUE(exec(h.execution(std::nullopt), h.ctx));
+  out = VagentExecutor::drainOutbox(h.ctx.arena, h.ctx.core,
+                                    image->agentCell);
+  EXPECT_EQ(out.size(), 1u);
   EXPECT_EQ(h.ctx.arena.outstandingMarks(), 0u);
 }
 

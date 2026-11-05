@@ -1011,19 +1011,6 @@ MetaRuntime::revise(std::string_view predicate, CellRef oldTerm,
 // Selection — §6.3-amended virtual weight-order (actor-executor §3.4)
 // ---------------------------------------------------------------------------
 
-namespace {
-
-/// A produced value's truthiness: bools as-is, numbers by zero, text
-/// by the "true" spelling the Boolean literal emits.
-bool truthy(const CellValue &value) {
-  if (const auto *flag = std::get_if<bool>(&value)) return *flag;
-  if (const auto *bits = std::get_if<std::int64_t>(&value)) return *bits != 0;
-  if (const auto *real = std::get_if<double>(&value)) return *real != 0.0;
-  return std::get<std::string>(value) == "true";
-}
-
-} // namespace
-
 std::expected<std::optional<CellRef>, std::string>
 MetaRuntime::selectClause(CellRef host,
                           const std::unordered_set<CellRef> &tried,
@@ -1057,11 +1044,13 @@ MetaRuntime::selectClause(CellRef host,
     const auto guard = arena.linked(clause, core_.dims().grab, Posward);
     if (!guard.has_value()) continue;
     // A refused guard is a failed `where`, never a selection fault —
-    // the next clause still gets its turn.
+    // the next clause still gets its turn. Success is production:
+    // §8.2's Icon semantics give comparisons no falsy value — `b` in
+    // `a == b` is produced even when it is `0` or `false`, so the
+    // produced value itself never discriminates.
     const auto outcome = runFragment(*guard, args, std::nullopt, whereFuel);
     if (outcome.refusal != MetaRunOutcome::Refusal::None) continue;
-    if (!outcome.produced || !outcome.result.has_value()) continue;
-    if (truthy(*outcome.result)) return clause;
+    if (outcome.produced) return clause;
   }
   return std::optional<CellRef>{std::nullopt};
 }

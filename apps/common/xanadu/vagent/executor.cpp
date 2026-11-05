@@ -351,12 +351,70 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
         arena.link(rec, core.dims().values, DimVector::POS, value));
   };
 
+  // §9.2's lifecycle events: a raise journals the percept — it is
+  // real §3.1 journal traffic — and enqueues a +d.pending internal
+  // event, so `on GoalFailed` dispatches through the ordinary drain
+  // rather than inside the settle walk that ended the intention. A
+  // settle-phase raise waits for the next turn's drain; one raised
+  // during percept dispatch drains right after the dispatch, still
+  // clear of the intention walk.
+  // Fields marshal as +d.step children labelled +d.name —
+  // the event-payload shape emit and `term.field` already read.
+  const auto raise =
+      [&](std::string_view name,
+          std::initializer_list<std::pair<std::string_view, CellRef>>
+              fields) {
+        const auto payload = arena.makeCell(name);
+        for (const auto &[key, value] : fields) {
+          zigzag::expectWritten(
+              arena.link(zigzag::rankTail(arena, payload,
+                                          core.dims().step),
+                         core.dims().step, DimVector::POS, value));
+          zigzag::expectWritten(arena.link(value, core.dims().name,
+                                         DimVector::POS,
+                                         arena.makeCell(key)));
+        }
+        const auto seen = arena.makeCell(name);
+        journalAppend(arena, agent, seen, dims.seen,
+                      static_cast<std::size_t>(
+                          setting("vagent.journal_size", 64)));
+        if (const auto rec = varsRecord(arena, core, seen, "grab", true))
+          zigzag::expectWritten(arena.link(
+              *rec, core.dims().values, DimVector::POS,
+              arena.makeScalarCell(static_cast<std::int64_t>(payload))));
+        const auto pend = arena.makeCell(name);
+        if (const auto rec = varsRecord(arena, core, pend, "grab", true))
+          zigzag::expectWritten(arena.link(
+              *rec, core.dims().values, DimVector::POS,
+              arena.makeScalarCell(static_cast<std::int64_t>(seen))));
+        zigzag::expectWritten(
+            arena.link(zigzag::rankTail(arena, agent, dims.pending),
+                       dims.pending, DimVector::POS, pend));
+      };
+
+  const auto goalNameOf = [&](CellRef i) {
+    const auto goal = meta.intentionField(i, "goal").value_or(0);
+    return goal == 0 ? std::string{}
+                     : std::string{arena.textOf(
+                           static_cast<CellRef>(goal))};
+  };
+
   // The fault arm of §3.5's ladder: count the fault and park for the
   // backoff window; the walker's faulted block owns retry and the
   // drop-when reconsideration at the cap. ready=1 because the ladder
   // only examines ready intentions — a suspension-point fault
-  // (await/delegation deadline) would otherwise park forever.
-  const auto faultIntention = [&](CellRef i) {
+  // (await/delegation deadline) would otherwise park forever. Every
+  // fault is the running plan's failure, so PlanFailed raises here.
+  const auto faultIntention = [&](CellRef i, std::string_view cause) {
+    const auto planCell = meta.intentionField(i, "plan").value_or(0);
+    raise("PlanFailed",
+          {{"intention", arena.makeScalarCell(std::int64_t{i})},
+           {"plan",
+            arena.makeCell(planCell == 0
+                               ? std::string_view{}
+                               : arena.textOf(
+                                     static_cast<CellRef>(planCell)))},
+           {"cause", arena.makeCell(cause)}});
     const auto faults = meta.intentionField(i, "faults").value_or(0);
     meta.setIntentionField(i, "faults", faults + 1);
     meta.setIntentionField(i, "faulted", 1);
@@ -501,8 +559,11 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       const auto delegator = meta.intentionField(ref, "delegator").value_or(0);
       if (delegator != 0) {
         meta.setIntentionField(static_cast<CellRef>(delegator), "delegated", 0);
-        faultIntention(static_cast<CellRef>(delegator));
+        faultIntention(static_cast<CellRef>(delegator), "dropped");
       }
+      raise("GoalDropped",
+            {{"intention", arena.makeScalarCell(std::int64_t{ref})},
+             {"goal", arena.makeCell(goalNameOf(ref))}});
       unlinkRank(arena, ref, dims.intention);
       return true;
     }
@@ -768,8 +829,8 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
   // `seen` is the percept's journal record — its `grab` scalar ref
   // resolves to the delivered payload term. A name-only percept
   // supplies no payload; a param'd handler can't bind its declared
-  // fields then, and its guard arity-refuses — which reads as a falsy
-  // `where`, not a turn fault.
+  // fields then, and its guard arity-refuses — which reads as a
+  // failed `where`, not a turn fault.
   auto dispatchEvent = [&](std::string_view name, CellRef seen) -> bool {
     const auto eventSym = eventSymbolNamed(arena, core, programRoot, name);
     if (!eventSym) return true;
@@ -792,7 +853,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
     // the clause descriptor's param chain carries the declared order —
     // `emit P{b: 1, a: 2}` binds b to `a`'s slot positionally no
     // longer. A param no field matches leaves the vector short →
-    // arity refusal → falsy guard.
+    // arity refusal → failed guard.
     const auto eventArgs = [&](CellRef head) -> std::vector<CellValue> {
       std::vector<CellValue> args;
       if (payload == noCell) return args;
@@ -850,7 +911,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
     for (const CellRef clause : clauses) {
       // The clause's +d.grab guard evaluates before the body — an
       // `on` handler's `[guard]` is a real filter, not decoration.
-      // Refusals read as falsy, same as selectClause.
+      // Refusals read as failures, same as selectClause.
       const auto guard =
           arena.linked(clause, core.dims().grab, DimVector::POS);
       const auto args =
@@ -858,19 +919,11 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       if (guard) {
         const auto outcome =
             meta.runFragment(*guard, args, exec.cursor, maxCycles);
-        bool pass = outcome.refusal == MetaRunOutcome::Refusal::None &&
-                    outcome.produced && outcome.result.has_value();
-        if (pass) {
-          const auto &v = *outcome.result;
-          if (const auto *b = std::get_if<bool>(&v))
-            pass = *b;
-          else if (const auto *n = std::get_if<std::int64_t>(&v))
-            pass = *n != 0;
-          else if (const auto *d = std::get_if<double>(&v))
-            pass = *d != 0.0;
-          else
-            pass = std::get<std::string>(v) == "true";
-        }
+        // §8.2: production is the pass — `occurrence.goal == "Work"`
+        // produces `"Work"`, and a produced `0`/`false` still counts.
+        const bool pass =
+            outcome.refusal == MetaRunOutcome::Refusal::None &&
+            outcome.produced;
         if (!pass) continue;
       }
       if (!zigzag::rankAfter(arena, clause, core.dims().step).empty()) {
@@ -1035,9 +1088,6 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
     return noCell;
   };
 
-  // A produced value's truthiness — the same contract meta.cpp's
-  // file-local truthy gives selectClause: bools as-is, numbers by
-  // zero, text by the "true" spelling.
   // A fragment head's declared param names, descriptor order — the
   // +d.values→(+d.grab/+d.step)+d.name chain meta.cpp's parameterCells
   // reads; mirrored because the reader is private.
@@ -1055,19 +1105,17 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
           names.emplace_back(arena.textOf(*n));
     return names;
   };
-  const auto evalBool = [&](CellRef head, CellRef i,
+  // §8.2's production test: a condition succeeds by producing, whatever
+  // the produced value — `a == b` yields `b` even when `b` is `0` or
+  // `false`, which is why the checker bars bare Bool conditions from
+  // these positions. Refusal and non-production are the only failures.
+  const auto succeeds = [&](CellRef head, CellRef i,
                             std::optional<std::vector<CellValue>> args =
                                 std::nullopt) -> bool {
     const auto outcome = meta.runFragment(
         head, args.value_or(intentionArgs(i)), exec.cursor, maxCycles);
-    if (outcome.refusal != MetaRunOutcome::Refusal::None || !outcome.produced ||
-        !outcome.result)
-      return false;
-    const auto &v = *outcome.result;
-    if (const auto *b = std::get_if<bool>(&v)) return *b;
-    if (const auto *n = std::get_if<std::int64_t>(&v)) return *n != 0;
-    if (const auto *r = std::get_if<double>(&v)) return *r != 0.0;
-    return std::get<std::string>(v) == "true";
+    return outcome.refusal == MetaRunOutcome::Refusal::None &&
+           outcome.produced;
   };
 
   // §3.5's deadline recovery: a parked `else` head evaluates with
@@ -1192,7 +1240,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
             beliefForm = arena.textOf(*v) == "belief";
         // A parked guard head is a per-candidate wake filter — the
         // `as` binding's arg is the delivered payload term, and a
-        // refusal or falsy verdict leaves the intention parked for
+        // refusal or a failed verdict leaves the intention parked for
         // the next match rather than faulting the turn.
         const auto awaitGuard = [&]() -> CellRef {
           if (const auto rec =
@@ -1214,15 +1262,8 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
                 CellValue{static_cast<std::int64_t>(delivered)});
           const auto go = meta.runFragment(awaitGuard, gArgs,
                                            exec.cursor, maxCycles);
-          if (go.refusal != MetaRunOutcome::Refusal::None ||
-              !go.produced || !go.result)
-            return false;
-          if (const auto *b = std::get_if<bool>(&*go.result)) return *b;
-          if (const auto *n = std::get_if<std::int64_t>(&*go.result))
-            return *n != 0;
-          if (const auto *d = std::get_if<double>(&*go.result))
-            return *d != 0.0;
-          return std::get<std::string>(*go.result) == "true";
+          return go.refusal == MetaRunOutcome::Refusal::None &&
+                 go.produced;
         };
         if (beliefForm && awaitTerm != noCell) {
           for (const CellRef clause : meta.beliefsOf(arena.textOf(awaitTerm)))
@@ -1297,7 +1338,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
         meta.setIntentionField(intention, "ready", 1);
       } else if (turn >= deadline) {
         meta.setIntentionField(intention, "waiting", 0);
-        if (!runElse(intention)) faultIntention(intention);
+        if (!runElse(intention)) faultIntention(intention, "deadline");
       }
       if (!matched) continue;
     }
@@ -1318,7 +1359,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
         zigzag::expectWritten(
             arena.unlink(intention, dims.subgoal, DimVector::POS));
         meta.setIntentionField(intention, "delegated", 0);
-        if (!runElse(intention)) faultIntention(intention);
+        if (!runElse(intention)) faultIntention(intention, "deadline");
       }
       continue;
     }
@@ -1330,8 +1371,9 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
     if (faulted != 0) {
       // §3.5's ladder: a fault parks for vagent.intention_backoff
       // turns, then retries; at the vagent.max_intention_faults cap
-      // the goal's dropTest is the reconsideration boundary — truthy
-      // drops the record off the rank, falsy (or absent) leaves it
+      // the goal's dropTest is the reconsideration boundary —
+      // producing drops the record off the rank, failing (or
+      // absent) leaves it
       // faulted for inspection.
       if (blockedTill > turn) continue;
       const auto faults = meta.intentionField(intention, "faults").value_or(0);
@@ -1342,7 +1384,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
           if (const auto rec = varsRecord(arena, core, goal, "dropTest", false))
             if (const auto head =
                     arena.linked(*rec, core.dims().values, DimVector::POS))
-              dropped = evalBool(*head, intention);
+              dropped = succeeds(*head, intention);
         if (dropped) {
           // A dropped subgoal fails the parent's achieve — the fault
           // ladder decides retry vs. drop there too.
@@ -1351,9 +1393,27 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
           if (delegator != 0) {
             meta.setIntentionField(static_cast<CellRef>(delegator), "delegated",
                                    0);
-            faultIntention(static_cast<CellRef>(delegator));
+            faultIntention(static_cast<CellRef>(delegator),
+                           "subgoal_dropped");
           }
+          raise("GoalDropped",
+                {{"intention",
+                  arena.makeScalarCell(std::int64_t{intention})},
+                 {"goal", arena.makeCell(goalNameOf(intention))}});
           unlinkRank(arena, intention, dims.intention);
+        } else if (meta.intentionField(intention, "goalFailed")
+                       .value_or(0) == 0) {
+          // The ladder's cap is §6.3's "no applicable untried plan
+          // remains": the goal has failed. V1 parks the record for
+          // inspection rather than unlinking — a GoalFailed handler is
+          // where re-adoption or an explicit drop happens — so the
+          // raise runs once via the flag.
+          raise("GoalFailed",
+                {{"intention",
+                  arena.makeScalarCell(std::int64_t{intention})},
+                 {"goal", arena.makeCell(goalNameOf(intention))},
+                 {"cause", arena.makeCell("no_untried_plans")}});
+          meta.setIntentionField(intention, "goalFailed", 1);
         }
         continue;
       }
@@ -1425,7 +1485,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
             if (it == env.end()) return false;
             args.push_back(it->second);
           }
-          return evalBool(holdsHead, intention, args);
+          return succeeds(holdsHead, intention, args);
         };
         const std::function<bool(std::size_t, decltype(seededEnv))>
             solve = [&](std::size_t i,
@@ -1456,7 +1516,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
                 setting("vagent.condition_turn_fuel", 256)),
             intentionArgs(intention));
         if (!child) {
-          faultIntention(intention);
+          faultIntention(intention, "restorer");
           continue;
         }
         meta.setIntentionField(*child, "delegator",
@@ -1490,7 +1550,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       return {};
     }();
     if (planCell == noCell) {
-      faultIntention(intention);
+      faultIntention(intention, "no_plan");
       continue;
     }
     // body_replaced: the clause's +d.spin target re-pointed since
@@ -1503,7 +1563,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
               arena.linked(*head, core.dims().name, DimVector::POS))
         liveName = std::string{arena.textOf(*name)};
     if (liveName != bodyName) {
-      faultIntention(intention);
+      faultIntention(intention, "body_replaced");
       continue;
     }
 
@@ -1519,7 +1579,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
         const auto head =
             arena.linked(planCell, core.dims().spin, DimVector::POS);
         if (!head) {
-          faultIntention(intention);
+          faultIntention(intention, "no_body");
           continue;
         }
         const auto outcome = meta.runFragment(*head, intentionArgs(intention),
@@ -1537,7 +1597,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       }
     }
     if (!ok) {
-      faultIntention(intention);
+      faultIntention(intention, "body");
       continue;
     }
     const auto next = stepIdx + 1;
@@ -1545,7 +1605,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       // The body's last member ran. For an achieve goal that is not
       // success yet — the guide's contract is that a plan's end
       // without `succeed when` counts as a failed plan: eval the
-      // goal's succeedTest, falsy goes back down the ladder.
+      // goal's succeedTest, failure goes back down the ladder.
       const auto goal = goalOf(intention);
       if (goal != noCell) {
         const auto kind = [&]() -> std::int64_t {
@@ -1561,9 +1621,9 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
                   varsRecord(arena, core, goal, "succeedTest", false))
             if (const auto head =
                     arena.linked(*rec, core.dims().values, DimVector::POS))
-              succeeded = evalBool(*head, intention);
+              succeeded = succeeds(*head, intention);
           if (!succeeded) {
-            faultIntention(intention);
+            faultIntention(intention, "succeed_unmet");
             continue;
           }
         }
@@ -1587,6 +1647,10 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
         meta.setIntentionField(static_cast<CellRef>(delegator), "delegated", 0);
         meta.setIntentionField(static_cast<CellRef>(delegator), "ready", 1);
       }
+      raise("GoalAchieved",
+            {{"intention",
+              arena.makeScalarCell(std::int64_t{intention})},
+             {"goal", arena.makeCell(goalNameOf(intention))}});
       unlinkRank(arena, intention, dims.intention);
     } else {
       meta.setIntentionField(intention, "step",
