@@ -9,12 +9,11 @@
 // The adapter boundary is stated per test rather than smoothed over:
 // the examples' verb sequences — learn_*, set_weight, sprout_synapse,
 // graft_*, reify, a `run` of a fitness fragment, and the mark-bounded
-// cut/fail — execute on MetaRuntime today. What needs the actor
-// executor (implementation.md :586-587 — "the full actor executor,
-// vagent iterations 4–5+") is exactly: event delivery firing the `on …`
-// handlers, `believes`/`believe` predicate state, and plan *selection*
-// consuming the clause bank. The one test that marks that boundary is
-// at the bottom; nothing else is faked with a stub executor.
+// cut/fail — execute on MetaRuntime. The turn-level arms — event
+// delivery firing the `on …` handlers, `believes`/`believe` state,
+// emit on the spine, and plan *selection* consuming the clause bank —
+// ran behind the bottom test's gate until the executor landed; it now
+// composes all four in a real VagentExecutor turn.
 #include <gtest/gtest.h>
 
 #include <cstdint>
@@ -28,10 +27,14 @@
 #include <vector>
 
 #include "common/xanadu/store.hpp"
+#include "common/xanadu/vagent/decls.hpp"
+#include "common/xanadu/vagent/executor.hpp"
+#include "common/xanadu/vagent/frontend.hpp"
 #include "common/xanadu/vagent/genesis.hpp"
 #include "common/xanadu/vagent/lineage.hpp"
 #include "common/xanadu/vagent/meta.hpp"
 #include "common/xanadu/vagent/p16.hpp"
+#include "common/xanadu/vagent/records.hpp"
 #include "common/xanadu/vortex/vortex_vm.hpp"
 #include "common/xanadu/vortex/worker_context.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
@@ -1244,31 +1247,77 @@ TEST(VagentPlasticityTest, LearnedWeightScheduleSurvivesCheckpointResume) {
 // rather than faked.
 // ===========================================================================
 
-TEST(VagentPlasticityTest, ActorExecutorBoundaryRemainsGated) {
-  // The phase's Requires names the full actor executor (vagent
-  // iterations 4–5+, implementation.md :586-587). What sits behind it
-  // in §9.2/§9.3 — and only this — is:
-  //
-  //  - event delivery firing `on Sighting`/`on Meal`/`on Attack`: the
-  //    turn machinery that runs the handler bodies whose verb
-  //    sequences the tests above execute verb-by-verb;
-  //  - `believes`/`believe` predicate state (§9.3's `believes sees` /
-  //    `believe learned_rule` guard), and `emit` inside handler turns;
-  //  - plan *selection* consuming the clause bank §8.2 describes —
-  //    evaluating each clause's where per selection. The bank's shape,
-  //    ordering, re-pointing and weight records are all asserted above;
-  //    the selecting turn is the executor's.
-  //
-  // Engine-level stand-ins used above, honestly named: handler bodies
-  // were driven as MetaRuntime verb sequences; `if [w]`'s Opt presence
-  // test as weight_of's disengage; the score comparison as a fixed
-  // fixture value inside a real `run` of a fitness fragment.
-  GTEST_SKIP()
-      << "§9.2/§9.3's turn-level arms — handler dispatch on event "
-         "delivery, believes/believe predicate evaluation, and plan "
-         "selection consuming the clause bank — require the actor "
-         "executor (vagent iterations 4–5+); the verb-level arms above "
-         "run green on today's machinery";
+TEST(VagentPlasticityTest, ActorExecutorRunsTheWorkedExamples) {
+  // The gate the tests above pointed at: §9.2/§9.3's turn-level arms,
+  // now landed — event delivery firing `on` handlers, `believes`/
+  // `believe` state inside the turn, `emit` on the spine, and plan
+  // selection consuming the clause bank with where evaluated per
+  // selection. One Sighting turn composes all four.
+  WorkerContext ctx;
+  auto artifacts = compileArtifacts(R"(
+    module demo
+    event Sighting
+    event Alarm
+    event Meal
+    predicate sees(s: Str)
+    goal Forage() perform
+    agent A {
+      on Sighting { believe sees("berry"); adopt Forage() }
+      plan scout for Forage where true == false { emit Alarm{} }
+      plan forage for Forage { emit Meal{} }
+    }
+  )");
+  ASSERT_TRUE(artifacts) << artifacts.error().front().detail;
+  auto image = lowerProgram(artifacts->program, ctx.core, ctx.vm);
+  ASSERT_TRUE(image) << image.error().front().detail;
+
+  zigzag::vortex::mesh::ActorExecution exec;
+  exec.pid   = xanadu::identity::ActorPid{"worker", "agent", 1, 1};
+  exec.grant = zigzag::vortex::mesh::ActorGrant{.programRef      = "sha256:p",
+                                                .baseRef         = "sha256:b",
+                                                .maxInstructions = 100'000,
+                                                .maxCells        = 10'000};
+  zigzag::vortex::mesh::ActorMessage msg;
+  msg.type      = xanadu::identity::MessageType::ActorSend;
+  msg.requestId = "req-1";
+  msg.value     = "Sighting";
+  exec.message  = std::move(msg);
+  exec.cursor =
+      ctx.vm.spawnCursor(ctx.vm.mintOpcode(OpcodeKind::Halt), "actor");
+
+  const auto outcome = VagentExecutor{}(exec, ctx);
+  ASSERT_TRUE(outcome) << static_cast<int>(outcome.error());
+
+  auto &arena = ctx.arena;
+  auto binds =
+      mintMetaBindSet(arena, ctx.core, ctx.core.home(), image->agentCell);
+  ASSERT_TRUE(binds) << binds.error();
+  MetaRuntime meta(ctx.core, ctx.vm, *binds);
+
+  // The handler's believe landed with the turn's provenance.
+  const auto berry = arena.makeCell("sees");
+  zigzag::expectWritten(arena.link(berry, ctx.core.dims().step, zigzag::Posward,
+                                   arena.makeCell("berry")));
+  EXPECT_TRUE(meta.believes("sees", berry));
+
+  // Selection consumed the bank: scout's where refused, so the outbox
+  // entry names Meal — the chosen clause's emit — never Alarm.
+  const auto outboxDim = ctx.core.findOrMintDimension("d.outbox");
+  const auto outbox    = zigzag::rankAfter(arena, image->agentCell, outboxDim) |
+                         std::ranges::to<std::vector>();
+  ASSERT_EQ(outbox.size(), 1U);
+  const auto payloadRec =
+      varsRecord(arena, ctx.core, outbox.front(), "payload", false);
+  ASSERT_TRUE(payloadRec.has_value());
+  const auto payload =
+      arena.linked(*payloadRec, ctx.core.dims().values, zigzag::Posward);
+  ASSERT_TRUE(payload.has_value());
+  EXPECT_EQ(arena.textOf(*payload), "Meal");
+
+  // The intention retired; the turn left no residual marks.
+  const auto intentDim = ctx.core.findOrMintDimension("d.intention");
+  EXPECT_TRUE(zigzag::rankAfter(arena, image->agentCell, intentDim).empty());
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
 }
 
 } // namespace
