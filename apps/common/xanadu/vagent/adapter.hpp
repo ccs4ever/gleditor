@@ -139,6 +139,15 @@ public:
   void spawnRefused(zigzag::vortex::WorkerContext &ctx,
                     zigzag::CellRef parent, zigzag::CellRef child) const;
 
+  /// §4.5's announcement for the causes only the mesh observes — a
+  /// genesis refusal ("init"), a lease lapsed without renewal
+  /// ("lease"), a host terminate ("terminate"). `stop` itself runs
+  /// in-turn and never reaches here; the shared `childstopping:`
+  /// dedupe keeps the report singular either way.
+  void memberStopping(zigzag::vortex::WorkerContext &ctx,
+                      zigzag::CellRef parent, zigzag::CellRef member,
+                      std::string_view cause) const;
+
   /// Correlate an outbound ActorSpawn with the member it asked for —
   /// the `spawnRequest` record the ack resolves through. Written
   /// before runtime.send so a crash between them loses no request.

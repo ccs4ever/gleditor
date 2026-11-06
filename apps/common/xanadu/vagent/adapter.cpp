@@ -304,6 +304,12 @@ void VagentAdapter::spawnRefused(zigzag::vortex::WorkerContext &ctx,
   executor_.spawnFailed(ctx.arena, ctx.core, parent, child);
 }
 
+void VagentAdapter::memberStopping(zigzag::vortex::WorkerContext &ctx,
+                                   CellRef parent, CellRef member,
+                                   std::string_view cause) const {
+  executor_.childStopping(ctx.arena, ctx.core, parent, member, cause);
+}
+
 void VagentAdapter::noteSpawnRequest(zigzag::vortex::WorkerContext &ctx,
                                      CellRef member,
                                      std::string_view requestId) const {

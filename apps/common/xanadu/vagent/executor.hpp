@@ -174,6 +174,21 @@ public:
                  zigzag::vortex::VortexCore &core, zigzag::CellRef agent,
                  zigzag::CellRef child) const;
 
+  /// §4.5's orderly-stop announcement for the causes the executor
+  /// cannot observe in a turn — `"terminate"`, `"lease"`, `"init"`;
+  /// `"stop"` is the verb's own path. Deduped on the same
+  /// `childstopping:` key `stop` writes, so the parent reports one
+  /// ChildStopping regardless of which side observed the death.
+  /// Flags the member destroying and queues `Destroy` for its own
+  /// settle, marks the parked waits with the real cause (the same
+  /// failure a ChildDown runs), raises `ChildStopping{child, cause}`
+  /// and pre-marks `childdown:` so the trailing ActorDown repeats
+  /// nothing.
+  void childStopping(zigzag::ArenaManifold &arena,
+                     zigzag::vortex::VortexCore &core,
+                     zigzag::CellRef agent, zigzag::CellRef member,
+                     std::string_view cause) const;
+
   /// §8.6's refused spawn: raises `SpawnFailed{child}` on the parent
   /// and fails every delivery still staged to the refused member's
   /// name — the outbox rank persists, so each failure rides

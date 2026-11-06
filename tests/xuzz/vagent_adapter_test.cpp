@@ -548,6 +548,42 @@ TEST(VagentAdapterTest, SpawnStagesTheWireRequestThroughTheSender) {
   EXPECT_EQ(calls, 1);
 }
 
+TEST(VagentAdapterTest, MemberStoppingRaisesOnceAndDestroysTheMember) {
+  AdapterHarness h;
+  const auto image =
+      h.lower("module demo\nevent Boot\n"
+              "agent A {\n"
+              "  var child: Opt<Agent> := none\n"
+              "  on Boot { child := spawn A() }\n"
+              "}");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+  auto &core  = h.ctx.core;
+  ASSERT_TRUE(h.adapter(h.execution(h.send("Boot")), h.ctx));
+  const auto member = h.memberCell(image->agentCell, "child");
+  ASSERT_TRUE(member);
+  // The mesh-side half of §4.5: the adapter hands the cause the
+  // runtime observed and the executor writes the full envelope —
+  // member flagged destroying, its Destroy queued, the parent's
+  // ChildStopping raised once.
+  h.adapter.memberStopping(h.ctx, image->agentCell, *member, "lease");
+  h.adapter.memberStopping(h.ctx, image->agentCell, *member, "lease");
+  const auto flag = varsRecord(arena, core, *member, "destroying", false);
+  ASSERT_TRUE(flag);
+  const auto fv = arena.linked(*flag, core.dims().values,
+                               DimVector::POS);
+  ASSERT_TRUE(fv);
+  EXPECT_EQ(arena.asInt64(*fv).value_or(0), 1);
+  EXPECT_THAT(h.journalOf(image->agentCell),
+              ::testing::Contains("ChildStopping"));
+  EXPECT_THAT(h.journalOf(*member), ::testing::Contains("Destroy"));
+  // The dedupe is a journal fact: one ChildStopping across repeats.
+  std::size_t count = 0;
+  for (const auto &name : h.journalOf(image->agentCell))
+    if (name == "ChildStopping") ++count;
+  EXPECT_EQ(count, 1u);
+}
+
 TEST(VagentAdapterTest, SpawnSendFailureFailsTheMember) {
   AdapterHarness h;
   const auto image =

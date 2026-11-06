@@ -145,6 +145,39 @@ void queueAdapterPercept(zigzag::ArenaManifold &arena,
   return v ? arena.asInt64(*v).value_or(0) : 0;
 }
 
+/// §"child loss": an intention waiting on a member fails when that
+/// member goes away — the settle's awaitFault rung turns the mark
+/// into the same else/fault ladder a deadline runs. Every raise that
+/// announces a member's end (ChildDown, ChildStopping) walks the
+/// parked intentions naming it. awaitPeer compares member `+d.name`
+/// text, so the mark survives a Moved's identity swap; only a parked
+/// intention (waiting or delegated) is a wait on the member — a
+/// stale awaitPeer on a running intention must not fire.
+void markPeerWaits(zigzag::ArenaManifold &arena,
+                   zigzag::vortex::VortexCore &core, CellRef agent,
+                   CellRef member, std::string_view cause) {
+  std::string memberName;
+  if (const auto n = arena.linked(member, core.dims().name,
+                                  DimVector::POS))
+    memberName = std::string{arena.textOf(*n)};
+  if (memberName.empty()) return;
+  for (const CellRef intention : zigzag::rankAfter(
+           arena, agent, core.findOrMintDimension("d.intention"))) {
+    if (intentionFlag(arena, core, intention, "waiting") == 0 &&
+        intentionFlag(arena, core, intention, "delegated") == 0)
+      continue;
+    const auto peer = varsRecord(arena, core, intention, "awaitPeer", false);
+    if (!peer) continue;
+    const auto v = arena.linked(*peer, core.dims().values, DimVector::POS);
+    if (!v || arena.textOf(*v) != memberName) continue;
+    if (const auto rec =
+            varsRecord(arena, core, intention, "awaitFault", true))
+      zigzag::expectWritten(
+          arena.link(*rec, core.dims().values, DimVector::POS,
+                     arena.makeCell(cause)));
+  }
+}
+
 } // namespace
 
 VagentExecutor::VagentExecutor(
@@ -705,21 +738,29 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       raiseOn(target, "Destroy", {});
       // §4.5's announcement is at once — the parent learns the child
       // is stopping when the stop lands, not when the child's own
-      // pump finishes `on Destroy`. The cause set is closed; `stop`
-      // is the only orderly path the executor has — terminate, lease
-      // and init failures stage theirs adapter-side.
+      // pump finishes `on Destroy`. The dedupe key is shared with
+      // the adapter-side report so a terminate/lease/init already
+      // observed suppresses this raise instead of doubling it.
+      // `stop` is the only orderly path the executor has —
+      // terminate, lease and init failures stage theirs adapter-side.
       if (const auto parent = parentOf(target); parent != noCell) {
-        raiseOn(parent, "ChildStopping",
-                {{"child",
-                  arena.makeScalarCell(std::int64_t{target})},
-                 {"cause", arena.makeCell("stop")}});
+        if (adapterOnce(arena, core, parent,
+                        std::format("childstopping:{}", target)))
+          raiseOn(parent, "ChildStopping",
+                  {{"child",
+                    arena.makeScalarCell(std::int64_t{target})},
+                   {"cause", arena.makeCell("stop")}});
         // "The parent reports one ChildStopping even when the
         // runtime's ActorDown follows it" — pre-marking the member's
         // down key makes that a fact of the delivered journal rather
         // than a race the adapter has to lose.
         (void)adapterOnce(arena, core, parent,
                           std::format("childdown:{}", target));
+        // A self-stop fails the parent's waits on this member by
+        // name; a child-stop fails this agent's own waits on it.
+        markPeerWaits(arena, core, parent, target, "stop");
       }
+      markPeerWaits(arena, core, agent, target, "stop");
       return true;
     }
     if (verb == "drop") {
@@ -2852,35 +2893,54 @@ void VagentExecutor::childDown(zigzag::ArenaManifold &arena,
   if (!adapterOnce(arena, core, agent,
                    std::format("childdown:{}", child)))
     return;
-  // The settle's `Down(child)` rung: mark every parked wait that
-  // names the dead member — awaitPeer compares member `+d.name`
-  // text, so the mark survives a Moved's identity swap. Only a
-  // parked intention (waiting or delegated) is a wait on the child;
-  // a stale awaitPeer on a running intention must not fire.
-  std::string childName;
-  if (const auto n = arena.linked(child, core.dims().name, DimVector::POS))
-    childName = std::string{arena.textOf(*n)};
-  if (!childName.empty())
-    for (const CellRef intention : zigzag::rankAfter(
-             arena, agent, core.findOrMintDimension("d.intention"))) {
-      if (intentionFlag(arena, core, intention, "waiting") == 0 &&
-          intentionFlag(arena, core, intention, "delegated") == 0)
-        continue;
-      const auto peer = varsRecord(arena, core, intention, "awaitPeer", false);
-      if (!peer) continue;
-      const auto v = arena.linked(*peer, core.dims().values, DimVector::POS);
-      if (!v || arena.textOf(*v) != childName) continue;
-      if (const auto rec =
-              varsRecord(arena, core, intention, "awaitFault", true))
-        zigzag::expectWritten(
-            arena.link(*rec, core.dims().values, DimVector::POS,
-                       arena.makeCell("down")));
-    }
+  // The settle's `Down(child)` rung is markPeerWaits with the death
+  // cause — "down" is what the else ladder reports for a member the
+  // mesh reported lost.
+  markPeerWaits(arena, core, agent, child, "down");
   const auto payload = arena.makeCell("ChildDown");
   perceptField(arena, core, payload, "child",
                arena.makeScalarCell(static_cast<std::int64_t>(child)));
   queueAdapterPercept(
       arena, core, agent, "ChildDown", payload,
+      static_cast<std::size_t>(setting("vagent.journal_size", 64)));
+}
+
+void VagentExecutor::childStopping(zigzag::ArenaManifold &arena,
+                                   zigzag::vortex::VortexCore &core,
+                                   zigzag::CellRef agent,
+                                   zigzag::CellRef member,
+                                   std::string_view cause) const {
+  if (agent == noCell || member == noCell) return;
+  // §5.x's closed cause set — "stop" is the executor's own verb;
+  // "terminate", "lease" and "init" arrive adapter-side. The dedupe
+  // key is shared with `stop` so the parent reports one
+  // ChildStopping regardless of which side observed the death.
+  if (!adapterOnce(arena, core, agent,
+                   std::format("childstopping:{}", member)))
+    return;
+  // The trailing ActorDown reports the same death — pre-marking its
+  // key keeps "one ChildStopping even when ActorDown follows" a
+  // journal fact rather than a race.
+  (void)adapterOnce(arena, core, agent,
+                    std::format("childdown:{}", member));
+  // The member's own `on Destroy` runs the same handler a `stop`
+  // would trigger — queued, not raised, so it dispatches inside the
+  // member's own settle.
+  if (const auto rec =
+          varsRecord(arena, core, member, "destroying", true))
+    zigzag::expectWritten(
+        arena.link(*rec, core.dims().values, DimVector::POS,
+                   arena.makeScalarCell(std::int64_t{1})));
+  queueAdapterPercept(
+      arena, core, member, "Destroy", arena.makeCell("Destroy"),
+      static_cast<std::size_t>(setting("vagent.journal_size", 64)));
+  markPeerWaits(arena, core, agent, member, cause);
+  const auto payload = arena.makeCell("ChildStopping");
+  perceptField(arena, core, payload, "child",
+               arena.makeScalarCell(static_cast<std::int64_t>(member)));
+  perceptField(arena, core, payload, "cause", arena.makeCell(cause));
+  queueAdapterPercept(
+      arena, core, agent, "ChildStopping", payload,
       static_cast<std::size_t>(setting("vagent.journal_size", 64)));
 }
 

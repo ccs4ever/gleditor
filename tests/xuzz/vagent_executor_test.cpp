@@ -3713,6 +3713,131 @@ TEST(VagentExecutorTest, OrderlyStopSuppressesTheTrailingActorDown) {
   EXPECT_EQ(arena.outstandingMarks(), 0u);
 }
 
+TEST(VagentExecutorTest, OrderlyStopFailsWaitsParkedOnTheChild) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image =
+      h.lower("module demo\nevent Boot\nevent Go\nevent Note\nevent Lost\n"
+              "question stock(item: Str): Str\n"
+              "goal Work() perform\n"
+              "agent A {\n"
+              "  var child: Opt<Agent> := none\n"
+              "  on Boot { child := spawn A(); adopt Work() }\n"
+              "  on Go { stop child }\n"
+              "  on ChildStopping { emit Note{} }\n"
+              "  plan w for Work { let r := ask child.stock(\"oil\") within "
+              "9s else cause; emit Lost{} }\n"
+              "}");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+  auto &core  = h.ctx.core;
+  ASSERT_TRUE(exec(h.execution("Boot"), h.ctx));
+  const auto staged =
+      VagentExecutor::drainOutbox(arena, core, image->agentCell);
+  // The spawn's wire entry leads; [1] is the ask the plan parked on.
+  ASSERT_EQ(staged.size(), 2u);
+  EXPECT_EQ(staged[0].kind, "spawn");
+  EXPECT_EQ(staged[1].kind, "ask");
+  // §"child loss": ChildStopping fails the waits the same way a
+  // down would — before this mark the orderly path left a parked
+  // ask waiting forever, because the trailing ActorDown's ChildDown
+  // is the very report the stop pre-marks away.
+  ASSERT_TRUE(exec(h.execution("Go"), h.ctx));
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+  const auto r = varsRecord(arena, core, image->agentCell, "r", false);
+  ASSERT_TRUE(r);
+  const auto rv = arena.linked(*r, core.dims().values,
+                               DimVector::POS);
+  ASSERT_TRUE(rv);
+  EXPECT_EQ(arena.textOf(*rv), "stop");
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+  const auto outbox =
+      VagentExecutor::drainOutbox(arena, core, image->agentCell);
+  ASSERT_EQ(outbox.size(), 4u);
+  EXPECT_EQ(outbox[2].payload, "Note");
+  EXPECT_EQ(outbox[3].payload, "Lost");
+  // The shared dedupe: an adapter-side report for the same member —
+  // a terminate racing the orderly stop — raises no second
+  // ChildStopping, and the trailing ActorDown stays suppressed.
+  const auto childVar = varsRecord(arena, core, image->agentCell,
+                                   "child", false);
+  ASSERT_TRUE(childVar);
+  const auto member = arena.asInt64(
+      *arena.linked(*childVar, core.dims().values, DimVector::POS));
+  ASSERT_TRUE(member);
+  exec.childStopping(arena, core, image->agentCell,
+                     static_cast<CellRef>(*member), "terminate");
+  exec.childDown(arena, core, image->agentCell,
+                 static_cast<CellRef>(*member));
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+  EXPECT_EQ(
+      VagentExecutor::drainOutbox(arena, core, image->agentCell).size(),
+      4u);
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
+TEST(VagentExecutorTest,
+     AdapterSideStopCauseRaisesChildStoppingAndFailsWaits) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image =
+      h.lower("module demo\nevent Boot\nevent Note\nevent Lost\n"
+              "question stock(item: Str): Str\n"
+              "goal Work() perform\n"
+              "agent A {\n"
+              "  var child: Opt<Agent> := none\n"
+              "  on Boot { child := spawn A(); adopt Work() }\n"
+              "  on ChildStopping [occurrence.cause == \"lease\"] { emit "
+              "Note{} }\n"
+              "  plan w for Work { let r := ask child.stock(\"oil\") within "
+              "9s else cause; emit Lost{} }\n"
+              "}");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+  auto &core  = h.ctx.core;
+  ASSERT_TRUE(exec(h.execution("Boot"), h.ctx));
+  const auto staged =
+      VagentExecutor::drainOutbox(arena, core, image->agentCell);
+  ASSERT_EQ(staged.size(), 2u);
+  const auto childVar = varsRecord(arena, core, image->agentCell,
+                                   "child", false);
+  ASSERT_TRUE(childVar);
+  const auto member = arena.asInt64(
+      *arena.linked(*childVar, core.dims().values, DimVector::POS));
+  ASSERT_TRUE(member);
+  // §4.5's adapter-side half: a lapsed lease is an orderly stop the
+  // executor cannot see — the adapter stages the same envelope the
+  // `stop` verb writes: Destroy for the member's own settle,
+  // ChildStopping{child, cause} for the parent, "lease" into the
+  // else cause of every wait on the member.
+  exec.childStopping(arena, core, image->agentCell,
+                     static_cast<CellRef>(*member), "lease");
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+  const auto r = varsRecord(arena, core, image->agentCell, "r", false);
+  ASSERT_TRUE(r);
+  const auto rv = arena.linked(*r, core.dims().values,
+                               DimVector::POS);
+  ASSERT_TRUE(rv);
+  EXPECT_EQ(arena.textOf(*rv), "lease");
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+  const auto outbox =
+      VagentExecutor::drainOutbox(arena, core, image->agentCell);
+  ASSERT_EQ(outbox.size(), 4u);
+  EXPECT_EQ(outbox[2].payload, "Note");
+  EXPECT_EQ(outbox[3].payload, "Lost");
+  // One report per member: the lease observer redelivering (or the
+  // ActorDown it precedes) raises nothing new.
+  exec.childStopping(arena, core, image->agentCell,
+                     static_cast<CellRef>(*member), "lease");
+  exec.childDown(arena, core, image->agentCell,
+                 static_cast<CellRef>(*member));
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+  EXPECT_EQ(
+      VagentExecutor::drainOutbox(arena, core, image->agentCell).size(),
+      4u);
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
 TEST(VagentExecutorTest, RefusedSpawnFailsStagedDeliveriesAndRaisesSpawnFailed) {
   ExecutorHarness h;
   VagentExecutor exec;
