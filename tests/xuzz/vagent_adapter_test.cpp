@@ -12,6 +12,7 @@
 #include "../../apps/common/xanadu/vagent/decls.hpp"
 #include "../../apps/common/xanadu/vagent/frontend.hpp"
 #include "../../apps/common/xanadu/vagent/lineage.hpp"
+#include "../../apps/common/xanadu/vagent/percept_codec.hpp"
 #include "../../apps/common/xanadu/vagent/records.hpp"
 #include "../../apps/common/xanadu/store.hpp"
 
@@ -1325,6 +1326,476 @@ TEST(VagentAdapterTest, MigrationGenesisWiresMovedToParentAndChild) {
   }
   EXPECT_THAT(targets,
               ::testing::UnorderedElementsAre(parentPid, childPid));
+}
+
+// A remote member minted straight into the directory — the shape
+// `var := spawn A()` + noteMemberPid produces, without the
+// one-agent-decl limit. Bound into `varName` when given so
+// `by <var>` handles resolve through +d.name.
+CellRef mintRemoteMember(AdapterHarness &h, CellRef agent,
+                         std::string_view name, const ActorPid &pid,
+                         std::string_view varName = {}) {
+  auto &arena       = h.ctx.arena;
+  const auto dirs   = h.ctx.core.findOrMintDimension("d.dirs");
+  const auto agents = h.ctx.core.findOrMintDimension("d.agents");
+  const auto member = arena.makeCell();
+  for (const CellRef dir :
+       zigzag::rankAfter(arena, h.ctx.core.home(), dirs)) {
+    zigzag::expectWritten(
+        arena.link(zigzag::rankTail(arena, dir, agents), agents,
+                   DimVector::POS, member));
+    break;
+  }
+  zigzag::expectWritten(
+      arena.link(member, h.ctx.core.dims().name, DimVector::POS,
+                 arena.makeCell(name)));
+  h.adapter.noteMemberPid(h.ctx, member, pid);
+  if (!varName.empty())
+    if (const auto rec =
+            varsRecord(arena, h.ctx.core, agent, varName, true))
+      zigzag::expectWritten(
+          arena.link(*rec, h.ctx.core.dims().values, DimVector::POS,
+                     refCell(arena, h.ctx.core, member)));
+  return member;
+}
+
+TEST(VagentAdapterTest, WireAchieveFromParentAdoptsAndReportsOutcome) {
+  // §953/§955 receiver side: an achieve the wire carries as
+  // `Deliver{__kind,__correlation}` adopts when accepts admits the
+  // sender (the member $parent is kin), and the adopted child's
+  // retire stages `outcome{status:"achieved"}` member-addressed back
+  // to the delegator's pid — the semantic correlation echoes, never
+  // the transport requestId.
+  AdapterHarness h;
+  const auto image =
+      h.lower("module demo\nevent ChildDone\n"
+              "goal Deliver() perform\n"
+              "agent A {\n"
+              "  plan d for Deliver { emit ChildDone{} }\n"
+              "}");
+  ASSERT_TRUE(image);
+  const ActorPid selfPid{"node1", "selfid", 1, 4};
+  const ActorPid parentPid{"node0", "parentid", 1, 2};
+  ActorMessage request;
+  request.type   = MessageType::ActorSpawn;
+  request.source = parentPid;
+  ActorGenesis genesis;
+  genesis.pid     = selfPid;
+  genesis.request = &request;
+  ASSERT_TRUE(h.adapter.genesis(genesis, h.ctx));
+  std::vector<ActorMessage> wire;
+  h.adapter.setSendSender(
+      [&wire](WorkerContext &, const ActorMessage &message)
+          -> std::expected<void, ActorError> {
+        wire.push_back(message);
+        return {};
+      });
+
+  ActorMessage achieve;
+  achieve.type      = MessageType::ActorSend;
+  achieve.source    = parentPid;
+  achieve.target    = selfPid;
+  achieve.requestId = "w-achieve-1";
+  achieve.value = "Deliver{__kind: \"achieve\", __correlation: \"r1\"}";
+  auto turn         = h.execution(achieve);
+  turn.pid          = selfPid;
+  ASSERT_TRUE(h.adapter(turn, h.ctx));
+
+  // The plan ran in the same settle: ChildDone broadcast took its
+  // remote leg to the parent, and the child's retire staged the
+  // outcome reply on the same drain.
+  const auto iDim = h.ctx.core.findOrMintDimension("d.intention");
+  EXPECT_TRUE(zigzag::rankAfter(h.ctx.arena, image->agentCell, iDim)
+                  .empty());
+  ASSERT_EQ(wire.size(), 2u);
+  EXPECT_EQ(wire[0].value, "ChildDone");
+  ASSERT_TRUE(wire[1].target);
+  EXPECT_EQ(*wire[1].target, parentPid);
+  const auto outcome = parsePercept(wire[1].value);
+  ASSERT_TRUE(outcome);
+  EXPECT_EQ(outcome->name, "outcome");
+  std::string status, corr;
+  for (const auto &[f, v] : outcome->fields) {
+    if (f == "status")
+      if (const auto *s = std::get_if<std::string>(&v)) status = *s;
+    if (f == "__correlation")
+      if (const auto *s = std::get_if<std::string>(&v)) corr = *s;
+  }
+  EXPECT_EQ(status, "achieved");
+  EXPECT_EQ(corr, "r1");
+  EXPECT_EQ(h.ctx.arena.outstandingMarks(), 0u);
+}
+
+TEST(VagentAdapterTest, WireAchieveFromNonKinIsRefusedOnTheWire) {
+  // §7.1's default accepts: a remote member with no lineage either
+  // way is refused — the reply rides the member-addressed arm to the
+  // stranger's pid and nothing adopts.
+  AdapterHarness h;
+  const auto image =
+      h.lower("module demo\n"
+              "goal Deliver() perform\n"
+              "agent A {\n"
+              "  plan d for Deliver { }\n"
+              "}");
+  ASSERT_TRUE(image);
+  const ActorPid selfPid{"node1", "selfid", 1, 4};
+  const ActorPid strangerPid{"node7", "stranger", 5, 5};
+  auto &arena = h.ctx.arena;
+  const auto dirs   = h.ctx.core.findOrMintDimension("d.dirs");
+  const auto agents = h.ctx.core.findOrMintDimension("d.agents");
+  const auto stranger = arena.makeCell();
+  for (const CellRef dir :
+       zigzag::rankAfter(arena, h.ctx.core.home(), dirs)) {
+    zigzag::expectWritten(
+        arena.link(zigzag::rankTail(arena, dir, agents), agents,
+                   DimVector::POS, stranger));
+    break;
+  }
+  zigzag::expectWritten(
+      arena.link(stranger, h.ctx.core.dims().name, DimVector::POS,
+                 arena.makeCell("Stranger")));
+  h.adapter.noteMemberPid(h.ctx, stranger, strangerPid);
+  h.adapter.noteMemberPid(h.ctx, image->agentCell, selfPid);
+  std::vector<ActorMessage> wire;
+  h.adapter.setSendSender(
+      [&wire](WorkerContext &, const ActorMessage &message)
+          -> std::expected<void, ActorError> {
+        wire.push_back(message);
+        return {};
+      });
+
+  ActorMessage achieve;
+  achieve.type      = MessageType::ActorSend;
+  achieve.source    = strangerPid;
+  achieve.target    = selfPid;
+  achieve.requestId = "w-achieve-2";
+  achieve.value = "Deliver{__kind: \"achieve\", __correlation: \"r2\"}";
+  auto turn         = h.execution(achieve);
+  turn.pid          = selfPid;
+  ASSERT_TRUE(h.adapter(turn, h.ctx));
+
+  const auto iDim = h.ctx.core.findOrMintDimension("d.intention");
+  EXPECT_TRUE(zigzag::rankAfter(arena, image->agentCell, iDim).empty());
+  ASSERT_EQ(wire.size(), 1u);
+  ASSERT_TRUE(wire[0].target);
+  EXPECT_EQ(*wire[0].target, strangerPid);
+  const auto refuse = parsePercept(wire[0].value);
+  ASSERT_TRUE(refuse);
+  // The refused goal's name is the percept's own — the same term the
+  // achieve carried, so the wire reads `Deliver{__kind:"refuse",…}`.
+  EXPECT_EQ(refuse->name, "Deliver");
+  std::string kind, corr;
+  for (const auto &[f, v] : refuse->fields) {
+    if (f == "__kind")
+      if (const auto *s = std::get_if<std::string>(&v)) kind = *s;
+    if (f == "__correlation")
+      if (const auto *s = std::get_if<std::string>(&v)) corr = *s;
+  }
+  EXPECT_EQ(kind, "refuse");
+  EXPECT_EQ(corr, "r2");
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
+TEST(VagentAdapterTest, WireOutcomeReadiesTheParkedAchieve) {
+  // Sender side: `achieve … by peer` stages the wire request with
+  // its self-correlation, the delegate's `outcome{achieved}` echoes
+  // the token through `__correlation`, and the parked intention
+  // readies — the spine resumes into emit Done.
+  AdapterHarness h;
+  const auto image =
+      h.lower("module demo\nevent Tick\nevent Done\n"
+              "goal Outer() perform\n"
+              "goal Deliver() perform\n"
+              "agent A {\n"
+              "  var peer: Opt<Agent> := none\n"
+              "  on Tick { adopt Outer() }\n"
+              "  plan o for Outer { achieve Deliver() by peer "
+              "within 9s; emit Done{} }\n"
+              "}");
+  ASSERT_TRUE(image);
+  const ActorPid selfPid{"worker", "agent", 1, 1};
+  const ActorPid peerPid{"node9", "peerid", 2, 7};
+  std::vector<ActorMessage> wire;
+  h.adapter.setSendSender(
+      [&wire](WorkerContext &, const ActorMessage &message)
+          -> std::expected<void, ActorError> {
+        wire.push_back(message);
+        return {};
+      });
+  mintRemoteMember(h, image->agentCell, "Peer", peerPid, "peer");
+  h.adapter.noteMemberPid(h.ctx, image->agentCell, selfPid);
+
+  // Turn for Tick: the achieve leaves as `Deliver{__kind,__correlation}`
+  // — Peer-named members resolve remote-only, so one leg wires.
+  ASSERT_TRUE(h.adapter(h.execution(h.send("Tick")), h.ctx));
+  ASSERT_EQ(wire.size(), 1u);
+  const auto sent = parsePercept(wire[0].value);
+  ASSERT_TRUE(sent);
+  EXPECT_EQ(sent->name, "Deliver");
+  std::string corr;
+  for (const auto &[f, v] : sent->fields)
+    if (f == "__correlation")
+      if (const auto *s = std::get_if<std::string>(&v)) corr = *s;
+  ASSERT_FALSE(corr.empty());
+
+  // The delegate's outcome arrives on the wire: the parked
+  // intention's `correlation` record matches and it readies.
+  ActorMessage reply;
+  reply.type      = MessageType::ActorSend;
+  reply.source    = peerPid;
+  reply.target    = selfPid;
+  reply.requestId = "w-outcome-1";
+  reply.value     = "outcome{status: \"achieved\", __kind: \"outcome\", "
+                    "__correlation: \"" +
+                    corr + "\"}";
+  auto turn       = h.execution(reply);
+  turn.pid        = selfPid;
+  ASSERT_TRUE(h.adapter(turn, h.ctx));
+
+  // The resumed spine emits Done — the broadcast's remote leg wires
+  // to the peer, the local leg journals.
+  EXPECT_THAT(h.journalOf(image->agentCell),
+              ::testing::Contains("Done"));
+  EXPECT_EQ(h.ctx.arena.outstandingMarks(), 0u);
+}
+
+TEST(VagentAdapterTest, WireOutcomeFailureFaultsTheParkedAchieve) {
+  // §955's failure arm: `outcome{status:"failed",cause:"nope"}`
+  // writes the cause onto the parked intention's refused field;
+  // with no else recovery the delegated rung faults it — PlanFailed
+  // journals with the wire's cause intact.
+  AdapterHarness h;
+  const auto image =
+      h.lower("module demo\nevent Tick\nevent Done\n"
+              "goal Outer() perform\n"
+              "goal Deliver() perform\n"
+              "agent A {\n"
+              "  var peer: Opt<Agent> := none\n"
+              "  on Tick { adopt Outer() }\n"
+              "  plan o for Outer { achieve Deliver() by peer "
+              "within 9s;\n"
+              "                   emit Done{} }\n"
+              "}");
+  ASSERT_TRUE(image);
+  const ActorPid selfPid{"worker", "agent", 1, 1};
+  const ActorPid peerPid{"node9", "peerid", 2, 7};
+  std::vector<ActorMessage> wire;
+  h.adapter.setSendSender(
+      [&wire](WorkerContext &, const ActorMessage &message)
+          -> std::expected<void, ActorError> {
+        wire.push_back(message);
+        return {};
+      });
+  mintRemoteMember(h, image->agentCell, "Peer", peerPid, "peer");
+  h.adapter.noteMemberPid(h.ctx, image->agentCell, selfPid);
+  ASSERT_TRUE(h.adapter(h.execution(h.send("Tick")), h.ctx));
+  ASSERT_EQ(wire.size(), 1u);
+  const auto sent = parsePercept(wire[0].value);
+  ASSERT_TRUE(sent);
+  std::string corr;
+  for (const auto &[f, v] : sent->fields)
+    if (f == "__correlation")
+      if (const auto *s = std::get_if<std::string>(&v)) corr = *s;
+  ASSERT_FALSE(corr.empty());
+
+  ActorMessage reply;
+  reply.type      = MessageType::ActorSend;
+  reply.source    = peerPid;
+  reply.target    = selfPid;
+  reply.requestId = "w-outcome-2";
+  reply.value     = "outcome{status: \"failed\", cause: \"nope\", "
+                    "__kind: \"outcome\", __correlation: \"" +
+                    corr + "\"}";
+  auto turn       = h.execution(reply);
+  turn.pid        = selfPid;
+  ASSERT_TRUE(h.adapter(turn, h.ctx));
+
+  // The delegated rung sees the refused mark the same settle —
+  // PlanFailed raises with the wire's cause and the intention
+  // carries faulted, never Done.
+  const auto journal = h.journalOf(image->agentCell);
+  EXPECT_THAT(journal, ::testing::Contains("PlanFailed"));
+  EXPECT_THAT(journal, ::testing::Not(::testing::Contains("Done")));
+  EXPECT_EQ(h.ctx.arena.outstandingMarks(), 0u);
+}
+
+TEST(VagentAdapterTest, WireCancelDropsTheAdoptedChild) {
+  // §954 receiver side: the adopted child records the achieve's
+  // correlation as delegatorCorrelation, and a wire `cancel` naming
+  // the same token drops it — GoalDropped raises, the rank clears.
+  AdapterHarness h;
+  const auto image =
+      h.lower("module demo\nevent Grant\n"
+              "goal Deliver() perform\n"
+              "agent A {\n"
+              "  plan d for Deliver { await Grant as g within 9s }\n"
+              "}");
+  ASSERT_TRUE(image);
+  const ActorPid selfPid{"node1", "selfid", 1, 4};
+  const ActorPid parentPid{"node0", "parentid", 1, 2};
+  ActorMessage request;
+  request.type   = MessageType::ActorSpawn;
+  request.source = parentPid;
+  ActorGenesis genesis;
+  genesis.pid     = selfPid;
+  genesis.request = &request;
+  ASSERT_TRUE(h.adapter.genesis(genesis, h.ctx));
+  std::vector<ActorMessage> wire;
+  h.adapter.setSendSender(
+      [&wire](WorkerContext &, const ActorMessage &message)
+          -> std::expected<void, ActorError> {
+        wire.push_back(message);
+        return {};
+      });
+
+  ActorMessage achieve;
+  achieve.type      = MessageType::ActorSend;
+  achieve.source    = parentPid;
+  achieve.target    = selfPid;
+  achieve.requestId = "w-achieve-3";
+  achieve.value = "Deliver{__kind: \"achieve\", __correlation: \"r3\"}";
+  auto turn         = h.execution(achieve);
+  turn.pid          = selfPid;
+  ASSERT_TRUE(h.adapter(turn, h.ctx));
+
+  // Adopted and parked on the await — one live intention carrying
+  // the delegation correlation.
+  const auto iDim = h.ctx.core.findOrMintDimension("d.intention");
+  ASSERT_EQ((zigzag::rankAfter(h.ctx.arena, image->agentCell, iDim) |
+             std::ranges::to<std::vector>())
+                .size(),
+            1u);
+
+  ActorMessage cancel;
+  cancel.type      = MessageType::ActorSend;
+  cancel.source    = parentPid;
+  cancel.target    = selfPid;
+  cancel.requestId = "w-cancel-1";
+  cancel.value     = "cancel{__kind: \"cancel\", __correlation: \"r3\"}";
+  auto turn2       = h.execution(cancel);
+  turn2.pid        = selfPid;
+  ASSERT_TRUE(h.adapter(turn2, h.ctx));
+
+  EXPECT_TRUE(zigzag::rankAfter(h.ctx.arena, image->agentCell, iDim)
+                  .empty());
+  EXPECT_THAT(h.journalOf(image->agentCell),
+              ::testing::Contains("GoalDropped"));
+  EXPECT_EQ(h.ctx.arena.outstandingMarks(), 0u);
+}
+
+TEST(VagentAdapterTest, WireCancelBeforeAdoptionIsRemembered) {
+  // §954's in-flight case: a cancel naming a correlation nobody
+  // adopted yet mints $cancelled:<id>, and the late achieve with the
+  // same token is consumed silently — no adoption, no reply.
+  AdapterHarness h;
+  const auto image =
+      h.lower("module demo\n"
+              "goal Deliver() perform\n"
+              "agent A {\n"
+              "  plan d for Deliver { }\n"
+              "}");
+  ASSERT_TRUE(image);
+  const ActorPid selfPid{"node1", "selfid", 1, 4};
+  const ActorPid parentPid{"node0", "parentid", 1, 2};
+  ActorMessage request;
+  request.type   = MessageType::ActorSpawn;
+  request.source = parentPid;
+  ActorGenesis genesis;
+  genesis.pid     = selfPid;
+  genesis.request = &request;
+  ASSERT_TRUE(h.adapter.genesis(genesis, h.ctx));
+  std::vector<ActorMessage> wire;
+  h.adapter.setSendSender(
+      [&wire](WorkerContext &, const ActorMessage &message)
+          -> std::expected<void, ActorError> {
+        wire.push_back(message);
+        return {};
+      });
+
+  ActorMessage cancel;
+  cancel.type      = MessageType::ActorSend;
+  cancel.source    = parentPid;
+  cancel.target    = selfPid;
+  cancel.requestId = "w-cancel-2";
+  cancel.value     = "cancel{__kind: \"cancel\", __correlation: \"r9\"}";
+  auto turn        = h.execution(cancel);
+  turn.pid         = selfPid;
+  ASSERT_TRUE(h.adapter(turn, h.ctx));
+  ASSERT_TRUE(
+      varsRecord(h.ctx.arena, h.ctx.core, image->agentCell,
+                 "$cancelled:r9", false)
+          .has_value());
+
+  ActorMessage achieve;
+  achieve.type      = MessageType::ActorSend;
+  achieve.source    = parentPid;
+  achieve.target    = selfPid;
+  achieve.requestId = "w-achieve-4";
+  achieve.value = "Deliver{__kind: \"achieve\", __correlation: \"r9\"}";
+  auto turn2        = h.execution(achieve);
+  turn2.pid         = selfPid;
+  ASSERT_TRUE(h.adapter(turn2, h.ctx));
+
+  const auto iDim = h.ctx.core.findOrMintDimension("d.intention");
+  EXPECT_TRUE(zigzag::rankAfter(h.ctx.arena, image->agentCell, iDim)
+                  .empty());
+  EXPECT_TRUE(wire.empty());
+  EXPECT_EQ(h.ctx.arena.outstandingMarks(), 0u);
+}
+
+TEST(VagentAdapterTest, DelegatedDeadlineStagesTheCancelWire) {
+  // §954 sender side: a `by peer` wait that reaches its within bound
+  // owes the delegate a best-effort cancel — the drain renders it
+  // member-addressed with the achieve's correlation echoed.
+  AdapterHarness h;
+  const auto image =
+      h.lower("module demo\nevent Tick\n"
+              "goal Outer() perform\n"
+              "goal Deliver() perform\n"
+              "agent A {\n"
+              "  var peer: Opt<Agent> := none\n"
+              "  on Tick { adopt Outer() }\n"
+              "  plan o for Outer { achieve Deliver() by peer "
+              "within 2s }\n"
+              "}");
+  ASSERT_TRUE(image);
+  const ActorPid selfPid{"worker", "agent", 1, 1};
+  const ActorPid peerPid{"node9", "peerid", 2, 7};
+  std::vector<ActorMessage> wire;
+  h.adapter.setSendSender(
+      [&wire](WorkerContext &, const ActorMessage &message)
+          -> std::expected<void, ActorError> {
+        wire.push_back(message);
+        return {};
+      });
+  mintRemoteMember(h, image->agentCell, "Peer", peerPid, "peer");
+  h.adapter.noteMemberPid(h.ctx, image->agentCell, selfPid);
+
+  // Turn 1 stages the achieve; turns 2–3 run the bound out — the
+  // expiry stages cancel before the fault ladder owns the wait.
+  ASSERT_TRUE(h.adapter(h.execution(h.send("Tick")), h.ctx));
+  ASSERT_EQ(wire.size(), 1u);
+  const auto sent = parsePercept(wire[0].value);
+  ASSERT_TRUE(sent);
+  std::string corr;
+  for (const auto &[f, v] : sent->fields)
+    if (f == "__correlation")
+      if (const auto *s = std::get_if<std::string>(&v)) corr = *s;
+  ASSERT_FALSE(corr.empty());
+  ASSERT_TRUE(h.adapter(h.execution(), h.ctx));
+  ASSERT_TRUE(h.adapter(h.execution(), h.ctx));
+
+  bool sawCancel = false;
+  for (const auto &m : wire) {
+    if (m.value.find("cancel") == std::string::npos) continue;
+    sawCancel = true;
+    ASSERT_TRUE(m.target);
+    EXPECT_EQ(*m.target, peerPid);
+    EXPECT_THAT(m.value, ::testing::HasSubstr("__correlation: \"" + corr +
+                                                "\""));
+  }
+  EXPECT_TRUE(sawCancel);
+  EXPECT_EQ(h.ctx.arena.outstandingMarks(), 0u);
 }
 
 } // namespace

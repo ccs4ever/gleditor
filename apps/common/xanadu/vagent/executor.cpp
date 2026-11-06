@@ -408,7 +408,105 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
     const auto id = std::format("{}:{}:{}", std::hash<std::string>{}(sender),
                                 turn, position);
     outField("id", arena.makeCell(id));
+    // An achieve's own id is its durable correlation token — the
+    // remote delegate's refuse/outcome replies echo it through
+    // `__correlation`, and the parked intention's `correlation`
+    // record matches them back. The wire requestId gets a transport
+    // leg suffix the token deliberately doesn't carry.
+    if (kind == "achieve" && correlation.empty())
+      outField("correlation", arena.makeCell(id));
     return id;
+  };
+
+  // A record field's text — the string channel delegatorCorrelation,
+  // correlation and awaitPeer ride on.
+  const auto recordText = [&](CellRef holder, std::string_view name)
+      -> std::string {
+    const auto rec = varsRecord(arena, core, holder, name, false);
+    if (!rec) return {};
+    const auto v = arena.linked(*rec, core.dims().values, DimVector::POS);
+    return v ? std::string{arena.textOf(*v)} : std::string{};
+  };
+  // A remote member is the delegator target a wire reply reaches —
+  // distinguished from a local intention by its `pid` record
+  // (genesis notes remote members; intentions never carry one).
+  const auto remoteMemberRef = [&](CellRef cell) {
+    return cell != noCell &&
+           varsRecord(arena, core, cell, "pid", false).has_value();
+  };
+  // The +d.step/+d.name field envelope's read half — the wire
+  // payload's `status`/`cause` children (perceptField's write shape).
+  const auto fieldText = [&](CellRef holder, std::string_view name)
+      -> std::string {
+    if (holder == noCell) return {};
+    for (const CellRef child :
+         zigzag::rankAfter(arena, holder, core.dims().step))
+      if (const auto n =
+              arena.linked(child, core.dims().name, DimVector::POS))
+        if (arena.textOf(*n) == name)
+          return std::string{arena.textOf(child)};
+    return {};
+  };
+  // The parked wait a remote reply answers: a `by peer` achieve
+  // records its entry id as `correlation` and the adopted child
+  // records it as `delegatorCorrelation`; refuse/outcome/cancel echo
+  // the same token through `__correlation`.
+  const auto intentionByCorrelation = [&](std::string_view field,
+                                          std::string_view correlation)
+      -> CellRef {
+    if (correlation.empty()) return noCell;
+    for (const CellRef i :
+         zigzag::rankAfter(arena, agent, dims.intention))
+      if (recordText(i, field) == correlation)
+        return i;
+    return noCell;
+  };
+  // A directory member by name — the cancel/outcome target for a
+  // `by peer` delegation whose awaitPeer holds the peer's name.
+  const auto memberNamedIn = [&](std::string_view name) -> CellRef {
+    if (name.empty()) return noCell;
+    for (const CellRef dir : zigzag::rankAfter(
+             arena, core.home(), core.findOrMintDimension("d.dirs")))
+      for (const CellRef m : zigzag::rankAfter(
+               arena, dir, core.findOrMintDimension("d.agents")))
+        if (const auto n = arena.linked(m, core.dims().name,
+                                        DimVector::POS))
+          if (arena.textOf(*n) == name) return m;
+    return noCell;
+  };
+  // §955's {correlation,status,cause}: an adopted child's end stages
+  // the reply the remote delegating achieve waits on. Local
+  // delegators keep the intention-field write-back.
+  const auto stageOutcome = [&](CellRef intention, std::string_view status,
+                                std::string_view cause = {}) {
+    const auto delegator = static_cast<CellRef>(
+        meta.intentionField(intention, "delegator").value_or(0));
+    if (!remoteMemberRef(delegator)) return;
+    const auto payload = arena.makeCell("outcome");
+    perceptField(arena, core, payload, "status",
+                 arena.makeCell(std::string{status}));
+    if (!cause.empty())
+      perceptField(arena, core, payload, "cause",
+                   arena.makeCell(std::string{cause}));
+    std::string targetName;
+    if (const auto n =
+            arena.linked(delegator, core.dims().name, DimVector::POS))
+      targetName = std::string{arena.textOf(*n)};
+    stageOutbox("outcome", payload, targetName, {}, noCell,
+                recordText(intention, "delegatorCorrelation"), "outcome",
+                {}, false, {}, delegator);
+  };
+  // §954: a remote delegated wait that ends early owes the delegate a
+  // cancel — best-effort and idempotent, keyed by the achieve's
+  // correlation token. awaitPeer's name resolves to the member; an
+  // unresolvable peer means there is nothing live to cancel.
+  const auto stageCancel = [&](CellRef intention) {
+    const auto correlation = recordText(intention, "correlation");
+    const auto peer        = memberNamedIn(recordText(intention, "awaitPeer"));
+    if (correlation.empty() || peer == noCell) return;
+    stageOutbox("cancel", arena.makeCell("cancel"),
+                recordText(intention, "awaitPeer"), {}, noCell, correlation,
+                "cancel", {}, false, {}, peer);
   };
 
   // A marshaled peer/target name cell → the directory member name the
@@ -814,10 +912,13 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       }();
       if (ref == noCell) return true; // none-bound handle: vacuous drop
       const auto delegator = meta.intentionField(ref, "delegator").value_or(0);
-      if (delegator != 0) {
+      if (remoteMemberRef(static_cast<CellRef>(delegator))) {
+        stageOutcome(ref, "dropped");
+      } else if (delegator != 0) {
         meta.setIntentionField(static_cast<CellRef>(delegator), "delegated", 0);
         faultIntention(static_cast<CellRef>(delegator), "dropped");
       }
+      stageCancel(ref);
       raise("GoalDropped",
             {{"intention", refCell(arena, core, ref)},
              {"goal", arena.makeCell(goalNameOf(ref))}});
@@ -1017,7 +1118,17 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
         // back — cross-agent delegation is the same cell-link
         // mechanism the local +d.subgoal path uses.
         const auto peerName = resolvePeer(peer);
-        stageOutbox("achieve", goalName, peerName, {}, intention);
+        const auto requestId =
+            stageOutbox("achieve", goalName, peerName, {}, intention);
+        // The durable correlation a remote refuse/outcome/cancel
+        // echoes — the settle's delegated rung matches it back to
+        // this park. The entry id self-correlates (stageOutbox), so
+        // the same token lives on both sides of the wire.
+        if (const auto rec =
+                varsRecord(arena, core, intention, "correlation", true))
+          zigzag::expectWritten(
+              arena.link(*rec, core.dims().values, DimVector::POS,
+                         arena.makeCell(requestId)));
         meta.setIntentionField(intention, "delegated", 1);
         meta.setIntentionField(intention, "ready", 0);
         const auto dl      = field("deadline");
@@ -1775,6 +1886,14 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
         // deadline rung drop the remote child.
         const auto delegator = ref("delegator");
         const auto goal      = eventSymbolNamed(arena, core, programRoot, pred);
+        const auto requestId = recordText(*head, "correlation");
+        // §954: an achieve arriving after its cancel is consumed
+        // silently — the id sits in $cancelled until the sender's
+        // retry window ends.
+        if (!requestId.empty() &&
+            varsRecord(arena, core, agent,
+                       std::string{"$cancelled:"} + requestId, false))
+          continue;
         // §7.1's receiver default: accepts(sender, goal_name) admits
         // delegation from the parent and from children (and the
         // degenerate `by self`), refusing everything else — the
@@ -1787,14 +1906,14 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
           if (const auto n =
                   arena.linked(sender, core.dims().name, DimVector::POS))
             senderName = std::string{arena.textOf(*n)};
-          std::string requestId;
-          if (const auto rec =
-                  varsRecord(arena, core, *head, "correlation", false))
-            if (const auto v =
-                    arena.linked(*rec, core.dims().values, DimVector::POS))
-              requestId = std::string{arena.textOf(*v)};
-          stageOutbox("refuse", term, senderName, {}, delegator,
-                      requestId);
+          // A member delegator can't ride the delegator field — the
+          // ref means nothing across the wire, and a same-node drain
+          // would write `refused` onto the member itself. The
+          // correlation token is the coherent handle on both legs.
+          stageOutbox("refuse", term, senderName, {},
+                      remoteMemberRef(delegator) ? noCell : delegator,
+                      requestId, {}, {}, false, {},
+                      remoteMemberRef(sender) ? sender : noCell);
           continue;
         }
         if (!goal || delegator == noCell) continue;
@@ -1805,22 +1924,90 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
         if (!child) continue;
         meta.setIntentionField(*child, "delegator",
                                static_cast<std::int64_t>(delegator));
-        zigzag::expectWritten(
-            arena.link(zigzag::rankTail(arena, delegator, dims.subgoal),
-                       dims.subgoal, DimVector::POS, *child));
+        if (remoteMemberRef(delegator)) {
+          // A remote delegator's replies stage member-addressed and
+          // correlation-keyed — +d.subgoal is intention machinery the
+          // sender's own settle never walks here.
+          if (!requestId.empty())
+            if (const auto rec =
+                    varsRecord(arena, core, *child, "delegatorCorrelation",
+                               true))
+              zigzag::expectWritten(
+                  arena.link(*rec, core.dims().values, DimVector::POS,
+                             arena.makeCell(requestId)));
+        } else {
+          zigzag::expectWritten(
+              arena.link(zigzag::rankTail(arena, delegator, dims.subgoal),
+                         dims.subgoal, DimVector::POS, *child));
+        }
         continue;
       }
       if (k == "refuse") {
         // §7.1: the receiver's accepts said no. The parked delegator
         // hears it through the settle's delegated rung, which runs
         // the `else` ladder with cause `refused` — writing a flag
-        // here keeps fragment runs out of the drain.
-        if (const auto delegator = ref("delegator"); delegator != noCell)
+        // here keeps fragment runs out of the drain. A wire refuse
+        // carries no intention ref; the achieve's correlation token
+        // names the park instead.
+        auto delegator = ref("delegator");
+        if (delegator == noCell)
+          delegator = intentionByCorrelation(
+              "correlation", recordText(*head, "correlation"));
+        if (delegator != noCell)
           if (const auto rec =
                   varsRecord(arena, core, delegator, "refused", true))
             zigzag::expectWritten(
                 arena.link(*rec, core.dims().values, DimVector::POS,
                            arena.makeCell("refused")));
+        continue;
+      }
+      if (k == "outcome") {
+        // §955's {correlation, status, cause}: a remote delegate's
+        // reply resumes the delegating achieve — "achieved" unblocks
+        // it, anything else runs the else ladder with the cause.
+        if (const auto parked = intentionByCorrelation(
+                "correlation", recordText(*head, "correlation"));
+            parked != noCell) {
+          const auto status = fieldText(term, "status");
+          if (status == "achieved") {
+            meta.setIntentionField(parked, "delegated", 0);
+            meta.setIntentionField(parked, "ready", 1);
+          } else {
+            const auto cause = fieldText(term, "cause");
+            if (const auto rec = varsRecord(arena, core, parked, "refused",
+                                            true))
+              zigzag::expectWritten(arena.link(
+                  *rec, core.dims().values, DimVector::POS,
+                  arena.makeCell(cause.empty()
+                                     ? std::string{status}
+                                     : cause)));
+          }
+        }
+        continue;
+      }
+      if (k == "cancel") {
+        // §954: drop the intention adopted for that correlation id —
+        // the adopted child recorded it as delegatorCorrelation. No
+        // adoption yet means the achieve is still in flight:
+        // $cancelled remembers the id for the retry window.
+        const auto correlation = recordText(*head, "correlation");
+        if (const auto child = intentionByCorrelation(
+                "delegatorCorrelation", correlation);
+            child != noCell) {
+          raise("GoalDropped",
+                {{"intention", refCell(arena, core, child)},
+                 {"goal", arena.makeCell(goalNameOf(child))}});
+          unlinkRank(arena, child, dims.intention);
+        } else if (!correlation.empty()) {
+          if (const auto rec =
+                  varsRecord(arena, core, agent,
+                             std::string{"$cancelled:"} +
+                                 std::string{correlation},
+                             true))
+            zigzag::expectWritten(
+                arena.link(*rec, core.dims().values, DimVector::POS,
+                           arena.makeScalarCell(std::int64_t{1})));
+        }
         continue;
       }
       if (k == "ask") {
@@ -2333,14 +2520,18 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       // achieve within: the delegation's own deadline. Expiry drops
       // the unfinished +d.subgoal children — the delegator's
       // notification path must not fire on them afterwards — then
-      // the parent rides the ordinary fault ladder.
+      // the parent rides the ordinary fault ladder. A remote wait
+      // ending owes the delegate §954's cancel first.
       const auto deadline =
           meta.intentionField(intention, "awaitDeadline").value_or(0);
       if (deadline != 0 && turn >= deadline) {
+        stageCancel(intention);
         for (const CellRef child :
              zigzag::rankAfter(arena, intention, dims.subgoal) |
-                 std::ranges::to<std::vector>())
+                 std::ranges::to<std::vector>()) {
+          stageCancel(child);
           unlinkRank(arena, child, dims.intention);
+        }
         zigzag::expectWritten(
             arena.unlink(intention, dims.subgoal, DimVector::POS));
         meta.setIntentionField(intention, "delegated", 0);
@@ -2375,10 +2566,13 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
             }
         if (dropped) {
           // A dropped subgoal fails the parent's achieve — the fault
-          // ladder decides retry vs. drop there too.
+          // ladder decides retry vs. drop there too. A remote
+          // delegator hears it as outcome{dropped,subgoal_dropped}.
           const auto delegator =
               meta.intentionField(intention, "delegator").value_or(0);
-          if (delegator != 0) {
+          if (remoteMemberRef(static_cast<CellRef>(delegator))) {
+            stageOutcome(intention, "dropped", "subgoal_dropped");
+          } else if (delegator != 0) {
             meta.setIntentionField(static_cast<CellRef>(delegator), "delegated",
                                    0);
             faultIntention(static_cast<CellRef>(delegator),
@@ -2396,6 +2590,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
           // inspection rather than unlinking — a GoalFailed handler is
           // where re-adoption or an explicit drop happens — so the
           // raise runs once via the flag.
+          stageOutcome(intention, "failed", "no_untried_plans");
           raise("GoalFailed",
                 {{"intention",
                   refCell(arena, core, intention)},
@@ -2649,10 +2844,13 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
         continue;
       }
       // The intention retires; a delegating parent's achieve resumes
-      // on this completion.
+      // on this completion. A remote delegator hears it as
+      // outcome{achieved} — the same resume, over the wire.
       const auto delegator =
           meta.intentionField(intention, "delegator").value_or(0);
-      if (delegator != 0) {
+      if (remoteMemberRef(static_cast<CellRef>(delegator))) {
+        stageOutcome(intention, "achieved");
+      } else if (delegator != 0) {
         meta.setIntentionField(static_cast<CellRef>(delegator), "delegated", 0);
         meta.setIntentionField(static_cast<CellRef>(delegator), "ready", 1);
       }
@@ -2808,7 +3006,8 @@ void VagentExecutor::deliver(zigzag::ArenaManifold &arena,
 
   if (delivery.kind == "tell" || delivery.kind == "untell" ||
       delivery.kind == "achieve" || delivery.kind == "ask" ||
-      delivery.kind == "refuse") {
+      delivery.kind == "refuse" || delivery.kind == "outcome" ||
+      delivery.kind == "cancel") {
     // A cross-agent effect isn't a percept — it lands as an inbox
     // record the receiver's own settle processes (assert/retract for
     // tell/untell, subgoal adoption for achieve). Every cell
@@ -2833,15 +3032,19 @@ void VagentExecutor::deliver(zigzag::ArenaManifold &arena,
     refField("grab", delivery.payloadCell);
     refField("sender", delivery.sender);
     refField("delegator", delivery.delegator);
-    // The delivery id is the request's correlation token — "ask"
-    // echoes it on the reply's percept and "achieve" on the refuse
-    // reply, so either sender-side wait resolves exactly one request.
-    if (!delivery.id.empty())
+    // The delivery's semantic correlation is the request's durable
+    // token — a wire requestId carries a transport leg suffix the
+    // remote side cannot reconstruct. "ask" echoes it on the reply's
+    // percept and "achieve" on the refuse/outcome replies, so either
+    // sender-side wait resolves exactly one request.
+    const auto token =
+        delivery.correlation.empty() ? delivery.id : delivery.correlation;
+    if (!token.empty())
       if (const auto rec =
               varsRecord(arena, core, record, "correlation", true))
         zigzag::expectWritten(
             arena.link(*rec, core.dims().values, DimVector::POS,
-                       arena.makeCell(delivery.id)));
+                       arena.makeCell(token)));
     return;
   }
 
@@ -3120,7 +3323,11 @@ void VagentExecutor::injectPercept(
                    .kind        = std::string{kind},
                    .payloadCell = payload,
                    .correlation = std::string{correlation},
-                   .sender      = sender});
+                   .sender      = sender,
+                   // A wire achieve's delegator can't name the remote
+                   // intention — the sender member carries it, and the
+                   // adoption's replies stage back member-addressed.
+                   .delegator   = kind == "achieve" ? sender : noCell});
 }
 
 void VagentExecutor::resumed(zigzag::ArenaManifold &arena,

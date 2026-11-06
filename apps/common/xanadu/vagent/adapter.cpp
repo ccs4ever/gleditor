@@ -619,7 +619,8 @@ void VagentAdapter::drain(zigzag::vortex::WorkerContext &ctx,
     // way, so `__kind` there would be wire noise.
     if (entry.kind == "tell" || entry.kind == "untell" ||
         entry.kind == "ask" || entry.kind == "achieve" ||
-        entry.kind == "refuse")
+        entry.kind == "refuse" || entry.kind == "outcome" ||
+        entry.kind == "cancel")
       spec.fields.emplace_back("__kind", entry.kind);
     if (!entry.correlation.empty())
       spec.fields.emplace_back("__correlation", entry.correlation);
