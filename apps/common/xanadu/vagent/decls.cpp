@@ -1748,10 +1748,19 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
         continue;
       }
       if (member.kind == DeclKind::Goal) {
-        // Behavior-owned goal semantics — where the goal cell lives
-        // and whose bank selects it — is outside M0's merge.
-        image.stubbed.push_back(
-            std::format("{}:{}", name, member.name));
+        // §5.7's merge keys plan banks by goal name, so a behavior's
+        // goal member declares the same shared symbol an agent goal
+        // would — one already minted needs no second lowering, and
+        // first-declared keeps its goalKind/test heads. The tests are
+        // goal-owned like any other goal's: their heads take the
+        // goal's own parameters, never the member walk's `$owner`.
+        if (!symbols.contains(member.name)) {
+          memberPrefix_ = {};
+          memberFields_ = {};
+          lowerDecl(member, insideAgent);
+          memberPrefix_ = name;
+          memberFields_ = memberFieldsOf(decl);
+        }
         continue;
       }
       lowerDecl(member, insideAgent);

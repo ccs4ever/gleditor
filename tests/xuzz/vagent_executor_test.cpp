@@ -3586,4 +3586,32 @@ TEST(VagentExecutorTest, UnroutableTargetRaisesDeliveryFailedOnTheSender) {
   EXPECT_EQ(arena.outstandingMarks(), 0u);
 }
 
+TEST(VagentExecutorTest, BehaviorGoalMemberAdoptsTheBehaviorsPlan) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image =
+      h.lower("module demo\nevent Tick\nevent Done\n"
+              "behavior Sweeper {\n"
+              "  goal Sweep() perform\n"
+              "  plan s for Sweep { emit Done{} }\n"
+              "}\n"
+              "agent A {\n"
+              "  behavior Sweeper()\n"
+              "  on Tick { adopt Sweep() }\n"
+              "}");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+  // The behavior's goal member declares the shared symbol; adopt
+  // resolves it and §5.7's merge finds the plan on the mounted
+  // instance's own bank.
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+  const auto outbox =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  ASSERT_EQ(outbox.size(), 1u);
+  EXPECT_EQ(outbox[0].kind, "emit");
+  EXPECT_EQ(outbox[0].payload, "Done");
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
 } // namespace

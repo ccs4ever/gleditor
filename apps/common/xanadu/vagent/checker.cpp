@@ -599,7 +599,20 @@ const Decl *Checker::member(const Decl *owner, std::string_view name,
 const Decl *Checker::goal(const Decl *owner, std::string_view name) const {
   if (const auto *local = member(owner, name, DeclKind::Goal)) return local;
   const auto *decl = global(name);
-  return decl && decl->kind == DeclKind::Goal ? decl : nullptr;
+  if (decl && decl->kind == DeclKind::Goal) return decl;
+  // §5.7's plan merge is name-keyed, so a mounted behavior's goal
+  // member is adoptable under its own name — the agent's `behavior B`
+  // members name which decls to ask. Creation members are the static
+  // view; `mount` at run time can't reach the checker anyway.
+  if (owner && owner->kind == DeclKind::Agent)
+    for (const auto &use : owner->members)
+      if (use.kind == DeclKind::BehaviorUse)
+        if (const auto *behavior = global(use.name);
+            behavior && behavior->kind == DeclKind::Behavior)
+          if (const auto *contributed =
+                  member(behavior, name, DeclKind::Goal))
+            return contributed;
+  return nullptr;
 }
 
 bool Checker::event(std::string_view name) const {
