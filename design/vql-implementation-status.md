@@ -507,3 +507,20 @@ Full build, formatting and all 745 affected tests from 69 suites passed, includi
 export/reload, recursion, lexical stream order and current-owner revalidation. Active mutation
 guards, atomic enforcement and the previously listed §4.12 gaps remain open; this is a bounded
 foundation.
+
+## Explicit native guard checking
+
+Runtime graph consumers can install cursor-owned guards, freeze Cell/Stream arguments and check
+validator frames asynchronously through ordinary VM execution. Exact-token removal and unique
+activation ownership preserve caller guards across returns. Choices retain guard and pending-check
+snapshots; close and refusal paths clean private mappings. Export relocates descriptors and refuses
+live/restorable state. See [iteration 29](projects/vortex-vm-only-iterations.md).
+
+Full build, repository formatting and all 760 affected tests from 70 suites passed with independent
+Luna architecture and senior/profiler gates. Tests include compiler-produced validators, frozen
+stream rebinding, strict Boolean results, source-free export/reload, recursive check refusal and
+retry against changed owner bits after a later dispatch fails. The opt-in profile records raw
+overhead and allocation counts, with no speedup claim. Guard limits are logical counts, not
+whole-heap bounds. Compiler parameter activation, semantic mutation transactions and nested
+validation scheduling remain open; explicit CheckGuards does not establish mutation enforcement or
+complete §4.12.

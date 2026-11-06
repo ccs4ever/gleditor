@@ -335,6 +335,153 @@ std::vector<CellRef> VortexVM::outputsOf(const CellRef opcode) const {
   return slots;
 }
 
+ExecutionResult VortexVM::invokeFramePrepared(
+    const CellRef descriptorCell,
+    const std::span<const std::vector<CellRef>> arguments,
+    const std::span<const CellRef> resultSlots, const CellRef cursor,
+    const std::optional<CellRef> continuation,
+    const std::optional<CellRef> failureOp) {
+  const auto fail = [failureOp](std::string message) {
+    return ExecutionResult{.success       = false,
+                           .failingClause = failureOp,
+                           .errorMessage  = std::move(message)};
+  };
+  auto &arena       = core_.arena();
+  const auto parsed = frameDescriptor(descriptorCell);
+  if (!parsed) return fail(parsed.error().message);
+  const auto &descriptor = *parsed;
+  const auto framesIt    = activationFrames_.find(cursor);
+  const std::size_t depth =
+      framesIt == activationFrames_.end() ? 0 : framesIt->second.size();
+  if (depth >= frameLimits_.maxDepth)
+    return fail("activation frame depth limit exceeded");
+  if (frameBackingCellsAllocated_ > frameLimits_.maxBackingCells ||
+      descriptor.locals.size() >
+          frameLimits_.maxBackingCells - frameBackingCellsAllocated_)
+    return fail("activation frame backing-cell limit exceeded");
+  if (arguments.size() != descriptor.argumentPorts.size() ||
+      resultSlots.size() != descriptor.resultPorts.size())
+    return fail("InvokeFrame port arity does not match its descriptor");
+  std::unordered_set<CellRef> uniqueDestinations;
+  for (const auto slot : resultSlots)
+    if (!arena.contains(slot) || getOpcodeKind(slot) ||
+        !uniqueDestinations.insert(slot).second || slot == descriptorCell)
+      return fail("InvokeFrame result destinations must be caller slots");
+  for (const auto local : descriptor.locals)
+    if (core_.hasPipeline(local))
+      return fail("frame descriptor locals cannot have pipelines");
+  if (depth > 0 && !continuation)
+    return fail("nested InvokeFrame requires a caller continuation");
+  if (nextActivationId_ == std::numeric_limits<std::uint64_t>::max())
+    return fail("activation identity limit exceeded");
+  for (std::size_t index = 0; index < arguments.size(); ++index) {
+    if (descriptor.argumentPorts[index].kind == FramePortKind::Cell &&
+        arguments[index].size() > 1)
+      return fail("InvokeFrame cell argument resolved to multiple cells");
+  }
+  const auto guards = guardStacks_.find(cursor);
+  const std::size_t guardBaseline =
+      guards == guardStacks_.end() || !guards->second ? 0
+                                                      : guards->second->size();
+  if (!continuation && guardBaseline != 0)
+    return fail("InvokeFrame requires a continuation for active caller guards");
+  ActivationFrame frame(descriptorCell, nextActivationId_, guardBaseline);
+  frame.returnOpcode = continuation;
+  frame.parentResultSlots.assign(resultSlots.begin(), resultSlots.end());
+  frame.resultPorts               = descriptor.resultPorts;
+  bool committed                  = false;
+  auto previousReferences         = cellReferences_;
+  auto previousStreams            = streams_;
+  auto previousIterators          = iterators_;
+  auto previousStreamSlots        = streamSlots_;
+  auto previousIteratorSlots      = iteratorSlots_;
+  auto previousFrames             = activationFrames_;
+  auto previousCursorPC           = cursorPC_;
+  const auto previousStreamCursor = streamCursor_;
+  if (std::ranges::any_of(descriptor.argumentPorts,
+                          [](const FramePort &port) {
+                            return port.kind == FramePortKind::Stream;
+                          }) ||
+      std::ranges::any_of(descriptor.resultPorts, [](const FramePort &port) {
+        return port.kind == FramePortKind::Stream;
+      })) {
+    try {
+      requireStreamCursor(cursor);
+    } catch (const std::exception &error) {
+      return fail(error.what());
+    }
+  }
+  zigzag::Mark mark;
+  try {
+    mark = arena.mark();
+  } catch (const std::exception &error) {
+    cellReferences_.swap(previousReferences);
+    streams_.swap(previousStreams);
+    iterators_.swap(previousIterators);
+    streamSlots_.swap(previousStreamSlots);
+    iteratorSlots_.swap(previousIteratorSlots);
+    activationFrames_.swap(previousFrames);
+    cursorPC_.swap(previousCursorPC);
+    streamCursor_ = previousStreamCursor;
+    return fail(error.what());
+  }
+  try {
+    frame.localBacking.reserve(descriptor.locals.size());
+    for (const auto logical : descriptor.locals) {
+      arena.consumeWork();
+      const CellRef backing = arena.makeCell();
+      frame.localBacking.emplace(logical, backing);
+      cellReferences_[backing] = std::nullopt;
+    }
+    for (std::size_t index = 0; index < descriptor.argumentPorts.size();
+         ++index) {
+      const CellRef target =
+          frame.localBacking.at(descriptor.argumentPorts[index].slot);
+      auto values = std::make_shared<std::vector<CellRef>>();
+      values->reserve(arguments[index].size());
+      for (const CellRef cell : arguments[index]) {
+        arena.consumeWork();
+        if (!arena.contains(cell))
+          throw std::runtime_error(
+              "InvokeFrame argument contains a missing cell");
+        values->push_back(cell);
+      }
+      if (descriptor.argumentPorts[index].kind == FramePortKind::Stream) {
+        streams_[target] = std::move(values);
+        streamSlots_.insert(target);
+      } else {
+        if (values->size() > 1)
+          throw std::runtime_error(
+              "InvokeFrame cell argument resolved to multiple cells");
+        cellReferences_[target] =
+            values->empty() ? std::nullopt : std::optional{values->front()};
+      }
+    }
+    activationFrames_[cursor].push_back(
+        std::make_shared<const ActivationFrame>(std::move(frame)));
+    setCursorOpcode(cursor, descriptor.entry.value());
+    arena.discard(mark);
+    frameBackingCellsAllocated_ += descriptor.locals.size();
+    ++nextActivationId_;
+    committed = true;
+    return {};
+  } catch (const std::exception &error) {
+    if (!committed) {
+      cellReferences_.swap(previousReferences);
+      streams_.swap(previousStreams);
+      iterators_.swap(previousIterators);
+      streamSlots_.swap(previousStreamSlots);
+      iteratorSlots_.swap(previousIteratorSlots);
+      activationFrames_.swap(previousFrames);
+      cursorPC_.swap(previousCursorPC);
+      streamCursor_ = previousStreamCursor;
+      arena.release(mark);
+      return fail(error.what());
+    }
+    return fail(error.what());
+  }
+}
+
 ExecutionResult VortexVM::executeFrameOpcode(const OpcodeKind kind,
                                              const CellRef opcode,
                                              const CellRef cursor) {
@@ -366,130 +513,20 @@ ExecutionResult VortexVM::executeFrameOpcode(const OpcodeKind kind,
     if (graphInputs.empty()) return fail("InvokeFrame requires a descriptor");
     if (!graphInputs.empty() && cellReferences_.contains(graphInputs.front()))
       return fail("InvokeFrame descriptor must be a direct graph reference");
-    const auto parsed = frameDescriptor(graphInputs.front());
-    if (!parsed) return fail(parsed.error().message);
-    const auto &descriptor = *parsed;
-    const auto framesIt    = activationFrames_.find(cursor);
-    const std::size_t depth =
-        framesIt == activationFrames_.end() ? 0 : framesIt->second.size();
-    if (depth >= frameLimits_.maxDepth)
-      return fail("activation frame depth limit exceeded");
-    if (frameBackingCellsAllocated_ > frameLimits_.maxBackingCells ||
-        descriptor.locals.size() >
-            frameLimits_.maxBackingCells - frameBackingCellsAllocated_)
-      return fail("activation frame backing-cell limit exceeded");
-    if (graphInputs.size() != descriptor.argumentPorts.size() + 1 ||
-        graphOutputs.size() != descriptor.resultPorts.size())
-      return fail("InvokeFrame port arity does not match its descriptor");
-    std::unordered_set<CellRef> uniqueDestinations;
-    for (const auto slot : graphOutputs)
-      if (!arena.contains(slot) || getOpcodeKind(slot) ||
-          !uniqueDestinations.insert(slot).second ||
-          slot == graphInputs.front())
-        return fail("InvokeFrame result destinations must be caller slots");
-    for (const auto local : descriptor.locals)
-      if (core_.hasPipeline(local))
-        return fail("frame descriptor locals cannot have pipelines");
-    for (std::size_t i = 0; i < descriptor.argumentPorts.size(); ++i)
-      if (iteratorSlots_.contains(graphInputs[i + 1]))
+    std::vector<std::vector<CellRef>> arguments;
+    arguments.reserve(graphInputs.size() - 1);
+    for (std::size_t index = 1; index < graphInputs.size(); ++index) {
+      if (iteratorSlots_.contains(graphInputs[index]))
         return fail("InvokeFrame iterator arguments are unsupported");
-
-    const auto returnOpcode =
-        arena.linked(opcode, core_.dims().spin, DimVector::POS);
-    if (depth > 0 && !returnOpcode)
-      return fail("nested InvokeFrame requires a caller continuation");
-    ActivationFrame frame(graphInputs.front());
-    frame.descriptor                = graphInputs.front();
-    frame.returnOpcode              = returnOpcode;
-    frame.parentResultSlots         = outputsOf(opcode);
-    frame.resultPorts               = descriptor.resultPorts;
-    bool committed                  = false;
-    auto previousReferences         = cellReferences_;
-    auto previousStreams            = streams_;
-    auto previousIterators          = iterators_;
-    auto previousStreamSlots        = streamSlots_;
-    auto previousIteratorSlots      = iteratorSlots_;
-    auto previousFrames             = activationFrames_;
-    auto previousCursorPC           = cursorPC_;
-    const auto previousStreamCursor = streamCursor_;
-    if (std::ranges::any_of(descriptor.argumentPorts,
-                            [](const FramePort &port) {
-                              return port.kind == FramePortKind::Stream;
-                            }) ||
-        std::ranges::any_of(descriptor.resultPorts, [](const FramePort &port) {
-          return port.kind == FramePortKind::Stream;
-        })) {
-      try {
-        requireStreamCursor(cursor);
-      } catch (const std::exception &error) {
-        return fail(error.what());
-      }
-    }
-    zigzag::Mark mark;
-    try {
-      mark = arena.mark();
-    } catch (const std::exception &error) {
-      cellReferences_.swap(previousReferences);
-      streams_.swap(previousStreams);
-      iterators_.swap(previousIterators);
-      streamSlots_.swap(previousStreamSlots);
-      iteratorSlots_.swap(previousIteratorSlots);
-      activationFrames_.swap(previousFrames);
-      cursorPC_.swap(previousCursorPC);
-      streamCursor_ = previousStreamCursor;
-      return fail(error.what());
-    }
-    try {
-      frame.localBacking.reserve(descriptor.locals.size());
-      for (const auto logical : descriptor.locals) {
+      auto &values = arguments.emplace_back();
+      forEachResultCell(graphInputs[index], [&](const CellRef cell) {
         arena.consumeWork();
-        const CellRef backing = arena.makeCell();
-        frame.localBacking.emplace(logical, backing);
-        cellReferences_[backing] = std::nullopt;
-      }
-      for (std::size_t index = 0; index < descriptor.argumentPorts.size();
-           ++index) {
-        const CellRef source = runtimeSlot(graphInputs[index + 1]);
-        const CellRef target =
-            frame.localBacking.at(descriptor.argumentPorts[index].slot);
-        auto values = std::make_shared<std::vector<CellRef>>();
-        forEachResultCell(source, [&](const CellRef cell) {
-          arena.consumeWork();
-          values->push_back(cell);
-        });
-        if (descriptor.argumentPorts[index].kind == FramePortKind::Stream) {
-          streams_[target] = std::move(values);
-          streamSlots_.insert(target);
-        } else {
-          if (values->size() > 1)
-            throw std::runtime_error(
-                "InvokeFrame cell argument resolved to multiple cells");
-          cellReferences_[target] =
-              values->empty() ? std::nullopt : std::optional{values->front()};
-        }
-      }
-      activationFrames_[cursor].push_back(
-          std::make_shared<const ActivationFrame>(std::move(frame)));
-      setCursorOpcode(cursor, descriptor.entry.value());
-      arena.discard(mark);
-      frameBackingCellsAllocated_ += descriptor.locals.size();
-      committed = true;
-      return {};
-    } catch (const std::exception &error) {
-      if (!committed) {
-        cellReferences_.swap(previousReferences);
-        streams_.swap(previousStreams);
-        iterators_.swap(previousIterators);
-        streamSlots_.swap(previousStreamSlots);
-        iteratorSlots_.swap(previousIteratorSlots);
-        activationFrames_.swap(previousFrames);
-        cursorPC_.swap(previousCursorPC);
-        streamCursor_ = previousStreamCursor;
-        arena.release(mark);
-        return fail(error.what());
-      }
-      return fail(error.what());
+        values.push_back(cell);
+      });
     }
+    return invokeFramePrepared(
+        graphInputs.front(), arguments, graphOutputs, cursor,
+        arena.linked(opcode, core_.dims().spin, DimVector::POS), opcode);
   }
 
   const auto graphInputs = core_.inputsOf(opcode);
@@ -501,6 +538,25 @@ ExecutionResult VortexVM::executeFrameOpcode(const OpcodeKind kind,
     return fail("ReturnFrame descriptor does not match active frame");
   if (frame.parentResultSlots.size() != frame.resultPorts.size())
     return fail("ReturnFrame result arity does not match its descriptor");
+
+  const auto guards     = guardStacks_.find(cursor);
+  const auto guardCount = guards == guardStacks_.end() || !guards->second
+                              ? 0
+                              : guards->second->size();
+  if (guardCount < frame.guardBaseline)
+    return fail("ReturnFrame lost caller guard state");
+  if (!frame.returnOpcode && frame.guardBaseline != 0)
+    return fail("ReturnFrame ended with active caller guards");
+  std::optional<RuntimeGuardStack> retainedGuards;
+  if (guardCount > frame.guardBaseline) {
+    for (std::size_t index = frame.guardBaseline; index < guardCount; ++index)
+      if ((*guards->second)[index]->ownerActivation != frame.activationId)
+        return fail("ReturnFrame cannot remove another activation's guards");
+    retainedGuards = std::make_shared<const std::vector<RuntimeGuardRef>>(
+        guards->second->begin(),
+        guards->second->begin() +
+            static_cast<std::ptrdiff_t>(frame.guardBaseline));
+  }
 
   struct ResultSnapshot {
     FramePortKind kind;
@@ -522,6 +578,7 @@ ExecutionResult VortexVM::executeFrameOpcode(const OpcodeKind kind,
     results.push_back({port.kind, std::move(cells)});
   }
 
+  auto previousGuards             = guardStacks_;
   auto previousReferences         = cellReferences_;
   auto previousStreams            = streams_;
   auto previousIterators          = iterators_;
@@ -554,6 +611,12 @@ ExecutionResult VortexVM::executeFrameOpcode(const OpcodeKind kind,
       }
     }
 
+    if (retainedGuards) {
+      if ((*retainedGuards)->empty())
+        guardStacks_.erase(cursor);
+      else
+        guardStacks_[cursor] = *retainedGuards;
+    }
     auto &frames            = activationFrames_.at(cursor);
     const auto returnOpcode = frame.returnOpcode;
     frames.pop_back();
@@ -580,6 +643,7 @@ ExecutionResult VortexVM::executeFrameOpcode(const OpcodeKind kind,
     arena.discard(mark);
   } catch (const std::exception &error) {
     arena.release(mark);
+    guardStacks_.swap(previousGuards);
     cellReferences_.swap(previousReferences);
     streams_.swap(previousStreams);
     iterators_.swap(previousIterators);

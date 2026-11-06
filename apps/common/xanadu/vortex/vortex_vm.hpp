@@ -20,6 +20,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -117,6 +118,9 @@ enum class OpcodeKind : std::uint8_t {
   VqlBoxScalar,
   ScopedChoice,
   VqlFieldProbe,
+  PushGuard,
+  PopGuard,
+  CheckGuards,
 };
 
 struct FrameDescriptorError {
@@ -154,6 +158,49 @@ struct FrameLimits {
   std::size_t maxDescriptorRecords{8192};
   std::size_t maxBackingCells{1'048'576};
 };
+
+// Per cursor. Capture accounting includes active and pending references,
+// conservatively counting duplicates; these are logical limits, not byte
+// bounds.
+struct GuardLimits {
+  std::size_t maxGuards{128};
+  std::size_t maxCapturedCells{1'048'576};
+  std::size_t maxDiagnosticBytes{1024};
+};
+
+struct RuntimeGuard {
+  CellRef token;
+  CellRef descriptor;
+  std::string diagnostic;
+  std::vector<std::vector<CellRef>> arguments;
+  std::optional<std::uint64_t> ownerActivation;
+
+  RuntimeGuard(CellRef tokenCell, CellRef frameDescriptor,
+               std::string diagnosticText,
+               std::vector<std::vector<CellRef>> actuals,
+               std::optional<std::uint64_t> owner)
+      : token(tokenCell), descriptor(frameDescriptor),
+        diagnostic(std::move(diagnosticText)), arguments(std::move(actuals)),
+        ownerActivation(owner) {}
+};
+using RuntimeGuardRef   = std::shared_ptr<const RuntimeGuard>;
+using RuntimeGuardStack = std::shared_ptr<const std::vector<RuntimeGuardRef>>;
+using GuardStackMap     = std::unordered_map<CellRef, RuntimeGuardStack>;
+
+struct PendingGuardCheck {
+  CellRef checkOpcode;
+  CellRef resultSlot;
+  RuntimeGuardStack guards;
+  std::size_t nextIndex{};
+  std::optional<std::uint64_t> ownerActivation;
+
+  PendingGuardCheck(CellRef opcode, CellRef result, RuntimeGuardStack snapshot,
+                    std::size_t next, std::optional<std::uint64_t> owner)
+      : checkOpcode(opcode), resultSlot(result), guards(std::move(snapshot)),
+        nextIndex(next), ownerActivation(owner) {}
+};
+using PendingGuardMap =
+    std::unordered_map<CellRef, std::shared_ptr<const PendingGuardCheck>>;
 
 // Both bounds include the caller prefix while any scope is open. Depth caps
 // all outstanding choices, including ordinary choices nested inside a scope.
@@ -196,10 +243,14 @@ using StreamMap =
 using IteratorMap = std::unordered_map<CellRef, std::shared_ptr<IteratorState>>;
 
 struct ActivationFrame {
-  explicit ActivationFrame(const CellRef frameDescriptor)
-      : descriptor(frameDescriptor) {}
+  ActivationFrame(const CellRef frameDescriptor, const std::uint64_t identity,
+                  const std::size_t callerGuards)
+      : descriptor(frameDescriptor), activationId(identity),
+        guardBaseline(callerGuards) {}
 
   CellRef descriptor;
+  std::uint64_t activationId;
+  std::size_t guardBaseline;
   std::optional<CellRef> returnOpcode;
   std::vector<CellRef> parentResultSlots;
   std::unordered_map<CellRef, CellRef> localBacking;
@@ -224,6 +275,8 @@ struct ChoicePoint {
   std::unordered_set<CellRef> iteratorSlots;
   std::optional<CellRef> streamCursor;
   std::unordered_map<CellRef, ActivationStack> activationFrames;
+  GuardStackMap guardStacks;
+  PendingGuardMap pendingGuardChecks;
   bool scoped{false};
 };
 
@@ -311,6 +364,12 @@ public:
   [[nodiscard]] FrameLimits frameLimits() const noexcept {
     return frameLimits_;
   }
+  VortexVM *setGuardLimits(GuardLimits limits);
+  [[nodiscard]] GuardLimits guardLimits() const noexcept {
+    return guardLimits_;
+  }
+  /// Includes runtime state retained by choice snapshots.
+  [[nodiscard]] bool hasActiveGuards() const noexcept;
   [[nodiscard]] std::size_t activationDepth(CellRef cursor) const noexcept;
   [[nodiscard]] bool hasActiveFrames() const noexcept;
   [[nodiscard]] std::optional<CellRef> resultCell(CellRef cursor,
@@ -345,6 +404,14 @@ public:
 private:
   ExecutionResult executeFrameOpcode(OpcodeKind kind, CellRef opcode,
                                      CellRef cursor);
+  ExecutionResult invokeFramePrepared(
+      CellRef descriptorCell, std::span<const std::vector<CellRef>> arguments,
+      std::span<const CellRef> resultSlots, CellRef cursor,
+      std::optional<CellRef> continuation, std::optional<CellRef> failureOp);
+  ExecutionResult executeGuardOpcode(OpcodeKind kind, CellRef opcode,
+                                     CellRef cursor);
+  [[nodiscard]] std::optional<std::uint64_t>
+  currentActivationId(CellRef cursor) const;
   [[nodiscard]] CellRef runtimeSlot(CellRef slot) const;
   [[nodiscard]] std::vector<CellRef> inputsOf(CellRef opcode) const;
   [[nodiscard]] std::vector<CellRef> outputsOf(CellRef opcode) const;
@@ -428,6 +495,10 @@ private:
   std::unordered_map<CellRef, std::string> memoizedOps_;
   std::unordered_map<CellRef, std::optional<CellRef>> cursorPC_;
   std::unordered_map<CellRef, ActivationStack> activationFrames_;
+  GuardStackMap guardStacks_;
+  PendingGuardMap pendingGuardChecks_;
+  GuardLimits guardLimits_;
+  std::uint64_t nextActivationId_{1};
   FrameLimits frameLimits_;
   ScopedChoiceLimits scopedChoiceLimits_;
   std::size_t frameBackingCellsAllocated_{};

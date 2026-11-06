@@ -914,3 +914,60 @@ atomic enforcement remain unimplemented; §4.12 remains incomplete.
 Logs: `/tmp/vql-validator-frames-build.log`, `/tmp/vql-validator-frames-tests.log`,
 `/tmp/vql-validator-frames-format.log`, `/tmp/vql-validator-frames-cli.log`,
 `/tmp/vql-validator-frames-profile-before.log`, `/tmp/vql-validator-frames-profile-after.log`.
+
+## Iteration 29: cursor-owned guards and asynchronous graph validation
+
+`PushGuard`, `PopGuard` and `CheckGuards` provide an explicit graph-level guard protocol using the
+existing `VORTEX_FRAME/1` descriptor. Push validates port arity and a single Cell result port,
+freezes resolved argument identities and returns a fresh opaque cell token. Cell ports retain
+zero/one cardinality; Stream ports retain emptiness, order and duplicates. Pop accepts only the
+current activation's top token. Native activations have unique identities that are not refunded by
+return or backtracking; returning trims callee guards while preserving the caller baseline.
+
+Check snapshots the current guard order and runs each validator through the same prepared native
+frame-entry helper as ordinary InvokeFrame. ReturnFrame resumes the checker, which requires an
+actual Bool cell and reports a named type-contract failure on false. No nested VM run, runtime AST,
+second matcher or cached default-result witness is introduced. A failed later dispatch discards its
+pending continuation; retry checks the current subjects from the first guard again. Recursive checks
+through the same opcode refuse using activation ownership rather than consuming an incomplete
+result.
+
+Guard records and pending continuations use immutable shared payloads. Choice snapshots retain both,
+include them in scoped snapshot accounting, and restore them with frame/register state. Cursor close
+clears private result mappings and current guards; callers still own the existing choice-abort/cut
+protocol before nonresumable shutdown. Halt/falloff with active or pending guards refuses.
+Per-cursor limits cover guard count, captured references and diagnostic text, including
+fragmentation. Capture accounting conservatively includes active and pending references; it is not a
+byte-memory bound. Successful token, scratch and frame allocations retain the arena's cumulative
+allocation semantics.
+
+Export relocates PushGuard's frame descriptor records and refuses live or choice-retained guard
+state before Store operations. Sealed Vortex mesh artifacts and raw stdlib guard calls refuse
+explicitly. Conditions and parameter pipelines reject guards before effects; pipeline preflight
+stops at Halt/Return like execution and shares its existing instruction cap. Vquery source and
+existing ordinary frame routes retain their compiled execution paths.
+
+This stage has a real consumer: tests compile a computed return validator, then install and execute
+its descriptor through runtime guards. Compiler-generated parameter activation and atomic mutation
+brackets are still absent. CheckGuards itself owns no semantic mutation transaction; temporary
+matching effects roll back through the shared compiled contract driver. Automatic mutation
+enforcement, nested effectful validation scheduling and the remaining §4.12 work stay open.
+
+The disabled opt-in probe measures 1/16/64 guards and zero/1,000 captured references per guard on an
+AMD Threadripper 1950X, Clang `-O3 -g`. Each row is one observation; the control still performs
+Push/Pop and capture copying, and omits checking. At 64 guards, checking took 1,077/1,702
+microseconds for zero/64,000 total captures versus 327/707 for the control. Check/control used
+321/128 VM cycles and 384/64 arena cells: four frame locals, one result scratch cell and one token
+per checked guard. VM cycles do not count every C++ traversal. These measurements describe this
+fixture's overhead and allocation accounting, not a latency improvement or general benchmark.
+
+Validation: full `make -j$(nproc)` and all 760 affected tests from 70 suites passed. Fifteen new
+cases cover compiler-generated validators, frozen streams, named failure order, token ownership,
+choice/pending restoration, cancellation, cap/fuel refusal and retry, strict result ABI, unsupported
+contexts, callee cleanup, fresh-VM export, recursive checks, current-owner retry after
+second-dispatch refusal, and pipeline termination. Repository formatting with clang-format 19 and
+Markdown lint passed. A headless Vquery CLI returned `validator` through the shared frame path.
+Fresh independent Luna architecture and senior/profiler gates accepted this bounded stage.
+
+Logs: `/tmp/vql-guards-build.log`, `/tmp/vql-guards-tests.log`, `/tmp/vql-guards-profile.log`,
+`/tmp/vql-guards-format.log`, `/tmp/vql-guards-cli.log`.

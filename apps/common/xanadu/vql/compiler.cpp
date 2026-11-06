@@ -127,6 +127,12 @@ VQLCompiler::opcodeMnemonic(zigzag::vortex::OpcodeKind kind) noexcept {
     return "SCOPED_CHOICE";
   case OpcodeKind::VqlFieldProbe:
     return "VQL_FIELD_PROBE";
+  case OpcodeKind::PushGuard:
+    return "PUSH_GUARD";
+  case OpcodeKind::PopGuard:
+    return "POP_GUARD";
+  case OpcodeKind::CheckGuards:
+    return "CHECK_GUARDS";
   case OpcodeKind::RankBegin:
     return "RANK_BEGIN";
   case OpcodeKind::IteratorNext:

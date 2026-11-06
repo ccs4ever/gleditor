@@ -624,6 +624,9 @@ std::vector<CellValue> VortexStdLib::call(std::string_view path,
 
 std::vector<CellValue> VortexStdLib::call(CellRef fnOp,
                                           const std::vector<CellValue> &args) {
+  if (vm_.hasActiveGuards())
+    throw std::invalid_argument(
+        "stdlib calls cannot run while runtime contract guards are active");
   if (vm_.hasActiveFrames())
     throw std::invalid_argument(
         "stdlib calls cannot run during activation-frame execution");
@@ -635,6 +638,11 @@ std::vector<CellValue> VortexStdLib::call(CellRef fnOp,
     throw std::invalid_argument(
         "stdlib raw calls do not support activation-frame opcodes");
   }
+  if (const auto kind = vm_.getOpcodeKind(fnOp);
+      kind == OpcodeKind::PushGuard || kind == OpcodeKind::PopGuard ||
+      kind == OpcodeKind::CheckGuards)
+    throw std::invalid_argument(
+        "stdlib raw calls do not support runtime contract guards");
   if (vm_.getOpcodeKind(fnOp) == OpcodeKind::VqlFieldProbe)
     throw std::invalid_argument(
         "stdlib raw calls do not support named field probes");

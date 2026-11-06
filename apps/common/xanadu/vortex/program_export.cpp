@@ -23,6 +23,13 @@ exportProgram(const VortexCore &core, const VortexVM &vm,
   if (arena.base())
     throw std::runtime_error(
         "export of a base-backed query requires a source binding");
+  if (vm.hasActiveGuards() ||
+      std::ranges::any_of(vm.choiceStack(), [](const auto &choice) {
+        return !choice.guardStacks.empty() ||
+               !choice.pendingGuardChecks.empty();
+      }))
+    throw std::runtime_error(
+        "export of live or restorable guards requires persisted runtime state");
   if (vm.hasActiveFrames())
     throw std::runtime_error(
         "export of a live activation frame requires persisted runtime state");
@@ -66,10 +73,12 @@ exportProgram(const VortexCore &core, const VortexVM &vm,
         slot = arena.linked(*slot, core.dims().step, DimVector::POS);
       }
     }
-    if (*kind == OpcodeKind::InvokeFrame || *kind == OpcodeKind::ReturnFrame) {
+    if (*kind == OpcodeKind::InvokeFrame || *kind == OpcodeKind::ReturnFrame ||
+        *kind == OpcodeKind::PushGuard) {
       const auto inputs = core.inputsOf(opcode);
       if (inputs.empty())
-        throw std::runtime_error("InvokeFrame has no descriptor operand");
+        throw std::runtime_error(
+            "frame or guard opcode has no descriptor operand");
       const auto descriptor = vm.frameDescriptor(inputs.front());
       if (!descriptor) throw std::runtime_error(descriptor.error().message);
       for (const auto &[record, target] : descriptor->referenceCells)
