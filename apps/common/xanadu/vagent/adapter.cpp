@@ -391,6 +391,18 @@ VagentAdapter::nextDeadline(zigzag::vortex::WorkerContext &ctx,
   return earliest;
 }
 
+bool VagentAdapter::pendingWork(zigzag::vortex::WorkerContext &ctx,
+                                CellRef member) const {
+  auto &arena = ctx.arena;
+  auto &core  = ctx.core;
+  for (const char *name : {"d.pending", "d.inbox"})
+    if (!zigzag::rankAfter(arena, member,
+                           core.findOrMintDimension(name))
+             .empty())
+      return true;
+  return false;
+}
+
 void VagentAdapter::noteSpawnRequest(zigzag::vortex::WorkerContext &ctx,
                                      CellRef member,
                                      std::string_view requestId) const {

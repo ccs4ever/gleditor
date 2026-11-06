@@ -692,4 +692,59 @@ TEST(VagentAdapterTest, GenesisOverASeededLineageRunsTheCeremony) {
   EXPECT_FALSE(adapter.genesis(reincarnation, ctx));
 }
 
+TEST(VagentAdapterTest, SeededLineageExecutesTheEmitChain) {
+  // The genesis fixture carried one turn further: a clause's guard and
+  // spine run off operand slots whose Int64s are positions, and the
+  // emit host-step's self-delivery is the observable proof the publish
+  // restated them — a stale slot leaves the guard produced=0 and
+  // Ready never reaches the journal.
+  xanadu::Store lineage;
+  zigzag::ArenaManifold stage;
+  const auto filed = fileDimensionVocabulary(lineage, stage, {});
+  ASSERT_TRUE(filed) << (filed ? "" : filed.error());
+  WorkerContext compile{&filed->fold, &lineage};
+  const auto artifacts = compileArtifacts(
+      "module demo\nevent Ready\nagent A {\n"
+      "  on Initialize { emit Ready{} }\n"
+      "  on Ready { }\n"
+      "}");
+  ASSERT_TRUE(artifacts);
+  const auto image =
+      lowerProgram(artifacts->program, compile.core, compile.vm);
+  ASSERT_TRUE(image);
+  const auto seeded = seedProgramImage(lineage, compile.arena,
+                                       image->programRoot);
+  ASSERT_TRUE(seeded) << (seeded ? "" : seeded.error());
+  const auto fold = std::make_unique<zigzag::Manifold>(
+      lineage.rebuildManifold(seeded->version));
+  WorkerContext ctx{fold.get(), &lineage};
+
+  VagentAdapter adapter;
+  ActorGenesis genesis;
+  genesis.pid = ActorPid{"worker", "agent", 1, 9};
+  ASSERT_TRUE(adapter.genesis(genesis, ctx));
+  const auto member = adapter.memberForPid(ctx, genesis.pid);
+  ASSERT_TRUE(member);
+
+  const auto journal = [&] {
+    const auto seen = ctx.core.findOrMintDimension("d.seen");
+    std::vector<std::string> names;
+    for (const CellRef cell : zigzag::rankAfter(ctx.arena, *member, seen))
+      names.emplace_back(ctx.arena.textOf(cell));
+    return names;
+  };
+  ActorExecution exec;
+  exec.pid   = genesis.pid;
+  exec.grant = ActorGrant{.programRef      = "sha256:p",
+                          .baseRef         = "sha256:b",
+                          .maxInstructions = 100'000,
+                          .maxCells        = 10'000};
+  exec.cursor =
+      ctx.vm.spawnCursor(ctx.vm.mintOpcode(OpcodeKind::Halt), "actor");
+  ASSERT_TRUE(adapter(exec, ctx));
+  ASSERT_TRUE(adapter.pendingWork(ctx, *member));
+  ASSERT_TRUE(adapter(exec, ctx));
+  EXPECT_THAT(journal(), ::testing::ElementsAre("Initialize", "Ready"));
+}
+
 } // namespace

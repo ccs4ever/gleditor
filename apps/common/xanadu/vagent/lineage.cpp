@@ -121,6 +121,105 @@ restateScopeArms(Store &lineage, xanadu::MicroversionId version,
   return version;
 }
 
+/// The emitter's recipe records the operand slots: `+d.refs` members
+/// mark their slot `+d.ref`, `+d.recipe` ref-capture members mark it
+/// `+d.refFor`. Each marked slot's Int64 is an arena position authored
+/// at emission — verbatim through promote, stale on the fold — and
+/// genesis (e) rebinds only by name on the `+d.code` heads it sweeps.
+/// Clause spines and unregistered heads have no (e) arm at all, so the
+/// publish restates every marked slot at the twin of the position it
+/// names — the name-records' labels still outrank the slot value when
+/// (e) does run.
+[[nodiscard]] xanadu::MicroversionId
+restateRefSlots(Store &lineage, xanadu::MicroversionId version,
+                ArenaManifold &arena, const zigzag::Promoted &promoted) {
+  std::unordered_map<zigzag::CellRef, zigzag::CellRef> twin;
+  twin.reserve(promoted.arena.size());
+  for (std::size_t i = 0; i < promoted.arena.size(); ++i)
+    twin.emplace(promoted.arena[i], promoted.cells[i]);
+  const auto twinOf = [&](zigzag::CellRef ref) {
+    if (!zigzag::isEphemeral(ref)) return ref;
+    const auto it = twin.find(ref);
+    return it == twin.end() ? zigzag::noCell : it->second;
+  };
+  const auto dimOf = [&](std::string_view name) {
+    for (const auto dim : arena.dimensions())
+      if (arena.textOf(dim) == name) return dim;
+    return zigzag::DimRef{zigzag::noCell};
+  };
+  const auto refsDim   = dimOf("d.refs");
+  const auto recipeDim = dimOf("d.recipe");
+  const auto refDim    = dimOf("d.ref");
+  const auto refForDim = dimOf("d.refFor");
+  const auto stepDim   = dimOf("d.step");
+  if (refsDim == zigzag::noCell || recipeDim == zigzag::noCell ||
+      refDim == zigzag::noCell || refForDim == zigzag::noCell ||
+      stepDim == zigzag::noCell)
+    return version;
+  const auto restate = [&](zigzag::CellRef slot) {
+    const auto named = arena.asInt64(slot);
+    if (!named) return;
+    const auto position = twinOf(static_cast<zigzag::CellRef>(*named));
+    if (position == zigzag::noCell ||
+        position == static_cast<zigzag::CellRef>(*named))
+      return;
+    const auto foldSlot = twinOf(slot);
+    if (foldSlot == zigzag::noCell) return;
+    version = lineage.setValue(version, foldSlot, xanadu::PrimediaSpan{},
+                               xanadu::ValueKind::Int64,
+                               std::bit_cast<std::uint64_t>(
+                                   static_cast<std::int64_t>(position)));
+  };
+  for (const auto head : promoted.arena) {
+    for (auto record = arena.linked(head, refsDim, zigzag::DimVector::POS);
+         record;
+         record = arena.linked(*record, stepDim, zigzag::DimVector::POS))
+      if (const auto slot =
+              arena.linked(*record, refDim, zigzag::DimVector::POS))
+        restate(*slot);
+    for (auto member = arena.linked(head, recipeDim, zigzag::DimVector::POS);
+         member;
+         member = arena.linked(*member, stepDim, zigzag::DimVector::POS))
+      if (const auto slot =
+              arena.linked(*member, refForDim, zigzag::DimVector::POS)) {
+        restate(*slot);
+        restate(*member);
+      }
+  }
+  return version;
+}
+
+/// A non-name ref slot carries `+d.mesh.relocation → "cell"` — the
+/// emission's own "this Int64 is a position" mark (fragment.cpp's
+/// refsRecord). Promote's walk sees edges only, so a referent named
+/// solely by that scalar never reaches the band: harvest every marked
+/// slot's position as a promote root, and restateRefSlots then has a
+/// twin to write back. Name-record slots re-resolve by label at
+/// genesis (e), so only the marked slots need seeding.
+[[nodiscard]] std::vector<zigzag::CellRef>
+harvestRelocationTargets(ArenaManifold &arena) {
+  zigzag::DimRef marker = zigzag::noCell;
+  for (const auto dim : arena.dimensions())
+    if (arena.textOf(dim) == "d.mesh.relocation") {
+      marker = dim;
+      break;
+    }
+  std::vector<zigzag::CellRef> targets;
+  if (marker == zigzag::noCell) return targets;
+  for (std::size_t dense = 0; dense < arena.cellCount(); ++dense) {
+    const auto cell =
+        static_cast<zigzag::CellRef>(zigzag::ephemeralBit | dense);
+    if (!arena.holdsOwn(cell)) continue;
+    if (!arena.linked(cell, marker, zigzag::DimVector::POS)) continue;
+    const auto named = arena.asInt64(cell);
+    if (!named || !zigzag::isEphemeral(
+                      static_cast<zigzag::CellRef>(*named)))
+      continue;
+    targets.push_back(static_cast<zigzag::CellRef>(*named));
+  }
+  return targets;
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -197,6 +296,8 @@ seedProgramImage(Store &lineage, ArenaManifold &arena,
   // the enumeration's restatement below.
   std::vector<zigzag::CellRef> extra;
   if (dimsDim != zigzag::noCell) extra.push_back(dimsDim);
+  for (const auto target : harvestRelocationTargets(arena))
+    extra.push_back(target);
   std::vector<zigzag::CellRef> arenaPositions;
   if (varsDim != zigzag::noCell && valuesDim != zigzag::noCell &&
       stepDim != zigzag::noCell)
@@ -225,6 +326,8 @@ seedProgramImage(Store &lineage, ArenaManifold &arena,
   if (arenaPositions.empty()) {
     promoted->version =
         restateScopeArms(lineage, promoted->version, arena, *promoted);
+    promoted->version =
+        restateRefSlots(lineage, promoted->version, arena, *promoted);
     return *promoted;
   }
 
@@ -283,6 +386,8 @@ seedProgramImage(Store &lineage, ArenaManifold &arena,
         "seedProgramImage: the promoted ops rank undercuts the authored "
         "enumeration");
   promoted->version = restateScopeArms(lineage, version, arena, *promoted);
+  promoted->version =
+      restateRefSlots(lineage, promoted->version, arena, *promoted);
   return *promoted;
 }
 
@@ -391,6 +496,8 @@ regenesisCycle(Store &lineage, ArenaManifold &arena, const CellRef agentRoot,
   }
   promoted->version =
       restateScopeArms(lineage, promoted->version, arena, *promoted);
+  promoted->version =
+      restateRefSlots(lineage, promoted->version, arena, *promoted);
 
   // 2. Filing BEFORE the rebuild: the sweep enumerates the still-live
   //    session arena — its session mints and any genesis re-mints from

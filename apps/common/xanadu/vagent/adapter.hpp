@@ -161,6 +161,14 @@ public:
   nextDeadline(zigzag::vortex::WorkerContext &ctx,
                zigzag::CellRef member) const;
 
+  /// §3.7's intra-program backlog: a drained delivery lands on the
+  /// receiver's +d.pending or +d.inbox rank — the member's own settle
+  /// consumes it next turn, but the mesh mailbox never sees it, so an
+  /// idle actor owed one sits quiescent forever. The host polls this
+  /// alongside nextDeadline and wakes for either.
+  [[nodiscard]] bool pendingWork(zigzag::vortex::WorkerContext &ctx,
+                                 zigzag::CellRef member) const;
+
   /// Correlate an outbound ActorSpawn with the member it asked for —
   /// the `spawnRequest` record the ack resolves through. Written
   /// before runtime.send so a crash between them loses no request.

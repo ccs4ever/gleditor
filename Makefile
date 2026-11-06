@@ -1195,10 +1195,10 @@ $(OBJDIR)/viconc: $(VICONC_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OB
 
 .PHONY: vagent vagent_frontend_test vagent_syntax_test vagent_runtime_test test/vagent-frontend test/vagent-syntax test/vagent-runtime
 vagent: $(OBJDIR)/vagent
-# The first iteration checks source without instantiating a device or VM.
-# Vortex lowering and the actor adapter will add their engine dependencies.
-$(OBJDIR)/vagent: $(VAGENT_OBJS) $(VAGENT_FRONTEND_OBJS)
-	$(CXX) $(LDFLAGS) -o $@ $^
+# `run` lowers into the engine and drives MeshActorRuntime + VagentAdapter,
+# so the binary carries the whole xanalogical core like the runner tests do.
+$(OBJDIR)/vagent: $(VAGENT_OBJS) $(VAGENT_FRONTEND_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
+	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS)
 
 vagent_frontend_test: $(OBJDIR)/vagent_frontend_test
 $(OBJDIR)/vagent_frontend_test: $(VAGENT_FRONTEND_TEST_OBJS) $(VAGENT_FRONTEND_OBJS)
