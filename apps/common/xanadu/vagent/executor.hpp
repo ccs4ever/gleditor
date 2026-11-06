@@ -149,6 +149,45 @@ public:
                       const OutboxEntry &entry,
                       std::string_view cause = "unknown") const;
 
+  /// §"internal events"' `Down(child)` rung, adapter-side: a
+  /// monitored member's ActorDown raises `ChildDown{child}` on the
+  /// parent and marks every intention parked on a wait to that
+  /// member — `awaitPeer` records the member's `+d.name` at park
+  /// time — with `awaitFault`, which the next settle turns into the
+  /// same else/fault ladder a deadline would run. `+d.delivered`
+  /// keys the raise on the member so a redelivered down (or the
+  /// ActorDown that trails an orderly `ChildStopping`, which `stop`
+  /// pre-marks) reports once.
+  void childDown(zigzag::ArenaManifold &arena,
+                 zigzag::vortex::VortexCore &core, zigzag::CellRef agent,
+                 zigzag::CellRef child) const;
+
+  /// §8.6's refused spawn: raises `SpawnFailed{child}` on the parent
+  /// and fails every delivery still staged to the refused member's
+  /// name — the outbox rank persists, so each failure rides
+  /// `deliveryFailed`'s own per-id idempotence.
+  void spawnFailed(zigzag::ArenaManifold &arena,
+                   zigzag::vortex::VortexCore &core,
+                   zigzag::CellRef agent, zigzag::CellRef child) const;
+
+  /// §5.4's `Moved{name}` receiver half: @p member is the adapter's
+  /// new reference record (its `+d.name` is the peer name it
+  /// replaces). Every `+d.vars` record still holding a stale
+  /// same-name member rebinds to it — the local form of "receivers
+  /// update `$peers`" — then the percept raises for `on Moved`
+  /// handlers. Name-keyed parked waits need no touch: `awaitPeer`
+  /// compares text, and the new member carries the same name.
+  void moved(zigzag::ArenaManifold &arena, zigzag::vortex::VortexCore &core,
+             zigzag::CellRef agent, zigzag::CellRef member) const;
+
+  /// The resumed-agent half of §5.4's migration: intentions waiting
+  /// on an effect cannot follow the device, so a resumed agent marks
+  /// every `awaitEffect` park `awaitFault`="migrated" — the next
+  /// settle runs the else/fault ladder with that cause.
+  void resumed(zigzag::ArenaManifold &arena,
+               zigzag::vortex::VortexCore &core,
+               zigzag::CellRef agent) const;
+
 private:
   [[nodiscard]] std::int64_t setting(std::string_view key,
                                      std::int64_t fallback) const;

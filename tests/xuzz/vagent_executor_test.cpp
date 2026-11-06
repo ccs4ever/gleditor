@@ -3586,6 +3586,232 @@ TEST(VagentExecutorTest, UnroutableTargetRaisesDeliveryFailedOnTheSender) {
   EXPECT_EQ(arena.outstandingMarks(), 0u);
 }
 
+TEST(VagentExecutorTest, DownOnChildRaisesChildDownAndFailsItsWaits) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image =
+      h.lower("module demo\nevent Boot\nevent Lost\nevent Down\n"
+              "question stock(item: Str): Str\n"
+              "goal Work() perform\n"
+              "agent A {\n"
+              "  var child: Opt<Agent> := none\n"
+              "  on Boot { child := spawn A(); adopt Work() }\n"
+              "  on ChildDown { emit Down{} }\n"
+              "  plan w for Work { let r := ask child.stock(\"oil\") within "
+              "9s else cause; emit Lost{} }\n"
+              "}");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+  auto &core  = h.ctx.core;
+  // Boot spawns the member and adopts the plan; the settle runs the
+  // ask step, which stages the request and parks on awaitCorr +
+  // awaitPeer — the member's name is what a Down matches.
+  ASSERT_TRUE(exec(h.execution("Boot"), h.ctx));
+  const auto staged =
+      VagentExecutor::drainOutbox(arena, core, image->agentCell);
+  ASSERT_EQ(staged.size(), 1u);
+  EXPECT_EQ(staged[0].kind, "ask");
+  const auto childVar = varsRecord(arena, core, image->agentCell, "child", false);
+  ASSERT_TRUE(childVar);
+  const auto childRef = arena.linked(*childVar, core.dims().values,
+                                     DimVector::POS);
+  ASSERT_TRUE(childRef);
+  const auto member = arena.asInt64(*childRef);
+  ASSERT_TRUE(member);
+  // The adapter's monitored-loss report: §"internal events"' Down
+  // rung raises ChildDown and fails intentions waiting on the child —
+  // both happen on the parent's next turn, not in the adapter's call.
+  exec.childDown(arena, core, image->agentCell,
+                 static_cast<CellRef>(*member));
+  // The turn's two halves: the pending drain dispatches ChildDown
+  // first, then the reconsideration walk's awaitFault rung binds the
+  // else's cause — the readied spine advances next turn.
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+  const auto outbox =
+      VagentExecutor::drainOutbox(arena, core, image->agentCell);
+  ASSERT_EQ(outbox.size(), 2u);
+  EXPECT_EQ(outbox[1].payload, "Down");
+  const auto r = varsRecord(arena, core, image->agentCell, "r", false);
+  ASSERT_TRUE(r);
+  const auto rv = arena.linked(*r, core.dims().values,
+                               DimVector::POS);
+  ASSERT_TRUE(rv);
+  EXPECT_EQ(arena.textOf(*rv), "down");
+  // The readied intention runs its next spine step — the plan's own
+  // emit follows the else recovery, like every ask-else.
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+  const auto resumed =
+      VagentExecutor::drainOutbox(arena, core, image->agentCell);
+  ASSERT_EQ(resumed.size(), 3u);
+  EXPECT_EQ(resumed[2].payload, "Lost");
+  // A second report for the same member is the journal's dedupe —
+  // no second ChildDown dispatches.
+  exec.childDown(arena, core, image->agentCell,
+                 static_cast<CellRef>(*member));
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+  EXPECT_EQ(
+      VagentExecutor::drainOutbox(arena, core, image->agentCell).size(),
+      3u);
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
+TEST(VagentExecutorTest, OrderlyStopSuppressesTheTrailingActorDown) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image =
+      h.lower("module demo\nevent Boot\nevent Note\nevent Note2\n"
+              "agent A {\n"
+              "  var child: Opt<Agent> := none\n"
+              "  on Boot { child := spawn A(); stop child }\n"
+              "  on ChildStopping { emit Note{} }\n"
+              "  on ChildDown { emit Note2{} }\n"
+              "}");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+  auto &core  = h.ctx.core;
+  ASSERT_TRUE(exec(h.execution("Boot"), h.ctx));
+  const auto childVar = varsRecord(arena, core, image->agentCell, "child", false);
+  ASSERT_TRUE(childVar);
+  const auto childRef = arena.linked(*childVar, core.dims().values,
+                                     DimVector::POS);
+  ASSERT_TRUE(childRef);
+  const auto member = arena.asInt64(*childRef);
+  ASSERT_TRUE(member);
+  // §4.5: "the parent reports one ChildStopping even when the
+  // runtime's ActorDown follows it" — the stop's pre-mark makes the
+  // trailing report a no-op.
+  exec.childDown(arena, core, image->agentCell,
+                 static_cast<CellRef>(*member));
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+  const auto outbox =
+      VagentExecutor::drainOutbox(arena, core, image->agentCell);
+  ASSERT_EQ(outbox.size(), 1u);
+  EXPECT_EQ(outbox[0].payload, "Note");
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
+TEST(VagentExecutorTest, RefusedSpawnFailsStagedDeliveriesAndRaisesSpawnFailed) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image =
+      h.lower("module demo\nevent Boot\nevent Note\nevent "
+              "Refused\nevent Lost\n"
+              "agent A {\n"
+              "  var child: Opt<Agent> := none\n"
+              "  on Boot { child := spawn A(); emit Note{} for child }\n"
+              "  on SpawnFailed { emit Refused{} }\n"
+              "  on DeliveryFailed [occurrence.cause == "
+              "\"spawn_refused\"] { emit Lost{} }\n"
+              "}");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+  auto &core  = h.ctx.core;
+  ASSERT_TRUE(exec(h.execution("Boot"), h.ctx));
+  const auto staged =
+      VagentExecutor::drainOutbox(arena, core, image->agentCell);
+  ASSERT_EQ(staged.size(), 1u);
+  EXPECT_EQ(staged[0].kind, "emit");
+  const auto childVar = varsRecord(arena, core, image->agentCell, "child", false);
+  ASSERT_TRUE(childVar);
+  const auto childRef = arena.linked(*childVar, core.dims().values,
+                                     DimVector::POS);
+  ASSERT_TRUE(childRef);
+  const auto member = arena.asInt64(*childRef);
+  ASSERT_TRUE(member);
+  // §8.6: the refusal raises SpawnFailed and fails the deliveries
+  // staged to the member's name — the staged emit was never
+  // deliverable after the refusal.
+  exec.spawnFailed(arena, core, image->agentCell,
+                   static_cast<CellRef>(*member));
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+  const auto outbox =
+      VagentExecutor::drainOutbox(arena, core, image->agentCell);
+  ASSERT_EQ(outbox.size(), 3u);
+  EXPECT_EQ(outbox[1].payload, "Lost");
+  EXPECT_EQ(outbox[2].payload, "Refused");
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
+TEST(VagentExecutorTest, MovedRebindsStalePeerRefsAndRaisesMoved) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image =
+      h.lower("module demo\nevent Boot\nevent Note\n"
+              "agent A {\n"
+              "  var child: Opt<Agent> := none\n"
+              "  on Boot { child := spawn A() }\n"
+              "  on Moved { emit Note{} }\n"
+              "}");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+  auto &core  = h.ctx.core;
+  ASSERT_TRUE(exec(h.execution("Boot"), h.ctx));
+  const auto childVar = varsRecord(arena, core, image->agentCell, "child", false);
+  ASSERT_TRUE(childVar);
+  const auto childRef = arena.linked(*childVar, core.dims().values,
+                                     DimVector::POS);
+  ASSERT_TRUE(childRef);
+  const auto oldMember = arena.asInt64(*childRef);
+  ASSERT_TRUE(oldMember);
+  const auto name = arena.linked(
+      static_cast<CellRef>(*oldMember), core.dims().name,
+      DimVector::POS);
+  ASSERT_TRUE(name);
+  // The adapter's new reference record for the same peer name — a
+  // migration's pid change minted it; the receiver's $peers update is
+  // a rebind, not a name rewrite.
+  const auto moved = arena.makeCell();
+  zigzag::expectWritten(
+      arena.link(moved, core.dims().name, DimVector::POS,
+                 arena.makeCell(arena.textOf(*name))));
+  exec.moved(arena, core, image->agentCell, moved);
+  const auto after = arena.linked(*childVar, core.dims().values,
+                                  DimVector::POS);
+  ASSERT_TRUE(after);
+  EXPECT_EQ(arena.asInt64(*after).value_or(-1),
+            static_cast<std::int64_t>(moved));
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+  const auto outbox =
+      VagentExecutor::drainOutbox(arena, core, image->agentCell);
+  ASSERT_EQ(outbox.size(), 1u);
+  EXPECT_EQ(outbox[0].payload, "Note");
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
+TEST(VagentExecutorTest, ResumedFailsEffectWaitsWithMigrated) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image = h.lower(
+      "module demo\nevent Tick\ngoal Work() perform\n"
+      "capacity Navigation { effect def read(): Str within 9s }\n"
+      "native skill Device implements Navigation\n"
+      "agent A {\n"
+      "  uses Navigation\n"
+      "  install Device\n"
+      "  on Tick { adopt Work() }\n"
+      "  plan w for Work { let r := Navigation.read() else cause }\n"
+      "}");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+  auto &core  = h.ctx.core;
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  const auto staged =
+      VagentExecutor::drainOutbox(arena, core, image->agentCell);
+  ASSERT_EQ(staged.size(), 1u);
+  EXPECT_EQ(staged[0].kind, "effect");
+  // §5.4: a resumed agent cannot follow its in-flight effects — the
+  // else ladder's cause is "migrated", which the test reads off r.
+  exec.resumed(arena, core, image->agentCell);
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+  const auto r = varsRecord(arena, core, image->agentCell, "r", false);
+  ASSERT_TRUE(r);
+  const auto rv = arena.linked(*r, core.dims().values,
+                               DimVector::POS);
+  ASSERT_TRUE(rv);
+  EXPECT_EQ(arena.textOf(*rv), "migrated");
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
 TEST(VagentExecutorTest, BehaviorGoalMemberAdoptsTheBehaviorsPlan) {
   ExecutorHarness h;
   VagentExecutor exec;

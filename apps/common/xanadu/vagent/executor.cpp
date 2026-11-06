@@ -80,6 +80,71 @@ void journalAppend(zigzag::ArenaManifold &arena, CellRef agent, CellRef entry,
   for (std::size_t i = 0; i < excess; ++i) unlinkRank(arena, members[i], seen);
 }
 
+/// The +d.step/+d.name field envelope the raise path mints —
+/// `occurrence.<name>` on the handler reads these children back.
+void perceptField(zigzag::ArenaManifold &arena,
+                  zigzag::vortex::VortexCore &core, CellRef payload,
+                  std::string_view name, CellRef value) {
+  zigzag::expectWritten(
+      arena.link(zigzag::rankTail(arena, payload, core.dims().step),
+                 core.dims().step, DimVector::POS, value));
+  zigzag::expectWritten(arena.link(value, core.dims().name,
+                                 DimVector::POS, arena.makeCell(name)));
+}
+
+/// The journal+pending tail every adapter-side raise shares: the seen
+/// cell is the dispatchable percept (its `grab` points at the payload
+/// whose fields handlers read), the pending record is what the next
+/// settle's drain turns into a dispatch.
+void queueAdapterPercept(zigzag::ArenaManifold &arena,
+                         zigzag::vortex::VortexCore &core, CellRef agent,
+                         std::string_view name, CellRef payload,
+                         std::size_t journalSize) {
+  const auto seen = arena.makeCell(name);
+  journalAppend(arena, agent, seen, core.findOrMintDimension("d.seen"),
+                journalSize);
+  if (const auto rec = varsRecord(arena, core, seen, "grab", true))
+    zigzag::expectWritten(
+        arena.link(*rec, core.dims().values, DimVector::POS,
+                   arena.makeScalarCell(static_cast<std::int64_t>(payload))));
+  const auto pending = core.findOrMintDimension("d.pending");
+  const auto pend    = arena.makeCell(name);
+  if (const auto rec = varsRecord(arena, core, pend, "grab", true))
+    zigzag::expectWritten(
+        arena.link(*rec, core.dims().values, DimVector::POS,
+                   arena.makeScalarCell(static_cast<std::int64_t>(seen))));
+  zigzag::expectWritten(arena.link(
+      zigzag::rankTail(arena, agent, pending), pending, DimVector::POS, pend));
+}
+
+/// One-shot key on the agent's +d.delivered rank — the dedupe the
+/// adapter's fault raises need so a redelivery (or the ActorDown
+/// trailing an orderly stop) cannot re-raise.
+[[nodiscard]] bool adapterOnce(zigzag::ArenaManifold &arena,
+                               zigzag::vortex::VortexCore &core,
+                               CellRef agent, std::string_view key) {
+  const auto delivered = core.findOrMintDimension("d.delivered");
+  for (const CellRef idCell : zigzag::rankAfter(arena, agent, delivered))
+    if (arena.textOf(idCell) == key) return false;
+  zigzag::expectWritten(
+      arena.link(zigzag::rankTail(arena, agent, delivered), delivered,
+                 DimVector::POS, arena.makeCell(key)));
+  return true;
+}
+
+/// The int field the turn's `intentionField` reads — duplicated at
+/// file scope because the adapter-side raises run outside a turn and
+/// have no MetaRuntime bound.
+[[nodiscard]] std::int64_t intentionFlag(zigzag::ArenaManifold &arena,
+                                         zigzag::vortex::VortexCore &core,
+                                         CellRef intention,
+                                         std::string_view field) {
+  const auto rec = varsRecord(arena, core, intention, field, false);
+  if (!rec) return 0;
+  const auto v = arena.linked(*rec, core.dims().values, DimVector::POS);
+  return v ? arena.asInt64(*v).value_or(0) : 0;
+}
+
 } // namespace
 
 VagentExecutor::VagentExecutor(
@@ -511,6 +576,22 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
                                              DimVector::POS,
                                              arena.makeScalarCell(*n)));
     };
+    // The peer a remote park is bound to — `ask`/`achieve for` write
+    // it so a Down on that member can mark the wait; a peer-less park
+    // clears it or a stale name outlives the wait it belonged to.
+    const auto awaitPeer = [&](std::string_view peerName) {
+      const auto rec =
+          varsRecord(arena, core, intention, "awaitPeer", true);
+      if (!rec) return;
+      if (const auto v =
+              arena.linked(*rec, core.dims().values, DimVector::POS))
+        zigzag::expectWritten(
+            arena.unlink(*rec, core.dims().values, DimVector::POS));
+      if (peerName.empty()) return;
+      zigzag::expectWritten(
+          arena.link(*rec, core.dims().values, DimVector::POS,
+                     arena.makeCell(peerName)));
+    };
     if (verb == "consume") {
       eventConsumed = true;
       return true;
@@ -621,11 +702,18 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       // pump finishes `on Destroy`. The cause set is closed; `stop`
       // is the only orderly path the executor has — terminate, lease
       // and init failures stage theirs adapter-side.
-      if (const auto parent = parentOf(target); parent != noCell)
+      if (const auto parent = parentOf(target); parent != noCell) {
         raiseOn(parent, "ChildStopping",
                 {{"child",
                   arena.makeScalarCell(std::int64_t{target})},
                  {"cause", arena.makeCell("stop")}});
+        // "The parent reports one ChildStopping even when the
+        // runtime's ActorDown follows it" — pre-marking the member's
+        // down key makes that a fact of the delivered journal rather
+        // than a race the adapter has to lose.
+        (void)adapterOnce(arena, core, parent,
+                          std::format("childdown:{}", target));
+      }
       return true;
     }
     if (verb == "drop") {
@@ -721,7 +809,9 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       // adapter echoes it on the answer's journal cell, and the wake
       // match requires it — two outstanding `stock` asks can no
       // longer cross-resolve.
-      const auto requestId = stageOutbox("ask", payload, resolvePeer(peer));
+      const auto peerName  = resolvePeer(peer);
+      const auto requestId = stageOutbox("ask", payload, peerName);
+      awaitPeer(peerName);
       if (const auto rec =
               varsRecord(arena, core, intention, "awaitCorr", true))
         zigzag::expectWritten(arena.link(*rec, core.dims().values,
@@ -820,6 +910,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
                 arena.link(*rec, core.dims().values, DimVector::POS,
                            arena.makeScalarCell(*g)));
       parkElse();
+      awaitPeer({});
       meta.setIntentionField(intention, "awaitDeadline", turn + *turns);
       meta.setIntentionField(intention, "waiting", 1);
       meta.setIntentionField(intention, "ready", 0);
@@ -841,13 +932,15 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
         // receiver-side adoption can point the child's delegator
         // back — cross-agent delegation is the same cell-link
         // mechanism the local +d.subgoal path uses.
-        stageOutbox("achieve", goalName, resolvePeer(peer), {}, intention);
+        const auto peerName = resolvePeer(peer);
+        stageOutbox("achieve", goalName, peerName, {}, intention);
         meta.setIntentionField(intention, "delegated", 1);
         meta.setIntentionField(intention, "ready", 0);
         const auto dl      = field("deadline");
         const auto dlTurns = dl != noCell ? arena.asInt64(dl) : std::nullopt;
         if (!dlTurns) return false; // `by` without `within` doesn't parse
         parkElse();
+        awaitPeer(peerName);
         meta.setIntentionField(intention, "awaitDeadline", turn + *dlTurns);
         return true;
       }
@@ -876,6 +969,10 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       // deadline-free re-delegation clears the field so the previous
       // bound can't fire early on the new child.
       parkElse();
+      // The local delegation's child is an intention, not a member —
+      // a stale awaitPeer from an earlier remote park must not point
+      // a Down at this wait.
+      awaitPeer({});
       if (const auto dl = field("deadline"); dl != noCell)
         if (const auto turns = arena.asInt64(dl)) {
           meta.setIntentionField(intention, "awaitDeadline", turn + *turns);
@@ -964,6 +1061,9 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
               arena.link(*rec, core.dims().values, DimVector::POS,
                          arena.makeCell(arena.textOf(bound))));
       parkElse();
+      // The wait binds a capacity instance, not a member — a stale
+      // awaitPeer would point a Down at a wait the child never owned.
+      awaitPeer({});
       meta.setIntentionField(intention, "awaitEffect", 1);
       meta.setIntentionField(intention, "awaitDeadline", turn + *turns);
       meta.setIntentionField(intention, "waiting", 1);
@@ -2061,22 +2161,45 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
             }
         meta.setIntentionField(intention, "waiting", 0);
         meta.setIntentionField(intention, "ready", 1);
-      } else if (turn >= deadline) {
-        meta.setIntentionField(intention, "waiting", 0);
-        // V6's elapsed deadline stages cancel to the binding — best
-        // effort by the host contract — before the statement's own
-        // ladder; the correlation names the in-flight request.
-        if (awaitEffect) {
-          CellRef call = noCell;
+      } else {
+        // A mark the adapter wrote between turns — childDown's "down"
+        // or resumed's "migrated". The else ladder hears the real
+        // cause before the within bound would report a deadline; a
+        // late-arriving answer would still win a same-turn race
+        // through `matched` above, which is the honest ordering.
+        std::string awaitFault;
+        if (const auto rec =
+                varsRecord(arena, core, intention, "awaitFault", false))
+          if (const auto v =
+                  arena.linked(*rec, core.dims().values, DimVector::POS))
+            awaitFault = std::string{arena.textOf(*v)};
+        if (!awaitFault.empty()) {
+          // One-shot like `refused`: unlink before the else runs so a
+          // re-park can't inherit the death.
           if (const auto rec =
-                  varsRecord(arena, core, intention, "awaitCall", false))
-            if (const auto v =
-                    arena.linked(*rec, core.dims().values, DimVector::POS))
-              if (const auto r = arena.asInt64(*v))
-                call = static_cast<CellRef>(*r);
-          stageOutbox("cancel", call, {}, {}, noCell, corr);
+                  varsRecord(arena, core, intention, "awaitFault", false))
+            zigzag::expectWritten(
+                arena.unlink(*rec, core.dims().values, DimVector::POS));
+          meta.setIntentionField(intention, "waiting", 0);
+          if (!runElse(intention, awaitFault))
+            faultIntention(intention, awaitFault);
+        } else if (turn >= deadline) {
+          meta.setIntentionField(intention, "waiting", 0);
+          // V6's elapsed deadline stages cancel to the binding — best
+          // effort by the host contract — before the statement's own
+          // ladder; the correlation names the in-flight request.
+          if (awaitEffect) {
+            CellRef call = noCell;
+            if (const auto rec =
+                    varsRecord(arena, core, intention, "awaitCall", false))
+              if (const auto v =
+                      arena.linked(*rec, core.dims().values, DimVector::POS))
+                if (const auto r = arena.asInt64(*v))
+                  call = static_cast<CellRef>(*r);
+            stageOutbox("cancel", call, {}, {}, noCell, corr);
+          }
+          if (!runElse(intention)) faultIntention(intention, "deadline");
         }
-        if (!runElse(intention)) faultIntention(intention, "deadline");
       }
       if (!matched) continue;
     }
@@ -2101,6 +2224,26 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
         meta.setIntentionField(intention, "delegated", 0);
         if (!runElse(intention, refused))
           faultIntention(intention, refused);
+        continue;
+      }
+      // A remote delegation's Down mark — the member died between
+      // turns, so the park faults now with the death cause instead of
+      // riding its within bound out. A local delegation carries no
+      // awaitPeer, so the mark can only be remote.
+      std::string awaitFault;
+      if (const auto rec =
+              varsRecord(arena, core, intention, "awaitFault", false))
+        if (const auto v =
+                arena.linked(*rec, core.dims().values, DimVector::POS))
+          awaitFault = std::string{arena.textOf(*v)};
+      if (!awaitFault.empty()) {
+        if (const auto rec =
+                varsRecord(arena, core, intention, "awaitFault", false))
+          zigzag::expectWritten(
+              arena.unlink(*rec, core.dims().values, DimVector::POS));
+        meta.setIntentionField(intention, "delegated", 0);
+        if (!runElse(intention, awaitFault))
+          faultIntention(intention, awaitFault);
         continue;
       }
       // achieve within: the delegation's own deadline. Expiry drops
@@ -2657,50 +2800,155 @@ void VagentExecutor::deliveryFailed(zigzag::ArenaManifold &arena,
   if (entry.sender == noCell) return;
   // The sender-side half of §7.3's honest bound: the request's own id
   // keys the dedupe, so the outbox rank's persistence cannot turn one
-  // unroutable entry into a stream of identical failures.
-  if (!entry.id.empty()) {
-    const auto delivered = core.findOrMintDimension("d.delivered");
-    for (const CellRef idCell :
-         zigzag::rankAfter(arena, entry.sender, delivered))
-      if (arena.textOf(idCell) == entry.id) return;
-    zigzag::expectWritten(
-        arena.link(zigzag::rankTail(arena, entry.sender, delivered),
-                   delivered, DimVector::POS,
-                   arena.makeCell(entry.id)));
-  }
+  // unroutable entry into a stream of identical failures. An id-less
+  // entry raises once per call — the caller's job to avoid.
+  if (!entry.id.empty() && !adapterOnce(arena, core, entry.sender, entry.id))
+    return;
   // The event payload rides the +d.step/+d.name envelope the raise
   // path mints — `occurrence.to` resolves no member for an unknown
   // name, so the target text is the honest Agent-typed value.
   const auto payload = arena.makeCell("DeliveryFailed");
-  const auto field   = [&](std::string_view name, CellRef value) {
-    zigzag::expectWritten(
-        arena.link(zigzag::rankTail(arena, payload, core.dims().step),
-                   core.dims().step, DimVector::POS, value));
-    zigzag::expectWritten(arena.link(value, core.dims().name,
-                                   DimVector::POS,
-                                   arena.makeCell(name)));
-  };
-  field("to", arena.makeCell(entry.target));
-  field("kind", arena.makeCell(entry.kind));
-  field("cause", arena.makeCell(cause));
-  const auto seen = arena.makeCell("DeliveryFailed");
-  journalAppend(arena, entry.sender, seen,
-                core.findOrMintDimension("d.seen"),
-                static_cast<std::size_t>(
-                    setting("vagent.journal_size", 64)));
-  if (const auto rec = varsRecord(arena, core, seen, "grab", true))
-    zigzag::expectWritten(arena.link(
-        *rec, core.dims().values, DimVector::POS,
-        arena.makeScalarCell(static_cast<std::int64_t>(payload))));
-  const auto pending = core.findOrMintDimension("d.pending");
-  const auto pend    = arena.makeCell("DeliveryFailed");
-  if (const auto rec = varsRecord(arena, core, pend, "grab", true))
-    zigzag::expectWritten(arena.link(
-        *rec, core.dims().values, DimVector::POS,
-        arena.makeScalarCell(static_cast<std::int64_t>(seen))));
-  zigzag::expectWritten(arena.link(
-      zigzag::rankTail(arena, entry.sender, pending), pending,
-      DimVector::POS, pend));
+  perceptField(arena, core, payload, "to", arena.makeCell(entry.target));
+  perceptField(arena, core, payload, "kind", arena.makeCell(entry.kind));
+  perceptField(arena, core, payload, "cause", arena.makeCell(cause));
+  queueAdapterPercept(
+      arena, core, entry.sender, "DeliveryFailed", payload,
+      static_cast<std::size_t>(setting("vagent.journal_size", 64)));
+}
+
+void VagentExecutor::childDown(zigzag::ArenaManifold &arena,
+                               zigzag::vortex::VortexCore &core,
+                               zigzag::CellRef agent,
+                               zigzag::CellRef child) const {
+  if (agent == noCell || child == noCell) return;
+  // One down per member: the key rides the member's ref so the
+  // ActorDown trailing an orderly `stop` (which pre-marks the same
+  // key beside ChildStopping) and a redelivered mesh report both
+  // collapse to the first raise.
+  if (!adapterOnce(arena, core, agent,
+                   std::format("childdown:{}", child)))
+    return;
+  // The settle's `Down(child)` rung: mark every parked wait that
+  // names the dead member — awaitPeer compares member `+d.name`
+  // text, so the mark survives a Moved's identity swap. Only a
+  // parked intention (waiting or delegated) is a wait on the child;
+  // a stale awaitPeer on a running intention must not fire.
+  std::string childName;
+  if (const auto n = arena.linked(child, core.dims().name, DimVector::POS))
+    childName = std::string{arena.textOf(*n)};
+  if (!childName.empty())
+    for (const CellRef intention : zigzag::rankAfter(
+             arena, agent, core.findOrMintDimension("d.intention"))) {
+      if (intentionFlag(arena, core, intention, "waiting") == 0 &&
+          intentionFlag(arena, core, intention, "delegated") == 0)
+        continue;
+      const auto peer = varsRecord(arena, core, intention, "awaitPeer", false);
+      if (!peer) continue;
+      const auto v = arena.linked(*peer, core.dims().values, DimVector::POS);
+      if (!v || arena.textOf(*v) != childName) continue;
+      if (const auto rec =
+              varsRecord(arena, core, intention, "awaitFault", true))
+        zigzag::expectWritten(
+            arena.link(*rec, core.dims().values, DimVector::POS,
+                       arena.makeCell("down")));
+    }
+  const auto payload = arena.makeCell("ChildDown");
+  perceptField(arena, core, payload, "child",
+               arena.makeScalarCell(static_cast<std::int64_t>(child)));
+  queueAdapterPercept(
+      arena, core, agent, "ChildDown", payload,
+      static_cast<std::size_t>(setting("vagent.journal_size", 64)));
+}
+
+void VagentExecutor::spawnFailed(zigzag::ArenaManifold &arena,
+                                 zigzag::vortex::VortexCore &core,
+                                 zigzag::CellRef agent,
+                                 zigzag::CellRef child) const {
+  if (agent == noCell || child == noCell) return;
+  if (!adapterOnce(arena, core, agent,
+                   std::format("spawnfailed:{}", child)))
+    return;
+  // §8.6: the refused name's staged deliveries fail too — the outbox
+  // rank persists, so each rides DeliveryFailed's own per-id dedupe
+  // rather than unlinking what the adapter might still inspect.
+  std::string refusedName;
+  if (const auto n = arena.linked(child, core.dims().name, DimVector::POS))
+    refusedName = std::string{arena.textOf(*n)};
+  if (!refusedName.empty())
+    for (const auto &entry : drainOutbox(arena, core, agent))
+      if (entry.target == refusedName)
+        deliveryFailed(arena, core, entry, "spawn_refused");
+  const auto payload = arena.makeCell("SpawnFailed");
+  perceptField(arena, core, payload, "child",
+               arena.makeScalarCell(static_cast<std::int64_t>(child)));
+  queueAdapterPercept(
+      arena, core, agent, "SpawnFailed", payload,
+      static_cast<std::size_t>(setting("vagent.journal_size", 64)));
+}
+
+void VagentExecutor::moved(zigzag::ArenaManifold &arena,
+                           zigzag::vortex::VortexCore &core,
+                           zigzag::CellRef agent,
+                           zigzag::CellRef member) const {
+  if (agent == noCell || member == noCell) return;
+  // The dedupe keys the new reference: one Moved per pid, a second
+  // migration arrives on a different member cell and reports again.
+  if (!adapterOnce(arena, core, agent, std::format("moved:{}", member)))
+    return;
+  // §5.4's "receivers update $peers": every vars record still holding
+  // a same-name member that isn't this reference rebinds to it — a
+  // member ref is the honest stale-marker because names, not cells,
+  // are the durable peer identity.
+  std::string name;
+  if (const auto n = arena.linked(member, core.dims().name, DimVector::POS))
+    name = std::string{arena.textOf(*n)};
+  if (!name.empty())
+    for (const CellRef rec :
+         zigzag::rankAfter(arena, agent, core.dims().vars)) {
+      const auto v = arena.linked(rec, core.dims().values, DimVector::POS);
+      if (!v) continue;
+      const auto ref = arena.asInt64(*v);
+      if (!ref) continue;
+      const auto held = static_cast<CellRef>(*ref);
+      if (held == member) continue;
+      const auto heldName =
+          arena.linked(held, core.dims().name, DimVector::POS);
+      if (!heldName || arena.textOf(*heldName) != name) continue;
+      zigzag::expectWritten(
+          arena.unlink(rec, core.dims().values, DimVector::POS));
+      zigzag::expectWritten(
+          arena.link(rec, core.dims().values, DimVector::POS,
+                     arena.makeScalarCell(
+                         static_cast<std::int64_t>(member))));
+    }
+  const auto payload = arena.makeCell("Moved");
+  perceptField(arena, core, payload, "name",
+               arena.makeScalarCell(static_cast<std::int64_t>(member)));
+  queueAdapterPercept(
+      arena, core, agent, "Moved", payload,
+      static_cast<std::size_t>(setting("vagent.journal_size", 64)));
+}
+
+void VagentExecutor::resumed(zigzag::ArenaManifold &arena,
+                             zigzag::vortex::VortexCore &core,
+                             zigzag::CellRef agent) const {
+  if (agent == noCell) return;
+  // §5.4: an effect wait cannot follow the device — the in-flight
+  // binding belonged to the old pid's host. The mark goes through
+  // the same awaitFault rung a Down writes, so the else ladder's
+  // cause is "migrated", not "down".
+  for (const CellRef intention :
+       zigzag::rankAfter(arena, agent,
+                         core.findOrMintDimension("d.intention"))) {
+    if (intentionFlag(arena, core, intention, "waiting") == 0) continue;
+    if (!varsRecord(arena, core, intention, "awaitEffect", false))
+      continue;
+    if (const auto rec =
+            varsRecord(arena, core, intention, "awaitFault", true))
+      zigzag::expectWritten(
+          arena.link(*rec, core.dims().values, DimVector::POS,
+                     arena.makeCell("migrated")));
+  }
 }
 
 } // namespace xanadu::vagent
