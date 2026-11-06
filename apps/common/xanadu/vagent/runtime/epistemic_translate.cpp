@@ -848,8 +848,11 @@ private:
   /// text that reads as a number or a truth word ("42", "1e3", "on") and
   /// renders a computed scalar canonically, so the kind and the bits differ
   /// between a resume and the live arena an upgrade reads while the text
-  /// agrees. The price is that a string and a scalar spelled alike digest
-  /// alike, which a checkpoint already makes them.
+  /// agrees. That kind change is why this reads text rather than the value:
+  /// the typed cell keeps the user's spelling through any number of
+  /// checkpoints and resumes, so the text is the one half every road shares.
+  /// The price is that a string and a scalar spelled alike digest alike,
+  /// which a checkpoint already makes them.
   [[nodiscard]] std::string rendered(CellRef c) const {
     auto text = a_.textOf(c);
     if (!text.empty()) return text;

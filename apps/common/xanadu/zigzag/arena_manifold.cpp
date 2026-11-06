@@ -1761,6 +1761,119 @@ ArenaResult ArenaManifold::compact() {
   return this;
 }
 
+namespace {
+/// @p cell's typed value as inference would spell it, or nothing for a cell
+/// with no scalar kind.
+[[nodiscard]] std::optional<xanadu::InferredTextValue>
+heldValue(const ArenaManifold &arena, const CellRef cell) {
+  const auto kind = arena.valueKindOf(cell);
+  if (xanadu::ValueKind::Double == kind) {
+    const auto value = arena.asDouble(cell);
+    if (!value) return std::nullopt;
+    return xanadu::InferredTextValue{
+        .kind = kind, .bits = xanadu::canonicalDoubleBits(*value)};
+  }
+  if (xanadu::ValueKind::Bool == kind) {
+    const auto value = arena.asBool(cell);
+    if (!value) return std::nullopt;
+    return xanadu::InferredTextValue{.kind = kind,
+                                     .bits = *value ? 1ULL : 0ULL};
+  }
+  if (xanadu::ValueKind::Int64 == kind) {
+    const auto value = arena.asInt64(cell);
+    if (!value) return std::nullopt;
+    return xanadu::InferredTextValue{
+        .kind = kind, .bits = std::bit_cast<std::uint64_t>(*value)};
+  }
+  return std::nullopt;
+}
+} // namespace
+
+bool textReadsAsValue(const ArenaManifold &arena, const CellRef cell,
+                      const std::string_view text) {
+  const auto held = heldValue(arena, cell);
+  return held && xanadu::inferTextValue(text) == *held;
+}
+
+namespace {
+/// Whether @p kind is one of the scalar kinds a cell's text can be read as.
+[[nodiscard]] bool isScalarKind(const xanadu::ValueKind kind) noexcept {
+  return xanadu::ValueKind::Double == kind || xanadu::ValueKind::Bool == kind ||
+         xanadu::ValueKind::Int64 == kind;
+}
+
+/// How a typed cell's text reaches the store.
+enum class ScalarText : std::uint8_t {
+  /// Bits and their canonical rendering, as for a computed scalar.
+  Render,
+  /// The cell's own spans; the store re-infers the same kind and bits.
+  Keep,
+  /// The cell's own span, which the store cannot read to re-infer (a quoted
+  /// scroll it holds no bytes of), followed by a SetValue restating the bits.
+  KeepAndRestate,
+};
+
+/**
+ * @brief How @p cell, typed, is to be promoted, given its @p spans already in
+ *        @p store's namespace (scratch spans excepted).
+ *
+ * Re-rendering a typed cell on promotion would spell a user's "1e3" as
+ * "1000" on every copy back into a store, so a checkpoint resumed and
+ * checkpointed again would no longer say what the user typed, and a typed
+ * store-span copy would lose its transclusion.
+ */
+[[nodiscard]] ScalarText
+scalarTextOf(const ArenaManifold &from, const CellRef cell,
+             const std::span<const xanadu::PrimediaSpan> spans,
+             const xanadu::Store &store) {
+  if (spans.empty()) return ScalarText::Render;
+  std::uint64_t length = 0;
+  for (const auto &span : spans) length += span.length;
+  // Longer text cannot infer at all, so there is no point reading it.
+  if (length > xanadu::maxInferredScalarTextBytes) return ScalarText::Render;
+  const auto held = heldValue(from, cell);
+  if (!held) return ScalarText::Render;
+
+  std::string stored;
+  stored.reserve(length);
+  try {
+    for (const auto &span : spans) {
+      if (xanadu::scratchScroll == span.scroll) {
+        stored += from.scratchTextOf(span);
+      } else {
+        stored += store.read(span);
+      }
+    }
+  } catch (const std::exception &) {
+    // Bytes this store cannot reach fall to the arena's reading below.
+    stored.clear();
+  }
+  if (xanadu::inferTextValue(stored) == *held) return ScalarText::Keep;
+  // The arena may read through a store the target has no bytes of yet (a
+  // resumed image's scroll); its reading is still the cell's own text. A
+  // SetValue restates one span only, and a run would have to be spliced back
+  // after it, each splice re-inferring from bytes the store cannot read.
+  if (spans.size() == 1 && xanadu::inferTextValue(from.textOf(cell)) == *held)
+    return ScalarText::KeepAndRestate;
+  return ScalarText::Render;
+}
+
+/// Mint @p cell's value as a computed scalar: bits and their canonical text.
+[[nodiscard]] xanadu::MicroversionId
+mintRenderedScalar(xanadu::Store &store, const xanadu::MicroversionId &parent,
+                   const ArenaManifold &from, const CellRef cell) {
+  switch (from.valueKindOf(cell)) {
+  case xanadu::ValueKind::Double:
+    // R6's deferred half, written here: bits *and* a rendering.
+    return store.makeScalarCell(parent, from.asDouble(cell).value_or(0.0));
+  case xanadu::ValueKind::Bool:
+    return store.makeScalarCell(parent, from.asBool(cell).value_or(false));
+  default:
+    return store.makeScalarCell(parent, from.asInt64(cell).value_or(0));
+  }
+}
+} // namespace
+
 std::optional<Promoted> promote(xanadu::Store &store,
                                 const xanadu::MicroversionId &parent,
                                 const ArenaManifold &from, const CellRef root,
@@ -1954,17 +2067,16 @@ std::optional<Promoted> promote(xanadu::Store &store,
     }
     const auto kind = from.valueKindOf(arena);
 
+    const auto scalarText = isScalarKind(kind)
+                                ? scalarTextOf(from, arena, spans, store)
+                                : ScalarText::Keep;
+
     xanadu::MicroversionId minted = out.version;
-    if (xanadu::ValueKind::Double == kind) {
-      // R6's deferred half, written here: bits *and* a rendering.
-      minted =
-          store.makeScalarCell(out.version, from.asDouble(arena).value_or(0.0));
-    } else if (xanadu::ValueKind::Bool == kind) {
-      minted =
-          store.makeScalarCell(out.version, from.asBool(arena).value_or(false));
-    } else if (xanadu::ValueKind::Int64 == kind) {
-      minted =
-          store.makeScalarCell(out.version, from.asInt64(arena).value_or(0));
+    if (ScalarText::Render == scalarText) {
+      minted = mintRenderedScalar(store, out.version, from, arena);
+      // The rendering is the whole text; the cell's own spans are not spliced
+      // onto it.
+      spans.clear();
     } else if (xanadu::ValueKind::OpHandle == kind && delayed.contains(arena)) {
       // Cycle members get real birth operations before any value names them.
       // SetValue below then creates the cycle without a forward reference or
@@ -1996,6 +2108,11 @@ std::optional<Promoted> promote(xanadu::Store &store,
     const CellRef realCell = store.cellRefOf(minted).value();
     real.emplace(arena, realCell);
     out.cells.push_back(realCell);
+    if (ScalarText::KeepAndRestate == scalarText) {
+      const auto held = *heldValue(from, arena);
+      out.version     = store.setValue(out.version, realCell, spans.front(),
+                                       held.kind, held.bits);
+    }
 
     // Every span after the first is a splice, since one operation carries one
     // span until U3.4's CompactBinaryV4.
@@ -2363,16 +2480,16 @@ std::optional<Promoted> promoteOverlay(const ArenaManifold &from,
     }
     const auto kind = from.valueKindOf(arena);
 
+    const auto scalarText = isScalarKind(kind)
+                                ? scalarTextOf(from, arena, spans, store)
+                                : ScalarText::Keep;
+
     xanadu::MicroversionId minted = out.version;
-    if (xanadu::ValueKind::Double == kind) {
-      minted =
-          store.makeScalarCell(out.version, from.asDouble(arena).value_or(0.0));
-    } else if (xanadu::ValueKind::Bool == kind) {
-      minted =
-          store.makeScalarCell(out.version, from.asBool(arena).value_or(false));
-    } else if (xanadu::ValueKind::Int64 == kind) {
-      minted =
-          store.makeScalarCell(out.version, from.asInt64(arena).value_or(0));
+    if (ScalarText::Render == scalarText) {
+      minted = mintRenderedScalar(store, out.version, from, arena);
+      // The rendering is the whole text; the cell's own spans are not spliced
+      // onto it.
+      spans.clear();
     } else if (xanadu::ValueKind::OpHandle == kind && delayed.contains(arena)) {
       if (spans.empty())
         minted = store.makeCell(out.version, std::string_view{});
@@ -2402,6 +2519,11 @@ std::optional<Promoted> promoteOverlay(const ArenaManifold &from,
     const CellRef realCell = store.cellRefOf(minted).value();
     real.emplace(arena, realCell);
     out.cells.push_back(realCell);
+    if (ScalarText::KeepAndRestate == scalarText) {
+      const auto held = *heldValue(from, arena);
+      out.version     = store.setValue(out.version, realCell, spans.front(),
+                                       held.kind, held.bits);
+    }
 
     std::uint64_t at = spans.empty() ? 0 : spans.front().length;
     for (std::size_t i = 1; i < spans.size(); i++) {

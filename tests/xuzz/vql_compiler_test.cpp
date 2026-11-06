@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 #include <memory>
 
+#include "common/xanadu/scalar.hpp"
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/user_permascroll.hpp"
 #include "common/xanadu/vortex/vortex_core.hpp"
@@ -203,6 +204,49 @@ TEST_F(VQLCompilerTest, ExportToStorePersistence) {
   EXPECT_EQ(reloaded.homeCell().value(), store.homeCell().value());
 
   std::filesystem::remove_all(tempDir);
+}
+
+TEST_F(VQLCompilerTest, ExportToStoreKeepsATypedCellsOwnSpelling) {
+  // R6: the user's spelling survives export while it reads as the value.
+  constexpr std::string_view spellings[] = {"1e3",  "007", "on",   "yes",
+                                            "-0.0", "+5",  "1.50", "NaN"};
+  for (const auto text : spellings) {
+    const auto inferred = inferTextValue(text);
+    const auto cell     = arena.makeCell(text);
+    ASSERT_TRUE(arena.setValueBits(cell, inferred.kind, inferred.bits));
+  }
+  // A computed scalar has no text, and one whose bits moved off its text no
+  // longer reads as it: both render.
+  arena.makeScalarCell(1000.0);
+  const auto moved = arena.makeCell("12e2");
+  ASSERT_TRUE(arena.setValueBits(moved, ValueKind::Int64, 7U));
+
+  VQLCompiler compiler(*core, *vm);
+  auto permascroll = std::make_shared<UserPermascroll>();
+  Store store(permascroll);
+  const auto ver      = compiler.exportToStore(store);
+  const auto manifold = store.rebuildManifold(ver);
+
+  auto find = [&](const std::string_view text) -> std::optional<CellRef> {
+    for (CellRef c = 1; c < store.segmentedOps().size(); ++c) {
+      if (manifold.contains(c) && manifold.textOf(c, store) == text) return c;
+    }
+    return std::nullopt;
+  };
+  for (const auto text : spellings) {
+    const auto inferred = inferTextValue(text);
+    const auto cell     = find(text);
+    ASSERT_TRUE(cell) << text;
+    EXPECT_EQ(manifold.valueKindOf(*cell), inferred.kind) << text;
+    EXPECT_EQ(manifold.slot(*cell)->valueBits, inferred.bits) << text;
+  }
+  const auto computed = find("1000");
+  ASSERT_TRUE(computed);
+  EXPECT_EQ(manifold.asDouble(*computed), 1000.0);
+  EXPECT_FALSE(find("12e2"));
+  const auto rendered = find("7");
+  ASSERT_TRUE(rendered);
+  EXPECT_EQ(manifold.asInt64(*rendered), 7);
 }
 
 TEST_F(VQLCompilerTest, VortexVMExecutionEquivalence) {

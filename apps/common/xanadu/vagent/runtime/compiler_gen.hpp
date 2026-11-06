@@ -920,11 +920,12 @@ private:
   /// A checkpoint types numeric- and boolean-looking text when it mints the
   /// cell (the owner's ruling keeps that), so after a resume "42" renders as
   /// Int64 42 where a live retry carries the string "42", and `Eq` is variant
-  /// equality. The cell keeps its text, and a whole-text slice reads it with
-  /// no kind. Only a string against a typed value needs the slice; equal
-  /// values and two strings decide at once, so the common roads mint nothing.
-  /// Two typed values compare by value as before: a computed scalar has no
-  /// text, and a slice of it would read as empty.
+  /// equality; that kind change alone is why this stays. The cell keeps its
+  /// text through every checkpoint and resume, and a whole-text slice reads
+  /// it with no kind. Only a string against a typed value needs the slice;
+  /// equal values and two strings decide at once, so the common roads mint
+  /// nothing. Two typed values compare by value as before: a computed scalar
+  /// has no text, and a slice of it would read as empty.
   void textEq(Opd a, Opd b, CellRef out) {
     const CellRef done = newLabel();
     emit(OpcodeKind::Eq, "teq", {a, b}, {out});

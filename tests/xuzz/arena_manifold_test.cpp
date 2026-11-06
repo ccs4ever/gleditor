@@ -27,6 +27,7 @@
 #include "common/xanadu/compact_op.hpp"
 #include "common/xanadu/microversion.hpp"
 #include "common/xanadu/ops.hpp"
+#include "common/xanadu/scalar.hpp"
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
 #include "common/xanadu/zigzag/manifold.hpp"
@@ -636,6 +637,148 @@ TEST(ArenaManifoldTest, aPromotedScalarRegainsTheRenderingTheArenaDeferred) {
   // and neither was carried through the search.
   EXPECT_EQ(manifold.asInt64(cell), 42);
   EXPECT_EQ(manifold.textOf(cell, store), "42");
+}
+
+// -- a typed cell's own text (R6: the spelling is the user's) ---------------
+
+/// The spellings a canonical rendering would rewrite. Each infers a kind, and
+/// none of them is that kind's shortest round-trip text.
+constexpr std::string_view kUserSpellings[] = {"1e3",  "007", "on",   "yes",
+                                               "-0.0", "+5",  "1.50", "NaN"};
+
+/// A typed scratch cell, the shape copyCell, VPL copy and mesh import leave:
+/// the user's text, and the bits inference reads from it.
+CellRef typedTextCell(ArenaManifold &arena, const std::string_view text) {
+  const auto inferred = xanadu::inferTextValue(text);
+  EXPECT_NE(inferred.kind, ValueKind::None) << text;
+  const auto cell = arena.makeCell(text);
+  EXPECT_TRUE(arena.setValueBits(cell, inferred.kind, inferred.bits));
+  return cell;
+}
+
+/// @p cell, persisted, still spells @p text and is what @p text infers to.
+void expectKeepsText(const Manifold &manifold, const Store &store,
+                     const CellRef cell, const std::string_view text) {
+  const auto inferred = xanadu::inferTextValue(text);
+  EXPECT_EQ(manifold.textOf(cell, store), text);
+  EXPECT_EQ(manifold.valueKindOf(cell), inferred.kind) << text;
+  ASSERT_TRUE(manifold.slot(cell)) << text;
+  EXPECT_EQ(manifold.slot(cell)->valueBits, inferred.bits) << text;
+}
+
+TEST(ArenaManifoldTest, promoteKeepsATypedCellsOwnSpelling) {
+  for (const auto text : kUserSpellings) {
+    Store store;
+    const auto at = store.sliceGenesis(MicroversionId{});
+    Arena arena;
+    const auto cell = typedTextCell(arena.m, text);
+
+    const auto promoted = zigzag::promote(store, at, arena.m, cell);
+    ASSERT_TRUE(promoted.has_value()) << text;
+    expectKeepsText(store.rebuildManifold(promoted->version), store,
+                    promoted->cells.front(), text);
+  }
+}
+
+TEST(ArenaManifoldTest, promoteOverlayKeepsATypedCellsOwnSpelling) {
+  for (const auto text : kUserSpellings) {
+    Store store;
+    const auto at = store.sliceGenesis(MicroversionId{});
+    ArenaManifold arena;
+    const auto cell = typedTextCell(arena, text);
+
+    const auto promoted = zigzag::promoteOverlay(arena, cell, store, at);
+    ASSERT_TRUE(promoted.has_value()) << text;
+    expectKeepsText(store.rebuildManifold(promoted->version), store,
+                    promoted->mapping.at(cell), text);
+  }
+}
+
+TEST(ArenaManifoldTest, aSecondPromotionStillKeepsTheSpelling) {
+  // A checkpoint, a resume over it, and the next checkpoint: the hop that
+  // used to render "007" as "7".
+  Store store;
+  const auto at = store.sliceGenesis(MicroversionId{});
+  Arena first;
+  const auto cell = typedTextCell(first.m, "007");
+  const auto once = zigzag::promote(store, at, first.m, cell);
+  ASSERT_TRUE(once.has_value());
+
+  const auto fold = store.rebuildManifold(once->version);
+  ArenaManifold resumed{&fold, store};
+  const auto copy =
+      resumed.makeCell(resumed.contentOf(once->cells.front()).front());
+  ASSERT_TRUE(resumed.setValueBits(copy, ValueKind::Int64, 7U));
+  const auto twice = zigzag::promote(store, once->version, resumed, copy);
+  ASSERT_TRUE(twice.has_value());
+  expectKeepsText(store.rebuildManifold(twice->version), store,
+                  twice->cells.front(), "007");
+}
+
+TEST(ArenaManifoldTest, aTypedQuotationPromotesToTheSameAddress) {
+  Store store;
+  auto at              = store.sliceGenesis(MicroversionId{});
+  at                   = store.makeCell(at, std::string_view{"1e3"});
+  const auto source    = store.cellRefOf(at).value();
+  const auto base      = store.rebuildManifold(at);
+  const auto sourceRun = base.contentOf(source);
+  ASSERT_EQ(sourceRun.size(), 1U);
+  const auto address = sourceRun.front();
+
+  // A typed copy quoting the store's bytes, as VPL copy and mesh import make.
+  Arena arena;
+  const auto quote = arena.m.makeCell(address);
+  ASSERT_TRUE(arena.m.setValueBits(quote, ValueKind::Double,
+                                   xanadu::canonicalDoubleBits(1000.0)));
+
+  const auto promoted = zigzag::promote(store, at, arena.m, quote);
+  ASSERT_TRUE(promoted.has_value());
+  const auto after = store.rebuildManifold(promoted->version);
+  const auto cell  = promoted->cells.front();
+  const auto run   = after.contentOf(cell);
+  ASSERT_EQ(run.size(), 1U);
+  // The transclusion survives: the same bytes, not a fresh rendering of them.
+  EXPECT_EQ(run.front(), address);
+  EXPECT_EQ(after.asDouble(cell), 1000.0);
+}
+
+TEST(ArenaManifoldTest, textThatNoLongerReadsAsTheBitsIsRendered) {
+  // Bits restated without the text, as an evaluator writing through a cell
+  // does: the text says 1000, the cell holds 7, and only the bits are true.
+  for (const bool overlay : {false, true}) {
+    Store store;
+    const auto at = store.sliceGenesis(MicroversionId{});
+    ArenaManifold arena;
+    const auto cell = arena.makeCell("1e3");
+    ASSERT_TRUE(arena.setValueBits(cell, ValueKind::Int64, 7U));
+
+    const auto promoted = overlay
+                              ? zigzag::promoteOverlay(arena, cell, store, at)
+                              : zigzag::promote(store, at, arena, cell);
+    ASSERT_TRUE(promoted.has_value());
+    const auto after = store.rebuildManifold(promoted->version);
+    const auto real  = promoted->mapping.at(cell);
+    EXPECT_EQ(after.asInt64(real), 7);
+    EXPECT_EQ(after.textOf(real, store), "7");
+  }
+}
+
+TEST(ArenaManifoldTest, aComputedScalarStillRendersCanonicallyFromEitherRoad) {
+  for (const bool overlay : {false, true}) {
+    Store store;
+    const auto at = store.sliceGenesis(MicroversionId{});
+    ArenaManifold arena;
+    const auto cell = arena.makeScalarCell(1000.0);
+
+    const auto promoted = overlay
+                              ? zigzag::promoteOverlay(arena, cell, store, at)
+                              : zigzag::promote(store, at, arena, cell);
+    ASSERT_TRUE(promoted.has_value());
+    const auto after = store.rebuildManifold(promoted->version);
+    const auto real  = promoted->mapping.at(cell);
+    EXPECT_EQ(after.asDouble(real), 1000.0);
+    EXPECT_EQ(after.textOf(real, store), "1000");
+  }
 }
 
 TEST(ArenaManifoldTest, promotionRefusesAboveItsBudgetAndWritesNothing) {

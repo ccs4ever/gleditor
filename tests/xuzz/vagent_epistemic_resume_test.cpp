@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -135,6 +136,8 @@ struct Side {
 class VagentEpistemicResume : public ::testing::Test {
 protected:
   Side a, b;
+  /// Every checkpoint taken, kept so its seeds outlive the hops after it.
+  std::vector<AgentCheckpoint> checkpoints;
   double base{};
 
   void SetUp() override {
@@ -182,19 +185,31 @@ protected:
 
   /// Checkpoint `a` and resume it on `b`, compiled from @p source.
   bool resumeOnB(std::string_view source = kSource) {
-    const auto saved = a.executor().checkpoint(a.pid);
+    return resumeOn(a, b, source);
+  }
+
+  /// Checkpoint @p from and resume it on @p to, a fresh host each time, so a
+  /// resumed actor's checkpoint is resumed exactly as a launched one's is.
+  bool resumeOn(Side &from, Side &to, std::string_view source = kSource) {
+    const auto saved = from.executor().checkpoint(from.pid);
     EXPECT_TRUE(saved) << (saved ? "" : toString(saved.error()));
     if (!saved) return false;
+    // A resumed actor's next checkpoint still quotes the bytes the one before
+    // it published; this host seeds only its own, so the earlier checkpoint's
+    // seeds stand behind it as the remote source would.
+    if (!checkpoints.empty())
+      saved->source->setFallback(checkpoints.back().source.get());
+    checkpoints.push_back(*saved);
     auto program = CompiledProgram::fromSource(source);
     EXPECT_TRUE(program) << program.error();
-    b.host.emplace(std::move(*program));
-    const auto resumed = b.executor().resume(*saved);
+    to.host.emplace(std::move(*program));
+    const auto resumed = to.executor().resume(*saved);
     EXPECT_TRUE(resumed);
     if (!resumed) return false;
-    b.pid = *resumed;
-    b.host->pump();
-    if (!b.executor().context(b.pid)) return false;
-    b.ready();
+    to.pid = *resumed;
+    to.host->pump();
+    if (!to.executor().context(to.pid)) return false;
+    to.ready();
     return true;
   }
 };
@@ -312,6 +327,93 @@ TEST_F(VagentEpistemicResume, NumericAndBooleanLookingKeysStillGroup) {
     ASSERT_EQ(statuses.size(), 2U);
     EXPECT_EQ(statuses.back(), kObsStatusCurrent);
   }
+}
+
+/// Spellings a canonical rendering would rewrite ("007" as "7", "on" as
+/// "true"). One hop keeps them by minting from the live string; only a second
+/// checkpoint, promoting the typed cell the first resume made, can lose them.
+constexpr std::string_view kRespelled[] = {"007", "1e3", "on",
+                                           "yes", "+5",  "1.50"};
+
+TEST_F(VagentEpistemicResume, RespelledEventIdsStillDedupAfterTwoHops) {
+  a.bind(kP1);
+  std::uint64_t seq = 0;
+  std::vector<CheckedObservation> sent;
+  for (const auto id : kRespelled) {
+    auto o    = reading(kP1, "left", ++seq, 1.0);
+    o.eventId = std::string(id);
+    ASSERT_EQ(a.observe(o)->kind, IngestOutcome::Kind::Committed) << id;
+    sent.push_back(o);
+  }
+  ASSERT_TRUE(resumeOnB());
+  b.bind(kP1);
+  Side c;
+  ASSERT_TRUE(resumeOn(b, c));
+  c.bind(kP1);
+  std::uint64_t answered = 0;
+  for (const auto &o : sent) {
+    SCOPED_TRACE(o.eventId);
+    ++answered;
+    const auto retry = c.observe(o);
+    ASSERT_TRUE(retry);
+    EXPECT_EQ(retry->kind, IngestOutcome::Kind::Duplicate)
+        << retry->code.value_or("");
+    EXPECT_EQ(c.stat(kTurnResultDuplicate), answered);
+    auto other     = o;
+    other.tuple[1] = WireValue::real(9.0);
+    ASSERT_TRUE(c.executor().observe(c.pid, other));
+    c.host->pump();
+    EXPECT_EQ(c.stat(kTurnResultConflictingEvent), answered);
+  }
+  EXPECT_EQ(c.stat(kTurnResultStaleSequence), 0U);
+}
+
+TEST_F(VagentEpistemicResume, RespelledKeysStillGroupAfterTwoHops) {
+  // Three keys a source, under the default `keys_per_source` of four.
+  const auto principalOf = [](std::size_t i) { return i < 3 ? kP1 : kP2; };
+  a.bind(kP1);
+  a.bind(kP2);
+  std::uint64_t seq = 0;
+  for (std::size_t i = 0; i < std::size(kRespelled); ++i)
+    ASSERT_EQ(a.observe(reading(principalOf(i), std::string(kRespelled[i]),
+                                ++seq, 1.0))
+                  ->kind,
+              IngestOutcome::Kind::Committed)
+        << kRespelled[i];
+  ASSERT_TRUE(resumeOnB());
+  b.bind(kP1);
+  b.bind(kP2);
+  Side c;
+  ASSERT_TRUE(resumeOn(b, c));
+  c.bind(kP1);
+  c.bind(kP2);
+  for (std::size_t i = 0; i < std::size(kRespelled); ++i) {
+    const auto again = c.observe(
+        reading(principalOf(i), std::string(kRespelled[i]), ++seq, 2.0));
+    ASSERT_TRUE(again) << kRespelled[i];
+    ASSERT_EQ(again->kind, IngestOutcome::Kind::Committed)
+        << kRespelled[i] << ": " << again->code.value_or("");
+  }
+  const auto d        = c.dims();
+  std::size_t clauses = 0;
+  for (const auto pred :
+       zigzag::rankAfter(c.arena(), *c.executor().agentCell(c.pid), d.belief))
+    if (c.arena().textOf(pred) == "at")
+      clauses += std::ranges::distance(
+          zigzag::rankAfter(c.arena(), pred, c.ctx().core.dims().clause));
+  EXPECT_EQ(clauses, std::size(kRespelled));
+  const auto histories = c.histories();
+  EXPECT_EQ(histories.size(), std::size(kRespelled));
+  for (const auto &[key, statuses] : histories) {
+    SCOPED_TRACE(key.second);
+    ASSERT_EQ(statuses.size(), 2U);
+    EXPECT_EQ(statuses.back(), kObsStatusCurrent);
+  }
+  // Each key still reads as the user spelled it, not as "7" or "true".
+  std::set<std::string> spelled;
+  for (const auto &[key, statuses] : histories) spelled.insert(key.second);
+  for (const auto key : kRespelled)
+    EXPECT_TRUE(spelled.contains(std::string(key))) << key;
 }
 
 TEST_F(VagentEpistemicResume, AdvanceAndRetireWalkTheRestoredRanks) {

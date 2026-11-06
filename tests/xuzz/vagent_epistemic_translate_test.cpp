@@ -142,6 +142,8 @@ std::string kind(const std::optional<IngestOutcome> &o) {
 class Translate : public ::testing::Test {
 protected:
   Side a, b;
+  /// Every checkpoint taken, kept so its seeds outlive the hops after it.
+  std::vector<AgentCheckpoint> checkpoints;
   double base{};
 
   void SetUp() override {
@@ -186,19 +188,30 @@ protected:
   }
 
   bool resumeOnB(std::string_view source = kSource) {
-    const auto saved = a.executor().checkpoint(a.pid);
+    return resumeOn(a, b, source);
+  }
+
+  /// Checkpoint @p from and resume it on @p to, on a fresh host.
+  bool resumeOn(Side &from, Side &to, std::string_view source = kSource) {
+    const auto saved = from.executor().checkpoint(from.pid);
     EXPECT_TRUE(saved) << (saved ? "" : toString(saved.error()));
     if (!saved) return false;
+    // A resumed actor's next checkpoint still quotes the bytes the one before
+    // it published; this host seeds only its own, so the earlier checkpoint's
+    // seeds stand behind it as the remote source would.
+    if (!checkpoints.empty())
+      saved->source->setFallback(checkpoints.back().source.get());
+    checkpoints.push_back(*saved);
     auto program = CompiledProgram::fromSource(source);
     EXPECT_TRUE(program) << program.error();
-    b.host.emplace(std::move(*program));
-    const auto resumed = b.executor().resume(*saved);
+    to.host.emplace(std::move(*program));
+    const auto resumed = to.executor().resume(*saved);
     EXPECT_TRUE(resumed) << (resumed ? "" : toString(resumed.error()));
     if (!resumed) return false;
-    b.pid = *resumed;
-    b.host->pump();
-    if (!b.executor().context(b.pid)) return false;
-    b.executor().setWallClockSynchronised(true);
+    to.pid = *resumed;
+    to.host->pump();
+    if (!to.executor().context(to.pid)) return false;
+    to.executor().setWallClockSynchronised(true);
     return true;
   }
 
@@ -490,6 +503,44 @@ TEST_F(Translate, NumericAndBooleanLookingTextAgreesOnBothRoads) {
   a.settle();
   EXPECT_EQ(a.digest(), source);
   replays(a);
+}
+
+TEST_F(Translate, RespelledTextDigestsAlikeAfterTwoHops) {
+  // Spellings a canonical rendering rewrites. The second checkpoint promotes
+  // the typed cells the first resume made, which is where they could drift.
+  constexpr std::string_view respelled[] = {"007", "1e3", "on",
+                                            "yes", "+5",  "1.50"};
+  a.bind(kP1);
+  a.bind(kP2);
+  std::uint64_t seq = 0;
+  std::vector<CheckedObservation> sent;
+  for (std::size_t i = 0; i < std::size(respelled); ++i) {
+    const std::string text(respelled[i]);
+    auto o    = reading(i < 3 ? kP1 : kP2, text, ++seq, 1.0);
+    o.eventId = text;
+    ASSERT_EQ(a.observe(o)->kind, IngestOutcome::Kind::Committed) << text;
+    sent.push_back(o);
+  }
+  a.settle();
+  const auto source = a.digest();
+  ASSERT_TRUE(resumeOnB());
+  EXPECT_EQ(b.digest(), source);
+  Side c;
+  ASSERT_TRUE(resumeOn(b, c));
+  EXPECT_EQ(c.digest(), source);
+  c.bind(kP1);
+  c.bind(kP2);
+  for (const auto &o : sent) {
+    SCOPED_TRACE(o.eventId);
+    const auto duplicates =
+        c.executor().stat(c.pid, std::string(kStatRefusedPrefix) +
+                                     std::string(kTurnResultDuplicate));
+    ASSERT_TRUE(c.executor().observe(c.pid, o));
+    c.host->pump();
+    EXPECT_EQ(c.executor().stat(c.pid, std::string(kStatRefusedPrefix) +
+                                           std::string(kTurnResultDuplicate)),
+              duplicates + 1);
+  }
 }
 
 TEST_F(Translate, ANumericLookingClockInstanceDigestsAlikeOnBothRoads) {

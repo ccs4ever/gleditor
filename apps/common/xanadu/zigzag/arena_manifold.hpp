@@ -844,6 +844,18 @@ private:
 };
 
 /**
+ * @brief Whether @p text, inferred as user text, is @p cell's typed value.
+ *
+ * True when inferTextValue() gives @p cell's own kind and canonical bits. The
+ * copy-to-store roads (promote(), promoteOverlay(), VQL export) ask this to
+ * decide between keeping a typed cell's spelling and rendering its bits: R6
+ * keeps the spelling, and a cell whose bits were restated without its text no
+ * longer reads as what it holds. False for a cell with no scalar kind.
+ */
+[[nodiscard]] bool textReadsAsValue(const ArenaManifold &arena, CellRef cell,
+                                    std::string_view text);
+
+/**
  * @brief Write an arena's answer into a document, as operations.
  *
  * The one road from the ephemeral side to the persistent one, and it works by
@@ -857,7 +869,11 @@ private:
  *    spooled into the author's permascroll and the span is rewritten to name
  *    it. This is where vlog §5.5's deferral is paid off.
  * 2. **A deferred scalar rendering is written.** An arena scalar carries bits
- *    only; Store::makeScalarCell() restores R6's other half.
+ *    only; Store::makeScalarCell() restores R6's other half. A typed cell
+ *    that has text of its own keeps it instead -- its store span, address and
+ *    all, or its scratch bytes -- whenever textReadsAsValue() holds, so a
+ *    user's "1e3" or "007" survives any number of promotions. Text that no
+ *    longer reads as the bits is rendered like a computed scalar.
  * 3. **The links are minted**, after every cell exists, because a link needs
  *    both of its ends.
  *

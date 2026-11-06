@@ -1021,8 +1021,11 @@ VQLCompiler::exportToStore(xanadu::Store &store,
   auto manifold = store.rebuildManifold(ver);
 
   // 1. Replicate dimensions
+  // Arena refs are ephemeralBit | dense: a bare 1..cellCount() index names no
+  // arena cell, and walking those exported nothing but the genesis.
   std::unordered_map<DimRef, DimRef> dimMap;
-  for (CellRef c = 1; c <= arena.cellCount(); ++c) {
+  for (std::uint32_t dense = 0; dense < arena.cellCount(); ++dense) {
+    const CellRef c = zigzag::ArenaManifold::refOf(dense);
     if (!arena.contains(c)) continue;
     std::string name = arena.textOf(c);
     if (!name.empty() && name.starts_with("d.")) {
@@ -1036,25 +1039,34 @@ VQLCompiler::exportToStore(xanadu::Store &store,
   }
 
   // 2. Mint cells
-  for (CellRef c = 1; c <= arena.cellCount(); ++c) {
+  for (std::uint32_t dense = 0; dense < arena.cellCount(); ++dense) {
+    const CellRef c = zigzag::ArenaManifold::refOf(dense);
     if (!arena.contains(c)) continue;
     if (cellMap.contains(c)) continue;
 
-    if (auto dVal = arena.asDouble(c)) {
+    // A typed cell keeps the user's spelling while it still reads as its
+    // value (R6), as promote() does; makeCell(text) re-infers the same bits.
+    // Only a computed scalar, or text its bits have moved away from, is
+    // rendered.
+    auto text = arena.textOf(c);
+    if (zigzag::textReadsAsValue(arena, c, text)) {
+      ver = store.makeCell(ver, text);
+    } else if (auto dVal = arena.asDouble(c)) {
       ver = store.makeScalarCell(ver, *dVal);
     } else if (auto iVal = arena.asInt64(c)) {
       ver = store.makeScalarCell(ver, *iVal);
     } else if (auto bVal = arena.asBool(c)) {
       ver = store.makeScalarCell(ver, *bVal);
     } else {
-      ver = store.makeCell(ver, arena.textOf(c));
+      ver = store.makeCell(ver, text);
     }
     cellMap[c] = store.cellRefOf(ver).value();
     manifold.advanceOrRefold(store, ver);
   }
 
   // 3. Link edges (posward links only)
-  for (CellRef c = 1; c <= arena.cellCount(); ++c) {
+  for (std::uint32_t dense = 0; dense < arena.cellCount(); ++dense) {
+    const CellRef c = zigzag::ArenaManifold::refOf(dense);
     if (!arena.contains(c) || !cellMap.contains(c)) continue;
     CellRef from = cellMap.at(c);
 
