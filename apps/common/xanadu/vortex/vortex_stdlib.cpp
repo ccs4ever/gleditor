@@ -640,9 +640,12 @@ std::vector<CellValue> VortexStdLib::call(CellRef fnOp,
   }
   if (const auto kind = vm_.getOpcodeKind(fnOp);
       kind == OpcodeKind::PushGuard || kind == OpcodeKind::PopGuard ||
-      kind == OpcodeKind::CheckGuards)
+      kind == OpcodeKind::CheckGuards || kind == OpcodeKind::OpenGuardScope ||
+      kind == OpcodeKind::CloseGuardScope ||
+      kind == OpcodeKind::BeginMutationGroup ||
+      kind == OpcodeKind::EndMutationGroup)
     throw std::invalid_argument(
-        "stdlib raw calls do not support runtime contract guards");
+        "stdlib raw calls do not support runtime contract guards/groups");
   if (vm_.getOpcodeKind(fnOp) == OpcodeKind::VqlFieldProbe)
     throw std::invalid_argument(
         "stdlib raw calls do not support named field probes");

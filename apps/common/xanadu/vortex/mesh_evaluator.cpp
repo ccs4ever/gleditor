@@ -259,6 +259,10 @@ bool pureOpcode(OpcodeKind opcode) {
   case OpcodeKind::PushGuard:
   case OpcodeKind::PopGuard:
   case OpcodeKind::CheckGuards:
+  case OpcodeKind::OpenGuardScope:
+  case OpcodeKind::CloseGuardScope:
+  case OpcodeKind::BeginMutationGroup:
+  case OpcodeKind::EndMutationGroup:
     return false;
   }
   return false;
@@ -296,9 +300,13 @@ void validateProgram(const VortexProgram &program, SyntaxLimits limits) {
           "Vortex instruction cell cannot alias a reference/dimension");
     if (instruction.opcode == OpcodeKind::PushGuard ||
         instruction.opcode == OpcodeKind::PopGuard ||
-        instruction.opcode == OpcodeKind::CheckGuards)
+        instruction.opcode == OpcodeKind::CheckGuards ||
+        instruction.opcode == OpcodeKind::OpenGuardScope ||
+        instruction.opcode == OpcodeKind::CloseGuardScope ||
+        instruction.opcode == OpcodeKind::BeginMutationGroup ||
+        instruction.opcode == OpcodeKind::EndMutationGroup)
       throw std::runtime_error(
-          "Vortex mesh does not support runtime contract guards");
+          "Vortex mesh does not support runtime contract guards/groups");
     if (instruction.opcode == OpcodeKind::InvokeFrame ||
         instruction.opcode == OpcodeKind::ReturnFrame)
       throw std::runtime_error(
@@ -507,7 +515,7 @@ VortexProgram decodeProgram(std::string_view bytes, SyntaxLimits limits) {
     dictionary(item, 5);
     const auto opcode = required(item, "opcode").asInteger();
     if (opcode < 0 ||
-        opcode > static_cast<std::int64_t>(OpcodeKind::CheckGuards))
+        opcode > static_cast<std::int64_t>(OpcodeKind::EndMutationGroup))
       throw std::runtime_error("Unknown Vortex artifact opcode");
     const auto &next = required(item, "next").asList();
     if (next.size() > 1)

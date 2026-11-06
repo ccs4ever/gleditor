@@ -274,6 +274,10 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
 
   const auto clear =
       emitOp(OpcodeKind::ClearCellRefs, "#CALL_CLEAR " + definition.name);
+  const CellRef guardScope =
+      openGuardScope("#CALL_GUARD_SCOPE " + definition.name);
+  const CellRef filterExit =
+      mintOpcode(OpcodeKind::Nop, "#PARAM_FILTER_CLEANUP " + definition.name);
   const auto end  = mintOpcode(OpcodeKind::Nop, "#CALL_END " + definition.name);
   const auto bind = [&](const std::string &name, std::vector<CellRef> cells) {
     functorBindings_.erase(name);
@@ -283,15 +287,20 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
   };
   const auto check = [&](const TypeExpr &type,
                          const std::vector<CellRef> &subjects,
-                         const bool bindCaptures) {
+                         const bool bindCaptures,
+                         const PreparedContractValidator &prepared,
+                         const std::string &diagnostic) {
     const CellRef matched = emitContractMatch(type, subjects, bindCaptures);
     const auto branch = emitOp(OpcodeKind::BranchFalseCell, "#PARAM_FILTER");
     emitInput(branch, matched);
-    emitInput(branch, end);
+    emitInput(branch, filterExit);
+    pushContractGuard(prepared, diagnostic, "#PARAM_GUARD");
   };
 
   std::size_t argumentIndex = 0;
-  for (const auto &parameter : definition.params) {
+  for (std::size_t parameterIndex = 0;
+       parameterIndex < definition.params.size(); ++parameterIndex) {
+    const auto &parameter = definition.params[parameterIndex];
     if (!parameter.isVariadic && argumentIndex < functors.size() &&
         functors[argumentIndex]) {
       const auto &name       = std::get<std::string>(parameter.target);
@@ -303,8 +312,19 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
     std::vector<CellRef> cells;
     if (parameter.isVariadic) {
       while (argumentIndex < values.size()) {
-        if (parameter.type)
-          check(*parameter.type, values[argumentIndex], false);
+        if (parameter.type) {
+          std::string diagnostic = definition.name + " parameter ";
+          diagnostic += std::to_string(parameterIndex + 1);
+          if (const auto *name = std::get_if<std::string>(&parameter.target))
+            diagnostic += " ($" + *name + ")";
+          if (diagnostic.size() > vm_.guardLimits().maxDiagnosticBytes)
+            throw std::invalid_argument("parameter guard diagnostic exceeds "
+                                        "the configured text budget");
+          const auto prepared =
+              prepareContractValidator(*parameter.type, values[argumentIndex]);
+          check(*parameter.type, values[argumentIndex], false, prepared,
+                diagnostic);
+        }
         cells.insert(cells.end(), values[argumentIndex].begin(),
                      values[argumentIndex].end());
         ++argumentIndex;
@@ -317,14 +337,41 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
                                 ambientContext_.has_value() ? ambientContext_
                                                             : context);
       }
-      if (parameter.type) check(*parameter.type, cells, true);
     }
-    if (const auto *pattern =
-            std::get_if<DestructurePattern>(&parameter.target)) {
-      TypeExpr shape{
-          .unionType = UnionType{.members = {PrimaryType{
-                                     .kind = ShapeType{.pattern = *pattern}}}}};
-      check(shape, cells, true);
+    std::optional<PreparedContractValidator> typePrepared;
+    std::optional<PreparedContractValidator> destructurePrepared;
+    std::optional<TypeExpr> destructureType;
+    std::string diagnostic = definition.name + " parameter ";
+    diagnostic += std::to_string(parameterIndex + 1);
+    if (const auto *name = std::get_if<std::string>(&parameter.target))
+      diagnostic += " ($" + *name + ")";
+    else if (std::holds_alternative<DestructurePattern>(parameter.target))
+      diagnostic += "destructure";
+    else
+      diagnostic += "context";
+    if (!parameter.isVariadic &&
+        (parameter.type ||
+         std::holds_alternative<DestructurePattern>(parameter.target))) {
+      if (diagnostic.size() > vm_.guardLimits().maxDiagnosticBytes)
+        throw std::invalid_argument(
+            "parameter guard diagnostic exceeds the configured text budget");
+      if (parameter.type)
+        typePrepared = prepareContractValidator(*parameter.type, cells);
+      if (parameter.type)
+        check(*parameter.type, cells, true, *typePrepared, diagnostic);
+      if (const auto *pattern =
+              std::get_if<DestructurePattern>(&parameter.target)) {
+        destructureType.emplace(TypeExpr{
+            .unionType =
+                UnionType{.members = {PrimaryType{
+                              .kind = ShapeType{.pattern = *pattern}}}}});
+        destructurePrepared = prepareContractValidator(*destructureType, cells);
+      }
+    }
+    if (!parameter.isVariadic &&
+        std::holds_alternative<DestructurePattern>(parameter.target)) {
+      if (destructureType && destructurePrepared)
+        check(*destructureType, cells, true, *destructurePrepared, diagnostic);
     } else if (const auto *name = std::get_if<std::string>(&parameter.target)) {
       bind(*name, std::move(cells));
     } else {
@@ -356,7 +403,10 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
         compileExecutionBlock(*block);
       else if (const auto *path = std::get_if<PathExpression>(&statement))
         compilePathExpression(*path, context.value_or(core_.home()));
-      else
+      else if (const auto *weave = std::get_if<WeaveStatement>(&statement)) {
+        compileExecutionBlock(
+            ExecutionBlock{.action = ActionClause{.clause = weave->effect}});
+      } else
         throw std::invalid_argument(
             "compiled definition body requires a supported block");
       bodyResults = lastResultCells_;
@@ -377,11 +427,16 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
     if (dynamicStreams_.contains(result)) dynamicStreams_.insert(slot);
     results.push_back(slot);
   }
-  zigzag::expectWritten(
-      core_.arena().link(*currentOp_, core_.dims().spin, false, end));
-  currentOp_ = end;
-  allOps_.push_back(end);
   lastResultCells_ = results;
+  closeGuardScope(guardScope, "#CALL_GUARD_SCOPE_CLOSE " + definition.name);
+  const CellRef skipFilterCleanup =
+      emitOp(OpcodeKind::BranchFalseCell, "#CALL_SKIP_FILTER_CLEANUP");
+  emitInputConstant(skipFilterCleanup, false);
+  emitInput(skipFilterCleanup, end);
+  appendOpcode(filterExit);
+  closeGuardScope(guardScope,
+                  "#CALL_FILTER_GUARD_SCOPE_CLOSE " + definition.name);
+  appendOpcode(end);
   return results;
 }
 
@@ -426,8 +481,8 @@ CellRef VQLCompiler::emitNativeFrameReturn(const CellRef descriptor,
   return opcode;
 }
 
-CellRef
-VQLCompiler::compileContractValidator(const TypeExpr &type,
+VQLCompiler::PreparedContractValidator
+VQLCompiler::prepareContractValidator(const TypeExpr &type,
                                       const std::span<const CellRef> subjects) {
   validateContractAliases(type);
   struct FrozenInput {
@@ -530,6 +585,18 @@ VQLCompiler::compileContractValidator(const TypeExpr &type,
     std::erase_if(spec.locals, [&](const CellRef slot) {
       return unusedSlots.contains(slot);
     });
+    if ((ambientContext_ && core_.hasPipeline(*ambientContext_)) ||
+        std::ranges::any_of(
+            subjects,
+            [this](const CellRef cell) { return core_.hasPipeline(cell); }) ||
+        std::ranges::any_of(frozen, [this](const FrozenInput &input) {
+          return input.slot &&
+                 std::ranges::any_of(input.cells, [this](const CellRef cell) {
+                   return core_.hasPipeline(cell);
+                 });
+        }))
+      throw std::invalid_argument(
+          "mutation guards cannot freeze pipelined contract inputs");
     finalizeNativeFrame(descriptor, spec);
   }
 
@@ -538,25 +605,33 @@ VQLCompiler::compileContractValidator(const TypeExpr &type,
           ? normalizeFrameStream(std::span{&*ambientContext_, std::size_t{1}})
           : normalizeFrameStream(std::span<const CellRef>{});
   const CellRef subjectStream = normalizeFrameStream(subjects);
-  std::vector<CellRef> callerStreams;
-  callerStreams.reserve(frozen.size());
+  PreparedContractValidator prepared{.descriptor = descriptor,
+                                     .id         = internalId};
+  prepared.frozenStreams.reserve(frozen.size() + 2);
+  prepared.frozenStreams.push_back(contextStream);
+  prepared.frozenStreams.push_back(subjectStream);
   for (const auto &input : frozen)
-    if (input.slot) callerStreams.push_back(normalizeFrameStream(input.cells));
+    if (input.slot)
+      prepared.frozenStreams.push_back(normalizeFrameStream(input.cells));
+  return prepared;
+}
 
+CellRef VQLCompiler::invokeContractValidator(
+    const PreparedContractValidator &prepared) {
   const CellRef invoke =
       emitOp(OpcodeKind::InvokeFrame,
-             "#INVOKE_CONTRACT_VALIDATOR " + std::to_string(internalId));
-  emitInput(invoke, descriptor);
-  emitInput(invoke, contextStream);
-  emitInput(invoke, subjectStream);
-  std::size_t callerIndex = 0;
-  for (const auto &input : frozen) {
-    if (!input.slot) continue;
-    emitInput(invoke, callerStreams[callerIndex++]);
-  }
+             "#INVOKE_CONTRACT_VALIDATOR " + std::to_string(prepared.id));
+  emitInput(invoke, prepared.descriptor);
+  for (const CellRef stream : prepared.frozenStreams) emitInput(invoke, stream);
   const CellRef result = core_.arena().makeCell();
   emitOutput(invoke, result);
   return result;
+}
+
+CellRef
+VQLCompiler::compileContractValidator(const TypeExpr &type,
+                                      const std::span<const CellRef> subjects) {
+  return invokeContractValidator(prepareContractValidator(type, subjects));
 }
 
 std::vector<CellRef> VQLCompiler::compileReusableFrameCall(
@@ -762,12 +837,15 @@ void VQLCompiler::compileFrameDefinition(const DefDeclaration &definition) {
   const CellRef returnOpcode =
       emitNativeFrameReturn(descriptor, "#RETURN_FRAME " + definition.name);
   const auto emitMatch = [&](const TypeExpr &type,
-                             const std::vector<CellRef> &subjects) {
+                             const std::vector<CellRef> &subjects,
+                             const PreparedContractValidator &prepared,
+                             const std::string &diagnostic) {
     const CellRef matched = emitContractMatch(type, subjects, true);
     const CellRef branch =
         emitOp(OpcodeKind::BranchFalseCell, "#FRAME_PARAM_FILTER");
     emitInput(branch, matched);
     emitInput(branch, returnOpcode);
+    pushContractGuard(prepared, diagnostic, "#FRAME_PARAM_GUARD");
   };
 
   for (std::size_t index = 0; index < definition.params.size(); ++index) {
@@ -791,13 +869,38 @@ void VQLCompiler::compileFrameDefinition(const DefDeclaration &definition) {
       if (!defaultCells.empty()) emitAppendStream(slot, defaultCells);
       appendOpcode(skip);
     }
-    if (parameter.type) emitMatch(*parameter.type, {slot});
+    std::string diagnostic = definition.name + " parameter ";
+    diagnostic += std::to_string(index + 1);
+    if (const auto *name = std::get_if<std::string>(&parameter.target))
+      diagnostic += " ($" + *name + ")";
+    else if (std::holds_alternative<DestructurePattern>(parameter.target))
+      diagnostic += "destructure";
+    else
+      diagnostic += "context";
+    if ((parameter.type ||
+         std::holds_alternative<DestructurePattern>(parameter.target)) &&
+        diagnostic.size() > vm_.guardLimits().maxDiagnosticBytes)
+      throw std::invalid_argument(
+          "parameter guard diagnostic exceeds the configured text budget");
+    std::optional<PreparedContractValidator> typePrepared;
+    std::optional<PreparedContractValidator> destructurePrepared;
+    std::optional<TypeExpr> destructureType;
+    if (parameter.type)
+      typePrepared = prepareContractValidator(*parameter.type,
+                                              std::span{&slot, std::size_t{1}});
+    if (parameter.type)
+      emitMatch(*parameter.type, {slot}, *typePrepared, diagnostic);
     if (const auto *pattern =
             std::get_if<DestructurePattern>(&parameter.target)) {
-      TypeExpr shape{
-          .unionType = UnionType{.members = {PrimaryType{
-                                     .kind = ShapeType{.pattern = *pattern}}}}};
-      emitMatch(shape, {slot});
+      destructureType.emplace(TypeExpr{
+          .unionType =
+              UnionType{.members = {PrimaryType{
+                            .kind = ShapeType{.pattern = *pattern}}}}});
+      destructurePrepared = prepareContractValidator(
+          *destructureType, std::span{&slot, std::size_t{1}});
+    }
+    if (destructureType && destructurePrepared) {
+      emitMatch(*destructureType, {slot}, *destructurePrepared, diagnostic);
     } else if (const auto *name = std::get_if<std::string>(&parameter.target)) {
       streamBindings_[*name] = {slot};
       varBindings_[*name]    = slot;
@@ -823,7 +926,10 @@ void VQLCompiler::compileFrameDefinition(const DefDeclaration &definition) {
         compileExecutionBlock(*block);
       else if (const auto *path = std::get_if<PathExpression>(&statement))
         compilePathExpression(*path, ambientContext_.value_or(core_.home()));
-      else
+      else if (const auto *weave = std::get_if<WeaveStatement>(&statement)) {
+        compileExecutionBlock(
+            ExecutionBlock{.action = ActionClause{.clause = weave->effect}});
+      } else
         throw std::invalid_argument(
             "frame definition body contains an unsupported statement");
       bodyResults = lastResultCells_;

@@ -26,10 +26,11 @@ exportProgram(const VortexCore &core, const VortexVM &vm,
   if (vm.hasActiveGuards() ||
       std::ranges::any_of(vm.choiceStack(), [](const auto &choice) {
         return !choice.guardStacks.empty() ||
-               !choice.pendingGuardChecks.empty();
+               !choice.pendingGuardChecks.empty() ||
+               !choice.guardScopes.empty() || !choice.mutationGroups.empty();
       }))
-    throw std::runtime_error(
-        "export of live or restorable guards requires persisted runtime state");
+    throw std::runtime_error("export of live or restorable guards/groups "
+                             "requires persisted runtime state");
   if (vm.hasActiveFrames())
     throw std::runtime_error(
         "export of a live activation frame requires persisted runtime state");

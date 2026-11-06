@@ -152,7 +152,7 @@ TEST(VortexLogicTest, InvalidSerializedOpcodeKindsAreNotDecoded) {
   LogicHarness h;
   const auto negative = h.arena.makeScalarCell(std::int64_t{-1});
   const auto tooLarge = h.arena.makeScalarCell(
-      static_cast<std::int64_t>(OpcodeKind::CheckGuards) + 1);
+      static_cast<std::int64_t>(OpcodeKind::EndMutationGroup) + 1);
 
   EXPECT_FALSE(h.vm.getOpcodeKind(negative));
   EXPECT_FALSE(h.vm.getOpcodeKind(tooLarge));

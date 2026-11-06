@@ -133,6 +133,14 @@ VQLCompiler::opcodeMnemonic(zigzag::vortex::OpcodeKind kind) noexcept {
     return "POP_GUARD";
   case OpcodeKind::CheckGuards:
     return "CHECK_GUARDS";
+  case OpcodeKind::OpenGuardScope:
+    return "OPEN_GUARD_SCOPE";
+  case OpcodeKind::CloseGuardScope:
+    return "CLOSE_GUARD_SCOPE";
+  case OpcodeKind::BeginMutationGroup:
+    return "BEGIN_MUTATION_GROUP";
+  case OpcodeKind::EndMutationGroup:
+    return "END_MUTATION_GROUP";
   case OpcodeKind::RankBegin:
     return "RANK_BEGIN";
   case OpcodeKind::IteratorNext:
@@ -180,6 +188,50 @@ VQLCompiler::opcodeMnemonic(zigzag::vortex::OpcodeKind kind) noexcept {
   default:
     return "UNKNOWN";
   }
+}
+
+CellRef VQLCompiler::openGuardScope(const std::string_view label) {
+  const CellRef opcode = emitOp(OpcodeKind::OpenGuardScope, label);
+  const CellRef token  = core_.arena().makeCell();
+  emitOutput(opcode, token);
+  frameMutableSlots_.insert(token);
+  return token;
+}
+
+void VQLCompiler::closeGuardScope(const CellRef token,
+                                  const std::string_view label) {
+  const CellRef opcode = emitOp(OpcodeKind::CloseGuardScope, label);
+  emitInput(opcode, token);
+}
+
+void VQLCompiler::pushContractGuard(const PreparedContractValidator &prepared,
+                                    const std::string_view diagnostic,
+                                    const std::string_view label) {
+  const auto limits = vm_.guardLimits();
+  if (diagnostic.empty() || diagnostic.size() > limits.maxDiagnosticBytes)
+    throw std::invalid_argument(
+        "guard diagnostic exceeds the configured text budget");
+  const CellRef opcode = emitOp(OpcodeKind::PushGuard, label);
+  emitInput(opcode, prepared.descriptor);
+  emitInputConstant(opcode, std::string{diagnostic});
+  for (const CellRef stream : prepared.frozenStreams) emitInput(opcode, stream);
+  const CellRef token = core_.arena().makeCell();
+  emitOutput(opcode, token);
+  frameMutableSlots_.insert(token);
+}
+
+CellRef VQLCompiler::beginMutationGroup(const std::string_view label) {
+  const CellRef opcode = emitOp(OpcodeKind::BeginMutationGroup, label);
+  const CellRef token  = core_.arena().makeCell();
+  emitOutput(opcode, token);
+  frameMutableSlots_.insert(token);
+  return token;
+}
+
+void VQLCompiler::endMutationGroup(const CellRef token,
+                                   const std::string_view label) {
+  const CellRef opcode = emitOp(OpcodeKind::EndMutationGroup, label);
+  emitInput(opcode, token);
 }
 
 VQLCompiler::VQLCompiler(zigzag::vortex::VortexCore &core,
@@ -420,6 +472,9 @@ std::optional<CellRef> VQLCompiler::compileQuery(const QueryExpression &query) {
 std::optional<CellRef>
 VQLCompiler::compilePathExpression(const PathExpression &path,
                                    CellRef ctxCell) {
+  if (path.shapeProjection)
+    throw std::invalid_argument(
+        "shape projections require Vortex field-weaving lowering");
   if (path.anchor.versionPin ||
       std::ranges::any_of(path.steps, [](const PathStep &step) {
         return step.versionPin.has_value();
@@ -473,6 +528,7 @@ VQLCompiler::compilePathExpression(const PathExpression &path,
 
   if (path.cloneTail && !stream.empty()) {
     stream = emitMap(stream, [&](CellRef master) {
+      const CellRef group = beginMutationGroup("#CLONE_TAIL_GROUP");
       for (const auto &op : path.cloneTail->operands) {
         std::optional<CellRef> opCell;
         if (op.path) {
@@ -514,6 +570,7 @@ VQLCompiler::compilePathExpression(const PathExpression &path,
           emitInput(linkOp, *opCell);
         }
       }
+      endMutationGroup(group, "#CLONE_TAIL_GROUP_END");
       return std::vector<CellRef>{master};
     });
   }
@@ -577,7 +634,11 @@ std::optional<CellRef> VQLCompiler::compileAnchor(const AnchorNode &anchor) {
   case AnchorKind::Create: {
     res = core_.arena().makeCell();
     if (anchor.createValue.has_value()) {
-      const auto &cv = *anchor.createValue;
+      const auto &cv      = *anchor.createValue;
+      const CellRef group = beginMutationGroup("#ANCHOR_CREATE_GROUP");
+      std::optional<CellRef> initialValue;
+      if (cv.kind == CreateValue::Kind::Expression && cv.expr)
+        initialValue = compileValueExpr(*cv.expr, core_.home());
       if (cv.kind == CreateValue::Kind::Literal) {
         CellRef valOp = emitOp(OpcodeKind::Value, "#INIT_VALUE");
         emitInput(valOp, res);
@@ -585,15 +646,15 @@ std::optional<CellRef> VQLCompiler::compileAnchor(const AnchorNode &anchor) {
         emitInputConstant(valOp, static_cast<std::int64_t>(-1));
         emitInputConstant(valOp, cv.literal);
       } else if (cv.kind == CreateValue::Kind::Expression && cv.expr) {
-        const auto valData = compileValueExpr(*cv.expr, core_.home());
-        if (valData) {
+        if (initialValue) {
           CellRef valOp = emitOp(OpcodeKind::Value, "#INIT_VALUE");
           emitInput(valOp, res);
           emitInputConstant(valOp, static_cast<std::int64_t>(0));
           emitInputConstant(valOp, static_cast<std::int64_t>(-1));
-          emitInput(valOp, *valData);
+          emitInput(valOp, *initialValue);
         }
       }
+      endMutationGroup(group, "#ANCHOR_CREATE_GROUP_END");
     }
     break;
   }

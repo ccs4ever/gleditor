@@ -524,3 +524,24 @@ overhead and allocation counts, with no speedup claim. Guard limits are logical 
 whole-heap bounds. Compiler parameter activation, semantic mutation transactions and nested
 validation scheduling remain open; explicit CheckGuards does not establish mutation enforcement or
 complete §4.12.
+
+## Active function parameter contracts and mutation groups
+
+Supported typed function calls now activate guards after successful matches, preserving pre-match
+lexical defaults, capture ordering, variadic per-actual filtering and native recursion. Complete
+source value/create/clone/weave operations use owned rollback groups. Scope and frame exits validate
+their participating guards before retiring them, while caller guards remain active. Failed checks
+roll back before reporting named contract errors; caller choices and prior committed groups remain.
+See [iteration 30](projects/vortex-vm-only-iterations.md).
+
+Full build and all 789 affected tests from 73 suites passed with fresh independent Luna architecture
+and senior/profiler gates. The new cases include aliases, displaced endpoints, literal creation
+chains, weave repair, later defaults, native recursion, guard expiry, cursor isolation, budgets,
+source-free export/reload and host/mesh source recovery. CLI validation exercises both successful
+and rejected mutations. The profile is a cold smoke measurement with no speedup claim; runtime
+limits remain logical counts. Guarded execution permits one live guarded cursor at a time.
+
+Effectful nested validation remains explicitly refused before source effects. The compiler now also
+refuses unlowered shape projection instead of silently ignoring it. Field weaving/projection,
+return-field construction, remaining typed binding/functor/variadic/lambda work, session state and
+complete frontend/parallel lifecycle parity remain open. Full §4.12 is incomplete.

@@ -385,6 +385,14 @@ ExecutionResult VortexVM::invokeFramePrepared(
                                                       : guards->second->size();
   if (!continuation && guardBaseline != 0)
     return fail("InvokeFrame requires a continuation for active caller guards");
+  if (!continuation) {
+    const auto scopes = guardScopes_.find(cursor);
+    if ((scopes != guardScopes_.end() && scopes->second &&
+         !scopes->second->empty()) ||
+        mutationGroupActive(cursor))
+      return fail(
+          "InvokeFrame requires a continuation for caller scopes/groups");
+  }
   ActivationFrame frame(descriptorCell, nextActivationId_, guardBaseline);
   frame.returnOpcode = continuation;
   frame.parentResultSlots.assign(resultSlots.begin(), resultSlots.end());
@@ -539,6 +547,33 @@ ExecutionResult VortexVM::executeFrameOpcode(const OpcodeKind kind,
   if (frame.parentResultSlots.size() != frame.resultPorts.size())
     return fail("ReturnFrame result arity does not match its descriptor");
 
+  if (hasOwnedMutationGroup(cursor, frame.activationId))
+    return fail("ReturnFrame cannot leave an owned mutation group open");
+  if (!frame.returnOpcode) {
+    const auto scopes = guardScopes_.find(cursor);
+    if (scopes != guardScopes_.end() && scopes->second &&
+        std::ranges::any_of(*scopes->second, [&](const GuardScope &scope) {
+          return scope.ownerActivation != frame.activationId;
+        }))
+      return fail("ReturnFrame ended with an active caller guard scope");
+  }
+
+  auto participating = ownedParticipatingGuards(cursor, frame.activationId);
+  const auto pending = pendingGuardChecks_.find(cursor);
+  const bool returningValidation =
+      pending != pendingGuardChecks_.end() && pending->second &&
+      pending->second->checkOpcode == opcode &&
+      pending->second->ownerActivation == frame.activationId;
+  if (!participating.empty() || returningValidation) {
+    const auto validation = driveGuardValidation(
+        cursor, opcode,
+        std::make_shared<const std::vector<RuntimeGuardRef>>(
+            std::move(participating)));
+    if (!validation.execution.success ||
+        validation.state == GuardDriveState::Suspended)
+      return validation.execution;
+  }
+
   const auto guards     = guardStacks_.find(cursor);
   const auto guardCount = guards == guardStacks_.end() || !guards->second
                               ? 0
@@ -578,6 +613,7 @@ ExecutionResult VortexVM::executeFrameOpcode(const OpcodeKind kind,
     results.push_back({port.kind, std::move(cells)});
   }
 
+  auto previousGuardScopes        = guardScopes_;
   auto previousGuards             = guardStacks_;
   auto previousReferences         = cellReferences_;
   auto previousStreams            = streams_;
@@ -611,6 +647,7 @@ ExecutionResult VortexVM::executeFrameOpcode(const OpcodeKind kind,
       }
     }
 
+    trimGuardScopes(cursor, frame.activationId);
     if (retainedGuards) {
       if ((*retainedGuards)->empty())
         guardStacks_.erase(cursor);
@@ -643,6 +680,7 @@ ExecutionResult VortexVM::executeFrameOpcode(const OpcodeKind kind,
     arena.discard(mark);
   } catch (const std::exception &error) {
     arena.release(mark);
+    guardScopes_.swap(previousGuardScopes);
     guardStacks_.swap(previousGuards);
     cellReferences_.swap(previousReferences);
     streams_.swap(previousStreams);

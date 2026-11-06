@@ -971,3 +971,72 @@ Fresh independent Luna architecture and senior/profiler gates accepted this boun
 
 Logs: `/tmp/vql-guards-build.log`, `/tmp/vql-guards-tests.log`, `/tmp/vql-guards-profile.log`,
 `/tmp/vql-guards-format.log`, `/tmp/vql-guards-cli.log`.
+
+## Iteration 30: active parameter guards and atomic source mutations
+
+Supported typed function parameters now install runtime guards after each completed successful
+match. Validator preparation freezes that contract's original lexical streams, subjects and context
+before matching publishes captures. A completed type match publishes captures before preparing the
+synthetic destructuring match, preserving their existing ordering. Earlier guards are active while
+later parameter defaults execute. Variadic contracts retain their per-actual checks. Parameter
+mismatch still returns empty without executing the body or return promise.
+
+Inline calls use owned guard scopes and close them on success and partial-filter exits. Native
+frames retain recursive execution and validate their own participating guards before return. A guard
+participates only when a source mutation runs while it is active. Scope exit validates those
+obligations, removes them from all enclosing groups, then retires the guard; an expired helper's
+type does not constrain later caller writes. Caller guards remain eligible for repair at an outer
+weave boundary. No cached default result replaces revalidation of the current owner.
+
+Source value replacement, complete creation lists with initialization/attachment, clone fanout and
+clone tails, and explicit weave effect sequences now emit mutation groups. Nested groups defer their
+checks to the enclosing group, allowing intermediate invalid state to be repaired. The outer end
+runs the shared validator frames asynchronously. Contract failure restores the exact owned choice
+checkpoint before reporting the named error, preserving caller choices and earlier committed groups.
+Group checkpoints use monotonic identities; ordinary Cut/Fail cannot consume them or replay a group.
+Snapshots include groups, scopes, participants, pending validation, registers and activation state;
+rollback restores cursor, stream and branch-path state as well. Fuel and successful frame
+allocations remain cumulative rather than being refunded.
+
+Per-call cycle exhaustion remains resumable. A separate cumulative group-cycle cap, scope/group
+depth and participant caps bound this protocol; guard captures and scoped snapshots retain their
+existing logical limits. Scope/group limit failures are classified as frontend Budget errors.
+Cancellation and terminal errors unwind owned groups, and canonical close clears scope/pending
+state. These counts are not a whole-heap or every-allocation bound.
+
+The VM serializes execution while another cursor has current guards, scopes, pending validation or
+an active group, closing the scalar-only cursor alias bypass. Historical choice snapshots alone do
+not extend an expired guard's lifetime. Mutating pre/postcondition clauses refuse before outer
+instruction effects while guarded state is present; parameter pipeline preflight likewise checks
+unsupported combinations before execution. Export refuses live/restorable scope/group state and
+relocates compiled graph references. Sealed Vortex mesh artifacts and raw stdlib guard/group routes
+remain explicitly unsupported; Vquery source routes execute the compiled mutation graphs.
+
+User mutation during a pending guard validation still refuses before its first source effect. A
+bounded scheduler for effectful nested validation remains unfinished. This stage also exposes an old
+compiler defect by explicitly refusing `PathExpression::shapeProjection`, which was previously
+silently ignored. Shape field weaving/projection, return-field construction, remaining typed binding
+and functor/variadic/lambda work, session and route/lifecycle parity still prevent §4.12 completion.
+There is no direct evaluator fallback or native-recursion-to-inline substitution.
+
+The disabled smoke probe compiles once per fresh case and separates compilation from execution. It
+performs 32/128 repeated typed or untyped `put` calls on one Int cell using `value(7)`; the control
+still includes scopes and mutation groups. On the Threadripper 1950X with Clang `-O3 -g`, single
+cold typed/untyped observations were 5,637/2,093 microseconds at 32 calls and 23,522/7,994 at 128.
+Compile observations were 509/155 and 342/237 microseconds. VM cycles were 3,141/1,637 and
+12,549/6,533; runtime arena growth was 736/64 and 2,944/256 cells. Emitted opcodes were 215/75.
+These rows describe the whole fixture and added contract costs, not isolated per-call latency,
+stable benchmarks or a speedup.
+
+Validation: full `make -j$(nproc)` exited zero and all 789 affected tests from 73 suites passed.
+Twenty-nine new enabled cases cover source mutation/filter/alias/default behavior, full creation and
+clone groups, weave repair and rollback, native recursion, caller/callee lifetimes, exact choice
+ownership, cancellation/resume/hard-cycle budgets, mutating condition refusal, scalar cursor
+isolation, and source-free exported graph reload. Host and mesh Vquery source tests cover success,
+named failure and later recovery. A real headless Vquery CLI returns `7` through emitted PushGuard
+and BeginMutationGroup instructions, and rejects a string write with the parameter's named
+TypeContractError. Independent fresh Luna architecture and senior/profiler gates accepted this
+bounded implementation. Repository formatting with clang-format 19 is the final gate.
+
+Logs: `/tmp/vql-mutations-build.log`, `/tmp/vql-mutations-tests.log`,
+`/tmp/vql-mutations-profile.log`, `/tmp/vql-mutations-cli.log`, `/tmp/vql-mutations-format.log`.

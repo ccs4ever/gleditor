@@ -121,6 +121,10 @@ enum class OpcodeKind : std::uint8_t {
   PushGuard,
   PopGuard,
   CheckGuards,
+  OpenGuardScope,
+  CloseGuardScope,
+  BeginMutationGroup,
+  EndMutationGroup,
 };
 
 struct FrameDescriptorError {
@@ -166,6 +170,11 @@ struct GuardLimits {
   std::size_t maxGuards{128};
   std::size_t maxCapturedCells{1'048'576};
   std::size_t maxDiagnosticBytes{1024};
+  std::size_t maxGuardScopes{128};
+  std::size_t maxMutationGroupDepth{64};
+  std::size_t maxGroupParticipants{1024};
+  // Logical VM cycles; ArenaManifold fuel still bounds lower-level work.
+  std::uint64_t maxMutationGroupCycles{1'000'000};
 };
 
 struct RuntimeGuard {
@@ -174,18 +183,54 @@ struct RuntimeGuard {
   std::string diagnostic;
   std::vector<std::vector<CellRef>> arguments;
   std::optional<std::uint64_t> ownerActivation;
+  std::optional<CellRef> ownerScope;
 
   RuntimeGuard(CellRef tokenCell, CellRef frameDescriptor,
                std::string diagnosticText,
                std::vector<std::vector<CellRef>> actuals,
-               std::optional<std::uint64_t> owner)
+               std::optional<std::uint64_t> owner,
+               std::optional<CellRef> scope = std::nullopt)
       : token(tokenCell), descriptor(frameDescriptor),
         diagnostic(std::move(diagnosticText)), arguments(std::move(actuals)),
-        ownerActivation(owner) {}
+        ownerActivation(owner), ownerScope(scope) {}
 };
 using RuntimeGuardRef   = std::shared_ptr<const RuntimeGuard>;
 using RuntimeGuardStack = std::shared_ptr<const std::vector<RuntimeGuardRef>>;
 using GuardStackMap     = std::unordered_map<CellRef, RuntimeGuardStack>;
+
+struct GuardScope {
+  CellRef token;
+  std::size_t guardBaseline{};
+  std::optional<std::uint64_t> ownerActivation;
+
+  GuardScope(CellRef marker, std::size_t baseline,
+             std::optional<std::uint64_t> owner)
+      : token(marker), guardBaseline(baseline), ownerActivation(owner) {}
+};
+using GuardScopeStack = std::shared_ptr<const std::vector<GuardScope>>;
+using GuardScopeMap   = std::unordered_map<CellRef, GuardScopeStack>;
+
+struct MutationGroup {
+  MutationGroup(std::uint64_t identity, std::uint64_t checkpointIdentity,
+                CellRef marker, std::size_t checkpoint,
+                std::optional<std::uint64_t> ownerId,
+                std::optional<CellRef> scope, std::uint64_t cycleBaseline)
+      : id(identity), choiceId(checkpointIdentity), token(marker),
+        checkpointIndex(checkpoint), ownerActivation(ownerId),
+        ownerScope(scope), startTotalCycles(cycleBaseline) {}
+
+  std::uint64_t id;
+  std::uint64_t choiceId;
+  CellRef token;
+  std::size_t checkpointIndex{};
+  std::optional<std::uint64_t> ownerActivation;
+  std::optional<CellRef> ownerScope;
+  // totalCycles_ is monotonic across choice restore and resumable run calls.
+  std::uint64_t startTotalCycles;
+  std::vector<RuntimeGuardRef> participants;
+};
+using MutationGroupStack = std::shared_ptr<const std::vector<MutationGroup>>;
+using MutationGroupMap   = std::unordered_map<CellRef, MutationGroupStack>;
 
 struct PendingGuardCheck {
   CellRef checkOpcode;
@@ -277,7 +322,18 @@ struct ChoicePoint {
   std::unordered_map<CellRef, ActivationStack> activationFrames;
   GuardStackMap guardStacks;
   PendingGuardMap pendingGuardChecks;
+  GuardScopeMap guardScopes;
+  MutationGroupMap mutationGroups;
+  std::optional<std::uint64_t> mutationCheckpointId;
+  std::uint64_t choiceId{};
   bool scoped{false};
+};
+
+enum class GuardDriveState : std::uint8_t { Complete, Suspended };
+
+struct GuardDriveResult {
+  ExecutionResult execution;
+  GuardDriveState state{GuardDriveState::Complete};
 };
 
 [[nodiscard]] std::string formatDeweyPath(std::span<const std::uint16_t> path);
@@ -370,6 +426,10 @@ public:
   }
   /// Includes runtime state retained by choice snapshots.
   [[nodiscard]] bool hasActiveGuards() const noexcept;
+  [[nodiscard]] std::vector<RuntimeGuardRef>
+  ownedParticipatingGuards(CellRef cursor, std::uint64_t activationId) const;
+  [[nodiscard]] bool hasOwnedMutationGroup(CellRef cursor,
+                                           std::uint64_t activationId) const;
   [[nodiscard]] std::size_t activationDepth(CellRef cursor) const noexcept;
   [[nodiscard]] bool hasActiveFrames() const noexcept;
   [[nodiscard]] std::optional<CellRef> resultCell(CellRef cursor,
@@ -404,12 +464,25 @@ public:
 private:
   ExecutionResult executeFrameOpcode(OpcodeKind kind, CellRef opcode,
                                      CellRef cursor);
+  ExecutionResult stepImpl(CellRef cursor);
   ExecutionResult invokeFramePrepared(
       CellRef descriptorCell, std::span<const std::vector<CellRef>> arguments,
       std::span<const CellRef> resultSlots, CellRef cursor,
       std::optional<CellRef> continuation, std::optional<CellRef> failureOp);
   ExecutionResult executeGuardOpcode(OpcodeKind kind, CellRef opcode,
                                      CellRef cursor);
+  ExecutionResult executeMutationScopeOpcode(OpcodeKind kind, CellRef opcode,
+                                             CellRef cursor);
+  GuardDriveResult driveGuardValidation(CellRef cursor, CellRef resumeOpcode,
+                                        RuntimeGuardStack guards);
+  void trimGuardScopes(CellRef cursor, std::uint64_t ownerActivation);
+  void abortOwnedMutationGroups(CellRef cursor,
+                                std::optional<std::uint64_t> owner) noexcept;
+  void removeValidatedGuardObligations(CellRef cursor,
+                                       std::span<const RuntimeGuardRef> guards);
+  [[nodiscard]] bool mutationGroupActive(CellRef cursor) const noexcept;
+  [[nodiscard]] bool hasPendingGuardValidation(CellRef cursor) const noexcept;
+  [[nodiscard]] std::vector<RuntimeGuardRef> activeGuards(CellRef cursor) const;
   [[nodiscard]] std::optional<std::uint64_t>
   currentActivationId(CellRef cursor) const;
   [[nodiscard]] CellRef runtimeSlot(CellRef slot) const;
@@ -497,8 +570,12 @@ private:
   std::unordered_map<CellRef, ActivationStack> activationFrames_;
   GuardStackMap guardStacks_;
   PendingGuardMap pendingGuardChecks_;
+  GuardScopeMap guardScopes_;
+  MutationGroupMap mutationGroups_;
   GuardLimits guardLimits_;
   std::uint64_t nextActivationId_{1};
+  std::uint64_t nextMutationGroupId_{1};
+  std::uint64_t nextChoiceId_{1};
   FrameLimits frameLimits_;
   ScopedChoiceLimits scopedChoiceLimits_;
   std::size_t frameBackingCellsAllocated_{};

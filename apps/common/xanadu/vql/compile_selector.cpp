@@ -43,9 +43,13 @@ std::vector<CellRef> VQLCompiler::compileSelector(const PathStep &step,
       }
     } else {
       for (CellRef current : stream) {
+        const CellRef group = beginMutationGroup("#CREATE_CELL_GROUP");
         std::vector<CellRef> createdCells;
         CellRef attachPoint = emitExtreme(current, dim, zigzag::DimVector::POS);
         for (const auto &createVal : sd.creates) {
+          std::optional<CellRef> initialValue;
+          if (createVal.kind == CreateValue::Kind::Expression && createVal.expr)
+            initialValue = compileValueExpr(*createVal.expr, current);
           CellRef newOp = emitOp(OpcodeKind::New, "#MINT_CELL");
           emitInput(newOp, attachPoint);
           emitInputConstant(newOp, static_cast<std::int64_t>(dim));
@@ -68,18 +72,18 @@ std::vector<CellRef> VQLCompiler::compileSelector(const PathStep &step,
             emitInputConstant(valOp, createVal.literal);
           } else if (createVal.kind == CreateValue::Kind::Expression &&
                      createVal.expr) {
-            const auto valData = compileValueExpr(*createVal.expr, current);
-            if (valData) {
+            if (initialValue) {
               CellRef valOp = emitOp(OpcodeKind::Value, "#INIT_VALUE");
               emitInput(valOp, freshCell);
               emitInputConstant(valOp, static_cast<std::int64_t>(0));
               emitInputConstant(valOp, static_cast<std::int64_t>(-1));
-              emitInput(valOp, *valData);
+              emitInput(valOp, *initialValue);
             }
           }
           createdCells.push_back(freshCell);
           attachPoint = freshCell;
         }
+        endMutationGroup(group, "#CREATE_CELL_GROUP_END");
 
         nextStream.insert(nextStream.end(), createdCells.begin(),
                           createdCells.end());
@@ -108,30 +112,34 @@ std::vector<CellRef> VQLCompiler::compileSelector(const PathStep &step,
           emitOutput(valOp, result);
           nextStream.push_back(result);
         } else {
+          const CellRef group    = beginMutationGroup("#VALUE_REPLACE_GROUP");
           const auto replacement = compileValueExpr(fn.args[0], current);
-          if (!replacement) continue;
-          const auto offset = fn.args.size() >= 2
-                                  ? compileValueExpr(fn.args[1], current)
-                                  : std::nullopt;
-          if (fn.args.size() >= 2 && !offset) continue;
-          const auto length = fn.args.size() >= 3
-                                  ? compileValueExpr(fn.args[2], current)
-                                  : std::nullopt;
-          if (fn.args.size() >= 3 && !length) continue;
-          CellRef valOp = emitOp(OpcodeKind::Value, "#VALUE");
-          emitInput(valOp, current);
-          if (offset) {
-            emitInput(valOp, *offset);
-          } else {
-            emitInputConstant(valOp, static_cast<std::int64_t>(0));
+          std::optional<CellRef> offset;
+          std::optional<CellRef> length;
+          if (replacement && fn.args.size() >= 2)
+            offset = compileValueExpr(fn.args[1], current);
+          if (replacement && (fn.args.size() < 2 || offset) &&
+              fn.args.size() >= 3)
+            length = compileValueExpr(fn.args[2], current);
+          if (replacement && (fn.args.size() < 2 || offset) &&
+              (fn.args.size() < 3 || length)) {
+            CellRef valOp = emitOp(OpcodeKind::Value, "#VALUE");
+            emitInput(valOp, current);
+            if (offset) {
+              emitInput(valOp, *offset);
+            } else {
+              emitInputConstant(valOp, static_cast<std::int64_t>(0));
+            }
+            if (length) {
+              emitInput(valOp, *length);
+            } else {
+              emitInputConstant(valOp,
+                                std::numeric_limits<std::int64_t>::max());
+            }
+            emitInput(valOp, *replacement);
+            nextStream.push_back(current);
           }
-          if (length) {
-            emitInput(valOp, *length);
-          } else {
-            emitInputConstant(valOp, std::numeric_limits<std::int64_t>::max());
-          }
-          emitInput(valOp, *replacement);
-          nextStream.push_back(current);
+          endMutationGroup(group, "#VALUE_REPLACE_GROUP_END");
         }
       }
     } else if (fn.name == "link" && fn.args.size() >= 2) {
@@ -165,6 +173,7 @@ std::vector<CellRef> VQLCompiler::compileSelector(const PathStep &step,
       }
 
       DimRef dim            = resolveDimension(dimName);
+      const CellRef group   = beginMutationGroup("#CLONE_FANOUT_GROUP");
       const auto targetCell = compileValueExpr(fn.args[1], core_.home());
 
       std::vector<CellRef> attachedClones;
@@ -197,6 +206,7 @@ std::vector<CellRef> VQLCompiler::compileSelector(const PathStep &step,
       }
 
       nextStream = std::move(attachedClones);
+      endMutationGroup(group, "#CLONE_FANOUT_GROUP_END");
     } else if (!definitions_.contains(fn.name) && fn.name == "string") {
       for (const auto current : stream) {
         const auto result = compileBuiltinInvocation(

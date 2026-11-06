@@ -42,7 +42,10 @@ bool budgetFailure(const std::string_view message) {
          lowered.find("work limit") != std::string::npos ||
          lowered.find("activation frame depth limit") != std::string::npos ||
          (lowered.find("scoped choice") != std::string::npos &&
-          lowered.find("limit") != std::string::npos);
+          lowered.find("limit") != std::string::npos) ||
+         (lowered.find("limit") != std::string::npos &&
+          (lowered.find("guard-scope") != std::string::npos ||
+           lowered.find("mutation-group") != std::string::npos));
 }
 
 QueryExecutionError runtimeError(const std::exception &error) {

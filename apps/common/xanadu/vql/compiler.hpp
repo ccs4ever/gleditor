@@ -150,9 +150,25 @@ private:
   void compilePendingFrameDefinitions();
   void compileFrameDefinition(const DefDeclaration &definition);
   class IsolatedCompileState;
+  struct PreparedContractValidator {
+    zigzag::CellRef descriptor;
+    std::size_t id;
+    std::vector<zigzag::CellRef> frozenStreams;
+  };
+  PreparedContractValidator
+  prepareContractValidator(const TypeExpr &type,
+                           std::span<const zigzag::CellRef> subjects);
+  zigzag::CellRef
+  invokeContractValidator(const PreparedContractValidator &prepared);
   zigzag::CellRef
   compileContractValidator(const TypeExpr &type,
                            std::span<const zigzag::CellRef> subjects);
+  zigzag::CellRef openGuardScope(std::string_view label);
+  void closeGuardScope(zigzag::CellRef token, std::string_view label);
+  void pushContractGuard(const PreparedContractValidator &prepared,
+                         std::string_view diagnostic, std::string_view label);
+  zigzag::CellRef beginMutationGroup(std::string_view label);
+  void endMutationGroup(zigzag::CellRef token, std::string_view label);
   void finalizeNativeFrame(
       zigzag::CellRef descriptor, zigzag::vortex::FrameDescriptorSpec &spec,
       std::optional<std::string_view> definitionName = std::nullopt);

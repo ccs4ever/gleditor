@@ -28,6 +28,16 @@ namespace {
 
 constexpr std::size_t maxParameterPipelineInstructions = 1000;
 
+bool sourceMutatingPrimitive(const OpcodeKind kind,
+                             const std::size_t arity) noexcept {
+  return ((kind == OpcodeKind::Link || kind == OpcodeKind::Value) &&
+          arity >= 4) ||
+         ((kind == OpcodeKind::New || kind == OpcodeKind::Break) &&
+          arity >= 3) ||
+         (kind == OpcodeKind::Splice && arity >= 4) ||
+         (kind == OpcodeKind::Clone && arity >= 1);
+}
+
 // Views borrow snapshot collections so resource preflight never allocates them.
 struct ChoiceSnapshotView {
   std::span<const std::uint16_t> deweyPath;
@@ -39,6 +49,8 @@ struct ChoiceSnapshotView {
   const std::unordered_map<CellRef, ActivationStack> &activationFrames;
   const GuardStackMap &guardStacks;
   const PendingGuardMap &pendingGuardChecks;
+  const GuardScopeMap &guardScopes;
+  const MutationGroupMap &mutationGroups;
 };
 
 template <class Snapshot>
@@ -112,6 +124,18 @@ std::size_t countSnapshotEntries(const Snapshot &snapshot, ArenaManifold &arena,
       add(guard->arguments.size());
       for (const auto &argument : guard->arguments) add(argument.size());
     }
+  }
+  add(snapshot.guardScopes.size());
+  for (const auto &[cursor, scopes] : snapshot.guardScopes) {
+    (void)cursor;
+    if (scopes) add(scopes->size());
+  }
+  add(snapshot.mutationGroups.size());
+  for (const auto &[cursor, groups] : snapshot.mutationGroups) {
+    (void)cursor;
+    if (!groups) continue;
+    add(groups->size());
+    for (const auto &group : *groups) add(group.participants.size());
   }
   return count;
 }
@@ -213,10 +237,141 @@ VortexVM *VortexVM::setGuardLimits(const GuardLimits limits) {
 
 bool VortexVM::hasActiveGuards() const noexcept {
   return !guardStacks_.empty() || !pendingGuardChecks_.empty() ||
+         !guardScopes_.empty() || !mutationGroups_.empty() ||
          std::ranges::any_of(choiceStack_, [](const ChoicePoint &choice) {
            return !choice.guardStacks.empty() ||
-                  !choice.pendingGuardChecks.empty();
+                  !choice.pendingGuardChecks.empty() ||
+                  !choice.guardScopes.empty() || !choice.mutationGroups.empty();
          });
+}
+
+std::vector<RuntimeGuardRef>
+VortexVM::activeGuards(const CellRef cursor) const {
+  const auto found = guardStacks_.find(cursor);
+  return found == guardStacks_.end() || !found->second
+             ? std::vector<RuntimeGuardRef>{}
+             : *found->second;
+}
+
+std::vector<RuntimeGuardRef>
+VortexVM::ownedParticipatingGuards(const CellRef cursor,
+                                   const std::uint64_t activationId) const {
+  std::vector<RuntimeGuardRef> result;
+  const auto found = mutationGroups_.find(cursor);
+  if (found == mutationGroups_.end() || !found->second) return result;
+  std::unordered_set<CellRef> seen;
+  for (const auto &group : *found->second) {
+    for (const auto &guard : group.participants) {
+      core_.arena().consumeWork();
+      if (guard && guard->ownerActivation == activationId &&
+          seen.insert(guard->token).second)
+        result.push_back(guard);
+    }
+  }
+  return result;
+}
+
+bool VortexVM::hasOwnedMutationGroup(const CellRef cursor,
+                                     const std::uint64_t activationId) const {
+  const auto found = mutationGroups_.find(cursor);
+  return found != mutationGroups_.end() && found->second &&
+         std::ranges::any_of(*found->second, [activationId](const auto &group) {
+           return group.ownerActivation == activationId;
+         });
+}
+
+bool VortexVM::mutationGroupActive(const CellRef cursor) const noexcept {
+  const auto found = mutationGroups_.find(cursor);
+  return found != mutationGroups_.end() && found->second &&
+         !found->second->empty();
+}
+
+bool VortexVM::hasPendingGuardValidation(const CellRef cursor) const noexcept {
+  return pendingGuardChecks_.contains(cursor);
+}
+
+void VortexVM::removeValidatedGuardObligations(
+    const CellRef cursor, const std::span<const RuntimeGuardRef> guards) {
+  if (guards.empty()) return;
+  std::unordered_set<CellRef> tokens;
+  tokens.reserve(guards.size());
+  for (const auto &guard : guards) {
+    core_.arena().consumeWork();
+    if (guard) tokens.insert(guard->token);
+  }
+  const auto found = mutationGroups_.find(cursor);
+  if (found == mutationGroups_.end() || !found->second) return;
+  auto nextGroups =
+      std::make_shared<std::vector<MutationGroup>>(*found->second);
+  for (auto &group : *nextGroups) {
+    std::erase_if(group.participants, [&](const RuntimeGuardRef &guard) {
+      return guard && tokens.contains(guard->token);
+    });
+  }
+  auto nextMap = mutationGroups_;
+  if (nextGroups->empty())
+    nextMap.erase(cursor);
+  else
+    nextMap[cursor] = std::move(nextGroups);
+  mutationGroups_.swap(nextMap);
+}
+
+void VortexVM::trimGuardScopes(const CellRef cursor,
+                               const std::uint64_t ownerActivation) {
+  const auto found = guardScopes_.find(cursor);
+  if (found == guardScopes_.end() || !found->second) return;
+  auto next = std::make_shared<std::vector<GuardScope>>(*found->second);
+  while (!next->empty() && next->back().ownerActivation == ownerActivation)
+    next->pop_back();
+  auto nextMap = guardScopes_;
+  if (next->empty())
+    nextMap.erase(cursor);
+  else
+    nextMap[cursor] = std::move(next);
+  guardScopes_.swap(nextMap);
+}
+
+void VortexVM::abortOwnedMutationGroups(
+    const CellRef cursor, const std::optional<std::uint64_t> owner) noexcept {
+  const auto found = mutationGroups_.find(cursor);
+  if (found == mutationGroups_.end() || !found->second ||
+      found->second->empty())
+    return;
+  const auto groupStack = found->second;
+  std::optional<std::size_t> groupIndex;
+  for (std::size_t index = 0; index < groupStack->size(); ++index) {
+    if (!owner || groupStack->at(index).ownerActivation == owner) {
+      groupIndex = index;
+      break;
+    }
+  }
+  if (!groupIndex) return;
+  const auto &group = groupStack->at(*groupIndex);
+  if (group.checkpointIndex >= choiceStack_.size() ||
+      choiceStack_[group.checkpointIndex].choiceId != group.choiceId)
+    return;
+  while (choiceStack_.size() > group.checkpointIndex + 1) {
+    core_.arena().discard(choiceStack_.back().mark);
+    choiceStack_.pop_back();
+  }
+  ChoicePoint saved = std::move(choiceStack_.back());
+  choiceStack_.pop_back();
+  core_.arena().release(saved.mark);
+  if (const auto pc = cursorPC_.find(cursor); pc != cursorPC_.end())
+    pc->second = saved.altOp;
+  cellReferences_.swap(saved.cellReferences);
+  streams_.swap(saved.streams);
+  iterators_.swap(saved.iterators);
+  streamSlots_.swap(saved.streamSlots);
+  iteratorSlots_.swap(saved.iteratorSlots);
+  activationFrames_.swap(saved.activationFrames);
+  guardStacks_.swap(saved.guardStacks);
+  pendingGuardChecks_.swap(saved.pendingGuardChecks);
+  guardScopes_.swap(saved.guardScopes);
+  mutationGroups_.swap(saved.mutationGroups);
+  currentDeweyPath_.swap(saved.deweyPath);
+  streamCursor_ = saved.streamCursor;
+  pruneResumeState();
 }
 
 std::optional<std::uint64_t>
@@ -275,7 +430,7 @@ std::optional<OpcodeKind> VortexVM::getOpcodeKind(CellRef opCell) const {
   auto val = core_.arena().asInt64(opCell);
   if (val && *val >= 0 &&
       static_cast<std::uint64_t>(*val) <=
-          static_cast<std::uint64_t>(OpcodeKind::CheckGuards)) {
+          static_cast<std::uint64_t>(OpcodeKind::EndMutationGroup)) {
     return static_cast<OpcodeKind>(*val);
   }
   return std::nullopt;
@@ -318,8 +473,11 @@ void VortexVM::setCursorOpcode(CellRef cursor, std::optional<CellRef> op) {
   }
   cursorPC_[cursor] = op;
   if (!op) {
+    abortOwnedMutationGroups(cursor, std::nullopt);
+    cursorPC_[cursor] = std::nullopt;
     clearResumeState(cursor);
     guardStacks_.erase(cursor);
+    guardScopes_.erase(cursor);
     if (const auto pending = pendingGuardChecks_.find(cursor);
         pending != pendingGuardChecks_.end() && pending->second) {
       cellReferences_.erase(pending->second->resultSlot);
@@ -635,9 +793,9 @@ void VortexVM::enforceScopedChoiceBudget(const bool addScoped) {
     throw std::length_error("scoped choice total depth limit exceeded");
   }
   const ChoiceSnapshotView current{
-      currentDeweyPath_, cellReferences_, streams_,
-      iterators_,        streamSlots_,    iteratorSlots_,
-      activationFrames_, guardStacks_,    pendingGuardChecks_};
+      currentDeweyPath_,   cellReferences_, streams_,          iterators_,
+      streamSlots_,        iteratorSlots_,  activationFrames_, guardStacks_,
+      pendingGuardChecks_, guardScopes_,    mutationGroups_};
   // The current view is the prospective snapshot, not an additional copy.
   std::size_t total = countSnapshotEntries(
       current, core_.arena(), scopedChoiceLimits_.maxSnapshotEntries);
@@ -676,6 +834,14 @@ void VortexVM::pushChoicePointImpl(const std::optional<CellRef> cursor,
     throw std::invalid_argument(
         "choice point cursor does not match the active scoped choice");
   }
+  if (const auto active = std::ranges::find_if(mutationGroups_,
+                                               [](const auto &entry) {
+                                                 return entry.second &&
+                                                        !entry.second->empty();
+                                               });
+      active != mutationGroups_.end() && (!cursor || active->first != *cursor))
+    throw std::invalid_argument(
+        "choice point cursor does not match the active mutation group");
   if (scoped || hasScopedChoices()) enforceScopedChoiceBudget(scoped);
   std::optional<CellRef> stackFrame;
   if (cursor && core_.arena().contains(*cursor)) {
@@ -690,6 +856,8 @@ void VortexVM::pushChoicePointImpl(const std::optional<CellRef> cursor,
     altDewey.push_back(1);
     nextDewey.push_back(0);
   }
+  if (nextChoiceId_ == 0)
+    throw std::overflow_error("choice-point identity space exhausted");
   choiceStack_.push_back(ChoicePoint{
       .cursor             = cursor,
       .altOp              = altOp,
@@ -708,6 +876,9 @@ void VortexVM::pushChoicePointImpl(const std::optional<CellRef> cursor,
       .activationFrames   = activationFrames_,
       .guardStacks        = guardStacks_,
       .pendingGuardChecks = pendingGuardChecks_,
+      .guardScopes        = guardScopes_,
+      .mutationGroups     = mutationGroups_,
+      .choiceId           = nextChoiceId_++,
       .scoped             = scoped,
   });
   // Finish all allocating snapshots before taking a LIFO arena mark.
@@ -728,7 +899,16 @@ bool VortexVM::backtrack(const std::optional<CellRef> cursor) {
     throw std::invalid_argument(
         "backtrack cursor does not match the active scoped choice");
   }
+  if (const auto active = std::ranges::find_if(mutationGroups_,
+                                               [](const auto &entry) {
+                                                 return entry.second &&
+                                                        !entry.second->empty();
+                                               });
+      active != mutationGroups_.end() && (!cursor || active->first != *cursor))
+    throw std::invalid_argument(
+        "backtrack cursor does not match the active mutation group");
   while (!choiceStack_.empty()) {
+    if (choiceStack_.back().mutationCheckpointId) return false;
     ChoicePoint cp = choiceStack_.back();
     choiceStack_.pop_back();
     if (!cursor || cp.cursor == cursor || !cp.cursor) {
@@ -742,6 +922,8 @@ bool VortexVM::backtrack(const std::optional<CellRef> cursor) {
       activationFrames_   = std::move(cp.activationFrames);
       guardStacks_        = std::move(cp.guardStacks);
       pendingGuardChecks_ = std::move(cp.pendingGuardChecks);
+      guardScopes_        = std::move(cp.guardScopes);
+      mutationGroups_     = std::move(cp.mutationGroups);
       pruneResumeState();
       if (cp.scoped || !oraclePath_.empty() || cutCallback_) {
         currentDeweyPath_ = cp.deweyPath;
@@ -760,6 +942,15 @@ bool VortexVM::backtrack(const std::optional<CellRef> cursor) {
 }
 
 void VortexVM::cut(std::size_t cutBarrier) {
+  if (activeCursor_) {
+    const auto active =
+        std::ranges::find_if(mutationGroups_, [](const auto &entry) {
+          return entry.second && !entry.second->empty();
+        });
+    if (active != mutationGroups_.end() && active->first != *activeCursor_)
+      throw std::invalid_argument(
+          "cut cursor does not match the active mutation group");
+  }
   if (activeCursor_ &&
       std::ranges::any_of(
           choiceStack_.begin() + static_cast<std::ptrdiff_t>(
@@ -770,6 +961,14 @@ void VortexVM::cut(std::size_t cutBarrier) {
     throw std::invalid_argument(
         "cut cursor does not match the active scoped choice");
   }
+  const auto firstRemoved =
+      choiceStack_.begin() +
+      static_cast<std::ptrdiff_t>(std::min(cutBarrier, choiceStack_.size()));
+  if (std::ranges::any_of(firstRemoved, choiceStack_.end(),
+                          [](const ChoicePoint &choice) {
+                            return choice.mutationCheckpointId.has_value();
+                          }))
+    throw std::invalid_argument("cut cannot cross an active mutation group");
   const auto firstScope = std::ranges::find_if(
       choiceStack_, [](const ChoicePoint &choice) { return choice.scoped; });
   const auto scopeBoundary =
@@ -822,6 +1021,8 @@ VortexVM *VortexVM::abortScopedChoices(const CellRef cursor) noexcept {
   activationFrames_.swap(saved.activationFrames);
   guardStacks_.swap(saved.guardStacks);
   pendingGuardChecks_.swap(saved.pendingGuardChecks);
+  guardScopes_.swap(saved.guardScopes);
+  mutationGroups_.swap(saved.mutationGroups);
   currentDeweyPath_.swap(saved.deweyPath);
   streamCursor_ = saved.streamCursor;
   pruneResumeState();
@@ -883,14 +1084,36 @@ void VortexVM::runPipeline(CellRef paramCell) {
     if (!preflightSeen.insert(*preflightOp).second)
       throw std::invalid_argument("cyclic parameter pipeline");
     const auto kind = getOpcodeKind(*preflightOp).value_or(OpcodeKind::Nop);
+    const auto pipelineInputs = core_.inputsOf(*preflightOp);
+    const bool mutatingPrimitive =
+        ((kind == OpcodeKind::Link || kind == OpcodeKind::Value) &&
+         pipelineInputs.size() >= 4) ||
+        (kind == OpcodeKind::New && pipelineInputs.size() >= 3) ||
+        (kind == OpcodeKind::Break && pipelineInputs.size() >= 3) ||
+        (kind == OpcodeKind::Splice && pipelineInputs.size() >= 4) ||
+        (kind == OpcodeKind::Clone && !pipelineInputs.empty());
+    if (mutatingPrimitive && activeCursor_) {
+      const auto active  = guardStacks_.find(*activeCursor_);
+      const bool guarded = active != guardStacks_.end() && active->second &&
+                           !active->second->empty();
+      if (guarded && hasPendingGuardValidation(*activeCursor_))
+        throw std::invalid_argument(
+            "source mutation refused during pending guard validation");
+      if (guarded && !mutationGroupActive(*activeCursor_))
+        throw std::invalid_argument(
+            "guarded source mutation requires an atomic mutation group");
+    }
     if (kind == OpcodeKind::Halt || kind == OpcodeKind::Return) {
       preflightOp.reset();
       break;
     }
     if (kind == OpcodeKind::PushGuard || kind == OpcodeKind::PopGuard ||
-        kind == OpcodeKind::CheckGuards)
+        kind == OpcodeKind::CheckGuards || kind == OpcodeKind::OpenGuardScope ||
+        kind == OpcodeKind::CloseGuardScope ||
+        kind == OpcodeKind::BeginMutationGroup ||
+        kind == OpcodeKind::EndMutationGroup)
       throw std::invalid_argument(
-          "guard opcodes cannot run in parameter pipelines");
+          "guard and mutation-scope opcodes cannot run in parameter pipelines");
     preflightOp =
         core_.arena().linked(*preflightOp, core_.dims().spin, DimVector::POS);
   }
@@ -959,7 +1182,46 @@ void VortexVM::runPipeline(CellRef paramCell) {
 
     std::vector<CellValue> outVals;
     bool jumped = false;
-    executeOpcodeBody(kind, *pipeOp, inVals, outVals, std::nullopt, jumped);
+    const auto executed =
+        executeOpcodeBody(kind, *pipeOp, inVals, outVals, std::nullopt, jumped);
+    if (!executed.success) throw std::runtime_error(executed.errorMessage);
+
+    if (activeCursor_) {
+      const auto pipelineInputs = core_.inputsOf(*pipeOp);
+      const bool mutatingPrimitive =
+          ((kind == OpcodeKind::Link || kind == OpcodeKind::Value) &&
+           pipelineInputs.size() >= 4) ||
+          (kind == OpcodeKind::New && pipelineInputs.size() >= 3) ||
+          (kind == OpcodeKind::Break && pipelineInputs.size() >= 3) ||
+          (kind == OpcodeKind::Splice && pipelineInputs.size() >= 4) ||
+          (kind == OpcodeKind::Clone && !pipelineInputs.empty());
+      const auto subject = mutatingPrimitive
+                               ? resolveCell(pipelineInputs, {},
+                                             cellReferences_, 0, core_.arena())
+                               : std::nullopt;
+      const auto active  = guardStacks_.find(*activeCursor_);
+      if (subject && active != guardStacks_.end() && active->second &&
+          !active->second->empty()) {
+        auto nextGroups = mutationGroups_;
+        auto groups     = std::make_shared<std::vector<MutationGroup>>(
+            *nextGroups.at(*activeCursor_));
+        for (auto &group : *groups) {
+          std::unordered_set<CellRef> known;
+          for (const auto &participant : group.participants)
+            if (participant) known.insert(participant->token);
+          for (const auto &guard : *active->second) {
+            core_.arena().consumeWork();
+            if (!guard || !known.insert(guard->token).second) continue;
+            if (group.participants.size() >= guardLimits_.maxGroupParticipants)
+              throw std::length_error(
+                  "mutation-group participant limit exceeded");
+            group.participants.push_back(guard);
+          }
+        }
+        nextGroups[*activeCursor_] = std::move(groups);
+        mutationGroups_.swap(nextGroups);
+      }
+    }
 
     std::vector<CellRef> outCells = outputsOf(*pipeOp);
     if ((kind == OpcodeKind::Link || kind == OpcodeKind::Break ||
@@ -996,6 +1258,9 @@ bool VortexVM::evaluateCondition(CellRef clause,
   }
 
   OpcodeKind kind = *kindOpt;
+  if (hasActiveGuards() &&
+      sourceMutatingPrimitive(kind, inputsOf(actualClause).size()))
+    return false;
   if (kind == OpcodeKind::MatchContract ||
       kind == OpcodeKind::RequireContract) {
     return false;
@@ -1015,7 +1280,10 @@ bool VortexVM::evaluateCondition(CellRef clause,
     throw std::invalid_argument(
         "activation-frame opcodes cannot run as conditions");
   if (kind == OpcodeKind::PushGuard || kind == OpcodeKind::PopGuard ||
-      kind == OpcodeKind::CheckGuards)
+      kind == OpcodeKind::CheckGuards || kind == OpcodeKind::OpenGuardScope ||
+      kind == OpcodeKind::CloseGuardScope ||
+      kind == OpcodeKind::BeginMutationGroup ||
+      kind == OpcodeKind::EndMutationGroup)
     throw std::invalid_argument("guard opcodes cannot run as conditions");
   std::vector<CellRef> inCells = inputsOf(actualClause);
   std::vector<CellValue> inVals;
@@ -1076,6 +1344,8 @@ ExecutionResult VortexVM::executeGuardOpcode(const OpcodeKind kind,
   const auto inputs  = core_.inputsOf(opcode);
   const auto outputs = core_.outputsOf(opcode);
   if (kind == OpcodeKind::PushGuard) {
+    if (hasPendingGuardValidation(cursor))
+      return fail("PushGuard refused during pending guard validation");
     if (inputs.size() < 2 || outputs.size() != 1)
       return fail("PushGuard requires descriptor, diagnostic, captures, and "
                   "one token output");
@@ -1172,10 +1442,17 @@ ExecutionResult VortexVM::executeGuardOpcode(const OpcodeKind kind,
     }
     zigzag::ArenaSavepoint savepoint(arena);
     try {
-      const CellRef token = arena.makeCell("VORTEX_GUARD/1");
+      const CellRef token   = arena.makeCell("VORTEX_GUARD/1");
+      const auto scopeStack = guardScopes_.find(cursor);
+      std::optional<CellRef> ownerScope;
+      if (scopeStack != guardScopes_.end() && scopeStack->second &&
+          !scopeStack->second->empty() &&
+          scopeStack->second->back().ownerActivation ==
+              currentActivationId(cursor))
+        ownerScope = scopeStack->second->back().token;
       guards->push_back(std::make_shared<const RuntimeGuard>(
           token, descriptorCell, *diagnostic, std::move(arguments),
-          currentActivationId(cursor)));
+          currentActivationId(cursor), ownerScope));
       auto nextGuardStacks    = guardStacks_;
       nextGuardStacks[cursor] = std::move(guards);
       auto nextReferences     = cellReferences_;
@@ -1207,6 +1484,15 @@ ExecutionResult VortexVM::executeGuardOpcode(const OpcodeKind kind,
     if (!token || *token != top->token ||
         top->ownerActivation != currentActivationId(cursor))
       return fail("PopGuard token is not the current activation's top guard");
+    if (const auto groups = mutationGroups_.find(cursor);
+        groups != mutationGroups_.end() && groups->second &&
+        std::ranges::any_of(*groups->second, [&](const MutationGroup &group) {
+          return std::ranges::any_of(
+              group.participants, [&](const RuntimeGuardRef &participant) {
+                return participant && participant->token == top->token;
+              });
+        }))
+      return fail("PopGuard cannot remove a dirty guard before validation");
     auto nextGuards =
         std::make_shared<std::vector<RuntimeGuardRef>>(*found->second);
     nextGuards->pop_back();
@@ -1230,20 +1516,356 @@ ExecutionResult VortexVM::executeGuardOpcode(const OpcodeKind kind,
   if (isMemoized(opcode) || !core_.preconditionsOf(opcode).empty() ||
       !core_.postconditionsOf(opcode).empty())
     return fail("guard opcodes do not support conditions or memoization");
-  const auto pendingIt = pendingGuardChecks_.find(cursor);
-  if (pendingIt != pendingGuardChecks_.end() &&
-      (!pendingIt->second || pendingIt->second->checkOpcode != opcode ||
-       pendingIt->second->ownerActivation != currentActivationId(cursor)))
+  if (const auto pending = pendingGuardChecks_.find(cursor);
+      pending != pendingGuardChecks_.end() &&
+      (!pending->second || pending->second->checkOpcode != opcode ||
+       pending->second->ownerActivation != currentActivationId(cursor)))
     return fail("recursive CheckGuards is not supported");
+  const auto stackIt = guardStacks_.find(cursor);
+  const RuntimeGuardStack guards =
+      stackIt == guardStacks_.end() || !stackIt->second
+          ? std::make_shared<const std::vector<RuntimeGuardRef>>()
+          : stackIt->second;
+  const auto driven = driveGuardValidation(cursor, opcode, guards);
+  if (!driven.execution.success || driven.state == GuardDriveState::Suspended)
+    return driven.execution;
+  if (guards && !guards->empty() &&
+      !arena.linked(opcode, core_.dims().spin, false))
+    return fail("cursor finished with an unpopped guard");
+  advanceCursor(arena.linked(opcode, core_.dims().spin, false));
+  return {};
+}
 
-  std::shared_ptr<const PendingGuardCheck> prior =
-      pendingIt == pendingGuardChecks_.end() ? nullptr : pendingIt->second;
-  RuntimeGuardStack guards;
+ExecutionResult VortexVM::executeMutationScopeOpcode(const OpcodeKind kind,
+                                                     const CellRef opcode,
+                                                     const CellRef cursor) {
+  const auto fail = [opcode](std::string message) {
+    return ExecutionResult{.success       = false,
+                           .failingClause = opcode,
+                           .errorMessage  = std::move(message)};
+  };
+  auto &arena             = core_.arena();
+  const auto inputs       = inputsOf(opcode);
+  const auto outputs      = outputsOf(opcode);
+  const auto continuation = arena.linked(opcode, core_.dims().spin, false);
+  if (isMemoized(opcode) || !core_.preconditionsOf(opcode).empty() ||
+      !core_.postconditionsOf(opcode).empty())
+    return fail(
+        "mutation-scope opcodes do not support conditions or memoization");
+  for (const auto slot : inputs)
+    if (core_.hasPipeline(slot))
+      return fail("mutation-scope opcodes do not support parameter pipelines");
+  for (const auto slot : outputs)
+    if (core_.hasPipeline(slot))
+      return fail("mutation-scope opcodes do not support parameter pipelines");
+
+  const auto advance = [&] {
+    auto nextPC    = cursorPC_;
+    nextPC[cursor] = continuation;
+    zigzag::ArenaSavepoint savepoint(arena);
+    if (arena.contains(cursor)) {
+      if (continuation)
+        zigzag::expectWritten(
+            arena.setValueBits(cursor, xanadu::ValueKind::Int64,
+                               static_cast<std::uint64_t>(*continuation)));
+      else
+        zigzag::expectWritten(
+            arena.setValueBits(cursor, xanadu::ValueKind::None, 0));
+    }
+    cursorPC_.swap(nextPC);
+    savepoint.commit();
+  };
+  const auto validOutput = [&](const CellRef output) {
+    return arena.contains(output) && !getOpcodeKind(output) &&
+           !streamSlots_.contains(output) && !iteratorSlots_.contains(output);
+  };
+
+  if (kind == OpcodeKind::OpenGuardScope) {
+    if (!inputs.empty() || outputs.size() != 1 || !continuation)
+      return fail("OpenGuardScope requires no inputs, one token output, and a "
+                  "continuation");
+    const CellRef output = runtimeSlot(outputs.front());
+    if (!validOutput(output))
+      return fail("OpenGuardScope token output must be a distinct scalar slot");
+    const auto scopes = guardScopes_.find(cursor);
+    if (guardLimits_.maxGuardScopes == 0 ||
+        (scopes != guardScopes_.end() && scopes->second &&
+         scopes->second->size() >= guardLimits_.maxGuardScopes))
+      return fail("guard-scope depth limit exceeded");
+    const auto guards          = guardStacks_.find(cursor);
+    const std::size_t baseline = guards == guardStacks_.end() || !guards->second
+                                     ? 0
+                                     : guards->second->size();
+    zigzag::ArenaSavepoint savepoint(arena);
+    try {
+      const CellRef token = arena.makeCell("VORTEX_GUARD_SCOPE/1");
+      auto nextScopes     = guardScopes_;
+      auto scopes         = std::make_shared<std::vector<GuardScope>>();
+      if (const auto current = guardScopes_.find(cursor);
+          current != guardScopes_.end() && current->second)
+        *scopes = *current->second;
+      scopes->emplace_back(token, baseline, currentActivationId(cursor));
+      nextScopes[cursor] = std::move(scopes);
+      auto nextRefs      = cellReferences_;
+      nextRefs[output]   = token;
+      advance();
+      guardScopes_.swap(nextScopes);
+      cellReferences_.swap(nextRefs);
+      savepoint.commit();
+      return {};
+    } catch (const std::exception &error) {
+      return fail(error.what());
+    }
+  }
+
+  if (kind == OpcodeKind::CloseGuardScope) {
+    if (inputs.size() != 1 || !outputs.empty())
+      return fail("CloseGuardScope requires one scope token and no outputs");
+    const auto scopesIt = guardScopes_.find(cursor);
+    if (scopesIt == guardScopes_.end() || !scopesIt->second ||
+        scopesIt->second->empty())
+      return fail("CloseGuardScope has no active scope");
+    const auto scope = scopesIt->second->back();
+    const auto token = resultCell(cursor, runtimeSlot(inputs.front()));
+    if (!token || *token != scope.token ||
+        scope.ownerActivation != currentActivationId(cursor))
+      return fail(
+          "CloseGuardScope token is not the current activation's top scope");
+    if (const auto groups = mutationGroups_.find(cursor);
+        groups != mutationGroups_.end() && groups->second &&
+        std::ranges::any_of(*groups->second, [&](const MutationGroup &group) {
+          return group.ownerScope == scope.token;
+        }))
+      return fail(
+          "CloseGuardScope cannot leave a group owned by that scope open");
+    if (hasPendingGuardValidation(cursor) &&
+        pendingGuardChecks_.at(cursor)->checkOpcode != opcode)
+      return fail(
+          "CloseGuardScope cannot consume another validation continuation");
+    std::vector<RuntimeGuardRef> participants;
+    if (const auto groups = mutationGroups_.find(cursor);
+        groups != mutationGroups_.end() && groups->second) {
+      std::unordered_set<CellRef> seen;
+      for (const auto &group : *groups->second)
+        for (const auto &guard : group.participants)
+          if (guard && guard->ownerScope == scope.token &&
+              seen.insert(guard->token).second)
+            participants.push_back(guard);
+    }
+    if (!participants.empty()) {
+      auto snapshot =
+          std::make_shared<const std::vector<RuntimeGuardRef>>(participants);
+      const auto driven = driveGuardValidation(cursor, opcode, snapshot);
+      if (!driven.execution.success ||
+          driven.state == GuardDriveState::Suspended)
+        return driven.execution;
+    }
+    const auto guards     = guardStacks_.find(cursor);
+    const auto guardCount = guards == guardStacks_.end() || !guards->second
+                                ? 0
+                                : guards->second->size();
+    if (guardCount < scope.guardBaseline)
+      return fail("CloseGuardScope lost its guard baseline");
+    if (guardCount > scope.guardBaseline) {
+      for (std::size_t index = scope.guardBaseline; index < guardCount;
+           ++index) {
+        const auto &guard = guards->second->at(index);
+        if (!guard || guard->ownerScope != scope.token ||
+            guard->ownerActivation != scope.ownerActivation)
+          return fail(
+              "CloseGuardScope cannot trim a guard owned by another scope");
+      }
+    }
+    auto nextGuards = guardStacks_;
+    if (scope.guardBaseline == 0)
+      nextGuards.erase(cursor);
+    else {
+      auto prefix = std::make_shared<std::vector<RuntimeGuardRef>>(
+          guards->second->begin(),
+          guards->second->begin() +
+              static_cast<std::ptrdiff_t>(scope.guardBaseline));
+      nextGuards[cursor] = std::move(prefix);
+    }
+    auto nextScopes = guardScopes_;
+    auto remaining  = std::make_shared<std::vector<GuardScope>>(
+        scopesIt->second->begin(), scopesIt->second->end() - 1);
+    if (remaining->empty())
+      nextScopes.erase(cursor);
+    else
+      nextScopes[cursor] = std::move(remaining);
+    try {
+      advance();
+    } catch (const std::exception &error) {
+      return fail(error.what());
+    }
+    guardStacks_.swap(nextGuards);
+    guardScopes_.swap(nextScopes);
+    return {};
+  }
+
+  if (kind == OpcodeKind::BeginMutationGroup) {
+    if (!inputs.empty() || outputs.size() != 1 || !continuation)
+      return fail("BeginMutationGroup requires no inputs, one token output, "
+                  "and a continuation");
+    if (hasPendingGuardValidation(cursor))
+      return fail("BeginMutationGroup refused during pending guard validation");
+    if (guardLimits_.maxMutationGroupCycles == 0)
+      return fail("mutation-group cycle limit is zero");
+    const auto groups = mutationGroups_.find(cursor);
+    const auto depth  = groups == mutationGroups_.end() || !groups->second
+                            ? 0
+                            : groups->second->size();
+    if (depth >= guardLimits_.maxMutationGroupDepth)
+      return fail("mutation-group depth limit exceeded");
+    const CellRef output = runtimeSlot(outputs.front());
+    if (!validOutput(output))
+      return fail(
+          "BeginMutationGroup token output must be a distinct scalar slot");
+    if (nextMutationGroupId_ == 0)
+      return fail("mutation-group identity space exhausted");
+    std::size_t checkpointIndex = choiceStack_.size();
+    std::optional<std::uint64_t> checkpointId;
+    bool checkpointCreated = false;
+    std::optional<CellRef> ownerScope;
+    if (const auto scopes = guardScopes_.find(cursor);
+        scopes != guardScopes_.end() && scopes->second &&
+        !scopes->second->empty() &&
+        scopes->second->back().ownerActivation == currentActivationId(cursor))
+      ownerScope = scopes->second->back().token;
+    try {
+      enforceScopedChoiceBudget(true);
+      pushChoicePointImpl(cursor, *continuation, false);
+      checkpointIndex                          = choiceStack_.size() - 1;
+      checkpointId                             = choiceStack_.back().choiceId;
+      checkpointCreated                        = true;
+      const auto groupId                       = nextMutationGroupId_++;
+      choiceStack_.back().mutationCheckpointId = groupId;
+      const CellRef token = arena.makeCell("VORTEX_MUTATION_GROUP/1");
+      auto nextGroups     = mutationGroups_;
+      auto stack          = std::make_shared<std::vector<MutationGroup>>();
+      if (const auto current = mutationGroups_.find(cursor);
+          current != mutationGroups_.end() && current->second)
+        *stack = *current->second;
+      stack->emplace_back(groupId, *checkpointId, token, checkpointIndex,
+                          currentActivationId(cursor), ownerScope,
+                          totalCycles_);
+      nextGroups[cursor] = std::move(stack);
+      auto nextRefs      = cellReferences_;
+      nextRefs[output]   = token;
+      advance();
+      mutationGroups_.swap(nextGroups);
+      cellReferences_.swap(nextRefs);
+      return {};
+    } catch (const std::exception &error) {
+      if (checkpointCreated && choiceStack_.size() == checkpointIndex + 1 &&
+          checkpointId && choiceStack_.back().choiceId == *checkpointId) {
+        core_.arena().release(choiceStack_.back().mark);
+        choiceStack_.pop_back();
+      }
+      return fail(error.what());
+    }
+  }
+
+  if (inputs.size() != 1 || !outputs.empty())
+    return fail("EndMutationGroup requires one token and no outputs");
+  const auto groupsIt = mutationGroups_.find(cursor);
+  if (groupsIt == mutationGroups_.end() || !groupsIt->second ||
+      groupsIt->second->empty())
+    return fail("EndMutationGroup has no active group");
+  const auto group      = groupsIt->second->back();
+  const auto groupToken = resultCell(cursor, runtimeSlot(inputs.front()));
+  if (!groupToken || *groupToken != group.token ||
+      group.ownerActivation != currentActivationId(cursor))
+    return fail(
+        "EndMutationGroup token is not the current activation's top group");
+  if (hasPendingGuardValidation(cursor) &&
+      pendingGuardChecks_.at(cursor)->checkOpcode != opcode)
+    return fail(
+        "EndMutationGroup cannot consume another validation continuation");
+  if (groupsIt->second->size() == 1 && !group.participants.empty()) {
+    const auto snapshot = std::make_shared<const std::vector<RuntimeGuardRef>>(
+        group.participants);
+    const auto driven = driveGuardValidation(cursor, opcode, snapshot);
+    if (!driven.execution.success || driven.state == GuardDriveState::Suspended)
+      return driven.execution;
+  }
+  const auto currentGroups = mutationGroups_.find(cursor);
+  if (currentGroups == mutationGroups_.end() || !currentGroups->second ||
+      currentGroups->second->empty() ||
+      currentGroups->second->back().id != group.id)
+    return fail("EndMutationGroup lost its live group state");
+  if (group.checkpointIndex >= choiceStack_.size() ||
+      choiceStack_[group.checkpointIndex].choiceId != group.choiceId ||
+      choiceStack_[group.checkpointIndex].mutationCheckpointId != group.id)
+    return fail("EndMutationGroup lost its exact rollback checkpoint");
+  if (std::ranges::any_of(choiceStack_.begin() + static_cast<std::ptrdiff_t>(
+                                                     group.checkpointIndex + 1),
+                          choiceStack_.end(), [](const ChoicePoint &choice) {
+                            return choice.scoped;
+                          }))
+    return fail("EndMutationGroup cannot close across an active scoped choice");
+  auto nextGroups = mutationGroups_;
+  auto nextStack =
+      std::make_shared<std::vector<MutationGroup>>(*currentGroups->second);
+  nextStack->pop_back();
+  if (!nextStack->empty()) {
+    auto &parent = nextStack->back();
+    std::unordered_set<CellRef> known;
+    for (const auto &participant : parent.participants)
+      if (participant) known.insert(participant->token);
+    for (const auto &participant : group.participants) {
+      arena.consumeWork();
+      if (!participant || !known.insert(participant->token).second) continue;
+      if (parent.participants.size() >= guardLimits_.maxGroupParticipants)
+        return fail("mutation-group participant limit exceeded");
+      parent.participants.push_back(participant);
+    }
+  }
+  if (nextStack->empty())
+    nextGroups.erase(cursor);
+  else
+    nextGroups[cursor] = std::move(nextStack);
+  try {
+    advance();
+  } catch (const std::exception &error) {
+    return fail(error.what());
+  }
+  while (choiceStack_.size() > group.checkpointIndex + 1) {
+    core_.arena().discard(choiceStack_.back().mark);
+    choiceStack_.pop_back();
+  }
+  ChoicePoint checkpoint = std::move(choiceStack_.back());
+  choiceStack_.pop_back();
+  core_.arena().discard(checkpoint.mark);
+  mutationGroups_.swap(nextGroups);
+  return {};
+}
+
+GuardDriveResult VortexVM::driveGuardValidation(const CellRef cursor,
+                                                const CellRef resumeOpcode,
+                                                RuntimeGuardStack guards) {
+  const auto fail = [resumeOpcode](std::string message,
+                                   const bool violation = false) {
+    return GuardDriveResult{
+        .execution =
+            ExecutionResult{.success = false,
+                            .contractViolation =
+                                violation ? ContractViolationKind::Postcondition
+                                          : ContractViolationKind::None,
+                            .failingClause = resumeOpcode,
+                            .errorMessage  = std::move(message)},
+        .state = GuardDriveState::Complete};
+  };
+  auto &arena           = core_.arena();
+  const auto owner      = currentActivationId(cursor);
+  const auto pending    = pendingGuardChecks_.find(cursor);
   std::size_t nextIndex = 0;
-  if (prior) {
-    // Once the previous validator result is consumed, a failed next dispatch
-    // retries the whole current stack instead of reusing a stale witness.
-    pendingGuardChecks_.erase(cursor);
+  if (pending != pendingGuardChecks_.end()) {
+    const auto prior = pending->second;
+    if (!prior || prior->checkOpcode != resumeOpcode ||
+        prior->ownerActivation != owner)
+      return fail("recursive guard validation is not supported");
+    pendingGuardChecks_.erase(pending);
     guards            = prior->guards;
     nextIndex         = prior->nextIndex;
     const auto actual = resultCell(cursor, prior->resultSlot);
@@ -1252,57 +1874,31 @@ ExecutionResult VortexVM::executeGuardOpcode(const OpcodeKind kind,
     const auto value = isBool ? arena.asBool(*actual) : std::nullopt;
     cellReferences_.erase(prior->resultSlot);
     if (!value) {
-      pendingGuardChecks_.erase(cursor);
-      return {
-          .success           = false,
-          .contractViolation = ContractViolationKind::Postcondition,
-          .failingClause     = opcode,
-          .errorMessage =
-              "TypeContractError: " +
-              (nextIndex > 0 && guards && nextIndex <= guards->size()
-                   ? guards->at(nextIndex - 1)->diagnostic
-                   : std::string("validator did not return one Bool Cell"))};
+      const auto diagnostic =
+          nextIndex > 0 && guards && nextIndex <= guards->size()
+              ? guards->at(nextIndex - 1)->diagnostic
+              : std::string("validator did not return one Bool Cell");
+      return fail("TypeContractError: " + diagnostic, true);
     }
     if (!*value) {
       const auto diagnostic =
           nextIndex > 0 && guards && nextIndex <= guards->size()
               ? guards->at(nextIndex - 1)->diagnostic
               : std::string("guard validator returned false");
-      pendingGuardChecks_.erase(cursor);
-      return {.success           = false,
-              .contractViolation = ContractViolationKind::Postcondition,
-              .failingClause     = opcode,
-              .errorMessage      = "TypeContractError: " + diagnostic};
+      return fail("TypeContractError: " + diagnostic, true);
     }
-  } else {
-    const auto stackIt = guardStacks_.find(cursor);
-    guards             = stackIt == guardStacks_.end()
-                             ? std::make_shared<const std::vector<RuntimeGuardRef>>()
-                             : stackIt->second;
   }
   if (!guards || nextIndex >= guards->size()) {
-    pendingGuardChecks_.erase(cursor);
-    if (const auto stack = guardStacks_.find(cursor);
-        stack != guardStacks_.end() && stack->second &&
-        !stack->second->empty() &&
-        !arena.linked(opcode, core_.dims().spin, false))
-      return fail("cursor finished with an unpopped guard");
-    advanceCursor(arena.linked(opcode, core_.dims().spin, false));
-    return {};
+    std::span<const RuntimeGuardRef> validated;
+    if (guards) validated = *guards;
+    removeValidatedGuardObligations(cursor, validated);
+    return {.execution = {}, .state = GuardDriveState::Complete};
   }
-  if (!arena.linked(opcode, core_.dims().spin, false))
-    return fail("CheckGuards requires a continuation while guards are active");
+  if (!arena.linked(resumeOpcode, core_.dims().spin, false))
+    return fail("guard validation requires a continuation");
   if (guards->size() > guardLimits_.maxGuards)
     return fail("guard count budget limit exceeded");
-  std::size_t captured    = guardCapturedCells(guards, arena);
-  const auto currentStack = guardStacks_.find(cursor);
-  if (currentStack != guardStacks_.end() && currentStack->second) {
-    const auto activeCaptured = guardCapturedCells(currentStack->second, arena);
-    if (activeCaptured > guardLimits_.maxCapturedCells -
-                             std::min(captured, guardLimits_.maxCapturedCells))
-      return fail("guard captured-cell budget limit exceeded");
-    captured += activeCaptured;
-  }
+  const auto captured = guardCapturedCells(guards, arena);
   if (captured > guardLimits_.maxCapturedCells)
     return fail("guard captured-cell budget limit exceeded");
   zigzag::ArenaSavepoint scratchSavepoint(arena);
@@ -1310,21 +1906,19 @@ ExecutionResult VortexVM::executeGuardOpcode(const OpcodeKind kind,
     const CellRef resultSlot    = arena.makeCell();
     const RuntimeGuardRef guard = guards->at(nextIndex);
     std::vector<CellRef> destinations{resultSlot};
-    const auto nextPending = std::make_shared<const PendingGuardCheck>(
-        opcode, resultSlot, guards, nextIndex + 1, currentActivationId(cursor));
     auto stagedPending    = pendingGuardChecks_;
-    stagedPending[cursor] = nextPending;
+    stagedPending[cursor] = std::make_shared<const PendingGuardCheck>(
+        resumeOpcode, resultSlot, guards, nextIndex + 1, owner);
     const auto invoked =
         invokeFramePrepared(guard->descriptor, guard->arguments, destinations,
-                            cursor, opcode, opcode);
+                            cursor, resumeOpcode, resumeOpcode);
     if (!invoked.success) {
       cellReferences_.erase(resultSlot);
-      pendingGuardChecks_.erase(cursor);
-      return invoked;
+      return {.execution = invoked, .state = GuardDriveState::Complete};
     }
     pendingGuardChecks_.swap(stagedPending);
     scratchSavepoint.commit();
-    return {};
+    return {.execution = {}, .state = GuardDriveState::Suspended};
   } catch (const std::exception &error) {
     pendingGuardChecks_.erase(cursor);
     return fail(error.what());
@@ -1340,9 +1934,13 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
     return {.success      = false,
             .errorMessage = "activation-frame opcodes require a VM cursor"};
   if (kind == OpcodeKind::PushGuard || kind == OpcodeKind::PopGuard ||
-      kind == OpcodeKind::CheckGuards)
-    return {.success      = false,
-            .errorMessage = "guard opcodes require a VM cursor"};
+      kind == OpcodeKind::CheckGuards || kind == OpcodeKind::OpenGuardScope ||
+      kind == OpcodeKind::CloseGuardScope ||
+      kind == OpcodeKind::BeginMutationGroup ||
+      kind == OpcodeKind::EndMutationGroup)
+    return {.success = false,
+            .errorMessage =
+                "guard and mutation-scope opcodes require a VM cursor"};
   const auto overflowFailure = [opcode] {
     return ExecutionResult{.success = false,
                            .contractViolation =
@@ -2146,6 +2744,54 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
 }
 
 ExecutionResult VortexVM::step(CellRef cursor) {
+  if (const auto groups = mutationGroups_.find(cursor);
+      groups != mutationGroups_.end() && groups->second &&
+      !groups->second->empty() && guardLimits_.maxMutationGroupCycles == 0) {
+    abortOwnedMutationGroups(cursor, std::nullopt);
+    return {.success      = false,
+            .errorMessage = "mutation-group cycle limit exceeded"};
+  }
+  if (const auto groups = mutationGroups_.find(cursor);
+      groups != mutationGroups_.end() && groups->second &&
+      std::ranges::any_of(*groups->second, [&](const MutationGroup &group) {
+        return totalCycles_ >= group.startTotalCycles &&
+               totalCycles_ - group.startTotalCycles >=
+                   guardLimits_.maxMutationGroupCycles;
+      })) {
+    abortOwnedMutationGroups(cursor, std::nullopt);
+    return {.success      = false,
+            .errorMessage = "mutation-group cycle limit exceeded"};
+  }
+  ExecutionResult result;
+  try {
+    result = stepImpl(cursor);
+  } catch (const std::exception &error) {
+    result = {.success = false, .errorMessage = error.what()};
+  }
+  if (!result.success) abortOwnedMutationGroups(cursor, std::nullopt);
+  return result;
+}
+
+ExecutionResult VortexVM::stepImpl(CellRef cursor) {
+  const auto activeGroup =
+      std::ranges::find_if(mutationGroups_, [](const auto &entry) {
+        return entry.second && !entry.second->empty();
+      });
+  if (activeGroup != mutationGroups_.end() && activeGroup->first != cursor)
+    return {.success = false,
+            .errorMessage =
+                "execution cursor does not match the active mutation group"};
+  const auto foreignStack = [cursor](const auto &entry) {
+    return entry.first != cursor && entry.second && !entry.second->empty();
+  };
+  if (std::ranges::any_of(guardStacks_, foreignStack) ||
+      std::ranges::any_of(guardScopes_, foreignStack) ||
+      std::ranges::any_of(pendingGuardChecks_, [cursor](const auto &entry) {
+        return entry.first != cursor && entry.second;
+      }))
+    return {.success = false,
+            .errorMessage =
+                "Vortex VM supports one active guarded cursor at a time"};
   if (hasScopedChoices() && !scopedChoicesOwnedBy(cursor)) {
     return {.success = false,
             .errorMessage =
@@ -2168,6 +2814,12 @@ ExecutionResult VortexVM::step(CellRef cursor) {
     if (pendingGuardChecks_.contains(cursor))
       return {.success      = false,
               .errorMessage = "cursor finished with pending guard validation"};
+    if (mutationGroupActive(cursor))
+      return {.success      = false,
+              .errorMessage = "cursor finished with an active mutation group"};
+    if (guardScopes_.contains(cursor))
+      return {.success      = false,
+              .errorMessage = "cursor finished with an active guard scope"};
     return ExecutionResult{.success           = true,
                            .contractViolation = ContractViolationKind::None,
                            .failingClause     = std::nullopt,
@@ -2194,6 +2846,14 @@ ExecutionResult VortexVM::step(CellRef cursor) {
       return {.success       = false,
               .failingClause = *op,
               .errorMessage  = "Halt reached with pending guard validation"};
+    if (mutationGroupActive(cursor))
+      return {.success       = false,
+              .failingClause = *op,
+              .errorMessage  = "Halt reached with an active mutation group"};
+    if (guardScopes_.contains(cursor))
+      return {.success       = false,
+              .failingClause = *op,
+              .errorMessage  = "Halt reached with an active guard scope"};
     return ExecutionResult{.success           = true,
                            .contractViolation = ContractViolationKind::None,
                            .failingClause     = std::nullopt,
@@ -2237,10 +2897,18 @@ ExecutionResult VortexVM::step(CellRef cursor) {
   }
 
   if (kind == OpcodeKind::PushGuard || kind == OpcodeKind::PopGuard ||
-      kind == OpcodeKind::CheckGuards) {
+      kind == OpcodeKind::CheckGuards || kind == OpcodeKind::OpenGuardScope ||
+      kind == OpcodeKind::CloseGuardScope ||
+      kind == OpcodeKind::BeginMutationGroup ||
+      kind == OpcodeKind::EndMutationGroup) {
     ++totalCycles_;
     try {
       core_.arena().consumeWork();
+      if (kind == OpcodeKind::OpenGuardScope ||
+          kind == OpcodeKind::CloseGuardScope ||
+          kind == OpcodeKind::BeginMutationGroup ||
+          kind == OpcodeKind::EndMutationGroup)
+        return executeMutationScopeOpcode(kind, *op, cursor);
       return executeGuardOpcode(kind, *op, cursor);
     } catch (const std::exception &error) {
       return {
@@ -2263,8 +2931,73 @@ ExecutionResult VortexVM::step(CellRef cursor) {
               .errorMessage  = "opcode would finish with an active guard"};
   }
 
-  const auto inputCells = inputsOf(*op);
-  const auto outCells   = outputsOf(*op);
+  const auto inputCells           = inputsOf(*op);
+  const auto outCells             = outputsOf(*op);
+  const auto hasMutatingCondition = [this](const auto &clauses) {
+    return std::ranges::any_of(clauses, [this](const CellRef clause) {
+      const CellRef actual = core_.arena()
+                                 .cloneMaster(clause, core_.dims().clone)
+                                 .value_or(clause);
+      const auto conditionKind = getOpcodeKind(actual);
+      return conditionKind &&
+             sourceMutatingPrimitive(*conditionKind, inputsOf(actual).size());
+    });
+  };
+  if (hasActiveGuards() && (hasMutatingCondition(core_.preconditionsOf(*op)) ||
+                            hasMutatingCondition(core_.postconditionsOf(*op))))
+    return {.success       = false,
+            .failingClause = *op,
+            .errorMessage  = "source-mutating conditions are refused while "
+                             "guard state is active"};
+  const bool sourceMutation =
+      ((kind == OpcodeKind::Link || kind == OpcodeKind::Value) &&
+       inputCells.size() >= 4) ||
+      (kind == OpcodeKind::New && inputCells.size() >= 3) ||
+      (kind == OpcodeKind::Break && inputCells.size() >= 3) ||
+      (kind == OpcodeKind::Splice && inputCells.size() >= 4) ||
+      (kind == OpcodeKind::Clone && !inputCells.empty());
+  const auto mutationSubject =
+      sourceMutation
+          ? resolveCell(inputCells, {}, cellReferences_, 0, core_.arena())
+          : std::nullopt;
+  const bool executesSourceMutation = sourceMutation && mutationSubject;
+  std::optional<MutationGroupMap> stagedParticipants;
+  if (executesSourceMutation) {
+    const auto active  = guardStacks_.find(cursor);
+    const bool guarded = active != guardStacks_.end() && active->second &&
+                         !active->second->empty();
+    if (guarded && hasPendingGuardValidation(cursor))
+      return {.success       = false,
+              .failingClause = *op,
+              .errorMessage =
+                  "source mutation refused during pending guard validation"};
+    if (guarded && !mutationGroupActive(cursor))
+      return {.success       = false,
+              .failingClause = *op,
+              .errorMessage =
+                  "guarded source mutation requires an atomic mutation group"};
+    if (guarded) {
+      const auto guards  = active->second;
+      stagedParticipants = mutationGroups_;
+      auto groups        = std::make_shared<std::vector<MutationGroup>>(
+          *stagedParticipants->at(cursor));
+      for (auto &group : *groups) {
+        std::unordered_set<CellRef> known;
+        for (const auto &participant : group.participants)
+          if (participant) known.insert(participant->token);
+        for (const auto &guard : *guards) {
+          if (!guard || !known.insert(guard->token).second) continue;
+          if (group.participants.size() >= guardLimits_.maxGroupParticipants)
+            return {.success       = false,
+                    .failingClause = *op,
+                    .errorMessage =
+                        "mutation-group participant limit exceeded"};
+          group.participants.push_back(guard);
+        }
+      }
+      (*stagedParticipants)[cursor] = std::move(groups);
+    }
+  }
   if (kind == OpcodeKind::ScopedChoice) {
     const auto failScoped = [op](const std::string_view message) {
       return ExecutionResult{.success       = false,
@@ -2343,7 +3076,11 @@ ExecutionResult VortexVM::step(CellRef cursor) {
       const auto conditionKind = getOpcodeKind(actual);
       return conditionKind == OpcodeKind::PushGuard ||
              conditionKind == OpcodeKind::PopGuard ||
-             conditionKind == OpcodeKind::CheckGuards;
+             conditionKind == OpcodeKind::CheckGuards ||
+             conditionKind == OpcodeKind::OpenGuardScope ||
+             conditionKind == OpcodeKind::CloseGuardScope ||
+             conditionKind == OpcodeKind::BeginMutationGroup ||
+             conditionKind == OpcodeKind::EndMutationGroup;
     });
   };
   if (hasGuardCondition(core_.preconditionsOf(*op)) ||
@@ -2727,6 +3464,8 @@ ExecutionResult VortexVM::step(CellRef cursor) {
     }
   }
 
+  if (stagedParticipants) mutationGroups_.swap(*stagedParticipants);
+
   // 8. Memoization Record (on Miss)
   if (!memoHit && memoizable) {
     if (const auto key = getMemoKey(*op)) {
@@ -2749,6 +3488,15 @@ ExecutionResult VortexVM::step(CellRef cursor) {
         return {.success       = false,
                 .failingClause = *op,
                 .errorMessage  = "cursor finished with an active guard"};
+      if (mutationGroupActive(cursor))
+        return {.success       = false,
+                .failingClause = *op,
+                .errorMessage =
+                    "cursor finished with an active mutation group"};
+      if (guardScopes_.contains(cursor))
+        return {.success       = false,
+                .failingClause = *op,
+                .errorMessage  = "cursor finished with an active guard scope"};
     }
     setCursorOpcode(cursor, nextOp);
   }
@@ -2807,6 +3555,7 @@ ExecutionResult VortexVM::run(CellRef cursor, std::size_t maxCycles,
   }
   for (std::size_t i = 0; i < maxCycles; ++i) {
     if (stopToken.stop_requested()) {
+      abortOwnedMutationGroups(cursor, std::nullopt);
       return ExecutionResult{.success           = false,
                              .contractViolation = ContractViolationKind::None,
                              .failingClause     = std::nullopt,
@@ -2814,6 +3563,12 @@ ExecutionResult VortexVM::run(CellRef cursor, std::size_t maxCycles,
     }
     const auto op = getCursorOpcode(cursor);
     if (!op) {
+      if (mutationGroupActive(cursor)) {
+        abortOwnedMutationGroups(cursor, std::nullopt);
+        return {.success = false,
+                .errorMessage =
+                    "cursor finished with an active mutation group"};
+      }
       if (hasScopedChoices()) {
         return {.success      = false,
                 .errorMessage = "cursor finished with an active scoped choice"};
@@ -2831,6 +3586,9 @@ ExecutionResult VortexVM::run(CellRef cursor, std::size_t maxCycles,
         return {.success = false,
                 .errorMessage =
                     "cursor finished with pending guard validation"};
+      if (guardScopes_.contains(cursor))
+        return {.success      = false,
+                .errorMessage = "cursor finished with an active guard scope"};
       return ExecutionResult{.success           = true,
                              .contractViolation = ContractViolationKind::None,
                              .failingClause     = std::nullopt,
@@ -2838,6 +3596,11 @@ ExecutionResult VortexVM::run(CellRef cursor, std::size_t maxCycles,
     }
     auto kind = getOpcodeKind(*op);
     if (kind && *kind == OpcodeKind::Halt) {
+      if (mutationGroupActive(cursor)) {
+        abortOwnedMutationGroups(cursor, std::nullopt);
+        return {.success      = false,
+                .errorMessage = "Halt reached with an active mutation group"};
+      }
       if (hasScopedChoices()) {
         return {.success      = false,
                 .errorMessage = "Halt reached with an active scoped choice"};
@@ -2853,6 +3616,9 @@ ExecutionResult VortexVM::run(CellRef cursor, std::size_t maxCycles,
       if (pendingGuardChecks_.contains(cursor))
         return {.success      = false,
                 .errorMessage = "Halt reached with pending guard validation"};
+      if (guardScopes_.contains(cursor))
+        return {.success      = false,
+                .errorMessage = "Halt reached with an active guard scope"};
       return ExecutionResult{.success           = true,
                              .contractViolation = ContractViolationKind::None,
                              .failingClause     = std::nullopt,
@@ -2871,6 +3637,8 @@ ExecutionResult VortexVM::run(CellRef cursor, std::size_t maxCycles,
 
 std::size_t VortexVM::stepScheduler(std::stop_token stopToken) {
   if (stopToken.stop_requested()) {
+    for (const auto cursor : activeCursors())
+      abortOwnedMutationGroups(cursor, std::nullopt);
     return 0;
   }
   std::size_t executed         = 0;
@@ -2889,6 +3657,8 @@ std::size_t VortexVM::stepScheduler(std::stop_token stopToken) {
 
   for (CellRef cursor : cursors) {
     if (stopToken.stop_requested()) {
+      for (const auto active : cursors)
+        abortOwnedMutationGroups(active, std::nullopt);
       break;
     }
     const auto op = getCursorOpcode(cursor);

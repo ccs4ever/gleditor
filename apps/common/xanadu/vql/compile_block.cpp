@@ -100,6 +100,7 @@ VQLCompiler::compileExecutionBlock(const ExecutionBlock &block) {
               }
             }
           } else if constexpr (std::is_same_v<Clause, EffectClause>) {
+            const CellRef group = beginMutationGroup("#EXPLICIT_WEAVE_GROUP");
             for (const auto &item : clause.items) {
               std::visit(
                   [&](const auto &effect) {
@@ -117,6 +118,7 @@ VQLCompiler::compileExecutionBlock(const ExecutionBlock &block) {
                   },
                   item.item);
             }
+            endMutationGroup(group, "#EXPLICIT_WEAVE_GROUP_END");
           } else if constexpr (std::is_same_v<Clause, ConditionalClause>) {
             const auto condition = compileBooleanExpr(
                 clause.condition, ambientContext_.value_or(core_.home()));
