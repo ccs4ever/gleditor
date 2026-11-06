@@ -1,5 +1,6 @@
 #include "adapter.hpp"
 
+#include "genesis.hpp"
 #include "meta.hpp"
 #include "records.hpp"
 #include "../vortex/worker_context.hpp"
@@ -140,14 +141,63 @@ VagentAdapter::operator()(const mesh::ActorExecution &exec,
 std::expected<void, mesh::ActorError>
 VagentAdapter::genesis(const mesh::ActorGenesis &genesis,
                        zigzag::vortex::WorkerContext &ctx) {
+  auto &arena = ctx.arena;
+  auto &core  = ctx.core;
   // The actor is its own context's declared member — index 0 in the
   // home directory, the same cell an exec pid of sequence 1 picks.
-  const auto members = directoryMembers(ctx.arena, ctx.core);
+  const auto members = directoryMembers(arena, core);
   if (members.empty()) return {};
   const CellRef self = members.front();
+
+  // Phase-6's wiring: when the arena overlays a lineage fold —
+  // spawn's pinned fold or resume's rebuild — genesis is the (a)–(e)
+  // ceremony, not just pid bookkeeping. The lineage is the retained
+  // store under the arena; the received band is the transported
+  // comparand on resume and the same-store cycle on spawn. A fold
+  // whose program never filed the image records binds no lineage —
+  // the ceremony has no band to compare, so it stays skipped rather
+  // than refused, matching the learn gate's closed-by-absence rule.
+  if (const auto *base = arena.base(); base != nullptr) {
+    if (const auto *lineage = base->store(); lineage != nullptr) {
+      const CellRef programRoot = core.home();
+      GenesisRoots roots{.programRoot = programRoot, .agentCell = self};
+      // The agent's own module is the first +d.stdlib member — the
+      // same default the turn's bind mint resolves bare names
+      // against.
+      for (const CellRef module : zigzag::rankAfter(
+               arena, programRoot, core.dims().stdlib)) {
+        roots.ownModule = module;
+        break;
+      }
+      if (const auto rec = varsRecord(arena, core, programRoot,
+                                    "imageRecord", false))
+        if (const auto v =
+                arena.linked(*rec, core.dims().values, DimVector::POS))
+          if (const auto ref = arena.asInt64(*v))
+            roots.imageRecord = static_cast<CellRef>(*ref);
+      if (const auto rec = varsRecord(arena, core, programRoot,
+                                    "imageExtent", false))
+        if (const auto v =
+                arena.linked(*rec, core.dims().values, DimVector::POS))
+          if (const auto extent = arena.asInt64(*v); extent && *extent > 0)
+            roots.imageExtent = static_cast<std::uint32_t>(*extent);
+      if (roots.imageRecord != noCell && roots.imageExtent.has_value()) {
+        const auto &received = genesis.transported != nullptr
+                                   ? *genesis.transported
+                                   : *lineage;
+        // A refusal here is the pairwise comparand failing closed —
+        // the incarnation never notes a pid it cannot stand behind.
+        if (const auto outcome = runGenesis(*lineage, received, arena,
+                                            core, ctx.vm, roots);
+            !outcome)
+          return std::unexpected(mesh::ActorError::ExecutionFailed);
+      }
+    }
+  }
+
   noteMemberPid(ctx, self, genesis.pid);
   if (genesis.transported != nullptr)
-    executor_.resumed(ctx.arena, ctx.core, self);
+    executor_.resumed(arena, core, self);
   return {};
 }
 

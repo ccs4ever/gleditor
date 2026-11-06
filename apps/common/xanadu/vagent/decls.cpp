@@ -1995,6 +1995,28 @@ lowerProgram(const Program &program, zigzag::vortex::VortexCore &core,
     return std::unexpected(std::move(lowerer.errors));
   if (const auto image = finalizeProgramImage(lowerer.compiler))
     lowerer.image.imageRecord = *image;
+  // The durable half of the image roots: LoweredImage is in-memory
+  // only — a rebuilt context's (a)–(e) ceremony and every turn's
+  // lineage bind recover the band through these program-side
+  // records. They mint inside the band, and so does the extent's
+  // scalar — the filed value counts its own slot.
+  if (lowerer.image.imageRecord != noCell) {
+    auto &arena = core.arena();
+    if (const auto rec =
+            varsRecord(arena, core, lowerer.image.programRoot,
+                       "imageRecord", true))
+      zigzag::expectWritten(
+          arena.link(*rec, core.dims().values, DimVector::POS,
+                     arena.makeScalarCell(static_cast<std::int64_t>(
+                         lowerer.image.imageRecord))));
+    if (const auto rec =
+            varsRecord(arena, core, lowerer.image.programRoot,
+                       "imageExtent", true))
+      zigzag::expectWritten(
+          arena.link(*rec, core.dims().values, DimVector::POS,
+                     arena.makeScalarCell(
+                         static_cast<std::int64_t>(arena.cellCount() + 1))));
+  }
   lowerer.image.imageExtent = static_cast<CellRef>(core.arena().cellCount());
   return std::move(lowerer.image);
 }

@@ -171,6 +171,18 @@ mintMetaBindSet(zigzag::ArenaManifold &arena, VortexCore &core,
     zigzag::expectWritten(arena.link(impureTail, stepDim, Posward, cell));
     impureTail = cell;
   }
+
+  // The durable lineage record lowerProgram filed beside the image —
+  // learn_*'s §6.6 gate and genesis (c)'s bind both read it. An image
+  // whose lowering never filed one (hand-minted fixtures) binds no
+  // lineage, and the gate refuses closed as it always has.
+  if (const auto rec =
+          varsRecord(arena, core, programRoot, "imageExtent", false))
+    if (const auto v = arena.linked(*rec, core.dims().values, Posward))
+      if (const auto extent = arena.asInt64(*v); extent && *extent > 0)
+        binds.lineage = MetaLineage{
+            .programRef  = programRoot,
+            .imageExtent = static_cast<std::uint32_t>(*extent)};
   return binds;
 }
 

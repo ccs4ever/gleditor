@@ -10,6 +10,7 @@
 
 #include "common/xanadu/vagent/frontend.hpp"
 #include "common/xanadu/vagent/lineage.hpp"
+#include "common/xanadu/vagent/meta.hpp"
 #include "common/xanadu/vagent/records.hpp"
 
 namespace {
@@ -285,6 +286,54 @@ TEST(VagentDeclsTest, RefusedBodiesStillMintNamedHeads) {
   const auto bodyName = h.arena.linked(*body, dims.name, Posward);
   ASSERT_TRUE(bodyName.has_value());
   EXPECT_EQ(h.arena.textOf(*bodyName), "decl:demo:on:Tick:body");
+}
+
+TEST(VagentDeclsTest, LoweredImageFilesItsDurableRoots) {
+  DeclHarness h;
+  auto image = h.lower(R"(
+    module demo
+    agent A { def f(): Int { 1 + 2 } }
+  )");
+  ASSERT_TRUE(image.has_value());
+  if (!image) return;
+  // Genesis on a rebuilt context has no LoweredImage — the band it
+  // binds comes back through these program-side records.
+  const auto recRef =
+      varsRecord(h.arena, h.core, image->programRoot, "imageRecord", false);
+  ASSERT_TRUE(recRef.has_value());
+  const auto refValue =
+      h.arena.linked(*recRef, h.core.dims().values, Posward);
+  ASSERT_TRUE(refValue.has_value());
+  EXPECT_EQ(h.arena.asInt64(*refValue).value_or(-1),
+            static_cast<std::int64_t>(image->imageRecord));
+  const auto recExt =
+      varsRecord(h.arena, h.core, image->programRoot, "imageExtent", false);
+  ASSERT_TRUE(recExt.has_value());
+  const auto extValue =
+      h.arena.linked(*recExt, h.core.dims().values, Posward);
+  ASSERT_TRUE(extValue.has_value());
+  EXPECT_EQ(h.arena.asInt64(*extValue).value_or(-1),
+            static_cast<std::int64_t>(image->imageExtent));
+}
+
+TEST(VagentDeclsTest, BindMintRecoversTheFiledLineage) {
+  DeclHarness h;
+  auto image = h.lower(R"(
+    module demo
+    agent A { def f(): Int { 1 + 2 } }
+  )");
+  ASSERT_TRUE(image.has_value());
+  if (!image) return;
+  auto binds = mintMetaBindSet(h.arena, h.core, image->programRoot,
+                               image->agentCell);
+  ASSERT_TRUE(binds.has_value());
+  // §6.6's lineage — learn_*'s sideness gate and the genesis
+  // comparand read the same record: the image's own root and its
+  // band extent.
+  ASSERT_TRUE(binds->lineage.has_value());
+  EXPECT_EQ(binds->lineage->programRef, image->programRoot);
+  EXPECT_EQ(binds->lineage->imageExtent,
+            static_cast<std::uint32_t>(image->imageExtent));
 }
 
 } // namespace
