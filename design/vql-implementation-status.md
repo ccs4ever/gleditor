@@ -689,6 +689,26 @@ bytes and reader bytes are reported separately, with no speedup or memory-usage 
 sweep retained eight unfinished failures, with 132 passes and one skip.
 
 This closes the unmetered collision-name scan in the new proxy path, not every legacy reader or a
-universal VM CPU bound. Name-dependent one-space snapshots still require integration with this
-shared bounded resolver. Index-rank mutation, general lifecycle, callable forms and full frontend
-parity still leave §4.12 incomplete.
+universal VM CPU bound. The following stage integrates this shared bounded resolver into one-space
+snapshots. Index-rank mutation, general lifecycle, callable forms and full frontend parity still
+leave §4.12 incomplete.
+
+## Bounded one-space snapshot names and Vortex directories
+
+One-space effective snapshots now share bounded name extraction and matching across candidates,
+while retaining explicit/shared identity priority and the complete foreign-axis coverage check. A
+successful missing name leaves a candidate unmapped; it never hides a nonempty foreign axis. Vortex
+callers provide a value-only directory descriptor over their existing dimension graph, whose stable
+root remains usable after home's connector is detached. Candidate discovery is bounded and
+read-only; names are not mirrored into registries or published as bindings. Local and quote views
+ignore that optional foreign-directory input. See
+[iteration 38](projects/vortex-vm-only-iterations.md).
+
+Full build, 890 affected tests across 81 suites, 92 selected ZigZag tests and the real headless CLI
+passed. Thirteen new enabled cases include unrelated-base fixtures to prove actual name mapping,
+complete source coverage, shared budgets, pre-read and fuel refusals, stable-directory validation,
+quote isolation, and VM/host execution through native function frames. The broader sweep retained
+the same eight unfinished failures, with 132 passes and one skip. Repository formatting passed. No
+new performance claim is made. Multiple spaces still require explicit/shared mappings. Arbitrary
+index-rank mutation, remaining callable forms and complete frontend/lifecycle parity leave §4.12
+incomplete.

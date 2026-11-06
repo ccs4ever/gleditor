@@ -80,6 +80,17 @@ struct DimensionLookupBudget {
   std::size_t workRemaining;
 };
 
+/// Preflight aggregate declared spans and bytes before invoking @p readSpan.
+/// The callback is borrowed for this call and is never retained. A reader may
+/// still allocate internally while producing one span's returned string.
+[[nodiscard]] std::expected<std::string, DimensionLookupRefusal>
+readDimensionTextBounded(
+    std::span<const xanadu::PrimediaSpan> spans, DimensionLookupBudget &budget,
+    gleditor::cpp26::function_ref<std::string(const xanadu::PrimediaSpan &)>
+        readSpan,
+    std::optional<gleditor::cpp26::function_ref<bool(std::size_t)>> charge =
+        std::nullopt);
+
 class UnrootedRegistryDependency : public std::runtime_error {
 public:
   using std::runtime_error::runtime_error;

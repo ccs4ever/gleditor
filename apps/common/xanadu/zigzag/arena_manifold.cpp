@@ -790,8 +790,9 @@ ArenaManifold::checkedDimensionMapping(
 }
 
 std::expected<std::vector<EffectiveLinkRow>, EffectiveLinkRefusal>
-ArenaManifold::snapshotLinks(const CellRef owner,
-                             const EffectiveLinkLimits &limits) const {
+ArenaManifold::snapshotLinks(
+    const CellRef owner, const EffectiveLinkLimits &limits,
+    const std::optional<DimensionDirectory> directory) const {
   if (limits.maxCandidates == 0 || limits.maxLinks == 0 ||
       limits.maxWork == 0) {
     return std::unexpected{EffectiveLinkRefusal::LimitExceeded};
@@ -799,9 +800,11 @@ ArenaManifold::snapshotLinks(const CellRef owner,
   if (!contains(owner)) {
     return std::unexpected{EffectiveLinkRefusal::UnknownOwner};
   }
+  const auto foreignOwner = isProxy(owner) ? foreignOf(owner) : std::nullopt;
 
   std::size_t workRemaining     = limits.maxWork;
   std::size_t candidateAttempts = 0;
+  DimensionLookupBudget nameBudget{dimensionLookupLimits_};
   std::vector<DimRef> candidates;
   auto spend = [&](const std::size_t amount = 1) {
     if (amount > workRemaining) {
@@ -816,6 +819,54 @@ ArenaManifold::snapshotLinks(const CellRef owner,
       return false;
     }
     return true;
+  };
+  const auto chargeNameWork = [&](const std::size_t amount) {
+    return spend(amount);
+  };
+  const auto spendNameWork = [&](const std::size_t amount = 1) {
+    if (amount > nameBudget.workRemaining) {
+      return false;
+    }
+    if (!chargeNameWork(amount)) {
+      return false;
+    }
+    nameBudget.workRemaining -= amount;
+    return true;
+  };
+  const auto resolveName = [&](const DimRef arenaDim, const Space &sourceSpace)
+      -> std::expected<std::optional<DimRef>, DimensionLookupRefusal> {
+    std::string_view name;
+    for (const auto &[key, dim] : arenaDims_) {
+      if (!spendNameWork()) {
+        return std::unexpected{DimensionLookupRefusal::FuelLimitExceeded};
+      }
+      if (dim == arenaDim) {
+        name = key;
+        break;
+      }
+    }
+    std::string extractedName;
+    if (name.empty()) {
+      auto text = boundedTextOf(arenaDim, nameBudget, chargeNameWork);
+      if (!text) {
+        return std::unexpected{text.error()};
+      }
+      extractedName = std::move(*text);
+      name          = extractedName;
+    }
+    if (name.empty()) {
+      return std::optional<DimRef>{};
+    }
+    const xanadu::SpanReader *reader = sourceSpace.reader;
+    if (reader == nullptr) {
+      reader = sourceSpace.store != nullptr ? sourceSpace.store
+                                            : sourceSpace.manifold->store();
+    }
+    if (reader == nullptr) {
+      return std::optional<DimRef>{};
+    }
+    return sourceSpace.manifold->dimensionNamedBounded(
+        name, *reader, nameBudget, chargeNameWork);
   };
   auto addCandidate = [&](const DimRef dim) {
     if (dim == noCell) {
@@ -860,6 +911,48 @@ ArenaManifold::snapshotLinks(const CellRef owner,
         }
         current = *next;
       }
+    }
+  }
+  if (foreignOwner && directory) {
+    const CellRef head = directory->head;
+    if (head == noCell || directory->axis == noCell || !contains(head) ||
+        !contains(directory->axis) || isProxy(head) ||
+        isQuoteOccurrence(head) || isProxy(directory->axis) ||
+        isQuoteOccurrence(directory->axis)) {
+      return std::unexpected{EffectiveLinkRefusal::InvalidDimensionDirectory};
+    }
+    CellRef current = head;
+    while (true) {
+      if (!contains(current) || isProxy(current) ||
+          isQuoteOccurrence(current)) {
+        return std::unexpected{EffectiveLinkRefusal::InvalidDimensionDirectory};
+      }
+      if (!addCandidate(current)) {
+        return std::unexpected{EffectiveLinkRefusal::LimitExceeded};
+      }
+      const auto directoryRows = dimensionsOf(current);
+      if (!spend(1 + directoryRows.size())) {
+        return std::unexpected{EffectiveLinkRefusal::LimitExceeded};
+      }
+      std::optional<CellRef> next;
+      bool axisRowFound = false;
+      for (const auto &edge : directoryRows) {
+        if (edge.dim != directory->axis) {
+          continue;
+        }
+        if (axisRowFound) {
+          return std::unexpected{
+              EffectiveLinkRefusal::InvalidDimensionDirectory};
+        }
+        axisRowFound = true;
+        if (edge.pos != noCell) {
+          next = edge.pos;
+        }
+      }
+      if (!next || *next == current || *next == head) {
+        break;
+      }
+      current = *next;
     }
   }
   for (const auto &[name, dim] : arenaDims_) {
@@ -930,7 +1023,6 @@ ArenaManifold::snapshotLinks(const CellRef owner,
     candidates[at] = value;
   }
 
-  const auto foreignOwner   = isProxy(owner) ? foreignOf(owner) : std::nullopt;
   const Space *foreignSpace = nullptr;
   if (isProxy(owner)) {
     if (!foreignOwner) {
@@ -991,9 +1083,12 @@ ArenaManifold::snapshotLinks(const CellRef owner,
                                    : EffectiveLinkRefusal::LimitExceeded};
       }
       sourceDims[i] = *mapped;
-      if (!sourceDims[i] && spaces_.size() == 1 &&
-          (!posShadowedRows[i] || !negShadowedRows[i])) {
-        return std::unexpected{EffectiveLinkRefusal::NameResolutionRequired};
+      if (!sourceDims[i] && spaces_.size() == 1) {
+        const auto named = resolveName(dim, *foreignSpace);
+        if (!named) {
+          return std::unexpected{EffectiveLinkRefusal::LimitExceeded};
+        }
+        sourceDims[i] = *named;
       }
     }
   }
@@ -1804,6 +1899,58 @@ std::string ArenaManifold::textOf(const CellRef ref,
     }
   }
   return out;
+}
+
+std::expected<std::string, DimensionLookupRefusal> ArenaManifold::boundedTextOf(
+    const CellRef ref, DimensionLookupBudget &budget,
+    const std::optional<gleditor::cpp26::function_ref<bool(std::size_t)>>
+        charge) const {
+  const xanadu::SpanReader *reader = defaultReader_;
+  CellRef target                   = ref;
+  bool directSourceRead            = false;
+  if (isQuoteOccurrence(ref)) {
+    target = canonicalProxyOf(ref).value();
+  }
+  if (isProxy(target)) {
+    const auto foreign = foreignOf(target);
+    if (foreign) {
+      if (const auto s = spaceAt(foreign->space)) {
+        if (s->reader != nullptr) {
+          reader = s->reader;
+        } else if (s->store != nullptr) {
+          reader = s->store;
+        }
+        directSourceRead = s->manifold != nullptr && reader != nullptr;
+      }
+    }
+  }
+  if (!directSourceRead) {
+    if (const auto quoted = quoteSpace_.find(target);
+        quoteSpace_.end() != quoted) {
+      if (const auto s = spaceAt(quoted->second)) {
+        if (s->reader != nullptr) {
+          reader = s->reader;
+        } else if (s->store != nullptr) {
+          reader = s->store;
+        }
+      }
+    }
+  }
+  if (reader == nullptr) {
+    reader = store_ != nullptr ? store_
+                               : (base_ != nullptr ? base_->store() : nullptr);
+  }
+
+  const auto spans = contentOf(ref);
+  return readDimensionTextBounded(
+      spans, budget,
+      [&](const xanadu::PrimediaSpan &span) {
+        if (!directSourceRead && span.scroll == xanadu::scratchScroll) {
+          return std::string{scratchTextOf(span)};
+        }
+        return reader != nullptr ? reader->read(span) : std::string{};
+      },
+      charge);
 }
 
 xanadu::PrimediaSpan ArenaManifold::intern(const std::string_view text) {

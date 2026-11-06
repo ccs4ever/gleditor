@@ -831,6 +831,68 @@ std::span<const DimRef> Manifold::dimensions() const {
   return dimsCache;
 }
 
+std::expected<std::string, DimensionLookupRefusal> readDimensionTextBounded(
+    const std::span<const xanadu::PrimediaSpan> spans,
+    DimensionLookupBudget &budget,
+    const gleditor::cpp26::function_ref<
+        std::string(const xanadu::PrimediaSpan &)>
+        readSpan,
+    const std::optional<gleditor::cpp26::function_ref<bool(std::size_t)>>
+        charge) {
+  if (spans.size() > budget.contentSpansRemaining) {
+    return std::unexpected{DimensionLookupRefusal::ContentSpanLimitExceeded};
+  }
+  std::size_t totalBytes = 0;
+  for (const auto &span : spans) {
+    if (budget.workRemaining == 0) {
+      return std::unexpected{DimensionLookupRefusal::WorkLimitExceeded};
+    }
+    if (charge) {
+      try {
+        if (!(*charge)(1)) {
+          return std::unexpected{DimensionLookupRefusal::FuelLimitExceeded};
+        }
+      } catch (...) {
+        return std::unexpected{DimensionLookupRefusal::FuelLimitExceeded};
+      }
+    }
+    --budget.workRemaining;
+    if (span.length > std::numeric_limits<std::size_t>::max() - totalBytes) {
+      return std::unexpected{DimensionLookupRefusal::ByteLimitExceeded};
+    }
+    totalBytes += static_cast<std::size_t>(span.length);
+  }
+  if (totalBytes > budget.workRemaining) {
+    return std::unexpected{DimensionLookupRefusal::WorkLimitExceeded};
+  }
+  if (charge) {
+    try {
+      if (!(*charge)(totalBytes)) {
+        return std::unexpected{DimensionLookupRefusal::FuelLimitExceeded};
+      }
+    } catch (...) {
+      return std::unexpected{DimensionLookupRefusal::FuelLimitExceeded};
+    }
+  }
+  budget.workRemaining -= totalBytes;
+  if (totalBytes > budget.bytesRemaining) {
+    return std::unexpected{DimensionLookupRefusal::ByteLimitExceeded};
+  }
+
+  budget.contentSpansRemaining -= spans.size();
+  budget.bytesRemaining -= totalBytes;
+  std::string text;
+  text.reserve(totalBytes);
+  for (const auto &span : spans) {
+    auto piece = readSpan(span);
+    if (piece.size() > span.length || piece.size() > totalBytes - text.size()) {
+      return std::unexpected{DimensionLookupRefusal::ByteLimitExceeded};
+    }
+    text += piece;
+  }
+  return text;
+}
+
 std::optional<DimRef>
 Manifold::dimensionNamed(const std::string_view name,
                          const xanadu::SpanReader &reader) const {
@@ -879,7 +941,6 @@ Manifold::dimensionNamedImpl(
     const bool legacyMode) const {
   auto &workRemaining      = budget.workRemaining;
   auto &directoryRemaining = budget.directoryCellsRemaining;
-  auto &spanRemaining      = budget.contentSpansRemaining;
   auto &byteRemaining      = budget.bytesRemaining;
   std::optional<DimensionLookupRefusal> spendFailure;
   const auto spendWork = [&](const std::size_t amount = 1) {
@@ -935,39 +996,10 @@ Manifold::dimensionNamedImpl(
       return textOf(dim, reader);
     }
     const auto spans = contentOf(dim);
-    if (spans.size() > spanRemaining) {
-      return std::unexpected{DimensionLookupRefusal::ContentSpanLimitExceeded};
-    }
-    std::size_t totalBytes = 0;
-    for (const auto &span : spans) {
-      if (!spendWork()) {
-        return std::unexpected{workError()};
-      }
-      if (span.length > std::numeric_limits<std::size_t>::max() - totalBytes) {
-        return std::unexpected{DimensionLookupRefusal::ByteLimitExceeded};
-      }
-      totalBytes += static_cast<std::size_t>(span.length);
-    }
-    if (!spendWork(totalBytes)) {
-      return std::unexpected{workError()};
-    }
-    if (totalBytes > byteRemaining) {
-      return std::unexpected{DimensionLookupRefusal::ByteLimitExceeded};
-    }
-    if (spans.size() > 0) {
-      spanRemaining -= spans.size();
-    }
-    byteRemaining -= totalBytes;
-    std::string text;
-    text.reserve(totalBytes);
-    for (const auto &span : spans) {
-      auto piece = reader.read(span);
-      if (piece.size() > totalBytes - text.size()) {
-        return std::unexpected{DimensionLookupRefusal::ByteLimitExceeded};
-      }
-      text += piece;
-    }
-    return text;
+    return readDimensionTextBounded(
+        spans, budget,
+        [&](const xanadu::PrimediaSpan &span) { return reader.read(span); },
+        charge);
   };
   const auto visitDirectory =
       [&](auto &&visitor) -> std::expected<void, DimensionLookupRefusal> {

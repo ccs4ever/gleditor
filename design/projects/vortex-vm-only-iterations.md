@@ -1404,3 +1404,49 @@ Logs: `/tmp/vql-bounded-names-build.log`, `/tmp/vql-bounded-names-tests.log`,
 `/tmp/vql-bounded-names-zigzag.log`, `/tmp/vql-bounded-names-profile.log`,
 `/tmp/vql-bounded-names-profile.xml`, `/tmp/vql-bounded-names-overlay.log`,
 `/tmp/vql-bounded-names-cli.log`, `/tmp/vql-bounded-names-format.log`.
+
+## Iteration 38: bounded one-space snapshot name resolution
+
+Effective-link snapshots now attempt the established one-space name mapping after explicit and
+shared identity mapping is absent. Arena dimension names come from their recorded name first, or
+from bounded content extraction with the existing reader and scratch namespace rules. Source
+matching reuses the shared registry-first, exact-text and one-hop alias matcher. Neither name
+resolution nor snapshotting publishes bindings, caches, dimensions or neighbor proxies. Multiple
+attached spaces retain their explicit mapping requirement.
+
+One lookup budget covers name extraction and all name matches across the snapshot. Its callback
+charges the snapshot work cap and active arena fuel once per charged operation. The explicit mapping
+path retains its existing snapshot budget. Shared bounded span materialization preflights declared
+span counts and byte totals before reading or reserving, while legacy lookup retains its prior
+reader behavior. A resource refusal becomes a snapshot limit refusal; a successful missing name
+leaves that candidate unmapped. The final source-axis coverage check still refuses an unrepresented
+nonempty foreign axis rather than returning a partial view or minting missing candidates.
+
+Vortex callers supply an optional directory view over the core's existing dimension graph. Its
+stable `d.dims` root remains usable after home loses its connector. Snapshot traversal charges CSR
+scans and candidate attempts before collecting those cells; it neither mirrors names into the arena
+registry nor changes the graph. Invalid, foreign or quote directory cells refuse explicitly. Local
+and quote-occurrence owners ignore this foreign-view input and retain their local snapshot behavior.
+
+Validation: full `make -j$(nproc)` passed, as did all 890 affected tests from 81 suites and 92
+selected ZigZag tests from 17 suites. Thirteen new enabled cases cover real name and alias mapping,
+ordinary scratch-text dimension names, complete source coverage, cumulative limits, pre-read
+refusal, spent fuel and retry, direct callback refusal, stable Core-directory traversal and genuine
+VM/host function-frame routes. The fixtures use an unrelated arena base so base-identity mapping
+cannot bypass the name path. Tests assert unchanged source operations, absent published bindings and
+exact, distinct Int64 assignments with repeated caller contexts.
+
+The real headless CLI removes an axis through a native function and returns exact
+`9007199254740993`. The broader sweep passed 132 of 141 tests, skipped one swarm case and retained
+the same eight unfinished frontend/exception-expectation failures. Full repository formatting with
+clang-format 19 passed. No new performance or allocation improvement is claimed for this stage;
+iteration 37's name probe is not evidence for the new directory traversal. Declared span lengths are
+preflighted, while custom readers retain responsibility for their own internal allocations.
+
+Multiple spaces still require explicit/shared identity mappings; missing candidate dimensions are
+not minted to satisfy source coverage. Arbitrary filing-rank mutation, general attachment/binding
+lifecycle, remaining callable forms and full frontend parity remain open. Full §4.12 is incomplete.
+
+Logs: `/tmp/vql-one-space-build.log`, `/tmp/vql-one-space-focused.log`,
+`/tmp/vql-one-space-tests.log`, `/tmp/vql-one-space-zigzag.log`, `/tmp/vql-one-space-overlay.log`,
+`/tmp/vql-one-space-cli.log`, `/tmp/vql-one-space-format.log`.

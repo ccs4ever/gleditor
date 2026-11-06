@@ -141,6 +141,12 @@ enum class EffectiveLinkRefusal : std::uint8_t {
   AmbiguousDimension,
   NameResolutionRequired,
   LimitExceeded,
+  InvalidDimensionDirectory,
+};
+
+struct DimensionDirectory {
+  CellRef head;
+  DimRef axis;
 };
 
 struct EffectiveLinkLimits {
@@ -437,12 +443,16 @@ public:
       std::optional<gleditor::cpp26::function_ref<bool(std::size_t)>> charge =
           std::nullopt) const noexcept;
 
-  /// Read the effective edges without minting proxies or changing overlays.
-  /// Limits must be positive. Name-only one-space mappings are refused for
-  /// bounded callers; each result row has at least one nonempty endpoint.
+  /// Read effective edges without minting proxies or changing overlays.
+  /// Limits must be positive. A one-space proxy may use the supplied bounded
+  /// dimension directory to resolve authored names; the head itself is part
+  /// of that rank. Local and quotation snapshots ignore the descriptor.
+  /// Each result row has at least one nonempty endpoint.
   [[nodiscard]] std::expected<std::vector<EffectiveLinkRow>,
                               EffectiveLinkRefusal>
-  snapshotLinks(CellRef owner, const EffectiveLinkLimits &limits) const;
+  snapshotLinks(
+      CellRef owner, const EffectiveLinkLimits &limits,
+      std::optional<DimensionDirectory> directory = std::nullopt) const;
 
   /// Resolves the arena dimension bound to @p foreignDim in @p space.
   /// An absent space searches every attached space and accepts an arena-local
@@ -783,6 +793,11 @@ public:
   ArenaManifold *evictOldestMark() noexcept;
 
 private:
+  [[nodiscard]] std::expected<std::string, DimensionLookupRefusal>
+  boundedTextOf(CellRef ref, DimensionLookupBudget &budget,
+                std::optional<gleditor::cpp26::function_ref<bool(std::size_t)>>
+                    charge) const;
+
   [[nodiscard]] bool hasUnsupportedUntrackedPrefixIdentity() const noexcept;
   [[nodiscard]] DimLink *existingLink(std::uint32_t dense, DimRef dim) noexcept;
   [[nodiscard]] DimLink *linkFor(std::uint32_t dense, DimRef dim);

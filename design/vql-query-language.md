@@ -2376,14 +2376,15 @@ explicit refusals. The rulings below describe the intended semantics.
   targets are prepared per owner before masking and require exactly one cell; existing-cell
   attachments use fresh clones. Canonical foreign proxies with explicit multi-space mappings now use
   effective-link snapshots and transactional masks while preserving source stores. Their filing
-  links must remain intact; quote owners, name-dependent one-space mappings and arbitrary index-rank
-  edits remain explicit refusals. Proxy collision diagnostics now use a shared budgeted name lookup;
-  integrating it into one-space snapshots remains open, and no universal VM CPU bound is
+  links must remain intact; quote owners, unrepresented nonempty foreign axes and arbitrary
+  index-rank edits remain explicit refusals. One-space snapshots also use shared budgeted name
+  lookup, with Vortex callers supplying the existing core dimension directory for bounded candidate
+  discovery. Proxy collision diagnostics use the same name matcher. No universal VM CPU bound is
   established. Calls/computed targets, nested shapes and other deferred forms still refuse.
   Immediate projection/traversal continuation requires an intermediate `let` until ordered path
   lowering exists. Eligible named functions execute these projections in reusable native frames,
   including recursion and caller-bound aliases; generic first-class shapes and other excluded forms
-  remain refused. See [iterations 29–37](projects/vortex-vm-only-iterations.md). Matching still
+  remain refused. See [iterations 29–38](projects/vortex-vm-only-iterations.md). Matching still
   materializes subjects; no zero-copy or universal allocation guarantee follows. Step predicates
   retain cell identity through guarded reference slots and Boolean control flow short-circuits.
   Nonempty literal shape predicates lower directional presence/absence rules, scalar literal targets

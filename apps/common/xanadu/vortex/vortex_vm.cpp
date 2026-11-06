@@ -749,10 +749,13 @@ ExecutionResult VortexVM::executeVqlMaskLinks(const CellRef opcode,
         return fail("VqlMaskLinks directed endpoint limit is invalid");
       }
       const auto projected = arena.snapshotLinks(
-          *owner, zigzag::EffectiveLinkLimits{
-                      .maxCandidates = projectionLimits_.maxSnapshotCandidates,
-                      .maxLinks      = 2 * projectionLimits_.maxLinksPerOwner,
-                      .maxWork       = projectionLimits_.maxSnapshotWork});
+          *owner,
+          zigzag::EffectiveLinkLimits{
+              .maxCandidates = projectionLimits_.maxSnapshotCandidates,
+              .maxLinks      = 2 * projectionLimits_.maxLinksPerOwner,
+              .maxWork       = projectionLimits_.maxSnapshotWork},
+          zigzag::DimensionDirectory{.head = core_.dims().dims,
+                                     .axis = core_.dims().dims});
       if (!projected) {
         switch (projected.error()) {
         case zigzag::EffectiveLinkRefusal::UnknownOwner:
@@ -766,6 +769,8 @@ ExecutionResult VortexVM::executeVqlMaskLinks(const CellRef opcode,
               "VqlMaskLinks requires explicit foreign dimension mappings");
         case zigzag::EffectiveLinkRefusal::LimitExceeded:
           return fail("VqlMaskLinks effective-link snapshot limit exceeded");
+        case zigzag::EffectiveLinkRefusal::InvalidDimensionDirectory:
+          return fail("VqlMaskLinks Vortex dimension directory is invalid");
         }
       }
       if (projected->size() > projectionLimits_.maxLinksPerOwner)

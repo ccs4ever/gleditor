@@ -6,10 +6,14 @@
 
 #include <chrono>
 #include <cstddef>
+#include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
+
+#include <gleditor/cpp26.hpp>
 
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
@@ -301,6 +305,53 @@ TEST(BoundedDimensionLookupTest, Utf8RequestNameUsesItsEncodedByteLength) {
 
   ASSERT_FALSE(refusal);
   EXPECT_EQ(refusal.error(), DimensionLookupRefusal::ByteLimitExceeded);
+  EXPECT_EQ(reader.reads, 0U);
+}
+
+TEST(BoundedDimensionLookupTest, FuelCallbackRefusalKeepsEarlierWorkConsumed) {
+  DimensionFixture fixture;
+  fixture.add("d.present");
+  auto manifold = fixture.fold();
+  CountingReader reader{fixture.store};
+  const auto limits = generousLimits();
+  DimensionLookupBudget budget{limits};
+  DimensionRegistry::instance().unregisterStore(&fixture.store);
+  std::size_t calls = 0;
+  const auto charge = [&](const std::size_t) {
+    ++calls;
+    return calls == 1;
+  };
+  const gleditor::cpp26::function_ref<bool(std::size_t)> chargeRef{charge};
+
+  const auto refusal = manifold.dimensionNamedBounded(
+      "d.present", reader, budget, std::optional{chargeRef});
+
+  ASSERT_FALSE(refusal);
+  EXPECT_EQ(refusal.error(), DimensionLookupRefusal::FuelLimitExceeded);
+  EXPECT_EQ(calls, 2U);
+  EXPECT_LT(budget.workRemaining, limits.work);
+  EXPECT_EQ(reader.reads, 0U);
+}
+
+TEST(BoundedDimensionLookupTest, ThrowingFuelCallbackBecomesTypedRefusal) {
+  DimensionFixture fixture;
+  fixture.add("d.present");
+  auto manifold = fixture.fold();
+  CountingReader reader{fixture.store};
+  const auto limits = generousLimits();
+  DimensionLookupBudget budget{limits};
+  DimensionRegistry::instance().unregisterStore(&fixture.store);
+  const auto charge = [](const std::size_t) -> bool {
+    throw std::runtime_error("test fuel callback");
+  };
+  const gleditor::cpp26::function_ref<bool(std::size_t)> chargeRef{charge};
+
+  const auto refusal = manifold.dimensionNamedBounded(
+      "d.present", reader, budget, std::optional{chargeRef});
+
+  ASSERT_FALSE(refusal);
+  EXPECT_EQ(refusal.error(), DimensionLookupRefusal::FuelLimitExceeded);
+  EXPECT_EQ(budget.workRemaining, limits.work);
   EXPECT_EQ(reader.reads, 0U);
 }
 

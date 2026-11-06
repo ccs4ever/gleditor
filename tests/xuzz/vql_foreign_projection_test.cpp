@@ -265,6 +265,67 @@ TEST(VqlForeignProjectionTest,
   EXPECT_EQ(arena.outstandingMarks(), 0U);
 }
 
+TEST(VqlForeignProjectionTest,
+     HostFunctionFrameMasksOneNameBoundSpaceWithRepeatedContexts) {
+  auto source = makeForeignProfileSource(2, "one_space_name_frame");
+  Manifold base;
+  VortexHost host{&base};
+  auto &arena      = host.arena();
+  const auto space = attach(arena, source, "one name-bound source");
+  const DimRef axis =
+      host.vqlEngine().coordinator().resolveDimension("d.foreign-profile");
+  ASSERT_NE(axis, source.dimension);
+  const DimRef markDimension =
+      host.vqlEngine().coordinator().resolveDimension("d.foreign-mark");
+  const CellRef firstOwner   = arena.proxyFor(space, source.owners[0]);
+  const CellRef secondOwner  = arena.proxyFor(space, source.owners[1]);
+  const auto sourceOpsBefore = source.store->opCount();
+
+  constexpr std::string_view query =
+      "def pure prune(. : Cell): Cell := { "
+      ".{*, !d.foreign-profile, +d.foreign-mark: 9007199254740993}; "
+      "return .; }; prune(.)";
+  xanadu::vql::CompilationOptions options;
+  options.contextCells = {firstOwner, secondOwner, firstOwner};
+  const auto compiled  = host.vqlCompiler().compile(query, options);
+  ASSERT_TRUE(compiled.success) << compiled.errorMessage;
+  EXPECT_TRUE(
+      std::ranges::any_of(compiled.generatedOpcodes, [&](const CellRef op) {
+        return host.vm().getOpcodeKind(op) == OpcodeKind::InvokeFrame &&
+               arena.textOf(op) == "#INVOKE_FRAME prune";
+      }));
+
+  const auto result =
+      host.executeVQLChecked(query, {firstOwner, secondOwner, firstOwner});
+
+  ASSERT_TRUE(result) << result.error().message;
+  EXPECT_EQ(*result,
+            (std::vector<CellRef>{firstOwner, secondOwner, firstOwner}));
+  EXPECT_FALSE(arena.linked(firstOwner, axis, DimVector::POS));
+  EXPECT_FALSE(arena.linked(secondOwner, axis, DimVector::POS));
+  EXPECT_FALSE(arena.boundDimensionSet(axis));
+  const auto firstMark  = arena.linked(firstOwner, markDimension);
+  const auto secondMark = arena.linked(secondOwner, markDimension);
+  ASSERT_TRUE(firstMark);
+  ASSERT_TRUE(secondMark);
+  EXPECT_NE(*firstMark, *secondMark);
+  EXPECT_EQ(arena.asInt64(*firstMark),
+            std::optional<std::int64_t>{INT64_C(9007199254740993)});
+  EXPECT_EQ(arena.asInt64(*secondMark),
+            std::optional<std::int64_t>{INT64_C(9007199254740993)});
+  EXPECT_TRUE(arena.findExistingProxy(space, source.neighbors[0]));
+  EXPECT_TRUE(arena.findExistingProxy(space, source.neighbors[1]));
+  for (std::size_t index = 0; index < source.owners.size(); ++index) {
+    EXPECT_EQ(source.manifold.linked(source.owners[index], source.dimension,
+                                     DimVector::POS),
+              source.neighbors[index]);
+  }
+  EXPECT_EQ(source.store->opCount(), sourceOpsBefore);
+  EXPECT_FALSE(host.vm().hasActiveFrames());
+  EXPECT_FALSE(host.vm().hasActiveGuards());
+  EXPECT_EQ(arena.outstandingMarks(), 0U);
+}
+
 TEST(VqlForeignProjectionProfileTest, DISABLED_ForeignMaskMaterialization) {
   for (const std::size_t count : {32U, 128U}) {
     profileForeignMask(count, false);

@@ -274,6 +274,56 @@ TEST(VortexMaskLinksTest,
   EXPECT_EQ(h.arena.outstandingMarks(), 0U);
 }
 
+TEST(VortexMaskLinksTest,
+     OneSpaceForeignMaskResolvesNamedAxisWithoutExplicitBinding) {
+  auto foreign = makeForeignSource("one_space_name_resolution");
+  Manifold base;
+  ArenaManifold arena{&base};
+  VortexCore core(arena);
+  VortexVM vm(core);
+  const auto space  = attach(arena, foreign, "source");
+  const DimRef axis = arena.ensureDimension("d.foreign-axis");
+  ASSERT_NE(axis, foreign.dimension);
+  const DimRef secondAxis    = arena.ensureDimension("d.foreign-axis-second");
+  const CellRef owner        = arena.proxyFor(space, foreign.owner);
+  const auto sourceOpsBefore = foreign.store->opCount();
+  const CellRef opcode       = vm.mintOpcode(OpcodeKind::VqlMaskLinks);
+  core.bindInput(opcode, owner);
+  core.bindInput(opcode, arena.makeScalarCell(true));
+  core.bindInput(opcode, arena.makeScalarCell(static_cast<std::int64_t>(axis)));
+  core.bindInput(opcode, arena.makeScalarCell(std::int64_t{0}));
+  const CellRef cursor     = vm.spawnCursor(opcode);
+  const auto cellsBefore   = arena.cellCount();
+  const auto shadowsBefore = arena.shadowCount();
+
+  const auto result = vm.step(cursor);
+
+  ASSERT_TRUE(result.success) << result.errorMessage;
+  EXPECT_FALSE(arena.linked(owner, axis, DimVector::POS));
+  const auto rows =
+      arena.snapshotLinks(owner, EffectiveLinkLimits{128, 128, 100'000});
+  ASSERT_TRUE(rows);
+  bool foundSecond = false;
+  for (const auto &row : *rows) {
+    if (row.dim != secondAxis) continue;
+    foundSecond = true;
+    ASSERT_TRUE(row.pos);
+    EXPECT_EQ(std::get<ForeignRef>(*row.pos),
+              (ForeignRef{space, foreign.secondNeighbor}));
+  }
+  EXPECT_TRUE(foundSecond);
+  EXPECT_FALSE(arena.findExistingProxy(space, foreign.secondNeighbor));
+  EXPECT_TRUE(arena.findExistingProxy(space, foreign.neighbor));
+  EXPECT_FALSE(arena.boundDimensionSet(axis));
+  EXPECT_EQ(arena.cellCount(), cellsBefore + 1);
+  EXPECT_EQ(arena.shadowCount(), shadowsBefore);
+  EXPECT_EQ(foreign.store->opCount(), sourceOpsBefore);
+  EXPECT_EQ(
+      foreign.manifold.linked(foreign.owner, foreign.dimension, DimVector::POS),
+      foreign.neighbor);
+  EXPECT_EQ(arena.outstandingMarks(), 0U);
+}
+
 TEST(VortexMaskLinksTest, ForeignSnapshotLimitRefusesBeforeMutation) {
   ForeignMaskHarness h;
   const CellRef opcode     = h.mask(false);

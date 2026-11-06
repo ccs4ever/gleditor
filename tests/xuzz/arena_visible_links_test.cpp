@@ -24,6 +24,7 @@
 #include "common/xanadu/user_permascroll.hpp"
 #include "common/xanadu/vortex/vortex_vm.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
+#include "common/xanadu/zigzag/dimension_registry.hpp"
 #include "common/xanadu/zigzag/manifold.hpp"
 
 namespace zigzag {
@@ -94,6 +95,37 @@ Source makeSource(const std::string_view name,
                 .dims     = std::move(dims),
                 .cells    = std::move(cells)};
 }
+
+Source makeAliasedSource(const std::string_view name,
+                         const std::vector<EdgeSpec> &edges) {
+  auto source  = makeSource(name, {"d.canonical", "d.alias"}, 3, edges);
+  auto version = source.store->primaryCurrentVersion();
+  version      = source.store->makeCell(version, "d.alias-edge");
+  const CellRef aliasName = source.store->cellRefOf(version).value();
+  version = source.store->setLink(version, source.dims[0], source.dims[1],
+                                  false, aliasName);
+  source.manifold = source.store->rebuildManifold(version);
+  return source;
+}
+
+class CountingReader final : public xanadu::SpanReader {
+public:
+  explicit CountingReader(const Store &store) : store_{store} {}
+
+  [[nodiscard]] std::string
+  read(const xanadu::PrimediaSpan &span) const override {
+    ++reads;
+    auto text = store_.read(span);
+    bytesRead += text.size();
+    return text;
+  }
+
+  mutable std::size_t reads{};
+  mutable std::size_t bytesRead{};
+
+private:
+  const Store &store_;
+};
 
 std::uint32_t attach(ArenaManifold &arena, Source &source,
                      const std::string_view label) {
@@ -284,7 +316,8 @@ TEST(ArenaVisibleLinksTest, LocalAndQuoteOccurrenceEdgesSnapshotAsLocalCells) {
   const CellRef local      = arena.makeCell("occurrence-local");
   ASSERT_TRUE(arena.link(occurrence, dim, DimVector::POS, local));
 
-  const auto occurrenceRows = arena.snapshotLinks(occurrence, generousLimits());
+  const auto occurrenceRows = arena.snapshotLinks(
+      occurrence, generousLimits(), DimensionDirectory{proxy, dim});
   ASSERT_TRUE(occurrenceRows);
   const auto *occurrenceRow = rowFor(*occurrenceRows, dim);
   ASSERT_NE(occurrenceRow, nullptr);
@@ -316,21 +349,417 @@ TEST(ArenaVisibleLinksTest,
 }
 
 TEST(ArenaVisibleLinksTest,
-     OneSpaceNameFallbackRemainsOnDimInButSnapshotRequiresExplicitMapping) {
+     OneSpaceNameFallbackResolvesSnapshotWithoutMutation) {
   auto source =
       makeSource("name_fallback", {"d.edge"}, 2, {{0, 0, DimVector::POS, 1}});
-  ArenaManifold arena;
+  Manifold base;
+  ArenaManifold arena{&base};
   const auto space = attach(arena, source, "source");
   const auto dim   = arena.ensureDimension("d.edge");
   ASSERT_EQ(arena.dimIn(space, dim), source.dims[0]);
-  const CellRef owner    = arena.proxyFor(space, source.cells[0]);
-  const auto cellsBefore = arena.cellCount();
+  const CellRef owner        = arena.proxyFor(space, source.cells[0]);
+  const auto cellsBefore     = arena.cellCount();
+  const auto shadowsBefore   = arena.shadowCount();
+  const auto sourceOpsBefore = source.store->opCount();
+  DimensionRegistry::instance().unregisterStore(source.store.get());
 
   const auto result = arena.snapshotLinks(owner, generousLimits());
+  ASSERT_TRUE(result);
+  const auto *row = rowFor(*result, dim);
+  ASSERT_NE(row, nullptr);
+  ASSERT_TRUE(row->pos);
+  EXPECT_EQ(std::get<ForeignRef>(*row->pos),
+            (ForeignRef{.space = space, .index = source.cells[1]}));
+  EXPECT_EQ(arena.cellCount(), cellsBefore);
+  EXPECT_EQ(arena.shadowCount(), shadowsBefore);
+  EXPECT_FALSE(arena.findExistingProxy(space, source.cells[1]));
+  EXPECT_FALSE(arena.boundDimensionSet(dim));
+  EXPECT_FALSE(DimensionRegistry::instance().get(*source.store, "d.edge"));
+  EXPECT_EQ(source.store->opCount(), sourceOpsBefore);
+  EXPECT_EQ(
+      source.manifold.linked(source.cells[0], source.dims[0], DimVector::POS),
+      source.cells[1]);
+}
+
+TEST(ArenaVisibleLinksTest, OneSpaceUnknownNameOnEmptySourceAxisIsHarmless) {
+  auto source = makeSource("empty_unknown_name", {"d.source"}, 1);
+  Manifold base;
+  ArenaManifold arena{&base};
+  const auto space           = attach(arena, source, "source");
+  const auto dim             = arena.ensureDimension("d.unknown");
+  const CellRef owner        = arena.proxyFor(space, source.cells[0]);
+  const auto cellsBefore     = arena.cellCount();
+  const auto sourceOpsBefore = source.store->opCount();
+  DimensionRegistry::instance().unregisterStore(source.store.get());
+
+  const auto result = arena.snapshotLinks(owner, generousLimits());
+
+  ASSERT_TRUE(result);
+  EXPECT_EQ(rowFor(*result, dim), nullptr);
+  const auto indexDim = arena.storeRefsDimension(space);
+  ASSERT_TRUE(indexDim);
+  const auto *indexRow = rowFor(*result, *indexDim);
+  ASSERT_NE(indexRow, nullptr);
+  ASSERT_TRUE(indexRow->neg);
+  EXPECT_EQ(std::get<CellRef>(*indexRow->neg),
+            *arena.spaceAt(space)->storeCell);
+  EXPECT_EQ(arena.cellCount(), cellsBefore);
+  EXPECT_FALSE(arena.boundDimensionSet(dim));
+  EXPECT_EQ(source.store->opCount(), sourceOpsBefore);
+  std::size_t proxies = 0;
+  arena.forEachProxy(space, [&](const CellRef, const CellRef) { ++proxies; });
+  EXPECT_EQ(proxies, 1U);
+}
+
+TEST(ArenaVisibleLinksTest,
+     OneSpacePartialShadowUsesOneHopAliasWithoutBindingOrMinting) {
+  auto source =
+      makeAliasedSource("alias_partial_shadow",
+                        {{0, 0, DimVector::POS, 1}, {0, 0, DimVector::NEG, 2}});
+  Manifold base;
+  ArenaManifold arena{&base};
+  const auto space    = attach(arena, source, "source");
+  const auto aliasDim = arena.ensureDimension("d.alias-edge");
+  const CellRef owner = arena.proxyFor(space, source.cells[0]);
+  const CellRef local = arena.makeCell("local positive override");
+  ASSERT_TRUE(arena.link(owner, aliasDim, DimVector::POS, local));
+  const auto cellsBefore     = arena.cellCount();
+  const auto shadowsBefore   = arena.shadowCount();
+  const auto sourceOpsBefore = source.store->opCount();
+  DimensionRegistry::instance().unregisterStore(source.store.get());
+
+  const auto result = arena.snapshotLinks(owner, generousLimits());
+
+  ASSERT_TRUE(result);
+  const auto *row = rowFor(*result, aliasDim);
+  ASSERT_NE(row, nullptr);
+  ASSERT_TRUE(row->pos);
+  ASSERT_TRUE(row->neg);
+  EXPECT_EQ(std::get<CellRef>(*row->pos), local);
+  EXPECT_EQ(std::get<ForeignRef>(*row->neg),
+            (ForeignRef{.space = space, .index = source.cells[2]}));
+  EXPECT_EQ(arena.cellCount(), cellsBefore);
+  EXPECT_EQ(arena.shadowCount(), shadowsBefore);
+  EXPECT_FALSE(arena.findExistingProxy(space, source.cells[2]));
+  EXPECT_FALSE(arena.boundDimensionSet(aliasDim));
+  EXPECT_FALSE(
+      DimensionRegistry::instance().get(*source.store, "d.alias-edge"));
+  EXPECT_EQ(source.store->opCount(), sourceOpsBefore);
+}
+
+TEST(ArenaVisibleLinksTest,
+     OneSpaceUnregisteredTextCandidateUsesBoundedNameFallback) {
+  auto source =
+      makeSource("text_candidate_fallback", {"d.edge"}, 3,
+                 {{0, 0, DimVector::POS, 1}, {0, 0, DimVector::NEG, 2}});
+  Manifold base;
+  ArenaManifold arena{&base};
+  const auto space           = attach(arena, source, "source");
+  const CellRef owner        = arena.proxyFor(space, source.cells[0]);
+  const DimRef textDimension = arena.makeCell("d.edge");
+  const CellRef local        = arena.makeCell("local positive override");
+  ASSERT_TRUE(arena.link(owner, textDimension, DimVector::POS, local));
+  const auto cellsBefore     = arena.cellCount();
+  const auto shadowsBefore   = arena.shadowCount();
+  const auto sourceOpsBefore = source.store->opCount();
+  DimensionRegistry::instance().unregisterStore(source.store.get());
+
+  const auto result = arena.snapshotLinks(owner, generousLimits());
+
+  ASSERT_TRUE(result);
+  const auto *row = rowFor(*result, textDimension);
+  ASSERT_NE(row, nullptr);
+  ASSERT_TRUE(row->pos);
+  ASSERT_TRUE(row->neg);
+  EXPECT_EQ(std::get<CellRef>(*row->pos), local);
+  EXPECT_EQ(std::get<ForeignRef>(*row->neg),
+            (ForeignRef{.space = space, .index = source.cells[2]}));
+  EXPECT_EQ(arena.cellCount(), cellsBefore);
+  EXPECT_EQ(arena.shadowCount(), shadowsBefore);
+  EXPECT_FALSE(arena.findExistingProxy(space, source.cells[2]));
+  EXPECT_FALSE(arena.boundDimensionSet(textDimension));
+  EXPECT_EQ(source.store->opCount(), sourceOpsBefore);
+}
+
+TEST(ArenaVisibleLinksTest,
+     OneSpaceUnmappedNonemptyAxisRefusesAfterMatchingKnownName) {
+  auto source =
+      makeSource("one_space_orphan_axis", {"d.edge", "d.orphan"}, 3,
+                 {{0, 0, DimVector::POS, 1}, {0, 1, DimVector::NEG, 2}});
+  Manifold base;
+  ArenaManifold arena{&base};
+  const auto space           = attach(arena, source, "source");
+  const auto edgeDim         = arena.ensureDimension("d.edge");
+  const CellRef owner        = arena.proxyFor(space, source.cells[0]);
+  const auto cellsBefore     = arena.cellCount();
+  const auto shadowsBefore   = arena.shadowCount();
+  const auto sourceOpsBefore = source.store->opCount();
+  DimensionRegistry::instance().unregisterStore(source.store.get());
+
+  const auto result = arena.snapshotLinks(owner, generousLimits());
+
   ASSERT_FALSE(result);
   EXPECT_EQ(result.error(), EffectiveLinkRefusal::NameResolutionRequired);
   EXPECT_EQ(arena.cellCount(), cellsBefore);
+  EXPECT_EQ(arena.shadowCount(), shadowsBefore);
   EXPECT_FALSE(arena.findExistingProxy(space, source.cells[1]));
+  EXPECT_FALSE(arena.findExistingProxy(space, source.cells[2]));
+  EXPECT_FALSE(arena.boundDimensionSet(edgeDim));
+  EXPECT_FALSE(arena.dimensionNamed("d.orphan"));
+  EXPECT_EQ(source.store->opCount(), sourceOpsBefore);
+  EXPECT_EQ(
+      source.manifold.linked(source.cells[0], source.dims[0], DimVector::POS),
+      source.cells[1]);
+  EXPECT_EQ(
+      source.manifold.linked(source.cells[0], source.dims[1], DimVector::NEG),
+      source.cells[2]);
+}
+
+TEST(ArenaVisibleLinksTest,
+     OneSpaceNameLookupLimitsRefuseAtomicallyAndAllowRetry) {
+  auto source = makeSource("one_space_name_limits", {"d.edge"}, 2,
+                           {{0, 0, DimVector::POS, 1}});
+  CountingReader reader{*source.store};
+  Manifold base;
+  ArenaManifold arena{&base};
+  const auto space           = arena.attach(Space{.manifold = &source.manifold,
+                                                  .store    = source.store.get(),
+                                                  .reader   = &reader,
+                                                  .label    = "source"});
+  const auto dim             = arena.ensureDimension("d.edge");
+  const CellRef owner        = arena.proxyFor(space, source.cells[0]);
+  const auto cellsBefore     = arena.cellCount();
+  const auto shadowsBefore   = arena.shadowCount();
+  const auto sourceOpsBefore = source.store->opCount();
+  DimensionRegistry::instance().unregisterStore(source.store.get());
+
+  std::vector<DimensionLookupLimits> refusingLimits;
+  auto directory           = arena.dimensionLookupLimits();
+  directory.directoryCells = 0;
+  refusingLimits.push_back(directory);
+  auto spans         = arena.dimensionLookupLimits();
+  spans.contentSpans = 0;
+  refusingLimits.push_back(spans);
+  auto bytes  = arena.dimensionLookupLimits();
+  bytes.bytes = std::string_view{"d.store-refs"}.size();
+  refusingLimits.push_back(bytes);
+  auto work = arena.dimensionLookupLimits();
+  work.work = std::string_view{"d.store-refs"}.size();
+  refusingLimits.push_back(work);
+
+  for (const auto &limits : refusingLimits) {
+    arena.setDimensionLookupLimits(limits);
+    reader.reads      = 0;
+    const auto result = arena.snapshotLinks(owner, generousLimits());
+    ASSERT_FALSE(result);
+    EXPECT_EQ(result.error(), EffectiveLinkRefusal::LimitExceeded);
+    EXPECT_EQ(reader.reads, 0U);
+    EXPECT_EQ(arena.cellCount(), cellsBefore);
+    EXPECT_EQ(arena.shadowCount(), shadowsBefore);
+    EXPECT_FALSE(arena.findExistingProxy(space, source.cells[1]));
+    EXPECT_FALSE(arena.boundDimensionSet(dim));
+    EXPECT_EQ(source.store->opCount(), sourceOpsBefore);
+  }
+
+  arena.setDimensionLookupLimits(DimensionLookupLimits{});
+  const auto success = arena.snapshotLinks(owner, generousLimits());
+  ASSERT_TRUE(success);
+  EXPECT_EQ(arena.cellCount(), cellsBefore);
+  EXPECT_EQ(arena.shadowCount(), shadowsBefore);
+  EXPECT_FALSE(arena.findExistingProxy(space, source.cells[1]));
+  EXPECT_EQ(source.store->opCount(), sourceOpsBefore);
+}
+
+TEST(ArenaVisibleLinksTest,
+     OneSpaceNameLookupFuelRefusalKeepsFuelSpentAndCanRetry) {
+  auto source =
+      makeSource("one_space_name_fuel", {"d.edge", "d.other"}, 3,
+                 {{0, 0, DimVector::POS, 1}, {0, 1, DimVector::NEG, 2}});
+  CountingReader reader{*source.store};
+  Manifold base;
+  ArenaManifold arena{&base};
+  const auto space           = arena.attach(Space{.manifold = &source.manifold,
+                                                  .store    = source.store.get(),
+                                                  .reader   = &reader,
+                                                  .label    = "source"});
+  const auto edgeDim         = arena.ensureDimension("d.edge");
+  const auto otherDim        = arena.ensureDimension("d.other");
+  const CellRef owner        = arena.proxyFor(space, source.cells[0]);
+  const auto cellsBefore     = arena.cellCount();
+  const auto shadowsBefore   = arena.shadowCount();
+  const auto sourceOpsBefore = source.store->opCount();
+  DimensionRegistry::instance().unregisterStore(source.store.get());
+  arena.setExecutionLimits(static_cast<std::uint32_t>(cellsBefore + 16), 100,
+                           1024);
+  reader.reads = 0;
+
+  const auto refused = arena.snapshotLinks(owner, generousLimits());
+
+  ASSERT_FALSE(refused);
+  EXPECT_EQ(refused.error(), EffectiveLinkRefusal::LimitExceeded);
+  EXPECT_GT(reader.reads, 0U);
+  EXPECT_THROW(arena.consumeWork(), std::runtime_error);
+  EXPECT_EQ(arena.cellCount(), cellsBefore);
+  EXPECT_EQ(arena.shadowCount(), shadowsBefore);
+  EXPECT_FALSE(arena.findExistingProxy(space, source.cells[1]));
+  EXPECT_FALSE(arena.findExistingProxy(space, source.cells[2]));
+  EXPECT_FALSE(arena.boundDimensionSet(edgeDim));
+  EXPECT_FALSE(arena.boundDimensionSet(otherDim));
+  EXPECT_EQ(source.store->opCount(), sourceOpsBefore);
+  EXPECT_EQ(
+      source.manifold.linked(source.cells[0], source.dims[0], DimVector::POS),
+      source.cells[1]);
+  EXPECT_EQ(
+      source.manifold.linked(source.cells[0], source.dims[1], DimVector::NEG),
+      source.cells[2]);
+
+  arena.setExecutionLimits(static_cast<std::uint32_t>(cellsBefore + 16),
+                           100'000, 1024);
+  const auto retried = arena.snapshotLinks(owner, generousLimits());
+  ASSERT_TRUE(retried);
+  EXPECT_TRUE(rowFor(*retried, edgeDim));
+  EXPECT_TRUE(rowFor(*retried, otherDim));
+  EXPECT_EQ(arena.cellCount(), cellsBefore);
+  EXPECT_EQ(arena.shadowCount(), shadowsBefore);
+  EXPECT_EQ(source.store->opCount(), sourceOpsBefore);
+}
+
+TEST(ArenaVisibleLinksTest, OneSpaceSnapshotWorkLimitRefusesBeforeNameReads) {
+  auto source = makeSource("one_space_snapshot_work", {"d.edge"}, 2,
+                           {{0, 0, DimVector::POS, 1}});
+  CountingReader reader{*source.store};
+  Manifold base;
+  ArenaManifold arena{&base};
+  const auto space           = arena.attach(Space{.manifold = &source.manifold,
+                                                  .store    = source.store.get(),
+                                                  .reader   = &reader,
+                                                  .label    = "source"});
+  const auto dim             = arena.ensureDimension("d.edge");
+  const CellRef owner        = arena.proxyFor(space, source.cells[0]);
+  const auto cellsBefore     = arena.cellCount();
+  const auto shadowsBefore   = arena.shadowCount();
+  const auto sourceOpsBefore = source.store->opCount();
+  DimensionRegistry::instance().unregisterStore(source.store.get());
+  reader.reads = 0;
+
+  const auto result =
+      arena.snapshotLinks(owner, EffectiveLinkLimits{128, 128, 1});
+
+  ASSERT_FALSE(result);
+  EXPECT_EQ(result.error(), EffectiveLinkRefusal::LimitExceeded);
+  EXPECT_EQ(reader.reads, 0U);
+  EXPECT_EQ(arena.cellCount(), cellsBefore);
+  EXPECT_EQ(arena.shadowCount(), shadowsBefore);
+  EXPECT_FALSE(arena.findExistingProxy(space, source.cells[1]));
+  EXPECT_FALSE(arena.boundDimensionSet(dim));
+  EXPECT_EQ(source.store->opCount(), sourceOpsBefore);
+}
+
+TEST(ArenaVisibleLinksTest,
+     SnapshotSharesNameBudgetAcrossIndividuallyAffordableCandidates) {
+  std::vector<std::string> dimensionStorage;
+  std::vector<std::string_view> dimensionNames;
+  dimensionStorage.reserve(20);
+  dimensionNames.reserve(20);
+  for (std::size_t index = 0; index < 20; ++index) {
+    dimensionStorage.push_back("d.name." + std::to_string(index));
+    dimensionNames.push_back(dimensionStorage.back());
+  }
+  auto source = makeSource("aggregate_name_budget", dimensionNames, 2,
+                           {{0, 19, DimVector::POS, 1}});
+  Manifold base;
+  ArenaManifold arena{&base};
+  const auto space = attach(arena, source, "source");
+  std::vector<DimRef> arenaDims;
+  arenaDims.reserve(dimensionNames.size());
+  for (const auto name : dimensionNames) {
+    arenaDims.push_back(arena.ensureDimension(name));
+  }
+  const CellRef owner = arena.proxyFor(space, source.cells[0]);
+  DimensionRegistry::instance().unregisterStore(source.store.get());
+
+  auto perLookupLimits = DimensionLookupLimits{};
+  perLookupLimits.work = 2'000;
+  for (const auto name : dimensionNames) {
+    DimensionLookupBudget perLookup{perLookupLimits};
+    const auto result =
+        source.manifold.dimensionNamedBounded(name, *source.store, perLookup);
+    ASSERT_TRUE(result);
+    EXPECT_TRUE(*result);
+  }
+
+  arena.setDimensionLookupLimits(perLookupLimits);
+  const auto cellsBefore     = arena.cellCount();
+  const auto sourceOpsBefore = source.store->opCount();
+  const auto result          = arena.snapshotLinks(owner, generousLimits());
+
+  ASSERT_FALSE(result);
+  EXPECT_EQ(result.error(), EffectiveLinkRefusal::LimitExceeded);
+  EXPECT_EQ(arena.cellCount(), cellsBefore);
+  EXPECT_FALSE(arena.findExistingProxy(space, source.cells[1]));
+  EXPECT_EQ(source.store->opCount(), sourceOpsBefore);
+  EXPECT_EQ(
+      source.manifold.linked(source.cells[0], source.dims[19], DimVector::POS),
+      source.cells[1]);
+}
+
+TEST(ArenaVisibleLinksTest,
+     CoreDirectoryNamesSurviveDetachedHomeAndRespectSnapshotLimits) {
+  auto source =
+      makeSource("core_directory", {"d.edge"}, 2, {{0, 0, DimVector::POS, 1}});
+  CountingReader reader{*source.store};
+  Manifold base;
+  ArenaManifold arena{&base};
+  vortex::VortexCore core{arena};
+  const auto space = arena.attach(Space{.manifold = &source.manifold,
+                                        .store    = source.store.get(),
+                                        .reader   = &reader,
+                                        .label    = "source"});
+  const auto axis  = core.mintDimension("d.edge");
+  ASSERT_NE(axis, source.dims[0]);
+  const auto owner = arena.proxyFor(space, source.cells[0]);
+  ASSERT_TRUE(arena.unlink(core.home(), core.dims().dims, DimVector::POS));
+  const auto cellsBefore     = arena.cellCount();
+  const auto shadowsBefore   = arena.shadowCount();
+  const auto sourceOpsBefore = source.store->opCount();
+  DimensionRegistry::instance().unregisterStore(source.store.get());
+  reader.reads = 0;
+
+  const auto missing = arena.snapshotLinks(owner, generousLimits());
+  ASSERT_FALSE(missing);
+  EXPECT_EQ(missing.error(), EffectiveLinkRefusal::NameResolutionRequired);
+
+  for (const auto directory : {DimensionDirectory{owner, core.dims().dims},
+                               DimensionDirectory{core.dims().dims, owner}}) {
+    const auto invalid =
+        arena.snapshotLinks(owner, generousLimits(), directory);
+    ASSERT_FALSE(invalid);
+    EXPECT_EQ(invalid.error(), EffectiveLinkRefusal::InvalidDimensionDirectory);
+  }
+
+  reader.reads      = 0;
+  const auto capped = arena.snapshotLinks(
+      owner, EffectiveLinkLimits{1, 128, 100'000},
+      DimensionDirectory{core.dims().dims, core.dims().dims});
+  ASSERT_FALSE(capped);
+  EXPECT_EQ(capped.error(), EffectiveLinkRefusal::LimitExceeded);
+  EXPECT_EQ(reader.reads, 0U);
+
+  const auto rows = arena.snapshotLinks(
+      owner, generousLimits(),
+      DimensionDirectory{core.dims().dims, core.dims().dims});
+  ASSERT_TRUE(rows);
+  const auto *row = rowFor(*rows, axis);
+  ASSERT_NE(row, nullptr);
+  ASSERT_TRUE(row->pos);
+  EXPECT_EQ(std::get<ForeignRef>(*row->pos),
+            (ForeignRef{space, source.cells[1]}));
+  EXPECT_EQ(arena.cellCount(), cellsBefore);
+  EXPECT_EQ(arena.shadowCount(), shadowsBefore);
+  EXPECT_FALSE(arena.findExistingProxy(space, source.cells[1]));
+  EXPECT_FALSE(arena.boundDimensionSet(axis));
+  EXPECT_FALSE(DimensionRegistry::instance().get(*source.store, "d.edge"));
+  EXPECT_EQ(source.store->opCount(), sourceOpsBefore);
 }
 
 TEST(ArenaVisibleLinksTest, StoreRefsDimensionIdentityIsPerAttachedSpace) {
@@ -368,8 +797,7 @@ TEST(ArenaVisibleLinksTest,
   EXPECT_NO_THROW(arena.proxyFor(liveSpace, source.cells[0]));
 }
 
-TEST(ArenaVisibleLinksTest,
-     OneSpaceForeignProjectionNeedsExplicitDimensionMapping) {
+TEST(ArenaVisibleLinksTest, OneSpaceDefaultDenyProjectionPreservesFilingAxis) {
   auto source =
       makeSource("foreign_mask", {"d.edge"}, 2, {{0, 0, DimVector::POS, 1}});
   ArenaManifold arena;
@@ -386,7 +814,7 @@ TEST(ArenaVisibleLinksTest,
   const auto result = vm.step(cursor);
 
   EXPECT_FALSE(result.success);
-  EXPECT_NE(result.errorMessage.find("requires explicit foreign dimension"),
+  EXPECT_NE(result.errorMessage.find("internal store-ref index link"),
             std::string::npos);
   EXPECT_EQ(arena.cellCount(), cellsBefore);
   EXPECT_FALSE(arena.findExistingProxy(space, source.cells[1]));
