@@ -151,6 +151,19 @@ public:
   memberNamed(zigzag::vortex::WorkerContext &ctx,
               std::string_view name) const;
 
+  /// The home directory's +d.agents rank, in order — members.front()
+  /// is the actor's own declared member. The spawn-request builder
+  /// resolves the asking member's pid off it.
+  [[nodiscard]] std::vector<zigzag::CellRef>
+  members(zigzag::vortex::WorkerContext &ctx) const;
+
+  /// noteMemberPid's read side — the member's durable `pid` record
+  /// parsed back into the mesh identity it names. Empty until an
+  /// incarnation notes one.
+  [[nodiscard]] std::optional<zigzag::vortex::mesh::ActorPid>
+  memberPid(zigzag::vortex::WorkerContext &ctx,
+            zigzag::CellRef member) const;
+
   /// @p member's index across the home directory's +d.agents ranks —
   /// the language-level spawnSequence the executor resolves. Empty
   /// when @p member is not in the directory.

@@ -542,6 +542,17 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
     return noCell;
   };
 
+  // `parent` resolves to the $parent member — the durable handle the
+  // reply idiom needs: the genesis-minted record carries a pid but no
+  // name, so a name-routed entry could never reach it. `self` and
+  // bound vars keep the name route — `for <var>` fanning out to every
+  // same-named member is the semantic the MissingTransport test pins.
+  const auto resolvePeerMember = [&](CellRef nameCell) -> CellRef {
+    if (nameCell == noCell || arena.textOf(nameCell) != "parent")
+      return noCell;
+    return parentOf(agent);
+  };
+
   // A marshaled term's +d.step children → positional CellValues for
   // runFragment: scalar cells keep their literal type, a structured
   // child (one carrying +d.step of its own) passes as its ref — the
@@ -791,9 +802,15 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       // must carry — a sender-local binding has no meaning off-agent.
       const auto target = field("target");
       const auto scope  = field("scope");
+      // A resolved member rides targetMember — the drain's
+      // member-addressed arm reaches a remote peer by pid whether or
+      // not the record carries a name ($parent never does) — while a
+      // plain name keeps the directory's name route.
+      const auto member = resolvePeerMember(target);
       stageOutbox("emit", payload,
                   target != noCell ? resolvePeer(target) : std::string{"0"},
-                  scope != noCell ? arena.textOf(scope) : std::string_view{});
+                  scope != noCell ? arena.textOf(scope) : std::string_view{},
+                  noCell, {}, {}, {}, false, {}, member);
       return true;
     }
     if (verb == "tell" || verb == "untell") {
@@ -803,7 +820,9 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       const auto peer    = field("peer");
       const auto payload = field("payload");
       if (peer == noCell || payload == noCell) return false;
-      stageOutbox(verb, payload, resolvePeer(peer));
+      stageOutbox(verb, payload, resolvePeer(peer),
+                  std::string_view{}, noCell, {}, {}, {}, false, {},
+                  resolvePeerMember(peer));
       return true;
     }
     if (verb == "stop") {
@@ -995,7 +1014,9 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       // match requires it — two outstanding `stock` asks can no
       // longer cross-resolve.
       const auto peerName  = resolvePeer(peer);
-      const auto requestId = stageOutbox("ask", payload, peerName);
+      const auto requestId =
+          stageOutbox("ask", payload, peerName, {}, noCell, {}, {}, {},
+                      false, {}, resolvePeerMember(peer));
       awaitPeer(peerName);
       if (const auto rec =
               varsRecord(arena, core, intention, "awaitCorr", true))
@@ -1119,7 +1140,8 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
         // mechanism the local +d.subgoal path uses.
         const auto peerName = resolvePeer(peer);
         const auto requestId =
-            stageOutbox("achieve", goalName, peerName, {}, intention);
+            stageOutbox("achieve", goalName, peerName, {}, intention,
+                        {}, {}, {}, false, {}, resolvePeerMember(peer));
         // The durable correlation a remote refuse/outcome/cancel
         // echoes — the settle's delegated rung matches it back to
         // this park. The entry id self-correlates (stageOutbox), so

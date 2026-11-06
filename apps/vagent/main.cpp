@@ -45,10 +45,12 @@ void usage(std::ostream &out) {
          "check validates each source unit without running it. run seeds a\n"
          "local lineage, spawns the program's agent on a single-node\n"
          "MeshActorRuntime, wakes it once so the Initialize handler runs,\n"
-         "and pumps turns until the actor goes quiescent — no transport,\n"
-         "so remote spawn/stop requests stay undispatched. Each --send\n"
-         "delivers one fielded percept (ints, floats, bools, \"strings\")\n"
-         "after genesis; a --send attaches to the FILE it follows.\n";
+         "and pumps turns until the actor goes quiescent. Remote sends\n"
+         "and spawn/stop requests dispatch through the runtime, so a\n"
+         "spawned child runs on the same node as a real second\n"
+         "incarnation. Each --send delivers one fielded percept (ints,\n"
+         "floats, bools, \"strings\") after genesis; a --send attaches to\n"
+         "the FILE it follows.\n";
 }
 
 bool readSource(std::string_view path, std::string &source) {
@@ -201,8 +203,12 @@ bool runFile(std::string_view path, const std::vector<SendSpec> &sends) {
       return outcome;
     // The host's sends land once the member exists: each stages a
     // fielded percept on +d.pending, which the pump's pendingWork
-    // sweep turns into a dispatch on a later turn.
-    if (const auto member = adapter.memberForPid(ctx, genesis.pid))
+    // sweep turns into a dispatch on a later turn. Only the root
+    // incarnation earns them — a spawned child's genesis carries the
+    // asking member's source, not the synthetic client's.
+    if (const auto member = adapter.memberForPid(ctx, genesis.pid);
+        member && genesis.request && genesis.request->source &&
+        *genesis.request->source == client)
       for (std::size_t i = 0; i < sends.size(); ++i)
         adapter.sendPercept(ctx, *member, sends[i].name,
                             sends[i].fields,
@@ -250,6 +256,39 @@ bool runFile(std::string_view path, const std::vector<SendSpec> &sends) {
     std::cerr << path << ": spawn failed\n";
     return false;
   }
+
+  // §5.1's remote spawn: a staged `spawn` entry becomes a real
+  // ActorSpawn — the requesting member's pid as source, the same
+  // programRef/capability the runner itself was granted (one agent
+  // declaration per program means every spawn lowers this image).
+  // The direct spawn call, not a loopback send: the child gets the
+  // lineage fold as its base — a real incarnation in the same
+  // runtime, executor turns and all — where receive() could only
+  // hand it an empty arena. The grant resolves synchronously into
+  // the member's `pid` record through spawnOutcome, the same path
+  // an ActorSpawnAck would take.
+  adapter.setSpawnSender(
+      [&](WorkerContext &ctx, zigzag::CellRef /*member*/,
+          std::string_view requestId)
+          -> std::expected<void, ActorError> {
+        const auto directory = adapter.members(ctx);
+        if (directory.empty())
+          return std::unexpected(ActorError::InvalidMessage);
+        const auto self = adapter.memberPid(ctx, directory.front());
+        if (!self) return std::unexpected(ActorError::InvalidMessage);
+        ActorMessage request;
+        request.type          = MessageType::ActorSpawn;
+        request.requestId     = std::string{requestId};
+        request.source        = *self;
+        request.programRef    = spawnRequest.programRef;
+        request.hashcashStamp = "local";
+        request.capability    = "local";
+        auto result = runtime.spawn(identity, request, wallNow,
+                                    ActorLineage{fold.get(), &lineage});
+        if (!result) return std::unexpected(result.error());
+        adapter.spawnOutcome(ctx, request, result);
+        return {};
+      });
 
   // `on Initialize` runs on the first exec turn whatever it carries, so a
   // P4 wake is the honest boot — no percept needs to be fabricated.

@@ -16,6 +16,7 @@
 #include "../../apps/common/xanadu/vagent/percept_codec.hpp"
 #include "../../apps/common/xanadu/vagent/records.hpp"
 #include "../../apps/common/xanadu/store.hpp"
+#include "../../apps/common/xanadu/vortex/mesh_actor.hpp"
 
 namespace {
 
@@ -629,6 +630,171 @@ TEST(VagentAdapterTest, SpawnStagesTheWireRequestThroughTheSender) {
   // Once-durable: a later drain does not re-send.
   ASSERT_TRUE(h.adapter(h.execution(), h.ctx));
   EXPECT_EQ(calls, 1);
+}
+
+TEST(VagentAdapterTest, RemoteSpawnGrantsThroughTheMeshRuntime) {
+  // The staged spawn entry rides a real MeshActorRuntime: the
+  // sender builds the ActorSpawn from the member's durable records
+  // — asking member's pid as source — and the runtime's spawn runs
+  // its own validation, dedupe and pid mint before the grant lands
+  // on the member through spawnOutcome, the same path an
+  // ActorSpawnAck takes off the wire.
+  AdapterHarness h;
+  const auto image =
+      h.lower("module demo\nevent Boot\n"
+              "agent A {\n"
+              "  var child: Opt<Agent> := none\n"
+              "  on Boot { child := spawn A() }\n"
+              "}");
+  ASSERT_TRUE(image);
+  const ActorPid selfPid{"vagent-local", "agentid", 1, 1};
+  h.adapter.noteMemberPid(h.ctx, image->agentCell, selfPid);
+
+  using zigzag::vortex::mesh::MeshActorRuntime;
+  MeshActorRuntime runtime{"vagent-local", 4};
+  const xanadu::identity::Fingerprint identity{};
+  runtime.trustNode("vagent-local", identity);
+  runtime.setAuthorizer(
+      [](const xanadu::identity::Fingerprint &,
+         const ActorMessage &request)
+          -> std::expected<ActorGrant, ActorError> {
+        ActorGrant grant;
+        grant.programRef      = request.programRef;
+        grant.baseRef         = "local-lineage";
+        grant.maxInstructions = 1'000'000;
+        grant.maxCells        = 1'000'000;
+        grant.maxOutputBytes  = 32'768;
+        grant.maxSolutions    = 64;
+        grant.maxMailboxBytes = 1u << 20;
+        grant.expiresAt = std::chrono::system_clock::now() +
+                          std::chrono::hours{1};
+        return grant;
+      });
+  runtime.setExecutor(
+      [](const ActorExecution &,
+         WorkerContext &) -> std::expected<std::string, ActorError> {
+        return std::string{};
+      });
+
+  ActorMessage captured;
+  h.adapter.setSpawnSender(
+      [&](WorkerContext &ctx, CellRef /*member*/,
+          std::string_view requestId)
+          -> std::expected<void, ActorError> {
+        const auto directory = h.adapter.members(ctx);
+        if (directory.empty())
+          return std::unexpected(ActorError::InvalidMessage);
+        const auto self =
+            h.adapter.memberPid(ctx, directory.front());
+        if (!self) return std::unexpected(ActorError::InvalidMessage);
+        ActorMessage request;
+        request.type          = MessageType::ActorSpawn;
+        request.requestId     = std::string{requestId};
+        request.source        = *self;
+        request.programRef    = "vagent:test";
+        request.hashcashStamp = "local";
+        request.capability    = "local";
+        captured              = request;
+        auto result = runtime.spawn(
+            identity, request, std::chrono::system_clock::now());
+        if (!result) return std::unexpected(result.error());
+        h.adapter.spawnOutcome(ctx, request, result);
+        return {};
+      });
+
+  auto turn = h.execution(h.send("Boot"));
+  turn.pid  = selfPid;
+  ASSERT_TRUE(h.adapter(turn, h.ctx));
+
+  // The request the wire carried: the staged entry's durable id and
+  // the asking member's mesh pid.
+  EXPECT_EQ(captured.type, MessageType::ActorSpawn);
+  ASSERT_TRUE(captured.source);
+  EXPECT_EQ(*captured.source, selfPid);
+  EXPECT_FALSE(captured.requestId.empty());
+
+  // The runtime minted the child's incarnation — the member's `pid`
+  // record names it, so the mesh's identity and the language's
+  // member agree end to end.
+  const auto member = h.memberCell(image->agentCell, "child");
+  ASSERT_TRUE(member);
+  const auto pid = h.adapter.memberPid(h.ctx, *member);
+  ASSERT_TRUE(pid);
+  EXPECT_EQ(pid->node, "vagent-local");
+  const auto resolved = h.adapter.memberForPid(h.ctx, *pid);
+  ASSERT_TRUE(resolved);
+  EXPECT_EQ(*resolved, *member);
+  EXPECT_EQ(runtime.actorCount(), 1u);
+  EXPECT_EQ(h.ctx.arena.outstandingMarks(), 0u);
+}
+
+TEST(VagentAdapterTest, RemoteSpawnRefusedFailsTheMember) {
+  // A denied grant answers the durable request with §8.6's refusal:
+  // the runtime's NotAuthorized becomes the hook's failure, and the
+  // drain's spawnFailed raises SpawnFailed on the asking agent —
+  // the member keeps its name but never gets a pid.
+  AdapterHarness h;
+  const auto image =
+      h.lower("module demo\nevent Boot\n"
+              "agent A {\n"
+              "  var child: Opt<Agent> := none\n"
+              "  on Boot { child := spawn A() }\n"
+              "}");
+  ASSERT_TRUE(image);
+  const ActorPid selfPid{"vagent-local", "agentid", 1, 1};
+  h.adapter.noteMemberPid(h.ctx, image->agentCell, selfPid);
+
+  using zigzag::vortex::mesh::MeshActorRuntime;
+  MeshActorRuntime runtime{"vagent-local", 4};
+  const xanadu::identity::Fingerprint identity{};
+  runtime.trustNode("vagent-local", identity);
+  runtime.setAuthorizer(
+      [](const xanadu::identity::Fingerprint &,
+         const ActorMessage &)
+          -> std::expected<ActorGrant, ActorError> {
+        return std::unexpected(ActorError::NotAuthorized);
+      });
+  runtime.setExecutor(
+      [](const ActorExecution &,
+         WorkerContext &) -> std::expected<std::string, ActorError> {
+        return std::string{};
+      });
+
+  h.adapter.setSpawnSender(
+      [&](WorkerContext &ctx, CellRef,
+          std::string_view requestId)
+          -> std::expected<void, ActorError> {
+        const auto directory = h.adapter.members(ctx);
+        const auto self      = directory.empty()
+                                   ? std::nullopt
+                                   : h.adapter.memberPid(ctx,
+                                                         directory.front());
+        if (!self) return std::unexpected(ActorError::InvalidMessage);
+        ActorMessage request;
+        request.type          = MessageType::ActorSpawn;
+        request.requestId     = std::string{requestId};
+        request.source        = *self;
+        request.programRef    = "vagent:test";
+        request.hashcashStamp = "local";
+        request.capability    = "local";
+        auto result = runtime.spawn(
+            identity, request, std::chrono::system_clock::now());
+        if (!result) return std::unexpected(result.error());
+        h.adapter.spawnOutcome(ctx, request, result);
+        return {};
+      });
+
+  auto turn = h.execution(h.send("Boot"));
+  turn.pid  = selfPid;
+  ASSERT_TRUE(h.adapter(turn, h.ctx));
+
+  EXPECT_EQ(runtime.actorCount(), 0u);
+  EXPECT_THAT(h.journalOf(image->agentCell),
+              ::testing::Contains("SpawnFailed"));
+  const auto member = h.memberCell(image->agentCell, "child");
+  ASSERT_TRUE(member);
+  EXPECT_FALSE(h.adapter.memberPid(h.ctx, *member));
+  EXPECT_EQ(h.ctx.arena.outstandingMarks(), 0u);
 }
 
 TEST(VagentAdapterTest, MemberStoppingRaisesOnceAndDestroysTheMember) {
@@ -1886,6 +2052,47 @@ TEST(VagentAdapterTest, TwoRuntimesDelegateAcrossTheWire) {
               ::testing::Contains("ChildDone"));
   EXPECT_EQ(parent.ctx.arena.outstandingMarks(), 0u);
   EXPECT_EQ(child.ctx.arena.outstandingMarks(), 0u);
+}
+
+TEST(VagentAdapterTest, EmitForParentWiresTheNamelessParentMember) {
+  // §2505's reply idiom: `for parent` resolves the genesis-bound
+  // $parent member, which carries a pid but no name — a name-routed
+  // entry could never reach it. The member-addressed arm sends by
+  // pid, so the reply lands on the real remote incarnation.
+  AdapterHarness h;
+  const auto image =
+      h.lower("module demo\nevent Boot\nevent Pong\n"
+              "agent A {\n"
+              "  on Boot { emit Pong{} for parent }\n"
+              "}");
+  ASSERT_TRUE(image);
+
+  const ActorPid parentPid{"node0", "parentid", 1, 2};
+  const ActorPid selfPid{"node1", "childid", 1, 4};
+  ActorMessage spawnRequest;
+  spawnRequest.type   = MessageType::ActorSpawn;
+  spawnRequest.source = parentPid;
+  ActorGenesis genesis;
+  genesis.pid     = selfPid;
+  genesis.request = &spawnRequest;
+  ASSERT_TRUE(h.adapter.genesis(genesis, h.ctx));
+
+  std::vector<ActorMessage> wire;
+  h.adapter.setSendSender(
+      [&wire](WorkerContext &, const ActorMessage &message)
+          -> std::expected<void, ActorError> {
+        wire.push_back(message);
+        return {};
+      });
+  auto tick = h.execution(h.send("Boot"));
+  tick.pid  = selfPid;
+  ASSERT_TRUE(h.adapter(tick, h.ctx));
+  ASSERT_EQ(wire.size(), 1u);
+  EXPECT_EQ(wire[0].type, MessageType::ActorSend);
+  ASSERT_TRUE(wire[0].target);
+  EXPECT_EQ(*wire[0].target, parentPid);
+  EXPECT_EQ(wire[0].value, "Pong");
+  EXPECT_EQ(h.ctx.arena.outstandingMarks(), 0u);
 }
 
 TEST(VagentAdapterTest, UnmarshalableRemotePayloadFaultsHonestly) {

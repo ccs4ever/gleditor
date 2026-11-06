@@ -835,6 +835,18 @@ VagentAdapter::memberNamed(zigzag::vortex::WorkerContext &ctx,
   return std::nullopt;
 }
 
+std::vector<CellRef>
+VagentAdapter::members(zigzag::vortex::WorkerContext &ctx) const {
+  return directoryMembers(ctx.arena, ctx.core);
+}
+
+std::optional<mesh::ActorPid>
+VagentAdapter::memberPid(zigzag::vortex::WorkerContext &ctx,
+                         CellRef member) const {
+  const auto key = memberPidKey(ctx.arena, ctx.core, member);
+  return key ? parsePid(*key) : std::nullopt;
+}
+
 std::optional<std::size_t>
 VagentAdapter::memberIndex(zigzag::vortex::WorkerContext &ctx,
                            CellRef member) const {
