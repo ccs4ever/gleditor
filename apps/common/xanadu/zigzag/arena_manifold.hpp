@@ -132,6 +132,7 @@ struct BoundDimensionSet {
 enum class DimensionMappingRefusal : std::uint8_t {
   Ambiguous,
   WorkLimitExceeded,
+  FuelLimitExceeded,
 };
 
 enum class EffectiveLinkRefusal : std::uint8_t {
@@ -322,6 +323,14 @@ public:
                  const xanadu::SpanReader *reader = nullptr) const;
   [[nodiscard]] std::optional<DimRef>
   dimensionNamed(std::string_view name, const xanadu::SpanReader &reader) const;
+  [[nodiscard]] DimensionLookupLimits dimensionLookupLimits() const noexcept {
+    return dimensionLookupLimits_;
+  }
+  ArenaManifold *
+  setDimensionLookupLimits(DimensionLookupLimits limits) noexcept {
+    dimensionLookupLimits_ = limits;
+    return this;
+  }
   DimRef ensureDimension(std::string_view name);
 
   /// Provenance root projected into this arena, when verified provenance is
@@ -423,8 +432,10 @@ public:
   /// Resolve explicit/raw-member bindings without allocating. Each map or
   /// member inspection consumes one unit from the caller-owned budget.
   [[nodiscard]] std::expected<std::optional<DimRef>, DimensionMappingRefusal>
-  checkedDimensionMapping(std::uint32_t space, DimRef dim,
-                          std::size_t &workRemaining) const noexcept;
+  checkedDimensionMapping(
+      std::uint32_t space, DimRef dim, std::size_t &workRemaining,
+      std::optional<gleditor::cpp26::function_ref<bool(std::size_t)>> charge =
+          std::nullopt) const noexcept;
 
   /// Read the effective edges without minting proxies or changing overlays.
   /// Limits must be positive. Name-only one-space mappings are refused for
@@ -888,6 +899,7 @@ private:
   const xanadu::SpanReader *defaultReader_{nullptr};
   mutable std::optional<std::size_t> workRemaining_;
   std::optional<std::size_t> scratchLimit_;
+  DimensionLookupLimits dimensionLookupLimits_{};
 };
 
 /**

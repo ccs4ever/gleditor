@@ -1351,3 +1351,56 @@ frontend/lifecycle parity also remain open. Full §4.12 is incomplete.
 Logs: `/tmp/vql-foreign-masks-build.log`, `/tmp/vql-foreign-masks-tests.log`,
 `/tmp/vql-foreign-masks-profile.log`, `/tmp/vql-foreign-masks-overlay.log`,
 `/tmp/vql-foreign-masks-cli.log`, `/tmp/vql-foreign-masks-format.log`.
+
+## Iteration 37: shared budgeted dimension-name lookup
+
+Manifold name lookup now has one shared matcher with a bounded, read-only entry point. Both routes
+retain registry-first held identities, directory order, exact text and one-hop `d.alias` semantics.
+Home is excluded from the dimension directory, and ordinary linear-rank termination remains valid.
+The compatibility entry point retains its previous reader behavior and successful cache insertion;
+bounded reads neither populate the directory cache nor register derived names. Expanded reader
+payloads remain accepted by legacy lookup while the bounded entry point refuses unplanned payload
+growth. No new configured-budget exception is introduced through the legacy noexcept arena reader.
+
+The bounded API returns a typed refusal separately from a successful missing name. It checks request
+bytes/work before registry hashing, span counts and aggregate declared bytes before reading or
+reserving payload storage, and CSR widths before link probes. Work includes repeated alias and
+matching passes. Mutable request counters are separate from an optional per-call fuel callback; the
+non-owning callback is never retained. Cache hits can bypass directory/span reads but still consume
+request-byte and work budget. No AST evaluation is involved.
+
+Proxy construction now shares one budget across explicit dimension mapping, requested-source and
+tail-origin name diagnostics, and their source-neighbor probes. Every charged operation also
+consumes active arena fuel. Lookup refusal throws inside the existing proxy savepoint, preserving
+rollback and spent fuel rather than pretending the name was absent. The new arena limits are
+configurable: defaults are 4,096 directory-name visits, 4,096 content spans, 1 MiB of cumulative
+request/payload bytes and 16,384 work units. Independent caps can be exhausted earlier than another
+cap, and repeated reads count again. This closes iteration 36's legacy name-scan escape in proxy
+collision diagnostics; it does not establish a universal whole-VM CPU/heap bound or merge these
+limits into the mask's snapshot cap.
+
+Validation: full `make -j$(nproc)` passed, as did all 877 affected tests from 81 suites and 92
+additional ZigZag tests from 17 suites. Fifteen new enabled cases cover typed refusals, cache-hit
+costs, shared budget depletion, UTF-8 byte accounting, fragmented pre-read refusal, alias hop depth,
+duplicate-name order, home exclusion, legacy reader compatibility, read-only behavior and proxy
+rollback/retry/fuel. The pre-existing fuel regression's successful retry now supplies enough fuel
+for newly metered diagnostics; its one-unit exhaustion/no-refund checks remain intact. The real
+headless CLI still removes the requested axis and preserves exact `9007199254740993`.
+
+A 2,048-dimension probe used explicitly enlarged limits to finish a missing-name lookup: 4,098
+directory and span visits, 55,149 budget bytes, 55,136 reader bytes, 4,098 reader calls and 71,545
+work units. The 13-byte difference is the request key. With the directory cap reduced to 256, the
+same probe returned a typed refusal after 256 visits/spans, 3,224 budget bytes, 3,211 reader bytes,
+256 reader calls and 4,250 work units. Single raw observations were 200 and 11 microseconds; fixture
+construction was outside timing. These are diagnostic counters and observations, not heap,
+throughput or speedup claims. The broader sweep passed 132 of 141 tests, skipped one swarm case, and
+retained the same eight unfinished frontend/exception-expectation failures.
+
+Name-dependent one-space snapshots still refuse; integrating the shared bounded resolver is a
+separate stage. Arbitrary index-rank mutation, general attachment/binding lifecycle, callable forms
+and full frontend/parallel parity remain open. Full §4.12 is incomplete.
+
+Logs: `/tmp/vql-bounded-names-build.log`, `/tmp/vql-bounded-names-tests.log`,
+`/tmp/vql-bounded-names-zigzag.log`, `/tmp/vql-bounded-names-profile.log`,
+`/tmp/vql-bounded-names-profile.xml`, `/tmp/vql-bounded-names-overlay.log`,
+`/tmp/vql-bounded-names-cli.log`, `/tmp/vql-bounded-names-format.log`.

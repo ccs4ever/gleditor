@@ -390,6 +390,26 @@ CellRef ArenaManifold::proxyFor(const std::uint32_t space,
 
   const Mark savepoint = mark();
   try {
+    const auto chargeLookupWork = [&](const std::size_t amount) {
+      try {
+        for (std::size_t i = 0; i < amount; ++i) {
+          consumeWork();
+        }
+      } catch (const std::runtime_error &) {
+        return false;
+      }
+      return true;
+    };
+    DimensionLookupBudget lookupBudget{dimensionLookupLimits_};
+    const auto chargeProbe = [&](const Manifold &manifold,
+                                 const CellRef owner) {
+      const std::size_t amount = 1 + manifold.dimensionsOf(owner).size();
+      if (amount > lookupBudget.workRemaining || !chargeLookupWork(amount)) {
+        throw std::runtime_error(
+            "proxy collision edge probe exhausted its configured budget");
+      }
+      lookupBudget.workRemaining -= amount;
+    };
     const auto dimStoreRefs = storeRefsDimension(space);
     if (!dimStoreRefs) {
       throw std::logic_error("proxy store-ref index dimension is unavailable");
@@ -397,30 +417,50 @@ CellRef ArenaManifold::proxyFor(const std::uint32_t space,
     const auto &source = spaces_[space - 1];
     const auto sourceDimension =
         [&](const std::uint32_t sourceId) -> std::optional<DimRef> {
-      if (const auto bound = dimIn(sourceId, *dimStoreRefs);
-          bound.has_value()) {
-        return bound;
+      const auto mapping =
+          checkedDimensionMapping(sourceId, *dimStoreRefs,
+                                  lookupBudget.workRemaining, chargeLookupWork);
+      if (!mapping) {
+        throw std::runtime_error(
+            mapping.error() == DimensionMappingRefusal::Ambiguous
+                ? "proxy collision lookup found ambiguous dimension mapping"
+                : "proxy collision lookup exhausted its configured budget");
+      }
+      if (mapping->has_value()) {
+        return **mapping;
       }
       const auto sourceSpace = spaceAt(sourceId);
       if (!sourceSpace || !sourceSpace->manifold) {
         return std::nullopt;
       }
-      if (sourceSpace->reader != nullptr) {
-        return sourceSpace->manifold->dimensionNamed("d.store-refs",
-                                                     *sourceSpace->reader);
+      const auto *reader = sourceSpace->reader;
+      if (reader == nullptr) {
+        reader = sourceSpace->store != nullptr ? sourceSpace->store
+                                               : sourceSpace->manifold->store();
       }
-      if (sourceSpace->store != nullptr) {
-        return sourceSpace->manifold->dimensionNamed("d.store-refs",
-                                                     *sourceSpace->store);
+      if (reader == nullptr) {
+        return std::nullopt;
       }
-      return sourceSpace->manifold->dimensionNamed("d.store-refs");
+      const auto named = sourceSpace->manifold->dimensionNamedBounded(
+          "d.store-refs", *reader, lookupBudget, chargeLookupWork);
+      if (!named) {
+        throw std::runtime_error("proxy collision dimension lookup refused by "
+                                 "its configured budget");
+      }
+      return *named;
     };
     const auto sourceDim = sourceDimension(space);
-    if (sourceDim && source.manifold &&
-        (source.manifold->linked(foreignIndex, *sourceDim, DimVector::POS) ||
-         source.manifold->linked(foreignIndex, *sourceDim, DimVector::NEG))) {
-      throw std::logic_error(
-          "proxy store-ref append conflicts with a source-axis neighbor");
+    if (sourceDim && source.manifold) {
+      chargeProbe(*source.manifold, foreignIndex);
+      if (source.manifold->linked(foreignIndex, *sourceDim, DimVector::POS)) {
+        throw std::logic_error(
+            "proxy store-ref append conflicts with a source-axis neighbor");
+      }
+      chargeProbe(*source.manifold, foreignIndex);
+      if (source.manifold->linked(foreignIndex, *sourceDim, DimVector::NEG)) {
+        throw std::logic_error(
+            "proxy store-ref append conflicts with a source-axis neighbor");
+      }
     }
 
     const CellRef tail = spaceStoreRefsTail_[space - 1];
@@ -434,11 +474,13 @@ CellRef ArenaManifold::proxyFor(const std::uint32_t space,
         if (const auto origin = foreignOf(tail); origin.has_value()) {
           const auto originSpace = spaceAt(origin->space);
           const auto originDim   = sourceDimension(origin->space);
-          if (originSpace && originSpace->manifold && originDim &&
-              originSpace->manifold->linked(origin->index, *originDim,
-                                            DimVector::POS)) {
-            throw std::logic_error(
-                "proxy store-ref tail has a source POS neighbor");
+          if (originSpace && originSpace->manifold && originDim) {
+            chargeProbe(*originSpace->manifold, origin->index);
+            if (originSpace->manifold->linked(origin->index, *originDim,
+                                              DimVector::POS)) {
+              throw std::logic_error(
+                  "proxy store-ref tail has a source POS neighbor");
+            }
           }
         }
       }
@@ -641,27 +683,44 @@ std::optional<DimRef> ArenaManifold::dimIn(const std::uint32_t space,
 
 std::expected<std::optional<DimRef>, DimensionMappingRefusal>
 ArenaManifold::checkedDimensionMapping(
-    const std::uint32_t space, const DimRef dim,
-    std::size_t &workRemaining) const noexcept {
+    const std::uint32_t space, const DimRef dim, std::size_t &workRemaining,
+    const std::optional<gleditor::cpp26::function_ref<bool(std::size_t)>>
+        charge) const noexcept {
   if (space == 0 || space > spaces_.size() || dim == noCell) {
     return std::nullopt;
   }
-  const auto spend = [&]() {
-    if (workRemaining == 0) {
+  bool fuelFailed    = false;
+  const auto refusal = [&]() {
+    return fuelFailed ? DimensionMappingRefusal::FuelLimitExceeded
+                      : DimensionMappingRefusal::WorkLimitExceeded;
+  };
+  const auto spend = [&](const std::size_t amount = 1) {
+    if (amount > workRemaining) {
       return false;
     }
-    workRemaining--;
+    if (charge) {
+      try {
+        if (!(*charge)(amount)) {
+          fuelFailed = true;
+          return false;
+        }
+      } catch (...) {
+        fuelFailed = true;
+        return false;
+      }
+    }
+    workRemaining -= amount;
     return true;
   };
 
   if (!spend()) {
-    return std::unexpected{DimensionMappingRefusal::WorkLimitExceeded};
+    return std::unexpected{refusal()};
   }
   if (const auto exact = boundDimensions_.find(dim);
       exact != boundDimensions_.end()) {
     for (const auto &member : exact->second.members) {
       if (!spend()) {
-        return std::unexpected{DimensionMappingRefusal::WorkLimitExceeded};
+        return std::unexpected{refusal()};
       }
       if (member.space == space) {
         return std::optional<DimRef>{member.dim};
@@ -674,13 +733,13 @@ ArenaManifold::checkedDimensionMapping(
   for (const auto &[arenaDim, set] : boundDimensions_) {
     std::ignore = arenaDim;
     if (!spend()) {
-      return std::unexpected{DimensionMappingRefusal::WorkLimitExceeded};
+      return std::unexpected{refusal()};
     }
     bool inputMember = false;
     std::optional<DimRef> targetMember;
     for (const auto &member : set.members) {
       if (!spend()) {
-        return std::unexpected{DimensionMappingRefusal::WorkLimitExceeded};
+        return std::unexpected{refusal()};
       }
       inputMember = inputMember || member.dim == dim;
       if (member.space == space) {
@@ -715,12 +774,8 @@ ArenaManifold::checkedDimensionMapping(
   std::size_t remaining = source->manifold->traversalBound();
   while (remaining-- > 0) {
     const auto rowSize = source->manifold->dimensionsOf(current).size();
-    if (rowSize >= workRemaining) {
-      return std::unexpected{DimensionMappingRefusal::WorkLimitExceeded};
-    }
-    workRemaining -= rowSize;
-    if (!spend()) {
-      return std::unexpected{DimensionMappingRefusal::WorkLimitExceeded};
+    if (!spend(rowSize + 1)) {
+      return std::unexpected{refusal()};
     }
     const auto next = source->manifold->linked(current, *dims, DimVector::POS);
     if (!next || *next == current || *next == *home) {

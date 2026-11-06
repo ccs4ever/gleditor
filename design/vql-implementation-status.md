@@ -669,7 +669,26 @@ stores remain unchanged. Four raw profile observations report VM dispatch counts
 with no speedup/heap claims. The broader sweep passed 130 of 139 tests, skipped one, and retained
 the same eight unfinished frontend failures.
 
-Snapshot/planning work is bounded, but proxy construction's legacy collision-name lookup can still
-scan a source directory outside that work cap. Shared bounded name resolution is next. General
-filing-rank mutation, federated mesh input, remaining callable forms and complete frontend/lifecycle
-parity remain open. Full §4.12 is incomplete.
+The following shared lookup stage now budgets proxy collision-name diagnostics separately from
+snapshot/planning work. General filing-rank mutation, federated mesh input, remaining callable forms
+and complete frontend/lifecycle parity remain open. Full §4.12 is incomplete.
+
+## Shared bounded dimension-name diagnostics
+
+One matcher now serves legacy and bounded dimension-name lookup, preserving registry priority,
+directory order, exact text and one-hop aliases. Bounded lookup separates typed resource refusal
+from a missing name, preflights bytes/spans before reads, charges CSR probes and work, and leaves
+derived caches unchanged. Proxy construction shares one configurable request budget and active arena
+fuel across mapping, source/tail lookup and collision probes. Legacy reader compatibility is
+retained. See [iteration 37](projects/vortex-vm-only-iterations.md).
+
+The full build, all 877 affected tests from 81 suites and 92 additional ZigZag tests passed. New
+cases cover cache, alias, duplicate/home, UTF-8, fragment, reader and rollback/fuel behavior. The
+large-directory probe records an actual miss and a typed refusal at the configured visit cap; budget
+bytes and reader bytes are reported separately, with no speedup or memory-usage claim. The broader
+sweep retained eight unfinished failures, with 132 passes and one skip.
+
+This closes the unmetered collision-name scan in the new proxy path, not every legacy reader or a
+universal VM CPU bound. Name-dependent one-space snapshots still require integration with this
+shared bounded resolver. Index-rank mutation, general lifecycle, callable forms and full frontend
+parity still leave §4.12 incomplete.

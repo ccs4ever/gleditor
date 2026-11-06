@@ -17,6 +17,7 @@
 #ifndef ZIGZAG_MANIFOLD_HPP
 #define ZIGZAG_MANIFOLD_HPP
 
+#include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <limits>
@@ -45,6 +46,39 @@ struct VersionAnnotation;
 } // namespace xanadu
 
 namespace zigzag {
+
+enum class DimensionLookupRefusal : std::uint8_t {
+  InvalidRequest,
+  DirectoryLimitExceeded,
+  ContentSpanLimitExceeded,
+  ByteLimitExceeded,
+  WorkLimitExceeded,
+  FuelLimitExceeded,
+};
+
+/// Keep collision diagnostics finite for authored manifolds with large or
+/// malformed dimension directories. Work also charges copied bytes, so it can
+/// stop a lookup before the independent directory/span/byte ceilings; callers
+/// may raise these limits on an arena for a known larger source.
+struct DimensionLookupLimits {
+  std::size_t directoryCells{4096};
+  std::size_t contentSpans{4096};
+  std::size_t bytes{1'048'576};
+  std::size_t work{16'384};
+};
+
+struct DimensionLookupBudget {
+  explicit DimensionLookupBudget(DimensionLookupLimits configured = {})
+      : limits(configured), directoryCellsRemaining(configured.directoryCells),
+        contentSpansRemaining(configured.contentSpans),
+        bytesRemaining(configured.bytes), workRemaining(configured.work) {}
+
+  DimensionLookupLimits limits;
+  std::size_t directoryCellsRemaining;
+  std::size_t contentSpansRemaining;
+  std::size_t bytesRemaining;
+  std::size_t workRemaining;
+};
 
 class UnrootedRegistryDependency : public std::runtime_error {
 public:
@@ -500,6 +534,21 @@ public:
   [[nodiscard]] std::optional<DimRef>
   dimensionNamed(std::string_view name, const xanadu::SpanReader &reader) const;
 
+  /// Bounded shared name matcher. Does not populate the lazy directory cache
+  /// or register a dimension name. The optional callback charges caller fuel.
+  [[nodiscard]] std::expected<std::optional<DimRef>, DimensionLookupRefusal>
+  dimensionNamedBounded(
+      std::string_view name, const xanadu::SpanReader &reader,
+      const DimensionLookupLimits &limits,
+      std::optional<gleditor::cpp26::function_ref<bool(std::size_t)>> charge =
+          std::nullopt) const;
+  [[nodiscard]] std::expected<std::optional<DimRef>, DimensionLookupRefusal>
+  dimensionNamedBounded(
+      std::string_view name, const xanadu::SpanReader &reader,
+      DimensionLookupBudget &budget,
+      std::optional<gleditor::cpp26::function_ref<bool(std::size_t)>> charge =
+          std::nullopt) const;
+
   /// Find a dimension by name using the associated Store as the reader;
   /// nullopt too when no Store is attached.
   [[nodiscard]] std::optional<DimRef>
@@ -783,6 +832,13 @@ public:
   [[nodiscard]] bool equivalentTo(const Manifold &other) const;
 
 private:
+  [[nodiscard]] std::expected<std::optional<DimRef>, DimensionLookupRefusal>
+  dimensionNamedImpl(
+      std::string_view name, const xanadu::SpanReader &reader,
+      DimensionLookupBudget &budget,
+      std::optional<gleditor::cpp26::function_ref<bool(std::size_t)>> charge,
+      bool legacyMode) const;
+
   friend struct ManifoldTestAccess;
 
   /// Count @p why and hand it back as the fold's answer.

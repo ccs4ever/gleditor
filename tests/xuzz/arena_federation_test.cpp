@@ -768,6 +768,68 @@ TEST(ArenaFederationTest,
 }
 
 TEST(ArenaFederationTest,
+     ProxyCollisionLookupBudgetRefusalRollsBackAndCanRetry) {
+  auto foreign = makeForeignLine("proxy_collision_budget", 2, {});
+  ArenaManifold arena;
+  const auto space      = arena.attach(Space{.manifold = &foreign.manifold,
+                                             .store    = foreign.store.get(),
+                                             .label    = "foreign"});
+  auto limits           = arena.dimensionLookupLimits();
+  limits.directoryCells = 0;
+  arena.setDimensionLookupLimits(limits);
+
+  const auto cellsBefore        = arena.cellCount();
+  const auto storeVersionBefore = foreign.store->primaryCurrentVersion();
+  const auto storeCell          = *arena.spaceAt(space)->storeCell;
+  EXPECT_THROW((void)arena.proxyFor(space, foreign.cells[0]),
+               std::runtime_error);
+
+  EXPECT_EQ(arena.cellCount(), cellsBefore);
+  EXPECT_FALSE(arena.findExistingProxy(space, foreign.cells[0]));
+  EXPECT_FALSE(arena.linked(storeCell, *arena.dimensionNamed("d.store-refs"),
+                            DimVector::POS));
+  EXPECT_EQ(arena.outstandingMarks(), 0U);
+  EXPECT_EQ(foreign.store->primaryCurrentVersion(), storeVersionBefore);
+
+  limits.directoryCells = 4096;
+  arena.setDimensionLookupLimits(limits);
+  EXPECT_NO_THROW((void)arena.proxyFor(space, foreign.cells[0]));
+  EXPECT_TRUE(arena.findExistingProxy(space, foreign.cells[0]));
+  EXPECT_EQ(arena.outstandingMarks(), 0U);
+  EXPECT_EQ(foreign.store->primaryCurrentVersion(), storeVersionBefore);
+}
+
+TEST(ArenaFederationTest,
+     ProxyCollisionLookupFuelRefusalRollsBackAndKeepsFuelSpent) {
+  auto foreign = makeForeignLine("proxy_collision_fuel", 2, {});
+  ArenaManifold arena;
+  const auto space       = arena.attach(Space{.manifold = &foreign.manifold,
+                                              .store    = foreign.store.get(),
+                                              .label    = "foreign"});
+  const auto cellsBefore = arena.cellCount();
+  const auto storeVersionBefore = foreign.store->primaryCurrentVersion();
+  const auto storeCell          = *arena.spaceAt(space)->storeCell;
+  arena.setExecutionLimits(cellsBefore + 8, 1, 1024);
+
+  EXPECT_THROW((void)arena.proxyFor(space, foreign.cells[0]),
+               std::runtime_error);
+
+  EXPECT_EQ(arena.cellCount(), cellsBefore);
+  EXPECT_FALSE(arena.findExistingProxy(space, foreign.cells[0]));
+  EXPECT_FALSE(arena.linked(storeCell, *arena.dimensionNamed("d.store-refs"),
+                            DimVector::POS));
+  EXPECT_EQ(arena.outstandingMarks(), 0U);
+  EXPECT_EQ(foreign.store->primaryCurrentVersion(), storeVersionBefore);
+  EXPECT_THROW(arena.consumeWork(), std::runtime_error);
+
+  arena.setExecutionLimits(cellsBefore + 8, 4096, 1024);
+  EXPECT_NO_THROW((void)arena.proxyFor(space, foreign.cells[0]));
+  EXPECT_TRUE(arena.findExistingProxy(space, foreign.cells[0]));
+  EXPECT_EQ(arena.outstandingMarks(), 0U);
+  EXPECT_EQ(foreign.store->primaryCurrentVersion(), storeVersionBefore);
+}
+
+TEST(ArenaFederationTest,
      LateDimensionBindingRefusesAnUnshadowedSourceTailNeighbor) {
   auto firstStore = createTestStore(tempStoreDir("late_store_refs_first"));
   auto firstVer   = firstStore->sliceGenesis(MicroversionId{});
@@ -1050,7 +1112,7 @@ TEST(ArenaFederationTest,
                std::runtime_error);
   EXPECT_EQ(arena.cellCount(), cellsBefore);
 
-  arena.setExecutionLimits(static_cast<std::uint32_t>(cellsBefore + 8), 100,
+  arena.setExecutionLimits(static_cast<std::uint32_t>(cellsBefore + 8), 100'000,
                            1024);
   EXPECT_NO_THROW(
       zigzag::expectWritten(arena.link(proxyA, dim, DimVector::POS, proxyC)));

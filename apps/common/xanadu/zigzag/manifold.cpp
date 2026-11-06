@@ -834,6 +834,91 @@ std::span<const DimRef> Manifold::dimensions() const {
 std::optional<DimRef>
 Manifold::dimensionNamed(const std::string_view name,
                          const xanadu::SpanReader &reader) const {
+  const DimensionLookupLimits unlimited{
+      .directoryCells = std::numeric_limits<std::size_t>::max(),
+      .contentSpans   = std::numeric_limits<std::size_t>::max(),
+      .bytes          = std::numeric_limits<std::size_t>::max(),
+      .work           = std::numeric_limits<std::size_t>::max()};
+  DimensionLookupBudget budget{unlimited};
+  const auto result =
+      dimensionNamedImpl(name, reader, budget, std::nullopt, true);
+  if (!result) {
+    if (result.error() == DimensionLookupRefusal::DirectoryLimitExceeded) {
+      return std::nullopt;
+    }
+    throw std::runtime_error("unbounded dimension-name lookup refused");
+  }
+  return *result;
+}
+
+std::expected<std::optional<DimRef>, DimensionLookupRefusal>
+Manifold::dimensionNamedBounded(
+    const std::string_view name, const xanadu::SpanReader &reader,
+    const DimensionLookupLimits &limits,
+    const std::optional<gleditor::cpp26::function_ref<bool(std::size_t)>>
+        charge) const {
+  DimensionLookupBudget budget{limits};
+  return dimensionNamedBounded(name, reader, budget, charge);
+}
+
+std::expected<std::optional<DimRef>, DimensionLookupRefusal>
+Manifold::dimensionNamedBounded(
+    const std::string_view name, const xanadu::SpanReader &reader,
+    DimensionLookupBudget &budget,
+    const std::optional<gleditor::cpp26::function_ref<bool(std::size_t)>>
+        charge) const {
+  return dimensionNamedImpl(name, reader, budget, charge, false);
+}
+
+std::expected<std::optional<DimRef>, DimensionLookupRefusal>
+Manifold::dimensionNamedImpl(
+    const std::string_view name, const xanadu::SpanReader &reader,
+    DimensionLookupBudget &budget,
+    const std::optional<gleditor::cpp26::function_ref<bool(std::size_t)>>
+        charge,
+    const bool legacyMode) const {
+  auto &workRemaining      = budget.workRemaining;
+  auto &directoryRemaining = budget.directoryCellsRemaining;
+  auto &spanRemaining      = budget.contentSpansRemaining;
+  auto &byteRemaining      = budget.bytesRemaining;
+  std::optional<DimensionLookupRefusal> spendFailure;
+  const auto spendWork = [&](const std::size_t amount = 1) {
+    if (amount > workRemaining) {
+      spendFailure = DimensionLookupRefusal::WorkLimitExceeded;
+      return false;
+    }
+    if (charge) {
+      try {
+        if (!(*charge)(amount)) {
+          spendFailure = DimensionLookupRefusal::FuelLimitExceeded;
+          return false;
+        }
+      } catch (...) {
+        spendFailure = DimensionLookupRefusal::FuelLimitExceeded;
+        return false;
+      }
+    }
+    workRemaining -= amount;
+    return true;
+  };
+  const auto workError = [&]() {
+    return spendFailure.value_or(DimensionLookupRefusal::WorkLimitExceeded);
+  };
+  const auto spendBytes = [&](const std::size_t amount) {
+    if (amount > byteRemaining) {
+      return false;
+    }
+    byteRemaining -= amount;
+    return true;
+  };
+
+  // Charge and bound the caller's bytes before the registry hashes the key.
+  if (!spendBytes(name.size())) {
+    return std::unexpected{DimensionLookupRefusal::ByteLimitExceeded};
+  }
+  if (!spendWork(std::max<std::size_t>(1, name.size()))) {
+    return std::unexpected{workError()};
+  }
   const auto held = [this](const DimRef dim) {
     return contains(dim) ? std::optional{dim} : std::nullopt;
   };
@@ -843,34 +928,146 @@ Manifold::dimensionNamed(const std::string_view name,
       return fast;
     }
   }
+
+  const auto readText = [&](const DimRef dim)
+      -> std::expected<std::string, DimensionLookupRefusal> {
+    if (legacyMode) {
+      return textOf(dim, reader);
+    }
+    const auto spans = contentOf(dim);
+    if (spans.size() > spanRemaining) {
+      return std::unexpected{DimensionLookupRefusal::ContentSpanLimitExceeded};
+    }
+    std::size_t totalBytes = 0;
+    for (const auto &span : spans) {
+      if (!spendWork()) {
+        return std::unexpected{workError()};
+      }
+      if (span.length > std::numeric_limits<std::size_t>::max() - totalBytes) {
+        return std::unexpected{DimensionLookupRefusal::ByteLimitExceeded};
+      }
+      totalBytes += static_cast<std::size_t>(span.length);
+    }
+    if (!spendWork(totalBytes)) {
+      return std::unexpected{workError()};
+    }
+    if (totalBytes > byteRemaining) {
+      return std::unexpected{DimensionLookupRefusal::ByteLimitExceeded};
+    }
+    if (spans.size() > 0) {
+      spanRemaining -= spans.size();
+    }
+    byteRemaining -= totalBytes;
+    std::string text;
+    text.reserve(totalBytes);
+    for (const auto &span : spans) {
+      auto piece = reader.read(span);
+      if (piece.size() > totalBytes - text.size()) {
+        return std::unexpected{DimensionLookupRefusal::ByteLimitExceeded};
+      }
+      text += piece;
+    }
+    return text;
+  };
+  const auto visitDirectory =
+      [&](auto &&visitor) -> std::expected<void, DimensionLookupRefusal> {
+    if (!home_ || !dimsDim_) {
+      return {};
+    }
+    if (!spendWork(1 + dimensionsOf(*home_).size())) {
+      return std::unexpected{workError()};
+    }
+    const auto first = linked(*home_, *dimsDim_, DimVector::POS);
+    if (!first || *first == *home_) {
+      return {};
+    }
+    auto current     = *first;
+    const auto bound = traversalBound();
+    for (std::size_t step = 0; step < bound; ++step) {
+      if (directoryRemaining == 0) {
+        return std::unexpected{DimensionLookupRefusal::DirectoryLimitExceeded};
+      }
+      if (!spendWork()) {
+        return std::unexpected{
+            spendFailure.value_or(DimensionLookupRefusal::WorkLimitExceeded)};
+      }
+      --directoryRemaining;
+      const auto visit = visitor(current);
+      if (!visit) {
+        return std::unexpected{visit.error()};
+      }
+      if (!*visit) {
+        return {};
+      }
+      if (!spendWork(1 + dimensionsOf(current).size())) {
+        return std::unexpected{workError()};
+      }
+      const auto next = linked(current, *dimsDim_, DimVector::POS);
+      if (!next || *next == current || *next == *home_) {
+        return {};
+      }
+      current = *next;
+    }
+    return std::unexpected{DimensionLookupRefusal::DirectoryLimitExceeded};
+  };
+
   std::optional<DimRef> dimAlias;
   if (name != "d.alias") {
-    for (const auto dim : dimensions()) {
-      if (textOf(dim, reader) == "d.alias") {
-        dimAlias = dim;
-        break;
+    auto scanned = visitDirectory([&](const DimRef dim) {
+      const auto text = readText(dim);
+      if (!text) {
+        return std::expected<bool, DimensionLookupRefusal>{
+            std::unexpected{text.error()}};
       }
+      if (*text == "d.alias") {
+        dimAlias = dim;
+        return std::expected<bool, DimensionLookupRefusal>{false};
+      }
+      return std::expected<bool, DimensionLookupRefusal>{true};
+    });
+    if (!scanned) {
+      return std::unexpected{scanned.error()};
     }
   }
-  auto named = dimensions() | std::views::filter([&](const DimRef dim) {
-                 if (textOf(dim, reader) == name) {
-                   return true;
-                 }
-                 if (dimAlias.has_value() && *dimAlias != dim) {
-                   const auto aliasCell =
-                       linked(dim, *dimAlias, DimVector::POS);
-                   if (aliasCell && textOf(*aliasCell, reader) == name) {
-                     return true;
-                   }
-                 }
-                 return false;
-               });
-  return firstOf(named).transform([&](const DimRef dim) {
-    if (nullptr != store_) {
-      DimensionRegistry::instance().registerDim(*store_, name, dim);
+
+  std::optional<DimRef> found;
+  auto scanned = visitDirectory([&](const DimRef dim) {
+    const auto text = readText(dim);
+    if (!text) {
+      return std::expected<bool, DimensionLookupRefusal>{
+          std::unexpected{text.error()}};
     }
-    return dim;
+    if (*text == name) {
+      found = dim;
+      return std::expected<bool, DimensionLookupRefusal>{false};
+    }
+    if (dimAlias && *dimAlias != dim) {
+      if (!spendWork(1 + dimensionsOf(dim).size())) {
+        return std::expected<bool, DimensionLookupRefusal>{
+            std::unexpected{workError()}};
+      }
+      const auto aliasCell = linked(dim, *dimAlias, DimVector::POS);
+      if (aliasCell) {
+        const auto aliasText = readText(*aliasCell);
+        if (!aliasText) {
+          return std::expected<bool, DimensionLookupRefusal>{
+              std::unexpected{aliasText.error()}};
+        }
+        if (*aliasText == name) {
+          found = dim;
+          return std::expected<bool, DimensionLookupRefusal>{false};
+        }
+      }
+    }
+    return std::expected<bool, DimensionLookupRefusal>{true};
   });
+  if (!scanned) {
+    return std::unexpected{scanned.error()};
+  }
+  if (found && legacyMode && store_ != nullptr) {
+    DimensionRegistry::instance().registerDim(*store_, name, *found);
+  }
+  return found;
 }
 
 std::optional<DimRef>
