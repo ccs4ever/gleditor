@@ -61,6 +61,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <gleditor/cpp26.hpp>
@@ -126,6 +127,33 @@ struct BoundDimensionSet {
   std::string name;
   DimRef arenaDim{noCell};
   std::vector<BoundDimensionMember> members;
+};
+
+enum class DimensionMappingRefusal : std::uint8_t {
+  Ambiguous,
+  WorkLimitExceeded,
+};
+
+enum class EffectiveLinkRefusal : std::uint8_t {
+  UnknownOwner,
+  UnmappedDimension,
+  AmbiguousDimension,
+  NameResolutionRequired,
+  LimitExceeded,
+};
+
+struct EffectiveLinkLimits {
+  std::size_t maxCandidates; ///< candidate insertion attempts, before dedupe
+  std::size_t maxLinks;      ///< nonempty POS and NEG endpoints in the result
+  std::size_t maxWork;       ///< scan work, also charged to active arena fuel
+};
+
+using EffectiveLinkNeighbor = std::variant<CellRef, ForeignRef>;
+
+struct EffectiveLinkRow {
+  DimRef dim;
+  std::optional<EffectiveLinkNeighbor> pos;
+  std::optional<EffectiveLinkNeighbor> neg;
 };
 
 struct ProxyEntry {
@@ -386,6 +414,19 @@ public:
   /// Resolves the corresponding dimension in @p space for @p dim.
   [[nodiscard]] std::optional<DimRef> dimIn(std::uint32_t space,
                                             DimRef dim) const noexcept;
+
+  /// Resolve explicit/raw-member bindings without allocating. Each map or
+  /// member inspection consumes one unit from the caller-owned budget.
+  [[nodiscard]] std::expected<std::optional<DimRef>, DimensionMappingRefusal>
+  checkedDimensionMapping(std::uint32_t space, DimRef dim,
+                          std::size_t &workRemaining) const noexcept;
+
+  /// Read the effective edges without minting proxies or changing overlays.
+  /// Limits must be positive. Name-only one-space mappings are refused for
+  /// bounded callers; each result row has at least one nonempty endpoint.
+  [[nodiscard]] std::expected<std::vector<EffectiveLinkRow>,
+                              EffectiveLinkRefusal>
+  snapshotLinks(CellRef owner, const EffectiveLinkLimits &limits) const;
 
   /// Resolves the arena dimension bound to @p foreignDim in @p space.
   /// An absent space searches every attached space and accepts an arena-local

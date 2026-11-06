@@ -576,35 +576,20 @@ std::optional<DimRef> ArenaManifold::dimIn(const std::uint32_t space,
   if (space == 0 || space > spaces_.size() || dim == noCell) {
     return std::nullopt;
   }
-  for (const auto &[arenaDim, bSet] : boundDimensions_) {
-    bool matches = (arenaDim == dim);
-    if (!matches) {
-      for (const auto &member : bSet.members) {
-        if (member.dim == dim) {
-          matches = true;
-          break;
-        }
-      }
-    }
-    if (matches) {
-      for (const auto &member : bSet.members) {
-        if (member.space == space) {
-          return member.dim;
-        }
-      }
-    }
+  auto mappingWork   = std::numeric_limits<std::size_t>::max();
+  const auto mapping = checkedDimensionMapping(space, dim, mappingWork);
+  if (!mapping.has_value()) {
+    return std::nullopt;
   }
-
+  if (mapping->has_value()) {
+    return **mapping;
+  }
   const auto s = spaceAt(space);
   if (!s || !s->manifold) {
     return std::nullopt;
   }
 
   if (spaces_.size() == 1) {
-    const auto dims = s->manifold->dimensions();
-    if (std::ranges::find(dims, dim) != dims.end()) {
-      return dim;
-    }
     std::string_view name;
     for (const auto &[k, v] : arenaDims_) {
       if (v == dim) {
@@ -633,6 +618,420 @@ std::optional<DimRef> ArenaManifold::dimIn(const std::uint32_t space,
   }
 
   return std::nullopt;
+}
+
+std::expected<std::optional<DimRef>, DimensionMappingRefusal>
+ArenaManifold::checkedDimensionMapping(
+    const std::uint32_t space, const DimRef dim,
+    std::size_t &workRemaining) const noexcept {
+  if (space == 0 || space > spaces_.size() || dim == noCell) {
+    return std::nullopt;
+  }
+  const auto spend = [&]() {
+    if (workRemaining == 0) {
+      return false;
+    }
+    workRemaining--;
+    return true;
+  };
+
+  if (!spend()) {
+    return std::unexpected{DimensionMappingRefusal::WorkLimitExceeded};
+  }
+  if (const auto exact = boundDimensions_.find(dim);
+      exact != boundDimensions_.end()) {
+    for (const auto &member : exact->second.members) {
+      if (!spend()) {
+        return std::unexpected{DimensionMappingRefusal::WorkLimitExceeded};
+      }
+      if (member.space == space) {
+        return std::optional<DimRef>{member.dim};
+      }
+    }
+    return std::nullopt;
+  }
+
+  std::optional<DimRef> alias;
+  for (const auto &[arenaDim, set] : boundDimensions_) {
+    std::ignore = arenaDim;
+    if (!spend()) {
+      return std::unexpected{DimensionMappingRefusal::WorkLimitExceeded};
+    }
+    bool inputMember = false;
+    std::optional<DimRef> targetMember;
+    for (const auto &member : set.members) {
+      if (!spend()) {
+        return std::unexpected{DimensionMappingRefusal::WorkLimitExceeded};
+      }
+      inputMember = inputMember || member.dim == dim;
+      if (member.space == space) {
+        targetMember = member.dim;
+      }
+    }
+    if (!inputMember || !targetMember) {
+      continue;
+    }
+    if (alias && *alias != *targetMember) {
+      return std::unexpected{DimensionMappingRefusal::Ambiguous};
+    }
+    alias = targetMember;
+  }
+  if (alias) {
+    return alias;
+  }
+
+  if (spaces_.size() != 1) {
+    return std::nullopt;
+  }
+  const auto source = spaceAt(space);
+  if (!source || !source->manifold) {
+    return std::nullopt;
+  }
+  const auto home = source->manifold->home();
+  const auto dims = source->manifold->dimsDimension();
+  if (!home || !dims) {
+    return std::nullopt;
+  }
+  CellRef current       = *home;
+  std::size_t remaining = source->manifold->traversalBound();
+  while (remaining-- > 0) {
+    const auto rowSize = source->manifold->dimensionsOf(current).size();
+    if (rowSize >= workRemaining) {
+      return std::unexpected{DimensionMappingRefusal::WorkLimitExceeded};
+    }
+    workRemaining -= rowSize;
+    if (!spend()) {
+      return std::unexpected{DimensionMappingRefusal::WorkLimitExceeded};
+    }
+    const auto next = source->manifold->linked(current, *dims, DimVector::POS);
+    if (!next || *next == current || *next == *home) {
+      return std::nullopt;
+    }
+    if (*next == dim) {
+      return std::optional<DimRef>{dim};
+    }
+    current = *next;
+  }
+  return std::nullopt;
+}
+
+std::expected<std::vector<EffectiveLinkRow>, EffectiveLinkRefusal>
+ArenaManifold::snapshotLinks(const CellRef owner,
+                             const EffectiveLinkLimits &limits) const {
+  if (limits.maxCandidates == 0 || limits.maxLinks == 0 ||
+      limits.maxWork == 0) {
+    return std::unexpected{EffectiveLinkRefusal::LimitExceeded};
+  }
+  if (!contains(owner)) {
+    return std::unexpected{EffectiveLinkRefusal::UnknownOwner};
+  }
+
+  std::size_t workRemaining     = limits.maxWork;
+  std::size_t candidateAttempts = 0;
+  std::vector<DimRef> candidates;
+  auto spend = [&](const std::size_t amount = 1) {
+    if (amount > workRemaining) {
+      return false;
+    }
+    workRemaining -= amount;
+    try {
+      for (std::size_t i = 0; i < amount; i++) {
+        consumeWork();
+      }
+    } catch (const std::runtime_error &) {
+      return false;
+    }
+    return true;
+  };
+  auto addCandidate = [&](const DimRef dim) {
+    if (dim == noCell) {
+      return true;
+    }
+    if (candidateAttempts >= limits.maxCandidates || !spend()) {
+      return false;
+    }
+    candidateAttempts++;
+    for (const DimRef current : candidates) {
+      if (!spend()) {
+        return false;
+      }
+      if (current == dim) {
+        return true;
+      }
+    }
+    candidates.push_back(dim);
+    return true;
+  };
+
+  // Manifold::dimensions() fills a cache by walking the whole rank. Walk its
+  // public rank endpoints directly so the caller's limits apply before any
+  // candidate vector grows.
+  if (base_ != nullptr) {
+    const auto home = base_->home();
+    const auto dims = base_->dimsDimension();
+    if (home && dims) {
+      CellRef current       = *home;
+      std::size_t remaining = base_->traversalBound();
+      while (remaining-- > 0) {
+        const auto rowSize = base_->dimensionsOf(current).size();
+        if (!spend(rowSize + 1)) {
+          return std::unexpected{EffectiveLinkRefusal::LimitExceeded};
+        }
+        const auto next = base_->linked(current, *dims, DimVector::POS);
+        if (!next || *next == current || *next == *home) {
+          break;
+        }
+        if (!addCandidate(*next)) {
+          return std::unexpected{EffectiveLinkRefusal::LimitExceeded};
+        }
+        current = *next;
+      }
+    }
+  }
+  for (const auto &[name, dim] : arenaDims_) {
+    std::ignore = name;
+    if (!spend()) {
+      return std::unexpected{EffectiveLinkRefusal::LimitExceeded};
+    }
+    if (contains(dim) && !addCandidate(dim)) {
+      return std::unexpected{EffectiveLinkRefusal::LimitExceeded};
+    }
+  }
+  for (const auto &[dim, set] : boundDimensions_) {
+    std::ignore = set;
+    if (!spend()) {
+      return std::unexpected{EffectiveLinkRefusal::LimitExceeded};
+    }
+    if (contains(dim) && !addCandidate(dim)) {
+      return std::unexpected{EffectiveLinkRefusal::LimitExceeded};
+    }
+  }
+  for (const auto &[arenaDim, set] : boundDimensions_) {
+    std::ignore = arenaDim;
+    for (const auto &member : set.members) {
+      if (!spend()) {
+        return std::unexpected{EffectiveLinkRefusal::LimitExceeded};
+      }
+      if (contains(member.dim) && !addCandidate(member.dim)) {
+        return std::unexpected{EffectiveLinkRefusal::LimitExceeded};
+      }
+    }
+  }
+
+  std::span<const DimLink> ownerRows;
+  if (const auto dense = denseOf(owner); dense.has_value()) {
+    const auto &slot = slots_[*dense];
+    ownerRows        = std::span<const DimLink>{links_.data() + slot.linkOffset,
+                                                slot.linkCount};
+  } else if (base_ != nullptr) {
+    ownerRows = base_->dimensionsOf(owner);
+  }
+  for (const auto &edge : ownerRows) {
+    if (!spend()) {
+      return std::unexpected{EffectiveLinkRefusal::LimitExceeded};
+    }
+    if (!contains(edge.dim)) {
+      return std::unexpected{EffectiveLinkRefusal::UnmappedDimension};
+    }
+    if (!addCandidate(edge.dim)) {
+      return std::unexpected{EffectiveLinkRefusal::LimitExceeded};
+    }
+  }
+
+  // A deterministic row order is part of the snapshot. Insertion sort keeps
+  // its comparison work visible to the same budget and needs no second buffer.
+  for (std::size_t i = 1; i < candidates.size(); i++) {
+    const DimRef value = candidates[i];
+    std::size_t at     = i;
+    while (at > 0) {
+      if (!spend()) {
+        return std::unexpected{EffectiveLinkRefusal::LimitExceeded};
+      }
+      if (candidates[at - 1] <= value) {
+        break;
+      }
+      candidates[at] = candidates[at - 1];
+      at--;
+    }
+    candidates[at] = value;
+  }
+
+  const auto foreignOwner   = isProxy(owner) ? foreignOf(owner) : std::nullopt;
+  const Space *foreignSpace = nullptr;
+  if (isProxy(owner)) {
+    if (!foreignOwner) {
+      return std::unexpected{EffectiveLinkRefusal::UnknownOwner};
+    }
+    const auto attached = spaceAt(foreignOwner->space);
+    if (!attached || !attached->manifold) {
+      return std::unexpected{EffectiveLinkRefusal::UnknownOwner};
+    }
+    foreignSpace = &*attached;
+  }
+
+  std::vector<EffectiveLinkRow> rows;
+  rows.reserve(candidates.size());
+  std::vector<std::optional<DimRef>> sourceDims(candidates.size());
+  std::vector<bool> posShadowedRows(candidates.size());
+  std::vector<bool> negShadowedRows(candidates.size());
+  std::size_t linkedCount = 0;
+  auto accountLink        = [&](std::optional<EffectiveLinkNeighbor> &side,
+                         const std::optional<CellRef> neighbor) {
+    if (!neighbor) {
+      return true;
+    }
+    if (linkedCount >= limits.maxLinks) {
+      return false;
+    }
+    linkedCount++;
+    side = EffectiveLinkNeighbor{*neighbor};
+    return true;
+  };
+
+  if (foreignOwner) {
+    const auto dense = denseOf(owner);
+    for (std::size_t i = 0; i < candidates.size(); i++) {
+      const DimRef dim = candidates[i];
+      if (!spend(2)) {
+        return std::unexpected{EffectiveLinkRefusal::LimitExceeded};
+      }
+      posShadowedRows[i] =
+          dense.has_value() &&
+          proxyShadowedEdges_.contains(ShadowEdgeKey{
+              .dense = *dense, .dim = dim, .dir = DimVector::POS});
+      negShadowedRows[i] =
+          dense.has_value() &&
+          proxyShadowedEdges_.contains(ShadowEdgeKey{
+              .dense = *dense, .dim = dim, .dir = DimVector::NEG});
+      std::size_t mappingWork = workRemaining;
+      const auto mapped =
+          checkedDimensionMapping(foreignOwner->space, dim, mappingWork);
+      const std::size_t usedWork = workRemaining - mappingWork;
+      if (!spend(usedWork)) {
+        return std::unexpected{EffectiveLinkRefusal::LimitExceeded};
+      }
+      if (!mapped.has_value()) {
+        return std::unexpected{mapped.error() ==
+                                       DimensionMappingRefusal::Ambiguous
+                                   ? EffectiveLinkRefusal::AmbiguousDimension
+                                   : EffectiveLinkRefusal::LimitExceeded};
+      }
+      sourceDims[i] = *mapped;
+      if (!sourceDims[i] && spaces_.size() == 1 &&
+          (!posShadowedRows[i] || !negShadowedRows[i])) {
+        return std::unexpected{EffectiveLinkRefusal::NameResolutionRequired};
+      }
+    }
+  }
+
+  for (std::size_t i = 0; i < candidates.size(); i++) {
+    const DimRef dim = candidates[i];
+    EffectiveLinkRow row{.dim = dim};
+    std::optional<DimLink> local;
+    for (const auto &edge : ownerRows) {
+      if (!spend()) {
+        return std::unexpected{EffectiveLinkRefusal::LimitExceeded};
+      }
+      if (edge.dim == dim) {
+        local = edge;
+        break;
+      }
+    }
+    if (!foreignOwner) {
+      if (local.has_value()) {
+        if (!spend(2)) {
+          return std::unexpected{EffectiveLinkRefusal::LimitExceeded};
+        }
+        if (!accountLink(row.pos, local->neighbor(DimVector::POS)) ||
+            !accountLink(row.neg, local->neighbor(DimVector::NEG))) {
+          return std::unexpected{EffectiveLinkRefusal::LimitExceeded};
+        }
+      }
+      rows.push_back(std::move(row));
+      continue;
+    }
+
+    const bool posShadowed = posShadowedRows[i];
+    const bool negShadowed = negShadowedRows[i];
+    if (posShadowed &&
+        !accountLink(row.pos,
+                     local ? local->neighbor(DimVector::POS) : std::nullopt)) {
+      return std::unexpected{EffectiveLinkRefusal::LimitExceeded};
+    }
+    if (negShadowed &&
+        !accountLink(row.neg,
+                     local ? local->neighbor(DimVector::NEG) : std::nullopt)) {
+      return std::unexpected{EffectiveLinkRefusal::LimitExceeded};
+    }
+
+    if (sourceDims[i].has_value()) {
+      const auto sourceRows =
+          foreignSpace->manifold->dimensionsOf(foreignOwner->index);
+      if (!spend(sourceRows.size())) {
+        return std::unexpected{EffectiveLinkRefusal::LimitExceeded};
+      }
+      for (const auto &edge : sourceRows) {
+        if (edge.dim != *sourceDims[i]) {
+          continue;
+        }
+        if (!posShadowed && edge.pos != noCell) {
+          if (linkedCount >= limits.maxLinks) {
+            return std::unexpected{EffectiveLinkRefusal::LimitExceeded};
+          }
+          row.pos = EffectiveLinkNeighbor{
+              ForeignRef{.space = foreignOwner->space, .index = edge.pos}};
+          linkedCount++;
+        }
+        if (!negShadowed && edge.neg != noCell) {
+          if (linkedCount >= limits.maxLinks) {
+            return std::unexpected{EffectiveLinkRefusal::LimitExceeded};
+          }
+          row.neg = EffectiveLinkNeighbor{
+              ForeignRef{.space = foreignOwner->space, .index = edge.neg}};
+          linkedCount++;
+        }
+        break;
+      }
+    }
+    rows.push_back(std::move(row));
+  }
+
+  // Every nonempty source CSR axis must be represented by at least one
+  // effective row; otherwise the snapshot would silently omit a foreign edge.
+  if (foreignOwner) {
+    const auto sourceRows =
+        foreignSpace->manifold->dimensionsOf(foreignOwner->index);
+    if (!spend(sourceRows.size())) {
+      return std::unexpected{EffectiveLinkRefusal::LimitExceeded};
+    }
+    for (const auto &edge : sourceRows) {
+      if (edge.pos == noCell && edge.neg == noCell) {
+        continue;
+      }
+      bool represented = false;
+      for (std::size_t i = 0; i < candidates.size(); i++) {
+        if (!spend()) {
+          return std::unexpected{EffectiveLinkRefusal::LimitExceeded};
+        }
+        if (sourceDims[i] && *sourceDims[i] == edge.dim) {
+          represented = true;
+          break;
+        }
+      }
+      if (!represented) {
+        return std::unexpected{
+            spaces_.size() == 1 ? EffectiveLinkRefusal::NameResolutionRequired
+                                : EffectiveLinkRefusal::UnmappedDimension};
+      }
+    }
+  }
+  if (!spend(rows.size())) {
+    return std::unexpected{EffectiveLinkRefusal::LimitExceeded};
+  }
+  std::erase_if(rows, [](const EffectiveLinkRow &row) {
+    return !row.pos.has_value() && !row.neg.has_value();
+  });
+  return rows;
 }
 
 std::optional<DimRef>

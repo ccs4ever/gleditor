@@ -632,3 +632,22 @@ including an unmapped literal same-named source axis. This is collision detectio
 identity binding. General binding changes after proxy edits, axis isolation and complete effective
 link enumeration remain open. Foreign projection masks remain explicitly unavailable, as do the
 previously listed callable/frontend/lifecycle gaps. Full §4.12 remains incomplete.
+
+## Bounded effective-link discovery
+
+An owning arena snapshot now merges inherited proxy topology with per-direction local overrides
+without minting neighbors. Local endpoints remain CellRef; inherited endpoints retain their source
+space and cell identity. Candidate, directed-edge and work limits apply before unbounded discovery,
+and failed work consumes arena fuel. See [iteration 35](projects/vortex-vm-only-iterations.md).
+
+The checked dimension mapper prioritizes exact arena keys and rejects conflicting raw aliases.
+Snapshots conservatively refuse name-dependent one-space mappings rather than invoke the legacy
+unbounded name lookup; the existing read wrapper keeps that fallback. Missing nonempty source axes
+refuse explicitly, and separate aliases retain independent directional overrides.
+
+The full build and all 849 affected tests from 78 suites passed. Eleven new cases cover identities,
+partial topology, limits and refusals; six profile observations show zero arena-cell growth without
+claiming zero heap allocation or speedup. The broader sweep retained eight unfinished frontend
+failures, with 128 passes and one skip. Foreign masks still refuse. Shared bounded name resolution,
+index-rank mutation/cache lifecycle, callable forms and full frontend parity remain unfinished; full
+§4.12 is incomplete.

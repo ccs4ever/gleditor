@@ -1243,3 +1243,55 @@ speedup claim follows. Full §4.12 remains incomplete.
 Logs: `/tmp/vql-proxy-links-build.log`, `/tmp/vql-proxy-links-tests.log`,
 `/tmp/vql-proxy-links-profile.log`, `/tmp/vql-proxy-links-overlay.log`,
 `/tmp/vql-proxy-links-cli.log`, `/tmp/vql-proxy-links-format.log`.
+
+## Iteration 35: bounded effective-link snapshots
+
+`ArenaManifold::snapshotLinks` now returns an owning view of effective local and foreign edges.
+Local endpoints carry CellRef; inherited endpoints carry exact `(space, source CellRef)` identities,
+even when their canonical proxies do not exist yet. Discovery mints no proxies and changes no cells,
+shadows, caches or links. Proxy rows merge inherited CSR topology with each direction's explicit
+local override, including empty overrides. Ordinary local/base rows and quotation-induced local rows
+retain their own topology. Empty result rows are omitted and axes retain full-width identities in
+deterministic order. This is an arena read primitive; no AST evaluation or second contract matcher
+is involved.
+
+Candidate discovery includes the base dimension rank, registered arena axes, valid bound keys,
+locally addressable raw binding members and owner rows. It walks the base rank directly rather than
+calling the lazy dimension cache. Mandatory positive limits bound candidate attempts, nonempty
+directed endpoints and work, including deduplication, sorting, mapping, CSR scans and filtering.
+Work also consumes active arena fuel, including failed requests; fuel exhaustion returns the typed
+limit refusal. Owning result vectors still allocate. No universal heap or concurrency guarantee
+follows.
+
+The shared checked mapper gives an exact arena key authority over raw-member aliases, including an
+exact key without a member for the requested space. Otherwise raw aliases must agree on one target
+identity or report ambiguity. The existing `dimIn` wrapper retains its one-space name fallback after
+checked absence; snapshots never invoke that unbounded lookup. A one-space candidate that would
+require name lookup returns `NameResolutionRequired` conservatively, even when another axis already
+covers the same source topology: accepting could omit another observable alias. Positive foreign
+snapshots currently use explicit mappings in multiple spaces. Missing coverage of any nonempty
+source axis refuses the whole request. Multiple view axes for one source axis remain distinct, with
+independent directional overrides.
+
+Validation: full `make -j$(nproc)` and all 849 affected tests from 78 suites passed. Eleven new
+enabled tests cover no-mint discovery, partial overrides, aliases and equal numeric refs across
+spaces, local/quote topology, missing/ambiguous mappings, exact-key precedence, full-width mapping,
+bounded refusal and spent fuel. They also retain the foreign-owner VqlMaskLinks refusal. The real
+headless CLI still returns exact `9007199254740993` through a native projection function. A broader
+consumer sweep passed 128 of 137 tests, skipped one swarm case, and retained the same eight
+unsupported VLace/VQL route and exception-expectation failures recorded in iteration 34.
+
+Six cold profile observations on the Threadripper 1950X with Clang `-O3 -g` exclude fixture setup
+and assertions. For 32 snapshots, local/unmaterialized-foreign/partially-overridden times were
+8/31/42 microseconds, returning 32/96/96 rows. At 128 snapshots they were 22/128/191 microseconds
+and 128/384/384 rows. Foreign rows include the filing rank and distinct axis aliases. Every case
+grew the arena by zero cells. These are whole-fixture observations, not zero heap allocation or
+speedup claims.
+
+Foreign masks remain unavailable until snapshot consumption and mutation preflight are implemented.
+Bounded shared name resolution, index-rank mutation/cache lifecycle and the earlier callable and
+frontend gaps remain open. Full §4.12 is incomplete.
+
+Logs: `/tmp/vql-visible-links-build.log`, `/tmp/vql-visible-links-tests.log`,
+`/tmp/vql-visible-links-profile.log`, `/tmp/vql-visible-links-overlay.log`,
+`/tmp/vql-visible-links-cli.log`, `/tmp/vql-visible-links-format.log`.
