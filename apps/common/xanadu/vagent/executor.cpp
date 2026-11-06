@@ -1887,13 +1887,25 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
         const auto delegator = ref("delegator");
         const auto goal      = eventSymbolNamed(arena, core, programRoot, pred);
         const auto requestId = recordText(*head, "correlation");
-        // §954: an achieve arriving after its cancel is consumed
-        // silently — the id sits in $cancelled until the sender's
-        // retry window ends.
-        if (!requestId.empty() &&
-            varsRecord(arena, core, agent,
-                       std::string{"$cancelled:"} + requestId, false))
-          continue;
+        // §954: an achieve arriving inside the sender's retry
+        // window after its cancel is consumed silently; past the
+        // window (send_retries × send_retry_interval turns) the id
+        // is forgotten and the achieve adopts fresh — the marker's
+        // expired value link is what the window measures.
+        if (!requestId.empty())
+          if (const auto rec =
+                  varsRecord(arena, core, agent,
+                             std::string{"$cancelled:"} + requestId,
+                             false)) {
+            const auto v =
+                arena.linked(*rec, core.dims().values, DimVector::POS);
+            const auto expiry = v ? arena.asInt64(*v) : std::nullopt;
+            if (expiry && turn <= *expiry)
+              continue;
+            if (v)
+              zigzag::expectWritten(arena.unlink(
+                  *rec, core.dims().values, DimVector::POS));
+          }
         // §7.1's receiver default: accepts(sender, goal_name) admits
         // delegation from the parent and from children (and the
         // degenerate `by self`), refusing everything else — the
@@ -1999,6 +2011,9 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
                  {"goal", arena.makeCell(goalNameOf(child))}});
           unlinkRank(arena, child, dims.intention);
         } else if (!correlation.empty()) {
+          // The marker is the id's expiry turn — §954's retry
+          // window, send_retries × send_retry_interval, in the
+          // same scalar clock awaits and deadlines ride.
           if (const auto rec =
                   varsRecord(arena, core, agent,
                              std::string{"$cancelled:"} +
@@ -2006,7 +2021,10 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
                              true))
             zigzag::expectWritten(
                 arena.link(*rec, core.dims().values, DimVector::POS,
-                           arena.makeScalarCell(std::int64_t{1})));
+                           arena.makeScalarCell(
+                               turn + setting("vagent.send_retries", 5) *
+                                          setting("vagent.send_retry_interval",
+                                                  1))));
         }
         continue;
       }

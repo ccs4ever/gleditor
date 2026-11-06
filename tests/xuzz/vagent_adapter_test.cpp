@@ -1740,6 +1740,29 @@ TEST(VagentAdapterTest, WireCancelBeforeAdoptionIsRemembered) {
   EXPECT_TRUE(zigzag::rankAfter(h.ctx.arena, image->agentCell, iDim)
                   .empty());
   EXPECT_TRUE(wire.empty());
+
+  // The marker holds only the retry window — send_retries ×
+  // send_retry_interval turns. Run it out: the same achieve id
+  // afterwards is fresh, adopts, and the child's retire reports the
+  // outcome the delegator long gave up waiting for.
+  for (int i = 0; i < 6; ++i) {
+    auto t = h.execution();
+    t.pid  = selfPid;
+    ASSERT_TRUE(h.adapter(t, h.ctx));
+  }
+  ActorMessage late;
+  late.type      = MessageType::ActorSend;
+  late.source    = parentPid;
+  late.target    = selfPid;
+  late.requestId = "w-achieve-5";
+  late.value = "Deliver{__kind: \"achieve\", __correlation: \"r9\"}";
+  auto turn3     = h.execution(late);
+  turn3.pid      = selfPid;
+  ASSERT_TRUE(h.adapter(turn3, h.ctx));
+  ASSERT_EQ(wire.size(), 1u);
+  const auto outcome = parsePercept(wire[0].value);
+  ASSERT_TRUE(outcome);
+  EXPECT_EQ(outcome->name, "outcome");
   EXPECT_EQ(h.ctx.arena.outstandingMarks(), 0u);
 }
 
