@@ -353,6 +353,18 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
     const auto chain = arena.linked(*rec, core.dims().values, DimVector::POS);
     return chain ? argValuesOf(*chain) : std::vector<CellValue>{};
   };
+  // §5.8's trailing `$owner` slot: only *member* heads (the adopted
+  // clause's guard/body/spine fragments, its `else` recovery) declare
+  // it — the goal's own condition heads do not — so the owner rides
+  // the intention's `owner` field and call sites append it where a
+  // member head runs, never blanket into intentionArgs.
+  const auto withOwner = [&](std::vector<CellValue> args,
+                             CellRef i) -> std::vector<CellValue> {
+    if (const auto owner = meta.intentionField(i, "owner");
+        owner && *owner != 0)
+      args.push_back(CellValue{static_cast<std::int64_t>(*owner)});
+    return args;
+  };
 
   // Store a var record's value: a declared `var`'s +d.values names one
   // stable "var.slot" holder — write through it so the cell fragment
@@ -905,9 +917,12 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       };
       // A lifecycle clause runs like a handler body: the +d.step
       // spine when the body carried host verbs, the +d.spin head
-      // otherwise.
+      // otherwise. The owner ref rides the trailing `$owner` slot —
+      // `on install { speed := … }` writes the frame's own field.
       const auto runLifecycle = [&](CellRef clause,
-                                    const std::vector<CellValue> &args) {
+                                    std::vector<CellValue> args,
+                                    CellRef owner) {
+        args.push_back(CellValue{static_cast<std::int64_t>(owner)});
         if (!zigzag::rankAfter(arena, clause, core.dims().step).empty()) {
           (void)runSpine(clause, args);
           return;
@@ -934,7 +949,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
                     if (const auto pv = arena.linked(*p, core.dims().values,
                                                      DimVector::POS))
                       argCell = *pv;
-                  runLifecycle(*clause, argValuesOf(argCell));
+                  runLifecycle(*clause, argValuesOf(argCell), frame);
                 }
             }
         for (const CellRef inst :
@@ -982,7 +997,12 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
           const auto head =
               arena.linked(*sym, core.dims().values, DimVector::POS);
           if (!head) return false;
-          const auto outcome = meta.runFragment(*head, argValuesOf(payload),
+          // §5.8: the method head's trailing `$owner` binds the frame —
+          // `speed` inside `Walker.goto` resolves on it, not the agent.
+          auto callArgs = argValuesOf(payload);
+          callArgs.push_back(
+              CellValue{static_cast<std::int64_t>(frame)});
+          const auto outcome = meta.runFragment(*head, callArgs,
                                                 exec.cursor, maxCycles);
           if (outcome.refusal != MetaRunOutcome::Refusal::None ||
               !outcome.produced || !outcome.result)
@@ -1001,17 +1021,34 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       // A descriptor's "fields" term: each slot's init head runs
       // against the mount/install arguments and lands on the owner's
       // vars — frames and behavior instances seed the same way.
+      // The holder is the §5.8 shape: rec +d.values → holder, owner
+      // +d.step → holder, holder +d.name → field name — so a member
+      // body's #FIND/#SET hop reaches it through the owner ref, while
+      // the vars record keeps the spec's inspectable layout. Init
+      // heads take the trailing $owner too (a later field may read
+      // an earlier one), so the args gain the owner ref.
       const auto seedFields = [&](CellRef owner, CellRef descriptor,
-                                  const std::vector<CellValue> &args) {
+                                  std::vector<CellValue> args) {
+        args.push_back(CellValue{static_cast<std::int64_t>(owner)});
         if (const auto rec =
                 varsRecord(arena, core, descriptor, "fields", false))
           if (const auto list =
                   arena.linked(*rec, core.dims().values, DimVector::POS))
             for (const CellRef slot :
                  zigzag::rankAfter(arena, *list, core.dims().step)) {
-              const auto frec = varsRecord(arena, core, owner,
-                                           arena.textOf(slot), true);
+              const std::string fieldName{arena.textOf(slot)};
+              const auto frec =
+                  varsRecord(arena, core, owner, fieldName, true);
               if (!frec) continue;
+              const auto holder = arena.makeCell();
+              zigzag::expectWritten(arena.link(
+                  *frec, core.dims().values, DimVector::POS, holder));
+              zigzag::expectWritten(arena.link(
+                  zigzag::rankTail(arena, owner, core.dims().step),
+                  core.dims().step, DimVector::POS, holder));
+              zigzag::expectWritten(arena.link(
+                  holder, core.dims().name, DimVector::POS,
+                  arena.makeCell(fieldName)));
               const auto head =
                   arena.linked(slot, core.dims().values, DimVector::POS);
               if (!head) continue;
@@ -1021,7 +1058,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
               // the same honesty rule as an uninitialised agent var.
               if (outcome.refusal == MetaRunOutcome::Refusal::None &&
                   outcome.produced && outcome.result)
-                storeVar(*frec, *outcome.result);
+                core.writeValue(holder, 0, std::nullopt, *outcome.result);
             }
       };
       if (verb == "unmount") {
@@ -1103,7 +1140,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       if (const auto rec = varsRecord(arena, core, skillRec, "install", false))
         if (const auto clause =
                 arena.linked(*rec, core.dims().values, DimVector::POS))
-          runLifecycle(*clause, args);
+          runLifecycle(*clause, args, frame);
       return true;
     }
     return false;
@@ -1154,8 +1191,11 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
     // the clause descriptor's param chain carries the declared order —
     // `emit P{b: 1, a: 2}` binds b to `a`'s slot positionally no
     // longer. A param no field matches leaves the vector short →
-    // arity refusal → failed guard.
-    const auto eventArgs = [&](CellRef head) -> std::vector<CellValue> {
+    // arity refusal → failed guard. `$owner` is the member-head
+    // convention's trailing slot: it binds the mounted instance,
+    // never a payload field.
+    const auto eventArgs = [&](CellRef head,
+                               CellRef owner) -> std::vector<CellValue> {
       std::vector<CellValue> args;
       if (payload == noCell) return args;
       const auto descriptor =
@@ -1167,6 +1207,11 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
            p = arena.linked(*p, core.dims().step, DimVector::POS)) {
         const auto pname = arena.linked(*p, core.dims().name, DimVector::POS);
         if (!pname) break;
+        if (arena.textOf(*pname) == "$owner") {
+          if (owner == noCell) return args;
+          args.push_back(CellValue{static_cast<std::int64_t>(owner)});
+          continue;
+        }
         CellRef field{noCell};
         for (const CellRef child :
              zigzag::rankAfter(arena, payload, core.dims().step))
@@ -1196,11 +1241,16 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
     // §3.5's merged order: priority first — a higher number runs
     // earlier — then source/declaration order, which the stable sort
     // leaves as clausesOf's rank walk for equal priorities.
-    auto clauses = meta.clausesOf(*eventSym);
     // §5.7's behavior merge: each mounted instance's descriptor
     // contributes its per-event clauses after the agent's own, in
     // +d.behavior mount order — the stable sort keeps this append
-    // order for equal priorities.
+    // order for equal priorities. The instance rides each entry:
+    // two mounts of one behavior contribute the same clause cell,
+    // so a clause-keyed owner map would bind one instance's fields
+    // to every copy's run.
+    std::vector<std::pair<CellRef, CellRef>> clauses;
+    for (const CellRef clause : meta.clausesOf(*eventSym))
+      clauses.emplace_back(clause, noCell);
     for (const CellRef inst :
          zigzag::rankAfter(arena, agent, dims.behavior)) {
       const auto rec = varsRecord(arena, core, inst, "behavior", false);
@@ -1220,7 +1270,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
            zigzag::rankAfter(arena, *term, core.dims().step))
         if (arena.textOf(child) == name)
           for (const CellRef clause : meta.clausesOf(child))
-            clauses.push_back(clause);
+            clauses.emplace_back(clause, inst);
     }
     const auto priorityOf = [&](CellRef clause) -> std::int64_t {
       if (const auto rec =
@@ -1231,17 +1281,28 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       return 0;
     };
     std::stable_sort(clauses.begin(), clauses.end(),
-                     [&](CellRef a, CellRef b) {
-                       return priorityOf(a) > priorityOf(b);
+                     [&](const auto &a, const auto &b) {
+                       return priorityOf(a.first) > priorityOf(b.first);
                      });
-    for (const CellRef clause : clauses) {
+    for (const auto &[clause, owner] : clauses) {
       // The clause's +d.grab guard evaluates before the body — an
       // `on` handler's `[guard]` is a real filter, not decoration.
       // Refusals read as failures, same as selectClause.
       const auto guard =
           arena.linked(clause, core.dims().grab, DimVector::POS);
-      const auto args =
-          guard ? eventArgs(*guard) : std::vector<CellValue>{};
+      const auto args = [&]() -> std::vector<CellValue> {
+        if (guard) return eventArgs(*guard, owner);
+        // No guard: bind off the body head's own param chain — the
+        // spine's first member or the spin head — so a param'd
+        // unguarded handler still fields the payload and `$owner`
+        // always lands on member heads.
+        auto members = zigzag::rankAfter(arena, clause, core.dims().step);
+        if (!members.empty()) return eventArgs(*members.begin(), owner);
+        if (const auto spin =
+                arena.linked(clause, core.dims().spin, DimVector::POS))
+          return eventArgs(*spin, owner);
+        return {};
+      }();
       if (guard) {
         const auto outcome =
             meta.runFragment(*guard, args, exec.cursor, maxCycles);
@@ -1616,7 +1677,9 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
         if (const auto n = arena.asInt64(*v)) head = static_cast<CellRef>(*n);
     if (head == noCell) return false;
     // Params bind positionally like every clause head — `cause` is
-    // the one named exception the recovery's env declares.
+    // the one named exception the recovery's env declares; `$owner`
+    // binds the intention's adopted-clause owner when a member body's
+    // recovery runs.
     const auto paramNames = paramNamesOf(head);
     const auto stored     = intentionArgs(intention);
     std::vector<CellValue> args;
@@ -1624,6 +1687,12 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
     for (const auto &pname : paramNames) {
       if (pname == "cause") {
         args.emplace_back(std::string{cause});
+        continue;
+      }
+      if (pname == "$owner") {
+        args.emplace_back(
+            static_cast<std::int64_t>(
+                meta.intentionField(intention, "owner").value_or(0)));
         continue;
       }
       if (position >= stored.size()) return false;
@@ -2134,8 +2203,9 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
           faultIntention(intention, "no_body");
           continue;
         }
-        const auto outcome = meta.runFragment(*head, intentionArgs(intention),
-                                              exec.cursor, maxCycles);
+        const auto outcome = meta.runFragment(
+            *head, withOwner(intentionArgs(intention), intention),
+            exec.cursor, maxCycles);
         ok = outcome.refusal == MetaRunOutcome::Refusal::None;
       }
     } else if (stepIdx < spine.size()) {
@@ -2144,7 +2214,8 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
         ok = runHostStep(member, intention);
       else {
         const auto outcome = meta.runFragment(
-            member, intentionArgs(intention), exec.cursor, maxCycles);
+            member, withOwner(intentionArgs(intention), intention),
+            exec.cursor, maxCycles);
         ok = outcome.refusal == MetaRunOutcome::Refusal::None;
       }
     }

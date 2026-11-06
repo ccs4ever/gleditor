@@ -271,7 +271,7 @@ TEST(VagentSelectTest, WhereGuardsSkipFailingClauses) {
   const auto picked = f.meta->selectClause(f.symbol("Work"));
   ASSERT_TRUE(picked) << picked.error();
   ASSERT_TRUE(picked->has_value());
-  EXPECT_EQ(**picked, bank[1]);
+  EXPECT_EQ(picked->value().first, bank[1]);
 }
 
 TEST(VagentSelectTest, WeightsOrderSelectionAndTriedSkips) {
@@ -288,20 +288,20 @@ TEST(VagentSelectTest, WeightsOrderSelectionAndTriedSkips) {
   // Equal (absent) weights — rank position breaks the tie.
   auto picked = f.meta->selectClause(f.symbol("Other"));
   ASSERT_TRUE(picked && picked->has_value());
-  EXPECT_EQ(**picked, bank[0]);
+  EXPECT_EQ(picked->value().first, bank[0]);
 
   // A d.vars weight record flips the order — the virtual order reads
   // the ledger, no relinking.
   ASSERT_TRUE(f.meta->setWeight(bank[1], 5.0).has_value());
   picked = f.meta->selectClause(f.symbol("Other"));
   ASSERT_TRUE(picked && picked->has_value());
-  EXPECT_EQ(**picked, bank[1]);
+  EXPECT_EQ(picked->value().first, bank[1]);
 
   // The tried-set skips the leader — selection falls to the next
   // untried clause whose guard holds.
   picked = f.meta->selectClause(f.symbol("Other"), {bank[1]});
   ASSERT_TRUE(picked && picked->has_value());
-  EXPECT_EQ(**picked, bank[0]);
+  EXPECT_EQ(picked->value().first, bank[0]);
 
   // Everything tried — exhaustion is an honest empty.
   picked = f.meta->selectClause(f.symbol("Other"), {bank[0], bank[1]});
@@ -3254,6 +3254,122 @@ TEST(VagentExecutorTest, UnmountOfAMissingBehaviorRefusesTheTurn) {
   // Nothing mounted — the verb's honest no faults the turn, the same
   // contract a refused `stop` or `uninstall` keeps.
   EXPECT_FALSE(exec(h.execution("Tick"), h.ctx));
+}
+
+TEST(VagentExecutorTest, MountedBehaviorFieldsCountTicksAcrossEvents) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image = h.lower(
+      "module demo\nevent Tick\n"
+      "behavior Counter {\n"
+      "  var ticks: Int := 0\n"
+      "  on Tick { ticks := ticks + 1 }\n"
+      "}\n"
+      "agent Host {\n"
+      "  behavior Counter\n"
+      "}");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+  auto &core  = h.ctx.core;
+  for (int i = 0; i < 3; ++i)
+    ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  const auto inst = arena.linked(image->agentCell,
+                                 core.findOrMintDimension("d.behavior"),
+                                 DimVector::POS);
+  ASSERT_TRUE(inst);
+  const auto ticks = varsRecord(arena, core, *inst, "ticks", false);
+  ASSERT_TRUE(ticks);
+  const auto value = arena.linked(*ticks, core.dims().values, DimVector::POS);
+  ASSERT_TRUE(value);
+  EXPECT_EQ(arena.asInt64(*value).value_or(-1), 3);
+}
+
+TEST(VagentExecutorTest, MountedBehaviorInstancesKeepSeparateFields) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image = h.lower(
+      "module demo\nevent Tick\n"
+      "behavior Counter(start: Int) {\n"
+      "  var ticks: Int := start\n"
+      "  on Tick { ticks := ticks + 1 }\n"
+      "}\n"
+      "agent Host {\n"
+      "  behavior Counter(10)\n"
+      "  behavior Counter(100)\n"
+      "}");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+  auto &core  = h.ctx.core;
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  // One Tick bumped each instance through its own $owner — Counter(10)
+  // reads 11, Counter(100) reads 101. Mount order is the rank's order.
+  const auto bDim = core.findOrMintDimension("d.behavior");
+  const auto insts =
+      zigzag::rankAfter(arena, image->agentCell, bDim) |
+      std::ranges::to<std::vector>();
+  ASSERT_EQ(insts.size(), 2u);
+  for (const auto [inst, want] : std::vector<std::pair<CellRef, int64_t>>{
+           {insts[0], 11},
+           {insts[1], 101}}) {
+    const auto ticks = varsRecord(arena, core, inst, "ticks", false);
+    ASSERT_TRUE(ticks);
+    const auto value =
+        arena.linked(*ticks, core.dims().values, DimVector::POS);
+    ASSERT_TRUE(value);
+    EXPECT_EQ(arena.asInt64(*value).value_or(-1), want);
+  }
+}
+
+TEST(VagentExecutorTest, SkillMethodReadsAndWritesFrameFields) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image = h.lower(
+      "module demo\nevent Tick\nevent Go\n"
+      "capacity Navigation { def goto(x: Int): Int def probe(): Int }\n"
+      "skill Walker implements Navigation {\n"
+      "  var speed: Int := 0\n"
+      "  on install { speed := 7 }\n"
+      "  def goto(x: Int): Int { speed := x; speed }\n"
+      "  def probe(): Int { speed }\n"
+      "}\n"
+      "agent Host {\n"
+      "  uses Navigation\n"
+      "  install Walker\n"
+      "  on Tick { let r := Navigation.probe() }\n"
+      "  on Go { let r := Navigation.goto(21) }\n"
+      "}");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+  auto &core  = h.ctx.core;
+  const auto r = [&]() -> std::optional<std::int64_t> {
+    const auto rec = varsRecord(arena, core, image->agentCell, "r", false);
+    if (!rec) return std::nullopt;
+    const auto v = arena.linked(*rec, core.dims().values, DimVector::POS);
+    return v ? arena.asInt64(*v) : std::nullopt;
+  };
+  const auto speed = [&]() -> std::optional<std::int64_t> {
+    const auto inst = arena.linked(image->agentCell,
+                                   core.findOrMintDimension("d.skill"),
+                                   DimVector::POS);
+    if (!inst) return std::nullopt;
+    const auto frame = arena.cloneMaster(*inst, core.dims().clone);
+    if (!frame) return std::nullopt;
+    const auto rec = varsRecord(arena, core, *frame, "speed", false);
+    if (!rec) return std::nullopt;
+    const auto v = arena.linked(*rec, core.dims().values, DimVector::POS);
+    return v ? arena.asInt64(*v) : std::nullopt;
+  };
+  // The first turn runs the creation spine — `install Walker` mounts
+  // the frame and `on install`'s `speed := 7` lands before the Tick
+  // dispatch — then probe reads the field through $owner.
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  EXPECT_EQ(speed().value_or(-1), 7);
+  EXPECT_EQ(r().value_or(-1), 7);
+  // goto writes then reads the same field; the frame's record proves
+  // the write persisted on the instance, not a frame-local copy.
+  ASSERT_TRUE(exec(h.execution("Go"), h.ctx));
+  EXPECT_EQ(r().value_or(-1), 21);
+  EXPECT_EQ(speed().value_or(-1), 21);
 }
 
 } // namespace

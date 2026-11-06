@@ -26,6 +26,15 @@ struct CompilerBinding {
 };
 using CompilerBindings = std::map<std::string, CompilerBinding, std::less<>>;
 
+// §5.8's owner-relative fields: the names a skill/behavior member body
+// resolves against the *runtime* owner (installed frame, mounted
+// instance) rather than any compile-time cell. A member head declares
+// a trailing `$owner` Cell parameter the dispatcher binds to the
+// instance ref; reads lower to #FIND over the owner's +d.step rank and
+// writes to #SET, the op pair `term.field`/term-member assignment
+// already use for name-keyed children.
+using OwnerFields = std::map<std::string, Type, std::less<>>;
+
 enum class ResultUse { Value, Discard };
 
 struct ScalarCompilerLimits {
@@ -136,6 +145,9 @@ struct FragmentBodyRequest {
   const CompilerBindings *bindings{};
   const FragmentContext *fragments{};
   ResultUse use{ResultUse::Value};
+  // Member bodies only: names resolved owner-relative. When set, the
+  // parameter list's trailing `$owner` slot carries the owner ref.
+  const OwnerFields *ownerFields{};
 };
 
 // First Vortex-lowering iteration: scalar literals/typed bindings, arithmetic,

@@ -73,6 +73,11 @@ struct FragmentInfo {
   bool pure{false};
   bool closed{false};
   std::size_t arity{0};
+  // §5.8's member-body field set — populated only for skill/behavior
+  // member heads (never by check()). When non-empty the head's
+  // declared params carry a trailing `$owner` Cell slot and bare
+  // field names resolve on the runtime owner.
+  std::map<std::string, Type, std::less<>> ownerFields;
 };
 using FragmentInfoMap = std::map<FragmentKey, FragmentInfo>;
 

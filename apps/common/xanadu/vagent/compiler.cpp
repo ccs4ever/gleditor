@@ -136,7 +136,7 @@ public:
   // with a #Return tail and the spill/publish records run relies on.
   std::expected<FragmentBody, Diagnostic>
   compileFragment(const Expr &body, const std::vector<Parameter> &parameters,
-                  ResultUse use) {
+                  ResultUse use, const OwnerFields *ownerFields = nullptr) {
     try {
       if (&vm_.core() != &core_)
         refuse(body, DiagnosticCode::InvalidDeclaration,
@@ -157,7 +157,22 @@ public:
         paramNames_.push_back(parameter.name);
         ++localCount_;
       }
-      paramCount_     = parameters.size();
+      paramCount_ = parameters.size();
+      if (ownerFields && !ownerFields->empty()) {
+        ownerFields_ = ownerFields;
+        // The dispatcher binds the runtime owner ref on the head's
+        // trailing `$owner` parameter — the one name callers may not
+        // declare themselves (snake_case admits no '$').
+        for (std::size_t i = parameters.size(); i-- > 0;)
+          if (parameters[i].name == "$owner") {
+            ownerIndex_ = i;
+            break;
+          }
+        if (ownerIndex_ == npos)
+          refuse(body, DiagnosticCode::InvalidDeclaration,
+                 "owner-relative fields require a trailing $owner "
+                 "parameter");
+      }
       const auto type = preflight(body, true, 0, false, false, use);
       return emitFragmentBody(body, type);
     } catch (const Diagnostic &diagnostic) {
@@ -196,6 +211,24 @@ private:
       if (local != scope->end()) {
         localReferences_[&expression] = local->second.index;
         return local->second.type;
+      }
+    }
+    // §5.8's owner-relative fields: a member body's bare `var` name
+    // resolves on the runtime owner (installed frame / mounted
+    // instance), not any compile-time cell — recorded per-expression
+    // so emit can pick the #FIND/#SET hop instead of a slot read.
+    // Locals and parameters still shadow the owner's names.
+    if (ownerFields_) {
+      if (const auto field = ownerFields_->find(expression.text);
+          field != ownerFields_->end()) {
+        const auto type = scalarType(field->second);
+        if (!type)
+          refuse(expression, DiagnosticCode::InvalidDeclaration,
+                 "owner field '" + expression.text +
+                     "' has a type outside the scalar lowering subset: " +
+                     typeName(field->second));
+        ownerRefs_.insert(&expression);
+        return *type;
       }
     }
     const auto found = bindings_.find(expression.text);
@@ -1139,6 +1172,11 @@ private:
     case ExprKind::Unit:
       return copy(output, cells_->unit, continuation);
     case ExprKind::Identifier: {
+      // An owner-relative field reads exactly like `term.field`: the
+      // $owner local's int names the instance cell whose +d.step rank
+      // #FIND walks for the +d.name-matched field holder.
+      if (ownerRefs_.contains(&expression))
+        return findOp(ownerCell(), expression.text, output, continuation);
       const auto source = resolved(expression);
       // A cap$N operand wraps its binding cell in a capture slot —
       // masterOf(slot) at run time — never an int64 snapshot.
@@ -1182,6 +1220,24 @@ private:
         return emit(left, leftValue, emit(right, output, continuation));
       const auto rightValue = temporary();
       if (op == ":=" || op == "<-") {
+        // An owner-relative field write: #SET walks the runtime owner's
+        // +d.step rank for the +d.name-matched holder and writes the
+        // produced value into it — resolved(left) names no cell here,
+        // so this branch must precede every resolved() use below. The
+        // op's false yield fails the statement: writing a field the
+        // owner does not carry is a real fault, never a silent drop.
+        if (left.kind == ExprKind::Identifier && ownerRefs_.contains(&left)) {
+          const auto wrote = temporary();
+          const auto set   = mint(OpcodeKind::FieldSet);
+          bindIn(set, ownerCell());
+          bindIn(set, textCell(left.text));
+          bindIn(set, rightValue);
+          bindOut(set, wrote);
+          spin(set,
+               jump(gate(wrote, copy(output, cells_->unit, continuation),
+                         cells_->fail)));
+          return emit(right, rightValue, set);
+        }
         // A cells path materializes its rank under the bound head itself, so
         // assigning one runs it with the binding cell as the head instead of
         // copying a head's content.
@@ -1720,6 +1776,15 @@ private:
   // `static` that reads one.
   std::size_t paramCount_{0};
   std::vector<std::string> paramNames_;
+  // §5.8's owner-relative member fields — set on member fragment
+  // compiles only. ownerIndex_ is the local slot `$owner` bound into;
+  // ownerRefs_ marks the expressions binding() resolved owner-side.
+  static constexpr std::size_t npos =
+      std::numeric_limits<std::size_t>::max();
+  const OwnerFields *ownerFields_{nullptr};
+  std::size_t ownerIndex_{npos};
+  std::unordered_set<const Expr *> ownerRefs_;
+  CellRef ownerCell() const { return localCells_.at(ownerIndex_); }
   // Binding cells referenced through cap$N aliases — operands on them
   // lower to capture slots (clone-rank members + ref-capture records),
   // never plain ref reads.
@@ -1759,7 +1824,7 @@ Compiler::compileFragmentBody(const FragmentBodyRequest &request) {
                   limits_, request.fragments, this,
                   /*recordOps=*/true);
   return emitter.compileFragment(*request.body, request.parameters,
-                                 request.use);
+                                 request.use, request.ownerFields);
 }
 
 } // namespace xanadu::vagent

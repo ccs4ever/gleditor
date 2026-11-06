@@ -231,6 +231,7 @@ bool pureOpcode(OpcodeKind opcode) {
   case OpcodeKind::Cut:
   case OpcodeKind::Linked:
   case OpcodeKind::Find:
+  case OpcodeKind::FieldSet:
     return true;
   case OpcodeKind::ChoiceDepth:
     return false;

@@ -125,15 +125,27 @@ struct Lowerer {
     literal.kind  = ExprKind::Unit;
     literal.loc   = decl.loc;
     literal.stamp = ScopeStamp{0, ordinal};
+    // §5.8's owner convention: inside a skill or behavior's member
+    // walk every emitted head declares a trailing `$owner` Cell
+    // parameter — the dispatcher binds the runtime owner cell there,
+    // and bare field names lower to #FIND/#SET hops on it instead of
+    // compile-time cells. The slot is unconditional so dispatch stays
+    // uniform when the owner declares no fields.
+    std::vector<Parameter> effective = params;
+    if (!memberPrefix_.empty())
+      effective.push_back(Parameter{.name = "$owner",
+                                    .type = Type{"Cell"}});
     const FragmentKey key{decl.loc, ordinal++};
     fragments.emplace(key,
                       FragmentRecord{.body = CodeBody{std::string{label},
-                                                      params, cloneExpr(body)},
+                                                      effective,
+                                                      cloneExpr(body)},
                                      .closed = true});
     infos.emplace(key, FragmentInfo{.result = std::move(result),
                                     .pure   = false,
                                     .closed = true,
-                                    .arity  = params.size()});
+                                    .arity  = effective.size(),
+                                    .ownerFields = memberFields_});
     const auto object = compileFragment(literal, context, compiler);
     if (!object) return std::unexpected(object.error());
     image.heads.push_back(object->head);
@@ -874,6 +886,20 @@ struct Lowerer {
   CellRef behaviorDesc_{noCell};
   CellRef usesTarget_{noCell};
   std::vector<CellRef> creationSteps_;
+  // The declaring owner's field set while a skill/behavior lowers its
+  // members — emitHead stamps it onto each member head's info so the
+  // emitter resolves the names on the runtime owner. Empty everywhere
+  // else.
+  OwnerFields memberFields_;
+  // Collect the member walk's field set before the first member head
+  // emits — init heads take it too (`var b := a + 1` reads a).
+  OwnerFields memberFieldsOf(const Decl &owner) {
+    OwnerFields fields;
+    for (const auto &member : owner.members)
+      if (member.kind == DeclKind::Field && member.result)
+        fields.emplace(member.name, *member.result);
+    return fields;
+  }
   DimRef capacityDim() {
     if (capacityDim_ == zigzag::noCell)
       capacityDim_ = core.findOrMintDimension("d.capacity");
@@ -1588,8 +1614,10 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
                        arena.makeScalarCell(std::int64_t{1})));
     const std::string prevPrefix = memberPrefix_;
     const CellRef prevUses       = usesTarget_;
+    const OwnerFields prevFields = memberFields_;
     memberPrefix_                = name;
     usesTarget_                  = rec;
+    memberFields_                = memberFieldsOf(decl);
     for (const auto &member : decl.members) {
       if (member.kind == DeclKind::Field) {
         lowerFieldSlot(rec, member, decl.parameters, name);
@@ -1638,6 +1666,7 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
     }
     memberPrefix_ = prevPrefix;
     usesTarget_   = prevUses;
+    memberFields_ = prevFields;
     return;
   }
   case DeclKind::Behavior: {
@@ -1669,9 +1698,11 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
     const std::string prevPrefix = memberPrefix_;
     const CellRef prevDesc       = behaviorDesc_;
     const CellRef prevUses       = usesTarget_;
+    const OwnerFields prevFields = memberFields_;
     memberPrefix_                = name;
     behaviorDesc_                = rec;
     usesTarget_                  = rec;
+    memberFields_                = memberFieldsOf(decl);
     for (const auto &member : decl.members) {
       if (member.kind == DeclKind::Field) {
         lowerFieldSlot(rec, member, decl.parameters, name);
@@ -1689,6 +1720,7 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
     memberPrefix_ = prevPrefix;
     behaviorDesc_ = prevDesc;
     usesTarget_   = prevUses;
+    memberFields_ = prevFields;
     return;
   }
   case DeclKind::Plan: {

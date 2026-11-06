@@ -98,6 +98,15 @@ enum class OpcodeKind : std::uint8_t {
   // a materialize-then-scan loop the scalar emitter has no loop for.
   // Appended last for the same persisted-kind reason.
   Find,
+
+  // Named-member write: Find's twin — the subject's int names a term
+  // cell, the op walks +d.step for the +d.name-matched member and
+  // replaces that member's content. Owner-relative field writes
+  // (`ticks := v` inside a skill/behavior member) need it: the Value
+  // op's subject is an operand *cell*, never a value-carried ref, so
+  // a holder discovered at run time cannot be a Value target.
+  // Appended last for the same persisted-kind reason.
+  FieldSet,
 };
 
 struct ChoicePoint {

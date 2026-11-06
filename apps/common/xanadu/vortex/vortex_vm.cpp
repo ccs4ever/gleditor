@@ -108,7 +108,7 @@ VortexVM::registerProgramOps(std::span<const CellRef> enumeration) {
     const auto kind = core_.arena().asInt64(opCell);
     if (!kind || *kind < 0 ||
         static_cast<std::uint64_t>(*kind) >
-            static_cast<std::uint64_t>(OpcodeKind::Find)) {
+            static_cast<std::uint64_t>(OpcodeKind::FieldSet)) {
       return std::unexpected("registerProgramOps: recorded cell " +
                              std::to_string(opCell) +
                              " does not decode to an opcode kind");
@@ -192,7 +192,7 @@ std::optional<OpcodeKind> VortexVM::getOpcodeKind(CellRef opCell) const {
   auto val = core_.arena().asInt64(opCell);
   if (val && *val >= 0 &&
       static_cast<std::uint64_t>(*val) <=
-          static_cast<std::uint64_t>(OpcodeKind::Find)) {
+          static_cast<std::uint64_t>(OpcodeKind::FieldSet)) {
     return static_cast<OpcodeKind>(*val);
   }
   return std::nullopt;
@@ -903,6 +903,41 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
         }
       }
       outputs.push_back(found);
+    }
+    break;
+  }
+  case OpcodeKind::FieldSet: {
+    // #SET subject name value: Find's write twin — the subject operand's
+    // int names a term cell; walk its +d.step rank for the member whose
+    // +d.name text matches and replace that member's content. A missing
+    // member or unbound subject yields false so the write's caller can
+    // fail the clause honestly rather than silently dropping state.
+    if (inputs.size() >= 3) {
+      const auto referenced = static_cast<CellRef>(toInt(inputs[0]));
+      const std::string wanted =
+          std::holds_alternative<std::string>(inputs[1])
+              ? std::get<std::string>(inputs[1])
+              : std::string{};
+      bool wrote = false;
+      if (core_.arena().contains(referenced)) {
+        const auto &dims = core_.dims();
+        for (const CellRef member :
+             zigzag::rankAfter(core_.arena(), referenced, dims.step)) {
+          core_.arena().consumeWork();
+          const auto label =
+              core_.arena().linked(member, dims.name, DimVector::POS);
+          if (label && core_.arena().textOf(*label) == wanted) {
+            WriteFault fault = WriteFault::None;
+            const auto res =
+                core_.writeValue(member, 0, std::nullopt, inputs[2], &fault);
+            if (fault == WriteFault::OpcodeKind)
+              return kindImmutabilityFault();
+            wrote = res.has_value();
+            break;
+          }
+        }
+      }
+      outputs.push_back(wrote);
     }
     break;
   }

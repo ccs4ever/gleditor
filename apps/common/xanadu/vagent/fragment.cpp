@@ -169,6 +169,9 @@ compileFragment(const Expr &literal, const FragmentContext &context,
         .bindings   = context.bindings,
         .fragments  = &context,
         .use        = ResultUse::Value,
+        .ownerFields =
+            info->second.ownerFields.empty() ? nullptr
+                                             : &info->second.ownerFields,
     };
     auto body = compiler.compileFragmentBody(request);
     if (!body) return std::unexpected(body.error());

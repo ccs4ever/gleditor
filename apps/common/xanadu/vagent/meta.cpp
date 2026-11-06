@@ -1011,7 +1011,7 @@ MetaRuntime::revise(std::string_view predicate, CellRef oldTerm,
 // Selection — §6.3-amended virtual weight-order (actor-executor §3.4)
 // ---------------------------------------------------------------------------
 
-std::expected<std::optional<CellRef>, std::string>
+std::expected<std::optional<std::pair<CellRef, CellRef>>, std::string>
 MetaRuntime::selectClause(CellRef host,
                           const std::unordered_set<CellRef> &tried,
                           std::size_t whereFuel,
@@ -1026,13 +1026,20 @@ MetaRuntime::selectClause(CellRef host,
   // tie-break, which is exactly the stable_sort.
   struct Candidate {
     CellRef clause;
+    CellRef owner;
     double weight;
   };
-  auto clauses = clausesOf(host);
+  std::vector<Candidate> candidates;
+  for (const CellRef clause : clausesOf(host))
+    candidates.push_back(
+        Candidate{clause, noCell, weightOf(clause).value_or(0.0)});
   // §5.7's plan list is the agent's plans, then each mounted
   // behavior's in +d.behavior order — the descriptor's "plans" table
   // keys per-goal clause ranks, so a mounted behavior contributes
   // without its clauses ever filing on the shared goal symbol.
+  // The instance rides the candidate: two mounts of one behavior
+  // share the clause cell, so a clause-keyed owner map would bind
+  // the first mount's fields to every copy's `where` guard.
   if (binds_.agentCell != noCell) {
     const auto bDim = core_.findOrMintDimension("d.behavior");
     for (const CellRef inst :
@@ -1051,13 +1058,10 @@ MetaRuntime::selectClause(CellRef host,
            zigzag::rankAfter(arena, *term, core_.dims().step))
         if (arena.textOf(child) == arena.textOf(host))
           for (const CellRef clause : clausesOf(child))
-            clauses.push_back(clause);
+            candidates.push_back(
+                Candidate{clause, inst, weightOf(clause).value_or(0.0)});
     }
   }
-  std::vector<Candidate> candidates;
-  candidates.reserve(clauses.size());
-  for (const auto clause : clauses)
-    candidates.push_back(Candidate{clause, weightOf(clause).value_or(0.0)});
   std::stable_sort(candidates.begin(), candidates.end(),
                    [](const Candidate &a, const Candidate &b) {
                      return a.weight > b.weight;
@@ -1073,11 +1077,18 @@ MetaRuntime::selectClause(CellRef host,
     // §8.2's Icon semantics give comparisons no falsy value — `b` in
     // `a == b` is produced even when it is `0` or `false`, so the
     // produced value itself never discriminates.
-    const auto outcome = runFragment(*guard, args, std::nullopt, whereFuel);
+    auto callArgs = args;
+    if (candidate.owner != noCell)
+      callArgs.push_back(
+          CellValue{static_cast<std::int64_t>(candidate.owner)});
+    const auto outcome =
+        runFragment(*guard, callArgs, std::nullopt, whereFuel);
     if (outcome.refusal != MetaRunOutcome::Refusal::None) continue;
-    if (outcome.produced) return clause;
+    if (outcome.produced)
+      return std::optional<std::pair<CellRef, CellRef>>{
+          std::pair{clause, candidate.owner}};
   }
-  return std::optional<CellRef>{std::nullopt};
+  return std::optional<std::pair<CellRef, CellRef>>{std::nullopt};
 }
 
 // ---------------------------------------------------------------------------
@@ -1120,7 +1131,7 @@ MetaRuntime::adoptGoal(CellRef goal, std::int64_t turn,
     return std::unexpected(
         "adopt: no clause on the goal's bank holds — the tried-set "
         "and where-guards exhausted selection");
-  const auto clause = **picked;
+  const auto [clause, owner] = **picked;
 
   // §3.5's resume identity: the registered-head name of the clause's
   // body head, snapshotted at adoption — a grafted or pruned body
@@ -1151,6 +1162,10 @@ MetaRuntime::adoptGoal(CellRef goal, std::int64_t turn,
 
   intField("id", *serial);
   field("kind", arena.makeCell("adopt"));
+  // §5.8: a behavior-owned clause's runtime owner rides the intention —
+  // the plan body's `$owner` binds it at every resume, so the instance
+  // survives checkpoint like the plan cell itself does.
+  intField("owner", static_cast<std::int64_t>(owner));
   // goal/plan are shared program-image cells: an edge here is the
   // single inbound +d.values slot a second adoption of the same goal
   // (a maintain monitor's restorer, say) would evict. Scalar refs

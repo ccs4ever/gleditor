@@ -393,7 +393,13 @@ public:
   // values into each candidate's where-guard positionally (clause
   // params are the plan's own bindings — names can differ from the
   // goal's declared parameters, so position is the contract).
-  [[nodiscard]] std::expected<std::optional<CellRef>, std::string>
+  //
+  // The result pairs the clause with its runtime owner — the mounted
+  // behavior instance whose table contributed it, `noCell` for the
+  // agent's own. Two mounts of one behavior share a clause cell, so
+  // the owner travels with the candidate, not in a clause-keyed map.
+  [[nodiscard]] std::expected<std::optional<std::pair<CellRef, CellRef>>,
+                              std::string>
   selectClause(CellRef host, const std::unordered_set<CellRef> &tried = {},
                std::size_t whereFuel                    = 256,
                const std::vector<CellValue> &args       = {});
