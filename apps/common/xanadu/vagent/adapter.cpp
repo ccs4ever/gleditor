@@ -1,0 +1,200 @@
+#include "adapter.hpp"
+
+#include "meta.hpp"
+#include "records.hpp"
+#include "../vortex/worker_context.hpp"
+
+#include <vector>
+
+namespace xanadu::vagent {
+
+namespace {
+
+namespace mesh = zigzag::vortex::mesh;
+using xanadu::identity::MessageType;
+using zigzag::CellRef;
+using zigzag::DimVector;
+using zigzag::noCell;
+
+/// The same key shape MeshActorRuntime::pidKey renders — a private
+/// static there, so the adapter keeps its own copy; the two must agree
+/// because the mesh's actors_ map and a member's `pid` record are the
+/// same lookup from opposite sides.
+[[nodiscard]] std::string
+renderPid(const mesh::ActorPid &pid) {
+  return std::to_string(pid.node.size()) + ":" + pid.node +
+         std::to_string(pid.cursor.size()) + ":" + pid.cursor + ":" +
+         std::to_string(pid.epoch) + ":" +
+         std::to_string(pid.spawnSequence);
+}
+
+/// `home +d.dirs → directory +d.agents → member` — the walk
+/// agentCellOf encodes in the executor, repeated here so the adapter
+/// resolves through the same durable shape.
+[[nodiscard]] std::vector<CellRef>
+directoryMembers(zigzag::ArenaManifold &arena,
+                 zigzag::vortex::VortexCore &core) {
+  const auto dirs   = core.findOrMintDimension("d.dirs");
+  const auto agents = core.findOrMintDimension("d.agents");
+  std::vector<CellRef> members;
+  for (const CellRef dir : zigzag::rankAfter(arena, core.home(), dirs))
+    for (const CellRef member : zigzag::rankAfter(arena, dir, agents))
+      members.push_back(member);
+  return members;
+}
+
+/// The member's durable `pid` record — a text cell holding the
+/// rendered mesh key, overwritten per incarnation.
+[[nodiscard]] std::optional<std::string>
+memberPidKey(zigzag::ArenaManifold &arena,
+             zigzag::vortex::VortexCore &core, CellRef member) {
+  const auto rec = varsRecord(arena, core, member, "pid", false);
+  if (!rec) return std::nullopt;
+  const auto v = arena.linked(*rec, core.dims().values, DimVector::POS);
+  if (!v) return std::nullopt;
+  return std::string{arena.textOf(*v)};
+}
+
+} // namespace
+
+VagentAdapter::VagentAdapter(VagentExecutor executor)
+    : executor_(std::move(executor)) {}
+
+std::expected<std::string, mesh::ActorError>
+VagentAdapter::operator()(const mesh::ActorExecution &exec,
+                          zigzag::vortex::WorkerContext &ctx) {
+  auto &arena = ctx.arena;
+  auto &core  = ctx.core;
+
+  // Mesh → language pid translation: a noted member's exec pid is
+  // rewritten to its directory index — agentCellOf's namespace — so
+  // the inner turn picks the same member the pid record names. The
+  // language-pid fallback applies only while *no* member carries a
+  // pid record (harness turns and pre-genesis contexts fabricate
+  // pids in that namespace); once genesis notes any member, an
+  // unresolvable exec pid must resolve to nobody — guessing a member
+  // by index under the runtime's global spawnSequence would run a
+  // turn on the wrong agent.
+  mesh::ActorExecution turn = exec;
+  std::optional<CellRef> self;
+  if (const auto member = memberForPid(ctx, exec.pid)) {
+    self = member;
+    if (const auto index = memberIndex(ctx, *member))
+      turn.pid.spawnSequence = *index + 1;
+  } else {
+    const auto members = directoryMembers(arena, core);
+    const auto anyNoted = std::ranges::any_of(members, [&](CellRef m) {
+      return memberPidKey(arena, core, m).has_value();
+    });
+    if (!anyNoted) {
+      const auto index =
+          exec.pid.spawnSequence < 2
+              ? std::size_t{0}
+              : static_cast<std::size_t>(exec.pid.spawnSequence - 1);
+      if (index < members.size()) self = members[index];
+    }
+  }
+
+  if (exec.message &&
+      exec.message->type == MessageType::ActorDown) {
+    // A monitored member's down arrives as a mailbox message; the
+    // percept the language dispatches is ChildDown, so the raw
+    // message is consumed here — journaling it as a generic
+    // "ActorDown" event would double-report the same loss.
+    if (self && exec.message->source)
+      if (const auto dead = memberForPid(ctx, *exec.message->source))
+        executor_.childDown(arena, core, *self, *dead);
+    turn.message.reset();
+  }
+
+  auto result = executor_(turn, ctx);
+  if (result && self) drain(ctx, *self);
+  return result;
+}
+
+std::expected<void, mesh::ActorError>
+VagentAdapter::genesis(const mesh::ActorGenesis &genesis,
+                       zigzag::vortex::WorkerContext &ctx) {
+  // The actor is its own context's declared member — index 0 in the
+  // home directory, the same cell an exec pid of sequence 1 picks.
+  const auto members = directoryMembers(ctx.arena, ctx.core);
+  if (members.empty()) return {};
+  const CellRef self = members.front();
+  noteMemberPid(ctx, self, genesis.pid);
+  if (genesis.transported != nullptr)
+    executor_.resumed(ctx.arena, ctx.core, self);
+  return {};
+}
+
+void VagentAdapter::drain(zigzag::vortex::WorkerContext &ctx,
+                          CellRef member) const {
+  auto &arena = ctx.arena;
+  auto &core  = ctx.core;
+  for (const auto &entry : VagentExecutor::drainOutbox(arena, core, member)) {
+    const auto deliveries =
+        VagentExecutor::route(arena, core, core.home(), entry);
+    if (deliveries.empty()) {
+      // "0"/empty is broadcast — silence there means an empty
+      // directory, never a fault. A concrete target the name scan
+      // cannot find is the unroutable case §"delivery failure"
+      // raises on the sender.
+      if (!entry.target.empty() && entry.target != "0" &&
+          !memberNamed(ctx, entry.target))
+        executor_.deliveryFailed(arena, core, entry, "unroutable");
+      continue;
+    }
+    for (const auto &delivery : deliveries)
+      executor_.deliver(arena, core, delivery);
+  }
+}
+
+void VagentAdapter::noteMemberPid(zigzag::vortex::WorkerContext &ctx,
+                                  CellRef member,
+                                  const mesh::ActorPid &pid) const {
+  const auto rec =
+      varsRecord(ctx.arena, ctx.core, member, "pid", true);
+  if (!rec) return;
+  zigzag::expectWritten(
+      ctx.arena.link(*rec, ctx.core.dims().values, DimVector::POS,
+                     ctx.arena.makeCell(renderPid(pid))));
+}
+
+std::optional<CellRef>
+VagentAdapter::memberForPid(zigzag::vortex::WorkerContext &ctx,
+                            const mesh::ActorPid &pid) const {
+  const auto key = renderPid(pid);
+  for (const CellRef member : directoryMembers(ctx.arena, ctx.core))
+    if (memberPidKey(ctx.arena, ctx.core, member) == key) return member;
+  return std::nullopt;
+}
+
+std::optional<CellRef>
+VagentAdapter::memberNamed(zigzag::vortex::WorkerContext &ctx,
+                           std::string_view name) const {
+  for (const CellRef member : directoryMembers(ctx.arena, ctx.core))
+    if (const auto n = ctx.arena.linked(member, ctx.core.dims().name,
+                                        DimVector::POS))
+      if (ctx.arena.textOf(*n) == name) return member;
+  return std::nullopt;
+}
+
+std::optional<std::size_t>
+VagentAdapter::memberIndex(zigzag::vortex::WorkerContext &ctx,
+                           CellRef member) const {
+  const auto members = directoryMembers(ctx.arena, ctx.core);
+  for (std::size_t i = 0; i < members.size(); ++i)
+    if (members[i] == member) return i;
+  return std::nullopt;
+}
+
+void VagentAdapter::memberRebound(zigzag::vortex::WorkerContext &ctx,
+                                  CellRef holder, CellRef member) const {
+  executor_.moved(ctx.arena, ctx.core, holder, member);
+}
+
+void VagentAdapter::spawnRefused(zigzag::vortex::WorkerContext &ctx,
+                                 CellRef parent, CellRef child) const {
+  executor_.spawnFailed(ctx.arena, ctx.core, parent, child);
+}
+
+} // namespace xanadu::vagent

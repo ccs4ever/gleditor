@@ -1,0 +1,113 @@
+#ifndef COMMON_XANADU_VAGENT_ADAPTER_HPP
+#define COMMON_XANADU_VAGENT_ADAPTER_HPP
+
+// The adapter the design doc calls greenfield: everything between
+// MeshActorRuntime's callbacks and VagentExecutor's language-level
+// entry points. Install `operator()` on setExecutor and `genesis` on
+// setGenesisHook; the runtime's own machinery (monitors, spawn acks,
+// resume) stays mesh-side — this layer translates its observations
+// into the durable events the language sees.
+//
+// Two pid namespaces meet here. MeshActorRuntime assigns
+// ActorPid{node, cursor=contentId, epoch, nextSpawn_++} — a global
+// counter with no relation to a program's member list. The language
+// resolves a member by its index in the home directory's +d.agents
+// rank (VagentExecutor's agentCellOf convention: the declared agent
+// is sequence 1). The durable half of the translation is a `pid`
+// varsRecord on the member cell carrying the rendered mesh key —
+// written by noteMemberPid at spawn-completion and rewritten by
+// genesis on each reincarnation — so a crashed adapter loses no
+// mapping and a migrated member's identity follows it.
+
+#include <expected>
+#include <optional>
+#include <string>
+#include <string_view>
+
+#include "executor.hpp"
+#include "../identity/identity_layout.hpp"
+
+namespace xanadu::vagent {
+
+class VagentAdapter {
+public:
+  /// The executor does every turn's work; the adapter wraps it.
+  explicit VagentAdapter(VagentExecutor executor = VagentExecutor{});
+
+  /// MeshActorRuntime::Executor. Translates before delegating: the
+  /// exec pid's mesh spawnSequence becomes the member's directory
+  /// index (the language's pid namespace), and an ActorDown mailbox
+  /// message becomes childDown on the parent — the message is
+  /// consumed rather than dispatched, because the language-level
+  /// percept is `ChildDown{child}`, never a generic "ActorDown"
+  /// event. A committed turn ends with the §3.7 outbox drain.
+  [[nodiscard]] std::expected<std::string,
+                              zigzag::vortex::mesh::ActorError>
+  operator()(const zigzag::vortex::mesh::ActorExecution &exec,
+             zigzag::vortex::WorkerContext &ctx);
+
+  /// MeshActorRuntime::GenesisHook. Every genesis (spawn or resume)
+  /// rewrites the member's `pid` record to the incarnation the mesh
+  /// just assigned — the durable identity a later ActorDown resolves
+  /// through. A transported checkpoint additionally means the agent
+  /// reincarnated: its effect parks fault with "migrated" per §5.4.
+  [[nodiscard]] std::expected<void, zigzag::vortex::mesh::ActorError>
+  genesis(const zigzag::vortex::mesh::ActorGenesis &genesis,
+          zigzag::vortex::WorkerContext &ctx);
+
+  /// §3.7's post-commit half: every staged entry routes through the
+  /// directory and delivers locally — a shared-arena program's only
+  /// reachable targets. A concrete target naming no member faults the
+  /// sender through deliveryFailed; an empty-scoped or broadcast fan-
+  /// out to nobody is not a failure.
+  void drain(zigzag::vortex::WorkerContext &ctx,
+             zigzag::CellRef member) const;
+
+  /// Write the member's durable mesh identity — the `pid` record a
+  /// later memberForPid resolves through. Idempotent; a reincarnation
+  /// overwrites the prior incarnation's key.
+  void noteMemberPid(zigzag::vortex::WorkerContext &ctx,
+                     zigzag::CellRef member,
+                     const zigzag::vortex::mesh::ActorPid &pid) const;
+
+  /// The member whose `pid` record names @p pid's rendered key, if
+  /// any — the only sound resolution for a mesh pid, whose
+  /// spawnSequence is the runtime's global counter, never a member
+  /// index.
+  [[nodiscard]] std::optional<zigzag::CellRef>
+  memberForPid(zigzag::vortex::WorkerContext &ctx,
+               const zigzag::vortex::mesh::ActorPid &pid) const;
+
+  /// The member whose `+d.name` is @p name — the spawn-refusal seam's
+  /// resolution: a refused member carries a name but never received a
+  /// pid.
+  [[nodiscard]] std::optional<zigzag::CellRef>
+  memberNamed(zigzag::vortex::WorkerContext &ctx,
+              std::string_view name) const;
+
+  /// @p member's index across the home directory's +d.agents ranks —
+  /// the language-level spawnSequence the executor resolves. Empty
+  /// when @p member is not in the directory.
+  [[nodiscard]] std::optional<std::size_t>
+  memberIndex(zigzag::vortex::WorkerContext &ctx,
+              zigzag::CellRef member) const;
+
+  /// §5.4's Moved receiver half — the mesh observed the peer at a new
+  /// reference; @p member is the adapter's fresh reference cell for
+  /// @p holder's stale binding.
+  void memberRebound(zigzag::vortex::WorkerContext &ctx,
+                     zigzag::CellRef holder, zigzag::CellRef member) const;
+
+  /// §8.6's refused spawn — the runtime's ActorSpawn reply named no
+  /// pid; @p parent is the member that staged the request, @p child
+  /// the refused member cell (its `+d.name` is the spawn's name).
+  void spawnRefused(zigzag::vortex::WorkerContext &ctx,
+                    zigzag::CellRef parent, zigzag::CellRef child) const;
+
+private:
+  VagentExecutor executor_;
+};
+
+} // namespace xanadu::vagent
+
+#endif
