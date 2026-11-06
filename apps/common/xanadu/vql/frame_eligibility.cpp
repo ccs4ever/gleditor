@@ -1,4 +1,5 @@
 #include "common/xanadu/vql/frame_eligibility.hpp"
+#include "common/xanadu/vql/projection_syntax.hpp"
 
 #include <algorithm>
 #include <concepts>
@@ -238,6 +239,7 @@ private:
                 [&](const ShapeLiteral &shape, const std::size_t childDepth) {
                   shapeLiteral(shape, scope, childDepth);
                 });
+            refuse("first-class shape values are not frame eligible");
           } else if constexpr (std::same_as<Part,
                                             std::shared_ptr<VersionExpr>>) {
             pointer(
@@ -393,8 +395,15 @@ private:
                pathStep(step, scope, childDepth);
              });
     if (path.shapeProjection) {
-      shapeLiteral(*path.shapeProjection, scope, depth + 1);
-      refuse("shape projections are not reusable frame bodies");
+      shapeLiteral(*path.shapeProjection, scope, depth + 1, true);
+      if (!isStaticShapeProjectionSyntax(*path.shapeProjection))
+        refuse("shape projection is outside the native frame subset");
+      for (const ShapeRule &entry : path.shapeProjection->rules) {
+        const auto *rule = std::get_if<DimensionShapeRule>(&entry.rule);
+        if (rule && rule->targetValue && rule->dimName == "d.clone" &&
+            !std::holds_alternative<ScalarLiteral>(rule->targetValue->kind))
+          refuse("nonliteral clone-dimension projection is not frame eligible");
+      }
     }
     if (path.cloneTail) {
       refuse("clone tails are not reusable frame bodies");
@@ -598,7 +607,8 @@ private:
   }
 
   void shapeLiteral(const ShapeLiteral &shape, const Scope &scope,
-                    const std::size_t depth) {
+                    const std::size_t depth,
+                    const bool projectionCandidate = false) {
     tick(depth);
     sequence(
         shape.rules, depth + 1,
@@ -625,7 +635,8 @@ private:
                                 const std::size_t nestedDepth) {
                               value(expr, scope, nestedDepth);
                             });
-                  refuse("shape rules are not frame eligible");
+                  if (!projectionCandidate)
+                    refuse("shape rules are not frame eligible");
                 } else if constexpr (std::same_as<Part,
                                                   VirtualDimensionDefRule>) {
                   if (part.expr)

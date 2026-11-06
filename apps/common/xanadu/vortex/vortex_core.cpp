@@ -73,14 +73,12 @@ CellRef VortexCore::mintDimension(std::string_view name) {
   if (const auto existing = baseDimensionNamed(name)) {
     return *existing;
   }
-  auto named = zigzag::rankAfter(arena_, home_, dims_.dims) |
-               std::views::filter([&](const DimRef dim) {
-                 return arena_.textOf(dim) == name;
-               });
-  if (const auto found = zigzag::firstOf(named)) {
+  if (const auto found = findDimension(name)) {
     return *found;
   }
-  CellRef tail = zigzag::rankTail(arena_, home_, dims_.dims);
+  // Projection can detach home's connector without deleting the directory.
+  // Mint through the same stable rank root that name lookup uses.
+  CellRef tail = zigzag::rankTail(arena_, dims_.dims, dims_.dims);
   return mintNamedDimension(name, tail);
 }
 

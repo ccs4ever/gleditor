@@ -2376,8 +2376,10 @@ explicit refusals. The rulings below describe the intended semantics.
   targets are prepared per owner before masking and require exactly one cell; existing-cell
   attachments use fresh clones. Calls/computed targets, nested shapes, foreign owners and other
   deferred forms still refuse. Immediate projection/traversal continuation requires an intermediate
-  `let` until ordered path lowering exists. See
-  [iterations 29–32](projects/vortex-vm-only-iterations.md). Matching still materializes subjects;
+  `let` until ordered path lowering exists. Eligible named functions execute these projections in
+  reusable native frames, including recursion and caller-bound aliases; generic first-class shapes
+  and other excluded forms remain refused. See
+  [iterations 29–33](projects/vortex-vm-only-iterations.md). Matching still materializes subjects;
   no zero-copy or universal allocation guarantee follows. Step predicates retain cell identity
   through guarded reference slots and Boolean control flow short-circuits. Nonempty literal shape
   predicates lower directional presence/absence rules, scalar literal targets and nested static

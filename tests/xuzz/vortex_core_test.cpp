@@ -55,6 +55,21 @@ TEST(VortexCoreTest, SystemGenesisMintsAllDimensionsOffHome) {
             d.dims);
 }
 
+TEST(VortexCoreTest, DimensionNamesRemainStableAfterHomeDirectoryIsDetached) {
+  TestHarness h;
+  const DimRef before    = h.core.mintDimension("d.before");
+  const DimRef directory = h.core.dims().dims;
+  ASSERT_TRUE(h.arena.unlink(h.core.home(), directory, DimVector::POS));
+  EXPECT_EQ(h.core.findDimension("d.before"), before);
+
+  const DimRef after = h.core.mintDimension("d.after");
+  EXPECT_EQ(h.core.findDimension("d.after"), after);
+  EXPECT_EQ(h.core.mintDimension("d.after"), after);
+  EXPECT_EQ(h.core.findOrMintDimension("d.after"), after);
+  EXPECT_EQ(h.core.findDimension("d.before"), before);
+  EXPECT_FALSE(h.arena.linked(h.core.home(), directory, DimVector::POS));
+}
+
 TEST(VortexCoreTest, TruthinessKeepsItsExplicitWordsAndProseFallback) {
   EXPECT_TRUE(VortexCore::evaluateTruthiness(CellValue{std::string{"YeS"}}));
   EXPECT_TRUE(VortexCore::evaluateTruthiness(CellValue{std::string{"ON"}}));

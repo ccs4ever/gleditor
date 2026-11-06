@@ -1140,3 +1140,54 @@ remains incomplete.
 Logs: `/tmp/vql-projection-targets-build.log`, `/tmp/vql-projection-targets-tests.log`,
 `/tmp/vql-projection-targets-profile.log`, `/tmp/vql-projection-targets-cli.log`,
 `/tmp/vql-projection-targets-format.log`.
+
+## Iteration 33: reusable native projection frames
+
+Eligible named functions now execute supported projections through reusable native frames, including
+actual self-recursion, nested calls and caller-bound free aliases. The compiler and eligibility
+scanner share a flat syntax classifier for static masks, literals, aliases and bounded read-only
+paths. Binding, pipeline, arena and resolved-dimension checks stay in the compiler; target
+preparation, exact-one contracts, clone generation and mutation groups keep their existing graph
+lowering. No VM opcode, frame port layout or runtime ABI was added.
+
+The scanner walks every projection operand through its existing capture and traversal machinery
+before classifying eligibility. Cycles, depth and query-wide node exhaustion remain hard errors,
+even when the enclosing syntax is unsupported. Call graph propagation and pre-match scopes remain
+unchanged. Generic first-class shape values are explicitly refused after traversal, including empty
+and wildcard-only shapes; they do not gain eligibility from the projection-specific path. Explicit
+weave definitions, functors, variadics, lambdas and the other previously excluded forms remain
+outside this native subset.
+
+The Host recovery test exposed a separate dimension identity defect. Name lookup started at the
+stable `d.dims` directory cell, but minting searched and appended from home. An exclusive home
+projection could detach only that connector, leaving the directory intact; subsequent new names then
+became undiscoverable and could receive multiple identities. Minting now uses the same stable
+directory root as lookup while retaining base-dimension precedence. It does not restore any links
+that the caller removed. A focused core regression and the unchanged Host recovery case cover the
+correction; this is not a general repair of projected core-home topology.
+
+Validation: full `make -j$(nproc)` exited zero and all 824 affected tests from 77 suites passed.
+Nine new enabled cases prove named function InvokeFrame descriptors (separate from validators),
+recursive mutation and distinct scalar cells, typed filter and rollback behavior, nested free
+captures with exact Int64/Double clone content, explicit context/default alias handling, source-free
+recursive export/reload, Host and mesh Vquery source recovery, conservative refusal propagation, and
+hard AST budgets/cycles. A projection-specific cyclic RHS also fails before syntax refusal. The real
+headless CLI builds first→second→third, recursively projects through the same native walk graph and
+returns `third`; an invalid native projected parameter raises its named contract error and exits 1.
+
+The four-point profile uses cold single observations, without a speedup claim. At 32 owners,
+untyped/Cell-typed parameters compiled in 411/216 microseconds and ran in 3,054/6,994; VM cycles
+were 2,021/3,973, compile arena growth 300/589 and runtime growth 448/1,440. At 128 owners, the
+values were 223/304, 11,749/30,124, 8,069/15,877, 396/685 and 1,792/5,760. The function descriptors
+contained 12/22 locals and generated 70/150 opcodes at either owner count. Whole-fixture arena
+growth includes backing, guard/group and result cells; it is not an isolated allocation or
+whole-heap bound.
+
+Foreign projection owners, ordered projection/traversal, nested/computed projection targets,
+effectful nested validation, remaining callable forms and full frontend/parallel lifecycle parity
+remain unfinished. Sealed Vortex mesh artifacts retain their explicit descriptor refusal. Full §4.12
+remains incomplete.
+
+Logs: `/tmp/vql-projection-frames-build.log`, `/tmp/vql-projection-frames-tests.log`,
+`/tmp/vql-projection-frames-profile.log`, `/tmp/vql-projection-frames-cli.log`,
+`/tmp/vql-projection-frames-format.log`.

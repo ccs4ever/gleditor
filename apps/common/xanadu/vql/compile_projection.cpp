@@ -1,4 +1,5 @@
 #include "common/xanadu/vql/compiler.hpp"
+#include "common/xanadu/vql/projection_syntax.hpp"
 
 #include <array>
 #include <limits>
@@ -18,23 +19,17 @@ void VQLCompiler::validateShapeProjection(const ShapeLiteral &shape) {
     throw std::invalid_argument(
         "compiled query exceeds maximum shape projection size 4096");
   remainingShapeProjectionRules_ -= shape.rules.size();
+  if (!isStaticShapeProjectionSyntax(shape))
+    throw std::invalid_argument(
+        "shape projection requires static rules and scalar, alias, or "
+        "read-only simple path targets");
   for (const auto &entry : shape.rules) {
     if (const auto *wildcard = std::get_if<ShapeWildcard>(&entry.rule)) {
-      if (*wildcard != ShapeWildcard::Everything &&
-          *wildcard != ShapeWildcard::Nothing)
-        throw std::invalid_argument("invalid shape projection wildcard");
+      (void)wildcard;
       continue;
     }
     const auto *rule = std::get_if<DimensionShapeRule>(&entry.rule);
-    if (!rule || !rule->dimName.starts_with("d.") || rule->dimName.size() <= 2)
-      throw std::invalid_argument(
-          "shape projections require static canonical d.name dimensions");
-    if (rule->direction != DimVector::POS && rule->direction != DimVector::NEG)
-      throw std::invalid_argument("invalid shape projection direction");
     if (!rule->targetValue) continue;
-    if (rule->negated || rule->isBidir)
-      throw std::invalid_argument(
-          "shape projection assignments require one non-negated direction");
 
     const ValueExpr &target = *rule->targetValue;
     if (std::holds_alternative<ScalarLiteral>(target.kind)) continue;
@@ -66,12 +61,7 @@ void VQLCompiler::validateShapeProjection(const ShapeLiteral &shape) {
                    std::get_if<std::shared_ptr<PathExpression>>(&target.kind)) {
       if (!*path) rejectTarget();
       const PathExpression &expression = **path;
-      if (expression.isFunctor || !expression.anchorPredicates.empty() ||
-          expression.shapeProjection || expression.cloneTail ||
-          expression.anchor.versionPin || expression.anchor.createValue ||
-          expression.anchor.generator || expression.anchor.storeAnchor ||
-          !expression.anchor.microversionId.empty())
-        rejectTarget();
+      if (!isSimpleProjectionPath(expression)) rejectTarget();
 
       switch (expression.anchor.kind) {
       case AnchorKind::Context:
@@ -106,21 +96,9 @@ void VQLCompiler::validateShapeProjection(const ShapeLiteral &shape) {
         }
         break;
       default:
-        rejectTarget();
+        break;
       }
 
-      for (const PathStep &step : expression.steps) {
-        const auto *dimension =
-            std::get_if<SignedDimensionStep>(&step.selector);
-        if (!dimension || !dimension->dimName.starts_with("d.") ||
-            dimension->dimName.size() <= 2 ||
-            (dimension->direction != DimVector::POS &&
-             dimension->direction != DimVector::NEG) ||
-            !dimension->creates.empty() || !step.predicates.empty() ||
-            !step.shapePredicates.empty() || step.versionPin ||
-            step.yieldMode != YieldMode::Default || step.capturedFunctor)
-          rejectTarget();
-      }
     } else {
       rejectTarget();
     }

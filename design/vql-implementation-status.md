@@ -583,8 +583,29 @@ rollback, export/reload and host/mesh source execution. The CLI preserves an Int
 exact-integer range and explicitly rejects an empty target. Profile measurements expose growing
 shared-clone-rank traversal cost; no speedup or general latency claim follows.
 
-Calls/computed targets, predicates and other deferred path forms, nested shapes, foreign owners,
-projection native-frame eligibility and ordered projection/traversal remain unfinished. The parser
-now refuses immediate continuation after projection rather than interpreting it as another
-statement; an intermediate `let` works. Nonliteral `d.clone` assignments refuse, and the existing
-`link(d.clone, target)` collision is still open. Full §4.12 remains incomplete.
+Calls/computed targets, predicates and other deferred path forms, nested shapes, foreign owners and
+ordered projection/traversal remain unfinished. The native-frame stage below extends projection
+eligibility. The parser now refuses immediate continuation after projection rather than interpreting
+it as another statement; an intermediate `let` works. Nonliteral `d.clone` assignments refuse, and
+the existing `link(d.clone, target)` collision is still open. Full §4.12 remains incomplete.
+
+## Native functions containing projections
+
+Supported projection bodies now reuse native function graphs, including recursion and free aliases.
+Compiler and eligibility share the same syntax predicate, while the existing budgeted scanner
+preserves capture and hard malformed-AST behavior before classification. First-class shape values
+remain refused after traversal; explicit weave definitions and previously excluded callable forms
+retain their current graph routes. See [iteration 33](projects/vortex-vm-only-iterations.md).
+
+The full build and all 824 affected tests from 77 suites passed. Tests distinguish the named
+function's InvokeFrame from validator calls and cover recursive export, typed rollback, exact clone
+content, default/caller scopes and Host/mesh source recovery. The CLI executes an actual three-node
+recursive projection graph. Four profile rows record whole-fixture native-frame costs and make no
+speedup claim.
+
+Recovery also revealed inconsistent dimension lookup/mint anchors after a home projection detached
+its `d.dims` connector. Both now use the stable directory cell, so new names retain one identity
+without restoring removed topology. A core regression isolates that behavior and the Host recovery
+case remains intact. Foreign owners, ordered projection/traversal, other deferred projection
+targets, callable forms, nested effectful validation and complete frontend/lifecycle parity still
+prevent full §4.12 completion.
