@@ -51,6 +51,16 @@ using SpawnSender =
         zigzag::vortex::WorkerContext &, zigzag::CellRef member,
         std::string_view requestId)>;
 
+/// The wire-send half for member-addressed send entries: the drain
+/// hands the host a complete `ActorSend` (source/target pids resolved
+/// off the members' durable `pid` records, the fielded payload
+/// rendered into `value` through percept_codec's in-band `Name{f: v}`
+/// form) — the host's job is only MeshActorRuntime::send.
+using SendSender =
+    std::function<std::expected<void, zigzag::vortex::mesh::ActorError>(
+        zigzag::vortex::WorkerContext &,
+        const zigzag::vortex::mesh::ActorMessage &)>;
+
 class VagentAdapter {
 public:
   /// The executor does every turn's work; the adapter wraps it.
@@ -68,6 +78,27 @@ public:
   /// language-side child either way; the wire request is mesh-side
   /// only). Setters chain.
   VagentAdapter *setSpawnSender(SpawnSender sender);
+
+  /// Install the transport the drain calls when an entry's target
+  /// resolves to a member whose `pid` record names another
+  /// incarnation — the remote half of §3.7 routing. Absent, remote
+  /// sends fault the sender through `DeliveryFailed{"transport"}`.
+  VagentAdapter *setSendSender(SendSender sender);
+
+  /// Mint a member-addressed outbox record on @p sender — the
+  /// adapter-originated send (Moved, ChildStopping, stop) whose
+  /// receiver is named by member cell because a remote peer's name
+  /// is not reliably known. The drain decides wire-vs-local off the
+  /// member's `pid` record, so the same staging serves both arms.
+  /// Returns the durable request id the wire dedupe keys on.
+  std::string stageSend(zigzag::vortex::WorkerContext &ctx,
+                        zigzag::CellRef sender,
+                        zigzag::CellRef targetMember,
+                        std::string_view percept,
+                        const std::vector<std::pair<
+                            std::string, zigzag::vortex::CellValue>>
+                            &fields,
+                        std::string_view id) const;
 
   /// MeshActorRuntime::Executor. Translates before delegating: the
   /// exec pid's mesh spawnSequence becomes the member's directory
@@ -204,6 +235,7 @@ private:
   VagentExecutor executor_;
   std::map<std::string, NativeBody> natives_;
   SpawnSender spawnSender_;
+  SendSender sendSender_;
 };
 
 } // namespace xanadu::vagent

@@ -2,9 +2,13 @@
 
 #include "genesis.hpp"
 #include "meta.hpp"
+#include "percept_codec.hpp"
 #include "records.hpp"
+#include "../scalar.hpp"
 #include "../vortex/worker_context.hpp"
 
+#include <bit>
+#include <format>
 #include <vector>
 
 namespace xanadu::vagent {
@@ -27,6 +31,48 @@ renderPid(const mesh::ActorPid &pid) {
          std::to_string(pid.cursor.size()) + ":" + pid.cursor + ":" +
          std::to_string(pid.epoch) + ":" +
          std::to_string(pid.spawnSequence);
+}
+
+/// renderPid's inverse — a member's durable `pid` record text back
+/// into the mesh identity a wire send needs. `<nlen>:<node><clen>:<cursor>:<epoch>:<seq>`.
+[[nodiscard]] std::optional<mesh::ActorPid>
+parsePid(std::string_view key) {
+  const auto field = [&](std::size_t &pos) -> std::optional<std::string_view> {
+    const auto colon = key.find(':', pos);
+    if (colon == std::string_view::npos) return std::nullopt;
+    const auto len = [&]() -> std::optional<std::size_t> {
+      try {
+        return static_cast<std::size_t>(
+            std::stoull(std::string{key.substr(pos, colon - pos)}));
+      } catch (...) {
+        return std::nullopt;
+      }
+    }();
+    if (!len) return std::nullopt;
+    pos = colon + 1;
+    if (pos + *len > key.size()) return std::nullopt;
+    const auto out = key.substr(pos, *len);
+    pos += *len;
+    return out;
+  };
+  std::size_t pos = 0;
+  mesh::ActorPid pid;
+  const auto node   = field(pos);
+  const auto cursor = field(pos);
+  if (!node || !cursor || pos >= key.size() || key[pos] != ':')
+    return std::nullopt;
+  ++pos;
+  const auto colon = key.find(':', pos);
+  if (colon == std::string_view::npos) return std::nullopt;
+  try {
+    pid.node          = std::string{*node};
+    pid.cursor        = std::string{*cursor};
+    pid.epoch         = std::stoull(std::string{key.substr(pos, colon - pos)});
+    pid.spawnSequence = std::stoull(std::string{key.substr(colon + 1)});
+  } catch (...) {
+    return std::nullopt;
+  }
+  return pid.isValid() ? std::optional{pid} : std::nullopt;
 }
 
 /// `home +d.dirs → directory +d.agents → member` — the walk
@@ -54,6 +100,20 @@ memberPidKey(zigzag::ArenaManifold &arena,
   const auto v = arena.linked(*rec, core.dims().values, DimVector::POS);
   if (!v) return std::nullopt;
   return std::string{arena.textOf(*v)};
+}
+
+/// The member cell @p member's `$parent` record names — the scalar-ref
+/// convention every vars-bound member rides. noCell for a top-level
+/// member.
+[[nodiscard]] CellRef
+parentMember(zigzag::ArenaManifold &arena,
+             zigzag::vortex::VortexCore &core, CellRef member) {
+  const auto rec = varsRecord(arena, core, member, "$parent", false);
+  if (!rec) return noCell;
+  const auto v = arena.linked(*rec, core.dims().values, DimVector::POS);
+  if (!v) return noCell;
+  const auto r = arena.asInt64(*v);
+  return r ? static_cast<CellRef>(*r) : noCell;
 }
 
 /// The +d.step/+d.name field envelope a fault payload carries —
@@ -84,6 +144,85 @@ void VagentAdapter::bindNative(std::string_view capacity,
 VagentAdapter *VagentAdapter::setSpawnSender(SpawnSender sender) {
   spawnSender_ = std::move(sender);
   return this;
+}
+
+VagentAdapter *VagentAdapter::setSendSender(SendSender sender) {
+  sendSender_ = std::move(sender);
+  return this;
+}
+
+std::string VagentAdapter::stageSend(
+    zigzag::vortex::WorkerContext &ctx, CellRef sender,
+    CellRef targetMember, std::string_view percept,
+    const std::vector<std::pair<std::string,
+                                zigzag::vortex::CellValue>> &fields,
+    std::string_view id) const {
+  auto &arena = ctx.arena;
+  auto &core  = ctx.core;
+  const auto outbox = core.findOrMintDimension("d.outbox");
+  const auto position = std::ranges::to<std::vector>(
+                            zigzag::rankAfter(arena, sender, outbox))
+                            .size();
+  const auto entry = arena.makeCell();
+  zigzag::expectWritten(
+      arena.link(zigzag::rankTail(arena, sender, outbox), outbox,
+                 DimVector::POS, entry));
+  const auto outField = [&](std::string_view name, CellRef value) {
+    if (const auto rec = varsRecord(arena, core, entry, name, true))
+      zigzag::expectWritten(
+          arena.link(*rec, core.dims().values, DimVector::POS, value));
+  };
+  outField("kind", arena.makeCell("send"));
+  outField("percept", arena.makeCell(std::string{percept}));
+  outField("targetMember",
+           arena.makeScalarCell(static_cast<std::int64_t>(targetMember)));
+  if (!fields.empty()) {
+    const auto payload = arena.makeCell(percept);
+    for (const auto &[field, value] : fields) {
+      // marshalTermExpr's dual channels: typed bits for bound-value
+      // reads, text for the wire render and term equality.
+      const auto cell = std::visit(
+          [&](const auto &v) -> CellRef {
+            using T = std::decay_t<decltype(v)>;
+            if constexpr (std::is_same_v<T, std::string>) {
+              return arena.makeCell(v);
+            } else {
+              const auto c = arena.makeCell(std::format("{}", v));
+              if constexpr (std::is_same_v<T, bool>) {
+                zigzag::expectWritten(arena.setValueBits(
+                    c, xanadu::ValueKind::Bool,
+                    static_cast<std::uint64_t>(v)));
+              } else if constexpr (std::is_same_v<T, std::int64_t>) {
+                zigzag::expectWritten(arena.setValueBits(
+                    c, xanadu::ValueKind::Int64,
+                    std::bit_cast<std::uint64_t>(v)));
+              } else {
+                zigzag::expectWritten(arena.setValueBits(
+                    c, xanadu::ValueKind::Double,
+                    xanadu::canonicalDoubleBits(v)));
+              }
+              return c;
+            }
+          },
+          value);
+      zigzag::expectWritten(
+          arena.link(zigzag::rankTail(arena, payload, core.dims().step),
+                     core.dims().step, DimVector::POS, cell));
+      zigzag::expectWritten(arena.link(cell, core.dims().name,
+                                     DimVector::POS,
+                                     arena.makeCell(field)));
+    }
+    outField("payload",
+             arena.makeScalarCell(static_cast<std::int64_t>(payload)));
+  }
+  const auto requestId = std::string{id};
+  outField("id", arena.makeCell(requestId.empty()
+                                    ? std::format("send:{}:{}",
+                                                  targetMember, position)
+                                    : requestId));
+  return requestId.empty() ? std::format("send:{}:{}", targetMember,
+                                         position)
+                           : requestId;
 }
 
 std::expected<std::string, mesh::ActorError>
@@ -128,9 +267,129 @@ VagentAdapter::operator()(const mesh::ActorExecution &exec,
     // message is consumed here — journaling it as a generic
     // "ActorDown" event would double-report the same loss.
     if (self && exec.message->source)
-      if (const auto dead = memberForPid(ctx, *exec.message->source))
-        executor_.childDown(arena, core, *self, *dead);
+      if (const auto dead = memberForPid(ctx, *exec.message->source)) {
+        // §4.5's lease-vs-loss classification: the monitor's
+        // "unreachable" (phi + lease + discovery evidence) and any
+        // unknown reason are the loss path — ChildDown. An orderly
+        // cause announces a stopping member, which reports
+        // ChildStopping; the shared dedupe collapses whichever report
+        // arrives second.
+        const auto &reason = exec.message->reason;
+        const auto cause =
+            reason == "stopped" ? std::string_view{"stop"}
+            : reason == "stop" || reason == "terminate" ||
+                    reason == "lease" || reason == "init"
+                ? std::string_view{reason}
+                : std::string_view{};
+        if (!cause.empty())
+          executor_.childStopping(arena, core, *self, *dead, cause);
+        else
+          executor_.childDown(arena, core, *self, *dead);
+      }
     turn.message.reset();
+  }
+
+  if (exec.message && self &&
+      exec.message->type == MessageType::ActorSend &&
+      exec.message->source) {
+    // The wire's fielded-percept arm: `value` parses as
+    // `Name{f: v, …}` — the codec the remote drain arm renders and
+    // the runner's --send shares. Three control names get adapter
+    // handling (Moved, stop, ChildStopping) because their semantics
+    // live above a plain inject; a bare name stays on the executor's
+    // message path, which dispatches it verbatim.
+    if (const auto spec = parsePercept(exec.message->value)) {
+      if (spec->name == "Moved") {
+        // §5.4's "receivers update $peers": the envelope's source is
+        // the peer's new incarnation — the fresh reference cell the
+        // holder's same-name records rebind to. The peer's durable
+        // name rides the payload's `name` field.
+        std::string movedName;
+        for (const auto &[field, value] : spec->fields)
+          if (field == "name")
+            if (const auto *text = std::get_if<std::string>(&value))
+              movedName = *text;
+        if (!movedName.empty()) {
+          const auto dirs   = core.findOrMintDimension("d.dirs");
+          const auto agents = core.findOrMintDimension("d.agents");
+          const auto fresh  = arena.makeCell();
+          for (const CellRef dir :
+               zigzag::rankAfter(arena, core.home(), dirs)) {
+            zigzag::expectWritten(
+                arena.link(zigzag::rankTail(arena, dir, agents),
+                           agents, DimVector::POS, fresh));
+            break;
+          }
+          zigzag::expectWritten(
+              arena.link(fresh, core.dims().name, DimVector::POS,
+                         arena.makeCell(movedName)));
+          noteMemberPid(ctx, fresh, *exec.message->source);
+          executor_.moved(arena, core, *self, fresh);
+        }
+        turn.message.reset();
+      } else if (spec->name == "stop") {
+        // §7.1's "accepted from the parent only": the wire source's
+        // pid must be the member $parent records. Anyone else's stop
+        // is consumed and dropped — no refuse kind is defined for it.
+        const auto parent = parentMember(arena, core, *self);
+        if (parent != noCell &&
+            memberPidKey(arena, core, parent) ==
+                renderPid(*exec.message->source)) {
+          executor_.stoppedByParent(arena, core, *self);
+          // §4.5's announcement returns over the same arm — the
+          // parent hears ChildStopping{cause:"stop"} from the
+          // member's own drain, not the mesh.
+          stageSend(ctx, *self, parent, "ChildStopping",
+                    {{"cause", std::string{"stop"}}}, {});
+        }
+        turn.message.reset();
+      } else if (spec->name == "ChildStopping") {
+        // The child's orderly-stop report: `child` is the wire's
+        // source (the member cell its pid records), `cause` the
+        // payload field — executor-side dedupe keeps the trailing
+        // ActorDown from doubling the raise.
+        std::string cause;
+        for (const auto &[field, value] : spec->fields)
+          if (field == "cause")
+            if (const auto *text = std::get_if<std::string>(&value))
+              cause = *text;
+        if (const auto child =
+                memberForPid(ctx, *exec.message->source))
+          executor_.childStopping(arena, core, *self, *child,
+                                  cause.empty() ? "stop" : cause);
+        turn.message.reset();
+      } else if (!spec->fields.empty()) {
+        // A fielded wire percept injects through the same deliver
+        // path --send uses — the request id rides +d.delivered's
+        // dedupe, the pending entry dispatches in this turn's settle.
+        // `__`-prefixed fields are the sender's transport metadata:
+        // __kind/__correlation restore the staged record's semantics,
+        // and the wire source maps to the member delivery records as
+        // the belief's +d.source.
+        std::string kind, correlation;
+        std::vector<
+            std::pair<std::string, zigzag::vortex::CellValue>>
+            fields;
+        for (const auto &f : spec->fields) {
+          const auto text = std::get_if<std::string>(&f.second);
+          if (f.first == "__kind") {
+            if (text) kind = *text;
+            continue;
+          }
+          if (f.first == "__correlation") {
+            if (text) correlation = *text;
+            continue;
+          }
+          fields.push_back(f);
+        }
+        const auto sender =
+            memberForPid(ctx, *exec.message->source).value_or(noCell);
+        executor_.injectPercept(arena, core, *self, spec->name,
+                                fields, exec.message->requestId,
+                                kind, correlation, sender);
+        turn.message.reset();
+      }
+    }
   }
 
   auto result = executor_(turn, ctx);
@@ -195,8 +454,85 @@ VagentAdapter::genesis(const mesh::ActorGenesis &genesis,
   }
 
   noteMemberPid(ctx, self, genesis.pid);
-  if (genesis.transported != nullptr)
+
+  // The spawn request's source is the pid that asked — the member
+  // $parent records. Only a first spawn reads it: a resume's request
+  // source is the migrator, not the parent, so the durable
+  // $parentPid text is the persistent name — minted here, then every
+  // genesis rebinds the $parent scalar through it. The scalar itself
+  // does not survive promote; the text and the member's directory
+  // edges do.
+  if (genesis.transported == nullptr && genesis.request != nullptr &&
+      genesis.request->source && *genesis.request->source != genesis.pid) {
+    CellRef parent =
+        memberForPid(ctx, *genesis.request->source).value_or(noCell);
+    if (parent == noCell) {
+      parent            = arena.makeCell();
+      const auto dirs   = core.findOrMintDimension("d.dirs");
+      const auto agents = core.findOrMintDimension("d.agents");
+      for (const CellRef dir :
+           zigzag::rankAfter(arena, core.home(), dirs)) {
+        zigzag::expectWritten(
+            arena.link(zigzag::rankTail(arena, dir, agents), agents,
+                       DimVector::POS, parent));
+        break;
+      }
+      noteMemberPid(ctx, parent, *genesis.request->source);
+    }
+    if (const auto rec =
+            varsRecord(arena, core, self, "$parentPid", true))
+      zigzag::expectWritten(
+          arena.link(*rec, core.dims().values, DimVector::POS,
+                     arena.makeCell(renderPid(*genesis.request->source))));
+  }
+  // Rebind the scalar through the durable pid text — first-spawn and
+  // resume both land here, so a publish-stale position renames the
+  // member the text survived. A moved parent keeps this pointing at
+  // the old incarnation until Moved{name}'s peer rebind reaches it —
+  // member naming on the wire is the deferred half.
+  if (const auto rec =
+          varsRecord(arena, core, self, "$parentPid", false))
+    if (const auto v =
+            arena.linked(*rec, core.dims().values, DimVector::POS))
+      if (const auto parentPid =
+              parsePid(arena.textOf(*v)))
+        if (const auto parent = memberForPid(ctx, *parentPid))
+          if (const auto prec =
+                  varsRecord(arena, core, self, "$parent", true)) {
+            if (arena.linked(*prec, core.dims().values, DimVector::POS))
+              zigzag::expectWritten(arena.unlink(
+                  *prec, core.dims().values, DimVector::POS));
+            zigzag::expectWritten(
+                arena.link(*prec, core.dims().values, DimVector::POS,
+                           arena.makeScalarCell(
+                               static_cast<std::int64_t>(*parent))));
+          }
+
+  if (genesis.transported != nullptr) {
     executor_.resumed(arena, core, self);
+    // §5.4's outbound half: the migrated agent announces Moved{name}
+    // to its parent and its children — member-addressed sends the
+    // next committed turn's drain wires to each member's recorded
+    // pid. Space hosts are not materialized as members yet; they join
+    // the set when the space registry exists.
+    const auto selfKey = memberPidKey(arena, core, self);
+    std::string selfName;
+    if (const auto n = arena.linked(self, core.dims().name))
+      selfName = std::string{arena.textOf(*n)};
+    std::vector<CellRef> targets;
+    if (const auto parent = parentMember(arena, core, self);
+        parent != noCell)
+      targets.push_back(parent);
+    for (const CellRef peer : directoryMembers(arena, core))
+      if (parentMember(arena, core, peer) == self)
+        targets.push_back(peer);
+    for (const CellRef target : targets)
+      if (const auto key = memberPidKey(arena, core, target);
+          key && key != selfKey)
+        stageSend(ctx, self, target, "Moved",
+                  {{"name", selfName}},
+                  std::format("moved:{}", target));
+  }
   return {};
 }
 
@@ -204,7 +540,106 @@ void VagentAdapter::drain(zigzag::vortex::WorkerContext &ctx,
                           CellRef member) const {
   auto &arena = ctx.arena;
   auto &core  = ctx.core;
+  const auto selfKey = memberPidKey(arena, core, member);
+  // §3.7's remote arm: a member whose `pid` record names another
+  // incarnation is wire-reachable — the send rides the same
+  // `dispatched` mark the spawn arm uses (at-least-once by ordering,
+  // the wire's own requestId dedupe keeps retries honest), and the
+  // requestId carries the target's key so one broadcast can't
+  // collide with itself across members.
+  const auto remoteSend = [&](const OutboxEntry &entry,
+                             const std::string &targetKey) {
+    if (entry.cell == noCell ||
+        varsRecord(arena, core, entry.cell, "dispatched", false))
+      return;
+    if (!sendSender_) {
+      executor_.deliveryFailed(arena, core, entry, "transport");
+      return;
+    }
+    const auto target = parsePid(targetKey);
+    const auto source = selfKey ? parsePid(*selfKey) : std::nullopt;
+    if (!target || !source) {
+      executor_.deliveryFailed(arena, core, entry, "transport");
+      return;
+    }
+    // The wire `value` is the percept's own term syntax — bare name
+    // for field-less sends, `Name{f: v}` when the payload marshaled
+    // fields the receiver's adapter parses back through
+    // injectPercept. `__`-prefixed fields are transport metadata the
+    // receiver strips before the percept lands: `__kind` keeps
+    // tell/untell's belief effect and `__correlation` keeps an ask's
+    // request id so the reply wakes the parked wait.
+    const auto percept =
+        entry.percept.empty() ? entry.payload : entry.percept;
+    PerceptSpec spec{.name = percept};
+    if (entry.payloadCell != noCell)
+      for (const CellRef child :
+           zigzag::rankAfter(arena, entry.payloadCell,
+                             core.dims().step)) {
+        const auto n = arena.linked(child, core.dims().name);
+        if (!n) continue;
+        zigzag::vortex::CellValue v;
+        if (const auto i = arena.asInt64(child))
+          v = *i;
+        else if (const auto d = arena.asDouble(child))
+          v = *d;
+        else if (const auto b = arena.asBool(child))
+          v = *b;
+        else
+          v = std::string{arena.textOf(child)};
+        spec.fields.emplace_back(std::string{arena.textOf(*n)}, v);
+      }
+    // Only the kinds `deliver` routes into +d.inbox change what the
+    // receiver does — send/emit/stop all arrive as percepts either
+    // way, so `__kind` there would be wire noise.
+    if (entry.kind == "tell" || entry.kind == "untell" ||
+        entry.kind == "ask" || entry.kind == "achieve" ||
+        entry.kind == "refuse")
+      spec.fields.emplace_back("__kind", entry.kind);
+    if (!entry.correlation.empty())
+      spec.fields.emplace_back("__correlation", entry.correlation);
+    mesh::ActorMessage message;
+    message.type      = MessageType::ActorSend;
+    message.requestId = entry.id + ":" + targetKey;
+    message.source    = *source;
+    message.target    = *target;
+    message.value     = renderPercept(spec.name, spec.fields);
+    const auto sent   = sendSender_(ctx, message);
+    if (!sent) {
+      executor_.deliveryFailed(arena, core, entry, "transport");
+      return;
+    }
+    if (const auto rec =
+            varsRecord(arena, core, entry.cell, "dispatched", true))
+      zigzag::expectWritten(
+          arena.link(*rec, core.dims().values, DimVector::POS,
+                     arena.makeCell("1")));
+  };
   for (const auto &entry : VagentExecutor::drainOutbox(arena, core, member)) {
+    if (entry.targetMember != noCell) {
+      // Member-addressed entries bypass name routing entirely — the
+      // target's pid record decides wire-vs-local.
+      if (const auto targetKey =
+              memberPidKey(arena, core, entry.targetMember);
+          targetKey && targetKey != selfKey) {
+        remoteSend(entry, *targetKey);
+      } else {
+        const auto percept =
+            entry.percept.empty() ? entry.payload : entry.percept;
+        executor_.deliver(
+            arena, core,
+            Delivery{.agent        = entry.targetMember,
+                     .percept      = percept,
+                     .id           = entry.id,
+                     .kind         = entry.kind,
+                     .payloadCell  = entry.payloadCell,
+                     .correlation  = entry.correlation,
+                     .sender       = entry.sender,
+                     .delegator    = entry.delegator,
+                     .fault        = entry.fault});
+      }
+      continue;
+    }
     if (entry.kind == "effect" || entry.kind == "cancel") {
       // Host work, not routing: an effect invokes its binding and
       // replies on the request's correlation; a cancel only notifies
@@ -299,8 +734,19 @@ void VagentAdapter::drain(zigzag::vortex::WorkerContext &ctx,
         executor_.deliveryFailed(arena, core, entry, "unroutable");
       continue;
     }
-    for (const auto &delivery : deliveries)
-      executor_.deliver(arena, core, delivery);
+    for (const auto &delivery : deliveries) {
+      // A name can resolve to a remote peer — the member's `pid`
+      // record naming another incarnation turns the delivery into a
+      // wire send; the requestId's target key keeps a broadcast to
+      // two remote members from colliding on the wire's dedupe.
+      if (const auto targetKey =
+              memberPidKey(arena, core, delivery.agent);
+          targetKey && targetKey != selfKey) {
+        remoteSend(entry, *targetKey);
+      } else {
+        executor_.deliver(arena, core, delivery);
+      }
+    }
   }
 }
 

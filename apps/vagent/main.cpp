@@ -17,6 +17,7 @@
 #include "common/xanadu/vagent/decls.hpp"
 #include "common/xanadu/vagent/frontend.hpp"
 #include "common/xanadu/vagent/lineage.hpp"
+#include "common/xanadu/vagent/percept_codec.hpp"
 #include "common/xanadu/vagent/token.hpp"
 #include "common/xanadu/vortex/mesh_actor.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
@@ -92,101 +93,8 @@ bool checkFile(std::string_view path) {
 
 // One `Name{f: v, ...}` percept the host stages after genesis — the
 // fielded send the bare ActorSend `value` string cannot carry.
-struct SendSpec {
-  std::string name;
-  std::vector<std::pair<std::string, zigzag::vortex::CellValue>> fields;
-};
-
-// `EVENT{f: v, ...}` or a bare `EVENT`: whitespace-tolerant, literals
-// int / float / "string" / true / false. Field names and the event
-// name are bare identifiers — the run-side counterpart of the
-// record-literal syntax emit marshals.
-std::optional<SendSpec> parseSendSpec(std::string_view text) {
-  std::size_t pos   = 0;
-  const auto ws     = [&] {
-    while (pos < text.size() && std::isspace(text[pos])) ++pos;
-  };
-  const auto ident  = [&]() -> std::optional<std::string> {
-    ws();
-    const auto start = pos;
-    if (pos >= text.size() ||
-        !(std::isalpha(text[pos]) || text[pos] == '_'))
-      return std::nullopt;
-    while (pos < text.size() &&
-           (std::isalnum(text[pos]) || text[pos] == '_'))
-      ++pos;
-    return std::string{text.substr(start, pos - start)};
-  };
-  const auto literal = [&]() -> std::optional<zigzag::vortex::CellValue> {
-    ws();
-    if (pos >= text.size()) return std::nullopt;
-    if (text[pos] == '"') {
-      const auto close = text.find('"', pos + 1);
-      if (close == std::string_view::npos) return std::nullopt;
-      const auto out = std::string{text.substr(pos + 1, close - pos - 1)};
-      pos            = close + 1;
-      return zigzag::vortex::CellValue{out};
-    }
-    if (text.substr(pos, 4) == "true") {
-      pos += 4;
-      return zigzag::vortex::CellValue{true};
-    }
-    if (text.substr(pos, 5) == "false") {
-      pos += 5;
-      return zigzag::vortex::CellValue{false};
-    }
-    const auto start = pos;
-    if (text[pos] == '-') ++pos;
-    bool dot = false;
-    while (pos < text.size() &&
-           (std::isdigit(text[pos]) || (text[pos] == '.' && !dot))) {
-      dot |= text[pos] == '.';
-      ++pos;
-    }
-    if (pos == start) return std::nullopt;
-    const auto number = std::string{text.substr(start, pos - start)};
-    try {
-      if (dot) return zigzag::vortex::CellValue{std::stod(number)};
-      return zigzag::vortex::CellValue{
-          static_cast<std::int64_t>(std::stoll(number))};
-    } catch (...) {
-      return std::nullopt;
-    }
-  };
-  SendSpec spec;
-  const auto name = ident();
-  if (!name) return std::nullopt;
-  spec.name = *name;
-  ws();
-  if (pos == text.size()) return spec;
-  if (text[pos] != '{') return std::nullopt;
-  ++pos;
-  ws();
-  if (pos < text.size() && text[pos] == '}') {
-    ++pos;
-    ws();
-    return pos == text.size() ? std::optional{spec} : std::nullopt;
-  }
-  for (;;) {
-    const auto field = ident();
-    if (!field) return std::nullopt;
-    ws();
-    if (pos >= text.size() || text[pos] != ':') return std::nullopt;
-    ++pos;
-    const auto value = literal();
-    if (!value) return std::nullopt;
-    spec.fields.emplace_back(*field, *value);
-    ws();
-    if (pos >= text.size()) return std::nullopt;
-    if (text[pos] == '}') {
-      ++pos;
-      ws();
-      return pos == text.size() ? std::optional{spec} : std::nullopt;
-    }
-    if (text[pos] != ',') return std::nullopt;
-    ++pos;
-  }
-}
+using SendSpec = xanadu::vagent::PerceptSpec;
+using xanadu::vagent::parsePercept;
 
 // The deadline sweep keys contexts by pid; MeshActorRuntime::pidKey is
 // private, so the runner renders its own (the four fields are the
@@ -301,6 +209,17 @@ bool runFile(std::string_view path, const std::vector<SendSpec> &sends) {
                             std::format("runner-send-{}", i));
     return {};
   });
+  // Member-addressed sends ride the same runtime.send the spawn arm
+  // uses — on a single node the sender loopback below turns them
+  // into real mailbox deliveries, so Moved/stop/fielded percepts
+  // exercise the full wire path.
+  adapter.setSendSender(
+      [&runtime](WorkerContext &,
+                 const ActorMessage &message)
+          -> std::expected<void, ActorError> {
+        if (!message.target) return std::unexpected(ActorError::InvalidMessage);
+        return runtime.send(message.target->node, message);
+      });
   runtime.setSpawnResultHook(
       [&outcomes](const ActorMessage &request,
                   const std::expected<ActorPid, ActorError> &result) {
@@ -441,7 +360,7 @@ int main(int argc, char *argv[]) {
           usage(std::cerr);
           return 2;
         }
-        const auto spec = parseSendSpec(argv[++index]);
+        const auto spec = parsePercept(argv[++index]);
         if (!spec) {
           std::cerr << "vagent: malformed --send '" << argv[index]
                     << "' — expected EVENT{f: v, ...}\n";

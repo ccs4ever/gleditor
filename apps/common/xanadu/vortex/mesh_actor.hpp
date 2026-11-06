@@ -128,6 +128,11 @@ struct ActorLineage {
 struct ActorGenesis {
   ActorPid pid;
   const xanadu::Store *transported{nullptr};
+  /// The spawn request this incarnation answers — its `source` is the
+  /// pid that asked, which the adapter binds as the member's `$parent`
+  /// (a top-level spawn's launcher carries the same shape). Null
+  /// means the caller supplied none.
+  const ActorMessage *request{nullptr};
 };
 
 struct ActorCheckpointRecord {

@@ -94,9 +94,11 @@ make -j$(nproc) test/vagent-frontend
 ```
 
 `run` lowers the program, seeds its image into a fresh local lineage, and drives the agent on a
-single-node `MeshActorRuntime` until quiescence — there is no transport yet, so remote spawn/stop
-requests stay undispatched. The REPL and network execution remain tracked work in the
-[implementation progress](design/vagent-implementation.md).
+single-node `MeshActorRuntime` until quiescence. Remote deliveries ride the adapter's wire arm —
+member-addressed sends render `Name{f: v}` onto `ActorSend`, the runner's loopback turns them into
+real mailbox deliveries — while remote spawn requests and multi-node transport between two
+runtimes stay undispatched integration work. The REPL and network execution remain tracked work in
+the [implementation progress](design/vagent-implementation.md).
 
 ## Library and rendering
 

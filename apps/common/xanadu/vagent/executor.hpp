@@ -64,6 +64,11 @@ struct OutboxEntry {
   // An "effect" entry's provider name — the capacity the call
   // qualified on, which the host's `capacity.method` binding table
   // keys against. Empty for every other kind.
+  // Member-addressed target — the adapter-originated sends (Moved,
+  // stop, ChildStopping) name their receiver by member cell, not by
+  // the directory-name text `target` carries, because a remote peer's
+  // name is not reliably known. noCell for name-addressed entries.
+  zigzag::CellRef targetMember{zigzag::noCell};
   std::string capacity;
   // V6's `effect preempts` — the entry carries the signature's
   // modifier so a scheduling binding honors start-at-once; the
@@ -205,13 +210,29 @@ public:
   /// same seen/pending/grab shape the intra-program fanout uses, so
   /// the member's next settle dispatches it like a wire arrival.
   /// `id` rides +d.delivered's idempotence — a runner resending the
-  /// same request redelivers harmlessly.
+  /// same request redelivers harmlessly. `kind`/`correlation` carry
+  /// the staged record's semantics over the wire ("tell" asserts a
+  /// belief, "ask" echoes its request id); `sender` is the receiver-
+  /// side member the source pid resolved to, the belief's +d.source.
   void injectPercept(zigzag::ArenaManifold &arena,
                      zigzag::vortex::VortexCore &core,
                      zigzag::CellRef agent, std::string_view name,
                      const std::vector<std::pair<
                          std::string, zigzag::vortex::CellValue>> &fields,
-                     std::string_view id) const;
+                     std::string_view id, std::string_view kind = {},
+                     std::string_view correlation       = {},
+                     zigzag::CellRef sender = zigzag::noCell) const;
+
+  /// §4.5's orderly stop as a wire arrival runs it: the `stop`
+  /// performative passed the adapter's parent-only check, so @p agent
+  /// gets the sequence the in-turn verb gives a local target —
+  /// `destroying` parks every phase but the pending drain, where the
+  /// queued `Destroy` dispatches under the member's own settle. The
+  /// ChildStopping report back to the parent is the caller's send,
+  /// since only it knows whether the parent is wire-reachable.
+  void stoppedByParent(zigzag::ArenaManifold &arena,
+                       zigzag::vortex::VortexCore &core,
+                       zigzag::CellRef agent) const;
 
   /// §5.4's `Moved{name}` receiver half: @p member is the adapter's
   /// new reference record (its `+d.name` is the peer name it

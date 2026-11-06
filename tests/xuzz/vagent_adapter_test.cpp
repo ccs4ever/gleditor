@@ -6,6 +6,8 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
+
 #include "../../apps/common/xanadu/vagent/adapter.hpp"
 #include "../../apps/common/xanadu/vagent/decls.hpp"
 #include "../../apps/common/xanadu/vagent/frontend.hpp"
@@ -823,6 +825,428 @@ TEST(VagentAdapterTest, SendPerceptBindsNamedFieldsAndDeduplicates) {
   EXPECT_THAT(journal(),
               ::testing::ElementsAre("Add", "Initialize", "Add"));
   EXPECT_THAT(total(), ::testing::Optional(10));
+}
+
+TEST(VagentAdapterTest, RemoteMemberSendRidesTheWireOnce) {
+  // §3.7's remote arm: an emit whose delivery resolves to a member
+  // whose `pid` record names another incarnation goes out as an
+  // ActorSend — source/target rendered from the pid records, the
+  // fielded payload rendered `Name{f: v}`, the request id carrying
+  // the target key. `dispatched` lands only after the send, so a
+  // re-drain never re-emits.
+  AdapterHarness h;
+  const auto image =
+      h.lower("module demo\nevent Boot\nevent Tick\n"
+              "event Ping { x: Int, note: Str }\n"
+              "agent A {\n"
+              "  var peer: Opt<Agent> := none\n"
+              "  on Boot { peer := spawn A() }\n"
+              "  on Tick { emit Ping{x: 1, note: \"hi\"} for peer }\n"
+              "}");
+  ASSERT_TRUE(image);
+  const ActorPid selfPid{"worker", "agent", 1, 1};
+  const ActorPid childPid{"node9", "childid", 2, 7};
+  std::vector<ActorMessage> wire;
+  h.adapter.setSendSender(
+      [&wire](WorkerContext &, const ActorMessage &message)
+          -> std::expected<void, ActorError> {
+        wire.push_back(message);
+        return {};
+      });
+  // Boot mints the member (the spawn entry itself is inert without a
+  // spawnSender); the pid notes make it a remote incarnation, which
+  // is what turns the next drain's delivery into a wire send.
+  ASSERT_TRUE(h.adapter(h.execution(h.send("Boot")), h.ctx));
+  const auto child = h.memberCell(image->agentCell, "peer");
+  ASSERT_TRUE(child);
+  h.adapter.noteMemberPid(h.ctx, *child, childPid);
+  h.adapter.noteMemberPid(h.ctx, image->agentCell, selfPid);
+
+  ASSERT_TRUE(h.adapter(h.execution(h.send("Tick")), h.ctx));
+  ASSERT_EQ(wire.size(), 1u);
+  EXPECT_EQ(wire[0].type, MessageType::ActorSend);
+  ASSERT_TRUE(wire[0].source);
+  ASSERT_TRUE(wire[0].target);
+  EXPECT_EQ(*wire[0].source, selfPid);
+  EXPECT_EQ(*wire[0].target, childPid);
+  EXPECT_EQ(wire[0].value, "Ping{x: 1, note: \"hi\"}");
+  // The id carries the entry's idempotence id and the target's key —
+  // a broadcast to two remote members can't collide on the wire's
+  // dedupe.
+  EXPECT_THAT(wire[0].requestId,
+              ::testing::EndsWith(":5:node97:childid:2:7"));
+  // dispatched is durable: a second committed turn reads the same
+  // outbox and sends nothing.
+  ASSERT_TRUE(h.adapter(h.execution(), h.ctx));
+  EXPECT_EQ(wire.size(), 1u);
+  EXPECT_EQ(h.ctx.arena.outstandingMarks(), 0u);
+}
+
+TEST(VagentAdapterTest, MissingTransportFaultsTheRemoteSender) {
+  // A remote delivery with no sendSender installed is the
+  // "transport" arm of delivery failure — the entry stays
+  // undispatched so a sender arriving later still picks it up. The
+  // same-named local member still receives its leg: `for peer`
+  // resolved to the name "A", and name routing fans out to every
+  // member carrying it — the DeliveryFailed reports only the leg
+  // that never left.
+  AdapterHarness h;
+  const auto image =
+      h.lower("module demo\nevent Boot\nevent Tick\nevent Ping\n"
+              "agent A {\n"
+              "  var peer: Opt<Agent> := none\n"
+              "  on Boot { peer := spawn A() }\n"
+              "  on Tick { emit Ping{} for peer }\n"
+              "}");
+  ASSERT_TRUE(image);
+  ASSERT_TRUE(h.adapter(h.execution(h.send("Boot")), h.ctx));
+  const auto child = h.memberCell(image->agentCell, "peer");
+  ASSERT_TRUE(child);
+  h.adapter.noteMemberPid(h.ctx, *child, ActorPid{"n", "c", 2, 7});
+  h.adapter.noteMemberPid(h.ctx, image->agentCell,
+                          ActorPid{"worker", "agent", 1, 1});
+  ASSERT_TRUE(h.adapter(h.execution(h.send("Tick")), h.ctx));
+  const auto journal = h.journalOf(image->agentCell);
+  EXPECT_THAT(journal, ::testing::Contains("DeliveryFailed"));
+  EXPECT_THAT(journal, ::testing::Contains("Ping"));
+}
+
+TEST(VagentAdapterTest, VerbStopOnARemoteChildSendsThePerformative) {
+  // `stop child` where child has a wire identity: §4.5's orderly
+  // sequence belongs to the child's own agent, so the verb stages a
+  // member-addressed send rather than mutating reference state — the
+  // parent's ChildStopping arrives when the child's own agent acts,
+  // not when the verb lands.
+  AdapterHarness h;
+  const auto image =
+      h.lower("module demo\nevent Boot\nevent Tick\n"
+              "agent A {\n"
+              "  var child: Opt<Agent> := none\n"
+              "  on Boot { child := spawn A() }\n"
+              "  on Tick { stop child }\n"
+              "}");
+  ASSERT_TRUE(image);
+  const ActorPid selfPid{"worker", "agent", 1, 1};
+  const ActorPid childPid{"node4", "childid", 3, 9};
+  std::vector<ActorMessage> wire;
+  h.adapter.setSendSender(
+      [&wire](WorkerContext &, const ActorMessage &message)
+          -> std::expected<void, ActorError> {
+        wire.push_back(message);
+        return {};
+      });
+  ASSERT_TRUE(h.adapter(h.execution(h.send("Boot")), h.ctx));
+  const auto child = h.memberCell(image->agentCell, "child");
+  ASSERT_TRUE(child);
+  h.adapter.noteMemberPid(h.ctx, *child, childPid);
+  h.adapter.noteMemberPid(h.ctx, image->agentCell, selfPid);
+
+  ASSERT_TRUE(h.adapter(h.execution(h.send("Tick")), h.ctx));
+  ASSERT_EQ(wire.size(), 1u);
+  ASSERT_TRUE(wire[0].target);
+  EXPECT_EQ(*wire[0].target, childPid);
+  EXPECT_EQ(wire[0].value, "stop");
+  // The local sequence never ran — no Destroy on the member, no
+  // ChildStopping raise on the parent journal.
+  EXPECT_THAT(h.journalOf(image->agentCell),
+              ::testing::Not(::testing::Contains("ChildStopping")));
+}
+
+TEST(VagentAdapterTest, WireStopFromParentRunsDestroyAndReportsBack) {
+  // §7.1's "accepted from the parent only": genesis bound $parent
+  // from the spawn request's source, so a wire `stop` from that pid
+  // runs the §4.5 sequence — Destroy dispatches this turn and the
+  // ChildStopping report rides the drain back to the parent's pid.
+  AdapterHarness h;
+  const auto image = h.lower("module demo\nagent A { }");
+  ASSERT_TRUE(image);
+  const ActorPid selfPid{"node1", "selfid", 1, 4};
+  const ActorPid parentPid{"node0", "parentid", 1, 2};
+  ActorMessage request;
+  request.type   = MessageType::ActorSpawn;
+  request.source = parentPid;
+  ActorGenesis genesis;
+  genesis.pid     = selfPid;
+  genesis.request = &request;
+  ASSERT_TRUE(h.adapter.genesis(genesis, h.ctx));
+  std::vector<ActorMessage> wire;
+  h.adapter.setSendSender(
+      [&wire](WorkerContext &, const ActorMessage &message)
+          -> std::expected<void, ActorError> {
+        wire.push_back(message);
+        return {};
+      });
+
+  ActorMessage stop;
+  stop.type   = MessageType::ActorSend;
+  stop.source = parentPid;
+  stop.target = selfPid;
+  stop.value  = "stop";
+  auto turn   = h.execution(stop);
+  turn.pid    = selfPid;
+  ASSERT_TRUE(h.adapter(turn, h.ctx));
+
+  EXPECT_THAT(h.journalOf(image->agentCell),
+              ::testing::Contains("Destroy"));
+  ASSERT_EQ(wire.size(), 1u);
+  ASSERT_TRUE(wire[0].target);
+  EXPECT_EQ(*wire[0].target, parentPid);
+  EXPECT_EQ(wire[0].value, "ChildStopping{cause: \"stop\"}");
+}
+
+TEST(VagentAdapterTest, WireStopFromANonParentIsDropped) {
+  // Same shape, wrong sender: a stop whose source is not the member
+  // $parent's pid is consumed with no Destroy and no report — the
+  // performative has no refuse kind.
+  AdapterHarness h;
+  const auto image = h.lower("module demo\nagent A { }");
+  ASSERT_TRUE(image);
+  const ActorPid selfPid{"node1", "selfid", 1, 4};
+  const ActorPid parentPid{"node0", "parentid", 1, 2};
+  const ActorPid strangerPid{"node7", "stranger", 5, 5};
+  ActorMessage request;
+  request.type   = MessageType::ActorSpawn;
+  request.source = parentPid;
+  ActorGenesis genesis;
+  genesis.pid     = selfPid;
+  genesis.request = &request;
+  ASSERT_TRUE(h.adapter.genesis(genesis, h.ctx));
+  std::vector<ActorMessage> wire;
+  h.adapter.setSendSender(
+      [&wire](WorkerContext &, const ActorMessage &message)
+          -> std::expected<void, ActorError> {
+        wire.push_back(message);
+        return {};
+      });
+
+  ActorMessage stop;
+  stop.type   = MessageType::ActorSend;
+  stop.source = strangerPid;
+  stop.target = selfPid;
+  stop.value  = "stop";
+  auto turn   = h.execution(stop);
+  turn.pid    = selfPid;
+  ASSERT_TRUE(h.adapter(turn, h.ctx));
+
+  EXPECT_THAT(h.journalOf(image->agentCell),
+              ::testing::Not(::testing::Contains("Destroy")));
+  EXPECT_TRUE(wire.empty());
+}
+
+TEST(VagentAdapterTest, WireChildStoppingCollapsesTheTrailingDown) {
+  // §4.5's "the parent reports one ChildStopping even when the
+  // runtime's ActorDown follows it": the wire report marks the
+  // shared dedupe key, so the orderly-reason ActorDown that trails
+  // it raises nothing — and no ChildDown either.
+  AdapterHarness h;
+  const auto image =
+      h.lower("module demo\nevent Boot\n"
+              "agent A {\n"
+              "  var child: Opt<Agent> := none\n"
+              "  on Boot { child := spawn A() }\n"
+              "}");
+  ASSERT_TRUE(image);
+  const ActorPid selfPid{"worker", "agent", 1, 1};
+  const ActorPid childPid{"node3", "childid", 2, 7};
+  ASSERT_TRUE(h.adapter(h.execution(h.send("Boot")), h.ctx));
+  const auto child = h.memberCell(image->agentCell, "child");
+  ASSERT_TRUE(child);
+  h.adapter.noteMemberPid(h.ctx, *child, childPid);
+  h.adapter.noteMemberPid(h.ctx, image->agentCell, selfPid);
+
+  ActorMessage stopping;
+  stopping.type      = MessageType::ActorSend;
+  stopping.requestId = "cs-1";
+  stopping.source    = childPid;
+  stopping.target    = selfPid;
+  stopping.value     = "ChildStopping{cause: \"stop\"}";
+  auto turnStop      = h.execution(stopping);
+  turnStop.pid       = selfPid;
+  ASSERT_TRUE(h.adapter(turnStop, h.ctx));
+
+  ActorMessage down;
+  down.type      = MessageType::ActorDown;
+  down.requestId = "mon-1";
+  down.source    = childPid;
+  down.target    = selfPid;
+  down.reason    = "stopped";
+  auto turnDown  = h.execution(down);
+  turnDown.pid   = selfPid;
+  ASSERT_TRUE(h.adapter(turnDown, h.ctx));
+
+  const auto journal = h.journalOf(image->agentCell);
+  EXPECT_EQ(std::ranges::count(journal, "ChildStopping"), 1);
+  EXPECT_THAT(journal, ::testing::Not(::testing::Contains("ChildDown")));
+}
+
+TEST(VagentAdapterTest, ActorDownUnreachableIsLossNotStopping) {
+  // The monitor's verdict is the loss arm: suspicion + lease +
+  // discovery evidence → ChildDown, never ChildStopping — "missing
+  // evidence is never interpreted as absence" keeps local children
+  // off this path entirely.
+  AdapterHarness h;
+  const auto image =
+      h.lower("module demo\nevent Boot\n"
+              "agent A {\n"
+              "  var child: Opt<Agent> := none\n"
+              "  on Boot { child := spawn A() }\n"
+              "}");
+  ASSERT_TRUE(image);
+  const ActorPid selfPid{"worker", "agent", 1, 1};
+  const ActorPid childPid{"node3", "childid", 2, 7};
+  ASSERT_TRUE(h.adapter(h.execution(h.send("Boot")), h.ctx));
+  const auto child = h.memberCell(image->agentCell, "child");
+  ASSERT_TRUE(child);
+  h.adapter.noteMemberPid(h.ctx, *child, childPid);
+  h.adapter.noteMemberPid(h.ctx, image->agentCell, selfPid);
+
+  ActorMessage down;
+  down.type      = MessageType::ActorDown;
+  down.requestId = "mon-2";
+  down.source    = childPid;
+  down.target    = selfPid;
+  down.reason    = "unreachable";
+  auto turnDown  = h.execution(down);
+  turnDown.pid   = selfPid;
+  ASSERT_TRUE(h.adapter(turnDown, h.ctx));
+
+  const auto journal = h.journalOf(image->agentCell);
+  EXPECT_THAT(journal, ::testing::Contains("ChildDown"));
+  EXPECT_THAT(journal,
+              ::testing::Not(::testing::Contains("ChildStopping")));
+}
+
+TEST(VagentAdapterTest, OrderlyActorDownReasonsTakeTheStoppingArm) {
+  // §4.5's closed cause set arrives on ActorDown.reason too — a
+  // "terminate" verdict reports ChildStopping{cause:"terminate"},
+  // and its pre-mark collapses a trailing loss-reason report.
+  AdapterHarness h;
+  const auto image =
+      h.lower("module demo\nevent Boot\n"
+              "agent A {\n"
+              "  var child: Opt<Agent> := none\n"
+              "  on Boot { child := spawn A() }\n"
+              "}");
+  ASSERT_TRUE(image);
+  const ActorPid selfPid{"worker", "agent", 1, 1};
+  const ActorPid childPid{"node3", "childid", 2, 7};
+  ASSERT_TRUE(h.adapter(h.execution(h.send("Boot")), h.ctx));
+  const auto child = h.memberCell(image->agentCell, "child");
+  ASSERT_TRUE(child);
+  h.adapter.noteMemberPid(h.ctx, *child, childPid);
+  h.adapter.noteMemberPid(h.ctx, image->agentCell, selfPid);
+
+  ActorMessage down;
+  down.type      = MessageType::ActorDown;
+  down.requestId = "mon-3";
+  down.source    = childPid;
+  down.target    = selfPid;
+  down.reason    = "terminate";
+  auto turnDown  = h.execution(down);
+  turnDown.pid   = selfPid;
+  ASSERT_TRUE(h.adapter(turnDown, h.ctx));
+
+  ActorMessage trailing;
+  trailing.type      = MessageType::ActorDown;
+  trailing.requestId = "mon-4";
+  trailing.source    = childPid;
+  trailing.target    = selfPid;
+  trailing.reason    = "unreachable";
+  auto turnLoss      = h.execution(trailing);
+  turnLoss.pid       = selfPid;
+  ASSERT_TRUE(h.adapter(turnLoss, h.ctx));
+
+  const auto journal = h.journalOf(image->agentCell);
+  EXPECT_EQ(std::ranges::count(journal, "ChildStopping"), 1);
+  EXPECT_THAT(journal, ::testing::Not(::testing::Contains("ChildDown")));
+}
+
+TEST(VagentAdapterTest, MigrationGenesisWiresMovedToParentAndChild) {
+  // §5.4's outbound half: a genesis carrying a checkpoint means the
+  // agent reincarnated — it announces Moved{name} to the parent the
+  // spawn request names and to each member whose $parent is the
+  // agent, member-addressed sends the next drain puts on the wire.
+  AdapterHarness h;
+  const auto image =
+      h.lower("module demo\nevent Boot\n"
+              "agent A {\n"
+              "  var child: Opt<Agent> := none\n"
+              "  on Boot { child := spawn A() }\n"
+              "}");
+  ASSERT_TRUE(image);
+  const ActorPid selfPid{"node8", "reincarnation", 5, 88};
+  const ActorPid parentPid{"node0", "parentid", 1, 2};
+  const ActorPid childPid{"node3", "childid", 2, 7};
+  // The child's member exists with its remote pid and its $parent
+  // bound to the agent — the shape a spawned child keeps across the
+  // same context. The parent's member and the $parentPid text are
+  // what the checkpoint carried: first spawn minted them, promote
+  // kept them, and the resume genesis rebinds $parent through them.
+  ASSERT_TRUE(h.adapter(h.execution(h.send("Boot")), h.ctx));
+  const auto child = h.memberCell(image->agentCell, "child");
+  ASSERT_TRUE(child);
+  h.adapter.noteMemberPid(h.ctx, *child, childPid);
+  auto &arena = h.ctx.arena;
+  auto &core  = h.ctx.core;
+  if (const auto rec =
+          varsRecord(arena, core, *child, "$parent", true))
+    zigzag::expectWritten(
+        arena.link(*rec, core.dims().values, DimVector::POS,
+                   arena.makeScalarCell(
+                       static_cast<std::int64_t>(image->agentCell))));
+  const auto parent = arena.makeCell();
+  {
+    const auto dirs   = core.findOrMintDimension("d.dirs");
+    const auto agents = core.findOrMintDimension("d.agents");
+    for (const CellRef dir :
+         zigzag::rankAfter(arena, core.home(), dirs)) {
+      zigzag::expectWritten(
+          arena.link(zigzag::rankTail(arena, dir, agents), agents,
+                     DimVector::POS, parent));
+      break;
+    }
+  }
+  h.adapter.noteMemberPid(h.ctx, parent, parentPid);
+  if (const auto rec =
+          varsRecord(arena, core, image->agentCell, "$parentPid", true))
+    zigzag::expectWritten(
+        arena.link(*rec, core.dims().values, DimVector::POS,
+                   arena.makeCell("5:node08:parentid:1:2")));
+
+  xanadu::Store transported;
+  ActorMessage request;
+  request.type   = MessageType::ActorSpawn;
+  request.source = ActorPid{"node6", "migrator", 4, 40};
+  ActorGenesis genesis;
+  genesis.pid         = selfPid;
+  genesis.request     = &request;
+  genesis.transported = &transported;
+  ASSERT_TRUE(h.adapter.genesis(genesis, h.ctx));
+
+  std::vector<ActorMessage> wire;
+  h.adapter.setSendSender(
+      [&wire](WorkerContext &, const ActorMessage &message)
+          -> std::expected<void, ActorError> {
+        wire.push_back(message);
+        return {};
+      });
+  auto turn  = h.execution();
+  turn.pid   = selfPid;
+  ASSERT_TRUE(h.adapter(turn, h.ctx));
+
+  // One Moved per remote peer — parent and child — rendered with the
+  // member's durable name so receivers can rebind their $peers.
+  ASSERT_EQ(wire.size(), 2u);
+  std::vector<ActorPid> targets;
+  for (const auto &m : wire) {
+    EXPECT_EQ(m.value, "Moved{name: \"A\"}");
+    ASSERT_TRUE(m.source);
+    EXPECT_EQ(*m.source, selfPid);
+    ASSERT_TRUE(m.target);
+    targets.push_back(*m.target);
+  }
+  EXPECT_THAT(targets,
+              ::testing::UnorderedElementsAre(parentPid, childPid));
 }
 
 } // namespace

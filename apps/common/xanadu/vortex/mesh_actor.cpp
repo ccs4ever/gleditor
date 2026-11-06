@@ -218,7 +218,7 @@ MeshActorRuntime::spawn(const xanadu::identity::Fingerprint &identity,
   if (genesisHook_) {
     try {
       if (const auto wired =
-              genesisHook_(ActorGenesis{pid, nullptr}, context);
+              genesisHook_(ActorGenesis{pid, nullptr, &request}, context);
           !wired) {
         return std::unexpected(wired.error());
       }
@@ -358,7 +358,9 @@ std::expected<ActorPid, ActorError> MeshActorRuntime::resume(
         // `actor->checkpoint->store`, reachable from the hook as
         // `context.arena.base()->store()`.
         if (const auto wired = genesisHook_(
-                ActorGenesis{actor->pid, checkpoint.store.get()}, context);
+                ActorGenesis{actor->pid, checkpoint.store.get(),
+                             &actor->spawnRequest},
+                context);
             !wired) {
           return std::unexpected(wired.error());
         }

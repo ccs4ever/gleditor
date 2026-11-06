@@ -68,6 +68,20 @@ eventSymbolNamed(zigzag::ArenaManifold &arena, zigzag::vortex::VortexCore &core,
   return std::nullopt;
 }
 
+/// The member's durable `pid` record — the rendered mesh pid text the
+/// adapter's noteMemberPid wrote. Empty when the member never took a
+/// wire identity (a shared-image child or an unnamed reference), which
+/// is exactly what makes it a local-delivery target.
+[[nodiscard]] std::optional<std::string>
+memberPidKey(zigzag::ArenaManifold &arena, zigzag::vortex::VortexCore &core,
+             CellRef member) {
+  const auto rec = varsRecord(arena, core, member, "pid", false);
+  if (!rec) return std::nullopt;
+  const auto v = arena.linked(*rec, core.dims().values, DimVector::POS);
+  if (!v) return std::nullopt;
+  return std::string{arena.textOf(*v)};
+}
+
 /// Append @p entry to the agent's +d.seen journal and drop the oldest
 /// heads while the rank exceeds @p bound — the ringrank's bounded form
 /// (§3.1's percept journal; provenance +d.evidence edges are M2).
@@ -336,7 +350,8 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
                                std::string_view percept     = {},
                                std::string_view fault       = {},
                                bool preempts = false,
-                               std::string_view capacity = {})
+                               std::string_view capacity = {},
+                               CellRef targetMember        = noCell)
         -> std::string {
     const auto position = std::ranges::to<std::vector>(
                               zigzag::rankAfter(arena, agent, dims.outbox))
@@ -385,6 +400,11 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
     if (delegator != noCell)
       outField("delegator",
                arena.makeScalarCell(static_cast<std::int64_t>(delegator)));
+    // Member-addressed entries bypass the drain's name resolution —
+    // a remote peer's name is not reliably known, its pid is.
+    if (targetMember != noCell)
+      outField("targetMember",
+               arena.makeScalarCell(static_cast<std::int64_t>(targetMember)));
     const auto id = std::format("{}:{}:{}", std::hash<std::string>{}(sender),
                                 turn, position);
     outField("id", arena.makeCell(id));
@@ -730,6 +750,18 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       // self, and the members this agent spawned. A stop aimed
       // anywhere else is refused, not silently dropped.
       if (target != agent && parentOf(target) != agent) return false;
+      // A member with a wire identity is a remote peer: its
+      // destroying flag and Destroy queue belong to its own agent,
+      // which the member-addressed send asks to run §4.5 — the
+      // child's ChildStopping reports back over the same arm rather
+      // than being raised here.
+      if (target != agent)
+        if (const auto peerKey = memberPidKey(arena, core, target);
+            peerKey && peerKey != memberPidKey(arena, core, agent)) {
+          stageOutbox("stop", noCell, {}, {}, noCell, {}, "stop", {},
+                      false, {}, target);
+          return true;
+        }
       if (flagged("stopped") || flagged("destroying")) return true;
       if (const auto rec =
               varsRecord(arena, core, target, "destroying", true))
@@ -2700,6 +2732,7 @@ VagentExecutor::drainOutbox(zigzag::ArenaManifold &arena,
                     .correlation = read("correlation"),
                     .fault       = read("fault"),
                     .cell        = entry,
+                    .targetMember = refField("targetMember"),
                     .capacity    = read("capacity"),
                     .preempts =
                         varsRecord(arena, core, entry, "preempts", false)
@@ -2866,9 +2899,14 @@ void VagentExecutor::deliveryFailed(zigzag::ArenaManifold &arena,
   if (entry.sender == noCell) return;
   // The sender-side half of §7.3's honest bound: the request's own id
   // keys the dedupe, so the outbox rank's persistence cannot turn one
-  // unroutable entry into a stream of identical failures. An id-less
-  // entry raises once per call — the caller's job to avoid.
-  if (!entry.id.empty() && !adapterOnce(arena, core, entry.sender, entry.id))
+  // unroutable entry into a stream of identical failures. The key is
+  // namespaced because +d.delivered is shared with `deliver`'s
+  // arrival marks — an entry whose broadcast leg already delivered
+  // back to its own sender must not swallow a remote leg's failure.
+  // An id-less entry raises once per call — the caller's job to avoid.
+  if (!entry.id.empty() &&
+      !adapterOnce(arena, core, entry.sender,
+                   std::format("deliveryfailed:{}", entry.id)))
     return;
   // The event payload rides the +d.step/+d.name envelope the raise
   // path mints — `occurrence.to` resolves no member for an unknown
@@ -2971,6 +3009,26 @@ void VagentExecutor::spawnFailed(zigzag::ArenaManifold &arena,
       static_cast<std::size_t>(setting("vagent.journal_size", 64)));
 }
 
+void VagentExecutor::stoppedByParent(zigzag::ArenaManifold &arena,
+                                     zigzag::vortex::VortexCore &core,
+                                     zigzag::CellRef agent) const {
+  if (agent == noCell) return;
+  // §4.5's orderly stop as the wire asks for it: the `stop`
+  // performative landed after the adapter's parent check, so the
+  // sequence the in-turn verb runs locally runs here on the real
+  // agent — `destroying` parks every phase but the pending drain,
+  // where the queued Destroy dispatches under the member's own settle.
+  if (const auto rec =
+          varsRecord(arena, core, agent, "destroying", true))
+    zigzag::expectWritten(
+        arena.link(*rec, core.dims().values, DimVector::POS,
+                   arena.makeScalarCell(std::int64_t{1})));
+  queueAdapterPercept(
+      arena, core, agent, "Destroy", arena.makeCell("Destroy"),
+      static_cast<std::size_t>(setting("vagent.journal_size", 64)));
+  markPeerWaits(arena, core, agent, agent, "stop");
+}
+
 void VagentExecutor::moved(zigzag::ArenaManifold &arena,
                            zigzag::vortex::VortexCore &core,
                            zigzag::CellRef agent,
@@ -3019,7 +3077,8 @@ void VagentExecutor::injectPercept(
     zigzag::CellRef agent, std::string_view name,
     const std::vector<std::pair<std::string, zigzag::vortex::CellValue>> &
         fields,
-    std::string_view id) const {
+    std::string_view id, std::string_view kind,
+    std::string_view correlation, zigzag::CellRef sender) const {
   if (agent == noCell || name.empty()) return;
   // marshalTermExpr's literal shape: dual channels — the typed bits
   // boundValue reads first, the text belief-term equality walks.
@@ -3062,7 +3121,10 @@ void VagentExecutor::injectPercept(
           Delivery{.agent       = agent,
                    .percept     = std::string{name},
                    .id          = std::string{id},
-                   .payloadCell = payload});
+                   .kind        = std::string{kind},
+                   .payloadCell = payload,
+                   .correlation = std::string{correlation},
+                   .sender      = sender});
 }
 
 void VagentExecutor::resumed(zigzag::ArenaManifold &arena,
