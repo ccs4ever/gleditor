@@ -271,4 +271,45 @@ void VagentAdapter::spawnRefused(zigzag::vortex::WorkerContext &ctx,
   executor_.spawnFailed(ctx.arena, ctx.core, parent, child);
 }
 
+void VagentAdapter::noteSpawnRequest(zigzag::vortex::WorkerContext &ctx,
+                                     CellRef member,
+                                     std::string_view requestId) const {
+  const auto rec = varsRecord(ctx.arena, ctx.core, member,
+                              "spawnRequest", true);
+  if (!rec) return;
+  zigzag::expectWritten(
+      ctx.arena.link(*rec, ctx.core.dims().values, DimVector::POS,
+                     ctx.arena.makeCell(requestId)));
+}
+
+void VagentAdapter::spawnOutcome(
+    zigzag::vortex::WorkerContext &ctx,
+    const mesh::ActorMessage &request,
+    const std::expected<mesh::ActorPid, mesh::ActorError> &result)
+    const {
+  auto &arena = ctx.arena;
+  auto &core  = ctx.core;
+  const auto members = directoryMembers(arena, core);
+  for (const CellRef member : members) {
+    const auto rec =
+        varsRecord(arena, core, member, "spawnRequest", false);
+    if (!rec) continue;
+    const auto v = arena.linked(*rec, core.dims().values,
+                                DimVector::POS);
+    if (!v || arena.textOf(*v) != request.requestId) continue;
+    if (result) {
+      // The grant's target is the child's real mesh identity —
+      // the spawnRequest record's whole job is done once it lands.
+      noteMemberPid(ctx, member, *result);
+      zigzag::expectWritten(
+          arena.unlink(*rec, core.dims().values, DimVector::POS));
+    } else if (!members.empty()) {
+      // §8.6: the requesting member is the directory's self —
+      // spawn minted the member under its own agent.
+      executor_.spawnFailed(arena, core, members.front(), member);
+    }
+    return;
+  }
+}
+
 } // namespace xanadu::vagent

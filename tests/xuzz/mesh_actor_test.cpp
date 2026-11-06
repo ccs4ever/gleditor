@@ -602,11 +602,14 @@ TEST(MeshActorTest, PumpScanRotatesAcrossBusyActors) {
 
 TEST(MeshActorRuntimeTest, SpawnResultHookReportsGrantAndRefusal) {
   // ActorSpawnAck is consumed at the runtime layer, so the adapter's
-  // only window onto a spawn outcome is this hook: it must fire on
-  // grant and on refusal alike, carrying spawn()'s own return.
-  Fingerprint identity;
-  MeshActorRuntime runtime("node", 1);
-  authorize(runtime, identity);
+  // only window onto a spawn outcome is this hook on the requester's
+  // runtime: it must fire on grant — with the child's real pid — and
+  // on refusal alike.
+  const Fingerprint host;
+  MeshActorRuntime runtime("requester", 1);
+  runtime.trustNode("host", host);
+  runtime.setSender(
+      [](std::string_view, const ActorMessage &) { return true; });
   int calls = 0;
   std::optional<ActorPid> granted;
   std::optional<ActorError> refused;
@@ -621,20 +624,40 @@ TEST(MeshActorRuntimeTest, SpawnResultHookReportsGrantAndRefusal) {
         else
           refused = result.error();
       });
-  ASSERT_TRUE(
-      runtime.receive(identity, spawnRequest(), ActorTime{}, wall));
+  const auto request = spawnRequest();
+  ASSERT_TRUE(runtime.send("host", request));
+  ActorMessage ack;
+  ack.type      = MessageType::ActorSpawnAck;
+  ack.requestId = request.requestId;
+  ack.target    = ActorPid{"host", "child", 1, 7};
+  ASSERT_TRUE(runtime.receive(host, ack, ActorTime{}, wall));
   EXPECT_EQ(calls, 1);
   EXPECT_EQ(lastRequest, "spawn-1");
   ASSERT_TRUE(granted);
-  auto bad       = spawnRequest("spawn-2");
-  bad.capability = "forged-grant";
-  EXPECT_EQ(
-      runtime.receive(identity, bad, ActorTime{}, wall).error(),
-      ActorError::NotAuthorized);
+  EXPECT_EQ(*granted, *ack.target);
+  // A refusal carries no pid — the free-text `reason` reaches the
+  // hook as a typed Refused so the member's deliveries can fail.
+  const auto request2 = spawnRequest("spawn-2");
+  ASSERT_TRUE(runtime.send("host", request2));
+  ack          = {};
+  ack.type      = MessageType::ActorSpawnAck;
+  ack.requestId = request2.requestId;
+  ack.reason    = "spawn refused";
+  ASSERT_TRUE(runtime.receive(host, ack, ActorTime{}, wall));
   EXPECT_EQ(calls, 2);
   EXPECT_EQ(lastRequest, "spawn-2");
   ASSERT_TRUE(refused);
-  EXPECT_EQ(*refused, ActorError::NotAuthorized);
+  EXPECT_EQ(*refused, ActorError::Refused);
+  // An ack naming no outstanding request is still refused before
+  // the hook can see it.
+  ack          = {};
+  ack.type      = MessageType::ActorSpawnAck;
+  ack.requestId = "never-sent";
+  ack.reason    = "spawn refused";
+  EXPECT_EQ(
+      runtime.receive(host, ack, ActorTime{}, wall).error(),
+      ActorError::InvalidMessage);
+  EXPECT_EQ(calls, 2);
 }
 } // namespace
 } // namespace zigzag::vortex::mesh

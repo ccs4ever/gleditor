@@ -446,9 +446,6 @@ MeshActorRuntime::receive(const xanadu::identity::Fingerprint &identity,
     else
       response.reason = "spawn refused";
     emit(message.source->node, response);
-    // The ack lives and dies at the runtime layer — the requester's
-    // adapter hears the outcome through the hook, never the mailbox.
-    if (spawnResultHook_) spawnResultHook_(message, pid);
     if (!pid) return std::unexpected(pid.error());
     return {};
   }
@@ -464,6 +461,22 @@ MeshActorRuntime::receive(const xanadu::identity::Fingerprint &identity,
       return std::unexpected(ActorError::NotAuthorized);
     }
     prior->second.acknowledged = true;
+    // The requester's window onto the outcome — the ack never
+    // enqueues to the requesting actor's mailbox, so without the
+    // hook a refused spawn leaves its staged deliveries parked
+    // forever. The grant carries the child's real mesh pid (the
+    // member's `pid` record); the refusal maps to Refused — the
+    // wire's free-text reason is not a typed error.
+    if (spawnResultHook_) {
+      if (message.target)
+        spawnResultHook_(prior->second.message,
+                         std::expected<ActorPid, ActorError>{
+                             *message.target});
+      else
+        spawnResultHook_(prior->second.message,
+                         std::expected<ActorPid, ActorError>{
+                             std::unexpected(ActorError::Refused)});
+    }
     return {};
   }
   if (!message.source || !message.target || message.target->node != node_) {

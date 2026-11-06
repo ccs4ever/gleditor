@@ -21,6 +21,7 @@ using zigzag::CellRef;
 using zigzag::DimVector;
 using zigzag::vortex::OpcodeKind;
 using zigzag::vortex::WorkerContext;
+using zigzag::vortex::mesh::ActorError;
 using zigzag::vortex::mesh::ActorExecution;
 using zigzag::vortex::mesh::ActorGenesis;
 using zigzag::vortex::mesh::ActorGrant;
@@ -450,6 +451,54 @@ TEST(VagentAdapterTest, HandlerFormEffectDispatchesItsReply) {
               ::testing::Contains("EffectDone"));
   EXPECT_THAT(h.journalOf(image->agentCell),
               ::testing::Contains("Got"));
+}
+
+TEST(VagentAdapterTest, SpawnOutcomeNotesGrantAndFailsRefusal) {
+  AdapterHarness h;
+  const auto image =
+      h.lower("module demo\nevent Boot\n"
+              "agent A {\n"
+              "  var child: Opt<Agent> := none\n"
+              "  var spare: Opt<Agent> := none\n"
+              "  on Boot { child := spawn A(); spare := spawn A() }\n"
+              "}");
+  ASSERT_TRUE(image);
+  ASSERT_TRUE(h.adapter(h.execution(h.send("Boot")), h.ctx));
+  const auto granted = h.memberCell(image->agentCell, "child");
+  const auto refused = h.memberCell(image->agentCell, "spare");
+  ASSERT_TRUE(granted);
+  ASSERT_TRUE(refused);
+  // The integration layer's half: the durable request correlation,
+  // written before the wire send.
+  h.adapter.noteSpawnRequest(h.ctx, *granted, "req-grant");
+  h.adapter.noteSpawnRequest(h.ctx, *refused, "req-refuse");
+  ActorMessage request;
+  request.requestId = "req-grant";
+  const ActorPid meshPid{"host", "spawned-cursor", 2, 41};
+  h.adapter.spawnOutcome(h.ctx, request, meshPid);
+  // The grant lands the member's real mesh identity and consumes
+  // the pending correlation.
+  ASSERT_TRUE(h.adapter.memberForPid(h.ctx, meshPid));
+  EXPECT_EQ(*h.adapter.memberForPid(h.ctx, meshPid), *granted);
+  h.adapter.spawnOutcome(h.ctx, request, meshPid);
+  // A replayed ack finds no spawnRequest and reports nothing — the
+  // member still resolves.
+  EXPECT_EQ(*h.adapter.memberForPid(h.ctx, meshPid), *granted);
+  // The refused member's staged name fails §8.6-style on the agent.
+  request.requestId = "req-refuse";
+  h.adapter.spawnOutcome(
+      h.ctx, request,
+      std::expected<ActorPid, ActorError>{
+          std::unexpected(ActorError::Refused)});
+  EXPECT_THAT(h.journalOf(image->agentCell),
+              ::testing::Contains("SpawnFailed"));
+  // An id no member ever claimed reports nothing at all.
+  request.requestId = "req-nobody";
+  h.adapter.spawnOutcome(
+      h.ctx, request,
+      std::expected<ActorPid, ActorError>{
+          std::unexpected(ActorError::Refused)});
+  EXPECT_EQ(h.ctx.arena.outstandingMarks(), 0u);
 }
 
 } // namespace

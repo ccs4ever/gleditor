@@ -48,6 +48,11 @@ enum class ActorError {
   ExecutionFailed,
   TransportUnavailable,
   NotQuiescent,
+  /// A remote verdict the wire carries as free text — the spawn
+  /// ack's `reason` — surfaced through SpawnResultHook. The
+  /// requester learns only that the host declined, not which of
+  /// its own refuse paths did.
+  Refused,
 };
 
 /// The verifier checks these against the signed capability, authenticated
@@ -170,8 +175,10 @@ public:
   /// ActorSpawnAck is acknowledged at the runtime layer and never
   /// enqueues to the requester's mailbox, so a refusal would leave
   /// its staged deliveries waiting forever. Fired from receive()'s
-  /// ActorSpawn arm with spawn()'s own return: the granted pid or
-  /// the refusal's error.
+  /// ActorSpawnAck arm — the requesting node's side — with the
+  /// original request and the ack's verdict: the granted pid the
+  /// member's `pid` record notes, or Refused when the ack names
+  /// none (the wire's free-text reason is not a typed error).
   using SpawnResultHook = std::function<void(
       const ActorMessage &request,
       const std::expected<ActorPid, ActorError> &result)>;

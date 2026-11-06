@@ -121,6 +121,25 @@ public:
   void spawnRefused(zigzag::vortex::WorkerContext &ctx,
                     zigzag::CellRef parent, zigzag::CellRef child) const;
 
+  /// Correlate an outbound ActorSpawn with the member it asked for —
+  /// the `spawnRequest` record the ack resolves through. Written
+  /// before runtime.send so a crash between them loses no request.
+  void noteSpawnRequest(zigzag::vortex::WorkerContext &ctx,
+                        zigzag::CellRef member,
+                        std::string_view requestId) const;
+
+  /// The SpawnResultHook's adapter half: find the member whose
+  /// `spawnRequest` names the request's id — grant notes its real
+  /// mesh pid and clears the pending record, refusal runs §8.6's
+  /// SpawnFailed on the requesting agent. An id no member claims is
+  /// a stale or duplicate ack and reports nothing.
+  void spawnOutcome(
+      zigzag::vortex::WorkerContext &ctx,
+      const zigzag::vortex::mesh::ActorMessage &request,
+      const std::expected<zigzag::vortex::mesh::ActorPid,
+                          zigzag::vortex::mesh::ActorError> &result)
+      const;
+
 private:
   VagentExecutor executor_;
   std::map<std::string, NativeBody> natives_;
