@@ -310,6 +310,38 @@ void VagentAdapter::memberStopping(zigzag::vortex::WorkerContext &ctx,
   executor_.childStopping(ctx.arena, ctx.core, parent, member, cause);
 }
 
+std::optional<std::int64_t>
+VagentAdapter::nextDeadline(zigzag::vortex::WorkerContext &ctx,
+                            CellRef member) const {
+  auto &arena = ctx.arena;
+  auto &core  = ctx.core;
+  std::optional<std::int64_t> earliest;
+  // Only a parked intention is a live wait — a fired one leaves its
+  // awaitDeadline behind until the intention unlinks, and a running
+  // intention's stale field is not a wake the host owes.
+  for (const CellRef intention : zigzag::rankAfter(
+           arena, member, core.findOrMintDimension("d.intention"))) {
+    const auto parked = [&](std::string_view flag) {
+      const auto rec = varsRecord(arena, core, intention, flag, false);
+      if (!rec) return false;
+      const auto v = arena.linked(*rec, core.dims().values,
+                                  DimVector::POS);
+      return v && arena.asInt64(*v).value_or(0) != 0;
+    };
+    if (!parked("waiting") && !parked("delegated")) continue;
+    const auto rec =
+        varsRecord(arena, core, intention, "awaitDeadline", false);
+    if (!rec) continue;
+    const auto v = arena.linked(*rec, core.dims().values,
+                                DimVector::POS);
+    if (!v) continue;
+    const auto deadline = arena.asInt64(*v);
+    if (!deadline) continue;
+    if (!earliest || *deadline < *earliest) earliest = deadline;
+  }
+  return earliest;
+}
+
 void VagentAdapter::noteSpawnRequest(zigzag::vortex::WorkerContext &ctx,
                                      CellRef member,
                                      std::string_view requestId) const {

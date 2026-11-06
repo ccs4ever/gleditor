@@ -148,6 +148,19 @@ public:
                       zigzag::CellRef parent, zigzag::CellRef member,
                       std::string_view cause) const;
 
+  /// §"timers and deadlines"' heap derivation. Every parked wait
+  /// writes `awaitDeadline` as an absolute `$turn` ordinal; the
+  /// minimum across the member's parked intentions is the turn the
+  /// runtime owes a wake by — an idle actor's clock advances only
+  /// when MeshActorRuntime::wake injects a P4 turn, so the heap is
+  /// the difference between a deadline firing and it never arriving.
+  /// Empty when nothing waits on a deadline. The host polls after
+  /// each committed turn; a deadline that comes due while the member
+  /// keeps working costs nothing (the settle's own rung consumes it).
+  [[nodiscard]] std::optional<std::int64_t>
+  nextDeadline(zigzag::vortex::WorkerContext &ctx,
+               zigzag::CellRef member) const;
+
   /// Correlate an outbound ActorSpawn with the member it asked for —
   /// the `spawnRequest` record the ack resolves through. Written
   /// before runtime.send so a crash between them loses no request.

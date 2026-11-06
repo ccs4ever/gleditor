@@ -584,6 +584,51 @@ TEST(VagentAdapterTest, MemberStoppingRaisesOnceAndDestroysTheMember) {
   EXPECT_EQ(count, 1u);
 }
 
+TEST(VagentAdapterTest, NextDeadlineIsTheEarliestParkedAwait) {
+  AdapterHarness h;
+  const auto image =
+      h.lower("module demo\nevent Boot\nevent Lost\n"
+              "question stock(item: Str): Str\n"
+              "goal Work() perform\n"
+              "agent A {\n"
+              "  var child: Opt<Agent> := none\n"
+              "  on Boot { child := spawn A(); adopt Work() }\n"
+              "  plan w for Work { let r := ask child.stock(\"oil\") within "
+              "9s else cause; emit Lost{} }\n"
+              "}");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+  auto &core  = h.ctx.core;
+  ASSERT_TRUE(h.adapter(h.execution(h.send("Boot")), h.ctx));
+  // The ask parked inside Boot's turn — its deadline is the
+  // park-turn ordinal plus the within bound, exactly the heap entry
+  // the host reads to know turns are owed.
+  const auto deadline = h.adapter.nextDeadline(h.ctx, image->agentCell);
+  ASSERT_TRUE(deadline);
+  const auto turnRec =
+      varsRecord(arena, core, image->agentCell, "$turn", false);
+  ASSERT_TRUE(turnRec);
+  const auto now = arena.asInt64(
+      *arena.linked(*turnRec, core.dims().values, DimVector::POS));
+  ASSERT_TRUE(now);
+  EXPECT_EQ(*deadline, *now + 9);
+  // Wakes are how an idle actor's clock moves: pump the message-less
+  // turns P4's runtime would inject until the deadline's rung fires.
+  for (std::int64_t t = *now; t < *deadline; ++t)
+    ASSERT_TRUE(h.adapter(h.execution(), h.ctx));
+  ASSERT_TRUE(h.adapter(h.execution(), h.ctx));
+  // The else bound "deadline" and the intention unparked — the heap
+  // owes this member nothing until it parks again.
+  EXPECT_FALSE(h.adapter.nextDeadline(h.ctx, image->agentCell)
+                   .has_value());
+  const auto r = varsRecord(arena, core, image->agentCell, "r", false);
+  ASSERT_TRUE(r);
+  const auto rv = arena.linked(*r, core.dims().values,
+                               DimVector::POS);
+  ASSERT_TRUE(rv);
+  EXPECT_EQ(arena.textOf(*rv), "unanswered");
+}
+
 TEST(VagentAdapterTest, SpawnSendFailureFailsTheMember) {
   AdapterHarness h;
   const auto image =
