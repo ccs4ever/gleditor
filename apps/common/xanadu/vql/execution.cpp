@@ -45,7 +45,9 @@ bool budgetFailure(const std::string_view message) {
           lowered.find("limit") != std::string::npos) ||
          (lowered.find("limit") != std::string::npos &&
           (lowered.find("guard-scope") != std::string::npos ||
-           lowered.find("mutation-group") != std::string::npos));
+           lowered.find("mutation-group") != std::string::npos ||
+           lowered.find("projection") != std::string::npos ||
+           lowered.find("vqlmasklinks") != std::string::npos));
 }
 
 QueryExecutionError runtimeError(const std::exception &error) {

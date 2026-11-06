@@ -1495,6 +1495,7 @@ ValueExpr Parser::parseValueAtom() {
   }
   if (check(TokenKind::Variable)) {
     if (peekToken().is(TokenKind::Slash) || peekToken().is(TokenKind::Dot) ||
+        peekToken().is(TokenKind::OpenBrace) ||
         peekToken().is(TokenKind::GreaterThan) ||
         peekToken().is(TokenKind::CloneJoin)) {
       return ValueExpr{

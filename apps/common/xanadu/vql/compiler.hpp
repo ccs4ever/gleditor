@@ -36,7 +36,8 @@ class MultiStoreCoordinator;
 
 namespace xanadu::vql {
 
-inline constexpr std::size_t maxCompiledShapePredicateRules = 4096;
+inline constexpr std::size_t maxCompiledShapePredicateRules  = 4096;
+inline constexpr std::size_t maxCompiledShapeProjectionRules = 4096;
 
 struct CompilationOptions {
   bool targetLibrary{false};            ///< Emit library store instead of exec
@@ -222,6 +223,8 @@ private:
   compileExecutionBlock(const ExecutionBlock &block);
   std::optional<zigzag::CellRef>
   compilePathExpression(const PathExpression &path, zigzag::CellRef ctxCell);
+  void validateShapeProjection(const ShapeLiteral &shape);
+  void compileShapeProjection(const ShapeLiteral &shape, zigzag::CellRef owner);
   std::optional<zigzag::CellRef> compileAnchor(const AnchorNode &anchor);
   std::optional<zigzag::CellRef> compilePathStep(const PathStep &step,
                                                  zigzag::CellRef inStreamCell);
@@ -256,6 +259,7 @@ private:
 
   std::unordered_map<std::string, std::optional<zigzag::CellRef>> varBindings_;
   std::unordered_map<std::string, std::vector<PathStep>> functorBindings_;
+  std::size_t remainingShapeProjectionRules_{maxCompiledShapeProjectionRules};
   std::size_t remainingShapePredicateRules_{maxCompiledShapePredicateRules};
   std::size_t remainingShapePredicateValidationNodes_{
       maxCompiledShapePredicateRules};

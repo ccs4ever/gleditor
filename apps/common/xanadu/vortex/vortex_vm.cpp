@@ -30,7 +30,8 @@ constexpr std::size_t maxParameterPipelineInstructions = 1000;
 
 bool sourceMutatingPrimitive(const OpcodeKind kind,
                              const std::size_t arity) noexcept {
-  return ((kind == OpcodeKind::Link || kind == OpcodeKind::Value) &&
+  return kind == OpcodeKind::VqlMaskLinks ||
+         ((kind == OpcodeKind::Link || kind == OpcodeKind::Value) &&
           arity >= 4) ||
          ((kind == OpcodeKind::New || kind == OpcodeKind::Break) &&
           arity >= 3) ||
@@ -235,6 +236,11 @@ VortexVM *VortexVM::setGuardLimits(const GuardLimits limits) {
   return this;
 }
 
+VortexVM *VortexVM::setProjectionLimits(const ProjectionLimits limits) {
+  projectionLimits_ = limits;
+  return this;
+}
+
 bool VortexVM::hasActiveGuards() const noexcept {
   return !guardStacks_.empty() || !pendingGuardChecks_.empty() ||
          !guardScopes_.empty() || !mutationGroups_.empty() ||
@@ -430,7 +436,7 @@ std::optional<OpcodeKind> VortexVM::getOpcodeKind(CellRef opCell) const {
   auto val = core_.arena().asInt64(opCell);
   if (val && *val >= 0 &&
       static_cast<std::uint64_t>(*val) <=
-          static_cast<std::uint64_t>(OpcodeKind::EndMutationGroup)) {
+          static_cast<std::uint64_t>(OpcodeKind::VqlMaskLinks)) {
     return static_cast<OpcodeKind>(*val);
   }
   return std::nullopt;
@@ -639,6 +645,106 @@ ExecutionResult VortexVM::executeProbeLink(const CellRef opcode,
                      *directionValue > 0 ? DimVector::POS : DimVector::NEG)
                : std::nullopt;
     outputs.emplace_back(static_cast<std::int64_t>(neighbor.value_or(noCell)));
+    return {};
+  } catch (const std::exception &error) {
+    return fail(error.what());
+  }
+}
+
+ExecutionResult VortexVM::executeVqlMaskLinks(const CellRef opcode,
+                                              std::vector<CellValue> &outputs) {
+  const auto fail = [opcode](std::string message) {
+    return ExecutionResult{.success       = false,
+                           .failingClause = opcode,
+                           .errorMessage  = std::move(message)};
+  };
+  try {
+    auto &arena       = core_.arena();
+    const auto inputs = inputsOf(opcode);
+    if (inputs.size() < 2 || (inputs.size() - 2) % 2 != 0 ||
+        !outputsOf(opcode).empty() || !outputs.empty())
+      return fail("VqlMaskLinks expects owner, default, and dimension/mask "
+                  "pairs with no outputs");
+    if (isMemoized(opcode)) return fail("VqlMaskLinks cannot be memoized");
+    if (!core_.preconditionsOf(opcode).empty() ||
+        !core_.postconditionsOf(opcode).empty())
+      return fail("VqlMaskLinks does not support pre/postconditions");
+    if (std::ranges::any_of(inputs, [&](const CellRef slot) {
+          return streamSlots_.contains(slot) || iteratorSlots_.contains(slot);
+        }))
+      return fail("VqlMaskLinks requires scalar reference slots");
+    if (std::ranges::any_of(inputs, [&](const CellRef slot) {
+          return core_.hasPipeline(slot);
+        }))
+      return fail("VqlMaskLinks does not support parameter pipelines");
+    if ((inputs.size() - 2) / 2 > projectionLimits_.maxRules)
+      return fail("VqlMaskLinks rule limit exceeded");
+    for (const auto slot : inputs)
+      if (!arena.contains(slot))
+        return fail("VqlMaskLinks input slot is missing");
+
+    const auto owner = resolveCell(inputs, {}, cellReferences_, 0, arena);
+    if (!owner) return fail("VqlMaskLinks owner is not a cell reference");
+    if (arena.isQuoteOccurrence(*owner) || arena.foreignOf(*owner))
+      return fail("VqlMaskLinks does not support foreign owners");
+    if (cellReferences_.contains(inputs[1]))
+      return fail("VqlMaskLinks default must be a Boolean scalar");
+    const auto defaultKeep = arena.asBool(inputs[1]);
+    if (!defaultKeep) return fail("VqlMaskLinks default must be Boolean");
+
+    std::unordered_map<DimRef, std::uint8_t> rules;
+    rules.reserve((inputs.size() - 2) / 2);
+    for (std::size_t index = 2; index < inputs.size(); index += 2) {
+      arena.consumeWork();
+      if (cellReferences_.contains(inputs[index]) ||
+          cellReferences_.contains(inputs[index + 1]))
+        return fail("VqlMaskLinks dimension and mask must be scalar values");
+      const auto rawDimension = arena.asInt64(inputs[index]);
+      if (!rawDimension || *rawDimension < 0 ||
+          static_cast<std::uint64_t>(*rawDimension) >
+              std::numeric_limits<DimRef>::max())
+        return fail("VqlMaskLinks dimension must be a valid 32-bit reference");
+      const auto dimension = static_cast<DimRef>(*rawDimension);
+      if (dimension == noCell || !arena.contains(dimension))
+        return fail("VqlMaskLinks dimension must be a valid local dimension");
+      const auto rawBits = arena.asInt64(inputs[index + 1]);
+      if (!rawBits || *rawBits < 0 || *rawBits > 3)
+        return fail("VqlMaskLinks keep bits must be in the range 0..3");
+      if (!rules.emplace(dimension, static_cast<std::uint8_t>(*rawBits)).second)
+        return fail("VqlMaskLinks dimensions must be unique");
+    }
+
+    const auto links = arena.dimensionsOf(*owner);
+    if (links.size() > projectionLimits_.maxLinksPerOwner)
+      return fail("VqlMaskLinks owner link limit exceeded");
+    std::vector<DimLink> snapshot(links.begin(), links.end());
+    struct Removal {
+      DimRef dimension;
+      DimVector direction;
+    };
+    std::vector<Removal> removals;
+    for (const auto &link : snapshot) {
+      arena.consumeWork();
+      if (!arena.contains(link.dim))
+        return fail("VqlMaskLinks encountered an unmapped local dimension");
+      const auto rule = rules.find(link.dim);
+      for (const auto direction : {DimVector::POS, DimVector::NEG}) {
+        if (!link.neighbor(direction)) continue;
+        arena.consumeWork();
+        const auto bit = direction == DimVector::POS ? 1U : 2U;
+        const bool keep =
+            rule != rules.end() ? (rule->second & bit) != 0 : *defaultKeep;
+        if (!keep) removals.push_back({link.dim, direction});
+      }
+    }
+
+    // Fuel is charged during the complete read/preflight pass above. The
+    // savepoint then makes reciprocal edge changes all-or-nothing on refusal.
+    zigzag::ArenaSavepoint savepoint(arena);
+    for (const auto &removal : removals)
+      zigzag::expectWritten(
+          arena.unlink(*owner, removal.dimension, removal.direction));
+    savepoint.commit();
     return {};
   } catch (const std::exception &error) {
     return fail(error.what());
@@ -1139,9 +1245,10 @@ void VortexVM::runPipeline(CellRef paramCell) {
       throw std::invalid_argument(
           "ScopedChoice cannot run in a parameter pipeline");
     }
-    if (kind == OpcodeKind::ProbeLink || kind == OpcodeKind::VqlFieldProbe) {
-      throw std::invalid_argument(
-          "ProbeLink/VqlFieldProbe cannot run in a parameter pipeline");
+    if (kind == OpcodeKind::ProbeLink || kind == OpcodeKind::VqlFieldProbe ||
+        kind == OpcodeKind::VqlMaskLinks) {
+      throw std::invalid_argument("ProbeLink/VqlFieldProbe/VqlMaskLinks cannot "
+                                  "run in a parameter pipeline");
     }
     if (kind == OpcodeKind::VqlString || kind == OpcodeKind::VqlAdd ||
         kind == OpcodeKind::VqlBoxScalar)
@@ -1270,9 +1377,10 @@ bool VortexVM::evaluateCondition(CellRef clause,
   }
   if (kind == OpcodeKind::ScopedChoice)
     throw std::invalid_argument("ScopedChoice cannot run as a condition");
-  if (kind == OpcodeKind::ProbeLink || kind == OpcodeKind::VqlFieldProbe)
+  if (kind == OpcodeKind::ProbeLink || kind == OpcodeKind::VqlFieldProbe ||
+      kind == OpcodeKind::VqlMaskLinks)
     throw std::invalid_argument(
-        "ProbeLink/VqlFieldProbe cannot run as conditions");
+        "ProbeLink/VqlFieldProbe/VqlMaskLinks cannot run as conditions");
   if (kind == OpcodeKind::VqlString || kind == OpcodeKind::VqlAdd ||
       kind == OpcodeKind::VqlBoxScalar)
     throw std::invalid_argument("VQL scalar opcodes cannot run as conditions");
@@ -1964,6 +2072,8 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
     return executeVqlBoxScalar(opcode, outputs);
   case OpcodeKind::ProbeLink:
     return executeProbeLink(opcode, outputs);
+  case OpcodeKind::VqlMaskLinks:
+    return executeVqlMaskLinks(opcode, outputs);
   case OpcodeKind::VqlFieldProbe:
     return executeVqlFieldProbe(opcode, outputs);
   case OpcodeKind::Add: {
@@ -2931,8 +3041,42 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
               .errorMessage  = "opcode would finish with an active guard"};
   }
 
-  const auto inputCells           = inputsOf(*op);
-  const auto outCells             = outputsOf(*op);
+  const auto inputCells = inputsOf(*op);
+  const auto outCells   = outputsOf(*op);
+  if (kind == OpcodeKind::VqlMaskLinks) {
+    if (inputCells.size() < 2 || (inputCells.size() - 2) % 2 != 0 ||
+        !outCells.empty())
+      return {.success       = false,
+              .failingClause = *op,
+              .errorMessage  = "VqlMaskLinks expects owner, default, and "
+                               "dimension/mask pairs with no outputs"};
+    if (isMemoized(*op) || !core_.preconditionsOf(*op).empty() ||
+        !core_.postconditionsOf(*op).empty())
+      return {.success       = false,
+              .failingClause = *op,
+              .errorMessage =
+                  "VqlMaskLinks does not support conditions or memoization"};
+    if (std::ranges::any_of(inputCells, [&](const CellRef input) {
+          return core_.hasPipeline(input);
+        }))
+      return {.success       = false,
+              .failingClause = *op,
+              .errorMessage =
+                  "VqlMaskLinks does not support parameter pipelines"};
+    const auto active  = guardStacks_.find(cursor);
+    const bool guarded = active != guardStacks_.end() && active->second &&
+                         !active->second->empty();
+    if (guarded && hasPendingGuardValidation(cursor))
+      return {.success       = false,
+              .failingClause = *op,
+              .errorMessage =
+                  "source mutation refused during pending guard validation"};
+    if (guarded && !mutationGroupActive(cursor))
+      return {.success       = false,
+              .failingClause = *op,
+              .errorMessage =
+                  "guarded source mutation requires an atomic mutation group"};
+  }
   const auto hasMutatingCondition = [this](const auto &clauses) {
     return std::ranges::any_of(clauses, [this](const CellRef clause) {
       const CellRef actual = core_.arena()
@@ -2950,6 +3094,7 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
             .errorMessage  = "source-mutating conditions are refused while "
                              "guard state is active"};
   const bool sourceMutation =
+      kind == OpcodeKind::VqlMaskLinks ||
       ((kind == OpcodeKind::Link || kind == OpcodeKind::Value) &&
        inputCells.size() >= 4) ||
       (kind == OpcodeKind::New && inputCells.size() >= 3) ||
@@ -3030,6 +3175,7 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
       kind == OpcodeKind::ResumeInit || kind == OpcodeKind::ResumeSet;
   const bool probeLinkOp           = kind == OpcodeKind::ProbeLink;
   const bool fieldProbeOp          = kind == OpcodeKind::VqlFieldProbe;
+  const bool maskLinksOp           = kind == OpcodeKind::VqlMaskLinks;
   const auto hasProbeLinkCondition = [this](const auto &clauses) {
     return std::ranges::any_of(clauses, [this](const CellRef clause) {
       const CellRef actual = core_.arena()
@@ -3037,7 +3183,8 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
                                  .value_or(clause);
       const auto clauseKind = getOpcodeKind(actual);
       return clauseKind == OpcodeKind::ProbeLink ||
-             clauseKind == OpcodeKind::VqlFieldProbe;
+             clauseKind == OpcodeKind::VqlFieldProbe ||
+             clauseKind == OpcodeKind::VqlMaskLinks;
     });
   };
   const auto hasVqlScalarCondition = [this](const auto &clauses) {
@@ -3091,8 +3238,10 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
   }
   if (hasProbeLinkCondition(core_.preconditionsOf(*op)) ||
       hasProbeLinkCondition(core_.postconditionsOf(*op))) {
-    return {.success      = false,
-            .errorMessage = "ProbeLink/VqlFieldProbe cannot run as conditions"};
+    return {
+        .success = false,
+        .errorMessage =
+            "ProbeLink/VqlFieldProbe/VqlMaskLinks cannot run as conditions"};
   }
   if (hasVqlScalarCondition(core_.preconditionsOf(*op)) ||
       hasVqlScalarCondition(core_.postconditionsOf(*op))) {
@@ -3140,6 +3289,12 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
       return {.success      = false,
               .errorMessage = "ProbeLink/VqlFieldProbe cannot be memoized"};
   }
+  if (maskLinksOp && std::ranges::any_of(inputCells, [&](const CellRef input) {
+        return streamSlots_.contains(input) || iteratorSlots_.contains(input);
+      }))
+    return {.success       = false,
+            .failingClause = *op,
+            .errorMessage  = "VqlMaskLinks requires scalar reference slots"};
   if (kind == OpcodeKind::VqlString || kind == OpcodeKind::VqlAdd ||
       kind == OpcodeKind::VqlBoxScalar) {
     if (!core_.preconditionsOf(*op).empty() ||
@@ -3282,7 +3437,8 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
           kind == OpcodeKind::RequireContract ||
           kind == OpcodeKind::VqlCompare || kind == OpcodeKind::VqlString ||
           kind == OpcodeKind::VqlAdd || kind == OpcodeKind::VqlBoxScalar ||
-          kind == OpcodeKind::ProbeLink || kind == OpcodeKind::ScopedChoice ||
+          kind == OpcodeKind::ProbeLink || kind == OpcodeKind::VqlMaskLinks ||
+          kind == OpcodeKind::ScopedChoice ||
           kind == OpcodeKind::VqlFieldProbe) {
         oldInputs.emplace_back(false);
       } else {
@@ -3308,8 +3464,8 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
       kind != OpcodeKind::VqlString && kind != OpcodeKind::VqlAdd &&
       kind != OpcodeKind::VqlBoxScalar && kind != OpcodeKind::ScopedChoice &&
       kind != OpcodeKind::ResumeInit && kind != OpcodeKind::ResumeSet &&
-      kind != OpcodeKind::ProbeLink && kind != OpcodeKind::VqlFieldProbe &&
-      !stateful;
+      kind != OpcodeKind::ProbeLink && kind != OpcodeKind::VqlMaskLinks &&
+      kind != OpcodeKind::VqlFieldProbe && !stateful;
   if (memoizable && isMemoized(*op)) {
     if (const auto key = getMemoKey(*op)) {
       CellRef pin = core_.getOrCreateMemoPin(*key);
@@ -3389,7 +3545,8 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
     // Structural reads and value reads return cell handles. Preserve identity
     // so later operations consume the target cell, not the result slot.
     if (kind == OpcodeKind::MatchContract || kind == OpcodeKind::ResumeInit ||
-        kind == OpcodeKind::ResumeSet || kind == OpcodeKind::VqlFieldProbe) {
+        kind == OpcodeKind::ResumeSet || kind == OpcodeKind::VqlFieldProbe ||
+        kind == OpcodeKind::VqlMaskLinks) {
       // These handlers atomically publish their reference or scalar outputs.
     } else if (stateful) {
       // Stateful registers write their runtime state and output refs directly.

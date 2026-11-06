@@ -252,6 +252,7 @@ bool pureOpcode(OpcodeKind opcode) {
   case OpcodeKind::ResumeSet:
     return false;
   case OpcodeKind::VqlFieldProbe:
+  case OpcodeKind::VqlMaskLinks:
   case OpcodeKind::ScopedChoice:
   case OpcodeKind::ChoiceDepth:
   case OpcodeKind::InvokeFrame:
@@ -311,6 +312,9 @@ void validateProgram(const VortexProgram &program, SyntaxLimits limits) {
         instruction.opcode == OpcodeKind::ReturnFrame)
       throw std::runtime_error(
           "Vortex mesh does not support activation-frame descriptors");
+    if (instruction.opcode == OpcodeKind::VqlMaskLinks)
+      throw std::runtime_error(
+          "Vortex mesh does not support shape projection mutations");
     if (!pureOpcode(instruction.opcode) ||
         !instructions.insert(instruction.cell).second)
       throw std::runtime_error(
@@ -515,7 +519,7 @@ VortexProgram decodeProgram(std::string_view bytes, SyntaxLimits limits) {
     dictionary(item, 5);
     const auto opcode = required(item, "opcode").asInteger();
     if (opcode < 0 ||
-        opcode > static_cast<std::int64_t>(OpcodeKind::EndMutationGroup))
+        opcode > static_cast<std::int64_t>(OpcodeKind::VqlMaskLinks))
       throw std::runtime_error("Unknown Vortex artifact opcode");
     const auto &next = required(item, "next").asList();
     if (next.size() > 1)

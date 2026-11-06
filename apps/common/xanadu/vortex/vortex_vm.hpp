@@ -125,6 +125,12 @@ enum class OpcodeKind : std::uint8_t {
   CloseGuardScope,
   BeginMutationGroup,
   EndMutationGroup,
+  VqlMaskLinks,
+};
+
+struct ProjectionLimits {
+  std::size_t maxRules{4096};
+  std::size_t maxLinksPerOwner{65536};
 };
 
 struct FrameDescriptorError {
@@ -424,6 +430,10 @@ public:
   [[nodiscard]] GuardLimits guardLimits() const noexcept {
     return guardLimits_;
   }
+  VortexVM *setProjectionLimits(ProjectionLimits limits);
+  [[nodiscard]] ProjectionLimits projectionLimits() const noexcept {
+    return projectionLimits_;
+  }
   /// Includes runtime state retained by choice snapshots.
   [[nodiscard]] bool hasActiveGuards() const noexcept;
   [[nodiscard]] std::vector<RuntimeGuardRef>
@@ -511,6 +521,8 @@ private:
                                       std::vector<CellValue> &outputs);
   ExecutionResult executeProbeLink(CellRef opcode,
                                    std::vector<CellValue> &outputs);
+  ExecutionResult executeVqlMaskLinks(CellRef opcode,
+                                      std::vector<CellValue> &outputs);
   ExecutionResult executeVqlFieldProbe(CellRef opcode,
                                        std::vector<CellValue> &outputs);
   ExecutionResult executeTypeContract(OpcodeKind kind, CellRef opcode,
@@ -573,6 +585,7 @@ private:
   GuardScopeMap guardScopes_;
   MutationGroupMap mutationGroups_;
   GuardLimits guardLimits_;
+  ProjectionLimits projectionLimits_;
   std::uint64_t nextActivationId_{1};
   std::uint64_t nextMutationGroupId_{1};
   std::uint64_t nextChoiceId_{1};

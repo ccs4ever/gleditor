@@ -1036,7 +1036,54 @@ isolation, and source-free exported graph reload. Host and mesh Vquery source te
 named failure and later recovery. A real headless Vquery CLI returns `7` through emitted PushGuard
 and BeginMutationGroup instructions, and rejects a string write with the parameter's named
 TypeContractError. Independent fresh Luna architecture and senior/profiler gates accepted this
-bounded implementation. Repository formatting with clang-format 19 is the final gate.
+bounded implementation. Repository formatting with clang-format 19 passed.
 
 Logs: `/tmp/vql-mutations-build.log`, `/tmp/vql-mutations-tests.log`,
 `/tmp/vql-mutations-profile.log`, `/tmp/vql-mutations-cli.log`, `/tmp/vql-mutations-format.log`.
+
+## Iteration 31: static shape projection graphs
+
+Static path shape projections now preserve each reached owner while executing masks and scalar
+literal assignments as real Vortex graphs. The compiler normalizes ordered wildcard resets and
+per-direction overrides into final keep bits. Empty shapes sever every incident link, the universal
+wildcard preserves unmentioned links, and explicit exclusions sever both directions. Signed and
+bidirectional inclusions retain their specified directions. Assignment targets are freshly boxed on
+every execution, preserving scalar kinds and preventing reciprocal-link theft between owners.
+
+The native `VqlMaskLinks` primitive snapshots the runtime owner's dimension run and unlinks denied
+edges through the arena's reciprocal-link API. It validates its graph operands before mutation,
+preserves full-width dimension identities, charges arena work and uses an arena savepoint. Every
+projection is enclosed in a source mutation group, so active parameter contracts see the completed
+projection and failed validation restores the original edges. Export relocates each dimension
+operand. Configurable rule and owner-width limits bound the primitive; query compilation also limits
+projection rules across the compilation.
+
+This stage supports local owners, static canonical dimensions, wildcard algebra and scalar literal
+assignments. Foreign owners and quoted occurrences refuse explicitly. Dynamic shape rules,
+path/call/alias targets, nested shapes, negated assignments and bidirectional assignments remain
+unsupported. In particular, future nonliteral targets must read the original owner before masking
+can remove their input links; no direct evaluator or AST fallback supplies those semantics. Function
+frame eligibility remains conservative and uses existing inline graph lowering for projections.
+Return-field construction remains a separate unfinished operation. Full §4.12 remains incomplete.
+
+Value-expression parsing also now retains `$owner{...}` inside an expression-bodied function.
+Previously it parsed the bare variable as the function body and left the projection outside the
+function scope. An AST regression checks placement, and a typed projection regression verifies that
+the resulting in-function mutation is rejected and rolled back when its contract fails.
+
+Validation: full `make -j$(nproc)` exited zero; all 807 affected tests from 75 suites passed.
+Eighteen new enabled cases cover runtime masks and exact scalar boxing, malformed graph operands,
+resource refusal without partial unlinking, guard rollback, parser scope, source-free export/reload,
+and host/mesh Vquery source routes. The real headless CLI returns `7` through emitted mask, box and
+link instructions, and rejects a typed projection with the named parameter TypeContractError.
+
+The opt-in mask profile records single cold observations, not a speedup or stable latency claim. At
+32 owners and 4/16 incident dimensions, compile times were 156/48 microseconds and run times
+408/373; both ran 229 VM cycles with 72 compile cells and 32 runtime cells. At 128 owners, compile
+times were 118/138 microseconds and run times 1,290/1,496; both ran 901 cycles with 168 compile
+cells and 128 runtime cells. Every case emitted 11 opcodes. These are whole-fixture counts,
+including mutation groups; arena fuel also charges work within the native mask primitive.
+
+Logs: `/tmp/vql-projections-build.log`, `/tmp/vql-projections-tests.log`,
+`/tmp/vql-projections-profile.log`, `/tmp/vql-projections-cli.log`,
+`/tmp/vql-projections-format.log`.

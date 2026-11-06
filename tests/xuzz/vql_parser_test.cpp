@@ -837,4 +837,24 @@ TEST(VQLParserTest, TrailingLambdaInFunctionInvocation) {
       std::holds_alternative<std::shared_ptr<PathLambda>>(fn.args[1].kind));
 }
 
+TEST(VQLParserTest, ProjectionStaysInsideExpressionBodiedFunction) {
+  Parser parser(
+      "def weave tag($owner) := $owner{+d.tag: \"new\"}; tag($owner)");
+  const auto query = parser.parseQuery();
+  ASSERT_EQ(query.defs.size(), 1U);
+  const auto *body =
+      std::get_if<std::shared_ptr<ValueExpr>>(&query.defs.front().body);
+  ASSERT_TRUE(body);
+  ASSERT_TRUE(*body);
+  const auto *path =
+      std::get_if<std::shared_ptr<PathExpression>>(&(*body)->kind);
+  ASSERT_TRUE(path);
+  ASSERT_TRUE(*path);
+  EXPECT_EQ((*path)->anchor.kind, AnchorKind::Variable);
+  EXPECT_EQ((*path)->anchor.name, "owner");
+  ASSERT_TRUE((*path)->shapeProjection);
+  EXPECT_EQ((*path)->shapeProjection->rules.size(), 1U);
+  EXPECT_EQ(query.body.statements.size(), 1U);
+}
+
 } // namespace

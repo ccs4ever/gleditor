@@ -545,3 +545,25 @@ Effectful nested validation remains explicitly refused before source effects. Th
 refuses unlowered shape projection instead of silently ignoring it. Field weaving/projection,
 return-field construction, remaining typed binding/functor/variadic/lambda work, session state and
 complete frontend/parallel lifecycle parity remain open. Full §4.12 is incomplete.
+
+## Static shape projection lowering
+
+Static path projections now compile signed dimension masks, wildcard resets and scalar literal
+assignments into Vortex graphs. Each owner retains its identity, stream position and duplicates;
+assignment cells are freshly boxed with their scalar types. A native mask primitive discovers
+unmentioned runtime links and severs reciprocal edges atomically. Source mutation groups integrate
+complete projections with active function parameter guards. See
+[iteration 31](projects/vortex-vm-only-iterations.md).
+
+The bounded subset supports local owners and static canonical dimensions. Foreign and quoted owners,
+dynamic rules, nonliteral or nested targets, and ambiguous negated/bidirectional assignments remain
+explicit refusals. Nonliteral targets need original-owner preparation before masking; return-field
+construction and the previously listed §4.12 gaps remain open. No direct evaluator fallback or full
+completion claim follows.
+
+The full build and all 807 affected tests from 75 suites passed. Coverage includes exact fresh
+scalar boxing, malformed and bounded mask inputs, reciprocal rollback, parser placement in function
+bodies, fresh-VM export and host/mesh source routes. A real headless CLI checks successful
+projection and named contract rejection. The opt-in four-point profile reports whole-fixture costs
+and makes no speedup claim. Function-body parsing now retains a variable's projection within its
+guarded scope instead of detaching it into the surrounding script.

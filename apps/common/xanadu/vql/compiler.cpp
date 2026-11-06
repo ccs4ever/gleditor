@@ -123,6 +123,8 @@ VQLCompiler::opcodeMnemonic(zigzag::vortex::OpcodeKind kind) noexcept {
     return "VQL_ADD";
   case OpcodeKind::VqlBoxScalar:
     return "VQL_BOX_SCALAR";
+  case OpcodeKind::VqlMaskLinks:
+    return "VQL_MASK_LINKS";
   case OpcodeKind::ScopedChoice:
     return "SCOPED_CHOICE";
   case OpcodeKind::VqlFieldProbe:
@@ -303,6 +305,7 @@ CompilationResult VQLCompiler::compile(const QueryExpression &query,
   remainingContractEmissions_             = options.maxContractEmissions;
   nextContractValidatorId_                = 0;
   compilingGraphContract_                 = false;
+  remainingShapeProjectionRules_          = maxCompiledShapeProjectionRules;
   remainingShapePredicateRules_           = maxCompiledShapePredicateRules;
   remainingShapePredicateValidationNodes_ = maxCompiledShapePredicateRules;
   shapeTargetConstants_.clear();
@@ -472,9 +475,7 @@ std::optional<CellRef> VQLCompiler::compileQuery(const QueryExpression &query) {
 std::optional<CellRef>
 VQLCompiler::compilePathExpression(const PathExpression &path,
                                    CellRef ctxCell) {
-  if (path.shapeProjection)
-    throw std::invalid_argument(
-        "shape projections require Vortex field-weaving lowering");
+  if (path.shapeProjection) validateShapeProjection(*path.shapeProjection);
   if (path.anchor.versionPin ||
       std::ranges::any_of(path.steps, [](const PathStep &step) {
         return step.versionPin.has_value();
@@ -525,6 +526,13 @@ VQLCompiler::compilePathExpression(const PathExpression &path,
       compileSteps(path.steps, std::move(stream),
                    path.anchor.kind != AnchorKind::Context ||
                        ambientContext_.has_value() || !contextInputs_.empty());
+
+  if (path.shapeProjection) {
+    stream = emitMap(stream, [&](const CellRef owner) {
+      compileShapeProjection(*path.shapeProjection, owner);
+      return std::vector<CellRef>{owner};
+    });
+  }
 
   if (path.cloneTail && !stream.empty()) {
     stream = emitMap(stream, [&](CellRef master) {
