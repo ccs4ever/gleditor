@@ -17,7 +17,7 @@ features or prerequisites for declaring the initial release complete.
 | 5. Beliefs and BDI                  | Typed keyed/source-aware facts, queries/logical update view, goal kinds, plans, subgoals, conditions, waits and captured bindings.                          | Complete adoption/selection/reconsideration/maintain/back-off/failure and await race coverage through turns.                                             | Open.                                                                                 |
 | 6. Effects and composition          | Capacities/skills/behaviors, native asynchronous effects, deadlines/cancel/preemption, scheduling, questions and typed performatives.                       | Multi-turn effects and late completion, swaps, handler merge/consume, question typing/fallback and scope/sender tests.                                   | Open.                                                                                 |
 | 7. Long-lived mesh                  | Approved P2–P8 and P14, single-owner spaces/holons, issuer budgets, renewal/stopping, fair finite-service P4 arbitration, identities/checkpoints/migration. | Queue/retry/floor/lease/slot regressions, bounded service under load, checkpoint/resume and migration including pending-state restrictions.              | Open.                                                                                 |
-| 8. Product integration              | `run`, `check`, REPL, launcher, settings/schema/notes P9, logging P10, build/tests/fuzz P11.                                                                | Real command-line/REPL journeys, failure exit codes, settings and binding diagnostics, fuzz inputs and normal Makefile targets.                          | `check` CLI verified; other integration open.                                         |
+| 8. Product integration              | `run`, `check`, REPL, launcher, settings/schema/notes P9, logging P10, build/tests/fuzz P11.                                                                | Real command-line/REPL journeys, failure exit codes, settings and binding diagnostics, fuzz inputs and normal Makefile targets.                          | `check` and single-node `run` verified (FILE plus `--send 'EVENT{f: v}'` percepts); REPL, launcher, `module/Agent(args)` selector form, settings and logging open. |
 | 9. Guide and end-to-end conformance | Complete beginner-to-operation guide, checked examples and executable sample project.                                                                       | Guide examples pass appropriate syntax/static/runtime checks; final worked examples exercise actual actors; limitations match current capabilities.      | Complete teaching draft; 25 source units statically checked, runtime validation open. |
 
 These tracks may overlap. Each iteration must update evidence rather than relabel an incomplete
@@ -67,6 +67,8 @@ make -j$(nproc) test/vagent-frontend
 make -j$(nproc) test/vagent-compiler test/vagent-runtime
 build/vagent check tests/samples/vagent/mini_01.vagent
 build/vagent check tests/samples/vagent/*.vagent
+build/vagent run tests/samples/vagent/mini_01.vagent \
+  --send 'Add{amount: 3}' --send 'Add{amount: 2}'
 ```
 
 `check` reports static diagnostics and does not assert that a source has been lowered, linked or

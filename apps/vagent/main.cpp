@@ -1,10 +1,15 @@
+#include <cctype>
 #include <chrono>
+#include <expected>
+#include <format>
 #include <fstream>
 #include <iostream>
 #include <iterator>
 #include <map>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "common/xanadu/store.hpp"
@@ -33,14 +38,16 @@ using xanadu::identity::MessageType;
 
 void usage(std::ostream &out) {
   out << "Usage: vagent check FILE...\n"
-         "       vagent run FILE...\n"
+         "       vagent run FILE [--send 'EVENT{f: v, ...}']...\n"
          "       vagent --help\n"
          "       vagent --version\n\n"
          "check validates each source unit without running it. run seeds a\n"
          "local lineage, spawns the program's agent on a single-node\n"
          "MeshActorRuntime, wakes it once so the Initialize handler runs,\n"
          "and pumps turns until the actor goes quiescent — no transport,\n"
-         "so remote spawn/stop requests stay undispatched.\n";
+         "so remote spawn/stop requests stay undispatched. Each --send\n"
+         "delivers one fielded percept (ints, floats, bools, \"strings\")\n"
+         "after genesis; a --send attaches to the FILE it follows.\n";
 }
 
 bool readSource(std::string_view path, std::string &source) {
@@ -83,6 +90,104 @@ bool checkFile(std::string_view path) {
   return true;
 }
 
+// One `Name{f: v, ...}` percept the host stages after genesis — the
+// fielded send the bare ActorSend `value` string cannot carry.
+struct SendSpec {
+  std::string name;
+  std::vector<std::pair<std::string, zigzag::vortex::CellValue>> fields;
+};
+
+// `EVENT{f: v, ...}` or a bare `EVENT`: whitespace-tolerant, literals
+// int / float / "string" / true / false. Field names and the event
+// name are bare identifiers — the run-side counterpart of the
+// record-literal syntax emit marshals.
+std::optional<SendSpec> parseSendSpec(std::string_view text) {
+  std::size_t pos   = 0;
+  const auto ws     = [&] {
+    while (pos < text.size() && std::isspace(text[pos])) ++pos;
+  };
+  const auto ident  = [&]() -> std::optional<std::string> {
+    ws();
+    const auto start = pos;
+    if (pos >= text.size() ||
+        !(std::isalpha(text[pos]) || text[pos] == '_'))
+      return std::nullopt;
+    while (pos < text.size() &&
+           (std::isalnum(text[pos]) || text[pos] == '_'))
+      ++pos;
+    return std::string{text.substr(start, pos - start)};
+  };
+  const auto literal = [&]() -> std::optional<zigzag::vortex::CellValue> {
+    ws();
+    if (pos >= text.size()) return std::nullopt;
+    if (text[pos] == '"') {
+      const auto close = text.find('"', pos + 1);
+      if (close == std::string_view::npos) return std::nullopt;
+      const auto out = std::string{text.substr(pos + 1, close - pos - 1)};
+      pos            = close + 1;
+      return zigzag::vortex::CellValue{out};
+    }
+    if (text.substr(pos, 4) == "true") {
+      pos += 4;
+      return zigzag::vortex::CellValue{true};
+    }
+    if (text.substr(pos, 5) == "false") {
+      pos += 5;
+      return zigzag::vortex::CellValue{false};
+    }
+    const auto start = pos;
+    if (text[pos] == '-') ++pos;
+    bool dot = false;
+    while (pos < text.size() &&
+           (std::isdigit(text[pos]) || (text[pos] == '.' && !dot))) {
+      dot |= text[pos] == '.';
+      ++pos;
+    }
+    if (pos == start) return std::nullopt;
+    const auto number = std::string{text.substr(start, pos - start)};
+    try {
+      if (dot) return zigzag::vortex::CellValue{std::stod(number)};
+      return zigzag::vortex::CellValue{
+          static_cast<std::int64_t>(std::stoll(number))};
+    } catch (...) {
+      return std::nullopt;
+    }
+  };
+  SendSpec spec;
+  const auto name = ident();
+  if (!name) return std::nullopt;
+  spec.name = *name;
+  ws();
+  if (pos == text.size()) return spec;
+  if (text[pos] != '{') return std::nullopt;
+  ++pos;
+  ws();
+  if (pos < text.size() && text[pos] == '}') {
+    ++pos;
+    ws();
+    return pos == text.size() ? std::optional{spec} : std::nullopt;
+  }
+  for (;;) {
+    const auto field = ident();
+    if (!field) return std::nullopt;
+    ws();
+    if (pos >= text.size() || text[pos] != ':') return std::nullopt;
+    ++pos;
+    const auto value = literal();
+    if (!value) return std::nullopt;
+    spec.fields.emplace_back(*field, *value);
+    ws();
+    if (pos >= text.size()) return std::nullopt;
+    if (text[pos] == '}') {
+      ++pos;
+      ws();
+      return pos == text.size() ? std::optional{spec} : std::nullopt;
+    }
+    if (text[pos] != ',') return std::nullopt;
+    ++pos;
+  }
+}
+
 // The deadline sweep keys contexts by pid; MeshActorRuntime::pidKey is
 // private, so the runner renders its own (the four fields are the
 // identity, never a member index).
@@ -91,7 +196,7 @@ std::string pidKey(const ActorPid &pid) {
          std::to_string(pid.spawnSequence);
 }
 
-bool runFile(std::string_view path) {
+bool runFile(std::string_view path, const std::vector<SendSpec> &sends) {
   std::string source;
   if (!readSource(path, source)) return false;
 
@@ -182,8 +287,19 @@ bool runFile(std::string_view path) {
     return result;
   });
   runtime.setGenesisHook([&](const ActorGenesis &genesis,
-                             WorkerContext &ctx) {
-    return adapter.genesis(genesis, ctx);
+                             WorkerContext &ctx)
+                             -> std::expected<void, ActorError> {
+    if (const auto outcome = adapter.genesis(genesis, ctx); !outcome)
+      return outcome;
+    // The host's sends land once the member exists: each stages a
+    // fielded percept on +d.pending, which the pump's pendingWork
+    // sweep turns into a dispatch on a later turn.
+    if (const auto member = adapter.memberForPid(ctx, genesis.pid))
+      for (std::size_t i = 0; i < sends.size(); ++i)
+        adapter.sendPercept(ctx, *member, sends[i].name,
+                            sends[i].fields,
+                            std::format("runner-send-{}", i));
+    return {};
   });
   runtime.setSpawnResultHook(
       [&outcomes](const ActorMessage &request,
@@ -259,12 +375,36 @@ bool runFile(std::string_view path) {
   if (auto it = actors.find(pidKey(*pid)); it != actors.end())
     if (const auto member =
             adapter.memberForPid(*it->second.second, *pid)) {
-      const auto seen =
-          it->second.second->core.findOrMintDimension("d.seen");
-      for (const auto event :
-           zigzag::rankAfter(it->second.second->arena, *member, seen)) {
-        std::cout << path << ": saw "
-                  << it->second.second->arena.textOf(event) << '\n';
+      auto &arena = it->second.second->arena;
+      auto &core  = it->second.second->core;
+      const auto seen = core.findOrMintDimension("d.seen");
+      for (const auto event : zigzag::rankAfter(arena, *member, seen))
+        std::cout << path << ": saw " << arena.textOf(event) << '\n';
+      // The member's +d.vars is a shared rank — a record belongs to
+      // this agent only while its +d.owner scalar names it. `$` keys
+      // are executor internals ($turn/$stats), not program state.
+      const auto of = core.findOrMintDimension("d.owner");
+      for (const auto rec : zigzag::rankAfter(arena, *member,
+                                              core.dims().vars)) {
+        const auto key = arena.textOf(rec);
+        if (key.empty() || key[0] == '$') continue;
+        if (const auto scope = arena.linked(rec, of))
+          if (arena.asInt64(*scope).value_or(-1) !=
+              static_cast<std::int64_t>(*member))
+            continue;
+        const auto value = arena.linked(rec, core.dims().values);
+        std::cout << path << ": var " << key << " = ";
+        if (!value) {
+          std::cout << "(unset)\n";
+        } else if (const auto b = arena.asBool(*value)) {
+          std::cout << (*b ? "true" : "false") << '\n';
+        } else if (const auto n = arena.asInt64(*value)) {
+          std::cout << *n << '\n';
+        } else if (const auto d = arena.asDouble(*value)) {
+          std::cout << *d << '\n';
+        } else {
+          std::cout << '"' << arena.textOf(*value) << "\"\n";
+        }
       }
     }
   std::cout << path << ": ran " << turns << " turns\n";
@@ -290,11 +430,31 @@ int main(int argc, char *argv[]) {
     return 2;
   }
   const bool run = std::string_view(argv[1]) == "run";
+  // A --send binds to the FILE before it: the arg walk groups each
+  // file with the sends that trail it, then runs the pairs in order.
+  std::vector<std::pair<std::string, std::vector<SendSpec>>> units;
   try {
-    bool valid = true;
     for (int index = 2; index < argc; ++index) {
-      valid = (run ? runFile : checkFile)(argv[index]) && valid;
+      const std::string_view arg{argv[index]};
+      if (arg == "--send") {
+        if (!run || units.empty() || index + 1 >= argc) {
+          usage(std::cerr);
+          return 2;
+        }
+        const auto spec = parseSendSpec(argv[++index]);
+        if (!spec) {
+          std::cerr << "vagent: malformed --send '" << argv[index]
+                    << "' — expected EVENT{f: v, ...}\n";
+          return 2;
+        }
+        units.back().second.push_back(*spec);
+        continue;
+      }
+      units.emplace_back(std::string{arg}, std::vector<SendSpec>{});
     }
+    bool valid = true;
+    for (const auto &[file, sends] : units)
+      valid = (run ? runFile(file, sends) : checkFile(file)) && valid;
     return valid ? 0 : 1;
   } catch (const std::exception &error) {
     std::cerr << "vagent: " << error.what() << '\n';

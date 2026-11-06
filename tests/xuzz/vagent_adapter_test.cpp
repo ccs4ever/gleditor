@@ -747,4 +747,82 @@ TEST(VagentAdapterTest, SeededLineageExecutesTheEmitChain) {
   EXPECT_THAT(journal(), ::testing::ElementsAre("Initialize", "Ready"));
 }
 
+TEST(VagentAdapterTest, SendPerceptBindsNamedFieldsAndDeduplicates) {
+  // The host's fielded send — what a wire ActorSend becomes when the
+  // bare `value` string can't carry the payload. Staged through
+  // deliver, the term's +d.step fields bind in the handler's guard:
+  // total reaches 7 only if `a.amount` resolved off the payload. A
+  // repeated id rides +d.delivered and never reaches the journal.
+  xanadu::Store lineage;
+  zigzag::ArenaManifold stage;
+  const auto filed = fileDimensionVocabulary(lineage, stage, {});
+  ASSERT_TRUE(filed) << (filed ? "" : filed.error());
+  WorkerContext compile{&filed->fold, &lineage};
+  const auto artifacts = compileArtifacts(
+      "module demo\nevent Add { amount: Int }\nagent A {\n"
+      "  var total: Int := 0\n"
+      "  on Add as a {\n"
+      "    let next := total + a.amount\n"
+      "    total := next\n"
+      "  }\n"
+      "}");
+  ASSERT_TRUE(artifacts);
+  const auto image =
+      lowerProgram(artifacts->program, compile.core, compile.vm);
+  ASSERT_TRUE(image);
+  const auto seeded = seedProgramImage(lineage, compile.arena,
+                                       image->programRoot);
+  ASSERT_TRUE(seeded) << (seeded ? "" : seeded.error());
+  const auto fold = std::make_unique<zigzag::Manifold>(
+      lineage.rebuildManifold(seeded->version));
+  WorkerContext ctx{fold.get(), &lineage};
+
+  VagentAdapter adapter;
+  ActorGenesis genesis;
+  genesis.pid = ActorPid{"worker", "agent", 1, 9};
+  ASSERT_TRUE(adapter.genesis(genesis, ctx));
+  const auto member = adapter.memberForPid(ctx, genesis.pid);
+  ASSERT_TRUE(member);
+
+  const auto total = [&] {
+    const auto rec =
+        varsRecord(ctx.arena, ctx.core, *member, "total", false);
+    if (!rec) return std::optional<std::int64_t>{};
+    const auto value = ctx.arena.linked(*rec, ctx.core.dims().values);
+    return value ? ctx.arena.asInt64(*value)
+                 : std::optional<std::int64_t>{};
+  };
+  const auto journal = [&] {
+    const auto seen = ctx.core.findOrMintDimension("d.seen");
+    std::vector<std::string> names;
+    for (const CellRef cell : zigzag::rankAfter(ctx.arena, *member, seen))
+      names.emplace_back(ctx.arena.textOf(cell));
+    return names;
+  };
+  ActorExecution exec;
+  exec.pid   = genesis.pid;
+  exec.grant = ActorGrant{.programRef      = "sha256:p",
+                          .baseRef         = "sha256:b",
+                          .maxInstructions = 100'000,
+                          .maxCells        = 10'000};
+  exec.cursor =
+      ctx.vm.spawnCursor(ctx.vm.mintOpcode(OpcodeKind::Halt), "actor");
+
+  const std::vector<std::pair<std::string, zigzag::vortex::CellValue>>
+      seven{{"amount", std::int64_t{7}}};
+  adapter.sendPercept(ctx, *member, "Add", seven, "s1");
+  adapter.sendPercept(ctx, *member, "Add", seven, "s1");
+  ASSERT_TRUE(adapter(exec, ctx));
+  EXPECT_THAT(journal(), ::testing::ElementsAre("Add", "Initialize"));
+  EXPECT_THAT(total(), ::testing::Optional(7));
+
+  const std::vector<std::pair<std::string, zigzag::vortex::CellValue>>
+      three{{"amount", std::int64_t{3}}};
+  adapter.sendPercept(ctx, *member, "Add", three, "s2");
+  ASSERT_TRUE(adapter(exec, ctx));
+  EXPECT_THAT(journal(),
+              ::testing::ElementsAre("Add", "Initialize", "Add"));
+  EXPECT_THAT(total(), ::testing::Optional(10));
+}
+
 } // namespace

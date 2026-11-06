@@ -1,5 +1,6 @@
 #include "executor.hpp"
 
+#include "../scalar.hpp"
 #include "../vortex/vortex_vm.hpp"
 #include "../zigzag/arena_manifold.hpp"
 #include "meta.hpp"
@@ -3011,6 +3012,57 @@ void VagentExecutor::moved(zigzag::ArenaManifold &arena,
   queueAdapterPercept(
       arena, core, agent, "Moved", payload,
       static_cast<std::size_t>(setting("vagent.journal_size", 64)));
+}
+
+void VagentExecutor::injectPercept(
+    zigzag::ArenaManifold &arena, zigzag::vortex::VortexCore &core,
+    zigzag::CellRef agent, std::string_view name,
+    const std::vector<std::pair<std::string, zigzag::vortex::CellValue>> &
+        fields,
+    std::string_view id) const {
+  if (agent == noCell || name.empty()) return;
+  // marshalTermExpr's literal shape: dual channels — the typed bits
+  // boundValue reads first, the text belief-term equality walks.
+  const auto literal = [&](const zigzag::vortex::CellValue &value) {
+    return std::visit(
+        [&](const auto &v) -> CellRef {
+          using T = std::decay_t<decltype(v)>;
+          if constexpr (std::is_same_v<T, std::string>) {
+            return arena.makeCell(v);
+          } else if constexpr (std::is_same_v<T, bool>) {
+            const auto cell =
+                arena.makeCell(v ? std::string{"true"}
+                                 : std::string{"false"});
+            zigzag::expectWritten(arena.setValueBits(
+                cell, xanadu::ValueKind::Bool,
+                static_cast<std::uint64_t>(v)));
+            return cell;
+          } else if constexpr (std::is_same_v<T, std::int64_t>) {
+            const auto cell =
+                arena.makeCell(std::format("{}", v));
+            zigzag::expectWritten(arena.setValueBits(
+                cell, xanadu::ValueKind::Int64,
+                std::bit_cast<std::uint64_t>(v)));
+            return cell;
+          } else {
+            const auto cell =
+                arena.makeCell(std::format("{}", v));
+            zigzag::expectWritten(
+                arena.setValueBits(cell, xanadu::ValueKind::Double,
+                                   xanadu::canonicalDoubleBits(v)));
+            return cell;
+          }
+        },
+        value);
+  };
+  const auto payload = arena.makeCell(name);
+  for (const auto &[field, value] : fields)
+    perceptField(arena, core, payload, field, literal(value));
+  deliver(arena, core,
+          Delivery{.agent       = agent,
+                   .percept     = std::string{name},
+                   .id          = std::string{id},
+                   .payloadCell = payload});
 }
 
 void VagentExecutor::resumed(zigzag::ArenaManifold &arena,

@@ -391,6 +391,15 @@ VagentAdapter::nextDeadline(zigzag::vortex::WorkerContext &ctx,
   return earliest;
 }
 
+void VagentAdapter::sendPercept(
+    zigzag::vortex::WorkerContext &ctx, CellRef member,
+    std::string_view name,
+    const std::vector<std::pair<std::string,
+                                zigzag::vortex::CellValue>> &fields,
+    std::string_view id) const {
+  executor_.injectPercept(ctx.arena, ctx.core, member, name, fields, id);
+}
+
 bool VagentAdapter::pendingWork(zigzag::vortex::WorkerContext &ctx,
                                 CellRef member) const {
   auto &arena = ctx.arena;

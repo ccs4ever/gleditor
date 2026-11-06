@@ -197,6 +197,22 @@ public:
                    zigzag::vortex::VortexCore &core,
                    zigzag::CellRef agent, zigzag::CellRef child) const;
 
+  /// A host-side percept injection — what an `ActorSend` arrival
+  /// becomes for fields the bare `value` string cannot carry: the
+  /// payload term is marshaled in the receiver's arena (literal
+  /// fields carry marshalTermExpr's dual text+typed-bits channels,
+  /// `+d.name` keys each field) and `deliver` lands it through the
+  /// same seen/pending/grab shape the intra-program fanout uses, so
+  /// the member's next settle dispatches it like a wire arrival.
+  /// `id` rides +d.delivered's idempotence — a runner resending the
+  /// same request redelivers harmlessly.
+  void injectPercept(zigzag::ArenaManifold &arena,
+                     zigzag::vortex::VortexCore &core,
+                     zigzag::CellRef agent, std::string_view name,
+                     const std::vector<std::pair<
+                         std::string, zigzag::vortex::CellValue>> &fields,
+                     std::string_view id) const;
+
   /// §5.4's `Moved{name}` receiver half: @p member is the adapter's
   /// new reference record (its `+d.name` is the peer name it
   /// replaces). Every `+d.vars` record still holding a stale

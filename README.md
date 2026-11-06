@@ -18,7 +18,7 @@ decisions; [AGENTS.md](AGENTS.md) is the contributor runbook.
 | `build/vquery`, `build/vqueryc` | VQL query runner/REPL and standalone compiler.                                 |
 | `build/vpl`, `build/vplc`       | VPL array-language runner/REPL and compiler.                                   |
 | `build/vprolog`                 | Prolog REPL over the Vortex/Vlog logic runtime.                                |
-| `build/vagent`                  | vagent source-checking frontend; compiler and actor runtime are in progress.   |
+| `build/vagent`                  | vagent agent-language checker and single-node runner.                          |
 | `build/store-dump`              | Inspect a store or `ops.nodes` directly, including one the loader refuses.     |
 | `build/xudu-swarm-peer`         | Peer used by the network-namespace swarm tests.                                |
 
@@ -83,16 +83,20 @@ example `./build/xuzz --lens docs --raster`. The query and language tools also o
 headless execution.
 
 The [vagent user guide](docs/vagent-user-guide.md) introduces its typed agent language and explains
-which commands are implemented. The current frontend can be built and checked with:
+which commands are implemented. Build, check, and run a program with:
 
 ```sh
 make -j$(nproc) vagent vagent_frontend_test
 make -j$(nproc) test/vagent-frontend
 ./build/vagent check tests/samples/vagent/mini_01.vagent
+./build/vagent run tests/samples/vagent/mini_01.vagent \
+  --send 'Add{amount: 3}' --send 'Add{amount: 2}'
 ```
 
-Source checking does not execute an agent. Vortex lowering, the actor adapter, `run`, and the REPL
-remain tracked work in the [implementation progress](design/vagent-implementation.md).
+`run` lowers the program, seeds its image into a fresh local lineage, and drives the agent on a
+single-node `MeshActorRuntime` until quiescence — there is no transport yet, so remote spawn/stop
+requests stay undispatched. The REPL and network execution remain tracked work in the
+[implementation progress](design/vagent-implementation.md).
 
 ## Library and rendering
 

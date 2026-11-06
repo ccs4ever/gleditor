@@ -161,6 +161,18 @@ public:
   nextDeadline(zigzag::vortex::WorkerContext &ctx,
                zigzag::CellRef member) const;
 
+  /// The host-side send half of §5.5 — what a wire `ActorSend`
+  /// becomes for fields the bare `value` string cannot carry: the
+  /// field payload is marshaled in the receiver's arena and lands
+  /// through deliver's seen/pending shape, so the member's next
+  /// settle dispatches it like a wire arrival. `id` rides
+  /// +d.delivered's idempotence.
+  void sendPercept(zigzag::vortex::WorkerContext &ctx,
+                   zigzag::CellRef member, std::string_view name,
+                   const std::vector<std::pair<
+                       std::string, zigzag::vortex::CellValue>> &fields,
+                   std::string_view id = {}) const;
+
   /// §3.7's intra-program backlog: a drained delivery lands on the
   /// receiver's +d.pending or +d.inbox rank — the member's own settle
   /// consumes it next turn, but the mesh mailbox never sees it, so an
