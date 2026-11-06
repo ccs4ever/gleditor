@@ -110,6 +110,11 @@ MeshActorRuntime *MeshActorRuntime::setGenesisHook(GenesisHook hook) {
   genesisHook_ = std::move(hook);
   return this;
 }
+MeshActorRuntime *
+MeshActorRuntime::setSpawnResultHook(SpawnResultHook hook) {
+  spawnResultHook_ = std::move(hook);
+  return this;
+}
 MeshActorRuntime *MeshActorRuntime::setSettingReader(
     std::function<std::optional<std::int64_t>(std::string_view)> reader) {
   settingReader_ = std::move(reader);
@@ -441,6 +446,9 @@ MeshActorRuntime::receive(const xanadu::identity::Fingerprint &identity,
     else
       response.reason = "spawn refused";
     emit(message.source->node, response);
+    // The ack lives and dies at the runtime layer — the requester's
+    // adapter hears the outcome through the hook, never the mailbox.
+    if (spawnResultHook_) spawnResultHook_(message, pid);
     if (!pid) return std::unexpected(pid.error());
     return {};
   }

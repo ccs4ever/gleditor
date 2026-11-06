@@ -55,10 +55,30 @@ memberPidKey(zigzag::ArenaManifold &arena,
   return std::string{arena.textOf(*v)};
 }
 
+/// The +d.step/+d.name field envelope a fault payload carries —
+/// `occurrence.<name>` on an `on EffectFailed` handler reads these
+/// children back. The executor's own raise path mints the same shape.
+void replyField(zigzag::ArenaManifold &arena,
+                zigzag::vortex::VortexCore &core, CellRef payload,
+                std::string_view name, std::string_view text) {
+  const auto value = arena.makeCell(text);
+  zigzag::expectWritten(
+      arena.link(zigzag::rankTail(arena, payload, core.dims().step),
+                 core.dims().step, DimVector::POS, value));
+  zigzag::expectWritten(arena.link(value, core.dims().name,
+                                 DimVector::POS, arena.makeCell(name)));
+}
+
 } // namespace
 
 VagentAdapter::VagentAdapter(VagentExecutor executor)
     : executor_(std::move(executor)) {}
+
+void VagentAdapter::bindNative(std::string_view capacity,
+                               std::string_view method, NativeBody body) {
+  natives_.emplace(std::string{capacity} + "." + std::string{method},
+                   std::move(body));
+}
 
 std::expected<std::string, mesh::ActorError>
 VagentAdapter::operator()(const mesh::ActorExecution &exec,
@@ -131,6 +151,60 @@ void VagentAdapter::drain(zigzag::vortex::WorkerContext &ctx,
   auto &arena = ctx.arena;
   auto &core  = ctx.core;
   for (const auto &entry : VagentExecutor::drainOutbox(arena, core, member)) {
+    if (entry.kind == "effect" || entry.kind == "cancel") {
+      // Host work, not routing: an effect invokes its binding and
+      // replies on the request's correlation; a cancel only notifies
+      // — the parked wait already faulted on its own deadline. The
+      // `dispatched` mark is what makes "performed once" durable: the
+      // outbox rank persists, so without it every drain would re-run
+      // the body and a checkpoint would replay it.
+      if (entry.cell == noCell ||
+          varsRecord(arena, core, entry.cell, "dispatched", false))
+        continue;
+      if (const auto rec =
+              varsRecord(arena, core, entry.cell, "dispatched", true))
+        zigzag::expectWritten(arena.link(*rec, core.dims().values,
+                                       DimVector::POS,
+                                       arena.makeCell("1")));
+      if (entry.kind != "effect") continue;
+
+      zigzag::CellRef result = noCell;
+      std::string fault;
+      if (const auto fn = natives_.find(entry.capacity + "." +
+                                        entry.payload);
+          fn != natives_.end()) {
+        if (auto out = fn->second(ctx, entry.sender, entry.payloadCell))
+          result = *out;
+        else
+          fault = std::move(out.error());
+      } else {
+        fault = "unbound";
+      }
+      Delivery reply{.agent        = entry.sender,
+                     .percept      = fault.empty() ? "EffectDone"
+                                                  : "EffectFailed",
+                     .id           = entry.id + ":effect",
+                     .kind         = "effect",
+                     .payloadCell  = noCell,
+                     .correlation  = entry.id,
+                     .sender       = entry.sender,
+                     .delegator    = noCell,
+                     .fault        = fault};
+      if (fault.empty()) {
+        reply.payloadCell = result;
+      } else {
+        // Handlers read occurrence.capacity/method/cause — the
+        // fielded record — while the parked wait takes the same
+        // cause off the journal's fault record into its else ladder.
+        const auto payload = arena.makeCell("EffectFailed");
+        replyField(arena, core, payload, "capacity", entry.capacity);
+        replyField(arena, core, payload, "method", entry.payload);
+        replyField(arena, core, payload, "cause", fault);
+        reply.payloadCell = payload;
+      }
+      executor_.deliver(arena, core, reply);
+      continue;
+    }
     const auto deliveries =
         VagentExecutor::route(arena, core, core.home(), entry);
     if (deliveries.empty()) {

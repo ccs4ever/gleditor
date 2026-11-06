@@ -599,5 +599,42 @@ TEST(MeshActorTest, PumpScanRotatesAcrossBusyActors) {
   EXPECT_EQ(std::ranges::count(served, second->cursor), 2);
   EXPECT_EQ(runtime.pumpOne(wall), false);
 }
+
+TEST(MeshActorRuntimeTest, SpawnResultHookReportsGrantAndRefusal) {
+  // ActorSpawnAck is consumed at the runtime layer, so the adapter's
+  // only window onto a spawn outcome is this hook: it must fire on
+  // grant and on refusal alike, carrying spawn()'s own return.
+  Fingerprint identity;
+  MeshActorRuntime runtime("node", 1);
+  authorize(runtime, identity);
+  int calls = 0;
+  std::optional<ActorPid> granted;
+  std::optional<ActorError> refused;
+  std::string lastRequest;
+  runtime.setSpawnResultHook(
+      [&](const ActorMessage &request,
+          const std::expected<ActorPid, ActorError> &result) {
+        ++calls;
+        lastRequest = request.requestId;
+        if (result)
+          granted = *result;
+        else
+          refused = result.error();
+      });
+  ASSERT_TRUE(
+      runtime.receive(identity, spawnRequest(), ActorTime{}, wall));
+  EXPECT_EQ(calls, 1);
+  EXPECT_EQ(lastRequest, "spawn-1");
+  ASSERT_TRUE(granted);
+  auto bad       = spawnRequest("spawn-2");
+  bad.capability = "forged-grant";
+  EXPECT_EQ(
+      runtime.receive(identity, bad, ActorTime{}, wall).error(),
+      ActorError::NotAuthorized);
+  EXPECT_EQ(calls, 2);
+  EXPECT_EQ(lastRequest, "spawn-2");
+  ASSERT_TRUE(refused);
+  EXPECT_EQ(*refused, ActorError::NotAuthorized);
+}
 } // namespace
 } // namespace zigzag::vortex::mesh

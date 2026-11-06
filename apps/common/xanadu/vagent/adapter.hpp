@@ -20,6 +20,8 @@
 // mapping and a migrated member's identity follows it.
 
 #include <expected>
+#include <functional>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -29,10 +31,25 @@
 
 namespace xanadu::vagent {
 
+/// A native skill body's ABI: the drain hands the binding the calling
+/// member and the marshaled call term (its +d.step children are the
+/// args), and the body either mints the return cell in the arena or
+/// fails with the cause an `EffectFailed` percept reports.
+using NativeBody = std::function<std::expected<zigzag::CellRef, std::string>(
+    zigzag::vortex::WorkerContext &, zigzag::CellRef agent,
+    zigzag::CellRef payload)>;
+
 class VagentAdapter {
 public:
   /// The executor does every turn's work; the adapter wraps it.
   explicit VagentAdapter(VagentExecutor executor = VagentExecutor{});
+
+  /// Install the host body behind `capacity.method` — a `native skill`
+  /// declaration's real implementation. The drain invokes it once per
+  /// staged effect entry and replies `EffectDone` with the minted
+  /// result or `EffectFailed{cause}` with the refusal.
+  void bindNative(std::string_view capacity, std::string_view method,
+                  NativeBody body);
 
   /// MeshActorRuntime::Executor. Translates before delegating: the
   /// exec pid's mesh spawnSequence becomes the member's directory
@@ -106,6 +123,7 @@ public:
 
 private:
   VagentExecutor executor_;
+  std::map<std::string, NativeBody> natives_;
 };
 
 } // namespace xanadu::vagent

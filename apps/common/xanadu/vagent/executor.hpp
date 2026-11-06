@@ -57,6 +57,18 @@ struct OutboxEntry {
   // "unanswered"/"remote_fault" — which fails the sender's wait
   // through its `else` cause rather than binding a value.
   std::string fault;
+  // The staged record cell itself — a host binding marks invoke-once
+  // state on it (the adapter's `dispatched`), which a pure-read drain
+  // could not otherwise carry back.
+  zigzag::CellRef cell{zigzag::noCell};
+  // An "effect" entry's provider name — the capacity the call
+  // qualified on, which the host's `capacity.method` binding table
+  // keys against. Empty for every other kind.
+  std::string capacity;
+  // V6's `effect preempts` — the entry carries the signature's
+  // modifier so a scheduling binding honors start-at-once; the
+  // sequential drain rides it for ordering.
+  bool preempts{false};
 };
 
 /// One staged delivery the adapter owes a receiver: the directory-

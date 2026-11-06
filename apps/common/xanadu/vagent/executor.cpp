@@ -301,7 +301,9 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
                                std::string_view correlation = {},
                                std::string_view percept     = {},
                                std::string_view fault       = {},
-                               bool preempts = false) -> std::string {
+                               bool preempts = false,
+                               std::string_view capacity = {})
+        -> std::string {
     const auto position = std::ranges::to<std::vector>(
                               zigzag::rankAfter(arena, agent, dims.outbox))
                               .size();
@@ -342,6 +344,10 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
     // V6's `effect preempts` — the entry carries the signature's
     // modifier so the binding's start-at-once rule survives the drain.
     if (preempts) outField("preempts", arena.makeScalarCell(std::int64_t{1}));
+    // An effect's provider name — the host binding's dispatch key;
+    // the payload term names only the method.
+    if (!capacity.empty())
+      outField("capacity", arena.makeCell(std::string{capacity}));
     if (delegator != noCell)
       outField("delegator",
                arena.makeScalarCell(static_cast<std::int64_t>(delegator)));
@@ -1031,7 +1037,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       if (!provided) return false;
       const auto requestId =
           stageOutbox("effect", payload, {}, {}, noCell, {}, {}, {},
-                      field("preempts") != noCell);
+                      field("preempts") != noCell, arena.textOf(cap));
       if (intention == noCell) return true;
       // §6.6's suspension: EffectDone and EffectFailed share the
       // request's correlation — the awaitEffect marker lets the wake
@@ -1984,6 +1990,31 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       // into the else ladder through the percept's `fault` record.
       const auto awaitEffect =
           meta.intentionField(intention, "awaitEffect").value_or(0) != 0;
+      // A mark the adapter wrote between turns — childDown's "down" or
+      // resumed's "migrated" — is the freshest fact the intention can
+      // hold: it postdates everything already journaled, so it wins
+      // over a delivered reply that the dead member or the previous
+      // incarnation sent before the mark was laid. One-shot like
+      // `refused`: unlink before the else runs so a re-park can't
+      // inherit the death.
+      {
+        std::string awaitFault;
+        if (const auto rec =
+                varsRecord(arena, core, intention, "awaitFault", false))
+          if (const auto v =
+                  arena.linked(*rec, core.dims().values, DimVector::POS))
+            awaitFault = std::string{arena.textOf(*v)};
+        if (!awaitFault.empty()) {
+          if (const auto rec =
+                  varsRecord(arena, core, intention, "awaitFault", false))
+            zigzag::expectWritten(
+                arena.unlink(*rec, core.dims().values, DimVector::POS));
+          meta.setIntentionField(intention, "waiting", 0);
+          if (!runElse(intention, awaitFault))
+            faultIntention(intention, awaitFault);
+          continue;
+        }
+      }
       bool matched      = false;
       CellRef matchCell = noCell;
       // The occurrence `as g` binds is the delivered payload term when
@@ -2161,45 +2192,22 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
             }
         meta.setIntentionField(intention, "waiting", 0);
         meta.setIntentionField(intention, "ready", 1);
-      } else {
-        // A mark the adapter wrote between turns — childDown's "down"
-        // or resumed's "migrated". The else ladder hears the real
-        // cause before the within bound would report a deadline; a
-        // late-arriving answer would still win a same-turn race
-        // through `matched` above, which is the honest ordering.
-        std::string awaitFault;
-        if (const auto rec =
-                varsRecord(arena, core, intention, "awaitFault", false))
-          if (const auto v =
-                  arena.linked(*rec, core.dims().values, DimVector::POS))
-            awaitFault = std::string{arena.textOf(*v)};
-        if (!awaitFault.empty()) {
-          // One-shot like `refused`: unlink before the else runs so a
-          // re-park can't inherit the death.
+      } else if (turn >= deadline) {
+        meta.setIntentionField(intention, "waiting", 0);
+        // V6's elapsed deadline stages cancel to the binding — best
+        // effort by the host contract — before the statement's own
+        // ladder; the correlation names the in-flight request.
+        if (awaitEffect) {
+          CellRef call = noCell;
           if (const auto rec =
-                  varsRecord(arena, core, intention, "awaitFault", false))
-            zigzag::expectWritten(
-                arena.unlink(*rec, core.dims().values, DimVector::POS));
-          meta.setIntentionField(intention, "waiting", 0);
-          if (!runElse(intention, awaitFault))
-            faultIntention(intention, awaitFault);
-        } else if (turn >= deadline) {
-          meta.setIntentionField(intention, "waiting", 0);
-          // V6's elapsed deadline stages cancel to the binding — best
-          // effort by the host contract — before the statement's own
-          // ladder; the correlation names the in-flight request.
-          if (awaitEffect) {
-            CellRef call = noCell;
-            if (const auto rec =
-                    varsRecord(arena, core, intention, "awaitCall", false))
-              if (const auto v =
-                      arena.linked(*rec, core.dims().values, DimVector::POS))
-                if (const auto r = arena.asInt64(*v))
-                  call = static_cast<CellRef>(*r);
-            stageOutbox("cancel", call, {}, {}, noCell, corr);
-          }
-          if (!runElse(intention)) faultIntention(intention, "deadline");
+                  varsRecord(arena, core, intention, "awaitCall", false))
+            if (const auto v =
+                    arena.linked(*rec, core.dims().values, DimVector::POS))
+              if (const auto r = arena.asInt64(*v))
+                call = static_cast<CellRef>(*r);
+          stageOutbox("cancel", call, {}, {}, noCell, corr);
         }
+        if (!runElse(intention)) faultIntention(intention, "deadline");
       }
       if (!matched) continue;
     }
@@ -2643,7 +2651,12 @@ VagentExecutor::drainOutbox(zigzag::ArenaManifold &arena,
                     .delegator   = refField("delegator"),
                     .percept     = read("percept"),
                     .correlation = read("correlation"),
-                    .fault       = read("fault")});
+                    .fault       = read("fault"),
+                    .cell        = entry,
+                    .capacity    = read("capacity"),
+                    .preempts =
+                        varsRecord(arena, core, entry, "preempts", false)
+                            .has_value()});
   }
   return entries;
 }

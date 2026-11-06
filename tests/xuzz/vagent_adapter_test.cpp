@@ -322,4 +322,134 @@ TEST(VagentAdapterTest, MemberReboundUpdatesStaleReferences) {
               ::testing::Contains("Moved"));
 }
 
+TEST(VagentAdapterTest, NativeBodyRepliesDoneAndBindsTheResult) {
+  AdapterHarness h;
+  const auto image = h.lower(
+      "module demo\nevent Tick\ngoal Work() perform\n"
+      "capacity Navigation { effect def read(): Str within 9s }\n"
+      "native skill Device implements Navigation\n"
+      "agent A {\n"
+      "  uses Navigation\n"
+      "  install Device\n"
+      "  on Tick { adopt Work() }\n"
+      "  plan w for Work { let r := Navigation.read() else cause }\n"
+      "}");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+  auto &core  = h.ctx.core;
+  int invoked = 0;
+  h.adapter.bindNative("Navigation", "read",
+                       [&](WorkerContext &c, CellRef, CellRef) {
+                         ++invoked;
+                         return c.arena.makeCell("berries");
+                       });
+  // The Tick turn stages + parks the effect; the post-commit drain
+  // invokes the binding and replies EffectDone on the correlation —
+  // the next turn's wake match binds r.
+  ASSERT_TRUE(h.adapter(h.execution(h.send("Tick")), h.ctx));
+  EXPECT_EQ(invoked, 1);
+  ASSERT_TRUE(h.adapter(h.execution(), h.ctx));
+  const auto r = varsRecord(arena, core, image->agentCell, "r", false);
+  ASSERT_TRUE(r);
+  const auto rv =
+      arena.linked(*r, core.dims().values, DimVector::POS);
+  ASSERT_TRUE(rv);
+  EXPECT_EQ(arena.textOf(*rv), "berries");
+  EXPECT_THAT(h.journalOf(image->agentCell),
+              ::testing::Contains("EffectDone"));
+  // `dispatched` makes the invoke once-durable: later drains see the
+  // same staged entry and leave the body alone.
+  ASSERT_TRUE(h.adapter(h.execution(), h.ctx));
+  EXPECT_EQ(invoked, 1);
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
+TEST(VagentAdapterTest, NativeFaultCarriesTheCauseIntoElse) {
+  AdapterHarness h;
+  const auto image = h.lower(
+      "module demo\nevent Tick\ngoal Work() perform\n"
+      "capacity Navigation { effect def read(): Str within 9s }\n"
+      "native skill Device implements Navigation\n"
+      "agent A {\n"
+      "  uses Navigation\n"
+      "  install Device\n"
+      "  on Tick { adopt Work() }\n"
+      "  plan w for Work { let r := Navigation.read() else cause }\n"
+      "}");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+  auto &core  = h.ctx.core;
+  h.adapter.bindNative(
+      "Navigation", "read",
+      [](WorkerContext &, CellRef, CellRef)
+          -> std::expected<CellRef, std::string> {
+        return std::unexpected("denied");
+      });
+  ASSERT_TRUE(h.adapter(h.execution(h.send("Tick")), h.ctx));
+  ASSERT_TRUE(h.adapter(h.execution(), h.ctx));
+  const auto r = varsRecord(arena, core, image->agentCell, "r", false);
+  ASSERT_TRUE(r);
+  const auto rv =
+      arena.linked(*r, core.dims().values, DimVector::POS);
+  ASSERT_TRUE(rv);
+  EXPECT_EQ(arena.textOf(*rv), "denied");
+  EXPECT_THAT(h.journalOf(image->agentCell),
+              ::testing::Contains("EffectFailed"));
+}
+
+TEST(VagentAdapterTest, UnboundNativeFaultsUnbound) {
+  AdapterHarness h;
+  const auto image = h.lower(
+      "module demo\nevent Tick\ngoal Work() perform\n"
+      "capacity Navigation { effect def read(): Str within 9s }\n"
+      "native skill Device implements Navigation\n"
+      "agent A {\n"
+      "  uses Navigation\n"
+      "  install Device\n"
+      "  on Tick { adopt Work() }\n"
+      "  plan w for Work { let r := Navigation.read() else cause }\n"
+      "}");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+  auto &core  = h.ctx.core;
+  // No binding registered — the staged effect still answers, with
+  // the honest provider-absent cause.
+  ASSERT_TRUE(h.adapter(h.execution(h.send("Tick")), h.ctx));
+  ASSERT_TRUE(h.adapter(h.execution(), h.ctx));
+  const auto r = varsRecord(arena, core, image->agentCell, "r", false);
+  ASSERT_TRUE(r);
+  const auto rv =
+      arena.linked(*r, core.dims().values, DimVector::POS);
+  ASSERT_TRUE(rv);
+  EXPECT_EQ(arena.textOf(*rv), "unbound");
+}
+
+TEST(VagentAdapterTest, HandlerFormEffectDispatchesItsReply) {
+  AdapterHarness h;
+  const auto image = h.lower(
+      "module demo\nevent Tick\nevent Got\n"
+      "capacity Navigation { effect def ping(): Str within 9s }\n"
+      "native skill Device implements Navigation\n"
+      "agent A {\n"
+      "  uses Navigation\n"
+      "  install Device\n"
+      "  on Tick { Navigation.ping() }\n"
+      "  on EffectDone { emit Got{} }\n"
+      "}");
+  ASSERT_TRUE(image);
+  h.adapter.bindNative("Navigation", "ping",
+                       [](WorkerContext &c, CellRef, CellRef) {
+                         return c.arena.makeCell("pong");
+                       });
+  // The handler form parks nothing — the reply arrives as an ordinary
+  // percept and its handler dispatches on the next turn.
+  ASSERT_TRUE(h.adapter(h.execution(h.send("Tick")), h.ctx));
+  ASSERT_TRUE(h.adapter(h.execution(), h.ctx));
+  ASSERT_TRUE(h.adapter(h.execution(), h.ctx));
+  EXPECT_THAT(h.journalOf(image->agentCell),
+              ::testing::Contains("EffectDone"));
+  EXPECT_THAT(h.journalOf(image->agentCell),
+              ::testing::Contains("Got"));
+}
+
 } // namespace

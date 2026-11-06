@@ -617,10 +617,10 @@ const Decl *Checker::goal(const Decl *owner, std::string_view name) const {
 
 bool Checker::event(std::string_view name) const {
   static const std::set<std::string_view> builtins{
-      "Event",          "Initialize",  "Destroy",       "GoalAchieved",
-      "GoalFailed",     "GoalDropped", "PlanFailed",    "EffectFailed",
-      "ConditionFault", "ChildDown",   "ChildStopping", "SpawnFailed",
-      "DeliveryFailed", "Moved"};
+      "Event",          "Initialize",     "Destroy",     "GoalAchieved",
+      "GoalFailed",     "GoalDropped",    "PlanFailed",  "EffectFailed",
+      "EffectDone",     "ConditionFault", "ChildDown",   "ChildStopping",
+      "SpawnFailed",    "DeliveryFailed", "Moved"};
   if (builtins.contains(name)) return true;
   auto *decl = global(name);
   return decl && decl->kind == DeclKind::Event;

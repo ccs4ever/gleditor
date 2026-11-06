@@ -166,6 +166,16 @@ public:
   using GenesisHook = std::function<std::expected<void, ActorError>(
       const ActorGenesis &, WorkerContext &)>;
 
+  /// The spawn-request outcome a requesting adapter cannot see —
+  /// ActorSpawnAck is acknowledged at the runtime layer and never
+  /// enqueues to the requester's mailbox, so a refusal would leave
+  /// its staged deliveries waiting forever. Fired from receive()'s
+  /// ActorSpawn arm with spawn()'s own return: the granted pid or
+  /// the refusal's error.
+  using SpawnResultHook = std::function<void(
+      const ActorMessage &request,
+      const std::expected<ActorPid, ActorError> &result)>;
+
   MeshActorRuntime(std::string node, std::uint64_t epoch,
                    ActorOptions options = {});
   ~MeshActorRuntime();
@@ -176,6 +186,7 @@ public:
   MeshActorRuntime *setExecutor(Executor executor);
   MeshActorRuntime *setSender(Sender sender);
   MeshActorRuntime *setGenesisHook(GenesisHook hook);
+  MeshActorRuntime *setSpawnResultHook(SpawnResultHook hook);
   /// The settings-layer read channel for `vagent.*` tunables
   /// (actor-executor §4.1); the adapter binds `system://settings` reads.
   /// Unset readers fall back to the compiled-in defaults.
@@ -298,6 +309,7 @@ private:
   Executor executor_;
   Sender sender_;
   GenesisHook genesisHook_;
+  SpawnResultHook spawnResultHook_;
   /// The settings-layer read channel the adapter installs — the
   /// `vagent.*` tunables of actor-executor §4.1/§4.2. Pump-side policy
   /// (`ready_per_message`) reads through it rather than ActorOptions,
