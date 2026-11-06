@@ -103,6 +103,14 @@ the section 5 table implied more than 200.
   when inference from it gives the same kind and bits, and render canonically otherwise, as R6
   already requires. VQL `exportToStore` gets the same guard; the slice DTO is a follow-up.
 
+- 2026-11-06: I3-3D round 1 (ML FAIL 1 BLOCKING 4 MAJOR, SEC FAIL 4 MAJOR; [reports](i3-3-review/)).
+  Revision 2 resolves all of them; the ML expert closed B1 and M1-M4 and raised N1 (a clock jump did
+  not invalidate live steady-basis mappings), which revision 2.1 resolves and the ML expert closed.
+  The ML expert's remaining MINOR (the 200 ppm jump bound against a 500 ppm kernel slew; a wall step
+  needlessly dropping paired mappings) is recorded for I3-3b2. I3-3D revision 2.1 is accepted. Owner
+  questions Q1-Q6 and Q8-Q11 are open; Q7 is answered by the ML expert. I3-3a waits on Q2, Q3 and
+  Q9.
+
 ## 1. I3-2 round-2 decisions
 
 The items marked `DECISION` in [findings-r2.md](i3-2-review/findings-r2.md):
