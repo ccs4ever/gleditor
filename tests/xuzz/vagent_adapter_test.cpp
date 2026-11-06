@@ -1767,6 +1767,127 @@ TEST(VagentAdapterTest, WireCancelBeforeAdoptionIsRemembered) {
   EXPECT_EQ(h.ctx.arena.outstandingMarks(), 0u);
 }
 
+TEST(VagentAdapterTest, TwoRuntimesDelegateAcrossTheWire) {
+  // End to end over real wire messages: two runtimes, each with its
+  // own arena, executor and adapter, coupled by the sendSender
+  // hooks. The parent's `achieve … by peer` leaves as an ActorSend,
+  // the child's adapter adopts it (the genesis-bound $parent is
+  // kin), the plan runs, and the staged outcome returns on the wire
+  // to ready the parent's parked intention — semantic correlation
+  // matching across both arenas.
+  AdapterHarness parent, child;
+  const auto pImage =
+      parent.lower("module demo\nevent Tick\nevent Done\n"
+                   "goal Outer() perform\n"
+                   "goal Deliver() perform\n"
+                   "agent A {\n"
+                   "  var peer: Opt<Agent> := none\n"
+                   "  on Tick { adopt Outer() }\n"
+                   "  plan o for Outer { achieve Deliver() by peer "
+                   "within 9s; emit Done{} }\n"
+                   "}");
+  ASSERT_TRUE(pImage);
+  const auto cImage =
+      child.lower("module demo\nevent ChildDone\n"
+                  "goal Deliver() perform\n"
+                  "agent B {\n"
+                  "  plan d for Deliver { emit ChildDone{} }\n"
+                  "}");
+  ASSERT_TRUE(cImage);
+
+  const ActorPid parentPid{"node0", "parentid", 1, 2};
+  const ActorPid childPid{"node1", "childid", 1, 4};
+
+  // The child's incarnation answers a spawn from parentPid —
+  // genesis mints the $parent member and notes both pids, which is
+  // what makes the wire achieve's sender kin.
+  ActorMessage spawnRequest;
+  spawnRequest.type   = MessageType::ActorSpawn;
+  spawnRequest.source = parentPid;
+  ActorGenesis genesis;
+  genesis.pid     = childPid;
+  genesis.request = &spawnRequest;
+  ASSERT_TRUE(child.adapter.genesis(genesis, child.ctx));
+
+  parent.adapter.noteMemberPid(parent.ctx, pImage->agentCell,
+                               parentPid);
+  mintRemoteMember(parent, pImage->agentCell, "Peer", childPid,
+                   "peer");
+
+  // The transport: each runtime's sent messages queue for the other.
+  std::vector<ActorMessage> parentToChild, childToParent;
+  parent.adapter.setSendSender(
+      [&parentToChild](WorkerContext &, const ActorMessage &m)
+          -> std::expected<void, ActorError> {
+        parentToChild.push_back(m);
+        return {};
+      });
+  child.adapter.setSendSender(
+      [&childToParent](WorkerContext &, const ActorMessage &m)
+          -> std::expected<void, ActorError> {
+        childToParent.push_back(m);
+        return {};
+      });
+  const auto deliver = [](AdapterHarness &h, const ActorPid &self,
+                          const ActorMessage &m) {
+    auto turn = h.execution(m);
+    turn.pid  = self;
+    return h.adapter(turn, h.ctx);
+  };
+
+  // Tick runs the parent's plan to the park: the wire request is a
+  // real ActorSend bound for the child's pid. The turn's pid names
+  // the parent's noted incarnation — the harness default only
+  // resolved because the earlier tests noted that exact pid.
+  auto tick = parent.execution(parent.send("Tick"));
+  tick.pid  = parentPid;
+  ASSERT_TRUE(parent.adapter(tick, parent.ctx));
+  ASSERT_EQ(parentToChild.size(), 1u);
+  EXPECT_EQ(parentToChild[0].type, MessageType::ActorSend);
+  ASSERT_TRUE(parentToChild[0].target);
+  EXPECT_EQ(*parentToChild[0].target, childPid);
+  const auto request = parsePercept(parentToChild[0].value);
+  ASSERT_TRUE(request);
+  EXPECT_EQ(request->name, "Deliver");
+  std::string corr;
+  for (const auto &[f, v] : request->fields)
+    if (f == "__correlation")
+      if (const auto *s = std::get_if<std::string>(&v)) corr = *s;
+  ASSERT_FALSE(corr.empty());
+
+  // The child takes the achieve off the wire, adopts it — its
+  // genesis-bound parent is kin — and the plan's retire stages the
+  // reply. ChildDone broadcasts remote to the parent; the outcome
+  // is member-addressed with the correlation echoed.
+  ASSERT_TRUE(deliver(child, childPid, parentToChild[0]));
+  ASSERT_EQ(childToParent.size(), 2u);
+  EXPECT_EQ(childToParent[0].value, "ChildDone");
+  const auto outcome = parsePercept(childToParent[1].value);
+  ASSERT_TRUE(outcome);
+  EXPECT_EQ(outcome->name, "outcome");
+  std::string status, echo;
+  for (const auto &[f, v] : outcome->fields) {
+    if (f == "status")
+      if (const auto *s = std::get_if<std::string>(&v)) status = *s;
+    if (f == "__correlation")
+      if (const auto *s = std::get_if<std::string>(&v)) echo = *s;
+  }
+  EXPECT_EQ(status, "achieved");
+  EXPECT_EQ(echo, corr);
+
+  // Back across the wire: the parent's parked intention matches on
+  // correlation and readies — the spine resumes into emit Done, and
+  // the child's own broadcast percept journals on the parent too.
+  ASSERT_TRUE(deliver(parent, parentPid, childToParent[0]));
+  ASSERT_TRUE(deliver(parent, parentPid, childToParent[1]));
+  EXPECT_THAT(parent.journalOf(pImage->agentCell),
+              ::testing::Contains("Done"));
+  EXPECT_THAT(parent.journalOf(pImage->agentCell),
+              ::testing::Contains("ChildDone"));
+  EXPECT_EQ(parent.ctx.arena.outstandingMarks(), 0u);
+  EXPECT_EQ(child.ctx.arena.outstandingMarks(), 0u);
+}
+
 TEST(VagentAdapterTest, UnmarshalableRemotePayloadFaultsHonestly) {
   // A payload field the flat Name{f: v} codec can't represent —
   // here a relocation-marked live position — must not render as a
