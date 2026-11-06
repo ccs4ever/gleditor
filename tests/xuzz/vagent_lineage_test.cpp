@@ -18,7 +18,9 @@
 #include "common/xanadu/scroll.hpp"
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/swarm.hpp"
+#include "common/xanadu/vagent/decls.hpp"
 #include "common/xanadu/vagent/lineage.hpp"
+#include "common/xanadu/vagent/records.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
 #include "common/xanadu/zigzag/dim_vector.hpp"
 
@@ -285,6 +287,56 @@ TEST(VagentLineageTest, RegenesisPreservesSessionMutationsAcrossFolds) {
   const auto held7 = a2.linked(rec2, values2, Posward);
   ASSERT_TRUE(held7.has_value());
   EXPECT_EQ(a2.asInt64(*held7).value_or(-1), 7);
+}
+
+TEST(VagentLineageTest, MarkedRefSlotsRestateThroughRegenesis) {
+  LineageHarness h;
+  auto &a0 = h.arena();
+
+  // A `var child` member ref: the scalar carries the member's arena
+  // position behind the relocation mark, and the member itself has no
+  // edge inbound from the agent — the harvest is the only thing that
+  // reaches it. Pre-mark this Int64 went verbatim through promote and
+  // the rebuilt arena read a dead position.
+  const auto agent  = a0.makeCell("agent");
+  const auto member = a0.makeCell("child-member");
+  const auto vars   = a0.dimensionNamed("d.vars").value();
+  const auto values = a0.dimensionNamed("d.values").value();
+  const auto record = a0.makeCell("child");
+  zigzag::expectWritten(a0.link(record, values, Posward,
+                              refCell(a0, h.context->core, member)));
+  zigzag::expectWritten(
+      a0.link(zigzag::rankTail(a0, agent, vars), vars, Posward, record));
+
+  auto c1 = regenesisCycle(h.lineage, a0, agent, 0);
+  ASSERT_TRUE(c1.has_value()) << (c1 ? "" : c1.error());
+  auto &a1 = c1->context->arena;
+
+  const auto vars1   = a1.dimensionNamed("d.vars").value();
+  const auto values1 = a1.dimensionNamed("d.values").value();
+  CellRef rec1       = noCell;
+  for (const auto cell : zigzag::rankAfter(a1, c1->agentCell, vars1)) {
+    if (a1.textOf(cell) == "child") rec1 = cell;
+  }
+  ASSERT_NE(rec1, noCell) << "the d.vars record did not fold";
+  const auto held = a1.linked(rec1, values1, Posward);
+  ASSERT_TRUE(held.has_value());
+  const auto named = a1.asInt64(*held);
+  ASSERT_TRUE(named.has_value());
+
+  // The slot restated: the Int64 names the member's persistent twin on
+  // this fold, not the old ephemeral position (ephemeralBit set and
+  // unreachable on a fresh context).
+  const auto restated = static_cast<CellRef>(*named);
+  EXPECT_FALSE(zigzag::isEphemeral(restated))
+      << "the member ref kept its ephemeral position across the fold";
+  ASSERT_TRUE(a1.contains(restated));
+  EXPECT_EQ(a1.textOf(restated), "child-member");
+  // The mark rode the slot's twin too — the next cycle can harvest the
+  // same manifest.
+  const auto reloc = a1.dimensionNamed("d.mesh.relocation");
+  ASSERT_TRUE(reloc.has_value());
+  EXPECT_TRUE(a1.linked(*held, *reloc, Posward).has_value());
 }
 
 TEST(VagentLineageTest, SessionMintFilesOnceWithNoVisibleTwin) {

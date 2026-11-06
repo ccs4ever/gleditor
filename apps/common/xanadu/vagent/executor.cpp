@@ -121,13 +121,13 @@ void queueAdapterPercept(zigzag::ArenaManifold &arena,
   if (const auto rec = varsRecord(arena, core, seen, "grab", true))
     zigzag::expectWritten(
         arena.link(*rec, core.dims().values, DimVector::POS,
-                   arena.makeScalarCell(static_cast<std::int64_t>(payload))));
+                   refCell(arena, core, payload)));
   const auto pending = core.findOrMintDimension("d.pending");
   const auto pend    = arena.makeCell(name);
   if (const auto rec = varsRecord(arena, core, pend, "grab", true))
     zigzag::expectWritten(
         arena.link(*rec, core.dims().values, DimVector::POS,
-                   arena.makeScalarCell(static_cast<std::int64_t>(seen))));
+                   refCell(arena, core, seen)));
   zigzag::expectWritten(arena.link(
       zigzag::rankTail(arena, agent, pending), pending, DimVector::POS, pend));
 }
@@ -377,7 +377,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
     // drainOutbox resolves the ref back to the cell.
     if (payload != noCell)
       outField("payload",
-               arena.makeScalarCell(static_cast<std::int64_t>(payload)));
+               refCell(arena, core, payload));
     outField("target", arena.makeCell(std::string{target}));
     if (!scope.empty()) outField("scope", arena.makeCell(std::string{scope}));
     // The ask-reply fields route reads: `percept` overrides the
@@ -399,12 +399,12 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       outField("capacity", arena.makeCell(std::string{capacity}));
     if (delegator != noCell)
       outField("delegator",
-               arena.makeScalarCell(static_cast<std::int64_t>(delegator)));
+               refCell(arena, core, delegator));
     // Member-addressed entries bypass the drain's name resolution —
     // a remote peer's name is not reliably known, its pid is.
     if (targetMember != noCell)
       outField("targetMember",
-               arena.makeScalarCell(static_cast<std::int64_t>(targetMember)));
+               refCell(arena, core, targetMember));
     const auto id = std::format("{}:{}:{}", std::hash<std::string>{}(sender),
                                 turn, position);
     outField("id", arena.makeCell(id));
@@ -553,12 +553,12 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
         if (const auto rec = varsRecord(arena, core, seen, "grab", true))
           zigzag::expectWritten(arena.link(
               *rec, core.dims().values, DimVector::POS,
-              arena.makeScalarCell(static_cast<std::int64_t>(payload))));
+              refCell(arena, core, payload)));
         const auto pend = arena.makeCell(name);
         if (const auto rec = varsRecord(arena, core, pend, "grab", true))
           zigzag::expectWritten(arena.link(
               *rec, core.dims().values, DimVector::POS,
-              arena.makeScalarCell(static_cast<std::int64_t>(seen))));
+              refCell(arena, core, seen)));
         zigzag::expectWritten(
             arena.link(zigzag::rankTail(arena, target, dims.pending),
                        dims.pending, DimVector::POS, pend));
@@ -584,7 +584,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
   const auto faultIntention = [&](CellRef i, std::string_view cause) {
     const auto planCell = meta.intentionField(i, "plan").value_or(0);
     raise("PlanFailed",
-          {{"intention", arena.makeScalarCell(std::int64_t{i})},
+          {{"intention", refCell(arena, core, i)},
            {"plan",
             arena.makeCell(planCell == 0
                                ? std::string_view{}
@@ -781,7 +781,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
                         std::format("childstopping:{}", target)))
           raiseOn(parent, "ChildStopping",
                   {{"child",
-                    arena.makeScalarCell(std::int64_t{target})},
+                    refCell(arena, core, target)},
                    {"cause", arena.makeCell("stop")}});
         // "The parent reports one ChildStopping even when the
         // runtime's ActorDown follows it" — pre-marking the member's
@@ -819,7 +819,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
         faultIntention(static_cast<CellRef>(delegator), "dropped");
       }
       raise("GoalDropped",
-            {{"intention", arena.makeScalarCell(std::int64_t{ref})},
+            {{"intention", refCell(arena, core, ref)},
              {"goal", arena.makeCell(goalNameOf(ref))}});
       unlinkRank(arena, ref, dims.intention);
       return true;
@@ -863,8 +863,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       if (const auto rec = varsRecord(arena, core, child, "$parent", true))
         zigzag::expectWritten(
             arena.link(*rec, core.dims().values, DimVector::POS,
-                       arena.makeScalarCell(
-                           static_cast<std::int64_t>(agent))));
+                       refCell(arena, core, agent)));
       // The wire half the adapter owes: the member exists, so the
       // entry's payload is the member cell itself — the drain turns
       // it into noteSpawnRequest + a spawn send, with the entry id
@@ -968,7 +967,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
                 varsRecord(arena, core, intention, "awaitTerm", true))
           zigzag::expectWritten(arena.link(
               *rec, core.dims().values, DimVector::POS,
-              arena.makeScalarCell(static_cast<std::int64_t>(event))));
+              refCell(arena, core, event)));
       if (beliefForm)
         if (const auto rec =
                 varsRecord(arena, core, intention, "awaitForm", true))
@@ -1137,8 +1136,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
               varsRecord(arena, core, intention, "awaitCall", true))
         zigzag::expectWritten(
             arena.link(*rec, core.dims().values, DimVector::POS,
-                       arena.makeScalarCell(
-                           static_cast<std::int64_t>(payload))));
+                       refCell(arena, core, payload)));
       if (const auto bound = field("result"); bound != noCell)
         if (const auto rec =
                 varsRecord(arena, core, intention, "awaitBind", true))
@@ -1350,8 +1348,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
         if (const auto rec = varsRecord(arena, core, inst, "behavior", true))
           zigzag::expectWritten(
               arena.link(*rec, core.dims().values, DimVector::POS,
-                         arena.makeScalarCell(
-                             static_cast<std::int64_t>(desc))));
+                         refCell(arena, core, desc)));
         seedFields(inst, desc, argValuesOf(payload));
         zigzag::expectWritten(
             arena.link(zigzag::rankTail(arena, agent, dims.behavior),
@@ -1383,7 +1380,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       if (const auto rec = varsRecord(arena, core, frame, "skill", true))
         zigzag::expectWritten(arena.link(
             *rec, core.dims().values, DimVector::POS,
-            arena.makeScalarCell(static_cast<std::int64_t>(skillRec))));
+            refCell(arena, core, skillRec)));
       // The marshaled call term stays on the frame — `on uninstall`
       // replays it for its own parameter binding.
       if (const auto rec = varsRecord(arena, core, frame, "params", true))
@@ -1967,7 +1964,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       return std::string{};
     }();
     raise("ConditionFault",
-          {{"intention", arena.makeScalarCell(std::int64_t{i})},
+          {{"intention", refCell(arena, core, i)},
            {"cause", arena.makeCell(cause)}});
     meta.setIntentionField(i, field, 1);
   };
@@ -2389,7 +2386,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
           }
           raise("GoalDropped",
                 {{"intention",
-                  arena.makeScalarCell(std::int64_t{intention})},
+                  refCell(arena, core, intention)},
                  {"goal", arena.makeCell(goalNameOf(intention))}});
           unlinkRank(arena, intention, dims.intention);
         } else if (meta.intentionField(intention, "goalFailed")
@@ -2401,7 +2398,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
           // raise runs once via the flag.
           raise("GoalFailed",
                 {{"intention",
-                  arena.makeScalarCell(std::int64_t{intention})},
+                  refCell(arena, core, intention)},
                  {"goal", arena.makeCell(goalNameOf(intention))},
                  {"cause", arena.makeCell("no_untried_plans")}});
           meta.setIntentionField(intention, "goalFailed", 1);
@@ -2661,7 +2658,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       }
       raise("GoalAchieved",
             {{"intention",
-              arena.makeScalarCell(std::int64_t{intention})},
+              refCell(arena, core, intention)},
              {"goal", arena.makeCell(goalNameOf(intention))}});
       unlinkRank(arena, intention, dims.intention);
     } else {
@@ -2831,7 +2828,7 @@ void VagentExecutor::deliver(zigzag::ArenaManifold &arena,
       if (const auto rec = varsRecord(arena, core, record, name, true))
         zigzag::expectWritten(
             arena.link(*rec, core.dims().values, DimVector::POS,
-                       arena.makeScalarCell(static_cast<std::int64_t>(ref))));
+                       refCell(arena, core, ref)));
     };
     refField("grab", delivery.payloadCell);
     refField("sender", delivery.sender);
@@ -2886,7 +2883,7 @@ void VagentExecutor::deliver(zigzag::ArenaManifold &arena,
   if (const auto rec = varsRecord(arena, core, pend, "grab", true))
     zigzag::expectWritten(arena.link(
         *rec, core.dims().values, DimVector::POS,
-        arena.makeScalarCell(static_cast<std::int64_t>(seen))));
+        refCell(arena, core, seen)));
   zigzag::expectWritten(arena.link(
       zigzag::rankTail(arena, delivery.agent, pending), pending,
       DimVector::POS, pend));
@@ -2938,7 +2935,7 @@ void VagentExecutor::childDown(zigzag::ArenaManifold &arena,
   markPeerWaits(arena, core, agent, child, "down");
   const auto payload = arena.makeCell("ChildDown");
   perceptField(arena, core, payload, "child",
-               arena.makeScalarCell(static_cast<std::int64_t>(child)));
+               refCell(arena, core, child));
   queueAdapterPercept(
       arena, core, agent, "ChildDown", payload,
       static_cast<std::size_t>(setting("vagent.journal_size", 64)));
@@ -2976,7 +2973,7 @@ void VagentExecutor::childStopping(zigzag::ArenaManifold &arena,
   markPeerWaits(arena, core, agent, member, cause);
   const auto payload = arena.makeCell("ChildStopping");
   perceptField(arena, core, payload, "child",
-               arena.makeScalarCell(static_cast<std::int64_t>(member)));
+               refCell(arena, core, member));
   perceptField(arena, core, payload, "cause", arena.makeCell(cause));
   queueAdapterPercept(
       arena, core, agent, "ChildStopping", payload,
@@ -3003,7 +3000,7 @@ void VagentExecutor::spawnFailed(zigzag::ArenaManifold &arena,
         deliveryFailed(arena, core, entry, "spawn_refused");
   const auto payload = arena.makeCell("SpawnFailed");
   perceptField(arena, core, payload, "child",
-               arena.makeScalarCell(static_cast<std::int64_t>(child)));
+               refCell(arena, core, child));
   queueAdapterPercept(
       arena, core, agent, "SpawnFailed", payload,
       static_cast<std::size_t>(setting("vagent.journal_size", 64)));
@@ -3061,12 +3058,11 @@ void VagentExecutor::moved(zigzag::ArenaManifold &arena,
           arena.unlink(rec, core.dims().values, DimVector::POS));
       zigzag::expectWritten(
           arena.link(rec, core.dims().values, DimVector::POS,
-                     arena.makeScalarCell(
-                         static_cast<std::int64_t>(member))));
+                     refCell(arena, core, member)));
     }
   const auto payload = arena.makeCell("Moved");
   perceptField(arena, core, payload, "name",
-               arena.makeScalarCell(static_cast<std::int64_t>(member)));
+               refCell(arena, core, member));
   queueAdapterPercept(
       arena, core, agent, "Moved", payload,
       static_cast<std::size_t>(setting("vagent.journal_size", 64)));

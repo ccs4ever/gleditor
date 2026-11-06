@@ -744,7 +744,7 @@ MetaRunOutcome MetaRuntime::runFragment(CellRef head,
   // run the successor is a fresh Halt — `Return` pops the frame and
   // lands there, ending `run` cleanly.
   const auto landing = vm_.mintOpcode(OpcodeKind::Halt);
-  const auto frame   = arena.makeScalarCell(static_cast<std::int64_t>(landing));
+  const auto frame   = refCell(arena, core_, landing);
   if (const auto top = arena.linked(cur, dims.stack, Posward))
     zigzag::expectWritten(arena.link(frame, dims.stack, Posward, *top));
   zigzag::expectWritten(arena.link(cur, dims.stack, Posward, frame));
@@ -977,9 +977,8 @@ MetaRuntime::believe(std::string_view predicate, CellRef term, CellRef peer,
     zigzag::expectWritten(arena.link(
         clause, core_.findOrMintDimension("d.source"), Posward, source));
     if (const auto slot = varsRecord(source, "peer", true))
-      zigzag::expectWritten(arena.link(
-          *slot, core_.dims().values, Posward,
-          arena.makeScalarCell(static_cast<std::int64_t>(peer))));
+      zigzag::expectWritten(arena.link(*slot, core_.dims().values, Posward,
+                                     refCell(arena, core_, peer)));
     if (const auto slot = varsRecord(source, "turn", true))
       zigzag::expectWritten(arena.link(*slot, core_.dims().values, Posward,
                                        arena.makeScalarCell(turn)));
@@ -1144,9 +1143,8 @@ void MetaRuntime::stageBeliefTriggers(std::string_view predicate,
     const auto pend = arena.makeCell(key);
     const auto ref  = [&](std::string_view name, CellRef cell) {
       if (const auto rec = varsRecord(pend, name, /*mint=*/true))
-        zigzag::expectWritten(arena.link(
-            *rec, core_.dims().values, Posward,
-            arena.makeScalarCell(static_cast<std::int64_t>(cell))));
+        zigzag::expectWritten(arena.link(*rec, core_.dims().values, Posward,
+                                       refCell(arena, core_, cell)));
     };
     ref("beliefClause", m.clause);
     ref("grab", factClause);

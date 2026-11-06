@@ -174,8 +174,7 @@ std::string VagentAdapter::stageSend(
   };
   outField("kind", arena.makeCell("send"));
   outField("percept", arena.makeCell(std::string{percept}));
-  outField("targetMember",
-           arena.makeScalarCell(static_cast<std::int64_t>(targetMember)));
+  outField("targetMember", refCell(arena, core, targetMember));
   if (!fields.empty()) {
     const auto payload = arena.makeCell(percept);
     for (const auto &[field, value] : fields) {
@@ -212,8 +211,7 @@ std::string VagentAdapter::stageSend(
                                      DimVector::POS,
                                      arena.makeCell(field)));
     }
-    outField("payload",
-             arena.makeScalarCell(static_cast<std::int64_t>(payload)));
+    outField("payload", refCell(arena, core, payload));
   }
   const auto requestId = std::string{id};
   outField("id", arena.makeCell(requestId.empty()
@@ -504,8 +502,7 @@ VagentAdapter::genesis(const mesh::ActorGenesis &genesis,
                   *prec, core.dims().values, DimVector::POS));
             zigzag::expectWritten(
                 arena.link(*prec, core.dims().values, DimVector::POS,
-                           arena.makeScalarCell(
-                               static_cast<std::int64_t>(*parent))));
+                           refCell(arena, core, *parent)));
           }
 
   if (genesis.transported != nullptr) {
