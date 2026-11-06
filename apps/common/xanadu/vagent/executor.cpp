@@ -791,6 +791,11 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
             arena.link(*rec, core.dims().values, DimVector::POS,
                        arena.makeScalarCell(
                            static_cast<std::int64_t>(agent))));
+      // The wire half the adapter owes: the member exists, so the
+      // entry's payload is the member cell itself — the drain turns
+      // it into noteSpawnRequest + a spawn send, with the entry id
+      // as the request's durable correlation.
+      stageOutbox("spawn", child, {});
       if (const auto bound = field("result"); bound != noCell)
         if (const auto rec =
                 varsRecord(arena, core, agent, arena.textOf(bound), true))
@@ -2665,6 +2670,12 @@ std::vector<Delivery> VagentExecutor::route(zigzag::ArenaManifold &arena,
                                             zigzag::vortex::VortexCore &core,
                                             zigzag::CellRef programRoot,
                                             const OutboxEntry &entry) {
+  // Kinds the drain handles without routing — effect/cancel are host
+  // work answered on the request's correlation, spawn a wire request
+  // — are never percepts; an empty target would broadcast them.
+  if (entry.kind == "effect" || entry.kind == "cancel" ||
+      entry.kind == "spawn")
+    return {};
   // Name resolution only — the receiver's own turn owns everything
   // after the percept name. "0"/empty is the broadcast fan-out the
   // emit schema reserves; `self`/`parent` and other implicit handles

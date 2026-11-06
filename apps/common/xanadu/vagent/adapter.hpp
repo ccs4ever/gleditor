@@ -39,6 +39,18 @@ using NativeBody = std::function<std::expected<zigzag::CellRef, std::string>(
     zigzag::vortex::WorkerContext &, zigzag::CellRef agent,
     zigzag::CellRef payload)>;
 
+/// The wire-send half a `spawn` entry needs: the integration layer
+/// reads the member's records (+d.name, +d.space), builds the
+/// ActorSpawn (programRef, capability, hashcash stamp) and hands it
+/// to MeshActorRuntime::send. `requestId` is the staged entry's
+/// durable id — the same token spawnOutcome resolves, so the
+/// member's `spawnRequest` record is written before the callback
+/// runs.
+using SpawnSender =
+    std::function<std::expected<void, zigzag::vortex::mesh::ActorError>(
+        zigzag::vortex::WorkerContext &, zigzag::CellRef member,
+        std::string_view requestId)>;
+
 class VagentAdapter {
 public:
   /// The executor does every turn's work; the adapter wraps it.
@@ -50,6 +62,12 @@ public:
   /// result or `EffectFailed{cause}` with the refusal.
   void bindNative(std::string_view capacity, std::string_view method,
                   NativeBody body);
+
+  /// Install the transport the drain calls per staged `spawn` entry
+  /// — absent, the entry waits undispatched (a member is a live
+  /// language-side child either way; the wire request is mesh-side
+  /// only). Setters chain.
+  VagentAdapter *setSpawnSender(SpawnSender sender);
 
   /// MeshActorRuntime::Executor. Translates before delegating: the
   /// exec pid's mesh spawnSequence becomes the member's directory
@@ -143,6 +161,7 @@ public:
 private:
   VagentExecutor executor_;
   std::map<std::string, NativeBody> natives_;
+  SpawnSender spawnSender_;
 };
 
 } // namespace xanadu::vagent

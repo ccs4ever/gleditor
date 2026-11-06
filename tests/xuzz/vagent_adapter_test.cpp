@@ -501,4 +501,70 @@ TEST(VagentAdapterTest, SpawnOutcomeNotesGrantAndFailsRefusal) {
   EXPECT_EQ(h.ctx.arena.outstandingMarks(), 0u);
 }
 
+TEST(VagentAdapterTest, SpawnStagesTheWireRequestThroughTheSender) {
+  AdapterHarness h;
+  const auto image =
+      h.lower("module demo\nevent Boot\n"
+              "agent A {\n"
+              "  var child: Opt<Agent> := none\n"
+              "  on Boot { child := spawn A() }\n"
+              "}");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+  auto &core  = h.ctx.core;
+  int calls = 0;
+  std::string requestId;
+  CellRef sentMember = zigzag::noCell;
+  h.adapter.setSpawnSender(
+      [&](WorkerContext &, CellRef member, std::string_view id)
+          -> std::expected<void, ActorError> {
+        ++calls;
+        requestId   = std::string{id};
+        sentMember  = member;
+        return {};
+      });
+  ASSERT_TRUE(h.adapter(h.execution(h.send("Boot")), h.ctx));
+  const auto member = h.memberCell(image->agentCell, "child");
+  ASSERT_TRUE(member);
+  EXPECT_EQ(calls, 1);
+  EXPECT_EQ(sentMember, *member);
+  // The durable correlation the ack resolves: the member's
+  // spawnRequest record names the staged entry's own id.
+  const auto req =
+      varsRecord(arena, core, *member, "spawnRequest", false);
+  ASSERT_TRUE(req);
+  const auto rv = arena.linked(*req, core.dims().values, DimVector::POS);
+  ASSERT_TRUE(rv);
+  EXPECT_EQ(arena.textOf(*rv), requestId);
+  // The remote's grant resolves the pending request end to end.
+  ActorMessage request;
+  request.requestId = requestId;
+  const ActorPid meshPid{"host", "spawned-cursor", 1, 9};
+  h.adapter.spawnOutcome(h.ctx, request, meshPid);
+  ASSERT_TRUE(h.adapter.memberForPid(h.ctx, meshPid));
+  EXPECT_EQ(*h.adapter.memberForPid(h.ctx, meshPid), *member);
+  // Once-durable: a later drain does not re-send.
+  ASSERT_TRUE(h.adapter(h.execution(), h.ctx));
+  EXPECT_EQ(calls, 1);
+}
+
+TEST(VagentAdapterTest, SpawnSendFailureFailsTheMember) {
+  AdapterHarness h;
+  const auto image =
+      h.lower("module demo\nevent Boot\n"
+              "agent A {\n"
+              "  var child: Opt<Agent> := none\n"
+              "  on Boot { child := spawn A() }\n"
+              "}");
+  ASSERT_TRUE(image);
+  h.adapter.setSpawnSender(
+      [](WorkerContext &, CellRef, std::string_view)
+          -> std::expected<void, ActorError> {
+        return std::unexpected(ActorError::TransportUnavailable);
+      });
+  ASSERT_TRUE(h.adapter(h.execution(h.send("Boot")), h.ctx));
+  EXPECT_THAT(h.journalOf(image->agentCell),
+              ::testing::Contains("SpawnFailed"));
+}
+
 } // namespace

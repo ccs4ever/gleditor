@@ -80,6 +80,11 @@ void VagentAdapter::bindNative(std::string_view capacity,
                    std::move(body));
 }
 
+VagentAdapter *VagentAdapter::setSpawnSender(SpawnSender sender) {
+  spawnSender_ = std::move(sender);
+  return this;
+}
+
 std::expected<std::string, mesh::ActorError>
 VagentAdapter::operator()(const mesh::ActorExecution &exec,
                           zigzag::vortex::WorkerContext &ctx) {
@@ -203,6 +208,34 @@ void VagentAdapter::drain(zigzag::vortex::WorkerContext &ctx,
         reply.payloadCell = payload;
       }
       executor_.deliver(arena, core, reply);
+      continue;
+    }
+    if (entry.kind == "spawn") {
+      // A member the verb minted but the wire never asked for —
+      // payloadCell is the member cell, entry.id the durable
+      // requestId. At-least-once by ordering: the correlation is
+      // durable before the send runs and `dispatched` marks only
+      // after the attempt, so a crashed drain retries and send's
+      // own requestId dedupe keeps the wire honest. No sender
+      // installed leaves the entry pending — a member is a live
+      // language-side child either way; the mesh spawn is the
+      // integration layer's choice.
+      if (entry.cell == noCell || entry.payloadCell == noCell ||
+          varsRecord(arena, core, entry.cell, "dispatched", false) ||
+          !spawnSender_)
+        continue;
+      noteSpawnRequest(ctx, entry.payloadCell, entry.id);
+      const auto sent = spawnSender_(ctx, entry.payloadCell, entry.id);
+      if (const auto rec =
+              varsRecord(arena, core, entry.cell, "dispatched", true))
+        zigzag::expectWritten(
+            arena.link(*rec, core.dims().values, DimVector::POS,
+                       arena.makeCell("1")));
+      // A send that can't even leave is the refusal's synchronous
+      // half — the asynchronous one arrives through spawnOutcome.
+      if (!sent)
+        executor_.spawnFailed(arena, core, entry.sender,
+                              entry.payloadCell);
       continue;
     }
     const auto deliveries =

@@ -1090,14 +1090,24 @@ TEST(VagentExecutorTest, SpawnMintsTheChildAndRouteResolvesIt) {
   EXPECT_EQ(arena.textOf(*spawnedName), "A");
   EXPECT_NE(spawned, image->agentCell);
 
+  // The spawn stages its wire request first — the member cell rides
+  // as the payload so the drain can noteSpawnRequest and send — and
+  // it is never a percept: route refuses it outright.
+  const auto outbox =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  ASSERT_EQ(outbox.size(), 3u);
+  EXPECT_EQ(outbox[0].kind, "spawn");
+  EXPECT_EQ(outbox[0].payloadCell, spawned);
+  EXPECT_FALSE(outbox[0].id.empty());
+  EXPECT_TRUE(VagentExecutor::route(arena, h.ctx.core, h.ctx.core.home(),
+                                    outbox[0])
+                  .empty());
+
   // The staged emit resolves `for child` to the member's name at
   // stage time; route matches every A-named member — sender and
   // spawned child both receive the percept.
-  const auto outbox =
-      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
-  ASSERT_EQ(outbox.size(), 2u);
   const auto deliveries = VagentExecutor::route(
-      arena, h.ctx.core, h.ctx.core.home(), outbox.front());
+      arena, h.ctx.core, h.ctx.core.home(), outbox[1]);
   EXPECT_EQ(deliveries.size(), 2u);
   EXPECT_TRUE(std::ranges::any_of(
       deliveries, [&](const Delivery &d) { return d.agent == spawned; }));
@@ -1107,9 +1117,9 @@ TEST(VagentExecutorTest, SpawnMintsTheChildAndRouteResolvesIt) {
   // `in inner` broadcasts into the space: the spawned member carries
   // +d.space "inner", the declared agent carries none — only the
   // child is in scope.
-  EXPECT_EQ(outbox[1].scope, "inner");
+  EXPECT_EQ(outbox[2].scope, "inner");
   const auto scoped =
-      VagentExecutor::route(arena, h.ctx.core, h.ctx.core.home(), outbox[1]);
+      VagentExecutor::route(arena, h.ctx.core, h.ctx.core.home(), outbox[2]);
   ASSERT_EQ(scoped.size(), 1u);
   EXPECT_EQ(scoped.front().agent, spawned);
   EXPECT_EQ(scoped.front().percept, "Pong");
@@ -1131,12 +1141,14 @@ TEST(VagentExecutorTest, SpawnedMemberRunsItsOwnTurnOnItsSequence) {
 
   // Boot spawns the second member and emits at it; `for child`
   // resolves to the A member name so both members get the percept.
+  // The spawn's wire entry leads the outbox — [1] is the Ping stage.
   ASSERT_TRUE(exec(h.execution("Boot"), h.ctx));
   const auto outbox =
       VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
-  ASSERT_EQ(outbox.size(), 1u);
+  ASSERT_EQ(outbox.size(), 2u);
+  EXPECT_EQ(outbox[0].kind, "spawn");
   const auto deliveries = VagentExecutor::route(
-      arena, h.ctx.core, h.ctx.core.home(), outbox.front());
+      arena, h.ctx.core, h.ctx.core.home(), outbox[1]);
   ASSERT_EQ(deliveries.size(), 2u);
   CellRef spawned = noCell;
   for (const auto &d : deliveries) {
@@ -1154,8 +1166,10 @@ TEST(VagentExecutorTest, SpawnedMemberRunsItsOwnTurnOnItsSequence) {
       VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
   const auto spawnedOut =
       VagentExecutor::drainOutbox(arena, h.ctx.core, spawned);
-  ASSERT_EQ(firstOut.size(), 2u);
-  EXPECT_EQ(firstOut[1].payload, "Done");
+  // The parent's rank is spawn entry + its own Ping stage + Done;
+  // the child's is only its own Done — no child minted a spawn.
+  ASSERT_EQ(firstOut.size(), 3u);
+  EXPECT_EQ(firstOut[2].payload, "Done");
   ASSERT_EQ(spawnedOut.size(), 1u);
   EXPECT_EQ(spawnedOut[0].payload, "Done");
   EXPECT_EQ(arena.outstandingMarks(), 0u);
@@ -2211,10 +2225,12 @@ TEST(VagentExecutorTest, SpawnSeedsParentLineageAndKinAcceptDelegation) {
   ASSERT_TRUE(exec(h.execution("Boot"), h.ctx));
   const auto outbox =
       VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
-  ASSERT_EQ(outbox.size(), 1u);
-  EXPECT_EQ(outbox[0].kind, "achieve");
+  // The spawn's wire entry leads; [1] is the delegation's stage.
+  ASSERT_EQ(outbox.size(), 2u);
+  EXPECT_EQ(outbox[0].kind, "spawn");
+  EXPECT_EQ(outbox[1].kind, "achieve");
   const auto deliveries = VagentExecutor::route(
-      arena, h.ctx.core, h.ctx.core.home(), outbox.front());
+      arena, h.ctx.core, h.ctx.core.home(), outbox[1]);
   ASSERT_EQ(deliveries.size(), 2u);
   CellRef spawned = noCell;
   for (const auto &d : deliveries) {
@@ -2249,11 +2265,12 @@ TEST(VagentExecutorTest, SpawnSeedsParentLineageAndKinAcceptDelegation) {
   ASSERT_TRUE(exec(h.execution(), h.ctx));
   const auto after =
       VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
-  ASSERT_EQ(after.size(), 3u);
+  ASSERT_EQ(after.size(), 4u);
   // Rank order settles the readied parent ahead of the freshly
-  // adopted local child — Done before its own ChildDone.
-  EXPECT_EQ(after[1].payload, "Done");
-  EXPECT_EQ(after[2].payload, "ChildDone");
+  // adopted local child — Done before its own ChildDone; [0]/[1]
+  // are the spawn and achieve stages.
+  EXPECT_EQ(after[2].payload, "Done");
+  EXPECT_EQ(after[3].payload, "ChildDone");
   EXPECT_TRUE(zigzag::rankAfter(arena, image->agentCell, iDim).empty());
   EXPECT_EQ(arena.outstandingMarks(), 0u);
 }
@@ -3541,9 +3558,11 @@ TEST(VagentExecutorTest, StopChildAnnouncesChildStoppingToTheParent) {
   ASSERT_TRUE(exec(h.execution("Boot"), h.ctx));
   const auto outbox =
       VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
-  ASSERT_EQ(outbox.size(), 1u);
-  EXPECT_EQ(outbox[0].kind, "emit");
-  EXPECT_EQ(outbox[0].payload, "Down");
+  // The spawn's wire entry leads; [1] is the handler's Down emit.
+  ASSERT_EQ(outbox.size(), 2u);
+  EXPECT_EQ(outbox[0].kind, "spawn");
+  EXPECT_EQ(outbox[1].kind, "emit");
+  EXPECT_EQ(outbox[1].payload, "Down");
 }
 
 TEST(VagentExecutorTest, UnroutableTargetRaisesDeliveryFailedOnTheSender) {
@@ -3609,8 +3628,10 @@ TEST(VagentExecutorTest, DownOnChildRaisesChildDownAndFailsItsWaits) {
   ASSERT_TRUE(exec(h.execution("Boot"), h.ctx));
   const auto staged =
       VagentExecutor::drainOutbox(arena, core, image->agentCell);
-  ASSERT_EQ(staged.size(), 1u);
-  EXPECT_EQ(staged[0].kind, "ask");
+  // The spawn's wire entry leads; [1] is the ask the plan staged.
+  ASSERT_EQ(staged.size(), 2u);
+  EXPECT_EQ(staged[0].kind, "spawn");
+  EXPECT_EQ(staged[1].kind, "ask");
   const auto childVar = varsRecord(arena, core, image->agentCell, "child", false);
   ASSERT_TRUE(childVar);
   const auto childRef = arena.linked(*childVar, core.dims().values,
@@ -3629,8 +3650,8 @@ TEST(VagentExecutorTest, DownOnChildRaisesChildDownAndFailsItsWaits) {
   ASSERT_TRUE(exec(h.execution(), h.ctx));
   const auto outbox =
       VagentExecutor::drainOutbox(arena, core, image->agentCell);
-  ASSERT_EQ(outbox.size(), 2u);
-  EXPECT_EQ(outbox[1].payload, "Down");
+  ASSERT_EQ(outbox.size(), 3u);
+  EXPECT_EQ(outbox[2].payload, "Down");
   const auto r = varsRecord(arena, core, image->agentCell, "r", false);
   ASSERT_TRUE(r);
   const auto rv = arena.linked(*r, core.dims().values,
@@ -3642,8 +3663,8 @@ TEST(VagentExecutorTest, DownOnChildRaisesChildDownAndFailsItsWaits) {
   ASSERT_TRUE(exec(h.execution(), h.ctx));
   const auto resumed =
       VagentExecutor::drainOutbox(arena, core, image->agentCell);
-  ASSERT_EQ(resumed.size(), 3u);
-  EXPECT_EQ(resumed[2].payload, "Lost");
+  ASSERT_EQ(resumed.size(), 4u);
+  EXPECT_EQ(resumed[3].payload, "Lost");
   // A second report for the same member is the journal's dedupe —
   // no second ChildDown dispatches.
   exec.childDown(arena, core, image->agentCell,
@@ -3651,7 +3672,7 @@ TEST(VagentExecutorTest, DownOnChildRaisesChildDownAndFailsItsWaits) {
   ASSERT_TRUE(exec(h.execution(), h.ctx));
   EXPECT_EQ(
       VagentExecutor::drainOutbox(arena, core, image->agentCell).size(),
-      3u);
+      4u);
   EXPECT_EQ(arena.outstandingMarks(), 0u);
 }
 
@@ -3685,8 +3706,10 @@ TEST(VagentExecutorTest, OrderlyStopSuppressesTheTrailingActorDown) {
   ASSERT_TRUE(exec(h.execution(), h.ctx));
   const auto outbox =
       VagentExecutor::drainOutbox(arena, core, image->agentCell);
-  ASSERT_EQ(outbox.size(), 1u);
-  EXPECT_EQ(outbox[0].payload, "Note");
+  // [0] is the spawn's wire entry; the stop's Note is the only emit.
+  ASSERT_EQ(outbox.size(), 2u);
+  EXPECT_EQ(outbox[0].kind, "spawn");
+  EXPECT_EQ(outbox[1].payload, "Note");
   EXPECT_EQ(arena.outstandingMarks(), 0u);
 }
 
@@ -3709,8 +3732,11 @@ TEST(VagentExecutorTest, RefusedSpawnFailsStagedDeliveriesAndRaisesSpawnFailed) 
   ASSERT_TRUE(exec(h.execution("Boot"), h.ctx));
   const auto staged =
       VagentExecutor::drainOutbox(arena, core, image->agentCell);
-  ASSERT_EQ(staged.size(), 1u);
-  EXPECT_EQ(staged[0].kind, "emit");
+  // The spawn's wire entry leads; [1] is the emit staged to the
+  // member's name — the refusal fails exactly that entry.
+  ASSERT_EQ(staged.size(), 2u);
+  EXPECT_EQ(staged[0].kind, "spawn");
+  EXPECT_EQ(staged[1].kind, "emit");
   const auto childVar = varsRecord(arena, core, image->agentCell, "child", false);
   ASSERT_TRUE(childVar);
   const auto childRef = arena.linked(*childVar, core.dims().values,
@@ -3726,9 +3752,9 @@ TEST(VagentExecutorTest, RefusedSpawnFailsStagedDeliveriesAndRaisesSpawnFailed) 
   ASSERT_TRUE(exec(h.execution(), h.ctx));
   const auto outbox =
       VagentExecutor::drainOutbox(arena, core, image->agentCell);
-  ASSERT_EQ(outbox.size(), 3u);
-  EXPECT_EQ(outbox[1].payload, "Lost");
-  EXPECT_EQ(outbox[2].payload, "Refused");
+  ASSERT_EQ(outbox.size(), 4u);
+  EXPECT_EQ(outbox[2].payload, "Lost");
+  EXPECT_EQ(outbox[3].payload, "Refused");
   EXPECT_EQ(arena.outstandingMarks(), 0u);
 }
 
@@ -3773,8 +3799,10 @@ TEST(VagentExecutorTest, MovedRebindsStalePeerRefsAndRaisesMoved) {
   ASSERT_TRUE(exec(h.execution(), h.ctx));
   const auto outbox =
       VagentExecutor::drainOutbox(arena, core, image->agentCell);
-  ASSERT_EQ(outbox.size(), 1u);
-  EXPECT_EQ(outbox[0].payload, "Note");
+  // [0] is the spawn's wire entry; Moved's Note is the only emit.
+  ASSERT_EQ(outbox.size(), 2u);
+  EXPECT_EQ(outbox[0].kind, "spawn");
+  EXPECT_EQ(outbox[1].payload, "Note");
   EXPECT_EQ(arena.outstandingMarks(), 0u);
 }
 
