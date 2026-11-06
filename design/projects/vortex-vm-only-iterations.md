@@ -1295,3 +1295,59 @@ frontend gaps remain open. Full §4.12 is incomplete.
 Logs: `/tmp/vql-visible-links-build.log`, `/tmp/vql-visible-links-tests.log`,
 `/tmp/vql-visible-links-profile.log`, `/tmp/vql-visible-links-overlay.log`,
 `/tmp/vql-visible-links-cli.log`, `/tmp/vql-visible-links-format.log`.
+
+## Iteration 36: foreign proxy projection masks
+
+VqlMaskLinks now consumes effective snapshots for canonical foreign proxies with explicit
+multi-space mappings. Rules, complete source-axis coverage, removals and the owner's filing-axis
+guard are checked before mutation. One outer arena savepoint owns all unlinks and any canonical
+neighbor proxies they materialize; nested kernel savepoints retain their usual rollback behavior.
+The local-owner path keeps its existing behavior. Quotation occurrences and name-dependent one-space
+snapshots remain explicit refusals, with no evaluator or legacy name-binding fallback.
+
+The existing 65,536-row cap remains a row cap; checked multiplication supplies twice that cap to the
+snapshot's directed-endpoint limit. Configurable candidate and work caps bound snapshot and
+index-preflight passes. A planned removal of the owner's exact `d.store-refs` axis refuses before
+any unlink, because arbitrary index-rank edits still do not maintain the cached tail. Index edges
+remain ordinary visible graph data; no axis is hidden and no promotion exception was added.
+
+Each space now records the actual index-axis identity at attachment. Proxy construction and rollback
+use it without rediscovering a label. The checked accessor is non-allocating and noexcept; release
+permanently clears an ephemeral cached identity that truncation removed, so a later mint with the
+same dense ref and name cannot revive a stale cache. Prefix hydration clears these identities and
+federation still refuses prefix export. This does not journal space attachment or establish general
+binding-change/attachment rollback parity.
+
+Validation: full `make -j$(nproc)` and all 862 affected tests from 80 suites passed. Thirteen new
+enabled cases cover index refusal before effects, ordinary-axis removal, aliases, partial overrides,
+quote/name/limit/fuel refusals, and second-neighbor allocation failure after an earlier unlink.
+Rollback assertions inspect the restored effective foreign rows, proxy maps, cells, shadows and
+marks. Host execution uses a named InvokeFrame over two real attached stores, preserves repeated
+owner contexts, and checks exact fresh Int64 assignments and unchanged source operation counts. A
+mask graph exported before its foreign stores exist reloads in a fresh VM and receives owners
+through ordinary runtime CopyCellRefs inputs; it neither captures nor copies foreign data.
+
+The real headless CLI removes an axis in a native function and retains exact `9007199254740993`. The
+broader consumer sweep ran 139 tests: 130 passed, one swarm case skipped, and the same eight
+unfinished frontend/exception-expectation cases failed. This remains a partial suite result. Mesh
+Vquery SOURCE retains its existing single-base-snapshot execution route, but its API cannot inject
+this multi-space proxy context; that route was not simulated by copying data. Sealed Vortex mesh
+artifacts still refuse effectful projections and frame descriptors.
+
+Four cold single profile observations on the Threadripper 1950X with Clang `-O3 -g` exclude setup
+and assertions. For 32 masks, missing/already-canonical neighbors took 226/126 microseconds and
+added 32/0 arena cells; for 128 they took 695/490 and added 128/0. VM dispatch counters were 32/32
+and 128/128, not processor-cycle measurements. The fixtures use one source dimension per owner; they
+measure repeated fixed-size masks, not large candidate-set scaling. Slots are not heap/RSS
+measurements, and these observations establish no speedup.
+
+Whole-operation CPU work is not yet fully bounded by the snapshot work cap. When a missing neighbor
+is minted, proxy construction's existing collision diagnostic can call legacy `dimIn` and
+`dimensionNamed` and scan a source directory outside that cap. This checks index-axis collisions; it
+is not evaluator fallback or implicit binding by the mask. A shared bounded name/collision lookup is
+the next prerequisite. General index-rank mutation, remaining callable forms and full
+frontend/lifecycle parity also remain open. Full §4.12 is incomplete.
+
+Logs: `/tmp/vql-foreign-masks-build.log`, `/tmp/vql-foreign-masks-tests.log`,
+`/tmp/vql-foreign-masks-profile.log`, `/tmp/vql-foreign-masks-overlay.log`,
+`/tmp/vql-foreign-masks-cli.log`, `/tmp/vql-foreign-masks-format.log`.

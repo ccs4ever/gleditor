@@ -685,8 +685,9 @@ ExecutionResult VortexVM::executeVqlMaskLinks(const CellRef opcode,
 
     const auto owner = resolveCell(inputs, {}, cellReferences_, 0, arena);
     if (!owner) return fail("VqlMaskLinks owner is not a cell reference");
-    if (arena.isQuoteOccurrence(*owner) || arena.foreignOf(*owner))
-      return fail("VqlMaskLinks does not support foreign owners");
+    if (arena.isQuoteOccurrence(*owner))
+      return fail("VqlMaskLinks does not support quote occurrences");
+    const auto foreignOwner = arena.foreignOf(*owner);
     if (cellReferences_.contains(inputs[1]))
       return fail("VqlMaskLinks default must be a Boolean scalar");
     const auto defaultKeep = arena.asBool(inputs[1]);
@@ -714,27 +715,103 @@ ExecutionResult VortexVM::executeVqlMaskLinks(const CellRef opcode,
         return fail("VqlMaskLinks dimensions must be unique");
     }
 
-    const auto links = arena.dimensionsOf(*owner);
-    if (links.size() > projectionLimits_.maxLinksPerOwner)
-      return fail("VqlMaskLinks owner link limit exceeded");
-    std::vector<DimLink> snapshot(links.begin(), links.end());
     struct Removal {
       DimRef dimension;
       DimVector direction;
     };
     std::vector<Removal> removals;
-    for (const auto &link : snapshot) {
+    const auto planRow = [&](const DimRef dimension,
+                             const std::optional<EffectiveLinkNeighbor> &pos,
+                             const std::optional<EffectiveLinkNeighbor> &neg) {
       arena.consumeWork();
-      if (!arena.contains(link.dim))
-        return fail("VqlMaskLinks encountered an unmapped local dimension");
-      const auto rule = rules.find(link.dim);
-      for (const auto direction : {DimVector::POS, DimVector::NEG}) {
-        if (!link.neighbor(direction)) continue;
+      if (!arena.contains(dimension)) {
+        throw std::logic_error(
+            "VqlMaskLinks encountered an unmapped local dimension");
+      }
+      const auto rule          = rules.find(dimension);
+      const auto planDirection = [&](const DimVector direction,
+                                     const auto &neighbor,
+                                     const std::uint8_t bit) {
+        if (!neighbor) return;
         arena.consumeWork();
-        const auto bit = direction == DimVector::POS ? 1U : 2U;
         const bool keep =
             rule != rules.end() ? (rule->second & bit) != 0 : *defaultKeep;
-        if (!keep) removals.push_back({link.dim, direction});
+        if (!keep) removals.push_back({dimension, direction});
+      };
+      planDirection(DimVector::POS, pos, 1);
+      planDirection(DimVector::NEG, neg, 2);
+    };
+
+    if (foreignOwner.has_value()) {
+      if (projectionLimits_.maxLinksPerOwner == 0 ||
+          projectionLimits_.maxLinksPerOwner >
+              std::numeric_limits<std::size_t>::max() / 2) {
+        return fail("VqlMaskLinks directed endpoint limit is invalid");
+      }
+      const auto projected = arena.snapshotLinks(
+          *owner, zigzag::EffectiveLinkLimits{
+                      .maxCandidates = projectionLimits_.maxSnapshotCandidates,
+                      .maxLinks      = 2 * projectionLimits_.maxLinksPerOwner,
+                      .maxWork       = projectionLimits_.maxSnapshotWork});
+      if (!projected) {
+        switch (projected.error()) {
+        case zigzag::EffectiveLinkRefusal::UnknownOwner:
+          return fail("VqlMaskLinks effective-link owner is unavailable");
+        case zigzag::EffectiveLinkRefusal::UnmappedDimension:
+          return fail("VqlMaskLinks encountered an unmapped foreign dimension");
+        case zigzag::EffectiveLinkRefusal::AmbiguousDimension:
+          return fail("VqlMaskLinks foreign dimension mapping is ambiguous");
+        case zigzag::EffectiveLinkRefusal::NameResolutionRequired:
+          return fail(
+              "VqlMaskLinks requires explicit foreign dimension mappings");
+        case zigzag::EffectiveLinkRefusal::LimitExceeded:
+          return fail("VqlMaskLinks effective-link snapshot limit exceeded");
+        }
+      }
+      if (projected->size() > projectionLimits_.maxLinksPerOwner)
+        return fail("VqlMaskLinks owner link limit exceeded");
+      for (const auto &row : *projected) {
+        planRow(row.dim, row.pos, row.neg);
+      }
+    } else {
+      const auto links = arena.dimensionsOf(*owner);
+      if (links.size() > projectionLimits_.maxLinksPerOwner)
+        return fail("VqlMaskLinks owner link limit exceeded");
+      const std::vector<DimLink> snapshot(links.begin(), links.end());
+      for (const auto &link : snapshot) {
+        const auto asNeighbor = [](const std::optional<CellRef> neighbor)
+            -> std::optional<EffectiveLinkNeighbor> {
+          if (!neighbor) return std::nullopt;
+          return EffectiveLinkNeighbor{*neighbor};
+        };
+        planRow(link.dim, asNeighbor(link.neighbor(DimVector::POS)),
+                asNeighbor(link.neighbor(DimVector::NEG)));
+      }
+    }
+
+    // The proxy map and this rank's tail cache must remain in agreement. Until
+    // unlink maintains that cache, reject the exact index axis before writes.
+    if (foreignOwner.has_value() && !removals.empty()) {
+      std::size_t preflightWork = 0;
+      if (preflightWork >= projectionLimits_.maxSnapshotWork) {
+        return fail("VqlMaskLinks store-ref index preflight limit exceeded");
+      }
+      preflightWork++;
+      arena.consumeWork();
+      const auto indexDimension = arena.storeRefsDimension(foreignOwner->space);
+      if (!indexDimension) {
+        return fail("VqlMaskLinks store-ref index identity is unavailable");
+      }
+      for (const auto &removal : removals) {
+        if (preflightWork >= projectionLimits_.maxSnapshotWork) {
+          return fail("VqlMaskLinks store-ref index preflight limit exceeded");
+        }
+        preflightWork++;
+        arena.consumeWork();
+        if (removal.dimension == *indexDimension) {
+          return fail(
+              "VqlMaskLinks cannot remove an internal store-ref index link");
+        }
       }
     }
 

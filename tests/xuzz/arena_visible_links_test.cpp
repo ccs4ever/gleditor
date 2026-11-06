@@ -316,7 +316,7 @@ TEST(ArenaVisibleLinksTest,
 }
 
 TEST(ArenaVisibleLinksTest,
-     OneSpaceNameFallbackRemainsOnDimInButSnapshotRefusesIt) {
+     OneSpaceNameFallbackRemainsOnDimInButSnapshotRequiresExplicitMapping) {
   auto source =
       makeSource("name_fallback", {"d.edge"}, 2, {{0, 0, DimVector::POS, 1}});
   ArenaManifold arena;
@@ -333,13 +333,47 @@ TEST(ArenaVisibleLinksTest,
   EXPECT_FALSE(arena.findExistingProxy(space, source.cells[1]));
 }
 
-TEST(ArenaVisibleLinksTest, ForeignProjectionMaskRemainsRefused) {
+TEST(ArenaVisibleLinksTest, StoreRefsDimensionIdentityIsPerAttachedSpace) {
+  auto first  = makeSource("store_refs_identity_first", {"d.edge"}, 1);
+  auto second = makeSource("store_refs_identity_second", {"d.edge"}, 1);
+  ArenaManifold arena;
+  const auto firstSpace  = attach(arena, first, "first");
+  const auto secondSpace = attach(arena, second, "second");
+  const auto storeRefs   = arena.ensureDimension("d.store-refs");
+
+  EXPECT_EQ(arena.storeRefsDimension(firstSpace), storeRefs);
+  EXPECT_EQ(arena.storeRefsDimension(secondSpace), storeRefs);
+  EXPECT_FALSE(arena.storeRefsDimension(0));
+  EXPECT_FALSE(arena.storeRefsDimension(secondSpace + 1));
+}
+
+TEST(ArenaVisibleLinksTest,
+     ReleasedSpaceDoesNotRecoverReusedStoreRefsDimensionIdentity) {
+  ArenaManifold arena;
+  const auto mark       = arena.mark();
+  const auto staleSpace = arena.attach(Space{.label = "released"});
+  const auto staleAxis  = arena.storeRefsDimension(staleSpace);
+  ASSERT_TRUE(staleAxis);
+
+  arena.release(mark);
+  EXPECT_FALSE(arena.storeRefsDimension(staleSpace));
+  static_cast<void>(arena.makeCell("reuse released dimension index"));
+  const auto reusedAxis = arena.ensureDimension("d.store-refs");
+  EXPECT_EQ(reusedAxis, *staleAxis);
+  EXPECT_FALSE(arena.storeRefsDimension(staleSpace));
+
+  auto source          = makeSource("store_refs_after_release", {"d.edge"}, 1);
+  const auto liveSpace = attach(arena, source, "live");
+  EXPECT_EQ(arena.storeRefsDimension(liveSpace), reusedAxis);
+  EXPECT_NO_THROW(arena.proxyFor(liveSpace, source.cells[0]));
+}
+
+TEST(ArenaVisibleLinksTest,
+     OneSpaceForeignProjectionNeedsExplicitDimensionMapping) {
   auto source =
       makeSource("foreign_mask", {"d.edge"}, 2, {{0, 0, DimVector::POS, 1}});
   ArenaManifold arena;
-  const auto space = attach(arena, source, "source");
-  const auto dim   = arena.ensureDimension("d.edge");
-  bind(arena, dim, space, source.dims[0]);
+  const auto space    = attach(arena, source, "source");
   const CellRef owner = arena.proxyFor(space, source.cells[0]);
   vortex::VortexCore core(arena);
   vortex::VortexVM vm(core);
@@ -352,7 +386,7 @@ TEST(ArenaVisibleLinksTest, ForeignProjectionMaskRemainsRefused) {
   const auto result = vm.step(cursor);
 
   EXPECT_FALSE(result.success);
-  EXPECT_NE(result.errorMessage.find("does not support foreign owners"),
+  EXPECT_NE(result.errorMessage.find("requires explicit foreign dimension"),
             std::string::npos);
   EXPECT_EQ(arena.cellCount(), cellsBefore);
   EXPECT_FALSE(arena.findExistingProxy(space, source.cells[1]));

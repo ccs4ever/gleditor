@@ -345,6 +345,11 @@ public:
   [[nodiscard]] gleditor::cpp26::optional<Space &>
   spaceAt(std::uint32_t id) noexcept;
 
+  /// The exact arena dimension used by this space's proxy index, if the
+  /// attached identity is still valid. This never resolves the axis by name.
+  [[nodiscard]] std::optional<DimRef>
+  storeRefsDimension(std::uint32_t space) const noexcept;
+
   [[nodiscard]] std::size_t spaceCount() const noexcept {
     return spaces_.size();
   }
@@ -855,6 +860,7 @@ private:
   std::vector<std::unordered_map<CellRef, CellRef>> spaceProxies_;
   std::vector<ProxyEntry> proxyOrder_;
   std::vector<CellRef> spaceStoreRefsTail_;
+  std::vector<std::optional<DimRef>> spaceStoreRefsDimensions_;
 
   std::unordered_map<CellRef, CellRef> occurrenceToCanonical_;
   std::unordered_map<CellRef, QuoteViewId> occurrenceToView_;

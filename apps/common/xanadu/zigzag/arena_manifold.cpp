@@ -300,8 +300,8 @@ std::uint32_t ArenaManifold::attach(Space space) {
     space.reader = space.store;
   }
 
-  const auto dimStores = ensureDimension("d.stores");
-  ensureDimension("d.store-refs");
+  const auto dimStores    = ensureDimension("d.stores");
+  const auto dimStoreRefs = ensureDimension("d.store-refs");
 
   if (space.storeCell && *space.storeCell == noCell) {
     throw std::invalid_argument("a space store cell cannot be noCell");
@@ -339,6 +339,7 @@ std::uint32_t ArenaManifold::attach(Space space) {
   storesRankTail_ = *space.storeCell;
 
   spaceStoreRefsTail_.push_back(*space.storeCell);
+  spaceStoreRefsDimensions_.push_back(dimStoreRefs);
   spaceProxies_.emplace_back();
   spaces_.push_back(space);
   return id;
@@ -360,6 +361,20 @@ ArenaManifold::spaceAt(const std::uint32_t id) noexcept {
   return spaces_[id - 1];
 }
 
+std::optional<DimRef>
+ArenaManifold::storeRefsDimension(const std::uint32_t space) const noexcept {
+  if (space == 0 || space > spaces_.size() ||
+      space > spaceStoreRefsDimensions_.size()) {
+    return std::nullopt;
+  }
+  const auto cachedDimension = spaceStoreRefsDimensions_[space - 1];
+  if (!cachedDimension) {
+    return std::nullopt;
+  }
+  const DimRef dimension = *cachedDimension;
+  return contains(dimension) ? std::optional<DimRef>{dimension} : std::nullopt;
+}
+
 CellRef ArenaManifold::proxyFor(const std::uint32_t space,
                                 const CellRef foreignIndex) {
   if (space == 0 || space > spaces_.size()) {
@@ -375,11 +390,15 @@ CellRef ArenaManifold::proxyFor(const std::uint32_t space,
 
   const Mark savepoint = mark();
   try {
-    const auto dimStoreRefs = ensureDimension("d.store-refs");
-    const auto &source      = spaces_[space - 1];
+    const auto dimStoreRefs = storeRefsDimension(space);
+    if (!dimStoreRefs) {
+      throw std::logic_error("proxy store-ref index dimension is unavailable");
+    }
+    const auto &source = spaces_[space - 1];
     const auto sourceDimension =
         [&](const std::uint32_t sourceId) -> std::optional<DimRef> {
-      if (const auto bound = dimIn(sourceId, dimStoreRefs); bound.has_value()) {
+      if (const auto bound = dimIn(sourceId, *dimStoreRefs);
+          bound.has_value()) {
         return bound;
       }
       const auto sourceSpace = spaceAt(sourceId);
@@ -410,7 +429,7 @@ CellRef ArenaManifold::proxyFor(const std::uint32_t space,
       const bool posShadowed =
           dense.has_value() &&
           proxyShadowedEdges_.contains(ShadowEdgeKey{
-              .dense = *dense, .dim = dimStoreRefs, .dir = DimVector::POS});
+              .dense = *dense, .dim = *dimStoreRefs, .dir = DimVector::POS});
       if (!posShadowed) {
         if (const auto origin = foreignOf(tail); origin.has_value()) {
           const auto originSpace = spaceAt(origin->space);
@@ -429,7 +448,7 @@ CellRef ArenaManifold::proxyFor(const std::uint32_t space,
                       static_cast<std::uint64_t>(foreignIndex);
     const CellRef proxy = mintSlot(xanadu::ValueKind::ExternRef, bits, {});
 
-    appendLocalLink(tail, dimStoreRefs, DimVector::POS, proxy);
+    appendLocalLink(tail, *dimStoreRefs, DimVector::POS, proxy);
 
     // Record the undo key before publishing into the map. If node allocation
     // fails, release() can erase the absent key and remove the minted slot.
@@ -2307,9 +2326,18 @@ ArenaManifold *ArenaManifold::release(const Mark &m) noexcept {
   liveLinks_   = m.liveLinks;
   liveContent_ = m.liveContent;
 
-  const auto dimStoreRefs = dimensionNamed("d.store-refs");
-  if (dimStoreRefs) {
-    for (std::size_t s = 0; s < spaces_.size(); ++s) {
+  for (auto &dimension : spaceStoreRefsDimensions_) {
+    if (dimension && isEphemeral(*dimension) && !contains(*dimension)) {
+      dimension.reset();
+    }
+  }
+
+  for (std::size_t s = 0; s < spaces_.size(); ++s) {
+    const auto dimStoreRefs =
+        s < std::numeric_limits<std::uint32_t>::max()
+            ? storeRefsDimension(static_cast<std::uint32_t>(s + 1))
+            : std::nullopt;
+    if (dimStoreRefs.has_value()) {
       CellRef cur       = *spaces_[s].storeCell;
       std::size_t limit = traversalBound();
       while (cur != noCell && limit-- > 0) {
@@ -2322,12 +2350,8 @@ ArenaManifold *ArenaManifold::release(const Mark &m) noexcept {
       if (s < spaceStoreRefsTail_.size()) {
         spaceStoreRefsTail_[s] = cur;
       }
-    }
-  } else {
-    for (std::size_t s = 0; s < spaces_.size(); ++s) {
-      if (s < spaceStoreRefsTail_.size() && spaces_[s].storeCell) {
-        spaceStoreRefsTail_[s] = *spaces_[s].storeCell;
-      }
+    } else if (s < spaceStoreRefsTail_.size() && spaces_[s].storeCell) {
+      spaceStoreRefsTail_[s] = *spaces_[s].storeCell;
     }
   }
 
@@ -2879,9 +2903,9 @@ bool prefixRunsAreWellFormed(
 
 bool ArenaManifold::hasUnsupportedUntrackedPrefixIdentity() const noexcept {
   return !spaces_.empty() || !spaceProxies_.empty() ||
-         !spaceStoreRefsTail_.empty() || !boundDimensions_.empty() ||
-         !provenanceCells_.empty() || authorshipRoot_.has_value() ||
-         storesRankTail_.has_value();
+         !spaceStoreRefsTail_.empty() || !spaceStoreRefsDimensions_.empty() ||
+         !boundDimensions_.empty() || !provenanceCells_.empty() ||
+         authorshipRoot_.has_value() || storesRankTail_.has_value();
 }
 
 std::expected<ArenaManifold::PrefixSnapshot, ArenaRefusal>
@@ -3046,6 +3070,7 @@ ArenaResult ArenaManifold::hydratePrefix(const PrefixSnapshot &snapshot) {
   spaces_.clear();
   spaceProxies_.clear();
   spaceStoreRefsTail_.clear();
+  spaceStoreRefsDimensions_.clear();
   proxyOrder_.clear();
   occurrenceToCanonical_.clear();
   occurrenceToView_.clear();

@@ -131,6 +131,9 @@ enum class OpcodeKind : std::uint8_t {
 struct ProjectionLimits {
   std::size_t maxRules{4096};
   std::size_t maxLinksPerOwner{65536};
+  std::size_t maxSnapshotCandidates{65536};
+  // Caps effective-link scans and index-axis preflight comparisons.
+  std::size_t maxSnapshotWork{4'000'000};
 };
 
 struct FrameDescriptorError {

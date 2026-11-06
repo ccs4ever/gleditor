@@ -583,11 +583,12 @@ rollback, export/reload and host/mesh source execution. The CLI preserves an Int
 exact-integer range and explicitly rejects an empty target. Profile measurements expose growing
 shared-clone-rank traversal cost; no speedup or general latency claim follows.
 
-Calls/computed targets, predicates and other deferred path forms, nested shapes, foreign owners and
-ordered projection/traversal remain unfinished. The native-frame stage below extends projection
-eligibility. The parser now refuses immediate continuation after projection rather than interpreting
-it as another statement; an intermediate `let` works. Nonliteral `d.clone` assignments refuse, and
-the existing `link(d.clone, target)` collision is still open. Full §4.12 remains incomplete.
+Calls/computed targets, predicates and other deferred path forms, nested shapes, general foreign
+projections and ordered projection/traversal remain unfinished. The native-frame stage below extends
+projection eligibility. The parser now refuses immediate continuation after projection rather than
+interpreting it as another statement; an intermediate `let` works. Nonliteral `d.clone` assignments
+refuse, and the existing `link(d.clone, target)` collision is still open. Full §4.12 remains
+incomplete.
 
 ## Native functions containing projections
 
@@ -606,9 +607,9 @@ speedup claim.
 Recovery also revealed inconsistent dimension lookup/mint anchors after a home projection detached
 its `d.dims` connector. Both now use the stable directory cell, so new names retain one identity
 without restoring removed topology. A core regression isolates that behavior and the Host recovery
-case remains intact. Foreign owners, ordered projection/traversal, other deferred projection
-targets, callable forms, nested effectful validation and complete frontend/lifecycle parity still
-prevent full §4.12 completion.
+case remains intact. General foreign-owner projections, ordered projection/traversal, other deferred
+projection targets, callable forms, nested effectful validation and complete frontend/lifecycle
+parity still prevent full §4.12 completion.
 
 ## Reciprocal foreign-link kernel prerequisite
 
@@ -629,9 +630,9 @@ not a full-suite pass; those frontend gaps remain on the specification backlog.
 
 Proxy creation temporarily refuses collisions between its index axis and authored source edges,
 including an unmapped literal same-named source axis. This is collision detection, not implicit
-identity binding. General binding changes after proxy edits, axis isolation and complete effective
-link enumeration remain open. Foreign projection masks remain explicitly unavailable, as do the
-previously listed callable/frontend/lifecycle gaps. Full §4.12 remains incomplete.
+identity binding. General binding changes after proxy edits and axis isolation remain open. The
+following snapshot and foreign-mask stages add a bounded subset; the previously listed
+callable/frontend/lifecycle gaps still leave full §4.12 incomplete.
 
 ## Bounded effective-link discovery
 
@@ -648,6 +649,27 @@ refuse explicitly, and separate aliases retain independent directional overrides
 The full build and all 849 affected tests from 78 suites passed. Eleven new cases cover identities,
 partial topology, limits and refusals; six profile observations show zero arena-cell growth without
 claiming zero heap allocation or speedup. The broader sweep retained eight unfinished frontend
-failures, with 128 passes and one skip. Foreign masks still refuse. Shared bounded name resolution,
-index-rank mutation/cache lifecycle, callable forms and full frontend parity remain unfinished; full
-§4.12 is incomplete.
+failures, with 128 passes and one skip. The foreign-mask stage below now consumes these snapshots.
+Shared bounded name resolution, general index-rank mutation/cache lifecycle, callable forms and full
+frontend parity remain unfinished; full §4.12 is incomplete.
+
+## Masks over explicitly bound foreign proxies
+
+Foreign proxy masks now execute through the same VM primitive using effective snapshots, complete
+removal planning and one outer rollback scope. The local path remains unchanged. Masks must preserve
+the owner's actual filing-axis links; quote owners and name-dependent one-space mappings still
+refuse before effects. See [iteration 36](projects/vortex-vm-only-iterations.md).
+
+The index-axis identity is captured per space and invalidated permanently when release truncates it,
+including same-name/reference reuse. This protects that cache without claiming general space
+attachment rollback. Full build and all 862 affected tests from 80 suites passed. Coverage includes
+late-mint rollback of earlier overlays, host native-frame calls with duplicate foreign contexts,
+exact fresh Int64 assignments and source-free artifact reload with runtime foreign inputs. Source
+stores remain unchanged. Four raw profile observations report VM dispatch counts and arena slots,
+with no speedup/heap claims. The broader sweep passed 130 of 139 tests, skipped one, and retained
+the same eight unfinished frontend failures.
+
+Snapshot/planning work is bounded, but proxy construction's legacy collision-name lookup can still
+scan a source directory outside that work cap. Shared bounded name resolution is next. General
+filing-rank mutation, federated mesh input, remaining callable forms and complete frontend/lifecycle
+parity remain open. Full §4.12 is incomplete.
