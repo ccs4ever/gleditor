@@ -412,10 +412,14 @@ struct Lowerer {
     // Capacity-qualified calls lower before the verb switch — Call is
     // not a host-verb kind, the qualifier is what gave it away.
     if (isCapacityCall(expr)) {
-      const Expr &callee = *expr.children.front();
+      const Expr &callee  = *expr.children.front();
+      const auto fx       = effectSigs_.find(
+          callee.children.front()->text + "." + callee.text);
       const auto step    = arena.makeCell();
-      zigzag::expectWritten(arena.link(step, verbDim(), DimVector::POS,
-                                       arena.makeCell("capcall")));
+      zigzag::expectWritten(arena.link(
+          step, verbDim(), DimVector::POS,
+          arena.makeCell(fx != effectSigs_.end() ? "effectcall"
+                                                 : "capcall")));
       const auto field = [&](std::string_view name, CellRef value) {
         if (const auto rec = varsRecord(arena, core, step, name, true))
           zigzag::expectWritten(
@@ -435,6 +439,21 @@ struct Lowerer {
                        dims().step, DimVector::POS, *arg));
       }
       field("payload", payload);
+      if (fx != effectSigs_.end()) {
+        // V6: the signature's `within` is the park's deadline — the
+        // binding's turn-clock is turns, like every other wait. `else`
+        // lowers the same recovery head ask parks for its own ladder.
+        field("deadline", arena.makeScalarCell(fx->second.turns));
+        if (fx->second.preempts)
+          field("preempts", arena.makeScalarCell(std::int64_t{1}));
+        if (expr.recovery) {
+          auto head =
+              marshalElse(decl, params, *expr.recovery, clauseName);
+          if (!head) return std::unexpected(head.error());
+          field("else", arena.makeScalarCell(
+                            static_cast<std::int64_t>(*head)));
+        }
+      }
       return step;
     }
     std::string_view verb;
@@ -900,6 +919,15 @@ struct Lowerer {
         fields.emplace(member.name, *member.result);
     return fields;
   }
+  // V6's effect surface: a capacity's `effect` methods keyed
+  // "Cap.method" — the signature's `within` is the call's deadline
+  // (the checker refuses an effect without one) and `preempts` rides
+  // the staged entry so the binding's scheduling rule is durable.
+  struct EffectSig {
+    bool preempts{false};
+    std::int64_t turns{0};
+  };
+  std::map<std::string, EffectSig, std::less<>> effectSigs_;
   DimRef capacityDim() {
     if (capacityDim_ == zigzag::noCell)
       capacityDim_ = core.findOrMintDimension("d.capacity");
@@ -1522,6 +1550,17 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
     // and its bodiless method signatures are the checker's surface.
     if (!symbols.contains(name)) mintSymbol(name);
     signatures.emplace(name, decl.parameters);
+    // `effect` methods carry the wait's deadline on the signature —
+    // the call site lowers to `effectcall` and the park rides these
+    // turns, so they are recorded here keyed "Cap.method".
+    for (const auto &member : decl.members)
+      if (member.kind == DeclKind::Method && member.effect) {
+        EffectSig sig{.preempts = member.preempts};
+        if (member.deadline &&
+            member.deadline->kind == ExprKind::Duration)
+          sig.turns = std::stoll(member.deadline->text);
+        effectSigs_.emplace(name + "." + member.name, sig);
+      }
     return;
   }
   case DeclKind::Uses: {

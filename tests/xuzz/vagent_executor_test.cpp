@@ -3372,4 +3372,153 @@ TEST(VagentExecutorTest, SkillMethodReadsAndWritesFrameFields) {
   EXPECT_EQ(speed().value_or(-1), 21);
 }
 
+TEST(VagentExecutorTest, EffectDoneResumesTheParkedIntentionWithTheResult) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image = h.lower(
+      "module demo\nevent Tick\ngoal Work() perform\n"
+      "capacity Navigation { effect def read(): Int within 3s }\n"
+      "native skill Device implements Navigation\n"
+      "agent A {\n"
+      "  uses Navigation\n"
+      "  install Device\n"
+      "  on Tick { adopt Work() }\n"
+      "  plan w for Work { let r := Navigation.read() }\n"
+      "}");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+  auto &core  = h.ctx.core;
+  // Tick adopts Work; the effect step stages the outbox entry and
+  // parks the intention on the request's correlation.
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  const auto staged =
+      VagentExecutor::drainOutbox(arena, core, image->agentCell);
+  ASSERT_EQ(staged.size(), 1u);
+  EXPECT_EQ(staged[0].kind, "effect");
+  // The adapter's answer: EffectDone carrying the result, correlated
+  // to the staged request — the parked wait binds it like an ask's.
+  exec.deliver(arena, core,
+               Delivery{.agent       = image->agentCell,
+                        .percept     = "EffectDone",
+                        .payloadCell = arena.makeScalarCell(std::int64_t{42}),
+                        .correlation = staged[0].id});
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+  const auto r = varsRecord(arena, core, image->agentCell, "r", false);
+  ASSERT_TRUE(r);
+  const auto rv = arena.linked(*r, core.dims().values, DimVector::POS);
+  ASSERT_TRUE(rv);
+  EXPECT_EQ(arena.asInt64(*rv).value_or(-1), 42);
+}
+
+TEST(VagentExecutorTest, EffectFailedRunsTheElseLadderWithTheCause) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image = h.lower(
+      "module demo\nevent Tick\ngoal Work() perform\n"
+      "capacity Navigation { effect def read(): Int within 3s }\n"
+      "native skill Device implements Navigation\n"
+      "agent A {\n"
+      "  uses Navigation\n"
+      "  install Device\n"
+      "  on Tick { adopt Work() }\n"
+      "  plan w for Work { let r := Navigation.read() else 0 }\n"
+      "}");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+  auto &core  = h.ctx.core;
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  const auto staged =
+      VagentExecutor::drainOutbox(arena, core, image->agentCell);
+  ASSERT_EQ(staged.size(), 1u);
+  // The binding's busy refusal rides the percept's fault field — the
+  // wake routes it into the else ladder as `cause`.
+  exec.deliver(arena, core,
+               Delivery{.agent       = image->agentCell,
+                        .percept     = "EffectFailed",
+                        .correlation = staged[0].id,
+                        .fault       = "busy"});
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+  const auto r = varsRecord(arena, core, image->agentCell, "r", false);
+  ASSERT_TRUE(r);
+  const auto rv = arena.linked(*r, core.dims().values, DimVector::POS);
+  ASSERT_TRUE(rv);
+  EXPECT_EQ(arena.asInt64(*rv).value_or(-1), 0);
+}
+
+TEST(VagentExecutorTest, EffectDeadlineStagesCancelBeforeTheLadder) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image = h.lower(
+      "module demo\nevent Tick\ngoal Work() perform\n"
+      "capacity Navigation { effect def read(): Int within 1s }\n"
+      "native skill Device implements Navigation\n"
+      "agent A {\n"
+      "  uses Navigation\n"
+      "  install Device\n"
+      "  on Tick { adopt Work() }\n"
+      "  plan w for Work { let r := Navigation.read() else 0 }\n"
+      "}");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+  auto &core  = h.ctx.core;
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  const auto staged =
+      VagentExecutor::drainOutbox(arena, core, image->agentCell);
+  ASSERT_EQ(staged.size(), 1u);
+  EXPECT_EQ(staged[0].kind, "effect");
+  // No delivery — the within bound elapses, staging cancel for the
+  // binding before the else ladder runs.
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+  const auto after =
+      VagentExecutor::drainOutbox(arena, core, image->agentCell);
+  // drainOutbox reads without consuming — the rank still holds the
+  // request; the cancel is the new entry.
+  ASSERT_EQ(after.size(), 2u);
+  EXPECT_EQ(after[1].kind, "cancel");
+  EXPECT_EQ(after[1].correlation, staged[0].id);
+  const auto r = varsRecord(arena, core, image->agentCell, "r", false);
+  ASSERT_TRUE(r);
+  const auto rv = arena.linked(*r, core.dims().values, DimVector::POS);
+  ASSERT_TRUE(rv);
+  EXPECT_EQ(arena.asInt64(*rv).value_or(-1), 0);
+}
+
+TEST(VagentExecutorTest, HandlerStagedEffectsFailAsAnEvent) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image = h.lower(
+      "module demo\nevent Tick\nevent Seen\n"
+      "capacity Navigation { effect def read(): Int within 3s }\n"
+      "native skill Device implements Navigation\n"
+      "agent A {\n"
+      "  uses Navigation\n"
+      "  install Device\n"
+      "  on Tick { Navigation.read() }\n"
+      "  on EffectFailed { emit Seen{} }\n"
+      "}");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+  auto &core  = h.ctx.core;
+  // The handler's bare call stages without parking — no intention
+  // exists to wait, and the turn still succeeds.
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  const auto staged =
+      VagentExecutor::drainOutbox(arena, core, image->agentCell);
+  ASSERT_EQ(staged.size(), 1u);
+  EXPECT_EQ(staged[0].kind, "effect");
+  // The binding's failure arrives as the EffectFailed event the spec
+  // gives handler calls — ordinary dispatch, `on EffectFailed` runs.
+  exec.deliver(arena, core,
+               Delivery{.agent   = image->agentCell,
+                        .percept     = "EffectFailed",
+                        .correlation = staged[0].id,
+                        .fault       = "busy"});
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+  const auto outbox =
+      VagentExecutor::drainOutbox(arena, core, image->agentCell);
+  ASSERT_EQ(outbox.size(), 2u);
+  EXPECT_EQ(outbox[1].kind, "emit");
+  EXPECT_EQ(outbox[1].payload, "Seen");
+}
+
 } // namespace

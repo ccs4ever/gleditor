@@ -235,7 +235,8 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
                                CellRef delegator      = noCell,
                                std::string_view correlation = {},
                                std::string_view percept     = {},
-                               std::string_view fault       = {}) -> std::string {
+                               std::string_view fault       = {},
+                               bool preempts = false) -> std::string {
     const auto position = std::ranges::to<std::vector>(
                               zigzag::rankAfter(arena, agent, dims.outbox))
                               .size();
@@ -273,6 +274,9 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       outField("percept", arena.makeCell(std::string{percept}));
     if (!fault.empty())
       outField("fault", arena.makeCell(std::string{fault}));
+    // V6's `effect preempts` — the entry carries the signature's
+    // modifier so the binding's start-at-once rule survives the drain.
+    if (preempts) outField("preempts", arena.makeScalarCell(std::int64_t{1}));
     if (delegator != noCell)
       outField("delegator",
                arena.makeScalarCell(static_cast<std::int64_t>(delegator)));
@@ -889,6 +893,72 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       for (const CellRef clause : meta.beliefsOf(pred))
         unlinkRank(arena, clause, core.dims().clause);
       return meta.believe(pred, term, agent, turn).has_value();
+    }
+    if (verb == "effectcall") {
+      // V6: an effect never runs inside the turn — the staged entry is
+      // what the host binding performs after commit. The plan form
+      // parks the intention on the request's correlation the way ask
+      // does; the handler form stages and returns, any failure
+      // arriving later as an EffectFailed percept.
+      const auto cap      = field("capacity");
+      const auto method   = field("method");
+      const auto payload  = field("payload");
+      const auto deadline = field("deadline");
+      if (cap == noCell || method == noCell || payload == noCell ||
+          deadline == noCell)
+        return false;
+      const auto turns = arena.asInt64(deadline);
+      if (!turns) return false;
+      // The honest provider gate: the capacity names an installed
+      // skill's instance — the checker keeps effect methods
+      // native-only, so a match is the binding's skill.
+      bool provided = false;
+      for (const CellRef inst :
+           zigzag::rankAfter(arena, agent, dims.skill))
+        if (const auto cn =
+                arena.linked(inst, dims.capacity, DimVector::POS);
+            cn && arena.textOf(*cn) == arena.textOf(cap)) {
+          provided = true;
+          break;
+        }
+      if (!provided) return false;
+      const auto requestId =
+          stageOutbox("effect", payload, {}, {}, noCell, {}, {}, {},
+                      field("preempts") != noCell);
+      if (intention == noCell) return true;
+      // §6.6's suspension: EffectDone and EffectFailed share the
+      // request's correlation — the awaitEffect marker lets the wake
+      // rung complete on either name and route a failure's cause into
+      // the else ladder. awaitCall keeps the marshaled call so an
+      // elapsed deadline can stage cancel naming what to stop.
+      if (const auto rec =
+              varsRecord(arena, core, intention, "awaitCorr", true))
+        zigzag::expectWritten(arena.link(*rec, core.dims().values,
+                                       DimVector::POS,
+                                       arena.makeCell(requestId)));
+      if (const auto rec =
+              varsRecord(arena, core, intention, "awaitEvent", true))
+        zigzag::expectWritten(
+            arena.link(*rec, core.dims().values, DimVector::POS,
+                       arena.makeCell("EffectDone")));
+      if (const auto rec =
+              varsRecord(arena, core, intention, "awaitCall", true))
+        zigzag::expectWritten(
+            arena.link(*rec, core.dims().values, DimVector::POS,
+                       arena.makeScalarCell(
+                           static_cast<std::int64_t>(payload))));
+      if (const auto bound = field("result"); bound != noCell)
+        if (const auto rec =
+                varsRecord(arena, core, intention, "awaitBind", true))
+          zigzag::expectWritten(
+              arena.link(*rec, core.dims().values, DimVector::POS,
+                         arena.makeCell(arena.textOf(bound))));
+      parkElse();
+      meta.setIntentionField(intention, "awaitEffect", 1);
+      meta.setIntentionField(intention, "awaitDeadline", turn + *turns);
+      meta.setIntentionField(intention, "waiting", 1);
+      meta.setIntentionField(intention, "ready", 0);
+      return true;
     }
     if (verb == "install" || verb == "uninstall" || verb == "capcall" ||
         verb == "mount" || verb == "unmount") {
@@ -1755,6 +1825,11 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       }();
       const auto deadline =
           meta.intentionField(intention, "awaitDeadline").value_or(0);
+      // V6's parked effect completes on either result name sharing the
+      // request's correlation — done binds the payload, failed faults
+      // into the else ladder through the percept's `fault` record.
+      const auto awaitEffect =
+          meta.intentionField(intention, "awaitEffect").value_or(0) != 0;
       bool matched      = false;
       CellRef matchCell = noCell;
       // The occurrence `as g` binds is the delivered payload term when
@@ -1838,7 +1913,10 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
         if (!beliefForm)
           for (const CellRef percept :
                zigzag::rankAfter(arena, agent, dims.seen)) {
-            if (arena.textOf(percept) != wanted) continue;
+            const auto pname = arena.textOf(percept);
+            if (pname != wanted &&
+                !(awaitEffect && pname == "EffectFailed"))
+              continue;
             // The delivered envelope: grab→payload when the percept
             // carries one, the percept itself otherwise — the term
             // an `as` binding's `r.field` reads through #FIND.
@@ -1931,6 +2009,19 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
         meta.setIntentionField(intention, "ready", 1);
       } else if (turn >= deadline) {
         meta.setIntentionField(intention, "waiting", 0);
+        // V6's elapsed deadline stages cancel to the binding — best
+        // effort by the host contract — before the statement's own
+        // ladder; the correlation names the in-flight request.
+        if (awaitEffect) {
+          CellRef call = noCell;
+          if (const auto rec =
+                  varsRecord(arena, core, intention, "awaitCall", false))
+            if (const auto v =
+                    arena.linked(*rec, core.dims().values, DimVector::POS))
+              if (const auto r = arena.asInt64(*v))
+                call = static_cast<CellRef>(*r);
+          stageOutbox("cancel", call, {}, {}, noCell, corr);
+        }
         if (!runElse(intention)) faultIntention(intention, "deadline");
       }
       if (!matched) continue;
