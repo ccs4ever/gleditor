@@ -326,6 +326,84 @@ TEST(VagentAdapterTest, MemberReboundUpdatesStaleReferences) {
               ::testing::Contains("Moved"));
 }
 
+TEST(VagentAdapterTest, MovedFromParentRenamesParentPidAndRebinds) {
+  AdapterHarness h;
+  const auto image = h.lower("module demo\nevent Boot\nagent A {\n"
+                             "  on Boot { emit Boot{} }\n"
+                             "}");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+  auto &core  = h.ctx.core;
+
+  // The child's durable parent shape: a $parent member under the old
+  // incarnation's pid plus the $parentPid text genesis rebinds through.
+  const ActorPid oldParent{"n1", "parentid", 1, 1};
+  const auto parent = arena.makeCell();
+  h.adapter.noteMemberPid(h.ctx, parent, oldParent);
+  const auto pidRec = varsRecord(arena, core, parent, "pid", false);
+  ASSERT_TRUE(pidRec);
+  const auto pidText =
+      arena.linked(*pidRec, core.dims().values, DimVector::POS);
+  ASSERT_TRUE(pidText);
+  const auto ppRec =
+      varsRecord(arena, core, image->agentCell, "$parentPid", true);
+  ASSERT_TRUE(ppRec);
+  zigzag::expectWritten(arena.link(*ppRec, core.dims().values,
+                                 DimVector::POS,
+                                 arena.makeCell(arena.textOf(*pidText))));
+  const auto psRec =
+      varsRecord(arena, core, image->agentCell, "$parent", true);
+  ASSERT_TRUE(psRec);
+  zigzag::expectWritten(arena.link(*psRec, core.dims().values,
+                                 DimVector::POS,
+                                 refCell(arena, core, parent)));
+
+  // Once any member is noted, an unresolvable exec pid binds nobody —
+  // the agent's own genesis pid goes on record first.
+  h.adapter.noteMemberPid(h.ctx, image->agentCell,
+                          ActorPid{"worker", "agent", 1, 1});
+
+  // The wire Moved: the parent's new incarnation — same cursor, new
+  // node and epoch.
+  auto msg      = h.send("Moved{name: \"P\"}");
+  msg.source    = ActorPid{"n2", "parentid", 2, 1};
+  ASSERT_TRUE(h.adapter(h.execution(msg), h.ctx));
+
+  const auto rebound = varsRecord(arena, core, image->agentCell, "$parent",
+                                  false);
+  ASSERT_TRUE(rebound);
+  const auto held =
+      arena.linked(*rebound, core.dims().values, DimVector::POS);
+  ASSERT_TRUE(held);
+  const auto heldRef = arena.asInt64(*held);
+  ASSERT_TRUE(heldRef);
+  const auto heldMember = static_cast<CellRef>(*heldRef);
+  EXPECT_NE(heldMember, parent) << "$parent still names the old member";
+  const auto heldName =
+      arena.linked(heldMember, core.dims().name, DimVector::POS);
+  ASSERT_TRUE(heldName);
+  EXPECT_EQ(arena.textOf(*heldName), "P");
+
+  // $parentPid renamed to the new incarnation — the text the rebound
+  // member's own pid record carries — and the pid resolves to it.
+  const auto pp = varsRecord(arena, core, image->agentCell, "$parentPid",
+                             false);
+  ASSERT_TRUE(pp);
+  const auto ppv =
+      arena.linked(*pp, core.dims().values, DimVector::POS);
+  ASSERT_TRUE(ppv);
+  const auto newPidRec = varsRecord(arena, core, heldMember, "pid", false);
+  ASSERT_TRUE(newPidRec);
+  const auto newPidText =
+      arena.linked(*newPidRec, core.dims().values, DimVector::POS);
+  ASSERT_TRUE(newPidText);
+  EXPECT_EQ(arena.textOf(*ppv), arena.textOf(*newPidText));
+  const auto resolved =
+      h.adapter.memberForPid(h.ctx, ActorPid{"n2", "parentid", 2, 1});
+  ASSERT_TRUE(resolved);
+  EXPECT_EQ(*resolved, heldMember);
+}
+
 TEST(VagentAdapterTest, NativeBodyRepliesDoneAndBindsTheResult) {
   AdapterHarness h;
   const auto image = h.lower(

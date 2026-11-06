@@ -323,6 +323,34 @@ VagentAdapter::operator()(const mesh::ActorExecution &exec,
                          arena.makeCell(movedName)));
           noteMemberPid(ctx, fresh, *exec.message->source);
           executor_.moved(arena, core, *self, fresh);
+          // A moved parent arrives as the same cursor under a new
+          // node/epoch — the pid's content identity is what survives
+          // an incarnation, and a name-less $parent member gives the
+          // name rebind nothing to find. Rename $parentPid to the new
+          // incarnation so the next genesis rebinds through it, and
+          // swing the $parent scalar now.
+          if (const auto pp = varsRecord(arena, core, *self, "$parentPid",
+                                         false))
+            if (const auto pv = arena.linked(*pp, core.dims().values,
+                                             DimVector::POS))
+              if (const auto old = parsePid(arena.textOf(*pv));
+                  old && old->cursor == exec.message->source->cursor) {
+                zigzag::expectWritten(arena.unlink(
+                    *pp, core.dims().values, DimVector::POS));
+                zigzag::expectWritten(arena.link(
+                    *pp, core.dims().values, DimVector::POS,
+                    arena.makeCell(renderPid(*exec.message->source))));
+                if (const auto prec = varsRecord(arena, core, *self,
+                                                 "$parent", true)) {
+                  if (arena.linked(*prec, core.dims().values,
+                                   DimVector::POS))
+                    zigzag::expectWritten(arena.unlink(
+                        *prec, core.dims().values, DimVector::POS));
+                  zigzag::expectWritten(arena.link(
+                      *prec, core.dims().values, DimVector::POS,
+                      refCell(arena, core, fresh)));
+                }
+              }
         }
         turn.message.reset();
       } else if (spec->name == "stop") {
