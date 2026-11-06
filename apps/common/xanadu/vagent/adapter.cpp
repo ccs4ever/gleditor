@@ -173,8 +173,7 @@ VagentAdapter::genesis(const mesh::ActorGenesis &genesis,
                                     "imageRecord", false))
         if (const auto v =
                 arena.linked(*rec, core.dims().values, DimVector::POS))
-          if (const auto ref = arena.asInt64(*v))
-            roots.imageRecord = static_cast<CellRef>(*ref);
+          roots.imageRecord = *v;
       if (const auto rec = varsRecord(arena, core, programRoot,
                                     "imageExtent", false))
         if (const auto v =

@@ -295,10 +295,15 @@ struct PromotionBudget {
 };
 
 /// What promote() produced: the state the store reached, and the real CellRef
-/// for each arena cell it wrote, in the order they were minted.
+/// for each arena cell it wrote, in the order they were minted. `arena` is
+/// the same order's ephemeral side — `cells[i]` is `real.at(arena[i])` — so
+/// a caller that recorded arena refs (an op enumeration's Int64 positions)
+/// can find each one's persistent twin. Base cells never appear: they were
+/// not minted.
 struct Promoted {
   xanadu::MicroversionId version;
   std::vector<CellRef> cells;
+  std::vector<CellRef> arena;
 };
 
 /**

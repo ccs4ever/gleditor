@@ -1998,17 +1998,20 @@ lowerProgram(const Program &program, zigzag::vortex::VortexCore &core,
   // The durable half of the image roots: LoweredImage is in-memory
   // only — a rebuilt context's (a)–(e) ceremony and every turn's
   // lineage bind recover the band through these program-side
-  // records. They mint inside the band, and so does the extent's
-  // scalar — the filed value counts its own slot.
+  // records. imageRecord files as a cell edge, not an Int64 — an
+  // arena-position scalar would go stale under promote, and without
+  // the edge the image record is unreachable from the program band
+  // and never enters the lineage at all. The extent is a genuine
+  // integer: its scalar mints inside the band, and the filed value
+  // counts that slot.
   if (lowerer.image.imageRecord != noCell) {
     auto &arena = core.arena();
     if (const auto rec =
             varsRecord(arena, core, lowerer.image.programRoot,
                        "imageRecord", true))
-      zigzag::expectWritten(
-          arena.link(*rec, core.dims().values, DimVector::POS,
-                     arena.makeScalarCell(static_cast<std::int64_t>(
-                         lowerer.image.imageRecord))));
+      zigzag::expectWritten(arena.link(*rec, core.dims().values,
+                                     DimVector::POS,
+                                     lowerer.image.imageRecord));
     if (const auto rec =
             varsRecord(arena, core, lowerer.image.programRoot,
                        "imageExtent", true))

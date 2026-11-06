@@ -6,10 +6,14 @@
 #include "common/xanadu/vagent/lineage.hpp"
 
 #include <array>
+#include <bit>
 #include <format>
+#include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include "common/xanadu/publication.hpp"
+#include "common/xanadu/zigzag/cell_views.hpp"
 #include "common/xanadu/zigzag/dimension_registry.hpp"
 
 namespace xanadu::vagent {
@@ -66,6 +70,57 @@ fileNameSet(Store &lineage, MicroversionId head,
   return DimensionFiling{head, std::move(fold), std::move(names)};
 }
 
+/// The `+d.owner`/`+d.holder` convention mints every scope arm as
+/// Int64(the named cell's position) — scalar content, so promote keeps
+/// the bits verbatim while the named cell mints a persistent twin, and
+/// the arm stales across a checkpoint exactly the way the ops
+/// enumeration's Int64 members do. Restate each promoted record's arm
+/// at the twin of the position it names; an arm naming a cell outside
+/// the promoted subgraph (or a plain integer) stays verbatim. Without
+/// this a scoped record's `owns` check fails closed post-genesis —
+/// the read path's dim resolves, the arm names a dead position, and
+/// the record is skipped wherever it sits.
+[[nodiscard]] xanadu::MicroversionId
+restateScopeArms(Store &lineage, xanadu::MicroversionId version,
+                 ArenaManifold &arena, const zigzag::Promoted &promoted) {
+  std::unordered_map<zigzag::CellRef, zigzag::CellRef> twin;
+  twin.reserve(promoted.arena.size());
+  for (std::size_t i = 0; i < promoted.arena.size(); ++i)
+    twin.emplace(promoted.arena[i], promoted.cells[i]);
+  const auto twinOf = [&](zigzag::CellRef ref) {
+    if (!zigzag::isEphemeral(ref)) return ref;
+    const auto it = twin.find(ref);
+    return it == twin.end() ? zigzag::noCell : it->second;
+  };
+  for (const std::string_view dimName : {"d.owner", "d.holder"}) {
+    zigzag::DimRef scopeDim = zigzag::noCell;
+    for (const auto dim : arena.dimensions())
+      if (arena.textOf(dim) == dimName) {
+        scopeDim = dim;
+        break;
+      }
+    if (scopeDim == zigzag::noCell) continue;
+    for (const auto arenaPos : promoted.arena) {
+      const auto arm =
+          arena.linked(arenaPos, scopeDim, zigzag::DimVector::POS);
+      if (!arm) continue;
+      const auto named = arena.asInt64(*arm);
+      if (!named) continue;
+      const auto position = twinOf(static_cast<zigzag::CellRef>(*named));
+      if (position == zigzag::noCell ||
+          position == static_cast<zigzag::CellRef>(*named))
+        continue;
+      const auto foldArm = twinOf(*arm);
+      if (foldArm == zigzag::noCell) continue;
+      version = lineage.setValue(version, foldArm, xanadu::PrimediaSpan{},
+                                 xanadu::ValueKind::Int64,
+                                 std::bit_cast<std::uint64_t>(
+                                     static_cast<std::int64_t>(position)));
+    }
+  }
+  return version;
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -89,19 +144,145 @@ seedLineageStore(const std::string_view sealed, const Scroll &from,
                      source, documentId);
 }
 
+namespace {
+
+/// Find @p owner's +d.vars member whose content names @p key — the
+/// varsRecord shape's own walk, written against whichever manifold the
+/// caller is standing on (the compile arena for the authored side, the
+/// rebuilt fold for the promoted side). Template so both spell one
+/// lookup.
+template <typename M>
+[[nodiscard]] std::optional<zigzag::CellRef>
+varsMember(M &m, const xanadu::SpanReader *reader, zigzag::CellRef owner,
+           zigzag::DimRef vars, zigzag::DimRef values,
+           std::string_view key) {
+  const auto textOf = [&](zigzag::CellRef cell) {
+    if constexpr (std::is_same_v<std::decay_t<M>, zigzag::ArenaManifold>)
+      return m.textOf(cell, reader);
+    else
+      return m.textOf(cell, *reader);
+  };
+  for (const auto record : zigzag::rankAfter(m, owner, vars))
+    if (textOf(record) == key)
+      if (const auto v = m.linked(record, values, zigzag::DimVector::POS))
+        return std::optional<zigzag::CellRef>{*v};
+  return std::nullopt;
+}
+
+} // namespace
+
 std::expected<Promoted, std::string>
 seedProgramImage(Store &lineage, ArenaManifold &arena,
                  const CellRef programRoot) {
   // Root = the program root, once — the image band the (a) comparand and
   // the (c) programRef bind then name. Every later promote roots at the
-  // agent cell alone.
-  auto promoted =
-      zigzag::promote(lineage, lineage.latest(), arena, programRoot);
+  // agent cell alone. extraRoots carries the d.dims dim before anything
+  // else discovered: R12's fiat reads home and dimsDim off the band's
+  // first two positions, and the d.dims rank is the one rank promote's
+  // discovery walk skips outright.
+  const auto dimNamed = [&](std::string_view name) {
+    for (const auto dim : arena.dimensions())
+      if (arena.textOf(dim) == name) return dim;
+    return zigzag::DimRef{zigzag::noCell};
+  };
+  const auto varsDim   = dimNamed("d.vars");
+  const auto valuesDim = dimNamed("d.values");
+  const auto stepDim   = dimNamed("d.step");
+  const auto dimsDim   = dimNamed("d.dims");
+
+  // The image record's "ops" enumeration holds Int64 arena positions —
+  // scalar bits promote cannot read, so an op reachable only through
+  // the enumeration would not promote at all. They join extraRoots:
+  // each becomes a promote root and each gets a persistent twin for
+  // the enumeration's restatement below.
+  std::vector<zigzag::CellRef> extra;
+  if (dimsDim != zigzag::noCell) extra.push_back(dimsDim);
+  std::vector<zigzag::CellRef> arenaPositions;
+  if (varsDim != zigzag::noCell && valuesDim != zigzag::noCell &&
+      stepDim != zigzag::noCell)
+    if (const auto imageRecord =
+            varsMember(arena, nullptr, programRoot, varsDim, valuesDim,
+                       "imageRecord"))
+      if (const auto opsHead =
+              varsMember(arena, nullptr, *imageRecord, varsDim,
+                         valuesDim, "ops"))
+        for (const auto member :
+             zigzag::rankAfter(arena, *opsHead, stepDim))
+          if (const auto position = arena.asInt64(member)) {
+            arenaPositions.push_back(
+                static_cast<zigzag::CellRef>(*position));
+            if (zigzag::isEphemeral(*position))
+              extra.push_back(static_cast<zigzag::CellRef>(*position));
+          }
+
+  auto promoted = zigzag::promote(lineage, lineage.latest(), arena,
+                                  programRoot, {}, extra);
   if (!promoted) {
     return std::unexpected(
         "seedProgramImage: promote refused the program image "
         "(root not an arena cell, a relocation cycle, or over budget)");
   }
+  if (arenaPositions.empty()) {
+    promoted->version =
+        restateScopeArms(lineage, promoted->version, arena, *promoted);
+    return *promoted;
+  }
+
+  std::unordered_map<zigzag::CellRef, zigzag::CellRef> twin;
+  twin.reserve(promoted->arena.size());
+  for (std::size_t i = 0; i < promoted->arena.size(); ++i)
+    twin.emplace(promoted->arena[i], promoted->cells[i]);
+
+  // The fold walk mirrors the arena walk on the promoted twins — the
+  // rank members sit in the same order both sides of the seed. A
+  // lineage-backed compile arena's root is a base cell: promote maps
+  // those to themselves, so the identity is the lookup's fallback.
+  auto fold = lineage.rebuildManifold(promoted->version);
+  const auto twinOf = [&](zigzag::CellRef ref) {
+    if (!zigzag::isEphemeral(ref)) return ref;
+    const auto it = twin.find(ref);
+    return it == twin.end() ? zigzag::noCell : it->second;
+  };
+  const auto varsTwin   = twinOf(varsDim);
+  const auto valuesTwin = twinOf(valuesDim);
+  const auto stepTwin   = twinOf(stepDim);
+  if (varsTwin == zigzag::noCell || valuesTwin == zigzag::noCell ||
+      stepTwin == zigzag::noCell)
+    return std::unexpected(
+        "seedProgramImage: the record dims did not reach the band");
+  const auto recordTwin =
+      varsMember(fold, &lineage, twinOf(programRoot), varsTwin,
+                 valuesTwin, "imageRecord");
+  if (!recordTwin)
+    return std::unexpected(
+        "seedProgramImage: the image record did not reach the band");
+  const auto opsTwin = varsMember(fold, &lineage, *recordTwin, varsTwin,
+                                  valuesTwin, "ops");
+  if (!opsTwin)
+    return std::unexpected(
+        "seedProgramImage: the ops enumeration did not reach the band");
+
+  auto version = promoted->version;
+  std::size_t index = 0;
+  for (const auto member : zigzag::rankAfter(fold, *opsTwin, stepTwin)) {
+    if (index >= arenaPositions.size())
+      return std::unexpected(
+          "seedProgramImage: the promoted ops rank outruns the authored "
+          "enumeration");
+    const auto position = twinOf(arenaPositions[index++]);
+    if (position == zigzag::noCell)
+      return std::unexpected(
+          "seedProgramImage: a recorded op names no promoted cell");
+    version = lineage.setValue(version, member, xanadu::PrimediaSpan{},
+                               xanadu::ValueKind::Int64,
+                               std::bit_cast<std::uint64_t>(
+                                   static_cast<std::int64_t>(position)));
+  }
+  if (index != arenaPositions.size())
+    return std::unexpected(
+        "seedProgramImage: the promoted ops rank undercuts the authored "
+        "enumeration");
+  promoted->version = restateScopeArms(lineage, version, arena, *promoted);
   return *promoted;
 }
 
@@ -208,6 +389,8 @@ regenesisCycle(Store &lineage, ArenaManifold &arena, const CellRef agentRoot,
         "regenesisCycle: promote refused the agent cell's subgraph "
         "(root not an arena cell, a relocation cycle, or over budget)");
   }
+  promoted->version =
+      restateScopeArms(lineage, promoted->version, arena, *promoted);
 
   // 2. Filing BEFORE the rebuild: the sweep enumerates the still-live
   //    session arena — its session mints and any genesis re-mints from

@@ -2037,8 +2037,12 @@ std::optional<Promoted> promote(xanadu::Store &store,
     }
   }
   out.cells.clear();
+  out.arena.clear();
   for (const auto cell : order) {
-    if (isEphemeral(cell)) out.cells.push_back(real.at(cell));
+    if (isEphemeral(cell)) {
+      out.arena.push_back(cell);
+      out.cells.push_back(real.at(cell));
+    }
   }
 
   // Links last: both ends have to exist, and every ref is translated rather

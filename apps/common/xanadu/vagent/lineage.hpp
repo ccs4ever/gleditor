@@ -61,17 +61,22 @@ inline constexpr std::string_view kMetaDimensionNames[] = {
     "d.ref",   "d.recipe",     "d.refFor",   "d.mesh.relocation",
 };
 
-/// The twenty `std:agent` dims the adapter `ensureDimension`-mints
+/// The twenty-three `std:agent` dims the adapter `ensureDimension`-mints
 /// (vagent-agent-language.md V10, actor-executor §8's M0 set) — the V10
 /// sweep precedes filing, or filing performs it. The executor's six
 /// (d.agents/d.dirs/d.seen/d.evidence/d.verb/d.holder) file here so
 /// ensureDimension never mints them under a live mark — resolveDimension
-/// refuses unfiled names there (actor-executor §3.1).
+/// refuses unfiled names there (actor-executor §3.1). d.owner scopes
+/// varsRecord's records to their cell, d.inbox/d.delivered carry the
+/// adapter's dispatch and dedupe ranks — all three must file with the
+/// vocabulary or a session mint forks the fold's resolution into a
+/// promoted twin nothing else can read.
 inline constexpr std::string_view kAgentDimensionNames[] = {
     "d.behavior", "d.skill",     "d.capacity", "d.space",  "d.member",
     "d.holon",    "d.intention", "d.subgoal",  "d.outbox", "d.belief",
     "d.pending",  "d.source",    "d.extends",  "d.agents", "d.dirs",
     "d.seen",     "d.evidence",  "d.verb",     "d.holder", "d.uses",
+    "d.inbox",    "d.delivered", "d.owner",
 };
 
 // ---------------------------------------------------------------------------

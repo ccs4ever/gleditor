@@ -9,6 +9,7 @@
 #include "../../apps/common/xanadu/vagent/adapter.hpp"
 #include "../../apps/common/xanadu/vagent/decls.hpp"
 #include "../../apps/common/xanadu/vagent/frontend.hpp"
+#include "../../apps/common/xanadu/vagent/lineage.hpp"
 #include "../../apps/common/xanadu/vagent/records.hpp"
 #include "../../apps/common/xanadu/store.hpp"
 
@@ -646,6 +647,49 @@ TEST(VagentAdapterTest, SpawnSendFailureFailsTheMember) {
   ASSERT_TRUE(h.adapter(h.execution(h.send("Boot")), h.ctx));
   EXPECT_THAT(h.journalOf(image->agentCell),
               ::testing::Contains("SpawnFailed"));
+}
+
+TEST(VagentAdapterTest, GenesisOverASeededLineageRunsTheCeremony) {
+  // The real spawn-lineage shape end to end: the lineage carries its
+  // genesis and filed dim vocabulary first, the program lowers into a
+  // compile context over that fold — dims resolve to the filed cells,
+  // never promoted twins — seedProgramImage promotes just the new
+  // program band, and the spawn pin's WorkerContext opens on the
+  // rebuilt fold.
+  xanadu::Store lineage;
+  zigzag::ArenaManifold stage;
+  const auto filed = fileDimensionVocabulary(lineage, stage, {});
+  ASSERT_TRUE(filed) << (filed ? "" : filed.error());
+  WorkerContext compile{&filed->fold, &lineage};
+  const auto artifacts = compileArtifacts(
+      "module demo\nagent A { def f(): Int { 1 + 2 } }");
+  ASSERT_TRUE(artifacts);
+  const auto image =
+      lowerProgram(artifacts->program, compile.core, compile.vm);
+  ASSERT_TRUE(image);
+  ASSERT_NE(image->imageRecord, zigzag::noCell);
+  const auto seeded = seedProgramImage(lineage, compile.arena,
+                                       image->programRoot);
+  ASSERT_TRUE(seeded) << (seeded ? "" : seeded.error());
+  const auto fold = std::make_unique<zigzag::Manifold>(
+      lineage.rebuildManifold(seeded->version));
+  WorkerContext ctx{fold.get(), &lineage};
+
+  VagentAdapter adapter;
+  ActorGenesis genesis;
+  genesis.pid = ActorPid{"worker", "agent", 1, 9};
+  ASSERT_TRUE(adapter.genesis(genesis, ctx));
+  ASSERT_TRUE(adapter.memberForPid(ctx, genesis.pid).has_value());
+
+  // The discriminating arm: a foreign transported comparand must
+  // refuse — (a)'s band verification is the only piece that can
+  // decide it, so a refusal is proof the ceremony ran rather than
+  // the image records going unread.
+  xanadu::Store foreign;
+  ActorGenesis reincarnation;
+  reincarnation.pid         = ActorPid{"worker", "agent", 1, 10};
+  reincarnation.transported = &foreign;
+  EXPECT_FALSE(adapter.genesis(reincarnation, ctx));
 }
 
 } // namespace

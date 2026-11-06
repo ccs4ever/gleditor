@@ -304,8 +304,10 @@ TEST(VagentDeclsTest, LoweredImageFilesItsDurableRoots) {
   const auto refValue =
       h.arena.linked(*recRef, h.core.dims().values, Posward);
   ASSERT_TRUE(refValue.has_value());
-  EXPECT_EQ(h.arena.asInt64(*refValue).value_or(-1),
-            static_cast<std::int64_t>(image->imageRecord));
+  // A cell edge, not an Int64: the ref rides promote to the image
+  // record's persistent twin, and the edge is what keeps the record
+  // reachable inside the image band.
+  EXPECT_EQ(*refValue, image->imageRecord);
   const auto recExt =
       varsRecord(h.arena, h.core, image->programRoot, "imageExtent", false);
   ASSERT_TRUE(recExt.has_value());
