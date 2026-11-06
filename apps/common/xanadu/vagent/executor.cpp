@@ -1921,8 +1921,13 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
           // A member delegator can't ride the delegator field — the
           // ref means nothing across the wire, and a same-node drain
           // would write `refused` onto the member itself. The
-          // correlation token is the coherent handle on both legs.
-          stageOutbox("refuse", term, senderName, {},
+          // correlation token is the coherent handle on both legs,
+          // and the wire needs nothing of the goal but its name —
+          // refusing a positional-arg goal must not bounce off the
+          // marshal gate.
+          stageOutbox("refuse",
+                      arena.makeCell(std::string{arena.textOf(term)}),
+                      senderName, {},
                       remoteMemberRef(delegator) ? noCell : delegator,
                       requestId, {}, {}, false, {},
                       remoteMemberRef(sender) ? sender : noCell);

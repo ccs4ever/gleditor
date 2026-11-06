@@ -39,6 +39,13 @@ using zigzag::vortex::VortexCore;
 /// (`term.field`) and event-payload fields already read. Literal
 /// children carry dual channels: text for textOf equality (belief
 /// term walks) plus the typed bits the bound-value readers take.
+///
+/// +d.step is one dimension, so a nested term cannot keep its own arg
+/// rank — linking the head into the parent's rank splices its args in
+/// as apparent siblings, and no edge afterwards can say which rank
+/// member was an arg. A compound arg is therefore marked on
+/// `+d.marshal` at marshal time: the only fact a flat-rank reader (the
+/// wire codec) can trust about nesting is one the marshal writes.
 [[nodiscard]] inline std::expected<CellRef, Diagnostic>
 marshalTermExpr(zigzag::ArenaManifold &arena, VortexCore &core,
                 const Expr &expr) {
@@ -76,6 +83,15 @@ marshalTermExpr(zigzag::ArenaManifold &arena, VortexCore &core,
       if (expr.kind == ExprKind::Record && i < expr.names.size())
         zigzag::expectWritten(arena.link(*arg, dims.name, DimVector::POS,
                                          arena.makeCell(expr.names[i])));
+      if (expr.children[i]->kind == ExprKind::Record ||
+          expr.children[i]->kind == ExprKind::Term)
+        zigzag::expectWritten(
+            arena.link(*arg, core.findOrMintDimension("d.marshal"),
+                       DimVector::POS,
+                       arena.makeCell(expr.children[i]->kind ==
+                                              ExprKind::Record
+                                          ? "record"
+                                          : "term")));
       zigzag::expectWritten(
           arena.link(zigzag::rankTail(arena, cell, dims.step), dims.step,
                      DimVector::POS, *arg));

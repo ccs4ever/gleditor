@@ -597,7 +597,35 @@ void VagentAdapter::drain(zigzag::vortex::WorkerContext &ctx,
     const auto percept =
         entry.percept.empty() ? entry.payload : entry.percept;
     PerceptSpec spec{.name = percept};
-    if (entry.payloadCell != noCell)
+    if (entry.payloadCell != noCell) {
+      // The flat Name{f: v} codec admits only named scalar fields.
+      // An unnamed child would silently drop off the arg list, a
+      // +d.marshal-marked compound head leaks its own args into the
+      // rank as apparent siblings — +d.step is one dimension, so the
+      // marshal's mark is the only surviving signal — and a
+      // relocation-marked Int64 is a live arena position that means
+      // nothing off-node. Any of them renders a corrupt percept —
+      // refuse the send honestly instead, the same deliveryFailed
+      // arm transport faults take.
+      const auto relocation =
+          core.findOrMintDimension("d.mesh.relocation");
+      const auto marshal = core.findOrMintDimension("d.marshal");
+      for (const CellRef child :
+           zigzag::rankAfter(arena, entry.payloadCell,
+                             core.dims().step)) {
+        const auto refMarked = [&] {
+          const auto r =
+              arena.linked(child, relocation, DimVector::POS);
+          return r && arena.textOf(*r) == "cell";
+        };
+        if (!arena.linked(child, core.dims().name) ||
+            arena.linked(child, marshal, DimVector::POS) ||
+            refMarked()) {
+          executor_.deliveryFailed(arena, core, entry,
+                                   "unmarshalable");
+          return;
+        }
+      }
       for (const CellRef child :
            zigzag::rankAfter(arena, entry.payloadCell,
                              core.dims().step)) {
@@ -614,6 +642,7 @@ void VagentAdapter::drain(zigzag::vortex::WorkerContext &ctx,
           v = std::string{arena.textOf(child)};
         spec.fields.emplace_back(std::string{arena.textOf(*n)}, v);
       }
+    }
     // Only the kinds `deliver` routes into +d.inbox change what the
     // receiver does — send/emit/stop all arrive as percepts either
     // way, so `__kind` there would be wire noise.

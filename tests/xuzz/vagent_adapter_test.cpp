@@ -12,6 +12,7 @@
 #include "../../apps/common/xanadu/vagent/decls.hpp"
 #include "../../apps/common/xanadu/vagent/frontend.hpp"
 #include "../../apps/common/xanadu/vagent/lineage.hpp"
+#include "../../apps/common/xanadu/vagent/marshal.hpp"
 #include "../../apps/common/xanadu/vagent/percept_codec.hpp"
 #include "../../apps/common/xanadu/vagent/records.hpp"
 #include "../../apps/common/xanadu/store.hpp"
@@ -1764,6 +1765,134 @@ TEST(VagentAdapterTest, WireCancelBeforeAdoptionIsRemembered) {
   ASSERT_TRUE(outcome);
   EXPECT_EQ(outcome->name, "outcome");
   EXPECT_EQ(h.ctx.arena.outstandingMarks(), 0u);
+}
+
+TEST(VagentAdapterTest, UnmarshalableRemotePayloadFaultsHonestly) {
+  // A payload field the flat Name{f: v} codec can't represent —
+  // here a relocation-marked live position — must not render as a
+  // corrupt integer field. The remote arm refuses through
+  // deliveryFailed instead of emitting it.
+  AdapterHarness h;
+  const auto image = h.lower("module demo\nagent A { }");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+  const ActorPid selfPid{"worker", "agent", 1, 1};
+  const ActorPid peerPid{"node9", "peerid", 2, 7};
+  std::vector<ActorMessage> wire;
+  h.adapter.setSendSender(
+      [&wire](WorkerContext &, const ActorMessage &message)
+          -> std::expected<void, ActorError> {
+        wire.push_back(message);
+        return {};
+      });
+  mintRemoteMember(h, image->agentCell, "Peer", peerPid);
+  h.adapter.noteMemberPid(h.ctx, image->agentCell, selfPid);
+
+  // An emit entry whose payload carries a ref-marked field — the
+  // record shape stageOutbox writes, with the one child the codec
+  // cannot honor.
+  const auto outboxDim = h.ctx.core.findOrMintDimension("d.outbox");
+  const auto entry     = arena.makeCell();
+  zigzag::expectWritten(
+      arena.link(zigzag::rankTail(arena, image->agentCell, outboxDim),
+                 outboxDim, DimVector::POS, entry));
+  const auto field = [&](std::string_view name, CellRef value) {
+    if (const auto rec =
+            varsRecord(arena, h.ctx.core, entry, name, true))
+      zigzag::expectWritten(
+          arena.link(*rec, h.ctx.core.dims().values, DimVector::POS,
+                     value));
+  };
+  field("kind", arena.makeCell("emit"));
+  field("target", arena.makeCell("Peer"));
+  field("id", arena.makeCell("e-marshal"));
+  const auto payload = arena.makeCell("Ping");
+  const auto refArg  = refCell(arena, h.ctx.core, image->agentCell);
+  zigzag::expectWritten(arena.link(
+      refArg, h.ctx.core.dims().name, DimVector::POS,
+      arena.makeCell("who")));
+  zigzag::expectWritten(
+      arena.link(zigzag::rankTail(arena, payload,
+                                  h.ctx.core.dims().step),
+                 h.ctx.core.dims().step, DimVector::POS, refArg));
+  field("payload", refCell(arena, h.ctx.core, payload));
+
+  auto turn = h.execution();
+  turn.pid  = selfPid;
+  ASSERT_TRUE(h.adapter(turn, h.ctx));
+
+  EXPECT_TRUE(wire.empty());
+  EXPECT_THAT(h.journalOf(image->agentCell),
+              ::testing::Contains("DeliveryFailed"));
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
+TEST(VagentAdapterTest, NestedPayloadFaultsHonestly) {
+  // A compound field marshals through marshalTermExpr with the
+  // `+d.marshal` mark — +d.step is one rank, so a nested term's args
+  // splice in as apparent siblings and only the mark keeps the flat
+  // codec honest. The remote arm must refuse the send rather than
+  // render `Outer{loc: "Inner", x: 1}`.
+  AdapterHarness h;
+  const auto image = h.lower("module demo\nagent A { }");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+  const ActorPid selfPid{"worker", "agent", 1, 1};
+  const ActorPid peerPid{"node9", "peerid", 2, 7};
+  std::vector<ActorMessage> wire;
+  h.adapter.setSendSender(
+      [&wire](WorkerContext &, const ActorMessage &message)
+          -> std::expected<void, ActorError> {
+        wire.push_back(message);
+        return {};
+      });
+  mintRemoteMember(h, image->agentCell, "Peer", peerPid);
+  h.adapter.noteMemberPid(h.ctx, image->agentCell, selfPid);
+
+  // Outer{loc: Inner{x: 1}} — the nested head's own arg splices into
+  // Outer's step rank at marshal time.
+  auto one   = std::make_unique<Expr>();
+  one->kind  = ExprKind::Integer;
+  one->text  = "1";
+  auto inner = std::make_unique<Expr>();
+  inner->kind = ExprKind::Record;
+  inner->text = "Inner";
+  inner->names = {"x"};
+  inner->children.push_back(std::move(one));
+  Expr outer;
+  outer.kind = ExprKind::Record;
+  outer.text = "Outer";
+  outer.names = {"loc"};
+  outer.children.push_back(std::move(inner));
+  const auto payload =
+      xanadu::vagent::marshalTermExpr(arena, h.ctx.core, outer);
+  ASSERT_TRUE(payload);
+
+  const auto outboxDim = h.ctx.core.findOrMintDimension("d.outbox");
+  const auto entry     = arena.makeCell();
+  zigzag::expectWritten(
+      arena.link(zigzag::rankTail(arena, image->agentCell, outboxDim),
+                 outboxDim, DimVector::POS, entry));
+  const auto field = [&](std::string_view name, CellRef value) {
+    if (const auto rec =
+            varsRecord(arena, h.ctx.core, entry, name, true))
+      zigzag::expectWritten(
+          arena.link(*rec, h.ctx.core.dims().values, DimVector::POS,
+                     value));
+  };
+  field("kind", arena.makeCell("emit"));
+  field("target", arena.makeCell("Peer"));
+  field("id", arena.makeCell("e-nested"));
+  field("payload", refCell(arena, h.ctx.core, *payload));
+
+  auto turn = h.execution();
+  turn.pid  = selfPid;
+  ASSERT_TRUE(h.adapter(turn, h.ctx));
+
+  EXPECT_TRUE(wire.empty());
+  EXPECT_THAT(h.journalOf(image->agentCell),
+              ::testing::Contains("DeliveryFailed"));
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
 }
 
 TEST(VagentAdapterTest, DelegatedDeadlineStagesTheCancelWire) {
