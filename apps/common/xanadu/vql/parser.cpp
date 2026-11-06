@@ -478,6 +478,13 @@ PathExpression Parser::parsePathExpression(bool allowCloneTail) {
     cloneTail = parseCloneTail();
   }
 
+  if (shapeProjection &&
+      (check(TokenKind::Slash) || check(TokenKind::Dot) ||
+       check(TokenKind::Arrow) || check(TokenKind::Transclude)))
+    throw ParseError(
+        "steps after shape projection require an explicit intermediate binding",
+        current_.loc);
+
   return PathExpression{.anchor           = std::move(anchor),
                         .isFunctor        = isFunctor,
                         .anchorPredicates = std::move(anchorPredicates),

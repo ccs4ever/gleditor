@@ -2371,28 +2371,31 @@ explicit refusals. The rulings below describe the intended semantics.
   mutation obligations before retiring the guard, while caller guards can be repaired at the outer
   weave boundary. Failed checks restore the owned transaction before raising the named error.
   Guarded execution serializes cursors, and effectful nested validation remains explicitly
-  unsupported before source effects. Static shape projections now compile exclusive and wildcard
-  masks plus scalar literal assignments into atomic VM graphs. Dynamic and nested projection targets
-  still refuse before source effects. See [iterations 29–31](projects/vortex-vm-only-iterations.md).
-  Matching still materializes subjects; no zero-copy or universal allocation guarantee follows. Step
-  predicates retain cell identity through guarded reference slots and Boolean control flow
-  short-circuits. Nonempty literal shape predicates lower directional presence/absence rules, scalar
-  literal targets and nested static shape targets to native one-hop probes and comparisons,
-  including foreign neighbors and self-links. Bidirectional targets accept either matching neighbor;
-  negated rules retain absence-only semantics and skip target evaluation. Dynamic targets still
-  refuse. Scalar predicates run before shape predicates and both precede the range clamp; the AST
-  does not retain their source interleaving. Empty/wildcard shape predicates and dynamic shape rules
-  still require lowering. Shape preflight rejects cycles, nesting beyond 128, and expanded shape
-  work beyond 4096 units across a compilation, accounting for duplicated bidirectional branches.
-  Validation also permits at most 4096 rule visits, including ignored targets and repeated shared
-  subtrees. Unsupported cases refuse explicitly. Runtime rank iterators and eager sequence registers
-  now support per-member typed filtering, stream cardinality, predicates and integer index clamps.
-  Foreign neighbors resolve through canonical arena proxies; choice points restore iterator state
-  and proxy minting. Computed defaults also execute inside eligible reusable frames, including
-  self/mutual recursive matching and return promises. Their temporary registers and captures are
-  local to each activation. Universal lazy streaming, recursive functor/variadic frames, mutation
-  enforcement and complete frontend/parallel parity remain open. Compiled execution never silently
-  calls a direct evaluator.
+  unsupported before source effects. Static shape projections compile exclusive/wildcard masks,
+  scalar literals and singleton alias/read-only path targets into atomic VM graphs. Nonliteral
+  targets are prepared per owner before masking and require exactly one cell; existing-cell
+  attachments use fresh clones. Calls/computed targets, nested shapes, foreign owners and other
+  deferred forms still refuse. Immediate projection/traversal continuation requires an intermediate
+  `let` until ordered path lowering exists. See
+  [iterations 29–32](projects/vortex-vm-only-iterations.md). Matching still materializes subjects;
+  no zero-copy or universal allocation guarantee follows. Step predicates retain cell identity
+  through guarded reference slots and Boolean control flow short-circuits. Nonempty literal shape
+  predicates lower directional presence/absence rules, scalar literal targets and nested static
+  shape targets to native one-hop probes and comparisons, including foreign neighbors and
+  self-links. Bidirectional targets accept either matching neighbor; negated rules retain
+  absence-only semantics and skip target evaluation. Dynamic targets still refuse. Scalar predicates
+  run before shape predicates and both precede the range clamp; the AST does not retain their source
+  interleaving. Empty/wildcard shape predicates and dynamic shape rules still require lowering.
+  Shape preflight rejects cycles, nesting beyond 128, and expanded shape work beyond 4096 units
+  across a compilation, accounting for duplicated bidirectional branches. Validation also permits at
+  most 4096 rule visits, including ignored targets and repeated shared subtrees. Unsupported cases
+  refuse explicitly. Runtime rank iterators and eager sequence registers now support per-member
+  typed filtering, stream cardinality, predicates and integer index clamps. Foreign neighbors
+  resolve through canonical arena proxies; choice points restore iterator state and proxy minting.
+  Computed defaults also execute inside eligible reusable frames, including self/mutual recursive
+  matching and return promises. Their temporary registers and captures are local to each activation.
+  Universal lazy streaming, recursive functor/variadic frames, mutation enforcement and complete
+  frontend/parallel parity remain open. Compiled execution never silently calls a direct evaluator.
 
 ______________________________________________________________________
 

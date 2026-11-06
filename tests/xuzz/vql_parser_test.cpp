@@ -857,4 +857,12 @@ TEST(VQLParserTest, ProjectionStaysInsideExpressionBodiedFunction) {
   EXPECT_EQ(query.body.statements.size(), 1U);
 }
 
+TEST(VQLParserTest, ProjectionContinuationRequiresExplicitBinding) {
+  for (const auto source : {"$owner{*}/+d.tag", "$owner{*}.value()",
+                            "$owner{*} => $target", "$owner{*} <~ $target"}) {
+    Parser parser(source);
+    EXPECT_THROW(parser.parseQuery(), ParseError);
+  }
+}
+
 } // namespace

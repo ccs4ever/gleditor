@@ -555,11 +555,11 @@ unmentioned runtime links and severs reciprocal edges atomically. Source mutatio
 complete projections with active function parameter guards. See
 [iteration 31](projects/vortex-vm-only-iterations.md).
 
-The bounded subset supports local owners and static canonical dimensions. Foreign and quoted owners,
-dynamic rules, nonliteral or nested targets, and ambiguous negated/bidirectional assignments remain
-explicit refusals. Nonliteral targets need original-owner preparation before masking; return-field
-construction and the previously listed §4.12 gaps remain open. No direct evaluator fallback or full
-completion claim follows.
+The initial subset supports local owners and static canonical dimensions. Foreign and quoted owners,
+dynamic rules, computed or nested targets, and negated/bidirectional assignments remain explicit
+refusals. The singleton target stage below adds alias and simple-path preparation before masking;
+return-field construction and the previously listed §4.12 gaps remain open. No direct evaluator
+fallback or full completion claim follows.
 
 The full build and all 807 affected tests from 75 suites passed. Coverage includes exact fresh
 scalar boxing, malformed and bounded mask inputs, reciprocal rollback, parser placement in function
@@ -567,3 +567,24 @@ bodies, fresh-VM export and host/mesh source routes. A real headless CLI checks 
 projection and named contract rejection. The opt-in four-point profile reports whole-fixture costs
 and makes no speedup claim. Function-body parsing now retains a variable's projection within its
 guarded scope instead of detaching it into the surrounding script.
+
+## Singleton cell targets in projections
+
+Aliases and bounded read-only paths now prepare every RHS for one owner before masking. The shared
+`Cell` contract rejects empty and multiple targets explicitly; selection happens only after that
+check. Existing-cell attachments use a fresh clone per owner occurrence through the same graph
+helper as `link()`, retaining exact scalar content and the target's other links. Preparation and
+assignment remain in the owner's mutation group. See
+[iteration 32](projects/vortex-vm-only-iterations.md).
+
+The full build and all 815 affected tests from 76 suites passed. New cases cover real rank
+cardinality, pre-mask source reads, exact clone masters and bits, duplicate occurrences, guard
+rollback, export/reload and host/mesh source execution. The CLI preserves an Int64 above the Double
+exact-integer range and explicitly rejects an empty target. Profile measurements expose growing
+shared-clone-rank traversal cost; no speedup or general latency claim follows.
+
+Calls/computed targets, predicates and other deferred path forms, nested shapes, foreign owners,
+projection native-frame eligibility and ordered projection/traversal remain unfinished. The parser
+now refuses immediate continuation after projection rather than interpreting it as another
+statement; an intermediate `let` works. Nonliteral `d.clone` assignments refuse, and the existing
+`link(d.clone, target)` collision is still open. Full §4.12 remains incomplete.

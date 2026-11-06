@@ -10,6 +10,23 @@ using zigzag::CellRef;
 using zigzag::DimRef;
 using zigzag::vortex::OpcodeKind;
 
+CellRef VQLCompiler::emitExistingTargetClone(const CellRef target) {
+  const auto cloneTail =
+      emitExtreme(target, core_.dims().clone, zigzag::DimVector::POS);
+  const auto cloneOp = emitOp(OpcodeKind::New, "#CLONE_GENERATOR");
+  emitInput(cloneOp, cloneTail);
+  emitInputConstant(cloneOp, static_cast<std::int64_t>(core_.dims().clone));
+  emitInputConstant(cloneOp, std::int64_t{1});
+
+  const auto cloneRead = emitOp(OpcodeKind::Link, "#CLONE_RESULT");
+  emitInput(cloneRead, cloneTail);
+  emitInputConstant(cloneRead, static_cast<std::int64_t>(core_.dims().clone));
+  emitInputConstant(cloneRead, std::int64_t{1});
+  const CellRef cloneCell = core_.arena().makeCell();
+  emitOutput(cloneRead, cloneCell);
+  return cloneCell;
+}
+
 std::vector<CellRef> VQLCompiler::compileSelector(const PathStep &step,
                                                   CellRef current,
                                                   bool hasContext) {
@@ -179,21 +196,7 @@ std::vector<CellRef> VQLCompiler::compileSelector(const PathStep &step,
       std::vector<CellRef> attachedClones;
       if (targetCell) {
         for (CellRef current : stream) {
-          const auto cloneTail = emitExtreme(*targetCell, core_.dims().clone,
-                                             zigzag::DimVector::POS);
-          const auto cloneOp   = emitOp(OpcodeKind::New, "#CLONE_GENERATOR");
-          emitInput(cloneOp, cloneTail);
-          emitInputConstant(cloneOp,
-                            static_cast<std::int64_t>(core_.dims().clone));
-          emitInputConstant(cloneOp, std::int64_t{1});
-
-          const auto cloneRead = emitOp(OpcodeKind::Link, "#CLONE_RESULT");
-          emitInput(cloneRead, cloneTail);
-          emitInputConstant(cloneRead,
-                            static_cast<std::int64_t>(core_.dims().clone));
-          emitInputConstant(cloneRead, std::int64_t{1});
-          CellRef cloneCell = core_.arena().makeCell();
-          emitOutput(cloneRead, cloneCell);
+          const CellRef cloneCell = emitExistingTargetClone(*targetCell);
 
           CellRef linkOp = emitOp(OpcodeKind::Link, "#LINK_ATTACH " + dimName);
           emitInput(linkOp, current);

@@ -123,6 +123,7 @@ private:
   zigzag::CellRef emitDereference(zigzag::CellRef candidate);
   zigzag::CellRef emitExtreme(zigzag::CellRef anchor, zigzag::DimRef dimension,
                               zigzag::DimVector direction);
+  zigzag::CellRef emitExistingTargetClone(zigzag::CellRef target);
   zigzag::CellRef emitRank(zigzag::CellRef anchor, zigzag::DimRef dimension,
                            zigzag::DimVector direction);
   std::vector<zigzag::CellRef>

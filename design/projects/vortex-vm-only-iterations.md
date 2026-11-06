@@ -1087,3 +1087,56 @@ including mutation groups; arena fuel also charges work within the native mask p
 Logs: `/tmp/vql-projections-build.log`, `/tmp/vql-projections-tests.log`,
 `/tmp/vql-projections-profile.log`, `/tmp/vql-projections-cli.log`,
 `/tmp/vql-projections-format.log`.
+
+## Iteration 32: prepared singleton projection targets
+
+Projection assignments now accept lexical cell aliases and a bounded read-only path subset. Each
+nonliteral target compiles to normal graph traversal and a normalized stream; the shared required
+`Cell` contract checks its complete cardinality before selecting its sole reference. Empty or
+multi-cell results raise a named target TypeContract error rather than silently choosing an element.
+Every nonliteral RHS for one owner occurrence is prepared under that owner before any masking or
+assignment. The source mutation group begins before preparation and rolls back the current
+occurrence on failure. No earlier listed literal assignment is published if a target check fails.
+
+Existing-cell targets use §4.7's unconditional fresh clone per owner occurrence. Projection and
+`link()` share the extracted graph clone-generator helper, preserving existing target backlinks,
+master identity and exact typed content without rendering/reboxing it. Literal targets retain fresh
+scalar boxing. Owner results preserve order and duplicates. Preparation is per occurrence, not a
+whole-input snapshot: a repeated owner's later path reads see its graph after the preceding
+committed occurrence. An explicit outer weave retains its normal wider rollback boundary.
+
+The read-only path subset has static signed dimension steps, static clamps, dereference and
+read-only placements. It excludes calls, arithmetic, nested projection, clone tails, predicates,
+versions, captured functors and yield suffixes; known attached pipelines refuse before effects.
+Dynamic shapes, nested targets, negated/bidirectional assignments and foreign/quoted owners remain
+unsupported. Nonliteral assignment on `d.clone` refuses before effects because an ordinary
+attachment would consume the generated clone's master backlink. The pre-existing
+`link(d.clone, target)` collision remains separate unfinished work. Projection frame eligibility
+remains conservative.
+
+Testing also exposed a parser gap: a separator after a tail projection was interpreted as a new
+statement and lost the projected stream context. The tail-only AST cannot encode that ordering, so
+`/`, `.`, `=>` and `<~` continuations now refuse explicitly. Bind the projected result with `let`
+before traversing it; native ordered projection/traversal remains a separate milestone. No AST
+execution or direct evaluator fallback supplies an unsupported case.
+
+Validation: full `make -j$(nproc)` exited zero and all 815 affected tests from 76 suites passed.
+Eight new enabled cases cover per-owner pre-mask reads, multiple RHS preparation, alias/path
+cardinality rollback, exact Int64/Double clone content and preserved target backlinks, duplicate
+owners, guarded replacement, refusal before effects, source-free export/reload and host/mesh Vquery
+source routes. Parser coverage checks the explicit continuation refusal. The real headless CLI
+returns exact `9007199254740993` through a prepared path target and rejects an empty target with its
+named required-type diagnostic and exit status 1.
+
+The opt-in profile records single cold observations with no speedup claim. At 32 owners,
+shared-alias/owner-path compile times were 294/106 microseconds, run times 5,590/2,900, VM cycles
+2,757/1,797, compile arena cells 146/234 and runtime arena cells 64/64. At 128 owners, the
+corresponding values were 150/178, 47,889/10,085, 35,589/7,173, 242/330 and 256/256. The fixtures
+emitted 26/50 opcodes. These are whole-fixture counts, including group tokens; unique fresh target
+clones are checked separately. The shared-alias fixture repeatedly walks a growing clone rank, an
+observed cost to address after semantic correctness rather than an optimization claim. Full §4.12
+remains incomplete.
+
+Logs: `/tmp/vql-projection-targets-build.log`, `/tmp/vql-projection-targets-tests.log`,
+`/tmp/vql-projection-targets-profile.log`, `/tmp/vql-projection-targets-cli.log`,
+`/tmp/vql-projection-targets-format.log`.
