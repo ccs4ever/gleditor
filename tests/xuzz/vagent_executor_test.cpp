@@ -3614,4 +3614,160 @@ TEST(VagentExecutorTest, BehaviorGoalMemberAdoptsTheBehaviorsPlan) {
   EXPECT_EQ(arena.outstandingMarks(), 0u);
 }
 
+TEST(VagentExecutorTest, BeliefAssertRunsThePlusTriggerWithItsCapture) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image =
+      h.lower("module demo\nevent Tick\n"
+              "predicate pos(v: Int)\n"
+              "agent A {\n"
+              "  var r : Int := 0\n"
+              "  on +pos(?v) { r := v }\n"
+              "  on Tick { believe pos(41) }\n"
+              "}");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+  // believe stages the pend; the same turn's drain fires the handler.
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  const auto r =
+      varsRecord(arena, h.ctx.core, image->agentCell, "r", false);
+  ASSERT_TRUE(r);
+  const auto v = arena.linked(*r, h.ctx.core.dims().values, DimVector::POS);
+  ASSERT_TRUE(v);
+  EXPECT_EQ(arena.asInt64(*v).value_or(0), 41);
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
+TEST(VagentExecutorTest, BeliefRetractRunsTheMinusTrigger) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image =
+      h.lower("module demo\nevent Tick\n"
+              "predicate pos(v: Int)\n"
+              "agent A {\n"
+              "  var r : Int := 0\n"
+              "  on -pos(?v) { r := v }\n"
+              "  on +pos(?v) { r := 0 - v }\n"
+              "  on Tick { believe pos(7); forget pos(7) }\n"
+              "}");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+  // The assert's "+pos" handler writes -7 first; the retract's
+  // "-pos" handler overwrites with the bound value — both stages
+  // land on one drain, in order.
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  const auto r =
+      varsRecord(arena, h.ctx.core, image->agentCell, "r", false);
+  ASSERT_TRUE(r);
+  const auto v = arena.linked(*r, h.ctx.core.dims().values, DimVector::POS);
+  ASSERT_TRUE(v);
+  EXPECT_EQ(arena.asInt64(*v).value_or(0), 7);
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
+TEST(VagentExecutorTest, BeliefPatternUnifiesNestedAndRepeatedAndWildcard) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image =
+      h.lower("module demo\nevent Tick\n"
+              "record Pair { a: Int, b: Int }\n"
+              "predicate edge(p: Pair)\n"
+              "predicate eq(x: Int, y: Int)\n"
+              "predicate any(x: Int, y: Int)\n"
+              "agent A {\n"
+              "  var a : Int := 0\n"
+              "  var b : Int := 0\n"
+              "  var w : Int := 0\n"
+              "  on +edge(Pair{a: ?x, b: ?y}) { a := x + y }\n"
+              "  on +eq(?x, ?x) { b := x }\n"
+              "  on +any(?_, ?v) { w := v }\n"
+              "  on Tick { believe edge(Pair{a: 3, b: 4}); "
+              "believe eq(9, 9); believe eq(1, 2); believe any(6, 8) }\n"
+              "}");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  const auto field = [&](std::string_view name) {
+    const auto rec =
+        varsRecord(arena, h.ctx.core, image->agentCell, name, false);
+    if (!rec) return std::int64_t{-1};
+    const auto v =
+        arena.linked(*rec, h.ctx.core.dims().values, DimVector::POS);
+    return v ? arena.asInt64(*v).value_or(-1) : -1;
+  };
+  // Nested term: both captures bind — 3 + 4.
+  EXPECT_EQ(field("a"), 7);
+  // Repeated `?x` constrains: eq(9, 9) fires, eq(1, 2) never matches.
+  EXPECT_EQ(field("b"), 9);
+  // `?_` is a pure wildcard — only the second capture binds.
+  EXPECT_EQ(field("w"), 8);
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
+TEST(VagentExecutorTest, BeliefTriggerGuardReadsTheCapturedVariable) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image =
+      h.lower("module demo\nevent Tick\nevent Done\n"
+              "predicate val(v: Int)\n"
+              "agent A {\n"
+              "  on +val(?v) [v > 10] { emit Done{} }\n"
+              "  on Tick { believe val(5); believe val(15) }\n"
+              "}");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  const auto outbox =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  // val(5) unifies but the guard refuses it — only val(15) emits.
+  ASSERT_EQ(outbox.size(), 1u);
+  EXPECT_EQ(outbox[0].payload, "Done");
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
+TEST(VagentExecutorTest, BehaviorBeliefHandlerBindsItsOwnInstance) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image =
+      h.lower("module demo\nevent Tick\n"
+              "predicate mark(v: Int)\n"
+              "behavior Watch {\n"
+              "  var count : Int := 0\n"
+              "  on +mark(?v) { count := count + v }\n"
+              "}\n"
+              "agent A {\n"
+              "  var hits : Int := 0\n"
+              "  behavior Watch()\n"
+              "  on +mark(?v) { hits := hits + 1 }\n"
+              "  on Tick { believe mark(3); believe mark(4) }\n"
+              "}");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  // §5.7's merge on the belief arm: the agent's own handler and the
+  // mounted instance's both staged, in table order. The instance's
+  // count accumulated 3 + 4 under its own $owner — not the agent's.
+  const auto hits =
+      varsRecord(arena, h.ctx.core, image->agentCell, "hits", false);
+  ASSERT_TRUE(hits);
+  const auto hv =
+      arena.linked(*hits, h.ctx.core.dims().values, DimVector::POS);
+  ASSERT_TRUE(hv);
+  EXPECT_EQ(arena.asInt64(*hv).value_or(-1), 2);
+  const auto behaviorDim = h.ctx.core.findOrMintDimension("d.behavior");
+  const auto insts       = std::ranges::to<std::vector>(
+      zigzag::rankAfter(arena, image->agentCell, behaviorDim));
+  ASSERT_EQ(insts.size(), 1u);
+  // An instance field's vars record holds the dual-linked holder —
+  // the int rides the holder's own scalar bits.
+  const auto count =
+      varsRecord(arena, h.ctx.core, insts.front(), "count", false);
+  ASSERT_TRUE(count);
+  const auto cv =
+      arena.linked(*count, h.ctx.core.dims().values, DimVector::POS);
+  ASSERT_TRUE(cv);
+  EXPECT_EQ(arena.asInt64(*cv).value_or(-1), 7);
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
 } // namespace

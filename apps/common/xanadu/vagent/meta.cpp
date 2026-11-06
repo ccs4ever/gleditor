@@ -1,5 +1,6 @@
 #include "common/xanadu/vagent/meta.hpp"
 
+#include "common/xanadu/scalar.hpp"
 #include "common/xanadu/vagent/records.hpp"
 
 #include <algorithm>
@@ -976,6 +977,10 @@ MetaRuntime::believe(std::string_view predicate, CellRef term, CellRef peer,
   if (evidence.has_value())
     zigzag::expectWritten(arena.link(
         clause, core_.findOrMintDimension("d.evidence"), Posward, *evidence));
+  // An assert is the `on +p` trigger point — matched handlers queue
+  // on the agent's pending rank and run under the settle's drain,
+  // never inside the step that wrote the fact.
+  stageBeliefTriggers(predicate, "+", clause);
   return clause;
 }
 
@@ -992,6 +997,10 @@ std::size_t MetaRuntime::forget(std::string_view predicate, CellRef term) {
   for (const auto clause : beliefsOf(predicate)) {
     const auto head = arena.linked(clause, grab, Posward);
     if (head.has_value() && beliefTermEquals(arena, step, *head, term)) {
+      // Retraction fires `on -p` against the fact being removed —
+      // stage before the unlink; the clause's cells persist, so the
+      // pending's grab stays readable either way.
+      stageBeliefTriggers(predicate, "-", clause);
       unlinkRank(clause, core_.dims().clause);
       ++removed;
     }
@@ -1005,6 +1014,139 @@ MetaRuntime::revise(std::string_view predicate, CellRef oldTerm,
                     std::optional<CellRef> evidence) {
   (void)forget(predicate, oldTerm);
   return believe(predicate, newTerm, peer, turn, evidence);
+}
+
+void MetaRuntime::stageBeliefTriggers(std::string_view predicate,
+                                      std::string_view sign,
+                                      CellRef factClause) {
+  auto &arena = core_.arena();
+  if (binds_.agentCell == noCell) return;
+  const auto factHead =
+      arena.linked(factClause, core_.dims().grab, Posward);
+  if (!factHead) return;
+  const auto key = std::string{sign} + std::string{predicate};
+
+  // §5.7's merge shape, belief-triggers arm: the agent's own table
+  // then each mounted behavior descriptor's in mount order — the
+  // owner rides the pending record so a behavior clause binds its
+  // instance, not the agent.
+  std::vector<std::pair<CellRef, CellRef>> tables;
+  const auto collect = [&](CellRef host, CellRef owner) {
+    const auto rec = varsRecord(host, "beliefHandlers", /*mint=*/false);
+    if (!rec) return;
+    const auto term = arena.linked(*rec, core_.dims().values, Posward);
+    if (!term) return;
+    for (const CellRef child :
+         zigzag::rankAfter(arena, *term, core_.dims().step))
+      if (arena.textOf(child) == key) tables.emplace_back(child, owner);
+  };
+  collect(binds_.agentCell, noCell);
+  for (const CellRef inst : zigzag::rankAfter(
+           arena, binds_.agentCell,
+           core_.findOrMintDimension("d.behavior"))) {
+    const auto rec = varsRecord(inst, "behavior", /*mint=*/false);
+    if (!rec) continue;
+    const auto v   = arena.linked(*rec, core_.dims().values, Posward);
+    const auto ref = v ? arena.asInt64(*v) : std::nullopt;
+    if (!ref) continue;
+    collect(static_cast<CellRef>(*ref), inst);
+  }
+  if (tables.empty()) return;
+
+  // A binding's marshal keeps factValue's read-back shape — typed
+  // bits for scalars and booleans, plain text for strings.
+  const auto bindingCell = [&](const CellValue &value) -> CellRef {
+    if (const auto n = std::get_if<std::int64_t>(&value))
+      return arena.makeScalarCell(*n);
+    if (const auto d = std::get_if<double>(&value)) {
+      const auto cell = arena.makeCell(std::to_string(*d));
+      zigzag::expectWritten(
+          arena.setValueBits(cell, xanadu::ValueKind::Double,
+                             xanadu::canonicalDoubleBits(*d)));
+      return cell;
+    }
+    if (const auto b = std::get_if<bool>(&value)) {
+      const auto cell = arena.makeCell(*b ? "true" : "false");
+      zigzag::expectWritten(
+          arena.setValueBits(cell, xanadu::ValueKind::Bool,
+                             *b ? std::uint64_t{1} : 0));
+      return cell;
+    }
+    return arena.makeCell(std::get<std::string>(value));
+  };
+  // `?` names in first-appearance order — the DFS the lowerer took
+  // when it wrote the head's params, so pending children land
+  // positionally under the same names.
+  const auto varOrder = [&](CellRef pattern) {
+    std::vector<std::string> order;
+    const std::function<void(CellRef)> walk = [&](CellRef cell) {
+      const auto text = arena.textOf(cell);
+      if (!text.empty() && text.front() == '?') {
+        const auto var = std::string_view{text}.substr(1);
+        if (var != "_" && std::ranges::find(order, var) == order.end())
+          order.emplace_back(var);
+        return;
+      }
+      for (const CellRef child :
+           zigzag::rankAfter(arena, cell, core_.dims().step))
+        walk(child);
+    };
+    walk(pattern);
+    return order;
+  };
+  const auto priorityOf = [&](CellRef clause) -> std::int64_t {
+    if (const auto rec = varsRecord(clause, "priority", /*mint=*/false))
+      if (const auto v = arena.linked(*rec, core_.dims().values, Posward))
+        if (const auto n = arena.asInt64(*v)) return *n;
+    return 0;
+  };
+  struct Match {
+    CellRef clause;
+    CellRef owner;
+    std::vector<CellValue> bindings;
+  };
+  std::vector<Match> matched;
+  for (const auto &[table, owner] : tables)
+    for (const CellRef clause : clausesOf(table)) {
+      CellRef pattern = noCell;
+      if (const auto rec = varsRecord(clause, "pattern", /*mint=*/false))
+        if (const auto v = arena.linked(*rec, core_.dims().values, Posward))
+          if (const auto ref = arena.asInt64(*v))
+            pattern = static_cast<CellRef>(*ref);
+      if (pattern == noCell) continue;
+      std::map<std::string, CellValue, std::less<>> env;
+      if (!unifyCollect(pattern, *factHead, env)) continue;
+      Match m{.clause = clause, .owner = owner};
+      for (const auto &var : varOrder(pattern))
+        m.bindings.push_back(env[var]);
+      matched.push_back(std::move(m));
+    }
+  // §3.5's merged order on the staged records too — priority first,
+  // the rank walk's source order breaking ties.
+  std::stable_sort(matched.begin(), matched.end(),
+                   [&](const Match &a, const Match &b) {
+                     return priorityOf(a.clause) > priorityOf(b.clause);
+                   });
+  const auto pending = core_.findOrMintDimension("d.pending");
+  for (const auto &m : matched) {
+    const auto pend = arena.makeCell(key);
+    const auto ref  = [&](std::string_view name, CellRef cell) {
+      if (const auto rec = varsRecord(pend, name, /*mint=*/true))
+        zigzag::expectWritten(arena.link(
+            *rec, core_.dims().values, Posward,
+            arena.makeScalarCell(static_cast<std::int64_t>(cell))));
+    };
+    ref("beliefClause", m.clause);
+    ref("grab", factClause);
+    if (m.owner != noCell) ref("owner", m.owner);
+    for (const auto &value : m.bindings)
+      zigzag::expectWritten(
+          arena.link(zigzag::rankTail(arena, pend, core_.dims().step),
+                     core_.dims().step, Posward, bindingCell(value)));
+    zigzag::expectWritten(
+        arena.link(zigzag::rankTail(arena, binds_.agentCell, pending),
+                   pending, Posward, pend));
+  }
 }
 
 // ---------------------------------------------------------------------------

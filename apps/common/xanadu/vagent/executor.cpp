@@ -1494,6 +1494,50 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
         if (const auto r = arena.asInt64(*v))
           seen = static_cast<CellRef>(*r);
     unlinkRank(arena, *head, dims.pending);
+    // A belief trigger stages its own shape — `beliefClause` names the
+    // handler clause and +d.step the bound values, so it dispatches
+    // through its own path rather than the event table.
+    CellRef beliefClause = noCell;
+    if (const auto rec =
+            varsRecord(arena, core, *head, "beliefClause", false))
+      if (const auto v =
+              arena.linked(*rec, core.dims().values, DimVector::POS))
+        if (const auto r = arena.asInt64(*v))
+          beliefClause = static_cast<CellRef>(*r);
+    if (beliefClause != noCell) {
+      std::vector<CellValue> args;
+      for (const CellRef child :
+           zigzag::rankAfter(arena, *head, core.dims().step))
+        args.push_back(meta.factValue(child));
+      if (const auto rec =
+              varsRecord(arena, core, *head, "owner", false))
+        if (const auto v =
+                arena.linked(*rec, core.dims().values, DimVector::POS))
+          if (const auto r = arena.asInt64(*v))
+            args.push_back(CellValue{*r});
+      if (const auto guard =
+              arena.linked(beliefClause, core.dims().grab,
+                           DimVector::POS)) {
+        auto outcome =
+            meta.runFragment(*guard, args, exec.cursor, maxCycles);
+        if (outcome.refusal != MetaRunOutcome::Refusal::None ||
+            !outcome.produced)
+          continue;
+      }
+      bool fired = true;
+      if (!zigzag::rankAfter(arena, beliefClause, core.dims().step)
+               .empty()) {
+        fired = runSpine(beliefClause, args);
+      } else if (const auto spin =
+                     arena.linked(beliefClause, core.dims().spin,
+                                  DimVector::POS)) {
+        const auto outcome =
+            meta.runFragment(*spin, args, exec.cursor, maxCycles);
+        fired = outcome.refusal == MetaRunOutcome::Refusal::None;
+      }
+      if (!fired) return failTurn();
+      continue;
+    }
     if (!dispatchEvent(name, seen)) return failTurn();
     // §4.5: `on Destroy` is the orderly stop's last act — nothing
     // behind it on the rank dispatches.

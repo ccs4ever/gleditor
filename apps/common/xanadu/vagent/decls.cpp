@@ -1068,9 +1068,9 @@ struct Lowerer {
   DimRef holderDim_{zigzag::noCell};
 
   void lowerDecl(const Decl &decl, bool insideAgent);
-  void lowerClauseBody(const Decl &decl, CellRef host,
-                       const std::vector<Parameter> &params,
-                       std::string_view clauseName);
+  CellRef lowerClauseBody(const Decl &decl, CellRef host,
+                          const std::vector<Parameter> &params,
+                          std::string_view clauseName);
   void lowerFieldSlot(CellRef descriptor, const Decl &member,
                       const std::vector<Parameter> &ownerParams,
                       std::string_view ownerName);
@@ -1081,9 +1081,9 @@ struct Lowerer {
 // One clause = a guard head (+d.grab) plus a body head (+d.spin). A
 // decl with no guard lowers `where true` so the clause shape is
 // uniform for clauseFormals/graft checks.
-void Lowerer::lowerClauseBody(const Decl &decl, CellRef host,
-                              const std::vector<Parameter> &params,
-                              std::string_view clauseName) {
+CellRef Lowerer::lowerClauseBody(const Decl &decl, CellRef host,
+                                 const std::vector<Parameter> &params,
+                                 std::string_view clauseName) {
   Expr trueGuard;
   trueGuard.kind        = ExprKind::Boolean;
   trueGuard.text        = "true";
@@ -1098,14 +1098,14 @@ void Lowerer::lowerClauseBody(const Decl &decl, CellRef host,
                              Type{"Bool"});
   if (!test) {
     errors.push_back(test.error());
-    return;
+    return noCell;
   }
   const auto body = emitDeclHead(
       decl, decl.body ? *decl.body : trueGuard, params,
       std::format("{}:body", label(clauseName)), Type{"()"}, false);
   if (!body) {
     errors.push_back(body.error());
-    return;
+    return noCell;
   }
   const auto clause = mintClause(host, clauseName, *test, *body, decl.priority);
   // A body with statement-position verbs gets the segment spine
@@ -1113,6 +1113,7 @@ void Lowerer::lowerClauseBody(const Decl &decl, CellRef host,
   // rank is non-empty (§3.8).
   if (decl.body && bodyHasHostVerb(*decl.body))
     emitSpine(decl, clause, params, clauseName);
+  return clause;
 }
 
 // A skill/behavior `var` member: a name cell on the descriptor's
@@ -1795,8 +1796,88 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
   }
   case DeclKind::Handler: {
     if (decl.trigger && decl.trigger->kind != ExprKind::Identifier) {
-      // +/-belief and term triggers have no symbol host at M0.
-      image.stubbed.push_back(name);
+      // §belief triggers: 'on +p(...)'/'on -p(...)' fire when a fact
+      // matching the trigger's term asserts/retracts. The clause
+      // files on a "beliefHandlers" table keyed sign+predicate —
+      // agent-level on the agent cell, instance-scoped on a behavior
+      // descriptor — and the marshaled pattern rides the clause's
+      // `pattern` field so believe/forget's stage walk unifies it
+      // against each candidate fact.
+      if (!decl.body) {
+        refuse(decl, std::format("handler 'on {}' declares no body", name));
+        return;
+      }
+      const auto &trigger = *decl.trigger;
+      const auto key      = name + trigger.text;
+      const auto host     = behaviorDesc_ != noCell
+                    ? clauseTableChild(behaviorDesc_, "beliefHandlers", key)
+                    : clauseTableChild(image.agentCell, "beliefHandlers", key);
+      // The `?` names are the handler's parameters in first-appearance
+      // order — the stage walk's bindings append in the same walk, and
+      // `?_` stays a wildcard, never a binding. Each parameter takes
+      // the type the predicate (or a record field inside the pattern)
+      // declares at its position — the head's params must stay inside
+      // the fragment's scalar lowering subset.
+      const auto *predicate = [&]() -> const Decl * {
+        for (const auto &decl : program.declarations)
+          if (decl.kind == DeclKind::Predicate &&
+              decl.name == trigger.text)
+            return &decl;
+        return nullptr;
+      }();
+      std::vector<Parameter> params;
+      std::set<std::string>    captured;
+      const std::function<void(const Expr &, const Type &)> collect =
+          [&](const Expr &expr, const Type &expected) {
+            if (expr.kind == ExprKind::LogicVariable) {
+              std::string var{expr.text};
+              if (!var.empty() && var.front() == '?') var.erase(0, 1);
+              if (var != "_" && captured.insert(var).second)
+                params.push_back(
+                    Parameter{.name = std::move(var), .type = expected});
+              return;
+            }
+            if (expr.kind == ExprKind::Record) {
+              const auto *record = [&]() -> const Decl * {
+                for (const auto &decl : program.declarations)
+                  if (decl.kind == DeclKind::Record &&
+                      decl.name == expr.text)
+                    return &decl;
+                return nullptr;
+              }();
+              for (std::size_t f = 0; f < expr.children.size(); ++f) {
+                const Type *field = nullptr;
+                if (record && f < expr.names.size())
+                  for (const auto &param : record->parameters)
+                    if (param.name == expr.names[f]) field = &param.type;
+                if (field) collect(*expr.children[f], *field);
+              }
+            }
+          };
+      for (std::size_t i = 0; i < trigger.children.size(); ++i) {
+        const auto *expected =
+            predicate && i < predicate->parameters.size()
+                ? &predicate->parameters[i].type
+                : nullptr;
+        if (expected) collect(*trigger.children[i], *expected);
+      }
+      const auto n = ++clauseCounts[host];
+      const auto clauseName =
+          n == 1 ? std::format("on:{}", key)
+                 : std::format("on:{}#{}", key, n);
+      const auto clause =
+          lowerClauseBody(decl, host, params, clauseName);
+      if (clause == noCell) return;
+      auto pattern = marshalPattern(trigger);
+      if (!pattern) {
+        errors.push_back(pattern.error());
+        return;
+      }
+      if (const auto rec = varsRecord(arena, core, clause, "pattern", true))
+        zigzag::expectWritten(
+            arena.link(*rec, dims().values, DimVector::POS,
+                       arena.makeScalarCell(
+                           static_cast<std::int64_t>(*pattern))));
       return;
     }
     if (!decl.body) {

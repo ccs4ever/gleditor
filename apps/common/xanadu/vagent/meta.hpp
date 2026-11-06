@@ -375,6 +375,15 @@ public:
   revise(std::string_view predicate, CellRef oldTerm, CellRef newTerm,
          CellRef peer, std::int64_t turn,
          std::optional<CellRef> evidence = std::nullopt);
+  /// §belief-trigger staging: walk the agent's and mounted behaviors'
+  /// "beliefHandlers" tables for clauses keyed `sign`+`predicate`,
+  /// unify each clause's `pattern` against the fact's head, and queue
+  /// a +d.pending record per match — bindings marshaled as ordered
+  /// +d.step children in the `?` names' first-appearance order. The
+  /// handler runs under the settle's own drain, never inside the
+  /// asserting step.
+  void stageBeliefTriggers(std::string_view predicate,
+                           std::string_view sign, CellRef factClause);
 
   // -- §6.3-amended selection (actor-executor §3.4)
   // -----------------------------
