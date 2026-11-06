@@ -129,11 +129,25 @@ public:
   /// entry (the evidence a parked await/ask matches) plus a
   /// `+d.pending` trigger the receiver's own settle drains and
   /// dispatches. Two cells, no receiver mutation inside the sender's
-  /// turn. Idempotence stays the caller's job: drain `id`s are
-  /// stable, and a host binding that delivers the same id twice
-  /// re-queues the percept.
+  /// turn. §3.7's idempotence key rides `+d.delivered`: a second
+  /// delivery of a journaled `id` is ignored, so a persistent outbox
+  /// rank redelivers harmlessly.
   void deliver(zigzag::ArenaManifold &arena, zigzag::vortex::VortexCore &core,
                const Delivery &delivery) const;
+
+  /// §"delivery failure": a routed entry whose concrete `target`
+  /// names no member raises `DeliveryFailed{to, kind, cause}` on the
+  /// sender — the local instance of §7.3's horizon, where the
+  /// adapter's retry machinery is the general case. The percept is
+  /// journaled and queued like any other, so `on DeliveryFailed`
+  /// dispatches on the sender's next turn. The entry's `id` keys the
+  /// same `+d.delivered` idempotence `deliver` uses, so a persistent
+  /// outbox rank cannot re-raise on every drain; an id-less entry
+  /// raises once per call, which is the caller's job to avoid.
+  void deliveryFailed(zigzag::ArenaManifold &arena,
+                      zigzag::vortex::VortexCore &core,
+                      const OutboxEntry &entry,
+                      std::string_view cause = "unknown") const;
 
 private:
   [[nodiscard]] std::int64_t setting(std::string_view key,

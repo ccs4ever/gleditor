@@ -3521,4 +3521,69 @@ TEST(VagentExecutorTest, HandlerStagedEffectsFailAsAnEvent) {
   EXPECT_EQ(outbox[1].payload, "Seen");
 }
 
+TEST(VagentExecutorTest, StopChildAnnouncesChildStoppingToTheParent) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image =
+      h.lower("module demo\nevent Boot\nevent Down\n"
+              "agent A {\n"
+              "  var child: Opt<Agent> := none\n"
+              "  on Boot { child := spawn A(); stop child }\n"
+              "  on ChildStopping [occurrence.cause == \"stop\"] { emit "
+              "Down{} }\n"
+              "}");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+  // The stop lands in Boot's turn: the child is flagged destroying,
+  // its own Destroy percept queues on the child, and §4.5's
+  // announcement reaches the parent at once — the guarded handler
+  // proves the cause field rode the percept.
+  ASSERT_TRUE(exec(h.execution("Boot"), h.ctx));
+  const auto outbox =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  ASSERT_EQ(outbox.size(), 1u);
+  EXPECT_EQ(outbox[0].kind, "emit");
+  EXPECT_EQ(outbox[0].payload, "Down");
+}
+
+TEST(VagentExecutorTest, UnroutableTargetRaisesDeliveryFailedOnTheSender) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image =
+      h.lower("module demo\nevent Boot\nevent Note\nevent Down\n"
+              "agent A {\n"
+              "  var target: Opt<Agent> := none\n"
+              "  on Boot { emit Note{} for target }\n"
+              "  on DeliveryFailed [occurrence.kind == \"emit\"] { emit "
+              "Down{} }\n"
+              "}");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+  ASSERT_TRUE(exec(h.execution("Boot"), h.ctx));
+  const auto outbox =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  ASSERT_EQ(outbox.size(), 1u);
+  EXPECT_EQ(outbox[0].kind, "emit");
+  // No member is named "Missing" — the adapter's route comes back
+  // empty, which is §7.3's failure horizon for a local send.
+  EXPECT_TRUE(VagentExecutor::route(arena, h.ctx.core, h.ctx.core.home(),
+                                    outbox[0])
+                  .empty());
+  exec.deliveryFailed(arena, h.ctx.core, outbox[0]);
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+  const auto after =
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  ASSERT_EQ(after.size(), 2u);
+  EXPECT_EQ(after[1].payload, "Down");
+  // §3.7's idempotence: a persistent outbox rank re-drains the same
+  // id — the failure must not re-raise.
+  exec.deliveryFailed(arena, h.ctx.core, outbox[0]);
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+  EXPECT_EQ(VagentExecutor::drainOutbox(arena, h.ctx.core,
+                                      image->agentCell)
+                .size(),
+            2u);
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
 } // namespace

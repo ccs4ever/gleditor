@@ -616,6 +616,16 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
             arena.link(*rec, core.dims().values, DimVector::POS,
                        arena.makeScalarCell(std::int64_t{1})));
       raiseOn(target, "Destroy", {});
+      // §4.5's announcement is at once — the parent learns the child
+      // is stopping when the stop lands, not when the child's own
+      // pump finishes `on Destroy`. The cause set is closed; `stop`
+      // is the only orderly path the executor has — terminate, lease
+      // and init failures stage theirs adapter-side.
+      if (const auto parent = parentOf(target); parent != noCell)
+        raiseOn(parent, "ChildStopping",
+                {{"child",
+                  arena.makeScalarCell(std::int64_t{target})},
+                 {"cause", arena.makeCell("stop")}});
       return true;
     }
     if (verb == "drop") {
@@ -2593,6 +2603,59 @@ void VagentExecutor::deliver(zigzag::ArenaManifold &arena,
         arena.makeScalarCell(static_cast<std::int64_t>(seen))));
   zigzag::expectWritten(arena.link(
       zigzag::rankTail(arena, delivery.agent, pending), pending,
+      DimVector::POS, pend));
+}
+
+void VagentExecutor::deliveryFailed(zigzag::ArenaManifold &arena,
+                                    zigzag::vortex::VortexCore &core,
+                                    const OutboxEntry &entry,
+                                    std::string_view cause) const {
+  if (entry.sender == noCell) return;
+  // The sender-side half of §7.3's honest bound: the request's own id
+  // keys the dedupe, so the outbox rank's persistence cannot turn one
+  // unroutable entry into a stream of identical failures.
+  if (!entry.id.empty()) {
+    const auto delivered = core.findOrMintDimension("d.delivered");
+    for (const CellRef idCell :
+         zigzag::rankAfter(arena, entry.sender, delivered))
+      if (arena.textOf(idCell) == entry.id) return;
+    zigzag::expectWritten(
+        arena.link(zigzag::rankTail(arena, entry.sender, delivered),
+                   delivered, DimVector::POS,
+                   arena.makeCell(entry.id)));
+  }
+  // The event payload rides the +d.step/+d.name envelope the raise
+  // path mints — `occurrence.to` resolves no member for an unknown
+  // name, so the target text is the honest Agent-typed value.
+  const auto payload = arena.makeCell("DeliveryFailed");
+  const auto field   = [&](std::string_view name, CellRef value) {
+    zigzag::expectWritten(
+        arena.link(zigzag::rankTail(arena, payload, core.dims().step),
+                   core.dims().step, DimVector::POS, value));
+    zigzag::expectWritten(arena.link(value, core.dims().name,
+                                   DimVector::POS,
+                                   arena.makeCell(name)));
+  };
+  field("to", arena.makeCell(entry.target));
+  field("kind", arena.makeCell(entry.kind));
+  field("cause", arena.makeCell(cause));
+  const auto seen = arena.makeCell("DeliveryFailed");
+  journalAppend(arena, entry.sender, seen,
+                core.findOrMintDimension("d.seen"),
+                static_cast<std::size_t>(
+                    setting("vagent.journal_size", 64)));
+  if (const auto rec = varsRecord(arena, core, seen, "grab", true))
+    zigzag::expectWritten(arena.link(
+        *rec, core.dims().values, DimVector::POS,
+        arena.makeScalarCell(static_cast<std::int64_t>(payload))));
+  const auto pending = core.findOrMintDimension("d.pending");
+  const auto pend    = arena.makeCell("DeliveryFailed");
+  if (const auto rec = varsRecord(arena, core, pend, "grab", true))
+    zigzag::expectWritten(arena.link(
+        *rec, core.dims().values, DimVector::POS,
+        arena.makeScalarCell(static_cast<std::int64_t>(seen))));
+  zigzag::expectWritten(arena.link(
+      zigzag::rankTail(arena, entry.sender, pending), pending,
       DimVector::POS, pend));
 }
 
