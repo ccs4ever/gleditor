@@ -7,6 +7,7 @@
 #ifndef TESTS_XUZZ_EPISTEMIC_INVARIANTS_HPP
 #define TESTS_XUZZ_EPISTEMIC_INVARIANTS_HPP
 
+#include <cmath>
 #include <cstdint>
 #include <map>
 #include <optional>
@@ -17,6 +18,8 @@
 #include <tuple>
 #include <vector>
 
+#include "common/xanadu/vagent/runtime/epistemic_abi_health.hpp"
+#include "common/xanadu/vagent/runtime/epistemic_limits.hpp"
 #include "common/xanadu/vagent/runtime/program.hpp"
 #include "common/xanadu/vagent/runtime/runtime_abi.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
@@ -112,6 +115,37 @@ public:
         if (text(record, kObsStatus) != kObsStatusRetired)
           return "a live record in the retired history of " +
                  arena().textOf(profile);
+    return std::nullopt;
+  }
+
+  /// The estimator's refusal weight `R` and total weight `N` of a profile,
+  /// each 0 while absent (I3-2a).
+  struct Weights {
+    double r{0.0};
+    double n{0.0};
+  };
+  [[nodiscard]] std::map<std::string, Weights> weights() const {
+    std::map<std::string, Weights> out;
+    for (const auto profile : profiles())
+      out.emplace(
+          arena().textOf(profile),
+          Weights{real(profile, kProfileHealthRefusedWeight).value_or(0),
+                  real(profile, kProfileHealthWeight).value_or(0)});
+    return out;
+  }
+
+  /// R3-9 under the largest bound in force (design 6.8): `0 <= R <= N <=
+  /// cap`, where the cap is `1 / (1 - b)` of the longest half-life a run has
+  /// used. The bound is exact: a rescale clamps `N` to it and an update only
+  /// adds non-negative terms, so no tolerance is needed for `N`; `R <= N`
+  /// gets one ulp-sized slack for the two products.
+  [[nodiscard]] std::optional<std::string> weightViolation(double cap) const {
+    for (const auto &[token, w] : weights()) {
+      if (!(w.r >= 0.0) || !std::isfinite(w.n))
+        return "R below 0 or N not finite for " + token;
+      if (w.r > w.n * (1.0 + 1e-12)) return "R above N for " + token;
+      if (w.n > cap) return "N above the cap for " + token;
+    }
     return std::nullopt;
   }
 

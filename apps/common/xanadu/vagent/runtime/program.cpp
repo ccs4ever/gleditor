@@ -395,13 +395,21 @@ LocalHost::upgrade(const identity::ActorPid &pid,
   return upgradeWith(pid, std::move(program), instructionLimit, false);
 }
 
-std::expected<void, TransferRefusal> LocalHost::upgradeQuiescing(
-    const identity::ActorPid &pid, std::shared_ptr<CompiledProgram> program,
-    const std::chrono::milliseconds timeout,
-    std::optional<std::uint64_t> instructionLimit) {
+std::expected<void, TransferRefusal>
+LocalHost::upgradeQuiescing(const identity::ActorPid &pid,
+                            std::shared_ptr<CompiledProgram> program,
+                            const std::chrono::milliseconds timeout,
+                            std::optional<std::uint64_t> instructionLimit) {
   constexpr auto road = TransferRoute::UpgradeSchema;
   const auto deadline = clock_.steady() + timeout;
-  if (const auto paused = executor_->pauseAdmission(pid, timeout); !paused)
+  // An operator's own pause outlives this call: it is put back at the end,
+  // where a bare `resumeAdmission` would cancel it (DIST m7).
+  const auto operatorPause = executor_->admissionPausedUntil(pid);
+  // The margin covers the upgrade after a drain that ends on its last tick,
+  // which otherwise meets a pause that lapsed between the two.
+  if (const auto paused = executor_->pauseAdmission(
+          pid, timeout + std::chrono::milliseconds(kQuiescingPauseMarginMs));
+      !paused)
     return std::unexpected(paused.error());
   const auto drained = [&]() -> std::expected<void, TransferRefusal> {
     for (;;) {
@@ -412,7 +420,8 @@ std::expected<void, TransferRefusal> LocalHost::upgradeQuiescing(
       // This host has one thread: a pump that ran nothing will not unblock
       // the actor by itself, so waiting for the deadline would only spin.
       if (turns == 0 || clock_.steady() >= deadline) {
-        const auto busy = report->firstBusy(AgentExecutor::UpgradeRoute::Schema);
+        const auto busy =
+            report->firstBusy(AgentExecutor::UpgradeRoute::Schema);
         return std::unexpected(TransferRefusal::make(
             TransferCode::NotQuiescent, road, ActorError::NotQuiescent,
             {.subject    = std::string(busy ? busy->first : "quiescence"),
@@ -420,18 +429,21 @@ std::expected<void, TransferRefusal> LocalHost::upgradeQuiescing(
       }
     }
   }();
-  const auto result =
+  auto result =
       drained ? upgradeWith(pid, std::move(program), instructionLimit, true)
               : drained;
-  executor_->resumeAdmission(pid);
+  executor_->restoreAdmissionPause(pid, operatorPause);
+  // The pause, not the actor, was what failed: say so, where the bare state
+  // number (Open) reads as noise.
+  if (!result && result.error().code == TransferCode::NotQuiescent &&
+      result.error().detail.subject == "admission")
+    result.error().detail.current = "the pause lapsed before the swap";
   return result;
 }
 
-std::expected<void, TransferRefusal>
-LocalHost::upgradeWith(const identity::ActorPid &pid,
-                       std::shared_ptr<CompiledProgram> program,
-                       std::optional<std::uint64_t> instructionLimit,
-                       const bool requirePaused) {
+std::expected<void, TransferRefusal> LocalHost::upgradeWith(
+    const identity::ActorPid &pid, std::shared_ptr<CompiledProgram> program,
+    std::optional<std::uint64_t> instructionLimit, const bool requirePaused) {
   if (!program || !programs_.contains(program->programRef()) ||
       programs_.at(std::string(program->programRef())).get() != program.get()) {
     return std::unexpected(TransferRefusal::make(TransferCode::Runtime,

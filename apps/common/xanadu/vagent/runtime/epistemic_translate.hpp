@@ -25,6 +25,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "common/xanadu/vagent/runtime/epistemic_limits.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_policy.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_preflight.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_refusal.hpp"
@@ -115,6 +116,15 @@ struct PlanRequest {
   std::optional<ResumeAllowance> allowance;
   /// Work the caller has already committed to, such as the schema comparison.
   std::uint64_t fixedWork{0};
+  /// Scratch bytes the caller's copiers have already taken from the same
+  /// grant: the generic copier runs first on the schema road, so the
+  /// translator's texts must fit in what it left (S-3).
+  std::uint64_t fixedBytes{0};
+  /// The destination's `vagent.epistemic_health_reasons` and `_actions`. A
+  /// profile's lists must fit them and its `health_cells` must be what they
+  /// hold, or the admission reserve is computed from a forged number (S-2).
+  std::int64_t healthReasons{kDefaultEpistemicHealthReasons};
+  std::int64_t healthActions{kDefaultEpistemicHealthActions};
 };
 
 struct TranslationPlan {

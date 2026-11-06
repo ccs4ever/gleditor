@@ -388,33 +388,44 @@ TEST_F(VagentEpistemicHealth, SuspectNeedsTheMinimumWeightNotTheCount) {
 }
 
 TEST_F(VagentEpistemicHealth, ANoteIsAnEvenlyInterleavedMixture) {
-  ASSERT_TRUE(send(reading(kP1)));
-  // Fill the per-source queue (8), then offer 56 more readings with every
-  // twentieth bad. The good ones meet a full queue and are credited.
-  std::int64_t refused = 0, credited = 0;
-  for (int i = 0; i < 8; ++i) ASSERT_TRUE(offer(reading(kP1)));
-  for (int i = 0; i < 56; ++i) {
-    if (i % 20 == 10) {
-      EXPECT_FALSE(offer(bad(kP1)));
-      ++refused;
-    } else {
-      EXPECT_FALSE(offer(reading(kP1)));
-      ++credited;
+  // R3-12 at every length its ruling cites (ML-1): the closed form does not
+  // depend on `n`, and this keeps a later change to the note path from
+  // breaking the long notes without a red test. `n` counts the eight queued
+  // readings and the offers the full queue turns into one note.
+  for (const std::int64_t n : {64, 128, 256, 512, 1000}) {
+    SCOPED_TRACE("n = " + std::to_string(n));
+    start({});
+    ASSERT_TRUE(send(reading(kP1)));
+    // Fill the per-source queue (8), then offer the rest with every
+    // twentieth bad (5%). The good ones meet a full queue and are credited.
+    std::int64_t refused = 0, credited = 0;
+    for (int i = 0; i < 8; ++i) ASSERT_TRUE(offer(reading(kP1)));
+    for (std::int64_t i = 0; i < n - 8; ++i) {
+      if (i % 20 == 10) {
+        EXPECT_FALSE(offer(bad(kP1)));
+        ++refused;
+      } else {
+        EXPECT_FALSE(offer(reading(kP1)));
+        ++credited;
+      }
     }
+    pump();
+    Model want;
+    for (int i = 0; i < 9; ++i) want.accept();
+    want.note(refused, credited);
+    expectWeights(kP1, want, "mixture");
+    EXPECT_LT(want.f(), kDefaultEpistemicSuspectFraction);
+    EXPECT_LT(weights(kP1).r / weights(kP1).n,
+              kDefaultEpistemicSuspectFraction);
+    // Credits first (revision 3) would have put the refusals at the newest
+    // end.
+    Model credits;
+    for (int i = 0; i < 9; ++i) credits.accept();
+    for (std::int64_t i = 0; i < credited; ++i) credits.accept();
+    for (std::int64_t i = 0; i < refused; ++i) credits.refuse();
+    EXPECT_GT(credits.f(), want.f() + 0.02);
+    EXPECT_EQ(health(kP1)->state, HealthState::Nominal);
   }
-  pump();
-  Model want;
-  for (int i = 0; i < 9; ++i) want.accept();
-  want.note(refused, credited);
-  expectWeights(kP1, want, "mixture");
-  EXPECT_LT(want.f(), 0.25);
-  // Credits first (revision 3) would have put the refusals at the newest end.
-  Model credits;
-  for (int i = 0; i < 9; ++i) credits.accept();
-  for (int i = 0; i < credited; ++i) credits.accept();
-  for (int i = 0; i < refused; ++i) credits.refuse();
-  EXPECT_GT(credits.f(), want.f() + 0.02);
-  EXPECT_EQ(health(kP1)->state, HealthState::Nominal);
 }
 
 TEST_F(VagentEpistemicHealth, ARefuseAcceptRefuseSequencePostsTwoNotesInOrder) {
@@ -1710,6 +1721,35 @@ TEST_F(VagentEpistemicHealthActions, ARefusedUpgradeLeavesTheLatchAndTheCache) {
   EXPECT_EQ(send(reading("k")), "SourceFaulted");
 }
 
+TEST_F(VagentEpistemicHealthActions,
+       ACommittedSchemaUpgradeClearsTheCacheAndTheArenaRelearnsIt) {
+  // DIST m9: since T1c the schema road carries a latched profile, so the
+  // "committed upgrade clears the cache" transition is reachable.
+  start();
+  EXPECT_EQ(send(reading("a")), "Committed");
+  EXPECT_EQ(act(Isolate{"x"}), "Committed");
+  ASSERT_TRUE(ex().sourceLatchCached(pid, kP1));
+  auto next = CompiledProgram::fromSource(std::string(kActionProgram) + "\n");
+  ASSERT_TRUE(next) << next.error();
+  auto held = host->retainProgram(std::move(*next));
+  ASSERT_TRUE(held);
+  host->pump();
+  const auto upgraded = host->upgrade(pid, held);
+  ASSERT_TRUE(upgraded) << toString(upgraded.error());
+  host->pump();
+  EXPECT_FALSE(ex().sourceLatchCached(pid, kP1));
+  // The latch is arena state and crossed; the first reading reaches the arena,
+  // is refused there, and teaches the cache again.
+  EXPECT_TRUE(health()->faulted);
+  const auto cycles = ctx().vm.totalCycles();
+  EXPECT_EQ(send(reading("a")), "SourceFaulted");
+  EXPECT_GT(ctx().vm.totalCycles(), cycles);
+  EXPECT_TRUE(ex().sourceLatchCached(pid, kP1));
+  const auto again = ex().observe(pid, reading("a"));
+  ASSERT_FALSE(again);
+  EXPECT_EQ(again.error(), EpistemicRefusal::SourceFaulted);
+}
+
 // -- Slice 2c3: closed charges at a reset (design 5.4, 6.4) ----------------
 
 TEST_F(VagentEpistemicHealthActions, AResetDropsTheChargeClosedAtTheCall) {
@@ -1882,6 +1922,44 @@ TEST_F(VagentEpistemicHealthActions,
   // is charged for stands in their way.
   EXPECT_EQ(act(Isolate{"x"}), "Committed");
   EXPECT_EQ(act(Reset{0}), "Committed");
+}
+
+TEST_F(VagentEpistemicHealthActions, ADegradeOnATombstoneGetsNoHeadroom) {
+  // S-7: the headroom is for repairs. A degrade is the lowest privilege, so
+  // on a tombstone it is admitted as on a live profile, while an isolate of
+  // the same tombstone still lands. Measured first: one reading's census, the
+  // tombstone it leaves, and what a degrade on that tombstone writes.
+  start();
+  EXPECT_EQ(send(reading("a")), "Committed");
+  const auto reading1 = *ex().epistemicCells(pid);
+  ASSERT_TRUE(ex().retireSource(pid, kP1));
+  host->pump();
+  const auto tombstone = *ex().epistemicCells(pid);
+  ASSERT_EQ(act(Degrade{"slow"}), "Committed");
+  const auto degrade = *ex().epistemicCells(pid) - tombstone;
+  ASSERT_GT(degrade, 0U);
+
+  // One cell short of the tombstone, a live source's reading and its reserve,
+  // and the degrade: inside the headroom, outside the ordinary ceiling.
+  const auto bound = static_cast<std::size_t>(healthBound(3, 4));
+  LocalHost::Options tight;
+  tight.settings.epistemic.cells = tombstone + reading1 + bound + degrade - 1;
+  start(kActionProgram, tight);
+  EXPECT_EQ(send(reading("a")), "Committed");
+  ASSERT_TRUE(ex().retireSource(pid, kP1));
+  host->pump();
+  ASSERT_EQ(*ex().epistemicCells(pid), tombstone);
+  const std::string other(64, '7');
+  ASSERT_TRUE(ex().bindSource(
+      pid, {"sensor:other", other, 1, "at", std::chrono::hours(1)}));
+  auto live      = reading("a");
+  live.principal = other;
+  ASSERT_EQ(send(live), "Committed");
+  ASSERT_LE(*ex().epistemicCells(pid) + bound + degrade,
+            tight.settings.epistemic.cells +
+                tight.settings.epistemic.cells / kHeadroomDivisor);
+  EXPECT_EQ(act(Degrade{"slow"}), "EpistemicBudget");
+  EXPECT_EQ(act(Isolate{"gone"}), "Committed");
 }
 
 TEST_F(VagentEpistemicHealthActions,

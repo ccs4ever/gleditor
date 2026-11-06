@@ -1687,11 +1687,12 @@ AgentExecutor::TurnOutcome AgentExecutor::deliverHost(State &state,
       spec.turnFields.set(std::string(kTurnHealth),
                           WireValue::record(std::move(healthRec)));
       spec.entry = state.agent.healthEntry;
-      // A degrade is admitted like an ingestion; everything else, and every
-      // action on a tombstone, draws on the headroom.
+      // A degrade is admitted like an ingestion, on a tombstone too: it is the
+      // lowest privilege and no repair, so it must not drain the headroom an
+      // isolate or a reset on a full arena needs (S-7). Every other action
+      // draws on the headroom.
       const bool exempt =
-          !std::holds_alternative<Degrade>(event.health->action) ||
-          (snapshot && snapshot->tombstone);
+          !std::holds_alternative<Degrade>(event.health->action);
       spec.admit = [this, &state, exempt]() {
         return admitCells(state, exempt);
       };
@@ -3348,10 +3349,12 @@ std::size_t AgentExecutor::epistemicReserve(const State &state) const {
             fieldValue(arena, state.vd, profile, kProfileRetired);
         retired && arena.asBool(*retired).value_or(false))
       continue;
-    const auto held =
-        intFieldOf(arena, state.vd, profile, kProfileHealthCells).value_or(0);
-    reserve +=
-        static_cast<std::size_t>(std::max<std::int64_t>(bound - held, 0));
+    // Clamped before the subtraction: the plan refuses a forged figure on
+    // the way in, and `bound - INT64_MIN` would overflow (S-2).
+    const auto held = std::clamp<std::int64_t>(
+        intFieldOf(arena, state.vd, profile, kProfileHealthCells).value_or(0),
+        0, bound);
+    reserve += static_cast<std::size_t>(bound - held);
   }
   return reserve;
 }
@@ -3582,16 +3585,6 @@ AgentExecutor::bindSource(const identity::ActorPid &target,
     return std::unexpected(EpistemicRefusal::InvalidIncarnation);
   if (!states_.contains(pidKey(target)) && !runtime_.localCursor(target))
     return std::unexpected(EpistemicRefusal::UnknownActor);
-  {
-    const std::lock_guard lock(ingress_->mutex);
-    for (const auto &[_, grants] : ingress_->healthGrants) {
-      for (const auto &g : grants) {
-        if (!g.revoked && clock_.steady() <= g.expiresAt && g.issuer &&
-            g.issuer->asString() == grant.principal)
-          return std::unexpected(EpistemicRefusal::SelfCertification);
-      }
-    }
-  }
   // The program this agent runs, or the root program before its first turn.
   const AgentProgram *program = &program_;
   if (const auto found = states_.find(pidKey(target));
@@ -3621,6 +3614,15 @@ AgentExecutor::bindSource(const identity::ActorPid &target,
   // refused here.
   if (admissionClosedLocked(target))
     return std::unexpected(EpistemicRefusal::AdmissionClosed);
+  // F14 in the scope that inserts, as `grantHealth` checks its issuer in
+  // the scope that stores the grant: checked in an earlier section, a grant
+  // naming this principal as issuer could land between the check and the
+  // bind (design 5.1, S-5).
+  for (const auto &[_, grants] : ingress_->healthGrants)
+    for (const auto &g : grants)
+      if (!g.revoked && clock_.steady() <= g.expiresAt && g.issuer &&
+          g.issuer->asString() == grant.principal)
+        return std::unexpected(EpistemicRefusal::SelfCertification);
   if (const auto routed = ingress_->aliases.find({pid, grant.alias});
       routed != ingress_->aliases.end() && routed->second != grant.principal)
     return std::unexpected(EpistemicRefusal::AliasInUse);
@@ -4159,29 +4161,34 @@ void AgentExecutor::drainPosted() {
   // principal's next note.
   const auto abandon = [&](const PostBox::Item &item) {
     const auto pid = pidKey(item.pid);
-    const std::lock_guard lock(ingress_->mutex);
-    if (item.ingest) {
-      ingress_->release(pid, item.ingest->principal, item.ingest->relay);
-      auto &predMap = ingress_->inFlight[{pid, item.ingest->principal}];
-      auto pIt      = predMap.find(item.ingest->predicate);
-      if (pIt != predMap.end()) {
-        auto sIt =
-            pIt->second.find(static_cast<std::int64_t>(item.ingest->sequence));
-        if (sIt != pIt->second.end()) pIt->second.erase(sIt);
-        if (pIt->second.empty()) predMap.erase(pIt);
+    {
+      const std::lock_guard lock(ingress_->mutex);
+      if (item.ingest) {
+        ingress_->release(pid, item.ingest->principal, item.ingest->relay);
+        auto &predMap = ingress_->inFlight[{pid, item.ingest->principal}];
+        auto pIt      = predMap.find(item.ingest->predicate);
+        if (pIt != predMap.end()) {
+          auto sIt = pIt->second.find(
+              static_cast<std::int64_t>(item.ingest->sequence));
+          if (sIt != pIt->second.end()) pIt->second.erase(sIt);
+          if (pIt->second.empty()) predMap.erase(pIt);
+        }
+        ingress_->log({pid, item.ingest->principal},
+                      settings_.epistemic.outcomeLog, item.ingest->incarnation,
+                      item.ingest->eventId,
+                      outcomeOfCode(kTurnResultUndelivered));
       }
-      ingress_->log({pid, item.ingest->principal},
-                    settings_.epistemic.outcomeLog, item.ingest->incarnation,
-                    item.ingest->eventId,
-                    outcomeOfCode(kTurnResultUndelivered));
+      // A note that carries its closed charge leaves the open one to the note
+      // queued behind it.
+      if (item.refusalsOf && !item.charge)
+        ingress_->charges.erase({pid, *item.refusalsOf});
+      if (item.sourceChange)
+        ingress_->changes.insert_or_assign(
+            {pid, item.sourceChange->principal},
+            outcomeOfCode(kTurnResultUndelivered));
     }
-    // A note that carries its closed charge leaves the open one to the note
-    // queued behind it.
-    if (item.refusalsOf && !item.charge)
-      ingress_->charges.erase({pid, *item.refusalsOf});
-    if (item.sourceChange)
-      ingress_->changes.insert_or_assign({pid, item.sourceChange->principal},
-                                         outcomeOfCode(kTurnResultUndelivered));
+    // After the guard, as dropHostEvents does: the audit sink runs with no
+    // executor lock held and may call back in (R3-10 clause 1).
     if (item.health) {
       finishHealthItem(item.pid, *item.health, kTurnResultUndelivered);
     }
@@ -5080,9 +5087,12 @@ void AgentExecutor::translateEpistemic(
       .fromDims    = from,
       .intoSchema  = compiled->upgradeSchema(),
       .registry    = TranslatorRegistry::of(ownedStateTranslator_ != nullptr),
-      .allowance   = ResumeAllowance{
-            .epistemicCells = static_cast<std::size_t>(settings_.epistemic.cells),
-            .grant = ResumeLimits{grant.maxInstructions, grant.maxCells}}};
+      .allowance   = ResumeAllowance{.epistemicCells = static_cast<std::size_t>(
+                                       settings_.epistemic.cells),
+                                     .grant = ResumeLimits{grant.maxInstructions,
+                                                         grant.maxCells}},
+      .healthReasons = settings_.epistemic.healthReasons,
+      .healthActions = settings_.epistemic.healthActions};
   const auto plan = planTranslation(request);
   if (!plan) throw TransferRefusalError(plan.error());
   if (!ownedStateTranslator_) return;
@@ -5452,14 +5462,17 @@ std::optional<TransferRefusal> AgentExecutor::resumeRefusal(
   }
   const auto registry =
       TranslatorRegistry::of(ownedStateTranslator_ != nullptr);
-  const auto plan = planTranslation({.disposition = Disposition::Resume,
-                                     .route       = TransferRoute::Resume,
-                                     .from        = view,
-                                     .fromAgent   = received.root,
-                                     .fromDims   = OwnedGraphDims::byName(dims),
-                                     .intoSchema = program->upgradeSchema(),
-                                     .registry   = registry,
-                                     .allowance  = allowance});
+  const auto plan =
+      planTranslation({.disposition   = Disposition::Resume,
+                       .route         = TransferRoute::Resume,
+                       .from          = view,
+                       .fromAgent     = received.root,
+                       .fromDims      = OwnedGraphDims::byName(dims),
+                       .intoSchema    = program->upgradeSchema(),
+                       .registry      = registry,
+                       .allowance     = allowance,
+                       .healthReasons = settings_.epistemic.healthReasons,
+                       .healthActions = settings_.epistemic.healthActions});
   if (!plan) return plan.error();
   return std::nullopt;
 }
@@ -5756,15 +5769,17 @@ std::optional<TransferRefusal> AgentExecutor::preflightUpgrade(
           .grant = ResumeLimits{grant->maxInstructions, grant->maxCells,
                                 grant->maxOutputBytes}};
     const auto plan = planTranslation(
-        {.disposition = Disposition::Upgrade,
-         .route       = road,
-         .from        = arena,
-         .fromAgent   = old.agent.agentCell,
-         .fromDims    = ownedDimsOf(old),
-         .intoSchema  = after,
-         .registry    = registry,
-         .allowance   = allowance,
-         .fixedWork   = upgradeSchemaCost(before) + upgradeSchemaCost(after)});
+        {.disposition   = Disposition::Upgrade,
+         .route         = road,
+         .from          = arena,
+         .fromAgent     = old.agent.agentCell,
+         .fromDims      = ownedDimsOf(old),
+         .intoSchema    = after,
+         .registry      = registry,
+         .allowance     = allowance,
+         .fixedWork     = upgradeSchemaCost(before) + upgradeSchemaCost(after),
+         .healthReasons = settings_.epistemic.healthReasons,
+         .healthActions = settings_.epistemic.healthActions});
     if (!plan) return plan.error();
   }
   return std::nullopt;
@@ -5825,12 +5840,34 @@ std::expected<AgentExecutor *, TransferRefusal> AgentExecutor::pauseAdmission(
   if (found == states_.end() || !live(*found->second))
     return std::unexpected(runtimeRefusal(TransferRoute::UpgradeSchema,
                                           ActorError::UnknownProcess));
-  const auto until =
-      saturatingAdd(clock_.steady(), ttl.value_or(settings_.admissionPause));
+  // An explicit ttl is held to the setting's own range: a pause also keeps
+  // out an operator's isolate and reset, so a forgotten long one must lapse
+  // as the longest configurable pause would (S-6).
+  const auto span  = std::clamp(ttl.value_or(settings_.admissionPause),
+                                std::chrono::milliseconds(kMinAdmissionPauseMs),
+                                std::chrono::milliseconds(kMaxAdmissionPauseMs));
+  const auto until = saturatingAdd(clock_.steady(), span);
   const std::lock_guard lock(ingress_->mutex);
   auto &admission = ingress_->admission[pidKey(pid)];
   admission.pausedUntil =
       std::max(admission.pausedUntil.value_or(until), until);
+  return this;
+}
+
+std::optional<zigzag::vortex::mesh::ActorTime>
+AgentExecutor::admissionPausedUntil(const identity::ActorPid &pid) const {
+  const std::lock_guard lock(ingress_->mutex);
+  const auto found = ingress_->admission.find(pidKey(pid));
+  return found == ingress_->admission.end() ? std::nullopt
+                                            : found->second.pausedUntil;
+}
+
+AgentExecutor *AgentExecutor::restoreAdmissionPause(
+    const identity::ActorPid &pid,
+    const std::optional<zigzag::vortex::mesh::ActorTime> until) {
+  if (!until) return resumeAdmission(pid);
+  const std::lock_guard lock(ingress_->mutex);
+  ingress_->admission[pidKey(pid)].pausedUntil = until;
   return this;
 }
 
@@ -6075,15 +6112,38 @@ AgentExecutor::upgrade(const identity::ActorPid &pid,
                                                  DimVector::POS,
                                                  graph.at(rank.first)));
               if (ownedStateTranslator_) {
-                const PlanRequest request{.disposition = Disposition::Upgrade,
-                                          .route       = road,
-                                          .from        = source,
-                                          .fromAgent   = old.agent.agentCell,
-                                          .fromDims    = ownedDimsOf(old),
-                                          .intoSchema  = *after,
-                                          .registry =
-                                              TranslatorRegistry::of(true),
-                                          .allowance = std::nullopt};
+                const PlanRequest request{
+                    .disposition   = Disposition::Upgrade,
+                    .route         = road,
+                    .from          = source,
+                    .fromAgent     = old.agent.agentCell,
+                    .fromDims      = ownedDimsOf(old),
+                    .intoSchema    = *after,
+                    .registry      = TranslatorRegistry::of(true),
+                    .allowance     = std::nullopt,
+                    .healthReasons = settings_.epistemic.healthReasons,
+                    .healthActions = settings_.epistemic.healthActions};
+                // Under the swap the generic copier has already interned its
+                // texts, so the translator's must fit in what the arena's
+                // scratch cap left; the pre-flight could only count its own
+                // (S-3). Cells and work were decided there.
+                if (const auto left = arena.remainingScratchBytes()) {
+                  PlanRequest scratchRequest = request;
+                  scratchRequest.allowance   = ResumeAllowance{
+                        .epistemicCells =
+                          static_cast<std::size_t>(settings_.epistemic.cells),
+                        .grant = ResumeLimits{
+                            .instructions =
+                              std::numeric_limits<std::uint64_t>::max(),
+                            .maxCells = grant.maxCells,
+                            .maxBytes = arena.scratchBytes() + *left}};
+                  scratchRequest.fixedBytes = arena.scratchBytes();
+                  if (const auto scratch = planTranslation(scratchRequest);
+                      !scratch) {
+                    translationRefusal = scratch.error();
+                    return std::unexpected(scratch.error().actor);
+                  }
+                }
                 const auto plan = planTranslation(request);
                 if (!plan) {
                   translationRefusal = plan.error();

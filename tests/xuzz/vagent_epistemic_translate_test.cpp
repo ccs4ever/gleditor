@@ -5,12 +5,16 @@
  */
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <array>
+#include <bit>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <optional>
 #include <set>
 #include <string>
@@ -434,6 +438,91 @@ TEST_F(Translate, ResumeAndUpgradeAgreeOverRandomIngestion) {
   }
 }
 
+/// Event IDs and keys a checkpoint types: numbers, a float literal and the
+/// truth words.
+constexpr std::string_view kTypedLooking[] = {"42",   "1e3", "6",
+                                              "true", "on",  "yes"};
+
+TEST_F(Translate, NumericAndBooleanLookingTextAgreesOnBothRoads) {
+  // Three keys a source, under the default `keys_per_source` of four.
+  a.bind(kP1);
+  a.bind(kP2);
+  std::uint64_t seq = 0;
+  std::vector<CheckedObservation> sent;
+  for (std::size_t i = 0; i < std::size(kTypedLooking); ++i) {
+    const std::string text(kTypedLooking[i]);
+    auto o    = reading(i < 3 ? kP1 : kP2, text, ++seq, 1.0);
+    o.eventId = text;
+    ASSERT_EQ(a.observe(o)->kind, IngestOutcome::Kind::Committed) << text;
+    sent.push_back(o);
+  }
+  a.settle();
+  const auto source = a.digest();
+  // Counted by the arena's stats: the host's outcome log answers an event ID
+  // it has already logged with the first outcome.
+  const auto refused = [](Side &side, std::string_view code) {
+    return side.executor().stat(side.pid, std::string(kStatRefusedPrefix) +
+                                              std::string(code));
+  };
+  const auto replays = [&](Side &side) {
+    for (const auto &o : sent) {
+      SCOPED_TRACE(o.eventId);
+      const auto duplicates = refused(side, kTurnResultDuplicate);
+      const auto conflicts  = refused(side, kTurnResultConflictingEvent);
+      ASSERT_TRUE(side.executor().observe(side.pid, o));
+      side.host->pump();
+      EXPECT_EQ(refused(side, kTurnResultDuplicate), duplicates + 1);
+      auto other     = o;
+      other.tuple[1] = WireValue::real(7.0);
+      ASSERT_TRUE(side.executor().observe(side.pid, other));
+      side.host->pump();
+      EXPECT_EQ(refused(side, kTurnResultConflictingEvent), conflicts + 1);
+    }
+    EXPECT_EQ(refused(side, kTurnResultStaleSequence), 0U);
+  };
+  ASSERT_TRUE(resumeOnB());
+  EXPECT_EQ(b.digest(), source);
+  b.bind(kP1);
+  b.bind(kP2);
+  replays(b);
+  const auto done = upgradeA();
+  ASSERT_TRUE(done) << toString(done.error());
+  a.settle();
+  EXPECT_EQ(a.digest(), source);
+  replays(a);
+}
+
+TEST_F(Translate, ANumericLookingClockInstanceDigestsAlikeOnBothRoads) {
+  // The executor's clock instance is 16 random hex digits, all decimal about
+  // once in 800 executors; that is what the random ingestion test met. Each
+  // record's copy is written here so the case is not left to chance.
+  populate();
+  a.settle();
+  const std::string digits = "1234567890123456";
+  std::size_t written      = 0;
+  const auto d             = a.dims();
+  for (const auto pred : zigzag::rankAfter(a.arena(), a.agent(), d.belief))
+    for (const auto clause :
+         zigzag::rankAfter(a.arena(), pred, a.ctx().core.dims().clause))
+      for (const auto s : zigzag::rankAfter(a.arena(), clause, d.source))
+        for (const auto record : zigzag::rankAfter(a.arena(), s, d.epistemic)) {
+          const auto cell = a.field(record, kObsClockInstance);
+          ASSERT_TRUE(cell);
+          zigzag::expectWritten(a.arena().setContent(
+              *cell, std::array{a.arena().intern(digits)}));
+          zigzag::expectWritten(
+              a.arena().setValueBits(*cell, xanadu::ValueKind::None, 0));
+          ++written;
+        }
+  ASSERT_GT(written, 0U);
+  const auto source = a.digest();
+  ASSERT_TRUE(resumeOnB());
+  EXPECT_EQ(b.digest(), source);
+  ASSERT_TRUE(upgradeA());
+  a.settle();
+  EXPECT_EQ(a.digest(), source);
+}
+
 TEST_F(Translate, AFailingTranslatorRollsBack) {
   populate();
   a.settle();
@@ -500,6 +589,90 @@ TEST_F(Translate, AnApplyTimeResumeFailureEndsTheActorWithAStoredRefusal) {
   EXPECT_EQ(stored->detail.subject, "injected");
 }
 
+TEST_F(Translate, AnArenaLimitInTheCopyIsATypedStoredRefusal) {
+  // The translator meets the scratch cap mid-copy: the refusal is typed and
+  // stored, where the arena's own throw used to end the resume untyped (S-3).
+  populate();
+  a.settle();
+  const auto saved = a.executor().checkpoint(a.pid);
+  ASSERT_TRUE(saved);
+  auto program = CompiledProgram::fromSource(kSource);
+  ASSERT_TRUE(program);
+  b.host.emplace(std::move(*program));
+  b.executor().setOwnedStateTranslator([](const TranslationPlan &plan,
+                                          const ApplyRequest &request) {
+    // Room for no text at all.
+    request.into.setExecutionLimits(std::numeric_limits<std::uint32_t>::max(),
+                                    std::numeric_limits<std::size_t>::max(),
+                                    request.into.scratchBytes());
+    return applyTranslation(plan, request);
+  });
+  const auto resumed = b.executor().resume(*saved);
+  ASSERT_TRUE(resumed);
+  b.host->pump();
+  EXPECT_FALSE(b.executor().context(*resumed));
+  const auto stored = b.executor().lastRefusal(*resumed);
+  ASSERT_TRUE(stored);
+  EXPECT_EQ(stored->code, TransferCode::PeakCopyBudget);
+  EXPECT_EQ(stored->detail.subject, "scratch bytes");
+  EXPECT_EQ(stored->actor, ActorError::ResourceLimit);
+}
+
+TEST_F(Translate, TheScratchGateCountsTypedTextAndTheCallersBytes) {
+  populate();
+  a.settle();
+  ASSERT_TRUE(resumeOnB());
+  const auto smallest = [](Side &s, std::uint64_t fixed) {
+    const auto registry = TranslatorRegistry::of(true);
+    const auto plan     = [&](std::uint64_t bytes) {
+      return planTranslation(
+          {.disposition = Disposition::Upgrade,
+               .route       = TransferRoute::UpgradeSchema,
+               .from        = s.arena(),
+               .fromAgent   = s.agent(),
+               .fromDims    = s.owned(),
+               .intoSchema  = s.host->program().upgradeSchema(),
+               .registry    = registry,
+               .allowance =
+               ResumeAllowance{
+                       .epistemicCells = AgentSettings{}.epistemic.cells,
+                       .grant =
+                       ResumeLimits{
+                               .instructions =
+                               std::numeric_limits<std::uint64_t>::max(),
+                               .maxCells =
+                               std::numeric_limits<std::uint32_t>::max(),
+                               .maxBytes = bytes}},
+               .fixedBytes = fixed});
+    };
+    std::uint64_t lo = 0, hi = 1U << 20;
+    EXPECT_TRUE(plan(hi));
+    while (lo < hi) {
+      const auto mid = lo + (hi - lo) / 2;
+      if (plan(mid))
+        hi = mid;
+      else
+        lo = mid + 1;
+    }
+    if (lo > 0) {
+      const auto refused = plan(lo - 1);
+      EXPECT_FALSE(refused);
+      if (!refused) {
+        EXPECT_EQ(refused.error().code, TransferCode::PeakCopyBudget);
+        EXPECT_EQ(refused.error().detail.subject, "scratch bytes");
+      }
+    }
+    return lo;
+  };
+  const auto live    = smallest(a, 0);
+  const auto resumed = smallest(b, 0);
+  // A checkpoint gives every number its text, and the copier interns it, so
+  // the resumed graph needs more scratch than the live one for the same state.
+  EXPECT_GT(resumed, live);
+  // What the caller's copiers already took counts against the same grant.
+  EXPECT_EQ(smallest(a, 100), live + 100);
+}
+
 TEST_F(Translate, ARecordWithoutAProfileIsInconsistent) {
   populate();
   a.settle();
@@ -516,6 +689,38 @@ TEST_F(Translate, ARecordWithoutAProfileIsInconsistent) {
   EXPECT_EQ(done.error().code, TransferCode::StateInconsistent);
 }
 
+TEST_F(Translate, ARefusalNamesACellByHashAndNeverByItsText) {
+  populate();
+  a.settle();
+  // A profile whose text is no principal token: document text, say.
+  const std::string secret = "the vault code is 1234";
+  const auto p             = *a.profile(kP1);
+  zigzag::expectWritten(
+      a.arena().setContent(p, std::array{a.arena().intern(secret)}));
+  const auto done = upgradeA();
+  ASSERT_FALSE(done);
+  EXPECT_EQ(done.error().code, TransferCode::StateInconsistent);
+  ASSERT_TRUE(done.error().detail.subject);
+  EXPECT_TRUE(done.error().detail.subject->starts_with("profile sha256:"))
+      << *done.error().detail.subject;
+  EXPECT_EQ(toString(done.error()).find(secret), std::string::npos);
+}
+
+TEST_F(Translate, TheDigestStopsAtACloneRing) {
+  // S-8: the plan refuses a ring; the digest, a test reader today, must still
+  // end on one.
+  populate();
+  a.settle();
+  const auto p     = *a.profile(kP1);
+  const auto clone = a.ctx().core.dims().clone;
+  auto last        = a.arena().linked(p, clone);
+  ASSERT_TRUE(last);
+  while (const auto next = a.arena().linked(*last, clone)) last = next;
+  zigzag::expectWritten(
+      a.arena().link(*last, clone, zigzag::DimVector::POS, p));
+  EXPECT_FALSE(a.digest().empty());
+}
+
 TEST_F(Translate, AMissingStreamsListIsReplayStateUnavailable) {
   populate();
   a.settle();
@@ -526,6 +731,114 @@ TEST_F(Translate, AMissingStreamsListIsReplayStateUnavailable) {
   EXPECT_EQ(done.error().code, TransferCode::ReplayStateUnavailable);
   EXPECT_EQ(done.error().detail.subject, kP1);
   EXPECT_EQ(done.error().detail.saved, std::string(kProfileStreams));
+}
+
+/// The profile values a crafted image could carry, each refused by the plan
+/// on both roads before anything is written (S-2).
+class TranslateForgedValues : public Translate {
+protected:
+  CellRef p1() { return *a.profile(kP1); }
+  void setBits(std::string_view field, xanadu::ValueKind kind,
+               std::uint64_t bits) {
+    const auto cell = a.field(p1(), field);
+    ASSERT_TRUE(cell) << field;
+    zigzag::expectWritten(a.arena().setValueBits(*cell, kind, bits));
+  }
+  void setText(CellRef owner, std::string_view field, std::string_view text) {
+    const auto cell = a.field(owner, field);
+    ASSERT_TRUE(cell) << field;
+    zigzag::expectWritten(
+        a.arena().setContent(*cell, std::array{a.arena().intern(text)}));
+    zigzag::expectWritten(
+        a.arena().setValueBits(*cell, xanadu::ValueKind::None, 0));
+  }
+  CellRef firstReason() {
+    const auto list = a.field(p1(), kProfileReasons);
+    return *a.arena().linked(*list, a.ctx().core.dims().grab);
+  }
+  /// Refused on the upgrade road and by the resume pre-flight, by @p field.
+  void expectRefused(std::string_view field) {
+    a.settle();
+    const auto saved = a.executor().checkpoint(a.pid);
+    ASSERT_TRUE(saved);
+    const auto resumed = a.executor().preflightResume(*saved);
+    ASSERT_TRUE(resumed);
+    EXPECT_EQ(resumed->code, TransferCode::StateInconsistent);
+    EXPECT_EQ(resumed->detail.subject, std::string(field));
+    const auto done = upgradeA();
+    ASSERT_FALSE(done);
+    EXPECT_EQ(done.error().code, TransferCode::StateInconsistent);
+    EXPECT_EQ(done.error().detail.subject, std::string(field));
+  }
+};
+
+TEST_F(TranslateForgedValues, TheSamplesThemselvesPass) {
+  populateEveryStructure();
+  a.settle();
+  const auto saved = a.executor().checkpoint(a.pid);
+  ASSERT_TRUE(saved);
+  EXPECT_FALSE(a.executor().preflightResume(*saved));
+}
+
+TEST_F(TranslateForgedValues, HealthCellsAtEitherExtremeRefuse) {
+  for (const auto forged : {std::numeric_limits<std::int64_t>::max(),
+                            std::numeric_limits<std::int64_t>::min()}) {
+    SCOPED_TRACE(forged);
+    SetUp();
+    populateEveryStructure();
+    setBits(kProfileHealthCells, xanadu::ValueKind::Int64,
+            std::bit_cast<std::uint64_t>(forged));
+    expectRefused(kProfileHealthCells);
+  }
+}
+
+TEST_F(TranslateForgedValues, ANonFiniteOrNegativeWeightRefuses) {
+  for (const auto field : {kProfileHealthWeight, kProfileHealthRefusedWeight})
+    for (const auto forged : {std::numeric_limits<double>::quiet_NaN(), -1.0,
+                              std::numeric_limits<double>::infinity()}) {
+      SCOPED_TRACE(std::string(field) + " " + std::to_string(forged));
+      SetUp();
+      populateEveryStructure();
+      setBits(field, xanadu::ValueKind::Double,
+              std::bit_cast<std::uint64_t>(forged));
+      expectRefused(field);
+    }
+}
+
+TEST_F(TranslateForgedValues, MoreReasonsThanTheSettingAllowRefuse) {
+  populateEveryStructure();
+  const auto context = a.populateContext(kP1);
+  const auto &all    = allOwnedStructures();
+  const auto reasons = std::ranges::find(
+      all, std::string_view("profile.reasons"), &OwnedStructure::id);
+  ASSERT_NE(reasons, all.end());
+  // The sample made one; the default allows three.
+  for (int i = 0; i < 3; ++i) reasons->populate(context);
+  expectRefused(kProfileReasons);
+}
+
+TEST_F(TranslateForgedValues, AForgedOperatorReasonRefuses) {
+  populateEveryStructure();
+  // An issuer that is no principal token cannot have authorised a degrade.
+  setText(firstReason(), kReasonIssuer, "operator says so");
+  expectRefused(kReasonOrigin);
+}
+
+TEST_F(TranslateForgedValues, AnUnknownOriginOrKindRefuses) {
+  populateEveryStructure();
+  setText(firstReason(), kReasonOrigin, "administrator");
+  expectRefused(kReasonOrigin);
+  SetUp();
+  populateEveryStructure();
+  setText(firstReason(), kReasonKind, "trusted");
+  expectRefused(kReasonKind);
+}
+
+TEST_F(TranslateForgedValues, ANegativeIncarnationRefuses) {
+  populateEveryStructure();
+  setBits(kProfileIncarnation, xanadu::ValueKind::Int64,
+          std::bit_cast<std::uint64_t>(std::int64_t{-1}));
+  expectRefused(kProfileIncarnation);
 }
 
 TEST_F(Translate, AnUnregisteredDimensionRefuses) {

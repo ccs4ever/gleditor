@@ -4,16 +4,20 @@
 #include <array>
 #include <bit>
 #include <charconv>
+#include <cmath>
 #include <limits>
 #include <ranges>
 #include <unordered_set>
+#include <utility>
 
 #include "common/xanadu/provenance.hpp"
+#include "common/xanadu/scalar.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_abi_health.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_limits.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_translate_registry.hpp"
 #include "common/xanadu/vagent/runtime/runtime_abi.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
+#include <gleditor/logging.hpp>
 
 namespace xanadu::vagent::runtime {
 
@@ -24,7 +28,8 @@ using zigzag::DimRef;
 using zigzag::DimVector;
 using zigzag::vortex::mesh::ActorError;
 
-constexpr auto kFailed = ActorError::ExecutionFailed;
+constexpr auto kFailed     = ActorError::ExecutionFailed;
+constexpr const char *kLog = "vortex.agent";
 
 std::vector<CellRef> ranked(const zigzag::ArenaManifold &arena, CellRef owner,
                             const std::optional<DimRef> &dim) {
@@ -37,6 +42,14 @@ bool isToken(std::string_view text) {
   return text.size() == 64 && std::ranges::all_of(text, [](char c) {
            return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
          });
+}
+
+/// A refusal subject for a cell whose text is not a token: a refusal may
+/// carry names and tokens, never a cell's own text, which can be document
+/// text or key material (S-4). The hash prefix still tells two cells apart.
+std::string subjectFor(std::string_view role, std::string_view text) {
+  if (isToken(text)) return std::string(text);
+  return std::string(role) + " sha256:" + xanadu::sha256Hex(text).substr(0, 16);
 }
 
 std::optional<ValueDims> valueDimsOf(const OwnedGraphDims &dims) {
@@ -245,8 +258,9 @@ std::uint64_t distinctTextBytes(const zigzag::ArenaManifold &arena,
   while (!stack.empty()) {
     const auto cell = stack.back();
     stack.pop_back();
-    if (arena.valueKindOf(cell) == xanadu::ValueKind::None)
-      texts.insert(arena.textOf(cell));
+    // Every cell's text, typed or not: the copier interns each one, and a
+    // checkpoint leaves a number its text (S-3).
+    texts.insert(arena.textOf(cell));
     for (const auto &dim : reach)
       if (dim)
         if (const auto next = arena.linked(cell, *dim)) admit(*next);
@@ -254,6 +268,103 @@ std::uint64_t distinctTextBytes(const zigzag::ArenaManifold &arena,
   std::uint64_t bytes = 0;
   for (const auto &text : texts) bytes += text.size();
   return bytes;
+}
+
+/// The entries of the list @p owner's field @p name holds, or none.
+std::vector<CellRef> listEntries(const zigzag::ArenaManifold &arena,
+                                 const ValueDims &vd,
+                                 const OwnedGraphDims &dims, CellRef owner,
+                                 std::string_view name) {
+  std::vector<CellRef> out;
+  const auto list = fieldValue(arena, vd, owner, name);
+  if (!list || !dims.grab) return out;
+  const auto first = arena.linked(*list, *dims.grab);
+  if (!first) return out;
+  out.push_back(*first);
+  if (dims.step)
+    for (const auto e : zigzag::rankAfter(arena, *first, *dims.step)) {
+      // A ring stops at its first repeat, as the clone chains do.
+      if (std::ranges::contains(out, e)) break;
+      out.push_back(e);
+    }
+  return out;
+}
+
+/// The profile's own values against what the routines that write them can
+/// produce. A checkpoint is host-trusted, but a crafted or stale image must
+/// not hand the executor a reserve, a weight or an operator reason it could
+/// not have minted (S-2). Authenticity is not decidable here (a reason
+/// carries no signature); shape is.
+std::optional<TransferRefusal>
+checkProfileValues(const zigzag::ArenaManifold &arena, const ValueDims &vd,
+                   const OwnedGraphDims &dims, CellRef profile,
+                   const PlanRequest &q) {
+  const auto bad = [&](std::string_view field,
+                       std::optional<std::uint64_t> saved = std::nullopt,
+                       std::optional<std::uint64_t> limit = std::nullopt) {
+    return std::optional{TransferRefusal::make(
+        TransferCode::StateInconsistent, q.route, kFailed,
+        {.subject = std::string(field), .savedCount = saved, .limit = limit})};
+  };
+  const auto value = [&](std::string_view field) {
+    return fieldValue(arena, vd, profile, field);
+  };
+  for (const auto field : {kProfileIncarnation, kProfileResetEpoch,
+                           kProfileActionSeq, kProfileFaultSeq}) {
+    const auto cell = value(field);
+    if (!cell) continue;
+    const auto n = arena.asInt64(*cell);
+    if (!n || *n < 0) return bad(field);
+  }
+  for (const auto field : {kProfileHealthWeight, kProfileHealthRefusedWeight}) {
+    const auto cell = value(field);
+    if (!cell) continue;
+    // A weight starts at +0.0 and every update adds non-negative terms.
+    const auto w = arena.asDouble(*cell);
+    if (!w || !std::isfinite(*w) || *w < 0.0) return bad(field);
+  }
+  const auto reasons = listEntries(arena, vd, dims, profile, kProfileReasons);
+  const auto actions = listEntries(arena, vd, dims, profile, kProfileActions);
+  if (std::cmp_greater(reasons.size(), q.healthReasons))
+    return bad(kProfileReasons, reasons.size(),
+               static_cast<std::uint64_t>(q.healthReasons));
+  if (std::cmp_greater(actions.size(), q.healthActions))
+    return bad(kProfileActions, actions.size(),
+               static_cast<std::uint64_t>(q.healthActions));
+  if (const auto cell = value(kProfileHealthCells)) {
+    // The estimator writes exactly this after every committed action, and
+    // the reserve is `healthBound - health_cells`: anything else either
+    // hides the bound or overflows the subtraction.
+    const auto expected =
+        healthBound(static_cast<std::int64_t>(reasons.size()),
+                    static_cast<std::int64_t>(actions.size()));
+    const auto held = arena.asInt64(*cell);
+    if (!held || *held != expected)
+      return bad(kProfileHealthCells, std::nullopt,
+                 static_cast<std::uint64_t>(expected));
+  }
+  const auto text = [&](CellRef entry, std::string_view field) {
+    const auto cell = fieldValue(arena, vd, entry, field);
+    return cell ? std::optional{arena.textOf(*cell)} : std::nullopt;
+  };
+  for (const auto entry : reasons) {
+    const auto origin = text(entry, kReasonOrigin);
+    const auto kind   = text(entry, kReasonKind);
+    if (!kind || (*kind != kReasonKindDegraded && *kind != kReasonKindSuspect))
+      return bad(kReasonKind);
+    if (origin == kReasonOriginOperator) {
+      // Only a degrade mints an operator reason, and it records the grant
+      // and the issuer's token that authorised it.
+      const auto issuer = text(entry, kReasonIssuer);
+      const auto grant  = text(entry, kReasonGrant);
+      if (*kind != kReasonKindDegraded || !issuer || !isToken(*issuer) ||
+          !grant || grant->empty())
+        return bad(kReasonOrigin);
+    } else if (origin != kReasonOriginDevice) {
+      return bad(kReasonOrigin);
+    }
+  }
+  return std::nullopt;
 }
 
 } // namespace
@@ -291,7 +402,8 @@ planTranslation(const PlanRequest &q) {
   for (const auto profile : ranked(arena, q.fromAgent, dims.trust)) {
     const auto token = arena.textOf(profile);
     if (!isToken(token))
-      return refuse(TransferCode::StateInconsistent, {.subject = token});
+      return refuse(TransferCode::StateInconsistent,
+                    {.subject = subjectFor("profile", token)});
     if (const auto stray = checkDims(profile))
       return refuse(TransferCode::UnregisteredOwnedStructure,
                     {.subject = *stray});
@@ -310,6 +422,8 @@ planTranslation(const PlanRequest &q) {
     };
     if (!fieldValue(arena, *vd, profile, kProfileIncarnation))
       return missing(kProfileIncarnation);
+    if (auto refused = checkProfileValues(arena, *vd, dims, profile, q))
+      return std::unexpected(std::move(*refused));
     // A retired principal's tombstone keeps its floor and clears the rest.
     for (const auto field : {kProfileStreams, kProfileDedup})
       if (!retired && !fieldValue(arena, *vd, profile, field))
@@ -355,9 +469,9 @@ planTranslation(const PlanRequest &q) {
       // is the clone occurrence on that profile's chain.
       const auto view = fieldValue(arena, *vd, record, kObsProfile);
       if (!view || !views.contains(*view))
-        return TransferRefusal::make(TransferCode::StateInconsistent, q.route,
-                                     kFailed,
-                                     {.subject = arena.textOf(anchor)});
+        return TransferRefusal::make(
+            TransferCode::StateInconsistent, q.route, kFailed,
+            {.subject = subjectFor("anchor", arena.textOf(anchor))});
       plan.records.push_back({.cell = record, .anchor = anchor});
     }
     return std::nullopt;
@@ -396,7 +510,8 @@ planTranslation(const PlanRequest &q) {
         // The new arena interns each distinct text once; a graph whose
         // distinct texts exceed the scratch an upgrade grant allows cannot be
         // copied however few cells it has.
-        const auto bytes = distinctTextBytes(arena, *vd, dims, plan);
+        const auto bytes =
+            distinctTextBytes(arena, *vd, dims, plan) + q.fixedBytes;
         if (bytes > *allow.grant->maxBytes)
           return refuse(TransferCode::PeakCopyBudget,
                         {.subject    = "scratch bytes",
@@ -471,23 +586,39 @@ public:
   /// not touched. The stored bits move as they are, so `-0.0` stays `-0.0`.
   CellRef copyCell(CellRef old) {
     charge();
+    // The arena's own limits throw an untyped error mid-copy; the plan
+    // already counted both, so meeting one here is a budget the caller's
+    // copiers shared, and it is named as the plan would have named it (S-3).
+    if (into_.remainingCellAllowance() == 0)
+      throw Refused{TransferRefusal::make(TransferCode::PeakCopyBudget, route_,
+                                          ActorError::ResourceLimit,
+                                          {.subject = "cells"})};
     const auto made = into_.makeCell();
     // One scratch span per distinct text: field names repeat in every record,
     // and an upgrade grant allows the new arena at most 32 KiB of scratch.
     auto text = from_.textOf(old);
     auto span = spans_.find(text);
-    if (span == spans_.end())
-      span = spans_.emplace(std::move(text), into_.intern(text)).first;
+    if (span == spans_.end()) {
+      if (const auto left = into_.remainingScratchBytes();
+          left && text.size() > *left)
+        throw Refused{TransferRefusal::make(TransferCode::PeakCopyBudget,
+                                            route_, ActorError::ResourceLimit,
+                                            {.subject    = "scratch bytes",
+                                             .savedCount = text.size(),
+                                             .limit      = *left})};
+      auto interned = into_.intern(text);
+      span          = spans_.emplace(std::move(text), interned).first;
+    }
     const std::array one{span->second};
     zigzag::expectWritten(into_.setContent(made, one));
     const auto kind = from_.valueKindOf(old);
     if (kind == xanadu::ValueKind::OpHandle ||
         kind == xanadu::ValueKind::ForeignOpHandle ||
         kind == xanadu::ValueKind::ExternRef)
-      inconsistent(from_.textOf(old));
+      inconsistent("value handle");
     if (kind != xanadu::ValueKind::None) {
       const auto slot = from_.slot(old);
-      if (!slot) inconsistent(from_.textOf(old));
+      if (!slot) inconsistent("cell slot");
       zigzag::expectWritten(into_.setValueBits(made, kind, slot->valueBits));
     }
     map_.insert_or_assign(old, made);
@@ -518,7 +649,7 @@ public:
         charge();
         if (const auto next = from_.linked(cell, was)) {
           const auto found = map_.find(*next);
-          if (found == map_.end()) inconsistent(from_.textOf(cell));
+          if (found == map_.end()) inconsistent("value edge");
           zigzag::expectWritten(
               into_.link(map_.at(cell), now, DimVector::POS, found->second));
         }
@@ -556,7 +687,7 @@ public:
     for (const auto &record : plan.records) {
       charge();
       const auto anchor = map_.find(record.anchor);
-      if (anchor == map_.end()) inconsistent(from_.textOf(record.anchor));
+      if (anchor == map_.end()) inconsistent("record anchor");
       appendToRank(into_, anchor->second, to_.epistemic,
                    copyGraph(record.cell));
     }
@@ -578,7 +709,7 @@ public:
         if (!next) continue;
         const auto found = map_.find(*next);
         if (found == map_.end() || into_.linked(fresh, now) != found->second)
-          inconsistent(from_.textOf(old));
+          inconsistent(from_.textOf(*was));
       }
     }
     if (made_.size() - start != plan.cells)
@@ -630,6 +761,13 @@ applyTranslation(const TranslationPlan &plan, const ApplyRequest &request) {
                              .charges = copier.charges()};
   } catch (Refused &refused) {
     return std::unexpected(std::move(refused.refusal));
+  } catch (const std::exception &e) {
+    // Every arena refusal is a typed refusal the host can read; the message
+    // names an arena limit, never a cell's text.
+    GLEDITOR_LOG_DEBUG(kLog, "translation stopped by the arena: {}", e.what());
+    return std::unexpected(TransferRefusal::make(
+        TransferCode::StateInconsistent, request.plan.route, kFailed,
+        {.subject = "arena"}));
   }
 }
 
@@ -671,27 +809,19 @@ public:
   /// The cell's data, then, when @p fields, its field names with their
   /// values, then its value and its list elements. A name cell is entered
   /// without its own `vars` link, which is its next sibling.
-  void cell(CellRef c, bool fields, std::span<const std::string_view> skip = {},
-            bool isName = false) {
+  void cell(CellRef c, bool fields,
+            std::span<const std::string_view> skip = {}) {
     if (!seen_.insert(c).second) {
       s_.tag('R');
       return;
     }
     s_.tag('C');
-    // A field name is text however it reads: a checkpoint types "0" as a
-    // number, and the digest must not call that a different graph.
-    const auto kind = isName ? xanadu::ValueKind::None : a_.valueKindOf(c);
-    s_.tag(static_cast<char>(kind));
-    if (kind == xanadu::ValueKind::Int64 || kind == xanadu::ValueKind::Double ||
-        kind == xanadu::ValueKind::Bool)
-      s_.number(a_.slot(c)->valueBits);
-    else
-      s_.bytes(a_.textOf(c));
+    s_.bytes(rendered(c));
     if (fields)
       for (const auto name : zigzag::rankAfter(a_, c, vars_)) {
         if (std::ranges::contains(skip, a_.textOf(name))) continue;
         s_.tag('N');
-        cell(name, false, {}, true);
+        cell(name, false);
       }
     if (const auto v = a_.linked(c, values_)) {
       s_.tag('V');
@@ -713,6 +843,33 @@ public:
   Stream &out() { return s_; }
 
 private:
+  /// What both roads keep of a cell: its text, or for a computed scalar,
+  /// which has none, the rendering a checkpoint gives it. A checkpoint types
+  /// text that reads as a number or a truth word ("42", "1e3", "on") and
+  /// renders a computed scalar canonically, so the kind and the bits differ
+  /// between a resume and the live arena an upgrade reads while the text
+  /// agrees. The price is that a string and a scalar spelled alike digest
+  /// alike, which a checkpoint already makes them.
+  [[nodiscard]] std::string rendered(CellRef c) const {
+    auto text = a_.textOf(c);
+    if (!text.empty()) return text;
+    switch (a_.valueKindOf(c)) {
+    case xanadu::ValueKind::Int64:
+      return xanadu::scalarValue(a_.asInt64(c).value_or(0)).text;
+    case xanadu::ValueKind::Bool:
+      return xanadu::scalarValue(a_.asBool(c).value_or(false)).text;
+    case xanadu::ValueKind::Double: {
+      const auto bits = a_.slot(c)->valueBits;
+      const auto d    = std::bit_cast<double>(bits);
+      // A checkpoint refuses a signalling NaN, so no road renders one.
+      if (xanadu::isSignallingNaN(d)) return "snan:" + std::to_string(bits);
+      return xanadu::scalarValue(d).text;
+    }
+    default:
+      return text;
+    }
+  }
+
   const zigzag::ArenaManifold &a_;
   DimRef vars_, values_;
   std::optional<DimRef> grab_, step_;
@@ -733,10 +890,12 @@ std::string epistemicStateDigest(const zigzag::ArenaManifold &arena,
   const auto profiles = ranked(arena, agent, dims.trust);
   for (const auto profile : profiles) {
     std::size_t position = 0;
-    for (auto v = dims.clone ? arena.linked(profile, *dims.clone)
-                             : std::nullopt;
-         v; v   = arena.linked(*v, *dims.clone))
-      views.emplace(*v, position++);
+    // A clone ring would never end; the plan refuses one, and the digest
+    // stops at the first repeat (S-8).
+    for (auto v               = dims.clone ? arena.linked(profile, *dims.clone)
+                                           : std::nullopt;
+         v && v != profile; v = arena.linked(*v, *dims.clone))
+      if (!views.emplace(*v, position++).second) break;
   }
   Hasher h(arena, dims, views);
   constexpr std::array<std::string_view, 2> clock{kProfileLastReceive,
@@ -753,9 +912,10 @@ std::string epistemicStateDigest(const zigzag::ArenaManifold &arena,
            mode == DigestMode::ModuloClock
                ? std::span{clock}
                : std::span<const std::string_view>{});
+    std::unordered_set<CellRef> chain;
     for (auto v = dims.clone ? arena.linked(profile, *dims.clone)
                              : std::nullopt;
-         v; v   = arena.linked(*v, *dims.clone)) {
+         v && chain.insert(*v).second; v = arena.linked(*v, *dims.clone)) {
       h.out().tag('Z');
       h.out().bytes(arena.textOf(*v));
     }

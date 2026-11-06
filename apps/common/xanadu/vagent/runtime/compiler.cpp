@@ -344,14 +344,17 @@ void Gen::emitContractViolation() {
   failNow();
 }
 
-void Gen::emitRtFind() {
-  beginInternal(rtFind_);
+void Gen::emitRtFind(CellRef label, bool asText) {
+  beginInternal(label);
   const CellRef n = reg(), eqName = reg();
   const CellRef loop = newLabel(), found = newLabel(), missing = newLabel();
   mov(S(n), S(rd(D(a0_), core_.dims().vars)));
   place(loop);
   branchIfZero(n, missing);
-  emit(OpcodeKind::Eq, "name?", {D(n), S(a1_)}, {eqName});
+  if (asText)
+    textEq(D(n), S(a1_), eqName);
+  else
+    emit(OpcodeKind::Eq, "name?", {D(n), S(a1_)}, {eqName});
   branch(S(eqName), found);
   mov(S(n), S(rd(D(n), core_.dims().vars)));
   jump(loop);
@@ -3312,7 +3315,7 @@ void Gen::emitRtHasSrc() {
   mov(S(s), S(rd(D(cl), dims_.source)));
   place(loop);
   branchIfZero(s, no);
-  emit(OpcodeKind::Eq, "src?", {D(s), S(nm)}, {eq});
+  textEq(D(s), S(nm), eq);
   branch(S(eq), yes);
   mov(S(s), S(rd(D(s), dims_.source)));
   jump(loop);
@@ -3338,7 +3341,7 @@ void Gen::emitRtBDrop() {
   mov(S(s), S(rd(D(cl), dims_.source)));
   place(loop);
   branchIfZero(s, none);
-  emit(OpcodeKind::Eq, "src?", {D(s), S(nm)}, {eq});
+  textEq(D(s), S(nm), eq);
   branch(S(eq), found);
   mov(S(s), S(rd(D(s), dims_.source)));
   jump(loop);
@@ -3401,6 +3404,9 @@ void Gen::emitRtBSet() {
   branch(S(u), keySame);
   emit(OpcodeKind::Unify, "key", {D(t1), D(t2)}, {u});
   branch(S(u), keyOk);
+  // A `Str` key a checkpoint typed no longer unifies with its own text.
+  typedTextEq(D(t1), D(t2), u);
+  branch(S(u), keyOk);
   jump(next1);
   place(keyOk);
   mov(S(t1), S(rd(D(t1), core_.dims().step)));
@@ -3423,7 +3429,7 @@ void Gen::emitRtBSet() {
     mov(S(old), S(rd(D(c), dims_.source)));
     place(scan);
     branchIfZero(old, noKeep);
-    emit(OpcodeKind::Eq, "src?", {D(old), S(src)}, {same});
+    textEq(D(old), S(src), same);
     branch(S(same), got);
     mov(S(old), S(rd(D(old), dims_.source)));
     jump(scan);
@@ -3461,7 +3467,7 @@ void Gen::emitRtBSet() {
     const CellRef scan = newLabel(), got = newLabel(), same = reg();
     mov(S(sc), S(rd(D(c), dims_.source)));
     place(scan);
-    emit(OpcodeKind::Eq, "src?", {D(sc), S(src)}, {same});
+    textEq(D(sc), S(src), same);
     branch(S(same), got);
     mov(S(sc), S(rd(D(sc), dims_.source)));
     jump(scan);
@@ -3524,7 +3530,7 @@ void Gen::emitProfileFor(CellRef who, CellRef inc, CellRef maxSources,
   mov(S(prof), S(rd(S(agentCell_), dims_.trust)));
   place(loop);
   branchIfZero(prof, absent);
-  emit(OpcodeKind::Eq, "who?", {D(prof), D(who)}, {same});
+  textEq(D(prof), D(who), same);
   branch(S(same), found);
   {
     // A tombstone keeps its replay floor but no share of the budget.
@@ -3633,7 +3639,7 @@ void Gen::emitObserveRefusal(CellRef entryLabel) {
   mov(S(prof), S(rd(S(agentCell_), dims_.trust)));
   place(loop);
   branchIfZero(prof, absent);
-  emit(OpcodeKind::Eq, "who?", {D(prof), D(who)}, {same});
+  textEq(D(prof), D(who), same);
   branch(S(same), found);
   mov(S(prof), S(rd(D(prof), dims_.trust)));
   jump(loop);
@@ -3922,7 +3928,7 @@ void Gen::emitSourceChange(CellRef entryLabel) {
   mov(S(prof), S(rd(S(agentCell_), dims_.trust)));
   place(loop);
   branchIfZero(prof, absent);
-  emit(OpcodeKind::Eq, "who?", {D(prof), D(who)}, {same});
+  textEq(D(prof), D(who), same);
   branch(S(same), found);
   mov(S(prof), S(rd(D(prof), dims_.trust)));
   jump(loop);
@@ -4288,10 +4294,11 @@ void Gen::emitObserve(CellRef entryLabel) {
     emit(OpcodeKind::Eq, "seen?", {D(v), D(inc)}, {same});
     requireTrue(same, next);
     nextField();
-    emit(OpcodeKind::Eq, "seen?", {D(v), D(eventId)}, {same});
+    // The ID and the digest are text a checkpoint may have typed.
+    textEq(D(v), D(eventId), same);
     requireTrue(same, next);
     nextField();
-    emit(OpcodeKind::Eq, "digest?", {D(v), D(digest)}, {same});
+    textEq(D(v), D(digest), same);
     branch(S(same), dup);
     endObservation(kTurnResultConflictingEvent);
     place(dup);
@@ -4316,7 +4323,7 @@ void Gen::emitObserve(CellRef entryLabel) {
                   ordered = newLabel();
     mov(S(a0_), S(streamsRec));
     mov(S(a1_), S(predName));
-    callLabel(rtFind_);
+    callLabel(rtFindText_);
     mov(S(stream), S(r0_));
     branchIfZero(stream, fresh);
     readInOrder(stream, kStreamOrder,
@@ -4569,7 +4576,7 @@ void Gen::emitObserve(CellRef entryLabel) {
       mov(S(sp), S(rd(D(cl), dims_.source)));
       place(sources);
       branchIfZero(sp, nextClause);
-      emit(OpcodeKind::Eq, "mine?", {D(sp), D(who)}, {same});
+      textEq(D(sp), D(who), same);
       requireTrue(same, nextSource);
       {
         // A key counts while it holds a current reading: a predecessor
@@ -6441,6 +6448,7 @@ CompiledAgent Gen::run() {
   haltOp_        = mkOp(OpcodeKind::Halt, "HALT");
   failOp_        = mkOp(OpcodeKind::Halt, "FAIL");
   rtFind_        = newLabel();
+  rtFindText_    = newLabel();
   rtAppendField_ = newLabel();
   rtListPush_    = newLabel();
   rtOutbox_      = newLabel();
@@ -6487,7 +6495,8 @@ CompiledAgent Gen::run() {
   prepareMethods();
   prepareExtensions();
 
-  emitRtFind();
+  emitRtFind(rtFind_, false);
+  emitRtFind(rtFindText_, true);
   emitRtAppendField();
   emitRtListPush();
   emitRtOutbox();

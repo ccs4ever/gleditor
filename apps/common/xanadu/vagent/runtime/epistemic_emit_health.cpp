@@ -143,7 +143,7 @@ void Gen::emitHealthEntry(CellRef entryLabel) {
     mov(S(prof), S(rd(S(agentCell_), dims_.trust)));
     place(loop);
     branchIfZero(prof, absent);
-    emit(OpcodeKind::Eq, "who?", {D(prof), D(who)}, {same});
+    textEq(D(prof), D(who), same);
     branch(S(same), found);
     mov(S(prof), S(rd(D(prof), dims_.trust)));
     jump(loop);
@@ -216,7 +216,8 @@ void Gen::emitHealthEntry(CellRef entryLabel) {
                            CellRef out) {
     const CellRef vc = reg();
     find(e, name, vc);
-    emit(OpcodeKind::Eq, "field?", {D(vc), expected}, {out});
+    // Codes, issuers and kinds are text a checkpoint may have typed.
+    textEq(D(vc), expected, out);
   };
   const auto setTo = [&](CellRef rec, std::string_view name, Opd value) {
     CellRef vc;
@@ -442,7 +443,7 @@ void Gen::emitHealthEntry(CellRef entryLabel) {
       branchIfZero(floorV, advanced);
       mov(S(a0_), S(streamsRec));
       mov(S(a1_), D(f));
-      callLabel(rtFind_);
+      callLabel(rtFindText_);
       mov(S(stream), S(r0_));
       branchIfZero(stream, fresh);
       find(stream, kObsSequence, seqV);

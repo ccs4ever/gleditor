@@ -7,7 +7,14 @@ namespace xanadu::vagent::runtime {
 namespace {
 
 std::optional<std::string> cut(std::optional<std::string> text) {
-  if (!text || text->size() <= kRefusalTextLimit) return text;
+  if (!text) return text;
+  // A subject can come from an image, and `what()` reaches a WARN line: a
+  // control byte there could forge or hide log lines (S-4). Same length, so
+  // the cut below still bounds it.
+  for (char &c : *text)
+    if (const auto u = static_cast<unsigned char>(c); u < 0x20U || u == 0x7FU)
+      c = '?';
+  if (text->size() <= kRefusalTextLimit) return text;
   auto end = kRefusalTextLimit;
   // Never end inside a UTF-8 sequence: a continuation byte is 10xxxxxx.
   while (end != 0 &&

@@ -304,8 +304,66 @@ question for the mesh mailbox (I3-4); the resume pre-flight reads the whole imag
 the decode time; and the registry's `kHostState` text is prose, checked only by being the single
 source of the user guide's table.
 
-Lead verification (2026-11-05): full build, `vagent_actor_test` 1031 and `xuzz_test` 3200 pass.
-One full run, which overlapped another process using the same `build/xdg` state, failed
+Lead verification (2026-11-05): full build, `vagent_actor_test` 1031 and `xuzz_test` 3200 pass. One
+full run, which overlapped another process using the same `build/xdg` state, failed
 `Translate.ResumeAndUpgradeAgreeOverRandomIngestion`; it then passed 10 repeats alone, 4 shuffled
 runs of the 897 vagent and epistemic tests and a clean full run. The failure text was not captured.
 It is carried into the M1 review as an unexplained intermittent.
+
+## M1 review (2026-11-05)
+
+One round under [decisions.md](decisions.md) section 0.1 over `9bd27a03..61e57eae` (I3-2c1, I3-2c2,
+I3-2c3, T1): [ML](m1-review/review-ml.md) PASS (3 MINOR), [DIST](m1-review/review-distributed.md)
+FAIL (1 MAJOR, 9 MINOR), [SEC](m1-review/review-security.md) FAIL (3 MAJOR, 5 MINOR). The owed I3-2
+confirmations are tracked in [owed-i3-2-confirmations.md](m1-review/owed-i3-2-confirmations.md).
+
+Owner ruling on DIST M1 / ML-3 (2026-11-06): type inference from canonical text when a cell is
+minted or its value updated stays; it is the only way the UI gets typed scalars, and the text
+remains on the cell, comparable by span or string whatever the value bits say. The defect is that
+the actor's generated code compares text identities (event IDs, incarnations, digests, `Str` keys)
+by typed value. The fix compares them as text; `Store::makeCell` and `ArenaManifold::promote` are
+unchanged.
+
+| Finding                                     | Severity | Disposition                                                                                                                                 |
+| ------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| DIST M1 / ML-3: checkpoint retypes text     | MAJOR    | Fixed: `textEq` on IDs, digests, principals, codes, stream names, `Str` keys; `NumericAndBooleanLooking*` (resume, both roads)              |
+| Intermittent `ResumeAndUpgradeAgree...`     | —        | Fixed: the digest hashes text, not kind; `ANumericLookingClockInstanceDigestsAlikeOnBothRoads` forces the case                              |
+| SEC S-1: audit sink under the ingress lock  | MAJOR    | Fixed: `abandon` finishes items after its guard; `AnUndeliveredItemsSinkMayCallBackIn`, `TheSinkRunsOncePerFinishedItem`, `ANullSink...`    |
+| SEC S-2: translator trusts profile values   | MAJOR    | Fixed: `checkProfileValues` refuses `StateInconsistent`; reserve clamps; `TranslateForgedValues.*` (7)                                      |
+| SEC S-3: scratch gate under-counts          | MAJOR    | Fixed: all texts counted, swap-time re-plan with `fixedBytes`, typed copier refusals; `TheScratchGateCounts...`, `AnArenaLimitInTheCopy...` |
+| ML-1: note mixture tested to `n` = 64 only  | MINOR    | Fixed: `ANoteIsAnEvenlyInterleavedMixture` at `n` = 64, 128, 256, 512, 1,000                                                                |
+| ML-2: R3-9 fuzz invariant missing           | MINOR    | Fixed: `weightViolation` after every fuzz step; restart step on a half-life 1 host checks `f`                                               |
+| SEC S-4: image text in refusal subjects     | MINOR    | Fixed: control bytes become `?`; cell texts become role plus hash; `ARefusalNamesACellByHash...`                                            |
+| SEC S-5: F14 check and insert in two scopes | MINOR    | Fixed: one scope in `bindSource`; four F14 tests (`AnIssuerCannotBeBoundAfterItsGrant` and three more)                                      |
+| SEC S-6: pause ttl unclamped                | MINOR    | Fixed: clamped to 1 s .. 10 min; `AnExplicitTtlIsClampedToTheSettingsRange`                                                                 |
+| SEC S-7: tombstone degrade uses headroom    | MINOR    | Fixed: a degrade is never exempt, a clear keeps R3-1's exemption; `ADegradeOnATombstoneGetsNoHeadroom`                                      |
+| SEC S-8: small items                        | MINOR    | Recorded; digest cycle guard fixed: `TheDigestStopsAtACloneRing`                                                                            |
+| DIST m2: mixed batch outcome reads Unknown  | MINOR    | Fixed: kept unless every item is `NoChange`; `ABatchEndingInANoChangeKeepsItsOutcome`                                                       |
+| DIST m7: quiescing cancels operator pause   | MINOR    | Fixed: pause restored, 1 s margin, lapse named; `UpgradeQuiescingKeepsAnOperatorsLongerPause`                                               |
+| DIST m9: no latch-cache test on schema road | MINOR    | Fixed: `ACommittedSchemaUpgradeClearsTheCacheAndTheArenaRelearnsIt`                                                                         |
+| DIST m1, m3, m4, m5, m6, m8                 | MINOR    | Recorded as limits for M2                                                                                                                   |
+
+### M1 fixes (2026-11-06)
+
+All "Fix" rows above are fixed and uncommitted. No VM, core or stdlib change: text comparison uses
+existing opcodes only. `Gen::textEq` keeps `Eq`, and when one side renders as a string and the other
+as a typed value, it compares the typed cell's whole-text slice (`Value` with offset 0 and length
+-1). A string is told from a number by `Gt ""` and `Lt "\xff"`, which no number passes both of. So
+the common roads mint no cell, and two typed values still compare by value. `rtBSet` adds the same
+typed-text case after its key `Unify`. `rtFindText_` keys a profile's streams by predicate name as
+text. `epistemicStateDigest` hashes a cell's text, or a bare scalar's canonical rendering, instead
+of its kind and bits. That is what made the random-ingestion intermittent: a 16-hex `clockInstance`
+that is all decimal digits.
+
+Limits found while fixing: `promote` re-renders a typed cell canonically. A second checkpoint
+therefore turns a resumed `"1e3"` into `"1000"` and `"on"` into `"true"`, so these comparisons hold
+across one resume but not across two for non-canonical spellings; the owner's ruling leaves
+`promote` as it is. `rtEqual` (user `==` on values and records), `dup`/`same` term `Unify` in
+`rtBSet` and user `Str` comparisons generally still compare typed values; only the key positions and
+the identities above changed.
+
+Tests: `vagent_actor_test` 1059 (was 1031), all pass. `xuzz_test` 3255 run, 3228 pass, 27 skipped
+(the network tests), none failed. `fuzz_epistemic_ingress` builds and ran clean for about 13 minutes
+in four runs over its corpus (`ASAN_OPTIONS=alloc_dealloc_mismatch=0`: libstdc++ 16's `stable_sort`
+buffer trips ASan before the first input on this toolchain); its restart step was reached, a rescale
+under it not yet.

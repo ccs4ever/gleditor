@@ -236,6 +236,84 @@ TEST_F(VagentEpistemicResume, DedupWindowsAndStreamsCarryOver) {
             IngestOutcome::Kind::Committed);
 }
 
+/// Event IDs and keys a checkpoint types: numbers, a float literal and the
+/// truth words. Each is text on the live side and a typed cell, keeping its
+/// text, after a resume.
+constexpr std::string_view kTypedLooking[] = {"42",   "1e3", "6",
+                                              "true", "on",  "yes"};
+
+TEST_F(VagentEpistemicResume, NumericAndBooleanLookingEventIdsStillDedup) {
+  a.bind(kP1);
+  std::uint64_t seq = 0;
+  std::vector<CheckedObservation> sent;
+  for (const auto id : kTypedLooking) {
+    auto o    = reading(kP1, "left", ++seq, 1.0);
+    o.eventId = std::string(id);
+    ASSERT_EQ(a.observe(o)->kind, IngestOutcome::Kind::Committed) << id;
+    sent.push_back(o);
+  }
+  ASSERT_TRUE(resumeOnB());
+  b.bind(kP1);
+  std::uint64_t answered = 0;
+  for (const auto &o : sent) {
+    SCOPED_TRACE(o.eventId);
+    ++answered;
+    // The exact retry meets the restored window.
+    const auto retry = b.observe(o);
+    ASSERT_TRUE(retry);
+    EXPECT_EQ(retry->kind, IngestOutcome::Kind::Duplicate)
+        << retry->code.value_or("");
+    EXPECT_EQ(b.stat(kTurnResultDuplicate), answered);
+    // The same ID with other bytes is a conflict, not a stale sequence.
+    auto other     = o;
+    other.tuple[1] = WireValue::real(9.0);
+    ASSERT_TRUE(b.executor().observe(b.pid, other));
+    b.host->pump();
+    EXPECT_EQ(b.stat(kTurnResultConflictingEvent), answered);
+  }
+  EXPECT_EQ(b.stat(kTurnResultStaleSequence), 0U);
+}
+
+TEST_F(VagentEpistemicResume, NumericAndBooleanLookingKeysStillGroup) {
+  // Three keys a source, under the default `keys_per_source` of four.
+  const auto principalOf = [](std::size_t i) { return i < 3 ? kP1 : kP2; };
+  a.bind(kP1);
+  a.bind(kP2);
+  std::uint64_t seq = 0;
+  for (std::size_t i = 0; i < std::size(kTypedLooking); ++i)
+    ASSERT_EQ(a.observe(reading(principalOf(i), std::string(kTypedLooking[i]),
+                                ++seq, 1.0))
+                  ->kind,
+              IngestOutcome::Kind::Committed)
+        << kTypedLooking[i];
+  ASSERT_TRUE(resumeOnB());
+  b.bind(kP1);
+  b.bind(kP2);
+  for (std::size_t i = 0; i < std::size(kTypedLooking); ++i)
+    ASSERT_EQ(b.observe(reading(principalOf(i), std::string(kTypedLooking[i]),
+                                ++seq, 2.0))
+                  ->kind,
+              IngestOutcome::Kind::Committed)
+        << kTypedLooking[i];
+  // One clause per key: the new reading replaced the restored one under the
+  // same key instead of standing beside it.
+  const auto d        = b.dims();
+  std::size_t clauses = 0;
+  for (const auto pred :
+       zigzag::rankAfter(b.arena(), *b.executor().agentCell(b.pid), d.belief))
+    if (b.arena().textOf(pred) == "at")
+      clauses += std::ranges::distance(
+          zigzag::rankAfter(b.arena(), pred, b.ctx().core.dims().clause));
+  EXPECT_EQ(clauses, std::size(kTypedLooking));
+  const auto histories = b.histories();
+  EXPECT_EQ(histories.size(), std::size(kTypedLooking));
+  for (const auto &[key, statuses] : histories) {
+    SCOPED_TRACE(key.second);
+    ASSERT_EQ(statuses.size(), 2U);
+    EXPECT_EQ(statuses.back(), kObsStatusCurrent);
+  }
+}
+
 TEST_F(VagentEpistemicResume, AdvanceAndRetireWalkTheRestoredRanks) {
   populate();
   ASSERT_TRUE(resumeOnB());

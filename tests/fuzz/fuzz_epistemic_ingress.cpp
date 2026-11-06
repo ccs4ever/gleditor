@@ -14,7 +14,10 @@
  *   of the profile's incarnation (`EpistemicView::violation`);
  * - the epistemic cells stay within the ceiling;
  * - resending committed bytes under an unchanged binding is `Duplicate`;
- * - a refused relayed copy changed neither health counters nor contact.
+ * - a refused relayed copy changed neither health counters nor contact;
+ * - every profile keeps `0 <= R <= N <= cap` under the largest half-life in
+ *   force, and a restart under a shorter half-life (a checkpoint resumed on
+ *   a second host) leaves the refusal fraction where it was (R3-9).
  *
  * One host and one compiled program serve the whole process, so an input
  * costs its own steps rather than a compilation; each input runs in a fresh
@@ -32,6 +35,7 @@
  * Set FUZZ_EPISTEMIC_REPORT to print each outcome code, for checking that a
  * corpus reaches every refusal.
  */
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cmath>
@@ -243,6 +247,24 @@ LocalHost &sharedHost() {
   return host;
 }
 
+/// The half-life the restart step resumes under: the shortest there is, so
+/// its cap is 2 and a resumed `N` of two events' weight or more is rescaled.
+constexpr std::int64_t kShortHalfLife = 1;
+
+/// A second host for the restart step, which resumes a checkpoint there.
+LocalHost &shortHalfLifeHost() {
+  static LocalHost host = [] {
+    auto program = CompiledProgram::fromSource(kProgram);
+    require(program.has_value(), "the fixed program compiles");
+    auto options                              = harnessOptions();
+    options.settings.epistemic.healthHalfLife = kShortHalfLife;
+    // The setting must stay below a share of the shorter cap to validate.
+    options.settings.epistemic.suspectMinEvents = 1;
+    return LocalHost(std::move(*program), options);
+  }();
+  return host;
+}
+
 /// Refusals the executor answers by return value only, without logging.
 bool unlogged(EpistemicRefusal refusal) {
   return refusal == EpistemicRefusal::UnknownSource ||
@@ -438,11 +460,86 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data,
     return receipt ? outcome : std::optional<IngestOutcome>{};
   };
 
+  // R3-9: the largest half-life a run uses bounds `N` everywhere.
+  const auto cap =
+      healthWeightCap(std::max(limits.healthHalfLife, kShortHalfLife));
   for (int step = 0; step < maxHarnessSteps && in.remaining_bytes() > 0;
        ++step) {
-    const auto which     = in.ConsumeIntegralInRange<std::size_t>(0, 3);
-    const auto principal = kPrincipals[which];
-    switch (in.ConsumeIntegralInRange(0, 15)) {
+    const auto which       = in.ConsumeIntegralInRange<std::size_t>(0, 3);
+    const auto principal   = kPrincipals[which];
+    const auto weightsHold = [&](AgentExecutor &ex,
+                                 const xanadu::identity::ActorPid &actor) {
+      const auto broken =
+          EpistemicView(ex, actor, kPredicates, kKeyless).weightViolation(cap);
+      if (broken) std::fprintf(stderr, "%s\n", broken->c_str());
+      require(!broken, "0 <= R <= N <= cap after every step");
+    };
+    switch (in.ConsumeIntegralInRange(0, 16)) {
+    case 16: {
+      // ML-2: a restart under a shorter half-life rescales R and N together
+      // before the first update (R3-9), so the fraction they make is the one
+      // the checkpoint held. One good reading after the resume is a counted
+      // accept, `R' = b R_s` and `N' = b N_s + 1`, which recovers the
+      // rescaled pair and its fraction.
+      const auto saved = executor.checkpoint(*pid);
+      if (!saved) break;
+      auto &other         = shortHalfLifeHost();
+      const auto restored = other.executor().resume(*saved);
+      if (!restored) break;
+      other.pump();
+      auto &ex = other.executor();
+      if (ex.context(*restored) == nullptr) break;
+      ex.setWallClockSynchronised(true);
+      weightsHold(ex, *restored);
+      const EpistemicView view(ex, *restored, kPredicates, kKeyless);
+      const auto inc  = view.incarnationOf(principal);
+      const auto all  = view.weights();
+      const auto seen = all.find(principal);
+      if (inc && seen != all.end() && seen->second.n >= 1.0 &&
+          ex.bindSource(*restored,
+                        {"restart", principal, static_cast<std::uint64_t>(*inc),
+                         "at", std::chrono::hours(1)})) {
+        other.pump();
+        auto &state = sources[which];
+        CheckedObservation o;
+        o.principal           = principal;
+        o.incarnation         = static_cast<std::uint64_t>(*inc);
+        o.eventId             = "restart" + std::to_string(++state.events);
+        o.sequence            = ++state.sequence;
+        o.predicate           = "at";
+        o.tuple               = {WireValue::text("self"), WireValue::real(1.0)};
+        o.acquiredAt          = now - 1.0;
+        o.acquiredUncertainty = 0.01;
+        o.clockBasis          = "wall";
+        o.frame               = "enu";
+        o.units               = "m";
+        o.variance            = 0.25;
+        if (ex.observe(*restored, o)) {
+          other.pump();
+          const auto outcome = ex.ingestOutcome(*restored, o.principal,
+                                                o.incarnation, o.eventId);
+          const auto after =
+              EpistemicView(ex, *restored, kPredicates, kKeyless).weights();
+          if (outcome && outcome->kind == IngestOutcome::Kind::Committed &&
+              after.contains(principal)) {
+            const auto b     = healthDecay(kShortHalfLife);
+            const auto &w    = after.at(principal);
+            const auto rS    = w.r / b;
+            const auto nS    = (w.n - 1.0) / b;
+            const auto fWas  = seen->second.r / seen->second.n;
+            const auto fKept = nS > 0.0 ? rS / nS : 0.0;
+            if (std::abs(fKept - fWas) > 1e-12)
+              std::fprintf(stderr, "f %.17g became %.17g\n", fWas, fKept);
+            require(std::abs(fKept - fWas) <= 1e-12,
+                    "a rescale leaves the refusal fraction unchanged");
+          }
+        }
+      }
+      weightsHold(ex, *restored);
+      other.percept(*restored, "Quit");
+      other.pump();
+      break;
+    }
     case 14:
     case 15: {
       const auto which3 = in.ConsumeIntegralInRange(0, 2);
@@ -630,6 +727,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data,
       break;
     }
     }
+    weightsHold(executor, *pid);
   }
   host.percept(*pid, "Quit");
   host.pump();

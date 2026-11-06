@@ -84,8 +84,12 @@ inline constexpr std::int64_t kDefaultEpistemicHealthActions = 4;
 inline constexpr std::int64_t kDefaultAdmissionPauseMs = 30'000;
 inline constexpr std::int64_t kMinAdmissionPauseMs     = 1'000;
 inline constexpr std::int64_t kMaxAdmissionPauseMs     = 600'000;
-inline constexpr std::int64_t kMinEpistemicHealthActions     = 2;
-inline constexpr std::int64_t kMaxEpistemicHealthActions     = 64;
+/// `upgradeQuiescing` pauses for its timeout plus this, so the swap after a
+/// drain that ends on the timeout's last tick still finds admission paused.
+/// One second: the swap is one pump of the host thread, far shorter.
+inline constexpr std::int64_t kQuiescingPauseMarginMs    = 1'000;
+inline constexpr std::int64_t kMinEpistemicHealthActions = 2;
+inline constexpr std::int64_t kMaxEpistemicHealthActions = 64;
 // `validate()` caps min events at this share of the estimator's weight bound
 // 1/(1-b): a larger value would disable SUSPECT without a trace.
 inline constexpr double kSuspectMinEventsWeightShare = 0.9;
@@ -165,9 +169,9 @@ epistemicLimitErrorName(EpistemicLimitError error) noexcept {
 /// The settle reserve is one 64th of the slot allowance.
 inline constexpr std::size_t kSlotReserveDivisor = 64;
 
-/// Exempt entries (isolate, clear, reset, settle, any action on a tombstone)
-/// may take the cell ceiling this fraction past it: a repair must land on an
-/// arena that ingestion has filled.
+/// Exempt entries (isolate, clear, reset, settle; never a degrade, even on a
+/// tombstone) may take the cell ceiling this fraction past it: a repair must
+/// land on an arena that ingestion has filled.
 inline constexpr std::size_t kHeadroomDivisor = 16;
 
 /// Cells a live profile costs before its records and its health reserve: the

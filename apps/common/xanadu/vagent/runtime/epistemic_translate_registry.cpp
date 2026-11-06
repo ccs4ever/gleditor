@@ -158,7 +158,9 @@ void populateHealthScalars(const PopulateContext &c) {
   put(c, kProfileResetEpoch, WireValue::integer(2));
   put(c, kProfileActionSeq, WireValue::integer(3));
   put(c, kProfileFaultSeq, WireValue::integer(1));
-  put(c, kProfileHealthCells, WireValue::integer(30));
+  // What the estimator writes for the one reason and one action the samples
+  // below add; the plan refuses any other figure.
+  put(c, kProfileHealthCells, WireValue::integer(healthBound(1, 1)));
   put(c, kProfileHealthRefusedWeight, WireValue::real(0.75));
   put(c, kProfileHealthWeight, WireValue::real(1.5));
 }
@@ -172,7 +174,7 @@ void populateReasons(const PopulateContext &c) {
   reason.set(std::string(kReasonOrigin),
              WireValue::text(std::string(kReasonOriginOperator)));
   reason.set(std::string(kReasonGrant), WireValue::text("grant-1"));
-  reason.set(std::string(kReasonIssuer), WireValue::text("issuer-1"));
+  reason.set(std::string(kReasonIssuer), WireValue::text(std::string(64, 'c')));
   reason.set(std::string(kReasonIncarnation), WireValue::integer(1));
   reason.set(std::string(kReasonWall), WireValue::real(99.5));
   appendToList(c, kProfileReasons, WireValue::record(std::move(reason)));

@@ -177,6 +177,15 @@ TEST(TransferRefusalTest, RefusalVocabularyIsStable) {
                             ActorError::ExecutionFailed, {.subject = wide});
   EXPECT_LE(utf.detail.subject->size(), kRefusalTextLimit);
   EXPECT_EQ(utf.detail.subject->size() % 2, 0U);
+  // A control byte from an image cannot forge a log line through what().
+  const auto forged = TransferRefusal::make(
+      TransferCode::StateInconsistent, TransferRoute::Resume,
+      ActorError::ExecutionFailed,
+      {.subject = "a\nWARN fake\x1b[0m\x7f", .saved = "\r", .current = "\t"});
+  EXPECT_EQ(forged.detail.subject, "a?WARN fake?[0m?");
+  EXPECT_EQ(forged.detail.saved, "?");
+  EXPECT_EQ(forged.detail.current, "?");
+  EXPECT_EQ(toString(forged).find('\n'), std::string::npos);
 }
 
 // -- resume -----------------------------------------------------------------

@@ -7,9 +7,13 @@
 
 #include <poll.h>
 
+#include <atomic>
 #include <chrono>
+#include <cstdio>
+#include <cstdlib>
 #include <optional>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "common/xanadu/vagent/runtime/agent_executor_internal.hpp"
@@ -181,6 +185,63 @@ TEST_F(VagentEpistemicGrants, IssuerCannotBeABoundSourceOrNamedSource) {
   EXPECT_EQ(bound.error(), EpistemicRefusal::SelfCertification);
 }
 
+TEST_F(VagentEpistemicGrants, AnIssuerCannotBeBoundAfterItsGrant) {
+  ASSERT_TRUE(ex().grantHealth(pid, grant("g1")));
+  const auto bound = ex().bindSource(
+      pid, {"sensor:op", kOperator, 1, "at", std::chrono::hours(1)});
+  ASSERT_FALSE(bound);
+  EXPECT_EQ(bound.error(), EpistemicRefusal::SelfCertification);
+}
+
+TEST_F(VagentEpistemicGrants, AnIssuerWithAProfileOnAnotherActorIsRefused) {
+  // F14 is host-wide: a profile anywhere on the host makes a principal a
+  // source, and a tombstone keeps it one.
+  const auto other = host->launch("A", "b");
+  ASSERT_TRUE(other);
+  host->pump();
+  ASSERT_TRUE(ex().bindSource(
+      *other, {"sensor:op", kOperator, 1, "at", std::chrono::hours(1)}));
+  host->pump();
+  auto o    = reading(1, 1.0, kOperator);
+  o.eventId = "op1";
+  ASSERT_TRUE(ex().observe(*other, o));
+  host->pump();
+  ASSERT_TRUE(ex().retireSource(*other, kOperator));
+  host->pump();
+  const auto refused = ex().grantHealth(pid, grant("g1"));
+  ASSERT_FALSE(refused);
+  EXPECT_EQ(refused.error(), EpistemicRefusal::SelfCertification);
+}
+
+TEST_F(VagentEpistemicGrants, AnIssuerWhoseProfileCrossedAResumeIsRefused) {
+  ASSERT_TRUE(ex().bindSource(
+      pid, {"sensor:op", kOperator, 1, "at", std::chrono::hours(1)}));
+  auto o    = reading(1, 1.0, kOperator);
+  o.eventId = "op1";
+  ASSERT_TRUE(ex().observe(pid, o));
+  host->pump();
+  const auto saved = ex().checkpoint(pid);
+  ASSERT_TRUE(saved);
+  auto next = makeHost();
+  ASSERT_TRUE(next);
+  const auto resumed = next->executor().resume(*saved);
+  ASSERT_TRUE(resumed);
+  next->pump();
+  // The binding is host memory and did not travel; the profile did.
+  const auto refused = next->executor().grantHealth(*resumed, grant("g1"));
+  ASSERT_FALSE(refused);
+  EXPECT_EQ(refused.error(), EpistemicRefusal::SelfCertification);
+}
+
+TEST_F(VagentEpistemicGrants, AnUppercaseIssuerIsNoPrincipal) {
+  std::string upper(64, 'B');
+  EXPECT_FALSE(HealthIssuer::fromPrincipal(upper));
+  const auto bound = ex().bindSource(
+      pid, {"sensor:up", upper, 1, "at", std::chrono::hours(1)});
+  ASSERT_FALSE(bound);
+  EXPECT_EQ(bound.error(), EpistemicRefusal::InvalidPrincipal);
+}
+
 TEST_F(VagentEpistemicGrants, TokensAreDistinctAndNonZero) {
   const auto a = ex().grantHealth(pid, grant("g1"));
   const auto b = ex().grantHealth(pid, grant("g2"));
@@ -273,6 +334,99 @@ TEST_F(VagentEpistemicGrants, ThrowingAuditSinkDoesNotBreakTheTurn) {
   host->pump();
   EXPECT_EQ(ex().healthOutcome(pid, *receipt).state,
             HealthOutcomeView::State::Known);
+}
+
+TEST_F(VagentEpistemicGrants, AnUndeliveredItemsSinkMayCallBackIn) {
+  // R3-10 clause 1: no executor lock is held while the sink runs, so a sink
+  // that tidies up by revoking the grant must not deadlock the pump. The
+  // undelivered road is the one that once ran it under the ingress lock.
+  std::vector<HealthAudit> audits;
+  std::optional<bool> revoked;
+  ex().setHealthAuditSink([&](const HealthAudit &a) {
+    audits.push_back(a);
+    revoked = ex().revokeHealthGrant(pid, "g1").has_value();
+  });
+  const auto token = ex().grantHealth(pid, grant("g1"));
+  ASSERT_TRUE(token);
+  const auto receipt =
+      ex().healthAction(pid, request(*token, kP1, Isolate{"op"}));
+  ASSERT_TRUE(receipt);
+  ASSERT_TRUE(host->runtime().stop(pid));
+  std::atomic<bool> pumped{false};
+  std::thread pump([&] {
+    host->pump();
+    pumped = true;
+  });
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(30);
+  while (!pumped && std::chrono::steady_clock::now() < deadline)
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  if (!pumped) {
+    // The pump is stuck on a lock it holds; nothing can unwind it.
+    std::fputs("audit sink deadlocked the pump\n", stderr);
+    std::_Exit(1);
+  }
+  pump.join();
+  // At most once per item, and the item's outcome is the undelivered code.
+  ASSERT_EQ(audits.size(), 1U);
+  EXPECT_EQ(audits.front().outcome.code,
+            std::optional<std::string>{std::string(kTurnResultUndelivered)});
+  EXPECT_EQ(revoked, std::optional<bool>{true});
+}
+
+TEST_F(VagentEpistemicGrants, TheSinkRunsOncePerFinishedItem) {
+  std::vector<HealthAudit> audits;
+  ex().setHealthAuditSink([&](const HealthAudit &a) { audits.push_back(a); });
+  const auto token = ex().grantHealth(pid, grant("g1"));
+  ASSERT_TRUE(token);
+  commitOne(*host, pid, 1);
+  ASSERT_TRUE(ex().healthAction(pid, request(*token, kP1, Degrade{"slow"})));
+  host->pump();
+  ASSERT_TRUE(ex().healthAction(pid, request(*token, kP1, Isolate{"op"})));
+  host->pump();
+  // Pumping again finds nothing to finish and calls nothing.
+  host->pump();
+  host->pump();
+  EXPECT_EQ(audits.size(), 2U);
+  EXPECT_EQ(ex().stat(pid, std::string(kStatAuditCalls)), audits.size());
+  EXPECT_LT(audits.front().actionSeq, audits.back().actionSeq);
+}
+
+TEST_F(VagentEpistemicGrants, ANullSinkStopsTheCallsAndKeepsTheOutcome) {
+  std::size_t calls = 0;
+  ex().setHealthAuditSink([&](const HealthAudit &) { ++calls; });
+  ex().setHealthAuditSink(nullptr);
+  const auto token = ex().grantHealth(pid, grant("g1"));
+  ASSERT_TRUE(token);
+  const auto receipt =
+      ex().healthAction(pid, request(*token, kP1, Isolate{"op"}));
+  ASSERT_TRUE(receipt);
+  host->pump();
+  EXPECT_EQ(calls, 0U);
+  EXPECT_EQ(ex().stat(pid, std::string(kStatAuditCalls)), 0U);
+  const auto view = ex().healthOutcome(pid, *receipt);
+  ASSERT_EQ(view.state, HealthOutcomeView::State::Known);
+  EXPECT_EQ(view.items.front().outcome.kind, IngestOutcome::Kind::Committed);
+}
+
+TEST_F(VagentEpistemicGrants, ABatchEndingInANoChangeKeepsItsOutcome) {
+  // DIST m2: only a record in which nothing changed is dropped.
+  ASSERT_TRUE(ex().bindSource(
+      pid, {"sensor:odo", kP2, 1, "at", std::chrono::hours(1)}));
+  const auto token = ex().grantHealth(pid, grant("g1", {kP1, kP2}));
+  ASSERT_TRUE(token);
+  ASSERT_TRUE(ex().healthAction(pid, request(*token, kP2, Isolate{"op"})));
+  host->pump();
+  const auto receipt =
+      ex().healthActionBatch(pid, {*token, {kP1, kP2}, Isolate{"op"}});
+  ASSERT_TRUE(receipt);
+  host->pump();
+  const auto view = ex().healthOutcome(pid, *receipt);
+  ASSERT_EQ(view.state, HealthOutcomeView::State::Known);
+  ASSERT_EQ(view.items.size(), 2U);
+  EXPECT_EQ(view.items[0].outcome.kind, IngestOutcome::Kind::Committed);
+  EXPECT_EQ(view.items[1].outcome.kind, IngestOutcome::Kind::NoChange)
+      << view.items[1].outcome.code.value_or("");
 }
 
 TEST_F(VagentEpistemicGrants, UnknownReceiptIsUnknown) {

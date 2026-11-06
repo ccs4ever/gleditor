@@ -532,11 +532,27 @@ TEST_F(AdmissionTest, ThePauseExpiresAndIsRenewedForTheDrain) {
   EXPECT_TRUE(ex().observe(pid, reading()));
 }
 
+TEST_F(AdmissionTest, AnExplicitTtlIsClampedToTheSettingsRange) {
+  // A forgotten long pause lapses as the longest configurable one would.
+  ASSERT_TRUE(ex().pauseAdmission(pid, std::chrono::hours(9999)));
+  advance(std::chrono::milliseconds(kMaxAdmissionPauseMs - 1000));
+  EXPECT_EQ(report().admission, AdmissionState::Paused);
+  advance(std::chrono::milliseconds(2000));
+  EXPECT_EQ(report().admission, AdmissionState::Open);
+  // And a short one holds for at least the shortest.
+  ASSERT_TRUE(ex().pauseAdmission(pid, std::chrono::milliseconds(1)));
+  advance(std::chrono::milliseconds(kMinAdmissionPauseMs / 2));
+  EXPECT_EQ(report().admission, AdmissionState::Paused);
+  advance(std::chrono::milliseconds(kMinAdmissionPauseMs));
+  EXPECT_EQ(report().admission, AdmissionState::Open);
+}
+
 TEST_F(AdmissionTest, RequirePausedRefusesAPauseThatLapsed) {
   settle();
   const auto held = retained();
+  // Clamped up to the setting's floor of 1 s, then lapsed.
   ASSERT_TRUE(ex().pauseAdmission(pid, std::chrono::milliseconds(10)));
-  advance(std::chrono::seconds(1));
+  advance(std::chrono::seconds(2));
   auto r = ex().upgrade(pid, held, grantFor(*held), true);
   ASSERT_FALSE(r);
   EXPECT_EQ(r.error().code, TransferCode::NotQuiescent);
@@ -548,6 +564,24 @@ TEST_F(AdmissionTest, RequirePausedRefusesAPauseThatLapsed) {
   ASSERT_TRUE(ex().pauseAdmission(pid, std::chrono::hours(1)));
   r = ex().upgrade(pid, held, grantFor(*held), true);
   EXPECT_TRUE(r) << (r ? "" : toString(r.error()));
+}
+
+TEST_F(AdmissionTest, UpgradeQuiescingKeepsAnOperatorsLongerPause) {
+  // DIST m7: the call reopens only what it opened.
+  ASSERT_TRUE(ex().pauseAdmission(pid, std::chrono::minutes(5)));
+  const auto upgraded =
+      host->upgradeQuiescing(pid, retained(), std::chrono::seconds(30));
+  ASSERT_TRUE(upgraded) << toString(upgraded.error());
+  EXPECT_EQ(report().admission, AdmissionState::Paused);
+  advance(std::chrono::minutes(6));
+  EXPECT_EQ(report().admission, AdmissionState::Open);
+}
+
+TEST_F(AdmissionTest, UpgradeQuiescingWithoutAPauseReopens) {
+  const auto upgraded =
+      host->upgradeQuiescing(pid, retained(), std::chrono::seconds(30));
+  ASSERT_TRUE(upgraded) << toString(upgraded.error());
+  EXPECT_EQ(report().admission, AdmissionState::Open);
 }
 
 TEST_F(AdmissionTest, UpgradeQuiescingDrainsAndUpgrades) {

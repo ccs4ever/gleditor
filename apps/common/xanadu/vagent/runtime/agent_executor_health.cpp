@@ -166,7 +166,7 @@ AgentExecutor::healthAction(const identity::ActorPid &target,
     if (admissionClosedLocked(target))
       return std::unexpected(EpistemicRefusal::AdmissionClosed);
     const StoredHealthGrant *matchedGrant = nullptr;
-    auto it = ingress_->healthGrants.find(pid);
+    auto it                               = ingress_->healthGrants.find(pid);
     if (it != ingress_->healthGrants.end()) {
       for (auto &g : it->second) {
         if (!g.revoked &&
@@ -261,13 +261,13 @@ AgentExecutor::healthAction(const identity::ActorPid &target,
 
   HealthReceipt receipt{ingress_->clockInstance, nextHealthCounter_++};
 
-  auto record              = std::make_shared<PendingHealthRecord>();
-  record->receipt          = receipt;
-  record->target           = target;
-  record->tokenDigest      = tokenDigest;
-  record->grantId          = grantId;
-  record->totalMembers     = 1;
-  record->remainingMembers = 1;
+  auto record                     = std::make_shared<PendingHealthRecord>();
+  record->receipt                 = receipt;
+  record->target                  = target;
+  record->tokenDigest             = tokenDigest;
+  record->grantId                 = grantId;
+  record->totalMembers            = 1;
+  record->remainingMembers        = 1;
   pendingHealth_[receipt.counter] = record;
 
   QueuedHealth qh;
@@ -321,7 +321,7 @@ AgentExecutor::healthActionBatch(const identity::ActorPid &target,
     if (admissionClosedLocked(target))
       return std::unexpected(EpistemicRefusal::AdmissionClosed);
     const StoredHealthGrant *matchedGrant = nullptr;
-    auto it = ingress_->healthGrants.find(pid);
+    auto it                               = ingress_->healthGrants.find(pid);
     if (it != ingress_->healthGrants.end()) {
       for (auto &g : it->second) {
         if (!g.revoked &&
@@ -629,7 +629,12 @@ void AgentExecutor::finishHealthItem(const identity::ActorPid &target,
     }
     if (qh.record->remainingMembers == 0) {
       pendingHealth_.erase(qh.receipt.counter);
-      if (outcome.kind != IngestOutcome::Kind::NoChange) {
+      // Only a record in which nothing changed is dropped; a batch whose last
+      // member was a NoChange still committed its earlier ones (DIST m2).
+      if (std::ranges::any_of(
+              qh.record->partialItems, [](const HealthItemOutcome &item) {
+                return item.outcome.kind != IngestOutcome::Kind::NoChange;
+              })) {
         HealthOutcomeRecord finished;
         finished.receipt = qh.receipt;
         finished.items   = qh.record->partialItems;

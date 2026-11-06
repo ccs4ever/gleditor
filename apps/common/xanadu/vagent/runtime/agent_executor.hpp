@@ -311,14 +311,26 @@ public:
   upgrade(const identity::ActorPid &pid, CompiledProgram &newProgram);
 
   /// Refuse new posts for @p pid (`AdmissionClosed`) until the pause lapses or
-  /// `resumeAdmission`. An absent @p ttl is `AgentSettings::admissionPause`.
-  /// A pause only ever extends: it never shortens one already in force.
+  /// `resumeAdmission`. An absent @p ttl is `AgentSettings::admissionPause`;
+  /// any ttl is clamped to that setting's range, 1 s to 10 min, because a
+  /// pause also refuses health actions and bindings. A pause only ever
+  /// extends: it never shortens one already in force.
   /// Readings already queued still run.
   [[nodiscard]] std::expected<AgentExecutor *, TransferRefusal>
   pauseAdmission(const identity::ActorPid &pid,
                  std::optional<std::chrono::milliseconds> ttl = std::nullopt);
   /// Idempotent; an unknown pid is a no-op. A swap in progress is not ended.
   AgentExecutor *resumeAdmission(const identity::ActorPid &pid);
+  /// The deadline of the pause in force for @p pid, if any; one that has
+  /// lapsed is still reported, so a caller can restore exactly what it found.
+  [[nodiscard]] std::optional<zigzag::vortex::mesh::ActorTime>
+  admissionPausedUntil(const identity::ActorPid &pid) const;
+  /// Put back a deadline `admissionPausedUntil` returned, unclamped and
+  /// possibly shorter than the one in force: the inverse of a pause, for
+  /// `upgradeQuiescing`, which must not cancel an operator's longer pause.
+  AgentExecutor *
+  restoreAdmissionPause(const identity::ActorPid &pid,
+                        std::optional<zigzag::vortex::mesh::ActorTime> until);
 
   /// Where a test can run code at a named point of a racing call, so the
   /// interleaving is chosen rather than hoped for. Empty in production.

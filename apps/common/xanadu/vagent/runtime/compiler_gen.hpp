@@ -410,7 +410,11 @@ private:
   CellRef curEvent_{}, scratchG_{}, refTmp_{};
   CellRef failStep_{};
   CellRef haltOp_{}, failOp_{};
-  CellRef rtFind_{}, rtAppendField_{}, rtListPush_{}, rtOutbox_{}, rtCopy_{};
+  /// `rtFindText_` is `rtFind_` matching names as text (`textEq`), for a
+  /// record whose names are data a checkpoint may have typed: a profile's
+  /// streams are keyed by predicate name.
+  CellRef rtFind_{}, rtFindText_{}, rtAppendField_{}, rtListPush_{},
+      rtOutbox_{}, rtCopy_{};
   FramePlan copyPlan_, equalPlan_;
   CellRef copyPro_{}, copyBody_{};
   // Emitted only for a unit that calls them: the first call site mints the
@@ -885,6 +889,59 @@ private:
     branch(S(t), label);
   }
 
+  /// `out := x renders as a non-empty string`. A typed value would have to be
+  /// both above and below 0 to pass: `Gt` and `Lt` compare a number against
+  /// text by `toDouble`, which reads both bounds as 0. No UTF-8 text starts
+  /// with 0xFF; one that does only takes the slower road in `textEq`.
+  void isText(Opd x, CellRef out) {
+    const CellRef no = newLabel();
+    emit(OpcodeKind::Gt, "str?", {x, S(cStr(""))}, {out});
+    branchIfZero(out, no);
+    emit(OpcodeKind::Lt, "str?", {x, S(cStr("\xff"))}, {out});
+    place(no);
+  }
+
+  /// `out := a and b hold the same text`, for the text identities generated
+  /// code compares: event IDs, digests, principals, `Str` keys.
+  ///
+  /// A checkpoint types numeric- and boolean-looking text when it mints the
+  /// cell (the owner's ruling keeps that), so after a resume "42" renders as
+  /// Int64 42 where a live retry carries the string "42", and `Eq` is variant
+  /// equality. The cell keeps its text, and a whole-text slice reads it with
+  /// no kind. Only a string against a typed value needs the slice; equal
+  /// values and two strings decide at once, so the common roads mint nothing.
+  /// Two typed values compare by value as before: a computed scalar has no
+  /// text, and a slice of it would read as empty.
+  void textEq(Opd a, Opd b, CellRef out) {
+    const CellRef done = newLabel();
+    emit(OpcodeKind::Eq, "teq", {a, b}, {out});
+    branch(S(out), done);
+    typedTextEq(a, b, out);
+    place(done);
+  }
+
+  /// `out := one of a and b is a string and the other a typed cell holding the
+  /// same text`: the one case `textEq` adds to `Eq`, alone, for a site whose
+  /// own comparison (a `Unify` of terms) already decided every other case.
+  void typedTextEq(Opd a, Opd b, CellRef out) {
+    const CellRef p = reg(), t = reg();
+    const CellRef done = newLabel(), aText = newLabel();
+    movC(out, false_);
+    isText(a, p);
+    branch(S(p), aText);
+    isText(b, p);
+    branchIfZero(p, done);
+    emit(OpcodeKind::Value, "txt", {a, S(zero_), S(negOne_)}, {t});
+    emit(OpcodeKind::Eq, "teq", {D(t), b}, {out});
+    jump(done);
+    place(aText);
+    isText(b, p);
+    branch(S(p), done);
+    emit(OpcodeKind::Value, "txt", {b, S(zero_), S(negOne_)}, {t});
+    emit(OpcodeKind::Eq, "teq", {a, D(t)}, {out});
+    place(done);
+  }
+
   void emitAppendTail(Opd owner, DimRef firstDim, DimRef nextDim,
                       CellRef fresh) {
     const CellRef t         = reg();
@@ -918,7 +975,7 @@ private:
     emit(OpcodeKind::Return, "return", {});
     kill();
   }
-  void emitRtFind();
+  void emitRtFind(CellRef label, bool asText);
   void emitRtAppendField();
   void emitRtSetField();
   void emitRtClearField();
