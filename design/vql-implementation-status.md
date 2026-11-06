@@ -609,3 +609,26 @@ without restoring removed topology. A core regression isolates that behavior and
 case remains intact. Foreign owners, ordered projection/traversal, other deferred projection
 targets, callable forms, nested effectful validation and complete frontend/lifecycle parity still
 prevent full §4.12 completion.
+
+## Reciprocal foreign-link kernel prerequisite
+
+Arena link replacement now clears inherited foreign reciprocals through canonical proxy identities.
+A shared bounded write plan preflights link-row capacity before copy-on-write shadows, and proxy
+construction rolls back failed mint/index/cache publication. Ordinary local updates add no
+savepoint. See [iteration 34](projects/vortex-vm-only-iterations.md).
+
+The full build and all 838 affected tests from 77 suites passed. Fourteen new cases cover source
+immutability, cross-space identity, reciprocal edits, base-backed bookkeeping, capacity and budget
+failures, rollback/retry and namespace collisions. The CLI preserves an exact large Int64 through a
+native projection function. Twelve opt-in profile rows record elapsed time and arena slots; they
+establish neither speedup nor heap-allocation bounds.
+
+The broader kernel-consumer sweep passed 127 of 136 tests, skipped one swarm case, and retained
+eight failures in unchanged unsupported VLace/VQL routes and an exception-class expectation. This is
+not a full-suite pass; those frontend gaps remain on the specification backlog.
+
+Proxy creation temporarily refuses collisions between its index axis and authored source edges,
+including an unmapped literal same-named source axis. This is collision detection, not implicit
+identity binding. General binding changes after proxy edits, axis isolation and complete effective
+link enumeration remain open. Foreign projection masks remain explicitly unavailable, as do the
+previously listed callable/frontend/lifecycle gaps. Full §4.12 remains incomplete.

@@ -1191,3 +1191,55 @@ remains incomplete.
 Logs: `/tmp/vql-projection-frames-build.log`, `/tmp/vql-projection-frames-tests.log`,
 `/tmp/vql-projection-frames-profile.log`, `/tmp/vql-projection-frames-cli.log`,
 `/tmp/vql-projection-frames-format.log`.
+
+## Iteration 34: reciprocal proxy-link updates and capacity refusal
+
+Arena link replacement now resolves inherited foreign occupants to canonical proxies before planning
+reciprocal clears and new endpoints. A fixed four-side plan is shared with raw local proxy-index
+bookkeeping. Capacity checks use cell references and authoritative local/base rows before creating
+copy-on-write shadows; exceeding the CellSlot link-count field's 65,535-row bound throws a numbered
+length error rather than silently writing only one end. Dimension references retain their full
+width. Ordinary local updates add no savepoint; foreign resolution uses a nested savepoint that
+restores proxy registration and graph changes while retaining spent work budget.
+
+Proxy construction owns a savepoint across dimension creation, minting, index attachment and cache
+publication. Its rollback journal precedes map publication. Raw index append avoids recursive
+foreign resolution and supports a base-owned store representative, including home. Rollback's index
+tail reconstruction is traversal-bounded; this is not a universal cycle or allocation-failure
+guarantee. General heap-allocation exception safety of existing arena journals remains unaudited.
+
+Internal `d.store-refs` can collide with authored source topology. Until proper axis isolation is
+implemented, proxy creation conservatively refuses incident source edges on its currently mapped
+index axis, or on a literal same-named source axis when unmapped. It also checks an unshadowed proxy
+tail's inherited positive edge using that tail's own source space. Name lookup detects a collision
+only; it creates no dimension binding. Arbitrary binding changes after proxy edits remain an open
+lifecycle issue. Foreign projection masks still refuse: `dimensionsOf(proxy)` is not a complete
+effective-link snapshot after partial shadowing. No privileged storage-axis semantics or
+foreign-mask support follows from this kernel stage.
+
+Validation: full `make -j$(nproc)` passed, and all 838 affected tests from 77 suites passed.
+Fourteen new enabled tests cover inherited unlink/replacement, cross-space identity, partial
+direction overrides, self-links, base-owned roots, capacity refusal without new shadows, proxy
+factory rollback/retry, source-axis collisions and unrefunded work. Two existing foreign-stream
+fixtures now assert the reciprocal rank split and reconcile a late-bound clone rank with the
+coordinator's existing representative before constructing a cycle. The real headless CLI returns
+exact `9007199254740993` through a native projection function.
+
+A broader overlay/federation/quotation/promotion sweep ran 136 tests: 127 passed, one swarm case
+skipped, and eight failed at unchanged unsupported frontend routes. Three VLace cases report
+unimplemented VM lowering; five VQL cases exercise unavailable `find`, `contains`, `delta`, or the
+unknown-function exception-class expectation. These remain unfinished specification work, not a
+passing full suite.
+
+The opt-in profile reports twelve cold single observations on the Threadripper 1950X with Clang
+`-O3 -g`; setup and assertions are outside timing. For 32 link operations, local/existing-proxy/
+missing-proxy times were 4/27/59 microseconds; unlink times were 2/18/57. At 128 operations, the
+corresponding times were 16/96/255 and 11/70/206. Arena cell growth was zero for local and
+already-materialized neighbors and exactly 32/128 for missing neighbors. These are slot counts, not
+heap-allocation counts; local means no extra savepoint/proxy work, not unchanged latency. Source
+immutability, reciprocal edges, canonical identity and zero outstanding marks are checked. No
+speedup claim follows. Full §4.12 remains incomplete.
+
+Logs: `/tmp/vql-proxy-links-build.log`, `/tmp/vql-proxy-links-tests.log`,
+`/tmp/vql-proxy-links-profile.log`, `/tmp/vql-proxy-links-overlay.log`,
+`/tmp/vql-proxy-links-cli.log`, `/tmp/vql-proxy-links-format.log`.

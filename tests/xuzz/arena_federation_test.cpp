@@ -14,6 +14,7 @@
 #include <stdexcept>
 #include <string>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include "common/xanadu/extern_ref.hpp"
@@ -66,6 +67,74 @@ std::shared_ptr<Store> createTestStore(const fs::path &dir) {
   cfg.storageDir = dir / "permascroll";
   auto perma     = std::make_shared<UserPermascroll>(cfg);
   return std::make_shared<Store>(perma);
+}
+
+struct ForeignLine {
+  std::shared_ptr<Store> store;
+  Manifold manifold;
+  DimRef dim{noCell};
+  std::vector<CellRef> cells;
+};
+
+ForeignLine
+makeForeignLine(const std::string &name, const std::size_t count,
+                const std::vector<std::pair<std::size_t, std::size_t>> &edges) {
+  auto store           = createTestStore(tempStoreDir(name));
+  auto version         = store->sliceGenesis(MicroversionId{});
+  const auto dimension = store->makeDimension(version, "d.edge");
+  version              = dimension.version;
+
+  std::vector<CellRef> cells;
+  cells.reserve(count);
+  for (std::size_t index = 0; index < count; ++index) {
+    version = store->makeCell(version, "cell " + std::to_string(index));
+    cells.push_back(store->cellRefOf(version).value());
+  }
+  for (const auto &[from, to] : edges) {
+    version =
+        store->setLink(version, cells[from], dimension.dim, false, cells[to]);
+  }
+
+  auto manifold = store->rebuildManifold(version);
+  return ForeignLine{.store    = std::move(store),
+                     .manifold = std::move(manifold),
+                     .dim      = dimension.dim,
+                     .cells    = std::move(cells)};
+}
+
+std::pair<CellRef, DimRef>
+hydrateFullStoreRefsTail(ArenaManifold &arena, std::vector<CellRef> &refs) {
+  ArenaManifold source;
+  const DimRef dimStores = source.ensureDimension("d.stores");
+  refs.reserve(zigzag::maxCellLinkRunCount + 2);
+  refs.push_back(dimStores);
+  for (std::size_t index = 1; index < zigzag::maxCellLinkRunCount + 2;
+       ++index) {
+    refs.push_back(source.makeCell());
+  }
+
+  const auto mark = source.mark();
+  auto snapshot   = source.exportPrefix(mark);
+  if (!snapshot) {
+    throw std::runtime_error("could not export saturated arena fixture");
+  }
+  snapshot->links.reserve(zigzag::maxCellLinkRunCount);
+  for (std::size_t index = 0; index < zigzag::maxCellLinkRunCount; ++index) {
+    snapshot->links.push_back(zigzag::DimLink{.dim = refs[index]});
+  }
+  snapshot->links.front().pos = refs[1];
+  auto &storeCell             = snapshot->slots.back();
+  storeCell.linkOffset        = 0;
+  storeCell.linkCount = static_cast<std::uint16_t>(zigzag::maxCellLinkRunCount);
+  snapshot->mark.linkSize =
+      static_cast<std::uint32_t>(zigzag::maxCellLinkRunCount);
+  snapshot->mark.liveLinks =
+      static_cast<std::uint32_t>(zigzag::maxCellLinkRunCount);
+
+  if (!arena.hydratePrefix(*snapshot)) {
+    throw std::runtime_error("could not hydrate saturated arena fixture");
+  }
+  return {refs.back(), dimStores};
 }
 
 TEST(ArenaFederationTest, SourceIdentityIncludesBaseCellsButNotScratchQuotes) {
@@ -480,6 +549,511 @@ TEST(ArenaFederationTest, ShadowedForeignLinkWinsOverDelegation) {
   const CellRef custom = arena.makeCell("local_override");
   zigzag::expectWritten(arena.link(pA, dimArena1, DimVector::POS, custom));
   EXPECT_EQ(arena.linked(pA, dimArena1, DimVector::POS), custom);
+}
+
+TEST(ArenaFederationTest,
+     UnlinkingAnUnmaterializedForeignHopClearsOnlyTheArenaReciprocal) {
+  auto foreign    = makeForeignLine("unlink_unmaterialized", 2, {{0, 1}});
+  const CellRef a = foreign.cells[0];
+  const CellRef b = foreign.cells[1];
+  ArenaManifold arena;
+  const auto space = arena.attach(Space{.manifold = &foreign.manifold,
+                                        .store    = foreign.store.get(),
+                                        .label    = "foreign"});
+  const auto dim   = arena.ensureDimension("d.edge");
+  ASSERT_TRUE(arena.bindDimension(dim, space, foreign.dim));
+  const CellRef proxyA = arena.proxyFor(space, a);
+
+  ASSERT_FALSE(arena.findExistingProxy(space, b));
+  EXPECT_FALSE(arena.linked(proxyA, dim, DimVector::POS));
+  zigzag::expectWritten(arena.link(proxyA, dim, DimVector::POS, std::nullopt));
+
+  const auto proxyB = arena.findExistingProxy(space, b);
+  ASSERT_TRUE(proxyB);
+  EXPECT_FALSE(arena.linked(*proxyB, dim, DimVector::NEG));
+  EXPECT_EQ(foreign.manifold.linked(a, foreign.dim, DimVector::POS), b);
+  EXPECT_EQ(foreign.manifold.linked(b, foreign.dim, DimVector::NEG), a);
+}
+
+TEST(ArenaFederationTest,
+     ReplacingForeignEdgesOnBothEndsClearsTheirArenaReciprocals) {
+  auto foreign    = makeForeignLine("replace_both_ends", 4, {{0, 1}, {3, 2}});
+  const CellRef a = foreign.cells[0];
+  const CellRef b = foreign.cells[1];
+  const CellRef d = foreign.cells[3];
+  const CellRef c = foreign.cells[2];
+  ArenaManifold arena;
+  const auto space = arena.attach(Space{.manifold = &foreign.manifold,
+                                        .store    = foreign.store.get(),
+                                        .label    = "foreign"});
+  const auto dim   = arena.ensureDimension("d.edge");
+  ASSERT_TRUE(arena.bindDimension(dim, space, foreign.dim));
+  const CellRef proxyA = arena.proxyFor(space, a);
+  const CellRef proxyC = arena.proxyFor(space, c);
+
+  zigzag::expectWritten(arena.link(proxyA, dim, DimVector::POS, proxyC));
+
+  const auto proxyB = arena.findExistingProxy(space, b);
+  const auto proxyD = arena.findExistingProxy(space, d);
+  ASSERT_TRUE(proxyB);
+  ASSERT_TRUE(proxyD);
+  EXPECT_FALSE(arena.linked(*proxyB, dim, DimVector::NEG));
+  EXPECT_FALSE(arena.linked(*proxyD, dim, DimVector::POS));
+  EXPECT_EQ(arena.linked(proxyA, dim, DimVector::POS), proxyC);
+  EXPECT_EQ(arena.linked(proxyC, dim, DimVector::NEG), proxyA);
+  EXPECT_EQ(foreign.manifold.linked(a, foreign.dim, DimVector::POS), b);
+  EXPECT_EQ(foreign.manifold.linked(d, foreign.dim, DimVector::POS), c);
+}
+
+TEST(ArenaFederationTest,
+     EditingOneProxyDirectionPreservesItsOtherDelegatedDirection) {
+  auto foreign = makeForeignLine("shadow_one_direction", 3, {{0, 1}, {2, 0}});
+  const CellRef a = foreign.cells[0];
+  const CellRef b = foreign.cells[1];
+  const CellRef c = foreign.cells[2];
+  ArenaManifold arena;
+  const auto space = arena.attach(Space{.manifold = &foreign.manifold,
+                                        .store    = foreign.store.get(),
+                                        .label    = "foreign"});
+  const auto dim   = arena.ensureDimension("d.edge");
+  ASSERT_TRUE(arena.bindDimension(dim, space, foreign.dim));
+  const CellRef proxyA    = arena.proxyFor(space, a);
+  const CellRef proxyC    = arena.proxyFor(space, c);
+  const CellRef customPos = arena.makeCell("local pos");
+  const CellRef customNeg = arena.makeCell("local neg");
+
+  zigzag::expectWritten(arena.link(proxyA, dim, DimVector::POS, customPos));
+  const auto proxyB = arena.findExistingProxy(space, b);
+  ASSERT_TRUE(proxyB);
+  EXPECT_FALSE(arena.linked(*proxyB, dim, DimVector::NEG));
+  EXPECT_EQ(arena.linked(proxyA, dim, DimVector::NEG), proxyC);
+
+  zigzag::expectWritten(arena.link(proxyA, dim, DimVector::NEG, customNeg));
+  ASSERT_EQ(arena.findExistingProxy(space, c), proxyC);
+  EXPECT_FALSE(arena.linked(proxyC, dim, DimVector::POS));
+  EXPECT_EQ(arena.linked(proxyA, dim, DimVector::POS), customPos);
+  EXPECT_EQ(arena.linked(proxyA, dim, DimVector::NEG), customNeg);
+  EXPECT_EQ(arena.linked(customPos, dim, DimVector::NEG), proxyA);
+}
+
+TEST(ArenaFederationTest, ReplacementKeepsEqualForeignIndexesInTheirOwnSpaces) {
+  auto first  = makeForeignLine("same_index_first", 2, {{0, 1}});
+  auto second = makeForeignLine("same_index_second", 2, {{0, 1}});
+  ASSERT_EQ(first.cells[0], second.cells[0]);
+  ASSERT_EQ(first.cells[1], second.cells[1]);
+  ArenaManifold arena;
+  const auto firstSpace  = arena.attach(Space{.manifold = &first.manifold,
+                                              .store    = first.store.get(),
+                                              .label    = "first"});
+  const auto secondSpace = arena.attach(Space{.manifold = &second.manifold,
+                                              .store    = second.store.get(),
+                                              .label    = "second"});
+  const auto dim         = arena.ensureDimension("d.edge");
+  ASSERT_TRUE(arena.bindDimension(dim, firstSpace, first.dim));
+  ASSERT_TRUE(arena.bindDimension(dim, secondSpace, second.dim));
+  const CellRef firstA  = arena.proxyFor(firstSpace, first.cells[0]);
+  const CellRef secondB = arena.proxyFor(secondSpace, second.cells[1]);
+  const CellRef firstB  = arena.proxyFor(firstSpace, first.cells[1]);
+  const CellRef secondA = arena.proxyFor(secondSpace, second.cells[0]);
+  ASSERT_NE(firstA, secondA);
+  ASSERT_NE(firstB, secondB);
+
+  zigzag::expectWritten(arena.link(firstA, dim, DimVector::POS, secondB));
+
+  EXPECT_EQ(arena.linked(firstA, dim, DimVector::POS), secondB);
+  EXPECT_FALSE(arena.linked(firstB, dim, DimVector::NEG));
+  EXPECT_FALSE(arena.linked(secondA, dim, DimVector::POS));
+  EXPECT_EQ(
+      arena.foreignOf(firstB),
+      (std::optional<ForeignRef>{ForeignRef{firstSpace, first.cells[1]}}));
+  EXPECT_EQ(
+      arena.foreignOf(secondB),
+      (std::optional<ForeignRef>{ForeignRef{secondSpace, second.cells[1]}}));
+  EXPECT_EQ(first.manifold.linked(first.cells[0], first.dim, DimVector::POS),
+            first.cells[1]);
+  EXPECT_EQ(second.manifold.linked(second.cells[0], second.dim, DimVector::POS),
+            second.cells[1]);
+}
+
+TEST(ArenaFederationTest,
+     ProxySelfLinkDoesNotDuplicateStoreRefsOrMintAnotherIdentity) {
+  auto foreign = makeForeignLine("proxy_self_link", 1, {});
+  ArenaManifold arena;
+  const auto space     = arena.attach(Space{.manifold = &foreign.manifold,
+                                            .store    = foreign.store.get(),
+                                            .label    = "foreign"});
+  const auto dim       = arena.ensureDimension("d.self");
+  const CellRef proxy  = arena.proxyFor(space, foreign.cells.front());
+  const auto storeRefs = arena.dimensionNamed("d.store-refs");
+  ASSERT_TRUE(storeRefs);
+  const CellRef storeCell = *arena.spaceAt(space)->storeCell;
+  ASSERT_EQ(arena.linked(storeCell, *storeRefs, DimVector::POS), proxy);
+  EXPECT_FALSE(arena.linked(proxy, *storeRefs, DimVector::POS));
+
+  zigzag::expectWritten(arena.link(proxy, dim, DimVector::POS, proxy));
+
+  EXPECT_EQ(arena.linked(proxy, dim, DimVector::POS), proxy);
+  EXPECT_EQ(arena.linked(proxy, dim, DimVector::NEG), proxy);
+  EXPECT_EQ(arena.proxyFor(space, foreign.cells.front()), proxy);
+  EXPECT_EQ(arena.linked(storeCell, *storeRefs, DimVector::POS), proxy);
+  EXPECT_FALSE(arena.linked(proxy, *storeRefs, DimVector::POS));
+}
+
+TEST(ArenaFederationTest, ProxyBookkeepingShadowsABaseOwnedRootStoreCell) {
+  auto store                = createTestStore(tempStoreDir("proxy_base_root"));
+  auto version              = store->sliceGenesis(MicroversionId{});
+  version                   = store->makeCell(version, "foreign payload");
+  const CellRef foreignCell = store->cellRefOf(version).value();
+  const Manifold base       = store->rebuildManifold(version);
+  const auto root           = base.home();
+  ASSERT_TRUE(root);
+
+  ArenaManifold arena(&base, store.get());
+  const auto space     = arena.attach(Space{.manifold  = &base,
+                                            .store     = store.get(),
+                                            .storeCell = *root,
+                                            .label     = "base root"});
+  const CellRef proxy  = arena.proxyFor(space, foreignCell);
+  const auto storeRefs = arena.dimensionNamed("d.store-refs");
+  ASSERT_TRUE(storeRefs);
+
+  EXPECT_TRUE(arena.holdsOwn(*root));
+  EXPECT_EQ(arena.linked(*root, *storeRefs, DimVector::POS), proxy);
+  EXPECT_EQ(arena.linked(proxy, *storeRefs, DimVector::NEG), *root);
+  EXPECT_EQ(arena.findExistingProxy(space, foreignCell), proxy);
+}
+
+TEST(ArenaFederationTest,
+     ProxyFactoryRefusesARequestedCellWithAuthoredStoreRefsEdges) {
+  auto store      = createTestStore(tempStoreDir("proxy_store_refs_collision"));
+  auto version    = store->sliceGenesis(MicroversionId{});
+  const auto axis = store->makeDimension(version, "d.store-refs");
+  version         = axis.version;
+  version         = store->makeCell(version, "source A");
+  const CellRef a = store->cellRefOf(version).value();
+  version         = store->makeCell(version, "source B");
+  const CellRef b = store->cellRefOf(version).value();
+  version         = store->setLink(version, a, axis.dim, false, b);
+  const Manifold manifold = store->rebuildManifold(version);
+
+  ArenaManifold arena;
+  const auto space = arena.attach(
+      Space{.manifold = &manifold, .store = store.get(), .label = "source"});
+  const auto internalAxis = arena.dimensionNamed("d.store-refs");
+  ASSERT_TRUE(internalAxis);
+  ASSERT_EQ(arena.dimIn(space, *internalAxis), axis.dim);
+  const auto storeCell   = *arena.spaceAt(space)->storeCell;
+  const auto cellsBefore = arena.cellCount();
+
+  try {
+    static_cast<void>(arena.proxyFor(space, a));
+    FAIL()
+        << "proxying a source cell on the internal store-refs axis must refuse";
+  } catch (const std::logic_error &error) {
+    EXPECT_THAT(
+        error.what(),
+        ::testing::HasSubstr(
+            "proxy store-ref append conflicts with a source-axis neighbor"));
+  }
+
+  EXPECT_EQ(arena.cellCount(), cellsBefore);
+  EXPECT_FALSE(arena.findExistingProxy(space, a));
+  EXPECT_FALSE(arena.linked(storeCell, *internalAxis, DimVector::POS));
+  std::size_t proxyCount = 0;
+  arena.forEachProxy(space,
+                     [&](const CellRef, const CellRef) { proxyCount++; });
+  EXPECT_EQ(proxyCount, 0U);
+  EXPECT_EQ(manifold.linked(a, axis.dim, DimVector::POS), b);
+  EXPECT_EQ(manifold.linked(b, axis.dim, DimVector::NEG), a);
+}
+
+TEST(ArenaFederationTest,
+     LateDimensionBindingRefusesAnUnshadowedSourceTailNeighbor) {
+  auto firstStore = createTestStore(tempStoreDir("late_store_refs_first"));
+  auto firstVer   = firstStore->sliceGenesis(MicroversionId{});
+  const auto axis = firstStore->makeDimension(firstVer, "d.late-edge");
+  firstVer        = axis.version;
+  firstVer        = firstStore->makeCell(firstVer, "tail source");
+  const CellRef tailSource = firstStore->cellRefOf(firstVer).value();
+  firstVer                 = firstStore->makeCell(firstVer, "tail neighbor");
+  const CellRef sourceNeighbor = firstStore->cellRefOf(firstVer).value();
+  firstVer = firstStore->makeCell(firstVer, "unrelated requested source");
+  const CellRef requestedSource = firstStore->cellRefOf(firstVer).value();
+  firstVer = firstStore->setLink(firstVer, tailSource, axis.dim, false,
+                                 sourceNeighbor);
+  const Manifold firstManifold = firstStore->rebuildManifold(firstVer);
+
+  auto secondStore = createTestStore(tempStoreDir("late_store_refs_second"));
+  auto secondVer   = secondStore->sliceGenesis(MicroversionId{});
+  secondVer        = secondStore->makeCell(secondVer, "other source");
+  const Manifold secondManifold = secondStore->rebuildManifold(secondVer);
+
+  ArenaManifold arena;
+  const auto firstSpace   = arena.attach(Space{
+        .manifold = &firstManifold, .store = firstStore.get(), .label = "first"});
+  const auto secondSpace  = arena.attach(Space{.manifold = &secondManifold,
+                                               .store    = secondStore.get(),
+                                               .label    = "second"});
+  const auto internalAxis = arena.dimensionNamed("d.store-refs");
+  ASSERT_TRUE(internalAxis);
+  ASSERT_FALSE(arena.dimIn(firstSpace, *internalAxis));
+  const CellRef tailProxy = arena.proxyFor(firstSpace, tailSource);
+  ASSERT_EQ(arena.findExistingProxy(firstSpace, tailSource), tailProxy);
+  ASSERT_FALSE(arena.findExistingProxy(firstSpace, sourceNeighbor));
+  ASSERT_EQ(arena.spaceCount(), 2U);
+
+  arena.bindDimension(*internalAxis, firstSpace, axis.dim);
+  ASSERT_EQ(arena.dimIn(firstSpace, *internalAxis), axis.dim);
+  const auto cellsBefore = arena.cellCount();
+  const auto storeCell   = *arena.spaceAt(firstSpace)->storeCell;
+
+  try {
+    static_cast<void>(arena.proxyFor(firstSpace, requestedSource));
+    FAIL() << "late binding must not hide the tail's delegated POS edge";
+  } catch (const std::logic_error &error) {
+    EXPECT_THAT(
+        error.what(),
+        ::testing::HasSubstr("proxy store-ref tail has a source POS neighbor"));
+  }
+
+  EXPECT_EQ(arena.cellCount(), cellsBefore);
+  EXPECT_FALSE(arena.findExistingProxy(firstSpace, requestedSource));
+  EXPECT_EQ(arena.findExistingProxy(firstSpace, tailSource), tailProxy);
+  EXPECT_EQ(arena.linked(storeCell, *internalAxis, DimVector::POS), tailProxy);
+  EXPECT_EQ(arena.linked(tailProxy, *internalAxis, DimVector::NEG), storeCell);
+  EXPECT_EQ(firstManifold.linked(tailSource, axis.dim, DimVector::POS),
+            sourceNeighbor);
+  EXPECT_EQ(firstManifold.linked(sourceNeighbor, axis.dim, DimVector::NEG),
+            tailSource);
+  std::size_t proxyCount = 0;
+  arena.forEachProxy(firstSpace,
+                     [&](const CellRef, const CellRef) { proxyCount++; });
+  EXPECT_EQ(proxyCount, 1U);
+  EXPECT_EQ(secondSpace, 2U);
+}
+
+TEST(ArenaFederationTest,
+     ProxyFactoryRefusesUnboundLiteralStoreRefsAxisNeighbors) {
+  auto firstStore = createTestStore(tempStoreDir("unbound_store_refs_first"));
+  auto firstVer   = firstStore->sliceGenesis(MicroversionId{});
+  const auto axis = firstStore->makeDimension(firstVer, "d.store-refs");
+  firstVer        = axis.version;
+  firstVer        = firstStore->makeCell(firstVer, "source neighbor");
+  const CellRef neighbor  = firstStore->cellRefOf(firstVer).value();
+  firstVer                = firstStore->makeCell(firstVer, "requested source");
+  const CellRef requested = firstStore->cellRefOf(firstVer).value();
+  firstVer =
+      firstStore->setLink(firstVer, neighbor, axis.dim, false, requested);
+  const Manifold firstManifold = firstStore->rebuildManifold(firstVer);
+
+  auto secondStore = createTestStore(tempStoreDir("unbound_store_refs_second"));
+  auto secondVer   = secondStore->sliceGenesis(MicroversionId{});
+  secondVer        = secondStore->makeCell(secondVer, "second source");
+  const Manifold secondManifold = secondStore->rebuildManifold(secondVer);
+
+  ArenaManifold arena;
+  const auto firstSpace = arena.attach(Space{
+      .manifold = &firstManifold, .store = firstStore.get(), .label = "first"});
+  static_cast<void>(arena.attach(Space{.manifold = &secondManifold,
+                                       .store    = secondStore.get(),
+                                       .label    = "second"}));
+  const auto internalAxis = arena.dimensionNamed("d.store-refs");
+  ASSERT_TRUE(internalAxis);
+  ASSERT_FALSE(arena.dimIn(firstSpace, *internalAxis));
+  const auto cellsBefore = arena.cellCount();
+  const auto storeCell   = *arena.spaceAt(firstSpace)->storeCell;
+
+  try {
+    static_cast<void>(arena.proxyFor(firstSpace, requested));
+    FAIL() << "an unbound literal store-refs source axis must refuse proxying";
+  } catch (const std::logic_error &error) {
+    EXPECT_THAT(
+        error.what(),
+        ::testing::HasSubstr(
+            "proxy store-ref append conflicts with a source-axis neighbor"));
+  }
+
+  EXPECT_EQ(arena.cellCount(), cellsBefore);
+  EXPECT_FALSE(arena.findExistingProxy(firstSpace, requested));
+  EXPECT_FALSE(arena.linked(storeCell, *internalAxis, DimVector::POS));
+  EXPECT_EQ(firstManifold.linked(requested, axis.dim, DimVector::NEG),
+            neighbor);
+  EXPECT_EQ(firstManifold.linked(neighbor, axis.dim, DimVector::POS),
+            requested);
+  std::size_t proxyCount = 0;
+  arena.forEachProxy(firstSpace,
+                     [&](const CellRef, const CellRef) { proxyCount++; });
+  EXPECT_EQ(proxyCount, 0U);
+}
+
+TEST(ArenaFederationTest, CapacityRefusalOnOwnedTargetDoesNotShadowBaseSource) {
+  auto store   = createTestStore(tempStoreDir("base_capacity_refusal"));
+  auto version = store->sliceGenesis(MicroversionId{});
+  version      = store->makeCell(version, "base source");
+  const CellRef baseSource = store->cellRefOf(version).value();
+  const Manifold base      = store->rebuildManifold(version);
+  ArenaManifold arena(&base, store.get());
+  std::vector<CellRef> refs;
+  const auto [fullTarget, dimStores] = hydrateFullStoreRefsTail(arena, refs);
+  (void)dimStores;
+  const DimRef newDimension = fullTarget;
+  const auto cellsBefore    = arena.cellCount();
+  const auto shadowsBefore  = arena.shadowCount();
+
+  EXPECT_THROW(
+      (void)arena.link(baseSource, newDimension, DimVector::POS, fullTarget),
+      std::length_error);
+
+  EXPECT_EQ(arena.cellCount(), cellsBefore);
+  EXPECT_EQ(arena.shadowCount(), shadowsBefore);
+  EXPECT_FALSE(arena.linked(baseSource, newDimension, DimVector::POS));
+  EXPECT_FALSE(arena.linked(fullTarget, newDimension, DimVector::NEG));
+  EXPECT_EQ(arena.slot(fullTarget)->linkCount, zigzag::maxCellLinkRunCount);
+}
+
+TEST(ArenaFederationTest,
+     FullStoreRefsTailRefusalDoesNotPublishProxyAndNormalTailCanRetry) {
+  ArenaManifold saturated;
+  std::vector<CellRef> refs;
+  const auto [fullTail, dimStores] = hydrateFullStoreRefsTail(saturated, refs);
+  const auto fullSpace             = saturated.attach(
+      Space{.storeCell = fullTail, .label = "full store refs tail"});
+  const auto storeRefs = saturated.dimensionNamed("d.store-refs");
+  ASSERT_TRUE(storeRefs);
+  const auto fullCount = saturated.cellCount();
+
+  EXPECT_THROW((void)saturated.proxyFor(fullSpace, 42), std::length_error);
+
+  EXPECT_EQ(saturated.cellCount(), fullCount);
+  EXPECT_FALSE(saturated.findExistingProxy(fullSpace, 42));
+  EXPECT_FALSE(saturated.linked(fullTail, *storeRefs, DimVector::POS));
+  std::size_t saturatedProxyCount = 0;
+  saturated.forEachProxy(
+      fullSpace, [&](const CellRef, const CellRef) { saturatedProxyCount++; });
+  EXPECT_EQ(saturatedProxyCount, 0U);
+  EXPECT_EQ(saturated.linked(fullTail, dimStores, DimVector::POS), refs[1]);
+  EXPECT_THROW((void)saturated.proxyFor(fullSpace, 42), std::length_error);
+  EXPECT_EQ(saturated.cellCount(), fullCount);
+  EXPECT_FALSE(saturated.findExistingProxy(fullSpace, 42));
+  saturatedProxyCount = 0;
+  saturated.forEachProxy(
+      fullSpace, [&](const CellRef, const CellRef) { saturatedProxyCount++; });
+  EXPECT_EQ(saturatedProxyCount, 0U);
+
+  ArenaManifold retry;
+  const auto retrySpace = retry.attach(Space{.label = "retry"});
+  const auto retryTail  = *retry.spaceAt(retrySpace)->storeCell;
+  const auto retryRefs  = retry.dimensionNamed("d.store-refs");
+  ASSERT_TRUE(retryRefs);
+  const auto retryCount = retry.cellCount();
+  retry.setAllocationLimitForTesting(static_cast<std::uint32_t>(retryCount));
+
+  EXPECT_THROW((void)retry.proxyFor(retrySpace, 42), std::runtime_error);
+
+  EXPECT_EQ(retry.cellCount(), retryCount);
+  EXPECT_FALSE(retry.findExistingProxy(retrySpace, 42));
+  EXPECT_FALSE(retry.linked(retryTail, *retryRefs, DimVector::POS));
+  std::size_t retryProxyCount = 0;
+  retry.forEachProxy(retrySpace,
+                     [&](const CellRef, const CellRef) { retryProxyCount++; });
+  EXPECT_EQ(retryProxyCount, 0U);
+  retry.setAllocationLimitForTesting(
+      static_cast<std::uint32_t>(retryCount + 1));
+  const CellRef proxy = retry.proxyFor(retrySpace, 42);
+
+  EXPECT_EQ(retry.proxyFor(retrySpace, 42), proxy);
+  EXPECT_EQ(retry.cellCount(), retryCount + 1);
+  EXPECT_EQ(retry.findExistingProxy(retrySpace, 42), proxy);
+  retryProxyCount = 0;
+  retry.forEachProxy(retrySpace,
+                     [&](const CellRef actual, const CellRef index) {
+                       EXPECT_EQ(actual, proxy);
+                       EXPECT_EQ(index, 42U);
+                       retryProxyCount++;
+                     });
+  EXPECT_EQ(retryProxyCount, 1U);
+  EXPECT_EQ(retry.linked(retryTail, *retryRefs, DimVector::POS), proxy);
+  EXPECT_EQ(retry.linked(proxy, *retryRefs, DimVector::NEG), retryTail);
+  EXPECT_FALSE(retry.linked(proxy, *retryRefs, DimVector::POS));
+}
+
+TEST(ArenaFederationTest,
+     OuterRollbackRestoresProxyIdentityBookkeepingAndDelegatedEdges) {
+  auto foreign    = makeForeignLine("proxy_outer_rollback", 2, {{0, 1}});
+  const CellRef a = foreign.cells[0];
+  const CellRef b = foreign.cells[1];
+  ArenaManifold arena;
+  const auto space = arena.attach(Space{.manifold = &foreign.manifold,
+                                        .store    = foreign.store.get(),
+                                        .label    = "foreign"});
+  const auto dim   = arena.ensureDimension("d.edge");
+  ASSERT_TRUE(arena.bindDimension(dim, space, foreign.dim));
+  const auto storeRefs = arena.dimensionNamed("d.store-refs");
+  ASSERT_TRUE(storeRefs);
+  const CellRef storeCell       = *arena.spaceAt(space)->storeCell;
+  const std::size_t beforeCells = arena.cellCount();
+  const auto outer              = arena.mark();
+  const CellRef proxyA          = arena.proxyFor(space, a);
+  zigzag::expectWritten(arena.link(proxyA, dim, DimVector::POS, std::nullopt));
+  ASSERT_TRUE(arena.findExistingProxy(space, b));
+  ASSERT_TRUE(arena.linked(proxyA, *storeRefs, DimVector::NEG));
+
+  arena.release(outer);
+
+  EXPECT_EQ(arena.cellCount(), beforeCells);
+  EXPECT_FALSE(arena.findExistingProxy(space, a));
+  EXPECT_FALSE(arena.findExistingProxy(space, b));
+  EXPECT_FALSE(arena.linked(storeCell, *storeRefs, DimVector::POS));
+  EXPECT_EQ(foreign.manifold.linked(a, foreign.dim, DimVector::POS), b);
+  EXPECT_EQ(foreign.manifold.linked(b, foreign.dim, DimVector::NEG), a);
+}
+
+TEST(ArenaFederationTest,
+     FailedForeignReplacementRollsBackMintsButKeepsFuelSpent) {
+  auto foreign = makeForeignLine("proxy_atomic_failure", 4, {{0, 1}, {3, 2}});
+  ArenaManifold arena;
+  const auto space = arena.attach(Space{.manifold = &foreign.manifold,
+                                        .store    = foreign.store.get(),
+                                        .label    = "foreign"});
+  const auto dim   = arena.ensureDimension("d.edge");
+  ASSERT_TRUE(arena.bindDimension(dim, space, foreign.dim));
+  const CellRef proxyA   = arena.proxyFor(space, foreign.cells[0]);
+  const CellRef proxyC   = arena.proxyFor(space, foreign.cells[2]);
+  const auto cellsBefore = arena.cellCount();
+  arena.setAllocationLimitForTesting(
+      static_cast<std::uint32_t>(cellsBefore + 1));
+
+  EXPECT_THROW((void)arena.link(proxyA, dim, DimVector::POS, proxyC),
+               std::runtime_error);
+
+  EXPECT_EQ(arena.cellCount(), cellsBefore);
+  EXPECT_FALSE(arena.findExistingProxy(space, foreign.cells[1]));
+  EXPECT_FALSE(arena.findExistingProxy(space, foreign.cells[3]));
+  EXPECT_FALSE(arena.linked(proxyA, dim, DimVector::POS));
+  EXPECT_FALSE(arena.linked(proxyC, dim, DimVector::NEG));
+  EXPECT_EQ(
+      foreign.manifold.linked(foreign.cells[0], foreign.dim, DimVector::POS),
+      foreign.cells[1]);
+  EXPECT_EQ(
+      foreign.manifold.linked(foreign.cells[3], foreign.dim, DimVector::POS),
+      foreign.cells[2]);
+
+  arena.setExecutionLimits(static_cast<std::uint32_t>(cellsBefore + 8), 1,
+                           1024);
+  EXPECT_THROW((void)arena.link(proxyA, dim, DimVector::POS, proxyC),
+               std::runtime_error);
+  EXPECT_THROW(arena.consumeWork(), std::runtime_error);
+  EXPECT_EQ(arena.cellCount(), cellsBefore);
+  EXPECT_FALSE(arena.findExistingProxy(space, foreign.cells[1]));
+  EXPECT_FALSE(arena.findExistingProxy(space, foreign.cells[3]));
+  EXPECT_THROW((void)arena.link(proxyA, dim, DimVector::POS, proxyC),
+               std::runtime_error);
+  EXPECT_EQ(arena.cellCount(), cellsBefore);
+
+  arena.setExecutionLimits(static_cast<std::uint32_t>(cellsBefore + 8), 100,
+                           1024);
+  EXPECT_NO_THROW(
+      zigzag::expectWritten(arena.link(proxyA, dim, DimVector::POS, proxyC)));
 }
 
 // 12. promotingAProxyFilesAPlaceholder

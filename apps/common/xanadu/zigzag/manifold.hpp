@@ -315,6 +315,9 @@ static_assert(sizeof(CellSlot) == 32);
 /// spanCount field can name.
 inline constexpr std::size_t maxCellContentSpanCount =
     std::numeric_limits<decltype(CellSlot::spanCount)>::max();
+/// A cell's dimension run cannot exceed its 16-bit linkCount field.
+inline constexpr std::size_t maxCellLinkRunCount =
+    std::numeric_limits<decltype(CellSlot::linkCount)>::max();
 
 /// A borrowed cell slot, or nothing: what slot() answers. A reference into the
 /// manifold's slot array, so valid until the next fold or write grows it.

@@ -1,6 +1,7 @@
 #include "common/xanadu/zigzag/arena_manifold.hpp"
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <cstddef>
 #include <limits>
@@ -372,19 +373,83 @@ CellRef ArenaManifold::proxyFor(const std::uint32_t space,
     return it->second;
   }
 
-  const auto bits = (static_cast<std::uint64_t>(space) << 32) |
-                    static_cast<std::uint64_t>(foreignIndex);
-  const CellRef proxy = mintSlot(xanadu::ValueKind::ExternRef, bits, {});
+  const Mark savepoint = mark();
+  try {
+    const auto dimStoreRefs = ensureDimension("d.store-refs");
+    const auto &source      = spaces_[space - 1];
+    const auto sourceDimension =
+        [&](const std::uint32_t sourceId) -> std::optional<DimRef> {
+      if (const auto bound = dimIn(sourceId, dimStoreRefs); bound.has_value()) {
+        return bound;
+      }
+      const auto sourceSpace = spaceAt(sourceId);
+      if (!sourceSpace || !sourceSpace->manifold) {
+        return std::nullopt;
+      }
+      if (sourceSpace->reader != nullptr) {
+        return sourceSpace->manifold->dimensionNamed("d.store-refs",
+                                                     *sourceSpace->reader);
+      }
+      if (sourceSpace->store != nullptr) {
+        return sourceSpace->manifold->dimensionNamed("d.store-refs",
+                                                     *sourceSpace->store);
+      }
+      return sourceSpace->manifold->dimensionNamed("d.store-refs");
+    };
+    const auto sourceDim = sourceDimension(space);
+    if (sourceDim && source.manifold &&
+        (source.manifold->linked(foreignIndex, *sourceDim, DimVector::POS) ||
+         source.manifold->linked(foreignIndex, *sourceDim, DimVector::NEG))) {
+      throw std::logic_error(
+          "proxy store-ref append conflicts with a source-axis neighbor");
+    }
 
-  const auto dimStoreRefs = ensureDimension("d.store-refs");
-  CellRef tail            = spaceStoreRefsTail_[space - 1];
-  zigzag::expectWritten(link(tail, dimStoreRefs, DimVector::POS, proxy));
-  spaceStoreRefsTail_[space - 1] = proxy;
+    const CellRef tail = spaceStoreRefsTail_[space - 1];
+    if (isProxy(tail)) {
+      const auto dense = denseOf(tail);
+      const bool posShadowed =
+          dense.has_value() &&
+          proxyShadowedEdges_.contains(ShadowEdgeKey{
+              .dense = *dense, .dim = dimStoreRefs, .dir = DimVector::POS});
+      if (!posShadowed) {
+        if (const auto origin = foreignOf(tail); origin.has_value()) {
+          const auto originSpace = spaceAt(origin->space);
+          const auto originDim   = sourceDimension(origin->space);
+          if (originSpace && originSpace->manifold && originDim &&
+              originSpace->manifold->linked(origin->index, *originDim,
+                                            DimVector::POS)) {
+            throw std::logic_error(
+                "proxy store-ref tail has a source POS neighbor");
+          }
+        }
+      }
+    }
 
-  map[foreignIndex] = proxy;
-  proxyOrder_.push_back(
-      ProxyEntry{.space = space, .foreignIndex = foreignIndex, .proxy = proxy});
-  return proxy;
+    const auto bits = (static_cast<std::uint64_t>(space) << 32) |
+                      static_cast<std::uint64_t>(foreignIndex);
+    const CellRef proxy = mintSlot(xanadu::ValueKind::ExternRef, bits, {});
+
+    appendLocalLink(tail, dimStoreRefs, DimVector::POS, proxy);
+
+    // Record the undo key before publishing into the map. If node allocation
+    // fails, release() can erase the absent key and remove the minted slot.
+    proxyOrder_.push_back(ProxyEntry{
+        .space = space, .foreignIndex = foreignIndex, .proxy = proxy});
+    const auto [it, inserted] = map.emplace(foreignIndex, proxy);
+    if (!inserted) {
+      const CellRef existing = it->second;
+      proxyOrder_.pop_back();
+      release(savepoint);
+      return existing;
+    }
+    spaceStoreRefsTail_[space - 1] = proxy;
+    discard(savepoint);
+  } catch (...) {
+    release(savepoint);
+    throw;
+  }
+  const auto found = map.find(foreignIndex);
+  return found->second;
 }
 
 std::optional<CellRef>
@@ -864,15 +929,115 @@ void ArenaManifold::setOneSide(const std::uint32_t dense, const DimRef dim,
   trail(dense);
   if (isProxy(refOf(dense))) {
     const ShadowEdgeKey key{.dense = dense, .dim = dim, .dir = dir};
-    if (proxyShadowedEdges_.insert(key).second) {
+    if (!proxyShadowedEdges_.contains(key)) {
       proxyShadowedEdgeOrder_.push_back(key);
+      try {
+        proxyShadowedEdges_.insert(key);
+      } catch (...) {
+        proxyShadowedEdgeOrder_.pop_back();
+        throw;
+      }
     }
   }
   DimLink *const edge = linkFor(dense, dim);
   if (nullptr == edge) {
-    return;
+    throw std::length_error(
+        "arena cell link run exceeds CellSlot::linkCount limit " +
+        std::to_string(maxCellLinkRunCount));
   }
   edge->encodedNeighbor(dir) = to;
+}
+
+void ArenaManifold::appendLocalLink(const CellRef from, const DimRef dim,
+                                    const DimVector dir, const CellRef to) {
+  const auto fromOld = localLink(from, dim);
+  const auto toOld   = localLink(to, dim);
+  const auto displacedFrom =
+      fromOld.has_value() ? fromOld->neighbor(dir) : std::nullopt;
+  const auto displacedTo =
+      toOld.has_value() ? toOld->neighbor(-dir) : std::nullopt;
+
+  std::array<SideWrite, 4> writes{};
+  std::size_t writeCount = 0;
+  auto add               = [&](const CellRef cell, const DimVector side,
+                 const std::optional<CellRef> neighbor) {
+    writes[writeCount++] =
+        SideWrite{.cell = cell, .dir = side, .neighbor = neighbor};
+  };
+
+  if (displacedFrom && displacedFrom != to) {
+    add(*displacedFrom, -dir, std::nullopt);
+  }
+  if (displacedTo && displacedTo != from) {
+    add(*displacedTo, dir, std::nullopt);
+  }
+  add(to, -dir, from);
+  add(from, dir, to);
+
+  applyLinkWrites(dim, std::span{writes}.first(writeCount));
+}
+
+std::optional<DimLink> ArenaManifold::localLink(const CellRef cell,
+                                                const DimRef dim) const {
+  if (const auto dense = denseOf(cell); dense.has_value()) {
+    const auto &slot = slots_[*dense];
+    for (std::uint16_t i = 0; i < slot.linkCount; i++) {
+      const auto &edge = links_[static_cast<std::size_t>(slot.linkOffset) + i];
+      if (edge.dim == dim) {
+        return edge;
+      }
+    }
+    return std::nullopt;
+  }
+  if (base_ != nullptr && base_->contains(cell)) {
+    for (const auto &edge : base_->dimensionsOf(cell)) {
+      if (edge.dim == dim) {
+        return edge;
+      }
+    }
+  }
+  return std::nullopt;
+}
+
+void ArenaManifold::applyLinkWrites(const DimRef dim,
+                                    const std::span<const SideWrite> writes) {
+  std::array<std::uint32_t, 4> denseRows{};
+  if (writes.size() > denseRows.size()) {
+    throw std::logic_error("arena link write plan exceeds four sides");
+  }
+
+  // Capacity is checked against the current owner before shadow() can create
+  // a COW slot, so a full base row leaves the overlay unchanged on refusal.
+  for (std::size_t i = 0; i < writes.size(); i++) {
+    const auto &write     = writes[i];
+    std::size_t linkCount = 0;
+    if (const auto dense = denseOf(write.cell); dense.has_value()) {
+      linkCount = slots_[*dense].linkCount;
+    } else if (base_ != nullptr && base_->contains(write.cell)) {
+      linkCount = base_->dimensionsOf(write.cell).size();
+    } else {
+      throw std::logic_error("arena link write plan names an unknown cell");
+    }
+    if (!localLink(write.cell, dim).has_value() &&
+        linkCount >= maxCellLinkRunCount) {
+      throw std::length_error(
+          "arena cell link run exceeds CellSlot::linkCount limit " +
+          std::to_string(maxCellLinkRunCount));
+    }
+  }
+
+  for (std::size_t i = 0; i < writes.size(); i++) {
+    const auto dense = shadow(writes[i].cell);
+    if (!dense.has_value()) {
+      throw std::logic_error("arena link write cell could not be shadowed");
+    }
+    denseRows[i] = *dense;
+  }
+
+  for (std::size_t i = 0; i < writes.size(); i++) {
+    const auto &write = writes[i];
+    setOneSide(denseRows[i], dim, write.dir, write.neighbor.value_or(noCell));
+  }
 }
 
 OptionalCell ArenaManifold::linked(const CellRef from, const DimRef dim,
@@ -1349,9 +1514,8 @@ ArenaResult ArenaManifold::setValueBits(const CellRef cell,
 ArenaResult ArenaManifold::link(const CellRef from, const DimRef dim,
                                 const DimVector dir,
                                 const std::optional<CellRef> to) {
-  // The dimension and the far end are only *read* here, so they are resolved
-  // rather than shadowed -- a link to a base cell shadows that cell because
-  // its reciprocal end changes, which is what the second shadow() below is.
+  // Resolve visible occupants first, then preflight every affected row before
+  // applyLinkWrites() creates any copy-on-write shadows.
   if (!contains(from)) {
     return std::unexpected{ArenaRefusal::UnknownCell};
   }
@@ -1362,46 +1526,76 @@ ArenaResult ArenaManifold::link(const CellRef from, const DimRef dim,
   if (to.has_value() && !contains(*to)) {
     return std::unexpected{ArenaRefusal::UnknownTarget};
   }
-  const auto dense = shadow(from);
-  if (!dense.has_value()) {
-    return std::unexpected{ArenaRefusal::UnknownCell};
-  }
-  const auto target = to.has_value() ? shadow(*to) : std::nullopt;
+  const auto needsForeignResolution = [&](const CellRef ref,
+                                          const DimVector side) {
+    const auto dense = denseOf(ref);
+    return dense.has_value() && isProxy(ref) &&
+           !proxyShadowedEdges_.contains(
+               ShadowEdgeKey{.dense = *dense, .dim = dim, .dir = side});
+  };
+  const auto visibleFrom = linked(from, dim, dir);
+  const auto visibleTo = to.has_value() ? linked(*to, dim, -dir) : std::nullopt;
+  const bool needsSavepoint =
+      needsForeignResolution(from, dir) ||
+      (to.has_value() && needsForeignResolution(*to, -dir)) ||
+      (visibleFrom.has_value() && needsForeignResolution(*visibleFrom, -dir)) ||
+      (visibleTo.has_value() && needsForeignResolution(*visibleTo, dir));
+  const std::optional<Mark> savepoint =
+      needsSavepoint ? std::optional<Mark>{mark()} : std::nullopt;
 
-  const auto d = *dense;
-  // Both sides read out before anything is touched: linkFor() can grow a run,
-  // and growing a run can move every DimLink in the arena.
-  std::optional<CellRef> displacedUs;
-  std::optional<CellRef> displacedIt;
-  if (const DimLink *const mine = existingLink(d, dim); nullptr != mine) {
-    displacedUs = mine->neighbor(dir);
-  }
-  if (target.has_value()) {
-    if (const DimLink *const theirs = existingLink(*target, dim);
-        nullptr != theirs) {
-      displacedIt = theirs->neighbor(-dir);
+  try {
+    // Resolve visible old occupants before shadowing or writing. A proxy may
+    // inherit either end from its foreign manifold, and linkedMinting gives
+    // that occupant its canonical arena identity.
+    const auto displacedUs = linkedMinting(from, dim, dir);
+    const auto displacedIt =
+        to.has_value() ? linkedMinting(*to, dim, -dir) : std::nullopt;
+
+    if (displacedUs && displacedUs != toCell) {
+      const auto inverse = linkedMinting(*displacedUs, dim, -dir);
+      if (inverse != from) {
+        throw std::logic_error("arena link has a mismatched visible inverse");
+      }
     }
+    if (to.has_value() && displacedIt && displacedIt != from) {
+      const auto inverse = linkedMinting(*displacedIt, dim, dir);
+      if (inverse != *to) {
+        throw std::logic_error("arena link has a mismatched visible inverse");
+      }
+    }
+
+    std::array<SideWrite, 4> writes{};
+    std::size_t writeCount = 0;
+    auto add               = [&](const CellRef cell, const DimVector side,
+                   const std::optional<CellRef> neighbor) {
+      writes[writeCount++] =
+          SideWrite{.cell = cell, .dir = side, .neighbor = neighbor};
+    };
+
+    // A link is one edge two cells share, so setting it breaks whatever each
+    // end held. Plan all clears before either new reciprocal end is written.
+    if (displacedUs && displacedUs != toCell) {
+      add(*displacedUs, -dir, std::nullopt);
+    }
+    if (displacedIt && displacedIt != from) {
+      add(*displacedIt, dir, std::nullopt);
+    }
+    if (to.has_value()) {
+      writes[writeCount++] =
+          SideWrite{.cell = *to, .dir = -dir, .neighbor = from};
+    }
+    writes[writeCount++] = SideWrite{.cell = from, .dir = dir, .neighbor = to};
+    applyLinkWrites(dim, std::span{writes}.first(writeCount));
+  } catch (...) {
+    if (savepoint.has_value()) {
+      release(*savepoint);
+    }
+    throw;
   }
 
-  // A link is one edge two cells share, so setting it breaks whatever each end
-  // held: the invariant is linked(a, d, dir) == b exactly when
-  // linked(b, d, -dir) == a. Maintained rather than derived, same as Manifold.
-  // shadow(), not denseOf(): a displaced occupant may still be living in the
-  // base, and clearing its end of the edge is a write like any other.
-  if (displacedUs && displacedUs != toCell) {
-    if (const auto other = shadow(*displacedUs); other.has_value()) {
-      setOneSide(*other, dim, -dir, noCell);
-    }
+  if (savepoint.has_value()) {
+    discard(*savepoint);
   }
-  if (displacedIt && displacedIt != from) {
-    if (const auto other = shadow(*displacedIt); other.has_value()) {
-      setOneSide(*other, dim, dir, noCell);
-    }
-  }
-  if (target.has_value()) {
-    setOneSide(*target, dim, -dir, from);
-  }
-  setOneSide(d, dim, dir, toCell);
   return this;
 }
 
@@ -1717,8 +1911,9 @@ ArenaManifold *ArenaManifold::release(const Mark &m) noexcept {
   const auto dimStoreRefs = dimensionNamed("d.store-refs");
   if (dimStoreRefs) {
     for (std::size_t s = 0; s < spaces_.size(); ++s) {
-      CellRef cur = *spaces_[s].storeCell;
-      while (cur != noCell) {
+      CellRef cur       = *spaces_[s].storeCell;
+      std::size_t limit = traversalBound();
+      while (cur != noCell && limit-- > 0) {
         const auto nxt = linked(cur, *dimStoreRefs, DimVector::POS);
         if (!nxt) {
           break;

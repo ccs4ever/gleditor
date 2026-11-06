@@ -178,6 +178,51 @@ TEST(ArenaManifoldTest, aLinkEvictsWhateverEitherEndHeld) {
   EXPECT_EQ(arena.m.linked(b, arena.step, DimVector::NEG), std::nullopt);
 }
 
+TEST(ArenaManifoldTest,
+     FullDimensionRunRefusesNewAxisWithoutWritingOnlyOneLinkEnd) {
+  constexpr std::size_t maxDimensions =
+      std::numeric_limits<std::uint16_t>::max();
+  ArenaManifold source;
+  std::vector<CellRef> refs;
+  refs.reserve(maxDimensions + 2);
+  for (std::size_t index = 0; index < maxDimensions + 2; ++index) {
+    refs.push_back(source.makeCell());
+  }
+
+  const auto mark = source.mark();
+  auto snapshot   = source.exportPrefix(mark);
+  ASSERT_TRUE(snapshot);
+  snapshot->links.reserve(maxDimensions);
+  for (std::size_t index = 0; index < maxDimensions; ++index) {
+    snapshot->links.push_back(zigzag::DimLink{.dim = refs[index + 1]});
+  }
+  auto &owner              = snapshot->slots.front();
+  owner.linkOffset         = 0;
+  owner.linkCount          = static_cast<std::uint16_t>(maxDimensions);
+  snapshot->mark.linkSize  = static_cast<std::uint32_t>(maxDimensions);
+  snapshot->mark.liveLinks = static_cast<std::uint32_t>(maxDimensions);
+
+  ArenaManifold arena;
+  ASSERT_TRUE(arena.hydratePrefix(*snapshot));
+  const CellRef fullOwner = refs.front();
+  const CellRef target    = refs.back();
+  const DimRef newDim     = target;
+
+  EXPECT_THROW((void)arena.link(fullOwner, newDim, DimVector::POS, target),
+               std::length_error);
+  EXPECT_FALSE(arena.linked(fullOwner, newDim, DimVector::POS));
+  EXPECT_FALSE(arena.linked(target, newDim, DimVector::NEG));
+  ASSERT_TRUE(arena.slot(fullOwner));
+  EXPECT_EQ(arena.slot(fullOwner)->linkCount, maxDimensions);
+  ASSERT_TRUE(arena.slot(target));
+  EXPECT_EQ(arena.slot(target)->linkCount, 0U);
+
+  const DimRef existingDim = refs[1];
+  ASSERT_TRUE(arena.link(fullOwner, existingDim, DimVector::POS, target));
+  EXPECT_EQ(arena.linked(fullOwner, existingDim, DimVector::POS), target);
+  EXPECT_EQ(arena.linked(target, existingDim, DimVector::NEG), fullOwner);
+}
+
 TEST(ArenaManifoldTest, aLinkNeedsCellsThisArenaHolds) {
   Arena arena;
   const auto a = arena.m.makeCell("a");

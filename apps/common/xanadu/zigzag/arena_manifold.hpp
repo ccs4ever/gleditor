@@ -730,6 +730,15 @@ private:
   [[nodiscard]] DimLink *existingLink(std::uint32_t dense, DimRef dim) noexcept;
   [[nodiscard]] DimLink *linkFor(std::uint32_t dense, DimRef dim);
   void setOneSide(std::uint32_t dense, DimRef dim, DimVector dir, CellRef to);
+  struct SideWrite {
+    CellRef cell;
+    DimVector dir;
+    std::optional<CellRef> neighbor;
+  };
+  [[nodiscard]] std::optional<DimLink> localLink(CellRef cell,
+                                                 DimRef dim) const;
+  void applyLinkWrites(DimRef dim, std::span<const SideWrite> writes);
+  void appendLocalLink(CellRef from, DimRef dim, DimVector dir, CellRef to);
   void setContentAt(std::uint32_t dense,
                     std::span<const xanadu::PrimediaSpan> spans);
 

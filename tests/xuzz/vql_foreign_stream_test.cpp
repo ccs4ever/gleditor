@@ -133,11 +133,16 @@ TEST(VQLForeignStreamTest,
     QueryExecutor executor(h.engine, h.vm, {.mode = mode});
     const auto result = executor.execute("./-d.items::rank", {h.anchor});
     ASSERT_TRUE(result) << result.error().message;
-    ASSERT_EQ(result->size(), 4u);
-    EXPECT_EQ(result->back(), h.anchor);
-    const auto first = h.arena.foreignOf((*result)[2]);
+    ASSERT_EQ(result->size(), 2u);
+    const auto first = h.arena.foreignOf(result->front());
     ASSERT_TRUE(first);
     EXPECT_EQ(first->index, h.foreign[0]);
+    EXPECT_EQ(result->back(), h.anchor);
+
+    const auto localComponent = executor.execute("./-d.items", {middle});
+    ASSERT_TRUE(localComponent) << localComponent.error().message;
+    EXPECT_EQ(*localComponent, (std::vector<CellRef>{local}));
+    EXPECT_EQ(h.arena.linked(local, h.dimension, DimVector::POS), middle);
   }
 }
 
@@ -163,9 +168,18 @@ TEST(VQLForeignStreamTest,
     EXPECT_EQ(*master, (std::vector<CellRef>{h.anchor}));
     const auto first  = h.arena.proxyFor(h.space, h.foreign.front());
     const auto second = h.arena.proxyFor(h.space, h.foreign[1]);
-    // A local closure can leave a foreign incoming edge pointing into a cycle.
+    // The late-bound proxy rank must first replace the authored representative
+    // with its matching proxy. The local closure then forms a reciprocal
+    // two-cell cycle and detaches the former tail neighbor.
+    zigzag::expectWritten(
+        h.arena.link(h.anchor, h.core.dims().clone, DimVector::POS, first));
     zigzag::expectWritten(
         h.arena.link(first, h.core.dims().clone, DimVector::NEG, second));
+    EXPECT_EQ(h.arena.linked(first, h.core.dims().clone, DimVector::NEG),
+              second);
+    EXPECT_EQ(h.arena.linked(second, h.core.dims().clone, DimVector::POS),
+              first);
+    EXPECT_FALSE(h.arena.linked(tail, h.core.dims().clone, DimVector::NEG));
     const auto lasso = executor.execute("$x>");
     ASSERT_TRUE(lasso) << lasso.error().message;
     EXPECT_EQ(*lasso, (std::vector<CellRef>{tail}));
