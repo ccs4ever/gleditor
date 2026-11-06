@@ -174,7 +174,10 @@ written and then read as 0. With half-life `H` events and `b = 2^(-1/H)`, comput
 `Exp` is `std::exp` (`vortex/vortex_vm.cpp`), a libm call whose last bit varies across C libraries,
 so hosts agree to a few ulps per update and not bit for bit (codebase r3 m4). A reading whose `f`
 sits within an ulp of `suspect_fraction` can flip state on another host; this is D1's tolerance, and
-the stamp is not replay-deterministic (3.4).
+the stamp is not replay-deterministic (3.4). (Superseded by I3-2a-r, I4-D1 3.9 and section 12: `b`
+and `1 - b` now come from the `expm1` series of `decay`, `H = 1` exactly 1/2, so `R`, `N` and `f`
+are bit-identical on every host for single-event updates; only a note's `b^n` with
+`n ln2 / H >= 1/2` still calls `Exp`. Validation: [i3-validation.md](i3-validation.md), I3-2a-r.)
 
 **The rescale, then the update (R3-9).** Before every update the IR compares `N` with the cap in
 force, `cap = 1/(1 - b)`. If `N > cap` it sets `R <- R cap / N` and `N <- cap`, preserving
@@ -381,10 +384,24 @@ SUSPECT for about 64 hours; only a reset shortens that, and the Schema notes say
 
 The declared interpretation (P19 5.1): **SUSPECT means about a quarter or more of the source's last
 few dozen counted outcomes were unusable** (epistemology r3 m1: counted, not all; 3.1 lists what is
-not counted). A source refusing under 10% stays NOMINAL; between 15% and 25% the state is noisy by
-nature. The state is for display, the latch and audit; I4 uses the continuous `f` (section 13). This
-is not P19's "three consecutive rejections", a streak of gate rejections that I4 adds to the state
-rule with its own thresholds under decision O10 (I3-2 pre-commits no streak).
+not counted). A source whose refusals are **independent** and under 10% stays NOMINAL; between 15%
+and 25% the state is noisy by nature. Refusals that arrive in bursts (a failure inside a long note,
+a clock mapping misconfigured for a minute, a firmware update) do not stay NOMINAL at the same
+marginal rate (I4-D1 section 12; measured by `BurstsAtFivePercentReachSuspect`, I3-2a-r):
+
+| Marginal refusal rate 5%, bursts of | SUSPECT onsets per $10^6$ events | time in SUSPECT |
+| ----------------------------------- | -------------------------------- | --------------- |
+| 1 (independent)                     | 0                                | 0               |
+| 4                                   | 121                              | 0.06%           |
+| 8                                   | 911                              | 0.97%           |
+| 16                                  | 2,819                            | 4.7%            |
+
+($H = 32$, `suspect_fraction` 0.25, `min_events` 8; I4-D1's `i32a_burst.py` gives 126, 970 and 2,868
+onsets from another generator.) From steady state 14 consecutive refusals reach SUSPECT and 13 do
+not. SUSPECT from the fraction clears itself as the burst decays and latches nothing (3.4). The
+state is for display, the latch and audit; I4 uses the continuous `f` (section 13). This is not
+P19's "three consecutive rejections", a streak of gate rejections that I4 adds to the state rule
+with its own thresholds under decision O10 (I3-2 pre-commits no streak).
 
 Validation: `validate()` keeps per-field domains and the one relation whose violation is silent:
 `healthHalfLife` in [1, 10^6], a finite `suspectFraction` in (0, 1\], `suspectMinEvents` in \[1,

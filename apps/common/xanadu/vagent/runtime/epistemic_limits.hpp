@@ -8,6 +8,7 @@
 #include "common/xanadu/zigzag/manifold.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -155,15 +156,64 @@ epistemicLimitErrorName(EpistemicLimitError error) noexcept {
   return "Unknown";
 }
 
-/// The per-event decay `b = 2^(-1/H)`, computed as the IR does
-/// (`Exp(-ln2 / H)`) so the host and the estimator routine agree.
+/// Terms of the `expm1` series of I4-D1 3.3: on `|y| <= 1/2` the first
+/// omitted term, `y^19 / 19!`, is below `1.6e-23`.
+inline constexpr std::size_t kExpm1SeriesOrder = 18;
+
+/// `1/k!` for `k <= 18` as the nearest doubles: `k!` is exact in a double up
+/// to `18!` (below `2^53`), so each quotient is one correctly rounded division,
+/// the same bits the reference generator's `float(1/k!)` holds.
+inline constexpr auto kExpm1SeriesCoefficients = [] {
+  std::array<double, kExpm1SeriesOrder + 1> c{};
+  double factorial = 1.0;
+  for (std::size_t k = 0; k <= kExpm1SeriesOrder; ++k) {
+    if (k > 0) factorial *= static_cast<double>(k);
+    c.at(k) = 1.0 / factorial;
+  }
+  return c;
+}();
+
+/// `expm1(y)` for `|y| <= 1/2` by the Horner form of I4-D1 3.3,
+/// `y (1 + y/2! + ... + y^17/18!)`. It calls no libm, so it is the same bits on
+/// every host (T0); the emitted routine runs the same `Mul`, `Add` sequence.
+/// The product and the sum are separate statements so that a compiler allowed
+/// to contract only within an expression cannot fuse them into an FMA, which
+/// would change the bits the IR (separate opcodes) produces.
+[[nodiscard]] inline double expm1Series(double y) {
+  double acc = kExpm1SeriesCoefficients[kExpm1SeriesOrder];
+  for (std::size_t k = kExpm1SeriesOrder - 1; k >= 1; --k) {
+    const double product = y * acc;
+    acc                  = kExpm1SeriesCoefficients.at(k) + product;
+  }
+  return y * acc;
+}
+
+/// The per-event decay `b = 2^(-1/H)` and its complement `1 - b`.
+struct HealthDecay {
+  double b;
+  double oneMinusB;
+};
+
+/// `b` and `1 - b` as the IR computes them (I4-D1 3.9): `x = ln2 / H <= 0.35`
+/// for `H >= 2`, so `b = 1 + expm1(-x)` comes from the series and `1 - b` is
+/// `-expm1(-x)`, never the subtraction of nearly equal numbers that moved the
+/// `min_events` domain bound by one across hosts at large `H` (NUM m3).
+/// `H = 1` is `b = 1/2` exactly. The host and the routine agree bit for bit.
+[[nodiscard]] inline HealthDecay healthDecayPair(std::int64_t halfLife) {
+  if (halfLife == 1) return {.b = 0.5, .oneMinusB = 0.5};
+  const double em = expm1Series(
+      -(std::numbers::ln2_v<double> / static_cast<double>(halfLife)));
+  return {.b = 1.0 + em, .oneMinusB = -em};
+}
+
+/// The per-event decay `b = 2^(-1/H)`.
 [[nodiscard]] inline double healthDecay(std::int64_t halfLife) {
-  return std::exp(-std::numbers::ln2_v<double> / static_cast<double>(halfLife));
+  return healthDecayPair(halfLife).b;
 }
 
 /// The largest `N` the estimator can reach, `1 / (1 - b)`.
 [[nodiscard]] inline double healthWeightCap(std::int64_t halfLife) {
-  return 1.0 / (1.0 - healthDecay(halfLife));
+  return 1.0 / healthDecayPair(halfLife).oneMinusB;
 }
 
 /// The settle reserve is one 64th of the slot allowance.

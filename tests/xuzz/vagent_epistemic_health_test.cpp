@@ -14,6 +14,8 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
+#include <fstream>
 #include <limits>
 #include <map>
 #include <memory>
@@ -21,6 +23,7 @@
 #include <optional>
 #include <random>
 #include <set>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -55,7 +58,8 @@ const std::string kP1(64, '1');
 const std::string kP2(64, '2');
 const std::string kRelay(64, 'a');
 
-/// The estimator of design 3.2, written out for one half-life.
+/// The estimator of design 3.2, written out for one half-life, operation for
+/// operation as the routine runs it (I3-2a-r), so the two agree bit for bit.
 struct Model {
   std::int64_t halfLife{32};
   double r{0.0};
@@ -75,14 +79,34 @@ struct Model {
     const auto events = k + c;
     if (events <= 0) return;
     rescale();
-    const double bn =
-        std::exp(-static_cast<double>(events) * std::numbers::ln2_v<double> /
-                 static_cast<double>(halfLife));
-    const double geo = (1.0 - bn) / (1.0 - b());
-    r = bn * r + static_cast<double>(k) / static_cast<double>(events) * geo;
-    n = bn * n + geo;
-    n = std::min(n, cap());
-    r = std::min(r, n);
+    // b^n as the IR forms it (I3-2a-r): b itself for one event, the series
+    // of `decay` while n ln2 / H < 1/2, `Exp` beyond.
+    const auto decay = healthDecayPair(halfLife);
+    double bn = decay.b, omn = decay.oneMinusB;
+    if (events != 1) {
+      const double x =
+          -std::numbers::ln2_v<double> / static_cast<double>(halfLife);
+      const double nx = static_cast<double>(events) * x;
+      if (nx > -0.5) {
+        const double em = expm1Series(nx);
+        bn              = 1.0 + em;
+        omn             = -em;
+      } else {
+        bn  = std::exp(nx);
+        omn = 1.0 - bn;
+      }
+    }
+    const double geo = omn / decay.oneMinusB;
+    // One operation per statement, in the IR's order, so that no compiler
+    // contraction separates the model's bits from the routine's.
+    const double share = static_cast<double>(k) / static_cast<double>(events);
+    const double t     = share * geo;
+    const double br    = bn * r;
+    r                  = br + t;
+    const double bw    = bn * n;
+    n                  = bw + geo;
+    n                  = std::min(n, cap());
+    r                  = std::min(r, n);
   }
   void accept() { note(0, 1); }
   void refuse() { note(1, 0); }
@@ -2057,6 +2081,316 @@ TEST_F(VagentEpistemicHealthActions, AtTheSlotReserveEveryHealthEntryRefuses) {
   // A turn that starts below the reserve may end a little above it.
   EXPECT_LE(arena().cellCount(), small.settings.epistemic.arenaSlots + reserve +
                                      (atAllowance - baseline));
+}
+
+// -- I3-2a-r: b by the series, the reference vectors and bursts ---------------
+
+/// One case of `tests/samples/vagent/epistemic_vectors.tsv` (I4-D1 4.4): its
+/// routine and its `key=value` fields.
+struct VectorCase {
+  std::string id;
+  std::string routine;
+  std::map<std::string, std::string, std::less<>> fields;
+
+  /// A hex-float field read back exactly.
+  [[nodiscard]] double real(std::string_view key) const {
+    return std::strtod(fields.find(key)->second.c_str(), nullptr);
+  }
+  [[nodiscard]] std::vector<double> reals(std::string_view key) const {
+    std::vector<double> out;
+    std::stringstream list(fields.find(key)->second);
+    for (std::string item; std::getline(list, item, ';');)
+      out.push_back(std::strtod(item.c_str(), nullptr));
+    return out;
+  }
+};
+
+std::vector<VectorCase> vectorCases(std::string_view routine) {
+  std::ifstream in("tests/samples/vagent/epistemic_vectors.tsv");
+  std::vector<VectorCase> out;
+  for (std::string line; std::getline(in, line);) {
+    if (line.starts_with('#')) continue;
+    std::stringstream cols(line);
+    VectorCase c;
+    std::getline(cols, c.id, '\t');
+    std::getline(cols, c.routine, '\t');
+    if (c.routine != routine) continue;
+    for (std::string col; std::getline(cols, col, '\t');)
+      if (const auto eq = col.find('='); eq != std::string::npos)
+        c.fields.emplace(col.substr(0, eq), col.substr(eq + 1));
+    out.push_back(std::move(c));
+  }
+  return out;
+}
+
+/// The reference's `fraction_run` (I4-D1 3.9) transliterated: rescale, then
+/// `R <- bR + hit`, `N <- bN + 1` from `R = N = 0`, one statement per
+/// operation. It carries no `min` guards: the routine's never fire on a
+/// single-event run (TheCapBoundsTheUpdateAtEveryHalfLife).
+struct FractionRun {
+  HealthDecay decay;
+  double cap;
+  double r{0.0};
+  double n{0.0};
+
+  explicit FractionRun(std::int64_t halfLife)
+      : decay(healthDecayPair(halfLife)), cap(1.0 / decay.oneMinusB) {}
+  void step(double hit) {
+    if (n > cap) {
+      const double scaled = r * cap;
+      r                   = scaled / n;
+      n                   = cap;
+    }
+    const double br = decay.b * r;
+    r               = br + hit;
+    const double bw = decay.b * n;
+    n               = bw + 1.0;
+  }
+  [[nodiscard]] double f() const { return r / n; }
+  [[nodiscard]] bool suspect(double minEvents, double threshold) const {
+    return n >= minEvents && f() >= threshold;
+  }
+};
+
+std::uint64_t bitsOf(double v) { return std::bit_cast<std::uint64_t>(v); }
+
+TEST(VagentEpistemicHealthDecay, TheHostDecayIsTheFractionBVectorsBitForBit) {
+  const auto cases = vectorCases("fraction_b");
+  ASSERT_EQ(cases.size(), 10U);
+  for (const auto &c : cases) {
+    const auto halfLife = static_cast<std::int64_t>(c.real("in.H"));
+    const auto decay    = healthDecayPair(halfLife);
+    EXPECT_EQ(bitsOf(decay.b), bitsOf(c.real("bits.b"))) << c.id;
+    EXPECT_EQ(bitsOf(decay.oneMinusB), bitsOf(c.real("bits.one_minus_b")))
+        << c.id;
+    EXPECT_EQ(bitsOf(healthWeightCap(halfLife)),
+              bitsOf(1.0 / c.real("bits.one_minus_b")))
+        << c.id;
+  }
+}
+
+TEST(VagentEpistemicHealthDecay, TheCapBoundsTheUpdateAtEveryHalfLife) {
+  // For every admissible H, fl(fl(b cap) + 1) <= cap, so (the update being
+  // monotone in N) N <= cap holds after every single-event update and the
+  // routine's `N <= cap` and `R <= N` guards never fire on one: the routine
+  // and `fraction_run` are the same sequence of operations. Also b is
+  // within a few ulp of the libm value it replaces.
+  std::int64_t worstUlp = 0;
+  for (std::int64_t h = 1; h <= kMaxEpistemicHealthHalfLife; ++h) {
+    const auto d     = healthDecayPair(h);
+    const double cap = 1.0 / d.oneMinusB;
+    const double bc  = d.b * cap;
+    const double up  = bc + 1.0;
+    ASSERT_LE(up, cap) << "H = " << h;
+    ASSERT_GT(d.oneMinusB, 0.0) << "H = " << h;
+    ASSERT_LT(d.b, 1.0) << "H = " << h;
+    const double libm = std::exp2(-1.0 / static_cast<double>(h));
+    const auto ulp    = std::abs(static_cast<std::int64_t>(bitsOf(d.b)) -
+                                 static_cast<std::int64_t>(bitsOf(libm)));
+    worstUlp          = std::max(worstUlp, ulp);
+  }
+  EXPECT_LE(worstUlp, 2);
+  std::printf("[ I3-2a-r ] b against libm exp2(-1/H), H in [1, %lld]: "
+              "largest difference %lld ulp\n",
+              static_cast<long long>(kMaxEpistemicHealthHalfLife),
+              static_cast<long long>(worstUlp));
+}
+
+TEST(VagentEpistemicHealthDecay, TheFractionRunMirrorIsTheReferenceBitForBit) {
+  const auto cases = vectorCases("fraction_run");
+  ASSERT_EQ(cases.size(), 5U);
+  for (const auto &c : cases) {
+    FractionRun run(static_cast<std::int64_t>(c.real("in.H")));
+    for (const double hit : c.reals("in.hits")) run.step(hit);
+    EXPECT_EQ(bitsOf(run.r), bitsOf(c.real("bits.R"))) << c.id;
+    EXPECT_EQ(bitsOf(run.n), bitsOf(c.real("bits.N"))) << c.id;
+    EXPECT_EQ(bitsOf(run.f()), bitsOf(c.real("bits.f"))) << c.id;
+  }
+}
+
+TEST_F(VagentEpistemicHealth, TheFractionRunVectorsRunThroughTheRoutine) {
+  // I4-D1 4.4's five event sequences through the emitted IR, one event per
+  // turn (a hit is a counted refusal, a miss an accepted reading): R, N and
+  // f must be the reference's bits, because b is T0 and the update is
+  // `+ *` only.
+  const auto cases = vectorCases("fraction_run");
+  ASSERT_EQ(cases.size(), 5U);
+  for (const auto &c : cases) {
+    SCOPED_TRACE(c.id);
+    AgentSettings settings;
+    settings.epistemic.healthHalfLife =
+        static_cast<std::int64_t>(c.real("in.H"));
+    start(settings);
+    for (const double hit : c.reals("in.hits")) {
+      if (hit != 0.0)
+        EXPECT_FALSE(send(bad(kP1)));
+      else
+        ASSERT_TRUE(send(reading(kP1)));
+    }
+    const auto got = weights(kP1, settings.epistemic.healthHalfLife);
+    EXPECT_EQ(bitsOf(got.r), bitsOf(c.real("bits.R")));
+    EXPECT_EQ(bitsOf(got.n), bitsOf(c.real("bits.N")));
+    const auto seen = health(kP1);
+    ASSERT_TRUE(seen);
+    EXPECT_EQ(bitsOf(seen->refusalFraction), bitsOf(c.real("bits.f")));
+  }
+}
+
+/// Bursts of @p burst refusals starting with probability `rate / burst` per
+/// event (overlapping bursts merge), as `i32a_burst.py` draws them: the
+/// marginal refusal rate is about @p rate.
+class BurstSource {
+public:
+  BurstSource(std::uint64_t seed, double rate, int burst)
+      : rng_(seed), start_(rate / burst), burst_(burst) {}
+  bool next() {
+    if (std::uniform_real_distribution<>(0.0, 1.0)(rng_) < start_)
+      left_ = std::max(left_, burst_);
+    if (left_ == 0) return false;
+    --left_;
+    return true;
+  }
+
+private:
+  std::mt19937_64 rng_;
+  double start_;
+  int burst_;
+  int left_{0};
+};
+
+TEST(VagentEpistemicHealthSimulation, BurstsAtFivePercentReachSuspect) {
+  // I4-D1 section 12: "stays NOMINAL under 10%" holds for independent
+  // refusals and not for bursts. H = 32, suspect_fraction 0.25, min_events
+  // 8, 10^6 events after a warm-up of 3H. The table there (126 onsets per
+  // 10^6 for bursts of 4, 970 for 8, 2,868 for 16; 0 independent) is an
+  // expectation from another generator, so the bounds are generous: the
+  // order of magnitude, and the ordering.
+  struct Row {
+    int burst;
+    double onsetsLow, onsetsHigh; // per 10^6 events
+    double shareHigh;             // percent of events in SUSPECT
+  };
+  const Row rows[] = {
+      {1, 0.0, 5.0, 0.01},
+      {4, 30.0, 500.0, 0.5},
+      {8, 300.0, 3000.0, 3.0},
+      {16, 1000.0, 8000.0, 12.0},
+  };
+  constexpr std::int64_t kEvents = 1'000'000;
+  double previous                = -1.0;
+  for (const auto &row : rows) {
+    BurstSource source(19, 0.05, row.burst);
+    FractionRun run(32);
+    std::int64_t onsets = 0, inSuspect = 0, hits = 0;
+    bool was = false;
+    for (std::int64_t i = 0; i < kEvents + 3 * 32; ++i) {
+      const bool hit = source.next();
+      run.step(hit ? 1.0 : 0.0);
+      const bool now = run.suspect(8.0, 0.25);
+      if (i >= 3 * 32) {
+        hits += hit;
+        onsets += now && !was;
+        inSuspect += now;
+      }
+      was = now;
+    }
+    const double rate  = static_cast<double>(hits) / kEvents;
+    const double share = 100.0 * static_cast<double>(inSuspect) / kEvents;
+    std::printf("[ I3-2a-r ] bursts of %2d: marginal rate %.4f, %lld SUSPECT "
+                "onsets per 10^6 events, %.3f%% of events SUSPECT\n",
+                row.burst, rate, static_cast<long long>(onsets), share);
+    EXPECT_NEAR(rate, 0.05, 0.005) << row.burst;
+    EXPECT_GE(static_cast<double>(onsets), row.onsetsLow) << row.burst;
+    EXPECT_LE(static_cast<double>(onsets), row.onsetsHigh) << row.burst;
+    EXPECT_LE(share, row.shareHigh) << row.burst;
+    EXPECT_GT(static_cast<double>(onsets), previous) << row.burst;
+    previous = static_cast<double>(onsets);
+  }
+}
+
+TEST_F(VagentEpistemicHealth, BurstySequencesRunTheSameThroughTheRoutine) {
+  // The same sequences through the emitted IR and `fraction_run`, event by
+  // event: identical R and N bits, and the same derived state, both the
+  // host's view and the IR's stamp on accepted readings. Bursts of 4
+  // and 8 at 5%, then from near steady state the 14 consecutive refusals
+  // that section 12 says suffice (13 do not).
+  for (const int burst : {4, 8}) {
+    SCOPED_TRACE("bursts of " + std::to_string(burst));
+    start({});
+    FractionRun run(kDefaultEpistemicHealthHalfLife);
+    BurstSource source(7, 0.05, burst);
+    int suspectEvents = 0;
+    bool wanted       = false;
+    const auto event  = [&](bool hit, int i) {
+      if (hit)
+        EXPECT_FALSE(send(bad(kP1)));
+      else
+        ASSERT_TRUE(send(reading(kP1)));
+      run.step(hit ? 1.0 : 0.0);
+      const auto got = weights(kP1);
+      ASSERT_EQ(bitsOf(got.r), bitsOf(run.r)) << "event " << i;
+      ASSERT_EQ(bitsOf(got.n), bitsOf(run.n)) << "event " << i;
+      const bool want =
+          run.suspect(static_cast<double>(kDefaultEpistemicSuspectMinEvents),
+                       kDefaultEpistemicSuspectFraction);
+      suspectEvents += want;
+      const auto seen = health(kP1);
+      ASSERT_TRUE(seen);
+      ASSERT_EQ(seen->state, want ? HealthState::Suspect : HealthState::Nominal)
+          << "event " << i;
+      // The stamp's record walk is linear in the records, so it is read at
+      // every change of state and every sixteenth reading, not at each.
+      const bool stampDue = want != wanted || i % 16 == 0;
+      wanted              = want;
+      if (!hit && stampDue) {
+        const auto record = newestRecord(kP1);
+        ASSERT_TRUE(record);
+        ASSERT_EQ(text(*record, kObsHealth),
+                  want ? kObsHealthSuspect : kObsHealthNominal)
+            << "event " << i;
+      }
+    };
+    int i = 0;
+    for (; i < 800; ++i) event(source.next(), i);
+    // 300 clean events take R to at most b^300 = 0.15% of the cap whatever
+    // the bursts left, close enough to steady state for the 13/14 edge.
+    for (int j = 0; j < 300; ++j, ++i) event(false, i);
+    for (int j = 0; j < 13; ++j, ++i) event(true, i);
+    EXPECT_EQ(health(kP1)->state, HealthState::Nominal) << "13 refusals";
+    event(true, i++);
+    EXPECT_EQ(health(kP1)->state, HealthState::Suspect) << "14 refusals";
+    std::printf("[ I3-2a-r ] bursts of %d: %d of %d events SUSPECT, routine "
+                "and fraction_run bit-identical throughout\n",
+                burst, suspectEvents, i);
+  }
+}
+
+TEST_F(VagentEpistemicHealth, ABurstAsOneNoteTakesTheSeriesOrExp) {
+  // A burst that arrives as one note is the mixture: b^n by the series while
+  // n ln2 / H < 1/2 (n <= 23 at H = 32), by `Exp` beyond. The model mirrors
+  // both branches operation for operation, so the bits agree on this host;
+  // the series branch is also the same bits on every host.
+  for (const std::int64_t k : {2, 8, 23, 24, 30}) {
+    SCOPED_TRACE("k = " + std::to_string(k));
+    start({});
+    Model want;
+    for (int i = 0; i < 40; ++i) {
+      ASSERT_TRUE(send(reading(kP1)));
+      want.accept();
+    }
+    for (std::int64_t i = 0; i < k; ++i) EXPECT_FALSE(offer(bad(kP1)));
+    pump();
+    want.note(k, 0);
+    const auto got = weights(kP1);
+    EXPECT_EQ(bitsOf(got.r), bitsOf(want.r));
+    EXPECT_EQ(bitsOf(got.n), bitsOf(want.n));
+    // And within rounding of k single refusals.
+    FractionRun run(kDefaultEpistemicHealthHalfLife);
+    for (int i = 0; i < 40; ++i) run.step(0.0);
+    for (std::int64_t i = 0; i < k; ++i) run.step(1.0);
+    EXPECT_NEAR(got.r, run.r, 1e-12 * run.r);
+    EXPECT_NEAR(got.n, run.n, 1e-12 * run.n);
+  }
 }
 
 } // namespace

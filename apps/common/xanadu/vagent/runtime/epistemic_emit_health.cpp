@@ -19,6 +19,7 @@
 #include <numbers>
 
 #include "common/xanadu/vagent/runtime/compiler_gen.hpp"
+#include "common/xanadu/vagent/runtime/epistemic_limits.hpp"
 
 namespace xanadu::vagent::runtime::codegen {
 
@@ -591,15 +592,49 @@ void Gen::emitHealthEntry(CellRef entryLabel) {
   endObservation(kTurnResultIngestionFault);
 }
 
-void Gen::emitHealthRescaled(CellRef prof, CellRef halfLife, CellRef r,
-                             CellRef n, CellRef x, CellRef b, CellRef omb,
-                             CellRef cap, CellRef vcR, CellRef vcN) {
-  const CellRef over = reg();
-  // The same expression on every host: Exp(-ln2 / H) from the integer.
+void Gen::emitExpm1Series(CellRef y, CellRef out) {
+  // The Horner form of I4-D1 3.3, one opcode per operation and no `Exp`, so
+  // every host computes the same bits (T0); `expm1Series` in
+  // epistemic_limits.hpp is the same sequence in C++, which the host's view
+  // and the tests rely on.
+  const CellRef product = reg();
+  movC(out, cFloat(kExpm1SeriesCoefficients[kExpm1SeriesOrder]));
+  for (std::size_t k = kExpm1SeriesOrder - 1; k >= 1; --k) {
+    emit(OpcodeKind::Mul, "y*acc", {S(y), S(out)}, {product});
+    emit(OpcodeKind::Add, "c_k+y*acc",
+         {S(cFloat(kExpm1SeriesCoefficients.at(k))), S(product)}, {out});
+  }
+  emit(OpcodeKind::Mul, "expm1", {S(y), S(out)}, {out});
+}
+
+void Gen::emitFractionDecay(CellRef halfLife, CellRef x, CellRef b,
+                            CellRef omb) {
+  // `x = -ln2 / H` stays for the note mixture's `b^n`; `b` and `1 - b` come
+  // from the series (I4-D1 3.9), whose argument `|x| <= 0.347` for `H >= 2`
+  // is inside its `|y| <= 1/2`, and `1 - b = -expm1(x)` is never the
+  // cancelling subtraction `1 - b` (NUM m3). `H = 1` is `b = 1/2` exactly,
+  // outside the series' range.
+  const CellRef unit = reg(), series = newLabel(), done = newLabel();
   emit(OpcodeKind::Div, "-ln2/H",
        {S(cFloat(-std::numbers::ln2_v<double>)), S(halfLife)}, {x});
-  emit(OpcodeKind::Exp, "b", {S(x)}, {b});
-  emit(OpcodeKind::Sub, "1-b", {S(cFloat(1.0)), S(b)}, {omb});
+  emit(OpcodeKind::Eq, "H=1?", {S(halfLife), S(cInt(1))}, {unit});
+  requireTrue(unit, series);
+  movC(b, cFloat(0.5));
+  movC(omb, cFloat(0.5));
+  jump(done);
+  place(series);
+  emitExpm1Series(x, omb);
+  emit(OpcodeKind::Add, "b=1+em", {S(cFloat(1.0)), S(omb)}, {b});
+  emit(OpcodeKind::Neg, "1-b=-em", {S(omb)}, {omb});
+  place(done);
+}
+
+void Gen::emitHealthRescaled(CellRef prof, const FractionCells &cells,
+                             CellRef halfLife, CellRef r, CellRef n, CellRef x,
+                             CellRef b, CellRef omb, CellRef cap, CellRef vcR,
+                             CellRef vcN) {
+  const CellRef over = reg();
+  emitFractionDecay(halfLife, x, b, omb);
   emit(OpcodeKind::Div, "cap", {S(cFloat(1.0)), S(omb)}, {cap});
   const auto load = [&](std::string_view name, CellRef out, CellRef vc) {
     const CellRef absent = newLabel(), done = newLabel();
@@ -622,7 +657,7 @@ void Gen::emitHealthRescaled(CellRef prof, CellRef halfLife, CellRef r,
     const CellRef nameR = reg(), next = reg(), same = reg(),
                   search = newLabel(), both = newLabel(), absentR = newLabel();
     mov(S(a0_), S(prof));
-    movC(a1_, cStr(std::string(kProfileHealthRefusedWeight)));
+    movC(a1_, cStr(std::string(cells.hits)));
     callLabel(rtFind_);
     mov(S(vcR), S(r0_));
     mov(S(nameR), S(r1_));
@@ -631,7 +666,7 @@ void Gen::emitHealthRescaled(CellRef prof, CellRef halfLife, CellRef r,
     mov(S(next), S(rd(D(nameR), core_.dims().vars)));
     branchIfZero(next, search);
     emit(OpcodeKind::Eq, "N next?",
-         {D(next), S(cStr(std::string(kProfileHealthWeight)))}, {same});
+         {D(next), S(cStr(std::string(cells.weight)))}, {same});
     requireTrue(same, search);
     mov(S(vcN), S(rd(D(next), core_.dims().values)));
     branchIfZero(vcN, search);
@@ -640,7 +675,7 @@ void Gen::emitHealthRescaled(CellRef prof, CellRef halfLife, CellRef r,
     place(absentR);
     movC(r, cFloat(0.0));
     place(search);
-    load(kProfileHealthWeight, n, vcN);
+    load(cells.weight, n, vcN);
     place(both);
   }
   // Rescale before the update, keeping f = R / N: after it N = cap is a fixed
@@ -655,8 +690,8 @@ void Gen::emitHealthRescaled(CellRef prof, CellRef halfLife, CellRef r,
   place(within);
 }
 
-void Gen::emitHealthStore(CellRef prof, CellRef r, CellRef n, CellRef vcR,
-                          CellRef vcN) {
+void Gen::emitHealthStore(CellRef prof, const FractionCells &cells, CellRef r,
+                          CellRef n, CellRef vcR, CellRef vcN) {
   const auto store = [&](std::string_view name, CellRef vc, CellRef value) {
     const CellRef create = newLabel(), stored = newLabel();
     branchIfZero(vc, create);
@@ -668,26 +703,19 @@ void Gen::emitHealthStore(CellRef prof, CellRef r, CellRef n, CellRef vcR,
     mov(D(fresh), S(value));
     place(stored);
   };
-  store(kProfileHealthRefusedWeight, vcR, r);
-  store(kProfileHealthWeight, vcN, n);
+  store(cells.hits, vcR, r);
+  store(cells.weight, vcN, n);
 }
 
 /// `R <- b^n R + (k/n)(1 - b^n)/(1 - b)` and `N <- b^n N + (1 - b^n)/(1 - b)`
 /// for `k` refusals among `n = k + c` events, as one evenly interleaved
 /// mixture (R3-12): exact in expectation whatever the order inside a note,
 /// since `R` is linear in the indicators and `N` does not depend on order.
-/// For k = 1, c = 0 it is the single-refusal update; for k = 0, c = 1 the
-/// accept update, which `rtHealth_` applies without the `Exp` and `Div`.
-void Gen::emitRtHealthUpdate() {
-  // I4-1b: bump the epistemic-state version here when the derived state class
-  // (read through rtHealth_) differs before and after the update, never on
-  // an R or N change inside a class.
-  beginInternal(*rtHealthUpdate_);
-  const CellRef prof = reg(), k = reg(), c = reg(), halfLife = reg();
-  mov(S(prof), S(a0_));
-  mov(S(k), S(a1_));
-  mov(S(c), S(a2_));
-  mov(S(halfLife), S(a3_));
+/// For k = 1, c = 0 it is the single-refusal update `R <- bR + 1`,
+/// `N <- bN + 1` bit for bit; for k = 0, c = 1 the accept update, which
+/// `emitFractionRead` applies without the `Div`.
+void Gen::emitFractionNote(CellRef prof, const FractionCells &cells, CellRef k,
+                           CellRef c, CellRef halfLife) {
   const CellRef n = reg(), r = reg(), w = reg(), x = reg(), b = reg(),
                 omb = reg(), cap = reg(), vcR = reg(), vcN = reg(),
                 positive = reg();
@@ -695,13 +723,34 @@ void Gen::emitRtHealthUpdate() {
   emit(OpcodeKind::Add, "n", {S(k), S(c)}, {n});
   emit(OpcodeKind::Gt, "n>0?", {S(n), S(zero_)}, {positive});
   requireTrue(positive, done);
-  emitHealthRescaled(prof, halfLife, r, w, x, b, omb, cap, vcR, vcN);
+  emitHealthRescaled(prof, cells, halfLife, r, w, x, b, omb, cap, vcR, vcN);
   const CellRef nx = reg(), bn = reg(), omn = reg(), geo = reg(), kd = reg(),
                 nd = reg(), share = reg(), t = reg(), rNew = reg(),
-                wNew = reg();
-  emit(OpcodeKind::Mul, "n*x", {S(n), S(x)}, {nx});
-  emit(OpcodeKind::Exp, "b^n", {S(nx)}, {bn});
-  emit(OpcodeKind::Sub, "1-b^n", {S(cFloat(1.0)), S(bn)}, {omn});
+                wNew = reg(), test = reg();
+  {
+    // b^n and 1 - b^n: one event is b itself, so a single refusal is T0 at
+    // every H (H = 1 included, where the series does not reach); a note whose
+    // exponent n ln2 / H is under 1/2 takes the series of `decay` (T0); only
+    // a longer note takes `Exp` (T1, I4-D1 section 12).
+    const CellRef many = newLabel(), longNote = newLabel(), ready = newLabel();
+    emit(OpcodeKind::Eq, "n=1?", {S(n), S(cInt(1))}, {test});
+    requireTrue(test, many);
+    mov(S(bn), S(b));
+    mov(S(omn), S(omb));
+    jump(ready);
+    place(many);
+    emit(OpcodeKind::Mul, "n*x", {S(n), S(x)}, {nx});
+    emit(OpcodeKind::Gt, "n*x>-1/2?", {S(nx), S(cFloat(-0.5))}, {test});
+    requireTrue(test, longNote);
+    emitExpm1Series(nx, omn);
+    emit(OpcodeKind::Add, "b^n=1+em", {S(cFloat(1.0)), S(omn)}, {bn});
+    emit(OpcodeKind::Neg, "1-b^n=-em", {S(omn)}, {omn});
+    jump(ready);
+    place(longNote);
+    emit(OpcodeKind::Exp, "b^n", {S(nx)}, {bn});
+    emit(OpcodeKind::Sub, "1-b^n", {S(cFloat(1.0)), S(bn)}, {omn});
+    place(ready);
+  }
   emit(OpcodeKind::Div, "geo", {S(omn), S(omb)}, {geo});
   // Integer operands would divide as integers.
   emit(OpcodeKind::Add, "kd", {S(k), S(cFloat(0.0))}, {kd});
@@ -715,8 +764,53 @@ void Gen::emitRtHealthUpdate() {
   // Floating-point guards only: the update keeps N <= cap and R <= N exactly.
   emit(OpcodeKind::Min, "N<=cap", {S(wNew), S(cap)}, {wNew});
   emit(OpcodeKind::Min, "R<=N", {S(rNew), S(wNew)}, {rNew});
-  emitHealthStore(prof, rNew, wNew, vcR, vcN);
+  emitHealthStore(prof, cells, rNew, wNew, vcR, vcN);
   place(done);
+}
+
+void Gen::emitFractionRead(CellRef prof, const FractionCells &cells,
+                           CellRef halfLife, CellRef accepted,
+                           CellRef minEvents, CellRef threshold, CellRef f,
+                           CellRef over) {
+  const CellRef r = reg(), w = reg(), x = reg(), b = reg(), omb = reg(),
+                cap = reg(), vcR = reg(), vcN = reg();
+  emitHealthRescaled(prof, cells, halfLife, r, w, x, b, omb, cap, vcR, vcN);
+  {
+    // R <- bR, N <- bN + 1: the accept update in closed form.
+    const CellRef skip = newLabel();
+    requireTrue(accepted, skip);
+    emit(OpcodeKind::Mul, "bR", {S(b), S(r)}, {r});
+    emit(OpcodeKind::Mul, "bN", {S(b), S(w)}, {w});
+    emit(OpcodeKind::Add, "bN+1", {S(w), S(cFloat(1.0))}, {w});
+    emit(OpcodeKind::Min, "N<=cap", {S(w), S(cap)}, {w});
+    emit(OpcodeKind::Min, "R<=N", {S(r), S(w)}, {r});
+    emitHealthStore(prof, cells, r, w, vcR, vcN);
+    place(skip);
+  }
+  // Div by a zero weight is 0.0, so a source with no history reads f = 0.
+  emit(OpcodeKind::Div, "f", {S(r), S(w)}, {f});
+  // The evidence floor first: below it the fraction decides nothing.
+  const CellRef below = newLabel(), decided = newLabel();
+  emit(OpcodeKind::Gte, "N>=min?", {S(w), S(minEvents)}, {over});
+  requireTrue(over, below);
+  emit(OpcodeKind::Gte, "f>=threshold?", {S(f), S(threshold)}, {over});
+  jump(decided);
+  place(below);
+  movC(over, false_);
+  place(decided);
+}
+
+void Gen::emitRtHealthUpdate() {
+  // I4-1b: bump the epistemic-state version here when the derived state class
+  // (read through rtHealth_) differs before and after the update, never on
+  // an R or N change inside a class.
+  beginInternal(*rtHealthUpdate_);
+  const CellRef prof = reg(), k = reg(), c = reg(), halfLife = reg();
+  mov(S(prof), S(a0_));
+  mov(S(k), S(a1_));
+  mov(S(c), S(a2_));
+  mov(S(halfLife), S(a3_));
+  emitFractionNote(prof, kHealthFractionCells, k, c, halfLife);
   ret();
 }
 
@@ -736,24 +830,9 @@ void Gen::emitRtHealth() {
   mov(S(suspect), S(a2_));
   mov(S(minEvents), S(a3_));
   mov(S(accepted), S(a4_));
-  const CellRef r = reg(), w = reg(), x = reg(), b = reg(), omb = reg(),
-                cap = reg(), vcR = reg(), vcN = reg(), f = reg(), flag = reg(),
-                latch = reg();
-  emitHealthRescaled(prof, halfLife, r, w, x, b, omb, cap, vcR, vcN);
-  {
-    // R <- bR, N <- bN + 1: the accept update in closed form.
-    const CellRef skip = newLabel();
-    requireTrue(accepted, skip);
-    emit(OpcodeKind::Mul, "bR", {S(b), S(r)}, {r});
-    emit(OpcodeKind::Mul, "bN", {S(b), S(w)}, {w});
-    emit(OpcodeKind::Add, "bN+1", {S(w), S(cFloat(1.0))}, {w});
-    emit(OpcodeKind::Min, "N<=cap", {S(w), S(cap)}, {w});
-    emit(OpcodeKind::Min, "R<=N", {S(r), S(w)}, {r});
-    emitHealthStore(prof, r, w, vcR, vcN);
-    place(skip);
-  }
-  // Div by a zero weight is 0.0, so a source with no history reads f = 0.
-  emit(OpcodeKind::Div, "f", {S(r), S(w)}, {f});
+  const CellRef f = reg(), flag = reg(), latch = reg(), overFraction = reg();
+  emitFractionRead(prof, kHealthFractionCells, halfLife, accepted, minEvents,
+                   suspect, f, overFraction);
   const CellRef notSuspect = newLabel(), out = newLabel(),
                 unlatched = newLabel();
   // The first reason of a kind decides the state with its own code.
@@ -799,10 +878,7 @@ void Gen::emitRtHealth() {
   jump(out);
   place(unlatched);
   reasonOf(kReasonKindSuspect, kObsHealthSuspect);
-  emit(OpcodeKind::Gte, "N>=min?", {S(w), S(minEvents)}, {flag});
-  requireTrue(flag, notSuspect);
-  emit(OpcodeKind::Gte, "f>=sf?", {S(f), S(suspect)}, {flag});
-  requireTrue(flag, notSuspect);
+  requireTrue(overFraction, notSuspect);
   movC(r0_, cStr(std::string(kObsHealthSuspect)));
   movC(r1_, cStr(std::string(kHealthCodeFraction)));
   jump(out);

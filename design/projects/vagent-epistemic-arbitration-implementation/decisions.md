@@ -95,6 +95,14 @@ the section 5 table implied more than 200.
   gate FAULTED is an event-count latch and a sensor below 1 Hz is isolated by the health-timer or
   operator path, the 0.1 Hz figure, and a wall-clock floor as a follow-up. I4-8 implements A17.
 
+- 2026-11-06: owner ruling on text and type. Type inference from canonical text on cell minting and
+  value update stays; the cell's text is the user's and stays comparable whatever its value bits.
+  The owner approved the core change of
+  [the text-preservation study](m1-review/text-preservation-blast-radius.md): `promote` and
+  `promoteOverlay` in `arena_manifold.cpp` keep a typed cell's own text (its span or scratch text)
+  when inference from it gives the same kind and bits, and render canonically otherwise, as R6
+  already requires. VQL `exportToStore` gets the same guard; the slice DTO is a follow-up.
+
 ## 1. I3-2 round-2 decisions
 
 The items marked `DECISION` in [findings-r2.md](i3-2-review/findings-r2.md):

@@ -61,6 +61,19 @@ struct Bail {
        std::string(what) + " is not supported in this iteration", loc);
 }
 
+/// The two profile fields one event-indexed fraction keeps (I4-D1 3.9): the
+/// weighted hits `R` and the weight `N`. The estimator routines take them as
+/// parameters, with `b` (from the half-life) and the evidence floor, because
+/// I4-8 instantiates the same estimator for the gate rejections.
+struct FractionCells {
+  std::string_view hits;
+  std::string_view weight;
+};
+
+/// Source health's instance (I3-2a): refused weight over total weight.
+inline constexpr FractionCells kHealthFractionCells{
+    .hits = kProfileHealthRefusedWeight, .weight = kProfileHealthWeight};
+
 // -- Static types -------------------------------------------------------------
 
 struct Ty {
@@ -1240,17 +1253,37 @@ private:
   /// the derived state in `r0_`, the code that decided it in `r1_` and the
   /// refusal fraction in `a2_`.
   void emitRtHealth();
-  /// Reads `R` and `N` of @p profile (0 when absent) into @p r and @p n and
-  /// rescales them with the cap in force before anything else uses them
-  /// (R3-9). @p x receives `-ln2 / H`, @p b the decay `b`, @p omb `1 - b` and
-  /// @p cap `1 / (1-b)`; @p vcR and @p vcN receive the field value cells, 0
-  /// when absent.
-  void emitHealthRescaled(CellRef profile, CellRef halfLife, CellRef r,
-                          CellRef n, CellRef x, CellRef b, CellRef omb,
-                          CellRef cap, CellRef vcR, CellRef vcN);
-  /// Write @p r and @p n back to @p profile, creating either field if absent.
-  void emitHealthStore(CellRef profile, CellRef r, CellRef n, CellRef vcR,
-                       CellRef vcN);
+  /// @p out = `expm1(@p y)` for `|y| <= 1/2` by the Horner series of I4-D1
+  /// 3.3 (35 opcodes, no `Exp`), the sequence `expm1Series` mirrors.
+  void emitExpm1Series(CellRef y, CellRef out);
+  /// @p x = `-ln2 / H`, @p b = `2^(-1/H)` and @p omb = `1 - b` from the
+  /// half-life register @p halfLife, by the series (T0), `H = 1` exactly 1/2.
+  void emitFractionDecay(CellRef halfLife, CellRef x, CellRef b, CellRef omb);
+  /// Reads the fraction's `R` and `N` (@p cells) of @p profile (0 when absent)
+  /// into @p r and @p n and rescales them with the cap in force before
+  /// anything else uses them (R3-9). @p x receives `-ln2 / H`, @p b the decay
+  /// `b`, @p omb `1 - b` and @p cap `1 / (1-b)`; @p vcR and @p vcN receive the
+  /// field value cells, 0 when absent.
+  void emitHealthRescaled(CellRef profile, const FractionCells &cells,
+                          CellRef halfLife, CellRef r, CellRef n, CellRef x,
+                          CellRef b, CellRef omb, CellRef cap, CellRef vcR,
+                          CellRef vcN);
+  /// Write @p r and @p n back to @p profile's @p cells, creating either field
+  /// if absent.
+  void emitHealthStore(CellRef profile, const FractionCells &cells, CellRef r,
+                       CellRef n, CellRef vcR, CellRef vcN);
+  /// Apply one note of @p k hits among @p k + @p c events (values) to
+  /// @p profile's @p cells under the half-life @p halfLife: the evenly
+  /// interleaved mixture of R3-12.
+  void emitFractionNote(CellRef profile, const FractionCells &cells, CellRef k,
+                        CellRef c, CellRef halfLife);
+  /// Read @p profile's @p cells through the rescale and, when the Bool
+  /// @p accepted holds, apply and store one non-hit event. @p f receives
+  /// `R / N` (0 for no history) and @p over the Bool `N >= minEvents` (the
+  /// evidence floor) and `f >= threshold`.
+  void emitFractionRead(CellRef profile, const FractionCells &cells,
+                        CellRef halfLife, CellRef accepted, CellRef minEvents,
+                        CellRef threshold, CellRef f, CellRef over);
   /// The arguments are values (counts and the half-life), not value-cell refs.
   void callHealthUpdate(CellRef profile, CellRef refusals, CellRef credits,
                         CellRef halfLife);

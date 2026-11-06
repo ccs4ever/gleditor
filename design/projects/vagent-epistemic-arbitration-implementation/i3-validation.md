@@ -383,3 +383,132 @@ This closes the items 2c2 left out; what is still open is listed at the end.
   throughput claim; the test shows the cause (no turn, no queue slot) and not the rate. The
   runbook test of 6.6 (revoke, isolate, drain, checkpoint, resume) is not written.
   I3-2 is complete apart from those three and the I4-1b version-bump sites listed under 2c2.
+
+## I3-2a-r: the health fraction's `b` by series, parameterised cells, burst tests
+
+The fix slice of I4-D1 section 12 (decisions 0.2, 2026-11-05: after T1, before I3-3). Written for
+the ML milestone review. Nothing is committed by the slice worker.
+
+### What changed
+
+- **`b` and `1 - b` are T0** (I4-D1 3.9). `Gen::emitFractionDecay`
+  (`vagent/runtime/epistemic_emit_health.cpp:610`) keeps `x = Div(-ln2, H)` and forms
+  `em = expm1_series(x)`, `b = 1 + em`, `1 - b = Neg(em)`; `H = 1` branches to `b = 1 - b = 1/2`
+  exactly. The series is `Gen::emitExpm1Series` (`:595`): the Horner form of 3.3, 18 terms, one
+  `Mul` and one `Add` per term and a final `Mul` (36 opcodes with the start), coefficients `1/k!` as
+  the nearest doubles (`kExpm1SeriesCoefficients`, `epistemic_limits.hpp:161`). The cap is still
+  `Div(1, 1 - b)`; the rescale-then-update order is untouched.
+- **The note mixture's `b^n`** (`emitFractionNote`, `:717`): `n = 1` takes `b` and `1 - b`
+  themselves (`:736`); otherwise `n x > -1/2` takes the series (`:743`), else `Exp` and `1 - b^n` by
+  `Sub` (`:750`). Only a note with `n ln2 / H >= 1/2` (`n >= 24` at `H = 32`) is still T1.
+- **The host agrees bit for bit.** `healthDecay`/`healthWeightCap` (`epistemic_limits.hpp:202-217`)
+  now compute the same sequence in C++ (`expm1Series`, `:182`; `healthDecayPair`, `:202`), so the
+  `min_events` domain bound `floor(0.9 / (1 - b))` (`validate()`) and `sourceHealth`'s read-only
+  rescale use the routine's `b`. This is C++ rather than Vortex because it is the host's own
+  configuration check and read API, which run outside any VM; it mirrors, not replaces, the IR.
+- **Parameterised** (I4-D1 section 12 item 1; mechanical). `FractionCells{hits, weight}`
+  (`compiler_gen.hpp:68`) names the two state cells; `kHealthFractionCells` (`:74`) is today's
+  `health_refused_weight`/`health_weight`. `emitHealthRescaled` (`:632`) and `emitHealthStore`
+  (`:693`) take it; the update body is `emitFractionNote(profile, cells, k, c, halfLife)` and the
+  read/accept/decision is
+  `emitFractionRead(profile, cells, halfLife, accepted, minEvents, threshold, f, over)` (`:771`),
+  which takes `b` (through `H`) and the evidence floor. The two internal routines `rtHealthUpdate_`
+  (`:803`) and `rtHealth_` (`:824`) pass `kHealthFractionCells`; their ABI is unchanged. I4-8
+  instantiates the same emitters with its gate cells (one internal routine per instance, or a
+  routine taking the names as `Str` arguments; that choice is I4-8's).
+- **Docs.** I3-2 3.2 carries a superseded note on `Exp(-ln2 / H)`; 3.3's claim now reads
+  "independent refusals" with the burst table below.
+
+### Measured
+
+- **`b` against the reference.** The 10 `fraction_b` vectors (`H` from 1 to 10^6): `b` and `1 - b`
+  bit-identical, and `healthWeightCap` is `1 / bits.one_minus_b` bit for bit.
+- **`b` against libm.** Over every admissible `H` in [1, 10^6], the series `b` differs from
+  `std::exp2(-1/H)` on this host (glibc, x86-64) by at most **1 ulp**.
+- **The guards never fire on single events.** For every `H` in [1, 10^6], `fl(fl(b cap) + 1) <= cap`
+  (also checked to `2^20` in Python). The update is monotone in `N`, so `N <= cap` after every
+  single-event update, and `R <= N` by monotonicity of `b R + h` against `b N + 1`: the routine's
+  two `Min` guards are inert outside a multi-event note, and the routine is `fraction_run`'s
+  operation sequence exactly. (`fraction_run` has no guards; that is why they agree.)
+- **The five `fraction_run` vectors through the IR** (one event per turn, `H` from the vector): `R`,
+  `N` and `f` (`sourceHealth().refusalFraction`) bit-identical to `bits.*` in all five, including
+  `H = 4096` over 600 events.
+- **Bursts** (`H = 32`, `suspect_fraction` 0.25, `min_events` 8, 10^6 events after a 3H warm-up,
+  bursts starting at rate `0.05/m` and merging on overlap as `i32a_burst.py` draws them, seed 19,
+  `mt19937_64`; I4-D1's table, from numpy and another generator, in brackets):
+
+| Bursts of | marginal rate | SUSPECT onsets per 10^6 | time in SUSPECT |
+| --------- | ------------- | ----------------------- | --------------- |
+| 1         | 0.0500        | 0 (0)                   | 0 (0)           |
+| 4         | 0.0490        | 121 (126)               | 0.063% (0.07%)  |
+| 8         | 0.0486        | 911 (970)               | 0.967% (0.96%)  |
+| 16        | 0.0478        | 2,819 (2,868)           | 4.69% (4.9%)    |
+
+- **Steady-state run length.** From near steady state (300 clean events after the bursts), 13
+  consecutive refusals leave NOMINAL and the 14th reads SUSPECT, through the IR, as section 12 says.
+- **Cost.** `MeasureTheCostOfAnIngestionAndABookkeepingTurn`: an ingestion 3,394 to 3,440 VM cycles
+  (+46), a refusal and its bookkeeping turn 1,938 to 1,983 (+45); the emitted code grows the arena
+  at launch from 27,421 to 28,037 slots (+616: the series is emitted inline three times, twice in
+  `rtHealthUpdate_` and once in `rtHealth_`). Wall time of the 1,500-event health test is unchanged
+  (6.3 s before, 6.0 s after).
+
+### Tests (`tests/xuzz/vagent_epistemic_health_test.cpp`, all in `vagent_actor_test`)
+
+- `Model` (`:63`) now forms `b^n` as the IR does and does one operation per statement, so it is an
+  operation-for-operation mirror; the existing tests keep their 1e-9 tolerances and pass.
+- New: `TheHostDecayIsTheFractionBVectorsBitForBit` (`:2157`),
+  `TheCapBoundsTheUpdateAtEveryHalfLife` (`:2172`), `TheFractionRunMirrorIsTheReferenceBitForBit`
+  (`:2199`; `FractionRun`, `:2130`, is `fraction_run` transliterated and checked against the five
+  vectors' bits), `TheFractionRunVectorsRunThroughTheRoutine` (`:2211`),
+  `BurstsAtFivePercentReachSuspect` (`:2261`; bounds are an order of magnitude and the ordering, not
+  the table: m = 1 at most 5 onsets, m = 4 in [30, 500], m = 8 in [300, 3000], m = 16 in \[1000,
+  8000\], strictly increasing), `BurstySequencesRunTheSameThroughTheRoutine` (`:2311`; bursts of 4
+  and 8 at 5%, 800 events then 300 clean then 14 refusals, 1,114 events per burst size: `R`, `N`
+  bits equal `FractionRun` after every event, the host state every event, the IR's stamp at every
+  state change and every sixteenth reading; 10.7 s), `ABurstAsOneNoteTakesTheSeriesOrExp` (`:2368`;
+  `k` = 2, 8, 23 on the series and 24, 30 on `Exp`, bit-equal to `Model` and within 1e-12 relative
+  of `k` single refusals).
+- **Result.** `vagent_actor_test`: 1,058 passed, 1 failed in the full run:
+  `Translate.AFullBudgetResumesWithinThePeakAndNotInPlace` filled to 19,042 cells against the 22,118
+  it requires while a fuzzer build ran in parallel; alone it passes three times out of three
+  (stopping at `EpistemicBudget` with 22,156 cells), so it is load-sensitive and not this slice.
+  `xuzz_test`: 3,233 passed; two timing benchmarks
+  (`ArrayfiladeBenchmarkTest.Subscripting10000Cells`,
+  `TranscopyrightBenchmarkTest.SeekableDecryptionLatencyUnder1ms`) failed under the same load and
+  pass alone. `make -j` (everything) exited 0; `make fuzz_epistemic_ingress` built, and runs of 300
+  (seed 2, complete) and about 600 (seed 1, stopped by a timeout under load) inputs found nothing,
+  with `ASAN_OPTIONS=alloc_dealloc_mismatch=0`. The Python stand-in `check_vectors.py ... host`
+  still passes (it is unchanged).
+
+### Deviations and decisions
+
+1. **`n = 1` shortcut in the mixture.** Section 12 says the mixture's `b^n` takes the series when
+   `n ln2 / H < 1/2`. For `H >= 2` and `n = 1` that is the same bits as `b`. At `H = 1` it is not in
+   the series' range and would call `Exp(-ln2)`; taking `b` for `n = 1` keeps a single refusal T0 at
+   every `H` and makes `geo = (1 - b)/(1 - b) = 1` exactly, so a single-refusal note is
+   `R <- b R + 1`, `N <- b N + 1` bit for bit, as `fraction_run` has it.
+1. **The `Min` guards stay.** They are inert on single events (measured above) and only a
+   multi-event note can reach them; removing them would be a behaviour change outside this slice.
+1. **I4-D1 Q6.** The vectors and the checker already sit where 4.4 lists them and are already
+   committed (`72ce6145`, with I4-D1 revision 2), so there is nothing to commit with this slice;
+   settled as proposed. This slice is the first C++ consumer of `fraction_b` and `fraction_run`; the
+   remaining routines' C++ test (`VagentEpistemicVectors`) is still I4-2's.
+1. **The 5.3 rows.** With `b` T0, the "as built" guards of I4-D1 5.3 (`H * 2^-48` on the fraction,
+   `4 db (H/ln2)^2` on `N >= min_events`) retire for single-event updates; a long note (`Exp`) still
+   carries them. I4-D1 itself is not edited here; the lead may strike the "as built" clauses.
+
+### Limits
+
+- The series is emitted inline three times rather than as one internal routine; the +616 launch
+  slots are the price, and a shared routine (as `decay` will want in I4-2) would cut them to about a
+  third.
+- Host and IR agree bit for bit only while the C++ compiler does not contract `y * acc + c` into an
+  FMA. The host code puts each operation in its own statement, which stops clang's default
+  `-ffp-contract=on`; GCC's default (`fast`) may contract across statements when FMA is enabled
+  (`-march` with FMA). The build passes no `-march`, so x86-64 baseline has no FMA; a build that
+  adds one should add `-ffp-contract=off` for these headers.
+- The burst figures are from one seed of one generator; the test asserts bounds, not counts. The
+  VM-level burst test sees few SUSPECT events (10 and 4 of 1,114), so the onset/clear edges it
+  checks through the IR are few; the 13/14 edge is the deterministic one.
+- The SUSPECT reading under bursts is still transient and latches nothing (3.4); the latch risk is
+  I4-8's, repaired there by the slow pair (I4-D1 7.1, 7.2).
