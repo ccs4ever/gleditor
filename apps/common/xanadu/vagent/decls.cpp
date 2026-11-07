@@ -76,6 +76,10 @@ struct Lowerer {
   FragmentInfoMap infos;
   CompilerBindings bindings;
   FragmentContext context;
+  // §5.5's deferred-eval sink — `static` operands (and `var`
+  // initializers that are `static`) record here and evaluate once
+  // after the member walk, when every `def` head is linked.
+  std::vector<PendingStatic> pendingStatics;
   std::uint64_t ordinal{0};
 
   // Name-keyed indexes gathered during the walk: module symbols (so a
@@ -93,11 +97,12 @@ struct Lowerer {
           ScalarCompilerLimits limits, const Program &program_)
       : core(core_), vm(vm_), compiler(core, vm, std::move(limits)),
         arena(core.arena()), program(program_) {
-    context.fragments = &fragments;
-    context.meta      = &metas;
-    context.info      = &infos;
-    context.bindings  = &bindings;
-    context.module    = program.module;
+    context.fragments      = &fragments;
+    context.meta           = &metas;
+    context.info           = &infos;
+    context.bindings       = &bindings;
+    context.pendingStatics = &pendingStatics;
+    context.module         = program.module;
   }
 
   [[nodiscard]] const auto &dims() const { return core.dims(); }
@@ -2005,6 +2010,19 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
         break;
       case ExprKind::None:
         break;
+      case ExprKind::Static:
+        // §5.5's staged seed: the operand defers to the member-walk
+        // drain, so `var v := static(helper())` sees every `def`
+        // head's linked symbol. The holder is the placeholder the
+        // drain restates in place — the record's +d.values edge and
+        // the binding already name it.
+        pendingStatics.push_back(PendingStatic{
+            .expr    = &init,
+            .target  = holder,
+            .type    = decl.result.value_or(Type{"<any>"}),
+            .methods = context.methods,
+            .closed  = {}});
+        break;
       default:
         image.stubbed.push_back(name);
         break;
@@ -2048,6 +2066,13 @@ lowerProgram(const Program &program, zigzag::vortex::VortexCore &core,
   lowerer.image.programRoot = core.home();
   lowerer.image.ownModule = core.getOrCreateModule(program.module.value_or(""));
   for (const auto &decl : program.declarations) lowerer.lowerDecl(decl, false);
+  // §5.5's deferred evals run once the walk ends: every member `def`
+  // head's `sym +d.values` edge exists by then, so `static` calls and
+  // `var` seeds evaluate order-independently against the full image.
+  if (lowerer.errors.empty())
+    if (auto drained = lowerer.compiler.drainStatics(lowerer.context);
+        !drained)
+      lowerer.errors = std::move(drained.error());
   if (!lowerer.errors.empty())
     return std::unexpected(std::move(lowerer.errors));
   if (const auto image = finalizeProgramImage(lowerer.compiler))

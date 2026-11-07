@@ -13,6 +13,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <variant>
 #include <vector>
 
 #include "common/xanadu/vagent/ast.hpp"
@@ -60,6 +61,37 @@ struct MethodTarget {
   Type result{};
 };
 
+// A closed `let` carried into a deferred `static` eval: the name bound
+// at check time to a literal or a `static` initializer. `manifest` is
+// what the eval binds the name to — a `CellValue` for a literal or
+// unit init, or the initializer's `Static` node for a staged one,
+// whose own pending record the drain resolves first. The eval binds a
+// fresh literal cell, never the runtime slot (whose write only exists
+// at run).
+struct ClosedLocal {
+  std::string name;
+  Type type{};
+  std::variant<zigzag::vortex::CellValue, const Expr *> manifest{};
+};
+
+// A `static` operand whose evaluation is deferred to the end of the
+// member walk — when every member `def` head's `sym +d.values` edge
+// exists, so calls resolve order-independently and `var` initializers
+// fold member results. The eval restates `target`'s content (an op
+// operand literal, or a var holder); the placeholder's opaque literal
+// record was already appended at emit, since a body's refs/literals
+// records seal into +d.refs before the drain runs. `closed` carries
+// the enclosing `let`s bound to manifest cells — the only free names
+// a pure+closed operand may legally read. `expr` is the `Static` node
+// itself: the operand hangs off it and diagnostics locate there.
+struct PendingStatic {
+  const Expr *expr{};
+  zigzag::CellRef target{};
+  Type type{};
+  const std::map<std::string, MethodTarget, std::less<>> *methods{};
+  std::vector<ClosedLocal> closed;
+};
+
 // The pipeline tables a compile carries beside the bindings: expand's
 // §5.6 fragment table and per-literal metadata, the checker's
 // per-fragment info (via check()'s infoOut), the capture records for
@@ -76,6 +108,12 @@ struct FragmentContext {
   // against — flat member names (an agent's `def`s); capacity or
   // qualified calls are not in it and refuse as before.
   const std::map<std::string, MethodTarget, std::less<>> *methods{};
+  // §5.5's deferred-eval sink — set by the program lowerer so `static`
+  // operands evaluate once after the member walk, when every `def`
+  // head's `sym +d.values` edge exists, rather than at their emission
+  // site. Absent, `static` evaluates eagerly at emit — the statement-
+  // level path's behavior.
+  std::vector<PendingStatic> *pendingStatics{};
   // The compiling unit's module name — the `src:<module>:<line>:<col>`
   // head label's first segment (§6.7); absent for a module-less unit.
   std::optional<std::string> module;

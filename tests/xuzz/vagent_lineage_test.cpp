@@ -1008,6 +1008,10 @@ TEST(VagentLineageTest, RunSeesEnclosingLetLocals) {
   auto image =
       lowerProgram(artifacts->program, ctx.core, ctx.vm, {},
                    &artifacts->expansion, &artifacts->fragmentInfo);
+  if (!image)
+    for (const auto &d : image.error())
+      fprintf(stderr, "lower %zu:%zu: %s\n", d.loc.line, d.loc.column,
+              d.detail.c_str());
   ASSERT_TRUE(image.has_value());
   EXPECT_THAT(image->stubbed, ::testing::IsEmpty());
 
@@ -1067,6 +1071,10 @@ TEST(VagentLineageTest, RunSeesOwnerFieldCaptures) {
   auto image =
       lowerProgram(artifacts->program, ctx.core, ctx.vm, {},
                    &artifacts->expansion, &artifacts->fragmentInfo);
+  if (!image)
+    for (const auto &d : image.error())
+      fprintf(stderr, "lower %zu:%zu: %s\n", d.loc.line, d.loc.column,
+              d.detail.c_str());
   ASSERT_TRUE(image.has_value());
   EXPECT_THAT(image->stubbed, ::testing::IsEmpty());
 
@@ -1157,6 +1165,10 @@ TEST(VagentLineageTest, MemberDefCallFromPlanAndHandler) {
   auto image =
       lowerProgram(artifacts->program, ctx.core, ctx.vm, {},
                    &artifacts->expansion, &artifacts->fragmentInfo);
+  if (!image)
+    for (const auto &d : image.error())
+      fprintf(stderr, "lower %zu:%zu: %s\n", d.loc.line, d.loc.column,
+              d.detail.c_str());
   ASSERT_TRUE(image.has_value());
   EXPECT_THAT(image->stubbed, ::testing::IsEmpty());
 
@@ -1179,6 +1191,129 @@ TEST(VagentLineageTest, MemberDefCallFromPlanAndHandler) {
   // 9 — not 8 — proves both calls ran: the handler's bump() first
   // (v 7→8), then the plan's bump() saw the updated state (8→9).
   EXPECT_EQ(*pos, 9) << "handler and plan must each run bump()";
+}
+
+TEST(VagentLineageTest, StaticVarSeedEvalsAfterMemberWalk) {
+  LineageHarness h;
+  auto &ctx = *h.context;
+
+  // §5.5's deferred eval: `later` is declared *after* the var whose
+  // initializer calls it — the drain runs once the member walk has
+  // linked `later`'s `sym +d.values → head`, so the seed folds its
+  // real result, not a placeholder.
+  auto artifacts = compileArtifacts(
+      "module demo\nevent Tick\nevent Done\n"
+      "goal Work() perform\n"
+      "agent A {\n"
+      "  var v: Int := static (later(21))\n"
+      "  on Tick { adopt Work() }\n"
+      "  plan p for Work { emit Done{} }\n"
+      "  def later(n: Int): Int { n * 2 }\n"
+      "}");
+  ASSERT_TRUE(artifacts.has_value());
+  auto image =
+      lowerProgram(artifacts->program, ctx.core, ctx.vm, {},
+                   &artifacts->expansion, &artifacts->fragmentInfo);
+  if (!image)
+    for (const auto &d : image.error())
+      fprintf(stderr, "lower %zu:%zu: %s\n", d.loc.line, d.loc.column,
+              d.detail.c_str());
+  ASSERT_TRUE(image.has_value());
+  EXPECT_THAT(image->stubbed, ::testing::IsEmpty());
+
+  auto &a0       = ctx.arena;
+  const auto rec = varsRecord(a0, ctx.core, image->agentCell, "v", false);
+  ASSERT_TRUE(rec.has_value());
+  const auto value = a0.linked(*rec, ctx.core.dims().values, Posward);
+  ASSERT_TRUE(value.has_value());
+  const auto pos = a0.asInt64(*value);
+  ASSERT_TRUE(pos.has_value());
+  EXPECT_EQ(*pos, 42) << "var seed must fold later(21)*2 at drain";
+}
+
+TEST(VagentLineageTest, StaticOperandSeesClosedLetsAndCalls) {
+  LineageHarness h;
+  auto &ctx = *h.context;
+
+  // Closed-name overlay: `let b := 5` mints a manifest cell the eval
+  // reads, and `static (later(b))` runs the member `def` in the
+  // compile arena — Tick folds b*10=50 + the call's 60 into v = 110.
+  auto artifacts = compileArtifacts(
+      "module demo\nevent Tick\nevent Done\n"
+      "goal Work() perform\n"
+      "agent A {\n"
+      "  var v: Int := 0\n"
+      "  on Tick { let b := 5\n"
+      "            v := static (b * 10) + static (later(b))\n"
+      "            adopt Work() }\n"
+      "  plan p for Work { emit Done{} }\n"
+      "  def later(n: Int): Int { n * 12 }\n"
+      "}");
+  ASSERT_TRUE(artifacts.has_value());
+  auto image =
+      lowerProgram(artifacts->program, ctx.core, ctx.vm, {},
+                   &artifacts->expansion, &artifacts->fragmentInfo);
+  if (!image)
+    for (const auto &d : image.error())
+      fprintf(stderr, "lower %zu:%zu: %s\n", d.loc.line, d.loc.column,
+              d.detail.c_str());
+  ASSERT_TRUE(image.has_value());
+  EXPECT_THAT(image->stubbed, ::testing::IsEmpty());
+
+  VagentExecutor exec;
+  ASSERT_TRUE(exec(tickOn(ctx), ctx)); // v := 50 + 60
+
+  auto &a0       = ctx.arena;
+  const auto rec = varsRecord(a0, ctx.core, image->agentCell, "v", false);
+  ASSERT_TRUE(rec.has_value());
+  const auto value = a0.linked(*rec, ctx.core.dims().values, Posward);
+  ASSERT_TRUE(value.has_value());
+  const auto pos = a0.asInt64(*value);
+  ASSERT_TRUE(pos.has_value());
+  EXPECT_EQ(*pos, 110)
+      << "closed let and member call must each fold at drain";
+}
+
+TEST(VagentLineageTest, StaticEvalChainsStaticLets) {
+  LineageHarness h;
+  auto &ctx = *h.context;
+
+  // `let x := static(…)` binds the placeholder itself — drained in
+  // emit order, so the second eval reads the first's folded value.
+  auto artifacts = compileArtifacts(
+      "module demo\nevent Tick\nevent Done\n"
+      "goal Work() perform\n"
+      "agent A {\n"
+      "  var v: Int := 0\n"
+      "  on Tick { let x := static (2 * 3)\n"
+      "            let y := x\n"
+      "            v := static (y + 1)\n"
+      "            adopt Work() }\n"
+      "  plan p for Work { emit Done{} }\n"
+      "}");
+  ASSERT_TRUE(artifacts.has_value());
+  auto image =
+      lowerProgram(artifacts->program, ctx.core, ctx.vm, {},
+                   &artifacts->expansion, &artifacts->fragmentInfo);
+  if (!image)
+    for (const auto &d : image.error())
+      fprintf(stderr, "lower %zu:%zu: %s\n", d.loc.line, d.loc.column,
+              d.detail.c_str());
+  ASSERT_TRUE(image.has_value());
+  EXPECT_THAT(image->stubbed, ::testing::IsEmpty());
+
+  VagentExecutor exec;
+  ASSERT_TRUE(exec(tickOn(ctx), ctx)); // v := 6 + 1
+
+  auto &a0       = ctx.arena;
+  const auto rec = varsRecord(a0, ctx.core, image->agentCell, "v", false);
+  ASSERT_TRUE(rec.has_value());
+  const auto value = a0.linked(*rec, ctx.core.dims().values, Posward);
+  ASSERT_TRUE(value.has_value());
+  const auto pos = a0.asInt64(*value);
+  ASSERT_TRUE(pos.has_value());
+  EXPECT_EQ(*pos, 7)
+      << "chained static lets must drain in emission order";
 }
 
 TEST(VagentLineageTest, MemberDefCallBindsPositionalArgs) {
@@ -1208,6 +1343,10 @@ TEST(VagentLineageTest, MemberDefCallBindsPositionalArgs) {
   auto image =
       lowerProgram(artifacts->program, ctx.core, ctx.vm, {},
                    &artifacts->expansion, &artifacts->fragmentInfo);
+  if (!image)
+    for (const auto &d : image.error())
+      fprintf(stderr, "lower %zu:%zu: %s\n", d.loc.line, d.loc.column,
+              d.detail.c_str());
   ASSERT_TRUE(image.has_value());
   EXPECT_THAT(image->stubbed, ::testing::IsEmpty());
 

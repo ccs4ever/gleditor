@@ -1043,6 +1043,33 @@ TEST(VagentCheckerTest, StaticFoldsPureClosedScalars) {
   EXPECT_TRUE(errors.empty()) << describe(errors);
 }
 
+TEST(VagentCheckerTest, StaticOperandAdmitsPureMemberCalls) {
+  // A pure, non-effect member `def` of the enclosing agent is a
+  // stage-0 callable — order-free, since the eval runs after the
+  // member walk links every `sym +d.values → head`.
+  const auto errors = diagnostics(R"(
+    agent A {
+      def calls(): Int { let base := 4
+                         static (later(2, 3)) + static (later(0, base)) }
+      def later(a: Int, b: Int): Int { a * 10 + b }
+      def nested(): Int { static (later(1, static (5))) }
+    }
+  )");
+  EXPECT_TRUE(errors.empty()) << describe(errors);
+  // Impure members stay refused at the purity arm.
+  rejects(R"(agent A { var count: Int := 0
+             def bump(): Int { count := count + 1 }
+             def f(): Int { static (bump()) } })",
+          DiagnosticCode::ImpureCondition);
+  // A call under a non-agent owner has no stage-0 callable surface.
+  rejects(R"(capacity Nav { def probe(): Int }
+             skill S implements Nav {
+               def helper(): Int { 1 }
+               def probe(): Int { static (helper()) }
+             })",
+          DiagnosticCode::InvalidPosition);
+}
+
 TEST(VagentCheckerTest, StaticOperandMustBePure) {
   rejects(R"(agent A { var count: Int := 0
              def f(): Int { static (count := 1) } })",
@@ -1067,11 +1094,13 @@ TEST(VagentCheckerTest, StaticOperandBarsArenaReadingAndRuntimeForms) {
   rejects(R"(predicate p(x: Int)
              agent A { def f(): Int { static (findall(?x, p(?x))) } })",
           DiagnosticCode::InvalidPosition);
-  // Stage-0 eval has no callables — even a pure def call is not closed.
-  rejects(R"(agent A { def g(): Int { 1 }
-             def f(): Int { static (g()) } })",
-          DiagnosticCode::InvalidPosition);
+  // Stage-0's callables are pure member defs only — `run`, builtins
+  // and qualified calls are not stage-0 callables.
   rejects(R"(agent A { def f(): Int { static (run(f)) } })",
+          DiagnosticCode::InvalidPosition);
+  rejects(R"(agent A { def f(): Int { static (text(1)) } })",
+          DiagnosticCode::InvalidPosition);
+  rejects(R"(agent A { def f(): Int { static (self.f()) } })",
           DiagnosticCode::InvalidPosition);
   // The implicit names name arena positions, not values.
   rejects(R"(agent A { var count: Int := 0
@@ -1095,6 +1124,10 @@ TEST(VagentCheckerTest, StaticOperandBarsRuntimeBoundNames) {
           DiagnosticCode::InvalidPosition);
   rejects(R"(agent A { def g(): Int { 1 }
              def f(): Int { let a := g(); static (a) } })",
+          DiagnosticCode::InvalidPosition);
+  // A composite initializer is a runtime value too — only literal-,
+  // static- and closed-alias inits mint manifest cells.
+  rejects(R"(agent A { def f(): Int { let a := 2 + 3; static (a) } })",
           DiagnosticCode::InvalidPosition);
 }
 

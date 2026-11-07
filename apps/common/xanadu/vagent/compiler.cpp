@@ -184,6 +184,92 @@ public:
     }
   }
 
+  // §5.5 staged evaluation: lower the operand into its own graph, run
+  // it in the compile arena under staticFuel with no mark outstanding,
+  // and answer the type-matched result. `bindings` is the caller's
+  // table plus the closed-`let` overlay; `methods` the callsite table
+  // the eval's RunCall hops resolve through. The eval residue — dead
+  // graph, cursor cell, temporaries — stays in the compile arena,
+  // which is discarded; recordOps=false keeps it out of the program
+  // image's op sequence. Public for Compiler::drainStatics, which hosts
+  // it over records the deferred sink collected.
+  // `expected` is the checked scalar — absent, any literal-expressible
+  // result is accepted (an unannotated `var`'s seed has no declared
+  // type to match).
+  std::expected<CellValue, Diagnostic>
+  evalStatic(const Expr &expression, std::optional<Scalar> expected,
+             const CompilerBindings &bindings,
+             const std::map<std::string, MethodTarget, std::less<>>
+                 *methods) {
+    auto fail = [&](DiagnosticCode code, std::string detail) {
+      return std::unexpected(Diagnostic{code, std::move(detail),
+                                        expression.loc});
+    };
+    FragmentContext evalContext;
+    if (fragments_) evalContext = *fragments_;
+    evalContext.methods        = methods;
+    // A `static` inside the operand evaluates eagerly at its own emit —
+    // the enclosing run needs the folded cell before it starts.
+    evalContext.pendingStatics = nullptr;
+    evalContext.bindings       = &bindings;
+    Emitter eval(core_, vm_, bindings, limits_, &evalContext, compiler_,
+                 false);
+    auto lowered =
+        eval.compile(*expression.children.front(), ResultUse::Value);
+    if (!lowered)
+      return fail(lowered.error().code,
+                  "'static' operand does not lower: " +
+                      lowered.error().detail);
+    const auto cursor = vm_.spawnCursor(lowered->entry, "vagent.static");
+    vm_.setCursorOpcode(cursor, lowered->entry);
+    const auto outcome = vm_.run(cursor, limits_.staticFuel);
+    // spawnCursor registered the eval cursor on home's +d.cursors rank;
+    // unlink it there so the eval leaves only dead graph behind.
+    zigzag::expectWritten(core_.arena().unlink(cursor, core_.dims().cursors,
+                                               zigzag::DimVector::NEG));
+    zigzag::expectWritten(core_.arena().unlink(cursor, core_.dims().cursors,
+                                               zigzag::DimVector::POS));
+    if (!outcome.success)
+      return fail(DiagnosticCode::InvalidDeclaration,
+                  "'static' operand did not evaluate: " +
+                      outcome.errorMessage);
+    // The compiler.cpp:108-110 invariant holds across eval: a `static`
+    // that leaves the VM off its no-choice, no-mark baseline would
+    // refuse the next compileStatement anyway — refuse it here.
+    if (vm_.choiceDepth() != 0 || core_.arena().outstandingMarks() != 0)
+      return fail(DiagnosticCode::InvalidDeclaration,
+                  "'static' evaluation left the VM off its no-choice, "
+                  "no-mark baseline");
+    const auto flag = core_.render(lowered->produced);
+    if (!flag || !std::holds_alternative<bool>(*flag) ||
+        !std::get<bool>(*flag))
+      return fail(DiagnosticCode::InvalidDeclaration,
+                  "'static' operand produced no value");
+    const auto value = core_.render(lowered->result);
+    const bool matches =
+        value &&
+        (!expected
+             ? (std::holds_alternative<std::int64_t>(*value) ||
+                std::holds_alternative<double>(*value) ||
+                std::holds_alternative<std::string>(*value) ||
+                std::holds_alternative<bool>(*value))
+             : (*expected == Scalar::Int &&
+                std::holds_alternative<std::int64_t>(*value)) ||
+                   (*expected == Scalar::Float &&
+                    std::holds_alternative<double>(*value)) ||
+                   (*expected == Scalar::Str &&
+                    std::holds_alternative<std::string>(*value)) ||
+                   (*expected == Scalar::Bool &&
+                    std::holds_alternative<bool>(*value)) ||
+                   (*expected == Scalar::Unit &&
+                    std::holds_alternative<std::string>(*value) &&
+                    std::get<std::string>(*value).empty()));
+    if (!matches)
+      return fail(DiagnosticCode::TypeMismatch,
+                  "'static' result does not match its checked type");
+    return *value;
+  }
+
 private:
   [[noreturn]] static void refuse(const Expr &expression, DiagnosticCode code,
                                   std::string detail) {
@@ -580,6 +666,7 @@ private:
       const auto index = localCount_++;
       {
         Local local{index, value};
+        local.init = expression.children.front().get();
         if (const auto rich =
                 resultTypes_.find(expression.children.front().get());
             rich != resultTypes_.end())
@@ -712,6 +799,17 @@ private:
                "'static' operand inside a fragment references a "
                "parameter — parameters are unvalued at the run/graft "
                "emission the operand is judged in");
+      // §5.5's closed-name channel: the operand's free names may only
+      // be closed `let`s — snapshot the in-scope set so emit's overlay
+      // sees them after scopes_ pops (inner scopes shadow outer, the
+      // resolver's own order).
+      {
+        auto &snapshot = staticCaptures_[&expression];
+        for (auto scope = scopes_.rbegin(); scope != scopes_.rend();
+             ++scope)
+          for (const auto &[name, local] : *scope)
+            snapshot.emplace(name, local);
+      }
       type = value;
       break;
     }
@@ -1436,9 +1534,17 @@ private:
                   continuation);
     case ExprKind::Cells:
       return emitCells(expression, output, continuation);
-    case ExprKind::Let:
-      return emit(*expression.children.front(), resolved(expression),
-                  copy(output, cells_->unit, continuation));
+    case ExprKind::Let: {
+      const auto &init = *expression.children.front();
+      const auto slot  = resolved(expression);
+      const auto tail  = copy(output, cells_->unit, continuation);
+      // A `let` over `static` binds the placeholder itself — the drain
+      // restates it in place, and the overlay names the init's `Static`
+      // node rather than any emitted cell.
+      if (init.kind == ExprKind::Static)
+        return copy(slot, emitStaticCell(init), tail);
+      return emit(init, slot, tail);
+    }
     case ExprKind::If: {
       const auto depth     = scalar(std::int64_t{0});
       const auto readDepth = mint(OpcodeKind::ChoiceDepth);
@@ -1455,64 +1561,8 @@ private:
       spin(readDepth, choice);
       return readDepth;
     }
-    case ExprKind::Static: {
-      // §5.5 staged evaluation: lower the operand into its own graph,
-      // run it in the compile arena under staticFuel with no mark
-      // outstanding, then fold the type-matched result cell in as a
-      // literal. The eval residue — dead graph, cursor cell,
-      // temporaries — stays in the compile arena, which is discarded;
-      // none of it reaches the sealed artifact. recordOps=false keeps
-      // the residue out of the program image's op sequence.
-      const auto expected = types_.at(expression.children.front().get());
-      Emitter eval(core_, vm_, bindings_, limits_, fragments_, compiler_,
-                   false);
-      auto lowered =
-          eval.compile(*expression.children.front(), ResultUse::Value);
-      if (!lowered)
-        refuse(expression, lowered.error().code,
-               "'static' operand does not lower: " + lowered.error().detail);
-      const auto cursor = vm_.spawnCursor(lowered->entry, "vagent.static");
-      vm_.setCursorOpcode(cursor, lowered->entry);
-      const auto outcome = vm_.run(cursor, limits_.staticFuel);
-      // spawnCursor registered the eval cursor on home's +d.cursors
-      // rank; unlink it there so the eval leaves only dead graph behind.
-      zigzag::expectWritten(core_.arena().unlink(cursor, core_.dims().cursors,
-                                                 zigzag::DimVector::NEG));
-      zigzag::expectWritten(core_.arena().unlink(cursor, core_.dims().cursors,
-                                                 zigzag::DimVector::POS));
-      if (!outcome.success)
-        refuse(expression, DiagnosticCode::InvalidDeclaration,
-               "'static' operand did not evaluate: " + outcome.errorMessage);
-      // The compiler.cpp:108-110 invariant holds across eval: a `static`
-      // that leaves the VM off its no-choice, no-mark baseline would
-      // refuse the next compileStatement anyway — refuse it here.
-      if (vm_.choiceDepth() != 0 || core_.arena().outstandingMarks() != 0)
-        refuse(expression, DiagnosticCode::InvalidDeclaration,
-               "'static' evaluation left the VM off its no-choice, "
-               "no-mark baseline");
-      const auto flag = core_.render(lowered->produced);
-      if (!flag || !std::holds_alternative<bool>(*flag) ||
-          !std::get<bool>(*flag))
-        refuse(expression, DiagnosticCode::InvalidDeclaration,
-               "'static' operand produced no value");
-      const auto value = core_.render(lowered->result);
-      const bool matches =
-          value &&
-          ((expected == Scalar::Int &&
-            std::holds_alternative<std::int64_t>(*value)) ||
-           (expected == Scalar::Float &&
-            std::holds_alternative<double>(*value)) ||
-           (expected == Scalar::Str &&
-            std::holds_alternative<std::string>(*value)) ||
-           (expected == Scalar::Bool && std::holds_alternative<bool>(*value)) ||
-           (expected == Scalar::Unit &&
-            std::holds_alternative<std::string>(*value) &&
-            std::get<std::string>(*value).empty()));
-      if (!matches)
-        refuse(expression, DiagnosticCode::TypeMismatch,
-               "'static' result does not match its checked type");
-      return copy(output, literalCell(*value), continuation);
-    }
+    case ExprKind::Static:
+      return copy(output, emitStaticCell(expression), continuation);
     case ExprKind::Code: {
       // §6.1: mint (or reuse) this literal's fragment object — head +
       // descriptor + body graph — and yield the Code value as a
@@ -1537,6 +1587,103 @@ private:
       // Preflight has already refused every non-scalar constructor.
       return jump(cells_->fail);
     }
+  }
+
+  // §5.5's closed-name overlay: the `let`s in scope at a `static`
+  // whose initializers are compile-time-manifest — the only free names
+  // a pure+closed operand may read. Emission is continuation-ordered,
+  // so the manifest can't be an emitted cell: a literal init carries
+  // its `literals_` value, a `static` init names its `Static` node for
+  // the drain to resolve first, and `let x := y` aliases through the
+  // snapshot to whatever `y` initialized with. Every other initializer
+  // is a runtime value: the name stays out, and the eval refuses it as
+  // unbound — unreachable through the checker, which already judged
+  // non-closed names not-closed.
+  std::vector<ClosedLocal> closedOverlay(const Expr &staticExpr) const {
+    std::vector<ClosedLocal> closed;
+    const auto found = staticCaptures_.find(&staticExpr);
+    if (found == staticCaptures_.end()) return closed;
+    const auto &snapshot = found->second;
+    for (const auto &[name, local] : snapshot) {
+      const auto type = resultType(local.type);
+      if (!type) continue;
+      // Alias chains: `let x := y` is closed exactly when `y`'s own
+      // initializer is — walk the snapshot until a non-Identifier init.
+      const Expr *init = local.init;
+      for (std::size_t hops = 0; init && init->kind == ExprKind::Identifier;
+           ++hops) {
+        if (hops > snapshot.size()) break; // alias cycles can't form
+        const auto source = snapshot.find(init->text);
+        init                = source == snapshot.end() ? nullptr
+                                                       : source->second.init;
+      }
+      if (!init) continue;
+      if (init->kind == ExprKind::Static)
+        closed.push_back({name, *type, init});
+      else if (const auto lit = literals_.find(init); lit != literals_.end())
+        closed.push_back({name, *type, lit->second});
+      else if (init->kind == ExprKind::Unit)
+        closed.push_back({name, *type, CellValue{std::string{}}});
+    }
+    return closed;
+  }
+
+  // The `static` emit seam: with a deferred-eval sink (the program
+  // walker's context) the operand's eval runs after the member walk —
+  // every `def` head's `sym +d.values` edge exists by then, so member
+  // calls resolve order-independently — and this emits a placeholder
+  // cell the drain restates. Without a sink (statement compiles), the
+  // eval is positional: it runs against the compile arena as it stands.
+  CellRef emitStaticCell(const Expr &expression) {
+    const auto expected = types_.at(expression.children.front().get());
+    if (fragments_ && fragments_->pendingStatics) {
+      const auto placeholder = own(core_.arena().makeCell());
+      const auto checked     = resultType(expected);
+      if (!checked)
+        refuse(expression, DiagnosticCode::TypeMismatch,
+               "'static' result type is not literal-expressible");
+      fragments_->pendingStatics->push_back(PendingStatic{
+          .expr    = &expression,
+          .target  = placeholder,
+          .type    = *checked,
+          .methods = fragments_->methods,
+          .closed  = closedOverlay(expression)});
+      // The placeholder's literal record lands now — the body's
+      // refs/literals records are sealed into +d.refs at this body's
+      // own emit, long before the drain restates the content. An
+      // opaque record is the honest shape: the cell's value is not a
+      // fixed literal, and reify twins whatever it holds.
+      if (body_) body_->literals.push_back({placeholder, std::nullopt});
+      return placeholder;
+    }
+    auto bindings = bindings_;
+    for (const auto &entry : closedOverlay(expression)) {
+      const auto *value =
+          std::get_if<zigzag::vortex::CellValue>(&entry.manifest);
+      CellValue cell;
+      if (value) {
+        cell = *value;
+      } else {
+        // A `static` init evaluates inline — the eager path has no
+        // pending records to resolve it through.
+        auto folded = evalStatic(*std::get<const Expr *>(entry.manifest),
+                                 scalarType(entry.type), bindings,
+                                 fragments_ ? fragments_->methods : nullptr);
+        if (!folded)
+          refuse(expression, folded.error().code, folded.error().detail);
+        cell = *folded;
+      }
+      // Eval residue — `literal`, not `literalCell`: the binding cell
+      // isn't image content the recipe should replay.
+      bindings[entry.name] =
+          CompilerBinding{literal(cell), entry.type, /*stateSide=*/false};
+    }
+    auto value =
+        evalStatic(expression, expected, bindings,
+                   fragments_ ? fragments_->methods : nullptr);
+    if (!value)
+      refuse(expression, value.error().code, value.error().detail);
+    return literalCell(*value);
   }
 
   // Link boxes under `head` as a +d.grab/+d.step rank at emit time. The
@@ -1979,6 +2126,10 @@ private:
     // `let c := code"…"` binds Cell here but `Code<T>` on the
     // resultTypes_ channel; `run(c)` reads T back off this slot.
     std::optional<Type> rich{};
+    // The let's initializer expression — parameters carry none. The
+    // closed-name overlay reads it to tell a manifest value (literal,
+    // `static`, closed alias) from a runtime binding.
+    const Expr *init{};
   };
   std::vector<std::map<std::string, Local, std::less<>>> scopes_;
   std::size_t localCount_{0};
@@ -1990,6 +2141,12 @@ private:
   std::unordered_map<const Expr *,
                      std::map<std::string, Local, std::less<>>>
       frameCaptures_;
+  // Per-`static` in-scope local snapshot — same walk as frameCaptures_
+  // (scopes_ is popped by emit); closedOverlay filters it to the
+  // manifest-carrying entries at emit time.
+  std::unordered_map<const Expr *,
+                     std::map<std::string, Local, std::less<>>>
+      staticCaptures_;
   std::unordered_map<const Expr *, CellRef> externalReferences_;
   std::size_t nodeCount_{0};
   std::unordered_set<const Expr *> discarded_;
@@ -2077,6 +2234,86 @@ Compiler::compileFragmentBody(const FragmentBodyRequest &request) {
   return emitter.compileFragment(*request.body, request.parameters,
                                  request.use, request.ownerFields,
                                  request.capFieldNames);
+}
+
+std::expected<void, std::vector<Diagnostic>>
+Compiler::drainStatics(FragmentContext &context) {
+  if (!context.pendingStatics) return {};
+  // The sink detaches before evals run: a `static` inside an operand
+  // evaluates eagerly at its own emit — the enclosing run needs the
+  // folded cell before it starts — so nothing appends mid-drain.
+  auto pending              = std::move(*context.pendingStatics);
+  context.pendingStatics    = nullptr;
+  std::vector<Diagnostic> errors;
+  // A `let x := static(…)` chains records: the dependent operand binds
+  // `x` through the init's `Static` node, whose own record must fold
+  // first. Records are keyed on their expression so resolution orders
+  // by dependency, not by the continuation-ordered emission sequence.
+  std::unordered_map<const Expr *, std::size_t> indexOf;
+  for (std::size_t i = 0; i < pending.size(); ++i)
+    indexOf.emplace(pending[i].expr, i);
+  std::vector<std::optional<CellValue>> folded(pending.size());
+  std::vector<bool> draining(pending.size(), false);
+  const auto manifest = [&](const CellValue &value) {
+    return std::visit(
+        [&](const auto &item) -> CellRef {
+          if constexpr (std::is_same_v<std::decay_t<decltype(item)>,
+                                       std::string>)
+            return core_.arena().makeCell(item);
+          else
+            return core_.arena().makeScalarCell(item);
+        },
+        value);
+  };
+  const auto drain = [&](this auto &&self, std::size_t i) -> void {
+    if (folded[i] || draining[i]) return;
+    draining[i] = true; // before resolving — guards init cycles
+    const auto &record = pending[i];
+    CompilerBindings bindings =
+        context.bindings ? *context.bindings : CompilerBindings{};
+    for (const auto &entry : record.closed) {
+      std::optional<CellValue> cell;
+      if (const auto *value =
+              std::get_if<zigzag::vortex::CellValue>(&entry.manifest)) {
+        cell = *value;
+      } else {
+        const auto *init = std::get<const Expr *>(entry.manifest);
+        if (const auto dep = indexOf.find(init); dep != indexOf.end()) {
+          self(dep->second);
+          cell = folded[dep->second];
+        }
+        // The init has no pending record when its eval refused — the
+        // binding then just omits the name and this operand's own
+        // failure lands on its entry.name reference.
+      }
+      if (cell)
+        bindings[entry.name] = CompilerBinding{manifest(*cell), entry.type,
+                                               /*stateSide=*/false};
+    }
+    Emitter host(core_, vm_, bindings, limits_, &context, this, false);
+    // `type` is the checked literal scalar; a non-scalar (an
+    // unannotated `var`'s `<any>` seed) carries no contract, so the
+    // eval accepts whichever literal-expressible arm it produces.
+    auto value = host.evalStatic(*record.expr, scalarType(record.type),
+                                 bindings, record.methods);
+    if (!value) {
+      errors.push_back(value.error());
+      return;
+    }
+    // The placeholder's content restates in place — the op's operand
+    // slot and the var record's +d.values edge already name the cell.
+    if (!core_.writeValue(record.target, 0, std::nullopt, *value)) {
+      errors.push_back(Diagnostic{DiagnosticCode::InvalidDeclaration,
+                                  "'static' placeholder cell could not "
+                                  "be written",
+                                  record.expr->loc});
+      return;
+    }
+    folded[i] = *value;
+  };
+  for (std::size_t i = 0; i < pending.size(); ++i) drain(i);
+  if (!errors.empty()) return std::unexpected(std::move(errors));
+  return {};
 }
 
 } // namespace xanadu::vagent

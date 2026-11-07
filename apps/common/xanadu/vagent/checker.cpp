@@ -248,7 +248,8 @@ private:
   // classified not-closed. `diagnose` reports the refusal reason at the
   // offending node; the let-initializer walk passes false — a non-closed
   // value is legal to bind, it only leaves the name unclosed.
-  bool staticClosed(const Expr &expression, Environment &env, bool diagnose);
+  bool staticClosed(const Expr &expression, Environment &env,
+                    const Decl *owner, bool diagnose);
   Type infer(const Expr &expression, Environment &env, Context context);
   Type condition(const Expr &expression, Environment &env, Context context);
   Type place(const Expr &expression, Environment &env, Context context);
@@ -1502,7 +1503,7 @@ Type Checker::recover(const Expr &expression, Type value, Environment &env,
 }
 
 bool Checker::staticClosed(const Expr &expression, Environment &env,
-                           bool diagnose) {
+                           const Decl *owner, bool diagnose) {
   resolutionWork(expression.loc);
   const auto refuse = [&](std::string detail) {
     if (diagnose)
@@ -1515,11 +1516,12 @@ bool Checker::staticClosed(const Expr &expression, Environment &env,
   // arm, which binds `cause` for its own expression.
   for (const ExprPtr *slot : {&expression.scope, &expression.recipients,
                               &expression.deadline, &expression.guard})
-    if (*slot) closed &= staticClosed(**slot, env, diagnose);
+    if (*slot) closed &= staticClosed(**slot, env, owner, diagnose);
   if (expression.recovery) {
     auto local     = copyEnvironment(env, expression.loc);
     local["cause"] = {named("Str"), false, 0};
-    closed = closed && staticClosed(*expression.recovery, local, diagnose);
+    closed =
+        closed && staticClosed(*expression.recovery, local, owner, diagnose);
   }
   switch (expression.kind) {
   case ExprKind::Integer:
@@ -1562,12 +1564,39 @@ bool Checker::staticClosed(const Expr &expression, Environment &env,
   case ExprKind::FindAll:
   case ExprKind::ForBelieves:
     return refuse("'static' operand may not read beliefs");
-  case ExprKind::Call:
-    // `run`, host and effect calls, and every other call alike — a
-    // stage-0 eval has no callables; program-side names are not closed.
+  case ExprKind::Call: {
+    // §5.5's stage-0 call surface: a pure, non-effect member `def` of
+    // the enclosing *agent* is callable — the member pre-pass mints
+    // its module symbol before any body emits, and the deferred eval
+    // runs after the member walk, so the RunCall's `sym +d.values →
+    // head` hop resolves in the compile arena whatever the member
+    // order. `run`, host/effect calls, builtins, qualified capcalls
+    // and calls under a non-agent owner stay refused — stage-0 has no
+    // host channel and no runtime owner.
+    const auto *callee = expression.children.empty()
+                             ? nullptr
+                             : expression.children.front().get();
+    if (callee && callee->kind == ExprKind::Identifier &&
+        callee->text != "run" && owner &&
+        owner->kind == DeclKind::Agent) {
+      if (const auto resolved = function(*callee, owner, false);
+          resolved && resolved->declaration && resolved->pure &&
+          !resolved->effect) {
+        const auto declOwner = methodOwners_.find(resolved->declaration);
+        if (declOwner != methodOwners_.end() && declOwner->second == owner) {
+          for (std::size_t i = 1; i < expression.children.size(); ++i)
+            if (expression.children[i])
+              closed &= staticClosed(*expression.children[i], env, owner,
+                                     diagnose);
+          return closed;
+        }
+      }
+    }
     return refuse(
         "'static' operand may not call methods or host/effect functions "
-        "('run' included)");
+        "('run' included) — only pure member defs of the enclosing "
+        "agent are stage-0 callables");
+  }
   case ExprKind::Code: {
     // §5.6's per-fragment classification is the literal's
     // outside-reference verdict — a not-closed record leaves the whole
@@ -1586,7 +1615,7 @@ bool Checker::staticClosed(const Expr &expression, Environment &env,
     // The inner static's operand must be closed for its own
     // evaluation; its own arms are verified when infer reaches it.
     for (const auto &child : expression.children)
-      if (child) closed &= staticClosed(*child, env, diagnose);
+      if (child) closed &= staticClosed(*child, env, owner, diagnose);
     return closed;
   case ExprKind::Splice:
     // A residual splice is the pipeline's named refusal elsewhere.
@@ -1595,7 +1624,7 @@ bool Checker::staticClosed(const Expr &expression, Environment &env,
     const auto value =
         expression.children.empty() || !expression.children.front()
             ? false
-            : staticClosed(*expression.children.front(), env, diagnose);
+            : staticClosed(*expression.children.front(), env, owner, diagnose);
     env[expression.text] = {unit, true, 0, value};
     return closed && value;
   }
@@ -1603,25 +1632,25 @@ bool Checker::staticClosed(const Expr &expression, Environment &env,
     // Each arm is judged in its own env copy, as infer's branches are.
     for (const auto &child : expression.children) {
       auto local = copyEnvironment(env, expression.loc);
-      if (child) closed &= staticClosed(*child, local, diagnose);
+      if (child) closed &= staticClosed(*child, local, owner, diagnose);
     }
     return closed;
   }
   case ExprKind::While: {
     auto local = copyEnvironment(env, expression.loc);
     for (const auto &child : expression.children)
-      if (child) closed &= staticClosed(*child, local, diagnose);
+      if (child) closed &= staticClosed(*child, local, owner, diagnose);
     return closed;
   }
   case ExprKind::For: {
     auto local = copyEnvironment(env, expression.loc);
     if (!expression.children.empty() && expression.children.front())
-      closed &= staticClosed(*expression.children.front(), local, diagnose);
+      closed &= staticClosed(*expression.children.front(), local, owner, diagnose);
     if (expression.binding && *expression.binding != "_")
       local[*expression.binding] = {unknown, true, 0};
     for (std::size_t i = 1; i < expression.children.size(); ++i)
       if (expression.children[i])
-        closed &= staticClosed(*expression.children[i], local, diagnose);
+        closed &= staticClosed(*expression.children[i], local, owner, diagnose);
     return closed;
   }
   // Impure statement forms — the pureBody arm names them; they are not
@@ -1651,7 +1680,7 @@ bool Checker::staticClosed(const Expr &expression, Environment &env,
     return false;
   default:
     for (const auto &child : expression.children)
-      if (child) closed &= staticClosed(*child, env, diagnose);
+      if (child) closed &= staticClosed(*child, env, owner, diagnose);
     return closed;
   }
 }
@@ -1934,14 +1963,32 @@ Type Checker::infer(const Expr &expression, Environment &env, Context context) {
             DiagnosticCode::DuplicateName,
             "duplicate local '" + expression.text + "'", expression.loc);
     // §5.5's rewritten closedness: a `let` name is closed for `static`
-    // operands when its initializer is itself closed — a literal, a
-    // `static`-bound value, or a composite of closed names. The walk is
-    // quiet here: a non-closed value is legal to bind, it only leaves
-    // the name unavailable to staged evaluation.
-    const auto closed =
-        expression.children.empty()
-            ? false
-            : staticClosed(*expression.children.front(), env, false);
+    // operands exactly when its initializer mints a compile-time-
+    // manifest cell the deferred eval's overlay resolves through — a
+    // scalar literal, a `static`, or an alias of an already-closed
+    // name. A composite or call initializer is a runtime value: legal
+    // to bind, but the name stays unavailable to staged evaluation.
+    const auto *init = expression.children.empty()
+                           ? nullptr
+                           : expression.children.front().get();
+    const auto closed = init && [&] {
+      switch (init->kind) {
+      case ExprKind::Static:
+      case ExprKind::Integer:
+      case ExprKind::Float:
+      case ExprKind::String:
+      case ExprKind::Boolean:
+      case ExprKind::Unit:
+        return true;
+      case ExprKind::Identifier: {
+        const auto found = env.find(init->text);
+        return found != env.end() && found->second.closed &&
+               !found->second.unvalued;
+      }
+      default:
+        return false;
+      }
+    }();
     env[expression.text] = {value, true, context.depth, closed};
     return unit;
   }
@@ -2386,7 +2433,7 @@ Type Checker::infer(const Expr &expression, Environment &env, Context context) {
             DiagnosticCode::ImpureCondition, "'static' operand must be pure",
             operandExpr.loc);
     auto closedEnv = copyEnvironment(env, expression.loc);
-    (void)staticClosed(operandExpr, closedEnv, true);
+    (void)staticClosed(operandExpr, closedEnv, context.owner, true);
     require(value == unknown || literalExpressible(value),
             DiagnosticCode::TypeMismatch,
             "'static' result must be a literal-expressible scalar (Int, "

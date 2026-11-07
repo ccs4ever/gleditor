@@ -204,6 +204,17 @@ public:
   [[nodiscard]] std::expected<FragmentBody, Diagnostic>
   compileFragmentBody(const FragmentBodyRequest &request);
 
+  // §5.5's deferred-eval drain: evaluate each `static` operand the
+  // context's pendingStatics recorded during the member walk — when
+  // every member `def` head is linked — and restate its placeholder
+  // cell's content in place. Closed `let`s resolve through their
+  // initializers in dependency order: literal values bind directly, a
+  // `static` init drains its own record first. Eval failures become
+  // diagnostics on the same channel as emit-time refusals; the list is
+  // consumed and the context's sink cleared.
+  [[nodiscard]] std::expected<void, std::vector<Diagnostic>>
+  drainStatics(FragmentContext &context);
+
   // The program-image bookkeeping §6.6's programRef record reads: ops
   // minted in mint order (the canonical post-fold positions for a
   // linearly-appended session image) plus the emission floor — the arena
