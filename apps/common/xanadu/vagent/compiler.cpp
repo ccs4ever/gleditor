@@ -312,9 +312,9 @@ private:
       // captured binding's own cell — operand wings for it are capture
       // slots (unvalued cells appended to the binding's +d.clone rank
       // tail, decoded via masterOf at run time), never int64 snapshots.
-      // A state-side slot is NOT a capture — its recipe capture-record
-      // would re-aim +d.values at the holder and evict the var
-      // record's own edge (fragment.cpp's capture arm).
+      // The recipe's capture member edges +d.values at the *slot*, not
+      // the binding — a state-side holder's -d.values is
+      // single-occupancy, and edging it would evict the var record's.
       captureCells_.insert(found->second.cell);
     }
     externalReferences_[&expression] = found->second.cell;

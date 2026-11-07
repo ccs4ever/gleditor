@@ -6,7 +6,7 @@
 // verbatim. The record taxonomy is the sibling's: literal members,
 // four-member link tuples whose `dim` field is name-keyed, and
 // +d.refFor ref-capture members (+d.name for dim referents, +d.values
-// for cap$N capture bindings).
+// marking cap$N capture slots — the binding rides the slot's int64).
 #include "common/xanadu/vagent/fragment.hpp"
 
 #include <cstdint>
@@ -403,15 +403,18 @@ compileFragment(const Expr &literal, const FragmentContext &context,
                          entry.name ? std::optional<std::string>{entry.role}
                                     : std::nullopt);
     }
-    // cap$N capture slots — the +d.values→binding arm re-appends the
-    // slot twin onto the *same* binding's +d.clone tail (a captured
-    // cell is shared, never copied).
+    // cap$N capture slots — the +d.values edge marks the member as a
+    // capture (reify re-appends the slot twin onto the binding's
+    // +d.clone tail; a captured cell is shared, never copied). The edge
+    // points at the *slot*, never the binding: the slot's int64 already
+    // names the binding position, while a live edge onto a state-side
+    // holder would evict its only -d.values — the var record's own.
     for (const auto &entry : body->captures) {
       const auto m = records.member(static_cast<std::int64_t>(entry.slot));
       zigzag::expectWritten(
           arena.link(m, fdims.refFor, DimVector::POS, entry.slot));
       zigzag::expectWritten(
-          arena.link(m, dims.values, DimVector::POS, entry.binding));
+          arena.link(m, dims.values, DimVector::POS, entry.slot));
       pushMember(m);
       records.refsRecord(entry.slot, std::nullopt, std::nullopt);
     }

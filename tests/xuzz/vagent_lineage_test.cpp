@@ -1091,4 +1091,44 @@ TEST(VagentLineageTest, RunSeesOwnerFieldCaptures) {
       << "the literal's cap$0 must #FIND the installed W's v — 7 + 1";
 }
 
+TEST(VagentLineageTest, AgentVarCaptureKeepsTheVarEdge) {
+  LineageHarness h;
+  auto &ctx = *h.context;
+
+  // An agent member's `var` lives state-side: cap$0 → v resolves to
+  // the var record's cell through context.bindings — where the
+  // clone-slot capture path's recipe record re-aims +d.values at the
+  // holder and evicts the var record's own edge (the documented
+  // state-side hazard at compiler.cpp's capName arm).
+  auto artifacts = compileArtifacts(
+      "module demo\nimport std:meta\nevent Tick\nevent Done\n"
+      "goal Work() perform\n"
+      "agent A {\n"
+      "  var v: Int := 7\n"
+      "  def probe(): Int {\n"
+      "    let c := code\"v + 1\"\n"
+      "    run(c)\n"
+      "  }\n"
+      "  on Tick { adopt Work() }\n"
+      "  plan p for Work { let r := probe()\n"
+      "                    emit Done{} }\n"
+      "}");
+  ASSERT_TRUE(artifacts.has_value());
+  auto image =
+      lowerProgram(artifacts->program, ctx.core, ctx.vm, {},
+                   &artifacts->expansion, &artifacts->fragmentInfo);
+  ASSERT_TRUE(image.has_value());
+
+  auto &a0       = ctx.arena;
+  const auto rec = varsRecord(a0, ctx.core, image->agentCell, "v", false);
+  ASSERT_TRUE(rec.has_value());
+  const auto value = a0.linked(*rec, ctx.core.dims().values, Posward);
+  ASSERT_TRUE(value.has_value())
+      << "a cap$0 → v capture must not evict the var record's "
+         "+d.values edge";
+  const auto pos = a0.asInt64(*value);
+  ASSERT_TRUE(pos.has_value());
+  EXPECT_EQ(*pos, 7);
+}
+
 } // namespace

@@ -1555,13 +1555,22 @@ std::expected<CellRef, std::string> MetaRuntime::reify(CellRef head) {
       writeInt(newSlot, static_cast<std::int64_t>(
                             mapped(static_cast<CellRef>(*referent))));
     }
-    // `cap$N` arm: the `+d.values` hint names the binding whose
-    // `d.clone` rank takes this slot — `New` + `Link`, never `Clone`.
-    if (const auto binding = arena.linked(m, dims.values, Posward)) {
+    // `cap$N` arm: a `+d.values` edge marks a capture member — the
+    // slot's int64 names the binding whose `d.clone` rank takes this
+    // slot (`New` + `Link`, never `Clone`). The edge itself points at
+    // the slot, not the binding — a live edge onto a state-side holder
+    // would evict its only `-d.values` (the var record's own); the
+    // slot's referent is external and verbatim through `mapped`.
+    if (arena.linked(m, dims.values, Posward)) {
+      const auto referent = posOf(*slot);
+      if (!referent)
+        return std::unexpected(
+            "reify: capture slot has no int64 binding referent");
+      const auto binding = mapped(static_cast<CellRef>(*referent));
       const auto cloneDim = resolveDimension(kCloneDimName);
       if (!cloneDim) return std::unexpected(cloneDim.error());
       zigzag::expectWritten(
-          arena.link(zigzag::rankTail(arena, *binding, *cloneDim), *cloneDim,
+          arena.link(zigzag::rankTail(arena, binding, *cloneDim), *cloneDim,
                      Posward, newSlot));
     }
     captureSlots.push_back(newSlot);

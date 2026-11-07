@@ -462,20 +462,43 @@ agent MetaUser {
   }
   EXPECT_TRUE(cloneSlot);
 
-  // …and the recipe's ref-capture member pairs the slot with the
-  // binding through +d.values — reify's cap$N re-append arm.
+  // …and the recipe's ref-capture member edges +d.values at the *slot*
+  // (whose int64 names the binding) — a live edge onto the binding
+  // would evict a state-side holder's only -d.values. Reify's cap$N
+  // re-append arm reads the binding off the slot.
   ASSERT_EQ(context.emitted.size(), 1U);
   const auto fdims   = mintFragmentDims(h.core);
   const auto &dims   = h.core.dims();
+  const CellRef head = context.emitted.begin()->second.head;
   bool captureMember = false;
-  for (const auto member :
-       h.chain(context.emitted.begin()->second.head, fdims.recipe)) {
+  for (const auto member : h.chain(head, fdims.recipe)) {
     const auto slot = h.arena.linked(member, fdims.refFor, Posward);
     if (!slot) continue;
-    const auto binding = h.arena.linked(member, dims.values, Posward);
-    if (binding && *binding == countCell) captureMember = true;
+    const auto marked = h.arena.linked(member, dims.values, Posward);
+    if (marked && *marked == *slot &&
+        h.arena.asInt64(*slot) == static_cast<std::int64_t>(countCell))
+      captureMember = true;
   }
   EXPECT_TRUE(captureMember);
+
+  // Reify replays the capture member: the binding is read off the
+  // slot's int64 (external → verbatim), and the copy's slot twin joins
+  // the same +d.clone tail — a captured cell is shared, never copied.
+  const auto binds = mintMetaBindSet(h.arena, h.core,
+                                   h.arena.makeCell("program"),
+                                   h.arena.makeCell("agent"));
+  ASSERT_TRUE(binds) << binds.error();
+  MetaRuntime runtime{h.core, h.vm, *binds};
+  const auto copy = runtime.reify(head);
+  ASSERT_TRUE(copy) << copy.error();
+  std::size_t cloneSlots = 0;
+  for (const auto slot :
+       zigzag::rankAfter(h.arena, countCell, h.core.dims().clone))
+    if (h.arena.asInt64(slot) == static_cast<std::int64_t>(countCell))
+      ++cloneSlots;
+  EXPECT_EQ(cloneSlots, 2U)
+      << "the copy's slot twin must re-append onto the same binding's "
+         "+d.clone tail";
 }
 
 // ---- refusals --------------------------------------------------------------

@@ -623,16 +623,19 @@ struct Recipe {
   /// +d.name (dimension ref) and +d.values (cap$N binding hint).
   static CellRef refCapture(MetaHarness &h, CellRef slot,
                             std::string_view dimName = {},
-                            CellRef binding          = zigzag::noCell) {
+                            bool mark              = false) {
     const auto member = h.arena.makeScalarCell(static_cast<std::int64_t>(slot));
     zigzag::expectWritten(
         h.arena.link(member, h.binds().dims.refFor, Posward, slot));
     if (!dimName.empty())
       zigzag::expectWritten(h.arena.link(member, h.core.dims().name, Posward,
                                          h.arena.makeCell(dimName)));
-    if (binding != zigzag::noCell)
+    // A +d.values edge marks a cap$N capture member. It points at the
+    // slot — never the binding itself, whose -d.values is
+    // single-occupancy; the binding rides the slot's int64.
+    if (mark)
       zigzag::expectWritten(
-          h.arena.link(member, h.core.dims().values, Posward, binding));
+          h.arena.link(member, h.core.dims().values, Posward, slot));
     return member;
   }
   /// Chain members onto the head's +d.recipe (+d.step links).
@@ -739,22 +742,25 @@ TEST(VagentMetaTest, ReifyRefCaptureRebindsAndAppendsCloneRank) {
   const auto entry = h.vm.mintOpcode(OpcodeKind::Return);
   const auto head  = mintHead(h, entry, "src:slots");
 
-  // A slot cell holding an *internal* referent (a), and a cap$N-style
-  // binding the slot should append to.
-  const auto slot    = h.arena.makeScalarCell(static_cast<std::int64_t>(a));
+  // A cap$N slot naming an *external* binding — the shape real
+  // emission mints: the member's +d.values marks the slot itself, and
+  // the binding rides the slot's int64 (external → verbatim, shared
+  // never copied).
   const auto binding = h.arena.makeCell();
+  const auto slot =
+      h.arena.makeScalarCell(static_cast<std::int64_t>(binding));
 
   std::vector<CellRef> members;
   members.push_back(Recipe::literal(h, a));
-  members.push_back(Recipe::refCapture(h, slot, {}, binding));
+  members.push_back(Recipe::refCapture(h, slot, {}, /*mark=*/true));
   Recipe::chain(h, head, members);
 
   const auto copy = h.rt().reify(head);
   ASSERT_TRUE(copy.has_value()) << (copy ? "" : copy.error());
 
-  // The new slot rebinds to the twin — internal referents go through
-  // the map, never verbatim. `d.clone` resolves on the d.dims rank —
-  // it is a native system dim, so the arena-local name table does not
+  // The slot twin re-appends onto the same binding's +d.clone tail and
+  // names the binding verbatim. `d.clone` resolves on the d.dims
+  // rank — a native system dim, so the arena-local name table does not
   // carry it.
   const auto cloneDim = h.core.findDimension("d.clone");
   ASSERT_TRUE(cloneDim.has_value());
@@ -765,7 +771,7 @@ TEST(VagentMetaTest, ReifyRefCaptureRebindsAndAppendsCloneRank) {
   EXPECT_NE(newSlot, slot);
   const auto referent = h.arena.asInt64(newSlot);
   ASSERT_TRUE(referent.has_value());
-  EXPECT_NE(static_cast<CellRef>(*referent), a);
+  EXPECT_EQ(static_cast<CellRef>(*referent), binding);
 }
 
 TEST(VagentMetaTest, ReifyRefusesDimensionMintUnderMarks) {
