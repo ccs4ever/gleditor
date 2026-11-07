@@ -26,6 +26,7 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -101,6 +102,21 @@ private:
   List items;
   Dict entries;
   std::string_view raw;
+};
+
+/**
+ * @brief Thrown in place of a plain std::runtime_error when the input parses
+ * but is not the one encoding its value has: a leading zero, a negative zero,
+ * or dictionary keys out of order or repeated.
+ *
+ * A signed format needs to tell "these bytes mean nothing" from "these bytes
+ * mean something, spelt a second way", because only the second is an attempt
+ * to make two byte strings verify as one message. Callers that do not care
+ * still catch it as a runtime_error.
+ */
+class NonCanonicalError : public std::runtime_error {
+public:
+  using std::runtime_error::runtime_error;
 };
 
 /**

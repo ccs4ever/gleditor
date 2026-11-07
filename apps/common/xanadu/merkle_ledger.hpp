@@ -28,6 +28,7 @@
 #include <utility>
 #include <vector>
 
+#include "identity/identity_engine.hpp"
 #include "provenance.hpp"
 #include "torrent.hpp"
 
@@ -54,7 +55,8 @@ struct IdentityKeyLink {
   bool revoked{false};
   /// Optional detached signature or system attestation token.
   std::string signature;
-  /// Monotonically increasing sequence index within the append-only ledger.
+  /// Monotonically increasing sequence index within the append-only ledger:
+  /// the entry's leaf index, which device revocations share.
   std::uint64_t sequence{};
 
   /// Canonical string representation used as input to the leaf hash.
@@ -128,13 +130,38 @@ public:
   std::pair<std::uint64_t, std::array<std::uint8_t, 32>>
   appendKey(IdentityKeyLink entry);
 
+  /**
+   * @brief Append a master-signed device revocation (P19 I3-3D Q9).
+   *
+   * Revocation is identity state that every consumer of device keys needs,
+   * so it lives here, under the same root as the key links, rather than in a
+   * peer's quarantine cache that a restart empties. The ledger stores the
+   * record as given; whoever trusts it verifies the master's signature, as
+   * `DurableRevocationRegistry` does when it loads.
+   *
+   * @return Pair of {leaf index, new merkle root}.
+   */
+  std::pair<std::uint64_t, std::array<std::uint8_t, 32>>
+  appendDeviceRevocation(identity::DeviceRevocationRecord record);
+
+  /// Every device revocation, in append order.
+  [[nodiscard]] const std::vector<identity::DeviceRevocationRecord> &
+  deviceRevocations() const;
+
+  /// The tagged leaf hash a device revocation is stored under.
+  [[nodiscard]] static std::array<std::uint8_t, 32>
+  revocationLeafHash(const identity::DeviceRevocationRecord &record);
+
+  /// Leaves in the tree: key links and device revocations together.
+  [[nodiscard]] std::size_t leafCount() const;
+
   /// The current 32-byte SHA-256 Merkle root of the ledger.
   [[nodiscard]] std::array<std::uint8_t, 32> root() const;
 
   /// Lowercase 64-character hex representation of the Merkle root.
   [[nodiscard]] std::string rootHex() const;
 
-  /// Total count of entries in the ledger.
+  /// Total count of key links in the ledger (device revocations excluded).
   [[nodiscard]] std::size_t size() const;
 
   /// Whether the ledger contains any entries.
@@ -147,8 +174,9 @@ public:
   /// Full list of entries in sequential append order.
   [[nodiscard]] const std::vector<IdentityKeyLink> &entries() const;
 
-  /// Generate a Merkle inclusion proof for the entry at @p index.
-  /// @throws std::out_of_range if index >= size().
+  /// Generate a Merkle inclusion proof for the leaf at @p index (a key link's
+  /// `sequence`).
+  /// @throws std::out_of_range if index >= leafCount().
   [[nodiscard]] MerkleProof generateProof(std::size_t index) const;
 
   /**

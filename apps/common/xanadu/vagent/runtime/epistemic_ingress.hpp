@@ -116,6 +116,41 @@ enum class EpistemicRefusal : std::uint8_t {
   /// wrong: nothing is logged, charged or noted, and the same bytes can be
   /// resent once admission reopens.
   AdmissionClosed,
+  // Signed ingress (P19 I3-3a1), steps 2, 3 and 5 of the verification order.
+  // None is logged, charged or counted: until step 5 passes the bytes are
+  // nobody's, so an unauthenticated flood cannot grow the outcome log.
+  /// Larger than `vagent.epistemic_signed_message_bytes`.
+  OversizeMessage,
+  /// Not the envelope, header or payload shape: a missing, unknown, mistyped
+  /// or out-of-bounds field, or a field the kind's table refuses.
+  MalformedMessage,
+  /// A body that parses but is a second spelling of its value.
+  NonCanonicalMessage,
+  /// A kind outside the table, or one reserved for a later slice.
+  UnsupportedKind,
+  /// A small-order key or a non-canonical point encoding.
+  InvalidSignerKey,
+  /// The header's issuer is not the SHA-256 of the envelope's key.
+  IssuerKeyMismatch,
+  /// A certificate on a pinned binding.
+  UnexpectedCertificate,
+  /// No certificate on a delegated binding.
+  DelegationMissing,
+  /// The revocation registry has not loaded; resend once it has.
+  RevocationUnavailable,
+  BadSignature,
+  /// The certificate does not chain to the binding's master, or names
+  /// another key, or the master is not in the ledger.
+  DelegationInvalid,
+  /// The certificate is outside its validity window at receipt.
+  DelegationExpired,
+  /// The device key, its certificate serial or its master is revoked.
+  KeyRevoked,
+  /// Step 4: a header a verified message already used, refused before the
+  /// signature check. The names are the arena's turn results for the same
+  /// conditions.
+  StaleSequence,
+  Duplicate,
 };
 
 /// What the host may do with a refused event.

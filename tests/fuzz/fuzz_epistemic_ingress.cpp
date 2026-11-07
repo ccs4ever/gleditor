@@ -32,6 +32,12 @@
  * belief (an isolate or a reset withdraws supports), and a refused one
  * changes nothing.
  *
+ * A decode step (P19 I3-3a1) feeds the signed-ingress codec either raw bytes
+ * or a well-formed signed message with one byte changed. Decoding refuses
+ * with a shape code, or yields a message whose body is the canonical
+ * encoding of what was decoded and whose re-encoded envelope decodes to the
+ * same message: two byte strings never mean one message.
+ *
  * Set FUZZ_EPISTEMIC_REPORT to print each outcome code, for checking that a
  * corpus reaches every refusal.
  */
@@ -52,6 +58,8 @@
 #include <fuzzer/FuzzedDataProvider.h>
 
 #include "../xuzz/epistemic_invariants.hpp"
+#include "common/xanadu/identity/standard_crypto_engine.hpp"
+#include "common/xanadu/vagent/runtime/epistemic_adapter_wire.hpp"
 #include "common/xanadu/vagent/runtime/program.hpp"
 
 namespace {
@@ -102,6 +110,92 @@ void require(bool ok, const char *what) {
   if (ok) return;
   std::fprintf(stderr, "epistemic invariant broken: %s\n", what);
   std::abort();
+}
+
+/// The decode step: see the file comment.
+void signedDecodeStep(FuzzedDataProvider &in) {
+  static const auto device = [] {
+    auto made = xanadu::identity::StandardCryptoEngine::generate();
+    require(made.has_value(), "a device key is generated");
+    return std::move(*made);
+  }();
+  std::string bytes;
+  if (in.ConsumeBool()) {
+    bytes = in.ConsumeRandomLengthString(1024);
+  } else {
+    SignedHeader h;
+    h.kind =
+        static_cast<SignedKind>(in.ConsumeIntegralInRange<std::uint8_t>(0, 4));
+    h.issuer           = issuerOf(device.publicKey());
+    h.incarnation      = in.ConsumeIntegralInRange<std::int64_t>(-1, 3);
+    h.sequence         = in.ConsumeIntegral<std::int64_t>();
+    h.audience         = std::string(64, 'a');
+    h.sent             = in.ConsumeIntegral<std::int64_t>();
+    h.epoch            = in.ConsumeIntegralInRange<std::int64_t>(-1, 2);
+    h.basis            = in.ConsumeBool() ? SignedClockBasis::Free
+                                          : SignedClockBasis::Synchronised;
+    h.clockUncertainty = in.ConsumeIntegral<std::int64_t>();
+    if (in.ConsumeBool()) h.expires = in.ConsumeIntegral<std::int64_t>();
+    if (in.ConsumeBool())
+      h.lowWatermark = in.ConsumeIntegralInRange<std::int64_t>(-1, 9);
+    SignedPayload p;
+    switch (in.ConsumeIntegralInRange(0, 3)) {
+    case 0: {
+      ObservationPayload o;
+      o.eventId   = in.ConsumeRandomLengthString(8);
+      o.predicate = "at";
+      o.policy    = std::string(64, 'c');
+      for (int i = in.ConsumeIntegralInRange(0, 3); i > 0; --i) {
+        if (in.ConsumeBool())
+          o.tuple.emplace_back(in.ConsumeIntegral<std::int64_t>());
+        else
+          o.tuple.emplace_back(in.ConsumeRandomLengthString(9));
+      }
+      o.acquired            = in.ConsumeIntegral<std::int64_t>();
+      o.acquiredUncertainty = in.ConsumeIntegral<std::int64_t>();
+      o.frame               = in.ConsumeBool() ? "enu" : "";
+      o.units               = in.ConsumeRandomLengthString(4);
+      if (in.ConsumeBool()) o.variance = in.ConsumeFloatingPoint<double>();
+      p = std::move(o);
+      break;
+    }
+    case 1:
+      p = HeartbeatPayload{};
+      break;
+    case 2:
+      p = HealthReportPayload{
+          static_cast<ReportAction>(in.ConsumeIntegralInRange(0, 2)),
+          in.ConsumeRandomLengthString(70)};
+      break;
+    default:
+      p = ClockPairPayload{};
+      break;
+    }
+    auto body = encodeSignedBody(h, p);
+    if (!body.empty() && in.ConsumeBool())
+      body[in.ConsumeIntegralInRange<std::size_t>(0, body.size() - 1)] =
+          static_cast<char>(in.ConsumeIntegral<std::uint8_t>());
+    auto envelope = signEnvelope(device, std::move(body));
+    require(envelope.has_value(), "the device signs");
+    bytes = encodeSignedEnvelope(*envelope);
+  }
+  const auto m = decodeSignedMessage(bytes, kMaxSignedMessageBytes);
+  if (!m) {
+    const auto code = m.error();
+    require(code == EpistemicRefusal::MalformedMessage ||
+                code == EpistemicRefusal::NonCanonicalMessage ||
+                code == EpistemicRefusal::UnsupportedKind ||
+                code == EpistemicRefusal::OversizeMessage,
+            "decode refuses only with a shape code");
+    return;
+  }
+  require(encodeSignedBody(m->header, m->payload) == m->envelope.body,
+          "a decoded body is the canonical encoding of its value");
+  const auto again = decodeSignedMessage(encodeSignedEnvelope(m->envelope),
+                                         kMaxSignedMessageBytes);
+  require(again && again->envelope == m->envelope &&
+              again->header == m->header && again->payload == m->payload,
+          "a re-encoded envelope decodes to the same message");
 }
 
 double wallSeconds() {
@@ -474,7 +568,10 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data,
       if (broken) std::fprintf(stderr, "%s\n", broken->c_str());
       require(!broken, "0 <= R <= N <= cap after every step");
     };
-    switch (in.ConsumeIntegralInRange(0, 16)) {
+    switch (in.ConsumeIntegralInRange(0, 17)) {
+    case 17:
+      signedDecodeStep(in);
+      break;
     case 16: {
       // ML-2: a restart under a shorter half-life rescales R and N together
       // before the first update (R3-9), so the fraction they make is the one

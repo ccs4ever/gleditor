@@ -28,6 +28,10 @@ inline constexpr std::string_view kDomainDeviceRevocation =
 inline constexpr std::string_view kDomainPeerAuth = "xanadu-peer-auth-v2:";
 inline constexpr std::string_view kDomainOracleAttestation =
     "xanadu-oracle-attestation-v1\n";
+/// Signed vagent ingress (P19 I3-3a): one domain for every message kind,
+/// because the kind is under the signature.
+inline constexpr std::string_view kDomainVagentSigned =
+    "xanadu-vagent-signed-v1\n";
 
 [[nodiscard]] constexpr std::string_view
 validationErrorToString(ValidationError err) noexcept {
@@ -295,6 +299,11 @@ public:
 class IRevocationRegistry {
 public:
   virtual ~IRevocationRegistry() = default;
+
+  /// Whether the registry holds every revocation its durable source has. A
+  /// caller that trusts keys refuses everything until it does, so a restart
+  /// can never reopen a revoked key while the source is still loading.
+  [[nodiscard]] virtual bool ready() const noexcept = 0;
 
   [[nodiscard]] virtual bool
   isDeviceRevoked(const PubKey32 &deviceKey,

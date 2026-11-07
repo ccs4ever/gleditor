@@ -16,6 +16,12 @@ namespace {
                            std::to_string(at));
 }
 
+[[noreturn]] void failNonCanonical(const std::string &what,
+                                   const std::size_t at) {
+  throw NonCanonicalError("bencode: " + what + " at offset " +
+                          std::to_string(at));
+}
+
 /// Read base-ten digits, with an optional leading minus, up to @p terminator.
 /// Leading zeros are refused: "i03e" and "i-0e" are not valid encodings, and
 /// accepting them would let two spellings of one number produce two info
@@ -42,13 +48,13 @@ std::int64_t readNumber(const std::string_view input, std::size_t &pos,
     fail("expected a number", from);
   }
   if (input[digitsFrom] == '0' && pos - digitsFrom > 1) {
-    fail("number with a leading zero", from);
+    failNonCanonical("number with a leading zero", from);
   }
   if (negative && 0 == value) {
-    fail("negative zero", from);
+    failNonCanonical("negative zero", from);
   }
   if (negative && input[digitsFrom] == '0') {
-    fail("number with a leading zero", from);
+    failNonCanonical("number with a leading zero", from);
   }
   if (pos >= input.size() || input[pos] != terminator) {
     fail(std::string{"expected '"} + terminator + "'", pos);
@@ -199,7 +205,7 @@ Value decode(const std::string_view input, std::size_t &pos,
       // be two info hashes for one torrent, so an input that does not follow
       // the rule cannot be trusted to identify anything.
       if (havePrevious && key.asString() <= previousKey) {
-        fail("dictionary keys out of order", keyAt);
+        failNonCanonical("dictionary keys out of order", keyAt);
       }
       previousKey  = key.asString();
       havePrevious = true;

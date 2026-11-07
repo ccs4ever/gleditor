@@ -16,6 +16,8 @@
 #include <cstring>
 #include <fstream>
 #include <map>
+#include <optional>
+#include <span>
 #include <sstream>
 #include <stdexcept>
 
@@ -52,6 +54,40 @@ std::string normalizeFingerprint(std::string_view fp) {
   }
   return out;
 }
+
+std::string hexOf(std::span<const std::uint8_t> bytes) {
+  static constexpr char hexChars[] = "0123456789abcdef";
+  std::string out;
+  out.reserve(bytes.size() * 2);
+  for (const auto b : bytes) {
+    out.push_back(hexChars[(b >> 4) & 0x0f]);
+    out.push_back(hexChars[b & 0x0f]);
+  }
+  return out;
+}
+
+template <std::size_t N>
+std::optional<std::array<std::uint8_t, N>> bytesOfHex(std::string_view hex) {
+  if (hex.size() != 2 * N) {
+    return std::nullopt;
+  }
+  std::array<std::uint8_t, N> out{};
+  for (std::size_t i = 0; i < N; ++i) {
+    uint8_t hi = 0;
+    uint8_t lo = 0;
+    if (!merkle::decode_hex_digit(hex[2 * i], hi) ||
+        !merkle::decode_hex_digit(hex[2 * i + 1], lo)) {
+      return std::nullopt;
+    }
+    out[i] = static_cast<std::uint8_t>((hi << 4) | lo);
+  }
+  return out;
+}
+
+/// The TSV shape this reader and writer agree on. Version 2 added device
+/// revocations; a version 1 file is refused by number rather than read as a
+/// ledger that might be missing them.
+constexpr std::string_view kLedgerTsvVersion = "2";
 
 std::string normalizeEmail(std::string_view email) {
   std::string out;
@@ -201,8 +237,16 @@ std::optional<MerkleProof> MerkleProof::fromTsv(const std::string_view tsv) {
 }
 
 struct MerkleLedger::Impl {
+  /// One leaf in append order: a key link or a device revocation, by its
+  /// index in that list. Kept so a copy replays the tree leaf for leaf.
+  struct Leaf {
+    bool revocation{false};
+    std::size_t index{};
+  };
   LedgerTree tree;
+  std::vector<Leaf> order;
   std::vector<IdentityKeyLink> entries;
+  std::vector<identity::DeviceRevocationRecord> revocations;
   std::map<std::string, std::size_t> byFingerprint;
   std::map<std::string, std::vector<std::size_t>> byEmail;
 };
@@ -214,17 +258,19 @@ MerkleLedger &MerkleLedger::operator=(MerkleLedger &&) noexcept = default;
 
 MerkleLedger::MerkleLedger(const MerkleLedger &other)
     : impl_(std::make_unique<Impl>()) {
-  for (const auto &entry : other.entries()) {
-    appendKey(entry);
+  for (const auto &leaf : other.impl_->order) {
+    if (leaf.revocation) {
+      appendDeviceRevocation(other.impl_->revocations[leaf.index]);
+    } else {
+      appendKey(other.impl_->entries[leaf.index]);
+    }
   }
 }
 
 MerkleLedger &MerkleLedger::operator=(const MerkleLedger &other) {
   if (this != &other) {
-    impl_ = std::make_unique<Impl>();
-    for (const auto &entry : other.entries()) {
-      appendKey(entry);
-    }
+    MerkleLedger copy(other);
+    impl_ = std::move(copy.impl_);
   }
   return *this;
 }
@@ -233,13 +279,14 @@ std::pair<std::uint64_t, std::array<std::uint8_t, 32>>
 MerkleLedger::appendKey(IdentityKeyLink entry) {
   entry.fingerprint = normalizeFingerprint(entry.fingerprint);
   entry.email       = normalizeEmail(entry.email);
-  entry.sequence    = impl_->entries.size();
+  entry.sequence    = impl_->order.size();
 
   const auto leafDigest = entry.leafHash();
   const merkle::HashT<32> leaf(leafDigest.data());
   impl_->tree.insert(leaf);
 
   const std::size_t idx = impl_->entries.size();
+  impl_->order.push_back({.revocation = false, .index = idx});
   impl_->entries.push_back(entry);
   impl_->byFingerprint[entry.fingerprint] = idx;
   impl_->byEmail[entry.email].push_back(idx);
@@ -247,9 +294,38 @@ MerkleLedger::appendKey(IdentityKeyLink entry) {
   return {entry.sequence, root()};
 }
 
+std::array<std::uint8_t, 32> MerkleLedger::revocationLeafHash(
+    const identity::DeviceRevocationRecord &record) {
+  // A distinct first line keeps a revocation's canonical form from ever
+  // equalling a key link's, whose first line is "seq:".
+  std::string form = "kind:device_revocation\n";
+  form += record.signingBuffer();
+  form += "sig:" + hexOf(record.masterSignature.bytes) + "\n";
+  return sha256Digest(kLeafDomain + form);
+}
+
+std::pair<std::uint64_t, std::array<std::uint8_t, 32>>
+MerkleLedger::appendDeviceRevocation(identity::DeviceRevocationRecord record) {
+  const std::uint64_t sequence = impl_->order.size();
+  const auto leafDigest        = revocationLeafHash(record);
+  const merkle::HashT<32> leaf(leafDigest.data());
+  impl_->tree.insert(leaf);
+  impl_->order.push_back(
+      {.revocation = true, .index = impl_->revocations.size()});
+  impl_->revocations.push_back(std::move(record));
+  return {sequence, root()};
+}
+
+const std::vector<identity::DeviceRevocationRecord> &
+MerkleLedger::deviceRevocations() const {
+  return impl_->revocations;
+}
+
+std::size_t MerkleLedger::leafCount() const { return impl_->order.size(); }
+
 std::array<std::uint8_t, 32> MerkleLedger::root() const {
   std::array<std::uint8_t, 32> out{};
-  if (impl_->entries.empty()) {
+  if (impl_->order.empty()) {
     return out;
   }
   const auto &r = impl_->tree.root();
@@ -275,7 +351,7 @@ const std::vector<IdentityKeyLink> &MerkleLedger::entries() const {
 }
 
 MerkleProof MerkleLedger::generateProof(std::size_t index) const {
-  if (index >= impl_->entries.size()) {
+  if (index >= impl_->order.size()) {
     throw std::out_of_range("MerkleLedger index out of range for proof");
   }
 
@@ -334,11 +410,26 @@ MerkleLedger::findByEmail(std::string_view email) const {
 
 std::string MerkleLedger::toTsv() const {
   std::string out;
-  common::tsv::write(out, "version", "1");
+  common::tsv::write(out, "version", kLedgerTsvVersion);
   common::tsv::write(out, "root", rootHex());
   common::tsv::write(out, "count", std::to_string(size()));
 
-  for (const auto &e : impl_->entries) {
+  for (const auto &leaf : impl_->order) {
+    if (leaf.revocation) {
+      const auto &r = impl_->revocations[leaf.index];
+      common::tsv::write(out, "revocation",
+                         std::to_string(&leaf - impl_->order.data()));
+      common::tsv::write(out, "serial", std::to_string(r.serialNumber));
+      common::tsv::write(out, "device_key", hexOf(r.devicePublicKey.bytes));
+      common::tsv::write(out, "master_fp", r.masterFingerprint.toString());
+      common::tsv::write(out, "date", std::to_string(r.revocationDate));
+      common::tsv::write(out, "reason",
+                         std::to_string(static_cast<unsigned>(r.reason)));
+      common::tsv::write(out, "master_signature",
+                         hexOf(r.masterSignature.bytes));
+      continue;
+    }
+    const auto &e = impl_->entries[leaf.index];
     common::tsv::write(out, "entry", std::to_string(e.sequence));
     common::tsv::write(out, "fingerprint", e.fingerprint);
     common::tsv::write(out, "email", e.email);
@@ -358,20 +449,72 @@ MerkleLedger MerkleLedger::fromTsv(const std::string_view tsv) {
   if (!entries) {
     return ledger;
   }
+  const auto version = std::ranges::find(*entries, std::string_view("version"),
+                                         &common::tsv::Entry::key);
+  if (version == entries->end() || version->value != kLedgerTsvVersion) {
+    throw std::runtime_error(
+        "identity ledger TSV version " +
+        (version == entries->end() ? std::string("(none)") : version->value) +
+        ", expected " + std::string(kLedgerTsvVersion));
+  }
   IdentityKeyLink link;
-  bool hasEntry     = false;
+  identity::DeviceRevocationRecord revocation;
+  enum class Open : std::uint8_t { None, Link, Revocation };
+  Open open         = Open::None;
   const auto append = [&] {
-    if (hasEntry) {
+    if (Open::Link == open) {
       ledger.appendKey(std::move(link));
-      link     = IdentityKeyLink{};
-      hasEntry = false;
+      link = IdentityKeyLink{};
+    } else if (Open::Revocation == open) {
+      ledger.appendDeviceRevocation(revocation);
+      revocation = identity::DeviceRevocationRecord{};
     }
+    open = Open::None;
+  };
+  // A field this reader cannot parse refuses the file: a revocation read as
+  // zeros would be a revocation of nothing.
+  const auto bad = [](std::string_view field) {
+    throw std::runtime_error("identity ledger TSV: unreadable " +
+                             std::string(field));
   };
   for (const auto &entry : *entries) {
     if ("entry" == entry.key) {
       append();
-      hasEntry = true;
-    } else if (!hasEntry) {
+      open = Open::Link;
+    } else if ("revocation" == entry.key) {
+      append();
+      open = Open::Revocation;
+    } else if (Open::Revocation == open) {
+      if ("serial" == entry.key) {
+        revocation.serialNumber = std::stoull(entry.value);
+      } else if ("device_key" == entry.key) {
+        const auto key = bytesOfHex<32>(entry.value);
+        if (!key) {
+          bad(entry.key);
+        } else {
+          revocation.devicePublicKey.bytes = *key;
+        }
+      } else if ("master_fp" == entry.key) {
+        const auto fp = identity::Fingerprint::fromString(entry.value);
+        if (!fp) {
+          bad(entry.key);
+        } else {
+          revocation.masterFingerprint = *fp;
+        }
+      } else if ("date" == entry.key) {
+        revocation.revocationDate = std::stoull(entry.value);
+      } else if ("reason" == entry.key) {
+        revocation.reason =
+            static_cast<identity::RevocationReason>(std::stoul(entry.value));
+      } else if ("master_signature" == entry.key) {
+        const auto sig = bytesOfHex<64>(entry.value);
+        if (!sig) {
+          bad(entry.key);
+        } else {
+          revocation.masterSignature.bytes = *sig;
+        }
+      }
+    } else if (Open::Link != open) {
       continue;
     } else if ("fingerprint" == entry.key) {
       link.fingerprint = entry.value;

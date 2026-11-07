@@ -3560,7 +3560,8 @@ bool fitsKind(Type::Kind kind, const WireValue &value) {
 
 OutcomeClass outcomeClassOf(std::string_view code) noexcept {
   if (code == "IngressBackpressure" || code == "ClockUnsynchronised" ||
-      code == "AdmissionClosed" || code == kTurnResultUndelivered)
+      code == "AdmissionClosed" || code == "RevocationUnavailable" ||
+      code == kTurnResultUndelivered)
     return OutcomeClass::Retryable;
   // A budget, an allowance or a binding the host must change first. An
   // exhausted turn is here, not retryable: the same bytes on the same state
@@ -3570,7 +3571,8 @@ OutcomeClass outcomeClassOf(std::string_view code) noexcept {
       code == kTurnResultTurnExhausted || code == kTurnResultIngestionFault ||
       code == "SourceFaulted" || code == "UnauthorizedHealthAction" ||
       code == "NoProfile" || code == "HealthReasonsFull" ||
-      code == "HealthUnavailable")
+      code == "HealthUnavailable" || code == "DelegationExpired" ||
+      code == "KeyRevoked")
     return OutcomeClass::NeedsHostAction;
   return OutcomeClass::Terminal;
 }
@@ -4078,6 +4080,36 @@ std::string_view epistemicRefusalName(EpistemicRefusal refusal) noexcept {
     return "SourceFaulted";
   case EpistemicRefusal::AdmissionClosed:
     return "AdmissionClosed";
+  case EpistemicRefusal::OversizeMessage:
+    return "OversizeMessage";
+  case EpistemicRefusal::MalformedMessage:
+    return "MalformedMessage";
+  case EpistemicRefusal::NonCanonicalMessage:
+    return "NonCanonicalMessage";
+  case EpistemicRefusal::UnsupportedKind:
+    return "UnsupportedKind";
+  case EpistemicRefusal::InvalidSignerKey:
+    return "InvalidSignerKey";
+  case EpistemicRefusal::IssuerKeyMismatch:
+    return "IssuerKeyMismatch";
+  case EpistemicRefusal::UnexpectedCertificate:
+    return "UnexpectedCertificate";
+  case EpistemicRefusal::DelegationMissing:
+    return "DelegationMissing";
+  case EpistemicRefusal::RevocationUnavailable:
+    return "RevocationUnavailable";
+  case EpistemicRefusal::BadSignature:
+    return "BadSignature";
+  case EpistemicRefusal::DelegationInvalid:
+    return "DelegationInvalid";
+  case EpistemicRefusal::DelegationExpired:
+    return "DelegationExpired";
+  case EpistemicRefusal::KeyRevoked:
+    return "KeyRevoked";
+  case EpistemicRefusal::StaleSequence:
+    return kTurnResultStaleSequence;
+  case EpistemicRefusal::Duplicate:
+    return kTurnResultDuplicate;
   }
   return "Unknown";
 }
