@@ -34,6 +34,12 @@ closedLiteralPredicateView(const BooleanExpr &predicate) noexcept;
 /// optional static range clamp and closed scalar predicates.
 [[nodiscard]] bool isClosedTraversalFunctorStep(const PathStep &step) noexcept;
 
+/// Returns the borrowed steps of a closed leading-slash traversal literal.
+/// The path has a canonical context anchor and each step is in the static
+/// traversal subset; no bindings or aliases are resolved here.
+[[nodiscard]] std::optional<std::span<const PathStep>>
+closedTraversalFunctorLiteralSteps(const ValueExpr &value) noexcept;
+
 } // namespace xanadu::vql
 
 #endif // COMMON_XANADU_VQL_CLOSED_FUNCTOR_SYNTAX_HPP

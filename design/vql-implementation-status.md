@@ -872,3 +872,21 @@ clamps. Two named modifier work units per step participate in existing specializ
 
 Validation pending. Other decorated/captured forms, general closures and the remaining frontend and
 lifecycle work still leave §4.12 incomplete; no speedup is claimed.
+
+## Closed literal defaults for required functor formals
+
+Omission may select a closed literal traversal default for a fixed untyped named formal required as
+a functor. Supplied actuals take precedence, including explicit empty values; ordinary values remain
+incompatible with the static functor ABI. Default/actual templates share exact keys and bounded
+normalization. Ordinary-value and unused default routing remains separate. See
+[iteration 48](projects/vortex-vm-only-iterations.md).
+
+Required-functor and ordinary-use summaries reach fixed points before mixed defaults are refused,
+including ordinary consumers behind forwarding helpers. Full build, all 1,019 affected tests from 93
+suites and all 102 focused tests from ten suites passed. Eight new cases include actual recursion,
+forwarding and override/reuse, omission precedence/refusal, ordinary routing and scope, atomic
+limits/retry, direct/relay mixed-use exclusions, source-free export/reload and host/mesh outputs.
+The real headless CLI returns `leaf`. Repository formatting with clang-format 19 and independent
+Luna gates passed. Broader audits retain eight route failures/one skip and seven callable failures;
+these are not full-suite passes. Captured/computed defaults, general closures and the remaining
+frontend and lifecycle work still leave §4.12 incomplete; no speedup is claimed.

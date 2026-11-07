@@ -239,6 +239,9 @@ private:
       const ClosedFunctorPredicateKey &predicate) noexcept;
   [[nodiscard]] std::size_t closedFunctorTemplateWork(
       std::span<const ClosedFunctorFormalKey> templates) const;
+  [[nodiscard]] std::optional<ClosedFunctorFormalKey>
+  normalizeClosedFunctorTemplate(std::span<const PathStep> steps,
+                                 std::size_t formalIndex);
 
   void appendOpcode(zigzag::CellRef opcode);
   zigzag::CellRef emitStreamClear();

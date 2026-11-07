@@ -242,94 +242,14 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
         std::ranges::binary_search(requiredFormalIndices, functorIndex);
     if (isFunctor) {
       const auto steps = closedFunctorArgumentSteps(argument);
-      if (!templateFormal || !steps || steps->empty()) {
+      if ((!templateFormal && !requiredFormal) || !steps) {
         unsupportedFunctorArgument = true;
       } else {
-        chargeClosedFunctorTemplateWork(1);
-        chargeClosedFunctorTemplateWork(steps->size());
-        bool plain = true;
-        for (const auto &step : *steps) {
-          const auto *dimension =
-              std::get_if<SignedDimensionStep>(&step.selector);
-          if (!dimension) {
-            plain = false;
-            break;
-          }
-          chargeClosedFunctorTemplateWork(closedFunctorStepModifierWork);
-          chargeClosedFunctorTemplateWork(dimension->dimName.size());
-          if (!isClosedTraversalFunctorStep(step)) {
-            plain = false;
-            break;
-          }
-          if (step.rangeClamp)
-            chargeClosedFunctorTemplateWork(
-                closedFunctorClampWork(step.rangeClamp->end.has_value()));
-          for (const auto &predicate : step.predicates) {
-            if (!closedLiteralPredicateView(predicate)) {
-              plain = false;
-              break;
-            }
-            chargeClosedFunctorTemplateWork(
-                closedFunctorPredicateWork(predicate));
-          }
-          if (!plain) break;
-        }
-        if (!plain) {
+        auto formal = normalizeClosedFunctorTemplate(*steps, functorIndex);
+        if (!formal) {
           unsupportedFunctorArgument = true;
         } else {
-          ClosedFunctorFormalKey formal{.formalIndex = functorIndex};
-          formal.steps.reserve(steps->size());
-          for (const auto &step : *steps) {
-            const auto &dimension =
-                std::get<SignedDimensionStep>(step.selector);
-            ClosedFunctorStepKey stepKey{
-                .dimName     = dimension.dimName,
-                .direction   = dimension.direction,
-                .isBidir     = dimension.isBidir,
-                .derefMaster = step.derefMaster,
-                .rangeClamp  = step.rangeClamp
-                                   ? std::optional{ClosedFunctorClampKey{
-                                         .start = step.rangeClamp->start,
-                                         .end   = step.rangeClamp->end}}
-                                   : std::nullopt};
-            stepKey.predicates.reserve(step.predicates.size());
-            for (const auto &predicate : step.predicates) {
-              const auto view = closedLiteralPredicateView(predicate);
-              if (!view)
-                throw std::logic_error(
-                    "closed traversal predicate changed after validation");
-              ClosedFunctorPredicateKey predicateKey;
-              predicateKey.terms.reserve(view->terms.size());
-              for (const auto &term : view->terms) {
-                ClosedFunctorPredicateTermKey termKey;
-                termKey.factors.reserve(term.factors.size());
-                for (const auto &factor : term.factors) {
-                  const auto comparison = closedLiteralComparisonView(factor);
-                  if (!comparison)
-                    throw std::logic_error(
-                        "closed traversal factor changed after validation");
-                  auto literal = std::visit(
-                      [](const auto &value) -> ClosedFunctorPredicateLiteral {
-                        using T = std::decay_t<decltype(value)>;
-                        if constexpr (std::is_same_v<T, double>)
-                          return scalarValue(value).bits;
-                        else
-                          return value;
-                      },
-                      comparison->literal.get().value);
-                  termKey.factors.push_back(ClosedFunctorPredicateFactorKey{
-                      .negated       = comparison->negated,
-                      .op            = comparison->op,
-                      .literalOnLeft = comparison->literalOnLeft,
-                      .literal       = std::move(literal)});
-                }
-                predicateKey.terms.push_back(std::move(termKey));
-              }
-              stepKey.predicates.push_back(std::move(predicateKey));
-            }
-            formal.steps.push_back(std::move(stepKey));
-          }
-          functorTemplates.push_back(std::move(formal));
+          functorTemplates.push_back(std::move(*formal));
         }
       }
     } else if (requiredFormal) {
@@ -342,11 +262,25 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
       static_cast<std::size_t>(ufcs && context &&
                                definition.params.size() > arguments.size());
   for (const std::size_t requiredIndex : requiredFormalIndices) {
-    if (requiredIndex >= suppliedActualCount) unsupportedFunctorArgument = true;
+    if (requiredIndex >= suppliedActualCount) {
+      const auto &parameter = definition.params[requiredIndex];
+      const auto defaultSteps =
+          parameter.defaultValue
+              ? closedTraversalFunctorLiteralSteps(*parameter.defaultValue)
+              : std::nullopt;
+      auto formal = defaultSteps ? normalizeClosedFunctorTemplate(*defaultSteps,
+                                                                  requiredIndex)
+                                 : std::nullopt;
+      if (formal)
+        functorTemplates.push_back(std::move(*formal));
+      else
+        unsupportedFunctorArgument = true;
+    }
     if (!std::ranges::binary_search(functorTemplates, requiredIndex, {},
                                     &ClosedFunctorFormalKey::formalIndex))
       unsupportedFunctorArgument = true;
   }
+  std::ranges::sort(functorTemplates, {}, &ClosedFunctorFormalKey::formalIndex);
   bool hasInlineCapture = false;
   if (const auto captures = frameFreeCaptureNames_.find(definition.name);
       captures != frameFreeCaptureNames_.end()) {
@@ -587,6 +521,92 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
                   "#CALL_FILTER_GUARD_SCOPE_CLOSE " + definition.name);
   appendOpcode(end);
   return results;
+}
+
+std::optional<VQLCompiler::ClosedFunctorFormalKey>
+VQLCompiler::normalizeClosedFunctorTemplate(
+    const std::span<const PathStep> steps, const std::size_t formalIndex) {
+  if (steps.empty()) return std::nullopt;
+  std::size_t work   = 1;
+  const auto addWork = [&work](const std::size_t amount) {
+    if (amount > std::numeric_limits<std::size_t>::max() - work)
+      work = std::numeric_limits<std::size_t>::max();
+    else
+      work += amount;
+  };
+  for (const auto &step : steps) {
+    const auto *dimension = std::get_if<SignedDimensionStep>(&step.selector);
+    if (!dimension || !isClosedTraversalFunctorStep(step)) return std::nullopt;
+    addWork(closedFunctorStepModifierWork);
+    addWork(dimension->dimName.size());
+    if (step.rangeClamp)
+      addWork(closedFunctorClampWork(step.rangeClamp->end.has_value()));
+    for (const auto &predicate : step.predicates) {
+      if (!closedLiteralPredicateView(predicate)) return std::nullopt;
+      const auto predicateWork = closedFunctorPredicateWork(predicate);
+      if (predicateWork == std::numeric_limits<std::size_t>::max())
+        throw std::invalid_argument(
+            "compiled VQL closed functor template work budget exhausted");
+      addWork(predicateWork);
+    }
+  }
+  if (steps.size() > std::numeric_limits<std::size_t>::max() - work)
+    work = std::numeric_limits<std::size_t>::max();
+  else
+    work += steps.size();
+  chargeClosedFunctorTemplateWork(work);
+
+  ClosedFunctorFormalKey formal{.formalIndex = formalIndex};
+  formal.steps.reserve(steps.size());
+  for (const auto &step : steps) {
+    const auto &dimension = std::get<SignedDimensionStep>(step.selector);
+    ClosedFunctorStepKey stepKey{
+        .dimName     = dimension.dimName,
+        .direction   = dimension.direction,
+        .isBidir     = dimension.isBidir,
+        .derefMaster = step.derefMaster,
+        .rangeClamp  = step.rangeClamp ? std::optional{ClosedFunctorClampKey{
+                                             .start = step.rangeClamp->start,
+                                             .end   = step.rangeClamp->end}}
+                                       : std::nullopt};
+    stepKey.predicates.reserve(step.predicates.size());
+    for (const auto &predicate : step.predicates) {
+      const auto view = closedLiteralPredicateView(predicate);
+      if (!view)
+        throw std::logic_error(
+            "closed traversal predicate changed after validation");
+      ClosedFunctorPredicateKey predicateKey;
+      predicateKey.terms.reserve(view->terms.size());
+      for (const auto &term : view->terms) {
+        ClosedFunctorPredicateTermKey termKey;
+        termKey.factors.reserve(term.factors.size());
+        for (const auto &factor : term.factors) {
+          const auto comparison = closedLiteralComparisonView(factor);
+          if (!comparison)
+            throw std::logic_error(
+                "closed traversal factor changed after validation");
+          auto literal = std::visit(
+              [](const auto &value) -> ClosedFunctorPredicateLiteral {
+                using T = std::decay_t<decltype(value)>;
+                if constexpr (std::is_same_v<T, double>)
+                  return scalarValue(value).bits;
+                else
+                  return value;
+              },
+              comparison->literal.get().value);
+          termKey.factors.push_back(ClosedFunctorPredicateFactorKey{
+              .negated       = comparison->negated,
+              .op            = comparison->op,
+              .literalOnLeft = comparison->literalOnLeft,
+              .literal       = std::move(literal)});
+        }
+        predicateKey.terms.push_back(std::move(termKey));
+      }
+      stepKey.predicates.push_back(std::move(predicateKey));
+    }
+    formal.steps.push_back(std::move(stepKey));
+  }
+  return formal;
 }
 
 CellRef
@@ -1237,11 +1257,17 @@ void VQLCompiler::compileFrameDefinition(const DefDeclaration &definition,
         functorTemplates, index, {}, &ClosedFunctorFormalKey::formalIndex);
     if (functorTemplate != functorTemplates.end() &&
         functorTemplate->formalIndex == index) {
-      const auto *name = std::get_if<std::string>(&parameter.target);
+      const auto *name    = std::get_if<std::string>(&parameter.target);
+      const auto required = frameFunctorFormalIndices_.find(definition.name);
+      const bool requiredFunctor =
+          required != frameFunctorFormalIndices_.end() &&
+          std::ranges::binary_search(required->second, index);
       if (!name || parameter.type || parameter.isVariadic ||
-          parameter.defaultValue)
+          (parameter.defaultValue &&
+           (!requiredFunctor ||
+            !closedTraversalFunctorLiteralSteps(*parameter.defaultValue))))
         throw std::invalid_argument(
-            "closed functor frame requires an untyped required named formal");
+            "closed functor frame requires an untyped named formal");
       chargeClosedFunctorTemplateWork(closedFunctorTemplateWork(
           std::span{&*functorTemplate, std::size_t{1}}));
       std::vector<PathStep> steps;
@@ -1337,7 +1363,8 @@ void VQLCompiler::compileFrameDefinition(const DefDeclaration &definition,
       varBindings_[*name]    = slot;
       continue;
     }
-    if (parameter.defaultValue) {
+    if (parameter.defaultValue && !(functorTemplate != functorTemplates.end() &&
+                                    functorTemplate->formalIndex == index)) {
       const CellRef notPresent = core_.arena().makeCell();
       const CellRef negate     = emitOp(OpcodeKind::Not, "#FRAME_DEFAULT_TEST");
       emitInput(negate, *presenceSlots[index]);

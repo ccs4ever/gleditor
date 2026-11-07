@@ -92,4 +92,26 @@ bool isClosedTraversalFunctorStep(const PathStep &step) noexcept {
   return true;
 }
 
+std::optional<std::span<const PathStep>>
+closedTraversalFunctorLiteralSteps(const ValueExpr &value) noexcept {
+  const auto *path = std::get_if<std::shared_ptr<PathExpression>>(&value.kind);
+  if (!path || !*path) return std::nullopt;
+
+  const auto &expression = **path;
+  const auto &anchor     = expression.anchor;
+  if (!expression.isFunctor || anchor.kind != AnchorKind::Context ||
+      !anchor.name.empty() || anchor.cellId != 0 || anchor.derefMaster ||
+      anchor.createValue || anchor.generator || anchor.storeAnchor ||
+      anchor.versionPin || !anchor.microversionId.empty() ||
+      !expression.anchorPredicates.empty() || expression.anchorProjection ||
+      expression.steps.empty() || expression.shapeProjection ||
+      expression.cloneTail)
+    return std::nullopt;
+
+  for (const PathStep &step : expression.steps)
+    if (!isClosedTraversalFunctorStep(step)) return std::nullopt;
+
+  return std::span<const PathStep>{expression.steps};
+}
+
 } // namespace xanadu::vql

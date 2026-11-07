@@ -1830,3 +1830,44 @@ Logs: `/tmp/vql-read-modifiers-build.log`, `/tmp/vql-read-modifiers-focused.log`
 `/tmp/vql-read-modifiers-tests.log`, `/tmp/vql-read-modifiers-cli.log`,
 `/tmp/vql-read-modifiers-callables.log`, `/tmp/vql-read-modifiers-overlay.log`,
 `/tmp/vql-read-modifiers-format.log`.
+
+## Iteration 48: closed literal defaults for required functor formals
+
+Fixed untyped named formals required as traversal functors may obtain a closed literal template from
+an omitted default. Supplied closed functors override that template; supplied ordinary or empty
+values remain supplied and never trigger it. The current static ABI still refuses applying an
+ordinary value as a functor. Defaults that are unused or read as ordinary values retain their
+existing routing. Captured/computed, typed, variadic, dot and destructured defaults remain outside
+this bounded native subset.
+
+Default and actual literals share a non-owning recognizer and one precharged normalization path.
+Requirement propagation reaches its fixed point before deciding whether a default is unused; pure
+forwarding to another static formal does not count as an ordinary read. Ordinary ValueExpr/variable
+syntax visits remain charged. A defaulted formal required both as a functor and an ordinary value
+refuses native reuse rather than dropping its value. The existing descriptor's dummy Stream and
+presence ports are preserved, and identical default/actual templates share variants. The old UFCS
+injection rule still applies; recursive omission tests use value calls through `identity(...)` to
+make that distinction explicit.
+
+Ordinary-use summaries also propagate to a fixed point after required-functor discovery. A
+static-capable callee formal may still consume a value; both UFCS mappings and direct or relay
+consumers feed the default mixed-use check. Queries without closed functor defaults skip this
+additional summary pass. Syntax-budget visits bound every iteration, callsite, argument and mapping.
+
+Validation: full `make -j$(nproc)`, all 1,019 affected tests across 93 suites and all 102 focused
+tests across ten suites passed. Eight new cases include omitted self/mutual defaults, pure
+forwarding, exact override/reuse, explicit-empty precedence/refusal, UFCS/caller binding isolation,
+ordinary inline defaults, captured/mixed/direct and relay value-use exclusion, atomic budgets/retry,
+source-free recursive export/reload and actual host/mesh SOURCE output. A real headless `vquery` run
+returned `leaf` through an omitted default and recursive VM graphs. Independent Luna gates accepted
+the final bounded stage. Repository formatting uses clang-format 19.
+
+Broader audits retain the same eight route failures and one skip (132 passes) and seven callable
+failures (33 passes). These are not full-suite passes. Captured/computed defaults, general closures,
+remaining decorated forms and frontend/lifecycle work still leave §4.12 incomplete. No speedup is
+claimed.
+
+Logs: `/tmp/vql-functor-default-build.log`, `/tmp/vql-functor-default-focused.log`,
+`/tmp/vql-functor-default-tests.log`, `/tmp/vql-functor-default-cli.log`,
+`/tmp/vql-functor-default-callables.log`, `/tmp/vql-functor-default-overlay.log`,
+`/tmp/vql-functor-default-format.log`.

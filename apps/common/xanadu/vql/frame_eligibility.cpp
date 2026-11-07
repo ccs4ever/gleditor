@@ -86,10 +86,70 @@ struct TraversalBudget {
   std::unordered_set<const void *> activePointers;
 };
 
+using ClosedDefaultIndices = std::unordered_set<std::size_t>;
+using ClosedDefaultIndex =
+    std::unordered_map<std::string, ClosedDefaultIndices>;
+
+void chargeClosedLiteralPredicateView(TraversalBudget &budget,
+                                      const BooleanExpr &predicate,
+                                      const std::size_t depth) {
+  budget.tick(depth); // BooleanExpr
+  for (const auto &term : predicate.terms) {
+    budget.tick(depth + 1); // BooleanTerm
+    for (std::size_t index = 0; index < term.factors.size(); ++index) {
+      budget.tick(depth + 2); // BooleanFactor
+      budget.tick(depth + 3); // ComparisonExpr
+      budget.tick(depth + 3); // Comparison operator
+      budget.tick(depth + 4); // Left ValueExpr
+      budget.tick(depth + 4); // Right ValueExpr
+      budget.tick(depth + 5); // Current-context PathExpression
+      budget.tick(depth + 5); // ScalarLiteral
+    }
+  }
+}
+
+bool isClosedTraversalFunctorDefault(const ValueExpr &value,
+                                     TraversalBudget &budget,
+                                     const std::size_t depth) {
+  budget.tick(depth);
+  const auto *path = std::get_if<std::shared_ptr<PathExpression>>(&value.kind);
+  if (!path || !*path) return false;
+
+  const void *identity = path->get();
+  if (!budget.activePointers.insert(identity).second)
+    throw ScanFailure("frame eligibility found a cyclic AST");
+  struct EraseOnExit {
+    std::unordered_set<const void *> &set;
+    const void *identity;
+    ~EraseOnExit() { set.erase(identity); }
+  } erase{budget.activePointers, identity};
+  budget.tick(depth + 1);
+
+  const auto &expression = **path;
+  const auto &anchor     = expression.anchor;
+  if (!expression.isFunctor || anchor.kind != AnchorKind::Context ||
+      !anchor.name.empty() || anchor.cellId != 0 || anchor.derefMaster ||
+      anchor.createValue || anchor.generator || anchor.storeAnchor ||
+      anchor.versionPin || !anchor.microversionId.empty() ||
+      !expression.anchorPredicates.empty() || expression.anchorProjection ||
+      expression.steps.empty() || expression.shapeProjection ||
+      expression.cloneTail)
+    return false;
+
+  for (const auto &step : expression.steps) {
+    budget.tick(depth + 2);
+    for (const auto &predicate : step.predicates)
+      chargeClosedLiteralPredicateView(budget, predicate, depth + 3);
+  }
+  return closedTraversalFunctorLiteralSteps(value).has_value();
+}
+
 class DefinitionScanner {
 public:
-  DefinitionScanner(TraversalBudget &budget, const DefinitionIndex &definitions)
-      : budget_(budget), definitions_(definitions) {}
+  DefinitionScanner(TraversalBudget &budget, const DefinitionIndex &definitions,
+                    const ClosedDefaultIndex &closedDefaults)
+      : budget_(budget), definitions_(definitions),
+        closedDefaults_(closedDefaults) {}
 
   std::optional<std::string> scan(const DefDeclaration &definition) {
     tick(0);
@@ -107,9 +167,18 @@ public:
         refuse(
             "only named final variadics without defaults are frame eligible");
       if (parameter.defaultValue) {
-        const bool prior          = scanningParameterDefault_;
-        scanningParameterDefault_ = true;
+        const bool prior                       = scanningParameterDefault_;
+        scanningParameterDefault_              = true;
+        const PathExpression *priorDefaultPath = recognizedDefaultPath_;
+        const auto eligibleDefaults = closedDefaults_.find(definition.name);
+        if (eligibleDefaults != closedDefaults_.end() &&
+            eligibleDefaults->second.contains(index)) {
+          const auto *path = std::get_if<std::shared_ptr<PathExpression>>(
+              &parameter.defaultValue->kind);
+          if (path && *path) recognizedDefaultPath_ = path->get();
+        }
         value(*parameter.defaultValue, scope, 2);
+        recognizedDefaultPath_    = priorDefaultPath;
         scanningParameterDefault_ = prior;
       }
       if (parameter.type) {
@@ -126,7 +195,8 @@ public:
         if (name->empty() || !scope.insert(*name).second)
           refuse("frame parameters must have unique variable names");
         else if (!parameter.type && !parameter.isVariadic &&
-                 !parameter.defaultValue)
+                 (!parameter.defaultValue ||
+                  hasClosedDefault(definition.name, index)))
           functorFormalIndicesByName_.emplace(*name, index);
       } else if (std::holds_alternative<bool>(parameter.target)) {
         if (contextParameterSeen)
@@ -176,6 +246,11 @@ public:
   [[nodiscard]] const std::unordered_set<std::size_t> &
   functorFormalIndices() const noexcept {
     return functorFormalIndices_;
+  }
+
+  [[nodiscard]] const std::unordered_set<std::size_t> &
+  ordinaryFunctorFormalIndices() const noexcept {
+    return ordinaryFunctorFormalIndices_;
   }
 
   [[nodiscard]] std::vector<CallSite> takeCallSites() && {
@@ -241,6 +316,11 @@ private:
       refuse("frame eligibility found an empty lexical variable");
       return;
     }
+    if (scope.contains(name) && !shadowedFunctorFormalNames_.contains(name)) {
+      if (const auto formal = functorFormalIndicesByName_.find(name);
+          formal != functorFormalIndicesByName_.end())
+        ordinaryFunctorFormalIndices_.insert(formal->second);
+    }
     if (!scope.contains(name)) {
       freeCaptureNames_.insert(name);
       if (requiredDefaultBinding) {
@@ -252,45 +332,10 @@ private:
     }
   }
 
-  bool isClosedFunctorLiteral(const PathExpression &path,
-                              const std::size_t depth) {
-    if (!path.isFunctor) return false;
-    const auto &anchor = path.anchor;
-    bool closed =
-        anchor.kind == AnchorKind::Context && anchor.name.empty() &&
-        anchor.cellId == 0 && !anchor.derefMaster && !anchor.createValue &&
-        !anchor.generator && !anchor.storeAnchor && !anchor.versionPin &&
-        anchor.microversionId.empty() && path.anchorPredicates.empty() &&
-        !path.anchorProjection && !path.shapeProjection && !path.cloneTail &&
-        !path.steps.empty();
-    sequence(path.steps, depth,
-             [&](const PathStep &step, const std::size_t stepDepth) {
-               // Charge the candidate Boolean tree before the shared
-               // recognizer inspects predicate fields. Unsupported shapes
-               // fall back to the ordinary bounded AST walk below.
-               for (const auto &predicate : step.predicates) {
-                 chargeClosedLiteralPredicateView(predicate, stepDepth + 1);
-               }
-               if (!isClosedTraversalFunctorStep(step)) closed = false;
-             });
-    return closed;
-  }
-
-  void chargeClosedLiteralPredicateView(const BooleanExpr &predicate,
-                                        const std::size_t depth) {
-    tick(depth); // BooleanExpr
-    for (const auto &term : predicate.terms) {
-      tick(depth + 1); // BooleanTerm
-      for (std::size_t index = 0; index < term.factors.size(); ++index) {
-        tick(depth + 2); // BooleanFactor
-        tick(depth + 3); // ComparisonExpr
-        tick(depth + 3); // Comparison operator
-        tick(depth + 4); // Left ValueExpr
-        tick(depth + 4); // Right ValueExpr
-        tick(depth + 5); // Current-context PathExpression
-        tick(depth + 5); // ScalarLiteral
-      }
-    }
+  bool hasClosedDefault(const std::string &definition,
+                        const std::size_t index) const {
+    const auto found = closedDefaults_.find(definition);
+    return found != closedDefaults_.end() && found->second.contains(index);
   }
 
   CallSite::FunctorArgumentSource
@@ -306,16 +351,7 @@ private:
       }
       return {};
     }
-    const auto *path =
-        std::get_if<std::shared_ptr<PathExpression>>(&argument.kind);
-    if (!path || !*path) return {};
-    bool closed = false;
-    pointer(
-        *path, depth,
-        [&](const PathExpression &expression, const std::size_t childDepth) {
-          closed = isClosedFunctorLiteral(expression, childDepth);
-        });
-    if (closed)
+    if (isClosedTraversalFunctorDefault(argument, budget_, depth))
       return {.kind = CallSite::FunctorArgumentSource::Kind::ClosedLiteral};
     return {};
   }
@@ -330,7 +366,6 @@ private:
 
   bool parameterAcceptsStaticFunctor(const LambdaParam &parameter) const {
     return !parameter.type && !parameter.isVariadic &&
-           !parameter.defaultValue &&
            std::holds_alternative<std::string>(parameter.target);
   }
 
@@ -482,7 +517,9 @@ private:
           }
           if (!resolvedIndex) return;
           const auto &parameter = params[*resolvedIndex];
-          if (parameterAcceptsStaticFunctor(parameter)) {
+          if (parameterAcceptsStaticFunctor(parameter) &&
+              (!parameter.defaultValue ||
+               hasClosedDefault(call.name, *resolvedIndex))) {
             literalPosition = true;
           } else if (parameterUsesFunctorValue(parameter)) {
             unsupportedFunctorPosition = true;
@@ -500,6 +537,15 @@ private:
       if (source.kind == CallSite::FunctorArgumentSource::Kind::ClosedLiteral &&
           literalPosition)
         continue;
+      if (source.kind == CallSite::FunctorArgumentSource::Kind::CallerFormal &&
+          literalPosition && !ordinaryPathPosition &&
+          !unsupportedFunctorPosition) {
+        // A bound static argument is forwarding, not an ordinary value read.
+        // Keep the ValueExpr and variable visits in the shared syntax budget.
+        tick(depth + 2);
+        tick(0);
+        continue;
+      }
       if (unsupportedFunctorPosition)
         refuse("defaulted functor formals remain on inline graph lowering");
       ordinaryArgumentValue(argument, scope, depth + 2,
@@ -574,7 +620,8 @@ private:
                       const std::size_t depth,
                       const bool allowLeadingSlashPath = false) {
     tick(depth);
-    if (path.isFunctor && !allowLeadingSlashPath)
+    if (path.isFunctor && !allowLeadingSlashPath &&
+        &path != recognizedDefaultPath_)
       refuse("partial path functors are not reusable frame bodies");
     if (path.anchor.kind == AnchorKind::Variable)
       variable(path.anchor.name, scope);
@@ -1250,15 +1297,18 @@ private:
 
   TraversalBudget &budget_;
   const DefinitionIndex &definitions_;
+  const ClosedDefaultIndex &closedDefaults_;
   std::unordered_map<std::string, std::size_t> functorFormalIndicesByName_;
   std::unordered_set<std::string> shadowedFunctorFormalNames_;
   std::unordered_set<std::string> freeCaptureNames_;
   std::unordered_set<std::size_t> functorFormalIndices_;
+  std::unordered_set<std::size_t> ordinaryFunctorFormalIndices_;
   std::unordered_set<std::string> requiredDefaultCaptureBindings_;
   std::unordered_set<std::string> conditionalRequiredDefaultCaptureBindings_;
   std::vector<CallSite> callSites_;
   bool scanningParameterDefault_{false};
   bool scanningConditionalRestType_{false};
+  const PathExpression *recognizedDefaultPath_{nullptr};
   std::optional<std::string> refusal_;
 };
 
@@ -1283,6 +1333,10 @@ analyzeFrameEligibility(const QueryExpression &query,
         conditionalRequiredDefaultCaptureSets;
     std::unordered_map<std::string, std::unordered_set<std::size_t>>
         functorFormalSets;
+    std::unordered_map<std::string, std::unordered_set<std::size_t>>
+        ordinaryFunctorFormalSets;
+    ClosedDefaultIndex closedDefaultIndices;
+    bool hasClosedFunctorDefaults = false;
     std::unordered_map<std::string, const DefDeclaration *> definitionsByName;
     for (const auto &definition : query.defs) {
       budget.tick(1);
@@ -1293,7 +1347,23 @@ analyzeFrameEligibility(const QueryExpression &query,
       definitionsByName.emplace(definition.name, &definition);
     }
     for (const auto &definition : query.defs) {
-      DefinitionScanner scanner(budget, definitionsByName);
+      auto &eligibleDefaults = closedDefaultIndices[definition.name];
+      for (std::size_t index = 0; index < definition.params.size(); ++index) {
+        budget.tick(1);
+        const auto &parameter = definition.params[index];
+        if (!parameter.defaultValue || parameter.type || parameter.isVariadic ||
+            !std::holds_alternative<std::string>(parameter.target))
+          continue;
+        if (isClosedTraversalFunctorDefault(*parameter.defaultValue, budget,
+                                            2)) {
+          eligibleDefaults.insert(index);
+          hasClosedFunctorDefaults = true;
+        }
+      }
+    }
+    for (const auto &definition : query.defs) {
+      DefinitionScanner scanner(budget, definitionsByName,
+                                closedDefaultIndices);
       const auto reason = scanner.scan(definition);
       freeCaptureSets.emplace(definition.name, scanner.freeCaptureNames());
       requiredDefaultCaptureSets.emplace(
@@ -1304,6 +1374,11 @@ analyzeFrameEligibility(const QueryExpression &query,
       for (const auto index : scanner.functorFormalIndices()) {
         budget.tick(1);
         functorFormals.insert(index);
+      }
+      auto &ordinaryFunctorFormals = ordinaryFunctorFormalSets[definition.name];
+      for (const auto index : scanner.ordinaryFunctorFormalIndices()) {
+        budget.tick(1);
+        ordinaryFunctorFormals.insert(index);
       }
       auto callSites = std::move(scanner).takeCallSites();
       for (auto &callSite : callSites) {
@@ -1352,7 +1427,8 @@ analyzeFrameEligibility(const QueryExpression &query,
                 !std::holds_alternative<std::string>(
                     params[formalIndex].target) ||
                 params[formalIndex].type || params[formalIndex].isVariadic ||
-                params[formalIndex].defaultValue ||
+                (params[formalIndex].defaultValue &&
+                 !closedDefaultIndices[calleeName].contains(formalIndex)) ||
                 argumentIndex >= callSite.functorArgumentSources.size())
               return false;
             const auto &source = callSite.functorArgumentSources[argumentIndex];
@@ -1374,17 +1450,18 @@ analyzeFrameEligibility(const QueryExpression &query,
             budget.tick(1);
             const bool injectContext = callSite.mayInjectContext &&
                                        params.size() > callSite.argumentCount;
-            const bool normalBound =
-                injectContext
-                    ? requiredFormal > 0 &&
-                          requiredFormal - 1 < callSite.argumentCount &&
-                          validateArgument(requiredFormal, requiredFormal - 1)
-                    : requiredFormal < callSite.argumentCount &&
-                          validateArgument(requiredFormal, requiredFormal);
-            const bool fallbackBound =
-                !injectContext ||
-                (requiredFormal < callSite.argumentCount &&
-                 validateArgument(requiredFormal, requiredFormal));
+            const auto branchBound = [&](const bool contextInjected) {
+              if (contextInjected && requiredFormal == 0) return false;
+              const std::size_t argumentIndex =
+                  contextInjected ? requiredFormal - 1 : requiredFormal;
+              if (argumentIndex < callSite.argumentCount)
+                return validateArgument(requiredFormal, argumentIndex);
+              const auto defaults = closedDefaultIndices.find(calleeName);
+              return defaults != closedDefaultIndices.end() &&
+                     defaults->second.contains(requiredFormal);
+            };
+            const bool normalBound   = branchBound(injectContext);
+            const bool fallbackBound = !injectContext || branchBound(false);
             if (!normalBound || !fallbackBound) {
               if (result.reusableDefinitions.erase(callSite.caller))
                 result.refusalReasons.emplace(
@@ -1394,6 +1471,81 @@ analyzeFrameEligibility(const QueryExpression &query,
           }
         }
       }
+    }
+
+    // A static-capable formal can still be consumed as an ordinary value.
+    // Propagate those uses after functor requirements settle, including through
+    // otherwise reusable no-default helpers, before accepting default bindings.
+    bool ordinaryUsesChanged = hasClosedFunctorDefaults;
+    while (ordinaryUsesChanged) {
+      budget.tick(1);
+      ordinaryUsesChanged = false;
+      for (const auto &[calleeName, callers] : captureCallersByCallee) {
+        budget.tick(1);
+        const auto &params   = definitionsByName.at(calleeName)->params;
+        const auto &required = functorFormalSets.at(calleeName);
+        const auto &ordinary = ordinaryFunctorFormalSets.at(calleeName);
+        for (const auto &callSite : callers) {
+          budget.tick(1);
+          const bool injectContext = callSite.mayInjectContext &&
+                                     params.size() > callSite.argumentCount;
+          for (std::size_t index = 0;
+               index < callSite.functorArgumentSources.size(); ++index) {
+            budget.tick(1);
+            const auto &source = callSite.functorArgumentSources[index];
+            if (source.kind !=
+                    CallSite::FunctorArgumentSource::Kind::CallerFormal ||
+                !source.callerFormalIndex)
+              continue;
+            const auto usesValue = [&](const std::size_t formalIndex) {
+              budget.tick(1);
+              return formalIndex >= params.size() ||
+                     params[formalIndex].isVariadic ||
+                     !required.contains(formalIndex) ||
+                     ordinary.contains(formalIndex);
+            };
+            bool ordinaryUse =
+                usesValue(index + static_cast<std::size_t>(injectContext));
+            if (injectContext) ordinaryUse |= usesValue(index);
+            if (ordinaryUse) {
+              const bool added = ordinaryFunctorFormalSets.at(callSite.caller)
+                                     .insert(*source.callerFormalIndex)
+                                     .second;
+              ordinaryUsesChanged |= added;
+            }
+          }
+        }
+      }
+    }
+
+    // A closed default is a static binding only when the definition needs
+    // that formal as a functor, including when the requirement is forwarded
+    // transitively to another reusable definition.
+    for (const auto &definition : query.defs) {
+      const auto defaults = closedDefaultIndices.find(definition.name);
+      const auto required = functorFormalSets.find(definition.name);
+      if (defaults == closedDefaultIndices.end() ||
+          required == functorFormalSets.end())
+        continue;
+      bool hasUnusedClosedDefault = false;
+      bool hasMixedClosedDefault  = false;
+      for (const std::size_t index : defaults->second) {
+        budget.tick(1);
+        if (!required->second.contains(index)) {
+          hasUnusedClosedDefault = true;
+          continue;
+        }
+        const auto ordinary = ordinaryFunctorFormalSets.find(definition.name);
+        hasMixedClosedDefault |= ordinary != ordinaryFunctorFormalSets.end() &&
+                                 ordinary->second.contains(index);
+      }
+      if ((hasUnusedClosedDefault || hasMixedClosedDefault) &&
+          result.reusableDefinitions.erase(definition.name))
+        result.refusalReasons.emplace(
+            definition.name,
+            hasMixedClosedDefault
+                ? "closed-default functor formal is also used as a value"
+                : "partial path functors are not reusable frame bodies");
     }
 
     std::deque<PendingCapture> pendingCaptures;
@@ -1558,7 +1710,8 @@ analyzeFrameEligibility(const QueryExpression &query,
       }
     }
 
-    DefinitionScanner validator(budget, definitionsByName);
+    DefinitionScanner validator(budget, definitionsByName,
+                                closedDefaultIndices);
     validator.validateQueryNodes(query);
   } catch (const std::exception &error) {
     return std::unexpected(FrameEligibilityError{error.what()});
