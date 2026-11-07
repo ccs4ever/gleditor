@@ -125,6 +125,13 @@ the section 5 table implied more than 200.
   change is approved. Q10: the executor's steady clock is `CLOCK_BOOTTIME` on Linux; segments stay
   for wall steps. Q11: row 4 stays uncounted for every device in v1. I3-3a may start.
 
+- 2026-11-06: owner rulings on the promote follow-ups. (1) A single-operation
+  `Store::makeCell(parent, span, kind, bits)` is approved as a core change; promote's restate path
+  uses it instead of `makeCell` plus `setValue`. (2) Resuming a resumed checkpoint chains each
+  checkpoint's content to the image it was resumed from; the chain is the design, not a test
+  fallback, and `checkpoint()` carries it. (3) `exportToStore` is lowered into shared engine code so
+  VQL and VPL share it, which also fixes VPL's dead `1..cellCount()` loop and unguarded scalar mint.
+
 ## 1. I3-2 round-2 decisions
 
 The items marked `DECISION` in [findings-r2.md](i3-2-review/findings-r2.md):
