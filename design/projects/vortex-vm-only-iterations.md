@@ -1801,3 +1801,32 @@ Logs: `/tmp/vql-boolean-predicate-build.log`, `/tmp/vql-boolean-predicate-focuse
 `/tmp/vql-boolean-predicate-tests.log`, `/tmp/vql-boolean-predicate-cli.log`,
 `/tmp/vql-boolean-predicate-callables.log`, `/tmp/vql-boolean-predicate-overlay.log`,
 `/tmp/vql-boolean-predicate-format.log`.
+
+## Iteration 47: read-only traversal modifiers in recursive functor frames
+
+Closed templates retain bidirectional dimension traversal and step-level clone-master dereferencing.
+Exact keys carry both flags, and ordinary selector/step graph lowering preserves
+positive-rank-then-negative-rank ordering and dereference-before-predicate/clamp semantics. Two
+named metadata work units per step cover the flags in source normalization and stored-template
+passes. Yield modes, placements, creation, historical pins, shapes and projections remain outside
+this stage.
+
+Validation: full `make -j$(nproc)` and all 93 focused tests across eight suites passed. Six new
+cases cover native self/mutual recursion and ordinary-graph parity, POS-before-NEG order and
+duplicate inputs, exact modifier/direction keys, two-hop clone masters before filtering/clamping,
+caller bindings, atomic budget refusal/retry and excluded decorations. Source-free recursive
+export/reload and actual host/mesh SOURCE output pass with a bare clone whose master is `keep`. The
+real headless CLI returns `keep` through the bidirectional dereference route. Initializing a clone
+would write through to its master; the fixture deliberately creates a blank clone. Independent Luna
+architecture, senior and resource gates accepted this bounded stage.
+
+All 1,011 affected tests across 92 suites and repository formatting with clang-format 19 passed. The
+broader audit retains eight failures and one skip (132 passes); the callable audit retains the same
+seven failures (33 passes). These are not full-suite passes. Other decorated/captured forms, general
+closures and remaining frontend/lifecycle work still leave §4.12 incomplete. No performance
+improvement is claimed.
+
+Logs: `/tmp/vql-read-modifiers-build.log`, `/tmp/vql-read-modifiers-focused.log`,
+`/tmp/vql-read-modifiers-tests.log`, `/tmp/vql-read-modifiers-cli.log`,
+`/tmp/vql-read-modifiers-callables.log`, `/tmp/vql-read-modifiers-overlay.log`,
+`/tmp/vql-read-modifiers-format.log`.

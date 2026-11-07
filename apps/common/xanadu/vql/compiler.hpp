@@ -136,6 +136,8 @@ private:
   struct ClosedFunctorStepKey {
     std::string dimName;
     zigzag::DimVector direction{zigzag::DimVector::POS};
+    bool isBidir{false};
+    bool derefMaster{false};
     std::optional<ClosedFunctorClampKey> rangeClamp;
     std::vector<ClosedFunctorPredicateKey> predicates;
 
@@ -173,6 +175,8 @@ private:
         for (const auto &step : formal.steps) {
           combine(std::hash<std::string>{}(step.dimName));
           combine(std::hash<zigzag::DimVector>{}(step.direction));
+          combine(std::hash<bool>{}(step.isBidir));
+          combine(std::hash<bool>{}(step.derefMaster));
           combine(step.rangeClamp.has_value());
           if (step.rangeClamp) {
             combine(std::hash<std::int64_t>{}(step.rangeClamp->start));
@@ -204,6 +208,8 @@ private:
       return result;
     }
   };
+  // Charge both modifiers on every step, including their default-false state.
+  static constexpr std::size_t closedFunctorStepModifierWork = 2;
 
   // Emission helpers
   zigzag::CellRef mintOpcode(zigzag::vortex::OpcodeKind kind,

@@ -255,6 +255,7 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
             plain = false;
             break;
           }
+          chargeClosedFunctorTemplateWork(closedFunctorStepModifierWork);
           chargeClosedFunctorTemplateWork(dimension->dimName.size());
           if (!isClosedTraversalFunctorStep(step)) {
             plain = false;
@@ -282,13 +283,15 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
             const auto &dimension =
                 std::get<SignedDimensionStep>(step.selector);
             ClosedFunctorStepKey stepKey{
-                .dimName    = dimension.dimName,
-                .direction  = dimension.direction,
-                .rangeClamp = step.rangeClamp
-                                  ? std::optional{ClosedFunctorClampKey{
-                                        .start = step.rangeClamp->start,
-                                        .end   = step.rangeClamp->end}}
-                                  : std::nullopt};
+                .dimName     = dimension.dimName,
+                .direction   = dimension.direction,
+                .isBidir     = dimension.isBidir,
+                .derefMaster = step.derefMaster,
+                .rangeClamp  = step.rangeClamp
+                                   ? std::optional{ClosedFunctorClampKey{
+                                         .start = step.rangeClamp->start,
+                                         .end   = step.rangeClamp->end}}
+                                   : std::nullopt};
             stepKey.predicates.reserve(step.predicates.size());
             for (const auto &predicate : step.predicates) {
               const auto view = closedLiteralPredicateView(predicate);
@@ -1245,15 +1248,17 @@ void VQLCompiler::compileFrameDefinition(const DefDeclaration &definition,
       steps.reserve(functorTemplate->steps.size());
       for (const auto &templateStep : functorTemplate->steps) {
         SignedDimensionStep dimension{.dimName   = templateStep.dimName,
-                                      .direction = templateStep.direction};
+                                      .direction = templateStep.direction,
+                                      .isBidir   = templateStep.isBidir};
         const auto rangeClamp =
             templateStep.rangeClamp
                 ? std::optional{RangeClamp{.start =
                                                templateStep.rangeClamp->start,
                                            .end = templateStep.rangeClamp->end}}
                 : std::nullopt;
-        PathStep step{.selector   = std::move(dimension),
-                      .rangeClamp = rangeClamp};
+        PathStep step{.selector    = std::move(dimension),
+                      .derefMaster = templateStep.derefMaster,
+                      .rangeClamp  = rangeClamp};
         step.predicates.reserve(templateStep.predicates.size());
         for (const auto &predicate : templateStep.predicates) {
           BooleanExpr predicateExpr;

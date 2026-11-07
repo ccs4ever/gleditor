@@ -169,6 +169,7 @@ std::size_t VQLCompiler::closedFunctorTemplateWork(
   for (const auto &formal : templates) {
     add(formal.steps.size());
     for (const auto &step : formal.steps) {
+      add(closedFunctorStepModifierWork);
       add(step.dimName.size());
       if (step.rangeClamp)
         add(closedFunctorClampWork(step.rangeClamp->end.has_value()));

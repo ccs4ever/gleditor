@@ -2339,20 +2339,20 @@ explicit refusals. The rulings below describe the intended semantics.
   (`$c / $up`) the steps run over the step's input, and the step's predicates and clamp then apply
   to what they reach. Decorated references retain a captured step sequence across later rebinding.
   Eligible fixed untyped named formals without defaults now accept closed signed-dimension templates
-  with optional static index/range clamps and flat Boolean scalar predicates in reusable recursive
-  function graphs. Ordered OR terms contain ordered AND factors; each factor compares the current
-  candidate with a direct primitive literal and may be negated. Exact template content, full signed
-  64-bit bounds, literal type/value, comparison operator/operand order, Boolean
-  boundaries/order/polarity, formal position and typed-rest arity distinguish variants; forwarding
-  reuses the graph descriptor. The formal retains an empty Stream port while compilation installs
-  its template. `[n]` and `[n,n]` share the parser's normalized clamp. Captured/computed predicates,
-  nested Boolean values and other decorated templates remain outside this native subset and use
-  finite inline graphs; unsupported recursive boundaries refuse. Specialization has a configurable
-  1,000,000-unit weighted template-work ceiling in addition to existing variant/opcode/descriptor
-  caps. It does not bound all compilation CPU or memory. See
-  [iterations 43–46](projects/vortex-vm-only-iterations.md). Binding and compilation may copy AST
-  data, and execution materializes result streams. Specialized representation and
-  allocation/performance claims remain subject to §4.12.4's measurements.
+  with optional bidirectional traversal, step-level master dereference, static index/range clamps
+  and flat Boolean scalar predicates in reusable recursive function graphs. Ordered OR terms contain
+  ordered AND factors; each factor compares the current candidate with a direct primitive literal
+  and may be negated. Exact template content, full signed 64-bit bounds, literal type/value,
+  comparison operator/operand order, Boolean boundaries/order/polarity, traversal flags, formal
+  position and typed-rest arity distinguish variants; forwarding reuses the graph descriptor. The
+  formal retains an empty Stream port while compilation installs its template. `[n]` and `[n,n]`
+  share the parser's normalized clamp. Captured/computed predicates, nested Boolean values and other
+  decorated templates remain outside this native subset and use finite inline graphs; unsupported
+  recursive boundaries refuse. Specialization has a configurable 1,000,000-unit weighted
+  template-work ceiling in addition to existing variant/opcode/descriptor caps. It does not bound
+  all compilation CPU or memory. See [iterations 43–47](projects/vortex-vm-only-iterations.md).
+  Binding and compilation may copy AST data, and execution materializes result streams. Specialized
+  representation and allocation/performance claims remain subject to §4.12.4's measurements.
 
 - **Block bindings run per member.** Nested `for` bindings preserve source order and duplicates;
   `where` and conditional actions branch in the VM. Untyped missing destructure fields bind empty,

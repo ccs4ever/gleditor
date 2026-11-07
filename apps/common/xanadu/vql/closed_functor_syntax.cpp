@@ -76,15 +76,15 @@ closedLiteralPredicateView(const BooleanExpr &predicate) noexcept {
 bool isClosedTraversalFunctorStep(const PathStep &step) noexcept {
   const auto *dimension = std::get_if<SignedDimensionStep>(&step.selector);
   if (!dimension || dimension->dimName.empty() ||
-      dimension->dimName.starts_with('$') || dimension->isBidir ||
+      dimension->dimName.starts_with('$') ||
       dimension->placement != Placement::Default || !dimension->creates.empty())
     return false;
   if (dimension->direction != zigzag::DimVector::POS &&
       dimension->direction != zigzag::DimVector::NEG)
     return false;
-  if (step.derefMaster || !step.shapePredicates.empty() ||
-      step.projectionAfter || step.versionPin ||
-      step.yieldMode != YieldMode::Default || step.capturedFunctor)
+  if (!step.shapePredicates.empty() || step.projectionAfter ||
+      step.versionPin || step.yieldMode != YieldMode::Default ||
+      step.capturedFunctor)
     return false;
   for (const auto &predicate : step.predicates) {
     if (!closedLiteralPredicateView(predicate)) return false;

@@ -861,3 +861,14 @@ Repository formatting with clang-format 19 passed. Broader audits retain the sam
 failures/one skip and seven callable failures. These are not full-suite passes. Captured/computed
 predicates, nested Boolean values and the recorded closure, frontend and lifecycle gaps still leave
 §4.12 incomplete; no speedup is claimed.
+
+## Read-only modifiers in recursive functor frames
+
+Closed traversal variants now retain bidirectional dimension traversal and step-level master
+dereferencing. Exact keys distinguish both flags and retain full signed direction; existing VM
+selector/step graphs apply POS rank before NEG rank and master dereferencing before predicates and
+clamps. Two named modifier work units per step participate in existing specialization passes. See
+[iteration 47](projects/vortex-vm-only-iterations.md).
+
+Validation pending. Other decorated/captured forms, general closures and the remaining frontend and
+lifecycle work still leave §4.12 incomplete; no speedup is claimed.
