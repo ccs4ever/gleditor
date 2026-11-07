@@ -23,6 +23,7 @@
 #include "common/xanadu/vagent/runtime/health_grants.hpp"
 #include "common/xanadu/vagent/runtime/program.hpp"
 #include "common/xanadu/vagent/runtime/runtime_abi.hpp"
+#include "epistemic_time.hpp"
 
 namespace {
 
@@ -138,18 +139,17 @@ protected:
   CheckedObservation reading() {
     ++seq;
     CheckedObservation o;
-    o.principal           = kP1;
-    o.incarnation         = 1;
-    o.eventId             = "e" + std::to_string(seq);
-    o.sequence            = seq;
-    o.predicate           = "at";
-    o.tuple               = {WireValue::text("self"), WireValue::real(1.0)};
-    o.acquiredAt          = wallSeconds() - 0.5;
-    o.acquiredUncertainty = 0.01;
-    o.clockBasis          = "wall";
-    o.frame               = "enu";
-    o.units               = "m";
-    o.variance            = 0.25;
+    o.principal   = kP1;
+    o.incarnation = 1;
+    o.eventId     = "e" + std::to_string(seq);
+    o.sequence    = seq;
+    o.predicate   = "at";
+    o.tuple       = {WireValue::text("self"), WireValue::real(1.0)};
+    setTimes(o, wallSeconds() - 0.5, 0.01);
+    o.clockBasis = "wall";
+    o.frame      = "enu";
+    o.units      = "m";
+    o.variance   = 0.25;
     return o;
   }
   HealthActionRequest isolate() { return {*token, kP1, Isolate{"stuck"}}; }

@@ -155,7 +155,7 @@ TEST(VagentEpistemicNoise, InvariantsHoldForEverySeed) {
   // Every kind of noise the simulator makes reached the executor somewhere
   // across the seeds, and real readings still got through.
   for (const auto *code : {"Committed", "Duplicate", "InvalidVariance",
-                           "ObservationTimeMismatch", "IngressBackpressure"})
+                           "ClockMappingMismatch", "IngressBackpressure"})
     EXPECT_GT(seen[code], 0U) << code;
   EXPECT_EQ(seen["IngestionFault"], 0U);
   EXPECT_EQ(seen["Pending"], 0U);

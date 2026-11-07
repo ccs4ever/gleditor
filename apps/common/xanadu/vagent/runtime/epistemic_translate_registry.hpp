@@ -47,7 +47,8 @@ struct OwnedStructure {
   std::string_view id;
   std::string_view dimension;
   /// "agent header", "agent rank", "profile field", "profile list", "profile
-  /// rank", "support rank", "record field" or "predicate master".
+  /// rank", "stream field" (inside a profile's `streams`), "support rank",
+  /// "record field" or "predicate master".
   std::string_view where;
   /// The ABI constants (by their C++ names, spelled in the array that
   /// declares them) this entry covers.

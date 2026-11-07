@@ -34,6 +34,7 @@
 #include <vector>
 
 #include "common/xanadu/vagent/runtime/epistemic_ingress.hpp"
+#include "epistemic_time.hpp"
 
 namespace xanadu::vagent::runtime::epistemic_test {
 
@@ -165,17 +166,17 @@ private:
     o.principal   = s.principal;
     o.incarnation = s.incarnation;
     o.eventId     = s.alias + ":" + std::to_string(s.incarnation) + ":" +
-                    std::to_string(++s.events);
-    o.sequence    = ++s.sequence;
-    o.predicate   = "at";
-    o.tuple       = {WireValue::text("target"), WireValue::real(x)};
-    o.acquiredAt =
-        wallStart_ + now() + s.skew + (chance(kForwardJump) ? 30.0 : 0.0);
-    o.acquiredUncertainty = 0.01;
-    o.clockBasis          = "wall";
-    o.frame               = "enu";
-    o.units               = "m";
-    o.variance            = variance;
+                std::to_string(++s.events);
+    o.sequence  = ++s.sequence;
+    o.predicate = "at";
+    o.tuple     = {WireValue::text("target"), WireValue::real(x)};
+    setTimes(o,
+             wallStart_ + now() + s.skew + (chance(kForwardJump) ? 30.0 : 0.0),
+             0.01);
+    o.clockBasis = "wall";
+    o.frame      = "enu";
+    o.units      = "m";
+    o.variance   = variance;
     return o;
   }
 

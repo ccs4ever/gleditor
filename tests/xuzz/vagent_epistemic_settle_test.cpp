@@ -23,6 +23,7 @@
 #include "common/xanadu/vagent/runtime/runtime_abi.hpp"
 #include "common/xanadu/vagent/runtime/settle_discard.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
+#include "epistemic_time.hpp"
 
 namespace {
 
@@ -105,12 +106,11 @@ protected:
     o.sequence    = sequence;
     o.predicate   = std::move(predicate);
     o.tuple       = {WireValue::text(std::move(key)), WireValue::real(x)};
-    o.acquiredAt  = base - 5.0 + 0.01 * static_cast<double>(sequence);
-    o.acquiredUncertainty = 0.01;
-    o.clockBasis          = "wall";
-    o.frame               = "enu";
-    o.units               = "m";
-    o.variance            = 0.25;
+    setTimes(o, base - 5.0 + 0.01 * static_cast<double>(sequence), 0.01);
+    o.clockBasis = "wall";
+    o.frame      = "enu";
+    o.units      = "m";
+    o.variance   = 0.25;
     return o;
   }
 

@@ -33,6 +33,7 @@
 #include "common/xanadu/vagent/runtime/program.hpp"
 #include "common/xanadu/vagent/runtime/runtime_abi.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
+#include "epistemic_time.hpp"
 
 namespace {
 
@@ -164,17 +165,16 @@ protected:
     o.incarnation = 1;
     o.eventId     = principal.substr(0, 4) + "-" + std::to_string(seq) + "-" +
                 std::to_string(++counter);
-    o.sequence            = seq;
-    o.predicate           = "at";
-    o.tuple               = {WireValue::text("self"), WireValue::real(x)};
-    o.acquiredAt          = wallNow() - 0.5;
-    o.acquiredUncertainty = 0.01;
-    o.clockBasis          = "wall";
-    o.clockEpoch          = 1;
-    o.clockMappingVersion = 1;
-    o.frame               = "enu";
-    o.units               = "m";
-    o.variance            = 0.25;
+    o.sequence  = seq;
+    o.predicate = "at";
+    o.tuple     = {WireValue::text("self"), WireValue::real(x)};
+    setTimes(o, wallNow() - 0.5, 0.01);
+    o.clockBasis = "wall";
+    o.clockEpoch = 1;
+    setMappingVersion(o, 1);
+    o.frame    = "enu";
+    o.units    = "m";
+    o.variance = 0.25;
     return o;
   }
   /// The same reading with a wrong frame: a health refusal decided on signed
@@ -477,18 +477,24 @@ TEST_F(VagentEpistemicHealth, ARelayedRefusalCountsOnlyOnSignedFields) {
   Model want;
   want.refuse();
   expectWeights(kP1, want, "relayed signed-basis refusal");
-  // Host-mapped basis: a relayed bad acquisition time moves nothing.
-  auto relayedAcq       = reading(kP1);
-  relayedAcq.acquiredAt = std::numeric_limits<double>::quiet_NaN();
-  relayedAcq.relayedBy  = kRelay;
+  // Counted version 2 (design 4.3): a negative signed time is decided on the
+  // origin's integers, so a relayed copy counts as a direct one does.
+  auto relayedAcq = reading(kP1);
+  setAcquiredAt(relayedAcq, std::numeric_limits<double>::quiet_NaN());
+  relayedAcq.relayedBy = kRelay;
   EXPECT_FALSE(send(relayedAcq));
+  want.refuse();
+  expectWeights(kP1, want, "relayed signed acquisition");
+  // A mapping the host could not use is the host's, relayed or not.
+  auto relayedMap            = reading(kP1);
+  relayedMap.mapping->offset = std::numeric_limits<double>::quiet_NaN();
+  relayedMap.relayedBy       = kRelay;
+  EXPECT_FALSE(send(relayedMap));
   expectWeights(kP1, want, "relayed host-mapped refusal");
   EXPECT_EQ(health(kP1)->uncountedSinceCommit, 1U);
-  // The same defect on a direct copy counts.
-  auto direct       = reading(kP1);
-  direct.acquiredAt = std::numeric_limits<double>::quiet_NaN();
+  auto direct            = reading(kP1);
+  direct.mapping->offset = std::numeric_limits<double>::quiet_NaN();
   EXPECT_FALSE(send(direct));
-  want.refuse();
   expectWeights(kP1, want, "direct host-mapped refusal");
 }
 
@@ -623,9 +629,9 @@ TEST_F(VagentEpistemicHealth, ALateReadingBelowTheMarkUpdatesNothing) {
 }
 
 TEST_F(VagentEpistemicHealth, EpochRegressionCountsAndHostTimeRefusalsDoNot) {
-  auto first                = reading(kP1);
-  first.clockEpoch          = 5;
-  first.clockMappingVersion = 2;
+  auto first       = reading(kP1);
+  first.clockEpoch = 5;
+  setMappingVersion(first, 2);
   ASSERT_TRUE(send(first));
   Model want;
   want.accept();
@@ -638,29 +644,30 @@ TEST_F(VagentEpistemicHealth, EpochRegressionCountsAndHostTimeRefusalsDoNot) {
   want.refuse();
   expectWeights(kP1, want, "ClockEpochRegression");
   // A mapping version that went backwards within one epoch is the host's.
-  auto olderMapping                = reading(kP1);
-  olderMapping.clockEpoch          = 5;
-  olderMapping.clockMappingVersion = 1;
+  auto olderMapping       = reading(kP1);
+  olderMapping.clockEpoch = 5;
+  setMappingVersion(olderMapping, 1);
   olderMapping.tuple = {WireValue::text("other"), WireValue::real(3.0)};
   ASSERT_TRUE(send(olderMapping));
   EXPECT_EQ(outcomeOf(olderMapping)->code, "ClockMappingRegression");
   expectWeights(kP1, want, "ClockMappingRegression");
   EXPECT_EQ(health(kP1)->uncountedSinceCommit, 1U);
   // A real-time clock that reset reads stale: NOMINAL, and the signs.
-  auto stale       = reading(kP1);
-  stale.acquiredAt = wallNow() - 3600.0;
+  auto stale = reading(kP1);
+  setAcquiredAt(stale, wallNow() - 3600.0);
   EXPECT_FALSE(send(stale));
-  expectWeights(kP1, want, "StaleObservation");
+  expectWeights(kP1, want, "LateDelivery");
   const auto seen = health(kP1);
   ASSERT_TRUE(seen);
   EXPECT_EQ(seen->state, HealthState::Nominal);
-  EXPECT_EQ(seen->lastRefusal, "StaleObservation");
+  // Signed at acquisition, an hour on: the path's, not the device's.
+  EXPECT_EQ(seen->lastRefusal, "LateDelivery");
   EXPECT_EQ(seen->uncountedSinceCommit, 2U);
-  EXPECT_GE(seen->contentRefusals, 3);
+  EXPECT_GE(seen->contentRefusals, 2);
   // A commit ends the streak.
-  auto next                = reading(kP1);
-  next.clockEpoch          = 5;
-  next.clockMappingVersion = 2;
+  auto next       = reading(kP1);
+  next.clockEpoch = 5;
+  setMappingVersion(next, 2);
   ASSERT_TRUE(send(next));
   EXPECT_EQ(outcomeOf(next)->kind, IngestOutcome::Kind::Committed);
   EXPECT_EQ(health(kP1)->uncountedSinceCommit, 0U);
@@ -684,7 +691,9 @@ TEST_F(VagentEpistemicHealth, ANonFiniteOrMistypedTupleIsAHealthRefusal) {
 }
 
 TEST_F(VagentEpistemicHealth, TheCountedCodeTableIsPublishedAndVersioned) {
-  EXPECT_EQ(kHealthRefusalCodesVersion, 1);
+  // Version 2 (design 4.3): every counted code is decided on signed bytes, so
+  // the relayed attenuation of version 1 is gone.
+  EXPECT_EQ(kHealthRefusalCodesVersion, 2);
   std::vector<std::string_view> direct, relayed;
   for (const auto &entry : kHealthRefusalCodes) {
     direct.push_back(entry.code);
@@ -695,13 +704,14 @@ TEST_F(VagentEpistemicHealth, TheCountedCodeTableIsPublishedAndVersioned) {
   EXPECT_EQ(direct, (std::vector<std::string_view>{
                         "ObservationFrameMismatch", "MissingVariance",
                         "InvalidVariance", "InvalidValue", "InvalidAcquisition",
-                        "ClockEpochRegression"}));
-  EXPECT_EQ(relayed, (std::vector<std::string_view>{
-                         "ObservationFrameMismatch", "MissingVariance",
-                         "InvalidVariance", "InvalidValue"}));
+                        "ClockEpochRegression", "ObservationTimeMismatch",
+                        "UncertainAcquisition"}));
+  EXPECT_EQ(relayed, direct);
   for (const auto host_time :
-       {"StaleObservation", "ObservationTimeMismatch", "UncertainAcquisition",
-        "ClockMappingRegression", "ConflictingEvent", "InvalidObservation"})
+       {"StaleObservation", "UnknownClockMapping", "InvalidClockMapping",
+        "UncertainClockMapping", "ClockMappingMismatch", "LateDelivery",
+        "MessageExpired", "AcquisitionOrderMismatch", "ClockMappingRegression",
+        "ConflictingEvent", "InvalidObservation"})
     EXPECT_FALSE(isHealthRefusalCode(host_time, false)) << host_time;
 }
 
@@ -1187,12 +1197,11 @@ protected:
     o.sequence    = seq;
     o.predicate   = "at";
     o.tuple       = {WireValue::text(std::move(key)), WireValue::real(1.0)};
-    o.acquiredAt  = wall() - 5.0 + 0.01 * static_cast<double>(seq);
-    o.acquiredUncertainty = 0.01;
-    o.clockBasis          = "wall";
-    o.frame               = "enu";
-    o.units               = "m";
-    o.variance            = 0.25;
+    setTimes(o, wall() - 5.0 + 0.01 * static_cast<double>(seq), 0.01);
+    o.clockBasis = "wall";
+    o.frame      = "enu";
+    o.units      = "m";
+    o.variance   = 0.25;
     return o;
   }
   /// The outcome code of a reading, "Committed" or the refusal.

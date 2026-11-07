@@ -27,6 +27,7 @@
 #include "common/xanadu/vagent/runtime/program.hpp"
 #include "common/xanadu/vagent/runtime/runtime_abi.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
+#include "epistemic_time.hpp"
 
 namespace {
 
@@ -168,12 +169,11 @@ protected:
     o.sequence    = sequence;
     o.predicate   = "at";
     o.tuple       = {WireValue::text(std::move(key)), WireValue::real(x)};
-    o.acquiredAt  = base - 5.0 + 0.01 * static_cast<double>(sequence);
-    o.acquiredUncertainty = 0.01;
-    o.clockBasis          = "wall";
-    o.frame               = "enu";
-    o.units               = "m";
-    o.variance            = 0.25;
+    setTimes(o, base - 5.0 + 0.01 * static_cast<double>(sequence), 0.01);
+    o.clockBasis = "wall";
+    o.frame      = "enu";
+    o.units      = "m";
+    o.variance   = 0.25;
     return o;
   }
 
@@ -318,6 +318,39 @@ TEST(TranslateKeys, AForcedFullKeyHashCollisionDoesNotMatch) {
   PredicateKey policed = one;
   policed.policy       = ArbitrationPolicy{};
   EXPECT_FALSE(colliding.find(policed));
+}
+
+TEST_F(Translate, AMappingVersionIsComparedOnlyUnderOneClockInstance) {
+  a.bind(kP1);
+  auto first       = reading(kP1, "left", 1, 1.0);
+  first.clockEpoch = 5;
+  setMappingVersion(first, 7);
+  ASSERT_TRUE(a.observe(first));
+  // Under the executor that issued version 7, version 2 went backwards.
+  auto regress       = reading(kP1, "right", 2, 1.0);
+  regress.clockEpoch = 5;
+  setMappingVersion(regress, 2);
+  const auto refused = a.observe(regress);
+  ASSERT_TRUE(refused);
+  EXPECT_EQ(refused->code, "ClockMappingRegression");
+  // The stream is carried, with the name of the clock it was issued under;
+  // the new executor's versions start over, so the same version is not a
+  // regression there (design 4.3, A4).
+  ASSERT_TRUE(resumeOnB());
+  b.bind(kP1);
+  auto again       = reading(kP1, "right", 3, 1.0);
+  again.clockEpoch = 5;
+  setMappingVersion(again, 2);
+  const auto resumed = b.observe(again);
+  ASSERT_TRUE(resumed);
+  EXPECT_EQ(resumed->kind, IngestOutcome::Kind::Committed);
+  // The stream now names the new instance, so a lower version regresses again.
+  auto lower       = reading(kP1, "left", 4, 1.0);
+  lower.clockEpoch = 5;
+  setMappingVersion(lower, 1);
+  const auto regressed = b.observe(lower);
+  ASSERT_TRUE(regressed);
+  EXPECT_EQ(regressed->code, "ClockMappingRegression");
 }
 
 TEST_F(Translate, PopulatedStateSurvivesResumeAndUpgrade) {

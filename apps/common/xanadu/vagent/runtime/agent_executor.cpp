@@ -4,6 +4,7 @@
 #include "common/xanadu/provenance.hpp"
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/system_docs.hpp"
+#include "common/xanadu/vagent/runtime/epistemic_abi_clock.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_adapter_wire.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_preflight.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_shape.hpp"
@@ -1928,14 +1929,19 @@ void AgentExecutor::finishSourceChange(State &state, const SourceChange &change,
   if (code == kTurnResultCommitted) {
     // Marks describe events of an incarnation: a retire ends them all, a
     // committed advance ends the lower incarnations'.
-    std::erase_if(ingress_->marks, [&](const auto &entry) {
+    const auto ended = [&](const auto &entry) {
       const auto &[markPid, markPrincipal, markIncarnation, predicate] =
           entry.first;
       return markPid == pid && markPrincipal == change.principal &&
              (change.retire ||
               (change.incarnation && markIncarnation < *change.incarnation));
-    });
-    if (change.retire) ingress_->uncounted.erase(source);
+    };
+    std::erase_if(ingress_->marks, ended);
+    std::erase_if(ingress_->timeFed, ended);
+    if (change.retire) {
+      ingress_->uncounted.erase(source);
+      ingress_->timeClass.erase(source);
+    }
   }
   if (change.retire || !change.incarnation) return;
   auto &floor = ingress_->floors[source];
@@ -3498,6 +3504,10 @@ SourceHealth AgentExecutor::readSourceHealth(const State &state,
           {pidKey(state.pid), out.principal});
       found != ingress_->refusedWhileFaulted.end())
     out.refusedWhileFaulted = found->second;
+  if (const auto found =
+          ingress_->timeClass.find({pidKey(state.pid), out.principal});
+      found != ingress_->timeClass.end() && found->second.weight > 0.0)
+    out.timeClassFraction = found->second.refused / found->second.weight;
   return out;
 }
 
@@ -3568,6 +3578,7 @@ OutcomeClass outcomeClassOf(std::string_view code) noexcept {
   if (code == "IngressBackpressure" || code == "ClockUnsynchronised" ||
       code == "AdmissionClosed" || code == "RevocationUnavailable" ||
       code == "AudienceUnavailable" || code == "UnknownClockMapping" ||
+      code == "UncertainClockMapping" || code == "ClockMappingMismatch" ||
       code == kTurnResultUndelivered)
     return OutcomeClass::Retryable;
   // A budget, an allowance or a binding the host must change first. An
@@ -3580,7 +3591,7 @@ OutcomeClass outcomeClassOf(std::string_view code) noexcept {
       code == "NoProfile" || code == "HealthReasonsFull" ||
       code == "HealthUnavailable" || code == "DelegationExpired" ||
       code == "KeyRevoked" || code == "PolicyMismatch" ||
-      code == "IncarnationStep")
+      code == "IncarnationStep" || code == "InvalidClockMapping")
     return OutcomeClass::NeedsHostAction;
   return OutcomeClass::Terminal;
 }
@@ -3898,34 +3909,27 @@ AgentExecutor::observe(const identity::ActorPid &target,
   // InvalidObservation keeps only what is wrong with the request itself. A
   // bad number is the device's (or the host mapping's) and feeds its health.
   if (o.eventId.empty() || !fits(o.incarnation) || !fits(o.sequence) ||
-      !fits(o.clockEpoch) || !fits(o.clockMappingVersion) ||
+      !fits(o.clockEpoch) || (o.mapping && !fits(o.mapping->version)) ||
       o.tuple.size() != b.params.size())
     return refuse(EpistemicRefusal::InvalidObservation);
-  if (!std::isfinite(o.acquiredAt) || !std::isfinite(o.acquiredUncertainty) ||
-      o.acquiredUncertainty < 0)
-    return refuse(EpistemicRefusal::InvalidAcquisition);
   if (adapter(EpistemicRefusal::InvalidValue))
     return refuse(EpistemicRefusal::InvalidValue);
   for (std::size_t i = 0; i < o.tuple.size(); ++i)
     if (!fitsKind(b.params[i], o.tuple[i]))
       return refuse(EpistemicRefusal::InvalidValue);
-  if (o.clockBasis != clockName(policy.clock))
-    return refuse(EpistemicRefusal::ObservationTimeMismatch);
+  // The time split (design 4.3). Rows 1 to 4 read the signed integers alone,
+  // so the counted codes among them never depend on the host.
+  const auto signedTimes = classifySignedTimes(o, policy);
+  noteTime(target, o, signedTimes, receivedSteady);
+  if (signedTimes.refusal) return refuse(*signedTimes.refusal);
   if (policy.clock == ObservationClock::Wall && !wallSynchronised)
     return refuse(EpistemicRefusal::ClockUnsynchronised);
-  const double receipt = policy.clock == ObservationClock::Wall
-                             ? seconds(wallNow().time_since_epoch())
-                             : receivedSteady;
-  const double skew    = static_cast<double>(policy.clockSkewMs) / 1000.0;
-  const double maxAge  = static_cast<double>(policy.maxAgeMs) / 1000.0;
-  // The uncertainty widens both windows below, so it is bounded first.
-  if (o.acquiredUncertainty >
-      static_cast<double>(policy.maxUncertaintyMs) / 1000.0)
-    return refuse(EpistemicRefusal::UncertainAcquisition);
-  if (o.acquiredAt > receipt + o.acquiredUncertainty + skew)
-    return refuse(EpistemicRefusal::ObservationTimeMismatch);
-  if (o.acquiredAt < receipt - maxAge - o.acquiredUncertainty)
-    return refuse(EpistemicRefusal::StaleObservation);
+  const double receipt   = policy.clock == ObservationClock::Wall
+                               ? seconds(wallNow().time_since_epoch())
+                               : receivedSteady;
+  const auto mappedTimes = classifyMappedTimes(o, policy, receipt);
+  noteTime(target, o, mappedTimes, receivedSteady);
+  if (mappedTimes.refusal) return refuse(*mappedTimes.refusal);
   if (policy.continuous) {
     if (o.frame != policy.frame || o.units != policy.units)
       return refuse(EpistemicRefusal::ObservationFrameMismatch);
@@ -3981,12 +3985,12 @@ AgentExecutor::observe(const identity::ActorPid &target,
   r.set(std::string(kObsEventId), WireValue::text(o.eventId));
   r.set(std::string(kObsDigest), WireValue::text(xanadu::sha256Hex(*encoded)));
   r.set(std::string(kObsSequence), integer(o.sequence));
-  r.set(std::string(kObsAcquiredAt), WireValue::real(o.acquiredAt));
+  r.set(std::string(kObsAcquiredAt), WireValue::real(mappedTimes.acquiredAt));
   r.set(std::string(kObsAcquiredUncertainty),
-        WireValue::real(o.acquiredUncertainty));
+        WireValue::real(mappedTimes.uncertainty));
   r.set(std::string(kObsClockBasis), WireValue::text(o.clockBasis));
   r.set(std::string(kObsClockEpoch), integer(o.clockEpoch));
-  r.set(std::string(kObsClockMappingVersion), integer(o.clockMappingVersion));
+  r.set(std::string(kObsClockMappingVersion), integer(o.mapping->version));
   r.set(std::string(kObsFrame), WireValue::text(o.frame));
   r.set(std::string(kObsUnits), WireValue::text(o.units));
   // The executor's own stamps: the host supplies neither receipt time.
@@ -4008,6 +4012,12 @@ AgentExecutor::observe(const identity::ActorPid &target,
   r.set(std::string(kObsFeatures), WireValue::list({}));
   r.set(std::string(kObsClockInstance),
         WireValue::text(ingress_->clockInstance));
+  // After the ordered fields and the stamps: absent reads as absent, so a
+  // record from before the slice is still whole.
+  r.set(std::string(kObsAcquiredDevice), WireValue::integer(o.device.acquired));
+  r.set(std::string(kObsSentDevice), WireValue::integer(o.device.sent));
+  r.set(std::string(kObsDeviceUncertainty),
+        WireValue::integer(o.device.clockUncertainty));
   // The routine reads these fields by position; the two orders are written
   // in two places, so they are compared here, where a mismatch is cheap.
   for (std::size_t i = 0; i < kObservationOrder.size(); ++i)
@@ -4068,13 +4078,15 @@ AgentExecutor::observe(const identity::ActorPid &target,
     }
     // A reading that passed every check but meets a full queue stands for an
     // accepted event the load dropped: credited once, and only on a stream
-    // that already committed, within the gap of its mark (design 3.2).
+    // that already committed, within the gap of its mark (design 3.2) or, for
+    // a signed adapter, up to the issuer's highest verified sequence (7.1).
     if (const auto found = ingress_->marks.find(stream);
         found != ingress_->marks.end() && found->second.mark &&
         ingress_->estimatorCounts(stream, o.sequence) &&
-        o.sequence <=
-            *found->second.mark + static_cast<std::uint64_t>(
-                                      settings_.epistemic.healthSequenceGap)) {
+        o.sequence <= o.verifiedSequenceBound.value_or(
+                          *found->second.mark +
+                          static_cast<std::uint64_t>(
+                              settings_.epistemic.healthSequenceGap))) {
       ingress_->raiseMark(stream, o.sequence);
       auto [open, fresh] = ingress_->charges.try_emplace(source);
       ++open->second.passed;
@@ -4189,6 +4201,16 @@ std::string_view epistemicRefusalName(EpistemicRefusal refusal) noexcept {
     return "InvalidBinding";
   case EpistemicRefusal::UnknownClockMapping:
     return "UnknownClockMapping";
+  case EpistemicRefusal::InvalidClockMapping:
+    return "InvalidClockMapping";
+  case EpistemicRefusal::UncertainClockMapping:
+    return "UncertainClockMapping";
+  case EpistemicRefusal::ClockMappingMismatch:
+    return "ClockMappingMismatch";
+  case EpistemicRefusal::LateDelivery:
+    return "LateDelivery";
+  case EpistemicRefusal::MessageExpired:
+    return "MessageExpired";
   }
   return "Unknown";
 }
@@ -6663,6 +6685,15 @@ AgentSettings AgentSettings::fromModel(const xanadu::SystemStoreModel &model) {
              ep.controlPerWake);
   loadSigned(xanadu::settings::kVagentEpistemicHealthReasons, ep.healthReasons);
   loadSigned(xanadu::settings::kVagentEpistemicHealthActions, ep.healthActions);
+  loadSigned(xanadu::settings::kVagentEpistemicTimeClassHalfLife,
+             ep.timeClassHalfLife);
+  ep.timeSuspectFraction =
+      model.getDouble(xanadu::settings::kVagentEpistemicTimeSuspectFraction,
+                      ep.timeSuspectFraction);
+  loadSigned(xanadu::settings::kVagentEpistemicCommonCauseSources,
+             ep.commonCauseSources);
+  loadSigned(xanadu::settings::kVagentEpistemicCommonCauseWindowMs,
+             ep.commonCauseWindowMs);
 
   if (const auto checked = ep.validate(); checked.has_value()) {
     settings.epistemic = ep;

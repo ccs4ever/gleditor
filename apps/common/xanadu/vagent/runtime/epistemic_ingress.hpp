@@ -24,6 +24,26 @@ namespace xanadu::vagent::runtime {
 
 enum class EpistemicRefusal : std::uint8_t;
 
+/// What the origin signed, in nanoseconds on its clock (design 4.1).
+struct DeviceTimes {
+  std::int64_t acquired{};
+  std::int64_t sent{};
+  std::int64_t acquiredUncertainty{};
+  std::int64_t clockUncertainty{};
+  std::optional<std::int64_t> expires;
+};
+
+/// The host's mapping of one device clock onto the policy's basis, in
+/// seconds: M(x) = x + offset, u_M(x) = uncertainty + 1e-6 * driftPpm *
+/// |x - anchor|.
+struct ClockMapping {
+  double offset{};
+  double uncertainty{};
+  double anchor{};
+  double driftPpm{};
+  std::uint64_t version{};
+};
+
 /// One observation as the host's verifying ingress adapter hands it over.
 /// `principal` is the origin signer, never the transport peer.
 struct CheckedObservation {
@@ -37,12 +57,15 @@ struct CheckedObservation {
   std::string predicate;
   /// The predicate's arguments, in declaration order.
   WireList tuple;
-  /// Mapped seconds on the policy's clock basis.
-  double acquiredAt{};
-  double acquiredUncertainty{};
+  /// What the origin signed (the adapter decoded it; `observe` never reads
+  /// the device's clock itself).
+  DeviceTimes device;
+  /// The host's mapping of the device clock onto `clockBasis`; absent when it
+  /// has none for the epoch (row 5 of design 4.3).
+  std::optional<ClockMapping> mapping;
+  /// The basis the mapping maps onto: the policy's, or the reading refuses.
   std::string clockBasis;
   std::uint64_t clockEpoch{};
-  std::uint64_t clockMappingVersion{};
   std::string frame;
   std::string units;
   /// Full scalar isotropic variance in squared units, continuous only.
@@ -56,6 +79,11 @@ struct CheckedObservation {
   /// and charged by the same rules as `observe`'s own. Any other code is
   /// refused as `InvalidObservation`.
   std::optional<EpistemicRefusal> adapterRefusal;
+  /// The issuer's highest verified sequence for the incarnation (design 7.1),
+  /// set by the signed adapter. Sequences it passed are signed and verified,
+  /// so a dropped reading's pass credit is bounded by it for any stride;
+  /// without it the bound is the health sequence gap above the mark.
+  std::optional<std::uint64_t> verifiedSequenceBound;
 };
 
 /// The host's authorization for one origin principal to report one arbitrated
@@ -96,10 +124,12 @@ enum class EpistemicRefusal : std::uint8_t {
   UnknownActor,
   InvalidObservation,
   ClockUnsynchronised,
+  /// Row 2: acquired after it was sent, on the device's own signed times.
   ObservationTimeMismatch,
-  /// A claimed acquisition uncertainty above the policy's max_uncertainty:
-  /// the reading cannot be placed in time closely enough to be used.
+  /// Row 3: a signed acquisition uncertainty above the policy's
+  /// max_uncertainty: the reading cannot be placed in time closely enough.
   UncertainAcquisition,
+  /// Row 4: the device held the reading longer than max_age before signing.
   StaleObservation,
   ObservationFrameMismatch,
   MissingVariance,
@@ -108,8 +138,8 @@ enum class EpistemicRefusal : std::uint8_t {
   /// A tuple that is mistyped or carries a non-finite number: decided on the
   /// origin's signed fields, so it counts for source health even relayed.
   InvalidValue,
-  /// A non-finite `acquiredAt` or uncertainty, or a negative uncertainty:
-  /// decided on host-mapped fields, so only a direct copy counts.
+  /// A negative signed time or uncertainty (row 1 of design 4.3): decided on
+  /// signed integers alone, so it counts even relayed.
   InvalidAcquisition,
   /// Health actions and grants (P19 I3-2c1).
   InvalidHealthGrant,
@@ -175,9 +205,22 @@ enum class EpistemicRefusal : std::uint8_t {
   /// A source binding the adapter cannot hold: a bad principal or master, no
   /// predicate, a repeated predicate or a non-positive lifetime.
   InvalidBinding,
-  /// No mapping from the device's clock to the policy's basis. Until I3-3b1
-  /// pairs free clocks, only a synchronised device on a wall policy maps.
+  /// No mapping from the device's clock to the policy's basis (row 5).
   UnknownClockMapping,
+  // The time split (P19 I3-3b1, design 4.3 rows 5a to 9). Logged and charged,
+  // never counted: each is decided on the host's mapping or on the path.
+  /// The mapping holds a non-finite or out-of-range value, or maps onto
+  /// another basis than the policy's.
+  InvalidClockMapping,
+  /// The signed uncertainty fits the policy's bound only before the mapping's
+  /// own is added.
+  UncertainClockMapping,
+  /// The mapped send time is in the host's future beyond every bound.
+  ClockMappingMismatch,
+  /// The path made the reading older than the policy admits.
+  LateDelivery,
+  /// The message's signed `expires` has passed.
+  MessageExpired,
 };
 
 /// What the host may do with a refused event.

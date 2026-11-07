@@ -254,12 +254,6 @@ struct EpistemicAdapter::State {
       }
       // Otherwise not an advance: `observe` refuses the unbound incarnation.
     }
-    // Step 6 before I3-3b1: a synchronised device clock on a wall policy maps
-    // with an offset of zero; nothing else has a mapping yet.
-    if (bound->policy.clock != ObservationClock::Wall ||
-        h.basis != SignedClockBasis::Synchronised)
-      return std::unexpected(EpistemicRefusal::UnknownClockMapping);
-
     CheckedObservation c;
     c.principal   = row.binding.principal;
     c.incarnation = incarnation;
@@ -282,16 +276,24 @@ struct EpistemicAdapter::State {
         c.tuple.push_back(value ? std::move(*value) : WireValue::integer(0));
       }
     }
-    c.acquiredAt          = seconds(o.acquired);
-    c.acquiredUncertainty = seconds(o.acquiredUncertainty + h.clockUncertainty);
-    c.clockBasis          = std::string(clockName(ObservationClock::Wall));
-    c.clockEpoch          = static_cast<std::uint64_t>(h.epoch);
-    c.clockMappingVersion = 1;
-    c.frame               = o.frame;
-    c.units               = o.units;
-    c.variance            = o.variance;
-    c.policy              = o.policy;
-    c.adapterRefusal      = adapterRefusal;
+    c.device = {.acquired            = o.acquired,
+                .sent                = h.sent,
+                .acquiredUncertainty = o.acquiredUncertainty,
+                .clockUncertainty    = h.clockUncertainty,
+                .expires             = h.expires};
+    // I3-3b1 part B replaces this with the mapping table. Until then only a
+    // synchronised device clock on a wall policy maps, with an identity
+    // mapping; anything else has none and `observe` refuses row 5.
+    if (bound->policy.clock == ObservationClock::Wall &&
+        h.basis == SignedClockBasis::Synchronised && now.wallSynchronised)
+      c.mapping = ClockMapping{.version = 1};
+    c.clockBasis     = std::string(clockName(bound->policy.clock));
+    c.clockEpoch     = static_cast<std::uint64_t>(h.epoch);
+    c.frame          = o.frame;
+    c.units          = o.units;
+    c.variance       = o.variance;
+    c.policy         = o.policy;
+    c.adapterRefusal = adapterRefusal;
 
     auto receipt = executor.observe(row.pid, c);
     if (receipt) {

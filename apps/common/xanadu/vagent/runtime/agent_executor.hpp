@@ -243,6 +243,7 @@ enum class AdmissionState : std::uint8_t { Open, Paused, Swapping };
 
 // Ingress records, private to the executor (agent_executor.cpp).
 struct IngestKey;
+struct TimeVerdict;
 struct SourceChange;
 
 class AgentExecutor {
@@ -803,6 +804,10 @@ private:
   void clearLatchCache(const identity::ActorPid &pid);
   /// Ask for a bookkeeping turn charging @p principal's waiting refusals.
   void postRefusals(const identity::ActorPid &target, std::string principal);
+  /// Feed one reading's time class to the host diagnostics (design 4.3): the
+  /// per-source time-class fraction and the shared-time-source watch.
+  void noteTime(const identity::ActorPid &target, const CheckedObservation &o,
+                const TimeVerdict &verdict, double steadyNow);
   /// The `$turn.refusal` record of one bookkeeping note.
   [[nodiscard]] WireRecord refusalNote(const identity::ActorPid &pid,
                                        const std::string &principal,

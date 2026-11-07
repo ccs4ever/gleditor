@@ -299,6 +299,31 @@ inline void AgentExecutor::PostBox::putBack(std::vector<Item> kept) {
                                 [](const Item &i) { return isControl(i); });
 }
 
+/// How the time split of design 4.3 classified one reading, and what the host
+/// diagnostics should learn from it. Decided from the reading, the policy and
+/// the receipt alone, so it is the same on every host.
+struct TimeVerdict {
+  std::optional<EpistemicRefusal> refusal;
+  /// Rows 4, 7 and 8 feed the time-class fraction as a refusal; a reading
+  /// that clears row 9 feeds it as a pass. Everything else feeds nothing.
+  enum class Feed : std::uint8_t { None, Refused, Passed } feed{Feed::None};
+  /// Rows 2 and 3, the signed refusals the shared-time-source watch reads.
+  bool sharedSource{false};
+  /// M(a) and U in seconds, valid once `refusal` is empty.
+  double acquiredAt{};
+  double uncertainty{};
+};
+
+/// Rows 1 to 4: only the origin's signed integers, in 128-bit arithmetic so no
+/// overflow turns a refusal into a pass.
+[[nodiscard]] TimeVerdict classifySignedTimes(const CheckedObservation &o,
+                                              const ArbitrationPolicy &policy);
+/// Rows 5, 5a and 6 to 9 against the receipt @p receipt (seconds on the
+/// policy's basis).
+[[nodiscard]] TimeVerdict classifyMappedTimes(const CheckedObservation &o,
+                                              const ArbitrationPolicy &policy,
+                                              double receipt);
+
 struct AgentExecutor::Ingress {
   struct Binding {
     std::string alias;
@@ -421,6 +446,41 @@ struct AgentExecutor::Ingress {
   /// Chargeable refusals the estimator did not count since the source last
   /// committed.
   std::map<SourceKey, std::uint64_t> uncounted;
+  /// The time-class diagnostic (design 4.3): the estimator's shape, `R` and
+  /// `N` of rows 4, 7 and 8 against every reading the host could place in
+  /// time. Host memory, lost with the host; never a reason and never `f`.
+  struct TimeClass {
+    double refused{0.0};
+    double weight{0.0};
+    /// Whether the fraction is at or above the suspect fraction, so a WARN is
+    /// logged on the crossing and not on every reading above it.
+    bool above{false};
+  };
+  std::map<SourceKey, TimeClass> timeClass;
+  /// Sequences each stream has already fed `timeClass`, oldest first, bounded
+  /// by the health replay ring: a replay feeds it once.
+  std::map<StreamKey, std::deque<std::uint64_t>> timeFed;
+  /// Per pid, the steady second of each source's newest hit on a counted
+  /// signed-time refusal (rows 2 and 3), and when the shared-source warning
+  /// last fired.
+  struct SharedTime {
+    std::map<std::string, double> hits;
+    std::optional<double> warnedAt;
+  };
+  std::map<std::string, SharedTime> sharedTime;
+  /// Feed one reading's time class into @p source's fraction. True when this
+  /// reading takes the fraction across the suspect fraction while fewer than
+  /// `commonCauseSources` other sources of the actor are above it, so the
+  /// caller logs one warning.
+  [[nodiscard]] bool feedTimeClass(const StreamKey &stream,
+                                   const SourceKey &source,
+                                   std::uint64_t sequence, bool refused,
+                                   const EpistemicLimits &limits);
+  /// Record a hit on rows 2 or 3; true when at least `commonCauseSources`
+  /// distinct sources of the actor hit within the window and none has been
+  /// reported in it.
+  [[nodiscard]] bool noteSharedTime(const SourceKey &source, double steadyNow,
+                                    const EpistemicLimits &limits);
   /// Unknown until the host's time service reports: a wall-basis reading
   /// taken before then cannot be placed in time.
   bool wallSynchronised{false};
@@ -579,8 +639,13 @@ struct AgentExecutor::Ingress {
     std::erase_if(inFlight, mine);
     admission.erase(pid);
     std::erase_if(uncounted, mine);
+    std::erase_if(timeClass, mine);
+    sharedTime.erase(pid);
     audiences.erase(pid);
     std::erase_if(marks, [&](const auto &entry) {
+      return std::get<0>(entry.first) == pid;
+    });
+    std::erase_if(timeFed, [&](const auto &entry) {
       return std::get<0>(entry.first) == pid;
     });
   }

@@ -58,6 +58,7 @@
 #include <fuzzer/FuzzedDataProvider.h>
 
 #include "../xuzz/epistemic_invariants.hpp"
+#include "../xuzz/epistemic_time.hpp"
 #include "common/xanadu/identity/standard_crypto_engine.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_adapter_wire.hpp"
 #include "common/xanadu/vagent/runtime/program.hpp"
@@ -302,18 +303,41 @@ CheckedObservation pickObservation(FuzzedDataProvider &in, double now,
   }
   constexpr std::array offsets{-5.0, -1.0,  -0.5, -0.01, 0.0,
                                -9.9, -11.0, 0.5,  30.0,  -1000.0};
-  o.acquiredAt          = in.ConsumeIntegralInRange(0, 7) == 0
-                              ? pickDouble(in)
-                              : now + offsets[in.ConsumeIntegralInRange<std::size_t>(
-                                 0, offsets.size() - 1)];
-  o.acquiredUncertainty = in.ConsumeIntegralInRange(0, 7) == 0
-                              ? pickDouble(in)
-                              : 0.01 * in.ConsumeIntegralInRange(0, 3);
+  setTimes(o,
+           in.ConsumeIntegralInRange(0, 7) == 0
+               ? pickDouble(in)
+               : now + offsets[in.ConsumeIntegralInRange<std::size_t>(
+                           0, offsets.size() - 1)],
+           in.ConsumeIntegralInRange(0, 7) == 0
+               ? pickDouble(in)
+               : 0.01 * in.ConsumeIntegralInRange(0, 3));
   o.clockBasis = in.ConsumeIntegralInRange(0, 7) == 0 ? "actor_mapped" : "wall";
   o.clockEpoch = in.ConsumeIntegralInRange<std::uint64_t>(0, 1);
-  o.clockMappingVersion = in.ConsumeIntegralInRange<std::uint64_t>(0, 1);
-  o.frame               = in.ConsumeIntegralInRange(0, 7) == 0 ? "ecef" : "enu";
-  o.units               = in.ConsumeIntegralInRange(0, 7) == 0 ? "ft" : "m";
+  setMappingVersion(o, in.ConsumeIntegralInRange<std::uint64_t>(0, 1));
+  // The mapping is the host's: sometimes missing, shifted or broken, so the
+  // time split's host-decided rows meet the same bytes as the signed ones.
+  switch (in.ConsumeIntegralInRange(0, 15)) {
+  case 0:
+    o.mapping.reset();
+    break;
+  case 1:
+    o.mapping->offset = pickDouble(in);
+    break;
+  case 2:
+    o.mapping->uncertainty = pickDouble(in);
+    break;
+  case 3:
+    o.mapping->driftPpm = pickDouble(in);
+    break;
+  case 4:
+    o.device.sent    = o.device.acquired + in.ConsumeIntegral<std::int64_t>();
+    o.device.expires = in.ConsumeIntegral<std::int64_t>();
+    break;
+  default:
+    break;
+  }
+  o.frame = in.ConsumeIntegralInRange(0, 7) == 0 ? "ecef" : "enu";
+  o.units = in.ConsumeIntegralInRange(0, 7) == 0 ? "ft" : "m";
   if (o.predicate != "door" ? in.ConsumeIntegralInRange(0, 7) != 0
                             : in.ConsumeIntegralInRange(0, 7) == 0)
     o.variance = in.ConsumeBool() ? 0.25 : pickDouble(in);
@@ -599,18 +623,17 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data,
         other.pump();
         auto &state = sources[which];
         CheckedObservation o;
-        o.principal           = principal;
-        o.incarnation         = static_cast<std::uint64_t>(*inc);
-        o.eventId             = "restart" + std::to_string(++state.events);
-        o.sequence            = ++state.sequence;
-        o.predicate           = "at";
-        o.tuple               = {WireValue::text("self"), WireValue::real(1.0)};
-        o.acquiredAt          = now - 1.0;
-        o.acquiredUncertainty = 0.01;
-        o.clockBasis          = "wall";
-        o.frame               = "enu";
-        o.units               = "m";
-        o.variance            = 0.25;
+        o.principal   = principal;
+        o.incarnation = static_cast<std::uint64_t>(*inc);
+        o.eventId     = "restart" + std::to_string(++state.events);
+        o.sequence    = ++state.sequence;
+        o.predicate   = "at";
+        o.tuple       = {WireValue::text("self"), WireValue::real(1.0)};
+        setTimes(o, now - 1.0, 0.01);
+        o.clockBasis = "wall";
+        o.frame      = "enu";
+        o.units      = "m";
+        o.variance   = 0.25;
         if (ex.observe(*restored, o)) {
           other.pump();
           const auto outcome = ex.ingestOutcome(*restored, o.principal,
@@ -708,12 +731,11 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data,
         o.sequence    = ++state.sequence;
         o.predicate   = "at";
         o.tuple       = {WireValue::text(std::string(key)), WireValue::real(x)};
-        o.acquiredAt  = now - 1.0;
-        o.acquiredUncertainty = 0.01;
-        o.clockBasis          = "wall";
-        o.frame               = "enu";
-        o.units               = "m";
-        o.variance            = 0.25;
+        setTimes(o, now - 1.0, 0.01);
+        o.clockBasis = "wall";
+        o.frame      = "enu";
+        o.units      = "m";
+        o.variance   = 0.25;
         return o;
       };
       if (in.ConsumeBool()) {
@@ -777,7 +799,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data,
                 "resending committed bytes writes nothing");
         // Bytes acquired near max_age may age out between the two sends.
         if (last->generation == generation &&
-            last->observation.acquiredAt > now - 9.0) {
+            testNanos(now - 9.0) < last->observation.device.acquired) {
           require(again && again->kind == IngestOutcome::Kind::Committed,
                   "a committed outcome stays committed");
           require(executor.stat(*pid, statName) == duplicates + 1,

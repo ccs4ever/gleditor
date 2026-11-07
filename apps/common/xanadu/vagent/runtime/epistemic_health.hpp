@@ -48,8 +48,13 @@ struct SourceHealth {
   std::optional<std::string> lastRefusal;
   /// Host memory: chargeable refusals the estimator did not count since this
   /// source last committed. The sign of a failure the estimator cannot see
-  /// (design 3.1) until I3-3 reinstates the host-time class.
+  /// (design 3.1).
   std::uint64_t uncountedSinceCommit{};
+  /// Host memory, diagnostic only (design 4.3): the share of this source's
+  /// time-classified readings the device held or the clocks disagreed on
+  /// (rows 4, 7, 8). Never a reason and never part of `refusalFraction`; absent
+  /// until the source has been classified once.
+  std::optional<double> timeClassFraction;
   /// Host memory: readings the latch cache refused since the last reset.
   std::uint64_t refusedWhileFaulted{};
   /// Durable arena state: how many resets the profile has had.
@@ -72,7 +77,7 @@ struct SourceHealth {
 };
 
 /// Bumped when the set of codes below changes.
-inline constexpr int kHealthRefusalCodesVersion = 1;
+inline constexpr int kHealthRefusalCodesVersion = 2;
 
 /// One refusal that moves the estimator, and whether it still counts when a
 /// relay delivered the copy. A relay can alter only what the origin did not
@@ -82,13 +87,19 @@ struct HealthRefusalCode {
   bool countsWhenRelayed;
 };
 
-inline constexpr std::array<HealthRefusalCode, 6> kHealthRefusalCodes{{
+///
+/// Version 2 (design 4.3): every counted code is decided on signed bytes at
+/// pinned sites (`tools/check-counted-sites.py`), so none depends on a relay's
+/// honesty and the relayed attenuation of version 1 is gone.
+inline constexpr std::array<HealthRefusalCode, 8> kHealthRefusalCodes{{
     {"ObservationFrameMismatch", true},
     {"MissingVariance", true},
     {"InvalidVariance", true},
     {"InvalidValue", true},
-    {"InvalidAcquisition", false},
-    {"ClockEpochRegression", false},
+    {"InvalidAcquisition", true},
+    {"ClockEpochRegression", true},
+    {"ObservationTimeMismatch", true},
+    {"UncertainAcquisition", true},
 }};
 
 [[nodiscard]] constexpr bool isHealthRefusalCode(std::string_view code,

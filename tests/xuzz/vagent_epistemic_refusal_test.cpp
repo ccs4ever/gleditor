@@ -19,6 +19,7 @@
 #include "common/xanadu/vagent/runtime/program.hpp"
 #include "common/xanadu/vagent/runtime/runtime_abi.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
+#include "epistemic_time.hpp"
 
 namespace {
 
@@ -98,18 +99,17 @@ double wallSeconds() {
 CheckedObservation reading(const std::string &principal, std::string eventId,
                            std::uint64_t sequence, double base) {
   CheckedObservation o;
-  o.principal           = principal;
-  o.incarnation         = 1;
-  o.eventId             = std::move(eventId);
-  o.sequence            = sequence;
-  o.predicate           = "at";
-  o.tuple               = {WireValue::text("self"), WireValue::real(1.0)};
-  o.acquiredAt          = base - 5.0 + 0.01 * static_cast<double>(sequence);
-  o.acquiredUncertainty = 0.01;
-  o.clockBasis          = "wall";
-  o.frame               = "enu";
-  o.units               = "m";
-  o.variance            = 0.25;
+  o.principal   = principal;
+  o.incarnation = 1;
+  o.eventId     = std::move(eventId);
+  o.sequence    = sequence;
+  o.predicate   = "at";
+  o.tuple       = {WireValue::text("self"), WireValue::real(1.0)};
+  setTimes(o, base - 5.0 + 0.01 * static_cast<double>(sequence), 0.01);
+  o.clockBasis = "wall";
+  o.frame      = "enu";
+  o.units      = "m";
+  o.variance   = 0.25;
   return o;
 }
 

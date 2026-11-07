@@ -18,6 +18,7 @@
 
 #include "common/xanadu/vagent/runtime/agent_executor_internal.hpp"
 #include "common/xanadu/vagent/runtime/program.hpp"
+#include "epistemic_time.hpp"
 
 namespace {
 
@@ -98,18 +99,17 @@ protected:
                              std::string principal     = kP1,
                              std::uint64_t incarnation = 1) {
     CheckedObservation o;
-    o.principal           = std::move(principal);
-    o.incarnation         = incarnation;
-    o.eventId             = "e" + std::to_string(sequence);
-    o.sequence            = sequence;
-    o.predicate           = "at";
-    o.tuple               = {WireValue::text("k"), WireValue::real(x)};
-    o.acquiredAt          = wallSeconds() - 5.0 + 0.01 * double(sequence);
-    o.acquiredUncertainty = 0.01;
-    o.clockBasis          = "wall";
-    o.frame               = "enu";
-    o.units               = "m";
-    o.variance            = 0.25;
+    o.principal   = std::move(principal);
+    o.incarnation = incarnation;
+    o.eventId     = "e" + std::to_string(sequence);
+    o.sequence    = sequence;
+    o.predicate   = "at";
+    o.tuple       = {WireValue::text("k"), WireValue::real(x)};
+    setTimes(o, wallSeconds() - 5.0 + 0.01 * double(sequence), 0.01);
+    o.clockBasis = "wall";
+    o.frame      = "enu";
+    o.units      = "m";
+    o.variance   = 0.25;
     return o;
   }
 

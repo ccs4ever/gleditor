@@ -132,6 +132,29 @@ inline constexpr std::int64_t kDefaultIncarnationStep = 1024;
 inline constexpr std::int64_t kMinIncarnationStep     = 1;
 inline constexpr std::int64_t kMaxIncarnationStep     = std::int64_t{1} << 31;
 
+// The time-class diagnostic and the shared-time-source watch (I3-3b1, design
+// 4.3 and 9.1). Host memory only: none of these reaches a decision.
+/// `vagent.epistemic_time_class_half_life`: readings over which a source's
+/// time-class fraction halves its memory; the health half-life, so the two
+/// read alike.
+inline constexpr std::int64_t kDefaultTimeClassHalfLife = 32;
+inline constexpr std::int64_t kMinTimeClassHalfLife     = 8;
+inline constexpr std::int64_t kMaxTimeClassHalfLife     = 4096;
+/// `vagent.epistemic_time_suspect_fraction`: the I3-2 suspect fraction.
+inline constexpr double kDefaultTimeSuspectFraction = 0.25;
+inline constexpr double kMinTimeSuspectFraction     = 0.01;
+inline constexpr double kMaxTimeSuspectFraction     = 1.0;
+/// `vagent.epistemic_common_cause_sources`: three agreeing sources point to a
+/// cause the sources share rather than to one device.
+inline constexpr std::int64_t kDefaultCommonCauseSources = 3;
+inline constexpr std::int64_t kMinCommonCauseSources     = 1;
+inline constexpr std::int64_t kMaxCommonCauseSources     = 128;
+/// `vagent.epistemic_common_cause_window_ms`: several heartbeats at typical
+/// rates.
+inline constexpr std::int64_t kDefaultCommonCauseWindowMs = 10'000;
+inline constexpr std::int64_t kMinCommonCauseWindowMs     = 100;
+inline constexpr std::int64_t kMaxCommonCauseWindowMs     = 3'600'000;
+
 enum class EpistemicLimitError : std::uint8_t {
   InvalidSources,
   InvalidCandidates,
@@ -148,6 +171,10 @@ enum class EpistemicLimitError : std::uint8_t {
   InvalidControlPerWake,
   InvalidHealthReasons,
   InvalidHealthActions,
+  InvalidTimeClassHalfLife,
+  InvalidTimeSuspectFraction,
+  InvalidCommonCauseSources,
+  InvalidCommonCauseWindow,
 };
 
 [[nodiscard]] constexpr std::string_view
@@ -183,6 +210,14 @@ epistemicLimitErrorName(EpistemicLimitError error) noexcept {
     return "InvalidHealthReasons";
   case EpistemicLimitError::InvalidHealthActions:
     return "InvalidHealthActions";
+  case EpistemicLimitError::InvalidTimeClassHalfLife:
+    return "InvalidTimeClassHalfLife";
+  case EpistemicLimitError::InvalidTimeSuspectFraction:
+    return "InvalidTimeSuspectFraction";
+  case EpistemicLimitError::InvalidCommonCauseSources:
+    return "InvalidCommonCauseSources";
+  case EpistemicLimitError::InvalidCommonCauseWindow:
+    return "InvalidCommonCauseWindow";
   }
   return "Unknown";
 }
@@ -329,6 +364,18 @@ struct EpistemicLimits {
   std::int64_t healthReasons{kDefaultEpistemicHealthReasons};
   /// `vagent.epistemic_health_actions`: audit entries a profile keeps.
   std::int64_t healthActions{kDefaultEpistemicHealthActions};
+  /// `vagent.epistemic_time_class_half_life`: readings over which a source's
+  /// time-class fraction halves its memory.
+  std::int64_t timeClassHalfLife{kDefaultTimeClassHalfLife};
+  /// `vagent.epistemic_time_suspect_fraction`: the time-class fraction at or
+  /// above which the host logs its warning.
+  double timeSuspectFraction{kDefaultTimeSuspectFraction};
+  /// `vagent.epistemic_common_cause_sources`: sources that agreeing means a
+  /// shared cause.
+  std::int64_t commonCauseSources{kDefaultCommonCauseSources};
+  /// `vagent.epistemic_common_cause_window_ms`: the window those sources
+  /// must fall in.
+  std::int64_t commonCauseWindowMs{kDefaultCommonCauseWindowMs};
 
   /// Slots past `arenaSlots` that only settle turns may use, so a batch of
   /// belief events still settles when the allowance is spent. Zero for a tiny
@@ -393,6 +440,19 @@ struct EpistemicLimits {
     if (healthActions < kMinEpistemicHealthActions ||
         healthActions > kMaxEpistemicHealthActions)
       return std::unexpected(EpistemicLimitError::InvalidHealthActions);
+    if (timeClassHalfLife < kMinTimeClassHalfLife ||
+        timeClassHalfLife > kMaxTimeClassHalfLife)
+      return std::unexpected(EpistemicLimitError::InvalidTimeClassHalfLife);
+    if (!std::isfinite(timeSuspectFraction) ||
+        timeSuspectFraction < kMinTimeSuspectFraction ||
+        timeSuspectFraction > kMaxTimeSuspectFraction)
+      return std::unexpected(EpistemicLimitError::InvalidTimeSuspectFraction);
+    if (commonCauseSources < kMinCommonCauseSources ||
+        commonCauseSources > kMaxCommonCauseSources)
+      return std::unexpected(EpistemicLimitError::InvalidCommonCauseSources);
+    if (commonCauseWindowMs < kMinCommonCauseWindowMs ||
+        commonCauseWindowMs > kMaxCommonCauseWindowMs)
+      return std::unexpected(EpistemicLimitError::InvalidCommonCauseWindow);
     return {};
   }
 

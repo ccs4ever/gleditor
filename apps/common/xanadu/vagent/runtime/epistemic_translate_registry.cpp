@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 
+#include "common/xanadu/vagent/runtime/epistemic_abi_clock.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_abi_health.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_shape.hpp"
 #include "common/xanadu/vagent/runtime/runtime_abi.hpp"
@@ -85,6 +86,11 @@ WireRecord sampleObservation(const std::string &token, std::string_view status,
     r.set(std::string(kObsFeatureSchema), WireValue::integer(0));
     r.set(std::string(kObsFeatures), WireValue::list({}));
     r.set(std::string(kObsClockInstance), text("instance"));
+    r.set(std::string(kObsAcquiredDevice),
+          WireValue::integer(1'700'000'000'000'000'000));
+    r.set(std::string(kObsSentDevice),
+          WireValue::integer(1'700'000'000'500'000'000));
+    r.set(std::string(kObsDeviceUncertainty), WireValue::integer(2'000'000));
   }
   if (retiredBy) r.set(std::string(kObsRetiredBy), text(*retiredBy));
   return r;
@@ -202,6 +208,28 @@ void populateRecordFields(const PopulateContext &c) {
     addRecord(c, *c.support, kObsStatusCurrent, std::nullopt, 103, true);
 }
 
+void populateSignedTime(const PopulateContext &c) {
+  if (c.support)
+    addRecord(c, *c.support, kObsStatusCurrent, std::nullopt, 105, true);
+}
+
+void populateStreamClock(const PopulateContext &c) {
+  auto streams = fieldValue(c.arena, c.vd, c.profile, kProfileStreams);
+  if (!streams) {
+    put(c, kProfileStreams, WireValue::record({}));
+    streams = fieldValue(c.arena, c.vd, c.profile, kProfileStreams);
+  }
+  if (!streams) return;
+  WireRecord stream;
+  stream.set(std::string(kObsSequence), WireValue::integer(4));
+  stream.set(std::string(kObsClockEpoch), WireValue::integer(2));
+  stream.set(std::string(kObsClockMappingVersion), WireValue::integer(3));
+  stream.set(std::string(kStreamClockInstance),
+             WireValue::text("0123456789abcdef"));
+  setField(c.arena, c.vd, *streams, "clocked_stream",
+           writeValue(c.arena, c.vd, WireValue::record(std::move(stream))));
+}
+
 void populateRetiredChain(const PopulateContext &c) {
   addRecord(c, c.profile, kObsStatusRetired, kRetiredByRetire, 104, true);
 }
@@ -215,6 +243,11 @@ constexpr std::array kProfileScalarFields{
     kProfileLastRefusal, kProfileRetired};
 constexpr std::array kLivenessFields{kProfileLastReceive, kProfileLastContact};
 constexpr std::array kStreamFields{kProfileStreams};
+// The stream record's own field, not a profile's: a distinct `where` below
+// keeps it out of `ownsProfileField`.
+constexpr std::array kStreamClockFields{kStreamClockInstance};
+constexpr std::array kSignedTimeFields{kObsAcquiredDevice, kObsSentDevice,
+                                       kObsDeviceUncertainty};
 constexpr std::array kDedupFields{kProfileDedup};
 constexpr std::array kHealthScalarFields{
     kProfileResetEpoch,  kProfileActionSeq,           kProfileFaultSeq,
@@ -266,7 +299,7 @@ constexpr std::array kShapeFields{kShapeHeaderName, kShapeVersionField};
 // The audience record (I3-3a2): its name and its one field.
 constexpr std::array kAudienceFields{kAudienceRecordName, kAudienceTokenField};
 
-constexpr std::array<OwnedStructure, 15> kOwned{{
+constexpr std::array<OwnedStructure, 17> kOwned{{
     {"agent.shape_header",
      "d.epistemic",
      "agent header",
@@ -318,6 +351,15 @@ constexpr std::array<OwnedStructure, 15> kOwned{{
      {},
      1,
      populateStreams},
+    {"stream.clock",
+     "d.vars",
+     "stream field",
+     kStreamClockFields,
+     Fate::Carried,
+     Fate::Carried,
+     {},
+     1,
+     populateStreamClock},
     {"profile.dedup",
      "d.vars",
      "profile list",
@@ -381,6 +423,15 @@ constexpr std::array<OwnedStructure, 15> kOwned{{
      {},
      1,
      populateRecordFields},
+    {"record.signed_time",
+     "d.vars",
+     "record field",
+     kSignedTimeFields,
+     Fate::Carried,
+     Fate::Carried,
+     {},
+     1,
+     populateSignedTime},
     {"profile.retired_chain",
      "d.epistemic",
      "profile rank",
@@ -473,6 +524,9 @@ constexpr std::array kHost{
     HostStateRow{"heartbeat and report floors, observation rings", "kept",
                  "lost; replays fall through to the arena's floors and dedup"},
     HostStateRow{"per-peer budgets, pending settles", "kept", "lost"},
+    HostStateRow{
+        "time-class fractions, shared-time-source windows", "kept",
+        "lost; diagnostics only, they decide nothing and relearn from traffic"},
     HostStateRow{
         "flights, requests, schedule",
         "flights and requests refuse the schema road; schedule recomputed",

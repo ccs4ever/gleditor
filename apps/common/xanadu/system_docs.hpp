@@ -348,6 +348,14 @@ inline constexpr std::string_view kVagentEpistemicWallRollbackMs =
     "vagent.epistemic_wall_rollback_ms";
 inline constexpr std::string_view kVagentEpistemicIncarnationStep =
     "vagent.epistemic_incarnation_step";
+inline constexpr std::string_view kVagentEpistemicTimeClassHalfLife =
+    "vagent.epistemic_time_class_half_life";
+inline constexpr std::string_view kVagentEpistemicTimeSuspectFraction =
+    "vagent.epistemic_time_suspect_fraction";
+inline constexpr std::string_view kVagentEpistemicCommonCauseSources =
+    "vagent.epistemic_common_cause_sources";
+inline constexpr std::string_view kVagentEpistemicCommonCauseWindowMs =
+    "vagent.epistemic_common_cause_window_ms";
 inline constexpr std::string_view kVagentTuiBorders = "vagent.tui.borders";
 inline constexpr std::string_view kVagentTuiHistorySize =
     "vagent.tui.history_size";

@@ -12,9 +12,11 @@
 #include <string>
 #include <vector>
 
+#include "common/xanadu/vagent/runtime/epistemic_abi_clock.hpp"
 #include "common/xanadu/vagent/runtime/program.hpp"
 #include "common/xanadu/vagent/runtime/runtime_abi.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
+#include "epistemic_time.hpp"
 
 namespace {
 
@@ -103,18 +105,17 @@ protected:
                              std::uint64_t sequence, double x,
                              double variance = 0.25) {
     CheckedObservation o;
-    o.principal           = principal;
-    o.incarnation         = 1;
-    o.eventId             = std::move(eventId);
-    o.sequence            = sequence;
-    o.predicate           = "at";
-    o.tuple               = {WireValue::text("self"), WireValue::real(x)};
-    o.acquiredAt          = at(sequence);
-    o.acquiredUncertainty = 0.01;
-    o.clockBasis          = "wall";
-    o.frame               = "enu";
-    o.units               = "m";
-    o.variance            = variance;
+    o.principal   = principal;
+    o.incarnation = 1;
+    o.eventId     = std::move(eventId);
+    o.sequence    = sequence;
+    o.predicate   = "at";
+    o.tuple       = {WireValue::text("self"), WireValue::real(x)};
+    setTimes(o, at(sequence), 0.01);
+    o.clockBasis = "wall";
+    o.frame      = "enu";
+    o.units      = "m";
+    o.variance   = variance;
     return o;
   }
 
@@ -294,8 +295,8 @@ TEST_F(VagentEpistemicIngress, MalformedObservationsAreRefusedAtIngress) {
 
 TEST_F(VagentEpistemicIngress,
        StructurallyInvalidInputIsRefusedBeforeQueueing) {
-  auto bad           = reading(kP1, "n1", 1, 1.0);
-  bad.acquiredAt     = std::numeric_limits<double>::quiet_NaN();
+  auto bad = reading(kP1, "n1", 1, 1.0);
+  setAcquiredAt(bad, std::numeric_limits<double>::quiet_NaN());
   const auto receipt = host->executor().observe(pid, bad);
   ASSERT_FALSE(receipt);
   EXPECT_EQ(receipt.error(), EpistemicRefusal::InvalidAcquisition);
@@ -495,8 +496,9 @@ TEST_F(VagentEpistemicIngress, RetiringASourceDropsItsSupportsAndKeepsAFloor) {
   EXPECT_EQ(flag(tomb, kProfileRetired), false);
   auto old        = reading(kP1, "n2", 2, 1.0);
   old.incarnation = 2;
-  old.acquiredAt  = base - 60.0;
-  EXPECT_EQ(refusedAtIngress(old), EpistemicRefusal::StaleObservation);
+  setAcquiredAt(old, base - 60.0);
+  // Signed at acquisition, so the path is what made it old (row 8).
+  EXPECT_EQ(refusedAtIngress(old), EpistemicRefusal::LateDelivery);
 }
 
 TEST_F(VagentEpistemicIngress, ATombstoneTakesNoShareOfThePrincipalBudget) {
@@ -560,30 +562,30 @@ TEST_F(VagentEpistemicIngress, OnlyADirectEventRefreshesContact) {
 
 TEST_F(VagentEpistemicIngress, AnOlderAcquisitionCannotReplaceANewerReading) {
   observe(reading(kP1, "e1", 1, 1.0));
-  auto older       = reading(kP1, "e2", 2, 2.0);
-  older.acquiredAt = at(1) - 0.5;
+  auto older = reading(kP1, "e2", 2, 2.0);
+  setAcquiredAt(older, at(1) - 0.5);
   observe(older);
-  EXPECT_EQ(refused(kTurnResultObservationTimeMismatch), 1U);
+  EXPECT_EQ(refused(kTurnResultAcquisitionOrderMismatch), 1U);
   // Within both uncertainties it is the same instant, so it is accepted.
-  auto close       = reading(kP1, "e3", 3, 2.0);
-  close.acquiredAt = at(1) - 0.005;
+  auto close = reading(kP1, "e3", 3, 2.0);
+  setAcquiredAt(close, at(1) - 0.005);
   observe(close);
-  EXPECT_EQ(refused(kTurnResultObservationTimeMismatch), 1U);
+  EXPECT_EQ(refused(kTurnResultAcquisitionOrderMismatch), 1U);
   // A new clock epoch resets the comparison.
-  auto rebased       = reading(kP1, "e4", 4, 3.0);
-  rebased.acquiredAt = at(1) - 1.0;
+  auto rebased = reading(kP1, "e4", 4, 3.0);
+  setAcquiredAt(rebased, at(1) - 1.0);
   rebased.clockEpoch = 1;
   observe(rebased);
-  EXPECT_EQ(refused(kTurnResultObservationTimeMismatch), 1U);
+  EXPECT_EQ(refused(kTurnResultAcquisitionOrderMismatch), 1U);
 }
 
 TEST_F(VagentEpistemicIngress, DifferentKeysNeverOrderEachOther) {
   observe(reading(kP1, "e1", 1, 1.0));
-  auto other       = reading(kP1, "e2", 2, 5.0);
-  other.tuple      = {WireValue::text("other"), WireValue::real(5.0)};
-  other.acquiredAt = at(1) - 4.0;
+  auto other  = reading(kP1, "e2", 2, 5.0);
+  other.tuple = {WireValue::text("other"), WireValue::real(5.0)};
+  setAcquiredAt(other, at(1) - 4.0);
   observe(other);
-  EXPECT_EQ(refused(kTurnResultObservationTimeMismatch), 0U);
+  EXPECT_EQ(refused(kTurnResultAcquisitionOrderMismatch), 0U);
   EXPECT_EQ(clauses().size(), 2U);
 }
 
@@ -701,17 +703,20 @@ TEST_F(VagentEpistemicIngress, AnUnsynchronisedWallClockRefusesRetryably) {
 }
 
 TEST_F(VagentEpistemicIngress, AcquisitionMustBeRecentAndNotInTheFuture) {
-  auto future       = reading(kP1, "e1", 1, 1.0);
-  future.acquiredAt = base + 3600.0;
-  EXPECT_EQ(refusedAtIngress(future),
-            EpistemicRefusal::ObservationTimeMismatch);
-  auto stale       = reading(kP1, "e2", 2, 1.0);
-  stale.acquiredAt = base - 60.0; // max_age is 10 s
-  EXPECT_EQ(refusedAtIngress(stale), EpistemicRefusal::StaleObservation);
+  auto future = reading(kP1, "e1", 1, 1.0);
+  setAcquiredAt(future, base + 3600.0);
+  EXPECT_EQ(refusedAtIngress(future), EpistemicRefusal::ClockMappingMismatch);
+  auto stale = reading(kP1, "e2", 2, 1.0);
+  setAcquiredAt(stale, base - 60.0); // max_age is 10 s
+  EXPECT_EQ(refusedAtIngress(stale), EpistemicRefusal::LateDelivery);
+  // The device itself held it: it signed a minute after it acquired it.
+  auto held = reading(kP1, "e2h", 2, 1.0);
+  held.device.sent += testNanos(60.0);
+  EXPECT_EQ(refusedAtIngress(held), EpistemicRefusal::StaleObservation);
   auto wrongBasis       = reading(kP1, "e3", 3, 1.0);
   wrongBasis.clockBasis = "monotonic";
   EXPECT_EQ(refusedAtIngress(wrongBasis),
-            EpistemicRefusal::ObservationTimeMismatch);
+            EpistemicRefusal::InvalidClockMapping);
   EXPECT_TRUE(clauses().empty());
 }
 
@@ -822,15 +827,16 @@ TEST_F(VagentEpistemicIngress, InTurnRefusalsAreChargedAfterTheUndo) {
   observe(reading(kP1, "e0", 1, 1.0)); // StaleSequence
   EXPECT_EQ(refused(kTurnResultStaleSequence), 1U);
   EXPECT_EQ(counter(prof, kProfileRefusedCount), 1);
-  auto older       = reading(kP1, "e2", 2, 1.0);
-  older.acquiredAt = at(1) - 0.5; // ObservationTimeMismatch
+  auto older = reading(kP1, "e2", 2, 1.0);
+  setAcquiredAt(older, at(1) - 0.5); // AcquisitionOrderMismatch
   observe(older);
-  EXPECT_EQ(counter(prof, kProfileContentRefusals), 1);
-  EXPECT_EQ(text(prof, kProfileLastRefusal), "ObservationTimeMismatch");
+  // Decided on the host's mapped times, so charged but not a content refusal.
+  EXPECT_EQ(counter(prof, kProfileContentRefusals), 0);
+  EXPECT_EQ(text(prof, kProfileLastRefusal), "AcquisitionOrderMismatch");
   // A duplicate is an exact retry, not a refusal.
   observe(reading(kP1, "e1", 1, 1.0));
-  EXPECT_EQ(counter(prof, kProfileRefusedCount), 1);
-  EXPECT_EQ(counter(prof, kProfileContentRefusals), 1);
+  EXPECT_EQ(counter(prof, kProfileRefusedCount), 2);
+  EXPECT_EQ(counter(prof, kProfileContentRefusals), 0);
 }
 
 TEST_F(VagentEpistemicIngress, HostConditionsAreNeverCharged) {
@@ -956,7 +962,7 @@ TEST_F(VagentEpistemicIngress, AResendPastMaxAgeIsARetryNotAFault) {
   const auto prof = profiles().front();
   host->advance(std::chrono::seconds(30));
   // The store-and-forward flush of an event it already holds.
-  EXPECT_EQ(refusedAtIngress(o), EpistemicRefusal::StaleObservation);
+  EXPECT_EQ(refusedAtIngress(o), EpistemicRefusal::LateDelivery);
   EXPECT_EQ(outcomeOf(o)->kind, IngestOutcome::Kind::Committed);
   EXPECT_EQ(counter(prof, kProfileContentRefusals), 0);
 }
@@ -978,9 +984,9 @@ TEST_F(VagentEpistemicIngress, ARecordCarriesWhatProducedIt) {
 }
 
 TEST_F(VagentEpistemicIngress, ClockEpochsAndMappingsNeverRegress) {
-  auto later                = reading(kP1, "e1", 1, 1.0);
-  later.clockEpoch          = 5;
-  later.clockMappingVersion = 2;
+  auto later       = reading(kP1, "e1", 1, 1.0);
+  later.clockEpoch = 5;
+  setMappingVersion(later, 2);
   observe(later);
   // On another key, so only the stream (not the per-key order) sees it.
   auto olderEpoch       = reading(kP1, "e2", 2, 2.0);
@@ -991,13 +997,13 @@ TEST_F(VagentEpistemicIngress, ClockEpochsAndMappingsNeverRegress) {
   auto olderMapping       = reading(kP1, "e3", 3, 3.0);
   olderMapping.tuple      = {WireValue::text("other"), WireValue::real(3.0)};
   olderMapping.clockEpoch = 5;
-  olderMapping.clockMappingVersion = 1;
+  setMappingVersion(olderMapping, 1);
   observe(olderMapping);
   EXPECT_EQ(outcomeOf(olderMapping)->code, "ClockMappingRegression");
   // A newer epoch resets the per-key order: its times are a new scale.
   auto rebased       = reading(kP1, "e4", 4, 4.0);
   rebased.clockEpoch = 6;
-  rebased.acquiredAt = at(1) - 2.0;
+  setAcquiredAt(rebased, at(1) - 2.0);
   observe(rebased);
   EXPECT_EQ(outcomeOf(rebased)->kind, IngestOutcome::Kind::Committed);
 }
@@ -1180,25 +1186,23 @@ TEST_F(VagentEpistemicIngress, TheTimeWindowsWidenByUncertaintyAndSkew) {
   const double now = std::chrono::duration<double>(
                          std::chrono::system_clock::now().time_since_epoch())
                          .count();
-  auto old                = reading(kP1, "old", 1, 1.0);
-  old.acquiredUncertainty = 2.0;
-  old.acquiredAt          = now - 11.0; // inside max_age + uncertainty
+  auto old = reading(kP1, "old", 1, 1.0);
+  setTimes(old, now - 11.0, 2.0); // inside max_age + uncertainty
   observe(old);
   EXPECT_EQ(outcomeOf(old)->kind, IngestOutcome::Kind::Committed);
-  auto older                = reading(kP1, "older", 2, 1.0);
-  older.acquiredUncertainty = 0.5;
-  older.acquiredAt          = now - 11.0; // outside
-  EXPECT_EQ(refusedAtIngress(older), EpistemicRefusal::StaleObservation);
-  auto ahead                = reading(kP1, "ahead", 3, 1.0);
-  ahead.acquiredUncertainty = 2.0;
-  ahead.acquiredAt          = now + 1.5; // inside uncertainty
+  auto older = reading(kP1, "older", 2, 1.0);
+  setTimes(older, now - 11.0, 0.5); // outside
+  EXPECT_EQ(refusedAtIngress(older), EpistemicRefusal::LateDelivery);
+  auto ahead = reading(kP1, "ahead", 3, 1.0);
+  setTimes(ahead, now + 1.5, 0.0);
+  // The device's own clock uncertainty is what excuses a send time ahead of
+  // the host (row 7), not the acquisition's.
+  ahead.device.clockUncertainty = testNanos(2.0);
   observe(ahead);
   EXPECT_EQ(outcomeOf(ahead)->kind, IngestOutcome::Kind::Committed);
-  auto further                = reading(kP1, "further", 4, 1.0);
-  further.acquiredUncertainty = 0.0;
-  further.acquiredAt          = now + 5.0;
-  EXPECT_EQ(refusedAtIngress(further),
-            EpistemicRefusal::ObservationTimeMismatch);
+  auto further = reading(kP1, "further", 4, 1.0);
+  setTimes(further, now + 5.0, 0.0);
+  EXPECT_EQ(refusedAtIngress(further), EpistemicRefusal::ClockMappingMismatch);
 }
 
 TEST_F(VagentEpistemicIngress,
@@ -1214,18 +1218,17 @@ agent A { var adds: Int := 0 }
   // Dated 100000 s ago, or a year ahead: a huge claimed uncertainty would
   // otherwise stretch both windows to admit it.
   for (const double offset : {-100000.0, 365.0 * 86400.0}) {
-    auto far       = reading(kP1, "f" + std::to_string(offset), 1, 1.0);
-    far.acquiredAt = base + offset;
-    far.acquiredUncertainty = 1e9;
+    auto far = reading(kP1, "f" + std::to_string(offset), 1, 1.0);
+    setTimes(far, base + offset, 1e9);
     EXPECT_EQ(refusedAtIngress(far), EpistemicRefusal::UncertainAcquisition)
         << offset;
   }
-  auto edge                = reading(kP1, "edge", 1, 1.0);
-  edge.acquiredUncertainty = 1.0;
+  auto edge = reading(kP1, "edge", 1, 1.0);
+  setAcquiredUncertainty(edge, 1.0);
   observe(edge);
   EXPECT_EQ(outcomeOf(edge)->kind, IngestOutcome::Kind::Committed);
-  auto over                = reading(kP1, "over", 2, 1.0);
-  over.acquiredUncertainty = 1.001;
+  auto over = reading(kP1, "over", 2, 1.0);
+  setAcquiredUncertainty(over, 1.001);
   EXPECT_EQ(refusedAtIngress(over), EpistemicRefusal::UncertainAcquisition);
   // Content refusals: the device sent timestamps it cannot vouch for. The
   // first two, before any commit, earned the profile they are charged to.
@@ -1306,12 +1309,12 @@ TEST_F(VagentEpistemicIngress, ARepeatedRefusalIsChargedOnce) {
 
 TEST_F(VagentEpistemicIngress, AnInTurnRefusalResentIsChargedOnce) {
   observe(reading(kP1, "e1", 1, 1.0));
-  auto older       = reading(kP1, "e2", 2, 2.0);
-  older.acquiredAt = at(1) - 0.5; // refused in the turn: acquired earlier
+  auto older = reading(kP1, "e2", 2, 2.0);
+  setAcquiredAt(older, at(1) - 0.5); // refused in the turn: acquired earlier
   observe(older);
   observe(older);
-  EXPECT_EQ(outcomeOf(older)->code, "ObservationTimeMismatch");
-  EXPECT_EQ(counter(profiles().front(), kProfileContentRefusals), 1);
+  EXPECT_EQ(outcomeOf(older)->code, "AcquisitionOrderMismatch");
+  EXPECT_EQ(counter(profiles().front(), kProfileRefusedCount), 1);
 }
 
 TEST_F(VagentEpistemicIngress, ARelayedRefusalDoesNotHideTheDirectCopy) {

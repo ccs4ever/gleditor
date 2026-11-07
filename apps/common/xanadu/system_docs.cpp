@@ -1035,10 +1035,11 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .notes = "vagent: fraction in (0, 1] of a source's counted outcomes "
                   "that were unusable at or above which it reads SUSPECT. "
                   "Counted outcomes are refusals decided on the device's own "
-                  "signed fields and epoch; host-time refusals (stale, time "
-                  "mismatch, uncertain acquisition, mapping regression) are "
-                  "not counted. Between 15% and 25% the state is noisy by "
-                  "nature",
+                  "signed fields (including its signed times and epoch); "
+                  "refusals decided on the host's clock mapping or on the "
+                  "path (stale delivery, mapping mismatch, mapping "
+                  "regression) are not counted. Between 15% and 25% the "
+                  "state is noisy by nature",
          .schemas =
              {{.expectedTypes = {"float"},
                .defaultValues =
@@ -1133,6 +1134,36 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .schemas =
              {{.expectedTypes = {"integer"},
                .defaultValues = {vagent::runtime::kDefaultIncarnationStep}}}},
+        {.name = std::string(settings::kVagentEpistemicTimeClassHalfLife),
+         .notes =
+             "vagent: readings over which a source's time-class fraction "
+             "halves its memory, 8 to 4096. The fraction (stale, "
+             "future-sent and late readings among those the host could place "
+             "in time) is a log warning and a diagnostic, never a reason",
+         .schemas =
+             {{.expectedTypes = {"integer"},
+               .defaultValues = {vagent::runtime::kDefaultTimeClassHalfLife}}}},
+        {.name  = std::string(settings::kVagentEpistemicTimeSuspectFraction),
+         .notes = "vagent: time-class fraction in [0.01, 1] at or above which "
+                  "the host logs that one source's clock looks wrong while "
+                  "fewer than the common-cause number of its peers do",
+         .schemas = {{.expectedTypes = {"float"},
+                      .defaultValues =
+                          {vagent::runtime::kDefaultTimeSuspectFraction}}}},
+        {.name  = std::string(settings::kVagentEpistemicCommonCauseSources),
+         .notes = "vagent: sources, 1 to 128, whose agreeing time faults point "
+                  "to a clock they share (one time server, GPS jamming) "
+                  "rather than to one device",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues =
+                          {vagent::runtime::kDefaultCommonCauseSources}}}},
+        {.name    = std::string(settings::kVagentEpistemicCommonCauseWindowMs),
+         .notes   = "vagent: milliseconds, 100 to 3600000, within which that "
+                    "many sources must hit a counted signed-time refusal for "
+                    "the host to log a shared device time source",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues =
+                          {vagent::runtime::kDefaultCommonCauseWindowMs}}}},
         {.name  = std::string(settings::kVagentAdmissionPauseMs),
          .notes = "vagent: milliseconds `pauseAdmission` closes an actor's "
                   "door for when it is not given a ttl, 1000 to 600000. The "

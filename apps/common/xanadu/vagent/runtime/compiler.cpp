@@ -59,6 +59,7 @@
 
 #include "common/xanadu/foreign_op_handle.hpp"
 #include "common/xanadu/vagent/runtime/compiler_gen.hpp"
+#include "common/xanadu/vagent/runtime/epistemic_abi_clock.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_policy.hpp"
 #include "common/xanadu/vagent/runtime/prelude.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
@@ -4340,7 +4341,14 @@ void Gen::emitObserve(CellRef entryLabel) {
   static constexpr std::array<std::string_view, 3> kStreamOrder{
       kObsSequence, kObsClockEpoch, kObsClockMappingVersion};
   const CellRef stream = global(), lastSeq = global(), lastEpoch = global(),
-                lastMapping = global();
+                lastMapping = global(), obsInstance = global();
+  // The executor's clock name travels in the record; a stream's mapping
+  // versions are comparable only under one (A4).
+  mov(S(a0_), S(obs));
+  movC(a1_, cStr(std::string(kStreamClockInstance)));
+  callLabel(rtFind_);
+  mov(S(obsInstance), S(r0_));
+  branchIfZero(obsInstance, malformed);
   {
     const CellRef stale = reg(), fresh = newLabel(), sameEpoch = newLabel(),
                   ordered = newLabel();
@@ -4368,6 +4376,18 @@ void Gen::emitObserve(CellRef entryLabel) {
     place(sameEpoch);
     emit(OpcodeKind::Eq, "epoch=?", {D(clockEpoch), D(lastEpoch)}, {stale});
     requireTrue(stale, ordered);
+    {
+      // A stream with no instance (older state), or another executor's, is
+      // compared with nothing: the versions restarted, they did not regress.
+      const CellRef last = reg();
+      mov(S(a0_), S(stream));
+      movC(a1_, cStr(std::string(kStreamClockInstance)));
+      callLabel(rtFind_);
+      mov(S(last), S(r0_));
+      branchIfZero(last, ordered);
+      textEq(D(last), D(obsInstance), stale);
+      requireTrue(stale, ordered);
+    }
     emit(OpcodeKind::Lt, "map<?", {D(mapping), D(lastMapping)}, {stale});
     requireTrue(stale, ordered);
     endObservation(kTurnResultClockMappingRegression);
@@ -4430,6 +4450,7 @@ void Gen::emitObserve(CellRef entryLabel) {
       mov(D(lastSeq), D(seq));
       mov(D(lastEpoch), D(clockEpoch));
       mov(D(lastMapping), D(mapping));
+      putScalar(stream, kStreamClockInstance, D(obsInstance));
       jump(written);
       place(first);
       const CellRef fresh = reg();
@@ -4438,7 +4459,8 @@ void Gen::emitObserve(CellRef entryLabel) {
       markRecord(fresh);
       for (const auto &[fname, value] :
            {std::pair{kObsSequence, seq}, std::pair{kObsClockEpoch, clockEpoch},
-            std::pair{kObsClockMappingVersion, mapping}}) {
+            std::pair{kObsClockMappingVersion, mapping},
+            std::pair{kStreamClockInstance, obsInstance}}) {
         CellRef vc;
         callSetField(fresh, std::string(fname), std::nullopt, vc);
         mov(D(vc), D(value));
@@ -4565,7 +4587,7 @@ void Gen::emitObserve(CellRef entryLabel) {
         const CellRef notOlder = newLabel();
         emit(OpcodeKind::Lt, "epoch<?", {D(clockEpoch), D(v)}, {same});
         requireTrue(same, notOlder);
-        endObservation(kTurnResultObservationTimeMismatch);
+        endObservation(kTurnResultClockEpochRegression);
         place(notOlder);
       }
       emit(OpcodeKind::Eq, "epoch?", {D(v), D(clockEpoch)}, {same});
@@ -4576,7 +4598,7 @@ void Gen::emitObserve(CellRef entryLabel) {
       emit(OpcodeKind::Sub, "floor", {D(when), S(tol)}, {floor});
       emit(OpcodeKind::Lt, "early?", {D(acquiredAt), S(floor)}, {early});
       requireTrue(early, retire);
-      endObservation(kTurnResultObservationTimeMismatch);
+      endObservation(kTurnResultAcquisitionOrderMismatch);
       place(retire);
       mov(D(st), S(cStr(std::string(kObsStatusRetired))));
       place(skip);
