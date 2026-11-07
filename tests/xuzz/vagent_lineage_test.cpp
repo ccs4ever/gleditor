@@ -1131,4 +1131,143 @@ TEST(VagentLineageTest, AgentVarCaptureKeepsTheVarEdge) {
   EXPECT_EQ(*pos, 7);
 }
 
+TEST(VagentLineageTest, MemberDefCallFromPlanAndHandler) {
+  LineageHarness h;
+  auto &ctx = *h.context;
+
+  // `bump` is declared *after* both callsites: the member pre-pass
+  // mints every def's module symbol up front so a caller's emit needs
+  // only the symbol's position — RunCall hops `sym +d.values → head`
+  // at run once the callee's own walk has landed it. Tick: v = 7 →
+  // bump → v = 8; plan: the let r is frame-local, so v := r carries
+  // the second call's result state-side — 8 + 1 = 9.
+  auto artifacts = compileArtifacts(
+      "module demo\nimport std:meta\nevent Tick\nevent Done\n"
+      "goal Work() perform\n"
+      "agent A {\n"
+      "  var v: Int := 7\n"
+      "  on Tick { v := bump()\n"
+      "            adopt Work() }\n"
+      "  plan p for Work { let r := bump()\n"
+      "                    v := r\n"
+      "                    emit Done{} }\n"
+      "  def bump(): Int { v + 1 }\n"
+      "}");
+  ASSERT_TRUE(artifacts.has_value());
+  auto image =
+      lowerProgram(artifacts->program, ctx.core, ctx.vm, {},
+                   &artifacts->expansion, &artifacts->fragmentInfo);
+  ASSERT_TRUE(image.has_value());
+  EXPECT_THAT(image->stubbed, ::testing::IsEmpty());
+
+  VagentExecutor exec;
+  ASSERT_TRUE(exec(tickOn(ctx), ctx)); // v := bump(); adopt
+  auto wake = tickOn(ctx);
+  wake.message.reset();
+  ASSERT_TRUE(exec(wake, ctx)); // let r := bump(); v := r
+  auto wake2 = tickOn(ctx);
+  wake2.message.reset();
+  ASSERT_TRUE(exec(wake2, ctx)); // emit Done
+
+  auto &a0       = ctx.arena;
+  const auto rec = varsRecord(a0, ctx.core, image->agentCell, "v", false);
+  ASSERT_TRUE(rec.has_value());
+  const auto value = a0.linked(*rec, ctx.core.dims().values, Posward);
+  ASSERT_TRUE(value.has_value());
+  const auto pos = a0.asInt64(*value);
+  ASSERT_TRUE(pos.has_value());
+  // 9 — not 8 — proves both calls ran: the handler's bump() first
+  // (v 7→8), then the plan's bump() saw the updated state (8→9).
+  EXPECT_EQ(*pos, 9) << "handler and plan must each run bump()";
+}
+
+TEST(VagentLineageTest, MemberDefCallBindsPositionalArgs) {
+  LineageHarness h;
+  auto &ctx = *h.context;
+
+  // Positional args stage on the caller's +d.grab/+d.step rank and
+  // RunCall binds them by the descriptor's +d.name labels — the same
+  // convention dynamic run(c, […]) uses. `add` reads `v` state-side
+  // inside its body, and `code"…"` inside `dbl` calls `add` too —
+  // literals inherit the member walk's methods table through the
+  // shared FragmentContext.
+  auto artifacts = compileArtifacts(
+      "module demo\nimport std:meta\nevent Tick\nevent Done\n"
+      "goal Work() perform\n"
+      "agent A {\n"
+      "  var v: Int := 1\n"
+      "  var w: Int := 0\n"
+      "  def add(n: Int, m: Int): Int { n + m }\n"
+      "  def dbl(): Int { run(code\"add(10, 5)\") }\n"
+      "  on Tick { adopt Work() }\n"
+      "  plan p for Work { v := add(v, 41)\n"
+      "                    w := dbl()\n"
+      "                    emit Done{} }\n"
+      "}");
+  ASSERT_TRUE(artifacts.has_value());
+  auto image =
+      lowerProgram(artifacts->program, ctx.core, ctx.vm, {},
+                   &artifacts->expansion, &artifacts->fragmentInfo);
+  ASSERT_TRUE(image.has_value());
+  EXPECT_THAT(image->stubbed, ::testing::IsEmpty());
+
+  VagentExecutor exec;
+  ASSERT_TRUE(exec(tickOn(ctx), ctx)); // adopt
+  for (int i = 0; i < 3; ++i) {
+    auto wake = tickOn(ctx);
+    wake.message.reset();
+    ASSERT_TRUE(exec(wake, ctx));
+  }
+
+  auto &a0       = ctx.arena;
+  const auto rec = varsRecord(a0, ctx.core, image->agentCell, "v", false);
+  ASSERT_TRUE(rec.has_value());
+  const auto value = a0.linked(*rec, ctx.core.dims().values, Posward);
+  ASSERT_TRUE(value.has_value());
+  const auto pos = a0.asInt64(*value);
+  ASSERT_TRUE(pos.has_value());
+  EXPECT_EQ(*pos, 42) << "add(v, 41) binds n=1, m=41 by descriptor name";
+
+  const auto recQ = varsRecord(a0, ctx.core, image->agentCell, "w", false);
+  ASSERT_TRUE(recQ.has_value());
+  const auto valueQ = a0.linked(*recQ, ctx.core.dims().values, Posward);
+  ASSERT_TRUE(valueQ.has_value());
+  const auto posQ = a0.asInt64(*valueQ);
+  ASSERT_TRUE(posQ.has_value());
+  EXPECT_EQ(*posQ, 15) << "a literal's add(10, 5) resolves the same way";
+}
+
+TEST(VagentLineageTest, MemberDefCallRefusesOutsideAgentScope) {
+  LineageHarness h;
+  auto &ctx = *h.context;
+
+  // The methods table is agent-scoped: `helper()` inside a skill body
+  // resolves at the checker (skills carry their own member defs) but
+  // must not bind the agent's flat-name table at lowering — the skill
+  // walk keeps the table empty, so probe's head files under stubbed
+  // rather than resolving `helper()` to the agent's `helper` — skill
+  // methods dispatch through `S.m` capcall instead.
+  auto artifacts = compileArtifacts(
+      "module demo\nimport std:meta\nevent Tick\nevent Done\n"
+      "capacity Nav { def probe(): Int }\n"
+      "skill W implements Nav {\n"
+      "  def helper(): Int { 1 }\n"
+      "  def probe(): Int { helper() }\n"
+      "}\n"
+      "goal Work() perform\n"
+      "agent A {\n"
+      "  def helper(): Int { 2 }\n"
+      "  on Tick { adopt Work() }\n"
+      "  plan p for Work { emit Done{} }\n"
+      "}");
+  ASSERT_TRUE(artifacts.has_value());
+  auto image =
+      lowerProgram(artifacts->program, ctx.core, ctx.vm, {},
+                   &artifacts->expansion, &artifacts->fragmentInfo);
+  ASSERT_TRUE(image.has_value());
+  EXPECT_THAT(image->stubbed, ::testing::Contains("probe"))
+      << "a flat helper() inside a skill body must stub probe's head, "
+         "not bind the agent's helper";
+}
+
 } // namespace

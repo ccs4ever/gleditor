@@ -760,9 +760,46 @@ private:
       break;
     }
     case ExprKind::Call: {
-      // §6.2's `run` special form — the only call the scalar kernel
-      // lowers; every other callee stays unsupported.
+      // §6.2's `run` special form and member `def` calls — the latter
+      // resolve through the methods table the member pre-pass minted:
+      // the callsite names the module symbol and RunCall hops
+      // `sym +d.values → head` at run, so the emit needs only the
+      // declared signature here. Every other callee stays unsupported.
       const auto &callee = *expression.children.front();
+      if (callee.kind == ExprKind::Identifier && callee.text != "run") {
+        const MethodTarget *target = nullptr;
+        if (fragments_ && fragments_->methods)
+          if (const auto it = fragments_->methods->find(callee.text);
+              it != fragments_->methods->end())
+            target = &it->second;
+        if (!target)
+          refuse(expression, DiagnosticCode::InvalidDeclaration,
+                 "scalar lowering resolves calls only against member "
+                 "`def`s — '" +
+                     std::string(callee.text) + "'");
+        if (pure)
+          refuse(expression, DiagnosticCode::InvalidPosition,
+                 "'" + std::string(callee.text) +
+                     "()' is opaque-impure — it cannot appear in a "
+                     "condition");
+        for (std::size_t i = 1; i < expression.children.size(); ++i)
+          preflight(*expression.children[i], false, depth + 1, pure);
+        resultTypes_[&expression] = target->result;
+        if (const auto scalar = scalarType(target->result)) {
+          type = *scalar;
+        } else if (target->result.name == "Code") {
+          // A method returning Code — the produced value is a
+          // head-valued ref, carried as a Cell scalar.
+          type = Scalar::Cell;
+        } else {
+          refuse(expression, DiagnosticCode::TypeMismatch,
+                 "'" + std::string(callee.text) +
+                     "' result type is outside the scalar lowering "
+                     "subset: " +
+                     typeName(target->result));
+        }
+        break;
+      }
       if (callee.kind != ExprKind::Identifier || callee.text != "run")
         refuse(expression, DiagnosticCode::InvalidDeclaration,
                "scalar lowering does not yet support calls — only the "
@@ -1486,8 +1523,12 @@ private:
       return copy(output, namedRef(head, fragmentLabel(expression), "run"),
                   continuation);
     }
-    case ExprKind::Call:
+    case ExprKind::Call: {
+      const auto &callee = *expression.children.front();
+      if (callee.kind == ExprKind::Identifier && callee.text != "run")
+        return emitMemberCall(expression, output, continuation);
       return emitRun(expression, output, continuation);
+    }
     case ExprKind::Splice:
       refuse(expression, DiagnosticCode::InvalidDeclaration,
              "a residual splice reached lowering; the expand stage "
@@ -1851,6 +1892,48 @@ private:
         tail = emit(*expression.children[2]->children[i], argTemps[i],
                     tail);
     return emit(operandExpr, box, tail);
+  }
+
+  // A member `def` callsite — the emit side of §6.2's RunCall/
+  // RunResume machinery with a *compile-time* operand: the module
+  // symbol the member pre-pass minted. RunCall resolves
+  // `sym +d.values → head` at run, so a caller lowered before its
+  // callee still binds; positional args stage left-to-right on the
+  // same +d.grab/+d.step rank the dynamic arm uses.
+  CellRef emitMemberCall(const Expr &expression, CellRef output,
+                         CellRef continuation) {
+    const auto &callee = *expression.children.front();
+    const auto &target = fragments_->methods->at(callee.text);
+
+    const auto runResume = mint(OpcodeKind::RunResume);
+    const auto box       = reference(target.sym);
+    bindIn(runResume, box);
+    bindIn(runResume, reference(cells_->fail));
+    bindOut(runResume, output);
+    spin(runResume, jump(continuation));
+
+    const auto runCall = mint(OpcodeKind::RunCall);
+    bindIn(runCall, box);
+    bindIn(runCall,
+           dimRef(core_.findOrMintDimension("d.entry"), "d.entry"));
+    bindIn(runCall, reference(cells_->fail));
+    spin(runCall, runResume);
+
+    std::vector<CellRef> argTemps;
+    for (std::size_t i = 1; i < expression.children.size(); ++i)
+      argTemps.push_back(temporary());
+    const auto argsRank = own(core_.arena().makeCell());
+    if (!argTemps.empty()) {
+      link(argsRank, core_.dims().grab, false, argTemps.front());
+      for (std::size_t i = 1; i < argTemps.size(); ++i)
+        link(argTemps[i - 1], core_.dims().step, false, argTemps[i]);
+    }
+    bindIn(runCall, reference(argsRank));
+
+    CellRef tail = runCall;
+    for (std::size_t i = argTemps.size(); i-- > 0;)
+      tail = emit(*expression.children[i + 1], argTemps[i], tail);
+    return tail;
   }
 
   // The callsite label for +d.refs name-records — the fragment's own

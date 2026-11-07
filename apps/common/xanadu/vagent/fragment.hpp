@@ -50,6 +50,16 @@ struct FragmentObject {
   zigzag::CellRef produced{};
 };
 
+// A member `def`'s callsite target: the module `+d.vars` symbol the
+// call resolves through — its `+d.values → head` edge lands when the
+// method's own walk finishes, so a caller lowered before its callee
+// still resolves at run — and the declared result type the callsite
+// reports.
+struct MethodTarget {
+  zigzag::CellRef sym{};
+  Type result{};
+};
+
 // The pipeline tables a compile carries beside the bindings: expand's
 // §5.6 fragment table and per-literal metadata, the checker's
 // per-fragment info (via check()'s infoOut), the capture records for
@@ -62,6 +72,10 @@ struct FragmentContext {
   const std::map<std::string, CaptureRecord, std::less<>> *captures{};
   const FragmentInfoMap *info{};
   const CompilerBindings *bindings{};
+  // The member-method callsite table the `def` call arm resolves
+  // against — flat member names (an agent's `def`s); capacity or
+  // qualified calls are not in it and refuse as before.
+  const std::map<std::string, MethodTarget, std::less<>> *methods{};
   // The compiling unit's module name — the `src:<module>:<line>:<col>`
   // head label's first segment (§6.7); absent for a module-less unit.
   std::optional<std::string> module;

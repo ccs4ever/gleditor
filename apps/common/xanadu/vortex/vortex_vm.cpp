@@ -959,9 +959,21 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
         setCursorOpcode(*cursor, failOp);
         jumped = true;
       };
-      const CellRef head     = static_cast<CellRef>(toInt(inputs[0]));
+      CellRef head           = static_cast<CellRef>(toInt(inputs[0]));
       const DimRef entryDim  = toInt(inputs[1]);
       const CellRef argsRank = static_cast<CellRef>(toInt(inputs[3]));
+
+      // A member-`def` callsite names the module *symbol*, not the
+      // head — the symbol's +d.values lands on the head whenever the
+      // method's own walk finished, so a caller lowered before its
+      // callee still resolves. Heads are discriminated by +d.entry: a
+      // cell carrying one IS the head (dynamic-run shape); a cell
+      // lacking one gets the single +d.values hop.
+      if (core_.arena().contains(head) &&
+          !core_.arena().linked(head, entryDim, zigzag::Posward))
+        if (const auto via = core_.arena().linked(head, dims.values,
+                                                zigzag::Posward))
+          head = *via;
 
       // Op first, head second — the same discriminator runFragment
       // applies (meta.cpp): an operand naming an op is the headless-run
@@ -1094,32 +1106,41 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
       const CellRef failOp = static_cast<CellRef>(toInt(inputs[1]));
       bool       produced  = false;
       CellValue  result{false};
-      if (core_.arena().contains(head))
-        if (const auto descriptor =
-                core_.arena().linked(head, dims.values, zigzag::Posward)) {
-          CellRef producedCell{noCell}, resultCell{noCell};
-          for (const CellRef record : zigzag::rankAfter(
-                   core_.arena(), *descriptor, dims.vars)) {
-            core_.arena().consumeWork();
-            const auto key = core_.arena().textOf(record);
-            if (key == "produced")
-              producedCell =
-                  core_.arena()
-                      .linked(record, dims.values, zigzag::Posward)
-                      .value_or(noCell);
-            else if (key == "result")
-              resultCell =
-                  core_.arena()
-                      .linked(record, dims.values, zigzag::Posward)
-                      .value_or(noCell);
-          }
-          if (core_.arena().contains(producedCell) &&
-              core_.arena().contains(resultCell)) {
-            produced = VortexCore::evaluateTruthiness(
-                core_.render(producedCell).value_or(CellValue{false}));
-            result   = core_.render(resultCell).value_or(CellValue{false});
-          }
+      // The box may name a member-`def` *symbol*: its +d.values lands
+      // on the head, and only the head's own +d.values is the
+      // descriptor. Hop the chain — the first cell whose +d.vars
+      // carries produced/result records is the descriptor.
+      auto at = head;
+      for (std::size_t hops = 0; hops < 2 && !produced; ++hops) {
+        if (!core_.arena().contains(at)) break;
+        const auto descriptor =
+            core_.arena().linked(at, dims.values, zigzag::Posward);
+        if (!descriptor || !core_.arena().contains(*descriptor)) break;
+        CellRef producedCell{noCell}, resultCell{noCell};
+        for (const CellRef record : zigzag::rankAfter(
+                 core_.arena(), *descriptor, dims.vars)) {
+          core_.arena().consumeWork();
+          const auto key = core_.arena().textOf(record);
+          if (key == "produced")
+            producedCell =
+                core_.arena()
+                    .linked(record, dims.values, zigzag::Posward)
+                    .value_or(noCell);
+          else if (key == "result")
+            resultCell =
+                core_.arena()
+                    .linked(record, dims.values, zigzag::Posward)
+                    .value_or(noCell);
         }
+        if (core_.arena().contains(producedCell) &&
+            core_.arena().contains(resultCell)) {
+          produced = VortexCore::evaluateTruthiness(
+              core_.render(producedCell).value_or(CellValue{false}));
+          result   = core_.render(resultCell).value_or(CellValue{false});
+        } else {
+          at = *descriptor;
+        }
+      }
       if (produced)
         outputs.emplace_back(result);
       else {

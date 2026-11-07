@@ -81,8 +81,12 @@ struct Lowerer {
   // Name-keyed indexes gathered during the walk: module symbols (so a
   // plan/on host lookup is a find, not a rank scan) and the declared
   // parameter lists plans/handlers inherit their head signatures from.
+  // `methods` is the member-`def` callsite table — symbols mint in the
+  // member pre-pass so a caller lowered before its callee resolves
+  // through `sym +d.values → head` at run.
   std::map<std::string, CellRef, std::less<>> symbols;
   std::map<std::string, std::vector<Parameter>, std::less<>> signatures;
+  std::map<std::string, MethodTarget, std::less<>> methods;
   std::map<CellRef, std::size_t> clauseCounts;
 
   Lowerer(zigzag::vortex::VortexCore &core_, zigzag::vortex::VortexVM &vm_,
@@ -1241,6 +1245,22 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
             arena.link(*rec, dims().values, DimVector::POS,
                        arena.makeScalarCell(std::int64_t{0})));
     }
+    // `def` symbols mint before any body emits — a member fragment's
+    // `probe()` callsite names the module symbol, and the symbol's
+    // `+d.values → head` edge lands only when the method's own walk
+    // finishes, so the callsite's emit time needs just the symbol's
+    // position, whatever order the declarations list them in. The
+    // table is scoped to the agent's own member walk — a `probe()`
+    // anywhere else resolves to nothing.
+    const auto *const prevMethods = context.methods;
+    context.methods               = &methods;
+    for (const auto &member : decl.members)
+      if (member.kind == DeclKind::Method)
+        methods.emplace(member.name,
+                        MethodTarget{symbols.contains(member.name)
+                                         ? symbols[member.name]
+                                         : mintSymbol(member.name),
+                                     member.result.value_or(Type{"()"})});
     // Var records mint before any body emits — a member fragment
     // binds `var` names through the bindings table at compile time,
     // whatever order the declarations list them in.
@@ -1248,6 +1268,7 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
       if (member.kind == DeclKind::Field) lowerDecl(member, true);
     for (const auto &member : decl.members)
       if (member.kind != DeclKind::Field) lowerDecl(member, true);
+    context.methods = prevMethods;
     // §8.5's creation order materializes as a spine: the `install`/
     // `behavior` members' host steps sit on a $create clause the
     // executor runs inside the $initialized turn, before `on
@@ -1525,8 +1546,12 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
             : std::string{name};
     // An answer legitimately shares its symbol — the matching
     // `question` decl minted it — while a `def` that lands on an
-    // existing name is the collision the old check caught.
-    if (decl.kind == DeclKind::Method && symbols.contains(symName)) {
+    // existing name is the collision the old check caught. The member
+    // pre-pass already minted this method's symbol for the callsite
+    // table — it carries no `+d.values` edge yet, so only an edged
+    // symbol is a real duplicate.
+    if (decl.kind == DeclKind::Method && symbols.contains(symName) &&
+        arena.linked(symbols[symName], dims().values, DimVector::POS)) {
       refuse(decl, std::format("duplicate symbol '{}'", symName));
       return;
     }
@@ -1657,12 +1682,16 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
         zigzag::expectWritten(
             arena.link(*r, dims().values, DimVector::POS,
                        arena.makeScalarCell(std::int64_t{1})));
-    const std::string prevPrefix = memberPrefix_;
-    const CellRef prevUses       = usesTarget_;
-    const OwnerFields prevFields = memberFields_;
-    memberPrefix_                = name;
-    usesTarget_                  = rec;
-    memberFields_                = memberFieldsOf(decl);
+    const std::string prevPrefix   = memberPrefix_;
+    const CellRef prevUses         = usesTarget_;
+    const OwnerFields prevFields   = memberFields_;
+    const auto *const prevMethods  = context.methods;
+    memberPrefix_                  = name;
+    usesTarget_                    = rec;
+    memberFields_                  = memberFieldsOf(decl);
+    // Skill members dispatch through `S.m` capcall — the flat-name
+    // `methods` table is the agent's own and must not resolve here.
+    context.methods                = nullptr;
     for (const auto &member : decl.members) {
       if (member.kind == DeclKind::Field) {
         lowerFieldSlot(rec, member, decl.parameters, name);
@@ -1709,9 +1738,10 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
       }
       lowerDecl(member, insideAgent);
     }
-    memberPrefix_ = prevPrefix;
-    usesTarget_   = prevUses;
-    memberFields_ = prevFields;
+    memberPrefix_   = prevPrefix;
+    usesTarget_     = prevUses;
+    memberFields_   = prevFields;
+    context.methods = prevMethods;
     return;
   }
   case DeclKind::Behavior: {
@@ -1740,14 +1770,18 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
         zigzag::expectWritten(
             arena.link(*r, dims().values, DimVector::POS, list));
     }
-    const std::string prevPrefix = memberPrefix_;
-    const CellRef prevDesc       = behaviorDesc_;
-    const CellRef prevUses       = usesTarget_;
-    const OwnerFields prevFields = memberFields_;
-    memberPrefix_                = name;
-    behaviorDesc_                = rec;
-    usesTarget_                  = rec;
-    memberFields_                = memberFieldsOf(decl);
+    const std::string prevPrefix   = memberPrefix_;
+    const CellRef prevDesc         = behaviorDesc_;
+    const CellRef prevUses         = usesTarget_;
+    const OwnerFields prevFields   = memberFields_;
+    const auto *const prevMethods  = context.methods;
+    memberPrefix_                  = name;
+    behaviorDesc_                  = rec;
+    usesTarget_                    = rec;
+    memberFields_                  = memberFieldsOf(decl);
+    // Behavior members dispatch through `B.m` — the flat-name
+    // `methods` table is the agent's own and must not resolve here.
+    context.methods                = nullptr;
     for (const auto &member : decl.members) {
       if (member.kind == DeclKind::Field) {
         lowerFieldSlot(rec, member, decl.parameters, name);
@@ -1771,10 +1805,11 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
       }
       lowerDecl(member, insideAgent);
     }
-    memberPrefix_ = prevPrefix;
-    behaviorDesc_ = prevDesc;
-    usesTarget_   = prevUses;
-    memberFields_ = prevFields;
+    memberPrefix_   = prevPrefix;
+    behaviorDesc_   = prevDesc;
+    usesTarget_     = prevUses;
+    memberFields_   = prevFields;
+    context.methods = prevMethods;
     return;
   }
   case DeclKind::Plan: {
