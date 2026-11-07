@@ -106,9 +106,12 @@ VortexVM::registerProgramOps(std::span<const CellRef> enumeration) {
     // asInt64 ≤ Find sweep of the band would register dimConstant
     // operand cells and every other small-int data cell too.
     const auto kind = core_.arena().asInt64(opCell);
+    // The bound is the enum's last ordinal — RunResume while §6.2's
+    // ops hold the append-last tail; a new kind landing past it must
+    // move this ceiling the way linkedCeiling's does (meta.cpp).
     if (!kind || *kind < 0 ||
         static_cast<std::uint64_t>(*kind) >
-            static_cast<std::uint64_t>(OpcodeKind::FieldSet)) {
+            static_cast<std::uint64_t>(OpcodeKind::RunResume)) {
       return std::unexpected("registerProgramOps: recorded cell " +
                              std::to_string(opCell) +
                              " does not decode to an opcode kind");
@@ -998,6 +1001,18 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
            cell = core_.arena().linked(*cell, dims.step, zigzag::Posward))
         params.push_back(*cell);
 
+      // §5.8's member convention: a `$owner` param is not an argument —
+      // the callee's #RESOLVE prologue finds the caller's own $owner
+      // binding on the shared vars rank. Arity and positional binding
+      // count the caller-supplied params only.
+      std::vector<CellRef> boundParams;
+      for (const auto param : params) {
+        const auto label = core_.arena().linked(param, dims.name,
+                                                zigzag::Posward);
+        if (label && core_.arena().textOf(*label) == "$owner") continue;
+        boundParams.push_back(param);
+      }
+
       // The caller-staged values ride the same convention: argsRank's
       // +d.grab chain via +d.step, each member the evaluated cell
       // itself.
@@ -1011,7 +1026,7 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
         argValues.push_back(
             core_.render(*cell).value_or(CellValue{false}));
       }
-      if (argValues.size() != params.size()) {
+      if (argValues.size() != boundParams.size()) {
         failJump();
         break;
       }
@@ -1041,9 +1056,9 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
       // name-keyed +d.vars/+d.values channel so the callee's #RESOLVE
       // prologue reads them verbatim; labelOf's argN fallback stands
       // for an unlabelled parameter.
-      for (std::size_t i = 0; i < params.size(); ++i) {
+      for (std::size_t i = 0; i < boundParams.size(); ++i) {
         core_.arena().consumeWork();
-        const auto label = core_.arena().linked(params[i], dims.name,
+        const auto label = core_.arena().linked(boundParams[i], dims.name,
                                                 zigzag::Posward);
         const auto name  = label ? core_.arena().textOf(*label)
                                  : "arg" + std::to_string(i);

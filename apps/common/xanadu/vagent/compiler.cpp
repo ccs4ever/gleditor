@@ -135,8 +135,11 @@ public:
   // d.vars/d.values channel), then emitted under the statement wrapper
   // with a #Return tail and the spill/publish records run relies on.
   std::expected<FragmentBody, Diagnostic>
-  compileFragment(const Expr &body, const std::vector<Parameter> &parameters,
-                  ResultUse use, const OwnerFields *ownerFields = nullptr) {
+  compileFragment(
+      const Expr &body, const std::vector<Parameter> &parameters,
+      ResultUse use, const OwnerFields *ownerFields = nullptr,
+      const std::map<std::string, std::string, std::less<>>
+          *capFieldNames = nullptr) {
     try {
       if (&vm_.core() != &core_)
         refuse(body, DiagnosticCode::InvalidDeclaration,
@@ -158,6 +161,7 @@ public:
         ++localCount_;
       }
       paramCount_ = parameters.size();
+      capFieldNames_ = capFieldNames;
       if (ownerFields && !ownerFields->empty()) {
         ownerFields_ = ownerFields;
         // The dispatcher binds the runtime owner ref on the head's
@@ -210,7 +214,32 @@ private:
       const auto local = scope->find(expression.text);
       if (local != scope->end()) {
         localReferences_[&expression] = local->second.index;
+        if (local->second.rich)
+          resultTypes_[&expression] = *local->second.rich;
         return local->second.type;
+      }
+    }
+    // §5.3's owner-field captures: a cap$N whose captured name is an
+    // owner field resolves owner-relative — the alias itself is never
+    // a field, so the join-supplied map names it.
+    if (capFieldNames_ && ownerFields_ && capName(expression.text)) {
+      if (const auto field = capFieldNames_->find(expression.text);
+          field != capFieldNames_->end()) {
+        const auto found = ownerFields_->find(field->second);
+        if (found == ownerFields_->end())
+          refuse(expression, DiagnosticCode::UnknownName,
+                 "owner field '" + field->second +
+                     "' captured by " + expression.text +
+                     " is not declared");
+        const auto type = scalarType(found->second);
+        if (!type)
+          refuse(expression, DiagnosticCode::InvalidDeclaration,
+                 "owner field '" + field->second +
+                     "' has a type outside the scalar lowering subset: " +
+                     typeName(found->second));
+        ownerRefs_.insert(&expression);
+        capFieldRefs_[&expression] = field->second;
+        return *type;
       }
     }
     // §5.8's owner-relative fields: a member body's bare `var` name
@@ -549,7 +578,14 @@ private:
         refuse(expression, DiagnosticCode::DuplicateName,
                "duplicate local '" + expression.text + "'");
       const auto index = localCount_++;
-      scopes_.back().emplace(expression.text, Local{index, value});
+      {
+        Local local{index, value};
+        if (const auto rich =
+                resultTypes_.find(expression.children.front().get());
+            rich != resultTypes_.end())
+          local.rich = rich->second;
+        scopes_.back().emplace(expression.text, local);
+      }
       localReferences_[&expression] = index;
       type = types_.at(expression.children.front().get()) == Scalar::Bottom
                  ? Scalar::Bottom
@@ -748,7 +784,10 @@ private:
         // The RunCall/RunResume pair carries the call: arity and the
         // produced/result gate read the head's descriptor at run time,
         // so preflight only proves the operand and the arg list are
-        // emittable and reports the honest Bottom result.
+        // emittable. A statically-known Code<T> operand gives back T —
+        // the richer resultTypes_ channel carries it; Bottom is the
+        // honest report only when the operand's fragment type is
+        // genuinely unknown.
         (void)preflight(operandExpr, false, depth + 1, pure);
         if (expression.children.size() == 3) {
           const auto &argsExpr = *expression.children[2];
@@ -759,6 +798,17 @@ private:
             preflight(*item, false, depth + 1, pure);
         }
         type = Scalar::Bottom;
+        if (const auto found = resultTypes_.find(&operandExpr);
+            found != resultTypes_.end() &&
+            found->second.name == "Code" &&
+            found->second.arguments.size() == 1) {
+          const auto &result = found->second.arguments.front();
+          resultTypes_[&expression] = result;
+          if (const auto scalar = scalarType(result))
+            type = *scalar;
+          else if (result.name == "Code")
+            type = Scalar::Cell;
+        }
         break;
       }
       const auto operandType = preflight(operandExpr, false, depth + 1, pure);
@@ -1199,9 +1249,16 @@ private:
     case ExprKind::Identifier: {
       // An owner-relative field reads exactly like `term.field`: the
       // $owner local's int names the instance cell whose +d.step rank
-      // #FIND walks for the +d.name-matched field holder.
-      if (ownerRefs_.contains(&expression))
-        return findOp(ownerCell(), expression.text, output, continuation);
+      // #FIND walks for the +d.name-matched field holder. A cap$N
+      // capture of a field finds it by the field's own name — the
+      // alias's text is never the +d.name.
+      if (ownerRefs_.contains(&expression)) {
+        const auto field = capFieldRefs_.find(&expression);
+        return findOp(ownerCell(),
+                      field != capFieldRefs_.end() ? field->second
+                                                 : expression.text,
+                      output, continuation);
+      }
       const auto source = resolved(expression);
       // A cap$N operand wraps its binding cell in a capture slot —
       // masterOf(slot) at run time — never an int64 snapshot.
@@ -1681,7 +1738,7 @@ private:
   CellRef emitFragmentObject(const Expr &expression) {
     const auto frame = frameBindings(expression);
     auto object      = xanadu::vagent::compileFragment(
-        expression, *fragments_, *compiler_, &frame);
+        expression, *fragments_, *compiler_, &frame, ownerFields_);
     if (!object) refuse(expression, object.error().code, object.error().detail);
     return object->head;
   }
@@ -1703,7 +1760,7 @@ private:
     const auto *record      = fragmentRecord(operandExpr);
     const auto frame        = frameBindings(operandExpr);
     auto object             = xanadu::vagent::compileFragment(
-        operandExpr, *fragments_, *compiler_, &frame);
+        operandExpr, *fragments_, *compiler_, &frame, ownerFields_);
     if (!object) refuse(expression, object.error().code, object.error().detail);
 
     // The entry/result/produced cells live in the callee's own graph;
@@ -1835,6 +1892,10 @@ private:
   struct Local {
     std::size_t index;
     Scalar type;
+    // The richer checker Type when the initializer carried one —
+    // `let c := code"…"` binds Cell here but `Code<T>` on the
+    // resultTypes_ channel; `run(c)` reads T back off this slot.
+    std::optional<Type> rich{};
   };
   std::vector<std::map<std::string, Local, std::less<>>> scopes_;
   std::size_t localCount_{0};
@@ -1884,6 +1945,13 @@ private:
   const OwnerFields *ownerFields_{nullptr};
   std::size_t ownerIndex_{npos};
   std::unordered_set<const Expr *> ownerRefs_;
+  // §5.3's owner-field captures — compileFragment's env join rewrites
+  // a cap$N naming an owner field to the field name here, and the
+  // Identifier arm's find hop reads capFieldRefs_ for that name (the
+  // alias's own text is never a field).
+  const std::map<std::string, std::string, std::less<>>
+      *capFieldNames_{nullptr};
+  std::unordered_map<const Expr *, std::string> capFieldRefs_;
   CellRef ownerCell() const { return localCells_.at(ownerIndex_); }
   // Binding cells referenced through cap$N aliases — operands on them
   // lower to capture slots (clone-rank members + ref-capture records),
@@ -1924,7 +1992,8 @@ Compiler::compileFragmentBody(const FragmentBodyRequest &request) {
                   limits_, request.fragments, this,
                   /*recordOps=*/true);
   return emitter.compileFragment(*request.body, request.parameters,
-                                 request.use, request.ownerFields);
+                                 request.use, request.ownerFields,
+                                 request.capFieldNames);
 }
 
 } // namespace xanadu::vagent

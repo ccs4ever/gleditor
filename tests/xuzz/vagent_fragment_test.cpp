@@ -178,6 +178,30 @@ agent MetaUser {
   EXPECT_EQ(h.core.render(statement->result), CellValue(std::int64_t{7}));
 }
 
+TEST(VagentFragmentTest, DynamicRunOfKnownCodeTypeYieldsItsResult) {
+  FragmentHarness h;
+  // `let c := code"…"` binds Cell in the scalar local but Code<Int>
+  // on the richer channel — `run(c)` reports Int, not Bottom.
+  auto artifacts = h.pipeline(R"(
+import std:meta
+agent MetaUser {
+  def probe(): Int { let c := code"1 + 2"; run(c) }
+}
+)");
+  ASSERT_TRUE(artifacts) << describe(artifacts.error());
+  const auto *body = FragmentHarness::firstMethodBody(artifacts->program);
+  ASSERT_NE(body, nullptr);
+  const CompilerBindings bindings;
+  auto context = h.contextOf(*artifacts, bindings);
+  auto statement =
+      h.compiler.compileStatement(*body, bindings, ResultUse::Value, &context);
+  ASSERT_TRUE(statement) << formatDiagnostic(statement.error());
+  EXPECT_EQ(statement->resultType, (Type{"Int", {}}));
+  h.run(*statement);
+  EXPECT_TRUE(h.produced(*statement));
+  EXPECT_EQ(h.core.render(statement->result), CellValue(std::int64_t{3}));
+}
+
 TEST(VagentFragmentTest, RunOfACodeResultYieldsTheInnerHeadRef) {
   FragmentHarness h;
   auto artifacts = h.pipeline(R"(

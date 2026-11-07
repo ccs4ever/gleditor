@@ -1033,4 +1033,62 @@ TEST(VagentLineageTest, RunSeesEnclosingLetLocals) {
          "x's let-local value — 4 + 5";
 }
 
+TEST(VagentLineageTest, RunSeesOwnerFieldCaptures) {
+  LineageHarness h;
+  auto &ctx = *h.context;
+
+  // `probe`'s literal names `v`, a skill var — expand mints cap$0 → v,
+  // but no frame local or state binding knows `v`: it lives on the
+  // installed instance's fields rank and resolves through $owner.
+  // compileFragment gives the literal the member convention's trailing
+  // $owner Cell parameter (RunCall skips it — the callee's #RESOLVE
+  // finds the caller's own binding on the shared vars rank) and the
+  // env join marks cap$0 owner-relative: its operand lowers to the
+  // same #FIND hop a bare `v` would, keyed on the field's own name.
+  auto artifacts = compileArtifacts(
+      "module demo\nimport std:meta\nevent Tick\nevent Done\n"
+      "capacity Nav { def probe(): Int }\n"
+      "skill W implements Nav {\n"
+      "  var v: Int := 7\n"
+      "  def probe(): Int {\n"
+      "    let c := code\"v + 1\"\n"
+      "    run(c)\n"
+      "  }\n"
+      "}\n"
+      "goal Work() perform\n"
+      "agent A {\n"
+      "  uses Nav\n"
+      "  on Tick { adopt Work() }\n"
+      "  plan p for Work { install W()\n"
+      "                    let r := Nav.probe()\n"
+      "                    emit Done{} }\n"
+      "}");
+  ASSERT_TRUE(artifacts.has_value());
+  auto image =
+      lowerProgram(artifacts->program, ctx.core, ctx.vm, {},
+                   &artifacts->expansion, &artifacts->fragmentInfo);
+  ASSERT_TRUE(image.has_value());
+  EXPECT_THAT(image->stubbed, ::testing::IsEmpty());
+
+  VagentExecutor exec;
+  ASSERT_TRUE(exec(tickOn(ctx), ctx)); // adopt + install
+  auto wake = tickOn(ctx);
+  wake.message.reset();
+  ASSERT_TRUE(exec(wake, ctx)); // capcall binds r
+  auto wake2 = tickOn(ctx);
+  wake2.message.reset();
+  ASSERT_TRUE(exec(wake2, ctx)); // emit Done
+
+  auto &a0       = ctx.arena;
+  const auto rec = varsRecord(a0, ctx.core, image->agentCell, "r", false);
+  ASSERT_TRUE(rec.has_value());
+  const auto value = a0.linked(*rec, ctx.core.dims().values, Posward);
+  ASSERT_TRUE(value.has_value());
+  const auto pos = a0.asInt64(*value);
+  ASSERT_TRUE(pos.has_value())
+      << "a run() result must surface as the bound scalar, not ''";
+  EXPECT_EQ(*pos, 8)
+      << "the literal's cap$0 must #FIND the installed W's v — 7 + 1";
+}
+
 } // namespace

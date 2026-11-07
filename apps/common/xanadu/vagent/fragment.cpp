@@ -125,7 +125,8 @@ FragmentDims mintFragmentDims(VortexCore &core) {
 
 std::expected<FragmentObject, Diagnostic>
 compileFragment(const Expr &literal, const FragmentContext &context,
-                Compiler &compiler, const CompilerBindings *frameLocals) {
+                Compiler &compiler, const CompilerBindings *frameLocals,
+                const OwnerFields *memberFields) {
   try {
     auto &arena    = compiler.core().arena();
     const auto key = fragmentKeyOf(literal);
@@ -198,18 +199,40 @@ compileFragment(const Expr &literal, const FragmentContext &context,
       joined = std::move(merged);
     }
 
+    // §5.8's member convention for owner-field captures: when the
+    // enclosing member declares fields, the literal carries the
+    // trailing `$owner` Cell parameter every member head does — the
+    // dispatcher binds the runtime owner ref there, and a cap$N whose
+    // captured name is a field resolves owner-relative through
+    // capFieldNames (alias → field). The checker's own ownerFields
+    // (never set for literals) yields to the enclosing member's set.
+    std::vector<Parameter> effectiveParams = record->second.body.parameters;
+    std::map<std::string, std::string, std::less<>> capFieldNames;
+    const OwnerFields *fields =
+        memberFields && !memberFields->empty()
+            ? memberFields
+            : (info->second.ownerFields.empty() ? nullptr
+                                                : &info->second.ownerFields);
+    if (fields) {
+      if (effectiveParams.empty() ||
+          effectiveParams.back().name != "$owner")
+        effectiveParams.push_back(
+            Parameter{.name = "$owner", .type = Type{"Cell"}});
+      for (const auto &[alias, captured] : record->second.env)
+        if (fields->contains(captured)) capFieldNames[alias] = captured;
+    }
+
     // Emit the body through the scalar Emitter — parameters seeded as
     // name-keyed frame-bound locals, the Return tail and published
     // result/produced cells inside the usual choice wrapper.
     FragmentBodyRequest request{
         .body       = record->second.body.body.get(),
-        .parameters = record->second.body.parameters,
+        .parameters = effectiveParams,
         .bindings   = joined ? &*joined : context.bindings,
         .fragments  = &context,
         .use        = ResultUse::Value,
-        .ownerFields =
-            info->second.ownerFields.empty() ? nullptr
-                                             : &info->second.ownerFields,
+        .ownerFields   = fields,
+        .capFieldNames = capFieldNames.empty() ? nullptr : &capFieldNames,
     };
     auto body = compiler.compileFragmentBody(request);
     if (!body) return std::unexpected(body.error());
@@ -273,15 +296,15 @@ compileFragment(const Expr &literal, const FragmentContext &context,
     field("pure", aCell(arena.makeScalarCell(info->second.pure)));
     field("closed", aCell(arena.makeScalarCell(info->second.closed)));
     field("arity", aCell(arena.makeScalarCell(
-                       static_cast<std::int64_t>(info->second.arity))));
-    for (const auto &parameter : record->second.body.parameters)
+                       static_cast<std::int64_t>(effectiveParams.size()))));
+    for (const auto &parameter : effectiveParams)
       field(parameter.name, aCell(arena.makeCell(typeName(parameter.type))));
 
     // Ordered parameter signature on the descriptor's +d.grab →
     // +d.step chain, each +d.name→name and +d.values→type — the shape
     // the sibling's parameterCells and §7.2 signature comparison read.
     CellRef paramTail = zigzag::noCell;
-    for (const auto &parameter : record->second.body.parameters) {
+    for (const auto &parameter : effectiveParams) {
       const auto cell = aCell(arena.makeCell());
       aLink(cell, dims.name, aCell(arena.makeCell(parameter.name)), "d.name");
       aLink(cell, dims.values, aCell(arena.makeCell(typeName(parameter.type))),

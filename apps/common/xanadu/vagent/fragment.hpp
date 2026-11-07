@@ -167,10 +167,16 @@ fragmentLabelOf(const FragmentKey &key,
 // cap$N whose captured name is a `let` local (a frame index, absent
 // from context.bindings) resolves to the caller's local cell here,
 // and an inner `let` shadows a decl-level `var` of the same name.
+// `memberFields` is the enclosing member's owner-field set: a cap$N
+// whose captured name is a skill/behavior `var` resolves
+// owner-relative — the literal declares the trailing `$owner` Cell
+// parameter of §5.8's member convention, and the field reads as a
+// #FIND hop on the bound owner cell.
 [[nodiscard]] std::expected<FragmentObject, Diagnostic>
 compileFragment(const Expr &literal, const FragmentContext &context,
                 Compiler &compiler,
-                const CompilerBindings *frameLocals = nullptr);
+                const CompilerBindings *frameLocals = nullptr,
+                const OwnerFields *memberFields = nullptr);
 
 // File the phase-3 apparatus dims the emission needs (idempotent —
 // findOrMintDimension's find arm resolves a sibling-filed name).

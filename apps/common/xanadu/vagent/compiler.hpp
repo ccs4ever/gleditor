@@ -148,6 +148,11 @@ struct FragmentBodyRequest {
   // Member bodies only: names resolved owner-relative. When set, the
   // parameter list's trailing `$owner` slot carries the owner ref.
   const OwnerFields *ownerFields{};
+  // §5.3's owner-field captures: a cap$N alias whose captured name is
+  // an owner field resolves owner-relative like the bare name — the
+  // map carries alias → field so the find hop names the field, not
+  // the alias.
+  const std::map<std::string, std::string, std::less<>> *capFieldNames{};
 };
 
 // First Vortex-lowering iteration: scalar literals/typed bindings, arithmetic,
