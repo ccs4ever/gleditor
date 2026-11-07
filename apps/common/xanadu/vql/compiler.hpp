@@ -20,8 +20,10 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
+#include <variant>
 #include <vector>
 
 #include <gleditor/cpp26.hpp>
@@ -44,8 +46,8 @@ struct CompilationOptions {
   struct Limits {
     // Independent per-request ceilings for named frame variants, generated
     // opcodes, frame descriptor records and closed-functor template work. The
-    // work ceiling counts template bindings, steps and dimension-name bytes;
-    // it does not cap all CPU or arena allocation work.
+    // work ceiling counts template bindings, steps, dimension-name bytes and
+    // typed literal-predicate keys; it does not cap all CPU or arena work.
     std::size_t maxNamedFrameVariants{1024};
     std::size_t maxGeneratedOpcodes{100'000};
     std::size_t maxFrameDescriptorRecords{100'000};
@@ -111,10 +113,20 @@ private:
 
     bool operator==(const ClosedFunctorClampKey &) const = default;
   };
+  using ClosedFunctorPredicateLiteral =
+      std::variant<std::string, std::int64_t, bool, std::uint64_t>;
+  struct ClosedFunctorPredicateKey {
+    CompOp op{CompOp::Equal};
+    bool literalOnLeft{false};
+    ClosedFunctorPredicateLiteral literal;
+
+    bool operator==(const ClosedFunctorPredicateKey &) const = default;
+  };
   struct ClosedFunctorStepKey {
     std::string dimName;
     zigzag::DimVector direction{zigzag::DimVector::POS};
     std::optional<ClosedFunctorClampKey> rangeClamp;
+    std::vector<ClosedFunctorPredicateKey> predicates;
 
     bool operator==(const ClosedFunctorStepKey &) const = default;
   };
@@ -157,6 +169,18 @@ private:
             if (step.rangeClamp->end)
               combine(std::hash<std::int64_t>{}(*step.rangeClamp->end));
           }
+          combine(step.predicates.size());
+          for (const auto &predicate : step.predicates) {
+            combine(std::hash<CompOp>{}(predicate.op));
+            combine(std::hash<bool>{}(predicate.literalOnLeft));
+            combine(predicate.literal.index());
+            std::visit(
+                [&combine](const auto &literal) {
+                  combine(
+                      std::hash<std::decay_t<decltype(literal)>>{}(literal));
+                },
+                predicate.literal);
+          }
         }
       }
       return result;
@@ -185,6 +209,10 @@ private:
   closedFunctorArgumentSteps(const ValueExpr &argument) const;
   void chargeClosedFunctorTemplateWork(std::size_t amount);
   [[nodiscard]] static std::size_t closedFunctorClampWork(bool hasEnd) noexcept;
+  [[nodiscard]] static std::size_t
+  closedFunctorPredicateWork(const ScalarLiteral &literal) noexcept;
+  [[nodiscard]] static std::size_t closedFunctorPredicateWork(
+      const ClosedFunctorPredicateLiteral &literal) noexcept;
   [[nodiscard]] std::size_t closedFunctorTemplateWork(
       std::span<const ClosedFunctorFormalKey> templates) const;
 

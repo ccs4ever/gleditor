@@ -1725,3 +1725,43 @@ Logs: `/tmp/vql-clamped-functor-build.log`, `/tmp/vql-clamped-functor-focused.lo
 `/tmp/vql-clamped-functor-tests.log`, `/tmp/vql-clamped-functor-cli.log`,
 `/tmp/vql-clamped-functor-callables.log`, `/tmp/vql-clamped-functor-overlay.log`,
 `/tmp/vql-clamped-functor-format.log`.
+
+## Iteration 45: literal scalar predicates in recursive traversal functors
+
+Closed traversal templates now admit separate scalar predicate brackets containing one non-negated
+comparison between the exact current candidate and a direct primitive literal, in either operand
+order. All six comparison operators use ordinary Vortex comparison lowering. Multiple such brackets
+retain their order; predicates run before the existing clamp. Compound Boolean forms, captures,
+computed operands, shape predicates and other excluded decorations remain outside this native
+subset.
+
+Variant keys retain operator, operand order and literal type. Int64 remains a signed 64-bit integer;
+Double uses shared scalar validation and canonical bits, preserving its distinct type while giving
+signed zero and quiet NaNs stable keys. Signaling NaNs are refused before canonicalization. Frame
+compilation reconstructs ordinary Boolean AST as a compilation intermediate and emits VM graphs;
+execution retains no predicate AST or evaluator callback. Candidate identity, ordering and
+duplicates continue through the existing stream filter. No VM opcode or descriptor format changes.
+
+Each predicate adds four weighted header units (record, operator, operand order and literal tag),
+plus its primitive width or UTF-8 string bytes, to specialization work before copying. All key/state
+passes and rehydration share that policy. The eligibility literal-argument shortcut also charges
+each accepted comparison's fixed AST structure before recognition; unsupported shapes still receive
+the full bounded AST walk. These are scoped work limits, not universal CPU or heap bounds.
+
+Validation: full `make -j$(nproc)`, all 997 affected tests from 90 suites and all 79 focused tests
+from six suites passed. Nine new cases cover real self/mutual recursion, exact typed comparison
+execution, ordered keys, signed zero and quiet NaN canonicalization, signaling NaN refusal/retry,
+predicate-before-clamp behavior, free-alias inline scope, AST/template work limits and source-free
+recursive export/reload with actual host/mesh SOURCE output. A real headless `vquery` run returned
+`keep` through a recursive literal-filter route. Repository formatting with clang-format 19 passed;
+independent Luna architecture/resource and senior reviews accepted this bounded stage.
+
+The broader 141-test audit retains the same eight failures and one skip (132 passes); the callable
+40-test audit retains the same seven failures (33 passes). These are not full-suite passes.
+Captured/computed predicates, compound Boolean forms, general closures, lambda values and remaining
+frontend/lifecycle work still leave §4.12 incomplete. No performance improvement is claimed.
+
+Logs: `/tmp/vql-literal-predicate-build.log`, `/tmp/vql-literal-predicate-focused.log`,
+`/tmp/vql-literal-predicate-tests.log`, `/tmp/vql-literal-predicate-cli.log`,
+`/tmp/vql-literal-predicate-callables.log`, `/tmp/vql-literal-predicate-overlay.log`,
+`/tmp/vql-literal-predicate-format.log`.

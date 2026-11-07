@@ -2339,16 +2339,19 @@ explicit refusals. The rulings below describe the intended semantics.
   (`$c / $up`) the steps run over the step's input, and the step's predicates and clamp then apply
   to what they reach. Decorated references retain a captured step sequence across later rebinding.
   Eligible fixed untyped named formals without defaults now accept closed signed-dimension templates
-  with optional static index/range clamps in reusable recursive function graphs. Exact template
-  content, full signed 64-bit bounds, formal position and typed-rest arity distinguish variants;
+  with optional static index/range clamps and separate single-comparison scalar predicate brackets
+  in reusable recursive function graphs. Predicates compare the current candidate with a direct
+  primitive literal. Exact template content, full signed 64-bit bounds, literal type/value,
+  comparison operator/operand order, formal position and typed-rest arity distinguish variants;
   forwarding reuses the graph descriptor. The formal retains an empty Stream port while compilation
-  installs its template. `[n]` and `[n,n]` share the parser's normalized clamp. Predicates, captures
-  and other decorated templates remain outside this native subset and use finite inline graphs;
-  unsupported recursive boundaries refuse. Specialization has a configurable 1,000,000-unit weighted
-  template-work ceiling in addition to existing variant/opcode/descriptor caps. It does not bound
-  all compilation CPU or memory. See [iterations 43–44](projects/vortex-vm-only-iterations.md).
-  Binding and compilation may copy AST data, and execution materializes result streams. Specialized
-  representation and allocation/performance claims remain subject to §4.12.4's measurements.
+  installs its template. `[n]` and `[n,n]` share the parser's normalized clamp. Captured/computed
+  predicates, compound Boolean forms and other decorated templates remain outside this native subset
+  and use finite inline graphs; unsupported recursive boundaries refuse. Specialization has a
+  configurable 1,000,000-unit weighted template-work ceiling in addition to existing
+  variant/opcode/descriptor caps. It does not bound all compilation CPU or memory. See
+  [iterations 43–45](projects/vortex-vm-only-iterations.md). Binding and compilation may copy AST
+  data, and execution materializes result streams. Specialized representation and
+  allocation/performance claims remain subject to §4.12.4's measurements.
 
 - **Block bindings run per member.** Nested `for` bindings preserve source order and duplicates;
   `where` and conditional actions branch in the VM. Untyped missing destructure fields bind empty,

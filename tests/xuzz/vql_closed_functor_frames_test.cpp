@@ -417,15 +417,13 @@ TEST(VQLClosedFunctorFrameTest,
   EXPECT_FALSE(
       invokeDescriptors(clampedRecursive, h.vm, h.core, "walk").empty());
 
-  for (const std::string_view actual : {"/+d.next[. = \"next\"]"}) {
-    const std::string source =
-        "def pure walk($nodes: Stream<Cell>, $route): Stream<Cell> := "
-        "walk($nodes/$route, $route); walk(##/+d.items, " +
-        std::string(actual) + ")";
-    const auto refused = h.compile(source);
-    EXPECT_FALSE(refused.success) << source;
-    EXPECT_FALSE(refused.cursor) << source;
-  }
+  const auto literalPredicate =
+      h.compile("def pure walk($nodes: Stream<Cell>, $route): Stream<Cell> := "
+                "walk($nodes/$route, $route); "
+                "walk(##/+d.items, /+d.next[. = \"next\"])");
+  ASSERT_TRUE(literalPredicate.success) << literalPredicate.errorMessage;
+  EXPECT_FALSE(
+      invokeDescriptors(literalPredicate, h.vm, h.core, "walk").empty());
 
   const auto projectedArgument =
       h.compile("def pure hold($route): Stream<Cell> := $route; "
@@ -441,6 +439,20 @@ TEST(VQLClosedFunctorFrameTest,
   EXPECT_FALSE(freeCapture.success);
   EXPECT_FALSE(freeCapture.cursor);
   EXPECT_NE(freeCapture.errorMessage.find("recursive"), std::string::npos);
+
+  const auto dynamicPredicate =
+      h.compile("def pure walk($nodes: Stream<Cell>, $route): Stream<Cell> := "
+                "walk($nodes/$route, $route); "
+                "walk(##/+d.items, /+d.next[. = $wanted])");
+  EXPECT_FALSE(dynamicPredicate.success);
+  EXPECT_FALSE(dynamicPredicate.cursor);
+
+  const auto compoundPredicate =
+      h.compile("def pure walk($nodes: Stream<Cell>, $route): Stream<Cell> := "
+                "walk($nodes/$route, $route); "
+                "walk(##/+d.items, /+d.next[. = \"next\" and . != \"other\"])");
+  EXPECT_FALSE(compoundPredicate.success);
+  EXPECT_FALSE(compoundPredicate.cursor);
 }
 
 TEST(VQLClosedFunctorFrameTest,

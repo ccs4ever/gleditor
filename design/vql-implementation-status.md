@@ -828,3 +828,19 @@ output. The real CLI uses a clamped route through a recursive Cell-returning fun
 failures and one skip (132 passes); the callable audit retains seven failures (33 passes). These are
 not full-suite passes. Other decorated/captured functors and the remaining callable, lifecycle and
 frontend gaps leave §4.12 incomplete; no performance improvement is claimed.
+
+## Literal scalar predicates in recursive functor frames
+
+Closed traversal variants now retain ordered, single-comparison candidate/literal predicates with
+exact operator, operand order and typed literal keys. Shared scalar validation preserves Int64 and
+Double distinctions, canonicalizes floating keys and refuses signaling NaNs. Ordinary VM comparison
+and stream filtering run before clamps; ASTs remain compilation intermediates. Predicate payload
+work and the eligibility fast path both participate in existing bounds. See
+[iteration 45](projects/vortex-vm-only-iterations.md).
+
+Full build, all 997 affected tests across 90 suites and all 79 focused tests passed. The real CLI
+returned `keep`; source-free export/reload and actual host/mesh SOURCE output passed. Repository
+formatting with clang-format 19 and independent Luna gates passed. Broader audits retain the same
+eight route failures/one skip and seven callable failures. These are not full-suite passes.
+Captured/computed predicates, compound Boolean forms and the other recorded
+closure/frontend/lifecycle gaps still leave §4.12 incomplete; no speedup is claimed.

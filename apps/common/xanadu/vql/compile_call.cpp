@@ -1,8 +1,11 @@
 #include "common/xanadu/vql/compiler.hpp"
 
 #include <algorithm>
+#include <bit>
 #include <limits>
+#include <stdexcept>
 
+#include "common/xanadu/scalar.hpp"
 #include "common/xanadu/vql/closed_functor_syntax.hpp"
 #include "common/xanadu/vql/contract_codec.hpp"
 #include "common/xanadu/vql/contracts.hpp"
@@ -260,6 +263,16 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
           if (step.rangeClamp)
             chargeClosedFunctorTemplateWork(
                 closedFunctorClampWork(step.rangeClamp->end.has_value()));
+          for (const auto &predicate : step.predicates) {
+            const auto view = closedLiteralPredicateView(predicate);
+            if (!view) {
+              plain = false;
+              break;
+            }
+            chargeClosedFunctorTemplateWork(
+                closedFunctorPredicateWork(view->literal.get()));
+          }
+          if (!plain) break;
         }
         if (!plain) {
           unsupportedFunctorArgument = true;
@@ -269,14 +282,35 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
           for (const auto &step : *steps) {
             const auto &dimension =
                 std::get<SignedDimensionStep>(step.selector);
-            formal.steps.push_back(
-                {.dimName    = dimension.dimName,
-                 .direction  = dimension.direction,
-                 .rangeClamp = step.rangeClamp
-                                   ? std::optional{ClosedFunctorClampKey{
-                                         .start = step.rangeClamp->start,
-                                         .end   = step.rangeClamp->end}}
-                                   : std::nullopt});
+            ClosedFunctorStepKey stepKey{
+                .dimName    = dimension.dimName,
+                .direction  = dimension.direction,
+                .rangeClamp = step.rangeClamp
+                                  ? std::optional{ClosedFunctorClampKey{
+                                        .start = step.rangeClamp->start,
+                                        .end   = step.rangeClamp->end}}
+                                  : std::nullopt};
+            stepKey.predicates.reserve(step.predicates.size());
+            for (const auto &predicate : step.predicates) {
+              const auto view = closedLiteralPredicateView(predicate);
+              if (!view)
+                throw std::logic_error(
+                    "closed traversal predicate changed after validation");
+              auto literal = std::visit(
+                  [](const auto &value) -> ClosedFunctorPredicateLiteral {
+                    using T = std::decay_t<decltype(value)>;
+                    if constexpr (std::is_same_v<T, double>)
+                      return scalarValue(value).bits;
+                    else
+                      return value;
+                  },
+                  view->literal.get().value);
+              stepKey.predicates.push_back(ClosedFunctorPredicateKey{
+                  .op            = view->op,
+                  .literalOnLeft = view->literalOnLeft,
+                  .literal       = std::move(literal)});
+            }
+            formal.steps.push_back(std::move(stepKey));
           }
           functorTemplates.push_back(std::move(formal));
         }
@@ -1204,8 +1238,39 @@ void VQLCompiler::compileFrameDefinition(const DefDeclaration &definition,
                                                templateStep.rangeClamp->start,
                                            .end = templateStep.rangeClamp->end}}
                 : std::nullopt;
-        steps.push_back(PathStep{.selector   = std::move(dimension),
-                                 .rangeClamp = rangeClamp});
+        PathStep step{.selector   = std::move(dimension),
+                      .rangeClamp = rangeClamp};
+        step.predicates.reserve(templateStep.predicates.size());
+        for (const auto &predicate : templateStep.predicates) {
+          const auto literal = std::visit(
+              [](const auto &value) -> ScalarLiteral {
+                using T = std::decay_t<decltype(value)>;
+                if constexpr (std::is_same_v<T, std::uint64_t>)
+                  return ScalarLiteral{.value = std::bit_cast<double>(value)};
+                else
+                  return ScalarLiteral{.value = value};
+              },
+              predicate.literal);
+          ValueExpr literalExpr{.kind = literal};
+          PathExpression contextPath;
+          contextPath.anchor.kind = AnchorKind::Context;
+          ValueExpr contextExpr{
+              .kind = std::make_shared<PathExpression>(std::move(contextPath))};
+          ComparisonExpr comparison;
+          comparison.op = predicate.op;
+          comparison.left =
+              predicate.literalOnLeft
+                  ? std::make_shared<ValueExpr>(std::move(literalExpr))
+                  : std::make_shared<ValueExpr>(std::move(contextExpr));
+          comparison.right =
+              predicate.literalOnLeft
+                  ? std::make_shared<ValueExpr>(std::move(contextExpr))
+                  : std::make_shared<ValueExpr>(std::move(literalExpr));
+          BooleanFactor factor{.test = std::move(comparison)};
+          step.predicates.push_back(BooleanExpr{
+              .terms = {BooleanTerm{.factors = {std::move(factor)}}}});
+        }
+        steps.push_back(std::move(step));
       }
       functorBindings_[*name] = std::move(steps);
       streamBindings_.erase(*name);

@@ -6,7 +6,30 @@
 #include <limits>
 #include <stdexcept>
 
+#include "common/xanadu/scalar.hpp"
+
 namespace xanadu::vql {
+namespace {
+constexpr std::size_t closedFunctorPredicateHeaderWork =
+    4; // One record, operator, operand order and typed-literal tag.
+
+template <typename Variant>
+std::size_t predicateTemplateWork(const Variant &literal) noexcept {
+  const std::size_t payload = std::visit(
+      [](const auto &value) -> std::size_t {
+        using T = std::decay_t<decltype(value)>;
+        if constexpr (std::is_same_v<T, std::string>)
+          return value.size();
+        else
+          return sizeof(T);
+      },
+      literal);
+  if (payload > std::numeric_limits<std::size_t>::max() -
+                    closedFunctorPredicateHeaderWork)
+    return std::numeric_limits<std::size_t>::max();
+  return closedFunctorPredicateHeaderWork + payload;
+}
+} // namespace
 
 bool VQLCompiler::isFunctorArgument(const ValueExpr &argument) const {
   if (const auto *name = std::get_if<std::string>(&argument.kind))
@@ -98,6 +121,16 @@ std::size_t VQLCompiler::closedFunctorClampWork(const bool hasEnd) noexcept {
          (hasEnd ? sizeof(std::int64_t) : 0);
 }
 
+std::size_t
+VQLCompiler::closedFunctorPredicateWork(const ScalarLiteral &literal) noexcept {
+  return predicateTemplateWork(literal.value);
+}
+
+std::size_t VQLCompiler::closedFunctorPredicateWork(
+    const ClosedFunctorPredicateLiteral &literal) noexcept {
+  return predicateTemplateWork(literal);
+}
+
 std::size_t VQLCompiler::closedFunctorTemplateWork(
     const std::span<const ClosedFunctorFormalKey> templates) const {
   std::size_t work = templates.size();
@@ -113,6 +146,8 @@ std::size_t VQLCompiler::closedFunctorTemplateWork(
       add(step.dimName.size());
       if (step.rangeClamp)
         add(closedFunctorClampWork(step.rangeClamp->end.has_value()));
+      for (const auto &predicate : step.predicates)
+        add(closedFunctorPredicateWork(predicate.literal));
     }
   }
   return work;
