@@ -19,6 +19,7 @@
 #include <numbers>
 
 #include "common/xanadu/vagent/runtime/compiler_gen.hpp"
+#include "common/xanadu/vagent/runtime/epistemic_abi_liveness.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_limits.hpp"
 
 namespace xanadu::vagent::runtime::codegen {
@@ -396,6 +397,9 @@ void Gen::emitHealthEntry(CellRef entryLabel) {
     putScalar(prof, kProfileResetEpoch, S(next));
     callClearField(prof, std::string(kProfileLastReceive));
     callClearField(prof, std::string(kProfileLastContact));
+    // The source is UNHEARD again: silence and staleness go with the stamps.
+    mov(S(a0_), S(prof));
+    callLabel(routineLabel(rtLivenessReset_, &Gen::emitRtLivenessReset));
     // The closed charges the commit discards stay in the lifetime counters.
     for (const auto &[counter, dropped] :
          {std::pair{kProfileContentRefusals, vcDropC},

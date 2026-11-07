@@ -114,6 +114,10 @@ std::string_view toString(const AdapterLimitError error) noexcept {
     return "InvalidWallSyncUncertainty";
   case AdapterLimitError::InvalidMaxPathLateness:
     return "InvalidMaxPathLateness";
+  case AdapterLimitError::InvalidHeartbeatFloor:
+    return "InvalidHeartbeatFloor";
+  case AdapterLimitError::InvalidSequenceGapNote:
+    return "InvalidSequenceGapNote";
   }
   return "Unknown";
 }
@@ -144,6 +148,10 @@ std::expected<void, AdapterLimitError> AdapterLimits::validate() const {
     return std::unexpected(AdapterLimitError::InvalidWallSyncUncertainty);
   if (outside(maxPathLatenessMs, kMinMaxPathLatenessMs, kMaxMaxPathLatenessMs))
     return std::unexpected(AdapterLimitError::InvalidMaxPathLateness);
+  if (outside(heartbeatFloorMs, kMinHeartbeatFloorMs, kMaxHeartbeatFloorMs))
+    return std::unexpected(AdapterLimitError::InvalidHeartbeatFloor);
+  if (outside(sequenceGapNote, kMinSequenceGapNote, kMaxSequenceGapNote))
+    return std::unexpected(AdapterLimitError::InvalidSequenceGapNote);
   return {};
 }
 
@@ -175,6 +183,8 @@ AdapterLimits AdapterLimits::fromModel(const SystemStoreModel &model) {
              out.wallSyncUncertaintyMs);
   readSigned(settings::kVagentEpistemicMaxPathLatenessMs,
              out.maxPathLatenessMs);
+  readSigned(settings::kVagentEpistemicHeartbeatFloorMs, out.heartbeatFloorMs);
+  readSigned(settings::kVagentEpistemicSequenceGapNote, out.sequenceGapNote);
   if (const auto checked = out.validate(); !checked) {
     if (const auto ingress = out.verify.validate(); !ingress)
       GLEDITOR_LOG_WARN(kLog,
@@ -242,6 +252,9 @@ struct EpistemicAdapter::State {
   std::map<std::string, std::pair<std::int64_t, std::int64_t>, std::less<>>
       highest;
   std::map<std::pair<std::string, std::string>, Streak> streaks;
+  /// Per issuer, the gaps above `sequence_gap_note` between its consecutive
+  /// verified sequences, any kind (design 5.2, m4). A diagnostic only.
+  std::map<std::string, std::uint64_t, std::less<>> gaps;
   /// The executor's jump generation this adapter last invalidated for.
   std::uint64_t clockGeneration{};
   /// By (pid text, principal): when a jump dropped the source's paired steady
@@ -261,11 +274,23 @@ struct EpistemicAdapter::State {
       for (const auto &[key, row] : rows) {
         if (row.binding.principal != issuer) continue;
         clockPending.insert_or_assign(key, now.steady);
+        executor.noteClockPending(row.pid, issuer, now.steady);
         GLEDITOR_LOG_INFO(kLog,
                           "source {}: the host clock jumped, its paired "
                           "mapping is dropped until it pairs again",
                           issuer);
       }
+  }
+
+  static EpistemicSourceGrant grantFor(const SourceBinding &b,
+                                       std::uint64_t incarnation,
+                                       const std::string &predicate) {
+    EpistemicSourceGrant grant{b.alias, b.principal, incarnation, predicate,
+                               b.lifetime};
+    grant.heartbeat = b.heartbeat;
+    if (const auto data = b.data.find(predicate); data != b.data.end())
+      grant.data = data->second;
+    return grant;
   }
 
   void emit(const IngressAudit &event) {
@@ -281,6 +306,13 @@ struct EpistemicAdapter::State {
       incarnation = h.incarnation;
       sequence    = h.sequence;
     } else if (h.incarnation == incarnation) {
+      // The device's one counter runs across every kind, so a gap is judged
+      // against the issuer's newest sequence and not a stream's.
+      if (h.sequence - sequence > limits.sequenceGapNote) {
+        ++gaps[h.issuer];
+        GLEDITOR_LOG_TRACE(kLog, "source {} skipped {} sequences", h.issuer,
+                           h.sequence - sequence);
+      }
       sequence = std::max(sequence, h.sequence);
     }
   }
@@ -413,7 +445,10 @@ struct EpistemicAdapter::State {
     if (!paired) return std::unexpected(paired.error());
     std::erase_if(clockPending, [&](const auto &entry) {
       const auto bound = rows.find(entry.first);
-      return bound != rows.end() && bound->second.binding.principal == h.issuer;
+      if (bound == rows.end() || bound->second.binding.principal != h.issuer)
+        return false;
+      executor.noteClockPending(bound->second.pid, h.issuer, std::nullopt);
+      return true;
     });
     GLEDITOR_LOG_DEBUG(kLog, "clock paired for {} epoch {} version {}",
                        h.issuer, h.epoch, (*paired)->version);
@@ -422,7 +457,11 @@ struct EpistemicAdapter::State {
 
   /// Step 6 for a heartbeat or a report: rows 5, 5a, 7 and 9 on the host's
   /// steady timeline, with `sent` standing for the acquisition, and the
-  /// freshness bound of 5.1. Dispatch of a fresh one is I3-3c1's and d's.
+  /// freshness bound of 5.1 (clamped, so a large `clock_uncertainty` does not
+  /// widen it). A fresh heartbeat re-arms its source's deadline and raises the
+  /// heartbeat floor; a message that is not fresh refreshes nothing, so a
+  /// withheld heartbeat cannot revive a silent source (S-2). A fresh report is
+  /// still refused: its dispatch is I3-3d's.
   std::expected<TransportReceipt, EpistemicRefusal>
   liveness(const Row &row, const SignedMessage &message,
            const HostInstant &at) {
@@ -445,7 +484,14 @@ struct EpistemicAdapter::State {
             milliseconds(smallestSkewMs(row)),
             milliseconds(limits.maxPathLatenessMs)))
       return std::unexpected(*refused);
-    return std::unexpected(EpistemicRefusal::UnsupportedKind);
+    if (h.kind != SignedKind::Heartbeat)
+      return std::unexpected(EpistemicRefusal::UnsupportedKind);
+    executor.noteFresh(
+        row.pid, row.binding.principal,
+        SteadyTime(std::chrono::duration_cast<SteadyTime::duration>(
+            std::chrono::nanoseconds(at.steady))));
+    verifier.noteSettled(h);
+    return TransportReceipt{};
   }
 
   /// Log once per streak that a source's mapping is too uncertain for its
@@ -537,8 +583,7 @@ struct EpistemicAdapter::State {
   std::expected<void, EpistemicRefusal> advance(Row &row, std::uint64_t to) {
     const auto from = row.binding.incarnation;
     for (const auto &predicate : row.binding.predicates) {
-      const EpistemicSourceGrant grant{row.binding.alias, row.binding.principal,
-                                       to, predicate, row.binding.lifetime};
+      const auto grant = grantFor(row.binding, to, predicate);
       if (auto bound = executor.bindSource(row.pid, grant); !bound)
         return std::unexpected(bound.error());
     }
@@ -660,14 +705,24 @@ EpistemicAdapter::bind(const identity::ActorPid &target,
       (b.driftPpm &&
        (*b.driftPpm < kMinClockDriftPpm || *b.driftPpm > kMaxClockDriftPpm)))
     return std::unexpected(EpistemicRefusal::InvalidBinding);
+  // Every duration is at least the floor (S-13b), and a data interval names a
+  // predicate of this binding.
+  const std::chrono::milliseconds floor(state_->limits.heartbeatFloorMs);
+  if (b.lifetime < floor || (b.heartbeat && *b.heartbeat < floor) ||
+      std::ranges::any_of(
+          b.data,
+          [&](const auto &entry) {
+            return entry.second < floor ||
+                   !std::ranges::contains(b.predicates, entry.first);
+          }))
+    return std::unexpected(EpistemicRefusal::InvalidBinding);
 
   const std::lock_guard lock(state_->mutex);
   auto &executor = state_->executor;
   const std::pair key{pidToText(target), b.principal};
   std::vector<std::string> done;
   for (const auto &predicate : b.predicates) {
-    const EpistemicSourceGrant grant{b.alias, b.principal, b.incarnation,
-                                     predicate, b.lifetime};
+    const auto grant = State::grantFor(b, b.incarnation, predicate);
     if (auto bound = executor.bindSource(target, grant); !bound) {
       for (const auto &undo : done)
         executor.unbindSource(target, b.principal, undo);
@@ -712,6 +767,9 @@ EpistemicAdapter *EpistemicAdapter::unbind(const identity::ActorPid &target,
     if (const auto top = state_->highest.find(principal);
         top != state_->highest.end())
       state_->highest.erase(top);
+    if (const auto gap = state_->gaps.find(principal);
+        gap != state_->gaps.end())
+      state_->gaps.erase(gap);
   }
   return this;
 }
@@ -820,6 +878,12 @@ EpistemicAdapter::clockPending(const identity::ActorPid &target,
              ? std::nullopt
              : std::optional<std::chrono::steady_clock::time_point>(
                    found->second);
+}
+
+std::uint64_t EpistemicAdapter::sequenceGaps(std::string_view principal) const {
+  const std::lock_guard lock(state_->mutex);
+  const auto found = state_->gaps.find(principal);
+  return found == state_->gaps.end() ? 0 : found->second;
 }
 
 const SignedVerifierStats &EpistemicAdapter::stats() const noexcept {

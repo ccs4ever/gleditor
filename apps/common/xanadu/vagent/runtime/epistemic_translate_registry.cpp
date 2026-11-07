@@ -5,6 +5,7 @@
 
 #include "common/xanadu/vagent/runtime/epistemic_abi_clock.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_abi_health.hpp"
+#include "common/xanadu/vagent/runtime/epistemic_abi_liveness.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_shape.hpp"
 #include "common/xanadu/vagent/runtime/runtime_abi.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
@@ -133,6 +134,14 @@ void populateScalars(const PopulateContext &c) {
 void populateLiveness(const PopulateContext &c) {
   put(c, kProfileLastReceive, WireValue::real(123.5));
   put(c, kProfileLastContact, WireValue::real(124.5));
+  put(c, kProfileLivenessInstance, WireValue::text("fedcba9876543210"));
+}
+
+void populateSilence(const PopulateContext &c) {
+  put(c, kProfileSilent, WireValue::boolean(true));
+  put(c, kProfileSilentSince, WireValue::real(125.25));
+  put(c, kProfileSilentCause,
+      WireValue::text(std::string(kSilentCauseHeartbeat)));
 }
 
 void populateStreams(const PopulateContext &c) {
@@ -230,6 +239,23 @@ void populateStreamClock(const PopulateContext &c) {
            writeValue(c.arena, c.vd, WireValue::record(std::move(stream))));
 }
 
+void populateStreamLiveness(const PopulateContext &c) {
+  auto streams = fieldValue(c.arena, c.vd, c.profile, kProfileStreams);
+  if (!streams) {
+    put(c, kProfileStreams, WireValue::record({}));
+    streams = fieldValue(c.arena, c.vd, c.profile, kProfileStreams);
+  }
+  if (!streams) return;
+  WireRecord stream;
+  stream.set(std::string(kObsSequence), WireValue::integer(5));
+  stream.set(std::string(kObsClockEpoch), WireValue::integer(1));
+  stream.set(std::string(kObsClockMappingVersion), WireValue::integer(1));
+  stream.set(std::string(kStreamReceived), WireValue::real(126.125));
+  stream.set(std::string(kStreamStale), WireValue::boolean(true));
+  setField(c.arena, c.vd, *streams, "live_stream",
+           writeValue(c.arena, c.vd, WireValue::record(std::move(stream))));
+}
+
 void populateRetiredChain(const PopulateContext &c) {
   addRecord(c, c.profile, kObsStatusRetired, kRetiredByRetire, 104, true);
 }
@@ -241,7 +267,11 @@ constexpr std::array kProfileScalarFields{
     kProfileIncarnation, kProfileFaulted,         kProfileRejectionStreak,
     kProfileRejectCount, kProfileContentRefusals, kProfileRefusedCount,
     kProfileLastRefusal, kProfileRetired};
-constexpr std::array kLivenessFields{kProfileLastReceive, kProfileLastContact};
+constexpr std::array kLivenessFields{kProfileLastReceive, kProfileLastContact,
+                                     kProfileLivenessInstance};
+constexpr std::array kSilenceFields{kProfileSilent, kProfileSilentSince,
+                                    kProfileSilentCause};
+constexpr std::array kStreamLivenessFields{kStreamReceived, kStreamStale};
 constexpr std::array kStreamFields{kProfileStreams};
 // The stream record's own field, not a profile's: a distinct `where` below
 // keeps it out of `ownsProfileField`.
@@ -303,7 +333,7 @@ constexpr std::array kLineageFields{
     kLineageRecordName, kLineageSegments, kLineageSegmentName, kSegInstance,
     kSegStartSteady,    kSegAnchorSteady, kSegAnchorWall,      kSegAnchorSync};
 
-constexpr std::array<OwnedStructure, 18> kOwned{{
+constexpr std::array<OwnedStructure, 20> kOwned{{
     {"agent.shape_header",
      "d.epistemic",
      "agent header",
@@ -355,10 +385,27 @@ constexpr std::array<OwnedStructure, 18> kOwned{{
      {},
      1,
      populateScalars},
-    {"profile.liveness", "d.vars", "profile field", kLivenessFields,
-     Fate::Dropped, Fate::Carried,
-     "stamps of the old executor's steady clock mean nothing to the new one", 1,
+    // Stamps of the old executor's steady clock. A resume carries them whole
+    // and the new instance's first control turn rebases them through
+    // `rtClockRebase`, or marks the profile silent with cause `rebase` (5.4).
+    {"profile.liveness",
+     "d.vars",
+     "profile field",
+     kLivenessFields,
+     Fate::Carried,
+     Fate::Carried,
+     {},
+     1,
      populateLiveness},
+    {"profile.silence",
+     "d.vars",
+     "profile field",
+     kSilenceFields,
+     Fate::Carried,
+     Fate::Carried,
+     {},
+     1,
+     populateSilence},
     {"profile.streams",
      "d.vars",
      "profile field",
@@ -377,6 +424,15 @@ constexpr std::array<OwnedStructure, 18> kOwned{{
      {},
      1,
      populateStreamClock},
+    {"stream.liveness",
+     "d.vars",
+     "stream field",
+     kStreamLivenessFields,
+     Fate::Carried,
+     Fate::Carried,
+     {},
+     1,
+     populateStreamLiveness},
     {"profile.dedup",
      "d.vars",
      "profile list",
@@ -519,8 +575,13 @@ constexpr std::array kHost{
                  "restarts at 1; the profile's action_seq carries"},
     HostStateRow{"latched (latch cache)", "cleared after the commit",
                  "the new executor's, empty"},
-    HostStateRow{"last_receive, last_contact (arena)", "kept",
-                 "cleared; liveness starts from the first contact"},
+    HostStateRow{"last_receive, last_contact, silent, stale (arena)", "kept",
+                 "carried; the first control turn of the new instance rebases "
+                 "the stamps, or marks the profile silent with cause rebase"},
+    HostStateRow{"deadline heap, last fresh time, silence mirror (executor)",
+                 "kept",
+                 "lost; the first deadline is the rebased arena stamp plus the "
+                 "expectation, read once the rebase turn commits"},
     HostStateRow{"clockInstance, wallSynchronised", "the executor's own",
                  "the new executor's own"},
     HostStateRow{"audit sink, nextHealthCounter_", "the executor's, kept",

@@ -11,6 +11,7 @@
  */
 #include "common/xanadu/vagent/runtime/compiler_gen.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_abi_clock.hpp"
+#include "common/xanadu/vagent/runtime/epistemic_abi_liveness.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_limits.hpp"
 
 namespace xanadu::vagent::runtime::codegen {
@@ -305,9 +306,10 @@ void Gen::emitClockEntry(CellRef entryLabel) {
   place(entryLabel);
   const FieldInfo &turn = fields_.at(std::string(kFieldTurn));
   const CellRef tp = reg(), clock = reg(), rb = reg(), status = reg(),
-                delta = reg(), u = reg(), ok = reg();
+                delta = reg(), u = reg(), ok = reg(), lv = reg();
   const CellRef malformed = newLabel(), noRebase = newLabel(),
-                finished = newLabel(), noClock = newLabel();
+                finished = newLabel(), noClock = newLabel(),
+                liveness = newLabel();
   mov(S(tp), S(rd(S(turn.nameCell), core_.dims().values)));
   const auto find = [&](CellRef record, std::string_view name, CellRef out) {
     mov(S(a0_), S(record));
@@ -317,12 +319,16 @@ void Gen::emitClockEntry(CellRef entryLabel) {
   };
   find(tp, kTurnClock, clock);
   find(tp, kTurnClockRebase, rb);
+  find(tp, kTurnLiveness, lv);
   {
-    const CellRef either = newLabel(), proceed = newLabel();
-    branchIfZero(clock, either);
+    const CellRef second = newLabel(), third = newLabel(), proceed = newLabel();
+    branchIfZero(clock, second);
     jump(proceed);
-    place(either);
-    branchIfZero(rb, malformed);
+    place(second);
+    branchIfZero(rb, third);
+    jump(proceed);
+    place(third);
+    branchIfZero(lv, malformed);
     place(proceed);
   }
   branchIfZero(clock, noClock);
@@ -334,8 +340,12 @@ void Gen::emitClockEntry(CellRef entryLabel) {
   }
   mov(S(a0_), S(clock));
   callLabel(rtClockNote_);
+  // The first control turn of a new instance places the carried stamps on
+  // its clock (design 5.4); later ones find nothing to do.
+  mov(S(a0_), S(clock));
+  callLabel(routineLabel(rtLivenessRebase_, &Gen::emitRtLivenessRebase));
   place(noClock);
-  branchIfZero(rb, finished);
+  branchIfZero(rb, liveness);
   {
     const CellRef inst = reg(), t = reg(), now = reg(), drift = reg();
     for (const auto &[name, out] :
@@ -359,6 +369,10 @@ void Gen::emitClockEntry(CellRef entryLabel) {
     putScalar(rb, kRebaseUncertainty, S(u));
     place(noRebase);
   }
+  place(liveness);
+  branchIfZero(lv, finished);
+  mov(S(a0_), S(lv));
+  callLabel(routineLabel(rtLivenessTurn_, &Gen::emitRtLivenessTurn));
   place(finished);
   endObservation(kTurnResultCommitted);
   place(malformed);

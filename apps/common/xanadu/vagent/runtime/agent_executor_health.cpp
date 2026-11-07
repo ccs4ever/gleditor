@@ -69,7 +69,7 @@ AgentExecutor::grantHealth(const identity::ActorPid &target,
   const std::lock_guard lock(ingress_->mutex);
 
   auto &actorGrants = ingress_->healthGrants[pid];
-  const auto now    = clock_.steady();
+  const auto now    = steadyNow();
   std::erase_if(actorGrants, [&](const StoredHealthGrant &g) {
     return g.revoked || now > g.expiresAt;
   });
@@ -109,7 +109,7 @@ AgentExecutor::grantHealth(const identity::ActorPid &target,
   stored.issuer           = grant.issuer;
   stored.sources          = grant.sources;
   stored.actions          = grant.actions;
-  stored.expiresAt        = saturatingAdd(clock_.steady(), grant.lifetime);
+  stored.expiresAt        = saturatingAdd(steadyNow(), grant.lifetime);
   stored.maxActions       = grant.maxActions;
   stored.remainingActions = grant.maxActions;
   stored.tokenDigest      = token->digest();
@@ -171,7 +171,7 @@ AgentExecutor::healthAction(const identity::ActorPid &target,
       for (auto &g : it->second) {
         if (!g.revoked &&
             CRYPTO_memcmp(g.tokenDigest.data(), tokenDigest.data(), 32) == 0) {
-          if (clock_.steady() <= g.expiresAt && g.remainingActions > 0) {
+          if (steadyNow() <= g.expiresAt && g.remainingActions > 0) {
             matchedGrant = &g;
             break;
           }
@@ -326,7 +326,7 @@ AgentExecutor::healthActionBatch(const identity::ActorPid &target,
       for (auto &g : it->second) {
         if (!g.revoked &&
             CRYPTO_memcmp(g.tokenDigest.data(), tokenDigest.data(), 32) == 0) {
-          if (clock_.steady() <= g.expiresAt && g.remainingActions > 0) {
+          if (steadyNow() <= g.expiresAt && g.remainingActions > 0) {
             matchedGrant = &g;
             break;
           }
@@ -489,7 +489,8 @@ bool AgentExecutor::wouldChangeHealth(const HealthAction &action,
         } else if constexpr (std::is_same_v<T, Reset>) {
           if (act.expectResetEpoch != snapshot.resetEpoch) return true;
           if (snapshot.faulted || !snapshot.reasons.empty() ||
-              snapshot.livenessPresent)
+              snapshot.livenessPresent || snapshot.silent ||
+              snapshot.staleStreams != 0)
             return true;
           // Weighted, or a streak: a SUSPECT-by-fraction profile with no
           // current record still changes, so a reset meant to cut the queue
@@ -529,6 +530,7 @@ void AgentExecutor::finishHealthItem(const identity::ActorPid &target,
     ingress_->commitReset(source, qh.generation);
     ingress_->latched.erase(source);
     ingress_->refusedWhileFaulted.erase(source);
+    livenessResetLocked(target, qh.principal);
   }
   // A reset that did not commit has dropped nothing: its closed charge goes
   // back, merged into whatever opened since. An undelivered item belongs to
@@ -560,6 +562,7 @@ void AgentExecutor::finishHealthItem(const identity::ActorPid &target,
       std::holds_alternative<Isolate>(qh.action)) {
     const std::lock_guard lock(ingress_->mutex);
     ingress_->latched.insert({pidKey(target), qh.principal});
+    livenessLatchedLocked(pidKey(target), qh.principal);
   }
 
   HealthAudit audit;
@@ -583,7 +586,7 @@ void AgentExecutor::finishHealthItem(const identity::ActorPid &target,
       qh.action);
   audit.issuer     = qh.issuer ? qh.issuer->asString() : "";
   audit.grantId    = qh.grantId;
-  audit.steadyTime = clock_.steady();
+  audit.steadyTime = steadyNow();
   if (ingress_->wallSynchronised) {
     audit.wallTime = wallNow();
   }

@@ -372,6 +372,10 @@ inline constexpr std::string_view kVagentEpistemicClockLineage =
     "vagent.epistemic_clock_lineage";
 inline constexpr std::string_view kVagentEpistemicSteadyDriftPpm =
     "vagent.epistemic_steady_drift_ppm";
+inline constexpr std::string_view kVagentEpistemicHeartbeatFloorMs =
+    "vagent.epistemic_heartbeat_floor_ms";
+inline constexpr std::string_view kVagentEpistemicSequenceGapNote =
+    "vagent.epistemic_sequence_gap_note";
 inline constexpr std::string_view kVagentTuiBorders = "vagent.tui.borders";
 inline constexpr std::string_view kVagentTuiHistorySize =
     "vagent.tui.history_size";

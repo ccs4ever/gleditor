@@ -1226,6 +1226,24 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .schemas =
              {{.expectedTypes = {"integer"},
                .defaultValues = {vagent::runtime::kDefaultSteadyDriftPpm}}}},
+        {.name = std::string(settings::kVagentEpistemicHeartbeatFloorMs),
+         .notes =
+             "vagent: milliseconds, 10 to 60000, the least any duration of a "
+             "source binding (its lifetime, heartbeat or per-predicate data "
+             "interval) may be. A device states its own intervals, so the "
+             "floor keeps one from asking the host for a timer storm",
+         .schemas =
+             {{.expectedTypes = {"integer"},
+               .defaultValues = {vagent::runtime::kDefaultHeartbeatFloorMs}}}},
+        {.name = std::string(settings::kVagentEpistemicSequenceGapNote),
+         .notes =
+             "vagent: sequences, 1 to 2147483648, a gap above which between "
+             "one issuer's consecutive verified sequences is counted as a "
+             "host diagnostic. Gaps are expected: the sequence space is "
+             "shared by every kind of message the issuer sends",
+         .schemas =
+             {{.expectedTypes = {"integer"},
+               .defaultValues = {vagent::runtime::kDefaultSequenceGapNote}}}},
         {.name  = std::string(settings::kVagentAdmissionPauseMs),
          .notes = "vagent: milliseconds `pauseAdmission` closes an actor's "
                   "door for when it is not given a ttl, 1000 to 600000. The "

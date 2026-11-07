@@ -194,6 +194,39 @@ inline constexpr std::int64_t kMaxSteadyDriftPpm     = 10'000;
 inline constexpr std::size_t kLineageBaseCells    = 3;
 inline constexpr std::size_t kLineageSegmentCells = 11;
 
+// Liveness: heartbeats, silence and the timer wake (P19 I3-3c1,
+// `i3-3-design.md` 5.1 to 5.3 and 9.1).
+/// `vagent.epistemic_heartbeat_floor_ms`: the least any binding duration may
+/// be (S-13b). A device chooses its own expectations, so without a floor a
+/// 1 ms `data` would make the host wake a thousand times a second for it; 100
+/// ms is below any real heartbeat and above a scheduler quantum.
+inline constexpr std::int64_t kDefaultHeartbeatFloorMs = 100;
+inline constexpr std::int64_t kMinHeartbeatFloorMs     = 10;
+inline constexpr std::int64_t kMaxHeartbeatFloorMs     = 60'000;
+/// `vagent.epistemic_sequence_gap_note`: a gap between an issuer's consecutive
+/// verified sequences above this is counted as a host diagnostic. The sequence
+/// space is the issuer's across every kind (m4), so a device with a reading
+/// every few hours and heartbeats every few seconds has a legitimate stride in
+/// the low thousands per stream but a small one per issuer.
+inline constexpr std::int64_t kDefaultSequenceGapNote = 64;
+inline constexpr std::int64_t kMinSequenceGapNote     = 1;
+inline constexpr std::int64_t kMaxSequenceGapNote     = std::int64_t{1} << 31;
+
+/// The bytes one liveness turn may carry, as the host estimates them. A turn's
+/// scratch is bounded by its grant (32 KiB), and its input record and what it
+/// writes both draw on it, so one item per agent holds as many entries as fit
+/// and a wake that finds more posts a second. Three quarters of the bound,
+/// which leaves the routine its own text. Measured: an entry for an existing
+/// profile used about 330 bytes (its principal, a record around it and the
+/// flags it writes), so it is priced at 336 and an item holds 73. A source
+/// never heard has no profile, and its silence makes one with a walk over the
+/// profiles there are, so that costs more as they accumulate: 32 fit a turn
+/// among few profiles and not among 100, and it is priced at 3,072 (eight to an
+/// item). A fleet that all fails to report at once is the case this prices.
+inline constexpr std::size_t kLivenessItemBudgetBytes = 24 * 1024;
+inline constexpr std::size_t kLivenessEntryBytes      = 336;
+inline constexpr std::size_t kLivenessCreateBytes     = 3072;
+
 // The time-class diagnostic and the shared-time-source watch (I3-3b1, design
 // 4.3 and 9.1). Host memory only: none of these reaches a decision.
 /// `vagent.epistemic_time_class_half_life`: readings over which a source's
@@ -240,6 +273,7 @@ enum class EpistemicLimitError : std::uint8_t {
   InvalidClockLineage,
   InvalidSteadyDrift,
   InvalidWallSyncUncertainty,
+  InvalidHeartbeatFloor,
 };
 
 [[nodiscard]] constexpr std::string_view
@@ -289,6 +323,8 @@ epistemicLimitErrorName(EpistemicLimitError error) noexcept {
     return "InvalidSteadyDrift";
   case EpistemicLimitError::InvalidWallSyncUncertainty:
     return "InvalidWallSyncUncertainty";
+  case EpistemicLimitError::InvalidHeartbeatFloor:
+    return "InvalidHeartbeatFloor";
   }
   return "Unknown";
 }
@@ -455,6 +491,10 @@ struct EpistemicLimits {
   /// `vagent.epistemic_wall_sync_uncertainty_ms`: the same setting the adapter
   /// reads for its mappings; here it is the sigma of a wall anchor.
   std::int64_t wallSyncUncertaintyMs{kDefaultWallSyncUncertaintyMs};
+  /// `vagent.epistemic_heartbeat_floor_ms`: the same setting the adapter reads;
+  /// the executor refuses a grant whose durations are below it, so a direct
+  /// `bindSource` cannot bypass the adapter's check.
+  std::int64_t heartbeatFloorMs{kDefaultHeartbeatFloorMs};
 
   /// Slots past `arenaSlots` that only settle turns may use, so a batch of
   /// belief events still settles when the allowance is spent. Zero for a tiny
@@ -540,6 +580,9 @@ struct EpistemicLimits {
     if (wallSyncUncertaintyMs < kMinWallSyncUncertaintyMs ||
         wallSyncUncertaintyMs > kMaxWallSyncUncertaintyMs)
       return std::unexpected(EpistemicLimitError::InvalidWallSyncUncertainty);
+    if (heartbeatFloorMs < kMinHeartbeatFloorMs ||
+        heartbeatFloorMs > kMaxHeartbeatFloorMs)
+      return std::unexpected(EpistemicLimitError::InvalidHeartbeatFloor);
     return {};
   }
 

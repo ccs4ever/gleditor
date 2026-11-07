@@ -21,6 +21,7 @@
 #include <string_view>
 #include <vector>
 
+#include "common/xanadu/vagent/runtime/epistemic_abi_liveness.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_translate.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_translate_registry.hpp"
 #include "common/xanadu/vagent/runtime/health_grants.hpp"
@@ -392,17 +393,46 @@ TEST_F(Translate, ALatchAndReasonsSurviveBothRoads) {
   EXPECT_EQ(a.arena().asInt64(*a.field(*a.profile(kP1), kProfileFaultSeq)), 1);
 }
 
-TEST_F(Translate, LivenessStampsFollowTheDisposition) {
+// I3-3c1 carries the stamps and the flags across a resume; the new instance's
+// first control turn rebases them (the liveness tests drive that turn).
+TEST_F(Translate, LivenessFieldsAreCarriedByBothDispositions) {
   populateEveryStructure();
-  ASSERT_TRUE(a.field(*a.profile(kP1), kProfileLastReceive));
+  const auto real = [](Side &s, std::string_view name) {
+    const auto cell = s.field(*s.profile(kP1), name);
+    return cell ? s.arena().asDouble(*cell) : std::nullopt;
+  };
+  ASSERT_EQ(real(a, kProfileLastReceive), 123.5);
+  const auto carried = [&](Side &s) {
+    EXPECT_EQ(real(s, kProfileLastReceive), 123.5);
+    EXPECT_EQ(real(s, kProfileLastContact), 124.5);
+    EXPECT_EQ(real(s, kProfileSilentSince), 125.25);
+    const auto cell = [&](std::string_view name) {
+      return s.field(*s.profile(kP1), name);
+    };
+    ASSERT_TRUE(cell(kProfileLivenessInstance));
+    EXPECT_EQ(s.arena().textOf(*cell(kProfileLivenessInstance)),
+              "fedcba9876543210");
+    ASSERT_TRUE(cell(kProfileSilent));
+    EXPECT_TRUE(s.arena().asBool(*cell(kProfileSilent)).value_or(false));
+    ASSERT_TRUE(cell(kProfileSilentCause));
+    EXPECT_EQ(s.arena().textOf(*cell(kProfileSilentCause)),
+              kSilentCauseHeartbeat);
+    const auto streams = cell(kProfileStreams);
+    ASSERT_TRUE(streams);
+    const auto stream = s.field(*streams, "live_stream");
+    ASSERT_TRUE(stream);
+    const auto received = s.field(*stream, kStreamReceived);
+    ASSERT_TRUE(received);
+    EXPECT_EQ(s.arena().asDouble(*received), 126.125);
+    const auto stale = s.field(*stream, kStreamStale);
+    ASSERT_TRUE(stale);
+    EXPECT_TRUE(s.arena().asBool(*stale).value_or(false));
+  };
   ASSERT_TRUE(resumeOnB());
-  EXPECT_FALSE(b.field(*b.profile(kP1), kProfileLastReceive));
-  EXPECT_FALSE(b.field(*b.profile(kP1), kProfileLastContact));
+  carried(b);
   ASSERT_TRUE(upgradeA());
   a.settle();
-  const auto kept = a.field(*a.profile(kP1), kProfileLastReceive);
-  ASSERT_TRUE(kept);
-  EXPECT_EQ(a.arena().asDouble(*kept), 123.5);
+  carried(a);
 }
 
 TEST_F(Translate, DoublesCrossByBitPattern) {

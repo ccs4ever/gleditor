@@ -4472,13 +4472,15 @@ void Gen::emitObserve(CellRef entryLabel) {
       place(written);
     }
     putScalar(prof, kProfileLastReceive, D(received));
-    // Only a directly received event shows the device is alive.
-    const CellRef direct = newLabel(), after = newLabel();
-    branchIfZero(relayed, direct);
-    jump(after);
-    place(direct);
+    // A committed copy is fresh whether it came direct or relayed (design
+    // 5.1), so it shows the device alive either way.
     putScalar(prof, kProfileLastContact, D(received));
-    place(after);
+    mov(S(a0_), S(prof));
+    mov(S(a1_), S(streamsRec));
+    mov(S(a2_), S(predName));
+    mov(S(a3_), S(received));
+    mov(S(a4_), S(obsInstance));
+    callLabel(routineLabel(rtLivenessCommit_, &Gen::emitRtLivenessCommit));
   };
   for (auto &[name, info] : preds_) {
     if (!info.arbitrated) continue;

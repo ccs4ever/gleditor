@@ -16,6 +16,7 @@
 #include <string_view>
 #include <vector>
 
+#include "common/xanadu/vagent/runtime/epistemic_abi_liveness.hpp"
 #include "common/xanadu/vagent/runtime/health_grants.hpp"
 #include "common/xanadu/vagent/runtime/program.hpp"
 #include "common/xanadu/vagent/runtime/runtime_abi.hpp"
@@ -222,9 +223,8 @@ TEST_F(VagentEpistemicResume, ProfilesHistoriesAndCloneRanksSurvive) {
   const auto viewsBefore = a.views(p1);
   ASSERT_TRUE(resumeOnB());
   EXPECT_EQ(b.histories(), before);
-  // Less the two liveness stamps each profile drops on resume.
-  EXPECT_EQ(*b.executor().epistemicCells(b.pid) + 2 * b.profiles().size(),
-            cellsBefore);
+  // The liveness stamps are carried since I3-3c1, so the count is unchanged.
+  EXPECT_EQ(*b.executor().epistemicCells(b.pid), cellsBefore);
   ASSERT_EQ(b.profiles().size(), 2U);
   const auto q1 = *b.profile(kP1);
   EXPECT_EQ(b.views(q1), viewsBefore);
@@ -455,15 +455,23 @@ TEST_F(VagentEpistemicResume, ARetiredHistoryCrossesAResume) {
   EXPECT_EQ(b.views(q1), 0U);
 }
 
-TEST_F(VagentEpistemicResume, LivenessStartsAgainFromTheFirstContact) {
+TEST_F(VagentEpistemicResume, LivenessIsCarriedAndNamesTheNewInstanceOnRebind) {
   populate();
   ASSERT_TRUE(a.value(*a.profile(kP1), kProfileLastContact));
+  const auto instanceA = a.executor().clockInstance();
   ASSERT_TRUE(resumeOnB());
   const auto q1 = *b.profile(kP1);
-  EXPECT_FALSE(b.value(q1, kProfileLastContact));
-  EXPECT_FALSE(b.value(q1, kProfileLastReceive));
+  EXPECT_TRUE(b.value(q1, kProfileLastContact));
+  EXPECT_TRUE(b.value(q1, kProfileLastReceive));
+  const auto instanceOf = [&](Side &s, CellRef profile) {
+    const auto cell = s.value(profile, kProfileLivenessInstance);
+    return cell ? s.arena().textOf(*cell) : std::string{};
+  };
+  EXPECT_EQ(instanceOf(b, q1), instanceA);
   b.bind(kP1);
   b.observe(reading(kP1, "left", 20, 1.0));
+  EXPECT_EQ(instanceOf(b, q1), b.executor().clockInstance());
+  EXPECT_NE(instanceA, b.executor().clockInstance());
   EXPECT_TRUE(b.value(q1, kProfileLastContact));
 }
 
@@ -538,7 +546,7 @@ TEST_F(VagentEpistemicResume, AFullEpistemicBudgetStillCheckpoints) {
   EXPECT_GE(*a.executor().epistemicCells(a.pid),
             AgentSettings{}.epistemic.cells * 9 / 10);
   ASSERT_TRUE(resumeOnB());
-  EXPECT_EQ(*b.executor().epistemicCells(b.pid) + 2 * b.profiles().size(),
+  EXPECT_EQ(*b.executor().epistemicCells(b.pid),
             *a.executor().epistemicCells(a.pid));
 }
 

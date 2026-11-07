@@ -266,7 +266,7 @@ void AgentExecutor::noteTime(const identity::ActorPid &target,
 
 ClockReading AgentExecutor::readClockLocked() const {
   ClockReading reading;
-  reading.steady = toSeconds(clock_.steady().time_since_epoch());
+  reading.steady = toSeconds(steadyNow().time_since_epoch());
   reading.sigma =
       static_cast<double>(settings_.epistemic.wallSyncUncertaintyMs) /
       kMillisPerSecond;
@@ -302,14 +302,14 @@ WireRecord noteFields(WireRecord clock) {
 } // namespace
 
 void AgentExecutor::queueClockNoteLocked(const identity::ActorPid &target,
-                                         WireRecord fields) {
+                                         WireRecord fields, bool first) {
   if (admissionClosedLocked(target)) {
     ingress_->lineageOwed[pidKey(target)].push_back(std::move(fields));
     return;
   }
   PostBox::Item item;
   item.pid       = target;
-  item.clockTurn = ClockTurn{std::move(fields), std::nullopt};
+  item.clockTurn = ClockTurn{std::move(fields), std::nullopt, first};
   posts_->pushControl(std::move(item));
 }
 
@@ -376,7 +376,7 @@ void AgentExecutor::startLineageLocked(const identity::ActorPid &target) {
   const auto reading = readClockLocked();
   checkClockLocked(reading);
   if (!ingress_->lineageActors.emplace(pidKey(target), target).second) return;
-  queueClockNoteLocked(target, noteFields(clockRecord(reading)));
+  queueClockNoteLocked(target, noteFields(clockRecord(reading)), true);
 }
 
 std::optional<std::uint64_t>
@@ -404,7 +404,7 @@ AgentExecutor::requestClockRebase(const identity::ActorPid &target,
     ingress_->rebases.erase(ingress_->rebases.begin());
   PostBox::Item item;
   item.pid       = target;
-  item.clockTurn = ClockTurn{std::move(fields), id};
+  item.clockTurn = ClockTurn{std::move(fields), id, false};
   posts_->pushControl(std::move(item));
   return id;
 }

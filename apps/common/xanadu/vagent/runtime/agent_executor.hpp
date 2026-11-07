@@ -37,6 +37,7 @@
 
 #include "common/xanadu/resolver.hpp"
 #include "common/xanadu/vagent/runtime/agent_executor_health.hpp"
+#include "common/xanadu/vagent/runtime/agent_executor_liveness.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_health.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_ingress.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_limits.hpp"
@@ -567,6 +568,36 @@ public:
                      std::string_view instance, double t);
   [[nodiscard]] std::optional<ClockRebase>
   clockRebaseResult(std::uint64_t request) const;
+  // -- Liveness (I3-3c1, agent_executor_liveness.cpp, design 5.1 to 5.3)
+  /// A message of @p principal verified, passed the seen-before check and the
+  /// freshness bound, at steady time @p at. Re-arms its heartbeat deadline,
+  /// and writes the arena only when the source was silent: one control item
+  /// that clears `silent`. A message that was not fresh never calls this, so
+  /// a withheld heartbeat cannot revive a silent source (S-2). Nothing for a
+  /// latched source, whose flags stay as they were. Callable from any thread.
+  AgentExecutor *noteFresh(const identity::ActorPid &target,
+                           std::string_view principal,
+                           zigzag::vortex::mesh::ActorTime at);
+  /// The adapter's report that @p principal's paired mapping was dropped at
+  /// @p since, or (nullopt) that its pairing completed or it was unbound. A
+  /// deadline that passes while it is set silences the source with cause
+  /// `clock` and not `heartbeat` (design 4.5).
+  AgentExecutor *
+  noteClockPending(const identity::ActorPid &target, std::string_view principal,
+                   std::optional<zigzag::vortex::mesh::ActorTime> since);
+  /// The grants' smallest heartbeat for @p principal among its live bindings
+  /// on @p target: the expectation its deadline is armed with.
+  [[nodiscard]] std::optional<std::chrono::milliseconds>
+  heartbeatExpectation(const identity::ActorPid &target,
+                       std::string_view principal) const;
+  /// TEST AND DIAGNOSTIC SURFACE. Entries in the deadline heap, and the
+  /// control items the timer and fresh heartbeats have posted so far.
+  [[nodiscard]] std::size_t livenessEntries() const;
+  [[nodiscard]] std::uint64_t livenessItemsPosted() const;
+  /// TEST SURFACE. Queue @p due as one liveness item, bypassing the heap, so a
+  /// test can deliver a stale entry after the commit that outdated it.
+  AgentExecutor *postLivenessItem(const identity::ActorPid &target,
+                                  std::vector<LivenessDue> due);
   /// The newest advance or retire turn's outcome for @p principal: how a
   /// host learns that the arena refused a binding it had accepted.
   [[nodiscard]] std::optional<IngestOutcome>
@@ -834,14 +865,41 @@ private:
   void dropHostEvents(State &state);
   /// Drop a stopped actor's bindings, queue counts, outcome log and charges.
   void forgetIngress(const identity::ActorPid &pid);
+  // -- Liveness (agent_executor_liveness.cpp). The `Locked` ones hold the
+  //    ingress mutex.
+  void collectLiveness();
+  void postLivenessLocked(const identity::ActorPid &target,
+                          std::vector<LivenessDue> due);
+  void armProfileLocked(const std::string &pid, const std::string &principal,
+                        LivenessTime from, bool keepLater);
+  void armStreamLocked(const std::string &pid, const std::string &principal,
+                       const std::string &predicate, LivenessTime from,
+                       double stamp);
+  [[nodiscard]] std::optional<std::chrono::milliseconds>
+  heartbeatOfLocked(const std::string &pid, const std::string &principal) const;
+  /// A commit is fresh: re-arm its source and stream from its receipt.
+  void livenessCommittedLocked(const std::string &pid, const IngestKey &ingest);
+  /// A latch takes the source's deadlines away; a reset restarts them.
+  void livenessLatchedLocked(const std::string &pid,
+                             const std::string &principal);
+  void livenessResetLocked(const identity::ActorPid &target,
+                           const std::string &principal);
+  /// Arm a new binding's first deadlines (from the arena when it already holds
+  /// the profile) and read the flags the arena holds.
+  void livenessBoundLocked(const identity::ActorPid &target,
+                           const std::string &principal);
+  /// Re-derive every deadline of @p state from the arena's rebased stamps.
+  void rearmFromArena(State &state);
+  void readLivenessHealth(const State &state, zigzag::CellRef profile,
+                          SourceHealth &out) const;
   // -- The clock lineage (agent_executor_clock.cpp)
   [[nodiscard]] ClockReading readClockLocked() const;
   /// The `$turn.clock` record of @p reading.
   [[nodiscard]] WireRecord clockRecord(const ClockReading &reading) const;
   /// Test @p reading against the anchor; ingress mutex held.
   std::uint64_t checkClockLocked(const ClockReading &reading);
-  void queueClockNoteLocked(const identity::ActorPid &target,
-                            WireRecord fields);
+  void queueClockNoteLocked(const identity::ActorPid &target, WireRecord fields,
+                            bool first = false);
   void flushLineageOwedLocked();
   /// The first note of this instance for an actor that has just bound.
   void startLineageLocked(const identity::ActorPid &target);
@@ -1064,6 +1122,13 @@ private:
   [[nodiscard]] const State *readableState(const identity::ActorPid &pid) const;
   [[nodiscard]] std::chrono::system_clock::time_point wallNow() const {
     return clock_.wall() + simulatedOffset_;
+  }
+  /// The steady clock with what `advanceSimulatedTime` has added, so simulated
+  /// time moves both clocks and no step is read as a jump of their offset.
+  [[nodiscard]] zigzag::vortex::mesh::ActorTime steadyNow() const {
+    return clock_.steady() +
+           std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+               simulatedOffset_);
   }
   [[nodiscard]] std::chrono::system_clock::time_point
   leaseRenewAt(const State &state) const;

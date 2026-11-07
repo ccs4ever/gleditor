@@ -1223,6 +1223,11 @@ private:
   /// lineage's segment rule and the rebase of design 4.4, in
   /// epistemic_emit_clock.cpp.
   CellRef rtClockNote_{}, rtClockRebase_{};
+  /// Liveness (I3-3c1, epistemic_emit_liveness.cpp): what a commit writes, what
+  /// a reset clears, the rebase of the stamps on a resume, and the timer's
+  /// turn. Lazy: only arbitrating agents reach the sites that call them.
+  std::optional<CellRef> rtLivenessCommit_, rtLivenessReset_, rtLivenessRebase_,
+      rtLivenessTurn_;
 
   void mintPredicates();
   const PredInfo &predOf(const Term &t);
@@ -1246,6 +1251,15 @@ private:
   /// lineage, 2 an anchor is missing), r1 = delta and a2 = uncertainty, as
   /// values.
   void emitRtClockRebase();
+  /// a0 = profile, a1 = its `streams` record, a2 = predicate name, a3 = the
+  /// commit's steady receipt, a4 = the executor's instance.
+  void emitRtLivenessCommit();
+  /// a0 = profile: clears silence, staleness and the profile's stamps.
+  void emitRtLivenessReset();
+  /// a0 = the `$turn.clock` record: rebases carried stamps or marks `rebase`.
+  void emitRtLivenessRebase();
+  /// a0 = the `$turn.liveness` record: applies the host's due entries.
+  void emitRtLivenessTurn();
   /// `clockEntry` (I3-3b2): note the segment rule per `$turn.clock`, and run
   /// the test-only `$turn.clock_rebase`.
   void emitClockEntry(CellRef entryLabel);

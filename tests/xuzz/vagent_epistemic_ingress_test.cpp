@@ -549,14 +549,14 @@ TEST_F(VagentEpistemicIngress, TheDedupWindowKeepsOnlyTheNewestEntries) {
   EXPECT_EQ(refused(kTurnResultStaleSequence), 1U);
 }
 
-TEST_F(VagentEpistemicIngress, OnlyADirectEventRefreshesContact) {
+// Design 5.1 replaces I3-1's direct-only rule: a committed copy is fresh
+// whether it came direct or relayed.
+TEST_F(VagentEpistemicIngress, ACommittedRelayedCopyRefreshesContactToo) {
   auto relayed      = reading(kP1, "e1", 1, 1.0);
   relayed.relayedBy = kP2;
   observe(relayed);
   const auto prof = profiles().front();
   EXPECT_TRUE(value(prof, kProfileLastReceive));
-  EXPECT_FALSE(value(prof, kProfileLastContact));
-  observe(reading(kP1, "e2", 2, 1.0));
   EXPECT_TRUE(value(prof, kProfileLastContact));
 }
 
@@ -685,10 +685,24 @@ TEST_F(VagentEpistemicIngress, AnUnboundOrExpiredSourceIsUnknown) {
   host->executor().unbindSource(pid, kP1, "at");
   EXPECT_EQ(refusedAtIngress(reading(kP1, "e1", 1, 1.0)),
             EpistemicRefusal::UnknownSource);
-  const auto kP3   = std::string(64, '3');
+  const auto kP3 = std::string(64, '3');
+  // A lifetime below the heartbeat floor is refused (S-13b), so a binding
+  // expires only by the steady clock passing a lifetime of at least the floor.
   auto expired     = grant(kP3, "sensor:lapsed");
   expired.lifetime = -std::chrono::seconds(1);
-  ASSERT_TRUE(host->executor().bindSource(pid, expired));
+  const auto below = host->executor().bindSource(pid, expired);
+  ASSERT_FALSE(below);
+  EXPECT_EQ(below.error(), EpistemicRefusal::InvalidBinding);
+  auto steady = std::make_shared<std::chrono::steady_clock::time_point>(
+      std::chrono::steady_clock::now());
+  LocalHost::Options options;
+  options.clock        = AgentClock::system();
+  options.clock.steady = [steady] { return *steady; };
+  start({}, options);
+  auto lapsing     = grant(kP3, "sensor:lapsed");
+  lapsing.lifetime = std::chrono::seconds(1);
+  ASSERT_TRUE(host->executor().bindSource(pid, lapsing));
+  *steady += std::chrono::seconds(2);
   EXPECT_EQ(refusedAtIngress(reading(kP3, "e1", 1, 1.0)),
             EpistemicRefusal::UnknownSource);
   EXPECT_TRUE(clauses().empty());
@@ -791,9 +805,12 @@ TEST_F(VagentEpistemicIngress, ARevocationWhileQueuedRefusesAtItsTurn) {
 }
 
 TEST_F(VagentEpistemicIngress, ADirectContentRefusalChargesHealthAndContact) {
-  auto relayed      = reading(kP1, "e1", 1, 1.0);
-  relayed.relayedBy = kP2;
-  observe(relayed);
+  // A relayed refusal creates the profile and shows nothing alive.
+  auto relayedFrame      = reading(kP1, "e1", 1, 1.0);
+  relayedFrame.frame     = "ecef";
+  relayedFrame.relayedBy = kP2;
+  EXPECT_EQ(refusedAtIngress(relayedFrame),
+            EpistemicRefusal::ObservationFrameMismatch);
   const auto prof = profiles().front();
   ASSERT_FALSE(value(prof, kProfileLastContact));
   auto frame  = reading(kP1, "e2", 2, 1.0);
@@ -801,7 +818,7 @@ TEST_F(VagentEpistemicIngress, ADirectContentRefusalChargesHealthAndContact) {
   EXPECT_EQ(refusedAtIngress(frame),
             EpistemicRefusal::ObservationFrameMismatch);
   EXPECT_EQ(counter(prof, kProfileContentRefusals), 1);
-  EXPECT_EQ(counter(prof, kProfileRefusedCount), 0);
+  EXPECT_EQ(counter(prof, kProfileRefusedCount), 1);
   EXPECT_EQ(counter(prof, kProfileRejectCount), 0);
   EXPECT_EQ(text(prof, kProfileLastRefusal), "ObservationFrameMismatch");
   // The device demonstrably sent it.
@@ -813,14 +830,18 @@ TEST_F(VagentEpistemicIngress, ARelayedRefusalIsDiagnosticOnly) {
   relayed.relayedBy = kP2;
   observe(relayed);
   const auto prof = profiles().front();
-  auto frame      = reading(kP1, "e2", 2, 1.0);
-  frame.frame     = "ecef";
-  frame.relayedBy = kP2;
+  // The committed relayed copy is fresh (5.1); a refused one adds nothing.
+  const auto contact = value(prof, kProfileLastContact);
+  ASSERT_TRUE(contact);
+  const auto stamp = arena().asDouble(*contact);
+  auto frame       = reading(kP1, "e2", 2, 1.0);
+  frame.frame      = "ecef";
+  frame.relayedBy  = kP2;
   EXPECT_EQ(refusedAtIngress(frame),
             EpistemicRefusal::ObservationFrameMismatch);
   EXPECT_EQ(counter(prof, kProfileContentRefusals), 0);
   EXPECT_EQ(counter(prof, kProfileRefusedCount), 1);
-  EXPECT_FALSE(value(prof, kProfileLastContact));
+  EXPECT_EQ(arena().asDouble(*value(prof, kProfileLastContact)), stamp);
 }
 
 TEST_F(VagentEpistemicIngress, InTurnRefusalsAreChargedAfterTheUndo) {

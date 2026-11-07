@@ -98,6 +98,11 @@ struct EpistemicSourceGrant {
   /// From binding, on the executor's steady clock, so a wall-clock step can
   /// neither expire nor extend it.
   std::chrono::steady_clock::duration lifetime{};
+  /// The device's declared heartbeat interval for the principal (design 5.1),
+  /// and for this predicate its data interval. Each is at least
+  /// `heartbeat_floor_ms` or `bindSource` refuses `InvalidBinding`.
+  std::optional<std::chrono::milliseconds> heartbeat;
+  std::optional<std::chrono::milliseconds> data;
 };
 
 /// Queued, never committed: the ingestion turn decides that later.

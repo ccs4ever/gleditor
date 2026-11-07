@@ -531,12 +531,14 @@ TEST_F(VagentEpistemicAdapter, ASettledReadingIsRefusedBeforeItsSignature) {
   EXPECT_EQ(adapter->stats().signatureChecks, checks);
 }
 
-TEST_F(VagentEpistemicAdapter, OtherKindsAreVerifiedButNotYetDispatched) {
+// A heartbeat dispatches since c1; a report is still I3-3d's.
+TEST_F(VagentEpistemicAdapter, AHealthReportIsVerifiedButNotYetDispatched) {
   bind(a, binding());
-  auto h             = header(audienceOf(a), 1);
-  h.kind             = SignedKind::Heartbeat;
-  h.expires          = nowNs() + 5'000'000'000;
-  const auto refused = ingest(a, seal(h, HeartbeatPayload{}));
+  auto h    = header(audienceOf(a), 1);
+  h.kind    = SignedKind::HealthReport;
+  h.expires = nowNs() + 5'000'000'000;
+  const auto refused =
+      ingest(a, seal(h, HealthReportPayload{ReportAction::Raise, "low"}));
   ASSERT_FALSE(refused);
   EXPECT_EQ(refused.error(), EpistemicRefusal::UnsupportedKind);
 }

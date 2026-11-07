@@ -730,14 +730,13 @@ TEST_F(VagentEpistemicPairing, HeartbeatsAreHeldToThePathBound) {
     h.expires          = wallNs() + expiresInMs * kNanosPerMilli;
     return ingest(seal(h, HeartbeatPayload{}));
   };
-  // Fresh: dispatch is c1's, so it reaches UnsupportedKind.
+  // Fresh: dispatched since c1, with a receipt that queued nothing.
   auto fresh = heartbeat(50, 5000);
-  ASSERT_FALSE(fresh);
-  EXPECT_EQ(fresh.error(), EpistemicRefusal::UnsupportedKind);
+  ASSERT_TRUE(fresh);
+  EXPECT_TRUE(fresh->eventId.empty());
   // Inside the bound plus the mapping's own uncertainty.
   fresh = heartbeat(5000, 5000);
-  ASSERT_FALSE(fresh);
-  EXPECT_EQ(fresh.error(), EpistemicRefusal::UnsupportedKind);
+  ASSERT_TRUE(fresh);
   // Beyond max_path_lateness_ms (5 s) plus u_d and the 0.1 s of wall sync.
   auto late = heartbeat(6000, 5000);
   ASSERT_FALSE(late);
@@ -778,8 +777,7 @@ TEST_F(VagentEpistemicPairing, AFreeDevicesHeartbeatNeedsAPairingToo) {
   h         = header(SignedKind::Heartbeat, SignedClockBasis::Free, principal);
   h.expires = h.sent + 5 * kNanosPerSecond;
   r         = ingest(seal(h, HeartbeatPayload{}));
-  ASSERT_FALSE(r);
-  EXPECT_EQ(r.error(), EpistemicRefusal::UnsupportedKind);
+  ASSERT_TRUE(r);
 }
 
 // --- incarnations -----------------------------------------------------------

@@ -689,3 +689,148 @@ is clang-format 19.1.7 clean; `make lint` (with `tools/check-counted-sites.py`) 
 | `gleditor_test`          | 830 passed                                                               |
 | `zigzag_test`            | 256 passed                                                               |
 | `fuzz_epistemic_ingress` | 311 runs in 125 s, seed 1, no crash, with `alloc_dealloc_mismatch=0` set |
+
+## I3-3c1: heartbeats, silence and the timer wake
+
+Source baseline: `77175afa`. Authority: I3-3D revision 2.1, sections 4.5 (the `clock` cause,
+deferred from b2), 5.1 to 5.4, 7, 8 (the c1 rows), 9.1 (the c1 rows) and 13.5. Section 13.5 says "as
+in revision 1", and revision 1 is not in the tree, so the slice was built from those sections. A
+Sonnet implementation agent built it from the lead's written decisions. The lead reviewed the
+simulated-clock change and ran every gate. Paths are relative to
+`apps/common/xanadu/vagent/runtime/` unless they start with `tests/` or `design/`.
+
+### What changed
+
+- **Expectations.**
+  - `SourceBinding` gains `heartbeat` and a per-predicate `data` map, and `EpistemicSourceGrant`
+    gains `heartbeat` and `data`.
+  - Every duration, the lifetime included, must be at least `heartbeat_floor_ms`. Both
+    `EpistemicAdapter::bind` and `bindSource` refuse `InvalidBinding` otherwise (S-13b).
+  - A source's heartbeat is the smallest among its live bindings.
+- **Arena state** (new `epistemic_emit_liveness.cpp`, all IR, and `epistemic_abi_liveness.hpp`).
+  - Profiles gain `silent`, `silent_since`, `silent_cause` and `liveness_instance`. Streams gain
+    `received` and `stale`.
+  - A commit writes the stamps and clears `stale` and `silent`. `last_contact` is now written for
+    relayed copies too (5.1).
+  - The I3-2 reset clears every flag and both stamps, and the deadline restarts from the reset.
+  - `wouldChangeHealth` counts a silent or stale source as a change for a reset.
+- **Heartbeats.** A heartbeat that verified and passed step 4 and the step-6 freshness bound is
+  fresh. The adapter calls `AgentExecutor::noteFresh`, then `noteSettled`, which raises the floor,
+  and returns a receipt with no event ID.
+  - `noteFresh` re-arms the deadline. It writes the arena only on the SILENT-to-LIVE transition.
+  - A heartbeat that is not fresh refreshes nothing.
+  - Health reports stay `UnsupportedKind` until I3-3d.
+- **The timer** (new `agent_executor_liveness.{hpp,cpp}`).
+  - `LivenessHeap` is indexed: one entry per (pid, principal, optional stream), updated in place.
+  - It is armed at bind, on each fresh message and on each commit (streams). After a resume it is
+    armed from the arena's rebased stamps.
+  - `tick`, and so `advanceSimulatedTime`, collects due entries into `liveness` control items.
+    `earliestDeadline` includes the heap's head.
+  - The liveness turn sets a flag only if no newer stamp is in the arena, so a commit that races the
+    timer wins.
+  - The cause is `clock` while the adapter reports a dropped mapping through `noteClockPending`,
+    otherwise `heartbeat`.
+  - Latched sources arm nothing.
+- **Health.** `SourceHealth` gains `silent`, `silentCause` and `staleStreams`. The flags never move
+  `R` or `N`, never add a reason and never change the displayed state.
+- **Resume.**
+  - `profile.liveness` is now Carried on resume, and copier pass 4's clearing is removed.
+    `profile.silence` and `stream.liveness` are registered.
+  - `emitRtLivenessRebase` runs from the new instance's first clock turn and rebases each stamp to
+    $t + \Delta - u_\Delta$.
+  - A failed rebase, or stamps with no `liveness_instance`, sets `silent` with cause `rebase` at
+    once (U-18, 8.2-R3d).
+- **Sequence gaps.** `EpistemicAdapter::sequenceGaps(principal)` counts gaps above
+  `sequence_gap_note` between an issuer's consecutive verified sequences, across all kinds (m4).
+- **Settings.** `heartbeat_floor_ms` (100, 10 to 60000) and `sequence_gap_note` (64, 1 to 2^31). The
+  executor and the adapter both read the floor.
+- **Simulated time.** The executor's steady reads go through `steadyNow()`, which applies the
+  simulated offset `advanceSimulatedTime` already applied to the wall clock. Simulated time
+  therefore moves both clocks together and no longer looks like a jump. Real clocks are untouched.
+- **Tests.**
+  - New `tests/xuzz/vagent_epistemic_liveness_test.cpp`, 23 cases.
+  - `Translate.LivenessFieldsAreCarriedByBothDispositions`.
+  - Existing tests change where the rules changed:
+    - fresh heartbeats now return a receipt (pairing and adapter tests);
+    - relayed commits refresh contact (`ACommittedRelayedCopyRefreshesContactToo`);
+    - a lifetime below the floor refuses at bind;
+    - resumed stamps are carried and rebased, not cleared.
+
+### Design tests (13.5, and b2's deferred case)
+
+| Test                                                                     | Covered                                                                                                          |
+| ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
+| the state machine: UNHEARD → SILENT, LIVE → SILENT → LIVE                | yes; no arena write across ten heartbeats while LIVE                                                             |
+| heap size stays at most sources × streams under 100,000 heartbeats       | yes                                                                                                              |
+| 128 sources due in one wake produce one control item per pid             | **partly**: 64 make one item, and 128 make two (deviation 1)                                                     |
+| `data_ms = 1` refuses at bind                                            | yes, and any duration below the floor, at `bind` and `bindSource`                                                |
+| a huge `clock_uncertainty` does not widen the freshness window           | yes                                                                                                              |
+| a withheld heartbeat past the path bound does not revive a silent source | yes                                                                                                              |
+| `stale` set and cleared; a commit racing the timer wins                  | yes                                                                                                              |
+| flags move no `R` or `N` and no displayed state; reset clears them       | yes                                                                                                              |
+| a latched source arms nothing                                            | yes                                                                                                              |
+| b2's case: a pairing that misses the deadline sets `silent` (`clock`)    | yes; the next fresh message after pairing clears it                                                              |
+| resume rebases conservatively; a failed rebase sets `silent` (`rebase`)  | yes: evicted, unanchored and shape-1 profiles; the first deadline comes from the rebased stamp; a latch survives |
+| sequence gaps per issuer                                                 | yes                                                                                                              |
+| populated resume and upgrade                                             | yes                                                                                                              |
+
+### Measurements
+
+- **Cells.** A profile at rest gains 2 cells (`liveness_instance`) and a stream 2 (`received`). A
+  silent profile gains 6 more, once, and a stale stream 2. A profile that is both silent and stale
+  measured +8, and repeating it adds nothing.
+- **Line counts.** About 1,590 lines of source against the design's 1,300, mostly the heap's header
+  and comments. The executor is at +51 of its 200 and `compiler.cpp` at +8 of its 100.
+
+### Deviations and readings
+
+1. **Not every wake fits one control item.** A turn's scratch is bounded at 32 KiB. A silence on an
+   existing profile costs about 330 bytes, and one that creates the profile of a never-heard source
+   about 3 KiB.
+   - The host splits a wake's entries by estimated cost (`kLivenessItemBudgetBytes`,
+     `kLivenessEntryBytes`, `kLivenessCreateBytes` in `epistemic_limits.hpp`). Up to 73 existing
+     profiles fit in one item; 128 take two, and never-heard sources at least 16.
+   - A failed turn undoes only its own chunk.
+   - S-13c's purpose, bounded turns per wake rather than one per source, holds. Its letter, one item
+     per pid, does not.
+   - The alternative was to create profiles at bind, which would change what binding means for every
+     existing test.
+1. **An UNHEARD source's first silence creates its profile.** No profile exists before a reading.
+   The item carries the binding's incarnation and `max_sources`, and a full principal budget ends
+   that turn `EpistemicBudget`.
+1. **A stream that has never committed is never stale.** It has no record to flag; the heartbeat
+   covers the source.
+1. **A completed pairing only clears `clockPending`.** The `clock` silence ends at the next fresh
+   message.
+1. **A profile with no stamps and no `liveness_instance` learns the instance**, rather than being
+   marked `rebase`. Nothing exists to rebase. Stamps without an instance, or any failed rebase, take
+   the `rebase` path, which also clears the unusable stamps.
+1. **Liveness items are collected in `tick` only**, not in `pumpUntilIdle`. Simulated time now moves
+   the steady clock as well as the wall clock (`steadyNow()`).
+1. **Closed admission and unbinding.** A closed door re-arms a due entry one floor interval later
+   instead of posting it. Unbinding the last binding erases the source's host liveness state, as
+   `retireSource` does.
+1. **Flags are written without an admission check.** An arena at its cell ceiling can exceed it by
+   at most the flag cells above, per profile and stream.
+
+### Limits carried forward
+
+- **Health reports** (I3-3d) and freeze (I3-3c2) are next. `frozen` is not built.
+- **The adapter step in the fuzzer** is still owed.
+- **Q10** (`CLOCK_BOOTTIME`) is still unscheduled.
+- **Traceability.** c1 closes U-18, 3.2-4, 5.1-20, 5.1-22, 8.2-4f and 8.2-R3d (design 13.5),
+  recorded at M2 acceptance.
+
+### Suite results
+
+`make -j$(nproc)` and `make vagent_actor_test` exited 0 with no warning in project code; touched C++
+is clang-format 19.1.7 clean; `make lint` (with `tools/check-counted-sites.py`) and
+`tools/check-translator-coverage.py` exit 0. Every suite ran headless with XDG under `build/xdg`.
+
+| Suite                    | Result                                                                   |
+| ------------------------ | ------------------------------------------------------------------------ |
+| `vagent_actor_test`      | 1,215 passed                                                             |
+| `xuzz_test`              | 3,391 passed                                                             |
+| `gleditor_test`          | 830 passed                                                               |
+| `zigzag_test`            | 256 passed                                                               |
+| `fuzz_epistemic_ingress` | 193 runs in 154 s, seed 1, no crash, with `alloc_dealloc_mismatch=0` set |

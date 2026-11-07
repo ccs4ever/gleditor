@@ -661,7 +661,7 @@ public:
     return map_.at(root);
   }
 
-  void run(const TranslationPlan &plan, Disposition disposition) {
+  void run(const TranslationPlan &plan) {
     const auto start = made_.size();
     // Pass 0: the agent's own records, after the header the new program
     // minted, so a device's audience survives the move.
@@ -722,16 +722,6 @@ public:
     }
     if (made_.size() - start != plan.cells)
       inconsistent("copied", made_.size() - start, plan.cells);
-    // Pass 4: liveness stamps are another clock's and start again.
-    if (disposition == Disposition::Resume)
-      for (const auto &profile : plan.profiles) {
-        const auto fresh = map_.at(profile.cell);
-        for (const auto field : {kProfileLastReceive, kProfileLastContact}) {
-          charge();
-          if (fieldValue(into_, ivd_, fresh, field))
-            setField(into_, ivd_, fresh, field, std::nullopt);
-        }
-      }
   }
 
   [[nodiscard]] std::uint64_t charges() const noexcept { return charges_; }
@@ -764,7 +754,7 @@ applyTranslation(const TranslationPlan &plan, const ApplyRequest &request) {
   try {
     Copier copier(request.plan, request);
     copier.bindAgent(request.intoAgent);
-    copier.run(plan, request.plan.disposition);
+    copier.run(plan);
     return TranslationReport{.cells   = copier.cells(),
                              .charges = copier.charges()};
   } catch (Refused &refused) {

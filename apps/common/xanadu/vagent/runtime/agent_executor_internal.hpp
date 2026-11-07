@@ -32,6 +32,7 @@
 
 #include "common/xanadu/vagent/runtime/agent_executor.hpp"
 #include "common/xanadu/vagent/runtime/agent_executor_health.hpp"
+#include "common/xanadu/vagent/runtime/agent_executor_liveness.hpp"
 #include "common/xanadu/vagent/runtime/checker.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_abi_health.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_clock_rows.hpp"
@@ -90,6 +91,9 @@ struct ClockReading {
 struct ClockTurn {
   WireRecord fields;
   std::optional<std::uint64_t> rebase;
+  /// An instance's first note: once it commits, the executor reads the rebased
+  /// stamps back and arms its first deadlines from them (design 5.4).
+  bool first{false};
 };
 
 struct AgentExecutor::Flight {
@@ -338,6 +342,10 @@ struct AgentExecutor::Ingress {
     std::string domain;
     /// The policy hash alone, which a signed observation must name.
     std::string policyHash;
+    /// The device's declared intervals (design 5.1), already checked against
+    /// the floor: the source's heartbeat and this predicate's data.
+    std::optional<std::chrono::milliseconds> heartbeat;
+    std::optional<std::chrono::milliseconds> data;
   };
   /// One event's entry in its source's outcome log.
   struct Logged {
@@ -526,6 +534,18 @@ struct AgentExecutor::Ingress {
     return std::string(out);
   }();
 
+  /// Liveness (I3-3c1, agent_executor_liveness.cpp): the deadline heap, what
+  /// the host remembers of each source, and the control items posted.
+  LivenessHeap liveHeap;
+  std::map<SourceKey, LivenessSource> live;
+  std::uint64_t livenessItems{0};
+  [[nodiscard]] bool bound(const std::string &pid,
+                           const std::string &principal) const {
+    const auto it = bindings.lower_bound({pid, principal, std::string{}});
+    return it != bindings.end() && std::get<0>(it->first) == pid &&
+           std::get<1>(it->first) == principal;
+  }
+
   /// One entry per event, updated in place as the event moves on. A
   /// committed event stays committed: a later resend, relay or refusal of
   /// the same key is a retry of an event the store already holds.
@@ -624,6 +644,12 @@ struct AgentExecutor::Ingress {
     if (found == bindings.end()) return;
     const auto alias = found->second.alias;
     bindings.erase(found);
+    // The last binding takes the source's deadlines with it; a predicate's
+    // stream deadline goes with its predicate.
+    if (!bound(pid, principal))
+      liveHeap.removeSource(pid, principal);
+    else
+      liveHeap.remove({pid, principal, predicate});
     const bool stillUsed = std::ranges::any_of(bindings, [&](const auto &b) {
       return std::get<0>(b.first) == pid && std::get<1>(b.first) == principal &&
              b.second.alias == alias;
@@ -672,6 +698,8 @@ struct AgentExecutor::Ingress {
     std::erase_if(timeFed, [&](const auto &entry) {
       return std::get<0>(entry.first) == pid;
     });
+    liveHeap.removePid(pid);
+    std::erase_if(live, mine);
   }
   /// Record one refusal against @p principal; true when it is the first
   /// since the last bookkeeping turn, so the caller posts a note for it.

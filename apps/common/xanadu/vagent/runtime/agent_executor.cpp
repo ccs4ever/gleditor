@@ -1,5 +1,6 @@
 #include "common/xanadu/vagent/runtime/agent_executor.hpp"
 #include "common/xanadu/vagent/runtime/agent_executor_internal.hpp"
+#include "common/xanadu/vagent/runtime/epistemic_abi_liveness.hpp"
 
 #include "common/xanadu/provenance.hpp"
 #include "common/xanadu/store.hpp"
@@ -629,7 +630,7 @@ zigzag::vortex::mesh::MeshActorRuntime::Sender AgentExecutor::loopbackSender(
   return [this, remote = std::move(remote)](std::string_view node,
                                             const ActorMessage &message) {
     if (node == localNode_) {
-      return runtime_.receive(owner_, message, clock_.steady(), wallNow())
+      return runtime_.receive(owner_, message, steadyNow(), wallNow())
           .has_value();
     }
     return remote && remote(node, message);
@@ -1517,7 +1518,7 @@ AgentExecutor::TurnOutcome AgentExecutor::deliverHost(State &state,
             if (!g.revoked &&
                 CRYPTO_memcmp(g.tokenDigest.data(),
                               event.health->tokenDigest.data(), 32) == 0) {
-              if (clock_.steady() <= g.expiresAt && g.remainingActions > 0 &&
+              if (steadyNow() <= g.expiresAt && g.remainingActions > 0 &&
                   std::ranges::find(g.sources, event.health->principal) !=
                       g.sources.end() &&
                   std::ranges::find(g.actions,
@@ -1740,6 +1741,9 @@ AgentExecutor::TurnOutcome AgentExecutor::deliverHost(State &state,
             : std::string(kTurnResultIngestionFault));
     if (event.ingest) finishIngest(state, *event.ingest, code);
     if (event.health) finishHealthItem(state.pid, *event.health, code);
+    if (event.clockTurn && event.clockTurn->first &&
+        code == kTurnResultCommitted && state.context)
+      rearmFromArena(state);
     if (event.sourceChange) {
       // The change has committed with its belief events still queued; they
       // settle here, before any other item or turn for this actor, and the
@@ -1812,10 +1816,13 @@ void AgentExecutor::finishIngest(State &state, const IngestKey &ingest,
     // working: the streak of refusals the estimator could not see ends.
     ingress_->raiseMark(stream, ingest.sequence);
     ingress_->uncounted.erase(source);
+    livenessCommittedLocked(pid, ingest);
   }
   if (logged.kind == IngestOutcome::Kind::Refused) {
-    if (*logged.code == kTurnResultSourceFaulted)
+    if (*logged.code == kTurnResultSourceFaulted) {
       ingress_->latched.insert(source);
+      livenessLatchedLocked(pid, ingest.principal);
+    }
     GLEDITOR_LOG_DEBUG(kIngressLog, "ingestion refused: {}", *logged.code);
     const bool relayed = ingest.relay.has_value();
     const bool lifetime =
@@ -2852,7 +2859,7 @@ void AgentExecutor::spawnChild(State &state, WorkerContext &context,
     return;
   }
   needsFirstTurn_.push_back(*pid);
-  (void)runtime_.monitor(state.pid, *pid, clock_.steady());
+  (void)runtime_.monitor(state.pid, *pid, steadyNow());
 
   // A child appears twice: on d.holon, and as a member of the inner space, so
   // leaving the space leaves the holon alone (§5.2).
@@ -3045,7 +3052,7 @@ AgentExecutor::deliver(const identity::ActorPid &target, Envelope envelope) {
   message.source    = hostPid_;
   message.target    = target;
   message.value     = *bytes;
-  return runtime_.receive(owner_, message, clock_.steady(), wallNow());
+  return runtime_.receive(owner_, message, steadyNow(), wallNow());
 }
 
 void AgentExecutor::tick() { tick(wallNow()); }
@@ -3060,6 +3067,7 @@ bool AgentExecutor::setDeliveryDeadline(
 
 void AgentExecutor::tick(std::chrono::system_clock::time_point now) {
   (void)checkClock();
+  collectLiveness();
   drainPosted();
   upkeepDeliveries(now);
   upkeepLeases(now);
@@ -3178,6 +3186,14 @@ AgentExecutor::earliestDeadline() const {
   for (const auto &[id, sent] : outstanding_) {
     consider(sent.lastSent + settings_.sendRetryInterval);
     if (sent.deadline) consider(*sent.deadline);
+  }
+  {
+    // The heap's head is on the steady clock; the caller waits on the wall.
+    const std::lock_guard lock(ingress_->mutex);
+    if (const auto head = ingress_->liveHeap.top())
+      consider(wallNow() +
+               std::chrono::duration_cast<std::chrono::system_clock::duration>(
+                   *head - steadyNow()));
   }
   return best;
 }
@@ -3459,6 +3475,7 @@ SourceHealth AgentExecutor::readSourceHealth(const State &state,
   out.livenessPresent =
       fieldValue(arena, vd, profile, kProfileLastReceive).has_value() ||
       fieldValue(arena, vd, profile, kProfileLastContact).has_value();
+  readLivenessHealth(state, profile, out);
   const auto textOf = [&](zigzag::CellRef entry, std::string_view name) {
     const auto cell = fieldValue(arena, vd, entry, name);
     return cell ? arena.textOf(*cell) : std::string{};
@@ -3631,10 +3648,22 @@ AgentExecutor::bindSource(const identity::ActorPid &target,
   if (predicate == compiled->checked().predicates.end() ||
       !predicate->second.policy)
     return std::unexpected(EpistemicRefusal::NotArbitrated);
+  // Every duration a device declares is at least the floor (S-13b), so no
+  // binding can ask the host for a timer storm; checked here as well as by the
+  // adapter so a direct caller cannot bypass it.
+  const std::chrono::milliseconds floor(settings_.epistemic.heartbeatFloorMs);
+  const auto belowFloor = [&](std::optional<std::chrono::milliseconds> d) {
+    return d && *d < floor;
+  };
+  if (grant.lifetime < floor || belowFloor(grant.heartbeat) ||
+      belowFloor(grant.data))
+    return std::unexpected(EpistemicRefusal::InvalidBinding);
   Ingress::Binding binding;
+  binding.heartbeat   = grant.heartbeat;
+  binding.data        = grant.data;
   binding.alias       = grant.alias;
   binding.incarnation = grant.incarnation;
-  binding.expiresAt   = saturatingAdd(clock_.steady(), grant.lifetime);
+  binding.expiresAt   = saturatingAdd(steadyNow(), grant.lifetime);
   binding.policy      = *predicate->second.policy;
   for (const auto &param : predicate->second.params)
     binding.params.push_back(param.type.kind);
@@ -3655,7 +3684,7 @@ AgentExecutor::bindSource(const identity::ActorPid &target,
   // bind (design 5.1, S-5).
   for (const auto &[_, grants] : ingress_->healthGrants)
     for (const auto &g : grants)
-      if (!g.revoked && clock_.steady() <= g.expiresAt && g.issuer &&
+      if (!g.revoked && steadyNow() <= g.expiresAt && g.issuer &&
           g.issuer->asString() == grant.principal)
         return std::unexpected(EpistemicRefusal::SelfCertification);
   if (const auto routed = ingress_->aliases.find({pid, grant.alias});
@@ -3704,6 +3733,7 @@ AgentExecutor::bindSource(const identity::ActorPid &target,
   }
   ingress_->bindings.insert_or_assign(key, std::move(binding));
   ingress_->aliases.insert_or_assign({pid, grant.alias}, grant.principal);
+  livenessBoundLocked(target, grant.principal);
   // Every bind queues the source-change turn, ahead of the agent's work. At
   // the profile's incarnation it changes nothing, so rebinding is also how a
   // host retries an advance that failed.
@@ -3731,6 +3761,7 @@ AgentExecutor::retireSource(const identity::ActorPid &target,
     if (std::get<0>(k) == pid && std::get<1>(k) == who)
       highest = std::max(highest.value_or(0), held.incarnation);
   ingress_->unbindAll(pid, who);
+  ingress_->live.erase({pid, who});
   // The floor survives retirement: a later binding must exceed it. With no
   // binding and no floor known, the host knows of no incarnation to keep;
   // the arena's tombstone, if any, still holds its own.
@@ -3755,6 +3786,8 @@ AgentExecutor *AgentExecutor::unbindSource(const identity::ActorPid &target,
   const std::lock_guard lock(ingress_->mutex);
   ingress_->unbind(pidKey(target), std::string(principal),
                    std::string(predicate));
+  if (!ingress_->bound(pidKey(target), std::string(principal)))
+    ingress_->live.erase({pidKey(target), std::string(principal)});
   return this;
 }
 
@@ -3786,7 +3819,7 @@ AgentExecutor::boundPredicate(const identity::ActorPid &target,
   const auto found = ingress_->bindings.find(
       {pidKey(target), std::string(principal), std::string(predicate)});
   if (found == ingress_->bindings.end() ||
-      clock_.steady() > found->second.expiresAt)
+      steadyNow() > found->second.expiresAt)
     return std::nullopt;
   return BoundPredicate{found->second.incarnation, found->second.policy,
                         found->second.params};
@@ -3794,7 +3827,7 @@ AgentExecutor::boundPredicate(const identity::ActorPid &target,
 
 AgentExecutor::HostTime AgentExecutor::hostTime() const {
   const std::lock_guard lock(ingress_->mutex);
-  return {clock_.steady(), wallNow(), ingress_->wallSynchronised};
+  return {steadyNow(), wallNow(), ingress_->wallSynchronised};
 }
 
 std::optional<IngestOutcome> AgentExecutor::ingestOutcome(
@@ -3852,7 +3885,7 @@ AgentExecutor::observe(const identity::ActorPid &target,
     const auto binding =
         ingress_->bindings.find({pid, o.principal, o.predicate});
     if (binding == ingress_->bindings.end() ||
-        clock_.steady() > binding->second.expiresAt) {
+        steadyNow() > binding->second.expiresAt) {
       GLEDITOR_LOG_DEBUG(kIngressLog, "observation for an unbound source");
       return std::unexpected(EpistemicRefusal::UnknownSource);
     }
@@ -3870,7 +3903,7 @@ AgentExecutor::observe(const identity::ActorPid &target,
     b                = binding->second;
     wallSynchronised = ingress_->wallSynchronised;
   }
-  const double receivedSteady = seconds(clock_.steady().time_since_epoch());
+  const double receivedSteady = seconds(steadyNow().time_since_epoch());
   const auto refuse           = [&](EpistemicRefusal code)
       -> std::expected<TransportReceipt, EpistemicRefusal> {
     const auto name = std::string(epistemicRefusalName(code));
@@ -4529,7 +4562,7 @@ void AgentExecutor::drainPosted() {
               ingress_->bindings.find({pidKey(item.pid), item.ingest->principal,
                                        item.ingest->predicate});
           if (binding == ingress_->bindings.end() ||
-              clock_.steady() > binding->second.expiresAt)
+              steadyNow() > binding->second.expiresAt)
             refused = "UnknownSource";
           else if (binding->second.incarnation != item.ingest->incarnation)
             refused = std::string(epistemicRefusalName(
@@ -5794,7 +5827,7 @@ AgentExecutor::quiescenceLocked(const identity::ActorPid &pid,
       arena.linked(state.agent.agentCell, state.dims.outbox) ? 1U : 0U;
   report.pendingSettle =
       arena.linked(state.agent.agentCell, state.dims.pending) ? 1U : 0U;
-  report.admission = ingress_->admissionOf(key, clock_.steady());
+  report.admission = ingress_->admissionOf(key, steadyNow());
   return report;
 }
 
@@ -5844,7 +5877,7 @@ AgentExecutor::boundPredicatesLocked(const identity::ActorPid &pid) const {
 }
 
 bool AgentExecutor::admissionClosedLocked(const identity::ActorPid &pid) const {
-  return ingress_->admissionOf(pidKey(pid), clock_.steady()) !=
+  return ingress_->admissionOf(pidKey(pid), steadyNow()) !=
          AdmissionState::Open;
 }
 
@@ -5992,7 +6025,7 @@ AgentExecutor::acquireSwap(const identity::ActorPid &pid,
   std::unique_lock ingress(ingress_->mutex);
   std::unique_lock health(healthMutex_);
   const auto key   = pidKey(pid);
-  const auto state = ingress_->admissionOf(key, clock_.steady());
+  const auto state = ingress_->admissionOf(key, steadyNow());
   if (state == AdmissionState::Swapping ||
       (requirePaused && state != AdmissionState::Paused))
     return notQuiescent("admission", static_cast<std::uint64_t>(state));
@@ -6023,7 +6056,7 @@ std::expected<AgentExecutor *, TransferRefusal> AgentExecutor::pauseAdmission(
   const auto span  = std::clamp(ttl.value_or(settings_.admissionPause),
                                 std::chrono::milliseconds(kMinAdmissionPauseMs),
                                 std::chrono::milliseconds(kMaxAdmissionPauseMs));
-  const auto until = saturatingAdd(clock_.steady(), span);
+  const auto until = saturatingAdd(steadyNow(), span);
   const std::lock_guard lock(ingress_->mutex);
   auto &admission = ingress_->admission[pidKey(pid)];
   admission.pausedUntil =
@@ -6742,6 +6775,8 @@ AgentSettings AgentSettings::fromModel(const xanadu::SystemStoreModel &model) {
   ep.wallSyncUncertaintyMs =
       model.getInt64(xanadu::settings::kVagentEpistemicWallSyncUncertaintyMs,
                      ep.wallSyncUncertaintyMs);
+  loadSigned(xanadu::settings::kVagentEpistemicHeartbeatFloorMs,
+             ep.heartbeatFloorMs);
 
   if (const auto checked = ep.validate(); checked.has_value()) {
     settings.epistemic = ep;

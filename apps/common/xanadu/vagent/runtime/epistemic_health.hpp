@@ -71,6 +71,13 @@ struct SourceHealth {
   std::uint64_t faultIncarnation{0};
   /// Whether `last_receive` or `last_contact` is present.
   bool livenessPresent{false};
+  /// Durable arena state of I3-3c1 (design 5.2): beside the state and never
+  /// part of it. A silent source's cause is `heartbeat`, `rebase` or `clock`;
+  /// `staleStreams` counts the streams that went `data_ms` without a commit.
+  /// They move no `R` or `N`, add no reason and leave `state` as it was.
+  bool silent{false};
+  std::optional<std::string> silentCause;
+  std::size_t staleStreams{0};
   /// Host audit sink call and throw counts for the actor (R3-10).
   std::uint64_t auditCalls{0};
   std::uint64_t auditThrows{0};

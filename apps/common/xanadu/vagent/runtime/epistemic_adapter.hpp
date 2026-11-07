@@ -26,6 +26,7 @@
 #include <cstdint>
 #include <expected>
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -62,6 +63,8 @@ enum class AdapterLimitError : std::uint8_t {
   InvalidClockPairTimeout,
   InvalidWallSyncUncertainty,
   InvalidMaxPathLateness,
+  InvalidHeartbeatFloor,
+  InvalidSequenceGapNote,
 };
 
 [[nodiscard]] std::string_view toString(AdapterLimitError error) noexcept;
@@ -76,6 +79,10 @@ struct AdapterLimits {
   std::int64_t clockPairTimeoutMs{kDefaultClockPairTimeoutMs};
   std::int64_t wallSyncUncertaintyMs{kDefaultWallSyncUncertaintyMs};
   std::int64_t maxPathLatenessMs{kDefaultMaxPathLatenessMs};
+  /// Read by the executor too (`EpistemicLimits::heartbeatFloorMs`), from the
+  /// same setting and the same default constant.
+  std::int64_t heartbeatFloorMs{kDefaultHeartbeatFloorMs};
+  std::int64_t sequenceGapNote{kDefaultSequenceGapNote};
 
   [[nodiscard]] std::expected<void, AdapterLimitError> validate() const;
   /// Read from `system://settings`. A value outside its range is warned
@@ -93,8 +100,9 @@ enum class IncarnationPolicy : std::uint8_t {
   Signed,
 };
 
-/// One row of the binding table (9.2) as a2 uses it; W1 builds it from the
-/// approved carrier, and the liveness fields arrive with I3-3c.
+/// One row of the binding table (9.2); W1 builds it from the approved carrier.
+/// The liveness expectations (c1) are optional device facts, and every
+/// duration, the lifetime included, is at least `heartbeat_floor_ms`.
 struct SourceBinding {
   std::string alias;
   /// SHA-256 of the device key as 64 lowercase hex, compared as text.
@@ -107,6 +115,12 @@ struct SourceBinding {
   std::optional<std::int64_t> driftPpm;
   std::chrono::steady_clock::duration lifetime{};
   std::vector<std::string> predicates;
+  /// How often the device sends a heartbeat. A source's expectation is the
+  /// smallest among the principal's live bindings on the agent.
+  std::optional<std::chrono::milliseconds> heartbeat;
+  /// How often a predicate commits a reading, per predicate; a key must name
+  /// one of `predicates`.
+  std::map<std::string, std::chrono::milliseconds> data;
 };
 
 /// What the adapter tells the host's audit sink, outside the outcome log.
@@ -171,6 +185,11 @@ public:
   [[nodiscard]] std::optional<std::chrono::steady_clock::time_point>
   clockPending(const identity::ActorPid &target,
                std::string_view principal) const;
+
+  /// Gaps above `sequence_gap_note` between consecutive verified sequences of
+  /// @p principal, any kind, summed over its incarnations (design 5.2, m4). A
+  /// host diagnostic only: nothing reads it to decide.
+  [[nodiscard]] std::uint64_t sequenceGaps(std::string_view principal) const;
 
   [[nodiscard]] const SignedVerifierStats &stats() const noexcept;
   [[nodiscard]] const AdapterLimits &limits() const noexcept;
