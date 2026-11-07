@@ -361,4 +361,21 @@ TEST(VagentDeclsTest, GapStubsFileUnderStubbedButDesignedOnesDoNot) {
               ::testing::UnorderedElementsAre("f", "g"));
 }
 
+TEST(VagentDeclsTest, CapturingCodeLiteralEmitsInsideMemberBodies) {
+  DeclHarness h;
+  auto image = h.lower(R"(
+    module demo
+    agent A {
+      var n: Int := 5
+      def f(): Int { let c := code"n + 1"; 0 }
+    }
+  )");
+  ASSERT_TRUE(image.has_value());
+  if (!image) return;
+  // `n` is a state-side var binding — the env join gives the
+  // literal's cap$0 alias its holder cell, so the body emits rather
+  // than falling into the stub audit.
+  EXPECT_THAT(image->stubbed, ::testing::IsEmpty());
+}
+
 } // namespace

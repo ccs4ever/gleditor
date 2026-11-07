@@ -160,13 +160,42 @@ compileFragment(const Expr &literal, const FragmentContext &context,
              "code\"…\" literal has no checked fragment info; the "
              "check stage must run before compile");
 
+    // §5.3's env join — each cap$N alias this literal captured names
+    // an outside binding; the alias resolves to that binding's own
+    // cell through the shared table. The cells"…" anchor spelling
+    // (cap_0 for cap$0) joins too, carrying the capture's stable bit —
+    // the stable-anchor gate reads it as the discriminator. A
+    // captured name the table does not know (an enclosing frame
+    // local, which has no cell yet) stays unbound and refuses below
+    // rather than silently binding.
+    std::optional<CompilerBindings> joined;
+    if (!record->second.env.empty() && context.bindings) {
+      CompilerBindings merged = *context.bindings;
+      for (const auto &[alias, captured] : record->second.env) {
+        const auto found = merged.find(captured);
+        if (found == merged.end()) continue;
+        merged.emplace(alias, CompilerBinding{found->second.cell,
+                                              found->second.type,
+                                              found->second.stateSide});
+        if (context.captures)
+          if (const auto rec = context.captures->find(alias);
+              rec != context.captures->end() &&
+              !rec->second.anchorAlias.empty())
+            merged.emplace(rec->second.anchorAlias,
+                           CompilerBinding{found->second.cell,
+                                           found->second.type,
+                                           rec->second.stable});
+      }
+      joined = std::move(merged);
+    }
+
     // Emit the body through the scalar Emitter — parameters seeded as
     // name-keyed frame-bound locals, the Return tail and published
     // result/produced cells inside the usual choice wrapper.
     FragmentBodyRequest request{
         .body       = record->second.body.body.get(),
         .parameters = record->second.body.parameters,
-        .bindings   = context.bindings,
+        .bindings   = joined ? &*joined : context.bindings,
         .fragments  = &context,
         .use        = ResultUse::Value,
         .ownerFields =
