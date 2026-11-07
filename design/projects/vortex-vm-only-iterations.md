@@ -1765,3 +1765,39 @@ Logs: `/tmp/vql-literal-predicate-build.log`, `/tmp/vql-literal-predicate-focuse
 `/tmp/vql-literal-predicate-tests.log`, `/tmp/vql-literal-predicate-cli.log`,
 `/tmp/vql-literal-predicate-callables.log`, `/tmp/vql-literal-predicate-overlay.log`,
 `/tmp/vql-literal-predicate-format.log`.
+
+## Iteration 46: Boolean literal predicates in recursive traversal functors
+
+Closed candidate/literal predicate templates now retain the parser's flat Boolean structure: ordered
+OR terms containing ordered AND factors, with factor-level negation. Every leaf remains an exact
+current-candidate/direct-primitive comparison. Exact keys retain bracket, term and factor
+boundaries, order and polarity; reconstruction uses the existing VM Boolean graph lowering without
+algebraic negation rewrites. Captures, computed/truthiness leaves, nested Boolean values and other
+decorations remain outside this native subset.
+
+Specialization work charges one unit per predicate bracket and term, five per factor (record,
+operator, operand order, polarity and type), plus primitive widths or UTF-8 literal bytes. All
+normalization, key/state and rehydration passes use this policy before copying. Syntax accounting
+charges each Boolean root, term and comparison-factor structure before the shared recognizer walks
+it; unsupported forms retain the full scope/cycle-aware walk. These limits cover their recorded
+work, not total CPU or heap use.
+
+Validation: full `make -j$(nproc)`, all 1,005 affected tests across 91 suites and all 87 focused
+tests across seven suites passed. Eight new cases cover native self/mutual recursion, AND/OR
+precedence and negation, grouping/order/polarity variant identity and reuse, IEEE NaN negation,
+unsupported and cyclic trees, node/template work limits with atomic refusal/retry, recursive
+source-free export and actual host/mesh SOURCE output. Compound predicates also run before static
+clamps. A real headless `vquery` run returned `keep` through the recursive Boolean route.
+Independent Luna architecture, senior and resource reviews accepted the bounded stage. Repository
+formatting uses clang-format 19.
+
+The broader audit retains eight failures and one skip (132 passes); the callable audit retains the
+same seven failures (33 passes). These are not full-suite passes. The initial audit launches during
+the linker rewrite did not execute; the reported audits were rerun after the build finished.
+Captured/computed predicates, nested Boolean values, general closures and the remaining frontend and
+lifecycle work still leave §4.12 incomplete. No performance improvement is claimed.
+
+Logs: `/tmp/vql-boolean-predicate-build.log`, `/tmp/vql-boolean-predicate-focused.log`,
+`/tmp/vql-boolean-predicate-tests.log`, `/tmp/vql-boolean-predicate-cli.log`,
+`/tmp/vql-boolean-predicate-callables.log`, `/tmp/vql-boolean-predicate-overlay.log`,
+`/tmp/vql-boolean-predicate-format.log`.

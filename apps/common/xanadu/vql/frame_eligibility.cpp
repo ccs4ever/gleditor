@@ -265,28 +265,32 @@ private:
         !path.steps.empty();
     sequence(path.steps, depth,
              [&](const PathStep &step, const std::size_t stepDepth) {
-               // Charge the fixed AST shape before the shallow shared
-               // recognizer inspects any predicate fields. Unsupported shapes
+               // Charge the candidate Boolean tree before the shared
+               // recognizer inspects predicate fields. Unsupported shapes
                // fall back to the ordinary bounded AST walk below.
-               for (std::size_t index = 0; index < step.predicates.size();
-                    ++index) {
-                 chargeClosedLiteralPredicateView(stepDepth + 1);
+               for (const auto &predicate : step.predicates) {
+                 chargeClosedLiteralPredicateView(predicate, stepDepth + 1);
                }
                if (!isClosedTraversalFunctorStep(step)) closed = false;
              });
     return closed;
   }
 
-  void chargeClosedLiteralPredicateView(const std::size_t depth) {
-    tick(depth);     // BooleanExpr
-    tick(depth + 1); // BooleanTerm
-    tick(depth + 2); // BooleanFactor
-    tick(depth + 3); // ComparisonExpr
-    tick(depth + 3); // Comparison operator
-    tick(depth + 4); // Left ValueExpr
-    tick(depth + 4); // Right ValueExpr
-    tick(depth + 5); // Current-context PathExpression
-    tick(depth + 5); // ScalarLiteral
+  void chargeClosedLiteralPredicateView(const BooleanExpr &predicate,
+                                        const std::size_t depth) {
+    tick(depth); // BooleanExpr
+    for (const auto &term : predicate.terms) {
+      tick(depth + 1); // BooleanTerm
+      for (std::size_t index = 0; index < term.factors.size(); ++index) {
+        tick(depth + 2); // BooleanFactor
+        tick(depth + 3); // ComparisonExpr
+        tick(depth + 3); // Comparison operator
+        tick(depth + 4); // Left ValueExpr
+        tick(depth + 4); // Right ValueExpr
+        tick(depth + 5); // Current-context PathExpression
+        tick(depth + 5); // ScalarLiteral
+      }
+    }
   }
 
   CallSite::FunctorArgumentSource

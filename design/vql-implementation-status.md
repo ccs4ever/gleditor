@@ -844,3 +844,20 @@ formatting with clang-format 19 and independent Luna gates passed. Broader audit
 eight route failures/one skip and seven callable failures. These are not full-suite passes.
 Captured/computed predicates, compound Boolean forms and the other recorded
 closure/frontend/lifecycle gaps still leave §4.12 incomplete; no speedup is claimed.
+
+## Boolean literal predicates in recursive functor frames
+
+Closed traversal variants retain ordered OR terms and AND factors with factor-level negation. Every
+leaf remains a direct candidate/literal scalar comparison. Nested exact keys preserve Boolean
+grouping, order and polarity; ordinary VM branches and `Not` preserve floating-point comparison
+semantics without algebraic rewriting. Structural/payload specialization accounting and syntax
+analysis include the expanded tree. See [iteration 46](projects/vortex-vm-only-iterations.md).
+
+Full build, all 1,005 affected tests across 91 suites and all 87 focused tests across seven suites
+passed. Eight new cases include actual recursion, key boundaries/order/polarity, NaN negation,
+malformed/cyclic refusals, atomic limits/retry, source-free export/reload and host/mesh SOURCE
+outputs. A real headless CLI run returned `keep`. Independent Luna gates accepted the bounded stage.
+Repository formatting with clang-format 19 passed. Broader audits retain the same eight route
+failures/one skip and seven callable failures. These are not full-suite passes. Captured/computed
+predicates, nested Boolean values and the recorded closure, frontend and lifecycle gaps still leave
+§4.12 incomplete; no speedup is claimed.

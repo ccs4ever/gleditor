@@ -10,8 +10,10 @@
 
 namespace xanadu::vql {
 namespace {
-constexpr std::size_t closedFunctorPredicateHeaderWork =
-    4; // One record, operator, operand order and typed-literal tag.
+constexpr std::size_t closedFunctorPredicateHeaderWork     = 1;
+constexpr std::size_t closedFunctorPredicateTermHeaderWork = 1;
+constexpr std::size_t closedFunctorPredicateFactorHeaderWork =
+    5; // Factor, operator, operand order, negation and typed-literal tag.
 
 template <typename Variant>
 std::size_t predicateTemplateWork(const Variant &literal) noexcept {
@@ -25,9 +27,16 @@ std::size_t predicateTemplateWork(const Variant &literal) noexcept {
       },
       literal);
   if (payload > std::numeric_limits<std::size_t>::max() -
-                    closedFunctorPredicateHeaderWork)
+                    closedFunctorPredicateFactorHeaderWork)
     return std::numeric_limits<std::size_t>::max();
-  return closedFunctorPredicateHeaderWork + payload;
+  return closedFunctorPredicateFactorHeaderWork + payload;
+}
+
+void addWork(std::size_t &total, const std::size_t amount) noexcept {
+  if (amount > std::numeric_limits<std::size_t>::max() - total)
+    total = std::numeric_limits<std::size_t>::max();
+  else
+    total += amount;
 }
 } // namespace
 
@@ -122,13 +131,30 @@ std::size_t VQLCompiler::closedFunctorClampWork(const bool hasEnd) noexcept {
 }
 
 std::size_t
-VQLCompiler::closedFunctorPredicateWork(const ScalarLiteral &literal) noexcept {
-  return predicateTemplateWork(literal.value);
+VQLCompiler::closedFunctorPredicateWork(const BooleanExpr &predicate) noexcept {
+  std::size_t work = closedFunctorPredicateHeaderWork;
+  const auto view  = closedLiteralPredicateView(predicate);
+  if (!view) return std::numeric_limits<std::size_t>::max();
+  for (const auto &term : view->terms) {
+    addWork(work, closedFunctorPredicateTermHeaderWork);
+    for (const auto &factor : term.factors) {
+      const auto comparison = closedLiteralComparisonView(factor);
+      if (!comparison) return std::numeric_limits<std::size_t>::max();
+      addWork(work, predicateTemplateWork(comparison->literal.get().value));
+    }
+  }
+  return work;
 }
 
 std::size_t VQLCompiler::closedFunctorPredicateWork(
-    const ClosedFunctorPredicateLiteral &literal) noexcept {
-  return predicateTemplateWork(literal);
+    const ClosedFunctorPredicateKey &predicate) noexcept {
+  std::size_t work = closedFunctorPredicateHeaderWork;
+  for (const auto &term : predicate.terms) {
+    addWork(work, closedFunctorPredicateTermHeaderWork);
+    for (const auto &factor : term.factors)
+      addWork(work, predicateTemplateWork(factor.literal));
+  }
+  return work;
 }
 
 std::size_t VQLCompiler::closedFunctorTemplateWork(
@@ -147,7 +173,7 @@ std::size_t VQLCompiler::closedFunctorTemplateWork(
       if (step.rangeClamp)
         add(closedFunctorClampWork(step.rangeClamp->end.has_value()));
       for (const auto &predicate : step.predicates)
-        add(closedFunctorPredicateWork(predicate.literal));
+        add(closedFunctorPredicateWork(predicate));
     }
   }
   return work;

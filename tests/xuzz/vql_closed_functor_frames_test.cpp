@@ -451,8 +451,9 @@ TEST(VQLClosedFunctorFrameTest,
       h.compile("def pure walk($nodes: Stream<Cell>, $route): Stream<Cell> := "
                 "walk($nodes/$route, $route); "
                 "walk(##/+d.items, /+d.next[. = \"next\" and . != \"other\"])");
-  EXPECT_FALSE(compoundPredicate.success);
-  EXPECT_FALSE(compoundPredicate.cursor);
+  ASSERT_TRUE(compoundPredicate.success) << compoundPredicate.errorMessage;
+  EXPECT_FALSE(
+      invokeDescriptors(compoundPredicate, h.vm, h.core, "walk").empty());
 }
 
 TEST(VQLClosedFunctorFrameTest,

@@ -3,19 +3,30 @@
 
 #include <functional>
 #include <optional>
+#include <span>
 
 #include "common/xanadu/vql/ast.hpp"
 
 namespace xanadu::vql {
 
-struct ClosedLiteralPredicateView {
+struct ClosedLiteralComparisonView {
   CompOp op{CompOp::Equal};
   bool literalOnLeft{};
+  bool negated{};
   std::reference_wrapper<const ScalarLiteral> literal;
 };
 
-/// Views a single, closed comparison between the current context and a scalar
-/// literal. The AST is inspected only at its fixed outer shape.
+/// Views one closed comparison factor between the current context and a
+/// scalar literal. The AST is inspected only at its fixed outer shape.
+[[nodiscard]] std::optional<ClosedLiteralComparisonView>
+closedLiteralComparisonView(const BooleanFactor &factor) noexcept;
+
+struct ClosedLiteralPredicateView {
+  std::span<const BooleanTerm> terms;
+};
+
+/// Views a flat Boolean expression whose nonempty terms and factors are all
+/// closed scalar comparisons. The view borrows the existing term vectors.
 [[nodiscard]] std::optional<ClosedLiteralPredicateView>
 closedLiteralPredicateView(const BooleanExpr &predicate) noexcept;
 

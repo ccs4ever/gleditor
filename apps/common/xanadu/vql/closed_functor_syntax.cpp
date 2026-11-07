@@ -33,15 +33,9 @@ bool isSupportedComparison(const CompOp op) noexcept {
 
 } // namespace
 
-std::optional<ClosedLiteralPredicateView>
-closedLiteralPredicateView(const BooleanExpr &predicate) noexcept {
-  if (predicate.terms.size() != 1 ||
-      predicate.terms.front().factors.size() != 1)
-    return std::nullopt;
-
-  const auto &factor = predicate.terms.front().factors.front();
-  if (factor.negated || !std::holds_alternative<ComparisonExpr>(factor.test))
-    return std::nullopt;
+std::optional<ClosedLiteralComparisonView>
+closedLiteralComparisonView(const BooleanFactor &factor) noexcept {
+  if (!std::holds_alternative<ComparisonExpr>(factor.test)) return std::nullopt;
 
   const auto &comparison = std::get<ComparisonExpr>(factor.test);
   if (!isSupportedComparison(comparison.op) || !comparison.left ||
@@ -51,18 +45,32 @@ closedLiteralPredicateView(const BooleanExpr &predicate) noexcept {
   const auto literalView = [&](const ValueExpr &context,
                                const ValueExpr &literal,
                                const bool literalOnLeft)
-      -> std::optional<ClosedLiteralPredicateView> {
+      -> std::optional<ClosedLiteralComparisonView> {
     if (!isCurrentContextPath(context)) return std::nullopt;
     const auto *scalar = std::get_if<ScalarLiteral>(&literal.kind);
     if (!scalar) return std::nullopt;
-    return ClosedLiteralPredicateView{.op            = comparison.op,
-                                      .literalOnLeft = literalOnLeft,
-                                      .literal       = std::cref(*scalar)};
+    return ClosedLiteralComparisonView{.op            = comparison.op,
+                                       .literalOnLeft = literalOnLeft,
+                                       .negated       = factor.negated,
+                                       .literal       = std::cref(*scalar)};
   };
 
   if (const auto view = literalView(*comparison.right, *comparison.left, true))
     return view;
   return literalView(*comparison.left, *comparison.right, false);
+}
+
+std::optional<ClosedLiteralPredicateView>
+closedLiteralPredicateView(const BooleanExpr &predicate) noexcept {
+  if (predicate.terms.empty()) return std::nullopt;
+  for (const auto &term : predicate.terms) {
+    if (term.factors.empty()) return std::nullopt;
+    for (const auto &factor : term.factors) {
+      if (!closedLiteralComparisonView(factor)) return std::nullopt;
+    }
+  }
+  return ClosedLiteralPredicateView{
+      .terms = std::span<const BooleanTerm>{predicate.terms}};
 }
 
 bool isClosedTraversalFunctorStep(const PathStep &step) noexcept {

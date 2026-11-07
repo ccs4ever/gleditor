@@ -264,13 +264,12 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
             chargeClosedFunctorTemplateWork(
                 closedFunctorClampWork(step.rangeClamp->end.has_value()));
           for (const auto &predicate : step.predicates) {
-            const auto view = closedLiteralPredicateView(predicate);
-            if (!view) {
+            if (!closedLiteralPredicateView(predicate)) {
               plain = false;
               break;
             }
             chargeClosedFunctorTemplateWork(
-                closedFunctorPredicateWork(view->literal.get()));
+                closedFunctorPredicateWork(predicate));
           }
           if (!plain) break;
         }
@@ -296,19 +295,34 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
               if (!view)
                 throw std::logic_error(
                     "closed traversal predicate changed after validation");
-              auto literal = std::visit(
-                  [](const auto &value) -> ClosedFunctorPredicateLiteral {
-                    using T = std::decay_t<decltype(value)>;
-                    if constexpr (std::is_same_v<T, double>)
-                      return scalarValue(value).bits;
-                    else
-                      return value;
-                  },
-                  view->literal.get().value);
-              stepKey.predicates.push_back(ClosedFunctorPredicateKey{
-                  .op            = view->op,
-                  .literalOnLeft = view->literalOnLeft,
-                  .literal       = std::move(literal)});
+              ClosedFunctorPredicateKey predicateKey;
+              predicateKey.terms.reserve(view->terms.size());
+              for (const auto &term : view->terms) {
+                ClosedFunctorPredicateTermKey termKey;
+                termKey.factors.reserve(term.factors.size());
+                for (const auto &factor : term.factors) {
+                  const auto comparison = closedLiteralComparisonView(factor);
+                  if (!comparison)
+                    throw std::logic_error(
+                        "closed traversal factor changed after validation");
+                  auto literal = std::visit(
+                      [](const auto &value) -> ClosedFunctorPredicateLiteral {
+                        using T = std::decay_t<decltype(value)>;
+                        if constexpr (std::is_same_v<T, double>)
+                          return scalarValue(value).bits;
+                        else
+                          return value;
+                      },
+                      comparison->literal.get().value);
+                  termKey.factors.push_back(ClosedFunctorPredicateFactorKey{
+                      .negated       = comparison->negated,
+                      .op            = comparison->op,
+                      .literalOnLeft = comparison->literalOnLeft,
+                      .literal       = std::move(literal)});
+                }
+                predicateKey.terms.push_back(std::move(termKey));
+              }
+              stepKey.predicates.push_back(std::move(predicateKey));
             }
             formal.steps.push_back(std::move(stepKey));
           }
@@ -1242,33 +1256,43 @@ void VQLCompiler::compileFrameDefinition(const DefDeclaration &definition,
                       .rangeClamp = rangeClamp};
         step.predicates.reserve(templateStep.predicates.size());
         for (const auto &predicate : templateStep.predicates) {
-          const auto literal = std::visit(
-              [](const auto &value) -> ScalarLiteral {
-                using T = std::decay_t<decltype(value)>;
-                if constexpr (std::is_same_v<T, std::uint64_t>)
-                  return ScalarLiteral{.value = std::bit_cast<double>(value)};
-                else
-                  return ScalarLiteral{.value = value};
-              },
-              predicate.literal);
-          ValueExpr literalExpr{.kind = literal};
-          PathExpression contextPath;
-          contextPath.anchor.kind = AnchorKind::Context;
-          ValueExpr contextExpr{
-              .kind = std::make_shared<PathExpression>(std::move(contextPath))};
-          ComparisonExpr comparison;
-          comparison.op = predicate.op;
-          comparison.left =
-              predicate.literalOnLeft
-                  ? std::make_shared<ValueExpr>(std::move(literalExpr))
-                  : std::make_shared<ValueExpr>(std::move(contextExpr));
-          comparison.right =
-              predicate.literalOnLeft
-                  ? std::make_shared<ValueExpr>(std::move(contextExpr))
-                  : std::make_shared<ValueExpr>(std::move(literalExpr));
-          BooleanFactor factor{.test = std::move(comparison)};
-          step.predicates.push_back(BooleanExpr{
-              .terms = {BooleanTerm{.factors = {std::move(factor)}}}});
+          BooleanExpr predicateExpr;
+          predicateExpr.terms.reserve(predicate.terms.size());
+          for (const auto &term : predicate.terms) {
+            BooleanTerm termExpr;
+            termExpr.factors.reserve(term.factors.size());
+            for (const auto &factor : term.factors) {
+              auto literal = std::visit(
+                  [](const auto &value) -> ScalarLiteral {
+                    using T = std::decay_t<decltype(value)>;
+                    if constexpr (std::is_same_v<T, std::uint64_t>)
+                      return ScalarLiteral{.value =
+                                               std::bit_cast<double>(value)};
+                    else
+                      return ScalarLiteral{.value = value};
+                  },
+                  factor.literal);
+              ValueExpr literalExpr{.kind = std::move(literal)};
+              PathExpression contextPath;
+              contextPath.anchor.kind = AnchorKind::Context;
+              ValueExpr contextExpr{.kind = std::make_shared<PathExpression>(
+                                        std::move(contextPath))};
+              ComparisonExpr comparison;
+              comparison.op = factor.op;
+              comparison.left =
+                  factor.literalOnLeft
+                      ? std::make_shared<ValueExpr>(std::move(literalExpr))
+                      : std::make_shared<ValueExpr>(std::move(contextExpr));
+              comparison.right =
+                  factor.literalOnLeft
+                      ? std::make_shared<ValueExpr>(std::move(contextExpr))
+                      : std::make_shared<ValueExpr>(std::move(literalExpr));
+              termExpr.factors.push_back(BooleanFactor{
+                  .negated = factor.negated, .test = std::move(comparison)});
+            }
+            predicateExpr.terms.push_back(std::move(termExpr));
+          }
+          step.predicates.push_back(std::move(predicateExpr));
         }
         steps.push_back(std::move(step));
       }

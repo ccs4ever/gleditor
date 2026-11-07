@@ -115,10 +115,21 @@ private:
   };
   using ClosedFunctorPredicateLiteral =
       std::variant<std::string, std::int64_t, bool, std::uint64_t>;
-  struct ClosedFunctorPredicateKey {
+  struct ClosedFunctorPredicateFactorKey {
+    bool negated{false};
     CompOp op{CompOp::Equal};
     bool literalOnLeft{false};
     ClosedFunctorPredicateLiteral literal;
+
+    bool operator==(const ClosedFunctorPredicateFactorKey &) const = default;
+  };
+  struct ClosedFunctorPredicateTermKey {
+    std::vector<ClosedFunctorPredicateFactorKey> factors;
+
+    bool operator==(const ClosedFunctorPredicateTermKey &) const = default;
+  };
+  struct ClosedFunctorPredicateKey {
+    std::vector<ClosedFunctorPredicateTermKey> terms;
 
     bool operator==(const ClosedFunctorPredicateKey &) const = default;
   };
@@ -171,15 +182,22 @@ private:
           }
           combine(step.predicates.size());
           for (const auto &predicate : step.predicates) {
-            combine(std::hash<CompOp>{}(predicate.op));
-            combine(std::hash<bool>{}(predicate.literalOnLeft));
-            combine(predicate.literal.index());
-            std::visit(
-                [&combine](const auto &literal) {
-                  combine(
-                      std::hash<std::decay_t<decltype(literal)>>{}(literal));
-                },
-                predicate.literal);
+            combine(predicate.terms.size());
+            for (const auto &term : predicate.terms) {
+              combine(term.factors.size());
+              for (const auto &factor : term.factors) {
+                combine(std::hash<bool>{}(factor.negated));
+                combine(std::hash<CompOp>{}(factor.op));
+                combine(std::hash<bool>{}(factor.literalOnLeft));
+                combine(factor.literal.index());
+                std::visit(
+                    [&combine](const auto &literal) {
+                      combine(std::hash<std::decay_t<decltype(literal)>>{}(
+                          literal));
+                    },
+                    factor.literal);
+              }
+            }
           }
         }
       }
@@ -210,9 +228,9 @@ private:
   void chargeClosedFunctorTemplateWork(std::size_t amount);
   [[nodiscard]] static std::size_t closedFunctorClampWork(bool hasEnd) noexcept;
   [[nodiscard]] static std::size_t
-  closedFunctorPredicateWork(const ScalarLiteral &literal) noexcept;
+  closedFunctorPredicateWork(const BooleanExpr &predicate) noexcept;
   [[nodiscard]] static std::size_t closedFunctorPredicateWork(
-      const ClosedFunctorPredicateLiteral &literal) noexcept;
+      const ClosedFunctorPredicateKey &predicate) noexcept;
   [[nodiscard]] std::size_t closedFunctorTemplateWork(
       std::span<const ClosedFunctorFormalKey> templates) const;
 
