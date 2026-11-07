@@ -35,6 +35,7 @@
 
 #include "common/xanadu/identity/identity_engine.hpp"
 #include "common/xanadu/identity/identity_layout.hpp"
+#include "common/xanadu/vagent/runtime/epistemic_adapter_clock.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_adapter_verify.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_ingress.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_limits.hpp"
@@ -55,14 +56,26 @@ inline constexpr std::size_t kMaxPendingSettles = 4096;
 enum class AdapterLimitError : std::uint8_t {
   InvalidSignedIngress,
   InvalidIncarnationStep,
+  InvalidClockDrift,
+  InvalidClockRepairFraction,
+  InvalidClockPairInterval,
+  InvalidClockPairTimeout,
+  InvalidWallSyncUncertainty,
+  InvalidMaxPathLateness,
 };
 
 [[nodiscard]] std::string_view toString(AdapterLimitError error) noexcept;
 
-/// The settings of `i3-3-design.md` 9.1 that slices a1 and a2 read.
+/// The settings of `i3-3-design.md` 9.1 that slices a1, a2 and b1 read.
 struct AdapterLimits {
   SignedIngressLimits verify;
   std::int64_t incarnationStep{kDefaultIncarnationStep};
+  std::int64_t clockDriftPpm{kDefaultClockDriftPpm};
+  double clockRepairFraction{kDefaultClockRepairFraction};
+  std::int64_t clockPairIntervalMs{kDefaultClockPairIntervalMs};
+  std::int64_t clockPairTimeoutMs{kDefaultClockPairTimeoutMs};
+  std::int64_t wallSyncUncertaintyMs{kDefaultWallSyncUncertaintyMs};
+  std::int64_t maxPathLatenessMs{kDefaultMaxPathLatenessMs};
 
   [[nodiscard]] std::expected<void, AdapterLimitError> validate() const;
   /// Read from `system://settings`. A value outside its range is warned
@@ -89,6 +102,9 @@ struct SourceBinding {
   std::variant<PinnedTrust, DelegatedTrust> trust{PinnedTrust{}};
   IncarnationPolicy incarnationPolicy{IncarnationPolicy::Fixed};
   std::uint64_t incarnation{1};
+  /// The device's clock drift bound in parts per million, when it states one;
+  /// else `vagent.epistemic_clock_drift_ppm`.
+  std::optional<std::int64_t> driftPpm;
   std::chrono::steady_clock::duration lifetime{};
   std::vector<std::string> predicates;
 };
@@ -132,11 +148,18 @@ public:
                            std::string_view principal);
 
   /// Verify @p bytes from @p peer and hand an observation to its agent. The
-  /// receipt means queued, as `observe`'s does.
+  /// receipt means queued, as `observe`'s does. A `clock_pair` reply that
+  /// pairs gets a receipt with an empty event ID: nothing was queued.
   [[nodiscard]] std::expected<TransportReceipt, EpistemicRefusal>
   ingest(std::string_view bytes, const TransportPeer &peer);
 
   EpistemicAdapter *setAuditSink(IngressAuditSink sink);
+  /// Where a clock challenge goes so the host can deliver it to the device.
+  /// Called after the adapter's lock is released, so the sink may call back
+  /// in. Without a sink no pairing starts.
+  EpistemicAdapter *setChallengeSink(ChallengeSink sink);
+  /// Replace the CSPRNG draw of a challenge's nonce, to test its failure.
+  EpistemicAdapter *setNonceSource(NonceSource source);
   /// Forget every audience read so far, as after a resume: the next message
   /// for an agent reads its committed identifier again.
   EpistemicAdapter *clearAudiences();
@@ -145,6 +168,10 @@ public:
   [[nodiscard]] const AdapterLimits &limits() const noexcept;
 
 private:
+  /// `ingest` under the adapter's mutex; sinks are called after it.
+  [[nodiscard]] std::expected<TransportReceipt, EpistemicRefusal>
+  ingestLocked(std::string_view bytes, const TransportPeer &peer);
+
   struct State;
   std::unique_ptr<State> state_;
 };

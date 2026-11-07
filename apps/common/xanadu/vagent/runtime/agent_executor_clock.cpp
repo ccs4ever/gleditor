@@ -7,6 +7,7 @@
  */
 #include "common/xanadu/vagent/runtime/agent_executor_internal.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <gleditor/logging.hpp>
 
@@ -33,22 +34,67 @@ double seconds(std::int64_t nanoseconds) {
   return static_cast<double>(nanoseconds) / kNanosPerSecond;
 }
 
-bool inRange(double value) {
+} // namespace
+
+bool inClockRange(const double value) {
   return std::isfinite(value) && std::abs(value) <= kMaxClockSeconds;
 }
 
-/// u_M(x): the mapping's uncertainty at its anchor, widened by drift.
-double mappingUncertainty(const ClockMapping &m, double x) {
+double mappingUncertainty(const ClockMapping &m, const double x) {
   return m.uncertainty + kPartsPerMillion * m.driftPpm * std::abs(x - m.anchor);
 }
 
 bool validMapping(const ClockMapping &m) {
-  return inRange(m.offset) && inRange(m.anchor) &&
+  return inClockRange(m.offset) && inClockRange(m.anchor) &&
          std::isfinite(m.uncertainty) && m.uncertainty >= 0.0 &&
          std::isfinite(m.driftPpm) && m.driftPpm >= 0.0;
 }
 
-} // namespace
+bool sentInFuture(const double mappedSent, const double clockUncertainty,
+                  const double mappedUncertainty, const double receipt,
+                  const double skew) {
+  return mappedSent > receipt + clockUncertainty + mappedUncertainty + skew;
+}
+
+ExpiryVerdict classifyExpiry(const ClockMapping &m, const std::int64_t expires,
+                             const double receipt) {
+  const double e            = seconds(expires);
+  const double mappedExpiry = e + m.offset;
+  const double uMe          = mappingUncertainty(m, e);
+  if (!inClockRange(mappedExpiry) || !std::isfinite(uMe))
+    return ExpiryVerdict::Invalid;
+  return mappedExpiry + uMe < receipt ? ExpiryVerdict::Expired
+                                      : ExpiryVerdict::Live;
+}
+
+std::optional<EpistemicRefusal> classifyMappedSent(
+    const DeviceTimes &d, const std::optional<ClockMapping> &mapping,
+    const double receipt, const double skew, const double maxLateness) {
+  if (!mapping) return EpistemicRefusal::UnknownClockMapping;
+  const auto &m = *mapping;
+  if (!validMapping(m)) return EpistemicRefusal::InvalidClockMapping;
+  const double sent   = seconds(d.sent);
+  const double ud     = seconds(d.clockUncertainty);
+  const double sentAt = sent + m.offset;
+  const double uMs    = mappingUncertainty(m, sent);
+  if (!inClockRange(sentAt) || !std::isfinite(uMs))
+    return EpistemicRefusal::InvalidClockMapping;
+  if (sentInFuture(sentAt, ud, uMs, receipt, skew))
+    return EpistemicRefusal::ClockMappingMismatch;
+  if (receipt - sentAt > maxLateness + std::min(ud + uMs, maxLateness))
+    return EpistemicRefusal::LateDelivery;
+  if (d.expires) {
+    switch (classifyExpiry(m, *d.expires, receipt)) {
+    case ExpiryVerdict::Invalid:
+      return EpistemicRefusal::InvalidClockMapping;
+    case ExpiryVerdict::Expired:
+      return EpistemicRefusal::MessageExpired;
+    case ExpiryVerdict::Live:
+      break;
+    }
+  }
+  return std::nullopt;
+}
 
 TimeVerdict classifySignedTimes(const CheckedObservation &o,
                                 const ArbitrationPolicy &policy) {
@@ -100,7 +146,7 @@ TimeVerdict classifyMappedTimes(const CheckedObservation &o,
   const double sentAt = sent + m.offset;
   const double uMa    = mappingUncertainty(m, a);
   const double uMs    = mappingUncertainty(m, sent);
-  if (!inRange(mapped) || !inRange(sentAt) || !std::isfinite(uMa) ||
+  if (!inClockRange(mapped) || !inClockRange(sentAt) || !std::isfinite(uMa) ||
       !std::isfinite(uMs))
     return refuse(EpistemicRefusal::InvalidClockMapping);
   const double u = ua + ud + uMa;
@@ -110,18 +156,16 @@ TimeVerdict classifyMappedTimes(const CheckedObservation &o,
     return refuse(EpistemicRefusal::UncertainClockMapping);
   const double skew = static_cast<double>(policy.clockSkewMs) / 1000.0;
   const double age  = static_cast<double>(policy.maxAgeMs) / 1000.0;
-  if (sentAt > receipt + ud + uMs + skew)
+  if (sentInFuture(sentAt, ud, uMs, receipt, skew))
     return refuse(EpistemicRefusal::ClockMappingMismatch,
                   TimeVerdict::Feed::Refused);
   if (receipt - mapped > age + u)
     return refuse(EpistemicRefusal::LateDelivery, TimeVerdict::Feed::Refused);
   if (d.expires) {
-    const double e            = seconds(*d.expires);
-    const double mappedExpiry = e + m.offset;
-    const double uMe          = mappingUncertainty(m, e);
-    if (!inRange(mappedExpiry) || !std::isfinite(uMe))
+    const auto expiry = classifyExpiry(m, *d.expires, receipt);
+    if (expiry == ExpiryVerdict::Invalid)
       return refuse(EpistemicRefusal::InvalidClockMapping);
-    if (mappedExpiry + uMe < receipt)
+    if (expiry == ExpiryVerdict::Expired)
       return refuse(EpistemicRefusal::MessageExpired);
   }
   v.feed        = TimeVerdict::Feed::Passed;

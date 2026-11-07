@@ -398,3 +398,170 @@ revision 2.1. The slice was therefore built from the sections above. Paths are r
 `xuzz_test` run and passed on the run before it and on three runs alone. It drives `build/xuzz`
 through a drag and touches nothing in this slice, so it is recorded as timing under load, not as a
 regression.
+
+## I3-3b1: pairing, mappings and the time split
+
+Source baseline: `114cd386`. Authority: I3-3D revision 2.1, sections 4.1 to 4.3, 5.1 (the freshness
+bound), 7, 7.1, 8 (the `record.signed_time` and `stream.clock` rows and the host-state table), 9.1
+and 10 (the b1 rows) and 13.3. The slice landed in two parts, each built by a Sonnet implementation
+agent from the lead's written decisions and then reviewed, rebuilt and tested by the lead. Part A is
+commit `de5887cd`, the time split in `observe`. Part B is this commit, the mapping table and pairing
+in the adapter. Paths are relative to `apps/common/xanadu/vagent/runtime/` unless they start with
+`tests/`, `tools/` or `design/`.
+
+### What changed
+
+- **The time split, part A** (`agent_executor_clock.cpp`, new).
+  - `CheckedObservation` carries what the device signed as `DeviceTimes` and the host's mapping as
+    `ClockMapping` (`epistemic_ingress.hpp`).
+  - `classifySignedTimes` decides rows 1 to 4 in 128-bit integers. `classifyMappedTimes` decides
+    rows 5 to 9.
+  - `observe` runs both in table order. The old receipt-based sites are deleted, not renamed.
+  - New refusals, all uncounted: `InvalidClockMapping` (NeedsHostAction), `UncertainClockMapping`
+    and `ClockMappingMismatch` (Retryable), and `LateDelivery` and `MessageExpired` (Terminal).
+- **The arena, part A.**
+  - A2 emits `ClockEpochRegression`, and A3 emits the new uncounted `AcquisitionOrderMismatch`
+    (`compiler.cpp`, about 4590 and 4601).
+  - Each stream keeps its `clock_instance`, so a mapping version is compared only under one
+    instance.
+  - Records keep `acquired_device`, `sent_device` and `device_uncertainty` (u_d in ns) beside the
+    mapped `acquired_at` and U.
+  - Both structures are registered (`record.signed_time`, and `stream.clock` under a new `where` of
+    "stream field") and carried by resume and upgrade.
+- **Counted version 2** (`epistemic_health.hpp:80`). Eight codes, all counted for relayed copies.
+  - `tools/check-counted-sites.py` pins every emitting site per code per file and runs under
+    `make lint`.
+  - `VagentEpistemicClockSites.APlantedCountedSiteFailsTheScript` plants an extra
+    `refuse(EpistemicRefusal::ObservationTimeMismatch)` in a copy of the tree and sees the script
+    fail.
+- **Diagnostics, part A.** A per-source time-class fraction in host memory, fed by rows 4, 7 and 8,
+  each stream sequence at most once. It warns when one source crosses `time_suspect_fraction` while
+  fewer than `common_cause_sources` others do, and is exposed as `SourceHealth::timeClassFraction`.
+  A second warning fires when `common_cause_sources` sources hit rows 2 or 3 within
+  `common_cause_window_ms`. Neither is a reason or `f`.
+- **The pass-credit bound** (7.1). Part A credits up to `verifiedSequenceBound` when it is present.
+  Part B sets it to the issuer's highest verified sequence for the incarnation
+  (`epistemic_adapter.cpp`, `noteVerified` and `verifiedBound`).
+- **The mapping table, part B** (`epistemic_adapter_clock.{hpp,cpp}`, new). `ClockMappingTable` is
+  keyed by (issuer, incarnation, epoch, device basis), with a wall and a steady mapping per mint and
+  one version per mint.
+  - **Synchronised.** Wall offset 0 with `wall_sync_uncertainty_ms`. The steady offset is the host's
+    steady-minus-wall at mint.
+  - **Free.** Paired only.
+  - **Challenges.** Keyed by (issuer, incarnation) and never replaced inside
+    `clock_pair_timeout_ms`. Rate-limited per issuer by `clock_pair_interval_ms`. The nonce is drawn
+    from `RAND_bytes` and compared with `CRYPTO_memcmp`, together with the challenge's audience. A
+    challenge is consumed only by an accepted reply.
+  - **The mapping a reply proves.** The offset is the midpoint of $[t_1 - d, t_2 - d]$ in integer
+    nanoseconds, $u_0 = (t_2 - t_1)/2$ and the anchor is $d$. The wall mapping adds the host's
+    wall-sync uncertainty.
+  - **Re-pairing.** Triggered when $u_M$ at the message's `sent` reaches `clock_repair_fraction` of
+    a bound predicate's `max_uncertainty`.
+- **Step 6 in the adapter, part B.**
+  - Observations carry the table's mapping into `observe`, or none, and then `observe` refuses
+    `UnknownClockMapping` and a pairing starts.
+  - Heartbeats and reports get the mapped rows on `sent` and the 5.1 freshness bound (`liveness`).
+    The rows' arithmetic is shared with `observe` through `epistemic_clock_rows.hpp`.
+  - `timely()` for incarnation advances runs the same rows, so an advance needs a mapping.
+  - `clock_pair` replies skip step 6 and go to the table; anything unsolicited, late or mismatched
+    refuses `ClockPairUnsolicited` (Terminal, unlogged).
+- **Binding, part B.** A `wall` predicate whose `max_uncertainty` is at or below
+  `wall_sync_uncertainty_ms` refuses `InvalidBinding` at bind, and what the call bound is unbound
+  again. `SourceBinding` gains `driftPpm`. A source whose `UncertainClockMapping` refusals persist
+  past `common_cause_window_ms` gets one warning per streak, naming its alias.
+- **Settings.** Part A added `time_class_half_life`, `time_suspect_fraction`, `common_cause_sources`
+  and `common_cause_window_ms` to the executor. Part B added `clock_drift_ppm`,
+  `clock_repair_fraction`, `clock_pair_interval_ms`, `clock_pair_timeout_ms`,
+  `wall_sync_uncertainty_ms` and `max_path_lateness_ms` to `AdapterLimits`. All ten are in
+  `defaultSettingSpecs()` with the design's defaults and ranges.
+- **Tests.**
+  - `tests/xuzz/vagent_epistemic_clock_test.cpp` (part A, 25 cases): every row of 4.3 at its
+    boundary, the sites script, the time-class fraction and the warnings.
+  - `tests/xuzz/vagent_epistemic_pairing_test.cpp` (part B, 21 cases).
+  - `tests/xuzz/epistemic_time.hpp` is the shared helper that builds device times and an identity
+    mapping for tests calling `observe` directly; every existing builder and the fuzzer use it. The
+    fuzzer also perturbs the mapping.
+
+### Design tests (13.3)
+
+| Test                                                                        | Where                                                                                                      |
+| --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| each row of 4.3 at its boundary, with margins                               | `VagentEpistemicClock.Row1…` to `Row9…`, `SignedChecksRunWithoutOverflow`                                  |
+| `common_cause`: shifted on eight, NaN on eight; `R`, `N`, stamps identical  | `HostFaultsOfEitherKindMoveNoEstimatorWeight`                                                              |
+| the pinned-sites script fails on a planted site                             | `VagentEpistemicClockSites.APlantedCountedSiteFailsTheScript`                                              |
+| a device flushing 600 buffered readings after an outage moves no `R` or `N` | `AFlushOfBufferedReadingsAfterAnOutageMovesNoWeight`                                                       |
+| a relayed copy counts exactly the v2 codes                                  | `ARelayedCopyCountsExactlyTheVersion2Codes`                                                                |
+| a relay replaying an old message cannot starve pairing (S-3a)               | pairing test, S-3a case                                                                                    |
+| a second source echoing the victim's nonce is refused; the victim pairs     | pairing test, S-3b case                                                                                    |
+| a pairing bound contains the true offset under drift                        | pairing test, 50 ppm simulated clock (re-pair mints version 2)                                             |
+| the first pairing after a reboot does not move the time-class fraction      | `TheFirstPairingAfterARebootDoesNotMoveTheFraction`                                                        |
+| a slow stream with a stride of about 1,080 is still credited                | `ASlowStreamIsCreditedUpToTheVerifiedSequence`, and through the adapter in the pairing test (stride 1,081) |
+| a wall-sync policy below `wall_sync_uncertainty_ms` refuses at bind         | pairing test, bind-time refusal and the boundary that still binds                                          |
+
+### Measurements
+
+- **Pairing $u_0$ on loopback.** 30 µs, against the design's "under 1 ms".
+- **Record cells.** Each record gains 6 cells (three fields), section 12's "+6 a record".
+- **Line counts.** About 1,750 lines of source against the design's 1,500. The executor's net
+  additions are 33 of its 300, and `compiler.cpp`'s 22 of its 120.
+
+### Deviations and readings
+
+1. **Where the table lives.** It is in `epistemic_adapter_clock.{hpp,cpp}`, because part A's
+   classification took `agent_executor_clock.cpp`. `epistemic_clock_rows.hpp` shares the mapped rows
+   between the adapter and `observe`.
+1. **The device basis is part of the mapping key.** A `free` pairing and a `synchronised` mint then
+   cannot overwrite each other. One version number covers both timelines of a mint.
+1. **At most 64 epochs per issuer** (`kMaxMappingEpochsPerIssuer`), oldest dropped. This bound is
+   not in the design. A verified device chooses its epochs, so without it the device could grow the
+   table.
+1. **Re-pairing is judged per bound predicate**, on its own timeline, against that predicate's
+   `max_uncertainty`. This can trigger earlier than "the smallest bound" and never later.
+1. **Heartbeats and reports are judged on the host's steady timeline**, with the smallest
+   `clock_skew` among the source's predicates.
+1. **Pairing is triggered only by a message at the bound incarnation**, or one a `signed` policy
+   could advance to, and only when the host has a challenge sink. Elsewhere a challenge has no use.
+1. **Negative device times on non-observation kinds are `MalformedMessage`.** This covers a negative
+   `sent` on a heartbeat, report or pair, and a negative `clock_uncertainty` on a heartbeat or
+   report. `InvalidAcquisition` would have added a counted site outside the pinned table.
+1. **$t_1$ is read when the challenge is made, and $t_2$ when the reply's ingest begins.** This is
+   the tightest interval the host can prove.
+1. **The challenge and audit sinks run after the adapter's mutex is released**, so a host may
+   re-enter the adapter from them. This also moves a2's audit emit.
+1. **Synchronised mappings are minted only while the host's wall clock is synchronised.** Otherwise
+   the reading refuses `ClockUnsynchronised` (wall) or `UnknownClockMapping`.
+1. **The time-class fraction has a denominator.** A reading that clears row 9 feeds $N$ only. The
+   per-source warning also needs $N$ at or above `suspect_min_events`. Its once-per-sequence ring is
+   separate and sized by `health_replay_ring`.
+1. **The new record fields follow `clock_instance` in the unordered tail**, not in
+   `kObservationOrder`, whose positions the routine reads.
+1. **`AcquisitionOrderMismatch` is charged as "other"**, so it no longer bumps `content_refusals` or
+   the contact stamp. `StaleObservation`, `ObservationTimeMismatch` and `UncertainAcquisition`
+   remain content refusals.
+1. **a2's `OnlyASynchronisedClockOnAWallPolicyMapsYet` is now
+   `ASynchronisedClockMapsOnBothTimelines`.** A synchronised device on an `actor_mapped` predicate
+   now commits. a2's deviation 1 is closed.
+
+### Limits carried forward
+
+- **Dispatch of fresh heartbeats and reports** is still `UnsupportedKind` until I3-3c1 and I3-3d,
+  and so are their step-4 floors.
+- **Jumps in the host's wall-minus-steady offset** are I3-3b2's. A synchronised `actor_mapped`
+  mapping keeps the offset it was minted with.
+- **The adapter step in the fuzzer**, owed since a2, is still owed. Part A's fuzzer perturbs the
+  mapping that reaches `observe`.
+- **Traceability.** b1 closes 3.2-7 (design 13.3), recorded at M2 acceptance under decisions 0.1.
+
+### Suite results
+
+`make -j$(nproc)` and `make vagent_actor_test` exited 0 with no warning in project code; touched C++
+is clang-format 19.1.7 clean; `make lint` (with `tools/check-counted-sites.py`) and
+`tools/check-translator-coverage.py` exit 0. Every suite ran headless with XDG under `build/xdg`.
+
+| Suite                    | Part A (`de5887cd`) | Part B (this commit)                                             |
+| ------------------------ | ------------------- | ---------------------------------------------------------------- |
+| `vagent_actor_test`      | 1,149 passed        | 1,170 passed; loopback $u_0$ 38 µs                               |
+| `xuzz_test`              | 3,325 passed        | 3,346 passed; loopback $u_0$ 34 µs                               |
+| `gleditor_test`          | 830 passed          | 830 passed                                                       |
+| `zigzag_test`            | 256 passed          | 256 passed                                                       |
+| `fuzz_epistemic_ingress` | 191 runs in 60 s    | 383 runs in 123 s, seed 1, no crash (`alloc_dealloc_mismatch=0`) |

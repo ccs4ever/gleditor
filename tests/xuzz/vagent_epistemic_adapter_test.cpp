@@ -462,7 +462,7 @@ TEST_F(VagentEpistemicAdapter, AnAdvancePastTheStepRefusesIncarnationStep) {
 
 // --- a2's clock mapping and the tuple --------------------------------------
 
-TEST_F(VagentEpistemicAdapter, OnlyASynchronisedClockOnAWallPolicyMapsYet) {
+TEST_F(VagentEpistemicAdapter, ASynchronisedClockMapsOnBothTimelines) {
   bind(a, binding({"at", "odo"}));
   auto h             = header(audienceOf(a), 1);
   h.basis            = SignedClockBasis::Free;
@@ -471,15 +471,16 @@ TEST_F(VagentEpistemicAdapter, OnlyASynchronisedClockOnAWallPolicyMapsYet) {
   ASSERT_FALSE(free);
   EXPECT_EQ(free.error(), EpistemicRefusal::UnknownClockMapping);
   EXPECT_EQ(outcomeClassOf("UnknownClockMapping"), OutcomeClass::Retryable);
+  // A synchronised device needs no pairing on an actor-mapped predicate
+  // either: the host composes its own steady-to-wall offset (I3-3b1 part B).
   ObservationPayload odo = at("e2", policyOf(a, "odo"));
   odo.predicate          = "odo";
   odo.tuple              = {std::string("left"), std::int64_t{3}};
   odo.frame.clear();
   odo.units.clear();
   odo.variance.reset();
-  const auto mapped = ingest(a, seal(header(audienceOf(a), 2), odo));
-  ASSERT_FALSE(mapped);
-  EXPECT_EQ(mapped.error(), EpistemicRefusal::UnknownClockMapping);
+  ASSERT_TRUE(ingest(a, seal(header(audienceOf(a), 2), odo)));
+  EXPECT_EQ(code(outcome(a, "e2")), "Committed");
   // Retryable, so not noted: the same bytes are verified again, not refused
   // as seen.
   const auto checks = adapter->stats().signatureChecks;

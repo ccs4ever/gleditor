@@ -34,6 +34,7 @@
 #include "common/xanadu/vagent/runtime/agent_executor_health.hpp"
 #include "common/xanadu/vagent/runtime/checker.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_abi_health.hpp"
+#include "common/xanadu/vagent/runtime/epistemic_clock_rows.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_health.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_ingress.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_limits.hpp"
@@ -298,31 +299,6 @@ inline void AgentExecutor::PostBox::putBack(std::vector<Item> kept) {
   std::ranges::stable_partition(items,
                                 [](const Item &i) { return isControl(i); });
 }
-
-/// How the time split of design 4.3 classified one reading, and what the host
-/// diagnostics should learn from it. Decided from the reading, the policy and
-/// the receipt alone, so it is the same on every host.
-struct TimeVerdict {
-  std::optional<EpistemicRefusal> refusal;
-  /// Rows 4, 7 and 8 feed the time-class fraction as a refusal; a reading
-  /// that clears row 9 feeds it as a pass. Everything else feeds nothing.
-  enum class Feed : std::uint8_t { None, Refused, Passed } feed{Feed::None};
-  /// Rows 2 and 3, the signed refusals the shared-time-source watch reads.
-  bool sharedSource{false};
-  /// M(a) and U in seconds, valid once `refusal` is empty.
-  double acquiredAt{};
-  double uncertainty{};
-};
-
-/// Rows 1 to 4: only the origin's signed integers, in 128-bit arithmetic so no
-/// overflow turns a refusal into a pass.
-[[nodiscard]] TimeVerdict classifySignedTimes(const CheckedObservation &o,
-                                              const ArbitrationPolicy &policy);
-/// Rows 5, 5a and 6 to 9 against the receipt @p receipt (seconds on the
-/// policy's basis).
-[[nodiscard]] TimeVerdict classifyMappedTimes(const CheckedObservation &o,
-                                              const ArbitrationPolicy &policy,
-                                              double receipt);
 
 struct AgentExecutor::Ingress {
   struct Binding {

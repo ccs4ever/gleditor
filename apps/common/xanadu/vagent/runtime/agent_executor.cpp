@@ -4211,6 +4211,8 @@ std::string_view epistemicRefusalName(EpistemicRefusal refusal) noexcept {
     return "LateDelivery";
   case EpistemicRefusal::MessageExpired:
     return "MessageExpired";
+  case EpistemicRefusal::ClockPairUnsolicited:
+    return "ClockPairUnsolicited";
   }
   return "Unknown";
 }

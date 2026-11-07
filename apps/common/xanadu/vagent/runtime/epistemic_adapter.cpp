@@ -3,6 +3,7 @@
 #include <gleditor/logging.hpp>
 
 #include <algorithm>
+#include <cstdint>
 #include <deque>
 #include <map>
 #include <mutex>
@@ -13,6 +14,7 @@
 
 #include "common/xanadu/system_docs.hpp"
 #include "common/xanadu/vagent/runtime/agent_executor.hpp"
+#include "common/xanadu/vagent/runtime/epistemic_clock_rows.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_policy.hpp"
 
 namespace xanadu::vagent::runtime {
@@ -29,8 +31,39 @@ bool isToken(std::string_view text) {
          });
 }
 
+constexpr double kNanosPerSecond  = 1e9;
+constexpr double kMillisPerSecond = 1e3;
+
 double seconds(std::int64_t nanoseconds) {
-  return static_cast<double>(nanoseconds) / 1e9;
+  return static_cast<double>(nanoseconds) / kNanosPerSecond;
+}
+
+double milliseconds(std::int64_t ms) {
+  return static_cast<double>(ms) / kMillisPerSecond;
+}
+
+std::int64_t nanosOf(std::int64_t ms) { return ms * 1'000'000; }
+
+template <class Clock>
+std::int64_t nanosSince(const std::chrono::time_point<Clock> &t) {
+  return std::chrono::duration_cast<std::chrono::nanoseconds>(
+             t.time_since_epoch())
+      .count();
+}
+
+HostInstant instantOf(const AgentExecutor::HostTime &now) {
+  return {nanosSince(now.steady), nanosSince(now.wall), now.wallSynchronised};
+}
+
+double secondsOn(ObservationClock clock, const HostInstant &now) {
+  return seconds(clock == ObservationClock::Wall ? now.wall : now.steady);
+}
+
+ClockTableLimits tableLimits(const AdapterLimits &l) {
+  return {.wallSyncUncertainty = milliseconds(l.wallSyncUncertaintyMs),
+          .pairTimeout         = nanosOf(l.clockPairTimeoutMs),
+          .pairInterval        = nanosOf(l.clockPairIntervalMs),
+          .maxEpochs           = kMaxMappingEpochsPerIssuer};
 }
 
 /// One declared argument from its signed form, or nothing when the item is
@@ -69,6 +102,18 @@ std::string_view toString(const AdapterLimitError error) noexcept {
     return "InvalidSignedIngress";
   case AdapterLimitError::InvalidIncarnationStep:
     return "InvalidIncarnationStep";
+  case AdapterLimitError::InvalidClockDrift:
+    return "InvalidClockDrift";
+  case AdapterLimitError::InvalidClockRepairFraction:
+    return "InvalidClockRepairFraction";
+  case AdapterLimitError::InvalidClockPairInterval:
+    return "InvalidClockPairInterval";
+  case AdapterLimitError::InvalidClockPairTimeout:
+    return "InvalidClockPairTimeout";
+  case AdapterLimitError::InvalidWallSyncUncertainty:
+    return "InvalidWallSyncUncertainty";
+  case AdapterLimitError::InvalidMaxPathLateness:
+    return "InvalidMaxPathLateness";
   }
   return "Unknown";
 }
@@ -79,6 +124,26 @@ std::expected<void, AdapterLimitError> AdapterLimits::validate() const {
   if (incarnationStep < kMinIncarnationStep ||
       incarnationStep > kMaxIncarnationStep)
     return std::unexpected(AdapterLimitError::InvalidIncarnationStep);
+  const auto outside = [](std::int64_t v, std::int64_t lo, std::int64_t hi) {
+    return v < lo || v > hi;
+  };
+  if (outside(clockDriftPpm, kMinClockDriftPpm, kMaxClockDriftPpm))
+    return std::unexpected(AdapterLimitError::InvalidClockDrift);
+  // Written so a NaN fails it.
+  if (!(clockRepairFraction >= kMinClockRepairFraction &&
+        clockRepairFraction <= kMaxClockRepairFraction))
+    return std::unexpected(AdapterLimitError::InvalidClockRepairFraction);
+  if (outside(clockPairIntervalMs, kMinClockPairIntervalMs,
+              kMaxClockPairIntervalMs))
+    return std::unexpected(AdapterLimitError::InvalidClockPairInterval);
+  if (outside(clockPairTimeoutMs, kMinClockPairTimeoutMs,
+              kMaxClockPairTimeoutMs))
+    return std::unexpected(AdapterLimitError::InvalidClockPairTimeout);
+  if (outside(wallSyncUncertaintyMs, kMinWallSyncUncertaintyMs,
+              kMaxWallSyncUncertaintyMs))
+    return std::unexpected(AdapterLimitError::InvalidWallSyncUncertainty);
+  if (outside(maxPathLatenessMs, kMinMaxPathLatenessMs, kMaxMaxPathLatenessMs))
+    return std::unexpected(AdapterLimitError::InvalidMaxPathLateness);
   return {};
 }
 
@@ -99,6 +164,17 @@ AdapterLimits AdapterLimits::fromModel(const SystemStoreModel &model) {
   readSigned(settings::kVagentEpistemicWallRollbackMs, v.wallRollbackMs);
   readSigned(settings::kVagentEpistemicHealthReplayRing, v.replayRing);
   readSigned(settings::kVagentEpistemicIncarnationStep, out.incarnationStep);
+  readSigned(settings::kVagentEpistemicClockDriftPpm, out.clockDriftPpm);
+  out.clockRepairFraction = model.getDouble(
+      settings::kVagentEpistemicClockRepairFraction, out.clockRepairFraction);
+  readSigned(settings::kVagentEpistemicClockPairIntervalMs,
+             out.clockPairIntervalMs);
+  readSigned(settings::kVagentEpistemicClockPairTimeoutMs,
+             out.clockPairTimeoutMs);
+  readSigned(settings::kVagentEpistemicWallSyncUncertaintyMs,
+             out.wallSyncUncertaintyMs);
+  readSigned(settings::kVagentEpistemicMaxPathLatenessMs,
+             out.maxPathLatenessMs);
   if (const auto checked = out.validate(); !checked) {
     if (const auto ingress = out.verify.validate(); !ingress)
       GLEDITOR_LOG_WARN(kLog,
@@ -120,7 +196,8 @@ struct EpistemicAdapter::State {
         const identity::IRevocationRegistry &revocations,
         const MasterKeys &masters)
       : executor(e), limits(std::move(l)),
-        verifier(limits.verify, revocations, masters) {}
+        verifier(limits.verify, revocations, masters),
+        clocks(tableLimits(limits)) {}
 
   struct Row {
     identity::ActorPid pid;
@@ -135,10 +212,17 @@ struct EpistemicAdapter::State {
     std::string eventId;
     SignedHeader header;
   };
+  /// A run of `UncertainClockMapping` refusals for one source, from its
+  /// first until an observation of it is accepted.
+  struct Streak {
+    std::int64_t since{};
+    bool warned{false};
+  };
 
   AgentExecutor &executor;
   AdapterLimits limits;
   SignedVerifier verifier;
+  ClockMappingTable clocks;
   std::mutex mutex;
   /// By (pid text, principal).
   std::map<std::pair<std::string, std::string>, Row> rows;
@@ -147,9 +231,218 @@ struct EpistemicAdapter::State {
   std::set<std::string> mirrored;
   std::deque<Pending> pending;
   IngressAuditSink audit;
+  ChallengeSink challengeSink;
+  NonceSource nonces;
+  /// Raised under the mutex and delivered after it is released, so a sink
+  /// that calls back into the adapter cannot deadlock it.
+  std::vector<IngressAudit> auditOutbox;
+  std::vector<ClockChallenge> challengeOutbox;
+  /// An issuer's highest verified sequence, any kind, for its newest
+  /// incarnation (design 7.1): (incarnation, sequence).
+  std::map<std::string, std::pair<std::int64_t, std::int64_t>, std::less<>>
+      highest;
+  std::map<std::pair<std::string, std::string>, Streak> streaks;
 
-  void emit(const IngressAudit &event) const {
-    if (audit) audit(event);
+  void emit(const IngressAudit &event) {
+    if (audit) auditOutbox.push_back(event);
+  }
+
+  void noteVerified(const SignedHeader &h) {
+    auto [it, fresh] =
+        highest.try_emplace(h.issuer, std::pair{h.incarnation, h.sequence});
+    if (fresh) return;
+    auto &[incarnation, sequence] = it->second;
+    if (h.incarnation > incarnation) {
+      incarnation = h.incarnation;
+      sequence    = h.sequence;
+    } else if (h.incarnation == incarnation) {
+      sequence = std::max(sequence, h.sequence);
+    }
+  }
+
+  /// The bound for a message's pass credit: its issuer's highest verified
+  /// sequence in the message's own incarnation.
+  [[nodiscard]] std::int64_t verifiedBound(const SignedHeader &h) const {
+    const auto it = highest.find(h.issuer);
+    return it != highest.end() && it->second.first == h.incarnation
+               ? it->second.second
+               : h.sequence;
+  }
+
+  /// The tightest skew allowance among the source's live predicates: a
+  /// message with no policy of its own is held to the strictest one.
+  [[nodiscard]] std::int64_t smallestSkewMs(const Row &row) const {
+    std::optional<std::int64_t> least;
+    for (const auto &predicate : row.binding.predicates)
+      if (const auto bound = executor.boundPredicate(
+              row.pid, row.binding.principal, predicate))
+        least = std::min(least.value_or(bound->policy.clockSkewMs),
+                         bound->policy.clockSkewMs);
+    return least.value_or(0);
+  }
+
+  /// Whether a challenge for the message's incarnation could be answered
+  /// usefully: the bound one, or one a `signed` binding may still advance to.
+  [[nodiscard]] bool pairable(const Row &row, const SignedHeader &h) const {
+    const auto bound = row.binding.incarnation;
+    const auto sent  = static_cast<std::uint64_t>(h.incarnation);
+    if (sent == bound) return true;
+    return row.binding.incarnationPolicy == IncarnationPolicy::Signed &&
+           sent > bound &&
+           sent - bound <= static_cast<std::uint64_t>(limits.incarnationStep);
+  }
+
+  /// Start a pairing under the challenge rules of 4.2. Only a message that
+  /// passed steps 1 to 5 reaches this, so a replay below the floor never
+  /// does.
+  void startPairing(const Row &row, const SignedHeader &h) {
+    if (!challengeSink || !pairable(row, h)) return;
+    // Read now, not at the message's receipt: the nonce does not exist before
+    // this, and a later t1 only tightens the interval.
+    const auto begunAt = instantOf(executor.hostTime());
+    auto begun = clocks.begin(row.pid, h.audience, h.issuer, h.incarnation,
+                              begunAt, nonces);
+    if (!begun) {
+      // No nonce, key or audience in the line.
+      switch (begun.error()) {
+      case PairingSkip::Pending:
+        GLEDITOR_LOG_TRACE(kLog, "clock challenge for {} already pending",
+                           h.issuer);
+        break;
+      case PairingSkip::RateLimited:
+        GLEDITOR_LOG_TRACE(kLog, "clock challenge for {} rate limited",
+                           h.issuer);
+        break;
+      case PairingSkip::EntropyUnavailable:
+        GLEDITOR_LOG_DEBUG(
+            kLog, "no clock challenge for {}: {}", h.issuer,
+            epistemicRefusalName(EpistemicRefusal::EntropyUnavailable));
+        break;
+      }
+      return;
+    }
+    GLEDITOR_LOG_DEBUG(kLog, "clock challenge started for {}", h.issuer);
+    challengeOutbox.push_back(std::move(*begun));
+  }
+
+  /// The mappings a message's header selects: a `synchronised` clock's are
+  /// minted on first sight, a `free` clock's exist only after a pairing.
+  const MappingSet *mappingsFor(const SignedHeader &h, const HostInstant &at) {
+    const ClockMappingTable::Key key{h.issuer, h.incarnation, h.epoch, h.basis};
+    return h.basis == SignedClockBasis::Synchronised
+               ? clocks.synchronised(key, at)
+               : clocks.find(key);
+  }
+
+  /// Re-pair once any predicate's mapping has grown to the repair fraction
+  /// of that predicate's uncertainty bound at the message's own time. Each
+  /// predicate is judged on its own timeline, which is the smallest bound
+  /// when they share one.
+  void maybeRepair(const Row &row, const SignedHeader &h,
+                   const MappingSet &set) {
+    const double x = seconds(h.sent);
+    for (const auto &predicate : row.binding.predicates) {
+      const auto bound =
+          executor.boundPredicate(row.pid, row.binding.principal, predicate);
+      if (!bound) continue;
+      const auto &m = set.on(bound->policy.clock);
+      if (!m) continue;
+      const double limit = limits.clockRepairFraction *
+                           milliseconds(bound->policy.maxUncertaintyMs);
+      if (mappingUncertainty(*m, x) >= limit) {
+        startPairing(row, h);
+        return;
+      }
+    }
+  }
+
+  static DeviceTimes deviceTimes(const SignedHeader &h,
+                                 const ObservationPayload &o) {
+    return {.acquired            = o.acquired,
+            .sent                = h.sent,
+            .acquiredUncertainty = o.acquiredUncertainty,
+            .clockUncertainty    = h.clockUncertainty,
+            .expires             = h.expires};
+  }
+
+  /// A `clock_pair` reply: it skips step 6 and is bounded by its challenge's
+  /// timeout instead (design 3.8).
+  std::expected<TransportReceipt, EpistemicRefusal>
+  pairReply(const Row &row, const SignedMessage &message,
+            const HostInstant &at) {
+    const auto &h = message.header;
+    const auto &p = std::get<ClockPairPayload>(message.payload);
+    // A device clock reads from zero; a negative stamp is not one.
+    if (h.sent < 0) return std::unexpected(EpistemicRefusal::MalformedMessage);
+    const ClockPairReply reply{
+        .issuer      = h.issuer,
+        .incarnation = h.incarnation,
+        .epoch       = h.epoch,
+        .basis       = h.basis,
+        .audience    = h.audience,
+        .nonce       = p.nonce,
+        .sent        = h.sent,
+        .driftPpm    = static_cast<double>(
+            row.binding.driftPpm.value_or(limits.clockDriftPpm))};
+    const auto paired = clocks.accept(reply, at);
+    if (!paired) return std::unexpected(paired.error());
+    GLEDITOR_LOG_DEBUG(kLog, "clock paired for {} epoch {} version {}",
+                       h.issuer, h.epoch, (*paired)->version);
+    return TransportReceipt{};
+  }
+
+  /// Step 6 for a heartbeat or a report: rows 5, 5a, 7 and 9 on the host's
+  /// steady timeline, with `sent` standing for the acquisition, and the
+  /// freshness bound of 5.1. Dispatch of a fresh one is I3-3c1's and d's.
+  std::expected<TransportReceipt, EpistemicRefusal>
+  liveness(const Row &row, const SignedMessage &message,
+           const HostInstant &at) {
+    const auto &h = message.header;
+    if (h.sent < 0 || h.clockUncertainty < 0)
+      return std::unexpected(EpistemicRefusal::MalformedMessage);
+    const auto *set = mappingsFor(h, at);
+    std::optional<ClockMapping> mapping;
+    if (set) {
+      mapping = set->steady;
+      maybeRepair(row, h, *set);
+    }
+    if (!mapping) startPairing(row, h);
+    const DeviceTimes device{.acquired         = h.sent,
+                             .sent             = h.sent,
+                             .clockUncertainty = h.clockUncertainty,
+                             .expires          = h.expires};
+    if (const auto refused = classifyMappedSent(
+            device, mapping, secondsOn(ObservationClock::ActorMapped, at),
+            milliseconds(smallestSkewMs(row)),
+            milliseconds(limits.maxPathLatenessMs)))
+      return std::unexpected(*refused);
+    return std::unexpected(EpistemicRefusal::UnsupportedKind);
+  }
+
+  /// Log once per streak that a source's mapping is too uncertain for its
+  /// predicate: the operator's remedy is a tighter clock or a looser bound.
+  void trackUncertainty(
+      const Row &row,
+      const std::expected<TransportReceipt, EpistemicRefusal> &receipt,
+      const HostInstant &at) {
+    const std::pair key{pidToText(row.pid), row.binding.principal};
+    if (receipt) {
+      streaks.erase(key);
+      return;
+    }
+    if (receipt.error() != EpistemicRefusal::UncertainClockMapping) return;
+    auto &streak =
+        streaks.try_emplace(key, Streak{.since = at.steady}).first->second;
+    const auto window =
+        nanosOf(executor.settings().epistemic.commonCauseWindowMs);
+    if (streak.warned || at.steady - streak.since <= window) return;
+    streak.warned = true;
+    GLEDITOR_LOG_WARN(kLog,
+                      "source {} ({}) has been refused UncertainClockMapping "
+                      "for over {} ms: its clock mapping is wider than its "
+                      "predicate's max_uncertainty",
+                      row.binding.alias, row.binding.principal,
+                      executor.settings().epistemic.commonCauseWindowMs);
   }
 
   /// The pid text the audience names, or why there is none.
@@ -191,20 +484,23 @@ struct EpistemicAdapter::State {
     });
   }
 
-  /// 3.10's timeliness condition under a2's mapping: a reading the path made
-  /// old, or one sent in the future, cannot advance anything.
+  /// 3.10's timeliness condition: the same step-6 rows as an observation's,
+  /// against the mapping of the message's own epoch. A reading the path made
+  /// old, or one sent in the future, cannot advance anything, and with no
+  /// mapping nothing is timely.
   static bool timely(const SignedHeader &h, const ObservationPayload &o,
                      const ArbitrationPolicy &policy,
-                     const AgentExecutor::HostTime &now) {
-    if (!now.wallSynchronised) return false;
-    const double receipt =
-        std::chrono::duration<double>(now.wall.time_since_epoch()).count();
-    const double u =
-        seconds(o.acquiredUncertainty) + seconds(h.clockUncertainty);
-    const double age  = static_cast<double>(policy.maxAgeMs) / 1000.0;
-    const double skew = static_cast<double>(policy.clockSkewMs) / 1000.0;
-    return receipt - seconds(o.acquired) <= age + u &&
-           seconds(h.sent) <= receipt + seconds(h.clockUncertainty) + skew;
+                     const std::optional<ClockMapping> &mapping,
+                     const HostInstant &at) {
+    if (policy.clock == ObservationClock::Wall && !at.wallSynchronised)
+      return false;
+    CheckedObservation probe;
+    probe.device     = deviceTimes(h, o);
+    probe.mapping    = mapping;
+    probe.clockBasis = std::string(clockName(policy.clock));
+    if (classifySignedTimes(probe, policy).refusal) return false;
+    return !classifyMappedTimes(probe, policy, secondsOn(policy.clock, at))
+                .refusal;
   }
 
   /// Rebind every predicate of @p row at @p to: the first bind supersedes
@@ -230,7 +526,7 @@ struct EpistemicAdapter::State {
 
   std::expected<TransportReceipt, EpistemicRefusal>
   observation(Row &row, const SignedMessage &message, const TransportPeer &peer,
-              const AgentExecutor::HostTime &now) {
+              const HostInstant &at) {
     const auto &h = message.header;
     const auto &o = std::get<ObservationPayload>(message.payload);
     if (!std::ranges::contains(row.binding.predicates, o.predicate))
@@ -239,13 +535,18 @@ struct EpistemicAdapter::State {
         executor.boundPredicate(row.pid, row.binding.principal, o.predicate);
     if (!bound) return std::unexpected(EpistemicRefusal::UnknownSource);
     const auto incarnation = static_cast<std::uint64_t>(h.incarnation);
+    const auto *set        = mappingsFor(h, at);
+    const std::optional<ClockMapping> mapping =
+        set ? set->on(bound->policy.clock) : std::nullopt;
+    if (set) maybeRepair(row, h, *set);
+    if (!mapping) startPairing(row, h);
     std::optional<EpistemicRefusal> adapterRefusal;
     if (incarnation > bound->incarnation &&
         row.binding.incarnationPolicy == IncarnationPolicy::Signed) {
       if (incarnation - bound->incarnation >
           static_cast<std::uint64_t>(limits.incarnationStep)) {
         adapterRefusal = EpistemicRefusal::IncarnationStep;
-      } else if (timely(h, o, bound->policy, now)) {
+      } else if (timely(h, o, bound->policy, mapping, at)) {
         if (auto advanced = advance(row, incarnation); !advanced)
           return std::unexpected(advanced.error());
         bound = executor.boundPredicate(row.pid, row.binding.principal,
@@ -276,26 +577,19 @@ struct EpistemicAdapter::State {
         c.tuple.push_back(value ? std::move(*value) : WireValue::integer(0));
       }
     }
-    c.device = {.acquired            = o.acquired,
-                .sent                = h.sent,
-                .acquiredUncertainty = o.acquiredUncertainty,
-                .clockUncertainty    = h.clockUncertainty,
-                .expires             = h.expires};
-    // I3-3b1 part B replaces this with the mapping table. Until then only a
-    // synchronised device clock on a wall policy maps, with an identity
-    // mapping; anything else has none and `observe` refuses row 5.
-    if (bound->policy.clock == ObservationClock::Wall &&
-        h.basis == SignedClockBasis::Synchronised && now.wallSynchronised)
-      c.mapping = ClockMapping{.version = 1};
-    c.clockBasis     = std::string(clockName(bound->policy.clock));
-    c.clockEpoch     = static_cast<std::uint64_t>(h.epoch);
-    c.frame          = o.frame;
-    c.units          = o.units;
-    c.variance       = o.variance;
-    c.policy         = o.policy;
-    c.adapterRefusal = adapterRefusal;
+    c.device                = deviceTimes(h, o);
+    c.mapping               = mapping;
+    c.verifiedSequenceBound = static_cast<std::uint64_t>(verifiedBound(h));
+    c.clockBasis            = std::string(clockName(bound->policy.clock));
+    c.clockEpoch            = static_cast<std::uint64_t>(h.epoch);
+    c.frame                 = o.frame;
+    c.units                 = o.units;
+    c.variance              = o.variance;
+    c.policy                = o.policy;
+    c.adapterRefusal        = adapterRefusal;
 
     auto receipt = executor.observe(row.pid, c);
+    trackUncertainty(row, receipt, at);
     if (receipt) {
       pending.push_back({row.pid, c.principal, c.incarnation, c.eventId, h});
       if (pending.size() > kMaxPendingSettles) pending.pop_front();
@@ -333,7 +627,9 @@ EpistemicAdapter::bind(const identity::ActorPid &target,
       b.predicates.empty() ||
       std::ranges::adjacent_find(sorted) != sorted.end() ||
       b.lifetime <= std::chrono::steady_clock::duration::zero() ||
-      b.incarnation == 0 || !std::in_range<std::int64_t>(b.incarnation))
+      b.incarnation == 0 || !std::in_range<std::int64_t>(b.incarnation) ||
+      (b.driftPpm &&
+       (*b.driftPpm < kMinClockDriftPpm || *b.driftPpm > kMaxClockDriftPpm)))
     return std::unexpected(EpistemicRefusal::InvalidBinding);
 
   const std::lock_guard lock(state_->mutex);
@@ -349,6 +645,16 @@ EpistemicAdapter::bind(const identity::ActorPid &target,
       return std::unexpected(bound.error());
     }
     done.push_back(predicate);
+    // Every wall mapping carries the host's own sync uncertainty, so a bound
+    // at or below it could never accept a reading (m10).
+    const auto bound = executor.boundPredicate(target, b.principal, predicate);
+    if (bound && bound->policy.clock == ObservationClock::Wall &&
+        bound->policy.maxUncertaintyMs <=
+            state_->limits.wallSyncUncertaintyMs) {
+      for (const auto &undo : done)
+        executor.unbindSource(target, b.principal, undo);
+      return std::unexpected(EpistemicRefusal::InvalidBinding);
+    }
   }
   if (const auto held = state_->rows.find(key); held != state_->rows.end())
     for (const auto &old : held->second.binding.predicates)
@@ -367,18 +673,49 @@ EpistemicAdapter *EpistemicAdapter::unbind(const identity::ActorPid &target,
   for (const auto &predicate : found->second.binding.predicates)
     state_->executor.unbindSource(target, principal, predicate);
   state_->rows.erase(found);
+  state_->streaks.erase({pidToText(target), std::string(principal)});
   const bool stillBound = std::ranges::any_of(
       state_->rows, [&](const auto &r) { return r.first.second == principal; });
-  if (!stillBound) state_->verifier.forget(principal);
+  if (!stillBound) {
+    state_->verifier.forget(principal);
+    state_->clocks.forget(principal);
+    if (const auto top = state_->highest.find(principal);
+        top != state_->highest.end())
+      state_->highest.erase(top);
+  }
   return this;
 }
 
 std::expected<TransportReceipt, EpistemicRefusal>
 EpistemicAdapter::ingest(std::string_view bytes, const TransportPeer &peer) {
-  const std::lock_guard lock(state_->mutex);
+  std::expected<TransportReceipt, EpistemicRefusal> result;
+  std::vector<IngressAudit> audits;
+  std::vector<ClockChallenge> challenges;
+  IngressAuditSink auditSink;
+  ChallengeSink challengeSink;
+  {
+    const std::lock_guard lock(state_->mutex);
+    result = ingestLocked(bytes, peer);
+    audits.swap(state_->auditOutbox);
+    challenges.swap(state_->challengeOutbox);
+    auditSink     = state_->audit;
+    challengeSink = state_->challengeSink;
+  }
+  // After the lock: a sink may call back into the adapter.
+  if (auditSink)
+    for (const auto &event : audits) auditSink(event);
+  if (challengeSink)
+    for (const auto &challenge : challenges) challengeSink(challenge);
+  return result;
+}
+
+std::expected<TransportReceipt, EpistemicRefusal>
+EpistemicAdapter::ingestLocked(std::string_view bytes,
+                               const TransportPeer &peer) {
   auto &s = *state_;
   s.settle();
   const auto now = s.executor.hostTime();
+  const auto at  = instantOf(now);
   std::optional<EpistemicRefusal> audienceRefusal;
   State::Row *row   = nullptr;
   const auto lookup = [&](const SignedHeader &h) -> std::optional<SignerTrust> {
@@ -400,16 +737,38 @@ EpistemicAdapter::ingest(std::string_view bytes, const TransportPeer &peer) {
       return std::unexpected(*audienceRefusal);
     return std::unexpected(message.error());
   }
-  // Heartbeats, reports and clock pairs are dispatched by I3-3b1, c1 and d;
-  // until then a verified one is refused and its header is not noted.
-  if (message->header.kind != SignedKind::Observation)
-    return std::unexpected(EpistemicRefusal::UnsupportedKind);
-  return s.observation(*row, *message, peer, now);
+  s.noteVerified(message->header);
+  // Step 6 and dispatch by kind. A `clock_pair` reply skips step 6; a
+  // fresh heartbeat or report is still refused until I3-3c1 and d dispatch it.
+  switch (message->header.kind) {
+  case SignedKind::Observation:
+    return s.observation(*row, *message, peer, at);
+  case SignedKind::ClockPair:
+    return s.pairReply(*row, *message, at);
+  case SignedKind::Heartbeat:
+  case SignedKind::HealthReport:
+    return s.liveness(*row, *message, at);
+  case SignedKind::Verification:
+    break;
+  }
+  return std::unexpected(EpistemicRefusal::UnsupportedKind);
 }
 
 EpistemicAdapter *EpistemicAdapter::setAuditSink(IngressAuditSink sink) {
   const std::lock_guard lock(state_->mutex);
   state_->audit = std::move(sink);
+  return this;
+}
+
+EpistemicAdapter *EpistemicAdapter::setChallengeSink(ChallengeSink sink) {
+  const std::lock_guard lock(state_->mutex);
+  state_->challengeSink = std::move(sink);
+  return this;
+}
+
+EpistemicAdapter *EpistemicAdapter::setNonceSource(NonceSource source) {
+  const std::lock_guard lock(state_->mutex);
+  state_->nonces = std::move(source);
   return this;
 }
 

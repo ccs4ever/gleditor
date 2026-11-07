@@ -348,6 +348,18 @@ inline constexpr std::string_view kVagentEpistemicWallRollbackMs =
     "vagent.epistemic_wall_rollback_ms";
 inline constexpr std::string_view kVagentEpistemicIncarnationStep =
     "vagent.epistemic_incarnation_step";
+inline constexpr std::string_view kVagentEpistemicClockDriftPpm =
+    "vagent.epistemic_clock_drift_ppm";
+inline constexpr std::string_view kVagentEpistemicClockRepairFraction =
+    "vagent.epistemic_clock_repair_fraction";
+inline constexpr std::string_view kVagentEpistemicClockPairIntervalMs =
+    "vagent.epistemic_clock_pair_interval_ms";
+inline constexpr std::string_view kVagentEpistemicClockPairTimeoutMs =
+    "vagent.epistemic_clock_pair_timeout_ms";
+inline constexpr std::string_view kVagentEpistemicWallSyncUncertaintyMs =
+    "vagent.epistemic_wall_sync_uncertainty_ms";
+inline constexpr std::string_view kVagentEpistemicMaxPathLatenessMs =
+    "vagent.epistemic_max_path_lateness_ms";
 inline constexpr std::string_view kVagentEpistemicTimeClassHalfLife =
     "vagent.epistemic_time_class_half_life";
 inline constexpr std::string_view kVagentEpistemicTimeSuspectFraction =

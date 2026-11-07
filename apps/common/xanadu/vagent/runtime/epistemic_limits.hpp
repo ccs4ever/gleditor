@@ -132,6 +132,46 @@ inline constexpr std::int64_t kDefaultIncarnationStep = 1024;
 inline constexpr std::int64_t kMinIncarnationStep     = 1;
 inline constexpr std::int64_t kMaxIncarnationStep     = std::int64_t{1} << 31;
 
+// Clock mapping and pairing (P19 I3-3b1 part B, `i3-3-design.md` 4.2 and 9.1).
+/// `vagent.epistemic_clock_drift_ppm`: the drift a device clock is assumed to
+/// have when its binding names none; twice a common crystal's +-50 ppm.
+inline constexpr std::int64_t kDefaultClockDriftPpm = 100;
+inline constexpr std::int64_t kMinClockDriftPpm     = 0;
+inline constexpr std::int64_t kMaxClockDriftPpm     = 10'000;
+/// `vagent.epistemic_clock_repair_fraction`: a mapping is renewed once its
+/// uncertainty reaches this fraction of the tightest bound it must meet, which
+/// leaves the other half of the budget for the pairing's own round trip.
+inline constexpr double kDefaultClockRepairFraction = 0.5;
+inline constexpr double kMinClockRepairFraction     = 0.05;
+inline constexpr double kMaxClockRepairFraction     = 0.95;
+/// `vagent.epistemic_clock_pair_interval_ms`: at most one new challenge a
+/// second per issuer, so a relay replaying readings cannot make the host
+/// mint nonces at line rate.
+inline constexpr std::int64_t kDefaultClockPairIntervalMs = 1000;
+inline constexpr std::int64_t kMinClockPairIntervalMs     = 100;
+inline constexpr std::int64_t kMaxClockPairIntervalMs     = 3'600'000;
+/// `vagent.epistemic_clock_pair_timeout_ms`: a later reply would give an
+/// initial uncertainty above one second, wider than any useful bound.
+inline constexpr std::int64_t kDefaultClockPairTimeoutMs = 2000;
+inline constexpr std::int64_t kMinClockPairTimeoutMs     = 10;
+inline constexpr std::int64_t kMaxClockPairTimeoutMs     = 60'000;
+/// `vagent.epistemic_wall_sync_uncertainty_ms`: how far the host's own wall
+/// clock may be from true time, as NTP over the internet leaves it. Every
+/// wall-basis mapping carries at least this much.
+inline constexpr std::int64_t kDefaultWallSyncUncertaintyMs = 100;
+inline constexpr std::int64_t kMinWallSyncUncertaintyMs     = 0;
+inline constexpr std::int64_t kMaxWallSyncUncertaintyMs     = 60'000;
+/// `vagent.epistemic_max_path_lateness_ms`: a congested gateway's delay; it
+/// is also the residual a replayed or withheld heartbeat can exploit.
+inline constexpr std::int64_t kDefaultMaxPathLatenessMs = 5000;
+inline constexpr std::int64_t kMinMaxPathLatenessMs     = 10;
+inline constexpr std::int64_t kMaxMaxPathLatenessMs     = 600'000;
+/// Clock epochs one issuer's mappings are kept for. An epoch is a device
+/// choice, so without a bound a verified device could grow the table; the
+/// oldest is dropped, and a dropped epoch only ever refuses (the stream floor
+/// already refuses a lower epoch).
+inline constexpr std::size_t kMaxMappingEpochsPerIssuer = 64;
+
 // The time-class diagnostic and the shared-time-source watch (I3-3b1, design
 // 4.3 and 9.1). Host memory only: none of these reaches a decision.
 /// `vagent.epistemic_time_class_half_life`: readings over which a source's

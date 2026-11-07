@@ -1134,6 +1134,50 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .schemas =
              {{.expectedTypes = {"integer"},
                .defaultValues = {vagent::runtime::kDefaultIncarnationStep}}}},
+        {.name  = std::string(settings::kVagentEpistemicClockDriftPpm),
+         .notes = "vagent: parts per million a device clock may drift when its "
+                  "binding names no bound, 0 to 10000; it widens a mapping's "
+                  "uncertainty with the time since its anchor",
+         .schemas =
+             {{.expectedTypes = {"integer"},
+               .defaultValues = {vagent::runtime::kDefaultClockDriftPpm}}}},
+        {.name = std::string(settings::kVagentEpistemicClockRepairFraction),
+         .notes =
+             "vagent: fraction in [0.05, 0.95] of the tightest bound a "
+             "source's predicates set on uncertainty at which the host asks "
+             "the device to pair its clock again",
+         .schemas = {{.expectedTypes = {"float"},
+                      .defaultValues =
+                          {vagent::runtime::kDefaultClockRepairFraction}}}},
+        {.name    = std::string(settings::kVagentEpistemicClockPairIntervalMs),
+         .notes   = "vagent: milliseconds, 100 to 3600000, between the clock "
+                    "challenges the host starts for one source",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues =
+                          {vagent::runtime::kDefaultClockPairIntervalMs}}}},
+        {.name = std::string(settings::kVagentEpistemicClockPairTimeoutMs),
+         .notes =
+             "vagent: milliseconds, 10 to 60000, a clock challenge waits for "
+             "its reply; a later reply is refused, and the wait bounds the "
+             "pairing's initial uncertainty",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues =
+                          {vagent::runtime::kDefaultClockPairTimeoutMs}}}},
+        {.name = std::string(settings::kVagentEpistemicWallSyncUncertaintyMs),
+         .notes =
+             "vagent: milliseconds, 0 to 60000, the host wall clock may "
+             "differ from true time. Every wall-basis clock mapping carries "
+             "it, so a wall predicate must allow more uncertainty than this",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues =
+                          {vagent::runtime::kDefaultWallSyncUncertaintyMs}}}},
+        {.name = std::string(settings::kVagentEpistemicMaxPathLatenessMs),
+         .notes =
+             "vagent: milliseconds, 10 to 600000, a heartbeat or report may "
+             "reach the host after it was sent before it counts as late",
+         .schemas =
+             {{.expectedTypes = {"integer"},
+               .defaultValues = {vagent::runtime::kDefaultMaxPathLatenessMs}}}},
         {.name = std::string(settings::kVagentEpistemicTimeClassHalfLife),
          .notes =
              "vagent: readings over which a source's time-class fraction "

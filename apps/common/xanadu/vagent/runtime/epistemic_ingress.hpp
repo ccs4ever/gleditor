@@ -221,6 +221,11 @@ enum class EpistemicRefusal : std::uint8_t {
   LateDelivery,
   /// The message's signed `expires` has passed.
   MessageExpired,
+  // Pairing (P19 I3-3b1 part B). Decided by the adapter before the executor
+  // sees anything: never logged, charged or counted.
+  /// A `clock_pair` reply with no live challenge for its issuer, a nonce or
+  /// audience that is not the challenge's, or one that came too late.
+  ClockPairUnsolicited,
 };
 
 /// What the host may do with a refused event.

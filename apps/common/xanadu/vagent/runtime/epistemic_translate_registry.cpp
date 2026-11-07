@@ -514,6 +514,12 @@ constexpr std::array kHost{
                  "not applicable"},
     HostStateRow{"source table (signed adapter)", "kept",
                  "lost; the host reloads its configuration and rebinds"},
+    HostStateRow{"clock mappings (signed adapter)", "kept",
+                 "lost; UnknownClockMapping until re-paired; versions restart "
+                 "under the new instance"},
+    HostStateRow{"pending clock challenges (signed adapter)", "kept",
+                 "lost; UnknownClockMapping until re-paired; versions restart "
+                 "under the new instance"},
     HostStateRow{"audience mirror (executor and adapter)", "kept",
                  "cleared; re-read from the arena at the first committed "
                  "source change"},
