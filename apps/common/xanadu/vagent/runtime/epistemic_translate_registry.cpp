@@ -263,14 +263,27 @@ constexpr std::array kRecordFields{kObsStatus,
 // The shipped names above are the only ones pinned at compile time; the
 // header and the master are the program's own cells, not profile fields.
 constexpr std::array kShapeFields{kShapeHeaderName, kShapeVersionField};
+// The audience record (I3-3a2): its name and its one field.
+constexpr std::array kAudienceFields{kAudienceRecordName, kAudienceTokenField};
 
-constexpr std::array<OwnedStructure, 14> kOwned{{
+constexpr std::array<OwnedStructure, 15> kOwned{{
     {"agent.shape_header",
      "d.epistemic",
      "agent header",
      kNoFields,
      Fate::Derived,
      Fate::Derived,
+     {},
+     1,
+     populateNothing},
+    // Written by the first bind's source-change turn, which every populated
+    // fixture runs, so it needs no sample of its own.
+    {"agent.audience",
+     "d.epistemic",
+     "agent rank",
+     kAudienceFields,
+     Fate::Carried,
+     Fate::Carried,
      {},
      1,
      populateNothing},
@@ -448,6 +461,18 @@ constexpr std::array kHost{
                  "refused earlier by checkpoint"},
     HostStateRow{"admission record", "kept until resumeAdmission or its ttl",
                  "not applicable"},
+    HostStateRow{"source table (signed adapter)", "kept",
+                 "lost; the host reloads its configuration and rebinds"},
+    HostStateRow{"audience mirror (executor and adapter)", "kept",
+                 "cleared; re-read from the arena at the first committed "
+                 "source change"},
+    HostStateRow{"delegation cache, wall high-water mark", "kept",
+                 "lost; the next message re-validates and the mark restarts"},
+    HostStateRow{"revocation registry", "kept",
+                 "reloaded from the ledger; fail-closed until ready()"},
+    HostStateRow{"heartbeat and report floors, observation rings", "kept",
+                 "lost; replays fall through to the arena's floors and dedup"},
+    HostStateRow{"per-peer budgets, pending settles", "kept", "lost"},
     HostStateRow{
         "flights, requests, schedule",
         "flights and requests refuse the schema road; schedule recomputed",

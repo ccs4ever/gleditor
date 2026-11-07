@@ -46,21 +46,6 @@ class MerkleLedger;
 
 namespace xanadu::vagent::runtime {
 
-/// `vagent.epistemic_delegation_cache`: validated chains kept; two sources
-/// per slot of the default `max_sources`.
-inline constexpr std::size_t kDefaultDelegationCache = 256;
-inline constexpr std::size_t kMinDelegationCache     = 16;
-inline constexpr std::size_t kMaxDelegationCache     = 4096;
-/// `vagent.epistemic_verify_per_peer`: verifications a second one transport
-/// peer may cost; a few percent of one core at about 60 us a verify.
-inline constexpr std::int64_t kDefaultVerifyPerPeer = 2000;
-inline constexpr std::int64_t kMinVerifyPerPeer     = 10;
-inline constexpr std::int64_t kMaxVerifyPerPeer     = 100'000;
-/// `vagent.epistemic_wall_rollback_ms`: larger than an NTP slew step, smaller
-/// than any certificate window.
-inline constexpr std::int64_t kDefaultWallRollbackMs = 1000;
-inline constexpr std::int64_t kMinWallRollbackMs     = 10;
-inline constexpr std::int64_t kMaxWallRollbackMs     = 3'600'000;
 /// Budgets kept for transport peers at once. The host admits its peers, so
 /// this is far above any honest count; past it a new peer is refused rather
 /// than letting a peer that mints identities grow the table (3.7).

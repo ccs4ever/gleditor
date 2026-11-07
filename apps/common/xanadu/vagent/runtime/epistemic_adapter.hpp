@@ -1,0 +1,154 @@
+/**
+ * @file epistemic_adapter.hpp
+ * @brief The signed-ingress adapter (P19 I3-3a2, `i3-3-design.md` sections
+ * 3.6 to 3.10): the first production caller of `bindSource` and `observe`.
+ *
+ * Bytes from a transport peer go through steps 1 to 5 of `SignedVerifier`,
+ * with this adapter's binding lookup at step 3: the header's audience names
+ * the receiving agent, and the (agent, issuer) pair names a binding. A
+ * verified observation is typed against the bound declaration, mapped onto
+ * the policy's clock and handed to `observe`, with the relay taken from the
+ * transport peer and never from the bytes. A `signed` binding advances its
+ * incarnation from a verified, timely message within the step bound, and
+ * rebinds every predicate of the principal at once.
+ *
+ * Why C++ and not Vortex: this is the host's authorization boundary. Nothing
+ * here holds state an agent reads; the agent's own state (its audience, its
+ * floors, its records) is written by its turns.
+ *
+ * Thread-safe: one mutex covers the verifier and the tables, so the adapter
+ * may be called from a network thread while another pumps the executor.
+ */
+#ifndef COMMON_XANADU_VAGENT_RUNTIME_EPISTEMIC_ADAPTER_HPP
+#define COMMON_XANADU_VAGENT_RUNTIME_EPISTEMIC_ADAPTER_HPP
+
+#include <chrono>
+#include <cstdint>
+#include <expected>
+#include <functional>
+#include <memory>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <variant>
+#include <vector>
+
+#include "common/xanadu/identity/identity_engine.hpp"
+#include "common/xanadu/identity/identity_layout.hpp"
+#include "common/xanadu/vagent/runtime/epistemic_adapter_verify.hpp"
+#include "common/xanadu/vagent/runtime/epistemic_ingress.hpp"
+#include "common/xanadu/vagent/runtime/epistemic_limits.hpp"
+
+namespace xanadu {
+class SystemStoreModel;
+}
+
+namespace xanadu::vagent::runtime {
+
+class AgentExecutor;
+
+/// Pending observations the adapter waits on before it notes their headers
+/// for step 4. Past it the oldest is dropped unnoted, which costs a later
+/// replay a full verify and nothing else.
+inline constexpr std::size_t kMaxPendingSettles = 4096;
+
+enum class AdapterLimitError : std::uint8_t {
+  InvalidSignedIngress,
+  InvalidIncarnationStep,
+};
+
+[[nodiscard]] std::string_view toString(AdapterLimitError error) noexcept;
+
+/// The settings of `i3-3-design.md` 9.1 that slices a1 and a2 read.
+struct AdapterLimits {
+  SignedIngressLimits verify;
+  std::int64_t incarnationStep{kDefaultIncarnationStep};
+
+  [[nodiscard]] std::expected<void, AdapterLimitError> validate() const;
+  /// Read from `system://settings`. A value outside its range is warned
+  /// about by name and every value keeps its default, as the executor's
+  /// own settings do.
+  [[nodiscard]] static AdapterLimits fromModel(const SystemStoreModel &model);
+  bool operator==(const AdapterLimits &) const = default;
+};
+
+/// How a binding's incarnation moves (3.10, Q4).
+enum class IncarnationPolicy : std::uint8_t {
+  /// The operator binds each incarnation, as before the adapter.
+  Fixed,
+  /// A verified, timely message within `incarnation_step` advances it.
+  Signed,
+};
+
+/// One row of the binding table (9.2) as a2 uses it; W1 builds it from the
+/// approved carrier, and the liveness fields arrive with I3-3c.
+struct SourceBinding {
+  std::string alias;
+  /// SHA-256 of the device key as 64 lowercase hex, compared as text.
+  std::string principal;
+  std::variant<PinnedTrust, DelegatedTrust> trust{PinnedTrust{}};
+  IncarnationPolicy incarnationPolicy{IncarnationPolicy::Fixed};
+  std::uint64_t incarnation{1};
+  std::chrono::steady_clock::duration lifetime{};
+  std::vector<std::string> predicates;
+};
+
+/// What the adapter tells the host's audit sink, outside the outcome log.
+struct IngressAudit {
+  enum class Kind : std::uint8_t {
+    /// A `signed` binding moved to a higher incarnation on a message.
+    IncarnationAdvanced,
+    /// The first `KeyRevoked` for a bound issuer (Q5).
+    KeyRevoked,
+  };
+  Kind kind{Kind::IncarnationAdvanced};
+  std::string principal;
+  /// The agent, for an advance; a revocation is the key's, not an agent's.
+  std::optional<identity::ActorPid> pid;
+  std::uint64_t from{};
+  std::uint64_t to{};
+};
+using IngressAuditSink = std::function<void(const IngressAudit &)>;
+
+class EpistemicAdapter {
+public:
+  /// @p executor, @p revocations and @p masters must outlive the adapter.
+  EpistemicAdapter(AgentExecutor &executor, AdapterLimits limits,
+                   const identity::IRevocationRegistry &revocations,
+                   const MasterKeys &masters);
+  ~EpistemicAdapter();
+  EpistemicAdapter(const EpistemicAdapter &)            = delete;
+  EpistemicAdapter &operator=(const EpistemicAdapter &) = delete;
+
+  /// Bind @p binding's principal to every one of its predicates on @p target
+  /// at its incarnation, replacing a row the pair already has. The first
+  /// executor refusal is returned and the predicates this call bound are
+  /// unbound again. `InvalidBinding` for a row the adapter cannot hold.
+  [[nodiscard]] std::expected<EpistemicAdapter *, EpistemicRefusal>
+  bind(const identity::ActorPid &target, SourceBinding binding);
+  /// Revoke the principal's row on @p target, and what step 4 keeps for it
+  /// once no agent binds it.
+  EpistemicAdapter *unbind(const identity::ActorPid &target,
+                           std::string_view principal);
+
+  /// Verify @p bytes from @p peer and hand an observation to its agent. The
+  /// receipt means queued, as `observe`'s does.
+  [[nodiscard]] std::expected<TransportReceipt, EpistemicRefusal>
+  ingest(std::string_view bytes, const TransportPeer &peer);
+
+  EpistemicAdapter *setAuditSink(IngressAuditSink sink);
+  /// Forget every audience read so far, as after a resume: the next message
+  /// for an agent reads its committed identifier again.
+  EpistemicAdapter *clearAudiences();
+
+  [[nodiscard]] const SignedVerifierStats &stats() const noexcept;
+  [[nodiscard]] const AdapterLimits &limits() const noexcept;
+
+private:
+  struct State;
+  std::unique_ptr<State> state_;
+};
+
+} // namespace xanadu::vagent::runtime
+
+#endif // COMMON_XANADU_VAGENT_RUNTIME_EPISTEMIC_ADAPTER_HPP

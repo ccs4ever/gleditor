@@ -139,6 +139,9 @@ struct TranslationPlan {
   };
   std::vector<Profile> profiles;
   std::vector<Record> records;
+  /// Records on the agent's own `d.epistemic` rank besides the shape header,
+  /// in rank order: the audience record (I3-3a2).
+  std::vector<zigzag::CellRef> agentRecords;
   std::uint64_t cells{0};
   std::uint64_t work{0};
 };
@@ -163,6 +166,24 @@ struct ApplyRequest {
 /// Read-only: refuses before anything is written.
 [[nodiscard]] std::expected<TranslationPlan, TransferRefusal>
 planTranslation(const PlanRequest &request);
+
+// -- Agent-rank records (P19 I3-3a2), in epistemic_translate_ingress.cpp ----
+
+/// The token of the agent's `EpistemicAudience` record, as text: a checkpoint
+/// may type an all-digit identifier as a number, and the text is what every
+/// road keeps.
+[[nodiscard]] std::optional<std::string>
+audienceOf(const zigzag::ArenaManifold &arena, zigzag::CellRef agent,
+           zigzag::DimRef epistemic, const ValueDims &vd);
+
+/// The cells of the agent's `d.epistemic` rank that a transfer carries: the
+/// audience record, at most one, with exactly its `token` field holding 64
+/// hex. Anything else on the rank but the shape header refuses
+/// `UnregisteredOwnedStructure`; a malformed audience refuses
+/// `StateInconsistent`.
+[[nodiscard]] std::expected<std::vector<zigzag::CellRef>, TransferRefusal>
+agentRankRecords(const zigzag::ArenaManifold &arena, zigzag::CellRef agent,
+                 const OwnedGraphDims &dims, TransferRoute route);
 
 [[nodiscard]] std::expected<TranslationReport, TransferRefusal>
 applyTranslation(const TranslationPlan &plan, const ApplyRequest &request);

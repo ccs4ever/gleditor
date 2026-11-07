@@ -651,7 +651,9 @@ TEST_F(VagentEpistemicIngress, TheCellCeilingRefusesWithoutWritingAnything) {
   EXPECT_EQ(refused(kTurnResultEpistemicBudget), 1U);
   EXPECT_TRUE(profiles().empty());
   EXPECT_TRUE(clauses().empty());
-  EXPECT_EQ(*host->executor().epistemicCells(pid), 0U);
+  // Only the audience record the bind wrote: the record, its field name and
+  // the token (I3-3a2).
+  EXPECT_EQ(*host->executor().epistemicCells(pid), 3U);
 }
 
 TEST_F(VagentEpistemicIngress, BindingRefusesAMalformedPrincipal) {
@@ -1522,17 +1524,26 @@ TEST_F(VagentEpistemicUpgrade, AQueuedSourceChangeIsNotQuiescent) {
   expectUnchanged(was);
 }
 
-TEST_F(VagentEpistemicUpgrade, AnEmptyEpistemicRootStillUpgradesBothWays) {
+TEST_F(VagentEpistemicUpgrade, ABoundRootWithNoProfileUpgradesOnlyBySchema) {
+  // No source has reported, but the bind wrote the agent's audience (I3-3a2),
+  // which devices sign into every message: state the schema road carries and
+  // the reconciler, with no translator, may not drop.
   settle();
   ASSERT_TRUE(profiles().empty());
+  const auto audience = host->executor().audience(pid);
+  ASSERT_TRUE(audience);
+  const auto was     = before();
+  const auto byValue = host->upgrade(pid, next());
+  ASSERT_FALSE(byValue);
+  EXPECT_EQ(byValue.error().code, TransferCode::RouteCarriesNoEpistemicState);
+  EXPECT_EQ(byValue.error().detail.subject, "d.epistemic");
+  expectUnchanged(was);
   auto held = host->retainProgram(next());
   ASSERT_TRUE(held);
   const auto shared = host->upgrade(pid, held);
   EXPECT_TRUE(shared) << (shared ? "" : toString(shared.error()));
   EXPECT_EQ(*host->executor().programRef(pid), held->programRef());
-  settle();
-  const auto byValue = host->upgrade(pid, next());
-  EXPECT_TRUE(byValue) << (byValue ? "" : toString(byValue.error()));
+  EXPECT_EQ(host->executor().audience(pid), audience);
 }
 
 TEST(VagentEpistemicIngressPlain, AProgramWithoutArbitrationCannotBind) {

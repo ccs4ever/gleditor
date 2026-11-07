@@ -4,6 +4,7 @@
 #include "common/xanadu/provenance.hpp"
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/system_docs.hpp"
+#include "common/xanadu/vagent/runtime/epistemic_adapter_wire.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_preflight.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_shape.hpp"
 #include "common/xanadu/vagent/runtime/program.hpp"
@@ -1894,7 +1895,12 @@ void AgentExecutor::finishSourceChange(State &state, const SourceChange &change,
                                        std::optional<SettleReport> settle) {
   const auto pid = pidKey(state.pid);
   const Ingress::SourceKey source{pid, change.principal};
+  // The arena's record is the identifier, whichever bind or checkpoint wrote
+  // it; read outside the lock, since only this thread writes the arena.
+  const auto written = audienceOf(state.context->arena, state.agent.agentCell,
+                                  state.dims.epistemic, state.vd);
   const std::lock_guard lock(ingress_->mutex);
+  if (written) ingress_->audiences[pid] = {*written, true};
   auto published   = outcomeOfCode(code);
   published.settle = std::move(settle);
   // A principal bound on several predicates is advanced once and then
@@ -3561,6 +3567,7 @@ bool fitsKind(Type::Kind kind, const WireValue &value) {
 OutcomeClass outcomeClassOf(std::string_view code) noexcept {
   if (code == "IngressBackpressure" || code == "ClockUnsynchronised" ||
       code == "AdmissionClosed" || code == "RevocationUnavailable" ||
+      code == "AudienceUnavailable" || code == "UnknownClockMapping" ||
       code == kTurnResultUndelivered)
     return OutcomeClass::Retryable;
   // A budget, an allowance or a binding the host must change first. An
@@ -3572,7 +3579,8 @@ OutcomeClass outcomeClassOf(std::string_view code) noexcept {
       code == "SourceFaulted" || code == "UnauthorizedHealthAction" ||
       code == "NoProfile" || code == "HealthReasonsFull" ||
       code == "HealthUnavailable" || code == "DelegationExpired" ||
-      code == "KeyRevoked")
+      code == "KeyRevoked" || code == "PolicyMismatch" ||
+      code == "IncarnationStep")
     return OutcomeClass::NeedsHostAction;
   return OutcomeClass::Terminal;
 }
@@ -3606,9 +3614,10 @@ AgentExecutor::bindSource(const identity::ActorPid &target,
   binding.policy      = *predicate->second.policy;
   for (const auto &param : predicate->second.params)
     binding.params.push_back(param.type.kind);
-  binding.domain = grant.predicate + "/" +
+  binding.policyHash = policyHash(binding.policy);
+  binding.domain     = grant.predicate + "/" +
                    std::to_string(binding.params.size()) + "@" +
-                   policyHash(binding.policy);
+                   binding.policyHash;
   const auto pid = pidKey(target);
   const std::lock_guard lock(ingress_->mutex);
   // In the scope that pushes: a bind that lands before the gate is seen by
@@ -3659,6 +3668,16 @@ AgentExecutor::bindSource(const identity::ActorPid &target,
                        grant.incarnation);
     ingress_->unbindAll(pid, grant.principal);
   }
+  // The audience is drawn before anything is bound, so a failed draw leaves
+  // nothing behind; one per pid, so every bind carries the same identifier.
+  auto audience = ingress_->audiences.find(pid);
+  if (audience == ingress_->audiences.end()) {
+    auto token = audienceMint_ ? audienceMint_() : mintAudienceToken();
+    if (!token) return std::unexpected(EpistemicRefusal::EntropyUnavailable);
+    audience =
+        ingress_->audiences.emplace(pid, Ingress::Audience{*token, false})
+            .first;
+  }
   ingress_->bindings.insert_or_assign(key, std::move(binding));
   ingress_->aliases.insert_or_assign({pid, grant.alias}, grant.principal);
   // Every bind queues the source-change turn, ahead of the agent's work. At
@@ -3666,7 +3685,8 @@ AgentExecutor::bindSource(const identity::ActorPid &target,
   // host retries an advance that failed.
   PostBox::Item item;
   item.pid          = target;
-  item.sourceChange = SourceChange{grant.principal, grant.incarnation, false};
+  item.sourceChange = SourceChange{grant.principal, grant.incarnation, false,
+                                   audience->second.token};
   posts_->pushControl(std::move(item));
   return this;
 }
@@ -3717,6 +3737,39 @@ AgentExecutor *AgentExecutor::setWallClockSynchronised(bool synchronised) {
   const std::lock_guard lock(ingress_->mutex);
   ingress_->wallSynchronised = synchronised;
   return this;
+}
+
+std::optional<std::string>
+AgentExecutor::audience(const identity::ActorPid &target) const {
+  const std::lock_guard lock(ingress_->mutex);
+  const auto found = ingress_->audiences.find(pidKey(target));
+  if (found == ingress_->audiences.end() || !found->second.committed)
+    return std::nullopt;
+  return found->second.token;
+}
+
+AgentExecutor *AgentExecutor::setAudienceMint(AudienceMint mint) {
+  audienceMint_ = std::move(mint);
+  return this;
+}
+
+std::optional<AgentExecutor::BoundPredicate>
+AgentExecutor::boundPredicate(const identity::ActorPid &target,
+                              std::string_view principal,
+                              std::string_view predicate) const {
+  const std::lock_guard lock(ingress_->mutex);
+  const auto found = ingress_->bindings.find(
+      {pidKey(target), std::string(principal), std::string(predicate)});
+  if (found == ingress_->bindings.end() ||
+      clock_.steady() > found->second.expiresAt)
+    return std::nullopt;
+  return BoundPredicate{found->second.incarnation, found->second.policy,
+                        found->second.params};
+}
+
+AgentExecutor::HostTime AgentExecutor::hostTime() const {
+  const std::lock_guard lock(ingress_->mutex);
+  return {clock_.steady(), wallNow(), ingress_->wallSynchronised};
 }
 
 std::optional<IngestOutcome> AgentExecutor::ingestOutcome(
@@ -3825,8 +3878,20 @@ AgentExecutor::observe(const identity::ActorPid &target,
   const auto &policy = b.policy;
   if (o.incarnation < b.incarnation)
     return refuse(EpistemicRefusal::StaleIncarnation);
+  // Only what the adapter decides on verified bytes may arrive this way, and
+  // each at the place this routine would decide it itself.
+  const auto adapter = [&](EpistemicRefusal code) {
+    return o.adapterRefusal == code;
+  };
+  if (o.adapterRefusal && !adapter(EpistemicRefusal::IncarnationStep) &&
+      !adapter(EpistemicRefusal::InvalidValue))
+    return refuse(EpistemicRefusal::InvalidObservation);
+  if (adapter(EpistemicRefusal::IncarnationStep))
+    return refuse(EpistemicRefusal::IncarnationStep);
   if (o.incarnation > b.incarnation)
     return refuse(EpistemicRefusal::UnboundIncarnation);
+  if (o.policy && *o.policy != b.policyHash)
+    return refuse(EpistemicRefusal::PolicyMismatch);
   const auto fits = [](std::uint64_t v) {
     return std::in_range<std::int64_t>(v);
   };
@@ -3839,6 +3904,8 @@ AgentExecutor::observe(const identity::ActorPid &target,
   if (!std::isfinite(o.acquiredAt) || !std::isfinite(o.acquiredUncertainty) ||
       o.acquiredUncertainty < 0)
     return refuse(EpistemicRefusal::InvalidAcquisition);
+  if (adapter(EpistemicRefusal::InvalidValue))
+    return refuse(EpistemicRefusal::InvalidValue);
   for (std::size_t i = 0; i < o.tuple.size(); ++i)
     if (!fitsKind(b.params[i], o.tuple[i]))
       return refuse(EpistemicRefusal::InvalidValue);
@@ -4110,6 +4177,18 @@ std::string_view epistemicRefusalName(EpistemicRefusal refusal) noexcept {
     return kTurnResultStaleSequence;
   case EpistemicRefusal::Duplicate:
     return kTurnResultDuplicate;
+  case EpistemicRefusal::AudienceMismatch:
+    return "AudienceMismatch";
+  case EpistemicRefusal::AudienceUnavailable:
+    return "AudienceUnavailable";
+  case EpistemicRefusal::PolicyMismatch:
+    return "PolicyMismatch";
+  case EpistemicRefusal::IncarnationStep:
+    return "IncarnationStep";
+  case EpistemicRefusal::InvalidBinding:
+    return "InvalidBinding";
+  case EpistemicRefusal::UnknownClockMapping:
+    return "UnknownClockMapping";
   }
   return "Unknown";
 }
@@ -4283,6 +4362,9 @@ void AgentExecutor::drainPosted() {
                        *item.sourceChange->incarnation)));
       change.set(std::string(kSourceRetire),
                  WireValue::boolean(item.sourceChange->retire));
+      if (item.sourceChange->audience)
+        change.set(std::string(kSourceAudience),
+                   WireValue::text(*item.sourceChange->audience));
       change.set(std::string(kIngestMaxSources),
                  WireValue::integer(static_cast<std::int64_t>(
                      settings_.epistemic.maxSources)));

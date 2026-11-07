@@ -3896,6 +3896,29 @@ void Gen::emitSourceChange(CellRef entryLabel) {
   }
   // Absent only for the retirement of a principal no binding names.
   find(change, kObsIncarnation, inc);
+  {
+    // The audience (I3-3a2) is written once, by the first bind that carries
+    // one: a racing second bind and a resumed checkpoint keep the first.
+    const CellRef audience = reg(), c = reg(), have = reg();
+    const CellRef scan = newLabel(), mint = newLabel(), kept = newLabel();
+    find(change, kSourceAudience, audience);
+    branchIfZero(audience, kept);
+    mov(S(c), S(rd(S(agentCell_), dims_.epistemic)));
+    place(scan);
+    branchIfZero(c, mint);
+    emit(OpcodeKind::Eq, "audience?",
+         {D(c), S(cStr(std::string(kAudienceRecordName)))}, {have});
+    branch(S(have), kept);
+    mov(S(c), S(rd(D(c), dims_.epistemic)));
+    jump(scan);
+    place(mint);
+    const CellRef record = reg();
+    alloc(record);
+    mov(D(record), S(cStr(std::string(kAudienceRecordName))));
+    putScalar(record, kAudienceTokenField, D(audience));
+    emitAppendTail(S(agentCell_), dims_.epistemic, dims_.epistemic, record);
+    place(kept);
+  }
   // A fresh streams record and dedup list, for a new or revived profile.
   const auto freshWindows = [&](CellRef prof) {
     const CellRef streams = reg(), seen = reg();

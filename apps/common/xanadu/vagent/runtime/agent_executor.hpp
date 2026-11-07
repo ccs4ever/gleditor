@@ -40,6 +40,7 @@
 #include "common/xanadu/vagent/runtime/epistemic_health.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_ingress.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_limits.hpp"
+#include "common/xanadu/vagent/runtime/epistemic_policy.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_preflight.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_refusal.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_translate.hpp"
@@ -500,6 +501,36 @@ public:
   /// The host's time service reports whether the wall clock is synchronised;
   /// until it is, observations on a wall-basis predicate refuse retryably.
   AgentExecutor *setWallClockSynchronised(bool synchronised);
+  /// The agent's audience identifier once its record has committed (P19
+  /// I3-3a2): 64 lowercase hex, compared as text, minted at the agent's first
+  /// bind and carried by resume and upgrade. An identifier, never a secret or
+  /// a capability. Callable from any thread.
+  [[nodiscard]] std::optional<std::string>
+  audience(const identity::ActorPid &target) const;
+  /// Where `bindSource` draws a new agent's audience; the default reads the
+  /// CSPRNG. Nothing means the entropy failed, and the bind refuses
+  /// `EntropyUnavailable` rather than fall back to a weaker source.
+  using AudienceMint = std::function<std::optional<std::string>()>;
+  AgentExecutor *setAudienceMint(AudienceMint mint);
+  /// What the signed adapter checks a bound source's messages against.
+  struct BoundPredicate {
+    std::uint64_t incarnation{};
+    ArbitrationPolicy policy;
+    std::vector<Type::Kind> params;
+  };
+  /// The live binding of @p principal on @p predicate, if any; callable from
+  /// any thread.
+  [[nodiscard]] std::optional<BoundPredicate>
+  boundPredicate(const identity::ActorPid &target, std::string_view principal,
+                 std::string_view predicate) const;
+  /// The executor's clocks and the time service's report, read together, so
+  /// the adapter judges a message against the clocks `observe` uses.
+  struct HostTime {
+    zigzag::vortex::mesh::ActorTime steady;
+    std::chrono::system_clock::time_point wall;
+    bool wallSynchronised{false};
+  };
+  [[nodiscard]] HostTime hostTime() const;
   /// The newest advance or retire turn's outcome for @p principal: how a
   /// host learns that the arena refused a binding it had accepted.
   [[nodiscard]] std::optional<IngestOutcome>
@@ -1041,6 +1072,7 @@ private:
   std::map<std::string, std::uint64_t> healthActionSeq_;
   mutable std::mutex auditSinkMutex_;
   HealthAuditSink healthAuditSink_;
+  AudienceMint audienceMint_;
 };
 
 } // namespace xanadu::vagent::runtime

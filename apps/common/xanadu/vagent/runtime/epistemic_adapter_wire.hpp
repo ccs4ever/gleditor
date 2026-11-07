@@ -48,13 +48,6 @@ inline constexpr std::size_t kSignedNonceBytes = 32;
 /// A health report code: an identifier, short enough for an audit line.
 inline constexpr std::size_t kMaxHealthCodeBytes = 64;
 
-/// `vagent.epistemic_signed_message_bytes`: an observation is under 1 KiB, and
-/// the ceiling is the bound `observe` already holds signed bytes to.
-inline constexpr std::size_t kDefaultSignedMessageBytes = 4096;
-inline constexpr std::size_t kMinSignedMessageBytes     = 1024;
-inline constexpr std::size_t kMaxSignedMessageBytes =
-    kMaxObservationSignedBytes;
-
 enum class SignedKind : std::uint8_t {
   Observation,
   Heartbeat,
@@ -209,6 +202,10 @@ signEnvelope(const identity::StandardCryptoEngine &device, std::string body,
 /// Strict UTF-8 (no overlong form, surrogate or code point past U+10FFFF),
 /// at most @p maxBytes long: tuple text is a reading, not an identifier.
 [[nodiscard]] bool isSignedText(std::string_view text, std::size_t maxBytes);
+
+/// A fresh audience identifier, 64 lowercase hex from the CSPRNG (3.6), or
+/// nothing when the entropy source fails: never a weaker fallback.
+[[nodiscard]] std::optional<std::string> mintAudienceToken();
 
 } // namespace xanadu::vagent::runtime
 

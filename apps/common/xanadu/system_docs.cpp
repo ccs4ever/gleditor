@@ -1097,15 +1097,51 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .schemas = {{.expectedTypes = {"integer"},
                       .defaultValues =
                           {vagent::runtime::kDefaultEpistemicHealthActions}}}},
-        {.name    = std::string(settings::kVagentAdmissionPauseMs),
-         .notes   = "vagent: milliseconds `pauseAdmission` closes an actor's "
-                    "door for when it is not given a ttl, 1000 to 600000. The "
-                    "pause lapses by itself, so a forgotten one cannot close "
-                    "a source for ever; `upgradeQuiescing` renews it across "
-                    "its drain",
+        {.name    = std::string(settings::kVagentEpistemicSignedMessageBytes),
+         .notes   = "vagent: largest signed ingress message, in bytes, 1024 to "
+                    "65536; an "
+                    "observation is under 1 KiB",
          .schemas = {{.expectedTypes = {"integer"},
-                      .defaultValues =
-                          {vagent::runtime::kDefaultAdmissionPauseMs}}}},
+                      .defaultValues = {static_cast<std::int64_t>(
+                          vagent::runtime::kDefaultSignedMessageBytes)}}}},
+        {.name    = std::string(settings::kVagentEpistemicDelegationCache),
+         .notes   = "vagent: validated delegation chains kept for signed "
+                    "ingress, 16 to "
+                    "4096",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues = {static_cast<std::int64_t>(
+                          vagent::runtime::kDefaultDelegationCache)}}}},
+        {.name  = std::string(settings::kVagentEpistemicVerifyPerPeer),
+         .notes = "vagent: signed messages one transport peer may have "
+                  "verified each "
+                  "second, 10 to 100000; at about 133 us a verify, 500 is "
+                  "about 7% of one core",
+         .schemas =
+             {{.expectedTypes = {"integer"},
+               .defaultValues = {vagent::runtime::kDefaultVerifyPerPeer}}}},
+        {.name = std::string(settings::kVagentEpistemicWallRollbackMs),
+         .notes =
+             "vagent: milliseconds the host wall clock may step back before "
+             "delegated keys refuse ClockUnsynchronised, 10 to 3600000",
+         .schemas =
+             {{.expectedTypes = {"integer"},
+               .defaultValues = {vagent::runtime::kDefaultWallRollbackMs}}}},
+        {.name = std::string(settings::kVagentEpistemicIncarnationStep),
+         .notes =
+             "vagent: the largest incarnation advance a signed-incarnation "
+             "binding takes from a verified message, 1 to 2147483648",
+         .schemas =
+             {{.expectedTypes = {"integer"},
+               .defaultValues = {vagent::runtime::kDefaultIncarnationStep}}}},
+        {.name  = std::string(settings::kVagentAdmissionPauseMs),
+         .notes = "vagent: milliseconds `pauseAdmission` closes an actor's "
+                  "door for when it is not given a ttl, 1000 to 600000. The "
+                  "pause lapses by itself, so a forgotten one cannot close "
+                  "a source for ever; `upgradeQuiescing` renews it across "
+                  "its drain",
+         .schemas =
+             {{.expectedTypes = {"integer"},
+               .defaultValues = {vagent::runtime::kDefaultAdmissionPauseMs}}}},
         {.name    = std::string(settings::kVagentTuiBorders),
          .notes   = "vagent tui: border glyphs; rounded, single or ascii. "
                     "Unset picks unicode where the locale is UTF-8",

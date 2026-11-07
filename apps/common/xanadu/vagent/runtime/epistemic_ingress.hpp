@@ -22,6 +22,8 @@
 
 namespace xanadu::vagent::runtime {
 
+enum class EpistemicRefusal : std::uint8_t;
+
 /// One observation as the host's verifying ingress adapter hands it over.
 /// `principal` is the origin signer, never the transport peer.
 struct CheckedObservation {
@@ -45,6 +47,15 @@ struct CheckedObservation {
   std::string units;
   /// Full scalar isotropic variance in squared units, continuous only.
   std::optional<double> variance;
+  /// The predicate's policy hash as the origin signed it. Set by the signed
+  /// adapter; a hash that is not the binding's refuses `PolicyMismatch`, so a
+  /// message signed for another declaration of the predicate never lands.
+  std::optional<std::string> policy;
+  /// A refusal the signed adapter decided on verified, signed fields after
+  /// step 5 (`IncarnationStep`, `InvalidValue`), handed over so it is logged
+  /// and charged by the same rules as `observe`'s own. Any other code is
+  /// refused as `InvalidObservation`.
+  std::optional<EpistemicRefusal> adapterRefusal;
 };
 
 /// The host's authorization for one origin principal to report one arbitrated
@@ -151,6 +162,22 @@ enum class EpistemicRefusal : std::uint8_t {
   /// conditions.
   StaleSequence,
   Duplicate,
+  // The adapter (P19 I3-3a2), steps 3 and 7 and binding.
+  /// The header's audience is not that of any agent the adapter binds.
+  AudienceMismatch,
+  /// A bound agent's audience has not committed yet; resend once it has.
+  AudienceUnavailable,
+  /// The payload's policy hash is not the bound predicate's.
+  PolicyMismatch,
+  /// A `signed` binding's incarnation advance larger than
+  /// `vagent.epistemic_incarnation_step`.
+  IncarnationStep,
+  /// A source binding the adapter cannot hold: a bad principal or master, no
+  /// predicate, a repeated predicate or a non-positive lifetime.
+  InvalidBinding,
+  /// No mapping from the device's clock to the policy's basis. Until I3-3b1
+  /// pairs free clocks, only a synchronised device on a wall policy maps.
+  UnknownClockMapping,
 };
 
 /// What the host may do with a refused event.

@@ -69,6 +69,9 @@ struct SourceChange {
   std::string principal;
   std::optional<std::uint64_t> incarnation;
   bool retire{false};
+  /// The audience a bind carries; the routine writes it only where the agent
+  /// has none.
+  std::optional<std::string> audience;
 };
 
 struct AgentExecutor::Flight {
@@ -306,6 +309,8 @@ struct AgentExecutor::Ingress {
     /// The predicate's name and arity with its policy hash, stamped on
     /// every record ingested under the binding.
     std::string domain;
+    /// The policy hash alone, which a signed observation must name.
+    std::string policyHash;
   };
   /// One event's entry in its source's outcome log.
   struct Logged {
@@ -419,6 +424,15 @@ struct AgentExecutor::Ingress {
   /// Unknown until the host's time service reports: a wall-basis reading
   /// taken before then cannot be placed in time.
   bool wallSynchronised{false};
+  /// Per pid, the audience this host minted or read back from the arena.
+  /// Only a committed one is answered: the arena's record is the authority,
+  /// so after a resume the first committed source change replaces the
+  /// host's fresh mint with the identifier the checkpoint carried.
+  struct Audience {
+    std::string token;
+    bool committed{false};
+  };
+  std::map<std::string, Audience> audiences;
   /// Names this executor's steady clock: received_steady and last_contact
   /// stamps are comparable only between records that carry the same one.
   std::string clockInstance = [] {
@@ -565,6 +579,7 @@ struct AgentExecutor::Ingress {
     std::erase_if(inFlight, mine);
     admission.erase(pid);
     std::erase_if(uncounted, mine);
+    audiences.erase(pid);
     std::erase_if(marks, [&](const auto &entry) {
       return std::get<0>(entry.first) == pid;
     });

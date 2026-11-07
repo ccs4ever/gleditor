@@ -101,6 +101,37 @@ inline constexpr std::size_t kMaxEventIdBytes           = 256;
 inline constexpr std::size_t kMaxObservationNameBytes   = 256;
 inline constexpr std::size_t kMaxObservationSignedBytes = 64 * 1024;
 
+// Signed ingress (P19 I3-3a, `i3-3-design.md` 9.1). Here rather than beside
+// the adapter so `defaultSettingSpecs()` can name them without the adapter.
+/// `vagent.epistemic_signed_message_bytes`: an observation is under 1 KiB, and
+/// the ceiling is the bound `observe` already holds signed bytes to.
+inline constexpr std::size_t kDefaultSignedMessageBytes = 4096;
+inline constexpr std::size_t kMinSignedMessageBytes     = 1024;
+inline constexpr std::size_t kMaxSignedMessageBytes =
+    kMaxObservationSignedBytes;
+/// `vagent.epistemic_delegation_cache`: validated chains kept; two sources
+/// per slot of the default `max_sources`.
+inline constexpr std::size_t kDefaultDelegationCache = 256;
+inline constexpr std::size_t kMinDelegationCache     = 16;
+inline constexpr std::size_t kMaxDelegationCache     = 4096;
+/// `vagent.epistemic_verify_per_peer`: verifications a second one transport
+/// peer may cost. Measured at 133 us a verify (I3-3a1), 500 a second is
+/// about 7% of one core; the design's 2,000 was priced on a 60 us estimate
+/// and would let one peer take about 27%.
+inline constexpr std::int64_t kDefaultVerifyPerPeer = 500;
+inline constexpr std::int64_t kMinVerifyPerPeer     = 10;
+inline constexpr std::int64_t kMaxVerifyPerPeer     = 100'000;
+/// `vagent.epistemic_wall_rollback_ms`: larger than an NTP slew step, smaller
+/// than any certificate window.
+inline constexpr std::int64_t kDefaultWallRollbackMs = 1000;
+inline constexpr std::int64_t kMinWallRollbackMs     = 10;
+inline constexpr std::int64_t kMaxWallRollbackMs     = 3'600'000;
+/// `vagent.epistemic_incarnation_step`: the largest incarnation advance a
+/// `signed` binding takes from a message, a thousand unobserved reboots.
+inline constexpr std::int64_t kDefaultIncarnationStep = 1024;
+inline constexpr std::int64_t kMinIncarnationStep     = 1;
+inline constexpr std::int64_t kMaxIncarnationStep     = std::int64_t{1} << 31;
+
 enum class EpistemicLimitError : std::uint8_t {
   InvalidSources,
   InvalidCandidates,

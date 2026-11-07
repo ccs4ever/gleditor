@@ -390,6 +390,9 @@ planTranslation(const PlanRequest &q) {
   TranslationPlan plan;
   const auto vd = valueDimsOf(dims);
   if (!vd) return plan;
+  auto agentRecords = agentRankRecords(arena, q.fromAgent, dims, q.route);
+  if (!agentRecords) return std::unexpected(std::move(agentRecords.error()));
+  plan.agentRecords = std::move(*agentRecords);
 
   const auto checkDims = [&](CellRef cell) -> std::optional<std::string> {
     for (const auto &link : arena.dimensionsOf(cell)) {
@@ -659,6 +662,10 @@ public:
 
   void run(const TranslationPlan &plan, Disposition disposition) {
     const auto start = made_.size();
+    // Pass 0: the agent's own records, after the header the new program
+    // minted, so a device's audience survives the move.
+    for (const auto record : plan.agentRecords)
+      appendToRank(into_, intoAgent(), to_.epistemic, copyGraph(record));
     // Pass 1: profiles, their fields and their clone chains.
     for (const auto &profile : plan.profiles) {
       const auto fresh = copyCell(profile.cell);
@@ -909,6 +916,12 @@ std::string epistemicStateDigest(const zigzag::ArenaManifold &arena,
       h.cell(record, true);
     }
   };
+  if (dims.epistemic)
+    for (const auto cell : ranked(arena, agent, dims.epistemic))
+      if (arena.textOf(cell) != kShapeHeaderName) {
+        h.out().tag('A');
+        h.cell(cell, true);
+      }
   for (const auto profile : profiles) {
     h.out().tag('P');
     h.cell(profile, true,

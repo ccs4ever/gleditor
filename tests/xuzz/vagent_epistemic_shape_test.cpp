@@ -395,11 +395,14 @@ TEST(EpistemicShapeTest, TheSavedHeaderIsComparedAndNotCopied) {
         zigzag::rankAfter(ctx.arena, agent,
                           registerDimensions(ctx.arena).epistemic) |
         std::ranges::to<std::vector<CellRef>>();
-    ASSERT_EQ(rank.size(), 1U);
+    // The header, then the audience record the saved agent's bind wrote,
+    // which is carried (I3-3a2).
+    ASSERT_EQ(rank.size(), 2U);
     // The program's own instantiation made it: the same cell a fresh launch
     // gets, not a clone of the saved one.
     EXPECT_EQ(rank.front(), programsOwn);
     EXPECT_EQ(ctx.arena.textOf(rank.front()), kShapeHeaderName);
+    EXPECT_EQ(ctx.arena.textOf(rank.back()), kAudienceRecordName);
   }
 
   // The in-place upgrade does the same.
@@ -409,7 +412,8 @@ TEST(EpistemicShapeTest, TheSavedHeaderIsComparedAndNotCopied) {
       a.host->upgrade(a.pid, a.host->retainProgram(nextVersion(kSource)));
   ASSERT_TRUE(upgraded) << toString(upgraded.error());
   a.host->pump();
-  ASSERT_EQ(a.epistemicRank().size(), 1U);
+  // The new program's header and the carried audience.
+  ASSERT_EQ(a.epistemicRank().size(), 2U);
   EXPECT_EQ(a.header(), programsOwn);
   EXPECT_EQ(a.probe().shape, 1);
 }

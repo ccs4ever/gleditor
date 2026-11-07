@@ -13,6 +13,8 @@
 #include "common/xanadu/identity/identity_engine.hpp"
 #include "common/xanadu/identity/standard_crypto_engine.hpp"
 
+#include <openssl/rand.h>
+
 namespace xanadu::vagent::runtime {
 
 namespace {
@@ -553,6 +555,20 @@ bool isSignedText(const std::string_view text, const std::size_t maxBytes) {
     i += length;
   }
   return true;
+}
+
+std::optional<std::string> mintAudienceToken() {
+  std::array<unsigned char, kSignedHexIdBytes / 2> bytes{};
+  if (RAND_bytes(bytes.data(), static_cast<int>(bytes.size())) != 1)
+    return std::nullopt;
+  static constexpr char digits[] = "0123456789abcdef";
+  std::string out;
+  out.reserve(kSignedHexIdBytes);
+  for (const auto b : bytes) {
+    out.push_back(digits[b >> 4U]);
+    out.push_back(digits[b & 0xFU]);
+  }
+  return out;
 }
 
 } // namespace xanadu::vagent::runtime

@@ -672,6 +672,13 @@ inline constexpr std::string_view kSourceRetire     = "retire";
 /// Records a profile's retired history keeps: the history bound for each
 /// key the source may support.
 inline constexpr std::string_view kSourceRetained = "retained";
+/// The receiving agent's audience identifier (P19 I3-3a2): 64 hex from the
+/// host's CSPRNG, written once to the agent's `d.epistemic` rank as an
+/// `EpistemicAudience` record with one `token` field, so a racing second
+/// bind and a resume keep the first.
+inline constexpr std::string_view kSourceAudience     = "audience";
+inline constexpr std::string_view kAudienceRecordName = "EpistemicAudience";
+inline constexpr std::string_view kAudienceTokenField = "token";
 /// A bookkeeping turn for a principal with no profile: nothing to charge.
 inline constexpr std::string_view kTurnResultNoProfile = "NoProfile";
 // Typed ingestion outcomes besides `Committed`.

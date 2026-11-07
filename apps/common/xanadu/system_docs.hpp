@@ -338,6 +338,16 @@ inline constexpr std::string_view kVagentEpistemicHealthReasons =
     "vagent.epistemic_health_reasons";
 inline constexpr std::string_view kVagentEpistemicHealthActions =
     "vagent.epistemic_health_actions";
+inline constexpr std::string_view kVagentEpistemicSignedMessageBytes =
+    "vagent.epistemic_signed_message_bytes";
+inline constexpr std::string_view kVagentEpistemicDelegationCache =
+    "vagent.epistemic_delegation_cache";
+inline constexpr std::string_view kVagentEpistemicVerifyPerPeer =
+    "vagent.epistemic_verify_per_peer";
+inline constexpr std::string_view kVagentEpistemicWallRollbackMs =
+    "vagent.epistemic_wall_rollback_ms";
+inline constexpr std::string_view kVagentEpistemicIncarnationStep =
+    "vagent.epistemic_incarnation_step";
 inline constexpr std::string_view kVagentTuiBorders = "vagent.tui.borders";
 inline constexpr std::string_view kVagentTuiHistorySize =
     "vagent.tui.history_size";

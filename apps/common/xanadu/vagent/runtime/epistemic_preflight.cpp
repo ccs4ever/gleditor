@@ -85,6 +85,9 @@ std::size_t countOwnedCells(const zigzag::ArenaManifold &arena, CellRef agent,
     for (const auto record : ranked(arena, profile, dims.epistemic))
       admit(record);
   }
+  // The agent's own records (the audience); the header is the program's.
+  for (const auto record : ranked(arena, agent, dims.epistemic))
+    if (arena.textOf(record) != kShapeHeaderName) admit(record);
   // Every support's history on an arbitrated predicate: the predicate heads
   // its policy master on `d.epistemic`, which only arbitration mints.
   for (const auto predicate : ranked(arena, agent, dims.belief)) {

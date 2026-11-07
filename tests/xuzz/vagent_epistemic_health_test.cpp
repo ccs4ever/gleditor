@@ -1917,9 +1917,10 @@ TEST_F(VagentEpistemicHealthActions, OrdinaryAdmissionReservesTheHealthBound) {
   LocalHost::Options tight;
   tight.settings.epistemic.cells = census + bound - 1;
   start(kActionProgram, tight);
-  // One cell short of the census plus the reserve: refused, writing nothing.
+  // One cell short of the census plus the reserve: refused, writing nothing
+  // but the bind's audience record (3 cells, I3-3a2).
   EXPECT_EQ(send(reading("a")), "EpistemicBudget");
-  EXPECT_EQ(*ex().epistemicCells(pid), 0U);
+  EXPECT_EQ(*ex().epistemicCells(pid), 3U);
 
   LocalHost::Options exact;
   exact.settings.epistemic.cells = census + bound;
@@ -1954,8 +1955,12 @@ TEST_F(VagentEpistemicHealthActions, ADegradeOnATombstoneGetsNoHeadroom) {
   // the same tombstone still lands. Measured first: one reading's census, the
   // tombstone it leaves, and what a degrade on that tombstone writes.
   start();
+  // The agent's own cells (the audience record of I3-3a2) are in every
+  // census below once, so the reading's share is measured without them.
+  host->pump();
+  const auto agent = *ex().epistemicCells(pid);
   EXPECT_EQ(send(reading("a")), "Committed");
-  const auto reading1 = *ex().epistemicCells(pid);
+  const auto reading1 = *ex().epistemicCells(pid) - agent;
   ASSERT_TRUE(ex().retireSource(pid, kP1));
   host->pump();
   const auto tombstone = *ex().epistemicCells(pid);
