@@ -378,4 +378,20 @@ TEST(VagentDeclsTest, CapturingCodeLiteralEmitsInsideMemberBodies) {
   EXPECT_THAT(image->stubbed, ::testing::IsEmpty());
 }
 
+TEST(VagentDeclsTest, FrameLocalReferenceEmitsInsideMemberBodies) {
+  DeclHarness h;
+  auto image = h.lower(R"(
+    module demo
+    agent A {
+      def f(): Int { let x := 5; let c := code"x + 1"; 0 }
+    }
+  )");
+  ASSERT_TRUE(image.has_value());
+  if (!image) return;
+  // `x` is a frame local of f's own body — references to enclosing
+  // locals resolve through the literal's own scope seed, not the
+  // cap$N alias map, so the body emits without a join entry.
+  EXPECT_THAT(image->stubbed, ::testing::IsEmpty());
+}
+
 } // namespace
