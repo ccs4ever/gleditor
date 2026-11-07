@@ -561,6 +561,25 @@ TEST(VagentMetaTest, ValidateRejectsBrokenControlTargets) {
   EXPECT_TRUE(h.rt().validate(good, {.runReachable = false}).ok);
 }
 
+TEST(VagentMetaTest, ValidateReadsEmissionShapeControlTargets) {
+  MetaHarness h;
+  // Pad the arena so the referent's position exceeds the RunResume ceiling —
+  // `isOpCell` on the ref-box then reads a large position, not an opcode.
+  for (int i = 0; i < 64; ++i) (void)h.arena.makeCell();
+  // The emission convention is two hops: the wing slot holds int64(refBox),
+  // the ref-box holds int64(referent) (compiler.cpp bindIn/reference).
+  const auto landing = h.vm.mintOpcode(OpcodeKind::Return);
+  const auto refBox  = h.arena.makeScalarCell(static_cast<std::int64_t>(landing));
+  const auto jump    = h.vm.mintOpcode(OpcodeKind::Jump);
+  h.core.bindInput(jump,
+                   h.arena.makeScalarCell(static_cast<std::int64_t>(refBox)));
+  // Known defect (design/vagent-metacircular-compiler.md §2): validate's
+  // control-target arm resolves only the slot's first hop — the ref-box —
+  // and isOpCell-reads its int64(referent) content, so every real
+  // emitWrapped body (all carry a Choice) false-negatives today.
+  EXPECT_FALSE(h.rt().validate(jump, {.runReachable = false}).ok);
+}
+
 TEST(VagentMetaTest, WeightValueLabelAndNextRand) {
   MetaHarness h;
   // Junction arm: +d.weight scalar.

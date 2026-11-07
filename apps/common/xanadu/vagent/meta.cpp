@@ -750,7 +750,12 @@ MetaRunOutcome MetaRuntime::runFragment(CellRef head,
   // successor op, pushed on the cursor's `+d.stack`. For a kernel-side
   // run the successor is a fresh Halt — `Return` pops the frame and
   // lands there, ending `run` cleanly.
-  const auto landing = vm_.mintOpcode(OpcodeKind::Halt);
+  // `Halt` ≤ `FieldSet` decodes by content, so an unregistered scalar cell
+  // lands `Return` identically — `mintOpcode` would write the untrailed
+  // `opcodeMap_` under whatever marks this capcall runs in, and the entry
+  // would outlive a released cell (P17).
+  const auto landing = arena.makeScalarCell(
+      static_cast<std::int64_t>(OpcodeKind::Halt));
   const auto frame   = refCell(arena, core_, landing);
   if (const auto top = arena.linked(cur, dims.stack, Posward))
     zigzag::expectWritten(arena.link(frame, dims.stack, Posward, *top));
