@@ -1268,7 +1268,9 @@ TEST(VagentPlasticityTest, ActorExecutorRunsTheWorkedExamples) {
     }
   )");
   ASSERT_TRUE(artifacts) << artifacts.error().front().detail;
-  auto image = lowerProgram(artifacts->program, ctx.core, ctx.vm);
+  auto image =
+      lowerProgram(artifacts->program, ctx.core, ctx.vm, {},
+                   &artifacts->expansion, &artifacts->fragmentInfo);
   ASSERT_TRUE(image) << image.error().front().detail;
 
   zigzag::vortex::mesh::ActorExecution exec;

@@ -35,7 +35,9 @@ struct ExecutorHarness {
         fprintf(stderr, "frontend: %s\n", d.detail.c_str());
       return std::unexpected(artifacts.error());
     }
-    auto image = lowerProgram(artifacts->program, ctx.core, ctx.vm);
+    auto image =
+        lowerProgram(artifacts->program, ctx.core, ctx.vm, {},
+                     &artifacts->expansion, &artifacts->fragmentInfo);
     if (!image)
       for (const auto &d : image.error())
         fprintf(stderr, "lower: %s\n", d.detail.c_str());

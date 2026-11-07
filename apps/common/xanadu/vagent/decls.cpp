@@ -2,6 +2,7 @@
 
 #include <bit>
 #include <format>
+#include <iterator>
 #include <map>
 #include <string_view>
 #include <utility>
@@ -1986,8 +1987,25 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
 
 std::expected<LoweredImage, std::vector<Diagnostic>>
 lowerProgram(const Program &program, zigzag::vortex::VortexCore &core,
-             zigzag::vortex::VortexVM &vm, ScalarCompilerLimits limits) {
+             zigzag::vortex::VortexVM &vm, ScalarCompilerLimits limits,
+             Expansion *expansion, const FragmentInfoMap *fragmentInfo) {
   Lowerer lowerer{core, vm, std::move(limits), program};
+  if (expansion) {
+    // Expand's literal records and metas move into the synthesized
+    // tables — records own their bodies, and the key spaces are
+    // disjoint: a literal keys on its own loc + fragment ordinal, a
+    // head keys on the decl's loc plus the lowering ordinal.
+    // `captures` stays a read-only pointer for the whole walk.
+    auto moveRange = [](auto &into, auto &from) {
+      into.insert(std::make_move_iterator(from.begin()),
+                  std::make_move_iterator(from.end()));
+    };
+    moveRange(lowerer.fragments, expansion->fragments);
+    moveRange(lowerer.metas, expansion->fragmentMeta);
+    lowerer.context.captures = &expansion->captures;
+  }
+  if (fragmentInfo)
+    lowerer.infos.insert(fragmentInfo->begin(), fragmentInfo->end());
   lowerer.image.programRoot = core.home();
   lowerer.image.ownModule = core.getOrCreateModule(program.module.value_or(""));
   for (const auto &decl : program.declarations) lowerer.lowerDecl(decl, false);

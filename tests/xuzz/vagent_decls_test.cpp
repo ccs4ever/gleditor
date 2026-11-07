@@ -30,7 +30,8 @@ struct DeclHarness {
   lower(std::string_view source) {
     auto artifacts = compileArtifacts(source);
     if (!artifacts) return std::unexpected(artifacts.error());
-    return lowerProgram(artifacts->program, core, vm);
+    return lowerProgram(artifacts->program, core, vm, {},
+                        &artifacts->expansion, &artifacts->fragmentInfo);
   }
 
   std::vector<CellRef> rank(CellRef cell, DimRef dim) const {

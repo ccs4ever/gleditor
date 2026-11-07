@@ -45,7 +45,9 @@ struct AdapterHarness {
         fprintf(stderr, "frontend: %s\n", d.detail.c_str());
       return std::unexpected(artifacts.error());
     }
-    auto image = lowerProgram(artifacts->program, ctx.core, ctx.vm);
+    auto image =
+        lowerProgram(artifacts->program, ctx.core, ctx.vm, {},
+                     &artifacts->expansion, &artifacts->fragmentInfo);
     if (!image)
       for (const auto &d : image.error())
         fprintf(stderr, "lower: %s\n", d.detail.c_str());
@@ -909,11 +911,12 @@ TEST(VagentAdapterTest, GenesisOverASeededLineageRunsTheCeremony) {
   const auto filed = fileDimensionVocabulary(lineage, stage, {});
   ASSERT_TRUE(filed) << (filed ? "" : filed.error());
   WorkerContext compile{&filed->fold, &lineage};
-  const auto artifacts = compileArtifacts(
+  auto artifacts = compileArtifacts(
       "module demo\nagent A { def f(): Int { 1 + 2 } }");
   ASSERT_TRUE(artifacts);
   const auto image =
-      lowerProgram(artifacts->program, compile.core, compile.vm);
+      lowerProgram(artifacts->program, compile.core, compile.vm, {},
+                   &artifacts->expansion, &artifacts->fragmentInfo);
   ASSERT_TRUE(image);
   ASSERT_NE(image->imageRecord, zigzag::noCell);
   const auto seeded = seedProgramImage(lineage, compile.arena,
@@ -951,14 +954,15 @@ TEST(VagentAdapterTest, SeededLineageExecutesTheEmitChain) {
   const auto filed = fileDimensionVocabulary(lineage, stage, {});
   ASSERT_TRUE(filed) << (filed ? "" : filed.error());
   WorkerContext compile{&filed->fold, &lineage};
-  const auto artifacts = compileArtifacts(
+  auto artifacts = compileArtifacts(
       "module demo\nevent Ready\nagent A {\n"
       "  on Initialize { emit Ready{} }\n"
       "  on Ready { }\n"
       "}");
   ASSERT_TRUE(artifacts);
   const auto image =
-      lowerProgram(artifacts->program, compile.core, compile.vm);
+      lowerProgram(artifacts->program, compile.core, compile.vm, {},
+                   &artifacts->expansion, &artifacts->fragmentInfo);
   ASSERT_TRUE(image);
   const auto seeded = seedProgramImage(lineage, compile.arena,
                                        image->programRoot);
@@ -1006,7 +1010,7 @@ TEST(VagentAdapterTest, SendPerceptBindsNamedFieldsAndDeduplicates) {
   const auto filed = fileDimensionVocabulary(lineage, stage, {});
   ASSERT_TRUE(filed) << (filed ? "" : filed.error());
   WorkerContext compile{&filed->fold, &lineage};
-  const auto artifacts = compileArtifacts(
+  auto artifacts = compileArtifacts(
       "module demo\nevent Add { amount: Int }\nagent A {\n"
       "  var total: Int := 0\n"
       "  on Add as a {\n"
@@ -1016,7 +1020,8 @@ TEST(VagentAdapterTest, SendPerceptBindsNamedFieldsAndDeduplicates) {
       "}");
   ASSERT_TRUE(artifacts);
   const auto image =
-      lowerProgram(artifacts->program, compile.core, compile.vm);
+      lowerProgram(artifacts->program, compile.core, compile.vm, {},
+                   &artifacts->expansion, &artifacts->fragmentInfo);
   ASSERT_TRUE(image);
   const auto seeded = seedProgramImage(lineage, compile.arena,
                                        image->programRoot);

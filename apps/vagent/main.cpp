@@ -110,9 +110,12 @@ bool runFile(std::string_view path, const std::vector<SendSpec> &sends) {
   std::string source;
   if (!readSource(path, source)) return false;
 
-  auto program = xanadu::vagent::compile(source);
-  if (!program) {
-    for (const auto &diagnostic : program.error()) {
+  // compileArtifacts — not plain compile — because a code"…" literal
+  // inside a body emits through the expansion's fragment table, and
+  // runFile lowers what check only reads.
+  auto artifacts = xanadu::vagent::compileArtifacts(source);
+  if (!artifacts) {
+    for (const auto &diagnostic : artifacts.error()) {
       std::cerr << path << ':' << xanadu::vagent::formatDiagnostic(diagnostic)
                 << '\n';
     }
@@ -131,7 +134,9 @@ bool runFile(std::string_view path, const std::vector<SendSpec> &sends) {
     return false;
   }
   WorkerContext compile{&filed->fold, &lineage};
-  auto image = xanadu::vagent::lowerProgram(*program, compile.core, compile.vm);
+  auto image = xanadu::vagent::lowerProgram(
+      artifacts->program, compile.core, compile.vm, {},
+      &artifacts->expansion, &artifacts->fragmentInfo);
   if (!image) {
     for (const auto &diagnostic : image.error()) {
       std::cerr << path << ':' << xanadu::vagent::formatDiagnostic(diagnostic)

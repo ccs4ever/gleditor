@@ -23,6 +23,7 @@
 #include "common/xanadu/vagent/ast.hpp"
 #include "common/xanadu/vagent/checker.hpp"
 #include "common/xanadu/vagent/compiler.hpp"
+#include "common/xanadu/vagent/expand.hpp"
 #include "common/xanadu/vortex/vortex_core.hpp"
 #include "common/xanadu/vortex/vortex_vm.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
@@ -83,9 +84,17 @@ struct LoweredImage {
 // scalar emitter refuses (agent statement kinds; M2 owns real
 // segmentation) still gets its named head, with a single-segment
 // placeholder graph so run/graft machinery sees a uniform shape.
+// `expansion` and `fragmentInfo` are the frontend's side tables: a
+// code"…" literal inside any lowered body resolves its fragment-table
+// record through them — without them the literal's head cannot emit
+// and the body falls back to the placeholder graph. Fragment records
+// own their cloned bodies, so lowering *moves* them out of `expansion`
+// — pass it only when the tables have no later reader.
 [[nodiscard]] std::expected<LoweredImage, std::vector<Diagnostic>>
 lowerProgram(const Program &program, zigzag::vortex::VortexCore &core,
-             zigzag::vortex::VortexVM &vm, ScalarCompilerLimits limits = {});
+             zigzag::vortex::VortexVM &vm, ScalarCompilerLimits limits = {},
+             Expansion *expansion = nullptr,
+             const FragmentInfoMap *fragmentInfo = nullptr);
 
 } // namespace xanadu::vagent
 

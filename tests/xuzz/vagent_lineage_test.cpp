@@ -659,7 +659,8 @@ TEST(VagentLineageTest, DelegatedRestorerRefsSurviveRegenesis) {
               d.detail.c_str());
   ASSERT_TRUE(artifacts.has_value());
   auto image =
-      lowerProgram(artifacts->program, ctx.core, ctx.vm);
+      lowerProgram(artifacts->program, ctx.core, ctx.vm, {},
+                   &artifacts->expansion, &artifacts->fragmentInfo);
   if (!image)
     for (const auto &d : image.error())
       fprintf(stderr, "lower %zu:%zu: %s\n", d.loc.line, d.loc.column,
@@ -776,7 +777,9 @@ TEST(VagentLineageTest, AdoptResultSlotRestatesThroughRegenesis) {
       fprintf(stderr, "frontend %zu:%zu: %s\n", d.loc.line, d.loc.column,
               d.detail.c_str());
   ASSERT_TRUE(artifacts.has_value());
-  auto image = lowerProgram(artifacts->program, ctx.core, ctx.vm);
+  auto image =
+      lowerProgram(artifacts->program, ctx.core, ctx.vm, {},
+                   &artifacts->expansion, &artifacts->fragmentInfo);
   ASSERT_TRUE(image.has_value());
 
   VagentExecutor exec;
@@ -849,7 +852,9 @@ TEST(VagentLineageTest, CapcallRefResultRestatesThroughRegenesis) {
       fprintf(stderr, "frontend %zu:%zu: %s\n", d.loc.line, d.loc.column,
               d.detail.c_str());
   ASSERT_TRUE(artifacts.has_value());
-  auto image = lowerProgram(artifacts->program, ctx.core, ctx.vm);
+  auto image =
+      lowerProgram(artifacts->program, ctx.core, ctx.vm, {},
+                   &artifacts->expansion, &artifacts->fragmentInfo);
   ASSERT_TRUE(image.has_value());
 
   VagentExecutor exec;
@@ -873,6 +878,83 @@ TEST(VagentLineageTest, CapcallRefResultRestatesThroughRegenesis) {
   ASSERT_TRUE(a0.contains(referent))
       << "the produced Ping term position names a live cell";
   EXPECT_EQ(a0.textOf(referent), "Ping");
+  EXPECT_TRUE(a0.linked(*value, reloc, Posward).has_value())
+      << "a ref-typed capcall result must ride the manifest";
+
+  auto c1 = regenesisCycle(h.lineage, a0, image->agentCell, 0);
+  ASSERT_TRUE(c1.has_value()) << (c1 ? "" : c1.error());
+  auto &a1 = c1->context->arena;
+
+  const auto rec1 =
+      varsRecord(a1, c1->context->core, c1->agentCell, "r", false);
+  ASSERT_TRUE(rec1.has_value()) << "the var record did not fold";
+  const auto value1 =
+      a1.linked(*rec1, a1.dimensionNamed("d.values").value(), Posward);
+  ASSERT_TRUE(value1.has_value());
+  const auto restated = a1.asInt64(*value1);
+  ASSERT_TRUE(restated.has_value());
+  const auto twin = static_cast<CellRef>(*restated);
+  ASSERT_TRUE(a1.contains(twin))
+      << "the folded r names a dead position — the mark was not restated";
+}
+
+TEST(VagentLineageTest, CapcallCodeResultRestatesThroughRegenesis) {
+  LineageHarness h;
+  auto &ctx = *h.context;
+
+  // `def probe(): Code<Int> { code"…" }` — the literal's fragment
+  // record lives in the expansion's table, so the method body emits
+  // through it only because lowerProgram threads the tables. Without
+  // them the body silently stubs to () and `r` binds "".
+  auto artifacts = compileArtifacts(
+      "module demo\nevent Tick\nevent Done\n"
+      "capacity Nav { def probe(): Code<Int> }\n"
+      "skill W implements Nav {\n"
+      "  def probe(): Code<Int> { code\"1 + 2\" }\n"
+      "}\n"
+      "goal Work() perform\n"
+      "agent A {\n"
+      "  uses Nav\n"
+      "  on Tick { adopt Work() }\n"
+      "  plan p for Work { install W()\n"
+      "                    let r := Nav.probe()\n"
+      "                    emit Done{} }\n"
+      "}");
+  if (!artifacts)
+    for (const auto &d : artifacts.error())
+      fprintf(stderr, "frontend %zu:%zu: %s\n", d.loc.line, d.loc.column,
+              d.detail.c_str());
+  ASSERT_TRUE(artifacts.has_value());
+  auto image =
+      lowerProgram(artifacts->program, ctx.core, ctx.vm, {},
+                   &artifacts->expansion, &artifacts->fragmentInfo);
+  ASSERT_TRUE(image.has_value());
+
+  VagentExecutor exec;
+  ASSERT_TRUE(exec(tickOn(ctx), ctx)); // adopt + install
+  auto wake = tickOn(ctx);
+  wake.message.reset();
+  ASSERT_TRUE(exec(wake, ctx)); // capcall binds r
+  auto wake2 = tickOn(ctx);
+  wake2.message.reset();
+  ASSERT_TRUE(exec(wake2, ctx)); // emit Done
+
+  auto &a0         = ctx.arena;
+  const auto reloc = ctx.core.findOrMintDimension("d.mesh.relocation");
+  const auto rec = varsRecord(a0, ctx.core, image->agentCell, "r", false);
+  ASSERT_TRUE(rec.has_value());
+  const auto value = a0.linked(*rec, ctx.core.dims().values, Posward);
+  ASSERT_TRUE(value.has_value());
+  const auto pos = a0.asInt64(*value);
+  ASSERT_TRUE(pos.has_value())
+      << "a code\"…\" result emits its namedRef head position, not ''";
+  const auto referent = static_cast<CellRef>(*pos);
+  ASSERT_TRUE(a0.contains(referent))
+      << "the produced code literal head position names a live cell";
+  EXPECT_TRUE(a0.linked(referent, ctx.core.findOrMintDimension("d.entry"),
+                      Posward)
+                  .has_value())
+      << "the referent is the literal's emitted head";
   EXPECT_TRUE(a0.linked(*value, reloc, Posward).has_value())
       << "a ref-typed capcall result must ride the manifest";
 
