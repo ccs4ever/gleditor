@@ -670,6 +670,22 @@ std::vector<CellRef> VQLCompiler::compileReusableFrameCall(
   for (const auto &argument : arguments)
     actuals.push_back(compileArgument(argument, context));
 
+  const std::size_t suppliedActualCount = actuals.size();
+  const bool hasVariadicRest =
+      !definition.params.empty() && definition.params.back().isVariadic;
+  const std::size_t fixedParameterCount =
+      definition.params.size() - static_cast<std::size_t>(hasVariadicRest);
+  if (hasVariadicRest) {
+    std::vector<CellRef> restCells;
+    for (std::size_t index = fixedParameterCount; index < actuals.size();
+         ++index) {
+      const auto &actual = actuals[index];
+      restCells.insert(restCells.end(), actual.begin(), actual.end());
+    }
+    actuals.resize(definition.params.size());
+    actuals.back() = std::move(restCells);
+  }
+
   if (const auto required =
           frameRequiredDefaultCaptureBindings_.find(definition.name);
       required != frameRequiredDefaultCaptureBindings_.end()) {
@@ -721,8 +737,9 @@ std::vector<CellRef> VQLCompiler::compileReusableFrameCall(
   presenceFlags.reserve(definition.params.size());
   for (std::size_t index = 0; index < definition.params.size(); ++index) {
     const std::vector<CellRef> empty;
-    const bool present = index < actuals.size();
-    const auto &actual = present ? actuals[index] : empty;
+    const bool present   = index < suppliedActualCount;
+    const bool hasActual = index < actuals.size();
+    const auto &actual   = hasActual ? actuals[index] : empty;
     argumentStreams.push_back(normalizeFrameStream(actual));
     presenceFlags.push_back(
         definition.params[index].defaultValue

@@ -712,3 +712,20 @@ the same eight unfinished failures, with 132 passes and one skip. Repository for
 new performance claim is made. Multiple spaces still require explicit/shared mappings. Arbitrary
 index-rank mutation, remaining callable forms and complete frontend/lifecycle parity leave §4.12
 incomplete.
+
+## Native frames for untyped final rest parameters
+
+Eligible final named untyped rest parameters now use reusable recursive frames, with one ordered
+Stream port preserving cell identity and duplicates. Fixed defaults and contracts remain in callee
+formal order; omission flags are captured before tail packing. Actual stream preparation, including
+rest traversal, runs in the caller before callee guards. A fixed mismatch filters the body without
+avoiding that preparation cost, and exact fuel thresholds are not promised equivalent to inline
+calls. Typed rest remains on compiled inline graphs until each original actual can be matched in
+callee scope with preserved boundaries. See [iteration 39](projects/vortex-vm-only-iterations.md).
+
+Full build and 899 affected tests across 82 suites passed, including nine new native-rest cases, 32
+focused regressions, source-free recursive export/reload, host and mesh SOURCE execution, and the
+dynamic-rest budget boundary. The real CLI executes mutual recursion and preserves ordered `7`,
+exact `9007199254740993`, `7`. The broader sweep retains the same eight unfinished failures and one
+skip, with 132 passes. No performance improvement is claimed. Typed recursive variadics, functors,
+lambdas and the remaining specification work still leave §4.12 incomplete.

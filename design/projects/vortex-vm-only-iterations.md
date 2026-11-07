@@ -1450,3 +1450,43 @@ lifecycle, remaining callable forms and full frontend parity remain open. Full ย
 Logs: `/tmp/vql-one-space-build.log`, `/tmp/vql-one-space-focused.log`,
 `/tmp/vql-one-space-tests.log`, `/tmp/vql-one-space-zigzag.log`, `/tmp/vql-one-space-overlay.log`,
 `/tmp/vql-one-space-cli.log`, `/tmp/vql-one-space-format.log`.
+
+## Iteration 39: reusable untyped variadic frames
+
+Eligible named definitions with a final untyped rest formal now use reusable native frames,
+including recursive calls. Actual expressions still compile in caller scope before activation. After
+the existing UFCS positional injection, remaining actual streams are combined in argument order into
+the existing final Stream port; no tail sends an empty stream. Runtime stream append preserves cell
+identity, duplicates and order. Fixed-formal default presence is recorded before packing, so omitted
+and explicit-empty arguments stay distinct. Fixed defaults and contract matches retain their callee
+scope and formal order. Ordinary calls retain their existing preparation path. As with other native
+frames, actual streams are fully prepared in the caller before callee guards run: a fixed-formal
+mismatch filters the body, not argument traversal or its execution-budget cost. No exact
+fuel-threshold parity with compiled inline calls is claimed. A nonempty positional tail fills all
+preceding fixed formals; omitted fixed defaults therefore accompany an empty tail.
+
+This stage changes neither VM opcodes nor the frame descriptor ABI. Eligibility still enforces
+query-wide syntax budgets, captures and transitive inline-only callees. Typed rest continues to use
+compiled inline graphs: it must check each original actual separately, with preceding callee
+defaults, captures, context and guards in scope. Caller-side prevalidation or one check over a flat
+rest stream would change those semantics. Defaulted, context-dot, destructured and functor variadic
+forms remain unsupported.
+
+Validation: full `make -j$(nproc)` and all 899 affected tests from 82 suites passed; the focused
+variadic/recursive/eligibility set passed all 32 tests from four suites. Nine new enabled cases
+identify the actual named InvokeFrame, exercise dynamic tails, empty rest, caller capture/default
+ordering, nested arguments, UFCS, fixed filtering and return promises, depth refusal/retry, and
+Store export/reload after the source compiler and VM are destroyed. Host and mesh Vquery SOURCE
+routes preserve exact Int64 values and duplicates. A budget regression confirms a dynamic rest
+stream is prepared before a fixed-type mismatch filters the body.
+
+The real headless CLI also executes mutual variadic recursion and returns `7`, exact
+`9007199254740993`, then `7`. The broader sweep passed 132 of 141 tests, skipped one swarm case and
+retained the same eight unfinished frontend/exception-expectation failures. Repository formatting
+with clang-format 19 passed. No performance, allocation or exact cross-route fuel improvement is
+claimed. Typed recursive rest still needs a grouped-actual ABI and callee-side matching; functors,
+lambdas and remaining ยง4.12 semantics stay incomplete.
+
+Logs: `/tmp/vql-native-rest-build.log`, `/tmp/vql-native-rest-focused.log`,
+`/tmp/vql-native-rest-tests.log`, `/tmp/vql-native-rest-overlay.log`,
+`/tmp/vql-native-rest-cli.log`, `/tmp/vql-native-rest-format.log`.

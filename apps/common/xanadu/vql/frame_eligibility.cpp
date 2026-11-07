@@ -73,10 +73,14 @@ public:
 
     Scope scope;
     bool contextParameterSeen = false;
-    for (const auto &parameter : definition.params) {
+    for (std::size_t index = 0; index < definition.params.size(); ++index) {
+      const auto &parameter = definition.params[index];
       tick(1);
-      if (parameter.isVariadic)
-        refuse("variadic definitions remain on inline graph lowering");
+      if (parameter.isVariadic &&
+          (index + 1 != definition.params.size() || parameter.type ||
+           parameter.defaultValue ||
+           !std::holds_alternative<std::string>(parameter.target)))
+        refuse("only untyped named final variadics are frame eligible");
       if (parameter.defaultValue) {
         const bool prior          = scanningParameterDefault_;
         scanningParameterDefault_ = true;
