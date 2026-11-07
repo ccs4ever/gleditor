@@ -2356,18 +2356,22 @@ explicit refusals. The rulings below describe the intended semantics.
 - **The compiler uses real VM instructions.** Bound point-free steps lower to Vortex traversals;
   typed calls use shared matching, capture slots, mismatch branches, body instructions and return
   checks. Eligible named definitions use reusable recursive frames; other supported definitions use
-  compiled inline graphs. Omitted parameter expressions compile after earlier parameter guards;
-  explicit arguments capture caller bindings, including untyped functor step vectors. Decorated
-  functor captures freeze their body across rebinding; application runs that body before applying
-  the outer predicates/clamp to the combined result. Query-time master dereference resolves foreign
-  proxies, charges each probe and returns the original cell on a cycle. Contract subject collection
-  charges members before copying them into its matcher buffer, and matching charges recursive type
-  visits and field probes. Failed shape and union attempts roll back arena defaults and minted
-  dimensions; captures are staged until the full match succeeds. Return validation releases its
-  temporary defaults on both outcomes. Computed return promises use reusable capture-free validator
-  frames with Boolean results and referenced lexical input ports; attached pipelines retain compiled
-  inline matching. Validators re-read the current owner instead of caching default results, while
-  noncomputed promises retain `RequireContract`. See
+  compiled inline graphs. Anonymous path-step lambdas with zero or one nonvariadic formal use the
+  same inline call graphs for types, destructuring and expression/block bodies. Their lexical scope
+  preserves native recursion of an enclosing eligible function; signatures validate before mapping
+  even on empty inputs. Lambda values and stored closure handles remain unsupported. See
+  [iteration 42](projects/vortex-vm-only-iterations.md). Omitted parameter expressions compile after
+  earlier parameter guards; explicit arguments capture caller bindings, including untyped functor
+  step vectors. Decorated functor captures freeze their body across rebinding; application runs that
+  body before applying the outer predicates/clamp to the combined result. Query-time master
+  dereference resolves foreign proxies, charges each probe and returns the original cell on a cycle.
+  Contract subject collection charges members before copying them into its matcher buffer, and
+  matching charges recursive type visits and field probes. Failed shape and union attempts roll back
+  arena defaults and minted dimensions; captures are staged until the full match succeeds. Return
+  validation releases its temporary defaults on both outcomes. Computed return promises use reusable
+  capture-free validator frames with Boolean results and referenced lexical input ports; attached
+  pipelines retain compiled inline matching. Validators re-read the current owner instead of caching
+  default results, while noncomputed promises retain `RequireContract`. See
   [iteration 28](projects/vortex-vm-only-iterations.md). Failed matching spends fuel even when its
   graph changes are rolled back. Explicit graph-level PushGuard/CheckGuards/PopGuard instructions
   now retain activation-owned frozen inputs and dispatch validators through ordinary native frames,

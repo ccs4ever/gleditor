@@ -771,3 +771,22 @@ retains eight unfinished failures and one skip, with 132 passes. An expanded cal
 28 of 40; its 12 failures cover unlowered lambdas, missing-context values, a weave assertion and
 `sort_into`. This is not a full-suite pass. Remaining callable, mutation, lifecycle and frontend
 work still leaves §4.12 incomplete. No performance improvement is claimed.
+
+## Anonymous path-step lambda graph lowering
+
+Zero- or one-formal anonymous path-step lambdas now use the shared inline Vortex call graphs for
+typed/destructuring matching and expression/block bodies. Their lexical scopes preserve native
+recursion of an enclosing eligible named function. Typed and nested destructuring captures publish
+after matching, and signature checks precede mapping even for empty inputs. See
+[iteration 42](projects/vortex-vm-only-iterations.md).
+
+Full build, 965 affected tests across 87 suites and all 40 focused lambda/type tests passed.
+Seventeen new cases include native outer recursion through an inline lambda, recursive source-free
+export/reload, explicit empty-input signature validation, scope/context capture, guards and
+rollback, and host/mesh SOURCE routes. The real CLI preserves exact large integers and returns
+scalar zero through recursive lambda calls. Repository formatting with clang-format 19 passed. The
+callable audit improved from 28/40 to 33/40; value lambdas, one weave assertion and five sorting
+cases remain unfinished. The broader sweep retains the same eight failures and one skip, with 132
+passes. This is not a full-suite pass. Lambda values, stored closures and recursive functor
+parameters remain open alongside the previously recorded frontend/lifecycle gaps. Full §4.12 is
+incomplete; no performance improvement is claimed.

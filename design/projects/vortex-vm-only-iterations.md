@@ -1596,3 +1596,46 @@ Logs: `/tmp/vql-ordered-projection-build.log`, `/tmp/vql-ordered-projection-focu
 `/tmp/vql-ordered-projection-tests.log`, `/tmp/vql-ordered-projection-cli.log`,
 `/tmp/vql-ordered-projection-overlay.log`, `/tmp/vql-ordered-projection-callables.log`,
 `/tmp/vql-ordered-projection-format.log`.
+
+## Iteration 42: anonymous path-step lambda graphs
+
+Anonymous path-step lambdas compile their expression or block body into inline Vortex instruction
+graphs through the shared call-contract lowering. The incoming candidate supplies the lambda context
+and its optional single formal. Parameter type matching precedes destructuring, and captures enter
+scope after their complete match. Existing default preparation, mutation guards and result
+publication remain shared with named calls. No lambda AST or evaluator callback is retained for
+execution.
+
+A private lexical-call mode preserves the enclosing named function's activation tracking rather than
+adding a synthetic lambda activation name. Consequently a lambda inside an eligible named function
+can call that function recursively through its existing InvokeFrame graph. Real inline-only named
+helper boundaries retain their recursion refusal. Lambda temporaries remain frame-local under the
+existing mutable-output collection. No VM opcode or frame descriptor format changes.
+
+Eligibility scans selector-lambda bodies in lexical scope and records their call dependencies in the
+enclosing definition. Type and destructuring captures, including nested fields and context, publish
+after matching; default aliases retain their pre-match environment. Existing cycle, depth and
+query-wide analysis budgets remain active. Signature preflight runs before stream mapping, including
+empty inputs. The supported bound is zero or one nonvariadic formal.
+
+Validation: full `make -j$(nproc)` passed, as did 965 affected tests across 87 suites and all 40
+focused lambda/type tests across two suites. Seventeen new cases cover expression/block bodies,
+zero-formal and named-formal contexts, direct and helper-mediated native-frame context, optional and
+typed captures, nested lambdas, caller shadowing, lazy empty input, guarded mutation rollback,
+native outer-function recursion, source-free recursive graph export/reload, host/mesh SOURCE
+execution, invalid signatures on empty/nonempty streams, malformed ASTs, rollback and retry. The
+real headless CLI preserves ordered `7`, exact `9007199254740993`, `7` through a typed lambda, and a
+recursive lambda call returns scalar zero. Architecture, senior and resource gates accepted this
+bounded stage; repository formatting with clang-format 19 passed.
+
+The callable audit improved from 28/40 to 33/40. Its seven remaining failures are the value-lambda
+route, a weave value assertion and five `sort_into` cases. The broader overlay/frontend sweep still
+has the same eight unfinished failures and one skip, with 132 passes. Neither selection is a
+full-suite pass. Lambda values, stored closure handles, recursive functor parameters, remaining
+variadic forms and other unfinished frontend/lifecycle work still leave §4.12 incomplete. No
+performance improvement or universal allocation/compile-time bound is claimed.
+
+Logs: `/tmp/vql-lambda-graph-build.log`, `/tmp/vql-lambda-graph-focused.log`,
+`/tmp/vql-lambda-graph-tests.log`, `/tmp/vql-lambda-graph-cli.log`,
+`/tmp/vql-lambda-graph-recursive-cli.log`, `/tmp/vql-lambda-graph-callables.log`,
+`/tmp/vql-lambda-graph-overlay.log`, `/tmp/vql-lambda-graph-format.log`.

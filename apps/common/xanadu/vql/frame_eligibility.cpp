@@ -536,7 +536,6 @@ private:
             pointer(
                 selector, depth + 1,
                 [&](const PathLambda &lambda, const std::size_t childDepth) {
-                  refuse("path lambdas are not reusable frame bodies");
                   pathLambda(lambda, scope, childDepth);
                 });
           }
@@ -817,28 +816,47 @@ private:
 
   void pathLambda(const PathLambda &lambda, const Scope &outer,
                   const std::size_t depth) {
+    if (lambda.params.size() > 1)
+      refuse("path lambdas with multiple parameters are not frame eligible");
+
     Scope scope = outer;
-    sequence(
-        lambda.params, depth,
-        [&](const LambdaParam &param, const std::size_t childDepth) {
-          if (param.defaultValue)
-            pointer(param.defaultValue, childDepth,
-                    [&](const ValueExpr &expr, const std::size_t nestedDepth) {
-                      value(expr, scope, nestedDepth);
-                    });
-          if (param.type)
-            pointer(
-                param.type, childDepth,
-                [&](const TypeExpr &typeExpr, const std::size_t nestedDepth) {
-                  type(typeExpr, scope, nestedDepth);
+    scope.insert(".");
+    for (std::size_t index = 0; index < lambda.params.size(); ++index) {
+      tick(depth);
+      const auto &param            = lambda.params[index];
+      const std::size_t childDepth = depth + 1;
+      const Scope prematchScope    = scope;
+      if (param.defaultValue) {
+        const bool prior          = scanningParameterDefault_;
+        scanningParameterDefault_ = true;
+        pointer(param.defaultValue, childDepth,
+                [&](const ValueExpr &expr, const std::size_t nestedDepth) {
+                  value(expr, prematchScope, nestedDepth);
                 });
-          if (const auto *name = std::get_if<std::string>(&param.target))
-            scope.insert(*name);
-          else if (std::holds_alternative<DestructurePattern>(param.target))
-            destructure(std::get<DestructurePattern>(param.target), scope,
-                        childDepth);
-          if (param.isVariadic) refuse("variadic path lambdas are unsupported");
-        });
+        scanningParameterDefault_ = prior;
+      }
+
+      Scope typeCaptures;
+      if (param.type)
+        pointer(param.type, childDepth,
+                [&](const TypeExpr &typeExpr, const std::size_t nestedDepth) {
+                  typeCaptures = type(typeExpr, prematchScope, nestedDepth);
+                });
+      scope.insert(typeCaptures.begin(), typeCaptures.end());
+
+      if (const auto *name = std::get_if<std::string>(&param.target)) {
+        if (name->empty()) refuse("path lambda parameter name is empty");
+        scope.insert(*name);
+      } else if (std::holds_alternative<bool>(param.target)) {
+        scope.insert(".");
+      } else {
+        const auto captures = contractPattern(
+            std::get<DestructurePattern>(param.target), scope, childDepth);
+        scope.insert(captures.begin(), captures.end());
+      }
+      if (param.isVariadic)
+        refuse("variadic path lambdas are not frame eligible");
+    }
     if (const auto *body =
             std::get_if<std::shared_ptr<ValueExpr>>(&lambda.body)) {
       pointer(*body, depth + 1,

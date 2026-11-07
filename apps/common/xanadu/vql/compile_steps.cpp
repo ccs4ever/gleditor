@@ -1,4 +1,5 @@
 #include "common/xanadu/vql/compiler.hpp"
+#include "common/xanadu/vql/contracts.hpp"
 #include "common/xanadu/vql/invocation.hpp"
 
 #include <stdexcept>
@@ -6,6 +7,28 @@
 namespace xanadu::vql {
 using zigzag::CellRef;
 using zigzag::vortex::OpcodeKind;
+namespace {
+
+void validatePathLambdaSignature(const PathLambda &lambda) {
+  if (lambda.params.size() > 1)
+    throw std::invalid_argument(
+        "path-step lambdas support at most one parameter");
+  if (!lambda.params.empty() && lambda.params.front().isVariadic)
+    throw std::invalid_argument("variadic path-step lambdas are unsupported");
+
+  const DefDeclaration signature{
+      .name   = "#vql-inline-path-lambda-signature",
+      .params = lambda.params,
+      .body   = lambda.body,
+  };
+  try {
+    validateFunctionSignature(signature);
+  } catch (const TypeContractError &error) {
+    throw std::invalid_argument(error.what());
+  }
+}
+
+} // namespace
 
 std::vector<CellRef> VQLCompiler::compileSteps(std::span<const PathStep> steps,
                                                std::vector<CellRef> stream,
@@ -27,6 +50,12 @@ std::vector<CellRef> VQLCompiler::compileSteps(std::span<const PathStep> steps,
          (function && function->name == "link" && function->args.size() >= 2));
     const auto present =
         userCall ? std::optional{emitStreamPresence(stream)} : std::nullopt;
+    if (const auto *lambda =
+            std::get_if<std::shared_ptr<PathLambda>>(&step.selector)) {
+      if (!*lambda)
+        throw std::invalid_argument("null VQL path lambda selector");
+      validatePathLambdaSignature(**lambda);
+    }
     if (step.capturedFunctor) {
       nextStream = compileSteps(*step.capturedFunctor, stream, hasContext);
     } else if (dimension && dimension->dimName.starts_with('$')) {

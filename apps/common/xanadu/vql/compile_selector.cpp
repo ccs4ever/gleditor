@@ -32,7 +32,22 @@ std::vector<CellRef> VQLCompiler::compileSelector(const PathStep &step,
                                                   bool hasContext) {
   const std::vector<CellRef> stream{current};
   std::vector<CellRef> nextStream;
-  if (std::holds_alternative<SignedDimensionStep>(step.selector)) {
+  if (const auto *lambda =
+          std::get_if<std::shared_ptr<PathLambda>>(&step.selector)) {
+    if (!*lambda) throw std::invalid_argument("null VQL path lambda selector");
+    if ((*lambda)->params.size() > 1)
+      throw std::invalid_argument(
+          "path-step lambdas support at most one parameter");
+    if (!(*lambda)->params.empty() && (*lambda)->params.front().isVariadic)
+      throw std::invalid_argument("variadic path-step lambdas are unsupported");
+
+    DefDeclaration inlineLambda{
+        .name   = "#vql-inline-path-lambda-" + std::to_string(allOps_.size()),
+        .params = (*lambda)->params,
+        .body   = (*lambda)->body,
+    };
+    nextStream = compileCall(inlineLambda, {}, current, true, false);
+  } else if (std::holds_alternative<SignedDimensionStep>(step.selector)) {
     const auto &sd = std::get<SignedDimensionStep>(step.selector);
     DimRef dim     = resolveDimension(sd.dimName);
 

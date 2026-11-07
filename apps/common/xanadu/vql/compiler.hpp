@@ -172,7 +172,8 @@ private:
   std::vector<zigzag::CellRef>
   compileCall(const DefDeclaration &definition,
               const std::vector<ValueExpr> &arguments,
-              std::optional<zigzag::CellRef> context, bool ufcs);
+              std::optional<zigzag::CellRef> context, bool ufcs,
+              bool entersActiveCallStack = true);
   std::vector<zigzag::CellRef>
   compileReusableFrameCall(const DefDeclaration &definition,
                            const std::vector<ValueExpr> &arguments,

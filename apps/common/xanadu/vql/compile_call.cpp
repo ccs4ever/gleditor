@@ -212,7 +212,8 @@ VQLCompiler::compileArgument(const ValueExpr &argument,
 std::vector<CellRef>
 VQLCompiler::compileCall(const DefDeclaration &definition,
                          const std::vector<ValueExpr> &arguments,
-                         std::optional<CellRef> context, bool ufcs) {
+                         std::optional<CellRef> context, bool ufcs,
+                         const bool entersActiveCallStack) {
   bool hasStaticFunctor = false;
   std::size_t functorIndex =
       ufcs && context && definition.params.size() > arguments.size() ? 1 : 0;
@@ -256,7 +257,8 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
           definition.name);
     return compileReusableFrameCall(definition, arguments, context, ufcs);
   }
-  if (std::ranges::contains(activeCalls_, definition.name))
+  if (entersActiveCallStack &&
+      std::ranges::contains(activeCalls_, definition.name))
     throw std::invalid_argument(
         "recursive compiled call requires a VM frame: " + definition.name);
 
@@ -295,8 +297,10 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
     functors.push_back(std::move(functor));
   }
   ambientContext_ = context;
-  activeCalls_.push_back(definition.name);
-  callActivated = true;
+  if (entersActiveCallStack) {
+    activeCalls_.push_back(definition.name);
+    callActivated = true;
+  }
 
   const auto clear =
       emitOp(OpcodeKind::ClearCellRefs, "#CALL_CLEAR " + definition.name);
