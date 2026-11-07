@@ -28,7 +28,63 @@ TEST(VQLFrameEligibilityTest,
             (std::vector<std::string>{"outside"}));
 }
 
-TEST(VQLFrameEligibilityTest, FunctorBindingsRemainOnInlineGraphPath) {
+TEST(VQLFrameEligibilityTest, ClosedFunctorFormalIsEligibleForNativeFrame) {
+  const auto query = Parser("def pure apply($node: Cell, $route): Cell := "
+                            "$node/$route; apply(##, /+d.parent)")
+                         .parseQuery();
+  const auto analysis = analyzeFrameEligibility(query);
+  ASSERT_TRUE(analysis) << analysis.error().message;
+  EXPECT_TRUE(analysis->reusableDefinitions.contains("apply"));
+  EXPECT_TRUE(analysis->freeCaptureNames.at("apply").empty());
+  EXPECT_EQ(analysis->functorFormalIndices.at("apply"),
+            (std::vector<std::size_t>{1}));
+}
+
+TEST(VQLFrameEligibilityTest,
+     ClosedFunctorRequirementsPropagateThroughForwardingWrappers) {
+  const auto query = Parser("def pure apply($node: Cell, $route): Cell := "
+                            "$node/$route; "
+                            "def pure wrapper($node: Cell, $route): Cell := "
+                            "apply($node, $route); "
+                            "wrapper(##, /+d.parent)")
+                         .parseQuery();
+  const auto analysis = analyzeFrameEligibility(query);
+  ASSERT_TRUE(analysis) << analysis.error().message;
+  EXPECT_TRUE(analysis->reusableDefinitions.contains("apply"));
+  EXPECT_TRUE(analysis->reusableDefinitions.contains("wrapper"));
+  EXPECT_EQ(analysis->functorFormalIndices.at("apply"),
+            (std::vector<std::size_t>{1}));
+  EXPECT_EQ(analysis->functorFormalIndices.at("wrapper"),
+            (std::vector<std::size_t>{1}));
+}
+
+TEST(VQLFrameEligibilityTest, NestedLambdaRestoresTheOuterClosedFunctorFormal) {
+  const auto query = Parser("def pure apply($node: Cell, $route): Cell := { "
+                            "let $ignored := $node / \\($route) $node; "
+                            "return $node/$route; }; "
+                            "apply(##, /+d.parent)")
+                         .parseQuery();
+  const auto analysis = analyzeFrameEligibility(query);
+  ASSERT_TRUE(analysis) << analysis.error().message;
+  EXPECT_TRUE(analysis->reusableDefinitions.contains("apply"));
+  EXPECT_EQ(analysis->functorFormalIndices.at("apply"),
+            (std::vector<std::size_t>{1}));
+}
+
+TEST(VQLFrameEligibilityTest,
+     OrdinaryRecursiveLambdaShadowDoesNotNeedAFunctorBinding) {
+  const auto query = Parser("def pure shadow($node, $depth: Int): Cell := { "
+                            "if $depth > 0 return $node / \\($node) "
+                            "shadow($node, $depth + -1) else return $node; }; "
+                            "shadow(##, 3)")
+                         .parseQuery();
+  const auto analysis = analyzeFrameEligibility(query);
+  ASSERT_TRUE(analysis) << analysis.error().message;
+  EXPECT_TRUE(analysis->reusableDefinitions.contains("shadow"));
+  EXPECT_TRUE(analysis->functorFormalIndices.at("shadow").empty());
+}
+
+TEST(VQLFrameEligibilityTest, FreeCallerFunctorBindingsRemainInlineOnly) {
   const auto query =
       Parser("def apply($node: Cell): Cell := $node/$to_parent; apply(##)")
           .parseQuery();

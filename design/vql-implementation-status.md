@@ -790,3 +790,24 @@ cases remain unfinished. The broader sweep retains the same eight failures and o
 passes. This is not a full-suite pass. Lambda values, stored closures and recursive functor
 parameters remain open alongside the previously recorded frontend/lifecycle gaps. Full §4.12 is
 incomplete; no performance improvement is claimed.
+
+## Closed traversal functors in recursive function frames
+
+Closed literal signed-dimension templates now specialize reusable function graph variants by exact
+content and formal position, alongside typed-rest arity. The caller passes the existing formal's
+Stream port an explicit empty stream; compilation installs the static template in callee formal
+order. Forwarding and mutual recursion use direct native frame descriptors. Full-width dimension
+resolution and existing graph export apply. See
+[iteration 43](projects/vortex-vm-only-iterations.md).
+
+A configurable 1,000,000-unit template-work policy counts binding entries, steps and dimension-name
+bytes during normalization/key copying and rehydration. It does not cap all compile CPU or memory.
+Full build, 982 affected tests across 88 suites and all 64 focused tests across four suites passed.
+Thirteen new graph/runtime cases and four added eligibility cases include self/mutual forwarding,
+template/rest/formal identity, dummy ports, lexical scope and caller preparation, weighted atomic
+limits, recursive source-free export/reload, and actual host/mesh SOURCE outputs. The real CLI
+recursively follows the supplied template and returns `leaf`. Repository formatting with
+clang-format 19 passed. The broader sweep retains eight failures and one skip (132 passes), and the
+callable audit retains seven failures (33 passes). These are not full-suite passes. Decorated
+recursive functors, general closures and the other recorded gaps keep §4.12 incomplete; no speedup
+is claimed.

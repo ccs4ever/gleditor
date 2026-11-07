@@ -43,11 +43,13 @@ inline constexpr std::size_t maxCompiledShapeProjectionRules = 4096;
 struct CompilationOptions {
   struct Limits {
     // Independent per-request ceilings for named frame variants, generated
-    // opcodes, and frame descriptor records. They do not cap all CPU or arena
-    // allocation work.
+    // opcodes, frame descriptor records and closed-functor template work. The
+    // work ceiling counts template bindings, steps and dimension-name bytes;
+    // it does not cap all CPU or arena allocation work.
     std::size_t maxNamedFrameVariants{1024};
     std::size_t maxGeneratedOpcodes{100'000};
     std::size_t maxFrameDescriptorRecords{100'000};
+    std::size_t maxClosedFunctorTemplateWork{1'000'000};
   };
 
   bool targetLibrary{false};            ///< Emit library store instead of exec
@@ -103,11 +105,24 @@ public:
       std::optional<xanadu::MicroversionId> parent = std::nullopt) const;
 
 private:
+  struct ClosedFunctorStepKey {
+    std::string dimName;
+    zigzag::DimVector direction{zigzag::DimVector::POS};
+
+    bool operator==(const ClosedFunctorStepKey &) const = default;
+  };
+  struct ClosedFunctorFormalKey {
+    std::size_t formalIndex{};
+    std::vector<ClosedFunctorStepKey> steps;
+
+    bool operator==(const ClosedFunctorFormalKey &) const = default;
+  };
   struct FrameDefinitionKey {
     std::string name;
     // Present only for typed variadic frames. Zero means no rest actual groups;
     // nullopt identifies an ordinary or untyped-rest frame.
     std::optional<std::size_t> restGroupCount;
+    std::vector<ClosedFunctorFormalKey> functorTemplates;
 
     bool operator==(const FrameDefinitionKey &) const = default;
   };
@@ -116,7 +131,21 @@ private:
       const auto nameHash = std::hash<std::string>{}(key.name);
       const auto countHash =
           std::hash<std::optional<std::size_t>>{}(key.restGroupCount);
-      return nameHash ^ countHash;
+      std::size_t result = nameHash ^ countHash;
+      const auto combine = [&result](const std::size_t value) {
+        result ^=
+            value + std::size_t{0x9e3779b9} + (result << 6) + (result >> 2);
+      };
+      combine(key.functorTemplates.size());
+      for (const auto &formal : key.functorTemplates) {
+        combine(std::hash<std::size_t>{}(formal.formalIndex));
+        combine(formal.steps.size());
+        for (const auto &step : formal.steps) {
+          combine(std::hash<std::string>{}(step.dimName));
+          combine(std::hash<zigzag::DimVector>{}(step.direction));
+        }
+      }
+      return result;
     }
   };
 
@@ -137,6 +166,12 @@ private:
   functorArgument(const ValueExpr &argument) const;
   std::optional<std::vector<PathStep>>
   functorArgument(const PathExpression &path) const;
+  [[nodiscard]] bool isFunctorArgument(const ValueExpr &argument) const;
+  [[nodiscard]] std::optional<std::span<const PathStep>>
+  closedFunctorArgumentSteps(const ValueExpr &argument) const;
+  void chargeClosedFunctorTemplateWork(std::size_t amount);
+  [[nodiscard]] std::size_t closedFunctorTemplateWork(
+      std::span<const ClosedFunctorFormalKey> templates) const;
 
   void appendOpcode(zigzag::CellRef opcode);
   zigzag::CellRef emitStreamClear();
@@ -174,10 +209,10 @@ private:
               const std::vector<ValueExpr> &arguments,
               std::optional<zigzag::CellRef> context, bool ufcs,
               bool entersActiveCallStack = true);
-  std::vector<zigzag::CellRef>
-  compileReusableFrameCall(const DefDeclaration &definition,
-                           const std::vector<ValueExpr> &arguments,
-                           std::optional<zigzag::CellRef> context, bool ufcs);
+  std::vector<zigzag::CellRef> compileReusableFrameCall(
+      const DefDeclaration &definition, const std::vector<ValueExpr> &arguments,
+      std::optional<zigzag::CellRef> context, bool ufcs,
+      std::vector<ClosedFunctorFormalKey> functorTemplates);
   void compilePendingFrameDefinitions();
   void compileFrameDefinition(const DefDeclaration &definition,
                               const FrameDefinitionKey &key);
@@ -236,8 +271,12 @@ private:
       frameRequiredDefaultCaptureBindings_;
   std::unordered_map<std::string, std::vector<std::string>>
       frameConditionalRequiredDefaultCaptureBindings_;
+  std::unordered_map<std::string, std::vector<std::size_t>>
+      frameFunctorFormalIndices_;
   struct FrameDefinitionState {
     zigzag::CellRef descriptor;
+    std::vector<ClosedFunctorFormalKey> functorTemplates;
+    std::optional<std::size_t> functorVariantOrdinal;
     std::optional<zigzag::CellRef> entry;
     bool queued{false};
     bool compiled{false};
@@ -252,6 +291,8 @@ private:
   std::string compilingFrameDefinitionName_;
   std::vector<std::string> activeCalls_;
   std::size_t maxNamedFrameVariants_{};
+  std::size_t remainingClosedFunctorTemplateWork_{};
+  std::size_t nextFunctorVariantOrdinal_{};
   std::size_t remainingGeneratedOpcodes_{};
   std::size_t remainingFrameDescriptorRecords_{};
   std::optional<zigzag::CellRef> ambientContext_;

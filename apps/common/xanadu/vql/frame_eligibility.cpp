@@ -1,4 +1,5 @@
 #include "common/xanadu/vql/frame_eligibility.hpp"
+#include "common/xanadu/vql/closed_functor_syntax.hpp"
 #include "common/xanadu/vql/projection_syntax.hpp"
 
 #include <algorithm>
@@ -18,8 +19,15 @@ namespace {
 using Scope = std::unordered_set<std::string>;
 
 struct CallSite {
+  struct FunctorArgumentSource {
+    enum class Kind : std::uint8_t { Other, ClosedLiteral, CallerFormal };
+    Kind kind{Kind::Other};
+    std::optional<std::size_t> callerFormalIndex;
+  };
+
   std::string callee;
   Scope visibleNames;
+  std::vector<FunctorArgumentSource> functorArgumentSources;
   bool inParameterDefault{false};
   bool conditionalOnTypedRest{false};
   bool mayInjectContext{false};
@@ -29,11 +37,14 @@ struct CallSite {
 struct CaptureDependency {
   std::string caller;
   Scope visibleNames;
+  std::vector<CallSite::FunctorArgumentSource> functorArgumentSources;
   bool inParameterDefault{false};
   bool conditionalOnTypedRest{false};
   bool mayInjectContext{false};
   std::size_t argumentCount{0};
 };
+
+using DefinitionIndex = std::unordered_map<std::string, const DefDeclaration *>;
 
 enum class CaptureRequirement : std::uint8_t {
   Free,
@@ -77,7 +88,8 @@ struct TraversalBudget {
 
 class DefinitionScanner {
 public:
-  explicit DefinitionScanner(TraversalBudget &budget) : budget_(budget) {}
+  DefinitionScanner(TraversalBudget &budget, const DefinitionIndex &definitions)
+      : budget_(budget), definitions_(definitions) {}
 
   std::optional<std::string> scan(const DefDeclaration &definition) {
     tick(0);
@@ -113,6 +125,9 @@ public:
       if (const auto *name = std::get_if<std::string>(&parameter.target)) {
         if (name->empty() || !scope.insert(*name).second)
           refuse("frame parameters must have unique variable names");
+        else if (!parameter.type && !parameter.isVariadic &&
+                 !parameter.defaultValue)
+          functorFormalIndicesByName_.emplace(*name, index);
       } else if (std::holds_alternative<bool>(parameter.target)) {
         if (contextParameterSeen)
           refuse("multiple context parameters remain on inline graph lowering");
@@ -156,6 +171,11 @@ public:
   [[nodiscard]] const std::unordered_set<std::string> &
   conditionalRequiredDefaultCaptureBindings() const noexcept {
     return conditionalRequiredDefaultCaptureBindings_;
+  }
+
+  [[nodiscard]] const std::unordered_set<std::size_t> &
+  functorFormalIndices() const noexcept {
+    return functorFormalIndices_;
   }
 
   [[nodiscard]] std::vector<CallSite> takeCallSites() && {
@@ -230,6 +250,71 @@ private:
           requiredDefaultCaptureBindings_.insert(name);
       }
     }
+  }
+
+  bool isClosedFunctorLiteral(const PathExpression &path,
+                              const std::size_t depth) {
+    if (!path.isFunctor) return false;
+    const auto &anchor = path.anchor;
+    bool closed =
+        anchor.kind == AnchorKind::Context && anchor.name.empty() &&
+        anchor.cellId == 0 && !anchor.derefMaster && !anchor.createValue &&
+        !anchor.generator && !anchor.storeAnchor && !anchor.versionPin &&
+        anchor.microversionId.empty() && path.anchorPredicates.empty() &&
+        !path.anchorProjection && !path.shapeProjection && !path.cloneTail &&
+        !path.steps.empty();
+    sequence(path.steps, depth,
+             [&](const PathStep &step, const std::size_t stepDepth) {
+               if (!isPlainClosedFunctorStep(step)) closed = false;
+               (void)stepDepth;
+             });
+    return closed;
+  }
+
+  CallSite::FunctorArgumentSource
+  functorArgumentSource(const ValueExpr &argument, const Scope &scope,
+                        const std::size_t depth) {
+    if (const auto *name = std::get_if<std::string>(&argument.kind)) {
+      if (scope.contains(*name) &&
+          !shadowedFunctorFormalNames_.contains(*name)) {
+        if (const auto found = functorFormalIndicesByName_.find(*name);
+            found != functorFormalIndicesByName_.end())
+          return {.kind = CallSite::FunctorArgumentSource::Kind::CallerFormal,
+                  .callerFormalIndex = found->second};
+      }
+      return {};
+    }
+    const auto *path =
+        std::get_if<std::shared_ptr<PathExpression>>(&argument.kind);
+    if (!path || !*path) return {};
+    bool closed = false;
+    pointer(
+        *path, depth,
+        [&](const PathExpression &expression, const std::size_t childDepth) {
+          closed = isClosedFunctorLiteral(expression, childDepth);
+        });
+    if (closed)
+      return {.kind = CallSite::FunctorArgumentSource::Kind::ClosedLiteral};
+    return {};
+  }
+
+  void shadowFunctorFormal(const std::string &name,
+                           std::vector<std::string> &addedNames) {
+    if (!functorFormalIndicesByName_.contains(name)) return;
+    budget_.charge();
+    if (shadowedFunctorFormalNames_.insert(name).second)
+      addedNames.push_back(name);
+  }
+
+  bool parameterAcceptsStaticFunctor(const LambdaParam &parameter) const {
+    return !parameter.type && !parameter.isVariadic &&
+           !parameter.defaultValue &&
+           std::holds_alternative<std::string>(parameter.target);
+  }
+
+  bool parameterUsesFunctorValue(const LambdaParam &parameter) const {
+    return !parameter.type && !parameter.isVariadic &&
+           std::holds_alternative<std::string>(parameter.target);
   }
 
   template <class T, class Action>
@@ -315,6 +400,24 @@ private:
         expr.kind);
   }
 
+  void ordinaryArgumentValue(const ValueExpr &argument, const Scope &scope,
+                             const std::size_t depth,
+                             const bool allowLeadingSlashPath) {
+    if (allowLeadingSlashPath) {
+      if (const auto *path =
+              std::get_if<std::shared_ptr<PathExpression>>(&argument.kind);
+          path && *path && (*path)->isFunctor) {
+        pointer(*path, depth,
+                [&](const PathExpression &expression,
+                    const std::size_t childDepth) {
+                  pathExpression(expression, scope, childDepth, true);
+                });
+        return;
+      }
+    }
+    value(argument, scope, depth);
+  }
+
   void invocation(const FunctionInvocation &call, const Scope &scope,
                   const std::size_t depth,
                   const bool mayInjectContext = false) {
@@ -324,22 +427,64 @@ private:
       budget_.charge();
       visibleNames.insert(name);
     }
-    callSites_.push_back(
-        {.callee                 = call.name,
-         .visibleNames           = std::move(visibleNames),
-         .inParameterDefault     = scanningParameterDefault_,
-         .conditionalOnTypedRest = scanningConditionalRestType_,
-         .mayInjectContext       = mayInjectContext,
-         .argumentCount          = call.args.size()});
+    CallSite callSite{.callee                 = call.name,
+                      .visibleNames           = std::move(visibleNames),
+                      .inParameterDefault     = scanningParameterDefault_,
+                      .conditionalOnTypedRest = scanningConditionalRestType_,
+                      .mayInjectContext       = mayInjectContext,
+                      .argumentCount          = call.args.size()};
     if (call.isSliceRead) refuse("slice reads are not reusable frame calls");
     if (std::ranges::any_of(call.argNames, [](const std::string &name) {
           return !name.empty();
         }))
       refuse("named function arguments are not reusable frame calls");
-    sequence(call.args, depth + 1,
-             [&](const ValueExpr &argument, const std::size_t childDepth) {
-               value(argument, scope, childDepth);
-             });
+    const auto target = definitions_.find(call.name);
+    for (std::size_t index = 0; index < call.args.size(); ++index) {
+      tick(depth + 1);
+      const auto &argument = call.args[index];
+      const auto source    = functorArgumentSource(argument, scope, depth + 2);
+      callSite.functorArgumentSources.push_back(source);
+      bool literalPosition            = false;
+      bool ordinaryPathPosition       = false;
+      bool unsupportedFunctorPosition = false;
+      if (target != definitions_.end()) {
+        const auto &params = target->second->params;
+        const bool injectContext =
+            mayInjectContext && params.size() > call.args.size();
+        const auto classify = [&](const std::size_t formalIndex) {
+          std::optional<std::size_t> resolvedIndex;
+          if (formalIndex < params.size()) {
+            resolvedIndex = formalIndex;
+          } else if (!params.empty() && params.back().isVariadic) {
+            resolvedIndex = params.size() - 1;
+          }
+          if (!resolvedIndex) return;
+          const auto &parameter = params[*resolvedIndex];
+          if (parameterAcceptsStaticFunctor(parameter)) {
+            literalPosition = true;
+          } else if (parameterUsesFunctorValue(parameter)) {
+            unsupportedFunctorPosition = true;
+          } else {
+            ordinaryPathPosition = true;
+          }
+        };
+        classify(index + static_cast<std::size_t>(injectContext));
+        if (injectContext) classify(index);
+        if (source.kind != CallSite::FunctorArgumentSource::Kind::Other &&
+            injectContext && literalPosition &&
+            (ordinaryPathPosition || unsupportedFunctorPosition))
+          refuse("context-injected functor argument maps to different formals");
+      }
+      if (source.kind == CallSite::FunctorArgumentSource::Kind::ClosedLiteral &&
+          literalPosition)
+        continue;
+      if (unsupportedFunctorPosition)
+        refuse("defaulted functor formals remain on inline graph lowering");
+      ordinaryArgumentValue(argument, scope, depth + 2,
+                            ordinaryPathPosition && !literalPosition &&
+                                !unsupportedFunctorPosition);
+    }
+    callSites_.push_back(std::move(callSite));
   }
 
   void versionExpr(const VersionExpr &expr, const Scope &scope,
@@ -404,9 +549,10 @@ private:
   }
 
   void pathExpression(const PathExpression &path, const Scope &scope,
-                      const std::size_t depth) {
+                      const std::size_t depth,
+                      const bool allowLeadingSlashPath = false) {
     tick(depth);
-    if (path.isFunctor)
+    if (path.isFunctor && !allowLeadingSlashPath)
       refuse("partial path functors are not reusable frame bodies");
     if (path.anchor.kind == AnchorKind::Variable)
       variable(path.anchor.name, scope);
@@ -467,8 +613,15 @@ private:
   void signedStep(const SignedDimensionStep &step, const Scope &scope,
                   const std::size_t depth) {
     if (step.dimName.starts_with('$')) {
-      variable(step.dimName.substr(1), scope);
-      refuse("path-functor applications remain on inline graph lowering");
+      const auto name = step.dimName.substr(1);
+      if (const auto found = functorFormalIndicesByName_.find(name);
+          found != functorFormalIndicesByName_.end() && scope.contains(name) &&
+          !shadowedFunctorFormalNames_.contains(name)) {
+        functorFormalIndices_.insert(found->second);
+        return;
+      }
+      variable(name, scope);
+      refuse("path-functor applications require an untyped named formal");
     }
     sequence(step.creates, depth,
              [&](const CreateValue &create, const std::size_t childDepth) {
@@ -721,7 +874,9 @@ private:
                 [&](const TypeExpr &typeExpr, const std::size_t nestedDepth) {
                   type(typeExpr, scope, nestedDepth);
                 });
-          if (!field.varName.empty()) scope.insert(field.varName);
+          if (!field.varName.empty()) {
+            scope.insert(field.varName);
+          }
         });
   }
 
@@ -754,7 +909,9 @@ private:
                          });
                }
                if (field.isContext) captures.insert(".");
-               if (!field.varName.empty()) captures.insert(field.varName);
+               if (!field.varName.empty()) {
+                 captures.insert(field.varName);
+               }
              });
     return captures;
   }
@@ -819,6 +976,7 @@ private:
     if (lambda.params.size() > 1)
       refuse("path lambdas with multiple parameters are not frame eligible");
 
+    std::vector<std::string> shadowedByLambda;
     Scope scope = outer;
     scope.insert(".");
     for (std::size_t index = 0; index < lambda.params.size(); ++index) {
@@ -842,16 +1000,21 @@ private:
                 [&](const TypeExpr &typeExpr, const std::size_t nestedDepth) {
                   typeCaptures = type(typeExpr, prematchScope, nestedDepth);
                 });
+      for (const auto &name : typeCaptures)
+        shadowFunctorFormal(name, shadowedByLambda);
       scope.insert(typeCaptures.begin(), typeCaptures.end());
 
       if (const auto *name = std::get_if<std::string>(&param.target)) {
         if (name->empty()) refuse("path lambda parameter name is empty");
+        shadowFunctorFormal(*name, shadowedByLambda);
         scope.insert(*name);
       } else if (std::holds_alternative<bool>(param.target)) {
         scope.insert(".");
       } else {
         const auto captures = contractPattern(
             std::get<DestructurePattern>(param.target), scope, childDepth);
+        for (const auto &name : captures)
+          shadowFunctorFormal(name, shadowedByLambda);
         scope.insert(captures.begin(), captures.end());
       }
       if (param.isVariadic)
@@ -869,6 +1032,8 @@ private:
                 scriptBody(script, scope, childDepth);
               });
     }
+    for (const auto &name : shadowedByLambda)
+      shadowedFunctorFormalNames_.erase(name);
   }
 
   void forClause(const ForClause &clause, Scope &scope,
@@ -895,7 +1060,9 @@ private:
           }
         },
         clause.target);
-    if (!clause.varName.empty()) scope.insert(clause.varName);
+    if (!clause.varName.empty()) {
+      scope.insert(clause.varName);
+    }
   }
 
   void returnClause(const ReturnClause &clause, const Scope &scope,
@@ -1028,7 +1195,9 @@ private:
             auto nestedScope = scope;
             if (part.asPattern)
               destructure(*part.asPattern, nestedScope, depth + 1);
-            if (part.asVar) nestedScope.insert(*part.asVar);
+            if (part.asVar) {
+              nestedScope.insert(*part.asVar);
+            }
             if (part.body)
               pointer(
                   part.body, depth + 1,
@@ -1058,7 +1227,11 @@ private:
   }
 
   TraversalBudget &budget_;
+  const DefinitionIndex &definitions_;
+  std::unordered_map<std::string, std::size_t> functorFormalIndicesByName_;
+  std::unordered_set<std::string> shadowedFunctorFormalNames_;
   std::unordered_set<std::string> freeCaptureNames_;
+  std::unordered_set<std::size_t> functorFormalIndices_;
   std::unordered_set<std::string> requiredDefaultCaptureBindings_;
   std::unordered_set<std::string> conditionalRequiredDefaultCaptureBindings_;
   std::vector<CallSite> callSites_;
@@ -1086,6 +1259,8 @@ analyzeFrameEligibility(const QueryExpression &query,
         requiredDefaultCaptureSets;
     std::unordered_map<std::string, std::unordered_set<std::string>>
         conditionalRequiredDefaultCaptureSets;
+    std::unordered_map<std::string, std::unordered_set<std::size_t>>
+        functorFormalSets;
     std::unordered_map<std::string, const DefDeclaration *> definitionsByName;
     for (const auto &definition : query.defs) {
       budget.tick(1);
@@ -1096,21 +1271,28 @@ analyzeFrameEligibility(const QueryExpression &query,
       definitionsByName.emplace(definition.name, &definition);
     }
     for (const auto &definition : query.defs) {
-      DefinitionScanner scanner(budget);
+      DefinitionScanner scanner(budget, definitionsByName);
       const auto reason = scanner.scan(definition);
       freeCaptureSets.emplace(definition.name, scanner.freeCaptureNames());
       requiredDefaultCaptureSets.emplace(
           definition.name, scanner.requiredDefaultCaptureBindings());
       conditionalRequiredDefaultCaptureSets.emplace(
           definition.name, scanner.conditionalRequiredDefaultCaptureBindings());
+      auto &functorFormals = functorFormalSets[definition.name];
+      for (const auto index : scanner.functorFormalIndices()) {
+        budget.tick(1);
+        functorFormals.insert(index);
+      }
       auto callSites = std::move(scanner).takeCallSites();
       for (auto &callSite : callSites) {
         if (!names.contains(callSite.callee)) continue;
         budget.tick(1);
         callersByCallee[callSite.callee].push_back(definition.name);
         captureCallersByCallee[callSite.callee].push_back(
-            {.caller                 = definition.name,
-             .visibleNames           = std::move(callSite.visibleNames),
+            {.caller       = definition.name,
+             .visibleNames = std::move(callSite.visibleNames),
+             .functorArgumentSources =
+                 std::move(callSite.functorArgumentSources),
              .inParameterDefault     = callSite.inParameterDefault,
              .conditionalOnTypedRest = callSite.conditionalOnTypedRest,
              .mayInjectContext       = callSite.mayInjectContext,
@@ -1120,6 +1302,76 @@ analyzeFrameEligibility(const QueryExpression &query,
         result.refusalReasons.emplace(definition.name, *reason);
       else
         result.reusableDefinitions.insert(definition.name);
+    }
+
+    // Forwarded functor formals become part of the caller's static signature.
+    // Selector calls have both a normal context-injected branch and an empty-
+    // context fallback, so both actual-to-formal mappings must be static.
+    bool functorRequirementsChanged = true;
+    while (functorRequirementsChanged) {
+      functorRequirementsChanged = false;
+      for (const auto &[calleeName, callers] : captureCallersByCallee) {
+        const auto required = functorFormalSets.find(calleeName);
+        const auto callee   = definitionsByName.find(calleeName);
+        if (required == functorFormalSets.end() || required->second.empty() ||
+            callee == definitionsByName.end())
+          continue;
+        const auto &params = callee->second->params;
+        std::vector<std::size_t> requiredFormals;
+        for (const std::size_t index : required->second) {
+          budget.tick(1);
+          requiredFormals.push_back(index);
+        }
+        for (const auto &callSite : callers) {
+          budget.tick(1);
+          const auto validateArgument = [&](const std::size_t formalIndex,
+                                            const std::size_t argumentIndex) {
+            if (formalIndex >= params.size() ||
+                !std::holds_alternative<std::string>(
+                    params[formalIndex].target) ||
+                params[formalIndex].type || params[formalIndex].isVariadic ||
+                params[formalIndex].defaultValue ||
+                argumentIndex >= callSite.functorArgumentSources.size())
+              return false;
+            const auto &source = callSite.functorArgumentSources[argumentIndex];
+            if (source.kind ==
+                CallSite::FunctorArgumentSource::Kind::ClosedLiteral)
+              return true;
+            if (source.kind !=
+                    CallSite::FunctorArgumentSource::Kind::CallerFormal ||
+                !source.callerFormalIndex)
+              return false;
+            const bool added = functorFormalSets[callSite.caller]
+                                   .insert(*source.callerFormalIndex)
+                                   .second;
+            functorRequirementsChanged |= added;
+            return true;
+          };
+
+          for (const std::size_t requiredFormal : requiredFormals) {
+            budget.tick(1);
+            const bool injectContext = callSite.mayInjectContext &&
+                                       params.size() > callSite.argumentCount;
+            const bool normalBound =
+                injectContext
+                    ? requiredFormal > 0 &&
+                          requiredFormal - 1 < callSite.argumentCount &&
+                          validateArgument(requiredFormal, requiredFormal - 1)
+                    : requiredFormal < callSite.argumentCount &&
+                          validateArgument(requiredFormal, requiredFormal);
+            const bool fallbackBound =
+                !injectContext ||
+                (requiredFormal < callSite.argumentCount &&
+                 validateArgument(requiredFormal, requiredFormal));
+            if (!normalBound || !fallbackBound) {
+              if (result.reusableDefinitions.erase(callSite.caller))
+                result.refusalReasons.emplace(
+                    callSite.caller,
+                    "calls a function requiring a closed functor argument");
+            }
+          }
+        }
+      }
     }
 
     std::deque<PendingCapture> pendingCaptures;
@@ -1246,6 +1498,14 @@ analyzeFrameEligibility(const QueryExpression &query,
       for (const auto &name : conditionalSet)
         if (!requiredSet.contains(name)) conditionalDefaults.push_back(name);
       std::ranges::sort(conditionalDefaults);
+
+      auto &functorFormals   = result.functorFormalIndices[definition.name];
+      const auto &functorSet = functorFormalSets.at(definition.name);
+      for (const auto index : functorSet) {
+        budget.tick(1);
+        functorFormals.push_back(index);
+      }
+      std::ranges::sort(functorFormals);
     }
 
     for (const auto &[caller, reason] : lazyDefaultRefusals) {
@@ -1276,7 +1536,7 @@ analyzeFrameEligibility(const QueryExpression &query,
       }
     }
 
-    DefinitionScanner validator(budget);
+    DefinitionScanner validator(budget, definitionsByName);
     validator.validateQueryNodes(query);
   } catch (const std::exception &error) {
     return std::unexpected(FrameEligibilityError{error.what()});

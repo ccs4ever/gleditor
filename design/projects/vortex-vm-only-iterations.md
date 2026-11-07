@@ -1639,3 +1639,52 @@ Logs: `/tmp/vql-lambda-graph-build.log`, `/tmp/vql-lambda-graph-focused.log`,
 `/tmp/vql-lambda-graph-tests.log`, `/tmp/vql-lambda-graph-cli.log`,
 `/tmp/vql-lambda-graph-recursive-cli.log`, `/tmp/vql-lambda-graph-callables.log`,
 `/tmp/vql-lambda-graph-overlay.log`, `/tmp/vql-lambda-graph-format.log`.
+
+## Iteration 43: closed traversal functors in recursive frame variants
+
+Fixed untyped named formals without defaults can carry closed traversal templates into reusable
+named function graphs. A supported template contains only literal signed-dimension steps with
+default placement and yield; predicates, clamps, dereferencing, creation, projections, captures and
+other selectors remain outside this native subset. Step order, complete dimension names and
+directions enter the exact variant key together with formal positions and typed-rest group count.
+The existing dimension resolver preserves full-width identities.
+
+The caller recognizes templates without copying their bodies or traversing the source path as data.
+It prepares ordinary arguments in caller scope and normalizes an empty stream for each template
+formal before InvokeFrame. Callee compilation installs the template at that formal's position and
+clears ordinary value bindings there. The existing Stream local and argument port remain in the
+descriptor. Self and mutual calls forwarding the same template reuse reserved graph roots rather
+than recursively expanding the AST. No VM opcode or descriptor format changes.
+
+Eligibility propagates required functor positions through calls and preserves pre-match lexical
+scope, lambda shadowing, free-capture boundaries and both generated UFCS mappings. Free caller
+functors and unsupported templates retain finite compiled-inline lowering; unsupported recursive
+boundaries refuse explicitly. Numeric ordinals distinguish variant labels without printing template
+contents.
+
+A configurable `maxClosedFunctorTemplateWork` ceiling defaults to 1,000,000 weighted units. Binding
+entries, steps and dimension-name bytes charge template normalization and key/state copying, lookup
+and rehydration work before materialization. Existing syntax/capture validation, variable-name
+lookups and lexical binding snapshots retain their own behavior; this ceiling is not a bound on all
+compilation CPU or memory. Unique variants, generated opcodes and descriptor records continue using
+the existing aggregate caps.
+
+Validation: full `make -j$(nproc)` passed, together with 982 affected tests across 88 suites and 64
+focused functor/eligibility/lambda/type tests across four suites. Thirteen new runtime/graph cases
+and four additional eligibility cases cover real native invocation, self/mutual forwarding,
+content/formal/rest key distinctions, duplicate-template reuse, retained dummy ports, caller-scope
+preparation, rebinding, order/duplicates, UFCS branches, finite inline compatibility, projection
+refusal, weighted limits and atomic retry, recursive source-free export/reload, and actual host/mesh
+SOURCE traversal output. The real headless CLI recursively follows a supplied template and returns
+`leaf`. Architecture, senior and resource gates accepted this bounded stage. Repository formatting
+with clang-format 19 passed.
+
+The broader sweep retains the same eight unfinished failures and one skip, with 132 passes. The
+callable audit remains 33/40, with the same seven failures. These are not full-suite passes. General
+closures, decorated recursive functors, lambda values, remaining variadic forms and
+frontend/lifecycle gaps still leave §4.12 incomplete. No performance improvement is claimed.
+
+Logs: `/tmp/vql-closed-functor-build.log`, `/tmp/vql-closed-functor-focused.log`,
+`/tmp/vql-closed-functor-tests.log`, `/tmp/vql-closed-functor-cli.log`,
+`/tmp/vql-closed-functor-callables.log`, `/tmp/vql-closed-functor-overlay.log`,
+`/tmp/vql-closed-functor-format.log`.

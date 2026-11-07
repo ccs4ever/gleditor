@@ -25,6 +25,9 @@ struct FrameEligibility {
   std::unordered_set<std::string> reusableDefinitions;
   /// Sorted free lexical aliases captured from each call site's current scope.
   std::unordered_map<std::string, std::vector<std::string>> freeCaptureNames;
+  /// Formal indices that reusable activations bind as closed functors.
+  std::unordered_map<std::string, std::vector<std::size_t>>
+      functorFormalIndices;
   /// Sorted aliases required by every activation for field-default resolution.
   std::unordered_map<std::string, std::vector<std::string>>
       requiredDefaultCaptureBindings;

@@ -1,7 +1,9 @@
 #include "common/xanadu/vql/compiler.hpp"
 
 #include <algorithm>
+#include <limits>
 
+#include "common/xanadu/vql/closed_functor_syntax.hpp"
 #include "common/xanadu/vql/contract_codec.hpp"
 #include "common/xanadu/vql/contracts.hpp"
 #include "common/xanadu/vql/invocation.hpp"
@@ -214,20 +216,76 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
                          const std::vector<ValueExpr> &arguments,
                          std::optional<CellRef> context, bool ufcs,
                          const bool entersActiveCallStack) {
-  bool hasStaticFunctor = false;
+  std::vector<ClosedFunctorFormalKey> functorTemplates;
+  bool unsupportedFunctorArgument = false;
+  const auto requiredFunctorFormals =
+      frameFunctorFormalIndices_.find(definition.name);
+  const std::span<const std::size_t> requiredFormalIndices =
+      requiredFunctorFormals == frameFunctorFormalIndices_.end()
+          ? std::span<const std::size_t>{}
+          : std::span<const std::size_t>{requiredFunctorFormals->second};
   std::size_t functorIndex =
       ufcs && context && definition.params.size() > arguments.size() ? 1 : 0;
   for (const auto &argument : arguments) {
-    if (functorIndex < definition.params.size()) {
-      const auto &parameter = definition.params[functorIndex];
-      if (!parameter.type && !parameter.isVariadic &&
-          std::holds_alternative<std::string>(parameter.target) &&
-          functorArgument(argument)) {
-        hasStaticFunctor = true;
-        break;
+    const bool acceptsFunctor = functorIndex < definition.params.size() &&
+                                !definition.params[functorIndex].type &&
+                                !definition.params[functorIndex].isVariadic &&
+                                std::holds_alternative<std::string>(
+                                    definition.params[functorIndex].target);
+    const bool isFunctor = acceptsFunctor && isFunctorArgument(argument);
+    const bool templateFormal =
+        acceptsFunctor && !definition.params[functorIndex].defaultValue;
+    const bool requiredFormal =
+        std::ranges::binary_search(requiredFormalIndices, functorIndex);
+    if (isFunctor) {
+      const auto steps = closedFunctorArgumentSteps(argument);
+      if (!templateFormal || !steps || steps->empty()) {
+        unsupportedFunctorArgument = true;
+      } else {
+        chargeClosedFunctorTemplateWork(1);
+        chargeClosedFunctorTemplateWork(steps->size());
+        bool plain = true;
+        for (const auto &step : *steps) {
+          const auto *dimension =
+              std::get_if<SignedDimensionStep>(&step.selector);
+          if (!dimension) {
+            plain = false;
+            break;
+          }
+          chargeClosedFunctorTemplateWork(dimension->dimName.size());
+          if (!isPlainClosedFunctorStep(step)) {
+            plain = false;
+            break;
+          }
+        }
+        if (!plain) {
+          unsupportedFunctorArgument = true;
+        } else {
+          ClosedFunctorFormalKey formal{.formalIndex = functorIndex};
+          formal.steps.reserve(steps->size());
+          for (const auto &step : *steps) {
+            const auto &dimension =
+                std::get<SignedDimensionStep>(step.selector);
+            formal.steps.push_back({.dimName   = dimension.dimName,
+                                    .direction = dimension.direction});
+          }
+          functorTemplates.push_back(std::move(formal));
+        }
       }
+    } else if (requiredFormal) {
+      unsupportedFunctorArgument = true;
     }
     ++functorIndex;
+  }
+  const std::size_t suppliedActualCount =
+      arguments.size() +
+      static_cast<std::size_t>(ufcs && context &&
+                               definition.params.size() > arguments.size());
+  for (const std::size_t requiredIndex : requiredFormalIndices) {
+    if (requiredIndex >= suppliedActualCount) unsupportedFunctorArgument = true;
+    if (!std::ranges::binary_search(functorTemplates, requiredIndex, {},
+                                    &ClosedFunctorFormalKey::formalIndex))
+      unsupportedFunctorArgument = true;
   }
   bool hasInlineCapture = false;
   if (const auto captures = frameFreeCaptureNames_.find(definition.name);
@@ -248,14 +306,15 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
         });
   }
   if (reusableFrameDefinitions_.contains(definition.name) &&
-      !hasStaticFunctor && !hasInlineCapture) {
+      !unsupportedFunctorArgument && !hasInlineCapture) {
     if (compilingFrameDefinition_ && activeCalls_.size() > 1 &&
         activeCalls_.back() != compilingFrameDefinitionName_ &&
         std::ranges::contains(activeCalls_, definition.name))
       throw std::invalid_argument(
           "recursive cycle crosses an inline-only definition: " +
           definition.name);
-    return compileReusableFrameCall(definition, arguments, context, ufcs);
+    return compileReusableFrameCall(definition, arguments, context, ufcs,
+                                    std::move(functorTemplates));
   }
   if (entersActiveCallStack &&
       std::ranges::contains(activeCalls_, definition.name))
@@ -506,10 +565,18 @@ void VQLCompiler::finalizeNativeFrame(
   addRecords(spec.resultPorts.size());
   remainingFrameDescriptorRecords_ -= recordCount;
   spec.entry           = entryOp_;
+  auto definitionState = frameDefinitions_.end();
+  if (definitionKey) {
+    chargeClosedFunctorTemplateWork(
+        closedFunctorTemplateWork(definitionKey->functorTemplates));
+    definitionState = frameDefinitions_.find(*definitionKey);
+    if (definitionState == frameDefinitions_.end())
+      throw std::invalid_argument("missing finalized frame definition");
+  }
   const auto finalized = vm_.finalizeFrameDescriptor(descriptor, spec);
   if (!finalized) throw std::invalid_argument(finalized.error().message);
   if (definitionKey) {
-    auto &state    = frameDefinitions_.at(*definitionKey);
+    auto &state    = definitionState->second;
     state.entry    = entryOp_;
     state.compiled = true;
     state.queued   = false;
@@ -678,7 +745,8 @@ VQLCompiler::compileContractValidator(const TypeExpr &type,
 
 std::vector<CellRef> VQLCompiler::compileReusableFrameCall(
     const DefDeclaration &definition, const std::vector<ValueExpr> &arguments,
-    const std::optional<CellRef> context, const bool ufcs) {
+    const std::optional<CellRef> context, const bool ufcs,
+    std::vector<ClosedFunctorFormalKey> functorTemplates) {
   const auto callerCaptureCells = [this](const std::string &name) {
     if (const auto found = streamBindings_.find(name);
         found != streamBindings_.end())
@@ -705,13 +773,11 @@ std::vector<CellRef> VQLCompiler::compileReusableFrameCall(
   const VQLCompiler::FrameDefinitionKey key{
       .name = definition.name,
       .restGroupCount =
-          typedRest ? std::optional{restGroupCount} : std::nullopt};
+          typedRest ? std::optional{restGroupCount} : std::nullopt,
+      .functorTemplates = std::move(functorTemplates)};
 
-  const bool needsDescriptor = !frameDefinitions_.contains(key);
-  if (needsDescriptor && frameDefinitions_.size() >= maxNamedFrameVariants_)
-    throw std::invalid_argument("named frame variant budget exhausted for " +
-                                definition.name);
-
+  chargeClosedFunctorTemplateWork(
+      closedFunctorTemplateWork(key.functorTemplates));
   const auto limits              = vm_.frameLimits();
   const std::size_t captureCount = [&] {
     const auto captures = frameFreeCaptureNames_.find(definition.name);
@@ -744,27 +810,71 @@ std::vector<CellRef> VQLCompiler::compileReusableFrameCall(
     throw std::invalid_argument(
         "native frame exceeds configured local or descriptor-port limits");
 
-  const CellRef descriptor = [&] {
+  std::optional<std::size_t> functorVariantOrdinal;
+  std::optional<CellRef> frameDescriptor;
+  {
+    chargeClosedFunctorTemplateWork(
+        closedFunctorTemplateWork(key.functorTemplates));
     auto state = frameDefinitions_.find(key);
     if (state == frameDefinitions_.end()) {
+      if (frameDefinitions_.size() >= maxNamedFrameVariants_)
+        throw std::invalid_argument(
+            "named frame variant budget exhausted for " + definition.name);
+      const auto templateCopyWork =
+          closedFunctorTemplateWork(key.functorTemplates);
+      chargeClosedFunctorTemplateWork(templateCopyWork);
+      chargeClosedFunctorTemplateWork(templateCopyWork);
+      chargeClosedFunctorTemplateWork(templateCopyWork);
+      std::vector<ClosedFunctorFormalKey> stateTemplates = key.functorTemplates;
       const auto reserved = vm_.reserveFrameDescriptor();
       if (!reserved) throw std::invalid_argument(reserved.error().message);
-      state = frameDefinitions_
-                  .emplace(key, FrameDefinitionState{.descriptor = *reserved})
-                  .first;
-    }
-    const CellRef frameDescriptor = state->second.descriptor;
-    if (!state->second.queued && !state->second.compiled) {
-      state->second.queued = true;
+      if (!key.functorTemplates.empty()) {
+        if (nextFunctorVariantOrdinal_ ==
+            std::numeric_limits<std::size_t>::max())
+          throw std::invalid_argument(
+              "compiled VQL functor variant ordinal exhausted");
+        functorVariantOrdinal = nextFunctorVariantOrdinal_++;
+      }
+      FrameDefinitionState newState{
+          .descriptor            = *reserved,
+          .functorTemplates      = std::move(stateTemplates),
+          .functorVariantOrdinal = functorVariantOrdinal,
+          .queued                = true};
+      state = frameDefinitions_.emplace(key, std::move(newState)).first;
       pendingFrameDefinitions_.push_back(key);
+    } else {
+      functorVariantOrdinal = state->second.functorVariantOrdinal;
+      if (!state->second.queued && !state->second.compiled) {
+        chargeClosedFunctorTemplateWork(
+            closedFunctorTemplateWork(key.functorTemplates));
+        state->second.queued = true;
+        pendingFrameDefinitions_.push_back(key);
+      }
     }
-    return frameDescriptor;
-  }();
+    if (!functorVariantOrdinal)
+      functorVariantOrdinal = state->second.functorVariantOrdinal;
+    frameDescriptor = state->second.descriptor;
+  }
+  const CellRef descriptor = frameDescriptor.value();
+  const auto functorSuffix =
+      functorVariantOrdinal
+          ? "<functor=" + std::to_string(*functorVariantOrdinal) + ">"
+          : std::string{};
 
   std::vector<std::vector<CellRef>> actuals;
   if (injectContext) actuals.push_back({*context});
-  for (const auto &argument : arguments)
-    actuals.push_back(compileArgument(argument, context));
+  std::size_t actualFormalIndex = static_cast<std::size_t>(injectContext);
+  for (const auto &argument : arguments) {
+    const auto functor =
+        std::ranges::lower_bound(key.functorTemplates, actualFormalIndex, {},
+                                 &ClosedFunctorFormalKey::formalIndex);
+    if (functor != key.functorTemplates.end() &&
+        functor->formalIndex == actualFormalIndex)
+      actuals.emplace_back();
+    else
+      actuals.push_back(compileArgument(argument, context));
+    ++actualFormalIndex;
+  }
 
   std::vector<std::vector<CellRef>> typedRestGroups;
   if (hasVariadicRest) {
@@ -863,9 +973,10 @@ std::vector<CellRef> VQLCompiler::compileReusableFrameCall(
     typedRestStreams.push_back(normalizeFrameStream(group));
 
   const CellRef resultStream = emitStreamClear();
-  const CellRef invoke       = emitOp(OpcodeKind::InvokeFrame,
-                                      "#INVOKE_FRAME " + definition.name +
-                                          frameVariantSuffix(key.restGroupCount));
+  const CellRef invoke =
+      emitOp(OpcodeKind::InvokeFrame,
+             "#INVOKE_FRAME " + definition.name +
+                 frameVariantSuffix(key.restGroupCount) + functorSuffix);
   emitInput(invoke, descriptor);
   emitInput(invoke, contextStream);
   for (const auto capture : captureStreams) emitInput(invoke, capture);
@@ -885,9 +996,13 @@ std::vector<CellRef> VQLCompiler::compileReusableFrameCall(
 void VQLCompiler::compilePendingFrameDefinitions() {
   for (std::size_t index = 0; index < pendingFrameDefinitions_.size();
        ++index) {
+    chargeClosedFunctorTemplateWork(closedFunctorTemplateWork(
+        pendingFrameDefinitions_[index].functorTemplates));
     const auto key = pendingFrameDefinitions_[index];
     bool compiled  = false;
     {
+      chargeClosedFunctorTemplateWork(
+          closedFunctorTemplateWork(key.functorTemplates));
       const auto state = frameDefinitions_.find(key);
       compiled = state == frameDefinitions_.end() || state->second.compiled;
     }
@@ -907,7 +1022,22 @@ void VQLCompiler::compileFrameDefinition(const DefDeclaration &definition,
                                          const FrameDefinitionKey &key) {
   IsolatedCompileState isolated(*this);
 
-  const CellRef descriptor      = frameDefinitions_.at(key).descriptor;
+  std::optional<CellRef> reservedDescriptor;
+  std::optional<std::size_t> functorVariantOrdinal;
+  std::vector<ClosedFunctorFormalKey> functorTemplates;
+  {
+    chargeClosedFunctorTemplateWork(
+        closedFunctorTemplateWork(key.functorTemplates));
+    const auto state = frameDefinitions_.find(key);
+    if (state == frameDefinitions_.end())
+      throw std::invalid_argument("missing reserved frame: " + definition.name);
+    reservedDescriptor    = state->second.descriptor;
+    functorVariantOrdinal = state->second.functorVariantOrdinal;
+    chargeClosedFunctorTemplateWork(
+        closedFunctorTemplateWork(state->second.functorTemplates));
+    functorTemplates = state->second.functorTemplates;
+  }
+  const CellRef descriptor      = reservedDescriptor.value();
   compilingFrameDefinition_     = true;
   compilingFrameDefinitionName_ = definition.name;
   activeCalls_.push_back(definition.name);
@@ -1021,7 +1151,11 @@ void VQLCompiler::compileFrameDefinition(const DefDeclaration &definition,
   for (const auto slot : restGroupSlots) dynamicStreams_.insert(slot);
   dynamicStreams_.insert(resultSlot);
 
-  const std::string suffix   = frameVariantSuffix(key.restGroupCount);
+  const std::string suffix =
+      frameVariantSuffix(key.restGroupCount) +
+      (functorVariantOrdinal
+           ? "<functor=" + std::to_string(*functorVariantOrdinal) + ">"
+           : std::string{});
   const CellRef returnOpcode = emitNativeFrameReturn(
       descriptor, "#RETURN_FRAME " + definition.name + suffix);
   const auto emitMatch = [&](const TypeExpr &type,
@@ -1037,8 +1171,31 @@ void VQLCompiler::compileFrameDefinition(const DefDeclaration &definition,
   };
 
   for (std::size_t index = 0; index < definition.params.size(); ++index) {
-    const auto &parameter = definition.params[index];
-    const CellRef slot    = parameterSlots[index];
+    const auto &parameter      = definition.params[index];
+    const CellRef slot         = parameterSlots[index];
+    const auto functorTemplate = std::ranges::lower_bound(
+        functorTemplates, index, {}, &ClosedFunctorFormalKey::formalIndex);
+    if (functorTemplate != functorTemplates.end() &&
+        functorTemplate->formalIndex == index) {
+      const auto *name = std::get_if<std::string>(&parameter.target);
+      if (!name || parameter.type || parameter.isVariadic ||
+          parameter.defaultValue)
+        throw std::invalid_argument(
+            "closed functor frame requires an untyped required named formal");
+      chargeClosedFunctorTemplateWork(closedFunctorTemplateWork(
+          std::span{&*functorTemplate, std::size_t{1}}));
+      std::vector<PathStep> steps;
+      steps.reserve(functorTemplate->steps.size());
+      for (const auto &templateStep : functorTemplate->steps) {
+        SignedDimensionStep dimension{.dimName   = templateStep.dimName,
+                                      .direction = templateStep.direction};
+        steps.push_back(PathStep{.selector = std::move(dimension)});
+      }
+      functorBindings_[*name] = std::move(steps);
+      streamBindings_.erase(*name);
+      varBindings_.erase(*name);
+      continue;
+    }
     if (typedRest && index == definition.params.size() - 1) {
       const auto *name = std::get_if<std::string>(&parameter.target);
       if (!name || !parameter.type)
@@ -1121,6 +1278,7 @@ void VQLCompiler::compileFrameDefinition(const DefDeclaration &definition,
     if (destructureType && destructurePrepared) {
       emitMatch(*destructureType, {slot}, *destructurePrepared, diagnostic);
     } else if (const auto *name = std::get_if<std::string>(&parameter.target)) {
+      functorBindings_.erase(*name);
       streamBindings_[*name] = {slot};
       varBindings_[*name]    = slot;
     } else {
@@ -1165,6 +1323,8 @@ void VQLCompiler::compileFrameDefinition(const DefDeclaration &definition,
   if (!entryOp_)
     throw std::invalid_argument("frame definition emitted no entry opcode");
   appendOpcode(returnOpcode);
+  chargeClosedFunctorTemplateWork(
+      closedFunctorTemplateWork(key.functorTemplates));
   const std::optional<FrameDefinitionKey> completedKey{key};
   finalizeNativeFrame(descriptor, spec, completedKey);
 }

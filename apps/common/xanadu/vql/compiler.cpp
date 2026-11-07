@@ -306,8 +306,11 @@ CellRef VQLCompiler::emitInputConstant(CellRef op, const CellValue &val) {
 CompilationResult VQLCompiler::compile(const QueryExpression &query,
                                        const CompilationOptions &options) {
   zigzag::vortex::AssemblyTransaction transaction(vm_);
-  remainingContractEmissions_      = options.maxContractEmissions;
-  maxNamedFrameVariants_           = options.limits.maxNamedFrameVariants;
+  remainingContractEmissions_ = options.maxContractEmissions;
+  maxNamedFrameVariants_      = options.limits.maxNamedFrameVariants;
+  remainingClosedFunctorTemplateWork_ =
+      options.limits.maxClosedFunctorTemplateWork;
+  nextFunctorVariantOrdinal_       = 0;
   remainingGeneratedOpcodes_       = options.limits.maxGeneratedOpcodes;
   remainingFrameDescriptorRecords_ = options.limits.maxFrameDescriptorRecords;
   nextContractValidatorId_         = 0;
@@ -328,6 +331,7 @@ CompilationResult VQLCompiler::compile(const QueryExpression &query,
   frameDefinitions_.clear();
   reusableFrameDefinitions_.clear();
   frameFreeCaptureNames_.clear();
+  frameFunctorFormalIndices_.clear();
   frameRequiredDefaultCaptureBindings_.clear();
   frameConditionalRequiredDefaultCaptureBindings_.clear();
   pendingFrameDefinitions_.clear();
@@ -371,6 +375,9 @@ CompilationResult VQLCompiler::compile(const QueryExpression &query,
       std::string label = key.name;
       if (key.restGroupCount)
         label += "<rest=" + std::to_string(*key.restGroupCount) + ">";
+      if (state.functorVariantOrdinal)
+        label +=
+            "<functor=" + std::to_string(*state.functorVariantOrdinal) + ">";
       dis += "\nFRAME " + label + ":\n" + disassemble(state.entry);
     }
     CompilationResult result{
@@ -446,8 +453,9 @@ std::optional<CellRef> VQLCompiler::compileQuery(const QueryExpression &query) {
   const auto frameEligibility = analyzeFrameEligibility(query);
   if (!frameEligibility)
     throw std::invalid_argument(frameEligibility.error().message);
-  reusableFrameDefinitions_ = frameEligibility->reusableDefinitions;
-  frameFreeCaptureNames_    = frameEligibility->freeCaptureNames;
+  reusableFrameDefinitions_  = frameEligibility->reusableDefinitions;
+  frameFreeCaptureNames_     = frameEligibility->freeCaptureNames;
+  frameFunctorFormalIndices_ = frameEligibility->functorFormalIndices;
   frameRequiredDefaultCaptureBindings_ =
       frameEligibility->requiredDefaultCaptureBindings;
   frameConditionalRequiredDefaultCaptureBindings_ =
