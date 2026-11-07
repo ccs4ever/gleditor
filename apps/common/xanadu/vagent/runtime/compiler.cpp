@@ -4701,6 +4701,8 @@ void Gen::emitObserve(CellRef entryLabel) {
       jump(scan);
       place(trimmed);
     }
+    // The second detector of a jump in the wall-minus-steady offset (4.4).
+    callClockNoteIfPresent(tp);
     callLabel(rtSettle_);
     endObservation(kTurnResultCommitted);
     place(next);
@@ -6504,6 +6506,8 @@ CompiledAgent Gen::run() {
   rtBSet_        = newLabel();
   rtSettle_      = newLabel();
   rtSourceDrop_  = newLabel();
+  rtClockNote_   = newLabel();
+  rtClockRebase_ = newLabel();
   rtCapFind_     = newLabel();
   a3_            = global();
   keepHistG_     = global();
@@ -6569,8 +6573,11 @@ CompiledAgent Gen::run() {
   out.failOp        = failOp_;
   emitSettle();
   if (std::ranges::any_of(preds_,
-                          [](const auto &p) { return p.second.arbitrated; }))
+                          [](const auto &p) { return p.second.arbitrated; })) {
     emitRtSourceDrop();
+    emitRtClockNote();
+    emitRtClockRebase();
+  }
   emitInit(out.initEntry);
   emitDispatch(out.dispatchEntry);
   if (std::ranges::any_of(preds_,
@@ -6585,6 +6592,8 @@ CompiledAgent Gen::run() {
     emitSettleEntry(*out.settleEntry);
     out.healthEntry = newLabel();
     emitHealthEntry(*out.healthEntry);
+    out.clockEntry = newLabel();
+    emitClockEntry(*out.clockEntry);
   }
   for (const auto &member : agent_->members) {
     if (const auto *field = std::get_if<VarDecl>(&member))

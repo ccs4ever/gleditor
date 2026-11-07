@@ -140,7 +140,8 @@ struct TranslationPlan {
   std::vector<Profile> profiles;
   std::vector<Record> records;
   /// Records on the agent's own `d.epistemic` rank besides the shape header,
-  /// in rank order: the audience record (I3-3a2).
+  /// in rank order: the audience record (I3-3a2) and the clock lineage
+  /// (I3-3b2).
   std::vector<zigzag::CellRef> agentRecords;
   std::uint64_t cells{0};
   std::uint64_t work{0};
@@ -176,10 +177,19 @@ planTranslation(const PlanRequest &request);
 audienceOf(const zigzag::ArenaManifold &arena, zigzag::CellRef agent,
            zigzag::DimRef epistemic, const ValueDims &vd);
 
+/// Whether @p record is a lineage of the one shape the routine writes (P19
+/// I3-3b2, epistemic_translate_clock.cpp): a `segments` list of at most
+/// `kMaxClockLineage` segments, each with an instance of 16 hex digits and
+/// finite doubles, the wall anchor present as a pair or absent as a pair.
+[[nodiscard]] bool clockLineageWellFormed(const zigzag::ArenaManifold &arena,
+                                          const OwnedGraphDims &dims,
+                                          zigzag::CellRef record);
+
 /// The cells of the agent's `d.epistemic` rank that a transfer carries: the
-/// audience record, at most one, with exactly its `token` field holding 64
-/// hex. Anything else on the rank but the shape header refuses
-/// `UnregisteredOwnedStructure`; a malformed audience refuses
+/// audience record and the clock lineage, at most one of each, the first with
+/// exactly its `token` field holding 64 hex and the second well formed.
+/// Anything else on the rank but the shape header refuses
+/// `UnregisteredOwnedStructure`; a malformed or repeated record refuses
 /// `StateInconsistent`.
 [[nodiscard]] std::expected<std::vector<zigzag::CellRef>, TransferRefusal>
 agentRankRecords(const zigzag::ArenaManifold &arena, zigzag::CellRef agent,

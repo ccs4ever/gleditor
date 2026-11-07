@@ -875,7 +875,8 @@ bool AgentExecutor::prepare(State &state, WorkerContext &context,
         (compiled->continueEntry && !sound(*compiled->continueEntry)) ||
         (compiled->failStepEntry && !sound(*compiled->failStepEntry)) ||
         (compiled->settleEntry && !sound(*compiled->settleEntry)) ||
-        (compiled->healthEntry && !sound(*compiled->healthEntry))) {
+        (compiled->healthEntry && !sound(*compiled->healthEntry)) ||
+        (compiled->clockEntry && !sound(*compiled->clockEntry))) {
       GLEDITOR_LOG_DEBUG(kLog, "instantiate returned a cell the arena lacks");
       return false;
     }
@@ -1717,6 +1718,8 @@ AgentExecutor::TurnOutcome AgentExecutor::deliverHost(State &state,
       finishHealthItem(state.pid, *event.health, code);
       return outcome;
     }
+    if (event.clockTurn && event.clockTurn->rebase)
+      armRebase(spec, *event.clockTurn->rebase);
     // Slots are never reused, so past the allowance only a checkpoint and
     // resume helps; no epistemic turn runs, rather than fail mid-turn.
     if (context.arena.cellCount() >= settings_.epistemic.arenaSlots) {
@@ -2248,6 +2251,12 @@ AgentExecutor::TurnOutcome AgentExecutor::runTurnOnce(State &state,
             failure = std::string(kFailStatement);
           }
         }
+      }
+      if (!failure && spec.inspect) {
+        if (const auto turn =
+                fieldValue(arena, state.vd, agent.agentCell, kFieldTurn))
+          if (const auto value = readValue(arena, state.vd, *turn))
+            spec.inspect(*value);
       }
       // 6. Settle: nothing raises internal events in this iteration.
       if (!failure && spec.markInitialized) {
@@ -3050,6 +3059,7 @@ bool AgentExecutor::setDeliveryDeadline(
 }
 
 void AgentExecutor::tick(std::chrono::system_clock::time_point now) {
+  (void)checkClock();
   drainPosted();
   upkeepDeliveries(now);
   upkeepLeases(now);
@@ -3248,7 +3258,10 @@ std::size_t AgentExecutor::pumpUntilIdle(std::size_t maxTurns) {
   std::size_t turns = 0;
   while (turns < maxTurns) {
     bool progressed = false;
-    auto pending    = std::move(needsFirstTurn_);
+    // The timer-wake detector until I3-3c1 adds the real wake: a suspend ends
+    // at the first round after it, with no reading needed.
+    (void)checkClock();
+    auto pending = std::move(needsFirstTurn_);
     needsFirstTurn_.clear();
     for (const auto &pid : pending) {
       const auto known = states_.find(pidKey(pid));
@@ -3699,6 +3712,7 @@ AgentExecutor::bindSource(const identity::ActorPid &target,
   item.sourceChange = SourceChange{grant.principal, grant.incarnation, false,
                                    audience->second.token};
   posts_->pushControl(std::move(item));
+  startLineageLocked(target);
   return this;
 }
 
@@ -3810,6 +3824,14 @@ AgentExecutor::observe(const identity::ActorPid &target,
   const auto seconds = [](auto duration) {
     return std::chrono::duration<double>(duration).count();
   };
+  // Before anything is mapped or queued: a jump found here invalidates the
+  // adapter's mappings before this reading uses one (design 4.5).
+  const auto reading = [&] {
+    const std::lock_guard lock(ingress_->mutex);
+    const auto taken = readClockLocked();
+    checkClockLocked(taken);
+    return taken;
+  }();
   // Nothing is stored for a malformed identity or an unbound source: the
   // caller has its answer in the return value, and the log keeps only what
   // a binding authorized, so a flood from outside cannot grow or evict it.
@@ -4028,6 +4050,7 @@ AgentExecutor::observe(const identity::ActorPid &target,
     }
   PostBox::Item item;
   item.pid         = target;
+  item.reading     = clockRecord(reading);
   item.observation = std::move(r);
   item.ingest = IngestKey{o.principal, o.incarnation,  o.eventId, o.predicate,
                           o.relayedBy, receivedSteady, o.sequence};
@@ -4343,7 +4366,7 @@ void AgentExecutor::drainPosted() {
   };
   const auto epistemic = [](const PostBox::Item &item) {
     return item.ingest || item.refusalsOf || item.sourceChange || item.health ||
-           item.healthBatch;
+           item.healthBatch || item.clockTurn;
   };
   for (auto &item : items) {
     // A pid the runtime has never heard of gets nothing; one posted between a
@@ -4401,6 +4424,19 @@ void AgentExecutor::drainPosted() {
       turn.sourceChange = std::move(item.sourceChange);
       turn.turnFields.set(std::string(kTurnSourceChange),
                           WireValue::record(std::move(change)));
+      const auto after = std::ranges::find_if_not(
+          state.hostEvents,
+          [](const HostEvent &event) { return isControl(event); });
+      state.hostEvents.insert(after, std::move(turn));
+    } else if (item.clockTurn) {
+      if (!state.agent.clockEntry) {
+        abandon(item);
+        continue;
+      }
+      HostEvent turn;
+      turn.entry       = state.agent.clockEntry;
+      turn.turnFields  = item.clockTurn->fields;
+      turn.clockTurn   = std::move(item.clockTurn);
       const auto after = std::ranges::find_if_not(
           state.hostEvents,
           [](const HostEvent &event) { return isControl(event); });
@@ -4549,6 +4585,9 @@ void AgentExecutor::drainPosted() {
                  WireValue::boolean(item.ingest && item.ingest->counts));
       ingest.turnFields.set(std::string(kTurnIngest),
                             WireValue::record(std::move(limits)));
+      if (item.reading)
+        ingest.turnFields.set(std::string(kTurnClock),
+                              WireValue::record(std::move(*item.reading)));
       state.hostEvents.push_back(std::move(ingest));
     } else if (item.percept) {
       raise(state, item.type, std::move(item.fields));
@@ -6696,6 +6735,13 @@ AgentSettings AgentSettings::fromModel(const xanadu::SystemStoreModel &model) {
              ep.commonCauseSources);
   loadSigned(xanadu::settings::kVagentEpistemicCommonCauseWindowMs,
              ep.commonCauseWindowMs);
+  loadSigned(xanadu::settings::kVagentEpistemicClockLineage, ep.clockLineage);
+  // Zero is a legal value of both, so they are not clamped to positive.
+  ep.steadyDriftPpm = model.getInt64(
+      xanadu::settings::kVagentEpistemicSteadyDriftPpm, ep.steadyDriftPpm);
+  ep.wallSyncUncertaintyMs =
+      model.getInt64(xanadu::settings::kVagentEpistemicWallSyncUncertaintyMs,
+                     ep.wallSyncUncertaintyMs);
 
   if (const auto checked = ep.validate(); checked.has_value()) {
     settings.epistemic = ep;

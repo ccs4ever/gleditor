@@ -164,6 +164,14 @@ public:
   /// for an agent reads its committed identifier again.
   EpistemicAdapter *clearAudiences();
 
+  /// When a jump in the host's wall-minus-steady offset dropped the paired
+  /// steady mapping of @p principal on @p target (design 4.5), until a pairing
+  /// for that issuer completes. Design 4.5 puts this on `SourceHealth`; the
+  /// adapter owns the mapping, so it answers here.
+  [[nodiscard]] std::optional<std::chrono::steady_clock::time_point>
+  clockPending(const identity::ActorPid &target,
+               std::string_view principal) const;
+
   [[nodiscard]] const SignedVerifierStats &stats() const noexcept;
   [[nodiscard]] const AdapterLimits &limits() const noexcept;
 

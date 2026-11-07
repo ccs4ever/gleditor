@@ -298,8 +298,12 @@ constexpr std::array kRecordFields{kObsStatus,
 constexpr std::array kShapeFields{kShapeHeaderName, kShapeVersionField};
 // The audience record (I3-3a2): its name and its one field.
 constexpr std::array kAudienceFields{kAudienceRecordName, kAudienceTokenField};
+// The clock lineage (I3-3b2): the record, its list and a segment's fields.
+constexpr std::array kLineageFields{
+    kLineageRecordName, kLineageSegments, kLineageSegmentName, kSegInstance,
+    kSegStartSteady,    kSegAnchorSteady, kSegAnchorWall,      kSegAnchorSync};
 
-constexpr std::array<OwnedStructure, 17> kOwned{{
+constexpr std::array<OwnedStructure, 18> kOwned{{
     {"agent.shape_header",
      "d.epistemic",
      "agent header",
@@ -315,6 +319,19 @@ constexpr std::array<OwnedStructure, 17> kOwned{{
      "d.epistemic",
      "agent rank",
      kAudienceFields,
+     Fate::Carried,
+     Fate::Carried,
+     {},
+     1,
+     populateNothing},
+    // Written by the first bind's clock turn, which every populated fixture
+    // runs, so it needs no sample of its own. A resume carries it whole and the
+    // new instance's first control turn appends that instance's segment; the
+    // routine's eviction keeps it within the destination's bound.
+    {"agent.clock_lineage",
+     "d.epistemic",
+     "agent rank",
+     kLineageFields,
      Fate::Carried,
      Fate::Carried,
      {},
@@ -520,6 +537,12 @@ constexpr std::array kHost{
     HostStateRow{"pending clock challenges (signed adapter)", "kept",
                  "lost; UnknownClockMapping until re-paired; versions restart "
                  "under the new instance"},
+    HostStateRow{"clock anchor, jump generation, lineage actors (executor)",
+                 "kept; the instance is unchanged",
+                 "lost; the new instance's first bind queues its segment, and "
+                 "the arena's lineage carries the old ones"},
+    HostStateRow{"clockPending (signed adapter)", "kept",
+                 "lost with the mappings it describes"},
     HostStateRow{"audience mirror (executor and adapter)", "kept",
                  "cleared; re-read from the arena at the first committed "
                  "source change"},

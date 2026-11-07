@@ -11,7 +11,9 @@
  */
 #include <algorithm>
 #include <ranges>
+#include <utility>
 
+#include "common/xanadu/vagent/runtime/epistemic_abi_clock.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_translate.hpp"
 #include "common/xanadu/vagent/runtime/runtime_abi.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
@@ -70,16 +72,25 @@ agentRankRecords(const zigzag::ArenaManifold &arena, const CellRef agent,
         TransferRefusal::make(code, route, ActorError::ExecutionFailed,
                               {.subject = std::move(subject)}));
   };
+  bool haveAudience = false, haveLineage = false;
   for (const auto cell : zigzag::rankAfter(arena, agent, *dims.epistemic)) {
     const auto name = arena.textOf(cell);
     if (name == kShapeHeaderName) continue;
-    if (name != kAudienceRecordName)
+    if (name == kAudienceRecordName) {
+      // One identifier per agent: two would leave the devices' choice to
+      // whichever a reader met first.
+      if (std::exchange(haveAudience, true) || !tokenOf(arena, vd, cell))
+        return refuse(TransferCode::StateInconsistent,
+                      std::string(kAudienceRecordName));
+    } else if (name == kLineageRecordName) {
+      // Two lineages would leave a rebase to whichever a reader met first.
+      if (std::exchange(haveLineage, true) ||
+          !clockLineageWellFormed(arena, dims, cell))
+        return refuse(TransferCode::StateInconsistent,
+                      std::string(kLineageRecordName));
+    } else {
       return refuse(TransferCode::UnregisteredOwnedStructure, "d.epistemic");
-    // One identifier per agent: two would leave the devices' choice to
-    // whichever a reader met first.
-    if (!out.empty() || !tokenOf(arena, vd, cell))
-      return refuse(TransferCode::StateInconsistent,
-                    std::string(kAudienceRecordName));
+    }
     out.push_back(cell);
   }
   return out;

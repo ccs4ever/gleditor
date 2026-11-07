@@ -653,9 +653,11 @@ TEST_F(VagentEpistemicIngress, TheCellCeilingRefusesWithoutWritingAnything) {
   EXPECT_EQ(refused(kTurnResultEpistemicBudget), 1U);
   EXPECT_TRUE(profiles().empty());
   EXPECT_TRUE(clauses().empty());
-  // Only the audience record the bind wrote: the record, its field name and
-  // the token (I3-3a2).
-  EXPECT_EQ(*host->executor().epistemicCells(pid), 3U);
+  // Only what the bind wrote: the audience record, its field name and the
+  // token (3 cells, I3-3a2), and the clock lineage with its first segment
+  // (3 + 11 cells, I3-3b2: the record, `segments` and its list; a segment
+  // holds its record and five fields of two cells).
+  EXPECT_EQ(*host->executor().epistemicCells(pid), 3U + 3U + 11U);
 }
 
 TEST_F(VagentEpistemicIngress, BindingRefusesAMalformedPrincipal) {

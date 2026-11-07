@@ -147,6 +147,31 @@ ClockMappingTable::accept(const ClockPairReply &reply, const HostInstant &now) {
                std::move(wall), steady);
 }
 
+std::vector<std::string>
+ClockMappingTable::invalidateSteady(const HostInstant &now) {
+  std::vector<std::string> dropped;
+  for (auto &[key, entry] : entries_) {
+    auto &set = entry.set;
+    if (!set.steady) continue;
+    if (key.basis == SignedClockBasis::Synchronised && now.wallSynchronised) {
+      // The composition samples steady-minus-wall when its version is minted;
+      // the new offset is the same sample taken now. Uncertainty is the
+      // wall's own and does not change.
+      ++set.version;
+      set.steady->offset  = seconds(now.steady) - seconds(now.wall);
+      set.steady->version = set.version;
+      if (set.wall) set.wall->version = set.version;
+      continue;
+    }
+    // A pairing's offset cannot be recomputed without the device, and a
+    // composition cannot be sampled without a wall reference.
+    set.steady.reset();
+    if (std::ranges::find(dropped, key.issuer) == dropped.end())
+      dropped.push_back(key.issuer);
+  }
+  return dropped;
+}
+
 void ClockMappingTable::forget(const std::string_view issuer) {
   std::erase_if(entries_,
                 [&](const auto &e) { return e.first.issuer == issuer; });

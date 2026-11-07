@@ -172,6 +172,28 @@ inline constexpr std::int64_t kMaxMaxPathLatenessMs     = 600'000;
 /// already refuses a lower epoch).
 inline constexpr std::size_t kMaxMappingEpochsPerIssuer = 64;
 
+// The clock lineage and jump detection (P19 I3-3b2, `i3-3-design.md` 4.4, 4.5
+// and 9.1).
+/// `vagent.epistemic_clock_lineage`: segments an agent keeps, counting restarts
+/// and suspends together; the oldest is evicted past it, and a record whose
+/// segment was evicted no longer rebases. A segment costs 11 cells, so the
+/// default is 91 and the largest setting 707.
+inline constexpr std::int64_t kDefaultClockLineage = 8;
+inline constexpr std::int64_t kMinClockLineage     = 2;
+inline constexpr std::int64_t kMaxClockLineage     = 64;
+/// `vagent.epistemic_steady_drift_ppm`: how far the host's steady clock may
+/// run from real time between two readings that agree. A host's monotonic
+/// clock is worse than a device crystal, so the default is twice
+/// `clock_drift_ppm`.
+inline constexpr std::int64_t kDefaultSteadyDriftPpm = 200;
+inline constexpr std::int64_t kMinSteadyDriftPpm     = 0;
+inline constexpr std::int64_t kMaxSteadyDriftPpm     = 10'000;
+/// Cells a lineage costs: the record with its `segments` field, and a
+/// segment with all five fields (the last two are absent while the wall
+/// clock is unsynchronised, which saves four).
+inline constexpr std::size_t kLineageBaseCells    = 3;
+inline constexpr std::size_t kLineageSegmentCells = 11;
+
 // The time-class diagnostic and the shared-time-source watch (I3-3b1, design
 // 4.3 and 9.1). Host memory only: none of these reaches a decision.
 /// `vagent.epistemic_time_class_half_life`: readings over which a source's
@@ -215,6 +237,9 @@ enum class EpistemicLimitError : std::uint8_t {
   InvalidTimeSuspectFraction,
   InvalidCommonCauseSources,
   InvalidCommonCauseWindow,
+  InvalidClockLineage,
+  InvalidSteadyDrift,
+  InvalidWallSyncUncertainty,
 };
 
 [[nodiscard]] constexpr std::string_view
@@ -258,6 +283,12 @@ epistemicLimitErrorName(EpistemicLimitError error) noexcept {
     return "InvalidCommonCauseSources";
   case EpistemicLimitError::InvalidCommonCauseWindow:
     return "InvalidCommonCauseWindow";
+  case EpistemicLimitError::InvalidClockLineage:
+    return "InvalidClockLineage";
+  case EpistemicLimitError::InvalidSteadyDrift:
+    return "InvalidSteadyDrift";
+  case EpistemicLimitError::InvalidWallSyncUncertainty:
+    return "InvalidWallSyncUncertainty";
   }
   return "Unknown";
 }
@@ -416,6 +447,14 @@ struct EpistemicLimits {
   /// `vagent.epistemic_common_cause_window_ms`: the window those sources
   /// must fall in.
   std::int64_t commonCauseWindowMs{kDefaultCommonCauseWindowMs};
+  /// `vagent.epistemic_clock_lineage`: segments the lineage keeps.
+  std::int64_t clockLineage{kDefaultClockLineage};
+  /// `vagent.epistemic_steady_drift_ppm`: the steady clock's drift bound, the
+  /// allowance of the segment rule and of jump detection.
+  std::int64_t steadyDriftPpm{kDefaultSteadyDriftPpm};
+  /// `vagent.epistemic_wall_sync_uncertainty_ms`: the same setting the adapter
+  /// reads for its mappings; here it is the sigma of a wall anchor.
+  std::int64_t wallSyncUncertaintyMs{kDefaultWallSyncUncertaintyMs};
 
   /// Slots past `arenaSlots` that only settle turns may use, so a batch of
   /// belief events still settles when the allowance is spent. Zero for a tiny
@@ -493,6 +532,14 @@ struct EpistemicLimits {
     if (commonCauseWindowMs < kMinCommonCauseWindowMs ||
         commonCauseWindowMs > kMaxCommonCauseWindowMs)
       return std::unexpected(EpistemicLimitError::InvalidCommonCauseWindow);
+    if (clockLineage < kMinClockLineage || clockLineage > kMaxClockLineage)
+      return std::unexpected(EpistemicLimitError::InvalidClockLineage);
+    if (steadyDriftPpm < kMinSteadyDriftPpm ||
+        steadyDriftPpm > kMaxSteadyDriftPpm)
+      return std::unexpected(EpistemicLimitError::InvalidSteadyDrift);
+    if (wallSyncUncertaintyMs < kMinWallSyncUncertaintyMs ||
+        wallSyncUncertaintyMs > kMaxWallSyncUncertaintyMs)
+      return std::unexpected(EpistemicLimitError::InvalidWallSyncUncertainty);
     return {};
   }
 

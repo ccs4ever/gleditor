@@ -32,6 +32,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "common/xanadu/identity/identity_layout.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_adapter_wire.hpp"
@@ -145,6 +146,15 @@ public:
 
   /// Drop everything held for @p issuer.
   void forget(std::string_view issuer);
+
+  /// A jump in the host's wall-minus-steady offset (design 4.5): every
+  /// steady-basis mapping carries the old offset. A `free` (paired) mapping
+  /// loses its steady side, so the next message refuses `UnknownClockMapping`
+  /// and triggers a pairing; a `synchronised` composition is minted again with
+  /// the offset @p now gives, as the next version. Wall mappings are never
+  /// touched. Returns the issuers whose paired mapping was dropped, once each.
+  [[nodiscard]] std::vector<std::string>
+  invalidateSteady(const HostInstant &now);
 
   [[nodiscard]] std::size_t pending() const noexcept {
     return challenges_.size();

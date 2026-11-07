@@ -896,6 +896,10 @@ struct CompiledAgent {
   /// Runs one operator health action per `$turn.health` (P19 I3-2c1);
   /// present exactly when `observeEntry` is.
   std::optional<zigzag::CellRef> healthEntry{};
+  /// Notes the segment rule of the clock lineage per `$turn.clock` and, for a
+  /// test, answers `$turn.clock_rebase` (P19 I3-3b2); present exactly when
+  /// `observeEntry` is.
+  std::optional<zigzag::CellRef> clockEntry{};
   std::map<std::string, zigzag::CellRef, std::less<>> fieldDefaults;
   std::map<std::string, CompiledContainer, std::less<>> skills;
   std::map<std::string, CompiledContainer, std::less<>> behaviors;

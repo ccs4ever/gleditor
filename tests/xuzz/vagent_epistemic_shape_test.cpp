@@ -12,6 +12,7 @@
 #include <string>
 #include <string_view>
 
+#include "common/xanadu/vagent/runtime/epistemic_abi_clock.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_policy.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_refusal.hpp"
 #include "common/xanadu/vagent/runtime/epistemic_shape.hpp"
@@ -395,14 +396,15 @@ TEST(EpistemicShapeTest, TheSavedHeaderIsComparedAndNotCopied) {
         zigzag::rankAfter(ctx.arena, agent,
                           registerDimensions(ctx.arena).epistemic) |
         std::ranges::to<std::vector<CellRef>>();
-    // The header, then the audience record the saved agent's bind wrote,
-    // which is carried (I3-3a2).
-    ASSERT_EQ(rank.size(), 2U);
+    // The header, then the audience record and the clock lineage the saved
+    // agent's bind wrote, which are carried (I3-3a2, I3-3b2).
+    ASSERT_EQ(rank.size(), 3U);
     // The program's own instantiation made it: the same cell a fresh launch
     // gets, not a clone of the saved one.
     EXPECT_EQ(rank.front(), programsOwn);
     EXPECT_EQ(ctx.arena.textOf(rank.front()), kShapeHeaderName);
-    EXPECT_EQ(ctx.arena.textOf(rank.back()), kAudienceRecordName);
+    EXPECT_EQ(ctx.arena.textOf(rank[1]), kAudienceRecordName);
+    EXPECT_EQ(ctx.arena.textOf(rank.back()), kLineageRecordName);
   }
 
   // The in-place upgrade does the same.
@@ -412,8 +414,9 @@ TEST(EpistemicShapeTest, TheSavedHeaderIsComparedAndNotCopied) {
       a.host->upgrade(a.pid, a.host->retainProgram(nextVersion(kSource)));
   ASSERT_TRUE(upgraded) << toString(upgraded.error());
   a.host->pump();
-  // The new program's header and the carried audience.
-  ASSERT_EQ(a.epistemicRank().size(), 2U);
+  // The new program's header, the carried audience and the carried clock
+  // lineage.
+  ASSERT_EQ(a.epistemicRank().size(), 3U);
   EXPECT_EQ(a.header(), programsOwn);
   EXPECT_EQ(a.probe().shape, 1);
 }

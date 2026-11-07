@@ -368,6 +368,10 @@ inline constexpr std::string_view kVagentEpistemicCommonCauseSources =
     "vagent.epistemic_common_cause_sources";
 inline constexpr std::string_view kVagentEpistemicCommonCauseWindowMs =
     "vagent.epistemic_common_cause_window_ms";
+inline constexpr std::string_view kVagentEpistemicClockLineage =
+    "vagent.epistemic_clock_lineage";
+inline constexpr std::string_view kVagentEpistemicSteadyDriftPpm =
+    "vagent.epistemic_steady_drift_ppm";
 inline constexpr std::string_view kVagentTuiBorders = "vagent.tui.borders";
 inline constexpr std::string_view kVagentTuiHistorySize =
     "vagent.tui.history_size";

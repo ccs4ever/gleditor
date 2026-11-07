@@ -253,6 +253,7 @@ std::uint64_t distinctTextBytes(const zigzag::ArenaManifold &arena,
     for (const auto view : profile.views) admit(view);
   }
   for (const auto &record : plan.records) admit(record.cell);
+  for (const auto record : plan.agentRecords) admit(record);
   const std::array<std::optional<DimRef>, 4> reach{vd.vars, vd.values,
                                                    dims.grab, dims.step};
   while (!stack.empty()) {

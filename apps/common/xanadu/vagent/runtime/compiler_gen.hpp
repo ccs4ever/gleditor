@@ -1219,6 +1219,10 @@ private:
   CellRef rtBRaise_{}, rtHasSrc_{}, rtBDrop_{}, rtBSet_{}, rtSettle_{};
   /// `rtSourceDrop_(profile, incBelow, retained)`: see emitRtSourceDrop.
   CellRef rtSourceDrop_{};
+  /// `rtClockNote_(clock)` and `rtClockRebase_(instance, t, now, drift)`: the
+  /// lineage's segment rule and the rebase of design 4.4, in
+  /// epistemic_emit_clock.cpp.
+  CellRef rtClockNote_{}, rtClockRebase_{};
 
   void mintPredicates();
   const PredInfo &predOf(const Term &t);
@@ -1233,6 +1237,21 @@ private:
   void emitProfileFor(CellRef who, CellRef inc, CellRef maxSources,
                       CellRef prof);
   void emitSourceChange(CellRef entryLabel);
+  /// a0 = the `$turn.clock` record. Appends or re-anchors the current
+  /// segment of the agent's clock lineage (design 4.4), minting the lineage
+  /// on first use.
+  void emitRtClockNote();
+  /// a0 = the instance, a1 = t, a2 = now, a3 = steady drift ppm, each the
+  /// ref of a value cell. r0 = status (0 rebased, 1 the segment left the
+  /// lineage, 2 an anchor is missing), r1 = delta and a2 = uncertainty, as
+  /// values.
+  void emitRtClockRebase();
+  /// `clockEntry` (I3-3b2): note the segment rule per `$turn.clock`, and run
+  /// the test-only `$turn.clock_rebase`.
+  void emitClockEntry(CellRef entryLabel);
+  /// Run the segment rule on `$turn.clock` of the turn record in @p tp when it
+  /// has one, as ingestion does after a commit.
+  void callClockNoteIfPresent(CellRef tp);
   /// The negward head of @p from's run on @p dim, into @p out.
   void headOf(CellRef from, DimRef dim, CellRef out);
   /// Retire every record of @p profile below an incarnation, move its support

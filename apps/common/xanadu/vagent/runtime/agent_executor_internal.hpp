@@ -75,6 +75,23 @@ struct SourceChange {
   std::optional<std::string> audience;
 };
 
+/// One reading of the host's clocks in seconds (design 4.5), taken together
+/// so a jump test and the record that carries it agree.
+struct ClockReading {
+  double steady{};
+  /// Absent while the host's wall clock is unsynchronised: never 0.
+  std::optional<double> wall;
+  /// The wall clock's uncertainty, `vagent.epistemic_wall_sync_uncertainty_ms`.
+  double sigma{};
+};
+
+/// A control turn of the clock lineage: the `$turn` fields it carries and, for
+/// the test and diagnostic surface, the request id it answers.
+struct ClockTurn {
+  WireRecord fields;
+  std::optional<std::uint64_t> rebase;
+};
+
 struct AgentExecutor::Flight {
   std::uint64_t token{};
   std::string skill;
@@ -103,6 +120,9 @@ struct AgentExecutor::TurnSpec {
   bool deferDrain{false};
   WireRecord turnFields;
   std::function<std::optional<std::string>()> admit;
+  /// Called with the turn's `$turn` record after the routine halts and before
+  /// the turn commits or is undone (the clock rebase's answer leaves this way).
+  std::function<void(const WireValue &)> inspect;
 };
 
 struct AgentExecutor::TurnOutcome {
@@ -120,13 +140,15 @@ struct AgentExecutor::HostEvent {
   std::optional<IngressCharge> charge;
   std::optional<SourceChange> sourceChange;
   std::optional<QueuedHealth> health;
+  std::optional<ClockTurn> clockTurn;
   std::optional<zigzag::CellRef> entry;
   WireRecord turnFields;
 };
 
 [[nodiscard]] inline bool
 isControl(const AgentExecutor::HostEvent &event) noexcept {
-  return event.sourceChange.has_value() || event.health.has_value();
+  return event.sourceChange.has_value() || event.health.has_value() ||
+         event.clockTurn.has_value();
 }
 
 [[nodiscard]] inline bool
@@ -198,6 +220,10 @@ struct AgentExecutor::PostBox {
     std::optional<SourceChange> sourceChange;
     std::optional<QueuedHealth> health;
     std::optional<QueuedHealthBatch> healthBatch;
+    std::optional<ClockTurn> clockTurn;
+    /// The host's clocks when an observation was queued: its turn's second
+    /// detector of a jump (design 4.4).
+    std::optional<WireRecord> reading;
     std::int64_t effect{};
     EffectResult result;
   };
@@ -272,7 +298,7 @@ struct AgentExecutor::PostBox {
 [[nodiscard]] inline bool
 isControl(const AgentExecutor::PostBox::Item &item) noexcept {
   return item.sourceChange.has_value() || item.health.has_value() ||
-         item.healthBatch.has_value();
+         item.healthBatch.has_value() || item.clockTurn.has_value();
 }
 
 [[nodiscard]] inline bool
@@ -460,6 +486,26 @@ struct AgentExecutor::Ingress {
   /// Unknown until the host's time service reports: a wall-basis reading
   /// taken before then cannot be placed in time.
   bool wallSynchronised{false};
+  /// The host's copy of the current anchor (design 4.5), and the number of
+  /// jumps it has found: a reading is either mapped before a jump is recorded
+  /// or after the invalidation that follows it, because both happen under this
+  /// mutex.
+  struct ClockAnchor {
+    double steady{};
+    double wall{};
+    double sigma{};
+  };
+  std::optional<ClockAnchor> clockAnchor;
+  std::uint64_t clockGeneration{0};
+  /// Actors that have had their instance's first lineage note: the ones a
+  /// jump queues a note for.
+  std::map<std::string, identity::ActorPid> lineageActors;
+  /// Notes held while an actor's door is closed, so none lands between an
+  /// upgrade's count of the post box and its swap.
+  std::map<std::string, std::vector<WireRecord>> lineageOwed;
+  /// Answers to the clock-rebase test surface, newest last, bounded.
+  std::map<std::uint64_t, std::optional<AgentExecutor::ClockRebase>> rebases;
+  std::uint64_t nextRebase{1};
   /// Per pid, the audience this host minted or read back from the arena.
   /// Only a committed one is answered: the arena's record is the authority,
   /// so after a resume the first committed source change replaces the
@@ -618,6 +664,8 @@ struct AgentExecutor::Ingress {
     std::erase_if(timeClass, mine);
     sharedTime.erase(pid);
     audiences.erase(pid);
+    lineageActors.erase(pid);
+    lineageOwed.erase(pid);
     std::erase_if(marks, [&](const auto &entry) {
       return std::get<0>(entry.first) == pid;
     });

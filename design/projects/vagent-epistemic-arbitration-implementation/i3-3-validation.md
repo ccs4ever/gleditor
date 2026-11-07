@@ -565,3 +565,127 @@ is clang-format 19.1.7 clean; `make lint` (with `tools/check-counted-sites.py`) 
 | `gleditor_test`          | 830 passed          | 830 passed                                                       |
 | `zigzag_test`            | 256 passed          | 256 passed                                                       |
 | `fuzz_epistemic_ingress` | 191 runs in 60 s    | 383 runs in 123 s, seed 1, no crash (`alloc_dealloc_mismatch=0`) |
+
+## I3-3b2: the lineage of segments and jump invalidation
+
+Source baseline: `5e5cfe42`. Authority: I3-3D revision 2.1, sections 4.4 and 4.5, 8 (the
+`agent.clock_lineage` row), 9.1 (the b2 rows) and 13.4. A Sonnet implementation agent built it from
+the lead's written decisions. The lead reviewed the host detection and the invalidation, formatted
+one line, and ran every gate. Paths are relative to `apps/common/xanadu/vagent/runtime/` unless they
+start with `tests/` or `design/`.
+
+### What changed
+
+- **The lineage** (new `epistemic_emit_clock.cpp`, 380 lines, all IR).
+  - An `EpistemicClockLineage` record on the agent's `d.epistemic` rank holds a `segments` list.
+    Each segment is `{instance, start_steady, anchor_steady, anchor_wall, anchor_sync}`, and the two
+    wall fields are absent while the wall clock is unsynchronised.
+  - At most `clock_lineage` segments are kept; the oldest is evicted past the bound.
+  - `emitRtClockNote` applies the segment rule of 4.4 on every committed ingestion while
+    synchronised (`compiler.cpp`, `callClockNoteIfPresent`). A step within
+    $\sigma_\text{old} + \sigma_\text{new} + 10^{-6}\rho_s\Delta s$ moves the anchor in place, and
+    anything larger appends a segment.
+  - The first bind of an instance queues that instance's first segment (`bindSource` →
+    `startLineageLocked`).
+  - The host's $w$, $s$ and $\sigma$ reach the turn as `$turn.clock`.
+- **`rtClockRebase(instance, t)`** (`emitRtClockRebase`). It returns $\Delta$ and $u_\Delta$ against
+  the current segment, and fails for an unanchored segment, or one that is no longer in the lineage.
+  Nothing calls it in production; I4-6 will.
+  - Tests run the IR itself through `requestClockRebase` and `clockRebaseResult`, a read-only
+    control turn of the new `clockEntry` that is rolled back after `TurnSpec::inspect` hands the
+    host the turn record. That is a test and diagnostic surface, not an API for I4.
+- **Host detection** (`agent_executor_clock.cpp`, `checkClock` and `checkClockLocked`).
+  - The executor tests the wall-minus-steady offset against its host anchor under the ingress mutex.
+    A NaN counts as a jump.
+  - It runs first in `observe`, at the top of each `pumpUntilIdle` round and in `tick`. That is the
+    nearest the tree has to I3-3c1's timer wake.
+  - A jump bumps a generation, queues a segment note for every arbitrating actor, and logs INFO.
+    Without a synchronised wall clock nothing is detected (4.4's residual, Q10).
+- **Invalidation** (`epistemic_adapter_clock.cpp`, `ClockMappingTable::invalidateSteady`). The
+  adapter's `followClock` runs first in every ingest.
+  - When the generation has moved, paired mappings lose their steady side, so the next message
+    refuses `UnknownClockMapping` and pairs.
+  - Synchronised compositions are re-minted at the next version.
+  - Wall mappings are untouched.
+  - `EpistemicAdapter::clockPending` is the time a pairing's mapping was dropped. It is cleared by
+    the completed pairing or by an unbind.
+- **Translation.**
+  - `agent.clock_lineage` is registered Carried and Carried.
+  - `agentRankRecords` admits one well-formed lineage beside the audience and refuses a malformed or
+    repeated one as `StateInconsistent` (new `epistemic_translate_clock.cpp`).
+  - The copier's pass 0 and the digest carry it.
+  - `distinctTextBytes` now counts agent-rank records, which the audience had been missing since a2.
+- **Settings.** `clock_lineage` (8, 2 to 64) and `steady_drift_ppm` (200, 0 to 10000). The executor
+  also reads `wall_sync_uncertainty_ms`, the same key the adapter reads.
+- **Tests.**
+  - New `tests/xuzz/vagent_epistemic_lineage_test.cpp`, 22 cases, driving the executor with a clock
+    whose wall and steady parts move independently.
+  - Three existing tests price the lineage's cells: the shape test, the cell-ceiling test and the
+    health admission test.
+
+### Design tests (13.4)
+
+| Test                                                                        | Covered                                                                                                                                                                                                        |
+| --------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| a rebase across a resume lands within its bound                             | yes                                                                                                                                                                                                            |
+| a suspend between a record and the rebase rebases it by its length          | yes (wall stepped, steady not)                                                                                                                                                                                 |
+| a suspend on an agent with only steady-basis predicates (N1)                | yes: detected at the first `observe`; paired refuses, pairs once and resumes; synchronised commits under a higher version; no pre-suspend mapping commits; `R`, `N` unchanged; `clockPending` set then cleared |
+| … a pairing that misses the heartbeat deadline sets `silent` (`clock`)      | **no**: the silence state machine and the timer turn are I3-3c1's                                                                                                                                              |
+| a jump found by a timer wake alone appends the segment                      | yes, by a pump with no message                                                                                                                                                                                 |
+| a wall step under synchronisation starts a segment                          | yes                                                                                                                                                                                                            |
+| an unsynchronised anchor fails the rebase; an evicted segment fails it      | yes                                                                                                                                                                                                            |
+| no path re-maps a record                                                    | yes                                                                                                                                                                                                            |
+| U-19: a latched source resumed with no anchor, paired and fed stays latched | yes                                                                                                                                                                                                            |
+| populated resume and upgrade                                                | yes, plus a malformed-lineage resume refusal                                                                                                                                                                   |
+
+### Measurements
+
+- **The lineage's cells.** The record is 3 cells, plus 11 per anchored segment or 7 per unanchored
+  one: 91 cells at the default bound of 8. Design 12 estimated about 99 with the audience's 3, and
+  the measured total is 94. An agent holds 14 more cells than before at its first segment.
+- **Line counts.** About 1,126 lines of source against the design's 1,100. The executor is at +49 of
+  its 150 and `compiler.cpp` at +10 of its 80.
+
+### Deviations and readings
+
+1. **`clockPending` lives on `EpistemicAdapter`, not `SourceHealth`.** The adapter owns the mappings
+   it describes.
+1. **The `clock` silence cause and the timer turn are deferred to I3-3c1**, which builds the silence
+   state machine. The pump stands in for the timer wake.
+1. **An instance's first segment starts at steady time 0.0.** If it started at the first note, a
+   reading acquired just before the bind would fall in no segment, and its rebase would fail.
+1. **An unanchored current segment gets a new segment at the first synchronised commit**, rather
+   than gaining an anchor in place. This errs toward refusing a rebase.
+1. **A reading at or below the current anchor's steady time changes nothing.** Control items run
+   ahead of data, so a reading queued before a jump must not start a bogus segment.
+1. **The host anchor rolls on every reading**, mirroring the arena's in-place update. It is kept
+   while the wall clock is unsynchronised, so a jump during that stretch is still caught when
+   synchronisation returns.
+1. **Segment notes for an actor whose admission is closed wait in `lineageOwed`** until it reopens.
+   Otherwise a post could land between an upgrade's count of the post box and its swap.
+1. **No reserve is kept for a segment appended at the cell ceiling.** Such a segment can make that
+   one ingestion refuse `EpistemicBudget`.
+1. **The translator reads a stored Int64 as a number**, because a checkpoint retypes whole-valued
+   doubles. An absent `d.step` dimension means no link.
+
+### Limits carried forward
+
+- **The adapter step in the fuzzer** is still owed.
+- **Q10, `CLOCK_BOOTTIME`, is unbuilt.** The owner approved it (decisions 0.2), but no slice is
+  assigned to it. Without a synchronised wall clock a suspend stays invisible.
+- **Traceability.** b2 closes U-17, U-19, 3.2-6, 3.2-8, 8.2-5d and 8.2-R3c (design 13.4), recorded
+  at M2 acceptance.
+
+### Suite results
+
+`make -j$(nproc)` and `make vagent_actor_test` exited 0 with no warning in project code; touched C++
+is clang-format 19.1.7 clean; `make lint` (with `tools/check-counted-sites.py`) and
+`tools/check-translator-coverage.py` exit 0. Every suite ran headless with XDG under `build/xdg`.
+
+| Suite                    | Result                                                                   |
+| ------------------------ | ------------------------------------------------------------------------ |
+| `vagent_actor_test`      | 1,192 passed                                                             |
+| `xuzz_test`              | 3,368 passed                                                             |
+| `gleditor_test`          | 830 passed                                                               |
+| `zigzag_test`            | 256 passed                                                               |
+| `fuzz_epistemic_ingress` | 311 runs in 125 s, seed 1, no crash, with `alloc_dealloc_mismatch=0` set |

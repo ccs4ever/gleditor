@@ -11,11 +11,16 @@
 #include <cmath>
 #include <gleditor/logging.hpp>
 
+#include "common/xanadu/vagent/runtime/epistemic_abi_clock.hpp"
+
 namespace xanadu::vagent::runtime {
 
 namespace {
 
 constexpr const char *kIngressLog = "vagent.ingress";
+/// Answers the rebase test surface keeps; older ones are dropped.
+constexpr std::size_t kMaxRebaseAnswers = 64;
+constexpr double kMillisPerSecond       = 1e3;
 
 // The signed checks run in 128-bit integers: a device chooses every operand,
 // and a wrapped sum would turn a refusal into a pass.
@@ -254,6 +259,201 @@ void AgentExecutor::noteTime(const identity::ActorPid &target,
                       "actor signed inconsistent or over-uncertain times "
                       "within {} ms",
                       limits.commonCauseSources, limits.commonCauseWindowMs);
+}
+
+// -- The clock lineage and jump detection (I3-3b2, design 4.4 and 4.5)
+// ---------------------------------------------------------------------
+
+ClockReading AgentExecutor::readClockLocked() const {
+  ClockReading reading;
+  reading.steady = toSeconds(clock_.steady().time_since_epoch());
+  reading.sigma =
+      static_cast<double>(settings_.epistemic.wallSyncUncertaintyMs) /
+      kMillisPerSecond;
+  if (ingress_->wallSynchronised)
+    reading.wall = toSeconds(wallNow().time_since_epoch());
+  return reading;
+}
+
+WireRecord AgentExecutor::clockRecord(const ClockReading &reading) const {
+  WireRecord clock;
+  clock.set(std::string(kClockTurnInstance),
+            WireValue::text(ingress_->clockInstance));
+  clock.set(std::string(kClockTurnSteady), WireValue::real(reading.steady));
+  if (reading.wall) {
+    clock.set(std::string(kClockTurnWall), WireValue::real(*reading.wall));
+    clock.set(std::string(kClockTurnSync), WireValue::real(reading.sigma));
+  }
+  clock.set(
+      std::string(kClockTurnDrift),
+      WireValue::real(static_cast<double>(settings_.epistemic.steadyDriftPpm)));
+  clock.set(std::string(kClockTurnMax),
+            WireValue::integer(settings_.epistemic.clockLineage));
+  return clock;
+}
+
+namespace {
+/// The `$turn` fields of a control turn that notes the segment rule.
+WireRecord noteFields(WireRecord clock) {
+  WireRecord fields;
+  fields.set(std::string(kTurnClock), WireValue::record(std::move(clock)));
+  return fields;
+}
+} // namespace
+
+void AgentExecutor::queueClockNoteLocked(const identity::ActorPid &target,
+                                         WireRecord fields) {
+  if (admissionClosedLocked(target)) {
+    ingress_->lineageOwed[pidKey(target)].push_back(std::move(fields));
+    return;
+  }
+  PostBox::Item item;
+  item.pid       = target;
+  item.clockTurn = ClockTurn{std::move(fields), std::nullopt};
+  posts_->pushControl(std::move(item));
+}
+
+void AgentExecutor::flushLineageOwedLocked() {
+  for (auto it = ingress_->lineageOwed.begin();
+       it != ingress_->lineageOwed.end();) {
+    const auto actor = ingress_->lineageActors.find(it->first);
+    if (actor == ingress_->lineageActors.end()) {
+      it = ingress_->lineageOwed.erase(it);
+      continue;
+    }
+    if (admissionClosedLocked(actor->second)) {
+      ++it;
+      continue;
+    }
+    auto notes = std::move(it->second);
+    it         = ingress_->lineageOwed.erase(it);
+    for (auto &fields : notes)
+      queueClockNoteLocked(actor->second, std::move(fields));
+  }
+}
+
+std::uint64_t AgentExecutor::checkClockLocked(const ClockReading &reading) {
+  flushLineageOwedLocked();
+  // Without a wall reference no offset exists to jump: the residual of 4.4.
+  if (!reading.wall) return ingress_->clockGeneration;
+  const Ingress::ClockAnchor here{reading.steady, *reading.wall, reading.sigma};
+  if (const auto &anchor = ingress_->clockAnchor) {
+    const double moved =
+        std::abs((here.wall - here.steady) - (anchor->wall - anchor->steady));
+    const double allowed =
+        anchor->sigma + here.sigma +
+        kClockPartsPerMillion *
+            static_cast<double>(settings_.epistemic.steadyDriftPpm) *
+            std::abs(here.steady - anchor->steady);
+    // Written so that a NaN counts as a jump: refusing is the safe error.
+    if (!(moved <= allowed)) {
+      ++ingress_->clockGeneration;
+      for (const auto &[pid, actor] : ingress_->lineageActors)
+        queueClockNoteLocked(actor, noteFields(clockRecord(reading)));
+      GLEDITOR_LOG_INFO(kIngressLog,
+                        "the wall-minus-steady offset moved by {:.3f} s: "
+                        "clock generation {}",
+                        moved, ingress_->clockGeneration);
+    }
+  }
+  // Rolled on every reading, as the arena's anchor is on every commit.
+  ingress_->clockAnchor = here;
+  return ingress_->clockGeneration;
+}
+
+std::uint64_t AgentExecutor::checkClock() {
+  const std::lock_guard lock(ingress_->mutex);
+  return checkClockLocked(readClockLocked());
+}
+
+std::string AgentExecutor::clockInstance() const {
+  const std::lock_guard lock(ingress_->mutex);
+  return ingress_->clockInstance;
+}
+
+void AgentExecutor::startLineageLocked(const identity::ActorPid &target) {
+  // Before the actor joins the set, so the note below is its only one.
+  const auto reading = readClockLocked();
+  checkClockLocked(reading);
+  if (!ingress_->lineageActors.emplace(pidKey(target), target).second) return;
+  queueClockNoteLocked(target, noteFields(clockRecord(reading)));
+}
+
+std::optional<std::uint64_t>
+AgentExecutor::requestClockRebase(const identity::ActorPid &target,
+                                  std::string_view instance, double t) {
+  const std::lock_guard lock(ingress_->mutex);
+  if (!ingress_->lineageActors.contains(pidKey(target)) ||
+      admissionClosedLocked(target))
+    return std::nullopt;
+  const auto id = ingress_->nextRebase++;
+  WireRecord request;
+  request.set(std::string(kRebaseInstance),
+              WireValue::text(std::string(instance)));
+  request.set(std::string(kRebaseT), WireValue::real(t));
+  request.set(std::string(kRebaseNow),
+              WireValue::real(readClockLocked().steady));
+  request.set(
+      std::string(kRebaseDrift),
+      WireValue::real(static_cast<double>(settings_.epistemic.steadyDriftPpm)));
+  WireRecord fields;
+  fields.set(std::string(kTurnClockRebase),
+             WireValue::record(std::move(request)));
+  ingress_->rebases.emplace(id, std::nullopt);
+  while (ingress_->rebases.size() > kMaxRebaseAnswers)
+    ingress_->rebases.erase(ingress_->rebases.begin());
+  PostBox::Item item;
+  item.pid       = target;
+  item.clockTurn = ClockTurn{std::move(fields), id};
+  posts_->pushControl(std::move(item));
+  return id;
+}
+
+std::optional<AgentExecutor::ClockRebase>
+AgentExecutor::clockRebaseResult(std::uint64_t request) const {
+  const std::lock_guard lock(ingress_->mutex);
+  const auto found = ingress_->rebases.find(request);
+  return found == ingress_->rebases.end() ? std::nullopt : found->second;
+}
+
+void AgentExecutor::armRebase(TurnSpec &spec, std::uint64_t request) {
+  // The answer is a diagnostic: the turn is rolled back, so it mints nothing.
+  spec.readOnly = true;
+  spec.inspect  = [this, request](const WireValue &turn) {
+    const auto *record = std::get_if<WireRecord>(&turn.data);
+    const auto *asked  = record ? record->find(kTurnClockRebase) : nullptr;
+    const auto *fields =
+        asked ? std::get_if<WireRecord>(&asked->data) : nullptr;
+    if (!fields) return;
+    const auto number = [&](std::string_view name) -> std::optional<double> {
+      const auto *v = fields->find(name);
+      if (!v) return std::nullopt;
+      if (const auto *real = std::get_if<double>(&v->data)) return *real;
+      if (const auto *integer = std::get_if<std::int64_t>(&v->data))
+        return static_cast<double>(*integer);
+      return std::nullopt;
+    };
+    const auto status = number(kRebaseStatus);
+    if (!status) return;
+    ClockRebase answer;
+    switch (static_cast<std::int64_t>(*status)) {
+    case kRebaseOk:
+      answer.status      = ClockRebase::Status::Rebased;
+      answer.delta       = number(kRebaseDelta).value_or(0.0);
+      answer.uncertainty = number(kRebaseUncertainty).value_or(0.0);
+      break;
+    case kRebaseGone:
+      answer.status = ClockRebase::Status::SegmentGone;
+      break;
+    default:
+      answer.status = ClockRebase::Status::Unanchored;
+      break;
+    }
+    const std::lock_guard lock(ingress_->mutex);
+    if (const auto found = ingress_->rebases.find(request);
+        found != ingress_->rebases.end())
+      found->second = answer;
+  };
 }
 
 } // namespace xanadu::vagent::runtime

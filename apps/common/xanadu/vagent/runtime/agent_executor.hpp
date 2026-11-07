@@ -245,6 +245,8 @@ enum class AdmissionState : std::uint8_t { Open, Paused, Swapping };
 struct IngestKey;
 struct TimeVerdict;
 struct SourceChange;
+struct ClockReading;
+struct ClockTurn;
 
 class AgentExecutor {
 public:
@@ -532,6 +534,39 @@ public:
     bool wallSynchronised{false};
   };
   [[nodiscard]] HostTime hostTime() const;
+  /// Read the host's clocks and test whether the wall-minus-steady offset
+  /// jumped since the current anchor: a suspend stops the steady clock, a wall
+  /// step moves the wall clock (design 4.5). On a jump it records the new
+  /// anchor, raises the generation, queues a control turn that appends the
+  /// arena segment for every actor that has bound a source, and logs INFO.
+  /// Nothing is detected while the wall clock is unsynchronised (Q10).
+  /// `observe` and every pump call it first, and so does the adapter, which
+  /// returns the generation to compare. Callable from any thread.
+  std::uint64_t checkClock();
+  /// This executor's steady-clock instance, as the lineage names it.
+  [[nodiscard]] std::string clockInstance() const;
+  /// TEST AND DIAGNOSTIC SURFACE (I3-3b2). Nothing calls `rtClockRebase` in
+  /// production until I4-6; this runs it in a turn that is rolled back and
+  /// keeps the answer. The answer for @p instance and steady time @p t, in
+  /// seconds, is read by `clockRebaseResult` once the actor has been pumped.
+  struct ClockRebase {
+    enum class Status : std::uint8_t {
+      Rebased,
+      /// The segment left the lineage, or the instance was never in it.
+      SegmentGone,
+      /// The segment or the current one has no wall anchor.
+      Unanchored,
+    };
+    Status status{Status::Rebased};
+    /// Added to t, carries it into the current segment's steady basis.
+    double delta{};
+    double uncertainty{};
+  };
+  [[nodiscard]] std::optional<std::uint64_t>
+  requestClockRebase(const identity::ActorPid &target,
+                     std::string_view instance, double t);
+  [[nodiscard]] std::optional<ClockRebase>
+  clockRebaseResult(std::uint64_t request) const;
   /// The newest advance or retire turn's outcome for @p principal: how a
   /// host learns that the arena refused a binding it had accepted.
   [[nodiscard]] std::optional<IngestOutcome>
@@ -799,6 +834,18 @@ private:
   void dropHostEvents(State &state);
   /// Drop a stopped actor's bindings, queue counts, outcome log and charges.
   void forgetIngress(const identity::ActorPid &pid);
+  // -- The clock lineage (agent_executor_clock.cpp)
+  [[nodiscard]] ClockReading readClockLocked() const;
+  /// The `$turn.clock` record of @p reading.
+  [[nodiscard]] WireRecord clockRecord(const ClockReading &reading) const;
+  /// Test @p reading against the anchor; ingress mutex held.
+  std::uint64_t checkClockLocked(const ClockReading &reading);
+  void queueClockNoteLocked(const identity::ActorPid &target,
+                            WireRecord fields);
+  void flushLineageOwedLocked();
+  /// The first note of this instance for an actor that has just bound.
+  void startLineageLocked(const identity::ActorPid &target);
+  void armRebase(TurnSpec &spec, std::uint64_t request);
   /// Empty the actor's latch cache and its refusal count: an upgrade keeps the
   /// pid, and the arena's latch is the authority the cache re-learns from.
   void clearLatchCache(const identity::ActorPid &pid);

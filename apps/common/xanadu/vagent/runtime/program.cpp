@@ -140,6 +140,9 @@ CompiledProgram::fromUnit(Unit unit, std::string_view name,
     if (stagingAgent.healthEntry) {
       persistentAgent.healthEntry = remap(*stagingAgent.healthEntry);
     }
+    if (stagingAgent.clockEntry) {
+      persistentAgent.clockEntry = remap(*stagingAgent.clockEntry);
+    }
     if (stagingAgent.observeRefusalEntry) {
       persistentAgent.observeRefusalEntry =
           remap(*stagingAgent.observeRefusalEntry);

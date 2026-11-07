@@ -242,6 +242,31 @@ struct EpistemicAdapter::State {
   std::map<std::string, std::pair<std::int64_t, std::int64_t>, std::less<>>
       highest;
   std::map<std::pair<std::string, std::string>, Streak> streaks;
+  /// The executor's jump generation this adapter last invalidated for.
+  std::uint64_t clockGeneration{};
+  /// By (pid text, principal): when a jump dropped the source's paired steady
+  /// mapping, until its pairing completes.
+  std::map<std::pair<std::string, std::string>, SteadyTime> clockPending;
+
+  /// Test the host's clocks before anything is mapped. A jump invalidates the
+  /// steady-basis mappings in the same critical section, so a message is
+  /// either mapped before the jump is recorded or after the invalidation.
+  void followClock() {
+    const auto generation = executor.checkClock();
+    if (generation == clockGeneration) return;
+    clockGeneration = generation;
+    const auto now  = executor.hostTime();
+    const auto lost = clocks.invalidateSteady(instantOf(now));
+    for (const auto &issuer : lost)
+      for (const auto &[key, row] : rows) {
+        if (row.binding.principal != issuer) continue;
+        clockPending.insert_or_assign(key, now.steady);
+        GLEDITOR_LOG_INFO(kLog,
+                          "source {}: the host clock jumped, its paired "
+                          "mapping is dropped until it pairs again",
+                          issuer);
+      }
+  }
 
   void emit(const IngressAudit &event) {
     if (audit) auditOutbox.push_back(event);
@@ -386,6 +411,10 @@ struct EpistemicAdapter::State {
             row.binding.driftPpm.value_or(limits.clockDriftPpm))};
     const auto paired = clocks.accept(reply, at);
     if (!paired) return std::unexpected(paired.error());
+    std::erase_if(clockPending, [&](const auto &entry) {
+      const auto bound = rows.find(entry.first);
+      return bound != rows.end() && bound->second.binding.principal == h.issuer;
+    });
     GLEDITOR_LOG_DEBUG(kLog, "clock paired for {} epoch {} version {}",
                        h.issuer, h.epoch, (*paired)->version);
     return TransportReceipt{};
@@ -674,6 +703,7 @@ EpistemicAdapter *EpistemicAdapter::unbind(const identity::ActorPid &target,
     state_->executor.unbindSource(target, principal, predicate);
   state_->rows.erase(found);
   state_->streaks.erase({pidToText(target), std::string(principal)});
+  state_->clockPending.erase({pidToText(target), std::string(principal)});
   const bool stillBound = std::ranges::any_of(
       state_->rows, [&](const auto &r) { return r.first.second == principal; });
   if (!stillBound) {
@@ -714,6 +744,7 @@ EpistemicAdapter::ingestLocked(std::string_view bytes,
                                const TransportPeer &peer) {
   auto &s = *state_;
   s.settle();
+  s.followClock();
   const auto now = s.executor.hostTime();
   const auto at  = instantOf(now);
   std::optional<EpistemicRefusal> audienceRefusal;
@@ -777,6 +808,18 @@ EpistemicAdapter *EpistemicAdapter::clearAudiences() {
   state_->audiences.clear();
   state_->mirrored.clear();
   return this;
+}
+
+std::optional<std::chrono::steady_clock::time_point>
+EpistemicAdapter::clockPending(const identity::ActorPid &target,
+                               std::string_view principal) const {
+  const std::lock_guard lock(state_->mutex);
+  const auto found =
+      state_->clockPending.find({pidToText(target), std::string(principal)});
+  return found == state_->clockPending.end()
+             ? std::nullopt
+             : std::optional<std::chrono::steady_clock::time_point>(
+                   found->second);
 }
 
 const SignedVerifierStats &EpistemicAdapter::stats() const noexcept {

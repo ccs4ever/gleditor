@@ -1208,6 +1208,24 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .schemas = {{.expectedTypes = {"integer"},
                       .defaultValues =
                           {vagent::runtime::kDefaultCommonCauseWindowMs}}}},
+        {.name = std::string(settings::kVagentEpistemicClockLineage),
+         .notes =
+             "vagent: segments, 2 to 64, of steady-clock history an agent "
+             "keeps for rebasing old readings across restarts and suspends. "
+             "A segment costs 11 cells, and a reading whose segment was "
+             "evicted can no longer be rebased",
+         .schemas =
+             {{.expectedTypes = {"integer"},
+               .defaultValues = {vagent::runtime::kDefaultClockLineage}}}},
+        {.name = std::string(settings::kVagentEpistemicSteadyDriftPpm),
+         .notes =
+             "vagent: parts per million, 0 to 10000, the host's steady clock "
+             "may drift from real time. It widens the allowance with which a "
+             "change in the wall-minus-steady offset counts as a jump and "
+             "the uncertainty of a rebased reading",
+         .schemas =
+             {{.expectedTypes = {"integer"},
+               .defaultValues = {vagent::runtime::kDefaultSteadyDriftPpm}}}},
         {.name  = std::string(settings::kVagentAdmissionPauseMs),
          .notes = "vagent: milliseconds `pauseAdmission` closes an actor's "
                   "door for when it is not given a ttl, 1000 to 600000. The "

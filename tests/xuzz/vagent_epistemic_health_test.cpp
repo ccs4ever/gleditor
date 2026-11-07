@@ -1927,9 +1927,10 @@ TEST_F(VagentEpistemicHealthActions, OrdinaryAdmissionReservesTheHealthBound) {
   tight.settings.epistemic.cells = census + bound - 1;
   start(kActionProgram, tight);
   // One cell short of the census plus the reserve: refused, writing nothing
-  // but the bind's audience record (3 cells, I3-3a2).
+  // but the bind's audience record (3 cells, I3-3a2) and clock lineage (3 + 11
+  // cells with one synchronised segment, I3-3b2).
   EXPECT_EQ(send(reading("a")), "EpistemicBudget");
-  EXPECT_EQ(*ex().epistemicCells(pid), 3U);
+  EXPECT_EQ(*ex().epistemicCells(pid), 3U + 3U + 11U);
 
   LocalHost::Options exact;
   exact.settings.epistemic.cells = census + bound;
