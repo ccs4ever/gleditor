@@ -1269,10 +1269,22 @@ void MetaRuntime::setIntentionField(CellRef intention, std::string_view field,
                                    arena.makeScalarCell(value)));
 }
 
+void MetaRuntime::setIntentionRef(CellRef intention, std::string_view field,
+                                  CellRef referent) {
+  auto &arena    = core_.arena();
+  const auto rec = varsRecord(intention, field, /*mint=*/true);
+  if (!rec) return;
+  if (const auto old = arena.linked(*rec, core_.dims().values, Posward))
+    zigzag::expectWritten(arena.unlink(*rec, core_.dims().values, Posward));
+  zigzag::expectWritten(arena.link(*rec, core_.dims().values, Posward,
+                                   refCell(arena, core_, referent)));
+}
+
 std::expected<CellRef, std::string>
 MetaRuntime::adoptGoal(CellRef goal, std::int64_t turn,
                        std::size_t whereFuel,
-                       const std::vector<CellValue> &args) {
+                       const std::vector<CellValue> &args,
+                       std::span<const CellRef> argRefs) {
   auto &arena = core_.arena();
   if (binds_.agentCell == noCell)
     return std::unexpected("adopt: no agent cell bound");
@@ -1316,14 +1328,18 @@ MetaRuntime::adoptGoal(CellRef goal, std::int64_t turn,
   field("kind", arena.makeCell("adopt"));
   // §5.8: a behavior-owned clause's runtime owner rides the intention —
   // the plan body's `$owner` binds it at every resume, so the instance
-  // survives checkpoint like the plan cell itself does.
-  intField("owner", static_cast<std::int64_t>(owner));
+  // survives checkpoint like the plan cell itself does. The mark is the
+  // §3.5 form of that survival: a session-minted owner is an ephemeral
+  // position that must restate at its twin, and a stable image cell
+  // reads through the mark untouched.
+  field("owner", refCell(arena, core_, owner));
   // goal/plan are shared program-image cells: an edge here is the
   // single inbound +d.values slot a second adoption of the same goal
   // (a maintain monitor's restorer, say) would evict. Scalar refs
-  // ride the delegator convention instead.
-  intField("goal", static_cast<std::int64_t>(goal));
-  intField("plan", static_cast<std::int64_t>(clause));
+  // ride the delegator convention instead — and a learned clause is
+  // itself session-minted, so the marked form covers both cases.
+  field("goal", refCell(arena, core_, goal));
+  field("plan", refCell(arena, core_, clause));
   field("tried", arena.makeCell());
   intField("step", 0);
   intField("waiting", 0);
@@ -1340,7 +1356,18 @@ MetaRuntime::adoptGoal(CellRef goal, std::int64_t turn,
   // mints: the caller's arg cells are shared marshal state.
   if (!args.empty()) {
     const auto chain = arena.makeCell();
-    for (const auto &arg : args) {
+    for (std::size_t i = 0; i < args.size(); ++i) {
+      const auto &arg = args[i];
+      // A ref arg stores the marked position of its source cell — a
+      // bare Int64 dead-reads across the fold. argRefs shorter than
+      // args means the tail args are plain values.
+      if (i < argRefs.size() && argRefs[i] != noCell) {
+        const auto cell = refCell(arena, core_, argRefs[i]);
+        zigzag::expectWritten(arena.link(
+            zigzag::rankTail(arena, chain, core_.dims().step),
+            core_.dims().step, Posward, cell));
+        continue;
+      }
       const auto cell = std::visit(
           [&](const auto &v) -> CellRef {
             using T = std::decay_t<decltype(v)>;

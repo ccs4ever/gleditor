@@ -9,6 +9,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <ranges>
 #include <set>
 #include <string>
 #include <tuple>
@@ -19,6 +20,8 @@
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/swarm.hpp"
 #include "common/xanadu/vagent/decls.hpp"
+#include "common/xanadu/vagent/executor.hpp"
+#include "common/xanadu/vagent/frontend.hpp"
 #include "common/xanadu/vagent/lineage.hpp"
 #include "common/xanadu/vagent/records.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
@@ -339,6 +342,56 @@ TEST(VagentLineageTest, MarkedRefSlotsRestateThroughRegenesis) {
   EXPECT_TRUE(a1.linked(*held, *reloc, Posward).has_value());
 }
 
+TEST(VagentLineageTest, VarSlotMemberRefRestatesThroughRegenesis) {
+  LineageHarness h;
+  auto &a0 = h.arena();
+
+  // The shape storeVarRef's var.slot arm writes for `child := spawn
+  // A()`: a stable holder named "var.slot" whose typed value carries
+  // the member's arena position — writeValue keeps the slot identity
+  // (fragment bindings resolved it) and the relocation mark rides the
+  // holder beside it, the manifest restateRefSlots rewrites at.
+  const auto agent   = a0.makeCell("agent");
+  const auto member  = a0.makeCell("child-member");
+  const auto vars    = a0.dimensionNamed("d.vars").value();
+  const auto values  = a0.dimensionNamed("d.values").value();
+  const auto nameDim = a0.dimensionNamed("d.name").value();
+  const auto reloc   = a0.dimensionNamed("d.mesh.relocation").value();
+  const auto record  = a0.makeCell("child");
+  const auto holder  = a0.makeCell();
+  zigzag::expectWritten(a0.link(record, values, Posward, holder));
+  zigzag::expectWritten(
+      a0.link(holder, nameDim, Posward, a0.makeCell("var.slot")));
+  h.context->core.writeValue(holder, 0, std::nullopt,
+                             zigzag::vortex::CellValue{
+                                 static_cast<std::int64_t>(member)});
+  zigzag::expectWritten(
+      a0.link(holder, reloc, Posward, a0.makeCell("cell")));
+  zigzag::expectWritten(
+      a0.link(zigzag::rankTail(a0, agent, vars), vars, Posward, record));
+
+  auto c1 = regenesisCycle(h.lineage, a0, agent, 0);
+  ASSERT_TRUE(c1.has_value()) << (c1 ? "" : c1.error());
+  auto &a1 = c1->context->arena;
+
+  const auto vars1   = a1.dimensionNamed("d.vars").value();
+  const auto values1 = a1.dimensionNamed("d.values").value();
+  CellRef rec1       = noCell;
+  for (const auto cell : zigzag::rankAfter(a1, c1->agentCell, vars1)) {
+    if (a1.textOf(cell) == "child") rec1 = cell;
+  }
+  ASSERT_NE(rec1, noCell) << "the var record did not fold";
+  const auto held = a1.linked(rec1, values1, Posward);
+  ASSERT_TRUE(held.has_value());
+  const auto named = a1.asInt64(*held);
+  ASSERT_TRUE(named.has_value());
+  const auto restated = static_cast<CellRef>(*named);
+  EXPECT_TRUE(a1.contains(restated))
+      << "the var.slot's position names a live cell on the new arena";
+  if (a1.contains(restated))
+    EXPECT_EQ(a1.textOf(restated), "child-member");
+}
+
 TEST(VagentLineageTest, SessionMintFilesOnceWithNoVisibleTwin) {
   LineageHarness h;
   auto &a0         = h.arena();
@@ -550,6 +603,223 @@ TEST(VagentLineageTest, RegenesisRefusesAnAlienRoot) {
       static_cast<std::uint32_t>(h.arena().cellCount()) + 64);
   auto refused = regenesisCycle(h.lineage, h.arena(), alien, 0);
   EXPECT_FALSE(refused.has_value());
+}
+
+// ---- executor-on-lineage: durable refs written by a real turn -------------
+
+/// The executor's Tick-shaped ActorExecution over the harness context —
+/// the same envelope the mesh grant carries.
+zigzag::vortex::mesh::ActorExecution tickOn(
+    zigzag::vortex::WorkerContext &ctx) {
+  zigzag::vortex::mesh::ActorExecution exec;
+  exec.pid   = xanadu::identity::ActorPid{"worker", "agent", 1, 1};
+  exec.grant = zigzag::vortex::mesh::ActorGrant{.programRef      = "sha256:p",
+                                               .baseRef         = "sha256:b",
+                                               .maxInstructions = 100'000,
+                                               .maxCells        = 10'000};
+  xanadu::identity::ActorMessage msg;
+  msg.type      = xanadu::identity::MessageType::ActorSend;
+  msg.requestId = "req-1";
+  msg.value     = "Tick";
+  exec.message  = std::move(msg);
+  exec.cursor   = ctx.vm.spawnCursor(
+      ctx.vm.mintOpcode(zigzag::vortex::OpcodeKind::Halt), "actor");
+  return exec;
+}
+
+/// The +d.values cell of `key`'s record on `owner` — noCell when the
+/// record or its value arm is absent.
+CellRef fieldValue(ArenaManifold &arena, zigzag::vortex::VortexCore &core,
+                   CellRef owner, std::string_view key) {
+  const auto rec = varsRecord(arena, core, owner, key, false);
+  if (!rec) return noCell;
+  return arena.linked(*rec, core.dims().values, Posward).value_or(noCell);
+}
+
+TEST(VagentLineageTest, DelegatedRestorerRefsSurviveRegenesis) {
+  LineageHarness h;
+  auto &ctx = *h.context;
+
+  // Tick adopts the maintain goal; the empty belief bank fires the
+  // restorer as a delegated subgoal in the same settle, and the
+  // restorer's plan parks on the await. Both intentions carry marked
+  // ref fields (delegator/goal/plan) minted this session — ephemeral,
+  // so only a marked position survives the fold.
+  auto artifacts = compileArtifacts(
+      "module demo\nevent Tick\nevent Go\n"
+      "predicate flag()\n"
+      "goal Keep(v: Int) maintain { holds believes flag() from self }\n"
+      "agent A {\n"
+      "  on Tick { adopt Keep(4) }\n"
+      "  plan p for Keep { await Go as g within 99s }\n"
+      "}");
+  if (!artifacts)
+    for (const auto &d : artifacts.error())
+      fprintf(stderr, "frontend %zu:%zu: %s\n", d.loc.line, d.loc.column,
+              d.detail.c_str());
+  ASSERT_TRUE(artifacts.has_value());
+  auto image =
+      lowerProgram(artifacts->program, ctx.core, ctx.vm);
+  if (!image)
+    for (const auto &d : image.error())
+      fprintf(stderr, "lower %zu:%zu: %s\n", d.loc.line, d.loc.column,
+              d.detail.c_str());
+  ASSERT_TRUE(image.has_value());
+
+  VagentExecutor exec;
+  ASSERT_TRUE(exec(tickOn(ctx), ctx));
+
+  auto &a0          = ctx.arena;
+  const auto iDim   = ctx.core.findOrMintDimension("d.intention");
+  const auto reloc  = ctx.core.findOrMintDimension("d.mesh.relocation");
+  const auto parked =
+      zigzag::rankAfter(a0, image->agentCell, iDim) |
+      std::ranges::to<std::vector>();
+  ASSERT_EQ(parked.size(), 2u) << "monitor plus delegated restorer";
+
+  // The restorer is the intention whose delegator names the monitor —
+  // the setIntentionRef write.
+  CellRef restorer = noCell, monitor = noCell;
+  for (const auto i : parked) {
+    const auto delegator = fieldValue(a0, ctx.core, i, "delegator");
+    if (delegator != noCell &&
+        a0.asInt64(delegator).value_or(0) != 0) {
+      restorer = i;
+    } else {
+      monitor = i;
+    }
+  }
+  ASSERT_NE(restorer, noCell);
+  ASSERT_NE(monitor, noCell);
+
+  // Pre-fold: the goal/plan fields are marked refs — adoptGoal's
+  // refCell writes — and the restorer's delegator marks the monitor.
+  for (const auto i : {monitor, restorer}) {
+    for (const std::string_view key : {"goal", "plan"}) {
+      const auto value = fieldValue(a0, ctx.core, i, key);
+      ASSERT_NE(value, noCell) << key;
+      EXPECT_TRUE(a0.linked(value, reloc, Posward).has_value())
+          << "intention field " << key << " is not relocation-marked";
+    }
+  }
+
+  auto c1 = regenesisCycle(h.lineage, a0, image->agentCell, 0);
+  ASSERT_TRUE(c1.has_value()) << (c1 ? "" : c1.error());
+  auto &a1 = c1->context->arena;
+
+  const auto iDim1  = a1.dimensionNamed("d.intention").value();
+  const auto twins  =
+      zigzag::rankAfter(a1, c1->agentCell, iDim1) |
+      std::ranges::to<std::vector>();
+  ASSERT_EQ(twins.size(), 2u);
+
+  CellRef restorer1 = noCell, monitor1 = noCell;
+  for (const auto i : twins) {
+    const auto delegator = fieldValue(a1, c1->context->core, i, "delegator");
+    if (delegator != noCell &&
+        a1.asInt64(delegator).value_or(0) != 0) {
+      restorer1 = i;
+    } else {
+      monitor1 = i;
+    }
+  }
+  ASSERT_NE(restorer1, noCell);
+  ASSERT_NE(monitor1, noCell);
+
+  // The delegator arm restated to the monitor's twin — not verbatim,
+  // not dead.
+  const auto delegator1 = fieldValue(a1, c1->context->core, restorer1,
+                                     "delegator");
+  ASSERT_NE(delegator1, noCell);
+  const auto named = a1.asInt64(delegator1);
+  ASSERT_TRUE(named.has_value());
+  EXPECT_EQ(static_cast<CellRef>(*named), monitor1);
+
+  // Both intentions' goal field restates to the Keep symbol's twin —
+  // the folded position names a live cell whose content is the name.
+  for (const auto i : {monitor1, restorer1}) {
+    const auto goal = fieldValue(a1, c1->context->core, i, "goal");
+    ASSERT_NE(goal, noCell);
+    const auto pos = a1.asInt64(goal);
+    ASSERT_TRUE(pos.has_value());
+    const auto referent = static_cast<CellRef>(*pos);
+    ASSERT_TRUE(a1.contains(referent))
+        << "the folded goal position names a dead cell";
+    EXPECT_EQ(a1.textOf(referent), "Keep");
+    const auto plan = fieldValue(a1, c1->context->core, i, "plan");
+    ASSERT_NE(plan, noCell);
+    const auto planPos = a1.asInt64(plan);
+    ASSERT_TRUE(planPos.has_value());
+    EXPECT_TRUE(a1.contains(static_cast<CellRef>(*planPos)))
+        << "the folded plan position names a dead cell";
+  }
+}
+
+TEST(VagentLineageTest, AdoptResultSlotRestatesThroughRegenesis) {
+  LineageHarness h;
+  auto &ctx = *h.context;
+
+  // `task := adopt` is the real storeVarRef path: the hoisted result
+  // binding writes the child intention's position through the var.slot
+  // holder with the relocation mark — the shape the earlier test mints
+  // by hand, driven here by an actual turn.
+  auto artifacts = compileArtifacts(
+      "module demo\nevent Tick\nevent Go { x: Int, y: Int }\n"
+      "goal Work() perform\n"
+      "agent A {\n"
+      "  var task: Opt<Intention> := none\n"
+      "  on Tick { task := adopt Work() }\n"
+      "  plan p for Work { await Go as g within 99s }\n"
+      "}");
+  if (!artifacts)
+    for (const auto &d : artifacts.error())
+      fprintf(stderr, "frontend %zu:%zu: %s\n", d.loc.line, d.loc.column,
+              d.detail.c_str());
+  ASSERT_TRUE(artifacts.has_value());
+  auto image = lowerProgram(artifacts->program, ctx.core, ctx.vm);
+  ASSERT_TRUE(image.has_value());
+
+  VagentExecutor exec;
+  ASSERT_TRUE(exec(tickOn(ctx), ctx));
+
+  auto &a0         = ctx.arena;
+  const auto reloc = ctx.core.findOrMintDimension("d.mesh.relocation");
+  const auto rec = varsRecord(a0, ctx.core, image->agentCell, "task", false);
+  ASSERT_TRUE(rec.has_value());
+  const auto slot = a0.linked(*rec, ctx.core.dims().values, Posward);
+  ASSERT_TRUE(slot.has_value());
+
+  // The parked intention is the holder's referent.
+  const auto iDim   = ctx.core.findOrMintDimension("d.intention");
+  const auto parked =
+      zigzag::rankAfter(a0, image->agentCell, iDim) |
+      std::ranges::to<std::vector>();
+  ASSERT_EQ(parked.size(), 1u);
+  const auto held = a0.asInt64(*slot);
+  ASSERT_TRUE(held.has_value());
+  EXPECT_EQ(static_cast<CellRef>(*held), parked.front());
+  EXPECT_TRUE(a0.linked(*slot, reloc, Posward).has_value())
+      << "storeVarRef left the var.slot holder unmarked";
+
+  auto c1 = regenesisCycle(h.lineage, a0, image->agentCell, 0);
+  ASSERT_TRUE(c1.has_value()) << (c1 ? "" : c1.error());
+  auto &a1 = c1->context->arena;
+
+  const auto rec1 =
+      varsRecord(a1, c1->context->core, c1->agentCell, "task", false);
+  ASSERT_TRUE(rec1.has_value()) << "the var record did not fold";
+  const auto slot1 =
+      a1.linked(*rec1, a1.dimensionNamed("d.values").value(), Posward);
+  ASSERT_TRUE(slot1.has_value());
+  const auto restated = a1.asInt64(*slot1);
+  ASSERT_TRUE(restated.has_value());
+  const auto intention1 =
+      zigzag::rankAfter(a1, c1->agentCell,
+                        a1.dimensionNamed("d.intention").value()) |
+      std::ranges::to<std::vector>();
+  ASSERT_EQ(intention1.size(), 1u);
+  EXPECT_EQ(static_cast<CellRef>(*restated), intention1.front())
+      << "the slot names the intention's twin, not a dead position";
 }
 
 } // namespace

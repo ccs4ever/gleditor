@@ -558,38 +558,55 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
   // child (one carrying +d.step of its own) passes as its ref — the
   // CellRef-as-int64 convention a fragment reads off the param's
   // declared type. Bare text children are strings.
-  const auto argValuesOf = [&](CellRef term) -> std::vector<CellValue> {
+  const auto argValuesOf = [&](CellRef term,
+                               std::vector<CellRef> *refs = nullptr)
+      -> std::vector<CellValue> {
     std::vector<CellValue> out;
+    if (refs) refs->clear();
     if (term == noCell) return out;
+    const auto reloc = arena.dimensionNamed("d.mesh.relocation");
     for (const CellRef arg :
          zigzag::rankAfter(arena, term, core.dims().step)) {
       if (const auto n = arena.asInt64(arg)) {
         out.emplace_back(*n);
+        // A marked Int64's own value is the referent — the stored
+        // args chain re-describes its refs this way.
+        if (refs)
+          refs->push_back(reloc && arena.linked(arg, *reloc,
+                                                DimVector::POS)
+                              ? static_cast<CellRef>(*n)
+                              : noCell);
         continue;
       }
       if (const auto d = arena.asDouble(arg)) {
         out.emplace_back(*d);
+        if (refs) refs->push_back(noCell);
         continue;
       }
       if (const auto b = arena.asBool(arg)) {
         out.emplace_back(*b);
+        if (refs) refs->push_back(noCell);
         continue;
       }
       if (!zigzag::rankAfter(arena, arg, core.dims().step).empty()) {
         out.emplace_back(static_cast<std::int64_t>(arg));
+        if (refs) refs->push_back(arg);
         continue;
       }
       out.emplace_back(std::string{arena.textOf(arg)});
+      if (refs) refs->push_back(noCell);
     }
     return out;
   };
   // The intention's stored `args` chain back to CellValues — the same
   // positional contract adoptGoal wrote.
-  const auto intentionArgs = [&](CellRef i) -> std::vector<CellValue> {
+  const auto intentionArgs = [&](CellRef i,
+                                 std::vector<CellRef> *refs = nullptr)
+      -> std::vector<CellValue> {
     const auto rec = varsRecord(arena, core, i, "args", false);
     if (!rec) return {};
     const auto chain = arena.linked(*rec, core.dims().values, DimVector::POS);
-    return chain ? argValuesOf(*chain) : std::vector<CellValue>{};
+    return chain ? argValuesOf(*chain, refs) : std::vector<CellValue>{};
   };
   // §5.8's trailing `$owner` slot: only *member* heads (the adopted
   // clause's guard/body/spine fragments, its `else` recovery) declare
@@ -616,6 +633,15 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
           arena.linked(*holder, core.dims().name, DimVector::POS);
       if (mark && arena.textOf(*mark) == "var.slot") {
         core.writeValue(*holder, 0, std::nullopt, val);
+        // A slot that once held a cell ref keeps the relocation mark
+        // until cleared — a stale manifest would harvest the plain
+        // integer as a position and corrupt it at the next fold. No
+        // dim means no mark can exist — dimensionNamed, not mint.
+        if (const auto reloc = arena.dimensionNamed("d.mesh.relocation"))
+          if (const auto stale =
+                  arena.linked(*holder, *reloc, DimVector::POS))
+            zigzag::expectWritten(
+                arena.unlink(*holder, *reloc, DimVector::POS));
         return;
       }
     }
@@ -630,6 +656,32 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
         val);
     zigzag::expectWritten(
         arena.link(rec, core.dims().values, DimVector::POS, value));
+  };
+
+  // The ref-valued storeVar: `child := spawn A()` / `task := adopt G()`
+  // bind a live cell, and the Int64 that carries its position must ride
+  // the relocation manifest — verbatim through promote it dead-reads on
+  // the rebuilt arena. On a var.slot the mark goes on the holder beside
+  // the typed value writeValue writes; a plain record takes a fresh
+  // refCell, the same shape outbox refs mint.
+  const auto storeVarRef = [&](CellRef rec, CellRef referent) {
+    if (const auto holder =
+            arena.linked(rec, core.dims().values, DimVector::POS)) {
+      const auto mark =
+          arena.linked(*holder, core.dims().name, DimVector::POS);
+      if (mark && arena.textOf(*mark) == "var.slot") {
+        core.writeValue(*holder, 0, std::nullopt,
+                        CellValue{static_cast<std::int64_t>(referent)});
+        const auto reloc = core.findOrMintDimension("d.mesh.relocation");
+        if (!arena.linked(*holder, reloc, DimVector::POS))
+          zigzag::expectWritten(arena.link(*holder, reloc, DimVector::POS,
+                                         arena.makeCell("cell")));
+        return;
+      }
+    }
+    zigzag::expectWritten(
+        arena.link(rec, core.dims().values, DimVector::POS,
+                   refCell(arena, core, referent)));
   };
 
   // §9.2's lifecycle events: a raise journals the percept — it is
@@ -778,10 +830,11 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       if (live.size() >=
           static_cast<std::size_t>(setting("vagent.max_intentions", 32)))
         return false;
+      std::vector<CellRef> argRefs;
       auto child = meta.adoptGoal(
           *goal, turn,
           static_cast<std::size_t>(setting("vagent.condition_turn_fuel", 256)),
-          argValuesOf(goalName));
+          argValuesOf(goalName, &argRefs), argRefs);
       if (!child) return false;
       // The hoist's result binding: `task := adopt G()` lands the
       // child's record ref on the agent's vars under the bound name —
@@ -789,7 +842,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       if (const auto bound = field("result"); bound != noCell)
         if (const auto rec =
                 varsRecord(arena, core, agent, arena.textOf(bound), true))
-          storeVar(*rec, CellValue{static_cast<std::int64_t>(*child)});
+          storeVarRef(*rec, *child);
       return true;
     }
     if (verb == "emit") {
@@ -992,7 +1045,7 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       if (const auto bound = field("result"); bound != noCell)
         if (const auto rec =
                 varsRecord(arena, core, agent, arena.textOf(bound), true))
-          storeVar(*rec, CellValue{static_cast<std::int64_t>(child)});
+          storeVarRef(*rec, child);
       return true;
     }
     if (verb == "ask") {
@@ -1169,15 +1222,15 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       if (live.size() >=
           static_cast<std::size_t>(setting("vagent.max_intentions", 32)))
         return false;
+      std::vector<CellRef> argRefs;
       auto child = meta.adoptGoal(
           *goal, turn,
           static_cast<std::size_t>(setting("vagent.condition_turn_fuel", 256)),
-          argValuesOf(goalName));
+          argValuesOf(goalName, &argRefs), argRefs);
       if (!child) return false;
       zigzag::expectWritten(
           arena.link(intention, dims.subgoal, DimVector::POS, *child));
-      meta.setIntentionField(*child, "delegator",
-                             static_cast<std::int64_t>(intention));
+      meta.setIntentionRef(*child, "delegator", intention);
       meta.setIntentionField(intention, "delegated", 1);
       meta.setIntentionField(intention, "ready", 0);
       // within bounds the delegation in turns — the same scalar clock
@@ -1956,13 +2009,13 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
           continue;
         }
         if (!goal || delegator == noCell) continue;
+        std::vector<CellRef> argRefs;
         auto child = meta.adoptGoal(*goal, turn,
                                     static_cast<std::size_t>(setting(
                                         "vagent.condition_turn_fuel", 256)),
-                                    argValuesOf(term));
+                                    argValuesOf(term, &argRefs), argRefs);
         if (!child) continue;
-        meta.setIntentionField(*child, "delegator",
-                               static_cast<std::int64_t>(delegator));
+        meta.setIntentionRef(*child, "delegator", delegator);
         if (remoteMemberRef(delegator)) {
           // A remote delegator's replies stage member-addressed and
           // correlation-keyed — +d.subgoal is intention machinery the
@@ -2492,8 +2545,9 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
                   stored = arena.makeCell(arena.textOf(bound));
               }
               if (stored == noCell)
-                stored = arena.makeScalarCell(
-                    static_cast<std::int64_t>(bound));
+                // A structured answer binds by reference — the marked
+                // form, since the cell's position dead-reads verbatim.
+                stored = refCell(arena, core, bound);
               zigzag::expectWritten(
                   arena.link(*dst, core.dims().values, DimVector::POS,
                              stored));
@@ -2743,17 +2797,19 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
       if (!holds) {
         // The restorer inherits the monitor's bound args — a
         // parameterized maintain's restorer works on the same values.
+        // The refs re-describe off the stored chain so a marked arg
+        // survives this re-adoption's own fold.
+        std::vector<CellRef> argRefs;
         auto child = meta.adoptGoal(
             goalCell, turn,
             static_cast<std::size_t>(
                 setting("vagent.condition_turn_fuel", 256)),
-            intentionArgs(intention));
+            intentionArgs(intention, &argRefs), argRefs);
         if (!child) {
           faultIntention(intention, "restorer");
           continue;
         }
-        meta.setIntentionField(*child, "delegator",
-                               static_cast<std::int64_t>(intention));
+        meta.setIntentionRef(*child, "delegator", intention);
         zigzag::expectWritten(
             arena.link(zigzag::rankTail(arena, intention, dims.subgoal),
                        dims.subgoal, DimVector::POS, *child));
@@ -3112,15 +3168,15 @@ void VagentExecutor::deliver(zigzag::ArenaManifold &arena,
                                        DimVector::POS,
                                        arena.makeCell(delivery.fault)));
   // The term envelope rides as a scalar ref — the durable record of
-  // what the percept carried. AwaitTerm is belief-form (the checker's
-  // term() requires a predicate), so nothing consumes it today; the
-  // schema is what a future field-matching event await reads.
+  // what the percept carried, so it must survive a fold as a marked
+  // ref rather than a dead position. AwaitTerm is belief-form (the
+  // checker's term() requires a predicate), so nothing consumes it
+  // today; the schema is what a future field-matching event await reads.
   if (delivery.payloadCell != noCell)
     if (const auto rec = varsRecord(arena, core, seen, "grab", true))
       zigzag::expectWritten(
           arena.link(*rec, core.dims().values, DimVector::POS,
-                     arena.makeScalarCell(
-                         static_cast<std::int64_t>(delivery.payloadCell))));
+                     refCell(arena, core, delivery.payloadCell)));
   journalAppend(arena, delivery.agent, seen, core.findOrMintDimension("d.seen"),
                 static_cast<std::size_t>(setting("vagent.journal_size", 64)));
   const auto pending = core.findOrMintDimension("d.pending");

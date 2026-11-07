@@ -430,9 +430,14 @@ public:
   // are the goal call's bound values — recorded on the intention's
   // `args` chain in order and bound positionally when any of the
   // clause's heads (guard, condition tests, spine fragments) run.
+  /// `argRefs`, when given, aligns with `args`: a ref arg's source
+  /// cell so the chain stores the relocation-marked position — a
+  /// structured term arg's Int64 dead-reads verbatim across a fold
+  /// otherwise. Empty means no arg is a reference.
   [[nodiscard]] std::expected<CellRef, std::string>
   adoptGoal(CellRef goal, std::int64_t turn, std::size_t whereFuel = 256,
-            const std::vector<CellValue> &args = {});
+            const std::vector<CellValue> &args = {},
+            std::span<const CellRef> argRefs           = {});
   /// The intention record's integer field — `step`, `ready`, `faulted`,
   /// `waiting`, `blocked_until`, `id` — absent field is `std::nullopt`.
   [[nodiscard]] std::optional<std::int64_t>
@@ -441,6 +446,12 @@ public:
   /// in-place scalar write.
   void setIntentionField(CellRef intention, std::string_view field,
                          std::int64_t value);
+  /// The ref-valued twin: the field's Int64 names a live cell — a
+  /// delegating intention, a remote member — so it mints through
+  /// `refCell`, carrying the relocation manifest that restates the
+  /// position at its referent's persistent twin across a fold.
+  void setIntentionRef(CellRef intention, std::string_view field,
+                       CellRef referent);
 
   /// `reify(c)`'s recipe replay (§6.1): walks the head's `+d.recipe`
   /// chain — `(from, dim, dir, to)` tuples anchored on the `+d.name`-
