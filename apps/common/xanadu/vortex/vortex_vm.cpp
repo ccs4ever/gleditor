@@ -941,6 +941,179 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
     }
     break;
   }
+  case OpcodeKind::RunCall: {
+    // #RUNCALL box entryDim failTarget argsRank — §6.2's dynamic run:
+    // the box's int names a fragment head; follow its +d.entry chain
+    // to the entry op, descriptor-check the args rank's arity, bind
+    // each value by the parameter's +d.name label on the cursor's
+    // +d.vars (the #BIND/#RESOLVE channel), push the frame whose
+    // successor is the +d.spin target (the RunResume op), and jump.
+    // Every §6.2 refusal lands on the fail target instead.
+    if (inputs.size() >= 4 && cursor) {
+      const auto &dims       = core_.dims();
+      const CellRef failOp   = static_cast<CellRef>(toInt(inputs[2]));
+      const auto failJump    = [&]() {
+        setCursorOpcode(*cursor, failOp);
+        jumped = true;
+      };
+      const CellRef head     = static_cast<CellRef>(toInt(inputs[0]));
+      const DimRef entryDim  = toInt(inputs[1]);
+      const CellRef argsRank = static_cast<CellRef>(toInt(inputs[3]));
+
+      // Op first, head second — the same discriminator runFragment
+      // applies (meta.cpp): an operand naming an op is the headless-run
+      // refusal; a head's +d.entry chain resolves to the graph root,
+      // bounded against link cycles like graphRoot's.
+      const auto resolved = [&]() -> std::optional<CellRef> {
+        if (!core_.arena().contains(head) ||
+            opcodeMap_.find(head) != opcodeMap_.end())
+          return std::nullopt;
+        auto current = head;
+        for (std::size_t hops = 0; hops < 16; ++hops) {
+          if (opcodeMap_.find(current) != opcodeMap_.end()) return current;
+          const auto next =
+              core_.arena().linked(current, entryDim, zigzag::Posward);
+          if (!next || !core_.arena().contains(*next)) return std::nullopt;
+          current = *next;
+        }
+        return std::nullopt;
+      }();
+      if (!resolved) {
+        failJump();
+        break;
+      }
+      const auto descriptor = core_.arena().linked(head, dims.values,
+                                                 zigzag::Posward);
+      if (!descriptor || !core_.arena().contains(*descriptor)) {
+        failJump();
+        break;
+      }
+
+      // Ordered signature: the descriptor's +d.grab chain via +d.step —
+      // parameterCells' convention — each member +d.name-labelled.
+      std::vector<CellRef> params;
+      for (auto cell = core_.arena().linked(*descriptor, dims.grab,
+                                          zigzag::Posward);
+           cell && core_.arena().contains(*cell);
+           cell = core_.arena().linked(*cell, dims.step, zigzag::Posward))
+        params.push_back(*cell);
+
+      // The caller-staged values ride the same convention: argsRank's
+      // +d.grab chain via +d.step, each member the evaluated cell
+      // itself.
+      std::vector<CellValue> argValues;
+      for (auto cell = core_.arena().linked(argsRank, dims.grab,
+                                          zigzag::Posward);
+           cell && core_.arena().contains(*cell);
+           cell = core_.arena().linked(*cell, dims.step,
+                                       zigzag::Posward)) {
+        core_.arena().consumeWork();
+        argValues.push_back(
+            core_.render(*cell).value_or(CellValue{false}));
+      }
+      if (argValues.size() != params.size()) {
+        failJump();
+        break;
+      }
+
+      // The §6.2 frame: an Int64 cell holding the successor op, pushed
+      // on the cursor's +d.stack — Call's shape, so the callee's tail
+      // Return lands on the RunResume op.
+      const auto nextOp = core_.arena().linked(opcode, dims.spin, zigzag::Posward);
+      if (!nextOp) {
+        failJump();
+        break;
+      }
+      CellRef frame = core_.arena().makeCell();
+      zigzag::expectWritten(
+          core_.arena().setValueBits(frame, xanadu::ValueKind::Int64,
+                                     static_cast<std::uint64_t>(*nextOp)));
+      const auto oldStack = core_.arena().linked(*cursor, dims.stack,
+                                                 zigzag::Posward);
+      zigzag::expectWritten(
+          core_.arena().link(*cursor, dims.stack, zigzag::Posward, frame));
+      if (oldStack) {
+        zigzag::expectWritten(
+            core_.arena().link(frame, dims.stack, zigzag::Posward, *oldStack));
+      }
+
+      // Bind each value by its parameter's +d.name label — #BIND's
+      // name-keyed +d.vars/+d.values channel so the callee's #RESOLVE
+      // prologue reads them verbatim; labelOf's argN fallback stands
+      // for an unlabelled parameter.
+      for (std::size_t i = 0; i < params.size(); ++i) {
+        core_.arena().consumeWork();
+        const auto label = core_.arena().linked(params[i], dims.name,
+                                                zigzag::Posward);
+        const auto name  = label ? core_.arena().textOf(*label)
+                                 : "arg" + std::to_string(i);
+        CellRef varCell  = core_.arena().makeCell(name);
+        CellRef valCell  = core_.arena().makeCell();
+        WriteFault fault = WriteFault::None;
+        core_.writeValue(valCell, 0, std::nullopt, argValues[i], &fault);
+        if (fault == WriteFault::OpcodeKind) return kindImmutabilityFault();
+        zigzag::expectWritten(
+            core_.arena().link(varCell, dims.values, zigzag::Posward, valCell));
+        if (const auto varsHead =
+                core_.arena().linked(*cursor, dims.vars, zigzag::Posward))
+          zigzag::expectWritten(
+              core_.arena().link(varCell, dims.vars, zigzag::Posward, *varsHead));
+        zigzag::expectWritten(
+            core_.arena().link(*cursor, dims.vars, zigzag::Posward, varCell));
+      }
+
+      setCursorOpcode(*cursor, *resolved);
+      jumped = true;
+    }
+    break;
+  }
+  case OpcodeKind::RunResume: {
+    // #RUNRESUME box failTarget → out: the frame successor a RunCall
+    // pushes. Read the head's descriptor produced/result cells — the
+    // descriptor's +d.vars records textOf-keyed — produced writes the
+    // result into the bound output and spins on; unproduced lands on
+    // the fail target — §6.2's post-Return gate.
+    if (inputs.size() >= 2 && cursor) {
+      const auto &dims     = core_.dims();
+      const CellRef head   = static_cast<CellRef>(toInt(inputs[0]));
+      const CellRef failOp = static_cast<CellRef>(toInt(inputs[1]));
+      bool       produced  = false;
+      CellValue  result{false};
+      if (core_.arena().contains(head))
+        if (const auto descriptor =
+                core_.arena().linked(head, dims.values, zigzag::Posward)) {
+          CellRef producedCell{noCell}, resultCell{noCell};
+          for (const CellRef record : zigzag::rankAfter(
+                   core_.arena(), *descriptor, dims.vars)) {
+            core_.arena().consumeWork();
+            const auto key = core_.arena().textOf(record);
+            if (key == "produced")
+              producedCell =
+                  core_.arena()
+                      .linked(record, dims.values, zigzag::Posward)
+                      .value_or(noCell);
+            else if (key == "result")
+              resultCell =
+                  core_.arena()
+                      .linked(record, dims.values, zigzag::Posward)
+                      .value_or(noCell);
+          }
+          if (core_.arena().contains(producedCell) &&
+              core_.arena().contains(resultCell)) {
+            produced = VortexCore::evaluateTruthiness(
+                core_.render(producedCell).value_or(CellValue{false}));
+            result   = core_.render(resultCell).value_or(CellValue{false});
+          }
+        }
+      if (produced)
+        outputs.emplace_back(result);
+      else {
+        setCursorOpcode(*cursor, failOp);
+        jumped = true;
+      }
+    }
+    break;
+  }
   case OpcodeKind::New: {
     std::vector<CellRef> inCells  = core_.inputsOf(opcode);
     std::vector<CellRef> outCells = core_.outputsOf(opcode);

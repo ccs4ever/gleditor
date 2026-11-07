@@ -91,7 +91,7 @@ mintMetaBindSet(zigzag::ArenaManifold &arena, VortexCore &core,
     return arena.makeScalarCell(value);
   };
   binds.validate.linkedCeiling =
-      mintInt(static_cast<std::int64_t>(OpcodeKind::Linked));
+      mintInt(static_cast<std::int64_t>(OpcodeKind::RunResume));
   binds.validate.arityTable  = arena.makeCell();
   binds.validate.impureKinds = arena.makeCell();
 
@@ -148,6 +148,13 @@ mintMetaBindSet(zigzag::ArenaManifold &arena, VortexCore &core,
       {static_cast<std::int64_t>(OpcodeKind::ChoiceDepth), 0, 1},
       {static_cast<std::int64_t>(OpcodeKind::Halt), 0, 0},
       {static_cast<std::int64_t>(OpcodeKind::Nop), 0, 0},
+      // Appended traversal/run kinds — kept off the head of the table
+      // so persisted records written before their introduction stay
+      // readable; the ceiling scalar above is the enum's last ordinal.
+      {static_cast<std::int64_t>(OpcodeKind::Find), 2, 1},
+      {static_cast<std::int64_t>(OpcodeKind::FieldSet), 3, 1},
+      {static_cast<std::int64_t>(OpcodeKind::RunCall), 4, 0},
+      {static_cast<std::int64_t>(OpcodeKind::RunResume), 2, 1},
   };
   const auto stepDim = core.dims().step;
   CellRef tableTail  = binds.validate.arityTable;

@@ -704,6 +704,18 @@ private:
         refuse(expression, DiagnosticCode::InvalidDeclaration,
                "code\"…\" literal has no checked fragment info; the "
                "check stage must run before compile");
+      // §5.3's frame-local channel: the literal's cap$N captures join
+      // to this scope's `let`/parameter cells at emit — preflight pops
+      // scopes_ before emit runs, so the in-scope set is snapshotted
+      // per literal here (inner scopes shadow outer, matching the
+      // resolver's own lookup order).
+      {
+        auto &snapshot = frameCaptures_[&expression];
+        for (auto scope = scopes_.rbegin(); scope != scopes_.rend();
+             ++scope)
+          for (const auto &[name, local] : *scope)
+            snapshot.emplace(name, local);
+      }
       // A Code value is a ref-box: the cell content int64 names the
       // fragment head, so it rides the Cell scalar mechanically while
       // the descriptor carries the real Code<T>.
@@ -731,11 +743,24 @@ private:
         refuse(expression, DiagnosticCode::InvalidDeclaration,
                "'run' takes a fragment and an optional argument list");
       const auto &operandExpr = *expression.children[1];
-      if (operandExpr.kind != ExprKind::Code)
-        refuse(operandExpr, DiagnosticCode::InvalidDeclaration,
-               "'run' operand must be a code\"…\" literal in this "
-               "lowering — name-bound and opaque Code values are the "
-               "§11.1 call ABI's owed surface");
+      if (operandExpr.kind != ExprKind::Code) {
+        // §6.2's dynamic run — a Code value rather than a literal.
+        // The RunCall/RunResume pair carries the call: arity and the
+        // produced/result gate read the head's descriptor at run time,
+        // so preflight only proves the operand and the arg list are
+        // emittable and reports the honest Bottom result.
+        (void)preflight(operandExpr, false, depth + 1, pure);
+        if (expression.children.size() == 3) {
+          const auto &argsExpr = *expression.children[2];
+          if (argsExpr.kind != ExprKind::List)
+            refuse(argsExpr, DiagnosticCode::TypeMismatch,
+                   "'run' argument list must be a list literal");
+          for (const auto &item : argsExpr.children)
+            preflight(*item, false, depth + 1, pure);
+        }
+        type = Scalar::Bottom;
+        break;
+      }
       const auto operandType = preflight(operandExpr, false, depth + 1, pure);
       (void)operandType; // the Code arm already checked its record
       const auto *record = fragmentRecord(operandExpr);
@@ -1631,12 +1656,32 @@ private:
     return fragment;
   }
 
+  // §5.3's frame-local overlay for a nested code"…" literal — the
+  // in-scope `let`/parameter names recorded at preflight (scopes_ is
+  // popped before emit), joined to their frame cells. A cap$N capture
+  // of a local resolves through it in compileFragment's env join; the
+  // emitted capture slot then reads the caller's own slot cell at run
+  // time (§5.3's shared-cell semantics — the value the caller wrote,
+  // never a snapshot).
+  CompilerBindings frameBindings(const Expr &literal) const {
+    CompilerBindings frame;
+    const auto snapshot = frameCaptures_.find(&literal);
+    if (snapshot == frameCaptures_.end()) return frame;
+    for (const auto &[name, local] : snapshot->second)
+      if (const auto type = resultType(local.type))
+        frame.emplace(name,
+                      CompilerBinding{localCells_.at(local.index), *type,
+                                      /*stateSide=*/false});
+    return frame;
+  }
+
   // Mint or reuse the fragment object for a surviving code"…" literal
   // — compileFragment (fragment.cpp) owns the head/descriptor/record
   // emission and the per-literal cache on the context.
   CellRef emitFragmentObject(const Expr &expression) {
-    auto object =
-        xanadu::vagent::compileFragment(expression, *fragments_, *compiler_);
+    const auto frame = frameBindings(expression);
+    auto object      = xanadu::vagent::compileFragment(
+        expression, *fragments_, *compiler_, &frame);
     if (!object) refuse(expression, object.error().code, object.error().detail);
     return object->head;
   }
@@ -1653,9 +1698,12 @@ private:
   CellRef emitRun(const Expr &expression, CellRef output,
                   CellRef continuation) {
     const auto &operandExpr = *expression.children[1];
+    if (operandExpr.kind != ExprKind::Code)
+      return emitRunDynamic(expression, operandExpr, output, continuation);
     const auto *record      = fragmentRecord(operandExpr);
-    auto object =
-        xanadu::vagent::compileFragment(operandExpr, *fragments_, *compiler_);
+    const auto frame        = frameBindings(operandExpr);
+    auto object             = xanadu::vagent::compileFragment(
+        operandExpr, *fragments_, *compiler_, &frame);
     if (!object) refuse(expression, object.error().code, object.error().detail);
 
     // The entry/result/produced cells live in the callee's own graph;
@@ -1702,6 +1750,52 @@ private:
     return tail;
   }
 
+  // §6.2's dynamic arm — the operand is a Code value, a ref-box whose
+  // int64 names a head, not a literal the emitter could pre-resolve.
+  // RunCall derefs the head's +d.entry at run, descriptor-checks the
+  // staged rank's arity, binds each value by the parameter's +d.name
+  // label, pushes the frame whose successor is RunResume, and jumps;
+  // RunResume is the produced/result gate — §6.2's post-Return half.
+  CellRef emitRunDynamic(const Expr &expression, const Expr &operandExpr,
+                         CellRef output, CellRef continuation) {
+    const auto runResume = mint(OpcodeKind::RunResume);
+    const auto box       = temporary();
+    bindIn(runResume, box);
+    bindIn(runResume, reference(cells_->fail));
+    bindOut(runResume, output);
+    spin(runResume, jump(continuation));
+
+    const auto runCall = mint(OpcodeKind::RunCall);
+    bindIn(runCall, box);
+    bindIn(runCall,
+           dimRef(core_.findOrMintDimension("d.entry"), "d.entry"));
+    bindIn(runCall, reference(cells_->fail));
+    spin(runCall, runResume);
+
+    // Caller-staged arguments: evaluated left-to-right into temps and
+    // ranked on +d.grab/+d.step — parameterCells' convention — so the
+    // op walks the values beside the descriptor's parameter rank.
+    std::vector<CellRef> argTemps;
+    if (expression.children.size() == 3)
+      for (std::size_t i = 0; i < expression.children[2]->children.size();
+           ++i)
+        argTemps.push_back(temporary());
+    const auto argsRank = own(core_.arena().makeCell());
+    if (!argTemps.empty()) {
+      link(argsRank, core_.dims().grab, false, argTemps.front());
+      for (std::size_t i = 1; i < argTemps.size(); ++i)
+        link(argTemps[i - 1], core_.dims().step, false, argTemps[i]);
+    }
+    bindIn(runCall, reference(argsRank));
+
+    CellRef tail = runCall;
+    if (expression.children.size() == 3)
+      for (std::size_t i = argTemps.size(); i-- > 0;)
+        tail = emit(*expression.children[2]->children[i], argTemps[i],
+                    tail);
+    return emit(operandExpr, box, tail);
+  }
+
   // The callsite label for +d.refs name-records — the fragment's own
   // label (declared #label verbatim, else the deterministic position
   // key) so genesis re-resolves the head by name. Same string
@@ -1746,6 +1840,12 @@ private:
   std::size_t localCount_{0};
   std::vector<CellRef> localCells_;
   std::unordered_map<const Expr *, std::size_t> localReferences_;
+  // §5.3's per-literal in-scope local snapshot — preflight's scopes_
+  // is popped by emit, so each code"…" records its visible locals for
+  // frameBindings to materialize into the env-join overlay.
+  std::unordered_map<const Expr *,
+                     std::map<std::string, Local, std::less<>>>
+      frameCaptures_;
   std::unordered_map<const Expr *, CellRef> externalReferences_;
   std::size_t nodeCount_{0};
   std::unordered_set<const Expr *> discarded_;

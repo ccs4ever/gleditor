@@ -162,10 +162,15 @@ fragmentLabelOf(const FragmentKey &key,
 // Emits the body through compiler.compileFragmentBody, hangs head,
 // descriptor, +d.refs inventory and +d.recipe template, memoizes on
 // context.emitted, and refuses — as a Diagnostic — splice-only
-// fragments, missing records, and missing checker info.
+// fragments, missing records, and missing checker info. `frameLocals`
+// is the enclosing emitter's in-scope local-name→cell overlay: a
+// cap$N whose captured name is a `let` local (a frame index, absent
+// from context.bindings) resolves to the caller's local cell here,
+// and an inner `let` shadows a decl-level `var` of the same name.
 [[nodiscard]] std::expected<FragmentObject, Diagnostic>
 compileFragment(const Expr &literal, const FragmentContext &context,
-                Compiler &compiler);
+                Compiler &compiler,
+                const CompilerBindings *frameLocals = nullptr);
 
 // File the phase-3 apparatus dims the emission needs (idempotent —
 // findOrMintDimension's find arm resolves a sibling-filed name).

@@ -382,15 +382,18 @@ TEST(VagentDeclsTest, FrameLocalReferenceEmitsInsideMemberBodies) {
   DeclHarness h;
   auto image = h.lower(R"(
     module demo
+    import std:meta
     agent A {
-      def f(): Int { let x := 5; let c := code"x + 1"; 0 }
+      def f(): Int { let x := 5; let c := code"x + 1"; run(c) }
     }
   )");
   ASSERT_TRUE(image.has_value());
   if (!image) return;
-  // `x` is a frame local of f's own body — references to enclosing
-  // locals resolve through the literal's own scope seed, not the
-  // cap$N alias map, so the body emits without a join entry.
+  // `x` is a frame local of f's own body — expand mints cap$0 → x in
+  // the literal's env, and the env join resolves it through the
+  // per-literal frame-local overlay (the caller's own slot cell, read
+  // live by the capture slot at run time). The run(c) tail keeps the
+  // let alive past dead-code elimination so emit really exercises it.
   EXPECT_THAT(image->stubbed, ::testing::IsEmpty());
 }
 

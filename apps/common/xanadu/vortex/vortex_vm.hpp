@@ -107,6 +107,21 @@ enum class OpcodeKind : std::uint8_t {
   // a holder discovered at run time cannot be a Value target.
   // Appended last for the same persisted-kind reason.
   FieldSet,
+
+  // §6.2's dynamic `run` callsite: the operand box's int names a
+  // fragment head; the op follows the head's +d.entry chain to the
+  // entry op, descriptor-checks arity, binds the args rank's values by
+  // parameter name on the cursor's +d.vars, pushes the frame, and
+  // jumps. A non-head operand, a missing descriptor, or an arity
+  // mismatch lands on the bound failure target — `run`'s §6.2
+  // refusals, not a halt. Appended last for the persisted-kind reason.
+  RunCall,
+
+  // RunCall's frame successor: reads the run's descriptor produced /
+  // result cells — produced writes result into the bound output and
+  // spins on; unproduced lands on the failure target. Appended last
+  // for the same persisted-kind reason.
+  RunResume,
 };
 
 struct ChoicePoint {

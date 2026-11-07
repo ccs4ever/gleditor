@@ -125,7 +125,7 @@ FragmentDims mintFragmentDims(VortexCore &core) {
 
 std::expected<FragmentObject, Diagnostic>
 compileFragment(const Expr &literal, const FragmentContext &context,
-                Compiler &compiler) {
+                Compiler &compiler, const CompilerBindings *frameLocals) {
   try {
     auto &arena    = compiler.core().arena();
     const auto key = fragmentKeyOf(literal);
@@ -164,13 +164,22 @@ compileFragment(const Expr &literal, const FragmentContext &context,
     // an outside binding; the alias resolves to that binding's own
     // cell through the shared table. The cells"…" anchor spelling
     // (cap_0 for cap$0) joins too, carrying the capture's stable bit —
-    // the stable-anchor gate reads it as the discriminator. A
-    // captured name the table does not know (an enclosing frame
-    // local, which has no cell yet) stays unbound and refuses below
-    // rather than silently binding.
+    // the stable-anchor gate reads it as the discriminator. Enclosing
+    // frame locals join through `frameLocals` — a `let` at the
+    // literal's position has no decl-level binding, its cell is the
+    // caller's frame slot — and shadows a same-named `var` exactly as
+    // the source scope did. A captured name neither table knows (an
+    // owner-relative field, which resolves through the runtime owner
+    // hop rather than a cell) stays unbound and refuses below rather
+    // than silently binding.
     std::optional<CompilerBindings> joined;
-    if (!record->second.env.empty() && context.bindings) {
-      CompilerBindings merged = *context.bindings;
+    if (!record->second.env.empty() &&
+        (context.bindings || frameLocals)) {
+      CompilerBindings merged =
+          context.bindings ? *context.bindings : CompilerBindings{};
+      if (frameLocals)
+        for (const auto &[name, binding] : *frameLocals)
+          merged.insert_or_assign(name, binding);
       for (const auto &[alias, captured] : record->second.env) {
         const auto found = merged.find(captured);
         if (found == merged.end()) continue;

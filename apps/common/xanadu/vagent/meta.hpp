@@ -87,8 +87,8 @@ struct MetaDimensions {
 /// `validate`'s adapter-bound constants (§6.1: the enum's integers are
 /// serialized data, so they arrive as bound cells, not prelude literals):
 ///
-/// - `linkedCeiling` — an Int64 scalar cell holding the `OpcodeKind::Linked`
-///   ordinal, the `int64`-decodes-in-`[0, Linked]` test's bound.
+/// - `linkedCeiling` — an Int64 scalar cell holding the enum's last
+///   ordinal, the `int64`-decodes-as-an-op-kind test's bound.
 /// - `arityTable` — a cell whose `+d.step` rank lists one `(op, in, out)`
 ///   Int64 triple per op kind, in the recipe-tuple convention: three
 ///   consecutive members name the op ordinal, the input-wing arity and the
