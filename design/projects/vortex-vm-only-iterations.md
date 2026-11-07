@@ -1688,3 +1688,40 @@ Logs: `/tmp/vql-closed-functor-build.log`, `/tmp/vql-closed-functor-focused.log`
 `/tmp/vql-closed-functor-tests.log`, `/tmp/vql-closed-functor-cli.log`,
 `/tmp/vql-closed-functor-callables.log`, `/tmp/vql-closed-functor-overlay.log`,
 `/tmp/vql-closed-functor-format.log`.
+
+## Iteration 44: static clamps in recursive traversal functors
+
+Closed signed-dimension templates now include static index/range clamps. Exact variant keys preserve
+clamp presence, signed 64-bit start, optional end presence and signed 64-bit end. Callee compilation
+restores that data on ordinary PathSteps, which use the existing VM clamp lowering. This permits
+recursive one-hop routes such as `/+d.next[1]` without narrowing bounds or dimension identities. The
+parser remains unchanged: `[n]` and `[n,n]` normalize to identical AST clamps and share a key.
+
+The shared closed-traversal predicate still excludes predicates, captures, projections, calls,
+creation, dereferencing, placement, bidirectionality, pins and yield overrides. Dummy ports, caller
+preparation order, reusable descriptors and source-free graph execution retain their previous
+semantics. No VM opcode, frame descriptor format or general closure ABI changes.
+
+Weighted template-work accounting adds a presence unit, the start's `sizeof(int64_t)`, an
+end-presence unit and the optional endpoint's width for each present clamp. Unclamped step costs
+remain unchanged. These are specialization work units, not a universal CPU or heap bound.
+
+Validation: full `make -j$(nproc)` passed, as did 988 affected tests across 89 suites and all 70
+focused tests across five suites. Six new cases cover self/mutual native calls, combined-stream
+versus explicit per-candidate clamp application, exact key reuse and distinctions, full-width
+positive and negative runtime bounds/dimensions, weighted atomic refusal/retry, recursive
+source-free export/reload, and actual host/mesh SOURCE output. Existing predicate and projection
+recursion boundaries remain covered. Large bounds select the existing nearest-edge clamp result; the
+tests distinguish that from narrowed 32-bit values. The real headless CLI uses a recursive
+Cell-returning function and a `[1]` route to reach `second`. Architecture, senior and resource gates
+accepted this bounded stage. Repository formatting with clang-format 19 passed.
+
+The broader sweep retains the same eight failures and one skip, with 132 passes; the callable audit
+retains the same seven failures, with 33 passes. These are not full-suite passes. Other
+decorated/captured functors, general closures, lambda values and the remaining specification work
+still leave §4.12 incomplete. No speedup is claimed.
+
+Logs: `/tmp/vql-clamped-functor-build.log`, `/tmp/vql-clamped-functor-focused.log`,
+`/tmp/vql-clamped-functor-tests.log`, `/tmp/vql-clamped-functor-cli.log`,
+`/tmp/vql-clamped-functor-callables.log`, `/tmp/vql-clamped-functor-overlay.log`,
+`/tmp/vql-clamped-functor-format.log`.

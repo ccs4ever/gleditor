@@ -811,3 +811,20 @@ clang-format 19 passed. The broader sweep retains eight failures and one skip (1
 callable audit retains seven failures (33 passes). These are not full-suite passes. Decorated
 recursive functors, general closures and the other recorded gaps keep §4.12 incomplete; no speedup
 is claimed.
+
+## Static-clamped traversal functors in recursive frames
+
+Recursive function variants now preserve static clamp presence and complete signed 64-bit bounds in
+closed traversal templates. Ordinary PathStep/VM lowering applies the restored clamp, enabling
+one-hop `[1]` routes without a new opcode or closure ABI. Existing parser normalization means `[n]`
+and `[n,n]` share a template. Present clamp metadata consumes additional weighted specialization
+work; unclamped costs are unchanged. See [iteration 44](projects/vortex-vm-only-iterations.md).
+
+Full build, 988 affected tests across 89 suites and all 70 focused tests passed. Six new cases cover
+native recursion, stream/candidate ordering, exact key identity, full-width signed bounds at
+runtime, atomic weighted limits, recursive source-free export/reload, and actual host/mesh SOURCE
+output. The real CLI uses a clamped route through a recursive Cell-returning function to reach
+`second`. Repository formatting with clang-format 19 passed. The broader sweep retains eight
+failures and one skip (132 passes); the callable audit retains seven failures (33 passes). These are
+not full-suite passes. Other decorated/captured functors and the remaining callable, lifecycle and
+frontend gaps leave §4.12 incomplete; no performance improvement is claimed.

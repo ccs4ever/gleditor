@@ -253,10 +253,13 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
             break;
           }
           chargeClosedFunctorTemplateWork(dimension->dimName.size());
-          if (!isPlainClosedFunctorStep(step)) {
+          if (!isClosedTraversalFunctorStep(step)) {
             plain = false;
             break;
           }
+          if (step.rangeClamp)
+            chargeClosedFunctorTemplateWork(
+                closedFunctorClampWork(step.rangeClamp->end.has_value()));
         }
         if (!plain) {
           unsupportedFunctorArgument = true;
@@ -266,8 +269,14 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
           for (const auto &step : *steps) {
             const auto &dimension =
                 std::get<SignedDimensionStep>(step.selector);
-            formal.steps.push_back({.dimName   = dimension.dimName,
-                                    .direction = dimension.direction});
+            formal.steps.push_back(
+                {.dimName    = dimension.dimName,
+                 .direction  = dimension.direction,
+                 .rangeClamp = step.rangeClamp
+                                   ? std::optional{ClosedFunctorClampKey{
+                                         .start = step.rangeClamp->start,
+                                         .end   = step.rangeClamp->end}}
+                                   : std::nullopt});
           }
           functorTemplates.push_back(std::move(formal));
         }
@@ -1189,7 +1198,14 @@ void VQLCompiler::compileFrameDefinition(const DefDeclaration &definition,
       for (const auto &templateStep : functorTemplate->steps) {
         SignedDimensionStep dimension{.dimName   = templateStep.dimName,
                                       .direction = templateStep.direction};
-        steps.push_back(PathStep{.selector = std::move(dimension)});
+        const auto rangeClamp =
+            templateStep.rangeClamp
+                ? std::optional{RangeClamp{.start =
+                                               templateStep.rangeClamp->start,
+                                           .end = templateStep.rangeClamp->end}}
+                : std::nullopt;
+        steps.push_back(PathStep{.selector   = std::move(dimension),
+                                 .rangeClamp = rangeClamp});
       }
       functorBindings_[*name] = std::move(steps);
       streamBindings_.erase(*name);

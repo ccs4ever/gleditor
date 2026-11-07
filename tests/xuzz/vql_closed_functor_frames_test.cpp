@@ -410,8 +410,14 @@ TEST(VQLClosedFunctorFrameTest,
   ASSERT_TRUE(decorated) << decorated.error().message;
   EXPECT_EQ(*decorated, (std::vector<CellRef>{next}));
 
-  for (const std::string_view actual :
-       {"/+d.next[1]", "/+d.next[. = \"next\"]"}) {
+  const auto clampedRecursive =
+      h.compile("def pure walk($nodes: Stream<Cell>, $route): Stream<Cell> := "
+                "walk($nodes/$route, $route); walk(##/+d.items, /+d.next[1])");
+  ASSERT_TRUE(clampedRecursive.success) << clampedRecursive.errorMessage;
+  EXPECT_FALSE(
+      invokeDescriptors(clampedRecursive, h.vm, h.core, "walk").empty());
+
+  for (const std::string_view actual : {"/+d.next[. = \"next\"]"}) {
     const std::string source =
         "def pure walk($nodes: Stream<Cell>, $route): Stream<Cell> := "
         "walk($nodes/$route, $route); walk(##/+d.items, " +

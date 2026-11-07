@@ -265,7 +265,7 @@ private:
         !path.steps.empty();
     sequence(path.steps, depth,
              [&](const PathStep &step, const std::size_t stepDepth) {
-               if (!isPlainClosedFunctorStep(step)) closed = false;
+               if (!isClosedTraversalFunctorStep(step)) closed = false;
                (void)stepDepth;
              });
     return closed;

@@ -105,9 +105,16 @@ public:
       std::optional<xanadu::MicroversionId> parent = std::nullopt) const;
 
 private:
+  struct ClosedFunctorClampKey {
+    std::int64_t start{1};
+    std::optional<std::int64_t> end;
+
+    bool operator==(const ClosedFunctorClampKey &) const = default;
+  };
   struct ClosedFunctorStepKey {
     std::string dimName;
     zigzag::DimVector direction{zigzag::DimVector::POS};
+    std::optional<ClosedFunctorClampKey> rangeClamp;
 
     bool operator==(const ClosedFunctorStepKey &) const = default;
   };
@@ -143,6 +150,13 @@ private:
         for (const auto &step : formal.steps) {
           combine(std::hash<std::string>{}(step.dimName));
           combine(std::hash<zigzag::DimVector>{}(step.direction));
+          combine(step.rangeClamp.has_value());
+          if (step.rangeClamp) {
+            combine(std::hash<std::int64_t>{}(step.rangeClamp->start));
+            combine(step.rangeClamp->end.has_value());
+            if (step.rangeClamp->end)
+              combine(std::hash<std::int64_t>{}(*step.rangeClamp->end));
+          }
         }
       }
       return result;
@@ -170,6 +184,7 @@ private:
   [[nodiscard]] std::optional<std::span<const PathStep>>
   closedFunctorArgumentSteps(const ValueExpr &argument) const;
   void chargeClosedFunctorTemplateWork(std::size_t amount);
+  [[nodiscard]] static std::size_t closedFunctorClampWork(bool hasEnd) noexcept;
   [[nodiscard]] std::size_t closedFunctorTemplateWork(
       std::span<const ClosedFunctorFormalKey> templates) const;
 

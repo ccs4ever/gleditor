@@ -92,6 +92,12 @@ void VQLCompiler::chargeClosedFunctorTemplateWork(const std::size_t amount) {
   remainingClosedFunctorTemplateWork_ -= amount;
 }
 
+std::size_t VQLCompiler::closedFunctorClampWork(const bool hasEnd) noexcept {
+  constexpr std::size_t presenceWorkUnit = 1;
+  return presenceWorkUnit + sizeof(std::int64_t) + presenceWorkUnit +
+         (hasEnd ? sizeof(std::int64_t) : 0);
+}
+
 std::size_t VQLCompiler::closedFunctorTemplateWork(
     const std::span<const ClosedFunctorFormalKey> templates) const {
   std::size_t work = templates.size();
@@ -103,7 +109,11 @@ std::size_t VQLCompiler::closedFunctorTemplateWork(
   };
   for (const auto &formal : templates) {
     add(formal.steps.size());
-    for (const auto &step : formal.steps) add(step.dimName.size());
+    for (const auto &step : formal.steps) {
+      add(step.dimName.size());
+      if (step.rangeClamp)
+        add(closedFunctorClampWork(step.rangeClamp->end.has_value()));
+    }
   }
   return work;
 }

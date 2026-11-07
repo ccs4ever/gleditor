@@ -2,7 +2,7 @@
 
 namespace xanadu::vql {
 
-bool isPlainClosedFunctorStep(const PathStep &step) noexcept {
+bool isClosedTraversalFunctorStep(const PathStep &step) noexcept {
   const auto *dimension = std::get_if<SignedDimensionStep>(&step.selector);
   if (!dimension || dimension->dimName.empty() ||
       dimension->dimName.starts_with('$') || dimension->isBidir ||
@@ -13,8 +13,8 @@ bool isPlainClosedFunctorStep(const PathStep &step) noexcept {
     return false;
   return !step.derefMaster && step.predicates.empty() &&
          step.shapePredicates.empty() && !step.projectionAfter &&
-         !step.rangeClamp && !step.versionPin &&
-         step.yieldMode == YieldMode::Default && !step.capturedFunctor;
+         !step.versionPin && step.yieldMode == YieldMode::Default &&
+         !step.capturedFunctor;
 }
 
 } // namespace xanadu::vql

@@ -5,8 +5,9 @@
 
 namespace xanadu::vql {
 
-/// Whether a path step is one literal, read-only dimension traversal.
-[[nodiscard]] bool isPlainClosedFunctorStep(const PathStep &step) noexcept;
+/// Whether a path step is a literal, read-only dimension traversal, with an
+/// optional static range clamp.
+[[nodiscard]] bool isClosedTraversalFunctorStep(const PathStep &step) noexcept;
 
 } // namespace xanadu::vql
 
