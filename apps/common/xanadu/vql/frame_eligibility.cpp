@@ -390,6 +390,19 @@ private:
       refuse("store slice anchors are not reusable frame bodies");
   }
 
+  void projectionShape(const ShapeLiteral &shape, const Scope &scope,
+                       const std::size_t depth) {
+    shapeLiteral(shape, scope, depth, true);
+    if (!isStaticShapeProjectionSyntax(shape))
+      refuse("shape projection is outside the native frame subset");
+    for (const ShapeRule &entry : shape.rules) {
+      const auto *rule = std::get_if<DimensionShapeRule>(&entry.rule);
+      if (rule && rule->targetValue && rule->dimName == "d.clone" &&
+          !std::holds_alternative<ScalarLiteral>(rule->targetValue->kind))
+        refuse("nonliteral clone-dimension projection is not frame eligible");
+    }
+  }
+
   void pathExpression(const PathExpression &path, const Scope &scope,
                       const std::size_t depth) {
     tick(depth);
@@ -427,21 +440,14 @@ private:
              [&](const BooleanExpr &predicate, const std::size_t childDepth) {
                booleanExpr(predicate, scope, childDepth);
              });
+    if (path.anchorProjection)
+      projectionShape(*path.anchorProjection, scope, depth + 1);
     sequence(path.steps, depth + 1,
              [&](const PathStep &step, const std::size_t childDepth) {
                pathStep(step, scope, childDepth);
              });
-    if (path.shapeProjection) {
-      shapeLiteral(*path.shapeProjection, scope, depth + 1, true);
-      if (!isStaticShapeProjectionSyntax(*path.shapeProjection))
-        refuse("shape projection is outside the native frame subset");
-      for (const ShapeRule &entry : path.shapeProjection->rules) {
-        const auto *rule = std::get_if<DimensionShapeRule>(&entry.rule);
-        if (rule && rule->targetValue && rule->dimName == "d.clone" &&
-            !std::holds_alternative<ScalarLiteral>(rule->targetValue->kind))
-          refuse("nonliteral clone-dimension projection is not frame eligible");
-      }
-    }
+    if (path.shapeProjection)
+      projectionShape(*path.shapeProjection, scope, depth + 1);
     if (path.cloneTail) {
       refuse("clone tails are not reusable frame bodies");
       sequence(path.cloneTail->operands, depth + 1,
@@ -564,6 +570,8 @@ private:
                  pathStep(nested, scope, childDepth);
                });
     }
+    if (step.projectionAfter)
+      projectionShape(*step.projectionAfter, scope, depth + 1);
   }
 
   void booleanExpr(const BooleanExpr &expr, const Scope &scope,

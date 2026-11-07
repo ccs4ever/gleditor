@@ -415,6 +415,35 @@ PathExpression Parser::parsePathExpression(bool allowCloneTail) {
     }
   }
 
+  std::optional<ShapeLiteral> anchorProjection;
+  std::optional<ShapeLiteral> shapeProjection;
+  const auto hasShapeProjection = [this]() {
+    if (!check(TokenKind::OpenBrace)) return false;
+    const Token nextTok = peekToken();
+    return !nextTok.is(TokenKind::KwWeave) && !nextTok.is(TokenKind::KwFor) &&
+           !nextTok.is(TokenKind::KwLet) && !nextTok.is(TokenKind::KwIf) &&
+           !nextTok.is(TokenKind::KwReturn) && !nextTok.is(TokenKind::KwWatch);
+  };
+  const auto projectionContinuesPath = [this]() {
+    return check(TokenKind::Slash) || check(TokenKind::Arrow) ||
+           check(TokenKind::Transclude) ||
+           (check(TokenKind::Dot) && peekToken().is(TokenKind::OpenBracket));
+  };
+  const auto recordProjection = [&](ShapeLiteral projection) {
+    if (hasShapeProjection())
+      throw ParseError("consecutive shape projections are not supported",
+                       current_.loc);
+    if (!projectionContinuesPath()) {
+      shapeProjection = std::move(projection);
+    } else if (steps.empty()) {
+      anchorProjection = std::move(projection);
+    } else {
+      steps.back().projectionAfter = std::move(projection);
+    }
+  };
+
+  if (hasShapeProjection()) recordProjection(parseShapeLiteral());
+
   while (check(TokenKind::Slash) || check(TokenKind::Dot) ||
          check(TokenKind::Arrow) || check(TokenKind::Transclude)) {
     // Slicing sugar: .[offset, length]
@@ -436,13 +465,14 @@ PathExpression Parser::parsePathExpression(bool allowCloneTail) {
           .name = "value", .args = std::move(args), .isSliceRead = true};
       PathStep step{.selector = std::move(fn)};
       steps.push_back(std::move(step));
+      if (hasShapeProjection()) recordProjection(parseShapeLiteral());
       continue;
     }
 
     if (check(TokenKind::Arrow) || check(TokenKind::Transclude)) {
       PathStep step = parsePathStep(false /*requireSlash*/);
       if (std::holds_alternative<PathMorphism>(step.selector) &&
-          !steps.empty() &&
+          !steps.empty() && !steps.back().projectionAfter &&
           std::holds_alternative<SignedDimensionStep>(steps.back().selector)) {
         const auto &sd = std::get<SignedDimensionStep>(steps.back().selector);
         auto &m        = std::get<PathMorphism>(step.selector);
@@ -453,23 +483,15 @@ PathExpression Parser::parsePathExpression(bool allowCloneTail) {
         steps.pop_back();
       }
       steps.push_back(std::move(step));
+      if (hasShapeProjection()) recordProjection(parseShapeLiteral());
       continue;
     }
 
     if (check(TokenKind::Slash)) {
       steps.push_back(parsePathStep(true /*requireSlash*/));
+      if (hasShapeProjection()) recordProjection(parseShapeLiteral());
     } else {
       break;
-    }
-  }
-
-  std::optional<ShapeLiteral> shapeProjection;
-  if (check(TokenKind::OpenBrace)) {
-    Token nextTok = peekToken();
-    if (!nextTok.is(TokenKind::KwWeave) && !nextTok.is(TokenKind::KwFor) &&
-        !nextTok.is(TokenKind::KwLet) && !nextTok.is(TokenKind::KwIf) &&
-        !nextTok.is(TokenKind::KwReturn) && !nextTok.is(TokenKind::KwWatch)) {
-      shapeProjection = parseShapeLiteral();
     }
   }
 
@@ -488,6 +510,7 @@ PathExpression Parser::parsePathExpression(bool allowCloneTail) {
   return PathExpression{.anchor           = std::move(anchor),
                         .isFunctor        = isFunctor,
                         .anchorPredicates = std::move(anchorPredicates),
+                        .anchorProjection = std::move(anchorProjection),
                         .steps            = std::move(steps),
                         .shapeProjection  = std::move(shapeProjection),
                         .cloneTail        = std::move(cloneTail)};

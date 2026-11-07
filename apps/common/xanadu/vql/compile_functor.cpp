@@ -1,6 +1,7 @@
 #include "common/xanadu/vql/compiler.hpp"
 #include "common/xanadu/vql/functor_capture.hpp"
 
+#include <algorithm>
 #include <stdexcept>
 
 namespace xanadu::vql {
@@ -20,8 +21,22 @@ VQLCompiler::functorArgument(const ValueExpr &argument) const {
 
 std::optional<std::vector<PathStep>>
 VQLCompiler::functorArgument(const PathExpression &path) const {
-  if (!path.anchorPredicates.empty() || path.shapeProjection || path.cloneTail)
+  const bool existingFunctorAnchor =
+      path.anchor.kind == AnchorKind::Variable &&
+      functorBindings_.contains(path.anchor.name);
+  const bool functorExpression = path.isFunctor || existingFunctorAnchor;
+  if (functorExpression) {
+    if (path.anchorProjection || path.shapeProjection)
+      throw std::invalid_argument(
+          "ordered shape projections are not supported in functors");
+    validateFunctorCaptureSteps(path.steps);
+  }
+  if (path.anchorProjection || path.shapeProjection ||
+      std::ranges::any_of(path.steps, [](const PathStep &step) {
+        return step.projectionAfter.has_value();
+      }))
     return std::nullopt;
+  if (!path.anchorPredicates.empty() || path.cloneTail) return std::nullopt;
   std::vector<PathStep> steps;
   if (!path.isFunctor) {
     if (path.anchor.kind != AnchorKind::Variable) return std::nullopt;

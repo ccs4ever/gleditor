@@ -754,3 +754,20 @@ preserves ordered `7`, exact `9007199254740993`, `7` through typed mutual recurs
 sweep retains eight known unfinished failures and one skip, with 132 passes. Repository formatting
 with clang-format 19 passed. No performance improvement is claimed. Variadic special forms,
 functors, lambdas and remaining §4.12 work remain incomplete.
+
+## Ordered shape projection continuations
+
+Anchor and intermediate shape projections now lower at their source position before the following
+path operation. Terminal projection ASTs remain compatible. The shared projection lowering keeps
+owner identity and existing atomic masks, targets and contract guards; named functions use native
+frames. Projection-bearing targets and functor capture remain refused where their mutation semantics
+would otherwise be lost. See [iteration 41](projects/vortex-vm-only-iterations.md).
+
+Full build, 922 affected tests from 84 suites and 50 focused tests from three suites passed.
+Thirteen new cases include native recursion, recursive source-free export/reload, host/mesh SOURCE
+routes, yield/selection ordering and atomic failure. The real CLI preserves exact `9007199254740993`
+through the recursive graph. Repository formatting with clang-format 19 passed. The broader sweep
+retains eight unfinished failures and one skip, with 132 passes. An expanded callable audit passes
+28 of 40; its 12 failures cover unlowered lambdas, missing-context values, a weave assertion and
+`sort_into`. This is not a full-suite pass. Remaining callable, mutation, lifecycle and frontend
+work still leaves §4.12 incomplete. No performance improvement is claimed.

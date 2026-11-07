@@ -262,6 +262,9 @@ private:
   compilePathExpression(const PathExpression &path, zigzag::CellRef ctxCell);
   void validateShapeProjection(const ShapeLiteral &shape);
   void compileShapeProjection(const ShapeLiteral &shape, zigzag::CellRef owner);
+  std::vector<zigzag::CellRef>
+  applyShapeProjection(std::span<const zigzag::CellRef> owners,
+                       const ShapeLiteral &shape);
   std::optional<zigzag::CellRef> compileAnchor(const AnchorNode &anchor);
   std::optional<zigzag::CellRef> compilePathStep(const PathStep &step,
                                                  zigzag::CellRef inStreamCell);

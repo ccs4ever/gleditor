@@ -128,6 +128,8 @@ std::vector<CellRef> VQLCompiler::compileSteps(std::span<const PathStep> steps,
     } else if (step.yieldMode != YieldMode::Keep) {
       stream = std::move(nextStream);
     }
+    if (step.projectionAfter)
+      stream = applyShapeProjection(stream, *step.projectionAfter);
     hasContext = true;
   }
 

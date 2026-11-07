@@ -1552,3 +1552,47 @@ frontend parity still leave §4.12 incomplete.
 Logs: `/tmp/vql-typed-rest-build.log`, `/tmp/vql-typed-rest-focused.log`,
 `/tmp/vql-typed-rest-tests.log`, `/tmp/vql-typed-rest-overlay.log`, `/tmp/vql-typed-rest-cli.log`,
 `/tmp/vql-typed-rest-format.log`.
+
+## Iteration 41: ordered shape projection continuations
+
+Supported shape projections can be followed immediately by another path operation. The AST retains
+the existing terminal `shapeProjection` field and records continuing projections after their anchor
+or preceding step. Parser lowering preserves source order and keeps clone tails terminal.
+Consecutive projections and unsupported raw-dot continuations remain explicit refusals.
+
+The compiler applies anchor projections after anchor predicates and dereferencing. A step projection
+runs after that step's selector, empty-context call alternative, dereferencing, predicates, clamp
+and yield selection, before the next step. All positions use the same owner-preserving VM projection
+lowering and static-rule validator, including empty streams and nested path steps. No VM opcode or
+frame descriptor format changes. Eligible named bodies retain native recursive graphs and exported
+instructions execute without their source AST.
+
+Projection target classification refuses paths carrying projections because those paths mutate
+rather than read their target. Functor capture likewise refuses the new projection-bearing paths
+until captured projection semantics are defined. Eligibility visits all projection positions with
+the existing lexical scope, cycle checks and query-wide budgets. Existing projection masks,
+singleton target requirements, atomic mutation behavior and contract guards remain in force.
+
+Validation: full `make -j$(nproc)` passed, as did all 922 affected tests across 84 suites and all 50
+focused projection/frame/parser tests across three suites. Thirteen new cases cover ordered reads,
+anchor and post-step projections, owner order and duplicates, predicates/clamps, keep-yield parents,
+pre-mask read-only targets and aliases, atomic failure, parser and legacy AST compatibility, functor
+capture refusals, host/mesh SOURCE execution, native recursion and recursive export/reload after the
+source AST and VM are destroyed. The real headless CLI returns exact `9007199254740993` through a
+recursive projected graph. Repository formatting with clang-format 19 passed; architecture, senior
+and resource gates accepted this bounded stage.
+
+The broader sweep retained the same eight unfinished failures and one skip, with 132 passes. An
+additional callable audit passed 28 of 40 tests: typed/anonymous path lambdas, missing-context value
+lowering, a weave value assertion and `sort_into` account for the 12 remaining failures in that
+selection. These are unfinished functionality, not a full-suite pass. Parser recursion has no
+separate depth budget before AST analysis; this stage adds no universal parser or compilation-time
+bound. No performance or total-memory improvement is claimed.
+
+Recursive functor/closure handles, anonymous lambda lowering, remaining variadic forms, deferred
+mutation/lifecycle/session semantics and full frontend parity still leave §4.12 incomplete.
+
+Logs: `/tmp/vql-ordered-projection-build.log`, `/tmp/vql-ordered-projection-focused.log`,
+`/tmp/vql-ordered-projection-tests.log`, `/tmp/vql-ordered-projection-cli.log`,
+`/tmp/vql-ordered-projection-overlay.log`, `/tmp/vql-ordered-projection-callables.log`,
+`/tmp/vql-ordered-projection-format.log`.

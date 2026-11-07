@@ -857,12 +857,41 @@ TEST(VQLParserTest, ProjectionStaysInsideExpressionBodiedFunction) {
   EXPECT_EQ(query.body.statements.size(), 1U);
 }
 
-TEST(VQLParserTest, ProjectionContinuationRequiresExplicitBinding) {
-  for (const auto source : {"$owner{*}/+d.tag", "$owner{*}.value()",
-                            "$owner{*} => $target", "$owner{*} <~ $target"}) {
+TEST(VQLParserTest, ProjectionContinuationIsRecordedAtItsPathPosition) {
+  Parser afterAnchor("$owner{*}/+d.tag");
+  const auto anchorQuery = afterAnchor.parseQuery();
+  ASSERT_TRUE(std::holds_alternative<PathExpression>(anchorQuery.expr));
+  const auto &anchorPath = std::get<PathExpression>(anchorQuery.expr);
+  ASSERT_TRUE(anchorPath.anchorProjection);
+  ASSERT_EQ(anchorPath.steps.size(), 1U);
+
+  Parser afterStep("##/d.owner{*}/+d.tag");
+  const auto stepQuery = afterStep.parseQuery();
+  ASSERT_TRUE(std::holds_alternative<PathExpression>(stepQuery.expr));
+  const auto &stepPath = std::get<PathExpression>(stepQuery.expr);
+  ASSERT_EQ(stepPath.steps.size(), 2U);
+  EXPECT_TRUE(stepPath.steps.front().projectionAfter);
+  EXPECT_FALSE(stepPath.shapeProjection);
+
+  for (const auto source :
+       {"$owner{*} => $target", "$owner{*} <~ $target", "$owner{*}.[1]"}) {
     Parser parser(source);
-    EXPECT_THROW(parser.parseQuery(), ParseError);
+    const auto query = parser.parseQuery();
+    ASSERT_TRUE(std::holds_alternative<PathExpression>(query.expr)) << source;
+    const auto &path = std::get<PathExpression>(query.expr);
+    ASSERT_TRUE(path.anchorProjection) << source;
+    EXPECT_FALSE(path.shapeProjection) << source;
   }
+
+  Parser rawCall("$owner{*}.value()");
+  EXPECT_THROW(rawCall.parseQuery(), ParseError);
+
+  Parser cloneTail("$owner{*} >< %\"clone\"");
+  const auto cloneQuery = cloneTail.parseQuery();
+  ASSERT_TRUE(std::holds_alternative<PathExpression>(cloneQuery.expr));
+  const auto &clonePath = std::get<PathExpression>(cloneQuery.expr);
+  ASSERT_TRUE(clonePath.shapeProjection);
+  ASSERT_TRUE(clonePath.cloneTail);
 }
 
 } // namespace

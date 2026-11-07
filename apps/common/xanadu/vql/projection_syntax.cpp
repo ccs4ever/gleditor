@@ -18,9 +18,10 @@ bool isValidDirection(const zigzag::DimVector direction) noexcept {
 
 bool isSimpleProjectionPath(const PathExpression &path) noexcept {
   if (path.isFunctor || !path.anchorPredicates.empty() ||
-      path.shapeProjection || path.cloneTail || path.anchor.versionPin ||
-      path.anchor.createValue || path.anchor.generator ||
-      path.anchor.storeAnchor || !path.anchor.microversionId.empty())
+      path.anchorProjection || path.shapeProjection || path.cloneTail ||
+      path.anchor.versionPin || path.anchor.createValue ||
+      path.anchor.generator || path.anchor.storeAnchor ||
+      !path.anchor.microversionId.empty())
     return false;
 
   switch (path.anchor.kind) {
@@ -39,8 +40,9 @@ bool isSimpleProjectionPath(const PathExpression &path) noexcept {
     if (!dimension || !isCanonicalDimensionName(dimension->dimName) ||
         !isValidDirection(dimension->direction) ||
         !dimension->creates.empty() || !step.predicates.empty() ||
-        !step.shapePredicates.empty() || step.versionPin ||
-        step.yieldMode != YieldMode::Default || step.capturedFunctor)
+        !step.shapePredicates.empty() || step.projectionAfter ||
+        step.versionPin || step.yieldMode != YieldMode::Default ||
+        step.capturedFunctor)
       return false;
   }
   return true;

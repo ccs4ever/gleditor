@@ -495,7 +495,6 @@ std::optional<CellRef> VQLCompiler::compileQuery(const QueryExpression &query) {
 std::optional<CellRef>
 VQLCompiler::compilePathExpression(const PathExpression &path,
                                    CellRef ctxCell) {
-  if (path.shapeProjection) validateShapeProjection(*path.shapeProjection);
   if (path.anchor.versionPin ||
       std::ranges::any_of(path.steps, [](const PathStep &step) {
         return step.versionPin.has_value();
@@ -542,16 +541,15 @@ VQLCompiler::compilePathExpression(const PathExpression &path,
       return std::vector<CellRef>{emitDereference(candidate)};
     });
   }
+  if (path.anchorProjection)
+    stream = applyShapeProjection(stream, *path.anchorProjection);
   stream =
       compileSteps(path.steps, std::move(stream),
                    path.anchor.kind != AnchorKind::Context ||
                        ambientContext_.has_value() || !contextInputs_.empty());
 
   if (path.shapeProjection) {
-    stream = emitMap(stream, [&](const CellRef owner) {
-      compileShapeProjection(*path.shapeProjection, owner);
-      return std::vector<CellRef>{owner};
-    });
+    stream = applyShapeProjection(stream, *path.shapeProjection);
   }
 
   if (path.cloneTail && !stream.empty()) {
@@ -606,6 +604,16 @@ VQLCompiler::compilePathExpression(const PathExpression &path,
   lastResultCells_ = stream;
   if (stream.empty()) return std::nullopt;
   return stream.front();
+}
+
+std::vector<CellRef>
+VQLCompiler::applyShapeProjection(std::span<const CellRef> owners,
+                                  const ShapeLiteral &shape) {
+  validateShapeProjection(shape);
+  return emitMap(owners, [&](const CellRef owner) {
+    compileShapeProjection(shape, owner);
+    return std::vector<CellRef>{owner};
+  });
 }
 
 std::optional<CellRef> VQLCompiler::compileAnchor(const AnchorNode &anchor) {

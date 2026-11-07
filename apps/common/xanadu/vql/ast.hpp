@@ -315,6 +315,8 @@ struct PathStep {
   bool derefMaster{false}; ///< Suffixed with ">"
   std::vector<BooleanExpr> predicates;
   std::vector<ShapeLiteral> shapePredicates; ///< "[{ ... }]"
+  std::optional<ShapeLiteral>
+      projectionAfter; ///< Applied before the next step.
   std::optional<RangeClamp> rangeClamp{std::nullopt};
   std::optional<VersionPin> versionPin{std::nullopt};
   YieldMode yieldMode{YieldMode::Default};
@@ -345,6 +347,8 @@ struct PathExpression {
   bool isFunctor{false};
   /// `#[...]`: predicates on the anchor's own cells, before any step.
   std::vector<BooleanExpr> anchorPredicates;
+  std::optional<ShapeLiteral>
+      anchorProjection; ///< Applied before the first step.
   std::vector<PathStep> steps;
   std::optional<ShapeLiteral> shapeProjection{std::nullopt}; ///< "$path{ ... }"
   std::optional<CloneTail> cloneTail{std::nullopt};
