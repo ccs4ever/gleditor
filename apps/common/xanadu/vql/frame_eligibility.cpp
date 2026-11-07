@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <concepts>
+#include <cstdint>
 #include <deque>
 #include <memory>
 #include <optional>
@@ -20,18 +21,30 @@ struct CallSite {
   std::string callee;
   Scope visibleNames;
   bool inParameterDefault{false};
+  bool conditionalOnTypedRest{false};
+  bool mayInjectContext{false};
+  std::size_t argumentCount{0};
 };
 
 struct CaptureDependency {
   std::string caller;
   Scope visibleNames;
   bool inParameterDefault{false};
+  bool conditionalOnTypedRest{false};
+  bool mayInjectContext{false};
+  std::size_t argumentCount{0};
+};
+
+enum class CaptureRequirement : std::uint8_t {
+  Free,
+  Required,
+  ConditionalRequired,
 };
 
 struct PendingCapture {
   std::string definition;
   std::string name;
-  bool requiredDefaultBinding{false};
+  CaptureRequirement requirement{CaptureRequirement::Free};
 };
 
 struct ScanFailure : std::runtime_error {
@@ -77,10 +90,10 @@ public:
       const auto &parameter = definition.params[index];
       tick(1);
       if (parameter.isVariadic &&
-          (index + 1 != definition.params.size() || parameter.type ||
-           parameter.defaultValue ||
+          (index + 1 != definition.params.size() || parameter.defaultValue ||
            !std::holds_alternative<std::string>(parameter.target)))
-        refuse("only untyped named final variadics are frame eligible");
+        refuse(
+            "only named final variadics without defaults are frame eligible");
       if (parameter.defaultValue) {
         const bool prior          = scanningParameterDefault_;
         scanningParameterDefault_ = true;
@@ -88,8 +101,13 @@ public:
         scanningParameterDefault_ = prior;
       }
       if (parameter.type) {
-        auto captures = type(*parameter.type, scope, 2);
-        scope.insert(captures.begin(), captures.end());
+        const Scope priorScope       = scope;
+        const bool savedConditional  = scanningConditionalRestType_;
+        scanningConditionalRestType_ = parameter.isVariadic;
+        auto captures                = type(*parameter.type, priorScope, 2);
+        scanningConditionalRestType_ = savedConditional;
+        if (!parameter.isVariadic)
+          scope.insert(captures.begin(), captures.end());
       }
 
       if (const auto *name = std::get_if<std::string>(&parameter.target)) {
@@ -133,6 +151,11 @@ public:
   [[nodiscard]] const std::unordered_set<std::string> &
   requiredDefaultCaptureBindings() const noexcept {
     return requiredDefaultCaptureBindings_;
+  }
+
+  [[nodiscard]] const std::unordered_set<std::string> &
+  conditionalRequiredDefaultCaptureBindings() const noexcept {
+    return conditionalRequiredDefaultCaptureBindings_;
   }
 
   [[nodiscard]] std::vector<CallSite> takeCallSites() && {
@@ -200,7 +223,12 @@ private:
     }
     if (!scope.contains(name)) {
       freeCaptureNames_.insert(name);
-      if (requiredDefaultBinding) requiredDefaultCaptureBindings_.insert(name);
+      if (requiredDefaultBinding) {
+        if (scanningConditionalRestType_)
+          conditionalRequiredDefaultCaptureBindings_.insert(name);
+        else
+          requiredDefaultCaptureBindings_.insert(name);
+      }
     }
   }
 
@@ -288,16 +316,21 @@ private:
   }
 
   void invocation(const FunctionInvocation &call, const Scope &scope,
-                  const std::size_t depth) {
+                  const std::size_t depth,
+                  const bool mayInjectContext = false) {
     tick(depth);
     Scope visibleNames;
     for (const auto &name : scope) {
       budget_.charge();
       visibleNames.insert(name);
     }
-    callSites_.push_back({.callee             = call.name,
-                          .visibleNames       = std::move(visibleNames),
-                          .inParameterDefault = scanningParameterDefault_});
+    callSites_.push_back(
+        {.callee                 = call.name,
+         .visibleNames           = std::move(visibleNames),
+         .inParameterDefault     = scanningParameterDefault_,
+         .conditionalOnTypedRest = scanningConditionalRestType_,
+         .mayInjectContext       = mayInjectContext,
+         .argumentCount          = call.args.size()});
     if (call.isSliceRead) refuse("slice reads are not reusable frame calls");
     if (std::ranges::any_of(call.argNames, [](const std::string &name) {
           return !name.empty();
@@ -458,7 +491,7 @@ private:
                                });
                     });
           } else if constexpr (std::same_as<Selector, FunctionInvocation>) {
-            invocation(selector, scope, depth + 1);
+            invocation(selector, scope, depth + 1, true);
           } else if constexpr (std::same_as<Selector, GenesisSelector> ||
                                std::same_as<Selector, DimensionPivotStep> ||
                                std::same_as<Selector, RootSelectorStep>) {
@@ -1001,8 +1034,10 @@ private:
   TraversalBudget &budget_;
   std::unordered_set<std::string> freeCaptureNames_;
   std::unordered_set<std::string> requiredDefaultCaptureBindings_;
+  std::unordered_set<std::string> conditionalRequiredDefaultCaptureBindings_;
   std::vector<CallSite> callSites_;
   bool scanningParameterDefault_{false};
+  bool scanningConditionalRestType_{false};
   std::optional<std::string> refusal_;
 };
 
@@ -1023,12 +1058,16 @@ analyzeFrameEligibility(const QueryExpression &query,
         freeCaptureSets;
     std::unordered_map<std::string, std::unordered_set<std::string>>
         requiredDefaultCaptureSets;
+    std::unordered_map<std::string, std::unordered_set<std::string>>
+        conditionalRequiredDefaultCaptureSets;
+    std::unordered_map<std::string, const DefDeclaration *> definitionsByName;
     for (const auto &definition : query.defs) {
       budget.tick(1);
       if (definition.name.empty())
         throw ScanFailure("frame eligibility found an unnamed definition");
       if (!names.insert(definition.name).second)
         throw ScanFailure("frame eligibility found duplicate definition names");
+      definitionsByName.emplace(definition.name, &definition);
     }
     for (const auto &definition : query.defs) {
       DefinitionScanner scanner(budget);
@@ -1036,15 +1075,20 @@ analyzeFrameEligibility(const QueryExpression &query,
       freeCaptureSets.emplace(definition.name, scanner.freeCaptureNames());
       requiredDefaultCaptureSets.emplace(
           definition.name, scanner.requiredDefaultCaptureBindings());
+      conditionalRequiredDefaultCaptureSets.emplace(
+          definition.name, scanner.conditionalRequiredDefaultCaptureBindings());
       auto callSites = std::move(scanner).takeCallSites();
       for (auto &callSite : callSites) {
         if (!names.contains(callSite.callee)) continue;
         budget.tick(1);
         callersByCallee[callSite.callee].push_back(definition.name);
         captureCallersByCallee[callSite.callee].push_back(
-            {.caller             = definition.name,
-             .visibleNames       = std::move(callSite.visibleNames),
-             .inParameterDefault = callSite.inParameterDefault});
+            {.caller                 = definition.name,
+             .visibleNames           = std::move(callSite.visibleNames),
+             .inParameterDefault     = callSite.inParameterDefault,
+             .conditionalOnTypedRest = callSite.conditionalOnTypedRest,
+             .mayInjectContext       = callSite.mayInjectContext,
+             .argumentCount          = callSite.argumentCount});
       }
       if (reason)
         result.refusalReasons.emplace(definition.name, *reason);
@@ -1057,23 +1101,34 @@ analyzeFrameEligibility(const QueryExpression &query,
         queuedFreeCaptures;
     std::unordered_map<std::string, std::unordered_set<std::string>>
         queuedRequiredDefaultCaptures;
+    std::unordered_map<std::string, std::unordered_set<std::string>>
+        queuedConditionalDefaultCaptures;
     const auto enqueueCapture = [&](const std::string &definition,
                                     const std::string &name,
-                                    const bool requiredDefaultBinding) {
-      auto &queued = requiredDefaultBinding
+                                    const CaptureRequirement requirement) {
+      auto &queued = requirement == CaptureRequirement::Free
+                         ? queuedFreeCaptures[definition]
+                     : requirement == CaptureRequirement::Required
                          ? queuedRequiredDefaultCaptures[definition]
-                         : queuedFreeCaptures[definition];
+                         : queuedConditionalDefaultCaptures[definition];
       if (queued.contains(name)) return;
       budget.tick(1);
       queued.insert(name);
-      pendingCaptures.push_back({definition, name, requiredDefaultBinding});
+      pendingCaptures.push_back({definition, name, requirement});
     };
     for (const auto &definition : query.defs) {
       const auto &freeCaptures = freeCaptureSets.at(definition.name);
-      const auto &defaultCaptures =
+      const auto &requiredCaptures =
           requiredDefaultCaptureSets.at(definition.name);
       for (const auto &name : freeCaptures)
-        enqueueCapture(definition.name, name, defaultCaptures.contains(name));
+        enqueueCapture(definition.name, name, CaptureRequirement::Free);
+      for (const auto &name : requiredCaptures)
+        enqueueCapture(definition.name, name, CaptureRequirement::Required);
+      for (const auto &name :
+           conditionalRequiredDefaultCaptureSets.at(definition.name))
+        if (!requiredCaptures.contains(name))
+          enqueueCapture(definition.name, name,
+                         CaptureRequirement::ConditionalRequired);
     }
 
     while (!pendingCaptures.empty()) {
@@ -1085,7 +1140,34 @@ analyzeFrameEligibility(const QueryExpression &query,
       for (const auto &callSite : callers->second) {
         budget.tick(1);
         if (callSite.visibleNames.contains(current.name)) continue;
-        if (current.requiredDefaultBinding && callSite.inParameterDefault) {
+
+        bool requiredBindingActive =
+            current.requirement == CaptureRequirement::Required;
+        CaptureRequirement propagatedRequirement = CaptureRequirement::Free;
+        if (current.requirement != CaptureRequirement::Free) {
+          if (current.requirement == CaptureRequirement::ConditionalRequired) {
+            const auto callee = definitionsByName.find(current.definition);
+            if (callee == definitionsByName.end() ||
+                callee->second->params.empty() ||
+                !callee->second->params.back().isVariadic ||
+                !callee->second->params.back().type)
+              continue;
+            const std::size_t fixedCount = callee->second->params.size() - 1;
+            std::size_t actualCount      = callSite.argumentCount;
+            if (callSite.mayInjectContext &&
+                callee->second->params.size() > callSite.argumentCount)
+              ++actualCount;
+            if (actualCount <= fixedCount) continue;
+            if (requiredDefaultCaptureSets.at(current.definition)
+                    .contains(current.name))
+              continue;
+          }
+          propagatedRequirement = callSite.conditionalOnTypedRest
+                                      ? CaptureRequirement::ConditionalRequired
+                                      : CaptureRequirement::Required;
+          requiredBindingActive = true;
+        }
+        if (requiredBindingActive && callSite.inParameterDefault) {
           lazyDefaultRefusals.try_emplace(
               callSite.caller,
               "a required field-default capture is unavailable inside a "
@@ -1095,14 +1177,27 @@ analyzeFrameEligibility(const QueryExpression &query,
 
         const bool newFreeCapture =
             freeCaptureSets[callSite.caller].insert(current.name).second;
-        const bool newDefaultCapture =
-            current.requiredDefaultBinding &&
-            requiredDefaultCaptureSets[callSite.caller]
-                .insert(current.name)
-                .second;
-        if (newFreeCapture || newDefaultCapture)
+        bool newRequiredCapture = false;
+        if (propagatedRequirement == CaptureRequirement::Required) {
+          newRequiredCapture = requiredDefaultCaptureSets[callSite.caller]
+                                   .insert(current.name)
+                                   .second;
+          conditionalRequiredDefaultCaptureSets[callSite.caller].erase(
+              current.name);
+        } else if (propagatedRequirement ==
+                       CaptureRequirement::ConditionalRequired &&
+                   !requiredDefaultCaptureSets[callSite.caller].contains(
+                       current.name)) {
+          newRequiredCapture =
+              conditionalRequiredDefaultCaptureSets[callSite.caller]
+                  .insert(current.name)
+                  .second;
+        }
+        if (newFreeCapture)
           enqueueCapture(callSite.caller, current.name,
-                         current.requiredDefaultBinding);
+                         CaptureRequirement::Free);
+        if (newRequiredCapture)
+          enqueueCapture(callSite.caller, current.name, propagatedRequirement);
       }
     }
 
@@ -1117,6 +1212,14 @@ analyzeFrameEligibility(const QueryExpression &query,
       const auto &requiredSet = requiredDefaultCaptureSets.at(definition.name);
       requiredDefaults.assign(requiredSet.begin(), requiredSet.end());
       std::ranges::sort(requiredDefaults);
+
+      auto &conditionalDefaults =
+          result.conditionalRequiredDefaultCaptureBindings[definition.name];
+      const auto &conditionalSet =
+          conditionalRequiredDefaultCaptureSets.at(definition.name);
+      for (const auto &name : conditionalSet)
+        if (!requiredSet.contains(name)) conditionalDefaults.push_back(name);
+      std::ranges::sort(conditionalDefaults);
     }
 
     for (const auto &[caller, reason] : lazyDefaultRefusals) {

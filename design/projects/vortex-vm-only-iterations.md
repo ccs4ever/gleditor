@@ -1490,3 +1490,65 @@ lambdas and remaining §4.12 semantics stay incomplete.
 Logs: `/tmp/vql-native-rest-build.log`, `/tmp/vql-native-rest-focused.log`,
 `/tmp/vql-native-rest-tests.log`, `/tmp/vql-native-rest-overlay.log`,
 `/tmp/vql-native-rest-cli.log`, `/tmp/vql-native-rest-format.log`.
+
+## Iteration 40: grouped typed variadic frame graphs
+
+Eligible typed final named rest parameters now preserve each original actual as its own Stream port.
+A frame variant is keyed by the function name and static rest-group count after existing UFCS
+injection. Repeated arities reuse their descriptor; recursive calls invoke reserved variant roots
+through the VM rather than expanding a recursive body. Zero groups remains distinct from one empty
+actual. Ordinary and untyped-rest frames keep their existing port scheme and labels.
+
+Inside the callee, fixed defaults, contracts and bindings precede rest matching. Each group prepares
+its own validator and guard in that lexical/context environment, matches with capture publication
+disabled, and appends only after a successful match. A failed group returns empty without executing
+the body or checking the return promise. The assembled rest name is bound after all groups pass.
+Shape captures from variadic types are scanned without publishing them into the body's lexical
+scope; caller aliases and pre-match field-default bindings retain their established meaning.
+Required aliases used only by a typed rest contract are conditional on a positive group count,
+including through wrapper calls and UFCS. Zero-group variants skip those unused requirements;
+requirements from fixed parameters, returns and body contracts remain active.
+
+All group normalizers are emitted before InvokeFrame. Normal-context and empty-context control
+alternatives may contain separate call sites sharing the same descriptor; the named-variant ceiling
+counts unique keys, while the opcode ceiling counts every minted instruction cell.
+
+Variant identity is separate from the base function name used for inline-cycle checks. All variants
+remain disconnected native instruction graphs included in disassembly and export. The existing
+FrameDescriptor format and VM opcodes are unchanged; the ordered argument ports describe each
+variant's groups. Native argument streams still prepare in caller scope before callee guards.
+
+Compilation has independent configurable aggregate policy ceilings: 1,024 named frame variants,
+100,000 minted VQL opcode cells and 100,000 finalized descriptor records. Variant reservation,
+opcode minting and descriptor serialization charge their respective ceilings first. Descriptor
+records count the entry, locals, argument ports and result ports for named and contract-validator
+frames. Existing contract-emission and VM per-descriptor limits still apply. These counters do not
+bound every arena allocation, operand link, CPU operation or total compile time.
+
+Compiler failure handling now includes terminal Halt/library Return emission, linking and result
+construction. Resource refusal returns a failed compilation and the assembly transaction rolls back
+without publishing an entry or results; a later compile resets its counters.
+
+Validation: full `make -j$(nproc)` passed, as did all 909 affected tests from 83 suites and all 42
+focused variadic/recursion/context/eligibility tests from six suites. Ten new enabled cases cover
+per-actual Int versus Stream cardinality, explicit empty groups, descriptor reuse across control
+alternatives and arities, typed UFCS, exact identity/order/duplicates, callee and owning-cell field
+defaults, conditional zero-group aliases through wrappers/lazy defaults/UFCS, capture isolation,
+per-group mutation guards and rollback, changed-arity mutual recursion and source-free Store
+export/reload. Host and mesh Vquery SOURCE routes execute the grouped graphs. Compiler-cap cases
+cover aggregate records including validators, unique variants, terminal executable/library opcodes,
+rollback and same-VM retry.
+
+The real headless CLI runs typed mutual recursion and preserves ordered `7`, exact
+`9007199254740993`, `7`. The broader sweep passed 132 of 141 tests, skipped one swarm case and
+retained the same eight unfinished frontend/exception-expectation failures. Repository formatting
+with clang-format 19 passed. No performance, total-memory or total-compilation-time improvement is
+claimed.
+
+Defaulted, context-dot, destructured and functor-valued variadic forms remain unsupported. Functors,
+lambdas, ordered projection continuations, remaining mutation/lifecycle/session semantics and full
+frontend parity still leave §4.12 incomplete.
+
+Logs: `/tmp/vql-typed-rest-build.log`, `/tmp/vql-typed-rest-focused.log`,
+`/tmp/vql-typed-rest-tests.log`, `/tmp/vql-typed-rest-overlay.log`, `/tmp/vql-typed-rest-cli.log`,
+`/tmp/vql-typed-rest-format.log`.

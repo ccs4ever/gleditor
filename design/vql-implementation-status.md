@@ -729,3 +729,28 @@ dynamic-rest budget boundary. The real CLI executes mutual recursion and preserv
 exact `9007199254740993`, `7`. The broader sweep retains the same eight unfinished failures and one
 skip, with 132 passes. No performance improvement is claimed. Typed recursive variadics, functors,
 lambdas and the remaining specification work still leave §4.12 incomplete.
+
+## Grouped typed variadic frame graphs and aggregate compilation caps
+
+Eligible typed final named rest parameters now use native frame variants keyed by original rest
+argument-group count, including zero groups. Fixed defaults and contracts precede per-group callee
+matching; each successful group retains its own guard before appending to the local rest stream.
+Explicit empty actuals are checked, while variadic shape captures do not enter body scope. Aliases
+required only by the rest contract are required only for positive-group variants, including through
+wrapper calls and UFCS; ordinary fixed/return/body requirements remain active at zero groups.
+Repeated arities share a descriptor even when control-flow alternatives have separate call sites.
+The existing VM frame format and opcodes are unchanged. See
+[iteration 40](projects/vortex-vm-only-iterations.md).
+
+Configurable per-request caps independently limit unique named variants (1,024), minted VQL opcodes
+(100,000) and finalized descriptor records (100,000), including validator frames. These counts do
+not bound all memory, arena cells or compile CPU time. Exhaustion through terminal Halt/library
+Return and linking returns a failed compilation and rolls assembly back.
+
+Full build, 909 affected tests across 83 suites and 42 focused regressions passed. Ten new enabled
+cases cover group cardinality, empty groups, defaults/captures/context, guard rollback, arity reuse,
+mutual recursive export/reload, host/mesh SOURCE routes and atomic cap refusal/retry. The real CLI
+preserves ordered `7`, exact `9007199254740993`, `7` through typed mutual recursion. The broader
+sweep retains eight known unfinished failures and one skip, with 132 passes. Repository formatting
+with clang-format 19 passed. No performance improvement is claimed. Variadic special forms,
+functors, lambdas and remaining §4.12 work remain incomplete.

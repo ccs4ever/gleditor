@@ -256,6 +256,10 @@ void VQLCompiler::chargeContractEmission() {
 
 CellRef VQLCompiler::mintOpcode(OpcodeKind kind, std::string_view label) {
   chargeContractEmission();
+  if (remainingGeneratedOpcodes_ == 0)
+    throw std::invalid_argument(
+        "compiled VQL opcode emission budget exhausted");
+  --remainingGeneratedOpcodes_;
   return vm_.mintOpcode(kind, label);
 }
 
@@ -302,11 +306,14 @@ CellRef VQLCompiler::emitInputConstant(CellRef op, const CellValue &val) {
 CompilationResult VQLCompiler::compile(const QueryExpression &query,
                                        const CompilationOptions &options) {
   zigzag::vortex::AssemblyTransaction transaction(vm_);
-  remainingContractEmissions_             = options.maxContractEmissions;
-  nextContractValidatorId_                = 0;
-  compilingGraphContract_                 = false;
-  remainingShapeProjectionRules_          = maxCompiledShapeProjectionRules;
-  remainingShapePredicateRules_           = maxCompiledShapePredicateRules;
+  remainingContractEmissions_      = options.maxContractEmissions;
+  maxNamedFrameVariants_           = options.limits.maxNamedFrameVariants;
+  remainingGeneratedOpcodes_       = options.limits.maxGeneratedOpcodes;
+  remainingFrameDescriptorRecords_ = options.limits.maxFrameDescriptorRecords;
+  nextContractValidatorId_         = 0;
+  compilingGraphContract_          = false;
+  remainingShapeProjectionRules_   = maxCompiledShapeProjectionRules;
+  remainingShapePredicateRules_    = maxCompiledShapePredicateRules;
   remainingShapePredicateValidationNodes_ = maxCompiledShapePredicateRules;
   shapeTargetConstants_.clear();
   entryOp_.reset();
@@ -322,6 +329,7 @@ CompilationResult VQLCompiler::compile(const QueryExpression &query,
   reusableFrameDefinitions_.clear();
   frameFreeCaptureNames_.clear();
   frameRequiredDefaultCaptureBindings_.clear();
+  frameConditionalRequiredDefaultCaptureBindings_.clear();
   pendingFrameDefinitions_.clear();
   frameMutableSlots_.clear();
   compilingFrameDefinition_ = false;
@@ -339,7 +347,51 @@ CompilationResult VQLCompiler::compile(const QueryExpression &query,
     if (lastResultCells_.empty() && resultCell) {
       lastResultCells_.push_back(*resultCell);
     }
+    std::optional<CellRef> terminal;
+    std::optional<CellRef> cursor;
+    if (options.targetLibrary) {
+      CellRef retOp = emitOp(OpcodeKind::Return, "#RETURN");
+      for (CellRef r : lastResultCells_) {
+        emitInput(retOp, r);
+      }
+      terminal = retOp;
+      linkAsLibrary(entryOp_.value(), options.moduleName, options.symbolName);
+    } else {
+      CellRef haltOp = emitOp(OpcodeKind::Halt, "#HALT");
+      for (CellRef r : lastResultCells_) {
+        emitInput(haltOp, r);
+      }
+      terminal = haltOp;
+      cursor   = linkAsExecutable(entryOp_.value());
+    }
+
+    std::string dis = disassemble(entryOp_);
+    for (const auto &[key, state] : frameDefinitions_) {
+      if (!state.entry) continue;
+      std::string label = key.name;
+      if (key.restGroupCount)
+        label += "<rest=" + std::to_string(*key.restGroupCount) + ">";
+      dis += "\nFRAME " + label + ":\n" + disassemble(state.entry);
+    }
+    CompilationResult result{
+        .success          = true,
+        .entryOpcode      = entryOp_,
+        .errorMessage     = "",
+        .generatedOpcodes = allOps_,
+        .disassembly      = std::move(dis),
+        .terminalOpcode   = terminal,
+        .cursor           = cursor,
+        .resultSlots      = lastResultCells_,
+    };
+    transaction.commit();
+    return result;
   } catch (const std::invalid_argument &unsupported) {
+    entryOp_.reset();
+    currentOp_.reset();
+    allOps_.clear();
+    lastResultCells_.clear();
+    frameDefinitions_.clear();
+    pendingFrameDefinitions_.clear();
     return CompilationResult{
         .success          = false,
         .entryOpcode      = std::nullopt,
@@ -348,40 +400,6 @@ CompilationResult VQLCompiler::compile(const QueryExpression &query,
         .disassembly      = "",
     };
   }
-  std::optional<CellRef> terminal;
-  std::optional<CellRef> cursor;
-  if (options.targetLibrary) {
-    CellRef retOp = emitOp(OpcodeKind::Return, "#RETURN");
-    for (CellRef r : lastResultCells_) {
-      emitInput(retOp, r);
-    }
-    terminal = retOp;
-    linkAsLibrary(entryOp_.value(), options.moduleName, options.symbolName);
-  } else {
-    CellRef haltOp = emitOp(OpcodeKind::Halt, "#HALT");
-    for (CellRef r : lastResultCells_) {
-      emitInput(haltOp, r);
-    }
-    terminal = haltOp;
-    cursor   = linkAsExecutable(entryOp_.value());
-  }
-
-  std::string dis = disassemble(entryOp_);
-  for (const auto &[name, state] : frameDefinitions_)
-    if (state.entry)
-      dis += "\nFRAME " + name + ":\n" + disassemble(state.entry);
-  CompilationResult result{
-      .success          = true,
-      .entryOpcode      = entryOp_,
-      .errorMessage     = "",
-      .generatedOpcodes = allOps_,
-      .disassembly      = std::move(dis),
-      .terminalOpcode   = terminal,
-      .cursor           = cursor,
-      .resultSlots      = lastResultCells_,
-  };
-  transaction.commit();
-  return result;
 }
 
 DimRef VQLCompiler::resolveDimension(std::string_view name) {
@@ -432,6 +450,8 @@ std::optional<CellRef> VQLCompiler::compileQuery(const QueryExpression &query) {
   frameFreeCaptureNames_    = frameEligibility->freeCaptureNames;
   frameRequiredDefaultCaptureBindings_ =
       frameEligibility->requiredDefaultCaptureBindings;
+  frameConditionalRequiredDefaultCaptureBindings_ =
+      frameEligibility->conditionalRequiredDefaultCaptureBindings;
   try {
     for (const auto &definition : query.defs)
       validateFunctionSignature(definition);

@@ -2295,11 +2295,13 @@ explicit refusals. The rulings below describe the intended semantics.
   no capture bindings. Defaulted, dot and destructured variadic forms remain explicitly unsupported.
   Explicit argument expressions compile before callee activation, so finite nested calls of the same
   definition are distinct from recursive body/default execution. Reusable native frames execute
-  eligible named definitions, including untyped final named rest and recursion. Typed rest retains
-  compiled inline graphs until per-actual checks can run in callee scope with preserved boundaries.
-  Native actual streams are prepared before callee guards: filtering a bad fixed parameter does not
-  avoid rest traversal or its budget cost. Exact fuel-threshold parity with inline calls is not
-  promised. Deferred typed variadic and functor forms remain open.
+  eligible named definitions, including typed and untyped final named rest and recursion. Typed
+  frame variants preserve each original actual group in a separate Stream port and check it in
+  callee scope after fixed formals; an explicit empty actual remains a group. Normal and empty
+  context control alternatives may share a descriptor. Native actual streams are prepared before
+  callee guards: filtering a bad fixed parameter does not avoid rest traversal or its budget cost.
+  Exact fuel-threshold parity with inline calls is not promised. Deferred variadic special forms and
+  functors remain open.
 
 - **Scalars are read as comparisons read them (§4.3).** `Int`, `Float` and `Bool` accept a cell
   minted with those value bits and a text cell whose whole content reads as one. Stored text may
@@ -2388,7 +2390,7 @@ explicit refusals. The rulings below describe the intended semantics.
   Immediate projection/traversal continuation requires an intermediate `let` until ordered path
   lowering exists. Eligible named functions execute these projections in reusable native frames,
   including recursion and caller-bound aliases; generic first-class shapes and other excluded forms
-  remain refused. See [iterations 29–39](projects/vortex-vm-only-iterations.md). Matching still
+  remain refused. See [iterations 29–40](projects/vortex-vm-only-iterations.md). Matching still
   materializes subjects; no zero-copy or universal allocation guarantee follows. Step predicates
   retain cell identity through guarded reference slots and Boolean control flow short-circuits.
   Nonempty literal shape predicates lower directional presence/absence rules, scalar literal targets
@@ -2405,9 +2407,9 @@ explicit refusals. The rulings below describe the intended semantics.
   Foreign neighbors resolve through canonical arena proxies; choice points restore iterator state
   and proxy minting. Computed defaults also execute inside eligible reusable frames, including
   self/mutual recursive matching and return promises. Their temporary registers and captures are
-  local to each activation. Universal lazy streaming, recursive functor and typed variadic frames,
-  mutation enforcement and complete frontend/parallel parity remain open. Compiled execution never
-  silently calls a direct evaluator.
+  local to each activation. Universal lazy streaming, recursive functor and remaining variadic
+  forms, mutation enforcement and complete frontend/parallel parity remain open. Compiled execution
+  never silently calls a direct evaluator.
 
 ______________________________________________________________________
 

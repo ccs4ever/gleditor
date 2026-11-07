@@ -14,6 +14,32 @@ using zigzag::vortex::FrameDescriptorSpec;
 using zigzag::vortex::FramePortKind;
 using zigzag::vortex::OpcodeKind;
 
+bool frameDescriptorCountsFit(const zigzag::vortex::FrameLimits limits,
+                              const std::size_t locals,
+                              const std::size_t argumentPorts,
+                              const std::size_t resultPorts) {
+  if (locals > limits.maxLocalsPerFrame || limits.maxDescriptorRecords == 0 ||
+      locals > limits.maxDescriptorRecords - 1)
+    return false;
+  std::size_t remaining = limits.maxDescriptorRecords - 1 - locals;
+  if (argumentPorts > remaining) return false;
+  remaining -= argumentPorts;
+  return resultPorts <= remaining;
+}
+
+bool addFrameCount(std::size_t &total, const std::size_t amount,
+                   const std::size_t limit) {
+  if (total > limit || amount > limit - total) return false;
+  total += amount;
+  return true;
+}
+
+std::string
+frameVariantSuffix(const std::optional<std::size_t> restGroupCount) {
+  if (!restGroupCount) return {};
+  return "<rest=" + std::to_string(*restGroupCount) + ">";
+}
+
 template <class Action> struct RestoreScope {
   Action action;
   ~RestoreScope() { action(); }
@@ -449,7 +475,7 @@ VQLCompiler::normalizeFrameStream(const std::span<const CellRef> cells) {
 
 void VQLCompiler::finalizeNativeFrame(
     const CellRef descriptor, FrameDescriptorSpec &spec,
-    const std::optional<std::string_view> definitionName) {
+    const std::optional<FrameDefinitionKey> definitionKey) {
   std::unordered_set<CellRef> localSet(spec.locals.begin(), spec.locals.end());
   std::vector<CellRef> mutableSlots(frameMutableSlots_.begin(),
                                     frameMutableSlots_.end());
@@ -463,11 +489,23 @@ void VQLCompiler::finalizeNativeFrame(
       spec.locals.push_back(output);
     }
   }
+  std::size_t recordCount = 1;
+  const auto addRecords   = [this, &recordCount](const std::size_t count) {
+    if (recordCount > remainingFrameDescriptorRecords_ ||
+        count > remainingFrameDescriptorRecords_ - recordCount)
+      throw std::invalid_argument(
+          "compiled VQL frame descriptor record budget exhausted");
+    recordCount += count;
+  };
+  addRecords(spec.locals.size());
+  addRecords(spec.argumentPorts.size());
+  addRecords(spec.resultPorts.size());
+  remainingFrameDescriptorRecords_ -= recordCount;
   spec.entry           = entryOp_;
   const auto finalized = vm_.finalizeFrameDescriptor(descriptor, spec);
   if (!finalized) throw std::invalid_argument(finalized.error().message);
-  if (definitionName) {
-    auto &state    = frameDefinitions_.at(std::string{*definitionName});
+  if (definitionKey) {
+    auto &state    = frameDefinitions_.at(*definitionKey);
     state.entry    = entryOp_;
     state.compiled = true;
     state.queued   = false;
@@ -646,74 +684,143 @@ std::vector<CellRef> VQLCompiler::compileReusableFrameCall(
       return std::vector<CellRef>{*found->second};
     return std::vector<CellRef>{};
   };
+  const bool hasVariadicRest =
+      !definition.params.empty() && definition.params.back().isVariadic;
+  const bool typedRest =
+      hasVariadicRest && definition.params.back().type != nullptr;
+  const bool injectContext =
+      ufcs && context && definition.params.size() > arguments.size();
+  const std::size_t fixedParameterCount =
+      definition.params.size() - static_cast<std::size_t>(hasVariadicRest);
+  const std::size_t suppliedActualCount =
+      arguments.size() + static_cast<std::size_t>(injectContext);
+  const std::size_t restGroupCount =
+      typedRest && suppliedActualCount > fixedParameterCount
+          ? suppliedActualCount - fixedParameterCount
+          : 0;
+  const VQLCompiler::FrameDefinitionKey key{
+      .name = definition.name,
+      .restGroupCount =
+          typedRest ? std::optional{restGroupCount} : std::nullopt};
+
+  const bool needsDescriptor = !frameDefinitions_.contains(key);
+  if (needsDescriptor && frameDefinitions_.size() >= maxNamedFrameVariants_)
+    throw std::invalid_argument("named frame variant budget exhausted for " +
+                                definition.name);
+
+  const auto limits              = vm_.frameLimits();
+  const std::size_t captureCount = [&] {
+    const auto captures = frameFreeCaptureNames_.find(definition.name);
+    return captures == frameFreeCaptureNames_.end() ? std::size_t{0}
+                                                    : captures->second.size();
+  }();
+  const std::size_t defaultCount =
+      static_cast<std::size_t>(std::ranges::count_if(
+          definition.params, [](const LambdaParam &parameter) {
+            return parameter.defaultValue != nullptr;
+          }));
+  const std::size_t inputParameterCount =
+      typedRest ? fixedParameterCount : definition.params.size();
+  std::size_t locals                      = 2;
+  std::size_t argumentPortCount           = 1;
+  const std::size_t descriptorRecordLimit = limits.maxDescriptorRecords;
+  if (!addFrameCount(locals, captureCount, limits.maxLocalsPerFrame) ||
+      !addFrameCount(locals, definition.params.size(),
+                     limits.maxLocalsPerFrame) ||
+      !addFrameCount(locals, defaultCount, limits.maxLocalsPerFrame) ||
+      !addFrameCount(locals, typedRest ? restGroupCount : 0,
+                     limits.maxLocalsPerFrame) ||
+      !addFrameCount(argumentPortCount, captureCount, descriptorRecordLimit) ||
+      !addFrameCount(argumentPortCount, inputParameterCount,
+                     descriptorRecordLimit) ||
+      !addFrameCount(argumentPortCount, defaultCount, descriptorRecordLimit) ||
+      !addFrameCount(argumentPortCount, typedRest ? restGroupCount : 0,
+                     descriptorRecordLimit) ||
+      !frameDescriptorCountsFit(limits, locals, argumentPortCount, 1))
+    throw std::invalid_argument(
+        "native frame exceeds configured local or descriptor-port limits");
+
   const CellRef descriptor = [&] {
-    auto state = frameDefinitions_.find(definition.name);
+    auto state = frameDefinitions_.find(key);
     if (state == frameDefinitions_.end()) {
       const auto reserved = vm_.reserveFrameDescriptor();
       if (!reserved) throw std::invalid_argument(reserved.error().message);
       state = frameDefinitions_
-                  .emplace(definition.name,
-                           FrameDefinitionState{.descriptor = *reserved})
+                  .emplace(key, FrameDefinitionState{.descriptor = *reserved})
                   .first;
     }
     const CellRef frameDescriptor = state->second.descriptor;
     if (!state->second.queued && !state->second.compiled) {
       state->second.queued = true;
-      pendingFrameDefinitions_.push_back(definition.name);
+      pendingFrameDefinitions_.push_back(key);
     }
     return frameDescriptor;
   }();
 
   std::vector<std::vector<CellRef>> actuals;
-  if (ufcs && context && definition.params.size() > arguments.size())
-    actuals.push_back({*context});
+  if (injectContext) actuals.push_back({*context});
   for (const auto &argument : arguments)
     actuals.push_back(compileArgument(argument, context));
 
-  const std::size_t suppliedActualCount = actuals.size();
-  const bool hasVariadicRest =
-      !definition.params.empty() && definition.params.back().isVariadic;
-  const std::size_t fixedParameterCount =
-      definition.params.size() - static_cast<std::size_t>(hasVariadicRest);
+  std::vector<std::vector<CellRef>> typedRestGroups;
   if (hasVariadicRest) {
-    std::vector<CellRef> restCells;
-    for (std::size_t index = fixedParameterCount; index < actuals.size();
-         ++index) {
-      const auto &actual = actuals[index];
-      restCells.insert(restCells.end(), actual.begin(), actual.end());
+    if (typedRest) {
+      for (std::size_t index = fixedParameterCount; index < actuals.size();
+           ++index)
+        typedRestGroups.push_back(std::move(actuals[index]));
+      actuals.resize(fixedParameterCount);
+    } else {
+      std::vector<CellRef> restCells;
+      for (std::size_t index = fixedParameterCount; index < actuals.size();
+           ++index) {
+        const auto &actual = actuals[index];
+        restCells.insert(restCells.end(), actual.begin(), actual.end());
+      }
+      actuals.resize(definition.params.size());
+      actuals.back() = std::move(restCells);
     }
-    actuals.resize(definition.params.size());
-    actuals.back() = std::move(restCells);
   }
 
+  std::vector<std::string> requiredNames;
   if (const auto required =
           frameRequiredDefaultCaptureBindings_.find(definition.name);
-      required != frameRequiredDefaultCaptureBindings_.end()) {
-    for (const auto &name : required->second) {
-      if (functorBindings_.contains(name))
-        throw std::invalid_argument("contract default $" + name +
-                                    " cannot capture a path functor");
-      if (const auto stream = streamBindings_.find(name);
-          stream != streamBindings_.end()) {
-        if (stream->second.size() > 1)
-          throw std::invalid_argument("contract default $" + name +
-                                      " must resolve to at most one cell");
-        if (!stream->second.empty() &&
-            core_.hasPipeline(stream->second.front()))
-          throw std::invalid_argument(
-              "contract default aliases cannot depend on parameter pipelines");
-        continue;
-      }
-      if (const auto scalar = varBindings_.find(name);
-          scalar != varBindings_.end() && scalar->second) {
-        if (core_.hasPipeline(*scalar->second))
-          throw std::invalid_argument(
-              "contract default aliases cannot depend on parameter pipelines");
-        continue;
-      }
+      required != frameRequiredDefaultCaptureBindings_.end())
+    requiredNames.insert(requiredNames.end(), required->second.begin(),
+                         required->second.end());
+  if (key.restGroupCount && *key.restGroupCount > 0) {
+    if (const auto conditional =
+            frameConditionalRequiredDefaultCaptureBindings_.find(
+                definition.name);
+        conditional != frameConditionalRequiredDefaultCaptureBindings_.end())
+      requiredNames.insert(requiredNames.end(), conditional->second.begin(),
+                           conditional->second.end());
+  }
+  std::ranges::sort(requiredNames);
+  requiredNames.erase(std::unique(requiredNames.begin(), requiredNames.end()),
+                      requiredNames.end());
+  for (const auto &name : requiredNames) {
+    if (functorBindings_.contains(name))
       throw std::invalid_argument("contract default $" + name +
-                                  " has no prior lexical binding");
+                                  " cannot capture a path functor");
+    if (const auto stream = streamBindings_.find(name);
+        stream != streamBindings_.end()) {
+      if (stream->second.size() > 1)
+        throw std::invalid_argument("contract default $" + name +
+                                    " must resolve to at most one cell");
+      if (!stream->second.empty() && core_.hasPipeline(stream->second.front()))
+        throw std::invalid_argument(
+            "contract default aliases cannot depend on parameter pipelines");
+      continue;
     }
+    if (const auto scalar = varBindings_.find(name);
+        scalar != varBindings_.end() && scalar->second) {
+      if (core_.hasPipeline(*scalar->second))
+        throw std::invalid_argument(
+            "contract default aliases cannot depend on parameter pipelines");
+      continue;
+    }
+    throw std::invalid_argument("contract default $" + name +
+                                " has no prior lexical binding");
   }
 
   std::vector<std::vector<CellRef>> capturedValues;
@@ -733,9 +840,9 @@ std::vector<CellRef> VQLCompiler::compileReusableFrameCall(
     captureStreams.push_back(normalizeFrameStream(capture));
   std::vector<CellRef> argumentStreams;
   std::vector<std::optional<CellRef>> presenceFlags;
-  argumentStreams.reserve(definition.params.size());
-  presenceFlags.reserve(definition.params.size());
-  for (std::size_t index = 0; index < definition.params.size(); ++index) {
+  argumentStreams.reserve(inputParameterCount);
+  presenceFlags.reserve(inputParameterCount);
+  for (std::size_t index = 0; index < inputParameterCount; ++index) {
     const std::vector<CellRef> empty;
     const bool present   = index < suppliedActualCount;
     const bool hasActual = index < actuals.size();
@@ -746,17 +853,25 @@ std::vector<CellRef> VQLCompiler::compileReusableFrameCall(
             ? std::optional{emitConstant(CellValue(present))}
             : std::nullopt);
   }
+  std::vector<CellRef> typedRestStreams;
+  typedRestStreams.reserve(typedRestGroups.size());
+  for (const auto &group : typedRestGroups)
+    typedRestStreams.push_back(normalizeFrameStream(group));
+
   const CellRef resultStream = emitStreamClear();
-  const CellRef invoke =
-      emitOp(OpcodeKind::InvokeFrame, "#INVOKE_FRAME " + definition.name);
+  const CellRef invoke       = emitOp(OpcodeKind::InvokeFrame,
+                                      "#INVOKE_FRAME " + definition.name +
+                                          frameVariantSuffix(key.restGroupCount));
   emitInput(invoke, descriptor);
   emitInput(invoke, contextStream);
   for (const auto capture : captureStreams) emitInput(invoke, capture);
 
-  for (std::size_t index = 0; index < definition.params.size(); ++index) {
+  for (std::size_t index = 0; index < inputParameterCount; ++index) {
     emitInput(invoke, argumentStreams[index]);
     if (presenceFlags[index]) emitInput(invoke, *presenceFlags[index]);
   }
+  for (const CellRef groupStream : typedRestStreams)
+    emitInput(invoke, groupStream);
   emitOutput(invoke, resultStream);
   dynamicStreams_.insert(resultStream);
   lastResultCells_ = {resultStream};
@@ -766,40 +881,82 @@ std::vector<CellRef> VQLCompiler::compileReusableFrameCall(
 void VQLCompiler::compilePendingFrameDefinitions() {
   for (std::size_t index = 0; index < pendingFrameDefinitions_.size();
        ++index) {
-    const auto name = pendingFrameDefinitions_[index];
-    bool compiled   = false;
+    const auto key = pendingFrameDefinitions_[index];
+    bool compiled  = false;
     {
-      const auto state = frameDefinitions_.find(name);
+      const auto state = frameDefinitions_.find(key);
       compiled = state == frameDefinitions_.end() || state->second.compiled;
     }
     if (compiled) continue;
     std::optional<DefDeclaration> definition;
     {
-      const auto found = definitions_.find(name);
+      const auto found = definitions_.find(key.name);
       if (found != definitions_.end()) definition = found->second;
     }
     if (!definition)
-      throw std::invalid_argument("missing frame definition: " + name);
-    compileFrameDefinition(*definition);
+      throw std::invalid_argument("missing frame definition: " + key.name);
+    compileFrameDefinition(*definition, key);
   }
 }
 
-void VQLCompiler::compileFrameDefinition(const DefDeclaration &definition) {
+void VQLCompiler::compileFrameDefinition(const DefDeclaration &definition,
+                                         const FrameDefinitionKey &key) {
   IsolatedCompileState isolated(*this);
 
-  const CellRef descriptor  = frameDefinitions_.at(definition.name).descriptor;
-  compilingFrameDefinition_ = true;
+  const CellRef descriptor      = frameDefinitions_.at(key).descriptor;
+  compilingFrameDefinition_     = true;
   compilingFrameDefinitionName_ = definition.name;
   activeCalls_.push_back(definition.name);
+
+  const bool typedRest             = key.restGroupCount.has_value();
+  const std::size_t restGroupCount = key.restGroupCount.value_or(0);
+  const std::size_t fixedParameterCount =
+      definition.params.size() -
+      static_cast<std::size_t>(!definition.params.empty() &&
+                               definition.params.back().isVariadic);
+  const std::size_t inputParameterCount =
+      typedRest ? fixedParameterCount : definition.params.size();
+  const std::size_t captureCount = [&] {
+    const auto captures = frameFreeCaptureNames_.find(definition.name);
+    return captures == frameFreeCaptureNames_.end() ? std::size_t{0}
+                                                    : captures->second.size();
+  }();
+  const std::size_t defaultCount =
+      static_cast<std::size_t>(std::ranges::count_if(
+          definition.params, [](const LambdaParam &parameter) {
+            return parameter.defaultValue != nullptr;
+          }));
+  const auto limits             = vm_.frameLimits();
+  std::size_t localCount        = 2;
+  std::size_t argumentPortCount = 1;
+  if (!addFrameCount(localCount, captureCount, limits.maxLocalsPerFrame) ||
+      !addFrameCount(localCount, definition.params.size(),
+                     limits.maxLocalsPerFrame) ||
+      !addFrameCount(localCount, defaultCount, limits.maxLocalsPerFrame) ||
+      !addFrameCount(localCount, typedRest ? restGroupCount : 0,
+                     limits.maxLocalsPerFrame) ||
+      !addFrameCount(argumentPortCount, captureCount,
+                     limits.maxDescriptorRecords) ||
+      !addFrameCount(argumentPortCount, inputParameterCount,
+                     limits.maxDescriptorRecords) ||
+      !addFrameCount(argumentPortCount, defaultCount,
+                     limits.maxDescriptorRecords) ||
+      !addFrameCount(argumentPortCount, typedRest ? restGroupCount : 0,
+                     limits.maxDescriptorRecords) ||
+      !frameDescriptorCountsFit(limits, localCount, argumentPortCount, 1))
+    throw std::invalid_argument(
+        "native frame exceeds configured local or descriptor-port limits");
 
   FrameDescriptorSpec spec;
   const CellRef contextSlot = core_.arena().makeCell();
   const CellRef resultSlot  = core_.arena().makeCell();
   std::vector<CellRef> captureSlots;
   std::vector<CellRef> parameterSlots;
+  std::vector<CellRef> restGroupSlots;
   std::vector<std::optional<CellRef>> presenceSlots;
   parameterSlots.reserve(definition.params.size());
   presenceSlots.reserve(definition.params.size());
+  restGroupSlots.reserve(restGroupCount);
   spec.locals = {contextSlot, resultSlot};
   spec.argumentPorts.emplace_back(contextSlot, FramePortKind::Stream);
   spec.resultPorts.emplace_back(resultSlot, FramePortKind::Stream);
@@ -813,7 +970,8 @@ void VQLCompiler::compileFrameDefinition(const DefDeclaration &definition) {
       spec.argumentPorts.emplace_back(slot, FramePortKind::Stream);
     }
   }
-  for (const auto &parameter : definition.params) {
+  for (std::size_t index = 0; index < definition.params.size(); ++index) {
+    const auto &parameter = definition.params[index];
     if (!std::holds_alternative<std::string>(parameter.target) &&
         !std::holds_alternative<bool>(parameter.target) &&
         !std::holds_alternative<DestructurePattern>(parameter.target))
@@ -823,13 +981,20 @@ void VQLCompiler::compileFrameDefinition(const DefDeclaration &definition) {
     parameterSlots.push_back(slot);
     presenceSlots.push_back(std::nullopt);
     spec.locals.push_back(slot);
-    spec.argumentPorts.emplace_back(slot, FramePortKind::Stream);
+    if (!(typedRest && index == definition.params.size() - 1))
+      spec.argumentPorts.emplace_back(slot, FramePortKind::Stream);
     if (parameter.defaultValue) {
       const CellRef present = core_.arena().makeCell();
       presenceSlots.back()  = present;
       spec.locals.push_back(present);
       spec.argumentPorts.emplace_back(present, FramePortKind::Cell);
     }
+  }
+  for (std::size_t index = 0; index < restGroupCount; ++index) {
+    const CellRef slot = core_.arena().makeCell();
+    restGroupSlots.push_back(slot);
+    spec.locals.push_back(slot);
+    spec.argumentPorts.emplace_back(slot, FramePortKind::Stream);
   }
 
   streamBindings_["."] = {contextSlot};
@@ -849,10 +1014,12 @@ void VQLCompiler::compileFrameDefinition(const DefDeclaration &definition) {
   for (const auto slot : parameterSlots) {
     dynamicStreams_.insert(slot);
   }
+  for (const auto slot : restGroupSlots) dynamicStreams_.insert(slot);
   dynamicStreams_.insert(resultSlot);
 
-  const CellRef returnOpcode =
-      emitNativeFrameReturn(descriptor, "#RETURN_FRAME " + definition.name);
+  const std::string suffix   = frameVariantSuffix(key.restGroupCount);
+  const CellRef returnOpcode = emitNativeFrameReturn(
+      descriptor, "#RETURN_FRAME " + definition.name + suffix);
   const auto emitMatch = [&](const TypeExpr &type,
                              const std::vector<CellRef> &subjects,
                              const PreparedContractValidator &prepared,
@@ -868,6 +1035,37 @@ void VQLCompiler::compileFrameDefinition(const DefDeclaration &definition) {
   for (std::size_t index = 0; index < definition.params.size(); ++index) {
     const auto &parameter = definition.params[index];
     const CellRef slot    = parameterSlots[index];
+    if (typedRest && index == definition.params.size() - 1) {
+      const auto *name = std::get_if<std::string>(&parameter.target);
+      if (!name || !parameter.type)
+        throw std::invalid_argument(
+            "typed variadic frame requires a named typed rest formal");
+      const std::string diagnostic = definition.name + " parameter " +
+                                     std::to_string(index + 1) + " ($" + *name +
+                                     ")";
+      if (diagnostic.size() > vm_.guardLimits().maxDiagnosticBytes)
+        throw std::invalid_argument(
+            "parameter guard diagnostic exceeds the configured text budget");
+
+      const CellRef clearRest =
+          emitOp(OpcodeKind::StreamClear, "#FRAME_TYPED_REST_CLEAR");
+      emitOutput(clearRest, slot);
+      for (const CellRef group : restGroupSlots) {
+        const auto prepared = prepareContractValidator(
+            *parameter.type, std::span{&group, std::size_t{1}});
+        const CellRef matched = emitContractMatch(
+            *parameter.type, std::span{&group, std::size_t{1}}, false);
+        const CellRef branch =
+            emitOp(OpcodeKind::BranchFalseCell, "#FRAME_REST_PARAM_FILTER");
+        emitInput(branch, matched);
+        emitInput(branch, returnOpcode);
+        pushContractGuard(prepared, diagnostic, "#FRAME_REST_PARAM_GUARD");
+        emitAppendStream(slot, std::span{&group, std::size_t{1}});
+      }
+      streamBindings_[*name] = {slot};
+      varBindings_[*name]    = slot;
+      continue;
+    }
     if (parameter.defaultValue) {
       const CellRef notPresent = core_.arena().makeCell();
       const CellRef negate     = emitOp(OpcodeKind::Not, "#FRAME_DEFAULT_TEST");
@@ -963,6 +1161,7 @@ void VQLCompiler::compileFrameDefinition(const DefDeclaration &definition) {
   if (!entryOp_)
     throw std::invalid_argument("frame definition emitted no entry opcode");
   appendOpcode(returnOpcode);
-  finalizeNativeFrame(descriptor, spec, definition.name);
+  const std::optional<FrameDefinitionKey> completedKey{key};
+  finalizeNativeFrame(descriptor, spec, completedKey);
 }
 } // namespace xanadu::vql

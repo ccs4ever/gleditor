@@ -207,7 +207,7 @@ TEST(VQLVariadicFrameTest, DefaultsAndUfcsKeepTheirPriorArgumentOrder) {
   EXPECT_EQ(*ufcs, (std::vector<CellRef>{h.fourth, h.fourth, h.fourth}));
 }
 
-TEST(VQLVariadicFrameTest, TypedRestStaysInlineAndChecksEachActual) {
+TEST(VQLVariadicFrameTest, TypedRestUsesNativeFramesAndChecksEachActual) {
   Harness h;
   VQLCompiler compiler(h.coordinator, h.vm);
   const auto source = "def pure collect(...$rest: Int): Stream<Int> := $rest; "
@@ -215,13 +215,11 @@ TEST(VQLVariadicFrameTest, TypedRestStaysInlineAndChecksEachActual) {
   const auto query  = Parser(source).parseQuery();
   const auto eligibility = analyzeFrameEligibility(query);
   ASSERT_TRUE(eligibility) << eligibility.error().message;
-  EXPECT_FALSE(eligibility->reusableDefinitions.contains("collect"));
-  EXPECT_NE(eligibility->refusalReasons.at("collect").find("variadic"),
-            std::string::npos);
+  EXPECT_TRUE(eligibility->reusableDefinitions.contains("collect"));
 
   const auto compiled = compiler.compile(query);
   ASSERT_TRUE(compiled.success) << compiled.errorMessage;
-  EXPECT_EQ(countFunctionInvokes(compiled, h.vm, h.arena, "collect"), 0u);
+  EXPECT_GT(countFunctionInvokes(compiled, h.vm, h.arena, "collect"), 0u);
   QueryExecutor executor(h.coordinator, h.vm);
   const auto valid = executor.execute(source);
   ASSERT_TRUE(valid) << valid.error().message;

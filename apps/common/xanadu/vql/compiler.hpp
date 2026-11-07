@@ -14,6 +14,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <span>
@@ -40,6 +41,15 @@ inline constexpr std::size_t maxCompiledShapePredicateRules  = 4096;
 inline constexpr std::size_t maxCompiledShapeProjectionRules = 4096;
 
 struct CompilationOptions {
+  struct Limits {
+    // Independent per-request ceilings for named frame variants, generated
+    // opcodes, and frame descriptor records. They do not cap all CPU or arena
+    // allocation work.
+    std::size_t maxNamedFrameVariants{1024};
+    std::size_t maxGeneratedOpcodes{100'000};
+    std::size_t maxFrameDescriptorRecords{100'000};
+  };
+
   bool targetLibrary{false};            ///< Emit library store instead of exec
   std::string moduleName{"std:custom"}; ///< Module name for library store
   std::string symbolName{"query"};      ///< Exported symbol name
@@ -47,6 +57,7 @@ struct CompilationOptions {
   std::vector<zigzag::CellRef> contextCells;
   std::unordered_map<std::string, std::vector<zigzag::CellRef>> initialBindings;
   std::size_t maxContractEmissions{65536};
+  Limits limits{};
 };
 
 struct CompilationResult {
@@ -92,6 +103,23 @@ public:
       std::optional<xanadu::MicroversionId> parent = std::nullopt) const;
 
 private:
+  struct FrameDefinitionKey {
+    std::string name;
+    // Present only for typed variadic frames. Zero means no rest actual groups;
+    // nullopt identifies an ordinary or untyped-rest frame.
+    std::optional<std::size_t> restGroupCount;
+
+    bool operator==(const FrameDefinitionKey &) const = default;
+  };
+  struct FrameDefinitionKeyHash {
+    std::size_t operator()(const FrameDefinitionKey &key) const noexcept {
+      const auto nameHash = std::hash<std::string>{}(key.name);
+      const auto countHash =
+          std::hash<std::optional<std::size_t>>{}(key.restGroupCount);
+      return nameHash ^ countHash;
+    }
+  };
+
   // Emission helpers
   zigzag::CellRef mintOpcode(zigzag::vortex::OpcodeKind kind,
                              std::string_view label = {});
@@ -150,7 +178,8 @@ private:
                            const std::vector<ValueExpr> &arguments,
                            std::optional<zigzag::CellRef> context, bool ufcs);
   void compilePendingFrameDefinitions();
-  void compileFrameDefinition(const DefDeclaration &definition);
+  void compileFrameDefinition(const DefDeclaration &definition,
+                              const FrameDefinitionKey &key);
   class IsolatedCompileState;
   struct PreparedContractValidator {
     zigzag::CellRef descriptor;
@@ -173,7 +202,7 @@ private:
   void endMutationGroup(zigzag::CellRef token, std::string_view label);
   void finalizeNativeFrame(
       zigzag::CellRef descriptor, zigzag::vortex::FrameDescriptorSpec &spec,
-      std::optional<std::string_view> definitionName = std::nullopt);
+      std::optional<FrameDefinitionKey> definitionKey = std::nullopt);
   zigzag::CellRef emitNativeFrameReturn(zigzag::CellRef descriptor,
                                         std::string_view label);
   [[nodiscard]] zigzag::CellRef
@@ -204,19 +233,26 @@ private:
       frameFreeCaptureNames_;
   std::unordered_map<std::string, std::vector<std::string>>
       frameRequiredDefaultCaptureBindings_;
+  std::unordered_map<std::string, std::vector<std::string>>
+      frameConditionalRequiredDefaultCaptureBindings_;
   struct FrameDefinitionState {
     zigzag::CellRef descriptor;
     std::optional<zigzag::CellRef> entry;
     bool queued{false};
     bool compiled{false};
   };
-  std::unordered_map<std::string, FrameDefinitionState> frameDefinitions_;
+  std::unordered_map<FrameDefinitionKey, FrameDefinitionState,
+                     FrameDefinitionKeyHash>
+      frameDefinitions_;
   std::unordered_set<std::string> reusableFrameDefinitions_;
-  std::vector<std::string> pendingFrameDefinitions_;
+  std::vector<FrameDefinitionKey> pendingFrameDefinitions_;
   std::unordered_set<zigzag::CellRef> frameMutableSlots_;
   bool compilingFrameDefinition_{false};
   std::string compilingFrameDefinitionName_;
   std::vector<std::string> activeCalls_;
+  std::size_t maxNamedFrameVariants_{};
+  std::size_t remainingGeneratedOpcodes_{};
+  std::size_t remainingFrameDescriptorRecords_{};
   std::optional<zigzag::CellRef> ambientContext_;
   std::vector<zigzag::CellRef> contextInputs_;
   std::unordered_map<std::string, std::vector<zigzag::CellRef>> streamBindings_;

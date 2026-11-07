@@ -25,9 +25,13 @@ struct FrameEligibility {
   std::unordered_set<std::string> reusableDefinitions;
   /// Sorted free lexical aliases captured from each call site's current scope.
   std::unordered_map<std::string, std::vector<std::string>> freeCaptureNames;
-  /// Sorted subset that must be bound to preserve field-default resolution.
+  /// Sorted aliases required by every activation for field-default resolution.
   std::unordered_map<std::string, std::vector<std::string>>
       requiredDefaultCaptureBindings;
+  /// Required only by typed-rest validators when at least one rest actual is
+  /// present at the named callsite; zero-group variants omit these checks.
+  std::unordered_map<std::string, std::vector<std::string>>
+      conditionalRequiredDefaultCaptureBindings;
   std::unordered_map<std::string, std::string> refusalReasons;
 };
 
