@@ -665,6 +665,14 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
   // the typed value writeValue writes; a plain record takes a fresh
   // refCell, the same shape outbox refs mint.
   const auto storeVarRef = [&](CellRef rec, CellRef referent) {
+    // A bare `none` arrives as position 0 — noCell is never a live
+    // referent, and marking it would harvest the Opt's empty state as
+    // a pointer. Route it through the scalar store, which also clears
+    // any mark a previous ref left on the slot.
+    if (referent == noCell) {
+      storeVar(rec, CellValue{std::int64_t{0}});
+      return;
+    }
     if (const auto holder =
             arena.linked(rec, core.dims().values, DimVector::POS)) {
       const auto mark =
@@ -682,6 +690,29 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
     zigzag::expectWritten(
         arena.link(rec, core.dims().values, DimVector::POS,
                    refCell(arena, core, referent)));
+  };
+
+  // A produced Int64 is a position when the fragment's declared result
+  // type carries refs — Cell/Intention/Agent handles, containers and
+  // user terms all mint cells. Opt<X> inherits X's answer (`none` is
+  // the bare 0 storeVarRef routes to the scalar path); the plain
+  // scalars never mint. The CellValue alone cannot say which side an
+  // Int64 sits on — `some(5)` and a ref are the same bits — so the
+  // descriptor's `+d.name` spelling is the only honest channel.
+  const auto refTypedResult = [&](CellRef head, const CellValue &val) {
+    if (!std::holds_alternative<std::int64_t>(val)) return false;
+    const auto type = meta.resultTypeOf(head);
+    if (!type) return false;
+    std::string_view inner{*type};
+    // `<any>` is the lowering's stamp for a thunk whose real type the
+    // checker did not thread through — unclassifiable Int64s take the
+    // scalar path, the same default as a descriptor-less head.
+    if (inner.empty() || inner == "<any>") return false;
+    if (inner.starts_with("Opt<") && inner.ends_with('>'))
+      inner = inner.substr(4, inner.size() - 5);
+    return inner != "Int" && inner != "Float" && inner != "Str" &&
+           inner != "Bool" && inner != "()" && inner != "Duration" &&
+           inner != "Time";
   };
 
   // §9.2's lifecycle events: a raise journals the percept — it is
@@ -1460,8 +1491,13 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
           // agent's vars under the bound name, the adopt convention.
           if (const auto bound = field("result"); bound != noCell)
             if (const auto rec =
-                    varsRecord(arena, core, agent, arena.textOf(bound), true))
-              storeVar(*rec, *outcome.result);
+                    varsRecord(arena, core, agent, arena.textOf(bound), true)) {
+              if (refTypedResult(*head, *outcome.result))
+                storeVarRef(*rec, static_cast<CellRef>(
+                                      std::get<std::int64_t>(*outcome.result)));
+              else
+                storeVar(*rec, *outcome.result);
+            }
           return true;
         }
         // Nothing installed provides the capacity — an honest refuse.
@@ -1506,8 +1542,19 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
               // A refused or empty init leaves the slot standing —
               // the same honesty rule as an uninitialised agent var.
               if (outcome.refusal == MetaRunOutcome::Refusal::None &&
-                  outcome.produced && outcome.result)
+                  outcome.produced && outcome.result) {
                 core.writeValue(holder, 0, std::nullopt, *outcome.result);
+                // A ref-valued field carries the same mark a var.slot
+                // does — the fresh holder starts unmarked, so this
+                // only ever adds.
+                if (refTypedResult(*head, *outcome.result)) {
+                  const auto reloc =
+                      core.findOrMintDimension("d.mesh.relocation");
+                  zigzag::expectWritten(arena.link(
+                      holder, reloc, DimVector::POS,
+                      arena.makeCell("cell")));
+                }
+              }
             }
       };
       if (verb == "unmount") {
@@ -2159,16 +2206,22 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
         // The produced value is marshaled as a bare cell — scalar or
         // text answers copy, a structured answer (a record term)
         // rides as the cell itself so the asker's `r.field` reads
-        // through #FIND.
-        const auto value = std::visit(
-            [&](const auto &x) -> CellRef {
-              using T = std::decay_t<decltype(x)>;
-              if constexpr (std::is_same_v<T, std::string>)
-                return arena.makeCell(x);
-              else
-                return arena.makeScalarCell(x);
-            },
-            *outcome.result);
+        // through #FIND. A ref-typed Int64 answer mints refCell —
+        // unmarked it dead-reads through the next fold.
+        const auto value =
+            refTypedResult(answerHead, *outcome.result)
+                ? refCell(arena, core,
+                          static_cast<CellRef>(
+                              std::get<std::int64_t>(*outcome.result)))
+                : std::visit(
+                      [&](const auto &x) -> CellRef {
+                        using T = std::decay_t<decltype(x)>;
+                        if constexpr (std::is_same_v<T, std::string>)
+                          return arena.makeCell(x);
+                        else
+                          return arena.makeScalarCell(x);
+                      },
+                      *outcome.result);
         stageOutbox("answer", value, senderName, {}, noCell, requestId,
                     pred);
         continue;
@@ -2294,25 +2347,19 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
     if (outcome.refusal != MetaRunOutcome::Refusal::None ||
         !outcome.produced || !outcome.result)
       return false;
-    const auto value = std::visit(
-        [&](const auto &x) -> CellRef {
-          using T = std::decay_t<decltype(x)>;
-          if constexpr (std::is_same_v<T, std::string>)
-            return arena.makeCell(x);
-          else
-            return arena.makeScalarCell(x);
-        },
-        *outcome.result);
+    // The recovery's produced value lands on the agent's bound var —
+    // the same classified store capcall uses, so a ref-typed `else`
+    // result rides the manifest and a var.slot keeps its holder.
     if (const auto rec =
             varsRecord(arena, core, intention, "awaitBind", false))
       if (const auto v = arena.linked(*rec, core.dims().values, DimVector::POS))
         if (const auto dst =
                 varsRecord(arena, core, agent, arena.textOf(*v), true)) {
-          if (arena.linked(*dst, core.dims().values, DimVector::POS))
-            zigzag::expectWritten(
-                arena.unlink(*dst, core.dims().values, DimVector::POS));
-          zigzag::expectWritten(arena.link(*dst, core.dims().values,
-                                           DimVector::POS, value));
+          if (refTypedResult(head, *outcome.result))
+            storeVarRef(*dst, static_cast<CellRef>(
+                                  std::get<std::int64_t>(*outcome.result)));
+          else
+            storeVar(*dst, *outcome.result);
         }
     meta.setIntentionField(intention, "waiting", 0);
     meta.setIntentionField(intention, "delegated", 0);
@@ -2521,36 +2568,43 @@ VagentExecutor::operator()(const ActorExecution &exec, WorkerContext &ctx) {
                   arena.linked(*rec, core.dims().values, DimVector::POS))
             if (const auto dst =
                     varsRecord(arena, core, agent, arena.textOf(*v), true)) {
-              if (arena.linked(*dst, core.dims().values, DimVector::POS))
-                zigzag::expectWritten(
-                    arena.unlink(*dst, core.dims().values, DimVector::POS));
               const auto bound =
                   matchDelivered != noCell ? matchDelivered : matchCell;
               // An ask reply (`corr` set) delivers the bare answer
               // cell: a leaf answer binds its value so `r` reads 42,
               // not a handle — a structured answer stays a ref for
               // `r.field`/#FIND. An `as g` binding always takes the
-              // ref: its value is the term to Find on.
-              CellRef stored = noCell;
+              // ref: its value is the term to Find on. The store goes
+              // through the classified helpers — a marked leaf (a
+              // ref-typed answer) stays a ref, and a var.slot keeps
+              // its holder.
+              bool stored = false;
               if (!corr.empty() && bound != noCell) {
-                if (const auto n = arena.asInt64(bound))
-                  stored = arena.makeScalarCell(*n);
-                else if (const auto d = arena.asDouble(bound))
-                  stored = arena.makeScalarCell(*d);
-                else if (const auto b = arena.asBool(bound))
-                  stored = arena.makeScalarCell(*b);
-                else if (zigzag::rankAfter(arena, bound,
-                                           core.dims().step)
-                             .empty())
-                  stored = arena.makeCell(arena.textOf(bound));
+                const auto reloc =
+                    arena.dimensionNamed("d.mesh.relocation");
+                if (const auto n = arena.asInt64(bound);
+                    reloc && arena.linked(bound, *reloc, DimVector::POS) &&
+                    n) {
+                  storeVarRef(*dst, static_cast<CellRef>(*n));
+                  stored = true;
+                } else if (n) {
+                  storeVar(*dst, CellValue{*n});
+                  stored = true;
+                } else if (const auto d = arena.asDouble(bound)) {
+                  storeVar(*dst, CellValue{*d});
+                  stored = true;
+                } else if (const auto b = arena.asBool(bound)) {
+                  storeVar(*dst, CellValue{*b});
+                  stored = true;
+                } else if (zigzag::rankAfter(arena, bound,
+                                             core.dims().step)
+                               .empty()) {
+                  storeVar(*dst, CellValue{std::string{arena.textOf(bound)}});
+                  stored = true;
+                }
               }
-              if (stored == noCell)
-                // A structured answer binds by reference — the marked
-                // form, since the cell's position dead-reads verbatim.
-                stored = refCell(arena, core, bound);
-              zigzag::expectWritten(
-                  arena.link(*dst, core.dims().values, DimVector::POS,
-                             stored));
+              if (!stored)
+                storeVarRef(*dst, bound);
             }
         meta.setIntentionField(intention, "waiting", 0);
         meta.setIntentionField(intention, "ready", 1);

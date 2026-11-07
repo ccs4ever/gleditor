@@ -1751,6 +1751,13 @@ MetaRuntime::MetaSignature MetaRuntime::signatureOf(CellRef head) const {
   return sig;
 }
 
+std::optional<std::string>
+MetaRuntime::resultTypeOf(CellRef head) const {
+  const auto sig = signatureOf(head);
+  if (!sig.descriptor) return std::nullopt;
+  return sig.resultType;
+}
+
 std::expected<CellRef, std::string>
 MetaRuntime::clauseHost(std::string_view name) const {
   // First-`:` split is a module arm only when the qualifier resolves;

@@ -481,6 +481,13 @@ public:
   /// `validate`'s pass serial share.
   [[nodiscard]] std::expected<std::int64_t, std::string> nextSerial() const;
 
+  /// The head's declared result type spelling off its `+d.values`
+  /// descriptor — `std::nullopt` when the head carries no descriptor.
+  /// The executor reads it to classify a produced Int64 as a cell
+  /// position versus a plain scalar at the durable-store boundary —
+  /// `CellValue` alone cannot say which side the bits sit on.
+  [[nodiscard]] std::optional<std::string> resultTypeOf(CellRef head) const;
+
   // -- Mutation surface (§6.1's phase-4 half) ------------------------------
 
   /// Unit-returning mutation arms name their refusal class in the
