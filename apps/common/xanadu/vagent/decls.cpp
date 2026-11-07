@@ -162,6 +162,10 @@ struct Lowerer {
                Type result, bool stubIsBoolean) {
     if (auto head = emitHead(decl, body, params, label, Type{result}))
       return head;
+    // A pure body that refused emission is a gap, not the designed
+    // spine-shadow — host-verb bodies stub by design (+d.step carries
+    // them), so only the gap case joins the image's degraded audit.
+    if (!bodyHasHostVerb(body)) image.stubbed.push_back(decl.name);
     Expr stub;
     stub.kind = stubIsBoolean ? ExprKind::Boolean : ExprKind::Unit;
     stub.text = stubIsBoolean ? "true" : "";

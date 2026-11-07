@@ -339,4 +339,26 @@ TEST(VagentDeclsTest, BindMintRecoversTheFiledLineage) {
             static_cast<std::uint32_t>(image->imageExtent));
 }
 
+TEST(VagentDeclsTest, GapStubsFileUnderStubbedButDesignedOnesDoNot) {
+  DeclHarness h;
+  auto image = h.lower(R"(
+    module demo
+    event Done
+    goal Work() perform
+    agent A {
+      plan p for Work { emit Done{} }
+      def f(): Opt<Int> { none }
+      def g(): Opt<Int> { none }
+    }
+  )");
+  ASSERT_TRUE(image.has_value());
+  if (!image) return;
+  // `none` type-checks for Opt<Int> but has no scalar lowering — the
+  // stub is a gap, so both f and g join the audit. The plan body's
+  // emit is a host verb: its head stubs by design (+d.step carries
+  // the verbs), and the designed shadow stays out of the audit.
+  EXPECT_THAT(image->stubbed,
+              ::testing::UnorderedElementsAre("f", "g"));
+}
+
 } // namespace
