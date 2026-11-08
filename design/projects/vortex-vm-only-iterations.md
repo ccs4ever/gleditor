@@ -2010,3 +2010,50 @@ Logs: `/tmp/vql-lambda-values-build.log`, `/tmp/vql-lambda-values-focused.log`,
 `/tmp/vql-lambda-values-tests.log`, `/tmp/vql-lambda-values-cli.log`,
 `/tmp/vql-lambda-values-callables.log`, `/tmp/vql-lambda-values-overlay.log`,
 `/tmp/vql-lambda-values-format.log`.
+
+## Iteration 52: runtime binding persistence and usable closure sessions
+
+This larger iteration delivers graph binding transport, portable bound closure application and
+session publication together. `VORTEX_BINDINGS/1` records literal Cell register targets, including
+missing results, ordered duplicate/empty Stream membership and unavailable/exhausted Iterator type
+markers. `RestoreBindings` stages replacement maps and advances the managed cursor under an arena
+savepoint. Failure restores maps, cursor ownership, physical cursor state and cumulative load
+counters. Successful loads remain cumulative. Live frames, choices, scopes, resumable state and
+unfinished iterators refuse; this is binding transport, not continuation migration.
+
+Cell data and VM bindings are independent. Export now preserves physical scalar bits/text and
+relocates every runtime binding through explicit descriptor records, including disconnected slots
+and alias cycles. A stream member that is itself another register remains that literal member.
+Ordinary integer data is never inferred to be a reference. Declared parameter, descriptor and cursor
+reference fields still relocate. Destination metadata and one native initializer are written only
+after snapshot/schema/reference preflight; the source arena stays unchanged. Descriptor work,
+records, metadata bytes/relations, slots/references and cumulative restore quotas are bounded.
+
+The VQL compiler reports the final top-level binding layout. Successful execution publishes actual
+VM cell-reference results atomically into the session before cursor cleanup. Failed execution
+publishes nothing. Static functor syntax remains a compilation intermediate across queries;
+functor/value/lens shadowing removes the old kind. Callee locals stay scoped. The CLI now retains
+one session engine across REPL lines while each query compiles and runs in its own VM.
+
+Validation: full `make -j$(nproc)` passed, all 1,084 affected tests across 100 suites passed and all
+26 focused tests across six suites passed. New cases cover literal alias cycles and data/register
+overlap, numeric payloads equal to CellRefs, exact Int64/Double values, missing/open/empty bindings,
+closed and unfinished iterators, local parser inspection limits, malformed descriptors, repeated
+cursor initialization, pre-Store quota refusal and a fuel-failure sweep with quota-preserving retry.
+A frame-created closure is applied directly after source-VM destruction and Store reload; its
+factory is not rerun. Both Cell and Stream handle routes work. Session tests use a fresh VM per
+query and cover recursive creator-frame lifetime, rebinding, live referenced contents, scope and
+return-promise failure. The real headless REPL returns exact `9007199254740993` through a closure
+created recursively on its previous line.
+
+Independent architecture, senior and resource reviews found and resolved descriptor marker,
+cumulative inspection and relation-limit issues. Session syntax/map copying is not optimized and no
+speedup or total CPU/heap claim is made. Broader callable and route audits are recorded with the
+validation logs; their unfinished functionality is not a full-suite pass. Broader closure
+signatures/bodies, general dynamic functors, deferred variadics and remaining route/lifecycle work
+still leave §4.12 incomplete.
+
+Logs: `/tmp/vql-persistent-bindings-build.log`, `/tmp/vql-persistent-bindings-focused.log`,
+`/tmp/vql-persistent-bindings-tests.log`, `/tmp/vql-persistent-bindings-cli.log`,
+`/tmp/vql-persistent-bindings-callables.log`, `/tmp/vql-persistent-bindings-overlay.log`,
+`/tmp/vql-persistent-bindings-format.log`.

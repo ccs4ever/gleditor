@@ -456,6 +456,7 @@ int main(int argc, char *argv[]) {
 
   // What the last query found: what -o and :save write.
   std::vector<zigzag::CellRef> lastResults;
+  xanadu::vql::VQLEngine engine(coordinator);
   // Query Execution Helper
   bool hasResults = false;
   auto runQuery   = [&](std::string_view qStr) -> bool {
@@ -473,7 +474,6 @@ int main(int argc, char *argv[]) {
       std::cout << xanadu::vql::AsciiVisualizer::renderAST(ast) << "\n";
     }
 
-    xanadu::vql::VQLEngine engine(coordinator);
     if (const auto root = lensRepl.root()) engine.setVariable("lens", *root);
     zigzag::vortex::VortexVM vm(coordinator.core());
     xanadu::vql::QueryExecutionOptions executionOptions;

@@ -80,6 +80,23 @@ TEST_F(VQueryE2ETest, HelpFlag) {
   EXPECT_NE(res.output.find("--output-store"), std::string::npos);
 }
 
+TEST_F(VQueryE2ETest, ReplKeepsCompiledClosureBindingsAcrossQueries) {
+  const auto input = testDir / "closure-session.vql";
+  {
+    std::ofstream script(input);
+    script
+        << R"(let $owned := string(9007199254740993); let $f := \($x) $owned; return ##)"
+        << '\n'
+        << "return ##/$f\n:quit\n";
+  }
+  const auto result = runVQuery("--engine vortex < '" + input.string() + "'");
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  EXPECT_EQ(result.output.find("Query failed:"), std::string::npos)
+      << result.output;
+  EXPECT_NE(result.output.find("9007199254740993"), std::string::npos)
+      << result.output;
+}
+
 TEST_F(VQueryE2ETest, DirectEvaluationBasic) {
   auto res = runVQuery("-e \"##\" --format cells");
   EXPECT_EQ(res.exitCode, 0) << res.output;

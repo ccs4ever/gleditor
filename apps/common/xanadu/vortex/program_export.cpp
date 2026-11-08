@@ -83,6 +83,13 @@ void collectClosureReferences(const VortexCore &core, const VortexVM &vm,
                          instructions);
     return;
   }
+  if (*tag == "VORTEX_BINDINGS/1") {
+    const auto parsed = vm.bindingsDescriptor(root);
+    if (!parsed) throw std::runtime_error(parsed.error().message);
+    for (const auto &[record, target] : parsed->referenceCells)
+      references.emplace(record, target);
+    return;
+  }
   throw std::runtime_error(
       "export found an unknown claimed runtime-object tag");
 }
@@ -112,6 +119,18 @@ exportProgram(const VortexCore &core, const VortexVM &vm,
   if (vm.hasActiveFrames())
     throw std::runtime_error(
         "export of a live activation frame requires persisted runtime state");
+
+  const auto originalEntry =
+      arena.linked(core.home(), core.dims().spin, DimVector::POS);
+  const auto bindings    = vm.snapshotBindings(originalEntry);
+  const bool hasBindings = !bindings.cellReferences.empty() ||
+                           !bindings.streams.empty() ||
+                           !bindings.iterators.empty();
+  if (hasBindings && !originalEntry)
+    throw std::runtime_error(
+        "runtime bindings require an executable home.spin entry");
+  if (hasBindings && !core.dims().runtimeObjectClaim)
+    throw std::runtime_error("Vortex runtime-object dimension is unavailable");
 
   if (std::ranges::any_of(vm.choiceStack(),
                           [](const auto &choice) { return choice.scoped; }))
@@ -163,23 +182,6 @@ exportProgram(const VortexCore &core, const VortexVM &vm,
         *kind == OpcodeKind::Call || *kind == OpcodeKind::Choice)
       throw std::runtime_error(
           "numeric control targets require relocation before export");
-    if (*kind == OpcodeKind::ApplyClosure) {
-      const auto inputs = core.inputsOf(opcode);
-      if (inputs.empty())
-        throw std::runtime_error("ApplyClosure has no closure handle input");
-      const auto refuseBinding = [] {
-        throw std::runtime_error(
-            "export of a runtime-bound ApplyClosure handle requires a direct "
-            "closure graph value or persisted runtime binding");
-      };
-      std::size_t handleCount = 0;
-      vm.forEachResultCell(inputs.front(), [&](const CellRef value) {
-        arena.consumeWork();
-        if (handleCount != 0 || value != inputs.front()) refuseBinding();
-        ++handleCount;
-      });
-      if (handleCount != 1) refuseBinding();
-    }
     for (const auto side : {DimVector::POS, DimVector::NEG}) {
       auto slot = arena.linked(opcode, core.dims().grab, side);
       std::set<CellRef> seen;
@@ -263,8 +265,6 @@ exportProgram(const VortexCore &core, const VortexVM &vm,
     if (arena.isProxy(cell.birthOp))
       throw std::runtime_error(
           "export of foreign query cells requires a source binding");
-    if (const auto target = vm.cellReferenceOf(cell.birthOp))
-      referenceOperands.emplace(cell.birthOp, *target);
     for (const auto &link : arena.dimensionsOf(cell.birthOp))
       axes.insert(link.dim);
   }
@@ -272,10 +272,72 @@ exportProgram(const VortexCore &core, const VortexVM &vm,
     (void)operand;
     axes.insert(axis);
   }
+  axes.insert(core.dims().grab);
+  axes.insert(core.dims().step);
+  axes.insert(core.dims().spin);
+  if (core.dims().runtimeObjectClaim)
+    axes.insert(*core.dims().runtimeObjectClaim);
   for (const auto axis : axes)
     if (!arena.contains(axis) || arena.textOf(axis).empty())
       throw std::runtime_error(
           "export dimension has no local identity or name");
+
+  // Check every reference and edge before the first Store mutation. Runtime
+  // register values are explicit descriptor records; integer payloads remain
+  // ordinary data unless the graph schema declares them as references.
+  for (const auto &[source, target] : referenceOperands)
+    if (!arena.contains(source) || !arena.contains(target))
+      throw std::runtime_error("export reference has an unmapped endpoint");
+  for (const auto &[source, target] : bindings.cellReferences) {
+    if (!arena.contains(source) || (target && !arena.contains(*target)))
+      throw std::runtime_error("runtime binding has an unmapped endpoint");
+  }
+  for (const auto &[slot, members] : bindings.streams) {
+    if (!arena.contains(slot) ||
+        !std::ranges::all_of(members, [&](const CellRef value) {
+          return arena.contains(value);
+        }))
+      throw std::runtime_error("runtime stream has an unmapped member");
+  }
+  for (const auto &[slot, _] : bindings.iterators)
+    if (!arena.contains(slot))
+      throw std::runtime_error("runtime iterator has an unmapped slot");
+  if (hasBindings) {
+    const auto limits     = vm.bindingsLimits();
+    std::size_t records   = 0;
+    const auto addRecords = [&](const std::size_t count) {
+      if (count > limits.maxDescriptorRecords -
+                      std::min(records, limits.maxDescriptorRecords))
+        throw std::runtime_error(
+            "runtime binding descriptor exceeds the record limit");
+      records += count;
+    };
+    addRecords(bindings.cellReferences.size());
+    addRecords(bindings.streams.size());
+    addRecords(bindings.iterators.size());
+    addRecords(bindings.cellReferences.size());
+    for (const auto &[_, members] : bindings.streams) {
+      addRecords(members.size());
+    }
+    if (records > limits.maxDescriptorRecords ||
+        limits.maxMetadataRelations < 2 ||
+        limits.maxMetadataBytes < zigzag::runtimeObjectProbeText.size() ||
+        limits.maxMetadataBytes < std::string_view{"VORTEX_BINDINGS/1"}.size())
+      throw std::runtime_error(
+          "runtime binding descriptor exceeds metadata limits");
+    for (const auto role :
+         {"ref.cell.slot", "ref.cell.target", "ref.stream.slot",
+          "ref.stream.member", "ref.iterator.unavailable",
+          "ref.iterator.exhausted"})
+      if (std::string_view{role}.size() > limits.maxMetadataBytes)
+        throw std::runtime_error(
+            "runtime binding descriptor role exceeds the metadata limit");
+  }
+  for (const auto &cell : arena.cells())
+    for (const auto &edge : arena.dimensionsOf(cell.birthOp))
+      if (const auto target = edge.neighbor(DimVector::POS);
+          target && !arena.contains(*target))
+        throw std::runtime_error("export edge has an unmapped endpoint");
 
   auto version =
       parent.value_or(store.structureHead().value_or(store.latest()));
@@ -304,8 +366,7 @@ exportProgram(const VortexCore &core, const VortexVM &vm,
   // numbers, while scalar minting canonicalizes display text; neither preserves
   // an arena slot exactly. Restate both halves even for the mapped root/axes.
   for (const auto &slot : arena.cells()) {
-    const auto source = slot.birthOp;
-    if (referenceOperands.contains(source)) continue;
+    const auto source  = slot.birthOp;
     const auto content = store.userPermascroll().append(arena.textOf(source));
     version            = store.setValue(version, cells.at(source), content,
                                         static_cast<xanadu::ValueKind>(slot.valueKind),
@@ -319,9 +380,84 @@ exportProgram(const VortexCore &core, const VortexVM &vm,
                                         xanadu::ValueKind::Int64,
                                         static_cast<std::uint64_t>(cells.at(target)));
   }
+
+  std::optional<CellRef> persistedBindings;
+  if (hasBindings) {
+    const auto claimAxis = dimensions.at(*core.dims().runtimeObjectClaim);
+    const auto grabAxis  = dimensions.at(core.dims().grab);
+    const auto stepAxis  = dimensions.at(core.dims().step);
+    const auto rootText =
+        store.userPermascroll().append(zigzag::runtimeObjectProbeText);
+    version            = store.makeCell(version, rootText);
+    persistedBindings  = *store.cellRefOf(version);
+    version            = store.setValue(version, *persistedBindings, rootText,
+                                        xanadu::ValueKind::None, 0);
+    const auto tagText = store.userPermascroll().append("VORTEX_BINDINGS/1");
+    version            = store.makeCell(version, tagText);
+    const auto tagCell = *store.cellRefOf(version);
+    version =
+        store.setValue(version, tagCell, tagText, xanadu::ValueKind::None, 0);
+    version = store.setLink(version, *persistedBindings, claimAxis,
+                            DimVector::POS, tagCell);
+
+    std::optional<CellRef> lastRecord;
+    auto addRecord = [&](const std::string_view role,
+                         const std::int64_t value) {
+      const auto roleText = store.userPermascroll().append(role);
+      version             = store.makeCell(version, roleText);
+      const auto record   = *store.cellRefOf(version);
+      version =
+          store.setValue(version, record, roleText, xanadu::ValueKind::Int64,
+                         static_cast<std::uint64_t>(value));
+      version = store.setLink(version, lastRecord.value_or(*persistedBindings),
+                              lastRecord ? stepAxis : grabAxis, DimVector::POS,
+                              record);
+      lastRecord = record;
+    };
+    for (const auto &[slot, target] : bindings.cellReferences) {
+      addRecord("ref.cell.slot", static_cast<std::int64_t>(cells.at(slot)));
+      addRecord("ref.cell.target",
+                target ? static_cast<std::int64_t>(cells.at(*target)) : -1);
+    }
+    for (const auto &[slot, members] : bindings.streams) {
+      addRecord("ref.stream.slot", static_cast<std::int64_t>(cells.at(slot)));
+      for (const auto member : members)
+        addRecord("ref.stream.member",
+                  static_cast<std::int64_t>(cells.at(member)));
+    }
+    for (const auto &[slot, state] : bindings.iterators)
+      addRecord(state == ClosedIteratorState::Unavailable
+                    ? "ref.iterator.unavailable"
+                    : "ref.iterator.exhausted",
+                static_cast<std::int64_t>(cells.at(slot)));
+
+    const auto emptyText     = store.userPermascroll().append("");
+    version                  = store.makeCell(version, emptyText);
+    const auto restoreOpcode = *store.cellRefOf(version);
+    version                  = store.setValue(
+        version, restoreOpcode, emptyText, xanadu::ValueKind::Int64,
+        static_cast<std::uint64_t>(OpcodeKind::RestoreBindings));
+    version            = store.makeCell(version, emptyText);
+    const auto operand = *store.cellRefOf(version);
+    version =
+        store.setValue(version, operand, emptyText, xanadu::ValueKind::Int64,
+                       static_cast<std::uint64_t>(*persistedBindings));
+    version = store.setLink(version, restoreOpcode, grabAxis, DimVector::POS,
+                            operand);
+    version = store.setLink(version, *store.homeCell(),
+                            dimensions.at(core.dims().spin), DimVector::POS,
+                            restoreOpcode);
+    version =
+        store.setLink(version, restoreOpcode, dimensions.at(core.dims().spin),
+                      DimVector::POS, cells.at(*originalEntry));
+  }
   for (const auto &slot : arena.cells()) {
     const auto source = slot.birthOp;
     for (const auto &edge : arena.dimensionsOf(source)) {
+      if (hasBindings && source == core.home() &&
+          edge.dim == core.dims().spin &&
+          edge.neighbor(DimVector::POS) == originalEntry)
+        continue;
       if (const auto target = edge.neighbor(DimVector::POS)) {
         if (!cells.contains(*target))
           throw std::runtime_error("export edge refers to an unmapped cell");

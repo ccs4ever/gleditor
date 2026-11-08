@@ -72,6 +72,7 @@ private:
   MultiStoreCoordinator &coordinator_;
   ContractBindings bindings_;
   std::optional<std::reference_wrapper<const ContractBindings>> bindingSource_;
+  VQLEngine *session_{nullptr};
   zigzag::vortex::VortexVM &vm_;
   QueryExecutionOptions options_;
   std::string disassembly_;

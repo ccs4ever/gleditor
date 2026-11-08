@@ -256,14 +256,14 @@ TEST(VortexClosureExportTest,
     ASSERT_TRUE(originalClosure);
     ASSERT_TRUE(h.vm.closureValue(*originalClosure));
     h.vm.setCursorOpcode(originalCursor, std::nullopt);
+    h.next(h.core.home(), apply);
 
     xanadu::Store store(scroll);
-    const auto before = store.latest();
-    const std::vector<CellRef> runtimeBoundProgram{apply};
-    EXPECT_THROW((void)zigzag::vortex::exportProgram(
-                     h.core, h.vm, runtimeBoundProgram, store),
-                 std::runtime_error);
-    EXPECT_EQ(store.latest(), before);
+    const std::vector<CellRef> runtimeBoundProgram{invoke, apply, halt};
+    const auto runtimeExported =
+        zigzag::vortex::exportProgram(h.core, h.vm, runtimeBoundProgram, store);
+    EXPECT_FALSE(runtimeExported.isZero());
+    store.save((temporary.path / "runtime-bound-closure").string());
 
     // A materialized value is portable graph data; the VM register referring
     // to it requires a separate runtime-binding initialization protocol.
@@ -281,6 +281,33 @@ TEST(VortexClosureExportTest,
     store.save((temporary.path / "materialized-closure").string());
   }
 
+  xanadu::Store runtimeLoaded(scroll);
+  runtimeLoaded.load((temporary.path / "runtime-bound-closure").string());
+  ASSERT_TRUE(runtimeLoaded.structureHead());
+  const auto runtimeManifold =
+      runtimeLoaded.rebuildManifold(*runtimeLoaded.structureHead());
+  zigzag::ArenaManifold runtimeArena(&runtimeManifold, runtimeLoaded);
+  zigzag::vortex::VortexCore runtimeCore(runtimeArena);
+  zigzag::vortex::VortexVM runtimeVM(runtimeCore);
+  const auto runtimeFirst = runtimeArena.linked(
+      runtimeCore.home(), runtimeCore.dims().spin, DimVector::POS);
+  ASSERT_TRUE(runtimeFirst);
+  const auto runtimeCursor =
+      runtimeVM.spawnCursor(*runtimeFirst, "restored-runtime-closure");
+  const auto runtimeExecution = runtimeVM.run(runtimeCursor, 200);
+  ASSERT_TRUE(runtimeExecution.success) << runtimeExecution.errorMessage;
+  std::optional<CellRef> runtimeOutput;
+  for (const auto &cell : runtimeManifold.cells())
+    if (runtimeArena.textOf(cell.birthOp) == "fresh vm result")
+      runtimeOutput = cell.birthOp;
+  ASSERT_TRUE(runtimeOutput);
+  const auto runtimeValues =
+      runtimeVM.resultCells(runtimeCursor, *runtimeOutput);
+  ASSERT_EQ(runtimeValues.size(), 1u);
+  EXPECT_EQ(runtimeCore.render(runtimeValues.front()),
+            std::optional{zigzag::vortex::CellValue{
+                std::string{"value boxed inside frame"}}});
+
   xanadu::Store loaded(scroll);
   loaded.load((temporary.path / "materialized-closure").string());
   ASSERT_TRUE(loaded.structureHead());
@@ -288,11 +315,16 @@ TEST(VortexClosureExportTest,
   zigzag::ArenaManifold arena(&manifold, loaded);
   zigzag::vortex::VortexCore core(arena);
   zigzag::vortex::VortexVM vm(core);
-  const auto apply =
+  const auto initializer =
       arena.linked(core.home(), core.dims().spin, DimVector::POS);
+  ASSERT_TRUE(initializer);
+  ASSERT_EQ(vm.getOpcodeKind(*initializer), OpcodeKind::RestoreBindings);
+  const auto apply =
+      arena.linked(*initializer, core.dims().spin, DimVector::POS);
   ASSERT_TRUE(apply);
   ASSERT_EQ(vm.getOpcodeKind(*apply), OpcodeKind::ApplyClosure);
-  const auto cursor    = vm.spawnCursor(*apply, "closure-export-destination");
+  const auto cursor =
+      vm.spawnCursor(*initializer, "closure-export-destination");
   const auto execution = vm.run(cursor, 100);
   ASSERT_TRUE(execution.success) << execution.errorMessage;
   const auto outputs = core.outputsOf(*apply);
@@ -336,7 +368,8 @@ TEST(VortexClosureExportTest,
 }
 
 TEST(VortexClosureExportTest,
-     RuntimeBoundStreamHandleRefusesBeforeStoreWrites) {
+     RuntimeBoundStreamHandleAppliesAfterFreshVmReload) {
+  TempDir temporary;
   Harness h;
   const auto ret = h.op(OpcodeKind::ReturnFrame);
   const auto frame =
@@ -357,18 +390,42 @@ TEST(VortexClosureExportTest,
   const auto halt = h.op(OpcodeKind::Halt);
   h.next(append, apply);
   h.next(apply, halt);
+  h.next(h.core.home(), append);
   const auto cursor    = h.vm.spawnCursor(append, "bound-stream-export");
   const auto execution = h.vm.run(cursor, 100);
   ASSERT_TRUE(execution.success) << execution.errorMessage;
   h.vm.setCursorOpcode(cursor, std::nullopt);
-  auto scroll = std::make_shared<xanadu::UserPermascroll>();
+  h.next(h.core.home(), apply);
+  auto scroll = std::make_shared<xanadu::UserPermascroll>(
+      xanadu::UserPermascroll::Config{.storageDir = temporary.path / "scroll"});
   xanadu::Store store(scroll);
-  const auto before = store.latest();
   const std::vector<CellRef> program{apply, halt};
-  EXPECT_THROW(
-      (void)zigzag::vortex::exportProgram(h.core, h.vm, program, store),
-      std::runtime_error);
-  EXPECT_EQ(store.latest(), before);
+  const auto exported =
+      zigzag::vortex::exportProgram(h.core, h.vm, program, store);
+  EXPECT_FALSE(exported.isZero());
+  store.save((temporary.path / "bound-stream").string());
+  xanadu::Store loaded(scroll);
+  loaded.load((temporary.path / "bound-stream").string());
+  ASSERT_TRUE(loaded.structureHead());
+  const auto manifold = loaded.rebuildManifold(*loaded.structureHead());
+  zigzag::ArenaManifold arena(&manifold, loaded);
+  zigzag::vortex::VortexCore core(arena);
+  zigzag::vortex::VortexVM vm(core);
+  const auto entry =
+      arena.linked(core.home(), core.dims().spin, DimVector::POS);
+  ASSERT_TRUE(entry);
+  ASSERT_EQ(vm.getOpcodeKind(*entry), OpcodeKind::RestoreBindings);
+  const auto restoredCursor = vm.spawnCursor(*entry, "restored-stream-handle");
+  const auto result         = vm.run(restoredCursor, 100);
+  ASSERT_TRUE(result.success) << result.errorMessage;
+  std::optional<CellRef> restoredSlot;
+  for (const auto &cell : manifold.cells())
+    if (arena.textOf(cell.birthOp) == "runtime handle stream")
+      restoredSlot = cell.birthOp;
+  ASSERT_TRUE(restoredSlot);
+  const auto handles = vm.resultCells(*restoredSlot);
+  ASSERT_EQ(handles.size(), 1u);
+  EXPECT_TRUE(vm.closureValue(handles.front()));
 }
 
 } // namespace

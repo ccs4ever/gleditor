@@ -127,6 +127,37 @@ void VQLEngine::clearVariables() noexcept {
   putGetLenses_.clear();
 }
 
+std::unordered_map<std::string, std::vector<PathStep>>
+VQLEngine::compilerFunctors() const {
+  std::unordered_map<std::string, std::vector<PathStep>> result;
+  result.reserve(functors_.size());
+  for (const auto &[name, steps] : functors_)
+    if (steps) result.emplace(name, *steps);
+  return result;
+}
+
+void VQLEngine::publishCompilerBindings(
+    ContractBindings bindings,
+    std::unordered_map<std::string, std::vector<PathStep>> functors) {
+  auto nextEnv      = env_;
+  auto nextFunctors = functors_;
+  auto nextLenses   = putGetLenses_;
+  for (auto &[name, cells] : bindings) {
+    nextFunctors.erase(name);
+    nextLenses.erase(name);
+    nextEnv[name] = std::move(cells);
+  }
+  for (auto &[name, steps] : functors) {
+    nextEnv.erase(name);
+    nextLenses.erase(name);
+    nextFunctors[name] =
+        std::make_shared<const std::vector<PathStep>>(std::move(steps));
+  }
+  env_.swap(nextEnv);
+  functors_.swap(nextFunctors);
+  putGetLenses_.swap(nextLenses);
+}
+
 std::vector<zigzag::CellRef> VQLEngine::execute(std::string_view queryString) {
   Parser parser(queryString);
   QueryExpression query = parser.parseQuery();

@@ -950,3 +950,21 @@ plus one route skip. First-class signatures/bodies beyond this slice, persistent
 dynamic and decorated recursive functors, deferred variadics and remaining lifecycle work still
 leave §4.12 incomplete. The [completion gates](projects/vql-412-completion-gates.md) record the
 remaining packages and a provisional planning band; this is not a full-suite pass.
+
+## Runtime binding persistence and closure sessions
+
+Iteration 52 combines native binding restore, portable bound closure application and successful
+session publication. Literal Cell register targets and ordered duplicate/empty Stream membership
+travel in `VORTEX_BINDINGS/1`; physical cell data stays independent. Missing/open values and closed
+Iterator types remain distinct. Live continuation state explicitly refuses. Source-free reload
+starts at application and retains data made inside a returned frame. Session bindings publish only
+after successful execution, and the CLI keeps them across REPL lines with a fresh VM for each query.
+See [iteration 52](projects/vortex-vm-only-iterations.md) and
+[the binding persistence plan](projects/vortex-binding-persistence-plan.md).
+
+Full build, 1,084 affected tests across 100 suites and 26 focused tests passed. Fuel-threshold
+rollback/retry, local descriptor inspection quotas, pre-Store metadata refusal, aliases/cycles,
+exact scalar bits and actual cross-query REPL output are covered. The real REPL returns exact
+`9007199254740993` from a recursively created closure on its next query. Broader closures, dynamic
+functors, deferred variadics and remaining route/lifecycle work keep §4.12 incomplete. This is not a
+full-suite pass; session AST/map copies establish no performance claim.

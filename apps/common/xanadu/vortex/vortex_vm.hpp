@@ -131,6 +131,7 @@ enum class OpcodeKind : std::uint8_t {
   VqlMaskLinks,
   CreateClosure,
   ApplyClosure,
+  RestoreBindings,
 };
 
 struct ProjectionLimits {
@@ -347,6 +348,35 @@ using StreamMap =
     std::unordered_map<CellRef, std::shared_ptr<std::vector<CellRef>>>;
 using IteratorMap = std::unordered_map<CellRef, std::shared_ptr<IteratorState>>;
 
+enum class ClosedIteratorState : std::uint8_t { Unavailable, Exhausted };
+
+struct RuntimeBindingSnapshot {
+  CellReferenceMap cellReferences;
+  std::unordered_map<CellRef, std::vector<CellRef>> streams;
+  std::unordered_map<CellRef, ClosedIteratorState> iterators;
+};
+
+struct ParsedBindingsDescriptor {
+  RuntimeBindingSnapshot snapshot;
+  std::vector<std::pair<CellRef, CellRef>> referenceCells;
+};
+
+struct BindingsDescriptorError {
+  std::string message;
+};
+
+struct LogicalBindingsLimits {
+  std::size_t maxSlots{65'536};
+  std::size_t maxReferences{1'000'000};
+  std::size_t maxDescriptorRecords{1'000'001};
+  std::size_t maxMetadataBytes{1024};
+  std::size_t maxMetadataRelations{64};
+  std::size_t maxInspectionWork{1'000'000};
+  std::size_t maxRestores{65'536};
+  std::size_t maxRestoredSlots{1'000'000};
+  std::size_t maxRestoredReferences{1'000'000};
+};
+
 struct ActivationFrame {
   ActivationFrame(const CellRef frameDescriptor, const std::uint64_t identity,
                   const std::size_t callerGuards)
@@ -412,6 +442,17 @@ public:
   /// Remove assembly caches for cells released by a failed compilation.
   VortexVM *pruneAssemblyState();
   [[nodiscard]] std::optional<OpcodeKind> getOpcodeKind(CellRef opCell) const;
+  [[nodiscard]] RuntimeBindingSnapshot snapshotBindings(
+      std::optional<CellRef> allowedPendingEntry = std::nullopt) const;
+  void restoreBindings(const RuntimeBindingSnapshot &snapshot);
+  VortexVM *setBindingsLimits(LogicalBindingsLimits limits);
+  [[nodiscard]] LogicalBindingsLimits bindingsLimits() const noexcept {
+    return bindingsLimits_;
+  }
+  [[nodiscard]] std::expected<CellRef, BindingsDescriptorError>
+  makeBindingsDescriptor(const RuntimeBindingSnapshot &snapshot);
+  [[nodiscard]] std::expected<ParsedBindingsDescriptor, BindingsDescriptorError>
+  bindingsDescriptor(CellRef root) const;
 
   // -- Cursor Creation & Process Scheduler ------------------------------------
   CellRef spawnCursor(CellRef entryOpcode, std::string_view name = {});
@@ -594,6 +635,7 @@ private:
                                       std::vector<CellValue> &outputs);
   ExecutionResult executeClosureOpcodeBody(OpcodeKind kind, CellRef opcode,
                                            CellRef cursor);
+  ExecutionResult executeRestoreBindings(CellRef opcode, CellRef cursor);
   ExecutionResult executeVqlFieldProbe(CellRef opcode,
                                        std::vector<CellValue> &outputs);
   ExecutionResult executeTypeContract(OpcodeKind kind, CellRef opcode,
@@ -664,6 +706,10 @@ private:
   LogicalClosureLimits closureLimits_;
   std::size_t closureValuesCreated_{};
   std::size_t closureEnvironmentCellsCreated_{};
+  LogicalBindingsLimits bindingsLimits_;
+  std::size_t bindingRestores_{};
+  std::size_t bindingSlotsRestored_{};
+  std::size_t bindingReferencesRestored_{};
   ScopedChoiceLimits scopedChoiceLimits_;
   std::size_t frameBackingCellsAllocated_{};
   std::vector<ChoicePoint> choiceStack_;

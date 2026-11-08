@@ -156,6 +156,8 @@ VQLCompiler::opcodeMnemonic(zigzag::vortex::OpcodeKind kind) noexcept {
     return "NOP";
   case OpcodeKind::Bind:
     return "BIND";
+  case OpcodeKind::RestoreBindings:
+    return "RESTORE_BINDINGS";
   case OpcodeKind::Resolve:
     return "RESOLVE";
   case OpcodeKind::Assert:
@@ -348,6 +350,7 @@ CompilationResult VQLCompiler::compile(const QueryExpression &query,
   contextInputs_  = options.contextCells;
   ambientContext_ = std::nullopt;
   functorBindings_.clear();
+  functorBindings_ = options.initialFunctors;
   lastResultCells_.clear();
   dynamicStreams_.clear();
 
@@ -396,6 +399,24 @@ CompilationResult VQLCompiler::compile(const QueryExpression &query,
         .cursor           = cursor,
         .resultSlots      = lastResultCells_,
     };
+    for (const auto &[name, slots] : streamBindings_) {
+      if (name == ".") continue;
+      if (const auto initial = options.initialBindings.find(name);
+          initial != options.initialBindings.end() && initial->second == slots)
+        continue;
+      result.sessionBindings.push_back(CompilationResult::SessionBinding{
+          .name  = name,
+          .kind  = CompilationResult::SessionBinding::Kind::Stream,
+          .slots = slots,
+      });
+    }
+    for (const auto &[name, steps] : functorBindings_) {
+      result.sessionBindings.push_back(CompilationResult::SessionBinding{
+          .name    = name,
+          .kind    = CompilationResult::SessionBinding::Kind::Functor,
+          .functor = steps,
+      });
+    }
     transaction.commit();
     return result;
   } catch (const std::invalid_argument &unsupported) {

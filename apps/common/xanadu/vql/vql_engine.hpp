@@ -70,6 +70,12 @@ public:
   [[nodiscard]] const ContractBindings &variables() const noexcept {
     return env_;
   }
+  using FunctorSteps = std::shared_ptr<const std::vector<PathStep>>;
+  [[nodiscard]] std::unordered_map<std::string, std::vector<PathStep>>
+  compilerFunctors() const;
+  void publishCompilerBindings(
+      ContractBindings bindings,
+      std::unordered_map<std::string, std::vector<PathStep>> functors);
 
   /// Executes a single statement in the query.
   std::vector<zigzag::CellRef> executeStatement(const Statement &stmt);
@@ -253,7 +259,6 @@ private:
 
   using Bindings = ContractBindings;
   /// A point-free functor's steps, composed once when it is bound (§4.12.3).
-  using FunctorSteps = std::shared_ptr<const std::vector<PathStep>>;
 
   /// What a field with nothing on its dimension does: a lambda or def
   /// parameter refuses the cell, a `for` or `watch` binding binds nothing.

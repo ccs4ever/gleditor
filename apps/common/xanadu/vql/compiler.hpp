@@ -60,11 +60,19 @@ struct CompilationOptions {
   bool optimize{false};                 ///< Enable optimizations
   std::vector<zigzag::CellRef> contextCells;
   std::unordered_map<std::string, std::vector<zigzag::CellRef>> initialBindings;
+  std::unordered_map<std::string, std::vector<PathStep>> initialFunctors;
   std::size_t maxContractEmissions{65536};
   Limits limits{};
 };
 
 struct CompilationResult {
+  struct SessionBinding {
+    enum class Kind : std::uint8_t { Stream, Functor };
+    std::string name;
+    Kind kind{Kind::Stream};
+    std::vector<zigzag::CellRef> slots;
+    std::vector<PathStep> functor;
+  };
   bool success{true};
   std::optional<zigzag::CellRef> entryOpcode;
   std::string errorMessage;
@@ -73,6 +81,7 @@ struct CompilationResult {
   std::optional<zigzag::CellRef> terminalOpcode;
   std::optional<zigzag::CellRef> cursor;
   std::vector<zigzag::CellRef> resultSlots;
+  std::vector<SessionBinding> sessionBindings;
 };
 
 class VQLCompiler {

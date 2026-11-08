@@ -24,6 +24,8 @@ enum class QueryScalarReadError {
 };
 
 inline constexpr std::string_view runtimeObjectProbeText = "<runtime-object>";
+inline constexpr std::string_view vortexBindingsDescriptorTag =
+    "VORTEX_BINDINGS/1";
 inline constexpr std::string_view runtimeObjectClaimDimensionName =
     "d.runtime-object";
 

@@ -9,7 +9,9 @@
 #include <iterator>
 #include <optional>
 #include <ranges>
+#include <unordered_map>
 #include <unordered_set>
+#include <utility>
 
 #include "common/xanadu/multi_store.hpp"
 #include "common/xanadu/vql/compiler.hpp"
@@ -69,6 +71,7 @@ QueryExecutor::QueryExecutor(MultiStoreCoordinator &coordinator,
 QueryExecutor::QueryExecutor(VQLEngine &session, zigzag::vortex::VortexVM &vm,
                              QueryExecutionOptions options)
     : QueryExecutor(session.coordinator(), vm, options) {
+  session_       = &session;
   bindingSource_ = std::cref(session.variables());
 }
 
@@ -140,6 +143,7 @@ QueryExecutor::executeVortex(const QueryExpression &query,
     compilation.contextCells = contextCells;
     compilation.initialBindings =
         bindingSource_ ? bindingSource_->get() : bindings_;
+    if (session_) compilation.initialFunctors = session_->compilerFunctors();
     const auto result = compiler.compile(query, compilation);
     disassembly_      = result.disassembly;
     if (!result.success) {
@@ -182,6 +186,23 @@ QueryExecutor::executeVortex(const QueryExpression &query,
     for (const auto slot : result.resultSlots) {
       const auto values = vm_.resultCells(slot);
       cells.insert(cells.end(), values.begin(), values.end());
+    }
+    if (session_) {
+      ContractBindings published;
+      std::unordered_map<std::string, std::vector<PathStep>> functors;
+      for (const auto &binding : result.sessionBindings) {
+        if (binding.kind == CompilationResult::SessionBinding::Kind::Functor) {
+          functors.emplace(binding.name, binding.functor);
+          continue;
+        }
+        auto &values = published[binding.name];
+        for (const auto slot : binding.slots) {
+          const auto slotValues = vm_.resultCells(slot);
+          values.insert(values.end(), slotValues.begin(), slotValues.end());
+        }
+      }
+      session_->publishCompilerBindings(std::move(published),
+                                        std::move(functors));
     }
     return cells;
   } catch (const TypeContractError &error) {

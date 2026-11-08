@@ -197,7 +197,8 @@ classifyRuntimeObjectRoot(const ArenaManifold &arena, const CellRef root,
     return RuntimeObjectClaimResult::ProbeLimitExceeded;
   if (targetTextResult == TextReadResult::Unreadable)
     return RuntimeObjectClaimResult::Unreadable;
-  if (targetText == closureDescriptorTag || targetText == closureValueTag)
+  if (targetText == closureDescriptorTag || targetText == closureValueTag ||
+      targetText == vortexBindingsDescriptorTag)
     return RuntimeObjectClaimResult::Claimed;
   return RuntimeObjectClaimResult::Unreadable;
 }
