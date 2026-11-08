@@ -94,6 +94,22 @@ VQLCompiler::compileExecutionBlock(const ExecutionBlock &block) {
               if (const auto *path = std::get_if<PathExpression>(&item.item)) {
                 compilePathExpression(*path, core_.home());
                 emitAppendStream(resultStream, lastResultCells_);
+              } else if (const auto *value =
+                             std::get_if<ReturnValue>(&item.item)) {
+                const auto *path = std::get_if<std::shared_ptr<PathExpression>>(
+                    &value->expression.kind);
+                const bool functorPath =
+                    path && *path &&
+                    ((*path)->isFunctor ||
+                     ((*path)->anchor.kind == AnchorKind::Variable &&
+                      functorBindings_.contains((*path)->anchor.name)));
+                if (functorPath || isFunctorArgument(value->expression)) {
+                  throw std::invalid_argument(
+                      "path functors cannot be returned as values");
+                }
+                const auto values =
+                    compileArgument(value->expression, ambientContext_);
+                emitAppendStream(resultStream, values);
               } else {
                 throw std::invalid_argument(
                     "field weaving requires Vortex graph lowering");

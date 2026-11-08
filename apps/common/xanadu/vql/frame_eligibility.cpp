@@ -1143,13 +1143,15 @@ private:
                      using Item = std::remove_cvref_t<decltype(pathOrWeave)>;
                      if constexpr (std::same_as<Item, PathExpression>) {
                        pathExpression(pathOrWeave, scope, childDepth);
-                     } else {
+                     } else if constexpr (std::same_as<Item, FieldWeave>) {
                        refuse("field weaving is not frame eligible");
                        sequence(pathOrWeave.steps, childDepth,
                                 [&](const PathStep &step,
                                     const std::size_t nestedDepth) {
                                   pathStep(step, scope, nestedDepth);
                                 });
+                     } else {
+                       value(pathOrWeave.expression, scope, childDepth);
                      }
                    },
                    item.item);

@@ -1871,3 +1871,37 @@ Logs: `/tmp/vql-functor-default-build.log`, `/tmp/vql-functor-default-focused.lo
 `/tmp/vql-functor-default-tests.log`, `/tmp/vql-functor-default-cli.log`,
 `/tmp/vql-functor-default-callables.log`, `/tmp/vql-functor-default-overlay.log`,
 `/tmp/vql-functor-default-format.log`.
+
+## Iteration 49: explicit value expressions in return items
+
+An explicit parenthesized return item carries a `ReturnValue` compilation intermediate and reuses
+ordinary VM value-expression lowering. Existing slash-led macro groups and empty groups retain their
+path grammar, as do bare integer cell addresses, bare variable paths and function-path UFCS.
+Parenthesized value calls use the existing value-call mapping. Unsupported value-to-path
+continuations and first-class functor/closure returns refuse explicitly. The legacy direct consumer
+also refuses the new item instead of interpreting it.
+
+The parser captures the closing parenthesis and requires comma, semicolon, block end, `else` or EOF
+on the same line; a later line preserves the existing statement separator. Unsupported suffixes
+therefore cannot silently become another query. Functor refusal inspects syntax and bound names
+without copying step vectors. The existing value visitor covers the new AST arm in whole-query
+syntax budgets, capture analysis and cycle checks.
+
+Validation: full `make -j$(nproc)`, all 1,028 affected tests across 94 suites and all 111 focused
+tests across eleven suites passed. Nine new cases cover parser compatibility and boundaries, exact
+Int64/Double/Bool/zero/text results, ordered duplicate identity streams, fresh loop computations,
+native recursion with an omitted functor default, return promises, explicit direct-route and closure
+refusals, actual cyclic compiled-body AST rollback/retry, and source-free recursive export/reload
+plus host/mesh SOURCE output. The real headless CLI returned exact `9007199254740993` through
+recursive value calls and VM `string()`. Independent Luna architecture, senior and resource gates
+accepted the final bounded stage. Repository formatting uses clang-format 19.
+
+Broader audits retain eight route failures and one skip (132 passes), and seven callable failures
+(33 passes). These are not full-suite passes. Unparenthesized/top-level value grammar, general
+closures, remaining decorated forms and frontend/lifecycle work still leave §4.12 incomplete. No
+speedup is claimed.
+
+Logs: `/tmp/vql-return-value-build.log`, `/tmp/vql-return-value-focused.log`,
+`/tmp/vql-return-value-tests.log`, `/tmp/vql-return-value-cli.log`,
+`/tmp/vql-return-value-callables.log`, `/tmp/vql-return-value-overlay.log`,
+`/tmp/vql-return-value-format.log`.

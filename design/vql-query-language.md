@@ -336,7 +336,11 @@ WhereClause           ::= "where" BooleanExpr ( ( "and" | "or" ) BooleanExpr )*
 ActionClause          ::= ReturnClause | EffectClause | ConditionalClause
 
 ReturnClause          ::= "return" ReturnItem ( "," ReturnItem )*
-ReturnItem            ::= PathExpression | FieldWeave
+ReturnItem            ::= PathExpression | FieldWeave | ReturnValue
+ReturnValue           ::= "(" ValueOrComparisonExpr ")"
+                         (* unless the next token is "/" or ")": existing macro path group *)
+ValueOrComparisonExpr ::= ValueExpr ( CompOp ValueExpr ( "and" BooleanFactor )*
+                          ( "or" BooleanTerm )* )?
 FieldWeave            ::= PathStep+
 
 EffectClause          ::= "weave" ( EffectItem | "{" EffectItem ( "," EffectItem )* "}" )
@@ -461,6 +465,8 @@ ValueExpr             ::= VersionExpr
                         | ShapeLiteral
                         | ShapeIndexExpr
                         | FunctionInvocation
+                        | "(" ValueOrComparisonExpr ")"
+                        | ValueExpr "+" ValueExpr   (* left associative *)
 LensSpec              ::= "lens" "(" "get" ":" ValueExpr ( "," "put" ":" ValueExpr )? ")"
 ShapeIndexExpr        ::= VariableRef "[" SignedDimension "]"
 PathLambda            ::= "\\" "(" ParamList? ")" ( "{" ScriptBody "}" | PathExpression | ValueExpr )
@@ -2320,12 +2326,18 @@ explicit refusals. The rulings below describe the intended semantics.
   textual numeric constraints do not implicitly cast text into numbers. These graphs use native VM
   instructions with full operand cardinality checks. Computed `string()` and `+` values are
   materialized into fresh cells at runtime so successive loop results remain distinct; variable/path
-  aliases keep their identities. Return-item/top-level grammar and legacy direct-consumer routing
-  remain incomplete; unsupported routes refuse explicitly. Computed contract-field defaults now use
-  scoped graph continuations in eligible native frames, inline calls and loop destructuring.
-  Computed defaults can call the same or mutually recursive definitions through reusable VM frames;
+  aliases keep their identities. Explicit parenthesized return items use this value lowering,
+  including value calls such as `return (f(...))`; bare function returns keep path/UFCS mapping.
+  Bare integer returns retain cell-address syntax, so a scalar zero is `return (0)`. Existing
+  slash-led and empty macro groups retain their path grammar. A value item must end at a same-line
+  item/clause boundary or a statement separator; unsupported continuations refuse. Unparenthesized
+  value arithmetic, top-level expression grammar and legacy direct-consumer routing remain
+  incomplete; unsupported routes refuse explicitly. Computed contract-field defaults now use scoped
+  graph continuations in eligible native frames, inline calls and loop destructuring. Computed
+  defaults can call the same or mutually recursive definitions through reusable VM frames;
   eligibility and runtime limits still apply. See
-  [iterations 18–24](projects/vortex-vm-only-iterations.md).
+  [iterations 18–24](projects/vortex-vm-only-iterations.md) and
+  [iteration 49](projects/vortex-vm-only-iterations.md).
 
 - **A default is used only when the field is absent**, and passing a cell or a path never mints: the
   bound cell is the linked one. A literal field default mints its scalar only when it is used;

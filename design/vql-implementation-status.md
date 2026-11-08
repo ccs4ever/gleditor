@@ -890,3 +890,20 @@ The real headless CLI returns `leaf`. Repository formatting with clang-format 19
 Luna gates passed. Broader audits retain eight route failures/one skip and seven callable failures;
 these are not full-suite passes. Captured/computed defaults, general closures and the remaining
 frontend and lifecycle work still leave §4.12 incomplete; no speedup is claimed.
+
+## Explicit parenthesized return values
+
+`return (expr)` uses a distinct compilation intermediate and the existing Vortex value and stream
+graphs. Path/macro groups, cell-address literals and bare function-path UFCS retain their existing
+grammar. Unsupported closure/functor values remain explicit refusals. See
+[iteration 49](projects/vortex-vm-only-iterations.md).
+
+Full build, all 1,028 affected tests across 94 suites and all 111 focused tests across eleven suites
+passed. Nine new cases cover compatible grammar and statement boundaries, exact scalar kinds,
+ordered identity streams, fresh loop results, native recursion/defaults, promises/refusals, cyclic
+AST rollback/retry and source-free recursive export/reload with host/mesh outputs. The real headless
+CLI preserved exact `9007199254740993` through recursive value calls and VM formatting. Repository
+formatting with clang-format 19 and independent Luna gates passed. Broader audits retain eight route
+failures/one skip and seven callable failures; these are not full-suite passes.
+Unparenthesized/top-level value grammar, general closures and remaining frontend and lifecycle gaps
+still leave §4.12 incomplete; no speedup is claimed.

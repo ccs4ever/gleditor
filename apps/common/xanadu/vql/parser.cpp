@@ -1281,7 +1281,26 @@ ReturnClause Parser::parseReturnClause() {
   std::vector<ReturnItem> items;
 
   while (true) {
-    if (check(TokenKind::Slash)) {
+    if (check(TokenKind::OpenParen) && !peekToken().is(TokenKind::Slash) &&
+        !peekToken().is(TokenKind::CloseParen)) {
+      consume(TokenKind::OpenParen, "Expected '(' before return value");
+      ValueExpr expression = parseValueOrComparisonExpr();
+      const Token closeParen =
+          consume(TokenKind::CloseParen,
+                  "Expected ')' after parenthesized return value");
+      // Newlines separate statements. On the same line, require an item or
+      // clause boundary so a value suffix cannot become a second path query.
+      if (current_.loc.line == closeParen.loc.line &&
+          !check(TokenKind::Comma) && !check(TokenKind::Semicolon) &&
+          !check(TokenKind::CloseBrace) && !check(TokenKind::KwElse) &&
+          !check(TokenKind::EndOfFile)) {
+        throw ParseError("Continuations after a parenthesized return value "
+                         "require a statement separator",
+                         current_.loc);
+      }
+      items.push_back(
+          ReturnItem{.item = ReturnValue{.expression = std::move(expression)}});
+    } else if (check(TokenKind::Slash)) {
       // FieldWeave: sequence of PathSteps rooted at result cell
       std::vector<PathStep> steps;
       while (check(TokenKind::Slash)) {

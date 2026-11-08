@@ -360,8 +360,12 @@ struct FieldWeave {
   std::vector<PathStep> steps;
 };
 
+struct ReturnValue {
+  ValueExpr expression;
+};
+
 struct ReturnItem {
-  std::variant<PathExpression, FieldWeave> item;
+  std::variant<PathExpression, FieldWeave, ReturnValue> item;
 };
 
 struct ReturnClause {

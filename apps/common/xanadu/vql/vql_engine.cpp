@@ -1709,6 +1709,9 @@ void VQLEngine::executeActionClause(
           cur = evaluateStep(step, cur);
         }
         accumulatedResults.push_back(resultCell);
+      } else if (std::holds_alternative<ReturnValue>(item.item)) {
+        throw std::invalid_argument(
+            "value return expressions require Vortex graph lowering");
       }
     }
   } else if (std::holds_alternative<EffectClause>(action.clause)) {
