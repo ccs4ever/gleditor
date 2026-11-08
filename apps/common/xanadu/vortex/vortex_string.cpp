@@ -46,7 +46,8 @@ readSingleScalar(VortexVM &vm, const CellRef slot,
                            " does not accept multiple input cells");
 
   const auto scalar =
-      zigzag::readQueryScalar(arena, *source, vm.core().dims().clone);
+      zigzag::readQueryScalar(arena, *source, vm.core().dims().clone,
+                              vm.core().dims().runtimeObjectClaim.value());
   if (!scalar) {
     switch (scalar.error()) {
     case zigzag::QueryScalarReadError::Missing:

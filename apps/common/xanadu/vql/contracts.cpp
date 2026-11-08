@@ -197,7 +197,9 @@ private:
     auto &arena = core_.arena();
     if (type.kind == K::Contextual || !arena.contains(cell)) return false;
     const auto scalarValue = [&] {
-      auto scalar = zigzag::readQueryScalar(arena, cell, core_.dims().clone);
+      auto scalar =
+          zigzag::readQueryScalar(arena, cell, core_.dims().clone,
+                                  core_.dims().runtimeObjectClaim.value());
       if (!scalar) {
         if (scalar.error() == zigzag::QueryScalarReadError::InvalidForeign)
           throw TypeContractError("contract scalar has no valid source cell");

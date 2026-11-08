@@ -1905,3 +1905,62 @@ Logs: `/tmp/vql-return-value-build.log`, `/tmp/vql-return-value-focused.log`,
 `/tmp/vql-return-value-tests.log`, `/tmp/vql-return-value-cli.log`,
 `/tmp/vql-return-value-callables.log`, `/tmp/vql-return-value-overlay.log`,
 `/tmp/vql-return-value-format.log`.
+
+## Iteration 50: graph-resident closure VM foundation
+
+`CreateClosure` and `ApplyClosure` use versioned descriptor/environment graphs and the existing
+native frame invocation path. Captures own resolved ordered cell-reference membership, including
+duplicates and empty streams, while data stays shared. Fresh data created inside a frame can escape
+through a closure. No runtime AST, callback, evaluator or closure registry implements application.
+Existing named definitions and static functors retain their behavior. The three-persona design is in
+[the closure runtime plan](vortex-closure-runtime-plan.md).
+
+A shared structural marker distinguishes closure roots from ordinary scalar text. Typed scalar bits
+keep precedence; matching probe text without a positive claim stays String. Descriptor/value parsers
+bound records, label fragments/bytes and relation rows before materialization or linear link scans.
+Source indices and counts remain ordinary integers. Stream arities, aggregate captures and mapped
+fan-out are checked before copying; copied references consume fuel. Successful creation and physical
+environment-cell counters remain cumulative across return and backtracking. Failed publication rolls
+back arena, maps, cursor and counters. The existing single active stream cursor policy remains.
+Closure input/output wings use the cell-reference records emitted by `bindInput`/`bindOutput`; port
+caps, cycles and metadata relation limits are checked while reading, before vectorization. Actual
+data-cell relation inspection charges work without applying metadata caps to that data.
+
+Export preflights closure/frame reference records and disconnected body instructions before Store
+writes. Its visited worklist follows declared frame entries, continuations, graph branches,
+conditions and pipelines; it does not infer code from ordinary input values. Materialized closure
+roots can be supplied directly and applied after reload in a fresh VM. Export of a runtime-bound
+Apply handle slot refuses until binding initialization is persisted. Numeric `Choice`, `Jump`,
+`Branch` and `Call` control targets also refuse. Counts, source ordinals and ordinary numeric data
+are not relocated. Closure opcodes refuse unsupported conditions, parameter pipelines, raw stdlib
+calls and sealed Vortex mesh artifacts before effects; VQL source lambda lowering remains future
+work.
+
+Validation: full `make -j$(nproc)` passed, all 1,050 affected tests across 96 suites passed, and all
+22 focused closure tests across two suites passed. Cases include malformed descriptors/values/wings,
+actual VM slot rebinding, live cell-content changes, ordered duplicates/empties, fresh invocation
+locals, frame-local data escape, choices, cursor inactivity/compaction, quota rollback/retry, scalar
+boundaries, pre-effect refusals, and source-free graph/value export with a disconnected branch
+target. The real headless CLI preserved exact `9007199254740993` through native recursion and VM
+`string()`. Independent Luna architecture, senior and resource reviews covered the bounded
+foundation and export corrections. Repository formatting uses clang-format 19.
+
+The opt-in application probe ran 32 calls per capture shape on an AMD Threadripper 1950X with Clang
+`-O3 -g`. Zero, one and eight capture streams allocated respectively 0, 32 and 256 frame backing
+cells. For 0/1/32 references per stream, observed times were 195/440/169, 385/389/555 and
+1,715/1,791/3,293 microseconds. Factories and graph construction preceded the timer; these single
+observations measure application only, not binding, creation or compilation, and establish no
+speedup. Repeated descriptor/frame parsing remains an observed cost. Metadata collection is fuel
+charged; additional bounded metadata-vector copies and slot mapping are not separately charged.
+These logical counters do not bound total CPU or heap use. Enable the probe with
+`GLEDITOR_CLOSURE_PROFILE=1` and `--gtest_filter='VortexClosureProfileTest.*'`.
+
+The callable audit retains seven failures (33 passes); the broader route audit retains eight
+failures and one skip (132 passes), with the same identities as iteration 49. General VQL
+closure/lambda lowering, persisted runtime bindings and remaining frontend/lifecycle work still
+leave §4.12 incomplete. This is not a full-suite pass.
+
+Logs: `/tmp/vql-closure-runtime-build.log`, `/tmp/vql-closure-runtime-focused.log`,
+`/tmp/vql-closure-runtime-tests.log`, `/tmp/vql-closure-runtime-profile.log`,
+`/tmp/vql-closure-runtime-cli.log`, `/tmp/vql-closure-runtime-callables.log`,
+`/tmp/vql-closure-runtime-overlay.log`, `/tmp/vql-closure-runtime-format.log`.

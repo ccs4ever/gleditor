@@ -5,11 +5,89 @@
 #include <map>
 #include <set>
 #include <stdexcept>
+#include <vector>
 
 #include "common/xanadu/user_permascroll.hpp"
 #include "common/xanadu/zigzag/dimension_registry.hpp"
+#include "common/xanadu/zigzag/query_scalar.hpp"
 
 namespace zigzag::vortex {
+namespace {
+
+std::optional<std::string> boundedArenaText(const ArenaManifold &arena,
+                                            const CellRef cell,
+                                            const std::size_t limit) {
+  const auto spans = arena.contentOf(cell);
+  if (spans.size() > limit) return std::nullopt;
+  std::size_t bytes = 0;
+  for (const auto &span : spans) {
+    if (span.length > limit - std::min(bytes, limit)) return std::nullopt;
+    bytes += static_cast<std::size_t>(span.length);
+  }
+  const auto text = arena.textOf(cell);
+  if (text.size() != bytes) return std::nullopt;
+  return text;
+}
+
+void addFrameReferences(const VortexVM &vm, const CellRef descriptor,
+                        std::map<CellRef, CellRef> &references,
+                        std::vector<CellRef> &instructions) {
+  const auto parsed = vm.frameDescriptor(descriptor);
+  if (!parsed) throw std::runtime_error(parsed.error().message);
+  for (const auto &[record, target] : parsed->referenceCells)
+    references.emplace(record, target);
+  if (parsed->entry) instructions.push_back(*parsed->entry);
+}
+
+void collectClosureReferences(const VortexCore &core, const VortexVM &vm,
+                              const CellRef root,
+                              std::map<CellRef, CellRef> &references,
+                              std::vector<CellRef> &instructions) {
+  const auto dimension = core.dims().runtimeObjectClaim;
+  if (!dimension)
+    throw std::runtime_error("Vortex runtime-object dimension is unavailable");
+  const auto metadataBytes = vm.closureLimits().maxMetadataBytes;
+  const auto claim         = zigzag::classifyRuntimeObjectRoot(
+      core.arena(), root, *dimension,
+      {.maxRootRelations = 64,
+               .maxMappingWork   = metadataBytes > SIZE_MAX / 4
+                                       ? SIZE_MAX
+                                       : std::max<std::size_t>(4096, metadataBytes * 4)});
+  if (claim != zigzag::RuntimeObjectClaimResult::Claimed)
+    throw std::runtime_error("export found a malformed claimed runtime object");
+  const auto tagCell = core.arena().linked(root, *dimension, DimVector::POS);
+  const auto tag     = tagCell
+                           ? boundedArenaText(core.arena(), *tagCell, metadataBytes)
+                           : std::nullopt;
+  if (!tag)
+    throw std::runtime_error("export found an unreadable runtime-object tag");
+  if (*tag == "VORTEX_CLOSURE_DESCRIPTOR/1") {
+    const auto parsed = vm.closureDescriptor(root);
+    if (!parsed) throw std::runtime_error(parsed.error().message);
+    for (const auto &[record, target] : parsed->referenceCells)
+      references.emplace(record, target);
+    if (parsed->frameDescriptor)
+      addFrameReferences(vm, *parsed->frameDescriptor, references,
+                         instructions);
+    return;
+  }
+  if (*tag == "VORTEX_CLOSURE_VALUE/1") {
+    const auto parsed = vm.closureValue(root);
+    if (!parsed) throw std::runtime_error(parsed.error().message);
+    for (const auto &[record, target] : parsed->referenceCells)
+      references.emplace(record, target);
+    const auto descriptor = vm.closureDescriptor(*parsed->descriptor);
+    if (!descriptor) throw std::runtime_error(descriptor.error().message);
+    if (descriptor->frameDescriptor)
+      addFrameReferences(vm, *descriptor->frameDescriptor, references,
+                         instructions);
+    return;
+  }
+  throw std::runtime_error(
+      "export found an unknown claimed runtime-object tag");
+}
+
+} // namespace
 
 xanadu::MicroversionId
 exportProgram(const VortexCore &core, const VortexVM &vm,
@@ -44,19 +122,62 @@ exportProgram(const VortexCore &core, const VortexVM &vm,
   // encoded as a scalar, whereas ordinary integer payloads must stay integers.
   std::map<CellRef, DimRef> dimensionOperands;
   std::map<CellRef, CellRef> referenceOperands;
-  for (const auto opcode : opcodes) {
+  std::vector<CellRef> instructions(opcodes.begin(), opcodes.end());
+  for (const auto &cell : arena.cells()) {
+    if (const auto claimDimension = core.dims().runtimeObjectClaim;
+        claimDimension &&
+        arena.linked(cell.birthOp, *claimDimension, DimVector::POS))
+      collectClosureReferences(core, vm, cell.birthOp, referenceOperands,
+                               instructions);
+  }
+  std::set<CellRef> visitedInstructions;
+  for (std::size_t index = 0; index < instructions.size(); ++index) {
+    const auto opcode = instructions[index];
+    arena.consumeWork();
+    if (!visitedInstructions.insert(opcode).second) continue;
     const auto kind = vm.getOpcodeKind(opcode);
     if (!kind) throw std::runtime_error("cannot export an unknown opcode");
+    // Frame entries may be disconnected from the submitted main chain. Only
+    // declared code edges extend the walk; ordinary input values are data.
+    if (const auto next =
+            arena.linked(opcode, core.dims().spin, DimVector::POS))
+      instructions.push_back(*next);
+    for (const auto condition : core.preconditionsOf(opcode))
+      instructions.push_back(condition);
+    for (const auto condition : core.postconditionsOf(opcode))
+      instructions.push_back(condition);
     if (*kind == OpcodeKind::ScopedChoice) {
       const auto inputs = core.inputsOf(opcode);
       if (inputs.size() != 1 || !core.outputsOf(opcode).empty() ||
           !vm.getOpcodeKind(inputs.front()))
         throw std::runtime_error("invalid scoped choice graph target");
+      instructions.push_back(inputs.front());
+    }
+    if (*kind == OpcodeKind::BranchFalseCell) {
+      const auto inputs = core.inputsOf(opcode);
+      if (inputs.size() != 2 || !vm.getOpcodeKind(inputs[1]))
+        throw std::runtime_error("invalid cell branch graph target");
+      instructions.push_back(inputs[1]);
     }
     if (*kind == OpcodeKind::Jump || *kind == OpcodeKind::Branch ||
-        *kind == OpcodeKind::Call)
+        *kind == OpcodeKind::Call || *kind == OpcodeKind::Choice)
       throw std::runtime_error(
           "numeric control targets require relocation before export");
+    if (*kind == OpcodeKind::ApplyClosure) {
+      const auto inputs = core.inputsOf(opcode);
+      if (inputs.empty())
+        throw std::runtime_error("ApplyClosure has no closure handle input");
+      if (const auto bound = vm.cellReferenceOf(inputs.front());
+          bound && *bound != inputs.front()) {
+        const auto closure = vm.closureValue(*bound);
+        if (!closure)
+          throw std::runtime_error(
+              "ApplyClosure handle binding is not a valid closure value");
+        throw std::runtime_error(
+            "export of a runtime-bound ApplyClosure handle requires a direct "
+            "closure graph value or persisted runtime binding");
+      }
+    }
     for (const auto side : {DimVector::POS, DimVector::NEG}) {
       auto slot = arena.linked(opcode, core.dims().grab, side);
       std::set<CellRef> seen;
@@ -71,6 +192,9 @@ exportProgram(const VortexCore &core, const VortexVM &vm,
           throw std::runtime_error(
               "opcode parameter slot has no relocatable target");
         referenceOperands.emplace(*slot, static_cast<CellRef>(*target));
+        if (const auto pipeline =
+                core.getPipelineHead(static_cast<CellRef>(*target)))
+          instructions.push_back(*pipeline);
         slot = arena.linked(*slot, core.dims().step, DimVector::POS);
       }
     }
@@ -80,10 +204,7 @@ exportProgram(const VortexCore &core, const VortexVM &vm,
       if (inputs.empty())
         throw std::runtime_error(
             "frame or guard opcode has no descriptor operand");
-      const auto descriptor = vm.frameDescriptor(inputs.front());
-      if (!descriptor) throw std::runtime_error(descriptor.error().message);
-      for (const auto &[record, target] : descriptor->referenceCells)
-        referenceOperands.emplace(record, target);
+      addFrameReferences(vm, inputs.front(), referenceOperands, instructions);
     }
     if (*kind == OpcodeKind::Link || *kind == OpcodeKind::New ||
         *kind == OpcodeKind::Break || *kind == OpcodeKind::RankBegin ||

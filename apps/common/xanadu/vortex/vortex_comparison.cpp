@@ -36,7 +36,8 @@ comparisonOperand(VortexCore &core, const CellReferenceMap &references,
     if (!reference->second) return std::nullopt;
     cell = *reference->second;
   }
-  auto scalar = zigzag::readQueryScalar(core.arena(), cell, core.dims().clone);
+  auto scalar = zigzag::readQueryScalar(core.arena(), cell, core.dims().clone,
+                                        core.dims().runtimeObjectClaim.value());
   if (scalar) return std::move(*scalar);
   switch (scalar.error()) {
   case zigzag::QueryScalarReadError::Missing:

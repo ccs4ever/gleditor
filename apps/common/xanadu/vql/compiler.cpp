@@ -125,6 +125,10 @@ VQLCompiler::opcodeMnemonic(zigzag::vortex::OpcodeKind kind) noexcept {
     return "VQL_BOX_SCALAR";
   case OpcodeKind::VqlMaskLinks:
     return "VQL_MASK_LINKS";
+  case OpcodeKind::CreateClosure:
+    return "CREATE_CLOSURE";
+  case OpcodeKind::ApplyClosure:
+    return "APPLY_CLOSURE";
   case OpcodeKind::ScopedChoice:
     return "SCOPED_CHOICE";
   case OpcodeKind::VqlFieldProbe:

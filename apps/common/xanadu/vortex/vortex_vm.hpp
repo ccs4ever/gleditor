@@ -34,6 +34,9 @@ class MultiStoreCoordinator;
 
 namespace zigzag::vortex {
 
+inline constexpr std::size_t closureStreamCapacity           = 64;
+inline constexpr std::size_t closureMetadataRelationCapacity = 64;
+
 enum class OpcodeKind : std::uint8_t {
   // Arithmetic
   Add,
@@ -126,6 +129,8 @@ enum class OpcodeKind : std::uint8_t {
   BeginMutationGroup,
   EndMutationGroup,
   VqlMaskLinks,
+  CreateClosure,
+  ApplyClosure,
 };
 
 struct ProjectionLimits {
@@ -170,6 +175,52 @@ struct FrameLimits {
   std::size_t maxLocalsPerFrame{4096};
   std::size_t maxDescriptorRecords{8192};
   std::size_t maxBackingCells{1'048'576};
+};
+
+enum class ClosureInputSource : std::uint8_t { Capture, Applied };
+
+struct ClosureFrameInput {
+  ClosureInputSource source{ClosureInputSource::Capture};
+  std::size_t index{};
+};
+
+struct ClosureDescriptorSpec {
+  std::optional<CellRef> frameDescriptor;
+  std::size_t captureStreamCount{};
+  std::size_t appliedStreamCount{};
+  std::vector<ClosureFrameInput> frameInputs;
+};
+
+struct ClosureDescriptorError {
+  std::string message;
+};
+
+struct ParsedClosureDescriptor {
+  std::optional<CellRef> frameDescriptor;
+  std::size_t captureStreamCount{};
+  std::size_t appliedStreamCount{};
+  std::vector<ClosureFrameInput> frameInputs;
+  std::vector<std::pair<CellRef, CellRef>> referenceCells;
+};
+
+struct ClosureValue {
+  std::optional<CellRef> descriptor;
+  std::vector<std::vector<CellRef>> captures;
+  std::vector<std::pair<CellRef, CellRef>> referenceCells;
+};
+
+struct LogicalClosureLimits {
+  std::size_t maxDescriptorRecords{8192};
+  std::size_t maxCaptureStreams{64};
+  std::size_t maxAppliedStreams{64};
+  std::size_t maxCapturedRefs{1'000'000};
+  std::size_t maxValueRecords{1'000'000};
+  std::size_t maxEnvironmentRecords{1'000'000};
+  std::size_t maxValuesCreated{65'536};
+  std::size_t maxEnvironmentCellsCreated{1'000'000};
+  std::size_t maxInvocationRefs{1'000'000};
+  std::size_t maxMetadataBytes{1024};
+  std::size_t maxMetadataRelations{64};
 };
 
 // Per cursor. Capture accounting includes active and pending references,
@@ -429,6 +480,19 @@ public:
   [[nodiscard]] FrameLimits frameLimits() const noexcept {
     return frameLimits_;
   }
+  [[nodiscard]] std::expected<CellRef, ClosureDescriptorError>
+  makeClosureDescriptor(const ClosureDescriptorSpec &spec);
+  [[nodiscard]] std::expected<ParsedClosureDescriptor, ClosureDescriptorError>
+  closureDescriptor(CellRef root) const;
+  [[nodiscard]] std::expected<CellRef, ClosureDescriptorError>
+  makeClosureValue(CellRef descriptor,
+                   std::span<const std::vector<CellRef>> resolvedActuals);
+  [[nodiscard]] std::expected<ClosureValue, ClosureDescriptorError>
+  closureValue(CellRef root) const;
+  VortexVM *setClosureLimits(LogicalClosureLimits limits);
+  [[nodiscard]] LogicalClosureLimits closureLimits() const noexcept {
+    return closureLimits_;
+  }
   VortexVM *setGuardLimits(GuardLimits limits);
   [[nodiscard]] GuardLimits guardLimits() const noexcept {
     return guardLimits_;
@@ -475,6 +539,8 @@ public:
   void runPipeline(CellRef paramCell);
 
 private:
+  ExecutionResult executeClosureOpcode(OpcodeKind kind, CellRef opcode,
+                                       CellRef cursor);
   ExecutionResult executeFrameOpcode(OpcodeKind kind, CellRef opcode,
                                      CellRef cursor);
   ExecutionResult stepImpl(CellRef cursor);
@@ -526,6 +592,8 @@ private:
                                    std::vector<CellValue> &outputs);
   ExecutionResult executeVqlMaskLinks(CellRef opcode,
                                       std::vector<CellValue> &outputs);
+  ExecutionResult executeClosureOpcodeBody(OpcodeKind kind, CellRef opcode,
+                                           CellRef cursor);
   ExecutionResult executeVqlFieldProbe(CellRef opcode,
                                        std::vector<CellValue> &outputs);
   ExecutionResult executeTypeContract(OpcodeKind kind, CellRef opcode,
@@ -593,6 +661,9 @@ private:
   std::uint64_t nextMutationGroupId_{1};
   std::uint64_t nextChoiceId_{1};
   FrameLimits frameLimits_;
+  LogicalClosureLimits closureLimits_;
+  std::size_t closureValuesCreated_{};
+  std::size_t closureEnvironmentCellsCreated_{};
   ScopedChoiceLimits scopedChoiceLimits_;
   std::size_t frameBackingCellsAllocated_{};
   std::vector<ChoicePoint> choiceStack_;

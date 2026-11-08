@@ -436,7 +436,7 @@ std::optional<OpcodeKind> VortexVM::getOpcodeKind(CellRef opCell) const {
   auto val = core_.arena().asInt64(opCell);
   if (val && *val >= 0 &&
       static_cast<std::uint64_t>(*val) <=
-          static_cast<std::uint64_t>(OpcodeKind::VqlMaskLinks)) {
+          static_cast<std::uint64_t>(OpcodeKind::ApplyClosure)) {
     return static_cast<OpcodeKind>(*val);
   }
   return std::nullopt;
@@ -1272,6 +1272,10 @@ void VortexVM::runPipeline(CellRef paramCell) {
     if (!preflightSeen.insert(*preflightOp).second)
       throw std::invalid_argument("cyclic parameter pipeline");
     const auto kind = getOpcodeKind(*preflightOp).value_or(OpcodeKind::Nop);
+    if (kind == OpcodeKind::InvokeFrame || kind == OpcodeKind::ReturnFrame ||
+        kind == OpcodeKind::CreateClosure || kind == OpcodeKind::ApplyClosure)
+      throw std::invalid_argument(
+          "frame and closure opcodes cannot run in parameter pipelines");
     const auto pipelineInputs = core_.inputsOf(*preflightOp);
     const bool mutatingPrimitive =
         ((kind == OpcodeKind::Link || kind == OpcodeKind::Value) &&
@@ -1336,9 +1340,10 @@ void VortexVM::runPipeline(CellRef paramCell) {
         kind == OpcodeKind::VqlBoxScalar)
       throw std::invalid_argument(
           "VQL scalar opcodes cannot run in a parameter pipeline");
-    if (kind == OpcodeKind::InvokeFrame || kind == OpcodeKind::ReturnFrame)
+    if (kind == OpcodeKind::InvokeFrame || kind == OpcodeKind::ReturnFrame ||
+        kind == OpcodeKind::CreateClosure || kind == OpcodeKind::ApplyClosure)
       throw std::invalid_argument(
-          "activation-frame opcodes cannot run in parameter pipelines");
+          "frame and closure opcodes cannot run in parameter pipelines");
     if (kind == OpcodeKind::PushGuard || kind == OpcodeKind::PopGuard ||
         kind == OpcodeKind::CheckGuards)
       throw std::invalid_argument(
@@ -1469,6 +1474,8 @@ bool VortexVM::evaluateCondition(CellRef clause,
   if (kind == OpcodeKind::InvokeFrame || kind == OpcodeKind::ReturnFrame)
     throw std::invalid_argument(
         "activation-frame opcodes cannot run as conditions");
+  if (kind == OpcodeKind::CreateClosure || kind == OpcodeKind::ApplyClosure)
+    throw std::invalid_argument("closure opcodes cannot run as conditions");
   if (kind == OpcodeKind::PushGuard || kind == OpcodeKind::PopGuard ||
       kind == OpcodeKind::CheckGuards || kind == OpcodeKind::OpenGuardScope ||
       kind == OpcodeKind::CloseGuardScope ||
@@ -2123,6 +2130,9 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
   if (kind == OpcodeKind::InvokeFrame || kind == OpcodeKind::ReturnFrame)
     return {.success      = false,
             .errorMessage = "activation-frame opcodes require a VM cursor"};
+  if (kind == OpcodeKind::CreateClosure || kind == OpcodeKind::ApplyClosure)
+    return {.success      = false,
+            .errorMessage = "closure opcodes require a VM cursor"};
   if (kind == OpcodeKind::PushGuard || kind == OpcodeKind::PopGuard ||
       kind == OpcodeKind::CheckGuards || kind == OpcodeKind::OpenGuardScope ||
       kind == OpcodeKind::CloseGuardScope ||
@@ -2156,6 +2166,11 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
     return executeProbeLink(opcode, outputs);
   case OpcodeKind::VqlMaskLinks:
     return executeVqlMaskLinks(opcode, outputs);
+  case OpcodeKind::CreateClosure:
+  case OpcodeKind::ApplyClosure:
+    return {.success       = false,
+            .failingClause = opcode,
+            .errorMessage  = "closure opcodes require a VM cursor"};
   case OpcodeKind::VqlFieldProbe:
     return executeVqlFieldProbe(opcode, outputs);
   case OpcodeKind::Add: {
@@ -3088,6 +3103,17 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
     }
   }
 
+  if (kind == OpcodeKind::CreateClosure || kind == OpcodeKind::ApplyClosure) {
+    ++totalCycles_;
+    try {
+      core_.arena().consumeWork();
+      return executeClosureOpcode(kind, *op, cursor);
+    } catch (const std::exception &error) {
+      return {
+          .success = false, .failingClause = *op, .errorMessage = error.what()};
+    }
+  }
+
   if (kind == OpcodeKind::PushGuard || kind == OpcodeKind::PopGuard ||
       kind == OpcodeKind::CheckGuards || kind == OpcodeKind::OpenGuardScope ||
       kind == OpcodeKind::CloseGuardScope ||
@@ -3289,6 +3315,16 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
              conditionKind == OpcodeKind::ReturnFrame;
     });
   };
+  const auto hasClosureCondition = [this](const auto &clauses) {
+    return std::ranges::any_of(clauses, [this](const CellRef clause) {
+      const CellRef actual = core_.arena()
+                                 .cloneMaster(clause, core_.dims().clone)
+                                 .value_or(clause);
+      const auto conditionKind = getOpcodeKind(actual);
+      return conditionKind == OpcodeKind::CreateClosure ||
+             conditionKind == OpcodeKind::ApplyClosure;
+    });
+  };
   const auto hasScopedChoiceCondition = [this](const auto &clauses) {
     return std::ranges::any_of(clauses, [this](const CellRef clause) {
       const CellRef actual = core_.arena()
@@ -3335,6 +3371,11 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
     return {.success = false,
             .errorMessage =
                 "activation-frame opcodes cannot run as conditions"};
+  }
+  if (hasClosureCondition(core_.preconditionsOf(*op)) ||
+      hasClosureCondition(core_.postconditionsOf(*op))) {
+    return {.success      = false,
+            .errorMessage = "closure opcodes cannot run as conditions"};
   }
   if (hasScopedChoiceCondition(core_.preconditionsOf(*op)) ||
       hasScopedChoiceCondition(core_.postconditionsOf(*op))) {

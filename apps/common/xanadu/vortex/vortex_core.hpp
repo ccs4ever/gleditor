@@ -54,6 +54,7 @@ struct SystemDimensions {
                          ///< content is &pos, its +d.grab &subject (vicon
                          ///< std:goal, spec section 6.1)
   DimRef stores{noCell}; ///< Multi-store connection rank off home
+  std::optional<DimRef> runtimeObjectClaim;
 };
 
 enum class ContractViolationKind : std::uint8_t {

@@ -907,3 +907,25 @@ formatting with clang-format 19 and independent Luna gates passed. Broader audit
 failures/one skip and seven callable failures; these are not full-suite passes.
 Unparenthesized/top-level value grammar, general closures and remaining frontend and lifecycle gaps
 still leave §4.12 incomplete; no speedup is claimed.
+
+## Graph-resident closure VM foundation
+
+Versioned closure descriptors and capture environments now execute through native frames using
+`CreateClosure` and `ApplyClosure`. Captured membership preserves cell identity, order, duplicates
+and empty streams, and can outlive a creating frame. Structural object markers keep closure roots
+outside scalar String/numeric comparisons while preserving typed scalar precedence. Bounded
+metadata, capture/fan-out quotas, fuel accounting and rollback cover malformed and failing graphs.
+See [iteration 50](projects/vortex-vm-only-iterations.md) and
+[the runtime plan](projects/vortex-closure-runtime-plan.md).
+
+Full build, 1,050 affected tests across 96 suites and 22 focused closure cases passed. Source-free
+export/reload includes materialized graph values holding frame-local data and disconnected branch
+targets. Runtime-bound Apply slots and legacy numeric control-target export explicitly refuse before
+Store writes. The real CLI still returns exact `9007199254740993`. Independent Luna gates reviewed
+the bounded foundation and export corrections. The opt-in application probe records timing and
+frame-backing allocation observations, without a speedup claim or creation/compilation measurements.
+
+This is a VM foundation: VQL lambda values remain unavailable pending frontend graph lowering.
+Persisted runtime bindings, general closures and remaining route/lifecycle work still leave §4.12
+incomplete. Broader callable checks retain seven unfinished failures; the route audit retains eight
+failures and one skip. These match iteration 49 and are not a full-suite pass.

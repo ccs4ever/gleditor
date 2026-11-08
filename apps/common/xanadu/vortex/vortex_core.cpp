@@ -8,6 +8,7 @@
 #include "common/xanadu/scalar.hpp"
 #include "common/xanadu/truthiness.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
+#include "common/xanadu/zigzag/query_scalar.hpp"
 
 namespace zigzag::vortex {
 
@@ -67,6 +68,8 @@ void VortexCore::initGenesis() {
   dims_.scan   = mintNamedDimension("d.scan", lastDim);
   dims_.stores = mintNamedDimension("d.stores", lastDim);
   dims_.role   = mintNamedDimension("d.role", lastDim);
+  dims_.runtimeObjectClaim =
+      mintNamedDimension(zigzag::runtimeObjectClaimDimensionName, lastDim);
 }
 
 CellRef VortexCore::mintDimension(std::string_view name) {
