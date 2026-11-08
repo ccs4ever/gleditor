@@ -14,6 +14,7 @@
 #include <stdexcept>
 #include <unordered_set>
 
+#include "common/xanadu/vql/closure_lambda_syntax.hpp"
 #include "common/xanadu/vql/contract_codec.hpp"
 #include "common/xanadu/vql/contracts.hpp"
 #include "common/xanadu/vql/frame_eligibility.hpp"
@@ -315,6 +316,7 @@ CompilationResult VQLCompiler::compile(const QueryExpression &query,
   remainingClosedFunctorTemplateWork_ =
       options.limits.maxClosedFunctorTemplateWork;
   nextFunctorVariantOrdinal_       = 0;
+  nextClosureLambdaId_             = 0;
   remainingGeneratedOpcodes_       = options.limits.maxGeneratedOpcodes;
   remainingFrameDescriptorRecords_ = options.limits.maxFrameDescriptorRecords;
   nextContractValidatorId_         = 0;
@@ -928,6 +930,9 @@ std::optional<CellRef> VQLCompiler::compileValueExpr(const ValueExpr &expr,
             return compileBooleanExpr(*val, ctxCell);
           }
           throw std::invalid_argument("null compiled boolean expression");
+        } else if constexpr (std::is_same_v<T, std::shared_ptr<PathLambda>>) {
+          if (!val) throw std::invalid_argument("null VQL closure lambda");
+          return compileClosureLambda(*val);
         } else {
           throw std::invalid_argument(
               "value expression requires Vortex graph lowering");

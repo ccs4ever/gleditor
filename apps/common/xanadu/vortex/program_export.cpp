@@ -167,16 +167,18 @@ exportProgram(const VortexCore &core, const VortexVM &vm,
       const auto inputs = core.inputsOf(opcode);
       if (inputs.empty())
         throw std::runtime_error("ApplyClosure has no closure handle input");
-      if (const auto bound = vm.cellReferenceOf(inputs.front());
-          bound && *bound != inputs.front()) {
-        const auto closure = vm.closureValue(*bound);
-        if (!closure)
-          throw std::runtime_error(
-              "ApplyClosure handle binding is not a valid closure value");
+      const auto refuseBinding = [] {
         throw std::runtime_error(
             "export of a runtime-bound ApplyClosure handle requires a direct "
             "closure graph value or persisted runtime binding");
-      }
+      };
+      std::size_t handleCount = 0;
+      vm.forEachResultCell(inputs.front(), [&](const CellRef value) {
+        arena.consumeWork();
+        if (handleCount != 0 || value != inputs.front()) refuseBinding();
+        ++handleCount;
+      });
+      if (handleCount != 1) refuseBinding();
     }
     for (const auto side : {DimVector::POS, DimVector::NEG}) {
       auto slot = arena.linked(opcode, core.dims().grab, side);

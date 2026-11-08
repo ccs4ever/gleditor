@@ -363,6 +363,7 @@ private:
   std::size_t maxNamedFrameVariants_{};
   std::size_t remainingClosedFunctorTemplateWork_{};
   std::size_t nextFunctorVariantOrdinal_{};
+  std::size_t nextClosureLambdaId_{};
   std::size_t remainingGeneratedOpcodes_{};
   std::size_t remainingFrameDescriptorRecords_{};
   std::optional<zigzag::CellRef> ambientContext_;
@@ -390,6 +391,7 @@ private:
                                                     zigzag::CellRef ctxCell);
   std::optional<zigzag::CellRef> compileValueExpr(const ValueExpr &expr,
                                                   zigzag::CellRef ctxCell);
+  zigzag::CellRef compileClosureLambda(const PathLambda &lambda);
   std::optional<zigzag::CellRef> compileComparison(const ComparisonExpr &comp,
                                                    zigzag::CellRef ctxCell);
   zigzag::CellRef compileShapePredicate(const ShapeLiteral &shape,

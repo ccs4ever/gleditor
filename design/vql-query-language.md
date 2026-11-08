@@ -2384,38 +2384,46 @@ explicit refusals. The rulings below describe the intended semantics.
   compiled inline graphs. Anonymous path-step lambdas with zero or one nonvariadic formal use the
   same inline call graphs for types, destructuring and expression/block bodies. Their lexical scope
   preserves native recursion of an enclosing eligible function; signatures validate before mapping
-  even on empty inputs. Lambda values and stored closure handles remain unsupported. See
-  [iteration 42](projects/vortex-vm-only-iterations.md). Omitted parameter expressions compile after
-  earlier parameter guards; explicit arguments capture caller bindings, including untyped functor
-  step vectors. Decorated functor captures freeze their body across rebinding; application runs that
-  body before applying the outer predicates/clamp to the combined result. Query-time master
-  dereference resolves foreign proxies, charges each probe and returns the original cell on a cycle.
-  Contract subject collection charges members before copying them into its matcher buffer, and
-  matching charges recursive type visits and field probes. Failed shape and union attempts roll back
-  arena defaults and minted dimensions; captures are staged until the full match succeeds. Return
-  validation releases its temporary defaults on both outcomes. Computed return promises use reusable
-  capture-free validator frames with Boolean results and referenced lexical input ports; attached
-  pipelines retain compiled inline matching. Validators re-read the current owner instead of caching
-  default results, while noncomputed promises retain `RequireContract`. See
-  [iteration 28](projects/vortex-vm-only-iterations.md). Failed matching spends fuel even when its
-  graph changes are rolled back. Explicit graph-level PushGuard/CheckGuards/PopGuard instructions
-  now retain activation-owned frozen inputs and dispatch validators through ordinary native frames,
-  with choice restoration and named Boolean failures. Compiler parameter activation and semantic
-  mutation transactions now protect supported function parameters and complete value, creation,
-  clone and weave operations. Each contract activates after its match; scope exit checks its own
-  mutation obligations before retiring the guard, while caller guards can be repaired at the outer
-  weave boundary. Failed checks restore the owned transaction before raising the named error.
-  Guarded execution serializes cursors, and effectful nested validation remains explicitly
-  unsupported before source effects. Static shape projections compile exclusive/wildcard masks,
-  scalar literals and singleton alias/read-only path targets into atomic VM graphs. Nonliteral
-  targets are prepared per owner before masking and require exactly one cell; existing-cell
-  attachments use fresh clones. Canonical foreign proxies with explicit multi-space mappings now use
-  effective-link snapshots and transactional masks while preserving source stores. Their filing
-  links must remain intact; quote owners, unrepresented nonempty foreign axes and arbitrary
-  index-rank edits remain explicit refusals. One-space snapshots also use shared budgeted name
-  lookup, with Vortex callers supplying the existing core dimension directory for bounded candidate
-  discovery. Proxy collision diagnostics use the same name matcher. No universal VM CPU bound is
-  established. Calls/computed targets, nested shapes and other deferred forms still refuse.
+  even on empty inputs. Lambda values with one untyped named formal and an alias or supported
+  read-only variable-anchored path body now compile to native closure frames. Free alias streams
+  snapshot membership at creation, including order, duplicates and empty streams; referenced cell
+  contents remain shared. Candidate `.` inside a predicate is separate from the empty inherited
+  context of this bounded value-lambda form. Applying a stored value as `/$f` maps it over incoming
+  candidates and requires exactly one structural function handle, without numeric-pointer or scalar
+  coercion. Named-definition capture timing and static functor lowering retain their earlier rules.
+  Broader first-class signatures/bodies, implicit context roots, nested creation and captured
+  functors remain deferred, as do persistent runtime bindings. See
+  [iterations 42 and 50–51](projects/vortex-vm-only-iterations.md). Omitted parameter expressions
+  compile after earlier parameter guards; explicit arguments capture caller bindings, including
+  untyped functor step vectors. Decorated functor captures freeze their body across rebinding;
+  application runs that body before applying the outer predicates/clamp to the combined result.
+  Query-time master dereference resolves foreign proxies, charges each probe and returns the
+  original cell on a cycle. Contract subject collection charges members before copying them into its
+  matcher buffer, and matching charges recursive type visits and field probes. Failed shape and
+  union attempts roll back arena defaults and minted dimensions; captures are staged until the full
+  match succeeds. Return validation releases its temporary defaults on both outcomes. Computed
+  return promises use reusable capture-free validator frames with Boolean results and referenced
+  lexical input ports; attached pipelines retain compiled inline matching. Validators re-read the
+  current owner instead of caching default results, while noncomputed promises retain
+  `RequireContract`. See [iteration 28](projects/vortex-vm-only-iterations.md). Failed matching
+  spends fuel even when its graph changes are rolled back. Explicit graph-level
+  PushGuard/CheckGuards/PopGuard instructions now retain activation-owned frozen inputs and dispatch
+  validators through ordinary native frames, with choice restoration and named Boolean failures.
+  Compiler parameter activation and semantic mutation transactions now protect supported function
+  parameters and complete value, creation, clone and weave operations. Each contract activates after
+  its match; scope exit checks its own mutation obligations before retiring the guard, while caller
+  guards can be repaired at the outer weave boundary. Failed checks restore the owned transaction
+  before raising the named error. Guarded execution serializes cursors, and effectful nested
+  validation remains explicitly unsupported before source effects. Static shape projections compile
+  exclusive/wildcard masks, scalar literals and singleton alias/read-only path targets into atomic
+  VM graphs. Nonliteral targets are prepared per owner before masking and require exactly one cell;
+  existing-cell attachments use fresh clones. Canonical foreign proxies with explicit multi-space
+  mappings now use effective-link snapshots and transactional masks while preserving source stores.
+  Their filing links must remain intact; quote owners, unrepresented nonempty foreign axes and
+  arbitrary index-rank edits remain explicit refusals. One-space snapshots also use shared budgeted
+  name lookup, with Vortex callers supplying the existing core dimension directory for bounded
+  candidate discovery. Proxy collision diagnostics use the same name matcher. No universal VM CPU
+  bound is established. Calls/computed targets, nested shapes and other deferred forms still refuse.
   Projections can continue immediately into supported path operations. Anchor and intermediate
   projections run after the preceding predicates, clamp and yield selection and before the following
   step; terminal projection ASTs remain compatible. Consecutive projections, unsupported raw-dot

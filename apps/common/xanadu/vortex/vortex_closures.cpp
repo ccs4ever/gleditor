@@ -684,9 +684,27 @@ ExecutionResult VortexVM::executeClosureOpcodeBody(const OpcodeKind kind,
   }
 
   if (inputs.empty()) return fail("ApplyClosure requires a closure handle");
-  const auto handle = resultCell(cursor, inputs.front());
-  if (!handle || !arena.contains(*handle))
-    return fail("ApplyClosure handle does not resolve to a cell");
+  std::optional<CellRef> handle;
+  std::size_t handleCount = 0;
+  try {
+    forEachResultCell(inputs.front(), [&](const CellRef cell) {
+      arena.consumeWork();
+      if (handleCount != 0)
+        throw std::length_error(
+            "ApplyClosure requires exactly one closure handle; input has "
+            "multiple values");
+      if (!arena.contains(cell))
+        throw std::invalid_argument(
+            "ApplyClosure handle does not resolve to a cell");
+      handle = cell;
+      ++handleCount;
+    });
+  } catch (const std::exception &error) {
+    return fail(error.what());
+  }
+  if (!handle)
+    return fail("ApplyClosure requires exactly one closure handle; input is "
+                "empty");
   const auto value = closureValue(*handle);
   if (!value) return fail(value.error().message);
   const auto descriptor = closureDescriptor(*value->descriptor);

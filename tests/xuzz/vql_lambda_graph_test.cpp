@@ -450,14 +450,23 @@ TEST(VQLLambdaGraphTest, NullLambdaSelectorIsACompileRefusal) {
 }
 
 TEST(VQLLambdaGraphTest,
-     ValueExpressionLambdasAndStoredClosuresStayUnsupported) {
+     ValueExpressionLambdasAndStoredClosuresUseNativeFrames) {
   Harness h;
   for (const std::string_view source :
        {"let $f := \\($value) $value; return $f",
         "def pure save(): Any := \\($value) $value; save()"}) {
     const auto compiled = h.compile(source);
-    EXPECT_FALSE(compiled.success) << source;
-    EXPECT_FALSE(compiled.cursor) << source;
+    ASSERT_TRUE(compiled.success) << compiled.errorMessage << source;
+    ASSERT_TRUE(compiled.cursor) << source;
+    EXPECT_GT(countOpcode(compiled, h.vm, OpcodeKind::CreateClosure), 0u);
+    EXPECT_GT(countOpcode(compiled, h.vm, OpcodeKind::ReturnFrame), 0u);
+    const auto execution = h.vm.run(*compiled.cursor, 10000);
+    ASSERT_TRUE(execution.success) << execution.errorMessage;
+    ASSERT_EQ(compiled.resultSlots.size(), 1u);
+    const auto values = h.vm.resultCells(compiled.resultSlots.front());
+    ASSERT_EQ(values.size(), 1u);
+    EXPECT_TRUE(h.vm.closureValue(values.front()));
+    h.vm.setCursorOpcode(*compiled.cursor, std::nullopt);
   }
 }
 

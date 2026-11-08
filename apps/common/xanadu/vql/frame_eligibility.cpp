@@ -1,5 +1,6 @@
 #include "common/xanadu/vql/frame_eligibility.hpp"
 #include "common/xanadu/vql/closed_functor_syntax.hpp"
+#include "common/xanadu/vql/closure_lambda_syntax.hpp"
 #include "common/xanadu/vql/projection_syntax.hpp"
 
 #include <algorithm>
@@ -426,7 +427,12 @@ private:
             pointer(
                 part, depth + 1,
                 [&](const PathLambda &lambda, const std::size_t childDepth) {
-                  refuse("path lambdas are not reusable closed frame bodies");
+                  const auto syntax =
+                      analyzeClosureLambdaSyntax(lambda, budget_.limits);
+                  if (!syntax) throw ScanFailure(syntax.error().message);
+                  if (!syntax->has_value())
+                    refuse("path lambda value is outside the supported closure "
+                           "syntax");
                   pathLambda(lambda, scope, childDepth);
                 });
           } else if constexpr (std::same_as<Part,

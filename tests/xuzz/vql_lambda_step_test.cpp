@@ -9,6 +9,7 @@
 #include "common/xanadu/multi_store.hpp"
 #include "common/xanadu/vql/vql_engine.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
+#include "common/xanadu/zigzag/query_scalar.hpp"
 
 namespace {
 
@@ -199,7 +200,14 @@ TEST(VQLLambdaStepTest, MissingCurrentCellDoesNotBecomeCellZero) {
     let $f := \($x) $x;
     return $f
   )");
-  EXPECT_TRUE(lambdaResult.empty());
+  // Returning a lambda now yields its graph value without applying it to an
+  // absent current cell or rebinding the outer variable.
+  ASSERT_EQ(lambdaResult.size(), 1u);
+  EXPECT_NE(lambdaResult.front(), zigzag::noCell);
+  EXPECT_EQ(
+      zigzag::classifyRuntimeObjectRoot(arena, lambdaResult.front(),
+                                        core.dims().runtimeObjectClaim.value()),
+      zigzag::RuntimeObjectClaimResult::Claimed);
   EXPECT_EQ(engine.getVariable("x"), (std::vector<zigzag::CellRef>{outer}));
 
   engine.setVariable("value", outer);

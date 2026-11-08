@@ -1964,3 +1964,49 @@ Logs: `/tmp/vql-closure-runtime-build.log`, `/tmp/vql-closure-runtime-focused.lo
 `/tmp/vql-closure-runtime-tests.log`, `/tmp/vql-closure-runtime-profile.log`,
 `/tmp/vql-closure-runtime-cli.log`, `/tmp/vql-closure-runtime-callables.log`,
 `/tmp/vql-closure-runtime-overlay.log`, `/tmp/vql-closure-runtime-format.log`.
+
+## Iteration 51: bounded VQL lambda values and stored application
+
+A lambda value with one untyped named nonvariadic formal and an alias or supported read-only
+variable-anchored path body compiles into a detached native frame, a closure descriptor and
+`CreateClosure`. The frame is compiled immediately in isolated compiler state. Its hidden context
+capture is explicitly empty; sorted free aliases become owned capture streams and the named formal
+is an applied stream. Capture membership freezes at creation while referenced data stays shared.
+Synthetic names are collision checked even against programmatic AST definitions, and closure arity,
+frame variants, generated code, descriptor records and syntax walks retain their logical budgets.
+
+A dynamic `/$f` step uses `ApplyClosure` per incoming candidate when no static functor binding wins.
+The VM accepts exactly one Cell/Stream handle and refuses empty/multiple handles and numeric pointer
+imitation. Empty incoming data skips application; results preserve identity, order and duplicates.
+Existing outer predicates/clamps/master operations follow application. The shared syntax recognizer
+keeps candidate predicate context distinct from captured aliases, and the full eligibility walker
+still validates unsupported and cyclic ASTs before signature recursion or inline expansion.
+
+First-class types/defaults/dot/destructuring/block bodies, nested creation, implicit context roots,
+functor captures and broader dynamic/higher-order calling forms remain deferred. Existing inline
+path-step lambdas retain their wider signature/body support. Session variable publication and
+persisted VM bindings remain unfinished. Export now refuses runtime-bound Stream handle slots as
+well as Cell slots before Store writes; direct closure graph values remain portable.
+
+Validation: full `make -j$(nproc)`, all 1,063 affected tests across 97 suites and all 33 focused
+tests across three suites passed. Twelve new source cases prove real Create/Apply/frame emission,
+creation-time rebinding, duplicate/empty captures, live data contents, predicate scope, a recursive
+native maker returning a closure holding frame-owned data, per-iteration closures after frame
+return, exact numeric kinds, handle/scalar refusals, bounded failure/rollback/retry, genuine
+compiled-body AST cycles, source-free export/reload and host/mesh SOURCE execution. An additional VM
+export case checks the live Stream-handle refusal. The old unavailable-value test now verifies
+native graph values and an `Any` return promise. The real headless CLI returned exact
+`9007199254740993` through a recursively created closure. Independent Luna architecture, senior and
+resource gates accepted the bounded stage; repeated analysis and per-candidate frame allocations
+establish no speedup claim. Repository formatting uses clang-format 19.
+
+Broader audits retain eight route failures/one skip (132 passes) and seven callable failures (33
+passes). The legacy missing-current-cell test now passes its closure-value segment and exposes its
+still-unfinished session update and `count()` checks; those assertions remain intact. This is not a
+full-suite pass or §4.12 completion. The remaining acceptance packages are tracked in
+[the completion gates](vql-412-completion-gates.md); their iteration estimate is provisional.
+
+Logs: `/tmp/vql-lambda-values-build.log`, `/tmp/vql-lambda-values-focused.log`,
+`/tmp/vql-lambda-values-tests.log`, `/tmp/vql-lambda-values-cli.log`,
+`/tmp/vql-lambda-values-callables.log`, `/tmp/vql-lambda-values-overlay.log`,
+`/tmp/vql-lambda-values-format.log`.

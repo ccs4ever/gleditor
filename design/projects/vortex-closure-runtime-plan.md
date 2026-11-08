@@ -2,10 +2,10 @@
 
 ## Bounded stage and invariants
 
-Iteration 50 establishes a VM foundation for first-class closure values. VQL lambda-value lowering
-follows separately; its current explicit refusals stay until real graph creation and application
-exist. Existing closed-functor frame variants remain valid, and named definitions keep their current
-call-site capture behavior.
+Iteration 50 establishes a VM foundation for first-class closure values. Iteration 51 adds the first
+bounded VQL lambda-value lowering through graph creation and application. Unsupported forms retain
+explicit refusals. Existing closed-functor frame variants remain valid, and named definitions keep
+their current call-site capture behavior.
 
 A closure owns the membership of its captured streams: resolved `CellRef` sequences in order,
 including duplicates and empty streams. It retains the referenced cells, rather than copying their
@@ -84,12 +84,12 @@ escape, choices/cancellation, later-cursor application, compaction, scalar typin
 graph/value export. Profiling separates binding/capture materialization, compilation and
 application/allocation; measurements establish costs rather than a promised speedup.
 
-## Frontend follow-up
+## Bounded frontend slice and follow-up
 
-The first lambda-value slice has one untyped named formal and a supported read-only path/alias body.
-Free scalar/stream bindings are captured at creation; rebinding a name later does not replace that
-membership, while changes to referenced cells remain visible. This ruling is new for closure values
-and does not change named-function call-site capture.
+The implemented first lambda-value slice has one untyped named formal and a supported read-only
+path/alias body. Free scalar/stream bindings are captured at creation; rebinding a name later does
+not replace that membership, while changes to referenced cells remain visible. This ruling is new
+for closure values and does not change named-function call-site capture.
 
 Implicit outer-context roots, dot formals, defaults, destructuring and nested lambda creation are
 outside the first slice. Candidate `.` inside a path predicate remains the traversal candidate; it

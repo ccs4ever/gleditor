@@ -7,6 +7,7 @@
 
 #include "common/xanadu/scalar.hpp"
 #include "common/xanadu/vql/closed_functor_syntax.hpp"
+#include "common/xanadu/vql/closure_lambda_syntax.hpp"
 #include "common/xanadu/vql/contract_codec.hpp"
 #include "common/xanadu/vql/contracts.hpp"
 #include "common/xanadu/vql/invocation.hpp"
@@ -1464,5 +1465,112 @@ void VQLCompiler::compileFrameDefinition(const DefDeclaration &definition,
       closedFunctorTemplateWork(key.functorTemplates));
   const std::optional<FrameDefinitionKey> completedKey{key};
   finalizeNativeFrame(descriptor, spec, completedKey);
+}
+
+CellRef VQLCompiler::compileClosureLambda(const PathLambda &lambda) {
+  const auto analyzed = analyzeClosureLambdaSyntax(lambda);
+  if (!analyzed) throw std::invalid_argument(analyzed.error().message);
+  if (!*analyzed)
+    throw std::invalid_argument(
+        "VQL lambda value is outside the supported closure syntax");
+  const auto &syntax = **analyzed;
+
+  const auto closureLimits = vm_.closureLimits();
+  if (closureLimits.maxCaptureStreams == 0 ||
+      syntax.freeCaptureNames.size() >= closureLimits.maxCaptureStreams ||
+      closureLimits.maxAppliedStreams == 0)
+    throw std::invalid_argument(
+        "VQL lambda exceeds configured closure stream limits");
+
+  if (frameDefinitions_.size() >= maxNamedFrameVariants_)
+    throw std::invalid_argument("compiled VQL frame variant budget exhausted");
+  const auto maxSize = std::numeric_limits<std::size_t>::max();
+  if (definitions_.size() > maxSize - frameDefinitions_.size() ||
+      definitions_.size() + frameDefinitions_.size() == maxSize)
+    throw std::invalid_argument(
+        "compiled VQL lambda name search bound is not representable");
+  std::size_t nameAttempts = definitions_.size() + frameDefinitions_.size() + 1;
+  std::optional<std::string> syntheticName;
+  while (nameAttempts > 0) {
+    if (nextClosureLambdaId_ == maxSize)
+      throw std::invalid_argument("compiled VQL lambda identifier exhausted");
+    std::string candidate =
+        "#vql-closure-lambda-" + std::to_string(nextClosureLambdaId_++);
+    --nameAttempts;
+    const bool frameNameInUse =
+        std::ranges::any_of(frameDefinitions_, [&candidate](const auto &entry) {
+          return entry.first.name == candidate;
+        });
+    if (!definitions_.contains(candidate) && !frameNameInUse) {
+      syntheticName = std::move(candidate);
+      break;
+    }
+  }
+  if (!syntheticName)
+    throw std::invalid_argument(
+        "compiled VQL lambda name search exhausted its bounded candidates");
+  const std::string &name = *syntheticName;
+  for (const auto &capture : syntax.freeCaptureNames)
+    if (functorBindings_.contains(capture))
+      throw std::invalid_argument(
+          "VQL lambda value cannot capture path functor $" + capture);
+
+  DefDeclaration definition{
+      .name   = name,
+      .params = {LambdaParam{.target = syntax.parameterName}},
+      .body   = lambda.body,
+  };
+  if (!frameFreeCaptureNames_.emplace(name, syntax.freeCaptureNames).second)
+    throw std::invalid_argument("compiled VQL lambda name is already in use");
+
+  const FrameDefinitionKey key{.name = name};
+  const auto reserved = vm_.reserveFrameDescriptor();
+  if (!reserved) throw std::invalid_argument(reserved.error().message);
+  FrameDefinitionState frameState{.descriptor = *reserved, .queued = true};
+  if (!frameDefinitions_.emplace(key, std::move(frameState)).second)
+    throw std::invalid_argument(
+        "compiled VQL lambda frame is already reserved");
+  compileFrameDefinition(definition, key);
+
+  std::vector<CellRef> captureSources;
+  captureSources.reserve(syntax.freeCaptureNames.size() + 1);
+  captureSources.push_back(normalizeFrameStream(std::span<const CellRef>{}));
+  for (const auto &capture : syntax.freeCaptureNames) {
+    std::vector<CellRef> cells;
+    if (const auto found = streamBindings_.find(capture);
+        found != streamBindings_.end()) {
+      cells = found->second;
+    } else if (const auto found = varBindings_.find(capture);
+               found != varBindings_.end() && found->second) {
+      cells.push_back(*found->second);
+    }
+    captureSources.push_back(normalizeFrameStream(cells));
+  }
+
+  std::vector<zigzag::vortex::ClosureFrameInput> frameInputs;
+  frameInputs.reserve(syntax.freeCaptureNames.size() + 2);
+  frameInputs.push_back(
+      {.source = zigzag::vortex::ClosureInputSource::Capture, .index = 0});
+  for (std::size_t index = 0; index < syntax.freeCaptureNames.size(); ++index)
+    frameInputs.push_back(
+        {.source = zigzag::vortex::ClosureInputSource::Capture,
+         .index  = index + 1});
+  frameInputs.push_back(
+      {.source = zigzag::vortex::ClosureInputSource::Applied, .index = 0});
+
+  const auto closureDescriptor =
+      vm_.makeClosureDescriptor({.frameDescriptor    = *reserved,
+                                 .captureStreamCount = captureSources.size(),
+                                 .appliedStreamCount = 1,
+                                 .frameInputs        = std::move(frameInputs)});
+  if (!closureDescriptor)
+    throw std::invalid_argument(closureDescriptor.error().message);
+
+  const CellRef create = emitOp(OpcodeKind::CreateClosure, "#CREATE_CLOSURE");
+  emitInput(create, *closureDescriptor);
+  for (const CellRef source : captureSources) emitInput(create, source);
+  const CellRef handle = core_.arena().makeCell();
+  emitOutput(create, handle);
+  return handle;
 }
 } // namespace xanadu::vql

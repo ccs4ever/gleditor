@@ -335,4 +335,40 @@ TEST(VortexClosureExportTest,
   EXPECT_EQ(store.latest(), before);
 }
 
+TEST(VortexClosureExportTest,
+     RuntimeBoundStreamHandleRefusesBeforeStoreWrites) {
+  Harness h;
+  const auto ret = h.op(OpcodeKind::ReturnFrame);
+  const auto frame =
+      h.vm.makeFrameDescriptor(FrameDescriptorSpec{.entry = ret});
+  ASSERT_TRUE(frame);
+  h.core.bindInput(ret, *frame);
+  const auto descriptor = h.vm.makeClosureDescriptor(
+      ClosureDescriptorSpec{.frameDescriptor = *frame});
+  ASSERT_TRUE(descriptor);
+  const auto value = h.vm.makeClosureValue(*descriptor, {});
+  ASSERT_TRUE(value);
+  const auto handleStream = h.arena.makeCell("runtime handle stream");
+  const auto append       = h.op(OpcodeKind::StreamAppend);
+  h.core.bindInput(append, *value);
+  h.core.bindOutput(append, handleStream);
+  const auto apply = h.op(OpcodeKind::ApplyClosure);
+  h.core.bindInput(apply, handleStream);
+  const auto halt = h.op(OpcodeKind::Halt);
+  h.next(append, apply);
+  h.next(apply, halt);
+  const auto cursor    = h.vm.spawnCursor(append, "bound-stream-export");
+  const auto execution = h.vm.run(cursor, 100);
+  ASSERT_TRUE(execution.success) << execution.errorMessage;
+  h.vm.setCursorOpcode(cursor, std::nullopt);
+  auto scroll = std::make_shared<xanadu::UserPermascroll>();
+  xanadu::Store store(scroll);
+  const auto before = store.latest();
+  const std::vector<CellRef> program{apply, halt};
+  EXPECT_THROW(
+      (void)zigzag::vortex::exportProgram(h.core, h.vm, program, store),
+      std::runtime_error);
+  EXPECT_EQ(store.latest(), before);
+}
+
 } // namespace

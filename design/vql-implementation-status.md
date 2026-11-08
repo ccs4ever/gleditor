@@ -929,3 +929,24 @@ This is a VM foundation: VQL lambda values remain unavailable pending frontend g
 Persisted runtime bindings, general closures and remaining route/lifecycle work still leave §4.12
 incomplete. Broader callable checks retain seven unfinished failures; the route audit retains eight
 failures and one skip. These match iteration 49 and are not a full-suite pass.
+
+## Bounded source lambda values
+
+One untyped named-formal lambda with an alias or supported read-only variable-anchored path body now
+creates a real closure graph. Stored `/$f` application maps native frames over incoming candidates.
+Captures freeze ordered membership at creation, including duplicates/empty streams, and retain live
+cell identity. Predicate candidate context remains separate; existing named and static-functor
+capture rules are unchanged. See [iteration 51](projects/vortex-vm-only-iterations.md).
+
+Full build, 1,063 affected tests across 97 suites and 33 focused tests passed. Tests include a
+recursive native maker holding frame-owned data, loop closures after frame return, exact scalar
+kinds, malformed AST/handle refusals and rollback, and fresh-VM export/reload plus host/mesh SOURCE.
+The CLI preserves exact `9007199254740993` through a recursively created closure. Live runtime-bound
+Cell/Stream handle export refuses before Store writes until binding initialization is persisted.
+Independent Luna gates accepted the bounded stage, with no speedup or total CPU/heap claim.
+
+Broader callable and route audits retain their seven and eight unfinished failures, respectively,
+plus one route skip. First-class signatures/bodies beyond this slice, persistent sessions/bindings,
+dynamic and decorated recursive functors, deferred variadics and remaining lifecycle work still
+leave §4.12 incomplete. The [completion gates](projects/vql-412-completion-gates.md) record the
+remaining packages and a provisional planning band; this is not a full-suite pass.
