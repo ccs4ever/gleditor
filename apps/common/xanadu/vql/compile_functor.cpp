@@ -181,20 +181,26 @@ std::size_t VQLCompiler::closedFunctorTemplateWork(
 }
 
 std::optional<std::vector<PathStep>>
-VQLCompiler::functorArgument(const ValueExpr &argument) const {
+VQLCompiler::functorArgument(const ValueExpr &argument) {
   if (const auto *path =
           std::get_if<std::shared_ptr<PathExpression>>(&argument.kind);
       path && *path)
     return functorArgument(**path);
   if (const auto *name = std::get_if<std::string>(&argument.kind)) {
     const auto found = functorBindings_.find(*name);
-    if (found != functorBindings_.end()) return found->second;
+    if (found != functorBindings_.end()) {
+      validateFunctorCaptureSteps(found->second);
+      chargeFunctorCaptureCopyWork(found->second, [&](const std::size_t work) {
+        chargeClosedFunctorTemplateWork(work);
+      });
+      return found->second;
+    }
   }
   return std::nullopt;
 }
 
 std::optional<std::vector<PathStep>>
-VQLCompiler::functorArgument(const PathExpression &path) const {
+VQLCompiler::functorArgument(const PathExpression &path) {
   const bool existingFunctorAnchor =
       path.anchor.kind == AnchorKind::Variable &&
       functorBindings_.contains(path.anchor.name);
@@ -219,17 +225,25 @@ VQLCompiler::functorArgument(const PathExpression &path) const {
     if (path.anchor.versionPin || path.anchor.derefMaster)
       throw std::invalid_argument(
           "qualified functor anchors require runtime functor handles");
+    validateFunctorCaptureSteps(found->second);
+    chargeFunctorCaptureCopyWork(found->second, [&](const std::size_t work) {
+      chargeClosedFunctorTemplateWork(work);
+    });
     steps = found->second;
   }
   auto captured = captureFunctorApplications(
       path.steps,
-      [&](std::string_view name) -> std::optional<std::vector<PathStep>> {
+      [&](std::string_view name) -> std::optional<std::span<const PathStep>> {
         const auto found = functorBindings_.find(std::string(name));
         if (found == functorBindings_.end())
           throw std::invalid_argument("unbound point-free functor '$" +
                                       std::string(name) + "'");
-        return found->second;
-      });
+        return std::span<const PathStep>{found->second};
+      },
+      [&](const std::size_t work) { chargeClosedFunctorTemplateWork(work); });
+  chargeFunctorCaptureCopyWork(captured, [&](const std::size_t work) {
+    chargeClosedFunctorTemplateWork(work);
+  });
   steps.insert(steps.end(), captured.begin(), captured.end());
   return steps;
 }

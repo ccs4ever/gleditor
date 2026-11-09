@@ -304,22 +304,36 @@ TEST(VQLBooleanPredicateFunctorFrameTest,
 }
 
 TEST(VQLBooleanPredicateFunctorFrameTest,
-     UnsupportedFreeComputedAndTruthinessPredicatesCannotBecomeTemplates) {
+     FreeComputedAndTruthinessPredicatesUseNativeTemplates) {
   Harness h;
+  const auto owner = h.cell("owner");
+  const auto value = h.cell("3");
+  h.link(h.core.home(), "d.items", owner);
+  h.link(owner, "d.next", value);
   for (const std::string_view route :
        {"/+d.next[. = $wanted]", "/+d.next[. = (1 + 2)]", "/+d.next[.]"}) {
     const std::string source = std::string(recursiveDefinition) +
                                "walk(##/+d.items, 1, " + std::string(route) +
                                ")";
-    const auto refused = h.compile(source);
-    EXPECT_FALSE(refused.success) << source;
-    EXPECT_FALSE(refused.cursor) << source;
+    CompilationOptions options;
+    options.initialBindings.emplace("wanted", std::vector<CellRef>{value});
+    const auto compiled = h.compile(source, options);
+    ASSERT_TRUE(compiled.success) << compiled.errorMessage;
+    EXPECT_FALSE(
+        namedInvokeDescriptors(compiled, h.vm, h.core, "walk").empty());
+    const auto result = h.execute(source, options.initialBindings);
+    ASSERT_TRUE(result) << result.error().message;
+    EXPECT_EQ(*result, (std::vector<CellRef>{value}));
   }
 }
 
 TEST(VQLBooleanPredicateFunctorFrameTest,
      MalformedAndCyclicBooleanPredicateTreesRefuseRecursion) {
   Harness h;
+  const auto owner = h.cell("owner");
+  const auto leaf  = h.cell("leaf");
+  h.link(h.core.home(), "d.items", owner);
+  h.link(owner, "d.next", leaf);
   constexpr std::string_view source =
       "def pure walk($nodes: Stream<Cell>, $depth: Int, $route): "
       "Stream<Cell> := { if $depth > 0 return walk($nodes/$route, "
@@ -351,10 +365,25 @@ TEST(VQLBooleanPredicateFunctorFrameTest,
                   ValueExpr{.kind = ScalarLiteral{.value = std::string("x")}}),
               .op    = CompOp::Equal,
               .right = std::make_shared<ValueExpr>(ValueExpr{
-                  .kind = ScalarLiteral{.value = std::string("y")}})}}}});
+                  .kind = ScalarLiteral{.value = std::string("x")}})}}}});
   nestedComparison.left =
       std::make_shared<ValueExpr>(ValueExpr{.kind = std::move(nestedBoolean)});
-  expectRefused(std::move(nested));
+  nestedComparison.right = std::make_shared<ValueExpr>(
+      ValueExpr{.kind = ScalarLiteral{.value = true}});
+  const auto nestedCompiled = h.compile(nested);
+  ASSERT_TRUE(nestedCompiled.success) << nestedCompiled.errorMessage;
+  EXPECT_FALSE(
+      namedInvokeDescriptors(nestedCompiled, h.vm, h.core, "walk").empty());
+  ASSERT_TRUE(nestedCompiled.cursor);
+  const auto execution = h.vm.run(*nestedCompiled.cursor, 100'000);
+  ASSERT_TRUE(execution.success) << execution.errorMessage;
+  std::vector<CellRef> values;
+  for (const auto slot : nestedCompiled.resultSlots) {
+    const auto members = h.vm.resultCells(slot);
+    values.insert(values.end(), members.begin(), members.end());
+  }
+  EXPECT_EQ(values, (std::vector<CellRef>{leaf}));
+  h.vm.setCursorOpcode(*nestedCompiled.cursor, std::nullopt);
 
   auto cyclic     = parse();
   auto cycle      = std::make_shared<BooleanExpr>();

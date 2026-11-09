@@ -221,6 +221,9 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
                          std::optional<CellRef> context, bool ufcs,
                          const bool entersActiveCallStack) {
   std::vector<ClosedFunctorFormalKey> functorTemplates;
+  std::vector<StaticFunctorProgram> staticFunctorPrograms;
+  std::unordered_set<std::string> staticProgramCaptureNames;
+  std::unordered_set<std::string> staticProgramRequiredNames;
   bool unsupportedFunctorArgument = false;
   const auto requiredFunctorFormals =
       frameFunctorFormalIndices_.find(definition.name);
@@ -242,15 +245,136 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
     const bool requiredFormal =
         std::ranges::binary_search(requiredFormalIndices, functorIndex);
     if (isFunctor) {
-      const auto steps = closedFunctorArgumentSteps(argument);
+      if (templateFormal || requiredFormal) {
+        if (const auto borrowed = closedFunctorArgumentSteps(argument)) {
+          auto formal = normalizeClosedFunctorTemplate(*borrowed, functorIndex);
+          if (formal) {
+            functorTemplates.push_back(std::move(*formal));
+            ++functorIndex;
+            continue;
+          }
+        }
+      }
+      auto steps = functorArgument(argument);
       if ((!templateFormal && !requiredFormal) || !steps) {
         unsupportedFunctorArgument = true;
       } else {
         auto formal = normalizeClosedFunctorTemplate(*steps, functorIndex);
-        if (!formal) {
-          unsupportedFunctorArgument = true;
-        } else {
+        if (formal) {
           functorTemplates.push_back(std::move(*formal));
+        } else {
+          auto program = normalizeStaticFunctorProgram(
+              *steps, functorIndex,
+              StaticFunctorProgramLimits{
+                  .maxWork = remainingClosedFunctorTemplateWork_});
+          if (!program) throw std::invalid_argument(program.error().message);
+          if (!*program) {
+            unsupportedFunctorArgument = true;
+          } else {
+            auto programScope = analyzeFrameStaticFunctorScope(
+                *(*program)->steps,
+                FrameEligibilityLimits{
+                    .maxWork = remainingClosedFunctorTemplateWork_});
+            if (!programScope)
+              throw std::invalid_argument(programScope.error().message);
+            if (programScope->refusalReason) {
+              unsupportedFunctorArgument = true;
+            } else {
+              chargeClosedFunctorTemplateWork(programScope->workUnits);
+              chargeClosedFunctorTemplateWork((*program)->workUnits);
+              const auto applications =
+                  frameFunctorApplicationScopes_.find(definition.name);
+              const auto shadowedAtEveryUse = [&](const std::string &name) {
+                if (applications == frameFunctorApplicationScopes_.end())
+                  return true;
+                for (const auto &site : applications->second) {
+                  if (site.formalIndex != functorIndex) continue;
+                  if (!site.visibleNames.contains(name)) return false;
+                }
+                return true;
+              };
+              const auto chargeCaptureName = [&](const std::string &name) {
+                chargeClosedFunctorTemplateWork(
+                    std::max(name.size(), std::size_t{1}));
+              };
+              for (const auto &alias : (*program)->aliases) {
+                if (functorBindings_.contains(alias.name) &&
+                    !shadowedAtEveryUse(alias.name))
+                  unsupportedFunctorArgument = true;
+              }
+              const auto addDirectNames = [&](const auto &names) {
+                for (const auto &name : names) {
+                  if (!shadowedAtEveryUse(name)) {
+                    chargeCaptureName(name);
+                    staticProgramCaptureNames.insert(name);
+                  }
+                }
+              };
+              addDirectNames(programScope->freeCaptureNames);
+              for (const auto &name :
+                   programScope->requiredDefaultCaptureBindings) {
+                if (shadowedAtEveryUse(name)) continue;
+                chargeCaptureName(name);
+                staticProgramCaptureNames.insert(name);
+                chargeCaptureName(name);
+                staticProgramRequiredNames.insert(name);
+              }
+              addDirectNames(
+                  programScope->conditionalRequiredDefaultCaptureBindings);
+              addDirectNames(
+                  programScope->omittedRestRequiredDefaultCaptureBindings);
+              for (const auto &callSite : programScope->callSites) {
+                const auto callee = definitions_.find(callSite.callee);
+                if (callee == definitions_.end()) continue;
+                if (!reusableFrameDefinitions_.contains(callSite.callee)) {
+                  unsupportedFunctorArgument = true;
+                  continue;
+                }
+                const auto addDependencies = [&](const auto &metadata,
+                                                 const bool required) {
+                  const auto found = metadata.find(callSite.callee);
+                  if (found == metadata.end()) return;
+                  for (const auto &name : found->second) {
+                    if (callSite.visibleNames.contains(name) ||
+                        shadowedAtEveryUse(name))
+                      continue;
+                    chargeCaptureName(name);
+                    staticProgramCaptureNames.insert(name);
+                    if (required) {
+                      chargeCaptureName(name);
+                      staticProgramRequiredNames.insert(name);
+                    }
+                    if (functorBindings_.contains(name) &&
+                        !shadowedAtEveryUse(name))
+                      unsupportedFunctorArgument = true;
+                  }
+                };
+                addDependencies(frameFreeCaptureNames_, false);
+                addDependencies(frameRequiredDefaultCaptureBindings_, true);
+                const auto &parameters = callee->second.params;
+                if (parameters.empty() || !parameters.back().isVariadic)
+                  continue;
+                const std::size_t fixedCount = parameters.size() - 1;
+                const bool injectContext =
+                    callSite.mayInjectContext &&
+                    parameters.size() > callSite.argumentCount;
+                const std::size_t suppliedCount =
+                    callSite.argumentCount +
+                    static_cast<std::size_t>(injectContext);
+                if (suppliedCount > fixedCount &&
+                    (parameters.back().type ||
+                     std::holds_alternative<DestructurePattern>(
+                         parameters.back().target)))
+                  addDependencies(
+                      frameConditionalRequiredDefaultCaptureBindings_, true);
+                if (parameters.back().defaultValue &&
+                    suppliedCount <= fixedCount)
+                  addDependencies(
+                      frameOmittedRestRequiredDefaultCaptureBindings_, true);
+              }
+              staticFunctorPrograms.push_back(std::move(**program));
+            }
+          }
         }
       }
     }
@@ -282,6 +406,15 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
     // expression that looked static was required to normalize above.
   }
   std::ranges::sort(functorTemplates, {}, &ClosedFunctorFormalKey::formalIndex);
+  std::ranges::sort(staticFunctorPrograms, {}, [](const auto &program) {
+    return program.key.formalIndex;
+  });
+  std::vector<std::string> staticProgramCaptures(
+      staticProgramCaptureNames.begin(), staticProgramCaptureNames.end());
+  std::ranges::sort(staticProgramCaptures);
+  std::vector<std::string> requiredStaticProgramCaptures(
+      staticProgramRequiredNames.begin(), staticProgramRequiredNames.end());
+  std::ranges::sort(requiredStaticProgramCaptures);
   bool hasInlineCapture = false;
   if (const auto captures = frameFreeCaptureNames_.find(definition.name);
       captures != frameFreeCaptureNames_.end()) {
@@ -308,8 +441,10 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
       throw std::invalid_argument(
           "recursive cycle crosses an inline-only definition: " +
           definition.name);
-    return compileReusableFrameCall(definition, arguments, context, ufcs,
-                                    std::move(functorTemplates));
+    return compileReusableFrameCall(
+        definition, arguments, context, ufcs, std::move(functorTemplates),
+        std::move(staticFunctorPrograms), std::move(staticProgramCaptures),
+        std::move(requiredStaticProgramCaptures));
   }
   if (entersActiveCallStack &&
       std::ranges::contains(activeCalls_, definition.name))
@@ -855,7 +990,10 @@ VQLCompiler::compileContractValidator(const TypeExpr &type,
 std::vector<CellRef> VQLCompiler::compileReusableFrameCall(
     const DefDeclaration &definition, const std::vector<ValueExpr> &arguments,
     const std::optional<CellRef> context, const bool ufcs,
-    std::vector<ClosedFunctorFormalKey> functorTemplates) {
+    std::vector<ClosedFunctorFormalKey> functorTemplates,
+    std::vector<StaticFunctorProgram> staticFunctorPrograms,
+    std::vector<std::string> extraCaptureNames,
+    std::vector<std::string> requiredProgramCaptureNames) {
   const auto callerCaptureCells = [this](const std::string &name) {
     if (const auto found = streamBindings_.find(name);
         found != streamBindings_.end())
@@ -875,6 +1013,56 @@ std::vector<CellRef> VQLCompiler::compileReusableFrameCall(
       definition.params.size() - static_cast<std::size_t>(hasVariadicRest);
   const std::size_t suppliedActualCount =
       arguments.size() + static_cast<std::size_t>(injectContext);
+  std::size_t staticFunctorProgramWork = 0;
+  for (const auto &program : staticFunctorPrograms) {
+    if (program.workUnits >
+        std::numeric_limits<std::size_t>::max() - staticFunctorProgramWork)
+      staticFunctorProgramWork = std::numeric_limits<std::size_t>::max();
+    else
+      staticFunctorProgramWork += program.workUnits;
+  }
+  std::size_t captureNameWork = 0;
+  for (const auto &name : extraCaptureNames) {
+    const auto amount = std::max(name.size(), std::size_t{1});
+    if (amount > std::numeric_limits<std::size_t>::max() - captureNameWork)
+      captureNameWork = std::numeric_limits<std::size_t>::max();
+    else
+      captureNameWork += amount;
+  }
+  for (const auto &name : requiredProgramCaptureNames) {
+    const auto amount = std::max(name.size(), std::size_t{1});
+    if (amount > std::numeric_limits<std::size_t>::max() - captureNameWork)
+      captureNameWork = std::numeric_limits<std::size_t>::max();
+    else
+      captureNameWork += amount;
+  }
+  const auto baseCaptures = frameFreeCaptureNames_.find(definition.name);
+  if (baseCaptures != frameFreeCaptureNames_.end()) {
+    for (const auto &name : baseCaptures->second) {
+      const auto amount = std::max(name.size(), std::size_t{1});
+      if (amount > std::numeric_limits<std::size_t>::max() - captureNameWork)
+        captureNameWork = std::numeric_limits<std::size_t>::max();
+      else
+        captureNameWork += amount;
+    }
+  }
+  chargeClosedFunctorTemplateWork(staticFunctorProgramWork);
+  chargeClosedFunctorTemplateWork(captureNameWork);
+  std::vector<StaticFunctorProgramKey> staticFunctorProgramKeys;
+  staticFunctorProgramKeys.reserve(staticFunctorPrograms.size());
+  for (const auto &program : staticFunctorPrograms)
+    staticFunctorProgramKeys.push_back(program.key);
+  std::ranges::sort(staticFunctorProgramKeys, {},
+                    &StaticFunctorProgramKey::formalIndex);
+  std::vector<std::string> allCaptureNames;
+  if (baseCaptures != frameFreeCaptureNames_.end())
+    allCaptureNames = baseCaptures->second;
+  allCaptureNames.insert(allCaptureNames.end(), extraCaptureNames.begin(),
+                         extraCaptureNames.end());
+  std::ranges::sort(allCaptureNames);
+  allCaptureNames.erase(
+      std::unique(allCaptureNames.begin(), allCaptureNames.end()),
+      allCaptureNames.end());
   const auto *restPattern =
       hasVariadicRest
           ? std::get_if<DestructurePattern>(&definition.params.back().target)
@@ -888,16 +1076,13 @@ std::vector<CellRef> VQLCompiler::compileReusableFrameCall(
       .name = definition.name,
       .restGroupCount =
           groupedRest ? std::optional{restGroupCount} : std::nullopt,
-      .functorTemplates = std::move(functorTemplates)};
+      .functorTemplates      = std::move(functorTemplates),
+      .staticFunctorPrograms = std::move(staticFunctorProgramKeys)};
 
   chargeClosedFunctorTemplateWork(
       closedFunctorTemplateWork(key.functorTemplates));
   const auto limits              = vm_.frameLimits();
-  const std::size_t captureCount = [&] {
-    const auto captures = frameFreeCaptureNames_.find(definition.name);
-    return captures == frameFreeCaptureNames_.end() ? std::size_t{0}
-                                                    : captures->second.size();
-  }();
+  const std::size_t captureCount = allCaptureNames.size();
   const std::size_t defaultCount =
       static_cast<std::size_t>(std::ranges::count_if(
           definition.params, [](const LambdaParam &parameter) {
@@ -939,10 +1124,27 @@ std::vector<CellRef> VQLCompiler::compileReusableFrameCall(
       chargeClosedFunctorTemplateWork(templateCopyWork);
       chargeClosedFunctorTemplateWork(templateCopyWork);
       chargeClosedFunctorTemplateWork(templateCopyWork);
+      chargeClosedFunctorTemplateWork(staticFunctorProgramWork);
+      chargeClosedFunctorTemplateWork(staticFunctorProgramWork);
+      chargeClosedFunctorTemplateWork(captureNameWork);
       std::vector<ClosedFunctorFormalKey> stateTemplates = key.functorTemplates;
+      std::vector<StaticFunctorProgram> statePrograms = staticFunctorPrograms;
+      std::vector<std::string> stateExtraCaptures     = extraCaptureNames;
+      std::size_t requiredCaptureCopyWork             = 0;
+      for (const auto &name : requiredProgramCaptureNames) {
+        const auto amount = std::max(name.size(), std::size_t{1});
+        if (amount >
+            std::numeric_limits<std::size_t>::max() - requiredCaptureCopyWork)
+          requiredCaptureCopyWork = std::numeric_limits<std::size_t>::max();
+        else
+          requiredCaptureCopyWork += amount;
+      }
+      chargeClosedFunctorTemplateWork(requiredCaptureCopyWork);
+      std::vector<std::string> stateRequiredCaptures =
+          requiredProgramCaptureNames;
       const auto reserved = vm_.reserveFrameDescriptor();
       if (!reserved) throw std::invalid_argument(reserved.error().message);
-      if (!key.functorTemplates.empty()) {
+      if (!key.functorTemplates.empty() || !key.staticFunctorPrograms.empty()) {
         if (nextFunctorVariantOrdinal_ ==
             std::numeric_limits<std::size_t>::max())
           throw std::invalid_argument(
@@ -952,15 +1154,23 @@ std::vector<CellRef> VQLCompiler::compileReusableFrameCall(
       FrameDefinitionState newState{
           .descriptor            = *reserved,
           .functorTemplates      = std::move(stateTemplates),
+          .staticFunctorPrograms = std::move(statePrograms),
+          .extraCaptureNames     = std::move(stateExtraCaptures),
+          .requiredCaptureNames  = std::move(stateRequiredCaptures),
           .functorVariantOrdinal = functorVariantOrdinal,
           .queued                = true};
       state = frameDefinitions_.emplace(key, std::move(newState)).first;
       pendingFrameDefinitions_.push_back(key);
     } else {
       functorVariantOrdinal = state->second.functorVariantOrdinal;
+      if (state->second.extraCaptureNames != extraCaptureNames ||
+          state->second.requiredCaptureNames != requiredProgramCaptureNames)
+        throw std::invalid_argument(
+            "static functor variant changed its capture contract");
       if (!state->second.queued && !state->second.compiled) {
         chargeClosedFunctorTemplateWork(
             closedFunctorTemplateWork(key.functorTemplates));
+        chargeClosedFunctorTemplateWork(staticFunctorProgramWork);
         state->second.queued = true;
         pendingFrameDefinitions_.push_back(key);
       }
@@ -982,8 +1192,13 @@ std::vector<CellRef> VQLCompiler::compileReusableFrameCall(
     const auto functor =
         std::ranges::lower_bound(key.functorTemplates, actualFormalIndex, {},
                                  &ClosedFunctorFormalKey::formalIndex);
-    if (functor != key.functorTemplates.end() &&
-        functor->formalIndex == actualFormalIndex)
+    const auto program =
+        std::ranges::lower_bound(key.staticFunctorPrograms, actualFormalIndex,
+                                 {}, &StaticFunctorProgramKey::formalIndex);
+    if ((functor != key.functorTemplates.end() &&
+         functor->formalIndex == actualFormalIndex) ||
+        (program != key.staticFunctorPrograms.end() &&
+         program->formalIndex == actualFormalIndex))
       actuals.emplace_back();
     else
       actuals.push_back(compileArgument(argument, context));
@@ -1031,6 +1246,13 @@ std::vector<CellRef> VQLCompiler::compileReusableFrameCall(
       requiredNames.insert(requiredNames.end(), omitted->second.begin(),
                            omitted->second.end());
   }
+  requiredNames.insert(requiredNames.end(), requiredProgramCaptureNames.begin(),
+                       requiredProgramCaptureNames.end());
+  if (const auto state = frameDefinitions_.find(key);
+      state != frameDefinitions_.end())
+    requiredNames.insert(requiredNames.end(),
+                         state->second.requiredCaptureNames.begin(),
+                         state->second.requiredCaptureNames.end());
   std::ranges::sort(requiredNames);
   requiredNames.erase(std::unique(requiredNames.begin(), requiredNames.end()),
                       requiredNames.end());
@@ -1060,12 +1282,9 @@ std::vector<CellRef> VQLCompiler::compileReusableFrameCall(
   }
 
   std::vector<std::vector<CellRef>> capturedValues;
-  if (const auto captures = frameFreeCaptureNames_.find(definition.name);
-      captures != frameFreeCaptureNames_.end()) {
-    capturedValues.reserve(captures->second.size());
-    for (const auto &name : captures->second)
-      capturedValues.push_back(callerCaptureCells(name));
-  }
+  capturedValues.reserve(allCaptureNames.size());
+  for (const auto &name : allCaptureNames)
+    capturedValues.push_back(callerCaptureCells(name));
 
   const CellRef contextStream =
       context ? normalizeFrameStream(std::span{&*context, std::size_t{1}})
@@ -1125,14 +1344,25 @@ std::vector<CellRef> VQLCompiler::compileReusableFrameCall(
 void VQLCompiler::compilePendingFrameDefinitions() {
   for (std::size_t index = 0; index < pendingFrameDefinitions_.size();
        ++index) {
-    chargeClosedFunctorTemplateWork(closedFunctorTemplateWork(
-        pendingFrameDefinitions_[index].functorTemplates));
-    const auto key = pendingFrameDefinitions_[index];
+    const auto &queuedKey = pendingFrameDefinitions_[index];
+    chargeClosedFunctorTemplateWork(
+        closedFunctorTemplateWork(queuedKey.functorTemplates));
+    for (const auto &program : queuedKey.staticFunctorPrograms) {
+      chargeClosedFunctorTemplateWork(
+          std::max(program.structuralIdentity.size(), std::size_t{1}));
+    }
+    const auto key = queuedKey;
     bool compiled  = false;
     {
       chargeClosedFunctorTemplateWork(
           closedFunctorTemplateWork(key.functorTemplates));
+      for (const auto &program : key.staticFunctorPrograms)
+        chargeClosedFunctorTemplateWork(
+            std::max(program.structuralIdentity.size(), std::size_t{1}));
       const auto state = frameDefinitions_.find(key);
+      if (state != frameDefinitions_.end())
+        for (const auto &program : state->second.staticFunctorPrograms)
+          chargeClosedFunctorTemplateWork(program.workUnits);
       compiled = state == frameDefinitions_.end() || state->second.compiled;
     }
     if (compiled) continue;
@@ -1154,9 +1384,14 @@ void VQLCompiler::compileFrameDefinition(const DefDeclaration &definition,
   std::optional<CellRef> reservedDescriptor;
   std::optional<std::size_t> functorVariantOrdinal;
   std::vector<ClosedFunctorFormalKey> functorTemplates;
+  std::vector<StaticFunctorProgram> staticFunctorPrograms;
+  std::vector<std::string> captureNames;
   {
     chargeClosedFunctorTemplateWork(
         closedFunctorTemplateWork(key.functorTemplates));
+    for (const auto &program : key.staticFunctorPrograms)
+      chargeClosedFunctorTemplateWork(
+          std::max(program.structuralIdentity.size(), std::size_t{1}));
     const auto state = frameDefinitions_.find(key);
     if (state == frameDefinitions_.end())
       throw std::invalid_argument("missing reserved frame: " + definition.name);
@@ -1165,6 +1400,30 @@ void VQLCompiler::compileFrameDefinition(const DefDeclaration &definition,
     chargeClosedFunctorTemplateWork(
         closedFunctorTemplateWork(state->second.functorTemplates));
     functorTemplates = state->second.functorTemplates;
+    for (const auto &program : state->second.staticFunctorPrograms)
+      chargeClosedFunctorTemplateWork(program.workUnits);
+    staticFunctorPrograms = state->second.staticFunctorPrograms;
+    if (const auto captures = frameFreeCaptureNames_.find(definition.name);
+        captures != frameFreeCaptureNames_.end()) {
+      std::size_t baseCaptureWork = 0;
+      for (const auto &name : captures->second) {
+        const auto amount = std::max(name.size(), std::size_t{1});
+        if (amount > std::numeric_limits<std::size_t>::max() - baseCaptureWork)
+          baseCaptureWork = std::numeric_limits<std::size_t>::max();
+        else
+          baseCaptureWork += amount;
+      }
+      chargeClosedFunctorTemplateWork(baseCaptureWork);
+      captureNames = captures->second;
+    }
+    for (const auto &name : state->second.extraCaptureNames)
+      chargeClosedFunctorTemplateWork(std::max(name.size(), std::size_t{1}));
+    captureNames.insert(captureNames.end(),
+                        state->second.extraCaptureNames.begin(),
+                        state->second.extraCaptureNames.end());
+    std::ranges::sort(captureNames);
+    captureNames.erase(std::unique(captureNames.begin(), captureNames.end()),
+                       captureNames.end());
   }
   const CellRef descriptor      = reservedDescriptor.value();
   compilingFrameDefinition_     = true;
@@ -1179,11 +1438,7 @@ void VQLCompiler::compileFrameDefinition(const DefDeclaration &definition,
                                definition.params.back().isVariadic);
   const std::size_t inputParameterCount =
       groupedRest ? fixedParameterCount : definition.params.size();
-  const std::size_t captureCount = [&] {
-    const auto captures = frameFreeCaptureNames_.find(definition.name);
-    return captures == frameFreeCaptureNames_.end() ? std::size_t{0}
-                                                    : captures->second.size();
-  }();
+  const std::size_t captureCount = captureNames.size();
   const std::size_t defaultCount =
       static_cast<std::size_t>(std::ranges::count_if(
           definition.params, [](const LambdaParam &parameter) {
@@ -1223,10 +1478,9 @@ void VQLCompiler::compileFrameDefinition(const DefDeclaration &definition,
   spec.locals = {contextSlot, resultSlot};
   spec.argumentPorts.emplace_back(contextSlot, FramePortKind::Stream);
   spec.resultPorts.emplace_back(resultSlot, FramePortKind::Stream);
-  if (const auto captures = frameFreeCaptureNames_.find(definition.name);
-      captures != frameFreeCaptureNames_.end()) {
-    captureSlots.reserve(captures->second.size());
-    for (std::size_t index = 0; index < captures->second.size(); ++index) {
+  if (!captureNames.empty()) {
+    captureSlots.reserve(captureNames.size());
+    for (std::size_t index = 0; index < captureNames.size(); ++index) {
       const CellRef slot = core_.arena().makeCell();
       captureSlots.push_back(slot);
       spec.locals.push_back(slot);
@@ -1264,10 +1518,9 @@ void VQLCompiler::compileFrameDefinition(const DefDeclaration &definition,
   varBindings_["."]    = contextSlot;
   ambientContext_      = contextSlot;
   dynamicStreams_.insert(contextSlot);
-  if (const auto captures = frameFreeCaptureNames_.find(definition.name);
-      captures != frameFreeCaptureNames_.end()) {
-    for (std::size_t index = 0; index < captures->second.size(); ++index) {
-      const auto &name      = captures->second[index];
+  if (!captureNames.empty()) {
+    for (std::size_t index = 0; index < captureNames.size(); ++index) {
+      const auto &name      = captureNames[index];
       const CellRef slot    = captureSlots[index];
       streamBindings_[name] = {slot};
       varBindings_[name]    = slot;
@@ -1377,6 +1630,26 @@ void VQLCompiler::compileFrameDefinition(const DefDeclaration &definition,
         steps.push_back(std::move(step));
       }
       functorBindings_[*name] = std::move(steps);
+      streamBindings_.erase(*name);
+      varBindings_.erase(*name);
+      continue;
+    }
+    const auto staticProgram = std::ranges::lower_bound(
+        staticFunctorPrograms, index, {},
+        [](const StaticFunctorProgram &item) { return item.key.formalIndex; });
+    if (staticProgram != staticFunctorPrograms.end() &&
+        staticProgram->key.formalIndex == index) {
+      const auto *name    = std::get_if<std::string>(&parameter.target);
+      const auto required = frameFunctorFormalIndices_.find(definition.name);
+      const bool requiredFunctor =
+          required != frameFunctorFormalIndices_.end() &&
+          std::ranges::binary_search(required->second, index);
+      if (!name || parameter.type || parameter.isVariadic ||
+          (parameter.defaultValue && !requiredFunctor))
+        throw std::invalid_argument(
+            "static functor programs require an untyped named functor formal");
+      chargeClosedFunctorTemplateWork(staticProgram->workUnits);
+      functorBindings_[*name] = *staticProgram->steps;
       streamBindings_.erase(*name);
       varBindings_.erase(*name);
       continue;

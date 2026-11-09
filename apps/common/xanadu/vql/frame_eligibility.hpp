@@ -8,18 +8,27 @@
 #include <cstddef>
 #include <expected>
 #include <optional>
+#include <span>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
 #include "common/xanadu/vql/ast.hpp"
+#include "common/xanadu/vql/static_functor_program.hpp"
 
 namespace xanadu::vql {
 
 struct FrameEligibilityLimits {
   std::size_t maxNodes{100'000};
   std::size_t maxDepth{256};
+  /// Total AST-node and copied metadata units for one bounded scope walk.
+  std::size_t maxWork{1'000'000};
+};
+
+struct FunctorApplicationScope {
+  std::size_t formalIndex{0};
+  std::unordered_set<std::string> visibleNames;
 };
 
 struct FrameEligibility {
@@ -29,6 +38,9 @@ struct FrameEligibility {
   /// Formal indices that reusable activations bind as closed functors.
   std::unordered_map<std::string, std::vector<std::size_t>>
       functorFormalIndices;
+  /// Lexical aliases visible at each static-formal application site.
+  std::unordered_map<std::string, std::vector<FunctorApplicationScope>>
+      functorApplicationScopes;
   /// Sorted aliases required by every activation for field-default resolution.
   std::unordered_map<std::string, std::vector<std::string>>
       requiredDefaultCaptureBindings;
@@ -55,6 +67,20 @@ struct ClosureCallSite {
   std::unordered_set<std::string> visibleNames;
   std::size_t argumentCount{0};
   bool mayInjectContext{false};
+};
+
+/// Scoped dependencies found inside a named static functor program. Callsite
+/// summaries let the compiler propagate helper captures without resolving
+/// their values before the frame in which the functor is applied.
+struct FrameStaticFunctorScope {
+  std::unordered_set<std::string> freeCaptureNames;
+  std::unordered_set<std::string> requiredDefaultCaptureBindings;
+  std::unordered_set<std::string> conditionalRequiredDefaultCaptureBindings;
+  std::unordered_set<std::string> omittedRestRequiredDefaultCaptureBindings;
+  std::vector<StaticFunctorAliasUse> aliasUses;
+  std::vector<ClosureCallSite> callSites;
+  std::optional<std::string> refusalReason;
+  std::size_t workUnits{0};
 };
 
 /// Scope data collected by the same bounded walker used for reusable frames.
@@ -84,6 +110,12 @@ analyzeFrameEligibility(const QueryExpression &query,
 [[nodiscard]] std::expected<FrameClosureScope, FrameEligibilityError>
 analyzeFrameClosureScope(const PathLambda &lambda,
                          FrameEligibilityLimits limits = {});
+
+/// Analyze a named static functor's borrowed path steps with the same bounded
+/// scope walker used for reusable definitions and closure bodies.
+[[nodiscard]] std::expected<FrameStaticFunctorScope, FrameEligibilityError>
+analyzeFrameStaticFunctorScope(std::span<const PathStep> steps,
+                               FrameEligibilityLimits limits = {});
 
 } // namespace xanadu::vql
 

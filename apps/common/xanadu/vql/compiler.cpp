@@ -341,6 +341,7 @@ CompilationResult VQLCompiler::compile(const QueryExpression &query,
   reusableFrameDefinitions_.clear();
   frameFreeCaptureNames_.clear();
   frameFunctorFormalIndices_.clear();
+  frameFunctorApplicationScopes_.clear();
   frameRequiredDefaultCaptureBindings_.clear();
   frameConditionalRequiredDefaultCaptureBindings_.clear();
   frameOmittedRestRequiredDefaultCaptureBindings_.clear();
@@ -482,9 +483,10 @@ std::optional<CellRef> VQLCompiler::compileQuery(const QueryExpression &query) {
   const auto frameEligibility = analyzeFrameEligibility(query);
   if (!frameEligibility)
     throw std::invalid_argument(frameEligibility.error().message);
-  reusableFrameDefinitions_  = frameEligibility->reusableDefinitions;
-  frameFreeCaptureNames_     = frameEligibility->freeCaptureNames;
-  frameFunctorFormalIndices_ = frameEligibility->functorFormalIndices;
+  reusableFrameDefinitions_      = frameEligibility->reusableDefinitions;
+  frameFreeCaptureNames_         = frameEligibility->freeCaptureNames;
+  frameFunctorFormalIndices_     = frameEligibility->functorFormalIndices;
+  frameFunctorApplicationScopes_ = frameEligibility->functorApplicationScopes;
   frameRequiredDefaultCaptureBindings_ =
       frameEligibility->requiredDefaultCaptureBindings;
   frameConditionalRequiredDefaultCaptureBindings_ =

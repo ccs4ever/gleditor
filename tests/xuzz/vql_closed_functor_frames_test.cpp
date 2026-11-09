@@ -444,8 +444,9 @@ TEST(VQLClosedFunctorFrameTest,
       h.compile("def pure walk($nodes: Stream<Cell>, $route): Stream<Cell> := "
                 "walk($nodes/$route, $route); "
                 "walk(##/+d.items, /+d.next[. = $wanted])");
-  EXPECT_FALSE(dynamicPredicate.success);
-  EXPECT_FALSE(dynamicPredicate.cursor);
+  ASSERT_TRUE(dynamicPredicate.success) << dynamicPredicate.errorMessage;
+  EXPECT_FALSE(
+      invokeDescriptors(dynamicPredicate, h.vm, h.core, "walk").empty());
 
   const auto compoundPredicate =
       h.compile("def pure walk($nodes: Stream<Cell>, $route): Stream<Cell> := "

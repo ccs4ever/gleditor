@@ -2362,12 +2362,21 @@ explicit refusals. The rulings below describe the intended semantics.
   operator/operand order, Boolean boundaries/order/polarity, traversal flags, formal position and
   typed-rest arity distinguish variants; forwarding reuses the graph descriptor. The formal retains
   an empty Stream port while compilation installs its template. `[n]` and `[n,n]` share the parser's
-  normalized clamp. Captured/computed predicates, nested Boolean values and other decorated
-  templates remain outside this native subset and use finite inline graphs; unsupported recursive
-  boundaries refuse. Specialization has a configurable 1,000,000-unit weighted template-work ceiling
-  in addition to existing variant/opcode/descriptor caps. It does not bound all compilation CPU or
-  memory. See [iterations 43–48](projects/vortex-vm-only-iterations.md). Binding and compilation may
-  copy AST data, and execution materializes result streams. Specialized representation and
+  normalized clamp. Additional symbolic named variants support computed scalar operands, nested
+  Boolean values, existing literal/nested shape predicates and frozen nested static bodies.
+  Graph-supported read placements and Keep also work in recursive variants. Variant-specific alias
+  ports and helper dependencies preserve application/callee lexical scope, formal/local shadowing
+  and missing-versus-bound-empty required defaults. Alias values do not change the structural
+  program key. Non-closed formal defaults, computed shape targets, ordered projections, historical
+  pins and creation at that recursive boundary remain outside this subset; supported finite cases
+  use inline graphs and unsupported recursive boundaries refuse. A configurable 1,000,000-unit
+  weighted template-work ceiling covers the new capture inspection, owned copies and normalization
+  phases alongside existing variant/opcode/descriptor caps. Scope analysis has a separate default
+  metadata-work ceiling and retains node/event and depth limits. These estimates exclude allocator
+  overhead, hashing and total compile CPU/heap. See
+  [iterations 43–48 and 55](projects/vortex-vm-only-iterations.md). Binding and compilation may
+  share read-only AST inputs and copy syntax data; execution and export require only graph
+  instructions. Execution materializes result streams. Specialized representation and
   allocation/performance claims remain subject to §4.12.4's measurements.
 
 - **Block bindings run per member.** Nested `for` bindings preserve source order and duplicates;

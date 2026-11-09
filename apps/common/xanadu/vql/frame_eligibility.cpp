@@ -73,7 +73,7 @@ struct ScanFailure : std::runtime_error {
 struct TraversalBudget {
   explicit TraversalBudget(const FrameEligibilityLimits configured)
       : limits(configured) {
-    if (limits.maxNodes == 0 || limits.maxDepth == 0)
+    if (limits.maxNodes == 0 || limits.maxDepth == 0 || limits.maxWork == 0)
       throw ScanFailure("frame eligibility traversal budget is zero");
   }
 
@@ -83,14 +83,28 @@ struct TraversalBudget {
     charge();
   }
 
+  // Keep the original event/node budget semantics for each AST visit. The
+  // explicit-amount overload charges only the newer aggregate work budget.
   void charge() {
     if (nodes >= limits.maxNodes)
       throw ScanFailure("frame eligibility AST node budget exhausted");
     ++nodes;
+    chargeWork(1);
   }
+
+  void charge(const std::size_t amount) { chargeWork(amount); }
+
+  void chargeWork(const std::size_t amount) {
+    if (amount > limits.maxWork - work)
+      throw ScanFailure("frame eligibility metadata work budget exhausted");
+    work += amount;
+  }
+
+  [[nodiscard]] std::size_t workUnits() const noexcept { return work; }
 
   FrameEligibilityLimits limits;
   std::size_t nodes{0};
+  std::size_t work{0};
   std::unordered_set<const void *> activePointers;
 };
 
@@ -280,6 +294,11 @@ public:
     return ordinaryFunctorFormalIndices_;
   }
 
+  [[nodiscard]] const std::unordered_map<std::size_t, std::vector<Scope>> &
+  functorApplicationScopes() const noexcept {
+    return functorApplicationScopes_;
+  }
+
   [[nodiscard]] std::vector<CallSite> takeCallSites() && {
     return std::move(callSites_);
   }
@@ -302,6 +321,53 @@ public:
                                   .visibleNames  = std::move(site.visibleNames),
                                   .argumentCount = site.argumentCount,
                                   .mayInjectContext = site.mayInjectContext});
+    return result;
+  }
+
+  [[nodiscard]] FrameStaticFunctorScope
+  scanStaticFunctor(const std::span<const PathStep> steps) {
+    tick(0);
+    staticFunctorProgramMode_ = true;
+    sequence(steps, 0, [&](const PathStep &step, const std::size_t depth) {
+      pathStep(step, Scope{}, depth);
+    });
+    FrameStaticFunctorScope result;
+    const auto chargeSetCopy = [this](const auto &names) {
+      for (const auto &name : names) {
+        budget_.chargeWork(1);
+        budget_.charge(name.size());
+      }
+    };
+    chargeSetCopy(freeCaptureNames_);
+    chargeSetCopy(requiredDefaultCaptureBindings_);
+    chargeSetCopy(conditionalRequiredDefaultCaptureBindings_);
+    chargeSetCopy(omittedRestRequiredDefaultCaptureBindings_);
+    result.freeCaptureNames               = freeCaptureNames_;
+    result.requiredDefaultCaptureBindings = requiredDefaultCaptureBindings_;
+    result.conditionalRequiredDefaultCaptureBindings =
+        conditionalRequiredDefaultCaptureBindings_;
+    result.omittedRestRequiredDefaultCaptureBindings =
+        omittedRestRequiredDefaultCaptureBindings_;
+    if (refusal_) {
+      budget_.chargeWork(1);
+      budget_.charge(refusal_->size());
+    }
+    result.refusalReason = refusal_;
+    std::ranges::sort(aliasUses_, [](const auto &left, const auto &right) {
+      if (left.name != right.name) return left.name < right.name;
+      return left.role < right.role;
+    });
+    aliasUses_.erase(std::unique(aliasUses_.begin(), aliasUses_.end()),
+                     aliasUses_.end());
+    result.aliasUses = std::move(aliasUses_);
+    auto callSites   = std::move(callSites_);
+    result.callSites.reserve(callSites.size());
+    for (auto &site : callSites)
+      result.callSites.push_back({.callee        = std::move(site.callee),
+                                  .visibleNames  = std::move(site.visibleNames),
+                                  .argumentCount = site.argumentCount,
+                                  .mayInjectContext = site.mayInjectContext});
+    result.workUnits = budget_.workUnits();
     return result;
   }
 
@@ -358,9 +424,13 @@ private:
   }
 
   void variable(const std::string &name, const Scope &scope,
-                const bool requiredDefaultBinding = false) {
+                const bool requiredDefaultBinding = false,
+                const StaticFunctorAliasUse::Role role =
+                    StaticFunctorAliasUse::Role::Value) {
     tick(0);
     if (name.empty()) {
+      if (staticFunctorProgramMode_)
+        throw ScanFailure("static functor has an empty lexical alias");
       refuse("frame eligibility found an empty lexical variable");
       return;
     }
@@ -370,14 +440,29 @@ private:
         ordinaryFunctorFormalIndices_.insert(formal->second);
     }
     if (!scope.contains(name)) {
+      budget_.chargeWork(1);
+      budget_.charge(name.size());
       freeCaptureNames_.insert(name);
+      if (staticFunctorProgramMode_) {
+        budget_.chargeWork(1);
+        budget_.charge(name.size());
+        aliasUses_.push_back({.name = name, .role = role});
+      }
       if (requiredDefaultBinding) {
-        if (scanningConditionalRestType_ && !scanningOmittedRestDefault_)
+        if (scanningConditionalRestType_ && !scanningOmittedRestDefault_) {
+          budget_.chargeWork(1);
+          budget_.charge(name.size());
           conditionalRequiredDefaultCaptureBindings_.insert(name);
-        else if (scanningOmittedRestDefault_ && !scanningConditionalRestType_)
+        } else if (scanningOmittedRestDefault_ &&
+                   !scanningConditionalRestType_) {
+          budget_.chargeWork(1);
+          budget_.charge(name.size());
           omittedRestRequiredDefaultCaptureBindings_.insert(name);
-        else
+        } else {
+          budget_.chargeWork(1);
+          budget_.charge(name.size());
           requiredDefaultCaptureBindings_.insert(name);
+        }
       }
     }
   }
@@ -412,7 +497,7 @@ private:
   void shadowFunctorFormal(const std::string &name,
                            std::vector<std::string> &addedNames) {
     if (!functorFormalIndicesByName_.contains(name)) return;
-    budget_.charge();
+    budget_.chargeWork(1);
     if (shadowedFunctorFormalNames_.insert(name).second)
       addedNames.push_back(name);
   }
@@ -526,9 +611,12 @@ private:
                   const std::size_t depth,
                   const bool mayInjectContext = false) {
     tick(depth);
+    budget_.chargeWork(1);
+    budget_.charge(call.name.size());
     Scope visibleNames;
     for (const auto &name : scope) {
-      budget_.charge();
+      budget_.chargeWork(1);
+      budget_.charge(name.size());
       visibleNames.insert(name);
     }
     CallSite callSite{.callee                 = call.name,
@@ -569,6 +657,18 @@ private:
               (!parameter.defaultValue ||
                hasClosedDefault(call.name, *resolvedIndex))) {
             literalPosition = true;
+            if (source.kind ==
+                    CallSite::FunctorArgumentSource::Kind::CallerFormal &&
+                source.callerFormalIndex) {
+              Scope visibleAtUse;
+              for (const auto &name : scope) {
+                budget_.chargeWork(1);
+                budget_.chargeWork(name.size());
+                visibleAtUse.insert(name);
+              }
+              functorApplicationScopes_[*source.callerFormalIndex].push_back(
+                  std::move(visibleAtUse));
+            }
           } else {
             ordinaryPathPosition = true;
           }
@@ -732,11 +832,20 @@ private:
           return;
         }
         functorFormalIndices_.insert(found->second);
+        Scope visibleNames;
+        for (const auto &name : scope) {
+          budget_.chargeWork(1);
+          budget_.charge(name.size());
+          visibleNames.insert(name);
+        }
+        functorApplicationScopes_[found->second].push_back(
+            std::move(visibleNames));
         return;
       }
-      variable(name, scope);
+      variable(name, scope, false, StaticFunctorAliasUse::Role::Functor);
       if (!inValueLambdaBody_ && !scope.contains(name))
-        refuse("path-functor applications require an untyped named formal");
+        if (!staticFunctorProgramMode_)
+          refuse("path-functor applications require an untyped named formal");
     }
     sequence(step.creates, depth,
              [&](const CreateValue &create, const std::size_t childDepth) {
@@ -747,68 +856,146 @@ private:
   void pathStep(const PathStep &step, const Scope &scope,
                 const std::size_t depth) {
     tick(depth);
-    std::visit(
-        [&](const auto &selector) {
-          using Selector = std::remove_cvref_t<decltype(selector)>;
-          if constexpr (std::same_as<Selector, SignedDimensionStep>) {
-            signedStep(selector, scope, depth + 1);
-          } else if constexpr (std::same_as<
-                                   Selector,
-                                   std::shared_ptr<MacroDimensionGroup>>) {
-            pointer(selector, depth + 1,
-                    [&](const MacroDimensionGroup &macro,
-                        const std::size_t childDepth) {
-                      sequence(macro.steps, childDepth,
-                               [&](const PathStep &nested,
-                                   const std::size_t nestedDepth) {
-                                 pathStep(nested, scope, nestedDepth);
-                               });
+    const bool replacedSelector =
+        staticFunctorProgramMode_ && step.capturedFunctor;
+    if (replacedSelector) {
+      const auto *dimension = std::get_if<SignedDimensionStep>(&step.selector);
+      const bool canonical = dimension && dimension->dimName.starts_with('$') &&
+                             dimension->direction == zigzag::DimVector::POS &&
+                             !dimension->isBidir &&
+                             dimension->placement == Placement::Default &&
+                             dimension->creates.empty();
+      if (!canonical) {
+        refuse("captured static functor has a noncanonical selector");
+        std::visit(
+            [&](const auto &selector) {
+              using Selector = std::remove_cvref_t<decltype(selector)>;
+              if constexpr (std::same_as<Selector, SignedDimensionStep>) {
+                signedStep(selector, scope, depth + 1);
+              } else if constexpr (std::same_as<
+                                       Selector,
+                                       std::shared_ptr<MacroDimensionGroup>>) {
+                pointer(selector, depth + 1,
+                        [&](const MacroDimensionGroup &macro,
+                            const std::size_t childDepth) {
+                          sequence(macro.steps, childDepth,
+                                   [&](const PathStep &nested,
+                                       const std::size_t nestedDepth) {
+                                     pathStep(nested, scope, nestedDepth);
+                                   });
+                        });
+              } else if constexpr (std::same_as<Selector, FunctionInvocation>) {
+                invocation(selector, scope, depth + 1, true);
+              } else if constexpr (std::same_as<Selector, SliceSelectorStep> ||
+                                   std::same_as<Selector, DocSelectorStep>) {
+                if (selector.predicateFilter)
+                  pointer(selector.predicateFilter, depth + 1,
+                          [&](const BooleanExpr &predicate,
+                              const std::size_t childDepth) {
+                            booleanExpr(predicate, scope, childDepth);
+                          });
+              } else if constexpr (std::same_as<Selector, PathMorphism>) {
+                value(selector.subject, scope, depth + 1);
+                sequence(
+                    selector.targets, depth + 1,
+                    [&](const ValueExpr &target, const std::size_t childDepth) {
+                      value(target, scope, childDepth);
                     });
-          } else if constexpr (std::same_as<Selector, FunctionInvocation>) {
-            invocation(selector, scope, depth + 1, true);
-          } else if constexpr (std::same_as<Selector, GenesisSelector> ||
-                               std::same_as<Selector, DimensionPivotStep> ||
-                               std::same_as<Selector, RootSelectorStep>) {
-            return;
-          } else if constexpr (std::same_as<Selector, SliceSelectorStep> ||
-                               std::same_as<Selector, DocSelectorStep>) {
-            if (selector.predicateFilter)
-              pointer(selector.predicateFilter, depth + 1,
-                      [&](const BooleanExpr &predicate,
+              } else if constexpr (std::same_as<Selector,
+                                                VirtualDimensionStep>) {
+                signedStep(selector.dimStep, scope, depth + 1);
+                value(selector.expr, scope, depth + 1);
+              } else if constexpr (std::same_as<Selector, PerspectiveStep>) {
+                if (selector.targetStep)
+                  pointer(selector.targetStep, depth + 1,
+                          [&](const PathStep &nested,
+                              const std::size_t childDepth) {
+                            pathStep(nested, scope, childDepth);
+                          });
+              } else if constexpr (std::same_as<Selector,
+                                                std::shared_ptr<PathLambda>>) {
+                pointer(selector, depth + 1,
+                        [&](const PathLambda &lambda,
+                            const std::size_t childDepth) {
+                          pathLambda(lambda, scope, childDepth);
+                        });
+              }
+            },
+            step.selector);
+      }
+      pointer(step.capturedFunctor, depth + 1,
+              [&](const std::vector<PathStep> &captured,
+                  const std::size_t childDepth) {
+                sequence(
+                    captured, childDepth,
+                    [&](const PathStep &nested, const std::size_t nestedDepth) {
+                      pathStep(nested, scope, nestedDepth);
+                    });
+              });
+    } else {
+      std::visit(
+          [&](const auto &selector) {
+            using Selector = std::remove_cvref_t<decltype(selector)>;
+            if constexpr (std::same_as<Selector, SignedDimensionStep>) {
+              signedStep(selector, scope, depth + 1);
+            } else if constexpr (std::same_as<
+                                     Selector,
+                                     std::shared_ptr<MacroDimensionGroup>>) {
+              pointer(selector, depth + 1,
+                      [&](const MacroDimensionGroup &macro,
                           const std::size_t childDepth) {
-                        booleanExpr(predicate, scope, childDepth);
+                        sequence(macro.steps, childDepth,
+                                 [&](const PathStep &nested,
+                                     const std::size_t nestedDepth) {
+                                   pathStep(nested, scope, nestedDepth);
+                                 });
                       });
-            refuse("document and slice selectors are not frame eligible");
-          } else if constexpr (std::same_as<Selector, PathMorphism>) {
-            value(selector.subject, scope, depth + 1);
-            sequence(
-                selector.targets, depth + 1,
-                [&](const ValueExpr &target, const std::size_t childDepth) {
-                  value(target, scope, childDepth);
-                });
-            refuse("path morphisms are not frame eligible");
-          } else if constexpr (std::same_as<Selector, VirtualDimensionStep>) {
-            signedStep(selector.dimStep, scope, depth + 1);
-            value(selector.expr, scope, depth + 1);
-            refuse("virtual dimensions are not frame eligible");
-          } else if constexpr (std::same_as<Selector, PerspectiveStep>) {
-            if (selector.targetStep)
-              pointer(
-                  selector.targetStep, depth + 1,
-                  [&](const PathStep &nested, const std::size_t childDepth) {
-                    pathStep(nested, scope, childDepth);
+            } else if constexpr (std::same_as<Selector, FunctionInvocation>) {
+              invocation(selector, scope, depth + 1, true);
+            } else if constexpr (std::same_as<Selector, GenesisSelector> ||
+                                 std::same_as<Selector, DimensionPivotStep> ||
+                                 std::same_as<Selector, RootSelectorStep>) {
+              return;
+            } else if constexpr (std::same_as<Selector, SliceSelectorStep> ||
+                                 std::same_as<Selector, DocSelectorStep>) {
+              if (selector.predicateFilter)
+                pointer(selector.predicateFilter, depth + 1,
+                        [&](const BooleanExpr &predicate,
+                            const std::size_t childDepth) {
+                          booleanExpr(predicate, scope, childDepth);
+                        });
+              refuse("document and slice selectors are not frame eligible");
+            } else if constexpr (std::same_as<Selector, PathMorphism>) {
+              value(selector.subject, scope, depth + 1);
+              sequence(
+                  selector.targets, depth + 1,
+                  [&](const ValueExpr &target, const std::size_t childDepth) {
+                    value(target, scope, childDepth);
                   });
-            refuse("perspective selectors are not frame eligible");
-          } else if constexpr (std::same_as<Selector,
-                                            std::shared_ptr<PathLambda>>) {
-            pointer(
-                selector, depth + 1,
-                [&](const PathLambda &lambda, const std::size_t childDepth) {
-                  pathLambda(lambda, scope, childDepth);
-                });
-          }
-        },
-        step.selector);
+              refuse("path morphisms are not frame eligible");
+            } else if constexpr (std::same_as<Selector, VirtualDimensionStep>) {
+              signedStep(selector.dimStep, scope, depth + 1);
+              value(selector.expr, scope, depth + 1);
+              refuse("virtual dimensions are not frame eligible");
+            } else if constexpr (std::same_as<Selector, PerspectiveStep>) {
+              if (selector.targetStep)
+                pointer(
+                    selector.targetStep, depth + 1,
+                    [&](const PathStep &nested, const std::size_t childDepth) {
+                      pathStep(nested, scope, childDepth);
+                    });
+              refuse("perspective selectors are not frame eligible");
+            } else if constexpr (std::same_as<Selector,
+                                              std::shared_ptr<PathLambda>>) {
+              pointer(
+                  selector, depth + 1,
+                  [&](const PathLambda &lambda, const std::size_t childDepth) {
+                    pathLambda(lambda, scope, childDepth);
+                  });
+            }
+          },
+          step.selector);
+    }
 
     sequence(step.predicates, depth + 1,
              [&](const BooleanExpr &predicate, const std::size_t childDepth) {
@@ -819,9 +1006,10 @@ private:
                shapeLiteral(shape, scope, childDepth);
              });
     if (step.versionPin) versionPin(*step.versionPin, scope, depth + 1);
-    if (step.yieldMode == YieldMode::Both || step.yieldMode == YieldMode::Last)
+    if (!staticFunctorProgramMode_ && (step.yieldMode == YieldMode::Both ||
+                                       step.yieldMode == YieldMode::Last))
       refuse("non-default path yield modes are not frame eligible");
-    if (step.capturedFunctor) {
+    if (step.capturedFunctor && !staticFunctorProgramMode_) {
       refuse("captured path functors are not frame eligible");
       const auto &captured = step.capturedFunctor;
       const void *identity = captured.get();
@@ -844,8 +1032,12 @@ private:
   void booleanExpr(const BooleanExpr &expr, const Scope &scope,
                    const std::size_t depth) {
     tick(depth);
+    if (staticFunctorProgramMode_ && expr.terms.empty())
+      throw ScanFailure("static functor has an empty Boolean expression");
     sequence(expr.terms, depth + 1,
              [&](const BooleanTerm &term, const std::size_t termDepth) {
+               if (staticFunctorProgramMode_ && term.factors.empty())
+                 throw ScanFailure("static functor has an empty Boolean term");
                sequence(term.factors, termDepth,
                         [&](const BooleanFactor &factor,
                             const std::size_t factorDepth) {
@@ -861,6 +1053,8 @@ private:
         [&](const auto &test) {
           using Test = std::remove_cvref_t<decltype(test)>;
           if constexpr (std::same_as<Test, ComparisonExpr>) {
+            if (staticFunctorProgramMode_ && (!test.left || !test.right))
+              throw ScanFailure("static functor has a null comparison operand");
             if (test.left)
               pointer(test.left, depth + 1,
                       [&](const ValueExpr &valueExpr,
@@ -941,14 +1135,35 @@ private:
                             invocation(call, scope, nestedDepth);
                           });
                 } else if constexpr (std::same_as<Part, DimensionShapeRule>) {
+                  bool literalStaticTarget = !part.targetValue;
                   if (part.targetValue)
-                    pointer(part.targetValue, childDepth,
-                            [&](const ValueExpr &expr,
-                                const std::size_t nestedDepth) {
-                              value(expr, scope, nestedDepth);
-                            });
-                  if (!projectionCandidate)
+                    pointer(
+                        part.targetValue, childDepth,
+                        [&](const ValueExpr &expr,
+                            const std::size_t nestedDepth) {
+                          if (std::holds_alternative<ScalarLiteral>(
+                                  expr.kind)) {
+                            literalStaticTarget = true;
+                            return;
+                          }
+                          if (const auto *nested =
+                                  std::get_if<std::shared_ptr<ShapeLiteral>>(
+                                      &expr.kind);
+                              nested && *nested) {
+                            literalStaticTarget = true;
+                            pointer(*nested, nestedDepth + 1,
+                                    [&](const ShapeLiteral &shape,
+                                        const std::size_t shapeDepth) {
+                                      shapeLiteral(shape, scope, shapeDepth);
+                                    });
+                            return;
+                          }
+                          value(expr, scope, nestedDepth);
+                        });
+                  if (!projectionCandidate && !staticFunctorProgramMode_)
                     refuse("shape rules are not frame eligible");
+                  if (staticFunctorProgramMode_ && !literalStaticTarget)
+                    refuse("computed shape targets are not static functors");
                 } else if constexpr (std::same_as<Part,
                                                   VirtualDimensionDefRule>) {
                   if (part.expr)
@@ -1350,9 +1565,11 @@ private:
   const DefinitionIndex &definitions_;
   const ClosedDefaultIndex &closedDefaults_;
   std::unordered_map<std::string, std::size_t> functorFormalIndicesByName_;
+  std::unordered_map<std::size_t, std::vector<Scope>> functorApplicationScopes_;
   std::unordered_set<std::string> shadowedFunctorFormalNames_;
   bool inValueLambdaBody_{false};
   std::unordered_set<std::string> freeCaptureNames_;
+  std::vector<StaticFunctorAliasUse> aliasUses_;
   std::unordered_set<std::size_t> functorFormalIndices_;
   std::unordered_set<std::size_t> ordinaryFunctorFormalIndices_;
   std::unordered_set<std::string> requiredDefaultCaptureBindings_;
@@ -1362,6 +1579,7 @@ private:
   bool scanningParameterDefault_{false};
   bool scanningConditionalRestType_{false};
   bool scanningOmittedRestDefault_{false};
+  bool staticFunctorProgramMode_{false};
   const PathExpression *recognizedDefaultPath_{nullptr};
   std::optional<std::string> refusal_;
 };
@@ -1432,6 +1650,22 @@ analyzeFrameEligibility(const QueryExpression &query,
       for (const auto index : scanner.functorFormalIndices()) {
         budget.tick(1);
         functorFormals.insert(index);
+      }
+      auto &applicationScopes =
+          result.functorApplicationScopes[definition.name];
+      for (const auto &[formalIndex, scopes] :
+           scanner.functorApplicationScopes()) {
+        budget.tick(1);
+        for (const auto &visibleNames : scopes) {
+          budget.tick(1);
+          FunctorApplicationScope site{.formalIndex = formalIndex};
+          for (const auto &name : visibleNames) {
+            budget.chargeWork(1);
+            budget.chargeWork(name.size());
+            site.visibleNames.insert(name);
+          }
+          applicationScopes.push_back(std::move(site));
+        }
       }
       auto &ordinaryFunctorFormals = ordinaryFunctorFormalSets[definition.name];
       for (const auto index : scanner.ordinaryFunctorFormalIndices()) {
@@ -1866,6 +2100,20 @@ analyzeFrameClosureScope(const PathLambda &lambda,
     const ClosedDefaultIndex closedDefaults;
     return DefinitionScanner(budget, definitions, closedDefaults)
         .scanClosure(lambda);
+  } catch (const std::exception &error) {
+    return std::unexpected(FrameEligibilityError{error.what()});
+  }
+}
+
+std::expected<FrameStaticFunctorScope, FrameEligibilityError>
+analyzeFrameStaticFunctorScope(const std::span<const PathStep> steps,
+                               const FrameEligibilityLimits limits) {
+  try {
+    TraversalBudget budget(limits);
+    const DefinitionIndex definitions;
+    const ClosedDefaultIndex closedDefaults;
+    return DefinitionScanner(budget, definitions, closedDefaults)
+        .scanStaticFunctor(steps);
   } catch (const std::exception &error) {
     return std::unexpected(FrameEligibilityError{error.what()});
   }

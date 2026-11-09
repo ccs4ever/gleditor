@@ -1008,3 +1008,27 @@ architecture, senior and resource reviews found no stage blocker. The broader au
 callable and eight route failures plus one skip. Value-lambda whole-formal
 defaults/multiple/variadic formals, decorated recursive static functors, stream lifecycle and final
 route/measurement gates remain. §4.12 remains incomplete; no full-suite or speedup claim is made.
+
+## Decorated static functors in reusable named frames
+
+Iteration 55 adds symbolic native variants for computed scalar/nested Boolean predicates, existing
+literal/nested shapes and frozen nested static bodies, together with existing read placements/Keep
+lowering. Structural keys preserve type/bits, names, order and flags without specializing on alias
+values. Per-variant alias ports and scoped helper dependencies retain late callee/application scope,
+formal/local shadowing and missing-versus-bound-empty required defaults. Read-only shared AST
+payloads exist only during compilation; exported execution is graph-only.
+
+Borrowed capture lookup and incremental inspection/copy checks bound the new materialization phases
+before vector/string copies. A separate scope metadata-work ceiling preserves existing node/depth
+limits. Work estimates do not cover allocator overhead, hashing or all CPU/heap. See
+[iteration 55](projects/vortex-vm-only-iterations.md) and
+[the static-functor frame contract](projects/vql-static-functor-frames-plan.md).
+
+Full build, all 1,157 affected tests across 104 suites, 24 new cases and 52 expanded focused cases
+passed. Native recursion/reuse, lexical alias timing, helper defaults, Boolean/shape semantics,
+duplicate order, exact numeric keys, bounds/retry, fresh-VM export and host/mesh SOURCE are covered.
+The real CLI returns `11` from the recursive computed-predicate program. Independent Luna
+architecture, senior and resource reviews accepted the bounded stage. The broader audits retain
+seven callable and eight route failures plus one skip. Non-closed static formal defaults, computed
+shape targets, projections/history, value-lambda extensions and remaining
+route/lifecycle/measurement gates keep §4.12 incomplete.

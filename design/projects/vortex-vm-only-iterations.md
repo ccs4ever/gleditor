@@ -2137,3 +2137,52 @@ Logs: `/tmp/vql-callables-rest-build.log`, `/tmp/vql-callables-rest-focused.log`
 `/tmp/vql-callables-rest-tests.log`, `/tmp/vql-callables-rest-cli.log`,
 `/tmp/vql-callables-rest-callables.log`, `/tmp/vql-callables-rest-overlay.log`,
 `/tmp/vql-callables-rest-format.log`.
+
+## Iteration 55: symbolic decorated static functor frames
+
+Named static functor variants now lower computed scalar operands, nested Boolean values, existing
+literal/nested shape predicates and nested frozen static bodies into reusable native frame graphs.
+Existing read placements and Keep lowering can also run in recursive variants. Closed literal
+templates retain their borrowed normalization path. Generic variants use a bounded structural key
+and compile-only step payload; keys contain symbolic names, exact scalar type/bits, ordered
+predicate/shape structure, flags and body/decorator boundaries, never current alias values or AST
+pointer identity. Execution and export contain ordinary Vortex graphs only.
+
+Variant-specific Stream ports transport template-only aliases and transitive named-helper
+dependencies. Formal and prior-local shadowing applies at each use, including forwarding-only
+functions. Required helper field-default aliases retain missing-versus-bound-empty semantics through
+forwarding. Static bodies freeze when bound while their ordinary aliases resolve in
+callee/application scope; value-lambda creation captures retain their separate rules. The normalizer
+owns its outer step vector and shares read-only nested AST inputs during synchronous compilation.
+Queued bodies are fully lowered before compilation returns; exported execution needs no AST payload.
+
+Scope analysis preserves the existing node/event and depth limits and adds a separate default
+1,000,000-unit metadata-work limit. Static normalization debits that preflight before key/payload
+work. Borrowed capture lookups and incremental inspection/copy checks cover owned vectors, strings,
+groups, expansion and splices before materialization. Non-closed programs spend the existing
+`maxClosedFunctorTemplateWork` ceiling on those phases. These are bounded work estimates; allocator
+overhead, hashing and total compile CPU/heap are outside the claim. No speedup is established.
+
+Full `make -j$(nproc)` passed. All 1,157 affected tests across 104 suites passed, including all 24
+new cases, and the expanded focused run passed 52 tests across five suites. Cases prove native
+descriptor reuse, 1/5/9 alias timing, before/after local shadowing, caller static aliases shadowed
+by formals/locals, direct/self/mutual/forwarded applications, helper dependencies and required
+defaults, Boolean order and nested-value execution, shape matching, frozen inner rebinding,
+aggregate clamps and duplicates, exact Int64/Double key distinctions, cycles inside unsupported
+syntax, repeated shared-tree budgets, byte-work limits and rollback/retry. A recursive
+computed-predicate graph survives AST/source-VM destruction and Store reload, and runs through
+host/mesh SOURCE. The real headless CLI returns `11` after two recursive applications.
+
+The matrix caught and fixed a formal-index increment missed by the closed fast path and restored
+hard refusal for malformed empty Boolean trees. Former unsupported-form tests now execute newly
+supported predicates and read modifiers; creation still refuses at that recursive boundary.
+Independent Luna architecture, senior and resource gates found no remaining stage blocker. The
+broader callable audit retains seven failures (33 passes); the route audit retains eight failures
+and one skip (132 passes). This is not a full-suite pass or §4.12 completion. Non-closed static
+formal defaults, computed shape targets, ordered projections, historical pins, new value-lambda
+static capture ABI and the remaining completion gates stay open.
+
+Logs: `/tmp/vql-static-functor-build.log`, `/tmp/vql-static-functor-focused.log`,
+`/tmp/vql-static-functor-tests.log`, `/tmp/vql-static-functor-cli.log`,
+`/tmp/vql-static-functor-callables.log`, `/tmp/vql-static-functor-overlay.log`,
+`/tmp/vql-static-functor-format.log`.

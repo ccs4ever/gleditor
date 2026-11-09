@@ -32,6 +32,8 @@
 #include "common/xanadu/vortex/vortex_core.hpp"
 #include "common/xanadu/vortex/vortex_vm.hpp"
 #include "common/xanadu/vql/ast.hpp"
+#include "common/xanadu/vql/frame_eligibility.hpp"
+#include "common/xanadu/vql/static_functor_program.hpp"
 
 namespace xanadu {
 class MultiStoreCoordinator;
@@ -167,6 +169,7 @@ private:
     // nullopt identifies an ordinary or untyped-rest frame.
     std::optional<std::size_t> restGroupCount;
     std::vector<ClosedFunctorFormalKey> functorTemplates;
+    std::vector<StaticFunctorProgramKey> staticFunctorPrograms;
 
     bool operator==(const FrameDefinitionKey &) const = default;
   };
@@ -217,6 +220,11 @@ private:
           }
         }
       }
+      combine(key.staticFunctorPrograms.size());
+      for (const auto &program : key.staticFunctorPrograms) {
+        combine(std::hash<std::size_t>{}(program.formalIndex));
+        combine(std::hash<std::string>{}(program.structuralIdentity));
+      }
       return result;
     }
   };
@@ -237,9 +245,9 @@ private:
                                     const zigzag::vortex::CellValue &val);
 
   std::optional<std::vector<PathStep>>
-  functorArgument(const ValueExpr &argument) const;
+  functorArgument(const ValueExpr &argument);
   std::optional<std::vector<PathStep>>
-  functorArgument(const PathExpression &path) const;
+  functorArgument(const PathExpression &path);
   [[nodiscard]] bool isFunctorArgument(const ValueExpr &argument) const;
   [[nodiscard]] std::optional<std::span<const PathStep>>
   closedFunctorArgumentSteps(const ValueExpr &argument) const;
@@ -294,7 +302,10 @@ private:
   std::vector<zigzag::CellRef> compileReusableFrameCall(
       const DefDeclaration &definition, const std::vector<ValueExpr> &arguments,
       std::optional<zigzag::CellRef> context, bool ufcs,
-      std::vector<ClosedFunctorFormalKey> functorTemplates);
+      std::vector<ClosedFunctorFormalKey> functorTemplates,
+      std::vector<StaticFunctorProgram> staticFunctorPrograms,
+      std::vector<std::string> extraCaptureNames,
+      std::vector<std::string> requiredProgramCaptureNames);
   void compilePendingFrameDefinitions();
   void compileFrameDefinition(const DefDeclaration &definition,
                               const FrameDefinitionKey &key);
@@ -357,9 +368,14 @@ private:
       frameOmittedRestRequiredDefaultCaptureBindings_;
   std::unordered_map<std::string, std::vector<std::size_t>>
       frameFunctorFormalIndices_;
+  std::unordered_map<std::string, std::vector<FunctorApplicationScope>>
+      frameFunctorApplicationScopes_;
   struct FrameDefinitionState {
     zigzag::CellRef descriptor;
     std::vector<ClosedFunctorFormalKey> functorTemplates;
+    std::vector<StaticFunctorProgram> staticFunctorPrograms;
+    std::vector<std::string> extraCaptureNames;
+    std::vector<std::string> requiredCaptureNames;
     std::optional<std::size_t> functorVariantOrdinal;
     std::optional<zigzag::CellRef> entry;
     bool queued{false};

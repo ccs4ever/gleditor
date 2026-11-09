@@ -264,15 +264,30 @@ TEST(VQLReadModifiersFunctorFrameTest,
 }
 
 TEST(VQLReadModifiersFunctorFrameTest,
-     OtherDecorationsStillRefuseRecursiveTemplateBoundaries) {
+     ReadPlacementAndKeepWorkWhileCreationStillRefuses) {
   Harness h;
-  for (const std::string_view route :
-       {"/~+d.next!keep", "/+d.next::head>", "/+d.next%\"new\""}) {
-    const auto compiled = h.compile(std::string(recursiveDefinition) +
-                                    "walk(##, 1, " + std::string(route) + ")");
-    EXPECT_FALSE(compiled.success) << route;
-    EXPECT_FALSE(compiled.cursor) << route;
+  const auto node = h.cell("node");
+  const auto next = h.cell("next");
+  h.link(h.core.home(), "d.next", node);
+  h.link(node, "d.next", next);
+  for (const std::string_view route : {"/~+d.next!keep", "/+d.next::head>"}) {
+    const std::string source = std::string(recursiveDefinition) +
+                               "walk($owners, 2, " + std::string(route) + ")";
+    CompilationOptions options;
+    options.initialBindings.emplace("owners", std::vector<CellRef>{node});
+    const auto compiled = h.compile(source, options);
+    ASSERT_TRUE(compiled.success) << compiled.errorMessage;
+    EXPECT_FALSE(
+        namedInvokeDescriptors(compiled, h.vm, h.core, "walk").empty());
+    const auto result = h.execute(source, options.initialBindings);
+    ASSERT_TRUE(result) << result.error().message;
+    EXPECT_EQ(*result, (std::vector<CellRef>{
+                           route == "/~+d.next!keep" ? node : h.core.home()}));
   }
+  const auto creation = h.compile(std::string(recursiveDefinition) +
+                                  "walk(##, 1, /+d.next%\"new\")");
+  EXPECT_FALSE(creation.success);
+  EXPECT_FALSE(creation.cursor);
 }
 
 TEST(VQLReadModifiersFunctorFrameTest,
