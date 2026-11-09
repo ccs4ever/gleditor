@@ -36,6 +36,10 @@ struct FrameEligibility {
   /// present at the named callsite; zero-group variants omit these checks.
   std::unordered_map<std::string, std::vector<std::string>>
       conditionalRequiredDefaultCaptureBindings;
+  /// Required only when the final variadic formal consumes its whole-rest
+  /// default because no rest actual groups were supplied.
+  std::unordered_map<std::string, std::vector<std::string>>
+      omittedRestRequiredDefaultCaptureBindings;
   std::unordered_map<std::string, std::string> refusalReasons;
 };
 
@@ -58,6 +62,7 @@ struct FrameClosureScope {
   std::unordered_set<std::string> freeCaptureNames;
   std::unordered_set<std::string> requiredDefaultCaptureBindings;
   std::unordered_set<std::string> conditionalRequiredDefaultCaptureBindings;
+  std::unordered_set<std::string> omittedRestRequiredDefaultCaptureBindings;
   std::vector<ClosureCallSite> callSites;
   std::optional<std::string> refusalReason;
 };

@@ -22,6 +22,7 @@ struct ClosureLambdaSyntax {
   std::vector<std::string> freeCaptureNames;
   std::vector<std::string> requiredDefaultCaptureBindings;
   std::vector<std::string> conditionalRequiredDefaultCaptureBindings;
+  std::vector<std::string> omittedRestRequiredDefaultCaptureBindings;
   std::vector<ClosureCallSite> callSites;
 };
 

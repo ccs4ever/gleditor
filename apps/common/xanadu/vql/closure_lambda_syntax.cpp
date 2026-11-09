@@ -38,6 +38,10 @@ analyzeClosureLambdaSyntax(const PathLambda &lambda,
       scope->conditionalRequiredDefaultCaptureBindings.begin(),
       scope->conditionalRequiredDefaultCaptureBindings.end());
   std::ranges::sort(result.conditionalRequiredDefaultCaptureBindings);
+  result.omittedRestRequiredDefaultCaptureBindings.assign(
+      scope->omittedRestRequiredDefaultCaptureBindings.begin(),
+      scope->omittedRestRequiredDefaultCaptureBindings.end());
+  std::ranges::sort(result.omittedRestRequiredDefaultCaptureBindings);
   result.callSites = std::move(scope->callSites);
   return std::optional<ClosureLambdaSyntax>{std::move(result)};
 }

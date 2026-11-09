@@ -353,6 +353,8 @@ private:
       frameRequiredDefaultCaptureBindings_;
   std::unordered_map<std::string, std::vector<std::string>>
       frameConditionalRequiredDefaultCaptureBindings_;
+  std::unordered_map<std::string, std::vector<std::string>>
+      frameOmittedRestRequiredDefaultCaptureBindings_;
   std::unordered_map<std::string, std::vector<std::size_t>>
       frameFunctorFormalIndices_;
   struct FrameDefinitionState {

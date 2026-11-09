@@ -175,15 +175,12 @@ TEST(VQLExecutionTest, FiltersMixedCandidatesWithoutLosingIdentity) {
   }
 }
 
-TEST(VQLExecutionTest, UnsupportedVariadicSignaturesFailBeforeExecution) {
+TEST(VQLExecutionTest, NonFinalVariadicSignaturesFailBeforeExecution) {
   for (const auto mode : {QueryExecutionMode::Vortex}) {
     Harness h;
     auto executor = h.executor(mode);
     for (const auto source : {"def f(...$rest, $later): Any := $rest; ##",
-                              "def f(...$first, ...$rest): Any := $rest; ##",
-                              "def f(...$rest := 7): Any := $rest; ##",
-                              "def f(... .): Any := .; ##",
-                              "def f(...{ +d.title: $t }): Any := $t; ##"}) {
+                              "def f(...$first, ...$rest): Any := $rest; ##"}) {
       SCOPED_TRACE(source);
       const auto result = executor.execute(source);
       ASSERT_FALSE(result);

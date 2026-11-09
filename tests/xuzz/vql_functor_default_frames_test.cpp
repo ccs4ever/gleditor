@@ -216,9 +216,16 @@ TEST(VQLFunctorDefaultFrameTest,
         "supplied", emptyActual ? std::vector<CellRef>{}
                                 : std::vector<CellRef>{h.cell("ordinary")});
     const auto compiled = h.compile(source, options);
-    EXPECT_FALSE(compiled.success);
-    EXPECT_FALSE(compiled.cursor);
-    EXPECT_FALSE(compiled.errorMessage.empty());
+    ASSERT_TRUE(compiled.success) << compiled.errorMessage;
+    ASSERT_TRUE(compiled.cursor);
+    const auto result = h.execute(source, options.initialBindings);
+    ASSERT_FALSE(result);
+    EXPECT_NE(result.error().message.find(
+                  emptyActual ? "requires exactly one closure handle"
+                              : "invalid Vortex closure value"),
+              std::string::npos)
+        << result.error().message;
+    EXPECT_FALSE(h.vm.hasActiveFrames());
   }
 }
 

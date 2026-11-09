@@ -20,7 +20,12 @@ using Scope = std::unordered_set<std::string>;
 
 struct CallSite {
   struct FunctorArgumentSource {
-    enum class Kind : std::uint8_t { Other, ClosedLiteral, CallerFormal };
+    enum class Kind : std::uint8_t {
+      Other,
+      RuntimeValue,
+      ClosedLiteral,
+      CallerFormal
+    };
     Kind kind{Kind::Other};
     std::optional<std::size_t> callerFormalIndex;
   };
@@ -30,6 +35,7 @@ struct CallSite {
   std::vector<FunctorArgumentSource> functorArgumentSources;
   bool inParameterDefault{false};
   bool conditionalOnTypedRest{false};
+  bool conditionalOnOmittedRestDefault{false};
   bool mayInjectContext{false};
   std::size_t argumentCount{0};
 };
@@ -40,6 +46,7 @@ struct CaptureDependency {
   std::vector<CallSite::FunctorArgumentSource> functorArgumentSources;
   bool inParameterDefault{false};
   bool conditionalOnTypedRest{false};
+  bool conditionalOnOmittedRestDefault{false};
   bool mayInjectContext{false};
   std::size_t argumentCount{0};
 };
@@ -50,6 +57,7 @@ enum class CaptureRequirement : std::uint8_t {
   Free,
   Required,
   ConditionalRequired,
+  OmittedRestRequired,
 };
 
 struct PendingCapture {
@@ -161,14 +169,14 @@ public:
     for (std::size_t index = 0; index < definition.params.size(); ++index) {
       const auto &parameter = definition.params[index];
       tick(1);
-      if (parameter.isVariadic &&
-          (index + 1 != definition.params.size() || parameter.defaultValue ||
-           !std::holds_alternative<std::string>(parameter.target)))
-        refuse(
-            "only named final variadics without defaults are frame eligible");
+      if (parameter.isVariadic && index + 1 != definition.params.size())
+        refuse("only final variadics are frame eligible");
       if (parameter.defaultValue) {
-        const bool prior                       = scanningParameterDefault_;
-        scanningParameterDefault_              = true;
+        const bool prior               = scanningParameterDefault_;
+        const bool priorOmittedDefault = scanningOmittedRestDefault_;
+        scanningParameterDefault_      = true;
+        scanningOmittedRestDefault_ =
+            parameter.isVariadic && parameter.defaultValue != nullptr;
         const PathExpression *priorDefaultPath = recognizedDefaultPath_;
         const auto eligibleDefaults = closedDefaults_.find(definition.name);
         if (eligibleDefaults != closedDefaults_.end() &&
@@ -178,15 +186,20 @@ public:
           if (path && *path) recognizedDefaultPath_ = path->get();
         }
         value(*parameter.defaultValue, scope, 2);
-        recognizedDefaultPath_    = priorDefaultPath;
-        scanningParameterDefault_ = prior;
+        recognizedDefaultPath_      = priorDefaultPath;
+        scanningParameterDefault_   = prior;
+        scanningOmittedRestDefault_ = priorOmittedDefault;
       }
       if (parameter.type) {
         const Scope priorScope       = scope;
         const bool savedConditional  = scanningConditionalRestType_;
+        const bool savedOmitted      = scanningOmittedRestDefault_;
         scanningConditionalRestType_ = parameter.isVariadic;
+        scanningOmittedRestDefault_ =
+            parameter.isVariadic && parameter.defaultValue != nullptr;
         auto captures                = type(*parameter.type, priorScope, 2);
         scanningConditionalRestType_ = savedConditional;
+        scanningOmittedRestDefault_  = savedOmitted;
         if (!parameter.isVariadic)
           scope.insert(captures.begin(), captures.end());
       }
@@ -204,8 +217,17 @@ public:
         contextParameterSeen = true;
       } else {
         const auto &pattern = std::get<DestructurePattern>(parameter.target);
-        auto captures       = contractPattern(pattern, scope, 2);
-        scope.insert(captures.begin(), captures.end());
+        const bool priorConditional = scanningConditionalRestType_;
+        const bool priorOmitted     = scanningOmittedRestDefault_;
+        if (parameter.isVariadic) {
+          scanningConditionalRestType_ = true;
+          scanningOmittedRestDefault_  = parameter.defaultValue != nullptr;
+        }
+        auto captures                = contractPattern(pattern, scope, 2);
+        scanningConditionalRestType_ = priorConditional;
+        scanningOmittedRestDefault_  = priorOmitted;
+        if (!parameter.isVariadic)
+          scope.insert(captures.begin(), captures.end());
       }
     }
 
@@ -243,6 +265,11 @@ public:
     return conditionalRequiredDefaultCaptureBindings_;
   }
 
+  [[nodiscard]] const std::unordered_set<std::string> &
+  omittedRestRequiredDefaultCaptureBindings() const noexcept {
+    return omittedRestRequiredDefaultCaptureBindings_;
+  }
+
   [[nodiscard]] const std::unordered_set<std::size_t> &
   functorFormalIndices() const noexcept {
     return functorFormalIndices_;
@@ -259,13 +286,15 @@ public:
 
   [[nodiscard]] FrameClosureScope scanClosure(const PathLambda &lambda) {
     tick(0);
-    pathLambda(lambda, Scope{}, 1);
+    pathLambda(lambda, Scope{}, 1, true);
     FrameClosureScope result;
     result.refusalReason                  = refusal_;
     result.freeCaptureNames               = freeCaptureNames_;
     result.requiredDefaultCaptureBindings = requiredDefaultCaptureBindings_;
     result.conditionalRequiredDefaultCaptureBindings =
         conditionalRequiredDefaultCaptureBindings_;
+    result.omittedRestRequiredDefaultCaptureBindings =
+        omittedRestRequiredDefaultCaptureBindings_;
     auto callSites = std::move(callSites_);
     result.callSites.reserve(callSites.size());
     for (auto &site : callSites)
@@ -343,8 +372,10 @@ private:
     if (!scope.contains(name)) {
       freeCaptureNames_.insert(name);
       if (requiredDefaultBinding) {
-        if (scanningConditionalRestType_)
+        if (scanningConditionalRestType_ && !scanningOmittedRestDefault_)
           conditionalRequiredDefaultCaptureBindings_.insert(name);
+        else if (scanningOmittedRestDefault_ && !scanningConditionalRestType_)
+          omittedRestRequiredDefaultCaptureBindings_.insert(name);
         else
           requiredDefaultCaptureBindings_.insert(name);
       }
@@ -367,7 +398,10 @@ private:
             found != functorFormalIndicesByName_.end())
           return {.kind = CallSite::FunctorArgumentSource::Kind::CallerFormal,
                   .callerFormalIndex = found->second};
+        return {.kind = CallSite::FunctorArgumentSource::Kind::RuntimeValue};
       }
+      if (inValueLambdaBody_)
+        return {.kind = CallSite::FunctorArgumentSource::Kind::RuntimeValue};
       return {};
     }
     if (isClosedTraversalFunctorDefault(argument, budget_, depth))
@@ -384,11 +418,6 @@ private:
   }
 
   bool parameterAcceptsStaticFunctor(const LambdaParam &parameter) const {
-    return !parameter.type && !parameter.isVariadic &&
-           std::holds_alternative<std::string>(parameter.target);
-  }
-
-  bool parameterUsesFunctorValue(const LambdaParam &parameter) const {
     return !parameter.type && !parameter.isVariadic &&
            std::holds_alternative<std::string>(parameter.target);
   }
@@ -445,7 +474,7 @@ private:
             pointer(
                 part, depth + 1,
                 [&](const PathLambda &lambda, const std::size_t childDepth) {
-                  pathLambda(lambda, scope, childDepth);
+                  pathLambda(lambda, scope, childDepth, true);
                 });
           } else if constexpr (std::same_as<Part,
                                             std::shared_ptr<BooleanExpr>>) {
@@ -506,8 +535,10 @@ private:
                       .visibleNames           = std::move(visibleNames),
                       .inParameterDefault     = scanningParameterDefault_,
                       .conditionalOnTypedRest = scanningConditionalRestType_,
-                      .mayInjectContext       = mayInjectContext,
-                      .argumentCount          = call.args.size()};
+                      .conditionalOnOmittedRestDefault =
+                          scanningOmittedRestDefault_,
+                      .mayInjectContext = mayInjectContext,
+                      .argumentCount    = call.args.size()};
     if (call.isSliceRead) refuse("slice reads are not reusable frame calls");
     if (std::ranges::any_of(call.argNames, [](const std::string &name) {
           return !name.empty();
@@ -519,9 +550,8 @@ private:
       const auto &argument = call.args[index];
       const auto source    = functorArgumentSource(argument, scope, depth + 2);
       callSite.functorArgumentSources.push_back(source);
-      bool literalPosition            = false;
-      bool ordinaryPathPosition       = false;
-      bool unsupportedFunctorPosition = false;
+      bool literalPosition      = false;
+      bool ordinaryPathPosition = false;
       if (target != definitions_.end()) {
         const auto &params = target->second->params;
         const bool injectContext =
@@ -539,8 +569,6 @@ private:
               (!parameter.defaultValue ||
                hasClosedDefault(call.name, *resolvedIndex))) {
             literalPosition = true;
-          } else if (parameterUsesFunctorValue(parameter)) {
-            unsupportedFunctorPosition = true;
           } else {
             ordinaryPathPosition = true;
           }
@@ -548,27 +576,22 @@ private:
         classify(index + static_cast<std::size_t>(injectContext));
         if (injectContext) classify(index);
         if (source.kind != CallSite::FunctorArgumentSource::Kind::Other &&
-            injectContext && literalPosition &&
-            (ordinaryPathPosition || unsupportedFunctorPosition))
+            injectContext && literalPosition && ordinaryPathPosition)
           refuse("context-injected functor argument maps to different formals");
       }
       if (source.kind == CallSite::FunctorArgumentSource::Kind::ClosedLiteral &&
           literalPosition)
         continue;
       if (source.kind == CallSite::FunctorArgumentSource::Kind::CallerFormal &&
-          literalPosition && !ordinaryPathPosition &&
-          !unsupportedFunctorPosition) {
+          literalPosition && !ordinaryPathPosition) {
         // A bound static argument is forwarding, not an ordinary value read.
         // Keep the ValueExpr and variable visits in the shared syntax budget.
         tick(depth + 2);
         tick(0);
         continue;
       }
-      if (unsupportedFunctorPosition)
-        refuse("defaulted functor formals remain on inline graph lowering");
       ordinaryArgumentValue(argument, scope, depth + 2,
-                            ordinaryPathPosition && !literalPosition &&
-                                !unsupportedFunctorPosition);
+                            ordinaryPathPosition && !literalPosition);
     }
     callSites_.push_back(std::move(callSite));
   }
@@ -704,11 +727,16 @@ private:
       if (const auto found = functorFormalIndicesByName_.find(name);
           found != functorFormalIndicesByName_.end() && scope.contains(name) &&
           !shadowedFunctorFormalNames_.contains(name)) {
+        if (inValueLambdaBody_) {
+          variable(name, scope);
+          return;
+        }
         functorFormalIndices_.insert(found->second);
         return;
       }
       variable(name, scope);
-      refuse("path-functor applications require an untyped named formal");
+      if (!inValueLambdaBody_ && !scope.contains(name))
+        refuse("path-functor applications require an untyped named formal");
     }
     sequence(step.creates, depth,
              [&](const CreateValue &create, const std::size_t childDepth) {
@@ -1059,7 +1087,7 @@ private:
   }
 
   void pathLambda(const PathLambda &lambda, const Scope &outer,
-                  const std::size_t depth) {
+                  const std::size_t depth, const bool valueLambdaBody = false) {
     if (lambda.params.size() > 1)
       refuse("path lambdas with multiple parameters are not frame eligible");
 
@@ -1107,6 +1135,8 @@ private:
       if (param.isVariadic)
         refuse("variadic path lambdas are not frame eligible");
     }
+    const bool priorValueLambdaBody = inValueLambdaBody_;
+    inValueLambdaBody_ |= valueLambdaBody;
     if (const auto *body =
             std::get_if<std::shared_ptr<ValueExpr>>(&lambda.body)) {
       pointer(*body, depth + 1,
@@ -1119,6 +1149,7 @@ private:
                 scriptBody(script, scope, childDepth);
               });
     }
+    inValueLambdaBody_ = priorValueLambdaBody;
     for (const auto &name : shadowedByLambda)
       shadowedFunctorFormalNames_.erase(name);
   }
@@ -1320,14 +1351,17 @@ private:
   const ClosedDefaultIndex &closedDefaults_;
   std::unordered_map<std::string, std::size_t> functorFormalIndicesByName_;
   std::unordered_set<std::string> shadowedFunctorFormalNames_;
+  bool inValueLambdaBody_{false};
   std::unordered_set<std::string> freeCaptureNames_;
   std::unordered_set<std::size_t> functorFormalIndices_;
   std::unordered_set<std::size_t> ordinaryFunctorFormalIndices_;
   std::unordered_set<std::string> requiredDefaultCaptureBindings_;
   std::unordered_set<std::string> conditionalRequiredDefaultCaptureBindings_;
+  std::unordered_set<std::string> omittedRestRequiredDefaultCaptureBindings_;
   std::vector<CallSite> callSites_;
   bool scanningParameterDefault_{false};
   bool scanningConditionalRestType_{false};
+  bool scanningOmittedRestDefault_{false};
   const PathExpression *recognizedDefaultPath_{nullptr};
   std::optional<std::string> refusal_;
 };
@@ -1351,6 +1385,8 @@ analyzeFrameEligibility(const QueryExpression &query,
         requiredDefaultCaptureSets;
     std::unordered_map<std::string, std::unordered_set<std::string>>
         conditionalRequiredDefaultCaptureSets;
+    std::unordered_map<std::string, std::unordered_set<std::string>>
+        omittedRestRequiredDefaultCaptureSets;
     std::unordered_map<std::string, std::unordered_set<std::size_t>>
         functorFormalSets;
     std::unordered_map<std::string, std::unordered_set<std::size_t>>
@@ -1390,6 +1426,8 @@ analyzeFrameEligibility(const QueryExpression &query,
           definition.name, scanner.requiredDefaultCaptureBindings());
       conditionalRequiredDefaultCaptureSets.emplace(
           definition.name, scanner.conditionalRequiredDefaultCaptureBindings());
+      omittedRestRequiredDefaultCaptureSets.emplace(
+          definition.name, scanner.omittedRestRequiredDefaultCaptureBindings());
       auto &functorFormals = functorFormalSets[definition.name];
       for (const auto index : scanner.functorFormalIndices()) {
         budget.tick(1);
@@ -1412,8 +1450,10 @@ analyzeFrameEligibility(const QueryExpression &query,
                  std::move(callSite.functorArgumentSources),
              .inParameterDefault     = callSite.inParameterDefault,
              .conditionalOnTypedRest = callSite.conditionalOnTypedRest,
-             .mayInjectContext       = callSite.mayInjectContext,
-             .argumentCount          = callSite.argumentCount});
+             .conditionalOnOmittedRestDefault =
+                 callSite.conditionalOnOmittedRestDefault,
+             .mayInjectContext = callSite.mayInjectContext,
+             .argumentCount    = callSite.argumentCount});
       }
       if (reason)
         result.refusalReasons.emplace(definition.name, *reason);
@@ -1454,6 +1494,9 @@ analyzeFrameEligibility(const QueryExpression &query,
             const auto &source = callSite.functorArgumentSources[argumentIndex];
             if (source.kind ==
                 CallSite::FunctorArgumentSource::Kind::ClosedLiteral)
+              return true;
+            if (source.kind ==
+                CallSite::FunctorArgumentSource::Kind::RuntimeValue)
               return true;
             if (source.kind !=
                     CallSite::FunctorArgumentSource::Kind::CallerFormal ||
@@ -1575,6 +1618,8 @@ analyzeFrameEligibility(const QueryExpression &query,
         queuedRequiredDefaultCaptures;
     std::unordered_map<std::string, std::unordered_set<std::string>>
         queuedConditionalDefaultCaptures;
+    std::unordered_map<std::string, std::unordered_set<std::string>>
+        queuedOmittedRestDefaultCaptures;
     const auto enqueueCapture = [&](const std::string &definition,
                                     const std::string &name,
                                     const CaptureRequirement requirement) {
@@ -1582,7 +1627,9 @@ analyzeFrameEligibility(const QueryExpression &query,
                          ? queuedFreeCaptures[definition]
                      : requirement == CaptureRequirement::Required
                          ? queuedRequiredDefaultCaptures[definition]
-                         : queuedConditionalDefaultCaptures[definition];
+                     : requirement == CaptureRequirement::ConditionalRequired
+                         ? queuedConditionalDefaultCaptures[definition]
+                         : queuedOmittedRestDefaultCaptures[definition];
       if (queued.contains(name)) return;
       budget.tick(1);
       queued.insert(name);
@@ -1601,6 +1648,11 @@ analyzeFrameEligibility(const QueryExpression &query,
         if (!requiredCaptures.contains(name))
           enqueueCapture(definition.name, name,
                          CaptureRequirement::ConditionalRequired);
+      for (const auto &name :
+           omittedRestRequiredDefaultCaptureSets.at(definition.name))
+        if (!requiredCaptures.contains(name))
+          enqueueCapture(definition.name, name,
+                         CaptureRequirement::OmittedRestRequired);
     }
 
     while (!pendingCaptures.empty()) {
@@ -1617,26 +1669,49 @@ analyzeFrameEligibility(const QueryExpression &query,
             current.requirement == CaptureRequirement::Required;
         CaptureRequirement propagatedRequirement = CaptureRequirement::Free;
         if (current.requirement != CaptureRequirement::Free) {
-          if (current.requirement == CaptureRequirement::ConditionalRequired) {
+          if (current.requirement == CaptureRequirement::ConditionalRequired ||
+              current.requirement == CaptureRequirement::OmittedRestRequired) {
             const auto callee = definitionsByName.find(current.definition);
             if (callee == definitionsByName.end() ||
                 callee->second->params.empty() ||
-                !callee->second->params.back().isVariadic ||
-                !callee->second->params.back().type)
+                !callee->second->params.back().isVariadic)
+              continue;
+            const auto &rest = callee->second->params.back();
+            if (current.requirement ==
+                    CaptureRequirement::ConditionalRequired &&
+                !rest.type &&
+                !std::holds_alternative<DestructurePattern>(rest.target))
+              continue;
+            if (current.requirement ==
+                    CaptureRequirement::OmittedRestRequired &&
+                !rest.defaultValue)
               continue;
             const std::size_t fixedCount = callee->second->params.size() - 1;
             std::size_t actualCount      = callSite.argumentCount;
             if (callSite.mayInjectContext &&
                 callee->second->params.size() > callSite.argumentCount)
               ++actualCount;
-            if (actualCount <= fixedCount) continue;
+            const bool hasRestGroups = actualCount > fixedCount;
+            if (current.requirement ==
+                    CaptureRequirement::ConditionalRequired &&
+                !hasRestGroups)
+              continue;
+            if (current.requirement ==
+                    CaptureRequirement::OmittedRestRequired &&
+                hasRestGroups)
+              continue;
             if (requiredDefaultCaptureSets.at(current.definition)
                     .contains(current.name))
               continue;
           }
-          propagatedRequirement = callSite.conditionalOnTypedRest
-                                      ? CaptureRequirement::ConditionalRequired
-                                      : CaptureRequirement::Required;
+          const bool presentOnly = callSite.conditionalOnTypedRest &&
+                                   !callSite.conditionalOnOmittedRestDefault;
+          const bool omittedOnly = callSite.conditionalOnOmittedRestDefault &&
+                                   !callSite.conditionalOnTypedRest;
+          propagatedRequirement =
+              presentOnly   ? CaptureRequirement::ConditionalRequired
+              : omittedOnly ? CaptureRequirement::OmittedRestRequired
+                            : CaptureRequirement::Required;
           requiredBindingActive = true;
         }
         if (requiredBindingActive && callSite.inParameterDefault) {
@@ -1656,14 +1731,48 @@ analyzeFrameEligibility(const QueryExpression &query,
                                    .second;
           conditionalRequiredDefaultCaptureSets[callSite.caller].erase(
               current.name);
+          omittedRestRequiredDefaultCaptureSets[callSite.caller].erase(
+              current.name);
         } else if (propagatedRequirement ==
                        CaptureRequirement::ConditionalRequired &&
                    !requiredDefaultCaptureSets[callSite.caller].contains(
                        current.name)) {
-          newRequiredCapture =
-              conditionalRequiredDefaultCaptureSets[callSite.caller]
-                  .insert(current.name)
-                  .second;
+          auto &omitted =
+              omittedRestRequiredDefaultCaptureSets[callSite.caller];
+          if (omitted.erase(current.name) != 0) {
+            newRequiredCapture = requiredDefaultCaptureSets[callSite.caller]
+                                     .insert(current.name)
+                                     .second;
+            newRequiredCapture |=
+                conditionalRequiredDefaultCaptureSets[callSite.caller].erase(
+                    current.name) != 0;
+            propagatedRequirement = CaptureRequirement::Required;
+          } else {
+            newRequiredCapture =
+                conditionalRequiredDefaultCaptureSets[callSite.caller]
+                    .insert(current.name)
+                    .second;
+          }
+        } else if (propagatedRequirement ==
+                       CaptureRequirement::OmittedRestRequired &&
+                   !requiredDefaultCaptureSets[callSite.caller].contains(
+                       current.name)) {
+          auto &conditional =
+              conditionalRequiredDefaultCaptureSets[callSite.caller];
+          if (conditional.erase(current.name) != 0) {
+            newRequiredCapture = requiredDefaultCaptureSets[callSite.caller]
+                                     .insert(current.name)
+                                     .second;
+            newRequiredCapture |=
+                omittedRestRequiredDefaultCaptureSets[callSite.caller].erase(
+                    current.name) != 0;
+            propagatedRequirement = CaptureRequirement::Required;
+          } else {
+            newRequiredCapture =
+                omittedRestRequiredDefaultCaptureSets[callSite.caller]
+                    .insert(current.name)
+                    .second;
+          }
         }
         if (newFreeCapture)
           enqueueCapture(callSite.caller, current.name,
@@ -1692,6 +1801,15 @@ analyzeFrameEligibility(const QueryExpression &query,
       for (const auto &name : conditionalSet)
         if (!requiredSet.contains(name)) conditionalDefaults.push_back(name);
       std::ranges::sort(conditionalDefaults);
+
+      auto &omittedRestDefaults =
+          result.omittedRestRequiredDefaultCaptureBindings[definition.name];
+      const auto &omittedRestSet =
+          omittedRestRequiredDefaultCaptureSets.at(definition.name);
+      for (const auto &name : omittedRestSet)
+        if (!requiredSet.contains(name) && !conditionalSet.contains(name))
+          omittedRestDefaults.push_back(name);
+      std::ranges::sort(omittedRestDefaults);
 
       auto &functorFormals   = result.functorFormalIndices[definition.name];
       const auto &functorSet = functorFormalSets.at(definition.name);

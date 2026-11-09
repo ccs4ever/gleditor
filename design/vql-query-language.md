@@ -2298,16 +2298,20 @@ explicit refusals. The rulings below describe the intended semantics.
 - **A variadic checks each actual before concatenating it.** A named final `...$xs: Int` takes
   trailing one-cell integer arguments; a multi-cell actual requires a type such as `Stream<Int>`.
   Rest arguments preserve cell identity, order and duplicates, and their shape contracts introduce
-  no capture bindings. Defaulted, dot and destructured variadic forms remain explicitly unsupported.
-  Explicit argument expressions compile before callee activation, so finite nested calls of the same
-  definition are distinct from recursive body/default execution. Reusable native frames execute
-  eligible named definitions, including typed and untyped final named rest and recursion. Typed
+  no capture bindings. Final named-function rest targets also support context and destructuring. A
+  whole-rest default runs once, after fixed-parameter checks, only when no original rest group was
+  supplied. Its result is one group; an explicit empty actual skips the default. Each group checks
+  its type and then its destructuring target before concatenation. Context targets bind the
+  aggregate even when empty; rest matching publishes no per-element captures. Explicit argument
+  expressions compile before callee activation, so finite nested calls of the same definition are
+  distinct from recursive body/default execution. Reusable native frames execute eligible named
+  definitions, including typed and untyped final named rest and recursion. Typed or destructured
   frame variants preserve each original actual group in a separate Stream port and check it in
   callee scope after fixed formals; an explicit empty actual remains a group. Normal and empty
   context control alternatives may share a descriptor. Native actual streams are prepared before
   callee guards: filtering a bad fixed parameter does not avoid rest traversal or its budget cost.
-  Exact fuel-threshold parity with inline calls is not promised. Deferred variadic special forms and
-  functors remain open.
+  Exact fuel-threshold parity with inline calls is not promised. Value-lambda variadics and
+  remaining decorated recursive static functors remain open.
 
 - **Scalars are read as comparisons read them (§4.3).** `Int`, `Float` and `Bool` accept a cell
   minted with those value bits and a text cell whose whole content reads as one. Stored text may
@@ -2394,11 +2398,14 @@ explicit refusals. The rulings below describe the intended semantics.
   supplied by a formal or prior body-local binding. Field defaults retain pre-match lexical scope,
   lazy owner-context graph execution and filtering. Unknown formal types are refused by name after
   bounded cycle/depth analysis and before application. Applying a stored value as `/$f` requires
-  exactly one structural function handle, without numeric pointer or scalar coercion.
-  Named-definition capture timing and static functor lowering retain their earlier rules.
+  exactly one structural function handle, without numeric pointer or scalar coercion. Runtime
+  handles can be applied inside reusable named and value-lambda bodies, including typed formals,
+  local bindings, captured value-lambda aliases and recursive forwarding. Static templates retain
+  separate graph variants. Static predicate aliases resolve in callee/application scope;
+  named-definition capture timing and static functor lowering retain their earlier rules.
   Whole-formal defaults, multiple/variadic value-lambda formals, captured static functor ABI and
-  general dynamic application inside reusable bodies remain deferred. AST visits are bounded across
-  the query. A separate 1,000,000-unit post-analysis capture expansion budget counts callsites and
+  remaining decorated recursive static functors remain deferred. AST visits are bounded across the
+  query. A separate 1,000,000-unit post-analysis capture expansion budget counts callsites and
   callee/capture-name bytes; it does not cap the initial scope walk, repeated nested analysis or
   total compile CPU/heap use. Runtime Cell/Stream bindings export through a versioned graph
   descriptor and native initialization, including literal aliases, duplicate/empty streams and
@@ -2458,9 +2465,9 @@ explicit refusals. The rulings below describe the intended semantics.
   resolve through canonical arena proxies; choice points restore iterator state and proxy minting.
   Computed defaults also execute inside eligible reusable frames, including self/mutual recursive
   matching and return promises. Their temporary registers and captures are local to each activation.
-  Universal lazy streaming, recursive functor and remaining variadic forms, mutation enforcement and
-  complete frontend/parallel parity remain open. Compiled execution never silently calls a direct
-  evaluator.
+  Universal lazy streaming, decorated recursive static functors and value-lambda variadics, mutation
+  enforcement and complete frontend/parallel parity remain open. Compiled execution never silently
+  calls a direct evaluator.
 
 ______________________________________________________________________
 

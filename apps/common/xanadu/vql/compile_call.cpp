@@ -253,8 +253,6 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
           functorTemplates.push_back(std::move(*formal));
         }
       }
-    } else if (requiredFormal) {
-      unsupportedFunctorArgument = true;
     }
     ++functorIndex;
   }
@@ -274,12 +272,14 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
                                  : std::nullopt;
       if (formal)
         functorTemplates.push_back(std::move(*formal));
-      else
+      else if (!parameter.defaultValue ||
+               !std::holds_alternative<std::shared_ptr<PathLambda>>(
+                   parameter.defaultValue->kind))
         unsupportedFunctorArgument = true;
     }
-    if (!std::ranges::binary_search(functorTemplates, requiredIndex, {},
-                                    &ClosedFunctorFormalKey::formalIndex))
-      unsupportedFunctorArgument = true;
+    // A formal used as a path step can receive either a closed static path
+    // template or an ordinary runtime closure handle. Only a supplied path
+    // expression that looked static was required to normalize above.
   }
   std::ranges::sort(functorTemplates, {}, &ClosedFunctorFormalKey::formalIndex);
   bool hasInlineCapture = false;
@@ -395,23 +395,47 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
     }
     std::vector<CellRef> cells;
     if (parameter.isVariadic) {
+      std::vector<std::vector<CellRef>> restGroups;
       while (argumentIndex < values.size()) {
-        if (parameter.type) {
-          std::string diagnostic = definition.name + " parameter ";
-          diagnostic += std::to_string(parameterIndex + 1);
-          if (const auto *name = std::get_if<std::string>(&parameter.target))
-            diagnostic += " ($" + *name + ")";
-          if (diagnostic.size() > vm_.guardLimits().maxDiagnosticBytes)
-            throw std::invalid_argument("parameter guard diagnostic exceeds "
-                                        "the configured text budget");
-          const auto prepared =
-              prepareContractValidator(*parameter.type, values[argumentIndex]);
-          check(*parameter.type, values[argumentIndex], false, prepared,
-                diagnostic);
-        }
-        cells.insert(cells.end(), values[argumentIndex].begin(),
-                     values[argumentIndex].end());
+        restGroups.push_back(values[argumentIndex]);
         ++argumentIndex;
+      }
+      const bool omitted = restGroups.empty();
+      if (omitted && parameter.defaultValue)
+        restGroups.push_back(compileArgument(
+            *parameter.defaultValue,
+            ambientContext_.has_value() ? ambientContext_ : context));
+      std::string diagnostic =
+          definition.name + " parameter " + std::to_string(parameterIndex + 1);
+      if (const auto *name = std::get_if<std::string>(&parameter.target))
+        diagnostic += " ($" + *name + ")";
+      else if (std::holds_alternative<DestructurePattern>(parameter.target))
+        diagnostic += "destructure";
+      else
+        diagnostic += "context";
+      if ((parameter.type ||
+           std::holds_alternative<DestructurePattern>(parameter.target)) &&
+          diagnostic.size() > vm_.guardLimits().maxDiagnosticBytes)
+        throw std::invalid_argument(
+            "parameter guard diagnostic exceeds the configured text budget");
+      std::optional<TypeExpr> restShape;
+      if (const auto *pattern =
+              std::get_if<DestructurePattern>(&parameter.target))
+        restShape.emplace(TypeExpr{
+            .unionType =
+                UnionType{.members = {PrimaryType{
+                              .kind = ShapeType{.pattern = *pattern}}}}});
+      for (const auto &group : restGroups) {
+        if (parameter.type) {
+          const auto prepared =
+              prepareContractValidator(*parameter.type, group);
+          check(*parameter.type, group, false, prepared, diagnostic);
+        }
+        if (restShape) {
+          const auto prepared = prepareContractValidator(*restShape, group);
+          check(*restShape, group, false, prepared, diagnostic);
+        }
+        cells.insert(cells.end(), group.begin(), group.end());
       }
     } else {
       if (argumentIndex < values.size())
@@ -456,6 +480,10 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
         std::holds_alternative<DestructurePattern>(parameter.target)) {
       if (destructureType && destructurePrepared)
         check(*destructureType, cells, true, *destructurePrepared, diagnostic);
+    } else if (parameter.isVariadic &&
+               std::holds_alternative<DestructurePattern>(parameter.target)) {
+      // Rest shape checks are per original argument group and publish no
+      // captures into the callee's lexical scope.
     } else if (const auto *name = std::get_if<std::string>(&parameter.target)) {
       bind(*name, std::move(cells));
     } else {
@@ -847,14 +875,19 @@ std::vector<CellRef> VQLCompiler::compileReusableFrameCall(
       definition.params.size() - static_cast<std::size_t>(hasVariadicRest);
   const std::size_t suppliedActualCount =
       arguments.size() + static_cast<std::size_t>(injectContext);
+  const auto *restPattern =
+      hasVariadicRest
+          ? std::get_if<DestructurePattern>(&definition.params.back().target)
+          : nullptr;
+  const bool groupedRest = typedRest || restPattern != nullptr;
   const std::size_t restGroupCount =
-      typedRest && suppliedActualCount > fixedParameterCount
+      groupedRest && suppliedActualCount > fixedParameterCount
           ? suppliedActualCount - fixedParameterCount
           : 0;
   const VQLCompiler::FrameDefinitionKey key{
       .name = definition.name,
       .restGroupCount =
-          typedRest ? std::optional{restGroupCount} : std::nullopt,
+          groupedRest ? std::optional{restGroupCount} : std::nullopt,
       .functorTemplates = std::move(functorTemplates)};
 
   chargeClosedFunctorTemplateWork(
@@ -871,7 +904,7 @@ std::vector<CellRef> VQLCompiler::compileReusableFrameCall(
             return parameter.defaultValue != nullptr;
           }));
   const std::size_t inputParameterCount =
-      typedRest ? fixedParameterCount : definition.params.size();
+      groupedRest ? fixedParameterCount : definition.params.size();
   std::size_t locals                      = 2;
   std::size_t argumentPortCount           = 1;
   const std::size_t descriptorRecordLimit = limits.maxDescriptorRecords;
@@ -879,13 +912,13 @@ std::vector<CellRef> VQLCompiler::compileReusableFrameCall(
       !addFrameCount(locals, definition.params.size(),
                      limits.maxLocalsPerFrame) ||
       !addFrameCount(locals, defaultCount, limits.maxLocalsPerFrame) ||
-      !addFrameCount(locals, typedRest ? restGroupCount : 0,
+      !addFrameCount(locals, groupedRest ? restGroupCount : 0,
                      limits.maxLocalsPerFrame) ||
       !addFrameCount(argumentPortCount, captureCount, descriptorRecordLimit) ||
       !addFrameCount(argumentPortCount, inputParameterCount,
                      descriptorRecordLimit) ||
       !addFrameCount(argumentPortCount, defaultCount, descriptorRecordLimit) ||
-      !addFrameCount(argumentPortCount, typedRest ? restGroupCount : 0,
+      !addFrameCount(argumentPortCount, groupedRest ? restGroupCount : 0,
                      descriptorRecordLimit) ||
       !frameDescriptorCountsFit(limits, locals, argumentPortCount, 1))
     throw std::invalid_argument(
@@ -959,7 +992,7 @@ std::vector<CellRef> VQLCompiler::compileReusableFrameCall(
 
   std::vector<std::vector<CellRef>> typedRestGroups;
   if (hasVariadicRest) {
-    if (typedRest) {
+    if (groupedRest) {
       for (std::size_t index = fixedParameterCount; index < actuals.size();
            ++index)
         typedRestGroups.push_back(std::move(actuals[index]));
@@ -989,6 +1022,14 @@ std::vector<CellRef> VQLCompiler::compileReusableFrameCall(
         conditional != frameConditionalRequiredDefaultCaptureBindings_.end())
       requiredNames.insert(requiredNames.end(), conditional->second.begin(),
                            conditional->second.end());
+  }
+  if (hasVariadicRest && suppliedActualCount <= fixedParameterCount) {
+    if (const auto omitted =
+            frameOmittedRestRequiredDefaultCaptureBindings_.find(
+                definition.name);
+        omitted != frameOmittedRestRequiredDefaultCaptureBindings_.end())
+      requiredNames.insert(requiredNames.end(), omitted->second.begin(),
+                           omitted->second.end());
   }
   std::ranges::sort(requiredNames);
   requiredNames.erase(std::unique(requiredNames.begin(), requiredNames.end()),
@@ -1044,10 +1085,16 @@ std::vector<CellRef> VQLCompiler::compileReusableFrameCall(
     const auto &actual   = hasActual ? actuals[index] : empty;
     argumentStreams.push_back(normalizeFrameStream(actual));
     presenceFlags.push_back(
-        definition.params[index].defaultValue
+        !definition.params[index].isVariadic &&
+                definition.params[index].defaultValue
             ? std::optional{emitConstant(CellValue(present))}
             : std::nullopt);
   }
+  const std::optional<CellRef> restPresence =
+      hasVariadicRest && definition.params.back().defaultValue
+          ? std::optional{emitConstant(
+                CellValue(suppliedActualCount > fixedParameterCount))}
+          : std::nullopt;
   std::vector<CellRef> typedRestStreams;
   typedRestStreams.reserve(typedRestGroups.size());
   for (const auto &group : typedRestGroups)
@@ -1066,6 +1113,7 @@ std::vector<CellRef> VQLCompiler::compileReusableFrameCall(
     emitInput(invoke, argumentStreams[index]);
     if (presenceFlags[index]) emitInput(invoke, *presenceFlags[index]);
   }
+  if (restPresence) emitInput(invoke, *restPresence);
   for (const CellRef groupStream : typedRestStreams)
     emitInput(invoke, groupStream);
   emitOutput(invoke, resultStream);
@@ -1123,14 +1171,14 @@ void VQLCompiler::compileFrameDefinition(const DefDeclaration &definition,
   compilingFrameDefinitionName_ = definition.name;
   activeCalls_.push_back(definition.name);
 
-  const bool typedRest             = key.restGroupCount.has_value();
+  const bool groupedRest           = key.restGroupCount.has_value();
   const std::size_t restGroupCount = key.restGroupCount.value_or(0);
   const std::size_t fixedParameterCount =
       definition.params.size() -
       static_cast<std::size_t>(!definition.params.empty() &&
                                definition.params.back().isVariadic);
   const std::size_t inputParameterCount =
-      typedRest ? fixedParameterCount : definition.params.size();
+      groupedRest ? fixedParameterCount : definition.params.size();
   const std::size_t captureCount = [&] {
     const auto captures = frameFreeCaptureNames_.find(definition.name);
     return captures == frameFreeCaptureNames_.end() ? std::size_t{0}
@@ -1148,7 +1196,7 @@ void VQLCompiler::compileFrameDefinition(const DefDeclaration &definition,
       !addFrameCount(localCount, definition.params.size(),
                      limits.maxLocalsPerFrame) ||
       !addFrameCount(localCount, defaultCount, limits.maxLocalsPerFrame) ||
-      !addFrameCount(localCount, typedRest ? restGroupCount : 0,
+      !addFrameCount(localCount, groupedRest ? restGroupCount : 0,
                      limits.maxLocalsPerFrame) ||
       !addFrameCount(argumentPortCount, captureCount,
                      limits.maxDescriptorRecords) ||
@@ -1156,7 +1204,7 @@ void VQLCompiler::compileFrameDefinition(const DefDeclaration &definition,
                      limits.maxDescriptorRecords) ||
       !addFrameCount(argumentPortCount, defaultCount,
                      limits.maxDescriptorRecords) ||
-      !addFrameCount(argumentPortCount, typedRest ? restGroupCount : 0,
+      !addFrameCount(argumentPortCount, groupedRest ? restGroupCount : 0,
                      limits.maxDescriptorRecords) ||
       !frameDescriptorCountsFit(limits, localCount, argumentPortCount, 1))
     throw std::invalid_argument(
@@ -1196,7 +1244,7 @@ void VQLCompiler::compileFrameDefinition(const DefDeclaration &definition,
     parameterSlots.push_back(slot);
     presenceSlots.push_back(std::nullopt);
     spec.locals.push_back(slot);
-    if (!(typedRest && index == definition.params.size() - 1))
+    if (!(groupedRest && index == definition.params.size() - 1))
       spec.argumentPorts.emplace_back(slot, FramePortKind::Stream);
     if (parameter.defaultValue) {
       const CellRef present = core_.arena().makeCell();
@@ -1333,35 +1381,73 @@ void VQLCompiler::compileFrameDefinition(const DefDeclaration &definition,
       varBindings_.erase(*name);
       continue;
     }
-    if (typedRest && index == definition.params.size() - 1) {
-      const auto *name = std::get_if<std::string>(&parameter.target);
-      if (!name || !parameter.type)
-        throw std::invalid_argument(
-            "typed variadic frame requires a named typed rest formal");
-      const std::string diagnostic = definition.name + " parameter " +
-                                     std::to_string(index + 1) + " ($" + *name +
-                                     ")";
-      if (diagnostic.size() > vm_.guardLimits().maxDiagnosticBytes)
+    if (groupedRest && index == definition.params.size() - 1) {
+      std::string diagnostic =
+          definition.name + " parameter " + std::to_string(index + 1);
+      if (const auto *name = std::get_if<std::string>(&parameter.target))
+        diagnostic += " ($" + *name + ")";
+      else if (std::holds_alternative<DestructurePattern>(parameter.target))
+        diagnostic += "destructure";
+      else
+        diagnostic += "context";
+      if ((parameter.type ||
+           std::holds_alternative<DestructurePattern>(parameter.target)) &&
+          diagnostic.size() > vm_.guardLimits().maxDiagnosticBytes)
         throw std::invalid_argument(
             "parameter guard diagnostic exceeds the configured text budget");
-
       const CellRef clearRest =
           emitOp(OpcodeKind::StreamClear, "#FRAME_TYPED_REST_CLEAR");
       emitOutput(clearRest, slot);
-      for (const CellRef group : restGroupSlots) {
-        const auto prepared = prepareContractValidator(
-            *parameter.type, std::span{&group, std::size_t{1}});
-        const CellRef matched = emitContractMatch(
-            *parameter.type, std::span{&group, std::size_t{1}}, false);
+      std::optional<TypeExpr> restShape;
+      if (const auto *pattern =
+              std::get_if<DestructurePattern>(&parameter.target))
+        restShape.emplace(TypeExpr{
+            .unionType =
+                UnionType{.members = {PrimaryType{
+                              .kind = ShapeType{.pattern = *pattern}}}}});
+      const auto emitRestMatch = [&](const TypeExpr &type,
+                                     const CellRef group) {
+        const auto prepared =
+            prepareContractValidator(type, std::span{&group, std::size_t{1}});
+        const CellRef matched =
+            emitContractMatch(type, std::span{&group, std::size_t{1}}, false);
         const CellRef branch =
             emitOp(OpcodeKind::BranchFalseCell, "#FRAME_REST_PARAM_FILTER");
         emitInput(branch, matched);
         emitInput(branch, returnOpcode);
         pushContractGuard(prepared, diagnostic, "#FRAME_REST_PARAM_GUARD");
+      };
+      for (const CellRef group : restGroupSlots) {
+        if (parameter.type) emitRestMatch(*parameter.type, group);
+        if (restShape) emitRestMatch(*restShape, group);
         emitAppendStream(slot, std::span{&group, std::size_t{1}});
       }
-      streamBindings_[*name] = {slot};
-      varBindings_[*name]    = slot;
+      if (parameter.defaultValue) {
+        const CellRef notPresent = core_.arena().makeCell();
+        const CellRef negate = emitOp(OpcodeKind::Not, "#FRAME_DEFAULT_TEST");
+        emitInput(negate, *presenceSlots[index]);
+        emitOutput(negate, notPresent);
+        const CellRef skip = mintOpcode(OpcodeKind::Nop, "#FRAME_DEFAULT_SKIP");
+        const CellRef branch =
+            emitOp(OpcodeKind::BranchFalseCell, "#FRAME_DEFAULT_MISSING");
+        emitInput(branch, notPresent);
+        emitInput(branch, skip);
+        const auto defaultCells =
+            compileArgument(*parameter.defaultValue, ambientContext_);
+        const CellRef defaultGroup = normalizeFrameStream(defaultCells);
+        if (parameter.type) emitRestMatch(*parameter.type, defaultGroup);
+        if (restShape) emitRestMatch(*restShape, defaultGroup);
+        emitAppendStream(slot, std::span{&defaultGroup, std::size_t{1}});
+        appendOpcode(skip);
+      }
+      if (const auto *name = std::get_if<std::string>(&parameter.target)) {
+        streamBindings_[*name] = {slot};
+        varBindings_[*name]    = slot;
+      } else if (std::holds_alternative<bool>(parameter.target)) {
+        streamBindings_["."] = {slot};
+        varBindings_["."]    = slot;
+        ambientContext_      = slot;
+      }
       continue;
     }
     if (parameter.defaultValue && !(functorTemplate != functorTemplates.end() &&
@@ -1546,14 +1632,20 @@ CellRef VQLCompiler::compileClosureLambda(const PathLambda &lambda) {
     const auto &parameters = callee->second.params;
     const bool hasVariadic =
         !parameters.empty() && parameters.back().isVariadic;
-    if (hasVariadic && parameters.back().type) {
+    if (hasVariadic) {
       const std::size_t fixedCount = parameters.size() - 1;
       const bool injectContext =
           site.mayInjectContext && parameters.size() > site.argumentCount;
       const std::size_t suppliedCount =
           site.argumentCount + static_cast<std::size_t>(injectContext);
-      if (suppliedCount > fixedCount)
+      const bool groupsRequireCaptureValidation =
+          parameters.back().type ||
+          std::holds_alternative<DestructurePattern>(parameters.back().target);
+      if (groupsRequireCaptureValidation && suppliedCount > fixedCount)
         addVisibleDependencies(frameConditionalRequiredDefaultCaptureBindings_,
+                               requiredDefaultNames);
+      if (parameters.back().defaultValue && suppliedCount <= fixedCount)
+        addVisibleDependencies(frameOmittedRestRequiredDefaultCaptureBindings_,
                                requiredDefaultNames);
     }
   }

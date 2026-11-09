@@ -343,6 +343,7 @@ CompilationResult VQLCompiler::compile(const QueryExpression &query,
   frameFunctorFormalIndices_.clear();
   frameRequiredDefaultCaptureBindings_.clear();
   frameConditionalRequiredDefaultCaptureBindings_.clear();
+  frameOmittedRestRequiredDefaultCaptureBindings_.clear();
   pendingFrameDefinitions_.clear();
   frameMutableSlots_.clear();
   compilingFrameDefinition_ = false;
@@ -488,6 +489,8 @@ std::optional<CellRef> VQLCompiler::compileQuery(const QueryExpression &query) {
       frameEligibility->requiredDefaultCaptureBindings;
   frameConditionalRequiredDefaultCaptureBindings_ =
       frameEligibility->conditionalRequiredDefaultCaptureBindings;
+  frameOmittedRestRequiredDefaultCaptureBindings_ =
+      frameEligibility->omittedRestRequiredDefaultCaptureBindings;
   try {
     for (const auto &definition : query.defs)
       validateFunctionSignature(definition);

@@ -345,13 +345,6 @@ void validateFunctionSignature(const DefDeclaration &definition) {
       if (index + 1 != definition.params.size())
         throw TypeContractError(definition.name +
                                 "() variadic parameter must be last");
-      if (!std::holds_alternative<std::string>(parameter.target))
-        throw TypeContractError(
-            definition.name + "() variadic parameters require a variable name");
-      if (parameter.defaultValue)
-        throw TypeContractError(
-            definition.name +
-            "() variadic parameter defaults are not supported");
     }
     if (parameter.type) ContractMatcher::validateType(*parameter.type);
     if (const auto *pattern =

@@ -2097,3 +2097,43 @@ Logs: `/tmp/vql-closure-signatures-build.log`, `/tmp/vql-closure-signatures-focu
 `/tmp/vql-closure-signatures-tests.log`, `/tmp/vql-closure-signatures-cli.log`,
 `/tmp/vql-closure-signatures-callables.log`, `/tmp/vql-closure-signatures-overlay.log`,
 `/tmp/vql-closure-signatures-format.log`.
+
+## Iteration 54: runtime higher-order frames and deferred rest signatures
+
+This combined iteration permits runtime closure handles in named function formals and body locals,
+and in value-lambda formals, locals and captured aliases. Application emits `ApplyClosure`; named
+forwarding and self/mutual recursion reuse native `InvokeFrame` graphs. Closed static path actuals
+retain separate template variants. Complex static paths retain finite inline graph lowering and
+explicit recursive refusals. Static predicate aliases still resolve in the callee/application scope;
+value-lambda aliases retain creation-time capture. A named call can be wrapped in a value lambda
+when a runtime handle is needed. Bare definition names are not function-reference syntax.
+
+Final named variadics now accept whole-rest defaults, context targets and destructuring. Zero
+original rest groups run the default once, after fixed-parameter checks; an explicitly empty group
+skips it. The default is one group. Each original group matches its type and then its destructuring
+shape before ordered concatenation. Rest matching publishes no per-element captures. Context rest
+formals bind the aggregate, including empty. Typed or destructured groups receive distinct Stream
+ports; a default-presence Cell port distinguishes omission. Descriptor/local preflight includes the
+extra ports. Omitted-rest dependency summaries propagate separately from positive-rest contract
+dependencies, including omitted fixed defaults and the existing UFCS injection rule.
+
+Full `make -j$(nproc)` passed, all 1,133 affected tests across 103 suites passed, and all 28 new
+tests passed. Cases include typed and local runtime handles, nested unary composition, defaults that
+produce handles, static/runtime variants, recursive forwarding, duplicate input, static predicate
+scope, whole-rest omission versus empty, ordered duplicate defaults, prior fixed bindings, context
+and destructuring isolation, filtering versus return promises, retry and fresh-VM export results.
+Host and mesh SOURCE routes preserve exact Int64 `9007199254740994`; the actual headless CLI
+produces the same result from combined runtime application and omitted fixed/rest defaults.
+
+Independent Luna architecture, senior and resource reviews found no stage blocker. The resource
+review noted the existing general native-frame Stream-copy cardinality gap as separate VM work;
+closure creation/application reference caps remain in place. There is no speedup or total CPU/heap
+claim. The broader callable audit retains seven failures (33 passes), and the route audit retains
+eight failures and one skip (132 passes). Whole-formal defaults and multiple/variadic value-lambda
+formals, decorated recursive static functors and remaining route/lifecycle gates keep §4.12
+incomplete. These results are not a full-suite pass.
+
+Logs: `/tmp/vql-callables-rest-build.log`, `/tmp/vql-callables-rest-focused.log`,
+`/tmp/vql-callables-rest-tests.log`, `/tmp/vql-callables-rest-cli.log`,
+`/tmp/vql-callables-rest-callables.log`, `/tmp/vql-callables-rest-overlay.log`,
+`/tmp/vql-callables-rest-format.log`.

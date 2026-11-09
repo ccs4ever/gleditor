@@ -986,3 +986,25 @@ typed curried closure across queries and returns exact `9007199254740994`. Whole
 multiple/variadic lambda formals, static functor captures and general higher-order reusable-body
 application remain unfinished. The broader audits retain seven callable and eight route failures
 plus one skip. This is not §4.12 completion or a full-suite pass, and no speedup is claimed.
+
+## Runtime callable frames and complete named rest targets
+
+Iteration 54 combines runtime closure application in reusable named/value-lambda bodies with final
+named rest defaults, context and destructuring. Ordinary runtime handles and closed static path
+templates use distinct native graph variants. Forwarded handles support self/mutual recursion;
+complex static templates retain finite inline graphs and explicit recursive refusals. Static
+predicate aliases retain callee/application scope, while value lambdas capture at creation.
+
+Rest defaults run once only when no original rest group was supplied, including when earlier fixed
+defaults were omitted. Explicit empty arguments skip the default. Type then shape matching occurs
+per group before concatenation; rest captures do not escape and context targets bind even empty
+aggregates. Separate presence ports and zero/positive dependency summaries preserve lazy scope and
+forwarding. See [iteration 54](projects/vortex-vm-only-iterations.md).
+
+Full build, 1,133 affected tests across 103 suites and all 28 new cases passed. Fresh-VM exports,
+recursive forwarding, host/mesh SOURCE and the real headless CLI are covered; combined runtime
+application and rest defaults preserve exact Int64 `9007199254740994`. Independent Luna
+architecture, senior and resource reviews found no stage blocker. The broader audits retain seven
+callable and eight route failures plus one skip. Value-lambda whole-formal
+defaults/multiple/variadic formals, decorated recursive static functors, stream lifecycle and final
+route/measurement gates remain. §4.12 remains incomplete; no full-suite or speedup claim is made.
