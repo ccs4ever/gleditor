@@ -1,6 +1,5 @@
 #include "common/xanadu/vql/frame_eligibility.hpp"
 #include "common/xanadu/vql/closed_functor_syntax.hpp"
-#include "common/xanadu/vql/closure_lambda_syntax.hpp"
 #include "common/xanadu/vql/projection_syntax.hpp"
 
 #include <algorithm>
@@ -258,6 +257,25 @@ public:
     return std::move(callSites_);
   }
 
+  [[nodiscard]] FrameClosureScope scanClosure(const PathLambda &lambda) {
+    tick(0);
+    pathLambda(lambda, Scope{}, 1);
+    FrameClosureScope result;
+    result.refusalReason                  = refusal_;
+    result.freeCaptureNames               = freeCaptureNames_;
+    result.requiredDefaultCaptureBindings = requiredDefaultCaptureBindings_;
+    result.conditionalRequiredDefaultCaptureBindings =
+        conditionalRequiredDefaultCaptureBindings_;
+    auto callSites = std::move(callSites_);
+    result.callSites.reserve(callSites.size());
+    for (auto &site : callSites)
+      result.callSites.push_back({.callee        = std::move(site.callee),
+                                  .visibleNames  = std::move(site.visibleNames),
+                                  .argumentCount = site.argumentCount,
+                                  .mayInjectContext = site.mayInjectContext});
+    return result;
+  }
+
   void validateQueryNodes(const QueryExpression &query) {
     Scope openScope;
     scriptBody(query.body, openScope, 0);
@@ -427,12 +445,6 @@ private:
             pointer(
                 part, depth + 1,
                 [&](const PathLambda &lambda, const std::size_t childDepth) {
-                  const auto syntax =
-                      analyzeClosureLambdaSyntax(lambda, budget_.limits);
-                  if (!syntax) throw ScanFailure(syntax.error().message);
-                  if (!syntax->has_value())
-                    refuse("path lambda value is outside the supported closure "
-                           "syntax");
                   pathLambda(lambda, scope, childDepth);
                 });
           } else if constexpr (std::same_as<Part,
@@ -1725,6 +1737,20 @@ analyzeFrameEligibility(const QueryExpression &query,
     return std::unexpected(FrameEligibilityError{error.what()});
   }
   return result;
+}
+
+std::expected<FrameClosureScope, FrameEligibilityError>
+analyzeFrameClosureScope(const PathLambda &lambda,
+                         const FrameEligibilityLimits limits) {
+  try {
+    TraversalBudget budget(limits);
+    const DefinitionIndex definitions;
+    const ClosedDefaultIndex closedDefaults;
+    return DefinitionScanner(budget, definitions, closedDefaults)
+        .scanClosure(lambda);
+  } catch (const std::exception &error) {
+    return std::unexpected(FrameEligibilityError{error.what()});
+  }
 }
 
 } // namespace xanadu::vql

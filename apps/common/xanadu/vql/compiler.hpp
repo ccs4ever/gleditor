@@ -52,6 +52,9 @@ struct CompilationOptions {
     std::size_t maxGeneratedOpcodes{100'000};
     std::size_t maxFrameDescriptorRecords{100'000};
     std::size_t maxClosedFunctorTemplateWork{1'000'000};
+    // Post-scope-analysis dependency expansion: callsites and callee/capture
+    // name bytes. Initial AST/scope walks have their own traversal limits.
+    std::size_t maxClosureCaptureWork{1'000'000};
   };
 
   bool targetLibrary{false};            ///< Emit library store instead of exec
@@ -371,6 +374,7 @@ private:
   std::vector<std::string> activeCalls_;
   std::size_t maxNamedFrameVariants_{};
   std::size_t remainingClosedFunctorTemplateWork_{};
+  std::size_t remainingClosureCaptureWork_{};
   std::size_t nextFunctorVariantOrdinal_{};
   std::size_t nextClosureLambdaId_{};
   std::size_t remainingGeneratedOpcodes_{};

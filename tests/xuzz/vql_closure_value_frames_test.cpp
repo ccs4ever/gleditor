@@ -257,13 +257,11 @@ TEST(VQLClosureValueFramesTest, CapturedNumericKindsAndExactBitsStayDistinct) {
 TEST(VQLClosureValueFramesTest,
      UnsupportedSignaturesAndLimitsRollbackAndRetry) {
   for (const auto source :
-       {R"(let $f := \() $outside; return $f)",
-        R"(let $f := \(.) .; return $f)",
-        R"(let $f := \($x: Int) $x; return $f)",
-        R"(let $f := \($x := 0) $x; return $f)",
-        R"(let $f := \($x) ##; return $f)", R"(let $f := \($x) .; return $f)",
-        R"(let $f := \($x) string($x); return $f)",
-        R"(let $f := \($x) \($y) $y; return $f)"}) {
+       {R"(let $f := \($x := 0) $x; return $f)",
+        R"(let $f := \($x, $y) $x; return $f)",
+        R"(let $f := \(...$xs) $xs; return $f)",
+        R"(let $f := \($x) %"fresh"; return $f)",
+        R"(let $route := /+d.next; let $f := \($x) $route; return $f)"}) {
     Harness h;
     const auto before = h.arena.cellCount();
     EXPECT_FALSE(h.compile(source).success) << source;

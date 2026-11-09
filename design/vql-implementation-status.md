@@ -968,3 +968,21 @@ exact scalar bits and actual cross-query REPL output are covered. The real REPL 
 `9007199254740993` from a recursively created closure on its next query. Broader closures, dynamic
 functors, deferred variadics and remaining route/lifecycle work keep §4.12 incomplete. This is not a
 full-suite pass; session AST/map copies establish no performance claim.
+
+## Typed structural closures and nested currying
+
+Iteration 53 combines zero/unary named/dot/destructured closure formals, compatible scalar/path/call
+and block bodies, nested creation and staged currying. Existing native matching and guards retain
+field-default scope, parameter filtering and named return-promise failures. Scoped helper summaries
+preserve creation-time capture without overriding formals or body locals. Closure syntax now uses
+the shared bounded scope walker; recursive type validation follows its cycle/depth checks. A
+separate quota bounds post-analysis capture dependency expansion, not all compilation work. See
+[iteration 53](projects/vortex-vm-only-iterations.md).
+
+Full build, 1,105 affected tests across 101 suites and 51 focused tests passed. Twenty-one new cases
+include structural defaults, alias timing, exact Int64/Double, nested frame lifetime, unknown type
+names, quota rollback/retry and fresh-VM export plus host/mesh SOURCE. The actual REPL retains a
+typed curried closure across queries and returns exact `9007199254740994`. Whole-formal defaults,
+multiple/variadic lambda formals, static functor captures and general higher-order reusable-body
+application remain unfinished. The broader audits retain seven callable and eight route failures
+plus one skip. This is not §4.12 completion or a full-suite pass, and no speedup is claimed.

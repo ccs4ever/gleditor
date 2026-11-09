@@ -97,6 +97,32 @@ is distinct from capturing an ambient cursor. Existing inline path-step lambda b
 Further forms, foreign closure handles, general closure call syntax and route/lifecycle parity still
 need explicit gates. Neither stage completes VQL §4.12.
 
+## Broader value closures and currying
+
+Iteration 53 reuses the frame eligibility walker for zero/unary closure scope analysis. Named,
+explicit-dot and destructured formals use the existing contract matching and guards. Compatible
+scalar/path/named-call and block bodies support nested closure creation and staged currying. The
+candidate is the applied Stream source for both hidden context and the optional formal; free capture
+ports are separate. This broadens the first slice without changing the Vortex graph ABI.
+
+The shared scope walker borrows the AST, detects active-pointer cycles and enforces node/depth
+limits before recursive signature validation. Each named-call summary retains the lexical names
+visible at that call. Compiler expansion subtracts those names from helper free/default dependencies
+before deciding which aliases the closure must capture. Required default aliases are checked at
+creation; an explicitly empty binding remains distinct from an undefined alias. Structural field
+defaults continue to see the pre-match environment.
+
+`maxClosureCaptureWork` limits post-analysis dependency expansion, charging callsites and
+callee/capture-name bytes before lookup/insertion. Initial AST/scope walks and repeated nested
+analysis are outside this counter and retain their traversal limits. This is not a total compile
+CPU/heap bound. Whole-formal defaults, multiple/variadic lambda formals, captured static functor
+values and broader dynamic application remain explicit refusals.
+
+Validation includes typed nested currying after AST destruction and Store reload, plus host and mesh
+SOURCE execution. A real REPL creates a typed increment closure in one query and applies it in
+another, returning exact `9007199254740994`. Full build, 1,105 affected tests across 101 suites and
+51 focused tests across four suites passed. These stages still do not complete §4.12.
+
 ## Primary-source grounding
 
 The three-persona review used Nelson's accounts as design constraints, not a prescribed closure ABI.

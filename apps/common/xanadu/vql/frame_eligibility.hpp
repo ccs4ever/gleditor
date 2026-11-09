@@ -7,6 +7,7 @@
 
 #include <cstddef>
 #include <expected>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -42,6 +43,25 @@ struct FrameEligibilityError {
   std::string message;
 };
 
+/// One named call encountered while analyzing a closure body. The visible
+/// aliases are the lexical bindings at that call, so helper captures already
+/// bound by the closure do not become captures of the closure itself.
+struct ClosureCallSite {
+  std::string callee;
+  std::unordered_set<std::string> visibleNames;
+  std::size_t argumentCount{0};
+  bool mayInjectContext{false};
+};
+
+/// Scope data collected by the same bounded walker used for reusable frames.
+struct FrameClosureScope {
+  std::unordered_set<std::string> freeCaptureNames;
+  std::unordered_set<std::string> requiredDefaultCaptureBindings;
+  std::unordered_set<std::string> conditionalRequiredDefaultCaptureBindings;
+  std::vector<ClosureCallSite> callSites;
+  std::optional<std::string> refusalReason;
+};
+
 /// Classify definitions safe to lower to reusable activation-frame graphs.
 /// Structural contract captures enter lexical scope only after their complete
 /// match; aliases used by defaults must already exist before that match.
@@ -52,6 +72,13 @@ struct FrameEligibilityError {
 [[nodiscard]] std::expected<FrameEligibility, FrameEligibilityError>
 analyzeFrameEligibility(const QueryExpression &query,
                         FrameEligibilityLimits limits = {});
+
+/// Analyze a closure's formal scope and body with the frame eligibility
+/// walker. Unsupported language forms are returned as a refusal reason;
+/// malformed ASTs and exhausted budgets remain hard errors.
+[[nodiscard]] std::expected<FrameClosureScope, FrameEligibilityError>
+analyzeFrameClosureScope(const PathLambda &lambda,
+                         FrameEligibilityLimits limits = {});
 
 } // namespace xanadu::vql
 

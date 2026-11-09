@@ -317,6 +317,7 @@ CompilationResult VQLCompiler::compile(const QueryExpression &query,
   maxNamedFrameVariants_      = options.limits.maxNamedFrameVariants;
   remainingClosedFunctorTemplateWork_ =
       options.limits.maxClosedFunctorTemplateWork;
+  remainingClosureCaptureWork_     = options.limits.maxClosureCaptureWork;
   nextFunctorVariantOrdinal_       = 0;
   nextClosureLambdaId_             = 0;
   remainingGeneratedOpcodes_       = options.limits.maxGeneratedOpcodes;

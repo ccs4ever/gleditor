@@ -1470,20 +1470,131 @@ void VQLCompiler::compileFrameDefinition(const DefDeclaration &definition,
 CellRef VQLCompiler::compileClosureLambda(const PathLambda &lambda) {
   const auto analyzed = analyzeClosureLambdaSyntax(lambda);
   if (!analyzed) throw std::invalid_argument(analyzed.error().message);
+  // The bounded walk must precede recursive type validation, including when
+  // an unsupported type made scope analysis decline this closure form.
+  DefDeclaration definition{
+      .name = "lambda", .params = lambda.params, .body = lambda.body};
+  validateFunctionSignature(definition);
   if (!*analyzed)
     throw std::invalid_argument(
         "VQL lambda value is outside the supported closure syntax");
   const auto &syntax = **analyzed;
 
   const auto closureLimits = vm_.closureLimits();
-  if (closureLimits.maxCaptureStreams == 0 ||
-      syntax.freeCaptureNames.size() >= closureLimits.maxCaptureStreams ||
+  if (syntax.freeCaptureNames.size() > closureLimits.maxCaptureStreams ||
       closureLimits.maxAppliedStreams == 0)
     throw std::invalid_argument(
         "VQL lambda exceeds configured closure stream limits");
+  const auto chargeCaptureWork = [this](const std::size_t amount) {
+    if (amount > remainingClosureCaptureWork_)
+      throw std::invalid_argument(
+          "VQL lambda capture metadata work budget exhausted");
+    remainingClosureCaptureWork_ -= amount;
+  };
+  std::unordered_set<std::string> captureNames;
+  captureNames.reserve(syntax.freeCaptureNames.size());
+  for (const auto &capture : syntax.freeCaptureNames) {
+    chargeCaptureWork(std::max(capture.size(), std::size_t{1}));
+    captureNames.insert(capture);
+  }
+  std::unordered_set<std::string> requiredDefaultNames;
+  std::unordered_set<std::string> conditionalDefaultNames;
+  const auto addCapture = [&](const std::string &alias) {
+    if (captureNames.contains(alias)) return;
+    if (captureNames.size() >= closureLimits.maxCaptureStreams)
+      throw std::invalid_argument(
+          "VQL lambda exceeds configured closure stream limits");
+    captureNames.insert(alias);
+  };
+  for (const auto &alias : syntax.requiredDefaultCaptureBindings) {
+    chargeCaptureWork(std::max(alias.size(), std::size_t{1}));
+    addCapture(alias);
+    requiredDefaultNames.insert(alias);
+  }
+  for (const auto &alias : syntax.conditionalRequiredDefaultCaptureBindings) {
+    chargeCaptureWork(std::max(alias.size(), std::size_t{1}));
+    addCapture(alias);
+    conditionalDefaultNames.insert(alias);
+  }
+  for (const auto &site : syntax.callSites) {
+    chargeCaptureWork(1);
+    chargeCaptureWork(site.callee.size());
+    const auto callee = definitions_.find(site.callee);
+    if (callee == definitions_.end()) continue;
 
+    const auto addVisibleDependencies = [&](const auto &metadata,
+                                            auto &destination) {
+      const auto found = metadata.find(site.callee);
+      if (found == metadata.end()) return;
+      for (const auto &alias : found->second) {
+        chargeCaptureWork(std::max(alias.size(), std::size_t{1}));
+        if (site.visibleNames.contains(alias)) continue;
+        addCapture(alias);
+        destination.insert(alias);
+      }
+    };
+    if (const auto free = frameFreeCaptureNames_.find(site.callee);
+        free != frameFreeCaptureNames_.end()) {
+      for (const auto &alias : free->second) {
+        chargeCaptureWork(std::max(alias.size(), std::size_t{1}));
+        if (!site.visibleNames.contains(alias)) addCapture(alias);
+      }
+    }
+    addVisibleDependencies(frameRequiredDefaultCaptureBindings_,
+                           requiredDefaultNames);
+
+    const auto &parameters = callee->second.params;
+    const bool hasVariadic =
+        !parameters.empty() && parameters.back().isVariadic;
+    if (hasVariadic && parameters.back().type) {
+      const std::size_t fixedCount = parameters.size() - 1;
+      const bool injectContext =
+          site.mayInjectContext && parameters.size() > site.argumentCount;
+      const std::size_t suppliedCount =
+          site.argumentCount + static_cast<std::size_t>(injectContext);
+      if (suppliedCount > fixedCount)
+        addVisibleDependencies(frameConditionalRequiredDefaultCaptureBindings_,
+                               requiredDefaultNames);
+    }
+  }
+
+  std::vector<std::string> captures(captureNames.begin(), captureNames.end());
+  std::ranges::sort(captures);
+  std::vector<std::string> requiredDefaults(requiredDefaultNames.begin(),
+                                            requiredDefaultNames.end());
+  std::ranges::sort(requiredDefaults);
+  std::vector<std::string> conditionalDefaults(conditionalDefaultNames.begin(),
+                                               conditionalDefaultNames.end());
+  std::ranges::sort(conditionalDefaults);
+
+  if (captures.size() > closureLimits.maxCaptureStreams)
+    throw std::invalid_argument(
+        "VQL lambda exceeds configured closure stream limits");
   if (frameDefinitions_.size() >= maxNamedFrameVariants_)
     throw std::invalid_argument("compiled VQL frame variant budget exhausted");
+
+  const auto frameLimits         = vm_.frameLimits();
+  const std::size_t defaultCount = static_cast<std::size_t>(
+      std::ranges::count_if(lambda.params, [](const LambdaParam &param) {
+        return param.defaultValue != nullptr;
+      }));
+  std::size_t localCount        = 2;
+  std::size_t argumentPortCount = 1;
+  if (!addFrameCount(localCount, captures.size(),
+                     frameLimits.maxLocalsPerFrame) ||
+      !addFrameCount(localCount, lambda.params.size(),
+                     frameLimits.maxLocalsPerFrame) ||
+      !addFrameCount(localCount, defaultCount, frameLimits.maxLocalsPerFrame) ||
+      !addFrameCount(argumentPortCount, captures.size(),
+                     frameLimits.maxDescriptorRecords) ||
+      !addFrameCount(argumentPortCount, lambda.params.size(),
+                     frameLimits.maxDescriptorRecords) ||
+      !addFrameCount(argumentPortCount, defaultCount,
+                     frameLimits.maxDescriptorRecords) ||
+      !frameDescriptorCountsFit(frameLimits, localCount, argumentPortCount, 1))
+    throw std::invalid_argument("native closure frame exceeds configured local "
+                                "or descriptor-port limits");
+
   const auto maxSize = std::numeric_limits<std::size_t>::max();
   if (definitions_.size() > maxSize - frameDefinitions_.size() ||
       definitions_.size() + frameDefinitions_.size() == maxSize)
@@ -1510,18 +1621,49 @@ CellRef VQLCompiler::compileClosureLambda(const PathLambda &lambda) {
     throw std::invalid_argument(
         "compiled VQL lambda name search exhausted its bounded candidates");
   const std::string &name = *syntheticName;
-  for (const auto &capture : syntax.freeCaptureNames)
+
+  for (const auto &capture : captures)
     if (functorBindings_.contains(capture))
       throw std::invalid_argument(
           "VQL lambda value cannot capture path functor $" + capture);
+  std::vector<std::string> requiredAliases = requiredDefaults;
+  requiredAliases.insert(requiredAliases.end(), conditionalDefaults.begin(),
+                         conditionalDefaults.end());
+  std::ranges::sort(requiredAliases);
+  requiredAliases.erase(
+      std::unique(requiredAliases.begin(), requiredAliases.end()),
+      requiredAliases.end());
+  for (const auto &required : requiredAliases) {
+    if (functorBindings_.contains(required))
+      throw std::invalid_argument("contract default $" + required +
+                                  " cannot capture a path functor");
+    if (const auto stream = streamBindings_.find(required);
+        stream != streamBindings_.end()) {
+      if (stream->second.size() > 1)
+        throw std::invalid_argument("contract default $" + required +
+                                    " must resolve to at most one cell");
+      if (!stream->second.empty() && core_.hasPipeline(stream->second.front()))
+        throw std::invalid_argument(
+            "contract default aliases cannot depend on parameter pipelines");
+      continue;
+    }
+    if (const auto scalar = varBindings_.find(required);
+        scalar != varBindings_.end() && scalar->second) {
+      if (core_.hasPipeline(*scalar->second))
+        throw std::invalid_argument(
+            "contract default aliases cannot depend on parameter pipelines");
+      continue;
+    }
+    throw std::invalid_argument("contract default $" + required +
+                                " has no prior lexical binding");
+  }
 
-  DefDeclaration definition{
-      .name   = name,
-      .params = {LambdaParam{.target = syntax.parameterName}},
-      .body   = lambda.body,
-  };
-  if (!frameFreeCaptureNames_.emplace(name, syntax.freeCaptureNames).second)
+  definition.name = name;
+  if (!frameFreeCaptureNames_.emplace(name, captures).second)
     throw std::invalid_argument("compiled VQL lambda name is already in use");
+  frameRequiredDefaultCaptureBindings_.emplace(name, requiredDefaults);
+  frameConditionalRequiredDefaultCaptureBindings_.emplace(name,
+                                                          conditionalDefaults);
 
   const FrameDefinitionKey key{.name = name};
   const auto reserved = vm_.reserveFrameDescriptor();
@@ -1533,9 +1675,8 @@ CellRef VQLCompiler::compileClosureLambda(const PathLambda &lambda) {
   compileFrameDefinition(definition, key);
 
   std::vector<CellRef> captureSources;
-  captureSources.reserve(syntax.freeCaptureNames.size() + 1);
-  captureSources.push_back(normalizeFrameStream(std::span<const CellRef>{}));
-  for (const auto &capture : syntax.freeCaptureNames) {
+  captureSources.reserve(captures.size());
+  for (const auto &capture : captures) {
     std::vector<CellRef> cells;
     if (const auto found = streamBindings_.find(capture);
         found != streamBindings_.end()) {
@@ -1548,15 +1689,16 @@ CellRef VQLCompiler::compileClosureLambda(const PathLambda &lambda) {
   }
 
   std::vector<zigzag::vortex::ClosureFrameInput> frameInputs;
-  frameInputs.reserve(syntax.freeCaptureNames.size() + 2);
-  frameInputs.push_back(
-      {.source = zigzag::vortex::ClosureInputSource::Capture, .index = 0});
-  for (std::size_t index = 0; index < syntax.freeCaptureNames.size(); ++index)
-    frameInputs.push_back(
-        {.source = zigzag::vortex::ClosureInputSource::Capture,
-         .index  = index + 1});
+  frameInputs.reserve(captures.size() + lambda.params.size() + 1);
   frameInputs.push_back(
       {.source = zigzag::vortex::ClosureInputSource::Applied, .index = 0});
+  for (std::size_t index = 0; index < captures.size(); ++index)
+    frameInputs.push_back(
+        {.source = zigzag::vortex::ClosureInputSource::Capture,
+         .index  = index});
+  if (!lambda.params.empty())
+    frameInputs.push_back(
+        {.source = zigzag::vortex::ClosureInputSource::Applied, .index = 0});
 
   const auto closureDescriptor =
       vm_.makeClosureDescriptor({.frameDescriptor    = *reserved,

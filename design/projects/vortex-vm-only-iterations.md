@@ -2057,3 +2057,43 @@ Logs: `/tmp/vql-persistent-bindings-build.log`, `/tmp/vql-persistent-bindings-fo
 `/tmp/vql-persistent-bindings-tests.log`, `/tmp/vql-persistent-bindings-cli.log`,
 `/tmp/vql-persistent-bindings-callables.log`, `/tmp/vql-persistent-bindings-overlay.log`,
 `/tmp/vql-persistent-bindings-format.log`.
+
+## Iteration 53: typed structural closure bodies and nested currying
+
+This larger iteration combines zero/unary closure formals, typed and destructured contracts,
+compatible scalar/path/named-call/block bodies, nested creation and staged currying. The applied
+candidate supplies hidden context and the optional formal through separate frame ports. Free alias
+captures retain creation-time membership, while referenced contents stay shared. Contracts still
+filter parameter mismatches; named-helper return promises remain errors. Structural field defaults
+keep their pre-match scope and existing graph thunks/guards.
+
+Closure analysis now delegates to the actual bounded frame scope walker, deleting the duplicate
+syntax walker. It borrows AST nodes and validates cycles/depth before recursive type validation.
+Scoped callsite summaries let closure capture expansion include transitive named-helper free/default
+aliases without capturing names bound by a lambda formal or prior body-local let. Typed-rest helper
+default requirements follow the existing actual-count and UFCS context-injection rule. Missing
+required aliases refuse at creation; bound-empty aliases remain defined. A separate configurable
+`maxClosureCaptureWork` budget counts post-analysis expansion callsites and callee/capture-name
+bytes. The initial scope walk, repeated nested scans and total compile CPU/heap are outside that
+counter. Distinct capture limits apply before helper alias insertion.
+
+Full `make -j$(nproc)` passed, all 1,105 affected tests across 101 suites passed, and all 51 focused
+tests across four suites passed. Twenty-one new cases cover candidate context/order/duplicates,
+typed/union/optional/destructure formals, Stream element-capture isolation, a field default that
+retains the original outer alias despite an earlier field capture and later rebinding, undefined
+versus empty aliases, exact Int64/Double bodies, helper scope/timing, block locals, nested
+shadowing, curried frame-owned captures, promises/rollback, work-budget refusal/retry and named
+unknown types. The new typed nested graph executes after AST/source-VM destruction and Store reload,
+and through host/mesh SOURCE routes. The real headless REPL creates a typed increment closure on one
+line and returns exact `9007199254740994` on its next line.
+
+Whole-formal defaults, multiple/variadic value-lambda formals, captured static functor values and
+general runtime application inside reusable bodies remain deferred. Existing inline path-step lambda
+defaults retain their wider behavior. The callable audit retains seven known failures (33 passes);
+the broader route audit retains eight failures and one skip (132 passes). These are not full-suite
+passes. No optimization or total CPU/heap claim is made, and §4.12 remains incomplete.
+
+Logs: `/tmp/vql-closure-signatures-build.log`, `/tmp/vql-closure-signatures-focused.log`,
+`/tmp/vql-closure-signatures-tests.log`, `/tmp/vql-closure-signatures-cli.log`,
+`/tmp/vql-closure-signatures-callables.log`, `/tmp/vql-closure-signatures-overlay.log`,
+`/tmp/vql-closure-signatures-format.log`.
