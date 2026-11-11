@@ -80,12 +80,15 @@ struct LocalCertificate {
         X509_gmtime_adj(X509_get_notAfter(certificate), 60) == nullptr ||
         X509_set_pubkey(certificate, key) != 1)
       throw std::runtime_error("local TLS certificate setup failed");
-    X509_NAME *name = X509_get_subject_name(certificate);
-    if (X509_NAME_add_entry_by_txt(
-            name, "CN", MBSTRING_ASC,
+    std::unique_ptr<X509_NAME, decltype(&X509_NAME_free)> name(X509_NAME_new(),
+                                                               &X509_NAME_free);
+    if (!name ||
+        X509_NAME_add_entry_by_txt(
+            name.get(), "CN", MBSTRING_ASC,
             reinterpret_cast<const unsigned char *>("127.0.0.1"), -1, -1,
             0) != 1 ||
-        X509_set_issuer_name(certificate, name) != 1)
+        X509_set_subject_name(certificate, name.get()) != 1 ||
+        X509_set_issuer_name(certificate, name.get()) != 1)
       throw std::runtime_error("local TLS certificate subject failed");
     X509V3_CTX extensionContext{};
     X509V3_set_ctx(&extensionContext, certificate, certificate, nullptr,
