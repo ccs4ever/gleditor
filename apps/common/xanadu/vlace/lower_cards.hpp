@@ -25,14 +25,19 @@
 
 namespace xanadu::vlace::lower {
 
-/// Where a failed pattern jumps. Pattern lowering emits straight-line tests;
-/// each test is a BranchFalseCell whose target is not yet known (the next
-/// alternative does not exist yet). The pattern pushes every such branch op
-/// onto `mismatch` and the caller (the `case` lowering, or a lambda's
-/// parameter prologue) patches them all to one place.
+/// How a pattern reports a mismatch. The caller (the `case` lowering, or a
+/// lambda's parameter prologue) mints `join` with ctx.mintLabel() BEFORE
+/// lowering the pattern. Every test the pattern emits is
+/// `ctx.branchIfFalse(test, site.join)`, and the pattern appends each branch op
+/// it emitted to `branches`. Nothing needs patching afterwards: the caller
+/// places `join` (ctx.placeLabel) at the start of whatever runs on a mismatch,
+/// once, after the matched path has jumped past it. Variables bind in the
+/// innermost scope of the context as the pattern is lowered; on a mismatch
+/// path they are unreachable, so a failed alternative leaves no binding.
 struct PatternSite {
   Operand scrutinee;
-  std::vector<zigzag::CellRef> mismatch;
+  zigzag::CellRef join;                  ///< where every mismatch lands
+  std::vector<zigzag::CellRef> branches; ///< the branch ops emitted so far
 };
 
 // =============================================================================
@@ -82,6 +87,15 @@ lowerLiteral(LowerContext &ctx, const ELiteral &e, SourceLocation loc);
 [[nodiscard]] Lowered<Operand> lowerBoolCtor(LowerContext &ctx, bool value,
                                              SourceLocation loc);
 
+/// Run @p block on the VM and return @p result, the register the block
+/// computed. Lower, run on the VM, map a failure with failureToEval: this is
+/// the one road for every host-side force, apply and read-back step
+/// (forceValueOnVm, renderValue, the L6 trampoline, runIoOnVm); none of them
+/// may evaluate through an AST walk. Failures come back as EvalError
+/// (BudgetExhausted for the budget texts).
+[[nodiscard]] Lowered<Operand> runBlock(LowerContext &ctx, Block block,
+                                        Operand result);
+
 /// Compiler::evaluate / evaluateProgram bodies: build a LowerContext, lower,
 /// assemble, run the VM, read the result back.
 [[nodiscard]] std::expected<ValuePtr, EvalError>
@@ -93,9 +107,10 @@ evaluateProgramOnVm(Compiler &compiler, const Program &prog);
 [[nodiscard]] std::expected<DriverResult, DriverError>
 driverEvaluate(const Program &prog, DriverResult partial);
 
-/// Read the cell back into a host Value. Classifies by the cell: scalars (L1),
-/// then kernel cells -- thunk or closure (L2), then data terms (L3); a cell no
-/// hook claims is refused. These are the per-kind hooks; nullopt = not mine.
+/// Read the cell back into a host Value. Classifies by the cell: kernel cells
+/// (thunk or closure, L2) first, then scalars (L1), then data terms (L3); a
+/// cell no hook claims is refused. These are the per-kind hooks; nullopt = not
+/// mine.
 [[nodiscard]] std::expected<ValuePtr, EvalError>
 readbackCell(Compiler &compiler, zigzag::CellRef cell);
 [[nodiscard]] std::optional<Lowered<ValuePtr>>
@@ -125,6 +140,12 @@ lowerValueDecl(LowerContext &ctx, const ValueDecl &d, SourceLocation loc);
 /// declaration exists (an empty table is a correct answer until L2 fills it).
 [[nodiscard]] std::optional<Lowered<Operand>>
 lookupTopLevel(LowerContext &ctx, std::string_view name, SourceLocation loc);
+
+/// A variable bound outside the frame being lowered (`hit.frameDepth > 0`).
+/// Records the capture with ctx.addCapture and returns the register the
+/// capturing frame reads it from. Called by L1's lowerVar.
+[[nodiscard]] Lowered<Operand>
+captureOperand(LowerContext &ctx, const ScopeHit &hit, SourceLocation loc);
 
 /// Shared kernel helpers that L3-L8 call. All return a register.
 /// A register for @p e that is evaluated later: the value itself when its form

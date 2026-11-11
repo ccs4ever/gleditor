@@ -9,6 +9,10 @@
 
 namespace xanadu::vlace::lower {
 
+Lowered<Operand> runBlock(LowerContext &, Block, Operand) {
+  return notLowered("expressions");
+}
+
 std::expected<ValuePtr, EvalError> evaluateExpressionOnVm(Compiler &,
                                                           const Expr &) {
   return notLowered("expressions");

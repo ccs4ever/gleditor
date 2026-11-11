@@ -13,7 +13,10 @@ Lowered<Operand> lowerLiteral(LowerContext &, const ELiteral &,
   return notLowered("expressions", loc);
 }
 
-Lowered<Operand> lowerVar(LowerContext &, const EVar &, SourceLocation loc) {
+Lowered<Operand> lowerVar(LowerContext &ctx, const EVar &e,
+                          SourceLocation loc) {
+  if (const auto hit = ctx.lookup(e.name); hit && hit->frameDepth > 0)
+    return captureOperand(ctx, *hit, loc); // L2
   return notLowered("expressions", loc);
 }
 

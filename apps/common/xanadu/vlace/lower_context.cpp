@@ -5,6 +5,7 @@
  */
 #include "common/xanadu/vlace/lower_context.hpp"
 
+#include <algorithm>
 #include <charconv>
 #include <format>
 
@@ -22,11 +23,16 @@ namespace {
 constexpr std::string_view failureTag = "VLACE";
 constexpr char failureSeparator       = '|';
 
+/// The text of LoweringBudgetExceeded, so the reworder recognises it.
+constexpr std::string_view loweringBudgetText =
+    "VLace lowering cell budget exhausted";
+
 /// The VM texts that mean the budget ran out, one per budget the VM keeps.
 constexpr std::string_view budgetTexts[] = {
     "activation frame depth limit exceeded",
     "Exceeded max cycles",
     "Vortex evaluation work budget exhausted",
+    loweringBudgetText,
 };
 
 std::optional<CompileError> codeFromName(std::string_view name) {
@@ -81,6 +87,19 @@ std::optional<std::size_t> CtorTable::fieldIndex(std::string_view ctor,
   return std::nullopt;
 }
 
+// -- LowerState ---------------------------------------------------------------
+
+const LowerState::KernelDims &
+LowerState::kernelDims(zigzag::vortex::VortexCore &core) {
+  if (!kernelDims_) {
+    kernelDims_ =
+        KernelDims{.thunk     = core.findOrMintDimension("d.thunk"),
+                   .memo      = core.findOrMintDimension("d.memo"),
+                   .blackhole = core.findOrMintDimension("d.blackhole")};
+  }
+  return *kernelDims_;
+}
+
 // -- LowerContext -------------------------------------------------------------
 
 LowerContext::LowerContext(Compiler &compiler)
@@ -89,15 +108,43 @@ LowerContext::LowerContext(Compiler &compiler)
   scopes_.push_back(Scope{.kind = ScopeKind::Frame, .names = {}});
 }
 
+void LowerContext::chargeCells(std::size_t count) {
+  generatedCells_ += count;
+  if (generatedCells_ > maxGeneratedCells) {
+    throw LoweringBudgetExceeded(*rewordBudgetFailure(loweringBudgetText));
+  }
+}
+
 CellRef LowerContext::emitOp(OpcodeKind kind, std::string_view label) {
+  chargeCells(1);
   const CellRef op = vm_.mintOpcode(kind, label);
-  if (!block_.entry) block_.entry = op;
+  placeLabel(op);
+  return op;
+}
+
+CellRef LowerContext::mintLabel(std::string_view name) {
+  chargeCells(1);
+  return vm_.mintOpcode(OpcodeKind::Nop, name);
+}
+
+void LowerContext::placeLabel(CellRef label) {
+  if (!block_.entry) block_.entry = label;
   if (block_.tail) {
     zigzag::expectWritten(
-        core_.arena().link(*block_.tail, core_.dims().spin, false, op));
+        core_.arena().link(*block_.tail, core_.dims().spin, false, label));
   }
-  block_.tail = op;
-  return op;
+  block_.tail = label;
+}
+
+CellRef LowerContext::branchIfFalse(Operand cond, CellRef label) {
+  const CellRef branch = emitOp(OpcodeKind::BranchFalseCell, "#vlace_branch");
+  emitInput(branch, cond.cell);
+  emitInput(branch, label);
+  return branch;
+}
+
+CellRef LowerContext::jumpTo(CellRef label) {
+  return branchIfFalse(emitConstant(CellValue{false}), label);
 }
 
 void LowerContext::emitInput(CellRef op, CellRef operand) {
@@ -106,17 +153,22 @@ void LowerContext::emitInput(CellRef op, CellRef operand) {
 
 void LowerContext::emitOutput(CellRef op, CellRef target) {
   core_.bindOutput(op, target);
+  block_.locals.push_back(target);
 }
 
 Operand LowerContext::emitConstant(const CellValue &value) {
+  chargeCells(1);
   const CellRef cell = core_.arena().makeCell();
+  // Offset 0 with no length replaces the cell's whole value.
   core_.writeValue(cell, 0, std::nullopt, value);
-  return Operand{.cell = cell, .state = Evaluation::Whnf};
+  return Operand(cell, Evaluation::Whnf);
 }
 
 Operand LowerContext::newRegister() {
-  return Operand{.cell  = core_.arena().makeCell(),
-                 .state = Evaluation::Unknown};
+  chargeCells(1);
+  const CellRef cell = core_.arena().makeCell();
+  block_.locals.push_back(cell);
+  return Operand(cell, Evaluation::Unknown);
 }
 
 Block LowerContext::swapBlock(Block next) noexcept {
@@ -140,8 +192,26 @@ LowerContext::ScopeGuard LowerContext::pushScope(ScopeKind kind) {
 
 void LowerContext::popScope() noexcept { scopes_.pop_back(); }
 
+LowerContext *LowerContext::addCapture(std::string name, Operand outer,
+                                       Operand inner) {
+  auto frame = std::ranges::find_if(
+      scopes_.rbegin(), scopes_.rend(),
+      [](const Scope &s) { return s.kind == ScopeKind::Frame; });
+  frame->names.insert_or_assign(name, inner);
+  frame->captures.push_back(
+      Capture{.name = std::move(name), .outer = outer, .inner = inner});
+  return this;
+}
+
+std::span<const LowerContext::Capture> LowerContext::captures() const {
+  const auto frame = std::ranges::find_if(
+      scopes_.rbegin(), scopes_.rend(),
+      [](const Scope &s) { return s.kind == ScopeKind::Frame; });
+  return frame->captures;
+}
+
 LowerContext *LowerContext::bind(std::string name, Operand operand) {
-  scopes_.back().names[std::move(name)] = operand;
+  scopes_.back().names.insert_or_assign(std::move(name), operand);
   return this;
 }
 

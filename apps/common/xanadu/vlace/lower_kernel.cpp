@@ -41,6 +41,11 @@ std::optional<Lowered<Operand>> lookupTopLevel(LowerContext &, std::string_view,
   return std::nullopt;
 }
 
+Lowered<Operand> captureOperand(LowerContext &, const ScopeHit &,
+                                SourceLocation loc) {
+  return notLowered("expressions", loc);
+}
+
 Lowered<Operand> lowerLazy(LowerContext &, const ExprNode &e) {
   return notLowered("expressions", e.loc);
 }

@@ -6,6 +6,9 @@
  */
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <stdexcept>
+
 #include "common/xanadu/vlace/compiler.hpp"
 #include "common/xanadu/vlace/lower_context.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
@@ -119,6 +122,104 @@ TEST(VlaceLowerContextTest, CardStateIsPerCardAndPersistent) {
   rig.compiler.lowerState().cardState<Counter>(Card::Kernel).n = 4;
   EXPECT_EQ(rig.compiler.lowerState().cardState<Counter>(Card::Kernel).n, 4);
   EXPECT_EQ(rig.compiler.lowerState().cardState<Counter>(Card::Data).n, 0);
+}
+
+TEST(VlaceLowerContextTest, CardStateWithAnotherTypeIsRefused) {
+  Rig rig;
+  struct A {
+    int n{0};
+  };
+  struct B {
+    int n{0};
+  };
+  static_cast<void>(rig.compiler.lowerState().cardState<A>(Card::Io));
+  EXPECT_THROW(
+      static_cast<void>(rig.compiler.lowerState().cardState<B>(Card::Io)),
+      std::logic_error);
+}
+
+TEST(VlaceLowerContextTest, LabelsSkipForwardAndAreReusableBackward) {
+  Rig rig;
+  LowerContext ctx(rig.compiler);
+  const auto skip = ctx.mintLabel("#skip");
+  ctx.jumpTo(skip);
+  ctx.emitRuntimeFailure(CompileError::NonExhaustiveMatch, {},
+                         "must be skipped");
+  ctx.placeLabel(skip);
+  ctx.emitOp(zigzag::vortex::OpcodeKind::Nop, "#end");
+  const auto cursor = rig.vm.spawnCursor(*ctx.block().entry, "vlace_test");
+  const auto result = rig.vm.run(cursor);
+  EXPECT_TRUE(result.success) << result.errorMessage;
+}
+
+TEST(VlaceLowerContextTest, BranchIfFalseTakesTheBranchOnlyWhenFalse) {
+  Rig rig;
+  LowerContext ctx(rig.compiler);
+  const auto otherwise = ctx.mintLabel("#else");
+  ctx.branchIfFalse(ctx.emitConstant(zigzag::vortex::CellValue{true}),
+                    otherwise);
+  ctx.emitRuntimeFailure(CompileError::NonExhaustiveMatch, {}, "fell through");
+  ctx.placeLabel(otherwise);
+  const auto cursor = rig.vm.spawnCursor(*ctx.block().entry, "vlace_test");
+  const auto result = rig.vm.run(cursor);
+  ASSERT_FALSE(result.success);
+  EXPECT_EQ(failureToEval(result).detail, "fell through");
+}
+
+TEST(VlaceLowerContextTest, BlockRecordsRegistersAndOutputsAsLocals) {
+  Rig rig;
+  LowerContext ctx(rig.compiler);
+  const auto reg = ctx.newRegister();
+  const auto out = ctx.newRegister();
+  const auto op  = ctx.emitOp(zigzag::vortex::OpcodeKind::Nop);
+  ctx.emitOutput(op, out.cell);
+  const auto constant = ctx.emitConstant(std::int64_t{3});
+  const auto old      = ctx.swapBlock(Block{});
+  EXPECT_NE(std::ranges::find(old.locals, reg.cell), old.locals.end());
+  EXPECT_NE(std::ranges::find(old.locals, out.cell), old.locals.end());
+  EXPECT_EQ(std::ranges::find(old.locals, constant.cell), old.locals.end());
+  EXPECT_TRUE(ctx.block().locals.empty());
+}
+
+TEST(VlaceLowerContextTest, CapturesAreListedByTheEnclosingFrame) {
+  Rig rig;
+  LowerContext ctx(rig.compiler);
+  const auto outer = ctx.emitConstant(std::int64_t{1});
+  ctx.bind("x", outer);
+  auto frame       = ctx.pushScope(ScopeKind::Frame);
+  auto inner       = ctx.pushScope();
+  const auto local = ctx.newRegister();
+  ctx.addCapture("x", outer, local);
+  ASSERT_EQ(ctx.captures().size(), 1U);
+  EXPECT_EQ(ctx.captures()[0].name, "x");
+  EXPECT_EQ(ctx.captures()[0].outer.cell, outer.cell);
+  EXPECT_EQ(ctx.lookup("x")->frameDepth, 0U);
+  EXPECT_EQ(ctx.lookup("x")->operand.cell, local.cell);
+}
+
+TEST(VlaceLowerContextTest, KernelDimensionsAreMintedOnceByName) {
+  Rig rig;
+  auto &state       = rig.compiler.lowerState();
+  const auto &first = state.kernelDims(rig.core);
+  const auto thunk  = first.thunk;
+  const auto &again = state.kernelDims(rig.core);
+  EXPECT_EQ(again.thunk, thunk);
+  EXPECT_NE(first.memo, first.blackhole);
+  EXPECT_NE(first.thunk, first.memo);
+}
+
+TEST(VlaceLowerContextTest, MintingPastTheBudgetIsReportedAsBudgetExhausted) {
+  Rig rig;
+  LowerContext ctx(rig.compiler);
+  try {
+    for (std::size_t i = 0; i <= maxGeneratedCells; ++i) {
+      static_cast<void>(ctx.newRegister());
+    }
+    FAIL() << "the cell budget did not trip";
+  } catch (const LoweringBudgetExceeded &budget) {
+    EXPECT_EQ(budget.error().code, CompileError::BudgetExhausted);
+    EXPECT_NE(budget.error().detail.find("budget"), std::string::npos);
+  }
 }
 
 } // namespace

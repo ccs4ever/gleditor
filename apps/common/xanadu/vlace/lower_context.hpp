@@ -24,8 +24,10 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
+#include <typeindex>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -40,10 +42,34 @@ namespace xanadu::vlace::lower {
 /// Every lowering function reports a compile-time refusal as an EvalError.
 template <class T> using Lowered = std::expected<T, EvalError>;
 
-/// Frames and closures nest; the old evaluator refused beyond this depth and
-/// the budget message is part of the observable contract (R2 of the L0 spike).
-/// L1 applies it with VortexVM::setFrameLimits.
+/// How deeply frames may nest during evaluation before the run is refused as
+/// over budget. The VM's default FrameLimits.maxDepth is 128, which a plain
+/// non-tail recursion such as `loop x = loop x` reaches quickly; the evaluator
+/// this lowering replaced allowed 512 and programs rely on that headroom.
+/// Card L1 must call `vm.setFrameLimits` with this value when it builds the
+/// run loop (the VM does not read this constant itself).
 inline constexpr std::size_t evaluationNestingBudget = 512;
+
+/// The most cells (opcodes, constants, registers, labels) one LowerContext may
+/// mint. VQL bounds its lowering the same way (maxGeneratedOpcodes); without a
+/// bound a pathological or recursive lowering allocates until the host runs out
+/// of memory. The figure matches the VM's own FrameLimits.maxBackingCells
+/// (1'048'576): a lowering past it could not run anyway. Exceeding it throws
+/// LoweringBudgetExceeded, which failureToEval-style code reports as
+/// CompileError::BudgetExhausted.
+inline constexpr std::size_t maxGeneratedCells = 1'000'000;
+
+/// Thrown by the emission helpers when maxGeneratedCells is exceeded. Card L1's
+/// evaluate*OnVm and driver entries catch it and return `error()`.
+class LoweringBudgetExceeded : public std::runtime_error {
+public:
+  explicit LoweringBudgetExceeded(EvalError error)
+      : std::runtime_error(error.detail), error_(std::move(error)) {}
+  [[nodiscard]] const EvalError &error() const noexcept { return error_; }
+
+private:
+  EvalError error_;
+};
 
 /// What lowering knows about a register's evaluation state.
 enum class Evaluation : std::uint8_t {
@@ -53,8 +79,13 @@ enum class Evaluation : std::uint8_t {
 
 /// A register and what is known about it.
 struct Operand {
-  zigzag::CellRef cell{};
-  Evaluation state{Evaluation::Unknown};
+  /// A register always names a cell; there is no empty Operand (absence is
+  /// std::optional<Operand>).
+  explicit Operand(zigzag::CellRef c,
+                   Evaluation s = Evaluation::Unknown) noexcept
+      : cell(c), state(s) {}
+  zigzag::CellRef cell;
+  Evaluation state;
 };
 
 /// The linear chain of opcodes being emitted (entry plus the last op, which
@@ -63,6 +94,12 @@ struct Operand {
 struct Block {
   std::optional<zigzag::CellRef> entry;
   std::optional<zigzag::CellRef> tail;
+  /// Every register this block writes: those from newRegister() and every
+  /// target given to emitOutput(). A frame descriptor's `locals` must list all
+  /// of them or recursive activations share the cells (VQL tracks the same set
+  /// as frameMutableSlots_). May contain duplicates; the frame builder (L2)
+  /// removes them. swapBlock() hands the whole Block, locals included, back.
+  std::vector<zigzag::CellRef> locals;
 };
 
 enum class ScopeKind : std::uint8_t {
@@ -127,12 +164,31 @@ public:
   [[nodiscard]] const CtorTable &ctors() const noexcept { return ctors_; }
 
   /// The card's private state of type T, default-constructed on first use. A
-  /// card must always ask with the same T for the same slot.
+  /// card must always ask with the same T for the same slot; a different T
+  /// throws std::logic_error rather than reinterpreting the stored object.
   template <class T> [[nodiscard]] T &cardState(Card card) {
     auto &slot = cardStates_[static_cast<std::size_t>(card)];
-    if (!slot) slot = std::make_shared<T>();
-    return *static_cast<T *>(slot.get());
+    if (!slot.object) {
+      slot.type   = std::type_index(typeid(T));
+      slot.object = std::make_shared<T>();
+    } else if (slot.type != std::type_index(typeid(T))) {
+      throw std::logic_error(
+          "VLace card state requested with a different type");
+    }
+    return *static_cast<T *>(slot.object.get());
   }
+
+  /// The dimensions the thunk kernel links on. Read by L2 (force/apply), L3
+  /// (case forces its scrutinee), L6 (the trampoline forces) and the read-back
+  /// hooks. Minted by name on first use, idempotent. They are arena
+  /// dimensions: under R8 evaluation mints nothing in a store, so these are as
+  /// ephemeral as the cells that use them.
+  struct KernelDims {
+    zigzag::DimRef thunk;     ///< thunk cell -> its suspended closure
+    zigzag::DimRef memo;      ///< thunk cell -> its forced value, once forced
+    zigzag::DimRef blackhole; ///< thunk cell -> itself while being forced
+  };
+  [[nodiscard]] const KernelDims &kernelDims(zigzag::vortex::VortexCore &core);
 
   /// True once the built-in constructors (L3) have been installed.
   [[nodiscard]] bool builtinsInstalled() const noexcept {
@@ -145,8 +201,12 @@ public:
 
 private:
   CtorTable ctors_;
-  std::array<std::shared_ptr<void>, static_cast<std::size_t>(Card::Count)>
-      cardStates_;
+  struct CardSlot {
+    std::shared_ptr<void> object;
+    std::type_index type{typeid(void)};
+  };
+  std::array<CardSlot, static_cast<std::size_t>(Card::Count)> cardStates_;
+  std::optional<KernelDims> kernelDims_;
   bool builtinsInstalled_{false};
 };
 
@@ -166,17 +226,40 @@ public:
 
   // -- Emission ---------------------------------------------------------------
 
+  // Every function below that mints a cell counts against maxGeneratedCells.
+
   /// Mint an opcode and link it after the block's tail on `d.spin`.
   zigzag::CellRef emitOp(zigzag::vortex::OpcodeKind kind,
                          std::string_view label = {});
   void emitInput(zigzag::CellRef op, zigzag::CellRef operand);
+  /// Bind @p target as @p op's output and record it in the block's `locals`.
   void emitOutput(zigzag::CellRef op, zigzag::CellRef target);
-  /// A fresh register holding @p value (a constant operand, in WHNF).
+  /// A fresh register holding @p value (a constant operand, in WHNF). Not a
+  /// local: a constant is written once, at lowering time.
   Operand emitConstant(const zigzag::vortex::CellValue &value);
-  /// A fresh, empty register (a slot for an op output or a field).
+  /// A fresh, empty register (a slot for an op output or a field); recorded in
+  /// the block's `locals`.
   Operand newRegister();
 
-  /// Replace the block being emitted into; returns the previous one.
+  // Labels. A label is a detached `Nop` opcode that a branch names as its
+  // target. A label is placed exactly once; it may be targeted before it is
+  // placed (a forward jump) or after (a backward jump), since a branch binds
+  // the label cell, not a position.
+
+  /// Mint a label without linking it into the chain.
+  zigzag::CellRef mintLabel(std::string_view name);
+  /// Link @p label after the block's tail and make it the tail. Execution that
+  /// falls through, and every branch to @p label, continues here.
+  void placeLabel(zigzag::CellRef label);
+  /// Emit a branch to @p label taken when @p cond is false
+  /// (`BranchFalseCell [cond, label]`); returns the branch op.
+  zigzag::CellRef branchIfFalse(Operand cond, zigzag::CellRef label);
+  /// Emit an unconditional jump to @p label (a BranchFalseCell on a constant
+  /// false, as VQL does for its join); returns the branch op.
+  zigzag::CellRef jumpTo(zigzag::CellRef label);
+
+  /// Replace the block being emitted into; returns the previous one. The
+  /// returned Block's `locals` are what a frame descriptor needs.
   Block swapBlock(Block next) noexcept;
   [[nodiscard]] const Block &block() const noexcept { return block_; }
 
@@ -205,7 +288,21 @@ public:
     LowerContext *ctx_;
   };
 
+  /// One variable captured from an enclosing frame.
+  struct Capture {
+    std::string name;
+    Operand outer; ///< the register in the enclosing frame
+    Operand inner; ///< the register the capturing frame reads it from
+  };
+
   [[nodiscard]] ScopeGuard pushScope(ScopeKind kind = ScopeKind::Block);
+  /// Record that the innermost Frame scope captures @p name from @p outer and
+  /// binds it there as @p inner, so later lookups in that frame hit at depth
+  /// 0. Called by captureOperand (L2). Chainable.
+  LowerContext *addCapture(std::string name, Operand outer, Operand inner);
+  /// The captures recorded so far by the innermost Frame scope, in order;
+  /// read it before the frame's ScopeGuard is destroyed to build the closure.
+  [[nodiscard]] std::span<const Capture> captures() const;
   /// Bind @p name in the innermost scope (shadowing outer ones). Chainable.
   LowerContext *bind(std::string name, Operand operand);
   [[nodiscard]] std::optional<ScopeHit> lookup(std::string_view name) const;
@@ -214,8 +311,10 @@ private:
   struct Scope {
     ScopeKind kind{ScopeKind::Block};
     std::unordered_map<std::string, Operand> names;
+    std::vector<Capture> captures;
   };
   void popScope() noexcept;
+  void chargeCells(std::size_t count);
 
   Compiler &compiler_;
   zigzag::vortex::VortexCore &core_;
@@ -223,6 +322,7 @@ private:
   LowerState &state_;
   Block block_;
   std::vector<Scope> scopes_;
+  std::size_t generatedCells_{0};
 };
 
 // -- Errors -------------------------------------------------------------------
@@ -255,8 +355,9 @@ fail(CompileError code, std::string detail, SourceLocation loc = {});
 [[nodiscard]] std::optional<EvalError>
 decodeRuntimeFailure(std::string_view message);
 
-/// Map the three VM texts that mean "ran out of budget" (frame depth, cycles,
-/// arena work) to CompileError::BudgetExhausted; nullopt for any other text.
+/// Map the VM texts that mean "ran out of budget" (frame depth, cycles, arena
+/// work) and the lowering-budget text to CompileError::BudgetExhausted; nullopt
+/// for any other text.
 [[nodiscard]] std::optional<EvalError>
 rewordBudgetFailure(std::string_view vmMessage);
 

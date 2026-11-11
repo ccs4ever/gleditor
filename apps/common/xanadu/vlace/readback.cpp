@@ -13,6 +13,11 @@
 
 namespace xanadu::vlace::lower {
 
+// The classification order readbackCell (L1) must implement, so L2 and L3 add
+// kinds through their own hooks without editing this file: the kernel hook
+// first (a thunk cell may also hold a scalar-looking memo, and a closure root
+// is a term), then the scalar hook, then the data hook. The first hook that
+// returns a value decides; a cell no hook claims is refused ("values").
 std::expected<ValuePtr, EvalError> readbackCell(Compiler &, zigzag::CellRef) {
   return notLowered("values");
 }
