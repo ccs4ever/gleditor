@@ -74,20 +74,24 @@ tmpfs and cannot hold a build.
 ```sh
 git submodule update --init --recursive        # verified: about 12 s in a fresh worktree
 export CCACHE_DIR=/data/git/gleditor-restore/.ccache CCACHE_NOHASHDIR=1 \
-       CCACHE_BASEDIR=/data/git/gleditor-restore
-make -j8 xuzz_test
+       CCACHE_BASEDIR=/data/git/gleditor-restore CCACHE_MAXSIZE=20G
+make -j$JOBS xuzz_test                         # JOBS is set by the coordinator, see §3
 export SDL_VIDEODRIVER=offscreen SDL_AUDIODRIVER=dummy LIBGL_ALWAYS_SOFTWARE=1 \
        XDG_DATA_HOME=$PWD/build/xdg/data XDG_CONFIG_HOME=$PWD/build/xdg/config \
        XDG_CACHE_HOME=$PWD/build/xdg/cache
 ./build/xuzz_test --gtest_brief=1 --gtest_filter='<card filter>'
 ```
 
-The three `CCACHE_*` variables are required. The Makefile exports `XDG_CACHE_HOME=build/xdg/cache`,
-and ccache follows it, so without them every worktree gets a private, empty cache. A cold
-`xuzz_test` build then costs about 6 minutes of wall time and about 9,300 CPU-seconds on 32 cores
-(observed). With the shared cache, a second worktree got a direct hit for an object the first one
-compiled (verified on one object). Use `-j8` rather than `-j$(nproc)`, because up to four workers
-build at once.
+The `CCACHE_*` variables are required. The Makefile exports `XDG_CACHE_HOME=build/xdg/cache`, and
+ccache follows it, so without them every worktree gets a private cache.
+
+- **Time.** A private cache starts empty: a cold `xuzz_test` build costs about 6 minutes of wall
+  time and about 9,300 CPU-seconds on 32 cores (observed). With the shared cache, a second worktree
+  got a direct hit for an object the first one compiled (verified on one object).
+- **Disk.** A private cache grows to its 5 GiB default limit. In `vql-completion`, 5.1 GB of the 7.2
+  GB `build/` directory was `build/xdg/cache/ccache`.
+- **Size of the shared cache.** One full build fills 5 GiB, so `CCACHE_MAXSIZE=20G` holds both sides
+  of a merge plus a wave of edits without evicting.
 
 **Hard rules.**
 
@@ -124,15 +128,38 @@ each refusal names what is unsupported. It replies `PASS`, or with numbered defe
 
 1. Do not read source. Read this plan, the TSV, worker reports, reviewer verdicts and gate logs.
    Keep logs on disk under `/data/git/gleditor-restore/.logs/<wave>/`.
+
 1. Within a wave, cards own disjoint files. Shared dispatch points are pre-stubbed by an integrator
    card (W1.0) so that workers only add new files.
+
 1. **Wave gate.** Merge the reviewed branches into the shared branch in card order, then run
    `make -j$(nproc)`, then the full `xuzz_test` once (276 s), `gleditor_test` and `zigzag_test`. The
    failing set must be a strict subset of the previous wave's: compare names against the TSV, not
    counts. Then run `make format-check` (prefix `PATH=/tmp/cf19/bin:$PATH`), `make lint`, and push.
-1. **Capacity.** At most 4 workers build at the same time. `/data` had 75 GB free after the worktree
-   cleanup, and a fully built worktree is 7.2 GB (a build of `xuzz_test` alone is smaller;
-   **unverified** how much). Spikes and reviewers do not build.
+
+1. **Capacity is computed at the start of each wave, not fixed.** Fan out every card whose
+   dependencies are met, up to the number of workers the machine can hold now:
+
+   ```sh
+   FREE_GB=$(df --output=avail -BG /data | tail -1 | tr -dc 0-9)
+   DISK_SLOTS=$(( (FREE_GB - 25) / 2 ))   # 25 GB: shared cache (20G) plus the gate build
+   CPU_SLOTS=$(( $(nproc) / 4 ))          # keep at least 4 compile jobs per building worker
+   BUILDERS=$(( DISK_SLOTS < CPU_SLOTS ? DISK_SLOTS : CPU_SLOTS ))
+   JOBS=$(( $(nproc) / (BUILDERS < READY ? BUILDERS : READY) ))   # READY = cards ready to run
+   ```
+
+   - **Per-worker disk** with the shared cache is about 1.1 GB, measured from the existing tree:
+     xanadu and test objects 0.57 GB plus the 0.48 GB `xuzz_test` binary, both as stored on lz4 ZFS.
+     The plan budgets 2 GB to allow for growth. Without the shared cache it is about 6 GB, which is
+     why the cache matters more than any cap.
+   - **Current values:** 75 GB free and 32 cores give 25 disk slots and 8 CPU slots. So CPU binds at
+     8 concurrent builders with `-j4` each.
+   - Spikes and reviewers do not build and are not counted. Recompute before every wave, and after
+     any change to free disk.
+   - **Optional reclaim:** private caches in the existing worktrees hold 18 GB. Running
+     `rm -rf <worktree>/build/xdg/cache/ccache` on worktrees not in use is safe; it only costs
+     rebuild time.
+
 1. **Escalate to the owner** for: anything in section 5; any change to `CompactOpNode`, to on-disk
    or wire formats, or to `system://` documents; a worker that proposes to reintroduce direct
    execution.
@@ -159,7 +186,7 @@ each refusal names what is unsupported. It replies `PASS`, or with numbered defe
   against `main`'s versions of `vql_multi_store_test` and `vql_watch_test`. The card table in W1 is
   pre-merge and must be corrected here.
 
-### W1: VQL (seven cards, up to 4 at a time)
+### W1: VQL (seven cards, fanned out per the §3 capacity rule)
 
 **W1.0 integrator** (low tier, about 30 minutes, runs first). It adds dispatch stubs that keep
 throwing today's messages, plus the declarations in `vql/compiler.hpp`, so that each card below only
