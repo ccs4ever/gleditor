@@ -17,6 +17,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "common/xanadu/store.hpp"
@@ -39,6 +40,13 @@ struct CompiledBinding {
   zigzag::CellRef cell;
   std::vector<zigzag::DirectedDim> axes;
   std::vector<zigzag::CellRef> dependencies;
+  /// The bound value is an enclosed array: a box cell whose content hangs off
+  /// `d.enclosure`. Valence stays `axes.size()`; enclosure is static because a
+  /// cell cannot carry the flag at run time (card V10).
+  bool enclosed{false};
+  /// Set when the bound value is a dimension (or a vector of dimensions): such
+  /// a value is pure compile-time structure and has no cells (card V4).
+  std::optional<std::vector<zigzag::DirectedDim>> dimensionValues{};
 };
 
 struct CompilationResult {
@@ -55,7 +63,16 @@ struct CompilationResult {
   std::unordered_map<zigzag::CellRef, std::vector<zigzag::CellRef>>
       cellDependencies;
   std::unordered_map<std::string, CompiledBinding> assignedBindings;
+  /// The final result is an enclosed array (see CompiledBinding::enclosed).
+  bool resultEnclosed{false};
+  /// A `⎕ x` print marker was compiled: the host prints the final result after
+  /// the run. The VM itself performs no I/O (card V13).
+  bool resultPrint{false};
+  /// Set when the final result is a dimension or a vector of dimensions.
+  std::optional<std::vector<zigzag::DirectedDim>> resultDimensionValues{};
 };
+
+class LowerContext;
 
 class VPLCompiler {
 public:
@@ -95,7 +112,16 @@ public:
   [[nodiscard]] static std::string renderAST(const AstNode &node);
 
 private:
+  /// The per-card lowering files (lower_*.cpp, graph_emit.cpp) reach the
+  /// emission helpers and the static side tables only through LowerContext
+  /// (lower_decls.hpp), so a card never edits this header.
+  friend class LowerContext;
+
   // Emission helpers
+  zigzag::CellRef mintOpcode(zigzag::vortex::OpcodeKind kind,
+                             std::string_view label = {});
+  void appendOpcode(zigzag::CellRef op);
+  void recordResultFacts(zigzag::CellRef cell);
   zigzag::CellRef emitOp(zigzag::vortex::OpcodeKind kind,
                          std::string_view label = {});
   void emitInput(zigzag::CellRef op, zigzag::CellRef operand);
@@ -150,6 +176,17 @@ private:
       rankDependencies_;
   std::unordered_map<zigzag::CellRef, std::vector<zigzag::CellRef>>
       cellDependencies_;
+  /// Static array facts, keyed like rankAxes_ by the cell a value lives in.
+  /// Valence is rankAxes_.at(cell).size(); these two cover what axes cannot.
+  std::unordered_set<zigzag::CellRef> enclosedCells_;
+  std::unordered_map<zigzag::CellRef, std::vector<zigzag::DirectedDim>>
+      dimensionValues_;
+  std::unordered_set<std::string> varEnclosed_;
+  std::unordered_map<std::string, std::vector<zigzag::DirectedDim>>
+      varDimensionValues_;
+  bool printRequested_{false};
+  bool lastResultEnclosed_{false};
+  std::optional<std::vector<zigzag::DirectedDim>> lastResultDimensionValues_;
   bool optimize_{false};
 
   [[nodiscard]] std::vector<zigzag::CellRef>
