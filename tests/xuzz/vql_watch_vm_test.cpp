@@ -120,8 +120,10 @@ TEST_F(VQLWatchVmTest, UnmountRefusalNamesTheForm) {
 }
 
 TEST_F(VQLWatchVmTest, WatchInsideAPerspectiveBlockIsRefusedByName) {
-  EXPECT_THAT(refusalOf("with perspective(\"alice\") { watch ## {} }"),
-              HasSubstr("watch statement inside a perspective block"));
+  EXPECT_THAT(
+      refusalOf(
+          "with perspective(\"alice\") { watch ##/d.items as $i { $i } }"),
+      HasSubstr("watch statement inside a perspective block"));
 }
 
 // Until the perspective selector card lands, a read inside a block is
