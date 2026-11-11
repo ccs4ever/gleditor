@@ -223,6 +223,8 @@ enum class CompileError : std::uint8_t {
   NonLinearPattern,
   NonExhaustiveMatch,
   UnknownModule,
+  /// Appended: evaluation ran out of frame depth, cycles or arena work.
+  BudgetExhausted,
 };
 
 [[nodiscard]] std::string_view compileErrorName(CompileError err) noexcept;

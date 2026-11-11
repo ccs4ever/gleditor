@@ -8,7 +8,7 @@
 #include <istream>
 #include <ostream>
 
-#include "common/xanadu/vlace/compiler.hpp"
+#include "common/xanadu/vlace/lower_cards.hpp"
 #include "common/xanadu/vlace/parser.hpp"
 #include "common/xanadu/vlace/types.hpp"
 
@@ -45,10 +45,7 @@ std::expected<DriverResult, DriverError> Driver::run(std::string_view source) {
     result.type = *t;
   }
 
-  return std::unexpected(
-      DriverError{.code   = CompileError::UnexpectedToken,
-                  .detail = "VM lowering is not implemented for VLace programs",
-                  .phase  = "compile"});
+  return lower::driverEvaluate(*prog, std::move(result));
 }
 
 std::expected<DriverResult, DriverError>
@@ -78,12 +75,7 @@ Driver::runIO(std::string_view source, std::istream &in, std::ostream &out) {
     result.type = *t;
   }
 
-  static_cast<void>(in);
-  static_cast<void>(out);
-  return std::unexpected(DriverError{
-      .code   = CompileError::UnexpectedToken,
-      .detail = "VM lowering is not implemented for VLace IO programs",
-      .phase  = "compile"});
+  return lower::driverEvaluateIO(*prog, std::move(result), in, out);
 }
 
 } // namespace xanadu::vlace
