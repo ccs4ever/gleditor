@@ -152,13 +152,14 @@ each refusal names what is unsupported. It replies `PASS`, or with numbered defe
      xanadu and test objects 0.57 GB plus the 0.48 GB `xuzz_test` binary, both as stored on lz4 ZFS.
      The plan budgets 2 GB to allow for growth. Without the shared cache it is about 6 GB, which is
      why the cache matters more than any cap.
-   - **Current values:** 75 GB free and 32 cores give 25 disk slots and 8 CPU slots. So CPU binds at
-     8 concurrent builders with `-j4` each.
+   - **Current values (2026-11-11, after `make clean` in every idle worktree):** 112 GB free and 32
+     cores give 43 disk slots and 8 CPU slots. So CPU binds at 8 concurrent builders with `-j4`
+     each.
    - Spikes and reviewers do not build and are not counted. Recompute before every wave, and after
      any change to free disk.
-   - **Optional reclaim:** private caches in the existing worktrees hold 18 GB. Running
-     `rm -rf <worktree>/build/xdg/cache/ccache` on worktrees not in use is safe; it only costs
-     rebuild time.
+   - Every worktree except `.worktrees/metacircular-compiler`, which is under active development,
+     was cleaned. So the first W0 build in `vql-completion` is cold and fills the shared cache. It
+     is cold regardless, because the OpenSSL change forces a full rebuild.
 
 1. **Escalate to the owner** for: anything in section 5; any change to `CompactOpNode`, to on-disk
    or wire formats, or to `system://` documents; a worker that proposes to reintroduce direct
