@@ -27,6 +27,36 @@
 
 namespace xanadu::vql {
 
+namespace {
+
+/// Throw sites inside the compiler are not annotated with a category (there
+/// are about 260 of them), so a refusal that carries none is classified from
+/// its message. Anything unrecognised is Unsupported: every unannotated site
+/// refuses the whole query, and none of them is a caller error worth keeping
+/// std::invalid_argument for.
+QueryErrorCategory classifyCompilerFailure(const std::exception &error) {
+  if (const auto *refusal = dynamic_cast<const QueryRefusal *>(&error))
+    return refusal->category();
+  if (dynamic_cast<const ParseError *>(&error))
+    return QueryErrorCategory::Parse;
+  if (dynamic_cast<const TypeContractError *>(&error))
+    return QueryErrorCategory::TypeContract;
+  const std::string_view message = error.what();
+  constexpr std::array unknownMarkers{
+      std::string_view{"unknown compiled function"},
+      std::string_view{"unknown VQL function"},
+  };
+  for (const auto marker : unknownMarkers)
+    if (message.find(marker) != std::string_view::npos)
+      return QueryErrorCategory::Unknown;
+  // "is not compiled to Vortex yet", "require(s) Vortex graph lowering",
+  // "does not have Vortex graph lowering yet" and "require ... lowering" all
+  // fall through to the default.
+  return QueryErrorCategory::Unsupported;
+}
+
+} // namespace
+
 using zigzag::CellRef;
 using zigzag::DimRef;
 using zigzag::DimVector;
@@ -34,12 +64,36 @@ using zigzag::vortex::CellValue;
 using zigzag::vortex::OpcodeKind;
 
 void VQLCompiler::refuseSemanticBuiltin(const std::string_view name) {
-  static constexpr std::array<std::string_view, 9> semanticBuiltins{
-      "project", "apply_shape",  "any",   "all",      "none",
-      "one",     "optional_one", "first", "same_cell"};
-  if (std::ranges::find(semanticBuiltins, name) != semanticBuiltins.end())
-    throw std::invalid_argument("VQL semantic builtin '" + std::string(name) +
-                                "' is not compiled to Vortex yet");
+  throw QueryRefusal(QueryErrorCategory::Unsupported,
+                     "VQL semantic builtin '" + std::string(name) +
+                         "' is not compiled to Vortex yet");
+}
+
+bool VQLCompiler::isSemanticShapeBuiltin(const std::string_view name) {
+  return name == "project" || name == "apply_shape";
+}
+
+bool VQLCompiler::isSemanticQuantifierBuiltin(const std::string_view name) {
+  return name == "any" || name == "all" || name == "none" || name == "one" ||
+         name == "optional_one" || name == "first" || name == "same_cell";
+}
+
+bool VQLCompiler::isPathFunction(const std::string_view name) {
+  return name == "sort_into" || name == "find" || name == "contains" ||
+         name == "count";
+}
+
+bool VQLCompiler::isLensFunction(const std::string_view name) {
+  return name == "lens" || name == "docs" || name == "files";
+}
+
+bool VQLCompiler::isKnownUnloweredFunction(const std::string_view name) {
+  // The function matrix of design/vql-query-language.md section 2, plus delta.
+  return isSemanticShapeBuiltin(name) || isSemanticQuantifierBuiltin(name) ||
+         isPathFunction(name) || isLensFunction(name) || name == "delta" ||
+         name == "current" || name == "local" || name == "slices" ||
+         name == "topic" || name == "btpk" || name == "btih" ||
+         name == "citing" || name == "ledger" || name == "system";
 }
 
 std::string_view
@@ -444,21 +498,28 @@ CompilationResult VQLCompiler::compile(const QueryExpression &query,
     }
     transaction.commit();
     return result;
-  } catch (const std::invalid_argument &unsupported) {
-    entryOp_.reset();
-    currentOp_.reset();
-    allOps_.clear();
-    lastResultCells_.clear();
-    frameDefinitions_.clear();
-    pendingFrameDefinitions_.clear();
-    return CompilationResult{
-        .success          = false,
-        .entryOpcode      = std::nullopt,
-        .errorMessage     = unsupported.what(),
-        .generatedOpcodes = {},
-        .disassembly      = "",
-    };
+  } catch (const std::invalid_argument &refused) {
+    return failCompilation(refused);
+  } catch (const QueryRefusal &refused) {
+    return failCompilation(refused);
   }
+}
+
+CompilationResult VQLCompiler::failCompilation(const std::exception &refused) {
+  entryOp_.reset();
+  currentOp_.reset();
+  allOps_.clear();
+  lastResultCells_.clear();
+  frameDefinitions_.clear();
+  pendingFrameDefinitions_.clear();
+  return CompilationResult{
+      .success          = false,
+      .entryOpcode      = std::nullopt,
+      .errorMessage     = refused.what(),
+      .generatedOpcodes = {},
+      .disassembly      = "",
+      .category         = classifyCompilerFailure(refused),
+  };
 }
 
 DimRef VQLCompiler::resolveDimension(std::string_view name) {
@@ -497,6 +558,7 @@ CompilationResult VQLCompiler::compile(std::string_view queryString,
         .errorMessage     = std::string("Parse error: ") + err.what(),
         .generatedOpcodes = {},
         .disassembly      = "",
+        .category         = QueryErrorCategory::Parse,
     };
   }
 }
@@ -504,7 +566,8 @@ CompilationResult VQLCompiler::compile(std::string_view queryString,
 std::optional<CellRef> VQLCompiler::compileQuery(const QueryExpression &query) {
   const auto frameEligibility = analyzeFrameEligibility(query);
   if (!frameEligibility)
-    throw std::invalid_argument(frameEligibility.error().message);
+    throw QueryRefusal(QueryErrorCategory::Budget,
+                       frameEligibility.error().message);
   reusableFrameDefinitions_      = frameEligibility->reusableDefinitions;
   readOnlyDefinitions_           = frameEligibility->readOnlyDefinitions;
   frameFreeCaptureNames_         = frameEligibility->freeCaptureNames;
@@ -520,20 +583,18 @@ std::optional<CellRef> VQLCompiler::compileQuery(const QueryExpression &query) {
     for (const auto &definition : query.defs)
       validateFunctionSignature(definition);
   } catch (const TypeContractError &error) {
-    throw std::invalid_argument(error.what());
+    throw QueryRefusal(QueryErrorCategory::TypeContract, error.what());
   }
   for (const auto &definition : query.defs) {
     if (definition.name == "#vql-current-timestamp")
       throw std::invalid_argument(
           "reserved VQL intrinsic name: #vql-current-timestamp");
     if (!definitions_.emplace(definition.name, definition).second)
-      throw std::invalid_argument("duplicate function definition: " +
-                                  definition.name);
+      throw QueryRefusal(QueryErrorCategory::Malformed,
+                         "duplicate function definition: " + definition.name);
   }
-  if (!query.mounts.empty() || !query.namespaceDeclarations.empty()) {
-    throw std::invalid_argument(
-        "VQL mount declarations require Vortex graph lowering");
-  }
+  if (!query.mounts.empty() || !query.namespaceDeclarations.empty())
+    compileMountDeclarations(query);
   if (!query.body.statements.empty()) {
     std::optional<CellRef> result;
     for (const auto &statement : query.body.statements) {
@@ -546,8 +607,7 @@ std::optional<CellRef> VQLCompiler::compileQuery(const QueryExpression &query) {
         result = compileExecutionBlock(
             ExecutionBlock{.action = ActionClause{.clause = weave->effect}});
       } else {
-        throw std::invalid_argument(
-            "watch and perspective statements require Vortex graph lowering");
+        result = compileWatchOrPerspectiveStatement(statement);
       }
     }
     return result;
@@ -566,7 +626,7 @@ VQLCompiler::compilePathExpression(const PathExpression &path,
       std::ranges::any_of(path.steps, [](const PathStep &step) {
         return step.versionPin.has_value();
       }))
-    throw std::invalid_argument("version pins require historical VM lowering");
+    return compileVersionPinnedPath(path, ctxCell);
   std::vector<CellRef> stream;
   if (path.anchor.kind == AnchorKind::Variable &&
       streamBindings_.contains(path.anchor.name)) {
@@ -765,8 +825,7 @@ std::optional<CellRef> VQLCompiler::compileAnchor(const AnchorNode &anchor) {
   case AnchorKind::StoreGenerator:
   case AnchorKind::StoreAnchor:
   case AnchorKind::Microversion:
-    throw std::invalid_argument(
-        "store generators and historical anchors require VM selector lowering");
+    return compileHistoricalAnchor(anchor);
   }
 
   return res;
@@ -949,9 +1008,20 @@ std::optional<CellRef> VQLCompiler::compileValueExpr(const ValueExpr &expr,
           if (const auto builtin = compileBuiltinInvocation(*val, ctxCell))
             return builtin;
           const auto definition = definitions_.find(val->name);
-          if (definition == definitions_.end())
-            throw std::invalid_argument("unknown compiled function: " +
-                                        val->name);
+          if (definition == definitions_.end()) {
+            if (isSemanticShapeBuiltin(val->name))
+              return compileSemanticShapeValue(*val, ctxCell);
+            if (isSemanticQuantifierBuiltin(val->name))
+              return compileSemanticQuantifierValue(*val, ctxCell);
+            if (isLensFunction(val->name))
+              return compileLensValue(*val, ctxCell);
+            if (isPathFunction(val->name))
+              return compilePathFunctionValue(*val, ctxCell);
+            throw QueryRefusal(isKnownUnloweredFunction(val->name)
+                                   ? QueryErrorCategory::Unsupported
+                                   : QueryErrorCategory::Unknown,
+                               "unknown compiled function: " + val->name);
+          }
           requirePositionalArguments(*val);
           const auto results =
               compileCall(definition->second, val->args, ctxCell, false);
@@ -987,6 +1057,12 @@ std::optional<CellRef> VQLCompiler::compileValueExpr(const ValueExpr &expr,
         } else if constexpr (std::is_same_v<T, std::shared_ptr<PathLambda>>) {
           if (!val) throw std::invalid_argument("null VQL closure lambda");
           return compileClosureLambda(*val);
+        } else if constexpr (std::is_same_v<T, std::shared_ptr<ShapeLiteral>>) {
+          if (!val) throw std::invalid_argument("null compiled shape literal");
+          return compileShapeValue(*val, ctxCell);
+        } else if constexpr (std::is_same_v<T, std::shared_ptr<VersionExpr>>) {
+          if (!val) throw std::invalid_argument("null compiled version value");
+          return compileVersionValue(*val, ctxCell);
         } else {
           throw std::invalid_argument(
               "value expression requires Vortex graph lowering");

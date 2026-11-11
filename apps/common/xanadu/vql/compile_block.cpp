@@ -111,8 +111,8 @@ VQLCompiler::compileExecutionBlock(const ExecutionBlock &block) {
                     compileArgument(value->expression, ambientContext_);
                 emitAppendStream(resultStream, values);
               } else {
-                throw std::invalid_argument(
-                    "field weaving requires Vortex graph lowering");
+                compileFieldWeave(std::get<FieldWeave>(item.item),
+                                  resultStream);
               }
             }
           } else if constexpr (std::is_same_v<Clause, EffectClause>) {

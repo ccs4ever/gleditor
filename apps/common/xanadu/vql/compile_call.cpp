@@ -161,7 +161,8 @@ VQLCompiler::compileBuiltinInvocation(const FunctionInvocation &invocation,
       throw std::invalid_argument("now() does not support slice reads");
     requirePositionalArguments(invocation);
     if (!invocation.args.empty())
-      throw std::invalid_argument("now() requires no arguments");
+      throw QueryRefusal(QueryErrorCategory::Malformed,
+                         "now() requires no arguments");
     const CellRef op =
         emitOp(OpcodeKind::CurrentTimestamp, "#CURRENT_TIMESTAMP");
     const CellRef result = core_.arena().makeCell();
@@ -220,9 +221,19 @@ VQLCompiler::compileArgument(const ValueExpr &argument,
       return {*builtin};
     const auto found = definitions_.find((*function)->name);
     if (found == definitions_.end()) {
-      refuseSemanticBuiltin((*function)->name);
-      throw std::invalid_argument("unknown compiled function: " +
-                                  (*function)->name);
+      const auto &invocation = **function;
+      if (isSemanticShapeBuiltin(invocation.name))
+        return compileSemanticShapeCall(invocation, context);
+      if (isSemanticQuantifierBuiltin(invocation.name))
+        return compileSemanticQuantifierCall(invocation, context);
+      if (isLensFunction(invocation.name))
+        return compileLensCall(invocation, context);
+      if (isPathFunction(invocation.name))
+        return compilePathFunctionCall(invocation, context);
+      throw QueryRefusal(isKnownUnloweredFunction(invocation.name)
+                             ? QueryErrorCategory::Unsupported
+                             : QueryErrorCategory::Unknown,
+                         "unknown compiled function: " + invocation.name);
     }
     requirePositionalArguments(**function);
     return compileCall(found->second, (*function)->args, context, false);

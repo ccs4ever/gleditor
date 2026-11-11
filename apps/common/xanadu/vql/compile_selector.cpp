@@ -243,10 +243,30 @@ std::vector<CellRef> VQLCompiler::compileSelector(const PathStep &step,
         nextStream.insert(nextStream.end(), results.begin(), results.end());
       }
     } else {
-      refuseSemanticBuiltin(fn.name);
-      throw std::invalid_argument("VQL path function '" + fn.name +
-                                  "' is not compiled to Vortex yet");
+      if (isSemanticShapeBuiltin(fn.name)) {
+        nextStream = compileSemanticShapeStep(step, current, hasContext);
+      } else if (isSemanticQuantifierBuiltin(fn.name)) {
+        nextStream = compileSemanticQuantifierStep(step, current, hasContext);
+      } else if (isLensFunction(fn.name)) {
+        nextStream = compileLensStep(step, current, hasContext);
+      } else if (isPathFunction(fn.name)) {
+        nextStream = compilePathFunctionStep(step, current, hasContext);
+      } else {
+        // Specified names with no owning card (delta, the store generators)
+        // are Unsupported; any other name is not a VQL function at all.
+        throw QueryRefusal(isKnownUnloweredFunction(fn.name)
+                               ? QueryErrorCategory::Unsupported
+                               : QueryErrorCategory::Unknown,
+                           "VQL path function '" + fn.name +
+                               "' is not compiled to Vortex yet");
+      }
     }
+  } else if (std::holds_alternative<RootSelectorStep>(step.selector) ||
+             std::holds_alternative<GenesisSelector>(step.selector) ||
+             std::holds_alternative<PerspectiveStep>(step.selector) ||
+             std::holds_alternative<std::shared_ptr<MacroDimensionGroup>>(
+                 step.selector)) {
+    nextStream = compileRootSelectorStep(step, current, hasContext);
   } else {
     throw std::invalid_argument(
         "this VQL path selector does not have Vortex graph lowering yet");

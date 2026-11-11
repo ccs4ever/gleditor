@@ -34,9 +34,10 @@ std::vector<CellRef> VQLCompiler::compileSteps(std::span<const PathStep> steps,
                                                std::vector<CellRef> stream,
                                                bool hasContext) {
   for (const auto &step : steps) {
-    if (step.versionPin)
-      throw std::invalid_argument(
-          "version pins require historical VM lowering");
+    if (step.versionPin) {
+      stream = compileVersionPinnedStep(step, std::move(stream), hasContext);
+      continue;
+    }
     const auto stepInput = stream;
     std::vector<CellRef> nextStream;
 

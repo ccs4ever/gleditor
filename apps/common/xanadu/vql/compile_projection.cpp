@@ -46,9 +46,7 @@ void VQLCompiler::validateShapeProjection(const ShapeLiteral &shape) {
   remainingShapeProjectionRules_ -= shape.rules.size();
   if (!isStaticShapeProjectionSyntax(shape) &&
       !hasStaticProjectionRuleShape(shape))
-    throw std::invalid_argument(
-        "shape projection requires static rules and scalar, alias, or "
-        "read-only simple path targets");
+    compileDynamicShapeProjection(shape);
   for (const auto &entry : shape.rules) {
     if (const auto *wildcard = std::get_if<ShapeWildcard>(&entry.rule)) {
       (void)wildcard;
