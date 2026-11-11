@@ -115,8 +115,9 @@ vectors, maps, syntax trees and arena cells and does allocate.
 - **Reciprocal topology.** A cell has at most one neighbor per direction on a dimension. Linking
   updates reciprocals. Snapshot cells must never steal original neighbors' reciprocal links.
 - **Explicit views and edits.** `project(subject, shape)` creates a detached, identity-remapped
-  arena snapshot. `apply_shape(subject, shape)` explicitly edits an arena neighborhood. Bare
-  `subject{...}` refuses its formerly ambiguous view/edit meaning. Neither silently writes a store.
+  arena snapshot without changing its sources. `apply_shape(subject, shape)` is the explicit form of
+  the in-place arena edit, with stricter validation. Bare `subject{...}` masks in place. None of the
+  three silently writes a store.
 - **Deliberate content authority.** `d.clone` shares editable content authority, not byte equality
   or generic reference identity. Clone joins preserve leftmost authority and reject occupied-rank
   collisions. Quotations share identified spans; independent equal-content files remain independent.
@@ -300,7 +301,7 @@ ConditionalClause     ::= "if" BooleanExpr ActionClause ( "else" ActionClause )?
 PathExpression        ::= ( AnchorNode | PartialPathFunctor ) VersionPin? PathStep* ShapeProjection? CloneTail?
 PartialPathFunctor    ::= "/" StepSelector
 ShapeProjection       ::= "{" ( ShapeRule ( "," ShapeRule )* )? "}"
-                          (* parsed for diagnosis; use project/apply_shape *)
+                          (* masks in place; apply_shape is explicit, project non-mutating *)
 
 AnchorNode            ::= RootSelector
                         | StoreAnchor
@@ -968,7 +969,8 @@ cache ($O(k)$ for valence $k$, without rank traversal). A shape test succeeds if
 #### 4.8.3 Shape Masking, Projection, and Lens Subsumption
 
 Use `project(subject, shape)` for a detached arena snapshot and `apply_shape(subject, shape)` for an
-explicit arena neighborhood edit. Bare `$subject{...}` refuses with an actionable diagnostic. Shape
+explicit arena neighborhood edit. Bare `$subject{...}` masks the subject in place; `apply_shape` is
+the explicit form with the stricter validation below, and `project` is the non-mutating form. Shape
 predicates in brackets remain read-only tests.
 
 Projection currently accepts masks only: empty, wildcard and signed dimension selection/exclusion.
