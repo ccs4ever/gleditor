@@ -10,7 +10,10 @@
 #include <gtest/gtest.h>
 
 #include "common/xanadu/vagent/ast_clone.hpp"
+#include "common/xanadu/vagent/inlang_parser.hpp"
 #include "common/xanadu/vagent/parser.hpp"
+#include "common/xanadu/vagent/r1_ast.hpp"
+#include "common/xanadu/zigzag/arena_manifold.hpp"
 
 namespace {
 
@@ -509,9 +512,11 @@ TEST(VAgentParserTest, RefusesMissingDeadlinesAndIncompleteActions) {
   }
 }
 
-TEST(VAgentParserTest, ScanWithinTermArgumentRequiresParentheses) {
-  EXPECT_FALSE(
-      Parser("believes reading(subject ? expression)").parseExpression());
+TEST(VAgentParserTest, ScanWithinTermArgumentAcceptsExpressions) {
+  auto unparen =
+      Parser("believes reading(subject ? expression)").parseExpression();
+  ASSERT_TRUE(unparen) << (unparen ? "" : formatDiagnostic(unparen.error()));
+  EXPECT_EQ((*unparen)->children[0]->children[0]->text, "?");
   auto valid =
       Parser("believes reading((subject ? expression))").parseExpression();
   ASSERT_TRUE(valid) << (valid ? "" : formatDiagnostic(valid.error()));
@@ -714,8 +719,7 @@ TEST(VAgentParserTest, ParseCodeBodyParsesSpliceAndStaticInside) {
   EXPECT_EQ(staged->body->children[1]->kind, ExprKind::Static);
   // The inner grammar is the vagent grammar, so a nested code"…" literal
   // parses as an inner literal — escaped one level in the source spelling.
-  auto nested =
-      Parser::parseCodeBody("x + splice code\"n: Int | n + 1\"(x)");
+  auto nested = Parser::parseCodeBody("x + splice code\"n: Int | n + 1\"(x)");
   ASSERT_TRUE(nested) << formatDiagnostic(nested.error());
   ASSERT_EQ(nested->body->kind, ExprKind::Binary);
   const auto &inner = *nested->body->children[1];
@@ -834,6 +838,15 @@ void expectSameDecl(const Decl &expected, const Decl &actual) {
   ASSERT_EQ(expected.members.size(), actual.members.size());
   for (std::size_t i = 0; i < expected.members.size(); ++i)
     expectSameDecl(expected.members[i], actual.members[i]);
+  ASSERT_EQ(expected.planArms.size(), actual.planArms.size());
+  for (std::size_t i = 0; i < expected.planArms.size(); ++i) {
+    expectSameOptionalExpr(expected.planArms[i].pattern,
+                           actual.planArms[i].pattern);
+    expectSameOptionalExpr(expected.planArms[i].guard,
+                           actual.planArms[i].guard);
+    expectSameOptionalExpr(expected.planArms[i].body, actual.planArms[i].body);
+    expectSameLocation(expected.planArms[i].loc, actual.planArms[i].loc);
+  }
   expectSameOptionalExpr(expected.body, actual.body);
   expectSameOptionalExpr(expected.guard, actual.guard);
   expectSameOptionalExpr(expected.initializer, actual.initializer);
@@ -913,6 +926,12 @@ TEST(VAgentAstCloneTest, CloneDeclCopiesNestedMembersClausesAndFlags) {
   clause.condition->children.push_back(makeExpr(ExprKind::Term, "level"));
   clause.condition->scope = makeExpr(ExprKind::Identifier, "self");
   original.goalClauses.push_back(std::move(clause));
+  PlanArm arm;
+  arm.loc     = SourceLocation{12, 5, 150};
+  arm.pattern = makeExpr(ExprKind::WildcardPattern);
+  arm.guard   = makeExpr(ExprKind::Boolean, "true");
+  arm.body    = makeExpr(ExprKind::Block);
+  original.planArms.push_back(std::move(arm));
   Decl member;
   member.kind        = DeclKind::Field;
   member.name        = "watch";
@@ -952,6 +971,250 @@ TEST(VAgentAstCloneTest, CloneProgramRoundTripsEverySpecificationSample) {
     ++clonedCount;
   }
   EXPECT_EQ(clonedCount, 23U);
+}
+
+TEST(VAgentParserTest, ParseProgramToR1AllSpecificationSamples) {
+  const std::filesystem::path directory("tests/samples/vagent");
+  ASSERT_TRUE(std::filesystem::is_directory(directory));
+  std::size_t sampleCount = 0;
+  for (const auto &entry : std::filesystem::directory_iterator(directory)) {
+    if (entry.path().extension() != ".vagent" ||
+        !entry.path().filename().string().starts_with("mini_"))
+      continue;
+    SCOPED_TRACE(entry.path().string());
+    std::ifstream stream(entry.path());
+    const std::string source(std::istreambuf_iterator<char>(stream), {});
+
+    // P21: Isolated scratch compilation arena
+    zigzag::ArenaManifold scratchArena;
+    zigzag::vortex::VortexCore core(scratchArena);
+
+    auto r1Prog = parseProgramToR1(scratchArena, core, source);
+    ASSERT_TRUE(r1Prog.has_value())
+        << "Failed to parse " << entry.path().filename().string()
+        << " to R1: " << r1Prog.error();
+
+    // Verify 2-degree rank invariants
+    EXPECT_TRUE(scratchArena.contains(*r1Prog));
+    EXPECT_EQ(scratchArena.textOf(*r1Prog), "program");
+
+    auto unmarshaled = unmarshalR1ToProgram(scratchArena, core, *r1Prog);
+    ASSERT_TRUE(unmarshaled.has_value())
+        << "Failed to unmarshal R1 to program: " << unmarshaled.error();
+
+    EXPECT_FALSE(unmarshaled->declarations.empty());
+    ++sampleCount;
+  }
+  EXPECT_EQ(sampleCount, 23U);
+}
+
+TEST(VAgentParserTest, DelimiterOrthogonalityTuplesListsAndRecords) {
+  auto unitExpr = Parser("()").parseExpression();
+  ASSERT_TRUE(unitExpr);
+  EXPECT_EQ((*unitExpr)->kind, ExprKind::Unit);
+
+  auto parenExpr = Parser("(42)").parseExpression();
+  ASSERT_TRUE(parenExpr);
+  EXPECT_EQ((*parenExpr)->kind, ExprKind::Integer);
+  EXPECT_EQ((*parenExpr)->text, "42");
+
+  auto tuple1 = Parser("(42,)").parseExpression();
+  ASSERT_TRUE(tuple1);
+  EXPECT_EQ((*tuple1)->kind, ExprKind::Tuple);
+  ASSERT_EQ((*tuple1)->children.size(), 1U);
+  EXPECT_EQ((*tuple1)->children[0]->kind, ExprKind::Integer);
+
+  auto tuple2 = Parser("(1, 2, 3)").parseExpression();
+  ASSERT_TRUE(tuple2);
+  EXPECT_EQ((*tuple2)->kind, ExprKind::Tuple);
+  ASSERT_EQ((*tuple2)->children.size(), 3U);
+
+  auto listSpread = Parser("[1, ...rest, 3]").parseExpression();
+  ASSERT_TRUE(listSpread);
+  EXPECT_EQ((*listSpread)->kind, ExprKind::List);
+  ASSERT_EQ((*listSpread)->children.size(), 3U);
+  EXPECT_EQ((*listSpread)->children[1]->kind, ExprKind::Unary);
+  EXPECT_EQ((*listSpread)->children[1]->text, "...");
+  ASSERT_EQ((*listSpread)->children[1]->children.size(), 1U);
+  EXPECT_EQ((*listSpread)->children[1]->children[0]->kind,
+            ExprKind::Identifier);
+  EXPECT_EQ((*listSpread)->children[1]->children[0]->text, "rest");
+}
+
+TEST(VAgentParserTest, PatternMatchingAndMatchArms) {
+  const std::string source = R"(
+    match item with {
+      0 => { false }
+      ?val where val > 0 => { true }
+      _ => { false }
+    }
+  )";
+  auto expr                = Parser(source).parseExpression();
+  ASSERT_TRUE(expr) << (expr ? "" : formatDiagnostic(expr.error()));
+  EXPECT_EQ((*expr)->kind, ExprKind::Match);
+  ASSERT_EQ((*expr)->children.size(), 4U);
+  EXPECT_EQ((*expr)->children[0]->kind, ExprKind::Identifier);
+  EXPECT_EQ((*expr)->children[0]->text, "item");
+
+  // Arm 1: 0 => { false }
+  EXPECT_EQ((*expr)->children[1]->kind, ExprKind::MatchArm);
+  ASSERT_GE((*expr)->children[1]->children.size(), 2U);
+  EXPECT_EQ((*expr)->children[1]->children[0]->kind, ExprKind::Integer);
+
+  // Arm 2: ?val where val > 0 => { true }
+  EXPECT_EQ((*expr)->children[2]->kind, ExprKind::MatchArm);
+  EXPECT_EQ((*expr)->children[2]->children[0]->kind, ExprKind::LogicVariable);
+  EXPECT_EQ((*expr)->children[2]->children[0]->text, "val");
+  ASSERT_NE((*expr)->children[2]->guard, nullptr);
+  EXPECT_EQ((*expr)->children[2]->guard->kind, ExprKind::Binary);
+
+  // Arm 3: _ => { false }
+  EXPECT_EQ((*expr)->children[3]->kind, ExprKind::MatchArm);
+  EXPECT_EQ((*expr)->children[3]->children[0]->kind, ExprKind::WildcardPattern);
+}
+
+TEST(VAgentParserTest, MultiArmPlansAndDefaultArm) {
+  const std::string source = R"(
+    agent Worker {
+      plan solve for Task(id) {
+        case 0 => { yield }
+        where id > 10 => { yield }
+        default => { yield }
+      }
+    }
+  )";
+  auto prog                = Parser(source).parseProgram();
+  ASSERT_TRUE(prog) << (prog ? "" : formatDiagnostic(prog.error()));
+  ASSERT_EQ(prog->declarations.size(), 1U);
+  const auto &agent = prog->declarations[0];
+  ASSERT_EQ(agent.members.size(), 1U);
+  const auto &plan = agent.members[0];
+  EXPECT_EQ(plan.kind, DeclKind::Plan);
+  ASSERT_EQ(plan.planArms.size(), 3U);
+
+  // Arm 0: case 0 => { yield }
+  ASSERT_NE(plan.planArms[0].pattern, nullptr);
+  EXPECT_EQ(plan.planArms[0].pattern->kind, ExprKind::Integer);
+
+  // Arm 1: where id > 10 => { yield }
+  EXPECT_EQ(plan.planArms[1].pattern, nullptr);
+  ASSERT_NE(plan.planArms[1].guard, nullptr);
+  EXPECT_EQ(plan.planArms[1].guard->kind, ExprKind::Binary);
+
+  // Arm 2: default => { yield }
+  EXPECT_EQ(plan.planArms[2].pattern, nullptr);
+  EXPECT_EQ(plan.planArms[2].guard, nullptr);
+  ASSERT_NE(plan.planArms[2].body, nullptr);
+}
+
+TEST(VAgentParserTest, MapLiteralsAndMapTypes) {
+  auto mapExpr = Parser(R"(Map { "alpha": 1, "beta": 2 })").parseExpression();
+  ASSERT_TRUE(mapExpr);
+  EXPECT_EQ((*mapExpr)->kind, ExprKind::Map);
+  ASSERT_EQ((*mapExpr)->children.size(), 4U);
+  EXPECT_EQ((*mapExpr)->children[0]->kind, ExprKind::String);
+  EXPECT_EQ((*mapExpr)->children[1]->kind, ExprKind::Integer);
+
+  const std::string progSource = R"(
+    record Dictionary { entries: Map<Str, Int> }
+  )";
+  auto prog                    = Parser(progSource).parseProgram();
+  ASSERT_TRUE(prog);
+  ASSERT_EQ(prog->declarations.size(), 1U);
+  const auto &rec = prog->declarations[0];
+  ASSERT_EQ(rec.parameters.size(), 1U);
+  EXPECT_EQ(rec.parameters[0].type.name, "Map");
+  ASSERT_EQ(rec.parameters[0].type.arguments.size(), 2U);
+  EXPECT_EQ(rec.parameters[0].type.arguments[0].name, "Str");
+  EXPECT_EQ(rec.parameters[0].type.arguments[1].name, "Int");
+}
+
+TEST(VAgentParserTest, MicroVersionLiteralsAndSafeNavigationAndCoalescing) {
+  auto mvHead = Parser("@HEAD").parseExpression();
+  ASSERT_TRUE(mvHead);
+  EXPECT_EQ((*mvHead)->kind, ExprKind::MicroVersionLiteral);
+  EXPECT_EQ((*mvHead)->text, "HEAD");
+
+  auto mvId = Parser("@2a4").parseExpression();
+  ASSERT_TRUE(mvId);
+  EXPECT_EQ((*mvId)->kind, ExprKind::MicroVersionLiteral);
+  EXPECT_EQ((*mvId)->text, "2a4");
+
+  auto safeNav = Parser("target?.state?.name").parseExpression();
+  ASSERT_TRUE(safeNav);
+  EXPECT_EQ((*safeNav)->kind, ExprKind::SafeNav);
+  EXPECT_EQ((*safeNav)->text, "name");
+  ASSERT_EQ((*safeNav)->children.size(), 1U);
+  EXPECT_EQ((*safeNav)->children[0]->kind, ExprKind::SafeNav);
+  EXPECT_EQ((*safeNav)->children[0]->text, "state");
+
+  auto coalesce = Parser("opt ?? fallback").parseExpression();
+  ASSERT_TRUE(coalesce);
+  EXPECT_EQ((*coalesce)->kind, ExprKind::Coalesce);
+  ASSERT_EQ((*coalesce)->children.size(), 2U);
+  EXPECT_EQ((*coalesce)->children[0]->kind, ExprKind::Identifier);
+  EXPECT_EQ((*coalesce)->children[1]->kind, ExprKind::Identifier);
+
+  auto unwrap = Parser("opt?").parseExpression();
+  ASSERT_TRUE(unwrap);
+  EXPECT_EQ((*unwrap)->kind, ExprKind::Unary);
+  EXPECT_EQ((*unwrap)->text, "?");
+  ASSERT_EQ((*unwrap)->children.size(), 1U);
+  EXPECT_EQ((*unwrap)->children[0]->kind, ExprKind::Identifier);
+
+  auto scanExpr = Parser("scan text with { tab(1) }").parseExpression();
+  ASSERT_TRUE(scanExpr);
+  EXPECT_EQ((*scanExpr)->kind, ExprKind::Binary);
+  EXPECT_EQ((*scanExpr)->text, "?");
+  ASSERT_EQ((*scanExpr)->children.size(), 2U);
+  EXPECT_EQ((*scanExpr)->children[0]->kind, ExprKind::Identifier);
+  EXPECT_EQ((*scanExpr)->children[1]->kind, ExprKind::Block);
+}
+
+TEST(VAgentParserTest, LetDestructuringWithElseRecovery) {
+  const std::string blockSource = R"({
+    let (?head, ?tail) := split() else { fail }
+    let _ := ignore()
+  })";
+  auto block                    = Parser(blockSource).parseExpression();
+  ASSERT_TRUE(block) << (block ? "" : formatDiagnostic(block.error()));
+  EXPECT_EQ((*block)->kind, ExprKind::Block);
+  ASSERT_EQ((*block)->children.size(), 2U);
+
+  const auto &let1 = (*block)->children[0];
+  EXPECT_EQ(let1->kind, ExprKind::Let);
+  ASSERT_EQ(let1->children.size(), 2U);
+  EXPECT_EQ(let1->children[0]->kind, ExprKind::TuplePattern);
+  EXPECT_EQ(let1->children[1]->kind, ExprKind::Call);
+  ASSERT_NE(let1->recovery, nullptr);
+  EXPECT_EQ(let1->recovery->kind, ExprKind::Block);
+
+  const auto &let2 = (*block)->children[1];
+  EXPECT_EQ(let2->kind, ExprKind::Let);
+  ASSERT_EQ(let2->children.size(), 2U);
+  EXPECT_EQ(let2->children[0]->kind, ExprKind::WildcardPattern);
+}
+
+TEST(VAgentParserTest, EventDestructuringAndWhereGuard) {
+  const std::string source = R"(
+    agent Receiver {
+      on Message { id: ?msgId, payload: ?p } where msgId > 0 {
+        yield
+      }
+    }
+  )";
+  auto prog                = Parser(source).parseProgram();
+  ASSERT_TRUE(prog) << (prog ? "" : formatDiagnostic(prog.error()));
+  ASSERT_EQ(prog->declarations.size(), 1U);
+  const auto &agent = prog->declarations[0];
+  ASSERT_EQ(agent.members.size(), 1U);
+  const auto &handler = agent.members[0];
+  EXPECT_EQ(handler.kind, DeclKind::Handler);
+  ASSERT_NE(handler.trigger, nullptr);
+  EXPECT_EQ(handler.trigger->kind, ExprKind::RecordPattern);
+  EXPECT_EQ(handler.trigger->text, "Message");
+  ASSERT_NE(handler.guard, nullptr);
+  EXPECT_EQ(handler.guard->kind, ExprKind::Binary);
 }
 
 } // namespace

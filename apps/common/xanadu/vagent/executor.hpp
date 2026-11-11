@@ -175,9 +175,8 @@ public:
   /// keys the raise on the member so a redelivered down (or the
   /// ActorDown that trails an orderly `ChildStopping`, which `stop`
   /// pre-marks) reports once.
-  void childDown(zigzag::ArenaManifold &arena,
-                 zigzag::vortex::VortexCore &core, zigzag::CellRef agent,
-                 zigzag::CellRef child) const;
+  void childDown(zigzag::ArenaManifold &arena, zigzag::vortex::VortexCore &core,
+                 zigzag::CellRef agent, zigzag::CellRef child) const;
 
   /// §4.5's orderly-stop announcement for the causes the executor
   /// cannot observe in a turn — `"terminate"`, `"lease"`, `"init"`;
@@ -190,17 +189,16 @@ public:
   /// and pre-marks `childdown:` so the trailing ActorDown repeats
   /// nothing.
   void childStopping(zigzag::ArenaManifold &arena,
-                     zigzag::vortex::VortexCore &core,
-                     zigzag::CellRef agent, zigzag::CellRef member,
-                     std::string_view cause) const;
+                     zigzag::vortex::VortexCore &core, zigzag::CellRef agent,
+                     zigzag::CellRef member, std::string_view cause) const;
 
   /// §8.6's refused spawn: raises `SpawnFailed{child}` on the parent
   /// and fails every delivery still staged to the refused member's
   /// name — the outbox rank persists, so each failure rides
   /// `deliveryFailed`'s own per-id idempotence.
   void spawnFailed(zigzag::ArenaManifold &arena,
-                   zigzag::vortex::VortexCore &core,
-                   zigzag::CellRef agent, zigzag::CellRef child) const;
+                   zigzag::vortex::VortexCore &core, zigzag::CellRef agent,
+                   zigzag::CellRef child) const;
 
   /// A host-side percept injection — what an `ActorSend` arrival
   /// becomes for fields the bare `value` string cannot carry: the
@@ -214,14 +212,14 @@ public:
   /// the staged record's semantics over the wire ("tell" asserts a
   /// belief, "ask" echoes its request id); `sender` is the receiver-
   /// side member the source pid resolved to, the belief's +d.source.
-  void injectPercept(zigzag::ArenaManifold &arena,
-                     zigzag::vortex::VortexCore &core,
-                     zigzag::CellRef agent, std::string_view name,
-                     const std::vector<std::pair<
-                         std::string, zigzag::vortex::CellValue>> &fields,
-                     std::string_view id, std::string_view kind = {},
-                     std::string_view correlation       = {},
-                     zigzag::CellRef sender = zigzag::noCell) const;
+  void injectPercept(
+      zigzag::ArenaManifold &arena, zigzag::vortex::VortexCore &core,
+      zigzag::CellRef agent, std::string_view name,
+      const std::vector<std::pair<std::string, zigzag::vortex::CellValue>>
+          &fields,
+      std::string_view id, std::string_view kind = {},
+      std::string_view correlation          = {},
+      std::optional<zigzag::CellRef> sender = std::nullopt) const;
 
   /// §4.5's orderly stop as a wire arrival runs it: the `stop`
   /// performative passed the adapter's parent-only check, so @p agent
@@ -248,8 +246,7 @@ public:
   /// on an effect cannot follow the device, so a resumed agent marks
   /// every `awaitEffect` park `awaitFault`="migrated" — the next
   /// settle runs the else/fault ladder with that cause.
-  void resumed(zigzag::ArenaManifold &arena,
-               zigzag::vortex::VortexCore &core,
+  void resumed(zigzag::ArenaManifold &arena, zigzag::vortex::VortexCore &core,
                zigzag::CellRef agent) const;
 
 private:

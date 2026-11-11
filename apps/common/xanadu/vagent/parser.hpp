@@ -83,6 +83,7 @@ private:
   // or produced a call another way (parenthesized), which is a check error.
   ExprPtr postfix(ExprPtr base, TokenKind *lastSuffix = nullptr);
   ExprPtr operand();
+  ExprPtr pattern();
   ExprPtr block();
   ExprPtr list();
   ExprPtr record(Token name);
@@ -105,7 +106,6 @@ private:
   std::size_t depth_{0};
   bool significantNewlines_{false};
   bool allowRecord_{true};
-  bool allowScan_{true};
 };
 
 } // namespace xanadu::vagent

@@ -1,0 +1,196 @@
+module std:compiler:lexer
+
+import std:meta
+import std:goal (tab, move, many, match, upto, any, pos)
+
+agent Lexer {
+  var error_msg: Str := ""
+  var cur_line: Int := 1
+  var cur_col: Int := 1
+
+  def is_whitespace(c: Str): Bool {
+    let res := c ? any(" \t\u{0d}")
+    if res > 0 then true else false
+  }
+
+  def is_newline(c: Str): Bool {
+    let res := c ? any("\n")
+    if res > 0 then true else false
+  }
+
+  def is_ident_start(c: Str): Bool {
+    let res := c ? any("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_")
+    if res > 0 then true else false
+  }
+
+  def is_ident_part(c: Str): Bool {
+    let res := c ? any("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_0123456789")
+    if res > 0 then true else false
+  }
+
+  def is_digit(c: Str): Bool {
+    let res := c ? any("0123456789")
+    if res > 0 then true else false
+  }
+
+  def is_hex_digit(c: Str): Bool {
+    let res := c ? any("0123456789abcdefABCDEF")
+    if res > 0 then true else false
+  }
+
+  def scan_ident(src: Str): Str {
+    src ? (tab(many("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_0123456789")) | "")
+  }
+
+  def scan_digits(src: Str): Str {
+    src ? (tab(many("0123456789")) | "")
+  }
+
+  def scan_hex_digits(src: Str): Str {
+    src ? (tab(many("0123456789abcdefABCDEF")) | "")
+  }
+
+  def is_keyword(w: Str): Bool {
+    if w == "agent" | w == "on" | w == "plan" | w == "var" | w == "let" |
+       w == "def" | w == "if" | w == "then" | w == "else" | w == "while" |
+       w == "import" | w == "return" | w == "fail" | w == "code" | w == "cells" |
+       w == "static" | w == "splice" | w == "true" | w == "false" | w == "none" |
+       w == "not" | w == "match" | w == "believes" | w == "event" | w == "record" |
+       w == "where" | w == "to" | w == "by" | w == "yield" | w == "consume" then
+      true
+    else
+      false
+  }
+
+  def next_token_kind(src: Str, p: Int, len: Int): Str {
+    if p >= len then {
+      "EOF"
+    } else {
+      let rest := str_slice(src, p, len)
+      let c := str_slice(rest, 0, 1)
+      if c == "\n" then {
+        "Newline"
+      } else if is_ident_start(c) then {
+        let id := scan_ident(rest)
+        if is_keyword(id) then "Keyword" else "Identifier"
+      } else if is_digit(c) then {
+        "Integer"
+      } else if c == "\"" then {
+        "String"
+      } else if c == "(" then {
+        "OpenParen"
+      } else if c == ")" then {
+        "CloseParen"
+      } else if c == "[" then {
+        "OpenBracket"
+      } else if c == "]" then {
+        "CloseBracket"
+      } else if c == "{" then {
+        "OpenBrace"
+      } else if c == "}" then {
+        "CloseBrace"
+      } else if c == "," then {
+        "Comma"
+      } else if c == ":" then {
+        let next2 := str_slice(rest, 0, 2)
+        if next2 == ":=" then "Assign" else "Colon"
+      } else if c == ";" then {
+        "Semicolon"
+      } else if c == "." then {
+        "Dot"
+      } else if c == "+" then {
+        let next2 := str_slice(rest, 0, 2)
+        if next2 == "++" then "Concat" else "Plus"
+      } else if c == "-" then {
+        let next2 := str_slice(rest, 0, 2)
+        if next2 == "->" then "Arrow" else "Minus"
+      } else if c == "*" then {
+        "Star"
+      } else if c == "/" then {
+        "Slash"
+      } else if c == "%" then {
+        "Percent"
+      } else if c == "=" then {
+        let next2 := str_slice(rest, 0, 2)
+        if next2 == "==" then "Equal" else "Assign"
+      } else if c == "!" then {
+        let next2 := str_slice(rest, 0, 2)
+        if next2 == "!=" then "NotEqual" else "Bang"
+      } else if c == "<" then {
+        let next2 := str_slice(rest, 0, 2)
+        if next2 == "<=" then "LessEqual" else if next2 == "<-" then "RevAssign" else "Less"
+      } else if c == ">" then {
+        let next2 := str_slice(rest, 0, 2)
+        if next2 == ">=" then "GreaterEqual" else "Greater"
+      } else if c == "&" then {
+        "Ampersand"
+      } else if c == "|" then {
+        "Alternation"
+      } else if c == "?" then {
+        "Scan"
+      } else {
+        "Unknown"
+      }
+    }
+  }
+
+  def next_token_text(src: Str, p: Int, len: Int): Str {
+    if p >= len then {
+      ""
+    } else {
+      let rest := str_slice(src, p, len)
+      let c := str_slice(rest, 0, 1)
+      if c == "\n" then {
+        "\n"
+      } else if is_ident_start(c) then {
+        scan_ident(rest)
+      } else if is_digit(c) then {
+        scan_digits(rest)
+      } else if c == ":" then {
+        let next2 := str_slice(rest, 0, 2)
+        if next2 == ":=" then ":=" else ":"
+      } else if c == "+" then {
+        let next2 := str_slice(rest, 0, 2)
+        if next2 == "++" then "++" else "+"
+      } else if c == "-" then {
+        let next2 := str_slice(rest, 0, 2)
+        if next2 == "->" then "->" else "-"
+      } else if c == "=" then {
+        let next2 := str_slice(rest, 0, 2)
+        if next2 == "==" then "==" else "="
+      } else if c == "!" then {
+        let next2 := str_slice(rest, 0, 2)
+        if next2 == "!=" then "!=" else "!"
+      } else if c == "<" then {
+        let next2 := str_slice(rest, 0, 2)
+        if next2 == "<=" then "<=" else if next2 == "<-" then "<-" else "<"
+      } else if c == ">" then {
+        let next2 := str_slice(rest, 0, 2)
+        if next2 == ">=" then ">=" else ">"
+      } else {
+        c
+      }
+    }
+  }
+
+  def skip_whitespace_and_comments(src: Str, p: Int, len: Int): Int {
+    if p >= len then {
+      p
+    } else {
+      let rest := str_slice(src, p, len)
+      let c := str_slice(rest, 0, 1)
+      if is_whitespace(c) then {
+        skip_whitespace_and_comments(src, p + 1, len)
+      } else if c == "#" then {
+        let line_rest := rest ? (upto("\n") | "")
+        if str_len(line_rest) > 0 then {
+          skip_whitespace_and_comments(src, p + str_len(line_rest), len)
+        } else {
+          len
+        }
+      } else {
+        p
+      }
+    }
+  }
+}

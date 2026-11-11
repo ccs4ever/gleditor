@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "common/xanadu/publication.hpp"
+#include "common/xanadu/relocation_marks.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
 #include "common/xanadu/zigzag/dimension_registry.hpp"
 
@@ -93,16 +94,11 @@ restateScopeArms(Store &lineage, xanadu::MicroversionId version,
     return it == twin.end() ? zigzag::noCell : it->second;
   };
   for (const std::string_view dimName : {"d.owner", "d.holder"}) {
-    zigzag::DimRef scopeDim = zigzag::noCell;
-    for (const auto dim : arena.dimensions())
-      if (arena.textOf(dim) == dimName) {
-        scopeDim = dim;
-        break;
-      }
-    if (scopeDim == zigzag::noCell) continue;
+    const auto scopeDim = findDimensionByName(arena, dimName);
+    if (!scopeDim) continue;
     for (const auto arenaPos : promoted.arena) {
       const auto arm =
-          arena.linked(arenaPos, scopeDim, zigzag::DimVector::POS);
+          arena.linked(arenaPos, *scopeDim, zigzag::DimVector::POS);
       if (!arm) continue;
       const auto named = arena.asInt64(*arm);
       if (!named) continue;
@@ -143,9 +139,7 @@ restateRefSlots(Store &lineage, xanadu::MicroversionId version,
     return it == twin.end() ? zigzag::noCell : it->second;
   };
   const auto dimOf = [&](std::string_view name) {
-    for (const auto dim : arena.dimensions())
-      if (arena.textOf(dim) == name) return dim;
-    return zigzag::DimRef{zigzag::noCell};
+    return findDimensionByName(arena, name).value_or(zigzag::noCell);
   };
   const auto refsDim   = dimOf("d.refs");
   const auto recipeDim = dimOf("d.recipe");
@@ -157,18 +151,19 @@ restateRefSlots(Store &lineage, xanadu::MicroversionId version,
       stepDim == zigzag::noCell)
     return version;
   const auto restate = [&](zigzag::CellRef slot) {
-    const auto named = arena.asInt64(slot);
+    const auto named = relocationTarget(arena, slot);
     if (!named) return;
-    const auto position = twinOf(static_cast<zigzag::CellRef>(*named));
-    if (position == zigzag::noCell ||
-        position == static_cast<zigzag::CellRef>(*named))
-      return;
+    const auto position = twinOf(*named);
+    if (position == zigzag::noCell || position == *named) return;
     const auto foldSlot = twinOf(slot);
     if (foldSlot == zigzag::noCell) return;
-    version = lineage.setValue(version, foldSlot, xanadu::PrimediaSpan{},
-                               xanadu::ValueKind::Int64,
-                               std::bit_cast<std::uint64_t>(
-                                   static_cast<std::int64_t>(position)));
+    const auto kind = arena.valueKindOf(slot);
+    const auto bits =
+        kind == xanadu::ValueKind::OpHandle
+            ? static_cast<std::uint64_t>(position)
+            : std::bit_cast<std::uint64_t>(static_cast<std::int64_t>(position));
+    version =
+        lineage.setValue(version, foldSlot, xanadu::PrimediaSpan{}, kind, bits);
   };
   for (const auto head : promoted.arena) {
     for (auto record = arena.linked(head, refsDim, zigzag::DimVector::POS);
@@ -186,66 +181,10 @@ restateRefSlots(Store &lineage, xanadu::MicroversionId version,
         restate(*member);
       }
   }
-  // The dense half of the relocation contract: a `d.mesh.relocation`
-  // mark on a slot cell is itself the manifest — vars-record member
-  // refs, record fields and staged-outbox refs ride `refCell` with no
-  // recipe chain to find them by. The rewrite is idempotent beside the
-  // chain arm's (a slot either walk reaches names the same twin).
-  if (const auto relocDim = dimOf("d.mesh.relocation");
-      relocDim != zigzag::noCell)
-    for (std::size_t dense = 0; dense < arena.cellCount(); ++dense) {
-      const auto cell =
-          static_cast<zigzag::CellRef>(zigzag::ephemeralBit | dense);
-      if (!arena.holdsOwn(cell)) continue;
-      if (!arena.linked(cell, relocDim, zigzag::DimVector::POS))
-        continue;
-      restate(cell);
-    }
+  // The relocation mark is itself the manifest for ref-valued slots that
+  // have no recipe chain to find them by.
+  for (const auto slot : markedRelocationSlots(arena)) restate(slot);
   return version;
-}
-
-/// Every slot cell carrying the `+d.mesh.relocation → "cell"` mark —
-/// the dense half of the manifest walk, slot-level so the caller
-/// decides which slots count (a regenesis cycle seeds only
-/// session-minted slots' referents; the recipe's band cells are
-/// replay-minted and must stay out).
-[[nodiscard]] std::vector<zigzag::CellRef>
-markedRelocationSlots(ArenaManifold &arena) {
-  zigzag::DimRef marker = zigzag::noCell;
-  for (const auto dim : arena.dimensions())
-    if (arena.textOf(dim) == "d.mesh.relocation") {
-      marker = dim;
-      break;
-    }
-  std::vector<zigzag::CellRef> slots;
-  if (marker == zigzag::noCell) return slots;
-  for (std::size_t dense = 0; dense < arena.cellCount(); ++dense) {
-    const auto cell =
-        static_cast<zigzag::CellRef>(zigzag::ephemeralBit | dense);
-    if (!arena.holdsOwn(cell)) continue;
-    if (arena.linked(cell, marker, zigzag::DimVector::POS))
-      slots.push_back(cell);
-  }
-  return slots;
-}
-
-/// A non-name ref slot carries `+d.mesh.relocation → "cell"` — the
-/// emission's own "this Int64 is a position" mark (fragment.cpp's
-/// refsRecord). Promote's walk sees edges only, so a referent named
-/// solely by that scalar never reaches the band: harvest every marked
-/// slot's position as a promote root, and restateRefSlots then has a
-/// twin to write back. Name-record slots re-resolve by label at
-/// genesis (e), so only the marked slots need seeding.
-[[nodiscard]] std::vector<zigzag::CellRef>
-harvestRelocationTargets(ArenaManifold &arena) {
-  std::vector<zigzag::CellRef> targets;
-  for (const auto slot : markedRelocationSlots(arena)) {
-    const auto named = arena.asInt64(slot);
-    if (named && zigzag::isEphemeral(
-                     static_cast<zigzag::CellRef>(*named)))
-      targets.push_back(static_cast<zigzag::CellRef>(*named));
-  }
-  return targets;
 }
 
 } // namespace
@@ -308,9 +247,7 @@ seedProgramImage(Store &lineage, ArenaManifold &arena,
   // first two positions, and the d.dims rank is the one rank promote's
   // discovery walk skips outright.
   const auto dimNamed = [&](std::string_view name) {
-    for (const auto dim : arena.dimensions())
-      if (arena.textOf(dim) == name) return dim;
-    return zigzag::DimRef{zigzag::noCell};
+    return findDimensionByName(arena, name).value_or(zigzag::noCell);
   };
   const auto varsDim   = dimNamed("d.vars");
   const auto valuesDim = dimNamed("d.values");
@@ -508,14 +445,14 @@ regenesisCycle(Store &lineage, ArenaManifold &arena, const CellRef agentRoot,
     }
   }
   // The marked-ref harvest, convention-filtered: a state-side
-  // `d.mesh.relocation` slot's Int64-carried referent never reaches
-  // promote through the edge walk — a `var child` member or a staged
-  // entry's payload lives only behind that scalar. The recipe's own
+  // `d.mesh.relocation` slot's referent never reaches promote through
+  // the edge walk — a `var child` member or a staged entry's payload
+  // lives only behind that scalar. The recipe's own
   // marks pair their slots through +d.ref/+d.refFor (fragment.cpp's
   // refsRecord), and genesis replay re-mints those referents —
   // seeding one re-installs the clause beside the replayed copy.
-  const auto refDim    = arena.dimensionNamed("d.ref");
-  const auto refForDim = arena.dimensionNamed("d.refFor");
+  const auto refDim    = findDimensionByName(arena, "d.ref");
+  const auto refForDim = findDimensionByName(arena, "d.refFor");
   for (const auto slot : markedRelocationSlots(arena)) {
     if (!zigzag::isEphemeral(slot)) continue;
     if ((refDim &&
@@ -523,9 +460,9 @@ regenesisCycle(Store &lineage, ArenaManifold &arena, const CellRef agentRoot,
         (refForDim &&
          arena.linked(slot, *refForDim, zigzag::DimVector::NEG)))
       continue;
-    const auto named = arena.asInt64(slot);
+    const auto named = relocationTarget(arena, slot);
     if (!named) continue;
-    const auto target = static_cast<CellRef>(*named);
+    const auto target = *named;
     if (zigzag::isEphemeral(target)) durable.push_back(target);
   }
   // Opt the same state-side shadows into committing edge-clears: the

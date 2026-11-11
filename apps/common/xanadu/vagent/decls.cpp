@@ -1,7 +1,9 @@
 #include "common/xanadu/vagent/decls.hpp"
 
 #include <bit>
+#include <deque>
 #include <format>
+#include <functional>
 #include <iterator>
 #include <map>
 #include <string_view>
@@ -9,9 +11,11 @@
 
 #include "common/xanadu/scalar.hpp"
 #include "common/xanadu/vagent/ast_clone.hpp"
+#include "common/xanadu/vagent/bootstrap.hpp"
 #include "common/xanadu/vagent/fragment.hpp"
 #include "common/xanadu/vagent/marshal.hpp"
 #include "common/xanadu/vagent/meta.hpp"
+#include "common/xanadu/vagent/r1_ast.hpp"
 #include "common/xanadu/vagent/records.hpp"
 #include "common/xanadu/zigzag/zzcore.hpp"
 
@@ -143,18 +147,16 @@ struct Lowerer {
     // uniform when the owner declares no fields.
     std::vector<Parameter> effective = params;
     if (!memberPrefix_.empty())
-      effective.push_back(Parameter{.name = "$owner",
-                                    .type = Type{"Cell"}});
+      effective.push_back(Parameter{.name = "$owner", .type = Type{"Cell"}});
     const FragmentKey key{decl.loc, ordinal++};
-    fragments.emplace(key,
-                      FragmentRecord{.body = CodeBody{std::string{label},
-                                                      effective,
-                                                      cloneExpr(body)},
-                                     .closed = true});
-    infos.emplace(key, FragmentInfo{.result = std::move(result),
-                                    .pure   = false,
-                                    .closed = true,
-                                    .arity  = effective.size(),
+    fragments.emplace(
+        key, FragmentRecord{.body   = CodeBody{std::string{label}, effective,
+                                               cloneExpr(body)},
+                            .closed = true});
+    infos.emplace(key, FragmentInfo{.result      = std::move(result),
+                                    .pure        = false,
+                                    .closed      = true,
+                                    .arity       = effective.size(),
                                     .ownerFields = memberFields_});
     const auto object = compileFragment(literal, context, compiler);
     if (!object) return std::unexpected(object.error());
@@ -255,14 +257,85 @@ struct Lowerer {
                ExprKind::Identifier;
   }
 
+  static bool isMetaVerb(std::string_view name) {
+    static const std::unordered_set<std::string_view> kVerbs{
+        "reify",
+        "validate",
+        "register",
+        "register_all",
+        "registration",
+        "dim_named",
+        "as_body",
+        "head_of",
+        "var_of",
+        "module_named",
+        "symbol_named",
+        "clauses_of",
+        "test_of",
+        "body_of",
+        "plan_named",
+        "code_named",
+        "label_of",
+        "weight_of",
+        "value_of",
+        "next_rand",
+        "graft_where",
+        "graft_body",
+        "graft_plan",
+        "graft_handler",
+        "graft_method",
+        "prune",
+        "learn_where",
+        "learn_body",
+        "learn_plan",
+        "learn_handler",
+        "learn_method",
+        "unlearn",
+        "set_weight",
+        "sprout_synapse",
+        "join_batch",
+        "build_fragment",
+        "compile_fragment",
+        "boot_writer",
+        "boot_linker",
+        "make_cell",
+        "program",
+        "agent_cell",
+        "grab_of",
+        "step_of",
+        "values_of",
+        "set_values",
+        "set_var",
+    };
+    return kVerbs.contains(name);
+  }
+
+  static std::optional<std::string_view> metaVerbNameOf(const Expr &expr) {
+    if (expr.kind != ExprKind::Call || expr.children.empty())
+      return std::nullopt;
+    const auto &callee = *expr.children.front();
+    if (callee.kind == ExprKind::Identifier) {
+      if (isMetaVerb(callee.text)) return callee.text;
+    } else if (callee.kind == ExprKind::Field && !callee.children.empty()) {
+      if (isMetaVerb(callee.text)) return callee.text;
+    }
+    return std::nullopt;
+  }
+
+  static bool isMetaCall(const Expr &expr) {
+    return metaVerbNameOf(expr).has_value();
+  }
+
   // The host verb a statement lowers to — the statement itself, or
   // the verb hoisted out of `x := <verb>` / `let x := <verb>`. The
   // two callers (the spine gate and the emitter) must agree on this
   // or a bound verb lowers as dead scalar code.
   static const Expr *hostVerbOf(const Expr &stmt) {
-    if (isHostVerb(stmt.kind) || isCapacityCall(stmt)) return &stmt;
+    if (isHostVerb(stmt.kind) || isCapacityCall(stmt) || isMetaCall(stmt))
+      return &stmt;
     const auto hoisted = [](const Expr &inner) {
-      return isHostVerb(inner.kind) || isCapacityCall(inner);
+      return isHostVerb(inner.kind) || isCapacityCall(inner) ||
+             isMetaCall(inner);
     };
     if (stmt.kind == ExprKind::Binary && stmt.text == ":=" &&
         stmt.children.size() == 2 &&
@@ -332,17 +405,17 @@ struct Lowerer {
         auto arg = marshalArg(*expr.children[i]);
         if (!arg) return arg;
         zigzag::expectWritten(
-            arena.link(zigzag::rankTail(arena, cell, dims().step),
-                       dims().step, DimVector::POS, *arg));
+            arena.link(zigzag::rankTail(arena, cell, dims().step), dims().step,
+                       DimVector::POS, *arg));
       }
       return cell;
     }
     default:
-      return std::unexpected(Diagnostic{
-          DiagnosticCode::InvalidPosition,
-          std::format("goal-call argument does not marshal: kind {}",
-                      static_cast<int>(expr.kind)),
-          expr.loc});
+      return std::unexpected(
+          Diagnostic{DiagnosticCode::InvalidPosition,
+                     std::format("goal-call argument does not marshal: kind {}",
+                                 static_cast<int>(expr.kind)),
+                     expr.loc});
     }
   }
 
@@ -357,22 +430,22 @@ struct Lowerer {
       return std::unexpected(Diagnostic{DiagnosticCode::InvalidPosition,
                                         "goal operand is not a named call",
                                         call.loc});
-    const auto &name = call.children.front()->text;
+    const auto &name  = call.children.front()->text;
     std::size_t arity = call.children.size() - 1;
     if (const auto it = signatures.find(std::string{name});
         it != signatures.end() && it->second.size() != arity)
       return std::unexpected(Diagnostic{
           DiagnosticCode::InvalidDeclaration,
-          std::format("goal '{}' takes {} argument(s), call carries {}",
-                      name, it->second.size(), arity),
+          std::format("goal '{}' takes {} argument(s), call carries {}", name,
+                      it->second.size(), arity),
           call.loc});
     const auto cell = arena.makeCell(name);
     for (std::size_t i = 1; i < call.children.size(); ++i) {
       auto arg = marshalArg(*call.children[i]);
       if (!arg) return std::unexpected(arg.error());
       zigzag::expectWritten(
-          arena.link(zigzag::rankTail(arena, cell, dims().step),
-                     dims().step, DimVector::POS, *arg));
+          arena.link(zigzag::rankTail(arena, cell, dims().step), dims().step,
+                     DimVector::POS, *arg));
     }
     return cell;
   }
@@ -390,19 +463,16 @@ struct Lowerer {
   marshalElse(const Decl &decl, const std::vector<Parameter> &params,
               const Expr &recovery, std::string_view clauseName) {
     auto ps = params;
-    ps.push_back(Parameter{.name = "cause",
-                           .type = Type{"Str"},
-                           .loc  = recovery.loc});
+    ps.push_back(
+        Parameter{.name = "cause", .type = Type{"Str"}, .loc = recovery.loc});
     return emitHead(decl, recovery, ps,
-                    std::format("{}:else", label(clauseName)),
-                    Type{"<any>"});
+                    std::format("{}:else", label(clauseName)), Type{"<any>"});
   }
 
   // A named call `F(a1, a2)` → a term cell named F whose +d.step
   // children are the marshaled args — the payload shape the
   // install/mount verbs and creation members all marshal to.
-  std::expected<CellRef, Diagnostic>
-  marshalCallPayload(const Expr &call) {
+  std::expected<CellRef, Diagnostic> marshalCallPayload(const Expr &call) {
     if (call.children.empty() ||
         call.children.front()->kind != ExprKind::Identifier)
       return std::unexpected(Diagnostic{DiagnosticCode::InvalidPosition,
@@ -413,8 +483,8 @@ struct Lowerer {
       auto arg = marshalArg(*call.children[i]);
       if (!arg) return std::unexpected(arg.error());
       zigzag::expectWritten(
-          arena.link(zigzag::rankTail(arena, payload, dims().step),
-                     dims().step, DimVector::POS, *arg));
+          arena.link(zigzag::rankTail(arena, payload, dims().step), dims().step,
+                     DimVector::POS, *arg));
     }
     return payload;
   }
@@ -423,17 +493,118 @@ struct Lowerer {
   mintHostStep(const Expr &expr, const Decl &decl,
                const std::vector<Parameter> &params,
                std::string_view clauseName) {
+    if (const auto metaVerb = metaVerbNameOf(expr)) {
+      const auto step = arena.makeCell();
+      zigzag::expectWritten(
+          arena.link(step, verbDim(), DimVector::POS,
+                     arena.makeCell("meta:" + std::string{*metaVerb})));
+      const auto field = [&](std::string_view name, CellRef value) {
+        if (const auto rec = varsRecord(arena, core, step, name, true))
+          zigzag::expectWritten(
+              arena.link(*rec, dims().values, DimVector::POS, value));
+      };
+      field("verb", arena.makeCell(*metaVerb));
+
+      const auto payload = arena.makeCell(*metaVerb);
+      for (std::size_t i = 1; i < expr.children.size(); ++i) {
+        const auto &child = *expr.children[i];
+        if (child.kind == ExprKind::Identifier) {
+          const auto identCell = arena.makeCell(child.text);
+          if (const auto rec = varsRecord(arena, core, identCell, "kind", true))
+            zigzag::expectWritten(arena.link(
+                *rec, dims().values, DimVector::POS, arena.makeCell("ident")));
+          zigzag::expectWritten(
+              arena.link(zigzag::rankTail(arena, payload, dims().step),
+                         dims().step, DimVector::POS, identCell));
+        } else if (child.kind == ExprKind::Code) {
+          auto obj = compileFragment(child, context, compiler);
+          if (!obj) return std::unexpected(obj.error());
+          image.heads.push_back(obj->head);
+          zigzag::expectWritten(arena.link(
+              zigzag::rankTail(arena, payload, dims().step), dims().step,
+              DimVector::POS,
+              arena.makeScalarCell(static_cast<std::int64_t>(obj->head))));
+        } else if (child.kind == ExprKind::List) {
+          const auto listCell = arena.makeCell("List");
+          if (const auto rec = varsRecord(arena, core, listCell, "kind", true))
+            zigzag::expectWritten(arena.link(
+                *rec, dims().values, DimVector::POS, arena.makeCell("list")));
+          for (const auto &elem : child.children) {
+            if (!elem) continue;
+            if (elem->kind == ExprKind::Identifier) {
+              const auto identCell = arena.makeCell(elem->text);
+              if (const auto r =
+                      varsRecord(arena, core, identCell, "kind", true))
+                zigzag::expectWritten(arena.link(*r, dims().values,
+                                                 DimVector::POS,
+                                                 arena.makeCell("ident")));
+              zigzag::expectWritten(
+                  arena.link(zigzag::rankTail(arena, listCell, dims().step),
+                             dims().step, DimVector::POS, identCell));
+            } else {
+              auto m = marshalArg(*elem);
+              if (!m) return std::unexpected(m.error());
+              zigzag::expectWritten(
+                  arena.link(zigzag::rankTail(arena, listCell, dims().step),
+                             dims().step, DimVector::POS, *m));
+            }
+          }
+          zigzag::expectWritten(
+              arena.link(zigzag::rankTail(arena, payload, dims().step),
+                         dims().step, DimVector::POS, listCell));
+        } else if (child.kind == ExprKind::String ||
+                   child.kind == ExprKind::Integer ||
+                   child.kind == ExprKind::Float ||
+                   child.kind == ExprKind::Boolean) {
+          auto marshaled = marshalArg(child);
+          if (marshaled) {
+            zigzag::expectWritten(
+                arena.link(zigzag::rankTail(arena, payload, dims().step),
+                           dims().step, DimVector::POS, *marshaled));
+          } else {
+            return std::unexpected(marshaled.error());
+          }
+        } else {
+          auto head = emitHead(decl, child, params,
+                               std::format("{}:meta_arg:{}:{}",
+                                           label(clauseName), metaArgSeq_++, i),
+                               Type{"<any>"});
+          if (head) {
+            const auto headCell =
+                arena.makeScalarCell(static_cast<std::int64_t>(*head));
+            if (const auto rec =
+                    varsRecord(arena, core, headCell, "kind", true))
+              zigzag::expectWritten(arena.link(*rec, dims().values,
+                                               DimVector::POS,
+                                               arena.makeCell("subfrag")));
+            zigzag::expectWritten(
+                arena.link(zigzag::rankTail(arena, payload, dims().step),
+                           dims().step, DimVector::POS, headCell));
+          } else {
+            auto marshaled = marshalArg(child);
+            if (marshaled) {
+              zigzag::expectWritten(
+                  arena.link(zigzag::rankTail(arena, payload, dims().step),
+                             dims().step, DimVector::POS, *marshaled));
+            } else {
+              return std::unexpected(head.error());
+            }
+          }
+        }
+      }
+      field("payload", payload);
+      return step;
+    }
     // Capacity-qualified calls lower before the verb switch — Call is
     // not a host-verb kind, the qualifier is what gave it away.
     if (isCapacityCall(expr)) {
-      const Expr &callee  = *expr.children.front();
-      const auto fx       = effectSigs_.find(
-          callee.children.front()->text + "." + callee.text);
-      const auto step    = arena.makeCell();
+      const Expr &callee = *expr.children.front();
+      const auto fx =
+          effectSigs_.find(callee.children.front()->text + "." + callee.text);
+      const auto step = arena.makeCell();
       zigzag::expectWritten(arena.link(
           step, verbDim(), DimVector::POS,
-          arena.makeCell(fx != effectSigs_.end() ? "effectcall"
-                                                 : "capcall")));
+          arena.makeCell(fx != effectSigs_.end() ? "effectcall" : "capcall")));
       const auto field = [&](std::string_view name, CellRef value) {
         if (const auto rec = varsRecord(arena, core, step, name, true))
           zigzag::expectWritten(
@@ -461,11 +632,9 @@ struct Lowerer {
         if (fx->second.preempts)
           field("preempts", arena.makeScalarCell(std::int64_t{1}));
         if (expr.recovery) {
-          auto head =
-              marshalElse(decl, params, *expr.recovery, clauseName);
+          auto head = marshalElse(decl, params, *expr.recovery, clauseName);
           if (!head) return std::unexpected(head.error());
-          field("else", arena.makeScalarCell(
-                            static_cast<std::int64_t>(*head)));
+          field("else", arena.makeScalarCell(static_cast<std::int64_t>(*head)));
         }
       }
       return step;
@@ -616,8 +785,8 @@ struct Lowerer {
       field("deadline", arena.makeScalarCell(static_cast<std::int64_t>(
                             std::stoll(expr.deadline->text))));
       if (elseHead != noCell)
-        field("else", arena.makeScalarCell(
-                          static_cast<std::int64_t>(elseHead)));
+        field("else",
+              arena.makeScalarCell(static_cast<std::int64_t>(elseHead)));
       return step;
     }
 
@@ -738,8 +907,8 @@ struct Lowerer {
         field("deadline", arena.makeScalarCell(static_cast<std::int64_t>(
                               std::stoll(expr.deadline->text))));
       if (elseHead != noCell)
-        field("else", arena.makeScalarCell(
-                          static_cast<std::int64_t>(elseHead)));
+        field("else",
+              arena.makeScalarCell(static_cast<std::int64_t>(elseHead)));
       return step;
     }
 
@@ -757,12 +926,10 @@ struct Lowerer {
       if (expr.guard) {
         auto ps = params;
         if (expr.binding)
-          ps.push_back(Parameter{.name = *expr.binding,
-                                 .type = Type{"Cell"},
-                                 .loc  = expr.loc});
+          ps.push_back(Parameter{
+              .name = *expr.binding, .type = Type{"Cell"}, .loc = expr.loc});
         auto head = emitHead(decl, *expr.guard, ps,
-                             std::format("{}:await:guard",
-                                         label(clauseName)),
+                             std::format("{}:await:guard", label(clauseName)),
                              Type{"Bool"});
         if (!head) return std::unexpected(head.error());
         guardHead = *head;
@@ -802,11 +969,11 @@ struct Lowerer {
       field("deadline", arena.makeScalarCell(static_cast<std::int64_t>(
                             std::stoll(expr.deadline->text))));
       if (guardHead != noCell)
-        field("guard", arena.makeScalarCell(
-                           static_cast<std::int64_t>(guardHead)));
+        field("guard",
+              arena.makeScalarCell(static_cast<std::int64_t>(guardHead)));
       if (elseHead != noCell)
-        field("else", arena.makeScalarCell(
-                          static_cast<std::int64_t>(elseHead)));
+        field("else",
+              arena.makeScalarCell(static_cast<std::int64_t>(elseHead)));
       return step;
     }
 
@@ -908,6 +1075,7 @@ struct Lowerer {
     return verbDim_;
   }
   DimRef verbDim_{zigzag::noCell};
+  std::size_t metaArgSeq_{0};
 
   // The owner prefix method/answer members qualify under — "S" while
   // a `skill S` or `behavior B` lowers its members, empty elsewhere.
@@ -1013,10 +1181,14 @@ struct Lowerer {
       if (verbStmt) {
         flushRun();
         auto step = mintHostStep(*verbStmt, decl, params, clauseName);
-        if (step && !bound.empty())
+        if (step && !bound.empty()) {
           if (const auto rec = varsRecord(arena, core, *step, "result", true))
             zigzag::expectWritten(arena.link(
                 *rec, dims().values, DimVector::POS, arena.makeCell(bound)));
+          if (const auto rec = varsRecord(arena, core, *step, "out", true))
+            zigzag::expectWritten(arena.link(
+                *rec, dims().values, DimVector::POS, arena.makeCell(bound)));
+        }
         if (step) {
           linkMember(*step);
           continue;
@@ -1043,6 +1215,87 @@ struct Lowerer {
     }
     flushRun();
   }
+
+  // Rewrites one plan arm into a plain guard/body pair on @p out. The
+  // arm's pattern tests join its `where` guard under `&`; a `?v` pattern
+  // variable is substituted by the parameter it matched, because the
+  // guard head runs before any binding exists. nullopt means success.
+  std::optional<std::string> buildPlanArm(const PlanArm &arm,
+                                          const std::vector<Parameter> &params,
+                                          Decl &out) {
+    std::vector<std::pair<std::string, std::string>> renames;
+    std::vector<ExprPtr> tests;
+    if (arm.pattern) {
+      std::vector<const Expr *> elements;
+      if (arm.pattern->kind == ExprKind::TuplePattern)
+        for (const auto &child : arm.pattern->children)
+          elements.push_back(child.get());
+      else
+        elements.push_back(arm.pattern.get());
+      if (params.empty())
+        return "a case pattern on a nullary goal; use where or default";
+      if (elements.size() != params.size())
+        return std::format("case pattern has {} elements for {} parameters",
+                           elements.size(), params.size());
+      for (std::size_t i = 0; i < elements.size(); ++i) {
+        const auto &element = *elements[i];
+        switch (element.kind) {
+        case ExprKind::WildcardPattern:
+          break;
+        case ExprKind::LogicVariable:
+          renames.emplace_back(element.text, params[i].name);
+          break;
+        case ExprKind::Integer:
+        case ExprKind::Float:
+        case ExprKind::String:
+        case ExprKind::Boolean: {
+          auto test     = std::make_unique<Expr>();
+          test->kind    = ExprKind::Binary;
+          test->text    = "==";
+          test->loc     = element.loc;
+          auto subject  = std::make_unique<Expr>();
+          subject->kind = ExprKind::Identifier;
+          subject->text = params[i].name;
+          subject->loc  = element.loc;
+          test->children.push_back(std::move(subject));
+          test->children.push_back(cloneExpr(element));
+          tests.push_back(std::move(test));
+          break;
+        }
+        default:
+          return "plan case patterns support literal, wildcard and variable "
+                 "elements";
+        }
+      }
+    }
+    const std::function<void(Expr &)> rename = [&](Expr &expr) {
+      if (expr.kind == ExprKind::Identifier)
+        for (const auto &[from, to] : renames)
+          if (expr.text == from) expr.text = to;
+      for (auto &child : expr.children)
+        if (child) rename(*child);
+    };
+    ExprPtr guard = arm.guard ? cloneExpr(arm.guard) : nullptr;
+    if (guard) rename(*guard);
+    for (auto &test : tests) {
+      if (!guard) {
+        guard = std::move(test);
+        continue;
+      }
+      auto both  = std::make_unique<Expr>();
+      both->kind = ExprKind::Binary;
+      both->text = "&";
+      both->loc  = guard->loc;
+      both->children.push_back(std::move(test));
+      both->children.push_back(std::move(guard));
+      guard = std::move(both);
+    }
+    out.guard = std::move(guard);
+    out.body  = cloneExpr(arm.body);
+    if (out.body) rename(*out.body);
+    return std::nullopt;
+  }
+  std::deque<Decl> synthesizedArms_;
 
   std::vector<Parameter> paramsOf(const Decl &decl, std::string_view host) {
     if (const auto it = signatures.find(std::string{host});
@@ -1107,9 +1360,9 @@ CellRef Lowerer::lowerClauseBody(const Decl &decl, CellRef host,
   // A Boolean test position must never take emitDeclHead's stub —
   // an unlowerable `where` is a refusal, not a vacuous `true` the
   // selector would silently pass.
-  const auto test = emitHead(decl, guardExpr, params,
-                             std::format("{}:guard", label(clauseName)),
-                             Type{"Bool"});
+  const auto test =
+      emitHead(decl, guardExpr, params,
+               std::format("{}:guard", label(clauseName)), Type{"Bool"});
   if (!test) {
     errors.push_back(test.error());
     return noCell;
@@ -1134,13 +1387,11 @@ CellRef Lowerer::lowerClauseBody(const Decl &decl, CellRef host,
 // "fields" term, +d.values → an init head taking the owner's
 // parameters — install/mount runs each against the call's arguments
 // to seed the frame's or instance's vars records.
-void Lowerer::lowerFieldSlot(
-    CellRef descriptor, const Decl &member,
-    const std::vector<Parameter> &ownerParams,
-    std::string_view ownerName) {
+void Lowerer::lowerFieldSlot(CellRef descriptor, const Decl &member,
+                             const std::vector<Parameter> &ownerParams,
+                             std::string_view ownerName) {
   CellRef list = noCell;
-  if (const auto r =
-          varsRecord(arena, core, descriptor, "fields", true)) {
+  if (const auto r = varsRecord(arena, core, descriptor, "fields", true)) {
     if (const auto v = arena.linked(*r, dims().values, DimVector::POS))
       list = *v;
     else {
@@ -1151,7 +1402,7 @@ void Lowerer::lowerFieldSlot(
   }
   const auto slot = arena.makeCell(member.name);
   zigzag::expectWritten(arena.link(zigzag::rankTail(arena, list, dims().step),
-                                 dims().step, DimVector::POS, slot));
+                                   dims().step, DimVector::POS, slot));
   if (member.initializer) {
     auto head =
         emitDeclHead(member, *member.initializer, ownerParams,
@@ -1170,8 +1421,7 @@ void Lowerer::lowerFieldSlot(
 // the descriptor's `table` vars record holds a term whose +d.step
 // children are keyed cells, each heading the +d.clause rank dispatch
 // merges for that trigger.
-CellRef Lowerer::clauseTableChild(CellRef descriptor,
-                                  std::string_view table,
+CellRef Lowerer::clauseTableChild(CellRef descriptor, std::string_view table,
                                   std::string_view key) {
   CellRef term = noCell;
   if (const auto r = varsRecord(arena, core, descriptor, table, true)) {
@@ -1183,12 +1433,11 @@ CellRef Lowerer::clauseTableChild(CellRef descriptor,
           arena.link(*r, dims().values, DimVector::POS, term));
     }
   }
-  for (const CellRef child :
-       zigzag::rankAfter(arena, term, dims().step))
+  for (const CellRef child : zigzag::rankAfter(arena, term, dims().step))
     if (arena.textOf(child) == key) return child;
   const auto child = arena.makeCell(key);
   zigzag::expectWritten(arena.link(zigzag::rankTail(arena, term, dims().step),
-                                 dims().step, DimVector::POS, child));
+                                   dims().step, DimVector::POS, child));
   return child;
 }
 
@@ -1321,8 +1570,7 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
       return;
     }
     MetaRuntime meta(core, vm, MetaBindSet{.agentCell = image.agentCell});
-    if (auto clause = meta.believe(name, *term, image.agentCell, 0);
-        !clause)
+    if (auto clause = meta.believe(name, *term, image.agentCell, 0); !clause)
       refuse(decl, clause.error());
     return;
   }
@@ -1382,19 +1630,18 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
         if (gc.kind == GoalClause::Kind::Holds) {
           std::vector<const Expr *> beliefs;
           std::vector<const Expr *> scalars;
-          const std::function<void(const Expr &)> peel =
-              [&](const Expr &e) {
-                if (e.kind == ExprKind::Believes) {
-                  beliefs.push_back(&e);
-                  return;
-                }
-                if (e.kind == ExprKind::Binary && e.text == "&") {
-                  for (const auto &c : e.children)
-                    if (c) peel(*c);
-                  return;
-                }
-                scalars.push_back(&e);
-              };
+          const std::function<void(const Expr &)> peel = [&](const Expr &e) {
+            if (e.kind == ExprKind::Believes) {
+              beliefs.push_back(&e);
+              return;
+            }
+            if (e.kind == ExprKind::Binary && e.text == "&") {
+              for (const auto &c : e.children)
+                if (c) peel(*c);
+              return;
+            }
+            scalars.push_back(&e);
+          };
           peel(*condition);
           if (!beliefs.empty()) {
             const auto container = arena.makeCell("holdsBeliefs");
@@ -1403,8 +1650,7 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
               if (query.scope) {
                 const bool local =
                     query.scope->kind == ExprKind::Identifier &&
-                    (query.scope->text == "self" ||
-                     query.scope->text == "0");
+                    (query.scope->text == "self" || query.scope->text == "0");
                 if (!local) {
                   errors.push_back(Diagnostic{
                       DiagnosticCode::InvalidDeclaration,
@@ -1415,9 +1661,9 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
                 }
               }
               if (query.children.empty()) {
-                errors.push_back(
-                    Diagnostic{DiagnosticCode::InvalidDeclaration,
-                               "holds believes carries no term", query.loc});
+                errors.push_back(Diagnostic{DiagnosticCode::InvalidDeclaration,
+                                            "holds believes carries no term",
+                                            query.loc});
                 return;
               }
               auto pattern = marshalPattern(*query.children.front());
@@ -1428,14 +1674,14 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
               // +d.grab is the membership dim — the patterns'
               // +d.step args share its chain, so +d.step itself
               // cannot separate sibling patterns.
-              zigzag::expectWritten(arena.link(
-                  zigzag::rankTail(arena, container, dims().grab),
-                  dims().grab, DimVector::POS, *pattern));
+              zigzag::expectWritten(
+                  arena.link(zigzag::rankTail(arena, container, dims().grab),
+                             dims().grab, DimVector::POS, *pattern));
             }
             if (const auto rec =
                     varsRecord(arena, core, sym, "holdsBelief", true))
-              zigzag::expectWritten(arena.link(*rec, dims().values,
-                                               DimVector::POS, container));
+              zigzag::expectWritten(
+                  arena.link(*rec, dims().values, DimVector::POS, container));
           }
           if (scalars.empty()) continue;
           // A leftover scalar half is an ordinary holdsTest — the
@@ -1444,7 +1690,7 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
           // after the goal's own: the monitor rung's unification env
           // fills them positionally, so the scalar half sees the
           // fact's bound value, not just the belief's existence.
-          auto hparams = paramsOf(decl, name);
+          auto hparams        = paramsOf(decl, name);
           const auto declared = [&](std::string_view want) {
             for (const auto &p : hparams)
               if (p.name == want) return true;
@@ -1465,8 +1711,7 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
                 if (arg.text == "_") continue;
                 if (declared(arg.text)) continue;
                 Type type{};
-                if (sig != signatures.end() &&
-                    i < sig->second.size())
+                if (sig != signatures.end() && i < sig->second.size())
                   type = sig->second[i].type;
                 if (type.name.empty()) {
                   errors.push_back(Diagnostic{
@@ -1492,8 +1737,8 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
           };
           for (const Expr *bexpr : beliefs)
             for (const auto &c : bexpr->children)
-              if (c && (c->kind == ExprKind::Term ||
-                        c->kind == ExprKind::Record) &&
+              if (c &&
+                  (c->kind == ExprKind::Term || c->kind == ExprKind::Record) &&
                   !collect(*c))
                 return;
           const Expr *remainder = scalars.front();
@@ -1506,24 +1751,24 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
               rebuilt.children.push_back(cloneExpr(*s));
             remainder = &rebuilt;
           }
-          auto head = emitHead(decl, *remainder, hparams,
-                               std::format("{}:holdsTest", label(name)),
-                               Type{"Bool"});
+          auto head =
+              emitHead(decl, *remainder, hparams,
+                       std::format("{}:holdsTest", label(name)), Type{"Bool"});
           if (!head) {
             errors.push_back(head.error());
             return;
           }
           if (const auto rec = varsRecord(arena, core, sym, "holdsTest", true))
-            zigzag::expectWritten(arena.link(*rec, dims().values,
-                                             DimVector::POS, *head));
+            zigzag::expectWritten(
+                arena.link(*rec, dims().values, DimVector::POS, *head));
           continue;
         }
         // drop/succeed conditions are pure scalar tests — emitHead
         // direct so an unlowerable condition refuses instead of
         // stubbing `true`.
-        auto head = emitHead(decl, *condition, paramsOf(decl, name),
-                             std::format("{}:{}", label(name), field),
-                             Type{"Bool"});
+        auto head =
+            emitHead(decl, *condition, paramsOf(decl, name),
+                     std::format("{}:{}", label(name), field), Type{"Bool"});
         if (!head) {
           errors.push_back(head.error());
           return;
@@ -1592,8 +1837,7 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
     for (const auto &member : decl.members)
       if (member.kind == DeclKind::Method && member.effect) {
         EffectSig sig{.preempts = member.preempts};
-        if (member.deadline &&
-            member.deadline->kind == ExprKind::Duration)
+        if (member.deadline && member.deadline->kind == ExprKind::Duration)
           sig.turns = std::stoll(member.deadline->text);
         effectSigs_.emplace(name + "." + member.name, sig);
       }
@@ -1633,10 +1877,9 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
       return;
     }
     const auto step = arena.makeCell();
-    zigzag::expectWritten(
-        arena.link(step, verbDim(), DimVector::POS,
-                   arena.makeCell(decl.kind == DeclKind::Install ? "install"
-                                                                : "mount")));
+    zigzag::expectWritten(arena.link(
+        step, verbDim(), DimVector::POS,
+        arena.makeCell(decl.kind == DeclKind::Install ? "install" : "mount")));
     if (const auto rec = varsRecord(arena, core, step, "payload", true))
       zigzag::expectWritten(
           arena.link(*rec, dims().values, DimVector::POS, *payload));
@@ -1687,16 +1930,16 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
         zigzag::expectWritten(
             arena.link(*r, dims().values, DimVector::POS,
                        arena.makeScalarCell(std::int64_t{1})));
-    const std::string prevPrefix   = memberPrefix_;
-    const CellRef prevUses         = usesTarget_;
-    const OwnerFields prevFields   = memberFields_;
-    const auto *const prevMethods  = context.methods;
-    memberPrefix_                  = name;
-    usesTarget_                    = rec;
-    memberFields_                  = memberFieldsOf(decl);
+    const std::string prevPrefix  = memberPrefix_;
+    const CellRef prevUses        = usesTarget_;
+    const OwnerFields prevFields  = memberFields_;
+    const auto *const prevMethods = context.methods;
+    memberPrefix_                 = name;
+    usesTarget_                   = rec;
+    memberFields_                 = memberFieldsOf(decl);
     // Skill members dispatch through `S.m` capcall — the flat-name
     // `methods` table is the agent's own and must not resolve here.
-    context.methods                = nullptr;
+    context.methods = nullptr;
     for (const auto &member : decl.members) {
       if (member.kind == DeclKind::Field) {
         lowerFieldSlot(rec, member, decl.parameters, name);
@@ -1763,30 +2006,29 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
     const auto sym = mintSymbol(name);
     signatures.emplace(name, decl.parameters);
     const auto rec = arena.makeCell(name);
-    zigzag::expectWritten(
-        arena.link(sym, dims().values, DimVector::POS, rec));
+    zigzag::expectWritten(arena.link(sym, dims().values, DimVector::POS, rec));
     if (!decl.parameters.empty()) {
       const auto list = arena.makeCell("params");
       for (const auto &p : decl.parameters)
         zigzag::expectWritten(
-            arena.link(zigzag::rankTail(arena, list, dims().step),
-                       dims().step, DimVector::POS, arena.makeCell(p.name)));
+            arena.link(zigzag::rankTail(arena, list, dims().step), dims().step,
+                       DimVector::POS, arena.makeCell(p.name)));
       if (const auto r = varsRecord(arena, core, rec, "params", true))
         zigzag::expectWritten(
             arena.link(*r, dims().values, DimVector::POS, list));
     }
-    const std::string prevPrefix   = memberPrefix_;
-    const CellRef prevDesc         = behaviorDesc_;
-    const CellRef prevUses         = usesTarget_;
-    const OwnerFields prevFields   = memberFields_;
-    const auto *const prevMethods  = context.methods;
-    memberPrefix_                  = name;
-    behaviorDesc_                  = rec;
-    usesTarget_                    = rec;
-    memberFields_                  = memberFieldsOf(decl);
+    const std::string prevPrefix  = memberPrefix_;
+    const CellRef prevDesc        = behaviorDesc_;
+    const CellRef prevUses        = usesTarget_;
+    const OwnerFields prevFields  = memberFields_;
+    const auto *const prevMethods = context.methods;
+    memberPrefix_                 = name;
+    behaviorDesc_                 = rec;
+    usesTarget_                   = rec;
+    memberFields_                 = memberFieldsOf(decl);
     // Behavior members dispatch through `B.m` — the flat-name
     // `methods` table is the agent's own and must not resolve here.
-    context.methods                = nullptr;
+    context.methods = nullptr;
     for (const auto &member : decl.members) {
       if (member.kind == DeclKind::Field) {
         lowerFieldSlot(rec, member, decl.parameters, name);
@@ -1822,7 +2064,7 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
       refuse(decl, std::format("plan '{}' names no goal", name));
       return;
     }
-    if (!decl.body) {
+    if (!decl.body && decl.planArms.empty()) {
       refuse(decl, std::format("plan '{}' declares no body", name));
       return;
     }
@@ -1836,7 +2078,30 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
       host = clauseTableChild(behaviorDesc_, "plans", *decl.target);
     else if (insideAgent)
       mintHolder(host);
-    lowerClauseBody(decl, host, paramsOf(decl, *decl.target), name);
+    if (decl.planArms.empty()) {
+      lowerClauseBody(decl, host, paramsOf(decl, *decl.target), name);
+      return;
+    }
+    // A multi-arm plan is M sequential clauses on the goal's clause rank:
+    // the first keeps the plan's own name (planNamed resolves it), the
+    // rest are `Name$k`. Each arm's pattern and guard become the clause's
+    // guard head so selection stays a pure Boolean test per clause.
+    const auto params   = paramsOf(decl, *decl.target);
+    std::size_t ordinal = 0;
+    for (const auto &arm : decl.planArms) {
+      ++ordinal;
+      auto &armDecl = synthesizedArms_.emplace_back(cloneDecl(decl));
+      armDecl.planArms.clear();
+      armDecl.guard = nullptr;
+      armDecl.body  = nullptr;
+      if (const auto problem = buildPlanArm(arm, params, armDecl)) {
+        refuse(decl, *problem);
+        continue;
+      }
+      lowerClauseBody(armDecl, host, params,
+                      ordinal == 1 ? name
+                                   : std::format("{}${}", name, ordinal));
+    }
     return;
   }
   case DeclKind::Handler: {
@@ -1854,9 +2119,10 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
       }
       const auto &trigger = *decl.trigger;
       const auto key      = name + trigger.text;
-      const auto host     = behaviorDesc_ != noCell
-                    ? clauseTableChild(behaviorDesc_, "beliefHandlers", key)
-                    : clauseTableChild(image.agentCell, "beliefHandlers", key);
+      const auto host =
+          behaviorDesc_ != noCell
+              ? clauseTableChild(behaviorDesc_, "beliefHandlers", key)
+              : clauseTableChild(image.agentCell, "beliefHandlers", key);
       // The `?` names are the handler's parameters in first-appearance
       // order — the stage walk's bindings append in the same walk, and
       // `?_` stays a wildcard, never a binding. Each parameter takes
@@ -1865,13 +2131,12 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
       // the fragment's scalar lowering subset.
       const auto *predicate = [&]() -> const Decl * {
         for (const auto &decl : program.declarations)
-          if (decl.kind == DeclKind::Predicate &&
-              decl.name == trigger.text)
+          if (decl.kind == DeclKind::Predicate && decl.name == trigger.text)
             return &decl;
         return nullptr;
       }();
       std::vector<Parameter> params;
-      std::set<std::string>    captured;
+      std::set<std::string> captured;
       const std::function<void(const Expr &, const Type &)> collect =
           [&](const Expr &expr, const Type &expected) {
             if (expr.kind == ExprKind::LogicVariable) {
@@ -1885,8 +2150,7 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
             if (expr.kind == ExprKind::Record) {
               const auto *record = [&]() -> const Decl * {
                 for (const auto &decl : program.declarations)
-                  if (decl.kind == DeclKind::Record &&
-                      decl.name == expr.text)
+                  if (decl.kind == DeclKind::Record && decl.name == expr.text)
                     return &decl;
                 return nullptr;
               }();
@@ -1900,18 +2164,15 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
             }
           };
       for (std::size_t i = 0; i < trigger.children.size(); ++i) {
-        const auto *expected =
-            predicate && i < predicate->parameters.size()
-                ? &predicate->parameters[i].type
-                : nullptr;
+        const auto *expected = predicate && i < predicate->parameters.size()
+                                   ? &predicate->parameters[i].type
+                                   : nullptr;
         if (expected) collect(*trigger.children[i], *expected);
       }
       const auto n = ++clauseCounts[host];
       const auto clauseName =
-          n == 1 ? std::format("on:{}", key)
-                 : std::format("on:{}#{}", key, n);
-      const auto clause =
-          lowerClauseBody(decl, host, params, clauseName);
+          n == 1 ? std::format("on:{}", key) : std::format("on:{}#{}", key, n);
+      const auto clause = lowerClauseBody(decl, host, params, clauseName);
       if (clause == noCell) return;
       auto pattern = marshalPattern(trigger);
       if (!pattern) {
@@ -1919,10 +2180,9 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
         return;
       }
       if (const auto rec = varsRecord(arena, core, clause, "pattern", true))
-        zigzag::expectWritten(
-            arena.link(*rec, dims().values, DimVector::POS,
-                       arena.makeScalarCell(
-                           static_cast<std::int64_t>(*pattern))));
+        zigzag::expectWritten(arena.link(
+            *rec, dims().values, DimVector::POS,
+            arena.makeScalarCell(static_cast<std::int64_t>(*pattern))));
       return;
     }
     if (!decl.body) {
@@ -1953,11 +2213,9 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
       return false;
     };
     if (!named("occurrence"))
-      params.push_back(
-          Parameter{.name = "occurrence", .type = Type{"Cell"}});
+      params.push_back(Parameter{.name = "occurrence", .type = Type{"Cell"}});
     if (decl.binding && !named(*decl.binding))
-      params.push_back(Parameter{.name = *decl.binding,
-                                 .type = Type{"Cell"}});
+      params.push_back(Parameter{.name = *decl.binding, .type = Type{"Cell"}});
     lowerClauseBody(decl, host, params, clause);
     return;
   }
@@ -2016,22 +2274,21 @@ void Lowerer::lowerDecl(const Decl &decl, bool insideAgent) {
         // head's linked symbol. The holder is the placeholder the
         // drain restates in place — the record's +d.values edge and
         // the binding already name it.
-        pendingStatics.push_back(PendingStatic{
-            .expr    = &init,
-            .target  = holder,
-            .type    = decl.result.value_or(Type{"<any>"}),
-            .methods = context.methods,
-            .closed  = {}});
+        pendingStatics.push_back(
+            PendingStatic{.expr    = &init,
+                          .target  = holder,
+                          .type    = decl.result.value_or(Type{"<any>"}),
+                          .methods = context.methods,
+                          .closed  = {}});
         break;
       default:
         image.stubbed.push_back(name);
         break;
       }
     }
-    bindings.emplace(
-        name,
-        CompilerBinding{holder, decl.result.value_or(Type{"<any>"}),
-                        /*stateSide=*/true});
+    bindings.emplace(name, CompilerBinding{holder,
+                                           decl.result.value_or(Type{"<any>"}),
+                                           /*stateSide=*/true});
     return;
   }
   default:
@@ -2065,13 +2322,18 @@ lowerProgram(const Program &program, zigzag::vortex::VortexCore &core,
     lowerer.infos.insert(fragmentInfo->begin(), fragmentInfo->end());
   lowerer.image.programRoot = core.home();
   lowerer.image.ownModule = core.getOrCreateModule(program.module.value_or(""));
+  ensureR1AstVocabulary(core.arena(), core, lowerer.image.programRoot);
+  if (auto boot = ensureBootstrapPair(core, vm, lowerer.image.programRoot);
+      boot) {
+    lowerer.image.heads.push_back(boot->writer);
+    lowerer.image.heads.push_back(boot->linker);
+  }
   for (const auto &decl : program.declarations) lowerer.lowerDecl(decl, false);
   // §5.5's deferred evals run once the walk ends: every member `def`
   // head's `sym +d.values` edge exists by then, so `static` calls and
   // `var` seeds evaluate order-independently against the full image.
   if (lowerer.errors.empty())
-    if (auto drained = lowerer.compiler.drainStatics(lowerer.context);
-        !drained)
+    if (auto drained = lowerer.compiler.drainStatics(lowerer.context); !drained)
       lowerer.errors = std::move(drained.error());
   if (!lowerer.errors.empty())
     return std::unexpected(std::move(lowerer.errors));
@@ -2088,15 +2350,12 @@ lowerProgram(const Program &program, zigzag::vortex::VortexCore &core,
   // counts that slot.
   if (lowerer.image.imageRecord != noCell) {
     auto &arena = core.arena();
-    if (const auto rec =
-            varsRecord(arena, core, lowerer.image.programRoot,
-                       "imageRecord", true))
-      zigzag::expectWritten(arena.link(*rec, core.dims().values,
-                                     DimVector::POS,
-                                     lowerer.image.imageRecord));
-    if (const auto rec =
-            varsRecord(arena, core, lowerer.image.programRoot,
-                       "imageExtent", true))
+    if (const auto rec = varsRecord(arena, core, lowerer.image.programRoot,
+                                    "imageRecord", true))
+      zigzag::expectWritten(arena.link(*rec, core.dims().values, DimVector::POS,
+                                       lowerer.image.imageRecord));
+    if (const auto rec = varsRecord(arena, core, lowerer.image.programRoot,
+                                    "imageExtent", true))
       zigzag::expectWritten(
           arena.link(*rec, core.dims().values, DimVector::POS,
                      arena.makeScalarCell(

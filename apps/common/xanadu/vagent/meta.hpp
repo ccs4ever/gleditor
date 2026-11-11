@@ -82,6 +82,18 @@ struct MetaDimensions {
   DimRef recipe{noCell};    ///< d.recipe — head's replay template rank
   DimRef refFor{noCell};    ///< d.refFor — ref-capture record → slot
   DimRef meshRelocation{noCell}; ///< d.mesh.relocation — "cell" marker edge
+  DimRef lineage{noCell};        ///< d.lineage — reify twin → source head rank
+  DimRef kindRegistered{
+      noCell};               ///< d.kind-registered — durable registered heads
+  DimRef pendingReg{noCell}; ///< d.pending-reg — trailed pending reg queue
+  DimRef astKinds{noCell};   ///< d.ast.kinds — R1 AST kind vocabulary rank
+};
+
+struct MetaRuntimeLimits {
+  std::size_t maxRegisterOps{512};
+  std::size_t maxPendingRegisters{64};
+  std::size_t maxRegisteredHeads{256};
+  std::size_t maxReplayFailures{1};
 };
 
 /// `validate`'s adapter-bound constants (§6.1: the enum's integers are
@@ -122,6 +134,7 @@ struct MetaBindSet {
   CellRef ownModule{noCell};
   MetaDimensions dims{};
   MetaValidateConstants validate{};
+  MetaRuntimeLimits limits{};
   /// `learn_*`'s sideness/closedness gate — absent binds refuse the
   /// durable verbs fail-closed (§6.6).
   std::optional<MetaLineage> lineage;
@@ -201,6 +214,13 @@ public:
       : core_(core), vm_(vm), binds_(binds) {}
 
   [[nodiscard]] const MetaBindSet &binds() const noexcept { return binds_; }
+  [[nodiscard]] const MetaRuntimeLimits &limits() const noexcept {
+    return binds_.limits;
+  }
+  MetaRuntime *setLimits(MetaRuntimeLimits limits) noexcept {
+    binds_.limits = limits;
+    return this;
+  }
   [[nodiscard]] VortexCore &core() noexcept { return core_; }
   [[nodiscard]] VortexVM &vm() noexcept { return vm_; }
   [[nodiscard]] zigzag::ArenaManifold &arena() const noexcept {
@@ -382,8 +402,8 @@ public:
   /// +d.step children in the `?` names' first-appearance order. The
   /// handler runs under the settle's own drain, never inside the
   /// asserting step.
-  void stageBeliefTriggers(std::string_view predicate,
-                           std::string_view sign, CellRef factClause);
+  void stageBeliefTriggers(std::string_view predicate, std::string_view sign,
+                           CellRef factClause);
 
   // -- §6.3-amended selection (actor-executor §3.4)
   // -----------------------------
@@ -410,8 +430,8 @@ public:
   [[nodiscard]] std::expected<std::optional<std::pair<CellRef, CellRef>>,
                               std::string>
   selectClause(CellRef host, const std::unordered_set<CellRef> &tried = {},
-               std::size_t whereFuel                    = 256,
-               const std::vector<CellValue> &args       = {});
+               std::size_t whereFuel              = 256,
+               const std::vector<CellValue> &args = {});
 
   // -- §3.5 intentions — data, not cursors
   // --------------------------------------
@@ -437,7 +457,7 @@ public:
   [[nodiscard]] std::expected<CellRef, std::string>
   adoptGoal(CellRef goal, std::int64_t turn, std::size_t whereFuel = 256,
             const std::vector<CellValue> &args = {},
-            std::span<const CellRef> argRefs           = {});
+            std::span<const CellRef> argRefs   = {});
   /// The intention record's integer field — `step`, `ready`, `faulted`,
   /// `waiting`, `blocked_until`, `id` — absent field is `std::nullopt`.
   [[nodiscard]] std::optional<std::int64_t>
@@ -598,6 +618,61 @@ public:
   /// fail-forever (refused — a guaranteed-dead patch).
   [[nodiscard]] MetaClosedReport verifyClosed(CellRef head) const;
 
+  // -- Stage 2 & Stage 4 Metacircular Registration & Synthesis ---------------
+
+  /// Whether @p head is committed on `agentCell +d.kind-registered`.
+  [[nodiscard]] bool kindRegistered(CellRef head) const;
+
+  /// `registration(h)`: `"absent"` | `"pending"` | `"committed"`.
+  [[nodiscard]] std::string_view registration(CellRef head) const;
+
+  /// `dim_named(name)`: resolve a filed dimension by name without minting.
+  [[nodiscard]] std::optional<CellRef> dimNamed(std::string_view name) const;
+
+  /// `as_body(c)`: narrow a `Code<T>` head to `Code<()>` after verifying its
+  /// descriptor declares `arity == 0` and `result == "()"`.
+  [[nodiscard]] std::optional<CellRef> asBody(CellRef head) const;
+
+  /// `var_of(owner, key)`: read `owner`'s `+d.vars` value cell for `key`.
+  [[nodiscard]] std::optional<CellRef> varOf(CellRef owner,
+                                             std::string_view key) const;
+
+  /// Collect and verify the op cells covered by @p head's `+d.recipe` and
+  /// `+d.refs` against its `+d.entry` control-flow reachability.
+  [[nodiscard]] std::expected<std::vector<CellRef>, std::string>
+  collectCoveredOps(CellRef head) const;
+
+  /// `register(h)`: atomic verification (`headShape` + `validate` +
+  /// `verifyClosed` + recipe coverage) and registration. Queues onto
+  /// `agentCell +d.pending-reg` when marks or scoped frames are live;
+  /// commits immediately to `d.kind-registered`, `d.code`, and `opcodeMap_`
+  /// when quiescent.
+  [[nodiscard]] std::expected<CellRef, std::string> registerCode(CellRef head);
+
+  /// `register_all(hs)`: mutually-recursive atomic batch registration.
+  [[nodiscard]] std::expected<std::vector<CellRef>, std::string>
+  registerAll(std::span<const CellRef> heads);
+
+  /// Two-pass post-commit drain of `agentCell +d.pending-reg` at `marks == 0`.
+  [[nodiscard]] std::size_t drainPendingRegisters();
+
+  /// Stage 4 2-degree-safe batched value/link join verb (`join_batch`).
+  [[nodiscard]] bool joinBatch(CellRef batch);
+
+  /// Stage 4 R2 fragment apparatus builder (`build_fragment`).
+  [[nodiscard]] std::optional<CellRef> buildFragmentFromSpec(CellRef spec);
+
+  /// 2-degree AST & metadata navigation and annotation.
+  [[nodiscard]] std::optional<CellRef> grabOf(CellRef cell) const;
+  [[nodiscard]] std::optional<CellRef> stepOf(CellRef cell) const;
+  [[nodiscard]] std::optional<CellRef> valuesOf(CellRef cell) const;
+  bool setValues(CellRef cell, CellRef val);
+  bool setVar(CellRef owner, std::string_view key, CellRef val);
+
+  /// Append @p head on the agent's `d.code` rank; refuses a second
+  ///  head carrying an existing `d.name` label.
+  [[nodiscard]] MetaMutation registerHead(CellRef head) const;
+
 private:
   /// A descriptor's declared signature: ordered `(name, type)` pairs
   /// off the `+d.grab → +d.step` parameter chain, the `result` record's
@@ -679,9 +754,6 @@ private:
   /// The install candidate: reify first when @p head is `d.code`-
   /// registered (a registered head is never mutated in place).
   [[nodiscard]] std::expected<CellRef, std::string> installable(CellRef head);
-  /// Append @p head on the agent's `d.code` rank; refuses a second
-  /// head carrying an existing `d.name` label.
-  [[nodiscard]] MetaMutation registerHead(CellRef head) const;
   /// `learn_*`'s two reifications — the `d.code`-registered argument
   /// reuse carve-out installs a single fresh copy.
   [[nodiscard]] std::expected<MetaLearnCopies, std::string>

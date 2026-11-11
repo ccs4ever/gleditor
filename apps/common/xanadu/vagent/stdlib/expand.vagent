@@ -1,0 +1,78 @@
+module std:compiler:expand
+
+import std:compiler:ast
+
+agent AstExpander {
+  var error_msg: Str := ""
+  var expanded_count: Int := 0
+  var static_nodes_count: Int := 0
+  var splice_nodes_count: Int := 0
+  var cells_paths_count: Int := 0
+
+  def is_static_node(kind: Str): Bool {
+    if kind == "static" then true
+    else false
+  }
+
+  def is_splice_node(kind: Str): Bool {
+    if kind == "splice" then true
+    else false
+  }
+
+  def is_cells_node(kind: Str): Bool {
+    if kind == "cells" then true
+    else false
+  }
+
+  // -------------------------------------------------------------------------
+  // Path Desugaring (cells"path" -> ZigZag dimension traversal steps)
+  // -------------------------------------------------------------------------
+
+  def parse_path_head(path: Str): Str {
+    if path == "" then ""
+    else if path == "d.values" then "d.values"
+    else if path == "d.step" then "d.step"
+    else if path == "d.grab" then "d.grab"
+    else if path == "d.vars" then "d.vars"
+    else if path == "d.spin" then "d.spin"
+    else path
+  }
+
+  def desugar_cells_path(path_str: Str): Str {
+    cells_paths_count := cells_paths_count + 1
+    expanded_count := expanded_count + 1
+    if path_str == "" then "d.values"
+    else parse_path_head(path_str)
+  }
+
+  // -------------------------------------------------------------------------
+  // Splice & Static Peeling
+  // -------------------------------------------------------------------------
+
+  def can_peel_splice(operand_kind: Str): Bool {
+    if operand_kind == "call" then true
+    else if operand_kind == "paren" then true
+    else false
+  }
+
+  def record_static_eval(): Int {
+    static_nodes_count := static_nodes_count + 1
+    expanded_count := expanded_count + 1
+    static_nodes_count
+  }
+
+  def record_splice_eval(): Int {
+    splice_nodes_count := splice_nodes_count + 1
+    expanded_count := expanded_count + 1
+    splice_nodes_count
+  }
+
+  def reset(): Int {
+    error_msg := ""
+    expanded_count := 0
+    static_nodes_count := 0
+    splice_nodes_count := 0
+    cells_paths_count := 0
+    0
+  }
+}

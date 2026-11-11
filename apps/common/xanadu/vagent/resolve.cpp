@@ -80,6 +80,7 @@ private:
                  DeclKind kind, std::size_t depth);
   void recover(Expr &expression, Scope &env, WalkContext context,
                std::size_t depth);
+  void bindPattern(Expr &pattern, Scope &env, std::size_t depth);
   void walk(Expr &expression, Scope &env, WalkContext context,
             std::size_t depth);
 
@@ -378,6 +379,37 @@ void Resolver::recover(Expr &expression, Scope &env, WalkContext context,
   walk(*expression.recovery, local, context, depth + 1);
 }
 
+void Resolver::bindPattern(Expr &pattern, Scope &env, std::size_t depth) {
+  if (depth > limits_.maxExpressionDepth) {
+    throw Diagnostic{DiagnosticCode::InvalidDeclaration,
+                     "AST exceeds ResolveLimits::maxExpressionDepth",
+                     pattern.loc};
+  }
+  work(pattern.loc);
+  pattern.stamp = ScopeStamp{env.id, std::nullopt};
+  if (pattern.kind == ExprKind::LogicVariable) {
+    if (pattern.text != "_") {
+      pattern.stamp = mint(env, pattern.text, pattern.loc);
+    }
+    return;
+  }
+  if (pattern.kind == ExprKind::Unary && pattern.text == "...") {
+    for (auto &child : pattern.children) {
+      if (child) bindPattern(*child, env, depth + 1);
+    }
+    return;
+  }
+  if (pattern.kind == ExprKind::TuplePattern ||
+      pattern.kind == ExprKind::ListPattern ||
+      pattern.kind == ExprKind::RecordPattern ||
+      pattern.kind == ExprKind::CtorPattern ||
+      pattern.kind == ExprKind::Tuple || pattern.kind == ExprKind::List) {
+    for (auto &child : pattern.children) {
+      if (child) bindPattern(*child, env, depth + 1);
+    }
+  }
+}
+
 void Resolver::walk(Expr &expression, Scope &env, WalkContext context,
                     std::size_t depth) {
   if (depth > limits_.maxExpressionDepth)
@@ -399,6 +431,8 @@ void Resolver::walk(Expr &expression, Scope &env, WalkContext context,
   case ExprKind::Consume:
   case ExprKind::Terminate:
   case ExprKind::Fail:
+  case ExprKind::MicroVersionLiteral:
+  case ExprKind::WildcardPattern:
     return;
   case ExprKind::Identifier:
   case ExprKind::LogicVariable:
@@ -464,9 +498,33 @@ void Resolver::walk(Expr &expression, Scope &env, WalkContext context,
   case ExprKind::Range:
   case ExprKind::List:
   case ExprKind::Record:
+  case ExprKind::Tuple:
+  case ExprKind::Map:
+  case ExprKind::SafeNav:
+  case ExprKind::Coalesce:
+  case ExprKind::TuplePattern:
+  case ExprKind::ListPattern:
+  case ExprKind::RecordPattern:
+  case ExprKind::CtorPattern:
     for (auto &child : expression.children)
       if (child) walk(*child, env, operand, depth + 1);
     return;
+  case ExprKind::Match:
+    for (auto &child : expression.children)
+      if (child) walk(*child, env, operand, depth + 1);
+    return;
+  case ExprKind::MatchArm: {
+    auto local = copy(env, expression.loc);
+    if (!expression.children.empty() && expression.children[0]) {
+      bindPattern(*expression.children[0], local, depth + 1);
+      walk(*expression.children[0], local, operand, depth + 1);
+    }
+    if (expression.guard) walk(*expression.guard, local, operand, depth + 1);
+    if (expression.children.size() > 1 && expression.children[1]) {
+      walk(*expression.children[1], local, context, depth + 1);
+    }
+    return;
+  }
   case ExprKind::Call:
     call(expression, env, context, depth);
     return;
@@ -491,9 +549,20 @@ void Resolver::walk(Expr &expression, Scope &env, WalkContext context,
   case ExprKind::Let:
     // The initializer resolves before the name binds — `let x := x` reads
     // the outer x, matching the checker's order.
-    if (!expression.children.empty())
-      walk(*expression.children.front(), env, operand, depth + 1);
-    mint(env, expression.text, expression.loc);
+    if (expression.text.empty() && expression.children.size() >= 2) {
+      if (expression.children[1])
+        walk(*expression.children[1], env, operand, depth + 1);
+      if (expression.children[0]) {
+        bindPattern(*expression.children[0], env, depth + 1);
+        walk(*expression.children[0], env, operand, depth + 1);
+      }
+    } else {
+      if (!expression.children.empty() && expression.children.front())
+        walk(*expression.children.front(), env, operand, depth + 1);
+      if (!expression.text.empty()) mint(env, expression.text, expression.loc);
+    }
+    if (expression.recovery)
+      walk(*expression.recovery, env, context, depth + 1);
     return;
   case ExprKind::Cells: {
     // A `$name` path anchor is an environment binding use; the checker
@@ -778,6 +847,15 @@ void Resolver::declaration(Decl &decl, const Decl *owner, std::size_t depth) {
     }
     if (decl.guard) walk(*decl.guard, env, operand, 1);
     if (decl.body) walk(*decl.body, env, {owner, true}, 1);
+    for (auto &arm : decl.planArms) {
+      auto armEnv = copy(env, arm.loc);
+      if (arm.pattern) {
+        bindPattern(*arm.pattern, armEnv, 1);
+        walk(*arm.pattern, armEnv, operand, 1);
+      }
+      if (arm.guard) walk(*arm.guard, armEnv, operand, 1);
+      if (arm.body) walk(*arm.body, armEnv, {owner, true}, 1);
+    }
     return;
   }
   case DeclKind::Handler:

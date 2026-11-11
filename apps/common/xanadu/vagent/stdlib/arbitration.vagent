@@ -1,0 +1,358 @@
+module std:agent:arbitration
+
+import std:meta
+
+agent PlanArbitrator {
+  var selected_plan_id: Int := 0
+  var highest_utility: Int := -1
+  var active_intentions_count: Int := 0
+  var next_intention_id: Int := 1
+  var current_turn_number: Int := 0
+  var loop_counter: Int := 0
+  var best_id: Int := 0
+  var best_prio: Int := -1
+
+  // Intention slots (tracked up to 8 concurrent intentions)
+  var i1_id: Int := 0
+  var i1_goal: Str := ""
+  var i1_kind: Str := ""
+  var i1_state: Str := "idle"
+  var i1_priority: Int := 0
+  var i1_step: Int := 0
+  var i1_deadline: Int := 0
+  var i1_event: Str := ""
+  var i1_corr: Str := ""
+  var i1_delegator: Int := 0
+  var i1_tried: Int := 0
+
+  var i2_id: Int := 0
+  var i2_goal: Str := ""
+  var i2_kind: Str := ""
+  var i2_state: Str := "idle"
+  var i2_priority: Int := 0
+  var i2_step: Int := 0
+  var i2_deadline: Int := 0
+  var i2_event: Str := ""
+  var i2_corr: Str := ""
+  var i2_delegator: Int := 0
+  var i2_tried: Int := 0
+
+  var i3_id: Int := 0
+  var i3_goal: Str := ""
+  var i3_kind: Str := ""
+  var i3_state: Str := "idle"
+  var i3_priority: Int := 0
+  var i3_step: Int := 0
+  var i3_deadline: Int := 0
+  var i3_event: Str := ""
+  var i3_corr: Str := ""
+  var i3_delegator: Int := 0
+  var i3_tried: Int := 0
+
+  var i4_id: Int := 0
+  var i4_goal: Str := ""
+  var i4_kind: Str := ""
+  var i4_state: Str := "idle"
+  var i4_priority: Int := 0
+  var i4_step: Int := 0
+  var i4_deadline: Int := 0
+  var i4_event: Str := ""
+  var i4_corr: Str := ""
+  var i4_delegator: Int := 0
+  var i4_tried: Int := 0
+
+  // -------------------------------------------------------------------------
+  // Utility & Synapse Scoring
+  // -------------------------------------------------------------------------
+
+  def calculate_utility(base_priority: Int, belief_weight: Int): Int {
+    base_priority * 10 + belief_weight
+  }
+
+  def calculate_comprehensive_utility(base_priority: Int, synapse_weight: Int, belief_bonus: Int, cost: Int): Int {
+    let raw := (base_priority * 100) + (synapse_weight * 10) + belief_bonus - cost
+    if raw < 0 then 0 else raw
+  }
+
+  def evaluate_precondition(cond_result: Bool): Bool {
+    cond_result
+  }
+
+  def is_plan_tried(tried_mask: Int, plan_id: Int): Bool {
+    if plan_id == 1 then (tried_mask % 2) == 1
+    else if plan_id == 2 then ((tried_mask / 2) % 2) == 1
+    else if plan_id == 3 then ((tried_mask / 4) % 2) == 1
+    else if plan_id == 4 then ((tried_mask / 8) % 2) == 1
+    else if plan_id == 5 then ((tried_mask / 16) % 2) == 1
+    else if plan_id == 6 then ((tried_mask / 32) % 2) == 1
+    else if plan_id == 7 then ((tried_mask / 64) % 2) == 1
+    else if plan_id == 8 then ((tried_mask / 128) % 2) == 1
+    else false
+  }
+
+  def mark_plan_tried(tried_mask: Int, plan_id: Int): Int {
+    if is_plan_tried(tried_mask, plan_id) then tried_mask
+    else if plan_id == 1 then tried_mask + 1
+    else if plan_id == 2 then tried_mask + 2
+    else if plan_id == 3 then tried_mask + 4
+    else if plan_id == 4 then tried_mask + 8
+    else if plan_id == 5 then tried_mask + 16
+    else if plan_id == 6 then tried_mask + 32
+    else if plan_id == 7 then tried_mask + 64
+    else if plan_id == 8 then tried_mask + 128
+    else tried_mask
+  }
+
+  def arbitrate_candidate(plan_id: Int, priority: Int, weight: Int, ready: Bool): Bool {
+    if ready then {
+      let u := calculate_utility(priority, weight)
+      if u > highest_utility then {
+        highest_utility := u
+        selected_plan_id := plan_id
+        true
+      } else false
+    } else false
+  }
+
+  def arbitrate_scored_candidate(plan_id: Int, base_prio: Int, synapse_wt: Int, belief_bonus: Int, cost: Int, guard_pass: Bool, tried_mask: Int): Bool {
+    if guard_pass & (!is_plan_tried(tried_mask, plan_id)) then {
+      let u := calculate_comprehensive_utility(base_prio, synapse_wt, belief_bonus, cost)
+      if u > highest_utility then {
+        highest_utility := u
+        selected_plan_id := plan_id
+        true
+      } else false
+    } else false
+  }
+
+  // -------------------------------------------------------------------------
+  // Intention Queue Lifecycle & Scheduling
+  // -------------------------------------------------------------------------
+
+  def enroll_intention(goal_name: Str, kind: Str, prio: Int, delegator: Int): Int {
+    let assigned_id := next_intention_id
+    next_intention_id := next_intention_id + 1
+
+    if i1_state == "idle" then {
+      i1_id := assigned_id
+      i1_goal := goal_name
+      i1_kind := kind
+      i1_state := "ready"
+      i1_priority := prio
+      i1_step := 0
+      i1_deadline := 0
+      i1_event := ""
+      i1_corr := ""
+      i1_delegator := delegator
+      i1_tried := 0
+      active_intentions_count := active_intentions_count + 1
+      assigned_id
+    } else if i2_state == "idle" then {
+      i2_id := assigned_id
+      i2_goal := goal_name
+      i2_kind := kind
+      i2_state := "ready"
+      i2_priority := prio
+      i2_step := 0
+      i2_deadline := 0
+      i2_event := ""
+      i2_corr := ""
+      i2_delegator := delegator
+      i2_tried := 0
+      active_intentions_count := active_intentions_count + 1
+      assigned_id
+    } else if i3_state == "idle" then {
+      i3_id := assigned_id
+      i3_goal := goal_name
+      i3_kind := kind
+      i3_state := "ready"
+      i3_priority := prio
+      i3_step := 0
+      i3_deadline := 0
+      i3_event := ""
+      i3_corr := ""
+      i3_delegator := delegator
+      i3_tried := 0
+      active_intentions_count := active_intentions_count + 1
+      assigned_id
+    } else if i4_state == "idle" then {
+      i4_id := assigned_id
+      i4_goal := goal_name
+      i4_kind := kind
+      i4_state := "ready"
+      i4_priority := prio
+      i4_step := 0
+      i4_deadline := 0
+      i4_event := ""
+      i4_corr := ""
+      i4_delegator := delegator
+      i4_tried := 0
+      active_intentions_count := active_intentions_count + 1
+      assigned_id
+    } else 0
+  }
+
+  def get_intention_state(id: Int): Str {
+    if id == i1_id then i1_state
+    else if id == i2_id then i2_state
+    else if id == i3_id then i3_state
+    else if id == i4_id then i4_state
+    else "unknown"
+  }
+
+  def get_intention_step(id: Int): Int {
+    if id == i1_id then i1_step
+    else if id == i2_id then i2_step
+    else if id == i3_id then i3_step
+    else if id == i4_id then i4_step
+    else -1
+  }
+
+  def advance_step(id: Int): Int {
+    if id == i1_id then {
+      i1_step := i1_step + 1
+      i1_step
+    } else if id == i2_id then {
+      i2_step := i2_step + 1
+      i2_step
+    } else if id == i3_id then {
+      i3_step := i3_step + 1
+      i3_step
+    } else if id == i4_id then {
+      i4_step := i4_step + 1
+      i4_step
+    } else -1
+  }
+
+  def park_on_event(id: Int, evt: Str, deadline: Int, corr: Str): Bool {
+    if id == i1_id then {
+      i1_state := "waiting"
+      i1_event := evt
+      i1_deadline := deadline
+      i1_corr := corr
+      true
+    } else if id == i2_id then {
+      i2_state := "waiting"
+      i2_event := evt
+      i2_deadline := deadline
+      i2_corr := corr
+      true
+    } else if id == i3_id then {
+      i3_state := "waiting"
+      i3_event := evt
+      i3_deadline := deadline
+      i3_corr := corr
+      true
+    } else if id == i4_id then {
+      i4_state := "waiting"
+      i4_event := evt
+      i4_deadline := deadline
+      i4_corr := corr
+      true
+    } else false
+  }
+
+  def wake_on_percept(evt: Str, corr: Str): Int {
+    loop_counter := 0
+    if i1_state == "waiting" & i1_event == evt & (i1_corr == "" | i1_corr == corr) then {
+      i1_state := "ready"
+      i1_event := ""
+      i1_corr := ""
+      loop_counter := loop_counter + 1
+    }
+    if i2_state == "waiting" & i2_event == evt & (i2_corr == "" | i2_corr == corr) then {
+      i2_state := "ready"
+      i2_event := ""
+      i2_corr := ""
+      loop_counter := loop_counter + 1
+    }
+    if i3_state == "waiting" & i3_event == evt & (i3_corr == "" | i3_corr == corr) then {
+      i3_state := "ready"
+      i3_event := ""
+      i3_corr := ""
+      loop_counter := loop_counter + 1
+    }
+    if i4_state == "waiting" & i4_event == evt & (i4_corr == "" | i4_corr == corr) then {
+      i4_state := "ready"
+      i4_event := ""
+      i4_corr := ""
+      loop_counter := loop_counter + 1
+    }
+    loop_counter
+  }
+
+  def check_deadlines(current_turn: Int): Int {
+    current_turn_number := current_turn
+    loop_counter := 0
+    if i1_state == "waiting" & i1_deadline > 0 & current_turn >= i1_deadline then {
+      i1_state := "failed"
+      loop_counter := loop_counter + 1
+    }
+    if i2_state == "waiting" & i2_deadline > 0 & current_turn >= i2_deadline then {
+      i2_state := "failed"
+      loop_counter := loop_counter + 1
+    }
+    if i3_state == "waiting" & i3_deadline > 0 & current_turn >= i3_deadline then {
+      i3_state := "failed"
+      loop_counter := loop_counter + 1
+    }
+    if i4_state == "waiting" & i4_deadline > 0 & current_turn >= i4_deadline then {
+      i4_state := "failed"
+      loop_counter := loop_counter + 1
+    }
+    loop_counter
+  }
+
+  def complete_intention(id: Int): Bool {
+    if id == i1_id then {
+      i1_state := "idle"
+      i1_id := 0
+      active_intentions_count := active_intentions_count - 1
+      true
+    } else if id == i2_id then {
+      i2_state := "idle"
+      i2_id := 0
+      active_intentions_count := active_intentions_count - 1
+      true
+    } else if id == i3_id then {
+      i3_state := "idle"
+      i3_id := 0
+      active_intentions_count := active_intentions_count - 1
+      true
+    } else if id == i4_id then {
+      i4_state := "idle"
+      i4_id := 0
+      active_intentions_count := active_intentions_count - 1
+      true
+    } else false
+  }
+
+  def select_highest_priority_ready(): Int {
+    best_id := 0
+    best_prio := -1
+
+    if i1_state == "ready" & i1_priority > best_prio then {
+      best_prio := i1_priority
+      best_id := i1_id
+    }
+    if i2_state == "ready" & i2_priority > best_prio then {
+      best_prio := i2_priority
+      best_id := i2_id
+    }
+    if i3_state == "ready" & i3_priority > best_prio then {
+      best_prio := i3_priority
+      best_id := i3_id
+    }
+    if i4_state == "ready" & i4_priority > best_prio then {
+      best_prio := i4_priority
+      best_id := i4_id
+    }
+    best_id
+  }
+
+  def reset(): Int {
+    selected_plan_id := 0
+    highest_utility := -1
+    0
+  }
+}

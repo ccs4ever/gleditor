@@ -50,6 +50,19 @@ enum class TokenKind : std::uint8_t {
   Greater,
   GreaterEqual,
   Ampersand,
+  KwMap,
+  KwMatch,
+  KwWith,
+  KwDefault,
+  KwCase,
+  Ellipsis,
+  FatArrow,
+  QuestionDot,
+  DoubleQuestion,
+  At,
+  MicroVersionLiteral,
+  LogicVariable,
+  Question,
 };
 
 // Owned spellings keep diagnostics and AST construction valid after a source

@@ -8,6 +8,8 @@
 #include <optional>
 #include <utility>
 
+#include "common/xanadu/microversion.hpp"
+
 namespace xanadu::vagent {
 namespace {
 
@@ -104,7 +106,19 @@ Token Lexer::identifier() {
   const auto start = location();
   while (identifierPart(peek())) advance();
   Token result = token(TokenKind::Identifier, start);
-  if (isReservedWord(result.text)) result.kind = TokenKind::Keyword;
+  if (result.text == "Map") {
+    result.kind = TokenKind::KwMap;
+  } else if (result.text == "match") {
+    result.kind = TokenKind::KwMatch;
+  } else if (result.text == "with") {
+    result.kind = TokenKind::KwWith;
+  } else if (result.text == "default") {
+    result.kind = TokenKind::KwDefault;
+  } else if (result.text == "case") {
+    result.kind = TokenKind::KwCase;
+  } else if (isReservedWord(result.text)) {
+    result.kind = TokenKind::Keyword;
+  }
   return result;
 }
 
@@ -292,6 +306,11 @@ std::expected<Token, Diagnostic> Lexer::punctuation() {
   case ';':
     return token(TokenKind::Semicolon, start);
   case '.':
+    if (peek() == '.' && peek(1) == '.') {
+      advance();
+      advance();
+      return token(TokenKind::Ellipsis, start);
+    }
     return token(TokenKind::Dot, start);
   case ':':
     return pair('=', TokenKind::Assign, TokenKind::Colon);
@@ -306,7 +325,21 @@ std::expected<Token, Diagnostic> Lexer::punctuation() {
   case '%':
     return token(TokenKind::Percent, start);
   case '?':
-    return token(TokenKind::Scan, start);
+    if (peek() == '?') {
+      advance();
+      return token(TokenKind::DoubleQuestion, start);
+    }
+    if (peek() == '.') {
+      advance();
+      return token(TokenKind::QuestionDot, start);
+    }
+    if (identifierStart(peek())) {
+      while (identifierPart(peek())) advance();
+      Token tok       = token(TokenKind::LogicVariable, start);
+      tok.stringValue = tok.text.substr(1);
+      return tok;
+    }
+    return token(TokenKind::Question, start);
   case '!':
     return pair('=', TokenKind::NotEqual, TokenKind::Bang);
   case '<':
@@ -318,10 +351,15 @@ std::expected<Token, Diagnostic> Lexer::punctuation() {
   case '>':
     return pair('=', TokenKind::GreaterEqual, TokenKind::Greater);
   case '=':
-    if (peek() != '=')
-      return std::unexpected(error("equality is spelled '=='", start));
-    advance();
-    return token(TokenKind::Equal, start);
+    if (peek() == '=') {
+      advance();
+      return token(TokenKind::Equal, start);
+    }
+    if (peek() == '>') {
+      advance();
+      return token(TokenKind::FatArrow, start);
+    }
+    return std::unexpected(error("equality is spelled '=='", start));
   case '|':
     if (peek() == '|')
       return std::unexpected(error("use '|' or '++', not '||'", start));
@@ -330,6 +368,29 @@ std::expected<Token, Diagnostic> Lexer::punctuation() {
     if (peek() == '&')
       return std::unexpected(error("conjunction is spelled '&'", start));
     return token(TokenKind::Ampersand, start);
+  case '@': {
+    if (identifierPart(peek())) {
+      const auto specStart = position_;
+      while (identifierPart(peek())) advance();
+      const std::string text = source_.substr(specStart, position_ - specStart);
+      if (text == "HEAD" || text == "head") {
+        Token tok       = token(TokenKind::MicroVersionLiteral, start);
+        tok.stringValue = "HEAD";
+        return tok;
+      }
+      try {
+        const auto parsed = xanadu::MicroversionId::parse(text);
+        Token tok         = token(TokenKind::MicroVersionLiteral, start);
+        tok.text          = "@" + parsed.str();
+        tok.stringValue   = parsed.str();
+        return tok;
+      } catch (const std::exception &) {
+        return std::unexpected(error(
+            "Invalid MicroVersion literal syntax: '@" + text + "'", start));
+      }
+    }
+    return token(TokenKind::At, start);
+  }
   case '$':
     return std::unexpected(
         error("'$' names are reserved for agent state", start));
@@ -384,10 +445,10 @@ std::expected<std::vector<Token>, Diagnostic> Lexer::tokenize() {
         auto quoted = string();
         if (!quoted) return std::unexpected(quoted.error());
         Token merged{
-            .kind        = TokenKind::PrefixedStringLiteral,
-            .text        = source_.substr(word.loc.offset, quoted->loc.offset +
-                                                               quoted->text.size() -
-                                                               word.loc.offset),
+            .kind = TokenKind::PrefixedStringLiteral,
+            .text = source_.substr(word.loc.offset, quoted->loc.offset +
+                                                        quoted->text.size() -
+                                                        word.loc.offset),
             .stringValue = std::move(quoted->stringValue),
             .loc         = word.loc};
         result.push_back(std::move(merged));

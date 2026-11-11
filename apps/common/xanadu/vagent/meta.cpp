@@ -12,6 +12,7 @@
 #include <map>
 #include <ranges>
 #include <set>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -33,6 +34,10 @@ constexpr std::pair<const char *, DimRef MetaDimensions::*> kDimNames[] = {
     {"d.recipe", &MetaDimensions::recipe},
     {"d.refFor", &MetaDimensions::refFor},
     {"d.mesh.relocation", &MetaDimensions::meshRelocation},
+    {"d.lineage", &MetaDimensions::lineage},
+    {"d.kind-registered", &MetaDimensions::kindRegistered},
+    {"d.pending-reg", &MetaDimensions::pendingReg},
+    {"d.ast.kinds", &MetaDimensions::astKinds},
 };
 
 /// `d.clone` — the binding dim `capture_slot_clone` appends `cap$N` cells
@@ -118,7 +123,12 @@ mintMetaBindSet(zigzag::ArenaManifold &arena, VortexCore &core,
       {static_cast<std::int64_t>(OpcodeKind::Not), 1, 1},
       {static_cast<std::int64_t>(OpcodeKind::Link), 4, 1},
       {static_cast<std::int64_t>(OpcodeKind::Break), 3, 1},
+      {static_cast<std::int64_t>(OpcodeKind::Linked), 3, 1},
       {static_cast<std::int64_t>(OpcodeKind::Linked), 4, 1},
+      {static_cast<std::int64_t>(OpcodeKind::Linked), 6, 1},
+      {static_cast<std::int64_t>(OpcodeKind::New), 3, 0},
+      {static_cast<std::int64_t>(OpcodeKind::New), 3, 1},
+      {static_cast<std::int64_t>(OpcodeKind::New), 4, 0},
       {static_cast<std::int64_t>(OpcodeKind::New), 4, 1},
       {static_cast<std::int64_t>(OpcodeKind::Value), 4, 1},
       {static_cast<std::int64_t>(OpcodeKind::Splice), 4, 1},
@@ -155,6 +165,11 @@ mintMetaBindSet(zigzag::ArenaManifold &arena, VortexCore &core,
       {static_cast<std::int64_t>(OpcodeKind::FieldSet), 3, 1},
       {static_cast<std::int64_t>(OpcodeKind::RunCall), 4, 0},
       {static_cast<std::int64_t>(OpcodeKind::RunResume), 2, 1},
+      {static_cast<std::int64_t>(OpcodeKind::StrLen), 1, 1},
+      {static_cast<std::int64_t>(OpcodeKind::ByteAt), 2, 1},
+      {static_cast<std::int64_t>(OpcodeKind::StrSlice), 3, 1},
+      {static_cast<std::int64_t>(OpcodeKind::IntToStr), 1, 1},
+      {static_cast<std::int64_t>(OpcodeKind::StrToInt), 1, 1},
   };
   const auto stepDim = core.dims().step;
   CellRef tableTail  = binds.validate.arityTable;
@@ -187,9 +202,9 @@ mintMetaBindSet(zigzag::ArenaManifold &arena, VortexCore &core,
           varsRecord(arena, core, programRoot, "imageExtent", false))
     if (const auto v = arena.linked(*rec, core.dims().values, Posward))
       if (const auto extent = arena.asInt64(*v); extent && *extent > 0)
-        binds.lineage = MetaLineage{
-            .programRef  = programRoot,
-            .imageExtent = static_cast<std::uint32_t>(*extent)};
+        binds.lineage =
+            MetaLineage{.programRef  = programRoot,
+                        .imageExtent = static_cast<std::uint32_t>(*extent)};
   return binds;
 }
 
@@ -272,6 +287,7 @@ MetaRuntime::planNamed(std::string_view qualified) const {
 }
 
 std::optional<CellRef> MetaRuntime::codeNamed(std::string_view label) const {
+  if (label.starts_with("boot:")) return std::nullopt;
   // The agent's registered `d.code` heads first — no first-`:` split;
   // `demo:Forager.f` is an opaque label, never `code_named("f")` on a
   // `demo` module arm.
@@ -492,6 +508,17 @@ MetaValidateReport MetaRuntime::validate(CellRef graphRootCell,
   auto &arena      = core_.arena();
   const auto &dims = core_.dims();
 
+  const auto bad = [&](std::string_view why) -> MetaValidateReport {
+    if (arena.contains(graphRootCell) && !imageRef(graphRootCell)) {
+      if (const auto rec =
+              varsRecord(graphRootCell, "$validate_error", /*mint=*/true)) {
+        zigzag::expectWritten(arena.link(*rec, core_.dims().values, Posward,
+                                         arena.makeCell(why)));
+      }
+    }
+    return {false, std::string{why}};
+  };
+
   // A head operand resolves through the `+d.entry` chain — transitive
   // because a wrapper head delegates to its attach (see `graphRoot`);
   // an op operand stands.
@@ -501,23 +528,24 @@ MetaValidateReport MetaRuntime::validate(CellRef graphRootCell,
   const auto ceiling =
       arena.asInt64(binds_.validate.linkedCeiling)
           .value_or(static_cast<std::int64_t>(OpcodeKind::Linked));
-  if (!isOpCell(root)) return {false, "validate: root is not an op cell"};
+  if (!isOpCell(root)) return bad("validate: root is not an op cell");
 
   // Decode the bound arity table: `(op, in, out)` triples on `+d.step`.
-  std::map<std::int64_t, std::pair<std::size_t, std::size_t>> arity;
+  std::map<std::int64_t, std::vector<std::pair<std::size_t, std::size_t>>>
+      arity;
   {
     const auto fields = collect(
         zigzag::rankAfter(arena, binds_.validate.arityTable, dims.step));
     if (fields.size() % 3 != 0)
-      return {false, "validate: arity table is not a triple chain"};
+      return bad("validate: arity table is not a triple chain");
     for (std::size_t i = 0; i + 2 < fields.size(); i += 3) {
       const auto op  = arena.asInt64(fields[i]);
       const auto in  = arena.asInt64(fields[i + 1]);
       const auto out = arena.asInt64(fields[i + 2]);
       if (!op || !in || !out || *in < 0 || *out < 0)
-        return {false, "validate: arity table field is not an int64 triple"};
-      arity[*op] = {static_cast<std::size_t>(*in),
-                    static_cast<std::size_t>(*out)};
+        return bad("validate: arity table field is not an int64 triple");
+      arity[*op].emplace_back(static_cast<std::size_t>(*in),
+                              static_cast<std::size_t>(*out));
     }
   }
   std::set<std::int64_t> impure;
@@ -525,17 +553,21 @@ MetaValidateReport MetaRuntime::validate(CellRef graphRootCell,
        zigzag::rankAfter(arena, binds_.validate.impureKinds, dims.step))
     if (const auto kind = arena.asInt64(cell)) impure.insert(*kind);
 
-  const auto serial = nextSerial();
-  if (!serial) return {false, serial.error()};
-  const auto tagged = [&](CellRef cell) {
-    for (const auto tag : zigzag::rankAfter(arena, cell, binds_.dims.validate))
-      if (arena.asInt64(tag) == *serial) return true;
-    return false;
-  };
-  const auto tag = [&](CellRef cell) {
-    zigzag::expectWritten(arena.link(cell, binds_.dims.validate, Posward,
-                                     arena.makeScalarCell(*serial)));
-  };
+  CellRef recipeHead = graphRootCell;
+  if (recipeHead == root && binds_.dims.entry != noCell) {
+    if (const auto back = arena.linked(root, binds_.dims.entry, Negward)) {
+      recipeHead = *back;
+    }
+  }
+  std::set<CellRef> internalCells;
+  if (recipeHead != root && binds_.dims.recipe != noCell) {
+    for (const auto member :
+         stepChain(arena, recipeHead, binds_.dims.recipe, dims.step)) {
+      if (const auto pos = arena.asInt64(member))
+        if (*pos != 1 && *pos != -1)
+          internalCells.insert(static_cast<CellRef>(*pos));
+    }
+  }
 
   // Op-graph reachability, bounded. Wing slots are walked for target
   // referents (control ops carry op refs as int64 slots); slots are
@@ -543,36 +575,45 @@ MetaValidateReport MetaRuntime::validate(CellRef graphRootCell,
   std::set<CellRef> seen{root};
   std::deque<CellRef> frontier{root};
   std::size_t visited = 0;
+  bool sawReturn      = false;
   const auto bound    = arena.traversalBound();
   while (!frontier.empty()) {
     const auto op = frontier.front();
     frontier.pop_front();
-    if (visited++ > bound)
-      return {false, "validate: op graph exceeds the arena bound"};
-    if (tagged(op)) continue;
-    tag(op);
+    core_.arena().consumeWork();
+    if (++visited > binds_.limits.maxRegisterOps)
+      return bad("validate: op count exceeds max_register_ops");
+    if (visited > bound)
+      return bad("validate: op graph exceeds the arena bound");
 
     const auto ordinal = arena.asInt64(op);
     if (!ordinal || *ordinal < 0 || *ordinal > ceiling)
-      return {false, "validate: op int64 outside [0, Linked]"};
+      return bad(std::format("validate: op int64 outside [0, {}]", ceiling));
+    const auto opKind = static_cast<OpcodeKind>(*ordinal);
+    if (opKind == OpcodeKind::Return) sawReturn = true;
     const auto shape = arity.find(*ordinal);
     if (shape == arity.end())
-      return {false, "validate: op kind absent from the arity table"};
-    const auto inCells  = core_.inputsOf(op);
-    const auto outCells = core_.outputsOf(op);
-    if (inCells.size() != shape->second.first ||
-        outCells.size() != shape->second.second)
-      return {false, "validate: wing arity differs from the table"};
-    if (options.runReachable &&
-        static_cast<OpcodeKind>(*ordinal) == OpcodeKind::New &&
-        !outCells.empty())
-      return {false, "validate: bound-output New in a run-reachable graph"};
-    if (options.expectPure && impure.contains(*ordinal))
-      return {false, "validate: impure op in a pure-flagged fragment"};
+      return bad("validate: op kind absent from the arity table");
+    const auto inCells    = core_.inputsOf(op);
+    const auto outCells   = core_.outputsOf(op);
+    const bool arityMatch = std::ranges::any_of(
+        shape->second, [&](const std::pair<std::size_t, std::size_t> &p) {
+          return inCells.size() == p.first && outCells.size() == p.second;
+        });
+    if (!arityMatch) return bad("validate: wing arity differs from the table");
+    if (options.expectPure && impure.contains(*ordinal)) {
+      const bool internalValueCopy =
+          opKind == OpcodeKind::Value &&
+          (inCells.size() == 1 ||
+           (inCells.size() == 4 && internalCells.contains(inCells[0])));
+      if (!internalValueCopy)
+        return bad("validate: impure op in a pure-flagged fragment");
+    }
 
-    const auto bad = [&](std::string_view why) {
-      return MetaValidateReport{false, std::string{why}};
-    };
+    if (!core_.preconditionsOf(op).empty() ||
+        !core_.postconditionsOf(op).empty())
+      return bad("validate: contract op-graphs are out of v1 scope");
+
     const auto enqueue =
         [&](CellRef target) -> std::optional<MetaValidateReport> {
       if (!arena.contains(target) || !isOpCell(target))
@@ -581,22 +622,41 @@ MetaValidateReport MetaRuntime::validate(CellRef graphRootCell,
       return std::nullopt;
     };
 
-    // `+d.spin` continuation; a run-reachable chain must tail Return.
+    // `+d.spin` continuation; a run-reachable chain must tail Return
+    // (or transfer via Jump / unwind via Fail to a Choice arm that tails
+    // Return).
     if (const auto next = arena.linked(op, dims.spin, Posward)) {
       if (const auto fail = enqueue(*next)) return *fail;
-    } else if (options.runReachable &&
-               static_cast<OpcodeKind>(*ordinal) != OpcodeKind::Return) {
+    } else if (options.runReachable && opKind != OpcodeKind::Return &&
+               opKind != OpcodeKind::Jump && opKind != OpcodeKind::Fail) {
       return bad("validate: run-reachable op chain ends without "
                  "Return");
     }
 
-    // Control-op targets are the op's wing operands directly:
-    // `inputsOf`/`outputsOf` already operand-resolve each slot (an
-    // Int64 naming a contained cell resolves to it), so re-reading the
-    // operand's own content would chase the *op ordinal*, not a cell.
+    // Control-op targets: Two-hop resolution.
     const auto target = [&](std::size_t index) -> std::optional<CellRef> {
       if (index >= inCells.size()) return std::nullopt;
-      return inCells[index];
+      const CellRef firstHop = inCells[index];
+      if (vm_.hasOpcodeKind(firstHop) ||
+          arena.linked(firstHop, dims.spin, Posward).has_value() ||
+          arena.linked(firstHop, dims.grab, Posward).has_value()) {
+        return firstHop;
+      }
+      if (const auto val = arena.asInt64(firstHop)) {
+        const CellRef twoHop = static_cast<CellRef>(*val);
+        if (arena.contains(twoHop) &&
+            !arena.linked(firstHop, dims.spin, Posward).has_value()) {
+          if (isOpCell(twoHop)) return twoHop;
+          if (const auto val2 = arena.asInt64(twoHop)) {
+            const CellRef threeHop = static_cast<CellRef>(*val2);
+            if (arena.contains(threeHop) && isOpCell(threeHop) &&
+                !arena.linked(twoHop, dims.spin, Posward).has_value()) {
+              return threeHop;
+            }
+          }
+        }
+      }
+      return firstHop;
     };
     switch (static_cast<OpcodeKind>(*ordinal)) {
     case OpcodeKind::Jump:
@@ -615,10 +675,38 @@ MetaValidateReport MetaRuntime::validate(CellRef graphRootCell,
         return bad("validate: Branch is missing its alternate target");
       }
       break;
+    case OpcodeKind::RunCall:
+      if (const auto t = target(2)) {
+        if (const auto fail = enqueue(*t)) return *fail;
+      } else {
+        return bad("validate: RunCall is missing its failure target");
+      }
+      break;
+    case OpcodeKind::RunResume:
+      if (const auto t = target(1)) {
+        if (const auto fail = enqueue(*t)) return *fail;
+      } else {
+        return bad("validate: RunResume is missing its failure target");
+      }
+      break;
     default:
       break;
     }
   }
+  if (options.runReachable && !sawReturn)
+    return bad("validate: run-reachable op chain ends without Return");
+
+  // If validation succeeded and $validate_error was previously set on
+  // graphRootCell, clear it.
+  if (arena.contains(graphRootCell) && !imageRef(graphRootCell)) {
+    if (const auto rec =
+            varsRecord(graphRootCell, "$validate_error", /*mint=*/false)) {
+      if (arena.linked(*rec, dims.values, Posward).has_value()) {
+        zigzag::expectWritten(arena.unlink(*rec, dims.values, Posward));
+      }
+    }
+  }
+
   return {true, {}};
 }
 
@@ -688,6 +776,12 @@ MetaRunOutcome MetaRuntime::runFragment(CellRef head,
                                         const std::vector<CellValue> &args,
                                         std::optional<CellRef> cursor,
                                         std::size_t maxCycles) {
+  if (registration(head) == "pending") {
+    return MetaRunOutcome{.refusal  = MetaRunOutcome::Refusal::VmFault,
+                          .produced = false,
+                          .result   = std::nullopt,
+                          .detail   = "pending_registration"};
+  }
   auto &arena      = core_.arena();
   const auto &dims = core_.dims();
 
@@ -705,7 +799,14 @@ MetaRunOutcome MetaRuntime::runFragment(CellRef head,
   if (!entry)
     return {MetaRunOutcome::Refusal::NotAHead, false, std::nullopt,
             "run operand's +d.entry chain reaches no opcode"};
-  const auto descriptor = arena.linked(head, dims.values, Posward);
+  auto descriptor = arena.linked(head, dims.values, Posward);
+  if (!descriptor || !arena.contains(*descriptor)) {
+    if (const auto direct = arena.linked(head, binds_.dims.entry, Posward)) {
+      if (!isOpCell(*direct)) {
+        descriptor = arena.linked(*direct, dims.values, Posward);
+      }
+    }
+  }
   if (!descriptor || !arena.contains(*descriptor))
     return {MetaRunOutcome::Refusal::NoDescriptor, false, std::nullopt,
             "fragment head carries no +d.values descriptor"};
@@ -754,9 +855,9 @@ MetaRunOutcome MetaRuntime::runFragment(CellRef head,
   // lands `Return` identically — `mintOpcode` would write the untrailed
   // `opcodeMap_` under whatever marks this capcall runs in, and the entry
   // would outlive a released cell (P17).
-  const auto landing = arena.makeScalarCell(
-      static_cast<std::int64_t>(OpcodeKind::Halt));
-  const auto frame   = refCell(arena, core_, landing);
+  const auto landing =
+      arena.makeScalarCell(static_cast<std::int64_t>(OpcodeKind::Halt));
+  const auto frame = refCell(arena, core_, landing);
   if (const auto top = arena.linked(cur, dims.stack, Posward))
     zigzag::expectWritten(arena.link(frame, dims.stack, Posward, *top));
   zigzag::expectWritten(arena.link(cur, dims.stack, Posward, frame));
@@ -921,14 +1022,12 @@ CellValue MetaRuntime::factValue(CellRef cell) const {
   // caller's business (it holds the CellRef, not a CellValue).
   const std::string text{arena.textOf(cell)};
   if (!text.empty()) {
-    char *end = nullptr;
-    errno     = 0;
+    char *end    = nullptr;
+    errno        = 0;
     const auto n = std::strtoll(text.c_str(), &end, 10);
-    if (errno == 0 && end == text.c_str() + text.size())
-      return CellValue{n};
+    if (errno == 0 && end == text.c_str() + text.size()) return CellValue{n};
     const auto f = std::strtod(text.c_str(), &end);
-    if (errno == 0 && end == text.c_str() + text.size())
-      return CellValue{f};
+    if (errno == 0 && end == text.c_str() + text.size()) return CellValue{f};
   }
   if (text == "true" || text == "false") return CellValue{text == "true"};
   return CellValue{text};
@@ -990,7 +1089,7 @@ MetaRuntime::believe(std::string_view predicate, CellRef term, CellRef peer,
         clause, core_.findOrMintDimension("d.source"), Posward, source));
     if (const auto slot = varsRecord(source, "peer", true))
       zigzag::expectWritten(arena.link(*slot, core_.dims().values, Posward,
-                                     refCell(arena, core_, peer)));
+                                       refCell(arena, core_, peer)));
     if (const auto slot = varsRecord(source, "turn", true))
       zigzag::expectWritten(arena.link(*slot, core_.dims().values, Posward,
                                        arena.makeScalarCell(turn)));
@@ -1044,8 +1143,7 @@ void MetaRuntime::stageBeliefTriggers(std::string_view predicate,
                                       CellRef factClause) {
   auto &arena = core_.arena();
   if (binds_.agentCell == noCell) return;
-  const auto factHead =
-      arena.linked(factClause, core_.dims().grab, Posward);
+  const auto factHead = arena.linked(factClause, core_.dims().grab, Posward);
   if (!factHead) return;
   const auto key = std::string{sign} + std::string{predicate};
 
@@ -1065,8 +1163,7 @@ void MetaRuntime::stageBeliefTriggers(std::string_view predicate,
   };
   collect(binds_.agentCell, noCell);
   for (const CellRef inst : zigzag::rankAfter(
-           arena, binds_.agentCell,
-           core_.findOrMintDimension("d.behavior"))) {
+           arena, binds_.agentCell, core_.findOrMintDimension("d.behavior"))) {
     const auto rec = varsRecord(inst, "behavior", /*mint=*/false);
     if (!rec) continue;
     const auto v   = arena.linked(*rec, core_.dims().values, Posward);
@@ -1083,16 +1180,14 @@ void MetaRuntime::stageBeliefTriggers(std::string_view predicate,
       return arena.makeScalarCell(*n);
     if (const auto d = std::get_if<double>(&value)) {
       const auto cell = arena.makeCell(std::to_string(*d));
-      zigzag::expectWritten(
-          arena.setValueBits(cell, xanadu::ValueKind::Double,
-                             xanadu::canonicalDoubleBits(*d)));
+      zigzag::expectWritten(arena.setValueBits(
+          cell, xanadu::ValueKind::Double, xanadu::canonicalDoubleBits(*d)));
       return cell;
     }
     if (const auto b = std::get_if<bool>(&value)) {
       const auto cell = arena.makeCell(*b ? "true" : "false");
-      zigzag::expectWritten(
-          arena.setValueBits(cell, xanadu::ValueKind::Bool,
-                             *b ? std::uint64_t{1} : 0));
+      zigzag::expectWritten(arena.setValueBits(cell, xanadu::ValueKind::Bool,
+                                               *b ? std::uint64_t{1} : 0));
       return cell;
     }
     return arena.makeCell(std::get<std::string>(value));
@@ -1140,8 +1235,7 @@ void MetaRuntime::stageBeliefTriggers(std::string_view predicate,
       std::map<std::string, CellValue, std::less<>> env;
       if (!unifyCollect(pattern, *factHead, env)) continue;
       Match m{.clause = clause, .owner = owner};
-      for (const auto &var : varOrder(pattern))
-        m.bindings.push_back(env[var]);
+      for (const auto &var : varOrder(pattern)) m.bindings.push_back(env[var]);
       matched.push_back(std::move(m));
     }
   // §3.5's merged order on the staged records too — priority first,
@@ -1156,7 +1250,7 @@ void MetaRuntime::stageBeliefTriggers(std::string_view predicate,
     const auto ref  = [&](std::string_view name, CellRef cell) {
       if (const auto rec = varsRecord(pend, name, /*mint=*/true))
         zigzag::expectWritten(arena.link(*rec, core_.dims().values, Posward,
-                                       refCell(arena, core_, cell)));
+                                         refCell(arena, core_, cell)));
     };
     ref("beliefClause", m.clause);
     ref("grab", factClause);
@@ -1166,8 +1260,8 @@ void MetaRuntime::stageBeliefTriggers(std::string_view predicate,
           arena.link(zigzag::rankTail(arena, pend, core_.dims().step),
                      core_.dims().step, Posward, bindingCell(value)));
     zigzag::expectWritten(
-        arena.link(zigzag::rankTail(arena, binds_.agentCell, pending),
-                   pending, Posward, pend));
+        arena.link(zigzag::rankTail(arena, binds_.agentCell, pending), pending,
+                   Posward, pend));
   }
 }
 
@@ -1210,7 +1304,7 @@ MetaRuntime::selectClause(CellRef host,
          zigzag::rankAfter(arena, binds_.agentCell, bDim)) {
       const auto rec = varsRecord(inst, "behavior", /*mint=*/false);
       if (!rec) continue;
-      const auto ref = arena.linked(*rec, core_.dims().values, Posward);
+      const auto ref  = arena.linked(*rec, core_.dims().values, Posward);
       const auto desc = ref ? arena.asInt64(*ref) : std::nullopt;
       if (!desc) continue;
       const auto table = varsRecord(static_cast<CellRef>(*desc), "plans",
@@ -1243,10 +1337,8 @@ MetaRuntime::selectClause(CellRef host,
     // produced value itself never discriminates.
     auto callArgs = args;
     if (candidate.owner != noCell)
-      callArgs.push_back(
-          CellValue{static_cast<std::int64_t>(candidate.owner)});
-    const auto outcome =
-        runFragment(*guard, callArgs, std::nullopt, whereFuel);
+      callArgs.push_back(CellValue{static_cast<std::int64_t>(candidate.owner)});
+    const auto outcome = runFragment(*guard, callArgs, std::nullopt, whereFuel);
     if (outcome.refusal != MetaRunOutcome::Refusal::None) continue;
     if (outcome.produced)
       return std::optional<std::pair<CellRef, CellRef>>{
@@ -1293,8 +1385,7 @@ void MetaRuntime::setIntentionRef(CellRef intention, std::string_view field,
 }
 
 std::expected<CellRef, std::string>
-MetaRuntime::adoptGoal(CellRef goal, std::int64_t turn,
-                       std::size_t whereFuel,
+MetaRuntime::adoptGoal(CellRef goal, std::int64_t turn, std::size_t whereFuel,
                        const std::vector<CellValue> &args,
                        std::span<const CellRef> argRefs) {
   auto &arena = core_.arena();
@@ -1375,9 +1466,9 @@ MetaRuntime::adoptGoal(CellRef goal, std::int64_t turn,
       // args means the tail args are plain values.
       if (i < argRefs.size() && argRefs[i] != noCell) {
         const auto cell = refCell(arena, core_, argRefs[i]);
-        zigzag::expectWritten(arena.link(
-            zigzag::rankTail(arena, chain, core_.dims().step),
-            core_.dims().step, Posward, cell));
+        zigzag::expectWritten(
+            arena.link(zigzag::rankTail(arena, chain, core_.dims().step),
+                       core_.dims().step, Posward, cell));
         continue;
       }
       const auto cell = std::visit(
@@ -1389,9 +1480,9 @@ MetaRuntime::adoptGoal(CellRef goal, std::int64_t turn,
               return arena.makeScalarCell(v);
           },
           arg);
-      zigzag::expectWritten(arena.link(
-          zigzag::rankTail(arena, chain, core_.dims().step),
-          core_.dims().step, Posward, cell));
+      zigzag::expectWritten(
+          arena.link(zigzag::rankTail(arena, chain, core_.dims().step),
+                     core_.dims().step, Posward, cell));
     }
     field("args", chain);
   }
@@ -1440,8 +1531,10 @@ std::expected<CellRef, std::string> MetaRuntime::reify(CellRef head) {
   // links.
   std::vector<CellRef> members;
   for (auto cell = recipe; cell && arena.contains(*cell);
-       cell      = arena.linked(*cell, dims.step, Posward))
+       cell      = arena.linked(*cell, dims.step, Posward)) {
+    arena.consumeWork();
     members.push_back(*cell);
+  }
 
   // Pass 1 — classify. A member bearing `+d.refFor` is a ref-capture
   // record; a member bearing `+d.name` is a tuple's dim-name field;
@@ -1571,7 +1664,7 @@ std::expected<CellRef, std::string> MetaRuntime::reify(CellRef head) {
       if (!referent)
         return std::unexpected(
             "reify: capture slot has no int64 binding referent");
-      const auto binding = mapped(static_cast<CellRef>(*referent));
+      const auto binding  = mapped(static_cast<CellRef>(*referent));
       const auto cloneDim = resolveDimension(kCloneDimName);
       if (!cloneDim) return std::unexpected(cloneDim.error());
       zigzag::expectWritten(
@@ -1604,6 +1697,7 @@ std::expected<CellRef, std::string> MetaRuntime::reify(CellRef head) {
     return out;
   };
   for (const auto rec : refChain(arena, head, binds_.dims.refs, dims.step)) {
+    arena.consumeWork();
     const auto target = arena.linked(rec, binds_.dims.ref, Posward);
     const auto name   = arena.linked(rec, dims.name, Posward);
     if (!target)
@@ -1711,6 +1805,14 @@ std::expected<CellRef, std::string> MetaRuntime::reify(CellRef head) {
   zigzag::expectWritten(arena.link(
       newHead, dims.name, Posward,
       arena.makeCell(std::format("reify:{}:{}", sourceLabel, *serial))));
+
+  if (binds_.dims.lineage != noCell) {
+    const auto tail =
+        zigzag::rankTail(arena, head, binds_.dims.lineage, Negward);
+    zigzag::expectWritten(
+        arena.link(newHead, binds_.dims.lineage, Posward, tail));
+  }
+
   return newHead;
 }
 
@@ -1772,8 +1874,7 @@ MetaRuntime::MetaSignature MetaRuntime::signatureOf(CellRef head) const {
   return sig;
 }
 
-std::optional<std::string>
-MetaRuntime::resultTypeOf(CellRef head) const {
+std::optional<std::string> MetaRuntime::resultTypeOf(CellRef head) const {
   const auto sig = signatureOf(head);
   if (!sig.descriptor) return std::nullopt;
   return sig.resultType;
@@ -2175,7 +2276,21 @@ std::set<CellRef> MetaRuntime::programCells() const {
 }
 
 MetaRuntime::MetaMutation MetaRuntime::learnable(CellRef head) const {
-  if (!hasProgramLineage())
+  bool hasLineage = hasProgramLineage() || kindRegistered(head);
+  if (!hasLineage && binds_.dims.lineage != noCell) {
+    auto current = head;
+    std::set<CellRef> seen{head};
+    while (const auto next =
+               arena().linked(current, binds_.dims.lineage, Posward)) {
+      if (!arena().contains(*next) || !seen.insert(*next).second) break;
+      if (imageRef(*next) || kindRegistered(*next)) {
+        hasLineage = true;
+        break;
+      }
+      current = *next;
+    }
+  }
+  if (!hasLineage)
     return std::unexpected(
         "learn refuses: no program lineage — the bind set carries no "
         "image-bound program() record (§6.6)");
@@ -2208,7 +2323,7 @@ MetaRuntime::MetaMutation MetaRuntime::registerHead(CellRef head) const {
   const auto label = labelOf(head).value_or("");
   for (const auto member :
        zigzag::rankAfter(arena, binds_.agentCell, binds_.dims.code))
-    if (labelOf(member).value_or("") == label)
+    if (member != head && labelOf(member).value_or("") == label)
       return std::unexpected(std::format(
           "d.code registration refuses a second head carrying label "
           "'{}'",
@@ -2697,6 +2812,21 @@ MetaRuntime::sproutSynapse(std::string_view from, std::string_view to,
   return junction;
 }
 
+namespace {
+
+thread_local const std::set<std::string, std::less<>> *g_batchLabels = nullptr;
+
+struct ScopedBatchLabels {
+  const std::set<std::string, std::less<>> *prev;
+  explicit ScopedBatchLabels(const std::set<std::string, std::less<>> *labels)
+      : prev(g_batchLabels) {
+    g_batchLabels = labels;
+  }
+  ~ScopedBatchLabels() { g_batchLabels = prev; }
+};
+
+} // namespace
+
 MetaClosedReport MetaRuntime::verifyClosed(CellRef head) const {
   auto &arena = core_.arena();
   MetaClosedReport report;
@@ -2716,6 +2846,7 @@ MetaClosedReport MetaRuntime::verifyClosed(CellRef head) const {
   std::map<CellRef, CellRef> captureFor;
   for (const auto member :
        stepChain(arena, head, binds_.dims.recipe, core_.dims().step)) {
+    core_.arena().consumeWork();
     if (const auto slot = arena.linked(member, binds_.dims.refFor, Posward))
       captureFor[*slot] = member;
     // Every member value is a covered position — persistent or ephemeral
@@ -2744,14 +2875,19 @@ MetaClosedReport MetaRuntime::verifyClosed(CellRef head) const {
                 symbolNamed(name.substr(0, colon), name.substr(colon + 1)))
           target = arena.linked(*symbol, core_.dims().values, Posward);
     if (target && arena.contains(*target)) {
-      const bool head =
+      const bool isHead =
           arena.linked(*target, binds_.dims.entry, Posward).has_value();
-      if (role == "run" && !head)
+      if (role == "run" && !isHead)
         return std::format(
             "run-role record '{}' resolves head-less — fail-forever", name);
       return {};
     }
+    for (const auto h : zigzag::rankAfter(arena, binds_.agentCell,
+                                          binds_.dims.kindRegistered)) {
+      if (labelOf(h).value_or("") == name) return {};
+    }
     if (codeNamed(name).has_value()) return {};
+    if (g_batchLabels && g_batchLabels->contains(name)) return {};
     return std::format("{}-role record '{}' unresolved — "
                        "fail-until-resume",
                        role, name);
@@ -2759,6 +2895,7 @@ MetaClosedReport MetaRuntime::verifyClosed(CellRef head) const {
 
   for (const auto record :
        stepChain(arena, head, binds_.dims.refs, core_.dims().step)) {
+    core_.arena().consumeWork();
     const auto marked   = arena.linked(record, binds_.dims.ref, Posward);
     const auto nameCell = arena.linked(record, core_.dims().name, Posward);
     if (nameCell) {
@@ -2820,6 +2957,842 @@ MetaClosedReport MetaRuntime::verifyClosed(CellRef head) const {
   }
   report.closed = true;
   return report;
+}
+
+bool MetaRuntime::kindRegistered(CellRef head) const {
+  if (head == noCell || binds_.dims.kindRegistered == noCell) return false;
+  for (const auto cell : zigzag::rankAfter(arena(), binds_.agentCell,
+                                           binds_.dims.kindRegistered)) {
+    if (cell == head) return true;
+  }
+  return false;
+}
+
+std::string_view MetaRuntime::registration(CellRef head) const {
+  if (kindRegistered(head)) return "committed";
+  if (arena().contains(head) &&
+      arena().linked(head, binds_.dims.entry, Posward).has_value() &&
+      imageRef(head)) {
+    return "committed";
+  }
+  if (binds_.dims.pendingReg != noCell) {
+    for (const auto req :
+         zigzag::rankAfter(arena(), binds_.agentCell, binds_.dims.pendingReg)) {
+      if (arena().asInt64(req) == static_cast<std::int64_t>(head)) {
+        return "pending";
+      }
+    }
+  }
+  return "absent";
+}
+
+std::optional<CellRef> MetaRuntime::dimNamed(std::string_view name) const {
+  return core_.findDimension(name);
+}
+
+std::optional<CellRef> MetaRuntime::asBody(CellRef head) const {
+  if (const auto shape = headShape(head, /*pureRequired=*/false, "as_body");
+      !shape) {
+    return std::nullopt;
+  }
+  const auto sig = signatureOf(head);
+  if (!sig.descriptor || !sig.params.empty() || sig.resultType != "()") {
+    return std::nullopt;
+  }
+  return head;
+}
+
+std::optional<CellRef> MetaRuntime::varOf(CellRef owner,
+                                          std::string_view key) const {
+  if (!arena().contains(owner)) return std::nullopt;
+  const auto rec = varsRecord(owner, key, /*mint=*/false);
+  if (!rec) return std::nullopt;
+  return arena().linked(*rec, core_.dims().values, Posward);
+}
+
+std::optional<CellRef> MetaRuntime::grabOf(CellRef cell) const {
+  if (!arena().contains(cell)) return std::nullopt;
+  return arena().linked(cell, core_.dims().grab, Posward);
+}
+
+std::optional<CellRef> MetaRuntime::stepOf(CellRef cell) const {
+  if (!arena().contains(cell)) return std::nullopt;
+  return arena().linked(cell, core_.dims().step, Posward);
+}
+
+std::optional<CellRef> MetaRuntime::valuesOf(CellRef cell) const {
+  if (!arena().contains(cell)) return std::nullopt;
+  return arena().linked(cell, core_.dims().values, Posward);
+}
+
+bool MetaRuntime::setValues(CellRef cell, CellRef val) {
+  if (!arena().contains(cell) || !arena().contains(val)) return false;
+  if (const auto oldVal = arena().linked(cell, core_.dims().values, Posward)) {
+    zigzag::expectWritten(arena().unlink(cell, core_.dims().values, Posward));
+  }
+  return arena().link(cell, core_.dims().values, Posward, val).has_value();
+}
+
+bool MetaRuntime::setVar(CellRef owner, std::string_view key, CellRef val) {
+  if (!arena().contains(owner) || !arena().contains(val)) return false;
+  const auto rec = varsRecord(owner, key, /*mint=*/true);
+  if (!rec) return false;
+  if (const auto oldVal = arena().linked(*rec, core_.dims().values, Posward)) {
+    zigzag::expectWritten(arena().unlink(*rec, core_.dims().values, Posward));
+  }
+  return arena().link(*rec, core_.dims().values, Posward, val).has_value();
+}
+
+std::expected<std::vector<CellRef>, std::string>
+MetaRuntime::collectCoveredOps(CellRef head) const {
+  auto &arena      = core_.arena();
+  const auto &dims = core_.dims();
+
+  if (const auto descriptor = arena.linked(head, dims.values, Posward);
+      descriptor && arena.contains(*descriptor)) {
+    for (const auto param : parameterCells(*descriptor)) {
+      if (core_.hasPipeline(param))
+        return std::unexpected(
+            "collectCoveredOps: parameter pipelines are out of v1 scope");
+    }
+  }
+
+  const auto entry = arena.linked(head, binds_.dims.entry, Posward);
+  if (!entry || !arena.contains(*entry))
+    return std::unexpected("collectCoveredOps: head carries no entry");
+
+  std::set<CellRef> coveredCells{head};
+  for (const auto member :
+       stepChain(arena, head, binds_.dims.recipe, dims.step)) {
+    if (const auto pos = arena.asInt64(member)) {
+      if (*pos != 1 && *pos != -1) {
+        const auto cell = static_cast<CellRef>(*pos);
+        coveredCells.insert(cell);
+        if (arena.contains(cell) && isOpCell(cell)) {
+          if (const auto opOrd = arena.asInt64(cell)) {
+            if (!zigzag::vortex::isRegistrableOpcode(*opOrd)) {
+              return std::unexpected(std::format(
+                  "collectCoveredOps: invalid registrable opcode {}", *opOrd));
+            }
+          }
+        }
+      }
+    }
+  }
+
+  for (const auto record :
+       stepChain(arena, head, binds_.dims.refs, dims.step)) {
+    if (const auto marked = arena.linked(record, binds_.dims.ref, Posward)) {
+      coveredCells.insert(*marked);
+      if (const auto pos = arena.asInt64(*marked)) {
+        coveredCells.insert(static_cast<CellRef>(*pos));
+      }
+    }
+  }
+
+  std::set<CellRef> reachableOps;
+  std::deque<CellRef> frontier;
+
+  const auto enqueue = [&](CellRef op) {
+    if (arena.contains(op) && isOpCell(op)) {
+      if (reachableOps.insert(op).second) {
+        frontier.push_back(op);
+      }
+    }
+  };
+
+  enqueue(*entry);
+
+  while (!frontier.empty()) {
+    const auto op = frontier.front();
+    frontier.pop_front();
+
+    if (reachableOps.size() > binds_.limits.maxRegisterOps) {
+      return std::unexpected(
+          "collectCoveredOps: op count exceeds max_register_ops");
+    }
+
+    if (const auto next = arena.linked(op, dims.spin, Posward)) {
+      enqueue(*next);
+    }
+
+    const auto ordinal = arena.asInt64(op);
+    if (!ordinal) continue;
+
+    const auto inCells = core_.inputsOf(op);
+    const auto target  = [&](std::size_t index) -> std::optional<CellRef> {
+      if (index >= inCells.size()) return std::nullopt;
+      const CellRef firstHop = inCells[index];
+      if (vm_.hasOpcodeKind(firstHop) ||
+          arena.linked(firstHop, dims.spin, Posward).has_value() ||
+          arena.linked(firstHop, dims.grab, Posward).has_value()) {
+        return firstHop;
+      }
+      if (const auto val = arena.asInt64(firstHop)) {
+        const CellRef twoHop = static_cast<CellRef>(*val);
+        if (arena.contains(twoHop) &&
+            !arena.linked(firstHop, dims.spin, Posward).has_value()) {
+          if (isOpCell(twoHop)) return twoHop;
+          if (const auto val2 = arena.asInt64(twoHop)) {
+            const CellRef threeHop = static_cast<CellRef>(*val2);
+            if (arena.contains(threeHop) && isOpCell(threeHop) &&
+                !arena.linked(twoHop, dims.spin, Posward).has_value()) {
+              return threeHop;
+            }
+          }
+        }
+      }
+      return firstHop;
+    };
+
+    switch (static_cast<OpcodeKind>(*ordinal)) {
+    case OpcodeKind::Jump:
+    case OpcodeKind::Choice:
+      if (const auto t = target(0)) enqueue(*t);
+      break;
+    case OpcodeKind::Call:
+      if (const auto t = target(0)) {
+        if (coveredCells.contains(*t)) enqueue(*t);
+      }
+      break;
+    case OpcodeKind::Branch:
+      if (const auto t = target(1)) enqueue(*t);
+      break;
+    case OpcodeKind::RunCall:
+      if (const auto t = target(2)) enqueue(*t);
+      break;
+    case OpcodeKind::RunResume:
+      if (const auto t = target(1)) enqueue(*t);
+      break;
+    default:
+      break;
+    }
+  }
+
+  for (const auto op : reachableOps) {
+    if (!coveredCells.contains(op)) {
+      return std::unexpected(std::format(
+          "collectCoveredOps: reachable op {} not covered in recipe/refs",
+          static_cast<std::uint64_t>(op)));
+    }
+  }
+
+  return std::vector<CellRef>(reachableOps.begin(), reachableOps.end());
+}
+
+std::expected<CellRef, std::string> MetaRuntime::registerCode(CellRef head) {
+  const auto reg = registration(head);
+  if (reg == "committed" || reg == "pending") {
+    return head;
+  }
+
+  if (const auto shape = headShape(head, /*pureRequired=*/false, "register");
+      !shape) {
+    if (arena().contains(head) && !imageRef(head)) {
+      if (const auto rec = varsRecord(head, "$validate_error", /*mint=*/true)) {
+        zigzag::expectWritten(arena().link(*rec, core_.dims().values, Posward,
+                                           arena().makeCell(shape.error())));
+      }
+    }
+    return std::unexpected(shape.error());
+  }
+
+  const auto entry = arena().linked(head, binds_.dims.entry, Posward);
+  if (!entry) return std::unexpected("register: missing entry");
+  const auto sig = signatureOf(head);
+  const auto val =
+      validate(head, {.runReachable = true, .expectPure = sig.pure});
+  if (!val.ok) {
+    if (arena().contains(head) && !imageRef(head)) {
+      if (const auto rec = varsRecord(head, "$validate_error", /*mint=*/true)) {
+        zigzag::expectWritten(arena().link(*rec, core_.dims().values, Posward,
+                                           arena().makeCell(val.detail)));
+      }
+    }
+    return std::unexpected(val.detail);
+  }
+
+  const auto ops = collectCoveredOps(head);
+  if (!ops) {
+    if (arena().contains(head) && !imageRef(head)) {
+      if (const auto rec = varsRecord(head, "$validate_error", /*mint=*/true)) {
+        zigzag::expectWritten(arena().link(*rec, core_.dims().values, Posward,
+                                           arena().makeCell(ops.error())));
+      }
+    }
+    return std::unexpected(ops.error());
+  }
+
+  const auto closed = verifyClosed(head);
+  if (!closed.closed) {
+    if (arena().contains(head) && !imageRef(head)) {
+      if (const auto rec = varsRecord(head, "$validate_error", /*mint=*/true)) {
+        zigzag::expectWritten(arena().link(*rec, core_.dims().values, Posward,
+                                           arena().makeCell(closed.detail)));
+      }
+    }
+    return std::unexpected(closed.detail);
+  }
+
+  if (arena().outstandingMarks() > 0 || vm_.scopedDepth() > 0) {
+    std::size_t pendingCount = 0;
+    if (binds_.dims.pendingReg != noCell) {
+      for (const auto _ : zigzag::rankAfter(arena(), binds_.agentCell,
+                                            binds_.dims.pendingReg)) {
+        (void)_;
+        ++pendingCount;
+      }
+    }
+    if (pendingCount >= binds_.limits.maxPendingRegisters) {
+      return std::unexpected("register: pending register queue exceeds limit");
+    }
+    const auto req = arena().makeScalarCell(static_cast<std::int64_t>(head));
+    zigzag::expectWritten(arena().link(
+        zigzag::rankTail(arena(), binds_.agentCell, binds_.dims.pendingReg),
+        binds_.dims.pendingReg, Posward, req));
+    return head;
+  }
+
+  std::size_t committedCount = 0;
+  if (binds_.dims.kindRegistered != noCell) {
+    for (const auto _ : zigzag::rankAfter(arena(), binds_.agentCell,
+                                          binds_.dims.kindRegistered)) {
+      (void)_;
+      ++committedCount;
+    }
+  }
+  if (committedCount >= binds_.limits.maxRegisteredHeads) {
+    return std::unexpected("register: registered heads count exceeds limit");
+  }
+
+  for (const auto op : *ops) {
+    if (const auto ord = arena().asInt64(op)) {
+      vm_.setOpcodeKind(op, static_cast<OpcodeKind>(*ord));
+    }
+  }
+
+  if (binds_.dims.kindRegistered != noCell && !kindRegistered(head)) {
+    zigzag::expectWritten(arena().link(
+        zigzag::rankTail(arena(), binds_.agentCell, binds_.dims.kindRegistered),
+        binds_.dims.kindRegistered, Posward, head));
+  }
+  if (!codeRegistered(head)) {
+    (void)registerHead(head);
+  }
+
+  return head;
+}
+
+std::expected<std::vector<CellRef>, std::string>
+MetaRuntime::registerAll(std::span<const CellRef> heads) {
+  if (heads.empty()) return std::vector<CellRef>{};
+
+  std::set<std::string, std::less<>> batchLabels;
+  for (const auto h : heads) {
+    if (const auto l = labelOf(h)) {
+      batchLabels.insert(*l);
+    }
+  }
+
+  ScopedBatchLabels scopedLabels(&batchLabels);
+
+  std::vector<std::vector<CellRef>> allCoveredOps;
+  allCoveredOps.reserve(heads.size());
+
+  for (const auto h : heads) {
+    const auto reg = registration(h);
+    if (reg == "committed" || reg == "pending") {
+      allCoveredOps.push_back({});
+      continue;
+    }
+
+    if (const auto shape = headShape(h, /*pureRequired=*/false, "register");
+        !shape) {
+      if (arena().contains(h) && !imageRef(h)) {
+        if (const auto rec = varsRecord(h, "$validate_error", /*mint=*/true)) {
+          zigzag::expectWritten(arena().link(*rec, core_.dims().values, Posward,
+                                             arena().makeCell(shape.error())));
+        }
+      }
+      return std::unexpected(shape.error());
+    }
+
+    const auto entry = arena().linked(h, binds_.dims.entry, Posward);
+    if (!entry) return std::unexpected("register_all: missing entry");
+    const auto sig = signatureOf(h);
+    const auto val =
+        validate(*entry, {.runReachable = true, .expectPure = sig.pure});
+    if (!val.ok) {
+      if (arena().contains(h) && !imageRef(h)) {
+        if (const auto rec = varsRecord(h, "$validate_error", /*mint=*/true)) {
+          zigzag::expectWritten(arena().link(*rec, core_.dims().values, Posward,
+                                             arena().makeCell(val.detail)));
+        }
+      }
+      return std::unexpected(val.detail);
+    }
+
+    const auto ops = collectCoveredOps(h);
+    if (!ops) {
+      if (arena().contains(h) && !imageRef(h)) {
+        if (const auto rec = varsRecord(h, "$validate_error", /*mint=*/true)) {
+          zigzag::expectWritten(arena().link(*rec, core_.dims().values, Posward,
+                                             arena().makeCell(ops.error())));
+        }
+      }
+      return std::unexpected(ops.error());
+    }
+
+    const auto closed = verifyClosed(h);
+    if (!closed.closed) {
+      if (arena().contains(h) && !imageRef(h)) {
+        if (const auto rec = varsRecord(h, "$validate_error", /*mint=*/true)) {
+          zigzag::expectWritten(arena().link(*rec, core_.dims().values, Posward,
+                                             arena().makeCell(closed.detail)));
+        }
+      }
+      return std::unexpected(closed.detail);
+    }
+
+    allCoveredOps.push_back(*ops);
+  }
+
+  const bool deferred = arena().outstandingMarks() > 0 || vm_.scopedDepth() > 0;
+  if (deferred) {
+    std::size_t pendingCount = 0;
+    if (binds_.dims.pendingReg != noCell) {
+      for (const auto _ : zigzag::rankAfter(arena(), binds_.agentCell,
+                                            binds_.dims.pendingReg)) {
+        (void)_;
+        ++pendingCount;
+      }
+    }
+    if (pendingCount + heads.size() > binds_.limits.maxPendingRegisters) {
+      return std::unexpected(
+          "register_all: pending register queue exceeds limit");
+    }
+    for (const auto h : heads) {
+      if (registration(h) == "pending" || registration(h) == "committed")
+        continue;
+      const auto req = arena().makeScalarCell(static_cast<std::int64_t>(h));
+      zigzag::expectWritten(arena().link(
+          zigzag::rankTail(arena(), binds_.agentCell, binds_.dims.pendingReg),
+          binds_.dims.pendingReg, Posward, req));
+    }
+  } else {
+    std::size_t committedCount = 0;
+    if (binds_.dims.kindRegistered != noCell) {
+      for (const auto _ : zigzag::rankAfter(arena(), binds_.agentCell,
+                                            binds_.dims.kindRegistered)) {
+        (void)_;
+        ++committedCount;
+      }
+    }
+    if (committedCount + heads.size() > binds_.limits.maxRegisteredHeads) {
+      return std::unexpected(
+          "register_all: registered heads count exceeds limit");
+    }
+    for (std::size_t i = 0; i < heads.size(); ++i) {
+      const auto h = heads[i];
+      if (registration(h) == "committed") continue;
+      for (const auto op : allCoveredOps[i]) {
+        if (const auto ord = arena().asInt64(op)) {
+          vm_.setOpcodeKind(op, static_cast<OpcodeKind>(*ord));
+        }
+      }
+      if (binds_.dims.kindRegistered != noCell && !kindRegistered(h)) {
+        zigzag::expectWritten(
+            arena().link(zigzag::rankTail(arena(), binds_.agentCell,
+                                          binds_.dims.kindRegistered),
+                         binds_.dims.kindRegistered, Posward, h));
+      }
+      if (!codeRegistered(h)) {
+        (void)registerHead(h);
+      }
+    }
+  }
+
+  return std::vector<CellRef>(heads.begin(), heads.end());
+}
+
+std::size_t MetaRuntime::drainPendingRegisters() {
+  if (arena().outstandingMarks() != 0 || vm_.scopedDepth() != 0) return 0;
+  if (binds_.dims.pendingReg == noCell) return 0;
+
+  const auto reqs = collect(
+      zigzag::rankAfter(arena(), binds_.agentCell, binds_.dims.pendingReg));
+  if (reqs.empty()) return 0;
+
+  std::vector<CellRef> candidates;
+  for (const auto req : reqs) {
+    if (const auto hPos = arena().asInt64(req)) {
+      candidates.push_back(static_cast<CellRef>(*hPos));
+    }
+    unlinkRank(req, binds_.dims.pendingReg);
+  }
+
+  std::set<std::string, std::less<>> batchLabels;
+  for (const auto h : candidates) {
+    if (const auto l = labelOf(h)) {
+      batchLabels.insert(*l);
+    }
+  }
+
+  ScopedBatchLabels scopedLabels(&batchLabels);
+
+  std::vector<std::pair<CellRef, std::vector<CellRef>>> validCandidates;
+  for (const auto h : candidates) {
+    const auto label = labelOf(h).value_or("");
+    const auto fail  = [&](std::string_view reason) {
+      if (const auto rec =
+              varsRecord(binds_.agentCell, std::format("fault:{}", label),
+                         /*mint=*/true)) {
+        zigzag::expectWritten(arena().link(*rec, core_.dims().values, Posward,
+                                           arena().makeCell(reason)));
+      }
+    };
+
+    if (const auto shape = headShape(h, /*pureRequired=*/false, "register");
+        !shape) {
+      fail(shape.error());
+      continue;
+    }
+    const auto entry = arena().linked(h, binds_.dims.entry, Posward);
+    if (!entry) {
+      fail("drain: missing entry");
+      continue;
+    }
+    const auto sig = signatureOf(h);
+    const auto val =
+        validate(*entry, {.runReachable = true, .expectPure = sig.pure});
+    if (!val.ok) {
+      fail(val.detail);
+      continue;
+    }
+    const auto ops = collectCoveredOps(h);
+    if (!ops) {
+      fail(ops.error());
+      continue;
+    }
+    const auto closed = verifyClosed(h);
+    if (!closed.closed) {
+      fail(closed.detail);
+      continue;
+    }
+
+    validCandidates.emplace_back(h, *ops);
+  }
+
+  std::size_t committed = 0;
+  for (const auto &[h, ops] : validCandidates) {
+    for (const auto op : ops) {
+      if (const auto ord = arena().asInt64(op)) {
+        vm_.setOpcodeKind(op, static_cast<OpcodeKind>(*ord));
+      }
+    }
+    if (binds_.dims.kindRegistered != noCell && !kindRegistered(h)) {
+      zigzag::expectWritten(
+          arena().link(zigzag::rankTail(arena(), binds_.agentCell,
+                                        binds_.dims.kindRegistered),
+                       binds_.dims.kindRegistered, Posward, h));
+    }
+    if (!codeRegistered(h)) {
+      (void)registerHead(h);
+    }
+    ++committed;
+  }
+
+  return committed;
+}
+
+bool MetaRuntime::joinBatch(CellRef batch) {
+  auto &arena      = core_.arena();
+  const auto &dims = core_.dims();
+  if (!arena.contains(batch)) return false;
+
+  const auto firstTuple = arena.linked(batch, dims.grab, Posward);
+  if (!firstTuple) return true;
+
+  std::vector<CellRef> tuples = zigzag::rank(arena, *firstTuple, dims.step) |
+                                std::ranges::to<std::vector>();
+
+  for (const auto tuple : tuples) {
+    core_.arena().consumeWork();
+    const auto tupleText = arena.textOf(tuple);
+    const auto firstArg  = arena.linked(tuple, dims.grab, Posward);
+    if (!firstArg) return false;
+    std::vector<CellRef> args = zigzag::rank(arena, *firstArg, dims.step) |
+                                std::ranges::to<std::vector>();
+
+    if (tupleText == "write") {
+      if (args.size() != 2) return false;
+      const auto targetRef = arena.asInt64(args[0]);
+      if (!targetRef) return false;
+      const CellRef target = static_cast<CellRef>(*targetRef);
+      if (!arena.contains(target)) return false;
+      if (imageRef(target) || vm_.hasOpcodeKind(target)) return false;
+
+      const auto val = core_.render(args[1]);
+      if (!val) return false;
+      core_.writeValue(target, 0, std::nullopt, *val);
+    } else if (tupleText == "link") {
+      if (args.size() != 4) return false;
+      const auto fromRef = arena.asInt64(args[0]);
+      const auto dimRef  = arena.asInt64(args[1]);
+      const auto dirVal  = arena.asInt64(args[2]);
+      const auto toRef   = arena.asInt64(args[3]);
+      if (!fromRef || !dimRef || !dirVal || !toRef) return false;
+
+      const CellRef from = static_cast<CellRef>(*fromRef);
+      const DimRef dim   = static_cast<DimRef>(*dimRef);
+      const CellRef to   = static_cast<CellRef>(*toRef);
+      if (!arena.contains(from) || !arena.contains(dim) || !arena.contains(to))
+        return false;
+      if (imageRef(from) || imageRef(to)) return false;
+
+      const auto dir = *dirVal < 0 ? Negward : Posward;
+      zigzag::expectWritten(arena.link(from, dim, dir, to));
+    } else {
+      return false;
+    }
+  }
+  return true;
+}
+
+std::optional<CellRef> MetaRuntime::buildFragmentFromSpec(CellRef spec) {
+  auto &arena      = core_.arena();
+  const auto &dims = core_.dims();
+  if (!arena.contains(spec)) return std::nullopt;
+
+  const auto head  = arena.makeCell();
+  const auto label = arena.textOf(spec);
+  if (!label.empty()) {
+    zigzag::expectWritten(
+        arena.link(head, dims.name, Posward, arena.makeCell(label)));
+  }
+
+  const auto entryVal = varOf(spec, "entry");
+  if (!entryVal) return std::nullopt;
+  const auto entryPos = arena.asInt64(*entryVal);
+  if (!entryPos) return std::nullopt;
+  const CellRef entryOp = static_cast<CellRef>(*entryPos);
+  if (!arena.contains(entryOp)) return std::nullopt;
+  zigzag::expectWritten(arena.link(head, binds_.dims.entry, Posward, entryOp));
+
+  std::vector<CellRef> specParams;
+  if (const auto pFirst = arena.linked(spec, dims.grab, Posward)) {
+    for (const auto p : zigzag::rank(arena, *pFirst, dims.step)) {
+      specParams.push_back(p);
+    }
+  }
+
+  CellRef resultSlot = entryOp;
+  if (const auto r = varOf(spec, "result_slot")) {
+    if (const auto rPos = arena.asInt64(*r)) {
+      resultSlot = static_cast<CellRef>(*rPos);
+    }
+  }
+  CellRef producedSlot = entryOp;
+  if (const auto p = varOf(spec, "produced_slot")) {
+    if (const auto pPos = arena.asInt64(*p)) {
+      producedSlot = static_cast<CellRef>(*pPos);
+    }
+  }
+  std::string resultType = "()";
+  if (const auto rt = varOf(spec, "result_type")) {
+    resultType = arena.textOf(*rt);
+  }
+  std::int64_t pureVal = 0;
+  if (const auto pu = varOf(spec, "pure")) {
+    pureVal = arena.asInt64(*pu).value_or(0);
+  }
+  std::int64_t closedVal = 1;
+  if (const auto cl = varOf(spec, "closed")) {
+    closedVal = arena.asInt64(*cl).value_or(1);
+  }
+
+  const auto descriptor = arena.makeCell();
+  zigzag::expectWritten(arena.link(head, dims.values, Posward, descriptor));
+
+  std::vector<CellRef> apparatusCells;
+  apparatusCells.push_back(descriptor);
+
+  struct AppLink {
+    CellRef from;
+    DimRef dim;
+    bool neg;
+    CellRef to;
+    std::string dimName;
+  };
+  std::vector<AppLink> appLinks;
+  appLinks.push_back({head, dims.values, false, descriptor, "d.values"});
+
+  const auto addField = [&](std::string_view key, CellRef value) {
+    const auto rec = arena.makeCell(key);
+    apparatusCells.push_back(rec);
+    zigzag::expectWritten(arena.link(rec, dims.values, Posward, value));
+    appLinks.push_back({rec, dims.values, false, value, "d.values"});
+    const auto tail = zigzag::rankTail(arena, descriptor, dims.vars);
+    zigzag::expectWritten(arena.link(tail, dims.vars, Posward, rec));
+    appLinks.push_back({tail, dims.vars, false, rec, "d.vars"});
+    return rec;
+  };
+
+  const auto resRec = addField("result", resultSlot);
+  const auto rtCell = arena.makeCell(resultType);
+  apparatusCells.push_back(rtCell);
+  zigzag::expectWritten(arena.link(resRec, dims.name, Posward, rtCell));
+  appLinks.push_back({resRec, dims.name, false, rtCell, "d.name"});
+
+  addField("produced", producedSlot);
+
+  const auto pureCell = arena.makeScalarCell(pureVal);
+  apparatusCells.push_back(pureCell);
+  addField("pure", pureCell);
+
+  const auto closedCell = arena.makeScalarCell(closedVal);
+  apparatusCells.push_back(closedCell);
+  addField("closed", closedCell);
+
+  const auto arityCell =
+      arena.makeScalarCell(static_cast<std::int64_t>(specParams.size()));
+  apparatusCells.push_back(arityCell);
+  addField("arity", arityCell);
+
+  CellRef paramTail = noCell;
+  for (const auto p : specParams) {
+    const auto pName  = arena.textOf(p);
+    std::string pType = "Any";
+    if (const auto tCell = arena.linked(p, dims.values, Posward)) {
+      pType = arena.textOf(*tCell);
+    }
+    const auto pTypeCell = arena.makeCell(pType);
+    apparatusCells.push_back(pTypeCell);
+    addField(pName, pTypeCell);
+
+    const auto pChainCell = arena.makeCell();
+    apparatusCells.push_back(pChainCell);
+    const auto pNameCell = arena.makeCell(pName);
+    apparatusCells.push_back(pNameCell);
+    zigzag::expectWritten(
+        arena.link(pChainCell, dims.name, Posward, pNameCell));
+    appLinks.push_back({pChainCell, dims.name, false, pNameCell, "d.name"});
+    const auto pValCell = arena.makeCell(pType);
+    apparatusCells.push_back(pValCell);
+    zigzag::expectWritten(
+        arena.link(pChainCell, dims.values, Posward, pValCell));
+    appLinks.push_back({pChainCell, dims.values, false, pValCell, "d.values"});
+
+    if (paramTail == noCell) {
+      zigzag::expectWritten(
+          arena.link(descriptor, dims.grab, Posward, pChainCell));
+      appLinks.push_back({descriptor, dims.grab, false, pChainCell, "d.grab"});
+    } else {
+      zigzag::expectWritten(
+          arena.link(paramTail, dims.step, Posward, pChainCell));
+      appLinks.push_back({paramTail, dims.step, false, pChainCell, "d.step"});
+    }
+    paramTail = pChainCell;
+  }
+
+  struct RefItem {
+    CellRef cell;
+    std::optional<std::string> name;
+    std::optional<std::string> role;
+  };
+  std::vector<RefItem> refItems;
+  if (const auto rFirst = arena.linked(spec, binds_.dims.refs, Posward)) {
+    for (const auto r : zigzag::rank(arena, *rFirst, dims.step)) {
+      if (const auto cPos = arena.asInt64(r)) {
+        std::optional<std::string> rName;
+        if (const auto nCell = arena.linked(r, dims.name, Posward)) {
+          rName = arena.textOf(*nCell);
+        }
+        std::optional<std::string> rRole;
+        if (const auto gCell = arena.linked(r, dims.grab, Posward)) {
+          rRole = arena.textOf(*gCell);
+        }
+        refItems.push_back({static_cast<CellRef>(*cPos), rName, rRole});
+      }
+    }
+  }
+
+  std::vector<CellRef> recipeMembers;
+  const auto pushMember = [&](std::int64_t pos) {
+    const auto m = arena.makeScalarCell(pos);
+    recipeMembers.push_back(m);
+    return m;
+  };
+
+  for (const auto &item : refItems) {
+    pushMember(static_cast<std::int64_t>(item.cell));
+  }
+  for (const auto c : apparatusCells) {
+    pushMember(static_cast<std::int64_t>(c));
+  }
+
+  const auto addTuple = [&](CellRef from, DimRef dim, bool neg, CellRef to,
+                            std::string_view dimName) {
+    pushMember(static_cast<std::int64_t>(from));
+    const auto anchor = pushMember(static_cast<std::int64_t>(dim));
+    zigzag::expectWritten(
+        arena.link(anchor, dims.name, Posward, arena.makeCell(dimName)));
+    pushMember(neg ? -1 : 1);
+    pushMember(static_cast<std::int64_t>(to));
+  };
+  addTuple(head, binds_.dims.entry, false, entryOp, "d.entry");
+  for (const auto &al : appLinks) {
+    addTuple(al.from, al.dim, al.neg, al.to, al.dimName);
+  }
+
+  if (!recipeMembers.empty()) {
+    zigzag::expectWritten(
+        arena.link(head, binds_.dims.recipe, Posward, recipeMembers.front()));
+    for (std::size_t i = 1; i < recipeMembers.size(); ++i) {
+      zigzag::expectWritten(arena.link(recipeMembers[i - 1], dims.step, Posward,
+                                       recipeMembers[i]));
+    }
+  }
+
+  std::vector<CellRef> refRecords;
+  const auto addRefRecord = [&](CellRef target,
+                                const std::optional<std::string> &name,
+                                const std::optional<std::string> &role) {
+    const auto rec = arena.makeCell();
+    zigzag::expectWritten(arena.link(rec, binds_.dims.ref, Posward, target));
+    if (name) {
+      zigzag::expectWritten(
+          arena.link(rec, dims.name, Posward, arena.makeCell(*name)));
+      if (role) {
+        zigzag::expectWritten(
+            arena.link(rec, dims.grab, Posward, arena.makeCell(*role)));
+      }
+    } else {
+      zigzag::expectWritten(arena.link(target, binds_.dims.meshRelocation,
+                                       Posward, arena.makeCell("cell")));
+    }
+    refRecords.push_back(rec);
+  };
+
+  for (const auto &item : refItems) {
+    if (item.name) {
+      addRefRecord(item.cell, item.name, item.role);
+    }
+  }
+  for (const auto m : recipeMembers) {
+    addRefRecord(m, std::nullopt, std::nullopt);
+  }
+
+  if (!refRecords.empty()) {
+    zigzag::expectWritten(
+        arena.link(head, binds_.dims.refs, Posward, refRecords.front()));
+    for (std::size_t i = 1; i < refRecords.size(); ++i) {
+      zigzag::expectWritten(
+          arena.link(refRecords[i - 1], dims.step, Posward, refRecords[i]));
+    }
+  }
+
+  return head;
 }
 
 } // namespace xanadu::vagent

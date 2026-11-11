@@ -1,0 +1,133 @@
+module std:compiler:decls
+
+import std:meta
+import std:compiler:ast
+
+agent DeclLowerer {
+  var error_msg: Str := ""
+  var lowered_count: Int := 0
+  var agent_count: Int := 0
+  var event_count: Int := 0
+  var plan_count: Int := 0
+  var belief_count: Int := 0
+  var field_count: Int := 0
+  var handler_count: Int := 0
+  var behavior_count: Int := 0
+
+  // -------------------------------------------------------------------------
+  // Disposition Matrix (All 20 VAgent Declaration Forms)
+  // -------------------------------------------------------------------------
+
+  def decl_disposition(kind: Str): Str {
+    if kind == "decl.agent" then "lower"
+    else if kind == "decl.event" then "lower"
+    else if kind == "decl.goal" then "lower"
+    else if kind == "decl.predicate" then "lower"
+    else if kind == "decl.plan" then "lower"
+    else if kind == "decl.method" then "lower"
+    else if kind == "decl.answer" then "lower"
+    else if kind == "decl.handler" then "lower"
+    else if kind == "decl.field" then "lower"
+    else if kind == "decl.record" then "lower"
+    else if kind == "decl.belief" then "lower"
+    else if kind == "decl.question" then "lower"
+    else if kind == "decl.skill" then "lower"
+    else if kind == "decl.capacity" then "lower"
+    else if kind == "decl.behavior" then "lower"
+    else if kind == "decl.lifecycle" then "stub"
+    else if kind == "decl.uses" then "lower"
+    else if kind == "decl.install" then "lower"
+    else if kind == "decl.behavior_use" then "lower"
+    else "refuse"
+  }
+
+  def should_lower(kind: Str): Bool {
+    let disp := decl_disposition(kind)
+    if disp == "lower" then true
+    else false
+  }
+
+  def should_stub(kind: Str): Bool {
+    let disp := decl_disposition(kind)
+    if disp == "stub" then true
+    else false
+  }
+
+  // -------------------------------------------------------------------------
+  // Semantic Classification
+  // -------------------------------------------------------------------------
+
+  def is_callable_decl(kind: Str): Bool {
+    if kind == "decl.plan" then true
+    else if kind == "decl.method" then true
+    else if kind == "decl.handler" then true
+    else false
+  }
+
+  def is_structural_decl(kind: Str): Bool {
+    if kind == "decl.agent" then true
+    else if kind == "decl.field" then true
+    else if kind == "decl.record" then true
+    else if kind == "decl.belief" then true
+    else false
+  }
+
+  def is_event_decl(kind: Str): Bool {
+    if kind == "decl.event" then true
+    else if kind == "decl.question" then true
+    else if kind == "decl.answer" then true
+    else false
+  }
+
+  def is_modular_decl(kind: Str): Bool {
+    if kind == "decl.behavior" then true
+    else if kind == "decl.skill" then true
+    else if kind == "decl.uses" then true
+    else if kind == "decl.install" then true
+    else if kind == "decl.behavior_use" then true
+    else false
+  }
+
+  def is_state_decl(kind: Str): Bool {
+    if kind == "decl.field" then true
+    else if kind == "decl.belief" then true
+    else if kind == "decl.record" then true
+    else false
+  }
+
+  // -------------------------------------------------------------------------
+  // Lowering Pipeline Accounting
+  // -------------------------------------------------------------------------
+
+  def record_lowered_decl(kind: Str, name: Str): Int {
+    if should_lower(kind) then {
+      lowered_count := lowered_count + 1
+      if kind == "decl.agent" then agent_count := agent_count + 1
+      else if kind == "decl.event" then event_count := event_count + 1
+      else if kind == "decl.plan" then plan_count := plan_count + 1
+      else if kind == "decl.belief" then belief_count := belief_count + 1
+      else if kind == "decl.field" then field_count := field_count + 1
+      else if kind == "decl.handler" then handler_count := handler_count + 1
+      else if kind == "decl.behavior" then behavior_count := behavior_count + 1
+      lowered_count
+    } else 0
+  }
+
+  def calculate_synapse_weight(declared_weight: Int): Int {
+    if declared_weight <= 0 then 10 // default weight
+    else declared_weight
+  }
+
+  def reset(): Int {
+    error_msg := ""
+    lowered_count := 0
+    agent_count := 0
+    event_count := 0
+    plan_count := 0
+    belief_count := 0
+    field_count := 0
+    handler_count := 0
+    behavior_count := 0
+    0
+  }
+}

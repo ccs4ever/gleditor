@@ -24,6 +24,8 @@
 
 namespace {
 
+using xanadu::identity::Fingerprint;
+using xanadu::identity::MessageType;
 using xanadu::vagent::VagentAdapter;
 using zigzag::vortex::WorkerContext;
 using zigzag::vortex::mesh::ActorError;
@@ -34,8 +36,6 @@ using zigzag::vortex::mesh::ActorLineage;
 using zigzag::vortex::mesh::ActorMessage;
 using zigzag::vortex::mesh::ActorPid;
 using zigzag::vortex::mesh::MeshActorRuntime;
-using xanadu::identity::Fingerprint;
-using xanadu::identity::MessageType;
 
 void usage(std::ostream &out) {
   out << "Usage: vagent check FILE...\n"
@@ -106,7 +106,8 @@ std::string pidKey(const ActorPid &pid) {
          std::to_string(pid.spawnSequence);
 }
 
-bool runFile(std::string_view path, const std::vector<SendSpec> &sends) {
+bool runFile(std::string_view path, const std::vector<SendSpec> &sends,
+             const std::vector<std::string> &scriptArgs = {}) {
   std::string source;
   if (!readSource(path, source)) return false;
 
@@ -127,16 +128,16 @@ bool runFile(std::string_view path, const std::vector<SendSpec> &sends) {
   // filed cells, then the whole image promotes into the lineage.
   xanadu::Store lineage;
   zigzag::ArenaManifold stage;
-  auto filed =
-      xanadu::vagent::fileDimensionVocabulary(lineage, stage, {});
+  auto filed = xanadu::vagent::fileDimensionVocabulary(lineage, stage, {});
   if (!filed) {
     std::cerr << path << ": " << filed.error() << '\n';
     return false;
   }
   WorkerContext compile{&filed->fold, &lineage};
+  compile.stdlib.setArgs(scriptArgs);
   auto image = xanadu::vagent::lowerProgram(
-      artifacts->program, compile.core, compile.vm, {},
-      &artifacts->expansion, &artifacts->fragmentInfo);
+      artifacts->program, compile.core, compile.vm, {}, &artifacts->expansion,
+      &artifacts->fragmentInfo);
   if (!image) {
     for (const auto &diagnostic : image.error()) {
       std::cerr << path << ':' << xanadu::vagent::formatDiagnostic(diagnostic)
@@ -145,7 +146,7 @@ bool runFile(std::string_view path, const std::vector<SendSpec> &sends) {
     return false;
   }
   auto seeded = xanadu::vagent::seedProgramImage(lineage, compile.arena,
-                                               image->programRoot);
+                                                 image->programRoot);
   if (!seeded) {
     std::cerr << path << ": " << seeded.error() << '\n';
     return false;
@@ -166,85 +167,81 @@ bool runFile(std::string_view path, const std::vector<SendSpec> &sends) {
   // contexts seen in executor turns feed the deadline sweep, spawn-request
   // outcomes queue until the requester's next turn can drain them.
   std::map<std::string, std::pair<ActorPid, WorkerContext *>> actors;
-  std::map<std::string,
-           std::vector<std::pair<ActorMessage,
-                                 std::expected<ActorPid, ActorError>>>>
+  std::map<
+      std::string,
+      std::vector<std::pair<ActorMessage, std::expected<ActorPid, ActorError>>>>
       outcomes;
 
-  runtime.setAuthorizer(
-      [](const Fingerprint &, const ActorMessage &request)
-          -> std::expected<ActorGrant, ActorError> {
-        ActorGrant grant;
-        grant.programRef       = request.programRef;
-        grant.baseRef          = "local-lineage";
-        grant.maxInstructions  = 1'000'000;
-        grant.maxCells         = 1'000'000;
-        grant.maxOutputBytes   = 32'768;
-        grant.maxSolutions     = 64;
-        grant.maxMailboxBytes  = 1u << 20;
-        grant.expiresAt =
-            std::chrono::system_clock::now() + std::chrono::hours{1};
-        grant.immutable = true;
-        return grant;
+  runtime.setAuthorizer([](const Fingerprint &, const ActorMessage &request)
+                            -> std::expected<ActorGrant, ActorError> {
+    ActorGrant grant;
+    grant.programRef      = request.programRef;
+    grant.baseRef         = "local-lineage";
+    grant.maxInstructions = 1'000'000;
+    grant.maxCells        = 1'000'000;
+    grant.maxOutputBytes  = 32'768;
+    grant.maxSolutions    = 64;
+    grant.maxMailboxBytes = 1u << 20;
+    grant.expiresAt = std::chrono::system_clock::now() + std::chrono::hours{1};
+    grant.immutable = true;
+    return grant;
+  });
+  runtime.setExecutor(
+      [&](const ActorExecution &exec,
+          WorkerContext &ctx) -> std::expected<std::string, ActorError> {
+        actors[pidKey(exec.pid)] = {exec.pid, &ctx};
+        if (auto pending = outcomes.find(pidKey(exec.pid));
+            pending != outcomes.end()) {
+          for (const auto &[request, result] : pending->second)
+            adapter.spawnOutcome(ctx, request, result);
+          outcomes.erase(pending);
+        }
+        auto result = adapter(exec, ctx);
+        if (!result) std::cerr << path << ": turn failed (actor down)\n";
+        return result;
       });
-  runtime.setExecutor([&](const ActorExecution &exec, WorkerContext &ctx)
-                          -> std::expected<std::string, ActorError> {
-    actors[pidKey(exec.pid)] = {exec.pid, &ctx};
-    if (auto pending = outcomes.find(pidKey(exec.pid));
-        pending != outcomes.end()) {
-      for (const auto &[request, result] : pending->second)
-        adapter.spawnOutcome(ctx, request, result);
-      outcomes.erase(pending);
-    }
-    auto result = adapter(exec, ctx);
-    if (!result)
-      std::cerr << path << ": turn failed (actor down)\n";
-    return result;
-  });
-  runtime.setGenesisHook([&](const ActorGenesis &genesis,
-                             WorkerContext &ctx)
-                             -> std::expected<void, ActorError> {
-    if (const auto outcome = adapter.genesis(genesis, ctx); !outcome)
-      return outcome;
-    // The host's sends land once the member exists: each stages a
-    // fielded percept on +d.pending, which the pump's pendingWork
-    // sweep turns into a dispatch on a later turn. Only the root
-    // incarnation earns them — a spawned child's genesis carries the
-    // asking member's source, not the synthetic client's.
-    if (const auto member = adapter.memberForPid(ctx, genesis.pid);
-        member && genesis.request && genesis.request->source &&
-        *genesis.request->source == client)
-      for (std::size_t i = 0; i < sends.size(); ++i)
-        adapter.sendPercept(ctx, *member, sends[i].name,
-                            sends[i].fields,
-                            std::format("runner-send-{}", i));
-    return {};
-  });
+  runtime.setGenesisHook(
+      [&](const ActorGenesis &genesis,
+          WorkerContext &ctx) -> std::expected<void, ActorError> {
+        ctx.stdlib.setArgs(scriptArgs);
+        if (const auto outcome = adapter.genesis(genesis, ctx); !outcome)
+          return outcome;
+        // The host's sends land once the member exists: each stages a
+        // fielded percept on +d.pending, which the pump's pendingWork
+        // sweep turns into a dispatch on a later turn. Only the root
+        // incarnation earns them — a spawned child's genesis carries the
+        // asking member's source, not the synthetic client's.
+        if (const auto member = adapter.memberForPid(ctx, genesis.pid);
+            member && genesis.request && genesis.request->source &&
+            *genesis.request->source == client)
+          for (std::size_t i = 0; i < sends.size(); ++i)
+            adapter.sendPercept(ctx, *member, sends[i].name, sends[i].fields,
+                                std::format("runner-send-{}", i));
+        return {};
+      });
   // Member-addressed sends ride the same runtime.send the spawn arm
   // uses — on a single node the sender loopback below turns them
   // into real mailbox deliveries, so Moved/stop/fielded percepts
   // exercise the full wire path.
-  adapter.setSendSender(
-      [&runtime](WorkerContext &,
-                 const ActorMessage &message)
-          -> std::expected<void, ActorError> {
-        if (!message.target) return std::unexpected(ActorError::InvalidMessage);
-        return runtime.send(message.target->node, message);
-      });
+  adapter.setSendSender([&runtime](WorkerContext &, const ActorMessage &message)
+                            -> std::expected<void, ActorError> {
+    if (!message.target) return std::unexpected(ActorError::InvalidMessage);
+    return runtime.send(message.target->node, message);
+  });
   runtime.setSpawnResultHook(
       [&outcomes](const ActorMessage &request,
                   const std::expected<ActorPid, ActorError> &result) {
         if (request.source)
           outcomes[pidKey(*request.source)].emplace_back(request, result);
       });
-  runtime.setSender([&](std::string_view destination,
-                        const ActorMessage &message) -> bool {
-    if (destination != node) return false;
-    return runtime
-        .receive(identity, message, std::chrono::steady_clock::now(),
-                 std::chrono::system_clock::now())
-        .has_value();
-  });
+  runtime.setSender(
+      [&](std::string_view destination, const ActorMessage &message) -> bool {
+        if (destination != node) return false;
+        return runtime
+            .receive(identity, message, std::chrono::steady_clock::now(),
+                     std::chrono::system_clock::now())
+            .has_value();
+      });
   runtime.trustNode(node, identity);
 
   const auto wallNow = std::chrono::system_clock::now();
@@ -274,8 +271,7 @@ bool runFile(std::string_view path, const std::vector<SendSpec> &sends) {
   // an ActorSpawnAck would take.
   adapter.setSpawnSender(
       [&](WorkerContext &ctx, zigzag::CellRef /*member*/,
-          std::string_view requestId)
-          -> std::expected<void, ActorError> {
+          std::string_view requestId) -> std::expected<void, ActorError> {
         const auto directory = adapter.members(ctx);
         if (directory.empty())
           return std::unexpected(ActorError::InvalidMessage);
@@ -336,10 +332,9 @@ bool runFile(std::string_view path, const std::vector<SendSpec> &sends) {
   }
 
   if (auto it = actors.find(pidKey(*pid)); it != actors.end())
-    if (const auto member =
-            adapter.memberForPid(*it->second.second, *pid)) {
-      auto &arena = it->second.second->arena;
-      auto &core  = it->second.second->core;
+    if (const auto member = adapter.memberForPid(*it->second.second, *pid)) {
+      auto &arena     = it->second.second->arena;
+      auto &core      = it->second.second->core;
       const auto seen = core.findOrMintDimension("d.seen");
       for (const auto event : zigzag::rankAfter(arena, *member, seen))
         std::cout << path << ": saw " << arena.textOf(event) << '\n';
@@ -347,8 +342,8 @@ bool runFile(std::string_view path, const std::vector<SendSpec> &sends) {
       // this agent only while its +d.owner scalar names it. `$` keys
       // are executor internals ($turn/$stats), not program state.
       const auto of = core.findOrMintDimension("d.owner");
-      for (const auto rec : zigzag::rankAfter(arena, *member,
-                                              core.dims().vars)) {
+      for (const auto rec :
+           zigzag::rankAfter(arena, *member, core.dims().vars)) {
         const auto key = arena.textOf(rec);
         if (key.empty() || key[0] == '$') continue;
         if (const auto scope = arena.linked(rec, of))
@@ -386,9 +381,8 @@ int main(int argc, char *argv[]) {
     std::cout << "vagent 0.2.0 (local runner)\n";
     return 0;
   }
-  if (argc < 3 ||
-      (std::string_view(argv[1]) != "check" &&
-       std::string_view(argv[1]) != "run")) {
+  if (argc < 3 || (std::string_view(argv[1]) != "check" &&
+                   std::string_view(argv[1]) != "run")) {
     usage(std::cerr);
     return 2;
   }
@@ -396,9 +390,16 @@ int main(int argc, char *argv[]) {
   // A --send binds to the FILE before it: the arg walk groups each
   // file with the sends that trail it, then runs the pairs in order.
   std::vector<std::pair<std::string, std::vector<SendSpec>>> units;
+  std::vector<std::string> scriptArgs;
   try {
     for (int index = 2; index < argc; ++index) {
       const std::string_view arg{argv[index]};
+      if (arg == "--") {
+        for (int rest = index + 1; rest < argc; ++rest) {
+          scriptArgs.emplace_back(argv[rest]);
+        }
+        break;
+      }
       if (arg == "--send") {
         if (!run || units.empty() || index + 1 >= argc) {
           usage(std::cerr);
@@ -413,11 +414,16 @@ int main(int argc, char *argv[]) {
         units.back().second.push_back(*spec);
         continue;
       }
+      if (run && !units.empty() && !arg.starts_with("--")) {
+        scriptArgs.emplace_back(arg);
+        continue;
+      }
       units.emplace_back(std::string{arg}, std::vector<SendSpec>{});
     }
     bool valid = true;
     for (const auto &[file, sends] : units)
-      valid = (run ? runFile(file, sends) : checkFile(file)) && valid;
+      valid =
+          (run ? runFile(file, sends, scriptArgs) : checkFile(file)) && valid;
     return valid ? 0 : 1;
   } catch (const std::exception &error) {
     std::cerr << "vagent: " << error.what() << '\n';

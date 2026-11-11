@@ -114,12 +114,14 @@ struct Descriptor {
   CellRef cell;
   CellRef result;
   CellRef produced;
+  CellRef resultRec;
 };
 Descriptor mintDescriptor(MetaHarness &h, CellRef head) {
   const auto descriptor = h.arena.makeCell();
   zigzag::expectWritten(
       h.arena.link(head, h.core.dims().values, Posward, descriptor));
-  Descriptor out{descriptor, h.arena.makeCell(), h.arena.makeScalarCell(false)};
+  Descriptor out{descriptor, h.arena.makeCell(), h.arena.makeScalarCell(false),
+                 zigzag::noCell};
   const auto record = [&](std::string_view key, CellRef value) {
     const auto rec = h.arena.makeCell(key);
     zigzag::expectWritten(
@@ -127,9 +129,10 @@ Descriptor mintDescriptor(MetaHarness &h, CellRef head) {
     zigzag::expectWritten(
         h.arena.link(zigzag::rankTail(h.arena, descriptor, h.core.dims().vars),
                      h.core.dims().vars, Posward, rec));
+    return rec;
   };
-  record("result", out.result);
-  record("produced", out.produced);
+  out.resultRec = record("result", out.result);
+  (void)record("produced", out.produced);
   return out;
 }
 
@@ -537,7 +540,7 @@ TEST(VagentMetaTest, ValidateWalksOpGraph) {
   h.core.bindInput(alloc, pos);
   const auto outSlot = h.arena.makeCell();
   h.core.bindOutput(alloc, outSlot);
-  EXPECT_FALSE(h.rt().validate(alloc).ok);
+  EXPECT_TRUE(h.rt().validate(alloc).ok);
 
   // An impure op (New) under a pure-flagged descriptor fails.
   MetaValidateOptions pure{.runReachable = true, .expectPure = true};
@@ -569,15 +572,12 @@ TEST(VagentMetaTest, ValidateReadsEmissionShapeControlTargets) {
   // The emission convention is two hops: the wing slot holds int64(refBox),
   // the ref-box holds int64(referent) (compiler.cpp bindIn/reference).
   const auto landing = h.vm.mintOpcode(OpcodeKind::Return);
-  const auto refBox  = h.arena.makeScalarCell(static_cast<std::int64_t>(landing));
-  const auto jump    = h.vm.mintOpcode(OpcodeKind::Jump);
+  const auto refBox =
+      h.arena.makeScalarCell(static_cast<std::int64_t>(landing));
+  const auto jump = h.vm.mintOpcode(OpcodeKind::Jump);
   h.core.bindInput(jump,
                    h.arena.makeScalarCell(static_cast<std::int64_t>(refBox)));
-  // Known defect (design/vagent-metacircular-compiler.md §2): validate's
-  // control-target arm resolves only the slot's first hop — the ref-box —
-  // and isOpCell-reads its int64(referent) content, so every real
-  // emitWrapped body (all carry a Choice) false-negatives today.
-  EXPECT_FALSE(h.rt().validate(jump, {.runReachable = false}).ok);
+  EXPECT_TRUE(h.rt().validate(jump, {.runReachable = false}).ok);
 }
 
 TEST(VagentMetaTest, WeightValueLabelAndNextRand) {
@@ -641,8 +641,7 @@ struct Recipe {
   /// A ref-capture member: +d.refFor → the source slot, optional
   /// +d.name (dimension ref) and +d.values (cap$N binding hint).
   static CellRef refCapture(MetaHarness &h, CellRef slot,
-                            std::string_view dimName = {},
-                            bool mark              = false) {
+                            std::string_view dimName = {}, bool mark = false) {
     const auto member = h.arena.makeScalarCell(static_cast<std::int64_t>(slot));
     zigzag::expectWritten(
         h.arena.link(member, h.binds().dims.refFor, Posward, slot));
@@ -766,8 +765,7 @@ TEST(VagentMetaTest, ReifyRefCaptureRebindsAndAppendsCloneRank) {
   // the binding rides the slot's int64 (external → verbatim, shared
   // never copied).
   const auto binding = h.arena.makeCell();
-  const auto slot =
-      h.arena.makeScalarCell(static_cast<std::int64_t>(binding));
+  const auto slot = h.arena.makeScalarCell(static_cast<std::int64_t>(binding));
 
   std::vector<CellRef> members;
   members.push_back(Recipe::literal(h, a));
@@ -819,6 +817,293 @@ TEST(VagentMetaTest, ReifyRefusesNonHeadOperand) {
   EXPECT_FALSE(h.rt().reify(bare).has_value());
   const auto op = h.vm.mintOpcode(OpcodeKind::Return);
   EXPECT_FALSE(h.rt().reify(op).has_value());
+}
+
+CellRef makeValidFragment(MetaHarness &h, std::string_view label,
+                          std::string_view resultType = "()",
+                          bool pure                   = false) {
+  const auto retOp = h.vm.mintOpcode(OpcodeKind::Return);
+  const auto head  = mintHead(h, retOp, label);
+  const auto desc  = mintDescriptor(h, head);
+  zigzag::expectWritten(h.arena.link(desc.resultRec, h.core.dims().name,
+                                     Posward, h.arena.makeCell(resultType)));
+  if (pure) {
+    const auto pureRec = h.arena.makeCell("pure");
+    zigzag::expectWritten(
+        h.arena.link(pureRec, h.core.dims().values, Posward,
+                     h.arena.makeScalarCell(std::int64_t{1})));
+    zigzag::expectWritten(
+        h.arena.link(zigzag::rankTail(h.arena, desc.cell, h.core.dims().vars),
+                     h.core.dims().vars, Posward, pureRec));
+  }
+  std::vector<CellRef> members;
+  members.push_back(Recipe::literal(h, retOp));
+  Recipe::chain(h, head, members);
+
+  // refs
+  const auto refRec = h.arena.makeCell();
+  zigzag::expectWritten(
+      h.arena.link(refRec, h.binds().dims.ref, Posward, retOp));
+  zigzag::expectWritten(h.arena.link(retOp, h.binds().dims.meshRelocation,
+                                     Posward, h.arena.makeCell("cell")));
+  zigzag::expectWritten(
+      h.arena.link(head, h.binds().dims.refs, Posward, refRec));
+  return head;
+}
+
+TEST(VagentMetaTest, ReifySplicesTwinsOntoLineageRank) {
+  MetaHarness h;
+  const auto sourceHead = makeValidFragment(h, "src:source");
+
+  const auto twin1 = h.rt().reify(sourceHead);
+  ASSERT_TRUE(twin1.has_value()) << (twin1 ? "" : twin1.error());
+
+  const auto twin2 = h.rt().reify(sourceHead);
+  ASSERT_TRUE(twin2.has_value()) << (twin2 ? "" : twin2.error());
+
+  // Strict 2-degree rank: twin2 +d.lineage -> twin1 +d.lineage -> sourceHead
+  EXPECT_EQ(h.arena.linked(*twin2, h.binds().dims.lineage, Posward), *twin1);
+  EXPECT_EQ(h.arena.linked(*twin1, h.binds().dims.lineage, Posward),
+            sourceHead);
+  EXPECT_EQ(h.arena.linked(sourceHead, h.binds().dims.lineage, Negward),
+            *twin1);
+  EXPECT_EQ(h.arena.linked(*twin1, h.binds().dims.lineage, Negward), *twin2);
+}
+
+TEST(VagentMetaTest, RegisterCodeImmediateCommitAndUnderMark) {
+  MetaHarness h;
+  const auto frag  = makeValidFragment(h, "src:frag1");
+  const auto entry = *h.arena.linked(frag, h.binds().dims.entry, Posward);
+
+  EXPECT_EQ(h.rt().registration(frag), "absent");
+  EXPECT_FALSE(h.rt().kindRegistered(frag));
+
+  // Immediate commit when marks == 0
+  const auto res = h.rt().registerCode(frag);
+  ASSERT_TRUE(res.has_value()) << (res ? "" : res.error());
+  EXPECT_EQ(*res, frag);
+  EXPECT_EQ(h.rt().registration(frag), "committed");
+  EXPECT_TRUE(h.rt().kindRegistered(frag));
+  EXPECT_TRUE(h.vm.hasOpcodeKind(entry));
+
+  // Under a live mark: queues onto d.pending-reg
+  const auto frag2 = makeValidFragment(h, "src:frag2");
+  const auto m     = h.arena.mark();
+  const auto res2  = h.rt().registerCode(frag2);
+  ASSERT_TRUE(res2.has_value()) << (res2 ? "" : res2.error());
+  EXPECT_EQ(h.rt().registration(frag2), "pending");
+  EXPECT_FALSE(h.rt().kindRegistered(frag2));
+
+  // Unwinds cleanly on release
+  h.arena.release(m);
+  EXPECT_EQ(h.rt().registration(frag2), "absent");
+
+  // Under mark with discard: commits via drainPendingRegisters
+  const auto frag3 = makeValidFragment(h, "src:frag3");
+  const auto m2    = h.arena.mark();
+  const auto res3  = h.rt().registerCode(frag3);
+  ASSERT_TRUE(res3.has_value());
+  EXPECT_EQ(h.rt().registration(frag3), "pending");
+  h.arena.discard(m2);
+
+  const auto drained = h.rt().drainPendingRegisters();
+  EXPECT_EQ(drained, 1U);
+  EXPECT_EQ(h.rt().registration(frag3), "committed");
+  EXPECT_TRUE(h.rt().kindRegistered(frag3));
+}
+
+TEST(VagentMetaTest, RegisterAllMutuallyRecursiveHeads) {
+  MetaHarness h;
+
+  const auto retA  = h.vm.mintOpcode(OpcodeKind::Return);
+  const auto callA = h.vm.mintOpcode(OpcodeKind::Call);
+  const auto retB  = h.vm.mintOpcode(OpcodeKind::Return);
+  const auto callB = h.vm.mintOpcode(OpcodeKind::Call);
+
+  const auto refBoxB = h.arena.makeScalarCell(static_cast<std::int64_t>(callB));
+  h.core.bindInput(callA, refBoxB);
+  zigzag::expectWritten(h.arena.link(callA, h.core.dims().spin, Posward, retA));
+
+  const auto refBoxA = h.arena.makeScalarCell(static_cast<std::int64_t>(callA));
+  h.core.bindInput(callB, refBoxA);
+  zigzag::expectWritten(h.arena.link(callB, h.core.dims().spin, Posward, retB));
+
+  const auto headA = mintHead(h, callA, "fragA");
+  const auto descA = mintDescriptor(h, headA);
+  zigzag::expectWritten(h.arena.link(descA.result, h.core.dims().name, Posward,
+                                     h.arena.makeCell("()")));
+
+  std::vector<CellRef> membersA;
+  membersA.push_back(Recipe::literal(h, callA));
+  membersA.push_back(Recipe::literal(h, refBoxB));
+  membersA.push_back(Recipe::literal(h, retA));
+  Recipe::chain(h, headA, membersA);
+
+  const auto refRecA1 = h.arena.makeCell();
+  zigzag::expectWritten(
+      h.arena.link(refRecA1, h.binds().dims.ref, Posward, callA));
+  zigzag::expectWritten(h.arena.link(callA, h.binds().dims.meshRelocation,
+                                     Posward, h.arena.makeCell("cell")));
+  const auto refRecA2 = h.arena.makeCell();
+  zigzag::expectWritten(
+      h.arena.link(refRecA2, h.binds().dims.ref, Posward, retA));
+  zigzag::expectWritten(h.arena.link(retA, h.binds().dims.meshRelocation,
+                                     Posward, h.arena.makeCell("cell")));
+  const auto nameRecA = h.arena.makeCell();
+  zigzag::expectWritten(h.arena.link(nameRecA, h.core.dims().name, Posward,
+                                     h.arena.makeCell("fragB")));
+  zigzag::expectWritten(h.arena.link(nameRecA, h.core.dims().grab, Posward,
+                                     h.arena.makeCell("call")));
+  zigzag::expectWritten(
+      h.arena.link(headA, h.binds().dims.refs, Posward, refRecA1));
+  zigzag::expectWritten(
+      h.arena.link(refRecA1, h.core.dims().step, Posward, refRecA2));
+  zigzag::expectWritten(
+      h.arena.link(refRecA2, h.core.dims().step, Posward, nameRecA));
+
+  const auto headB = mintHead(h, callB, "fragB");
+  const auto descB = mintDescriptor(h, headB);
+  zigzag::expectWritten(h.arena.link(descB.result, h.core.dims().name, Posward,
+                                     h.arena.makeCell("()")));
+
+  std::vector<CellRef> membersB;
+  membersB.push_back(Recipe::literal(h, callB));
+  membersB.push_back(Recipe::literal(h, refBoxA));
+  membersB.push_back(Recipe::literal(h, retB));
+  Recipe::chain(h, headB, membersB);
+
+  const auto refRecB1 = h.arena.makeCell();
+  zigzag::expectWritten(
+      h.arena.link(refRecB1, h.binds().dims.ref, Posward, callB));
+  zigzag::expectWritten(h.arena.link(callB, h.binds().dims.meshRelocation,
+                                     Posward, h.arena.makeCell("cell")));
+  const auto refRecB2 = h.arena.makeCell();
+  zigzag::expectWritten(
+      h.arena.link(refRecB2, h.binds().dims.ref, Posward, retB));
+  zigzag::expectWritten(h.arena.link(retB, h.binds().dims.meshRelocation,
+                                     Posward, h.arena.makeCell("cell")));
+  const auto nameRecB = h.arena.makeCell();
+  zigzag::expectWritten(h.arena.link(nameRecB, h.core.dims().name, Posward,
+                                     h.arena.makeCell("fragA")));
+  zigzag::expectWritten(h.arena.link(nameRecB, h.core.dims().grab, Posward,
+                                     h.arena.makeCell("call")));
+  zigzag::expectWritten(
+      h.arena.link(headB, h.binds().dims.refs, Posward, refRecB1));
+  zigzag::expectWritten(
+      h.arena.link(refRecB1, h.core.dims().step, Posward, refRecB2));
+  zigzag::expectWritten(
+      h.arena.link(refRecB2, h.core.dims().step, Posward, nameRecB));
+
+  std::vector<CellRef> batch = {headA, headB};
+  const auto res             = h.rt().registerAll(batch);
+  ASSERT_TRUE(res.has_value()) << (res ? "" : res.error());
+  EXPECT_EQ(res->size(), 2U);
+  EXPECT_EQ(h.rt().registration(headA), "committed");
+  EXPECT_EQ(h.rt().registration(headB), "committed");
+}
+
+TEST(VagentMetaTest, AsBodyDimNamedVarOf) {
+  MetaHarness h;
+  // dimNamed
+  EXPECT_EQ(h.rt().dimNamed("d.code"), h.binds().dims.code);
+  EXPECT_EQ(h.rt().dimNamed("d.nonexistent"), std::nullopt);
+
+  // varOf
+  const auto owner = h.arena.makeCell();
+  EXPECT_EQ(h.rt().varOf(owner, "my_var"), std::nullopt);
+  const auto rec = h.arena.makeCell("my_var");
+  const auto val = h.arena.makeCell("value_text");
+  zigzag::expectWritten(h.arena.link(rec, h.core.dims().values, Posward, val));
+  zigzag::expectWritten(h.arena.link(owner, h.core.dims().vars, Posward, rec));
+  EXPECT_EQ(h.rt().varOf(owner, "my_var"), val);
+
+  // asBody
+  const auto validHead = makeValidFragment(h, "src:body", "()");
+  EXPECT_EQ(h.rt().asBody(validHead), validHead);
+
+  const auto nonVoidHead = makeValidFragment(h, "src:non_void", "Int");
+  EXPECT_EQ(h.rt().asBody(nonVoidHead), std::nullopt);
+
+  const auto bareCell = h.arena.makeCell();
+  EXPECT_EQ(h.rt().asBody(bareCell), std::nullopt);
+}
+
+TEST(VagentMetaTest, JoinBatchWriteAndLink) {
+  MetaHarness h;
+  const auto batch = h.arena.makeCell();
+
+  // Create target cell for write
+  const auto targetCell = h.arena.makeCell();
+  const auto targetBox =
+      h.arena.makeScalarCell(static_cast<std::int64_t>(targetCell));
+  const auto valCell = h.arena.makeScalarCell(std::int64_t{42});
+
+  // Tuple 1: "write"
+  const auto tuple1 = h.arena.makeCell("write");
+  zigzag::expectWritten(
+      h.arena.link(tuple1, h.core.dims().grab, Posward, targetBox));
+  zigzag::expectWritten(
+      h.arena.link(targetBox, h.core.dims().step, Posward, valCell));
+
+  // Tuple 2: "link"
+  const auto cellA = h.arena.makeCell();
+  const auto cellB = h.arena.makeCell();
+  const auto boxA  = h.arena.makeScalarCell(static_cast<std::int64_t>(cellA));
+  const auto boxDim =
+      h.arena.makeScalarCell(static_cast<std::int64_t>(h.binds().dims.weight));
+  const auto dirCell = h.arena.makeScalarCell(std::int64_t{1});
+  const auto boxB    = h.arena.makeScalarCell(static_cast<std::int64_t>(cellB));
+
+  const auto tuple2 = h.arena.makeCell("link");
+  zigzag::expectWritten(
+      h.arena.link(tuple2, h.core.dims().grab, Posward, boxA));
+  zigzag::expectWritten(
+      h.arena.link(boxA, h.core.dims().step, Posward, boxDim));
+  zigzag::expectWritten(
+      h.arena.link(boxDim, h.core.dims().step, Posward, dirCell));
+  zigzag::expectWritten(
+      h.arena.link(dirCell, h.core.dims().step, Posward, boxB));
+
+  // Chain tuples on batch +d.grab -> +d.step
+  zigzag::expectWritten(
+      h.arena.link(batch, h.core.dims().grab, Posward, tuple1));
+  zigzag::expectWritten(
+      h.arena.link(tuple1, h.core.dims().step, Posward, tuple2));
+
+  EXPECT_TRUE(h.rt().joinBatch(batch));
+  EXPECT_EQ(h.arena.asInt64(targetCell), 42);
+  EXPECT_EQ(h.arena.linked(cellA, h.binds().dims.weight, Posward), cellB);
+
+  // joinBatch refuses writing to an opcode cell
+  const auto opCell   = h.vm.mintOpcode(OpcodeKind::Return);
+  const auto badBatch = h.arena.makeCell();
+  const auto badTuple = h.arena.makeCell("write");
+  const auto opBox = h.arena.makeScalarCell(static_cast<std::int64_t>(opCell));
+  zigzag::expectWritten(
+      h.arena.link(badTuple, h.core.dims().grab, Posward, opBox));
+  zigzag::expectWritten(
+      h.arena.link(opBox, h.core.dims().step, Posward, valCell));
+  zigzag::expectWritten(
+      h.arena.link(badBatch, h.core.dims().grab, Posward, badTuple));
+  EXPECT_FALSE(h.rt().joinBatch(badBatch));
+}
+
+TEST(VagentMetaTest, BuildFragmentFromSpec) {
+  MetaHarness h;
+  const auto retOp = h.vm.mintOpcode(OpcodeKind::Return);
+
+  const auto spec     = h.arena.makeCell("src:spec_test");
+  const auto entryRec = h.arena.makeCell("entry");
+  zigzag::expectWritten(
+      h.arena.link(entryRec, h.core.dims().values, Posward,
+                   h.arena.makeScalarCell(static_cast<std::int64_t>(retOp))));
+  zigzag::expectWritten(
+      h.arena.link(spec, h.core.dims().vars, Posward, entryRec));
+
+  const auto frag = h.rt().buildFragmentFromSpec(spec);
+  ASSERT_TRUE(frag.has_value());
+  EXPECT_EQ(h.arena.linked(*frag, h.binds().dims.entry, Posward), retOp);
+  EXPECT_EQ(h.rt().labelOf(*frag), "src:spec_test");
 }
 
 } // namespace

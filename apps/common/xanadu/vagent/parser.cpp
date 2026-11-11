@@ -14,7 +14,9 @@ namespace {
 
 bool isWord(const Token &token) {
   return token.kind == TokenKind::Identifier ||
-         token.kind == TokenKind::Keyword;
+         token.kind == TokenKind::Keyword || token.kind == TokenKind::KwMap ||
+         token.kind == TokenKind::KwMatch || token.kind == TokenKind::KwWith ||
+         token.kind == TokenKind::KwDefault || token.kind == TokenKind::KwCase;
 }
 
 bool pascalCase(std::string_view name) {
@@ -46,7 +48,10 @@ std::optional<Operator> binaryOperator(const Token &token) {
   case TokenKind::RevAssign:
     return Operator{2, true};
   case TokenKind::Scan:
+  case TokenKind::Question:
     return Operator{3, false, true};
+  case TokenKind::DoubleQuestion:
+    return Operator{5};
   case TokenKind::Alternation:
     return Operator{5};
   case TokenKind::Equal:
@@ -70,6 +75,46 @@ std::optional<Operator> binaryOperator(const Token &token) {
   }
   if (token.text == "to") return Operator{4, false, true};
   return std::nullopt;
+}
+
+bool startsOperand(const Token &tok) {
+  switch (tok.kind) {
+  case TokenKind::IntegerLiteral:
+  case TokenKind::FloatLiteral:
+  case TokenKind::StringLiteral:
+  case TokenKind::PrefixedStringLiteral:
+  case TokenKind::DurationLiteral:
+  case TokenKind::MicroVersionLiteral:
+  case TokenKind::LogicVariable:
+  case TokenKind::Identifier:
+  case TokenKind::OpenBrace:
+  case TokenKind::OpenBracket:
+  case TokenKind::OpenParen:
+  case TokenKind::Minus:
+  case TokenKind::Bang:
+  case TokenKind::Star:
+  case TokenKind::KwMap:
+  case TokenKind::KwMatch:
+    return true;
+  case TokenKind::Keyword:
+    return tok.text == "true" || tok.text == "false" || tok.text == "none" ||
+           tok.text == "if" || tok.text == "while" || tok.text == "for" ||
+           tok.text == "believes" || tok.text == "findall" ||
+           tok.text == "splice" || tok.text == "static" || tok.text == "not" ||
+           tok.text == "scan" || tok.text == "self" ||
+           tok.text == "terminate" || tok.text == "yield" ||
+           tok.text == "consume" || tok.text == "fail" ||
+           tok.text == "return" || tok.text == "emit" || tok.text == "tell" ||
+           tok.text == "untell" || tok.text == "believe" ||
+           tok.text == "forget" || tok.text == "revise" ||
+           tok.text == "spawn" || tok.text == "adopt" ||
+           tok.text == "achieve" || tok.text == "ask" || tok.text == "await" ||
+           tok.text == "drop" || tok.text == "stop" || tok.text == "install" ||
+           tok.text == "uninstall" || tok.text == "mount" ||
+           tok.text == "unmount";
+  default:
+    return false;
+  }
 }
 
 } // namespace
@@ -198,7 +243,10 @@ bool Parser::startsContinuation(std::size_t position) const {
   case TokenKind::Greater:
   case TokenKind::GreaterEqual:
   case TokenKind::Dot:
+  case TokenKind::QuestionDot:
+  case TokenKind::DoubleQuestion:
   case TokenKind::Scan:
+  case TokenKind::Question:
     return true;
   default:
     break;
@@ -263,7 +311,11 @@ std::expected<Program, Diagnostic> Parser::parseProgram() {
       imported.path = modulePath();
       if (acceptWord("as")) imported.alias = identifier().text;
       if (accept(TokenKind::OpenParen)) {
-        if (!at(TokenKind::CloseParen)) imported.symbols = identifierList();
+        if (!at(TokenKind::CloseParen)) {
+          imported.symbols.push_back(anyWord().text);
+          while (accept(TokenKind::Comma))
+            imported.symbols.push_back(anyWord().text);
+        }
         expect(TokenKind::CloseParen, "')' after imported symbols");
       }
       program.imports.push_back(std::move(imported));
@@ -291,8 +343,8 @@ std::expected<ExprPtr, Diagnostic> Parser::parseExpression() {
   }
 }
 
-std::expected<CodeBody, Diagnostic>
-Parser::parseCodeBody(std::string_view text, ParseLimits limits) {
+std::expected<CodeBody, Diagnostic> Parser::parseCodeBody(std::string_view text,
+                                                          ParseLimits limits) {
   // §5.1: '#' is not a vagent token, so a leading '#label' is consumed
   // textually before the inner lex runs. The consumed span is blanked
   // rather than removed, so every SourceLocation the inner parse produces
@@ -356,8 +408,7 @@ std::expected<CodeBody, Diagnostic> Parser::codeBody() {
       // unambiguously: no Expr can begin with a type annotation, exactly
       // the way 'Ident {' resolves to a record literal (§5.1).
       result.parameters = parameters();
-      expect(TokenKind::Alternation,
-             "'|' after the code parameter header");
+      expect(TokenKind::Alternation, "'|' after the code parameter header");
     }
     result.body = expression();
     separators();
@@ -394,7 +445,13 @@ Type Parser::type() {
     expect(TokenKind::CloseParen, "')' in the unit type");
     return Type{"()", {}};
   }
-  Type result{identifier().text, {}};
+  std::string name;
+  if (accept(TokenKind::KwMap) || acceptWord("Map")) {
+    name = "Map";
+  } else {
+    name = identifier().text;
+  }
+  Type result{std::move(name), {}};
   if (accept(TokenKind::Less)) {
     result.arguments.push_back(type());
     while (accept(TokenKind::Comma)) result.arguments.push_back(type());
@@ -485,10 +542,43 @@ Decl Parser::handler(Context context) {
   } else {
     const auto name = identifier();
     result.name     = name.text;
-    result.trigger  = make(ExprKind::Identifier, name.loc, name.text);
-    if (acceptWord("as")) result.binding = identifier().text;
+    if (acceptWord("as")) {
+      result.trigger = make(ExprKind::Identifier, name.loc, name.text);
+      result.binding = identifier().text;
+    } else if (at(TokenKind::OpenBrace) &&
+               ((isWord(peek(1)) && peek(2).kind == TokenKind::Colon) ||
+                peek(1).kind == TokenKind::LogicVariable)) {
+      take(); // consume '{'
+      Mode newlines(significantNewlines_, false);
+      Mode records(allowRecord_, true);
+      auto pat = make(ExprKind::RecordPattern, name.loc, name.text);
+      if (!accept(TokenKind::CloseBrace)) {
+        for (;;) {
+          if (at(TokenKind::LogicVariable)) {
+            auto v = take();
+            pat->names.push_back(v.text.starts_with('?') ? v.text.substr(1)
+                                                         : v.text);
+            pat->children.push_back(
+                make(ExprKind::LogicVariable, v.loc, pat->names.back()));
+          } else {
+            const auto field = anyWord();
+            pat->names.push_back(field.text);
+            expect(TokenKind::Colon, "':' after field in event destructuring");
+            pat->children.push_back(pattern());
+          }
+          if (!accept(TokenKind::Comma)) break;
+          if (accept(TokenKind::CloseBrace)) break;
+        }
+        expect(TokenKind::CloseBrace, "'}' after event record pattern");
+      }
+      result.trigger = finish(std::move(pat));
+    } else {
+      result.trigger = make(ExprKind::Identifier, name.loc, name.text);
+    }
   }
-  if (accept(TokenKind::OpenBracket)) {
+  if (acceptWord("where")) {
+    result.guard = headerExpression();
+  } else if (accept(TokenKind::OpenBracket)) {
     Mode newlines(significantNewlines_, false);
     Mode records(allowRecord_, true);
     result.guard = expression();
@@ -569,8 +659,71 @@ Decl Parser::plan() {
     if (!at(TokenKind::CloseParen)) *result.planBindings = identifierList();
     expect(TokenKind::CloseParen, "')' after plan parameter names");
   }
-  if (acceptWord("where")) result.guard = headerExpression();
-  result.body = block();
+  if (acceptWord("where")) {
+    result.guard = headerExpression();
+    result.body  = block();
+    return result;
+  }
+  expect(TokenKind::OpenBrace, "'{' or 'where' after plan header");
+  // Check if multi-arm plan or single-arm body block
+  std::size_t look = position_;
+  while (look < tokens_.size() && tokens_[look].kind == TokenKind::Newline) {
+    ++look;
+  }
+  bool isMultiArm = false;
+  if (look < tokens_.size()) {
+    const auto &first = tokens_[look];
+    if (first.kind == TokenKind::KwCase || first.text == "case" ||
+        first.kind == TokenKind::KwDefault || first.text == "default" ||
+        first.text == "where") {
+      isMultiArm = true;
+    }
+  }
+  if (isMultiArm) {
+    Mode newlines(significantNewlines_, false);
+    while (!accept(TokenKind::CloseBrace) && !at(TokenKind::EndOfFile)) {
+      while (at(TokenKind::Newline)) take();
+      if (accept(TokenKind::CloseBrace)) break;
+      PlanArm arm;
+      arm.loc = peek().loc;
+      if (accept(TokenKind::KwDefault) || acceptWord("default")) {
+        expect(TokenKind::FatArrow, "'=>' after 'default'");
+        arm.body = at(TokenKind::OpenBrace) ? block() : expression();
+        result.planArms.push_back(std::move(arm));
+        while (at(TokenKind::Newline) || at(TokenKind::Comma) ||
+               at(TokenKind::Semicolon)) {
+          take();
+        }
+        if (!at(TokenKind::CloseBrace)) {
+          fail("'default' arm must be the terminal arm in a multi-arm plan");
+        }
+        continue;
+      }
+      if (accept(TokenKind::KwCase) || acceptWord("case")) {
+        arm.pattern = pattern();
+        if (acceptWord("where")) {
+          arm.guard = expression();
+        }
+        expect(TokenKind::FatArrow, "'=>' after plan arm pattern");
+        arm.body = at(TokenKind::OpenBrace) ? block() : expression();
+        result.planArms.push_back(std::move(arm));
+      } else if (acceptWord("where")) {
+        arm.guard = expression();
+        expect(TokenKind::FatArrow, "'=>' after plan arm guard");
+        arm.body = at(TokenKind::OpenBrace) ? block() : expression();
+        result.planArms.push_back(std::move(arm));
+      } else {
+        fail("expected 'case', 'where', or 'default' in plan arm");
+      }
+      while (at(TokenKind::Comma) || at(TokenKind::Semicolon) ||
+             at(TokenKind::Newline)) {
+        take();
+      }
+    }
+  } else {
+    --position_;
+    result.body = block();
+  }
   return result;
 }
 
@@ -702,7 +855,6 @@ Decl Parser::declaration(Context context) {
 std::vector<ExprPtr> Parser::arguments() {
   Mode newlines(significantNewlines_, false);
   Mode records(allowRecord_, true);
-  Mode scans(allowScan_, true);
   std::vector<ExprPtr> result;
   layout();
   if (accept(TokenKind::CloseParen)) return result;
@@ -727,25 +879,163 @@ ExprPtr Parser::namedCall(bool required) {
   return finish(std::move(result));
 }
 
+ExprPtr Parser::pattern() {
+  layout();
+  const auto token = peek();
+  if (token.text == "_") {
+    take();
+    return make(ExprKind::WildcardPattern, token.loc, "_");
+  }
+  if (token.kind == TokenKind::LogicVariable) {
+    take();
+    const auto varName =
+        token.text.starts_with('?') ? token.text.substr(1) : token.text;
+    return make(ExprKind::LogicVariable, token.loc, varName);
+  }
+  if (token.kind == TokenKind::IntegerLiteral) {
+    take();
+    return make(ExprKind::Integer, token.loc, token.text);
+  }
+  if (token.kind == TokenKind::FloatLiteral) {
+    take();
+    return make(ExprKind::Float, token.loc, token.text);
+  }
+  if (token.kind == TokenKind::StringLiteral) {
+    take();
+    return make(ExprKind::String, token.loc, token.stringValue);
+  }
+  if (token.kind == TokenKind::MicroVersionLiteral) {
+    take();
+    return make(ExprKind::MicroVersionLiteral, token.loc,
+                token.stringValue.empty() ? token.text : token.stringValue);
+  }
+  if (token.kind == TokenKind::OpenParen) {
+    take();
+    Mode newlines(significantNewlines_, false);
+    Mode records(allowRecord_, true);
+    if (accept(TokenKind::CloseParen)) {
+      return make(ExprKind::Unit, token.loc);
+    }
+    auto pat = make(ExprKind::TuplePattern, token.loc);
+    pat->children.push_back(pattern());
+    while (accept(TokenKind::Comma)) {
+      if (at(TokenKind::CloseParen)) break;
+      pat->children.push_back(pattern());
+    }
+    expect(TokenKind::CloseParen, "')' after tuple pattern");
+    return finish(std::move(pat));
+  }
+  if (token.kind == TokenKind::OpenBracket) {
+    take();
+    Mode newlines(significantNewlines_, false);
+    Mode records(allowRecord_, true);
+    auto pat = make(ExprKind::ListPattern, token.loc);
+    if (!accept(TokenKind::CloseBracket)) {
+      for (;;) {
+        if (accept(TokenKind::Ellipsis)) {
+          auto spread =
+              make(ExprKind::Unary, tokens_[position_ - 1].loc, "...");
+          spread->children.push_back(pattern());
+          pat->children.push_back(std::move(spread));
+        } else {
+          pat->children.push_back(pattern());
+        }
+        if (!accept(TokenKind::Comma)) break;
+        if (accept(TokenKind::CloseBracket)) return finish(std::move(pat));
+      }
+      expect(TokenKind::CloseBracket, "']' after list pattern");
+    }
+    return finish(std::move(pat));
+  }
+  if (acceptWord("true") || acceptWord("false")) {
+    return make(ExprKind::Boolean, token.loc, token.text);
+  }
+  if (acceptWord("none")) {
+    return make(ExprKind::None, token.loc, "none");
+  }
+  if (token.kind == TokenKind::Identifier || isWord(token)) {
+    const auto name = take();
+    if (pascalCase(name.text)) {
+      if (accept(TokenKind::OpenBrace)) {
+        Mode newlines(significantNewlines_, false);
+        Mode records(allowRecord_, true);
+        auto pat = make(ExprKind::RecordPattern, name.loc, name.text);
+        if (!accept(TokenKind::CloseBrace)) {
+          for (;;) {
+            if (at(TokenKind::LogicVariable)) {
+              auto v = take();
+              pat->names.push_back(v.text.starts_with('?') ? v.text.substr(1)
+                                                           : v.text);
+              pat->children.push_back(
+                  make(ExprKind::LogicVariable, v.loc, pat->names.back()));
+            } else {
+              const auto field = anyWord();
+              pat->names.push_back(field.text);
+              expect(TokenKind::Colon, "':' after field in record pattern");
+              pat->children.push_back(pattern());
+            }
+            if (!accept(TokenKind::Comma)) break;
+            if (accept(TokenKind::CloseBrace)) return finish(std::move(pat));
+          }
+          expect(TokenKind::CloseBrace, "'}' after record pattern");
+        }
+        return finish(std::move(pat));
+      }
+      if (accept(TokenKind::OpenParen)) {
+        Mode newlines(significantNewlines_, false);
+        Mode records(allowRecord_, true);
+        auto pat = make(ExprKind::CtorPattern, name.loc, name.text);
+        if (!accept(TokenKind::CloseParen)) {
+          for (;;) {
+            pat->children.push_back(pattern());
+            if (!accept(TokenKind::Comma)) break;
+            if (accept(TokenKind::CloseParen)) return finish(std::move(pat));
+          }
+          expect(TokenKind::CloseParen,
+                 "')' after constructor pattern arguments");
+        }
+        return finish(std::move(pat));
+      }
+      return make(ExprKind::CtorPattern, name.loc, name.text);
+    }
+    return make(ExprKind::LogicVariable, name.loc, name.text);
+  }
+  fail("expected a pattern");
+}
+
 ExprPtr Parser::block() {
   Depth depth(*this);
   layout();
   const auto open = expect(TokenKind::OpenBrace, "'{' before a body");
   Mode newlines(significantNewlines_, true);
   Mode records(allowRecord_, true);
-  Mode scans(allowScan_, true);
   auto result = make(ExprKind::Block, open.loc);
   separators();
   while (!accept(TokenKind::CloseBrace)) {
     if (at(TokenKind::EndOfFile)) fail("unterminated block; expected '}'");
     ExprPtr statement;
     if (acceptWord("let")) {
-      const auto name = identifier();
-      statement       = make(ExprKind::Let, name.loc, name.text);
-      if (accept(TokenKind::Colon)) statement->annotation = type();
-      expect(TokenKind::Assign, "':=' after a local declaration");
-      statement->children.push_back(expression());
-      statement = finish(std::move(statement));
+      const auto letLoc = tokens_[position_ - 1].loc;
+      const auto &pk    = peek();
+      if (pk.text == "_" || pk.kind == TokenKind::LogicVariable ||
+          pk.kind == TokenKind::OpenParen ||
+          pk.kind == TokenKind::OpenBracket ||
+          (pascalCase(pk.text) && (peek(1).kind == TokenKind::OpenParen ||
+                                   peek(1).kind == TokenKind::OpenBrace))) {
+        auto pat  = pattern();
+        statement = make(ExprKind::Let, letLoc);
+        statement->children.push_back(std::move(pat));
+        expect(TokenKind::Assign, "':=' after a local declaration");
+        statement->children.push_back(expression());
+        statement = finish(std::move(statement));
+      } else {
+        const auto name = identifier();
+        statement       = make(ExprKind::Let, name.loc, name.text);
+        if (accept(TokenKind::Colon)) statement->annotation = type();
+        expect(TokenKind::Assign, "':=' after a local declaration");
+        statement->children.push_back(expression());
+        statement = finish(std::move(statement));
+      }
     } else {
       statement = expression();
     }
@@ -766,14 +1056,19 @@ ExprPtr Parser::block() {
         call = &statement->children[1];
       }
       if (!call) {
-        fail("statement recovery requires a direct call, a ':=' direct-call "
-             "RHS, or a let direct-call initializer");
+        if (statement->kind == ExprKind::Let && statement->text.empty()) {
+          statement->recovery =
+              at(TokenKind::OpenBrace) ? block() : expression();
+          statement = finish(std::move(statement));
+        } else {
+          fail("statement recovery requires a direct call, a ':=' direct-call "
+               "RHS, or a let direct-call initializer");
+        }
+      } else {
+        (*call)->recovery = at(TokenKind::OpenBrace) ? block() : expression();
+        *call             = finish(std::move(*call));
+        statement         = finish(std::move(statement));
       }
-      (*call)->recovery = expression();
-      *call             = finish(std::move(*call));
-      // The call has already been included in its wrapper's cached height.
-      // Recompute it before any outer block can trust that height.
-      statement = finish(std::move(statement));
     }
     result->children.push_back(std::move(statement));
     if (!at(TokenKind::CloseBrace) && !at(TokenKind::Newline) &&
@@ -792,11 +1087,16 @@ ExprPtr Parser::expression(int minimum) {
   for (;;) {
     expressionLayout();
     const auto op = binaryOperator(peek());
-    if (!op || op->precedence < minimum || (at(TokenKind::Scan) && !allowScan_))
-      break;
+    if (!op || op->precedence < minimum) break;
     const auto token = take();
-    auto result = make(token.text == "to" ? ExprKind::Range : ExprKind::Binary,
-                       left->loc, token.text);
+    ExprPtr result;
+    if (token.kind == TokenKind::DoubleQuestion) {
+      result = make(ExprKind::Coalesce, left->loc);
+    } else if (token.text == "to") {
+      result = make(ExprKind::Range, left->loc, token.text);
+    } else {
+      result = make(ExprKind::Binary, left->loc, token.text);
+    }
     result->children.push_back(std::move(left));
     result->children.push_back(
         expression(op->precedence + (op->rightAssociative ? 0 : 1)));
@@ -844,7 +1144,6 @@ ExprPtr Parser::postfix(ExprPtr base, TokenKind *lastSuffix) {
     } else if (accept(TokenKind::OpenBracket)) {
       Mode newlines(significantNewlines_, false);
       Mode records(allowRecord_, true);
-      Mode scans(allowScan_, true);
       auto indexed = make(ExprKind::Index, base->loc);
       indexed->children.push_back(std::move(base));
       indexed->children.push_back(expression());
@@ -857,6 +1156,18 @@ ExprPtr Parser::postfix(ExprPtr base, TokenKind *lastSuffix) {
       accessed->children.push_back(std::move(base));
       base = finish(std::move(accessed));
       last = TokenKind::Dot;
+    } else if (accept(TokenKind::QuestionDot)) {
+      const auto field = anyWord();
+      auto safenav     = make(ExprKind::SafeNav, base->loc, field.text);
+      safenav->children.push_back(std::move(base));
+      base = finish(std::move(safenav));
+      last = TokenKind::QuestionDot;
+    } else if (at(TokenKind::Question) && !startsOperand(peek(1))) {
+      take();
+      auto unwrap = make(ExprKind::Unary, base->loc, "?");
+      unwrap->children.push_back(std::move(base));
+      base = finish(std::move(unwrap));
+      last = TokenKind::Question;
     } else
       break;
   }
@@ -873,11 +1184,17 @@ ExprPtr Parser::list() {
   const auto open = take();
   Mode newlines(significantNewlines_, false);
   Mode records(allowRecord_, true);
-  Mode scans(allowScan_, true);
   auto result = make(ExprKind::List, open.loc);
   if (!accept(TokenKind::CloseBracket)) {
     for (;;) {
-      result->children.push_back(expression());
+      if (at(TokenKind::Ellipsis)) {
+        const auto el = take();
+        auto spread   = make(ExprKind::Unary, el.loc, "...");
+        spread->children.push_back(expression());
+        result->children.push_back(std::move(spread));
+      } else {
+        result->children.push_back(expression());
+      }
       if (!accept(TokenKind::Comma)) break;
       if (accept(TokenKind::CloseBracket)) return finish(std::move(result));
     }
@@ -890,7 +1207,6 @@ ExprPtr Parser::record(Token name) {
   expect(TokenKind::OpenBrace, "'{' after a record type");
   Mode newlines(significantNewlines_, false);
   Mode records(allowRecord_, true);
-  Mode scans(allowScan_, true);
   auto result = make(ExprKind::Record, name.loc, name.text);
   if (!accept(TokenKind::CloseBrace)) {
     for (;;) {
@@ -899,7 +1215,11 @@ ExprPtr Parser::record(Token name) {
       // A `?name` field value is a capture slot — the same termArgument
       // arm predicate positions carry, so a record in a believes/
       // forget pattern spells capture points field by field.
-      if (accept(TokenKind::Scan)) {
+      if (at(TokenKind::LogicVariable)) {
+        const auto var = take();
+        result->children.push_back(
+            make(ExprKind::LogicVariable, var.loc, var.stringValue));
+      } else if (accept(TokenKind::Scan) || accept(TokenKind::Question)) {
         const auto var = identifier();
         result->children.push_back(
             make(ExprKind::LogicVariable, var.loc, var.text));
@@ -915,11 +1235,14 @@ ExprPtr Parser::record(Token name) {
 }
 
 ExprPtr Parser::termArgument() {
-  if (accept(TokenKind::Scan)) {
+  if (at(TokenKind::LogicVariable)) {
+    const auto var = take();
+    return make(ExprKind::LogicVariable, var.loc, var.stringValue);
+  }
+  if (accept(TokenKind::Scan) || accept(TokenKind::Question)) {
     const auto name = identifier();
     return make(ExprKind::LogicVariable, name.loc, name.text);
   }
-  Mode scans(allowScan_, false);
   return expression();
 }
 
@@ -969,6 +1292,12 @@ ExprPtr Parser::primary() {
   case TokenKind::DurationLiteral:
     take();
     return make(ExprKind::Duration, token.loc, token.text);
+  case TokenKind::MicroVersionLiteral:
+    take();
+    return make(ExprKind::MicroVersionLiteral, token.loc, token.stringValue);
+  case TokenKind::LogicVariable:
+    take();
+    return make(ExprKind::LogicVariable, token.loc, token.stringValue);
   case TokenKind::OpenBrace:
     return block();
   case TokenKind::OpenBracket:
@@ -977,14 +1306,110 @@ ExprPtr Parser::primary() {
     take();
     Mode newlines(significantNewlines_, false);
     Mode records(allowRecord_, true);
-    Mode scans(allowScan_, true);
     if (accept(TokenKind::CloseParen)) return make(ExprKind::Unit, token.loc);
-    auto result = expression();
+    auto first = expression();
+    if (accept(TokenKind::Comma)) {
+      auto tuple = make(ExprKind::Tuple, token.loc);
+      tuple->children.push_back(std::move(first));
+      if (!accept(TokenKind::CloseParen)) {
+        for (;;) {
+          tuple->children.push_back(expression());
+          if (!accept(TokenKind::Comma)) break;
+          if (accept(TokenKind::CloseParen)) return finish(std::move(tuple));
+        }
+        expect(TokenKind::CloseParen, "')' after tuple elements");
+      }
+      return finish(std::move(tuple));
+    }
     expect(TokenKind::CloseParen, "')' after expression");
-    return finish(std::move(result));
+    return finish(std::move(first));
   }
   default:
     break;
+  }
+  if (at(TokenKind::KwMatch) || word("match")) {
+    if (peek(1).kind == TokenKind::OpenParen) {
+      std::size_t depth = 1;
+      std::size_t i     = position_ + 2;
+      while (i < tokens_.size() && depth > 0) {
+        if (tokens_[i].kind == TokenKind::OpenParen)
+          ++depth;
+        else if (tokens_[i].kind == TokenKind::CloseParen)
+          --depth;
+        ++i;
+      }
+      while (i < tokens_.size() && tokens_[i].kind == TokenKind::Newline) ++i;
+      if (i >= tokens_.size() ||
+          (tokens_[i].kind != TokenKind::KwWith && tokens_[i].text != "with")) {
+        const auto matchTok = take();
+        return make(ExprKind::Identifier, matchTok.loc, matchTok.text);
+      }
+    }
+    const auto matchTok = take();
+    auto result         = make(ExprKind::Match, matchTok.loc);
+    result->children.push_back(expression());
+    expressionLayout();
+    if (!accept(TokenKind::KwWith)) {
+      expectWord("with");
+    }
+    expect(TokenKind::OpenBrace, "'{' after 'with'");
+    Mode newlines(significantNewlines_, false);
+    Mode records(allowRecord_, true);
+    while (!accept(TokenKind::CloseBrace)) {
+      separators();
+      if (accept(TokenKind::CloseBrace)) break;
+      auto arm = make(ExprKind::MatchArm, peek().loc);
+      arm->children.push_back(pattern());
+      expressionLayout();
+      if (acceptWord("where")) {
+        arm->guard = expression();
+      }
+      expressionLayout();
+      expect(TokenKind::FatArrow, "'=>' after match pattern");
+      arm->children.push_back(block());
+      result->children.push_back(finish(std::move(arm)));
+      separators();
+    }
+    return finish(std::move(result));
+  }
+  if (at(TokenKind::KwMap) || word("Map")) {
+    const auto mapTok = take();
+    if (at(TokenKind::OpenBrace)) {
+      take();
+      Mode newlines(significantNewlines_, false);
+      Mode records(allowRecord_, true);
+      auto result = make(ExprKind::Map, mapTok.loc);
+      if (!accept(TokenKind::CloseBrace)) {
+        for (;;) {
+          separators();
+          if (accept(TokenKind::CloseBrace)) break;
+          auto key = expression();
+          expect(TokenKind::Colon, "':' after map key");
+          auto val = expression();
+          result->children.push_back(std::move(key));
+          result->children.push_back(std::move(val));
+          if (!accept(TokenKind::Comma)) break;
+          separators();
+          if (accept(TokenKind::CloseBrace)) return finish(std::move(result));
+        }
+        expect(TokenKind::CloseBrace, "'}' after map entries");
+      }
+      return finish(std::move(result));
+    }
+    return make(ExprKind::Identifier, mapTok.loc, mapTok.text);
+  }
+  if (word("scan")) {
+    const auto scanTok = take();
+    auto subject       = expression();
+    expressionLayout();
+    if (!accept(TokenKind::KwWith)) {
+      expectWord("with");
+    }
+    auto body   = at(TokenKind::OpenBrace) ? block() : expression();
+    auto result = make(ExprKind::Binary, scanTok.loc, "?");
+    result->children.push_back(std::move(subject));
+    result->children.push_back(std::move(body));
+    return finish(std::move(result));
   }
   if (acceptWord("true") || acceptWord("false"))
     return make(ExprKind::Boolean, token.loc, token.text);

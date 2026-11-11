@@ -56,6 +56,15 @@ Decl cloneDecl(const Decl &decl) {
     cloned.loc       = clause.loc;
     copy.goalClauses.push_back(std::move(cloned));
   }
+  copy.planArms.reserve(decl.planArms.size());
+  for (const auto &arm : decl.planArms) {
+    PlanArm cloned;
+    cloned.pattern = cloneExpr(arm.pattern);
+    cloned.guard   = cloneExpr(arm.guard);
+    cloned.body    = cloneExpr(arm.body);
+    cloned.loc     = arm.loc;
+    copy.planArms.push_back(std::move(cloned));
+  }
   copy.members.reserve(decl.members.size());
   for (const auto &member : decl.members)
     copy.members.push_back(cloneDecl(member));

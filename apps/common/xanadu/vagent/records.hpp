@@ -6,6 +6,7 @@
 // records, patch fields, `+d.step` chains and rank tails — so the cell
 // manipulation lives once here rather than being re-implemented per TU.
 
+#include "common/xanadu/relocation_marks.hpp"
 #include "common/xanadu/vortex/vortex_core.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
@@ -20,6 +21,8 @@
 #include <vector>
 
 namespace xanadu::vagent {
+
+using xanadu::refCell;
 
 /// The `+d.step`-linked chain that follows a single lead edge — the
 /// `d.refs`/`d.recipe`/`d.patch-head` shape.
@@ -49,27 +52,6 @@ inline void unlinkRank(zigzag::ArenaManifold &arena, CellRef cell,
     else
       zigzag::expectWritten(arena.unlink(*pred, dim, Posward));
   }
-}
-
-/// Mint a scalar cell carrying the position of @p ref with the
-/// `d.mesh.relocation → "cell"` mark — the manifest's "this Int64 is a
-/// live position" signal (fragment.cpp's refsRecord uses the same mark
-/// for recipe refs). Promote cannot see an Int64-carried referent, so
-/// the mark is what harvests it as a root and what the publish's
-/// restatement rewrites the slot at the referent's twin — a bare
-/// Int64 position goes verbatim through both and silently stale.
-/// Write member refs, record refs and term refs through this; flags
-/// and integer values keep `makeScalarCell`.
-[[nodiscard]] inline CellRef
-refCell(zigzag::ArenaManifold &arena, zigzag::vortex::VortexCore &core,
-        CellRef ref) {
-  const auto cell =
-      arena.makeScalarCell(static_cast<std::int64_t>(ref));
-  zigzag::expectWritten(
-      arena.link(cell,
-                 core.findOrMintDimension("d.mesh.relocation"),
-                 zigzag::DimVector::POS, arena.makeCell("cell")));
-  return cell;
 }
 
 /// Parse a record field as int64. `std::stoll` throws on a malformed

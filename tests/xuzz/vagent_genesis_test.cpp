@@ -1191,4 +1191,154 @@ TEST(VagentGenesisTest, UnlearnedPatchStaysOutOfReplay) {
       << "the unlearned clause still resolves after genesis";
 }
 
+// ---------------------------------------------------------------------------
+// Step (b½) — durable d.kind-registered rehydration and circuit breaker
+// ---------------------------------------------------------------------------
+
+CellRef mintKindRegisteredHead(DurableProgram &f, Author &a,
+                               std::string_view label, CellRef op) {
+  const auto head = a.cell("", f.at);
+  a.link(head, dimAt(f, "d.entry"), op, f.at);
+  a.link(head, dimAt(f, "d.name"), a.cell(label, f.at), f.at);
+
+  const auto mLitH  = a.scalar(static_cast<std::int64_t>(head), f.at);
+  const auto mLitO  = a.scalar(static_cast<std::int64_t>(op), f.at);
+  const auto mFrom  = a.scalar(static_cast<std::int64_t>(head), f.at);
+  const auto anchor = a.scalar(static_cast<std::int64_t>(f.programRoot), f.at);
+  a.link(anchor, dimAt(f, "d.name"), a.cell("d.entry", f.at), f.at);
+  const auto mDir = a.scalar(1, f.at);
+  const auto mTo  = a.scalar(static_cast<std::int64_t>(op), f.at);
+  a.link(head, dimAt(f, "d.recipe"), mLitH, f.at);
+  a.link(mLitH, dimAt(f, "d.step"), mLitO, f.at);
+  a.link(mLitO, dimAt(f, "d.step"), mFrom, f.at);
+  a.link(mFrom, dimAt(f, "d.step"), anchor, f.at);
+  a.link(anchor, dimAt(f, "d.step"), mDir, f.at);
+  a.link(mDir, dimAt(f, "d.step"), mTo, f.at);
+  return head;
+}
+
+TEST(VagentGenesisTest, KindRegisteredHeadRehydratedInGenesis) {
+  DurableProgram f;
+  buildDurableProgram(f);
+  Author a{f.store};
+
+  // Author a head with an op on d.kind-registered directly (not on d.code).
+  const auto kindOp =
+      a.scalar(static_cast<std::int64_t>(OpcodeKind::Return), f.at);
+  const auto head = mintKindRegisteredHead(f, a, "kind-reg-frag", kindOp);
+  a.link(f.agentCell, dimAt(f, "d.kind-registered"), head, f.at);
+
+  auto gc      = freshContext(f.store, f);
+  auto outcome = runGenesis(f.store, f.store, gc.context->arena,
+                            gc.context->core, gc.context->vm, gc.roots);
+  ASSERT_TRUE(outcome.has_value()) << (outcome ? "" : outcome.error());
+
+  // (b½): 1 registered head rehydrated.
+  EXPECT_EQ(outcome->registeredHeadsRehydrated, 1U);
+  EXPECT_EQ(outcome->registeredHeadsDropped, 0U);
+  // The head's op was registered in VM.
+  EXPECT_TRUE(gc.context->vm.hasOpcodeKind(kindOp));
+  EXPECT_EQ(gc.context->vm.getOpcodeKind(kindOp).value_or(OpcodeKind::Add),
+            OpcodeKind::Return);
+  // And the head was ensured on agentCell +d.code.
+  bool onCode = false;
+  for (const auto h : zigzag::rankAfter(gc.context->arena, f.agentCell,
+                                        outcome->binds.dims.code)) {
+    if (h == head) {
+      onCode = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(onCode) << "rehydrated head was not placed on d.code";
+}
+
+TEST(VagentGenesisTest, PatchReferencingKindRegisteredHeadSucceeds) {
+  DurableProgram f;
+  buildDurableProgram(f);
+  Author a{f.store};
+
+  // Author a head only on d.kind-registered.
+  const auto kindOp =
+      a.scalar(static_cast<std::int64_t>(OpcodeKind::Return), f.at);
+  const auto head = mintKindRegisteredHead(f, a, "kind-patch-head", kindOp);
+  a.link(f.agentCell, dimAt(f, "d.kind-registered"), head, f.at);
+
+  // Author a patch record that references "kind-patch-head".
+  CellRef patchTail = f.patches.back();
+  f.patches.push_back(mintPatchRecord(f, a,
+                                      PatchSpec{
+                                          .label   = "patch:5",
+                                          .ordinal = 5,
+                                          .verb    = "learn_where",
+                                          .target  = "patch:0",
+                                          .heads   = {"kind-patch-head"},
+                                      },
+                                      patchTail));
+
+  auto gc      = freshContext(f.store, f);
+  auto outcome = runGenesis(f.store, f.store, gc.context->arena,
+                            gc.context->core, gc.context->vm, gc.roots);
+  ASSERT_TRUE(outcome.has_value()) << (outcome ? "" : outcome.error());
+
+  EXPECT_EQ(outcome->registeredHeadsRehydrated, 1U);
+  // 5 live patches replayed (0, 1, 2, 3, and our 5; patch 4 was dead).
+  EXPECT_EQ(outcome->patchesReplayed, 5U);
+  EXPECT_EQ(outcome->patchesDropped, 1U);
+}
+
+TEST(VagentGenesisTest, CorruptedKindRegisteredHeadDroppedAndCircuitBreaker) {
+  DurableProgram f;
+  buildDurableProgram(f);
+  Author a{f.store};
+
+  // Corrupted head 1: op ordinal is invalid / out of range for validate.
+  const auto badOp1   = a.scalar(999'999, f.at);
+  const auto badHead1 = mintKindRegisteredHead(f, a, "corrupt-head-1", badOp1);
+
+  // Corrupted head 2: another head on the d.kind-registered rank.
+  const auto badOp2   = a.scalar(999'998, f.at);
+  const auto badHead2 = mintKindRegisteredHead(f, a, "corrupt-head-2", badOp2);
+
+  // Link agentCell -> badHead1 -> badHead2 on d.kind-registered.
+  a.link(f.agentCell, dimAt(f, "d.kind-registered"), badHead1, f.at);
+  a.link(badHead1, dimAt(f, "d.kind-registered"), badHead2, f.at);
+
+  auto gc      = freshContext(f.store, f);
+  auto outcome = runGenesis(f.store, f.store, gc.context->arena,
+                            gc.context->core, gc.context->vm, gc.roots);
+  ASSERT_TRUE(outcome.has_value()) << (outcome ? "" : outcome.error());
+
+  // Head 1 failed verification; maxReplayFailures (default 1) was reached;
+  // Head 2 tripped the circuit breaker. Both are dropped.
+  EXPECT_EQ(outcome->registeredHeadsRehydrated, 0U);
+  EXPECT_EQ(outcome->registeredHeadsDropped, 2U);
+
+  // Both heads should be unlinked from d.kind-registered.
+  for (const auto h : zigzag::rankAfter(gc.context->arena, f.agentCell,
+                                        outcome->binds.dims.kindRegistered)) {
+    EXPECT_NE(h, badHead1);
+    EXPECT_NE(h, badHead2);
+  }
+
+  // Fault tombstones written to agentCell's d.vars.
+  bool foundFault1 = false;
+  bool foundFault2 = false;
+  for (const auto rec : zigzag::rankAfter(gc.context->arena, f.agentCell,
+                                          gc.context->core.dims().vars)) {
+    if (gc.context->arena.textOf(rec) == "fault:corrupt-head-1") {
+      foundFault1 = true;
+    }
+    if (gc.context->arena.textOf(rec) == "fault:corrupt-head-2") {
+      foundFault2    = true;
+      const auto val = gc.context->arena.linked(
+          rec, gc.context->core.dims().values, Posward);
+      ASSERT_TRUE(val.has_value());
+      EXPECT_EQ(gc.context->arena.textOf(*val), "circuit_breaker");
+    }
+  }
+  EXPECT_TRUE(foundFault1) << "tombstone for corrupt-head-1 not found";
+  EXPECT_TRUE(foundFault2)
+      << "circuit breaker tombstone for corrupt-head-2 not found";
+}
+
 } // namespace

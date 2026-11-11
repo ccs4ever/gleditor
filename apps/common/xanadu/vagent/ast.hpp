@@ -89,6 +89,18 @@ enum class ExprKind : std::uint8_t {
   Code,
   Splice,
   Static,
+  Match,
+  MatchArm,
+  SafeNav,
+  Coalesce,
+  Map,
+  Tuple,
+  TuplePattern,
+  ListPattern,
+  RecordPattern,
+  WildcardPattern,
+  CtorPattern,
+  MicroVersionLiteral,
 };
 
 struct Expr;
@@ -181,6 +193,13 @@ struct GoalClause {
   SourceLocation loc{};
 };
 
+struct PlanArm {
+  ExprPtr pattern{nullptr};
+  ExprPtr guard{nullptr};
+  ExprPtr body{nullptr};
+  SourceLocation loc{};
+};
+
 enum class DeclKind : std::uint8_t {
   Event,
   Record,
@@ -217,6 +236,7 @@ struct Decl {
   std::optional<std::vector<std::string>> planBindings;
   std::vector<Contract> contracts;
   std::vector<GoalClause> goalClauses;
+  std::vector<PlanArm> planArms;
   std::vector<Decl> members;
   ExprPtr body;
   ExprPtr guard;

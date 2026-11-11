@@ -163,14 +163,24 @@ sweepDimName(zigzag::ArenaManifold &arena, VortexCore &core,
                             std::string>
 sweepDimensionVocabulary(zigzag::ArenaManifold &arena, VortexCore &core,
                          CellRef agentCell, DimRef codeDim, DimRef recipeDim) {
-  auto names      = dimensionVocabulary(arena);
-  const auto step = core.dims().step;
-  const auto name = core.dims().name;
-  for (const auto head : zigzag::rankAfter(arena, agentCell, codeDim))
-    for (const auto member : stepChain(arena, head, recipeDim, step))
-      if (const auto nameCell = arena.linked(member, name, Posward))
-        if (auto text = arena.textOf(*nameCell); !text.empty())
-          names.insert(std::move(text));
+  auto names           = dimensionVocabulary(arena);
+  const auto step      = core.dims().step;
+  const auto name      = core.dims().name;
+  const auto scanRanks = [&](DimRef dim) {
+    if (dim == noCell) return;
+    for (const auto head : zigzag::rankAfter(arena, agentCell, dim))
+      for (const auto member : stepChain(arena, head, recipeDim, step))
+        if (const auto nameCell = arena.linked(member, name, Posward))
+          if (auto text = arena.textOf(*nameCell); !text.empty())
+            names.insert(std::move(text));
+  };
+  scanRanks(codeDim);
+  if (const auto kindRegDim = core.findDimension("d.kind-registered")) {
+    scanRanks(*kindRegDim);
+  } else if (const auto kindRegDim2 =
+                 arena.dimensionNamed("d.kind-registered")) {
+    scanRanks(*kindRegDim2);
+  }
 
   std::size_t resolved = 0;
   std::vector<std::string> minted;
@@ -480,8 +490,7 @@ runGenesis(const xanadu::Store &lineage, const xanadu::Store &received,
     return std::unexpected(
         "genesis: the roots record names no image extent — nothing to "
         "bind a lineage against");
-  if (const auto ok =
-          verifyLineageBand(lineage, received, *roots.imageExtent);
+  if (const auto ok = verifyLineageBand(lineage, received, *roots.imageExtent);
       !ok)
     return std::unexpected(ok.error());
 
@@ -545,6 +554,119 @@ runGenesis(const xanadu::Store &lineage, const xanadu::Store &received,
 
   MetaRuntime meta(core, vm, *binds);
 
+  // (b½) — durable d.kind-registered heads rehydration before (d):
+  // walk agentCell +d.kind-registered, re-verify each head, re-bind opcodes in
+  // vm, ensure presence on d.code, and trip the circuit breaker on failures.
+  if (out.binds.dims.kindRegistered != noCell &&
+      arena.contains(roots.agentCell)) {
+    std::vector<CellRef> kindRegHeads;
+    for (const auto h : zigzag::rankAfter(arena, roots.agentCell,
+                                          out.binds.dims.kindRegistered)) {
+      kindRegHeads.push_back(h);
+    }
+    std::size_t replayFailures = 0;
+    for (const auto head : kindRegHeads) {
+      const auto label = meta.labelOf(head).value_or("<unlabelled>");
+      // Skip if unlearned or faulted.
+      const std::string faultKey   = std::format("fault:{}", label);
+      const std::string unlearnKey = std::format("unlearn:{}", label);
+      if (varsRecord(arena, core, roots.agentCell, faultKey, /*mint=*/false)
+              .has_value() ||
+          varsRecord(arena, core, roots.agentCell, unlearnKey, /*mint=*/false)
+              .has_value()) {
+        continue;
+      }
+
+      if (replayFailures >= out.binds.limits.maxReplayFailures) {
+        // Circuit breaker tripped.
+        unlinkRank(arena, head, out.binds.dims.kindRegistered);
+        if (const auto rec = varsRecord(arena, core, roots.agentCell, faultKey,
+                                        /*mint=*/true)) {
+          zigzag::expectWritten(arena.link(*rec, core.dims().values, Posward,
+                                           arena.makeCell("circuit_breaker")));
+        }
+        out.faults.push_back(std::format(
+            "kind-registered '{}': circuit breaker tripped", label));
+        ++out.registeredHeadsDropped;
+        continue;
+      }
+
+      // Re-verify head.
+      std::string failureReason;
+      const auto coveredOps = meta.collectCoveredOps(head);
+      if (!coveredOps) {
+        failureReason = coveredOps.error();
+      } else {
+        const auto entryOp = arena.linked(head, out.binds.dims.entry, Posward);
+        if (!entryOp || !arena.contains(*entryOp)) {
+          failureReason = "missing entry op";
+        } else {
+          bool expectPure = false;
+          if (const auto descriptor =
+                  arena.linked(head, core.dims().values, Posward)) {
+            if (arena.contains(*descriptor)) {
+              for (const auto rec :
+                   zigzag::rankAfter(arena, *descriptor, core.dims().vars)) {
+                if (arena.textOf(rec) == "pure") {
+                  if (const auto flag =
+                          arena.linked(rec, core.dims().values, Posward)) {
+                    expectPure = arena.asBool(*flag).value_or(false) ||
+                                 arena.asInt64(*flag).value_or(0) != 0;
+                  }
+                  break;
+                }
+              }
+            }
+          }
+          const auto report = meta.validate(
+              *entryOp, MetaValidateOptions{.runReachable = true,
+                                            .expectPure   = expectPure});
+          if (!report.ok) {
+            failureReason = report.detail;
+          } else {
+            const auto closedReport = meta.verifyClosed(head);
+            if (!closedReport.closed) {
+              failureReason = closedReport.detail;
+            }
+          }
+        }
+      }
+
+      if (!failureReason.empty()) {
+        ++replayFailures;
+        ++out.registeredHeadsDropped;
+        unlinkRank(arena, head, out.binds.dims.kindRegistered);
+        unlinkRank(arena, head, out.binds.dims.code);
+        if (const auto rec = varsRecord(arena, core, roots.agentCell, faultKey,
+                                        /*mint=*/true)) {
+          zigzag::expectWritten(arena.link(*rec, core.dims().values, Posward,
+                                           arena.makeCell(failureReason)));
+        }
+        out.faults.push_back(
+            std::format("kind-registered '{}': {}", label, failureReason));
+      } else {
+        for (const auto op : *coveredOps) {
+          if (const auto kind = arena.asInt64(op)) {
+            vm.setOpcodeKind(op, static_cast<OpcodeKind>(*kind));
+          }
+        }
+        bool onCode = false;
+        for (const auto m :
+             zigzag::rankAfter(arena, roots.agentCell, out.binds.dims.code)) {
+          if (m == head) {
+            onCode = true;
+            break;
+          }
+        }
+        if (!onCode) {
+          (void)meta.registerHead(head);
+        }
+        ++out.registeredHeadsRehydrated;
+        out.opsRegistered += coveredOps->size();
+      }
+    }
+  }
+
   // (d) — the ordinal d.patch replay: rank order is append order, and
   // the recorded ordinal is the tie-break authority. Replay mints no
   // patch records and draws no patch:<n> serial.
@@ -591,11 +713,26 @@ runGenesis(const xanadu::Store &lineage, const xanadu::Store &received,
   // (d)'s install set — the copies hang off program-side anchors a
   // head-only sweep never reaches.
   std::vector<CellRef> sweep;
+  std::set<CellRef> sweepSeen;
+  const auto addSweep = [&](CellRef head) {
+    if (head != noCell && arena.contains(head) &&
+        sweepSeen.insert(head).second) {
+      sweep.push_back(head);
+    }
+  };
   for (const auto head :
-       zigzag::rankAfter(arena, roots.agentCell, binds->dims.code))
-    sweep.push_back(head);
-  for (const auto copy : out.installedCopies)
-    if (std::ranges::find(sweep, copy) == sweep.end()) sweep.push_back(copy);
+       zigzag::rankAfter(arena, roots.agentCell, binds->dims.code)) {
+    addSweep(head);
+  }
+  if (binds->dims.kindRegistered != noCell) {
+    for (const auto head : zigzag::rankAfter(arena, roots.agentCell,
+                                             binds->dims.kindRegistered)) {
+      addSweep(head);
+    }
+  }
+  for (const auto copy : out.installedCopies) {
+    addSweep(copy);
+  }
   for (const auto head : sweep) {
     std::set<CellRef> dimHandled;
     const auto dimsDone =

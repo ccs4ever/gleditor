@@ -39,16 +39,17 @@ using zigzag::vortex::WorkerContext;
 // ---------------------------------------------------------------------------
 
 /// The genesis names: "d.dims" (the rank's own dim — `home` beside it is a
-/// plain genesis cell, not a dimension) plus the seventeen system dims
-/// `VortexCore::initGenesis` mints (vortex_core.cpp:50-69) and `attach()`'s
-/// "d.store-refs" (arena_manifold.cpp:289-290). Nineteen cells, eighteen
+/// plain genesis cell, not a dimension) plus the nineteen system dims
+/// `VortexCore::initGenesis` mints (vortex_core.cpp:51-74) and `attach()`'s
+/// "d.store-refs" (arena_manifold.cpp:289-290). Twenty-one cells, twenty
 /// filed names, plus the one attach() adds.
 inline constexpr std::string_view kGenesisDimensionNames[] = {
     "d.dims",   "d.grab",     "d.step",       "d.spin",
     "d.stack",  "d.contract", "d.clone",      "d.cursors",
     "d.cache",  "d.vars",     "d.values",     "d.pinning-cursors",
     "d.name",   "d.stdlib",   "d.clause",     "d.scan",
-    "d.stores", "d.role",     "d.store-refs",
+    "d.stores", "d.role",     "d.store-refs", "d.left",
+    "d.right",
 };
 
 /// The twelve apparatus dims §6.1's bind set carries — filed on the
@@ -56,9 +57,10 @@ inline constexpr std::string_view kGenesisDimensionNames[] = {
 /// bound non-dim members (program root, agent cell, `validate` constants)
 /// bind at genesis (c) and never file.
 inline constexpr std::string_view kMetaDimensionNames[] = {
-    "d.code",  "d.patch",      "d.weight",   "d.synapse",
-    "d.entry", "d.patch-head", "d.validate", "d.refs",
-    "d.ref",   "d.recipe",     "d.refFor",   "d.mesh.relocation",
+    "d.code",    "d.patch",           "d.weight",      "d.synapse",
+    "d.entry",   "d.patch-head",      "d.validate",    "d.refs",
+    "d.ref",     "d.recipe",          "d.refFor",      "d.mesh.relocation",
+    "d.lineage", "d.kind-registered", "d.pending-reg", "d.ast.kinds",
 };
 
 /// The twenty-three `std:agent` dims the adapter `ensureDimension`-mints

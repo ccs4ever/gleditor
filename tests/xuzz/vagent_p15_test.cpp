@@ -326,10 +326,16 @@ TEST(VagentP15Test, RegisterProgramImageRepopulatesAFreshContext) {
         << "recorded op " << op << " is absent from the fresh map";
   }
 
-  // The hole the pass exists to close: a surgical write into a
-  // recorded op cell lands while the fresh map holds nothing.
-  WriteFault fault    = WriteFault::None;
-  const CellRef stray = h.vm.mintOpcode(OpcodeKind::Nop);
+  // The hole the pass exists to close: a surgical write into an
+  // opcode-kind cell no live map claims lands. Owner-keyed guards mean
+  // h.vm's map still protects what it minted, so the stray comes from a
+  // scoped VM whose guard dies with it.
+  WriteFault fault = WriteFault::None;
+  CellRef stray    = zigzag::noCell;
+  {
+    zigzag::vortex::VortexVM tmp{h.core};
+    stray = tmp.mintOpcode(OpcodeKind::Nop);
+  }
   EXPECT_TRUE(fresh.getOpcodeKind(stray).has_value());
   EXPECT_FALSE(fresh.hasOpcodeKind(stray));
   EXPECT_TRUE(h.core.writeValue(stray, 0, std::nullopt,

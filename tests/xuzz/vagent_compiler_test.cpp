@@ -1084,4 +1084,34 @@ TEST(VAgentCompilerTest, CapAnchorsResolveOnlyOnStateSideCaptures) {
   EXPECT_EQ(h.members(statement->result), std::vector<CellRef>{child});
 }
 
+TEST(VAgentCompilerTest, MatchLowersToEqBranchChainWithoutChoicePoints) {
+  ScalarHarness h;
+  const struct {
+    const char *source;
+    CellValue expected;
+  } cases[] = {
+      {"match 2 with { 1 => { 10 }; 2 => { 20 }; _ => { 30 } }",
+       CellValue(std::int64_t{20})},
+      {"match 9 with { 1 => { 10 }; 2 => { 20 }; _ => { 30 } }",
+       CellValue(std::int64_t{30})},
+      {"match \"b\" with { \"a\" => { 1 }; \"b\" => { 2 }; _ => { 3 } }",
+       CellValue(std::int64_t{2})},
+      {"match 7 with { ?n where n > 5 => { n * 2 }; _ => { 0 } }",
+       CellValue(std::int64_t{14})},
+      {"match 3 with { ?n where n > 5 => { n * 2 }; _ => { 0 } }",
+       CellValue(std::int64_t{0})},
+  };
+  for (const auto &testCase : cases) {
+    SCOPED_TRACE(testCase.source);
+    auto statement = h.compile(testCase.source);
+    ASSERT_TRUE(statement) << (statement ? ""
+                                         : formatDiagnostic(statement.error()));
+    h.run(*statement);
+    EXPECT_TRUE(h.produced(*statement));
+    EXPECT_EQ(h.core.render(statement->result), testCase.expected);
+    EXPECT_EQ(h.vm.choiceDepth(), 0U);
+    EXPECT_EQ(h.arena.outstandingMarks(), 0U);
+  }
+}
+
 } // namespace

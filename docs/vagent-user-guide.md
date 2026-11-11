@@ -158,19 +158,45 @@ outgoing message as immediate terminal output.
 
 Type-like names use `PascalCase`: events, records, goals, agents, behaviors, skills and capacities.
 Predicates, questions, fields, locals and methods use `snake_case`. Names beginning with `$` belong
-to the runtime; source code cannot declare or assign them. `_` binds nothing.
+to the runtime; source code cannot declare or assign them. `_` binds nothing as a wildcard pattern.
 
 Write `//` line comments or non-nesting `/* block comments */`. Strings use double quotes, including
-escapes such as `\n`, `\t`, `\"`, `\\` and `\u{...}`. Literals include `1_000`, `0x2A`, `3.5`,
-`1e-3`, `true`, `false`, `()`, `none`, `250ms`, `2s` and `5min`.
+escapes such as `\n`, `\t`, `\"`, `\\` and `\u{...}`. Literals include numbers (`1_000`, `0x2A`,
+`3.5`, `1e-3`), booleans (`true`, `false`), unit `()`, options (`Some(v)`, `none`), durations
+(`250ms`, `2s`, `5min`), tree-backed map literals (`map { key => val }`), and first-class
+`MicroVersion` literals (`@0`, `@2a4`, `@17b1c3`).
 
-A newline normally separates statements inside a block. A leading continuation such as `&`, `|`,
-`++`, a comparison, `.`, `?`, `to`, `by`, `then`, `else` or `do` continues the preceding expression.
-A leading `-`, `!`, `*`, `(`, `[` or `{` can start a new expression and does not imply continuation.
-Use parentheses when a long expression would otherwise be hard to read. Newlines inside grouping,
-lists and record literals are whitespace; nested statement blocks regain significant newlines.
-Declarations outside blocks need no statement separators. A semicolon can separate statements on one
-line.
+### Delimiter orthogonality
+
+Delimiters in VAgent are strictly and orthogonally partitioned by construct:
+
+- **Parentheses `(...)`**: Fixed-arity heterogeneous tuples (e.g. `(?x, ?y)`, `(Int, Str)`),
+  function call arguments, and expression grouping. Single-element tuple patterns require a trailing
+  comma: `(?a,)`, distinguishing them from parenthesized grouping.
+- **Square brackets `[...]`**: Homogeneous dynamic lists (`[1, 2, 3]`, `[Int]`), 1-based element
+  subscripting (`arr[1]`), interval slicing (`text[1..3]`), and list destructuring patterns
+  (`[?head, ...?tail]`). The ellipsis spread operator `...` avoids lexical collision with the
+  alternation operator `|`.
+- **Curly braces `{...}`**: Structured records, event payloads, map literals, and procedural blocks
+  (`Point { x: 3, y: 4 }`, `Move { destination: ... }`, `map { "k" => 42 }`, and
+  `{ stmt1; stmt2 }`).
+
+### Statements, newlines, and semicolons
+
+A newline normally separates sequential statements inside a block. A semicolon (`;`) can optionally
+separate statements on one line or terminate a statement.
+
+> [!IMPORTANT] The semicolon (`;`) is strictly and exclusively a procedural statement separator or
+> terminator (Tier 1 procedural sequencing). The semicolon **NEVER** denotes disjunction or
+> alternation anywhere in VAgent! Prolog's overloaded semicolon is banished; disjunction is
+> expressed exclusively with pure boolean `or` (Tier 2) or goal-directed alternation `|` (Tier 3).
+
+A leading continuation such as `&`, `|`, `and`, `or`, `??`, `++`, a comparison, `.`, `?.`, `?`,
+`to`, `by`, `then`, `else` or `do` continues the preceding expression. A leading `-`, `!`, `*`, `(`,
+`[` or `{` can start a new expression and does not imply continuation. Use parentheses when a long
+expression would otherwise be hard to read. Newlines inside grouping, lists, and record literals are
+whitespace; nested statement blocks regain significant newlines. Declarations outside blocks need no
+statement separators.
 
 The token `<-` is reversible assignment. `a<-1` does not mean “a is less than negative one”; write
 `a < -1` for that comparison and add spaces around assignments for clarity.
@@ -187,9 +213,10 @@ questions declare types; locals can infer their type from an initializer.
 | `Duration`, `Time`            | A duration such as `2s`, and a turn time or absolute deadline.                                                                                                            |
 | `Agent`, `Space`              | Names of living agents or spaces, not pointers to their private state.                                                                                                    |
 | `Intention`, `Timer`          | Scalar ids used to refer to work within an agent.                                                                                                                         |
-| `Opt<T>`                      | A value that may be absent. Absence is `none`; reading it produces its value or fails.                                                                                    |
-| `[T]`                         | A homogeneous list. Values are copied when stored.                                                                                                                        |
-| `Map<K, V>`                   | Specified typed key/value collection. Source operations need the future linked prelude/runtime; no implemented map API is advertised here.                                |
+| `Opt<T>`                      | A value that may be absent. Absence is `none`; presence is `Some(v)`. Soft unwrap `opt?`, hard unwrap `opt!`, safe nav `?.`, coalescing `??`. Sentinels are banished.     |
+| `[T]`                         | A homogeneous list. Values are copied when stored. 1-based indexing `[1..N]`.                                                                                             |
+| `Map<K, V>`                   | Tree-backed associative key/value map on orthogonal dimensions `d.left` and `d.right`. Literals `map { k => v }`, with $O(\log N)$ lookup, insertion and membership.      |
+| `MicroVersion`                | An exact OSMIC hypertime commit point (`@0`, `@2a4`, `@17b1c3`) sealed in a Merkle ops spool. Passed to `spawn image` and `std:hypertime` navigation.                     |
 | `Cell`                        | A reference to an existing arena cell — the one value not copied on store; `==`/`!=` compare identity. See [metaprogramming](#metaprogramming-and-self-modifying-agents). |
 | `Code<T>`                     | A `code"…"` fragment that produces a `T` when run; a bare `Code` accepts any `T`. See [metaprogramming](#metaprogramming-and-self-modifying-agents).                      |
 | Declared record/event         | Named fields with static types. An event also has message meaning.                                                                                                        |
@@ -231,6 +258,182 @@ enclosing Move event supplies the delivery meaning. On a copy, change the last a
 
 **Check your reasoning.** The edit is accepted; the predicted last_x is 4. An Int cannot be
 substituted for the Point-valued destination.
+
+### Universal 1-based indexing and slicing
+
+In harmony with relational logic, ISO Prolog, VQL, Vicon, and ZigZag manifold ranks (`+d.step`),
+indexing in VAgent is strictly **1-based**:
+
+```text
+Sequence of length N:
+Elements:      [  e_1  ,  e_2  ,  e_3  , ... ,  e_N  ]
+1-Based Index:     1       2       3             N
+Reverse Index:    -N    -(N-1)  -(N-2)          -1
+```
+
+- **Domain**: For any sequence of length $N$ (lists, strings, grids), valid element indices belong
+  to the closed integer set $\{1, 2, \dots, N\}$.
+
+- **Subscript access**: `arr[1]` accesses the first element (head); `arr[N]` accesses the final
+  element.
+
+- **Symmetrical negative indexing**: Negative indices count backward from the tail:
+
+  ```math
+  \text{effective}(k) = \begin{cases} k & \text{if } k > 0 \\ N + 1 + k & \text{if } k < 0 \end{cases}
+  ```
+
+  `arr[-1]` yields element $N$ (the last element), `arr[-2]` yields element $N-1$, and `arr[-N]`
+  yields element 1.
+
+- **Strict rejection of index 0**: Index 0 does not belong to either forward or reverse element
+  coordinates. Subscripting with a literal integer `0` (e.g. `arr[0]`, `str[0]`) triggers a fatal
+  compile-time diagnostic:
+
+  ```text
+  error[E101]: 1-based indexing violation: index 0 is invalid in 1-based indexing
+  ```
+
+  At run time, an index expression evaluating to `0` triggers goal failure (`#Fail`) in
+  goal-directed contexts or raises `IndexOutOfBounds` in deterministic expressions.
+
+- **Goal-directed out-of-bounds failure**: Subscripting beyond sequence bounds ($i < -N$ or $i > N$)
+  fails goal-directed evaluation (`#Fail`), participating directly in backtracking search or
+  recovering via `else`:
+
+  ```vagent-harmonized
+  let first := arr[1] else return none
+  ```
+
+- **Inclusive interval slices**: Slicing uses closed inclusive intervals $[start..end]$:
+
+  ```vagent-harmonized
+  let sub := text[1..3]    // Yields characters 1, 2, and 3 (length 3)
+  let tail := text[2..-1]  // Yields from character 2 to the end
+  ```
+
+  Slice length is $L = end - start + 1$. When $end = start - 1$, an empty sequence is produced; when
+  $end < start - 1$, the slice fails (`#Fail`).
+
+- **Loop ranges**: Range iteration `for i in start..end do` iterates through inclusive values from
+  `start` to `end`.
+
+### Canonical options and unwrapping
+
+The canonical option type is `Opt<T>` (e.g. `Opt<Int>`, `Opt<Agent>`). Postfix `T?` is rejected in
+type declarations to keep `?` reserved for expression unwrap and pattern variables.
+
+- **Constructors**: `Some(v)` constructs an option carrying value $v$; `none` represents absence.
+
+- **Subtype promotion**: An expression of type $T$ implicitly promotes to `Opt<T>` where expected:
+
+  ```vagent-harmonized
+  var current_target: Opt<Str> := "base_station"  // Promotes to Some("base_station")
+  current_target := none                          // Resets to none
+  ```
+
+- **Unwrapping semantics**:
+
+  - **Soft goal-directed unwrap (`opt?`)**: If `Some(v)`, yields $v$; if `none`, emits VM `#Fail`,
+    backtracking to an enclosing choice point or triggering an `else` branch without crashing the
+    turn:
+
+    ```vagent-harmonized
+    let target := current_target?
+    let config := load_file("custom.cfg")? | load_file("default.cfg")? | fallback_config
+    ```
+
+  - **Assertive hard force-unwrap (`opt!` or `opt.unwrap()`)**: If `Some(v)`, yields $v$; if `none`,
+    raises `ActorError::ContractViolation`, halting the current turn immediately and discarding
+    uncommitted turn state.
+
+- **Safe navigation (`?.`)**: Traverses members or method calls, propagating `none` if the base is
+  `none`:
+
+  ```vagent-harmonized
+  let zip := user?.address?.zip_code  // Yields Opt<Str>
+  ```
+
+- **Null coalescing (`??`)**: Provides a fallback value if the left operand evaluates to `none`:
+
+  ```vagent-harmonized
+  let display_name := user?.nickname ?? "Anonymous"
+  ```
+
+- **Banishment of sentinels**: Sentinels (such as `-1` for invalid indices, `""` for missing names,
+  or `0` for inactive states) are strictly prohibited. All optional fields and return values use
+  canonical `Opt<T>`.
+
+### Tree-backed maps on orthogonal dimensions
+
+Throughout complex agent systems, high-performance associative lookups are required for symbol
+tables, token registries, and route tables. In Nelsonian ZigZag, every dimension is strictly a
+2-regular graph with reciprocal links ($A \xrightarrow{+D} B \iff B \xrightarrow{-D} A$).
+
+Because an internal binary search tree node has 3 incident edges (parent, left child, right child),
+embedding left and right branches along a single dimension violates 2-degree reciprocity. To
+preserve topological purity, VAgent allocates **two orthogonal branching dimensions**:
+
+- `+d.left`: Parent links `POS` to left child ($< \text{key}$); child reciprocally links `NEG` back
+  to parent (`-d.left`).
+- `+d.right`: Parent links `POS` to right child ($> \text{key}$); child reciprocally links `NEG`
+  back to parent (`-d.right`).
+- `+d.values`: Links from each key node cell to its associated value cell.
+- `+d.step`: Links all key node cells in symmetric in-order traversal rank ($O(N)$ iteration).
+
+Every map is anchored by a persistent `mapRoot` container cell (text `"map"`):
+
+- `mapRoot` links along `+d.grab` to the root key cell, and along `+d.step` to the minimum key cell.
+- **Rotation invariance**: Tree balancing rotations modify branch pointers on `d.left` and
+  `d.right`, but the in-order traversal rank on `+d.step` is strictly invariant
+  ($\text{InOrder}(R(T)) \equiv \text{InOrder}(T)$). Tree balancing **never modifies `+d.step`
+  links**, guaranteeing active sequential iterators are never disturbed by tree rebalancing.
+
+```text
+                       mapRoot Container Cell ["map"]
+                      /                          \
+               (+d.grab)                      (+d.step)
+                  /                                \
+          Root Cell ["pure"]                Min Key Cell ["closed"]
+         /                  \                         |
+    (+d.left)            (+d.right)               (+d.step)
+      /                        \                      |
+Left Child ["closed"]     Right Child ["result"]     ...
+   (+d.values)                 (+d.values)
+        |                           |
+   Value Cell                  Value Cell
+```
+
+Map syntax and operations:
+
+- **Literals**: `let scores := map { "alice" => 95, "bob" => 88 }`, empty map `map {}`.
+- **Search**: `scores["alice"]` or `scores.get("alice")` performs an $O(\log N)$ descent. Soft
+  lookup `scores["alice"]?` fails (`#Fail`) if the key is absent.
+- **Insertion & update**: `scores["charlie"] := 92` or `scores.set("charlie", 92)` in $O(\log N)$.
+- **Membership**: `scores.has("alice")` returns `Bool` in $O(\log N)$.
+- **Keys and length**: `scores.keys()` returns `[K]` in $O(N)$ via `+d.step`; `scores.len()` gives
+  the element count.
+- **Iteration**: `for (k, v) in scores do { ... }` iterates along `+d.step` in $O(N)$.
+- **Fuel accounting**: Every descent along `d.left` or `d.right` and every step along `+d.step`
+  calls `consumeWork()`, deducting cycle fuel under Spool-Mesh turn quotas.
+
+### First-class MicroVersion literals
+
+VAgent provides native, first-class **`MicroVersion` literals** of the form `@<id>`, where `<id>` is
+a base-36 hexadecimal or bijective-base-26 microversion identifier:
+
+- `@0`: The genesis commit of an OSMIC store.
+- `@2a4`: Branch `a`, generation 4 off root commit 2.
+- `@17b1c3`: Complex hypertime branch state.
+
+These literals represent exact, immutable commit points in the append-only `SegmentedOpsSpool`. The
+compiler statically verifies version literal syntax, preventing malformed or invalid version
+identifiers at compile time.
+
+MicroVersion values are first-class: they can be stored in fields
+(`var snapshot: MicroVersion := @0`), passed across messages, queried with `std:hypertime`
+functions, and used to spawn actors directly from a specific historical or branch state via
+`spawn image(@2a4)`.
 
 ## Events and handlers
 
@@ -347,6 +550,84 @@ Those acceptance/rejection results are observable today. The counter values rema
 an executor exists. Before continuing, identify a field, a handler local, an event binding and a
 condition without needing search or goal syntax.
 
+### Algebraic pattern matching and destructuring
+
+Beyond boolean conditionals, VAgent provides algebraic pattern matching via `match ... with` and
+destructuring `let` bindings:
+
+```ebnf
+MatchExpr      ::= "match" Expr "with" "{" (MatchArm ("," | "\n")*)* "}"
+MatchArm       ::= Pattern ("where" Expr)? "=>" (Expr | Block)
+DestructureLet ::= "let" Pattern ":=" Expr ("else" Block)?
+```
+
+The mandatory `with` keyword distinguishes match expressions from record literals
+(`Point { x: 1 }`). Match arms are separated by commas or newlines.
+
+#### Comprehensive pattern vocabulary
+
+Patterns decompose data structures cleanly:
+
+- **Literals**: Match exact values (`1`, `3.14`, `"ready"`, `true`, `false`, `none`).
+- **Wildcard (`_`)**: Matches any value without binding a variable.
+- **Variables (`?var`)**: Binds an unbound logic variable accessible in the arm's guard and body.
+- **Tuples (`(...)`)**: Fixed-arity tuples `(?a, ?b)`. Single-element tuple patterns require a
+  trailing comma: `(?a,)`.
+- **Dynamic lists (`[...]`)**: Lists with head and tail decomposition via the ellipsis spread
+  operator: `[?head, ...?tail]`.
+- **Records (`{...}`)**: Named field destructuring: `Point { x: ?x, y: ?y }`.
+- **Variants & constructors**: Tagged variants such as `Some(?v)`, `Ok(?val)`, and `Err(?err)`.
+
+#### Deterministic lowering without choice points
+
+Unlike search and goal-directed backtracking, pattern matching compiles down to **deterministic
+decision trees** using `#Equal`, `#Branch`, and `#ExtractField` VM opcodes:
+
+- **Zero choice points**: Pattern matching emits no `#Choice` or `#Fail` instructions. This
+  guarantees choice depth is untouched, preventing trail rollback from destroying side effects
+  executed within arm bodies.
+
+- **Compile-time exhaustiveness (`E310`)**: The compiler statically verifies that match expressions
+  cover all possible variants and shapes. Non-exhaustive matches trigger a fatal diagnostic:
+
+  ```text
+  error[E310]: Non-exhaustive match: missing cases
+  ```
+
+- **Refutable `let` bindings (`E313`)**: Binding a refutable pattern in a `let` statement requires
+  an explicit `else` diverging block:
+
+  ```vagent-harmonized
+  let Some(?target) := current_target else {
+    return Err("No active target")
+  }
+  ```
+
+  Omitting the `else` block on a refutable pattern triggers
+  `error[E313]: Refutable pattern in let binding requires else clause`.
+
+#### Worked example: Packet dispatching
+
+```vagent-harmonized
+event Packet { id: Str, payload: Str }
+
+agent Dispatcher {
+  on Packet as p {
+    match p with {
+      Packet { id: ?id, payload: "PING" } => {
+        emit Pong(id: id)
+      },
+      Packet { id: ?id, payload: ?body } where body.len() > 0 => {
+        process_payload(id, body)
+      },
+      _ => {
+        log("Ignored malformed or empty packet")
+      }
+    }
+  }
+}
+```
+
 ## Search and expression reference
 
 `e1 & e2` continues to `e2` for successful results of `e1`; `e1 | e2` tries alternatives. A bounded
@@ -376,26 +657,52 @@ necessary: `value == 1 | 2` means `(value == 1) | 2`, whose second arm always su
 negate a returned Bool value. `!list` generates list elements, `!string` generates characters,
 `*value` obtains a size, and `++` concatenates lists or strings.
 
+### The four-tier evaluation hierarchy
+
+VAgent partitions computation into four distinct, non-interfering evaluation tiers:
+
+| Tier       | Category                      | Operators          | Semantics & VM Lowering                                                                                                                                                                                                                                                                                                                                |
+| :--------- | :---------------------------- | :----------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Tier 1** | **Procedural Sequencing**     | `\n`, `;`          | Sequential execution along `+d.spin`. Semicolon is strictly a statement separator/terminator, NEVER disjunction. Enforces Griswold's Principle of Bounded Expressions: choice points created within a statement are automatically cut at statement boundaries (`#CutChoiceDepth`), ensuring procedural side effects never backtrack across statements. |
+| **Tier 2** | **Pure Boolean Logic**        | `not`, `and`, `or` | Deterministic evaluation over `Bool` values with short-circuiting. Emits zero choice points onto the VM choice stack.                                                                                                                                                                                                                                  |
+| **Tier 3** | **Goal-Directed Execution**   | `&`, `\|`, `!`     | `&` chains successes; `\|` introduces backtracking choice points (`#Choice`); `!` cuts choice points (`#Cut`).                                                                                                                                                                                                                                         |
+| **Tier 4** | **Relational Belief Queries** | `believes (...)`   | Unification queries over Horn clause ranks (`d.clause`). Multi-predicate queries compose via Tier 3 `&` and `\|`. Inside belief terms, commas (`,`) remain strictly argument separators.                                                                                                                                                               |
+
+#### Multi-predicate belief queries
+
+In BDI plans and conditional guards, belief queries compose using Tier 3 operators:
+
+```vagent-harmonized
+if believes (At(self, ?x, ?y) & Clear(?x, ?y)) then {
+  log("Position verified clear at " ++ int_to_str(?x) ++ "," ++ int_to_str(?y))
+}
+```
+
+Inside `believes (...)`, `&` conjoins predicates and `|` alternates between them, while commas (`,`)
+remain strictly term argument separators.
+
 ### Operator precedence
 
-The following is ordered from strongest binding to weakest. Comparisons do not chain; use
-`a < b & b < c`. Assignment is right-associative, but its unit result makes ordinary chained
-assignment ill-typed.
+The following is ordered from strongest binding (level 13) to weakest (level 1). Under this
+harmonized hierarchy, infix string scanning `?` sits below goal conjunction `&`, allowing
+`subject ? tab(a) & tab(b)` to parse naturally as `subject ? (tab(a) & tab(b))` without requiring
+extra parentheses. Comparisons do not chain; use `a < b and b < c` or `a < b & b < c`.
 
-| Level | Operators                        |
-| ----- | -------------------------------- |
-| 1     | Call, index, field access        |
-| 2     | Unary `-`, `!`, `*`              |
-| 3     | `*`, `/`, `%`                    |
-| 4     | `+`, `-`                         |
-| 5     | `++`                             |
-| 6     | `<`, `<=`, `>`, `>=`, `==`, `!=` |
-| 7     | `not`                            |
-| 8     | `\|`                             |
-| 9     | `to` with optional `by`          |
-| 10    | `?` for string scanning          |
-| 11    | `:=`, `<-`                       |
-| 12    | `&`                              |
+| Level        | Category              | Operators                                                          |
+| :----------- | :-------------------- | :----------------------------------------------------------------- |
+| 13 (Highest) | Primary               | Member access `.`, Safe navigation `?.`, Subscript `[]`, Call `()` |
+| 12           | Unary                 | Unary `-`, pure `not`, soft unwrap `?`, hard unwrap `!`, size `*`  |
+| 11           | Multiplicative        | `*`, `/`, `%`                                                      |
+| 10           | Additive              | `+`, `-`, concatenation `++`                                       |
+| 9            | Range                 | `..` (and `to` with optional `by`)                                 |
+| 8            | Comparison & Equality | `<`, `<=`, `>`, `>=`, `==`, `!=`                                   |
+| 7            | Pure Conjunction      | `and`                                                              |
+| 6            | Pure Disjunction      | `or`                                                               |
+| 5            | Null Coalescing       | `??`                                                               |
+| 4            | Goal Conjunction      | `&`                                                                |
+| 3            | Alternation / Choice  | `\|`                                                               |
+| 2            | String Scanning       | Infix `?`                                                          |
+| 1 (Lowest)   | Assignment            | `:=`, `<-`                                                         |
 
 ## Assignment and rollback boundaries
 
@@ -532,8 +839,55 @@ pure condition or an answer. The purity restriction follows calls transitively.
 
 ### String scanning
 
-The binary `text ? expression` establishes a scanning subject and position. This differs from the
-`?name` query binding used in a belief term.
+VAgent provides Icon-inspired string scanning with 1-based coordinates and goal-directed failure.
+Scanning comes in two forms: a structured block form and an inline infix expression.
+
+#### Form A: Structured block form (`scan subject with { ... }`)
+
+Recommended for multi-statement scanning and packet parsing workflows:
+
+```vagent-harmonized
+scan packet with {
+  tab(match("HEADER:"))
+  let id := tab(upto(";"))
+  move(1)
+  let payload := tab_end()
+  emit PacketParsed(id: id, body: payload)
+}
+```
+
+The `scan ... with` block pushes a new scanning environment (`#ScanPush`), initializing `subject()`
+to the packet text and cursor position `pos()` to 1. Upon block exit, the previous scanning
+environment is automatically restored (`#ScanPop`). Inside the block:
+
+- **State inspection**: The current subject and cursor position are accessed via standard nullary
+  built-in functions `subject()` and `pos()`. (Icon's archaic prefix `&` sigils, such as `&subject`
+  and `&pos`, are banished).
+- **Scanner routines**:
+  - `tab(n)`: Sets cursor position to $n$ ($1 \le n \le N+1$) and returns the spanned substring
+    between the old and new position.
+  - `tab_end()`: Advances cursor to the end of the subject ($N+1$) and returns the remainder.
+  - `move(n)`: Moves the cursor forward by $n$ characters and returns the spanned substring.
+  - `match(prefix)`: Matches `prefix` at the current cursor and advances past it; fails (`#Fail`) if
+    `prefix` does not match.
+  - `many(charset)`: Consumes one or more consecutive characters belonging to `charset`.
+  - `upto(charset)`: Scans forward up to the next character belonging to `charset` (generator).
+  - `any(charset)`: Matches a single character belonging to `charset`.
+  - `find(needle)`: Generates successive positions where `needle` occurs in the subject.
+
+#### Form B: Inline infix form (`subject ? scan_expr`)
+
+Retained for concise, single-expression parsing:
+
+```vagent-harmonized
+let id := packet ? (tab(match("ID:")) & tab(upto(";")))
+```
+
+Under VAgent's 13-tier operator precedence, the infix scanning operator `?` sits at level 2, binding
+below goal conjunction `&` (level 4). This guarantees that `s ? tab(a) & tab(b)` parses naturally as
+`s ? (tab(a) & tab(b))` without requiring manual parentheses.
+
+The following complete checkable unit demonstrates inline scanning:
 
 **Checkable source; runtime predicted.** Save as `tags.vagent`.
 
@@ -795,6 +1149,101 @@ intention itself ends the watch and its restorer.
 The runtime raises `PlanFailed`, `GoalAchieved`, `GoalFailed` and `GoalDropped` for the
 corresponding transitions. A parent subgoal call receives its child's outcome; dropping only a
 subgoal causes the parent's waiting statement to fail with cause `dropped`.
+
+### Multi-arm plan guards and BDI deliberation
+
+In practical BDI agents, complex goals require distinct execution strategies depending on the
+agent's belief state. Formerly, declaring alternative strategies required duplicating the entire
+goal signature for every plan:
+
+```vagent-harmonized
+// BEFORE: Redundant goal signature duplication
+plan RouteDrone for DeliverPackage(?pkg, ?dest) where pkg.weight <= 5 and drone_available() {
+  achieve FlyTo(dest)
+}
+plan RouteTruck for DeliverPackage(?pkg, ?dest) where pkg.weight > 5 and truck_available() {
+  achieve DriveTo(dest)
+}
+plan RouteDelay for DeliverPackage(?pkg, ?dest) where true {
+  emit DeliveryDelayed(pkg.id)
+}
+```
+
+VAgent eliminates this boilerplate via **multi-arm plan declarations**, permitting multiple guarded
+arms under a single plan header:
+
+```vagent-harmonized
+plan RouteCargo for DeliverPackage(?pkg, ?dest) {
+  where pkg.weight <= 5 and drone_available() => {
+    achieve FlyTo(dest)
+  },
+  where pkg.weight > 5 and truck_available() => {
+    achieve DriveTo(dest)
+  },
+  default => {
+    emit DeliveryDelayed(pkg.id)
+  }
+}
+```
+
+#### Discriminator arms and pattern specialization
+
+Plan arms are distinguished by three explicit keywords:
+
+- `where Expr => Block`: Guarded arm selected when boolean expression `Expr` evaluates to `true`.
+- `case Pattern where Expr => Block`: Pattern specialization arm matching against the goal's
+  argument payload, with an optional boolean guard.
+- `default => Block`: Unconditional fallback arm executed when prior arms fail or do not apply.
+
+When strategies inspect distinct structural variants of a goal argument, pattern specialization is
+embedded directly in the arms:
+
+```vagent-harmonized
+plan ProcessTokenPlan for ProcessToken(?tok) {
+  case Token { kind: Ident, text: ?t } where is_keyword(t) => {
+    emit KeywordFound(t)
+  },
+  case Token { kind: Ident, text: ?t } => {
+    emit IdentifierFound(t)
+  },
+  case Token { kind: Number, text: ?t } => {
+    emit NumberFound(str_to_int(t))
+  },
+  default => {
+    emit UnknownToken(tok)
+  }
+}
+```
+
+#### BDI deliberation semantics and turn atomicity
+
+Multi-arm deliberation operates under strict transactional guarantees:
+
+1. **Applicability selection**: When a goal is adopted, the deliberation engine evaluates arms in
+   declaration order. The first arm whose pattern matches and whose `where` guard succeeds is
+   selected.
+1. **Goal payload matching and scoping**:
+   - For an $N$-ary goal ($N \ge 1$), `case Pattern` matches the argument value (if $N = 1$) or the
+     argument tuple `(?arg1, ..., ?argN)` (if $N > 1$). Attempting to match a pattern on a nullary
+     goal ($N = 0$) emits compile diagnostic
+     `error[E315]: Cannot match pattern on nullary goal; use where or default`.
+   - Variables bound by `?ident` within a `case Pattern` arm are lexically scoped strictly to that
+     arm's guard and body block.
+1. **Turn atomicity and arm-scoped rollback**:
+   - Executing an arm body within a turn captures an arm-scoped arena mark: `m_arm = arena.mark()`.
+   - If an arm body fails prior to irrevocable external commit (e.g. subgoal failure, expired
+     deadline, or explicit `#Fail`), the executor calls `arena.release(m_arm)`. This rolls back
+     speculative arena cells and un-stages any pending `+d.outbox` entries before advancing to the
+     next untried arm, preventing phantom messages across branches.
+1. **Untried arm reconsideration**:
+   - When an arm body fails during execution, the failure does not fault the actor.
+   - The executor appends the failed clause cell to the intention's `tried` rank along `+d.step`.
+   - The intention scheduler re-evaluates untried arms; if no untried arms remain, execution
+     escalates to the standard `GoalFailed` transition.
+1. **Substrate lowering**:
+   - Compiles into sequential clause cells along the goal's `+d.clause` rank (`PlanName`,
+     `PlanName$2`, ..., `PlanName$M`), requiring 0 extra runtime bytes while eliminating ~70% of AST
+     and source boilerplate.
 
 ## Waiting without blocking
 
@@ -1344,8 +1793,145 @@ source check cannot tell you that your predicted message schedule occurred.
 ## Persistence, checkpoints and agent identity
 
 Fields, beliefs and sources, installed skill/behavior state, intentions/locals/waits, children,
-spaces, timers and readiness information live in the private arena. Ordinary working-state updates
-mint no operations in a user document. The initial language has no StoreWriter operation.
+spaces, timers and readiness information live in the agent's private arena. Ordinary working-state
+updates mint no operations in a user document.
+
+### Epistemic ingestion and host boundaries
+
+VAgent provides standard read-only ingestion primitives to import external source code and data into
+ephemeral strings:
+
+```vagent-harmonized
+module std:io
+
+// Reads the entire contents of a UTF-8 host file into an ephemeral string.
+def read_file(path: Str) : Result<Str, IoError>
+
+// Reads from standard input until EOF.
+def read_stdin() : Result<Str, IoError>
+
+// Writes diagnostic text to standard output (interactive REPL / diagnostics).
+def print(text: Str) : ()
+
+// Writes diagnostic text to standard error.
+def eprint(text: Str) : ()
+```
+
+```vagent-harmonized
+module std:env
+
+// Returns process arguments passed from the host CLI.
+def args() : [Str]
+```
+
+- **Resource accounting**: File ingestion allocates an ephemeral scratch buffer capped at **64
+  MiB**. Exceeding this limit halts the operation with `ActorError::ResourceLimit`.
+- **Fuel deduction**: Epistemic I/O deducts cycle fuel via `core_.arena().consumeWork()`
+  proportional to the bytes read.
+
+### The Nelsonian persistence invariant: zero host file writes
+
+VAgent provides **zero arbitrary host filesystem write primitives** (`std:io:write_file` is strictly
+forbidden). In the Nelsonian Xanadu and ZigZag hyperstructural architecture, the traditional mutable
+filesystem is an obsolete persistence model:
+
+1. **No unversioned side effects**: Host filesystem writes forge side effects outside the Merkle
+   audit log, destroying deterministic replay and reproducibility.
+1. **Distributed sandbox security**: Allowing arbitrary file writes would create unsandboxed disk
+   escape vectors for distributed swarm actors executing under `MeshActorRuntime`.
+1. **Nelsonian permanence**: Content bytes exist exclusively on the author's append-only
+   permascroll, and structural operations exist as 64-byte `CompactOpNode` records sealed into
+   Merkle-piece-aligned segments.
+
+> [!IMPORTANT] The **single and exclusive path to permanent persistence in VAgent is Arena
+> Promotion** (`std:zigzag:promote`).
+
+```mermaid
+flowchart TD
+  subgraph Ingestion ["Epistemic Ingestion: Read-Only"]
+    FS["Host Filesystem / Stdin / CLI"] -->|std:io:read_file| EphemStr["Ephemeral Memory String"]
+    EphemStr -->|Tokenize / Parse| EphemCells["ArenaManifold: In-Memory Cells & Links"]
+  end
+
+  subgraph Forbidden ["Strictly Refused: Uncontrolled Mutation"]
+    EphemCells -.->|FORBIDDEN: write_file| RawFS["Raw Host Disk: No Provenance, No Merkle Root"]
+  end
+
+  subgraph PermPersistence ["The Single Path to Permanent Persistence"]
+    EphemCells -->|std:zigzag:promote| PromoteWalk["promote(store, parent, arena, root)"]
+    PromoteWalk --> Spool["SegmentedOpsSpool: 64-byte CompactOpNodes"]
+    PromoteWalk --> Scroll["UserPermascroll: Append-Only Primedia"]
+    Spool --> Seal["MicroversionId Seal + Ed25519 Provenance"]
+    Scroll --> Seal
+  end
+```
+
+When an agent executes `std:zigzag:promote(store, parent, arena, root)`:
+
+- Reachable cells from the in-memory `ArenaManifold` are walked and committed as 64-byte
+  `CompactOpNode` records in `SegmentedOpsSpool`.
+- String primedia is appended to the author's append-only `UserPermascroll`.
+- The commit is sealed with an immutable `MicroversionId` and cryptographically signed with Ed25519
+  keys and X.509 delegation certificates in `AUTHORSHIP.tsv`.
+- The store's working head advances to the new microversion via `repoint_head()`.
+
+### Hypertime navigation with std:hypertime
+
+VAgent exposes full hypertime branch awareness and ancestry analysis through the `std:hypertime`
+module, operating directly over first-class `MicroVersion` literals:
+
+| Function Signature                                           | Underlying Substrate Method            | Complexity             | Description                                                            |
+| :----------------------------------------------------------- | :------------------------------------- | :--------------------- | :--------------------------------------------------------------------- |
+| `lca(a: MicroVersion, b: MicroVersion) -> MicroVersion`      | `Chronofilade::lowestCommonAncestor()` | $O(\log N)$            | Lowest Common Ancestor state using binary lifting table (`up_`).       |
+| `is_ancestor_of(a: MicroVersion, d: MicroVersion) -> Bool`   | `MicroversionId::isAncestorOf()`       | $O(\text{segments})$   | True if state `a` lies along the replay path of state `d`.             |
+| `depth(v: MicroVersion) -> Int`                              | `Chronofilade::depth()`                | $O(1)$                 | Ancestral distance from genesis `@0`.                                  |
+| `jump_ancestor(v: MicroVersion, steps: Int) -> MicroVersion` | `Chronofilade::jumpAncestor()`         | $O(\log \text{steps})$ | Jumps up `steps` ancestral generations via binary lifting.             |
+| `path(v: MicroVersion) -> [MicroVersion]`                    | `MicroversionId::path()`               | $O(\text{depth})$      | Ordered list of states from `@0` to `@v` required to replay state `v`. |
+| `parent(v: MicroVersion) -> MicroVersion`                    | `MicroversionId::parent()`             | $O(1)$                 | Immediate ancestral predecessor along branch chain.                    |
+| `next(v: MicroVersion) -> MicroVersion`                      | `MicroversionId::next()`               | $O(1)$                 | Immediate successor state along same branch chain.                     |
+| `latest() -> MicroVersion`                                   | `Store::latest()`                      | $O(1)$                 | Most recently appended state in bound store spool.                     |
+| `head() -> MicroVersion`                                     | `Store::primaryCurrentVersion()`       | $O(1)$                 | Active working head version of current store branch.                   |
+| `heads() -> [MicroVersion]`                                  | `Store::currentVersions()`             | $O(1)$                 | All active concurrent working heads.                                   |
+| `repoint_head(v: MicroVersion) -> ()`                        | `Store::repointCurrentVersion()`       | $O(1)$                 | Advances store working head to `v`.                                    |
+| `to_str(v: MicroVersion) -> Str`                             | `MicroversionId::str()`                | $O(\text{segments})$   | Canonical string representation (`@2a4` $\to$ `"2a4"`).                |
+| `parse(s: Str) -> Result<MicroVersion, HypertimeError>`      | `MicroversionId::parse()`              | $O(\text{length})$     | Validates and parses external string into `MicroVersion`.              |
+
+#### Worked example: Branch reconciliation and LCA analysis
+
+```vagent-harmonized
+use std:io { print }
+use std:hypertime { lca, path, depth, is_ancestor_of }
+
+agent BranchMerger {
+  on ReconcileUnits { base: MicroVersion, feature: MicroVersion } do {
+    // Calculate lowest common ancestor in O(log N) via Chronofilade
+    let common_base := lca(base, feature)
+    print("Branch divergence point: @" ++ to_str(common_base))
+    print("Ancestral depth: " ++ int_to_str(depth(common_base)))
+
+    if is_ancestor_of(common_base, feature) then {
+      print("Feature branch is a direct descendant of common base.")
+    }
+  }
+}
+```
+
+### Dynamic image spawning
+
+VAgent allows spawning actors directly from a compiled Store microversion or cell manifold:
+
+```vagent-harmonized
+// Spawning from a sealed microversion
+let pid := spawn image(@2a4)
+
+// Spawning from an in-memory manifold root
+let worker_pid := spawn image(worker_manifold_root)
+```
+
+Dynamic image spawning dispatches through `MeshActorRuntime::spawn`, anchoring
+`ActorLineage{fold, store}` and verifying capability authorization against the caller's grant.
+
+### Checkpoints and agent migration
 
 A checkpoint explicitly promotes reachable state into the checkpoint value's own transient store; it
 is not navigation history in a visited document. It needs no live marks or choice points, a
@@ -1849,32 +2435,36 @@ The table groups words by purpose. Some words are contextual rather than reserve
 access and record keys admit words that cannot be used as bare local names. Follow the exact lexical
 rules in §8.1 of the design when choosing identifiers.
 
-| Words                                               | Role and common interaction                                                                               |
-| --------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| `module`, `import`, `as`                            | Logical module declaration/import, aliasing, event or await binding.                                      |
-| `record`, `event`, `extends`                        | Typed values/events and event/capacity subtype relationships; see [records](#records-named-values).       |
-| `agent`, `behavior`, `mount`, `unmount`             | Actor declaration and reusable in-actor contributions.                                                    |
-| `capacity`, `skill`, `native`, `implements`, `uses` | Method contract, implementation, host binding, and caller visibility.                                     |
-| `install`, `uninstall`                              | Add/remove a skill; replacing a conflict removes its whole implementation.                                |
-| `def`, `return`, `requires`, `ensures`              | Ordinary methods and pure call contracts; return exits a method, not an intention.                        |
-| `effect`, `preempts`, `within`                      | Asynchronous native work, explicit preemption contract and deadlines.                                     |
-| `var`, `let`, `none`                                | Persistent field, local declaration, optional absence.                                                    |
-| `if`, `then`, `else`, `not`                         | Success/failure control flow and local recovery; else associates with the nearest eligible construct.     |
-| `for`, `in`, `while`, `do`, `to`, `by`              | Deterministic traversal/loops and inclusive ranges; in/by also occur in message/delegation forms.         |
-| `predicate`, `key`, `believe`, `revise`, `forget`   | Typed fact declaration, replacement key and self-source updates.                                          |
-| `believes`, `from`, `findall`                       | Pure matching, source restriction and materialized matches.                                               |
-| `tell`, `untell`                                    | Staged source-bearing belief messages.                                                                    |
-| `goal`, `achieve`, `perform`, `maintain`            | Goal kinds; achieve at a call site also waits for a local/delegated goal.                                 |
-| `succeed`, `when`, `holds`, `drop`                  | Pure commitment conditions and explicit cancellation of an intention.                                     |
-| `plan`, `where`, `adopt`                            | Goal implementation, pure applicability and nonwaiting top-level adoption.                                |
-| `on`, `occurrence`, `priority`, `consume`           | Event handling/binding, within-event order, and stopping later handlers.                                  |
-| `emit`, `in`, `for`                                 | Stage an event, choose its space, restrict recipients.                                                    |
-| `question`, `answer`, `ask`                         | Typed read-only remote queries and a plan's wait for their result.                                        |
-| `await`, `as`, `within`                             | Wait for a fact or future event; capture the match and bound its lifetime.                                |
-| `spawn`, `self`, `parent`, `inner`, `outer`         | Named actors, family relationships and space context.                                                     |
-| `yield`, `fail`, `stop`, `terminate`                | Cooperate, fail computation, request a child's stop, or stop self.                                        |
-| `code`, `splice`, `static`, `cells`                 | Prefix forms — fragment literal, compile-time substitution/eval, arena path — contextual, not bare names. |
-| `run`, `reify`, `graft_*`, `learn_*`, `unlearn`     | `std:meta` special forms and mutation verbs — available only after `import std:meta`.                     |
+| Words                                                | Role and common interaction                                                                               |
+| ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `module`, `import`, `as`, `use`                      | Logical module declaration/import, aliasing, event or await binding.                                      |
+| `record`, `event`, `extends`                         | Typed values/events and event/capacity subtype relationships; see [records](#records-named-values).       |
+| `agent`, `behavior`, `mount`, `unmount`              | Actor declaration and reusable in-actor contributions.                                                    |
+| `capacity`, `skill`, `native`, `implements`, `uses`  | Method contract, implementation, host binding, and caller visibility.                                     |
+| `install`, `uninstall`                               | Add/remove a skill; replacing a conflict removes its whole implementation.                                |
+| `def`, `return`, `requires`, `ensures`               | Ordinary methods and pure call contracts; return exits a method, not an intention.                        |
+| `effect`, `preempts`, `within`                       | Asynchronous native work, explicit preemption contract and deadlines.                                     |
+| `var`, `let`, `none`, `Some`                         | Persistent field, local declaration, canonical option constructors.                                       |
+| `if`, `then`, `else`, `not`, `and`, `or`             | Pure control flow, deterministic boolean logic; else associates with nearest eligible construct.          |
+| `match`, `with`, `case`, `default`                   | Algebraic pattern matching and multi-arm plan discriminators/fallbacks.                                   |
+| `for`, `in`, `while`, `do`, `to`, `by`               | Deterministic traversal/loops and inclusive ranges; in/by also occur in message/delegation forms.         |
+| `scan`                                               | Structured string scanning block (`scan subject with { ... }`) with `subject()` and `pos()`.              |
+| `map`                                                | Tree-backed binary search tree associative container literal (`map { key => val }`).                      |
+| `@` / `@<id>`                                        | First-class `MicroVersion` literals (`@0`, `@2a4`) representing exact hypertime store commit points.      |
+| `predicate`, `key`, `believe`, `revise`, `forget`    | Typed fact declaration, replacement key and self-source updates.                                          |
+| `believes`, `from`, `findall`                        | Pure matching, source restriction and materialized matches.                                               |
+| `tell`, `untell`                                     | Staged source-bearing belief messages.                                                                    |
+| `goal`, `achieve`, `perform`, `maintain`             | Goal kinds; achieve at a call site also waits for a local/delegated goal.                                 |
+| `succeed`, `when`, `holds`, `drop`                   | Pure commitment conditions and explicit cancellation of an intention.                                     |
+| `plan`, `where`, `adopt`                             | Goal implementation, pure applicability and nonwaiting top-level adoption.                                |
+| `on`, `occurrence`, `priority`, `consume`            | Event handling/binding, within-event order, and stopping later handlers.                                  |
+| `emit`, `in`, `for`                                  | Stage an event, choose its space, restrict recipients.                                                    |
+| `question`, `answer`, `ask`                          | Typed read-only remote queries and a plan's wait for their result.                                        |
+| `await`, `as`, `within`                              | Wait for a fact or future event; capture the match and bound its lifetime.                                |
+| `spawn`, `image`, `self`, `parent`, `inner`, `outer` | Named actors, dynamic store image spawning, family relationships and space context.                       |
+| `yield`, `fail`, `stop`, `terminate`                 | Cooperate, fail computation, request a child's stop, or stop self.                                        |
+| `code`, `splice`, `static`, `cells`                  | Prefix forms — fragment literal, compile-time substitution/eval, arena path — contextual, not bare names. |
+| `run`, `reify`, `graft_*`, `learn_*`, `unlearn`      | `std:meta` special forms and mutation verbs — available only after `import std:meta`.                     |
 
 ## Initial boundaries and where to continue
 
@@ -1895,16 +2485,17 @@ Implementation is proceeding in iterations. The available user command checks so
 execute agents. You can practice writing accepted units and diagnosing rejected edits today. The
 runtime stories in this guide teach the specified language for the future executor.
 
-| Area                                     | Status and what it means for this guide                                                                                                                                                                                                |
-| ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Syntax, types and static restrictions    | Standalone-source checking is implemented as `build/vagent check FILE...`, running the full parse → resolve → expand → check pipeline. Rejected source produces diagnostics and a nonzero exit; module/template gaps are listed below. |
-| Metaprogramming                          | `code"…"`, `Code<T>`, `splice`/`static` and the `std:meta` surface check and expand today; the graft/learn/patch/genesis machinery is implemented in the runtime's integration tests, but no `vagent run` command exercises it yet.    |
-| Internal Vortex compiler                 | A scalar-expression lowering kernel passes integration tests, but it does not compile complete agent programs and has no source CLI command.                                                                                           |
-| Running an agent                         | `vagent run module/Agent(args)` is the specified future invocation, not an enabled command in the frontend-only iteration.                                                                                                             |
-| REPL, event delivery and observing turns | Require complete language lowering and the actor adapter; no interactive command language is invented here.                                                                                                                            |
-| Examples                                 | Language examples are complete source units unless marked as prose fragments. Their traces explain specified behavior; frontend acceptance alone does not verify execution.                                                            |
-| Native effects and scheduling            | Require the future adapter and explicit host bindings. Declaring a native skill does not supply a device driver.                                                                                                                       |
-| Deferred extensions                      | StoreWriter, cross-owner spaces, large-value handles, arbitrary suspension, protocol declarations and shared programs are not initial features.                                                                                        |
+| Area                                     | Status and what it means for this guide                                                                                                                                                                                                                                                                                                                                                        |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Syntax, types and static restrictions    | Standalone-source checking is implemented as `build/vagent check FILE...`, running the full parse → resolve → expand → check pipeline. Rejected source produces diagnostics and a nonzero exit; module/template gaps are listed below.                                                                                                                                                         |
+| Metaprogramming                          | `code"…"`, `Code<T>`, `splice`/`static` and the `std:meta` surface check and expand today; the graft/learn/patch/genesis machinery is implemented in the runtime's integration tests, but no `vagent run` command exercises it yet.                                                                                                                                                            |
+| Internal Vortex compiler                 | A scalar-expression lowering kernel passes integration tests, but it does not compile complete agent programs and has no source CLI command.                                                                                                                                                                                                                                                   |
+| Running an agent                         | `vagent run module/Agent(args)` is the specified future invocation, not an enabled command in the frontend-only iteration.                                                                                                                                                                                                                                                                     |
+| REPL, event delivery and observing turns | Require complete language lowering and the actor adapter; no interactive command language is invented here.                                                                                                                                                                                                                                                                                    |
+| Language harmonization (P26–P38)         | The accepted language harmonization proposals (P26–P38) specify universal 1-based indexing, canonical options (`Opt<T>`), 4-tier operators, delimiter orthogonality, algebraic pattern matching, multi-arm plans, tree-backed maps, and first-class hypertime literals. Substrate and engine primitives are implemented in Phase 1; Phase 2 compiler syntax forms are presented in this guide. |
+| Examples                                 | Language examples are complete source units unless marked as prose fragments. Their traces explain specified behavior; frontend acceptance alone does not verify execution.                                                                                                                                                                                                                    |
+| Native effects and scheduling            | Require the future adapter and explicit host bindings. Declaring a native skill does not supply a device driver.                                                                                                                                                                                                                                                                               |
+| Deferred extensions                      | StoreWriter, cross-owner spaces, large-value handles, arbitrary suspension, protocol declarations and shared programs are not initial features.                                                                                                                                                                                                                                                |
 
 Use the implementation's tests and progress record to determine which stage has passed its gates. Do
 not infer that a feature executes because its syntax is accepted. In particular, static checking

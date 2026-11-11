@@ -1,0 +1,119 @@
+module std:compiler:ast
+
+agent AstClassifier {
+  def is_literal(kind: Str): Bool {
+    if kind == "lit.int" then true
+    else if kind == "lit.bool" then true
+    else if kind == "lit.str" then true
+    else if kind == "lit.cell" then true
+    else if kind == "lit.float" then true
+    else if kind == "lit.record" then true
+    else false
+  }
+
+  def is_expr(kind: Str): Bool {
+    if is_literal(kind) then true
+    else if kind == "ident" then true
+    else if kind == "unary" then true
+    else if kind == "binary" then true
+    else if kind == "call" then true
+    else if kind == "dot" then true
+    else if kind == "index" then true
+    else if kind == "if" then true
+    else if kind == "block" then true
+    else if kind == "assign" then true
+    else if kind == "match" then true
+    else if kind == "scan" then true
+    else if kind == "static" then true
+    else if kind == "splice" then true
+    else if kind == "range" then true
+    else false
+  }
+
+  def is_stmt(kind: Str): Bool {
+    if kind == "let" then true
+    else if kind == "var" then true
+    else if kind == "emit" then true
+    else if kind == "tell" then true
+    else if kind == "untell" then true
+    else if kind == "adopt" then true
+    else if kind == "spawn" then true
+    else if kind == "await" then true
+    else if kind == "return" then true
+    else if kind == "fail" then true
+    else false
+  }
+
+  def is_decl(kind: Str): Bool {
+    if kind == "decl.agent" then true
+    else if kind == "decl.event" then true
+    else if kind == "decl.plan" then true
+    else if kind == "decl.belief" then true
+    else if kind == "decl.field" then true
+    else if kind == "decl.fn" then true
+    else if kind == "decl.param" then true
+    else if kind == "decl.goal" then true
+    else if kind == "decl.handler" then true
+    else if kind == "decl.method" then true
+    else if kind == "decl.behavior" then true
+    else if kind == "decl.skill" then true
+    else if kind == "decl.record" then true
+    else if kind == "program" then true
+    else if kind == "import" then true
+    else false
+  }
+
+  def is_control_flow(kind: Str): Bool {
+    if kind == "if" then true
+    else if kind == "match" then true
+    else if kind == "scan" then true
+    else if kind == "return" then true
+    else if kind == "fail" then true
+    else false
+  }
+
+  def is_meta_expr(kind: Str): Bool {
+    if kind == "static" then true
+    else if kind == "splice" then true
+    else if kind == "scan" then true
+    else false
+  }
+
+  def is_container_node(kind: Str): Bool {
+    if kind == "program" then true
+    else if kind == "decl.agent" then true
+    else if kind == "block" then true
+    else false
+  }
+
+  def kind_tag_id(kind: Str): Int {
+    if kind == "lit.int" then 0
+    else if kind == "lit.bool" then 1
+    else if kind == "lit.str" then 2
+    else if kind == "lit.cell" then 3
+    else if kind == "ident" then 4
+    else if kind == "unary" then 5
+    else if kind == "binary" then 6
+    else if kind == "call" then 7
+    else if kind == "dot" then 8
+    else if kind == "index" then 9
+    else if kind == "if" then 10
+    else if kind == "block" then 11
+    else if kind == "assign" then 12
+    else if kind == "match" then 13
+    else if kind == "scan" then 14
+    else if kind == "static" then 15
+    else if kind == "splice" then 16
+    else if kind == "range" then 17
+    else if kind == "program" then 18
+    else if kind == "import" then 19
+    else if kind == "decl.agent" then 20
+    else if kind == "decl.event" then 21
+    else if kind == "decl.plan" then 22
+    else if kind == "decl.belief" then 23
+    else if kind == "decl.fn" then 24
+    else if kind == "decl.param" then 25
+    else if kind == "decl.field" then 26
+    else -1
+  }
+}

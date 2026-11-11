@@ -34,16 +34,17 @@ TEST(VagentLexerTest, ReservedAndContextualWordsStayDistinct) {
 
 TEST(VagentLexerTest, EveryReservedWordInTheSpecificationIsClassified) {
   constexpr std::string_view words[] = {
-      "achieve",   "adopt",   "agent",      "answer",    "ask",      "await",
-      "behavior",  "believe", "believes",   "by",        "capacity", "consume",
-      "def",       "do",      "drop",       "effect",    "else",     "emit",
-      "event",     "extends", "fail",       "findall",   "for",      "forget",
-      "goal",      "if",      "implements", "import",    "in",       "install",
-      "key",       "let",     "mount",      "native",    "none",     "not",
-      "on",        "plan",    "predicate",  "question",  "record",   "return",
-      "revise",    "self",    "skill",      "spawn",     "stop",     "tell",
-      "terminate", "then",    "to",         "uninstall", "unmount",  "untell",
-      "uses",      "var",     "where",      "while",     "within",   "yield"};
+      "achieve",   "adopt",     "agent",    "answer",  "ask",        "await",
+      "behavior",  "believe",   "believes", "by",      "capacity",   "case",
+      "consume",   "def",       "default",  "do",      "drop",       "effect",
+      "else",      "emit",      "event",    "extends", "fail",       "findall",
+      "for",       "forget",    "goal",     "if",      "implements", "import",
+      "in",        "install",   "key",      "let",     "Map",        "match",
+      "mount",     "native",    "none",     "not",     "on",         "plan",
+      "predicate", "question",  "record",   "return",  "revise",     "self",
+      "skill",     "spawn",     "stop",     "tell",    "terminate",  "then",
+      "to",        "uninstall", "unmount",  "untell",  "uses",       "var",
+      "where",     "while",     "with",     "within",  "yield"};
   for (const auto word : words) EXPECT_TRUE(isReservedWord(word)) << word;
   EXPECT_FALSE(isReservedWord("maintain"));
   EXPECT_FALSE(isReservedWord("ensures"));
@@ -65,7 +66,7 @@ TEST(VagentLexerTest, OperatorsUseLongestMatch) {
                 TokenKind::Bang,           TokenKind::Less,
                 TokenKind::LessEqual,      TokenKind::Greater,
                 TokenKind::GreaterEqual,   TokenKind::Ampersand,
-                TokenKind::Alternation,    TokenKind::Scan,
+                TokenKind::Alternation,    TokenKind::Question,
                 TokenKind::Colon,          TokenKind::Dot,
                 TokenKind::Comma,          TokenKind::Semicolon,
                 TokenKind::OpenParen,      TokenKind::CloseParen,
@@ -204,7 +205,7 @@ TEST(VagentLexerTest, MalformedStringsAreRefused) {
 
 TEST(VagentLexerTest, UnsupportedCharactersAndOperatorsAreRefused) {
   constexpr std::string_view invalid[] = {
-      "$name", "@", "'single quotes'", "=", "&&", "||", "~="};
+      "$name", "'single quotes'", "=", "&&", "||", "~="};
   for (const auto source : invalid) {
     SCOPED_TRACE(source);
     auto result = Lexer(source).tokenize();
@@ -262,6 +263,41 @@ TEST(VagentLexerTest, UnterminatedPrefixedStringIsLexicalError) {
   auto result = Lexer(R"(cells"##)").tokenize();
   ASSERT_FALSE(result);
   EXPECT_EQ(result.error().code, DiagnosticCode::Lexical);
+}
+
+TEST(VagentLexerTest, TokenizesHarmonizedOperatorsAndKeywords) {
+  auto result =
+      Lexer("... => ?. ?? @ ?target Map match with default case").tokenize();
+  ASSERT_TRUE(result) << result.error().detail;
+  EXPECT_EQ(
+      kinds(*result),
+      (std::vector<TokenKind>{
+          TokenKind::Ellipsis, TokenKind::FatArrow, TokenKind::QuestionDot,
+          TokenKind::DoubleQuestion, TokenKind::At, TokenKind::LogicVariable,
+          TokenKind::KwMap, TokenKind::KwMatch, TokenKind::KwWith,
+          TokenKind::KwDefault, TokenKind::KwCase, TokenKind::EndOfFile}));
+  EXPECT_EQ((*result)[5].stringValue, "target");
+  EXPECT_EQ((*result)[5].text, "?target");
+}
+
+TEST(VagentLexerTest, MicroVersionLiteralsValidation) {
+  auto head = Lexer("@HEAD @head @0 @1 @2a4").tokenize();
+  ASSERT_TRUE(head) << head.error().detail;
+  ASSERT_EQ(head->size(), 6U);
+  EXPECT_EQ((*head)[0].kind, TokenKind::MicroVersionLiteral);
+  EXPECT_EQ((*head)[0].stringValue, "HEAD");
+  EXPECT_EQ((*head)[1].kind, TokenKind::MicroVersionLiteral);
+  EXPECT_EQ((*head)[1].stringValue, "HEAD");
+  EXPECT_EQ((*head)[2].kind, TokenKind::MicroVersionLiteral);
+  EXPECT_EQ((*head)[2].stringValue, "0");
+  EXPECT_EQ((*head)[3].kind, TokenKind::MicroVersionLiteral);
+  EXPECT_EQ((*head)[3].stringValue, "1");
+  EXPECT_EQ((*head)[4].kind, TokenKind::MicroVersionLiteral);
+  EXPECT_EQ((*head)[4].stringValue, "2a4");
+
+  auto invalid = Lexer("@xyz_not_valid").tokenize();
+  ASSERT_FALSE(invalid);
+  EXPECT_EQ(invalid.error().code, DiagnosticCode::Lexical);
 }
 
 } // namespace

@@ -1,0 +1,130 @@
+module std:compiler:checker
+
+import std:meta
+import std:compiler:ast
+
+agent AstChecker {
+  var error_msg: Str := ""
+  var pure_val: Int := 1
+  var closed_val: Int := 1
+  var capture_count: Int := 0
+
+  def is_reserved_param(name: Str): Bool {
+    if name == "result" then true
+    else if name == "produced" then true
+    else if name == "pure" then true
+    else if name == "closed" then true
+    else if name == "arity" then true
+    else false
+  }
+
+  def is_meta_reserved(name: Str): Bool {
+    if name == "reify" then true
+    else if name == "validate" then true
+    else if name == "register" then true
+    else if name == "register_all" then true
+    else if name == "registration" then true
+    else if name == "dim_named" then true
+    else if name == "as_body" then true
+    else if name == "head_of" then true
+    else if name == "var_of" then true
+    else if name == "make_cell" then true
+    else if name == "boot_writer" then true
+    else if name == "boot_linker" then true
+    else if name == "join_batch" then true
+    else if name == "build_fragment" then true
+    else if name == "compile_fragment" then true
+    else false
+  }
+
+  def is_numeric(t: Str): Bool {
+    if t == "Int" then true
+    else if t == "Float" then true
+    else false
+  }
+
+  def is_comparison_op(op: Str): Bool {
+    if op == "<" then true
+    else if op == "<=" then true
+    else if op == ">" then true
+    else if op == ">=" then true
+    else if op == "==" then true
+    else if op == "!=" then true
+    else false
+  }
+
+  def is_arithmetic_op(op: Str): Bool {
+    if op == "+" then true
+    else if op == "-" then true
+    else if op == "*" then true
+    else if op == "/" then true
+    else if op == "%" then true
+    else false
+  }
+
+  def is_bitwise_op(op: Str): Bool {
+    if op == "&" then true
+    else if op == "|" then true
+    else if op == "^" then true
+    else if op == "<<" then true
+    else if op == ">>" then true
+    else false
+  }
+
+  def is_impure_call(name: Str): Bool {
+    if name == "make_cell" then true
+    else if name == "register" then true
+    else if name == "register_all" then true
+    else if name == "join_batch" then true
+    else if name == "build_fragment" then true
+    else if name == "compile_fragment" then true
+    else if name == "set_values" then true
+    else if name == "set_var" then true
+    else false
+  }
+
+  def validate_param_name(name: Str, meta_imported: Bool): Str {
+    if is_reserved_param(name) == true then "reserved_descriptor_key"
+    else if meta_imported == true then {
+      if is_meta_reserved(name) == true then "unimported_meta_keyword"
+      else "ok"
+    } else "ok"
+  }
+
+  def is_subtype(actual: Str, expected: Str): Bool {
+    if actual == expected then true
+    else if expected == "Cell" then true
+    else if actual == "Bottom" then true
+    else false
+  }
+
+  def infer_binary_type(op: Str, left: Str, right: Str): Str {
+    if is_arithmetic_op(op) == true then {
+      if is_numeric(left) == true then {
+        if is_numeric(right) == true then {
+          if left == "Float" then "Float"
+          else if right == "Float" then "Float"
+          else "Int"
+        } else "type_error"
+      } else "type_error"
+    } else if is_comparison_op(op) == true then {
+      if left == right | left == "Cell" | right == "Cell" then "Bool"
+      else "type_error"
+    } else if is_bitwise_op(op) == true then {
+      if left == "Int" then {
+        if right == "Int" then "Int"
+        else "type_error"
+      } else "type_error"
+    } else "unknown_operator"
+  }
+
+  def infer_unary_type(op: Str, arg: Str): Str {
+    if op == "-" then {
+      if is_numeric(arg) == true then arg
+      else "type_error"
+    } else if op == "not" then {
+      if arg == "Bool" then "Bool"
+      else "type_error"
+    } else "unknown_operator"
+  }
+}

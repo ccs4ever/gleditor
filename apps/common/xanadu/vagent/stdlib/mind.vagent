@@ -1,0 +1,299 @@
+module std:agent:mind
+
+import std:meta
+
+agent AgentMind {
+  var active_intentions: Int := 0
+  var total_beliefs: Int := 0
+  var error_msg: Str := ""
+  var current_turn: Int := 0
+
+  // Belief base: 8 structured relational fact slots
+  var b1_active: Bool := false
+  var b1_pred: Str := ""
+  var b1_subj: Str := ""
+  var b1_obj: Str := ""
+  var b1_weight: Int := 0
+  var b1_source: Str := ""
+
+  var b2_active: Bool := false
+  var b2_pred: Str := ""
+  var b2_subj: Str := ""
+  var b2_obj: Str := ""
+  var b2_weight: Int := 0
+  var b2_source: Str := ""
+
+  var b3_active: Bool := false
+  var b3_pred: Str := ""
+  var b3_subj: Str := ""
+  var b3_obj: Str := ""
+  var b3_weight: Int := 0
+  var b3_source: Str := ""
+
+  var b4_active: Bool := false
+  var b4_pred: Str := ""
+  var b4_subj: Str := ""
+  var b4_obj: Str := ""
+  var b4_weight: Int := 0
+  var b4_source: Str := ""
+
+  var b5_active: Bool := false
+  var b5_pred: Str := ""
+  var b5_subj: Str := ""
+  var b5_obj: Str := ""
+  var b5_weight: Int := 0
+  var b5_source: Str := ""
+
+  var b6_active: Bool := false
+  var b6_pred: Str := ""
+  var b6_subj: Str := ""
+  var b6_obj: Str := ""
+  var b6_weight: Int := 0
+  var b6_source: Str := ""
+
+  var b7_active: Bool := false
+  var b7_pred: Str := ""
+  var b7_subj: Str := ""
+  var b7_obj: Str := ""
+  var b7_weight: Int := 0
+  var b7_source: Str := ""
+
+  var b8_active: Bool := false
+  var b8_pred: Str := ""
+  var b8_subj: Str := ""
+  var b8_obj: Str := ""
+  var b8_weight: Int := 0
+  var b8_source: Str := ""
+
+  // Percept staging inbox
+  var inbox_name: Str := ""
+  var inbox_payload: Str := ""
+  var inbox_corr: Str := ""
+  var inbox_sender: Str := ""
+  var inbox_occupied: Bool := false
+  var op_success: Bool := false
+
+  // -------------------------------------------------------------------------
+  // Belief Base Operations
+  // -------------------------------------------------------------------------
+
+  def assert_fact(pred: Str, subj: Str, obj: Str, weight: Int, source: Str): Int {
+    if !b1_active then {
+      b1_active := true
+      b1_pred := pred
+      b1_subj := subj
+      b1_obj := obj
+      b1_weight := weight
+      b1_source := source
+      total_beliefs := total_beliefs + 1
+      1
+    } else if !b2_active then {
+      b2_active := true
+      b2_pred := pred
+      b2_subj := subj
+      b2_obj := obj
+      b2_weight := weight
+      b2_source := source
+      total_beliefs := total_beliefs + 1
+      2
+    } else if !b3_active then {
+      b3_active := true
+      b3_pred := pred
+      b3_subj := subj
+      b3_obj := obj
+      b3_weight := weight
+      b3_source := source
+      total_beliefs := total_beliefs + 1
+      3
+    } else if !b4_active then {
+      b4_active := true
+      b4_pred := pred
+      b4_subj := subj
+      b4_obj := obj
+      b4_weight := weight
+      b4_source := source
+      total_beliefs := total_beliefs + 1
+      4
+    } else if !b5_active then {
+      b5_active := true
+      b5_pred := pred
+      b5_subj := subj
+      b5_obj := obj
+      b5_weight := weight
+      b5_source := source
+      total_beliefs := total_beliefs + 1
+      5
+    } else if !b6_active then {
+      b6_active := true
+      b6_pred := pred
+      b6_subj := subj
+      b6_obj := obj
+      b6_weight := weight
+      b6_source := source
+      total_beliefs := total_beliefs + 1
+      6
+    } else if !b7_active then {
+      b7_active := true
+      b7_pred := pred
+      b7_subj := subj
+      b7_obj := obj
+      b7_weight := weight
+      b7_source := source
+      total_beliefs := total_beliefs + 1
+      7
+    } else if !b8_active then {
+      b8_active := true
+      b8_pred := pred
+      b8_subj := subj
+      b8_obj := obj
+      b8_weight := weight
+      b8_source := source
+      total_beliefs := total_beliefs + 1
+      8
+    } else 0
+  }
+
+  def retract_fact(pred: Str, subj: Str, obj: Str): Bool {
+    op_success := false
+    if b1_active & b1_pred == pred & b1_subj == subj & b1_obj == obj then {
+      b1_active := false
+      total_beliefs := total_beliefs - 1
+      op_success := true
+    }
+    if b2_active & b2_pred == pred & b2_subj == subj & b2_obj == obj then {
+      b2_active := false
+      total_beliefs := total_beliefs - 1
+      op_success := true
+    }
+    if b3_active & b3_pred == pred & b3_subj == subj & b3_obj == obj then {
+      b3_active := false
+      total_beliefs := total_beliefs - 1
+      op_success := true
+    }
+    if b4_active & b4_pred == pred & b4_subj == subj & b4_obj == obj then {
+      b4_active := false
+      total_beliefs := total_beliefs - 1
+      op_success := true
+    }
+    if b5_active & b5_pred == pred & b5_subj == subj & b5_obj == obj then {
+      b5_active := false
+      total_beliefs := total_beliefs - 1
+      op_success := true
+    }
+    if b6_active & b6_pred == pred & b6_subj == subj & b6_obj == obj then {
+      b6_active := false
+      total_beliefs := total_beliefs - 1
+      op_success := true
+    }
+    if b7_active & b7_pred == pred & b7_subj == subj & b7_obj == obj then {
+      b7_active := false
+      total_beliefs := total_beliefs - 1
+      op_success := true
+    }
+    if b8_active & b8_pred == pred & b8_subj == subj & b8_obj == obj then {
+      b8_active := false
+      total_beliefs := total_beliefs - 1
+      op_success := true
+    }
+    op_success
+  }
+
+  def holds_fact(pred: Str, subj: Str, obj: Str): Bool {
+    if b1_active & b1_pred == pred & b1_subj == subj & b1_obj == obj then true
+    else if b2_active & b2_pred == pred & b2_subj == subj & b2_obj == obj then true
+    else if b3_active & b3_pred == pred & b3_subj == subj & b3_obj == obj then true
+    else if b4_active & b4_pred == pred & b4_subj == subj & b4_obj == obj then true
+    else if b5_active & b5_pred == pred & b5_subj == subj & b5_obj == obj then true
+    else if b6_active & b6_pred == pred & b6_subj == subj & b6_obj == obj then true
+    else if b7_active & b7_pred == pred & b7_subj == subj & b7_obj == obj then true
+    else if b8_active & b8_pred == pred & b8_subj == subj & b8_obj == obj then true
+    else false
+  }
+
+  def match_belief(pattern: Str, fact: Str): Bool {
+    if pattern == "*" then true
+    else if pattern == fact then true
+    else false
+  }
+
+  def match_pattern_triple(p_pred: Str, p_subj: Str, p_obj: Str, f_pred: Str, f_subj: Str, f_obj: Str): Bool {
+    (match_belief(p_pred, f_pred)) & (match_belief(p_subj, f_subj)) & (match_belief(p_obj, f_obj))
+  }
+
+  def query_pattern(p_pred: Str, p_subj: Str, p_obj: Str): Bool {
+    if b1_active & match_pattern_triple(p_pred, p_subj, p_obj, b1_pred, b1_subj, b1_obj) then true
+    else if b2_active & match_pattern_triple(p_pred, p_subj, p_obj, b2_pred, b2_subj, b2_obj) then true
+    else if b3_active & match_pattern_triple(p_pred, p_subj, p_obj, b3_pred, b3_subj, b3_obj) then true
+    else if b4_active & match_pattern_triple(p_pred, p_subj, p_obj, b4_pred, b4_subj, b4_obj) then true
+    else if b5_active & match_pattern_triple(p_pred, p_subj, p_obj, b5_pred, b5_subj, b5_obj) then true
+    else if b6_active & match_pattern_triple(p_pred, p_subj, p_obj, b6_pred, b6_subj, b6_obj) then true
+    else if b7_active & match_pattern_triple(p_pred, p_subj, p_obj, b7_pred, b7_subj, b7_obj) then true
+    else if b8_active & match_pattern_triple(p_pred, p_subj, p_obj, b8_pred, b8_subj, b8_obj) then true
+    else false
+  }
+
+  def query_belief_object(pred: Str, subj: Str): Str {
+    if b1_active & b1_pred == pred & b1_subj == subj then b1_obj
+    else if b2_active & b2_pred == pred & b2_subj == subj then b2_obj
+    else if b3_active & b3_pred == pred & b3_subj == subj then b3_obj
+    else if b4_active & b4_pred == pred & b4_subj == subj then b4_obj
+    else if b5_active & b5_pred == pred & b5_subj == subj then b5_obj
+    else if b6_active & b6_pred == pred & b6_subj == subj then b6_obj
+    else if b7_active & b7_pred == pred & b7_subj == subj then b7_obj
+    else if b8_active & b8_pred == pred & b8_subj == subj then b8_obj
+    else ""
+  }
+
+  // -------------------------------------------------------------------------
+  // Percept & Event Ingestion
+  // -------------------------------------------------------------------------
+
+  def stage_percept(name: Str, payload: Str, corr: Str, sender: Str): Bool {
+    inbox_name := name
+    inbox_payload := payload
+    inbox_corr := corr
+    inbox_sender := sender
+    inbox_occupied := true
+    true
+  }
+
+  def clear_percept(): Bool {
+    inbox_name := ""
+    inbox_payload := ""
+    inbox_corr := ""
+    inbox_sender := ""
+    inbox_occupied := false
+    true
+  }
+
+  def can_trigger_plan(event_tag: Str, plan_event: Str): Bool {
+    if event_tag == plan_event then true
+    else false
+  }
+
+  // -------------------------------------------------------------------------
+  // Goal Maintenance Condition Checks
+  // -------------------------------------------------------------------------
+
+  def evaluate_maintain_condition(cond_pred: Str, cond_subj: Str, cond_obj: Str): Bool {
+    holds_fact(cond_pred, cond_subj, cond_obj)
+  }
+
+  def should_trigger_restoration(cond_pred: Str, cond_subj: Str, cond_obj: Str): Bool {
+    !evaluate_maintain_condition(cond_pred, cond_subj, cond_obj)
+  }
+
+  def step_cycle(pending_events: Int): Int {
+    if pending_events > 0 then {
+      active_intentions := active_intentions + pending_events
+      pending_events
+    } else 0
+  }
+
+  def retire_intention(): Int {
+    if active_intentions > 0 then {
+      active_intentions := active_intentions - 1
+      active_intentions
+    } else 0
+  }
+}

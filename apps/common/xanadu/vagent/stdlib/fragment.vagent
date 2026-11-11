@@ -1,0 +1,100 @@
+module std:compiler:fragment
+
+import std:meta
+import std:compiler:ast
+import std:compiler:emitter
+
+agent FragmentAssembler {
+  var error_msg: Str := ""
+  var registered_count: Int := 0
+  var current_fragment_label: Str := ""
+  var entry_opcode_id: Int := 0
+  var result_slot_id: Int := 0
+  var produced_slot_id: Int := 0
+  var result_type_name: Str := "Int"
+  var is_pure: Bool := true
+  var is_closed: Bool := true
+  var parameter_count: Int := 0
+  var internal_refs_count: Int := 0
+  var recipe_tuples_count: Int := 0
+
+  def is_pure_descriptor(pure_flag: Int): Bool {
+    if pure_flag != 0 then true else false
+  }
+
+  def is_closed_descriptor(closed_flag: Int): Bool {
+    if closed_flag != 0 then true else false
+  }
+
+  def configure_descriptor(label: Str, entry: Int, res_slot: Int, prod_slot: Int, res_type: Str, pure_val: Int, closed_val: Int, arity_val: Int): Bool {
+    current_fragment_label := label
+    entry_opcode_id := entry
+    result_slot_id := res_slot
+    produced_slot_id := prod_slot
+    result_type_name := res_type
+    is_pure := is_pure_descriptor(pure_val)
+    is_closed := is_closed_descriptor(closed_val)
+    parameter_count := arity_val
+    true
+  }
+
+  def add_internal_ref(ref_id: Int): Int {
+    internal_refs_count := internal_refs_count + 1
+    internal_refs_count
+  }
+
+  def add_recipe_link_tuple(src_slot: Int, dim_name: Str, dst_slot: Int): Int {
+    recipe_tuples_count := recipe_tuples_count + 1
+    recipe_tuples_count
+  }
+
+  def validate_descriptor_invariants(): Bool {
+    if current_fragment_label == "" then {
+      error_msg := "fragment label cannot be empty"
+      false
+    } else if entry_opcode_id < 0 then {
+      error_msg := "invalid entry opcode id"
+      false
+    } else if result_slot_id < 0 then {
+      error_msg := "invalid result slot id"
+      false
+    } else true
+  }
+
+  def build_and_register(spec: Cell): Opt<Cell> {
+    let head := build_fragment(spec)
+    if head != none then {
+      let val := validate(head)
+      if val then {
+        register(head)
+        registered_count := registered_count + 1
+        head
+      } else {
+        error_msg := "validation failed"
+        none
+      }
+    } else {
+      error_msg := "build_fragment failed"
+      none
+    }
+  }
+
+  def status_of(h: Cell): Str {
+    registration(h)
+  }
+
+  def reset(): Int {
+    error_msg := ""
+    current_fragment_label := ""
+    entry_opcode_id := 0
+    result_slot_id := 0
+    produced_slot_id := 0
+    result_type_name := "Int"
+    is_pure := true
+    is_closed := true
+    parameter_count := 0
+    internal_refs_count := 0
+    recipe_tuples_count := 0
+    0
+  }
+}

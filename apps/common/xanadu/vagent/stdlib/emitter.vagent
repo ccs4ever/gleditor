@@ -1,0 +1,263 @@
+module std:compiler:emitter
+
+import std:meta
+import std:compiler:ast
+
+agent AstEmitter {
+  var error_msg: Str := ""
+  var next_slot: Int := 0
+  var next_instruction_id: Int := 1
+  var instruction_count: Int := 0
+  var entry_instruction: Int := 0
+  var last_instruction: Int := 0
+
+  // -------------------------------------------------------------------------
+  // Opcode Taxonomy (57 Vortex Opcodes)
+  // -------------------------------------------------------------------------
+
+  def opcode_kind(name: Str): Int {
+    if name == "#ADD" then 0
+    else if name == "#SUB" then 1
+    else if name == "#MUL" then 2
+    else if name == "#DIV" then 3
+    else if name == "#DIVMOD" then 4
+    else if name == "#MOD" then 5
+    else if name == "#NEG" then 6
+    else if name == "#EQ" then 7
+    else if name == "#NEQ" then 8
+    else if name == "#LT" then 9
+    else if name == "#LTE" then 10
+    else if name == "#GT" then 11
+    else if name == "#GTE" then 12
+    else if name == "#AND" then 13
+    else if name == "#OR" then 14
+    else if name == "#NOT" then 15
+    else if name == "#LINK" then 16
+    else if name == "#BREAK" then 17
+    else if name == "#NEW" then 18
+    else if name == "#VALUE" then 19
+    else if name == "#SPLICE" then 20
+    else if name == "#CLONE" then 21
+    else if name == "#JUMP" then 22
+    else if name == "#BRANCH" then 23
+    else if name == "#CALL" then 24
+    else if name == "#RETURN" then 25
+    else if name == "#HALT" then 26
+    else if name == "#NOP" then 27
+    else if name == "#BIND" then 28
+    else if name == "#RESOLVE" then 29
+    else if name == "#ASSERT" then 30
+    else if name == "#ABS" then 31
+    else if name == "#MIN" then 32
+    else if name == "#MAX" then 33
+    else if name == "#CLAMP" then 34
+    else if name == "#TRIM" then 35
+    else if name == "#TOLOWER" then 36
+    else if name == "#TOUPPER" then 37
+    else if name == "#STRLEN" then 38
+    else if name == "#BYTEAT" then 39
+    else if name == "#STRSLICE" then 40
+    else if name == "#INTTOSTR" then 41
+    else if name == "#STRTOINT" then 42
+    else if name == "#UNIFY" then 43
+    else if name == "#ISVAR" then 44
+    else if name == "#MAKEVAR" then 45
+    else if name == "#MAKETERM" then 46
+    else if name == "#DEREF" then 47
+    else if name == "#CHOICE" then 48
+    else if name == "#FAIL" then 49
+    else if name == "#CUT" then 50
+    else if name == "#CHOICEDEPTH" then 51
+    else if name == "#LINKED" then 52
+    else if name == "#FIND" then 53
+    else if name == "#FIELDSET" then 54
+    else if name == "#RUNCALL" then 55
+    else if name == "#RUNRESUME" then 56
+    else 0
+  }
+
+  def opcode_name(kind: Int): Str {
+    if kind == 0 then "#ADD"
+    else if kind == 1 then "#SUB"
+    else if kind == 2 then "#MUL"
+    else if kind == 3 then "#DIV"
+    else if kind == 4 then "#DIVMOD"
+    else if kind == 5 then "#MOD"
+    else if kind == 6 then "#NEG"
+    else if kind == 7 then "#EQ"
+    else if kind == 8 then "#NEQ"
+    else if kind == 9 then "#LT"
+    else if kind == 10 then "#LTE"
+    else if kind == 11 then "#GT"
+    else if kind == 12 then "#GTE"
+    else if kind == 13 then "#AND"
+    else if kind == 14 then "#OR"
+    else if kind == 15 then "#NOT"
+    else if kind == 16 then "#LINK"
+    else if kind == 17 then "#BREAK"
+    else if kind == 18 then "#NEW"
+    else if kind == 19 then "#VALUE"
+    else if kind == 20 then "#SPLICE"
+    else if kind == 21 then "#CLONE"
+    else if kind == 22 then "#JUMP"
+    else if kind == 23 then "#BRANCH"
+    else if kind == 24 then "#CALL"
+    else if kind == 25 then "#RETURN"
+    else if kind == 26 then "#HALT"
+    else if kind == 27 then "#NOP"
+    else if kind == 28 then "#BIND"
+    else if kind == 29 then "#RESOLVE"
+    else if kind == 30 then "#ASSERT"
+    else if kind == 31 then "#ABS"
+    else if kind == 32 then "#MIN"
+    else if kind == 33 then "#MAX"
+    else if kind == 34 then "#CLAMP"
+    else if kind == 35 then "#TRIM"
+    else if kind == 36 then "#TOLOWER"
+    else if kind == 37 then "#TOUPPER"
+    else if kind == 38 then "#STRLEN"
+    else if kind == 39 then "#BYTEAT"
+    else if kind == 40 then "#STRSLICE"
+    else if kind == 41 then "#INTTOSTR"
+    else if kind == 42 then "#STRTOINT"
+    else if kind == 43 then "#UNIFY"
+    else if kind == 44 then "#ISVAR"
+    else if kind == 45 then "#MAKEVAR"
+    else if kind == 46 then "#MAKETERM"
+    else if kind == 47 then "#DEREF"
+    else if kind == 48 then "#CHOICE"
+    else if kind == 49 then "#FAIL"
+    else if kind == 50 then "#CUT"
+    else if kind == 51 then "#CHOICEDEPTH"
+    else if kind == 52 then "#LINKED"
+    else if kind == 53 then "#FIND"
+    else if kind == 54 then "#FIELDSET"
+    else if kind == 55 then "#RUNCALL"
+    else if kind == 56 then "#RUNRESUME"
+    else "#ADD"
+  }
+
+  def emit_binary_opcode(tag: Str): Str {
+    if tag == "+" then "#ADD"
+    else if tag == "-" then "#SUB"
+    else if tag == "*" then "#MUL"
+    else if tag == "/" then "#DIV"
+    else if tag == "%" then "#MOD"
+    else if tag == "==" then "#EQ"
+    else if tag == "!=" then "#NEQ"
+    else if tag == "<" then "#LT"
+    else if tag == "<=" then "#LTE"
+    else if tag == ">" then "#GT"
+    else if tag == ">=" then "#GTE"
+    else if tag == "&" then "#AND"
+    else if tag == "|" then "#OR"
+    else if tag == "&&" then "#AND"
+    else if tag == "||" then "#OR"
+    else "#ADD"
+  }
+
+  def emit_unary_opcode(tag: Str): Str {
+    if tag == "-" then "#NEG"
+    else "#NOT"
+  }
+
+  def is_jump_opcode(kind: Int): Bool {
+    if kind == 22 then true
+    else if kind == 23 then true
+    else false
+  }
+
+  def is_terminal_opcode(kind: Int): Bool {
+    if kind == 25 then true
+    else if kind == 26 then true
+    else false
+  }
+
+  // -------------------------------------------------------------------------
+  // Slot / Register Allocation
+  // -------------------------------------------------------------------------
+
+  def alloc_slot(): Int {
+    let s := next_slot
+    next_slot := next_slot + 1
+    s
+  }
+
+  def reset_slots(): Int {
+    next_slot := 0
+    instruction_count := 0
+    next_instruction_id := 1
+    entry_instruction := 0
+    last_instruction := 0
+    0
+  }
+
+  // -------------------------------------------------------------------------
+  // Instruction Emission Methods
+  // -------------------------------------------------------------------------
+
+  def emit_instruction(kind: Int, out_slot: Int): Int {
+    let id := next_instruction_id
+    next_instruction_id := next_instruction_id + 1
+    instruction_count := instruction_count + 1
+    if entry_instruction == 0 then entry_instruction := id
+    last_instruction := id
+    id
+  }
+
+  def emit_binary(tag: Str, left_slot: Int, right_slot: Int): Int {
+    let op_name := emit_binary_opcode(tag)
+    let kind := opcode_kind(op_name)
+    let out_slot := alloc_slot()
+    emit_instruction(kind, out_slot)
+    out_slot
+  }
+
+  def emit_unary(tag: Str, in_slot: Int): Int {
+    let op_name := emit_unary_opcode(tag)
+    let kind := opcode_kind(op_name)
+    let out_slot := alloc_slot()
+    emit_instruction(kind, out_slot)
+    out_slot
+  }
+
+  def emit_resolve_param(param_name: Str): Int {
+    let out_slot := alloc_slot()
+    emit_instruction(29, out_slot) // 29 = #RESOLVE
+    out_slot
+  }
+
+  def emit_scan_success_cut(): Int {
+    // Proposal P19: Emit #CUT on scan success to protect AST and bytecode allocations
+    emit_instruction(50, 0) // 50 = #CUT
+  }
+
+  def emit_epilogue_and_return(result_slot: Int, produced_flag: Bool): Int {
+    let prod_slot := alloc_slot()
+    emit_instruction(19, prod_slot) // 19 = #VALUE sets produced
+    emit_instruction(25, result_slot) // 25 = #RETURN
+    result_slot
+  }
+
+  def emit_branch(cond_slot: Int, target_label: Int): Int {
+    emit_instruction(23, cond_slot) // 23 = #BRANCH
+  }
+
+  def emit_jump(target_label: Int): Int {
+    emit_instruction(22, 0) // 22 = #JUMP
+  }
+
+  def emit_member_find(subject_slot: Int, field_name: Str): Int {
+    let out_slot := alloc_slot()
+    emit_instruction(53, out_slot) // 53 = #FIND
+    out_slot
+  }
+
+  def emit_member_set(subject_slot: Int, field_name: Str, val_slot: Int): Int {
+    emit_instruction(54, val_slot) // 54 = #FIELDSET
+  }
+
+  def build_spec(spec: Cell): Opt<Cell> {
+    build_fragment(spec)
+  }
+}

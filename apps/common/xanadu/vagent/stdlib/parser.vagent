@@ -1,0 +1,176 @@
+module std:compiler:parser
+
+import std:meta
+import std:compiler:ast
+import std:goal (tab, move, many, match, upto, any, pos)
+
+agent AstParser {
+  var error_msg: Str := ""
+  var cur_pos: Int := 0
+  var parsed_decl_count: Int := 0
+  var parsed_stmt_count: Int := 0
+  var parsed_expr_count: Int := 0
+
+  // -------------------------------------------------------------------------
+  // Lexical & Character Scanners (using std:goal VIcon Scanning)
+  // -------------------------------------------------------------------------
+
+  def is_space(c: Str): Bool {
+    let res := c ? any(" \t\n\u{0d}")
+    if res > 0 then true else false
+  }
+
+  def is_digit(c: Str): Bool {
+    let res := c ? any("0123456789")
+    if res > 0 then true else false
+  }
+
+  def is_alpha(c: Str): Bool {
+    let res := c ? any("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_")
+    if res > 0 then true else false
+  }
+
+  def scan_whitespace(src: Str): Str {
+    src ? (tab(many(" \t\n\u{0d}")) | "")
+  }
+
+  def scan_identifier(src: Str): Str {
+    src ? (tab(many("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_0123456789")) | "")
+  }
+
+  def scan_digits(src: Str): Str {
+    src ? (tab(many("0123456789")) | "")
+  }
+
+  def skip_whitespace(src: Str, pos: Int, len: Int): Int {
+    if pos >= len then pos else {
+      let rest := str_slice(src, pos, len)
+      let sp := rest ? (tab(many(" \t\n\u{0d}")) | "")
+      pos + str_len(sp)
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Keyword & Token Recognition
+  // -------------------------------------------------------------------------
+
+  def is_decl_keyword(kw: Str): Bool {
+    if kw == "agent" then true
+    else if kw == "event" then true
+    else if kw == "goal" then true
+    else if kw == "plan" then true
+    else if kw == "belief" then true
+    else if kw == "def" then true
+    else if kw == "on" then true
+    else if kw == "module" then true
+    else if kw == "import" then true
+    else if kw == "behavior" then true
+    else if kw == "skill" then true
+    else false
+  }
+
+  def is_stmt_keyword(kw: Str): Bool {
+    if kw == "let" then true
+    else if kw == "var" then true
+    else if kw == "emit" then true
+    else if kw == "tell" then true
+    else if kw == "untell" then true
+    else if kw == "adopt" then true
+    else if kw == "spawn" then true
+    else if kw == "await" then true
+    else if kw == "return" then true
+    else if kw == "fail" then true
+    else false
+  }
+
+  // -------------------------------------------------------------------------
+  // Precedence Levels for Precedence Climbing
+  // -------------------------------------------------------------------------
+
+  def operator_precedence(op: Str): Int {
+    if op == ":=" then 1
+    else if op == "|" then 2
+    else if op == "&" then 3
+    else if op == "==" then 4
+    else if op == "!=" then 4
+    else if op == "<" then 5
+    else if op == "<=" then 5
+    else if op == ">" then 5
+    else if op == ">=" then 5
+    else if op == "+" then 6
+    else if op == "-" then 6
+    else if op == "*" then 7
+    else if op == "/" then 7
+    else if op == "%" then 7
+    else if op == "?" then 8
+    else 0
+  }
+
+  def is_binary_operator(op: Str): Bool {
+    operator_precedence(op) > 0
+  }
+
+  def is_unary_operator(op: Str): Bool {
+    if op == "-" then true
+    else if op == "!" then true
+    else if op == "not" then true
+    else false
+  }
+
+  // -------------------------------------------------------------------------
+  // Grammar Classification Helpers
+  // -------------------------------------------------------------------------
+
+  def classify_statement_kind(kw: Str): Str {
+    if kw == "let" then "stmt.let"
+    else if kw == "var" then "stmt.var"
+    else if kw == "emit" then "stmt.emit"
+    else if kw == "tell" then "stmt.tell"
+    else if kw == "untell" then "stmt.untell"
+    else if kw == "adopt" then "stmt.adopt"
+    else if kw == "spawn" then "stmt.spawn"
+    else if kw == "await" then "stmt.await"
+    else if kw == "return" then "stmt.return"
+    else if kw == "fail" then "stmt.fail"
+    else "stmt.expr"
+  }
+
+  def classify_decl_kind(kw: Str): Str {
+    if kw == "agent" then "decl.agent"
+    else if kw == "event" then "decl.event"
+    else if kw == "goal" then "decl.goal"
+    else if kw == "plan" then "decl.plan"
+    else if kw == "belief" then "decl.belief"
+    else if kw == "def" then "decl.method"
+    else if kw == "on" then "decl.handler"
+    else if kw == "module" then "decl.module"
+    else if kw == "import" then "decl.import"
+    else if kw == "behavior" then "decl.behavior"
+    else if kw == "skill" then "decl.skill"
+    else "decl.unknown"
+  }
+
+  def record_parsed_decl(): Int {
+    parsed_decl_count := parsed_decl_count + 1
+    parsed_decl_count
+  }
+
+  def record_parsed_stmt(): Int {
+    parsed_stmt_count := parsed_stmt_count + 1
+    parsed_stmt_count
+  }
+
+  def record_parsed_expr(): Int {
+    parsed_expr_count := parsed_expr_count + 1
+    parsed_expr_count
+  }
+
+  def reset(): Int {
+    error_msg := ""
+    cur_pos := 0
+    parsed_decl_count := 0
+    parsed_stmt_count := 0
+    parsed_expr_count := 0
+    0
+  }
+}

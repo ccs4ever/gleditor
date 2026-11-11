@@ -23,6 +23,52 @@ namespace {
 Type named(std::string name) { return {std::move(name), {}}; }
 Type list(Type element) { return {"List", {std::move(element)}}; }
 Type optional(Type element) { return {"Opt", {std::move(element)}}; }
+inline bool isOptType(std::string_view name) noexcept {
+  return name == "Opt" || name == "Option";
+}
+inline bool isLiteralZero(const Expr &expr) noexcept {
+  if (expr.kind != ExprKind::Integer) return false;
+  auto text = expr.text;
+  std::erase(text, '_');
+  const bool hex = text.starts_with("0x") || text.starts_with("0X");
+  std::uint64_t val{};
+  const auto parsed =
+      std::from_chars(text.data() + (hex ? 2 : 0), text.data() + text.size(),
+                      val, hex ? 16 : 10);
+  return (parsed.ec == std::errc{} && parsed.ptr == text.data() + text.size() &&
+          val == 0);
+}
+inline bool isRefutablePattern(const Expr &pat) noexcept {
+  switch (pat.kind) {
+  case ExprKind::WildcardPattern:
+  case ExprKind::LogicVariable:
+    return false;
+  case ExprKind::TuplePattern:
+  case ExprKind::Tuple:
+    for (const auto &child : pat.children) {
+      if (child && isRefutablePattern(*child)) return true;
+    }
+    return false;
+  case ExprKind::RecordPattern:
+    for (const auto &child : pat.children) {
+      if (child && isRefutablePattern(*child)) return true;
+    }
+    return false;
+  default:
+    return true;
+  }
+}
+inline bool expressionDiverges(const Expr &expr) noexcept {
+  if (expr.kind == ExprKind::Return || expr.kind == ExprKind::Fail ||
+      expr.kind == ExprKind::Terminate)
+    return true;
+  if (expr.kind == ExprKind::Block && !expr.children.empty()) {
+    for (const auto &child : expr.children) {
+      if (child && expressionDiverges(*child)) return true;
+    }
+  }
+  return false;
+}
 const Type unit    = named("()");
 const Type bottom  = named("<bottom>");
 const Type unknown = named("<unknown>");
@@ -86,6 +132,21 @@ bool signaturesEquivalent(const Decl &left, const Decl &right) {
     if (left.parameters[i].type != right.parameters[i].type) return false;
   return true;
 }
+bool isReservedDescriptorParamName(std::string_view name) {
+  return name == "result" || name == "produced" || name == "pure" ||
+         name == "closed" || name == "arity";
+}
+bool isStdMetaReservedName(std::string_view name) {
+  return name == "run" || name == "value_of" || name == "register" ||
+         name == "register_all" || name == "registration" ||
+         name == "dim_named" || name == "as_body" || name == "head_of" ||
+         name == "var_of" || name == "make_cell" || name == "boot_writer" ||
+         name == "boot_linker" || name == "join_batch" ||
+         name == "build_fragment" || name == "compile_fragment" ||
+         name == "grab_of" || name == "step_of" || name == "values_of" ||
+         name == "set_values" || name == "set_var";
+}
+
 bool directWaitPosition(const Expr &expression) {
   return expression.kind == ExprKind::Call ||
          expression.kind == ExprKind::Ask ||
@@ -94,7 +155,7 @@ bool directWaitPosition(const Expr &expression) {
 }
 
 Type read(Type type) {
-  if (type.name == "Opt" && type.arguments.size() == 1)
+  if (isOptType(type.name) && type.arguments.size() == 1)
     return type.arguments.front();
   return type;
 }
@@ -248,8 +309,12 @@ private:
   // classified not-closed. `diagnose` reports the refusal reason at the
   // offending node; the let-initializer walk passes false — a non-closed
   // value is legal to bind, it only leaves the name unclosed.
-  bool staticClosed(const Expr &expression, Environment &env,
-                    const Decl *owner, bool diagnose);
+  bool staticClosed(const Expr &expression, Environment &env, const Decl *owner,
+                    bool diagnose);
+  void checkPattern(const Expr &pat, const Type &targetType,
+                    Environment &armEnv, Context context,
+                    std::vector<std::string> &coveredConstructors,
+                    bool &hasWildcard);
   Type infer(const Expr &expression, Environment &env, Context context);
   Type condition(const Expr &expression, Environment &env, Context context);
   Type place(const Expr &expression, Environment &env, Context context);
@@ -610,18 +675,17 @@ const Decl *Checker::goal(const Decl *owner, std::string_view name) const {
       if (use.kind == DeclKind::BehaviorUse)
         if (const auto *behavior = global(use.name);
             behavior && behavior->kind == DeclKind::Behavior)
-          if (const auto *contributed =
-                  member(behavior, name, DeclKind::Goal))
+          if (const auto *contributed = member(behavior, name, DeclKind::Goal))
             return contributed;
   return nullptr;
 }
 
 bool Checker::event(std::string_view name) const {
   static const std::set<std::string_view> builtins{
-      "Event",          "Initialize",     "Destroy",     "GoalAchieved",
-      "GoalFailed",     "GoalDropped",    "PlanFailed",  "EffectFailed",
-      "EffectDone",     "ConditionFault", "ChildDown",   "ChildStopping",
-      "SpawnFailed",    "DeliveryFailed", "Moved"};
+      "Event",       "Initialize",     "Destroy",    "GoalAchieved",
+      "GoalFailed",  "GoalDropped",    "PlanFailed", "EffectFailed",
+      "EffectDone",  "ConditionFault", "ChildDown",  "ChildStopping",
+      "SpawnFailed", "DeliveryFailed", "Moved"};
   if (builtins.contains(name)) return true;
   auto *decl = global(name);
   return decl && decl->kind == DeclKind::Event;
@@ -643,7 +707,7 @@ void Checker::reservedName(std::string_view name, SourceLocation loc) {
            loc);
   }
   if (name == "splice" || name == "static" ||
-      (metaImported_ && (name == "run" || name == "value_of"))) {
+      (metaImported_ && isStdMetaReservedName(name))) {
     report(DiagnosticCode::InvalidIdentifier,
            "'" + std::string(name) +
                "' is a reserved contextual keyword; declarations and "
@@ -656,11 +720,15 @@ bool Checker::compatible(const Type &actual, const Type &expected) const {
   if (actual == bottom || actual == unknown || expected == unknown ||
       actual == any || expected == any)
     return true;
-  if (expected.name == "Opt" && expected.arguments.size() == 1) {
+  if (isOptType(expected.name) && expected.arguments.size() == 1) {
     if (actual == absent) return true;
-    if (actual.name == "Opt" && actual.arguments.size() == 1)
+    if (isOptType(actual.name) && actual.arguments.size() == 1)
       return compatible(actual.arguments.front(), expected.arguments.front());
     return compatible(actual, expected.arguments.front());
+  }
+  if (isOptType(actual.name) && actual.arguments.size() == 1 &&
+      isOptType(expected.name) && expected.arguments.size() == 1) {
+    return compatible(actual.arguments.front(), expected.arguments.front());
   }
   // Bare Code is the §6.1 parameterized wildcard: it accepts a fragment of
   // any result type, while Code<T> stays invariant in T (§5.2 — a
@@ -684,14 +752,15 @@ void Checker::expectType(const Type &actual, const Type &expected,
 }
 void Checker::validateType(const Type &type, SourceLocation loc) {
   static const std::set<std::string_view> scalars{
-      "Int",   "Float", "Str",       "Bool",  "()",    "Duration", "Time",
-      "Agent", "Space", "Intention", "Timer", "Event", "Cell",     "Code"};
+      "Int",      "Float", "Str",   "Bool",  "()",
+      "Duration", "Time",  "Agent", "Space", "Intention",
+      "Timer",    "Event", "Cell",  "Code",  "MicroVersion"};
   const auto *decl = global(type.name);
   const bool user =
       decl && (decl->kind == DeclKind::Record || decl->kind == DeclKind::Event);
-  std::size_t arity = type.name == "List" || type.name == "Opt" ? 1U
-                      : type.name == "Map"                      ? 2U
-                                                                : 0U;
+  std::size_t arity = type.name == "List" || isOptType(type.name) ? 1U
+                      : type.name == "Map"                        ? 2U
+                                                                  : 0U;
   // §5.2's arity chain: Code maps to 0-or-1 — Code<T> the typed fragment,
   // bare Code the §6.1 wildcard.
   const bool codeArity = type.name == "Code" && type.arguments.size() <= 1;
@@ -741,6 +810,12 @@ void Checker::parameters(const Decl &decl) {
     require(snake(parameter.name), DiagnosticCode::InvalidIdentifier,
             "parameter/field names must be snake_case", parameter.loc);
     reservedName(parameter.name, parameter.loc);
+    if (isReservedDescriptorParamName(parameter.name)) {
+      report(DiagnosticCode::InvalidIdentifier,
+             "parameter name '" + parameter.name +
+                 "' is reserved for fragment descriptor metadata (P2)",
+             parameter.loc);
+    }
     require(names.insert(parameter.name).second, DiagnosticCode::DuplicateName,
             "duplicate parameter/field '" + parameter.name + "'",
             parameter.loc);
@@ -913,6 +988,21 @@ std::optional<Function> Checker::function(const Expr &callee, const Decl *owner,
     if (name == "members")
       return builtin({named("Space")}, list(named("Agent")));
     if (name == "children") return builtin({}, list(named("Agent")));
+    if (name == "abs") return builtin({named("Int")}, named("Int"));
+    if (name == "min" || name == "max")
+      return builtin({named("Int"), named("Int")}, named("Int"));
+    if (name == "clamp")
+      return builtin({named("Int"), named("Int"), named("Int")}, named("Int"));
+    if (name == "trim" || name == "to_lower" || name == "to_upper")
+      return builtin({named("Str")}, named("Str"));
+    if (name == "str_len") return builtin({named("Str")}, named("Int"));
+    if (name == "byte_at")
+      return builtin({named("Str"), named("Int")}, optional(named("Int")));
+    if (name == "str_slice")
+      return builtin({named("Str"), named("Int"), named("Int")}, named("Str"));
+    if (name == "int_to_str") return builtin({named("Int")}, named("Str"));
+    if (name == "str_to_int")
+      return builtin({named("Str")}, optional(named("Int")));
   }
   if ((!qualifier || *qualifier == "Clock") && name == "now")
     return builtin({}, named("Time"));
@@ -941,12 +1031,54 @@ std::optional<Function> Checker::function(const Expr &callee, const Decl *owner,
   if (goalImported) {
     if (name == "tab" || name == "move")
       return builtin({named("Int")}, named("Str"));
+    if (name == "tab_end") return builtin({}, named("Str"));
     if (name == "find" || name == "match" || name == "upto" || name == "many" ||
         name == "any")
       return builtin({named("Str")}, named("Int"));
     if (name == "bal") return builtin({}, named("Int"));
     if (name == "subject") return builtin({}, named("Str"));
     if (name == "pos") return builtin({}, named("Int"));
+  }
+  bool hypertimeCallable = false;
+  for (const auto &imported : program_.imports) {
+    resolutionWork(imported.loc, 1 + imported.symbols.size());
+    if (imported.path != "std:hypertime") continue;
+    const bool selected =
+        imported.symbols.empty() ||
+        std::ranges::find(imported.symbols, name) != imported.symbols.end();
+    const bool qualified =
+        !qualifier || *qualifier == imported.alias.value_or("std:hypertime");
+    hypertimeCallable = hypertimeCallable || (selected && qualified);
+  }
+  if (hypertimeCallable || (qualifier && *qualifier == "std:hypertime")) {
+    if (name == "lca")
+      return builtin({named("MicroVersion"), named("MicroVersion")},
+                     named("MicroVersion"));
+    if (name == "path")
+      return builtin({named("MicroVersion")}, list(named("MicroVersion")));
+    if (name == "is_ancestor_of")
+      return builtin({named("MicroVersion"), named("MicroVersion")},
+                     named("Bool"));
+    if (name == "depth") return builtin({named("MicroVersion")}, named("Int"));
+    if (name == "jump_ancestor")
+      return builtin({named("MicroVersion"), named("Int")},
+                     named("MicroVersion"));
+    if (name == "parent" || name == "next")
+      return builtin({named("MicroVersion")}, named("MicroVersion"));
+    if (name == "children")
+      return builtin({named("MicroVersion")}, list(named("MicroVersion")));
+    if (name == "branch")
+      return builtin({named("MicroVersion"), named("Int")},
+                     named("MicroVersion"));
+    if (name == "branch_letters") return builtin({named("Int")}, named("Str"));
+    if (name == "latest" || name == "head")
+      return builtin({}, named("MicroVersion"));
+    if (name == "heads") return builtin({}, list(named("MicroVersion")));
+    if (name == "repoint_head")
+      return builtin({named("MicroVersion")}, unit, false);
+    if (name == "to_str") return builtin({named("MicroVersion")}, named("Str"));
+    if (name == "parse")
+      return builtin({named("Str")}, optional(named("MicroVersion")));
   }
   // §6.1's read surface: the reflect family plus the value reads, keyed
   // by the std:meta import exactly like std:goal's member rows.
@@ -967,6 +1099,8 @@ std::optional<Function> Checker::function(const Expr &callee, const Decl *owner,
     const auto code = [](Type element) {
       return Type{"Code", {std::move(element)}};
     };
+    const auto fragment = Type{"Code", {}};
+    const auto bodyCode = code(unit);
     if (name == "program" || name == "agent_cell")
       return builtin({}, named("Cell"));
     if (name == "module_named")
@@ -988,6 +1122,35 @@ std::optional<Function> Checker::function(const Expr &callee, const Decl *owner,
       return builtin({named("Cell")}, optional(named("Float")));
     if (name == "value_of") return builtin({named("Cell")}, any);
     if (name == "next_rand") return builtin({named("Cell")}, named("Int"));
+    if (name == "register")
+      return builtin({named("Cell")}, optional(code(named("Cell"))), false);
+    if (name == "register_all")
+      return builtin({list(named("Cell"))}, optional(list(code(named("Cell")))),
+                     false);
+    if (name == "registration") return builtin({named("Cell")}, named("Str"));
+    if (name == "dim_named")
+      return builtin({named("Str")}, optional(named("Cell")));
+    if (name == "as_body") return builtin({fragment}, optional(bodyCode));
+    if (name == "head_of") return builtin({fragment}, named("Cell"));
+    if (name == "var_of")
+      return builtin({named("Cell"), named("Str")}, optional(named("Cell")));
+    if (name == "make_cell") return builtin({any}, named("Cell"), false);
+    if (name == "boot_writer" || name == "boot_linker")
+      return builtin({}, code(named("Cell")));
+    if (name == "join_batch")
+      return builtin({named("Cell")}, named("Bool"), false);
+    if (name == "build_fragment")
+      return builtin({named("Cell")}, optional(named("Cell")), false);
+    if (name == "compile_fragment")
+      return builtin({named("Str"), any, named("Str"), named("Cell")},
+                     optional(code(named("Cell"))), false);
+    if (name == "grab_of" || name == "step_of" || name == "values_of")
+      return builtin({named("Cell")}, optional(named("Cell")));
+    if (name == "set_values")
+      return builtin({named("Cell"), named("Cell")}, named("Bool"), false);
+    if (name == "set_var")
+      return builtin({named("Cell"), named("Str"), named("Cell")},
+                     named("Bool"), false);
     // §6.1's mutation half (phase 4): the graft verbs, their durable
     // learn_* twins — the "conditional on P16" flag means transport of
     // the patch records is phase 6's seam, while the session machinery
@@ -996,8 +1159,6 @@ std::optional<Function> Checker::function(const Expr &callee, const Decl *owner,
     // A bare `Code` parameter is the parameterized wildcard —
     // `Type{"Code", {}}` accepts `Code<T>` for any T (`compatible`'s
     // empty-argument arm); `body` pins `Code<()>` explicitly.
-    const auto fragment = Type{"Code", {}};
-    const auto bodyCode = code(unit);
     if (name == "graft_plan" || name == "learn_plan")
       return builtin({named("Str"), named("Str"), fragment, bodyCode}, unit,
                      false);
@@ -1262,6 +1423,94 @@ Type Checker::call(const Expr &expression, Environment &env, Context context) {
       break;
     }
   }
+  const auto *calleeExpr = expression.children.front().get();
+  if (calleeExpr && calleeExpr->kind == ExprKind::Field &&
+      !calleeExpr->children.empty()) {
+    auto baseType = infer(*calleeExpr->children.front(), env, operand(context));
+    if (baseType.name == "Map" && baseType.arguments.size() == 2) {
+      if (calleeExpr->text == "get") {
+        require(expression.children.size() == 2, DiagnosticCode::TypeMismatch,
+                "map.get requires 1 argument", expression.loc);
+        if (expression.children.size() >= 2) {
+          expectType(infer(*expression.children[1], env, operand(context)),
+                     baseType.arguments[0], expression.children[1]->loc);
+        }
+        return optional(baseType.arguments[1]);
+      }
+      if (calleeExpr->text == "contains" || calleeExpr->text == "has") {
+        require(expression.children.size() == 2, DiagnosticCode::TypeMismatch,
+                "map." + calleeExpr->text + " requires 1 argument",
+                expression.loc);
+        if (expression.children.size() >= 2) {
+          expectType(infer(*expression.children[1], env, operand(context)),
+                     baseType.arguments[0], expression.children[1]->loc);
+        }
+        return named("Bool");
+      }
+      if (calleeExpr->text == "keys") {
+        require(expression.children.size() == 1, DiagnosticCode::TypeMismatch,
+                "map.keys takes no arguments", expression.loc);
+        return list(baseType.arguments[0]);
+      }
+      if (calleeExpr->text == "len") {
+        require(expression.children.size() == 1, DiagnosticCode::TypeMismatch,
+                "map.len takes no arguments", expression.loc);
+        return named("Int");
+      }
+    }
+    if (isOptType(baseType.name) && baseType.arguments.size() == 1) {
+      if (calleeExpr->text == "unwrap") {
+        require(expression.children.size() == 1, DiagnosticCode::TypeMismatch,
+                "opt.unwrap takes no arguments", expression.loc);
+        return baseType.arguments.front();
+      }
+    }
+  }
+  if (calleeExpr && calleeExpr->kind == ExprKind::SafeNav &&
+      !calleeExpr->children.empty()) {
+    auto rawBase = infer(*calleeExpr->children.front(), env, operand(context));
+    Type inner   = isOptType(rawBase.name) && rawBase.arguments.size() == 1
+                       ? rawBase.arguments.front()
+                       : rawBase;
+    if (inner.name == "Map" && inner.arguments.size() == 2) {
+      if (calleeExpr->text == "get") {
+        require(expression.children.size() == 2, DiagnosticCode::TypeMismatch,
+                "map?.get requires 1 argument", expression.loc);
+        if (expression.children.size() >= 2) {
+          expectType(infer(*expression.children[1], env, operand(context)),
+                     inner.arguments[0], expression.children[1]->loc);
+        }
+        return optional(inner.arguments[1]);
+      }
+      if (calleeExpr->text == "contains" || calleeExpr->text == "has") {
+        require(expression.children.size() == 2, DiagnosticCode::TypeMismatch,
+                "map?." + calleeExpr->text + " requires 1 argument",
+                expression.loc);
+        if (expression.children.size() >= 2) {
+          expectType(infer(*expression.children[1], env, operand(context)),
+                     inner.arguments[0], expression.children[1]->loc);
+        }
+        return optional(named("Bool"));
+      }
+      if (calleeExpr->text == "keys") {
+        require(expression.children.size() == 1, DiagnosticCode::TypeMismatch,
+                "map?.keys takes no arguments", expression.loc);
+        return optional(list(inner.arguments[0]));
+      }
+      if (calleeExpr->text == "len") {
+        require(expression.children.size() == 1, DiagnosticCode::TypeMismatch,
+                "map?.len takes no arguments", expression.loc);
+        return optional(named("Int"));
+      }
+    }
+    if (isOptType(inner.name) && inner.arguments.size() == 1) {
+      if (calleeExpr->text == "unwrap") {
+        require(expression.children.size() == 1, DiagnosticCode::TypeMismatch,
+                "opt?.unwrap takes no arguments", expression.loc);
+        return optional(inner.arguments.front());
+      }
+    }
+  }
   auto signature = function(*expression.children.front(), context.owner);
   if (!signature) {
     for (std::size_t i = 1; i < expression.children.size(); ++i)
@@ -1317,6 +1566,11 @@ Type Checker::place(const Expr &expression, Environment &env, Context context) {
     return unknown;
   }
   if (expression.kind == ExprKind::Index && expression.children.size() == 2) {
+    if (isLiteralZero(*expression.children[1])) {
+      report(DiagnosticCode::InvalidPosition,
+             "Index 0 is invalid in 1-based indexing; indices start at 1",
+             expression.children[1]->loc);
+    }
     (void)place(*expression.children.front(), env, context);
     auto base  = infer(*expression.children.front(), env, operand(context));
     auto index = infer(*expression.children[1], env, operand(context));
@@ -1353,63 +1607,64 @@ Type Checker::term(const Expr &expression, Environment &env, Context context,
   // unify and is refused like infer's record arm.
   const std::function<void(const Expr &, const Type &)> bindArgument =
       [&](const Expr &argument, const Type &expected) {
-    if (argument.kind == ExprKind::LogicVariable) {
-      require(snake(argument.text), DiagnosticCode::InvalidIdentifier,
-              "query bindings must be snake_case", argument.loc);
-      if (argument.text == "_") {
-        require(bind, DiagnosticCode::InvalidPosition,
-                "asserted facts cannot contain a wildcard", argument.loc);
-        return;
-      }
-      auto found = env.find(argument.text);
-      if (found == env.end()) {
-        if (bind) {
-          reservedName(argument.text, argument.loc);
-          env[argument.text] = {expected, true, context.depth};
-        } else
-          report(DiagnosticCode::UnknownName,
-                 "asserted facts must be ground; unbound '" + argument.text +
-                     "'",
-                 argument.loc);
-      } else
-        expectType(read(found->second.type), expected, argument.loc);
-      return;
-    }
-    if (argument.kind == ExprKind::Identifier && argument.text == "_") {
-      require(bind, DiagnosticCode::InvalidPosition,
-              "asserted facts cannot contain a wildcard", argument.loc);
-      return;
-    }
-    if (argument.kind == ExprKind::Record)
-      if (const auto *decl = global(argument.text);
-          decl && decl->kind == DeclKind::Record) {
-        std::set<std::string> supplied;
-        for (std::size_t f = 0;
-             f < argument.children.size() && f < argument.names.size(); ++f) {
-          const Type *fieldType = nullptr;
-          for (const auto &param : decl->parameters)
-            if (param.name == argument.names[f]) {
-              fieldType = &param.type;
-              break;
-            }
-          if (!fieldType) {
-            report(DiagnosticCode::UnknownName,
-                   "unknown record field '" + argument.names[f] + "'",
-                   argument.loc);
-            continue;
+        if (argument.kind == ExprKind::LogicVariable) {
+          require(snake(argument.text), DiagnosticCode::InvalidIdentifier,
+                  "query bindings must be snake_case", argument.loc);
+          if (argument.text == "_") {
+            require(bind, DiagnosticCode::InvalidPosition,
+                    "asserted facts cannot contain a wildcard", argument.loc);
+            return;
           }
-          supplied.insert(argument.names[f]);
-          bindArgument(*argument.children[f], *fieldType);
+          auto found = env.find(argument.text);
+          if (found == env.end()) {
+            if (bind) {
+              reservedName(argument.text, argument.loc);
+              env[argument.text] = {expected, true, context.depth};
+            } else
+              report(DiagnosticCode::UnknownName,
+                     "asserted facts must be ground; unbound '" +
+                         argument.text + "'",
+                     argument.loc);
+          } else
+            expectType(read(found->second.type), expected, argument.loc);
+          return;
         }
-        for (const auto &param : decl->parameters)
-          require(supplied.contains(param.name),
-                  DiagnosticCode::TypeMismatch,
+        if (argument.kind == ExprKind::Identifier && argument.text == "_") {
+          require(bind, DiagnosticCode::InvalidPosition,
+                  "asserted facts cannot contain a wildcard", argument.loc);
+          return;
+        }
+        if (argument.kind == ExprKind::Record)
+          if (const auto *decl = global(argument.text);
+              decl && decl->kind == DeclKind::Record) {
+            std::set<std::string> supplied;
+            for (std::size_t f = 0;
+                 f < argument.children.size() && f < argument.names.size();
+                 ++f) {
+              const Type *fieldType = nullptr;
+              for (const auto &param : decl->parameters)
+                if (param.name == argument.names[f]) {
+                  fieldType = &param.type;
+                  break;
+                }
+              if (!fieldType) {
+                report(DiagnosticCode::UnknownName,
+                       "unknown record field '" + argument.names[f] + "'",
+                       argument.loc);
+                continue;
+              }
+              supplied.insert(argument.names[f]);
+              bindArgument(*argument.children[f], *fieldType);
+            }
+            for (const auto &param : decl->parameters)
+              require(
+                  supplied.contains(param.name), DiagnosticCode::TypeMismatch,
                   "missing record field '" + param.name + "'", argument.loc);
-        return;
-      }
-    expectType(infer(argument, env, operand(context)), expected,
-               argument.loc);
-  };
+            return;
+          }
+        expectType(infer(argument, env, operand(context)), expected,
+                   argument.loc);
+      };
   for (std::size_t i = 0; i < expression.children.size(); ++i) {
     const auto expected = i < predicate->parameters.size()
                               ? predicate->parameters[i].type
@@ -1577,8 +1832,7 @@ bool Checker::staticClosed(const Expr &expression, Environment &env,
                              ? nullptr
                              : expression.children.front().get();
     if (callee && callee->kind == ExprKind::Identifier &&
-        callee->text != "run" && owner &&
-        owner->kind == DeclKind::Agent) {
+        callee->text != "run" && owner && owner->kind == DeclKind::Agent) {
       if (const auto resolved = function(*callee, owner, false);
           resolved && resolved->declaration && resolved->pure &&
           !resolved->effect) {
@@ -1586,8 +1840,8 @@ bool Checker::staticClosed(const Expr &expression, Environment &env,
         if (declOwner != methodOwners_.end() && declOwner->second == owner) {
           for (std::size_t i = 1; i < expression.children.size(); ++i)
             if (expression.children[i])
-              closed &= staticClosed(*expression.children[i], env, owner,
-                                     diagnose);
+              closed &=
+                  staticClosed(*expression.children[i], env, owner, diagnose);
           return closed;
         }
       }
@@ -1645,7 +1899,8 @@ bool Checker::staticClosed(const Expr &expression, Environment &env,
   case ExprKind::For: {
     auto local = copyEnvironment(env, expression.loc);
     if (!expression.children.empty() && expression.children.front())
-      closed &= staticClosed(*expression.children.front(), local, owner, diagnose);
+      closed &=
+          staticClosed(*expression.children.front(), local, owner, diagnose);
     if (expression.binding && *expression.binding != "_")
       local[*expression.binding] = {unknown, true, 0};
     for (std::size_t i = 1; i < expression.children.size(); ++i)
@@ -1682,6 +1937,160 @@ bool Checker::staticClosed(const Expr &expression, Environment &env,
     for (const auto &child : expression.children)
       if (child) closed &= staticClosed(*child, env, owner, diagnose);
     return closed;
+  }
+}
+
+void Checker::checkPattern(const Expr &pat, const Type &targetType,
+                           Environment &armEnv, Context context,
+                           std::vector<std::string> &coveredConstructors,
+                           bool &hasWildcard) {
+  switch (pat.kind) {
+  case ExprKind::WildcardPattern:
+    hasWildcard = true;
+    break;
+  case ExprKind::LogicVariable:
+    hasWildcard = true;
+    if (pat.text != "_") {
+      reservedName(pat.text, pat.loc);
+      armEnv[pat.text] = {targetType, true, context.depth + 1};
+    }
+    break;
+  case ExprKind::Integer:
+    expectType(named("Int"), targetType, pat.loc);
+    break;
+  case ExprKind::Float:
+    expectType(named("Float"), targetType, pat.loc);
+    break;
+  case ExprKind::String:
+    expectType(named("Str"), targetType, pat.loc);
+    break;
+  case ExprKind::Boolean:
+    expectType(named("Bool"), targetType, pat.loc);
+    coveredConstructors.push_back(pat.text);
+    break;
+  case ExprKind::None:
+    if (isOptType(targetType.name) && targetType.arguments.size() == 1) {
+      coveredConstructors.push_back("none");
+    } else {
+      expectType(absent, targetType, pat.loc);
+    }
+    break;
+  case ExprKind::MicroVersionLiteral:
+    expectType(named("MicroVersion"), targetType, pat.loc);
+    break;
+  case ExprKind::TuplePattern:
+  case ExprKind::Tuple: {
+    if (targetType.name == "Tuple") {
+      if (pat.children.size() != targetType.arguments.size()) {
+        report(DiagnosticCode::TypeMismatch,
+               "tuple pattern arity mismatch: expected " +
+                   std::to_string(targetType.arguments.size()) + ", got " +
+                   std::to_string(pat.children.size()),
+               pat.loc);
+      } else {
+        for (std::size_t i = 0; i < pat.children.size(); ++i) {
+          if (pat.children[i]) {
+            checkPattern(*pat.children[i], targetType.arguments[i], armEnv,
+                         context, coveredConstructors, hasWildcard);
+          }
+        }
+      }
+    } else if (targetType != unknown && targetType != any) {
+      expectType(named("Tuple"), targetType, pat.loc);
+    }
+    break;
+  }
+  case ExprKind::ListPattern:
+  case ExprKind::List: {
+    if (targetType.name == "List" && targetType.arguments.size() == 1) {
+      const auto &elemType = targetType.arguments.front();
+      for (const auto &child : pat.children) {
+        if (!child) continue;
+        if (child->kind == ExprKind::Unary && child->text == "...") {
+          if (!child->children.empty() && child->children[0]) {
+            checkPattern(*child->children[0], targetType, armEnv, context,
+                         coveredConstructors, hasWildcard);
+          }
+        } else {
+          checkPattern(*child, elemType, armEnv, context, coveredConstructors,
+                       hasWildcard);
+        }
+      }
+    } else if (targetType != unknown && targetType != any) {
+      expectType(named("List"), targetType, pat.loc);
+    }
+    break;
+  }
+  case ExprKind::CtorPattern: {
+    if (pat.text == "Some" && isOptType(targetType.name) &&
+        targetType.arguments.size() == 1) {
+      coveredConstructors.push_back("Some");
+      if (pat.children.size() == 1 && pat.children[0]) {
+        checkPattern(*pat.children[0], targetType.arguments.front(), armEnv,
+                     context, coveredConstructors, hasWildcard);
+      } else {
+        report(DiagnosticCode::TypeMismatch,
+               "constructor 'Some' requires exactly 1 argument", pat.loc);
+      }
+    } else if (const auto *decl = global(pat.text)) {
+      if (decl->kind == DeclKind::Record || decl->kind == DeclKind::Event) {
+        expectType(named(decl->name), targetType, pat.loc);
+        coveredConstructors.push_back(decl->name);
+        if (pat.children.size() != decl->parameters.size()) {
+          report(DiagnosticCode::TypeMismatch,
+                 "constructor '" + pat.text + "' expects " +
+                     std::to_string(decl->parameters.size()) +
+                     " arguments, got " + std::to_string(pat.children.size()),
+                 pat.loc);
+        } else {
+          for (std::size_t i = 0; i < pat.children.size(); ++i) {
+            if (pat.children[i]) {
+              checkPattern(*pat.children[i], decl->parameters[i].type, armEnv,
+                           context, coveredConstructors, hasWildcard);
+            }
+          }
+        }
+      } else {
+        report(DiagnosticCode::TypeMismatch,
+               "'" + pat.text + "' is not a record or event constructor",
+               pat.loc);
+      }
+    } else {
+      coveredConstructors.push_back(pat.text);
+    }
+    break;
+  }
+  case ExprKind::RecordPattern: {
+    if (const auto *decl = global(pat.text)) {
+      expectType(named(decl->name), targetType, pat.loc);
+      coveredConstructors.push_back(decl->name);
+      for (std::size_t i = 0; i < pat.names.size(); ++i) {
+        const auto &fieldName = pat.names[i];
+        auto fieldT           = fieldType(targetType, fieldName);
+        if (!fieldT) {
+          report(DiagnosticCode::UnknownName,
+                 "unknown field '" + fieldName + "' in pattern for " + pat.text,
+                 pat.loc);
+        } else if (i < pat.children.size() && pat.children[i]) {
+          checkPattern(*pat.children[i], *fieldT, armEnv, context,
+                       coveredConstructors, hasWildcard);
+        }
+      }
+    } else {
+      report(DiagnosticCode::UnknownName,
+             "unknown record pattern '" + pat.text + "'", pat.loc);
+    }
+    break;
+  }
+  case ExprKind::Unary: {
+    if (pat.text == "..." && !pat.children.empty() && pat.children[0]) {
+      checkPattern(*pat.children[0], targetType, armEnv, context,
+                   coveredConstructors, hasWildcard);
+    }
+    break;
+  }
+  default:
+    break;
   }
 }
 
@@ -1776,12 +2185,25 @@ Type Checker::infer(const Expr &expression, Environment &env, Context context) {
               "size requires a string, list or map", expression.loc);
       return named("Int");
     }
+    if (expression.text == "?") {
+      if (isOptType(value.name) && value.arguments.size() == 1) {
+        return value.arguments.front();
+      }
+      report(DiagnosticCode::TypeMismatch,
+             "soft unwrap '?' requires an Opt operand, got " + typeName(value),
+             expression.loc);
+      return unknown;
+    }
     if (expression.text == "!") {
+      if (isOptType(value.name) && value.arguments.size() == 1) {
+        return value.arguments.front();
+      }
       if (value.name == "Str") return value;
       if (value.name == "List" && value.arguments.size() == 1)
         return value.arguments.front();
       report(DiagnosticCode::TypeMismatch,
-             "generation requires a string or list", expression.loc);
+             "force unwrap or generation requires an Opt, string or list",
+             expression.loc);
       return unknown;
     }
     report(DiagnosticCode::InvalidDeclaration, "unknown unary operator",
@@ -1856,13 +2278,18 @@ Type Checker::infer(const Expr &expression, Environment &env, Context context) {
       return right;
     }
     if (comparison(expression.text)) {
+      if (left.name == "MicroVersion" || right.name == "MicroVersion") {
+        expectType(right, left, rightExpr.loc);
+        return named("Bool");
+      }
       expectType(right, left, rightExpr.loc);
       if (expression.text != "==" && expression.text != "!=") {
         require(numeric(left) || left.name == "Str" || left.name == "Time" ||
-                    left.name == "Duration" || left == unknown,
+                    left.name == "Duration" || left.name == "MicroVersion" ||
+                    left == unknown,
                 DiagnosticCode::TypeMismatch,
-                "ordered comparisons require numeric, Str, Time or Duration "
-                "operands",
+                "ordered comparisons require numeric, Str, Time, Duration or "
+                "MicroVersion operands",
                 expression.loc);
       }
       return right;
@@ -1897,6 +2324,12 @@ Type Checker::infer(const Expr &expression, Environment &env, Context context) {
   case ExprKind::Call:
     return call(expression, env, context);
   case ExprKind::Index: {
+    if (expression.children.size() >= 2 &&
+        isLiteralZero(*expression.children[1])) {
+      report(DiagnosticCode::InvalidPosition,
+             "Index 0 is invalid in 1-based indexing; indices start at 1",
+             expression.children[1]->loc);
+    }
     auto value = child(0, operand(context));
     auto index = child(1, operand(context));
     if (value.name == "List" && value.arguments.size() == 1) {
@@ -1909,7 +2342,7 @@ Type Checker::infer(const Expr &expression, Environment &env, Context context) {
     }
     if (value.name == "Map" && value.arguments.size() == 2) {
       expectType(index, value.arguments.front(), expression.loc);
-      return read(value.arguments[1]);
+      return optional(value.arguments[1]);
     }
     report(DiagnosticCode::TypeMismatch,
            "indexing requires a list, string or map", expression.loc);
@@ -1922,6 +2355,46 @@ Type Checker::infer(const Expr &expression, Environment &env, Context context) {
            "unknown field '" + expression.text + "' on " + typeName(base),
            expression.loc);
     return unknown;
+  }
+  case ExprKind::SafeNav: {
+    auto base  = child(0, operand(context));
+    Type inner = isOptType(base.name) && base.arguments.size() == 1
+                     ? base.arguments.front()
+                     : base;
+    if (auto type = fieldType(inner, expression.text)) {
+      return optional(*type);
+    }
+    if (inner.name == "Map" && inner.arguments.size() == 2) {
+      if (expression.text == "len") return optional(named("Int"));
+      if (expression.text == "keys") return optional(list(inner.arguments[0]));
+    }
+    report(DiagnosticCode::UnknownName,
+           "unknown field '" + expression.text + "' on " + typeName(inner),
+           expression.loc);
+    return unknown;
+  }
+  case ExprKind::Coalesce: {
+    if (expression.children.size() != 2) {
+      report(DiagnosticCode::InvalidDeclaration,
+             "null coalescing needs two operands", expression.loc);
+      return unknown;
+    }
+    auto optType      = infer(*expression.children[0], env, operand(context));
+    auto fallbackType = infer(*expression.children[1], env, operand(context));
+    if (isOptType(optType.name) && optType.arguments.size() == 1) {
+      expectType(fallbackType, optType.arguments.front(),
+                 expression.children[1]->loc);
+      return optType.arguments.front();
+    }
+    if (optType != unknown) {
+      report(DiagnosticCode::TypeMismatch,
+             "null coalescing '?"
+             "?"
+             "' requires an Opt left operand, got " +
+                 typeName(optType),
+             expression.children[0]->loc);
+    }
+    return fallbackType;
   }
   case ExprKind::Block: {
     auto local = copyEnvironment(env, expression.loc);
@@ -1939,6 +2412,27 @@ Type Checker::infer(const Expr &expression, Environment &env, Context context) {
     return result;
   }
   case ExprKind::Let: {
+    if (expression.text.empty() && expression.children.size() >= 2) {
+      auto rhsVal = infer(*expression.children[1], env, operand(context));
+      if (isRefutablePattern(*expression.children[0])) {
+        require(expression.recovery != nullptr, DiagnosticCode::TypeMismatch,
+                "Refutable pattern in let binding requires else clause",
+                expression.loc);
+        if (expression.recovery) {
+          auto recoveryType = infer(*expression.recovery, env, context);
+          require(expressionDiverges(*expression.recovery) ||
+                      recoveryType == bottom,
+                  DiagnosticCode::TypeMismatch,
+                  "else clause in refutable let must diverge",
+                  expression.recovery->loc);
+        }
+      }
+      std::vector<std::string> covered;
+      bool wildcard = false;
+      checkPattern(*expression.children[0], rhsVal, env, context, covered,
+                   wildcard);
+      return unit;
+    }
     require(snake(expression.text) && expression.text != "_",
             DiagnosticCode::InvalidIdentifier,
             "local names must be snake_case and cannot be '_'", expression.loc);
@@ -1968,9 +2462,9 @@ Type Checker::infer(const Expr &expression, Environment &env, Context context) {
     // scalar literal, a `static`, or an alias of an already-closed
     // name. A composite or call initializer is a runtime value: legal
     // to bind, but the name stays unavailable to staged evaluation.
-    const auto *init = expression.children.empty()
-                           ? nullptr
-                           : expression.children.front().get();
+    const auto *init  = expression.children.empty()
+                            ? nullptr
+                            : expression.children.front().get();
     const auto closed = init && [&] {
       switch (init->kind) {
       case ExprKind::Static:
@@ -1991,6 +2485,137 @@ Type Checker::infer(const Expr &expression, Environment &env, Context context) {
     }();
     env[expression.text] = {value, true, context.depth, closed};
     return unit;
+  }
+  case ExprKind::Tuple: {
+    std::vector<Type> elements;
+    for (const auto &childExpr : expression.children) {
+      elements.push_back(infer(*childExpr, env, operand(context)));
+    }
+    return Type{"Tuple", std::move(elements)};
+  }
+  case ExprKind::Map: {
+    if (expression.children.empty()) {
+      if (context.result && context.result->name == "Map" &&
+          context.result->arguments.size() == 2) {
+        return *context.result;
+      }
+      return Type{"Map", {any, any}};
+    }
+    Type keyType = any;
+    Type valType = any;
+    for (std::size_t i = 0; i + 1 < expression.children.size(); i += 2) {
+      auto k = infer(*expression.children[i], env, operand(context));
+      auto v = infer(*expression.children[i + 1], env, operand(context));
+      if (keyType == any)
+        keyType = k;
+      else
+        expectType(k, keyType, expression.children[i]->loc);
+
+      if (valType == any)
+        valType = v;
+      else
+        expectType(v, valType, expression.children[i + 1]->loc);
+    }
+    if (keyType != any && keyType != unknown) {
+      const bool allowed =
+          keyType.name == "Str" || keyType.name == "Int" ||
+          keyType.name == "Cell" || keyType.name == "CellRef" ||
+          keyType.name == "MicroVersion" || keyType.name == "Bool";
+      require(allowed, DiagnosticCode::TypeMismatch,
+              "map key type must be a primitive scalar or Cell, got " +
+                  typeName(keyType),
+              expression.children[0]->loc);
+    }
+    return Type{"Map", {keyType, valType}};
+  }
+  case ExprKind::Match: {
+    if (expression.children.empty()) {
+      report(DiagnosticCode::InvalidDeclaration, "empty match expression",
+             expression.loc);
+      return unknown;
+    }
+    auto targetType = infer(*expression.children[0], env, operand(context));
+    Type resultType = bottom;
+    std::vector<std::string> coveredConstructors;
+    bool hasUnguardedWildcard = false;
+
+    for (std::size_t i = 1; i < expression.children.size(); ++i) {
+      const auto &armExpr = *expression.children[i];
+      if (armExpr.kind != ExprKind::MatchArm || armExpr.children.empty()) {
+        continue;
+      }
+      auto armEnv = copyEnvironment(env, armExpr.loc);
+      std::vector<std::string> armCovered;
+      bool armWildcard = false;
+      checkPattern(*armExpr.children[0], targetType, armEnv, context,
+                   armCovered, armWildcard);
+
+      if (armExpr.guard) {
+        condition(*armExpr.guard, armEnv, operand(context));
+      } else {
+        if (armWildcard) hasUnguardedWildcard = true;
+        for (const auto &c : armCovered) coveredConstructors.push_back(c);
+      }
+
+      Type bodyType = unit;
+      if (armExpr.children.size() > 1 && armExpr.children[1]) {
+        bodyType = infer(*armExpr.children[1], armEnv, context);
+      }
+      if (resultType == bottom) {
+        resultType = bodyType;
+      } else if (bodyType != bottom) {
+        expectType(bodyType, resultType, armExpr.loc);
+      }
+    }
+
+    if (!hasUnguardedWildcard) {
+      if (targetType.name == "Bool") {
+        bool hasTrue  = false;
+        bool hasFalse = false;
+        for (const auto &c : coveredConstructors) {
+          if (c == "true") hasTrue = true;
+          if (c == "false") hasFalse = true;
+        }
+        if (!hasTrue || !hasFalse) {
+          std::string missing;
+          if (!hasTrue && !hasFalse)
+            missing = "true, false";
+          else if (!hasTrue)
+            missing = "true";
+          else
+            missing = "false";
+          report(DiagnosticCode::TypeMismatch,
+                 "Non-exhaustive match; missing variants: " + missing,
+                 expression.loc);
+        }
+      } else if (isOptType(targetType.name) &&
+                 targetType.arguments.size() == 1) {
+        bool hasSome = false;
+        bool hasNone = false;
+        for (const auto &c : coveredConstructors) {
+          if (c == "Some") hasSome = true;
+          if (c == "none") hasNone = true;
+        }
+        if (!hasSome || !hasNone) {
+          std::string missing;
+          if (!hasSome && !hasNone)
+            missing = "Some, none";
+          else if (!hasSome)
+            missing = "Some";
+          else
+            missing = "none";
+          report(DiagnosticCode::TypeMismatch,
+                 "Non-exhaustive match; missing variants: " + missing,
+                 expression.loc);
+        }
+      } else if (targetType != unknown && targetType != bottom) {
+        report(DiagnosticCode::TypeMismatch,
+               "Non-exhaustive match; missing wildcard or variable arm",
+               expression.loc);
+      }
+    }
+
+    return resultType == bottom ? unit : resultType;
   }
   case ExprKind::List: {
     Type element = any;
@@ -2099,15 +2724,37 @@ Type Checker::infer(const Expr &expression, Environment &env, Context context) {
   case ExprKind::For: {
     auto iterable = child(0, operand(context));
     auto local    = copyEnvironment(env, expression.loc);
-    Type element  = iterable.name == "<range>" ? named("Int")
-                    : iterable.name == "List" && iterable.arguments.size() == 1
-                        ? iterable.arguments.front()
-                        : unknown;
-    require(
-        element != unknown || iterable == unknown, DiagnosticCode::TypeMismatch,
-        "for-in requires a list or range, not an individual generated value",
-        expression.loc);
-    if (expression.binding && *expression.binding != "_") {
+    const bool isMap =
+        (iterable.name == "Map" && iterable.arguments.size() == 2);
+    Type element = iterable.name == "<range>" ? named("Int")
+                   : iterable.name == "List" && iterable.arguments.size() == 1
+                       ? iterable.arguments.front()
+                   : isMap ? iterable.arguments.front()
+                           : unknown;
+    require(element != unknown || iterable == unknown,
+            DiagnosticCode::TypeMismatch,
+            "for-in requires a list, map or range, not an individual generated "
+            "value",
+            expression.loc);
+    if (expression.names.size() == 2) {
+      require(isMap || iterable == unknown, DiagnosticCode::TypeMismatch,
+              "destructuring loop variables (k, v) requires a Map",
+              expression.loc);
+      Type keyType = isMap ? iterable.arguments[0] : unknown;
+      Type valType = isMap ? iterable.arguments[1] : unknown;
+      if (expression.names[0] != "_") {
+        require(snake(expression.names[0]), DiagnosticCode::InvalidIdentifier,
+                "loop binding must be snake_case", expression.loc);
+        reservedName(expression.names[0], expression.loc);
+        local[expression.names[0]] = {keyType, true, context.depth + 1};
+      }
+      if (expression.names[1] != "_") {
+        require(snake(expression.names[1]), DiagnosticCode::InvalidIdentifier,
+                "loop binding must be snake_case", expression.loc);
+        reservedName(expression.names[1], expression.loc);
+        local[expression.names[1]] = {valType, true, context.depth + 1};
+      }
+    } else if (expression.binding && *expression.binding != "_") {
       require(snake(*expression.binding), DiagnosticCode::InvalidIdentifier,
               "loop binding must be snake_case", expression.loc);
       reservedName(*expression.binding, expression.loc);
@@ -2386,6 +3033,12 @@ Type Checker::infer(const Expr &expression, Environment &env, Context context) {
       require(snake(parameter.name), DiagnosticCode::InvalidIdentifier,
               "parameter/field names must be snake_case", parameter.loc);
       reservedName(parameter.name, parameter.loc);
+      if (isReservedDescriptorParamName(parameter.name)) {
+        report(DiagnosticCode::InvalidIdentifier,
+               "parameter name '" + parameter.name +
+                   "' is reserved for fragment descriptor metadata (P2)",
+               parameter.loc);
+      }
       require(
           names.insert(parameter.name).second, DiagnosticCode::DuplicateName,
           "duplicate code parameter '" + parameter.name + "'", parameter.loc);
@@ -2442,6 +3095,10 @@ Type Checker::infer(const Expr &expression, Environment &env, Context context) {
             expression.loc);
     return value;
   }
+  case ExprKind::MicroVersionLiteral:
+    return named("MicroVersion");
+  default:
+    break;
   }
   report(DiagnosticCode::InvalidDeclaration, "unknown expression kind",
          expression.loc);
@@ -2708,6 +3365,32 @@ void Checker::declaration(const Decl &decl, const Decl *owner) {
     }
     if (decl.guard) condition(*decl.guard, env, operand(context));
     if (decl.body) infer(*decl.body, env, context);
+    for (const auto &arm : decl.planArms) {
+      auto armEnv = copyEnvironment(env, arm.loc);
+      if (arm.pattern) {
+        if (!target || target->parameters.empty()) {
+          report(DiagnosticCode::InvalidPosition,
+                 "Cannot match pattern on nullary goal; use where or default",
+                 arm.pattern->loc);
+        } else {
+          Type targetType;
+          if (target->parameters.size() == 1) {
+            targetType = target->parameters.front().type;
+          } else {
+            std::vector<Type> tupleTypes;
+            for (const auto &param : target->parameters)
+              tupleTypes.push_back(param.type);
+            targetType = Type{"Tuple", std::move(tupleTypes)};
+          }
+          std::vector<std::string> covered;
+          bool wildcard = false;
+          checkPattern(*arm.pattern, targetType, armEnv, context, covered,
+                       wildcard);
+        }
+      }
+      if (arm.guard) condition(*arm.guard, armEnv, operand(context));
+      if (arm.body) infer(*arm.body, armEnv, context);
+    }
     break;
   }
   case DeclKind::Handler:

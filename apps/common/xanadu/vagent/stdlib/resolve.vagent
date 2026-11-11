@@ -1,0 +1,164 @@
+module std:compiler:resolve
+
+import std:compiler:ast
+
+agent ScopeResolver {
+  var error_msg: Str := ""
+  var scope_depth: Int := 0
+  var resolved_count: Int := 0
+  var local_bindings_count: Int := 0
+  var external_refs_count: Int := 0
+
+  // Scope symbol slots (supports up to 8 active lexical bindings)
+  var s1_name: Str := ""
+  var s1_kind: Str := ""
+  var s1_depth: Int := -1
+
+  var s2_name: Str := ""
+  var s2_kind: Str := ""
+  var s2_depth: Int := -1
+
+  var s3_name: Str := ""
+  var s3_kind: Str := ""
+  var s3_depth: Int := -1
+
+  var s4_name: Str := ""
+  var s4_kind: Str := ""
+  var s4_depth: Int := -1
+
+  var s5_name: Str := ""
+  var s5_kind: Str := ""
+  var s5_depth: Int := -1
+
+  var s6_name: Str := ""
+  var s6_kind: Str := ""
+  var s6_depth: Int := -1
+
+  var s7_name: Str := ""
+  var s7_kind: Str := ""
+  var s7_depth: Int := -1
+
+  var s8_name: Str := ""
+  var s8_kind: Str := ""
+  var s8_depth: Int := -1
+
+  // -------------------------------------------------------------------------
+  // Scope Stack Operations
+  // -------------------------------------------------------------------------
+
+  def enter_scope(): Int {
+    scope_depth := scope_depth + 1
+    scope_depth
+  }
+
+  def exit_scope(): Int {
+    if scope_depth > 0 then {
+      // Clear bindings defined at this depth
+      if s1_depth == scope_depth then { s1_name := ""; s1_kind := ""; s1_depth := -1 }
+      if s2_depth == scope_depth then { s2_name := ""; s2_kind := ""; s2_depth := -1 }
+      if s3_depth == scope_depth then { s3_name := ""; s3_kind := ""; s3_depth := -1 }
+      if s4_depth == scope_depth then { s4_name := ""; s4_kind := ""; s4_depth := -1 }
+      if s5_depth == scope_depth then { s5_name := ""; s5_kind := ""; s5_depth := -1 }
+      if s6_depth == scope_depth then { s6_name := ""; s6_kind := ""; s6_depth := -1 }
+      if s7_depth == scope_depth then { s7_name := ""; s7_kind := ""; s7_depth := -1 }
+      if s8_depth == scope_depth then { s8_name := ""; s8_kind := ""; s8_depth := -1 }
+      scope_depth := scope_depth - 1
+      scope_depth
+    } else 0
+  }
+
+  def bind_symbol(name: Str, kind: Str): Bool {
+    local_bindings_count := local_bindings_count + 1
+    if s1_depth == -1 then {
+      s1_name := name
+      s1_kind := kind
+      s1_depth := scope_depth
+      true
+    } else if s2_depth == -1 then {
+      s2_name := name
+      s2_kind := kind
+      s2_depth := scope_depth
+      true
+    } else if s3_depth == -1 then {
+      s3_name := name
+      s3_kind := kind
+      s3_depth := scope_depth
+      true
+    } else if s4_depth == -1 then {
+      s4_name := name
+      s4_kind := kind
+      s4_depth := scope_depth
+      true
+    } else if s5_depth == -1 then {
+      s5_name := name
+      s5_kind := kind
+      s5_depth := scope_depth
+      true
+    } else if s6_depth == -1 then {
+      s6_name := name
+      s6_kind := kind
+      s6_depth := scope_depth
+      true
+    } else if s7_depth == -1 then {
+      s7_name := name
+      s7_kind := kind
+      s7_depth := scope_depth
+      true
+    } else if s8_depth == -1 then {
+      s8_name := name
+      s8_kind := kind
+      s8_depth := scope_depth
+      true
+    } else false
+  }
+
+  // -------------------------------------------------------------------------
+  // Symbol Resolution & Classification
+  // -------------------------------------------------------------------------
+
+  def lookup_kind(name: Str): Str {
+    // Search innermost to outermost (s8 down to s1)
+    if s8_depth >= 0 & s8_name == name then s8_kind
+    else if s7_depth >= 0 & s7_name == name then s7_kind
+    else if s6_depth >= 0 & s6_name == name then s6_kind
+    else if s5_depth >= 0 & s5_name == name then s5_kind
+    else if s4_depth >= 0 & s4_name == name then s4_kind
+    else if s3_depth >= 0 & s3_name == name then s3_kind
+    else if s2_depth >= 0 & s2_name == name then s2_kind
+    else if s1_depth >= 0 & s1_name == name then s1_kind
+    else "unresolved"
+  }
+
+  def is_local_variable(name: Str): Bool {
+    let k := lookup_kind(name)
+    if k == "local" then true
+    else if k == "param" then true
+    else false
+  }
+
+  def is_agent_field(name: Str): Bool {
+    let k := lookup_kind(name)
+    if k == "field" then true
+    else false
+  }
+
+  def resolve_ident(name: Str): Str {
+    resolved_count := resolved_count + 1
+    let k := lookup_kind(name)
+    if k == "unresolved" then {
+      external_refs_count := external_refs_count + 1
+      name
+    } else name
+  }
+
+  def reset(): Int {
+    error_msg := ""
+    scope_depth := 0
+    resolved_count := 0
+    local_bindings_count := 0
+    external_refs_count := 0
+    s1_depth := -1; s2_depth := -1; s3_depth := -1; s4_depth := -1
+    s5_depth := -1; s6_depth := -1; s7_depth := -1; s8_depth := -1
+    0
+  }
+}

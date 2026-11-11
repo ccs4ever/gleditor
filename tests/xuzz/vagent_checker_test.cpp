@@ -1276,4 +1276,550 @@ TEST(VagentCheckerTest, CapAliasesAreReadOnlyAndUnvaluedInStatic) {
   }
 }
 
+TEST(VagentCheckerTest, RefusesReservedDescriptorKeysAsDefParameterNames) {
+  const char *reserved[] = {"result", "produced", "pure", "closed", "arity"};
+  for (const char *name : reserved) {
+    const std::string source =
+        std::string("agent A { def f(") + name + ": Int): Int { 1 } }";
+    rejects(source, DiagnosticCode::InvalidIdentifier);
+  }
+}
+
+TEST(VagentCheckerTest,
+     RefusesReservedDescriptorKeysAsCodeFragmentParameterNames) {
+  const char *reserved[] = {"result", "produced", "pure", "closed", "arity"};
+  for (const char *name : reserved) {
+    const std::string source =
+        "agent A { def f(): Int { let c := code\"placeholder\"; 1 } }";
+    auto program = Parser(source).parseProgram();
+    ASSERT_TRUE(program.has_value()) << formatDiagnostic(program.error());
+    const auto *literal = findKind(*program, ExprKind::Code);
+    ASSERT_NE(literal, nullptr);
+    const std::string inner = std::string(name) + ": Int | " + name;
+    FragmentTable table;
+    table[{literal->loc, std::nullopt}] = codeRecord(inner, true);
+    const auto errors                   = diagnostics(*program, table);
+    EXPECT_TRUE(std::ranges::any_of(errors,
+                                    [](const Diagnostic &error) {
+                                      return error.code ==
+                                             DiagnosticCode::InvalidIdentifier;
+                                    }))
+        << "Expected InvalidIdentifier for reserved name: " << name << "\n"
+        << describe(errors);
+  }
+}
+
+TEST(VagentCheckerTest, StdMetaNewBuiltinsTypecheckWithImport) {
+  const std::string source = R"(
+    import std:meta
+    agent A {
+      def test_builtins(c: Cell): Int {
+        let r1 := register(c)
+        let r2 := register_all([c])
+        let s1: Str := registration(c)
+        let d1 := dim_named("v")
+        let b1 := as_body(code"1")
+        let h1: Cell := head_of(code"1")
+        let v1 := var_of(c, "x")
+        let m1: Cell := make_cell(42)
+        let w1 := boot_writer()
+        let l1 := boot_linker()
+        let j1: Bool := join_batch(c)
+        let f1 := build_fragment(c)
+        let cf1 := compile_fragment("mod", ["arg"], "res", c)
+        1
+      }
+    }
+  )";
+  auto program             = Parser(source).parseProgram();
+  ASSERT_TRUE(program.has_value()) << formatDiagnostic(program.error());
+  FragmentTable table;
+  for (const auto &decl : program->declarations) {
+    if (decl.kind == DeclKind::Agent) {
+      for (const auto &member : decl.members) {
+        if (member.kind == DeclKind::Method && member.body) {
+          std::vector<const Expr *> stack{member.body.get()};
+          while (!stack.empty()) {
+            const auto *e = stack.back();
+            stack.pop_back();
+            if (e->kind == ExprKind::Code) {
+              table[{e->loc, std::nullopt}] = codeRecord("1", true);
+            }
+            for (const auto &child : e->children) {
+              if (child) stack.push_back(child.get());
+            }
+          }
+        }
+      }
+    }
+  }
+  const auto errors = diagnostics(*program, table);
+  EXPECT_TRUE(errors.empty()) << describe(errors);
+}
+
+TEST(VagentCheckerTest, StdMetaNewNamesAreReservedUnderImport) {
+  const char *metaNames[] = {
+      "register",        "register_all", "registration", "dim_named",
+      "as_body",         "head_of",      "var_of",       "make_cell",
+      "boot_writer",     "boot_linker",  "join_batch",   "build_fragment",
+      "compile_fragment"};
+  for (const char *name : metaNames) {
+    const std::string source = std::string("import std:meta\nagent A { def ") +
+                               name + "(): Int { 1 } }";
+    rejects(source, DiagnosticCode::InvalidIdentifier);
+
+    const std::string sourceLet =
+        std::string("import std:meta\nagent A { def f(): Int { let ") + name +
+        " := 1; 1 } }";
+    rejects(sourceLet, DiagnosticCode::InvalidIdentifier);
+  }
+}
+
+TEST(VagentCheckerTest, StdMetaNewBuiltinsRequireImport) {
+  const char *metaCalls[] = {
+      "register(c)",
+      "register_all([c])",
+      "registration(c)",
+      "dim_named(\"v\")",
+      "as_body(code\"1\")",
+      "head_of(code\"1\")",
+      "var_of(c, \"x\")",
+      "make_cell(42)",
+      "boot_writer()",
+      "boot_linker()",
+      "join_batch(c)",
+      "build_fragment(c)",
+      "compile_fragment(\"mod\", [\"arg\"], \"res\", c)"};
+  for (const char *call : metaCalls) {
+    const std::string source =
+        std::string("agent A { def f(c: Cell): Int { ") + call + "; 1 } }";
+    rejects(source, DiagnosticCode::UnknownName);
+  }
+}
+
+TEST(VagentCheckerTest, ScalarStringAndIntegerBuiltinsTypecheckAsPure) {
+  const std::string source = R"(
+    question test_scalars(): Int
+    agent A {
+      answer test_scalars(): Int {
+        let len: Int := str_len("hello")
+        let b: Opt<Int> := byte_at("hello", 1)
+        let sub: Str := str_slice("hello", 1, 3)
+        let s: Str := int_to_str(42)
+        let n: Opt<Int> := str_to_int("42")
+        len
+      }
+    }
+  )";
+  const auto errors        = diagnostics(source);
+  EXPECT_TRUE(errors.empty()) << describe(errors);
+}
+
+TEST(VagentCheckerTest, UniversalOneBasedIndexingHarmonization) {
+  // Rejects coll[0] with DiagnosticCode::InvalidPosition
+  rejects(
+      R"(
+    agent A {
+      def f(): Int {
+        let xs: List<Int> := [1, 2, 3]
+        xs[0]
+      }
+    }
+  )",
+      DiagnosticCode::InvalidPosition);
+
+  rejects(
+      R"(
+    agent A {
+      def f(): Str {
+        let s: Str := "hello"
+        s[0]
+      }
+    }
+  )",
+      DiagnosticCode::InvalidPosition);
+
+  rejects(
+      R"(
+    agent A {
+      def f(): Int {
+        var xs: List<Int> := [1, 2, 3]
+        xs[0] := 99
+        1
+      }
+    }
+  )",
+      DiagnosticCode::InvalidPosition);
+
+  // Accepts 1-based indexing
+  const auto valid = diagnostics(R"(
+    agent A {
+      def f(): Int {
+        let xs: List<Int> := [10, 20, 30]
+        let s: Str := "world"
+        let first: Int := xs[1]
+        let last: Int := xs[-1]
+        let ch: Str := s[1]
+        first
+      }
+    }
+  )");
+  EXPECT_TRUE(valid.empty()) << describe(valid);
+}
+
+TEST(VagentCheckerTest, CanonicalOptionAndUnwrapSemantics) {
+  // Soft and hard unwrap
+  const auto valid = diagnostics(R"(
+    agent A {
+      def f(optVal: Opt<Int>): Int {
+        let soft: Int := optVal?
+        let hard: Int := optVal!
+        hard
+      }
+    }
+  )");
+  EXPECT_TRUE(valid.empty()) << describe(valid);
+
+  // Soft unwrap on non-Opt is rejected
+  rejects(
+      R"(
+    agent A {
+      def f(n: Int): Int {
+        n?
+      }
+    }
+  )",
+      DiagnosticCode::TypeMismatch);
+
+  // Hard unwrap on non-Opt is rejected
+  rejects(
+      R"(
+    agent A {
+      def f(n: Int): Int {
+        n!
+      }
+    }
+  )",
+      DiagnosticCode::TypeMismatch);
+
+  // Legacy Option<T> unifies with Opt<T>
+  const auto unifies = diagnostics(R"(
+    agent A {
+      def f(a: Option<Int>): Opt<Int> {
+        let b: Opt<Int> := a
+        let c: Option<Int> := b
+        c
+      }
+    }
+  )");
+  EXPECT_TRUE(unifies.empty()) << describe(unifies);
+}
+
+TEST(VagentCheckerTest, SafeNavigationAndNullCoalescing) {
+  const auto valid = diagnostics(R"(
+    record Item { id: Int, label: Str }
+    agent A {
+      def f(optItem: Opt<Item>): Opt<Int> {
+        let idOpt: Opt<Int> := optItem?.id
+        idOpt
+      }
+      def g(optNum: Opt<Int>): Int {
+        let num: Int := optNum ?? 42
+        num
+      }
+    }
+  )");
+  EXPECT_TRUE(valid.empty()) << describe(valid);
+
+  // Coalescing type mismatch
+  rejects(
+      R"(
+    agent A {
+      def f(optNum: Opt<Int>): Int {
+        optNum ?? "fallback"
+      }
+    }
+  )",
+      DiagnosticCode::TypeMismatch);
+}
+
+TEST(VagentCheckerTest, MapTypeSynthesisMethodsAndSubscript) {
+  const auto valid = diagnostics(R"(
+    agent A {
+      def test_map(): Int {
+        let m: Map<Str, Int> := Map { "alpha": 1, "beta": 2 }
+        let empty: Map<Str, Int> := Map {}
+        let optVal: Opt<Int> := m["alpha"]
+        let got: Opt<Int> := m.get("beta")
+        let has: Bool := m.contains("alpha")
+        let has2: Bool := m.has("beta")
+        let keys: List<Str> := m.keys()
+        let count: Int := m.len()
+        var mutableMap: Map<Str, Int> := Map {}
+        mutableMap["key"] := 100
+        count
+      }
+      def test_loop(m: Map<Str, Int>): Int {
+        for (k, v) in m do {
+          let key: Str := k
+          let val: Int := v
+        }
+        for k in m do {
+          let key: Str := k
+        }
+        1
+      }
+    }
+  )");
+  EXPECT_TRUE(valid.empty()) << describe(valid);
+
+  // Disallowed map key type
+  rejects(
+      R"(
+    agent A {
+      def f(): Int {
+        let m := Map { [1, 2]: "bad" }
+        1
+      }
+    }
+  )",
+      DiagnosticCode::TypeMismatch);
+
+  // Subscript assignment type mismatch
+  rejects(
+      R"(
+    agent A {
+      def f(): Int {
+        var m: Map<Str, Int> := Map {}
+        m[42] := 10
+        1
+      }
+    }
+  )",
+      DiagnosticCode::TypeMismatch);
+
+  rejects(
+      R"(
+    agent A {
+      def f(): Int {
+        var m: Map<Str, Int> := Map {}
+        m["key"] := "not an int"
+        1
+      }
+    }
+  )",
+      DiagnosticCode::TypeMismatch);
+}
+
+TEST(VagentCheckerTest, MicroVersionTypeCheckingAndIsolation) {
+  const auto valid = diagnostics(R"(
+    agent A {
+      def test_mv(): Bool {
+        let v1: MicroVersion := @HEAD
+        let v2: MicroVersion := @2a4
+        let eq: Bool := v1 == v2
+        let ne: Bool := v1 != v2
+        let lt: Bool := v1 < v2
+        let lte: Bool := v1 <= v2
+        let gt: Bool := v1 > v2
+        let gte: Bool := v1 >= v2
+        eq
+      }
+      def test_hypertime(v: MicroVersion): Bool {
+        let p: MicroVersion := parent(v)
+        let anc: Bool := is_ancestor_of(p, v)
+        let d: Int := depth(v)
+        anc
+      }
+    }
+  )");
+  EXPECT_TRUE(valid.empty()) << describe(valid);
+
+  // Strict isolation: MicroVersion does not unify with Str or Int
+  rejects(
+      R"(
+    agent A {
+      def f(): MicroVersion {
+        "HEAD"
+      }
+    }
+  )",
+      DiagnosticCode::TypeMismatch);
+
+  rejects(
+      R"(
+    agent A {
+      def f(): MicroVersion {
+        42
+      }
+    }
+  )",
+      DiagnosticCode::TypeMismatch);
+
+  rejects(
+      R"(
+    agent A {
+      def f(): Bool {
+        @HEAD == "HEAD"
+      }
+    }
+  )",
+      DiagnosticCode::TypeMismatch);
+}
+
+TEST(VagentCheckerTest, PatternMatchingAndExhaustiveness) {
+  // Exhaustive bool match
+  const auto validBool = diagnostics(R"(
+    agent A {
+      def f(b: Bool): Int {
+        match b with {
+          true => { 1 }
+          false => { 0 }
+        }
+      }
+    }
+  )");
+  EXPECT_TRUE(validBool.empty()) << describe(validBool);
+
+  // Non-exhaustive bool match
+  rejects(
+      R"(
+    agent A {
+      def f(b: Bool): Int {
+        match b with {
+          true => { 1 }
+        }
+      }
+    }
+  )",
+      DiagnosticCode::TypeMismatch);
+
+  // Wildcard makes bool match exhaustive
+  const auto validWildcard = diagnostics(R"(
+    agent A {
+      def f(b: Bool): Int {
+        match b with {
+          true => { 1 }
+          _ => { 0 }
+        }
+      }
+    }
+  )");
+  EXPECT_TRUE(validWildcard.empty()) << describe(validWildcard);
+
+  // Exhaustive Opt match
+  const auto validOpt = diagnostics(R"(
+    agent A {
+      def f(o: Opt<Int>): Int {
+        match o with {
+          Some(?x) => { x }
+          none => { 0 }
+        }
+      }
+    }
+  )");
+  EXPECT_TRUE(validOpt.empty()) << describe(validOpt);
+
+  // Non-exhaustive Opt match
+  rejects(
+      R"(
+    agent A {
+      def f(o: Opt<Int>): Int {
+        match o with {
+          Some(?x) => { x }
+        }
+      }
+    }
+  )",
+      DiagnosticCode::TypeMismatch);
+
+  // MicroVersion pattern match
+  const auto validMvMatch = diagnostics(R"(
+    agent A {
+      def f(v: MicroVersion): Int {
+        match v with {
+          @HEAD => { 1 }
+          _ => { 0 }
+        }
+      }
+    }
+  )");
+  EXPECT_TRUE(validMvMatch.empty()) << describe(validMvMatch);
+
+  // Tuple pattern
+  const auto validTuple = diagnostics(R"(
+    agent A {
+      def f(p: (Int, Str)): Int {
+        match p with {
+          (?n, ?s) => { n }
+        }
+      }
+    }
+  )");
+  EXPECT_TRUE(validTuple.empty()) << describe(validTuple);
+
+  // Let refutable pattern with diverging else
+  const auto validLet = diagnostics(R"(
+    agent A {
+      def f(o: Opt<Int>): Int {
+        let Some(?x) := o else { return 0 }
+        x
+      }
+    }
+  )");
+  EXPECT_TRUE(validLet.empty()) << describe(validLet);
+
+  // Let refutable pattern without else is rejected
+  rejects(
+      R"(
+    agent A {
+      def f(o: Opt<Int>): Int {
+        let Some(?x) := o
+        x
+      }
+    }
+  )",
+      DiagnosticCode::TypeMismatch);
+
+  // Let refutable pattern with non-diverging else is rejected
+  rejects(
+      R"(
+    agent A {
+      def f(o: Opt<Int>): Int {
+        let Some(?x) := o else { let y := 1 }
+        x
+      }
+    }
+  )",
+      DiagnosticCode::TypeMismatch);
+}
+
+TEST(VagentCheckerTest, MultiArmPlansAndPatternScoping) {
+  // Multi-arm plan with pattern and guard
+  const auto valid = diagnostics(R"(
+    goal Compute(n: Int) perform
+    agent Worker {
+      plan compute for Compute {
+        case 0 => { yield }
+        case ?n where n > 0 => { yield }
+        default => { yield }
+      }
+    }
+  )");
+  EXPECT_TRUE(valid.empty()) << describe(valid);
+
+  // Multi-arm plan matching pattern on nullary goal rejected
+  rejects(
+      R"(
+    goal Work() perform
+    agent Worker {
+      plan work for Work {
+        case 0 => { yield }
+        default => { yield }
+      }
+    }
+  )",
+      DiagnosticCode::InvalidPosition);
+}
+
 } // namespace

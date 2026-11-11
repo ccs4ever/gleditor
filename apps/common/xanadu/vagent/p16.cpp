@@ -45,6 +45,7 @@
 
 #include <algorithm>
 #include <bit>
+#include <set>
 #include <unordered_set>
 #include <utility>
 
@@ -61,12 +62,12 @@ using zigzag::Posward;
 class EngineP16Ceremony final : public P16Ceremony {
 public:
   EngineP16Ceremony(zigzag::ArenaManifold &arena, CellRef agentCell,
-                    DimRef code, DimRef refs, DimRef ref, DimRef name,
-                    DimRef step, std::vector<CellRef> installedCopies,
-                    P16Publish publish)
-      : arena_(arena), agentCell_(agentCell), code_(code), refs_(refs),
-        ref_(ref), name_(name), step_(step),
-        installedCopies_(std::move(installedCopies)),
+                    DimRef code, DimRef kindRegistered, DimRef refs, DimRef ref,
+                    DimRef name, DimRef step,
+                    std::vector<CellRef> installedCopies, P16Publish publish)
+      : arena_(arena), agentCell_(agentCell), code_(code),
+        kindRegistered_(kindRegistered), refs_(refs), ref_(ref), name_(name),
+        step_(step), installedCopies_(std::move(installedCopies)),
         publish_(std::move(publish)) {}
 
   bool onFlagged() override {
@@ -154,14 +155,25 @@ private:
   /// lacking `+d.ref` count toward `malformed` for the flag-time veto.
   std::vector<CellRef> markedCells(std::size_t *malformed = nullptr) const {
     std::vector<CellRef> heads;
-    // A misbound object (no agent cell, no +d.code) sweeps nothing —
-    // the flag-time inventory then re-kinds nothing and the publish
-    // proceeds cleanly, matching an agent with no registered heads.
-    if (agentCell_ != zigzag::noCell && arena_.contains(agentCell_))
-      for (const auto head : zigzag::rankAfter(arena_, agentCell_, code_))
-        heads.push_back(head);
-    for (const auto copy : installedCopies_)
-      if (std::ranges::find(heads, copy) == heads.end()) heads.push_back(copy);
+    std::set<CellRef> headSet;
+    const auto addHead = [&](CellRef h) {
+      if (h != zigzag::noCell && arena_.contains(h) &&
+          headSet.insert(h).second) {
+        heads.push_back(h);
+      }
+    };
+    if (agentCell_ != zigzag::noCell && arena_.contains(agentCell_)) {
+      if (code_ != zigzag::noCell) {
+        for (const auto head : zigzag::rankAfter(arena_, agentCell_, code_))
+          addHead(head);
+      }
+      if (kindRegistered_ != zigzag::noCell) {
+        for (const auto head :
+             zigzag::rankAfter(arena_, agentCell_, kindRegistered_))
+          addHead(head);
+      }
+    }
+    for (const auto copy : installedCopies_) addHead(copy);
 
     std::unordered_set<CellRef> seen;
     std::vector<CellRef> out;
@@ -204,7 +216,7 @@ private:
 
   zigzag::ArenaManifold &arena_;
   CellRef agentCell_;
-  DimRef code_, refs_, ref_, name_, step_;
+  DimRef code_, kindRegistered_, refs_, ref_, name_, step_;
   std::vector<CellRef> installedCopies_;
   P16Publish publish_;
   P16Flag flag_{P16Flag::Clear};
@@ -217,9 +229,9 @@ makeP16Ceremony(zigzag::ArenaManifold &arena, VortexCore &core,
                 const MetaBindSet &binds, P16Publish publish,
                 std::vector<CellRef> installedCopies) {
   return std::make_unique<EngineP16Ceremony>(
-      arena, binds.agentCell, binds.dims.code, binds.dims.refs, binds.dims.ref,
-      core.dims().name, core.dims().step, std::move(installedCopies),
-      std::move(publish));
+      arena, binds.agentCell, binds.dims.code, binds.dims.kindRegistered,
+      binds.dims.refs, binds.dims.ref, core.dims().name, core.dims().step,
+      std::move(installedCopies), std::move(publish));
 }
 
 } // namespace xanadu::vagent

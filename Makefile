@@ -1214,12 +1214,12 @@ $(OBJDIR)/vagent: $(VAGENT_OBJS) $(VAGENT_FRONTEND_OBJS) $(XUDU_CORE_OBJS) $(OBJ
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS)
 
 vagent_frontend_test: $(OBJDIR)/vagent_frontend_test
-$(OBJDIR)/vagent_frontend_test: $(VAGENT_FRONTEND_TEST_OBJS) $(VAGENT_FRONTEND_OBJS)
-	$(CXX) $(LDFLAGS) -o $@ $^ $(TEST_LIBS)
+$(OBJDIR)/vagent_frontend_test: $(VAGENT_FRONTEND_TEST_OBJS) $(VAGENT_FRONTEND_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o $(OBJDIR)/apps/common/ui/lens_file_picker.o
+	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS) $(TEST_LIBS)
 
 vagent_syntax_test: $(OBJDIR)/vagent_syntax_test
-$(OBJDIR)/vagent_syntax_test: $(VAGENT_SYNTAX_TEST_OBJS) $(VAGENT_SYNTAX_OBJS)
-	$(CXX) $(LDFLAGS) -o $@ $^ $(TEST_LIBS)
+$(OBJDIR)/vagent_syntax_test: $(VAGENT_SYNTAX_TEST_OBJS) $(VAGENT_SYNTAX_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o $(OBJDIR)/apps/common/ui/lens_file_picker.o
+	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS) $(TEST_LIBS)
 
 test/vagent-syntax: vagent_syntax_test
 	$(OBJDIR)/vagent_syntax_test

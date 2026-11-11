@@ -102,6 +102,9 @@ struct GenesisOutcome {
   std::size_t dimsResolved{0};
   std::vector<std::string> dimsMinted;
   std::size_t opsRegistered{0};
+  // (b½): durable d.kind-registered heads re-verified and re-bound.
+  std::size_t registeredHeadsRehydrated{0};
+  std::size_t registeredHeadsDropped{0};
   // (d): ordinal-order replay vs fault-dropped records.
   std::size_t patchesReplayed{0};
   std::size_t patchesDropped{0};

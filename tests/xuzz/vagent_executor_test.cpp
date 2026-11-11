@@ -5,10 +5,12 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include "../../apps/common/xanadu/vagent/compiler.hpp"
 #include "../../apps/common/xanadu/vagent/decls.hpp"
 #include "../../apps/common/xanadu/vagent/executor.hpp"
 #include "../../apps/common/xanadu/vagent/frontend.hpp"
 #include "../../apps/common/xanadu/vagent/meta.hpp"
+#include "../../apps/common/xanadu/vagent/parser.hpp"
 #include "../../apps/common/xanadu/vagent/records.hpp"
 
 namespace {
@@ -35,9 +37,8 @@ struct ExecutorHarness {
         fprintf(stderr, "frontend: %s\n", d.detail.c_str());
       return std::unexpected(artifacts.error());
     }
-    auto image =
-        lowerProgram(artifacts->program, ctx.core, ctx.vm, {},
-                     &artifacts->expansion, &artifacts->fragmentInfo);
+    auto image = lowerProgram(artifacts->program, ctx.core, ctx.vm, {},
+                              &artifacts->expansion, &artifacts->fragmentInfo);
     if (!image)
       for (const auto &d : image.error())
         fprintf(stderr, "lower: %s\n", d.detail.c_str());
@@ -86,10 +87,9 @@ TEST(VagentExecutorTest, WakeTurnBumpsTurnAndLeavesNoResiduals) {
   EXPECT_EQ(h.ctx.arena.outstandingMarks(), 0u);
   // A wake journals no new percept — the lone entry is the first
   // turn's Initialize.
-  const auto seen = h.ctx.core.findOrMintDimension("d.seen");
-  const auto journal =
-      zigzag::rankAfter(h.ctx.arena, image->agentCell, seen) |
-      std::ranges::to<std::vector>();
+  const auto seen    = h.ctx.core.findOrMintDimension("d.seen");
+  const auto journal = zigzag::rankAfter(h.ctx.arena, image->agentCell, seen) |
+                       std::ranges::to<std::vector>();
   ASSERT_EQ(journal.size(), 1u);
   EXPECT_EQ(h.ctx.arena.textOf(journal.front()), "Initialize");
 }
@@ -162,10 +162,9 @@ TEST(VagentExecutorTest, PendingEventsDrainDuringSettleWithoutJournaling) {
   EXPECT_TRUE(zigzag::rankAfter(arena, image->agentCell, pend).empty());
   // Internal events are not percepts — the journal holds only the
   // first turn's Initialize.
-  const auto seen = h.ctx.core.findOrMintDimension("d.seen");
-  const auto journal =
-      zigzag::rankAfter(arena, image->agentCell, seen) |
-      std::ranges::to<std::vector>();
+  const auto seen    = h.ctx.core.findOrMintDimension("d.seen");
+  const auto journal = zigzag::rankAfter(arena, image->agentCell, seen) |
+                       std::ranges::to<std::vector>();
   ASSERT_EQ(journal.size(), 1u);
   EXPECT_EQ(arena.textOf(journal.front()), "Initialize");
   EXPECT_EQ(arena.outstandingMarks(), 0u);
@@ -274,6 +273,38 @@ TEST(VagentSelectTest, WhereGuardsSkipFailingClauses) {
   ASSERT_TRUE(picked) << picked.error();
   ASSERT_TRUE(picked->has_value());
   EXPECT_EQ(picked->value().first, bank[1]);
+}
+
+TEST(VagentSelectTest, MultiArmPlanLowersToSequentialClausesAndSelectsByArm) {
+  SelectorFixture f;
+  f.setup("module demo\ngoal Pick(n: Int) perform\n"
+          "agent A {\n"
+          "  plan choose for Pick(n) {\n"
+          "    case 1 => { }\n"
+          "    case ?v where v > 5 => { }\n"
+          "    default => { }\n"
+          "  }\n"
+          "}");
+  ASSERT_TRUE(f.meta);
+  const auto bank = f.clauses("Pick");
+  ASSERT_EQ(bank.size(), 3u);
+  // The primary arm keeps the plan's own name; the rest are Name$k.
+  EXPECT_EQ(f.h.ctx.arena.textOf(*f.h.ctx.arena.linked(
+                bank[0], f.h.ctx.core.dims().name, zigzag::Posward)),
+            "decl:demo:choose");
+  EXPECT_EQ(f.h.ctx.arena.textOf(*f.h.ctx.arena.linked(
+                bank[1], f.h.ctx.core.dims().name, zigzag::Posward)),
+            "decl:demo:choose$2");
+  const auto pick = [&](std::int64_t n) {
+    const auto picked =
+        f.meta->selectClause(f.symbol("Pick"), {}, 256, {CellValue{n}});
+    EXPECT_TRUE(picked && picked->has_value());
+    return picked && picked->has_value() ? picked->value().first
+                                         : zigzag::noCell;
+  };
+  EXPECT_EQ(pick(1), bank[0]);
+  EXPECT_EQ(pick(9), bank[1]);
+  EXPECT_EQ(pick(3), bank[2]);
 }
 
 TEST(VagentSelectTest, WeightsOrderSelectionAndTriedSkips) {
@@ -391,12 +422,12 @@ TEST(VagentExecutorTest, OnHandlerGuardEvaluatesBeforeTheBody) {
   // The [guard] is a real filter now — before this, dispatch ran every
   // clause's body unconditionally. `emit` makes the selection visible:
   // const-false's handler stages nothing, const-true's does.
-  const auto image = h.lower(
-      "module demo\nevent Tick\nevent Fired\nevent Nope\n"
-      "agent A {\n"
-      "  on Tick [2 > 3] { emit Nope{} }\n"
-      "  on Tick [1 < 2] { emit Fired{} }\n"
-      "}");
+  const auto image =
+      h.lower("module demo\nevent Tick\nevent Fired\nevent Nope\n"
+              "agent A {\n"
+              "  on Tick [2 > 3] { emit Nope{} }\n"
+              "  on Tick [1 < 2] { emit Fired{} }\n"
+              "}");
   ASSERT_TRUE(image);
   auto &arena = h.ctx.arena;
 
@@ -416,9 +447,8 @@ TEST(VagentExecutorTest, OnHandlerGuardArityBindsFromTheDeliveredPayload) {
   // name-only percept can't satisfy the contract, so dispatch reads
   // the arity refusal as a falsy guard and skips the clause; the
   // delivered record supplies `n` by name and the handler fires.
-  const auto image = h.lower(
-      "module demo\nevent Ping { n: Int }\nevent Fired\n"
-      "agent A { on Ping { emit Fired{} } }");
+  const auto image = h.lower("module demo\nevent Ping { n: Int }\nevent Fired\n"
+                             "agent A { on Ping { emit Fired{} } }");
   ASSERT_TRUE(image);
   auto &arena = h.ctx.arena;
 
@@ -454,9 +484,9 @@ TEST(VagentExecutorTest, OnHandlerFieldAccessReadsTheDeliveredPayload) {
   // a name-keyed hop over the payload's +d.step rank. A loud alarm
   // fires; a quiet one fails the guard; a bare name-only percept can't
   // bind `severity` at all and the clause skips without faulting.
-  const auto image = h.lower(
-      "module demo\nevent Alarm { severity: Int }\nevent Loud\n"
-      "agent A { on Alarm as a [a.severity > 5] { emit Loud{} } }");
+  const auto image =
+      h.lower("module demo\nevent Alarm { severity: Int }\nevent Loud\n"
+              "agent A { on Alarm as a [a.severity > 5] { emit Loud{} } }");
   ASSERT_TRUE(image);
   auto &arena = h.ctx.arena;
 
@@ -464,11 +494,10 @@ TEST(VagentExecutorTest, OnHandlerFieldAccessReadsTheDeliveredPayload) {
     const auto term  = arena.makeCell(text);
     const auto field = arena.makeCell(text);
     zigzag::expectWritten(arena.setValueBits(
-        field, xanadu::ValueKind::Int64,
-        std::bit_cast<std::uint64_t>(bits)));
-    zigzag::expectWritten(
-        arena.link(field, h.ctx.core.dims().name, DimVector::POS,
-                   arena.makeCell("severity")));
+        field, xanadu::ValueKind::Int64, std::bit_cast<std::uint64_t>(bits)));
+    zigzag::expectWritten(arena.link(field, h.ctx.core.dims().name,
+                                     DimVector::POS,
+                                     arena.makeCell("severity")));
     zigzag::expectWritten(
         arena.link(zigzag::rankTail(arena, term, h.ctx.core.dims().step),
                    h.ctx.core.dims().step, DimVector::POS, field));
@@ -491,8 +520,7 @@ TEST(VagentExecutorTest, OnHandlerFieldAccessReadsTheDeliveredPayload) {
                         .percept     = "Alarm",
                         .payloadCell = alarm("Alarm", 2)});
   ASSERT_TRUE(exec(h.execution(), h.ctx));
-  outbox =
-      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  outbox = VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
   EXPECT_EQ(outbox.size(), 1u) << "severity 2 must fail the guard";
 
   // A name-only percept can't bind the declared `severity` param —
@@ -503,8 +531,7 @@ TEST(VagentExecutorTest, OnHandlerFieldAccessReadsTheDeliveredPayload) {
                         .percept     = "Alarm",
                         .payloadCell = arena.makeCell("Alarm")});
   ASSERT_TRUE(exec(h.execution(), h.ctx));
-  outbox =
-      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  outbox = VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
   EXPECT_EQ(outbox.size(), 1u);
   EXPECT_EQ(arena.outstandingMarks(), 0u);
 }
@@ -516,13 +543,13 @@ TEST(VagentExecutorTest, ConsumeSpendsTheEventForLaterHandlersOnly) {
   // `consume` stops *later* handlers of the same event; statements
   // after consume inside its own body still run, and a handler whose
   // guard fails never consumes — later handlers still see the event.
-  const auto image = h.lower(
-      "module demo\nevent Tick\nevent Big\nevent Mid\nevent Small\n"
-      "agent A {\n"
-      "  on Tick [2 > 3] { emit Small{}; consume }\n"
-      "  on Tick { emit Big{}; consume; emit Mid{} }\n"
-      "  on Tick { emit Small{} }\n"
-      "}");
+  const auto image =
+      h.lower("module demo\nevent Tick\nevent Big\nevent Mid\nevent Small\n"
+              "agent A {\n"
+              "  on Tick [2 > 3] { emit Small{}; consume }\n"
+              "  on Tick { emit Big{}; consume; emit Mid{} }\n"
+              "  on Tick { emit Small{} }\n"
+              "}");
   ASSERT_TRUE(image);
   auto &arena = h.ctx.arena;
 
@@ -541,12 +568,11 @@ TEST(VagentExecutorTest, HandlerPriorityOrdersBeforeDeclarationOrder) {
   // §3.5's merged order: priority first (higher runs earlier), ties
   // keep declaration order. The first-declared handler carries no
   // priority, so priority 2's handler emits ahead of it.
-  const auto image = h.lower(
-      "module demo\nevent Tick\nevent Low\nevent High\n"
-      "agent A {\n"
-      "  on Tick { emit Low{} }\n"
-      "  on Tick priority 2 { emit High{} }\n"
-      "}");
+  const auto image = h.lower("module demo\nevent Tick\nevent Low\nevent High\n"
+                             "agent A {\n"
+                             "  on Tick { emit Low{} }\n"
+                             "  on Tick priority 2 { emit High{} }\n"
+                             "}");
   ASSERT_TRUE(image);
   auto &arena = h.ctx.arena;
 
@@ -565,25 +591,24 @@ TEST(VagentExecutorTest, AgentVarReadsInGuardsAndWritesThroughBodies) {
   // The guide's counting shape: `var` mints the agent's state slot,
   // the guard reads it live, and `high := high + 1` writes through
   // the record's holder at run time — durable across turns.
-  const auto image = h.lower(
-      "module demo\nevent Tick\nevent Done\n"
-      "agent A {\n"
-      "  var high: Int := 0\n"
-      "  on Tick [high < 2] { high := high + 1; emit Done{} }\n"
-      "}");
+  const auto image =
+      h.lower("module demo\nevent Tick\nevent Done\n"
+              "agent A {\n"
+              "  var high: Int := 0\n"
+              "  on Tick [high < 2] { high := high + 1; emit Done{} }\n"
+              "}");
   ASSERT_TRUE(image);
-  auto &arena = h.ctx.arena;
+  auto &arena       = h.ctx.arena;
   const auto highOf = [&]() -> std::int64_t {
-    const auto rec = varsRecord(arena, h.ctx.core, image->agentCell,
-                                "high", false);
+    const auto rec =
+        varsRecord(arena, h.ctx.core, image->agentCell, "high", false);
     if (!rec) return -1;
     const auto holder =
         arena.linked(*rec, h.ctx.core.dims().values, DimVector::POS);
     if (!holder) return -1;
     const auto rendered = h.ctx.core.render(*holder);
     if (!rendered) return -1;
-    if (const auto *n = std::get_if<std::int64_t>(&*rendered))
-      return *n;
+    if (const auto *n = std::get_if<std::int64_t>(&*rendered)) return *n;
     return -1;
   };
 
@@ -759,12 +784,10 @@ TEST(VagentExecutorTest, AwaitGuardFiltersTheWakePercept) {
   const auto grant = [&](std::int64_t ok) {
     const auto term  = arena.makeCell("Grant");
     const auto field = arena.makeCell(std::to_string(ok));
-    zigzag::expectWritten(arena.setValueBits(
-        field, xanadu::ValueKind::Int64,
-        std::bit_cast<std::uint64_t>(ok)));
-    zigzag::expectWritten(
-        arena.link(field, h.ctx.core.dims().name, DimVector::POS,
-                   arena.makeCell("ok")));
+    zigzag::expectWritten(arena.setValueBits(field, xanadu::ValueKind::Int64,
+                                             std::bit_cast<std::uint64_t>(ok)));
+    zigzag::expectWritten(arena.link(field, h.ctx.core.dims().name,
+                                     DimVector::POS, arena.makeCell("ok")));
     zigzag::expectWritten(
         arena.link(zigzag::rankTail(arena, term, h.ctx.core.dims().step),
                    h.ctx.core.dims().step, DimVector::POS, field));
@@ -788,8 +811,7 @@ TEST(VagentExecutorTest, AwaitGuardFiltersTheWakePercept) {
                 .size(),
             1u);
   EXPECT_TRUE(
-      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell)
-          .empty());
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell).empty());
 
   // Grant{ok: 9} satisfies it — the scan skips the first percept on
   // the guard and resumes on the second.
@@ -1101,15 +1123,15 @@ TEST(VagentExecutorTest, SpawnMintsTheChildAndRouteResolvesIt) {
   EXPECT_EQ(outbox[0].kind, "spawn");
   EXPECT_EQ(outbox[0].payloadCell, spawned);
   EXPECT_FALSE(outbox[0].id.empty());
-  EXPECT_TRUE(VagentExecutor::route(arena, h.ctx.core, h.ctx.core.home(),
-                                    outbox[0])
-                  .empty());
+  EXPECT_TRUE(
+      VagentExecutor::route(arena, h.ctx.core, h.ctx.core.home(), outbox[0])
+          .empty());
 
   // The staged emit resolves `for child` to the member's name at
   // stage time; route matches every A-named member — sender and
   // spawned child both receive the percept.
-  const auto deliveries = VagentExecutor::route(
-      arena, h.ctx.core, h.ctx.core.home(), outbox[1]);
+  const auto deliveries =
+      VagentExecutor::route(arena, h.ctx.core, h.ctx.core.home(), outbox[1]);
   EXPECT_EQ(deliveries.size(), 2u);
   EXPECT_TRUE(std::ranges::any_of(
       deliveries, [&](const Delivery &d) { return d.agent == spawned; }));
@@ -1149,8 +1171,8 @@ TEST(VagentExecutorTest, SpawnedMemberRunsItsOwnTurnOnItsSequence) {
       VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
   ASSERT_EQ(outbox.size(), 2u);
   EXPECT_EQ(outbox[0].kind, "spawn");
-  const auto deliveries = VagentExecutor::route(
-      arena, h.ctx.core, h.ctx.core.home(), outbox[1]);
+  const auto deliveries =
+      VagentExecutor::route(arena, h.ctx.core, h.ctx.core.home(), outbox[1]);
   ASSERT_EQ(deliveries.size(), 2u);
   CellRef spawned = noCell;
   for (const auto &d : deliveries) {
@@ -1622,8 +1644,8 @@ TEST(VagentExecutorTest, OnInitializeFiresOnceAheadOfTheFirstPercept) {
   // turn, ahead of that turn's own percept — the outbox reads
   // [Ready, Ping], not [Ping, Ready].
   ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
-  auto out = VagentExecutor::drainOutbox(h.ctx.arena, h.ctx.core,
-                                       image->agentCell);
+  auto out =
+      VagentExecutor::drainOutbox(h.ctx.arena, h.ctx.core, image->agentCell);
   ASSERT_EQ(out.size(), 2u);
   EXPECT_EQ(out[0].payload, "Ready");
   EXPECT_EQ(out[1].payload, "Ping");
@@ -1631,8 +1653,7 @@ TEST(VagentExecutorTest, OnInitializeFiresOnceAheadOfTheFirstPercept) {
   // The $initialized flag record is durable — later turns never
   // re-fire it.
   ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
-  out = VagentExecutor::drainOutbox(h.ctx.arena, h.ctx.core,
-                                    image->agentCell);
+  out = VagentExecutor::drainOutbox(h.ctx.arena, h.ctx.core, image->agentCell);
   ASSERT_EQ(out.size(), 3u);
   EXPECT_EQ(out[2].payload, "Ping");
   EXPECT_EQ(h.ctx.arena.outstandingMarks(), 0u);
@@ -1662,8 +1683,8 @@ TEST(VagentExecutorTest, GoalDroppedRaiseDispatchesTheHandlerNextTurn) {
   // during percept dispatch drains in this same turn — only raises
   // inside the intention walk wait for the next.
   ASSERT_TRUE(exec(h.execution("Cancel"), h.ctx));
-  auto out = VagentExecutor::drainOutbox(h.ctx.arena, h.ctx.core,
-                                       image->agentCell);
+  auto out =
+      VagentExecutor::drainOutbox(h.ctx.arena, h.ctx.core, image->agentCell);
   ASSERT_EQ(out.size(), 2u);
   EXPECT_EQ(out[0].payload, "Done");
   // The guard reads `goal` off the marshaled payload's named fields.
@@ -1688,20 +1709,18 @@ TEST(VagentExecutorTest, GoalAchievedRaiseDispatchesOnRetire) {
   // The plan completes and the intention retires on the Start turn
   // itself; GoalAchieved's handler runs the turn after.
   ASSERT_TRUE(exec(h.execution("Start"), h.ctx));
-  auto out = VagentExecutor::drainOutbox(h.ctx.arena, h.ctx.core,
-                                       image->agentCell);
+  auto out =
+      VagentExecutor::drainOutbox(h.ctx.arena, h.ctx.core, image->agentCell);
   EXPECT_TRUE(out.empty());
   ASSERT_TRUE(exec(h.execution(std::nullopt), h.ctx));
-  out = VagentExecutor::drainOutbox(h.ctx.arena, h.ctx.core,
-                                    image->agentCell);
+  out = VagentExecutor::drainOutbox(h.ctx.arena, h.ctx.core, image->agentCell);
   ASSERT_EQ(out.size(), 1u);
   EXPECT_EQ(out[0].payload, "Won");
 }
 
 TEST(VagentExecutorTest, PlanFailedRaiseCarriesTheFaultCause) {
   ExecutorHarness h;
-  VagentExecutor exec{[](std::string_view key)
-                          -> std::optional<std::int64_t> {
+  VagentExecutor exec{[](std::string_view key) -> std::optional<std::int64_t> {
     if (key == "vagent.intention_backoff") return 0;
     return std::nullopt;
   }};
@@ -1722,16 +1741,15 @@ TEST(VagentExecutorTest, PlanFailedRaiseCarriesTheFaultCause) {
   // retry; the handler dispatches the turn after.
   ASSERT_TRUE(exec(h.execution("Start"), h.ctx));
   ASSERT_TRUE(exec(h.execution(std::nullopt), h.ctx));
-  const auto out = VagentExecutor::drainOutbox(h.ctx.arena, h.ctx.core,
-                                              image->agentCell);
+  const auto out =
+      VagentExecutor::drainOutbox(h.ctx.arena, h.ctx.core, image->agentCell);
   ASSERT_EQ(out.size(), 1u);
   EXPECT_EQ(out[0].payload, "PF");
 }
 
 TEST(VagentExecutorTest, GoalFailedRaisesOnceAtTheFaultCap) {
   ExecutorHarness h;
-  VagentExecutor exec{[](std::string_view key)
-                          -> std::optional<std::int64_t> {
+  VagentExecutor exec{[](std::string_view key) -> std::optional<std::int64_t> {
     if (key == "vagent.intention_backoff") return 0;
     if (key == "vagent.max_intention_faults") return 2;
     return std::nullopt;
@@ -1755,16 +1773,15 @@ TEST(VagentExecutorTest, GoalFailedRaisesOnceAtTheFaultCap) {
   ASSERT_TRUE(exec(h.execution(std::nullopt), h.ctx));
   ASSERT_TRUE(exec(h.execution(std::nullopt), h.ctx));
   ASSERT_TRUE(exec(h.execution(std::nullopt), h.ctx));
-  auto out = VagentExecutor::drainOutbox(h.ctx.arena, h.ctx.core,
-                                       image->agentCell);
+  auto out =
+      VagentExecutor::drainOutbox(h.ctx.arena, h.ctx.core, image->agentCell);
   ASSERT_EQ(out.size(), 1u);
   EXPECT_EQ(out[0].payload, "GF");
 
   // The flag record gates the raise: later settles never re-fire it.
   ASSERT_TRUE(exec(h.execution(std::nullopt), h.ctx));
   ASSERT_TRUE(exec(h.execution(std::nullopt), h.ctx));
-  out = VagentExecutor::drainOutbox(h.ctx.arena, h.ctx.core,
-                                    image->agentCell);
+  out = VagentExecutor::drainOutbox(h.ctx.arena, h.ctx.core, image->agentCell);
   EXPECT_EQ(out.size(), 1u);
   EXPECT_EQ(h.ctx.arena.outstandingMarks(), 0u);
 }
@@ -1772,13 +1789,12 @@ TEST(VagentExecutorTest, GoalFailedRaisesOnceAtTheFaultCap) {
 TEST(VagentExecutorTest, ConditionFaultRaisesOnceAcrossRefusals) {
   ExecutorHarness h;
   VagentExecutor exec;
-  const auto image =
-      h.lower("module demo\nevent Start\nevent Grant\n"
-              "goal G() achieve { succeed when 1 > 0 }\n"
-              "agent A {\n"
-              "  on Start { adopt G() }\n"
-              "  plan p for G { await Grant as g within 9s }\n"
-              "}");
+  const auto image = h.lower("module demo\nevent Start\nevent Grant\n"
+                             "goal G() achieve { succeed when 1 > 0 }\n"
+                             "agent A {\n"
+                             "  on Start { adopt G() }\n"
+                             "  plan p for G { await Grant as g within 9s }\n"
+                             "}");
   ASSERT_TRUE(image);
   const auto seenDim = h.ctx.core.findOrMintDimension("d.seen");
   const auto journal = [&] {
@@ -1796,7 +1812,7 @@ TEST(VagentExecutorTest, ConditionFaultRaisesOnceAcrossRefusals) {
   // runs under a starved grant — a VmFault, not a failure — so §6.4's
   // isolation parks the intention "unchanged" and raises
   // ConditionFault once.
-  auto starved = h.execution("Grant");
+  auto starved                  = h.execution("Grant");
   starved.grant.maxInstructions = 1;
   ASSERT_TRUE(exec(starved, h.ctx));
 
@@ -1804,7 +1820,7 @@ TEST(VagentExecutorTest, ConditionFaultRaisesOnceAcrossRefusals) {
   // the second raise. (No `on` handler exists for either lifecycle
   // event, so the pending drain runs no fragments a starved turn
   // could fault on.)
-  starved                     = h.execution(std::nullopt);
+  starved                       = h.execution(std::nullopt);
   starved.grant.maxInstructions = 1;
   ASSERT_TRUE(exec(starved, h.ctx));
   EXPECT_EQ(std::ranges::count(journal(), "ConditionFault"), 1);
@@ -1899,11 +1915,11 @@ TEST(VagentExecutorTest, PickedStreaksJournalOnStatsEachTurn) {
     return v ? arena.asInt64(*v).value_or(-1) : -1;
   };
 
-  auto turn = h.execution("Tick");
+  auto turn       = h.execution("Tick");
   turn.wakeStreak = 0;
   turn.msgStreak  = 2;
   ASSERT_TRUE(exec(turn, h.ctx));
-  auto wake = h.execution(std::nullopt);
+  auto wake       = h.execution(std::nullopt);
   wake.wakeStreak = 1;
   wake.msgStreak  = 0;
   ASSERT_TRUE(exec(wake, h.ctx));
@@ -1949,8 +1965,7 @@ TEST(VagentExecutorTest, AskElseSuppliesTheValueOnExpiry) {
   // produces -1, r binds it, and the wait completes rather than
   // faulting.
   ASSERT_TRUE(exec(h.execution(), h.ctx));
-  const auto r =
-      varsRecord(arena, h.ctx.core, image->agentCell, "r", false);
+  const auto r = varsRecord(arena, h.ctx.core, image->agentCell, "r", false);
   ASSERT_TRUE(r.has_value());
   const auto rv = arena.linked(*r, h.ctx.core.dims().values, DimVector::POS);
   ASSERT_TRUE(rv.has_value());
@@ -1962,9 +1977,7 @@ TEST(VagentExecutorTest, AskElseSuppliesTheValueOnExpiry) {
   const auto outbox =
       VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
   EXPECT_TRUE(std::ranges::any_of(
-      outbox, [](const OutboxEntry &e) {
-        return e.payload == "Done";
-      }));
+      outbox, [](const OutboxEntry &e) { return e.payload == "Done"; }));
   EXPECT_EQ(arena.outstandingMarks(), 0u);
 }
 
@@ -2002,9 +2015,7 @@ TEST(VagentExecutorTest, AwaitElseCompletesAnExpiredBareWait) {
   const auto outbox =
       VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
   EXPECT_TRUE(std::ranges::any_of(
-      outbox, [](const OutboxEntry &e) {
-        return e.payload == "Done";
-      }));
+      outbox, [](const OutboxEntry &e) { return e.payload == "Done"; }));
   EXPECT_EQ(arena.outstandingMarks(), 0u);
 }
 
@@ -2036,17 +2047,16 @@ TEST(VagentExecutorTest, UnlowerableBooleanConditionsRefuseNotStub) {
   ExecutorHarness h;
   // `u` is bound by nothing — the scalar remainder has no meaning
   // for it and must refuse rather than stub `true`.
-  EXPECT_FALSE(h.lower(
-      "module demo\npredicate level(value: Int)\n"
-      "goal Enough() maintain { holds believes level(?v) from self & "
-      "u >= 1 }\n"
-      "agent A { plan fix for Enough { believe level(9) } }"));
+  EXPECT_FALSE(
+      h.lower("module demo\npredicate level(value: Int)\n"
+              "goal Enough() maintain { holds believes level(?v) from self & "
+              "u >= 1 }\n"
+              "agent A { plan fix for Enough { believe level(9) } }"));
   // A `where` guard is the same Boolean test position — a belief
   // query there refuses instead of silently passing selection.
-  EXPECT_FALSE(h.lower(
-      "module demo\nevent Tick\npredicate p(value: Int)\n"
-      "goal Work() achieve { succeed when 1 == 1 }\n"
-      "agent A { plan p for Work where believes p(?x) { } }"));
+  EXPECT_FALSE(h.lower("module demo\nevent Tick\npredicate p(value: Int)\n"
+                       "goal Work() achieve { succeed when 1 == 1 }\n"
+                       "agent A { plan p for Work where believes p(?x) { } }"));
 }
 
 TEST(VagentExecutorTest, BoundAskWakesOnDeliveredAnswerAndBindsIt) {
@@ -2080,8 +2090,7 @@ TEST(VagentExecutorTest, BoundAskWakesOnDeliveredAnswerAndBindsIt) {
   exec.deliver(arena, h.ctx.core,
                Delivery{.agent       = image->agentCell,
                         .percept     = "stock",
-                        .payloadCell =
-                            arena.makeScalarCell(std::int64_t{7}),
+                        .payloadCell = arena.makeScalarCell(std::int64_t{7}),
                         .correlation = request.front().id});
   ASSERT_TRUE(exec(h.execution(), h.ctx));
 
@@ -2231,8 +2240,8 @@ TEST(VagentExecutorTest, SpawnSeedsParentLineageAndKinAcceptDelegation) {
   ASSERT_EQ(outbox.size(), 2u);
   EXPECT_EQ(outbox[0].kind, "spawn");
   EXPECT_EQ(outbox[1].kind, "achieve");
-  const auto deliveries = VagentExecutor::route(
-      arena, h.ctx.core, h.ctx.core.home(), outbox[1]);
+  const auto deliveries =
+      VagentExecutor::route(arena, h.ctx.core, h.ctx.core.home(), outbox[1]);
   ASSERT_EQ(deliveries.size(), 2u);
   CellRef spawned = noCell;
   for (const auto &d : deliveries) {
@@ -2242,8 +2251,7 @@ TEST(VagentExecutorTest, SpawnSeedsParentLineageAndKinAcceptDelegation) {
   ASSERT_NE(spawned, noCell);
 
   // The spawn seeded the lineage record the accepts default reads.
-  const auto parent =
-      varsRecord(arena, h.ctx.core, spawned, "$parent", false);
+  const auto parent = varsRecord(arena, h.ctx.core, spawned, "$parent", false);
   ASSERT_TRUE(parent.has_value());
   const auto pv =
       arena.linked(*parent, h.ctx.core.dims().values, DimVector::POS);
@@ -2283,18 +2291,17 @@ TEST(VagentExecutorTest, DelegatedAchieveRefusedByNonKinRunsTheElse) {
   // §7.1: accepts(sender, goal_name) defaults to the lineage — a
   // declared Stranger is no kin to A, so the delegation comes back
   // `refused` through the same outbox the ask reply rides.
-  const auto image =
-      h.lower("module demo\nevent Tick\nevent Done\n"
-              "goal Work() perform\n"
-              "goal Outer() perform\n"
-              "agent A {\n"
-              "  var stranger: Opt<Agent> := none\n"
-              "  on Tick { adopt Outer() }\n"
-              "  plan w for Work { }\n"
-              "  plan o for Outer { achieve Work() by stranger "
-              "within 9s else cause;\n"
-              "                     emit Done{} }\n"
-              "}");
+  const auto image = h.lower("module demo\nevent Tick\nevent Done\n"
+                             "goal Work() perform\n"
+                             "goal Outer() perform\n"
+                             "agent A {\n"
+                             "  var stranger: Opt<Agent> := none\n"
+                             "  on Tick { adopt Outer() }\n"
+                             "  plan w for Work { }\n"
+                             "  plan o for Outer { achieve Work() by stranger "
+                             "within 9s else cause;\n"
+                             "                     emit Done{} }\n"
+                             "}");
   ASSERT_TRUE(image);
   auto &arena     = h.ctx.arena;
   const auto iDim = h.ctx.core.findOrMintDimension("d.intention");
@@ -2307,20 +2314,17 @@ TEST(VagentExecutorTest, DelegatedAchieveRefusedByNonKinRunsTheElse) {
   // entry the adapter would have registered — a named rank member
   // carrying no $parent lineage — and `by stranger` reaches it
   // through the bound var exactly like a spawn-result handle.
-  const auto agents   = h.ctx.core.findOrMintDimension("d.agents");
-  const auto dirs     = h.ctx.core.findOrMintDimension("d.dirs");
-  CellRef dirCell     = noCell;
-  for (const CellRef d :
-       zigzag::rankAfter(arena, h.ctx.core.home(), dirs))
+  const auto agents = h.ctx.core.findOrMintDimension("d.agents");
+  const auto dirs   = h.ctx.core.findOrMintDimension("d.dirs");
+  CellRef dirCell   = noCell;
+  for (const CellRef d : zigzag::rankAfter(arena, h.ctx.core.home(), dirs))
     dirCell = d;
   ASSERT_NE(dirCell, noCell);
   const auto stranger = arena.makeCell();
-  zigzag::expectWritten(
-      arena.link(zigzag::rankTail(arena, dirCell, agents), agents,
-                 DimVector::POS, stranger));
-  zigzag::expectWritten(
-      arena.link(stranger, h.ctx.core.dims().name, DimVector::POS,
-                 arena.makeCell("Stranger")));
+  zigzag::expectWritten(arena.link(zigzag::rankTail(arena, dirCell, agents),
+                                   agents, DimVector::POS, stranger));
+  zigzag::expectWritten(arena.link(stranger, h.ctx.core.dims().name,
+                                   DimVector::POS, arena.makeCell("Stranger")));
   const auto var =
       varsRecord(arena, h.ctx.core, image->agentCell, "stranger", true);
   ASSERT_TRUE(var.has_value());
@@ -2335,8 +2339,8 @@ TEST(VagentExecutorTest, DelegatedAchieveRefusedByNonKinRunsTheElse) {
   EXPECT_EQ(outbox[0].kind, "achieve");
   const auto delegator = outbox[0].delegator;
   ASSERT_NE(delegator, noCell);
-  const auto requests = VagentExecutor::route(
-      arena, h.ctx.core, h.ctx.core.home(), outbox[0]);
+  const auto requests =
+      VagentExecutor::route(arena, h.ctx.core, h.ctx.core.home(), outbox[0]);
   ASSERT_EQ(requests.size(), 1u);
   EXPECT_EQ(requests.front().agent, stranger);
   exec.deliver(arena, h.ctx.core, requests.front());
@@ -2354,8 +2358,8 @@ TEST(VagentExecutorTest, DelegatedAchieveRefusedByNonKinRunsTheElse) {
   EXPECT_EQ(refusals[0].target, "A");
   EXPECT_EQ(refusals[0].delegator, delegator);
 
-  const auto replies = VagentExecutor::route(
-      arena, h.ctx.core, h.ctx.core.home(), refusals[0]);
+  const auto replies =
+      VagentExecutor::route(arena, h.ctx.core, h.ctx.core.home(), refusals[0]);
   ASSERT_EQ(replies.size(), 1u);
   exec.deliver(arena, h.ctx.core, replies.front());
 
@@ -2385,21 +2389,18 @@ TEST(VagentExecutorTest, StopTargetsOnlySelfOrSpawnedChildren) {
               "  on Tock { stop stranger }\n"
               "}");
   ASSERT_TRUE(image);
-  auto &arena = h.ctx.arena;
+  auto &arena       = h.ctx.arena;
   const auto agents = h.ctx.core.findOrMintDimension("d.agents");
   const auto dirs   = h.ctx.core.findOrMintDimension("d.dirs");
   CellRef dirCell   = noCell;
-  for (const CellRef d :
-       zigzag::rankAfter(arena, h.ctx.core.home(), dirs))
+  for (const CellRef d : zigzag::rankAfter(arena, h.ctx.core.home(), dirs))
     dirCell = d;
   ASSERT_NE(dirCell, noCell);
   const auto stranger = arena.makeCell();
-  zigzag::expectWritten(
-      arena.link(zigzag::rankTail(arena, dirCell, agents), agents,
-                 DimVector::POS, stranger));
-  zigzag::expectWritten(
-      arena.link(stranger, h.ctx.core.dims().name, DimVector::POS,
-                 arena.makeCell("Stranger")));
+  zigzag::expectWritten(arena.link(zigzag::rankTail(arena, dirCell, agents),
+                                   agents, DimVector::POS, stranger));
+  zigzag::expectWritten(arena.link(stranger, h.ctx.core.dims().name,
+                                   DimVector::POS, arena.makeCell("Stranger")));
   const auto var =
       varsRecord(arena, h.ctx.core, image->agentCell, "stranger", true);
   ASSERT_TRUE(var.has_value());
@@ -2410,19 +2411,19 @@ TEST(VagentExecutorTest, StopTargetsOnlySelfOrSpawnedChildren) {
   // `stop child` — the spawned member's $parent is the running
   // agent, so §4.5's orderly stop applies to it.
   ASSERT_TRUE(exec(h.execution("Boot"), h.ctx));
-  CellRef spawned   = noCell;
+  CellRef spawned = noCell;
   for (const CellRef dir : zigzag::rankAfter(arena, h.ctx.core.home(), dirs))
     for (const CellRef m : zigzag::rankAfter(arena, dir, agents))
       if (m != image->agentCell &&
-          arena.textOf(*arena.linked(m, h.ctx.core.dims().name,
-                                     DimVector::POS)) == "A")
+          arena.textOf(
+              *arena.linked(m, h.ctx.core.dims().name, DimVector::POS)) == "A")
         spawned = m;
   ASSERT_NE(spawned, noCell);
-  const auto flag =
-      varsRecord(arena, h.ctx.core, spawned, "destroying", false);
+  const auto flag = varsRecord(arena, h.ctx.core, spawned, "destroying", false);
   ASSERT_TRUE(flag.has_value());
-  EXPECT_EQ(arena.asInt64(*arena.linked(*flag, h.ctx.core.dims().values,
-                                        DimVector::POS))
+  EXPECT_EQ(arena
+                .asInt64(*arena.linked(*flag, h.ctx.core.dims().values,
+                                       DimVector::POS))
                 .value_or(0),
             1);
 
@@ -2430,8 +2431,7 @@ TEST(VagentExecutorTest, StopTargetsOnlySelfOrSpawnedChildren) {
   // and the member carries no destroy flag.
   EXPECT_FALSE(exec(h.execution("Tock"), h.ctx));
   EXPECT_FALSE(
-      varsRecord(arena, h.ctx.core, stranger, "destroying", false)
-          .has_value());
+      varsRecord(arena, h.ctx.core, stranger, "destroying", false).has_value());
   EXPECT_EQ(arena.outstandingMarks(), 0u);
 }
 
@@ -2521,21 +2521,20 @@ TEST(VagentExecutorTest, AskRunsTheReceiversAnswerAndBindsTheReply) {
 
   // The adapter delivers the request; the receiver's own turn runs
   // the answer head and stages the correlated reply.
-  const auto requests = VagentExecutor::route(
-      arena, h.ctx.core, h.ctx.core.home(), outbox[0]);
+  const auto requests =
+      VagentExecutor::route(arena, h.ctx.core, h.ctx.core.home(), outbox[0]);
   ASSERT_EQ(requests.size(), 1u);
   exec.deliver(arena, h.ctx.core, requests.front());
   ASSERT_TRUE(exec(h.execution(), h.ctx));
-  outbox =
-      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  outbox = VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
   ASSERT_EQ(outbox.size(), 2u);
   EXPECT_EQ(outbox[1].kind, "answer");
   EXPECT_EQ(outbox[1].percept, "stock");
   EXPECT_EQ(outbox[1].correlation, outbox[0].id);
   EXPECT_TRUE(outbox[1].fault.empty());
 
-  const auto replies = VagentExecutor::route(
-      arena, h.ctx.core, h.ctx.core.home(), outbox[1]);
+  const auto replies =
+      VagentExecutor::route(arena, h.ctx.core, h.ctx.core.home(), outbox[1]);
   ASSERT_EQ(replies.size(), 1u);
   EXPECT_EQ(replies[0].percept, "stock");
   EXPECT_EQ(replies[0].correlation, outbox[0].id);
@@ -2544,17 +2543,14 @@ TEST(VagentExecutorTest, AskRunsTheReceiversAnswerAndBindsTheReply) {
   // Turn 3 — the wake binds the answer's VALUE: `r` reads 42, not a
   // handle, and the resumed spine emits Done.
   ASSERT_TRUE(exec(h.execution(), h.ctx));
-  const auto r =
-      varsRecord(arena, h.ctx.core, image->agentCell, "r", false);
+  const auto r = varsRecord(arena, h.ctx.core, image->agentCell, "r", false);
   ASSERT_TRUE(r.has_value());
   const auto rv = arena.linked(*r, h.ctx.core.dims().values, DimVector::POS);
   ASSERT_TRUE(rv.has_value());
   EXPECT_EQ(arena.asInt64(*rv).value_or(0), 42);
-  outbox =
-      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
-  EXPECT_TRUE(std::ranges::any_of(outbox, [](const OutboxEntry &e) {
-    return e.payload == "Done";
-  }));
+  outbox = VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  EXPECT_TRUE(std::ranges::any_of(
+      outbox, [](const OutboxEntry &e) { return e.payload == "Done"; }));
   EXPECT_TRUE(zigzag::rankAfter(arena, image->agentCell, iDim).empty());
   EXPECT_EQ(arena.outstandingMarks(), 0u);
 }
@@ -2583,37 +2579,33 @@ TEST(VagentExecutorTest, AskToAnUnansweredQuestionRepliesWithTheFault) {
   auto outbox =
       VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
   ASSERT_EQ(outbox.size(), 1u);
-  const auto requests = VagentExecutor::route(
-      arena, h.ctx.core, h.ctx.core.home(), outbox[0]);
+  const auto requests =
+      VagentExecutor::route(arena, h.ctx.core, h.ctx.core.home(), outbox[0]);
   ASSERT_EQ(requests.size(), 1u);
   exec.deliver(arena, h.ctx.core, requests.front());
   ASSERT_TRUE(exec(h.execution(), h.ctx));
-  outbox =
-      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  outbox = VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
   ASSERT_EQ(outbox.size(), 2u);
   EXPECT_EQ(outbox[1].kind, "answer");
   EXPECT_EQ(outbox[1].fault, "unanswered");
 
-  const auto replies = VagentExecutor::route(
-      arena, h.ctx.core, h.ctx.core.home(), outbox[1]);
+  const auto replies =
+      VagentExecutor::route(arena, h.ctx.core, h.ctx.core.home(), outbox[1]);
   ASSERT_EQ(replies.size(), 1u);
   exec.deliver(arena, h.ctx.core, replies.front());
   ASSERT_TRUE(exec(h.execution(), h.ctx));
   // The else bound `r` to the cause text, and the wait completed
   // without faulting the intention — the readied spine resumes on
   // the next settle like every else recovery.
-  const auto r =
-      varsRecord(arena, h.ctx.core, image->agentCell, "r", false);
+  const auto r = varsRecord(arena, h.ctx.core, image->agentCell, "r", false);
   ASSERT_TRUE(r.has_value());
   const auto rv = arena.linked(*r, h.ctx.core.dims().values, DimVector::POS);
   ASSERT_TRUE(rv.has_value());
   EXPECT_EQ(arena.textOf(*rv), "unanswered");
   ASSERT_TRUE(exec(h.execution(), h.ctx));
-  outbox =
-      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
-  EXPECT_TRUE(std::ranges::any_of(outbox, [](const OutboxEntry &e) {
-    return e.payload == "Done";
-  }));
+  outbox = VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  EXPECT_TRUE(std::ranges::any_of(
+      outbox, [](const OutboxEntry &e) { return e.payload == "Done"; }));
   EXPECT_TRUE(zigzag::rankAfter(arena, image->agentCell, iDim).empty());
   EXPECT_EQ(arena.outstandingMarks(), 0u);
 }
@@ -2631,7 +2623,9 @@ TEST(VagentExecutorTest, AnswerOverThe32KiBBoundAnswersRemoteFault) {
               "goal Outer() perform\n"
               "agent A {\n"
               "  on Tick { adopt Outer() }\n"
-              "  answer big(): Str { \"" + big + "\" }\n"
+              "  answer big(): Str { \"" +
+              big +
+              "\" }\n"
               "  plan o for Outer { ask self.big() within 9s; emit Done{} }\n"
               "}");
   ASSERT_TRUE(image);
@@ -2641,13 +2635,12 @@ TEST(VagentExecutorTest, AnswerOverThe32KiBBoundAnswersRemoteFault) {
   auto outbox =
       VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
   ASSERT_EQ(outbox.size(), 1u);
-  const auto requests = VagentExecutor::route(
-      arena, h.ctx.core, h.ctx.core.home(), outbox[0]);
+  const auto requests =
+      VagentExecutor::route(arena, h.ctx.core, h.ctx.core.home(), outbox[0]);
   ASSERT_EQ(requests.size(), 1u);
   exec.deliver(arena, h.ctx.core, requests.front());
   ASSERT_TRUE(exec(h.execution(), h.ctx));
-  outbox =
-      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  outbox = VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
   ASSERT_EQ(outbox.size(), 2u);
   EXPECT_EQ(outbox[1].kind, "answer");
   EXPECT_EQ(outbox[1].fault, "remote_fault");
@@ -2682,10 +2675,9 @@ TEST(VagentExecutorTest, AskWithAMalformedTermAnswersRemoteFault) {
   // A two-arg `stock` term: one arg over the declared arity.
   const auto bad = arena.makeCell("stock");
   for (const auto arg : {"a", "b"})
-    zigzag::expectWritten(
-        arena.link(zigzag::rankTail(arena, bad, h.ctx.core.dims().step),
-                   h.ctx.core.dims().step, DimVector::POS,
-                   arena.makeCell(arg)));
+    zigzag::expectWritten(arena.link(
+        zigzag::rankTail(arena, bad, h.ctx.core.dims().step),
+        h.ctx.core.dims().step, DimVector::POS, arena.makeCell(arg)));
   exec.deliver(arena, h.ctx.core,
                Delivery{.agent       = image->agentCell,
                         .id          = outbox[0].id,
@@ -2693,29 +2685,25 @@ TEST(VagentExecutorTest, AskWithAMalformedTermAnswersRemoteFault) {
                         .payloadCell = bad,
                         .sender      = image->agentCell});
   ASSERT_TRUE(exec(h.execution(), h.ctx));
-  outbox =
-      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  outbox = VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
   ASSERT_EQ(outbox.size(), 2u);
   EXPECT_EQ(outbox[1].kind, "answer");
   EXPECT_EQ(outbox[1].fault, "remote_fault");
 
-  const auto replies = VagentExecutor::route(
-      arena, h.ctx.core, h.ctx.core.home(), outbox[1]);
+  const auto replies =
+      VagentExecutor::route(arena, h.ctx.core, h.ctx.core.home(), outbox[1]);
   ASSERT_EQ(replies.size(), 1u);
   exec.deliver(arena, h.ctx.core, replies.front());
   ASSERT_TRUE(exec(h.execution(), h.ctx));
-  const auto r =
-      varsRecord(arena, h.ctx.core, image->agentCell, "r", false);
+  const auto r = varsRecord(arena, h.ctx.core, image->agentCell, "r", false);
   ASSERT_TRUE(r.has_value());
   const auto rv = arena.linked(*r, h.ctx.core.dims().values, DimVector::POS);
   ASSERT_TRUE(rv.has_value());
   EXPECT_EQ(arena.textOf(*rv), "remote_fault");
   ASSERT_TRUE(exec(h.execution(), h.ctx));
-  outbox =
-      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
-  EXPECT_TRUE(std::ranges::any_of(outbox, [](const OutboxEntry &e) {
-    return e.payload == "Done";
-  }));
+  outbox = VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell);
+  EXPECT_TRUE(std::ranges::any_of(
+      outbox, [](const OutboxEntry &e) { return e.payload == "Done"; }));
   EXPECT_TRUE(zigzag::rankAfter(arena, image->agentCell, iDim).empty());
   EXPECT_EQ(arena.outstandingMarks(), 0u);
 }
@@ -2750,8 +2738,8 @@ TEST(VagentExecutorTest, StopSelfHaltsEveryLaterTurn) {
              std::ranges::to<std::vector>())
                 .size(),
             3u);
-  const auto rec = varsRecord(arena, h.ctx.core, image->agentCell,
-                              "stopped", false);
+  const auto rec =
+      varsRecord(arena, h.ctx.core, image->agentCell, "stopped", false);
   ASSERT_TRUE(rec);
   const auto flag =
       arena.linked(*rec, h.ctx.core.dims().values, DimVector::POS);
@@ -2764,12 +2752,11 @@ TEST(VagentExecutorTest, StopSelfHaltsEveryLaterTurn) {
 TEST(VagentExecutorTest, StopRunsOnDestroyBeforeHalting) {
   ExecutorHarness h;
   VagentExecutor exec;
-  const auto image =
-      h.lower("module demo\nevent Tick\nevent Bye\n"
-              "agent A {\n"
-              "  on Tick { stop self }\n"
-              "  on Destroy { emit Bye{} }\n"
-              "}");
+  const auto image = h.lower("module demo\nevent Tick\nevent Bye\n"
+                             "agent A {\n"
+                             "  on Tick { stop self }\n"
+                             "  on Destroy { emit Bye{} }\n"
+                             "}");
   ASSERT_TRUE(image);
   auto &arena = h.ctx.arena;
 
@@ -2866,24 +2853,22 @@ TEST(VagentBeliefTest, PeerProvenanceSurvivesSiblingClauses) {
   // edge would make them contend for the peer cell's single
   // -d.values slot — the second write silently displacing the
   // first's provenance. Scalar content keeps both.
-  const auto wetClause = meta.believe("weather", arena.makeCell("wet"),
-                                      peer, 1);
-  const auto dryClause = meta.believe("weather", arena.makeCell("dry"),
-                                      peer, 2);
+  const auto wetClause =
+      meta.believe("weather", arena.makeCell("wet"), peer, 1);
+  const auto dryClause =
+      meta.believe("weather", arena.makeCell("dry"), peer, 2);
   ASSERT_TRUE(wetClause && dryClause);
   const auto sourceDim = h.ctx.core.findDimension("d.source");
   ASSERT_TRUE(sourceDim.has_value());
   for (const auto *clause : {&*wetClause, &*dryClause}) {
     const auto source = arena.linked(*clause, *sourceDim, DimVector::POS);
     ASSERT_TRUE(source.has_value());
-    const auto slot =
-        varsRecord(arena, h.ctx.core, *source, "peer", false);
+    const auto slot = varsRecord(arena, h.ctx.core, *source, "peer", false);
     ASSERT_TRUE(slot.has_value());
     const auto value =
         arena.linked(*slot, h.ctx.core.dims().values, DimVector::POS);
     ASSERT_TRUE(value.has_value());
-    EXPECT_EQ(arena.asInt64(*value),
-              std::optional{std::int64_t(peer)});
+    EXPECT_EQ(arena.asInt64(*value), std::optional{std::int64_t(peer)});
   }
 }
 
@@ -3145,30 +3130,28 @@ TEST(VagentExecutorTest, CapcallWithoutAnInstalledSkillRefusesTheStep) {
 TEST(VagentExecutorTest, BehaviorMemberMountsAtCreationAndUnmounts) {
   ExecutorHarness h;
   VagentExecutor exec;
-  const auto image = h.lower(
-      "module demo\nevent Tick\nevent Remove\nevent Counted\n"
-      "behavior Reporter {\n"
-      "  on Tick { emit Counted{} }\n"
-      "}\n"
-      "agent Host {\n"
-      "  behavior Reporter\n"
-      "  on Remove { unmount Reporter }\n"
-      "}");
+  const auto image =
+      h.lower("module demo\nevent Tick\nevent Remove\nevent Counted\n"
+              "behavior Reporter {\n"
+              "  on Tick { emit Counted{} }\n"
+              "}\n"
+              "agent Host {\n"
+              "  behavior Reporter\n"
+              "  on Remove { unmount Reporter }\n"
+              "}");
   ASSERT_TRUE(image);
   auto &arena      = h.ctx.arena;
   const auto bDim  = h.ctx.core.findOrMintDimension("d.behavior");
   const auto count = [&] {
-    return VagentExecutor::drainOutbox(arena, h.ctx.core,
-                                     image->agentCell)
+    return VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell)
         .size();
   };
 
   // Turn 1 mounts the member (the $create spine) before the Tick
   // dispatches — the behavior's own clause answers it.
   ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
-  const auto instances =
-      zigzag::rankAfter(arena, image->agentCell, bDim) |
-      std::ranges::to<std::vector>();
+  const auto instances = zigzag::rankAfter(arena, image->agentCell, bDim) |
+                         std::ranges::to<std::vector>();
   ASSERT_EQ(instances.size(), 1u);
   EXPECT_EQ(arena.textOf(instances.front()), "Reporter");
   EXPECT_EQ(count(), 1u);
@@ -3180,8 +3163,7 @@ TEST(VagentExecutorTest, BehaviorMemberMountsAtCreationAndUnmounts) {
   // …until unmount splices the instance: the next Tick contributes
   // nothing.
   ASSERT_TRUE(exec(h.execution("Remove"), h.ctx));
-  EXPECT_TRUE(
-      zigzag::rankAfter(arena, image->agentCell, bDim).empty());
+  EXPECT_TRUE(zigzag::rankAfter(arena, image->agentCell, bDim).empty());
   ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
   EXPECT_EQ(count(), 2u);
 }
@@ -3189,15 +3171,14 @@ TEST(VagentExecutorTest, BehaviorMemberMountsAtCreationAndUnmounts) {
 TEST(VagentExecutorTest, MountedBehaviorContributesAPlanToTheGoal) {
   ExecutorHarness h;
   VagentExecutor exec;
-  const auto image = h.lower(
-      "module demo\nevent Tick\nevent Helped\n"
-      "goal Work() perform\n"
-      "behavior Helper {\n"
-      "  plan h for Work { emit Helped{} }\n"
-      "}\n"
-      "agent A {\n"
-      "  on Tick { mount Helper() ; adopt Work() }\n"
-      "}");
+  const auto image = h.lower("module demo\nevent Tick\nevent Helped\n"
+                             "goal Work() perform\n"
+                             "behavior Helper {\n"
+                             "  plan h for Work { emit Helped{} }\n"
+                             "}\n"
+                             "agent A {\n"
+                             "  on Tick { mount Helper() ; adopt Work() }\n"
+                             "}");
   ASSERT_TRUE(image);
   auto &arena = h.ctx.arena;
 
@@ -3217,19 +3198,19 @@ TEST(VagentExecutorTest, MountedBehaviorContributesAPlanToTheGoal) {
 TEST(VagentExecutorTest, InstallMemberRunsBeforeInitialize) {
   ExecutorHarness h;
   VagentExecutor exec;
-  const auto image = h.lower(
-      "module demo\nevent Installed\nevent Init\n"
-      "capacity Navigation { def goto(x: Int): Int }\n"
-      "skill Walker(level: Int) implements Navigation {\n"
-      "  var speed: Int := level\n"
-      "  on install { emit Installed{} }\n"
-      "  def goto(x: Int): Int { x }\n"
-      "}\n"
-      "agent A {\n"
-      "  uses Navigation\n"
-      "  install Walker(7)\n"
-      "  on Initialize { emit Init{} }\n"
-      "}");
+  const auto image =
+      h.lower("module demo\nevent Installed\nevent Init\n"
+              "capacity Navigation { def goto(x: Int): Int }\n"
+              "skill Walker(level: Int) implements Navigation {\n"
+              "  var speed: Int := level\n"
+              "  on install { emit Installed{} }\n"
+              "  def goto(x: Int): Int { x }\n"
+              "}\n"
+              "agent A {\n"
+              "  uses Navigation\n"
+              "  install Walker(7)\n"
+              "  on Initialize { emit Init{} }\n"
+              "}");
   ASSERT_TRUE(image);
   auto &arena = h.ctx.arena;
 
@@ -3237,16 +3218,14 @@ TEST(VagentExecutorTest, InstallMemberRunsBeforeInitialize) {
   // Initialize dispatches — even on a message-less first turn.
   ASSERT_TRUE(exec(h.execution(), h.ctx));
 
-  const auto skillDim = h.ctx.core.findOrMintDimension("d.skill");
-  const auto instances =
-      zigzag::rankAfter(arena, image->agentCell, skillDim) |
-      std::ranges::to<std::vector>();
+  const auto skillDim  = h.ctx.core.findOrMintDimension("d.skill");
+  const auto instances = zigzag::rankAfter(arena, image->agentCell, skillDim) |
+                         std::ranges::to<std::vector>();
   ASSERT_EQ(instances.size(), 1u);
   const auto frame =
       arena.cloneMaster(instances.front(), h.ctx.core.dims().clone);
   ASSERT_TRUE(frame);
-  const auto speed =
-      varsRecord(arena, h.ctx.core, *frame, "speed", false);
+  const auto speed = varsRecord(arena, h.ctx.core, *frame, "speed", false);
   ASSERT_TRUE(speed);
   const auto sv =
       arena.linked(*speed, h.ctx.core.dims().values, DimVector::POS);
@@ -3263,12 +3242,11 @@ TEST(VagentExecutorTest, InstallMemberRunsBeforeInitialize) {
 TEST(VagentExecutorTest, UnmountOfAMissingBehaviorRefusesTheTurn) {
   ExecutorHarness h;
   VagentExecutor exec;
-  const auto image = h.lower(
-      "module demo\nevent Tick\n"
-      "behavior Helper { on Tick { emit Tick{} } }\n"
-      "agent A {\n"
-      "  on Tick { unmount Helper }\n"
-      "}");
+  const auto image = h.lower("module demo\nevent Tick\n"
+                             "behavior Helper { on Tick { emit Tick{} } }\n"
+                             "agent A {\n"
+                             "  on Tick { unmount Helper }\n"
+                             "}");
   ASSERT_TRUE(image);
   // Nothing mounted — the verb's honest no faults the turn, the same
   // contract a refused `stop` or `uninstall` keeps.
@@ -3278,23 +3256,20 @@ TEST(VagentExecutorTest, UnmountOfAMissingBehaviorRefusesTheTurn) {
 TEST(VagentExecutorTest, MountedBehaviorFieldsCountTicksAcrossEvents) {
   ExecutorHarness h;
   VagentExecutor exec;
-  const auto image = h.lower(
-      "module demo\nevent Tick\n"
-      "behavior Counter {\n"
-      "  var ticks: Int := 0\n"
-      "  on Tick { ticks := ticks + 1 }\n"
-      "}\n"
-      "agent Host {\n"
-      "  behavior Counter\n"
-      "}");
+  const auto image = h.lower("module demo\nevent Tick\n"
+                             "behavior Counter {\n"
+                             "  var ticks: Int := 0\n"
+                             "  on Tick { ticks := ticks + 1 }\n"
+                             "}\n"
+                             "agent Host {\n"
+                             "  behavior Counter\n"
+                             "}");
   ASSERT_TRUE(image);
   auto &arena = h.ctx.arena;
   auto &core  = h.ctx.core;
-  for (int i = 0; i < 3; ++i)
-    ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
-  const auto inst = arena.linked(image->agentCell,
-                                 core.findOrMintDimension("d.behavior"),
-                                 DimVector::POS);
+  for (int i = 0; i < 3; ++i) ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  const auto inst = arena.linked(
+      image->agentCell, core.findOrMintDimension("d.behavior"), DimVector::POS);
   ASSERT_TRUE(inst);
   const auto ticks = varsRecord(arena, core, *inst, "ticks", false);
   ASSERT_TRUE(ticks);
@@ -3306,34 +3281,30 @@ TEST(VagentExecutorTest, MountedBehaviorFieldsCountTicksAcrossEvents) {
 TEST(VagentExecutorTest, MountedBehaviorInstancesKeepSeparateFields) {
   ExecutorHarness h;
   VagentExecutor exec;
-  const auto image = h.lower(
-      "module demo\nevent Tick\n"
-      "behavior Counter(start: Int) {\n"
-      "  var ticks: Int := start\n"
-      "  on Tick { ticks := ticks + 1 }\n"
-      "}\n"
-      "agent Host {\n"
-      "  behavior Counter(10)\n"
-      "  behavior Counter(100)\n"
-      "}");
+  const auto image = h.lower("module demo\nevent Tick\n"
+                             "behavior Counter(start: Int) {\n"
+                             "  var ticks: Int := start\n"
+                             "  on Tick { ticks := ticks + 1 }\n"
+                             "}\n"
+                             "agent Host {\n"
+                             "  behavior Counter(10)\n"
+                             "  behavior Counter(100)\n"
+                             "}");
   ASSERT_TRUE(image);
   auto &arena = h.ctx.arena;
   auto &core  = h.ctx.core;
   ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
   // One Tick bumped each instance through its own $owner — Counter(10)
   // reads 11, Counter(100) reads 101. Mount order is the rank's order.
-  const auto bDim = core.findOrMintDimension("d.behavior");
-  const auto insts =
-      zigzag::rankAfter(arena, image->agentCell, bDim) |
-      std::ranges::to<std::vector>();
+  const auto bDim  = core.findOrMintDimension("d.behavior");
+  const auto insts = zigzag::rankAfter(arena, image->agentCell, bDim) |
+                     std::ranges::to<std::vector>();
   ASSERT_EQ(insts.size(), 2u);
   for (const auto [inst, want] : std::vector<std::pair<CellRef, int64_t>>{
-           {insts[0], 11},
-           {insts[1], 101}}) {
+           {insts[0], 11}, {insts[1], 101}}) {
     const auto ticks = varsRecord(arena, core, inst, "ticks", false);
     ASSERT_TRUE(ticks);
-    const auto value =
-        arena.linked(*ticks, core.dims().values, DimVector::POS);
+    const auto value = arena.linked(*ticks, core.dims().values, DimVector::POS);
     ASSERT_TRUE(value);
     EXPECT_EQ(arena.asInt64(*value).value_or(-1), want);
   }
@@ -3342,24 +3313,24 @@ TEST(VagentExecutorTest, MountedBehaviorInstancesKeepSeparateFields) {
 TEST(VagentExecutorTest, SkillMethodReadsAndWritesFrameFields) {
   ExecutorHarness h;
   VagentExecutor exec;
-  const auto image = h.lower(
-      "module demo\nevent Tick\nevent Go\n"
-      "capacity Navigation { def goto(x: Int): Int def probe(): Int }\n"
-      "skill Walker implements Navigation {\n"
-      "  var speed: Int := 0\n"
-      "  on install { speed := 7 }\n"
-      "  def goto(x: Int): Int { speed := x; speed }\n"
-      "  def probe(): Int { speed }\n"
-      "}\n"
-      "agent Host {\n"
-      "  uses Navigation\n"
-      "  install Walker\n"
-      "  on Tick { let r := Navigation.probe() }\n"
-      "  on Go { let r := Navigation.goto(21) }\n"
-      "}");
+  const auto image =
+      h.lower("module demo\nevent Tick\nevent Go\n"
+              "capacity Navigation { def goto(x: Int): Int def probe(): Int }\n"
+              "skill Walker implements Navigation {\n"
+              "  var speed: Int := 0\n"
+              "  on install { speed := 7 }\n"
+              "  def goto(x: Int): Int { speed := x; speed }\n"
+              "  def probe(): Int { speed }\n"
+              "}\n"
+              "agent Host {\n"
+              "  uses Navigation\n"
+              "  install Walker\n"
+              "  on Tick { let r := Navigation.probe() }\n"
+              "  on Go { let r := Navigation.goto(21) }\n"
+              "}");
   ASSERT_TRUE(image);
-  auto &arena = h.ctx.arena;
-  auto &core  = h.ctx.core;
+  auto &arena  = h.ctx.arena;
+  auto &core   = h.ctx.core;
   const auto r = [&]() -> std::optional<std::int64_t> {
     const auto rec = varsRecord(arena, core, image->agentCell, "r", false);
     if (!rec) return std::nullopt;
@@ -3367,9 +3338,8 @@ TEST(VagentExecutorTest, SkillMethodReadsAndWritesFrameFields) {
     return v ? arena.asInt64(*v) : std::nullopt;
   };
   const auto speed = [&]() -> std::optional<std::int64_t> {
-    const auto inst = arena.linked(image->agentCell,
-                                   core.findOrMintDimension("d.skill"),
-                                   DimVector::POS);
+    const auto inst = arena.linked(
+        image->agentCell, core.findOrMintDimension("d.skill"), DimVector::POS);
     if (!inst) return std::nullopt;
     const auto frame = arena.cloneMaster(*inst, core.dims().clone);
     if (!frame) return std::nullopt;
@@ -3394,16 +3364,16 @@ TEST(VagentExecutorTest, SkillMethodReadsAndWritesFrameFields) {
 TEST(VagentExecutorTest, EffectDoneResumesTheParkedIntentionWithTheResult) {
   ExecutorHarness h;
   VagentExecutor exec;
-  const auto image = h.lower(
-      "module demo\nevent Tick\ngoal Work() perform\n"
-      "capacity Navigation { effect def read(): Int within 3s }\n"
-      "native skill Device implements Navigation\n"
-      "agent A {\n"
-      "  uses Navigation\n"
-      "  install Device\n"
-      "  on Tick { adopt Work() }\n"
-      "  plan w for Work { let r := Navigation.read() }\n"
-      "}");
+  const auto image =
+      h.lower("module demo\nevent Tick\ngoal Work() perform\n"
+              "capacity Navigation { effect def read(): Int within 3s }\n"
+              "native skill Device implements Navigation\n"
+              "agent A {\n"
+              "  uses Navigation\n"
+              "  install Device\n"
+              "  on Tick { adopt Work() }\n"
+              "  plan w for Work { let r := Navigation.read() }\n"
+              "}");
   ASSERT_TRUE(image);
   auto &arena = h.ctx.arena;
   auto &core  = h.ctx.core;
@@ -3432,16 +3402,16 @@ TEST(VagentExecutorTest, EffectDoneResumesTheParkedIntentionWithTheResult) {
 TEST(VagentExecutorTest, EffectFailedRunsTheElseLadderWithTheCause) {
   ExecutorHarness h;
   VagentExecutor exec;
-  const auto image = h.lower(
-      "module demo\nevent Tick\ngoal Work() perform\n"
-      "capacity Navigation { effect def read(): Int within 3s }\n"
-      "native skill Device implements Navigation\n"
-      "agent A {\n"
-      "  uses Navigation\n"
-      "  install Device\n"
-      "  on Tick { adopt Work() }\n"
-      "  plan w for Work { let r := Navigation.read() else 0 }\n"
-      "}");
+  const auto image =
+      h.lower("module demo\nevent Tick\ngoal Work() perform\n"
+              "capacity Navigation { effect def read(): Int within 3s }\n"
+              "native skill Device implements Navigation\n"
+              "agent A {\n"
+              "  uses Navigation\n"
+              "  install Device\n"
+              "  on Tick { adopt Work() }\n"
+              "  plan w for Work { let r := Navigation.read() else 0 }\n"
+              "}");
   ASSERT_TRUE(image);
   auto &arena = h.ctx.arena;
   auto &core  = h.ctx.core;
@@ -3467,16 +3437,16 @@ TEST(VagentExecutorTest, EffectFailedRunsTheElseLadderWithTheCause) {
 TEST(VagentExecutorTest, EffectDeadlineStagesCancelBeforeTheLadder) {
   ExecutorHarness h;
   VagentExecutor exec;
-  const auto image = h.lower(
-      "module demo\nevent Tick\ngoal Work() perform\n"
-      "capacity Navigation { effect def read(): Int within 1s }\n"
-      "native skill Device implements Navigation\n"
-      "agent A {\n"
-      "  uses Navigation\n"
-      "  install Device\n"
-      "  on Tick { adopt Work() }\n"
-      "  plan w for Work { let r := Navigation.read() else 0 }\n"
-      "}");
+  const auto image =
+      h.lower("module demo\nevent Tick\ngoal Work() perform\n"
+              "capacity Navigation { effect def read(): Int within 1s }\n"
+              "native skill Device implements Navigation\n"
+              "agent A {\n"
+              "  uses Navigation\n"
+              "  install Device\n"
+              "  on Tick { adopt Work() }\n"
+              "  plan w for Work { let r := Navigation.read() else 0 }\n"
+              "}");
   ASSERT_TRUE(image);
   auto &arena = h.ctx.arena;
   auto &core  = h.ctx.core;
@@ -3488,8 +3458,7 @@ TEST(VagentExecutorTest, EffectDeadlineStagesCancelBeforeTheLadder) {
   // No delivery — the within bound elapses, staging cancel for the
   // binding before the else ladder runs.
   ASSERT_TRUE(exec(h.execution(), h.ctx));
-  const auto after =
-      VagentExecutor::drainOutbox(arena, core, image->agentCell);
+  const auto after = VagentExecutor::drainOutbox(arena, core, image->agentCell);
   // drainOutbox reads without consuming — the rank still holds the
   // request; the cancel is the new entry.
   ASSERT_EQ(after.size(), 2u);
@@ -3505,16 +3474,16 @@ TEST(VagentExecutorTest, EffectDeadlineStagesCancelBeforeTheLadder) {
 TEST(VagentExecutorTest, HandlerStagedEffectsFailAsAnEvent) {
   ExecutorHarness h;
   VagentExecutor exec;
-  const auto image = h.lower(
-      "module demo\nevent Tick\nevent Seen\n"
-      "capacity Navigation { effect def read(): Int within 3s }\n"
-      "native skill Device implements Navigation\n"
-      "agent A {\n"
-      "  uses Navigation\n"
-      "  install Device\n"
-      "  on Tick { Navigation.read() }\n"
-      "  on EffectFailed { emit Seen{} }\n"
-      "}");
+  const auto image =
+      h.lower("module demo\nevent Tick\nevent Seen\n"
+              "capacity Navigation { effect def read(): Int within 3s }\n"
+              "native skill Device implements Navigation\n"
+              "agent A {\n"
+              "  uses Navigation\n"
+              "  install Device\n"
+              "  on Tick { Navigation.read() }\n"
+              "  on EffectFailed { emit Seen{} }\n"
+              "}");
   ASSERT_TRUE(image);
   auto &arena = h.ctx.arena;
   auto &core  = h.ctx.core;
@@ -3528,7 +3497,7 @@ TEST(VagentExecutorTest, HandlerStagedEffectsFailAsAnEvent) {
   // The binding's failure arrives as the EffectFailed event the spec
   // gives handler calls — ordinary dispatch, `on EffectFailed` runs.
   exec.deliver(arena, core,
-               Delivery{.agent   = image->agentCell,
+               Delivery{.agent       = image->agentCell,
                         .percept     = "EffectFailed",
                         .correlation = staged[0].id,
                         .fault       = "busy"});
@@ -3587,9 +3556,9 @@ TEST(VagentExecutorTest, UnroutableTargetRaisesDeliveryFailedOnTheSender) {
   EXPECT_EQ(outbox[0].kind, "emit");
   // No member is named "Missing" — the adapter's route comes back
   // empty, which is §7.3's failure horizon for a local send.
-  EXPECT_TRUE(VagentExecutor::route(arena, h.ctx.core, h.ctx.core.home(),
-                                    outbox[0])
-                  .empty());
+  EXPECT_TRUE(
+      VagentExecutor::route(arena, h.ctx.core, h.ctx.core.home(), outbox[0])
+          .empty());
   exec.deliveryFailed(arena, h.ctx.core, outbox[0]);
   ASSERT_TRUE(exec(h.execution(), h.ctx));
   const auto after =
@@ -3600,10 +3569,9 @@ TEST(VagentExecutorTest, UnroutableTargetRaisesDeliveryFailedOnTheSender) {
   // id — the failure must not re-raise.
   exec.deliveryFailed(arena, h.ctx.core, outbox[0]);
   ASSERT_TRUE(exec(h.execution(), h.ctx));
-  EXPECT_EQ(VagentExecutor::drainOutbox(arena, h.ctx.core,
-                                      image->agentCell)
-                .size(),
-            2u);
+  EXPECT_EQ(
+      VagentExecutor::drainOutbox(arena, h.ctx.core, image->agentCell).size(),
+      2u);
   EXPECT_EQ(arena.outstandingMarks(), 0u);
 }
 
@@ -3634,18 +3602,18 @@ TEST(VagentExecutorTest, DownOnChildRaisesChildDownAndFailsItsWaits) {
   ASSERT_EQ(staged.size(), 2u);
   EXPECT_EQ(staged[0].kind, "spawn");
   EXPECT_EQ(staged[1].kind, "ask");
-  const auto childVar = varsRecord(arena, core, image->agentCell, "child", false);
+  const auto childVar =
+      varsRecord(arena, core, image->agentCell, "child", false);
   ASSERT_TRUE(childVar);
-  const auto childRef = arena.linked(*childVar, core.dims().values,
-                                     DimVector::POS);
+  const auto childRef =
+      arena.linked(*childVar, core.dims().values, DimVector::POS);
   ASSERT_TRUE(childRef);
   const auto member = arena.asInt64(*childRef);
   ASSERT_TRUE(member);
   // The adapter's monitored-loss report: §"internal events"' Down
   // rung raises ChildDown and fails intentions waiting on the child —
   // both happen on the parent's next turn, not in the adapter's call.
-  exec.childDown(arena, core, image->agentCell,
-                 static_cast<CellRef>(*member));
+  exec.childDown(arena, core, image->agentCell, static_cast<CellRef>(*member));
   // The turn's two halves: the pending drain dispatches ChildDown
   // first, then the reconsideration walk's awaitFault rung binds the
   // else's cause — the readied spine advances next turn.
@@ -3656,8 +3624,7 @@ TEST(VagentExecutorTest, DownOnChildRaisesChildDownAndFailsItsWaits) {
   EXPECT_EQ(outbox[2].payload, "Down");
   const auto r = varsRecord(arena, core, image->agentCell, "r", false);
   ASSERT_TRUE(r);
-  const auto rv = arena.linked(*r, core.dims().values,
-                               DimVector::POS);
+  const auto rv = arena.linked(*r, core.dims().values, DimVector::POS);
   ASSERT_TRUE(rv);
   EXPECT_EQ(arena.textOf(*rv), "down");
   // The readied intention runs its next spine step — the plan's own
@@ -3669,12 +3636,10 @@ TEST(VagentExecutorTest, DownOnChildRaisesChildDownAndFailsItsWaits) {
   EXPECT_EQ(resumed[3].payload, "Lost");
   // A second report for the same member is the journal's dedupe —
   // no second ChildDown dispatches.
-  exec.childDown(arena, core, image->agentCell,
-                 static_cast<CellRef>(*member));
+  exec.childDown(arena, core, image->agentCell, static_cast<CellRef>(*member));
   ASSERT_TRUE(exec(h.execution(), h.ctx));
-  EXPECT_EQ(
-      VagentExecutor::drainOutbox(arena, core, image->agentCell).size(),
-      4u);
+  EXPECT_EQ(VagentExecutor::drainOutbox(arena, core, image->agentCell).size(),
+            4u);
   EXPECT_EQ(arena.outstandingMarks(), 0u);
 }
 
@@ -3693,18 +3658,18 @@ TEST(VagentExecutorTest, OrderlyStopSuppressesTheTrailingActorDown) {
   auto &arena = h.ctx.arena;
   auto &core  = h.ctx.core;
   ASSERT_TRUE(exec(h.execution("Boot"), h.ctx));
-  const auto childVar = varsRecord(arena, core, image->agentCell, "child", false);
+  const auto childVar =
+      varsRecord(arena, core, image->agentCell, "child", false);
   ASSERT_TRUE(childVar);
-  const auto childRef = arena.linked(*childVar, core.dims().values,
-                                     DimVector::POS);
+  const auto childRef =
+      arena.linked(*childVar, core.dims().values, DimVector::POS);
   ASSERT_TRUE(childRef);
   const auto member = arena.asInt64(*childRef);
   ASSERT_TRUE(member);
   // §4.5: "the parent reports one ChildStopping even when the
   // runtime's ActorDown follows it" — the stop's pre-mark makes the
   // trailing report a no-op.
-  exec.childDown(arena, core, image->agentCell,
-                 static_cast<CellRef>(*member));
+  exec.childDown(arena, core, image->agentCell, static_cast<CellRef>(*member));
   ASSERT_TRUE(exec(h.execution(), h.ctx));
   const auto outbox =
       VagentExecutor::drainOutbox(arena, core, image->agentCell);
@@ -3748,8 +3713,7 @@ TEST(VagentExecutorTest, OrderlyStopFailsWaitsParkedOnTheChild) {
   ASSERT_TRUE(exec(h.execution(), h.ctx));
   const auto r = varsRecord(arena, core, image->agentCell, "r", false);
   ASSERT_TRUE(r);
-  const auto rv = arena.linked(*r, core.dims().values,
-                               DimVector::POS);
+  const auto rv = arena.linked(*r, core.dims().values, DimVector::POS);
   ASSERT_TRUE(rv);
   EXPECT_EQ(arena.textOf(*rv), "stop");
   ASSERT_TRUE(exec(h.execution(), h.ctx));
@@ -3761,25 +3725,22 @@ TEST(VagentExecutorTest, OrderlyStopFailsWaitsParkedOnTheChild) {
   // The shared dedupe: an adapter-side report for the same member —
   // a terminate racing the orderly stop — raises no second
   // ChildStopping, and the trailing ActorDown stays suppressed.
-  const auto childVar = varsRecord(arena, core, image->agentCell,
-                                   "child", false);
+  const auto childVar =
+      varsRecord(arena, core, image->agentCell, "child", false);
   ASSERT_TRUE(childVar);
   const auto member = arena.asInt64(
       *arena.linked(*childVar, core.dims().values, DimVector::POS));
   ASSERT_TRUE(member);
   exec.childStopping(arena, core, image->agentCell,
                      static_cast<CellRef>(*member), "terminate");
-  exec.childDown(arena, core, image->agentCell,
-                 static_cast<CellRef>(*member));
+  exec.childDown(arena, core, image->agentCell, static_cast<CellRef>(*member));
   ASSERT_TRUE(exec(h.execution(), h.ctx));
-  EXPECT_EQ(
-      VagentExecutor::drainOutbox(arena, core, image->agentCell).size(),
-      4u);
+  EXPECT_EQ(VagentExecutor::drainOutbox(arena, core, image->agentCell).size(),
+            4u);
   EXPECT_EQ(arena.outstandingMarks(), 0u);
 }
 
-TEST(VagentExecutorTest,
-     AdapterSideStopCauseRaisesChildStoppingAndFailsWaits) {
+TEST(VagentExecutorTest, AdapterSideStopCauseRaisesChildStoppingAndFailsWaits) {
   ExecutorHarness h;
   VagentExecutor exec;
   const auto image =
@@ -3801,8 +3762,8 @@ TEST(VagentExecutorTest,
   const auto staged =
       VagentExecutor::drainOutbox(arena, core, image->agentCell);
   ASSERT_EQ(staged.size(), 2u);
-  const auto childVar = varsRecord(arena, core, image->agentCell,
-                                   "child", false);
+  const auto childVar =
+      varsRecord(arena, core, image->agentCell, "child", false);
   ASSERT_TRUE(childVar);
   const auto member = arena.asInt64(
       *arena.linked(*childVar, core.dims().values, DimVector::POS));
@@ -3817,8 +3778,7 @@ TEST(VagentExecutorTest,
   ASSERT_TRUE(exec(h.execution(), h.ctx));
   const auto r = varsRecord(arena, core, image->agentCell, "r", false);
   ASSERT_TRUE(r);
-  const auto rv = arena.linked(*r, core.dims().values,
-                               DimVector::POS);
+  const auto rv = arena.linked(*r, core.dims().values, DimVector::POS);
   ASSERT_TRUE(rv);
   EXPECT_EQ(arena.textOf(*rv), "lease");
   ASSERT_TRUE(exec(h.execution(), h.ctx));
@@ -3831,16 +3791,15 @@ TEST(VagentExecutorTest,
   // ActorDown it precedes) raises nothing new.
   exec.childStopping(arena, core, image->agentCell,
                      static_cast<CellRef>(*member), "lease");
-  exec.childDown(arena, core, image->agentCell,
-                 static_cast<CellRef>(*member));
+  exec.childDown(arena, core, image->agentCell, static_cast<CellRef>(*member));
   ASSERT_TRUE(exec(h.execution(), h.ctx));
-  EXPECT_EQ(
-      VagentExecutor::drainOutbox(arena, core, image->agentCell).size(),
-      4u);
+  EXPECT_EQ(VagentExecutor::drainOutbox(arena, core, image->agentCell).size(),
+            4u);
   EXPECT_EQ(arena.outstandingMarks(), 0u);
 }
 
-TEST(VagentExecutorTest, RefusedSpawnFailsStagedDeliveriesAndRaisesSpawnFailed) {
+TEST(VagentExecutorTest,
+     RefusedSpawnFailsStagedDeliveriesAndRaisesSpawnFailed) {
   ExecutorHarness h;
   VagentExecutor exec;
   const auto image =
@@ -3864,10 +3823,11 @@ TEST(VagentExecutorTest, RefusedSpawnFailsStagedDeliveriesAndRaisesSpawnFailed) 
   ASSERT_EQ(staged.size(), 2u);
   EXPECT_EQ(staged[0].kind, "spawn");
   EXPECT_EQ(staged[1].kind, "emit");
-  const auto childVar = varsRecord(arena, core, image->agentCell, "child", false);
+  const auto childVar =
+      varsRecord(arena, core, image->agentCell, "child", false);
   ASSERT_TRUE(childVar);
-  const auto childRef = arena.linked(*childVar, core.dims().values,
-                                     DimVector::POS);
+  const auto childRef =
+      arena.linked(*childVar, core.dims().values, DimVector::POS);
   ASSERT_TRUE(childRef);
   const auto member = arena.asInt64(*childRef);
   ASSERT_TRUE(member);
@@ -3888,38 +3848,36 @@ TEST(VagentExecutorTest, RefusedSpawnFailsStagedDeliveriesAndRaisesSpawnFailed) 
 TEST(VagentExecutorTest, MovedRebindsStalePeerRefsAndRaisesMoved) {
   ExecutorHarness h;
   VagentExecutor exec;
-  const auto image =
-      h.lower("module demo\nevent Boot\nevent Note\n"
-              "agent A {\n"
-              "  var child: Opt<Agent> := none\n"
-              "  on Boot { child := spawn A() }\n"
-              "  on Moved { emit Note{} }\n"
-              "}");
+  const auto image = h.lower("module demo\nevent Boot\nevent Note\n"
+                             "agent A {\n"
+                             "  var child: Opt<Agent> := none\n"
+                             "  on Boot { child := spawn A() }\n"
+                             "  on Moved { emit Note{} }\n"
+                             "}");
   ASSERT_TRUE(image);
   auto &arena = h.ctx.arena;
   auto &core  = h.ctx.core;
   ASSERT_TRUE(exec(h.execution("Boot"), h.ctx));
-  const auto childVar = varsRecord(arena, core, image->agentCell, "child", false);
+  const auto childVar =
+      varsRecord(arena, core, image->agentCell, "child", false);
   ASSERT_TRUE(childVar);
-  const auto childRef = arena.linked(*childVar, core.dims().values,
-                                     DimVector::POS);
+  const auto childRef =
+      arena.linked(*childVar, core.dims().values, DimVector::POS);
   ASSERT_TRUE(childRef);
   const auto oldMember = arena.asInt64(*childRef);
   ASSERT_TRUE(oldMember);
-  const auto name = arena.linked(
-      static_cast<CellRef>(*oldMember), core.dims().name,
-      DimVector::POS);
+  const auto name = arena.linked(static_cast<CellRef>(*oldMember),
+                                 core.dims().name, DimVector::POS);
   ASSERT_TRUE(name);
   // The adapter's new reference record for the same peer name — a
   // migration's pid change minted it; the receiver's $peers update is
   // a rebind, not a name rewrite.
   const auto moved = arena.makeCell();
-  zigzag::expectWritten(
-      arena.link(moved, core.dims().name, DimVector::POS,
-                 arena.makeCell(arena.textOf(*name))));
+  zigzag::expectWritten(arena.link(moved, core.dims().name, DimVector::POS,
+                                   arena.makeCell(arena.textOf(*name))));
   exec.moved(arena, core, image->agentCell, moved);
-  const auto after = arena.linked(*childVar, core.dims().values,
-                                  DimVector::POS);
+  const auto after =
+      arena.linked(*childVar, core.dims().values, DimVector::POS);
   ASSERT_TRUE(after);
   EXPECT_EQ(arena.asInt64(*after).value_or(-1),
             static_cast<std::int64_t>(moved));
@@ -3936,16 +3894,16 @@ TEST(VagentExecutorTest, MovedRebindsStalePeerRefsAndRaisesMoved) {
 TEST(VagentExecutorTest, ResumedFailsEffectWaitsWithMigrated) {
   ExecutorHarness h;
   VagentExecutor exec;
-  const auto image = h.lower(
-      "module demo\nevent Tick\ngoal Work() perform\n"
-      "capacity Navigation { effect def read(): Str within 9s }\n"
-      "native skill Device implements Navigation\n"
-      "agent A {\n"
-      "  uses Navigation\n"
-      "  install Device\n"
-      "  on Tick { adopt Work() }\n"
-      "  plan w for Work { let r := Navigation.read() else cause }\n"
-      "}");
+  const auto image =
+      h.lower("module demo\nevent Tick\ngoal Work() perform\n"
+              "capacity Navigation { effect def read(): Str within 9s }\n"
+              "native skill Device implements Navigation\n"
+              "agent A {\n"
+              "  uses Navigation\n"
+              "  install Device\n"
+              "  on Tick { adopt Work() }\n"
+              "  plan w for Work { let r := Navigation.read() else cause }\n"
+              "}");
   ASSERT_TRUE(image);
   auto &arena = h.ctx.arena;
   auto &core  = h.ctx.core;
@@ -3960,8 +3918,7 @@ TEST(VagentExecutorTest, ResumedFailsEffectWaitsWithMigrated) {
   ASSERT_TRUE(exec(h.execution(), h.ctx));
   const auto r = varsRecord(arena, core, image->agentCell, "r", false);
   ASSERT_TRUE(r);
-  const auto rv = arena.linked(*r, core.dims().values,
-                               DimVector::POS);
+  const auto rv = arena.linked(*r, core.dims().values, DimVector::POS);
   ASSERT_TRUE(rv);
   EXPECT_EQ(arena.textOf(*rv), "migrated");
   EXPECT_EQ(arena.outstandingMarks(), 0u);
@@ -3970,16 +3927,15 @@ TEST(VagentExecutorTest, ResumedFailsEffectWaitsWithMigrated) {
 TEST(VagentExecutorTest, BehaviorGoalMemberAdoptsTheBehaviorsPlan) {
   ExecutorHarness h;
   VagentExecutor exec;
-  const auto image =
-      h.lower("module demo\nevent Tick\nevent Done\n"
-              "behavior Sweeper {\n"
-              "  goal Sweep() perform\n"
-              "  plan s for Sweep { emit Done{} }\n"
-              "}\n"
-              "agent A {\n"
-              "  behavior Sweeper()\n"
-              "  on Tick { adopt Sweep() }\n"
-              "}");
+  const auto image = h.lower("module demo\nevent Tick\nevent Done\n"
+                             "behavior Sweeper {\n"
+                             "  goal Sweep() perform\n"
+                             "  plan s for Sweep { emit Done{} }\n"
+                             "}\n"
+                             "agent A {\n"
+                             "  behavior Sweeper()\n"
+                             "  on Tick { adopt Sweep() }\n"
+                             "}");
   ASSERT_TRUE(image);
   auto &arena = h.ctx.arena;
   // The behavior's goal member declares the shared symbol; adopt
@@ -3998,20 +3954,18 @@ TEST(VagentExecutorTest, BehaviorGoalMemberAdoptsTheBehaviorsPlan) {
 TEST(VagentExecutorTest, BeliefAssertRunsThePlusTriggerWithItsCapture) {
   ExecutorHarness h;
   VagentExecutor exec;
-  const auto image =
-      h.lower("module demo\nevent Tick\n"
-              "predicate pos(v: Int)\n"
-              "agent A {\n"
-              "  var r : Int := 0\n"
-              "  on +pos(?v) { r := v }\n"
-              "  on Tick { believe pos(41) }\n"
-              "}");
+  const auto image = h.lower("module demo\nevent Tick\n"
+                             "predicate pos(v: Int)\n"
+                             "agent A {\n"
+                             "  var r : Int := 0\n"
+                             "  on +pos(?v) { r := v }\n"
+                             "  on Tick { believe pos(41) }\n"
+                             "}");
   ASSERT_TRUE(image);
   auto &arena = h.ctx.arena;
   // believe stages the pend; the same turn's drain fires the handler.
   ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
-  const auto r =
-      varsRecord(arena, h.ctx.core, image->agentCell, "r", false);
+  const auto r = varsRecord(arena, h.ctx.core, image->agentCell, "r", false);
   ASSERT_TRUE(r);
   const auto v = arena.linked(*r, h.ctx.core.dims().values, DimVector::POS);
   ASSERT_TRUE(v);
@@ -4022,23 +3976,21 @@ TEST(VagentExecutorTest, BeliefAssertRunsThePlusTriggerWithItsCapture) {
 TEST(VagentExecutorTest, BeliefRetractRunsTheMinusTrigger) {
   ExecutorHarness h;
   VagentExecutor exec;
-  const auto image =
-      h.lower("module demo\nevent Tick\n"
-              "predicate pos(v: Int)\n"
-              "agent A {\n"
-              "  var r : Int := 0\n"
-              "  on -pos(?v) { r := v }\n"
-              "  on +pos(?v) { r := 0 - v }\n"
-              "  on Tick { believe pos(7); forget pos(7) }\n"
-              "}");
+  const auto image = h.lower("module demo\nevent Tick\n"
+                             "predicate pos(v: Int)\n"
+                             "agent A {\n"
+                             "  var r : Int := 0\n"
+                             "  on -pos(?v) { r := v }\n"
+                             "  on +pos(?v) { r := 0 - v }\n"
+                             "  on Tick { believe pos(7); forget pos(7) }\n"
+                             "}");
   ASSERT_TRUE(image);
   auto &arena = h.ctx.arena;
   // The assert's "+pos" handler writes -7 first; the retract's
   // "-pos" handler overwrites with the bound value — both stages
   // land on one drain, in order.
   ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
-  const auto r =
-      varsRecord(arena, h.ctx.core, image->agentCell, "r", false);
+  const auto r = varsRecord(arena, h.ctx.core, image->agentCell, "r", false);
   ASSERT_TRUE(r);
   const auto v = arena.linked(*r, h.ctx.core.dims().values, DimVector::POS);
   ASSERT_TRUE(v);
@@ -4072,8 +4024,7 @@ TEST(VagentExecutorTest, BeliefPatternUnifiesNestedAndRepeatedAndWildcard) {
     const auto rec =
         varsRecord(arena, h.ctx.core, image->agentCell, name, false);
     if (!rec) return std::int64_t{-1};
-    const auto v =
-        arena.linked(*rec, h.ctx.core.dims().values, DimVector::POS);
+    const auto v = arena.linked(*rec, h.ctx.core.dims().values, DimVector::POS);
     return v ? arena.asInt64(*v).value_or(-1) : -1;
   };
   // Nested term: both captures bind — 3 + 4.
@@ -4088,13 +4039,12 @@ TEST(VagentExecutorTest, BeliefPatternUnifiesNestedAndRepeatedAndWildcard) {
 TEST(VagentExecutorTest, BeliefTriggerGuardReadsTheCapturedVariable) {
   ExecutorHarness h;
   VagentExecutor exec;
-  const auto image =
-      h.lower("module demo\nevent Tick\nevent Done\n"
-              "predicate val(v: Int)\n"
-              "agent A {\n"
-              "  on +val(?v) [v > 10] { emit Done{} }\n"
-              "  on Tick { believe val(5); believe val(15) }\n"
-              "}");
+  const auto image = h.lower("module demo\nevent Tick\nevent Done\n"
+                             "predicate val(v: Int)\n"
+                             "agent A {\n"
+                             "  on +val(?v) [v > 10] { emit Done{} }\n"
+                             "  on Tick { believe val(5); believe val(15) }\n"
+                             "}");
   ASSERT_TRUE(image);
   auto &arena = h.ctx.arena;
   ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
@@ -4109,19 +4059,18 @@ TEST(VagentExecutorTest, BeliefTriggerGuardReadsTheCapturedVariable) {
 TEST(VagentExecutorTest, BehaviorBeliefHandlerBindsItsOwnInstance) {
   ExecutorHarness h;
   VagentExecutor exec;
-  const auto image =
-      h.lower("module demo\nevent Tick\n"
-              "predicate mark(v: Int)\n"
-              "behavior Watch {\n"
-              "  var count : Int := 0\n"
-              "  on +mark(?v) { count := count + v }\n"
-              "}\n"
-              "agent A {\n"
-              "  var hits : Int := 0\n"
-              "  behavior Watch()\n"
-              "  on +mark(?v) { hits := hits + 1 }\n"
-              "  on Tick { believe mark(3); believe mark(4) }\n"
-              "}");
+  const auto image = h.lower("module demo\nevent Tick\n"
+                             "predicate mark(v: Int)\n"
+                             "behavior Watch {\n"
+                             "  var count : Int := 0\n"
+                             "  on +mark(?v) { count := count + v }\n"
+                             "}\n"
+                             "agent A {\n"
+                             "  var hits : Int := 0\n"
+                             "  behavior Watch()\n"
+                             "  on +mark(?v) { hits := hits + 1 }\n"
+                             "  on Tick { believe mark(3); believe mark(4) }\n"
+                             "}");
   ASSERT_TRUE(image);
   auto &arena = h.ctx.arena;
   ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
@@ -4131,8 +4080,7 @@ TEST(VagentExecutorTest, BehaviorBeliefHandlerBindsItsOwnInstance) {
   const auto hits =
       varsRecord(arena, h.ctx.core, image->agentCell, "hits", false);
   ASSERT_TRUE(hits);
-  const auto hv =
-      arena.linked(*hits, h.ctx.core.dims().values, DimVector::POS);
+  const auto hv = arena.linked(*hits, h.ctx.core.dims().values, DimVector::POS);
   ASSERT_TRUE(hv);
   EXPECT_EQ(arena.asInt64(*hv).value_or(-1), 2);
   const auto behaviorDim = h.ctx.core.findOrMintDimension("d.behavior");
@@ -4148,6 +4096,256 @@ TEST(VagentExecutorTest, BehaviorBeliefHandlerBindsItsOwnInstance) {
       arena.linked(*count, h.ctx.core.dims().values, DimVector::POS);
   ASSERT_TRUE(cv);
   EXPECT_EQ(arena.asInt64(*cv).value_or(-1), 7);
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
+TEST(VagentExecutorTest, P12StringAndIntBuiltinsExecuteInTurn) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  const auto image = h.lower("module demo\n"
+                             "event Tick\n"
+                             "agent A {\n"
+                             "  var len: Int := 0\n"
+                             "  var sub: Str := \"\"\n"
+                             "  var s: Str := \"\"\n"
+                             "  on Tick {\n"
+                             "    len := str_len(\"hello world\")\n"
+                             "    sub := str_slice(\"hello world\", 0, 5)\n"
+                             "    s := int_to_str(42)\n"
+                             "  }\n"
+                             "}");
+  ASSERT_TRUE(image);
+  auto &arena = h.ctx.arena;
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+
+  const auto lenRec =
+      varsRecord(arena, h.ctx.core, image->agentCell, "len", false);
+  ASSERT_TRUE(lenRec);
+  const auto lenVal =
+      arena.linked(*lenRec, h.ctx.core.dims().values, DimVector::POS);
+  ASSERT_TRUE(lenVal);
+  EXPECT_EQ(arena.asInt64(*lenVal).value_or(-1), 11);
+
+  const auto subRec =
+      varsRecord(arena, h.ctx.core, image->agentCell, "sub", false);
+  ASSERT_TRUE(subRec);
+  const auto subVal =
+      arena.linked(*subRec, h.ctx.core.dims().values, DimVector::POS);
+  ASSERT_TRUE(subVal);
+  EXPECT_EQ(arena.textOf(*subVal), "hello");
+
+  const auto sRec = varsRecord(arena, h.ctx.core, image->agentCell, "s", false);
+  ASSERT_TRUE(sRec);
+  const auto sVal =
+      arena.linked(*sRec, h.ctx.core.dims().values, DimVector::POS);
+  ASSERT_TRUE(sVal);
+  EXPECT_EQ(arena.textOf(*sVal), "42");
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+
+  // Compiler-level execution of byte_at and str_to_int
+  Compiler compiler{h.ctx.core, h.ctx.vm};
+  auto parsedByte = Parser("byte_at(\"hello\", 1)").parseExpression();
+  ASSERT_TRUE(parsedByte.has_value());
+  auto compiledByte = compiler.compileStatement(**parsedByte);
+  ASSERT_TRUE(compiledByte.has_value());
+  const auto cursor1 = h.ctx.vm.spawnCursor(compiledByte->entry);
+  h.ctx.vm.setCursorOpcode(cursor1, compiledByte->entry);
+  const auto res1 = h.ctx.vm.run(cursor1);
+  EXPECT_TRUE(res1.success);
+  EXPECT_EQ(arena.asInt64(compiledByte->result).value_or(-1),
+            static_cast<std::int64_t>('e'));
+
+  auto parsedInt = Parser("str_to_int(\"420\")").parseExpression();
+  ASSERT_TRUE(parsedInt.has_value());
+  auto compiledInt = compiler.compileStatement(**parsedInt);
+  ASSERT_TRUE(compiledInt.has_value());
+  const auto cursor2 = h.ctx.vm.spawnCursor(compiledInt->entry);
+  h.ctx.vm.setCursorOpcode(cursor2, compiledInt->entry);
+  const auto res2 = h.ctx.vm.run(cursor2);
+  EXPECT_TRUE(res2.success);
+  EXPECT_EQ(arena.asInt64(compiledInt->result).value_or(-1), 420);
+}
+
+TEST(VagentExecutorTest, P13MakeCellAndHeadOfExecuteInTurn) {
+  ExecutorHarness h;
+  auto &arena = h.ctx.arena;
+  Compiler compiler{h.ctx.core, h.ctx.vm};
+
+  auto parsedCell = Parser("make_cell(42)").parseExpression();
+  ASSERT_TRUE(parsedCell.has_value());
+  auto compiledCell = compiler.compileStatement(**parsedCell);
+  ASSERT_TRUE(compiledCell.has_value());
+  const auto cursor = h.ctx.vm.spawnCursor(compiledCell->entry);
+  h.ctx.vm.setCursorOpcode(cursor, compiledCell->entry);
+  const auto res = h.ctx.vm.run(cursor);
+  EXPECT_TRUE(res.success);
+  const auto mintedCell =
+      static_cast<CellRef>(arena.asInt64(compiledCell->result).value_or(0));
+  EXPECT_NE(mintedCell, zigzag::noCell);
+  EXPECT_EQ(arena.asInt64(mintedCell).value_or(-1), 42);
+
+  // Turn execution with make_cell and head_of
+  VagentExecutor exec;
+  const auto image = h.lower("module demo\n"
+                             "import std:meta\n"
+                             "event Tick\n"
+                             "agent A {\n"
+                             "  var n: Int := 0\n"
+                             "  on Tick {\n"
+                             "    let c := make_cell(77)\n"
+                             "    let h := head_of(code\"77\")\n"
+                             "    n := 77\n"
+                             "  }\n"
+                             "}");
+  ASSERT_TRUE(image);
+  ASSERT_TRUE(exec(h.execution("Tick"), h.ctx));
+  const auto nRec = varsRecord(arena, h.ctx.core, image->agentCell, "n", false);
+  ASSERT_TRUE(nRec);
+  const auto nVal =
+      arena.linked(*nRec, h.ctx.core.dims().values, DimVector::POS);
+  ASSERT_TRUE(nVal);
+  EXPECT_EQ(arena.asInt64(*nVal).value_or(-1), 77);
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
+TEST(VagentExecutorTest, StdMetaHostVerbsExecuteAndDrainPendingRegisters) {
+  ExecutorHarness h;
+  VagentExecutor exec{[](std::string_view key) -> std::optional<std::int64_t> {
+    if (key == "vagent.max_register_ops") return 512;
+    if (key == "vagent.max_pending_registers") return 64;
+    if (key == "vagent.max_registered_heads") return 256;
+    if (key == "vagent.max_register_replay_failures") return 1;
+    return std::nullopt;
+  }};
+  auto &arena = h.ctx.arena;
+
+  const auto image = h.lower("module demo\n"
+                             "import std:meta\n"
+                             "event Probe { h: Cell }\n"
+                             "agent A {\n"
+                             "  var reg_turn: Str := \"\"\n"
+                             "  var valid_turn: Bool := false\n"
+                             "  on Probe as ev {\n"
+                             "    let d := dim_named(\"d.step\")\n"
+                             "    valid_turn := validate(ev.h)\n"
+                             "    let reg := register(ev.h)\n"
+                             "    reg_turn := registration(ev.h)\n"
+                             "  }\n"
+                             "}");
+  ASSERT_TRUE(image);
+
+  // Mint a valid fragment head with entry, descriptor, recipe, refs
+  const auto retOp     = h.ctx.vm.mintOpcode(OpcodeKind::Return);
+  const auto head      = arena.makeCell();
+  const auto entryDim  = h.ctx.core.findOrMintDimension("d.entry");
+  const auto refsDim   = h.ctx.core.findOrMintDimension("d.refs");
+  const auto refDim    = h.ctx.core.findOrMintDimension("d.ref");
+  const auto relocDim  = h.ctx.core.findOrMintDimension("d.mesh.relocation");
+  const auto recipeDim = h.ctx.core.findOrMintDimension("d.recipe");
+  const auto nameDim   = h.ctx.core.dims().name;
+
+  zigzag::expectWritten(arena.link(head, entryDim, DimVector::POS, retOp));
+  zigzag::expectWritten(arena.link(head, nameDim, DimVector::POS,
+                                   arena.makeCell("src:test_frag")));
+
+  const auto desc = arena.makeCell();
+  zigzag::expectWritten(
+      arena.link(head, h.ctx.core.dims().values, DimVector::POS, desc));
+  const auto resCell = arena.makeCell("result");
+  zigzag::expectWritten(
+      arena.link(resCell, nameDim, DimVector::POS, arena.makeCell("()")));
+  zigzag::expectWritten(
+      arena.link(desc, h.ctx.core.dims().vars, DimVector::POS, resCell));
+
+  const auto litRec = arena.makeScalarCell(static_cast<std::int64_t>(retOp));
+  zigzag::expectWritten(arena.link(head, recipeDim, DimVector::POS, litRec));
+
+  const auto refRec = arena.makeCell();
+  zigzag::expectWritten(arena.link(refRec, refDim, DimVector::POS, litRec));
+  zigzag::expectWritten(
+      arena.link(litRec, relocDim, DimVector::POS, arena.makeCell("cell")));
+  zigzag::expectWritten(arena.link(head, refsDim, DimVector::POS, refRec));
+
+  // Deliver Probe event carrying head as parameter 'h'
+  const auto term  = arena.makeCell("Probe");
+  const auto field = arena.makeScalarCell(static_cast<std::int64_t>(head));
+  zigzag::expectWritten(arena.link(field, h.ctx.core.dims().name,
+                                   DimVector::POS, arena.makeCell("h")));
+  zigzag::expectWritten(
+      arena.link(zigzag::rankTail(arena, term, h.ctx.core.dims().step),
+                 h.ctx.core.dims().step, DimVector::POS, field));
+
+  exec.deliver(arena, h.ctx.core,
+               Delivery{.agent       = image->agentCell,
+                        .percept     = "Probe",
+                        .payloadCell = term});
+
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
+
+  // Inside the turn, registration(h) was "pending"
+  const auto regRec =
+      varsRecord(arena, h.ctx.core, image->agentCell, "reg_turn", false);
+  ASSERT_TRUE(regRec);
+  const auto regVal =
+      arena.linked(*regRec, h.ctx.core.dims().values, DimVector::POS);
+  ASSERT_TRUE(regVal);
+  EXPECT_EQ(arena.textOf(*regVal), "pending");
+
+  // Post-commit drainPendingRegisters() transitioned registration(head) to
+  // "committed"
+  const auto binds =
+      mintMetaBindSet(arena, h.ctx.core, image->programRoot, image->agentCell);
+  ASSERT_TRUE(binds.has_value());
+  MetaRuntime meta(h.ctx.core, h.ctx.vm, *binds);
+  EXPECT_EQ(meta.registration(head), "committed");
+  EXPECT_EQ(arena.outstandingMarks(), 0u);
+}
+
+TEST(VagentExecutorTest, StdMetaGraftAndLearnWhereExecuteInTurn) {
+  ExecutorHarness h;
+  VagentExecutor exec;
+  auto &arena = h.ctx.arena;
+
+  const auto image = h.lower("module demo\n"
+                             "import std:meta\n"
+                             "event Poke { c: Cell }\n"
+                             "goal Guard() perform\n"
+                             "plan cautious for Guard() {\n"
+                             "  emit Poke{c: make_cell(0)}\n"
+                             "}\n"
+                             "agent A {\n"
+                             "  on Poke as ev {\n"
+                             "    let p := plan_named(\"cautious\")\n"
+                             "    let b := as_body(code\"()\")\n"
+                             "    let ac := agent_cell()\n"
+                             "    let v := var_of(ac, \"$turn\")\n"
+                             "    graft_where(p, code\"true\")\n"
+                             "    learn_where(p, code\"true\")\n"
+                             "  }\n"
+                             "}");
+  ASSERT_TRUE(image);
+
+  // Mint a named clause for graft_where / learn_where
+  const auto clause = arena.makeCell();
+  zigzag::expectWritten(arena.link(clause, h.ctx.core.dims().name,
+                                   DimVector::POS,
+                                   arena.makeCell("demo:clause1")));
+
+  // Deliver Poke with c = clause
+  const auto term  = arena.makeCell("Poke");
+  const auto field = arena.makeScalarCell(static_cast<std::int64_t>(clause));
+  zigzag::expectWritten(arena.link(field, h.ctx.core.dims().name,
+                                   DimVector::POS, arena.makeCell("c")));
+  zigzag::expectWritten(
+      arena.link(zigzag::rankTail(arena, term, h.ctx.core.dims().step),
+                 h.ctx.core.dims().step, DimVector::POS, field));
+
+  exec.deliver(arena, h.ctx.core,
+               Delivery{.agent       = image->agentCell,
+                        .percept     = "Poke",
+                        .payloadCell = term});
+
+  ASSERT_TRUE(exec(h.execution(), h.ctx));
   EXPECT_EQ(arena.outstandingMarks(), 0u);
 }
 

@@ -93,4 +93,32 @@ capacity Meta {
   // keyed by the clause's +d.name (a name-less clause is refused).
   def set_weight(cell: Cell, w: Float)
   def sprout_synapse(from_name: Str, to_name: Str, w: Float): Cell
+
+  // Stage 2 & Stage 4 Metacircular Registration & Synthesis.
+  // `register` and `register_all` atomically verify and register heads,
+  // queuing onto d.pending-reg under live marks and committing at turn boundary.
+  def register(h: Cell): Opt<Code<Cell>>
+  def register_all(hs: List<Cell>): Opt<List<Code<Cell>>>
+  def registration(h: Cell): Str
+
+  // Structural reflection & decomposition.
+  def dim_named(name: Str): Opt<Cell>
+  def as_body(c: Code): Opt<Code<()>>
+  def head_of(c: Code): Cell
+  def var_of(owner: Cell, var_name: Str): Opt<Cell>
+  def make_cell(val: Cell): Cell
+
+  // Stage 4 bootstrap primitives and batched joins.
+  def boot_writer(): Code<Cell>
+  def boot_linker(): Code<Cell>
+  def join_batch(batch: Cell): Bool
+  def build_fragment(spec: Cell): Opt<Cell>
+  def compile_fragment(label: Str, params: Cell, result_type: Str, src: Cell): Opt<Code<Cell>>
+
+  // 2-degree AST & metadata navigation and annotation.
+  def grab_of(cell: Cell): Opt<Cell>
+  def step_of(cell: Cell): Opt<Cell>
+  def values_of(cell: Cell): Opt<Cell>
+  def set_values(cell: Cell, val: Cell): Bool
+  def set_var(owner: Cell, var_name: Str, val: Cell): Bool
 }
