@@ -220,9 +220,17 @@ VQLCompiler::compileArgument(const ValueExpr &argument,
       return {*builtin};
     const auto found = definitions_.find((*function)->name);
     if (found == definitions_.end()) {
-      refuseSemanticBuiltin((*function)->name);
-      throw std::invalid_argument("unknown compiled function: " +
-                                  (*function)->name);
+      const auto &invocation = **function;
+      if (isSemanticShapeBuiltin(invocation.name))
+        return compileSemanticShapeCall(invocation, context);
+      if (isSemanticQuantifierBuiltin(invocation.name))
+        return compileSemanticQuantifierCall(invocation, context);
+      if (invocation.name == "lens")
+        return compileLensCall(invocation, context);
+      if (isPathFunction(invocation.name))
+        return compilePathFunctionCall(invocation, context);
+      throw QueryRefusal(QueryErrorCategory::Unknown,
+                         "unknown compiled function: " + invocation.name);
     }
     requirePositionalArguments(**function);
     return compileCall(found->second, (*function)->args, context, false);

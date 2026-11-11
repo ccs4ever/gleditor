@@ -64,12 +64,23 @@ using zigzag::vortex::CellValue;
 using zigzag::vortex::OpcodeKind;
 
 void VQLCompiler::refuseSemanticBuiltin(const std::string_view name) {
-  static constexpr std::array<std::string_view, 9> semanticBuiltins{
-      "project", "apply_shape",  "any",   "all",      "none",
-      "one",     "optional_one", "first", "same_cell"};
-  if (std::ranges::find(semanticBuiltins, name) != semanticBuiltins.end())
-    throw std::invalid_argument("VQL semantic builtin '" + std::string(name) +
-                                "' is not compiled to Vortex yet");
+  throw QueryRefusal(QueryErrorCategory::Unsupported,
+                     "VQL semantic builtin '" + std::string(name) +
+                         "' is not compiled to Vortex yet");
+}
+
+bool VQLCompiler::isSemanticShapeBuiltin(const std::string_view name) {
+  return name == "project" || name == "apply_shape";
+}
+
+bool VQLCompiler::isSemanticQuantifierBuiltin(const std::string_view name) {
+  return name == "any" || name == "all" || name == "none" || name == "one" ||
+         name == "optional_one" || name == "first" || name == "same_cell";
+}
+
+bool VQLCompiler::isPathFunction(const std::string_view name) {
+  return name == "sort_into" || name == "find" || name == "contains" ||
+         name == "count";
 }
 
 std::string_view
@@ -568,10 +579,8 @@ std::optional<CellRef> VQLCompiler::compileQuery(const QueryExpression &query) {
       throw std::invalid_argument("duplicate function definition: " +
                                   definition.name);
   }
-  if (!query.mounts.empty() || !query.namespaceDeclarations.empty()) {
-    throw std::invalid_argument(
-        "VQL mount declarations require Vortex graph lowering");
-  }
+  if (!query.mounts.empty() || !query.namespaceDeclarations.empty())
+    compileMountDeclarations(query);
   if (!query.body.statements.empty()) {
     std::optional<CellRef> result;
     for (const auto &statement : query.body.statements) {
@@ -584,8 +593,7 @@ std::optional<CellRef> VQLCompiler::compileQuery(const QueryExpression &query) {
         result = compileExecutionBlock(
             ExecutionBlock{.action = ActionClause{.clause = weave->effect}});
       } else {
-        throw std::invalid_argument(
-            "watch and perspective statements require Vortex graph lowering");
+        result = compileWatchOrPerspectiveStatement(statement);
       }
     }
     return result;
@@ -604,7 +612,7 @@ VQLCompiler::compilePathExpression(const PathExpression &path,
       std::ranges::any_of(path.steps, [](const PathStep &step) {
         return step.versionPin.has_value();
       }))
-    throw std::invalid_argument("version pins require historical VM lowering");
+    return compileVersionPinnedPath(path, ctxCell);
   std::vector<CellRef> stream;
   if (path.anchor.kind == AnchorKind::Variable &&
       streamBindings_.contains(path.anchor.name)) {
@@ -803,8 +811,7 @@ std::optional<CellRef> VQLCompiler::compileAnchor(const AnchorNode &anchor) {
   case AnchorKind::StoreGenerator:
   case AnchorKind::StoreAnchor:
   case AnchorKind::Microversion:
-    throw std::invalid_argument(
-        "store generators and historical anchors require VM selector lowering");
+    return compileHistoricalAnchor(anchor);
   }
 
   return res;
@@ -987,9 +994,18 @@ std::optional<CellRef> VQLCompiler::compileValueExpr(const ValueExpr &expr,
           if (const auto builtin = compileBuiltinInvocation(*val, ctxCell))
             return builtin;
           const auto definition = definitions_.find(val->name);
-          if (definition == definitions_.end())
-            throw std::invalid_argument("unknown compiled function: " +
-                                        val->name);
+          if (definition == definitions_.end()) {
+            if (val->name == "lens" || isPathFunction(val->name)) {
+              const auto cells = val->name == "lens"
+                                     ? compileLensCall(*val, ctxCell)
+                                     : compilePathFunctionCall(*val, ctxCell);
+              return cells.empty()
+                         ? std::nullopt
+                         : std::optional{emitFirstCell(cells.front())};
+            }
+            throw QueryRefusal(QueryErrorCategory::Unknown,
+                               "unknown compiled function: " + val->name);
+          }
           requirePositionalArguments(*val);
           const auto results =
               compileCall(definition->second, val->args, ctxCell, false);
@@ -1025,6 +1041,12 @@ std::optional<CellRef> VQLCompiler::compileValueExpr(const ValueExpr &expr,
         } else if constexpr (std::is_same_v<T, std::shared_ptr<PathLambda>>) {
           if (!val) throw std::invalid_argument("null VQL closure lambda");
           return compileClosureLambda(*val);
+        } else if constexpr (std::is_same_v<T, std::shared_ptr<ShapeLiteral>>) {
+          if (!val) throw std::invalid_argument("null compiled shape literal");
+          return compileShapeValue(*val, ctxCell);
+        } else if constexpr (std::is_same_v<T, std::shared_ptr<VersionExpr>>) {
+          if (!val) throw std::invalid_argument("null compiled version value");
+          return compileVersionValue(*val, ctxCell);
         } else {
           throw std::invalid_argument(
               "value expression requires Vortex graph lowering");

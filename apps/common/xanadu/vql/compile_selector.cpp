@@ -243,17 +243,27 @@ std::vector<CellRef> VQLCompiler::compileSelector(const PathStep &step,
         nextStream.insert(nextStream.end(), results.begin(), results.end());
       }
     } else {
-      refuseSemanticBuiltin(fn.name);
-      // Names the roadmap lowers are Unsupported; any other name is not a
-      // VQL function at all.
-      const bool planned = fn.name == "sort_into" || fn.name == "find" ||
-                           fn.name == "contains" || fn.name == "count" ||
-                           fn.name == "delta";
-      throw QueryRefusal(planned ? QueryErrorCategory::Unsupported
-                                 : QueryErrorCategory::Unknown,
-                         "VQL path function '" + fn.name +
-                             "' is not compiled to Vortex yet");
+      if (isSemanticShapeBuiltin(fn.name)) {
+        nextStream = compileSemanticShapeStep(step, current, hasContext);
+      } else if (isSemanticQuantifierBuiltin(fn.name)) {
+        nextStream = compileSemanticQuantifierStep(step, current, hasContext);
+      } else if (isPathFunction(fn.name)) {
+        nextStream = compilePathFunctionStep(step, current, hasContext);
+      } else {
+        // delta is planned but owned by no lowering card; any other name is
+        // not a VQL function at all.
+        throw QueryRefusal(fn.name == "delta" ? QueryErrorCategory::Unsupported
+                                              : QueryErrorCategory::Unknown,
+                           "VQL path function '" + fn.name +
+                               "' is not compiled to Vortex yet");
+      }
     }
+  } else if (std::holds_alternative<RootSelectorStep>(step.selector) ||
+             std::holds_alternative<GenesisSelector>(step.selector) ||
+             std::holds_alternative<PerspectiveStep>(step.selector) ||
+             std::holds_alternative<std::shared_ptr<MacroDimensionGroup>>(
+                 step.selector)) {
+    nextStream = compileRootSelectorStep(step, current, hasContext);
   } else {
     throw std::invalid_argument(
         "this VQL path selector does not have Vortex graph lowering yet");

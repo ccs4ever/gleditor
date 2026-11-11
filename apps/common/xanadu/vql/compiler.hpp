@@ -117,8 +117,14 @@ public:
 
   /// Throws the explicit refusal for a semantic builtin (project, apply_shape,
   /// any, all, none, one, optional_one, first, same_cell) that has no Vortex
-  /// graph lowering yet; returns normally for every other name.
-  static void refuseSemanticBuiltin(std::string_view name);
+  /// graph lowering yet.
+  [[noreturn]] static void refuseSemanticBuiltin(std::string_view name);
+
+  /// Which lowering card owns a function name. The dispatch sites test these
+  /// and call the matching stub below; each stub lives in its own file.
+  [[nodiscard]] static bool isSemanticShapeBuiltin(std::string_view name);
+  [[nodiscard]] static bool isSemanticQuantifierBuiltin(std::string_view name);
+  [[nodiscard]] static bool isPathFunction(std::string_view name);
 
   /// Resolves a dimension name to its DimRef, minting if non-existent.
   zigzag::DimRef resolveDimension(std::string_view name);
@@ -302,6 +308,63 @@ private:
                                                zigzag::CellRef current,
                                                bool hasContext);
   std::unordered_set<zigzag::CellRef> dynamicStreams_;
+
+  // Lowering stubs, one file per card. Each throws today's refusal until its
+  // card fills it in. "Step" stubs are called from compileSelector with the
+  // step, the one cell flowing through it and whether a context exists, and
+  // return the next stream; "call" stubs are called where a function is used
+  // as a value or argument and return the cells it produces.
+  /// Q1, compile_path_functions.cpp: sort_into, find, contains, count.
+  std::vector<zigzag::CellRef> compilePathFunctionStep(const PathStep &step,
+                                                       zigzag::CellRef current,
+                                                       bool hasContext);
+  std::vector<zigzag::CellRef>
+  compilePathFunctionCall(const FunctionInvocation &fn,
+                          std::optional<zigzag::CellRef> context);
+  /// Q2, compile_root_selectors.cpp: RootSelectorStep, GenesisSelector,
+  /// PerspectiveStep, MacroDimensionGroup.
+  std::vector<zigzag::CellRef> compileRootSelectorStep(const PathStep &step,
+                                                       zigzag::CellRef current,
+                                                       bool hasContext);
+  /// Q3, compile_history.cpp.
+  std::vector<zigzag::CellRef>
+  compileVersionPinnedStep(const PathStep &step,
+                           std::vector<zigzag::CellRef> stream,
+                           bool hasContext);
+  std::optional<zigzag::CellRef>
+  compileVersionPinnedPath(const PathExpression &path, zigzag::CellRef ctxCell);
+  std::optional<zigzag::CellRef>
+  compileHistoricalAnchor(const AnchorNode &anchor);
+  std::optional<zigzag::CellRef> compileVersionValue(const VersionExpr &version,
+                                                     zigzag::CellRef ctxCell);
+  /// Q4, compile_watch.cpp.
+  std::optional<zigzag::CellRef>
+  compileWatchOrPerspectiveStatement(const Statement &statement);
+  void compileMountDeclarations(const QueryExpression &query);
+  /// Q5, compile_dynamic_view.cpp.
+  void compileDynamicShapeProjection(const ShapeLiteral &shape);
+  std::vector<zigzag::CellRef>
+  compileLensCall(const FunctionInvocation &fn,
+                  std::optional<zigzag::CellRef> context);
+  std::optional<zigzag::CellRef> compileShapeValue(const ShapeLiteral &shape,
+                                                   zigzag::CellRef ctxCell);
+  /// Q9, compile_field_weave.cpp.
+  void compileFieldWeave(const FieldWeave &weave, zigzag::CellRef resultStream);
+  /// S1, compile_semantic_shape.cpp: project, apply_shape.
+  std::vector<zigzag::CellRef> compileSemanticShapeStep(const PathStep &step,
+                                                        zigzag::CellRef current,
+                                                        bool hasContext);
+  std::vector<zigzag::CellRef>
+  compileSemanticShapeCall(const FunctionInvocation &fn,
+                           std::optional<zigzag::CellRef> context);
+  /// S2, compile_semantic_quantifiers.cpp: any, all, none, one, optional_one,
+  /// first, same_cell.
+  std::vector<zigzag::CellRef>
+  compileSemanticQuantifierStep(const PathStep &step, zigzag::CellRef current,
+                                bool hasContext);
+  std::vector<zigzag::CellRef>
+  compileSemanticQuantifierCall(const FunctionInvocation &fn,
+                                std::optional<zigzag::CellRef> context);
 
   // AST compilation subroutines
   std::optional<zigzag::CellRef> compileQuery(const QueryExpression &query);
