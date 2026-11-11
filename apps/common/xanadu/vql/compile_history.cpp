@@ -9,7 +9,6 @@
 
 #include <algorithm>
 #include <array>
-#include <limits>
 #include <ranges>
 #include <stdexcept>
 
@@ -26,12 +25,6 @@ namespace {
 /// ordinary path compiler. A '#' cannot start a user variable, so it cannot
 /// collide with one.
 constexpr std::string_view pinnedAnchorBinding = "#pinned-anchor";
-
-/// Branch names are base-26 ordinals ("a" = 1, "aa" = 27) held in the 32-bit
-/// branch field of a version identifier.
-constexpr std::uint64_t branchOrdinalLimit =
-    std::numeric_limits<std::uint32_t>::max();
-constexpr std::uint64_t branchAlphabetSize = 26;
 
 [[noreturn]] void refuse(const std::string &message) {
   throw QueryRefusal(QueryErrorCategory::Unsupported, message);
@@ -69,17 +62,15 @@ std::optional<MicroversionId> parseVersion(const std::string &text) {
   }
 }
 
-std::optional<std::uint32_t> branchOrdinal(const std::string &name) {
-  std::uint64_t ordinal = 0;
-  for (const char ch : name) {
-    if (ch < 'a' || ch > 'z') return std::nullopt;
-    const auto digit = static_cast<std::uint64_t>(ch - 'a' + 1);
-    if (ordinal > (branchOrdinalLimit - digit) / branchAlphabetSize)
-      return std::nullopt;
-    ordinal = ordinal * branchAlphabetSize + digit;
-  }
-  if (ordinal == 0) return std::nullopt;
-  return static_cast<std::uint32_t>(ordinal);
+/// The first state of branch @p letters off @p version. The branch is spelled
+/// into an identifier and read back by MicroversionId::parse, which owns the
+/// bijective base-26 rules and the 32-bit limit, so they are not copied here.
+std::optional<MicroversionId> branchOf(const MicroversionId &version,
+                                       const std::string &letters) {
+  // An empty name would parse as the next number on the chain, and state zero
+  // has no segment for a branch to hang from.
+  if (letters.empty() || version.isZero()) return std::nullopt;
+  return parseVersion(version.str() + letters + "1");
 }
 
 /// Mirrors VQLEngine::evaluateVersionExpr, reading the version variables the
@@ -115,9 +106,8 @@ std::optional<MicroversionId> evaluateVersion(const VersionExpr &expr,
   case Op::Branch: {
     if (!expr.left) return std::nullopt;
     const auto version = evaluateVersion(*expr.left, variable, arena);
-    const auto ordinal = branchOrdinal(expr.branchName);
-    if (!version || !ordinal) return std::nullopt;
-    return version->branch(*ordinal);
+    if (!version) return std::nullopt;
+    return branchOf(*version, expr.branchName);
   }
   }
   return std::nullopt;
@@ -139,6 +129,19 @@ const StoreInfo *storeForCell(const MultiStoreCoordinator &coordinator,
   return primary == stores.end() ? &stores.front() : &*primary;
 }
 
+/// A fold replays up to every operation of the store, so it costs that many
+/// units of the arena's work budget; a pin over a long range then fails as a
+/// budget refusal instead of running unmetered.
+void chargeFold(const zigzag::ArenaManifold &arena, const Store &store) {
+  if (!arena.executionLimited()) return;
+  try {
+    for (std::size_t op = 0; op < store.opCount(); ++op) arena.consumeWork();
+  } catch (const std::runtime_error &) {
+    throw QueryRefusal(QueryErrorCategory::Budget,
+                       "version pin fold exceeds the VQL work budget");
+  }
+}
+
 /// The space holding the store folded at @p version, folding and attaching it
 /// on first use. One fold per (store, version) gives every cell one historical
 /// identity however often it is pinned. nullopt when that state has no home.
@@ -151,6 +154,7 @@ std::optional<std::uint32_t> historicalSpace(zigzag::ArenaManifold &arena,
     if (space && space->store == info.store.get() && space->label == label)
       return id;
   }
+  chargeFold(arena, *info.store);
   auto fold =
       std::make_shared<zigzag::Manifold>(info.store->rebuildManifold(version));
   if (!fold->home()) return std::nullopt;
@@ -202,11 +206,13 @@ std::vector<CellRef> pinAnchorCells(MultiStoreCoordinator &coordinator,
            "an arena with no store, so there is no microversion to fold");
   std::vector<CellRef> pinned;
   if (pin.versions.empty()) return pinned;
+  // Resolved before anything is folded or attached, so a pin the compiler
+  // must refuse (a run-time version variable) refuses with the arena intact.
+  const auto versions = pinnedVersions(pin, variable, arena);
   for (const CellRef input : inputs) {
     arena.consumeWork();
     const auto *info = storeForCell(coordinator, arena, input);
     if (!info || !info->store) continue;
-    const auto versions  = pinnedVersions(pin, variable, arena);
     const auto available = info->store->allVersions();
     for (const auto &version : versions) {
       arena.consumeWork();
@@ -228,18 +234,28 @@ std::vector<CellRef> pinAnchorCells(MultiStoreCoordinator &coordinator,
   return pinned;
 }
 
+/// Binds a stream name for the span of one compile and puts back what was
+/// there before, so a pin nested in a pinned path, or a second pin compiled
+/// while the first is open, does not lose the outer binding.
 struct ScopedStreamBinding {
-  std::unordered_map<std::string, std::vector<CellRef>> &bindings;
+  using Map = std::unordered_map<std::string, std::vector<CellRef>>;
+  Map &bindings;
   std::string name;
-  ScopedStreamBinding(
-      std::unordered_map<std::string, std::vector<CellRef>> &map,
-      std::string key, std::vector<CellRef> cells)
+  std::optional<std::vector<CellRef>> previous;
+  ScopedStreamBinding(Map &map, std::string key, std::vector<CellRef> cells)
       : bindings(map), name(std::move(key)) {
+    if (const auto found = bindings.find(name); found != bindings.end())
+      previous = std::move(found->second);
     bindings[name] = std::move(cells);
   }
   ScopedStreamBinding(const ScopedStreamBinding &)            = delete;
   ScopedStreamBinding &operator=(const ScopedStreamBinding &) = delete;
-  ~ScopedStreamBinding() { bindings.erase(name); }
+  ~ScopedStreamBinding() {
+    if (previous)
+      bindings[name] = std::move(*previous);
+    else
+      bindings.erase(name);
+  }
 };
 
 } // namespace
@@ -389,6 +405,31 @@ VQLCompiler::compileVersionValue(const VersionExpr &version,
   const auto resolved = evaluateVersion(version, variable, core_.arena());
   if (!resolved) return std::nullopt;
   return emitConstant(zigzag::vortex::CellValue{resolved->str()});
+}
+
+bool compareVersionsCausally(const CompOp op, const MicroversionId &lhs,
+                             const MicroversionId &rhs) {
+  // isAncestorOf is strict, so <= and >= add equality; the engine's direct
+  // evaluator forgot to, which made @a <= @a false.
+  // Versions form a tree, not a line: siblings are neither before nor after
+  // each other, so text or integer order would answer where history cannot.
+  const bool lhsFirst = lhs.isAncestorOf(rhs);
+  const bool rhsFirst = rhs.isAncestorOf(lhs);
+  switch (op) {
+  case CompOp::Equal:
+    return lhs == rhs;
+  case CompOp::NotEqual:
+    return lhs != rhs;
+  case CompOp::LessThan:
+    return lhsFirst && lhs != rhs;
+  case CompOp::LessEqual:
+    return lhsFirst || lhs == rhs;
+  case CompOp::GreaterThan:
+    return rhsFirst && lhs != rhs;
+  case CompOp::GreaterEqual:
+    return rhsFirst || lhs == rhs;
+  }
+  return false;
 }
 
 } // namespace xanadu::vql
