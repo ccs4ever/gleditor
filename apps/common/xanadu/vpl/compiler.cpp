@@ -15,6 +15,7 @@
 #include <unordered_set>
 
 #include "common/xanadu/vpl/lexer.hpp"
+#include "common/xanadu/vpl/lower_decls.hpp"
 #include "common/xanadu/vpl/parser.hpp"
 
 namespace xanadu::vpl {
@@ -26,20 +27,6 @@ using zigzag::vortex::CellValue;
 using zigzag::vortex::OpcodeKind;
 
 namespace {
-
-void mergeDependencies(std::vector<CellRef> &into,
-                       const std::vector<CellRef> &from) {
-  for (const auto cell : from) {
-    if (std::ranges::find(into, cell) == into.end()) into.push_back(cell);
-  }
-}
-
-CellRef requireCompiledCell(const std::optional<CellRef> result) {
-  if (!result) {
-    throw std::invalid_argument("VPL expression has no compiled cell");
-  }
-  return *result;
-}
 
 std::string_view verbName(TokenKind kind) noexcept {
   switch (kind) {
@@ -379,8 +366,17 @@ std::vector<CellRef> VPLCompiler::rankDependenciesOf(const CellRef cell) const {
   return dependenciesOf(cell);
 }
 
+CellRef VPLCompiler::mintOpcode(OpcodeKind kind, std::string_view label) {
+  return vm_.mintOpcode(kind, label);
+}
+
 CellRef VPLCompiler::emitOp(OpcodeKind kind, std::string_view label) {
-  CellRef op = vm_.mintOpcode(kind, label);
+  CellRef op = mintOpcode(kind, label);
+  appendOpcode(op);
+  return op;
+}
+
+void VPLCompiler::appendOpcode(CellRef op) {
   if (!entryOp_) {
     entryOp_ = op;
   }
@@ -390,7 +386,6 @@ CellRef VPLCompiler::emitOp(OpcodeKind kind, std::string_view label) {
   }
   currentOp_ = op;
   allOps_.push_back(op);
-  return op;
 }
 
 void VPLCompiler::emitInput(CellRef op, CellRef operand) {
@@ -634,6 +629,16 @@ std::optional<CellRef> VPLCompiler::compileNode(const AstNode &node) {
   throw std::invalid_argument("unsupported VPL AST node in VM compiler");
 }
 
+void VPLCompiler::recordResultFacts(const CellRef cell) {
+  lastResultEnclosed_ = enclosedCells_.contains(cell);
+  if (const auto dims = dimensionValues_.find(cell);
+      dims != dimensionValues_.end()) {
+    lastResultDimensionValues_ = dims->second;
+  } else {
+    lastResultDimensionValues_.reset();
+  }
+}
+
 std::optional<CellRef> VPLCompiler::compileProgram(const Program &prog) {
   std::optional<CellRef> lastRes;
   for (const auto &expr : prog.expressions()) {
@@ -649,6 +654,7 @@ std::optional<CellRef> VPLCompiler::compileProgram(const Program &prog) {
       lastResultAxes_ = axes->second;
     }
     lastResultDependencies_ = rankDependenciesOf(*lastRes);
+    recordResultFacts(*lastRes);
   }
   return lastRes;
 }
@@ -682,11 +688,11 @@ std::optional<CellRef> VPLCompiler::compileVector(const VectorExpr &expr) {
   if (cells.empty())
     throw std::invalid_argument("VPL vector has no VM-compiled elements");
 
-  for (const auto cell : cells) {
-    if (rankAxes_.contains(cell)) {
-      throw std::invalid_argument(
-          "nested VPL ranks require explicit array lowering");
-    }
+  if (std::ranges::any_of(cells, [&](const CellRef cell) {
+        return rankAxes_.contains(cell);
+      })) {
+    LowerContext ctx(*this);
+    return lower::lowerVectorOfRanks(ctx, expr, cells);
   }
   const auto axis = core_.dims().step;
   zigzag::expectWritten(
@@ -702,9 +708,8 @@ std::optional<CellRef> VPLCompiler::compileVector(const VectorExpr &expr) {
 }
 
 CellRef VPLCompiler::compileDimension(const DimensionExpr &expr) {
-  (void)expr;
-  throw std::invalid_argument(
-      "VPL dimension values require typed-handle VM lowering");
+  LowerContext ctx(*this);
+  return lower::lowerDimension(ctx, expr);
 }
 
 std::optional<CellRef>
@@ -716,6 +721,13 @@ VPLCompiler::compileIdentifier(const IdentifierExpr &expr) {
       if (const auto axes = varAxes_.find(expr.name());
           axes != varAxes_.end() && !axes->second.empty()) {
         rankAxes_[*it->second] = axes->second;
+      }
+      if (varEnclosed_.contains(expr.name())) {
+        enclosedCells_.insert(*it->second);
+      }
+      if (const auto dims = varDimensionValues_.find(expr.name());
+          dims != varDimensionValues_.end()) {
+        dimensionValues_[*it->second] = dims->second;
       }
     }
     return it->second;
@@ -747,132 +759,77 @@ std::optional<CellRef> VPLCompiler::compileAssign(const AssignExpr &expr) {
   } else {
     varAxes_[expr.target()] = bindingAxes;
   }
+  const bool enclosed = enclosedCells_.contains(*valCell);
+  if (enclosed) {
+    varEnclosed_.insert(expr.target());
+  } else {
+    varEnclosed_.erase(expr.target());
+  }
+  std::optional<std::vector<zigzag::DirectedDim>> dimensionValues;
+  if (const auto dims = dimensionValues_.find(*valCell);
+      dims != dimensionValues_.end()) {
+    dimensionValues                    = dims->second;
+    varDimensionValues_[expr.target()] = dims->second;
+  } else {
+    varDimensionValues_.erase(expr.target());
+  }
   assignedBindings_[expr.target()] = {
-      .cell         = *valCell,
-      .axes         = bindingAxes,
-      .dependencies = rankDependenciesOf(*valCell),
+      .cell            = *valCell,
+      .axes            = bindingAxes,
+      .dependencies    = rankDependenciesOf(*valCell),
+      .enclosed        = enclosed,
+      .dimensionValues = std::move(dimensionValues),
   };
   return valCell;
 }
 
 std::optional<CellRef> VPLCompiler::compileMonadic(const MonadicExpr &expr) {
   if (expr.hasCustomVerb()) {
+    LowerContext ctx(*this);
     if (const auto *adv =
-            dynamic_cast<const AdverbExpr *>(expr.customVerb().get())) {
-      TokenKind adverb    = adv->adverb();
-      TokenKind innerVerb = TokenKind::Plus;
-      if (const auto *v =
-              dynamic_cast<const VerbExpr *>(adv->operand().get())) {
-        innerVerb = v->verb();
-      }
-
-      OpcodeKind opKind = OpcodeKind::Add;
-      std::string_view opLabel =
-          adverb == TokenKind::Reduce ? "#REDUCE_ADD" : "#SCAN_ADD";
-      if (innerVerb == TokenKind::Plus) {
-        // Addition is the only currently supported reduction primitive.
-      } else if (innerVerb == TokenKind::Times) {
-        opKind  = OpcodeKind::Mul;
-        opLabel = (adverb == TokenKind::Reduce) ? "#REDUCE_MUL" : "#SCAN_MUL";
-      } else if (innerVerb == TokenKind::Ceiling) {
-        opKind  = OpcodeKind::Max;
-        opLabel = (adverb == TokenKind::Reduce) ? "#REDUCE_MAX" : "#SCAN_MAX";
-      } else if (innerVerb == TokenKind::Floor) {
-        opKind  = OpcodeKind::Min;
-        opLabel = (adverb == TokenKind::Reduce) ? "#REDUCE_MIN" : "#SCAN_MIN";
-      } else {
-        throw std::invalid_argument(
-            "VPL VM reduce/scan supports only +, *, maximum, and minimum");
-      }
-
-      if (adverb == TokenKind::Reduce) {
-        const auto *vec = dynamic_cast<const VectorExpr *>(expr.right().get());
-        if (!vec)
-          throw std::invalid_argument(
-              "VPL VM reduce currently requires a literal vector");
-        std::vector<CellRef> operandCells;
-        for (const auto &el : vec->elements()) {
-          if (!el)
-            throw std::invalid_argument(
-                "VPL reduction rank contains a missing element");
-          operandCells.push_back(requireCompiledCell(compileNode(*el)));
-        }
-
-        if (operandCells.empty())
-          throw std::invalid_argument("VPL reduce requires a nonempty rank");
-        if (operandCells.size() == 1) return operandCells.front();
-
-        CellRef acc = operandCells[0];
-        for (std::size_t i = 1; i < operandCells.size(); ++i) {
-          CellRef op = emitOp(opKind, opLabel);
-          emitInput(op, acc);
-          emitInput(op, operandCells[i]);
-          CellRef out = core_.arena().makeCell();
-          emitOutput(op, out);
-          acc = out;
-        }
-        return acc;
-      }
-
-      if (adverb == TokenKind::Scan) {
-        const auto *vec = dynamic_cast<const VectorExpr *>(expr.right().get());
-        if (!vec)
-          throw std::invalid_argument(
-              "VPL VM scan currently requires a literal vector");
-        std::vector<CellRef> operandCells;
-        for (const auto &el : vec->elements()) {
-          if (!el)
-            throw std::invalid_argument("VPL scan rank has a missing element");
-          operandCells.push_back(requireCompiledCell(compileNode(*el)));
-        }
-
-        if (operandCells.empty())
-          throw std::invalid_argument("VPL scan requires a nonempty rank");
-
-        std::vector<CellRef> scanCells;
-        CellRef acc = operandCells[0];
-        scanCells.push_back(acc);
-
-        for (std::size_t i = 1; i < operandCells.size(); ++i) {
-          CellRef op = emitOp(opKind, opLabel);
-          emitInput(op, acc);
-          emitInput(op, operandCells[i]);
-          CellRef out = core_.arena().makeCell();
-          emitOutput(op, out);
-          scanCells.push_back(out);
-          acc = out;
-        }
-
-        const auto axis = core_.dims().step;
-        for (std::size_t i = 0; i + 1 < scanCells.size(); ++i) {
-          zigzag::expectWritten(core_.arena().link(
-              scanCells[i], axis, DimVector::POS, scanCells[i + 1]));
-        }
-        rankAxes_[scanCells.front()] = {
-            zigzag::DirectedDim{axis, DimVector::POS}};
-        auto &dependencies = rankDependencies_[scanCells.front()];
-        for (const auto cell : scanCells) {
-          core_.arena().consumeWork();
-          mergeDependencies(dependencies, dependenciesOf(cell));
-        }
-        return scanCells.front();
-      }
-
-      if (adverb == TokenKind::Each) {
-        throw std::invalid_argument("VPL VM each adverb is unsupported");
-      }
+            dynamic_cast<const AdverbExpr *>(expr.customVerb().get());
+        adv != nullptr && adv->adverb() == TokenKind::Each) {
+      return lower::lowerEachMonadic(ctx, expr, *adv);
     }
-    throw std::invalid_argument("unsupported VPL custom verb in VM compiler");
+    if (const auto *conj =
+            dynamic_cast<const ConjunctionExpr *>(expr.customVerb().get())) {
+      if (conj->conjunction() == TokenKind::OuterProduct) {
+        return lower::lowerOuterProductMonadic(ctx, expr, *conj);
+      }
+      return lower::lowerConjunctionMonadic(ctx, expr, *conj);
+    }
+    return lower::lowerFoldMonadic(ctx, expr);
   }
 
-  if (expr.verb() == TokenKind::Iota || expr.verb() == TokenKind::Catenate ||
-      expr.verb() == TokenKind::Enclose || expr.verb() == TokenKind::Disclose ||
-      expr.verb() == TokenKind::Rho || expr.verb() == TokenKind::Transpose ||
-      expr.verb() == TokenKind::ReverseFirst ||
-      expr.verb() == TokenKind::ReverseLast ||
-      expr.verb() == TokenKind::Power || expr.verb() == TokenKind::Times ||
-      expr.verb() == TokenKind::Floor || expr.verb() == TokenKind::Ceiling) {
-    throw std::invalid_argument("unsupported VPL monadic verb in VM compiler");
+  {
+    LowerContext ctx(*this);
+    switch (expr.verb()) {
+    case TokenKind::Iota:
+      return lower::lowerIotaMonadic(ctx, expr);
+    case TokenKind::Rho:
+      return lower::lowerRhoMonadic(ctx, expr);
+    case TokenKind::Transpose:
+      return lower::lowerTransposeMonadic(ctx, expr);
+    case TokenKind::ReverseFirst:
+    case TokenKind::ReverseLast:
+      return lower::lowerReverseMonadic(ctx, expr);
+    case TokenKind::Power:
+      return lower::lowerPowerMonadic(ctx, expr);
+    case TokenKind::Times:
+      return lower::lowerSignumMonadic(ctx, expr);
+    case TokenKind::Floor:
+      return lower::lowerFloorMonadic(ctx, expr);
+    case TokenKind::Ceiling:
+      return lower::lowerCeilingMonadic(ctx, expr);
+    case TokenKind::Catenate:
+      return lower::lowerRavelMonadic(ctx, expr);
+    case TokenKind::Enclose:
+      return lower::lowerEncloseMonadic(ctx, expr);
+    case TokenKind::Disclose:
+      return lower::lowerDiscloseMonadic(ctx, expr);
+    default:
+      break;
+    }
   }
 
   if (!expr.right())
@@ -881,9 +838,42 @@ std::optional<CellRef> VPLCompiler::compileMonadic(const MonadicExpr &expr) {
   const std::optional<CellRef> rCell = compileNode(*expr.right());
   if (!rCell)
     throw std::invalid_argument("VPL monadic operand has no VM result");
-  if (expr.verb() != TokenKind::Plus && rankAxes_.contains(*rCell)) {
-    throw std::invalid_argument(
-        "VPL scalar monadic arithmetic on a rank requires array lowering");
+
+  {
+    LowerContext ctx(*this);
+    switch (expr.verb()) {
+    case TokenKind::Tally:
+      return lower::lowerTallyMonadic(ctx, expr, *rCell);
+    case TokenKind::GradeUp:
+    case TokenKind::GradeDown:
+      return lower::lowerGradeMonadic(ctx, expr, *rCell);
+    case TokenKind::Where:
+      return lower::lowerWhereMonadic(ctx, expr, *rCell);
+    case TokenKind::Match:
+      return lower::lowerMatchMonadic(ctx, expr, *rCell);
+    case TokenKind::Hypertime:
+      return lower::lowerHypertimeMonadic(ctx, expr, *rCell);
+    case TokenKind::Transclude:
+      return lower::lowerTranscludeMonadic(ctx, expr, *rCell);
+    case TokenKind::Scrub:
+      return lower::lowerScrubMonadic(ctx, expr, *rCell);
+    default:
+      break;
+    }
+    if (expr.verb() != TokenKind::Plus && rankAxes_.contains(*rCell)) {
+      switch (expr.verb()) {
+      case TokenKind::Minus:
+      case TokenKind::Magnitude:
+      case TokenKind::Not:
+      case TokenKind::Divide:
+        return lower::lowerMonadicArithmeticOnRank(ctx, expr, *rCell);
+      default:
+        // No card owns this verb on a rank (Member, Take, Drop, Compress,
+        // comparisons, ... used monadically): keep today's refusal.
+        throw std::invalid_argument(
+            "VPL scalar monadic arithmetic on a rank requires array lowering");
+      }
+    }
   }
 
   switch (expr.verb()) {
@@ -928,11 +918,31 @@ std::optional<CellRef> VPLCompiler::compileMonadic(const MonadicExpr &expr) {
 }
 
 CellRef VPLCompiler::compileDyadic(const DyadicExpr &expr) {
-  if (expr.verb() == TokenKind::Iota || expr.verb() == TokenKind::Catenate ||
-      expr.verb() == TokenKind::Rho || expr.verb() == TokenKind::Take ||
-      expr.verb() == TokenKind::Drop || expr.verb() == TokenKind::Scrub ||
-      expr.verb() == TokenKind::Power) {
-    throw std::invalid_argument("unsupported VPL dyadic verb in VM compiler");
+  LowerContext ctx(*this);
+  // A custom verb has verb() == Error, so the plain-verb list below never
+  // matches it. Its operands are compiled and checked in the same order as for
+  // a plain verb, so every message is the one the generic path always gave.
+  if (!expr.hasCustomVerb()) {
+    switch (expr.verb()) {
+    case TokenKind::Iota:
+      return lower::lowerIotaDyadic(ctx, expr);
+    case TokenKind::Rho:
+      return isDimensionOperand(expr.right().get())
+                 ? lower::lowerRhoViewDyadic(ctx, expr)
+                 : lower::lowerRhoDyadic(ctx, expr);
+    case TokenKind::Take:
+      return lower::lowerTakeDyadic(ctx, expr);
+    case TokenKind::Drop:
+      return lower::lowerDropDyadic(ctx, expr);
+    case TokenKind::Power:
+      return lower::lowerPowerDyadic(ctx, expr);
+    case TokenKind::Catenate:
+      return lower::lowerCatenateDyadic(ctx, expr);
+    case TokenKind::Scrub:
+      return lower::lowerScrubDyadic(ctx, expr);
+    default:
+      break;
+    }
   }
 
   if (!expr.left() || !expr.right())
@@ -941,9 +951,65 @@ CellRef VPLCompiler::compileDyadic(const DyadicExpr &expr) {
   const auto rCell = compileNode(*expr.right());
   if (!lCell || !rCell)
     throw std::invalid_argument("VPL dyadic operands must compile to values");
+
+  if (expr.hasCustomVerb()) {
+    const AstNode *custom = expr.customVerb().get();
+    if (const auto *adv = dynamic_cast<const AdverbExpr *>(custom)) {
+      if (adv->adverb() == TokenKind::Each)
+        return lower::lowerEachDyadic(ctx, expr, *adv, *lCell, *rCell);
+      if (adv->adverb() == TokenKind::Reduce ||
+          adv->adverb() == TokenKind::Scan)
+        return lower::lowerFoldDyadic(ctx, expr, *adv, *lCell, *rCell);
+    } else if (const auto *conj =
+                   dynamic_cast<const ConjunctionExpr *>(custom)) {
+      if (conj->conjunction() == TokenKind::OuterProduct)
+        return lower::lowerOuterProductDyadic(ctx, expr, *conj, *lCell, *rCell);
+      return lower::lowerConjunctionDyadic(ctx, expr, *conj, *lCell, *rCell);
+    }
+    // An adverb no card owns (Compress used as an adverb): today's refusal.
+    if (rankAxes_.contains(*lCell) || rankAxes_.contains(*rCell)) {
+      throw std::invalid_argument(
+          "VPL scalar dyadic arithmetic on ranks requires array lowering");
+    }
+    throw std::invalid_argument("unsupported VPL dyadic verb in VM compiler");
+  }
+
+  switch (expr.verb()) {
+  case TokenKind::Transpose:
+    return lower::lowerTransposeDyadic(ctx, expr, *lCell, *rCell);
+  case TokenKind::Member:
+    return lower::lowerMemberDyadic(ctx, expr, *lCell, *rCell);
+  case TokenKind::Match:
+    return lower::lowerMatchDyadic(ctx, expr, *lCell, *rCell);
+  case TokenKind::Compress:
+    return lower::lowerCompressDyadic(ctx, expr, *lCell, *rCell);
+  default:
+    break;
+  }
   if (rankAxes_.contains(*lCell) || rankAxes_.contains(*rCell)) {
-    throw std::invalid_argument(
-        "VPL scalar dyadic arithmetic on ranks requires array lowering");
+    switch (expr.verb()) {
+    case TokenKind::Plus:
+    case TokenKind::Minus:
+    case TokenKind::Times:
+    case TokenKind::Divide:
+    case TokenKind::Magnitude:
+    case TokenKind::Ceiling:
+    case TokenKind::Floor:
+    case TokenKind::Equal:
+    case TokenKind::NotEqual:
+    case TokenKind::LessThan:
+    case TokenKind::LessEqual:
+    case TokenKind::GreaterThan:
+    case TokenKind::GreaterEqual:
+    case TokenKind::And:
+    case TokenKind::Or:
+      return lower::lowerDyadicArithmeticOnRank(ctx, expr, *lCell, *rCell);
+    default:
+      // No card owns this verb on ranks (Where, Tally, Hypertime, ...):
+      // keep today's refusal.
+      throw std::invalid_argument(
+          "VPL scalar dyadic arithmetic on ranks requires array lowering");
+    }
   }
 
   OpcodeKind kind;
@@ -1028,18 +1094,18 @@ CellRef VPLCompiler::compileAdverb(const AdverbExpr &expr) {
 }
 
 CellRef VPLCompiler::compileConjunction(const ConjunctionExpr &expr) {
-  (void)expr;
-  throw std::invalid_argument("VPL conjunctions are unsupported by the VM");
+  LowerContext ctx(*this);
+  return lower::lowerConjunctionExpr(ctx, expr);
 }
 
 std::optional<CellRef> VPLCompiler::compileIndexing(const IndexingExpr &expr) {
-  (void)expr;
-  throw std::invalid_argument("VPL indexing is unsupported by the VM");
+  LowerContext ctx(*this);
+  return lower::lowerIndexing(ctx, expr);
 }
 
 std::optional<CellRef> VPLCompiler::compileQuad(const QuadExpr &expr) {
-  (void)expr;
-  throw std::invalid_argument("VPL quad IO is unsupported by the VM");
+  LowerContext ctx(*this);
+  return lower::lowerQuad(ctx, expr);
 }
 
 CellRef VPLCompiler::linkAsExecutable(CellRef entryOp) {
@@ -1067,6 +1133,13 @@ CompilationResult VPLCompiler::compile(const Program &program,
   rankDependencies_.clear();
   cellDependencies_.clear();
   assignedBindings_.clear();
+  enclosedCells_.clear();
+  dimensionValues_.clear();
+  varEnclosed_.clear();
+  varDimensionValues_.clear();
+  printRequested_     = false;
+  lastResultEnclosed_ = false;
+  lastResultDimensionValues_.reset();
   lastResultCells_.clear();
   lastResultAxes_.clear();
   lastResultDependencies_.clear();
@@ -1111,6 +1184,10 @@ CompilationResult VPLCompiler::compile(const Program &program,
     if (cell && !binding.axes().empty()) {
       rankAxes_[*cell] = binding.axes();
     }
+    if (cell && binding.isEnclosed()) {
+      enclosedCells_.insert(*cell);
+      varEnclosed_.insert(name);
+    }
   }
 
   try {
@@ -1122,6 +1199,7 @@ CompilationResult VPLCompiler::compile(const Program &program,
         lastResultAxes_ = axes->second;
       }
       lastResultDependencies_ = rankDependenciesOf(*resultCell);
+      recordResultFacts(*resultCell);
     }
 
     std::optional<CellRef> terminal;
@@ -1144,18 +1222,21 @@ CompilationResult VPLCompiler::compile(const Program &program,
 
     std::string dis = disassemble(entryOp_);
     CompilationResult result{
-        .success            = true,
-        .entryOpcode        = entryOp_,
-        .errorMessage       = "",
-        .generatedOpcodes   = allOps_,
-        .disassembly        = std::move(dis),
-        .terminalOpcode     = terminal,
-        .cursor             = cursor,
-        .resultSlots        = lastResultCells_,
-        .resultAxes         = lastResultAxes_,
-        .resultDependencies = lastResultDependencies_,
-        .cellDependencies   = cellDependencies_,
-        .assignedBindings   = assignedBindings_,
+        .success               = true,
+        .entryOpcode           = entryOp_,
+        .errorMessage          = "",
+        .generatedOpcodes      = allOps_,
+        .disassembly           = std::move(dis),
+        .terminalOpcode        = terminal,
+        .cursor                = cursor,
+        .resultSlots           = lastResultCells_,
+        .resultAxes            = lastResultAxes_,
+        .resultDependencies    = lastResultDependencies_,
+        .cellDependencies      = cellDependencies_,
+        .assignedBindings      = assignedBindings_,
+        .resultEnclosed        = lastResultEnclosed_,
+        .resultPrint           = printRequested_,
+        .resultDimensionValues = lastResultDimensionValues_,
     };
     transaction.commit();
     return result;
@@ -1169,6 +1250,11 @@ CompilationResult VPLCompiler::compile(const Program &program,
     cellDependencies_.clear();
     rankDependencies_.clear();
     assignedBindings_.clear();
+    enclosedCells_.clear();
+    dimensionValues_.clear();
+    lastResultEnclosed_ = false;
+    lastResultDimensionValues_.reset();
+    printRequested_ = false;
     return CompilationResult{
         .success          = false,
         .entryOpcode      = std::nullopt,

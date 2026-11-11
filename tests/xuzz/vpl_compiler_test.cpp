@@ -200,6 +200,10 @@ TEST_F(VPLCompilerTest, ScalarArithmeticExplicitlyRefusesRankOperands) {
   EXPECT_FALSE(monadic.success);
   EXPECT_NE(monadic.errorMessage.find("scalar monadic arithmetic on a rank"),
             std::string::npos);
+}
+
+TEST_F(VPLCompilerTest, UnboundIdentifierIsRefused) {
+  VPLCompiler compiler(*core, *vm);
 
   const auto unbound = compiler.compile("missing");
   EXPECT_FALSE(unbound.success);
@@ -231,7 +235,7 @@ TEST_F(VPLCompilerTest, CompileOptimizationConstantFolding) {
   EXPECT_EQ(resOpt.generatedOpcodes.size(), 1u); // Only Halt
 }
 
-TEST_F(VPLCompilerTest, RejectsUnsupportedIndexingAndContainment) {
+TEST_F(VPLCompilerTest, RejectsUnsupportedEncloseAndDisclose) {
   VPLCompiler compiler(*core, *vm);
 
   const auto enclose = compiler.compile("⊂ 42");
@@ -240,11 +244,19 @@ TEST_F(VPLCompilerTest, RejectsUnsupportedIndexingAndContainment) {
             std::string::npos);
 
   EXPECT_FALSE(compiler.compile("⊃ C").success);
+}
+
+TEST_F(VPLCompilerTest, RejectsUnsupportedIndexing) {
+  VPLCompiler compiler(*core, *vm);
 
   const auto indexing = compiler.compile("A[3]");
   EXPECT_FALSE(indexing.success);
   EXPECT_NE(indexing.errorMessage.find("VPL indexing is unsupported"),
             std::string::npos);
+}
+
+TEST_F(VPLCompilerTest, RejectsUnsupportedDimensionValue) {
+  VPLCompiler compiler(*core, *vm);
 
   const auto dimension = compiler.compile("d.1");
   EXPECT_FALSE(dimension.success);
