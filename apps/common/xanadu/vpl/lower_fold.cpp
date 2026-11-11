@@ -40,8 +40,7 @@ Maybe lowerFoldMonadic(LowerContext &ctx, const MonadicExpr &expr) {
       opKind  = OpcodeKind::Min;
       opLabel = (adverb == TokenKind::Reduce) ? "#REDUCE_MIN" : "#SCAN_MIN";
     } else {
-      throw std::invalid_argument(
-          "VPL VM reduce/scan supports only +, *, maximum, and minimum");
+      refuse(msg::reduceScanVerbs);
     }
 
     if (adverb == TokenKind::Reduce) {
@@ -117,23 +116,16 @@ Maybe lowerFoldMonadic(LowerContext &ctx, const MonadicExpr &expr) {
       return scanCells.front();
     }
   }
-  throw std::invalid_argument("unsupported VPL custom verb in VM compiler");
-  throw std::invalid_argument("unsupported VPL custom verb in VM compiler");
+  refuse(msg::customUnsupported);
 }
 
 Maybe lowerTallyMonadic(LowerContext &ctx, const MonadicExpr &, CellRef rCell) {
-  if (ctx.isRank(rCell))
-    throw std::invalid_argument(
-        "VPL scalar monadic arithmetic on a rank requires array lowering");
-  throw std::invalid_argument("unsupported VPL monadic verb in VM compiler");
+  refuseMonadicOperand(ctx, rCell);
 }
 
 CellRef lowerFoldDyadic(LowerContext &ctx, const DyadicExpr &,
                         const AdverbExpr &, CellRef lCell, CellRef rCell) {
-  if (ctx.isRank(lCell) || ctx.isRank(rCell))
-    throw std::invalid_argument(
-        "VPL scalar dyadic arithmetic on ranks requires array lowering");
-  throw std::invalid_argument("unsupported VPL dyadic verb in VM compiler");
+  refuseDyadicOperands(ctx, lCell, rCell);
 }
 
 } // namespace xanadu::vpl::lower

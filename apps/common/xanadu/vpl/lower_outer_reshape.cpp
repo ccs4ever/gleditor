@@ -11,21 +11,18 @@
 namespace xanadu::vpl::lower {
 
 CellRef lowerRhoDyadic(LowerContext &, const DyadicExpr &) {
-  throw std::invalid_argument("unsupported VPL dyadic verb in VM compiler");
+  refuse(msg::dyadicUnsupported);
 }
 
 Maybe lowerOuterProductMonadic(LowerContext &, const MonadicExpr &,
                                const ConjunctionExpr &) {
-  throw std::invalid_argument("unsupported VPL custom verb in VM compiler");
+  refuse(msg::customUnsupported);
 }
 
 CellRef lowerOuterProductDyadic(LowerContext &ctx, const DyadicExpr &,
                                 const ConjunctionExpr &, CellRef lCell,
                                 CellRef rCell) {
-  if (ctx.isRank(lCell) || ctx.isRank(rCell))
-    throw std::invalid_argument(
-        "VPL scalar dyadic arithmetic on ranks requires array lowering");
-  throw std::invalid_argument("unsupported VPL dyadic verb in VM compiler");
+  refuseDyadicOperands(ctx, lCell, rCell);
 }
 
 } // namespace xanadu::vpl::lower

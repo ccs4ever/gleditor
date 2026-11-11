@@ -12,44 +12,33 @@
 namespace xanadu::vpl::lower {
 
 Maybe lowerScrubMonadic(LowerContext &ctx, const MonadicExpr &, CellRef rCell) {
-  if (ctx.isRank(rCell))
-    throw std::invalid_argument(
-        "VPL scalar monadic arithmetic on a rank requires array lowering");
-  throw std::invalid_argument("unsupported VPL monadic verb in VM compiler");
+  refuseMonadicOperand(ctx, rCell);
 }
 
 CellRef lowerScrubDyadic(LowerContext &, const DyadicExpr &) {
-  throw std::invalid_argument("unsupported VPL dyadic verb in VM compiler");
+  refuse(msg::dyadicUnsupported);
 }
 
 CellRef lowerCompressDyadic(LowerContext &ctx, const DyadicExpr &,
                             CellRef lCell, CellRef rCell) {
-  if (ctx.isRank(lCell) || ctx.isRank(rCell))
-    throw std::invalid_argument(
-        "VPL scalar dyadic arithmetic on ranks requires array lowering");
-  throw std::invalid_argument("unsupported VPL dyadic verb in VM compiler");
+  refuseDyadicOperands(ctx, lCell, rCell);
 }
 
 Maybe lowerConjunctionMonadic(LowerContext &, const MonadicExpr &,
                               const ConjunctionExpr &) {
-  throw std::invalid_argument("unsupported VPL custom verb in VM compiler");
+  refuse(msg::customUnsupported);
 }
 
 CellRef lowerConjunctionDyadic(LowerContext &ctx, const DyadicExpr &,
                                const ConjunctionExpr &, CellRef lCell,
                                CellRef rCell) {
-  if (ctx.isRank(lCell) || ctx.isRank(rCell))
-    throw std::invalid_argument(
-        "VPL scalar dyadic arithmetic on ranks requires array lowering");
-  throw std::invalid_argument("unsupported VPL dyadic verb in VM compiler");
+  refuseDyadicOperands(ctx, lCell, rCell);
 }
 
 CellRef lowerConjunctionExpr(LowerContext &, const ConjunctionExpr &) {
-  throw std::invalid_argument("VPL conjunctions are unsupported by the VM");
+  refuse(msg::conjunctions);
 }
 
-Maybe lowerQuad(LowerContext &, const QuadExpr &) {
-  throw std::invalid_argument("VPL quad IO is unsupported by the VM");
-}
+Maybe lowerQuad(LowerContext &, const QuadExpr &) { refuse(msg::quad); }
 
 } // namespace xanadu::vpl::lower

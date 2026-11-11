@@ -12,18 +12,12 @@ namespace xanadu::vpl::lower {
 
 Maybe lowerHypertimeMonadic(LowerContext &ctx, const MonadicExpr &,
                             CellRef rCell) {
-  if (ctx.isRank(rCell))
-    throw std::invalid_argument(
-        "VPL scalar monadic arithmetic on a rank requires array lowering");
-  throw std::invalid_argument("unsupported VPL monadic verb in VM compiler");
+  refuseMonadicOperand(ctx, rCell);
 }
 
 Maybe lowerTranscludeMonadic(LowerContext &ctx, const MonadicExpr &,
                              CellRef rCell) {
-  if (ctx.isRank(rCell))
-    throw std::invalid_argument(
-        "VPL scalar monadic arithmetic on a rank requires array lowering");
-  throw std::invalid_argument("unsupported VPL monadic verb in VM compiler");
+  refuseMonadicOperand(ctx, rCell);
 }
 
 } // namespace xanadu::vpl::lower

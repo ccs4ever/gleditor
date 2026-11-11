@@ -12,28 +12,34 @@
 namespace xanadu::vpl::lower {
 
 Maybe lowerTransposeMonadic(LowerContext &, const MonadicExpr &) {
-  throw std::invalid_argument("unsupported VPL monadic verb in VM compiler");
+  refuse(msg::monadicUnsupported);
 }
 
 Maybe lowerReverseMonadic(LowerContext &, const MonadicExpr &) {
-  throw std::invalid_argument("unsupported VPL monadic verb in VM compiler");
+  refuse(msg::monadicUnsupported);
 }
 
 CellRef lowerRhoViewDyadic(LowerContext &, const DyadicExpr &) {
-  throw std::invalid_argument("unsupported VPL dyadic verb in VM compiler");
+  refuse(msg::dyadicUnsupported);
+}
+
+CellRef lowerRhoViewCompiled(LowerContext &, const DyadicExpr &, CellRef,
+                             CellRef) {
+  refuse(msg::dyadicUnsupported);
 }
 
 CellRef lowerTransposeDyadic(LowerContext &ctx, const DyadicExpr &,
                              CellRef lCell, CellRef rCell) {
-  if (ctx.isRank(lCell) || ctx.isRank(rCell))
-    throw std::invalid_argument(
-        "VPL scalar dyadic arithmetic on ranks requires array lowering");
-  throw std::invalid_argument("unsupported VPL dyadic verb in VM compiler");
+  refuseDyadicOperands(ctx, lCell, rCell);
 }
 
 CellRef lowerDimension(LowerContext &, const DimensionExpr &) {
-  throw std::invalid_argument(
-      "VPL dimension values require typed-handle VM lowering");
+  refuse(msg::dimensionValues);
+}
+
+Maybe lowerDimensionVector(LowerContext &, const VectorExpr &,
+                           const std::vector<CellRef> &) {
+  refuse(msg::dimensionValues);
 }
 
 } // namespace xanadu::vpl::lower

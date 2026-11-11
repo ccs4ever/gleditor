@@ -37,12 +37,27 @@ void walkRank(LowerContext &, CellRef, DimRef, DimVector,
   notYet("walkRank");
 }
 
+void walkRankAfter(LowerContext &, CellRef, DimRef, DimVector,
+                   gleditor::cpp26::function_ref<void(CellRef)>) {
+  notYet("walkRankAfter");
+}
+
+void walkRanksLockstep(LowerContext &, CellRef, DimRef, DimVector, CellRef,
+                       DimRef, DimVector,
+                       gleditor::cpp26::function_ref<void(CellRef, CellRef)>) {
+  notYet("walkRanksLockstep");
+}
+
+CellRef extentOf(LowerContext &, CellRef, DimRef, DimVector) {
+  notYet("extentOf");
+}
+
 CellRef extreme(LowerContext &, CellRef, DimRef, DimVector) {
   notYet("extreme");
 }
 
-void countedLoop(LowerContext &, CellRef,
-                 gleditor::cpp26::function_ref<void(CellRef)>) {
+CellRef countedLoop(LowerContext &, CellRef,
+                    gleditor::cpp26::function_ref<void(CellRef)>) {
   notYet("countedLoop");
 }
 

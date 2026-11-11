@@ -11,35 +11,33 @@
 namespace xanadu::vpl::lower {
 
 Maybe lowerPowerMonadic(LowerContext &, const MonadicExpr &) {
-  throw std::invalid_argument("unsupported VPL monadic verb in VM compiler");
+  refuse(msg::monadicUnsupported);
 }
 
 Maybe lowerSignumMonadic(LowerContext &, const MonadicExpr &) {
-  throw std::invalid_argument("unsupported VPL monadic verb in VM compiler");
+  refuse(msg::monadicUnsupported);
 }
 
 Maybe lowerFloorMonadic(LowerContext &, const MonadicExpr &) {
-  throw std::invalid_argument("unsupported VPL monadic verb in VM compiler");
+  refuse(msg::monadicUnsupported);
 }
 
 Maybe lowerCeilingMonadic(LowerContext &, const MonadicExpr &) {
-  throw std::invalid_argument("unsupported VPL monadic verb in VM compiler");
+  refuse(msg::monadicUnsupported);
 }
 
 CellRef lowerPowerDyadic(LowerContext &, const DyadicExpr &) {
-  throw std::invalid_argument("unsupported VPL dyadic verb in VM compiler");
+  refuse(msg::dyadicUnsupported);
 }
 
 Maybe lowerMonadicArithmeticOnRank(LowerContext &, const MonadicExpr &,
                                    CellRef) {
-  throw std::invalid_argument(
-      "VPL scalar monadic arithmetic on a rank requires array lowering");
+  refuse(msg::monadicOnRank);
 }
 
 CellRef lowerDyadicArithmeticOnRank(LowerContext &, const DyadicExpr &, CellRef,
                                     CellRef) {
-  throw std::invalid_argument(
-      "VPL scalar dyadic arithmetic on ranks requires array lowering");
+  refuse(msg::dyadicOnRank);
 }
 
 Maybe lowerEachMonadic(LowerContext &, const MonadicExpr &expr,
@@ -54,18 +52,14 @@ Maybe lowerEachMonadic(LowerContext &, const MonadicExpr &expr,
   (void)expr;
   if (innerVerb != TokenKind::Plus && innerVerb != TokenKind::Times &&
       innerVerb != TokenKind::Ceiling && innerVerb != TokenKind::Floor) {
-    throw std::invalid_argument(
-        "VPL VM reduce/scan supports only +, *, maximum, and minimum");
+    refuse(msg::reduceScanVerbs);
   }
-  throw std::invalid_argument("VPL VM each adverb is unsupported");
+  refuse(msg::eachUnsupported);
 }
 
 CellRef lowerEachDyadic(LowerContext &ctx, const DyadicExpr &,
                         const AdverbExpr &, CellRef lCell, CellRef rCell) {
-  if (ctx.isRank(lCell) || ctx.isRank(rCell))
-    throw std::invalid_argument(
-        "VPL scalar dyadic arithmetic on ranks requires array lowering");
-  throw std::invalid_argument("unsupported VPL dyadic verb in VM compiler");
+  refuseDyadicOperands(ctx, lCell, rCell);
 }
 
 } // namespace xanadu::vpl::lower

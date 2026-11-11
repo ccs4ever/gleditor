@@ -688,6 +688,12 @@ std::optional<CellRef> VPLCompiler::compileVector(const VectorExpr &expr) {
   if (cells.empty())
     throw std::invalid_argument("VPL vector has no VM-compiled elements");
 
+  if (std::ranges::all_of(cells, [&](const CellRef cell) {
+        return dimensionValues_.contains(cell);
+      })) {
+    LowerContext ctx(*this);
+    return lower::lowerDimensionVector(ctx, expr, cells);
+  }
   if (std::ranges::any_of(cells, [&](const CellRef cell) {
         return rankAxes_.contains(cell);
       })) {
@@ -870,8 +876,7 @@ std::optional<CellRef> VPLCompiler::compileMonadic(const MonadicExpr &expr) {
       default:
         // No card owns this verb on a rank (Member, Take, Drop, Compress,
         // comparisons, ... used monadically): keep today's refusal.
-        throw std::invalid_argument(
-            "VPL scalar monadic arithmetic on a rank requires array lowering");
+        lower::refuse(lower::msg::monadicOnRank);
       }
     }
   }
@@ -913,7 +918,7 @@ std::optional<CellRef> VPLCompiler::compileMonadic(const MonadicExpr &expr) {
     return out;
   }
   default:
-    throw std::invalid_argument("unsupported VPL monadic verb in VM compiler");
+    lower::refuse(lower::msg::monadicUnsupported);
   }
 }
 
@@ -968,10 +973,9 @@ CellRef VPLCompiler::compileDyadic(const DyadicExpr &expr) {
     }
     // An adverb no card owns (Compress used as an adverb): today's refusal.
     if (rankAxes_.contains(*lCell) || rankAxes_.contains(*rCell)) {
-      throw std::invalid_argument(
-          "VPL scalar dyadic arithmetic on ranks requires array lowering");
+      lower::refuse(lower::msg::dyadicOnRank);
     }
-    throw std::invalid_argument("unsupported VPL dyadic verb in VM compiler");
+    lower::refuse(lower::msg::dyadicUnsupported);
   }
 
   switch (expr.verb()) {
@@ -1007,8 +1011,7 @@ CellRef VPLCompiler::compileDyadic(const DyadicExpr &expr) {
     default:
       // No card owns this verb on ranks (Where, Tally, Hypertime, ...):
       // keep today's refusal.
-      throw std::invalid_argument(
-          "VPL scalar dyadic arithmetic on ranks requires array lowering");
+      lower::refuse(lower::msg::dyadicOnRank);
     }
   }
 
@@ -1077,7 +1080,7 @@ CellRef VPLCompiler::compileDyadic(const DyadicExpr &expr) {
     l    = "#OR";
     break;
   default:
-    throw std::invalid_argument("unsupported VPL dyadic verb in VM compiler");
+    lower::refuse(lower::msg::dyadicUnsupported);
   }
 
   CellRef op = emitOp(kind, l);

@@ -70,8 +70,10 @@ public:
   void emitOutput(zigzag::CellRef op, zigzag::CellRef target) const {
     compiler_.emitOutput(op, target);
   }
-  zigzag::CellRef emitConstant(const zigzag::vortex::CellValue &value) const {
-    return compiler_.emitConstant(value);
+  zigzag::CellRef emitConstant(
+      const zigzag::vortex::CellValue &value,
+      std::optional<zigzag::CellRef> designatedCell = std::nullopt) const {
+    return compiler_.emitConstant(value, designatedCell);
   }
   zigzag::CellRef
   emitInputConstant(zigzag::CellRef op,
@@ -174,6 +176,52 @@ namespace lower {
 using zigzag::CellRef;
 using Maybe = std::optional<zigzag::CellRef>;
 
+/// The refusal texts shared by many stubs. One copy each, so a card cannot
+/// drift a duplicate; tests match substrings of these.
+namespace msg {
+inline constexpr std::string_view monadicUnsupported =
+    "unsupported VPL monadic verb in VM compiler";
+inline constexpr std::string_view monadicOnRank =
+    "VPL scalar monadic arithmetic on a rank requires array lowering";
+inline constexpr std::string_view dyadicUnsupported =
+    "unsupported VPL dyadic verb in VM compiler";
+inline constexpr std::string_view dyadicOnRank =
+    "VPL scalar dyadic arithmetic on ranks requires array lowering";
+inline constexpr std::string_view customUnsupported =
+    "unsupported VPL custom verb in VM compiler";
+inline constexpr std::string_view reduceScanVerbs =
+    "VPL VM reduce/scan supports only +, *, maximum, and minimum";
+inline constexpr std::string_view eachUnsupported =
+    "VPL VM each adverb is unsupported";
+inline constexpr std::string_view dimensionValues =
+    "VPL dimension values require typed-handle VM lowering";
+inline constexpr std::string_view indexing =
+    "VPL indexing is unsupported by the VM";
+inline constexpr std::string_view conjunctions =
+    "VPL conjunctions are unsupported by the VM";
+inline constexpr std::string_view quad = "VPL quad IO is unsupported by the VM";
+inline constexpr std::string_view nestedRanks =
+    "nested VPL ranks require explicit array lowering";
+} // namespace msg
+
+[[noreturn]] inline void refuse(std::string_view message) {
+  throw std::invalid_argument(std::string(message));
+}
+
+/// Post-operand monadic refusal: the rank message for a rank operand, else the
+/// generic unsupported-verb message.
+[[noreturn]] inline void refuseMonadicOperand(const LowerContext &ctx,
+                                              CellRef operand) {
+  refuse(ctx.isRank(operand) ? msg::monadicOnRank : msg::monadicUnsupported);
+}
+
+/// Post-operand dyadic refusal: the rank message if either operand is a rank.
+[[noreturn]] inline void refuseDyadicOperands(const LowerContext &ctx,
+                                              CellRef left, CellRef right) {
+  refuse(ctx.isRank(left) || ctx.isRank(right) ? msg::dyadicOnRank
+                                               : msg::dyadicUnsupported);
+}
+
 // ---------------------------------------------------------------------------
 // Monadic verbs refused before the operand is compiled (compileMonadic).
 // The stub receives the unevaluated node: compile expr.right() yourself.
@@ -238,8 +286,21 @@ Maybe lowerConjunctionMonadic(LowerContext &ctx, const MonadicExpr &expr,
 CellRef lowerIotaDyadic(LowerContext &ctx, const DyadicExpr &expr); // V3
 /// Dyadic ⍴ whose right operand is a dimension or vector of dimensions
 /// (isDimensionOperand): `H ⍴ (d.1 d.2 d.3)`.
+///
+/// The test is purely syntactic. `H ⍴ D` with D bound to a dimension value, or
+/// a vector mixing dimensions and other elements, takes the other branch and
+/// reaches lowerRhoDyadic, which must consult ctx.dimensionValuesOf(rCell)
+/// after compiling its operands and, for a dimension value, call
+/// lowerRhoViewCompiled.
 CellRef lowerRhoViewDyadic(LowerContext &ctx, const DyadicExpr &expr); // V4
-/// Every other dyadic ⍴: link form and reshape form.
+/// V4's view logic on already compiled operands (rCell carries dimension
+/// values). The entry point V9 calls from lowerRhoDyadic so it never edits
+/// V4's file; lowerRhoViewDyadic may call it too. Today: throws
+/// msg::dyadicUnsupported.
+CellRef lowerRhoViewCompiled(LowerContext &ctx, const DyadicExpr &expr,
+                             CellRef lCell, CellRef rCell); // V4
+/// Every other dyadic ⍴: link form and reshape form. Must route a right
+/// operand with dimension values to lowerRhoViewCompiled (see above).
 CellRef lowerRhoDyadic(LowerContext &ctx, const DyadicExpr &expr);      // V9
 CellRef lowerTakeDyadic(LowerContext &ctx, const DyadicExpr &expr);     // V5
 CellRef lowerDropDyadic(LowerContext &ctx, const DyadicExpr &expr);     // V5
@@ -289,7 +350,18 @@ CellRef lowerConjunctionDyadic(LowerContext &ctx, const DyadicExpr &expr,
 // ---------------------------------------------------------------------------
 // Other forms.
 // ---------------------------------------------------------------------------
+/// A bare dimension `d.1`. A dimension value has no cells, so this returns an
+/// alias register (emit::aliasRegister of a cleared register) on which it calls
+/// ctx.setDimensionValues({dimension, POS}). Today: throws
+/// msg::dimensionValues.
 CellRef lowerDimension(LowerContext &ctx, const DimensionExpr &expr); // V4
+/// A literal vector whose every compiled element carries dimension values
+/// (`(d.1 d.2 d.3)` standalone). Returns an alias register carrying the
+/// concatenated dimension values via ctx.setDimensionValues. Unreachable until
+/// V4 makes lowerDimension succeed (the element compile throws first); today it
+/// throws msg::dimensionValues, the same message the element compile gives.
+Maybe lowerDimensionVector(LowerContext &ctx, const VectorExpr &expr,
+                           const std::vector<CellRef> &cells); // V4
 /// A literal vector with at least one element that is itself a rank. `cells`
 /// are the compiled elements, in order.
 Maybe lowerVectorOfRanks(LowerContext &ctx, const VectorExpr &expr,

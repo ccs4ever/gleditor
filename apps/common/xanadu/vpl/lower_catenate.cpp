@@ -11,17 +11,16 @@
 namespace xanadu::vpl::lower {
 
 Maybe lowerRavelMonadic(LowerContext &, const MonadicExpr &) {
-  throw std::invalid_argument("unsupported VPL monadic verb in VM compiler");
+  refuse(msg::monadicUnsupported);
 }
 
 CellRef lowerCatenateDyadic(LowerContext &, const DyadicExpr &) {
-  throw std::invalid_argument("unsupported VPL dyadic verb in VM compiler");
+  refuse(msg::dyadicUnsupported);
 }
 
 Maybe lowerVectorOfRanks(LowerContext &, const VectorExpr &,
                          const std::vector<CellRef> &) {
-  throw std::invalid_argument(
-      "nested VPL ranks require explicit array lowering");
+  refuse(msg::nestedRanks);
 }
 
 } // namespace xanadu::vpl::lower

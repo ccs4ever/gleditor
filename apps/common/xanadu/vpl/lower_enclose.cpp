@@ -11,11 +11,11 @@
 namespace xanadu::vpl::lower {
 
 Maybe lowerEncloseMonadic(LowerContext &, const MonadicExpr &) {
-  throw std::invalid_argument("unsupported VPL monadic verb in VM compiler");
+  refuse(msg::monadicUnsupported);
 }
 
 Maybe lowerDiscloseMonadic(LowerContext &, const MonadicExpr &) {
-  throw std::invalid_argument("unsupported VPL monadic verb in VM compiler");
+  refuse(msg::monadicUnsupported);
 }
 
 } // namespace xanadu::vpl::lower

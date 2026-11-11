@@ -11,11 +11,11 @@
 namespace xanadu::vpl::lower {
 
 CellRef lowerTakeDyadic(LowerContext &, const DyadicExpr &) {
-  throw std::invalid_argument("unsupported VPL dyadic verb in VM compiler");
+  refuse(msg::dyadicUnsupported);
 }
 
 CellRef lowerDropDyadic(LowerContext &, const DyadicExpr &) {
-  throw std::invalid_argument("unsupported VPL dyadic verb in VM compiler");
+  refuse(msg::dyadicUnsupported);
 }
 
 } // namespace xanadu::vpl::lower

@@ -11,44 +11,29 @@
 namespace xanadu::vpl::lower {
 
 Maybe lowerGradeMonadic(LowerContext &ctx, const MonadicExpr &, CellRef rCell) {
-  if (ctx.isRank(rCell))
-    throw std::invalid_argument(
-        "VPL scalar monadic arithmetic on a rank requires array lowering");
-  throw std::invalid_argument("unsupported VPL monadic verb in VM compiler");
+  refuseMonadicOperand(ctx, rCell);
 }
 
 Maybe lowerWhereMonadic(LowerContext &ctx, const MonadicExpr &, CellRef rCell) {
-  if (ctx.isRank(rCell))
-    throw std::invalid_argument(
-        "VPL scalar monadic arithmetic on a rank requires array lowering");
-  throw std::invalid_argument("unsupported VPL monadic verb in VM compiler");
+  refuseMonadicOperand(ctx, rCell);
 }
 
 Maybe lowerMatchMonadic(LowerContext &ctx, const MonadicExpr &, CellRef rCell) {
-  if (ctx.isRank(rCell))
-    throw std::invalid_argument(
-        "VPL scalar monadic arithmetic on a rank requires array lowering");
-  throw std::invalid_argument("unsupported VPL monadic verb in VM compiler");
+  refuseMonadicOperand(ctx, rCell);
 }
 
 CellRef lowerMemberDyadic(LowerContext &ctx, const DyadicExpr &, CellRef lCell,
                           CellRef rCell) {
-  if (ctx.isRank(lCell) || ctx.isRank(rCell))
-    throw std::invalid_argument(
-        "VPL scalar dyadic arithmetic on ranks requires array lowering");
-  throw std::invalid_argument("unsupported VPL dyadic verb in VM compiler");
+  refuseDyadicOperands(ctx, lCell, rCell);
 }
 
 CellRef lowerMatchDyadic(LowerContext &ctx, const DyadicExpr &, CellRef lCell,
                          CellRef rCell) {
-  if (ctx.isRank(lCell) || ctx.isRank(rCell))
-    throw std::invalid_argument(
-        "VPL scalar dyadic arithmetic on ranks requires array lowering");
-  throw std::invalid_argument("unsupported VPL dyadic verb in VM compiler");
+  refuseDyadicOperands(ctx, lCell, rCell);
 }
 
 Maybe lowerIndexing(LowerContext &, const IndexingExpr &) {
-  throw std::invalid_argument("VPL indexing is unsupported by the VM");
+  refuse(msg::indexing);
 }
 
 } // namespace xanadu::vpl::lower

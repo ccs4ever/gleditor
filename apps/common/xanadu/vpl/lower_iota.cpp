@@ -11,15 +11,15 @@
 namespace xanadu::vpl::lower {
 
 Maybe lowerIotaMonadic(LowerContext &, const MonadicExpr &) {
-  throw std::invalid_argument("unsupported VPL monadic verb in VM compiler");
+  refuse(msg::monadicUnsupported);
 }
 
 Maybe lowerRhoMonadic(LowerContext &, const MonadicExpr &) {
-  throw std::invalid_argument("unsupported VPL monadic verb in VM compiler");
+  refuse(msg::monadicUnsupported);
 }
 
 CellRef lowerIotaDyadic(LowerContext &, const DyadicExpr &) {
-  throw std::invalid_argument("unsupported VPL dyadic verb in VM compiler");
+  refuse(msg::dyadicUnsupported);
 }
 
 } // namespace xanadu::vpl::lower
