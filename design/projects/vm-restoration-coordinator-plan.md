@@ -399,6 +399,32 @@ Ruled by the owner on 2026-11-11, after W0.3 (each ruling binds the cards that l
 - **MAIN:** `main`'s 13 failing tests and its format and lint debt stay out of scope. The gates are
   "no failure outside `MAIN`" and "no new format or lint violation relative to `main`".
 
+Ruled by the owner on 2026-11-11, after the three spikes (D4). The spike reports, with the card
+splits and the card-to-test mappings, are in `/data/git/gleditor-restore/.logs/w2/`
+(`L0-vlace-spike.md`, `P0-logic-spike.md`, `V0-vpl-spike.md` and the three `*-cards.tsv`); they
+replace the card lists under "W2 and W3" above.
+
+- **Logic opcodes:** approved after a probe. A probe test first shows that `MakeVar`, `MakeTerm` and
+  `Deref` outputs cannot be chained by a graph; if it fails as predicted, those three publish their
+  outputs as cell references and `MakeTerm` builds through `Vlog::makeTerm`. If the probe passes,
+  nothing changes.
+- **`RelationNext`:** approved. A read-only accessor opcode plus a `setRelationProvider` hook.
+- **`DimByName`:** approved. `DimByName(name, mintFlag)` for VLace `std:xanadu`.
+- **`Hypertime`:** approved. No inputs, one Int64 output: the arena's operation high-water mark.
+- **`Pow`:** approved now, with its own tests, although no existing test needs it.
+- **VLace IO:** a host trampoline satisfies the policy. IO actions evaluate on the VM to pure
+  description values; `runIO` performs the leaf effects and calls the VM for every force and
+  application. No effect opcode.
+- **`VPLEngine`:** becomes a thin facade over the VM executor; the dead interpreter is deleted; the
+  three refusal tests are rewritten to prove that no AST is executed directly.
+- **Untested VPL semantics** (key, empty reduce, copies of quoted cells): follow
+  `design/vpl-array-language.md` where it speaks; otherwise refuse with a named message. Each card
+  tests what it implements.
+
+All four opcodes are appended by one serial card, O1, which owns `vortex/vortex_vm.hpp/.cpp` until
+it lands, so that no two cards append to the enum. The workers' common instructions are in
+`/data/git/gleditor-restore/.logs/card-brief.md`.
+
 ## 5a. Original decision table (before W0)
 
 | Id  | Before | Decision                                                                                                                   | Recommendation                                                                                                                                                          |
