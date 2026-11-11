@@ -29,6 +29,18 @@ CellRef emitTerm(CompileContext &, FrameScope &, Chain &, CellRef) {
   refuseUnlowered(kCard, "emitTerm");
 }
 
+CellRef emitConstant(CompileContext &, Chain &, const ScalarConstant &) {
+  refuseUnlowered(kCard, "emitConstant");
+}
+
+std::optional<CellRef> argumentPort(const FrameScope &, std::size_t) {
+  refuseUnlowered(kCard, "argumentPort");
+}
+
+bool bindArgumentPort(FrameScope &, CellRef, std::size_t) {
+  refuseUnlowered(kCard, "bindArgumentPort");
+}
+
 void emitUnifyOrFail(CompileContext &, FrameScope &, Chain &, CellRef,
                      CellRef) {
   refuseUnlowered(kCard, "emitUnifyOrFail");
@@ -46,6 +58,38 @@ void placeLabel(CompileContext &, Chain &, Label) {
 
 CellRef emitChoice(CompileContext &, Chain &, Label) {
   refuseUnlowered(kCard, "emitChoice");
+}
+
+CellRef emitJump(CompileContext &, Chain &, Label) {
+  refuseUnlowered(kCard, "emitJump");
+}
+
+CellRef emitBranchIf(CompileContext &, Chain &, CellRef, Label) {
+  refuseUnlowered(kCard, "emitBranchIf");
+}
+
+CellRef emitBranchUnless(CompileContext &, Chain &, CellRef, Label) {
+  refuseUnlowered(kCard, "emitBranchUnless");
+}
+
+CellRef emitCut(CompileContext &, FrameScope &, Chain &) {
+  refuseUnlowered(kCard, "emitCut");
+}
+
+NegationScope openNegationScope(CompileContext &, FrameScope &, Chain &) {
+  refuseUnlowered(kCard, "openNegationScope");
+}
+
+void closeNegationScope(FrameScope &, const NegationScope &) {
+  refuseUnlowered(kCard, "closeNegationScope");
+}
+
+CellRef emitCutTo(CompileContext &, Chain &, CellRef) {
+  refuseUnlowered(kCard, "emitCutTo");
+}
+
+void emitNonTermGoal(CompileContext &, FrameScope &, Chain &, CellRef) {
+  refuseUnlowered(kCard, "goal is not a term");
 }
 
 LoweredQuery lowerQuery(CompileContext &, std::span<const CellRef>) {
@@ -95,7 +139,7 @@ void emitUnknownPredicate(CompileContext &, FrameScope &, Chain &,
   refuseUnlowered(kCard, "no lowering for predicate " + key.display());
 }
 
-void emitClause(CompileContext &, FrameScope &, Chain &, CellRef) {
+void emitClause(CompileContext &, FrameScope &, Chain &, CellRef, bool) {
   refuseUnlowered(kCard, "emitClause");
 }
 

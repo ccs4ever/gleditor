@@ -25,10 +25,17 @@ std::string PredicateKey::display() const {
   return name + "/" + std::to_string(arity);
 }
 
+namespace {
+// 2^64 / golden ratio: the usual hash_combine mixer, so name and arity hashes
+// do not cancel when one is small.
+constexpr std::size_t kGoldenRatioMix = 0x9e3779b97f4a7c15ULL;
+constexpr unsigned kHashShift         = 6;
+} // namespace
+
 std::size_t PredicateKeyHash::operator()(const PredicateKey &k) const noexcept {
-  return std::hash<std::string>{}(k.name) ^
-         (std::hash<std::size_t>{}(k.arity) + 0x9e3779b97f4a7c15ULL +
-          (std::hash<std::string>{}(k.name) << 6U));
+  const std::size_t nameHash = std::hash<std::string>{}(k.name);
+  return nameHash ^ (std::hash<std::size_t>{}(k.arity) + kGoldenRatioMix +
+                     (nameHash << kHashShift));
 }
 
 CompileContext makeCompileContext(VortexCore &core, VortexVM &vm,
@@ -51,7 +58,8 @@ void emitGoal(CompileContext &ctx, FrameScope &scope, Chain &chain,
               CellRef goal) {
   const auto functor = ctx.stdlib.functorOf(goal);
   if (!functor) {
-    refuseUnlowered("P0", "goal is not a term");
+    emitNonTermGoal(ctx, scope, chain, goal);
+    return;
   }
   const PredicateKey key{*functor, ctx.stdlib.argumentsOf(goal).size()};
 

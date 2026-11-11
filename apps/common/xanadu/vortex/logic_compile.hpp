@@ -17,7 +17,8 @@
  * Emission convention: goals are emitted FORWARD into a Chain. An emitter
  * appends ops to the chain's tail; a failing test branches to
  * FrameScope::failOp; success falls through to whatever is appended next.
- * Forward jump targets are Labels placed later.
+ * Jump targets are Labels, which may be placed before or after the ops that
+ * target them (see newLabel).
  *
  * Ownership of each declaration is the "Owner:" line above it.
  */
@@ -35,6 +36,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <variant>
 #include <vector>
 
 #include "common/xanadu/vortex/vortex_core.hpp"
@@ -86,9 +88,10 @@ struct RelationRequest {
   /// First candidate to consider. Opaque to the graph; 0 on the first call.
   std::size_t position{};
   /// Candidate bound fixed by the first call (the arena cellCount snapshot),
-  /// so a scan that mints answer cells does not chase its own tail. 0 on the
-  /// first call, which means "take the snapshot now".
-  std::size_t limit{};
+  /// so a scan that mints answer cells does not chase its own tail. Nullopt on
+  /// the first call, which means "take the snapshot now"; an empty relation
+  /// then answers with a present limit of 0, which is not the same thing.
+  std::optional<std::size_t> limit;
 };
 
 /// One matching tuple. `cells` holds exactly one fresh answer cell per
@@ -147,13 +150,16 @@ struct CompileContext {
   /// solutions" or walk home, as the old solver did.
   const xanadu::Store *store{nullptr};
   /// Stdlib predicate cells first, in registration order, then the caller's
-  /// custom predicates: the candidatePreds order of the old solver.
+  /// custom predicates: the candidatePreds order of the old solver. Custom
+  /// predicates enter only here and are matched to a goal by NAME, as
+  /// `core.arena().textOf(pred) == functor`.
   std::vector<CellRef> candidatePredicates;
   /// VM cycle budget for one solve. Real, not the 100000 vm.run default.
   std::size_t maxCycles{};
   RelationRegistry relations;
-  /// Compiled predicate frames, so recursion and mutual recursion close over
-  /// the descriptor cell. Owner: P1.
+  /// Compiled predicate frames. Entry-first protocol: a predicate's frame
+  /// descriptor is registered here BEFORE its body is compiled, so recursion
+  /// and mutual recursion can refer to it. Owner: P1.
   std::unordered_map<PredicateKey, CellRef, PredicateKeyHash> frames;
 };
 
@@ -163,7 +169,7 @@ struct Chain {
   std::optional<CellRef> tail;
 };
 
-/// A forward jump target, placed later with placeLabel().
+/// A jump target. See newLabel for when it may be placed.
 struct Label {
   CellRef op{};
 };
@@ -173,12 +179,17 @@ struct FrameScope {
   PredicateKey predicate;
   /// The shared Fail op: a failing test branches here.
   CellRef failOp{};
-  /// Frame-local slots. Argument ports come first, then variables, temporaries
-  /// and the barrier.
+  /// Frame-local slots. Argument port i is `locals[i]` (read it with
+  /// argumentPort); variables, temporaries and the barrier follow.
   std::vector<CellRef> locals;
-  /// The slot written by `ChoiceDepth` at entry; `Cut barrier` is `!`.
+  /// Cut barrier slot, written by `ChoiceDepth`. P1 sets it at every predicate
+  /// frame entry AND in the query-level scope that lowerQuery builds, so it is
+  /// engaged whenever a card sees a scope. P2 never reads it: use emitCut,
+  /// openNegationScope and closeNegationScope.
   std::optional<CellRef> barrier;
-  /// Dereferenced clause/query variable cell -> its local slot.
+  /// Dereferenced clause/query variable cell -> its local slot. emitClause
+  /// clears it on entry (every clause is a fresh renaming per activation) and
+  /// nothing else clears it.
   std::unordered_map<CellRef, CellRef> variableSlots;
 };
 
@@ -193,6 +204,29 @@ CellRef appendOp(CompileContext &ctx, Chain &chain, OpcodeKind kind,
 
 /// A fresh frame-local slot (temporary) in @p scope.
 CellRef newLocal(CompileContext &ctx, FrameScope &scope);
+
+/// A scalar a graph can carry as a constant.
+using ScalarConstant = std::variant<std::int64_t, double, std::string, bool>;
+
+/// A static cell holding @p value, usable as an op input anywhere in @p chain.
+/// Numbers are scalar cells (makeScalarCell), text is a text cell. Needed for
+/// the zero-divisor guard, numeric conversion, boxing an arithmetic result and
+/// the relation key and start position.
+CellRef emitConstant(CompileContext &ctx, Chain &chain,
+                     const ScalarConstant &value);
+
+/// Port @p index of @p scope's frame: `scope.locals[index]`. Nullopt past the
+/// predicate's arity.
+[[nodiscard]] std::optional<CellRef> argumentPort(const FrameScope &scope,
+                                                  std::size_t index);
+
+/// Head-argument rule. A head argument that is a variable seen for the first
+/// time IS its port: call this, which records the port as the variable's slot
+/// and emits nothing. Returns false (and changes nothing) if the variable
+/// already has a slot; the caller then emits `Unify port, variableSlot`. Any
+/// other head argument is built with emitTerm and unified with the port. In a
+/// body, variableSlot mints a fresh `MakeVar` instead.
+bool bindArgumentPort(FrameScope &scope, CellRef variable, std::size_t index);
 
 /// The slot of variable @p variable (deref'd), minting it with `MakeVar` into
 /// @p chain on first occurrence.
@@ -213,11 +247,59 @@ void emitUnifyOrFail(CompileContext &ctx, FrameScope &scope, Chain &chain,
 void emitFailUnless(CompileContext &ctx, FrameScope &scope, Chain &chain,
                     CellRef ok);
 
-/// A forward target; place it with placeLabel() once its position is known.
+/// A fresh, unplaced jump target. It may be targeted by emitChoice, emitJump,
+/// emitBranchIf and emitBranchUnless BEFORE or AFTER it is placed, so forward
+/// targets (a clause chain's next alternative) and backward targets (a loop
+/// head: `placeLabel; RelationNext ...; Choice -> label`) are both expressible.
+/// Placing it appends a landing op to the chain, which the following ops
+/// continue from. Placing a label twice, or leaving a targeted label unplaced
+/// when the frame is finished, is a LogicRefusal.
 Label newLabel(CompileContext &ctx);
 void placeLabel(CompileContext &ctx, Chain &chain, Label label);
 /// Appends `Choice target`.
 CellRef emitChoice(CompileContext &ctx, Chain &chain, Label target);
+/// Appends an unconditional `Jump target`.
+CellRef emitJump(CompileContext &ctx, Chain &chain, Label target);
+/// Appends a `Branch` to @p target taken when the Bool in @p condition is true
+/// (emitBranchIf) or false (emitBranchUnless).
+CellRef emitBranchIf(CompileContext &ctx, Chain &chain, CellRef condition,
+                     Label target);
+CellRef emitBranchUnless(CompileContext &ctx, Chain &chain, CellRef condition,
+                         Label target);
+
+// -- Cut (Owner: P1) ----------------------------------------------------------
+// Semantics, from the old solver (e9090999^ vortex_stdlib.cpp:405, 795, 1371,
+// 4331): a clause body's `!` cuts the alternatives of that predicate call (its
+// remaining clauses and every choice its earlier goals left) and keeps the
+// bindings; the caller's choices survive. A query-level `!` has frame id 1,
+// which no clause matches, so it cuts every pending alternative of the query
+// to its left and the goals to its right still run. `\+ G` runs G in a nested
+// solve with its own cut state, so a `!` inside G cuts only G's alternatives;
+// the old code seeds that nested goal's frame id with the NEXT unassigned
+// frame id, which collides with the first predicate called inside G, and I
+// could not determine whether that was intended. The specified behaviour here
+// is the clean one: a cut inside `\+` is local to the negation.
+
+/// Appends `Cut barrier` for the current scope's barrier. A scope without a
+/// barrier is a LogicRefusal.
+CellRef emitCut(CompileContext &ctx, FrameScope &scope, Chain &chain);
+
+/// What openNegationScope displaced.
+struct NegationScope {
+  CellRef barrier{};
+  std::optional<CellRef> outer;
+};
+
+/// For `\+ G`: allocates a fresh slot, appends `ChoiceDepth -> slot`, and makes
+/// it @p scope's barrier so that emitGoal(G) lowers a `!` inside G to a cut
+/// local to the negation. The caller then appends `Choice CONT`, G, a cut to
+/// `.barrier` (emitCutTo) and `Fail`. Restore the outer barrier with
+/// closeNegationScope.
+NegationScope openNegationScope(CompileContext &ctx, FrameScope &scope,
+                                Chain &chain);
+void closeNegationScope(FrameScope &scope, const NegationScope &negation);
+/// Appends `Cut barrier` for an explicit barrier slot (negation's final cut).
+CellRef emitCutTo(CompileContext &ctx, Chain &chain, CellRef barrier);
 
 // -- Query lowering and driving (Owner: P1, logic_compile_core.cpp) -----------
 
@@ -316,8 +398,10 @@ void installRelationProvider(CompileContext &ctx);
 
 // -- User predicates (Owner: P1, logic_compile_core.cpp) ----------------------
 
-/// True when some candidate predicate cell named key.name has at least one
-/// clause whose head has key.arity arguments.
+/// True when some candidate predicate cell has text equal to key.name
+/// (`core.arena().textOf(pred) == key.name`) and at least one clause. Matches
+/// by NAME only, as the old solver did: a clause of another arity is still
+/// compiled into the frame and fails at head unification.
 [[nodiscard]] bool hasUserClauses(const CompileContext &ctx,
                                   const PredicateKey &key);
 
@@ -331,16 +415,26 @@ void emitUserCall(CompileContext &ctx, FrameScope &scope, Chain &chain,
 [[nodiscard]] std::optional<CellRef>
 compilePredicateFrame(CompileContext &ctx, const PredicateKey &key);
 
-/// What the dispatch does with a functor/arity nobody owns. The old solver let
-/// such a goal fail silently, and the spike keeps that, so P1 emits a `Fail`;
-/// until then it refuses naming the predicate.
+/// What the dispatch does with a functor nobody owns (no candidate predicate
+/// matched by name, no builtin, no relation). The old solver failed silently
+/// here: no candidate, so the goal simply had no solutions and raised nothing.
+/// P1 emits a branch to scope.failOp and raises no error. Until then it
+/// refuses naming the predicate.
 void emitUnknownPredicate(CompileContext &ctx, FrameScope &scope, Chain &chain,
                           const PredicateKey &key);
 
+/// A goal that is not a term (an unbound variable or other non-callable cell).
+/// The old solver did `if (!functorOf(goal)) return true;`: it skipped the
+/// goal and went on with the next one, with no error and no failure. P1
+/// emits nothing for it, so control falls through to the following goal.
+void emitNonTermGoal(CompileContext &ctx, FrameScope &scope, Chain &chain,
+                     CellRef goal);
+
 /// One clause of a predicate chain: head unification then body goals then
-/// ReturnFrame, appended to @p chain.
+/// ReturnFrame, appended to @p chain. Clears scope.variableSlots on entry.
+/// @p last is true for the final clause, which pushes no `Choice`.
 void emitClause(CompileContext &ctx, FrameScope &scope, Chain &chain,
-                CellRef clause);
+                CellRef clause, bool last);
 
 // -- Dispatch (Owner: P0, final; logic_dispatch.cpp) --------------------------
 
