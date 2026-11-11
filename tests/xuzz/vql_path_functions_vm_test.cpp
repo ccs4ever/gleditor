@@ -1,18 +1,23 @@
 /**
  * @file vql_path_functions_vm_test.cpp
- * @brief VQL path functions lowered to Vortex graphs (Q1): count in its call
- * and value positions, and the refusals for sort_into, find, contains, and
- * count as a path step.
+ * @brief VQL path functions lowered to Vortex graphs (Q1): count, contains and
+ * sort_into in their call and value positions, and the refusals for find and
+ * for count as a path step.
  */
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <expected>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <vector>
 
+#include "common/xanadu/multi_store.hpp"
+#include "common/xanadu/vortex/vortex_vm.hpp"
+#include "common/xanadu/vql/execution.hpp"
 #include "common/xanadu/vql/vql_engine.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
 
@@ -105,10 +110,83 @@ TEST_F(PathFunctionFixture, CountWithArgumentRunsPerCurrentCell) {
   EXPECT_EQ(arena.asInt64(perCell[1]), 0);
 }
 
-TEST_F(PathFunctionFixture, ContainsIsRefusedUntilASubstringOpcodeExists) {
-  expectRefusal(R"(contains("abc", "b"))", "contains");
+TEST_F(PathFunctionFixture, ContainsArityIsCheckedBeforeArgumentsRun) {
   expectRefusal(R"(contains("abc"))", "contains");
   expectRefusal(R"(contains("abc", "a", "extra"))", "contains");
+  expectRefusal("contains()", "contains");
+}
+
+TEST_F(PathFunctionFixture, ContainsSearchesEveryOffset) {
+  const auto answer = [&](const std::string &query) {
+    const auto result = engine.execute(query);
+    EXPECT_EQ(result.size(), 1U) << query;
+    return result.empty() ? std::optional<zigzag::vortex::CellValue>{}
+                          : core.render(result.front());
+  };
+  using zigzag::vortex::CellValue;
+  EXPECT_EQ(answer(R"(contains("abc", "b"))"), CellValue(true));
+  EXPECT_EQ(answer(R"(contains("abc", "a"))"), CellValue(true));
+  EXPECT_EQ(answer(R"(contains("abc", "c"))"), CellValue(true));
+  EXPECT_EQ(answer(R"(contains("abc", "abc"))"), CellValue(true));
+  EXPECT_EQ(answer(R"(contains("abc", "bc"))"), CellValue(true));
+  EXPECT_EQ(answer(R"(contains("abc", "z"))"), CellValue(false));
+  EXPECT_EQ(answer(R"(contains("abc", "abcd"))"), CellValue(false));
+  EXPECT_EQ(answer(R"(contains("abc", "ac"))"), CellValue(false));
+  // A partial match at the tail must not count, and a repeated prefix must
+  // not hide the real match behind it.
+  EXPECT_EQ(answer(R"(contains("aab", "ab"))"), CellValue(true));
+  EXPECT_EQ(answer(R"(contains("abab", "bb"))"), CellValue(false));
+}
+
+TEST_F(PathFunctionFixture, ContainsEmptyNeedleAndHaystackFollowFind) {
+  const auto answer = [&](const std::string &query) {
+    const auto result = engine.execute(query);
+    EXPECT_EQ(result.size(), 1U) << query;
+    return result.empty() ? std::optional<zigzag::vortex::CellValue>{}
+                          : core.render(result.front());
+  };
+  using zigzag::vortex::CellValue;
+  EXPECT_EQ(answer(R"(contains("abc", ""))"), CellValue(true));
+  EXPECT_EQ(answer(R"(contains("", ""))"), CellValue(true));
+  EXPECT_EQ(answer(R"(contains("", "a"))"), CellValue(false));
+}
+
+TEST_F(PathFunctionFixture, ContainsReadsNumbersAsTheirText) {
+  using zigzag::vortex::CellValue;
+  const auto result = engine.execute("contains(12345, 34)");
+  ASSERT_EQ(result.size(), 1U);
+  EXPECT_EQ(core.render(result.front()), CellValue(true));
+}
+
+TEST_F(PathFunctionFixture, ContainsOfAnAbsentArgumentIsFalse) {
+  using zigzag::vortex::CellValue;
+  for (const auto *query :
+       {R"(contains($absent, "a"))", R"(contains("a", $absent))",
+        R"(contains(##/d.absent, ##/d.absent))"}) {
+    const auto result = engine.execute(query);
+    ASSERT_EQ(result.size(), 1U) << query;
+    EXPECT_EQ(core.render(result.front()), CellValue(false)) << query;
+  }
+}
+
+TEST_F(PathFunctionFixture, ContainsRunsOnCellsAndAgainOnEveryEvaluation) {
+  using zigzag::vortex::CellValue;
+  linkItems(2);
+  for (int round = 0; round < 2; ++round) {
+    const auto hit = engine.execute(R"(contains(##/d.items, "item"))");
+    ASSERT_EQ(hit.size(), 1U);
+    EXPECT_EQ(core.render(hit.front()), CellValue(true));
+    const auto miss = engine.execute(R"(contains(##/d.items, "zzz"))");
+    ASSERT_EQ(miss.size(), 1U);
+    EXPECT_EQ(core.render(miss.front()), CellValue(false));
+  }
+}
+
+TEST_F(PathFunctionFixture, ContainsInALetBindingIsTheBooleanScalar) {
+  const auto bound =
+      engine.execute(R"(let $hit := contains("abc", "b"); return $hit)");
+  ASSERT_EQ(bound.size(), 1U);
+  EXPECT_EQ(core.render(bound.front()), zigzag::vortex::CellValue(true));
 }
 
 TEST_F(PathFunctionFixture, FindIsRefusedUntilProseSearchExists) {
@@ -117,11 +195,162 @@ TEST_F(PathFunctionFixture, FindIsRefusedUntilProseSearchExists) {
   expectRefusal(R"(find("a", "b"))", "find");
 }
 
-TEST_F(PathFunctionFixture, SortIntoIsRefusedWithItsContract) {
-  linkItems(3);
-  expectRefusal("sort_into(##/d.items)", "sort_into");
-  expectRefusal("sort_into(##/d.items, +d.tag)", "sort_into");
-  expectRefusal("##/d.items/sort_into(##/d.items, by: +d.tag)", "sort_into");
+// A rank of keyed cells: n cells along d.videos, each with a +d.tag key.
+struct SortFixture : PathFunctionFixture {
+  DimRef videos{engine.resolveDimension("d.videos")};
+  DimRef tag{engine.resolveDimension("d.tag")};
+  std::vector<zigzag::CellRef> cells;
+
+  void build(const std::vector<std::int64_t> &keys) {
+    auto previous = core.home();
+    for (const auto key : keys) {
+      const auto cell = arena.makeCell("cell " + std::to_string(cells.size()));
+      zigzag::expectWritten(
+          arena.link(cell, tag, DimVector::POS, arena.makeScalarCell(key)));
+      zigzag::expectWritten(arena.link(previous, videos, DimVector::POS, cell));
+      cells.push_back(cell);
+      previous = cell;
+    }
+  }
+
+  // The rank after home, read back off the arena.
+  std::vector<zigzag::CellRef> rank() const {
+    std::vector<zigzag::CellRef> out;
+    auto at = arena.linked(core.home(), videos, DimVector::POS);
+    while (at) {
+      out.push_back(*at);
+      at = arena.linked(*at, videos, DimVector::POS);
+    }
+    return out;
+  }
+
+  std::vector<zigzag::CellRef> pick(std::initializer_list<std::size_t> order) {
+    std::vector<zigzag::CellRef> out;
+    for (const auto index : order) out.push_back(cells[index]);
+    return out;
+  }
+
+  // Every link is reciprocal and the rank is a simple chain.
+  void expectReciprocal() const {
+    auto previous = core.home();
+    for (const auto cell : rank()) {
+      EXPECT_EQ(arena.linked(cell, videos, DimVector::NEG), previous);
+      previous = cell;
+    }
+  }
+};
+
+TEST_F(SortFixture, SortsStablyAndRelinksReciprocally) {
+  build({5, 3, 5, 1, 3});
+  const auto sorted = engine.execute("sort_into(##/d.videos, by: +d.tag)");
+  EXPECT_EQ(sorted, pick({3, 1, 4, 0, 2}));
+  EXPECT_EQ(rank(), pick({3, 1, 4, 0, 2}));
+  expectReciprocal();
+}
+
+TEST_F(SortFixture, SortingTwiceAndSortedInputAreIdempotent) {
+  build({1, 2, 3});
+  EXPECT_EQ(engine.execute("sort_into(##/d.videos, by: +d.tag)"),
+            pick({0, 1, 2}));
+  EXPECT_EQ(engine.execute("sort_into(##/d.videos, by: +d.tag)"),
+            pick({0, 1, 2}));
+  expectReciprocal();
+}
+
+TEST_F(SortFixture, ReverseOrderMovesEveryCell) {
+  build({4, 3, 2, 1});
+  EXPECT_EQ(engine.execute("sort_into(##/d.videos, by: +d.tag)"),
+            pick({3, 2, 1, 0}));
+  expectReciprocal();
+}
+
+TEST_F(SortFixture, EmptyAndSingleRanksAreReturnedUnchanged) {
+  EXPECT_TRUE(engine.execute("sort_into(##/d.videos, by: +d.tag)").empty());
+  build({7});
+  EXPECT_EQ(engine.execute("sort_into(##/d.videos, by: +d.tag)"), pick({0}));
+  expectReciprocal();
+}
+
+TEST_F(SortFixture, ASectionAfterAnAnchorKeepsTheCellsAroundIt) {
+  build({9, 4, 8, 1});
+  engine.setVariable("anchor", cells[0]);
+  const auto sorted =
+      engine.execute("sort_into($anchor/+d.videos, by: +d.tag)");
+  EXPECT_EQ(sorted, pick({3, 1, 2}));
+  EXPECT_EQ(rank(), pick({0, 3, 1, 2}));
+  expectReciprocal();
+}
+
+TEST_F(SortFixture, LambdaKeyReceivesEachCandidate) {
+  build({3, 1, 2});
+  const auto sorted =
+      engine.execute(R"(sort_into(##/d.videos, by: \($c) $c/+d.tag))");
+  EXPECT_EQ(sorted, pick({1, 2, 0}));
+}
+
+TEST_F(SortFixture, ALetBindingHoldsTheWholeSortedSection) {
+  build({3, 1, 2});
+  const auto bound = engine.execute(
+      "let $sorted := sort_into(##/d.videos, by: +d.tag); return $sorted");
+  EXPECT_EQ(bound, pick({1, 2, 0}));
+  EXPECT_EQ(rank(), pick({1, 2, 0}));
+}
+
+TEST_F(SortFixture, ACandidateWithoutAKeyFailsAndLeavesTheRankAlone) {
+  build({3, 1, 2});
+  const auto bare = arena.makeCell("no key");
+  zigzag::expectWritten(arena.link(cells.back(), videos, DimVector::POS, bare));
+  cells.push_back(bare);
+  const auto before = rank();
+  expectRefusal("sort_into(##/d.videos, by: +d.tag)", "");
+  EXPECT_EQ(rank(), before);
+  expectReciprocal();
+}
+
+TEST_F(SortFixture, ARankPathThatMayNotBeOneSectionIsRefused) {
+  build({2, 1});
+  const auto before = rank();
+  for (const auto *query :
+       {"sort_into(##/d.videos/+d.videos, by: +d.tag)",
+        "sort_into(##/-d.videos, by: +d.tag)",
+        "sort_into(##/+d.videos[1], by: +d.tag)",
+        "sort_into(##/+d.videos[? true], by: +d.tag)",
+        "sort_into(##/~d.videos, by: +d.tag)", "sort_into($absent, by: +d.tag)",
+        "sort_into(##, by: +d.tag)"}) {
+    expectRefusal(query, "sort_into");
+  }
+  EXPECT_EQ(rank(), before);
+}
+
+TEST_F(SortFixture, SortIntoRequiresItsByKey) {
+  build({2, 1});
+  expectRefusal("sort_into(##/d.videos)", "sort_into");
+  expectRefusal("sort_into(##/d.videos, +d.tag)", "sort_into");
+  expectRefusal("sort_into(##/d.videos, by: +d.tag, by: +d.tag)", "sort_into");
+}
+
+TEST_F(SortFixture, ExhaustingTheCycleBudgetFailsAndRollsTheRankBack) {
+  std::vector<std::int64_t> keys;
+  for (std::int64_t key = 40; key > 0; --key) keys.push_back(key);
+  build(keys);
+  const auto before = rank();
+
+  zigzag::vortex::VortexVM vm{core};
+  xanadu::MultiStoreCoordinator coordinator{core};
+  xanadu::vql::QueryExecutor tight(coordinator, vm, {.maxCycles = 200});
+  const auto refused = tight.execute("sort_into(##/d.videos, by: +d.tag)");
+  ASSERT_FALSE(refused.has_value());
+  EXPECT_EQ(refused.error().category, xanadu::vql::QueryErrorCategory::Budget)
+      << refused.error().message;
+  EXPECT_EQ(rank(), before);
+
+  xanadu::vql::QueryExecutor roomy(coordinator, vm, {.maxCycles = 5'000'000});
+  const auto sorted = roomy.execute("sort_into(##/d.videos, by: +d.tag)");
+  ASSERT_TRUE(sorted.has_value()) << sorted.error().message;
+  EXPECT_EQ(sorted->size(), cells.size());
+  EXPECT_EQ(rank().front(), cells.back());
+  EXPECT_EQ(rank().back(), cells.front());
+  expectReciprocal();
 }
 
 } // namespace
