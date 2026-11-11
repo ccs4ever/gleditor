@@ -31,6 +31,7 @@ distinctions matter.
 - [Modules and reusable declarations](#modules-and-reusable-declarations)
 - [A complete workshop project](#a-complete-workshop-project)
 - [Persistence, checkpoints and agent identity](#persistence-checkpoints-and-agent-identity)
+- [Metaprogramming and self-modifying agents](#metaprogramming-and-self-modifying-agents)
 - [Configuration and operational limits](#configuration-and-operational-limits)
 - [Testing agents](#testing-agents)
 - [Diagnosing problems](#diagnosing-problems)
@@ -179,17 +180,19 @@ The token `<-` is reversible assignment. `a<-1` does not mean “a is less than 
 The language is statically typed. Parameters, fields, event fields, records, predicates and
 questions declare types; locals can infer their type from an initializer.
 
-| Type                          | Use                                                                                                                                        |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `Int`, `Float`, `Str`, `Bool` | Numeric values, text and Boolean data. Comparisons require matching static types; `1 == 1.0` is rejected.                                  |
-| `()`                          | Unit: a successful action with no useful value. It is not failure.                                                                         |
-| `Duration`, `Time`            | A duration such as `2s`, and a turn time or absolute deadline.                                                                             |
-| `Agent`, `Space`              | Names of living agents or spaces, not pointers to their private state.                                                                     |
-| `Intention`, `Timer`          | Scalar ids used to refer to work within an agent.                                                                                          |
-| `Opt<T>`                      | A value that may be absent. Absence is `none`; reading it produces its value or fails.                                                     |
-| `[T]`                         | A homogeneous list. Values are copied when stored.                                                                                         |
-| `Map<K, V>`                   | Specified typed key/value collection. Source operations need the future linked prelude/runtime; no implemented map API is advertised here. |
-| Declared record/event         | Named fields with static types. An event also has message meaning.                                                                         |
+| Type                          | Use                                                                                                                                                                       |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Int`, `Float`, `Str`, `Bool` | Numeric values, text and Boolean data. Comparisons require matching static types; `1 == 1.0` is rejected.                                                                 |
+| `()`                          | Unit: a successful action with no useful value. It is not failure.                                                                                                        |
+| `Duration`, `Time`            | A duration such as `2s`, and a turn time or absolute deadline.                                                                                                            |
+| `Agent`, `Space`              | Names of living agents or spaces, not pointers to their private state.                                                                                                    |
+| `Intention`, `Timer`          | Scalar ids used to refer to work within an agent.                                                                                                                         |
+| `Opt<T>`                      | A value that may be absent. Absence is `none`; reading it produces its value or fails.                                                                                    |
+| `[T]`                         | A homogeneous list. Values are copied when stored.                                                                                                                        |
+| `Map<K, V>`                   | Specified typed key/value collection. Source operations need the future linked prelude/runtime; no implemented map API is advertised here.                                |
+| `Cell`                        | A reference to an existing arena cell — the one value not copied on store; `==`/`!=` compare identity. See [metaprogramming](#metaprogramming-and-self-modifying-agents). |
+| `Code<T>`                     | A `code"…"` fragment that produces a `T` when run; a bare `Code` accepts any `T`. See [metaprogramming](#metaprogramming-and-self-modifying-agents).                      |
+| Declared record/event         | Named fields with static types. An event also has message meaning.                                                                                                        |
 
 Use `var name: Type := value` for a field and `let name := value` for a local. Fields require an
 initial value. A field that cannot yet have a value usually starts as an optional initialized to
@@ -1370,6 +1373,384 @@ busy-agent replacement and shared program bases are deferred extensions. Design 
 workloads around the supported bounds and measure them; neither extension is supplied by the syntax
 checker.
 
+## Metaprogramming and self-modifying agents
+
+Everything so far treats a program as fixed text that runs. vagent can also treat a program as
+*data*: a vagent program lives on the same arena as the agent's beliefs, fields and plans, built
+from the same cells and links. That makes two things possible. A fragment of source can be carried
+as a value, instantiated at compile time or run at run time. And an agent can inspect and change its
+own behaviour structure — add a plan, tighten a `where` test, grow a rule rank — with those changes
+optionally surviving a checkpoint.
+
+This is the basis of the design's *plasticity* path: mutating behaviour structure, not merely scalar
+state. A weight is a scalar cell; a learned plan is structure. The full contract is
+[vagent-metaprogramming.md](../design/vagent-metaprogramming.md); this section teaches the usable
+surface. As throughout this guide, each fenced unit is checked by `build/vagent check` — which now
+runs the complete parse → resolve → **expand** → check pipeline — while the runtime stories remain
+predicted behaviour until a `vagent run` command exists.
+
+### Cells and the `cells"…"` path
+
+The meta surface names its targets with `Cell`, the one vagent value that is not copied: a `Cell`
+refers to an existing arena cell by identity, so `==`/`!=` compare two handles for the *same* cell
+and ordered comparison is a type error. A `cells"path"` expression navigates the arena and yields
+`[Cell]` — a list, even for one result, so callers index or `for` down to a single `Cell`.
+
+The path body is VQL path source, embedded behind the `cells` prefix because `#`, `/`, `%`, `?` and
+braces collide with vagent's own operators. The supported subset is one anchor followed by steps:
+`##` is the arena home cell, `$name` names a `Cell`-typed binding followed at run time, `+d.name`/
+`-d.name` traverse a dimension edge, and `%` mints a cell. Creation (`%`) steps may repeat, but at
+most one traversal (`+d`/`-d`) step is allowed and it must be last. A path containing `%` is an
+arena write — refused wherever actions are, like a condition or a pure initializer.
+
+**Checkable source; runtime predicted.** Save as `cells.vagent`.
+
+```vagent
+agent Tracker {
+  var head: [Cell] := cells"##"
+
+  def members(target: Cell): [Cell] {
+    cells"$target"
+  }
+
+  on Tick { let found := cells"##/d.items" }
+}
+event Tick
+```
+
+Most metaprogramming code does not spell `cells"…"` itself — `program()`, `agent_cell()`,
+`plan_named(…)` and `clauses_of(…)` hand you the cells you need. The path literal matters when you
+walk a rank directly, for example `cells"$a/+d.code"` over the agent cell's registered-fragment
+rank.
+
+A `Cell` (or `Code`) handle is *session-local*. The `var head: [Cell]` above is fine inside one
+incarnation, but a handle stored across a checkpoint either dies or aliases a different cell after
+resume — arena positions are not stable across genesis. Bank a *name* (`label_of`, a qualified
+symbol, a `#label`) and re-resolve it with `code_named`/`plan_named`/`symbol_named` when you need a
+reference that outlives an incarnation; only the durable records on the agent's ranks survive.
+
+### The `code"…"` literal: a fragment value
+
+A `code"…"` literal is source carried as a value. Like `cells"…"`, the prefix is part of one token —
+`code "…"` is an identifier followed by a string and any other prefix is a syntax error. The body is
+ordinary vagent expression source, parsed by the same parser, in the scope where the literal
+appears.
+
+```text
+code"n: Int | n + 1"        a fragment: parameter header `n: Int |`, body `n + 1`
+code"#inc n: Int | n + 1"   the same, labelled `inc` for later lookup
+code"believes sees(...)"    a test-shaped fragment
+code"{ navigate_to(w) }"    a body-shaped fragment, type Code<()>
+```
+
+The result has type `Code<T>`: `code"n: Int | n + 1"` is a `Code<Int>` — a fragment that *produces*
+an `Int` when it runs; `code"{ … }"` is a `Code<()>` — a fragment that acts. A bare `Code` in a
+parameter is a wildcard accepting `Code<T>` for any `T`. Creating the literal is a *pure* value — it
+produces a fragment and has no arena effect, whatever the body's own purity. A fragment's free names
+bind where the literal is written, and a captured `Cell` is held by *identity* — the fragment keeps
+the cell itself, not a copy of its contents — which is what makes capture predictable.
+
+### `splice`: compile-time substitution
+
+`splice c` substitutes a fragment's body at compile time — quasiquote's unquote. `splice c(args)`
+instantiates a parameterized fragment call-by-value: each argument binds to a fresh local before the
+body is substituted. The operand must be statically known at expansion — a literal or a name the
+expander can resolve — never a runtime `Cell`.
+
+**Checkable source; runtime predicted.** Save as `fragments.vagent`.
+
+```vagent
+event Tick
+
+agent Counter {
+  var count: Int := 0
+
+  on Tick {
+    let inc := code"n: Int | n + 1"      // Code<Int>, one Int parameter
+    let next := splice inc(count)        // expands to { let p0 := count; p0 + 1 }
+    count := next
+  }
+}
+```
+
+`splice inc(count)` binds `count` to a fresh `let` local and substitutes the cloned body; the merged
+statement lowers once, at compile time. `run(inc, [count])` would do the same instantiation at run
+time through a call frame instead of inlining — the difference between quasiquote and eval.
+
+A `def` that splices a `Code` parameter becomes a *template*: the expander specializes one copy per
+call site. This is how you write a higher-order construct in a language with no closures.
+
+**Checkable source; runtime predicted.** Save as `template.vagent`.
+
+```vagent
+event Tick
+
+agent Mapper {
+  var count: Int := 0
+
+  def apply(c: Code<Int>, x: Int): Int { splice c(x) }
+
+  on Tick { count := apply(code"p: Int | p * 2", count) }
+}
+```
+
+Each call to `apply` expands its own `splice c(x)` with that site's fragment, so `apply` is not a
+single compiled body. Three rules bound `splice`: the operand is statically known, the splice
+produces a value rather than a place (you cannot `:=` into one), and a fragment that cannot be
+resolved is refused at expand time rather than left to fail at run time.
+
+### `static`: compile-time evaluation
+
+`static e` evaluates `e` in the compile arena and substitutes the literal result — a compile-time
+constant the language computes rather than you hand-writing it. The operand must be pure, *closed*
+(every name bound to a literal or another `static` value — a `var` or a handler local is not) and of
+a literal-expressible type: `Int`, `Float`, `Str`, `Bool` or `()`. It may not call methods, host
+functions, `run`, or read cells.
+
+**Checkable source; runtime predicted.** Save as `static_fold.vagent`.
+
+```vagent
+event Tick
+
+agent Waiter {
+  var started: Int := static (2 * 3)
+
+  def measure(): Int { static (60 * 1000) }
+
+  on Tick {
+    let base := static (21)
+    let shifted := static (base * 2)     // base is static-bound, so closed
+    let folded := static (static (3) + 1)
+    started := shifted + folded + static { let a := 2; a * 3 }
+  }
+}
+```
+
+`static (60 * 1000)` folds to `60000` before the artifact is sealed; `static { let a := 2; a * 3 }`
+runs a whole block at compile time and substitutes `6`. Writing `static (started * 2)` inside the
+handler is refused — `started` is a `var`, bound at run time, so the operand is not closed.
+
+### `import std:meta`: the reflection surface
+
+The mutations and the read surface live behind `import std:meta`; until then `run`, `reify` and the
+verbs are unknown names, so a unit that only uses `code"…"`/`splice`/`static` needs no import. Once
+imported, the following are available — the reads are `pure`, the rest impure:
+
+| Form                                  | Result            | Meaning                                                            |
+| ------------------------------------- | ----------------- | ------------------------------------------------------------------ |
+| `program()`                           | `Cell`            | this agent's program-image root                                    |
+| `agent_cell()`                        | `Cell`            | this agent's own cell                                              |
+| `module_named(name)`                  | `Opt<Cell>`       | a module cell by name                                              |
+| `symbol_named(owner, name)`           | `Opt<Cell>`       | a goal/event/symbol cell on the named module                       |
+| `clauses_of(cell)`                    | `[Cell]`          | the `d.clause` rank — plans of a goal, handlers of an event type   |
+| `plan_named(qualified)`               | `Opt<Cell>`       | a clause cell by its qualified `module:Agent.plan` name            |
+| `code_named(label)`                   | `Opt<Code<Cell>>` | a fragment head by its `#label`                                    |
+| `test_of(clause)` / `body_of(clause)` | `Opt<Code<Cell>>` | the clause's `where` test / `spin` body wrapped as a `Code` handle |
+| `label_of(cell)`                      | `Opt<Str>`        | a head's `#label` or a learned clause's minted `patch:<n>`         |
+| `validate(cell)`                      | `Bool`            | well-formedness walk over a fragment head's graph                  |
+| `weight_of(cell)`                     | `Opt<Float>`      | the `d.weight`/`d.vars` scalar of a junction or named clause       |
+| `value_of(cell)`                      | `any`             | a `Cell`'s bits — the companion to `run` on a `Code<Cell>`         |
+| `next_rand(seed)`                     | `Int`             | deterministic pseudo-random mix from a state cell's seed           |
+| `run(c)` / `run(c, [args])`           | `T`               | run a fragment in its own frame; `args` a list literal             |
+| `reify(c)`                            | `Code<T>`         | mint a fresh closed copy of a fragment                             |
+
+Two honest types recur here. `Opt<…>` is a *presence guard*, not an auto-unwrapping argument —
+`module_named`/`symbol_named`/`plan_named`/`code_named`/`weight_of`/`test_of`/`body_of`/`label_of`
+all return one, so read them with `if [x] then … else …`, which tests presence and binds the
+unwrapped value for the `then` body. And `Code<Cell>` is the type the reflect-wrapped graphs carry
+(`test_of`, `body_of`, `code_named`): their produced value's type is not statically known, so `run`
+on one yields a `Cell` whose bits `value_of` reads — not a statically-typed `Int`.
+
+**Checkable source; runtime predicted.** Save as `meta_read.vagent`.
+
+```vagent
+import std:meta
+
+agent Probe {
+  def probe(): Int { run(code"1 + 2") }
+
+  def subtract(): Int { run(code"w: Int, v: Int | w - v", [10, 3]) }
+
+  def root(): Cell { program() }
+
+  def self_cell(): Cell { agent_cell() }
+}
+```
+
+### `run` and `reify`: executing a fragment at run time
+
+`run(c, [args])` executes a fragment now, in its own frame at the same cursor — same-cursor
+execution, not a separate intention. It is *observational*: the temporary frame and argument
+bindings are torn down afterwards, leaving the caller's cursor state untouched. It is
+*opaque-impure*: the checker cannot see inside the fragment, so `run` is refused in a `where` test,
+a pure method or a read-only answer — anywhere a guaranteed-pure computation is required. `reify(c)`
+makes a fresh, independently-installable copy of a fragment, which matters because a grafted head is
+*consumed* — you cannot graft the same head twice.
+
+**Checkable source; runtime predicted.** Save as `reify.vagent`.
+
+```vagent
+import std:meta
+
+agent Copier {
+  def dup(): Int {
+    let inc := code"#inc n: Int | n + 1"
+    let copy := reify(inc)
+    run(copy, [41])
+  }
+
+  def lookup(): Cell {
+    let named := code_named("inc")
+    if [named] then run(named, [1]) else cells"##"[0]
+  }
+}
+```
+
+`run(copy, [41])` returns `42` — the literal's type `Code<Int>` makes the result an `Int`. The
+`lookup` method resolves the same fragment by its `#inc` label; `code_named` yields a `Code<Cell>`,
+so `run` on it returns a `Cell` rather than an `Int`.
+
+### `graft_*` and `learn_*`: changing the behaviour structure
+
+The mutation verbs come in session/durable pairs. `graft_*` edits the current incarnation only — the
+change dies when the agent does or a checkpoint resumes. `learn_*` does the same graft *and* records
+a durable patch on the agent's `d.patch` rank, so genesis re-derives the change after a
+checkpoint/resume — this is what "learned" means: it persists.
+
+The two verb families gate differently. `graft_*` *validates* the fragment — it must be well-formed
+so the runtime can run it. `learn_*` additionally requires the fragment to be *closed*: every
+outbound reference it makes must resolve to a cell inside the fragment or carry a `+d.name`
+re-resolution, so the patch can be replayed on a fresh arena after a checkpoint. A fragment that
+reaches out to an arbitrary program-side cell without naming it is refused — `learn_*` is a
+closedness gate, not merely a well-formedness check.
+
+| Verb                                         | Effect                                                                         |
+| -------------------------------------------- | ------------------------------------------------------------------------------ |
+| `graft_plan(goal, name, test, body)`         | mint a named clause, `test` as `where`, `body` as the plan; append to the goal |
+| `graft_handler(event, name, guard, body, p)` | the same on an event type's clause rank, with an integer priority              |
+| `graft_where(clause, test)`                  | re-point a clause's `where` test at a new fragment                             |
+| `graft_body(clause, body)`                   | re-point a clause's body at a new fragment                                     |
+| `graft_method(owner, name, code)`            | install `code` as a callable `owner.name` method, replacing any same-named one |
+| `prune(clause)` / `unlearn(cell)`            | unlink a clause from its rank / undo the latest matching patch                 |
+| `learn_*` twins                              | each `graft_*` verb plus a durable `d.patch` record                            |
+| `set_weight(cell, w)` / `weight_of(cell)`    | write / read a clause- or junction-correlated weight                           |
+| `sprout_synapse(from, to, w)`                | mint a `d.synapse` junction naming two endpoints by label, weighted `w`        |
+
+Every one is impure — each writes arena edges. A grafted `test`/`guard` must be `pure`; a `body` is
+`Code<()>`. The verbs that take a `Cell` name their target through the arena handle, never a `Code`
+value — `prune`/`unlearn`/`graft_where`/`set_weight`/`test_of` all take the clause *cell*.
+
+**Checkable source; runtime predicted.** Save as `tighten.vagent`.
+
+```vagent
+module demo:guard
+import std:meta
+
+event Attack
+goal Patrol() perform
+predicate threat(level: Float)
+
+agent Guard {
+  def patrol() { }
+
+  plan cautious for Patrol where believes threat(?t) & t > 0.7 {
+    patrol()
+  }
+
+  on Attack as a {
+    let c := plan_named("demo:Guard.cautious")
+    if [c] then learn_where(c, code"believes threat(?t) & t > 0.9")
+  }
+}
+```
+
+`plan_named` resolves the clause by its qualified `demo:Guard.cautious` name (the `module demo`
+header is what makes that module exist); `learn_where` requires the new test to be closed, re-points
+the clause's `where` at it and records the patch. Because the replaced test is program-original,
+resuming restores the skeleton's own attachment and re-applies the learned test on top — the change
+affects the *next* plan selection, since `where` is evaluated per selection. A `?t` bound inside the
+test stays inside it: a grafted test cannot export `?`-bindings to the clause body.
+
+`learn_plan` grows a clause rather than re-pointing one:
+`learn_plan("Feed", "near_water", test, body)` appends a fresh clause to `Feed`'s rank, mints its
+label `patch:<n>` from a durable serial and records `near_water` as the patch's alias — so `patch:`
+is refused as a user `name`, and a learned clause is found by its `patch:<n>` label, not the alias.
+
+### Weights and synapses: the plasticity path
+
+The machinery above is sufficient substrate for weights, synapses and a Hebbian grow-and-strengthen
+cycle, using only cells and ranks. A **weight** is a `Float` scalar on a cell — `set_weight` writes
+it through the arena handle and `weight_of` reads it back. A **synapse** is a *junction cell* on the
+agent's `d.synapse` rank naming two endpoints by qualified-name label, carrying its own weight
+scalar — a junction rather than a bare edge because a dimension gives each cell one `+d` neighbour,
+so endpoint-to-endpoint links could only express a star. `sprout_synapse(from, to, w)` mints one and
+returns its `Cell`.
+
+**Checkable source; runtime predicted.** Save as `hebbian.vagent`.
+
+```vagent
+module demo:forager
+import std:meta
+
+event Sighting
+event Meal
+goal Feed() perform
+predicate sees(what: Str, near: Str)
+predicate learned_rule(what: Str)
+
+agent Forager {
+  def navigate_to(place: Str) { }
+
+  on Sighting as s {
+    // grow a candidate rule the first time we see food near water
+    if believes sees("food", "water") & not believes learned_rule("food_water") then {
+      learn_plan("Feed", "near_water",
+                 code"believes sees(\"food\", \"water\")",
+                 code"{ navigate_to(\"water\") }")
+      believe learned_rule("food_water")
+    }
+  }
+
+  on Meal as m {   // it worked — strengthen the whole rank
+    let feed := symbol_named("demo", "Feed")
+    if [feed] then
+      for c in clauses_of(feed) do {
+        let w := weight_of(c)
+        if [w] then set_weight(c, w + 0.1) else set_weight(c, 0.1)
+      }
+  }
+}
+```
+
+This is the design's §9.3 example: a `Sighting` grows a `near_water` clause the first time food is
+seen near water, and each `Meal` strengthens every clause on `Feed`'s rank by `0.1`, seeding the
+first record at `0.1`. The grown clause participates in plan selection like any plan — it *is* a
+plan. One bound: clause tests must be `pure`, so the condition structure can grow and re-point but
+cannot itself act — the action lives in the `Code<()>` body.
+
+### What survives a checkpoint; what the checker proves
+
+`learn_*` records are what makes a mutation durable. Graft edits are session-local; a `learn_*`
+additionally writes a patch record to the agent's `d.patch` rank, and genesis replays those patches
+in ordinal order after a resume — so the learned `near_water` clause and the tightened `where` come
+back without re-running the handler. Weights and synapses are different: `set_weight` and
+`sprout_synapse` write *state-side* records (`d.weight`/`d.vars` and `d.synapse`), which survive a
+resume directly on the agent's ranks — they need no patch, because they are state rather than
+re-derived program structure. This is the distinction the
+[Persistence](#persistence-checkpoints-and-agent-identity) section's checkpoint story applies to
+program structure as well as state: installed copies die with the incarnation, but the *patch
+records* that re-derive them — and the state-side weight and synapse records — are durable.
+
+Checking today verifies everything in these units: the `code"…"` literal parses as vagent source,
+`Code<T>` types are checked, `splice`/`static` are expanded in the real pipeline, `std:meta` calls
+type-check against their signatures, and the purity/position rules are enforced — `run` refused in a
+pure position, `splice` refused on a non-statically-known operand, `static` refused on a non-closed
+name, `validate`/`set_weight` refused on a `Code` where a `Cell` is required, and a mutating
+`cells"…%"` path refused in a pure position. The runtime behaviour the prose describes — patch
+records surviving a resume, learned clauses entering plan selection — is implemented and exercised
+by the integration tests, but `vagent` still has no `run` command: as elsewhere, a successful
+`check` verifies the source, not that a mutation executed.
+
 ## Configuration and operational limits
 
 The launcher/adapter design reads `vagent.*` settings from `system://settings`, with schema and
@@ -1468,30 +1849,32 @@ The table groups words by purpose. Some words are contextual rather than reserve
 access and record keys admit words that cannot be used as bare local names. Follow the exact lexical
 rules in §8.1 of the design when choosing identifiers.
 
-| Words                                               | Role and common interaction                                                                           |
-| --------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `module`, `import`, `as`                            | Logical module declaration/import, aliasing, event or await binding.                                  |
-| `record`, `event`, `extends`                        | Typed values/events and event/capacity subtype relationships; see [records](#records-named-values).   |
-| `agent`, `behavior`, `mount`, `unmount`             | Actor declaration and reusable in-actor contributions.                                                |
-| `capacity`, `skill`, `native`, `implements`, `uses` | Method contract, implementation, host binding, and caller visibility.                                 |
-| `install`, `uninstall`                              | Add/remove a skill; replacing a conflict removes its whole implementation.                            |
-| `def`, `return`, `requires`, `ensures`              | Ordinary methods and pure call contracts; return exits a method, not an intention.                    |
-| `effect`, `preempts`, `within`                      | Asynchronous native work, explicit preemption contract and deadlines.                                 |
-| `var`, `let`, `none`                                | Persistent field, local declaration, optional absence.                                                |
-| `if`, `then`, `else`, `not`                         | Success/failure control flow and local recovery; else associates with the nearest eligible construct. |
-| `for`, `in`, `while`, `do`, `to`, `by`              | Deterministic traversal/loops and inclusive ranges; in/by also occur in message/delegation forms.     |
-| `predicate`, `key`, `believe`, `revise`, `forget`   | Typed fact declaration, replacement key and self-source updates.                                      |
-| `believes`, `from`, `findall`                       | Pure matching, source restriction and materialized matches.                                           |
-| `tell`, `untell`                                    | Staged source-bearing belief messages.                                                                |
-| `goal`, `achieve`, `perform`, `maintain`            | Goal kinds; achieve at a call site also waits for a local/delegated goal.                             |
-| `succeed`, `when`, `holds`, `drop`                  | Pure commitment conditions and explicit cancellation of an intention.                                 |
-| `plan`, `where`, `adopt`                            | Goal implementation, pure applicability and nonwaiting top-level adoption.                            |
-| `on`, `occurrence`, `priority`, `consume`           | Event handling/binding, within-event order, and stopping later handlers.                              |
-| `emit`, `in`, `for`                                 | Stage an event, choose its space, restrict recipients.                                                |
-| `question`, `answer`, `ask`                         | Typed read-only remote queries and a plan's wait for their result.                                    |
-| `await`, `as`, `within`                             | Wait for a fact or future event; capture the match and bound its lifetime.                            |
-| `spawn`, `self`, `parent`, `inner`, `outer`         | Named actors, family relationships and space context.                                                 |
-| `yield`, `fail`, `stop`, `terminate`                | Cooperate, fail computation, request a child's stop, or stop self.                                    |
+| Words                                               | Role and common interaction                                                                               |
+| --------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `module`, `import`, `as`                            | Logical module declaration/import, aliasing, event or await binding.                                      |
+| `record`, `event`, `extends`                        | Typed values/events and event/capacity subtype relationships; see [records](#records-named-values).       |
+| `agent`, `behavior`, `mount`, `unmount`             | Actor declaration and reusable in-actor contributions.                                                    |
+| `capacity`, `skill`, `native`, `implements`, `uses` | Method contract, implementation, host binding, and caller visibility.                                     |
+| `install`, `uninstall`                              | Add/remove a skill; replacing a conflict removes its whole implementation.                                |
+| `def`, `return`, `requires`, `ensures`              | Ordinary methods and pure call contracts; return exits a method, not an intention.                        |
+| `effect`, `preempts`, `within`                      | Asynchronous native work, explicit preemption contract and deadlines.                                     |
+| `var`, `let`, `none`                                | Persistent field, local declaration, optional absence.                                                    |
+| `if`, `then`, `else`, `not`                         | Success/failure control flow and local recovery; else associates with the nearest eligible construct.     |
+| `for`, `in`, `while`, `do`, `to`, `by`              | Deterministic traversal/loops and inclusive ranges; in/by also occur in message/delegation forms.         |
+| `predicate`, `key`, `believe`, `revise`, `forget`   | Typed fact declaration, replacement key and self-source updates.                                          |
+| `believes`, `from`, `findall`                       | Pure matching, source restriction and materialized matches.                                               |
+| `tell`, `untell`                                    | Staged source-bearing belief messages.                                                                    |
+| `goal`, `achieve`, `perform`, `maintain`            | Goal kinds; achieve at a call site also waits for a local/delegated goal.                                 |
+| `succeed`, `when`, `holds`, `drop`                  | Pure commitment conditions and explicit cancellation of an intention.                                     |
+| `plan`, `where`, `adopt`                            | Goal implementation, pure applicability and nonwaiting top-level adoption.                                |
+| `on`, `occurrence`, `priority`, `consume`           | Event handling/binding, within-event order, and stopping later handlers.                                  |
+| `emit`, `in`, `for`                                 | Stage an event, choose its space, restrict recipients.                                                    |
+| `question`, `answer`, `ask`                         | Typed read-only remote queries and a plan's wait for their result.                                        |
+| `await`, `as`, `within`                             | Wait for a fact or future event; capture the match and bound its lifetime.                                |
+| `spawn`, `self`, `parent`, `inner`, `outer`         | Named actors, family relationships and space context.                                                     |
+| `yield`, `fail`, `stop`, `terminate`                | Cooperate, fail computation, request a child's stop, or stop self.                                        |
+| `code`, `splice`, `static`, `cells`                 | Prefix forms — fragment literal, compile-time substitution/eval, arena path — contextual, not bare names. |
+| `run`, `reify`, `graft_*`, `learn_*`, `unlearn`     | `std:meta` special forms and mutation verbs — available only after `import std:meta`.                     |
 
 ## Initial boundaries and where to continue
 
@@ -1512,15 +1895,16 @@ Implementation is proceeding in iterations. The available user command checks so
 execute agents. You can practice writing accepted units and diagnosing rejected edits today. The
 runtime stories in this guide teach the specified language for the future executor.
 
-| Area                                     | Status and what it means for this guide                                                                                                                                     |
-| ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Syntax, types and static restrictions    | Standalone-source checking is implemented as `build/vagent check FILE...`. Rejected source produces diagnostics and a nonzero exit; module/template gaps are listed below.  |
-| Internal Vortex compiler                 | A scalar-expression lowering kernel passes integration tests, but it does not compile complete agent programs and has no source CLI command.                                |
-| Running an agent                         | `vagent run module/Agent(args)` is the specified future invocation, not an enabled command in the frontend-only iteration.                                                  |
-| REPL, event delivery and observing turns | Require complete language lowering and the actor adapter; no interactive command language is invented here.                                                                 |
-| Examples                                 | Language examples are complete source units unless marked as prose fragments. Their traces explain specified behavior; frontend acceptance alone does not verify execution. |
-| Native effects and scheduling            | Require the future adapter and explicit host bindings. Declaring a native skill does not supply a device driver.                                                            |
-| Deferred extensions                      | StoreWriter, cross-owner spaces, large-value handles, arbitrary suspension, protocol declarations and shared programs are not initial features.                             |
+| Area                                     | Status and what it means for this guide                                                                                                                                                                                                |
+| ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Syntax, types and static restrictions    | Standalone-source checking is implemented as `build/vagent check FILE...`, running the full parse → resolve → expand → check pipeline. Rejected source produces diagnostics and a nonzero exit; module/template gaps are listed below. |
+| Metaprogramming                          | `code"…"`, `Code<T>`, `splice`/`static` and the `std:meta` surface check and expand today; the graft/learn/patch/genesis machinery is implemented in the runtime's integration tests, but no `vagent run` command exercises it yet.    |
+| Internal Vortex compiler                 | A scalar-expression lowering kernel passes integration tests, but it does not compile complete agent programs and has no source CLI command.                                                                                           |
+| Running an agent                         | `vagent run module/Agent(args)` is the specified future invocation, not an enabled command in the frontend-only iteration.                                                                                                             |
+| REPL, event delivery and observing turns | Require complete language lowering and the actor adapter; no interactive command language is invented here.                                                                                                                            |
+| Examples                                 | Language examples are complete source units unless marked as prose fragments. Their traces explain specified behavior; frontend acceptance alone does not verify execution.                                                            |
+| Native effects and scheduling            | Require the future adapter and explicit host bindings. Declaring a native skill does not supply a device driver.                                                                                                                       |
+| Deferred extensions                      | StoreWriter, cross-owner spaces, large-value handles, arbitrary suspension, protocol declarations and shared programs are not initial features.                                                                                        |
 
 Use the implementation's tests and progress record to determine which stage has passed its gates. Do
 not infer that a feature executes because its syntax is accepted. In particular, static checking

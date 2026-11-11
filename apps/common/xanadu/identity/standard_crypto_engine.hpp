@@ -32,6 +32,7 @@ using EvpPkeyCtxPtr =
     std::unique_ptr<EVP_PKEY_CTX, decltype(&EVP_PKEY_CTX_free)>;
 using X509Ptr      = std::unique_ptr<X509, decltype(&X509_free)>;
 using X509ReqPtr   = std::unique_ptr<X509_REQ, decltype(&X509_REQ_free)>;
+using X509NamePtr  = std::unique_ptr<X509_NAME, decltype(&X509_NAME_free)>;
 using X509StorePtr = std::unique_ptr<X509_STORE, decltype(&X509_STORE_free)>;
 using X509StoreCtxPtr =
     std::unique_ptr<X509_STORE_CTX, decltype(&X509_STORE_CTX_free)>;

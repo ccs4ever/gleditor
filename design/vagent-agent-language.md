@@ -667,6 +667,7 @@ the position rules of §8.3 are what make `:=` stand.
 | list `[T]`                 | a value cell with its first element on `+d.grab` and the rest chained on `+d.step`; from the first element this is `std:collections`' list (a rank on `d.step`), and from the value cell it is Vlog's term layout | index and size O(n); `++` copies |
 | `Map<K, V>`                | `std:collections`' map: a root cell with key cells on `d.vars`, each with its value on `+d.values`                                                                                                                | lookup O(n)                      |
 | `Opt<T>`                   | a value cell with or without its one value on `+d.grab`                                                                                                                                                           | O(1) plus the value              |
+| `Cell`                     | a ref-box: a scalar cell whose `Int` content names a live arena cell                                                                                                                                              | O(1)                             |
 | names and ids              | one scalar or text cell (V11)                                                                                                                                                                                     | O(1)                             |
 
 Because a list value is laid out as a term, `#Unify` works on list-valued belief arguments, element
@@ -1040,7 +1041,9 @@ ______________________________________________________________________
   reserved field names, which user code cannot declare or assign.
 
 - Literals: integers (`42`, `1_000`, `0x2A`), floats (`3.5`, `1e-3`), strings (`"..."` with `\n`,
-  `\t`, `\"`, `\\`, `\u{...}`), `true`, `false`, `()`, `none`, durations (`250ms`, `2s`, `5min`).
+  `\t`, `\"`, `\\`, `\u{...}`), `true`, `false`, `()`, `none`, durations (`250ms`, `2s`, `5min`), and
+  the `cells"..."` prefixed string of §8.7. The prefix is part of one token: `cells "##"` is an
+  identifier followed by a string, and any other prefix on a string literal is a syntax error.
 
 - `<-` is one token, so `a<-1` is an assignment; the checker warns when `<-` has no space before it.
 
@@ -1236,12 +1239,37 @@ staged to that name.
 ### 8.7 Types
 
 `Int`, `Float`, `Str`, `Bool`, `()`, `Duration`, `Time`, `Agent` (an agent name), `Space` (a host
-name and a space name), `Intention` and `Timer` (scalar ids), `Event` (the supertype of all events),
-`Opt<T>`, `[T]` (a list), `Map<K, V>` (from `std:agent`, §5.9), and declared events and records.
-`record Name { fields }` declares a record with no wire kind; geometry such as a `Point` is a record
-the program declares. `predicate p(args)` declares a belief predicate and `question q(args): T` an
-askable query. Values are copied when stored (V11). Types are checked statically, including belief
-terms against their predicates; locals are inferred.
+name and a space name), `Intention` and `Timer` (scalar ids), `Cell` (a cell reference, §5.9),
+`Event` (the supertype of all events), `Opt<T>`, `[T]` (a list), `Map<K, V>` (from `std:agent`,
+§5.9), and declared events and records. `record Name { fields }` declares a record with no wire
+kind; geometry such as a `Point` is a record the program declares. `predicate p(args)` declares a
+belief predicate and `question q(args): T` an askable query. Values are copied when stored (V11) —
+except `Cell`, which is the one identity that is not copied: a `Cell` value refers to an existing
+arena cell rather than naming a new one. `==` and `!=` compare `Cell` operands by identity; ordered
+comparison is a type error. Types are checked statically, including belief terms against their
+predicates; locals are inferred.
+
+A `cells"path"` expression navigates the arena and yields `[Cell]`. The string body is VQL path
+source, embedded behind the `cells` prefix because VQL's `#`, `/`, `%`, `?` and braces collide with
+vagent's own operators. Inside it, the supported subset is one anchor followed by signed dimension
+steps:
+
+- anchors: `##` (the arena home cell), a bare decimal cell id, or `$name` naming a `Cell`-typed
+  binding whose ref-box is followed at run time;
+- steps: `+d.name` or `-d.name` traversals, and `%` creations (`%"literal"` or a bare `%` mint);
+- one link-presence shape filter per traversal step: `d.items[{+d.flag}]` keeps only members with
+  their own `+d.flag` link.
+
+At most one traversal step is allowed and it must be the last step — `cells"##/d.items"` reads
+home's `d.items` rank, `cells"##/+d.items%"x"` appends a cell to it, and `cells"##/+d.a%"x"/+d.b%"y"`
+chains creation. A step after a multi-creation step is refused (several subjects cannot fan out).
+Every other VQL form — predicates, projections, clone tails, store/generator/version anchors,
+computed creation values, yield modes, negated or bidirectional filters — is rejected at check or
+compile time with a diagnostic, never silently narrowed. A path with `%` is an arena write: it is
+rejected wherever actions are (conditions, read-only answers, pure initializers). A traversal on an
+empty rank yields `[]`, never fails. The result `[Cell]` is a list head whose `+d.grab`/`+d.step`
+rank holds one ref-box per member, so the identity cells stay arena-owned and the result is rebuilt
+on re-execution.
 
 ### 8.8 Names in scope
 
@@ -1261,8 +1289,8 @@ spawn, so an agent that needs a peer spawns it in its own `on Initialize` (§12.
 
 ### 8.9 Grammar
 
-`Ident`, `Word` (an identifier or any keyword), `IntLit`, `Duration`, `Literal` and `NEWLINE` are
-the lexical forms of §8.1.
+`Ident`, `Word` (an identifier or any keyword), `IntLit`, `Duration`, `Literal`, `CellsLit` and
+`NEWLINE` are the lexical forms of §8.1.
 
 ```ebnf
 Unit          ::= [ ModuleDecl ] { ImportDecl } { TopDecl } ;
@@ -1332,7 +1360,8 @@ Add           ::= Mul { ( '+' | '-' ) Mul } ;
 Mul           ::= Unary { ( '*' | '/' | '%' ) Unary } ;
 Unary         ::= ( '-' | '!' | '*' ) Unary | Postfix ;
 Postfix       ::= Primary { '(' [ ArgList ] ')' | '[' Expr ']' | '.' Word } ;
-Primary       ::= Ident | Literal | 'self' | 'parent' | 'inner' | 'outer' | 'occurrence'
+Primary       ::= Ident | Literal | CellsLit | 'self' | 'parent' | 'inner' | 'outer'
+                | 'occurrence'
                 | '(' Expr ')' | Block | ListLit | RecordLit
                 | 'if' Expr 'then' Expr [ 'else' Expr ]
                 | 'while' Expr 'do' Expr
@@ -1356,6 +1385,7 @@ Action        ::= 'emit' Postfix [ 'in' Postfix ] [ 'for' Postfix ]
 GoalCall      ::= Ident '(' [ ArgList ] ')' ;
 RecordLit     ::= Ident '{' [ Word ':' Expr { ',' Word ':' Expr } [ ',' ] ] '}' ;
 ListLit       ::= '[' [ ArgList ] ']' ;
+CellsLit      ::= 'cells' StrLit ;
 Term          ::= Ident '(' [ TermArg { ',' TermArg } ] ')' ;
 TermArg       ::= '?' Ident | Expr ;
 
@@ -1388,6 +1418,9 @@ Notes the grammar cannot carry:
   parentheses. After `believe`, `forget`, `revise`, `believes`, `findall`, `tell`, `untell` and
   `await`, and in a trigger, `name(args)` is a term. Variables bound in an `if` condition, a
   `where`, a guard, an `await` or a `for believes` are visible in the corresponding body.
+- **`CellsLit` is one token.** The `cells` prefix must be adjacent to the quote; a space, a comment
+  or a keyword in that position does not form a `CellsLit`. Its string body is VQL source and keeps
+  the usual escapes, so a quoted creation writes `cells"##/+d.x%\"y\""`.
 - **Skills.** A vagent skill may `uses` other capacities. A `MethodDef` marked `effect` is rejected:
   only native skills implement effects.
 - **`return`** is accepted in methods, answers and `def`s; a handler or plan ends at the end of its

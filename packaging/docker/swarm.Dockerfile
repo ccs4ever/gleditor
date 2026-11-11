@@ -10,7 +10,7 @@ RUN apt-get update \
       libunibreak-dev libfontconfig-dev libpoppler-cpp-dev libpoppler-private-dev \
       libmagic-dev libvlc-dev libsdl3-dev libsdl3-image-dev \
       libgl-dev libegl1 libgl1-mesa-dri fonts-dejavu-core \
-      libtorrent-rasterbar-dev libssl-dev liblmdb-dev librnp-dev libsqlite3-dev \
+      libtorrent-rasterbar-dev libcurl4-openssl-dev libssl-dev liblmdb-dev librnp-dev libsqlite3-dev libgmime-3.0-dev libetpan-dev \
       libspdlog-dev gnupg iproute2 util-linux python3 xvfb xauth \
     && rm -rf /var/lib/apt/lists/*
 

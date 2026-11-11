@@ -3347,16 +3347,6 @@ bool ZigzagVisualizer::translateVQLAndAttachToFocus(std::string_view vqlQuery,
     return false;
   }
 
-  // Ensure standard Vortex dimensions exist in engine and store
-  if (engine_) {
-    for (const auto &dim :
-         {std::string(attachDim), std::string("d.spin"), std::string("d.step"),
-          std::string("d.grab"), std::string("d.vars"), std::string("d.values"),
-          std::string("d.branch")}) {
-      std::ignore = engine_->dimensionFor(dim);
-    }
-  }
-
   const auto focusRef = static_cast<CellRef>(*accursed_cell_focus_);
   auto result = vortex_host_->compileAndAttachVQL(vqlQuery, focusRef, attachDim,
                                                   DimVector::POS, spawnCursor);
@@ -3365,6 +3355,17 @@ bool ZigzagVisualizer::translateVQLAndAttachToFocus(std::string_view vqlQuery,
     return false;
   }
   const auto entryOpcode = *result.entryOpcode;
+
+  // A refused query must not mint the dimensions used by successful VQL
+  // attachments in the user's slice.
+  if (engine_) {
+    for (const auto &dim :
+         {std::string(attachDim), std::string("d.spin"), std::string("d.step"),
+          std::string("d.grab"), std::string("d.vars"), std::string("d.values"),
+          std::string("d.branch")}) {
+      std::ignore = engine_->dimensionFor(dim);
+    }
+  }
 
   // If visualizing a persistent document backed by store and engine, promote
   if (store_ && engine_) {

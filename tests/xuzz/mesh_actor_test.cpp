@@ -1,7 +1,10 @@
 #include <gtest/gtest.h>
 
+#include "common/xanadu/store.hpp"
+#include "common/xanadu/vagent/p16.hpp"
 #include "common/xanadu/vortex/mesh_actor.hpp"
 
+#include <algorithm>
 #include <set>
 
 namespace zigzag::vortex::mesh {
@@ -28,6 +31,7 @@ ActorGrant grantFor(const ActorMessage &request) {
           "sha256:immutable-base",
           100000,
           10000,
+          0,
           32768,
           100,
           65536,
@@ -48,7 +52,7 @@ void authorize(MeshActorRuntime &runtime, const Fingerprint &identity) {
   runtime.setExecutor(
       [](const ActorExecution &execution,
          WorkerContext &) -> std::expected<std::string, ActorError> {
-        return "result:" + execution.message.value;
+        return "result:" + execution.message->value;
       });
 }
 
@@ -109,7 +113,7 @@ TEST(MeshActorTest,
         const auto cursorList = context.vm.activeCursors();
         EXPECT_NE(std::ranges::find(cursorList, execution.cursor),
                   cursorList.end());
-        context.arena.makeCell(execution.message.value);
+        context.arena.makeCell(execution.message->value);
         return "ok";
       });
   ASSERT_TRUE(runtime.receive(identity, sendTo(*first), ActorTime{}, wall));
@@ -241,6 +245,258 @@ TEST(MeshActorTest, GoneRequiresPhiLeaseAndFreshNoSeederAndLedgerEvidence) {
   EXPECT_EQ(runtime.liveness(target), ActorLiveness::Alive);
 }
 
+TEST(MeshActorTest, WakeRunsExecutorWithAbsentMessageAndSendsNoReply) {
+  MeshActorRuntime runtime("worker", 1);
+  Fingerprint identity;
+  authorize(runtime, identity);
+  const auto pid = runtime.spawn(identity, spawnRequest(), wall);
+  ASSERT_TRUE(pid);
+  EXPECT_EQ(runtime.wake(ActorPid{"worker", "nobody", 1, 1}).error(),
+            ActorError::UnknownProcess);
+  unsigned wakeTurns = 0, messageTurns = 0;
+  std::vector<ActorMessage> emitted;
+  runtime.setSender(
+      [&](std::string_view, const ActorMessage &message) {
+        emitted.push_back(message);
+        return true;
+      });
+  runtime.setExecutor(
+      [&](const ActorExecution &execution,
+          WorkerContext &) -> std::expected<std::string, ActorError> {
+        if (execution.message) {
+          ++messageTurns;
+          return "replied";
+        }
+        ++wakeTurns;
+        return "wake-turn";
+      });
+  ASSERT_TRUE(runtime.wake(*pid));
+  EXPECT_EQ(runtime.pendingWakes(*pid), 1);
+  EXPECT_EQ(runtime.pumpOne(wall), true);
+  EXPECT_EQ(runtime.pendingWakes(*pid), 0);
+  EXPECT_EQ(wakeTurns, 1);
+  EXPECT_EQ(messageTurns, 0);
+  EXPECT_TRUE(emitted.empty());
+  // Wake turns never queue behind mailbox work: a message received after
+  // the wake still runs first (mailbox drains before wakes).
+  ASSERT_TRUE(runtime.wake(*pid));
+  ASSERT_TRUE(runtime.receive(identity, sendTo(*pid), ActorTime{}, wall));
+  EXPECT_EQ(runtime.pumpOne(wall), true);
+  EXPECT_EQ(messageTurns, 1);
+  const auto replies = std::ranges::count_if(emitted, [](const auto &sent) {
+    return sent.type == MessageType::ActorDeliverValue;
+  });
+  EXPECT_EQ(replies, 1);
+  EXPECT_EQ(runtime.pumpOne(wall), true);
+  EXPECT_EQ(wakeTurns, 2);
+  EXPECT_EQ(std::ranges::count_if(emitted,
+                                [](const auto &sent) {
+                                  return sent.type ==
+                                         MessageType::ActorDeliverValue;
+                                }),
+            1);
+  EXPECT_EQ(runtime.pumpOne(wall), false);
+}
+
+namespace {
+class FakeP16Ceremony : public xanadu::vagent::P16Ceremony {
+public:
+  bool onFlagged() override {
+    ++flagged;
+    return flaggedOutcome;
+  }
+  std::expected<void, std::string> onFlaggedTurnEnd() override {
+    ++turnEnds;
+    if (!publishOutcome) return std::unexpected(std::string{"refused"});
+    return {};
+  }
+  void restoreAll() override { ++restores; }
+  unsigned flagged{};
+  unsigned turnEnds{};
+  unsigned restores{};
+  bool flaggedOutcome{true};
+  bool publishOutcome{true};
+};
+} // namespace
+
+TEST(MeshActorTest, P16CeremonyWindowsFireOnTheSoleQueuedFlaggedTurn) {
+  MeshActorRuntime runtime("worker", 1);
+  Fingerprint identity;
+  authorize(runtime, identity);
+  const auto pid = runtime.spawn(identity, spawnRequest(), wall);
+  ASSERT_TRUE(pid);
+  FakeP16Ceremony ceremony;
+  ASSERT_TRUE(runtime.setP16Ceremony(*pid, &ceremony));
+  EXPECT_EQ(runtime.p16Ceremony(*pid), &ceremony);
+  EXPECT_EQ(runtime.setP16Ceremony(ActorPid{"worker", "nobody", 1, 1},
+                                   &ceremony)
+                .error(),
+            ActorError::UnknownProcess);
+  EXPECT_EQ(runtime.raiseP16Flag(ActorPid{"worker", "nobody", 1, 1}).error(),
+            ActorError::UnknownProcess);
+  ASSERT_TRUE(runtime.raiseP16Flag(*pid));
+  EXPECT_EQ(runtime.p16Flag(*pid), xanadu::vagent::P16Flag::Raised);
+  ASSERT_TRUE(runtime.receive(identity, sendTo(*pid), ActorTime{}, wall));
+  ASSERT_EQ(runtime.pumpOne(wall), true);
+  EXPECT_EQ(ceremony.flagged, 1);
+  EXPECT_EQ(ceremony.turnEnds, 1);
+  EXPECT_EQ(ceremony.restores, 0);
+  EXPECT_EQ(runtime.p16Flag(*pid), xanadu::vagent::P16Flag::Clear);
+}
+
+TEST(MeshActorTest, P16FlaggedWakeTurnRunsTheCeremonyOnAnEmptyMailbox) {
+  MeshActorRuntime runtime("worker", 1);
+  Fingerprint identity;
+  authorize(runtime, identity);
+  const auto pid = runtime.spawn(identity, spawnRequest(), wall);
+  ASSERT_TRUE(pid);
+  runtime.setExecutor(
+      [](const ActorExecution &execution,
+         WorkerContext &) -> std::expected<std::string, ActorError> {
+        return execution.message ? "had-message" : "wake-turn";
+      });
+  FakeP16Ceremony ceremony;
+  ASSERT_TRUE(runtime.setP16Ceremony(*pid, &ceremony));
+  // The empty-mailbox checkpoint decision: arm the flag, mint the wake.
+  ASSERT_TRUE(runtime.raiseP16Flag(*pid));
+  ASSERT_TRUE(runtime.wake(*pid));
+  ASSERT_EQ(runtime.pumpOne(wall), true);
+  EXPECT_EQ(ceremony.flagged, 1);
+  EXPECT_EQ(ceremony.turnEnds, 1);
+  EXPECT_EQ(runtime.p16Flag(*pid), xanadu::vagent::P16Flag::Clear);
+}
+
+TEST(MeshActorTest, P16VetoAndNonSoleQueuedTurnsLeaveTheFlagArmed) {
+  MeshActorRuntime runtime("worker", 1);
+  Fingerprint identity;
+  authorize(runtime, identity);
+  const auto pid = runtime.spawn(identity, spawnRequest(), wall);
+  ASSERT_TRUE(pid);
+  FakeP16Ceremony ceremony;
+  ASSERT_TRUE(runtime.setP16Ceremony(*pid, &ceremony));
+  // Two queued messages: neither turn is sole-queued, so the flag waits.
+  ASSERT_TRUE(runtime.raiseP16Flag(*pid));
+  ASSERT_TRUE(runtime.receive(identity, sendTo(*pid), ActorTime{}, wall));
+  ASSERT_TRUE(runtime.receive(identity, sendTo(*pid, "second"),
+                            ActorTime{}, wall));
+  ASSERT_EQ(runtime.pumpOne(wall), true);
+  EXPECT_EQ(ceremony.flagged, 0);
+  EXPECT_EQ(runtime.p16Flag(*pid), xanadu::vagent::P16Flag::Raised);
+  // The second turn ends with an empty mailbox — sole-queued — and the
+  // ceremony's veto keeps the flag armed for a later turn.
+  ceremony.flaggedOutcome = false;
+  ASSERT_EQ(runtime.pumpOne(wall), true);
+  EXPECT_EQ(ceremony.flagged, 1);
+  EXPECT_EQ(ceremony.turnEnds, 0);
+  EXPECT_EQ(ceremony.restores, 1);
+  EXPECT_EQ(runtime.p16Flag(*pid), xanadu::vagent::P16Flag::Raised);
+  // A publish refusal restores and re-arms rather than draining.
+  ceremony.flaggedOutcome = true;
+  ceremony.publishOutcome = false;
+  ASSERT_TRUE(runtime.receive(identity, sendTo(*pid, "third"),
+                            ActorTime{}, wall));
+  ASSERT_EQ(runtime.pumpOne(wall), true);
+  EXPECT_EQ(ceremony.turnEnds, 1);
+  EXPECT_EQ(ceremony.restores, 2);
+  EXPECT_EQ(runtime.p16Flag(*pid), xanadu::vagent::P16Flag::Raised);
+  // Executor failure is ActorDown: the flag clears outright, no restore.
+  runtime.setExecutor(
+      [](const ActorExecution &,
+         WorkerContext &) -> std::expected<std::string, ActorError> {
+        return std::unexpected(ActorError::ExecutionFailed);
+      });
+  ASSERT_TRUE(runtime.receive(identity, sendTo(*pid, "fatal"),
+                            ActorTime{}, wall));
+  ASSERT_EQ(runtime.pumpOne(wall), true);
+  EXPECT_EQ(ceremony.restores, 2);
+  EXPECT_EQ(runtime.p16Flag(*pid), xanadu::vagent::P16Flag::Clear);
+}
+
+TEST(MeshActorTest, P16SelfSendInsideTheFlaggedTurnVetoesTheWindow) {
+  MeshActorRuntime runtime("worker", 1);
+  Fingerprint identity;
+  authorize(runtime, identity);
+  const auto pid = runtime.spawn(identity, spawnRequest(), wall);
+  ASSERT_TRUE(pid);
+  FakeP16Ceremony ceremony;
+  ASSERT_TRUE(runtime.setP16Ceremony(*pid, &ceremony));
+  auto *runtimePointer = &runtime;
+  runtime.setExecutor(
+      [&, runtimePointer](
+          const ActorExecution &execution,
+          WorkerContext &) -> std::expected<std::string, ActorError> {
+        // The flagged turn's self-send lands in its own mailbox — the
+        // pending(pid)==0 re-check at turn end must veto the ceremony.
+        EXPECT_TRUE(runtimePointer
+                        ->receive(identity, sendTo(execution.pid, "self"),
+                                  ActorTime{}, wall));
+        return "ok";
+      });
+  ASSERT_TRUE(runtime.raiseP16Flag(*pid));
+  ASSERT_TRUE(runtime.receive(identity, sendTo(*pid), ActorTime{}, wall));
+  ASSERT_EQ(runtime.pumpOne(wall), true);
+  EXPECT_EQ(ceremony.flagged, 1);
+  EXPECT_EQ(ceremony.turnEnds, 0);
+  EXPECT_EQ(ceremony.restores, 1);
+  EXPECT_EQ(runtime.p16Flag(*pid), xanadu::vagent::P16Flag::Raised);
+  EXPECT_EQ(runtime.pending(*pid), 1);
+}
+
+TEST(MeshActorTest, SpawnLineagePinInjectsFoldAndReaderThroughTheContext) {
+  // Outlive the runtime: the actor's arena holds a raw base_ pointer into
+  // `fold`, so the lineage store and fold are declared first.
+  xanadu::Store lineage;
+  auto fold = std::make_unique<Manifold>(
+      lineage.rebuildManifold(lineage.latest()));
+  MeshActorRuntime runtime("worker", 1);
+  Fingerprint identity;
+  authorize(runtime, identity);
+  Manifold storeless;
+  EXPECT_EQ(runtime
+                .spawn(identity, spawnRequest(), wall,
+                       ActorLineage{&storeless, &lineage})
+                .error(),
+            ActorError::InvalidMessage);
+  const auto pid = runtime.spawn(identity, spawnRequest(), wall,
+                                 ActorLineage{fold.get(), &lineage});
+  ASSERT_TRUE(pid);
+  runtime.setExecutor(
+      [&](const ActorExecution &,
+          WorkerContext &context) -> std::expected<std::string, ActorError> {
+        EXPECT_EQ(context.arena.base(), fold.get());
+        EXPECT_EQ(context.arena.base()->store(), &lineage);
+        return "ok";
+      });
+  ASSERT_TRUE(runtime.receive(identity, sendTo(*pid), ActorTime{}, wall));
+  ASSERT_EQ(runtime.pumpOne(wall), true);
+}
+
+TEST(MeshActorTest, GenesisHookRunsBeforeTurnsAndCanRefuseSpawn) {
+  MeshActorRuntime runtime("worker", 1);
+  Fingerprint identity;
+  authorize(runtime, identity);
+  unsigned wired = 0;
+  runtime.setGenesisHook(
+      [&](const ActorGenesis &genesis,
+          WorkerContext &context) -> std::expected<void, ActorError> {
+        ++wired;
+        EXPECT_EQ(genesis.transported, nullptr);
+        // The fresh context is already live — the await-message cursor is
+        // minted before the hook runs.
+        EXPECT_EQ(context.vm.activeCursors().size(), 1U);
+        if (genesis.pid.spawnSequence == 2) {
+          return std::unexpected(ActorError::ExecutionFailed);
+        }
+        return {};
+      });
+  const auto pid = runtime.spawn(identity, spawnRequest(), wall);
+  ASSERT_TRUE(pid);
+  EXPECT_EQ(wired, 1);
+  EXPECT_EQ(runtime.spawn(identity, spawnRequest("spawn-2"), wall).error(),
+            ActorError::ExecutionFailed);
+  EXPECT_EQ(runtime.actorCount(), 1);
+}
+
 TEST(MeshActorTest,
      RedispatchPreservesImmutableInputAndRefusesStatefulRestart) {
   MeshActorRuntime runtime("worker", 1);
@@ -267,6 +523,141 @@ TEST(MeshActorTest,
   ASSERT_TRUE(stateful);
   EXPECT_EQ(runtime.redispatch(*stateful, "replacement").error(),
             ActorError::NotImmutable);
+}
+
+TEST(MeshActorTest, WakeStarvationBoundedByReadyPerMessage) {
+  // §4.1: ready_per_message consecutive mailbox services force one wake
+  // service even while the mailbox stays full.
+  MeshActorRuntime runtime("worker", 1);
+  Fingerprint identity;
+  authorize(runtime, identity);
+  runtime.setSettingReader(
+      [](std::string_view key) -> std::optional<std::int64_t> {
+        if (key == "vagent.ready_per_message") return 2;
+        return std::nullopt;
+      });
+  const auto pid = runtime.spawn(identity, spawnRequest(), wall);
+  ASSERT_TRUE(pid);
+  std::vector<std::string> order;
+  std::vector<std::size_t> wakeStreaks, msgStreaks;
+  runtime.setExecutor(
+      [&](const ActorExecution &ex,
+          WorkerContext &) -> std::expected<std::string, ActorError> {
+        order.push_back(ex.message ? "msg" : "wake");
+        wakeStreaks.push_back(ex.wakeStreak);
+        msgStreaks.push_back(ex.msgStreak);
+        return "ok";
+      });
+  ASSERT_TRUE(runtime.wake(*pid));
+  ASSERT_TRUE(runtime.receive(identity, sendTo(*pid, "m1"), ActorTime{}, wall));
+  ASSERT_TRUE(runtime.receive(identity, sendTo(*pid, "m2"), ActorTime{}, wall));
+  ASSERT_TRUE(runtime.receive(identity, sendTo(*pid, "m3"), ActorTime{}, wall));
+  for (int i = 0; i < 4; ++i) {
+    EXPECT_EQ(runtime.pumpOne(wall), true);
+  }
+  // Two message services push msgStreak to the bound; the third pick is the
+  // forced wake, after which message service resumes.
+  EXPECT_EQ(order, (std::vector<std::string>{"msg", "msg", "wake", "msg"}));
+  // The replay record reads the streaks as each turn was picked.
+  EXPECT_EQ(msgStreaks, (std::vector<std::size_t>{0, 1, 2, 0}));
+  EXPECT_EQ(wakeStreaks, (std::vector<std::size_t>{0, 0, 0, 1}));
+  EXPECT_EQ(runtime.pumpOne(wall), false);
+}
+
+TEST(MeshActorTest, PumpScanRotatesAcrossBusyActors) {
+  // P8: the busy-actor scan resumes after the last-served key, so a busy
+  // actor is reached within |actors| pump calls — no first-actor bias.
+  MeshActorRuntime runtime("worker", 4);
+  Fingerprint identity;
+  authorize(runtime, identity);
+  const auto first  = runtime.spawn(identity, spawnRequest(), wall);
+  const auto second = runtime.spawn(identity, spawnRequest("spawn-2"), wall);
+  ASSERT_TRUE(first);
+  ASSERT_TRUE(second);
+  std::vector<std::string> served;
+  runtime.setExecutor(
+      [&](const ActorExecution &ex,
+          WorkerContext &) -> std::expected<std::string, ActorError> {
+        served.push_back(ex.pid.cursor);
+        return "ok";
+      });
+  for (int i = 0; i < 2; ++i) {
+    ASSERT_TRUE(runtime.receive(
+        identity, sendTo(*first, "a" + std::to_string(i)), ActorTime{}, wall));
+    ASSERT_TRUE(runtime.receive(
+        identity, sendTo(*second, "b" + std::to_string(i)), ActorTime{}, wall));
+  }
+  for (int i = 0; i < 4; ++i) {
+    EXPECT_EQ(runtime.pumpOne(wall), true);
+  }
+  ASSERT_EQ(served.size(), 4u);
+  // Alternation: no actor serves twice while the other waits.
+  for (std::size_t i = 1; i < served.size(); ++i) {
+    EXPECT_NE(served[i], served[i - 1]);
+  }
+  EXPECT_EQ(std::ranges::count(served, first->cursor), 2);
+  EXPECT_EQ(std::ranges::count(served, second->cursor), 2);
+  EXPECT_EQ(runtime.pumpOne(wall), false);
+}
+
+TEST(MeshActorRuntimeTest, SpawnResultHookReportsGrantAndRefusal) {
+  // ActorSpawnAck is consumed at the runtime layer, so the adapter's
+  // only window onto a spawn outcome is this hook on the requester's
+  // runtime: it must fire on grant — with the child's real pid — and
+  // on refusal alike.
+  const Fingerprint host;
+  MeshActorRuntime runtime("requester", 1);
+  runtime.trustNode("host", host);
+  runtime.setSender(
+      [](std::string_view, const ActorMessage &) { return true; });
+  int calls = 0;
+  std::optional<ActorPid> granted;
+  std::optional<ActorError> refused;
+  std::string lastRequest;
+  runtime.setSpawnResultHook(
+      [&](const ActorMessage &request,
+          const std::expected<ActorPid, ActorError> &result) {
+        ++calls;
+        lastRequest = request.requestId;
+        if (result)
+          granted = *result;
+        else
+          refused = result.error();
+      });
+  const auto request = spawnRequest();
+  ASSERT_TRUE(runtime.send("host", request));
+  ActorMessage ack;
+  ack.type      = MessageType::ActorSpawnAck;
+  ack.requestId = request.requestId;
+  ack.target    = ActorPid{"host", "child", 1, 7};
+  ASSERT_TRUE(runtime.receive(host, ack, ActorTime{}, wall));
+  EXPECT_EQ(calls, 1);
+  EXPECT_EQ(lastRequest, "spawn-1");
+  ASSERT_TRUE(granted);
+  EXPECT_EQ(*granted, *ack.target);
+  // A refusal carries no pid — the free-text `reason` reaches the
+  // hook as a typed Refused so the member's deliveries can fail.
+  const auto request2 = spawnRequest("spawn-2");
+  ASSERT_TRUE(runtime.send("host", request2));
+  ack          = {};
+  ack.type      = MessageType::ActorSpawnAck;
+  ack.requestId = request2.requestId;
+  ack.reason    = "spawn refused";
+  ASSERT_TRUE(runtime.receive(host, ack, ActorTime{}, wall));
+  EXPECT_EQ(calls, 2);
+  EXPECT_EQ(lastRequest, "spawn-2");
+  ASSERT_TRUE(refused);
+  EXPECT_EQ(*refused, ActorError::Refused);
+  // An ack naming no outstanding request is still refused before
+  // the hook can see it.
+  ack          = {};
+  ack.type      = MessageType::ActorSpawnAck;
+  ack.requestId = "never-sent";
+  ack.reason    = "spawn refused";
+  EXPECT_EQ(
+      runtime.receive(host, ack, ActorTime{}, wall).error(),
+      ActorError::InvalidMessage);
+  EXPECT_EQ(calls, 2);
 }
 } // namespace
 } // namespace zigzag::vortex::mesh

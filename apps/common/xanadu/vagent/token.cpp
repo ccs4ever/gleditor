@@ -93,15 +93,24 @@ std::string_view diagnosticCodeName(DiagnosticCode code) noexcept {
     return "MissingDeadline";
   case DiagnosticCode::InvalidDeclaration:
     return "InvalidDeclaration";
+  case DiagnosticCode::Unsupported:
+    return "Unsupported";
   }
   return "UnknownDiagnostic";
 }
 
 std::string formatDiagnostic(const Diagnostic &diagnostic) {
-  return std::to_string(diagnostic.loc.line) + ":" +
-         std::to_string(diagnostic.loc.column) + ": " +
-         std::string(diagnosticCodeName(diagnostic.code)) + ": " +
-         diagnostic.detail;
+  std::string result = std::to_string(diagnostic.loc.line) + ":" +
+                       std::to_string(diagnostic.loc.column);
+  // §5.1: positions inside a code"…" body qualify the literal's own loc
+  // with one '+<off-line>:<off-col>' arm per enclosing level.
+  for (const auto &arm : diagnostic.inner) {
+    result += "+" + std::to_string(arm.line) + ":" +
+              std::to_string(arm.column);
+  }
+  result += ": " + std::string(diagnosticCodeName(diagnostic.code)) +
+            ": " + diagnostic.detail;
+  return result;
 }
 
 } // namespace xanadu::vagent

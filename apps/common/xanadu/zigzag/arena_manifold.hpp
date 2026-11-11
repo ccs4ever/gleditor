@@ -275,15 +275,81 @@ void expectWritten(
     const ArenaResult &result,
     std::source_location where = std::source_location::current()) noexcept;
 
+/// What a shadowed persistent cell may emit during promote(), per cell.
+/// Flags compose: a caller may allow clears but not values, or vice versa.
+/// See design/arena-promotion-delta-completeness.md §4.0.
+enum class ShadowCommit : std::uint8_t {
+  Additive = 0,      ///< adds + repoints only (the legacy behavior)
+  Clears   = 1 << 0, ///< + edge clears (e.pos == noCell on a changed edge)
+  Values   = 1 << 1, ///< + value/content restatement (the deferred stage)
+  Suppress = 1 << 2, ///< emit nothing for this cell (not even adds)
+};
+
+[[nodiscard]] constexpr ShadowCommit operator|(const ShadowCommit a,
+                                               const ShadowCommit b) noexcept {
+  return static_cast<ShadowCommit>(static_cast<std::uint8_t>(a) |
+                                   static_cast<std::uint8_t>(b));
+}
+[[nodiscard]] constexpr ShadowCommit operator&(const ShadowCommit a,
+                                               const ShadowCommit b) noexcept {
+  return static_cast<ShadowCommit>(static_cast<std::uint8_t>(a) &
+                                   static_cast<std::uint8_t>(b));
+}
+[[nodiscard]] constexpr ShadowCommit operator~(const ShadowCommit a) noexcept {
+  return static_cast<ShadowCommit>(
+      static_cast<std::uint8_t>(~static_cast<std::uint8_t>(a)) &
+      0x0fU); // mask to the defined bits
+}
+constexpr ShadowCommit &operator|=(ShadowCommit &a,
+                                   const ShadowCommit b) noexcept {
+  return a = a | b;
+}
+constexpr ShadowCommit &operator&=(ShadowCommit &a,
+                                   const ShadowCommit b) noexcept {
+  return a = a & b;
+}
+
+/// Is flag `f` set in flag set `p`?
+[[nodiscard]] constexpr bool policyHas(const ShadowCommit p,
+                                       const ShadowCommit f) noexcept {
+  return (p & f) != ShadowCommit::Additive;
+}
+
+/// The common per-cell policy: state-side cells (a ref above the program-image
+/// `extent`) commit edge-clears; image-side and everything else stays
+/// additive. `ref > extent` is the same sideness test regenesisCycle applies
+/// when seeding extraRoots (lineage.cpp). isEphemeral/isProxy/!holdsOwn cells
+/// never reach the predicate -- promote() consults it only for persistent
+/// shadowed cells, so an ephemeralBit-set ref cannot read "> extent" here.
+[[nodiscard]] inline auto commitStateSide(const CellRef extent) noexcept {
+  return [extent](const CellRef ref) noexcept {
+    return ref > extent ? ShadowCommit::Clears : ShadowCommit::Additive;
+  };
+}
+
 struct PromotionBudget {
-  std::uint32_t maxOps{65536};
+  std::uint32_t maxOps{65536}; ///< reachable-cell bound (NOT an op count)
+  /// Per-cell emission policy for shadowed persistent cells.
+  /// std::nullopt (the default) is the legacy additive-everything path,
+  /// bit-identical to the behavior before this field existed. When set, it
+  /// governs all emission for a shadowed cell: Additive = adds/repoints,
+  /// Clears = +clears, Values = +value/content, Suppress = nothing.
+  /// Borrowed, not owned -- call-scoped only.
+  gleditor::cpp26::optional<
+      gleditor::cpp26::function_ref<ShadowCommit(CellRef)>>
+      commitShadowed{};
 };
 
 /// What promote() produced: the state the store reached, and the real CellRef
-/// for each arena cell it wrote, in the order they were minted.
+/// for each arena cell it wrote, in the order they were minted. `arena` is
+/// the same order's ephemeral side — `cells[i]` is `real.at(arena[i])` — so
+/// a caller that recorded arena refs (an op enumeration's Int64 positions)
+/// can find each one's persistent twin. Base cells never appear: they were
+/// not minted.
 struct Promoted {
   xanadu::MicroversionId version;
   std::vector<CellRef> cells;
+  std::vector<CellRef> arena;
 };
 
 /**
@@ -534,6 +600,15 @@ public:
     return shadowOrder_.size();
   }
 
+  /// The base cells this arena has shadowed, in write order. A promote()
+  /// call folding session mutations passes this as @p extraRoots so a
+  /// shadowed cell reachable only through an unshadowed base cell's
+  /// persistent edges — which the root walk deliberately does not
+  /// traverse — still folds.
+  [[nodiscard]] std::span<const CellRef> shadowOrder() const noexcept {
+    return shadowOrder_;
+  }
+
   // -- read path: the same questions Manifold answers ------------------------
 
   /// The dense id for @p ref, or nullopt. Arithmetic, not a lookup: an arena
@@ -554,6 +629,11 @@ public:
   }
 
   [[nodiscard]] std::size_t cellCount() const noexcept { return slots_.size(); }
+
+  /// Live arena-local cells for the grant's `vagent.max_live_cells` bound —
+  /// minted minus rolled-back (release() truncates dead tail slots). Durable
+  /// base cells are not live allocations, so the count stays arena-local.
+  [[nodiscard]] std::size_t liveCells() const noexcept { return cellCount(); }
 
   /// How many cells a walk through this arena could visit: its own and every
   /// base cell it reads through. cellCount() alone would cut a walk over base
@@ -939,6 +1019,12 @@ private:
  *        along any dimension is promoted -- a failed branch's cells are not
  *        reachable from an answer, which is what makes "promote the answer,
  *        not the search" a graph walk rather than a bookkeeping problem.
+ * @param extraRoots additional cells to promote as if reachable. Only cells
+ *        this arena holds (minted or shadowed) qualify; an unshadowed base
+ *        cell is skipped because expanding it would walk the base document
+ *        the walk is written to avoid. Session-mutation folding passes
+ *        shadowOrder(): a rank append sitting on a shadowed cell behind
+ *        unshadowed base records is invisible to the root walk alone.
  * @return nothing, having written nothing, when the reachable subgraph exceeds
  *         @p budget, or when @p root is not a cell of @p from.
  *
@@ -948,7 +1034,8 @@ private:
  */
 [[nodiscard]] std::optional<Promoted>
 promote(xanadu::Store &store, const xanadu::MicroversionId &parent,
-        const ArenaManifold &from, CellRef root, PromotionBudget budget = {});
+        const ArenaManifold &from, CellRef root, PromotionBudget budget = {},
+        std::span<const CellRef> extraRoots = {});
 
 [[nodiscard]] std::string
 encodeArenaPrefix(const ArenaManifold::PrefixSnapshot &snapshot);

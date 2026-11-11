@@ -265,6 +265,28 @@ inline constexpr std::string_view kVortexParallelThreshold =
 inline constexpr std::string_view kVortexOrParallelSearch =
     "vortex.or_parallel_search";
 
+// Vagent actor-executor policy (design/vagent-actor-executor.md §4.1/§4.2)
+inline constexpr std::string_view kVagentReadyPerMessage =
+    "vagent.ready_per_message";
+inline constexpr std::string_view kVagentJournalSize = "vagent.journal_size";
+inline constexpr std::string_view kVagentConditionTurnFuel =
+    "vagent.condition_turn_fuel";
+inline constexpr std::string_view kVagentMaxIntentions =
+    "vagent.max_intentions";
+inline constexpr std::string_view kVagentMaxTimers  = "vagent.max_timers";
+inline constexpr std::string_view kVagentMaxPending = "vagent.max_pending";
+inline constexpr std::string_view kVagentMaxHostDeliveries =
+    "vagent.max_host_deliveries";
+inline constexpr std::string_view kVagentMaxClausesPerPredicate =
+    "vagent.max_clauses_per_predicate";
+inline constexpr std::string_view kVagentMaxClausesPerGoal =
+    "vagent.max_clauses_per_goal";
+inline constexpr std::string_view kVagentReclaimDeadline =
+    "vagent.reclaim_deadline";
+inline constexpr std::string_view kVagentMaxLiveCells = "vagent.max_live_cells";
+inline constexpr std::string_view kVagentCompactEvery =
+    "vagent.compact_every";
+
 // UI
 inline constexpr std::string_view kTabBarVisible       = "tabBarVisible";
 inline constexpr std::string_view kStatusBarVisible    = "statusBarVisible";
@@ -333,6 +355,14 @@ inline constexpr std::string_view kQuotationModalMaxWidthShare =
     "quotationModal.maxWidthShare";
 inline constexpr std::string_view kQuotationModalMaxHeightShare =
     "quotationModal.maxHeightShare";
+inline constexpr std::string_view kEvidenceModalWidthPx =
+    "evidenceModal.widthPx";
+inline constexpr std::string_view kEvidenceModalHeightPx =
+    "evidenceModal.heightPx";
+inline constexpr std::string_view kEvidenceModalMaxWidthShare =
+    "evidenceModal.maxWidthShare";
+inline constexpr std::string_view kEvidenceModalMaxHeightShare =
+    "evidenceModal.maxHeightShare";
 inline constexpr std::string_view kTelescopeModalWidthPx =
     "telescopeModal.widthPx";
 inline constexpr std::string_view kTelescopeModalHeightPx =
@@ -409,6 +439,8 @@ inline constexpr std::string_view kKeymapTelescopeToggle =
     "std:xuzz/telescope_toggle";
 inline constexpr std::string_view kKeymapTelescopeToggleF3 =
     "std:xuzz/telescope_toggle_f3";
+inline constexpr std::string_view kKeymapEvidenceCase =
+    "std:xuzz/evidence_case_toggle";
 inline constexpr std::string_view kKeymapTensionPhysicsToggle =
     "std:xuzz/tension_physics_toggle";
 inline constexpr std::string_view kKeymapUnlockTranscopyrightF5 =
@@ -1282,6 +1314,7 @@ struct UIConfig {
   QuotationTetherConfig tether;
   WorldCardConfig hullCard{260.0F, 46.0F};
   ModalPresentationConfig quotationModal;
+  ModalPresentationConfig evidenceModal{840.0F, 720.0F, 0.95F, 0.9F};
   ModalPresentationConfig telescopeModal{860.0F, 560.0F};
   ModalPresentationConfig hypertimeModal{640.0F, 460.0F};
 

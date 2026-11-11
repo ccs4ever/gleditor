@@ -70,6 +70,9 @@ Variables, all optional:
   disable) is what makes that cheap.
 - `GLEDITOR_SDL=2|3` — pick the SDL major; unset probes pkg-config (SDL3 if present, else SDL2).
 - `GLEDITOR_ENABLE_A11Y=1|0` — require/disable AccessKit; unset uses it if found.
+- `GLEDITOR_MAIL=1|0` — require/disable GMime 3 + libetpan for mail evidence; unset probes each and
+  compiles refusing stubs (`GLEDITOR_HAVE_GMIME`/`GLEDITOR_HAVE_ETPAN`/`GLEDITOR_HAVE_MAIL`) for
+  whatever is missing, the `pg_backend.cpp` pattern. Toggling flips flags on every object.
 - `CXX=g++` — override the compiler (default `clang++`).
 
 Do not hand-pick `-std=` or hardcode a compiler in new build logic; the Makefile probes.

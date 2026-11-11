@@ -596,14 +596,16 @@ StandardCryptoEngine::generateCsr(
     return std::unexpected(ValidationError::SerializationError);
   }
 
-  X509_NAME *name = X509_REQ_get_subject_name(req.get());
+  // OpenSSL 4 returns the request's subject as const, so build the name and
+  // install a copy.
+  X509NamePtr name(X509_NAME_new(), &X509_NAME_free);
   if (!name) {
     return std::unexpected(ValidationError::SerializationError);
   }
   const std::string cn = !deviceName.empty() ? deviceName : deviceId;
   if (!cn.empty()) {
     if (X509_NAME_add_entry_by_txt(
-            name, "CN", MBSTRING_UTF8,
+            name.get(), "CN", MBSTRING_UTF8,
             reinterpret_cast<const unsigned char *>(cn.c_str()), -1, -1,
             0) <= 0) {
       return std::unexpected(ValidationError::SerializationError);
@@ -611,11 +613,14 @@ StandardCryptoEngine::generateCsr(
   }
   if (!deviceId.empty()) {
     if (X509_NAME_add_entry_by_txt(
-            name, "OU", MBSTRING_UTF8,
+            name.get(), "OU", MBSTRING_UTF8,
             reinterpret_cast<const unsigned char *>(deviceId.c_str()), -1, -1,
             0) <= 0) {
       return std::unexpected(ValidationError::SerializationError);
     }
+  }
+  if (X509_REQ_set_subject_name(req.get(), name.get()) <= 0) {
+    return std::unexpected(ValidationError::SerializationError);
   }
 
   const PubKey32 devPub = deviceSigner.publicKey();
@@ -697,37 +702,51 @@ StandardCryptoEngine::createDelegationCertificate(
     return std::unexpected(ValidationError::SerializationError);
   }
 
-  X509_NAME *certSubj  = X509_get_subject_name(cert.get());
+  // OpenSSL 4 returns the certificate's names as const, so build them and
+  // install copies.
+  X509NamePtr certSubj(X509_NAME_new(), &X509_NAME_free);
+  if (!certSubj) {
+    return std::unexpected(ValidationError::SerializationError);
+  }
   const std::string cn = !constraints.deviceName.empty()
                              ? constraints.deviceName
                              : constraints.deviceId;
   if (!cn.empty()) {
     X509_NAME_add_entry_by_txt(
-        certSubj, "CN", MBSTRING_UTF8,
+        certSubj.get(), "CN", MBSTRING_UTF8,
         reinterpret_cast<const unsigned char *>(cn.c_str()), -1, -1, 0);
   }
   if (!constraints.deviceId.empty()) {
     X509_NAME_add_entry_by_txt(
-        certSubj, "OU", MBSTRING_UTF8,
+        certSubj.get(), "OU", MBSTRING_UTF8,
         reinterpret_cast<const unsigned char *>(constraints.deviceId.c_str()),
         -1, -1, 0);
   }
+  if (X509_set_subject_name(cert.get(), certSubj.get()) <= 0) {
+    return std::unexpected(ValidationError::SerializationError);
+  }
 
-  X509_NAME *issuerName      = X509_get_issuer_name(cert.get());
+  X509NamePtr issuerName(X509_NAME_new(), &X509_NAME_free);
+  if (!issuerName) {
+    return std::unexpected(ValidationError::SerializationError);
+  }
   const std::string authorCn = !constraints.authorName.empty()
                                    ? constraints.authorName
                                    : "Xanadu Master Authority";
   if (X509_NAME_add_entry_by_txt(
-          issuerName, "CN", MBSTRING_UTF8,
+          issuerName.get(), "CN", MBSTRING_UTF8,
           reinterpret_cast<const unsigned char *>(authorCn.c_str()), -1, -1,
           0) <= 0) {
     return std::unexpected(ValidationError::SerializationError);
   }
   if (!constraints.authorEmail.empty()) {
-    X509_NAME_add_entry_by_txt(issuerName, "emailAddress", MBSTRING_UTF8,
+    X509_NAME_add_entry_by_txt(issuerName.get(), "emailAddress", MBSTRING_UTF8,
                                reinterpret_cast<const unsigned char *>(
                                    constraints.authorEmail.c_str()),
                                -1, -1, 0);
+  }
+  if (X509_set_issuer_name(cert.get(), issuerName.get()) <= 0) {
+    return std::unexpected(ValidationError::SerializationError);
   }
 
   if (ASN1_TIME_set(X509_getm_notBefore(cert.get()),
@@ -842,8 +861,9 @@ StandardCryptoEngine::authorizeCsr(
   const ASN1_BIT_STRING *csrSig = nullptr;
   const X509_ALGOR *csrAlg      = nullptr;
   X509_REQ_get0_signature(req.get(), &csrSig, &csrAlg);
-  if (csrSig && csrSig->length == 64) {
-    std::span<const std::uint8_t, 32> sBytes(csrSig->data + 32, 32);
+  if (csrSig && ASN1_STRING_length(csrSig) == 64) {
+    std::span<const std::uint8_t, 32> sBytes(ASN1_STRING_get0_data(csrSig) + 32,
+                                             32);
     if (!isCanonicalEd25519Scalar(sBytes)) {
       return std::unexpected(ValidationError::CsrSignatureInvalid);
     }
@@ -858,7 +878,7 @@ StandardCryptoEngine::authorizeCsr(
   }
 
   CertificateConstraints effective = constraints;
-  X509_NAME *reqSubj               = X509_REQ_get_subject_name(req.get());
+  const X509_NAME *reqSubj         = X509_REQ_get_subject_name(req.get());
   if (reqSubj && effective.deviceName.empty()) {
     char cnBuf[256] = {};
     if (X509_NAME_get_text_by_NID(reqSubj, NID_commonName, cnBuf,
@@ -1009,8 +1029,9 @@ std::expected<void, ValidationError> StandardCryptoEngine::verifyDelegation(
   const ASN1_BIT_STRING *sig = nullptr;
   const X509_ALGOR *alg      = nullptr;
   X509_get0_signature(&sig, &alg, x509Cert.get());
-  if (sig && sig->length == 64) {
-    std::span<const std::uint8_t, 32> sBytes(sig->data + 32, 32);
+  if (sig && ASN1_STRING_length(sig) == 64) {
+    std::span<const std::uint8_t, 32> sBytes(ASN1_STRING_get0_data(sig) + 32,
+                                             32);
     if (!isCanonicalEd25519Scalar(sBytes)) {
       return std::unexpected(ValidationError::DelegationSignatureInvalid);
     }
@@ -1040,7 +1061,7 @@ std::expected<void, ValidationError> StandardCryptoEngine::verifyDelegation(
   }
   X509_set_version(rootCert.get(), 2);
   ASN1_INTEGER_set_uint64(X509_get_serialNumber(rootCert.get()), 0);
-  X509_NAME *issName = X509_get_issuer_name(x509Cert.get());
+  const X509_NAME *issName = X509_get_issuer_name(x509Cert.get());
   X509_set_subject_name(rootCert.get(), issName);
   X509_set_issuer_name(rootCert.get(), issName);
   if (!ASN1_TIME_set(X509_getm_notBefore(rootCert.get()), 0)) {

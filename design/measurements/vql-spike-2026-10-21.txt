@@ -1,0 +1,160 @@
+command: ./build/vql-spike --cells 1000 --dimensions 2 --warmups 3 --repetitions 21
+compiler=Clang 23.1.1 cplusplus=202400 steady_clock=1
+cells=1000 dimensions=2 repetitions=21 warmups=3
+allocation_probe_self_check=pass
+layout CellRef size=4 align=4
+layout zigzag::CellSlot size=32 align=8
+layout zigzag::DimLink size=12 align=4
+layout SignedDimensionStep size=64 align=8
+layout PathStep size=264 align=8
+layout PathExpression size=480 align=8
+layout QueryExpression size=560 align=8
+layout VQLEngine size=344 align=8
+layout PrototypeHyperHandle size=16 align=8
+layout PrototypeCurriedMorphism size=24 align=8
+layout PrototypeDynamicLensMatrix size=64 align=8
+query=##/+d.items/+d.hop0/+d.hop1
+functor=let $h0 := /+d.hop0; let $h1 := /+d.hop1; let $walk := $h0 / $h1; ##/+d.items / $walk
+fixture_cells=3022 expected_count=1000 expected_checksum=10415434106586018603
+parse_eval_first_use samples=1 min_ns=565380.0 median_ns=565380.0 p95_ns=565380.0 new_calls_mean=7050.0 requested_bytes_mean=333125.0 delete_calls_mean=7049.0
+parse_first_observed samples=1 min_ns=4558.0 median_ns=4558.0 p95_ns=4558.0 new_calls_mean=5.0 requested_bytes_mean=3368.0 delete_calls_mean=2.0
+parse_only_warm samples=21 min_ns=3106.0 median_ns=3126.0 p95_ns=3166.0 new_calls_mean=5.0 requested_bytes_mean=3368.0 delete_calls_mean=5.0
+parse_eval_fresh_engine samples=21 min_ns=460209.0 median_ns=464828.0 p95_ns=474756.0 new_calls_mean=7050.0 requested_bytes_mean=333125.0 delete_calls_mean=7050.0
+eval_parsed_fresh_engine samples=21 min_ns=459146.0 median_ns=469296.0 p95_ns=525764.0 new_calls_mean=7045.0 requested_bytes_mean=329757.0 delete_calls_mean=7045.0
+eval_parsed_warm_engine samples=21 min_ns=271268.0 median_ns=364176.0 p95_ns=464166.0 new_calls_mean=7045.0 requested_bytes_mean=329757.0 delete_calls_mean=7045.0
+eval_bound_functor_warm samples=21 min_ns=271348.0 median_ns=272320.0 p95_ns=276618.0 new_calls_mean=7046.0 requested_bytes_mean=333757.0 delete_calls_mean=7046.0
+native_link_visitor samples=21 min_ns=23595.0 median_ns=23785.0 p95_ns=24277.0 new_calls_mean=0.0 requested_bytes_mean=0.0 delete_calls_mean=0.0
+compile_identity_fresh_runtime samples=21 min_ns=1373.0 median_ns=1393.0 p95_ns=1583.0 new_calls_mean=13.0 requested_bytes_mean=954.0 delete_calls_mean=7.0
+compiled_identity count=1 checksum=4953164290808674201 execution=success (only_common_subset_measured)
+compiled_rank refused=whole-rank traversal is not compiled to Vortex yet; run the query with --engine direct
+compiled_functor refused=point-free path functors is not compiled to Vortex yet; run the query with --engine direct
+correctness=pass arena_growth=0
+
+command: ./build/vql-spike --cells 100 --dimensions 2 --warmups 3 --repetitions 21
+compiler=Clang 23.1.1 cplusplus=202400 steady_clock=1
+cells=100 dimensions=2 repetitions=21 warmups=3
+allocation_probe_self_check=pass
+layout CellRef size=4 align=4
+layout zigzag::CellSlot size=32 align=8
+layout zigzag::DimLink size=12 align=4
+layout SignedDimensionStep size=64 align=8
+layout PathStep size=264 align=8
+layout PathExpression size=480 align=8
+layout QueryExpression size=560 align=8
+layout VQLEngine size=344 align=8
+layout PrototypeHyperHandle size=16 align=8
+layout PrototypeCurriedMorphism size=24 align=8
+layout PrototypeDynamicLensMatrix size=64 align=8
+query=##/+d.items/+d.hop0/+d.hop1
+functor=let $h0 := /+d.hop0; let $h1 := /+d.hop1; let $walk := $h0 / $h1; ##/+d.items / $walk
+fixture_cells=322 expected_count=100 expected_checksum=11438972477485373251
+parse_eval_first_use samples=1 min_ns=158252.0 median_ns=158252.0 p95_ns=158252.0 new_calls_mean=738.0 requested_bytes_mean=37165.0 delete_calls_mean=737.0
+parse_first_observed samples=1 min_ns=5310.0 median_ns=5310.0 p95_ns=5310.0 new_calls_mean=5.0 requested_bytes_mean=3368.0 delete_calls_mean=2.0
+parse_only_warm samples=21 min_ns=3487.0 median_ns=3557.0 p95_ns=3687.0 new_calls_mean=5.0 requested_bytes_mean=3368.0 delete_calls_mean=5.0
+parse_eval_fresh_engine samples=21 min_ns=58512.0 median_ns=58802.0 p95_ns=59504.0 new_calls_mean=738.0 requested_bytes_mean=37165.0 delete_calls_mean=738.0
+eval_parsed_fresh_engine samples=21 min_ns=54575.0 median_ns=54714.0 p95_ns=61718.0 new_calls_mean=733.0 requested_bytes_mean=33797.0 delete_calls_mean=733.0
+eval_parsed_warm_engine samples=21 min_ns=54474.0 median_ns=54615.0 p95_ns=54735.0 new_calls_mean=733.0 requested_bytes_mean=33797.0 delete_calls_mean=733.0
+eval_bound_functor_warm samples=21 min_ns=54383.0 median_ns=54594.0 p95_ns=54945.0 new_calls_mean=734.0 requested_bytes_mean=34197.0 delete_calls_mean=734.0
+native_link_visitor samples=21 min_ns=4609.0 median_ns=4619.0 p95_ns=4619.0 new_calls_mean=0.0 requested_bytes_mean=0.0 delete_calls_mean=0.0
+compile_identity_fresh_runtime samples=21 min_ns=2524.0 median_ns=2565.0 p95_ns=2886.0 new_calls_mean=13.0 requested_bytes_mean=954.0 delete_calls_mean=7.0
+compiled_identity count=1 checksum=4953164290808674201 execution=success (only_common_subset_measured)
+compiled_rank refused=whole-rank traversal is not compiled to Vortex yet; run the query with --engine direct
+compiled_functor refused=point-free path functors is not compiled to Vortex yet; run the query with --engine direct
+correctness=pass arena_growth=0
+
+command: ./build/vql-spike --cells 10000 --dimensions 2 --warmups 3 --repetitions 21
+compiler=Clang 23.1.1 cplusplus=202400 steady_clock=1
+cells=10000 dimensions=2 repetitions=21 warmups=3
+allocation_probe_self_check=pass
+layout CellRef size=4 align=4
+layout zigzag::CellSlot size=32 align=8
+layout zigzag::DimLink size=12 align=4
+layout SignedDimensionStep size=64 align=8
+layout PathStep size=264 align=8
+layout PathExpression size=480 align=8
+layout QueryExpression size=560 align=8
+layout VQLEngine size=344 align=8
+layout PrototypeHyperHandle size=16 align=8
+layout PrototypeCurriedMorphism size=24 align=8
+layout PrototypeDynamicLensMatrix size=64 align=8
+query=##/+d.items/+d.hop0/+d.hop1
+functor=let $h0 := /+d.hop0; let $h1 := /+d.hop1; let $walk := $h0 / $h1; ##/+d.items / $walk
+fixture_cells=30022 expected_count=10000 expected_checksum=3410927607864110035
+parse_eval_first_use samples=1 min_ns=5511384.0 median_ns=5511384.0 p95_ns=5511384.0 new_calls_mean=70065.0 requested_bytes_mean=3435501.0 delete_calls_mean=70064.0
+parse_first_observed samples=1 min_ns=8366.0 median_ns=8366.0 p95_ns=8366.0 new_calls_mean=5.0 requested_bytes_mean=3368.0 delete_calls_mean=2.0
+parse_only_warm samples=21 min_ns=3426.0 median_ns=3437.0 p95_ns=3467.0 new_calls_mean=5.0 requested_bytes_mean=3368.0 delete_calls_mean=5.0
+parse_eval_fresh_engine samples=21 min_ns=2302396.0 median_ns=2598652.0 p95_ns=3630623.0 new_calls_mean=70065.0 requested_bytes_mean=3435501.0 delete_calls_mean=70065.0
+eval_parsed_fresh_engine samples=21 min_ns=2576890.0 median_ns=2620213.0 p95_ns=3024956.0 new_calls_mean=70060.0 requested_bytes_mean=3432133.0 delete_calls_mean=70060.0
+eval_parsed_warm_engine samples=21 min_ns=2505725.0 median_ns=2619993.0 p95_ns=3085001.0 new_calls_mean=70060.0 requested_bytes_mean=3432133.0 delete_calls_mean=70060.0
+eval_bound_functor_warm samples=21 min_ns=2327894.0 median_ns=2443406.0 p95_ns=2883516.0 new_calls_mean=70061.0 requested_bytes_mean=3472133.0 delete_calls_mean=70061.0
+native_link_visitor samples=21 min_ns=215812.0 median_ns=240720.0 p95_ns=250528.0 new_calls_mean=0.0 requested_bytes_mean=0.0 delete_calls_mean=0.0
+compile_identity_fresh_runtime samples=21 min_ns=1232.0 median_ns=1252.0 p95_ns=1392.0 new_calls_mean=13.0 requested_bytes_mean=954.0 delete_calls_mean=7.0
+compiled_identity count=1 checksum=4953164290808674201 execution=success (only_common_subset_measured)
+compiled_rank refused=whole-rank traversal is not compiled to Vortex yet; run the query with --engine direct
+compiled_functor refused=point-free path functors is not compiled to Vortex yet; run the query with --engine direct
+correctness=pass arena_growth=0
+
+command: ./build/vql-spike --cells 1000 --dimensions 1 --warmups 3 --repetitions 21
+compiler=Clang 23.1.1 cplusplus=202400 steady_clock=1
+cells=1000 dimensions=1 repetitions=21 warmups=3
+allocation_probe_self_check=pass
+layout CellRef size=4 align=4
+layout zigzag::CellSlot size=32 align=8
+layout zigzag::DimLink size=12 align=4
+layout SignedDimensionStep size=64 align=8
+layout PathStep size=264 align=8
+layout PathExpression size=480 align=8
+layout QueryExpression size=560 align=8
+layout VQLEngine size=344 align=8
+layout PrototypeHyperHandle size=16 align=8
+layout PrototypeCurriedMorphism size=24 align=8
+layout PrototypeDynamicLensMatrix size=64 align=8
+query=##/+d.items/+d.hop0
+functor=let $h0 := /+d.hop0; let $walk := $h0; ##/+d.items / $walk
+fixture_cells=2021 expected_count=1000 expected_checksum=7805245585809371363
+parse_eval_first_use samples=1 min_ns=360579.0 median_ns=360579.0 p95_ns=360579.0 new_calls_mean=4037.0 requested_bytes_mean=187586.0 delete_calls_mean=4036.0
+parse_first_observed samples=1 min_ns=3897.0 median_ns=3897.0 p95_ns=3897.0 new_calls_mean=4.0 requested_bytes_mean=2048.0 delete_calls_mean=1.0
+parse_only_warm samples=21 min_ns=2314.0 median_ns=2345.0 p95_ns=2404.0 new_calls_mean=4.0 requested_bytes_mean=2048.0 delete_calls_mean=4.0
+parse_eval_fresh_engine samples=21 min_ns=162300.0 median_ns=215702.0 p95_ns=289433.0 new_calls_mean=4037.0 requested_bytes_mean=187586.0 delete_calls_mean=4037.0
+eval_parsed_fresh_engine samples=21 min_ns=160727.0 median_ns=161419.0 p95_ns=165886.0 new_calls_mean=4033.0 requested_bytes_mean=185538.0 delete_calls_mean=4033.0
+eval_parsed_warm_engine samples=21 min_ns=160928.0 median_ns=161518.0 p95_ns=167721.0 new_calls_mean=4033.0 requested_bytes_mean=185538.0 delete_calls_mean=4033.0
+eval_bound_functor_warm samples=21 min_ns=160757.0 median_ns=161348.0 p95_ns=167169.0 new_calls_mean=4034.0 requested_bytes_mean=189538.0 delete_calls_mean=4034.0
+native_link_visitor samples=21 min_ns=15189.0 median_ns=15199.0 p95_ns=15199.0 new_calls_mean=0.0 requested_bytes_mean=0.0 delete_calls_mean=0.0
+compile_identity_fresh_runtime samples=21 min_ns=1362.0 median_ns=1383.0 p95_ns=1553.0 new_calls_mean=13.0 requested_bytes_mean=954.0 delete_calls_mean=7.0
+compiled_identity count=1 checksum=4953164290808674201 execution=success (only_common_subset_measured)
+compiled_rank refused=whole-rank traversal is not compiled to Vortex yet; run the query with --engine direct
+compiled_functor refused=point-free path functors is not compiled to Vortex yet; run the query with --engine direct
+correctness=pass arena_growth=0
+
+command: ./build/vql-spike --cells 1000 --dimensions 4 --warmups 3 --repetitions 21
+compiler=Clang 23.1.1 cplusplus=202400 steady_clock=1
+cells=1000 dimensions=4 repetitions=21 warmups=3
+allocation_probe_self_check=pass
+layout CellRef size=4 align=4
+layout zigzag::CellSlot size=32 align=8
+layout zigzag::DimLink size=12 align=4
+layout SignedDimensionStep size=64 align=8
+layout PathStep size=264 align=8
+layout PathExpression size=480 align=8
+layout QueryExpression size=560 align=8
+layout VQLEngine size=344 align=8
+layout PrototypeHyperHandle size=16 align=8
+layout PrototypeCurriedMorphism size=24 align=8
+layout PrototypeDynamicLensMatrix size=64 align=8
+query=##/+d.items/+d.hop0/+d.hop1/+d.hop2/+d.hop3
+functor=let $h0 := /+d.hop0; let $h1 := /+d.hop1; let $h2 := /+d.hop2; let $h3 := /+d.hop3; let $walk := $h0 / $h1 / $h2 / $h3; ##/+d.items / $walk
+fixture_cells=5024 expected_count=1000 expected_checksum=6787549532220052819
+parse_eval_first_use samples=1 min_ns=543798.0 median_ns=543798.0 p95_ns=543798.0 new_calls_mean=13075.0 requested_bytes_mean=624203.0 delete_calls_mean=13074.0
+parse_first_observed samples=1 min_ns=4178.0 median_ns=4178.0 p95_ns=4178.0 new_calls_mean=6.0 requested_bytes_mean=6008.0 delete_calls_mean=3.0
+parse_only_warm samples=21 min_ns=2775.0 median_ns=2805.0 p95_ns=2926.0 new_calls_mean=6.0 requested_bytes_mean=6008.0 delete_calls_mean=6.0
+parse_eval_fresh_engine samples=21 min_ns=484325.0 median_ns=490166.0 p95_ns=497180.0 new_calls_mean=13075.0 requested_bytes_mean=624203.0 delete_calls_mean=13075.0
+eval_parsed_fresh_engine samples=21 min_ns=479807.0 median_ns=483483.0 p95_ns=491589.0 new_calls_mean=13069.0 requested_bytes_mean=618195.0 delete_calls_mean=13069.0
+eval_parsed_warm_engine samples=21 min_ns=428689.0 median_ns=481019.0 p95_ns=488924.0 new_calls_mean=13069.0 requested_bytes_mean=618195.0 delete_calls_mean=13069.0
+eval_bound_functor_warm samples=21 min_ns=426334.0 median_ns=445581.0 p95_ns=488112.0 new_calls_mean=13070.0 requested_bytes_mean=622195.0 delete_calls_mean=13070.0
+native_link_visitor samples=21 min_ns=45316.0 median_ns=51228.0 p95_ns=51238.0 new_calls_mean=0.0 requested_bytes_mean=0.0 delete_calls_mean=0.0
+compile_identity_fresh_runtime samples=21 min_ns=1383.0 median_ns=1432.0 p95_ns=1573.0 new_calls_mean=13.0 requested_bytes_mean=954.0 delete_calls_mean=7.0
+compiled_identity count=1 checksum=4953164290808674201 execution=success (only_common_subset_measured)
+compiled_rank refused=whole-rank traversal is not compiled to Vortex yet; run the query with --engine direct
+compiled_functor refused=point-free path functors is not compiled to Vortex yet; run the query with --engine direct
+correctness=pass arena_growth=0
+

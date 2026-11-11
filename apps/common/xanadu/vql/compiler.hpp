@@ -111,6 +111,11 @@ public:
   [[nodiscard]] static std::string_view
   opcodeMnemonic(zigzag::vortex::OpcodeKind kind) noexcept;
 
+  /// Throws the explicit refusal for a semantic builtin (project, apply_shape,
+  /// any, all, none, one, optional_one, first, same_cell) that has no Vortex
+  /// graph lowering yet; returns normally for every other name.
+  static void refuseSemanticBuiltin(std::string_view name);
+
   /// Resolves a dimension name to its DimRef, minting if non-existent.
   zigzag::DimRef resolveDimension(std::string_view name);
 

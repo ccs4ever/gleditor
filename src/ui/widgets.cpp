@@ -7,6 +7,7 @@
 #include <limits>
 #include <optional>
 #include <stdexcept>
+#include <tuple>
 #include <unordered_set>
 
 namespace gleditor::ui {
@@ -51,6 +52,32 @@ std::size_t aligned(const std::string &text, std::size_t at) {
   while (!boundary(breaks, at)) --at;
   return at;
 }
+std::pair<std::size_t, std::size_t> lineRange(std::string_view text,
+                                              std::size_t at) {
+  at = std::min(at, text.size());
+  const auto newlineBefore =
+      at == 0 ? std::string_view::npos : text.rfind('\n', at - 1);
+  const auto begin =
+      newlineBefore == std::string_view::npos ? 0 : newlineBefore + 1;
+  const auto newlineAfter = text.find('\n', at);
+  return {begin,
+          newlineAfter == std::string_view::npos ? text.size() : newlineAfter};
+}
+std::size_t graphemeColumn(const std::string &text, std::size_t begin,
+                           std::size_t at) {
+  std::size_t result = 0;
+  for (auto offset = begin; offset < at; offset = next(text, offset)) ++result;
+  return result;
+}
+std::size_t lineOffsetAtColumn(const std::string &text, std::size_t begin,
+                               std::size_t end, std::size_t column) {
+  auto offset = begin;
+  while (offset < end && column > 0) {
+    offset = std::min(next(text, offset), end);
+    --column;
+  }
+  return offset;
+}
 bool validUtf8(std::string_view value) {
   std::size_t i = 0;
   while (i < value.size()) {
@@ -83,6 +110,24 @@ bool validUtf8(std::string_view value) {
       return false;
   }
   return true;
+}
+std::string maskedText(std::string_view value) {
+  constexpr std::string_view mask = "\xE2\x80\xA2";
+  std::string result;
+  for (const auto byte : value)
+    if ((static_cast<unsigned char>(byte) & 0xC0U) != 0x80U)
+      result.append(mask);
+  return result;
+}
+std::size_t maskedCaret(std::string_view value, std::size_t caret) {
+  caret = std::min(caret, value.size());
+  while (caret > 0 && caret < value.size() &&
+         (static_cast<unsigned char>(value[caret]) & 0xC0U) == 0x80U)
+    --caret;
+  std::size_t count = 0;
+  for (std::size_t i = 0; i < caret; ++i)
+    if ((static_cast<unsigned char>(value[i]) & 0xC0U) != 0x80U) ++count;
+  return count * 3;
 }
 float caretPosition(const text::FittedText &fitted, const std::string &source,
                     std::size_t caret) {
@@ -187,35 +232,97 @@ bool Stepper::change(int direction) {
 void TextField::insert(std::string_view text) {
   if (!validUtf8(value) || !validUtf8(text))
     throw std::invalid_argument("Text input must be UTF-8");
+  if (sensitive && (text.find('\n') != std::string_view::npos ||
+                    text.find('\r') != std::string_view::npos))
+    throw std::invalid_argument(
+        "Sensitive text fields cannot contain a newline");
   caret = aligned(value, caret);
   value.insert(caret, text);
   caret += text.size();
+  preferredColumn.reset();
+  visualLineStarts.clear();
+  visualLineEnds.clear();
 }
-bool TextField::key(Key key, KeyMods) {
+bool TextField::key(Key key, KeyMods mods) {
   if (!validUtf8(value))
     throw std::invalid_argument("Text input must be UTF-8");
-  caret = aligned(value, caret);
+  if (sensitive && multiline)
+    throw std::invalid_argument("Sensitive text fields must be single-line");
+  caret                     = aligned(value, caret);
+  auto [lineBegin, lineEnd] = lineRange(value, caret);
+  std::optional<std::size_t> visualLine;
+  if (multiline && visualLineStarts.size() == visualLineEnds.size()) {
+    for (std::size_t i = 0; i < visualLineStarts.size(); ++i) {
+      if (caret >= visualLineStarts[i] && caret <= visualLineEnds[i]) {
+        visualLine = i;
+        lineBegin  = visualLineStarts[i];
+        lineEnd    = visualLineEnds[i];
+        if (caret == lineEnd && i + 1 < visualLineStarts.size() &&
+            visualLineStarts[i + 1] == caret)
+          continue;
+        break;
+      }
+    }
+  }
   switch (key) {
   case Key::Left:
     caret = previous(value, caret);
+    preferredColumn.reset();
     return true;
   case Key::Right:
     caret = next(value, caret);
+    preferredColumn.reset();
     return true;
   case Key::Home:
-    caret = 0;
+    caret = multiline && !held(mods, KeyMods::Ctrl) ? lineBegin : 0;
+    preferredColumn.reset();
     return true;
   case Key::End:
-    caret = value.size();
+    caret = multiline && !held(mods, KeyMods::Ctrl) ? lineEnd : value.size();
+    preferredColumn.reset();
     return true;
+  case Key::Return:
+    if (!multiline || sensitive) return false;
+    insert("\n");
+    return true;
+  case Key::Up:
+  case Key::Down: {
+    if (!multiline) return false;
+    const auto column =
+        preferredColumn.value_or(graphemeColumn(value, lineBegin, caret));
+    auto targetBegin = lineBegin;
+    auto targetEnd   = lineEnd;
+    if (visualLine) {
+      const auto target =
+          key == Key::Up
+              ? (*visualLine == 0 ? 0 : *visualLine - 1)
+              : std::min(*visualLine + 1, visualLineStarts.size() - 1);
+      targetBegin = visualLineStarts[target];
+      targetEnd   = visualLineEnds[target];
+    } else if (key == Key::Up) {
+      if (lineBegin > 0)
+        std::tie(targetBegin, targetEnd) = lineRange(value, lineBegin - 1);
+    } else if (lineEnd < value.size()) {
+      std::tie(targetBegin, targetEnd) = lineRange(value, lineEnd + 1);
+    }
+    caret           = lineOffsetAtColumn(value, targetBegin, targetEnd, column);
+    preferredColumn = column;
+    return true;
+  }
   case Key::Backspace: {
     const auto from = previous(value, caret);
     value.erase(from, caret - from);
     caret = from;
+    preferredColumn.reset();
+    visualLineStarts.clear();
+    visualLineEnds.clear();
     return true;
   }
   case Key::Delete:
     value.erase(caret, next(value, caret) - caret);
+    preferredColumn.reset();
+    visualLineStarts.clear();
+    visualLineEnds.clear();
     return true;
   default:
     return false;
@@ -289,7 +396,8 @@ class WidgetBuilder {
 public:
   WidgetBuilder(const Widget &root, const UiMetrics &metrics,
                 const Theme &theme, text::ShapingCache &cache)
-      : metrics_(metrics), theme_(theme), cache_(cache) {
+      : metrics_(metrics), theme_(theme), cache_(cache),
+        preserveReadableControls_(root.preserveReadableControls) {
     collect(root);
   }
   WidgetScene build(const Widget &root, Rect bounds) {
@@ -328,6 +436,7 @@ private:
   const UiMetrics &metrics_;
   const Theme &theme_;
   text::ShapingCache &cache_;
+  bool preserveReadableControls_{};
   WidgetScene scene_;
   std::unordered_set<WidgetId> ids_;
   WidgetId largest_{};
@@ -384,8 +493,15 @@ private:
   Size natural(const Widget &w, float width) {
     const auto p = pad(w.fontRole);
     Size size{width, line(w.fontRole) + p * 2};
-    if (const auto *label = std::get_if<Label>(&w.model)) {
+    if (const auto *input = std::get_if<TextField>(&w.model)) {
+      if (input->multiline && !input->sensitive)
+        size.height = line(w.fontRole) * w.maxLines + p * 2;
+    } else if (const auto *label = std::get_if<Label>(&w.model)) {
       size = measure(label->text, w.fontRole);
+      // Ink bounds can be shorter than the line accepted by the next fit,
+      // especially after pixel rounding at fractional display scales.
+      if (preserveReadableControls_)
+        size.height = std::max(size.height, std::ceil(line(w.fontRole)));
       if (label->purpose == TextPurpose::Title)
         size.height = line(FontRole::Title) * 2;
       if (label->purpose == TextPurpose::Description)
@@ -410,6 +526,10 @@ private:
           line(FontRole::Title) * 2 + line(FontRole::Body) * w.maxLines + 3 * p;
     else if (std::holds_alternative<Tooltip>(w.model))
       size.height = line(FontRole::Caption) * w.maxLines + 2 * p;
+    else if (std::holds_alternative<Tabs>(w.model))
+      // Both the group and each tab have padding around the label.
+      size.height =
+          std::max(touch(), std::ceil(line(w.fontRole)) + p * 2) + p * 2;
     else if (const auto *list = std::get_if<List>(&w.model))
       size.height = std::min(static_cast<float>(list->rows.size()),
                              static_cast<float>(w.maxLines)) *
@@ -423,13 +543,20 @@ private:
         size.height = std::max(
             size.height, metrics_.px(bounds.bottom + bounds.height) + 2 * p);
     } else if (container(w)) {
+      const auto flowWidth =
+          std::holds_alternative<ButtonFlow>(w.model) && w.preferred.width > 0
+              ? std::min(width, metrics_.px(w.preferred.width))
+              : width;
+      const auto flowContentWidth =
+          std::floor(std::max(0.0F, flowWidth - 2 * p));
       size.height    = p * 2;
       float rowWidth = 0, rowHeight = 0;
       for (const auto &child : w.children) {
-        const auto childSize = natural(child, std::max(0.0F, width - p * 2));
+        const auto childSize =
+            natural(child, std::max(0.0F, flowWidth - p * 2));
         if (std::holds_alternative<ButtonFlow>(w.model)) {
           if (rowWidth > 0 &&
-              rowWidth + gap() + childSize.width > width - p * 2) {
+              rowWidth + gap() + childSize.width > flowContentWidth) {
             size.height += rowHeight + gap();
             rowWidth  = 0;
             rowHeight = 0;
@@ -581,27 +708,83 @@ private:
     else if (const auto *input = std::get_if<TextField>(&w.model)) {
       if (!validUtf8(input->value))
         throw std::invalid_argument("Text field must contain UTF-8");
+      if (input->sensitive && input->multiline)
+        throw std::invalid_argument(
+            "Sensitive text fields must be single-line");
+      const auto shownValue =
+          input->sensitive ? maskedText(input->value) : input->value;
       visual(w, geometry,
-             input->value.empty() ? input->placeholder : input->value,
-             TextPurpose::Label, a11y::Role::TextInput, true, input->action);
-      auto &item           = scene_.visuals.back();
+             input->multiline       ? std::string{}
+             : input->value.empty() ? input->placeholder
+                                    : shownValue,
+             TextPurpose::Label,
+             input->sensitive ? a11y::Role::PasswordInput
+                              : a11y::Role::TextInput,
+             true, input->action);
+      auto &item = scene_.visuals.back();
+      if (input->multiline)
+        item.text = input->value.empty() ? input->placeholder : shownValue;
       item.textInput       = true;
-      item.value           = input->value;
+      item.value           = input->sensitive ? shownValue : input->value;
       item.accessibleLabel = input->placeholder;
       const auto source =
-          input->value.empty() ? input->placeholder : input->value;
-      item.fitted = cache_.fitted(
-          source, item.font, text::TextFit{.overflow = text::Overflow::Clip});
+          input->value.empty() ? input->placeholder : shownValue;
+      if (input->multiline) {
+        item.fitted = cache_.fitted(
+            source, item.font,
+            text::TextFit{.maxWidthPx  = geometry.contentRect.width,
+                          .maxHeightPx = std::nullopt,
+                          .maxLines    = std::nullopt,
+                          .overflow    = text::Overflow::Wrap});
+      } else {
+        item.fitted = cache_.fitted(
+            source, item.font, text::TextFit{.overflow = text::Overflow::Clip});
+      }
       const auto caret  = aligned(input->value, input->caret);
-      const auto prefix = caretPosition(item.fitted, input->value, caret);
-      const auto maxScroll =
-          std::max(0.0F, item.fitted.widthPx - geometry.contentRect.width);
-      item.textOffsetPx = std::clamp(input->scrollPx, 0.0F, maxScroll);
-      if (prefix < item.textOffsetPx) item.textOffsetPx = prefix;
-      if (prefix > item.textOffsetPx + geometry.contentRect.width)
-        item.textOffsetPx = prefix - geometry.contentRect.width;
-      item.caretOffsetPx = std::clamp(prefix - item.textOffsetPx, 0.0F,
-                                      geometry.contentRect.width);
+      const auto prefix = caretPosition(
+          item.fitted, input->sensitive ? shownValue : input->value,
+          input->sensitive ? maskedCaret(input->value, caret) : caret);
+      if (input->multiline) {
+        item.multilineTextInput = true;
+        const auto &lines       = item.fitted.shaping.lines;
+        const auto lineEntry =
+            std::ranges::find_if(lines, [&](const auto &entry) {
+              const auto begin = static_cast<std::size_t>(entry.byteStart);
+              const auto end   = begin + entry.byteLength;
+              return caret >= begin && caret <= end;
+            });
+        const auto lineTop = lineEntry == lines.end() ? 0.0F : lineEntry->top;
+        const auto lineHeight = lineEntry == lines.end()
+                                    ? item.font->metrics().lineHeight
+                                    : lineEntry->barHeight;
+        const auto maxScroll =
+            std::max(0.0F, item.fitted.heightPx - geometry.contentRect.height);
+        auto scroll = std::clamp(input->verticalScrollPx, 0.0F, maxScroll);
+        if (input->followCaret) {
+          if (lineTop < scroll) scroll = lineTop;
+          if (lineTop + lineHeight > scroll + geometry.contentRect.height)
+            scroll = lineTop + lineHeight - geometry.contentRect.height;
+        }
+        item.verticalTextOffsetPx = std::clamp(scroll, 0.0F, maxScroll);
+        item.caretOffsetPx =
+            std::clamp(prefix, 0.0F, geometry.contentRect.width);
+        if (lineTop >= item.verticalTextOffsetPx &&
+            lineTop + lineHeight <=
+                item.verticalTextOffsetPx + geometry.contentRect.height)
+          item.caretOffsetYPx = geometry.contentRect.height - lineTop -
+                                lineHeight - item.verticalTextOffsetPx;
+        item.caretHeightPx = std::min(lineHeight, geometry.contentRect.height);
+      } else {
+        const auto maxScroll =
+            std::max(0.0F, item.fitted.widthPx - geometry.contentRect.width);
+        item.textOffsetPx = std::clamp(input->scrollPx, 0.0F, maxScroll);
+        if (prefix < item.textOffsetPx) item.textOffsetPx = prefix;
+        if (prefix > item.textOffsetPx + geometry.contentRect.width)
+          item.textOffsetPx = prefix - geometry.contentRect.width;
+        item.caretOffsetPx = std::clamp(prefix - item.textOffsetPx, 0.0F,
+                                        geometry.contentRect.width);
+        item.caretHeightPx = geometry.contentRect.height;
+      }
     } else if (const auto *control = std::get_if<Scrubber>(&w.model)) {
       visual(w, geometry, control->label, TextPurpose::Label, a11y::Role::Group,
              true, control->action);
@@ -660,7 +843,7 @@ private:
       for (const auto &tab : tabs->tabs) {
         auto size = measure(tab.text, w.fontRole);
         size.width += 2 * p;
-        size.height = touch();
+        size.height = std::max(touch(), std::ceil(line(w.fontRole)) + p * 2);
         items.push_back({.id        = tab.id,
                          .intrinsic = size,
                          .grow      = 1,
@@ -780,12 +963,32 @@ private:
         titleId = generated();
         items.push_back({.id        = titleId,
                          .intrinsic = {geometry.contentRect.width,
-                                       line(FontRole::Title) * 2}});
+                                       line(FontRole::Title) * 2},
+                         .minimum   = {0, preserveReadableControls_
+                                              ? std::ceil(line(FontRole::Title))
+                                              : 0.0F}});
       }
-      for (const auto &child : w.children)
-        items.push_back(
-            {.id        = child.id,
-             .intrinsic = natural(child, geometry.contentRect.width)});
+      for (const auto &child : w.children) {
+        const auto intrinsic = natural(child, geometry.contentRect.width);
+        // Scrollable content can give up space before controls lose their
+        // labels. Description labels may wrap to fewer lines under pressure.
+        auto minimumHeight =
+            std::holds_alternative<Button>(child.model) ||
+                    std::holds_alternative<TextField>(child.model) ||
+                    std::holds_alternative<ButtonFlow>(child.model) ||
+                    std::holds_alternative<Tabs>(child.model)
+                ? intrinsic.height
+            : std::holds_alternative<Label>(child.model)
+                ? std::ceil(line(child.fontRole))
+                : 0.0F;
+        if (const auto *list = std::get_if<List>(&child.model);
+            list && !list->rows.empty())
+          minimumHeight = std::min(intrinsic.height, rowHeight(child, *list));
+        if (!preserveReadableControls_) minimumHeight = 0;
+        items.push_back({.id        = child.id,
+                         .intrinsic = intrinsic,
+                         .minimum   = {0, minimumHeight}});
+      }
       auto placed =
           std::holds_alternative<ButtonFlow>(w.model)
               ? flow(geometry.contentRect, items,

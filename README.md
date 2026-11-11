@@ -18,7 +18,7 @@ decisions; [AGENTS.md](AGENTS.md) is the contributor runbook.
 | `build/vquery`, `build/vqueryc` | VQL query runner/REPL and standalone compiler.                                 |
 | `build/vpl`, `build/vplc`       | VPL array-language runner/REPL and compiler.                                   |
 | `build/vprolog`                 | Prolog REPL over the Vortex/Vlog logic runtime.                                |
-| `build/vagent`                  | vagent source-checking frontend; compiler and actor runtime are in progress.   |
+| `build/vagent`                  | vagent agent-language checker and single-node runner.                          |
 | `build/store-dump`              | Inspect a store or `ops.nodes` directly, including one the loader refuses.     |
 | `build/xudu-swarm-peer`         | Peer used by the network-namespace swarm tests.                                |
 
@@ -45,12 +45,17 @@ investigating missing headers under `thirdparty/`. Those directories are git sub
 pointer rather than their contents.
 
 The build needs a C++23 compiler, Make, pkg-config, FreeType, HarfBuzz, libunibreak, FriBidi,
-Fontconfig, GLM, spdlog, SDL2 or SDL3, libtorrent-rasterbar, OpenSSL, LMDB, and the OpenGL headers.
-GoogleTest and GoogleMock are needed for tests. Vulkan and `glslangValidator` are used when
-available; AccessKit is optional unless explicitly required. `gnupg` is needed at run time for
-signed publication. For Ubuntu, the
+Fontconfig, GLM, spdlog, SDL2 or SDL3, libtorrent-rasterbar, OpenSSL, LMDB, SQLite, libcurl, and the
+OpenGL headers. GoogleTest and GoogleMock are needed for tests. Vulkan and `glslangValidator` are
+used when available; AccessKit is optional unless explicitly required. Mail evidence (IMAP capture,
+MIME parsing, draft serialization) wants LibEtPan and GMime 3 and probes for them at configure time;
+without them those adapters compile refusing stubs and the rest of the tree builds normally.
+`GLEDITOR_MAIL=1` makes them required, `GLEDITOR_MAIL=0` skips the probes entirely. `gnupg` is
+needed at run time for signed publication. For Ubuntu, the
 [CI build job's apt package list](.github/workflows/c-cpp.yml#L134) is a tested Linux dependency
-set; other distributions use their equivalent library and tool packages.
+set; other distributions use their equivalent library and tool packages. Native external-source
+adapters require libcurl with asynchronous DNS support; an unsupported resolver is refused
+explicitly.
 
 ```sh
 make -j$(nproc) lib       # shared library
@@ -78,16 +83,22 @@ example `./build/xuzz --lens docs --raster`. The query and language tools also o
 headless execution.
 
 The [vagent user guide](docs/vagent-user-guide.md) introduces its typed agent language and explains
-which commands are implemented. The current frontend can be built and checked with:
+which commands are implemented. Build, check, and run a program with:
 
 ```sh
 make -j$(nproc) vagent vagent_frontend_test
 make -j$(nproc) test/vagent-frontend
 ./build/vagent check tests/samples/vagent/mini_01.vagent
+./build/vagent run tests/samples/vagent/mini_01.vagent \
+  --send 'Add{amount: 3}' --send 'Add{amount: 2}'
 ```
 
-Source checking does not execute an agent. Vortex lowering, the actor adapter, `run`, and the REPL
-remain tracked work in the [implementation progress](design/vagent-implementation.md).
+`run` lowers the program, seeds its image into a fresh local lineage, and drives the agent on a
+single-node `MeshActorRuntime` until quiescence. Remote deliveries ride the adapter's wire arm —
+member-addressed sends render `Name{f: v}` onto `ActorSend`, the runner's loopback turns them into
+real mailbox deliveries — while remote spawn requests and multi-node transport between two
+runtimes stay undispatched integration work. The REPL and network execution remain tracked work in
+the [implementation progress](design/vagent-implementation.md).
 
 ## Library and rendering
 
@@ -109,6 +120,17 @@ The [Xanadu and Xuzz reference](docs/xanadu.md) describes the store formats, hyp
 and link identities, publishing and reader layers, system configuration, and language runtimes. See
 its [disposable-store and backup steps](docs/xanadu.md#create-and-back-up-a-disposable-store) to
 seed, reopen, and back up a scratch store with its permascroll.
+
+VQL has a direct evaluator and a restricted Vortex compiler. The
+[VQL conformance matrix](design/vql-conformance.md) lists supported engine subsets and links the
+executable corpus. Unsupported compiled semantics fail explicitly. The
+[VQL performance spike](design/vql-performance-spike.md), built with
+`make -j$(nproc) vql-spike vql-spike-abi`, measures real traversal/allocation costs and records ABI
+evidence separately from proposed runtime layouts.
+
+The [private evidence case guide](design/vql-evidence-case.md) covers read-only SQLite and REST
+capture, retained field and span annotations, offline reopen, refresh comparison and selected local
+export. Open the Xuzz panel with Ctrl+Alt+Shift+E or use `:evidence help` in the `vquery` REPL.
 
 ## ZigZag and Xuzz presentation
 

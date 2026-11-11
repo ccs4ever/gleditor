@@ -377,7 +377,23 @@ std::expected<std::vector<Token>, Diagnostic> Lexer::tokenize() {
       continue;
     }
     if (identifierStart(c)) {
-      result.push_back(identifier());
+      auto word = identifier();
+      if (peek() == '"' && word.kind == TokenKind::Identifier) {
+        // cells"…" embeds a VQL cells path; the prefix is text before the
+        // quote and the parser validates it. A keyword never prefixes.
+        auto quoted = string();
+        if (!quoted) return std::unexpected(quoted.error());
+        Token merged{
+            .kind        = TokenKind::PrefixedStringLiteral,
+            .text        = source_.substr(word.loc.offset, quoted->loc.offset +
+                                                               quoted->text.size() -
+                                                               word.loc.offset),
+            .stringValue = std::move(quoted->stringValue),
+            .loc         = word.loc};
+        result.push_back(std::move(merged));
+        continue;
+      }
+      result.push_back(std::move(word));
       continue;
     }
     auto next = isDigit(c, 10) ? number() : c == '"' ? string() : punctuation();

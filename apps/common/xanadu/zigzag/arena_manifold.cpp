@@ -2601,7 +2601,8 @@ ArenaResult ArenaManifold::compact() {
 std::optional<Promoted> promote(xanadu::Store &store,
                                 const xanadu::MicroversionId &parent,
                                 const ArenaManifold &from, const CellRef root,
-                                const PromotionBudget budget) {
+                                const PromotionBudget budget,
+                                const std::span<const CellRef> extraRoots) {
   if (!from.contains(root) || from.isProvenanceCell(root)) {
     return std::nullopt;
   }
@@ -2613,6 +2614,18 @@ std::optional<Promoted> promote(xanadu::Store &store,
   std::vector<CellRef> frontier{root};
   std::unordered_set<CellRef> seen{root};
   std::unordered_set<CellRef> queued{root};
+  // extraRoots seed the walk with cells the caller knows hold writes the
+  // root walk cannot reach — a shadowed base cell behind an unshadowed
+  // one. Only held cells qualify: expanding an unshadowed base would
+  // recurse into the document the terminal condition exists to avoid.
+  for (const CellRef extra : extraRoots) {
+    if (!from.contains(extra) || from.isProvenanceCell(extra) ||
+        !from.holdsOwn(extra)) {
+      continue;
+    }
+    if (seen.insert(extra).second) order.push_back(extra);
+    if (queued.insert(extra).second) frontier.push_back(extra);
+  }
   for (std::size_t i = 0; i < frontier.size(); i++) {
     const CellRef current = frontier[i];
     // A base cell only read through the overlay is an existing endpoint, not
@@ -2719,6 +2732,27 @@ std::optional<Promoted> promote(xanadu::Store &store,
             })) {
       return std::nullopt;
     }
+  }
+
+  // Cross-store guard (delta-completeness §4.5): when a caller opts into
+  // committing shadowed-cell diffs, a base store that differs from the
+  // destination is a wrong-cell write -- setLink resolves refs in the
+  // destination index space, so an identity-mapped persistent ref would graft
+  // onto an unrelated cell. Refuse outright: a refusal writes nothing. The
+  // non-opted-in additive path carries the same latent hazard for re-points
+  // today; rather than change those callers (export*ToStore relies on it) we
+  // warn and stay bit-identical. mesh_jobs is exempt: there base==dest.
+  if (nullptr != from.base() && nullptr != from.base()->store() &&
+      from.base()->store() != &store) {
+    if (budget.commitShadowed) {
+      GLEDITOR_LOG_WARN("zigzag.arena",
+                        "promote: refusing -- base manifold's store differs "
+                        "from the destination store");
+      return std::nullopt;
+    }
+    GLEDITOR_LOG_WARN("zigzag.arena",
+                      "promote: base store != destination (latent wrong-cell "
+                      "hazard for repoints)");
   }
 
   // Nothing is written until the walk has finished and the budget has held, so
@@ -2871,8 +2905,12 @@ std::optional<Promoted> promote(xanadu::Store &store,
     }
   }
   out.cells.clear();
+  out.arena.clear();
   for (const auto cell : order) {
-    if (isEphemeral(cell)) out.cells.push_back(real.at(cell));
+    if (isEphemeral(cell)) {
+      out.arena.push_back(cell);
+      out.cells.push_back(real.at(cell));
+    }
   }
 
   // Links last: both ends have to exist, and every ref is translated rather
@@ -2889,25 +2927,52 @@ std::optional<Promoted> promote(xanadu::Store &store,
     if (!from.holdsOwn(arena) || from.isProxy(arena)) {
       continue;
     }
+    // Per-cell emission policy. Only persistent shadowed cells (an owned slot
+    // under a non-ephemeral name) consult commitShadowed -- mints, proxies and
+    // untouched base fall-throughs stay additive. Suppress wins outright.
+    const bool persistentShadow = !isEphemeral(arena);
+    const ShadowCommit policy   = persistentShadow && budget.commitShadowed
+                                      ? (*budget.commitShadowed)(arena)
+                                      : ShadowCommit::Additive;
+    if (policyHas(policy, ShadowCommit::Suppress)) {
+      continue;
+    }
+    const bool mayClear = policyHas(policy, ShadowCommit::Clears);
     for (const auto &edge : from.dimensionsOf(arena)) {
-      // Only the posward side: the negward one is the same edge read from the
-      // other end, and setLink() maintains both.
-      if (noCell == edge.pos) {
+      // Net-state diff against the base: emit only edges whose posward target
+      // changed. A shadow is a whole-cell copy, so shadow-vs-base is complete.
+      // For a persistent shadow the base lookup sees the original edge; for a
+      // minted/ephemeral cell (or a base-less arena) there is no base edge.
+      const CellRef basePos =
+          persistentShadow && nullptr != from.base()
+              ? from.base()
+                    ->linked(arena, edge.dim, DimVector::POS)
+                    .value_or(noCell)
+              : noCell;
+      if (edge.pos == basePos) {
+        continue; // unchanged -- the additive dedup case
+      }
+      // A changed edge: add/repoint always (unless Suppress, handled above);
+      // a dropped edge (pos == noCell) emits a durable clear only under Clears.
+      const bool isClear = (noCell == edge.pos);
+      if (isClear && !mayClear) {
         continue;
       }
       const auto dim = real.find(edge.dim);
-      const auto to  = real.find(edge.pos);
-      if (dim == real.end() || to == real.end()) {
+      if (dim == real.end()) {
         continue;
       }
-      if (nullptr != from.base() && !isEphemeral(arena) &&
-          !isEphemeral(edge.dim) && !isEphemeral(edge.pos)) {
-        if (from.base()->linked(arena, edge.dim, DimVector::POS) == edge.pos) {
+      if (isClear) {
+        out.version = store.setLink(out.version, real.at(arena), dim->second,
+                                    false, std::nullopt);
+      } else {
+        const auto to = real.find(edge.pos);
+        if (to == real.end()) {
           continue;
         }
+        out.version = store.setLink(out.version, real.at(arena), dim->second,
+                                    false, to->second);
       }
-      out.version = store.setLink(out.version, real.at(arena), dim->second,
-                                  false, to->second);
       // The next setLink reads `known`, so a link it failed to fold would
       // make every later one validate against a stale view.
       if (const auto stepped = known.advance(store, out.version); !stepped) {

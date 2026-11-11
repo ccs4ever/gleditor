@@ -151,6 +151,7 @@ protected:
                             fresh ? checkpointHash : "initial-counter-base",
                             100000,
                             10000,
+                            0,
                             32768,
                             100,
                             65536,
@@ -165,7 +166,7 @@ protected:
         [this, target = &runtime](
             const ActorExecution &execution,
             WorkerContext &context) -> std::expected<std::string, ActorError> {
-          if (execution.message.value != "increment")
+          if (!execution.message || execution.message->value != "increment")
             return std::unexpected(ActorError::InvalidMessage);
           ++executions;
           CellRef root;

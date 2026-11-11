@@ -243,6 +243,7 @@ std::vector<CellRef> VQLCompiler::compileSelector(const PathStep &step,
         nextStream.insert(nextStream.end(), results.begin(), results.end());
       }
     } else {
+      refuseSemanticBuiltin(fn.name);
       throw std::invalid_argument("VQL path function '" + fn.name +
                                   "' is not compiled to Vortex yet");
     }

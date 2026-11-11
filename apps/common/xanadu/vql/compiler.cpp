@@ -6,6 +6,8 @@
 #include "common/xanadu/vortex/assembly_transaction.hpp"
 #include "common/xanadu/vql/invocation.hpp"
 
+#include <algorithm>
+#include <array>
 #include <cstdio>
 #include <iomanip>
 #include <limits>
@@ -30,6 +32,15 @@ using zigzag::DimRef;
 using zigzag::DimVector;
 using zigzag::vortex::CellValue;
 using zigzag::vortex::OpcodeKind;
+
+void VQLCompiler::refuseSemanticBuiltin(const std::string_view name) {
+  static constexpr std::array<std::string_view, 9> semanticBuiltins{
+      "project", "apply_shape",  "any",   "all",      "none",
+      "one",     "optional_one", "first", "same_cell"};
+  if (std::ranges::find(semanticBuiltins, name) != semanticBuiltins.end())
+    throw std::invalid_argument("VQL semantic builtin '" + std::string(name) +
+                                "' is not compiled to Vortex yet");
+}
 
 std::string_view
 VQLCompiler::opcodeMnemonic(zigzag::vortex::OpcodeKind kind) noexcept {
@@ -68,6 +79,8 @@ VQLCompiler::opcodeMnemonic(zigzag::vortex::OpcodeKind kind) noexcept {
     return "NOT";
   case OpcodeKind::Link:
     return "LINK";
+  case OpcodeKind::Linked:
+    return "LINKED";
   case OpcodeKind::Break:
     return "BREAK";
   case OpcodeKind::New:
@@ -704,8 +717,9 @@ std::optional<CellRef> VQLCompiler::compileAnchor(const AnchorNode &anchor) {
     break;
   }
   case AnchorKind::LiteralCellId:
-    if (anchor.cellId > std::numeric_limits<CellRef>::max()) {
-      return std::nullopt;
+    if (anchor.cellId == 0 ||
+        anchor.cellId > std::numeric_limits<CellRef>::max()) {
+      throw std::invalid_argument("literal cell anchor is invalid");
     }
     res = static_cast<CellRef>(anchor.cellId);
     if (!core_.arena().contains(res)) return std::nullopt;

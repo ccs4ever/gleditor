@@ -39,6 +39,7 @@
 #include "cli.hpp"
 #include "view_coordinator.hpp"
 
+#include "common/ui/evidence/evidence_case_panel.hpp"
 #include "common/ui/lens_file_picker.hpp"
 #include "common/ui/quotation_builder_overlay.hpp"
 #include "common/ui/store_object_manager.hpp"
@@ -1236,6 +1237,8 @@ int XuzzApp::run(const int argc, char **argv) {
         return false;
       });
 
+  xanadu::evidence::EvidenceCasePanel evidenceCasePanel(userPermascroll);
+
   docSwitcher->setCloseHandler([&views](const std::uint32_t docIndex) {
     views.closeDocument(docIndex);
   });
@@ -2039,6 +2042,7 @@ int XuzzApp::run(const int argc, char **argv) {
   renderer->addFrameContributor(&swarmTelescope);
   renderer->addFrameContributor(&quotationOverlay);
   renderer->addFrameContributor(&storeObjectManager);
+  renderer->addFrameContributor(&evidenceCasePanel);
   renderer->addFrameContributor(&convergenceOverlay);
   renderer->addPickObserver(&convergenceOverlay);
   renderer->addSpanDecorator(&convergenceOverlay);
@@ -2060,6 +2064,7 @@ int XuzzApp::run(const int argc, char **argv) {
   state->accessibility->addSource(radialMenu.get());
   state->accessibility->addSource(&pouchDrawer);
   state->accessibility->addSource(&storeObjectManager);
+  state->accessibility->addSource(&evidenceCasePanel);
   state->accessibility->addSource(&swarmTelescope);
   state->accessibility->addSource(&convergenceOverlay);
   state->accessibility->setToolkit("xuzz", TOSTRING(GLEDITOR_VERSION));
@@ -2314,7 +2319,7 @@ int XuzzApp::run(const int argc, char **argv) {
        std::initializer_list<gleditor::ui::FocusScope *>{
            zigzagPresentation.get(), &swarmTelescope, &publishForm,
            &quotationOverlay, &storeObjectManager, &pouchDrawer, &map,
-           radialMenu.get()}) {
+           radialMenu.get(), &evidenceCasePanel}) {
     modalScopes.push_back(state->focusManager.registerScope(
         *scope, {.allowedCommands = {"quit", "std:xuzz/quit"}}));
   }
@@ -2327,6 +2332,7 @@ int XuzzApp::run(const int argc, char **argv) {
   renderer->addPickObserver(&swarmTelescope);
   renderer->addPickObserver(&quotationOverlay);
   renderer->addPickObserver(&storeObjectManager);
+  renderer->addPickObserver(&evidenceCasePanel);
 
   state->pressOnSelection = [&kineticTetherEngine, &session, renderer,
                              state](const std::uint32_t docIdx,
@@ -3400,6 +3406,9 @@ int XuzzApp::run(const int argc, char **argv) {
   app.commands().registerAction(
       "store-manager-toggle", "toggle store object manager drawer",
       [&storeObjectManager] { storeObjectManager.toggle(); });
+  app.commands().registerAction(
+      "evidence-case-toggle", "toggle evidence case panel",
+      [&evidenceCasePanel] { evidenceCasePanel.toggle(); });
   app.commands().registerAction("physics-toggle",
                                 "toggle 3-way tension spring layout physics",
                                 [&links] { links.togglePhysics(); });
@@ -4182,10 +4191,11 @@ int XuzzApp::run(const int argc, char **argv) {
   // 8. System Store Change Watcher Callback
   session->setSystemDocChangedCallback(
       [&app, radialMenu, docSwitcher, &pouchDrawer, &links, &map, &linkPanel,
-       &views, &overview, &storeObjectManager, &quotationOverlay,
-       &swarmTelescope, &satelloidOverlay, &kineticTetherOverlay,
-       &wireframeHullOverlay, readablePx, &session, zigzagPresentation,
-       &bridgeCoordinator, &showKeyHints, state, applyTypography,
+       &views, &overview, &storeObjectManager, &evidenceCasePanel,
+       &quotationOverlay, &swarmTelescope, &satelloidOverlay,
+       &kineticTetherOverlay, &wireframeHullOverlay, readablePx, &session,
+       zigzagPresentation, &bridgeCoordinator, &showKeyHints, state,
+       applyTypography,
        &opts](const xanadu::SystemDocKind kind, const xanadu::Store &store) {
         std::cout << "xuzz: system doc updated (" << xanadu::systemDocUri(kind)
                   << ")\n";
@@ -4239,6 +4249,7 @@ int XuzzApp::run(const int argc, char **argv) {
           overview.setConfig(uiCfg.overview);
           pouchDrawer.setConfig(uiCfg.pouchPanel);
           storeObjectManager.setConfig(uiCfg.storePanel);
+          evidenceCasePanel.setPresentationConfig(uiCfg.evidenceModal);
           satelloidOverlay.setConfig(uiCfg.satelloidCard);
           kineticTetherOverlay.setConfig(uiCfg.tetherCard);
           kineticTetherOverlay.setTetherConfig(uiCfg.tether);
@@ -4284,6 +4295,7 @@ int XuzzApp::run(const int argc, char **argv) {
       overview.setConfig(uiCfg.overview);
       pouchDrawer.setConfig(uiCfg.pouchPanel);
       storeObjectManager.setConfig(uiCfg.storePanel);
+      evidenceCasePanel.setPresentationConfig(uiCfg.evidenceModal);
       satelloidOverlay.setConfig(uiCfg.satelloidCard);
       kineticTetherOverlay.setConfig(uiCfg.tetherCard);
       kineticTetherOverlay.setTetherConfig(uiCfg.tether);

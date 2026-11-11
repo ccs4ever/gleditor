@@ -127,7 +127,7 @@ TEST(VQLLambdaStepTest, UserDefinedFunctionBlockBodyAndWeave) {
 
   const std::string script = R"(
     def weave annotate($c, $tag) := {
-      weave $c { +d.status => $tag };
+      weave apply_shape($c, {*, +d.status => $tag});
       return $c;
     };
     annotate(##/+d.items[1], "processed")

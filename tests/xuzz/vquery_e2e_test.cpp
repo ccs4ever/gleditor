@@ -104,11 +104,23 @@ TEST_F(VQueryE2ETest, DirectEvaluationBasic) {
 }
 
 TEST_F(VQueryE2ETest, OnTheFlyVortexCompilation) {
-  auto res =
-      runVQuery("-e \"##/d.1\" --engine vortex --dump-asm --format cells");
+  const auto res = runVQuery("-f tests/samples/vql/conformance/create_rank.vql "
+                             "--engine vortex --dump-asm --format text");
   EXPECT_EQ(res.exitCode, 0) << res.output;
   EXPECT_NE(res.output.find("#RANK_BEGIN"), std::string::npos);
+  EXPECT_NE(res.output.find("#MINT_CELL"), std::string::npos);
   EXPECT_NE(res.output.find("#HALT"), std::string::npos);
+  EXPECT_TRUE(res.output.ends_with("Alpha\nBeta\n")) << res.output;
+}
+
+TEST_F(VQueryE2ETest, VortexRefusesUnimplementedSemantics) {
+  const auto rank = runVQuery("-e '##/+d.items' --engine vortex");
+  EXPECT_EQ(rank.exitCode, 1) << rank.output;
+  EXPECT_NE(rank.output.find("whole-rank traversal"), std::string::npos);
+  EXPECT_NE(rank.output.find("--engine direct"), std::string::npos);
+  const auto source = runVQuery("-e 'topic(\"missing\")' --engine vortex");
+  EXPECT_EQ(source.exitCode, 1) << source.output;
+  EXPECT_NE(source.output.find("store generators"), std::string::npos);
 }
 
 TEST_F(VQueryE2ETest, AsciiVisualizationMode) {

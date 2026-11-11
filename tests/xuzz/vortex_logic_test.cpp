@@ -39,6 +39,27 @@ TEST(VortexLogicTest, GenesisMintsDClauseDimension) {
   EXPECT_EQ(h.core.arena().textOf(h.core.dims().clause), "d.clause");
 }
 
+TEST(VortexLogicTest, PruneCursorsUnlinksDeadTwins) {
+  LogicHarness h;
+  // §5.2: dead twins earlier incarnations left on home+d.cursors unlink,
+  // with the predecessor repair keeping the surviving cursor reachable.
+  const CellRef op = h.vm.mintOpcode(OpcodeKind::New);
+  const CellRef c1 = h.vm.spawnCursor(op, "one");
+  const CellRef c2 = h.vm.spawnCursor(op, "two");
+  const CellRef c3 = h.vm.spawnCursor(op, "three");
+  EXPECT_EQ(h.vm.activeCursors(), (std::vector<CellRef>{c1, c2, c3}));
+  h.vm.pruneCursors(c3);
+  EXPECT_EQ(h.vm.activeCursors(), (std::vector<CellRef>{c3}));
+  // Idempotent, and keeping a mid-rank cursor repairs both sides.
+  h.vm.pruneCursors(c3);
+  EXPECT_EQ(h.vm.activeCursors().size(), 1u);
+  const CellRef c4 = h.vm.spawnCursor(op, "four");
+  const CellRef c5 = h.vm.spawnCursor(op, "five");
+  EXPECT_EQ(h.vm.activeCursors(), (std::vector<CellRef>{c3, c4, c5}));
+  h.vm.pruneCursors(c4);
+  EXPECT_EQ(h.vm.activeCursors(), (std::vector<CellRef>{c4}));
+}
+
 TEST(VortexLogicTest, OpcodeUnifyAtomsAndScalarNumbers) {
   LogicHarness h;
 
@@ -152,7 +173,7 @@ TEST(VortexLogicTest, InvalidSerializedOpcodeKindsAreNotDecoded) {
   LogicHarness h;
   const auto negative = h.arena.makeScalarCell(std::int64_t{-1});
   const auto tooLarge = h.arena.makeScalarCell(
-      static_cast<std::int64_t>(OpcodeKind::CurrentTimestamp) + 1);
+      static_cast<std::int64_t>(OpcodeKind::RunResume) + 1);
 
   EXPECT_FALSE(h.vm.getOpcodeKind(negative));
   EXPECT_FALSE(h.vm.getOpcodeKind(tooLarge));
@@ -278,6 +299,34 @@ TEST(VortexLogicTest, AnonymousChoicePointRemainsBacktrackable) {
   ASSERT_EQ(h.vm.choiceDepth(), 1U);
   EXPECT_FALSE(h.vm.choiceStack().back().cursor);
   EXPECT_TRUE(h.vm.backtrack(std::nullopt));
+  EXPECT_EQ(h.vm.choiceDepth(), 0U);
+  EXPECT_EQ(h.arena.outstandingMarks(), 0U);
+}
+
+TEST(VortexLogicTest, BacktrackStopsAtForeignCursorChoicePoint) {
+  LogicHarness h;
+  const auto altOp = h.vm.mintOpcode(OpcodeKind::Halt);
+  const auto curA  = h.vm.spawnCursor(altOp, "a");
+  const auto curB  = h.vm.spawnCursor(altOp, "b");
+
+  h.vm.pushChoicePoint(curA, altOp); // A's own point, below
+  h.vm.pushChoicePoint(curB, altOp); // foreign point, on top
+  const auto marksBefore = h.arena.outstandingMarks();
+  ASSERT_EQ(marksBefore, 2U);
+  ASSERT_EQ(h.vm.choiceDepth(), 2U);
+
+  // A's backtrack must stop at B's point: not consumed, mark not leaked.
+  EXPECT_FALSE(h.vm.backtrack(curA));
+  EXPECT_EQ(h.vm.choiceDepth(), 2U);
+  EXPECT_EQ(h.arena.outstandingMarks(), marksBefore);
+
+  // B's own backtrack consumes it and releases its mark.
+  EXPECT_TRUE(h.vm.backtrack(curB));
+  EXPECT_EQ(h.vm.choiceDepth(), 1U);
+  EXPECT_EQ(h.arena.outstandingMarks(), 1U);
+
+  // A's point is then reachable and drains cleanly.
+  EXPECT_TRUE(h.vm.backtrack(curA));
   EXPECT_EQ(h.vm.choiceDepth(), 0U);
   EXPECT_EQ(h.arena.outstandingMarks(), 0U);
 }

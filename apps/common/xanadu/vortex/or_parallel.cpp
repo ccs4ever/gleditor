@@ -411,6 +411,11 @@ ExecutionResult OrParallelCoordinator::executeSparkOnWorker(
   }
   VortexVM workerVm{workerCore};
   if (bindProgramOpcodes) {
+    // Fresh-context binds happen here by contract: a worker VM's empty
+    // opcode map is what the caller's callback re-fills — vagent program
+    // images register through vm.registerProgramImage(imageRecord)
+    // (genesis (b) does the same inside runGenesis), never by scanning
+    // arbitrary values.
     bindProgramOpcodes(workerCore, workerVm);
   }
   workerVm.setCutCallback([&coordinator](std::string_view prefix) {

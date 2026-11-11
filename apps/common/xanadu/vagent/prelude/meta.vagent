@@ -1,0 +1,96 @@
+// std:meta — the runtime metaprogramming prelude
+// (design/vagent-metaprogramming.md §6.1, phase 3 of
+// design/vagent-metaprogramming-implementation.md).
+//
+// Skeleton in the std:agent prelude style: the surface is declared as a
+// signature-only capacity so the file parses today, while the adapter's
+// bind set — the twelve apparatus dims filed on the program's d.dims
+// rank, the validate constants as bound data cells, and the two non-dim
+// roots program()/agent_cell() — is what turns these names into live
+// routines (V10's mechanism: data-minted cells and dims, never C++
+// registration). Nothing links this yet.
+//
+// Two §6.1 rows have no surface spelling yet and stay in this comment:
+//   value_of(c: Cell) -> <any>      — the cell's rendered content;
+//                                     `<any>` is not a type name a
+//                                     source file may write.
+//   run(c: Code<T>, [args])         — a checker-level special form, not
+//                                     a member row: its second operand
+//                                     is the language's only
+//                                     heterogeneous argument list.
+//   reify(c: Code<T>) -> Code<T>    — likewise a special form: it
+//                                     returns the operand's own
+//                                     Code<T> identity.
+//
+// Phase 4 adds the mutation half. The graft verbs are session-only —
+// they link, unlink and re-point through the ordinary trailed writes,
+// so under live marks a release restores the pre-mutation graph (§6.4's
+// session arm); the under-execution/turn-boundary arm is the adapter's
+// deferral, not a refusal this surface can express. The learn_* verbs
+// are the same installs with a durable tail: a fresh head reified onto
+// the agent's d.code rank, a fresh installed copy at the attachment,
+// and a d.patch record carrying the minted patch:<n> label, the
+// recorded target/alias, and the patch-head chain of head names —
+// §6.1's "conditional on P16" flag means the *transport* of those
+// records is phase 6's seam, not that the machinery waits on it.
+module std:meta
+
+capacity Meta {
+  // The roots the adapter binds.
+  def program(): Cell
+  def agent_cell(): Cell
+
+  // The reflect family — pure reads over program structure.
+  // `symbol_named`/`plan_named` split the first `:` only when the
+  // qualifier resolves as a module; `code_named` treats its label as
+  // opaque (`demo:Forager.f` never becomes `code_named("f")` on `demo`).
+  def module_named(path: Str): Opt<Cell>
+  def symbol_named(owner: Str, name: Str): Opt<Cell>
+  def clauses_of(cell: Cell): List<Cell>
+  def test_of(clause: Cell): Opt<Code<Cell>>
+  def body_of(clause: Cell): Opt<Code<Cell>>
+  def plan_named(qualified: Str): Opt<Cell>
+  def code_named(label: Str): Opt<Code<Cell>>
+  def label_of(cell: Cell): Opt<Str>
+
+  // The reads. `validate` walks the op graph under the bound constants
+  // (Linked ceiling, per-op arity table, impure-kind set) that arrive
+  // as data cells in the bind set — never as prelude literals.
+  def validate(cell: Cell): Bool
+  def weight_of(cell: Cell): Opt<Float>
+  def next_rand(seed: Cell): Int
+
+  // The mutation half — every member impure (each writes arena edges).
+  // A bare `Code` parameter is the parameterized wildcard `Code<T>`;
+  // `Code<()>` pins the body/test shape the attachment expects.
+  // graft_plan/graft_handler append a named clause at rank tail;
+  // graft_where/graft_body re-point a clause's +d.grab/+d.spin;
+  // graft_method unlinks a same-named symbol first, then installs
+  // `owner.name` on the resolved module's d.vars.
+  def graft_plan(goal_name: Str, name: Str, test: Code, body: Code<()>)
+  def graft_handler(event_name: Str, name: Str, guard: Code, body: Code<()>,
+                    priority: Int)
+  def graft_where(clause: Cell, test: Code)
+  def graft_body(clause: Cell, body: Code<()>)
+  def graft_method(owner: Str, name: Str, fragment: Code)
+  def prune(clause: Cell)
+
+  // The durable twins. `learn_*` re-verifies closed at accept time and
+  // refuses fail-closed when no program lineage binds; a learned clause
+  // is labelled patch:<n> (the alias rides the patch record, never the
+  // clause), a learned method's `name` is the functional lookup name
+  // verbatim.
+  def learn_plan(goal_name: Str, name: Str, test: Code, body: Code<()>)
+  def learn_handler(event_name: Str, name: Str, guard: Code, body: Code<()>,
+                    priority: Int)
+  def learn_where(clause: Cell, test: Code)
+  def learn_body(clause: Cell, body: Code<()>)
+  def learn_method(owner: Str, name: Str, fragment: Code)
+  def unlearn(clause_or_symbol: Cell)
+
+  // Weights and synapses. `set_weight` dispatches on the target's kind —
+  // a junction's own +d.weight scalar, else the agent's d.vars record
+  // keyed by the clause's +d.name (a name-less clause is refused).
+  def set_weight(cell: Cell, w: Float)
+  def sprout_synapse(from_name: Str, to_name: Str, w: Float): Cell
+}

@@ -22,6 +22,10 @@ class Gleditor < Formula
   # (whatever their libgtest-dev / gtest-devel / gtest package installed);
   # Homebrew has no such ambient location.
   depends_on "boost"
+  depends_on "curl"
+  depends_on "sqlite"
+  depends_on "gmime"
+  depends_on "libetpan"
   depends_on "fontconfig"
   depends_on "freetype"
   depends_on "fribidi"

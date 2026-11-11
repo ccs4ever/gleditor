@@ -31,6 +31,10 @@
   # ones.
   boost,
   openssl,
+  curl,
+  sqlite,
+  gmime3,
+  libetpan,
   version ? "0.1.0",
 }:
 
@@ -83,6 +87,10 @@ stdenv.mkDerivation {
     rnp
     boost
     openssl
+    curl
+    sqlite
+    gmime3
+    libetpan
   ];
 
   # The Makefile's compiler default is clang++; stdenv supplies its own, and

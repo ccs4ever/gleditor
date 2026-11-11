@@ -15,7 +15,7 @@ namespace {
 using namespace xanadu::vql;
 using zigzag::DimVector;
 
-TEST(VQLWatchTest, StreamingAndDeltaMetadata) {
+TEST(VQLWatchTest, RefusesSimulatedDeltaMetadata) {
   zigzag::ArenaManifold arena;
   zigzag::vortex::VortexCore core(arena);
   VQLEngine engine(core);
@@ -35,6 +35,29 @@ TEST(VQLWatchTest, StreamingAndDeltaMetadata) {
   ASSERT_EQ(deltas.size(), 2u);
   EXPECT_EQ(deltas[0], item1);
   EXPECT_EQ(deltas[1], item2);
+}
+
+TEST(VQLWatchTest, RefusesSimulatedDeltaMetadataLeavesSliceUntouched) {
+  zigzag::ArenaManifold arena;
+  zigzag::vortex::VortexCore core(arena);
+  VQLEngine engine(core);
+
+  zigzag::DimRef dItems = engine.resolveDimension("d.items");
+  zigzag::CellRef item1 = arena.makeCell("first");
+  zigzag::CellRef item2 = arena.makeCell("second");
+
+  EXPECT_TRUE(arena.link(core.home(), dItems, DimVector::POS, item1));
+  EXPECT_TRUE(arena.link(item1, dItems, DimVector::POS, item2));
+
+  EXPECT_THROW(engine.execute("watch ##/d.items as $item {\n"
+                              "  $item/+d.delta\n"
+                              "}"),
+               std::runtime_error);
+  const auto dDelta = engine.resolveDimension("d.delta");
+  EXPECT_FALSE(arena.linked(item1, dDelta, DimVector::POS));
+  EXPECT_FALSE(arena.linked(item2, dDelta, DimVector::POS));
+  EXPECT_EQ(engine.execute("##/d.items"),
+            (std::vector<zigzag::CellRef>{item1, item2}));
 }
 
 TEST(VQLWatchTest, PollReportsMembershipChangesAndCanBeCancelled) {
@@ -184,7 +207,32 @@ TEST(VQLWatchTest, SinceRequiresStoreBackedHistory) {
       std::runtime_error);
 }
 
-TEST(VQLWatchTest, MultiStatementScriptWithForAndWatch) {
+TEST(VQLWatchTest, RefusesSimulatedCatchUp) {
+  zigzag::ArenaManifold arena;
+  zigzag::vortex::VortexCore core(arena);
+  VQLEngine engine(core);
+
+  zigzag::DimRef dTasks = engine.resolveDimension("d.tasks");
+  zigzag::CellRef t1    = arena.makeCell("init");
+  zigzag::CellRef t2    = arena.makeCell("processing");
+  zigzag::CellRef t3    = arena.makeCell("done");
+  zigzag::CellRef t4    = arena.makeCell("post_termination");
+
+  EXPECT_TRUE(arena.link(core.home(), dTasks, DimVector::POS, t1));
+  EXPECT_TRUE(arena.link(t1, dTasks, DimVector::POS, t2));
+  EXPECT_TRUE(arena.link(t2, dTasks, DimVector::POS, t3));
+  EXPECT_TRUE(arena.link(t3, dTasks, DimVector::POS, t4));
+
+  EXPECT_THROW(
+      engine.execute("watch ##/d.tasks as $t since @88 until $t = \"done\" {\n"
+                     "  $t\n"
+                     "}"),
+      std::runtime_error);
+  EXPECT_EQ(engine.execute("##/d.tasks"),
+            (std::vector<zigzag::CellRef>{t1, t2, t3, t4}));
+}
+
+TEST(VQLWatchTest, ScriptReportsUnsupportedWatch) {
   zigzag::ArenaManifold arena;
   zigzag::vortex::VortexCore core(arena);
   VQLEngine engine(core);
@@ -201,10 +249,9 @@ TEST(VQLWatchTest, MultiStatementScriptWithForAndWatch) {
                        "  $it\n"
                        "};";
 
-  auto results = engine.execute(script);
-  ASSERT_EQ(results.size(), 2u);
-  EXPECT_EQ(arena.textOf(results[0]), "itemA");
-  EXPECT_EQ(arena.textOf(results[1]), "itemB");
+  EXPECT_THROW(engine.execute(script), std::runtime_error);
+  EXPECT_EQ(engine.execute("##/d.items"),
+            (std::vector<zigzag::CellRef>{i1, i2}));
 }
 
 } // namespace

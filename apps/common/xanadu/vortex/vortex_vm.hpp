@@ -11,6 +11,7 @@
 #define COMMON_XANADU_VORTEX_VM_HPP
 
 #include <cstdint>
+#include <expected>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -133,6 +134,42 @@ enum class OpcodeKind : std::uint8_t {
   ApplyClosure,
   RestoreBindings,
   CurrentTimestamp,
+
+  // Rank traversal: reads every cell linked from the subject on one
+  // dimension and materializes them as a ref-box rank under the bound
+  // output head. Appended last: opcode kind ints are cell content.
+  Linked,
+
+  // Named-member lookup: the subject's int names a term cell whose
+  // +d.step rank the op walks for the member carrying a matching
+  // +d.name label — `term.field` in one hop, where Linked would need
+  // a materialize-then-scan loop the scalar emitter has no loop for.
+  // Appended last for the same persisted-kind reason.
+  Find,
+
+  // Named-member write: Find's twin — the subject's int names a term
+  // cell, the op walks +d.step for the +d.name-matched member and
+  // replaces that member's content. Owner-relative field writes
+  // (`ticks := v` inside a skill/behavior member) need it: the Value
+  // op's subject is an operand *cell*, never a value-carried ref, so
+  // a holder discovered at run time cannot be a Value target.
+  // Appended last for the same persisted-kind reason.
+  FieldSet,
+
+  // §6.2's dynamic `run` callsite: the operand box's int names a
+  // fragment head; the op follows the head's +d.entry chain to the
+  // entry op, descriptor-checks arity, binds the args rank's values by
+  // parameter name on the cursor's +d.vars, pushes the frame, and
+  // jumps. A non-head operand, a missing descriptor, or an arity
+  // mismatch lands on the bound failure target — `run`'s §6.2
+  // refusals, not a halt. Appended last for the persisted-kind reason.
+  RunCall,
+
+  // RunCall's frame successor: reads the run's descriptor produced /
+  // result cells — produced writes result into the bound output and
+  // spins on; unproduced lands on the failure target. Appended last
+  // for the same persisted-kind reason.
+  RunResume,
 };
 
 struct ProjectionLimits {
@@ -432,6 +469,10 @@ struct GuardDriveResult {
 class VortexVM {
 public:
   explicit VortexVM(VortexCore &core);
+  /// The funnel predicate this VM installed captures `this`; a core
+  /// that outlives the VM must never run a dangling guard, so the
+  /// slot is released when this VM installed it.
+  ~VortexVM();
 
   [[nodiscard]] VortexCore &core() noexcept { return core_; }
   [[nodiscard]] const VortexCore &core() const noexcept { return core_; }
@@ -454,10 +495,52 @@ public:
   makeBindingsDescriptor(const RuntimeBindingSnapshot &snapshot);
   [[nodiscard]] std::expected<ParsedBindingsDescriptor, BindingsDescriptorError>
   bindingsDescriptor(CellRef root) const;
+  /// P15's membership test (spec §6.5/M10): true only when @p opCell is
+  /// *registered* in this context's opcodeMap_. getOpcodeKind decodes
+  /// int64 content as a kind too — but only a map entry means a content
+  /// write would desync the recorded kind, so the funnel's kind
+  /// predicate tests membership, never decodability.
+  [[nodiscard]] bool hasOpcodeKind(CellRef opCell) const {
+    return opcodeMap_.contains(opCell);
+  }
+  /// Install this VM's kind predicate on the core's write funnel —
+  /// P15's `opcodeMap_.contains(masterOf(cell))`. The constructor calls
+  /// it; re-call it when a second VM over the same core re-installed
+  /// its own map's view (production contexts are one VM per core).
+  VortexVM *installWriteGuard();
+
+  // -- P15 Image Re-Registration ----------------------------------------------
+  /// §6.5/P15's registration pass — genesis step (b) (spec :2335-2343).
+  /// opcodeMap_ is per-context and holds none of a folded image's op
+  /// cells at any fresh-context bind — at the spawn-time injection as
+  /// after resume — so the recorded instruction enumeration
+  /// re-registers here. @p enumeration is the image record's ops rank:
+  /// recorded cell positions, never a value scan (a scan of the band
+  /// would claim dimConstant operand cells and put honest data inside
+  /// the P15 refusal). The kind reads off each recorded cell's own
+  /// asInt64 — safe for a recorded cell. Returns the count registered,
+  /// or a named refusal when a member names no arena cell or carries
+  /// no decodable kind.
+  [[nodiscard]] std::expected<std::size_t, std::string>
+  registerProgramOps(std::span<const CellRef> enumeration);
+  /// The programRef bind-record half: walks @p imageRecord's "ops"
+  /// +d.vars record — fragment.cpp's finalizeProgramImage shape — for
+  /// its +d.step-chained rank of int64 op positions, then registers
+  /// through registerProgramOps. The call site every fresh-context
+  /// image bind uses: the genesis (b) harness calls
+  /// `vm.registerProgramImage(image)` inside or_parallel's
+  /// `bindProgramOpcodes` worker hook at spawn and on the
+  /// mesh_actor resume path's fresh WorkerContext.
+  [[nodiscard]] std::expected<std::size_t, std::string>
+  registerProgramImage(CellRef imageRecord);
 
   // -- Cursor Creation & Process Scheduler ------------------------------------
   CellRef spawnCursor(CellRef entryOpcode, std::string_view name = {});
   [[nodiscard]] std::vector<CellRef> activeCursors() const;
+  /// §5.2: unlink every home+d.cursors rank member other than @p keep — the
+  /// dead twins earlier incarnations leave behind on a resumed image. Called
+  /// at cursor spawn sites before further work can accrete another twin.
+  void pruneCursors(CellRef keep);
 
   // -- Opt-In Memoization -----------------------------------------------------
   void enableMemoization(CellRef opcode, std::string_view memoKey);
@@ -578,7 +661,12 @@ public:
   [[nodiscard]] bool hasResumeState() const noexcept;
 
   // -- Pipeline Execution Helper ----------------------------------------------
-  void runPipeline(CellRef paramCell);
+  /// Runs the preprocessing/postprocessing chain off a parameter cell.
+  /// A P15 refusal inside a pipeline op's body or at either writeback
+  /// surfaces as the same typed `success=false` the step loop returns
+  /// (spec §6.5); pre-P15 failures inside the chain keep the legacy
+  /// swallowed-failure shape.
+  [[nodiscard]] ExecutionResult runPipeline(CellRef paramCell);
 
 private:
   ExecutionResult executeClosureOpcode(OpcodeKind kind, CellRef opcode,
@@ -721,6 +809,10 @@ private:
   std::size_t oracleCursor_{0};
   std::uint64_t totalCycles_{0};
   std::function<void(std::string_view deweyPrefix)> cutCallback_;
+  /// Tracks the funnel-guard slot's owner so ~VortexVM only releases
+  /// what this VM installed — a second VM over the same core that
+  /// never installed leaves the first's guard in place.
+  bool guardInstalled_{false};
 };
 
 } // namespace zigzag::vortex

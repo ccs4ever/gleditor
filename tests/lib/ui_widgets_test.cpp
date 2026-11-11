@@ -2,12 +2,15 @@
 
 #include <gleditor/text/diagnostics.hpp>
 #include <gleditor/text/fit.hpp>
+#include <gleditor/text/font.hpp>
 #include <gleditor/ui/button_metrics.hpp>
 #include <gleditor/ui/overlay.hpp>
 #include <gleditor/ui/recessed_well.hpp>
 #include <gleditor/ui/segmented_pill.hpp>
 #include <gleditor/ui/widgets.hpp>
 
+#include <array>
+#include <cmath>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -16,6 +19,143 @@
 namespace {
 using namespace gleditor::ui;
 using gleditor::Key;
+
+TEST(UiWidgetTest, NaturalLabelsAndNestedTabsRetainVisibleGlyphs) {
+  Widget root{.id       = 1,
+              .model    = Panel{"Inspector"},
+              .children = {
+                  {.id = 2, .model = Label{"Private evidence case"}},
+                  {.id = 3, .model = Label{"Select a retained observation"}},
+                  {.id    = 4,
+                   .model = Tabs{{{5, "Case", "case"},
+                                  {6, "Sources", "sources"},
+                                  {7, "Evidence", "evidence"}}}},
+              }};
+  root.preserveReadableControls = true;
+  const UiMetrics metrics{.screenWidth = 800, .screenHeight = 600};
+  const Theme theme;
+  gleditor::text::ShapingCache cache;
+  const auto scene =
+      layoutWidgets(root, {0, 0, 800, 600}, metrics, theme, cache);
+  for (const auto id : {2U, 3U, 5U, 6U, 7U}) {
+    const auto *visual = scene.find(id);
+    ASSERT_NE(visual, nullptr);
+    EXPECT_FALSE(visual->fitted.shaping.glyphs.empty()) << visual->text;
+    EXPECT_EQ(visual->fitted.visibleBytes, visual->text.size()) << visual->text;
+  }
+}
+
+TEST(UiWidgetTest, LongDetailsYieldSpaceBeforeControlLabelsDisappear) {
+  Widget root{
+      .id       = 1,
+      .model    = Panel{},
+      .children = {
+          {.id = 2, .model = TextField{"", "Search", "search"}},
+          {.id       = 3,
+           .model    = ButtonFlow{},
+           .children = {{.id = 4, .model = Button{"Preview", "preview"}},
+                        {.id = 5, .model = Button{"Annotate", "annotate"}}}},
+          {.id    = 6,
+           .model = List{{{7, "First retained detail", {}, false},
+                          {8, "Second retained detail", {}, false},
+                          {9, "Third retained detail", {}, false},
+                          {10, "Fourth retained detail", {}, false},
+                          {11, "Fifth retained detail", {}, false}}}},
+      }};
+  root.preserveReadableControls = true;
+  const UiMetrics metrics{.screenWidth = 800, .screenHeight = 600};
+  const Theme theme;
+  gleditor::text::ShapingCache cache;
+  const auto scene =
+      layoutWidgets(root, {0, 0, 600, 240}, metrics, theme, cache);
+  for (const auto id : {2U, 4U, 5U}) {
+    const auto *visual = scene.find(id);
+    ASSERT_NE(visual, nullptr);
+    EXPECT_FALSE(visual->fitted.shaping.glyphs.empty()) << visual->text;
+    EXPECT_EQ(visual->fitted.visibleBytes, visual->text.size()) << visual->text;
+  }
+  ASSERT_NE(scene.layout.find(6), nullptr);
+  EXPECT_LT(scene.layout.find(6)->rect.height, 5 * theme.type.minTouchPx);
+}
+
+TEST(UiWidgetTest, ButtonFlowMeasuresRoundedWrappedRowsAtFullHeight) {
+  const UiMetrics metrics{
+      .screenWidth = 1600, .screenHeight = 1000, .marginShare = 0.0F};
+  const Theme theme;
+  const auto font = gleditor::text::FontManager::instance().getFont(
+      metrics.fontDescription(FontRole::Label, theme));
+  const auto p                = font->metrics().lineHeight * theme.paddingEm;
+  const auto gap              = font->metrics().lineHeight * theme.gapEm;
+  constexpr float buttonWidth = 150.0F;
+  constexpr std::size_t buttonCount = 8;
+  const std::array<std::string, buttonCount> labels{
+      "Open",    "Follow",  "Annotate",   "Export",
+      "Refresh", "Connect", "Disconnect", "Close"};
+  const auto requiredWidth = buttonWidth * static_cast<float>(buttonCount) +
+                             gap * static_cast<float>(buttonCount - 1);
+
+  float left{};
+  float width{};
+  bool foundNarrowRoundedContent = false;
+  for (int leftStep = 0; leftStep < 20 && !foundNarrowRoundedContent;
+       ++leftStep) {
+    const auto candidateLeft = 40.0F + static_cast<float>(leftStep) * 0.05F;
+    for (int epsilonStep = 1; epsilonStep < 20; ++epsilonStep) {
+      const auto epsilon        = static_cast<float>(epsilonStep) * 0.05F;
+      const auto candidateWidth = requiredWidth + 4 * p + epsilon;
+      const Rect bounds{candidateLeft, 100.0F, candidateWidth, 300.0F};
+      auto outer = clampToSafeArea(metrics.rounded(bounds), bounds);
+      outer      = clampToSafeArea(metrics.rounded(outer), outer);
+      const auto panelContent = clampToSafeArea(
+          metrics.rounded({outer.left + p, outer.bottom + p,
+                           outer.width - 2 * p, outer.height - 2 * p}),
+          outer);
+      const auto flowOuter =
+          clampToSafeArea(metrics.rounded(panelContent), panelContent);
+      const auto flowContent = clampToSafeArea(
+          metrics.rounded({flowOuter.left + p, flowOuter.bottom + p,
+                           flowOuter.width - 2 * p, flowOuter.height - 2 * p}),
+          flowOuter);
+      const auto rawContentWidth = candidateWidth - 4 * p;
+      if (rawContentWidth >= requiredWidth &&
+          std::floor(rawContentWidth) < requiredWidth &&
+          flowContent.width < requiredWidth) {
+        left                      = candidateLeft;
+        width                     = candidateWidth;
+        foundNarrowRoundedContent = true;
+        break;
+      }
+    }
+  }
+  ASSERT_TRUE(foundNarrowRoundedContent);
+
+  Widget buttonFlow{.id = 2, .model = ButtonFlow{}};
+  for (std::size_t i = 0; i < buttonCount; ++i) {
+    buttonFlow.children.push_back(
+        {.id        = static_cast<std::uint32_t>(10 + i),
+         .model     = Button{labels[i], "action-" + std::to_string(i)},
+         .preferred = {buttonWidth, 32.0F}});
+  }
+  Widget root{.id = 1, .model = Panel{}, .children = {buttonFlow}};
+  root.preserveReadableControls = true;
+  gleditor::text::ShapingCache cache;
+  const auto scene =
+      layoutWidgets(root, {left, 100, width, 300}, metrics, theme, cache);
+
+  std::vector<float> rowBottoms;
+  for (std::size_t i = 0; i < buttonCount; ++i) {
+    const auto id      = static_cast<std::uint32_t>(10 + i);
+    const auto *box    = scene.layout.find(id);
+    const auto *visual = scene.find(id);
+    ASSERT_NE(box, nullptr);
+    ASSERT_NE(visual, nullptr);
+    EXPECT_GE(box->rect.height, theme.buttonMetrics.heightStandardPx);
+    EXPECT_EQ(visual->fitted.visibleBytes, visual->text.size());
+    if (std::ranges::find(rowBottoms, box->rect.bottom) == rowBottoms.end())
+      rowBottoms.push_back(box->rect.bottom);
+  }
+  EXPECT_GT(rowBottoms.size(), 1U);
+}
 
 TEST(UiWidgetTest, textEditingPreservesUtf8AndPlacesInsertionAtTheCaret) {
   TextField field{.value = "A\xC3\xA9\xE7\x95\x8C"
@@ -40,6 +180,66 @@ TEST(UiWidgetTest, textEditingPreservesUtf8AndPlacesInsertionAtTheCaret) {
   EXPECT_EQ(field.value, unchanged);
 }
 
+TEST(UiWidgetTest, multilineFieldsNavigateUtf8LinesAndInsertReturn) {
+  TextField field{.value = "a\xC3\xA9\n\xE7\x95\x8C"
+                           "b",
+                  .caret = std::string("a\xC3\xA9\n\xE7\x95\x8C"
+                                       "b")
+                               .size(),
+                  .multiline = true};
+  EXPECT_TRUE(field.key(Key::Home));
+  EXPECT_EQ(field.caret, std::string("a\xC3\xA9\n").size());
+  EXPECT_TRUE(field.key(Key::Up));
+  EXPECT_EQ(field.caret, 0U);
+  EXPECT_TRUE(field.key(Key::End, gleditor::KeyMods::Ctrl));
+  EXPECT_EQ(field.caret, field.value.size());
+  EXPECT_TRUE(field.key(Key::Return));
+  EXPECT_EQ(field.value.back(), '\n');
+  EXPECT_EQ(field.caret, field.value.size());
+
+  TextField singleLine;
+  EXPECT_FALSE(singleLine.key(Key::Return));
+  singleLine.insert("one\ntwo");
+  EXPECT_EQ(singleLine.value, "one\ntwo");
+  TextField sensitive{.sensitive = true};
+  EXPECT_THROW(sensitive.insert("one\ntwo"), std::invalid_argument);
+}
+
+TEST(UiWidgetTest, multilineFieldsWrapScrollAndNavigateSoftWrappedLines) {
+  const std::string text =
+      "one two three four five six seven eight nine ten eleven twelve";
+  ScreenOverlay overlay(
+      {.id = 1,
+       .model =
+           TextField{.value = text, .caret = text.size(), .multiline = true},
+       .preferred = {190, 72}});
+  const UiMetrics metrics{.screenWidth = 640, .screenHeight = 480};
+  const auto scene   = overlay.prepare(metrics, Theme{});
+  const auto *visual = scene->find(1);
+  const auto *box    = scene->layout.find(1);
+  ASSERT_NE(visual, nullptr);
+  ASSERT_NE(box, nullptr);
+  EXPECT_EQ(visual->value, text);
+  EXPECT_GE(visual->fitted.lines, 2U);
+  EXPECT_GT(visual->fitted.heightPx, box->contentRect.height);
+  EXPECT_GT(visual->verticalTextOffsetPx, 0.0F);
+  ASSERT_TRUE(visual->caretOffsetYPx.has_value());
+
+  std::vector<WidgetAction> actions;
+  overlay.setActionHandler(
+      [&](const auto &action) { actions.push_back(action); });
+  ASSERT_TRUE(overlay.keyInto(1, Key::Home));
+  ASSERT_EQ(actions.size(), 1U);
+  ASSERT_TRUE(actions.front().caret.has_value());
+  EXPECT_GT(*actions.back().caret, 0U);
+  EXPECT_LT(*actions.back().caret, text.size());
+  ASSERT_TRUE(overlay.keyInto(1, Key::Up));
+  ASSERT_EQ(actions.size(), 2U);
+  ASSERT_TRUE(actions.back().caret.has_value());
+  EXPECT_LT(*actions.back().caret, *actions.front().caret);
+  EXPECT_TRUE(actions.back().verticalScrollPx.has_value());
+}
+
 TEST(UiWidgetTest, backspaceAndNavigationKeepCombiningAndZwjGraphemesWhole) {
   const std::string combining = "a\xCC\x81";
   const std::string family    = "👨‍👩‍👧‍👦";
@@ -56,6 +256,44 @@ TEST(UiWidgetTest, backspaceAndNavigationKeepCombiningAndZwjGraphemesWhole) {
   EXPECT_TRUE(field.key(Key::Backspace));
   EXPECT_EQ(field.value, "Z");
   EXPECT_EQ(field.caret, 0U);
+}
+
+TEST(UiWidgetTest, sensitiveFieldsMaskUtf8AndKeepCaretInMaskedGeometry) {
+  const std::string secret = "a\xC3\xA9\xE7\x95\x8C";
+  ScreenOverlay overlay({.id        = 1,
+                         .model     = TextField{.value       = secret,
+                                                .placeholder = "Password",
+                                                .caret       = 3,
+                                                .sensitive   = true},
+                         .preferred = {180, 44}});
+  const UiMetrics metrics{.screenWidth = 640, .screenHeight = 480};
+  const auto scene   = overlay.prepare(metrics, Theme{});
+  const auto *visual = scene->find(1);
+  ASSERT_NE(visual, nullptr);
+  EXPECT_EQ(visual->text, "•••");
+  EXPECT_EQ(visual->value, "•••");
+  EXPECT_EQ(visual->accessibleLabel, "Password");
+  ASSERT_TRUE(visual->caretOffsetPx.has_value());
+  EXPECT_GT(*visual->caretOffsetPx, 0.0F);
+  EXPECT_LT(*visual->caretOffsetPx, visual->fitted.widthPx);
+  for (const auto &glyph : visual->fitted.shaping.glyphs)
+    EXPECT_EQ(glyph.chr, "•");
+  EXPECT_EQ(visual->fitted.shaping.clusters.size(), 3U);
+
+  EXPECT_TRUE(overlay.keyInto(1, Key::Left));
+  EXPECT_TRUE(overlay.keyInto(1, Key::Backspace));
+  EXPECT_EQ(overlay.prepare(metrics, Theme{})->find(1)->value, "••");
+}
+
+TEST(UiWidgetTest, emptySensitiveFieldKeepsItsPlaceholder) {
+  ScreenOverlay overlay(
+      {.id    = 1,
+       .model = TextField{.placeholder = "Password", .sensitive = true}});
+  const auto scene =
+      overlay.prepare({.screenWidth = 640, .screenHeight = 480}, Theme{});
+  ASSERT_NE(scene->find(1), nullptr);
+  EXPECT_EQ(scene->find(1)->text, "Password");
+  EXPECT_TRUE(scene->find(1)->value.empty());
 }
 
 TEST(UiWidgetTest, longTextFieldsScrollToTheCaretAndKeepTheirCompleteText) {

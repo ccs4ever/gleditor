@@ -331,12 +331,14 @@ TEST(StandardCryptoEngineTest, X509PathValidationRejectsCaCertificates) {
   X509_set_version(caCert.get(), 2);
   ASN1_INTEGER_set_uint64(X509_get_serialNumber(caCert.get()), 999);
 
-  X509_NAME *name = X509_get_subject_name(caCert.get());
+  X509NamePtr name(X509_NAME_new(), &X509_NAME_free);
+  ASSERT_THAT(name, NotNull());
   X509_NAME_add_entry_by_txt(
-      name, "CN", MBSTRING_UTF8,
+      name.get(), "CN", MBSTRING_UTF8,
       reinterpret_cast<const unsigned char *>("Rogue Intermediate CA"), -1, -1,
       0);
-  X509_set_issuer_name(caCert.get(), name);
+  X509_set_subject_name(caCert.get(), name.get());
+  X509_set_issuer_name(caCert.get(), name.get());
 
   ASN1_TIME_set(X509_getm_notBefore(caCert.get()), 1000);
   ASN1_TIME_set(X509_getm_notAfter(caCert.get()), 2000);

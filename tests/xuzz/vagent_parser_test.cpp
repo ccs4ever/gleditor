@@ -1,11 +1,15 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <memory>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 #include <gtest/gtest.h>
 
+#include "common/xanadu/vagent/ast_clone.hpp"
 #include "common/xanadu/vagent/parser.hpp"
 
 namespace {
@@ -531,6 +535,209 @@ TEST(VAgentParserTest, PropagatesLexicalFailureWithoutPartialProgram) {
   EXPECT_EQ(parsed.error().code, DiagnosticCode::Lexical);
 }
 
+TEST(VAgentParserTest, CellsStringParsesAsADedicatedExpression) {
+  auto parsed = Parser(R"(cells"##/d.items")").parseExpression();
+  ASSERT_TRUE(parsed) << formatDiagnostic(parsed.error());
+  ASSERT_TRUE(*parsed);
+  EXPECT_EQ((*parsed)->kind, ExprKind::Cells);
+  EXPECT_EQ((*parsed)->text, "##/d.items");
+}
+
+TEST(VAgentParserTest, UnknownStringPrefixIsRefused) {
+  auto parsed = Parser(R"(vql"##")").parseExpression();
+  ASSERT_FALSE(parsed);
+  EXPECT_NE(parsed.error().detail.find("unknown string prefix"),
+            std::string::npos);
+}
+
+TEST(VAgentParserTest, CodeStringParsesAsADedicatedExpression) {
+  auto parsed = Parser(R"(code"x + w")").parseExpression();
+  ASSERT_TRUE(parsed) << formatDiagnostic(parsed.error());
+  ASSERT_TRUE(*parsed);
+  EXPECT_EQ((*parsed)->kind, ExprKind::Code);
+  // The literal keeps its decoded inner text raw — expand runs
+  // parseCodeBody per literal, not the parser.
+  EXPECT_EQ((*parsed)->text, "x + w");
+}
+
+TEST(VAgentParserTest, SpliceParsesAPrefixedPostfixOperand) {
+  auto parsed = Parser("splice c").parseExpression();
+  ASSERT_TRUE(parsed) << formatDiagnostic(parsed.error());
+  ASSERT_EQ((*parsed)->kind, ExprKind::Splice);
+  ASSERT_EQ((*parsed)->children.size(), 1U);
+  EXPECT_EQ((*parsed)->children[0]->kind, ExprKind::Identifier);
+  EXPECT_EQ((*parsed)->children[0]->text, "c");
+}
+
+TEST(VAgentParserTest, SpliceCallPeelsTheArglist) {
+  // §5.1's peeling rule: the operand's outermost postfix ends in parens,
+  // so the arglist belongs to the splice — children[0] is the fragment
+  // name, the rest its actuals.
+  auto parsed = Parser("splice inc(count)").parseExpression();
+  ASSERT_TRUE(parsed) << formatDiagnostic(parsed.error());
+  ASSERT_EQ((*parsed)->kind, ExprKind::Splice);
+  ASSERT_EQ((*parsed)->children.size(), 2U);
+  EXPECT_EQ((*parsed)->children[0]->kind, ExprKind::Identifier);
+  EXPECT_EQ((*parsed)->children[0]->text, "inc");
+  EXPECT_EQ((*parsed)->children[1]->kind, ExprKind::Identifier);
+  EXPECT_EQ((*parsed)->children[1]->text, "count");
+}
+
+TEST(VAgentParserTest, SpliceParenthesizedCallStaysCallShaped) {
+  // 'splice (f(x))' splices a call result — the arglist never reached the
+  // operand's outermost postfix, so it stays a call-shaped operand for
+  // the checker to refuse.
+  auto parsed = Parser("splice (inc(count))").parseExpression();
+  ASSERT_TRUE(parsed) << formatDiagnostic(parsed.error());
+  ASSERT_EQ((*parsed)->kind, ExprKind::Splice);
+  ASSERT_EQ((*parsed)->children.size(), 1U);
+  EXPECT_EQ((*parsed)->children[0]->kind, ExprKind::Call);
+}
+
+TEST(VAgentParserTest, SpliceFieldOrIndexOperandDoesNotPeel) {
+  auto field = Parser("splice inc(count).frag").parseExpression();
+  ASSERT_TRUE(field) << formatDiagnostic(field.error());
+  ASSERT_EQ((*field)->kind, ExprKind::Splice);
+  ASSERT_EQ((*field)->children.size(), 1U);
+  EXPECT_EQ((*field)->children[0]->kind, ExprKind::Field);
+  auto indexed = Parser("splice fragments[0]").parseExpression();
+  ASSERT_TRUE(indexed) << formatDiagnostic(indexed.error());
+  ASSERT_EQ((*indexed)->kind, ExprKind::Splice);
+  ASSERT_EQ((*indexed)->children.size(), 1U);
+  EXPECT_EQ((*indexed)->children[0]->kind, ExprKind::Index);
+}
+
+TEST(VAgentParserTest, SpliceRequiresAnOperand) {
+  EXPECT_FALSE(Parser("splice").parseExpression());
+  // A newline after 'splice' refuses rather than swallowing the next
+  // statement's expression as the operand.
+  EXPECT_FALSE(Parser("splice\nc + 1").parseExpression());
+}
+
+TEST(VAgentParserTest, SpliceAndStaticStayLegalMemberNames) {
+  // Contextual words: any Word may follow '.', so members named splice or
+  // static remain callable.
+  auto parsed = Parser("x.splice(3) + y.static").parseExpression();
+  ASSERT_TRUE(parsed) << formatDiagnostic(parsed.error());
+  EXPECT_EQ((*parsed)->kind, ExprKind::Binary);
+}
+
+TEST(VAgentParserTest, StaticParsesAUnaryPrefixedOperand) {
+  auto folded = Parser("static (60 * 1000)").parseExpression();
+  ASSERT_TRUE(folded) << formatDiagnostic(folded.error());
+  ASSERT_EQ((*folded)->kind, ExprKind::Static);
+  ASSERT_EQ((*folded)->children.size(), 1U);
+  EXPECT_EQ((*folded)->children[0]->kind, ExprKind::Binary);
+  // 'static' is Unary-prefixed: the operand binds at unary level, so
+  // 'static 60 * 1000' folds 60 and multiplies the result (§5.5).
+  auto unparenthesized = Parser("static 60 * 1000").parseExpression();
+  ASSERT_TRUE(unparenthesized) << formatDiagnostic(unparenthesized.error());
+  ASSERT_EQ((*unparenthesized)->kind, ExprKind::Binary);
+  EXPECT_EQ((*unparenthesized)->text, "*");
+  ASSERT_EQ((*unparenthesized)->children.size(), 2U);
+  EXPECT_EQ((*unparenthesized)->children[0]->kind, ExprKind::Static);
+  EXPECT_EQ((*unparenthesized)->children[0]->children[0]->kind,
+            ExprKind::Integer);
+}
+
+TEST(VAgentParserTest, StaticRequiresAnOperand) {
+  EXPECT_FALSE(Parser("static").parseExpression());
+  EXPECT_FALSE(Parser("static\n60 * 1000").parseExpression());
+}
+
+TEST(VAgentParserTest, CodeTypeSyntaxParsesTypedAndBareForms) {
+  // 'Code<T>' and bare 'Code' parse through the ordinary type production —
+  // the 0-or-1 arity chain is the checker's (§5.2).
+  auto parsed = Parser::parseCodeBody("f: Code<Int>, g: Code | splice f");
+  ASSERT_TRUE(parsed) << formatDiagnostic(parsed.error());
+  ASSERT_EQ(parsed->parameters.size(), 2U);
+  EXPECT_EQ(typeName(parsed->parameters[0].type), "Code<Int>");
+  EXPECT_EQ(typeName(parsed->parameters[1].type), "Code");
+  EXPECT_EQ(parsed->body->kind, ExprKind::Splice);
+}
+
+TEST(VAgentParserTest, ParseCodeBodyParsesPlainLabelledAndParameterized) {
+  auto plain = Parser::parseCodeBody("x + w");
+  ASSERT_TRUE(plain) << formatDiagnostic(plain.error());
+  EXPECT_FALSE(plain->label);
+  EXPECT_TRUE(plain->parameters.empty());
+  ASSERT_TRUE(plain->body);
+  EXPECT_EQ(plain->body->kind, ExprKind::Binary);
+
+  auto labelled = Parser::parseCodeBody("#inc n: Int | n + 1");
+  ASSERT_TRUE(labelled) << formatDiagnostic(labelled.error());
+  ASSERT_TRUE(labelled->label);
+  EXPECT_EQ(*labelled->label, "inc");
+  ASSERT_EQ(labelled->parameters.size(), 1U);
+  EXPECT_EQ(labelled->parameters[0].name, "n");
+  EXPECT_EQ(labelled->parameters[0].type.name, "Int");
+  ASSERT_TRUE(labelled->body);
+  EXPECT_EQ(labelled->body->kind, ExprKind::Binary);
+
+  auto two = Parser::parseCodeBody("w: Int, b: Bool | if b then w + 1 else w");
+  ASSERT_TRUE(two) << formatDiagnostic(two.error());
+  EXPECT_FALSE(two->label);
+  ASSERT_EQ(two->parameters.size(), 2U);
+  EXPECT_EQ(two->parameters[1].name, "b");
+  EXPECT_EQ(two->parameters[1].type.name, "Bool");
+  EXPECT_EQ(two->body->kind, ExprKind::If);
+}
+
+TEST(VAgentParserTest, ParseCodeBodyReportsLiteralRelativeLocations) {
+  // The '#'-strip blanks the consumed span, so a syntax error inside the
+  // literal reports literal-relative inner coordinates — the reporter
+  // qualifies them into src:m:l:c+o:c (code_path's innerDiagnostic).
+  auto parsed = Parser::parseCodeBody("#lab x + )");
+  ASSERT_FALSE(parsed);
+  EXPECT_EQ(parsed.error().loc.line, 1U);
+  EXPECT_EQ(parsed.error().loc.column, 10U);
+  EXPECT_TRUE(parsed.error().inner.empty());
+}
+
+TEST(VAgentParserTest, ParseCodeBodyRefusesMalformedLabelsAndTrailing) {
+  EXPECT_FALSE(Parser::parseCodeBody("#"));
+  EXPECT_FALSE(Parser::parseCodeBody("#9x e"));
+  EXPECT_FALSE(Parser::parseCodeBody("# e"));
+  EXPECT_FALSE(Parser::parseCodeBody("x y"));
+  EXPECT_FALSE(Parser::parseCodeBody(""));
+}
+
+TEST(VAgentParserTest, ParseCodeBodyParsesSpliceAndStaticInside) {
+  auto splice = Parser::parseCodeBody("x + splice c");
+  ASSERT_TRUE(splice) << formatDiagnostic(splice.error());
+  ASSERT_EQ(splice->body->children.size(), 2U);
+  EXPECT_EQ(splice->body->children[1]->kind, ExprKind::Splice);
+  auto staged = Parser::parseCodeBody("splice inc(static (2 * 3000))");
+  ASSERT_TRUE(staged) << formatDiagnostic(staged.error());
+  ASSERT_EQ(staged->body->kind, ExprKind::Splice);
+  ASSERT_EQ(staged->body->children.size(), 2U);
+  EXPECT_EQ(staged->body->children[1]->kind, ExprKind::Static);
+  // The inner grammar is the vagent grammar, so a nested code"…" literal
+  // parses as an inner literal — escaped one level in the source spelling.
+  auto nested =
+      Parser::parseCodeBody("x + splice code\"n: Int | n + 1\"(x)");
+  ASSERT_TRUE(nested) << formatDiagnostic(nested.error());
+  ASSERT_EQ(nested->body->kind, ExprKind::Binary);
+  const auto &inner = *nested->body->children[1];
+  ASSERT_EQ(inner.kind, ExprKind::Splice);
+  ASSERT_EQ(inner.children.size(), 2U);
+  EXPECT_EQ(inner.children[0]->kind, ExprKind::Code);
+  EXPECT_EQ(inner.children[0]->text, "n: Int | n + 1");
+}
+
+TEST(VAgentParserTest, ParseCodeBodyParsesHeaderlessAndEmptyForms) {
+  auto unit = Parser::parseCodeBody("()");
+  ASSERT_TRUE(unit) << formatDiagnostic(unit.error());
+  EXPECT_EQ(unit->body->kind, ExprKind::Unit);
+  auto block = Parser::parseCodeBody("{ x := 1; x }");
+  ASSERT_TRUE(block) << formatDiagnostic(block.error());
+  EXPECT_EQ(block->body->kind, ExprKind::Block);
+  // An assignment body is a legal Expr — its impurity is the checker's.
+  auto assign = Parser::parseCodeBody("w := 3");
+  ASSERT_TRUE(assign) << formatDiagnostic(assign.error());
+  EXPECT_EQ(assign->body->kind, ExprKind::Binary);
+}
+
 TEST(VAgentParserTest, ConfiguredLimitsBoundRecursionAndConstructedTrees) {
   ParseLimits limits;
   limits.maxDepth = 12;
@@ -546,6 +753,205 @@ TEST(VAgentParserTest, ConfiguredLimitsBoundRecursionAndConstructedTrees) {
   EXPECT_FALSE(Parser(fields, limits).parseExpression());
   limits.maxTokens = 2;
   EXPECT_FALSE(Parser("event E", limits).parseProgram());
+}
+
+ExprPtr makeExpr(ExprKind kind, std::string text = {}) {
+  auto result  = std::make_unique<Expr>();
+  result->kind = kind;
+  result->text = std::move(text);
+  return result;
+}
+
+void expectSameLocation(const SourceLocation &expected,
+                        const SourceLocation &actual) {
+  EXPECT_EQ(expected.line, actual.line);
+  EXPECT_EQ(expected.column, actual.column);
+  EXPECT_EQ(expected.offset, actual.offset);
+}
+
+// Structural equality plus pointer-distinctness: a clone shares no node with
+// its source, because kernel side tables key on `const Expr *`.
+void expectSameExpr(const Expr &expected, const Expr &actual) {
+  EXPECT_NE(&expected, &actual);
+  EXPECT_EQ(expected.kind, actual.kind);
+  EXPECT_EQ(expected.text, actual.text);
+  expectSameLocation(expected.loc, actual.loc);
+  EXPECT_EQ(expected.names, actual.names);
+  EXPECT_EQ(expected.annotation, actual.annotation);
+  EXPECT_EQ(expected.binding, actual.binding);
+  EXPECT_EQ(expected.stamp, actual.stamp);
+  ASSERT_EQ(expected.children.size(), actual.children.size());
+  for (std::size_t i = 0; i < expected.children.size(); ++i)
+    expectSameExpr(*expected.children[i], *actual.children[i]);
+  const auto metadata = [](const ExprPtr &left, const ExprPtr &right) {
+    ASSERT_EQ(left == nullptr, right == nullptr);
+    if (left != nullptr) expectSameExpr(*left, *right);
+  };
+  metadata(expected.scope, actual.scope);
+  metadata(expected.recipients, actual.recipients);
+  metadata(expected.deadline, actual.deadline);
+  metadata(expected.guard, actual.guard);
+  metadata(expected.recovery, actual.recovery);
+}
+
+void expectSameOptionalExpr(const ExprPtr &expected, const ExprPtr &actual) {
+  ASSERT_EQ(expected == nullptr, actual == nullptr);
+  if (expected != nullptr) expectSameExpr(*expected, *actual);
+}
+
+void expectSameDecl(const Decl &expected, const Decl &actual) {
+  EXPECT_NE(&expected, &actual);
+  EXPECT_EQ(expected.kind, actual.kind);
+  EXPECT_EQ(expected.name, actual.name);
+  expectSameLocation(expected.loc, actual.loc);
+  ASSERT_EQ(expected.parameters.size(), actual.parameters.size());
+  for (std::size_t i = 0; i < expected.parameters.size(); ++i) {
+    EXPECT_EQ(expected.parameters[i].name, actual.parameters[i].name);
+    EXPECT_EQ(expected.parameters[i].type, actual.parameters[i].type);
+    EXPECT_EQ(expected.parameters[i].key, actual.parameters[i].key);
+    expectSameLocation(expected.parameters[i].loc, actual.parameters[i].loc);
+  }
+  EXPECT_EQ(expected.result, actual.result);
+  EXPECT_EQ(expected.names, actual.names);
+  EXPECT_EQ(expected.target, actual.target);
+  EXPECT_EQ(expected.goalKind, actual.goalKind);
+  EXPECT_EQ(expected.planBindings, actual.planBindings);
+  ASSERT_EQ(expected.contracts.size(), actual.contracts.size());
+  for (std::size_t i = 0; i < expected.contracts.size(); ++i) {
+    EXPECT_EQ(expected.contracts[i].postcondition,
+              actual.contracts[i].postcondition);
+    expectSameLocation(expected.contracts[i].loc, actual.contracts[i].loc);
+    expectSameOptionalExpr(expected.contracts[i].condition,
+                           actual.contracts[i].condition);
+  }
+  ASSERT_EQ(expected.goalClauses.size(), actual.goalClauses.size());
+  for (std::size_t i = 0; i < expected.goalClauses.size(); ++i) {
+    EXPECT_EQ(expected.goalClauses[i].kind, actual.goalClauses[i].kind);
+    expectSameLocation(expected.goalClauses[i].loc, actual.goalClauses[i].loc);
+    expectSameOptionalExpr(expected.goalClauses[i].condition,
+                           actual.goalClauses[i].condition);
+  }
+  ASSERT_EQ(expected.members.size(), actual.members.size());
+  for (std::size_t i = 0; i < expected.members.size(); ++i)
+    expectSameDecl(expected.members[i], actual.members[i]);
+  expectSameOptionalExpr(expected.body, actual.body);
+  expectSameOptionalExpr(expected.guard, actual.guard);
+  expectSameOptionalExpr(expected.initializer, actual.initializer);
+  expectSameOptionalExpr(expected.trigger, actual.trigger);
+  expectSameOptionalExpr(expected.deadline, actual.deadline);
+  EXPECT_EQ(expected.binding, actual.binding);
+  EXPECT_EQ(expected.priority, actual.priority);
+  EXPECT_EQ(expected.native, actual.native);
+  EXPECT_EQ(expected.effect, actual.effect);
+  EXPECT_EQ(expected.preempts, actual.preempts);
+}
+
+void expectSameProgram(const Program &expected, const Program &actual) {
+  EXPECT_EQ(expected.module, actual.module);
+  ASSERT_EQ(expected.imports.size(), actual.imports.size());
+  for (std::size_t i = 0; i < expected.imports.size(); ++i) {
+    EXPECT_EQ(expected.imports[i].path, actual.imports[i].path);
+    EXPECT_EQ(expected.imports[i].alias, actual.imports[i].alias);
+    EXPECT_EQ(expected.imports[i].symbols, actual.imports[i].symbols);
+    expectSameLocation(expected.imports[i].loc, actual.imports[i].loc);
+  }
+  ASSERT_EQ(expected.declarations.size(), actual.declarations.size());
+  for (std::size_t i = 0; i < expected.declarations.size(); ++i)
+    expectSameDecl(expected.declarations[i], actual.declarations[i]);
+}
+
+TEST(VAgentAstCloneTest, CloneExprCopiesEveryFieldAndOwnsEveryNode) {
+  Expr original;
+  original.kind       = ExprKind::AwaitEvent;
+  original.text       = "Ping";
+  original.loc        = SourceLocation{3, 7, 42};
+  original.names      = {"first", "second"};
+  original.annotation = Type{"List", {Type{"Int", {}}}};
+  original.binding    = "pong";
+  original.stamp      = ScopeStamp{.scope = 11, .ordinal = 4};
+  original.children.push_back(makeExpr(ExprKind::Integer, "1"));
+  original.children.back()->stamp = ScopeStamp{.scope = 11};
+  original.scope                  = makeExpr(ExprKind::Identifier, "inner");
+  original.recipients             = makeExpr(ExprKind::Identifier, "parent");
+  original.deadline               = makeExpr(ExprKind::Duration, "1s");
+  original.guard                  = makeExpr(ExprKind::Boolean, "true");
+  original.recovery               = makeExpr(ExprKind::Integer, "0");
+
+  const auto copy = cloneExpr(original);
+  ASSERT_TRUE(copy);
+  expectSameExpr(original, *copy);
+  // An absent metadata child clones to nullptr rather than a fresh node.
+  EXPECT_EQ(cloneExpr(ExprPtr{}), nullptr);
+}
+
+TEST(VAgentAstCloneTest, CloneDeclCopiesNestedMembersClausesAndFlags) {
+  // The population is intentionally ungrammatical — one Decl carrying every
+  // field at once, so the coverage does not depend on any one declaration
+  // kind's real shape.
+  Decl original;
+  original.kind         = DeclKind::Goal;
+  original.name         = "Enough";
+  original.loc          = SourceLocation{9, 2, 100};
+  original.parameters   = {Parameter{.name = "minimum",
+                                     .type = Type{"Int", {}},
+                                     .key  = true,
+                                     .loc  = SourceLocation{9, 13, 111}}};
+  original.result       = Type{"Bool", {}};
+  original.names        = {"Base", "Mixin"};
+  original.target       = "parentGoal";
+  original.goalKind     = GoalKind::Maintain;
+  original.planBindings = std::vector<std::string>{"bound", "names"};
+  Contract contract;
+  contract.postcondition = true;
+  contract.loc           = SourceLocation{10, 3, 120};
+  contract.condition     = makeExpr(ExprKind::Boolean, "true");
+  original.contracts.push_back(std::move(contract));
+  GoalClause clause;
+  clause.kind      = GoalClause::Kind::Drop;
+  clause.loc       = SourceLocation{11, 3, 140};
+  clause.condition = makeExpr(ExprKind::Believes);
+  clause.condition->children.push_back(makeExpr(ExprKind::Term, "level"));
+  clause.condition->scope = makeExpr(ExprKind::Identifier, "self");
+  original.goalClauses.push_back(std::move(clause));
+  Decl member;
+  member.kind        = DeclKind::Field;
+  member.name        = "watch";
+  member.result      = Type{"Opt", {Type{"Int", {}}}};
+  member.initializer = makeExpr(ExprKind::None);
+  original.members.push_back(std::move(member));
+  original.body     = makeExpr(ExprKind::Block);
+  original.guard    = makeExpr(ExprKind::Identifier, "ready");
+  original.trigger  = makeExpr(ExprKind::Term, "started");
+  original.deadline = makeExpr(ExprKind::Duration, "2s");
+  original.binding  = "alias";
+  original.priority = 7;
+  original.native   = true;
+  original.effect   = true;
+  original.preempts = true;
+
+  const auto copy = cloneDecl(original);
+  expectSameDecl(original, copy);
+}
+
+TEST(VAgentAstCloneTest, CloneProgramRoundTripsEverySpecificationSample) {
+  const std::filesystem::path directory("tests/samples/vagent");
+  ASSERT_TRUE(std::filesystem::is_directory(directory));
+  std::size_t clonedCount = 0;
+  for (const auto &entry : std::filesystem::directory_iterator(directory)) {
+    if (entry.path().extension() != ".vagent" ||
+        !entry.path().filename().string().starts_with("mini_"))
+      continue;
+    SCOPED_TRACE(entry.path().string());
+    std::ifstream stream(entry.path());
+    const std::string source(std::istreambuf_iterator<char>(stream), {});
+    auto parsed = Parser(source).parseProgram();
+    ASSERT_TRUE(parsed.has_value())
+        << (parsed ? "" : formatDiagnostic(parsed.error()));
+    const auto copy = cloneProgram(*parsed);
+    expectSameProgram(*parsed, copy);
+    ++clonedCount;
+  }
+  EXPECT_EQ(clonedCount, 23U);
 }
 
 } // namespace

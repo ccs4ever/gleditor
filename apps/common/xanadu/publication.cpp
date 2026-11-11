@@ -1093,8 +1093,13 @@ void applyOpsSegment(const std::string_view sealed, Store &history,
 std::unique_ptr<Store>
 historyFromSeal(const std::span<const std::string_view> segments,
                 const Scroll &from,
-                const std::map<std::string, Scroll> &scrolls) {
-  auto history                   = std::make_unique<Store>();
+                const std::map<std::string, Scroll> &scrolls,
+                const DocumentId *const documentId) {
+  auto history =
+      documentId != nullptr
+          ? std::make_unique<Store>(std::shared_ptr<UserPermascroll>{},
+                                    *documentId)
+          : std::make_unique<Store>();
   const auto selfScrollInHistory = history->addScroll(from);
   for (const auto &segment : segments) {
     applyOpsSegment(segment, *history, selfScrollInHistory, scrolls);
@@ -1104,9 +1109,11 @@ historyFromSeal(const std::span<const std::string_view> segments,
 
 std::unique_ptr<Store>
 historyFromSeal(const std::string_view sealed, const Scroll &from,
-                const std::map<std::string, Scroll> &scrolls) {
+                const std::map<std::string, Scroll> &scrolls,
+                const DocumentId *const documentId) {
   const std::array<std::string_view, 1> one{sealed};
-  return historyFromSeal(std::span<const std::string_view>{one}, from, scrolls);
+  return historyFromSeal(std::span<const std::string_view>{one}, from, scrolls,
+                         documentId);
 }
 
 std::unique_ptr<Store>

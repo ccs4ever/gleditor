@@ -219,9 +219,11 @@ VQLCompiler::compileArgument(const ValueExpr &argument,
     if (const auto builtin = compileBuiltinInvocation(**function, context))
       return {*builtin};
     const auto found = definitions_.find((*function)->name);
-    if (found == definitions_.end())
+    if (found == definitions_.end()) {
+      refuseSemanticBuiltin((*function)->name);
       throw std::invalid_argument("unknown compiled function: " +
                                   (*function)->name);
+    }
     requirePositionalArguments(**function);
     return compileCall(found->second, (*function)->args, context, false);
   }

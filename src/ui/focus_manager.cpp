@@ -446,6 +446,11 @@ bool FocusManager::dispatchKey(const KeyEvent &event) {
     return entry.policy.modal;
   }
   if (layout && event.key == Key::Return) {
+    // An editor may use Return as content rather than a dialog action.
+    if (entry.scope->keyPressed(event)) {
+      state_->refresh();
+      return true;
+    }
     auto target = entry.node;
     for (const auto &box : layout->boxes) {
       if (box.defaultAction && box.focusable && box.enabled &&
@@ -460,7 +465,8 @@ bool FocusManager::dispatchKey(const KeyEvent &event) {
       return true;
     }
   }
-  const bool handled = entry.scope->keyPressed(event);
+  const bool handled =
+      !(layout && event.key == Key::Return) && entry.scope->keyPressed(event);
   if (!handled && layout && entry.node &&
       (event.key == Key::Left || event.key == Key::Right ||
        event.key == Key::Up || event.key == Key::Down)) {

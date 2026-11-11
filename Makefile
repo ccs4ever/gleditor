@@ -275,7 +275,7 @@ TEST_PKGS := gmock_main
 # thing this program is for. Better to fail at configure time than to ship a
 # xanadoc editor that quietly cannot publish.
 # OpenSSL is required for in-process Ed25519 signing and X.509 v3 device delegation.
-XUDU_PKGS := libtorrent-rasterbar openssl lmdb libmagic sqlite3 spdlog libzstd libblake3 libzmq libngtcp2 libngtcp2_crypto_ossl
+XUDU_PKGS := libtorrent-rasterbar openssl lmdb libmagic sqlite3 libcurl spdlog libzstd libblake3 libzmq libngtcp2 libngtcp2_crypto_ossl
 ifneq (,$(filter-out $(NO_SDL_GOALS),$(or $(MAKECMDGOALS),all)))
 ifneq ($(shell pkg-config --exists libtorrent-rasterbar && echo 1),1)
 $(error libtorrent-rasterbar was not found by pkg-config. It is required: \
@@ -283,6 +283,48 @@ install libtorrent-rasterbar-dev (Debian, Ubuntu), libtorrent-rasterbar-devel \
 (Fedora), or libtorrent-rasterbar (Arch, Homebrew).)
 endif
 endif
+
+# Mail evidence needs gmime-3.0 (MIME parse + draft serialization) and
+# libetpan (the IMAP session); smtp_transport is curl-only and needs
+# neither, so the send path survives an etpan-less build. GLEDITOR_MAIL=0
+# disables both probes, =1 requires both libraries, unset probes each on
+# its own -- the gated TUs compile refusing stubs (the pg_backend shape),
+# so the ops exist and fail with an actionable answer.
+ifneq ($(GLEDITOR_MAIL),0)
+ifeq ($(shell pkg-config --exists gmime-3.0 && echo 1),1)
+GLEDITOR_HAVE_GMIME := 1
+endif
+ifeq ($(shell pkg-config --exists libetpan && echo 1),1)
+GLEDITOR_HAVE_ETPAN := 1
+endif
+ifeq ($(GLEDITOR_MAIL),1)
+ifndef GLEDITOR_HAVE_GMIME
+$(error GLEDITOR_MAIL=1 was asked for but GMime 3 was not found by \
+pkg-config. Install libgmime-3.0-dev (Debian, Ubuntu), gmime30-devel \
+(Fedora), gmime3 (Arch), gmime (Homebrew), or build GLEDITOR_MAIL=0.)
+endif
+ifndef GLEDITOR_HAVE_ETPAN
+$(error GLEDITOR_MAIL=1 was asked for but libetpan was not found by \
+pkg-config. Install libetpan-dev (Debian, Ubuntu), libetpan-devel (Fedora), \
+or libetpan (Arch, Homebrew), or build GLEDITOR_MAIL=0.)
+endif
+endif
+endif
+ifdef GLEDITOR_HAVE_GMIME
+override CXXFLAGS += -DGLEDITOR_HAVE_GMIME=1
+MAIL_PKGS += gmime-3.0
+endif
+ifdef GLEDITOR_HAVE_ETPAN
+override CXXFLAGS += -DGLEDITOR_HAVE_ETPAN=1
+MAIL_PKGS += libetpan
+endif
+# The IMAP session needs both halves -- etpan for the connection, gmime to
+# parse what it fetches -- so only the conjunction lights readImapMailbox's
+# real body; everything else gates on its own library's flag.
+ifneq ($(and $(GLEDITOR_HAVE_GMIME),$(GLEDITOR_HAVE_ETPAN)),)
+override CXXFLAGS += -DGLEDITOR_HAVE_MAIL=1
+endif
+MAIL_LIBS := $(if $(MAIL_PKGS),$(shell pkg-config $(STATIC) --libs $(MAIL_PKGS)))
 
 # Which platform this is. Up here because the accessibility block below needs
 # it, and it is wanted again further down for what a shared library is called.
@@ -562,11 +604,11 @@ ifdef GLEDITOR_HAVE_SYSTEMD
 override CXXFLAGS += -DGLEDITOR_HAVE_SYSTEMD=1 $(SYSTEMD_CFLAGS)
 endif
 
-XUDU_LIBS := $(shell pkg-config $(STATIC) --libs $(XUDU_PKGS)) $(PG_LIBS) $(SYSTEMD_LIBS)
+XUDU_LIBS := $(shell pkg-config $(STATIC) --libs $(XUDU_PKGS)) $(PG_LIBS) $(SYSTEMD_LIBS) $(MAIL_LIBS)
 # Matches XUDU_PKGS because ZIGZAG_SHARED_CORE_OBJS is XUDU_CORE_OBJS: zigzag
 # links the whole xanalogical engine, so it needs whatever that engine needs.
 ZIGZAG_PKGS := $(XUDU_PKGS)
-ZIGZAG_LIBS := $(shell pkg-config $(STATIC) --libs $(ZIGZAG_PKGS)) $(PG_LIBS) $(SYSTEMD_LIBS)
+ZIGZAG_LIBS := $(shell pkg-config $(STATIC) --libs $(ZIGZAG_PKGS)) $(PG_LIBS) $(SYSTEMD_LIBS) $(MAIL_LIBS)
 
 # glslangValidator is the traditional name and glslang the current one; which
 # of the two a distribution installs varies, so both are tried.
@@ -637,6 +679,19 @@ XUZZ_SRCS      := $(shell find apps/xuzz -name '*.cpp' 2>/dev/null)
 LIB_TEST_SRCS  := $(shell find tests/lib -name '*.cpp' 2>/dev/null)
 ZIGZAG_TEST_SRCS := $(shell find tests/zigzag -name '*.cpp' 2>/dev/null)
 XUZZ_TEST_SRCS := $(shell find tests/xuzz -name '*.cpp' 2>/dev/null)
+# Mail tests exercise the real libraries; under the refusing-stub builds the
+# behaviors they pin (draft bytes, parsed messages, live session failures)
+# are exactly the ones that are off, so they drop with their libraries.
+ifndef GLEDITOR_HAVE_GMIME
+XUZZ_TEST_SRCS := $(filter-out tests/xuzz/evidence_mime_test.cpp \
+                  tests/xuzz/evidence_mail_draft_test.cpp \
+                  tests/xuzz/evidence_smtp_transport_test.cpp \
+                  tests/xuzz/effect_communications_test.cpp,$(XUZZ_TEST_SRCS))
+endif
+ifndef GLEDITOR_HAVE_MAIL
+XUZZ_TEST_SRCS := $(filter-out tests/xuzz/evidence_imap_transport_test.cpp \
+                  tests/xuzz/evidence_mail_controller_test.cpp,$(XUZZ_TEST_SRCS))
+endif
 
 OBJDIR := build/
 obj = $(addprefix $(OBJDIR)/,$(patsubst %.cpp,%.o,$(1)))
@@ -676,12 +731,14 @@ VICONC_SRCS     := $(shell find apps/viconc -name '*.cpp' 2>/dev/null)
 VICONC_OBJS     := $(call obj,$(VICONC_SRCS))
 VAGENT_SRCS     := $(shell find apps/vagent -name '*.cpp' 2>/dev/null)
 VAGENT_OBJS     := $(call obj,$(VAGENT_SRCS))
-VAGENT_FRONTEND_SRCS := $(addprefix apps/common/xanadu/vagent/,token.cpp lexer.cpp parser.cpp checker.cpp)
+VAGENT_FRONTEND_SRCS := $(addprefix apps/common/xanadu/vagent/,token.cpp lexer.cpp parser.cpp checker.cpp cell_path.cpp code_path.cpp resolve.cpp frontend.cpp ast_clone.cpp expand.cpp) \
+    $(addprefix apps/common/xanadu/vql/,lexer.cpp parser.cpp) \
+    apps/common/xanadu/scanner_base.cpp
 VAGENT_FRONTEND_OBJS := $(call obj,$(VAGENT_FRONTEND_SRCS))
-VAGENT_FRONTEND_TEST_SRCS := $(addprefix tests/xuzz/,vagent_lexer_test.cpp vagent_parser_test.cpp vagent_checker_test.cpp vagent_guide_test.cpp)
+VAGENT_FRONTEND_TEST_SRCS := $(addprefix tests/xuzz/,vagent_lexer_test.cpp vagent_parser_test.cpp vagent_checker_test.cpp vagent_guide_test.cpp vagent_code_path_test.cpp vagent_expand_test.cpp)
 VAGENT_FRONTEND_TEST_OBJS := $(call obj,$(VAGENT_FRONTEND_TEST_SRCS))
 VAGENT_SYNTAX_TEST_OBJS := $(call obj,tests/xuzz/vagent_lexer_test.cpp tests/xuzz/vagent_parser_test.cpp)
-VAGENT_SYNTAX_OBJS := $(call obj,apps/common/xanadu/vagent/token.cpp apps/common/xanadu/vagent/lexer.cpp apps/common/xanadu/vagent/parser.cpp)
+VAGENT_SYNTAX_OBJS := $(call obj,apps/common/xanadu/vagent/token.cpp apps/common/xanadu/vagent/lexer.cpp apps/common/xanadu/vagent/parser.cpp apps/common/xanadu/vagent/ast_clone.cpp)
 VAGENT_RUNTIME_TEST_OBJS := $(call obj,tests/xuzz/vortex_logic_test.cpp tests/xuzz/vortex_core_test.cpp tests/xuzz/arena_manifold_test.cpp tests/xuzz/transport_and_or_parallel_test.cpp tests/xuzz/mesh_vortex_artifact_test.cpp)
 # This suite isolates shared VM prerequisites while frontend/lowering evolves.
 VAGENT_RUNTIME_CORE_OBJS := $(filter-out $(call obj,$(shell find apps/common/xanadu/vagent -name '*.cpp' 2>/dev/null)),$(XUDU_CORE_OBJS))
@@ -788,6 +845,19 @@ SPIRV := $(patsubst assets/shaders/%.glsl,assets/shaders/vulkan/%.spv,$(GLSL_SOU
 all: lib gleditor xudu xuzz zigzag store-dump xudu-dump vqueryc vquery vprolog vplc vpl vlace vlacec vicon viconc vagent gleditor_test xuzz_test xudu_test zigzag_test $(OBJDIR)/compile_commands.json
 ifdef GLEDITOR_ENABLE_VULKAN
 all: shaders
+endif
+
+# Native source adapters share curl's bounded connection and TLS support.
+EVIDENCE_CURL_ADAPTERS := capture fediverse_transport irc_transport mail_transport smtp_transport
+$(foreach adapter,$(EVIDENCE_CURL_ADAPTERS),$(addprefix $(OBJDIR)/apps/common/xanadu/evidence/$(adapter),.o .j .dep)): private CXXFLAGS += $(shell pkg-config --cflags libcurl)
+$(foreach test,evidence_imap_transport_test evidence_smtp_transport_test,$(addprefix $(OBJDIR)/tests/xuzz/$(test),.o .j .dep)): private CXXFLAGS += $(shell pkg-config --cflags libcurl)
+ifdef GLEDITOR_HAVE_ETPAN
+$(addprefix $(OBJDIR)/apps/common/xanadu/evidence/mail_transport,.o .j .dep): private CXXFLAGS += $(shell pkg-config --cflags libetpan)
+endif
+EVIDENCE_GMIME_ADAPTERS := mime mail_draft
+ifdef GLEDITOR_HAVE_GMIME
+$(addprefix $(OBJDIR)/tests/xuzz/evidence_mail_draft_test,.o .j .dep): private CXXFLAGS += $(shell pkg-config --cflags gmime-3.0)
+$(foreach adapter,$(EVIDENCE_GMIME_ADAPTERS),$(addprefix $(OBJDIR)/apps/common/xanadu/evidence/$(adapter),.o .j .dep)): private CXXFLAGS += $(shell pkg-config --cflags gmime-3.0)
 endif
 
 # cannot unveil a nonexistant directory, have to remove the sandbox for
@@ -999,6 +1069,13 @@ $(OBJDIR)/zigzag_test: $(ZIGZAG_TEST_OBJS) $(ZIGZAG_SHARED_CORE_OBJS) $(COMMON_U
 FUZZ_OBJDIR   := $(OBJDIR)/fuzz
 FUZZ_FLAGS    := -fsanitize=fuzzer-no-link,address,undefined
 FUZZ_CORE_OBJS := $(patsubst %.cpp,$(FUZZ_OBJDIR)/%.o,$(XUDU_CORE_SRCS))
+$(foreach adapter,$(EVIDENCE_CURL_ADAPTERS),$(FUZZ_OBJDIR)/apps/common/xanadu/evidence/$(adapter).o): private CXXFLAGS += $(shell pkg-config --cflags libcurl)
+ifdef GLEDITOR_HAVE_ETPAN
+$(FUZZ_OBJDIR)/apps/common/xanadu/evidence/mail_transport.o: private CXXFLAGS += $(shell pkg-config --cflags libetpan)
+endif
+ifdef GLEDITOR_HAVE_GMIME
+$(foreach adapter,$(EVIDENCE_GMIME_ADAPTERS),$(FUZZ_OBJDIR)/apps/common/xanadu/evidence/$(adapter).o): private CXXFLAGS += $(shell pkg-config --cflags gmime-3.0)
+endif
 # scroll.cpp and publication.cpp (both under XUDU_CORE_SRCS above) now call
 # into MimeType and SourceGrounder, which live under src/ rather than
 # apps/common/xanadu/ and so are not swept up by XUDU_CORE_SRCS. Needed here for
@@ -1068,6 +1145,15 @@ vql-rank-benchmark: $(OBJDIR)/vql-rank-benchmark
 $(OBJDIR)/vql-rank-benchmark: $(VQL_RANK_BENCH_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS)
 
+# Scoped VQL experiment; inherits the compiler/standard probes and headless env.
+.PHONY: vql-spike vql-spike-abi
+vql-spike: $(OBJDIR)/vql-spike
+vql-spike-abi: $(OBJDIR)/vql-spike-abi.s
+$(OBJDIR)/vql-spike-abi.s: tools/spikes/vql_abi_probe.cpp $(FLAGSTAMP) | $(OBJDIR)/
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -S -o $@ $<
+$(OBJDIR)/vql-spike: $(call obj,tools/spikes/spike_vql_semantics.cpp) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
+	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS)
+
 .PHONY: vqueryc
 vqueryc: $(OBJDIR)/vqueryc
 $(OBJDIR)/vqueryc: $(VQUERYC_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
@@ -1115,10 +1201,10 @@ $(OBJDIR)/viconc: $(VICONC_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OB
 
 .PHONY: vagent vagent_frontend_test vagent_syntax_test vagent_runtime_test test/vagent-frontend test/vagent-syntax test/vagent-runtime
 vagent: $(OBJDIR)/vagent
-# The first iteration checks source without instantiating a device or VM.
-# Vortex lowering and the actor adapter will add their engine dependencies.
-$(OBJDIR)/vagent: $(VAGENT_OBJS) $(VAGENT_FRONTEND_OBJS)
-	$(CXX) $(LDFLAGS) -o $@ $^
+# `run` lowers into the engine and drives MeshActorRuntime + VagentAdapter,
+# so the binary carries the whole xanalogical core like the runner tests do.
+$(OBJDIR)/vagent: $(VAGENT_OBJS) $(VAGENT_FRONTEND_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
+	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS)
 
 vagent_frontend_test: $(OBJDIR)/vagent_frontend_test
 $(OBJDIR)/vagent_frontend_test: $(VAGENT_FRONTEND_TEST_OBJS) $(VAGENT_FRONTEND_OBJS)
@@ -1145,6 +1231,53 @@ $(OBJDIR)/vagent_compiler_test: $(call obj,tests/xuzz/vagent_compiler_test.cpp) 
 
 test/vagent-compiler: vagent_compiler_test
 	$(OBJDIR)/vagent_compiler_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
+
+# Phase-3 fragment emission + the sibling's std:meta surface share one
+# dedicated binary: both suites exercise the emitted head/descriptor/
+# +d.refs/+d.recipe schema and the `run` convention engine-side.
+.PHONY: vagent_fragment_test test/vagent-fragment
+vagent_fragment_test: $(OBJDIR)/vagent_fragment_test
+$(OBJDIR)/vagent_fragment_test: $(call obj,tests/xuzz/vagent_fragment_test.cpp tests/xuzz/vagent_meta_test.cpp) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
+	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS) $(TEST_LIBS)
+
+test/vagent-fragment: vagent_fragment_test
+	$(OBJDIR)/vagent_fragment_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
+
+# Phase-4 runtime mutation + P15's kind-immutability funnel share one
+# dedicated kernel-linked binary (the vagent_fragment_test shape):
+# mutation covers the graft/prune/learn_* verbs; P15 covers the
+# write-funnel's typed refusals and the program-image registration
+# pass — both suites exercise vagent/ objects vagent_runtime_test
+# filters out.
+.PHONY: vagent_mutation_test test/vagent-mutation
+vagent_mutation_test: $(OBJDIR)/vagent_mutation_test
+$(OBJDIR)/vagent_mutation_test: $(call obj,tests/xuzz/vagent_p15_test.cpp tests/xuzz/vagent_mutation_test.cpp) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
+	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS) $(TEST_LIBS)
+
+test/vagent-mutation: vagent_mutation_test
+	$(OBJDIR)/vagent_mutation_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
+
+# Phase-5 lineage plumbing + genesis (a)-(e) ceremony: two dedicated
+# kernel-linked binaries in the vagent_fragment_test shape — the pair
+# splits along the seam in vagent/lineage.hpp, so each half links and
+# runs without the other half's test file having landed yet. Both
+# suites exercise vagent/ objects vagent_runtime_test filters out
+# (lineage.cpp is glob-picked into XUDU_CORE_OBJS like fragment.cpp).
+.PHONY: vagent_lineage_test test/vagent-lineage
+vagent_lineage_test: $(OBJDIR)/vagent_lineage_test
+$(OBJDIR)/vagent_lineage_test: $(call obj,tests/xuzz/vagent_lineage_test.cpp) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
+	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS) $(TEST_LIBS)
+
+test/vagent-lineage: vagent_lineage_test
+	$(OBJDIR)/vagent_lineage_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
+
+.PHONY: vagent_genesis_test test/vagent-genesis
+vagent_genesis_test: $(OBJDIR)/vagent_genesis_test
+$(OBJDIR)/vagent_genesis_test: $(call obj,tests/xuzz/vagent_genesis_test.cpp) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
+	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS) $(TEST_LIBS)
+
+test/vagent-genesis: vagent_genesis_test
+	$(OBJDIR)/vagent_genesis_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
 
 test/vagent-frontend: vagent vagent_frontend_test
 	$(OBJDIR)/vagent_frontend_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
@@ -1666,6 +1799,7 @@ install: $(OBJDIR)/gleditor $(OBJDIR)/xuzz $(OBJDIR)/xudu $(OBJDIR)/zigzag
 ifdef GLEDITOR_ENABLE_VULKAN
 install: shaders
 endif
+
 install:
 	$(INSTALL) -d $(DESTDIR)$(bindir)
 	$(INSTALL) -m 755 $(OBJDIR)/gleditor $(DESTDIR)$(bindir)/gleditor

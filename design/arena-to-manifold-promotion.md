@@ -308,9 +308,17 @@ When `promote()` is called on an overlaid arena:
   `ephemeralBit`) trigger `makeCell` or `makeScalarCell`.
 - **Topological Re-linking**: Any modified or newly attached edges between base cells and new cells
   are emitted as standard `SetLink` operations.
+- **Opt-in edge clears**: Link emission is a net-state diff — each owned cell's shadowed edge set is
+  compared against the base edge set and only changed edges emit. By default (`commitShadowed`
+  unset) a *dropped* base edge still emits nothing, preserving the legacy additive-only behavior. A
+  caller that supplies `PromotionBudget::commitShadowed` may return `ShadowCommit::Clears` per cell,
+  which emits `setLink(…, std::nullopt)` — the canonical "rearrange to limbo" clear — for durably
+  dropped edges, or `ShadowCommit::Suppress` to emit nothing for that cell at all. See
+  [`design/arena-promotion-delta-completeness.md`](arena-promotion-delta-completeness.md).
 
 This provides seamless **delta promotion**: speculative work updates the document without
-duplicating existing subgraphs or re-minting existing text.
+duplicating existing subgraphs or re-minting existing text — and, under an explicit per-cell opt-in,
+without losing dropped edges.
 
 ______________________________________________________________________
 
@@ -344,16 +352,18 @@ ______________________________________________________________________
 
 ## 7. Comparative Summary of Promotion Modes
 
-| Metric / Behavior       | Root-Reachable (`promote`)     | Overlay Delta (`promote`)    | Whole-Program (`exportToStore`)   |
-| :---------------------- | :----------------------------- | :--------------------------- | :-------------------------------- |
-| **Primary Use Case**    | Query / Vlog / VPL expressions | Interactive document editing | Compiler CLI (`vplc`), libraries  |
-| **Selection Strategy**  | BFS walk from `root`           | BFS walk from `root`         | Linear sweep over all dense slots |
-| **Unreachable Cells**   | Silently dropped (pruned)      | Silently dropped (pruned)    | Fully exported if allocated       |
-| **Base Document Cells** | N/A (unbacked arena)           | Mapped to self; zero ops     | N/A (fresh store creation)        |
-| **Scratch Buffer Text** | Spooled to permascroll         | Spooled to permascroll       | Spooled via string values         |
-| **Scalar Cells (R6)**   | Bits + permascroll text        | Bits + permascroll text      | Bits + permascroll text           |
-| **Safety Guard**        | Rejects `ephemeralBit`         | Rejects `ephemeralBit`       | Maps all slots via `cellMap`      |
-| **Budget Enforcement**  | Yes (`PromotionBudget`)        | Yes (`PromotionBudget`)      | Unbounded (compiler-driven)       |
+| Metric / Behavior       | Root-Reachable (`promote`)     | Overlay Delta (`promote`)     | Whole-Program (`exportToStore`)   |
+| :---------------------- | :----------------------------- | :---------------------------- | :-------------------------------- |
+| **Primary Use Case**    | Query / Vlog / VPL expressions | Interactive document editing  | Compiler CLI (`vplc`), libraries  |
+| **Selection Strategy**  | BFS walk from `root`           | BFS walk from `root`          | Linear sweep over all dense slots |
+| **Unreachable Cells**   | Silently dropped (pruned)      | Silently dropped (pruned)     | Fully exported if allocated       |
+| **Base Document Cells** | N/A (unbacked arena)           | Mapped to self                | N/A (fresh store creation)        |
+| **Dropped Base Edges**  | N/A                            | Additive by default; durable  | N/A (fresh store creation)        |
+|                         |                                | clears under `commitShadowed` |                                   |
+| **Scratch Buffer Text** | Spooled to permascroll         | Spooled to permascroll        | Spooled via string values         |
+| **Scalar Cells (R6)**   | Bits + permascroll text        | Bits + permascroll text       | Bits + permascroll text           |
+| **Safety Guard**        | Rejects `ephemeralBit`         | Rejects `ephemeralBit`        | Maps all slots via `cellMap`      |
+| **Budget Enforcement**  | Yes (`PromotionBudget`)        | Yes (`PromotionBudget`)       | Unbounded (compiler-driven)       |
 
 ______________________________________________________________________
 

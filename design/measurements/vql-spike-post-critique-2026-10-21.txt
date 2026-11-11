@@ -1,0 +1,30 @@
+compiler=Clang 23.1.1 cplusplus=202400 steady_clock=1
+cells=1000 dimensions=2 repetitions=21 warmups=3
+allocation_probe_self_check=pass
+layout CellRef size=4 align=4
+layout zigzag::CellSlot size=32 align=8
+layout zigzag::DimLink size=12 align=4
+layout SignedDimensionStep size=64 align=8
+layout PathStep size=264 align=8
+layout PathExpression size=480 align=8
+layout QueryExpression size=560 align=8
+layout VQLEngine size=344 align=8
+layout PrototypeHyperHandle size=16 align=8
+layout PrototypeCurriedMorphism size=24 align=8
+layout PrototypeDynamicLensMatrix size=64 align=8
+query=##/+d.items/+d.hop0/+d.hop1
+functor=let $h0 := /+d.hop0; let $h1 := /+d.hop1; let $walk := $h0 / $h1; ##/+d.items / $walk
+fixture_cells=3022 expected_count=1000 expected_checksum=10415434106586018603
+parse_eval_first_use samples=1 min_ns=290795.0 median_ns=290795.0 p95_ns=290795.0 new_calls_mean=7050.0 requested_bytes_mean=333125.0 delete_calls_mean=7049.0
+parse_first_observed samples=1 min_ns=3547.0 median_ns=3547.0 p95_ns=3547.0 new_calls_mean=5.0 requested_bytes_mean=3368.0 delete_calls_mean=2.0
+parse_only_warm samples=21 min_ns=1643.0 median_ns=1653.0 p95_ns=1673.0 new_calls_mean=5.0 requested_bytes_mean=3368.0 delete_calls_mean=5.0
+parse_eval_fresh_engine samples=21 min_ns=224990.0 median_ns=229608.0 p95_ns=262181.0 new_calls_mean=7050.0 requested_bytes_mean=333125.0 delete_calls_mean=7050.0
+eval_parsed_fresh_engine samples=21 min_ns=223667.0 median_ns=229609.0 p95_ns=254746.0 new_calls_mean=7045.0 requested_bytes_mean=329757.0 delete_calls_mean=7045.0
+eval_parsed_warm_engine samples=21 min_ns=222845.0 median_ns=225360.0 p95_ns=230490.0 new_calls_mean=7045.0 requested_bytes_mean=329757.0 delete_calls_mean=7045.0
+eval_bound_functor_warm samples=21 min_ns=223988.0 median_ns=232543.0 p95_ns=263012.0 new_calls_mean=7046.0 requested_bytes_mean=333757.0 delete_calls_mean=7046.0
+native_link_visitor samples=21 min_ns=22212.0 median_ns=22644.0 p95_ns=25539.0 new_calls_mean=0.0 requested_bytes_mean=0.0 delete_calls_mean=0.0
+compile_identity_fresh_runtime samples=21 min_ns=1252.0 median_ns=1262.0 p95_ns=1343.0 new_calls_mean=13.0 requested_bytes_mean=954.0 delete_calls_mean=7.0
+compiled_identity count=1 checksum=4953164290808674201 execution=success (only_common_subset_measured)
+compiled_rank refused=whole-rank traversal is not compiled to Vortex yet; run the query with --engine direct
+compiled_functor refused=point-free path functors is not compiled to Vortex yet; run the query with --engine direct
+correctness=pass arena_growth=0

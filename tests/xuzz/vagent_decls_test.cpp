@@ -1,0 +1,400 @@
+// M0 declaration lowering tests (design/vagent-actor-executor.md §8):
+// the DeclKind disposition table, module/symbol/clause emission, the
+// +d.dirs/+d.agents agent path, +d.holder dispatch ownership, the
+// $-reserved seeds and the executor dim filing.
+
+#include "common/xanadu/vagent/decls.hpp"
+
+#include <gmock/gmock.h>
+#include <gtest/gtest.h>
+
+#include "common/xanadu/vagent/frontend.hpp"
+#include "common/xanadu/vagent/lineage.hpp"
+#include "common/xanadu/vagent/meta.hpp"
+#include "common/xanadu/vagent/records.hpp"
+
+namespace {
+
+using namespace xanadu::vagent;
+using zigzag::CellRef;
+using zigzag::DimRef;
+using zigzag::noCell;
+using zigzag::Posward;
+
+struct DeclHarness {
+  zigzag::ArenaManifold arena;
+  zigzag::vortex::VortexCore core{arena};
+  zigzag::vortex::VortexVM vm{core};
+
+  std::expected<LoweredImage, std::vector<Diagnostic>>
+  lower(std::string_view source) {
+    auto artifacts = compileArtifacts(source);
+    if (!artifacts) return std::unexpected(artifacts.error());
+    return lowerProgram(artifacts->program, core, vm, {},
+                        &artifacts->expansion, &artifacts->fragmentInfo);
+  }
+
+  std::vector<CellRef> rank(CellRef cell, DimRef dim) const {
+    std::vector<CellRef> out;
+    for (const auto member : zigzag::rankAfter(arena, cell, dim))
+      out.push_back(member);
+    return out;
+  }
+  std::optional<CellRef> named(CellRef owner, DimRef dim,
+                               std::string_view name) const {
+    for (const auto member : rank(owner, dim))
+      if (arena.textOf(member) == name) return member;
+    return std::nullopt;
+  }
+};
+
+TEST(VagentDeclsTest, DispositionTableDisposesEveryDeclKind) {
+  const DeclKind kinds[] = {
+      DeclKind::Event,     DeclKind::Record,      DeclKind::Predicate,
+      DeclKind::Question,  DeclKind::Capacity,    DeclKind::Skill,
+      DeclKind::Behavior,  DeclKind::Agent,       DeclKind::Goal,
+      DeclKind::Plan,      DeclKind::Method,      DeclKind::Answer,
+      DeclKind::Handler,   DeclKind::Field,       DeclKind::Uses,
+      DeclKind::Install,   DeclKind::BehaviorUse, DeclKind::Belief,
+      DeclKind::Lifecycle,
+  };
+  ASSERT_EQ(std::size(kinds), 19U);
+  int lowers = 0, stubs = 0, refuses = 0;
+  for (const auto kind : kinds) switch (declDisposition(kind)) {
+    case DeclDisposition::Lower:
+      ++lowers;
+      break;
+    case DeclDisposition::Stub:
+      ++stubs;
+      break;
+    case DeclDisposition::Refuse:
+      ++refuses;
+      break;
+    }
+  EXPECT_EQ(lowers, 18);
+  EXPECT_EQ(stubs, 1);
+  EXPECT_EQ(refuses, 0);
+
+  EXPECT_EQ(declDisposition(DeclKind::Agent), DeclDisposition::Lower);
+  EXPECT_EQ(declDisposition(DeclKind::Handler), DeclDisposition::Lower);
+  EXPECT_EQ(declDisposition(DeclKind::Field), DeclDisposition::Lower);
+  EXPECT_EQ(declDisposition(DeclKind::Uses), DeclDisposition::Lower);
+  EXPECT_EQ(declDisposition(DeclKind::Install), DeclDisposition::Lower);
+  EXPECT_EQ(declDisposition(DeclKind::BehaviorUse), DeclDisposition::Lower);
+}
+
+TEST(VagentDeclsTest, AgentImageAssembles) {
+  DeclHarness h;
+  auto image = h.lower(R"(
+    module demo
+    event Tick
+    agent A {
+      goal Reach(target: Int) perform
+      plan direct for Reach(target) { }
+      on Tick { }
+      def value(): Int { 1 }
+    }
+  )");
+  ASSERT_TRUE(image.has_value());
+  if (!image) return;
+  const auto &dims = h.core.dims();
+
+  EXPECT_EQ(image->programRoot, h.core.home());
+  ASSERT_NE(image->agentCell, noCell);
+  ASSERT_NE(image->directory, noCell);
+  ASSERT_NE(image->ownModule, noCell);
+
+  // Module cell rides the program root's +d.stdlib rank, content =
+  // path verbatim.
+  EXPECT_EQ(h.arena.textOf(image->ownModule), "demo");
+  EXPECT_THAT(h.rank(image->programRoot, dims.stdlib),
+              ::testing::Contains(image->ownModule));
+
+  // cells"##/+d.dirs/+d.agents" — the agent is reachable from home
+  // through the purpose-minted directory cell, not directly.
+  const auto dirs   = h.core.findOrMintDimension("d.dirs");
+  const auto agents = h.core.findOrMintDimension("d.agents");
+  const auto holder = h.core.findOrMintDimension("d.holder");
+  EXPECT_THAT(h.rank(image->programRoot, dirs),
+              ::testing::ElementsAre(image->directory));
+  EXPECT_THAT(h.rank(image->directory, agents),
+              ::testing::ElementsAre(image->agentCell));
+
+  // Declared symbols on the module's +d.vars rank.
+  const auto reach = h.named(image->ownModule, dims.vars, "Reach");
+  const auto tick  = h.named(image->ownModule, dims.vars, "Tick");
+  const auto value = h.named(image->ownModule, dims.vars, "value");
+  ASSERT_TRUE(reach.has_value());
+  ASSERT_TRUE(tick.has_value());
+  ASSERT_TRUE(value.has_value());
+
+  // Goal/event symbols carry +d.holder → a scalar cell whose content
+  // is the agent ref (one link per cell per dim means the agent's
+  // -d.holder slot could only ever pair one symbol).
+  const auto holderOf = [&](CellRef sym) {
+    const auto cell = h.arena.linked(sym, holder, Posward);
+    return cell ? h.arena.asInt64(*cell) : std::nullopt;
+  };
+  EXPECT_EQ(holderOf(*reach), static_cast<std::int64_t>(image->agentCell));
+  EXPECT_EQ(holderOf(*tick), static_cast<std::int64_t>(image->agentCell));
+
+  // The plan clause: +d.name/+d.grab/+d.spin on the goal's +d.clause
+  // rank — the graftPlan shape — with declared body-head names.
+  const auto planClauses = h.rank(*reach, dims.clause);
+  ASSERT_EQ(planClauses.size(), 1U);
+  const auto clause   = planClauses.front();
+  const auto nameCell = h.arena.linked(clause, dims.name, Posward);
+  ASSERT_TRUE(nameCell.has_value());
+  EXPECT_EQ(h.arena.textOf(*nameCell), "direct");
+  const auto guard = h.arena.linked(clause, dims.grab, Posward);
+  const auto body  = h.arena.linked(clause, dims.spin, Posward);
+  ASSERT_TRUE(guard.has_value());
+  ASSERT_TRUE(body.has_value());
+  const auto bodyName = h.arena.linked(*body, dims.name, Posward);
+  ASSERT_TRUE(bodyName.has_value());
+  EXPECT_EQ(h.arena.textOf(*bodyName), "decl:demo:direct:body");
+  EXPECT_TRUE(
+      h.arena.linked(*body, h.core.findOrMintDimension("d.entry"), Posward)
+          .has_value());
+
+  // The handler clause lands on the event symbol the same way.
+  const auto onClauses = h.rank(*tick, dims.clause);
+  ASSERT_EQ(onClauses.size(), 1U);
+  const auto onName = h.arena.linked(onClauses.front(), dims.name, Posward);
+  ASSERT_TRUE(onName.has_value());
+  EXPECT_EQ(h.arena.textOf(*onName), "on:Tick");
+
+  // `def` lowers a callable: the symbol's +d.values names its head.
+  EXPECT_TRUE(h.arena.linked(*value, dims.values, Posward).has_value());
+
+  // $-reserved seeds are claimed on the agent cell.
+  for (const auto seed : {"$turn", "$step", "$stats"})
+    EXPECT_TRUE(
+        varsRecord(h.arena, h.core, image->agentCell, seed, false).has_value())
+        << seed;
+
+  // Bodies emitted ops — the image record exists.
+  EXPECT_NE(image->imageRecord, noCell);
+}
+
+TEST(VagentDeclsTest, StubKindsMintSymbolsAndRecord) {
+  DeclHarness h;
+  auto image = h.lower(R"(
+    module demo
+    record S { f: Int }
+    question q(x: Int): Int
+    predicate reading(v: Int)
+  )");
+  ASSERT_TRUE(image.has_value());
+  if (!image) return;
+  const auto &dims = h.core.dims();
+  // `q` lowers — the symbol and signature are its whole image; `S`
+  // lowers for its field schema. Nothing here defers to a stub.
+  EXPECT_THAT(image->stubbed,
+              ::testing::Not(::testing::Contains("q")));
+  EXPECT_THAT(image->stubbed,
+              ::testing::Not(::testing::Contains("S")));
+  EXPECT_TRUE(h.named(image->ownModule, dims.vars, "S").has_value());
+  EXPECT_TRUE(h.named(image->ownModule, dims.vars, "q").has_value());
+  EXPECT_TRUE(h.named(image->ownModule, dims.vars, "reading").has_value());
+}
+
+TEST(VagentDeclsTest, BeliefMembersMintCreationFactsIntoTheBank) {
+  DeclHarness h;
+  const auto image = h.lower("module demo\n"
+                             "predicate level(value: Int)\n"
+                             "predicate pair(a: Int, b: Int)\n"
+                             "agent A {\n"
+                             "  believe level(5)\n"
+                             "  believe pair(3, 4)\n"
+                             "}");
+  ASSERT_TRUE(image.has_value());
+  if (!image) return;
+
+  const auto &dims     = h.core.dims();
+  const auto beliefDim = h.core.findOrMintDimension("d.belief");
+  EXPECT_THAT(image->stubbed, ::testing::IsEmpty());
+
+  // Each member's predicate bank hangs off the agent's +d.belief rank.
+  const auto level = h.named(image->agentCell, beliefDim, "level");
+  const auto pair  = h.named(image->agentCell, beliefDim, "pair");
+  ASSERT_TRUE(level.has_value());
+  ASSERT_TRUE(pair.has_value());
+
+  // One clause apiece — +d.grab holds the marshaled ground term.
+  const auto clauses = h.rank(*level, dims.clause);
+  ASSERT_EQ(clauses.size(), 1u);
+  const auto term = h.arena.linked(clauses.front(), dims.grab, Posward);
+  ASSERT_TRUE(term.has_value());
+  EXPECT_EQ(h.arena.textOf(*term), "level");
+  const auto arg = h.arena.linked(*term, dims.step, Posward);
+  ASSERT_TRUE(arg.has_value());
+  EXPECT_EQ(h.arena.textOf(*arg), "5");
+
+  // +d.source records creation provenance: peer=self, turn=0.
+  const auto source = h.arena.linked(
+      clauses.front(), h.core.findOrMintDimension("d.source"), Posward);
+  ASSERT_TRUE(source.has_value());
+  const auto peer = varsRecord(h.arena, h.core, *source, "peer", false);
+  ASSERT_TRUE(peer.has_value());
+  // peer=self rides as scalar content — an edge could not be shared
+  // across clauses sourced from the same agent.
+  const auto peerCell = h.arena.linked(*peer, dims.values, Posward);
+  ASSERT_TRUE(peerCell.has_value());
+  EXPECT_EQ(h.arena.asInt64(*peerCell),
+            std::optional{static_cast<std::int64_t>(image->agentCell)});
+  const auto turn = varsRecord(h.arena, h.core, *source, "turn", false);
+  ASSERT_TRUE(turn.has_value());
+  const auto turnCell = h.arena.linked(*turn, dims.values, Posward);
+  ASSERT_TRUE(turnCell.has_value());
+  EXPECT_EQ(h.arena.asInt64(*turnCell), std::optional<std::int64_t>{0});
+}
+
+TEST(VagentDeclsTest, CompositionDirectivesRefuse) {
+  DeclHarness h;
+  const auto image = h.lower("agent A { uses B }");
+  ASSERT_FALSE(image.has_value());
+  EXPECT_FALSE(image.error().empty());
+}
+
+TEST(VagentDeclsTest, ExecutorDimensionsFileWithTheAgentSet) {
+  for (const auto name :
+       {"d.agents", "d.dirs", "d.seen", "d.evidence", "d.verb", "d.holder"})
+    EXPECT_TRUE(std::ranges::find(kAgentDimensionNames, name) !=
+                std::ranges::end(kAgentDimensionNames))
+        << name;
+}
+
+TEST(VagentDeclsTest, RefusedBodiesStillMintNamedHeads) {
+  DeclHarness h;
+  // `emit` is an agent statement kind the scalar Emitter refuses —
+  // the head and its declared name still land, over a stub graph.
+  auto image = h.lower(R"(
+    module demo
+    event Tick
+    event Seen { v: Int }
+    agent A { on Tick { emit Seen{v: 1} } }
+  )");
+  ASSERT_TRUE(image.has_value());
+  if (!image) return;
+  const auto &dims = h.core.dims();
+  const auto tick  = h.named(image->ownModule, dims.vars, "Tick");
+  ASSERT_TRUE(tick.has_value());
+  const auto clauses = h.rank(*tick, dims.clause);
+  ASSERT_EQ(clauses.size(), 1U);
+  const auto body = h.arena.linked(clauses.front(), dims.spin, Posward);
+  ASSERT_TRUE(body.has_value());
+  const auto bodyName = h.arena.linked(*body, dims.name, Posward);
+  ASSERT_TRUE(bodyName.has_value());
+  EXPECT_EQ(h.arena.textOf(*bodyName), "decl:demo:on:Tick:body");
+}
+
+TEST(VagentDeclsTest, LoweredImageFilesItsDurableRoots) {
+  DeclHarness h;
+  auto image = h.lower(R"(
+    module demo
+    agent A { def f(): Int { 1 + 2 } }
+  )");
+  ASSERT_TRUE(image.has_value());
+  if (!image) return;
+  // Genesis on a rebuilt context has no LoweredImage — the band it
+  // binds comes back through these program-side records.
+  const auto recRef =
+      varsRecord(h.arena, h.core, image->programRoot, "imageRecord", false);
+  ASSERT_TRUE(recRef.has_value());
+  const auto refValue =
+      h.arena.linked(*recRef, h.core.dims().values, Posward);
+  ASSERT_TRUE(refValue.has_value());
+  // A cell edge, not an Int64: the ref rides promote to the image
+  // record's persistent twin, and the edge is what keeps the record
+  // reachable inside the image band.
+  EXPECT_EQ(*refValue, image->imageRecord);
+  const auto recExt =
+      varsRecord(h.arena, h.core, image->programRoot, "imageExtent", false);
+  ASSERT_TRUE(recExt.has_value());
+  const auto extValue =
+      h.arena.linked(*recExt, h.core.dims().values, Posward);
+  ASSERT_TRUE(extValue.has_value());
+  EXPECT_EQ(h.arena.asInt64(*extValue).value_or(-1),
+            static_cast<std::int64_t>(image->imageExtent));
+}
+
+TEST(VagentDeclsTest, BindMintRecoversTheFiledLineage) {
+  DeclHarness h;
+  auto image = h.lower(R"(
+    module demo
+    agent A { def f(): Int { 1 + 2 } }
+  )");
+  ASSERT_TRUE(image.has_value());
+  if (!image) return;
+  auto binds = mintMetaBindSet(h.arena, h.core, image->programRoot,
+                               image->agentCell);
+  ASSERT_TRUE(binds.has_value());
+  // §6.6's lineage — learn_*'s sideness gate and the genesis
+  // comparand read the same record: the image's own root and its
+  // band extent.
+  ASSERT_TRUE(binds->lineage.has_value());
+  EXPECT_EQ(binds->lineage->programRef, image->programRoot);
+  EXPECT_EQ(binds->lineage->imageExtent,
+            static_cast<std::uint32_t>(image->imageExtent));
+}
+
+TEST(VagentDeclsTest, GapStubsFileUnderStubbedButDesignedOnesDoNot) {
+  DeclHarness h;
+  auto image = h.lower(R"(
+    module demo
+    event Done
+    goal Work() perform
+    agent A {
+      plan p for Work { emit Done{} }
+      def f(): Opt<Int> { none }
+      def g(): Opt<Int> { none }
+    }
+  )");
+  ASSERT_TRUE(image.has_value());
+  if (!image) return;
+  // `none` type-checks for Opt<Int> but has no scalar lowering — the
+  // stub is a gap, so both f and g join the audit. The plan body's
+  // emit is a host verb: its head stubs by design (+d.step carries
+  // the verbs), and the designed shadow stays out of the audit.
+  EXPECT_THAT(image->stubbed,
+              ::testing::UnorderedElementsAre("f", "g"));
+}
+
+TEST(VagentDeclsTest, CapturingCodeLiteralEmitsInsideMemberBodies) {
+  DeclHarness h;
+  auto image = h.lower(R"(
+    module demo
+    agent A {
+      var n: Int := 5
+      def f(): Int { let c := code"n + 1"; 0 }
+    }
+  )");
+  ASSERT_TRUE(image.has_value());
+  if (!image) return;
+  // `n` is a state-side var binding — the env join gives the
+  // literal's cap$0 alias its holder cell, so the body emits rather
+  // than falling into the stub audit.
+  EXPECT_THAT(image->stubbed, ::testing::IsEmpty());
+}
+
+TEST(VagentDeclsTest, FrameLocalReferenceEmitsInsideMemberBodies) {
+  DeclHarness h;
+  auto image = h.lower(R"(
+    module demo
+    import std:meta
+    agent A {
+      def f(): Int { let x := 5; let c := code"x + 1"; run(c) }
+    }
+  )");
+  ASSERT_TRUE(image.has_value());
+  if (!image) return;
+  // `x` is a frame local of f's own body — expand mints cap$0 → x in
+  // the literal's env, and the env join resolves it through the
+  // per-literal frame-local overlay (the caller's own slot cell, read
+  // live by the capture slot at run time). The run(c) tail keeps the
+  // let alive past dead-code elimination so emit really exercises it.
+  EXPECT_THAT(image->stubbed, ::testing::IsEmpty());
+}
+
+} // namespace

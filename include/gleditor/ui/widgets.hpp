@@ -9,6 +9,7 @@
 #include <memory>
 #include <string>
 #include <variant>
+#include <vector>
 
 namespace gleditor::ui {
 using WidgetId = std::uint32_t;
@@ -72,6 +73,12 @@ struct TextField {
   std::string value, placeholder, action;
   std::size_t caret{};
   float scrollPx{};
+  bool sensitive{};
+  bool multiline{};
+  bool followCaret{true};
+  float verticalScrollPx{};
+  std::optional<std::size_t> preferredColumn{};
+  std::vector<std::size_t> visualLineStarts, visualLineEnds;
   void insert(std::string_view);
   bool key(Key, KeyMods = KeyMods::None);
 };
@@ -116,6 +123,8 @@ struct Widget {
   Tone tone{Tone::Normal};
   std::uint16_t maxLines{3};
   bool defaultAction{};
+  /// Root policy: let detail lists shrink before controls lose readable text.
+  bool preserveReadableControls{};
 };
 struct WidgetVisual {
   WidgetId id{}, ownerId{};
@@ -133,6 +142,10 @@ struct WidgetVisual {
   double fraction{};
   bool scrubber{};
   std::optional<float> caretOffsetPx;
+  std::optional<float> caretOffsetYPx;
+  float caretHeightPx{};
+  float verticalTextOffsetPx{};
+  bool multilineTextInput{};
 };
 struct WidgetScene {
   LayoutResult layout;
@@ -154,6 +167,9 @@ struct WidgetAction {
   std::size_t itemIndex{};
   /// Text field byte position after the shared editor processes the event.
   std::optional<std::size_t> caret;
+  std::optional<float> horizontalScrollPx, verticalScrollPx;
+  std::optional<std::size_t> preferredColumn;
+  std::optional<bool> followCaret;
 };
 } // namespace gleditor::ui
 #endif

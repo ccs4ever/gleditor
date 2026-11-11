@@ -7,11 +7,13 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <expected>
 #include <iostream>
 #include <limits>
 #include <ranges>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <unordered_set>
 
 #include <gleditor/logging.hpp>
@@ -229,7 +231,93 @@ std::size_t guardCapturedCells(const RuntimeGuardStack &guards,
 
 } // namespace
 
-VortexVM::VortexVM(VortexCore &core) : core_(core) {}
+VortexVM::VortexVM(VortexCore &core) : core_(core) { installWriteGuard(); }
+
+VortexVM::~VortexVM() {
+  // The installed predicate captures this VM — releasing the slot keeps
+  // a longer-lived core from invoking a dangling guard.
+  if (guardInstalled_) {
+    core_.setWriteGuard(nullptr);
+  }
+}
+
+VortexVM *VortexVM::installWriteGuard() {
+  // P15 (spec §6.5/M10): the funnel's kind predicate tests *this*
+  // context's opcodeMap_ membership of the resolved clone master —
+  // masterOf rather than the raw target, because a clone of a
+  // registered op is unregistered yet writes the registered master's
+  // bits. Fresh cells are never claimed: an unregistered cell's
+  // content is its kind and cannot desync the map.
+  core_.setWriteGuard(
+      [this](const CellRef master) { return hasOpcodeKind(master); });
+  guardInstalled_ = true;
+  return this;
+}
+
+std::expected<std::size_t, std::string>
+VortexVM::registerProgramOps(std::span<const CellRef> enumeration) {
+  std::size_t registered = 0;
+  for (const CellRef opCell : enumeration) {
+    if (!core_.arena().contains(opCell)) {
+      return std::unexpected("registerProgramOps: recorded op cell " +
+                             std::to_string(opCell) + " is not in the arena");
+    }
+    // The kind reads off the recorded cell's own content — safe for a
+    // *recorded* cell (spec :2326). Never a value scan: an
+    // asInt64 ≤ Find sweep of the band would register dimConstant
+    // operand cells and every other small-int data cell too.
+    const auto kind = core_.arena().asInt64(opCell);
+    // The bound is the enum's last ordinal — RunResume while §6.2's
+    // ops hold the append-last tail; a new kind landing past it must
+    // move this ceiling the way linkedCeiling's does (meta.cpp).
+    if (!kind || *kind < 0 ||
+        static_cast<std::uint64_t>(*kind) >
+            static_cast<std::uint64_t>(OpcodeKind::RunResume)) {
+      return std::unexpected("registerProgramOps: recorded cell " +
+                             std::to_string(opCell) +
+                             " does not decode to an opcode kind");
+    }
+    setOpcodeKind(opCell, static_cast<OpcodeKind>(*kind));
+    ++registered;
+  }
+  return registered;
+}
+
+std::expected<std::size_t, std::string>
+VortexVM::registerProgramImage(CellRef imageRecord) {
+  if (!core_.arena().contains(imageRecord)) {
+    return std::unexpected(
+        "registerProgramImage: image record is not an arena cell");
+  }
+  const auto &dims = core_.dims();
+  // The "ops" +d.vars record — fragment.cpp's varsRecord shape: record
+  // content is the key verbatim, +d.values the rank head.
+  std::optional<CellRef> opsHead;
+  for (const auto record :
+       zigzag::rankAfter(core_.arena(), imageRecord, dims.vars)) {
+    if (core_.arena().textOf(record) == "ops") {
+      opsHead = core_.arena().linked(record, dims.values, DimVector::POS);
+      break;
+    }
+  }
+  if (!opsHead) {
+    return std::unexpected(
+        "registerProgramImage: image record carries no \"ops\" rank");
+  }
+  std::vector<CellRef> enumeration;
+  for (const auto member :
+       zigzag::rankAfter(core_.arena(), *opsHead, dims.step)) {
+    const auto position = core_.arena().asInt64(member);
+    if (!position || *position <= 0 ||
+        static_cast<std::uint64_t>(*position) >
+            std::numeric_limits<CellRef>::max()) {
+      return std::unexpected(
+          "registerProgramImage: ops member does not name a cell");
+    }
+    enumeration.push_back(static_cast<CellRef>(*position));
+  }
+  return registerProgramOps(enumeration);
+}
 
 VortexVM *VortexVM::setGuardLimits(const GuardLimits limits) {
   guardLimits_ = limits;
@@ -439,7 +527,7 @@ std::optional<OpcodeKind> VortexVM::getOpcodeKind(CellRef opCell) const {
   auto val = core_.arena().asInt64(opCell);
   if (val && *val >= 0 &&
       static_cast<std::uint64_t>(*val) <=
-          static_cast<std::uint64_t>(OpcodeKind::CurrentTimestamp)) {
+          static_cast<std::uint64_t>(OpcodeKind::RunResume)) {
     return static_cast<OpcodeKind>(*val);
   }
   return std::nullopt;
@@ -538,6 +626,27 @@ CellRef VortexVM::spawnCursor(CellRef entryOpcode, std::string_view name) {
 std::vector<CellRef> VortexVM::activeCursors() const {
   return zigzag::rankAfter(core_.arena(), core_.home(), core_.dims().cursors) |
          std::ranges::to<std::vector>();
+}
+
+void VortexVM::pruneCursors(CellRef keep) {
+  const DimRef dim = core_.dims().cursors;
+  for (const CellRef member : activeCursors()) {
+    if (member == keep) continue;
+    // Same-dim rank unlink: forward edge first so the successor's backlink
+    // frees before the predecessor repair rewires it.
+    const auto pred = core_.arena().linked(member, dim, zigzag::Negward);
+    const auto succ = core_.arena().linked(member, dim, zigzag::Posward);
+    if (succ)
+      zigzag::expectWritten(core_.arena().unlink(member, dim, zigzag::Posward));
+    if (pred) {
+      if (succ)
+        zigzag::expectWritten(
+            core_.arena().link(*pred, dim, zigzag::Posward, *succ));
+      else
+        zigzag::expectWritten(
+            core_.arena().unlink(*pred, dim, zigzag::Posward));
+    }
+  }
 }
 
 void VortexVM::enableMemoization(CellRef opcode, std::string_view memoKey) {
@@ -1100,6 +1209,13 @@ bool VortexVM::backtrack(const std::optional<CellRef> cursor) {
         "backtrack cursor does not match the active mutation group");
   while (!choiceStack_.empty()) {
     if (choiceStack_.back().mutationCheckpointId) return false;
+    // A choice point owned by a different activation is never this cursor's
+    // to unwind: consuming it would drop its mark (and the rollback it
+    // guards) outright. Stop instead -- the caller's own points sit below it.
+    if (cursor && choiceStack_.back().cursor &&
+        *choiceStack_.back().cursor != *cursor) {
+      return false;
+    }
     ChoicePoint cp = choiceStack_.back();
     choiceStack_.pop_back();
     if (!cursor || cp.cursor == cursor || !cp.cursor) {
@@ -1265,7 +1381,18 @@ VortexVM::setCutCallback(std::function<void(std::string_view deweyPrefix)> cb) {
   return this;
 }
 
-void VortexVM::runPipeline(CellRef paramCell) {
+ExecutionResult VortexVM::runPipeline(CellRef paramCell) {
+  // The funnel's refusal mapped to the per-site typed failure — the
+  // executing pipeline op is the failing clause, like the numeric
+  // contract faults' convention.
+  const auto kindImmutabilityFault = [](CellRef executing) {
+    return ExecutionResult{
+        .success           = false,
+        .contractViolation = ContractViolationKind::KindImmutability,
+        .failingClause     = executing,
+        .errorMessage      = "P15: pipeline write to a registered "
+                             "opcode cell refused (kind immutability)"};
+  };
   auto pipeOp = core_.getPipelineHead(paramCell);
   std::unordered_set<CellRef> preflightSeen;
   std::size_t preflightLimit = maxParameterPipelineInstructions;
@@ -1385,6 +1512,11 @@ void VortexVM::runPipeline(CellRef paramCell) {
     bool jumped = false;
     const auto executed =
         executeOpcodeBody(kind, *pipeOp, inVals, outVals, std::nullopt, jumped);
+    // The P15 refusal -- a Value/Splice body inside the chain aiming at a
+    // registered op cell -- surfaces per site as a typed fault.
+    if (executed.contractViolation == ContractViolationKind::KindImmutability) {
+      return executed;
+    }
     if (!executed.success) throw std::runtime_error(executed.errorMessage);
 
     if (activeCursor_) {
@@ -1432,20 +1564,35 @@ void VortexVM::runPipeline(CellRef paramCell) {
       writeCellReferences(outCells, outVals);
     } else if (outCells.empty()) {
       if (!outVals.empty()) {
-        core_.writeValue(paramCell, 0, std::nullopt, outVals[0]);
+        WriteFault fault = WriteFault::None;
+        std::ignore =
+            core_.writeValue(paramCell, 0, std::nullopt, outVals[0], &fault);
+        if (fault == WriteFault::OpcodeKind) {
+          return kindImmutabilityFault(*pipeOp);
+        }
       }
     } else {
-      if (kind != OpcodeKind::New && kind != OpcodeKind::Clone) {
+      if (kind != OpcodeKind::New && kind != OpcodeKind::Clone &&
+          kind != OpcodeKind::Linked) {
         for (std::size_t i = 0; i < std::min(outCells.size(), outVals.size());
              ++i) {
           cellReferences_.erase(outCells[i]);
-          core_.writeValue(outCells[i], 0, std::nullopt, outVals[i]);
+          WriteFault fault = WriteFault::None;
+          std::ignore      = core_.writeValue(outCells[i], 0, std::nullopt,
+                                              outVals[i], &fault);
+          if (fault == WriteFault::OpcodeKind) {
+            return kindImmutabilityFault(*pipeOp);
+          }
         }
       }
     }
 
     pipeOp = core_.arena().linked(*pipeOp, core_.dims().spin, false);
   }
+  return ExecutionResult{.success           = true,
+                         .contractViolation = ContractViolationKind::None,
+                         .failingClause     = std::nullopt,
+                         .errorMessage      = ""};
 }
 
 bool VortexVM::evaluateCondition(CellRef clause,
@@ -2158,6 +2305,18 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
                            .failingClause = opcode,
                            .errorMessage = "Signed integer overflow in opcode"};
   };
+  // P15's typed refusal (spec §6.5/M10): the funnel reports
+  // WriteFault::OpcodeKind when a program-value write aims at an
+  // opcodeMap_-registered cell's clone master — surfaced per site as
+  // `success=false`, classified like the numeric contract faults.
+  const auto kindImmutabilityFault = [opcode] {
+    return ExecutionResult{
+        .success           = false,
+        .contractViolation = ContractViolationKind::KindImmutability,
+        .failingClause     = opcode,
+        .errorMessage      = "P15: write to a registered opcode cell "
+                             "refused (kind immutability)"};
+  };
   constexpr auto minInt = std::numeric_limits<std::int64_t>::min();
   switch (kind) {
   case OpcodeKind::ResumeInit:
@@ -2438,15 +2597,375 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
     }
     break;
   }
+  case OpcodeKind::Linked: {
+    // #LINKED subject dim neg [follow] [filterDim filterNeg]: walks the whole
+    // rank from the subject and rebuilds, under the bound output head, a
+    // +d.grab/+d.step list of ref-boxes (int content holding each member's
+    // CellRef). With follow, the subject box's int content names the real
+    // subject, which is how a stored traversal result feeds a later step.
+    // With a filter pair, a member must have its own link on filterDim to be
+    // included.
+    std::vector<CellRef> inCells  = core_.inputsOf(opcode);
+    std::vector<CellRef> outCells = core_.outputsOf(opcode);
+    if (inCells.size() >= 3 || inputs.size() >= 3) {
+      auto subject =
+          resolveCell(inCells, inputs, cellReferences_, 0, core_.arena());
+      if (subject && inputs.size() >= 4 &&
+          VortexCore::evaluateTruthiness(inputs[3])) {
+        const auto referenced = static_cast<CellRef>(toInt(inputs[0]));
+        subject               = core_.arena().contains(referenced)
+                                    ? std::optional<CellRef>(referenced)
+                                    : std::nullopt;
+      }
+      const DimRef dim       = inputs.size() >= 2 ? toInt(inputs[1]) : 0;
+      const bool neg         = inputs.size() >= 3 && toInt(inputs[2]) < 0;
+      const bool filter      = inputs.size() >= 6;
+      const DimRef filterDim = filter ? toInt(inputs[4]) : 0;
+      const bool filterNeg   = filter && toInt(inputs[5]) < 0;
+      if (!outCells.empty()) {
+        const CellRef head = outCells.front();
+        // A previous materialization is replaced: unlink the old ref-boxes.
+        // Runs even when the subject is gone, or a re-execution would keep a
+        // stale rank instead of yielding an empty list.
+        if (const auto first =
+                core_.arena().linked(head, core_.dims().grab, false)) {
+          for (auto box = std::optional<CellRef>(*first); box;) {
+            core_.arena().consumeWork();
+            // The successor is read before the unlink: breaking first would
+            // orphan the rest of the rank and leak every box after it.
+            const auto next =
+                core_.arena().linked(*box, core_.dims().step, false);
+            core_.breakLink(*box, core_.dims().step, false);
+            box = next;
+          }
+          core_.breakLink(head, core_.dims().grab, false);
+        }
+        if (subject) {
+          CellRef tail = head;
+          bool first   = true;
+          std::unordered_set<CellRef> seen{*subject};
+          for (auto member = core_.arena().linked(*subject, dim, neg);
+               member && seen.insert(*member).second;
+               member = core_.arena().linked(*member, dim, neg)) {
+            core_.arena().consumeWork();
+            if (filter && !core_.arena().linked(*member, filterDim, filterNeg))
+              continue;
+            const CellRef box = core_.arena().makeScalarCell(
+                static_cast<std::int64_t>(*member));
+            zigzag::expectWritten(core_.arena().link(
+                tail, first ? core_.dims().grab : core_.dims().step, false,
+                box));
+            tail  = box;
+            first = false;
+          }
+          outputs.emplace_back(static_cast<std::int64_t>(head));
+        } else {
+          outputs.emplace_back(noCell);
+        }
+      } else {
+        outputs.emplace_back(noCell);
+      }
+    }
+    break;
+  }
+  case OpcodeKind::Find: {
+    // #FIND subject name: the subject operand's int names a term cell;
+    // walk its +d.step rank for the member whose +d.name text matches
+    // and yield that member's rendered value — `term.field` in one op.
+    // A missing member or unbound subject yields false so a guard's
+    // `a.missing > n` fails the clause instead of faulting the turn.
+    if (inputs.size() >= 2) {
+      const auto referenced    = static_cast<CellRef>(toInt(inputs[0]));
+      const std::string wanted = std::holds_alternative<std::string>(inputs[1])
+                                     ? std::get<std::string>(inputs[1])
+                                     : std::string{};
+      CellValue found{false};
+      if (core_.arena().contains(referenced)) {
+        const auto &dims = core_.dims();
+        for (const CellRef member :
+             zigzag::rankAfter(core_.arena(), referenced, dims.step)) {
+          core_.arena().consumeWork();
+          const auto label =
+              core_.arena().linked(member, dims.name, DimVector::POS);
+          if (label && core_.arena().textOf(*label) == wanted) {
+            if (const auto rendered = core_.render(member)) found = *rendered;
+            break;
+          }
+        }
+      }
+      outputs.push_back(found);
+    }
+    break;
+  }
+  case OpcodeKind::FieldSet: {
+    // #SET subject name value: Find's write twin — the subject operand's
+    // int names a term cell; walk its +d.step rank for the member whose
+    // +d.name text matches and replace that member's content. A missing
+    // member or unbound subject yields false so the write's caller can
+    // fail the clause honestly rather than silently dropping state.
+    if (inputs.size() >= 3) {
+      const auto referenced    = static_cast<CellRef>(toInt(inputs[0]));
+      const std::string wanted = std::holds_alternative<std::string>(inputs[1])
+                                     ? std::get<std::string>(inputs[1])
+                                     : std::string{};
+      bool wrote               = false;
+      if (core_.arena().contains(referenced)) {
+        const auto &dims = core_.dims();
+        for (const CellRef member :
+             zigzag::rankAfter(core_.arena(), referenced, dims.step)) {
+          core_.arena().consumeWork();
+          const auto label =
+              core_.arena().linked(member, dims.name, DimVector::POS);
+          if (label && core_.arena().textOf(*label) == wanted) {
+            WriteFault fault = WriteFault::None;
+            const auto res =
+                core_.writeValue(member, 0, std::nullopt, inputs[2], &fault);
+            if (fault == WriteFault::OpcodeKind) return kindImmutabilityFault();
+            wrote = res.has_value();
+            break;
+          }
+        }
+      }
+      outputs.push_back(wrote);
+    }
+    break;
+  }
+  case OpcodeKind::RunCall: {
+    // #RUNCALL box entryDim failTarget argsRank — §6.2's dynamic run:
+    // the box's int names a fragment head; follow its +d.entry chain
+    // to the entry op, descriptor-check the args rank's arity, bind
+    // each value by the parameter's +d.name label on the cursor's
+    // +d.vars (the #BIND/#RESOLVE channel), push the frame whose
+    // successor is the +d.spin target (the RunResume op), and jump.
+    // Every §6.2 refusal lands on the fail target instead.
+    if (inputs.size() >= 4 && cursor) {
+      const auto &dims     = core_.dims();
+      const CellRef failOp = static_cast<CellRef>(toInt(inputs[2]));
+      const auto failJump  = [&]() {
+        setCursorOpcode(*cursor, failOp);
+        jumped = true;
+      };
+      CellRef head           = static_cast<CellRef>(toInt(inputs[0]));
+      const DimRef entryDim  = toInt(inputs[1]);
+      const CellRef argsRank = static_cast<CellRef>(toInt(inputs[3]));
+
+      // A member-`def` callsite names the module *symbol*, not the
+      // head — the symbol's +d.values lands on the head whenever the
+      // method's own walk finished, so a caller lowered before its
+      // callee still resolves. Heads are discriminated by +d.entry: a
+      // cell carrying one IS the head (dynamic-run shape); a cell
+      // lacking one gets the single +d.values hop.
+      if (core_.arena().contains(head) &&
+          !core_.arena().linked(head, entryDim, zigzag::Posward))
+        if (const auto via =
+                core_.arena().linked(head, dims.values, zigzag::Posward))
+          head = *via;
+
+      // Op first, head second — the same discriminator runFragment
+      // applies (meta.cpp): an operand naming an op is the headless-run
+      // refusal; a head's +d.entry chain resolves to the graph root,
+      // bounded against link cycles like graphRoot's.
+      const auto resolved = [&]() -> std::optional<CellRef> {
+        if (!core_.arena().contains(head) ||
+            opcodeMap_.find(head) != opcodeMap_.end())
+          return std::nullopt;
+        auto current = head;
+        for (std::size_t hops = 0; hops < 16; ++hops) {
+          if (opcodeMap_.find(current) != opcodeMap_.end()) return current;
+          const auto next =
+              core_.arena().linked(current, entryDim, zigzag::Posward);
+          if (!next || !core_.arena().contains(*next)) return std::nullopt;
+          current = *next;
+        }
+        return std::nullopt;
+      }();
+      if (!resolved) {
+        failJump();
+        break;
+      }
+      const auto descriptor =
+          core_.arena().linked(head, dims.values, zigzag::Posward);
+      if (!descriptor || !core_.arena().contains(*descriptor)) {
+        failJump();
+        break;
+      }
+
+      // Ordered signature: the descriptor's +d.grab chain via +d.step —
+      // parameterCells' convention — each member +d.name-labelled.
+      std::vector<CellRef> params;
+      for (auto cell =
+               core_.arena().linked(*descriptor, dims.grab, zigzag::Posward);
+           cell && core_.arena().contains(*cell);
+           cell = core_.arena().linked(*cell, dims.step, zigzag::Posward))
+        params.push_back(*cell);
+
+      // §5.8's member convention: a `$owner` param is not an argument —
+      // the callee's #RESOLVE prologue finds the caller's own $owner
+      // binding on the shared vars rank. Arity and positional binding
+      // count the caller-supplied params only.
+      std::vector<CellRef> boundParams;
+      for (const auto param : params) {
+        const auto label =
+            core_.arena().linked(param, dims.name, zigzag::Posward);
+        if (label && core_.arena().textOf(*label) == "$owner") continue;
+        boundParams.push_back(param);
+      }
+
+      // The caller-staged values ride the same convention: argsRank's
+      // +d.grab chain via +d.step, each member the evaluated cell
+      // itself.
+      std::vector<CellValue> argValues;
+      for (auto cell =
+               core_.arena().linked(argsRank, dims.grab, zigzag::Posward);
+           cell && core_.arena().contains(*cell);
+           cell = core_.arena().linked(*cell, dims.step, zigzag::Posward)) {
+        core_.arena().consumeWork();
+        argValues.push_back(core_.render(*cell).value_or(CellValue{false}));
+      }
+      if (argValues.size() != boundParams.size()) {
+        failJump();
+        break;
+      }
+
+      // The §6.2 frame: an Int64 cell holding the successor op, pushed
+      // on the cursor's +d.stack — Call's shape, so the callee's tail
+      // Return lands on the RunResume op.
+      const auto nextOp =
+          core_.arena().linked(opcode, dims.spin, zigzag::Posward);
+      if (!nextOp) {
+        failJump();
+        break;
+      }
+      CellRef frame = core_.arena().makeCell();
+      zigzag::expectWritten(
+          core_.arena().setValueBits(frame, xanadu::ValueKind::Int64,
+                                     static_cast<std::uint64_t>(*nextOp)));
+      const auto oldStack =
+          core_.arena().linked(*cursor, dims.stack, zigzag::Posward);
+      zigzag::expectWritten(
+          core_.arena().link(*cursor, dims.stack, zigzag::Posward, frame));
+      if (oldStack) {
+        zigzag::expectWritten(
+            core_.arena().link(frame, dims.stack, zigzag::Posward, *oldStack));
+      }
+
+      // Bind each value by its parameter's +d.name label — #BIND's
+      // name-keyed +d.vars/+d.values channel so the callee's #RESOLVE
+      // prologue reads them verbatim; labelOf's argN fallback stands
+      // for an unlabelled parameter.
+      for (std::size_t i = 0; i < boundParams.size(); ++i) {
+        core_.arena().consumeWork();
+        const auto label =
+            core_.arena().linked(boundParams[i], dims.name, zigzag::Posward);
+        const auto name =
+            label ? core_.arena().textOf(*label) : "arg" + std::to_string(i);
+        CellRef varCell  = core_.arena().makeCell(name);
+        CellRef valCell  = core_.arena().makeCell();
+        WriteFault fault = WriteFault::None;
+        core_.writeValue(valCell, 0, std::nullopt, argValues[i], &fault);
+        if (fault == WriteFault::OpcodeKind) return kindImmutabilityFault();
+        zigzag::expectWritten(
+            core_.arena().link(varCell, dims.values, zigzag::Posward, valCell));
+        if (const auto varsHead =
+                core_.arena().linked(*cursor, dims.vars, zigzag::Posward))
+          zigzag::expectWritten(core_.arena().link(varCell, dims.vars,
+                                                   zigzag::Posward, *varsHead));
+        zigzag::expectWritten(
+            core_.arena().link(*cursor, dims.vars, zigzag::Posward, varCell));
+      }
+
+      setCursorOpcode(*cursor, *resolved);
+      jumped = true;
+    }
+    break;
+  }
+  case OpcodeKind::RunResume: {
+    // #RUNRESUME box failTarget → out: the frame successor a RunCall
+    // pushes. Read the head's descriptor produced/result cells — the
+    // descriptor's +d.vars records textOf-keyed — produced writes the
+    // result into the bound output and spins on; unproduced lands on
+    // the fail target — §6.2's post-Return gate.
+    if (inputs.size() >= 2 && cursor) {
+      const auto &dims     = core_.dims();
+      const CellRef head   = static_cast<CellRef>(toInt(inputs[0]));
+      const CellRef failOp = static_cast<CellRef>(toInt(inputs[1]));
+      bool produced        = false;
+      CellValue result{false};
+      // The box may name a member-`def` *symbol*: its +d.values lands
+      // on the head, and only the head's own +d.values is the
+      // descriptor. Hop the chain — the first cell whose +d.vars
+      // carries produced/result records is the descriptor.
+      auto at = head;
+      for (std::size_t hops = 0; hops < 2 && !produced; ++hops) {
+        if (!core_.arena().contains(at)) break;
+        const auto descriptor =
+            core_.arena().linked(at, dims.values, zigzag::Posward);
+        if (!descriptor || !core_.arena().contains(*descriptor)) break;
+        CellRef producedCell{noCell}, resultCell{noCell};
+        for (const CellRef record :
+             zigzag::rankAfter(core_.arena(), *descriptor, dims.vars)) {
+          core_.arena().consumeWork();
+          const auto key = core_.arena().textOf(record);
+          if (key == "produced")
+            producedCell = core_.arena()
+                               .linked(record, dims.values, zigzag::Posward)
+                               .value_or(noCell);
+          else if (key == "result")
+            resultCell = core_.arena()
+                             .linked(record, dims.values, zigzag::Posward)
+                             .value_or(noCell);
+        }
+        if (core_.arena().contains(producedCell) &&
+            core_.arena().contains(resultCell)) {
+          produced = VortexCore::evaluateTruthiness(
+              core_.render(producedCell).value_or(CellValue{false}));
+          result = core_.render(resultCell).value_or(CellValue{false});
+        } else {
+          at = *descriptor;
+        }
+      }
+      if (produced)
+        outputs.emplace_back(result);
+      else {
+        setCursorOpcode(*cursor, failOp);
+        jumped = true;
+      }
+    }
+    break;
+  }
   case OpcodeKind::New: {
     std::vector<CellRef> inCells  = inputsOf(opcode);
     std::vector<CellRef> outCells = outputsOf(opcode);
     if (inCells.size() >= 3 || inputs.size() >= 3) {
-      const auto c =
-          resolveCell(inCells, inputs, cellReferences_, 0, core_.arena());
+      auto c = resolveCell(inCells, inputs, cellReferences_, 0, core_.arena());
       DimRef d = inputs.size() >= 2 ? toInt(inputs[1]) : 0;
       bool neg = inputs.size() >= 3 && toInt(inputs[2]) < 0;
       if (c) {
+        const bool append = inputs.size() == 4 &&
+                            std::holds_alternative<bool>(inputs[3]) &&
+                            std::get<bool>(inputs[3]);
+        if (append) {
+          if (!outCells.empty() &&
+              (core_.arena().linked(outCells.front(), d, false) ||
+               core_.arena().linked(outCells.front(), d, true))) {
+            return ExecutionResult{
+                .success = false,
+                .errorMessage =
+                    "Compiled creation output was already used; compile a "
+                    "fresh executable"};
+          }
+          std::unordered_set<CellRef> seen{*c};
+          while (const auto next = core_.arena().linked(*c, d, neg)) {
+            core_.arena().consumeWork();
+            if (!seen.insert(*next).second) {
+              return ExecutionResult{
+                  .success = false,
+                  .errorMessage =
+                      "Compiled append requires an open rank, not a cycle"};
+            }
+            c = *next;
+          }
+        }
         if (!outCells.empty()) {
           CellRef fresh = outCells[0];
           core_.setLink(*c, d, neg, fresh);
@@ -2474,9 +2993,17 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
                                           ? std::optional<CellValue>(inputs[3])
                                           : std::nullopt;
       if (c) {
-        auto res = repl ? core_.writeValue(*c, off, len, *repl)
-                        : core_.readValue(*c, off, len);
-        outputs.emplace_back(res ? *res : noCell);
+        if (repl) {
+          WriteFault fault = WriteFault::None;
+          const auto res   = core_.writeValue(*c, off, len, *repl, &fault);
+          if (fault == WriteFault::OpcodeKind) {
+            return kindImmutabilityFault();
+          }
+          outputs.emplace_back(res ? *res : noCell);
+        } else {
+          const auto res = core_.readValue(*c, off, len);
+          outputs.emplace_back(res ? *res : noCell);
+        }
       } else {
         outputs.emplace_back(noCell);
       }
@@ -2491,7 +3018,11 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
       std::int64_t off = toInt(inputs[1]);
       std::int64_t len = toInt(inputs[2]);
       if (c) {
-        auto res = core_.splice(*c, off, len, inputs[3]);
+        WriteFault fault = WriteFault::None;
+        const auto res   = core_.splice(*c, off, len, inputs[3], &fault);
+        if (fault == WriteFault::OpcodeKind) {
+          return kindImmutabilityFault();
+        }
         outputs.emplace_back(res ? *res : noCell);
       } else {
         outputs.emplace_back(noCell);
@@ -3568,7 +4099,10 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
     if (kind == OpcodeKind::BranchFalseCell && index == 1) continue;
     if (processedIn.insert(paramCell).second && core_.hasPipeline(paramCell)) {
       try {
-        runPipeline(paramCell);
+        const auto pipelineResult = runPipeline(paramCell);
+        if (!pipelineResult.success) {
+          return pipelineResult;
+        }
       } catch (const std::exception &error) {
         return {.success = false, .errorMessage = error.what()};
       }
@@ -3603,6 +4137,18 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
   bool memoHit = false;
   std::vector<CellValue> newOutputs;
 
+  // P15's typed refusal (spec §6.5/M10): a funnel write aimed at an
+  // opcodeMap_-registered cell's clone master fails the step — the
+  // executing op is the failing clause, matching the numeric faults.
+  const auto kindImmutabilityFault = [](CellRef executing) {
+    return ExecutionResult{
+        .success           = false,
+        .contractViolation = ContractViolationKind::KindImmutability,
+        .failingClause     = executing,
+        .errorMessage      = "P15: write to a registered opcode cell "
+                             "refused (kind immutability)"};
+  };
+
   // These operations return cell identities. Content-only memo keys cannot
   // preserve the identity of a current neighbor or an ephemeral value slice.
   const bool memoizable =
@@ -3634,7 +4180,12 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
                i < std::min(outCells.size(), newOutputs.size()); ++i) {
             clearTypedRegister(outCells[i]);
             cellReferences_.erase(outCells[i]);
-            core_.writeValue(outCells[i], 0, std::nullopt, newOutputs[i]);
+            WriteFault fault = WriteFault::None;
+            std::ignore      = core_.writeValue(outCells[i], 0, std::nullopt,
+                                                newOutputs[i], &fault);
+            if (fault == WriteFault::OpcodeKind) {
+              return kindImmutabilityFault(*op);
+            }
           }
         }
       }
@@ -3732,12 +4283,18 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
                             kind == OpcodeKind::CopyCellRefs ||
                                 kind == OpcodeKind::ClearCellRefs);
       }
-    } else if (kind != OpcodeKind::New && kind != OpcodeKind::Clone) {
+    } else if (kind != OpcodeKind::New && kind != OpcodeKind::Clone &&
+               kind != OpcodeKind::Linked) {
       for (std::size_t i = 0; i < std::min(outCells.size(), newOutputs.size());
            ++i) {
         clearTypedRegister(outCells[i]);
         cellReferences_.erase(outCells[i]);
-        core_.writeValue(outCells[i], 0, std::nullopt, newOutputs[i]);
+        WriteFault fault = WriteFault::None;
+        std::ignore      = core_.writeValue(outCells[i], 0, std::nullopt,
+                                            newOutputs[i], &fault);
+        if (fault == WriteFault::OpcodeKind) {
+          return kindImmutabilityFault(*op);
+        }
       }
     }
 
@@ -3747,7 +4304,10 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
       for (CellRef outCell : outCells) {
         if (processedOut.insert(outCell).second && core_.hasPipeline(outCell)) {
           try {
-            runPipeline(outCell);
+            const auto pipelineResult = runPipeline(outCell);
+            if (!pipelineResult.success) {
+              return pipelineResult;
+            }
           } catch (const std::exception &error) {
             return {.success = false, .errorMessage = error.what()};
           }
