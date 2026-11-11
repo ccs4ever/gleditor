@@ -1,28 +1,22 @@
 /**
  * @file compiler.hpp
- * @brief vlace evaluator over the Vortex core (Stage 3: arithmetic, let,
- *        lambda/application, if).
+ * @brief vlace evaluator front: the public Compiler API over the Vortex VM.
  *
- * Stage 3 evaluates a vlace expression in an ArenaManifold, producing a value.
- * Arithmetic is performed through the VM's arithmetic opcodes over scalar cells
- * (R6: the bits in the node), so numeric work mints arena scalar cells and
- * spools no content -- the regime §2.2 calls the referentially transparent one.
- * Functions are closures capturing their defining environment (§4.3); `let` and
- * `letrec` extend the environment (§5.2); `if` is strict in its condition.
- *
- * Later stages replace this tree-walk with full opcode-stream lowering where
- * laziness and pattern matching demand it (§6, §5.4); Stage 3 is the first
- * end-to-end "it evaluates" increment the staged plan asks for.
+ * Every vlace expression is lowered to ordinary Vortex graph operations and
+ * run on the VM (lower_*.cpp, one file per card); this class holds the
+ * persistent state a lowering needs and the host-side `Value` read-back that
+ * tests, the mesh evaluator and the REPL consume. A Value is a read-back
+ * handle onto an arena cell: it carries the cell it was read from, so forcing
+ * it later hits the same memo.
  */
 #ifndef COMMON_XANADU_VLACE_COMPILER_HPP
 #define COMMON_XANADU_VLACE_COMPILER_HPP
 
 #include <expected>
-#include <functional>
 #include <iosfwd>
 #include <memory>
+#include <optional>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 #include "common/xanadu/vlace/ast.hpp"
@@ -33,30 +27,14 @@ namespace zigzag {
 class ProjectionSession;
 } // namespace zigzag
 
+namespace xanadu::vlace::lower {
+class LowerState;
+} // namespace xanadu::vlace::lower
+
 namespace xanadu::vlace {
-/// A runtime value. Stage 3: a scalar (int/float/string/bool) or a closure.
-/// Later stages add constructed values (ADTs), thunks, and lists.
+/// A host-side view of a runtime value read back from an arena cell.
 struct Value;
 using ValuePtr = std::shared_ptr<Value>;
-
-struct Env; ///< lexical environment, a chain of frames
-using EnvPtr = std::shared_ptr<Env>;
-
-struct Closure {
-  std::vector<Pattern> const *params{nullptr}; ///< borrowed from the AST
-  ExprNode const *body{nullptr};               ///< borrowed from the AST
-  std::size_t applied{0}; ///< how many params already supplied
-  std::vector<ValuePtr> argsSoFar;
-  EnvPtr env; ///< captured defining environment
-};
-
-struct Thunk; ///< a suspended computation (laziness, §6.2)
-
-class Compiler;
-/// A built-in C++ function body: receives the compiler (for arena access) and
-/// the collected argument values, returns a value or an error (§13).
-using NativeFn = std::function<std::expected<ValuePtr, struct EvalError>(
-    Compiler &, std::vector<ValuePtr> &)>;
 
 struct Value {
   // Exactly one of these is active, chosen by `kind`.
@@ -65,42 +43,20 @@ struct Value {
     Float,
     Str,
     Bool,
-    Closure,
-    Ctor,   ///< a constructed ADT value: tag + argument values (§4.2)
-    Thunk,  ///< an unforced suspended computation (§6.2)
-    Native, ///< a built-in C++ function (std:xanadu arena verbs, §13)
+    Closure, ///< a function; opaque, applied only on the VM
+    Ctor,    ///< a constructed ADT value: tag + argument values (§4.2)
+    Thunk,   ///< an unforced suspended computation (§6.2)
   } kind{Kind::Int};
   std::int64_t i{0};
   double f{0.0};
   std::string s;
   bool b{false};
-  std::shared_ptr<Closure> clo;
   // Ctor payload.
   std::string tag;            ///< constructor name, e.g. "Cons", "Leaf"
   std::vector<ValuePtr> args; ///< constructor arguments (may be thunks)
   std::size_t ctorArity{0}; ///< total arity; args.size() < ctorArity == partial
-  // Thunk payload.
-  std::shared_ptr<Thunk> thunk;
-  // Native payload: a C++ built-in collecting `nativeArity` arguments, then
-  // invoking `native` with the Compiler and the collected (unforced) args. Used
-  // for the std:xanadu arena-authoring verbs (§13); partial application
-  // accumulates into `args` exactly as a Ctor does.
-  std::size_t nativeArity{0};
-  std::string nativeName; ///< for diagnostics
-  std::shared_ptr<NativeFn> native;
-};
-
-/// A suspended computation forced at most once, memoized in place (§6.2/§6.3).
-struct Thunk {
-  ExprNode const *body{nullptr}; ///< borrowed from the AST
-  EnvPtr env;
-  bool forced{false};
-  ValuePtr cached;
-};
-
-struct Env {
-  std::unordered_map<std::string, ValuePtr> vars;
-  EnvPtr parent;
+  /// The arena cell this value was read from; forcing and applying act on it.
+  std::optional<zigzag::CellRef> cell;
 };
 
 /// An evaluation failure, named by code (§8.2) with a human detail + location.
@@ -112,115 +68,62 @@ struct EvalError {
 
 class Compiler {
 public:
-  Compiler(zigzag::vortex::VortexCore &core, zigzag::vortex::VortexVM &vm)
-      : core_(core), vm_(vm) {}
+  Compiler(zigzag::vortex::VortexCore &core, zigzag::vortex::VortexVM &vm);
+  ~Compiler();
+  Compiler(const Compiler &)            = delete;
+  Compiler &operator=(const Compiler &) = delete;
 
-  /// Refuses until expressions are lowered to Vortex VM instructions.
+  /// Lower @p expr to Vortex operations, run them, read the value back.
   [[nodiscard]] std::expected<ValuePtr, EvalError> evaluate(const Expr &expr);
 
-  /// Refuses until programs are lowered to Vortex VM instructions.
+  /// As evaluate, for a whole program (declarations, then the result).
   [[nodiscard]] std::expected<ValuePtr, EvalError>
   evaluateProgram(const Program &prog);
 
-  /// Install the built-in value bindings a fresh program expects without an
-  /// explicit import: the typed IO primitives (pure/bind/then/putStr/putStrLn/
-  /// getLine, §6.5) and the Option/Result constructors (§6.6). Called by
-  /// evaluateProgram; idempotent. IO primitives are description-builders
-  /// (tagged Ctor values) performed only by runIO at the boundary -- building
-  /// one writes nothing, so the pure fragment stays referentially transparent.
-  void installBuiltins();
-
-  /// Refuses until IO actions are lowered to Vortex VM instructions.
+  /// Perform an IO action description at the boundary (§6.5). Building an
+  /// action writes nothing; only this performs its leaf effects, and every
+  /// force and application it needs runs on the VM.
   std::expected<ValuePtr, EvalError> runIO(const ValuePtr &action,
                                            std::istream &in, std::ostream &out);
 
   /// Render a value shallowly without forcing a thunk.
   [[nodiscard]] static std::string show(const ValuePtr &v);
 
-  /// Throws std::logic_error until forcing is lowered to Vortex VM
-  /// instructions.
+  /// Render a value deeply, forcing thunks on the VM. Throws std::logic_error
+  /// until rendering is lowered.
   [[nodiscard]] std::string render(const ValuePtr &v, int depthBudget = 10000);
 
-  /// Refuses until thunk forcing is lowered to Vortex VM instructions.
+  /// Force a value to weak head normal form on the VM.
   std::expected<ValuePtr, EvalError> forceValue(ValuePtr value);
 
   [[nodiscard]] zigzag::vortex::VortexCore &core() noexcept { return core_; }
+  [[nodiscard]] zigzag::vortex::VortexVM &vm() noexcept { return vm_; }
 
-private:
-  std::expected<ValuePtr, EvalError> eval(const ExprNode &e, const EnvPtr &env);
-  std::expected<ValuePtr, EvalError>
-  evalBinOp(const EBinOp &op, const EnvPtr &env, SourceLocation loc);
-  std::expected<ValuePtr, EvalError> apply(const ValuePtr &fn, ValuePtr arg,
-                                           SourceLocation loc);
+  /// Constructor / record tables and per-card state that outlive one
+  /// evaluation; the built-in constructors are installed on first use.
+  [[nodiscard]] lower::LowerState &lowerState();
 
-  // Evaluate a record construction / functional update (§5.7). The record
-  // subexpr forces to a Ctor; named fields are placed by the ctor's field-name
-  // list (ctorFields_), replacing positional args by name. A bare constructor
-  // subexpr yields a fresh fully-applied Ctor; an existing record is copied so
-  // the original is left unchanged (sharing the untouched fields).
-  std::expected<ValuePtr, EvalError> evalRecordUpdate(const ERecordUpdate &ru,
-                                                      const EnvPtr &env,
-                                                      SourceLocation loc);
-
-  // Arithmetic / comparison performed via the VM's opcodes over scalar cells.
-  std::expected<ValuePtr, EvalError> numericOp(std::string_view op,
-                                               const ValuePtr &lhs,
-                                               const ValuePtr &rhs,
-                                               SourceLocation loc);
-
-  // Force a value to weak head normal form: if it is an unforced thunk, run
-  // its body once and memoize the result (§6.7). Returns the forced value.
-  std::expected<ValuePtr, EvalError> force(ValuePtr v);
-
-  // Try to match `pat` against `scrutinee`, binding pattern variables into
-  // `out`. Returns true on a match. Forces the scrutinee to WHNF as far as the
-  // pattern demands (§5.4). A failed match leaves `out` to be discarded by the
-  // caller.
-  std::expected<bool, EvalError>
-  matchPattern(const PatternNode &pat, const ValuePtr &scrutinee,
-               std::unordered_map<std::string, ValuePtr> &out);
-
-  // Register a data declaration's constructors (name -> arity) so ECtor /
-  // application can build constructed values and matching can check arity.
-  // Refuses a ctor name the runtime itself interprets (the reserved tags:
-  // Cell/Dim/IO.*/the prelude ADTs/the Scalar ctors -- §7 P1).
-  std::expected<void, EvalError> registerData(const DataDecl &dd);
-
-  // Install the std:xanadu arena-authoring verbs (§13) as native built-ins:
-  // makeText/makeDim/dimensionNamed/setLink/cellText/linked (pure arena verbs)
-  // and `promote` (the one authoring effect, an IO description). Called by
-  // installBuiltins.
-  void installXanadu();
-
-  // Build an unforced thunk value from an expression + environment.
-  ValuePtr makeThunk(const ExprNode *body, const EnvPtr &env);
-
-  zigzag::vortex::VortexCore &core_;
-  zigzag::vortex::VortexVM &vm_;
-  EnvPtr globals_{std::make_shared<Env>()};
-  std::size_t evaluationDepth_{0};
-  // Constructor name -> arity. Nil/Cons and True/False are pre-registered.
-  std::unordered_map<std::string, std::size_t> ctorArity_;
-  // Record constructor name -> ordered field names, in Inputs-Wing order
-  // (§5.7). Populated by registerData() for record ctors; drives named-field
-  // placement in ERecordUpdate and record construction.
-  std::unordered_map<std::string, std::vector<std::string>> ctorFields_;
-  // Field name -> the record constructor it belongs to. A field name is a
-  // top-level accessor function C -> fieldType (§5.7); eval of EVar/EApp
-  // special-cases a known accessor applied to a Ctor to return that arg.
-  std::unordered_map<std::string, std::string> fieldAccessor_;
-  // Projection sessions opened by `openLens` (§7.4). Held so the projected
-  // cells (and their arena) outlive the evaluation that reads them.
-  std::vector<std::shared_ptr<zigzag::ProjectionSession>> sessions_;
+  /// Projection sessions opened by `openLens` (§7.4). Held so the projected
+  /// cells (and their arena) outlive the evaluation that reads them.
+  [[nodiscard]] std::vector<std::shared_ptr<zigzag::ProjectionSession>> &
+  sessions() noexcept {
+    return sessions_;
+  }
 
   // The session that projected @p cell, or nullptr when no open session
   // owns it (an authored or foreign cell). Scans sessions_ calling
   // ownsCell -- the single ownership predicate: node cells resolve through
   // the session's key map, attribute cells one negward hop on a managed
   // dim. Shared by every session-resolution op and the cellKey/cellEq/
-  // cellScalar natives so none re-specifies the climb.
+  // cellScalar leaves so none re-specifies the climb.
   [[nodiscard]] zigzag::ProjectionSession *
   sessionFor(zigzag::CellRef cell) const noexcept;
+
+private:
+  zigzag::vortex::VortexCore &core_;
+  zigzag::vortex::VortexVM &vm_;
+  std::unique_ptr<lower::LowerState> state_;
+  std::vector<std::shared_ptr<zigzag::ProjectionSession>> sessions_;
 };
 
 } // namespace xanadu::vlace

@@ -84,6 +84,8 @@ std::string_view compileErrorName(CompileError e) noexcept {
     return "NonExhaustiveMatch";
   case CompileError::UnknownModule:
     return "UnknownModule";
+  case CompileError::BudgetExhausted:
+    return "BudgetExhausted";
   }
   return "Unknown";
 }
