@@ -143,6 +143,24 @@ std::size_t countSnapshotEntries(const Snapshot &snapshot, ArenaManifold &arena,
   return count;
 }
 
+// MakeVar, MakeTerm and Deref return cell identities, so a downstream
+// Unify/MakeTerm/InvokeFrame that names the output slot must see the cell, not
+// the Int64 box that carries its number. Link/Value/ProbeLink are published
+// the same way.
+bool publishesLogicReference(const OpcodeKind kind) {
+  return kind == OpcodeKind::MakeVar || kind == OpcodeKind::MakeTerm ||
+         kind == OpcodeKind::Deref;
+}
+
+// Readers of host state (a registered provider, the arena's position, its
+// dimension table). Like CurrentTimestamp they cannot run where a graph is
+// re-evaluated for its truth value or as a parameter pipeline, and are never
+// memoized: the same inputs do not give the same output.
+bool readsHostState(const OpcodeKind kind) noexcept {
+  return kind == OpcodeKind::RelationNext || kind == OpcodeKind::DimByName ||
+         kind == OpcodeKind::Hypertime;
+}
+
 double toDouble(const CellValue &val) {
   if (std::holds_alternative<double>(val)) return std::get<double>(val);
   if (std::holds_alternative<std::int64_t>(val))
@@ -267,12 +285,12 @@ VortexVM::registerProgramOps(std::span<const CellRef> enumeration) {
     // asInt64 ≤ Find sweep of the band would register dimConstant
     // operand cells and every other small-int data cell too.
     const auto kind = core_.arena().asInt64(opCell);
-    // The bound is the enum's last ordinal — RunResume while §6.2's
-    // ops hold the append-last tail; a new kind landing past it must
-    // move this ceiling the way linkedCeiling's does (meta.cpp).
+    // The bound is the enum's last ordinal — Pow while the append-last tail
+    // is RelationNext..Pow; a new kind landing past it must move this
+    // ceiling the way linkedCeiling's does (meta.cpp).
     if (!kind || *kind < 0 ||
         static_cast<std::uint64_t>(*kind) >
-            static_cast<std::uint64_t>(OpcodeKind::RunResume)) {
+            static_cast<std::uint64_t>(OpcodeKind::Pow)) {
       return std::unexpected("registerProgramOps: recorded cell " +
                              std::to_string(opCell) +
                              " does not decode to an opcode kind");
@@ -527,7 +545,7 @@ std::optional<OpcodeKind> VortexVM::getOpcodeKind(CellRef opCell) const {
   auto val = core_.arena().asInt64(opCell);
   if (val && *val >= 0 &&
       static_cast<std::uint64_t>(*val) <=
-          static_cast<std::uint64_t>(OpcodeKind::RunResume)) {
+          static_cast<std::uint64_t>(OpcodeKind::Pow)) {
     return static_cast<OpcodeKind>(*val);
   }
   return std::nullopt;
@@ -757,6 +775,139 @@ ExecutionResult VortexVM::executeProbeLink(const CellRef opcode,
                      *directionValue > 0 ? DimVector::POS : DimVector::NEG)
                : std::nullopt;
     outputs.emplace_back(static_cast<std::int64_t>(neighbor.value_or(noCell)));
+    return {};
+  } catch (const std::exception &error) {
+    return fail(error.what());
+  }
+}
+
+VortexVM *VortexVM::setRelationProvider(std::string relation,
+                                        RelationProvider provider) {
+  if (provider)
+    relationProviders_.insert_or_assign(std::move(relation),
+                                        std::move(provider));
+  else
+    relationProviders_.erase(relation);
+  return this;
+}
+
+ExecutionResult VortexVM::executeRelationNext(const CellRef opcode) {
+  const auto fail = [opcode](std::string message) {
+    return ExecutionResult{.success       = false,
+                           .failingClause = opcode,
+                           .errorMessage  = std::move(message)};
+  };
+  // Inputs are the relation, the position, the scan bound, then the goal's
+  // arguments; outputs are found, the next position, the bound, then one
+  // answer cell per argument.
+  constexpr std::size_t fixedInputs  = 3;
+  constexpr std::size_t fixedOutputs = 3;
+  try {
+    const auto inputs = inputsOf(opcode);
+    const auto slots  = outputsOf(opcode);
+    if (inputs.size() < fixedInputs)
+      return fail("RelationNext expects a relation, a position, a limit and "
+                  "the goal arguments");
+    const std::size_t arity = inputs.size() - fixedInputs;
+    if (slots.size() != fixedOutputs + arity)
+      return fail("RelationNext expects found, position and limit outputs "
+                  "plus one answer slot per argument");
+    if (std::ranges::any_of(slots, [&](const CellRef slot) {
+          return std::ranges::find(inputs, slot) != inputs.end();
+        }))
+      return fail("RelationNext outputs must not alias an input");
+    if (isMemoized(opcode)) return fail("RelationNext cannot be memoized");
+    if (!core_.preconditionsOf(opcode).empty() ||
+        !core_.postconditionsOf(opcode).empty())
+      return fail("RelationNext does not support pre/postconditions");
+    const auto typed = [this](const CellRef slot) {
+      return streamSlots_.contains(slot) || iteratorSlots_.contains(slot);
+    };
+    if (std::ranges::any_of(inputs, typed) || std::ranges::any_of(slots, typed))
+      return fail("RelationNext requires scalar reference slots");
+    const auto pipelined = [this](const CellRef slot) {
+      return core_.hasPipeline(slot);
+    };
+    if (std::ranges::any_of(inputs, pipelined) ||
+        std::ranges::any_of(slots, pipelined))
+      return fail("RelationNext does not support parameter pipelines");
+    for (const CellRef slot : inputs)
+      if (!core_.arena().contains(slot))
+        return fail("RelationNext input slot is missing");
+    for (const CellRef slot : slots)
+      if (!core_.arena().contains(slot))
+        return fail("RelationNext output slot is missing");
+
+    const auto relation            = inputValue(inputs[0]);
+    const auto *const relationName = std::get_if<std::string>(&relation);
+    if (relationName == nullptr || relationName->empty())
+      return fail("RelationNext relation must be non-empty text");
+    const auto position             = inputValue(inputs[1]);
+    const auto limit                = inputValue(inputs[2]);
+    const auto *const positionValue = std::get_if<std::int64_t>(&position);
+    const auto *const limitValue    = std::get_if<std::int64_t>(&limit);
+    if (positionValue == nullptr || limitValue == nullptr)
+      return fail("RelationNext position and limit must be Int64 values");
+    const auto provider = relationProviders_.find(*relationName);
+    if (provider == relationProviders_.end())
+      return fail("RelationNext: no relation provider is registered for '" +
+                  *relationName + "'");
+
+    std::vector<CellRef> arguments;
+    arguments.reserve(arity);
+    for (std::size_t i = 0; i < arity; ++i) {
+      const auto argument = resolveCell(inputs, {}, cellReferences_,
+                                        fixedInputs + i, core_.arena());
+      if (!argument)
+        return fail("RelationNext argument " + std::to_string(i) +
+                    " does not name an arena cell");
+      arguments.push_back(*argument);
+    }
+
+    core_.arena().consumeWork();
+    zigzag::ArenaSavepoint savepoint(core_.arena());
+    const auto result =
+        provider->second(RelationQuery{.relation  = *relationName,
+                                       .position  = *positionValue,
+                                       .limit     = *limitValue,
+                                       .arguments = arguments,
+                                       .arena     = core_.arena()});
+    if (!result) return fail("RelationNext: " + result.error());
+    if (*result && (*result)->answers.size() != arity)
+      return fail("RelationNext provider for '" + *relationName +
+                  "' returned " + std::to_string((*result)->answers.size()) +
+                  " answers for " + std::to_string(arity) + " arguments");
+    if (*result)
+      for (const CellRef answer : (*result)->answers)
+        if (!core_.arena().contains(answer))
+          return fail("RelationNext provider for '" + *relationName +
+                      "' returned a cell the arena does not hold");
+
+    const bool found = result->has_value();
+    const std::int64_t nextPosition =
+        found ? (*result)->nextPosition : *positionValue;
+    const std::int64_t nextLimit = found ? (*result)->limit : *limitValue;
+    const auto writeScalar = [&](const CellRef slot, const CellValue &value) {
+      clearTypedRegister(slot);
+      cellReferences_.erase(slot);
+      WriteFault fault = WriteFault::None;
+      std::ignore      = core_.writeValue(slot, 0, std::nullopt, value, &fault);
+      return fault != WriteFault::OpcodeKind;
+    };
+    if (!writeScalar(slots[0], CellValue{found}) ||
+        !writeScalar(slots[1], CellValue{nextPosition}) ||
+        !writeScalar(slots[2], CellValue{nextLimit}))
+      return fail("P15: write to a registered opcode cell refused (kind "
+                  "immutability)");
+    // Exhaustion publishes absent references, so a graph that reads an answer
+    // slot after a failed lookup sees no cell instead of a stale one.
+    std::vector<CellValue> answers;
+    answers.reserve(arity);
+    for (std::size_t i = 0; i < arity; ++i)
+      answers.emplace_back(
+          static_cast<std::int64_t>(found ? (*result)->answers[i] : noCell));
+    writeCellReferences(std::span(slots).subspan(fixedOutputs), answers);
+    savepoint.commit();
     return {};
   } catch (const std::exception &error) {
     return fail(error.what());
@@ -1472,6 +1623,10 @@ ExecutionResult VortexVM::runPipeline(CellRef paramCell) {
         kind == OpcodeKind::CurrentTimestamp)
       throw std::invalid_argument(
           "VQL scalar opcodes cannot run in a parameter pipeline");
+    if (readsHostState(kind))
+      throw std::invalid_argument(
+          "RelationNext/DimByName/Hypertime cannot run in a parameter "
+          "pipeline");
     if (kind == OpcodeKind::InvokeFrame || kind == OpcodeKind::ReturnFrame ||
         kind == OpcodeKind::CreateClosure || kind == OpcodeKind::ApplyClosure ||
         kind == OpcodeKind::RestoreBindings)
@@ -1559,7 +1714,7 @@ ExecutionResult VortexVM::runPipeline(CellRef paramCell) {
     std::vector<CellRef> outCells = outputsOf(*pipeOp);
     if ((kind == OpcodeKind::Link || kind == OpcodeKind::Break ||
          kind == OpcodeKind::Value || kind == OpcodeKind::CopyCellRefs ||
-         kind == OpcodeKind::ClearCellRefs) &&
+         kind == OpcodeKind::ClearCellRefs || publishesLogicReference(kind)) &&
         !outCells.empty()) {
       writeCellReferences(outCells, outVals);
     } else if (outCells.empty()) {
@@ -1625,6 +1780,9 @@ bool VortexVM::evaluateCondition(CellRef clause,
   if (kind == OpcodeKind::VqlString || kind == OpcodeKind::VqlAdd ||
       kind == OpcodeKind::VqlBoxScalar || kind == OpcodeKind::CurrentTimestamp)
     throw std::invalid_argument("scalar opcodes cannot run as conditions");
+  if (readsHostState(kind))
+    throw std::invalid_argument(
+        "RelationNext/DimByName/Hypertime cannot run as conditions");
   if (kind == OpcodeKind::InvokeFrame || kind == OpcodeKind::ReturnFrame)
     throw std::invalid_argument(
         "activation-frame opcodes cannot run as conditions");
@@ -2335,6 +2493,8 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
     return executeCurrentTimestamp(opcode, outputs);
   case OpcodeKind::ProbeLink:
     return executeProbeLink(opcode, outputs);
+  case OpcodeKind::RelationNext:
+    return executeRelationNext(opcode);
   case OpcodeKind::VqlMaskLinks:
     return executeVqlMaskLinks(opcode, outputs);
   case OpcodeKind::CreateClosure:
@@ -2405,6 +2565,89 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
         outputs.emplace_back(result);
       }
     }
+    break;
+  }
+  case OpcodeKind::Pow: {
+    const auto fail = [opcode](std::string message) {
+      return ExecutionResult{.success       = false,
+                             .failingClause = opcode,
+                             .errorMessage  = std::move(message)};
+    };
+    const auto numeric = [](const CellValue &value) {
+      return std::holds_alternative<std::int64_t>(value) ||
+             std::holds_alternative<double>(value);
+    };
+    if (inputs.size() != 2 || !numeric(inputs[0]) || !numeric(inputs[1]))
+      return fail("Pow expects a numeric base and a numeric exponent");
+    // Exact like Mul while the exponent is a non-negative integer and nothing
+    // is a double; every other pair goes through the floating-point power.
+    if (std::holds_alternative<std::int64_t>(inputs[0]) &&
+        std::holds_alternative<std::int64_t>(inputs[1]) &&
+        std::get<std::int64_t>(inputs[1]) >= 0) {
+      const auto base   = std::get<std::int64_t>(inputs[0]);
+      auto remaining    = std::get<std::int64_t>(inputs[1]);
+      std::int64_t acc  = 1;
+      std::int64_t step = base;
+      while (remaining > 0) {
+        if ((remaining & 1) != 0 && __builtin_mul_overflow(acc, step, &acc))
+          return overflowFailure();
+        remaining >>= 1;
+        if (remaining > 0 && __builtin_mul_overflow(step, step, &step))
+          return overflowFailure();
+      }
+      outputs.emplace_back(acc);
+      break;
+    }
+    const double base     = toDouble(inputs[0]);
+    const double exponent = toDouble(inputs[1]);
+    if (base == 0.0 && exponent < 0.0)
+      return fail("Pow: zero raised to a negative power");
+    if (base < 0.0 && std::trunc(exponent) != exponent)
+      return fail("Pow: negative base with a non-integer exponent");
+    const double result = std::pow(base, exponent);
+    if (!std::isfinite(result)) return fail("Pow: result is not finite");
+    outputs.emplace_back(result);
+    break;
+  }
+  case OpcodeKind::Hypertime: {
+    if (!inputs.empty())
+      return {.success       = false,
+              .failingClause = opcode,
+              .errorMessage  = "Hypertime expects no inputs"};
+    auto &arena = core_.arena();
+    arena.consumeWork();
+    // A store-backed arena's operations are the base manifold's cells; its
+    // own cells are ephemeral and mint none. Without a base every cell is an
+    // operation, as the VPL oracle counted.
+    const auto *const base = arena.base();
+    outputs.emplace_back(static_cast<std::int64_t>(
+        base != nullptr ? base->cellCount() : arena.cellCount()));
+    break;
+  }
+  case OpcodeKind::DimByName: {
+    const auto fail = [opcode](std::string message) {
+      return ExecutionResult{.success       = false,
+                             .failingClause = opcode,
+                             .errorMessage  = std::move(message)};
+    };
+    if (inputs.size() != 2)
+      return fail("DimByName expects a name and a mint flag");
+    const auto *const name = std::get_if<std::string>(&inputs[0]);
+    if (name == nullptr || name->empty())
+      return fail("DimByName name must be non-empty text");
+    bool mint = false;
+    if (const auto *const flag = std::get_if<bool>(&inputs[1]))
+      mint = *flag;
+    else if (const auto *const number = std::get_if<std::int64_t>(&inputs[1]))
+      mint = *number != 0;
+    else
+      return fail("DimByName mint flag must be a Bool or an Int64");
+    auto &arena = core_.arena();
+    arena.consumeWork();
+    auto dimension = arena.dimensionNamed(*name);
+    if (!dimension && mint) dimension = arena.ensureDimension(*name);
+    // Absent reads as the noCell Int64, as Deref and ProbeLink report it.
+    outputs.emplace_back(static_cast<std::int64_t>(dimension.value_or(noCell)));
     break;
   }
   case OpcodeKind::Div: {
@@ -3373,18 +3616,15 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
         args.push_back(*argCell);
       }
     }
-    CellRef term = core_.arena().makeCell(functor);
-    CellRef prev = noCell;
-    for (CellRef arg : args) {
-      if (prev == noCell) {
-        zigzag::expectWritten(
-            core_.arena().link(term, core_.dims().grab, false, arg));
-      } else {
-        zigzag::expectWritten(
-            core_.arena().link(prev, core_.dims().step, false, arg));
-      }
-      prev = arg;
-    }
+    // Vlog::makeTerm aliases an argument that is already in another term's
+    // chain or repeated here, so f(X, X) and a shared sub-term neither steal
+    // the cell nor trip the link refusal.
+    zigzag::Vlog vlog{.m     = core_.arena(),
+                      .clone = core_.dims().clone,
+                      .grab  = core_.dims().grab,
+                      .step  = core_.dims().step,
+                      .vars  = core_.dims().vars};
+    const CellRef term = vlog.makeTerm(functor, args);
     outputs.emplace_back(static_cast<std::int64_t>(term));
     break;
   }
@@ -3860,6 +4100,15 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
              kind == OpcodeKind::CurrentTimestamp;
     });
   };
+  const auto hasHostStateCondition = [this](const auto &clauses) {
+    return std::ranges::any_of(clauses, [this](const CellRef clause) {
+      const CellRef actual = core_.arena()
+                                 .cloneMaster(clause, core_.dims().clone)
+                                 .value_or(clause);
+      const auto conditionKind = getOpcodeKind(actual);
+      return conditionKind && readsHostState(*conditionKind);
+    });
+  };
   const auto hasFrameCondition = [this](const auto &clauses) {
     return std::ranges::any_of(clauses, [this](const CellRef clause) {
       const CellRef actual = core_.arena()
@@ -3921,6 +4170,30 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
       hasVqlScalarCondition(core_.postconditionsOf(*op))) {
     return {.success      = false,
             .errorMessage = "VQL scalar opcodes cannot run as conditions"};
+  }
+  if (hasHostStateCondition(core_.preconditionsOf(*op)) ||
+      hasHostStateCondition(core_.postconditionsOf(*op))) {
+    return {.success = false,
+            .errorMessage =
+                "RelationNext/DimByName/Hypertime cannot run as conditions"};
+  }
+  if (kind == OpcodeKind::RelationNext) {
+    if (!core_.preconditionsOf(*op).empty() ||
+        !core_.postconditionsOf(*op).empty())
+      return {.success       = false,
+              .failingClause = *op,
+              .errorMessage  = "RelationNext does not support "
+                               "pre/postconditions"};
+    if (std::ranges::any_of(
+            inputCells,
+            [&](const CellRef input) { return core_.hasPipeline(input); }) ||
+        std::ranges::any_of(outCells, [&](const CellRef output) {
+          return core_.hasPipeline(output);
+        }))
+      return {.success       = false,
+              .failingClause = *op,
+              .errorMessage  = "RelationNext does not support parameter "
+                               "pipelines"};
   }
   if (hasFrameCondition(core_.preconditionsOf(*op)) ||
       hasFrameCondition(core_.postconditionsOf(*op))) {
@@ -4123,7 +4396,8 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
           kind == OpcodeKind::CurrentTimestamp ||
           kind == OpcodeKind::ProbeLink || kind == OpcodeKind::VqlMaskLinks ||
           kind == OpcodeKind::ScopedChoice ||
-          kind == OpcodeKind::VqlFieldProbe) {
+          kind == OpcodeKind::VqlFieldProbe ||
+          kind == OpcodeKind::RelationNext) {
         oldInputs.emplace_back(false);
       } else {
         oldInputs.push_back(inputValue(paramCell));
@@ -4163,7 +4437,7 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
       kind != OpcodeKind::ScopedChoice && kind != OpcodeKind::ResumeInit &&
       kind != OpcodeKind::ResumeSet && kind != OpcodeKind::ProbeLink &&
       kind != OpcodeKind::VqlMaskLinks && kind != OpcodeKind::VqlFieldProbe &&
-      !stateful;
+      !readsHostState(kind) && !stateful;
   if (memoizable && isMemoized(*op)) {
     if (const auto key = getMemoKey(*op)) {
       CellRef pin = core_.getOrCreateMemoPin(*key);
@@ -4173,7 +4447,8 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
         newOutputs = *cached;
         if (kind == OpcodeKind::Link || kind == OpcodeKind::Break ||
             kind == OpcodeKind::Value || kind == OpcodeKind::CopyCellRefs ||
-            kind == OpcodeKind::ClearCellRefs) {
+            kind == OpcodeKind::ClearCellRefs ||
+            publishesLogicReference(kind)) {
           writeCellReferences(outCells, newOutputs);
         } else {
           for (std::size_t i = 0;
@@ -4250,14 +4525,14 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
     // so later operations consume the target cell, not the result slot.
     if (kind == OpcodeKind::MatchContract || kind == OpcodeKind::ResumeInit ||
         kind == OpcodeKind::ResumeSet || kind == OpcodeKind::VqlFieldProbe ||
-        kind == OpcodeKind::VqlMaskLinks) {
+        kind == OpcodeKind::VqlMaskLinks || kind == OpcodeKind::RelationNext) {
       // These handlers atomically publish their reference or scalar outputs.
     } else if (stateful) {
       // Stateful registers write their runtime state and output refs directly.
     } else if (kind == OpcodeKind::Link || kind == OpcodeKind::Break ||
                kind == OpcodeKind::Value || kind == OpcodeKind::CopyCellRefs ||
                kind == OpcodeKind::ClearCellRefs ||
-               kind == OpcodeKind::ProbeLink ||
+               kind == OpcodeKind::ProbeLink || publishesLogicReference(kind) ||
                kind == OpcodeKind::VqlBoxScalar ||
                kind == OpcodeKind::CurrentTimestamp) {
       if (kind == OpcodeKind::VqlBoxScalar ||

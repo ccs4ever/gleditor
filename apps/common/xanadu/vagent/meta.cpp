@@ -91,7 +91,7 @@ mintMetaBindSet(zigzag::ArenaManifold &arena, VortexCore &core,
     return arena.makeScalarCell(value);
   };
   binds.validate.linkedCeiling =
-      mintInt(static_cast<std::int64_t>(OpcodeKind::RunResume));
+      mintInt(static_cast<std::int64_t>(OpcodeKind::Pow));
   binds.validate.arityTable  = arena.makeCell();
   binds.validate.impureKinds = arena.makeCell();
 
@@ -149,8 +149,12 @@ mintMetaBindSet(zigzag::ArenaManifold &arena, VortexCore &core,
       {static_cast<std::int64_t>(OpcodeKind::Halt), 0, 0},
       {static_cast<std::int64_t>(OpcodeKind::Nop), 0, 0},
       // Main's appended traversal/run kinds (Linked above, then these
-      // four) sit after the VQL opcodes in the enum, at 81-85, so the
-      // ceiling scalar above is RunResume, the enum's last ordinal.
+      // four) sit after the VQL opcodes in the enum, at 81-85. The
+      // ceiling scalar above is Pow, the enum's last ordinal; the four
+      // kinds appended after RunResume (RelationNext, DimByName,
+      // Hypertime, Pow) are deliberately not in this table: they are
+      // host-state readers and a numeric leaf the meta palette does not
+      // reify, and a kind absent here makes validate refuse it by name.
       {static_cast<std::int64_t>(OpcodeKind::Find), 2, 1},
       {static_cast<std::int64_t>(OpcodeKind::FieldSet), 3, 1},
       {static_cast<std::int64_t>(OpcodeKind::RunCall), 4, 0},
@@ -554,7 +558,7 @@ MetaValidateReport MetaRuntime::validate(CellRef graphRootCell,
 
     const auto ordinal = arena.asInt64(op);
     if (!ordinal || *ordinal < 0 || *ordinal > ceiling)
-      return {false, "validate: op int64 outside [0, RunResume]"};
+      return {false, "validate: op int64 outside [0, Pow]"};
     const auto shape = arity.find(*ordinal);
     if (shape == arity.end())
       return {false, "validate: op kind absent from the arity table"};
