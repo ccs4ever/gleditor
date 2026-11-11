@@ -14,6 +14,7 @@
 #include "common/xanadu/bencode.hpp"
 #include "common/xanadu/foreign_op_handle.hpp"
 #include "common/xanadu/resolver.hpp"
+#include "common/xanadu/spool_write.hpp"
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/user_permascroll.hpp"
 
@@ -204,8 +205,10 @@ static std::expected<ValueSeed, std::string> publishValueImpl(
         return std::unexpected(
             "mesh value: primedia provenance does not cover sealed bytes");
       }
-      store.userPermascroll().sealIncremental(seedRoot, *signedPrimedia, {},
-                                              allBytes.size());
+      xanadu::requireSpoolWrite(
+          store.userPermascroll().sealIncremental(
+              seedRoot, *signedPrimedia, {}, allBytes.size()),
+          "seal mesh value primedia");
     }
     const auto primedia = store.userPermascroll().currentScroll();
     std::set<xanadu::InfoHash> payloads;

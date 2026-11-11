@@ -1,6 +1,7 @@
 #include "segmented_primedia_spool.hpp"
 
 #include <algorithm>
+#include <cerrno>
 #include <cstring>
 #include <fcntl.h>
 #include <stdexcept>
@@ -32,7 +33,7 @@ SegmentedPrimediaSpool::SegmentedPrimediaSpool() {
   arena.reserve(defaultPrimediaReservation);
 }
 
-SegmentedPrimediaSpool::~SegmentedPrimediaSpool() { clear(); }
+SegmentedPrimediaSpool::~SegmentedPrimediaSpool() { reset(); }
 
 SegmentedPrimediaSpool::SegmentedPrimediaSpool(
     SegmentedPrimediaSpool &&other) noexcept
@@ -47,14 +48,16 @@ SegmentedPrimediaSpool::SegmentedPrimediaSpool(
   other.totalBytes.store(0, std::memory_order_relaxed);
   other.committedBytes = 0;
   other.activeFd.reset();
+  other.activePath.clear();
   other.activeStart  = 0;
   other.flushedBytes = 0;
+  other.readOnly     = false;
 }
 
 SegmentedPrimediaSpool &
 SegmentedPrimediaSpool::operator=(SegmentedPrimediaSpool &&other) noexcept {
   if (this != &other) {
-    clear();
+    reset();
     arena       = std::move(other.arena);
     segmentList = std::move(other.segmentList);
     totalBytes.store(other.totalBytes.load(std::memory_order_relaxed),
@@ -68,8 +71,10 @@ SegmentedPrimediaSpool::operator=(SegmentedPrimediaSpool &&other) noexcept {
     other.totalBytes.store(0, std::memory_order_relaxed);
     other.committedBytes = 0;
     other.activeFd.reset();
+    other.activePath.clear();
     other.activeStart  = 0;
     other.flushedBytes = 0;
+    other.readOnly     = false;
   }
   return *this;
 }
@@ -95,7 +100,11 @@ bool SegmentedPrimediaSpool::ensureCommitted(const std::size_t requiredBytes) {
   return true;
 }
 
-PrimediaSpan SegmentedPrimediaSpool::append(const std::string_view bytes) {
+SpoolResult<PrimediaSpan>
+SegmentedPrimediaSpool::append(const std::string_view bytes) {
+  if (readOnly) {
+    return std::unexpected(SpoolRefusal::ReadOnly);
+  }
   // Relaxed: an appender is the only writer, so it is reading back what it
   // itself published and needs no ordering to see it.
   const auto start = totalBytes.load(std::memory_order_relaxed);
@@ -158,9 +167,17 @@ std::string_view SegmentedPrimediaSpool::bytes() const {
           static_cast<std::size_t>(published)};
 }
 
-void SegmentedPrimediaSpool::adopt(const std::string_view data) {
-  clear();
-  append(data);
+SpoolResult<SegmentedPrimediaSpool *>
+SegmentedPrimediaSpool::adopt(const std::string_view data) {
+  if (readOnly) {
+    return std::unexpected(SpoolRefusal::ReadOnly);
+  }
+  reset();
+  auto appended = append(data);
+  if (!appended) {
+    return std::unexpected(appended.error());
+  }
+  return this;
 }
 
 bool SegmentedPrimediaSpool::addSealedSegment(
@@ -218,26 +235,26 @@ bool SegmentedPrimediaSpool::addSealedSegment(
 }
 
 bool SegmentedPrimediaSpool::openActiveSegment(
-    const std::filesystem::path &path) {
+    const std::filesystem::path &path, const bool requestedReadOnly) {
   if (activeFd.has_value()) {
     ::close(*activeFd);
     activeFd.reset();
   }
+  readOnly = false;
   activePath = path.string();
-  activeFd   = openDescriptor(activePath.c_str(), O_RDWR | O_CREAT, 0644);
-  if (!activeFd) {
-    // A permascroll that can be read but not appended to: a checked-in fixture
-    // in a read-only checkout, or another user's scroll. Reading one is a
-    // reasonable thing to want -- it is what makes the document open at all --
-    // so this opens it rather than refusing, and flush() below writes nothing
-    // because nothing can be appended without a writable arena either.
+  readOnly = false;
+  if (requestedReadOnly) {
     activeFd = openDescriptor(activePath.c_str(), O_RDONLY);
     readOnly = activeFd.has_value();
-    if (!activeFd) {
-      return false;
-    }
   } else {
-    readOnly = false;
+    activeFd = openDescriptor(activePath.c_str(), O_RDWR | O_CREAT, 0644);
+    if (!activeFd && (errno == EACCES || errno == EROFS || errno == EPERM)) {
+      activeFd = openDescriptor(activePath.c_str(), O_RDONLY);
+      readOnly = activeFd.has_value();
+    }
+  }
+  if (!activeFd) {
+    return false;
   }
 
   // Whatever the file already holds is primedia this spool has recorded
@@ -251,6 +268,7 @@ bool SegmentedPrimediaSpool::openActiveSegment(
   if (::fstat(*activeFd, &st) < 0) {
     ::close(*activeFd);
     activeFd.reset();
+    readOnly = false;
     return false;
   }
   if (st.st_size > 0) {
@@ -258,6 +276,7 @@ bool SegmentedPrimediaSpool::openActiveSegment(
     if (!ensureCommitted(activeStart + have)) {
       ::close(*activeFd);
       activeFd.reset();
+      readOnly = false;
       return false;
     }
     std::size_t got = 0;
@@ -267,6 +286,7 @@ bool SegmentedPrimediaSpool::openActiveSegment(
       if (n <= 0) {
         ::close(*activeFd);
         activeFd.reset();
+        readOnly = false;
         return false;
       }
       got += static_cast<std::size_t>(n);
@@ -314,7 +334,9 @@ bool SegmentedPrimediaSpool::refreshActiveSegment() {
 
 bool SegmentedPrimediaSpool::sealActive(
     const std::filesystem::path &newActivePath) {
-  flush();
+  if (readOnly || !flush()) {
+    return false;
+  }
   if (activeFd.has_value()) {
     ::close(*activeFd);
     activeFd.reset();
@@ -338,6 +360,9 @@ bool SegmentedPrimediaSpool::sealActive(
 }
 
 bool SegmentedPrimediaSpool::flush() {
+  if (readOnly) {
+    return false;
+  }
   // Acquire, so that a flush from a thread other than the appender writes out
   // every byte that appender had published rather than a prefix of them.
   const auto published = totalBytes.load(std::memory_order_acquire);
@@ -349,7 +374,7 @@ bool SegmentedPrimediaSpool::flush() {
     // that followed it synced a file no byte had ever been written to.
     arena.flush(arena.base(), static_cast<std::size_t>(published));
   }
-  if (!activeFd || activePath.empty() || readOnly) {
+  if (!activeFd || activePath.empty()) {
     return true;
   }
   while (flushedBytes < published) {
@@ -371,7 +396,15 @@ bool SegmentedPrimediaSpool::flush() {
   return true;
 }
 
-void SegmentedPrimediaSpool::clear() {
+SpoolResult<SegmentedPrimediaSpool *> SegmentedPrimediaSpool::clear() {
+  if (readOnly) {
+    return std::unexpected(SpoolRefusal::ReadOnly);
+  }
+  reset();
+  return this;
+}
+
+void SegmentedPrimediaSpool::reset() {
   if (activeFd.has_value()) {
     ::close(*activeFd);
     activeFd.reset();

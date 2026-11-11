@@ -24,6 +24,7 @@
 #include "provenance.hpp"
 #include "scroll.hpp"
 #include "segmented_primedia_spool.hpp"
+#include "spool_write.hpp"
 #include "spool.hpp"
 #include "swarm.hpp"
 #include "torrent.hpp"
@@ -111,6 +112,7 @@ public:
                     ///< primary author station; 'main' is protected)
     std::size_t segmentAlignmentBytes{
         64UZ * 1024}; ///< 64 KiB alignment for BitTorrent/mmap
+    bool readOnly{false}; ///< Open existing primedia without creating state.
   };
 
   /// Generates a cryptographically unique RFC 4122 UUIDv4 for a secondary
@@ -129,10 +131,9 @@ public:
   /**
    * @brief Atomically append keystrokes to the user's permascroll.
    * @param text The newly typed UTF-8 or primedia byte sequence.
-   * @return PrimediaSpan with scroll=localScroll (0) and 64-bit continuous
-   * offset.
+   * @return The local span with a 64-bit continuous offset, or ReadOnly.
    */
-  PrimediaSpan append(std::string_view text);
+  SpoolResult<PrimediaSpan> append(std::string_view text);
 
   // findExistingSpan used to live here: a flat search of the whole
   // permascroll for text about to be appended, so an insert could point at an
@@ -184,10 +185,10 @@ public:
   /// @}
 
   /// Adopt in-memory bytes (for compatibility / text loading).
-  void adopt(std::string_view data);
+  SpoolResult<UserPermascroll *> adopt(std::string_view data);
 
   /// Reset the spool to empty state.
-  void clear();
+  SpoolResult<UserPermascroll *> clear();
 
   /// Access underlying segmented primedia spool.
   [[nodiscard]] const SegmentedPrimediaSpool &spool() const noexcept {
@@ -210,9 +211,9 @@ public:
    * range.
    * @param holes Optional holes (withheld or transcopyright paywall spans) in
    * this slice.
-   * @return The newly sealed ScrollSegment, or std::nullopt if nothing to seal.
+   * @return The segment, empty when there is nothing to seal, or ReadOnly.
    */
-  std::optional<ScrollSegment>
+  SpoolResult<std::optional<ScrollSegment>>
   sealIncremental(const std::filesystem::path &outputDir,
                   const SignedProvenance &provenance,
                   const std::vector<PublishedHoleRecord> &holes = {},
@@ -232,8 +233,9 @@ public:
    * @param primediaPath File path to the device's primedia payload.
    * @return The canonical Scroll descriptor for the subscroll.
    */
-  Scroll registerSubscroll(std::string_view deviceId,
-                           const std::filesystem::path &primediaPath);
+  SpoolResult<Scroll>
+  registerSubscroll(std::string_view deviceId,
+                    const std::filesystem::path &primediaPath);
 
   /**
    * @brief Ingest a slice of primedia bytes directly into a device subscroll.
@@ -241,8 +243,9 @@ public:
    * Writes the data to `devices/<deviceId>/active.primedia` and returns the
    * canonical Scroll descriptor.
    */
-  Scroll ingestSubscroll(std::string_view deviceId,
-                         std::span<const std::uint8_t> data);
+  SpoolResult<Scroll>
+  ingestSubscroll(std::string_view deviceId,
+                  std::span<const std::uint8_t> data);
 
   /// Resolves the storage path for a given device's active primedia file.
   [[nodiscard]] std::filesystem::path

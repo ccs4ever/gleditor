@@ -189,7 +189,7 @@ TEST(TranscopyrightStorageTest, userPermascrollSealsHolesAsZeroFillOnWire) {
   // Append 100 bytes of author text
   const std::string text = "012345678901234567890123456789012345678901234567890"
                            "1234567890123456789012345678901234567890123456789";
-  const auto span        = scroll.append(text);
+  const auto span = requireSpoolWrite(scroll.append(text));
   EXPECT_EQ(span.length, 100U);
 
   // Withhold bytes [20, 50)
@@ -202,7 +202,8 @@ TEST(TranscopyrightStorageTest, userPermascrollSealsHolesAsZeroFillOnWire) {
   prov.tsv       = "author\tTest Author\n";
   prov.signature = "ed25519-sig:test-signature\n";
 
-  const auto segment = scroll.sealIncremental(tempDir, prov, {hole});
+  const auto segment =
+      requireSpoolWrite(scroll.sealIncremental(tempDir, prov, {hole}));
   ASSERT_TRUE(segment.has_value());
   EXPECT_EQ(segment->length, 100U);
 

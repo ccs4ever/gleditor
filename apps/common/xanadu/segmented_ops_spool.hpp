@@ -17,6 +17,7 @@
 
 #include "compact_op.hpp"
 #include "microversion.hpp"
+#include "spool_write.hpp"
 #include "virtual_memory_arena.hpp"
 
 namespace xanadu {
@@ -246,14 +247,15 @@ public:
    * @brief Append a new operation to the active segment.
    * @param node The operation payload.
    * @param produces The microversion state produced.
-   * @return The 1-based index of the new operation.
+   * @return The 1-based index, or a read-only refusal before changing state.
    * @throws SpoolExhausted when the reservation is full, which is a fact
    *         about this document. Nothing is appended and the spool is left
    *         exactly as it was.
    * @throws std::bad_alloc when there is room in the reservation but the
    *         machine will not back it, which is a fact about the machine.
    */
-  std::uint32_t append(CompactOpNode node, const MicroversionId &produces);
+  SpoolResult<std::uint32_t> append(CompactOpNode node,
+                                    const MicroversionId &produces);
 
   /**
    * @brief Get a pointer to an operation by its 1-based index.
@@ -340,16 +342,22 @@ public:
   bool addSealedSegment(const std::filesystem::path &path);
 
   /**
-   * @brief Open the writable segment that new operations are appended to.
+   * @brief Open the active segment, optionally requiring read-only access.
    *
    * A file that does not exist yet, or exists and is empty, is created with a
    * header and nothing after it. A file that already holds nodes is adopted
    * rather than overwritten, so reopening a spool picks up where it left off.
-   * Anything appended after that is written to this file by flush().
+   * Anything appended after that is written to this file by flush(). A
+   * requested read-only open uses O_RDONLY only and refuses a missing or
+   * empty file rather than creating its header.
    *
    * @throws OpsSegmentUnreadable as addSealedSegment() does.
    */
-  bool openActiveSegment(const std::filesystem::path &path);
+  bool openActiveSegment(const std::filesystem::path &path,
+                         bool readOnly = false);
+
+  /// Whether this spool was opened without write access.
+  [[nodiscard]] bool isReadOnly() const noexcept { return readOnly; }
 
   /**
    * @brief Write every operation held to @p path as a whole segment file.
@@ -487,6 +495,7 @@ private:
   /// activeFlushedOps), so a flush writes from where it left off.
   std::uint32_t activeStartIndex{1};
   std::uint32_t activeFlushedOps{0};
+  bool readOnly{false};
 };
 
 } // namespace xanadu

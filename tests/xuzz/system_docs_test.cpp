@@ -798,9 +798,12 @@ TEST(SystemDocsTest, UserPermascrollWithheldSpanSealing) {
   std::filesystem::create_directories(tempDir);
 
   UserPermascroll scroll;
-  const auto pubSpan1 = scroll.append("Public header text. ");
-  const auto sysSpan  = scroll.append("secret_private_keymap_bindings_12345");
-  const auto pubSpan2 = scroll.append(" Public footer text.");
+  const auto pubSpan1 =
+      xanadu::requireSpoolWrite(scroll.append("Public header text. "));
+  const auto sysSpan = xanadu::requireSpoolWrite(
+      scroll.append("secret_private_keymap_bindings_12345"));
+  const auto pubSpan2 =
+      xanadu::requireSpoolWrite(scroll.append(" Public footer text."));
 
   PublishedHoleRecord hole;
   hole.at     = sysSpan.start;
@@ -808,7 +811,8 @@ TEST(SystemDocsTest, UserPermascrollWithheldSpanSealing) {
   hole.reason = HoleReason::Withheld;
 
   const auto prov = makeTestProvenance();
-  const auto seg  = scroll.sealIncremental(tempDir, prov, {hole});
+  const auto seg = xanadu::requireSpoolWrite(
+      scroll.sealIncremental(tempDir, prov, {hole}));
   ASSERT_TRUE(seg.has_value());
   EXPECT_EQ(seg->at, 0U);
   EXPECT_EQ(seg->length, scroll.size());

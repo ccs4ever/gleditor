@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "spool.hpp"
+#include "spool_write.hpp"
 #include "virtual_memory_arena.hpp"
 
 namespace xanadu {
@@ -45,14 +46,14 @@ public:
 
   /**
    * @brief Append bytes to the active primedia segment.
-   * @return The canonical PrimediaSpan where the bytes were recorded.
+   * @return The span where the bytes were recorded, or ReadOnly.
    */
-  PrimediaSpan append(std::string_view bytes);
+  SpoolResult<PrimediaSpan> append(std::string_view bytes);
 
   /**
    * @brief Append binary payload bytes to the active primedia segment.
    */
-  PrimediaSpan append(const std::span<const std::uint8_t> bytes) {
+  SpoolResult<PrimediaSpan> append(const std::span<const std::uint8_t> bytes) {
     return append(std::string_view(reinterpret_cast<const char *>(bytes.data()),
                                    bytes.size()));
   }
@@ -78,7 +79,7 @@ public:
   /**
    * @brief Adopt in-memory bytes (for compatibility / text loading).
    */
-  void adopt(std::string_view data);
+  SpoolResult<SegmentedPrimediaSpool *> adopt(std::string_view data);
 
   /**
    * @brief Add a sealed read-only segment file.
@@ -86,14 +87,15 @@ public:
   bool addSealedSegment(const std::filesystem::path &path);
 
   /**
-   * @brief Set the active writable segment file, restoring what it holds.
+   * @brief Open the active segment and restore what it holds.
    *
    * The file's bytes are read in at the spool's current end and keep those
    * addresses, so reopening a permascroll is what makes a span recorded in an
    * earlier session still resolve. This is the read half of the spool's
    * persistence; flush() is the write half.
    */
-  bool openActiveSegment(const std::filesystem::path &path);
+  bool openActiveSegment(const std::filesystem::path &path,
+                         bool readOnly = false);
 
   /**
    * @brief Refresh unread trailing bytes from the active segment file on disk.
@@ -116,8 +118,11 @@ public:
    */
   bool flush();
 
-  /// Reset the spool to empty state.
-  void clear();
+  /// Whether the active file descriptor was opened read-only.
+  [[nodiscard]] bool isReadOnly() const noexcept { return readOnly; }
+
+  /// Reset a writable spool to empty state.
+  SpoolResult<SegmentedPrimediaSpool *> clear();
 
   [[nodiscard]] const std::vector<SegmentInfo> &segments() const {
     return segmentList;
@@ -125,6 +130,7 @@ public:
 
 private:
   bool ensureCommitted(std::size_t requiredBytes);
+  void reset();
 
   VirtualMemoryArena arena;
   std::vector<SegmentInfo> segmentList;
@@ -162,8 +168,8 @@ private:
   /// How much of the arena the active segment file already holds. Everything
   /// past it is typed but not yet durable; flush() is what closes the gap.
   std::uint64_t flushedBytes{0};
-  /// The active segment could be opened for reading but not for writing -- a
-  /// fixture in a read-only checkout, say. flush() writes nothing.
+  /// The active segment was explicitly or necessarily opened read-only;
+  /// mutating operations refuse instead of silently discarding writes.
   bool readOnly{false};
 };
 

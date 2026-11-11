@@ -154,7 +154,7 @@ Store::makeForeignOpHandle(const MicroversionId &parent,
   op.kind    = OpKind::Structure;
   op.flags   = structureFlags(StructureVerb::MakeCell, false,
                               ValueKind::ForeignOpHandle);
-  op.span    = userPermascroll_->append(descriptor);
+  op.span    = appendLocalPrimedia(descriptor);
   op.value   = 0;
   op.context = context.value_or(MicroversionId{});
   if (!context && sliceBirth_.has_value())

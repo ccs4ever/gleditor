@@ -1,6 +1,7 @@
 #include "segmented_ops_spool.hpp"
 
 #include <algorithm>
+#include <cerrno>
 #include <cstring>
 #include <fcntl.h>
 #include <limits>
@@ -195,13 +196,14 @@ SegmentedOpsSpool::SegmentedOpsSpool(SegmentedOpsSpool &&other) noexcept
       idHashSlots(std::move(other.idHashSlots)), idHashCount(other.idHashCount),
       activeFd(other.activeFd), activePath(std::move(other.activePath)),
       activeStartIndex(other.activeStartIndex),
-      activeFlushedOps(other.activeFlushedOps) {
+      activeFlushedOps(other.activeFlushedOps), readOnly(other.readOnly) {
   other.opCount        = 0;
   other.committedBytes = 0;
   other.idHashCount    = 0;
   other.activeFd.reset();
   other.activeStartIndex = 1;
   other.activeFlushedOps = 0;
+  other.readOnly         = false;
   // A moved-from vector is left empty, not just cleared of its old contents
   // -- so the index-0 sentinel the constructor promised has to be put back,
   // or the next append() on the moved-from object would misfile everything
@@ -227,12 +229,14 @@ SegmentedOpsSpool::operator=(SegmentedOpsSpool &&other) noexcept {
     activePath           = std::move(other.activePath);
     activeStartIndex     = other.activeStartIndex;
     activeFlushedOps     = other.activeFlushedOps;
+    readOnly             = other.readOnly;
     other.opCount        = 0;
     other.committedBytes = 0;
     other.idHashCount    = 0;
     other.activeFd.reset();
     other.activeStartIndex = 1;
     other.activeFlushedOps = 0;
+    other.readOnly         = false;
     other.indexLookup.emplace_back();
     other.tree.emplace_back();
   }
@@ -365,8 +369,11 @@ void SegmentedOpsSpool::linkIntoTree(const std::uint32_t index) {
   }
 }
 
-std::uint32_t SegmentedOpsSpool::append(CompactOpNode node,
-                                        const MicroversionId &produces) {
+SpoolResult<std::uint32_t>
+SegmentedOpsSpool::append(CompactOpNode node, const MicroversionId &produces) {
+  if (readOnly) {
+    return std::unexpected(SpoolRefusal::ReadOnly);
+  }
   // Asked before anything is committed, so running out of reservation is
   // reported as the document-shaped fact it is rather than reaching the
   // caller as the arena's bare bad_alloc. Anything ensureCommitted refuses
@@ -600,13 +607,28 @@ bool SegmentedOpsSpool::addSealedSegment(const std::filesystem::path &path) {
   return true;
 }
 
-bool SegmentedOpsSpool::openActiveSegment(const std::filesystem::path &path) {
+bool SegmentedOpsSpool::openActiveSegment(const std::filesystem::path &path,
+                                          const bool requestedReadOnly) {
   if (activeFd.has_value()) {
     ::close(*activeFd);
     activeFd.reset();
   }
-  const int fd = ::open(path.string().c_str(), O_RDWR | O_CREAT, 0644);
+  readOnly = requestedReadOnly;
+  int fd = requestedReadOnly
+               ? ::open(path.string().c_str(), O_RDONLY)
+               : ::open(path.string().c_str(), O_RDWR | O_CREAT, 0644);
+  if (fd < 0 && !requestedReadOnly &&
+      (errno == EACCES || errno == EROFS || errno == EPERM)) {
+    fd = ::open(path.string().c_str(), O_RDONLY);
+    if (fd >= 0) {
+      readOnly = true;
+    }
+  }
   if (fd < 0) {
+    if (requestedReadOnly) {
+      throw OpsSegmentUnreadable(path.string() +
+                                 " cannot be opened for read-only operations");
+    }
     return false;
   }
   struct stat st{};
@@ -617,6 +639,12 @@ bool SegmentedOpsSpool::openActiveSegment(const std::filesystem::path &path) {
 
   const auto startIndex = opCount + 1U;
   if (0 == st.st_size) {
+    if (readOnly) {
+      ::close(fd);
+      throw OpsSegmentUnreadable(path.string() +
+                                 " is empty and cannot be initialized "
+                                 "by a read-only operations spool");
+    }
     // Nothing here yet, so this is where the file gets its header. The rest of
     // the 64 KiB is never written and stays a hole.
     if (!writeSegmentHeader(fd, segmentHeaderFor(startIndex, 0))) {
@@ -652,6 +680,9 @@ bool SegmentedOpsSpool::openActiveSegment(const std::filesystem::path &path) {
 }
 
 bool SegmentedOpsSpool::sealActive(const std::filesystem::path &newActivePath) {
+  if (readOnly) {
+    return false;
+  }
   if (!flush()) {
     return false;
   }
@@ -676,6 +707,9 @@ bool SegmentedOpsSpool::sealActive(const std::filesystem::path &newActivePath) {
 }
 
 bool SegmentedOpsSpool::flush() {
+  if (readOnly) {
+    return false;
+  }
   if (activeFd.has_value() && opCount >= activeStartIndex) {
     const auto pending = (opCount - activeStartIndex + 1U) - activeFlushedOps;
     if (pending > 0) {
@@ -725,6 +759,9 @@ bool SegmentedOpsSpool::flush() {
 
 bool SegmentedOpsSpool::writeSegmentFile(
     const std::filesystem::path &path) const {
+  if (readOnly) {
+    return false;
+  }
   const int fd =
       ::open(path.string().c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
   if (fd < 0) {
@@ -772,6 +809,7 @@ void SegmentedOpsSpool::clear() {
   activeStartIndex = 1;
   activeFlushedOps = 0;
   activePath.clear();
+  readOnly = false;
 }
 
 } // namespace xanadu

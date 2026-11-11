@@ -91,7 +91,8 @@ TEST(SpanIdentityTest, TypingOverExistingTextStillAppends) {
 // author quotes, and is the primitive an explicit transclusion command needs.
 TEST(SpanIdentityTest, InsertSpanQuotesAnExistingSpanOnPurpose) {
   Store store;
-  const auto span = store.primedia().append("Original master text passage.");
+  const auto span = xanadu::requireSpoolWrite(
+      store.primedia().append("Original master text passage."));
   const auto v1   = store.insertSpan(MicroversionId{}, 0, span);
 
   EXPECT_EQ(v1.str(), "1");

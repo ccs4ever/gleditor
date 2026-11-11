@@ -387,7 +387,8 @@ TEST(ManifoldTest, aCellsMicroHistoryIsAChainOfOperations) {
 TEST(ManifoldTest, setValueRestatesContentAndBits) {
   Slice slice;
   const auto cell = slice.cell("42");
-  const auto span = slice.store.userPermascrollPtr()->append("43");
+  const auto span = xanadu::requireSpoolWrite(
+      slice.store.userPermascrollPtr()->append("43"));
   slice.at = slice.store.setValue(slice.at, cell, span, ValueKind::Double,
                                   0x4045800000000000ULL);
 
@@ -1830,8 +1831,10 @@ TEST(ManifoldTest, aLinkIsACellWithAnAddress) {
   Store store(perma);
   auto at = store.sliceGenesis(MicroversionId{});
 
-  const auto spanA = perma->append("Theodor Holm Nelson");
-  const auto spanB = perma->append("Literary Machines");
+  const auto spanA =
+      xanadu::requireSpoolWrite(perma->append("Theodor Holm Nelson"));
+  const auto spanB =
+      xanadu::requireSpoolWrite(perma->append("Literary Machines"));
 
   Link link;
   link.type  = LinkType::Comment;
@@ -1896,14 +1899,18 @@ TEST(ManifoldTest, aMultiSpanLinkSurvivesPublicationAndTransclusion) {
     Store store(perma);
     auto at = store.sliceGenesis(MicroversionId{});
 
-    const auto spanA1 = perma->append("Multi-span left end piece 1. ");
-    perma->append(
-        "Filler separating left pieces so R9 does not coalesce them.");
-    const auto spanA2 = perma->append("Multi-span left end piece 2.");
-    const auto spanB1 = perma->append("Multi-span right end piece 1. ");
-    perma->append(
-        "Filler separating right pieces so R9 does not coalesce them.");
-    const auto spanB2 = perma->append("Multi-span right end piece 2.");
+    const auto spanA1 =
+        xanadu::requireSpoolWrite(perma->append("Multi-span left end piece 1. "));
+    xanadu::requireSpoolWrite(perma->append(
+        "Filler separating left pieces so R9 does not coalesce them."));
+    const auto spanA2 =
+        xanadu::requireSpoolWrite(perma->append("Multi-span left end piece 2."));
+    const auto spanB1 =
+        xanadu::requireSpoolWrite(perma->append("Multi-span right end piece 1. "));
+    xanadu::requireSpoolWrite(perma->append(
+        "Filler separating right pieces so R9 does not coalesce them."));
+    const auto spanB2 =
+        xanadu::requireSpoolWrite(perma->append("Multi-span right end piece 2."));
 
     originalLink.type    = LinkType::Quotation;
     originalLink.tier    = ProminenceTier::Curated;
@@ -1944,8 +1951,8 @@ TEST(ManifoldTest, anotherAuthorsLinkSetFoldsOverMine) {
 
   Store storeMine(perma);
   auto atMine          = storeMine.sliceGenesis(MicroversionId{});
-  const auto spanMineA = perma->append("My text on side A");
-  const auto spanMineB = perma->append("My text on side B");
+  const auto spanMineA = xanadu::requireSpoolWrite(perma->append("My text on side A"));
+  const auto spanMineB = xanadu::requireSpoolWrite(perma->append("My text on side B"));
 
   Link linkMine;
   linkMine.type  = LinkType::Comment;
@@ -1959,8 +1966,10 @@ TEST(ManifoldTest, anotherAuthorsLinkSetFoldsOverMine) {
   Store storeTheirs(perma);
   storeTheirs.adoptOpRecords(storeMine.opRecords());
   auto atTheirs          = atMine;
-  const auto spanTheirsA = perma->append("Their commentary on side A");
-  const auto spanTheirsB = perma->append("Their response on side B");
+  const auto spanTheirsA =
+      xanadu::requireSpoolWrite(perma->append("Their commentary on side A"));
+  const auto spanTheirsB =
+      xanadu::requireSpoolWrite(perma->append("Their response on side B"));
 
   Link linkTheirs;
   linkTheirs.type  = LinkType::Disagreement;

@@ -357,8 +357,9 @@ UserPermascroll::UserPermascroll(Config config) : config_(std::move(config)) {
                                 "(must be 1-64 alphanumeric, "
                                 "dash, or underscore characters, not 'main')");
   }
-  const auto restored = permascrollState(config_);
-  if (config_.deviceKeys.publicKey.isZero())
+  const auto restored =
+      config_.readOnly ? std::optional<Scroll>{} : permascrollState(config_);
+  if (!config_.readOnly && config_.deviceKeys.publicKey.isZero())
     config_.deviceKeys = createMutableKeys();
 
   currentScroll_.publisher = config_.deviceKeys.publicKey;
@@ -366,7 +367,21 @@ UserPermascroll::UserPermascroll(Config config) : config_(std::move(config)) {
                                  ? "permascroll"
                                  : "permascroll/" + config_.deviceId;
 
-  if (!config_.storageDir.empty()) {
+  if (config_.readOnly) {
+    if (config_.storageDir.empty()) {
+      throw std::runtime_error(
+          "read-only permascroll: storageDir is required");
+    }
+    auto activePath = config_.storageDir / "active.primedia";
+    if (!config_.deviceId.empty()) {
+      activePath = config_.storageDir / "devices" / config_.deviceId /
+                   "active.primedia";
+    }
+    if (!spool_.openActiveSegment(activePath, true)) {
+      throw std::runtime_error(
+          "read-only permascroll: cannot open existing active.primedia");
+    }
+  } else if (!config_.storageDir.empty()) {
     std::error_code ec;
     std::filesystem::create_directories(config_.storageDir / "segments", ec);
 
@@ -398,12 +413,16 @@ UserPermascroll::~UserPermascroll() {
   // A permascroll is the only copy of what its author typed, and nothing else
   // holds a reference by the time this runs. Losing the unflushed tail here
   // would lose the end of the session -- the part most likely to matter.
-  if (!config_.storageDir.empty()) {
+  if (!config_.readOnly && !config_.storageDir.empty()) {
     spool_.flush();
   }
 }
 
-PrimediaSpan UserPermascroll::append(const std::string_view text) {
+SpoolResult<PrimediaSpan>
+UserPermascroll::append(const std::string_view text) {
+  if (config_.readOnly) {
+    return std::unexpected(SpoolRefusal::ReadOnly);
+  }
   std::scoped_lock lock(appendMutex_);
   return spool_.append(text);
 }
@@ -442,14 +461,28 @@ std::uint64_t UserPermascroll::size() const { return spool_.size(); }
 
 std::string_view UserPermascroll::bytes() const { return spool_.bytes(); }
 
-void UserPermascroll::adopt(const std::string_view data) {
+SpoolResult<UserPermascroll *>
+UserPermascroll::adopt(const std::string_view data) {
+  if (config_.readOnly) {
+    return std::unexpected(SpoolRefusal::ReadOnly);
+  }
   std::scoped_lock lock(appendMutex_);
-  spool_.adopt(data);
+  auto result = spool_.adopt(data);
+  if (!result) {
+    return std::unexpected(result.error());
+  }
+  return this;
 }
 
-void UserPermascroll::clear() {
+SpoolResult<UserPermascroll *> UserPermascroll::clear() {
+  if (config_.readOnly) {
+    return std::unexpected(SpoolRefusal::ReadOnly);
+  }
   std::scoped_lock lock(appendMutex_);
-  spool_.clear();
+  auto result = spool_.clear();
+  if (!result) {
+    return std::unexpected(result.error());
+  }
   sealedBytes_ = 0;
   currentScroll_.segments.clear();
   if (!config_.storageDir.empty()) {
@@ -457,6 +490,7 @@ void UserPermascroll::clear() {
     spool_.openActiveSegment(config_.storageDir / "active.primedia");
     (void)permascrollState(config_, &currentScroll_);
   }
+  return this;
 }
 
 Scroll UserPermascroll::currentScroll() const {
@@ -474,10 +508,14 @@ std::string UserPermascroll::globalScrollKey() const {
   return *key;
 }
 
-std::optional<ScrollSegment> UserPermascroll::sealIncremental(
+SpoolResult<std::optional<ScrollSegment>>
+UserPermascroll::sealIncremental(
     const std::filesystem::path &outputDir, const SignedProvenance &provenance,
     const std::vector<PublishedHoleRecord> &holes,
     const std::optional<std::uint64_t> expectedEnd) {
+  if (config_.readOnly) {
+    return std::unexpected(SpoolRefusal::ReadOnly);
+  }
   std::scoped_lock lock(appendMutex_);
 
   const auto allBytes = spool_.bytes();
@@ -486,12 +524,12 @@ std::optional<ScrollSegment> UserPermascroll::sealIncremental(
         "permascroll changed while its seal was being signed");
   }
   if (allBytes.size() <= sealedBytes_) {
-    return std::nullopt; // Nothing new to seal
+    return std::optional<ScrollSegment>{}; // Nothing new to seal
   }
 
   const auto unsealedSlice = allBytes.substr(sealedBytes_);
   if (unsealedSlice.empty()) {
-    return std::nullopt;
+    return std::optional<ScrollSegment>{};
   }
 
   auto wirePayload = publicationPrimedia(unsealedSlice, sealedBytes_, holes);
@@ -531,7 +569,7 @@ std::optional<ScrollSegment> UserPermascroll::sealIncremental(
   currentScroll_ = std::move(next);
   sealedBytes_ += unsealedSlice.size();
 
-  return segment;
+  return std::optional<ScrollSegment>{std::move(segment)};
 }
 
 bool UserPermascroll::flush() {
@@ -558,9 +596,12 @@ UserPermascroll::deviceActivePrimediaPath(std::string_view deviceId) const {
   return config_.storageDir / "devices" / deviceId / "active.primedia";
 }
 
-Scroll
+SpoolResult<Scroll>
 UserPermascroll::registerSubscroll(std::string_view deviceId,
                                    const std::filesystem::path &primediaPath) {
+  if (config_.readOnly) {
+    return std::unexpected(SpoolRefusal::ReadOnly);
+  }
   if (!isValidDeviceId(deviceId)) {
     throw std::invalid_argument(
         "UserPermascroll: cannot register subscroll for invalid deviceId (must "
@@ -590,8 +631,12 @@ UserPermascroll::registerSubscroll(std::string_view deviceId,
   return subscroll;
 }
 
-Scroll UserPermascroll::ingestSubscroll(std::string_view deviceId,
-                                        std::span<const std::uint8_t> data) {
+SpoolResult<Scroll>
+UserPermascroll::ingestSubscroll(std::string_view deviceId,
+                                 std::span<const std::uint8_t> data) {
+  if (config_.readOnly) {
+    return std::unexpected(SpoolRefusal::ReadOnly);
+  }
   if (!isValidDeviceId(deviceId)) {
     throw std::invalid_argument(
         "UserPermascroll: cannot ingest subscroll for invalid deviceId (must "

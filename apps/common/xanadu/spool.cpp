@@ -1,5 +1,6 @@
 #include "spool.hpp"
 #include "segmented_primedia_spool.hpp"
+#include "spool_write.hpp"
 
 #include <memory>
 #include <stdexcept>
@@ -17,7 +18,7 @@ PrimediaSpool::PrimediaSpool() : impl(std::make_unique<Impl>()) {}
 PrimediaSpool::~PrimediaSpool() = default;
 
 PrimediaSpan PrimediaSpool::append(const std::string_view bytes) {
-  return impl->spool.append(bytes);
+  return requireSpoolWrite(impl->spool.append(bytes), "append primedia");
 }
 
 std::string PrimediaSpool::read(const PrimediaSpan &span) const {
@@ -38,7 +39,7 @@ std::uint64_t PrimediaSpool::size() const { return impl->spool.size(); }
 std::string_view PrimediaSpool::bytes() const { return impl->spool.bytes(); }
 
 void PrimediaSpool::adopt(const std::string_view stored) {
-  impl->spool.adopt(stored);
+  requireSpoolWrite(impl->spool.adopt(stored), "adopt primedia");
 }
 
 } // namespace xanadu

@@ -20,6 +20,7 @@
 
 #include "binary_ops.hpp"
 #include "common/xanadu/osmic_walker.hpp"
+#include "common/xanadu/spool_write.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
 #include "common/xanadu/zigzag/dimension_registry.hpp"
 #include "publication.hpp"
@@ -136,6 +137,9 @@ Store::Store(std::shared_ptr<UserPermascroll> userPermascroll,
 }
 
 void Store::sealMetadata() const {
+  if (isReadOnly()) {
+    throw SpoolWriteRefused(SpoolRefusal::ReadOnly, "seal store metadata");
+  }
   sealPendingMetadataAsCells();
   userPermascroll_->flush();
 }
@@ -257,7 +261,8 @@ void Store::putOp(const MicroversionId &produces, const Op &op) {
   const auto node = CompactOpNode::fromOp(
       op, parentIdx, sourceIdx, CompactOpNode::branchOrdinalFor(produces),
       contextIdx);
-  const auto index = opsSpool.append(node, produces);
+  const auto index = requireSpoolWrite(opsSpool.append(node, produces),
+                                       "append operation");
 
   if (index >= editedBirths_.size()) {
     editedBirths_.resize(index + 1, std::nullopt);
@@ -299,6 +304,14 @@ void Store::putOp(const MicroversionId &produces, const Op &op) {
   if (chronofilade_ && index > 0) {
     chronofilade_->recordOp(index, node, produces, *this);
   }
+}
+
+PrimediaSpan
+Store::appendLocalPrimedia(const std::string_view text) const {
+  if (isReadOnly()) {
+    throw SpoolWriteRefused(SpoolRefusal::ReadOnly, "append primedia");
+  }
+  return requireSpoolWrite(userPermascroll_->append(text), "append primedia");
 }
 
 void Store::indexGenesisCells() {
@@ -709,7 +722,7 @@ MicroversionId Store::makeSlice(const MicroversionId &parent,
                                 const std::string_view name,
                                 const MicroversionId &context) {
   const auto span =
-      name.empty() ? PrimediaSpan{} : userPermascroll_->append(name);
+      name.empty() ? PrimediaSpan{} : appendLocalPrimedia(name);
   return makeSlice(parent, span, context);
 }
 
@@ -729,7 +742,7 @@ MicroversionId Store::makeXanadoc(const MicroversionId &parent,
                                   const std::string_view name,
                                   const MicroversionId &context) {
   const auto span =
-      name.empty() ? PrimediaSpan{} : userPermascroll_->append(name);
+      name.empty() ? PrimediaSpan{} : appendLocalPrimedia(name);
   return makeXanadoc(parent, span, context);
 }
 
@@ -768,7 +781,7 @@ MicroversionId Store::makeCell(const MicroversionId &parent,
   Op op;
   op.kind    = OpKind::Structure;
   op.flags   = structureFlags(StructureVerb::MakeCell, false, inferred.kind);
-  op.span    = userPermascroll_->append(text);
+  op.span    = appendLocalPrimedia(text);
   op.value   = inferred.bits;
   op.context = context.value_or(MicroversionId{});
   if (!context && sliceBirth_.has_value()) {
@@ -790,7 +803,7 @@ MicroversionId Store::applyScalar(const MicroversionId &parent,
   if (cell && *cell == zigzag::noCell) {
     throw std::invalid_argument("a scalar target must be a cell or nullopt");
   }
-  const auto span = userPermascroll_->append(value.text);
+  const auto span = appendLocalPrimedia(value.text);
   if (!cell) {
     Op op;
     op.kind    = OpKind::Structure;
@@ -839,7 +852,7 @@ MicroversionId Store::makeOpHandle(const MicroversionId &parent,
                                 " does not exist in store");
   }
   const auto span =
-      text.empty() ? PrimediaSpan{} : userPermascroll_->append(text);
+      text.empty() ? PrimediaSpan{} : appendLocalPrimedia(text);
   Op op;
   op.kind = OpKind::Structure;
   op.flags =
@@ -946,7 +959,7 @@ MicroversionId Store::spliceCell(const MicroversionId &parent,
   // the difference this verb exists to make. setCellText() appends the whole
   // cell however little of it changed.
   const auto span =
-      text.empty() ? PrimediaSpan{} : userPermascroll_->append(text);
+      text.empty() ? PrimediaSpan{} : appendLocalPrimedia(text);
   return spliceCellSpan(parent, cell, at, removing, span, context);
 }
 
@@ -954,7 +967,7 @@ MicroversionId Store::setCellText(const MicroversionId &parent,
                                   const zigzag::CellRef cell,
                                   const std::string_view text,
                                   std::optional<MicroversionId> context) {
-  const auto span     = userPermascroll_->append(text);
+  const auto span     = appendLocalPrimedia(text);
   const auto inferred = inferTextValue(text);
   return setValue(parent, cell, span, inferred.kind, inferred.bits, context);
 }
@@ -1855,7 +1868,7 @@ MicroversionId Store::insert(const MicroversionId &parent,
   op.context = resolvedContext;
   // Into the spool first: the op records where the content went, never the
   // content, so the content has to have gone somewhere before there is an op.
-  op.span = userPermascroll_->append(text);
+  op.span = appendLocalPrimedia(text);
   return apply(parent, op);
 }
 
@@ -1869,7 +1882,7 @@ Store::InsertedMedia Store::insertMedia(const MicroversionId &parent,
   op.kind    = OpKind::Insert;
   op.at      = at;
   op.context = resolvedContext;
-  op.span    = userPermascroll_->append(bytes);
+  op.span    = appendLocalPrimedia(bytes);
   localSegments.addSegment(ScrollSegment{
       .at       = op.span.start,
       .length   = op.span.length,
@@ -2580,7 +2593,7 @@ MicroversionId Store::makeExternRef(const MicroversionId &parent,
   }
 
   const auto descriptorText = target.produces.str();
-  const auto span           = userPermascroll_->append(descriptorText);
+  const auto span           = appendLocalPrimedia(descriptorText);
 
   Op op;
   op.kind = OpKind::Structure;
@@ -3391,7 +3404,7 @@ MicroversionId Store::renameStructure(const MicroversionId &parent,
                                       const std::uint32_t structureBirth,
                                       const std::string_view newName) {
   const auto span =
-      newName.empty() ? PrimediaSpan{} : userPermascroll_->append(newName);
+      newName.empty() ? PrimediaSpan{} : appendLocalPrimedia(newName);
   return renameStructure(parent, structureBirth, span);
 }
 
@@ -3448,7 +3461,7 @@ MicroversionId Store::annotateTimestamp(const MicroversionId &parent,
 
   // Canonical UTC RFC 3339 representation
   const auto scalar = scalarTimestamp(instant);
-  const auto span   = userPermascroll_->append(scalar.text);
+  const auto span   = appendLocalPrimedia(scalar.text);
 
   // Mint Cell with ValueKind::Timestamp
   const auto ctx = sliceBirth_.has_value() ? opsSpool.idOf(*sliceBirth_).value()
@@ -3672,7 +3685,7 @@ MicroversionId Store::annotateVersion(const MicroversionId &parent,
                                   annotation.timestamp);
     }
     const auto scalar = scalarTimestamp(parsed);
-    const auto span   = userPermascroll_->append(scalar.text);
+    const auto span   = appendLocalPrimedia(scalar.text);
     const auto ctx    = sliceBirth_.has_value()
                             ? opsSpool.idOf(*sliceBirth_).value()
                             : MicroversionId{};
@@ -4018,6 +4031,9 @@ void Store::adoptOpRecords(const std::vector<OpRecord> &records) {
 }
 
 void Store::sealPendingMetadataAsCells() const {
+  if (isReadOnly()) {
+    return;
+  }
   if (latest().isZero()) {
     return;
   }
@@ -4091,6 +4107,9 @@ void Store::sealPendingMetadataAsCells() const {
 }
 
 void Store::save(const std::string &directory) const {
+  if (isReadOnly()) {
+    throw SpoolWriteRefused(SpoolRefusal::ReadOnly, "save store");
+  }
   sealPendingMetadataAsCells();
   const std::filesystem::path dir(directory);
   std::filesystem::create_directories(dir);
@@ -4318,6 +4337,9 @@ Store::resolveVersionTargets(std::span<const std::string> versionOrAliasStrings,
 }
 
 void Store::saveOsmicText(const std::string &directory) const {
+  if (isReadOnly()) {
+    throw SpoolWriteRefused(SpoolRefusal::ReadOnly, "save OSMIC text");
+  }
   sealPendingMetadataAsCells();
   const std::filesystem::path dir(directory);
   std::filesystem::create_directories(dir);
@@ -4355,7 +4377,7 @@ void Store::writeOsmicText(std::ostream &out) const {
   writeOsmicTextOpsSpool(out, opRecords());
 }
 
-void Store::load(const std::string &directory) {
+void Store::load(const std::string &directory, const bool readOnly) {
   const std::filesystem::path dir(directory);
 
   // A store from when a document carried a copy of the author's whole
@@ -4384,6 +4406,14 @@ void Store::load(const std::string &directory) {
         "and this build does not read one. See design R11.");
   }
 
+  if (readOnly && !std::filesystem::exists(dir / opsNodesFile)) {
+    const auto reason = std::filesystem::exists(dir / opsExportFile)
+                            ? " contains only ops.export; read-only loads "
+                              "require ops.nodes"
+                            : " has no ops.nodes for a read-only load";
+    throw OpsSegmentUnreadable((dir / opsNodesFile).string() + reason);
+  }
+
   opsSpool.clear();
   linkTable.clear();
   externals.clear();
@@ -4406,7 +4436,7 @@ void Store::load(const std::string &directory) {
   if (std::filesystem::exists(dir / opsNodesFile)) {
     // Taken in whole: the nodes are already the shape they are held in, and
     // every name is worked out from the tree rather than read from the file.
-    if (!opsSpool.openActiveSegment(dir / opsNodesFile)) {
+    if (!opsSpool.openActiveSegment(dir / opsNodesFile, readOnly)) {
       throw std::runtime_error("cannot read the operations in " +
                                (dir / opsNodesFile).string());
     }

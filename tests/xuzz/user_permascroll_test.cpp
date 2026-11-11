@@ -40,11 +40,12 @@ using xanadu::SignedProvenance;
 using xanadu::Store;
 using xanadu::UserPermascroll;
 using xanadu::identity::Fingerprint;
+using xanadu::requireSpoolWrite;
 
 TEST(UserPermascrollTest, BasicAppendAndRead) {
   UserPermascroll scroll;
-  const auto span1 = scroll.append("Hello ");
-  const auto span2 = scroll.append("Permascroll!");
+  const auto span1 = requireSpoolWrite(scroll.append("Hello "));
+  const auto span2 = requireSpoolWrite(scroll.append("Permascroll!"));
 
   EXPECT_EQ(span1.scroll, 0U);
   EXPECT_EQ(span1.start, 0U);
@@ -112,25 +113,25 @@ TEST(UserPermascrollTest, IncrementalSealing) {
   std::filesystem::create_directories(tempDir);
 
   UserPermascroll scroll;
-  scroll.append("First segment content.");
+  requireSpoolWrite(scroll.append("First segment content."));
 
   SignedProvenance prov1;
   prov1.tsv       = "title\tPermascroll Seg 1\n";
   prov1.signature = "ed25519-sig:test-permascroll-seg-1\n";
 
-  const auto seg1 = scroll.sealIncremental(tempDir, prov1);
+  const auto seg1 = requireSpoolWrite(scroll.sealIncremental(tempDir, prov1));
   ASSERT_TRUE(seg1.has_value());
   EXPECT_EQ(seg1->at, 0U);
   EXPECT_EQ(seg1->length, 22U);
   EXPECT_EQ(seg1->fileIndex, 0U);
 
-  scroll.append(" Second segment content.");
+  requireSpoolWrite(scroll.append(" Second segment content."));
 
   SignedProvenance prov2;
   prov2.tsv       = "title\tPermascroll Seg 2\n";
   prov2.signature = "ed25519-sig:test-permascroll-seg-2\n";
 
-  const auto seg2 = scroll.sealIncremental(tempDir, prov2);
+  const auto seg2 = requireSpoolWrite(scroll.sealIncremental(tempDir, prov2));
   ASSERT_TRUE(seg2.has_value());
   EXPECT_EQ(seg2->at, 22U);
   EXPECT_EQ(seg2->length, 24U);
@@ -168,9 +169,10 @@ TEST_F(PersistentPermascrollTest,
     UserPermascroll scroll(config());
     publisher = scroll.config().deviceKeys.publicKey;
     name      = scroll.globalScrollKey();
-    scroll.append("Story Ideas");
-    first = *scroll.sealIncremental(root / "published", provenance);
-    scroll.append(" - revised");
+    requireSpoolWrite(scroll.append("Story Ideas"));
+    first = *requireSpoolWrite(
+        scroll.sealIncremental(root / "published", provenance));
+    requireSpoolWrite(scroll.append(" - revised"));
   }
   {
     UserPermascroll scroll(config());
@@ -179,18 +181,21 @@ TEST_F(PersistentPermascrollTest,
     EXPECT_EQ(scroll.bytes(), "Story Ideas - revised");
     ASSERT_EQ(scroll.currentScroll().segments.size(), 1U);
     EXPECT_EQ(scroll.currentScroll().segments.front(), first);
-    const auto second = scroll.sealIncremental(root / "published", provenance);
+    const auto second =
+        requireSpoolWrite(scroll.sealIncremental(root / "published", provenance));
     ASSERT_TRUE(second);
     EXPECT_EQ(second->at, 11U);
     EXPECT_EQ(second->length, 10U);
     EXPECT_NE(second->torrent, first.torrent);
-    EXPECT_FALSE(scroll.sealIncremental(root / "published", provenance));
+    EXPECT_FALSE(
+        requireSpoolWrite(scroll.sealIncremental(root / "published", provenance)));
   }
   UserPermascroll reopened(config());
   ASSERT_EQ(reopened.currentScroll().segments.size(), 2U);
   EXPECT_EQ(reopened.currentScroll().segments.front(), first);
   EXPECT_EQ(reopened.currentScroll().length(), reopened.size());
-  EXPECT_FALSE(reopened.sealIncremental(root / "published", provenance));
+  EXPECT_FALSE(
+      requireSpoolWrite(reopened.sealIncremental(root / "published", provenance)));
   const auto permissions =
       std::filesystem::status(root / "author/publication-state/data.mdb")
           .permissions();
@@ -202,14 +207,16 @@ TEST_F(PersistentPermascrollTest,
 TEST_F(PersistentPermascrollTest, FailedOutputDoesNotCommitASeal) {
   {
     UserPermascroll scroll(config());
-    scroll.append("Ideas");
-    EXPECT_THROW(scroll.sealIncremental(root / "author/active.primedia", {}),
+    requireSpoolWrite(scroll.append("Ideas"));
+    EXPECT_THROW(requireSpoolWrite(
+                     scroll.sealIncremental(root / "author/active.primedia", {})),
                  std::filesystem::filesystem_error);
     EXPECT_TRUE(scroll.currentScroll().segments.empty());
   }
   UserPermascroll reopened(config());
   EXPECT_TRUE(reopened.currentScroll().segments.empty());
-  const auto first = reopened.sealIncremental(root / "published", {});
+  const auto first =
+      requireSpoolWrite(reopened.sealIncremental(root / "published", {}));
   ASSERT_TRUE(first);
   EXPECT_EQ(first->at, 0U);
   EXPECT_EQ(first->length, 5U);
@@ -230,8 +237,9 @@ TEST_F(PersistentPermascrollTest, AConflictingIdentityIsRefused) {
 TEST_F(PersistentPermascrollTest, MissingSealedBytesAreRefused) {
   {
     UserPermascroll scroll(config());
-    scroll.append("Ideas");
-    ASSERT_TRUE(scroll.sealIncremental(root / "published", {}));
+    requireSpoolWrite(scroll.append("Ideas"));
+    ASSERT_TRUE(requireSpoolWrite(
+        scroll.sealIncremental(root / "published", {})));
   }
   std::filesystem::resize_file(root / "author/active.primedia", 2);
   EXPECT_THROW(UserPermascroll{config()}, xanadu::PermascrollStateUnreadable);
@@ -266,6 +274,75 @@ TEST_F(PersistentPermascrollTest, AnUnknownStateVersionIsRefusedByNumber) {
   } catch (const xanadu::PermascrollStateUnreadable &error) {
     EXPECT_THAT(error.what(), testing::HasSubstr("got byte 50"));
   }
+}
+
+TEST_F(PersistentPermascrollTest, ReadOnlyOpenNeverCreatesOrWritesState) {
+  const auto assetDir = root / "readonly";
+  std::filesystem::create_directories(assetDir);
+  const auto active = assetDir / "active.primedia";
+  const std::string assetText = "read-only asset bytes";
+  {
+    std::ofstream out(active, std::ios::binary);
+    out << assetText;
+  }
+  const auto original = std::filesystem::file_size(active);
+  UserPermascroll::Config readOnly;
+  readOnly.storageDir = assetDir;
+  readOnly.readOnly = true;
+  ASSERT_TRUE(readOnly.deviceKeys.publicKey.isZero());
+
+  for (int i = 0; i < 2; ++i) {
+    UserPermascroll scroll(readOnly);
+    EXPECT_TRUE(scroll.config().deviceKeys.publicKey.isZero())
+        << "read-only construction must not mint identity keys";
+    EXPECT_TRUE(scroll.spool().isReadOnly());
+    EXPECT_EQ(scroll.bytes(), assetText);
+    EXPECT_EQ(scroll.read(PrimediaSpan{xanadu::localScroll, 0,
+                                       assetText.size()}),
+              assetText);
+    EXPECT_TRUE(scroll.refresh());
+
+    auto appended = scroll.append("!");
+    ASSERT_FALSE(appended);
+    EXPECT_EQ(appended.error(), xanadu::SpoolRefusal::ReadOnly);
+    auto cleared = scroll.clear();
+    ASSERT_FALSE(cleared);
+    EXPECT_EQ(cleared.error(), xanadu::SpoolRefusal::ReadOnly);
+    auto adopted = scroll.adopt("replacement");
+    ASSERT_FALSE(adopted);
+    EXPECT_EQ(adopted.error(), xanadu::SpoolRefusal::ReadOnly);
+    auto sealed = scroll.sealIncremental(root / "sealed", {});
+    ASSERT_FALSE(sealed);
+    EXPECT_EQ(sealed.error(), xanadu::SpoolRefusal::ReadOnly);
+    EXPECT_FALSE(scroll.flush());
+    auto registered = scroll.registerSubscroll("laptop", active);
+    ASSERT_FALSE(registered);
+    EXPECT_EQ(registered.error(), xanadu::SpoolRefusal::ReadOnly);
+    auto ingested = scroll.ingestSubscroll("laptop", {});
+    ASSERT_FALSE(ingested);
+    EXPECT_EQ(ingested.error(), xanadu::SpoolRefusal::ReadOnly);
+    EXPECT_EQ(scroll.bytes(), assetText);
+    EXPECT_EQ(std::filesystem::file_size(active), original);
+  }
+
+  EXPECT_FALSE(std::filesystem::exists(assetDir / "segments"));
+  EXPECT_FALSE(std::filesystem::exists(assetDir / "publication-state"));
+  EXPECT_FALSE(std::filesystem::exists(assetDir / "devices"));
+  EXPECT_FALSE(std::filesystem::exists(assetDir / "keys"));
+  EXPECT_FALSE(std::filesystem::exists(root / "sealed"));
+  EXPECT_EQ(std::filesystem::file_size(active), original);
+  std::ifstream input(active, std::ios::binary);
+  const std::string after((std::istreambuf_iterator<char>(input)),
+                          std::istreambuf_iterator<char>());
+  EXPECT_EQ(after, assetText);
+}
+
+TEST_F(PersistentPermascrollTest, MissingReadOnlyPathIsNotCreated) {
+  UserPermascroll::Config readOnly;
+  readOnly.storageDir = root / "absent";
+  readOnly.readOnly = true;
+  EXPECT_THROW(UserPermascroll{readOnly}, std::runtime_error);
+  EXPECT_FALSE(std::filesystem::exists(readOnly.storageDir));
 }
 
 TEST(UserPermascrollTest, CollaborativeLiveEditingZeroPayload) {
@@ -458,7 +535,8 @@ TEST(UserPermascrollTest, IngestSubscrollWritesBytesAndCreatesHierarchy) {
       tempDir / "devices" / "laptop" / "active.primedia";
   EXPECT_FALSE(std::filesystem::exists(expectedTarget.parent_path()));
 
-  const auto subscroll = scroll.ingestSubscroll("laptop", data);
+  const auto subscroll =
+      requireSpoolWrite(scroll.ingestSubscroll("laptop", data));
 
   EXPECT_TRUE(std::filesystem::exists(expectedTarget.parent_path()));
   EXPECT_TRUE(
@@ -504,7 +582,8 @@ TEST(UserPermascrollTest,
       tempDir / "devices" / "peer-station" / "active.primedia";
   EXPECT_FALSE(std::filesystem::exists(expectedTarget.parent_path()));
 
-  const auto subscroll = scroll.registerSubscroll("peer-station", externalFile);
+  const auto subscroll =
+      requireSpoolWrite(scroll.registerSubscroll("peer-station", externalFile));
 
   EXPECT_TRUE(std::filesystem::exists(expectedTarget.parent_path()));
   EXPECT_TRUE(
@@ -544,18 +623,22 @@ TEST(UserPermascrollTest, SubscrollRejectsInvalidDeviceIds) {
                                                std::string(65, 'a')};
 
   for (const auto &id : invalidIds) {
-    EXPECT_THROW(scroll.registerSubscroll(id, "/tmp/dummy.primedia"),
+    EXPECT_THROW(requireSpoolWrite(
+                     scroll.registerSubscroll(id, "/tmp/dummy.primedia")),
                  std::invalid_argument)
         << "Expected registerSubscroll to reject invalid device ID: '" << id
         << "'";
-    EXPECT_THROW(scroll.ingestSubscroll(id, {}), std::invalid_argument)
+    EXPECT_THROW(requireSpoolWrite(scroll.ingestSubscroll(id, {})),
+                 std::invalid_argument)
         << "Expected ingestSubscroll to reject invalid device ID: '" << id
         << "'";
   }
 
-  EXPECT_NO_THROW(scroll.ingestSubscroll("a", {}));
-  EXPECT_NO_THROW(scroll.ingestSubscroll("laptop_01-test", {}));
-  EXPECT_NO_THROW(scroll.ingestSubscroll(std::string(64, 'b'), {}));
+  EXPECT_NO_THROW(requireSpoolWrite(scroll.ingestSubscroll("a", {})));
+  EXPECT_NO_THROW(
+      requireSpoolWrite(scroll.ingestSubscroll("laptop_01-test", {})));
+  EXPECT_NO_THROW(
+      requireSpoolWrite(scroll.ingestSubscroll(std::string(64, 'b'), {})));
 }
 
 TEST(UserPermascrollTest, UniqueUuidDeviceIdGeneration) {
@@ -634,7 +717,7 @@ TEST(UserPermascrollTest, readingWhileAnotherThreadAppendsNeverSeesAHalfSpan) {
   });
 
   for (int i = 0; i < records; i++) {
-    spans.push_back(scroll.append(block));
+    spans.push_back(requireSpoolWrite(scroll.append(block)));
     published.store(i + 1, std::memory_order_release);
   }
   reading.store(false, std::memory_order_release);
@@ -650,14 +733,15 @@ TEST(UserPermascrollTest, readingWhileAnotherThreadAppendsNeverSeesAHalfSpan) {
 
 TEST(UserPermascrollTest, aViewSurvivesEveryLaterAppend) {
   UserPermascroll scroll;
-  const auto first = scroll.append("the first thing typed");
+  const auto first =
+      requireSpoolWrite(scroll.append("the first thing typed"));
   const auto view  = scroll.readView(first);
   ASSERT_EQ(std::string(view), "the first thing typed");
 
   // Past the 4 KiB page the first append committed, and past several more, so
   // the arena has had to commit pages underneath the view's neighbourhood.
   for (int i = 0; i < 5000; i++) {
-    std::ignore = scroll.append("filler filler filler filler ");
+    requireSpoolWrite(scroll.append("filler filler filler filler "));
   }
 
   // Still the same bytes at the same address: an arena that reserved its
@@ -670,7 +754,7 @@ TEST(UserPermascrollTest, aViewSurvivesEveryLaterAppend) {
 
 TEST(UserPermascrollTest, aSpanPastTheEndIsClampedRatherThanRead) {
   UserPermascroll scroll;
-  const auto span = scroll.append("twelve bytes");
+  const auto span = requireSpoolWrite(scroll.append("twelve bytes"));
 
   // What the clamp is for: a reader asking for more than was published gets
   // what was published, never uninitialised arena. The difference matters

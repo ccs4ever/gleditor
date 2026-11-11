@@ -9,14 +9,17 @@
 #include <array>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <optional>
 #include <string>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include "common/xanadu/compact_op.hpp"
 #include "common/xanadu/microversion.hpp"
 #include "common/xanadu/segmented_ops_spool.hpp"
+#include "common/xanadu/spool_write.hpp"
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/virtual_memory_arena.hpp"
 
@@ -27,6 +30,12 @@ using xanadu::MicroversionId;
 using xanadu::OpKind;
 using xanadu::PrimediaSpan;
 using xanadu::SegmentedOpsSpool;
+
+std::uint32_t appendChecked(SegmentedOpsSpool &spool, CompactOpNode node,
+                            const MicroversionId &name) {
+  return xanadu::requireSpoolWrite(spool.append(node, name),
+                                   "append test operation");
+}
 
 TEST(SegmentedOpsSpoolTest, rootStateAndMissingNamesAreDistinct) {
   SegmentedOpsSpool spool;
@@ -40,7 +49,7 @@ TEST(SegmentedOpsSpoolTest, rootStateAndMissingNamesAreDistinct) {
 
   CompactOpNode node;
   const auto name  = MicroversionId::parse("1");
-  const auto index = spool.append(node, name);
+  const auto index = appendChecked(spool, node, name);
   EXPECT_EQ(spool.indexOf(name), index);
   EXPECT_EQ(spool.idOf(index), name);
   EXPECT_FALSE(spool.idOf(index + 1U));
@@ -55,7 +64,7 @@ TEST(SegmentedOpsSpoolTest, appendAndTraverseLinearChain) {
   n1.at   = 0;
   n1.setSpan(PrimediaSpan{xanadu::localScroll, 0, 5});
   const auto id1  = MicroversionId::parse("1");
-  const auto idx1 = spool.append(n1, id1);
+  const auto idx1 = appendChecked(spool, n1, id1);
   EXPECT_EQ(idx1, 1U);
 
   // Op 2: Insert " world" -> state 2
@@ -65,7 +74,7 @@ TEST(SegmentedOpsSpoolTest, appendAndTraverseLinearChain) {
   n2.at          = 5;
   n2.setSpan(PrimediaSpan{xanadu::localScroll, 5, 6});
   const auto id2  = MicroversionId::parse("2");
-  const auto idx2 = spool.append(n2, id2);
+  const auto idx2 = appendChecked(spool, n2, id2);
   EXPECT_EQ(idx2, 2U);
 
   EXPECT_EQ(spool.size(), 2U);
@@ -95,24 +104,26 @@ TEST(SegmentedOpsSpoolTest, branchingTreeTopologyAndSiblings) {
   // 1
   CompactOpNode n1;
   n1.kind         = OpKind::Insert;
-  const auto idx1 = spool.append(n1, MicroversionId::parse("1"));
+  const auto idx1 = appendChecked(spool, n1, MicroversionId::parse("1"));
 
   // 2 (child 1 of 1)
   CompactOpNode n2;
   n2.parentIndex  = idx1;
-  const auto idx2 = spool.append(n2, MicroversionId::parse("2"));
+  const auto idx2 = appendChecked(spool, n2, MicroversionId::parse("2"));
 
   // 1a1 (child 2 of 1 / branch)
   CompactOpNode n1a1;
   n1a1.parentIndex   = idx1;
   n1a1.branchOrdinal = 1;
-  const auto idx1a1  = spool.append(n1a1, MicroversionId::parse("1a1"));
+  const auto idx1a1 =
+      appendChecked(spool, n1a1, MicroversionId::parse("1a1"));
 
   // 1b1 (child 3 of 1 / branch)
   CompactOpNode n1b1;
   n1b1.parentIndex   = idx1;
   n1b1.branchOrdinal = 2;
-  const auto idx1b1  = spool.append(n1b1, MicroversionId::parse("1b1"));
+  const auto idx1b1 =
+      appendChecked(spool, n1b1, MicroversionId::parse("1b1"));
 
   // Children of 1 should be [2, 1a1, 1b1]
   const auto childrenOf1 = spool.childrenOf(idx1);
@@ -137,7 +148,7 @@ TEST(SegmentedOpsSpoolTest, pointerStabilityUnderGrowth) {
     node.parentIndex = i - 1;
     node.at          = i;
     const auto id    = MicroversionId::parse(std::to_string(i));
-    const auto idx   = spool.append(node, id);
+    const auto idx   = appendChecked(spool, node, id);
     recordedPointers.push_back(spool.get(idx));
   }
 
@@ -165,7 +176,9 @@ TEST(SegmentedOpsSpoolTest, aSpoolCountsDownToItsCeilingAndThenRefuses) {
     CompactOpNode node;
     node.parentIndex = i - 1U;
     node.at          = i;
-    ASSERT_EQ(spool.append(node, MicroversionId::parse(std::to_string(i))), i);
+    ASSERT_EQ(appendChecked(
+                  spool, node, MicroversionId::parse(std::to_string(i))),
+              i);
     ASSERT_EQ(spool.opCapacityRemaining(), capacity - i);
   }
 
@@ -173,7 +186,7 @@ TEST(SegmentedOpsSpoolTest, aSpoolCountsDownToItsCeilingAndThenRefuses) {
   refused.parentIndex = capacity;
   const auto name     = MicroversionId::parse(std::to_string(capacity + 1U));
   try {
-    spool.append(refused, name);
+    appendChecked(spool, refused, name);
     FAIL() << "an operation past the reservation must not be recorded";
   } catch (const xanadu::SpoolExhausted &e) {
     // The numbers a caller needs to say something useful about it, rather
@@ -305,11 +318,101 @@ void appendChain(SegmentedOpsSpool &spool, const std::uint32_t count) {
     node.parentIndex   = index - 1U;
     node.branchOrdinal = 0;
     node.at            = index;
-    spool.append(node, MicroversionId::parse(std::to_string(index)));
+    appendChecked(spool, node, MicroversionId::parse(std::to_string(index)));
   }
 }
 
+std::string fileBytes(const std::filesystem::path &path) {
+  std::ifstream input(path, std::ios::binary);
+  return {std::istreambuf_iterator<char>{input},
+          std::istreambuf_iterator<char>{}};
+}
+
 } // namespace
+
+TEST(SegmentedOpsSpoolTest,
+     explicitReadOnlyOpenRefusesAllWritesWithoutMutation) {
+  const auto dir    = scratchDir("explicit_readonly");
+  const auto active = dir / "active.ops";
+  {
+    SegmentedOpsSpool writer;
+    ASSERT_TRUE(writer.openActiveSegment(active));
+    appendChain(writer, 3);
+    ASSERT_TRUE(writer.flush());
+  }
+  const auto before = fileBytes(active);
+
+  SegmentedOpsSpool reader;
+  ASSERT_TRUE(reader.openActiveSegment(active, true));
+  ASSERT_TRUE(reader.isReadOnly());
+  ASSERT_EQ(reader.size(), 3U);
+  ASSERT_NE(reader.get(2U), nullptr);
+  EXPECT_EQ(reader.get(2U)->parentIndex, 1U);
+  EXPECT_EQ(reader.idOf(3U)->str(), "3");
+
+  CompactOpNode extra;
+  extra.parentIndex = 3;
+  const auto refused = reader.append(extra, MicroversionId::parse("4"));
+  ASSERT_FALSE(refused);
+  EXPECT_EQ(refused.error(), xanadu::SpoolRefusal::ReadOnly);
+  EXPECT_EQ(reader.size(), 3U);
+  EXPECT_FALSE(reader.flush());
+  EXPECT_FALSE(reader.sealActive(dir / "next.ops"));
+  EXPECT_FALSE(reader.writeSegmentFile(dir / "copy.ops"));
+  EXPECT_FALSE(std::filesystem::exists(dir / "next.ops"));
+  EXPECT_FALSE(std::filesystem::exists(dir / "copy.ops"));
+  EXPECT_EQ(fileBytes(active), before);
+
+  SegmentedOpsSpool moved(std::move(reader));
+  EXPECT_TRUE(moved.isReadOnly());
+  EXPECT_EQ(moved.size(), 3U);
+  EXPECT_FALSE(moved.append(extra, MicroversionId::parse("4")));
+
+  SegmentedOpsSpool moveAssigned;
+  moveAssigned = std::move(moved);
+  EXPECT_TRUE(moveAssigned.isReadOnly());
+  EXPECT_EQ(moveAssigned.size(), 3U);
+  moveAssigned.clear();
+  EXPECT_FALSE(moveAssigned.isReadOnly());
+}
+
+TEST(SegmentedOpsSpoolTest,
+     readOnlyOpenRejectsEmptyAndMissingFilesWithoutCreating) {
+  const auto dir     = scratchDir("readonly_empty");
+  const auto empty   = dir / "empty.ops";
+  const auto missing = dir / "missing.ops";
+  {
+    std::ofstream out(empty, std::ios::binary);
+  }
+
+  SegmentedOpsSpool spool;
+  EXPECT_THROW(spool.openActiveSegment(empty, true),
+               xanadu::OpsSegmentUnreadable);
+  EXPECT_EQ(std::filesystem::file_size(empty), 0U);
+  EXPECT_THROW(spool.openActiveSegment(missing, true),
+               xanadu::OpsSegmentUnreadable);
+  EXPECT_FALSE(std::filesystem::exists(missing));
+}
+
+TEST(SegmentedOpsSpoolTest, writableSpoolMovesRemainAppendable) {
+  const auto dir = scratchDir("writable_move");
+  SegmentedOpsSpool source;
+  ASSERT_TRUE(source.openActiveSegment(dir / "active.ops"));
+  appendChain(source, 2);
+
+  SegmentedOpsSpool moved(std::move(source));
+  EXPECT_FALSE(moved.isReadOnly());
+  appendChain(moved, 1);
+  ASSERT_TRUE(moved.flush());
+  EXPECT_EQ(moved.size(), 3U);
+
+  SegmentedOpsSpool assigned;
+  assigned = std::move(moved);
+  EXPECT_FALSE(assigned.isReadOnly());
+  appendChain(assigned, 1);
+  ASSERT_TRUE(assigned.flush());
+  EXPECT_EQ(assigned.size(), 4U);
+}
 
 TEST(SegmentedOpsSpoolTest, appendedOpsReachTheActiveSegmentFile) {
   const auto dir    = scratchDir("active");
@@ -429,12 +532,12 @@ TEST(SegmentedOpsSpoolTest, branchesSurviveBeingSealedAndReopened) {
     branched.parentIndex   = 1;
     branched.branchOrdinal = 1;
     branched.at            = 100;
-    writer.append(branched, MicroversionId::parse("1a1"));
+    requireSpoolWrite(writer.append(branched, MicroversionId::parse("1a1")));
     CompactOpNode onward;
     onward.parentIndex   = 4;
     onward.branchOrdinal = 0;
     onward.at            = 101;
-    writer.append(onward, MicroversionId::parse("1a2"));
+    requireSpoolWrite(writer.append(onward, MicroversionId::parse("1a2")));
     ASSERT_TRUE(writer.flush());
   }
 
@@ -529,7 +632,9 @@ TEST(SegmentedOpsSpoolTest, appendingUnderASealedParentDoesNotWriteIntoIt) {
   onward.parentIndex = lastSealed;
   onward.at          = 9001;
   const auto onwardIdx =
-      spool.append(onward, MicroversionId::parse(std::to_string(2U * perPage)));
+      appendChecked(
+          spool, onward,
+          MicroversionId::parse(std::to_string(2U * perPage)));
 
   // A branch off a sealed node that already has a child, which used to walk
   // into the sealed range and write nextSiblingIndex into the sibling.
@@ -538,8 +643,10 @@ TEST(SegmentedOpsSpoolTest, appendingUnderASealedParentDoesNotWriteIntoIt) {
   branched.parentIndex   = forkAt;
   branched.branchOrdinal = 1;
   branched.at            = 9002;
-  const auto branchIdx   = spool.append(
-      branched, MicroversionId::parse(std::to_string(forkAt) + "a1"));
+  const auto branchIdx =
+      appendChecked(
+          spool, branched,
+          MicroversionId::parse(std::to_string(forkAt) + "a1"));
 
   EXPECT_EQ(spool.childrenOf(lastSealed),
             (std::vector<std::uint32_t>{onwardIdx}));
@@ -736,7 +843,7 @@ TEST(SegmentedOpsSpoolTest, aSegmentFileSaysWhatItIsAndComesBackTheSame) {
   branched.parentIndex   = 3;
   branched.branchOrdinal = 1;
   branched.at            = 700;
-  spool.append(branched, MicroversionId::parse("3a1"));
+  appendChecked(spool, branched, MicroversionId::parse("3a1"));
   ASSERT_TRUE(spool.writeSegmentFile(path));
 
   // Exactly a header and its operations, with the header's own 64 KiB left as
@@ -766,11 +873,11 @@ TEST(SegmentedOpsSpoolTest, aSegmentFileSaysWhatItIsAndComesBackTheSame) {
   CompactOpNode onward;
   onward.parentIndex = 8;
   onward.at          = 701;
-  reopened.append(onward, MicroversionId::parse("3a2"));
+  appendChecked(reopened, onward, MicroversionId::parse("3a2"));
   CompactOpNode further;
   further.parentIndex = 9;
   further.at          = 702;
-  reopened.append(further, MicroversionId::parse("3a3"));
+  appendChecked(reopened, further, MicroversionId::parse("3a3"));
   ASSERT_TRUE(reopened.flush());
   EXPECT_EQ(std::filesystem::file_size(path), segmentFileSize(10));
 

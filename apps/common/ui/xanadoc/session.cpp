@@ -38,6 +38,7 @@
 #include "common/xanadu/format_resolver.hpp"
 #include "common/xanadu/link_layout.hpp"
 #include "common/xanadu/provenance.hpp"
+#include "common/xanadu/spool_write.hpp"
 
 namespace xanadu {
 
@@ -1078,8 +1079,10 @@ std::string Session::publishDocument(const MicroversionId &version,
       primediaRecord.extra.emplace_back("permascroll_at", std::to_string(from));
       primediaProvenance = signProvenance(primediaRecord, signing);
     }
-    const auto newlySealed = st.userPermascrollPtr()->sealIncremental(
-        into, primediaProvenance, withheldHoles);
+    const auto newlySealed =
+        requireSpoolWrite(st.userPermascrollPtr()->sealIncremental(
+                              into, primediaProvenance, withheldHoles),
+                          "seal session primedia");
     if (newlySealed.has_value() && swarmSource) {
       if (localAuthorScrollKey_.empty()) {
         localAuthorScrollKey_ = st.userPermascroll().globalScrollKey();

@@ -30,6 +30,7 @@
 #include <unistd.h>
 #endif
 
+#include "common/xanadu/spool_write.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
 
 namespace xanadu::evidence {
@@ -496,7 +497,8 @@ struct EvidenceCase::Impl {
   }
 
   [[nodiscard]] CellRef makeRecordCell(const std::string_view value) {
-    const auto span = permascroll->append(value);
+    const auto span =
+        requireSpoolWrite(permascroll->append(value), "append evidence");
     return appendSpanCell(span);
   }
 
@@ -1327,7 +1329,8 @@ RecordId EvidenceCase::retain(const RecordId sourceId,
       } else if (value.storage == StorageClass::Blob &&
                  std::holds_alternative<Binary>(value.value)) {
         const auto bytes = std::get<Binary>(value.value).bytes;
-        const auto span  = impl_->permascroll->append(bytes);
+        const auto span = requireSpoolWrite(
+            impl_->permascroll->append(bytes), "append evidence blob");
         cell             = impl_->appendSpanCell(span);
       } else {
         const auto raw =
@@ -1380,7 +1383,8 @@ RecordId EvidenceCase::retain(const RecordId sourceId,
                                       : "http-entity-body");
     impl_->putAttribute(pageRecord, "redacted",
                         page.redacted ? "true" : "false");
-    const auto span = impl_->permascroll->append(page.body);
+    const auto span = requireSpoolWrite(
+        impl_->permascroll->append(page.body), "append evidence page");
     const auto body = impl_->appendSpanCell(span);
     impl_->link(pageRecord, bodyDimension, body);
   }

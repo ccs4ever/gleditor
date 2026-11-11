@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -17,6 +18,7 @@
 #include "common/xanadu/compact_op.hpp"
 #include "common/xanadu/microversion.hpp"
 #include "common/xanadu/ops.hpp"
+#include "common/xanadu/spool_write.hpp"
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/store_tables.hpp"
 #include "common/xanadu/user_permascroll.hpp"
@@ -656,6 +658,82 @@ TEST_F(StoreRoundTripTest, aQuotationIntoASecondDocumentSurvivesSaving) {
   // copy has to mean after a round trip.
   EXPECT_EQ(reloaded.textOf(quoted), "Hello");
   EXPECT_EQ(reloaded.textOf(MicroversionId::parse("1")), "Hello there");
+}
+
+TEST_F(StoreRoundTripTest, readOnlyLoadRejectsMutationAndBothSaveFormats) {
+  MicroversionId one;
+  {
+    Store writer(perma);
+    one = writer.insert(MicroversionId{}, 0, "immutable");
+    writer.save(dir.string());
+  }
+  const auto opsBefore = [&] {
+    std::ifstream input(dir / "ops.nodes", std::ios::binary);
+    return std::string{std::istreambuf_iterator<char>{input},
+                       std::istreambuf_iterator<char>{}};
+  }();
+  const auto tablesBefore = [&] {
+    std::ifstream input(dir / "store.tables", std::ios::binary);
+    return std::string{std::istreambuf_iterator<char>{input},
+                       std::istreambuf_iterator<char>{}};
+  }();
+  const auto bytesBefore = perma->size();
+
+  Store reader(perma);
+  reader.load(dir.string(), true);
+  ASSERT_TRUE(reader.isReadOnly());
+  EXPECT_EQ(reader.opCount(), 1U);
+  EXPECT_EQ(reader.textOf(one), "immutable");
+
+  EXPECT_THROW(reader.insert(one, 9, " refused"),
+               xanadu::SpoolWriteRefused);
+  EXPECT_THROW(reader.erase(one, 0, 1), xanadu::SpoolWriteRefused);
+  EXPECT_EQ(reader.opCount(), 1U);
+  EXPECT_EQ(perma->size(), bytesBefore);
+
+  reader.setCurrentVersions({one});
+  reader.setVersionAnnotation(one, {.alias = "deferred"});
+  ASSERT_TRUE(reader.hasPendingMetadata());
+  const auto binaryTarget = dir / "binary-save";
+  const auto textTarget   = dir / "text-save";
+  EXPECT_THROW(reader.save(binaryTarget.string()),
+               xanadu::SpoolWriteRefused);
+  EXPECT_THROW(reader.saveOsmicText(textTarget.string()),
+               xanadu::SpoolWriteRefused);
+  EXPECT_FALSE(std::filesystem::exists(binaryTarget));
+  EXPECT_FALSE(std::filesystem::exists(textTarget));
+  EXPECT_EQ(reader.opCount(), 1U);
+  EXPECT_EQ(perma->size(), bytesBefore);
+  EXPECT_TRUE(reader.hasPendingMetadata());
+
+  std::ifstream opsInput(dir / "ops.nodes", std::ios::binary);
+  std::ifstream tablesInput(dir / "store.tables", std::ios::binary);
+  EXPECT_EQ((std::string{std::istreambuf_iterator<char>{opsInput},
+                         std::istreambuf_iterator<char>{}}),
+            opsBefore);
+  EXPECT_EQ((std::string{std::istreambuf_iterator<char>{tablesInput},
+                         std::istreambuf_iterator<char>{}}),
+            tablesBefore);
+  EXPECT_THROW(reader.sealMetadata(), xanadu::SpoolWriteRefused);
+  EXPECT_TRUE(reader.hasPendingMetadata());
+}
+
+TEST_F(StoreRoundTripTest, readOnlyLoadRejectsMissingAndTextOnlyOps) {
+  Store reader(perma);
+  const auto missing = dir / "missing";
+  EXPECT_THROW(reader.load(missing.string(), true),
+               xanadu::OpsSegmentUnreadable);
+  EXPECT_FALSE(std::filesystem::exists(missing));
+
+  const auto textOnly = dir / "text-only";
+  std::filesystem::create_directories(textOnly);
+  {
+    std::ofstream out(textOnly / "ops.export", std::ios::binary);
+    out << "unsupported for read-only loading";
+  }
+  EXPECT_THROW(reader.load(textOnly.string(), true),
+               xanadu::OpsSegmentUnreadable);
+  EXPECT_FALSE(std::filesystem::exists(textOnly / "ops.nodes"));
 }
 
 } // namespace

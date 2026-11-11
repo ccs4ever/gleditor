@@ -17,11 +17,12 @@ namespace {
 
 using xanadu::PrimediaSpan;
 using xanadu::SegmentedPrimediaSpool;
+using xanadu::requireSpoolWrite;
 
 TEST(SegmentedPrimediaSpoolTest, appendAndReadLocalSpans) {
   SegmentedPrimediaSpool spool;
-  const auto span1 = spool.append("Hello, ");
-  const auto span2 = spool.append("World!");
+  const auto span1 = requireSpoolWrite(spool.append("Hello, "));
+  const auto span2 = requireSpoolWrite(spool.append("World!"));
 
   EXPECT_EQ(span1.start, 0U);
   EXPECT_EQ(span1.length, 7U);
@@ -58,7 +59,7 @@ TEST(SegmentedPrimediaSpoolTest, multiSegmentContinuityAcrossSeals) {
 
   // Append new text to the active part
   const std::string text2 = "The second active stretch of text.";
-  const auto span2        = spool.append(text2);
+  const auto span2        = requireSpoolWrite(spool.append(text2));
 
   EXPECT_EQ(span2.start, text1.size());
   EXPECT_EQ(span2.length, text2.size());
@@ -82,12 +83,12 @@ TEST(SegmentedPrimediaSpoolTest, LifecycleAndActiveSegments) {
 
   SegmentedPrimediaSpool spool;
   EXPECT_TRUE(spool.openActiveSegment(active1));
-  spool.append("Active segment text 1.");
+  requireSpoolWrite(spool.append("Active segment text 1."));
   EXPECT_TRUE(spool.flush());
 
   // Seal active segment and rotate to active2
   EXPECT_TRUE(spool.sealActive(active2));
-  spool.append("Active segment text 2.");
+  requireSpoolWrite(spool.append("Active segment text 2."));
   EXPECT_TRUE(spool.flush());
 
   // Move constructor
@@ -104,11 +105,11 @@ TEST(SegmentedPrimediaSpoolTest, LifecycleAndActiveSegments) {
 
 TEST(SegmentedPrimediaSpoolTest, AdoptAndFlush) {
   SegmentedPrimediaSpool spool;
-  spool.append("Initial text");
+  requireSpoolWrite(spool.append("Initial text"));
   EXPECT_EQ(spool.bytes(), "Initial text");
 
   // Adopt replaces contents
-  spool.adopt("Replaced text");
+  requireSpoolWrite(spool.adopt("Replaced text"));
   EXPECT_EQ(spool.bytes(), "Replaced text");
   EXPECT_EQ(spool.size(), 13U);
   EXPECT_TRUE(spool.flush());
@@ -116,7 +117,7 @@ TEST(SegmentedPrimediaSpoolTest, AdoptAndFlush) {
 
 TEST(SegmentedPrimediaSpoolTest, ErrorsAndBounds) {
   SegmentedPrimediaSpool spool;
-  spool.append("Sample text");
+  requireSpoolWrite(spool.append("Sample text"));
 
   // Non-local span throws
   PrimediaSpan nonLocal{42U, 0, 5};
@@ -134,7 +135,7 @@ TEST(SegmentedPrimediaSpoolTest, ErrorsAndBounds) {
   EXPECT_EQ(spool.readView(oobSpan), "");
 
   // Empty append returns 0-length span
-  auto emptyAppended = spool.append("");
+  auto emptyAppended = requireSpoolWrite(spool.append(""));
   EXPECT_EQ(emptyAppended.length, 0U);
 
   // Non-existent sealed segment fails
@@ -148,7 +149,7 @@ TEST(SegmentedPrimediaSpoolTest, appendAndReadBinaryMediaPayload) {
       0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
   };
 
-  const auto span = spool.append(pngBytes);
+  const auto span = requireSpoolWrite(spool.append(pngBytes));
   EXPECT_EQ(span.start, 0U);
   EXPECT_EQ(span.length, pngBytes.size());
   EXPECT_EQ(spool.size(), pngBytes.size());
@@ -187,7 +188,7 @@ TEST_F(ActiveSegmentTest, whatWasAppendedComesBackInANewSpool) {
   {
     SegmentedPrimediaSpool spool;
     ASSERT_TRUE(spool.openActiveSegment(path));
-    spool.append("the quick brown fox");
+    requireSpoolWrite(spool.append("the quick brown fox"));
     ASSERT_TRUE(spool.flush());
   }
 
@@ -206,8 +207,8 @@ TEST_F(ActiveSegmentTest, aSpanKeepsItsAddressAcrossASession) {
   {
     SegmentedPrimediaSpool spool;
     ASSERT_TRUE(spool.openActiveSegment(path));
-    spool.append("see: ");
-    quoted = spool.append("quick");
+    requireSpoolWrite(spool.append("see: "));
+    quoted = requireSpoolWrite(spool.append("quick"));
     ASSERT_TRUE(spool.flush());
   }
 
@@ -221,7 +222,7 @@ TEST_F(ActiveSegmentTest, appendingAfterAReopenContinuesTheSameAddresses) {
   {
     SegmentedPrimediaSpool spool;
     ASSERT_TRUE(spool.openActiveSegment(path));
-    spool.append("one");
+    requireSpoolWrite(spool.append("one"));
     ASSERT_TRUE(spool.flush());
   }
 
@@ -229,7 +230,7 @@ TEST_F(ActiveSegmentTest, appendingAfterAReopenContinuesTheSameAddresses) {
   {
     SegmentedPrimediaSpool spool;
     ASSERT_TRUE(spool.openActiveSegment(path));
-    second = spool.append(" two");
+    second = requireSpoolWrite(spool.append(" two"));
     // Past what the file already held, not over it.
     EXPECT_EQ(second.start, 3U);
     ASSERT_TRUE(spool.flush());
@@ -248,13 +249,13 @@ TEST_F(ActiveSegmentTest, flushingTwiceWritesOnlyTheTail) {
   const auto path = dir / "active.primedia";
   SegmentedPrimediaSpool spool;
   ASSERT_TRUE(spool.openActiveSegment(path));
-  spool.append("one");
+  requireSpoolWrite(spool.append("one"));
   ASSERT_TRUE(spool.flush());
   EXPECT_EQ(std::filesystem::file_size(path), 3U);
   ASSERT_TRUE(spool.flush());
   EXPECT_EQ(std::filesystem::file_size(path), 3U)
       << "a flush with nothing appended since the last one wrote again";
-  spool.append(" two");
+  requireSpoolWrite(spool.append(" two"));
   ASSERT_TRUE(spool.flush());
   EXPECT_EQ(std::filesystem::file_size(path), 7U);
 }
@@ -263,8 +264,65 @@ TEST_F(ActiveSegmentTest, nothingIsDurableUntilItIsFlushed) {
   const auto path = dir / "active.primedia";
   SegmentedPrimediaSpool spool;
   ASSERT_TRUE(spool.openActiveSegment(path));
-  spool.append("typed but not flushed");
+  requireSpoolWrite(spool.append("typed but not flushed"));
   EXPECT_EQ(std::filesystem::file_size(path), 0U);
+}
+
+TEST_F(ActiveSegmentTest, explicitReadOnlyRejectsEveryWritePath) {
+  const auto path = dir / "active.primedia";
+  PrimediaSpan persisted;
+  {
+    SegmentedPrimediaSpool writer;
+    ASSERT_TRUE(writer.openActiveSegment(path));
+    persisted = requireSpoolWrite(writer.append("immutable bytes"));
+    ASSERT_TRUE(writer.flush());
+  }
+  const auto before = std::filesystem::file_size(path);
+  SegmentedPrimediaSpool reader;
+  ASSERT_TRUE(reader.openActiveSegment(path, true));
+  ASSERT_TRUE(reader.isReadOnly());
+  EXPECT_EQ(reader.bytes(), "immutable bytes");
+  EXPECT_EQ(persisted.start, 0U);
+  EXPECT_EQ(persisted.length, 15U);
+  EXPECT_EQ(reader.read(persisted), "immutable bytes");
+
+  auto textAppend = reader.append("!");
+  ASSERT_FALSE(textAppend);
+  EXPECT_EQ(textAppend.error(), xanadu::SpoolRefusal::ReadOnly);
+  const std::vector<std::uint8_t> binary{0x01, 0x02};
+  auto binaryAppend = reader.append(binary);
+  ASSERT_FALSE(binaryAppend);
+  EXPECT_EQ(binaryAppend.error(), xanadu::SpoolRefusal::ReadOnly);
+  EXPECT_FALSE(reader.flush());
+  EXPECT_FALSE(reader.sealActive(dir / "must-not-exist.primedia"));
+  auto cleared = reader.clear();
+  ASSERT_FALSE(cleared);
+  EXPECT_EQ(cleared.error(), xanadu::SpoolRefusal::ReadOnly);
+  auto adopted = reader.adopt("replacement");
+  ASSERT_FALSE(adopted);
+  EXPECT_EQ(adopted.error(), xanadu::SpoolRefusal::ReadOnly);
+  EXPECT_EQ(reader.bytes(), "immutable bytes");
+
+  SegmentedPrimediaSpool moved(std::move(reader));
+  EXPECT_TRUE(moved.isReadOnly());
+  EXPECT_FALSE(reader.isReadOnly());
+  SegmentedPrimediaSpool assigned;
+  assigned = std::move(moved);
+  EXPECT_TRUE(assigned.isReadOnly());
+  EXPECT_FALSE(moved.isReadOnly());
+  EXPECT_EQ(std::filesystem::file_size(path), before);
+  EXPECT_FALSE(std::filesystem::exists(dir / "must-not-exist.primedia"));
+  std::ifstream input(path, std::ios::binary);
+  const std::string after((std::istreambuf_iterator<char>(input)),
+                          std::istreambuf_iterator<char>());
+  EXPECT_EQ(after, "immutable bytes");
+}
+
+TEST_F(ActiveSegmentTest, missingReadOnlyFileIsNeverCreated) {
+  const auto missing = dir / "missing.primedia";
+  SegmentedPrimediaSpool spool;
+  EXPECT_FALSE(spool.openActiveSegment(missing, true));
+  EXPECT_FALSE(std::filesystem::exists(missing));
 }
 
 } // namespace
@@ -273,10 +331,10 @@ TEST_F(ActiveSegmentTest, MoveTransfersTheOpenDescriptorWithoutClosingIt) {
   const auto path = dir / "active.primedia";
   SegmentedPrimediaSpool source;
   ASSERT_TRUE(source.openActiveSegment(path));
-  source.append("before");
+  requireSpoolWrite(source.append("before"));
   SegmentedPrimediaSpool destination(std::move(source));
-  source.clear();
-  destination.append(" after");
+  ASSERT_TRUE(source.clear());
+  requireSpoolWrite(destination.append(" after"));
   ASSERT_TRUE(destination.flush());
 
   SegmentedPrimediaSpool reopened;

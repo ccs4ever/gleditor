@@ -968,6 +968,9 @@ public:
 
   [[nodiscard]] bool isSystem() const { return isSystem_; }
   void setSystem(const bool sys) { isSystem_ = sys; }
+  [[nodiscard]] bool isReadOnly() const noexcept {
+    return opsSpool.isReadOnly();
+  }
 
   [[nodiscard]] const SegmentedPrimediaSpool &primedia() const {
     return userPermascroll_->spool();
@@ -1335,9 +1338,11 @@ public:
   /// Stream standard OSMIC text format of all operations on demand.
   void writeOsmicText(std::ostream &out) const;
 
-  /// Read back what save() or saveOsmicText() wrote. Auto-detects binary and
-  /// text formats. A directory with no store in it produces an empty one.
-  void load(const std::string &directory);
+  /// Read back what save() or saveOsmicText() wrote, auto-detecting text and
+  /// binary operations. A requested read-only load requires ops.nodes and
+  /// opens it without writable fallback; text-only and missing stores are
+  /// refused. A normal load of a missing store stays empty.
+  void load(const std::string &directory, bool readOnly = false);
 
   /**
    * @brief Every recorded operation, in the order they are serialized.
@@ -1411,6 +1416,8 @@ private:
   [[nodiscard]] MicroversionId
   resolveTextContext(const MicroversionId &parent,
                      const std::optional<MicroversionId> &context) const;
+  [[nodiscard]] PrimediaSpan
+  appendLocalPrimedia(std::string_view text) const;
 
   [[nodiscard]] std::optional<std::uint32_t>
   resolveXanadocBirth(const MicroversionId &version,

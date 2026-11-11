@@ -23,6 +23,7 @@
 #include "bencode.hpp"
 #include "binary_ops.hpp"
 #include "scroll_codec.hpp"
+#include "spool_write.hpp"
 #include "store.hpp"
 #include "swarm.hpp"
 
@@ -1573,8 +1574,9 @@ Publication publishDocument(Store &store, const MicroversionId &version,
     throw std::runtime_error(
         "publication requires signed permascroll and history provenance");
   }
-  store.userPermascrollPtr()->sealIncremental(torrentOutputDir,
-                                              permascrollProvenance, holes);
+  requireSpoolWrite(store.userPermascrollPtr()->sealIncremental(
+                        torrentOutputDir, permascrollProvenance, holes),
+                    "seal publication primedia");
   const auto userScroll = store.userPermascroll().currentScroll();
   // The convenience path publishes a complete history snapshot. The session
   // path keeps incremental history segments in its durable SealState instead.
