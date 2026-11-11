@@ -2931,68 +2931,6 @@ CellRef VortexStdLib::addClause(CellRef predCell, CellRef headTerm,
   return clauseCell;
 }
 
-bool VortexStdLib::solveOnce(CellRef goal,
-                             std::span<const CellRef> customPredicates) {
-  return solveOnce(std::span<const CellRef>{&goal, 1}, customPredicates);
-}
-
-bool VortexStdLib::solveOnce(std::span<const CellRef> goals,
-                             std::span<const CellRef> customPredicates) {
-  bool found = false;
-  solve(
-      goals,
-      [&](const LogicSolution &) {
-        found = true;
-        return false;
-      },
-      customPredicates, 1);
-  return found;
-}
-
-std::vector<LogicSolution>
-VortexStdLib::solveQuery(CellRef goal,
-                         std::span<const CellRef> customPredicates,
-                         std::size_t maxSolutions) {
-  return solveQuery(std::span<const CellRef>{&goal, 1}, customPredicates,
-                    maxSolutions);
-}
-
-std::vector<LogicSolution>
-VortexStdLib::solveQuery(std::span<const CellRef> goals,
-                         std::span<const CellRef> customPredicates,
-                         std::size_t maxSolutions) {
-  std::vector<LogicSolution> solutions;
-  solve(
-      goals,
-      [&](const LogicSolution &sol) {
-        solutions.push_back(sol);
-        return true;
-      },
-      customPredicates, maxSolutions);
-  return solutions;
-}
-
-bool VortexStdLib::solve(CellRef goal,
-                         std::function<bool(const LogicSolution &)> onSolution,
-                         std::span<const CellRef> customPredicates,
-                         std::size_t maxSolutions) {
-  return solve(std::span<const CellRef>{&goal, 1}, std::move(onSolution),
-               customPredicates, maxSolutions);
-}
-
-bool VortexStdLib::solve(std::span<const CellRef> goals,
-                         std::function<bool(const LogicSolution &)> onSolution,
-                         std::span<const CellRef> customPredicates,
-                         std::size_t maxSolutions) {
-  static_cast<void>(goals);
-  static_cast<void>(onSolution);
-  static_cast<void>(customPredicates);
-  static_cast<void>(maxSolutions);
-  throw std::logic_error(
-      "Vortex logic execution is unavailable: VM resolution lowering is not "
-      "implemented");
-}
-
 // -- Module 9: sys:array ----------------------------------------------------
 std::optional<CellRef> VortexStdLib::arrayIota(std::size_t n,
                                                std::optional<DimRef> dim,

@@ -46,6 +46,9 @@ class Store;
 namespace zigzag::vortex {
 
 class VortexWorkerPool;
+namespace logic {
+struct CompileContext;
+}
 
 struct LogicSolution {
   std::vector<std::pair<CellRef, CellRef>> bindings;
@@ -272,6 +275,24 @@ public:
     return predBridgeEdge_;
   }
 
+  /// The predicate cells bootstrap() seeded, in the order the old solver tried
+  /// them (equal, =, member, append, length, then the extensional builtins).
+  /// Cells that bootstrap() has not made are omitted.
+  [[nodiscard]] std::vector<CellRef> stdlibPredicates() const;
+  /// VM cycles one solve may spend; the real budget the logic driver passes to
+  /// VortexVM::run, not its 100000 default.
+  VortexStdLib *setLogicCycleBudget(std::size_t maxCycles) noexcept {
+    logicMaxCycles_ = maxCycles;
+    return this;
+  }
+  [[nodiscard]] std::size_t logicCycleBudget() const noexcept {
+    return logicMaxCycles_;
+  }
+  /// A compile context over this library's core, VM and bound store, for the
+  /// logic lowering (logic_compile.hpp).
+  [[nodiscard]] logic::CompileContext
+  makeLogicContext(std::span<const CellRef> customPredicates);
+
   /// Throws std::logic_error until logic resolution is lowered to VM code.
   bool solveOnce(CellRef goal, std::span<const CellRef> customPredicates = {});
   /// Throws std::logic_error until logic resolution is lowered to VM code.
@@ -497,6 +518,9 @@ private:
   VortexCore &core_;
   VortexVM &vm_;
   const xanadu::Store *boundStore_{nullptr};
+  /// Matches VortexVM::run's default so behaviour is unchanged until a caller
+  /// (the mesh evaluator's budget.maxCycles) sets it.
+  std::size_t logicMaxCycles_{100000};
 
   // Stage 2 data-parallel hook: borrowed, not owned. Null => serial.
   VortexWorkerPool *workerPool_{nullptr};
