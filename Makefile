@@ -708,6 +708,7 @@ ZIGZAG_TEST_OBJS := $(call obj,$(ZIGZAG_TEST_SRCS))
 XUZZ_TEST_OBJS  := $(call obj,$(XUZZ_TEST_SRCS))
 XUDU_TEST_OBJS  := $(XUZZ_TEST_OBJS)
 SWARM_PEER_OBJS := $(call obj,tools/xudu-swarm-peer.cpp)
+VORTEX_STDLIB_GEN_OBJS := $(call obj,tools/vortex_stdlib_gen.cpp)
 UI_TEXT_BASELINE_OBJS := $(call obj,tools/ui-text-baseline.cpp)
 LINK_STRESS_OBJS := $(call obj,tools/render-link-stress.cpp)
 VQUERYC_SRCS    := $(shell find apps/vqueryc -name '*.cpp' 2>/dev/null)
@@ -806,7 +807,7 @@ endif
 ALL_OBJS := $(sort $(LIB_OBJS) $(GLEDITOR_OBJS) $(XUDU_CORE_OBJS) $(XUZZ_OBJS) \
 	$(ZIGZAG_CORE_OBJS) $(ZIGZAG_TEST_OBJS) $(COMMON_UI_OBJS) \
 	$(LIB_TEST_OBJS) $(XUDU_TEST_OBJS) $(XUZZ_TEST_OBJS) $(SWARM_PEER_OBJS) \
-	$(GENERATE_SAMPLE_XANADOCS_OBJS) $(VQUERYC_OBJS) $(VQUERY_OBJS) $(VPROLOG_OBJS) $(VPLC_OBJS) $(VPL_OBJS) $(VLACE_OBJS) $(VLACEC_OBJS) $(VICON_OBJS) $(VICONC_OBJS) $(VAGENT_OBJS) \
+	$(VORTEX_STDLIB_GEN_OBJS) $(GENERATE_SAMPLE_XANADOCS_OBJS) $(VQUERYC_OBJS) $(VQUERY_OBJS) $(VPROLOG_OBJS) $(VPLC_OBJS) $(VPL_OBJS) $(VLACE_OBJS) $(VLACEC_OBJS) $(VICON_OBJS) $(VICONC_OBJS) $(VAGENT_OBJS) \
 	$(UI_TEXT_BASELINE_OBJS) $(LINK_STRESS_OBJS) $(SPIKE_OBJS))
 ALL_OBJ_DIRS := $(sort $(OBJDIR)/ $(OBJDIR)/tmp/ $(dir $(ALL_OBJS)))
 DEPS := $(sort $(patsubst %.o,%.dep,$(ALL_OBJS)))
@@ -959,6 +960,18 @@ $(OBJDIR)/xuzz: $(XUZZ_OBJS) $(XUDU_CORE_OBJS) $(COMMON_UI_OBJS) $(LIBLINK)
 	$(CXX) $(LDFLAGS) -o $@ $(XUZZ_OBJS) $(XUDU_CORE_OBJS) $(COMMON_UI_OBJS) \
 	  $(APP_LDFLAGS) $(LIBS) $(XUDU_LIBS)
 .PHONY: xuzz
+
+# Build the generator against the headless engine; this opt-in target writes a
+# full image under build/ unless VORTEX_STDLIB_OUT names another empty path.
+VORTEX_STDLIB_OUT ?= $(OBJDIR)/vortex-stdlib-image
+.PHONY: stdlib-image
+stdlib-image: $(OBJDIR)/vortex-stdlib-gen
+	$(OBJDIR)/vortex-stdlib-gen --out "$(VORTEX_STDLIB_OUT)" --stdlib
+$(OBJDIR)/vortex-stdlib-gen: $(VORTEX_STDLIB_GEN_OBJS) \
+	$(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o \
+	$(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o \
+	$(OBJDIR)/src/enfilade/layoutfilade.o
+	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS)
 
 ZIGZAG_SHARED_CORE_OBJS := $(COMMON_XANADU_OBJS)
 
@@ -1442,7 +1455,8 @@ TEST_FILTER ?= -$(SWARM_NETNS_TESTS)
 # under build/), so a fresh checkout's `make test` builds them rather than
 # failing with "binary not found".
 TEST_PROGRAMS := $(addprefix $(OBJDIR)/,gleditor xudu xuzz zigzag xudu-dump \
-	xudu-swarm-peer vquery vpl vplc vprolog vlace vlacec vicon viconc vagent)
+	xudu-swarm-peer vquery vpl vplc vprolog vlace vlacec vicon viconc vagent \
+	vortex-stdlib-gen)
 
 .PHONY: test test/all test/integration test/e2e-orchestration
 test: $(TEST_PROGRAMS) $(OBJDIR)/gleditor_test $(OBJDIR)/xuzz_test $(OBJDIR)/zigzag_test
@@ -1789,7 +1803,8 @@ INSTALL_DATADIR := $(DESTDIR)$(appdir)
 # gets installed knows where its data went even if it is later moved somewhere
 # the executable-relative search cannot follow.
 install: GLEDITOR_DATADIR := $(appdir)
-install: $(OBJDIR)/gleditor $(OBJDIR)/xuzz $(OBJDIR)/xudu $(OBJDIR)/zigzag
+install: $(OBJDIR)/gleditor $(OBJDIR)/xuzz $(OBJDIR)/xudu $(OBJDIR)/zigzag \
+	$(OBJDIR)/vortex-stdlib-gen
 ifdef GLEDITOR_ENABLE_VULKAN
 install: shaders
 endif
@@ -1798,6 +1813,9 @@ install:
 	$(INSTALL) -d $(DESTDIR)$(bindir)
 	$(INSTALL) -m 755 $(OBJDIR)/gleditor $(DESTDIR)$(bindir)/gleditor
 	$(INSTALL) -m 755 $(OBJDIR)/xuzz $(DESTDIR)$(bindir)/xuzz
+	# Developer tool: regenerates and verifies the checked-in stdlib image.
+	$(INSTALL) -m 755 $(OBJDIR)/vortex-stdlib-gen \
+		$(DESTDIR)$(bindir)/vortex-stdlib-gen
 	rm -f $(DESTDIR)$(bindir)/xudu && ln -sf xuzz $(DESTDIR)$(bindir)/xudu
 	rm -f $(DESTDIR)$(bindir)/zigzag && ln -sf xuzz $(DESTDIR)$(bindir)/zigzag
 	# The real name is what a program records; the linker name is what a later
@@ -1846,6 +1864,15 @@ ifdef GLEDITOR_ENABLE_VULKAN
 	$(INSTALL) -m 644 $(SPIRV) $(INSTALL_DATADIR)/shaders/vulkan
 endif
 	$(INSTALL) -m 644 assets/logo.png $(INSTALL_DATADIR)/logo.png
+	# The prebuilt Vortex stdlib image: one sealed artifact (store + the one
+	# permascroll its spans address), installed as a unit under appdir so the
+	# compiled-in GLEDITOR_DATADIR chain finds it.
+	$(INSTALL) -d $(INSTALL_DATADIR)/vortex-stdlib/store \
+		$(INSTALL_DATADIR)/vortex-stdlib/permascroll
+	$(INSTALL) -m 644 assets/vortex-stdlib/store/* \
+		$(INSTALL_DATADIR)/vortex-stdlib/store/
+	$(INSTALL) -m 644 assets/vortex-stdlib/permascroll/* \
+		$(INSTALL_DATADIR)/vortex-stdlib/permascroll/
 	$(INSTALL) -d $(DESTDIR)$(datadir)/applications
 	$(INSTALL) -m 644 packaging/gleditor.desktop $(DESTDIR)$(datadir)/applications/
 	$(INSTALL) -d $(DESTDIR)$(datadir)/metainfo
@@ -1865,6 +1892,7 @@ uninstall:
 	$(RM) -f $(DESTDIR)$(bindir)/xuzz
 	$(RM) -f $(DESTDIR)$(bindir)/zigzag
 	$(RM) -f $(DESTDIR)$(bindir)/xudu
+	$(RM) -f $(DESTDIR)$(bindir)/vortex-stdlib-gen
 	$(RM) -f $(DESTDIR)$(libdir)/$(notdir $(LIBREAL))
 	$(RM) -f $(DESTDIR)$(libdir)/$(LIBNAME)
 	$(RM) -f $(DESTDIR)$(libdir)/pkgconfig/gleditor.pc

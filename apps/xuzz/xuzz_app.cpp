@@ -29,6 +29,7 @@
 #include <gleditor/doc_switcher.hpp>
 #include <gleditor/form.hpp>
 #include <gleditor/media_widget.hpp>
+#include <gleditor/paths.hpp>
 #include <gleditor/radial_menu.hpp>
 #include <gleditor/render_state.hpp>
 #include <gleditor/renderer.hpp>
@@ -51,6 +52,7 @@
 #include "common/xanadu/system_docs.hpp"
 #include "common/xanadu/torrent.hpp"
 #include "common/xanadu/user_permascroll.hpp"
+#include "common/xanadu/vortex/stdlib_image.hpp"
 #include "common/xanadu/vortex/vortex_host.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
 #include "common/xanadu/zigzag/filesystem_lens.hpp"
@@ -1585,6 +1587,29 @@ int XuzzApp::run(const int argc, char **argv) {
   satelloidOverlay.setLinkContext(&linkContext);
 
   // 5. Zigzag presentation & BridgeCoordinator
+  // Settle the stdlib image policy before the visualizer's ctor builds the
+  // first Vortex context. assetPath() is the SDL-aware resolution the
+  // headless engine chain cannot do (portable zip, installed share dir);
+  // vortex.stdlib_source is startup-only and read here, never through
+  // VortexHostConfig::fromStore, which document stores also drive.
+  // GLEDITOR_STDLIB_DIR is the developer's image override and outranks the
+  // shipped asset in resolveStdlibPolicy only while the seam leaves the
+  // snapshot's imageDir unset -- setting it unconditionally would shadow the
+  // env var for the whole process.
+  // environment() in stdlib_image.cpp reads an empty value as unset; the seam
+  // must agree or GLEDITOR_STDLIB_DIR="" would skip the asset path while the
+  // resolver also ignores it.
+  const char *envStdlibDir = std::getenv("GLEDITOR_STDLIB_DIR");
+  if (envStdlibDir == nullptr || envStdlibDir[0] == '\0')
+    zigzag::vortex::setStdlibImageDir(gleditor::assetPath("vortex-stdlib"));
+  const auto stdlibSourceVals =
+      xanadu::getSetting(session->systemStore(xanadu::SystemDocKind::Settings),
+                         xanadu::settings::kVortexStdlibSource);
+  if (!stdlibSourceVals.empty() &&
+      std::holds_alternative<std::string>(stdlibSourceVals[0])) {
+    zigzag::vortex::applyStdlibSettingsSource(
+        std::get<std::string>(stdlibSourceVals[0]));
+  }
   auto zigzagPresentation = std::make_shared<zigzag::ZigzagVisualizer>("");
   auto &bridgeStore       = session->store(0);
   zigzagPresentation->bindXanaduStore(bridgeStore,

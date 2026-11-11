@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 
 #include <optional>
+#include <ranges>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -13,11 +14,13 @@
 #include <vector>
 
 #include "common/xanadu/store.hpp"
+#include "common/xanadu/vortex/stdlib_image_format.hpp"
 #include "common/xanadu/vortex/vortex_core.hpp"
 #include "common/xanadu/vortex/vortex_stdlib.hpp"
 #include "common/xanadu/vortex/vortex_vm.hpp"
 #include "common/xanadu/vortex/vortex_worker_pool.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
+#include "common/xanadu/zigzag/cell_views.hpp"
 #include "common/xanadu/zigzag/zzstructure.hpp"
 
 namespace {
@@ -47,8 +50,258 @@ TEST(VortexStdLibTest, BootstrapAndModuleDiscovery) {
   EXPECT_TRUE(h.stdlib.has("std:collections"));
   EXPECT_TRUE(h.stdlib.has("std:math"));
   EXPECT_TRUE(h.stdlib.has("std:string"));
+  EXPECT_TRUE(h.stdlib.has("std:env"));
+  EXPECT_TRUE(h.stdlib.has("std:io"));
+  EXPECT_TRUE(h.stdlib.has("std:map"));
+  EXPECT_TRUE(h.stdlib.has("std:hypertime"));
+  EXPECT_TRUE(h.stdlib.has("std:zigzag"));
 
   EXPECT_FALSE(h.stdlib.has("std:nonexistent"));
+  EXPECT_FALSE(h.stdlib.has("std:io/write_file"));
+  EXPECT_FALSE(h.stdlib.has("std:io/write"));
+}
+
+TEST(VortexStdLibTest, ManualBuilderWritesPrivateImageManifest) {
+  ArenaManifold arena;
+  VortexCore core{arena};
+  VortexVM vm{core};
+  VortexStdLib stdlib{core, vm, VortexStdLib::Bootstrap::Manual};
+  EXPECT_TRUE(stdlib.modules().empty());
+
+  const auto beforeBegin = arena.cellCount();
+  EXPECT_FALSE(stdlib.endImageManifest());
+  EXPECT_EQ(arena.cellCount(), beforeBegin);
+  const auto blockedBegin = arena.mark();
+  EXPECT_FALSE(stdlib.beginImageOps());
+  EXPECT_EQ(arena.cellCount(), beforeBegin);
+  arena.release(blockedBegin);
+  ASSERT_TRUE(stdlib.beginImageOps());
+  EXPECT_FALSE(stdlib.beginImageOps());
+  const auto beforeRefusal = arena.cellCount();
+  EXPECT_FALSE(stdlib.buildModule("std:goal"));
+  EXPECT_EQ(arena.cellCount(), beforeRefusal);
+  EXPECT_FALSE(stdlib.buildModule("std:missing"));
+  EXPECT_EQ(arena.cellCount(), beforeRefusal);
+
+  const CellRef data = arena.makeScalarCell(std::int64_t{1});
+  const auto math    = stdlib.buildModule("std:math");
+  ASSERT_TRUE(math);
+  EXPECT_FALSE(stdlib.buildModule("std:math"));
+  const auto blockedEnd       = arena.mark();
+  const auto beforeBlockedEnd = arena.cellCount();
+  EXPECT_FALSE(stdlib.buildModule("std:string"));
+  EXPECT_FALSE(stdlib.endImageManifest());
+  EXPECT_EQ(arena.cellCount(), beforeBlockedEnd);
+  arena.release(blockedEnd);
+  ASSERT_TRUE(stdlib.endImageManifest());
+  EXPECT_FALSE(stdlib.endImageManifest());
+  EXPECT_FALSE(stdlib.buildModule("std:string"));
+
+  const auto manifestKey =
+      zigzag::firstOf(zigzag::rankAfter(arena, core.home(), core.dims().vars) |
+                      std::views::filter([&](CellRef cell) {
+                        return arena.textOf(cell) == "stdlib.image";
+                      }));
+  ASSERT_TRUE(manifestKey);
+  const auto holder =
+      arena.linked(*manifestKey, core.dims().values, zigzag::DimVector::POS);
+  ASSERT_TRUE(holder);
+  EXPECT_EQ(std::ranges::distance(
+                zigzag::rankAfter(arena, *holder, core.dims().vars)),
+            8);
+  EXPECT_EQ(std::ranges::distance(
+                zigzag::rankAfter(arena, core.home(), core.dims().vars)),
+            1);
+  for (const CellRef record :
+       zigzag::rankAfter(arena, *holder, core.dims().vars)) {
+    const auto value =
+        arena.linked(record, core.dims().values, zigzag::DimVector::POS);
+    ASSERT_TRUE(value);
+    if (arena.textOf(record) == "imageOpcodeCount") {
+      EXPECT_EQ(arena.asInt64(*value),
+                static_cast<std::int64_t>(stdlibImageOpcodeCount()));
+    } else if (arena.textOf(record) == "imageEpoch") {
+      EXPECT_EQ(arena.textOf(*value), stdlibImageEpoch());
+    }
+  }
+
+  std::optional<CellRef> opsRecord;
+  for (const CellRef record :
+       zigzag::rankAfter(arena, *holder, core.dims().vars)) {
+    if (arena.textOf(record) == "ops") opsRecord = record;
+  }
+  ASSERT_TRUE(opsRecord);
+  const auto opsHead =
+      arena.linked(*opsRecord, core.dims().values, zigzag::DimVector::POS);
+  ASSERT_TRUE(opsHead);
+  bool sawRegisteredOpcode = false;
+  for (const CellRef member :
+       zigzag::rankAfter(arena, *opsHead, core.dims().step)) {
+    const auto position = arena.asInt64(member);
+    ASSERT_TRUE(position);
+    const CellRef opcode = static_cast<CellRef>(*position);
+    EXPECT_TRUE(vm.hasOpcodeKind(opcode));
+    sawRegisteredOpcode = true;
+  }
+  EXPECT_TRUE(sawRegisteredOpcode);
+  EXPECT_FALSE(vm.hasOpcodeKind(data));
+}
+
+TEST(VortexStdLibTest, RebindRestoresClampSignatureWithoutMinting) {
+  ArenaManifold arena;
+  VortexCore core{arena};
+  VortexVM originalVm{core};
+  VortexStdLib builder{core, originalVm, VortexStdLib::Bootstrap::Manual};
+  ASSERT_TRUE(builder.beginImageOps());
+  ASSERT_TRUE(builder.buildModule("std:math"));
+  ASSERT_TRUE(builder.endImageManifest());
+  const CellRef clamp = *builder.resolve("std:math/clamp");
+  const std::vector<CellRef> inputs(builder.routineInputs(clamp).begin(),
+                                    builder.routineInputs(clamp).end());
+  const std::vector<CellRef> outputs(builder.routineOutputs(clamp).begin(),
+                                     builder.routineOutputs(clamp).end());
+  ASSERT_EQ(inputs.size(), 3U);
+  ASSERT_EQ(outputs.size(), 1U);
+
+  VortexVM freshVm{core};
+  VortexStdLib rebound{core, freshVm, VortexStdLib::Bootstrap::Manual};
+  const auto cellsBeforeRebind = arena.cellCount();
+  ASSERT_TRUE(rebound.rebindInstance());
+  EXPECT_EQ(arena.cellCount(), cellsBeforeRebind);
+  EXPECT_TRUE(freshVm.hasOpcodeKind(clamp));
+  EXPECT_EQ(std::vector<CellRef>(rebound.routineInputs(clamp).begin(),
+                                 rebound.routineInputs(clamp).end()),
+            inputs);
+  EXPECT_EQ(std::vector<CellRef>(rebound.routineOutputs(clamp).begin(),
+                                 rebound.routineOutputs(clamp).end()),
+            outputs);
+  EXPECT_EQ(rebound.call("std:math/clamp", {std::int64_t{150}, std::int64_t{0},
+                                            std::int64_t{100}}),
+            (std::vector<CellValue>{std::int64_t{100}}));
+}
+
+TEST(VortexStdLibTest, RebindAllowsHydrationFloorButRefusesRealMarks) {
+  ArenaManifold arena;
+  VortexCore core{arena};
+  VortexVM originalVm{core};
+  VortexStdLib builder{core, originalVm, VortexStdLib::Bootstrap::Manual};
+  ASSERT_TRUE(builder.beginImageOps());
+  ASSERT_TRUE(builder.buildModule("std:math"));
+  ASSERT_TRUE(builder.endImageManifest());
+  const auto prefixMark = arena.mark();
+  const auto prefix     = arena.exportPrefix(prefixMark);
+  arena.discard(prefixMark);
+  ASSERT_TRUE(arena.hydratePrefix(prefix));
+  EXPECT_EQ(arena.outstandingMarks(), 1U);
+  EXPECT_EQ(arena.liveMarks(), 0U);
+
+  VortexVM vm{core};
+  VortexStdLib rebound{core, vm, VortexStdLib::Bootstrap::Manual};
+  const auto before = arena.cellCount();
+  ASSERT_TRUE(rebound.rebindInstance());
+  EXPECT_EQ(arena.cellCount(), before);
+  const auto mark = arena.mark();
+  EXPECT_FALSE(rebound.rebindInstance());
+  EXPECT_EQ(arena.cellCount(), before);
+  arena.release(mark);
+  arena.evictOldestMark();
+}
+
+TEST(VortexStdLibTest, RebindRestoresGoalCachesAndRefusesUnsafeMetadata) {
+  ArenaManifold arena;
+  VortexCore core{arena};
+  VortexVM builderVm{core};
+  VortexStdLib builder{core, builderVm, VortexStdLib::Bootstrap::Manual};
+  ASSERT_TRUE(builder.beginImageOps());
+  ASSERT_TRUE(builder.buildModule("std:logic"));
+  ASSERT_TRUE(builder.buildModule("std:goal"));
+  ASSERT_TRUE(builder.endImageManifest());
+
+  VortexVM vm{core};
+  VortexStdLib rebound{core, vm, VortexStdLib::Bootstrap::Manual};
+  ASSERT_TRUE(rebound.rebindInstance());
+  ASSERT_TRUE(rebound.resolve("std:goal/halt"));
+  ASSERT_TRUE(rebound.resolve("std:goal/fail"));
+  ASSERT_TRUE(rebound.resolve("std:goal/sentinel"));
+  EXPECT_EQ(rebound.goalHaltOp(), *rebound.resolve("std:goal/halt"));
+  EXPECT_EQ(rebound.goalFailOp(), *rebound.resolve("std:goal/fail"));
+  EXPECT_EQ(rebound.goalSentinelOp(), *rebound.resolve("std:goal/sentinel"));
+  for (const auto getter :
+       {&VortexStdLib::predicateEqual, &VortexStdLib::predicateUnify,
+        &VortexStdLib::predicateMember, &VortexStdLib::predicateAppend,
+        &VortexStdLib::predicateLength, &VortexStdLib::predicateSetting,
+        &VortexStdLib::predicateSettingShape,
+        &VortexStdLib::predicateSettingDefault,
+        &VortexStdLib::predicateCellValue, &VortexStdLib::predicateCellLink,
+        &VortexStdLib::predicateTransclude, &VortexStdLib::predicateXanalink,
+        &VortexStdLib::predicateCellSpan, &VortexStdLib::predicateBridgeEdge}) {
+    EXPECT_EQ((rebound.*getter)(), (builder.*getter)());
+  }
+
+  const CellRef cachedHalt = rebound.goalHaltOp();
+  const CellRef fromEntry  = *rebound.resolve("std:goal/from");
+  const std::vector<CellRef> fromInputs(
+      rebound.routineInputs(fromEntry).begin(),
+      rebound.routineInputs(fromEntry).end());
+  const CellRef manifestKey =
+      *zigzag::firstOf(zigzag::rankAfter(arena, core.home(), core.dims().vars) |
+                       std::views::filter([&](CellRef cell) {
+                         return arena.textOf(cell) == "stdlib.image";
+                       }));
+  const CellRef holder =
+      *arena.linked(manifestKey, core.dims().values, zigzag::DimVector::POS);
+  std::optional<CellRef> opsRecord;
+  for (const CellRef record :
+       zigzag::rankAfter(arena, holder, core.dims().vars)) {
+    if (arena.textOf(record) == "ops") opsRecord = record;
+  }
+  ASSERT_TRUE(opsRecord);
+  const CellRef opsHead =
+      *arena.linked(*opsRecord, core.dims().values, zigzag::DimVector::POS);
+  const CellRef firstMember =
+      *arena.linked(opsHead, core.dims().step, zigzag::DimVector::POS);
+  ASSERT_TRUE(arena.setValueBits(firstMember, xanadu::ValueKind::Int64,
+                                 std::int64_t{999999}));
+  const auto cellsBeforeRefusal = arena.cellCount();
+  EXPECT_FALSE(rebound.rebindInstance());
+  EXPECT_EQ(rebound.goalHaltOp(), cachedHalt);
+  EXPECT_EQ(std::vector<CellRef>(rebound.routineInputs(fromEntry).begin(),
+                                 rebound.routineInputs(fromEntry).end()),
+            fromInputs);
+  EXPECT_EQ(arena.cellCount(), cellsBeforeRefusal);
+
+  const auto mark = arena.mark();
+  EXPECT_FALSE(rebound.rebindInstance());
+  EXPECT_EQ(rebound.goalHaltOp(), cachedHalt);
+  EXPECT_EQ(std::vector<CellRef>(rebound.routineInputs(fromEntry).begin(),
+                                 rebound.routineInputs(fromEntry).end()),
+            fromInputs);
+  EXPECT_EQ(arena.cellCount(), cellsBeforeRefusal);
+  arena.release(mark);
+}
+
+TEST(VortexStdLibTest, FromAndSeqBothKeepCallableEntriesAfterRebind) {
+  ArenaManifold arena;
+  VortexCore core{arena};
+  VortexVM builderVm{core};
+  VortexStdLib builder{core, builderVm};
+  VortexVM vm{core};
+  VortexStdLib rebound{core, vm, VortexStdLib::Bootstrap::Manual};
+  ASSERT_TRUE(rebound.rebindInstance());
+  for (const auto path : {"std:goal/from", "std:goal/seq"}) {
+    const auto entry = rebound.resolve(path);
+    ASSERT_TRUE(entry) << path;
+    const auto inputs  = rebound.routineInputs(*entry);
+    const auto outputs = rebound.routineOutputs(*entry);
+    ASSERT_EQ(inputs.size(), 4U);
+    ASSERT_EQ(outputs.size(), 1U);
+    ASSERT_TRUE(arena.setValueBits(inputs[0], xanadu::ValueKind::Int64, 10));
+    ASSERT_TRUE(arena.setValueBits(inputs[1], xanadu::ValueKind::Int64, 2));
+    EXPECT_EQ(
+        rebound.goalBoundedFirst(*entry, outputs[0], rebound.goalHaltOp()),
+        (std::optional<CellValue>{CellValue{std::int64_t{10}}}));
+    EXPECT_EQ(arena.liveMarks(), 0U);
+  }
 }
 
 TEST(VortexStdLibTest, GoalOutputAbsenceIsUnitAndValuesStayPresent) {
@@ -475,7 +728,7 @@ TEST(VortexStdLibTest, FunctionalModuleMapFilterFoldZip) {
                                    return x * x;
                                  })
                             .value();
-  auto squaredVec = h.stdlib.listToVector(squaredHead, outDim);
+  auto squaredVec     = h.stdlib.listToVector(squaredHead, outDim);
   ASSERT_EQ(squaredVec.size(), 5u);
   EXPECT_EQ(squaredVec[0], CellValue(static_cast<std::int64_t>(1)));
   EXPECT_EQ(squaredVec[1], CellValue(static_cast<std::int64_t>(4)));
@@ -491,7 +744,7 @@ TEST(VortexStdLibTest, FunctionalModuleMapFilterFoldZip) {
                                     return std::get<std::int64_t>(v) % 2 == 0;
                                   })
                           .value();
-  auto evensVec = h.stdlib.listToVector(evensHead, filterDim);
+  auto evensVec     = h.stdlib.listToVector(evensHead, filterDim);
   ASSERT_EQ(evensVec.size(), 2u);
   EXPECT_EQ(evensVec[0], CellValue(static_cast<std::int64_t>(4)));
   EXPECT_EQ(evensVec[1], CellValue(static_cast<std::int64_t>(16)));
@@ -785,6 +1038,350 @@ TEST(VortexStdLibTest, DataParallelMapFilterFoldIsDeterministic) {
     EXPECT_EQ(gotFold, baselineFold)
         << "non-commutative fold differs at threads=" << threads;
   }
+}
+
+TEST(VortexStdLibTest, EnvModuleOperations) {
+  TestHarness h;
+  EXPECT_TRUE(h.stdlib.has("std:env"));
+  EXPECT_TRUE(h.stdlib.has("std:env/args"));
+  EXPECT_TRUE(h.stdlib.has("std:env/get_var"));
+
+  // Initially empty args
+  EXPECT_EQ(h.stdlib.envArgs(), std::nullopt);
+
+  // Set args
+  h.stdlib.setArgs({"--verbose", "--port", "8080"});
+  auto argsHead = h.stdlib.envArgs();
+  ASSERT_TRUE(argsHead.has_value());
+  auto argVals = h.stdlib.listToVector(*argsHead);
+  ASSERT_EQ(argVals.size(), 3u);
+  EXPECT_EQ(argVals[0], CellValue(std::string("--verbose")));
+  EXPECT_EQ(argVals[1], CellValue(std::string("--port")));
+  EXPECT_EQ(argVals[2], CellValue(std::string("8080")));
+
+  // Test via call()
+  auto callArgs = h.stdlib.call("std:env/args", {});
+  ASSERT_EQ(callArgs.size(), 1u);
+  EXPECT_NE(static_cast<CellRef>(std::get<std::int64_t>(callArgs[0])), noCell);
+
+  // Environment variable lookup
+  setenv("TEST_VORTEX_ENV_VAR", "vortex_active", 1);
+  auto varVal = h.stdlib.envGetVar("TEST_VORTEX_ENV_VAR");
+  ASSERT_TRUE(varVal.has_value());
+  EXPECT_EQ(*varVal, "vortex_active");
+
+  auto callVar =
+      h.stdlib.call("std:env/get_var", {std::string("TEST_VORTEX_ENV_VAR")});
+  ASSERT_EQ(callVar.size(), 1u);
+  EXPECT_EQ(std::get<std::string>(callVar[0]), "vortex_active");
+
+  EXPECT_EQ(h.stdlib.envGetVar("NONEXISTENT_VORTEX_VAR_XYZ_12345"),
+            std::nullopt);
+}
+
+TEST(VortexStdLibTest, IoModuleOperations) {
+  TestHarness h;
+  EXPECT_TRUE(h.stdlib.has("std:io"));
+  EXPECT_TRUE(h.stdlib.has("std:io/read_file"));
+  EXPECT_TRUE(h.stdlib.has("std:io/read_stdin"));
+  EXPECT_TRUE(h.stdlib.has("std:io/print"));
+  EXPECT_TRUE(h.stdlib.has("std:io/eprint"));
+
+  // Strictly no write_file primitive exists (Nelsonian invariant V9)
+  EXPECT_FALSE(h.stdlib.has("std:io/write_file"));
+  EXPECT_FALSE(h.stdlib.has("std:io/write"));
+
+  // Read existing file
+  auto content = h.stdlib.ioReadFile("Makefile");
+  ASSERT_TRUE(content.has_value());
+  EXPECT_FALSE(content->empty());
+
+  auto callRes = h.stdlib.call("std:io/read_file", {std::string("Makefile")});
+  ASSERT_EQ(callRes.size(), 1u);
+  EXPECT_FALSE(std::get<std::string>(callRes[0]).empty());
+
+  // Nonexistent file returns nullopt
+  EXPECT_EQ(h.stdlib.ioReadFile("nonexistent_test_file_never_exists.xyz"),
+            std::nullopt);
+
+  // Print operations execute cleanly
+  EXPECT_NO_THROW(h.stdlib.ioPrint(""));
+  EXPECT_NO_THROW(h.stdlib.ioEprint(""));
+  EXPECT_NO_THROW(h.stdlib.call("std:io/print", {std::string("")}));
+  EXPECT_NO_THROW(h.stdlib.call("std:io/eprint", {std::string("")}));
+
+  // Fuel consumption enforces budget
+  TestHarness limitedH;
+  // Give very small work budget (10 work units)
+  limitedH.arena.setExecutionLimits(1000, 10, 10000);
+  EXPECT_THROW(
+      { (void)limitedH.stdlib.ioReadFile("Makefile"); }, std::runtime_error);
+}
+
+TEST(VortexStdLibTest, ZigzagModuleAdditions) {
+  TestHarness h;
+  EXPECT_TRUE(h.stdlib.has("std:zigzag"));
+  EXPECT_TRUE(h.stdlib.has("std:zigzag/make_cell"));
+  EXPECT_TRUE(h.stdlib.has("std:zigzag/text_of"));
+  EXPECT_TRUE(h.stdlib.has("std:zigzag/set_text"));
+  EXPECT_TRUE(h.stdlib.has("std:zigzag/set_value"));
+  EXPECT_TRUE(h.stdlib.has("std:zigzag/resolve_dim"));
+  EXPECT_TRUE(h.stdlib.has("std:zigzag/promote"));
+
+  // zzMakeCell & zzTextOf
+  CellRef c = h.stdlib.zzMakeCell("initial text").value();
+  EXPECT_NE(c, noCell);
+  EXPECT_EQ(h.stdlib.zzTextOf(c), "initial text");
+
+  // zzSetText
+  EXPECT_TRUE(h.stdlib.zzSetText(c, "updated text"));
+  EXPECT_EQ(h.stdlib.zzTextOf(c), "updated text");
+
+  // zzSetValue
+  EXPECT_TRUE(h.stdlib.zzSetValue(c, CellValue{static_cast<std::int64_t>(42)}));
+  EXPECT_EQ(h.arena.asInt64(c), 42);
+
+  // zzResolveDim
+  auto stepDim = h.stdlib.zzResolveDim("step");
+  ASSERT_TRUE(stepDim.has_value());
+  EXPECT_EQ(*stepDim, h.core.dims().step);
+
+  auto dStepDim = h.stdlib.zzResolveDim("d.step");
+  ASSERT_TRUE(dStepDim.has_value());
+  EXPECT_EQ(*dStepDim, h.core.dims().step);
+
+  EXPECT_EQ(h.stdlib.zzResolveDim("d.dimension_that_does_not_exist"),
+            std::nullopt);
+
+  // Call dispatches
+  auto callCellRes =
+      h.stdlib.call("std:zigzag/make_cell", {std::string("via_call")});
+  ASSERT_EQ(callCellRes.size(), 1u);
+  CellRef callCell =
+      static_cast<CellRef>(std::get<std::int64_t>(callCellRes[0]));
+  EXPECT_NE(callCell, noCell);
+
+  auto callTextRes = h.stdlib.call("std:zigzag/text_of",
+                                   {static_cast<std::int64_t>(callCell)});
+  ASSERT_EQ(callTextRes.size(), 1u);
+  EXPECT_EQ(std::get<std::string>(callTextRes[0]), "via_call");
+
+  auto callSetTextRes =
+      h.stdlib.call("std:zigzag/set_text", {static_cast<std::int64_t>(callCell),
+                                            std::string("replaced_via_call")});
+  ASSERT_EQ(callSetTextRes.size(), 1u);
+  EXPECT_TRUE(std::get<bool>(callSetTextRes[0]));
+  EXPECT_EQ(h.stdlib.zzTextOf(callCell), "replaced_via_call");
+
+  auto callSetValueRes = h.stdlib.call(
+      "std:zigzag/set_value",
+      {static_cast<std::int64_t>(callCell), static_cast<std::int64_t>(999)});
+  ASSERT_EQ(callSetValueRes.size(), 1u);
+  EXPECT_TRUE(std::get<bool>(callSetValueRes[0]));
+  EXPECT_EQ(h.arena.asInt64(callCell), 999);
+
+  // zzCloneToChain: links to tail of clone rank of symbolOp and tail of spin
+  // rank of targetCell
+  CellRef symbolOp   = h.stdlib.zzMakeCell("symbol_op").value();
+  CellRef targetCell = h.stdlib.zzMakeCell("target_cell").value();
+  auto cloneHead     = h.stdlib.zzCloneToChain(symbolOp, targetCell);
+  ASSERT_TRUE(cloneHead.has_value());
+  EXPECT_NE(*cloneHead, noCell);
+  EXPECT_EQ(zigzag::rankTail(h.arena, symbolOp, h.core.dims().clone),
+            *cloneHead);
+  EXPECT_EQ(zigzag::rankTail(h.arena, targetCell, h.core.dims().spin),
+            *cloneHead);
+
+  // Promotion without bound store returns nullopt
+  EXPECT_EQ(h.stdlib.zzPromote(c, std::nullopt), std::nullopt);
+}
+
+TEST(VortexStdLibTest, MapModuleBstAndOrdering) {
+  TestHarness h;
+  EXPECT_TRUE(h.stdlib.has("std:map"));
+  EXPECT_TRUE(h.stdlib.has("std:map/create"));
+  EXPECT_TRUE(h.stdlib.has("std:map/set"));
+  EXPECT_TRUE(h.stdlib.has("std:map/get"));
+  EXPECT_TRUE(h.stdlib.has("std:map/has"));
+  EXPECT_TRUE(h.stdlib.has("std:map/keys"));
+  EXPECT_TRUE(h.stdlib.has("std:map/len"));
+
+  CellRef map = h.stdlib.createMap();
+  EXPECT_NE(map, noCell);
+  EXPECT_EQ(h.stdlib.mapLen(map), 0u);
+  EXPECT_TRUE(h.stdlib.mapKeys(map).empty());
+
+  // Insert out of order
+  h.stdlib.mapSet(map, "delta", static_cast<std::int64_t>(4));
+  h.stdlib.mapSet(map, "alpha", static_cast<std::int64_t>(1));
+  h.stdlib.mapSet(map, "charlie", static_cast<std::int64_t>(3));
+  h.stdlib.mapSet(map, "bravo", static_cast<std::int64_t>(2));
+
+  EXPECT_EQ(h.stdlib.mapLen(map), 4u);
+  EXPECT_TRUE(h.stdlib.mapHas(map, "alpha"));
+  EXPECT_TRUE(h.stdlib.mapHas(map, "bravo"));
+  EXPECT_TRUE(h.stdlib.mapHas(map, "charlie"));
+  EXPECT_TRUE(h.stdlib.mapHas(map, "delta"));
+  EXPECT_FALSE(h.stdlib.mapHas(map, "echo"));
+
+  EXPECT_EQ(h.stdlib.mapGet(map, "bravo"),
+            CellValue(static_cast<std::int64_t>(2)));
+
+  // Keys must be in strictly sorted order
+  auto keys = h.stdlib.mapKeys(map);
+  ASSERT_EQ(keys.size(), 4u);
+  EXPECT_EQ(keys[0], CellValue(std::string("alpha")));
+  EXPECT_EQ(keys[1], CellValue(std::string("bravo")));
+  EXPECT_EQ(keys[2], CellValue(std::string("charlie")));
+  EXPECT_EQ(keys[3], CellValue(std::string("delta")));
+
+  // Update existing key
+  h.stdlib.mapSet(map, "bravo", static_cast<std::int64_t>(200));
+  EXPECT_EQ(h.stdlib.mapLen(map), 4u);
+  EXPECT_EQ(h.stdlib.mapGet(map, "bravo"),
+            CellValue(static_cast<std::int64_t>(200)));
+
+  // Numeric keys in separate map
+  CellRef numMap = h.stdlib.createMap();
+  h.stdlib.mapSet(numMap, CellValue(static_cast<std::int64_t>(30)),
+                  std::string("thirty"));
+  h.stdlib.mapSet(numMap, CellValue(static_cast<std::int64_t>(10)),
+                  std::string("ten"));
+  h.stdlib.mapSet(numMap, CellValue(static_cast<std::int64_t>(20)),
+                  std::string("twenty"));
+
+  EXPECT_EQ(h.stdlib.mapLen(numMap), 3u);
+  auto numKeys = h.stdlib.mapKeys(numMap);
+  ASSERT_EQ(numKeys.size(), 3u);
+  EXPECT_EQ(numKeys[0], CellValue(static_cast<std::int64_t>(10)));
+  EXPECT_EQ(numKeys[1], CellValue(static_cast<std::int64_t>(20)));
+  EXPECT_EQ(numKeys[2], CellValue(static_cast<std::int64_t>(30)));
+
+  // Call dispatches
+  auto callCreate = h.stdlib.call("std:map/create", {});
+  ASSERT_EQ(callCreate.size(), 1u);
+  CellRef callMap = static_cast<CellRef>(std::get<std::int64_t>(callCreate[0]));
+  EXPECT_NE(callMap, noCell);
+
+  h.stdlib.call("std:map/set",
+                {static_cast<std::int64_t>(callMap), std::string("k1"),
+                 static_cast<std::int64_t>(42)});
+  auto callHas = h.stdlib.call(
+      "std:map/has", {static_cast<std::int64_t>(callMap), std::string("k1")});
+  ASSERT_EQ(callHas.size(), 1u);
+  EXPECT_TRUE(std::get<bool>(callHas[0]));
+
+  auto callGet = h.stdlib.call(
+      "std:map/get", {static_cast<std::int64_t>(callMap), std::string("k1")});
+  ASSERT_EQ(callGet.size(), 1u);
+  EXPECT_EQ(std::get<std::int64_t>(callGet[0]), 42);
+
+  auto callLen =
+      h.stdlib.call("std:map/len", {static_cast<std::int64_t>(callMap)});
+  ASSERT_EQ(callLen.size(), 1u);
+  EXPECT_EQ(std::get<std::int64_t>(callLen[0]), 1);
+
+  // Fuel consumption check: verify consumeWork is invoked during map
+  // operations. intern() bounds the arena's whole append-only scratch buffer,
+  // which already holds the bootstrapped stdlib's interned text (~14 KiB), so
+  // the scratch budget must cover that baseline plus evaluation growth.
+  TestHarness fuelH;
+  fuelH.arena.setExecutionLimits(
+      static_cast<std::uint32_t>(fuelH.arena.cellCount() + 1000), 100,
+      1U << 20);
+  CellRef fMap = fuelH.stdlib.createMap();
+  fuelH.stdlib.mapSet(fMap, "a", static_cast<std::int64_t>(1));
+  const auto remainingAfterInsert = fuelH.arena.workRemaining();
+  ASSERT_TRUE(remainingAfterInsert.has_value());
+  EXPECT_LT(*remainingAfterInsert, 100u);
+
+  (void)fuelH.stdlib.mapGet(fMap, "a");
+  const auto remainingAfterGet = fuelH.arena.workRemaining();
+  ASSERT_TRUE(remainingAfterGet.has_value());
+  EXPECT_LT(*remainingAfterGet, *remainingAfterInsert);
+}
+
+TEST(VortexStdLibTest, HypertimeModuleOperations) {
+  TestHarness h;
+  EXPECT_TRUE(h.stdlib.has("std:hypertime"));
+  EXPECT_TRUE(h.stdlib.has("std:hypertime/lca"));
+  EXPECT_TRUE(h.stdlib.has("std:hypertime/path"));
+  EXPECT_TRUE(h.stdlib.has("std:hypertime/is_ancestor_of"));
+  EXPECT_TRUE(h.stdlib.has("std:hypertime/depth"));
+  EXPECT_TRUE(h.stdlib.has("std:hypertime/jump_ancestor"));
+  EXPECT_TRUE(h.stdlib.has("std:hypertime/parent"));
+  EXPECT_TRUE(h.stdlib.has("std:hypertime/next"));
+  EXPECT_TRUE(h.stdlib.has("std:hypertime/children"));
+  EXPECT_TRUE(h.stdlib.has("std:hypertime/branch"));
+  EXPECT_TRUE(h.stdlib.has("std:hypertime/branch_letters"));
+  EXPECT_TRUE(h.stdlib.has("std:hypertime/latest"));
+  EXPECT_TRUE(h.stdlib.has("std:hypertime/head"));
+  EXPECT_TRUE(h.stdlib.has("std:hypertime/heads"));
+  EXPECT_TRUE(h.stdlib.has("std:hypertime/repoint_head"));
+  EXPECT_TRUE(h.stdlib.has("std:hypertime/to_str"));
+  EXPECT_TRUE(h.stdlib.has("std:hypertime/parse"));
+
+  // Pure version string queries
+  EXPECT_EQ(h.stdlib.hyperParent("2a4"), "2a3");
+  EXPECT_EQ(h.stdlib.hyperParent("2a1"), "2");
+  EXPECT_EQ(h.stdlib.hyperNext("2a4"), "2a5");
+  EXPECT_EQ(h.stdlib.hyperBranch("2", 1), "2a1");
+  EXPECT_EQ(h.stdlib.hyperBranchLetters(1), "a");
+  EXPECT_EQ(h.stdlib.hyperBranchLetters(2), "b");
+  EXPECT_EQ(h.stdlib.hyperBranchLetters(27), "aa");
+  EXPECT_EQ(h.stdlib.hyperToStr("2a4"), "2a4");
+  EXPECT_EQ(h.stdlib.hyperParse("2a4"), "2a4");
+  EXPECT_EQ(h.stdlib.hyperParse("not_a_valid_microversion"), std::nullopt);
+
+  EXPECT_TRUE(h.stdlib.hyperIsAncestorOf("2", "2a4"));
+  EXPECT_FALSE(h.stdlib.hyperIsAncestorOf("2a4", "2"));
+
+  EXPECT_EQ(h.stdlib.hyperDepth("2a2"), 4);
+  EXPECT_EQ(h.stdlib.hyperJumpAncestor("2a2", 2), "2");
+  EXPECT_EQ(h.stdlib.hyperLca("2a1", "2b1"), "2");
+
+  std::vector<std::string> path = h.stdlib.hyperPath("2a1");
+  ASSERT_EQ(path.size(), 3u);
+  EXPECT_EQ(path[0], "1");
+  EXPECT_EQ(path[1], "2");
+  EXPECT_EQ(path[2], "2a1");
+
+  // Call dispatches
+  auto callParent = h.stdlib.call("std:hypertime/parent", {std::string("2a4")});
+  ASSERT_EQ(callParent.size(), 1u);
+  EXPECT_EQ(std::get<std::string>(callParent[0]), "2a3");
+
+  auto callNext = h.stdlib.call("std:hypertime/next", {std::string("2a4")});
+  ASSERT_EQ(callNext.size(), 1u);
+  EXPECT_EQ(std::get<std::string>(callNext[0]), "2a5");
+
+  auto callBranch = h.stdlib.call(
+      "std:hypertime/branch", {std::string("2"), static_cast<std::int64_t>(1)});
+  ASSERT_EQ(callBranch.size(), 1u);
+  EXPECT_EQ(std::get<std::string>(callBranch[0]), "2a1");
+
+  auto callLca = h.stdlib.call("std:hypertime/lca",
+                               {std::string("2a1"), std::string("2b1")});
+  ASSERT_EQ(callLca.size(), 1u);
+  EXPECT_EQ(std::get<std::string>(callLca[0]), "2");
+
+  // Store-backed queries
+  xanadu::Store store;
+  EXPECT_TRUE(h.stdlib.exportStandardLibraryToStore(store));
+  h.stdlib.setBoundStore(&store);
+
+  EXPECT_TRUE(h.stdlib.hyperHead().has_value());
+  EXPECT_TRUE(h.stdlib.hyperLatest().has_value());
+  EXPECT_FALSE(h.stdlib.hyperHeads().empty());
+
+  auto curHead = *h.stdlib.hyperHead();
+  EXPECT_TRUE(h.stdlib.hyperRepointHead(curHead));
+
+  // zzPromote with bound store
+  CellRef testCell = h.stdlib.zzMakeCell("to_promote").value();
+  auto promotedVer = h.stdlib.zzPromote(testCell, std::nullopt);
+  EXPECT_TRUE(promotedVer.has_value());
+  EXPECT_EQ(h.stdlib.hyperHead(), promotedVer);
 }
 
 } // namespace

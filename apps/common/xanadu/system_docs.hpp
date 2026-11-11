@@ -264,6 +264,8 @@ inline constexpr std::string_view kVortexParallelThreshold =
     "vortex.parallel_threshold";
 inline constexpr std::string_view kVortexOrParallelSearch =
     "vortex.or_parallel_search";
+inline constexpr std::string_view kVortexStdlibSource =
+    "vortex.stdlib_source";
 
 // Vagent actor-executor policy (design/vagent-actor-executor.md §4.1/§4.2)
 inline constexpr std::string_view kVagentReadyPerMessage =

@@ -8,21 +8,32 @@
 #include <bit>
 #include <cctype>
 #include <cmath>
+#include <cstdlib>
+#include <fstream>
+#include <iostream>
 #include <limits>
 #include <numeric>
 #include <ranges>
 #include <sstream>
+#include <stdexcept>
 #include <unordered_set>
 
 #include <gleditor/logging.hpp>
 
+#include "common/xanadu/microversion.hpp"
+#include "common/xanadu/relocation_marks.hpp"
+#include "common/xanadu/spool_write.hpp"
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/system_docs.hpp"
+#include "common/xanadu/vortex/stdlib_image.hpp"
+#include "common/xanadu/vortex/stdlib_image_format.hpp"
 #include "common/xanadu/vortex/vortex_worker_pool.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
 #include "common/xanadu/zigzag/vlog.hpp"
 
 namespace zigzag::vortex {
+
+using xanadu::MicroversionId;
 
 namespace {
 
@@ -83,6 +94,48 @@ double toDoubleVal(const CellValue &v) {
   } catch (...) {
     return 0.0;
   }
+}
+
+int compareCellValues(const CellValue &a, const CellValue &b) {
+  const bool aNum = std::holds_alternative<std::int64_t>(a) ||
+                    std::holds_alternative<double>(a);
+  const bool bNum = std::holds_alternative<std::int64_t>(b) ||
+                    std::holds_alternative<double>(b);
+  if (aNum && bNum) {
+    if (std::holds_alternative<std::int64_t>(a) &&
+        std::holds_alternative<std::int64_t>(b)) {
+      const auto va = std::get<std::int64_t>(a);
+      const auto vb = std::get<std::int64_t>(b);
+      return (va < vb) ? -1 : (va > vb ? 1 : 0);
+    }
+    if (std::holds_alternative<double>(a) &&
+        std::holds_alternative<double>(b)) {
+      const auto va = std::get<double>(a);
+      const auto vb = std::get<double>(b);
+      return (va < vb) ? -1 : (va > vb ? 1 : 0);
+    }
+    const double va = std::holds_alternative<double>(a)
+                          ? std::get<double>(a)
+                          : static_cast<double>(std::get<std::int64_t>(a));
+    const double vb = std::holds_alternative<double>(b)
+                          ? std::get<double>(b)
+                          : static_cast<double>(std::get<std::int64_t>(b));
+    return (va < vb) ? -1 : (va > vb ? 1 : 0);
+  }
+  if (a.index() != b.index()) {
+    return a.index() < b.index() ? -1 : 1;
+  }
+  if (std::holds_alternative<std::string>(a)) {
+    const auto &sa = std::get<std::string>(a);
+    const auto &sb = std::get<std::string>(b);
+    return sa.compare(sb);
+  }
+  if (std::holds_alternative<bool>(a)) {
+    const bool ba = std::get<bool>(a);
+    const bool bb = std::get<bool>(b);
+    return (ba < bb) ? -1 : (ba > bb ? 1 : 0);
+  }
+  return 0;
 }
 
 void collectVariablesHelper(const VortexStdLib &stdlib, CellRef term,
@@ -1161,8 +1214,8 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
           CellRef oDocCell    = core.arena().makeCell("store");
           std::string spanStr = "[" + std::to_string(cop->spanStart) + "," +
                                 std::to_string(cop->spanLength) + "]";
-          CellRef spanCell = core.arena().makeCell(spanStr);
-          CellRef tDocCell = core.arena().makeCell("active");
+          CellRef spanCell    = core.arena().makeCell(spanStr);
+          CellRef tDocCell    = core.arena().makeCell("active");
           if (stdlib.unify(goalArgs[0], oDocCell) &&
               stdlib.unify(goalArgs[1], spanCell) &&
               stdlib.unify(goalArgs[2], tDocCell)) {
@@ -1236,7 +1289,7 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
             core.arena().makeScalarCell(static_cast<std::int64_t>(c));
         std::string spanStr = "[" + std::to_string(sp.start) + "," +
                               std::to_string(sp.length) + "]";
-        CellRef spCell = core.arena().makeCell(spanStr);
+        CellRef spCell      = core.arena().makeCell(spanStr);
         if (stdlib.unify(goalArgs[0], cCell) &&
             stdlib.unify(goalArgs[1], spCell)) {
           bool keepGoing = solveQueryHelper(
@@ -1433,8 +1486,71 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
 
 } // namespace
 
-VortexStdLib::VortexStdLib(VortexCore &core, VortexVM &vm)
-    : core_(core), vm_(vm) {
+VortexStdLib::VortexStdLib(VortexCore &core, VortexVM &vm,
+                           const Bootstrap bootstrapMode)
+    : core_(core), vm_(vm), bootstrapMode_(bootstrapMode) {
+  if (bootstrapMode_ == Bootstrap::Automatic) ensureStdlib();
+}
+
+void VortexStdLib::ensureStdlib() {
+  if (bootstrapComplete_) return;
+  auto &arena = core_.arena();
+  // An arena that already carries the record has its library -- grafted by an
+  // earlier instance or built by bootstrap(); this instance only rebinds.
+  // The probe precedes every source path: falling back to bootstrap() on an
+  // arena that already has the record would mint a duplicate manifest.
+  const auto present = [&] {
+    for (const CellRef key :
+         rankAfter(arena, core_.home(), core_.dims().vars)) {
+      // The record key always links its holder through d.values; a bare cell
+      // squatting the reserved name must not read as a manifest, or every
+      // later ensureStdlib on this arena would throw with no fallback.
+      if (arena.textOf(key) == "stdlib.image" &&
+          arena.linked(key, core_.dims().values, DimVector::POS))
+        return true;
+    }
+    return false;
+  };
+  if (present()) {
+    const auto rebound = rebindInstance();
+    if (!rebound) throw std::runtime_error(rebound.error());
+    return;
+  }
+
+  const auto policy = resolveStdlibPolicy();
+  if (policy.mode == StdlibMode::Cpp) {
+    bootstrap();
+    return;
+  }
+
+  auto image = openStdlibImage(policy.imageDir);
+  if (!image) {
+    if (policy.mode == StdlibMode::Image) throw image.error();
+    GLEDITOR_LOG_WARN("vortex.stdlib",
+                      "stdlib image unavailable ({}); falling back to C++ "
+                      "bootstrap",
+                      image.error().what());
+    bootstrap();
+    return;
+  }
+
+  const auto grafted = graftImage(**image);
+  if (grafted) return;
+
+  // A graft that failed after its mark was discarded leaves the record
+  // present; retry the rebind rather than bootstrapping a second library
+  // over the grafted one.
+  if (present()) {
+    const auto rebound = rebindInstance();
+    if (rebound) return;
+    throw std::runtime_error(rebound.error());
+  }
+  if (policy.mode == StdlibMode::Image)
+    throw std::runtime_error(grafted.error());
+  GLEDITOR_LOG_WARN("vortex.stdlib",
+                    "stdlib image graft refused ({}); falling back to C++ "
+                    "bootstrap",
+                    grafted.error());
   bootstrap();
 }
 
@@ -1456,44 +1572,783 @@ void VortexStdLib::exportSymbol(CellRef moduleCell, std::string_view symbolName,
   core_.exportSymbol(moduleCell, symbolName, entryOp);
 }
 
-void VortexStdLib::bootstrap() {
-  CellRef modMemoize     = getOrCreateModule("std:memoize");
-  CellRef modContract    = getOrCreateModule("std:contract");
-  CellRef modPipeline    = getOrCreateModule("std:pipeline");
-  CellRef modFunctional  = getOrCreateModule("std:functional");
-  CellRef modCollections = getOrCreateModule("std:collections");
-  CellRef modMath        = getOrCreateModule("std:math");
-  CellRef modString      = getOrCreateModule("std:string");
-  CellRef modLogic       = getOrCreateModule("std:logic");
-  // std:goal weaves in after std:logic because its generators call
-  // std:logic's #Choice/#Fail plumbing (vicon spec section 7.1).
-  CellRef modGoal   = getOrCreateModule("std:goal");
-  CellRef modArray  = getOrCreateModule("sys:array");
-  CellRef modZigzag = getOrCreateModule("std:zigzag");
-  CellRef modGC     = getOrCreateModule("std:gc");
-  CellRef modUI     = getOrCreateModule("std:ui");
-  CellRef modNav    = getOrCreateModule("std:nav");
-  CellRef modBridge = getOrCreateModule("std:bridge");
-  CellRef modXuzz   = getOrCreateModule("std:xuzz");
-  CellRef modXudu   = getOrCreateModule("std:xudu");
+std::span<const std::string_view>
+VortexStdLib::canonicalModuleOrder() noexcept {
+  static constexpr auto order = [] {
+    std::array<std::string_view, moduleBuilders_.size()> names{};
+    for (std::size_t i = 0; i < names.size(); ++i)
+      names[i] = moduleBuilders_[i].name;
+    return names;
+  }();
+  return order;
+}
 
-  buildMathModule(modMath);
-  buildStringModule(modString);
-  buildContractModule(modContract);
-  buildPipelineModule(modPipeline);
-  buildMemoizeModule(modMemoize);
-  buildFunctionalModule(modFunctional);
-  buildCollectionsModule(modCollections);
-  buildLogicModule(modLogic);
-  buildGoalModule(modGoal);
-  buildArrayModule(modArray);
-  buildZigzagModule(modZigzag);
-  buildGCModule(modGC);
-  buildUiModule(modUI);
-  buildNavModule(modNav);
-  buildBridgeModule(modBridge);
-  buildXuzzModule(modXuzz);
-  buildXuduModule(modXudu);
+void VortexStdLib::bootstrap() {
+  if (bootstrapComplete_) return;
+  if (!beginImageOps()) {
+    throw std::logic_error("VortexStdLib bootstrap could not begin image ops");
+  }
+  for (const auto module : canonicalModuleOrder()) {
+    const auto built = buildModule(module);
+    if (!built) throw std::runtime_error(built.error());
+  }
+  const auto ended = endImageManifest();
+  if (!ended) throw std::runtime_error(ended.error());
+  bootstrapComplete_ = true;
+}
+
+std::expected<VortexStdLib *, std::string> VortexStdLib::beginImageOps() {
+  if (core_.arena().liveMarks() != 0) {
+    return std::unexpected("beginImageOps: arena has live marks");
+  }
+  if (imageOpsBegun_ || imageManifestEnded_ || bootstrapComplete_) {
+    return std::unexpected("beginImageOps: image construction already started");
+  }
+  imageOpsBegun_ = true;
+  imageOpsHead_  = core_.arena().makeCell();
+  imageOpsTail_  = imageOpsHead_;
+  return this;
+}
+
+std::expected<CellRef, std::string>
+VortexStdLib::buildModule(const std::string_view moduleName) {
+  if (core_.arena().liveMarks() != 0) {
+    return std::unexpected("buildModule: arena has live marks");
+  }
+  if (!imageOpsBegun_ || imageManifestEnded_) {
+    return std::unexpected("buildModule: image ops are not open");
+  }
+  const auto builder =
+      std::ranges::find(moduleBuilders_, moduleName, &ModuleBuilder::name);
+  if (builder == moduleBuilders_.end()) {
+    return std::unexpected("buildModule: unknown module '" +
+                           std::string(moduleName) + "'");
+  }
+  if (builtModules_.contains(std::string(moduleName))) {
+    return std::unexpected("buildModule: duplicate module '" +
+                           std::string(moduleName) + "'");
+  }
+  if (moduleName == "std:goal" && !builtModules_.contains("std:logic")) {
+    return std::unexpected(
+        "buildModule: std:goal requires std:logic to be built first");
+  }
+  if (bootstrapMode_ == Bootstrap::Manual && core_.findModule(moduleName)) {
+    return std::unexpected("buildModule: module already exists in the arena '" +
+                           std::string(moduleName) + "'");
+  }
+
+  const CellRef module        = getOrCreateModule(moduleName);
+  const std::size_t firstCell = core_.arena().cellCount();
+  (this->*(builder->build))(module);
+
+  if (const auto appended = appendModuleOpcodes(firstCell); !appended)
+    return std::unexpected(appended.error());
+  if (const auto persisted = persistModuleBindings(module); !persisted)
+    return std::unexpected(persisted.error());
+  builtModules_.insert(std::string(moduleName));
+  return module;
+}
+
+std::expected<CellRef, std::string>
+VortexStdLib::keyRecord(const CellRef owner, const std::string_view key,
+                        const CellRef value) {
+  auto &arena = core_.arena();
+  if (!arena.contains(owner) || !arena.contains(value)) {
+    return std::unexpected("keyRecord: owner or value is not in the arena");
+  }
+  const CellRef record = arena.makeCell(key);
+  if (const auto linked =
+          arena.link(record, core_.dims().values, DimVector::POS, value);
+      !linked) {
+    return std::unexpected("keyRecord: could not link value");
+  }
+  const CellRef tail = rankTail(arena, owner, core_.dims().vars);
+  if (const auto linked =
+          arena.link(tail, core_.dims().vars, DimVector::POS, record);
+      !linked) {
+    return std::unexpected("keyRecord: could not append key record");
+  }
+  return record;
+}
+
+std::expected<void, std::string>
+VortexStdLib::appendModuleOpcodes(const std::size_t firstCell) {
+  auto &arena      = core_.arena();
+  const auto cells = arena.cells();
+  std::vector<CellRef> opCells;
+  for (std::size_t i = firstCell; i < cells.size(); ++i) {
+    const CellRef opCell = cells[i].birthOp;
+    if (vm_.hasOpcodeKind(opCell)) opCells.push_back(opCell);
+  }
+  for (const CellRef opCell : opCells) {
+    const CellRef member =
+        arena.makeScalarCell(static_cast<std::int64_t>(opCell));
+    if (const auto linked = arena.link(imageOpsTail_, core_.dims().step,
+                                       DimVector::POS, member);
+        !linked) {
+      return std::unexpected("appendModuleOpcodes: could not append op cell");
+    }
+    imageOpsTail_ = member;
+  }
+  return {};
+}
+
+std::expected<void, std::string>
+VortexStdLib::persistRoutineBinding(const CellRef symbol,
+                                    const CellRef entryOp) {
+  auto &arena             = core_.arena();
+  const auto paramsDim    = core_.findOrMintDimension("d.params");
+  const CellRef signature = arena.makeCell();
+  if (const auto linked =
+          arena.link(symbol, paramsDim, DimVector::POS, signature);
+      !linked) {
+    return std::unexpected("persistRoutineBinding: could not attach signature");
+  }
+
+  const auto binding = routineBindings_.find(entryOp);
+  const std::span<const CellRef> inputs =
+      binding == routineBindings_.end()
+          ? std::span<const CellRef>{}
+          : std::span<const CellRef>{binding->second.inputParams};
+  const std::span<const CellRef> outputs =
+      binding == routineBindings_.end()
+          ? std::span<const CellRef>{}
+          : std::span<const CellRef>{binding->second.outputParams};
+  const auto writeSide = [&](const std::string_view name,
+                             const std::span<const CellRef> refs)
+      -> std::expected<void, std::string> {
+    const CellRef head = arena.makeCell();
+    if (!keyRecord(signature, name, head))
+      return std::unexpected("persistRoutineBinding: could not write '" +
+                             std::string(name) + "' record");
+    CellRef tail = head;
+    for (const CellRef ref : refs) {
+      if (!arena.contains(ref))
+        return std::unexpected("persistRoutineBinding: parameter target is "
+                               "not in the arena");
+      const CellRef member =
+          arena.makeScalarCell(static_cast<std::int64_t>(ref));
+      if (const auto linked =
+              arena.link(tail, core_.dims().step, DimVector::POS, member);
+          !linked) {
+        return std::unexpected(
+            "persistRoutineBinding: could not append parameter member");
+      }
+      tail = member;
+    }
+    return {};
+  };
+  if (const auto result = writeSide("in", inputs); !result) return result;
+  return writeSide("out", outputs);
+}
+
+std::expected<void, std::string>
+VortexStdLib::persistModuleBindings(const CellRef moduleCell) {
+  for (const CellRef symbol :
+       rankAfter(core_.arena(), moduleCell, core_.dims().vars)) {
+    const auto entry =
+        core_.arena().linked(symbol, core_.dims().values, DimVector::POS);
+    if (!entry || !core_.arena().contains(*entry)) {
+      return std::unexpected(
+          "persistModuleBindings: " + core_.arena().textOf(moduleCell) + "/" +
+          core_.arena().textOf(symbol) + " has no entry cell");
+    }
+    if (const auto result = persistRoutineBinding(symbol, *entry); !result)
+      return result;
+  }
+  return {};
+}
+
+std::expected<VortexStdLib *, std::string> VortexStdLib::endImageManifest() {
+  if (core_.arena().liveMarks() != 0) {
+    return std::unexpected("endImageManifest: arena has live marks");
+  }
+  if (!imageOpsBegun_ || imageManifestEnded_) {
+    return std::unexpected("endImageManifest: image ops are not open");
+  }
+  auto &arena          = core_.arena();
+  const CellRef holder = arena.makeCell();
+  if (!keyRecord(core_.home(), "stdlib.image", holder)) {
+    return std::unexpected("endImageManifest: could not attach image holder");
+  }
+  if (!keyRecord(holder, "ops", imageOpsHead_)) {
+    return std::unexpected("endImageManifest: could not attach ops record");
+  }
+  const std::size_t opCellCount =
+      static_cast<std::size_t>(std::ranges::distance(
+          rankAfter(arena, imageOpsHead_, core_.dims().step)));
+  // The generator later replaces these development-only release fields.
+  const auto textField = [&](const std::string_view key,
+                             const std::string_view value) {
+    return keyRecord(holder, key, arena.makeCell(value));
+  };
+  const auto intField = [&](const std::string_view key,
+                            const std::int64_t value) {
+    return keyRecord(holder, key, arena.makeScalarCell(value));
+  };
+  if (!textField("imageEpoch", stdlibImageEpoch()) ||
+      !intField("contentVersion", 0) || !textField("generatorHead", "cpp") ||
+      !intField("expectedScrollBytes", 0) ||
+      !intField("imageOpcodeCount",
+                static_cast<std::int64_t>(stdlibImageOpcodeCount())) ||
+      !intField("imageVerbCount",
+                static_cast<std::int64_t>(stdlibImageVerbCount())) ||
+      !intField("imageOpcodeCellCount",
+                static_cast<std::int64_t>(opCellCount))) {
+    return std::unexpected("endImageManifest: could not write manifest fields");
+  }
+  imageManifestEnded_ = true;
+  bootstrapComplete_  = true;
+  return this;
+}
+
+// The image's dimension registry names the system dimensions genesis
+// minted. On arenas whose registry is split across a base manifold,
+// findOrMintDimension's chain walk cannot reach dims genesis linked off
+// base-owned cells, so it would mint a second "d.vars" and every grafted
+// edge would land under a dimension rebind never reads. core_.dims() is
+// the authoritative name->dim map; only names outside it fall through.
+static DimRef graftDimension(VortexCore &core, const std::string_view name) {
+  static constexpr std::pair<std::string_view, DimRef SystemDimensions::*>
+      kSystemDims[]{
+          {"d.dims", &SystemDimensions::dims},
+          {"d.grab", &SystemDimensions::grab},
+          {"d.step", &SystemDimensions::step},
+          {"d.spin", &SystemDimensions::spin},
+          {"d.stack", &SystemDimensions::stack},
+          {"d.contract", &SystemDimensions::contract},
+          {"d.clone", &SystemDimensions::clone},
+          {"d.cursors", &SystemDimensions::cursors},
+          {"d.cache", &SystemDimensions::cache},
+          {"d.vars", &SystemDimensions::vars},
+          {"d.values", &SystemDimensions::values},
+          {"d.pinning-cursors", &SystemDimensions::pinningCursors},
+          {"d.name", &SystemDimensions::name},
+          {"d.role", &SystemDimensions::role},
+          {"d.stdlib", &SystemDimensions::stdlib},
+          {"d.clause", &SystemDimensions::clause},
+          {"d.scan", &SystemDimensions::scan},
+          {"d.stores", &SystemDimensions::stores},
+          {"d.left", &SystemDimensions::left},
+          {"d.right", &SystemDimensions::right},
+      };
+  const auto &dims = core.dims();
+  for (const auto &[dimName, member] : kSystemDims) {
+    if (dimName == name) {
+      const DimRef ref = dims.*member;
+      if (ref != noCell) return ref;
+    }
+  }
+  // Non-system registry members (d.params, d.mesh.relocation, ...) have no
+  // SystemDimensions slot, but they can still pre-exist on a split
+  // base/local registry where findOrMintDimension's chain walk cannot see
+  // them. Resolve by the broadest name search first; only a truly absent
+  // name may mint, or the graft would split that dim's ranks across two
+  // identities.
+  if (const auto found =
+          xanadu::findDimensionByName(core.arena(), name, &core)) {
+    return *found;
+  }
+  return core.findOrMintDimension(name);
+}
+
+std::expected<VortexStdLib *, std::string>
+VortexStdLib::graftImage(const StdlibImage &image) {
+  auto &arena     = core_.arena();
+  const auto fail = [](const std::string &detail) {
+    return std::expected<VortexStdLib *, std::string>(
+        std::unexpected("graftImage: " + detail));
+  };
+  if (arena.liveMarks() != 0) return fail("arena has live marks");
+  if (core_.home() == noCell) return fail("core has no home cell");
+  if (bootstrapComplete_) return fail("stdlib already ensured");
+
+  const auto &manifold = image.manifold;
+  const auto &reader   = *image.store;
+  const auto needDim   = [&](const std::string_view name) {
+    return manifold.dimensionNamed(name, reader);
+  };
+  const auto varsDim   = needDim("d.vars");
+  const auto valuesDim = needDim("d.values");
+  const auto stdlibDim = needDim("d.stdlib");
+  const auto stepDim   = needDim("d.step");
+  const auto paramsDim = needDim("d.params");
+  const auto relocDim  = needDim("d.mesh.relocation");
+  if (!varsDim || !valuesDim || !stdlibDim || !stepDim || !paramsDim ||
+      !relocDim || image.dimensionRegistry == noCell)
+    return fail("image lacks a dimension the graft requires");
+
+  // The record is emitted by both the image path and bootstrap(), so its
+  // presence means this arena already has a library to rebind, not graft.
+  // Like ensureStdlib's probe, require the d.values holder link so a stray
+  // text-only cell cannot block the graft.
+  for (const CellRef key : rankAfter(arena, core_.home(), core_.dims().vars)) {
+    if (arena.textOf(key) == "stdlib.image" &&
+        arena.linked(key, core_.dims().values, DimVector::POS))
+      return fail("arena already carries a stdlib.image record");
+  }
+
+  const Mark mark = arena.mark();
+  // release() rolls the arena back to the mark; discard() commits. An
+  // exception mid-graft would otherwise leave a live mark that wedges every
+  // later graft, bootstrap, compaction, and hydration, so the guard releases
+  // unless the commit below dismisses it.
+  struct MarkGuard {
+    ArenaManifold &arena;
+    Mark mark;
+    bool armed = true;
+    ~MarkGuard() {
+      if (armed) arena.release(mark);
+    }
+  } guard{arena, mark};
+  const auto bail = [&](const std::string &detail) { return fail(detail); };
+
+  // image CellRef -> arena CellRef. preExisting holds image cells whose arena
+  // counterpart was already live (home, registry dims, name-merged modules);
+  // every other image cell is cloned below, so a map miss is always a refusal.
+  std::unordered_map<CellRef, CellRef> map;
+  std::unordered_set<CellRef> preExisting;
+  std::unordered_set<CellRef> mergedModules;
+  std::unordered_set<CellRef> registryDims;
+
+  map.emplace(image.home, core_.home());
+  preExisting.insert(image.home);
+
+  for (const CellRef dimCell :
+       rankAfter(manifold, image.home, image.dimensionRegistry)) {
+    const auto name = manifold.textOf(dimCell, reader);
+    if (name.size() < 2 || name[0] != 'd' || name[1] != '.')
+      return bail("dimension registry member is not a d.* name");
+    map.emplace(dimCell, graftDimension(core_, name));
+    preExisting.insert(dimCell);
+    registryDims.insert(dimCell);
+  }
+
+  for (const CellRef module : rankAfter(manifold, image.home, *stdlibDim)) {
+    const auto name     = manifold.textOf(module, reader);
+    const auto existing = resolve(name);
+    if (existing && arena.textOf(*existing) == name) {
+      map.emplace(module, *existing);
+      preExisting.insert(module);
+      mergedModules.insert(module);
+    }
+  }
+
+  // Dimension cells resolve by name before any cloning: a dim outside the
+  // registry closure would otherwise be minted as a plain cell, and filing
+  // edges under a non-dimension cell corrupts the rank structure.
+  for (const auto &slot : manifold.cells()) {
+    const CellRef src = slot.birthOp;
+    if (src == noCell) continue;
+    for (const DimLink &edge : manifold.dimensionsOf(src)) {
+      if (edge.dim == noCell || map.contains(edge.dim)) continue;
+      const auto name = manifold.textOf(edge.dim, reader);
+      if (!name.starts_with("d.")) continue;
+      map.emplace(edge.dim, graftDimension(core_, name));
+      preExisting.insert(edge.dim);
+    }
+  }
+
+  for (const auto &slot : manifold.cells()) {
+    const CellRef src = slot.birthOp;
+    if (src == noCell || map.contains(src)) continue;
+    const CellRef dst = manifold.contentOf(src).empty()
+                            ? arena.makeCell()
+                            : arena.makeCell(manifold.textOf(src, reader));
+    if (slot.valueKind != 0) {
+      if (const auto written = arena.setValueBits(
+              dst, static_cast<xanadu::ValueKind>(slot.valueKind),
+              slot.valueBits);
+          !written)
+        return bail("value copy refused: " +
+                    std::string(toString(written.error())));
+    }
+    map.emplace(src, dst);
+  }
+
+  // Edges replay pos-side only: a pos edge and its neg twin are one logical
+  // edge, and link() writes both ends, so each is applied exactly once.
+  for (const auto &slot : manifold.cells()) {
+    const CellRef src = slot.birthOp;
+    if (src == noCell) continue;
+    for (const DimLink &edge : manifold.dimensionsOf(src)) {
+      const CellRef dst = edge.pos;
+      if (dst == noCell) continue;
+
+      const std::string dimText = manifold.textOf(edge.dim, reader);
+      const auto dimIt          = map.find(edge.dim);
+      // map[edge.dim] is always a graftDimension() result: the pre-pass above
+      // resolves every d.* edge dim before cloning, so a hit can never be a
+      // plain cell clone.
+      if (dimIt == map.end() || !dimText.starts_with("d."))
+        return bail("edge dimension is outside the grafted subgraph");
+      const DimRef arenaDim = dimIt->second;
+
+      const auto srcIt = map.find(src);
+      const auto dstIt = map.find(dst);
+      if (srcIt == map.end() || dstIt == map.end())
+        return bail("edge endpoint is outside the grafted subgraph");
+
+      // Relations wholly among live cells -- dim-registry adjacency, home's
+      // own filings, merged modules -- are the arena's structure, already
+      // correct by name in whatever order this arena minted it. The graft
+      // attaches image cells; it never rewires the live cells' mutual edges.
+      if (preExisting.contains(src) && preExisting.contains(dst)) continue;
+
+      if (preExisting.contains(dst)) {
+        // A grafted edge may only land on a rank the live cell already has;
+        // anything else would rewire foreign structure.
+        if (!rankContains(arena, srcIt->second, dstIt->second, arenaDim))
+          return bail("edge would attach a live cell to a foreign rank (" +
+                      dimText + " from '" + manifold.textOf(src, reader) +
+                      "' to '" + manifold.textOf(dst, reader) + "')");
+        continue;
+      }
+      if (preExisting.contains(src)) {
+        // Shared anchors may gain grafted members only on their own ranks:
+        // home's d.vars/d.stdlib and a name-merged module's d.vars.
+        // A registry dim cell anchors its own member rank along its own
+        // dimension (d.vars -d.vars-> ...); that rank is the dim's structure,
+        // not a foreign one, so grafted members may append to it.
+        const bool shared =
+            (src == image.home &&
+             (dimText == "d.vars" || dimText == "d.stdlib")) ||
+            (mergedModules.contains(src) && dimText == "d.vars") ||
+            (registryDims.contains(src) &&
+             dimText == manifold.textOf(src, reader));
+        if (!shared)
+          return bail("graft would extend a rank on a live cell (" + dimText +
+                      " from '" + manifold.textOf(src, reader) + "' to '" +
+                      manifold.textOf(dst, reader) + "')");
+        const CellRef tail = rankTail(arena, srcIt->second, arenaDim);
+        if (const auto written =
+                arena.link(tail, arenaDim, false, dstIt->second);
+            !written)
+          return bail("rank append refused: " +
+                      std::string(toString(written.error())));
+        continue;
+      }
+      if (const auto written =
+              arena.link(srcIt->second, arenaDim, false, dstIt->second);
+          !written)
+        return bail("edge replay refused: " +
+                    std::string(toString(written.error())));
+    }
+  }
+
+  // Ref-valued cells still carry image-space targets; translate them through
+  // the map. Marked cells are the relocation-marked legacy scalar refs;
+  // OpHandle cells always carry a target; record members are the Int64 cells
+  // in the "ops"/"in"/"out" step chains.
+  const auto translate = [&](const CellRef imageRef) -> OptionalCell {
+    const auto it = map.find(imageRef);
+    return it == map.end() ? std::nullopt : OptionalCell{it->second};
+  };
+  const auto setRef = [&](const CellRef src, const CellRef imageTarget,
+                          const xanadu::ValueKind kind) {
+    const auto target = translate(imageTarget);
+    if (!target) return false;
+    const auto dst = map.find(src);
+    if (dst == map.end()) return false;
+    return static_cast<bool>(arena.setValueBits(dst->second, kind, *target));
+  };
+
+  for (const auto &slot : manifold.cells()) {
+    const CellRef src = slot.birthOp;
+    if (src == noCell) continue;
+    const auto kind = manifold.valueKindOf(src);
+    if (kind == xanadu::ValueKind::Int64) {
+      bool marked = false;
+      for (const DimLink &edge : manifold.dimensionsOf(src)) {
+        if (edge.dim == *relocDim && edge.pos != noCell) {
+          marked = true;
+          break;
+        }
+      }
+      if (!marked) continue;
+      const auto ref = manifold.asInt64(src);
+      if (!ref || *ref <= 0 || *ref > std::numeric_limits<CellRef>::max() ||
+          !setRef(src, static_cast<CellRef>(*ref), kind))
+        return bail("marked cell ref is outside the grafted subgraph");
+    } else if (kind == xanadu::ValueKind::OpHandle) {
+      const auto target = manifold.handleTarget(src);
+      if (!target || !setRef(src, *target, kind))
+        return bail("op handle target is outside the grafted subgraph");
+    }
+  }
+
+  // Record members: Int64 cells hanging off the "ops" record's step chain and
+  // each signature's "in"/"out" chains. Walked on the image side so the graft
+  // translates exactly the cells the loader reads as references.
+  std::unordered_set<CellRef> recordMembers;
+  const auto harvest = [&](const CellRef record) {
+    const auto head = manifold.linked(record, *valuesDim, DimVector::POS);
+    if (!head) return;
+    for (const CellRef member : rankAfter(manifold, *head, *stepDim)) {
+      recordMembers.insert(member);
+    }
+  };
+  for (const CellRef record :
+       rankAfter(manifold, image.manifestHolder, *varsDim)) {
+    if (manifold.textOf(record, reader) == "ops") harvest(record);
+  }
+  for (const auto &routine : image.routines) {
+    const auto holder =
+        manifold.linked(routine.symbol, *paramsDim, DimVector::POS);
+    if (!holder) continue;
+    for (const CellRef record : rankAfter(manifold, *holder, *varsDim)) {
+      const auto name = manifold.textOf(record, reader);
+      if (name == "in" || name == "out") harvest(record);
+    }
+  }
+  for (const CellRef member : recordMembers) {
+    const auto bits = manifold.asInt64(member);
+    const auto dst  = map.find(member);
+    if (!bits || *bits <= 0 || *bits > std::numeric_limits<CellRef>::max() ||
+        dst == map.end())
+      return bail("record member is outside the grafted subgraph");
+    const auto target = translate(static_cast<CellRef>(*bits));
+    if (!target)
+      return bail("record member ref is outside the grafted subgraph");
+    if (const auto written =
+            arena.setValueBits(dst->second, xanadu::ValueKind::Int64, *target);
+        !written)
+      return bail("record member rewrite refused: " +
+                  std::string(toString(written.error())));
+  }
+
+  arena.discard(mark);
+  guard.armed        = false;
+  const auto rebound = rebindInstance();
+  if (!rebound) return fail(rebound.error());
+  return this;
+}
+
+std::expected<VortexStdLib *, std::string> VortexStdLib::rebindInstance() {
+  auto &arena = core_.arena();
+  if (arena.liveMarks() != 0) {
+    return std::unexpected(
+        "rebindInstance: arena has outstanding marks; refusing unsafe rebind");
+  }
+  const auto paramsDim = core_.findDimension("d.params");
+  if (!paramsDim) {
+    return std::unexpected("rebindInstance: missing d.params dimension");
+  }
+
+  std::vector<std::vector<CellRef>> opEnumerations;
+  const auto fail = [](const std::string_view detail) {
+    return std::unexpected("rebindInstance: " + std::string(detail));
+  };
+  std::size_t imageRecords = 0;
+  for (const CellRef imageKey :
+       rankAfter(arena, core_.home(), core_.dims().vars)) {
+    if (arena.textOf(imageKey) != "stdlib.image") continue;
+    const auto holder =
+        arena.linked(imageKey, core_.dims().values, DimVector::POS);
+    // A text-only squatter is not a record; the probes in ensureStdlib and
+    // graftImage apply the same d.values-link requirement.
+    if (!holder) continue;
+    // The image loader requires exactly one record on home +d.vars; merging
+    // several here would make bindings order-dependent.
+    if (++imageRecords > 1)
+      return fail("home carries multiple stdlib.image records");
+    if (!arena.contains(*holder))
+      return fail("stdlib.image record has no holder target");
+
+    std::unordered_map<std::string, CellRef> fields;
+    for (const CellRef record : rankAfter(arena, *holder, core_.dims().vars)) {
+      const std::string key = arena.textOf(record);
+      if (fields.contains(key)) return fail("duplicate image field key");
+      const auto value =
+          arena.linked(record, core_.dims().values, DimVector::POS);
+      if (!value || !arena.contains(*value))
+        return fail("image field has no value target");
+      fields.emplace(key, *value);
+    }
+    for (const std::string_view key :
+         {"ops", "imageEpoch", "contentVersion", "generatorHead",
+          "expectedScrollBytes", "imageOpcodeCount", "imageVerbCount",
+          "imageOpcodeCellCount"}) {
+      if (!fields.contains(std::string(key)))
+        return fail("image holder is missing field '" + std::string(key) + "'");
+    }
+    if (arena.valueKindOf(fields.at("imageEpoch")) != xanadu::ValueKind::None ||
+        arena.textOf(fields.at("imageEpoch")).empty() ||
+        arena.valueKindOf(fields.at("generatorHead")) !=
+            xanadu::ValueKind::None ||
+        arena.textOf(fields.at("generatorHead")).empty()) {
+      return fail("text manifest field has an invalid value");
+    }
+    for (const std::string_view key :
+         {"contentVersion", "expectedScrollBytes", "imageOpcodeCount",
+          "imageVerbCount", "imageOpcodeCellCount"}) {
+      if (arena.valueKindOf(fields.at(std::string(key))) !=
+              xanadu::ValueKind::Int64 ||
+          !arena.asInt64(fields.at(std::string(key)))) {
+        return fail("integer manifest field has an invalid value");
+      }
+    }
+
+    const CellRef opsHead = fields.at("ops");
+    std::vector<CellRef> enumeration;
+    std::unordered_set<CellRef> seen;
+    for (const CellRef member : rankAfter(arena, opsHead, core_.dims().step)) {
+      const auto position = arena.asInt64(member);
+      if (!position || *position <= 0 ||
+          static_cast<std::uint64_t>(*position) >
+              std::numeric_limits<CellRef>::max()) {
+        return fail("ops member does not encode a cell reference");
+      }
+      const CellRef opCell = static_cast<CellRef>(*position);
+      if (!arena.contains(opCell))
+        return fail("ops member names a missing opcode cell");
+      const auto kindBits = arena.asInt64(opCell);
+      if (!kindBits || !isRegistrableOpcode(*kindBits) ||
+          !seen.insert(opCell).second) {
+        return fail("ops member names a missing, invalid, or repeated opcode");
+      }
+      enumeration.push_back(opCell);
+    }
+    const auto recordedCount = arena.asInt64(fields.at("imageOpcodeCount"));
+    const auto recordedCells = arena.asInt64(fields.at("imageOpcodeCellCount"));
+    if (!recordedCount ||
+        *recordedCount != static_cast<std::int64_t>(stdlibImageOpcodeCount()) ||
+        arena.asInt64(fields.at("imageVerbCount")) !=
+            static_cast<std::int64_t>(stdlibImageVerbCount()) ||
+        !recordedCells ||
+        *recordedCells != static_cast<std::int64_t>(enumeration.size())) {
+      return fail("image ABI counts or ops enumeration do not match the "
+                  "manifest record");
+    }
+    opEnumerations.push_back(std::move(enumeration));
+  }
+  if (opEnumerations.empty()) return fail("home has no stdlib.image record");
+
+  std::unordered_map<CellRef, RoutineBinding> rebuiltBindings;
+  for (const CellRef module :
+       rankAfter(arena, core_.home(), core_.dims().stdlib)) {
+    for (const CellRef symbol : rankAfter(arena, module, core_.dims().vars)) {
+      const auto entry =
+          arena.linked(symbol, core_.dims().values, DimVector::POS);
+      if (!entry || !arena.contains(*entry))
+        return fail("exported symbol has no entry target");
+      const auto signature = arena.linked(symbol, *paramsDim, DimVector::POS);
+      if (!signature || !arena.contains(*signature))
+        return fail("exported symbol has no signature holder");
+
+      std::optional<CellRef> inRecord;
+      std::optional<CellRef> outRecord;
+      for (const CellRef record :
+           rankAfter(arena, *signature, core_.dims().vars)) {
+        const auto value =
+            arena.linked(record, core_.dims().values, DimVector::POS);
+        if (!value || !arena.contains(*value))
+          return fail("signature record has no rank head");
+        const auto key = arena.textOf(record);
+        if (key == "in" && !inRecord)
+          inRecord = *value;
+        else if (key == "out" && !outRecord)
+          outRecord = *value;
+        else
+          return fail("signature holder has unknown or repeated records");
+      }
+      if (!inRecord || !outRecord)
+        return fail("signature holder is missing in/out records");
+
+      RoutineBinding binding;
+      const auto readRefs =
+          [&](const CellRef head,
+              std::vector<CellRef> &refs) -> std::expected<void, std::string> {
+        for (const CellRef member : rankAfter(arena, head, core_.dims().step)) {
+          const auto position = arena.asInt64(member);
+          if (!position || *position <= 0 ||
+              static_cast<std::uint64_t>(*position) >
+                  std::numeric_limits<CellRef>::max()) {
+            return std::unexpected("signature member is not a cell reference");
+          }
+          const CellRef ref = static_cast<CellRef>(*position);
+          if (!arena.contains(ref))
+            return std::unexpected("signature member target is missing");
+          refs.push_back(ref);
+        }
+        return {};
+      };
+      if (const auto result = readRefs(*inRecord, binding.inputParams); !result)
+        return fail(result.error());
+      if (const auto result = readRefs(*outRecord, binding.outputParams);
+          !result)
+        return fail(result.error());
+      // persistRoutineBinding writes empty in/out ranks for ops that never had
+      // a routineBindings_ entry (contract/pipeline templates). Materializing
+      // one here would divert call() onto the binding path, which writes no
+      // arguments — bootstrap instead falls through to the operand wings.
+      if (!binding.inputParams.empty() || !binding.outputParams.empty())
+        rebuiltBindings.insert_or_assign(*entry, std::move(binding));
+    }
+  }
+
+  const auto cached = [this](const std::string_view path) {
+    return resolve(path).value_or(noCell);
+  };
+  const CellRef equal             = cached("std:logic/equal");
+  const CellRef unify             = cached("std:logic/=");
+  const CellRef member            = cached("std:logic/member");
+  const CellRef append            = cached("std:logic/append");
+  const CellRef length            = cached("std:logic/length");
+  const CellRef vortexFunction    = cached("std:logic/vortex_function");
+  const CellRef vortexModule      = cached("std:logic/vortex_module");
+  const CellRef vortexInstruction = cached("std:logic/vortex_instruction");
+  const CellRef vortexContract    = cached("std:logic/vortex_contract");
+  const CellRef vortexParam       = cached("std:logic/vortex_param");
+  const CellRef setting           = cached("std:logic/setting");
+  const CellRef settingShape      = cached("std:logic/setting_shape");
+  const CellRef settingDefault    = cached("std:logic/setting_default");
+  const CellRef cellValue         = cached("std:logic/cell_value");
+  const CellRef cellLink          = cached("std:logic/cell_link");
+  const CellRef transclude        = cached("std:logic/transclude");
+  const CellRef xanalink          = cached("std:logic/xanalink");
+  const CellRef cellSpan          = cached("std:logic/cell_span");
+  const CellRef bridgeEdge        = cached("std:logic/bridge_edge");
+  const CellRef halt              = cached("std:goal/halt");
+  const CellRef goalFail          = cached("std:goal/fail");
+  const CellRef sentinel          = cached("std:goal/sentinel");
+
+  for (const auto &enumeration : opEnumerations) {
+    if (const auto registered = vm_.registerProgramOps(enumeration);
+        !registered) {
+      return fail(registered.error());
+    }
+  }
+  routineBindings_       = std::move(rebuiltBindings);
+  predEqual_             = equal;
+  predUnify_             = unify;
+  predMember_            = member;
+  predAppend_            = append;
+  predLength_            = length;
+  predVortexFunction_    = vortexFunction;
+  predVortexModule_      = vortexModule;
+  predVortexInstruction_ = vortexInstruction;
+  predVortexContract_    = vortexContract;
+  predVortexParam_       = vortexParam;
+  predSetting_           = setting;
+  predSettingShape_      = settingShape;
+  predSettingDefault_    = settingDefault;
+  predCellValue_         = cellValue;
+  predCellLink_          = cellLink;
+  predTransclude_        = transclude;
+  predXanalink_          = xanalink;
+  predCellSpan_          = cellSpan;
+  predBridgeEdge_        = bridgeEdge;
+  goalHalt_              = halt;
+  goalFail_              = goalFail;
+  goalSentinel_          = sentinel;
+  // A completed rebind validated the arena's manifest end to end, so the
+  // manifest-ended fact holds for grafted and rebound libraries exactly as
+  // it does for one this instance bootstrapped; exportImageToStore's
+  // completeness gate reads it.
+  imageManifestEnded_ = true;
+  bootstrapComplete_  = true;
+  return this;
 }
 
 void VortexStdLib::buildMathModule(CellRef mod) {
@@ -2117,6 +2972,233 @@ std::vector<CellValue> VortexStdLib::call(CellRef fnOp,
           args.empty() ? noCell : static_cast<CellRef>(toInt64(args[0]));
       return {static_cast<std::int64_t>(zzDuplicate(cell).value_or(noCell))};
     }
+    if (opName == "#ZZ_MAKE_CELL") {
+      std::string text =
+          !args.empty() && std::holds_alternative<std::string>(args[0])
+              ? std::get<std::string>(args[0])
+              : "";
+      return {static_cast<std::int64_t>(zzMakeCell(text).value_or(noCell))};
+    }
+    if (opName == "#ZZ_TEXT_OF") {
+      CellRef cell =
+          args.empty() ? noCell : static_cast<CellRef>(toInt64(args[0]));
+      auto text = zzTextOf(cell);
+      if (text) return {*text};
+      return {};
+    }
+    if (opName == "#ZZ_SET_TEXT") {
+      CellRef cell =
+          args.empty() ? noCell : static_cast<CellRef>(toInt64(args[0]));
+      std::string text =
+          args.size() > 1 && std::holds_alternative<std::string>(args[1])
+              ? std::get<std::string>(args[1])
+              : "";
+      return {zzSetText(cell, text)};
+    }
+    if (opName == "#ZZ_SET_VALUE") {
+      CellRef cell =
+          args.empty() ? noCell : static_cast<CellRef>(toInt64(args[0]));
+      CellValue val =
+          args.size() > 1 ? args[1] : CellValue(static_cast<std::int64_t>(0));
+      return {zzSetValue(cell, val)};
+    }
+    if (opName == "#ZZ_RESOLVE_DIM") {
+      std::string name =
+          !args.empty() && std::holds_alternative<std::string>(args[0])
+              ? std::get<std::string>(args[0])
+              : "";
+      return {static_cast<std::int64_t>(zzResolveDim(name).value_or(noCell))};
+    }
+    if (opName == "#ZZ_PROMOTE") {
+      CellRef root =
+          args.empty() ? noCell : static_cast<CellRef>(toInt64(args[0]));
+      std::optional<std::size_t> maxOps;
+      if (args.size() > 1 && toInt64(args[1]) > 0) {
+        maxOps = static_cast<std::size_t>(toInt64(args[1]));
+      }
+      auto ver = zzPromote(root, maxOps);
+      if (ver) return {*ver};
+      return {};
+    }
+  }
+  if (opName.starts_with("#ENV_")) {
+    if (opName == "#ENV_ARGS") {
+      return {static_cast<std::int64_t>(envArgs().value_or(noCell))};
+    }
+    if (opName == "#ENV_GET_VAR") {
+      std::string key =
+          !args.empty() && std::holds_alternative<std::string>(args[0])
+              ? std::get<std::string>(args[0])
+              : "";
+      auto val = envGetVar(key);
+      if (val) return {*val};
+      return {};
+    }
+  }
+  if (opName.starts_with("#IO_")) {
+    if (opName == "#IO_READ_FILE") {
+      std::string path =
+          !args.empty() && std::holds_alternative<std::string>(args[0])
+              ? std::get<std::string>(args[0])
+              : "";
+      auto content = ioReadFile(path);
+      if (content) return {*content};
+      return {};
+    }
+    if (opName == "#IO_READ_STDIN") {
+      auto content = ioReadStdin();
+      if (content) return {*content};
+      return {};
+    }
+    if (opName == "#IO_PRINT") {
+      std::string text =
+          !args.empty() && std::holds_alternative<std::string>(args[0])
+              ? std::get<std::string>(args[0])
+              : "";
+      ioPrint(text);
+      return {};
+    }
+    if (opName == "#IO_EPRINT") {
+      std::string text =
+          !args.empty() && std::holds_alternative<std::string>(args[0])
+              ? std::get<std::string>(args[0])
+              : "";
+      ioEprint(text);
+      return {};
+    }
+  }
+  if (opName.starts_with("#MAP_")) {
+    if (opName == "#MAP_CREATE") {
+      return {static_cast<std::int64_t>(createMap())};
+    }
+    if (opName == "#MAP_SET") {
+      CellRef mapRoot =
+          args.empty() ? noCell : static_cast<CellRef>(toInt64(args[0]));
+      CellValue key =
+          args.size() > 1 ? args[1] : CellValue(static_cast<std::int64_t>(0));
+      CellValue val =
+          args.size() > 2 ? args[2] : CellValue(static_cast<std::int64_t>(0));
+      mapSet(mapRoot, key, val);
+      return {static_cast<std::int64_t>(mapRoot)};
+    }
+    if (opName == "#MAP_GET") {
+      CellRef mapRoot =
+          args.empty() ? noCell : static_cast<CellRef>(toInt64(args[0]));
+      CellValue key =
+          args.size() > 1 ? args[1] : CellValue(static_cast<std::int64_t>(0));
+      auto val = mapGet(mapRoot, key);
+      if (val) return {*val};
+      return {};
+    }
+    if (opName == "#MAP_HAS") {
+      CellRef mapRoot =
+          args.empty() ? noCell : static_cast<CellRef>(toInt64(args[0]));
+      CellValue key =
+          args.size() > 1 ? args[1] : CellValue(static_cast<std::int64_t>(0));
+      return {mapHas(mapRoot, key)};
+    }
+    if (opName == "#MAP_KEYS") {
+      CellRef mapRoot =
+          args.empty() ? noCell : static_cast<CellRef>(toInt64(args[0]));
+      auto keys = mapKeys(mapRoot);
+      return {static_cast<std::int64_t>(createList(keys).value_or(noCell))};
+    }
+    if (opName == "#MAP_LEN") {
+      CellRef mapRoot =
+          args.empty() ? noCell : static_cast<CellRef>(toInt64(args[0]));
+      return {static_cast<std::int64_t>(mapLen(mapRoot))};
+    }
+  }
+  if (opName.starts_with("#HYPER_")) {
+    const auto strArg = [&args](std::size_t i) -> std::string {
+      if (i >= args.size()) return "";
+      return std::holds_alternative<std::string>(args[i])
+                 ? std::get<std::string>(args[i])
+                 : std::to_string(toInt64(args[i]));
+    };
+    if (opName == "#HYPER_LCA") {
+      auto res = hyperLca(strArg(0), strArg(1));
+      if (res) return {*res};
+      return {};
+    }
+    if (opName == "#HYPER_PATH") {
+      auto p = hyperPath(strArg(0));
+      std::vector<CellValue> items;
+      items.reserve(p.size());
+      for (auto &s : p) items.emplace_back(std::move(s));
+      return {static_cast<std::int64_t>(createList(items).value_or(noCell))};
+    }
+    if (opName == "#HYPER_IS_ANCESTOR_OF") {
+      return {hyperIsAncestorOf(strArg(0), strArg(1))};
+    }
+    if (opName == "#HYPER_DEPTH") {
+      auto d = hyperDepth(strArg(0));
+      if (d) return {*d};
+      return {};
+    }
+    if (opName == "#HYPER_JUMP_ANCESTOR") {
+      std::int64_t steps = args.size() > 1 ? toInt64(args[1]) : 0;
+      auto res           = hyperJumpAncestor(strArg(0), steps);
+      if (res) return {*res};
+      return {};
+    }
+    if (opName == "#HYPER_PARENT") {
+      auto res = hyperParent(strArg(0));
+      if (res) return {*res};
+      return {};
+    }
+    if (opName == "#HYPER_NEXT") {
+      auto res = hyperNext(strArg(0));
+      if (res) return {*res};
+      return {};
+    }
+    if (opName == "#HYPER_CHILDREN") {
+      auto kids = hyperChildren(strArg(0));
+      std::vector<CellValue> items;
+      items.reserve(kids.size());
+      for (auto &s : kids) items.emplace_back(std::move(s));
+      return {static_cast<std::int64_t>(createList(items).value_or(noCell))};
+    }
+    if (opName == "#HYPER_BRANCH") {
+      std::int64_t ord = args.size() > 1 ? toInt64(args[1]) : 1;
+      auto res         = hyperBranch(strArg(0), ord);
+      if (res) return {*res};
+      return {};
+    }
+    if (opName == "#HYPER_BRANCH_LETTERS") {
+      std::int64_t ord = args.empty() ? 1 : toInt64(args[0]);
+      return {hyperBranchLetters(ord)};
+    }
+    if (opName == "#HYPER_LATEST") {
+      auto res = hyperLatest();
+      if (res) return {*res};
+      return {};
+    }
+    if (opName == "#HYPER_HEAD") {
+      auto res = hyperHead();
+      if (res) return {*res};
+      return {};
+    }
+    if (opName == "#HYPER_HEADS") {
+      auto heads = hyperHeads();
+      std::vector<CellValue> items;
+      items.reserve(heads.size());
+      for (auto &s : heads) items.emplace_back(std::move(s));
+      return {static_cast<std::int64_t>(createList(items).value_or(noCell))};
+    }
+    if (opName == "#HYPER_REPOINT_HEAD") {
+      return {hyperRepointHead(strArg(0))};
+    }
+    if (opName == "#HYPER_TO_STR") {
+      auto res = hyperToStr(strArg(0));
+      if (res) return {*res};
+      return {};
+    }
+    if (opName == "#HYPER_PARSE") {
+      auto res = hyperParse(strArg(0));
+      if (res) return {*res};
+      return {};
+    }
   }
   if (opName.starts_with("#NAV_")) {
     if (opName == "#NAV_HOP_HEAD") {
@@ -2594,32 +3676,151 @@ std::size_t VortexStdLib::listLength(CellRef head,
 
 CellRef VortexStdLib::createMap() { return core_.arena().makeCell("map"); }
 
-void VortexStdLib::mapSet(CellRef mapRoot, std::string_view key,
-                          const CellValue &val) {
-  if (mapRoot == noCell) return;
-  auto &arena = core_.arena();
-  if (const auto keyCell = mapKeyCell(mapRoot, key)) {
-    // An existing key: restate its value cell, minting one if it had none.
-    const auto valCell = step(arena, *keyCell, core_.dims().values);
-    if (valCell) {
-      core_.writeValue(*valCell, 0, std::nullopt, val);
-    } else {
-      zigzag::expectWritten(
-          arena.link(*keyCell, core_.dims().values, false, valueCell(val)));
+std::optional<CellRef> VortexStdLib::mapKeyCell(CellRef mapRoot,
+                                                const CellValue &key) const {
+  if (mapRoot == noCell || !core_.arena().contains(mapRoot)) {
+    return std::nullopt;
+  }
+  auto current = step(core_.arena(), mapRoot, core_.dims().grab);
+  while (current) {
+    core_.arena().consumeWork(1);
+    const auto currentVal = core_.render(*current);
+    if (!currentVal) break;
+    const int cmp = compareCellValues(key, *currentVal);
+    if (cmp == 0) {
+      return current;
     }
-    return;
+    if (cmp < 0) {
+      current = step(core_.arena(), *current, core_.dims().left);
+    } else {
+      current = step(core_.arena(), *current, core_.dims().right);
+    }
+  }
+  return std::nullopt;
+}
+
+std::optional<CellRef> VortexStdLib::mapKeyCell(CellRef mapRoot,
+                                                std::string_view key) const {
+  return mapKeyCell(mapRoot, CellValue(std::string(key)));
+}
+
+bool VortexStdLib::mapSet(CellRef mapRoot, const CellValue &key,
+                          const CellValue &val) {
+  if (mapRoot == noCell || !core_.arena().contains(mapRoot)) {
+    return false;
+  }
+  auto &arena   = core_.arena();
+  auto rootNode = step(arena, mapRoot, core_.dims().grab);
+  if (!rootNode) {
+    core_.arena().consumeWork(1);
+    const CellRef keyCell = std::visit(
+        [&arena](const auto &v) -> CellRef {
+          using T = std::decay_t<decltype(v)>;
+          if constexpr (std::is_same_v<T, std::string>) {
+            return arena.makeCell(v);
+          } else {
+            return arena.makeScalarCell(v);
+          }
+        },
+        key);
+    zigzag::expectWritten(
+        arena.link(keyCell, core_.dims().values, false, valueCell(val)));
+    zigzag::expectWritten(
+        arena.link(mapRoot, core_.dims().grab, false, keyCell));
+    zigzag::expectWritten(
+        arena.link(mapRoot, core_.dims().step, false, keyCell));
+    return true;
   }
 
-  // A fresh key-value pair onto the tail of the key rank.
-  const CellRef keyCell = arena.makeCell(key);
-  zigzag::expectWritten(
-      arena.link(keyCell, core_.dims().values, false, valueCell(val)));
-  zigzag::expectWritten(arena.link(rankTail(arena, mapRoot, core_.dims().vars),
-                                   core_.dims().vars, false, keyCell));
+  CellRef current = *rootNode;
+  while (true) {
+    core_.arena().consumeWork(1);
+    const auto currentVal = core_.render(current);
+    if (!currentVal) return false;
+    const int cmp = compareCellValues(key, *currentVal);
+    if (cmp == 0) {
+      const auto valCell = step(arena, current, core_.dims().values);
+      if (valCell) {
+        core_.writeValue(*valCell, 0, std::nullopt, val);
+      } else {
+        zigzag::expectWritten(
+            arena.link(current, core_.dims().values, false, valueCell(val)));
+      }
+      return true;
+    }
+    if (cmp < 0) {
+      auto leftChild = step(arena, current, core_.dims().left);
+      if (leftChild) {
+        current = *leftChild;
+      } else {
+        const CellRef keyCell = std::visit(
+            [&arena](const auto &v) -> CellRef {
+              using T = std::decay_t<decltype(v)>;
+              if constexpr (std::is_same_v<T, std::string>) {
+                return arena.makeCell(v);
+              } else {
+                return arena.makeScalarCell(v);
+              }
+            },
+            key);
+        zigzag::expectWritten(
+            arena.link(keyCell, core_.dims().values, false, valueCell(val)));
+        zigzag::expectWritten(
+            arena.link(current, core_.dims().left, false, keyCell));
+
+        auto pred = step(arena, current, core_.dims().step, DimVector::NEG);
+        if (pred) {
+          zigzag::expectWritten(
+              arena.unlink(*pred, core_.dims().step, DimVector::POS));
+          zigzag::expectWritten(
+              arena.link(*pred, core_.dims().step, false, keyCell));
+        }
+        zigzag::expectWritten(
+            arena.link(keyCell, core_.dims().step, false, current));
+        return true;
+      }
+    } else {
+      auto rightChild = step(arena, current, core_.dims().right);
+      if (rightChild) {
+        current = *rightChild;
+      } else {
+        const CellRef keyCell = std::visit(
+            [&arena](const auto &v) -> CellRef {
+              using T = std::decay_t<decltype(v)>;
+              if constexpr (std::is_same_v<T, std::string>) {
+                return arena.makeCell(v);
+              } else {
+                return arena.makeScalarCell(v);
+              }
+            },
+            key);
+        zigzag::expectWritten(
+            arena.link(keyCell, core_.dims().values, false, valueCell(val)));
+        zigzag::expectWritten(
+            arena.link(current, core_.dims().right, false, keyCell));
+
+        auto succ = step(arena, current, core_.dims().step, DimVector::POS);
+        if (succ) {
+          zigzag::expectWritten(
+              arena.unlink(current, core_.dims().step, DimVector::POS));
+          zigzag::expectWritten(
+              arena.link(keyCell, core_.dims().step, false, *succ));
+        }
+        zigzag::expectWritten(
+            arena.link(current, core_.dims().step, false, keyCell));
+        return true;
+      }
+    }
+  }
+}
+
+void VortexStdLib::mapSet(CellRef mapRoot, std::string_view key,
+                          const CellValue &val) {
+  mapSet(mapRoot, CellValue(std::string(key)), val);
 }
 
 std::optional<CellValue> VortexStdLib::mapGet(CellRef mapRoot,
-                                              std::string_view key) const {
+                                              const CellValue &key) const {
   if (mapRoot == noCell) return std::nullopt;
   return mapKeyCell(mapRoot, key)
       .and_then(hop(core_.arena(), core_.dims().values))
@@ -2627,16 +3828,39 @@ std::optional<CellValue> VortexStdLib::mapGet(CellRef mapRoot,
           [this](const CellRef cell) { return core_.render(cell).value(); });
 }
 
-bool VortexStdLib::mapHas(CellRef mapRoot, std::string_view key) const {
-  return mapGet(mapRoot, key).has_value();
+std::optional<CellValue> VortexStdLib::mapGet(CellRef mapRoot,
+                                              std::string_view key) const {
+  return mapGet(mapRoot, CellValue(std::string(key)));
 }
 
-std::vector<std::string> VortexStdLib::mapKeys(CellRef mapRoot) const {
-  return rankAfter(core_.arena(), mapRoot, core_.dims().vars) |
-         std::views::transform([this](const CellRef cell) {
-           return core_.arena().textOf(cell);
-         }) |
-         std::ranges::to<std::vector>();
+bool VortexStdLib::mapHas(CellRef mapRoot, const CellValue &key) const {
+  return mapKeyCell(mapRoot, key).has_value();
+}
+
+bool VortexStdLib::mapHas(CellRef mapRoot, std::string_view key) const {
+  return mapHas(mapRoot, CellValue(std::string(key)));
+}
+
+std::vector<CellValue> VortexStdLib::mapKeys(CellRef mapRoot) const {
+  if (mapRoot == noCell || !core_.arena().contains(mapRoot)) {
+    return {};
+  }
+  std::vector<CellValue> result;
+  for (const CellRef cell :
+       rankAfter(core_.arena(), mapRoot, core_.dims().step)) {
+    if (const auto val = core_.render(cell)) {
+      result.push_back(*val);
+    }
+  }
+  return result;
+}
+
+std::size_t VortexStdLib::mapLen(CellRef mapRoot) const {
+  if (mapRoot == noCell || !core_.arena().contains(mapRoot)) {
+    return 0;
+  }
+  return static_cast<std::size_t>(std::ranges::distance(
+      rankAfter(core_.arena(), mapRoot, core_.dims().step)));
 }
 
 GridResult VortexStdLib::createGrid(std::size_t rows, std::size_t cols,
@@ -2724,15 +3948,6 @@ CellRef VortexStdLib::copyValueCell(const CellRef source) {
 
 DimRef VortexStdLib::listDim(const std::optional<DimRef> dim) const noexcept {
   return dim.value_or(core_.dims().step);
-}
-
-std::optional<CellRef>
-VortexStdLib::mapKeyCell(const CellRef mapRoot,
-                         const std::string_view key) const {
-  return firstOf(rankAfter(core_.arena(), mapRoot, core_.dims().vars) |
-                 std::views::filter([&](const CellRef cell) {
-                   return core_.arena().textOf(cell) == key;
-                 }));
 }
 
 // -- Module 6: std:math -------------------------------------------------------
@@ -3078,7 +4293,7 @@ void VortexStdLib::buildGoalModule(CellRef mod) {
   // renders the cell and takes the integer as the op to run -- the same
   // idiom vortex_logic_test.cpp drives #Choice with.
   const auto opref = [this](const CellRef target) {
-    return core_.arena().makeScalarCell(static_cast<std::int64_t>(target));
+    return xanadu::refCell(core_.arena(), core_, target);
   };
   const auto spin = [this](const CellRef a, const CellRef b) {
     zigzag::expectWritten(
@@ -3089,7 +4304,7 @@ void VortexStdLib::buildGoalModule(CellRef mod) {
   // graph self-contained: produce suspends on it until a caller overwrites
   // the operand with its own continuation's ref.
   const auto contCell = [this] {
-    return core_.arena().makeScalarCell(static_cast<std::int64_t>(goalHalt_));
+    return xanadu::refCell(core_.arena(), core_, goalHalt_);
   };
 
   const CellRef zero   = lit(0);
@@ -3241,7 +4456,12 @@ void VortexStdLib::buildGoalModule(CellRef mod) {
     routineBindings_[entry] = {.inputParams  = {lo, stepIn, out, cont},
                                .outputParams = {out}};
     exportSymbol(mod, "from", entry);
-    exportSymbol(mod, "seq", entry);
+    // Two symbols cannot both occupy an entry's single -d.values slot.
+    // The alias gets its own entry but runs the very same generator graph.
+    const CellRef seq = vm_.mintOpcode(OpcodeKind::Jump, "#GOAL_FROM");
+    core_.bindInput(seq, opref(entry));
+    routineBindings_[seq] = routineBindings_.at(entry);
+    exportSymbol(mod, "seq", seq);
   }
 
   // repeat: produce `in` forever -- the frame re-pushes itself as its own
@@ -3589,8 +4809,12 @@ void VortexStdLib::buildGoalModule(CellRef mod) {
   }
 
   // fail: #Fail alone -- the exhausted generator as a symbol.
+  routineBindings_[goalHalt_] = {.inputParams = {}, .outputParams = {}};
+  exportSymbol(mod, "halt", goalHalt_);
   routineBindings_[goalFail_] = {.inputParams = {}, .outputParams = {}};
   exportSymbol(mod, "fail", goalFail_);
+  routineBindings_[goalSentinel_] = {.inputParams = {}, .outputParams = {}};
+  exportSymbol(mod, "sentinel", goalSentinel_);
 
   // succeed: produce &null once -- the bare cell, an empty result.
   // in: out, cont.
@@ -3637,9 +4861,9 @@ void VortexStdLib::buildGoalModule(CellRef mod) {
     CellRef eEntry = operand();
 
     const CellRef scanDimCell =
-        lit(static_cast<std::int64_t>(core_.dims().scan));
+        xanadu::refCell(core_.arena(), core_, core_.dims().scan);
     const CellRef grabDimCell =
-        lit(static_cast<std::int64_t>(core_.dims().grab));
+        xanadu::refCell(core_.arena(), core_, core_.dims().grab);
 
     CellRef entry   = vm_.mintOpcode(OpcodeKind::Choice, "#GOAL_SCAN");
     CellRef push    = vm_.mintOpcode(OpcodeKind::New, "#GOAL_SCAN_PUSH");
@@ -3948,6 +5172,178 @@ bool VortexStdLib::scanSetPos(const std::int64_t pos) {
         return core_.writeValue(cursor, 0, std::nullopt, pos);
       })
       .has_value();
+}
+
+std::optional<std::string> VortexStdLib::goalSubjectText() {
+  const auto subj = scanSubject();
+  if (!subj || !core_.arena().contains(*subj)) {
+    return std::nullopt;
+  }
+  return core_.arena().textOf(*subj);
+}
+
+std::optional<std::int64_t>
+VortexStdLib::goalPos(std::optional<std::int64_t> target) {
+  if (!target.has_value()) {
+    return scanPos();
+  }
+  const auto subjText = goalSubjectText();
+  if (!subjText) {
+    return std::nullopt;
+  }
+  const auto curPosOpt = scanPos();
+  if (!curPosOpt) {
+    return std::nullopt;
+  }
+  const std::int64_t curPos = *curPosOpt;
+  const std::int64_t len    = static_cast<std::int64_t>(subjText->size());
+  const std::int64_t t      = *target <= 0 ? (len + 1 + *target) : *target;
+  if (curPos == t) {
+    return t;
+  }
+  return std::nullopt;
+}
+
+std::optional<std::string> VortexStdLib::goalTab(std::int64_t targetPos) {
+  const auto subjText = goalSubjectText();
+  if (!subjText) {
+    return std::nullopt;
+  }
+  const auto curPosOpt = scanPos();
+  if (!curPosOpt) {
+    return std::nullopt;
+  }
+  const std::int64_t curPos = *curPosOpt;
+  const std::int64_t len    = static_cast<std::int64_t>(subjText->size());
+  const std::int64_t target =
+      targetPos <= 0 ? (len + 1 + targetPos) : targetPos;
+  if (target < 1 || target > len + 1) {
+    return std::nullopt;
+  }
+  if (!scanSetPos(target)) {
+    return std::nullopt;
+  }
+  const std::int64_t from = std::min(curPos, target);
+  const std::int64_t to   = std::max(curPos, target);
+  const std::size_t start = static_cast<std::size_t>(from - 1);
+  const std::size_t count = static_cast<std::size_t>(to - from);
+  return subjText->substr(start, count);
+}
+
+std::optional<std::string> VortexStdLib::goalMove(std::int64_t delta) {
+  const auto curPosOpt = scanPos();
+  if (!curPosOpt) {
+    return std::nullopt;
+  }
+  return goalTab(*curPosOpt + delta);
+}
+
+std::optional<std::int64_t> VortexStdLib::goalMatch(std::string_view prefix) {
+  const auto subjText = goalSubjectText();
+  if (!subjText) {
+    return std::nullopt;
+  }
+  const auto curPosOpt = scanPos();
+  if (!curPosOpt) {
+    return std::nullopt;
+  }
+  const std::int64_t curPos = *curPosOpt;
+  if (curPos < 1 || curPos > static_cast<std::int64_t>(subjText->size() + 1)) {
+    return std::nullopt;
+  }
+  const std::size_t offset = static_cast<std::size_t>(curPos - 1);
+  if (offset + prefix.size() <= subjText->size() &&
+      std::string_view(*subjText).substr(offset, prefix.size()) == prefix) {
+    return curPos + static_cast<std::int64_t>(prefix.size());
+  }
+  return std::nullopt;
+}
+
+std::optional<std::int64_t> VortexStdLib::goalMany(std::string_view charset) {
+  const auto subjText = goalSubjectText();
+  if (!subjText) {
+    return std::nullopt;
+  }
+  const auto curPosOpt = scanPos();
+  if (!curPosOpt) {
+    return std::nullopt;
+  }
+  const std::int64_t curPos = *curPosOpt;
+  if (curPos < 1 || curPos > static_cast<std::int64_t>(subjText->size())) {
+    return std::nullopt;
+  }
+  const std::size_t offset = static_cast<std::size_t>(curPos - 1);
+  std::size_t count        = 0;
+  while (offset + count < subjText->size() &&
+         charset.find((*subjText)[offset + count]) != std::string_view::npos) {
+    ++count;
+  }
+  if (count > 0) {
+    return curPos + static_cast<std::int64_t>(count);
+  }
+  return std::nullopt;
+}
+
+std::optional<std::int64_t> VortexStdLib::goalUpto(std::string_view charset) {
+  const auto subjText = goalSubjectText();
+  if (!subjText) {
+    return std::nullopt;
+  }
+  const auto curPosOpt = scanPos();
+  if (!curPosOpt) {
+    return std::nullopt;
+  }
+  const std::int64_t curPos = *curPosOpt;
+  if (curPos < 1 || curPos > static_cast<std::int64_t>(subjText->size() + 1)) {
+    return std::nullopt;
+  }
+  const std::size_t offset = static_cast<std::size_t>(curPos - 1);
+  const auto idx           = subjText->find_first_of(charset, offset);
+  if (idx != std::string::npos) {
+    return static_cast<std::int64_t>(idx + 1);
+  }
+  return std::nullopt;
+}
+
+std::optional<std::int64_t> VortexStdLib::goalAny(std::string_view charset) {
+  const auto subjText = goalSubjectText();
+  if (!subjText) {
+    return std::nullopt;
+  }
+  const auto curPosOpt = scanPos();
+  if (!curPosOpt) {
+    return std::nullopt;
+  }
+  const std::int64_t curPos = *curPosOpt;
+  if (curPos < 1 || curPos > static_cast<std::int64_t>(subjText->size())) {
+    return std::nullopt;
+  }
+  const std::size_t offset = static_cast<std::size_t>(curPos - 1);
+  if (charset.find((*subjText)[offset]) != std::string_view::npos) {
+    return curPos + 1;
+  }
+  return std::nullopt;
+}
+
+std::optional<std::int64_t> VortexStdLib::goalFind(std::string_view needle) {
+  const auto subjText = goalSubjectText();
+  if (!subjText) {
+    return std::nullopt;
+  }
+  const auto curPosOpt = scanPos();
+  if (!curPosOpt) {
+    return std::nullopt;
+  }
+  const std::int64_t curPos = *curPosOpt;
+  if (curPos < 1 || curPos > static_cast<std::int64_t>(subjText->size() + 1)) {
+    return std::nullopt;
+  }
+  const std::size_t offset = static_cast<std::size_t>(curPos - 1);
+  const auto idx           = subjText->find(needle, offset);
+  if (idx != std::string::npos) {
+    return static_cast<std::int64_t>(idx + 1);
+  }
+  return std::nullopt;
 }
 
 void VortexStdLib::buildArrayModule(CellRef mod) {
@@ -4545,6 +5941,79 @@ void VortexStdLib::buildZigzagModule(CellRef mod) {
     exportSymbol(mod, "duplicate", op);
   }
 
+  // make_cell: text -> cell (#ZZ_MAKE_CELL)
+  {
+    CellRef text = core_.arena().makeCell();
+    CellRef out  = core_.arena().makeCell();
+    CellRef op   = vm_.mintOpcode(OpcodeKind::Nop, "#ZZ_MAKE_CELL");
+    core_.bindInput(op, text);
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {.inputParams = {text}, .outputParams = {out}};
+    exportSymbol(mod, "make_cell", op);
+  }
+
+  // text_of: cell -> text (#ZZ_TEXT_OF)
+  {
+    CellRef cell = core_.arena().makeCell();
+    CellRef out  = core_.arena().makeCell();
+    CellRef op   = vm_.mintOpcode(OpcodeKind::Nop, "#ZZ_TEXT_OF");
+    core_.bindInput(op, cell);
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {.inputParams = {cell}, .outputParams = {out}};
+    exportSymbol(mod, "text_of", op);
+  }
+
+  // set_text: cell, text -> bool (#ZZ_SET_TEXT)
+  {
+    CellRef cell = core_.arena().makeCell();
+    CellRef text = core_.arena().makeCell();
+    CellRef out  = core_.arena().makeCell();
+    CellRef op   = vm_.mintOpcode(OpcodeKind::Nop, "#ZZ_SET_TEXT");
+    core_.bindInput(op, cell);
+    core_.bindInput(op, text);
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {.inputParams = {cell, text}, .outputParams = {out}};
+    exportSymbol(mod, "set_text", op);
+  }
+
+  // set_value: cell, val -> bool (#ZZ_SET_VALUE)
+  {
+    CellRef cell = core_.arena().makeCell();
+    CellRef val  = core_.arena().makeCell();
+    CellRef out  = core_.arena().makeCell();
+    CellRef op   = vm_.mintOpcode(OpcodeKind::Nop, "#ZZ_SET_VALUE");
+    core_.bindInput(op, cell);
+    core_.bindInput(op, val);
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {.inputParams = {cell, val}, .outputParams = {out}};
+    exportSymbol(mod, "set_value", op);
+  }
+
+  // resolve_dim: name -> dim (#ZZ_RESOLVE_DIM)
+  {
+    CellRef name = core_.arena().makeCell();
+    CellRef out  = core_.arena().makeCell();
+    CellRef op   = vm_.mintOpcode(OpcodeKind::Nop, "#ZZ_RESOLVE_DIM");
+    core_.bindInput(op, name);
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {.inputParams = {name}, .outputParams = {out}};
+    exportSymbol(mod, "resolve_dim", op);
+  }
+
+  // promote: root, maxOps -> ver (#ZZ_PROMOTE)
+  {
+    CellRef root   = core_.arena().makeCell();
+    CellRef maxOps = core_.arena().makeCell();
+    CellRef out    = core_.arena().makeCell();
+    CellRef op     = vm_.mintOpcode(OpcodeKind::Nop, "#ZZ_PROMOTE");
+    core_.bindInput(op, root);
+    core_.bindInput(op, maxOps);
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {.inputParams  = {root, maxOps},
+                            .outputParams = {out}};
+    exportSymbol(mod, "promote", op);
+  }
+
   constexpr std::pair<std::string_view, std::string_view> kExtraZzActions[] = {
       {"rasterize_print", "#ZZ_RASTERIZE_PRINT"},
       {"export_link_package", "#ZZ_EXPORT_LINK_PACKAGE"},
@@ -4901,10 +6370,14 @@ std::optional<CellRef> VortexStdLib::zzCloneToChain(CellRef symbolOp,
     return std::nullopt;
   }
   CellRef clone = core_.arena().makeCell();
+  const CellRef symTail =
+      zigzag::rankTail(core_.arena(), symbolOp, core_.dims().clone);
   zigzag::expectWritten(
-      core_.arena().link(symbolOp, core_.dims().clone, DimVector::POS, clone));
+      core_.arena().link(symTail, core_.dims().clone, DimVector::POS, clone));
+  const CellRef tgtTail =
+      zigzag::rankTail(core_.arena(), targetCell, core_.dims().spin);
   zigzag::expectWritten(
-      core_.arena().link(targetCell, core_.dims().spin, DimVector::POS, clone));
+      core_.arena().link(tgtTail, core_.dims().spin, DimVector::POS, clone));
   return clone;
 }
 
@@ -5006,29 +6479,512 @@ bool VortexStdLib::exportModuleToStore(std::string_view modulePath,
   return true;
 }
 
+std::expected<MicroversionId, std::string>
+VortexStdLib::exportImageToStore(xanadu::Store &destStore,
+                                 const std::int64_t contentVersion) const {
+  const auto refuse =
+      [](std::string message) -> std::expected<MicroversionId, std::string> {
+    return std::unexpected(std::move(message));
+  };
+  const auto &arena = core_.arena();
+  if (arena.base() != nullptr)
+    return refuse("exportImageToStore: source arena has a base manifold");
+  if (arena.liveMarks() != 0)
+    return refuse("exportImageToStore: source arena has live marks");
+  if (!imageManifestEnded_ || !bootstrapComplete_)
+    return refuse("exportImageToStore: source image manifest is incomplete");
+  if (contentVersion <= 0)
+    return refuse("exportImageToStore: contentVersion must be positive");
+  if (!destStore.allVersions().empty() || destStore.hasPendingMetadata())
+    return refuse("exportImageToStore: destination store is not empty");
+  if (arena.cellCount() >
+      static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max()))
+    return refuse(
+        "exportImageToStore: arena cell count exceeds promotion budget");
+
+  const auto findRankMember =
+      [&](const CellRef anchor, const DimRef dim,
+          const std::string_view name) -> std::optional<CellRef> {
+    std::optional<CellRef> found;
+    for (const CellRef cell : zigzag::rankAfter(arena, anchor, dim)) {
+      if (arena.textOf(cell) != name) continue;
+      if (found) return std::nullopt;
+      found = cell;
+    }
+    return found;
+  };
+  const auto requireLink =
+      [&](const CellRef from, const DimRef dim,
+          const std::string_view what) -> std::expected<CellRef, std::string> {
+    const auto target = arena.linked(from, dim, DimVector::POS);
+    if (!target || !arena.contains(*target))
+      return std::unexpected("exportImageToStore: missing " +
+                             std::string(what));
+    return *target;
+  };
+
+  if (!arena.contains(core_.home()) || !arena.contains(core_.dims().dims) ||
+      arena.textOf(core_.dims().dims) != "d.dims")
+    return refuse("exportImageToStore: invalid home or d.dims genesis");
+  std::vector<std::string> registryNames;
+  std::unordered_set<std::string> uniqueDimensionNames;
+  for (const CellRef dim :
+       zigzag::rank(arena, core_.dims().dims, core_.dims().dims)) {
+    const std::string name = arena.textOf(dim);
+    if (name.empty() || !uniqueDimensionNames.insert(name).second)
+      return refuse("exportImageToStore: malformed dimension registry");
+    registryNames.push_back(name);
+  }
+
+  const auto imageKey =
+      findRankMember(core_.home(), core_.dims().vars, "stdlib.image");
+  if (!imageKey) {
+    return refuse("exportImageToStore: missing or duplicate stdlib.image key");
+  }
+  const auto holderResult =
+      requireLink(*imageKey, core_.dims().values, "manifest holder");
+  if (!holderResult) return refuse(holderResult.error());
+  const CellRef holder = *holderResult;
+
+  static constexpr std::array<std::string_view, 8> fieldNames{
+      "ops",
+      "imageEpoch",
+      "contentVersion",
+      "generatorHead",
+      "expectedScrollBytes",
+      "imageOpcodeCount",
+      "imageVerbCount",
+      "imageOpcodeCellCount"};
+  std::unordered_map<std::string, CellRef> fieldKeys;
+  std::unordered_map<std::string, CellRef> fieldValues;
+  for (const CellRef key :
+       zigzag::rankAfter(arena, holder, core_.dims().vars)) {
+    const std::string name = arena.textOf(key);
+    if (fieldKeys.contains(name))
+      return refuse("exportImageToStore: duplicate manifest field '" + name +
+                    "'");
+    fieldKeys.emplace(name, key);
+    const auto value = requireLink(key, core_.dims().values, "manifest field");
+    if (!value) return refuse(value.error());
+    fieldValues.emplace(name, *value);
+  }
+  for (const std::string_view name : fieldNames) {
+    if (!fieldKeys.contains(std::string(name)))
+      return refuse("exportImageToStore: incomplete manifest field '" +
+                    std::string(name) + "'");
+  }
+  if (arena.textOf(fieldValues.at("imageEpoch")) != stdlibImageEpoch() ||
+      arena.valueKindOf(fieldValues.at("imageEpoch")) !=
+          xanadu::ValueKind::None ||
+      arena.valueKindOf(fieldValues.at("generatorHead")) !=
+          xanadu::ValueKind::None ||
+      arena.textOf(fieldValues.at("generatorHead")).empty())
+    return refuse("exportImageToStore: invalid manifest text metadata");
+  for (const std::string_view name :
+       {"contentVersion", "expectedScrollBytes", "imageOpcodeCount",
+        "imageVerbCount", "imageOpcodeCellCount"}) {
+    if (arena.valueKindOf(fieldValues.at(std::string(name))) !=
+            xanadu::ValueKind::Int64 ||
+        !arena.asInt64(fieldValues.at(std::string(name))))
+      return refuse("exportImageToStore: invalid integer manifest metadata");
+  }
+  if (arena.asInt64(fieldValues.at("imageOpcodeCount")) !=
+          static_cast<std::int64_t>(stdlibImageOpcodeCount()) ||
+      arena.asInt64(fieldValues.at("imageVerbCount")) !=
+          static_cast<std::int64_t>(stdlibImageVerbCount()))
+    return refuse("exportImageToStore: manifest ABI counts are stale");
+
+  const auto paramsDim = core_.findDimension("d.params");
+  const auto markDim   = core_.findDimension(xanadu::cellRelocationDimension);
+  if (!paramsDim || !markDim)
+    return refuse("exportImageToStore: missing params or relocation dimension");
+
+  struct PositionalRef {
+    CellRef member;
+    CellRef target;
+  };
+  std::vector<PositionalRef> positionalRefs;
+  std::vector<CellRef> extraRoots{core_.dims().dims, *imageKey, holder};
+  for (const std::string_view name : fieldNames)
+    extraRoots.push_back(fieldKeys.at(std::string(name)));
+  const auto collectPositional =
+      [&](const CellRef head,
+          const std::string_view label) -> std::expected<void, std::string> {
+    std::unordered_set<CellRef> seen;
+    for (const CellRef member :
+         zigzag::rankAfter(arena, head, core_.dims().step)) {
+      const auto raw = arena.asInt64(member);
+      if (!raw || *raw <= 0 ||
+          static_cast<std::uint64_t>(*raw) >
+              std::numeric_limits<CellRef>::max())
+        return std::unexpected("exportImageToStore: truncated " +
+                               std::string(label) + " Int64 reference");
+      const CellRef target = static_cast<CellRef>(*raw);
+      if (!arena.contains(member) || !arena.contains(target) ||
+          !isEphemeral(target) || arena.isProxy(target))
+        return std::unexpected("exportImageToStore: invalid or foreign " +
+                               std::string(label) + " target");
+      if (!seen.insert(member).second)
+        return std::unexpected("exportImageToStore: cyclic " +
+                               std::string(label) + " member rank");
+      positionalRefs.push_back({.member = member, .target = target});
+      extraRoots.push_back(member);
+      extraRoots.push_back(target);
+    }
+    return {};
+  };
+
+  const CellRef opsHead = fieldValues.at("ops");
+  if (const auto collected = collectPositional(opsHead, "ops"); !collected)
+    return refuse(collected.error());
+  // The ops rank is walked before the signature collects below append to
+  // positionalRefs, so its size here is exactly the enumeration rebind sees.
+  const std::size_t opsMemberCount = positionalRefs.size();
+  std::unordered_set<CellRef> opcodeTargets;
+  for (const auto &ref : positionalRefs) {
+    if (!arena.contains(ref.target))
+      return refuse("exportImageToStore: ops manifest target is missing");
+    const auto kind = arena.asInt64(ref.target);
+    if (!kind || !isRegistrableOpcode(*kind) ||
+        !opcodeTargets.insert(ref.target).second)
+      return refuse("exportImageToStore: ops manifest has an invalid or "
+                    "repeated opcode target");
+  }
+  if (opcodeTargets.empty())
+    return refuse("exportImageToStore: ops manifest is empty");
+  std::unordered_set<CellRef> signatures;
+  for (const CellRef module :
+       zigzag::rankAfter(arena, core_.home(), core_.dims().stdlib)) {
+    for (const CellRef symbol :
+         zigzag::rankAfter(arena, module, core_.dims().vars)) {
+      if (!requireLink(symbol, core_.dims().values, "routine entry"))
+        return refuse("exportImageToStore: exported symbol has no entry");
+      const auto signature = arena.linked(symbol, *paramsDim, DimVector::POS);
+      if (!signature || !arena.contains(*signature) ||
+          !signatures.insert(*signature).second)
+        return refuse(
+            "exportImageToStore: missing or aliased routine signature");
+      std::unordered_map<std::string, CellRef> sides;
+      for (const CellRef record :
+           zigzag::rankAfter(arena, *signature, core_.dims().vars)) {
+        const std::string side = arena.textOf(record);
+        if ((side != "in" && side != "out") || sides.contains(side))
+          return refuse("exportImageToStore: malformed routine signature");
+        const auto head =
+            requireLink(record, core_.dims().values, "signature member rank");
+        if (!head) return refuse(head.error());
+        sides.emplace(side, *head);
+      }
+      if (!sides.contains("in") || !sides.contains("out"))
+        return refuse("exportImageToStore: incomplete routine signature");
+      for (const std::string_view side : {"in", "out"}) {
+        if (const auto collected =
+                collectPositional(sides.at(std::string(side)), side);
+            !collected)
+          return refuse(collected.error());
+      }
+    }
+  }
+
+  struct MarkedInt64 {
+    CellRef slot;
+    CellRef target;
+  };
+  std::vector<MarkedInt64> markedInt64;
+  const auto marked = xanadu::markedRelocationSlots(arena);
+  std::unordered_set<CellRef> markedSet(marked.begin(), marked.end());
+  for (const CellRef slot : marked) {
+    const auto target = xanadu::relocationTarget(arena, slot);
+    if (!target || !isEphemeral(*target) || arena.isProxy(*target))
+      return refuse("exportImageToStore: marked ref has an invalid or foreign "
+                    "target");
+    if (!arena.holdsOwn(slot) || arena.isProxy(slot))
+      return refuse("exportImageToStore: marked ref slot is not locally owned");
+    extraRoots.push_back(slot);
+    extraRoots.push_back(*target);
+    if (arena.valueKindOf(slot) == xanadu::ValueKind::Int64) {
+      if (!arena.asInt64(slot))
+        return refuse("exportImageToStore: marked Int64 has truncated bits");
+      markedInt64.push_back({.slot = slot, .target = *target});
+    } else if (arena.valueKindOf(slot) != xanadu::ValueKind::OpHandle) {
+      return refuse("exportImageToStore: relocation marker is on a non-ref "
+                    "value");
+    }
+  }
+  for (const auto &cell : arena.cells()) {
+    if (arena.valueKindOf(cell.birthOp) != xanadu::ValueKind::OpHandle)
+      continue;
+    const auto target = arena.handleTarget(cell.birthOp);
+    if (!target || !arena.contains(*target) || !isEphemeral(*target) ||
+        arena.isProxy(*target) || !markedSet.contains(cell.birthOp))
+      return refuse("exportImageToStore: OpHandle lacks complete relocation "
+                    "coverage");
+  }
+
+  static constexpr std::array<std::string_view, 8> ownedDimensions{
+      "d.values", "d.params", "d.contract", "d.spin",
+      "d.step",   "d.clause", "d.grab",     xanadu::cellRelocationDimension};
+  std::unordered_map<DimRef, std::array<std::unordered_set<CellRef>, 2>>
+      directedOwners;
+  for (const auto &cell : arena.cells()) {
+    for (const auto &edge : arena.dimensionsOf(cell.birthOp)) {
+      const std::string name = arena.textOf(edge.dim);
+      if (name == xanadu::cellRelocationDimension && edge.pos != noCell &&
+          arena.textOf(edge.pos) != xanadu::cellRelocationMarker)
+        return refuse("exportImageToStore: malformed relocation marker edge");
+      if (std::ranges::find(ownedDimensions, std::string_view{name}) ==
+          ownedDimensions.end())
+        continue;
+      const std::array<CellRef, 2> targets{edge.pos, edge.neg};
+      for (std::size_t dir = 0; dir < targets.size(); ++dir) {
+        const CellRef target = targets[dir];
+        if (target == noCell) continue;
+        if (!arena.contains(target) || !isEphemeral(target) ||
+            arena.isProxy(target))
+          return refuse("exportImageToStore: owned edge has a foreign target");
+        if (!directedOwners[edge.dim][dir].insert(target).second)
+          return refuse("exportImageToStore: single-owner graph discipline "
+                        "violated on " +
+                        name);
+      }
+    }
+  }
+
+  try {
+    zigzag::PromotionBudget budget{};
+    budget.maxOps     = static_cast<std::uint32_t>(arena.cellCount());
+    budget.wholeSpace = true;
+    auto promoted     = zigzag::promote(destStore, MicroversionId{}, arena,
+                                        core_.home(), budget, extraRoots);
+    if (!promoted)
+      return refuse("exportImageToStore: whole-space promotion refused");
+    if (promoted->arena.size() != promoted->cells.size())
+      return refuse("exportImageToStore: promotion mapping lengths differ");
+
+    std::unordered_map<CellRef, CellRef> mapped;
+    mapped.reserve(promoted->arena.size());
+    for (std::size_t i = 0; i < promoted->arena.size(); ++i) {
+      const CellRef source = promoted->arena[i];
+      const CellRef target = promoted->cells[i];
+      if (!arena.contains(source) || !arena.holdsOwn(source) ||
+          arena.isProxy(source) || !isEphemeral(source) || target == noCell ||
+          isEphemeral(target) || !mapped.emplace(source, target).second)
+        return refuse("exportImageToStore: invalid or duplicate promotion "
+                      "mapping");
+    }
+    const auto mappedRef = [&](const CellRef source,
+                               const std::string_view label)
+        -> std::expected<CellRef, std::string> {
+      const auto found = mapped.find(source);
+      if (found == mapped.end())
+        return std::unexpected("exportImageToStore: unmapped " +
+                               std::string(label) + " target");
+      return found->second;
+    };
+    std::unordered_map<CellRef, CellRef> restates;
+    std::vector<std::pair<CellRef, CellRef>> restateOrder;
+    const auto addRestate =
+        [&](const CellRef member, const CellRef target,
+            const std::string_view label) -> std::expected<void, std::string> {
+      if (!mappedRef(member, label))
+        return std::unexpected("exportImageToStore: unmapped " +
+                               std::string(label) + " ref slot");
+      const auto mappedTarget = mappedRef(target, label);
+      if (!mappedTarget) return std::unexpected(mappedTarget.error());
+      const auto [it, inserted] = restates.emplace(member, *mappedTarget);
+      if (!inserted && it->second != *mappedTarget)
+        return std::unexpected("exportImageToStore: conflicting ref restates");
+      if (inserted) restateOrder.emplace_back(member, *mappedTarget);
+      return {};
+    };
+    for (const auto &ref : markedInt64) {
+      if (const auto result = addRestate(ref.slot, ref.target, "marked Int64");
+          !result)
+        return refuse(result.error());
+    }
+    for (const auto &ref : positionalRefs) {
+      if (const auto result =
+              addRestate(ref.member, ref.target, "positional record");
+          !result)
+        return refuse(result.error());
+    }
+    for (const CellRef ref : marked) {
+      if (arena.valueKindOf(ref) != xanadu::ValueKind::OpHandle) continue;
+      const auto target = xanadu::relocationTarget(arena, ref);
+      if (!mappedRef(ref, "OpHandle") || !target ||
+          !mappedRef(*target, "OpHandle"))
+        return refuse("exportImageToStore: unmapped marked OpHandle target");
+    }
+    for (const auto &ref : marked) {
+      if (arena.valueKindOf(ref) == xanadu::ValueKind::OpHandle) {
+        const auto target = xanadu::relocationTarget(arena, ref);
+        if (!target || !mappedRef(*target, "OpHandle"))
+          return refuse("exportImageToStore: unmapped marked OpHandle target");
+      }
+    }
+    for (const CellRef value : fieldValues | std::views::values) {
+      if (!mappedRef(value, "manifest value"))
+        return refuse("exportImageToStore: unmapped manifest value");
+    }
+    if (!mappedRef(*imageKey, "manifest key") ||
+        !mappedRef(holder, "manifest holder"))
+      return refuse("exportImageToStore: unmapped manifest name");
+    for (const std::string_view name : fieldNames) {
+      if (!mappedRef(fieldKeys.at(std::string(name)), "manifest field key"))
+        return refuse("exportImageToStore: unmapped manifest field name");
+    }
+
+    if (destStore.opCount() == 0 ||
+        destStore.opCount() > std::numeric_limits<std::uint32_t>::max())
+      return refuse("exportImageToStore: promoted store has no physical head");
+    const auto physicalHeadIndex =
+        static_cast<std::uint32_t>(destStore.opCount());
+    if (destStore.segmentedOps().idOf(physicalHeadIndex) != promoted->version)
+      return refuse("exportImageToStore: promotion did not end at its physical "
+                    "head");
+
+    MicroversionId version = promoted->version;
+    for (const auto &[member, target] : restateOrder) {
+      version = destStore.setValue(
+          version, mapped.at(member), xanadu::PrimediaSpan{},
+          xanadu::ValueKind::Int64, static_cast<std::uint64_t>(target));
+    }
+    if (destStore.opCount() == 0 ||
+        destStore.opCount() > std::numeric_limits<std::uint32_t>::max() ||
+        destStore.segmentedOps().idOf(
+            static_cast<std::uint32_t>(destStore.opCount())) != version)
+      return refuse("exportImageToStore: ref restates did not end at the "
+                    "physical head");
+
+    MicroversionId finalHead = version;
+    constexpr std::size_t trailingOps =
+        7; // One SetValue per mutable manifest field.
+    for (std::size_t i = 0; i < trailingOps; ++i) finalHead = finalHead.next();
+    const std::string epochText        = stdlibImageEpoch();
+    const std::string headText         = finalHead.str();
+    const std::uint64_t oldScrollBytes = destStore.userPermascroll().size();
+    const std::uint64_t maxScrollBytes =
+        static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max());
+    const auto epochBytes = static_cast<std::uint64_t>(epochText.size());
+    const auto headBytes  = static_cast<std::uint64_t>(headText.size());
+    if (oldScrollBytes > maxScrollBytes ||
+        epochBytes > maxScrollBytes - oldScrollBytes ||
+        headBytes > maxScrollBytes - oldScrollBytes - epochBytes)
+      return refuse("exportImageToStore: final permascroll size exceeds Int64");
+    const auto epochSpan =
+        xanadu::requireSpoolWrite(destStore.userPermascroll().append(epochText),
+                                  "append stdlib image epoch");
+    const auto headSpan =
+        xanadu::requireSpoolWrite(destStore.userPermascroll().append(headText),
+                                  "append stdlib generator head");
+    const std::uint64_t scrollBytes = destStore.userPermascroll().size();
+    if (scrollBytes != oldScrollBytes + epochBytes + headBytes)
+      return refuse("exportImageToStore: appended text spans do not match "
+                    "permascroll size");
+
+    const auto writeBits = [&](const std::string_view name,
+                               const std::int64_t value) {
+      version = destStore.setValue(
+          version, mapped.at(fieldValues.at(std::string(name))),
+          xanadu::PrimediaSpan{}, xanadu::ValueKind::Int64,
+          static_cast<std::uint64_t>(value));
+    };
+    version =
+        destStore.setValue(version, mapped.at(fieldValues.at("imageEpoch")),
+                           epochSpan, xanadu::ValueKind::None, 0);
+    writeBits("contentVersion", contentVersion);
+    writeBits("imageOpcodeCount",
+              static_cast<std::int64_t>(stdlibImageOpcodeCount()));
+    writeBits("imageVerbCount",
+              static_cast<std::int64_t>(stdlibImageVerbCount()));
+    writeBits("imageOpcodeCellCount",
+              static_cast<std::int64_t>(opsMemberCount));
+    version =
+        destStore.setValue(version, mapped.at(fieldValues.at("generatorHead")),
+                           headSpan, xanadu::ValueKind::None, 0);
+    writeBits("expectedScrollBytes", static_cast<std::int64_t>(scrollBytes));
+    if (version != finalHead)
+      return refuse("exportImageToStore: trailing manifest head prediction "
+                    "mismatch");
+
+    if (destStore.opCount() == 0 ||
+        destStore.opCount() > std::numeric_limits<std::uint32_t>::max() ||
+        destStore.segmentedOps().idOf(
+            static_cast<std::uint32_t>(destStore.opCount())) != finalHead)
+      return refuse("exportImageToStore: final head is not the physical head");
+    auto folded = destStore.rebuildManifold(finalHead);
+    if (folded.refusedOps() != 0)
+      return refuse("exportImageToStore: final image fold refused operations");
+    if (!folded.home() || !folded.dimsDimension() ||
+        folded.cells().size() < 2 ||
+        folded.cells()[0].birthOp != *folded.home() ||
+        folded.cells()[1].birthOp != *folded.dimsDimension())
+      return refuse(
+          "exportImageToStore: final image has invalid genesis order");
+    for (const auto &name : registryNames) {
+      if (!folded.dimensionNamed(name, destStore))
+        return refuse(
+            "exportImageToStore: final dimension registry is missing '" +
+            std::string(name) + "'");
+    }
+    for (const auto &ref : markedInt64) {
+      const CellRef slot   = mapped.at(ref.slot);
+      const CellRef target = mapped.at(ref.target);
+      if (folded.asInt64(slot) != static_cast<std::int64_t>(target) ||
+          !folded.contains(target) || isEphemeral(target))
+        return refuse("exportImageToStore: marked Int64 relocation did not "
+                      "survive the fold");
+    }
+    for (const CellRef ref : marked) {
+      if (arena.valueKindOf(ref) != xanadu::ValueKind::OpHandle) continue;
+      const auto sourceTarget = xanadu::relocationTarget(arena, ref);
+      if (!sourceTarget)
+        return refuse("exportImageToStore: marked OpHandle target disappeared");
+      const CellRef target = mapped.at(*sourceTarget);
+      if (folded.handleTarget(mapped.at(ref)) != target ||
+          !folded.contains(target) || isEphemeral(target))
+        return refuse("exportImageToStore: promoted OpHandle relocation did "
+                      "not survive the fold");
+    }
+    for (const auto &ref : positionalRefs) {
+      const CellRef target = mapped.at(ref.target);
+      if (folded.asInt64(mapped.at(ref.member)) !=
+              static_cast<std::int64_t>(target) ||
+          !folded.contains(target) || isEphemeral(target))
+        return refuse("exportImageToStore: positional relocation did not "
+                      "survive the fold");
+    }
+    if (folded.textOf(mapped.at(fieldValues.at("imageEpoch")), destStore) !=
+            stdlibImageEpoch() ||
+        folded.textOf(mapped.at(fieldValues.at("generatorHead")), destStore) !=
+            finalHead.str() ||
+        folded.asInt64(mapped.at(fieldValues.at("contentVersion"))) !=
+            contentVersion ||
+        folded.asInt64(mapped.at(fieldValues.at("expectedScrollBytes"))) !=
+            static_cast<std::int64_t>(destStore.userPermascroll().size()) ||
+        folded.asInt64(mapped.at(fieldValues.at("imageOpcodeCount"))) !=
+            static_cast<std::int64_t>(stdlibImageOpcodeCount()) ||
+        folded.asInt64(mapped.at(fieldValues.at("imageVerbCount"))) !=
+            static_cast<std::int64_t>(stdlibImageVerbCount()) ||
+        folded.asInt64(mapped.at(fieldValues.at("imageOpcodeCellCount"))) !=
+            static_cast<std::int64_t>(opsMemberCount))
+      return refuse("exportImageToStore: finalized manifest does not match "
+                    "the image");
+    return finalHead;
+  } catch (const std::exception &error) {
+    return refuse("exportImageToStore: " + std::string(error.what()));
+  }
+}
+
 bool VortexStdLib::exportStandardLibraryToStore(
     xanadu::Store &destStore) const {
-  const CellRef stdlibRoot =
-      core_.arena()
-          .linked(core_.home(), core_.dims().stdlib, DimVector::POS)
-          .value_or(core_.home());
-  auto parent = destStore.allVersions().empty()
-                    ? xanadu::MicroversionId{}
-                    : destStore.primaryCurrentVersion();
-  zigzag::PromotionBudget budget{.maxOps = 200000};
-  auto promoted =
-      zigzag::promote(destStore, parent, core_.arena(), stdlibRoot, budget);
-  if (!promoted) {
-    return false;
-  }
-  destStore.repointCurrentVersion(promoted->version);
-  return true;
+  return exportImageToStore(destStore).has_value();
 }
 
 std::optional<CellRef>
 VortexStdLib::importModuleFromStore(const xanadu::Store &srcStore) {
-  auto ver         = srcStore.allVersions().empty() ? xanadu::MicroversionId{}
-                                                    : srcStore.primaryCurrentVersion();
+  auto ver = srcStore.allVersions().empty() ? xanadu::MicroversionId{}
+                                            : srcStore.primaryCurrentVersion();
   auto srcManifold = srcStore.rebuildManifold(ver);
   if (srcManifold.cellCount() == 0) {
     return std::nullopt;
@@ -5123,9 +7079,9 @@ bool VortexStdLib::bridgeCellToDoc(xanadu::Store &store, CellRef cell,
     return false;
   }
   std::string text = core_.arena().textOf(cell);
-  auto parent      = store.allVersions().empty() ? xanadu::MicroversionId{}
-                                                 : store.primaryCurrentVersion();
-  auto newVer      = store.insert(parent, docOffset, text);
+  auto parent = store.allVersions().empty() ? xanadu::MicroversionId{}
+                                            : store.primaryCurrentVersion();
+  auto newVer = store.insert(parent, docOffset, text);
   store.repointCurrentVersion(newVer);
   return true;
 }
@@ -5133,8 +7089,8 @@ bool VortexStdLib::bridgeCellToDoc(xanadu::Store &store, CellRef cell,
 CellRef VortexStdLib::bridgeDocToCell(xanadu::Store &store,
                                       std::uint32_t docOffset,
                                       std::uint32_t length) {
-  auto ver            = store.allVersions().empty() ? xanadu::MicroversionId{}
-                                                    : store.primaryCurrentVersion();
+  auto ver = store.allVersions().empty() ? xanadu::MicroversionId{}
+                                         : store.primaryCurrentVersion();
   std::string docText = store.textOf(ver);
   if (docOffset >= docText.size()) {
     return core_.arena().makeCell("");
@@ -5263,6 +7219,509 @@ void VortexStdLib::buildXuduModule(CellRef mod) {
     routineBindings_[op] = {.inputParams = {}, .outputParams = {out}};
     exportSymbol(mod, name, op);
   }
+}
+
+// -- Module 10: std:zigzag (additions) ---------------------------------------
+std::optional<CellRef> VortexStdLib::zzMakeCell(std::string_view text) {
+  return core_.arena().makeCell(text);
+}
+
+std::optional<std::string> VortexStdLib::zzTextOf(CellRef cell) {
+  if (cell == noCell || !core_.arena().contains(cell)) {
+    return std::nullopt;
+  }
+  return core_.arena().textOf(cell);
+}
+
+bool VortexStdLib::zzSetText(CellRef cell, std::string_view text) {
+  if (cell == noCell || !core_.arena().contains(cell)) {
+    return false;
+  }
+  return core_.arena().setText(cell, text).has_value();
+}
+
+bool VortexStdLib::zzSetValue(CellRef cell, const CellValue &val) {
+  if (cell == noCell || !core_.arena().contains(cell)) {
+    return false;
+  }
+  return core_.writeValue(cell, 0, std::nullopt, val).has_value();
+}
+
+std::optional<DimRef> VortexStdLib::zzResolveDim(std::string_view name) {
+  if (core_.dims().dims == noCell ||
+      !core_.arena().contains(core_.dims().dims)) {
+    return std::nullopt;
+  }
+  std::string target(name);
+  std::string dotted = name.starts_with("d.") ? target : "d." + target;
+  for (const CellRef dimCell :
+       zigzag::rank(core_.arena(), core_.dims().dims, core_.dims().dims)) {
+    const std::string text = core_.arena().textOf(dimCell);
+    if (text == target || text == dotted) {
+      return dimCell;
+    }
+  }
+  return std::nullopt;
+}
+
+std::optional<std::string>
+VortexStdLib::zzPromote(CellRef root, std::optional<std::size_t> maxOps) {
+  if (!boundStore_) {
+    return std::nullopt;
+  }
+  std::vector<CellRef> extraRoots;
+  if (core_.dims().dims != noCell) {
+    extraRoots.push_back(core_.dims().dims);
+  }
+  if (root != noCell) {
+    if (const auto relocDim = zzResolveDim("mesh.relocation")) {
+      if (const auto target =
+              core_.arena().linked(root, *relocDim, DimVector::POS)) {
+        extraRoots.push_back(*target);
+      }
+    }
+  }
+  const auto shadows = core_.arena().shadowOrder();
+  extraRoots.insert(extraRoots.end(), shadows.begin(), shadows.end());
+
+  zigzag::PromotionBudget budget{};
+  if (maxOps) {
+    budget.maxOps = *maxOps;
+  }
+
+  auto promoted =
+      zigzag::promote(*boundStore_, boundStore_->primaryCurrentVersion(),
+                      core_.arena(), root, budget, extraRoots);
+  if (!promoted) {
+    return std::nullopt;
+  }
+  boundStore_->repointCurrentVersion(promoted->version);
+  return promoted->version.str();
+}
+
+// -- Module 11: std:env -------------------------------------------------------
+std::optional<CellRef> VortexStdLib::envArgs() {
+  if (cliArgs_.empty()) {
+    return std::nullopt;
+  }
+  std::vector<CellValue> vals;
+  vals.reserve(cliArgs_.size());
+  for (const auto &arg : cliArgs_) {
+    vals.emplace_back(arg);
+  }
+  return createList(vals, core_.dims().step);
+}
+
+std::optional<std::string> VortexStdLib::envGetVar(std::string_view key) {
+  const std::string keyStr(key);
+  const char *val = std::getenv(keyStr.c_str());
+  if (!val) {
+    return std::nullopt;
+  }
+  return std::string(val);
+}
+
+void VortexStdLib::buildEnvModule(CellRef mod) {
+  // args: -> listHead (#ENV_ARGS)
+  {
+    CellRef out = core_.arena().makeCell();
+    CellRef op  = vm_.mintOpcode(OpcodeKind::Nop, "#ENV_ARGS");
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {.inputParams = {}, .outputParams = {out}};
+    exportSymbol(mod, "args", op);
+  }
+  // get_var: key -> val (#ENV_GET_VAR)
+  {
+    CellRef key = core_.arena().makeCell();
+    CellRef out = core_.arena().makeCell();
+    CellRef op  = vm_.mintOpcode(OpcodeKind::Nop, "#ENV_GET_VAR");
+    core_.bindInput(op, key);
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {.inputParams = {key}, .outputParams = {out}};
+    exportSymbol(mod, "get_var", op);
+  }
+}
+
+// -- Module 12: std:io --------------------------------------------------------
+std::optional<std::string> VortexStdLib::ioReadFile(std::string_view path) {
+  constexpr std::size_t kMaxInputBytes = 67108864; // 64 MiB
+  std::ifstream file(std::string(path), std::ios::binary | std::ios::ate);
+  if (!file.is_open()) {
+    return std::nullopt;
+  }
+  const auto size = file.tellg();
+  if (size < 0 || static_cast<std::size_t>(size) > kMaxInputBytes) {
+    return std::nullopt;
+  }
+  core_.arena().consumeWork(static_cast<std::size_t>(size));
+  file.seekg(0, std::ios::beg);
+  std::string content(static_cast<std::size_t>(size), '\0');
+  if (size > 0 && !file.read(content.data(), size)) {
+    return std::nullopt;
+  }
+  return content;
+}
+
+std::optional<std::string> VortexStdLib::ioReadStdin() {
+  constexpr std::size_t kMaxInputBytes = 67108864; // 64 MiB
+  std::string result;
+  constexpr std::size_t kChunkSize = 65536;
+  std::vector<char> buffer(kChunkSize);
+  while (std::cin.good()) {
+    std::cin.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
+    const auto count = std::cin.gcount();
+    if (count <= 0) break;
+    if (result.size() + static_cast<std::size_t>(count) > kMaxInputBytes) {
+      return std::nullopt;
+    }
+    core_.arena().consumeWork(static_cast<std::size_t>(count));
+    result.append(buffer.data(), static_cast<std::size_t>(count));
+  }
+  return result;
+}
+
+void VortexStdLib::ioPrint(std::string_view text) {
+  std::cout << text << std::flush;
+}
+
+void VortexStdLib::ioEprint(std::string_view text) {
+  std::cerr << text << std::flush;
+}
+
+void VortexStdLib::buildIoModule(CellRef mod) {
+  // read_file: path -> content (#IO_READ_FILE)
+  {
+    CellRef path = core_.arena().makeCell();
+    CellRef out  = core_.arena().makeCell();
+    CellRef op   = vm_.mintOpcode(OpcodeKind::Nop, "#IO_READ_FILE");
+    core_.bindInput(op, path);
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {.inputParams = {path}, .outputParams = {out}};
+    exportSymbol(mod, "read_file", op);
+  }
+  // read_stdin: -> content (#IO_READ_STDIN)
+  {
+    CellRef out = core_.arena().makeCell();
+    CellRef op  = vm_.mintOpcode(OpcodeKind::Nop, "#IO_READ_STDIN");
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {.inputParams = {}, .outputParams = {out}};
+    exportSymbol(mod, "read_stdin", op);
+  }
+  // print: text -> (#IO_PRINT)
+  {
+    CellRef text = core_.arena().makeCell();
+    CellRef op   = vm_.mintOpcode(OpcodeKind::Nop, "#IO_PRINT");
+    core_.bindInput(op, text);
+    routineBindings_[op] = {.inputParams = {text}, .outputParams = {}};
+    exportSymbol(mod, "print", op);
+  }
+  // eprint: text -> (#IO_EPRINT)
+  {
+    CellRef text = core_.arena().makeCell();
+    CellRef op   = vm_.mintOpcode(OpcodeKind::Nop, "#IO_EPRINT");
+    core_.bindInput(op, text);
+    routineBindings_[op] = {.inputParams = {text}, .outputParams = {}};
+    exportSymbol(mod, "eprint", op);
+  }
+}
+
+// -- Module 13: std:map (builder) ---------------------------------------------
+void VortexStdLib::buildMapModule(CellRef mod) {
+  // create: -> mapRoot (#MAP_CREATE)
+  {
+    CellRef out = core_.arena().makeCell();
+    CellRef op  = vm_.mintOpcode(OpcodeKind::Nop, "#MAP_CREATE");
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {.inputParams = {}, .outputParams = {out}};
+    exportSymbol(mod, "create", op);
+  }
+  // set: mapRoot, key, val -> mapRoot (#MAP_SET)
+  {
+    CellRef root = core_.arena().makeCell();
+    CellRef key  = core_.arena().makeCell();
+    CellRef val  = core_.arena().makeCell();
+    CellRef out  = core_.arena().makeCell();
+    CellRef op   = vm_.mintOpcode(OpcodeKind::Nop, "#MAP_SET");
+    core_.bindInput(op, root);
+    core_.bindInput(op, key);
+    core_.bindInput(op, val);
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {.inputParams  = {root, key, val},
+                            .outputParams = {out}};
+    exportSymbol(mod, "set", op);
+  }
+  // get: mapRoot, key -> val (#MAP_GET)
+  {
+    CellRef root = core_.arena().makeCell();
+    CellRef key  = core_.arena().makeCell();
+    CellRef out  = core_.arena().makeCell();
+    CellRef op   = vm_.mintOpcode(OpcodeKind::Nop, "#MAP_GET");
+    core_.bindInput(op, root);
+    core_.bindInput(op, key);
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {.inputParams = {root, key}, .outputParams = {out}};
+    exportSymbol(mod, "get", op);
+  }
+  // has: mapRoot, key -> bool (#MAP_HAS)
+  {
+    CellRef root = core_.arena().makeCell();
+    CellRef key  = core_.arena().makeCell();
+    CellRef out  = core_.arena().makeCell();
+    CellRef op   = vm_.mintOpcode(OpcodeKind::Nop, "#MAP_HAS");
+    core_.bindInput(op, root);
+    core_.bindInput(op, key);
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {.inputParams = {root, key}, .outputParams = {out}};
+    exportSymbol(mod, "has", op);
+  }
+  // keys: mapRoot -> listHead (#MAP_KEYS)
+  {
+    CellRef root = core_.arena().makeCell();
+    CellRef out  = core_.arena().makeCell();
+    CellRef op   = vm_.mintOpcode(OpcodeKind::Nop, "#MAP_KEYS");
+    core_.bindInput(op, root);
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {.inputParams = {root}, .outputParams = {out}};
+    exportSymbol(mod, "keys", op);
+  }
+  // len: mapRoot -> count (#MAP_LEN)
+  {
+    CellRef root = core_.arena().makeCell();
+    CellRef out  = core_.arena().makeCell();
+    CellRef op   = vm_.mintOpcode(OpcodeKind::Nop, "#MAP_LEN");
+    core_.bindInput(op, root);
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {.inputParams = {root}, .outputParams = {out}};
+    exportSymbol(mod, "len", op);
+  }
+}
+
+// -- Module 14: std:hypertime -------------------------------------------------
+namespace {
+std::optional<MicroversionId> tryParseMv(std::string_view text) {
+  try {
+    if (text.empty()) return std::nullopt;
+    return MicroversionId::parse(text);
+  } catch (...) {
+    return std::nullopt;
+  }
+}
+} // namespace
+
+std::optional<std::string> VortexStdLib::hyperLca(std::string_view a,
+                                                  std::string_view b) {
+  const auto mvA = tryParseMv(a);
+  const auto mvB = tryParseMv(b);
+  if (!mvA || !mvB) return std::nullopt;
+
+  if (boundStore_ && boundStore_->chronofilade()) {
+    const auto opA = boundStore_->segmentedOps().indexOf(*mvA);
+    const auto opB = boundStore_->segmentedOps().indexOf(*mvB);
+    if (opA && opB) {
+      if (const auto lcaIdx =
+              boundStore_->chronofilade()->lowestCommonAncestor(*opA, *opB)) {
+        if (const auto mvLca = boundStore_->segmentedOps().idOf(*lcaIdx)) {
+          return mvLca->str();
+        }
+      }
+    }
+  }
+
+  // Pure string fallback: common prefix of path()
+  const auto pathA = mvA->path();
+  const auto pathB = mvB->path();
+  std::optional<MicroversionId> lastCommon;
+  const std::size_t minLen = std::min(pathA.size(), pathB.size());
+  for (std::size_t i = 0; i < minLen; ++i) {
+    if (pathA[i] == pathB[i]) {
+      lastCommon = pathA[i];
+    } else {
+      break;
+    }
+  }
+  if (!lastCommon) return std::nullopt;
+  return lastCommon->str();
+}
+
+std::vector<std::string> VortexStdLib::hyperPath(std::string_view v) {
+  const auto mv = tryParseMv(v);
+  if (!mv || mv->isZero()) return {};
+  const auto p = mv->path();
+  std::vector<std::string> result;
+  result.reserve(p.size());
+  for (const auto &item : p) {
+    result.push_back(item.str());
+  }
+  return result;
+}
+
+bool VortexStdLib::hyperIsAncestorOf(std::string_view a, std::string_view d) {
+  const auto mvA = tryParseMv(a);
+  const auto mvD = tryParseMv(d);
+  if (!mvA || !mvD) return false;
+  return mvA->isAncestorOf(*mvD);
+}
+
+std::optional<std::int64_t> VortexStdLib::hyperDepth(std::string_view v) {
+  const auto mv = tryParseMv(v);
+  if (!mv) return std::nullopt;
+
+  if (boundStore_ && boundStore_->chronofilade()) {
+    if (const auto opIdx = boundStore_->segmentedOps().indexOf(*mv)) {
+      if (const auto d = boundStore_->chronofilade()->depth(*opIdx)) {
+        return static_cast<std::int64_t>(*d);
+      }
+    }
+  }
+  return static_cast<std::int64_t>(mv->path().size());
+}
+
+std::optional<std::string> VortexStdLib::hyperJumpAncestor(std::string_view v,
+                                                           std::int64_t steps) {
+  const auto mv = tryParseMv(v);
+  if (!mv || steps < 0) return std::nullopt;
+
+  if (boundStore_ && boundStore_->chronofilade()) {
+    if (const auto opIdx = boundStore_->segmentedOps().indexOf(*mv)) {
+      if (const auto ancIdx = boundStore_->chronofilade()->jumpAncestor(
+              *opIdx, static_cast<std::size_t>(steps))) {
+        if (const auto ancId = boundStore_->segmentedOps().idOf(*ancIdx)) {
+          return ancId->str();
+        }
+      }
+    }
+  }
+
+  auto cur = *mv;
+  for (std::int64_t i = 0; i < steps; ++i) {
+    cur = cur.parent();
+  }
+  return cur.str();
+}
+
+std::optional<std::string> VortexStdLib::hyperParent(std::string_view v) {
+  const auto mv = tryParseMv(v);
+  if (!mv) return std::nullopt;
+  return mv->parent().str();
+}
+
+std::optional<std::string> VortexStdLib::hyperNext(std::string_view v) {
+  const auto mv = tryParseMv(v);
+  if (!mv) return std::nullopt;
+  return mv->next().str();
+}
+
+std::vector<std::string> VortexStdLib::hyperChildren(std::string_view v) {
+  if (!boundStore_) return {};
+  const auto mv = tryParseMv(v);
+  if (!mv) return {};
+  const auto kids = boundStore_->children(*mv);
+  std::vector<std::string> result;
+  result.reserve(kids.size());
+  for (const auto &kid : kids) {
+    result.push_back(kid.str());
+  }
+  return result;
+}
+
+std::optional<std::string> VortexStdLib::hyperBranch(std::string_view v,
+                                                     std::int64_t ordinal) {
+  const auto mv = tryParseMv(v);
+  if (!mv || ordinal <= 0) return std::nullopt;
+  return mv->branch(static_cast<std::uint32_t>(ordinal)).str();
+}
+
+std::string VortexStdLib::hyperBranchLetters(std::int64_t ordinal) {
+  if (ordinal <= 0) return "";
+  return MicroversionId::branchLetters(static_cast<std::uint32_t>(ordinal));
+}
+
+std::optional<std::string> VortexStdLib::hyperLatest() {
+  if (!boundStore_) return std::nullopt;
+  return boundStore_->latest().str();
+}
+
+std::optional<std::string> VortexStdLib::hyperHead() {
+  if (!boundStore_) return std::nullopt;
+  return boundStore_->primaryCurrentVersion().str();
+}
+
+std::vector<std::string> VortexStdLib::hyperHeads() {
+  if (!boundStore_) return {};
+  const auto heads = boundStore_->currentVersions();
+  std::vector<std::string> result;
+  result.reserve(heads.size());
+  for (const auto &h : heads) {
+    result.push_back(h.str());
+  }
+  return result;
+}
+
+bool VortexStdLib::hyperRepointHead(std::string_view v) {
+  if (!boundStore_) return false;
+  const auto mv = tryParseMv(v);
+  if (!mv) return false;
+  boundStore_->repointCurrentVersion(*mv);
+  return true;
+}
+
+std::optional<std::string> VortexStdLib::hyperToStr(std::string_view v) {
+  const auto mv = tryParseMv(v);
+  if (!mv) return std::nullopt;
+  return mv->str();
+}
+
+std::optional<std::string> VortexStdLib::hyperParse(std::string_view s) {
+  const auto mv = tryParseMv(s);
+  if (!mv) return std::nullopt;
+  return mv->str();
+}
+
+void VortexStdLib::buildHypertimeModule(CellRef mod) {
+  const auto reg1 = [&](std::string_view name, std::string_view opcode) {
+    CellRef in0 = core_.arena().makeCell();
+    CellRef out = core_.arena().makeCell();
+    CellRef op  = vm_.mintOpcode(OpcodeKind::Nop, opcode);
+    core_.bindInput(op, in0);
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {.inputParams = {in0}, .outputParams = {out}};
+    exportSymbol(mod, name, op);
+  };
+  const auto reg2 = [&](std::string_view name, std::string_view opcode) {
+    CellRef in0 = core_.arena().makeCell();
+    CellRef in1 = core_.arena().makeCell();
+    CellRef out = core_.arena().makeCell();
+    CellRef op  = vm_.mintOpcode(OpcodeKind::Nop, opcode);
+    core_.bindInput(op, in0);
+    core_.bindInput(op, in1);
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {.inputParams = {in0, in1}, .outputParams = {out}};
+    exportSymbol(mod, name, op);
+  };
+  const auto reg0 = [&](std::string_view name, std::string_view opcode) {
+    CellRef out = core_.arena().makeCell();
+    CellRef op  = vm_.mintOpcode(OpcodeKind::Nop, opcode);
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {.inputParams = {}, .outputParams = {out}};
+    exportSymbol(mod, name, op);
+  };
+
+  reg2("lca", "#HYPER_LCA");
+  reg1("path", "#HYPER_PATH");
+  reg2("is_ancestor_of", "#HYPER_IS_ANCESTOR_OF");
+  reg1("depth", "#HYPER_DEPTH");
+  reg2("jump_ancestor", "#HYPER_JUMP_ANCESTOR");
+  reg1("parent", "#HYPER_PARENT");
+  reg1("next", "#HYPER_NEXT");
+  reg1("children", "#HYPER_CHILDREN");
+  reg2("branch", "#HYPER_BRANCH");
+  reg1("branch_letters", "#HYPER_BRANCH_LETTERS");
+  reg0("latest", "#HYPER_LATEST");
+  reg0("head", "#HYPER_HEAD");
+  reg0("heads", "#HYPER_HEADS");
+  reg1("repoint_head", "#HYPER_REPOINT_HEAD");
+  reg1("to_str", "#HYPER_TO_STR");
+  reg1("parse", "#HYPER_PARSE");
 }
 
 } // namespace zigzag::vortex

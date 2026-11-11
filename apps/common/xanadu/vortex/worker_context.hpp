@@ -57,9 +57,11 @@ struct WorkerContext {
   // the fold must already carry its filed vocabulary at this point —
   // mint/file → fold → pin/inject → first-resolution.
   explicit WorkerContext(const Manifold *baseManifold     = nullptr,
-                         const xanadu::SpanReader *reader = nullptr)
+                         const xanadu::SpanReader *reader = nullptr,
+                         const VortexStdLib::Bootstrap bootstrapMode =
+                             VortexStdLib::Bootstrap::Automatic)
       : arena(baseManifold), core(*arena.setDefaultSpanReader(reader)),
-        vm(core), stdlib(core, vm) {}
+        vm(core), stdlib(core, vm, bootstrapMode) {}
 
   WorkerContext(const WorkerContext &)            = delete;
   WorkerContext &operator=(const WorkerContext &) = delete;

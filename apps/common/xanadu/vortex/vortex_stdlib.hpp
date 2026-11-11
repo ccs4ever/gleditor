@@ -22,18 +22,23 @@
 #ifndef COMMON_XANADU_VORTEX_STDLIB_HPP
 #define COMMON_XANADU_VORTEX_STDLIB_HPP
 
+#include <array>
 #include <cstdint>
+#include <expected>
 #include <functional>
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
 #include "common/xanadu/vortex/vortex_core.hpp"
+#include "common/xanadu/vortex/stdlib_image_format.hpp"
 #include "common/xanadu/vortex/vortex_vm.hpp"
+#include "common/xanadu/microversion.hpp"
 #include "common/xanadu/zigzag/presentation_surface.hpp"
 #include "common/xanadu/zigzag/vlog.hpp"
 #include "common/xanadu/zigzag/zzstructure.hpp"
@@ -46,6 +51,7 @@ class Store;
 namespace zigzag::vortex {
 
 class VortexWorkerPool;
+struct StdlibImage;
 
 struct LogicSolution {
   std::vector<std::pair<CellRef, CellRef>> bindings;
@@ -63,11 +69,31 @@ struct GridResult {
 
 class VortexStdLib {
 public:
-  VortexStdLib(VortexCore &core, VortexVM &vm);
+  enum class Bootstrap : std::uint8_t { Automatic, Manual };
+
+  VortexStdLib(VortexCore &core, VortexVM &vm,
+               Bootstrap bootstrapMode = Bootstrap::Automatic);
 
   // -- System Bootstrap -------------------------------------------------------
-  /// Weaves the 7 standard modules into the manifold along +d.stdlib off home.
+  /// Weaves the canonical standard modules along +d.stdlib off home.
   void bootstrap();
+
+  /// The deterministic order used by bootstrap and future module generators.
+  [[nodiscard]] static std::span<const std::string_view>
+  canonicalModuleOrder() noexcept;
+  /// Start an image-construction session and create its sole ops rank head.
+  [[nodiscard]] std::expected<VortexStdLib *, std::string> beginImageOps();
+  /// Build one canonical module by name, refusing unknown or repeated names.
+  [[nodiscard]] std::expected<CellRef, std::string>
+  buildModule(std::string_view moduleName);
+  /// Finish the private image manifest and the single ops enumeration.
+  [[nodiscard]] std::expected<VortexStdLib *, std::string> endImageManifest();
+  /// Rebuild this instance's bindings and goal refs from existing image data.
+  [[nodiscard]] std::expected<VortexStdLib *, std::string> rebindInstance();
+  /// Grafts a validated stdlib image into this arena inside one mark, then
+  /// rebinds this instance. The arena is left untouched on refusal.
+  [[nodiscard]] std::expected<VortexStdLib *, std::string>
+  graftImage(const StdlibImage &image);
 
   // -- Spatial Symbol Resolution (import) -------------------------------------
   /// Resolves "std:<module>/<symbol>" to its entry opcode or "std:<module>" to
@@ -170,13 +196,6 @@ public:
   [[nodiscard]] std::size_t
   listLength(CellRef head, std::optional<DimRef> dim = std::nullopt) const;
 
-  CellRef createMap();
-  void mapSet(CellRef mapRoot, std::string_view key, const CellValue &val);
-  [[nodiscard]] std::optional<CellValue> mapGet(CellRef mapRoot,
-                                                std::string_view key) const;
-  [[nodiscard]] bool mapHas(CellRef mapRoot, std::string_view key) const;
-  [[nodiscard]] std::vector<std::string> mapKeys(CellRef mapRoot) const;
-
   /// The first cell and dimensions; a zero-sized grid has no head but retains
   /// its shape in the result.
   GridResult
@@ -232,9 +251,8 @@ public:
   CellRef addClause(CellRef predCell, CellRef headTerm,
                     std::span<const CellRef> bodyGoals = {});
 
-  void setBoundStore(const xanadu::Store *store) noexcept {
-    boundStore_ = store;
-  }
+  void setBoundStore(xanadu::Store *store) noexcept { boundStore_ = store; }
+  [[nodiscard]] xanadu::Store *boundStore() noexcept { return boundStore_; }
   [[nodiscard]] const xanadu::Store *boundStore() const noexcept {
     return boundStore_;
   }
@@ -326,6 +344,79 @@ public:
   std::optional<CellRef> zzDelete(CellRef cell);
   std::optional<CellRef> zzCloneToChain(CellRef symbolOp, CellRef targetCell);
   std::optional<CellRef> zzDuplicate(CellRef cell);
+  std::optional<CellRef> zzMakeCell(std::string_view text);
+  [[nodiscard]] std::optional<std::string> zzTextOf(CellRef cell);
+  bool zzSetText(CellRef cell, std::string_view text);
+  bool zzSetValue(CellRef cell, const CellValue &val);
+  [[nodiscard]] std::optional<DimRef> zzResolveDim(std::string_view name);
+  std::optional<std::string>
+  zzPromote(CellRef root, std::optional<std::size_t> maxOps = std::nullopt);
+
+  // -- Module 11: std:env -----------------------------------------------------
+  void setArgs(std::vector<std::string> args) { cliArgs_ = std::move(args); }
+  [[nodiscard]] const std::vector<std::string> &args() const noexcept {
+    return cliArgs_;
+  }
+  std::optional<CellRef> envArgs();
+  [[nodiscard]] std::optional<std::string> envGetVar(std::string_view key);
+
+  // -- Module 12: std:io ------------------------------------------------------
+  [[nodiscard]] std::optional<std::string> ioReadFile(std::string_view path);
+  [[nodiscard]] std::optional<std::string> ioReadStdin();
+  void ioPrint(std::string_view text);
+  void ioEprint(std::string_view text);
+
+  // -- Module 13: std:map -----------------------------------------------------
+  CellRef createMap();
+  bool mapSet(CellRef mapRoot, const CellValue &key, const CellValue &val);
+  void mapSet(CellRef mapRoot, std::string_view key, const CellValue &val);
+  void mapSet(CellRef mapRoot, const char *key, const CellValue &val) {
+    mapSet(mapRoot, std::string_view(key), val);
+  }
+  [[nodiscard]] std::optional<CellValue> mapGet(CellRef mapRoot,
+                                                const CellValue &key) const;
+  [[nodiscard]] std::optional<CellValue> mapGet(CellRef mapRoot,
+                                                std::string_view key) const;
+  [[nodiscard]] std::optional<CellValue> mapGet(CellRef mapRoot,
+                                                const char *key) const {
+    return mapGet(mapRoot, std::string_view(key));
+  }
+  [[nodiscard]] bool mapHas(CellRef mapRoot, const CellValue &key) const;
+  [[nodiscard]] bool mapHas(CellRef mapRoot, std::string_view key) const;
+  [[nodiscard]] bool mapHas(CellRef mapRoot, const char *key) const {
+    return mapHas(mapRoot, std::string_view(key));
+  }
+  [[nodiscard]] std::vector<CellValue> mapKeys(CellRef mapRoot) const;
+  [[nodiscard]] std::size_t mapLen(CellRef mapRoot) const;
+  [[nodiscard]] std::optional<CellRef> mapKeyCell(CellRef mapRoot,
+                                                  const CellValue &key) const;
+  [[nodiscard]] std::optional<CellRef> mapKeyCell(CellRef mapRoot,
+                                                  std::string_view key) const;
+  [[nodiscard]] std::optional<CellRef> mapKeyCell(CellRef mapRoot,
+                                                  const char *key) const {
+    return mapKeyCell(mapRoot, std::string_view(key));
+  }
+
+  // -- Module 14: std:hypertime -----------------------------------------------
+  [[nodiscard]] std::optional<std::string> hyperLca(std::string_view a,
+                                                    std::string_view b);
+  [[nodiscard]] std::vector<std::string> hyperPath(std::string_view v);
+  [[nodiscard]] bool hyperIsAncestorOf(std::string_view a, std::string_view d);
+  [[nodiscard]] std::optional<std::int64_t> hyperDepth(std::string_view v);
+  [[nodiscard]] std::optional<std::string>
+  hyperJumpAncestor(std::string_view v, std::int64_t steps);
+  [[nodiscard]] std::optional<std::string> hyperParent(std::string_view v);
+  [[nodiscard]] std::optional<std::string> hyperNext(std::string_view v);
+  [[nodiscard]] std::vector<std::string> hyperChildren(std::string_view v);
+  [[nodiscard]] std::optional<std::string> hyperBranch(std::string_view v,
+                                                       std::int64_t ordinal);
+  [[nodiscard]] std::string hyperBranchLetters(std::int64_t ordinal);
+  [[nodiscard]] std::optional<std::string> hyperLatest();
+  [[nodiscard]] std::optional<std::string> hyperHead();
+  [[nodiscard]] std::vector<std::string> hyperHeads();
+  bool hyperRepointHead(std::string_view v);
+  [[nodiscard]] std::optional<std::string> hyperToStr(std::string_view v);
+  [[nodiscard]] std::optional<std::string> hyperParse(std::string_view s);
 
   // -- Module 11: std:gc ------------------------------------------------------
   std::size_t gcSweep();
@@ -441,13 +532,32 @@ public:
   /// scan is open.
   bool scanSetPos(std::int64_t pos);
 
+  // String Scanning goal routines (spec section 6.2)
+  std::optional<std::string> goalTab(std::int64_t targetPos);
+  std::optional<std::string> goalMove(std::int64_t delta);
+  std::optional<std::int64_t> goalMatch(std::string_view prefix);
+  std::optional<std::int64_t> goalMany(std::string_view charset);
+  std::optional<std::int64_t> goalUpto(std::string_view charset);
+  std::optional<std::int64_t> goalAny(std::string_view charset);
+  std::optional<std::int64_t> goalFind(std::string_view needle);
+  std::optional<std::int64_t>
+  goalPos(std::optional<std::int64_t> target = std::nullopt);
+  std::optional<std::string> goalSubjectText();
+
   // -- Sovereign Store Library Packaging (Zero YAML) --------------------------
   bool exportModuleToStore(std::string_view modulePath,
                            xanadu::Store &destStore) const;
+  [[nodiscard]] std::expected<xanadu::MicroversionId, std::string>
+  exportImageToStore(
+      xanadu::Store &destStore,
+      std::int64_t contentVersion = kStdlibContentVersion) const;
   bool exportStandardLibraryToStore(xanadu::Store &destStore) const;
   std::optional<CellRef> importModuleFromStore(const xanadu::Store &srcStore);
 
 private:
+  /// Policy-driven ensure: image graft when the resolved source allows it,
+  /// C++ bootstrap otherwise. Runs once per instance.
+  void ensureStdlib();
   /// The texts of the cells on @p from's rank along @p dim, after @p from.
   [[nodiscard]] std::vector<std::string> namesAfter(CellRef from,
                                                     DimRef dim) const;
@@ -458,9 +568,6 @@ private:
   CellRef copyValueCell(CellRef source);
   /// @p dim, or d.step when a list builtin was handed no dimension.
   [[nodiscard]] DimRef listDim(std::optional<DimRef> dim) const noexcept;
-  /// The key cell on @p mapRoot's d.vars rank reading @p key.
-  [[nodiscard]] std::optional<CellRef> mapKeyCell(CellRef mapRoot,
-                                                  std::string_view key) const;
   /// The cell @p r hops along @p dRow then @p c along @p dCol from the root.
   [[nodiscard]] std::optional<CellRef> gridCell(CellRef gridRoot, std::size_t r,
                                                 std::size_t c, DimRef dRow,
@@ -487,10 +594,56 @@ private:
   void buildBridgeModule(CellRef mod);
   void buildXuzzModule(CellRef mod);
   void buildXuduModule(CellRef mod);
-
+  void buildEnvModule(CellRef mod);
+  void buildIoModule(CellRef mod);
+  void buildMapModule(CellRef mod);
+  void buildHypertimeModule(CellRef mod);
+  struct ModuleBuilder {
+    std::string_view name;
+    void (VortexStdLib::*build)(CellRef);
+  };
+  inline static constexpr std::array moduleBuilders_{
+      ModuleBuilder{"std:math", &VortexStdLib::buildMathModule},
+      ModuleBuilder{"std:string", &VortexStdLib::buildStringModule},
+      ModuleBuilder{"std:contract", &VortexStdLib::buildContractModule},
+      ModuleBuilder{"std:pipeline", &VortexStdLib::buildPipelineModule},
+      ModuleBuilder{"std:memoize", &VortexStdLib::buildMemoizeModule},
+      ModuleBuilder{"std:functional", &VortexStdLib::buildFunctionalModule},
+      ModuleBuilder{"std:collections", &VortexStdLib::buildCollectionsModule},
+      ModuleBuilder{"std:logic", &VortexStdLib::buildLogicModule},
+      ModuleBuilder{"std:goal", &VortexStdLib::buildGoalModule},
+      ModuleBuilder{"sys:array", &VortexStdLib::buildArrayModule},
+      ModuleBuilder{"std:zigzag", &VortexStdLib::buildZigzagModule},
+      ModuleBuilder{"std:gc", &VortexStdLib::buildGCModule},
+      ModuleBuilder{"std:ui", &VortexStdLib::buildUiModule},
+      ModuleBuilder{"std:nav", &VortexStdLib::buildNavModule},
+      ModuleBuilder{"std:bridge", &VortexStdLib::buildBridgeModule},
+      ModuleBuilder{"std:xuzz", &VortexStdLib::buildXuzzModule},
+      ModuleBuilder{"std:xudu", &VortexStdLib::buildXuduModule},
+      ModuleBuilder{"std:env", &VortexStdLib::buildEnvModule},
+      ModuleBuilder{"std:io", &VortexStdLib::buildIoModule},
+      ModuleBuilder{"std:map", &VortexStdLib::buildMapModule},
+      ModuleBuilder{"std:hypertime", &VortexStdLib::buildHypertimeModule},
+  };
+  [[nodiscard]] std::expected<CellRef, std::string>
+  keyRecord(CellRef owner, std::string_view key, CellRef value);
+  [[nodiscard]] std::expected<void, std::string>
+  persistModuleBindings(CellRef moduleCell);
+  [[nodiscard]] std::expected<void, std::string>
+  appendModuleOpcodes(std::size_t firstCell);
+  [[nodiscard]] std::expected<void, std::string>
+  persistRoutineBinding(CellRef symbol, CellRef entryOp);
   VortexCore &core_;
   VortexVM &vm_;
-  const xanadu::Store *boundStore_{nullptr};
+  Bootstrap bootstrapMode_{Bootstrap::Automatic};
+  bool imageOpsBegun_{false};
+  bool imageManifestEnded_{false};
+  bool bootstrapComplete_{false};
+  CellRef imageOpsHead_{noCell};
+  CellRef imageOpsTail_{noCell};
+  std::unordered_set<std::string> builtModules_;
+  xanadu::Store *boundStore_{nullptr};
+  std::vector<std::string> cliArgs_;
 
   // Stage 2 data-parallel hook: borrowed, not owned. Null => serial.
   VortexWorkerPool *workerPool_{nullptr};

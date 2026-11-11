@@ -52,6 +52,9 @@ cp build/libgleditor.dll "$stage/"
 cp assets/shaders/*.glsl "$stage/assets/shaders/"
 cp assets/shaders/vulkan/*.spv "$stage/assets/shaders/vulkan/"
 cp assets/logo.png "$stage/assets/logo.png"
+# The prebuilt Vortex stdlib image rides in the portable assets dir; without
+# it xuzz falls back to the C++ bootstrap with a warning per context.
+cp -R assets/vortex-stdlib "$stage/assets/vortex-stdlib"
 cp LICENSE README.md "$stage/"
 
 # AccessKit, when this was built with it. Copied by name rather than left to

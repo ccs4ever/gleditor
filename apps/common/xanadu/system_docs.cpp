@@ -831,6 +831,14 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
                   "contexts (independent goals on private arenas, merged by "
                   "submission index). Default off; serial search is unchanged",
          .schemas = {{.expectedTypes = {"boolean"}, .defaultValues = {false}}}},
+        {.name  = std::string(settings::kVortexStdlibSource),
+         .notes = "Startup-only Vortex stdlib source: 'image' requires the "
+                  "prebuilt store image, 'cpp' forces the C++ bootstrap, "
+                  "'imagethencpp' (default) tries the image then falls back. "
+                  "Read once before the first Vortex context; later changes "
+                  "do not re-source the library",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"imagethencpp"}}}}},
         {.name  = std::string(settings::kVagentReadyPerMessage),
          .notes = "Consecutive mailbox services before one local wake is "
                   "forced; bounds P4 wake starvation (actor-executor §4.1)",

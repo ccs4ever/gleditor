@@ -55,6 +55,18 @@ for shader in glyph.vert.glsl glyph.frag.glsl; do
 done
 echo "ok: the shaders are where the program looked for them"
 
+# The Vortex stdlib image is the other packaged asset: a missing one does not
+# stop the program (it warns and bootstraps through C++), so it needs its own
+# check or a packaging regression ships silently.
+if [ ! -f "$assets/vortex-stdlib/store/ops.nodes" ] ||
+  [ ! -f "$assets/vortex-stdlib/store/store.tables" ] ||
+  [ ! -f "$assets/vortex-stdlib/permascroll/active.primedia" ]; then
+  echo "FAIL: $assets/vortex-stdlib is incomplete; the stdlib image store or"
+  echo "      its permascroll did not ship with the assets"
+  exit 1
+fi
+echo "ok: the stdlib image is where the program looked for it"
+
 if [ -z "$BACKENDS" ]; then
   echo "no backends named; skipping the render"
   exit 0
