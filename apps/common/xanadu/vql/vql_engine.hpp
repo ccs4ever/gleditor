@@ -7,6 +7,7 @@
 #define COMMON_XANADU_VQL_VQL_ENGINE_HPP
 
 #include <cstdint>
+#include <expected>
 #include <memory>
 #include <optional>
 #include <span>
@@ -17,6 +18,7 @@
 #include <utility>
 #include <vector>
 
+#include "common/xanadu/vql/query_error.hpp"
 #include <gleditor/cpp26.hpp>
 
 #include "common/xanadu/multi_store.hpp"
@@ -44,10 +46,20 @@ public:
   explicit VQLEngine(zigzag::vortex::VortexCore &core);
   explicit VQLEngine(zigzag::ArenaManifold &arena);
 
-  /// Executes a parsed query expression and returns the resulting cells.
+  /// Primary API: runs a parsed query and returns its cells, or a typed
+  /// error. Query failures, parse errors included, are never thrown.
+  [[nodiscard]] std::expected<std::vector<zigzag::CellRef>, QueryError>
+  tryExecute(const QueryExpression &query);
+
+  /// Primary API for source text (lexing, parsing, and evaluating).
+  [[nodiscard]] std::expected<std::vector<zigzag::CellRef>, QueryError>
+  tryExecute(std::string_view queryString);
+
+  /// Throwing wrapper over tryExecute: TypeContractError, ParseError,
+  /// std::invalid_argument (Malformed) or QueryRefusal (everything else).
   std::vector<zigzag::CellRef> execute(const QueryExpression &query);
 
-  /// Executes a raw query string (lexing, parsing, and evaluating).
+  /// Throwing wrapper over tryExecute for source text.
   std::vector<zigzag::CellRef> execute(std::string_view queryString);
 
   /// Evaluates a path expression starting from an optional set of context

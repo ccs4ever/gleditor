@@ -244,8 +244,15 @@ std::vector<CellRef> VQLCompiler::compileSelector(const PathStep &step,
       }
     } else {
       refuseSemanticBuiltin(fn.name);
-      throw std::invalid_argument("VQL path function '" + fn.name +
-                                  "' is not compiled to Vortex yet");
+      // Names the roadmap lowers are Unsupported; any other name is not a
+      // VQL function at all.
+      const bool planned = fn.name == "sort_into" || fn.name == "find" ||
+                           fn.name == "contains" || fn.name == "count" ||
+                           fn.name == "delta";
+      throw QueryRefusal(planned ? QueryErrorCategory::Unsupported
+                                 : QueryErrorCategory::Unknown,
+                         "VQL path function '" + fn.name +
+                             "' is not compiled to Vortex yet");
     }
   } else {
     throw std::invalid_argument(

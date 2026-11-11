@@ -53,6 +53,8 @@ bool budgetFailure(const std::string_view message) {
 }
 
 QueryExecutionError runtimeError(const std::exception &error) {
+  if (const auto *refusal = dynamic_cast<const QueryRefusal *>(&error))
+    return {.category = refusal->category(), .message = error.what()};
   return {.category = budgetFailure(error.what())
                           ? QueryExecutionError::Category::Budget
                           : QueryExecutionError::Category::Runtime,
@@ -148,7 +150,7 @@ QueryExecutor::executeVortex(const QueryExpression &query,
     disassembly_      = result.disassembly;
     if (!result.success) {
       return std::unexpected(QueryExecutionError{
-          .category = QueryExecutionError::Category::Compile,
+          .category = result.category.value_or(QueryErrorCategory::Unsupported),
           .message  = result.errorMessage,
       });
     }

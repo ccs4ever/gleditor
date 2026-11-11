@@ -14,6 +14,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -33,6 +34,7 @@
 #include "common/xanadu/vortex/vortex_vm.hpp"
 #include "common/xanadu/vql/ast.hpp"
 #include "common/xanadu/vql/frame_eligibility.hpp"
+#include "common/xanadu/vql/query_error.hpp"
 #include "common/xanadu/vql/static_functor_program.hpp"
 
 namespace xanadu {
@@ -87,6 +89,8 @@ struct CompilationResult {
   std::optional<zigzag::CellRef> cursor;
   std::vector<zigzag::CellRef> resultSlots;
   std::vector<SessionBinding> sessionBindings;
+  /// Set exactly when success is false.
+  std::optional<QueryErrorCategory> category;
 };
 
 class VQLCompiler {
@@ -126,6 +130,8 @@ public:
       std::optional<xanadu::MicroversionId> parent = std::nullopt) const;
 
 private:
+  CompilationResult failCompilation(const std::exception &refused);
+
   struct ClosedFunctorClampKey {
     std::int64_t start{1};
     std::optional<std::int64_t> end;

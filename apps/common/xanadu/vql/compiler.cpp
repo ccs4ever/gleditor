@@ -27,6 +27,36 @@
 
 namespace xanadu::vql {
 
+namespace {
+
+/// Throw sites inside the compiler are not annotated with a category (there
+/// are about 260 of them), so a refusal that carries none is classified from
+/// its message. Anything unrecognised is Unsupported: every unannotated site
+/// refuses the whole query, and none of them is a caller error worth keeping
+/// std::invalid_argument for.
+QueryErrorCategory classifyCompilerFailure(const std::exception &error) {
+  if (const auto *refusal = dynamic_cast<const QueryRefusal *>(&error))
+    return refusal->category();
+  if (dynamic_cast<const ParseError *>(&error))
+    return QueryErrorCategory::Parse;
+  if (dynamic_cast<const TypeContractError *>(&error))
+    return QueryErrorCategory::TypeContract;
+  const std::string_view message = error.what();
+  constexpr std::array unknownMarkers{
+      std::string_view{"unknown compiled function"},
+      std::string_view{"unknown VQL function"},
+  };
+  for (const auto marker : unknownMarkers)
+    if (message.find(marker) != std::string_view::npos)
+      return QueryErrorCategory::Unknown;
+  // "is not compiled to Vortex yet", "require(s) Vortex graph lowering",
+  // "does not have Vortex graph lowering yet" and "require ... lowering" all
+  // fall through to the default.
+  return QueryErrorCategory::Unsupported;
+}
+
+} // namespace
+
 using zigzag::CellRef;
 using zigzag::DimRef;
 using zigzag::DimVector;
@@ -444,21 +474,28 @@ CompilationResult VQLCompiler::compile(const QueryExpression &query,
     }
     transaction.commit();
     return result;
-  } catch (const std::invalid_argument &unsupported) {
-    entryOp_.reset();
-    currentOp_.reset();
-    allOps_.clear();
-    lastResultCells_.clear();
-    frameDefinitions_.clear();
-    pendingFrameDefinitions_.clear();
-    return CompilationResult{
-        .success          = false,
-        .entryOpcode      = std::nullopt,
-        .errorMessage     = unsupported.what(),
-        .generatedOpcodes = {},
-        .disassembly      = "",
-    };
+  } catch (const std::invalid_argument &refused) {
+    return failCompilation(refused);
+  } catch (const QueryRefusal &refused) {
+    return failCompilation(refused);
   }
+}
+
+CompilationResult VQLCompiler::failCompilation(const std::exception &refused) {
+  entryOp_.reset();
+  currentOp_.reset();
+  allOps_.clear();
+  lastResultCells_.clear();
+  frameDefinitions_.clear();
+  pendingFrameDefinitions_.clear();
+  return CompilationResult{
+      .success          = false,
+      .entryOpcode      = std::nullopt,
+      .errorMessage     = refused.what(),
+      .generatedOpcodes = {},
+      .disassembly      = "",
+      .category         = classifyCompilerFailure(refused),
+  };
 }
 
 DimRef VQLCompiler::resolveDimension(std::string_view name) {
@@ -497,6 +534,7 @@ CompilationResult VQLCompiler::compile(std::string_view queryString,
         .errorMessage     = std::string("Parse error: ") + err.what(),
         .generatedOpcodes = {},
         .disassembly      = "",
+        .category         = QueryErrorCategory::Parse,
     };
   }
 }
@@ -520,7 +558,7 @@ std::optional<CellRef> VQLCompiler::compileQuery(const QueryExpression &query) {
     for (const auto &definition : query.defs)
       validateFunctionSignature(definition);
   } catch (const TypeContractError &error) {
-    throw std::invalid_argument(error.what());
+    throw QueryRefusal(QueryErrorCategory::TypeContract, error.what());
   }
   for (const auto &definition : query.defs) {
     if (definition.name == "#vql-current-timestamp")

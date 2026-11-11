@@ -15,6 +15,7 @@
 #include "common/xanadu/vortex/vortex_vm.hpp"
 #include "common/xanadu/vql/ast.hpp"
 #include "common/xanadu/vql/contracts.hpp"
+#include "common/xanadu/vql/query_error.hpp"
 
 namespace xanadu {
 class MultiStoreCoordinator;
@@ -26,18 +27,8 @@ class VQLEngine;
 
 enum class QueryExecutionMode : std::uint8_t { Direct, Vortex };
 
-struct QueryExecutionError {
-  enum class Category : std::uint8_t {
-    Parse,
-    Compile,
-    TypeContract,
-    Runtime,
-    Budget,
-  };
-
-  Category category{Category::Runtime};
-  std::string message;
-};
+/// The executor reports the same typed error as VQLEngine::tryExecute.
+using QueryExecutionError = QueryError;
 
 struct QueryExecutionOptions {
   QueryExecutionMode mode{QueryExecutionMode::Vortex};

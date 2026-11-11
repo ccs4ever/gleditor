@@ -158,22 +158,61 @@ void VQLEngine::publishCompilerBindings(
   putGetLenses_.swap(nextLenses);
 }
 
+namespace {
+
+/// The one place a QueryError becomes an exception.
+[[noreturn]] void throwQueryError(const QueryError &error) {
+  switch (error.category) {
+  case QueryErrorCategory::TypeContract:
+    throw TypeContractError(error.message);
+  case QueryErrorCategory::Parse:
+    throw ParseError(error.message, SourceLocation{});
+  case QueryErrorCategory::Malformed:
+    throw std::invalid_argument(error.message);
+  case QueryErrorCategory::Unsupported:
+  case QueryErrorCategory::Unknown:
+  case QueryErrorCategory::Runtime:
+  case QueryErrorCategory::Budget:
+    break;
+  }
+  throw QueryRefusal(error.category, error.message);
+}
+
+std::vector<zigzag::CellRef>
+valueOrThrow(std::expected<std::vector<zigzag::CellRef>, QueryError> result) {
+  if (!result) throwQueryError(result.error());
+  return std::move(*result);
+}
+
+} // namespace
+
+std::expected<std::vector<zigzag::CellRef>, QueryError>
+VQLEngine::tryExecute(std::string_view queryString) {
+  try {
+    Parser parser(queryString);
+    return tryExecute(parser.parseQuery());
+  } catch (const ParseError &error) {
+    return std::unexpected(QueryError{.category = QueryErrorCategory::Parse,
+                                      .message  = error.what()});
+  }
+}
+
+std::expected<std::vector<zigzag::CellRef>, QueryError>
+VQLEngine::tryExecute(const QueryExpression &query) {
+  zigzag::vortex::VortexVM vm(*core_);
+  QueryExecutor executor(*this, vm);
+  return executor.execute(query);
+}
+
 std::vector<zigzag::CellRef> VQLEngine::execute(std::string_view queryString) {
+  // Parsed here, not in tryExecute, so a ParseError keeps its location.
   Parser parser(queryString);
   QueryExpression query = parser.parseQuery();
   return execute(query);
 }
 
 std::vector<zigzag::CellRef> VQLEngine::execute(const QueryExpression &query) {
-  zigzag::vortex::VortexVM vm(*core_);
-  QueryExecutor executor(*this, vm);
-  auto result = executor.execute(query);
-  if (!result) {
-    if (result.error().category == QueryExecutionError::Category::TypeContract)
-      throw TypeContractError(result.error().message);
-    throw std::invalid_argument(result.error().message);
-  }
-  return std::move(*result);
+  return valueOrThrow(tryExecute(query));
 }
 
 std::vector<zigzag::CellRef>
@@ -270,7 +309,8 @@ VQLEngine::functorOf(const PathExpression &path) const {
   const bool functorExpression = path.isFunctor || existingFunctorAnchor;
   if (functorExpression) {
     if (path.anchorProjection || path.shapeProjection)
-      throw std::invalid_argument(
+      throw QueryRefusal(
+          QueryErrorCategory::Unsupported,
           "ordered shape projections are not supported in functors");
     validateFunctorCaptureSteps(path.steps);
   }
@@ -568,20 +608,21 @@ VQLEngine::executeStatement(const Statement &stmt) {
 std::vector<zigzag::CellRef>
 VQLEngine::executePerspectiveBlock(const PerspectiveBlock &block) {
   (void)block;
-  throw std::invalid_argument(
-      "perspective blocks require Vortex graph lowering");
+  throw QueryRefusal(QueryErrorCategory::Unsupported,
+                     "perspective blocks require Vortex graph lowering");
 }
 
 std::vector<zigzag::CellRef>
 VQLEngine::executeWatch(const WatchStatement &watchStmt) {
   (void)watchStmt;
-  throw std::invalid_argument("watch blocks require Vortex graph lowering");
+  throw QueryRefusal(QueryErrorCategory::Unsupported,
+                     "watch blocks require Vortex graph lowering");
 }
 
 VQLEngine::WatchId VQLEngine::subscribeWatch(PathExpression path) {
   (void)path;
-  throw std::invalid_argument(
-      "watch subscriptions require Vortex graph lowering");
+  throw QueryRefusal(QueryErrorCategory::Unsupported,
+                     "watch subscriptions require Vortex graph lowering");
 }
 
 std::vector<VQLEngine::WatchEvent> VQLEngine::pollWatch(const WatchId id) {
@@ -738,14 +779,14 @@ VQLEngine::watchTopology(const zigzag::CellRef cell) {
 
 void VQLEngine::executeMount(const MountDeclaration &mount) {
   (void)mount;
-  throw std::invalid_argument(
-      "mount declarations require Vortex graph lowering");
+  throw QueryRefusal(QueryErrorCategory::Unsupported,
+                     "mount declarations require Vortex graph lowering");
 }
 
 void VQLEngine::executeUnmount(const UnmountDeclaration &unmount) {
   (void)unmount;
-  throw std::invalid_argument(
-      "unmount declarations require Vortex graph lowering");
+  throw QueryRefusal(QueryErrorCategory::Unsupported,
+                     "unmount declarations require Vortex graph lowering");
 }
 
 std::vector<zigzag::CellRef>
@@ -1025,13 +1066,7 @@ VQLEngine::evaluatePath(const PathExpression &path,
   query.expr = path;
   zigzag::vortex::VortexVM vm(*core_);
   QueryExecutor executor(*this, vm);
-  auto result = executor.execute(query, contextCells);
-  if (!result) {
-    if (result.error().category == QueryExecutionError::Category::TypeContract)
-      throw TypeContractError(result.error().message);
-    throw std::invalid_argument(result.error().message);
-  }
-  return std::move(*result);
+  return valueOrThrow(executor.execute(query, contextCells));
 }
 
 std::vector<zigzag::CellRef>
@@ -1520,7 +1555,8 @@ VQLEngine::evaluateValueExpr(const ValueExpr &expr,
   }
 
   if (std::holds_alternative<std::shared_ptr<BinaryValueExpr>>(expr.kind))
-    throw std::invalid_argument(
+    throw QueryRefusal(
+        QueryErrorCategory::Unsupported,
         "binary value expressions require Vortex VM graph lowering");
 
   return std::nullopt;
@@ -1741,7 +1777,8 @@ void VQLEngine::executeActionClause(
         }
         accumulatedResults.push_back(resultCell);
       } else if (std::holds_alternative<ReturnValue>(item.item)) {
-        throw std::invalid_argument(
+        throw QueryRefusal(
+            QueryErrorCategory::Unsupported,
             "value return expressions require Vortex graph lowering");
       }
     }
