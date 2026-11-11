@@ -264,13 +264,45 @@ TEST_F(VPLCompilerTest, RejectsUnsupportedDimensionValue) {
             std::string::npos);
 }
 
-TEST_F(VPLCompilerTest, DirectEvaluationEntryPointsRefuseAstExecution) {
+// Intent (rewritten from "both entry points throw"): the facade's AST and
+// source entry points must be the VM and nothing else. Evaluation advances the
+// VM's cycle counter, a tiny cycle budget stops it (a host interpreter has no
+// such budget), and forms the compiler does not lower are refused through the
+// same path at compile time.
+TEST_F(VPLCompilerTest, DirectEvaluationEntryPointsRunOnTheVmOnly) {
   VPLEngine engine(*core);
   Parser parser("1 + 2");
   const auto ast = parser.parseProgram();
   ASSERT_NE(ast, nullptr);
-  EXPECT_THROW(engine.evaluate(*ast), std::runtime_error);
-  EXPECT_THROW(engine.evaluate("1 + 2"), std::runtime_error);
+
+  const auto before = engine.totalCycles();
+  EXPECT_EQ(engine.evaluate(*ast).scalarInt(), 3);
+  const auto afterAst = engine.totalCycles();
+  EXPECT_GT(afterAst, before);
+  EXPECT_EQ(engine.evaluate("1 + 2").scalarInt(), 3);
+  EXPECT_GT(engine.totalCycles(), afterAst);
+
+  engine.setCycleBudget(1);
+  EXPECT_THROW(static_cast<void>(engine.evaluate(*ast)), VPLExecutionError);
+  EXPECT_THROW(static_cast<void>(engine.evaluate("1 + 2")), VPLExecutionError);
+  engine.setCycleBudget(kDefaultCycleBudget);
+
+  try {
+    static_cast<void>(engine.evaluate("⍫ 1 2"));
+    FAIL() << "an unlowered verb must be refused";
+  } catch (const VPLExecutionError &error) {
+    EXPECT_EQ(error.stage(), ExecutionError::Stage::Compile);
+    EXPECT_EQ(std::string(error.what()).rfind("Compilation error: ", 0), 0U);
+  }
+  try {
+    static_cast<void>(engine.evaluate("missing"));
+    FAIL() << "an unbound name must be refused";
+  } catch (const VPLExecutionError &error) {
+    EXPECT_EQ(error.stage(), ExecutionError::Stage::Compile);
+    EXPECT_NE(
+        std::string(error.what()).find("unbound VPL identifier 'missing'"),
+        std::string::npos);
+  }
 }
 
 TEST_F(VPLCompilerTest, RenderASTFormatting) {

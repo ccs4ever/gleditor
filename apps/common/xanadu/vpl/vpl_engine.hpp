@@ -1,11 +1,11 @@
 /**
  * @file vpl_engine.hpp
- * @brief Direct AST evaluation engine for Vortex Parallel Language (VPL).
+ * @brief Thin facade that evaluates VPL on the Vortex VM.
  *
- * Evaluates VPL AST expressions directly against ArenaManifold and Store,
- * supporting APL/J array semantics, dual syntax equivalence, multidimensional
- * rank indexing, hypertime scrubbing, clone masters, and transclusion
- * discovery.
+ * VPLEngine owns an arena, a core, a VM and a standard library, compiles each
+ * expression with VPLCompiler and runs the program through Executor. No AST is
+ * interpreted by host code: an expression that the compiler does not lower is
+ * refused with the compiler's named message.
  */
 #ifndef COMMON_XANADU_VPL_VPL_ENGINE_HPP
 #define COMMON_XANADU_VPL_VPL_ENGINE_HPP
@@ -14,15 +14,15 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
-#include <unordered_map>
-#include <vector>
 
 #include "common/xanadu/vortex/vortex_core.hpp"
 #include "common/xanadu/vortex/vortex_stdlib.hpp"
 #include "common/xanadu/vortex/vortex_vm.hpp"
 #include "common/xanadu/vpl/ast.hpp"
+#include "common/xanadu/vpl/execution.hpp"
 #include "common/xanadu/vpl/parser.hpp"
 #include "common/xanadu/vpl/view.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
@@ -34,6 +34,20 @@ class Store;
 
 namespace xanadu::vpl {
 
+/// Thrown by VPLEngine::evaluate when compiling or running fails. A
+/// runtime_error, so callers that only care that evaluation failed keep
+/// working; stage() tells a refused form (Compile) from an exhausted budget
+/// (Budget).
+class VPLExecutionError : public std::runtime_error {
+public:
+  VPLExecutionError(ExecutionError::Stage stage, const std::string &message)
+      : std::runtime_error(message), stage_(stage) {}
+  [[nodiscard]] ExecutionError::Stage stage() const noexcept { return stage_; }
+
+private:
+  ExecutionError::Stage stage_;
+};
+
 class VPLEngine {
 public:
   VPLEngine();
@@ -42,16 +56,33 @@ public:
   explicit VPLEngine(Store &store);
   ~VPLEngine();
 
+  VPLEngine(const VPLEngine &)            = delete;
+  VPLEngine &operator=(const VPLEngine &) = delete;
+
   VPLEngine *withConsoleEffects(bool enabled) noexcept {
     consoleEffects_ = enabled;
     return this;
   }
 
-  /// Evaluates an AST node and returns the resulting VplView.
+  /// Compiles an AST node and runs it on the VM. Throws VPLExecutionError.
   VplView evaluate(const AstNode &node);
 
-  /// Lexes, parses, and evaluates a VPL source expression.
+  /// Lexes, parses, compiles and runs a VPL source expression on the VM.
   VplView evaluate(std::string_view source);
+
+  /// Logical VM cycles each evaluation may spend before it fails with a Budget
+  /// error.
+  VPLEngine *setCycleBudget(std::size_t cycles) noexcept {
+    cycleBudget_ = cycles;
+    return this;
+  }
+  [[nodiscard]] std::size_t cycleBudget() const noexcept {
+    return cycleBudget_;
+  }
+  /// Cycles the VM has executed in total; it only moves when the VM runs.
+  [[nodiscard]] std::uint64_t totalCycles() const noexcept {
+    return vm_->totalCycles();
+  }
 
   /// Variable environment bindings.
   void setVariable(std::string_view name, VplView value);
@@ -76,6 +107,7 @@ public:
   [[nodiscard]] const zigzag::ArenaManifold &arena() const noexcept {
     return core_->arena();
   }
+  [[nodiscard]] zigzag::vortex::VortexVM &vm() noexcept { return *vm_; }
   [[nodiscard]] zigzag::vortex::VortexStdLib &stdlib() noexcept {
     return *stdlib_;
   }
@@ -89,59 +121,24 @@ public:
   [[nodiscard]] zigzag::DimRef defaultDim();
 
 private:
-  VplView evaluateNode(const AstNode &node);
-  VplView catenate(std::span<const VplView> operands);
-  void recordSources(VplView &view);
-
-  // Node evaluation helpers
-  static VplView evalScalar(const ScalarExpr &expr);
-  VplView evalVector(const VectorExpr &expr);
-  VplView evalDimension(const DimensionExpr &expr);
-  VplView evalIdentifier(const IdentifierExpr &expr);
-  VplView evalMonadic(const MonadicExpr &expr);
-  VplView evalDyadic(const DyadicExpr &expr);
-  VplView evalAdverb(const AdverbExpr &expr);
-  VplView evalConjunction(const ConjunctionExpr &expr);
-  VplView evalAssign(const AssignExpr &expr);
-  VplView evalIndexing(const IndexingExpr &expr);
-  VplView evalQuad(const QuadExpr &expr);
-  VplView evalProgram(const Program &expr);
-
-  // Verb implementations
-  VplView applyMonadicVerb(TokenKind verb, const VplView &arg);
-  VplView applyDyadicVerb(TokenKind verb, const VplView &left,
-                          const VplView &right);
-
-  // Arithmetic & logic helper
-  static double computeMonadicScalar(TokenKind verb, double val);
-  static double computeDyadicScalar(TokenKind verb, double left, double right);
-
-  // Cell extraction helper
-  double cellValueDouble(zigzag::CellRef cell) const;
-  std::int64_t cellValueInt(zigzag::CellRef cell) const;
-  std::string cellValueString(zigzag::CellRef cell) const;
-
-  // View cell minting
-  VplView mintRank(const std::vector<double> &values, zigzag::DimRef dim);
-  VplView mintRank(const std::vector<std::int64_t> &values, zigzag::DimRef dim);
-  VplView mintRank(const std::vector<std::string> &values, zigzag::DimRef dim);
+  /// Builds the executor once core_ and vm_ point at live objects.
+  void wire();
+  VplView unwrap(std::expected<ExecutionResult, ExecutionError> result);
 
   std::unique_ptr<zigzag::ArenaManifold> ownedArena_{nullptr};
   std::unique_ptr<zigzag::vortex::VortexCore> ownedCore_{nullptr};
   std::unique_ptr<zigzag::vortex::VortexVM> ownedVm_{nullptr};
   std::unique_ptr<zigzag::vortex::VortexStdLib> ownedStdlib_{nullptr};
+  std::unique_ptr<Executor> executor_;
 
   zigzag::vortex::VortexCore *core_{nullptr};
   zigzag::vortex::VortexVM *vm_{nullptr};
   zigzag::vortex::VortexStdLib *stdlib_{nullptr};
   Store *store_{nullptr};
   bool consoleEffects_{true};
+  std::size_t cycleBudget_{kDefaultCycleBudget};
 
   std::optional<zigzag::DimRef> defaultDim_;
-  std::unordered_map<std::string, VplView> env_;
-  std::vector<std::vector<zigzag::CellRef>> dependencyStack_;
-  std::unordered_map<zigzag::CellRef, std::vector<zigzag::CellRef>>
-      cellDependencies_;
 };
 
 } // namespace xanadu::vpl
