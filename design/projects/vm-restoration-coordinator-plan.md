@@ -8,6 +8,39 @@ checked against branch `feature/vql-completion` at `8b2d1ee4` on 2026-11-11 unle
 Policy, fixed by `e9090999`: every frontend compiles to a Vortex graph and runs on the VM. There is
 no direct interpreter, and an unlowered form must refuse with an explicit error.
 
+## Status: W0 is done (2026-11-11)
+
+Sections 0 and 1 describe the tree before W0 and are kept as the record. What is true now:
+
+- **W0.1** landed on `main` as `5239d848`. The port covers five files, not three: two IRC evidence
+  tests had the same break. A mid-tier security review passed it.
+
+- **W0.2** merged `main` into this branch as `8462ef31` plus fix commit `d1a10256`. Opcodes: this
+  branch keeps 47–80; `main`'s `Linked`, `Find`, `FieldSet`, `RunCall` and `RunResume` are 81–85. No
+  stored artifact held opcode numbers. A mechanical check confirms that no test name from either
+  parent was lost.
+
+- **W0.3** re-measured the baseline at `d1a10256`; see the TSV, which now has a binary column:
+
+  | Binary          | Ran  | Failed | Of which already failing on `main` |
+  | --------------- | ---- | ------ | ---------------------------------- |
+  | `xuzz_test`     | 3787 | 237    | 11                                 |
+  | `gleditor_test` | 842  | 1      | 1                                  |
+  | `zigzag_test`   | 268  | 2      | 1                                  |
+
+  The 237 are 182 of the old baseline, 11 of `main`'s, and 44 of `main`'s VQL tests that meet the
+  VM-only policy for the first time. The W1 card table below is corrected for them.
+
+- **`main` is not green on its own** at `5239d848`: 15 `xuzz_test` failures (evidence, subscription,
+  VPL compiler, one benchmark), one `gleditor_test`, one `zigzag_test`; `make format-check` fails on
+  42 files and `make lint` on 2, all byte-identical to `main`. These carry the card `MAIN` in the
+  TSV and are outside this plan. Until the owner rules otherwise, the wave gate for format and lint
+  is "no new violation relative to `main`", and the final gate is "no failure outside `MAIN`".
+
+- Evidence for all of the above is under `/data/git/gleditor-restore/.logs/w0/`:
+  `classification.tsv` and `classification-notes.md` (the 45 new failures),
+  `d3-expected-feasibility.md`, `out-of-plan-findings.md`, and the `main-*` and `merged-*` logs.
+
 ## 0. Blockers: nothing below can start until W0 is done
 
 1. **The tree does not compile.** OpenSSL 4.1.0 was installed on this machine at 10:17 on
@@ -204,6 +237,46 @@ fills in a function in its own new file:
 New `.cpp` files are picked up automatically: the Makefile uses
 `find apps/common/xanadu -name '*.cpp'`.
 
+**Corrections from W0.3** (they override the table below where they differ; counts are tests in the
+TSV that list the card, and a test may list several):
+
+- **D3 card (mid, runs with W1.0, before every other card; 22 tests).** Boundary conversion to
+  `std::expected`, per the owner's ruling and `d3-expected-feasibility.md`:
+  - Add a typed category to `CompilationResult` and to the executor's error (`Malformed`,
+    `Unsupported`, `Unknown`, `TypeContract`, `Runtime`, `Budget`).
+  - Add `VQLEngine::tryExecute`, returning `std::expected<std::vector<CellRef>, QueryError>`, as the
+    primary API.
+  - Keep `execute` as a thin throwing wrapper: `QueryRefusal` (derived from `std::runtime_error`)
+    for unsupported, unknown, runtime and budget failures; `std::invalid_argument` only for
+    malformed source; `TypeContractError` unchanged.
+  - Replace both mappings at `vql/vql_engine.cpp:174` and `:1032`.
+  - Owns `vql/execution.hpp/.cpp`, `vql/vql_engine.hpp/.cpp`, one new header, and the catch in
+    `vql/compiler.cpp`.
+- **Q1 (17).** `delta` is not a lowering: `main` requires it to refuse, and the D3 card satisfies
+  that. `count` and `contains` gain tests from `vql_semantics_repair_test`.
+- **Q2 (5).** Also owns the macro-group selector `( )?*+`.
+- **Q3 (10).** `current()` only among the generators; the rest wait on R-GEN.
+- **Q4 (14).** Blocked on R-WATCH: the two parents' watch tests contradict each other.
+- **Q6 (16 tests, 7 defects; mid; runs last in W1, as sole owner of the shared files).**
+  - Compiled `%` append does not refuse cycles (`compile_selector.cpp:82-90`).
+  - `compile(".")` and `compileVQL("/d.1/d.2")` succeed with no bound context
+    (`compiler.cpp:572-581`; needs R-CTX).
+  - Clone chains fan out from the master instead of chaining (`compiler.cpp:658`).
+  - Stream comparisons use each operand's first cell only (`compiler.cpp:934,942,960`).
+  - Excess positional arguments are accepted (`compile_call.cpp:235`, `compile_selector.cpp:126`).
+  - `link(+d.edge, 0)` is accepted and mutates (`compile_selector.cpp:177-226`).
+  - The `#EMPTY_CALL` fallback runs a function after a genuinely empty walk
+    (`compile_steps.cpp:104-124`).
+  - Plus the three defects listed under the table.
+- **New Q8 (mid; 6).** Session-persistent `def`: `userDefs_` is never written, so a definition does
+  not survive to the next `execute`. Owns `vql/execution.cpp` after the D3 card lands.
+- **New Q9 (mid; 1).** Field weaving (`compile_block.cpp:115`).
+- **New S1 (mid; 8).** Semantic builtins `project` and `apply_shape` (D2).
+- **New S2 (mid; 7).** Semantic builtins `any`, `all`, `none`, `one`, `optional_one`, `first` and
+  `same_cell` (D2).
+- **R-OBS (7 tests).** Seven of `main`'s tests assert a refusal, or a compiler contract, that this
+  branch deliberately replaced. No lowering can turn them green; they wait on the owner (section 5).
+
 The cards below are fixed by this table; the test names are in the TSV under each card label.
 
 | Card | Tier | Tests | Feature                                                                                                                                   | Spec                              | Oracle                              | Owns                                                |
@@ -288,7 +361,31 @@ rows to the owner (D4) and only then fans out.
   830/830 and `zigzag_test` 256/256, or higher after the merge; `make format-check` and `make lint`
   clean. `make test` swarm tests are run by the owner (they need `veth`).
 
-## 5. Owner decisions, needed before the wave named
+## 5. Owner decisions
+
+Decided on 2026-11-11:
+
+- **D5:** the OpenSSL port landed on `main` first.
+- **D1:** this branch keeps opcodes 47–80.
+- **D2:** `main`'s direct-evaluator features are kept, refused, and given lowering cards (S1, S2).
+- **D3:** `std::expected` where feasible, otherwise `QueryRefusal`. The spike found full conversion
+  costly (259 throw sites, an estimated 2,000–3,500 lines) and boundary conversion cheap, so the D3
+  card in W1 does the boundary conversion.
+
+Open, found by W0.3 (each blocks only the tests that list it in the TSV):
+
+| Id      | Tests | Question                                                                                                       | Recommendation                                                                    |
+| ------- | ----- | -------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| R-WATCH | 6     | May a `watch` statement with no `since` baseline run? This branch's tests say yes; `main`'s say it must refuse | Refuse without a store-backed `since`; keep the poll API. Rewrites 2 branch tests |
+| R-OBS   | 7     | Rewrite the 7 `main` tests that assert a refusal or contract this branch replaced, as proposed in the TSV      | Yes                                                                               |
+| R-NUM   | 1     | Exact numeric comparison (this branch's spec) or `main`'s coercion boundaries                                  | Exact; rewrite `ScalarComparisonCoercionBoundariesRemainStable`                   |
+| R-BARE  | 1     | Bare `$s{...}` stays an in-place mask (about 15 branch tests) or refuses (`main`)                              | Keep the mask                                                                     |
+| R-GEN   | 2     | `local("x")` and `slices("x")` for a missing store: refuse (`main`) or return empty (this branch)              | Refuse; keep `current()` lowered                                                  |
+| R-CTX   | 2     | Refuse a context-relative path with no bound context at compile time                                           | Yes                                                                               |
+| R-RERUN | 1     | May a compiled creation be run again, appending again                                                          | Yes                                                                               |
+| MAIN    | 13    | Fix `main`'s own failing tests, format and lint debt as part of this work, or leave them                       | Leave; fix on `main` separately                                                   |
+
+## 5a. Original decision table (before W0)
 
 | Id  | Before | Decision                                                                                                                   | Recommendation                                                                                                                                                          |
 | --- | ------ | -------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
