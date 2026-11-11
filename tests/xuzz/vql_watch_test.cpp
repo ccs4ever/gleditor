@@ -254,4 +254,49 @@ TEST(VQLWatchTest, ScriptReportsUnsupportedWatch) {
             (std::vector<zigzag::CellRef>{i1, i2}));
 }
 
+TEST(VQLWatchTest, StreamingAndDeltaMetadata) {
+  zigzag::ArenaManifold arena;
+  zigzag::vortex::VortexCore core(arena);
+  VQLEngine engine(core);
+
+  zigzag::DimRef dItems = engine.resolveDimension("d.items");
+  zigzag::CellRef item1 = arena.makeCell("first");
+  zigzag::CellRef item2 = arena.makeCell("second");
+
+  EXPECT_TRUE(arena.link(core.home(), dItems, DimVector::POS, item1));
+  EXPECT_TRUE(arena.link(item1, dItems, DimVector::POS, item2));
+
+  // Snapshot watch execution does not invent a delta cell for existing data.
+  auto deltas = engine.execute("watch ##/d.items as $item {\n"
+                               "  $item/+d.delta\n"
+                               "}");
+
+  ASSERT_EQ(deltas.size(), 2u);
+  EXPECT_EQ(deltas[0], item1);
+  EXPECT_EQ(deltas[1], item2);
+}
+
+TEST(VQLWatchTest, MultiStatementScriptWithForAndWatch) {
+  zigzag::ArenaManifold arena;
+  zigzag::vortex::VortexCore core(arena);
+  VQLEngine engine(core);
+
+  zigzag::DimRef dItems = engine.resolveDimension("d.items");
+  zigzag::CellRef i1    = arena.makeCell("itemA");
+  zigzag::CellRef i2    = arena.makeCell("itemB");
+
+  EXPECT_TRUE(arena.link(core.home(), dItems, DimVector::POS, i1));
+  EXPECT_TRUE(arena.link(i1, dItems, DimVector::POS, i2));
+
+  std::string script = "for $x in ##/d.items return $x;\n"
+                       "watch ##/d.items as $it until $it = \"itemB\" {\n"
+                       "  $it\n"
+                       "};";
+
+  auto results = engine.execute(script);
+  ASSERT_EQ(results.size(), 2u);
+  EXPECT_EQ(arena.textOf(results[0]), "itemA");
+  EXPECT_EQ(arena.textOf(results[1]), "itemB");
+}
+
 } // namespace

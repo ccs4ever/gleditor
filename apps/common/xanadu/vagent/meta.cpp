@@ -148,9 +148,9 @@ mintMetaBindSet(zigzag::ArenaManifold &arena, VortexCore &core,
       {static_cast<std::int64_t>(OpcodeKind::ChoiceDepth), 0, 1},
       {static_cast<std::int64_t>(OpcodeKind::Halt), 0, 0},
       {static_cast<std::int64_t>(OpcodeKind::Nop), 0, 0},
-      // Appended traversal/run kinds — kept off the head of the table
-      // so persisted records written before their introduction stay
-      // readable; the ceiling scalar above is the enum's last ordinal.
+      // Main's appended traversal/run kinds (Linked above, then these
+      // four) sit after the VQL opcodes in the enum, at 81-85, so the
+      // ceiling scalar above is RunResume, the enum's last ordinal.
       {static_cast<std::int64_t>(OpcodeKind::Find), 2, 1},
       {static_cast<std::int64_t>(OpcodeKind::FieldSet), 3, 1},
       {static_cast<std::int64_t>(OpcodeKind::RunCall), 4, 0},
@@ -187,9 +187,9 @@ mintMetaBindSet(zigzag::ArenaManifold &arena, VortexCore &core,
           varsRecord(arena, core, programRoot, "imageExtent", false))
     if (const auto v = arena.linked(*rec, core.dims().values, Posward))
       if (const auto extent = arena.asInt64(*v); extent && *extent > 0)
-        binds.lineage = MetaLineage{
-            .programRef  = programRoot,
-            .imageExtent = static_cast<std::uint32_t>(*extent)};
+        binds.lineage =
+            MetaLineage{.programRef  = programRoot,
+                        .imageExtent = static_cast<std::uint32_t>(*extent)};
   return binds;
 }
 
@@ -554,7 +554,7 @@ MetaValidateReport MetaRuntime::validate(CellRef graphRootCell,
 
     const auto ordinal = arena.asInt64(op);
     if (!ordinal || *ordinal < 0 || *ordinal > ceiling)
-      return {false, "validate: op int64 outside [0, Linked]"};
+      return {false, "validate: op int64 outside [0, RunResume]"};
     const auto shape = arity.find(*ordinal);
     if (shape == arity.end())
       return {false, "validate: op kind absent from the arity table"};
@@ -754,9 +754,9 @@ MetaRunOutcome MetaRuntime::runFragment(CellRef head,
   // lands `Return` identically — `mintOpcode` would write the untrailed
   // `opcodeMap_` under whatever marks this capcall runs in, and the entry
   // would outlive a released cell (P17).
-  const auto landing = arena.makeScalarCell(
-      static_cast<std::int64_t>(OpcodeKind::Halt));
-  const auto frame   = refCell(arena, core_, landing);
+  const auto landing =
+      arena.makeScalarCell(static_cast<std::int64_t>(OpcodeKind::Halt));
+  const auto frame = refCell(arena, core_, landing);
   if (const auto top = arena.linked(cur, dims.stack, Posward))
     zigzag::expectWritten(arena.link(frame, dims.stack, Posward, *top));
   zigzag::expectWritten(arena.link(cur, dims.stack, Posward, frame));
@@ -921,14 +921,12 @@ CellValue MetaRuntime::factValue(CellRef cell) const {
   // caller's business (it holds the CellRef, not a CellValue).
   const std::string text{arena.textOf(cell)};
   if (!text.empty()) {
-    char *end = nullptr;
-    errno     = 0;
+    char *end    = nullptr;
+    errno        = 0;
     const auto n = std::strtoll(text.c_str(), &end, 10);
-    if (errno == 0 && end == text.c_str() + text.size())
-      return CellValue{n};
+    if (errno == 0 && end == text.c_str() + text.size()) return CellValue{n};
     const auto f = std::strtod(text.c_str(), &end);
-    if (errno == 0 && end == text.c_str() + text.size())
-      return CellValue{f};
+    if (errno == 0 && end == text.c_str() + text.size()) return CellValue{f};
   }
   if (text == "true" || text == "false") return CellValue{text == "true"};
   return CellValue{text};
@@ -990,7 +988,7 @@ MetaRuntime::believe(std::string_view predicate, CellRef term, CellRef peer,
         clause, core_.findOrMintDimension("d.source"), Posward, source));
     if (const auto slot = varsRecord(source, "peer", true))
       zigzag::expectWritten(arena.link(*slot, core_.dims().values, Posward,
-                                     refCell(arena, core_, peer)));
+                                       refCell(arena, core_, peer)));
     if (const auto slot = varsRecord(source, "turn", true))
       zigzag::expectWritten(arena.link(*slot, core_.dims().values, Posward,
                                        arena.makeScalarCell(turn)));
@@ -1044,8 +1042,7 @@ void MetaRuntime::stageBeliefTriggers(std::string_view predicate,
                                       CellRef factClause) {
   auto &arena = core_.arena();
   if (binds_.agentCell == noCell) return;
-  const auto factHead =
-      arena.linked(factClause, core_.dims().grab, Posward);
+  const auto factHead = arena.linked(factClause, core_.dims().grab, Posward);
   if (!factHead) return;
   const auto key = std::string{sign} + std::string{predicate};
 
@@ -1065,8 +1062,7 @@ void MetaRuntime::stageBeliefTriggers(std::string_view predicate,
   };
   collect(binds_.agentCell, noCell);
   for (const CellRef inst : zigzag::rankAfter(
-           arena, binds_.agentCell,
-           core_.findOrMintDimension("d.behavior"))) {
+           arena, binds_.agentCell, core_.findOrMintDimension("d.behavior"))) {
     const auto rec = varsRecord(inst, "behavior", /*mint=*/false);
     if (!rec) continue;
     const auto v   = arena.linked(*rec, core_.dims().values, Posward);
@@ -1083,16 +1079,14 @@ void MetaRuntime::stageBeliefTriggers(std::string_view predicate,
       return arena.makeScalarCell(*n);
     if (const auto d = std::get_if<double>(&value)) {
       const auto cell = arena.makeCell(std::to_string(*d));
-      zigzag::expectWritten(
-          arena.setValueBits(cell, xanadu::ValueKind::Double,
-                             xanadu::canonicalDoubleBits(*d)));
+      zigzag::expectWritten(arena.setValueBits(
+          cell, xanadu::ValueKind::Double, xanadu::canonicalDoubleBits(*d)));
       return cell;
     }
     if (const auto b = std::get_if<bool>(&value)) {
       const auto cell = arena.makeCell(*b ? "true" : "false");
-      zigzag::expectWritten(
-          arena.setValueBits(cell, xanadu::ValueKind::Bool,
-                             *b ? std::uint64_t{1} : 0));
+      zigzag::expectWritten(arena.setValueBits(cell, xanadu::ValueKind::Bool,
+                                               *b ? std::uint64_t{1} : 0));
       return cell;
     }
     return arena.makeCell(std::get<std::string>(value));
@@ -1140,8 +1134,7 @@ void MetaRuntime::stageBeliefTriggers(std::string_view predicate,
       std::map<std::string, CellValue, std::less<>> env;
       if (!unifyCollect(pattern, *factHead, env)) continue;
       Match m{.clause = clause, .owner = owner};
-      for (const auto &var : varOrder(pattern))
-        m.bindings.push_back(env[var]);
+      for (const auto &var : varOrder(pattern)) m.bindings.push_back(env[var]);
       matched.push_back(std::move(m));
     }
   // §3.5's merged order on the staged records too — priority first,
@@ -1156,7 +1149,7 @@ void MetaRuntime::stageBeliefTriggers(std::string_view predicate,
     const auto ref  = [&](std::string_view name, CellRef cell) {
       if (const auto rec = varsRecord(pend, name, /*mint=*/true))
         zigzag::expectWritten(arena.link(*rec, core_.dims().values, Posward,
-                                       refCell(arena, core_, cell)));
+                                          refCell(arena, core_, cell)));
     };
     ref("beliefClause", m.clause);
     ref("grab", factClause);
@@ -1166,8 +1159,8 @@ void MetaRuntime::stageBeliefTriggers(std::string_view predicate,
           arena.link(zigzag::rankTail(arena, pend, core_.dims().step),
                      core_.dims().step, Posward, bindingCell(value)));
     zigzag::expectWritten(
-        arena.link(zigzag::rankTail(arena, binds_.agentCell, pending),
-                   pending, Posward, pend));
+        arena.link(zigzag::rankTail(arena, binds_.agentCell, pending), pending,
+                   Posward, pend));
   }
 }
 
@@ -1210,7 +1203,7 @@ MetaRuntime::selectClause(CellRef host,
          zigzag::rankAfter(arena, binds_.agentCell, bDim)) {
       const auto rec = varsRecord(inst, "behavior", /*mint=*/false);
       if (!rec) continue;
-      const auto ref = arena.linked(*rec, core_.dims().values, Posward);
+      const auto ref  = arena.linked(*rec, core_.dims().values, Posward);
       const auto desc = ref ? arena.asInt64(*ref) : std::nullopt;
       if (!desc) continue;
       const auto table = varsRecord(static_cast<CellRef>(*desc), "plans",
@@ -1243,10 +1236,8 @@ MetaRuntime::selectClause(CellRef host,
     // produced value itself never discriminates.
     auto callArgs = args;
     if (candidate.owner != noCell)
-      callArgs.push_back(
-          CellValue{static_cast<std::int64_t>(candidate.owner)});
-    const auto outcome =
-        runFragment(*guard, callArgs, std::nullopt, whereFuel);
+      callArgs.push_back(CellValue{static_cast<std::int64_t>(candidate.owner)});
+    const auto outcome = runFragment(*guard, callArgs, std::nullopt, whereFuel);
     if (outcome.refusal != MetaRunOutcome::Refusal::None) continue;
     if (outcome.produced)
       return std::optional<std::pair<CellRef, CellRef>>{
@@ -1293,8 +1284,7 @@ void MetaRuntime::setIntentionRef(CellRef intention, std::string_view field,
 }
 
 std::expected<CellRef, std::string>
-MetaRuntime::adoptGoal(CellRef goal, std::int64_t turn,
-                       std::size_t whereFuel,
+MetaRuntime::adoptGoal(CellRef goal, std::int64_t turn, std::size_t whereFuel,
                        const std::vector<CellValue> &args,
                        std::span<const CellRef> argRefs) {
   auto &arena = core_.arena();
@@ -1375,9 +1365,9 @@ MetaRuntime::adoptGoal(CellRef goal, std::int64_t turn,
       // args means the tail args are plain values.
       if (i < argRefs.size() && argRefs[i] != noCell) {
         const auto cell = refCell(arena, core_, argRefs[i]);
-        zigzag::expectWritten(arena.link(
-            zigzag::rankTail(arena, chain, core_.dims().step),
-            core_.dims().step, Posward, cell));
+        zigzag::expectWritten(
+            arena.link(zigzag::rankTail(arena, chain, core_.dims().step),
+                       core_.dims().step, Posward, cell));
         continue;
       }
       const auto cell = std::visit(
@@ -1389,9 +1379,9 @@ MetaRuntime::adoptGoal(CellRef goal, std::int64_t turn,
               return arena.makeScalarCell(v);
           },
           arg);
-      zigzag::expectWritten(arena.link(
-          zigzag::rankTail(arena, chain, core_.dims().step),
-          core_.dims().step, Posward, cell));
+      zigzag::expectWritten(
+          arena.link(zigzag::rankTail(arena, chain, core_.dims().step),
+                     core_.dims().step, Posward, cell));
     }
     field("args", chain);
   }
@@ -1571,7 +1561,7 @@ std::expected<CellRef, std::string> MetaRuntime::reify(CellRef head) {
       if (!referent)
         return std::unexpected(
             "reify: capture slot has no int64 binding referent");
-      const auto binding = mapped(static_cast<CellRef>(*referent));
+      const auto binding  = mapped(static_cast<CellRef>(*referent));
       const auto cloneDim = resolveDimension(kCloneDimName);
       if (!cloneDim) return std::unexpected(cloneDim.error());
       zigzag::expectWritten(
@@ -1772,8 +1762,7 @@ MetaRuntime::MetaSignature MetaRuntime::signatureOf(CellRef head) const {
   return sig;
 }
 
-std::optional<std::string>
-MetaRuntime::resultTypeOf(CellRef head) const {
+std::optional<std::string> MetaRuntime::resultTypeOf(CellRef head) const {
   const auto sig = signatureOf(head);
   if (!sig.descriptor) return std::nullopt;
   return sig.resultType;
@@ -1980,7 +1969,7 @@ MetaRuntime::graftPlan(std::string_view goal, std::string_view name,
   // clauses share one formal list.
   const auto canonical = clauseFormals(*host);
   const auto matchSig  = [&](CellRef head, std::string_view role,
-                             bool testArm) -> MetaMutation {
+                            bool testArm) -> MetaMutation {
     const auto sig = signatureOf(head);
     if (!sig.descriptor)
       return std::unexpected(std::format(
@@ -1988,13 +1977,13 @@ MetaRuntime::graftPlan(std::string_view goal, std::string_view name,
     if (!testArm && sig.resultType != "()")
       return std::unexpected(
           std::format("graft_plan: {} must be Code<()>-shaped (result '{}')",
-                      role, sig.resultType));
+                       role, sig.resultType));
     if (!canonical.descriptor) return {};
     if (sig.params != canonical.params ||
         (testArm && sig.resultType != canonical.resultType))
       return std::unexpected(std::format(
           "graft_plan: {} signature does not match the goal's clause "
-          "formals",
+           "formals",
           role));
     return {};
   };

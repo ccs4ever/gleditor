@@ -343,6 +343,16 @@ VPLCompiler::opcodeMnemonic(zigzag::vortex::OpcodeKind kind) noexcept {
     return "CUT";
   case OpcodeKind::ChoiceDepth:
     return "CHOICEDEPTH";
+  case OpcodeKind::Linked:
+    return "LINKED";
+  case OpcodeKind::Find:
+    return "FIND";
+  case OpcodeKind::FieldSet:
+    return "SET";
+  case OpcodeKind::RunCall:
+    return "RUNCALL";
+  case OpcodeKind::RunResume:
+    return "RUNRESUME";
   default:
     return "UNKNOWN";
   }
