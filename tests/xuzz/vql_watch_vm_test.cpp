@@ -60,15 +60,25 @@ TEST_F(VQLWatchVmTest, ExecuteWatchRunsTheCompiledRefusal) {
   const auto query = parser.parseQuery();
   ASSERT_EQ(query.body.statements.size(), 1u);
   const auto &watch = std::get<WatchStatement>(query.body.statements.front());
-  EXPECT_THROW((void)engine.executeWatch(watch), std::runtime_error);
+  try {
+    (void)engine.executeWatch(watch);
+    ADD_FAILURE() << "executeWatch must refuse a watch without a baseline";
+  } catch (const std::runtime_error &refusal) {
+    EXPECT_THAT(refusal.what(), HasSubstr("'since' baseline"));
+    EXPECT_THAT(refusal.what(), HasSubstr("pollWatch"));
+  }
 }
 
 TEST_F(VQLWatchVmTest, SubscribingToRemoteDiscoveryIsRefused) {
   Parser parser("topic(\"ci\")/d.active");
   const auto query = parser.parseQuery();
-  EXPECT_THROW(
-      (void)engine.subscribeWatch(std::get<PathExpression>(query.expr)),
-      std::runtime_error);
+  try {
+    (void)engine.subscribeWatch(std::get<PathExpression>(query.expr));
+    ADD_FAILURE() << "a remote subscription must refuse";
+  } catch (const std::runtime_error &refusal) {
+    EXPECT_THAT(refusal.what(), HasSubstr("'topic'"));
+    EXPECT_THAT(refusal.what(), HasSubstr("ZZ9P"));
+  }
 }
 
 TEST_F(VQLWatchVmTest, SubscriptionsPollTheCurrentShapeOfTheirPath) {
@@ -98,30 +108,56 @@ TEST_F(VQLWatchVmTest, RemoteMountNamesItsAnchor) {
   EXPECT_THAT(message, HasSubstr("ZZ9P"));
 }
 
-TEST_F(VQLWatchVmTest, FailedPerspectiveBlockLeavesNoAmbientSelection) {
+TEST_F(VQLWatchVmTest, LocalMountRefusalNamesTheMissingDispatch) {
+  const auto message =
+      refusalOf("mount current() as +d.cluster; ##/+d.cluster");
+  EXPECT_THAT(message, HasSubstr("mount d.cluster has no compiled dispatch"));
+}
+
+TEST_F(VQLWatchVmTest, UnmountRefusalNamesTheForm) {
+  EXPECT_THAT(refusalOf("unmount +d.cluster; ##"),
+              HasSubstr("unmount d.cluster has no compiled dispatch"));
+}
+
+TEST_F(VQLWatchVmTest, WatchInsideAPerspectiveBlockIsRefusedByName) {
+  EXPECT_THAT(refusalOf("with perspective(\"alice\") { watch ## {} }"),
+              HasSubstr("watch statement inside a perspective block"));
+}
+
+// Until the perspective selector card lands, a read inside a block is
+// qualified into a perspective step and refused by the selector lowering,
+// where an unqualified canonical read would have returned empty. Replace this
+// with the read assertions when that card lands.
+TEST_F(VQLWatchVmTest, PerspectiveBlockReadsAreQualifiedNotCanonical) {
   const auto subject = arena.makeCell("subject");
   engine.setVariable("p", subject);
-  EXPECT_THROW(
-      (void)engine.execute("with perspective(\"alice\") { watch ## {} }"),
-      std::runtime_error);
-  // A block qualifies its own steps and nothing else, so a failed block has
-  // no ambient state to leave behind.
+  EXPECT_TRUE(engine.execute("$p/+d.comment").empty());
+  EXPECT_THAT(refusalOf("with perspective(\"alice\") { $p/+d.comment }"),
+              HasSubstr("path selector does not have Vortex graph lowering"));
   EXPECT_TRUE(engine.execute("$p/+d.comment").empty());
 }
 
-TEST_F(VQLWatchVmTest, PerspectiveBlockOverAForBlockIsRefusedByName) {
-  EXPECT_THAT(
-      refusalOf(
-          "with perspective(\"alice\") { for $x in ##/d.items return $x }"),
-      HasSubstr("perspective block over a for, let or return block"));
-}
-
-TEST_F(VQLWatchVmTest, PerspectiveBlockOverAPredicateStepIsRefusedByName) {
+TEST_F(VQLWatchVmTest, PerspectiveBlockRefusesStepsItCannotQualify) {
   const auto subject = arena.makeCell("subject");
   engine.setVariable("p", subject);
-  EXPECT_THAT(
-      refusalOf("with perspective(\"alice\") { $p/+d.comment[. = \"x\"] }"),
-      HasSubstr("step that has predicates"));
+  for (const char *form :
+       {"$p/count()", "$p/+d.comment/count()", "$p/+d.comment%$p"}) {
+    SCOPED_TRACE(form);
+    EXPECT_THAT(
+        refusalOf(std::string("with perspective(\"alice\") { ") + form + " }"),
+        HasSubstr("perspective block cannot qualify"));
+  }
+}
+
+TEST_F(VQLWatchVmTest, InnerPerspectiveBlockOverridesTheOuterName) {
+  const auto subject = arena.makeCell("subject");
+  engine.setVariable("p", subject);
+  // The outer block qualifies nothing inside the inner one: the inner body is
+  // refused by the selector lowering under its own name, not the outer's, and
+  // an outer statement beside it is qualified separately.
+  EXPECT_THAT(refusalOf("with perspective(\"bob\") { "
+                        "with perspective(\"alice\") { $p/+d.comment } }"),
+              HasSubstr("path selector does not have Vortex graph lowering"));
 }
 
 } // namespace
