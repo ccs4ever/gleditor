@@ -1,0 +1,186 @@
+# Baseline failures for design/projects/vm-restoration-coordinator-plan.md
+# Measured 2026-11-11 at 8b2d1ee4 (before OpenSSL 4.1 and before merging main).
+# Columns: card<TAB>test<TAB>observed refusal or assertion. Re-baseline after W0.
+D3	VQLMultiStoreTest.AnUnknownFunctionIsRefusedByName	VQL path function 'frob' is not compiled to Vortex yet
+L	LensVlaceGate.HistogramIsNonEmptyProvingCellsWereWalked	vlace: 1:1: UnexpectedToken: VM lowering is not implemented for VLace IO programs
+L	LensVlaceGate.WordFrequencyHistogramOverProjectedDirectory	vlace program failed: vlace: 1:1: UnexpectedToken: VM lowering is not implemented for VLace IO programs
+L	MeshEvaluatorTest.RecursiveEvaluationConsumesFuel	Expected: (result.error().find("budget")) != (std::string::npos), actual: 18446744073709551615 vs 184467440737
+L	MeshEvaluatorTest.VlacePreservesConstructorFields	VM lowering is not implemented for VLace programs
+L	VlaceCompilerTest.Addition	VM lowering is not implemented for VLace programs"
+L	VlaceCompilerTest.ArithmeticPrecedence	VM lowering is not implemented for VLace programs"
+L	VlaceCompilerTest.BooleanShortCircuit	VM lowering is not implemented for VLace programs"
+L	VlaceCompilerTest.Comparison	VM lowering is not implemented for VLace programs"
+L	VlaceCompilerTest.Division	VM lowering is not implemented for VLace programs"
+L	VlaceCompilerTest.DollarApplication	VM lowering is not implemented for VLace programs"
+L	VlaceCompilerTest.FloatArithmetic	VM lowering is not implemented for VLace programs"
+L	VlaceCompilerTest.IfFalse	VM lowering is not implemented for VLace programs"
+L	VlaceCompilerTest.IfTrue	VM lowering is not implemented for VLace programs"
+L	VlaceCompilerTest.IntegerLiteral	VM lowering is not implemented for VLace programs"
+L	VlaceCompilerTest.Lambda	VM lowering is not implemented for VLace programs"
+L	VlaceCompilerTest.LambdaTwoArgs	VM lowering is not implemented for VLace programs"
+L	VlaceCompilerTest.LeftAssocSubtraction	VM lowering is not implemented for VLace programs"
+L	VlaceCompilerTest.LetBinding	VM lowering is not implemented for VLace programs"
+L	VlaceCompilerTest.NestedLet	VM lowering is not implemented for VLace programs"
+L	VlaceCompilerTest.PartialApplication	VM lowering is not implemented for VLace programs"
+L	VlaceCompilerTest.RecursiveFactorialTopLevel	VM lowering is not implemented for VLace programs"
+L	VlaceCompilerTest.StringConcat	VM lowering is not implemented for VLace programs"
+L	VlaceCompilerTest.TopLevelValueDecl	VM lowering is not implemented for VLace programs"
+L	VlaceCompilerTest.UnboundIdentifierError	VM lowering is not implemented for VLace programs"
+L	VlaceDriverTest.EvaluatesWithType	Actual: false / Expected: true
+L	VlaceDriverTest.TypeCheckingCanBeDisabled	Actual: false / Expected: true
+L	VlaceE2ETest.AdtConstructorValue	VM lowering is not implemented for VLace programs"
+L	VlaceE2ETest.CaseGuard	VM lowering is not implemented for VLace programs"
+L	VlaceE2ETest.CaseOnListCons	VM lowering is not implemented for VLace programs"
+L	VlaceE2ETest.CaseOnListEmpty	VM lowering is not implemented for VLace programs"
+L	VlaceE2ETest.ConsExpression	VM lowering is not implemented for VLace programs"
+L	VlaceE2ETest.EmptyList	VM lowering is not implemented for VLace programs"
+L	VlaceE2ETest.InfiniteStreamTakeFinite	VM lowering is not implemented for VLace programs"
+L	VlaceE2ETest.LazyLetDoesNotDivergeWhenUnused	VM lowering is not implemented for VLace programs"
+L	VlaceE2ETest.LetrecLength	VM lowering is not implemented for VLace programs"
+L	VlaceE2ETest.ListLiteral	VM lowering is not implemented for VLace programs"
+L	VlaceE2ETest.MapOverList	VM lowering is not implemented for VLace programs"
+L	VlaceE2ETest.NonExhaustiveMatchError	VM lowering is not implemented for VLace programs"
+L	VlaceE2ETest.NonLinearPatternError	VM lowering is not implemented for VLace programs"
+L	VlaceE2ETest.TuplePatternAndRender	VM lowering is not implemented for VLace programs"
+L	VlaceE2ETest.UserAdtAndCase	VM lowering is not implemented for VLace programs"
+L	VlaceIOTest.BindComputesOnTheReadValue	vlace: 1:1: UnexpectedToken: VM lowering is not implemented for VLace IO programs
+L	VlaceIOTest.BindResultTypeFollowsContinuation	vlace: 1:1: UnexpectedToken: VM lowering is not implemented for VLace programs"
+L	VlaceIOTest.BindSequencesTypes	vlace: 1:1: UnexpectedToken: VM lowering is not implemented for VLace programs"
+L	VlaceIOTest.BindThreadsValueIntoContinuation	vlace: 1:1: UnexpectedToken: VM lowering is not implemented for VLace IO programs
+L	VlaceIOTest.GetLineHasIOStringType	vlace: 1:1: UnexpectedToken: VM lowering is not implemented for VLace programs"
+L	VlaceIOTest.InfixBindOperatorThreadsValue	vlace: 1:1: UnexpectedToken: VM lowering is not implemented for VLace IO programs
+L	VlaceIOTest.InfixOperatorsType	vlace: 1:1: UnexpectedToken: VM lowering is not implemented for VLace programs"
+L	VlaceIOTest.LeftIdentityObserved	vlace: 1:1: UnexpectedToken: VM lowering is not implemented for VLace IO programs
+L	VlaceIOTest.NestedBindSequencesThreeEffects	vlace: 1:1: UnexpectedToken: VM lowering is not implemented for VLace IO programs
+L	VlaceIOTest.NoneTypesAsPolymorphicOption	vlace: 1:1: UnexpectedToken: VM lowering is not implemented for VLace programs"
+L	VlaceIOTest.OkTypesAsResult	vlace: 1:1: UnexpectedToken: VM lowering is not implemented for VLace programs"
+L	VlaceIOTest.OptionCaseEvaluates	vlace: 1:1: UnexpectedToken: VM lowering is not implemented for VLace IO programs
+L	VlaceIOTest.PureHasIOType	vlace: 1:1: UnexpectedToken: VM lowering is not implemented for VLace programs"
+L	VlaceIOTest.PureRunReturnsWrappedValue	vlace: 1:1: UnexpectedToken: VM lowering is not implemented for VLace IO programs
+L	VlaceIOTest.PutStrLnHasIOUnitType	vlace: 1:1: UnexpectedToken: VM lowering is not implemented for VLace programs"
+L	VlaceIOTest.PutStrLnWritesWithNewline	vlace: 1:1: UnexpectedToken: VM lowering is not implemented for VLace IO programs
+L	VlaceIOTest.PutStrWritesWithoutNewline	vlace: 1:1: UnexpectedToken: VM lowering is not implemented for VLace IO programs
+L	VlaceIOTest.ResultCaseEvaluates	vlace: 1:1: UnexpectedToken: VM lowering is not implemented for VLace IO programs
+L	VlaceIOTest.RightIdentityObserved	vlace: 1:1: UnexpectedToken: VM lowering is not implemented for VLace IO programs
+L	VlaceIOTest.SomeTypesAsOption	vlace: 1:1: UnexpectedToken: VM lowering is not implemented for VLace programs"
+L	VlaceIOTest.ThenSequencesTwoEffectsLeftToRight	vlace: 1:1: UnexpectedToken: VM lowering is not implemented for VLace IO programs
+L	VlacePreludeTest.Append	VM lowering is not implemented for VLace programs"
+L	VlacePreludeTest.Booleans	VM lowering is not implemented for VLace programs"
+L	VlacePreludeTest.Combinators	VM lowering is not implemented for VLace programs"
+L	VlacePreludeTest.Composed	VM lowering is not implemented for VLace programs"
+L	VlacePreludeTest.DimensionNamedLooksUpWithoutMinting	Actual: false / Expected: true
+L	VlacePreludeTest.Filter	VM lowering is not implemented for VLace programs"
+L	VlacePreludeTest.Find	VM lowering is not implemented for VLace programs"
+L	VlacePreludeTest.Foldl	VM lowering is not implemented for VLace programs"
+L	VlacePreludeTest.Foldr	VM lowering is not implemented for VLace programs"
+L	VlacePreludeTest.Length	VM lowering is not implemented for VLace programs"
+L	VlacePreludeTest.Map	VM lowering is not implemented for VLace programs"
+L	VlacePreludeTest.PreludeParses	VM lowering is not implemented for VLace programs"
+L	VlacePreludeTest.Reverse	VM lowering is not implemented for VLace programs"
+L	VlacePreludeTest.TakeDrop	VM lowering is not implemented for VLace programs"
+L	VlacePreludeTest.TakeFromInfiniteRepeat	VM lowering is not implemented for VLace programs"
+L	VlacePreludeTest.TakeFromIterate	VM lowering is not implemented for VLace programs"
+L	VlacePreludeTest.Tuples	VM lowering is not implemented for VLace programs"
+L	VlaceRecordsTest.Construction	VM lowering is not implemented for VLace programs"
+L	VlaceRecordsTest.ConstructionOutOfOrder	VM lowering is not implemented for VLace programs"
+L	VlaceRecordsTest.FieldAccess	VM lowering is not implemented for VLace programs"
+L	VlaceRecordsTest.FieldAccessSecond	VM lowering is not implemented for VLace programs"
+L	VlaceRecordsTest.FunctionalUpdateLeavesOtherField	VM lowering is not implemented for VLace programs"
+L	VlaceRecordsTest.UnknownFieldIsRefused	VM lowering is not implemented for VLace programs"
+L	VlaceRecordsTest.UpdateExpressionUsesAccessor	VM lowering is not implemented for VLace programs"
+L	VlaceXanaduTest.CellTextIsString	vlace: 1:1: UnexpectedToken: VM lowering is not implemented for VLace programs"
+L	VlaceXanaduTest.CellTextRoundTripsContent	vlace: 1:1: UnexpectedToken: VM lowering is not implemented for VLace programs"
+L	VlaceXanaduTest.DimensionNamedIsOptionDim	vlace: 1:1: UnexpectedToken: VM lowering is not implemented for VLace programs"
+L	VlaceXanaduTest.DistinctCellsHoldDistinctContent	vlace: 1:1: UnexpectedToken: VM lowering is not implemented for VLace programs"
+L	VlaceXanaduTest.LinkedIsOptionCell	vlace: 1:1: UnexpectedToken: VM lowering is not implemented for VLace programs"
+L	VlaceXanaduTest.MakeDimIsDim	vlace: 1:1: UnexpectedToken: VM lowering is not implemented for VLace programs"
+L	VlaceXanaduTest.MakeTextIsCell	vlace: 1:1: UnexpectedToken: VM lowering is not implemented for VLace programs"
+L	VlaceXanaduTest.PromoteIsIOEffect	vlace: 1:1: UnexpectedToken: VM lowering is not implemented for VLace programs"
+L	VlaceXanaduTest.PromoteRunsAtBoundary	vlace: 1:1: UnexpectedToken: VM lowering is not implemented for VLace IO programs
+L	VlaceXanaduTest.PromoteSequencedWithConsole	vlace: 1:1: UnexpectedToken: VM lowering is not implemented for VLace IO programs
+L	VlaceXanaduTest.PureArenaVerbsAreNotIO	vlace: 1:1: UnexpectedToken: VM lowering is not implemented for VLace programs"
+L	VlaceXanaduTest.SetLinkIsUnit	vlace: 1:1: UnexpectedToken: VM lowering is not implemented for VLace programs"
+L	VlaceXanaduTest.SetLinkThenLinkedReadsNeighbour	vlace: 1:1: UnexpectedToken: VM lowering is not implemented for VLace programs
+M	MeshEvaluatorTest.AllFrontendsUsePrivateOwnedContexts	Vortex logic execution is unavailable: VM resolution lowering is not implemented
+M	MeshEvaluatorTest.ParsingIsBoundedBeforeRecursiveLanguageConsumers	Actual: false / Expected: true
+M	MeshHostTest.TwoOwnersExecuteFetchAndMergeEveryFrontendWithoutCallingHardwareOnUiOrWorker	Expected equality of these values: / Which is: 4-byte object <03-00 00-00>
+M	MeshJobsTest.EveryFrontendFetchesImmutableSourceAndSeedsAnIdempotentJobBoundResult	Expected equality of these values: / Which is: 4-byte object <03-00 00-00>
+P	LensVprologGate.ContainmentChildIsSelectableByBoundDimension	Vortex logic execution is unavailable: VM resolution lowering is not implemented
+P	LensVprologGate.FileChildRoleFactReadsFile	Vortex logic execution is unavailable: VM resolution lowering is not implemented
+P	LensVprologGate.RoleAttributeIsAnswerableAsAFact	Vortex logic execution is unavailable: VM resolution lowering is not implemented
+P	LensVprologGate.RootLinksAreEnumerableAsLogicFacts	Vortex logic execution is unavailable: VM resolution lowering is not implemented
+P	LensVprologGate.UnboundCellValueEnumeratesProjectedEntryNames	Vortex logic execution is unavailable: VM resolution lowering is not implemented
+P	MeshCliTest.SeparateRequesterProcessesUseEveryFrontendAgainstARealWorkerAndGpgSigner	Vortex logic execution is unavailable: VM resolution lowering is not implemented
+P	MeshEvaluatorTest.PrologKeepsSolutionsAfterBacktracking	Vortex logic execution is unavailable: VM resolution lowering is not implemented
+P	SqlLensTest.VprologEnumeratesSightingsAsLogicFacts	Vortex logic execution is unavailable: VM resolution lowering is not implemented
+P	VPrologCompilerTest.CompileAndSolveFactsQuery	vprolog execution is unavailable: VM resolution lowering is not implemented
+P	VPrologCompilerTest.CompileAndSolvePrologAppend	vprolog execution is unavailable: VM resolution lowering is not implemented
+P	VPrologCompilerTest.CompileAndSolveRulesAndRecursion	vprolog execution is unavailable: VM resolution lowering is not implemented
+P	VPrologCompilerTest.IntrospectVortexContractsAndParams	vprolog execution is unavailable: VM resolution lowering is not implemented
+P	VPrologCompilerTest.IntrospectVortexInstructionsAndPipelines	vprolog execution is unavailable: VM resolution lowering is not implemented
+P	VPrologCompilerTest.IntrospectVortexStdLib	vprolog execution is unavailable: VM resolution lowering is not implemented
+P	VPrologCompilerTest.SolveConjunctionAndBuiltins	vprolog execution is unavailable: VM resolution lowering is not implemented
+P	VPrologE2ETest.AppendConcatenationAndSplitting	Expected equality of these values: / Which is: 1
+P	VPrologE2ETest.ArithmeticEvaluation	Expected equality of these values: / Which is: 1
+P	VPrologE2ETest.ConsultSourceFileAndRecursion	Expected equality of these values: / Which is: 1
+P	VPrologE2ETest.CutPruningAlternatives	Expected equality of these values: / Which is: 1
+P	VPrologE2ETest.GridVisualizer	Expected equality of these values: / Which is: 1
+P	VPrologE2ETest.IntrospectVortexHyperstructureE2E	Expected equality of these values: / Which is: 1
+P	VPrologE2ETest.IntrospectVortexStdLibE2E	Expected equality of these values: / Which is: 1
+P	VPrologE2ETest.ListingFlag	Expected equality of these values: / Which is: 1
+P	VPrologE2ETest.QueryFailureExitsFalse	Expected: (res.output.find("false.")) != (std::string::npos), actual: 18446744073709551615 vs 1844674407370955
+P	VortexHostTest.LogicSolvingAndOmnibarQueries	VortexHost::solveLogic error: Vortex logic execution is unavailable: VM resolution lowering is not implemented
+P	VortexHostTest.OrParallelLogicSearchIsDeterministic	Vortex logic execution is unavailable: VM resolution lowering is not implemented
+P	VortexLogicTest.HypermediaManifoldPredicates	Vortex logic execution is unavailable: VM resolution lowering is not implemented
+P	VortexLogicTest.HypermediaPredicatesRejectCellIdsWiderThanCellRef	Vortex logic execution is unavailable: VM resolution lowering is not implemented
+P	VortexLogicTest.HypermediaSettingPredicates	Vortex logic execution is unavailable: VM resolution lowering is not implemented
+P	VortexLogicTest.HypermediaTransclusionAndXanalinkPredicates	Vortex logic execution is unavailable: VM resolution lowering is not implemented
+P	VortexLogicTest.PredicateAppendConcatenation	Vortex logic execution is unavailable: VM resolution lowering is not implemented
+P	VortexLogicTest.PredicateAppendReversibleSplitting	Vortex logic execution is unavailable: VM resolution lowering is not implemented
+P	VortexLogicTest.PredicateEqualResolution	Vortex logic execution is unavailable: VM resolution lowering is not implemented
+P	VortexLogicTest.PredicateLengthComputation	Vortex logic execution is unavailable: VM resolution lowering is not implemented
+P	VortexLogicTest.PredicateMemberVerificationAndGeneration	Vortex logic execution is unavailable: VM resolution lowering is not implemented
+Q1	VQLLambdaStepTest.MissingCurrentCellDoesNotBecomeCellZero	VQL path function 'count' is not compiled to Vortex yet
+Q1	VQLMultiStoreTest.ContainsAnswersAtTheTopLevel	VQL path function 'contains' is not compiled to Vortex yet
+Q1	VQLMultiStoreTest.DeltaDefaultsButExplicitMissingTargetHasNoValue	unknown compiled function: delta
+Q1	VQLMultiStoreTest.FindEmptyAndNewlineNeedlesVisitEachDocumentLine	VQL path function 'find' is not compiled to Vortex yet
+Q1	VQLMultiStoreTest.FindReadsDocumentProse	VQL path function 'find' is not compiled to Vortex yet
+Q1	VQLSortTest.LambdaReceivesEachCandidateAsItsContext	VQL path function 'sort_into' is not compiled to Vortex yet
+Q1	VQLSortTest.LargeIntegerKeysRemainDistinctAndEqualKeysStayStable	VQL path function 'sort_into' is not compiled to Vortex yet
+Q1	VQLSortTest.NumericKeysUseNumericOrderingAndRelinkReciprocally	VQL path function 'sort_into' is not compiled to Vortex yet
+Q1	VQLSortTest.SortingAStoreProxyDoesNotAppendStoreOperations	VQL path function 'sort_into' is not compiled to Vortex yet
+Q1	VQLSortTest.StringKeysUseLexicalOrdering	VQL path function 'sort_into' is not compiled to Vortex yet
+Q2	VQLEngineTest.RootStepsOnSlices	this VQL path selector does not have Vortex graph lowering yet
+Q2	VQLPerspectiveTest.ConcurrentAnnotationsAndValencePreservation	this VQL path selector does not have Vortex graph lowering yet
+Q2	VQLPerspectiveTest.TransparentFallbackRule	this VQL path selector does not have Vortex graph lowering yet
+Q3	VQLGeneratorsTest.MissingLocalStoreAndFilteredSlicesHaveNoFallback	store generators and historical anchors require VM selector lowering
+Q3	VQLHistoryTest.AncestryRangeEnumeratesOnlyStatesWithTheCell	version pins require historical VM lowering
+Q3	VQLHistoryTest.ArithmeticPinsAndMissingVersions	version pins require historical VM lowering
+Q3	VQLHistoryTest.PinFoldsHistoricalTopologyAndLeavesSourceUntouched	version pins require historical VM lowering
+Q3	VQLHistoryTest.PinningCellMapsItsIdentityAcrossHistoricalFolds	version pins require historical VM lowering
+Q3	VQLHistoryTest.RepeatedPinSharesTheSameHistoricalCellIdentity	version pins require historical VM lowering
+Q3	VQLHistoryTest.VersionOrderingUsesCausalAncestry	value expression requires Vortex graph lowering
+Q4	VQLHistoryTest.WatchSinceFindsCellsAddedAfterItsHistoricalSnapshot	watch and perspective statements require Vortex graph lowering
+Q4	VQLHistoryTest.WatchSinceSameTopologyProducesNoSnapshotDelta	watch and perspective statements require Vortex graph lowering
+Q4	VQLPerspectiveTest.ScopedPerspectiveBlock	watch and perspective statements require Vortex graph lowering
+Q4	VQLWatchTest.CallbackMayCancelAndRegisterSubscriptionsSafely	watch subscriptions require Vortex graph lowering
+Q4	VQLWatchTest.LocalMountDispatchAddsNoArenaCells	mount declarations require Vortex graph lowering
+Q4	VQLWatchTest.MountAliasIsPrivateToItsEngineSession	mount declarations require Vortex graph lowering
+Q4	VQLWatchTest.MultiStatementScriptWithForAndWatch	watch and perspective statements require Vortex graph lowering
+Q4	VQLWatchTest.PollReportsMembershipChangesAndCanBeCancelled	watch subscriptions require Vortex graph lowering
+Q4	VQLWatchTest.RemoteMountDoesNotSilentlyResolveToLocalHome	VQL mount declarations require Vortex graph lowering
+Q4	VQLWatchTest.SinceRequiresStoreBackedHistory	watch and perspective statements require Vortex graph lowering
+Q4	VQLWatchTest.StreamingAndDeltaMetadata	watch and perspective statements require Vortex graph lowering
+Q5	VQLDynamicViewTest.ComputedDimensionsAreLazyAndObserveUpdatedSource	shape projection requires static rules and scalar, alias, or read-only simple path targets
+Q5	VQLDynamicViewTest.FailedCallbackRestoresOuterBindings	unknown compiled function: lens
+Q5	VQLDynamicViewTest.PivotScopesAreIndependentAndLeaveSourceLinksIntact	shape projection requires static rules and scalar, alias, or read-only simple path targets
+Q5	VQLDynamicViewTest.PivotWritesReachPhysicalDimension	shape projection requires static rules and scalar, alias, or read-only simple path targets
+Q5	VQLDynamicViewTest.PutGetCallbacksReadAndWriteUnderlyingCells	unknown compiled function: lens
+Q5	VQLShapeRuntimeTest.ShapeReturnedByFunctionCanBeBoundAndProjected	value expression requires Vortex graph lowering
+Q5	VQLShapeRuntimeTest.UnboundShapeReferenceRefusesProjection	shape projection requires static rules and scalar, alias, or read-only simple path targets
+Q6	VQLEngineTest.SproutMorphism	frame eligibility found a null AST node
+Q6	VQLLambdaStepTest.UserDefinedFunctionBlockBodyAndWeave	Expected equality of these values: / Which is: ""
+Q6	VQLValueTest.InvalidOffsetsRefuseBeforeMutation	Expected: engine.execute("$item/value(\"bad\", \"offset\")") throws an exception of type std::runtime_error. /
+Q7	VQLHistoryTest.StoreProxyMaskPreservesSelectedDimensionWithoutStoreWrites	VqlMaskLinks cannot remove an internal store-ref index link
+V	MeshEvaluatorTest.VplEnclosuresKeepTheNestedArrayTopology	Compilation error: unsupported VPL monadic verb in VM compiler
+V	MeshEvaluatorTest.VplPreservesArrayTopologyAndAxes	Compilation error: unsupported VPL dyadic verb in VM compiler
