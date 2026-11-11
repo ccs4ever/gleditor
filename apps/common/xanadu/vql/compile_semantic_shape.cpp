@@ -13,6 +13,7 @@
 #include <array>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_set>
 #include <utility>
 
@@ -116,22 +117,56 @@ VQLCompiler::compileSemanticShapeCall(const FunctionInvocation &fn,
   for (const auto &[edge, rule] : assignments)
     rejectNested(rejectNested, *rule->targetValue, rule->dimName);
 
-  const auto subjects = compileArgument(fn.args[0], context);
+  // Everything below is decided from the AST alone, so it refuses before the
+  // subject or any target has emitted an op.
+  for (const auto &[edge, rule] : assignments)
+    if (resolveDimension(rule->dimName) == core_.dims().clone)
+      refuse("shape assignment cannot assign the clone dimension");
 
-  if (!assignments.empty()) {
+  // One subject, one dimension, both directions assigned: the two reciprocal
+  // writes land on the subject's own slots when exactly one target is the
+  // subject itself, and the second Link would silently overwrite the first.
+  // Naming the same variable on both sides keeps both targets equal, which is
+  // collision-free; anything else needs a cell-identity comparison.
+  const auto variableName =
+      [](const ValueExpr &value) -> std::optional<std::string_view> {
+    if (const auto *name = std::get_if<std::string>(&value.kind))
+      return std::string_view{*name};
+    return std::nullopt;
+  };
+  for (const auto &[edge, rule] : assignments)
+    for (const auto &[other, otherRule] : assignments) {
+      if (rule->dimName != otherRule->dimName ||
+          edge.second != DimVector::POS || other.second != DimVector::NEG)
+        continue;
+      const auto left  = variableName(*rule->targetValue);
+      const auto right = variableName(*otherRule->targetValue);
+      if (!left || !right || *left != *right)
+        refuse("apply_shape reciprocal collision on " + rule->dimName +
+               ": assigning both directions can overwrite the subject's own "
+               "link when one target is the subject, and telling that apart "
+               "needs a cell-identity comparison that no Vortex opcode "
+               "provides");
+    }
+
+  // The subject's cardinality is the one refusal that needs the compiled
+  // argument. compileArgument only emits graph ops; nothing executes when the
+  // compile throws, and this runs before beginMutationGroup and before any
+  // op that writes the store or arena.
+  const auto subjects = compileArgument(fn.args[0], context);
+  if (!assignments.empty() &&
+      (subjects.size() != 1 || dynamicStreams_.contains(subjects.front())))
     // Two subjects sharing a target, or a repeated subject, can only be told
     // apart by cell identity, which VqlCompare (a value comparison) cannot
     // supply. A single statically known subject has nothing to collide with.
-    if (subjects.size() != 1 || dynamicStreams_.contains(subjects.front()))
-      refuse("apply_shape with target assignments requires a single "
-             "statically known subject: rejecting reciprocal collisions "
-             "between subjects needs a cell-identity comparison that no "
-             "Vortex opcode provides");
-    for (const auto &[edge, rule] : assignments)
-      if (resolveDimension(rule->dimName) == core_.dims().clone)
-        refuse("shape assignment cannot assign the clone dimension");
-  }
+    refuse("apply_shape with target assignments requires a single "
+           "statically known subject: rejecting reciprocal collisions "
+           "between subjects needs a cell-identity comparison that no "
+           "Vortex opcode provides");
 
+  // A throw from here to endMutationGroup leaves the group open, which is
+  // harmless: the compiler is per-compile, so no open group reaches a later
+  // compile, and neighbouring lowerings unwind the same way.
   const CellRef group = beginMutationGroup("#APPLY_SHAPE_GROUP");
   std::vector<CellRef> targets;
   TypeExpr cellType;

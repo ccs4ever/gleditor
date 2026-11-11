@@ -970,8 +970,10 @@ cache ($O(k)$ for valence $k$, without rank traversal). A shape test succeeds if
 
 Use `project(subject, shape)` for a detached arena snapshot and `apply_shape(subject, shape)` for an
 explicit arena neighborhood edit. Bare `$subject{...}` masks the subject in place; `apply_shape` is
-the explicit form with the stricter validation below, and `project` is the non-mutating form. Shape
-predicates in brackets remain read-only tests.
+the explicit form with stricter validation (nested shapes and unsupported rule kinds refuse,
+assignments are validated before the mask, and reciprocal collisions refuse), and `project` is the
+non-mutating form; the compiled path does not lower `project` yet. Shape predicates in brackets
+remain read-only tests.
 
 Projection currently accepts masks only: empty, wildcard and signed dimension selection/exclusion.
 It copies the selected reachable topology with remapped cell identity, preserves referenced content

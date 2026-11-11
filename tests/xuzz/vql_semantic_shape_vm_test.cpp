@@ -102,7 +102,8 @@ TEST_F(VQLSemanticShapeVmTest, AssignmentsOverSeveralSubjectsRefuseByName) {
 TEST_F(VQLSemanticShapeVmTest, UnsupportedRulesRefuseBeforeAnyEffect) {
   const auto message =
       refusalOf("apply_shape($s, {+d.keep, d.keep <=> d.omit})");
-  EXPECT_NE(message.find("apply_shape"), std::string::npos) << message;
+  EXPECT_NE(message.find("supports only wildcard"), std::string::npos)
+      << message;
   expectUntouched();
 }
 
@@ -115,9 +116,61 @@ TEST_F(VQLSemanticShapeVmTest, NestedShapeAssignmentRefuses) {
 
 TEST_F(VQLSemanticShapeVmTest, BidirectionalAssignmentRefuses) {
   engine.setVariable("target", arena.makeCell("target"));
-  EXPECT_THROW(engine.execute("apply_shape($s, {~d.edge: $target})"),
-               std::runtime_error);
+  const auto message = refusalOf("apply_shape($s, {~d.edge: $target})");
+  EXPECT_NE(message.find("shape assignments require"), std::string::npos)
+      << message;
   expectUntouched();
+}
+
+TEST_F(VQLSemanticShapeVmTest, WrongArityRefuses) {
+  const auto message = refusalOf("apply_shape($s)");
+  EXPECT_NE(message.find("requires 2 argument"), std::string::npos) << message;
+  expectUntouched();
+}
+
+TEST_F(VQLSemanticShapeVmTest, CloneDimensionAssignmentRefusesBeforeEffects) {
+  engine.setVariable("target", arena.makeCell("target"));
+  const auto message = refusalOf("apply_shape($s, {+d.clone: $target})");
+  EXPECT_NE(message.find("clone dimension"), std::string::npos) << message;
+  expectUntouched();
+}
+
+TEST_F(VQLSemanticShapeVmTest, SelfTargetOnOneDirectionCollidesAndRefuses) {
+  const auto other = arena.makeCell("other");
+  engine.setVariable("other", other);
+  const auto message =
+      refusalOf("apply_shape($s, {*, +d.edge: $s, -d.edge: $other})");
+  EXPECT_NE(message.find("reciprocal collision"), std::string::npos) << message;
+  EXPECT_NE(message.find("cell-identity"), std::string::npos) << message;
+  expectUntouched();
+  EXPECT_FALSE(arena.linked(subject, edge, DimVector::POS));
+  EXPECT_FALSE(arena.linked(other, edge, DimVector::POS));
+}
+
+TEST_F(VQLSemanticShapeVmTest, DistinctTargetsOnOppositeDirectionsRefuse) {
+  engine.setVariable("first", arena.makeCell("first"));
+  engine.setVariable("second", arena.makeCell("second"));
+  const auto message =
+      refusalOf("apply_shape($s, {+d.edge: $first, -d.edge: $second})");
+  EXPECT_NE(message.find("reciprocal collision"), std::string::npos) << message;
+  expectUntouched();
+}
+
+TEST_F(VQLSemanticShapeVmTest, SameVariableOnOppositeDirectionsIsAccepted) {
+  const auto target = arena.makeCell("target");
+  engine.setVariable("target", target);
+  engine.execute("apply_shape($s, {+d.edge: $target, -d.edge: $target})");
+  EXPECT_EQ(arena.linked(subject, edge, DimVector::POS), target);
+  EXPECT_EQ(arena.linked(subject, edge, DimVector::NEG), target);
+}
+
+TEST_F(VQLSemanticShapeVmTest, ValuePositionUseLowersThroughTheValuePath) {
+  // A comparison operand is compiled by compileValueExpr, not as an argument.
+  const auto result = engine.execute(
+      "let $x := ## where apply_shape($s, {+d.keep}) == $s return $x");
+  (void)result;
+  EXPECT_FALSE(arena.linked(subject, omit, DimVector::POS));
+  EXPECT_EQ(arena.linked(subject, keep, DimVector::POS), kept);
 }
 
 TEST_F(VQLSemanticShapeVmTest, ShapeHeldInAVariableRefusesByName) {
