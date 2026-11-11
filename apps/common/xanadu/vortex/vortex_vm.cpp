@@ -439,7 +439,7 @@ std::optional<OpcodeKind> VortexVM::getOpcodeKind(CellRef opCell) const {
   auto val = core_.arena().asInt64(opCell);
   if (val && *val >= 0 &&
       static_cast<std::uint64_t>(*val) <=
-          static_cast<std::uint64_t>(OpcodeKind::RestoreBindings)) {
+          static_cast<std::uint64_t>(OpcodeKind::CurrentTimestamp)) {
     return static_cast<OpcodeKind>(*val);
   }
   return std::nullopt;
@@ -1341,7 +1341,8 @@ void VortexVM::runPipeline(CellRef paramCell) {
                                   "run in a parameter pipeline");
     }
     if (kind == OpcodeKind::VqlString || kind == OpcodeKind::VqlAdd ||
-        kind == OpcodeKind::VqlBoxScalar)
+        kind == OpcodeKind::VqlBoxScalar ||
+        kind == OpcodeKind::CurrentTimestamp)
       throw std::invalid_argument(
           "VQL scalar opcodes cannot run in a parameter pipeline");
     if (kind == OpcodeKind::InvokeFrame || kind == OpcodeKind::ReturnFrame ||
@@ -1369,7 +1370,8 @@ void VortexVM::runPipeline(CellRef paramCell) {
     std::vector<CellRef> inCells = inputsOf(*pipeOp);
     std::vector<CellValue> inVals;
     if (kind == OpcodeKind::VqlCompare || kind == OpcodeKind::VqlString ||
-        kind == OpcodeKind::VqlAdd || kind == OpcodeKind::VqlBoxScalar) {
+        kind == OpcodeKind::VqlAdd || kind == OpcodeKind::VqlBoxScalar ||
+        kind == OpcodeKind::CurrentTimestamp) {
       // These VQL scalar leaves resolve raw VM slots themselves.
     } else if (inCells.empty()) {
       inVals.push_back(inputValue(paramCell));
@@ -1474,8 +1476,8 @@ bool VortexVM::evaluateCondition(CellRef clause,
     throw std::invalid_argument(
         "ProbeLink/VqlFieldProbe/VqlMaskLinks cannot run as conditions");
   if (kind == OpcodeKind::VqlString || kind == OpcodeKind::VqlAdd ||
-      kind == OpcodeKind::VqlBoxScalar)
-    throw std::invalid_argument("VQL scalar opcodes cannot run as conditions");
+      kind == OpcodeKind::VqlBoxScalar || kind == OpcodeKind::CurrentTimestamp)
+    throw std::invalid_argument("scalar opcodes cannot run as conditions");
   if (kind == OpcodeKind::InvokeFrame || kind == OpcodeKind::ReturnFrame)
     throw std::invalid_argument(
         "activation-frame opcodes cannot run as conditions");
@@ -1491,7 +1493,8 @@ bool VortexVM::evaluateCondition(CellRef clause,
   std::vector<CellRef> inCells = inputsOf(actualClause);
   std::vector<CellValue> inVals;
   if (kind == OpcodeKind::VqlCompare || kind == OpcodeKind::VqlString ||
-      kind == OpcodeKind::VqlAdd || kind == OpcodeKind::VqlBoxScalar) {
+      kind == OpcodeKind::VqlAdd || kind == OpcodeKind::VqlBoxScalar ||
+      kind == OpcodeKind::CurrentTimestamp) {
     // Their handlers resolve raw slots and must observe missing references.
   } else if (!inCells.empty()) {
     for (CellRef c : inCells) {
@@ -2169,6 +2172,8 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
     return executeVqlAdd(opcode, outputs);
   case OpcodeKind::VqlBoxScalar:
     return executeVqlBoxScalar(opcode, outputs);
+  case OpcodeKind::CurrentTimestamp:
+    return executeCurrentTimestamp(opcode, outputs);
   case OpcodeKind::ProbeLink:
     return executeProbeLink(opcode, outputs);
   case OpcodeKind::VqlMaskLinks:
@@ -3320,7 +3325,8 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
                                  .value_or(clause);
       const auto kind = getOpcodeKind(actual);
       return kind == OpcodeKind::VqlString || kind == OpcodeKind::VqlAdd ||
-             kind == OpcodeKind::VqlBoxScalar;
+             kind == OpcodeKind::VqlBoxScalar ||
+             kind == OpcodeKind::CurrentTimestamp;
     });
   };
   const auto hasFrameCondition = [this](const auto &clauses) {
@@ -3438,7 +3444,8 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
             .failingClause = *op,
             .errorMessage  = "VqlMaskLinks requires scalar reference slots"};
   if (kind == OpcodeKind::VqlString || kind == OpcodeKind::VqlAdd ||
-      kind == OpcodeKind::VqlBoxScalar) {
+      kind == OpcodeKind::VqlBoxScalar ||
+      kind == OpcodeKind::CurrentTimestamp) {
     if (!core_.preconditionsOf(*op).empty() ||
         !core_.postconditionsOf(*op).empty()) {
       return {.success = false,
@@ -3579,6 +3586,7 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
           kind == OpcodeKind::RequireContract ||
           kind == OpcodeKind::VqlCompare || kind == OpcodeKind::VqlString ||
           kind == OpcodeKind::VqlAdd || kind == OpcodeKind::VqlBoxScalar ||
+          kind == OpcodeKind::CurrentTimestamp ||
           kind == OpcodeKind::ProbeLink || kind == OpcodeKind::VqlMaskLinks ||
           kind == OpcodeKind::ScopedChoice ||
           kind == OpcodeKind::VqlFieldProbe) {
@@ -3604,10 +3612,12 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
       kind != OpcodeKind::ClearCellRefs &&
       kind != OpcodeKind::BranchFalseCell && kind != OpcodeKind::VqlCompare &&
       kind != OpcodeKind::VqlString && kind != OpcodeKind::VqlAdd &&
-      kind != OpcodeKind::VqlBoxScalar && kind != OpcodeKind::ScopedChoice &&
-      kind != OpcodeKind::ResumeInit && kind != OpcodeKind::ResumeSet &&
-      kind != OpcodeKind::ProbeLink && kind != OpcodeKind::VqlMaskLinks &&
-      kind != OpcodeKind::VqlFieldProbe && !stateful;
+      kind != OpcodeKind::VqlBoxScalar &&
+      kind != OpcodeKind::CurrentTimestamp &&
+      kind != OpcodeKind::ScopedChoice && kind != OpcodeKind::ResumeInit &&
+      kind != OpcodeKind::ResumeSet && kind != OpcodeKind::ProbeLink &&
+      kind != OpcodeKind::VqlMaskLinks && kind != OpcodeKind::VqlFieldProbe &&
+      !stateful;
   if (memoizable && isMemoized(*op)) {
     if (const auto key = getMemoKey(*op)) {
       CellRef pin = core_.getOrCreateMemoPin(*key);
@@ -3637,14 +3647,15 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
   bool boxReferenceSnapshotTaken = false;
   bool hadBoxOutputReference     = false;
   std::optional<CellRef> priorBoxOutputReference;
-  if (kind == OpcodeKind::VqlBoxScalar) {
+  if (kind == OpcodeKind::VqlBoxScalar ||
+      kind == OpcodeKind::CurrentTimestamp) {
     if (outCells.size() != 1 || !core_.arena().contains(outCells.front()) ||
         streamSlots_.contains(outCells.front()) ||
         iteratorSlots_.contains(outCells.front())) {
       return {.success       = false,
               .failingClause = *op,
               .errorMessage =
-                  "VqlBoxScalar output must be one scalar arena slot"};
+                  "scalar-producing opcode output must be one arena slot"};
     }
     boxScalarOutput = outCells.front();
     try {
@@ -3696,8 +3707,10 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
                kind == OpcodeKind::Value || kind == OpcodeKind::CopyCellRefs ||
                kind == OpcodeKind::ClearCellRefs ||
                kind == OpcodeKind::ProbeLink ||
-               kind == OpcodeKind::VqlBoxScalar) {
-      if (kind == OpcodeKind::VqlBoxScalar) {
+               kind == OpcodeKind::VqlBoxScalar ||
+               kind == OpcodeKind::CurrentTimestamp) {
+      if (kind == OpcodeKind::VqlBoxScalar ||
+          kind == OpcodeKind::CurrentTimestamp) {
         if (const auto found = cellReferences_.find(*boxScalarOutput);
             found != cellReferences_.end()) {
           hadBoxOutputReference   = true;

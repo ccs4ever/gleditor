@@ -1,6 +1,7 @@
 #include "common/xanadu/vortex/vortex_vm.hpp"
 
 #include <bit>
+#include <chrono>
 #include <concepts>
 #include <cstdint>
 #include <expected>
@@ -14,6 +15,7 @@
 #include <variant>
 
 #include "common/xanadu/scalar.hpp"
+#include "common/xanadu/zigzag/arena_savepoint.hpp"
 #include "common/xanadu/zigzag/query_scalar.hpp"
 
 namespace zigzag::vortex {
@@ -238,6 +240,43 @@ ExecutionResult VortexVM::executeVqlBoxScalar(const CellRef opcode,
         },
         *scalar);
     outputs.emplace_back(static_cast<std::int64_t>(boxed));
+    return {};
+  } catch (const std::exception &error) {
+    return fail(error.what());
+  }
+}
+
+ExecutionResult
+VortexVM::executeCurrentTimestamp(const CellRef opcode,
+                                  std::vector<CellValue> &outputs) {
+  const auto fail = [opcode](std::string message) {
+    return ExecutionResult{.success       = false,
+                           .failingClause = opcode,
+                           .errorMessage  = std::move(message)};
+  };
+
+  try {
+    const auto inputs      = inputsOf(opcode);
+    const auto outputSlots = outputsOf(opcode);
+    if (!inputs.empty() || outputSlots.size() != 1)
+      return fail("CurrentTimestamp expects no inputs and one output");
+    const CellRef outputSlot = outputSlots.front();
+    auto &arena              = core_.arena();
+    if (!arena.contains(outputSlot) || streamSlots_.contains(outputSlot) ||
+        iteratorSlots_.contains(outputSlot))
+      return fail("CurrentTimestamp output must be one scalar arena slot");
+
+    arena.consumeWork();
+    const auto now = std::chrono::system_clock::now().time_since_epoch();
+    const auto nanos =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(now);
+    const auto value = xanadu::scalarTimestamp(nanos.count());
+    zigzag::ArenaSavepoint savepoint(arena);
+    const CellRef timestamp = arena.makeCell(value.text);
+    zigzag::expectWritten(
+        arena.setValueBits(timestamp, value.kind, value.bits));
+    outputs.emplace_back(static_cast<std::int64_t>(timestamp));
+    savepoint.commit();
     return {};
   } catch (const std::exception &error) {
     return fail(error.what());

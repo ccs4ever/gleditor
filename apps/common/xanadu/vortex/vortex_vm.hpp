@@ -132,6 +132,7 @@ enum class OpcodeKind : std::uint8_t {
   CreateClosure,
   ApplyClosure,
   RestoreBindings,
+  CurrentTimestamp,
 };
 
 struct ProjectionLimits {
@@ -629,6 +630,8 @@ private:
                                 std::vector<CellValue> &outputs);
   ExecutionResult executeVqlBoxScalar(CellRef opcode,
                                       std::vector<CellValue> &outputs);
+  ExecutionResult executeCurrentTimestamp(CellRef opcode,
+                                          std::vector<CellValue> &outputs);
   ExecutionResult executeProbeLink(CellRef opcode,
                                    std::vector<CellValue> &outputs);
   ExecutionResult executeVqlMaskLinks(CellRef opcode,

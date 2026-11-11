@@ -267,6 +267,7 @@ bool pureOpcode(OpcodeKind opcode) {
   case OpcodeKind::CreateClosure:
   case OpcodeKind::ApplyClosure:
   case OpcodeKind::RestoreBindings:
+  case OpcodeKind::CurrentTimestamp:
     return false;
   }
   return false;
@@ -526,7 +527,7 @@ VortexProgram decodeProgram(std::string_view bytes, SyntaxLimits limits) {
     dictionary(item, 5);
     const auto opcode = required(item, "opcode").asInteger();
     if (opcode < 0 ||
-        opcode > static_cast<std::int64_t>(OpcodeKind::RestoreBindings))
+        opcode > static_cast<std::int64_t>(OpcodeKind::CurrentTimestamp))
       throw std::runtime_error("Unknown Vortex artifact opcode");
     const auto &next = required(item, "next").asList();
     if (next.size() > 1)
