@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <bit>
+#include <cassert>
 #include <cstddef>
 #include <limits>
 #include <span>
@@ -25,6 +26,63 @@ ArenaManifold::ArenaManifold(const Manifold *base, const xanadu::Store *store)
   if (store_ != nullptr) {
     projectProvenance(*store_);
   }
+}
+
+ArenaManifold::ArenaManifold(ArenaManifold &&other) noexcept : ArenaManifold() {
+  swap(other);
+}
+
+ArenaManifold &ArenaManifold::operator=(ArenaManifold &&other) noexcept {
+  if (this != &other) {
+    ArenaManifold moved(std::move(other));
+    swap(moved);
+  }
+  return *this;
+}
+
+void ArenaManifold::swap(ArenaManifold &other) noexcept {
+  using std::swap;
+  swap(slots_, other.slots_);
+  swap(links_, other.links_);
+  swap(content_, other.content_);
+  swap(scratch_, other.scratch_);
+  swap(trail_, other.trail_);
+  swap(base_, other.base_);
+  swap(store_, other.store_);
+  swap(authorshipRoot_, other.authorshipRoot_);
+  swap(provenanceCells_, other.provenanceCells_);
+  swap(arenaDims_, other.arenaDims_);
+  swap(overlay_, other.overlay_);
+  swap(shadowOrder_, other.shadowOrder_);
+  swap(liveLinks_, other.liveLinks_);
+  swap(liveContent_, other.liveContent_);
+  swap(outstandingMarks_, other.outstandingMarks_);
+  swap(hasHydrationFloor_, other.hasHydrationFloor_);
+  swap(floors_, other.floors_);
+  swap(spaces_, other.spaces_);
+  swap(spaceProxies_, other.spaceProxies_);
+  swap(proxyOrder_, other.proxyOrder_);
+  swap(spaceStoreRefsTail_, other.spaceStoreRefsTail_);
+  swap(occurrenceToCanonical_, other.occurrenceToCanonical_);
+  swap(occurrenceToView_, other.occurrenceToView_);
+  swap(viewCanonicalToOccurrence_, other.viewCanonicalToOccurrence_);
+  swap(quoteOccurrenceOrder_, other.quoteOccurrenceOrder_);
+  swap(quoteSpace_, other.quoteSpace_);
+  swap(quoteSpaceOrder_, other.quoteSpaceOrder_);
+  swap(boundDimensions_, other.boundDimensions_);
+  swap(proxyShadowedEdges_, other.proxyShadowedEdges_);
+  swap(proxyShadowedEdgeOrder_, other.proxyShadowedEdgeOrder_);
+  swap(storesRankTail_, other.storesRankTail_);
+  swap(allocationLimit_, other.allocationLimit_);
+  swap(defaultReader_, other.defaultReader_);
+  swap(workRemaining_, other.workRemaining_);
+  swap(scratchLimit_, other.scratchLimit_);
+}
+
+std::uint32_t ArenaManifold::liveMarks() const noexcept {
+  assert(!hasHydrationFloor_ || (!floors_.empty() && outstandingMarks_ > 0));
+  return hasHydrationFloor_ && outstandingMarks_ > 0 ? outstandingMarks_ - 1
+                                                     : outstandingMarks_;
 }
 
 std::optional<CellRef> ArenaManifold::home() const noexcept {
@@ -1594,6 +1652,10 @@ Mark ArenaManifold::mark() noexcept {
 }
 
 ArenaManifold *ArenaManifold::discard(const Mark &m) noexcept {
+  assert(!hasHydrationFloor_ || outstandingMarks_ > 1);
+  if (hasHydrationFloor_ && outstandingMarks_ == 1) {
+    return this;
+  }
   std::ignore = m;
   if (0 == outstandingMarks_) {
     return this;
@@ -1610,6 +1672,10 @@ ArenaManifold *ArenaManifold::discard(const Mark &m) noexcept {
 }
 
 ArenaManifold *ArenaManifold::release(const Mark &m) noexcept {
+  assert(!hasHydrationFloor_ || outstandingMarks_ > 1);
+  if (hasHydrationFloor_ && outstandingMarks_ == 1) {
+    return this;
+  }
   for (std::size_t i = quoteSpaceOrder_.size(); i > m.quoteSpaceCount; i--) {
     quoteSpace_.erase(quoteSpaceOrder_[i - 1]);
   }
@@ -1776,7 +1842,9 @@ std::optional<Promoted> promote(xanadu::Store &store,
       if (queued.insert(*target).second) frontier.push_back(*target);
     }
     for (const auto &edge : from.dimensionsOf(current)) {
-      if (from.textOf(edge.dim) == "d.dims") {
+      if (const auto dimName = from.textOf(edge.dim);
+          dimName == "d.lineage" ||
+          (dimName == "d.dims" && !budget.wholeSpace)) {
         continue;
       }
       auto discover = [&](const CellRef next, const bool expand) {
@@ -1808,13 +1876,19 @@ std::optional<Promoted> promote(xanadu::Store &store,
   std::vector<CellRef> cyclicHandles;
   std::unordered_set<CellRef> ready;
   for (const auto cell : order) {
-    if (from.valueKindOf(cell) == xanadu::ValueKind::OpHandle &&
-        isEphemeral(cell) && !from.isProxy(cell)) {
+    if (from.valueKindOf(cell) == xanadu::ValueKind::OpHandle) {
+      // A proxy op handle's target lives in foreign space promote cannot
+      // translate, and handleTarget() reads proxies as absent; refuse before
+      // any operation is written rather than dereference mid-mint.
+      if (from.isProxy(cell)) return std::nullopt;
       const auto target = from.handleTarget(cell);
       if (!target) return std::nullopt;
       if (isEphemeral(*target)) {
-        if (!xanadu::isCellRelocationHandle(from, cell) ||
-            !seen.contains(*target))
+        if (!seen.contains(*target)) return std::nullopt;
+        // The relocation-handle mark is only meaningful on ephemeral cells;
+        // any op handle naming an unwritten target defers so its target's
+        // birth operation exists before the handle's value does.
+        if (isEphemeral(cell) && !xanadu::isCellRelocationHandle(from, cell))
           return std::nullopt;
         deferred.push_back(cell);
         continue;
@@ -1827,7 +1901,8 @@ std::optional<Promoted> promote(xanadu::Store &store,
   while (!deferred.empty()) {
     const auto before = deferred.size();
     std::erase_if(deferred, [&](CellRef cell) {
-      if (!ready.contains(*from.handleTarget(cell))) return false;
+      const auto target = from.handleTarget(cell);
+      if (!target || !ready.contains(*target)) return false;
       mintOrder.push_back(cell);
       ready.insert(cell);
       return true;
@@ -1894,6 +1969,18 @@ std::optional<Promoted> promote(xanadu::Store &store,
   Promoted out{.version = parent, .cells = {}};
   out.cells.reserve(order.size());
 
+  // Scalar-valued cells that also carry real content -- an opcode's "#NAME"
+  // label sits beside its opcode bits -- cannot take the makeScalarCell arm:
+  // that op restates the value's own rendering and drops the content. They
+  // mint their content in the loop and take their bits in the setValue pass
+  // below, the same two-phase shape cyclicHandles uses.
+  struct PendingScalar {
+    CellRef arena;
+    xanadu::ValueKind kind;
+    std::uint64_t bits;
+  };
+  std::vector<PendingScalar> pendingScalars;
+
   for (const CellRef arena : mintOrder) {
     // A cell the overlay was only reading through already has a name in this
     // document, so promotion maps it to itself and mints nothing. Only what
@@ -1956,9 +2043,23 @@ std::optional<Promoted> promote(xanadu::Store &store,
       }
     }
     const auto kind = from.valueKindOf(arena);
+    const bool dualScalar =
+        spans.size() == 1 &&
+        (xanadu::ValueKind::Double == kind || xanadu::ValueKind::Bool == kind ||
+         xanadu::ValueKind::Int64 == kind);
 
     xanadu::MicroversionId minted = out.version;
-    if (xanadu::ValueKind::Double == kind) {
+    if (dualScalar) {
+      if (xanadu::scratchScroll == spans.front().scroll) {
+        minted = store.makeCell(out.version, from.scratchTextOf(spans.front()));
+      } else {
+        minted = store.makeCell(out.version, spans.front());
+      }
+      if (const auto slot = from.slot(arena); slot.has_value()) {
+        pendingScalars.push_back(PendingScalar{
+            .arena = arena, .kind = kind, .bits = slot->valueBits});
+      }
+    } else if (xanadu::ValueKind::Double == kind) {
       // R6's deferred half, written here: bits *and* a rendering.
       minted =
           store.makeScalarCell(out.version, from.asDouble(arena).value_or(0.0));
@@ -1979,9 +2080,10 @@ std::optional<Promoted> promote(xanadu::Store &store,
       else
         minted = store.makeCell(out.version, spans.front());
     } else if (xanadu::ValueKind::OpHandle == kind) {
-      const auto target = *from.handleTarget(arena);
-      minted            = store.makeOpHandle(
-          out.version, isEphemeral(target) ? real.at(target) : target,
+      const auto target = from.handleTarget(arena);
+      if (!target) return std::nullopt;
+      minted = store.makeOpHandle(
+          out.version, isEphemeral(*target) ? real.at(*target) : *target,
           from.textOf(arena));
     } else if (xanadu::ValueKind::ForeignOpHandle == kind) {
       const auto target = xanadu::foreignOpTarget(from, arena);
@@ -2015,6 +2117,19 @@ std::optional<Promoted> promote(xanadu::Store &store,
     }
   }
 
+  if (!pendingScalars.empty()) {
+    auto current = store.rebuildManifold(out.version);
+    for (const auto &pending : pendingScalars) {
+      const auto born    = real.at(pending.arena);
+      const auto content = current.contentOf(born);
+      if (content.empty()) {
+        continue;
+      }
+      out.version = store.setValue(out.version, born, content.front(),
+                                   pending.kind, pending.bits);
+    }
+  }
+
   if (!cyclicHandles.empty()) {
     auto current = store.rebuildManifold(out.version);
     for (const auto handle : cyclicHandles) {
@@ -2022,12 +2137,13 @@ std::optional<Promoted> promote(xanadu::Store &store,
       const auto content = current.contentOf(born);
       const std::vector<xanadu::PrimediaSpan> spans(content.begin(),
                                                     content.end());
-      const auto target = *from.handleTarget(handle);
+      const auto target = from.handleTarget(handle);
+      if (!target) return std::nullopt;
       out.version =
           store.setValue(out.version, born,
                          spans.empty() ? xanadu::PrimediaSpan{} : spans.front(),
                          xanadu::ValueKind::OpHandle,
-                         isEphemeral(target) ? real.at(target) : target);
+                         isEphemeral(*target) ? real.at(*target) : *target);
       std::uint64_t offset = spans.empty() ? 0 : spans.front().length;
       for (std::size_t i = 1; i < spans.size(); ++i) {
         out.version =
@@ -2071,6 +2187,9 @@ std::optional<Promoted> promote(xanadu::Store &store,
     }
     const bool mayClear = policyHas(policy, ShadowCommit::Clears);
     for (const auto &edge : from.dimensionsOf(arena)) {
+      if (from.textOf(edge.dim) == "d.lineage") {
+        continue;
+      }
       // Net-state diff against the base: emit only edges whose posward target
       // changed. A shadow is a whole-cell copy, so shadow-vs-base is complete.
       // For a persistent shadow the base lookup sees the original edge; for a
@@ -2161,7 +2280,11 @@ ArenaManifold::PrefixSnapshot ArenaManifold::exportPrefix(const Mark &m) const {
   return out;
 }
 
-ArenaManifold *ArenaManifold::hydratePrefix(const PrefixSnapshot &snapshot) {
+ArenaResult ArenaManifold::hydratePrefix(const PrefixSnapshot &snapshot) {
+  if (outstandingMarks_ != 0) {
+    return std::unexpected{ArenaRefusal::MarksOutstanding};
+  }
+
   slots_       = snapshot.slots;
   links_       = snapshot.links;
   content_     = snapshot.content;
@@ -2185,7 +2308,8 @@ ArenaManifold *ArenaManifold::hydratePrefix(const PrefixSnapshot &snapshot) {
       .links   = static_cast<std::uint32_t>(links_.size()),
       .content = static_cast<std::uint32_t>(content_.size()),
   });
-  outstandingMarks_ = 1;
+  outstandingMarks_  = 1;
+  hasHydrationFloor_ = true;
   return this;
 }
 
@@ -2195,6 +2319,9 @@ ArenaManifold *ArenaManifold::evictOldestMark() noexcept {
   }
   floors_.erase(floors_.begin());
   outstandingMarks_--;
+  if (hasHydrationFloor_) {
+    hasHydrationFloor_ = false;
+  }
   return this;
 }
 

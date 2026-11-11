@@ -75,6 +75,11 @@ enum class OpcodeKind : std::uint8_t {
   Trim,
   ToLower,
   ToUpper,
+  StrLen,
+  ByteAt,
+  StrSlice,
+  IntToStr,
+  StrToInt,
 
   // Vlog Logic Programming Extensions
   Unify,
@@ -122,7 +127,35 @@ enum class OpcodeKind : std::uint8_t {
   // spins on; unproduced lands on the failure target. Appended last
   // for the same persisted-kind reason.
   RunResume,
+
+  // VIcon Goal-Directed String Scanning Extensions (§6.1 / §6.2)
+  ScanPush,
+  ScanPop,
+  ScanTab,
+  ScanMove,
+  ScanMatch,
+  ScanMany,
+  ScanUpto,
+  ScanAny,
+  ScanFind,
+  ScanPos,
+  ScanSubject,
 };
+
+inline constexpr OpcodeKind kLastContentDecodableOpcode = OpcodeKind::FieldSet;
+inline constexpr OpcodeKind kLastOpcodeKind = OpcodeKind::ScanSubject;
+
+[[nodiscard]] constexpr bool
+isContentDecodableOpcode(std::int64_t raw) noexcept {
+  return raw >= 0 &&
+         static_cast<std::uint64_t>(raw) <=
+             static_cast<std::uint64_t>(kLastContentDecodableOpcode);
+}
+
+[[nodiscard]] constexpr bool isRegistrableOpcode(std::int64_t raw) noexcept {
+  return raw >= 0 && static_cast<std::uint64_t>(raw) <=
+                         static_cast<std::uint64_t>(kLastOpcodeKind);
+}
 
 struct ChoicePoint {
   std::optional<CellRef> cursor;
@@ -140,10 +173,16 @@ struct ChoicePoint {
 class VortexVM {
 public:
   explicit VortexVM(VortexCore &core);
-  /// The funnel predicate this VM installed captures `this`; a core
-  /// that outlives the VM must never run a dangling guard, so the
-  /// slot is released when this VM installed it.
+  /// The funnel predicate this VM installs captures `this`; the core removes
+  /// this VM's owner-keyed entry at destruction.
   ~VortexVM();
+
+  // Registered guard callbacks and choice-point ownership require a stable VM
+  // identity. A default copy would retain opcode state without owning a guard.
+  VortexVM(const VortexVM &)            = delete;
+  VortexVM &operator=(const VortexVM &) = delete;
+  VortexVM(VortexVM &&)                 = delete;
+  VortexVM &operator=(VortexVM &&)      = delete;
 
   [[nodiscard]] VortexCore &core() noexcept { return core_; }
   [[nodiscard]] const VortexCore &core() const noexcept { return core_; }
@@ -161,10 +200,9 @@ public:
   [[nodiscard]] bool hasOpcodeKind(CellRef opCell) const {
     return opcodeMap_.contains(opCell);
   }
-  /// Install this VM's kind predicate on the core's write funnel —
-  /// P15's `opcodeMap_.contains(masterOf(cell))`. The constructor calls
-  /// it; re-call it when a second VM over the same core re-installed
-  /// its own map's view (production contexts are one VM per core).
+  /// Install or update this VM's kind predicate on the core's write funnel —
+  /// P15's `opcodeMap_.contains(masterOf(cell))`. Repeated calls are
+  /// idempotent and do not affect guards registered by other VMs.
   VortexVM *installWriteGuard();
 
   // -- P15 Image Re-Registration ----------------------------------------------
@@ -210,6 +248,7 @@ public:
   bool backtrack(std::optional<CellRef> cursor);
   void cut(std::size_t cutBarrier = 0);
   [[nodiscard]] std::size_t choiceDepth() const noexcept;
+  [[nodiscard]] std::size_t scopedDepth() const noexcept { return 0; }
   void clearChoicePoints();
 
   // -- Distributed / Intra-Node OR-Parallelism Extensions ---------------------
@@ -275,10 +314,6 @@ private:
   std::size_t oracleCursor_{0};
   std::uint64_t totalCycles_{0};
   std::function<void(std::string_view deweyPrefix)> cutCallback_;
-  /// Tracks the funnel-guard slot's owner so ~VortexVM only releases
-  /// what this VM installed — a second VM over the same core that
-  /// never installed leaves the first's guard in place.
-  bool guardInstalled_{false};
 };
 
 } // namespace zigzag::vortex

@@ -319,10 +319,10 @@ bool OrParallelCoordinator::submitSolution(
   std::vector<std::uint16_t> pathVec(deweyPath.begin(), deweyPath.end());
   const CellRef solCell = arena_.makeCell(value);
   solutions_[pathVec]   = OrParallelSolution{
-        .deweyPath      = pathVec,
-        .deweyKey       = key,
-        .value          = std::string(value),
-        .submissionCell = solCell,
+      .deweyPath      = pathVec,
+      .deweyKey       = key,
+      .value          = std::string(value),
+      .submissionCell = solCell,
   };
   rebuildSubmissionRankLocked();
   return true;
@@ -344,9 +344,23 @@ ExecutionResult OrParallelCoordinator::executeSparkOnWorker(
 
   ArenaManifold workerArena{base};
   VortexCore workerCore{workerArena};
-  if (spark.model == SparkModelKind::ShadowDeltaPrefix &&
-      spark.prefixSnapshot.has_value()) {
-    workerArena.hydratePrefix(*spark.prefixSnapshot);
+  if (spark.model == SparkModelKind::ShadowDeltaPrefix) {
+    if (!spark.prefixSnapshot) {
+      return ExecutionResult{.success           = false,
+                             .contractViolation = ContractViolationKind::None,
+                             .failingClause     = std::nullopt,
+                             .errorMessage =
+                                 "Shadow-delta spark has no prefix snapshot"};
+    }
+    if (const auto hydrated = workerArena.hydratePrefix(*spark.prefixSnapshot);
+        !hydrated) {
+      return ExecutionResult{
+          .success           = false,
+          .contractViolation = ContractViolationKind::None,
+          .failingClause     = std::nullopt,
+          .errorMessage      = "Could not hydrate worker arena: " +
+                          std::string(zigzag::toString(hydrated.error()))};
+    }
   }
   VortexVM workerVm{workerCore};
   if (bindProgramOpcodes) {
@@ -355,7 +369,25 @@ ExecutionResult OrParallelCoordinator::executeSparkOnWorker(
     // images register through vm.registerProgramImage(imageRecord)
     // (genesis (b) does the same inside runGenesis), never by scanning
     // arbitrary values.
+    //
+    // Safety guard (P6 / ARCHITECT-5): Any opcode registration on workerVm over
+    // workerArena must check workerArena.contains(op) &&
+    // !zigzag::isEphemeral(op) so session-ephemeral runtime-registered ops are
+    // never bound on a worker whose base manifold lacks them.
     bindProgramOpcodes(workerCore, workerVm);
+  }
+  // Safety guard (P6 / ARCHITECT-5): When backed by a base manifold, ensure any
+  // entry opcode to be scheduled on workerVm is contained in workerArena and
+  // not an ephemeral cell that does not exist in base.
+  if (base != nullptr && spark.entryOpcode != noCell &&
+      (!workerArena.contains(spark.entryOpcode) ||
+       (spark.model == SparkModelKind::OracleRecompute &&
+        zigzag::isEphemeral(spark.entryOpcode)))) {
+    return ExecutionResult{
+        .success           = false,
+        .contractViolation = ContractViolationKind::None,
+        .failingClause     = std::nullopt,
+        .errorMessage      = "Entry opcode is unbound or ephemeral on worker"};
   }
   workerVm.setCutCallback([&coordinator](std::string_view prefix) {
     coordinator.prunePrefix(prefix);

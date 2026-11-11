@@ -7,6 +7,7 @@
 
 #include <gleditor/logging.hpp>
 
+#include "common/xanadu/relocation_marks.hpp"
 #include "common/xanadu/scalar.hpp"
 #include "common/xanadu/truthiness.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
@@ -69,6 +70,8 @@ void VortexCore::initGenesis() {
   dims_.scan   = mintNamedDimension("d.scan", lastDim);
   dims_.stores = mintNamedDimension("d.stores", lastDim);
   dims_.role   = mintNamedDimension("d.role", lastDim);
+  dims_.left   = mintNamedDimension("d.left", lastDim);
+  dims_.right  = mintNamedDimension("d.right", lastDim);
 }
 
 CellRef VortexCore::mintDimension(std::string_view name) {
@@ -205,15 +208,13 @@ VortexCore::writeValue(CellRef cell, const std::int64_t offset,
     return std::nullopt;
   }
   const CellRef master = masterOf(cell);
-  // P15 (spec §6.5/M10): kind immutability. The VM-installed predicate
-  // tests opcodeMap_ membership of the resolved master — a clone of a
-  // registered op is unregistered but writes the registered master's
-  // bits, so the master is the cell to test. Restating a registered
-  // cell's content would desync the map's recorded kind, and the map
-  // is VM-private — no trail can undo it. A write to an unregistered
-  // cell stays free: its content is its kind, which is exactly how
-  // New+Value mints runtime ops.
-  if (writeGuard_ && writeGuard_(master)) {
+  // P15 (spec §6.5/M10): each live VM protects its own registered opcode
+  // masters; a write is refused if any map claims this cell.
+  const bool guarded =
+      std::ranges::any_of(writeGuards_, [master](const auto &entry) {
+        return entry.second(master);
+      });
+  if (guarded) {
     if (fault != nullptr) {
       *fault = WriteFault::OpcodeKind;
     }
@@ -380,15 +381,10 @@ VortexCore::baseDimensionNamed(const std::string_view name) const {
 
 std::vector<CellRef> VortexCore::wingOf(const CellRef opcode,
                                         const DimVector side) const {
-  // A wing slot holds either an operand reference -- an Int64 naming a cell
-  // the arena can reach -- or is itself the operand, read through its master.
+  // OpHandle is the current reference encoding; Int64 remains readable for
+  // older arenas. Other scalar kinds are never interpreted as references.
   const auto operand = [this](const CellRef slot) {
-    return arena_.asInt64(slot)
-        .transform([](const std::int64_t v) { return static_cast<CellRef>(v); })
-        .and_then([this](const CellRef ref) {
-          return arena_.contains(ref) ? std::optional{ref} : std::nullopt;
-        })
-        .value_or(masterOf(slot));
+    return xanadu::relocationTarget(arena_, slot).value_or(masterOf(slot));
   };
   const auto first = arena_.linked(opcode, dims_.grab, side);
   if (!first) return {};
@@ -404,11 +400,23 @@ std::vector<CellRef> VortexCore::outputsOf(CellRef opcode) const {
   return wingOf(opcode, DimVector::NEG);
 }
 
+std::vector<CellRef> VortexCore::rawWingSlotsOf(CellRef opcode,
+                                                bool rightWing) const {
+  const auto side  = rightWing ? DimVector::NEG : DimVector::POS;
+  const auto first = arena_.linked(opcode, dims_.grab, side);
+  if (!first) return {};
+  return zigzag::rank(arena_, *first, dims_.step) |
+         std::ranges::to<std::vector>();
+}
+
 void VortexCore::bindInput(CellRef opcode, CellRef operand) {
   if (!arena_.contains(opcode) || !arena_.contains(operand)) {
     return;
   }
-  CellRef slot = arena_.makeScalarCell(static_cast<std::int64_t>(operand));
+  const CellRef slot = arena_.makeCell();
+  zigzag::expectWritten(arena_.setValueBits(
+      slot, xanadu::ValueKind::OpHandle, static_cast<std::uint64_t>(operand)));
+  xanadu::markCellRelocation(arena_, *this, slot);
 
   // Link slot into opcode's input wing (+d.grab, then chain on +d.step)
   const auto first = arena_.linked(opcode, dims_.grab, DimVector::POS);
@@ -426,7 +434,10 @@ void VortexCore::bindOutput(CellRef opcode, CellRef target) {
   if (!arena_.contains(opcode) || !arena_.contains(target)) {
     return;
   }
-  CellRef slot = arena_.makeScalarCell(static_cast<std::int64_t>(target));
+  const CellRef slot = arena_.makeCell();
+  zigzag::expectWritten(arena_.setValueBits(
+      slot, xanadu::ValueKind::OpHandle, static_cast<std::uint64_t>(target)));
+  xanadu::markCellRelocation(arena_, *this, slot);
 
   // Link slot into opcode's output wing (-d.grab, then chain on +d.step)
   const auto first = arena_.linked(opcode, dims_.grab, DimVector::NEG);

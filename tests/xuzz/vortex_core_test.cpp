@@ -5,10 +5,17 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <bit>
 #include <limits>
+#include <memory>
+#include <ranges>
 #include <string>
+#include <type_traits>
 #include <vector>
 
+#include "common/xanadu/relocation_marks.hpp"
+#include "common/xanadu/store.hpp"
 #include "common/xanadu/vortex/vortex_core.hpp"
 #include "common/xanadu/vortex/vortex_vm.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
@@ -255,6 +262,145 @@ TEST(VortexCoreTest, DualWingCallingConventionAndSnapshotBeforeWrite) {
 
   // Snapshot-before-write ensures 10 + 10 = 20
   EXPECT_EQ(h.core.render(outCell), CellValue(static_cast<std::int64_t>(20)));
+}
+
+TEST(VortexCoreTest, WingSlotsUseUniqueMarkedOpHandlesAndPromoteByTwin) {
+  TestHarness h;
+  const auto firstInput   = h.arena.makeCell("first input");
+  const auto secondInput  = h.arena.makeCell("second input");
+  const auto firstOutput  = h.arena.makeCell("first output");
+  const auto secondOutput = h.arena.makeCell("second output");
+  const auto opcode       = h.vm.mintOpcode(OpcodeKind::Nop, "#WINGS");
+
+  h.core.bindInput(opcode, firstInput);
+  h.core.bindInput(opcode, secondInput);
+  h.core.bindOutput(opcode, firstOutput);
+  h.core.bindOutput(opcode, secondOutput);
+
+  EXPECT_EQ(h.core.inputsOf(opcode),
+            (std::vector<CellRef>{firstInput, secondInput}));
+  EXPECT_EQ(h.core.outputsOf(opcode),
+            (std::vector<CellRef>{firstOutput, secondOutput}));
+
+  const auto relocation = h.core.findDimension(xanadu::cellRelocationDimension);
+  ASSERT_TRUE(relocation);
+  EXPECT_FALSE(h.arena.dimensionNamed(xanadu::cellRelocationDimension));
+
+  const auto inputSlots  = h.core.rawWingSlotsOf(opcode);
+  const auto outputSlots = h.core.rawWingSlotsOf(opcode, true);
+  ASSERT_EQ(inputSlots.size(), 2u);
+  ASSERT_EQ(outputSlots.size(), 2u);
+  std::vector<CellRef> markers;
+  const auto checkWing = [&](const std::vector<CellRef> &slots,
+                             const std::vector<CellRef> &targets) {
+    for (std::size_t i = 0; i < slots.size(); ++i) {
+      EXPECT_EQ(h.arena.valueKindOf(slots[i]), xanadu::ValueKind::OpHandle);
+      EXPECT_EQ(h.arena.handleTarget(slots[i]), targets[i]);
+      const auto marker = h.arena.linked(slots[i], *relocation, DimVector::POS);
+      ASSERT_TRUE(marker);
+      EXPECT_EQ(h.arena.textOf(*marker), xanadu::cellRelocationMarker);
+      markers.push_back(*marker);
+    }
+  };
+  checkWing(inputSlots, {firstInput, secondInput});
+  checkWing(outputSlots, {firstOutput, secondOutput});
+  EXPECT_EQ(std::ranges::count_if(markers,
+                                  [&](const CellRef marker) {
+                                    return std::ranges::count(markers,
+                                                              marker) == 1;
+                                  }),
+            4);
+
+  xanadu::Store store;
+  const auto promoted = zigzag::promote(store, store.latest(), h.arena, opcode);
+  ASSERT_TRUE(promoted);
+  const auto twinOf = [&](const CellRef ref) -> std::optional<CellRef> {
+    const auto found = std::ranges::find(promoted->arena, ref);
+    if (found == promoted->arena.end()) return std::nullopt;
+    return promoted->cells[static_cast<std::size_t>(
+        std::distance(promoted->arena.begin(), found))];
+  };
+  const auto fold = store.rebuildManifold(promoted->version);
+  for (const auto &[slot, target] : {std::pair{inputSlots[0], firstInput},
+                                     std::pair{inputSlots[1], secondInput},
+                                     std::pair{outputSlots[0], firstOutput},
+                                     std::pair{outputSlots[1], secondOutput}}) {
+    const auto slotTwin   = twinOf(slot);
+    const auto targetTwin = twinOf(target);
+    ASSERT_TRUE(slotTwin);
+    ASSERT_TRUE(targetTwin);
+    EXPECT_EQ(fold.valueKindOf(*slotTwin), xanadu::ValueKind::OpHandle);
+    const auto persistedSlot = fold.slot(*slotTwin);
+    ASSERT_TRUE(persistedSlot);
+    EXPECT_EQ(persistedSlot->valueBits, *targetTwin);
+  }
+}
+
+TEST(VortexCoreTest, LegacyInt64WingsDecodeAndUnmarkedIntegersStayUnharvested) {
+  TestHarness h;
+  const auto target = h.arena.makeCell("legacy target");
+  const auto opcode = h.vm.mintOpcode(OpcodeKind::Nop, "#LEGACY_WING");
+  const auto legacy = h.arena.makeScalarCell(static_cast<std::int64_t>(target));
+  ASSERT_TRUE(h.arena.link(opcode, h.core.dims().grab, DimVector::POS, legacy));
+  EXPECT_EQ(h.core.inputsOf(opcode), (std::vector<CellRef>{target}));
+
+  const auto unmarked =
+      h.arena.makeScalarCell(static_cast<std::int64_t>(target));
+  EXPECT_THAT(xanadu::harvestRelocationTargets(h.arena),
+              ::testing::Not(::testing::Contains(target)));
+  EXPECT_THAT(xanadu::markedRelocationSlots(h.arena),
+              ::testing::Not(::testing::Contains(unmarked)));
+}
+
+TEST(VortexCoreTest, RelocationTargetsRejectTruncatedInt64References) {
+  TestHarness h;
+  const auto target = h.arena.makeCell("valid target");
+  const auto overflowing =
+      static_cast<std::uint64_t>(std::numeric_limits<CellRef>::max()) + 1U +
+      target;
+  const auto tooLarge =
+      h.arena.makeScalarCell(static_cast<std::int64_t>(overflowing));
+  const auto negative = h.arena.makeScalarCell(std::int64_t{-1});
+  EXPECT_FALSE(xanadu::relocationTarget(h.arena, tooLarge));
+  EXPECT_FALSE(xanadu::relocationTarget(h.arena, negative));
+}
+
+TEST(VortexCoreTest, RankOnlyRelocationDimensionHarvestsMarkedInt64Targets) {
+  TestHarness h;
+  const auto target  = h.arena.makeCell("relocation target");
+  const auto refCell = xanadu::refCell(h.arena, h.core, target);
+
+  EXPECT_FALSE(h.arena.dimensionNamed(xanadu::cellRelocationDimension));
+  ASSERT_TRUE(h.core.findDimension(xanadu::cellRelocationDimension));
+  EXPECT_THAT(xanadu::markedRelocationSlots(h.arena),
+              ::testing::Contains(refCell));
+  EXPECT_THAT(xanadu::harvestRelocationTargets(h.arena),
+              ::testing::Contains(target));
+
+  xanadu::Store store;
+  const auto promoted =
+      zigzag::promote(store, store.latest(), h.arena, refCell, {},
+                      xanadu::harvestRelocationTargets(h.arena));
+  ASSERT_TRUE(promoted);
+  const auto twinOf = [&](const CellRef ref) -> std::optional<CellRef> {
+    const auto found = std::ranges::find(promoted->arena, ref);
+    if (found == promoted->arena.end()) return std::nullopt;
+    return promoted->cells[static_cast<std::size_t>(
+        std::distance(promoted->arena.begin(), found))];
+  };
+  const auto slotTwin   = twinOf(refCell);
+  const auto targetTwin = twinOf(target);
+  ASSERT_TRUE(slotTwin);
+  ASSERT_TRUE(targetTwin);
+  const auto version = store.setValue(
+      promoted->version, *slotTwin, xanadu::PrimediaSpan{},
+      xanadu::ValueKind::Int64,
+      std::bit_cast<std::uint64_t>(static_cast<std::int64_t>(*targetTwin)));
+  const auto fold          = store.rebuildManifold(version);
+  const auto persistedSlot = fold.slot(*slotTwin);
+  ASSERT_TRUE(persistedSlot);
+  EXPECT_EQ(std::bit_cast<std::int64_t>(persistedSlot->valueBits),
+            static_cast<std::int64_t>(*targetTwin));
 }
 
 TEST(VortexCoreTest, ParameterPipelinesAlongDSpin) {
@@ -673,6 +819,155 @@ TEST(VortexCoreTest,
   EXPECT_EQ(result.contractViolation, ContractViolationKind::Precondition);
   EXPECT_EQ(result.failingClause, clause);
   EXPECT_EQ(h.core.render(output), CellValue{std::int64_t{123}});
+}
+
+static_assert(!std::is_copy_constructible_v<VortexVM>);
+static_assert(!std::is_move_constructible_v<VortexVM>);
+
+TEST(VortexCoreTest, EmptyWriteGuardRemovesOnlyItsOwner) {
+  TestHarness h;
+  const int extraOwner = 0;
+  const auto data      = h.arena.makeCell("data");
+  const auto op        = h.vm.mintOpcode(OpcodeKind::Nop, "#GUARDED");
+  h.core.setWriteGuard(&extraOwner,
+                       [data](const CellRef cell) { return cell == data; });
+  EXPECT_FALSE(
+      h.core.writeValue(data, 0, std::nullopt, std::string{"changed"}));
+  h.core.setWriteGuard(&extraOwner, {});
+  EXPECT_TRUE(h.core.writeValue(data, 0, std::nullopt, std::string{"changed"}));
+  EXPECT_FALSE(h.core.writeValue(op, 0, std::nullopt, std::string{"changed"}));
+}
+
+TEST(VortexCoreTest, WriteGuardsAreOwnedByEachLiveVM) {
+  ArenaManifold arena;
+  VortexCore core{arena};
+
+  const auto expectRefused = [&](const CellRef cell) {
+    WriteFault fault = WriteFault::None;
+    EXPECT_FALSE(
+        core.writeValue(cell, 0, std::nullopt, std::string{"changed"}, &fault));
+    EXPECT_EQ(fault, WriteFault::OpcodeKind);
+  };
+  const auto expectWritable = [&](const CellRef cell) {
+    WriteFault fault = WriteFault::OpcodeKind;
+    ASSERT_TRUE(
+        core.writeValue(cell, 0, std::nullopt, std::string{"changed"}, &fault));
+    EXPECT_EQ(fault, WriteFault::None);
+    EXPECT_EQ(core.render(cell), CellValue{std::string{"changed"}});
+  };
+  const auto makeClone = [&](const CellRef master) {
+    const auto clone = arena.makeCell("clone");
+    EXPECT_TRUE(core.setLink(master, core.dims().clone, DimVector::POS, clone));
+    return clone;
+  };
+
+  auto persistent = std::make_unique<VortexVM>(core);
+  const auto persistentOp =
+      persistent->mintOpcode(OpcodeKind::Add, "#PERSISTENT");
+  const auto persistentClone = makeClone(persistentOp);
+
+  auto transient         = std::make_unique<VortexVM>(core);
+  const auto transientOp = transient->mintOpcode(OpcodeKind::Mul, "#TRANSIENT");
+  const auto transientClone = makeClone(transientOp);
+  ASSERT_EQ(transient->installWriteGuard(), transient.get());
+  ASSERT_EQ(persistent->installWriteGuard(), persistent.get());
+  ASSERT_EQ(persistent->installWriteGuard(), persistent.get());
+
+  expectRefused(persistentOp);
+  expectRefused(persistentClone);
+  expectRefused(transientOp);
+  expectRefused(transientClone);
+
+  const auto ordinary = arena.makeCell("ordinary");
+  expectWritable(ordinary);
+
+  transient.reset();
+  expectRefused(persistentOp);
+  expectRefused(persistentClone);
+
+  auto later            = std::make_unique<VortexVM>(core);
+  const auto laterOp    = later->mintOpcode(OpcodeKind::Sub, "#LATER");
+  const auto laterClone = makeClone(laterOp);
+  expectRefused(persistentOp);
+  expectRefused(laterOp);
+  expectRefused(laterClone);
+
+  // Destroying the older VM first removes only its entry; the newer VM keeps
+  // protecting its own registered opcode and clone master.
+  persistent.reset();
+  expectWritable(persistentOp);
+  expectWritable(persistentClone);
+  expectRefused(laterOp);
+  expectRefused(laterClone);
+
+  later.reset();
+  expectWritable(laterOp);
+  expectWritable(laterClone);
+}
+
+TEST(VortexCoreTest, ByteAtAndStrSliceFollowOneBasedSemantics) {
+  TestHarness h;
+  // ByteAt: 1-based indexing
+  {
+    auto resFirst = executeNumeric(h, OpcodeKind::ByteAt,
+                                   {std::string{"hello"}, std::int64_t{1}});
+    ASSERT_TRUE(resFirst.result.success);
+    EXPECT_EQ(h.core.render(resFirst.outputs[0]),
+              CellValue{static_cast<std::int64_t>('h')});
+
+    auto resLast = executeNumeric(h, OpcodeKind::ByteAt,
+                                  {std::string{"hello"}, std::int64_t{-1}});
+    ASSERT_TRUE(resLast.result.success);
+    EXPECT_EQ(h.core.render(resLast.outputs[0]),
+              CellValue{static_cast<std::int64_t>('o')});
+
+    auto resSecondLast = executeNumeric(
+        h, OpcodeKind::ByteAt, {std::string{"hello"}, std::int64_t{-2}});
+    ASSERT_TRUE(resSecondLast.result.success);
+    EXPECT_EQ(h.core.render(resSecondLast.outputs[0]),
+              CellValue{static_cast<std::int64_t>('l')});
+
+    auto resZero = executeNumeric(h, OpcodeKind::ByteAt,
+                                  {std::string{"hello"}, std::int64_t{0}});
+    EXPECT_FALSE(resZero.result.success);
+    EXPECT_THAT(resZero.result.errorMessage,
+                ::testing::HasSubstr("out of bounds"));
+
+    auto resOob = executeNumeric(h, OpcodeKind::ByteAt,
+                                 {std::string{"hello"}, std::int64_t{6}});
+    EXPECT_FALSE(resOob.result.success);
+    EXPECT_THAT(resOob.result.errorMessage,
+                ::testing::HasSubstr("out of bounds"));
+  }
+
+  // StrSlice: 1-based closed interval [start, end]
+  {
+    auto resSlice = executeNumeric(
+        h, OpcodeKind::StrSlice,
+        {std::string{"hello"}, std::int64_t{1}, std::int64_t{3}});
+    ASSERT_TRUE(resSlice.result.success);
+    EXPECT_EQ(h.core.render(resSlice.outputs[0]),
+              CellValue{std::string{"hel"}});
+
+    auto resEmpty = executeNumeric(
+        h, OpcodeKind::StrSlice,
+        {std::string{"hello"}, std::int64_t{2}, std::int64_t{1}});
+    ASSERT_TRUE(resEmpty.result.success);
+    EXPECT_EQ(h.core.render(resEmpty.outputs[0]), CellValue{std::string{""}});
+
+    auto resNeg = executeNumeric(
+        h, OpcodeKind::StrSlice,
+        {std::string{"hello"}, std::int64_t{2}, std::int64_t{-1}});
+    ASSERT_TRUE(resNeg.result.success);
+    EXPECT_EQ(h.core.render(resNeg.outputs[0]), CellValue{std::string{"ello"}});
+
+    auto resZero = executeNumeric(
+        h, OpcodeKind::StrSlice,
+        {std::string{"hello"}, std::int64_t{0}, std::int64_t{3}});
+    EXPECT_FALSE(resZero.result.success);
+    EXPECT_THAT(resZero.result.errorMessage,
+                ::testing::HasSubstr("out of bounds"));
+  }
 }
 
 } // namespace

@@ -17,18 +17,22 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 #include "common/xanadu/compact_op.hpp"
 #include "common/xanadu/microversion.hpp"
 #include "common/xanadu/ops.hpp"
 #include "common/xanadu/store.hpp"
+#include "common/xanadu/vortex/vortex_core.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
 #include "common/xanadu/zigzag/manifold.hpp"
 
@@ -47,6 +51,10 @@ using zigzag::isEphemeral;
 using zigzag::Manifold;
 using zigzag::noCell;
 using zigzag::Space;
+using zigzag::vortex::VortexCore;
+
+static_assert(std::is_copy_constructible_v<ArenaManifold>);
+static_assert(std::is_copy_assignable_v<ArenaManifold>);
 
 /// An arena with two dimensions minted, since every link needs one and a
 /// dimension here is just a cell (R12).
@@ -60,6 +68,16 @@ struct Arena {
     step  = m.makeCell("d.step");
   }
 };
+
+ArenaManifold::PrefixSnapshot
+prefixSnapshot(const std::string_view text = "hydrated") {
+  ArenaManifold source;
+  source.makeCell(text);
+  const auto mark = source.mark();
+  auto snapshot   = source.exportPrefix(mark);
+  source.discard(mark);
+  return snapshot;
+}
 
 // -- identity ---------------------------------------------------------------
 
@@ -237,6 +255,206 @@ TEST(ArenaManifoldTest, bindingAVariableToAVariableThenToATermPropagates) {
 }
 
 // -- choice points ----------------------------------------------------------
+
+TEST(ArenaManifoldTest, hydrationFloorIsNotReportedAsALiveMark) {
+  ArenaManifold arena;
+  ASSERT_TRUE(arena.hydratePrefix(prefixSnapshot()));
+  EXPECT_EQ(arena.outstandingMarks(), 1U);
+  EXPECT_EQ(arena.liveMarks(), 0U);
+
+  const auto outer = arena.mark();
+  EXPECT_EQ(arena.outstandingMarks(), 2U);
+  EXPECT_EQ(arena.liveMarks(), 1U);
+  const auto inner = arena.mark();
+  EXPECT_EQ(arena.outstandingMarks(), 3U);
+  EXPECT_EQ(arena.liveMarks(), 2U);
+
+  arena.release(inner);
+  EXPECT_EQ(arena.outstandingMarks(), 2U);
+  EXPECT_EQ(arena.liveMarks(), 1U);
+
+  const auto nested = arena.mark();
+  arena.discard(nested);
+  EXPECT_EQ(arena.outstandingMarks(), 2U);
+  EXPECT_EQ(arena.liveMarks(), 1U);
+  arena.discard(outer);
+  EXPECT_EQ(arena.outstandingMarks(), 1U);
+  EXPECT_EQ(arena.liveMarks(), 0U);
+
+  arena.evictOldestMark();
+  EXPECT_EQ(arena.outstandingMarks(), 0U);
+  EXPECT_EQ(arena.liveMarks(), 0U);
+}
+
+TEST(ArenaManifoldTest, ordinaryNestedMarksAreAllLive) {
+  ArenaManifold arena;
+  const auto outer = arena.mark();
+  const auto inner = arena.mark();
+  EXPECT_EQ(arena.outstandingMarks(), 2U);
+  EXPECT_EQ(arena.liveMarks(), 2U);
+
+  arena.release(inner);
+  EXPECT_EQ(arena.liveMarks(), 1U);
+  arena.discard(outer);
+  EXPECT_EQ(arena.liveMarks(), 0U);
+}
+
+TEST(ArenaManifoldTest, evictingTheOldestHydrationFloorKeepsRealMarksLive) {
+  ArenaManifold arena;
+  ASSERT_TRUE(arena.hydratePrefix(prefixSnapshot()));
+  const auto outer = arena.mark();
+  const auto inner = arena.mark();
+  ASSERT_EQ(arena.outstandingMarks(), 3U);
+  ASSERT_EQ(arena.liveMarks(), 2U);
+
+  arena.evictOldestMark();
+  EXPECT_EQ(arena.outstandingMarks(), 2U);
+  EXPECT_EQ(arena.liveMarks(), 2U);
+  arena.release(inner);
+  EXPECT_EQ(arena.outstandingMarks(), 1U);
+  EXPECT_EQ(arena.liveMarks(), 1U);
+  arena.discard(outer);
+  EXPECT_EQ(arena.outstandingMarks(), 0U);
+  EXPECT_EQ(arena.liveMarks(), 0U);
+}
+
+TEST(ArenaManifoldTest, hydrationUnderARealMarkRefusesWithoutMutation) {
+  ArenaManifold arena;
+  const auto cell           = arena.makeCell("before");
+  const auto dim            = arena.makeCell("d.test");
+  const auto originalTarget = arena.makeCell("original target");
+  ASSERT_TRUE(arena.link(cell, dim, DimVector::POS, originalTarget));
+  const auto mark  = arena.mark();
+  const auto fresh = arena.makeCell("under mark");
+  ASSERT_TRUE(arena.link(cell, dim, DimVector::POS, fresh));
+  const auto beforeCells = arena.cellCount();
+  const auto beforeTrail = arena.trailSize();
+
+  const auto refused = arena.hydratePrefix(prefixSnapshot("replacement"));
+  ASSERT_FALSE(refused);
+  EXPECT_EQ(refused.error(), zigzag::ArenaRefusal::MarksOutstanding);
+  EXPECT_EQ(zigzag::toString(refused.error()), "marks outstanding");
+  EXPECT_EQ(arena.cellCount(), beforeCells);
+  EXPECT_EQ(arena.outstandingMarks(), 1U);
+  EXPECT_EQ(arena.liveMarks(), 1U);
+  EXPECT_EQ(arena.trailSize(), beforeTrail);
+  EXPECT_EQ(arena.textOf(cell), "before");
+  EXPECT_EQ(arena.textOf(fresh), "under mark");
+  EXPECT_EQ(arena.linked(cell, dim, DimVector::POS), fresh);
+
+  arena.release(mark);
+  EXPECT_EQ(arena.cellCount(), 3U);
+  EXPECT_EQ(arena.textOf(cell), "before");
+  EXPECT_EQ(arena.linked(cell, dim, DimVector::POS), originalTarget);
+}
+
+TEST(ArenaManifoldTest, evictedHydrationFloorCanBeRehydrated) {
+  ArenaManifold arena;
+  const auto snapshot = prefixSnapshot();
+  ASSERT_TRUE(arena.hydratePrefix(snapshot));
+  const auto hydratedCell = ArenaManifold::refOf(0);
+  ASSERT_EQ(arena.textOf(hydratedCell), "hydrated");
+
+  arena.evictOldestMark();
+  EXPECT_EQ(arena.outstandingMarks(), 0U);
+  EXPECT_EQ(arena.liveMarks(), 0U);
+  EXPECT_EQ(arena.textOf(hydratedCell), "hydrated");
+
+  ASSERT_TRUE(arena.hydratePrefix(snapshot));
+  EXPECT_EQ(arena.outstandingMarks(), 1U);
+  EXPECT_EQ(arena.liveMarks(), 0U);
+  EXPECT_EQ(arena.textOf(hydratedCell), "hydrated");
+}
+
+#ifndef NDEBUG
+TEST(ArenaManifoldTest, releasingOrDiscardingTheSoleHydrationFloorAsserts) {
+  const auto snapshot = prefixSnapshot();
+  EXPECT_DEATH_IF_SUPPORTED(
+      {
+        ArenaManifold arena;
+        zigzag::expectWritten(arena.hydratePrefix(snapshot));
+        arena.release(zigzag::Mark{});
+      },
+      "hasHydrationFloor_");
+  EXPECT_DEATH_IF_SUPPORTED(
+      {
+        ArenaManifold arena;
+        zigzag::expectWritten(arena.hydratePrefix(snapshot));
+        arena.discard(zigzag::Mark{});
+      },
+      "hasHydrationFloor_");
+}
+#else
+TEST(ArenaManifoldTest, staleReleaseOrDiscardCannotConsumeSoleHydrationFloor) {
+  ArenaManifold arena;
+  ASSERT_TRUE(arena.hydratePrefix(prefixSnapshot()));
+  arena.release(zigzag::Mark{});
+  EXPECT_EQ(arena.outstandingMarks(), 1U);
+  EXPECT_EQ(arena.liveMarks(), 0U);
+  arena.discard(zigzag::Mark{});
+  EXPECT_EQ(arena.outstandingMarks(), 1U);
+  EXPECT_EQ(arena.liveMarks(), 0U);
+}
+#endif
+
+TEST(ArenaManifoldTest, movesTransferHydrationAndRealMarksAndResetSources) {
+  ArenaManifold source;
+  ASSERT_TRUE(source.hydratePrefix(prefixSnapshot()));
+  const auto realMark = source.mark();
+  const auto realCell = source.makeCell("real");
+
+  ArenaManifold moved(std::move(source));
+  EXPECT_EQ(moved.outstandingMarks(), 2U);
+  EXPECT_EQ(moved.liveMarks(), 1U);
+  EXPECT_EQ(moved.textOf(ArenaManifold::refOf(0)), "hydrated");
+  EXPECT_EQ(moved.textOf(realCell), "real");
+  EXPECT_EQ(source.outstandingMarks(), 0U);
+  EXPECT_EQ(source.liveMarks(), 0U);
+  EXPECT_EQ(source.cellCount(), 0U);
+  const auto sourceCell = source.makeCell("usable");
+  EXPECT_EQ(source.textOf(sourceCell), "usable");
+  const auto sourceMark = source.mark();
+  source.release(sourceMark);
+  moved.release(realMark);
+  EXPECT_EQ(moved.outstandingMarks(), 1U);
+  EXPECT_EQ(moved.liveMarks(), 0U);
+
+  Store store;
+  const auto genesis = store.sliceGenesis(MicroversionId{});
+  const auto base    = store.rebuildManifold(genesis);
+  ArenaManifold assigning(&base, &store);
+  assigning.setDefaultSpanReader(&store);
+  assigning.setExecutionLimits(100U, 17U, 1024U);
+  ASSERT_TRUE(assigning.hydratePrefix(prefixSnapshot()));
+  const auto outer         = assigning.mark();
+  const auto inner         = assigning.mark();
+  const auto assignedCell  = assigning.makeCell("assigned");
+  const auto remainingWork = assigning.workRemaining();
+
+  ArenaManifold destination;
+  destination.makeCell("old destination");
+  destination = std::move(assigning);
+  EXPECT_EQ(destination.outstandingMarks(), 3U);
+  EXPECT_EQ(destination.liveMarks(), 2U);
+  EXPECT_EQ(destination.base(), &base);
+  EXPECT_EQ(destination.store(), &store);
+  EXPECT_EQ(destination.allocationLimit(), 100U);
+  EXPECT_EQ(destination.workRemaining(), remainingWork);
+  EXPECT_EQ(destination.textOf(assignedCell), "assigned");
+  EXPECT_EQ(assigning.outstandingMarks(), 0U);
+  EXPECT_EQ(assigning.liveMarks(), 0U);
+  EXPECT_EQ(assigning.cellCount(), 0U);
+  const auto fresh = assigning.makeCell("reused source");
+  EXPECT_EQ(assigning.textOf(fresh), "reused source");
+
+  destination.release(inner);
+  destination.discard(outer);
+  EXPECT_EQ(destination.outstandingMarks(), 1U);
+  EXPECT_EQ(destination.liveMarks(), 0U);
+  destination.evictOldestMark();
+  EXPECT_EQ(destination.outstandingMarks(), 0U);
+  EXPECT_EQ(destination.liveMarks(), 0U);
+}
 
 TEST(ArenaManifoldTest, releaseTruncatesCellsMintedUnderTheMark) {
   Arena arena;
@@ -590,6 +808,86 @@ TEST(ArenaManifoldTest, promoteWritesTheReachableAnswerAndNothingElse) {
   }
 }
 
+TEST(ArenaManifoldTest, defaultPromotionDoesNotTraverseTheDimensionRegistry) {
+  ArenaManifold arena;
+  VortexCore core{arena};
+  ASSERT_NE(core.findOrMintDimension("d.unused"), noCell);
+
+  Store store;
+  const auto promoted =
+      zigzag::promote(store, MicroversionId{}, arena, core.home());
+  ASSERT_TRUE(promoted);
+  ASSERT_EQ(promoted->cells.size(), 1U);
+
+  const auto folded = store.rebuildManifold(promoted->version);
+  ASSERT_TRUE(folded.home());
+  EXPECT_EQ(*folded.home(), promoted->cells.front());
+  EXPECT_TRUE(folded.dimensions().empty());
+  EXPECT_FALSE(folded.dimensionNamed("d.unused", store));
+}
+
+TEST(ArenaManifoldTest,
+     wholeSpacePromotionIncludesRegistryAndPreservesGenesisOrder) {
+  ArenaManifold arena;
+  VortexCore core{arena};
+  ASSERT_NE(core.findOrMintDimension("d.unused"), noCell);
+
+  std::vector<std::string> dimensionNames;
+  CellRef dimension = core.home();
+  while (const auto next =
+             arena.linked(dimension, core.dims().dims, DimVector::POS)) {
+    dimension = *next;
+    dimensionNames.push_back(arena.textOf(dimension));
+  }
+  ASSERT_FALSE(dimensionNames.empty());
+
+  Store store;
+  const std::array roots{core.home(), core.dims().dims};
+  zigzag::PromotionBudget budget{};
+  budget.wholeSpace   = true;
+  const auto promoted = zigzag::promote(store, MicroversionId{}, arena,
+                                        core.home(), budget, roots);
+  ASSERT_TRUE(promoted);
+  ASSERT_GE(promoted->cells.size(), 2U);
+  ASSERT_EQ(promoted->arena[0], core.home());
+  ASSERT_EQ(promoted->arena[1], core.dims().dims);
+
+  const auto folded = store.rebuildManifold(promoted->version);
+  ASSERT_TRUE(folded.home());
+  ASSERT_TRUE(folded.dimsDimension());
+  EXPECT_EQ(*folded.home(), promoted->cells[0]);
+  EXPECT_EQ(*folded.dimsDimension(), promoted->cells[1]);
+  EXPECT_EQ(folded.dimensions().size(), dimensionNames.size());
+  for (const auto &name : dimensionNames) {
+    EXPECT_TRUE(folded.dimensionNamed(name, store)) << name;
+  }
+  EXPECT_TRUE(folded.dimensionNamed("d.unused", store));
+  EXPECT_EQ(folded.refusedOps(), 0U);
+}
+
+TEST(ArenaManifoldTest, wholeSpacePromotionStillExcludesLineageContents) {
+  ArenaManifold arena;
+  VortexCore core{arena};
+  const auto lineage     = core.findOrMintDimension("d.lineage");
+  const auto lineageOnly = arena.makeCell("lineage-only payload");
+  ASSERT_TRUE(arena.link(core.home(), lineage, DimVector::POS, lineageOnly));
+
+  Store store;
+  const std::array roots{core.home(), core.dims().dims};
+  zigzag::PromotionBudget budget{};
+  budget.wholeSpace   = true;
+  const auto promoted = zigzag::promote(store, MicroversionId{}, arena,
+                                        core.home(), budget, roots);
+  ASSERT_TRUE(promoted);
+  EXPECT_EQ(
+      std::find(promoted->arena.begin(), promoted->arena.end(), lineageOnly),
+      promoted->arena.end());
+
+  const auto folded = store.rebuildManifold(promoted->version);
+  EXPECT_TRUE(folded.dimensionNamed("d.lineage", store));
+  EXPECT_EQ(folded.refusedOps(), 0U);
+}
+
 TEST(ArenaManifoldTest, promotionCarriesTheLinksWithBothEndsIntact) {
   Store store;
   auto at = store.sliceGenesis(MicroversionId{});
@@ -662,6 +960,21 @@ TEST(ArenaManifoldTest, promotionRefusesAboveItsBudgetAndWritesNothing) {
   EXPECT_EQ(manifold.cellCount(), 2U); // home and d.dims, and no more
 
   EXPECT_FALSE(zigzag::promote(store, at, arena.m, noCell).has_value());
+}
+
+TEST(ArenaManifoldTest,
+     wholeSpacePromotionRefusesAboveItsBudgetWithoutWriting) {
+  ArenaManifold arena;
+  VortexCore core{arena};
+  Store store;
+
+  const std::array roots{core.home(), core.dims().dims};
+  zigzag::PromotionBudget budget{};
+  budget.maxOps     = 2;
+  budget.wholeSpace = true;
+  EXPECT_FALSE(zigzag::promote(store, MicroversionId{}, arena, core.home(),
+                               budget, roots));
+  EXPECT_EQ(store.opCount(), 0U);
 }
 
 // -- the overlay ------------------------------------------------------------

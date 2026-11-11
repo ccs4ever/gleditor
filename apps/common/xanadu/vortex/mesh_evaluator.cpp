@@ -17,6 +17,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include "common/xanadu/relocation_marks.hpp"
 #include "common/xanadu/vlace/compiler.hpp"
 #include "common/xanadu/vlace/parser.hpp"
 #include "common/xanadu/vlace/types.hpp"
@@ -221,6 +222,11 @@ bool pureOpcode(OpcodeKind opcode) {
   case OpcodeKind::Trim:
   case OpcodeKind::ToLower:
   case OpcodeKind::ToUpper:
+  case OpcodeKind::StrLen:
+  case OpcodeKind::ByteAt:
+  case OpcodeKind::StrSlice:
+  case OpcodeKind::IntToStr:
+  case OpcodeKind::StrToInt:
   case OpcodeKind::Unify:
   case OpcodeKind::IsVar:
   case OpcodeKind::MakeVar:
@@ -234,6 +240,17 @@ bool pureOpcode(OpcodeKind opcode) {
   case OpcodeKind::FieldSet:
   case OpcodeKind::RunCall:
   case OpcodeKind::RunResume:
+  case OpcodeKind::ScanPush:
+  case OpcodeKind::ScanPop:
+  case OpcodeKind::ScanTab:
+  case OpcodeKind::ScanMove:
+  case OpcodeKind::ScanMatch:
+  case OpcodeKind::ScanMany:
+  case OpcodeKind::ScanUpto:
+  case OpcodeKind::ScanAny:
+  case OpcodeKind::ScanFind:
+  case OpcodeKind::ScanPos:
+  case OpcodeKind::ScanSubject:
     return true;
   case OpcodeKind::ChoiceDepth:
     return false;
@@ -623,8 +640,12 @@ void executeProgram(ResultBuilder &builder, WorkerContext &context,
   const auto dimension = [&](const std::string &name) -> DimRef {
     if (auto existing = dimensions.find(name); existing != dimensions.end())
       return existing->second;
-    const auto existing = arena.dimensionNamed(name);
-    const auto result   = existing ? *existing : arena.makeCell(name);
+    const auto existing =
+        xanadu::findDimensionByName(arena, name, &context.core);
+    const auto result = existing ? *existing
+                        : name == xanadu::cellRelocationDimension
+                            ? context.core.findOrMintDimension(name)
+                            : arena.makeCell(name);
     dimensions.emplace(name, result);
     return result;
   };
@@ -637,12 +658,12 @@ void executeProgram(ResultBuilder &builder, WorkerContext &context,
     else
       cells.push_back(arena.makeCell());
   }
-  std::vector<std::pair<CellRef, CellRef>> references;
+  std::vector<CellRef> references;
   for (std::size_t i = 0; i < cells.size(); ++i) {
     if (auto ref = std::get_if<VortexReference>(&program.cells[i].value)) {
       expectWritten(arena.setValueBits(cells[i], xanadu::ValueKind::Int64,
                                        cells[ref->cell]));
-      references.emplace_back(cells[i], cells[ref->cell]);
+      references.push_back(cells[i]);
     }
   }
   using Edge = std::tuple<CellRef, DimRef, DimVector>;
@@ -675,16 +696,10 @@ void executeProgram(ResultBuilder &builder, WorkerContext &context,
   for (const auto &instruction : program.instructions) {
     const auto op = cells[instruction.cell];
     for (auto input : instruction.inputs) {
-      const auto slot =
-          ArenaManifold::refOf(static_cast<std::uint32_t>(arena.cellCount()));
       context.core.bindInput(op, cells[input]);
-      references.emplace_back(slot, cells[input]);
     }
     for (auto output : instruction.outputs) {
-      const auto slot =
-          ArenaManifold::refOf(static_cast<std::uint32_t>(arena.cellCount()));
       context.core.bindOutput(op, cells[output]);
-      references.emplace_back(slot, cells[output]);
     }
   }
   auto cursor = context.vm.spawnCursor(cells[program.entry], "mesh:artifact");
@@ -724,9 +739,7 @@ void executeProgram(ResultBuilder &builder, WorkerContext &context,
   // Execution uses local numeric operands. Publication uses typed handles so
   // every reference is relocated again by the receiver rather than mistaken
   // for a portable integer literal.
-  const auto relocation = arena.makeCell("d.mesh.relocation");
-  for (const auto &[cell, originalTarget] : references) {
-    (void)originalTarget;
+  for (const auto cell : references) {
     const auto target = arena.asInt64(cell);
     if (!target || *target < 0 ||
         static_cast<std::uint64_t>(*target) >
@@ -736,7 +749,7 @@ void executeProgram(ResultBuilder &builder, WorkerContext &context,
           "Vortex artifact reference operand lost its target");
     expectWritten(arena.setValueBits(cell, xanadu::ValueKind::OpHandle,
                                      static_cast<CellRef>(*target)));
-    builder.link(cell, relocation, arena.makeCell("cell"));
+    xanadu::markCellRelocation(arena, context.core, cell);
   }
 }
 

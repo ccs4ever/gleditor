@@ -192,7 +192,7 @@ enum class ArenaRefusal : std::uint8_t {
   UnknownCell,      ///< the subject is not a cell this arena can reach
   UnknownDimension, ///< the dimension is not a cell this arena can reach
   UnknownTarget,    ///< the far end is not a cell this arena can reach
-  MarksOutstanding, ///< compact() inside a choice point would corrupt undo
+  MarksOutstanding, ///< compaction or hydration would invalidate live undo
 };
 
 class ArenaManifold;
@@ -292,6 +292,9 @@ struct PromotionBudget {
   gleditor::cpp26::optional<
       gleditor::cpp26::function_ref<ShadowCommit(CellRef)>>
       commitShadowed{};
+  /// Include the d.dims registry rank during promotion. The d.lineage rank
+  /// remains excluded. Appended to preserve existing aggregate initializers.
+  bool wholeSpace{false};
 };
 
 /// What promote() produced: the state the store reached, and the real CellRef
@@ -313,6 +316,10 @@ struct Promoted {
 class ArenaManifold {
 public:
   ArenaManifold() = default;
+  ArenaManifold(const ArenaManifold &)            = default;
+  ArenaManifold &operator=(const ArenaManifold &) = default;
+  ArenaManifold(ArenaManifold &&other) noexcept;
+  ArenaManifold &operator=(ArenaManifold &&other) noexcept;
 
   /// An arena over @p base: reads fall through, writes shadow. @p base must
   /// outlive this, and must not be mutated while it is being read through --
@@ -483,11 +490,16 @@ public:
   [[nodiscard]] bool executionLimited() const noexcept {
     return workRemaining_.has_value();
   }
-  void consumeWork() const {
+  [[nodiscard]] std::optional<std::size_t> workRemaining() const noexcept {
+    return workRemaining_;
+  }
+  void consumeWork(std::size_t amount = 1) const {
     if (workRemaining_) {
-      if (*workRemaining_ == 0)
+      if (*workRemaining_ < amount) {
+        *workRemaining_ = 0;
         throw std::runtime_error("Vortex evaluation work budget exhausted");
-      --*workRemaining_;
+      }
+      *workRemaining_ -= amount;
     }
   }
 
@@ -661,6 +673,12 @@ public:
   /// Append @p text to the scratch buffer and answer its span.
   xanadu::PrimediaSpan intern(std::string_view text);
 
+  /// Restate @p cell's content with text interned in scratch.
+  ArenaResult setText(CellRef cell, std::string_view text) {
+    auto span = intern(text);
+    return setContent(cell, std::span<const xanadu::PrimediaSpan>{&span, 1});
+  }
+
   /// Restate @p cell's content as @p spans. A run, not one span: U3's reason
   /// applies here too, and an arena cell can hold one where an op cannot yet.
   ArenaResult setContent(CellRef cell,
@@ -735,10 +753,14 @@ public:
   /// bindings made under it stand; only the ability to retry is discarded.
   ArenaManifold *discard(const Mark &m) noexcept;
 
-  /// How many choice points are outstanding. Nonzero forbids compaction.
+  /// Raw floor count, including the synthetic hydration floor. Nonzero forbids
+  /// compaction.
   [[nodiscard]] std::uint32_t outstandingMarks() const noexcept {
     return outstandingMarks_;
   }
+
+  /// Live caller-owned marks, excluding an explicitly tracked hydration floor.
+  [[nodiscard]] std::uint32_t liveMarks() const noexcept;
 
   /// Entries the conditional trail holds. Stays at zero through a
   /// deterministic call that only binds variables it minted itself.
@@ -782,16 +804,17 @@ public:
   /// slot copy.
   [[nodiscard]] PrefixSnapshot exportPrefix(const Mark &m) const;
 
-  /// Hydrate this arena with a parent's [0..m) prefix snapshot, rebuilding
-  /// overlay_ from shadowed base cells and pushing a split floor on floors_ so
-  /// subsequent child branch writes are trailed properly.
-  ArenaManifold *hydratePrefix(const PrefixSnapshot &snapshot);
+  /// Hydrate only a mark-free arena with a parent's prefix, rebuilding
+  /// overlay_ and installing one synthetic, evictable floor.
+  ArenaResult hydratePrefix(const PrefixSnapshot &snapshot);
 
   /// Evict the oldest mark floor when a near-root choice point is stolen by
   /// another OR-parallel worker and will never be backtracked locally.
   ArenaManifold *evictOldestMark() noexcept;
 
 private:
+  void swap(ArenaManifold &other) noexcept;
+
   [[nodiscard]] DimLink *existingLink(std::uint32_t dense, DimRef dim) noexcept;
   [[nodiscard]] DimLink *linkFor(std::uint32_t dense, DimRef dim);
   void setOneSide(std::uint32_t dense, DimRef dim, DimVector dir, CellRef to);
@@ -843,6 +866,8 @@ private:
   std::size_t liveLinks_{0};
   std::size_t liveContent_{0};
   std::uint32_t outstandingMarks_{0};
+  /// The oldest floor is synthetic iff this explicit flag is set.
+  bool hasHydrationFloor_{false};
 
   /// One outstanding mark's arena lengths: §5.3's comparands. `cells` is what
   /// decides whether a cell is old enough to trail; `links` and `content` are

@@ -18,6 +18,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -54,6 +55,8 @@ struct SystemDimensions {
                          ///< content is &pos, its +d.grab &subject (vicon
                          ///< std:goal, spec section 6.1)
   DimRef stores{noCell}; ///< Multi-store connection rank off home
+  DimRef left{noCell};   ///< Left-child / binary branch dimension
+  DimRef right{noCell};  ///< Right-child / binary branch dimension
 };
 
 enum class ContractViolationKind : std::uint8_t {
@@ -191,12 +194,20 @@ public:
                                     std::optional<std::int64_t> length,
                                     const CellValue &replacement,
                                     WriteFault *fault = nullptr);
-  /// Install the kind predicate the funnel consults on the resolved
-  /// clone master — P15's `opcodeMap_.contains(masterOf(cell))`. The
-  /// VortexVM over this core installs it at construction; a second VM
-  /// sharing the core re-installs its own map's view.
-  VortexCore *setWriteGuard(std::function<bool(CellRef master)> guard) {
-    writeGuard_ = std::move(guard);
+  /// Install or replace one owner's kind predicate. A write is refused if
+  /// any owner's predicate claims the resolved clone master.
+  VortexCore *setWriteGuard(const void *owner,
+                            std::function<bool(CellRef master)> guard) {
+    if (guard) {
+      writeGuards_.insert_or_assign(owner, std::move(guard));
+    } else {
+      writeGuards_.erase(owner);
+    }
+    return this;
+  }
+  /// Remove only the predicate registered under @p owner.
+  VortexCore *clearWriteGuard(const void *owner) {
+    writeGuards_.erase(owner);
     return this;
   }
 
@@ -279,6 +290,8 @@ public:
   // -- Dual-Wing Calling Convention -------------------------------------------
   [[nodiscard]] std::vector<CellRef> inputsOf(CellRef opcode) const;
   [[nodiscard]] std::vector<CellRef> outputsOf(CellRef opcode) const;
+  [[nodiscard]] std::vector<CellRef>
+  rawWingSlotsOf(CellRef opcode, bool rightWing = false) const;
   void bindInput(CellRef opcode, CellRef operand);
   void bindOutput(CellRef opcode, CellRef target);
 
@@ -330,10 +343,9 @@ private:
   ArenaManifold &arena_;
   CellRef home_{noCell};
   SystemDimensions dims_{};
-  /// P15's installed predicate (spec §6.5/M10): consulted on the
-  /// resolved clone master inside writeValue — empty while no VortexVM
-  /// over this core has installed one.
-  std::function<bool(CellRef)> writeGuard_;
+  /// P15's per-owner predicates (spec §6.5/M10), consulted on the resolved
+  /// clone master inside writeValue.
+  std::unordered_map<const void *, std::function<bool(CellRef)>> writeGuards_;
 };
 
 } // namespace zigzag::vortex

@@ -4,6 +4,7 @@
  */
 #include "common/xanadu/vortex/vortex_vm.hpp"
 
+#include <charconv>
 #include <chrono>
 #include <cmath>
 #include <expected>
@@ -72,24 +73,14 @@ std::optional<CellRef> resolveCell(const std::vector<CellRef> &inCells,
 
 VortexVM::VortexVM(VortexCore &core) : core_(core) { installWriteGuard(); }
 
-VortexVM::~VortexVM() {
-  // The installed predicate captures this VM — releasing the slot keeps
-  // a longer-lived core from invoking a dangling guard.
-  if (guardInstalled_) {
-    core_.setWriteGuard(nullptr);
-  }
-}
+VortexVM::~VortexVM() { core_.clearWriteGuard(this); }
 
 VortexVM *VortexVM::installWriteGuard() {
   // P15 (spec §6.5/M10): the funnel's kind predicate tests *this*
-  // context's opcodeMap_ membership of the resolved clone master —
-  // masterOf rather than the raw target, because a clone of a
-  // registered op is unregistered yet writes the registered master's
-  // bits. Fresh cells are never claimed: an unregistered cell's
-  // content is its kind and cannot desync the map.
+  // context's opcodeMap_ membership of the resolved clone master.
+  // Fresh cells remain writable because they are absent from this map.
   core_.setWriteGuard(
-      [this](const CellRef master) { return hasOpcodeKind(master); });
-  guardInstalled_ = true;
+      this, [this](const CellRef master) { return hasOpcodeKind(master); });
   return this;
 }
 
@@ -106,12 +97,7 @@ VortexVM::registerProgramOps(std::span<const CellRef> enumeration) {
     // asInt64 ≤ Find sweep of the band would register dimConstant
     // operand cells and every other small-int data cell too.
     const auto kind = core_.arena().asInt64(opCell);
-    // The bound is the enum's last ordinal — RunResume while §6.2's
-    // ops hold the append-last tail; a new kind landing past it must
-    // move this ceiling the way linkedCeiling's does (meta.cpp).
-    if (!kind || *kind < 0 ||
-        static_cast<std::uint64_t>(*kind) >
-            static_cast<std::uint64_t>(OpcodeKind::RunResume)) {
+    if (!kind || !isRegistrableOpcode(*kind)) {
       return std::unexpected("registerProgramOps: recorded cell " +
                              std::to_string(opCell) +
                              " does not decode to an opcode kind");
@@ -193,9 +179,7 @@ std::optional<OpcodeKind> VortexVM::getOpcodeKind(CellRef opCell) const {
     return it->second;
   }
   auto val = core_.arena().asInt64(opCell);
-  if (val && *val >= 0 &&
-      static_cast<std::uint64_t>(*val) <=
-          static_cast<std::uint64_t>(OpcodeKind::FieldSet)) {
+  if (val && isContentDecodableOpcode(*val)) {
     return static_cast<OpcodeKind>(*val);
   }
   return std::nullopt;
@@ -886,11 +870,10 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
     // A missing member or unbound subject yields false so a guard's
     // `a.missing > n` fails the clause instead of faulting the turn.
     if (inputs.size() >= 2) {
-      const auto referenced = static_cast<CellRef>(toInt(inputs[0]));
-      const std::string wanted =
-          std::holds_alternative<std::string>(inputs[1])
-              ? std::get<std::string>(inputs[1])
-              : std::string{};
+      const auto referenced    = static_cast<CellRef>(toInt(inputs[0]));
+      const std::string wanted = std::holds_alternative<std::string>(inputs[1])
+                                     ? std::get<std::string>(inputs[1])
+                                     : std::string{};
       CellValue found{false};
       if (core_.arena().contains(referenced)) {
         const auto &dims = core_.dims();
@@ -916,12 +899,11 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
     // member or unbound subject yields false so the write's caller can
     // fail the clause honestly rather than silently dropping state.
     if (inputs.size() >= 3) {
-      const auto referenced = static_cast<CellRef>(toInt(inputs[0]));
-      const std::string wanted =
-          std::holds_alternative<std::string>(inputs[1])
-              ? std::get<std::string>(inputs[1])
-              : std::string{};
-      bool wrote = false;
+      const auto referenced    = static_cast<CellRef>(toInt(inputs[0]));
+      const std::string wanted = std::holds_alternative<std::string>(inputs[1])
+                                     ? std::get<std::string>(inputs[1])
+                                     : std::string{};
+      bool wrote               = false;
       if (core_.arena().contains(referenced)) {
         const auto &dims = core_.dims();
         for (const CellRef member :
@@ -933,8 +915,7 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
             WriteFault fault = WriteFault::None;
             const auto res =
                 core_.writeValue(member, 0, std::nullopt, inputs[2], &fault);
-            if (fault == WriteFault::OpcodeKind)
-              return kindImmutabilityFault();
+            if (fault == WriteFault::OpcodeKind) return kindImmutabilityFault();
             wrote = res.has_value();
             break;
           }
@@ -953,9 +934,9 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
     // successor is the +d.spin target (the RunResume op), and jump.
     // Every §6.2 refusal lands on the fail target instead.
     if (inputs.size() >= 4 && cursor) {
-      const auto &dims       = core_.dims();
-      const CellRef failOp   = static_cast<CellRef>(toInt(inputs[2]));
-      const auto failJump    = [&]() {
+      const auto &dims     = core_.dims();
+      const CellRef failOp = static_cast<CellRef>(toInt(inputs[2]));
+      const auto failJump  = [&]() {
         setCursorOpcode(*cursor, failOp);
         jumped = true;
       };
@@ -971,8 +952,8 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
       // lacking one gets the single +d.values hop.
       if (core_.arena().contains(head) &&
           !core_.arena().linked(head, entryDim, zigzag::Posward))
-        if (const auto via = core_.arena().linked(head, dims.values,
-                                                zigzag::Posward))
+        if (const auto via =
+                core_.arena().linked(head, dims.values, zigzag::Posward))
           head = *via;
 
       // Op first, head second — the same discriminator runFragment
@@ -997,8 +978,8 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
         failJump();
         break;
       }
-      const auto descriptor = core_.arena().linked(head, dims.values,
-                                                 zigzag::Posward);
+      const auto descriptor =
+          core_.arena().linked(head, dims.values, zigzag::Posward);
       if (!descriptor || !core_.arena().contains(*descriptor)) {
         failJump();
         break;
@@ -1007,8 +988,8 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
       // Ordered signature: the descriptor's +d.grab chain via +d.step —
       // parameterCells' convention — each member +d.name-labelled.
       std::vector<CellRef> params;
-      for (auto cell = core_.arena().linked(*descriptor, dims.grab,
-                                          zigzag::Posward);
+      for (auto cell =
+               core_.arena().linked(*descriptor, dims.grab, zigzag::Posward);
            cell && core_.arena().contains(*cell);
            cell = core_.arena().linked(*cell, dims.step, zigzag::Posward))
         params.push_back(*cell);
@@ -1019,8 +1000,8 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
       // count the caller-supplied params only.
       std::vector<CellRef> boundParams;
       for (const auto param : params) {
-        const auto label = core_.arena().linked(param, dims.name,
-                                                zigzag::Posward);
+        const auto label =
+            core_.arena().linked(param, dims.name, zigzag::Posward);
         if (label && core_.arena().textOf(*label) == "$owner") continue;
         boundParams.push_back(param);
       }
@@ -1029,14 +1010,12 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
       // +d.grab chain via +d.step, each member the evaluated cell
       // itself.
       std::vector<CellValue> argValues;
-      for (auto cell = core_.arena().linked(argsRank, dims.grab,
-                                          zigzag::Posward);
+      for (auto cell =
+               core_.arena().linked(argsRank, dims.grab, zigzag::Posward);
            cell && core_.arena().contains(*cell);
-           cell = core_.arena().linked(*cell, dims.step,
-                                       zigzag::Posward)) {
+           cell = core_.arena().linked(*cell, dims.step, zigzag::Posward)) {
         core_.arena().consumeWork();
-        argValues.push_back(
-            core_.render(*cell).value_or(CellValue{false}));
+        argValues.push_back(core_.render(*cell).value_or(CellValue{false}));
       }
       if (argValues.size() != boundParams.size()) {
         failJump();
@@ -1046,7 +1025,8 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
       // The §6.2 frame: an Int64 cell holding the successor op, pushed
       // on the cursor's +d.stack — Call's shape, so the callee's tail
       // Return lands on the RunResume op.
-      const auto nextOp = core_.arena().linked(opcode, dims.spin, zigzag::Posward);
+      const auto nextOp =
+          core_.arena().linked(opcode, dims.spin, zigzag::Posward);
       if (!nextOp) {
         failJump();
         break;
@@ -1055,13 +1035,21 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
       zigzag::expectWritten(
           core_.arena().setValueBits(frame, xanadu::ValueKind::Int64,
                                      static_cast<std::uint64_t>(*nextOp)));
-      const auto oldStack = core_.arena().linked(*cursor, dims.stack,
-                                                 zigzag::Posward);
+      const auto oldStack =
+          core_.arena().linked(*cursor, dims.stack, zigzag::Posward);
       zigzag::expectWritten(
           core_.arena().link(*cursor, dims.stack, zigzag::Posward, frame));
       if (oldStack) {
         zigzag::expectWritten(
             core_.arena().link(frame, dims.stack, zigzag::Posward, *oldStack));
+      }
+      // P18: Record caller vars head on the frame cell along +d.vars so
+      // Return and RunResume can restore the caller's variable scope.
+      const auto callerVars =
+          core_.arena().linked(*cursor, dims.vars, zigzag::Posward);
+      if (callerVars) {
+        zigzag::expectWritten(
+            core_.arena().link(frame, dims.vars, zigzag::Posward, *callerVars));
       }
 
       // Bind each value by its parameter's +d.name label — #BIND's
@@ -1070,10 +1058,10 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
       // for an unlabelled parameter.
       for (std::size_t i = 0; i < boundParams.size(); ++i) {
         core_.arena().consumeWork();
-        const auto label = core_.arena().linked(boundParams[i], dims.name,
-                                                zigzag::Posward);
-        const auto name  = label ? core_.arena().textOf(*label)
-                                 : "arg" + std::to_string(i);
+        const auto label =
+            core_.arena().linked(boundParams[i], dims.name, zigzag::Posward);
+        const auto name =
+            label ? core_.arena().textOf(*label) : "arg" + std::to_string(i);
         CellRef varCell  = core_.arena().makeCell(name);
         CellRef valCell  = core_.arena().makeCell();
         WriteFault fault = WriteFault::None;
@@ -1083,8 +1071,8 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
             core_.arena().link(varCell, dims.values, zigzag::Posward, valCell));
         if (const auto varsHead =
                 core_.arena().linked(*cursor, dims.vars, zigzag::Posward))
-          zigzag::expectWritten(
-              core_.arena().link(varCell, dims.vars, zigzag::Posward, *varsHead));
+          zigzag::expectWritten(core_.arena().link(varCell, dims.vars,
+                                                   zigzag::Posward, *varsHead));
         zigzag::expectWritten(
             core_.arena().link(*cursor, dims.vars, zigzag::Posward, varCell));
       }
@@ -1104,8 +1092,8 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
       const auto &dims     = core_.dims();
       const CellRef head   = static_cast<CellRef>(toInt(inputs[0]));
       const CellRef failOp = static_cast<CellRef>(toInt(inputs[1]));
-      bool       produced  = false;
-      CellValue  result{false};
+      bool produced        = false;
+      CellValue result{false};
       // The box may name a member-`def` *symbol*: its +d.values lands
       // on the head, and only the head's own +d.values is the
       // descriptor. Hop the chain — the first cell whose +d.vars
@@ -1116,27 +1104,28 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
         const auto descriptor =
             core_.arena().linked(at, dims.values, zigzag::Posward);
         if (!descriptor || !core_.arena().contains(*descriptor)) break;
-        CellRef producedCell{noCell}, resultCell{noCell};
-        for (const CellRef record : zigzag::rankAfter(
-                 core_.arena(), *descriptor, dims.vars)) {
+        std::optional<CellRef> producedCell;
+        std::optional<CellRef> resultVal;
+        for (const CellRef record :
+             zigzag::rankAfter(core_.arena(), *descriptor, dims.vars)) {
           core_.arena().consumeWork();
           const auto key = core_.arena().textOf(record);
-          if (key == "produced")
+          if (key == "result" && !resultVal) {
+            resultVal =
+                core_.arena().linked(record, dims.values, zigzag::Posward);
+          } else if (key == "produced" && !producedCell) {
             producedCell =
-                core_.arena()
-                    .linked(record, dims.values, zigzag::Posward)
-                    .value_or(noCell);
-          else if (key == "result")
-            resultCell =
-                core_.arena()
-                    .linked(record, dims.values, zigzag::Posward)
-                    .value_or(noCell);
+                core_.arena().linked(record, dims.values, zigzag::Posward);
+          }
+          if (resultVal && producedCell) {
+            break;
+          }
         }
-        if (core_.arena().contains(producedCell) &&
-            core_.arena().contains(resultCell)) {
+        if (producedCell && core_.arena().contains(*producedCell) &&
+            resultVal && core_.arena().contains(*resultVal)) {
           produced = VortexCore::evaluateTruthiness(
-              core_.render(producedCell).value_or(CellValue{false}));
-          result   = core_.render(resultCell).value_or(CellValue{false});
+              core_.render(*producedCell).value_or(CellValue{false}));
+          result = core_.render(*resultVal).value_or(CellValue{false});
         } else {
           at = *descriptor;
         }
@@ -1147,6 +1136,394 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
         setCursorOpcode(*cursor, failOp);
         jumped = true;
       }
+    }
+    break;
+  }
+  case OpcodeKind::ScanPush: {
+    if (!inputs.empty()) {
+      CellRef subjCell = noCell;
+      if (std::holds_alternative<std::string>(inputs[0])) {
+        subjCell = core_.arena().makeCell(std::get<std::string>(inputs[0]));
+      } else {
+        const auto n = toInt(inputs[0]);
+        if (core_.arena().contains(static_cast<CellRef>(n))) {
+          subjCell = static_cast<CellRef>(n);
+        } else {
+          subjCell = core_.arena().makeCell(std::to_string(n));
+        }
+      }
+      const CellRef cursorCell =
+          core_.arena().makeScalarCell(static_cast<std::int64_t>(1));
+      const CellRef tail =
+          zigzag::rankTail(core_.arena(), core_.home(), core_.dims().scan);
+      zigzag::expectWritten(core_.arena().link(tail, core_.dims().scan,
+                                               DimVector::POS, cursorCell));
+      zigzag::expectWritten(core_.arena().link(cursorCell, core_.dims().grab,
+                                               DimVector::POS, subjCell));
+      outputs.emplace_back(static_cast<std::int64_t>(cursorCell));
+    }
+    break;
+  }
+  case OpcodeKind::ScanPop: {
+    if (!inputs.empty()) {
+      const CellRef cursorCell = static_cast<CellRef>(toInt(inputs[0]));
+      if (cursorCell != noCell && core_.arena().contains(cursorCell)) {
+        const auto prev = zigzag::step(core_.arena(), cursorCell,
+                                       core_.dims().scan, DimVector::NEG);
+        const auto next = zigzag::step(core_.arena(), cursorCell,
+                                       core_.dims().scan, DimVector::POS);
+        zigzag::expectWritten(core_.arena().unlink(
+            cursorCell, core_.dims().scan, DimVector::NEG));
+        zigzag::expectWritten(core_.arena().unlink(
+            cursorCell, core_.dims().scan, DimVector::POS));
+        if (prev.has_value() && next.has_value()) {
+          zigzag::expectWritten(core_.arena().link(*prev, core_.dims().scan,
+                                                   DimVector::POS, *next));
+        }
+      }
+    }
+    break;
+  }
+  case OpcodeKind::ScanTab: {
+    if (inputs.size() >= 2) {
+      const auto targetPos = toInt(inputs[0]);
+      const CellRef failOp = static_cast<CellRef>(toInt(inputs[1]));
+      const CellRef tail =
+          zigzag::rankTail(core_.arena(), core_.home(), core_.dims().scan);
+      const auto subjCell =
+          tail != core_.home()
+              ? core_.arena().linked(tail, core_.dims().grab, DimVector::POS)
+              : std::nullopt;
+      if (!subjCell || !core_.arena().contains(*subjCell)) {
+        if (cursor) {
+          setCursorOpcode(*cursor, failOp);
+          jumped = true;
+        }
+        break;
+      }
+      const std::string subj    = core_.arena().textOf(*subjCell);
+      const std::int64_t curPos = core_.arena().asInt64(tail).value_or(1);
+      const std::int64_t len    = static_cast<std::int64_t>(subj.size());
+      const std::int64_t target =
+          targetPos <= 0 ? (len + 1 + targetPos) : targetPos;
+      if (target < 1 || target > len + 1) {
+        if (cursor) {
+          setCursorOpcode(*cursor, failOp);
+          jumped = true;
+        }
+        break;
+      }
+      std::ignore             = core_.writeValue(tail, 0, std::nullopt, target);
+      const std::int64_t from = std::min(curPos, target);
+      const std::int64_t to   = std::max(curPos, target);
+      const std::size_t start = static_cast<std::size_t>(from - 1);
+      const std::size_t count = static_cast<std::size_t>(to - from);
+      outputs.emplace_back(subj.substr(start, count));
+    }
+    break;
+  }
+  case OpcodeKind::ScanMove: {
+    if (inputs.size() >= 2) {
+      const auto delta     = toInt(inputs[0]);
+      const CellRef failOp = static_cast<CellRef>(toInt(inputs[1]));
+      const CellRef tail =
+          zigzag::rankTail(core_.arena(), core_.home(), core_.dims().scan);
+      const auto subjCell =
+          tail != core_.home()
+              ? core_.arena().linked(tail, core_.dims().grab, DimVector::POS)
+              : std::nullopt;
+      if (!subjCell || !core_.arena().contains(*subjCell)) {
+        if (cursor) {
+          setCursorOpcode(*cursor, failOp);
+          jumped = true;
+        }
+        break;
+      }
+      const std::string subj       = core_.arena().textOf(*subjCell);
+      const std::int64_t curPos    = core_.arena().asInt64(tail).value_or(1);
+      const std::int64_t targetPos = curPos + delta;
+      const std::int64_t len       = static_cast<std::int64_t>(subj.size());
+      const std::int64_t target =
+          targetPos <= 0 ? (len + 1 + targetPos) : targetPos;
+      if (target < 1 || target > len + 1) {
+        if (cursor) {
+          setCursorOpcode(*cursor, failOp);
+          jumped = true;
+        }
+        break;
+      }
+      std::ignore             = core_.writeValue(tail, 0, std::nullopt, target);
+      const std::int64_t from = std::min(curPos, target);
+      const std::int64_t to   = std::max(curPos, target);
+      const std::size_t start = static_cast<std::size_t>(from - 1);
+      const std::size_t count = static_cast<std::size_t>(to - from);
+      outputs.emplace_back(subj.substr(start, count));
+    }
+    break;
+  }
+  case OpcodeKind::ScanMatch: {
+    if (inputs.size() >= 2) {
+      const std::string prefix = std::holds_alternative<std::string>(inputs[0])
+                                     ? std::get<std::string>(inputs[0])
+                                     : std::to_string(toInt(inputs[0]));
+      const CellRef failOp     = static_cast<CellRef>(toInt(inputs[1]));
+      const CellRef tail =
+          zigzag::rankTail(core_.arena(), core_.home(), core_.dims().scan);
+      const auto subjCell =
+          tail != core_.home()
+              ? core_.arena().linked(tail, core_.dims().grab, DimVector::POS)
+              : std::nullopt;
+      if (!subjCell || !core_.arena().contains(*subjCell)) {
+        if (cursor) {
+          setCursorOpcode(*cursor, failOp);
+          jumped = true;
+        }
+        break;
+      }
+      const std::string subj    = core_.arena().textOf(*subjCell);
+      const std::int64_t curPos = core_.arena().asInt64(tail).value_or(1);
+      if (curPos < 1 || curPos > static_cast<std::int64_t>(subj.size() + 1)) {
+        if (cursor) {
+          setCursorOpcode(*cursor, failOp);
+          jumped = true;
+        }
+        break;
+      }
+      const std::size_t offset = static_cast<std::size_t>(curPos - 1);
+      if (offset + prefix.size() <= subj.size() &&
+          std::string_view(subj).substr(offset, prefix.size()) == prefix) {
+        outputs.emplace_back(curPos + static_cast<std::int64_t>(prefix.size()));
+      } else {
+        if (cursor) {
+          setCursorOpcode(*cursor, failOp);
+          jumped = true;
+        }
+      }
+    }
+    break;
+  }
+  case OpcodeKind::ScanMany: {
+    if (inputs.size() >= 2) {
+      const std::string charset = std::holds_alternative<std::string>(inputs[0])
+                                      ? std::get<std::string>(inputs[0])
+                                      : std::to_string(toInt(inputs[0]));
+      const CellRef failOp      = static_cast<CellRef>(toInt(inputs[1]));
+      const CellRef tail =
+          zigzag::rankTail(core_.arena(), core_.home(), core_.dims().scan);
+      const auto subjCell =
+          tail != core_.home()
+              ? core_.arena().linked(tail, core_.dims().grab, DimVector::POS)
+              : std::nullopt;
+      if (!subjCell || !core_.arena().contains(*subjCell)) {
+        if (cursor) {
+          setCursorOpcode(*cursor, failOp);
+          jumped = true;
+        }
+        break;
+      }
+      const std::string subj    = core_.arena().textOf(*subjCell);
+      const std::int64_t curPos = core_.arena().asInt64(tail).value_or(1);
+      if (curPos < 1 || curPos > static_cast<std::int64_t>(subj.size())) {
+        if (cursor) {
+          setCursorOpcode(*cursor, failOp);
+          jumped = true;
+        }
+        break;
+      }
+      const std::size_t offset = static_cast<std::size_t>(curPos - 1);
+      std::size_t count        = 0;
+      while (offset + count < subj.size() &&
+             charset.find(subj[offset + count]) != std::string::npos) {
+        ++count;
+      }
+      if (count > 0) {
+        outputs.emplace_back(curPos + static_cast<std::int64_t>(count));
+      } else {
+        if (cursor) {
+          setCursorOpcode(*cursor, failOp);
+          jumped = true;
+        }
+      }
+    }
+    break;
+  }
+  case OpcodeKind::ScanUpto: {
+    if (inputs.size() >= 2) {
+      const std::string charset = std::holds_alternative<std::string>(inputs[0])
+                                      ? std::get<std::string>(inputs[0])
+                                      : std::to_string(toInt(inputs[0]));
+      const CellRef failOp      = static_cast<CellRef>(toInt(inputs[1]));
+      const CellRef tail =
+          zigzag::rankTail(core_.arena(), core_.home(), core_.dims().scan);
+      const auto subjCell =
+          tail != core_.home()
+              ? core_.arena().linked(tail, core_.dims().grab, DimVector::POS)
+              : std::nullopt;
+      if (!subjCell || !core_.arena().contains(*subjCell)) {
+        if (cursor) {
+          setCursorOpcode(*cursor, failOp);
+          jumped = true;
+        }
+        break;
+      }
+      const std::string subj    = core_.arena().textOf(*subjCell);
+      const std::int64_t curPos = core_.arena().asInt64(tail).value_or(1);
+      if (curPos < 1 || curPos > static_cast<std::int64_t>(subj.size() + 1)) {
+        if (cursor) {
+          setCursorOpcode(*cursor, failOp);
+          jumped = true;
+        }
+        break;
+      }
+      const std::size_t offset = static_cast<std::size_t>(curPos - 1);
+      const auto idx           = subj.find_first_of(charset, offset);
+      if (idx != std::string::npos) {
+        outputs.emplace_back(static_cast<std::int64_t>(idx + 1));
+      } else {
+        if (cursor) {
+          setCursorOpcode(*cursor, failOp);
+          jumped = true;
+        }
+      }
+    }
+    break;
+  }
+  case OpcodeKind::ScanAny: {
+    if (inputs.size() >= 2) {
+      const std::string charset = std::holds_alternative<std::string>(inputs[0])
+                                      ? std::get<std::string>(inputs[0])
+                                      : std::to_string(toInt(inputs[0]));
+      const CellRef failOp      = static_cast<CellRef>(toInt(inputs[1]));
+      const CellRef tail =
+          zigzag::rankTail(core_.arena(), core_.home(), core_.dims().scan);
+      const auto subjCell =
+          tail != core_.home()
+              ? core_.arena().linked(tail, core_.dims().grab, DimVector::POS)
+              : std::nullopt;
+      if (!subjCell || !core_.arena().contains(*subjCell)) {
+        if (cursor) {
+          setCursorOpcode(*cursor, failOp);
+          jumped = true;
+        }
+        break;
+      }
+      const std::string subj    = core_.arena().textOf(*subjCell);
+      const std::int64_t curPos = core_.arena().asInt64(tail).value_or(1);
+      if (curPos < 1 || curPos > static_cast<std::int64_t>(subj.size())) {
+        if (cursor) {
+          setCursorOpcode(*cursor, failOp);
+          jumped = true;
+        }
+        break;
+      }
+      const std::size_t offset = static_cast<std::size_t>(curPos - 1);
+      if (charset.find(subj[offset]) != std::string::npos) {
+        outputs.emplace_back(curPos + 1);
+      } else {
+        if (cursor) {
+          setCursorOpcode(*cursor, failOp);
+          jumped = true;
+        }
+      }
+    }
+    break;
+  }
+  case OpcodeKind::ScanFind: {
+    if (inputs.size() >= 2) {
+      const std::string needle = std::holds_alternative<std::string>(inputs[0])
+                                     ? std::get<std::string>(inputs[0])
+                                     : std::to_string(toInt(inputs[0]));
+      const CellRef failOp     = static_cast<CellRef>(toInt(inputs[1]));
+      const CellRef tail =
+          zigzag::rankTail(core_.arena(), core_.home(), core_.dims().scan);
+      const auto subjCell =
+          tail != core_.home()
+              ? core_.arena().linked(tail, core_.dims().grab, DimVector::POS)
+              : std::nullopt;
+      if (!subjCell || !core_.arena().contains(*subjCell)) {
+        if (cursor) {
+          setCursorOpcode(*cursor, failOp);
+          jumped = true;
+        }
+        break;
+      }
+      const std::string subj    = core_.arena().textOf(*subjCell);
+      const std::int64_t curPos = core_.arena().asInt64(tail).value_or(1);
+      if (curPos < 1 || curPos > static_cast<std::int64_t>(subj.size() + 1)) {
+        if (cursor) {
+          setCursorOpcode(*cursor, failOp);
+          jumped = true;
+        }
+        break;
+      }
+      const std::size_t offset = static_cast<std::size_t>(curPos - 1);
+      const auto idx           = subj.find(needle, offset);
+      if (idx != std::string::npos) {
+        outputs.emplace_back(static_cast<std::int64_t>(idx + 1));
+      } else {
+        if (cursor) {
+          setCursorOpcode(*cursor, failOp);
+          jumped = true;
+        }
+      }
+    }
+    break;
+  }
+  case OpcodeKind::ScanPos: {
+    if (!inputs.empty()) {
+      const CellRef tail =
+          zigzag::rankTail(core_.arena(), core_.home(), core_.dims().scan);
+      const auto subjCell =
+          tail != core_.home()
+              ? core_.arena().linked(tail, core_.dims().grab, DimVector::POS)
+              : std::nullopt;
+      if (!subjCell || !core_.arena().contains(*subjCell)) {
+        const CellRef failOp = static_cast<CellRef>(toInt(inputs.back()));
+        if (cursor) {
+          setCursorOpcode(*cursor, failOp);
+          jumped = true;
+        }
+        break;
+      }
+      const std::int64_t curPos = core_.arena().asInt64(tail).value_or(1);
+      if (inputs.size() >= 2) {
+        const auto targetPos   = toInt(inputs[0]);
+        const CellRef failOp   = static_cast<CellRef>(toInt(inputs[1]));
+        const std::string subj = core_.arena().textOf(*subjCell);
+        const std::int64_t len = static_cast<std::int64_t>(subj.size());
+        const std::int64_t target =
+            targetPos <= 0 ? (len + 1 + targetPos) : targetPos;
+        if (curPos == target) {
+          outputs.emplace_back(target);
+        } else {
+          if (cursor) {
+            setCursorOpcode(*cursor, failOp);
+            jumped = true;
+          }
+        }
+      } else {
+        outputs.emplace_back(curPos);
+      }
+    }
+    break;
+  }
+  case OpcodeKind::ScanSubject: {
+    if (!inputs.empty()) {
+      const CellRef tail =
+          zigzag::rankTail(core_.arena(), core_.home(), core_.dims().scan);
+      const auto subjCell =
+          tail != core_.home()
+              ? core_.arena().linked(tail, core_.dims().grab, DimVector::POS)
+              : std::nullopt;
+      if (!subjCell || !core_.arena().contains(*subjCell)) {
+        const CellRef failOp = static_cast<CellRef>(toInt(inputs[0]));
+        if (cursor) {
+          setCursorOpcode(*cursor, failOp);
+          jumped = true;
+        }
+        break;
+      }
+      outputs.emplace_back(core_.arena().textOf(*subjCell));
     }
     break;
   }
@@ -1310,6 +1687,13 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
           zigzag::expectWritten(
               core_.arena().link(frame, core_.dims().stack, false, *oldStack));
         }
+        // P18: Record caller vars head on the frame cell along +d.vars
+        const auto callerVars =
+            core_.arena().linked(*cursor, core_.dims().vars, false);
+        if (callerVars) {
+          zigzag::expectWritten(
+              core_.arena().link(frame, core_.dims().vars, false, *callerVars));
+        }
       }
       setCursorOpcode(*cursor, targetOp);
       jumped = true;
@@ -1326,6 +1710,11 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
             returnOpVal ? static_cast<CellRef>(*returnOpVal) : noCell;
         const auto nextStack =
             core_.arena().linked(*frame, core_.dims().stack, false);
+        // P18: Restore caller's +d.vars head recorded on frame
+        const auto callerVars =
+            core_.arena().linked(*frame, core_.dims().vars, false);
+        zigzag::expectWritten(
+            core_.arena().link(*cursor, core_.dims().vars, false, callerVars));
         zigzag::expectWritten(
             core_.arena().link(*cursor, core_.dims().stack, false, nextStack));
         setCursorOpcode(*cursor, returnOp);
@@ -1484,6 +1873,116 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
         c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
       }
       outputs.emplace_back(s);
+    }
+    break;
+  }
+  case OpcodeKind::StrLen: {
+    if (!inputs.empty()) {
+      const std::string s = std::holds_alternative<std::string>(inputs[0])
+                                ? std::get<std::string>(inputs[0])
+                                : std::to_string(toInt(inputs[0]));
+      outputs.emplace_back(static_cast<std::int64_t>(s.size()));
+    }
+    break;
+  }
+  case OpcodeKind::ByteAt: {
+    if (inputs.size() >= 2) {
+      const std::string s    = std::holds_alternative<std::string>(inputs[0])
+                                   ? std::get<std::string>(inputs[0])
+                                   : std::to_string(toInt(inputs[0]));
+      const std::int64_t idx = toInt(inputs[1]);
+      const auto sz          = static_cast<std::int64_t>(s.size());
+      std::int64_t eff       = 0;
+      bool valid             = false;
+      if (idx > 0) {
+        eff   = idx;
+        valid = (eff <= sz);
+      } else if (idx < 0) {
+        eff   = sz + 1 + idx;
+        valid = (eff >= 1 && eff <= sz);
+      }
+      if (!valid) {
+        if (backtrack(cursor)) {
+          jumped = true;
+          break;
+        }
+        return ExecutionResult{.success           = false,
+                               .contractViolation = ContractViolationKind::None,
+                               .failingClause     = opcode,
+                               .errorMessage = "ByteAt index out of bounds"};
+      }
+      outputs.emplace_back(static_cast<std::int64_t>(
+          static_cast<unsigned char>(s[static_cast<std::size_t>(eff - 1)])));
+    }
+    break;
+  }
+  case OpcodeKind::StrSlice: {
+    if (inputs.size() >= 3) {
+      const std::string s = std::holds_alternative<std::string>(inputs[0])
+                                ? std::get<std::string>(inputs[0])
+                                : std::to_string(toInt(inputs[0]));
+      const std::int64_t rawStart = toInt(inputs[1]);
+      const std::int64_t rawEnd   = toInt(inputs[2]);
+      const auto sz               = static_cast<std::int64_t>(s.size());
+      const std::int64_t start    = rawStart < 0 ? sz + 1 + rawStart : rawStart;
+      const std::int64_t end      = rawEnd < 0 ? sz + 1 + rawEnd : rawEnd;
+
+      if (end == start - 1) {
+        outputs.emplace_back(std::string{});
+        break;
+      }
+      if (start < 1 || end > sz || end < start - 1) {
+        if (backtrack(cursor)) {
+          jumped = true;
+          break;
+        }
+        return ExecutionResult{.success           = false,
+                               .contractViolation = ContractViolationKind::None,
+                               .failingClause     = opcode,
+                               .errorMessage = "StrSlice index out of bounds"};
+      }
+      outputs.emplace_back(s.substr(static_cast<std::size_t>(start - 1),
+                                    static_cast<std::size_t>(end - start + 1)));
+    }
+    break;
+  }
+  case OpcodeKind::IntToStr: {
+    if (!inputs.empty()) {
+      outputs.emplace_back(std::to_string(toInt(inputs[0])));
+    }
+    break;
+  }
+  case OpcodeKind::StrToInt: {
+    if (!inputs.empty()) {
+      if (std::holds_alternative<std::int64_t>(inputs[0])) {
+        outputs.emplace_back(std::get<std::int64_t>(inputs[0]));
+        break;
+      }
+      const auto *s = std::get_if<std::string>(&inputs[0]);
+      if (!s || s->empty()) {
+        if (backtrack(cursor)) {
+          jumped = true;
+          break;
+        }
+        return ExecutionResult{.success           = false,
+                               .contractViolation = ContractViolationKind::None,
+                               .failingClause     = opcode,
+                               .errorMessage = "StrToInt invalid integer text"};
+      }
+      std::int64_t parsed = 0;
+      const auto [ptr, ec] =
+          std::from_chars(s->data(), s->data() + s->size(), parsed);
+      if (ec != std::errc{} || ptr != s->data() + s->size()) {
+        if (backtrack(cursor)) {
+          jumped = true;
+          break;
+        }
+        return ExecutionResult{.success           = false,
+                               .contractViolation = ContractViolationKind::None,
+                               .failingClause     = opcode,
+                               .errorMessage = "StrToInt invalid integer text"};
+      }
+      outputs.emplace_back(parsed);
     }
     break;
   }
@@ -1859,8 +2358,8 @@ std::size_t VortexVM::stepScheduler(std::stop_token stopToken) {
   // category is disabled, so an instrumented build pays nothing by default.
   static const auto schedLogger = gleditor::logging::category("vortex.sched");
   const bool trace              = schedLogger->should_log(spdlog::level::trace);
-  const auto tickStart          = trace ? std::chrono::steady_clock::now()
-                                        : std::chrono::steady_clock::time_point{};
+  const auto tickStart = trace ? std::chrono::steady_clock::now()
+                               : std::chrono::steady_clock::time_point{};
 
   for (CellRef cursor : cursors) {
     if (stopToken.stop_requested()) {
