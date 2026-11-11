@@ -372,18 +372,32 @@ Decided on 2026-11-11:
   costly (259 throw sites, an estimated 2,000–3,500 lines) and boundary conversion cheap, so the D3
   card in W1 does the boundary conversion.
 
-Open, found by W0.3 (each blocks only the tests that list it in the TSV):
+Ruled by the owner on 2026-11-11, after W0.3 (each ruling binds the cards that list it in the TSV):
 
-| Id      | Tests | Question                                                                                                       | Recommendation                                                                    |
-| ------- | ----- | -------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| R-WATCH | 6     | May a `watch` statement with no `since` baseline run? This branch's tests say yes; `main`'s say it must refuse | Refuse without a store-backed `since`; keep the poll API. Rewrites 2 branch tests |
-| R-OBS   | 7     | Rewrite the 7 `main` tests that assert a refusal or contract this branch replaced, as proposed in the TSV      | Yes                                                                               |
-| R-NUM   | 1     | Exact numeric comparison (this branch's spec) or `main`'s coercion boundaries                                  | Exact; rewrite `ScalarComparisonCoercionBoundariesRemainStable`                   |
-| R-BARE  | 1     | Bare `$s{...}` stays an in-place mask (about 15 branch tests) or refuses (`main`)                              | Keep the mask                                                                     |
-| R-GEN   | 2     | `local("x")` and `slices("x")` for a missing store: refuse (`main`) or return empty (this branch)              | Refuse; keep `current()` lowered                                                  |
-| R-CTX   | 2     | Refuse a context-relative path with no bound context at compile time                                           | Yes                                                                               |
-| R-RERUN | 1     | May a compiled creation be run again, appending again                                                          | Yes                                                                               |
-| MAIN    | 13    | Fix `main`'s own failing tests, format and lint debt as part of this work, or leave them                       | Leave; fix on `main` separately                                                   |
+- **R-WATCH:** a `watch` statement runs only with a `since` baseline backed by store history;
+  otherwise it refuses. The poll API stays. `StreamingAndDeltaMetadata` and
+  `MultiStatementScriptWithForAndWatch` are rewritten to expect the refusal, and the duplicate
+  `RefusesSimulatedDeltaMetadata` (a merge artifact with the branch's body) is reconciled with them.
+  Card Q4.
+- **R-OBS:** rewrite the seven obsolete `main` tests as proposed per test in
+  `.logs/w0/classification.tsv`: keep a refusal assertion only for forms that are still refused,
+  with a message that names the feature, and assert success where the branch compiles the form. New
+  card T1 (low tier, test files only, runs after the D3 card).
+- **R-GEN:** tentatively, `local`, `topic`, `btpk`, `system` and `slices` refuse for a missing
+  store, and `current()` is lowered. Card Q3. The owner also wants a way to select store
+  alternatives, so that `local(x)` can fall back to or combine with `local(y)`. That is a language
+  design item needing its own proposal and approval; nothing in this plan builds it, and the refusal
+  must not foreclose it.
+- **R-CTX:** compiling a context-relative path with no bound context is refused, except inside
+  functor definitions. Card Q6.
+- **R-NUM:** numeric comparison is exact. `ScalarComparisonCoercionBoundariesRemainStable` is
+  rewritten to the exact rule. Card T1.
+- **R-BARE:** bare `$s{...}` stays an in-place mask. `main`'s spec lines and the one assertion in
+  `vql_semantics_repair_test` are corrected; `project` and `apply_shape` are still added. Card S1.
+- **R-RERUN:** a compiled creation may run again and appends again; the "already used" assertion is
+  dropped. Card T1.
+- **MAIN:** `main`'s 13 failing tests and its format and lint debt stay out of scope. The gates are
+  "no failure outside `MAIN`" and "no new format or lint violation relative to `main`".
 
 ## 5a. Original decision table (before W0)
 
