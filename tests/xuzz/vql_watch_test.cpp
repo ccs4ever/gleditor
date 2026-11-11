@@ -27,14 +27,15 @@ TEST(VQLWatchTest, RefusesSimulatedDeltaMetadata) {
   EXPECT_TRUE(arena.link(core.home(), dItems, DimVector::POS, item1));
   EXPECT_TRUE(arena.link(item1, dItems, DimVector::POS, item2));
 
-  // Snapshot watch execution does not invent a delta cell for existing data.
-  auto deltas = engine.execute("watch ##/d.items as $item {\n"
-                               "  $item/+d.delta\n"
-                               "}");
-
-  ASSERT_EQ(deltas.size(), 2u);
-  EXPECT_EQ(deltas[0], item1);
-  EXPECT_EQ(deltas[1], item2);
+  EXPECT_THROW(engine.execute("watch ##/d.items as $item {\n"
+                              "  $item/+d.delta\n"
+                              "}"),
+               std::runtime_error);
+  const auto dDelta = engine.resolveDimension("d.delta");
+  EXPECT_FALSE(arena.linked(item1, dDelta, DimVector::POS));
+  EXPECT_FALSE(arena.linked(item2, dDelta, DimVector::POS));
+  EXPECT_EQ(engine.execute("##/d.items"),
+            (std::vector<zigzag::CellRef>{item1, item2}));
 }
 
 TEST(VQLWatchTest, RefusesSimulatedDeltaMetadataLeavesSliceUntouched) {
@@ -266,14 +267,23 @@ TEST(VQLWatchTest, StreamingAndDeltaMetadata) {
   EXPECT_TRUE(arena.link(core.home(), dItems, DimVector::POS, item1));
   EXPECT_TRUE(arena.link(item1, dItems, DimVector::POS, item2));
 
-  // Snapshot watch execution does not invent a delta cell for existing data.
-  auto deltas = engine.execute("watch ##/d.items as $item {\n"
-                               "  $item/+d.delta\n"
-                               "}");
-
-  ASSERT_EQ(deltas.size(), 2u);
-  EXPECT_EQ(deltas[0], item1);
-  EXPECT_EQ(deltas[1], item2);
+  // A watch statement without a `since` baseline has nothing to report: it
+  // refuses, names the missing baseline and points at the polling API instead
+  // of inventing a delta cell for existing data.
+  try {
+    (void)engine.execute("watch ##/d.items as $item {\n"
+                         "  $item/+d.delta\n"
+                         "}");
+    ADD_FAILURE() << "a watch statement without a baseline must refuse";
+  } catch (const std::runtime_error &refusal) {
+    EXPECT_THAT(refusal.what(), testing::HasSubstr("since"));
+    EXPECT_THAT(refusal.what(), testing::HasSubstr("pollWatch"));
+  }
+  const auto dDelta = engine.resolveDimension("d.delta");
+  EXPECT_FALSE(arena.linked(item1, dDelta, DimVector::POS));
+  EXPECT_FALSE(arena.linked(item2, dDelta, DimVector::POS));
+  EXPECT_EQ(engine.execute("##/d.items"),
+            (std::vector<zigzag::CellRef>{item1, item2}));
 }
 
 TEST(VQLWatchTest, MultiStatementScriptWithForAndWatch) {
@@ -288,15 +298,27 @@ TEST(VQLWatchTest, MultiStatementScriptWithForAndWatch) {
   EXPECT_TRUE(arena.link(core.home(), dItems, DimVector::POS, i1));
   EXPECT_TRUE(arena.link(i1, dItems, DimVector::POS, i2));
 
+  // The script's `for` statement still runs on its own.
+  auto results = engine.execute("for $x in ##/d.items return $x;");
+  ASSERT_EQ(results.size(), 2u);
+  EXPECT_EQ(arena.textOf(results[0]), "itemA");
+  EXPECT_EQ(arena.textOf(results[1]), "itemB");
+
+  // The watch statement has no baseline, so the script refuses as a whole
+  // instead of returning matches for it.
   std::string script = "for $x in ##/d.items return $x;\n"
                        "watch ##/d.items as $it until $it = \"itemB\" {\n"
                        "  $it\n"
                        "};";
-
-  auto results = engine.execute(script);
-  ASSERT_EQ(results.size(), 2u);
-  EXPECT_EQ(arena.textOf(results[0]), "itemA");
-  EXPECT_EQ(arena.textOf(results[1]), "itemB");
+  try {
+    (void)engine.execute(script);
+    ADD_FAILURE() << "a watch statement without a baseline must refuse";
+  } catch (const std::runtime_error &refusal) {
+    EXPECT_THAT(refusal.what(), testing::HasSubstr("since"));
+    EXPECT_THAT(refusal.what(), testing::HasSubstr("pollWatch"));
+  }
+  EXPECT_EQ(engine.execute("##/d.items"),
+            (std::vector<zigzag::CellRef>{i1, i2}));
 }
 
 } // namespace

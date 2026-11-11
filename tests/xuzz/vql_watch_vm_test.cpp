@@ -1,0 +1,127 @@
+/**
+ * @file vql_watch_vm_test.cpp
+ * @brief Watch statements, polling subscriptions, mounts and scoped
+ * perspective blocks as compiled VM programs: what refuses, and by what name.
+ */
+#include <gmock/gmock.h>
+#include <gtest/gtest.h>
+
+#include "common/xanadu/vql/parser.hpp"
+#include "common/xanadu/vql/vql_engine.hpp"
+#include "common/xanadu/zigzag/arena_manifold.hpp"
+
+namespace {
+
+using namespace xanadu::vql;
+using testing::HasSubstr;
+using zigzag::DimVector;
+
+struct VQLWatchVmTest : testing::Test {
+  zigzag::ArenaManifold arena;
+  zigzag::vortex::VortexCore core{arena};
+  VQLEngine engine{core};
+
+  std::string refusalOf(const std::string &query) {
+    try {
+      (void)engine.execute(query);
+    } catch (const std::runtime_error &refusal) {
+      return refusal.what();
+    }
+    ADD_FAILURE() << "expected a refusal: " << query;
+    return {};
+  }
+};
+
+TEST_F(VQLWatchVmTest, WatchWithoutBaselineNamesTheBaselineAndThePollingApi) {
+  const auto before  = arena.cellCount();
+  const auto message = refusalOf("watch ##/d.items as $item { $item }");
+  EXPECT_THAT(message, HasSubstr("'since' baseline"));
+  EXPECT_THAT(message, HasSubstr("subscribeWatch"));
+  EXPECT_THAT(message, HasSubstr("pollWatch"));
+  EXPECT_EQ(arena.cellCount(), before);
+}
+
+TEST_F(VQLWatchVmTest, WatchSinceOnAnArenaWithoutStoreHistoryNamesTheStore) {
+  const auto message =
+      refusalOf("watch ##/d.items as $item since @88 { $item }");
+  EXPECT_THAT(message, HasSubstr("local Store"));
+  EXPECT_THAT(message, HasSubstr("store-backed history"));
+  EXPECT_THAT(message, HasSubstr("pollWatch"));
+}
+
+TEST_F(VQLWatchVmTest, WatchOverRemoteDiscoveryNamesTheMissingSession) {
+  EXPECT_THAT(
+      refusalOf("watch topic(\"ci\")/d.active as $job since @1 { $job }"),
+      HasSubstr("ZZ9P"));
+}
+
+TEST_F(VQLWatchVmTest, ExecuteWatchRunsTheCompiledRefusal) {
+  Parser parser("watch ##/d.items as $item { $item }");
+  const auto query = parser.parseQuery();
+  ASSERT_EQ(query.body.statements.size(), 1u);
+  const auto &watch = std::get<WatchStatement>(query.body.statements.front());
+  EXPECT_THROW((void)engine.executeWatch(watch), std::runtime_error);
+}
+
+TEST_F(VQLWatchVmTest, SubscribingToRemoteDiscoveryIsRefused) {
+  Parser parser("topic(\"ci\")/d.active");
+  const auto query = parser.parseQuery();
+  EXPECT_THROW(
+      (void)engine.subscribeWatch(std::get<PathExpression>(query.expr)),
+      std::runtime_error);
+}
+
+TEST_F(VQLWatchVmTest, SubscriptionsPollTheCurrentShapeOfTheirPath) {
+  const auto dim = engine.resolveDimension("d.items");
+  const auto a   = arena.makeCell("a");
+  ASSERT_TRUE(arena.link(core.home(), dim, DimVector::POS, a));
+
+  Parser parser("##/d.items");
+  const auto id =
+      engine.subscribeWatch(std::get<PathExpression>(parser.parseQuery().expr));
+  EXPECT_EQ(engine.pollWatch(id).size(), 1u);
+
+  const auto b = arena.makeCell("b");
+  ASSERT_TRUE(arena.link(a, dim, DimVector::POS, b));
+  const auto events = engine.pollWatch(id);
+  ASSERT_EQ(events.size(), 2u);
+  EXPECT_EQ(events[0].change, VQLEngine::WatchChange::Modified);
+  EXPECT_EQ(events[1].cell, b);
+  EXPECT_EQ(events[1].change, VQLEngine::WatchChange::Added);
+  EXPECT_TRUE(engine.cancelWatch(id));
+  EXPECT_THROW((void)engine.pollWatch(id), std::out_of_range);
+}
+
+TEST_F(VQLWatchVmTest, RemoteMountNamesItsAnchor) {
+  const auto message = refusalOf("mount topic(\"cluster\") as +d.remote; ##");
+  EXPECT_THAT(message, HasSubstr("remote store anchor 'topic'"));
+  EXPECT_THAT(message, HasSubstr("ZZ9P"));
+}
+
+TEST_F(VQLWatchVmTest, FailedPerspectiveBlockLeavesNoAmbientSelection) {
+  const auto subject = arena.makeCell("subject");
+  engine.setVariable("p", subject);
+  EXPECT_THROW(
+      (void)engine.execute("with perspective(\"alice\") { watch ## {} }"),
+      std::runtime_error);
+  // A block qualifies its own steps and nothing else, so a failed block has
+  // no ambient state to leave behind.
+  EXPECT_TRUE(engine.execute("$p/+d.comment").empty());
+}
+
+TEST_F(VQLWatchVmTest, PerspectiveBlockOverAForBlockIsRefusedByName) {
+  EXPECT_THAT(
+      refusalOf(
+          "with perspective(\"alice\") { for $x in ##/d.items return $x }"),
+      HasSubstr("perspective block over a for, let or return block"));
+}
+
+TEST_F(VQLWatchVmTest, PerspectiveBlockOverAPredicateStepIsRefusedByName) {
+  const auto subject = arena.makeCell("subject");
+  engine.setVariable("p", subject);
+  EXPECT_THAT(
+      refusalOf("with perspective(\"alice\") { $p/+d.comment[. = \"x\"] }"),
+      HasSubstr("step that has predicates"));
+}
+
+} // namespace
