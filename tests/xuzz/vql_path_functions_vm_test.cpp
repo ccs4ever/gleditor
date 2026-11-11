@@ -9,6 +9,7 @@
 
 #include <cstdint>
 #include <expected>
+#include <limits>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -50,14 +51,27 @@ struct PathFunctionFixture : ::testing::Test {
     return arena.asInt64(result.front());
   }
 
-  // A refusal is a runtime_error that names the function.
-  void expectRefusal(const std::string &query, std::string_view name) {
+  // A refusal is a runtime_error whose message contains `text`.
+  void expectRefusal(const std::string &query, std::string_view text) {
     SCOPED_TRACE(query);
     try {
       std::ignore = engine.execute(query);
       FAIL() << "query was not refused";
     } catch (const std::runtime_error &error) {
-      EXPECT_NE(std::string_view(error.what()).find(name),
+      EXPECT_NE(std::string_view(error.what()).find(text),
+                std::string_view::npos)
+          << error.what();
+    }
+  }
+
+  // A malformed call (a caller's mistake) surfaces as invalid_argument.
+  void expectMalformed(const std::string &query, std::string_view text) {
+    SCOPED_TRACE(query);
+    try {
+      std::ignore = engine.execute(query);
+      FAIL() << "query was not refused";
+    } catch (const std::invalid_argument &error) {
+      EXPECT_NE(std::string_view(error.what()).find(text),
                 std::string_view::npos)
           << error.what();
     }
@@ -102,12 +116,36 @@ TEST_F(PathFunctionFixture, ArgumentFreeCountAsPathStepIsRefusedByName) {
 
 TEST_F(PathFunctionFixture, CountWithArgumentRunsPerCurrentCell) {
   linkItems(2);
-  // Each cell of the walk answers its own count, as a step with an argument
-  // always does; the argument here is empty at every cell.
-  const auto perCell = engine.execute("##/d.items/count($absent)");
+  // The first item has two cells along d.sub, the second none, so a per-cell
+  // count answers 2 then 0 where a whole-walk count would answer one number.
+  const auto sub  = engine.resolveDimension("d.sub");
+  const auto head = arena.linked(core.home(), items, DimVector::POS);
+  ASSERT_TRUE(head);
+  const auto firstSub = arena.makeCell("s0");
+  zigzag::expectWritten(arena.link(*head, sub, DimVector::POS, firstSub));
+  zigzag::expectWritten(
+      arena.link(firstSub, sub, DimVector::POS, arena.makeCell("s1")));
+  const auto perCell = engine.execute("##/d.items/count(+d.sub)");
   ASSERT_EQ(perCell.size(), 2U);
-  EXPECT_EQ(arena.asInt64(perCell[0]), 0);
+  EXPECT_EQ(arena.asInt64(perCell[0]), 2);
   EXPECT_EQ(arena.asInt64(perCell[1]), 0);
+}
+
+TEST_F(PathFunctionFixture, NamedArgumentsToCountAndContainsAreMalformed) {
+  expectMalformed("count(path: ##/d.items)", "count");
+  expectMalformed(R"(contains(haystack: "abc", "b"))", "contains");
+}
+
+TEST_F(PathFunctionFixture, ContainsSearchesAComputedScalarAsItsText) {
+  linkItems(1);
+  using zigzag::vortex::CellValue;
+  // count() mints an Int64 cell at run time; it is searched as "1".
+  auto result = engine.execute(R"(contains("a1b", count(##/d.items)))");
+  ASSERT_EQ(result.size(), 1U);
+  EXPECT_EQ(core.render(result.front()), CellValue(true));
+  result = engine.execute(R"(contains("a2b", count(##/d.items)))");
+  ASSERT_EQ(result.size(), 1U);
+  EXPECT_EQ(core.render(result.front()), CellValue(false));
 }
 
 TEST_F(PathFunctionFixture, ContainsArityIsCheckedBeforeArgumentsRun) {
@@ -302,7 +340,7 @@ TEST_F(SortFixture, ACandidateWithoutAKeyFailsAndLeavesTheRankAlone) {
   zigzag::expectWritten(arena.link(cells.back(), videos, DimVector::POS, bare));
   cells.push_back(bare);
   const auto before = rank();
-  expectRefusal("sort_into(##/d.videos, by: +d.tag)", "");
+  expectRefusal("sort_into(##/d.videos, by: +d.tag)", "exactly one scalar");
   EXPECT_EQ(rank(), before);
   expectReciprocal();
 }
@@ -322,11 +360,112 @@ TEST_F(SortFixture, ARankPathThatMayNotBeOneSectionIsRefused) {
   EXPECT_EQ(rank(), before);
 }
 
-TEST_F(SortFixture, SortIntoRequiresItsByKey) {
+TEST_F(SortFixture, SortIntoArityIsUnsupportedAndNamingMistakesAreMalformed) {
   build({2, 1});
+  // Arity stays a runtime refusal: VQLQueryErrorTest pins it Unsupported.
   expectRefusal("sort_into(##/d.videos)", "sort_into");
-  expectRefusal("sort_into(##/d.videos, +d.tag)", "sort_into");
   expectRefusal("sort_into(##/d.videos, by: +d.tag, by: +d.tag)", "sort_into");
+  expectMalformed("sort_into(##/d.videos, +d.tag)", "by:");
+  expectMalformed("sort_into(##/d.videos, key: +d.tag)", "by:");
+  expectMalformed("sort_into(rank: ##/d.videos, by: +d.tag)", "by:");
+}
+
+// Key classes. Gt orders text byte-wise and everything else through double, so
+// the lowering refuses what that cannot order correctly.
+struct SortKeyFixture : SortFixture {
+  void buildKeyCells(const std::vector<zigzag::CellRef> &keys) {
+    auto previous = core.home();
+    for (const auto key : keys) {
+      const auto cell = arena.makeCell("cell " + std::to_string(cells.size()));
+      zigzag::expectWritten(arena.link(cell, tag, DimVector::POS, key));
+      zigzag::expectWritten(arena.link(previous, videos, DimVector::POS, cell));
+      cells.push_back(cell);
+      previous = cell;
+    }
+  }
+  void expectRefusedAndUnmoved(std::string_view text) {
+    const auto before = rank();
+    expectRefusal("sort_into(##/d.videos, by: +d.tag)", text);
+    EXPECT_EQ(rank(), before);
+    expectReciprocal();
+  }
+};
+
+TEST_F(SortKeyFixture, TextKeysIncludingEmptyAndNumeralsSortLexically) {
+  buildKeyCells({arena.makeCell("b"), arena.makeCell("10"), arena.makeCell(""),
+                 arena.makeCell("9"), arena.makeCell("a")});
+  EXPECT_EQ(engine.execute("sort_into(##/d.videos, by: +d.tag)"),
+            pick({2, 1, 3, 4, 0}));
+  expectReciprocal();
+}
+
+TEST_F(SortKeyFixture, DecimalKeysSortNumerically) {
+  buildKeyCells({arena.makeScalarCell(2.5), arena.makeScalarCell(-1.5),
+                 arena.makeScalarCell(10.25)});
+  EXPECT_EQ(engine.execute("sort_into(##/d.videos, by: +d.tag)"),
+            pick({1, 0, 2}));
+}
+
+TEST_F(SortKeyFixture, MixedTextAndNumberKeysAreRefusedAndRolledBack) {
+  buildKeyCells({arena.makeCell("a"), arena.makeScalarCell(std::int64_t{1}),
+                 arena.makeCell("b")});
+  expectRefusedAndUnmoved("sort_into");
+  expectRefusedAndUnmoved("cannot mix");
+}
+
+TEST_F(SortKeyFixture, NumberFirstThenTextKeysAreRefused) {
+  buildKeyCells({arena.makeScalarCell(std::int64_t{3}),
+                 arena.makeScalarCell(std::int64_t{2}), arena.makeCell("a")});
+  expectRefusedAndUnmoved("cannot mix");
+}
+
+TEST_F(SortKeyFixture, IntegerAgainstDecimalKeysAreRefused) {
+  // 2^53+1 against 2^53: through double they compare equal and would sort
+  // silently wrong, so the pair is refused instead.
+  buildKeyCells({arena.makeScalarCell(std::int64_t{9007199254740993}),
+                 arena.makeScalarCell(9007199254740992.0)});
+  expectRefusedAndUnmoved("cannot mix");
+}
+
+TEST_F(SortKeyFixture, NaNKeysAreRefused) {
+  buildKeyCells({arena.makeScalarCell(1.5),
+                 arena.makeScalarCell(std::numeric_limits<double>::quiet_NaN()),
+                 arena.makeScalarCell(0.5)});
+  expectRefusedAndUnmoved("NaN");
+}
+
+TEST_F(SortKeyFixture, BoolKeysAreRefused) {
+  buildKeyCells({arena.makeScalarCell(true), arena.makeScalarCell(false)});
+  expectRefusedAndUnmoved("Bool");
+}
+
+TEST_F(SortKeyFixture, ALambdaKeyIsEvaluatedForEveryComparisonAndStaysCorrect) {
+  buildKeyCells({arena.makeScalarCell(std::int64_t{6}),
+                 arena.makeScalarCell(std::int64_t{2}),
+                 arena.makeScalarCell(std::int64_t{5}),
+                 arena.makeScalarCell(std::int64_t{2}),
+                 arena.makeScalarCell(std::int64_t{9}),
+                 arena.makeScalarCell(std::int64_t{1})});
+  EXPECT_EQ(engine.execute(R"(sort_into(##/d.videos, by: \($c) $c/+d.tag))"),
+            pick({5, 1, 3, 2, 0, 4}));
+  expectReciprocal();
+}
+
+// A ring has no head: the anchored walk ends back at the anchor. The sort
+// detects that before moving anything and refuses by name.
+TEST_F(SortKeyFixture, ACyclicRankTerminatesWithoutRelinking) {
+  buildKeyCells({arena.makeScalarCell(std::int64_t{3}),
+                 arena.makeScalarCell(std::int64_t{1}),
+                 arena.makeScalarCell(std::int64_t{2})});
+  zigzag::expectWritten(arena.unlink(cells[0], videos, DimVector::NEG));
+  zigzag::expectWritten(arena.link(cells[2], videos, DimVector::POS, cells[0]));
+  // The walk from c1 is c2, c0 and stops at the anchor, so c1 is both the
+  // section's predecessor and its successor.
+  engine.setVariable("ring", cells[1]);
+  expectRefusal("sort_into($ring/+d.videos, by: +d.tag)", "cyclic rank");
+  EXPECT_EQ(arena.linked(cells[0], videos, DimVector::POS), cells[1]);
+  EXPECT_EQ(arena.linked(cells[1], videos, DimVector::POS), cells[2]);
+  EXPECT_EQ(arena.linked(cells[2], videos, DimVector::POS), cells[0]);
 }
 
 TEST_F(SortFixture, ExhaustingTheCycleBudgetFailsAndRollsTheRankBack) {

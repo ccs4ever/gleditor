@@ -25,9 +25,9 @@
 
 #include <algorithm>
 #include <cstddef>
-#include <limits>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace xanadu::vql {
 using zigzag::CellRef;
@@ -38,17 +38,18 @@ namespace {
 
 constexpr std::int64_t towardPositive = 1;
 constexpr std::int64_t towardNegative = -1;
-constexpr std::int64_t unboundedSlice =
-    std::numeric_limits<std::int64_t>::max();
 
-[[noreturn]] void refusePathFunction(const FunctionInvocation &fn,
-                                     const std::string &reason) {
-  throw QueryRefusal(QueryErrorCategory::Unsupported,
-                     "VQL path function '" + fn.name + "' " + reason);
+[[noreturn]] void refusePathFunction(
+    const FunctionInvocation &fn, const std::string &reason,
+    const QueryErrorCategory category = QueryErrorCategory::Unsupported) {
+  throw QueryRefusal(category, "VQL path function '" + fn.name + "' " + reason);
 }
 
 // Arity is checked before any argument is compiled, so a wrong call refuses
-// without evaluating its arguments.
+// without evaluating its arguments. It stays Unsupported: the standing tests
+// (UnsupportedBuiltinArityRefusesBeforeArgumentsRun, VQLQueryErrorTest) pin
+// arity refusals as runtime errors of that category. Named arguments the
+// function does not have are a caller's mistake, so they are Malformed.
 void requireArity(const FunctionInvocation &fn, const std::size_t expected,
                   const std::string_view shape) {
   if (fn.args.size() != expected)
@@ -58,7 +59,8 @@ void requireArity(const FunctionInvocation &fn, const std::size_t expected,
 void requirePositional(const FunctionInvocation &fn) {
   if (std::ranges::any_of(
           fn.argNames, [](const std::string &name) { return !name.empty(); }))
-    refusePathFunction(fn, "does not take named arguments");
+    refusePathFunction(fn, "does not take named arguments",
+                       QueryErrorCategory::Malformed);
 }
 
 // find reads store documents and answers quote cells over their spans; neither
@@ -69,15 +71,6 @@ void refuseFind(const FunctionInvocation &fn) {
                          "prose needs a substring-search opcode and a quote "
                          "constructor, and neither exists");
 }
-
-// The only path shape the lowered sort can order: one plain +dimension step
-// from an anchor that names one cell. Anything else may walk several ranks or
-// a non-contiguous section, which the insertion sort cannot detect at run
-// time (the oracle refuses those), so it refuses here, before any effect.
-struct SortTarget {
-  const PathExpression *path;
-  DimRef dimension;
-};
 
 } // namespace
 
@@ -104,7 +97,11 @@ VQLCompiler::compilePathFunctionCall(const FunctionInvocation &fn,
                        "unknown compiled function: " + fn.name);
 
   // Validate every contract before the first argument is compiled.
-  std::optional<SortTarget> sortTarget;
+  // The only path shape the lowered sort can order: one plain +dimension step
+  // from an anchor that names one cell. Anything else may walk several ranks
+  // or a non-contiguous section, which the insertion sort cannot detect at run
+  // time (the oracle refuses those), so it refuses here, before any effect.
+  std::optional<DimRef> sortDimension;
   if (fn.name == "count") {
     requireArity(fn, 1, "exactly one path argument");
     requirePositional(fn);
@@ -113,8 +110,10 @@ VQLCompiler::compilePathFunctionCall(const FunctionInvocation &fn,
     requirePositional(fn);
   } else {
     requireArity(fn, 2, "a rank path and a by: key");
-    if (fn.argNames.size() != 2 || fn.argNames[1] != "by")
-      refusePathFunction(fn, "takes a rank path and a by: key");
+    if (fn.argNames.size() != 2 || !fn.argNames[0].empty() ||
+        fn.argNames[1] != "by")
+      refusePathFunction(fn, "takes a positional rank path and a named by: key",
+                         QueryErrorCategory::Malformed);
     const auto *target =
         std::get_if<std::shared_ptr<PathExpression>>(&fn.args.front().kind);
     constexpr auto shapeReason =
@@ -159,8 +158,9 @@ VQLCompiler::compilePathFunctionCall(const FunctionInvocation &fn,
     const auto *lambda =
         std::get_if<std::shared_ptr<PathLambda>>(&fn.args[1].kind);
     if (lambda && !*lambda)
-      throw std::invalid_argument("null VQL path lambda selector");
-    sortTarget = SortTarget{&path, resolveDimension(dimension->dimName)};
+      throw std::invalid_argument("VQL path function 'sort_into' by: key is a "
+                                  "null path lambda");
+    sortDimension = resolveDimension(dimension->dimName);
   }
 
   const auto fresh      = [&] { return core_.arena().makeCell(); };
@@ -302,7 +302,6 @@ VQLCompiler::compilePathFunctionCall(const FunctionInvocation &fn,
     const auto needleCells   = compileArgument(fn.args[1], context);
     const auto zero          = emitConstant(std::int64_t{0});
     const auto one           = emitConstant(std::int64_t{1});
-    const auto unbounded     = emitConstant(unboundedSlice);
     const auto emptyText     = emitConstant(std::string{});
     const auto found         = arithmetic(OpcodeKind::Eq, zero, one);
 
@@ -312,11 +311,21 @@ VQLCompiler::compilePathFunctionCall(const FunctionInvocation &fn,
     const auto done            = label("#CONTAINS_END");
     branchFalse(arithmetic(OpcodeKind::And, haystackPresent, needlePresent),
                 done);
-    const auto haystack   = firstOf(haystackCells);
-    const auto needleCell = firstOf(needleCells);
-    // Slicing renders any scalar as text, so a numeric needle compares as the
-    // text the direct evaluator compared.
-    const auto needle = slice(needleCell, zero, unbounded);
+    const auto haystackCell = firstOf(haystackCells);
+    const auto needleCell   = firstOf(needleCells);
+    // Slices read a cell's spooled text, which a scalar minted at run time
+    // (a count, a sum) does not have. VqlString states any scalar as its
+    // canonical text first, so both sides are searched as the text the direct
+    // evaluator compared.
+    const auto asText = [&](CellRef scalar) {
+      const auto opcode = emitOp(OpcodeKind::VqlString, "#CONTAINS_TEXT");
+      emitInput(opcode, scalar);
+      const auto text = fresh();
+      emitOutput(opcode, text);
+      return text;
+    };
+    const auto haystack = asText(haystackCell);
+    const auto needle   = asText(needleCell);
 
     // Count the needle's bytes one slice at a time; the first empty slice is
     // its end.
@@ -357,8 +366,7 @@ VQLCompiler::compilePathFunctionCall(const FunctionInvocation &fn,
   }
 
   // sort_into
-  const auto &target    = *sortTarget;
-  const auto dimension  = target.dimension;
+  const auto dimension  = *sortDimension;
   const auto candidates = compileArgument(fn.args.front(), context);
   const auto zero       = emitConstant(std::int64_t{0});
   const auto one        = emitConstant(std::int64_t{1});
@@ -381,6 +389,47 @@ VQLCompiler::compilePathFunctionCall(const FunctionInvocation &fn,
     return exactlyOne(cells, "sort_into key must return exactly one scalar");
   };
 
+  // Gt orders text byte-wise but converts everything else through double, so a
+  // mixed or non-finite key would sort silently wrong. Every key is therefore
+  // classified (text, integer, decimal) with the contract matcher, which reads
+  // a cell's typed scalar the way the comparison opcodes do, and refused
+  // unless it is of the first key's class. Integer against decimal is refused
+  // too: the comparison goes through double and is inexact beyond 2^53. The
+  // failure messages name the kind that was refused; "mixed" names the pair
+  // by class because one Assert carries one static text.
+  struct KeyClass {
+    CellRef text;
+    CellRef integer;
+    CellRef decimal;
+  };
+  const auto matchesKind = [&](BasicType::Kind kind, CellRef subject) {
+    const TypeExpr type{.unionType = {.members = {PrimaryType{
+                                          .kind = BasicType{.kind = kind}}}}};
+    return emitContractMatch(type, std::span{&subject, std::size_t{1}}, false);
+  };
+  const auto classify = [&](CellRef key) {
+    const auto text    = matchesKind(BasicType::Kind::String, key);
+    const auto integer = matchesKind(BasicType::Kind::Int, key);
+    const auto decimal = matchesKind(BasicType::Kind::Float, key);
+    const auto boolean = matchesKind(BasicType::Kind::Bool, key);
+    const auto numeric = negate(text);
+    const auto isInt   = arithmetic(OpcodeKind::And, numeric, integer);
+    const auto isDec   = arithmetic(OpcodeKind::And,
+                                    arithmetic(OpcodeKind::And, numeric, decimal),
+                                    negate(integer));
+    assertThat(negate(arithmetic(OpcodeKind::And, numeric, boolean)),
+               "VQL path function 'sort_into' cannot order Bool keys");
+    assertThat(arithmetic(OpcodeKind::Or, text,
+                          arithmetic(OpcodeKind::Or, isInt, isDec)),
+               "VQL path function 'sort_into' orders text, integer and "
+               "decimal keys only");
+    assertThat(
+        arithmetic(OpcodeKind::Or, text, arithmetic(OpcodeKind::Eq, key, key)),
+        "VQL path function 'sort_into' cannot order NaN keys");
+    return KeyClass{text, isInt, isDec};
+  };
+  const auto firstClass = KeyClass{fresh(), fresh(), fresh()};
+
   const auto first    = fresh();
   const auto before   = fresh();
   const auto count    = arithmetic(OpcodeKind::Add, zero, zero);
@@ -389,6 +438,44 @@ VQLCompiler::compilePathFunctionCall(const FunctionInvocation &fn,
   const auto follower = fresh();
   clearRef(first);
   clearRef(before);
+
+  // The walk never repeats a candidate, but on a ring it stops at the anchor,
+  // so the section's predecessor is also its successor. The oracle refused
+  // that; so does this, before anything moves. Cell identity is read as the
+  // number ProbeLink answers for a neighbour.
+  const auto last    = fresh();
+  const auto visited = arithmetic(OpcodeKind::Add, zero, zero);
+  clearRef(last);
+  const auto survey = emitOp(OpcodeKind::StreamBegin, "#SORT_SURVEY");
+  for (const auto candidate : candidates) emitInput(survey, candidate);
+  const auto surveyIterator = fresh();
+  emitOutput(survey, surveyIterator);
+  emitIteratorLoop(surveyIterator, [&](CellRef candidate) {
+    const auto notFirst = label("#SORT_SURVEY_NEXT");
+    branchFalse(arithmetic(OpcodeKind::Eq, visited, zero), notFirst);
+    copyRef(candidate, first);
+    copyRef(readNeighbour(candidate, dimension, towardNegative), before);
+    appendOpcode(notFirst);
+    copyRef(candidate, last);
+    arithmetic(OpcodeKind::Add, visited, one, visited);
+  });
+  const auto unguarded = label("#SORT_NOT_A_RING");
+  branchFalse(arithmetic(OpcodeKind::Gt, visited, zero), unguarded);
+  branchFalse(emitCellPresence(before), unguarded);
+  const auto identityBeside = [&](CellRef anchor, std::int64_t sign) {
+    const auto opcode = emitOp(OpcodeKind::ProbeLink, "#SORT_IDENTITY");
+    emitInput(opcode, anchor);
+    emitInputConstant(opcode, static_cast<std::int64_t>(dimension));
+    emitInputConstant(opcode, sign);
+    const auto identity = fresh();
+    emitOutput(opcode, identity);
+    return identity;
+  };
+  const auto predecessor = identityBeside(first, towardNegative);
+  const auto successor   = identityBeside(last, towardPositive);
+  assertThat(negate(arithmetic(OpcodeKind::Eq, predecessor, successor)),
+             "VQL path function 'sort_into' cannot reorder a cyclic rank");
+  appendOpcode(unguarded);
 
   // One group around the whole sort: a failing key or an exhausted budget
   // rolls the rank back instead of leaving it half sorted.
@@ -401,8 +488,6 @@ VQLCompiler::compilePathFunctionCall(const FunctionInvocation &fn,
     const auto notFirst = label("#SORT_NOT_FIRST");
     const auto end      = label("#SORT_ITEM_END");
     branchFalse(arithmetic(OpcodeKind::Eq, count, zero), notFirst);
-    copyRef(candidate, first);
-    copyRef(readNeighbour(candidate, dimension, towardNegative), before);
     jump(end);
     appendOpcode(notFirst);
 
@@ -410,7 +495,26 @@ VQLCompiler::compilePathFunctionCall(const FunctionInvocation &fn,
     // over those whose key is strictly greater; strictness keeps equal keys
     // in their original order. `follower` trails `walk` by one cell, so the
     // insertion point is between them.
-    const auto candidateKey = keyOf(candidate);
+    // The first candidate's key is read when the second arrives, so a
+    // one-cell section evaluates no key, as the oracle did.
+    const auto notSecond = label("#SORT_NOT_SECOND");
+    branchFalse(arithmetic(OpcodeKind::Eq, count, one), notSecond);
+    const auto firstKey = classify(keyOf(first));
+    arithmetic(OpcodeKind::Or, firstKey.text, firstKey.text, firstClass.text);
+    arithmetic(OpcodeKind::Or, firstKey.integer, firstKey.integer,
+               firstClass.integer);
+    arithmetic(OpcodeKind::Or, firstKey.decimal, firstKey.decimal,
+               firstClass.decimal);
+    appendOpcode(notSecond);
+    const auto candidateKey   = keyOf(candidate);
+    const auto candidateClass = classify(candidateKey);
+    for (const auto [mine, reference] :
+         {std::pair{candidateClass.text, firstClass.text},
+          std::pair{candidateClass.integer, firstClass.integer},
+          std::pair{candidateClass.decimal, firstClass.decimal}})
+      assertThat(arithmetic(OpcodeKind::Eq, mine, reference),
+                 "VQL path function 'sort_into' cannot mix text, integer and "
+                 "decimal keys");
     const auto previous = readNeighbour(candidate, dimension, towardNegative);
     copyRef(previous, walk);
     copyRef(candidate, follower);
