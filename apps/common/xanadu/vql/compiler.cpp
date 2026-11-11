@@ -83,6 +83,19 @@ bool VQLCompiler::isPathFunction(const std::string_view name) {
          name == "count";
 }
 
+bool VQLCompiler::isLensFunction(const std::string_view name) {
+  return name == "lens" || name == "docs" || name == "files";
+}
+
+bool VQLCompiler::isKnownUnloweredFunction(const std::string_view name) {
+  // The function matrix of design/vql-query-language.md section 2, plus delta.
+  return isSemanticShapeBuiltin(name) || isSemanticQuantifierBuiltin(name) ||
+         isPathFunction(name) || isLensFunction(name) || name == "delta" ||
+         name == "current" || name == "local" || name == "slices" ||
+         name == "topic" || name == "btpk" || name == "btih" ||
+         name == "citing" || name == "ledger" || name == "system";
+}
+
 std::string_view
 VQLCompiler::opcodeMnemonic(zigzag::vortex::OpcodeKind kind) noexcept {
   switch (kind) {
@@ -553,7 +566,8 @@ CompilationResult VQLCompiler::compile(std::string_view queryString,
 std::optional<CellRef> VQLCompiler::compileQuery(const QueryExpression &query) {
   const auto frameEligibility = analyzeFrameEligibility(query);
   if (!frameEligibility)
-    throw std::invalid_argument(frameEligibility.error().message);
+    throw QueryRefusal(QueryErrorCategory::Budget,
+                       frameEligibility.error().message);
   reusableFrameDefinitions_      = frameEligibility->reusableDefinitions;
   readOnlyDefinitions_           = frameEligibility->readOnlyDefinitions;
   frameFreeCaptureNames_         = frameEligibility->freeCaptureNames;
@@ -576,8 +590,8 @@ std::optional<CellRef> VQLCompiler::compileQuery(const QueryExpression &query) {
       throw std::invalid_argument(
           "reserved VQL intrinsic name: #vql-current-timestamp");
     if (!definitions_.emplace(definition.name, definition).second)
-      throw std::invalid_argument("duplicate function definition: " +
-                                  definition.name);
+      throw QueryRefusal(QueryErrorCategory::Malformed,
+                         "duplicate function definition: " + definition.name);
   }
   if (!query.mounts.empty() || !query.namespaceDeclarations.empty())
     compileMountDeclarations(query);
@@ -995,15 +1009,17 @@ std::optional<CellRef> VQLCompiler::compileValueExpr(const ValueExpr &expr,
             return builtin;
           const auto definition = definitions_.find(val->name);
           if (definition == definitions_.end()) {
-            if (val->name == "lens" || isPathFunction(val->name)) {
-              const auto cells = val->name == "lens"
-                                     ? compileLensCall(*val, ctxCell)
-                                     : compilePathFunctionCall(*val, ctxCell);
-              return cells.empty()
-                         ? std::nullopt
-                         : std::optional{emitFirstCell(cells.front())};
-            }
-            throw QueryRefusal(QueryErrorCategory::Unknown,
+            if (isSemanticShapeBuiltin(val->name))
+              return compileSemanticShapeValue(*val, ctxCell);
+            if (isSemanticQuantifierBuiltin(val->name))
+              return compileSemanticQuantifierValue(*val, ctxCell);
+            if (isLensFunction(val->name))
+              return compileLensValue(*val, ctxCell);
+            if (isPathFunction(val->name))
+              return compilePathFunctionValue(*val, ctxCell);
+            throw QueryRefusal(isKnownUnloweredFunction(val->name)
+                                   ? QueryErrorCategory::Unsupported
+                                   : QueryErrorCategory::Unknown,
                                "unknown compiled function: " + val->name);
           }
           requirePositionalArguments(*val);

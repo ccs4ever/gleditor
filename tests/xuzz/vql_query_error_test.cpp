@@ -71,4 +71,39 @@ TEST(VQLQueryErrorTest, ExecuteKeepsParseAndTypeContractExceptionTypes) {
   EXPECT_THROW(std::ignore = f.engine.execute(typeError), TypeContractError);
 }
 
+// A wrong argument count for a lowered builtin is the caller's mistake, not a
+// missing feature.
+TEST(VQLQueryErrorTest, MalformedSourceIsInvalidArgument) {
+  Fixture f;
+  constexpr const char *badArity = "let $t := now(1); return $t";
+  const auto result              = f.engine.tryExecute(badArity);
+  ASSERT_FALSE(result);
+  EXPECT_EQ(result.error().category, QueryErrorCategory::Malformed);
+  EXPECT_THROW(std::ignore = f.engine.execute(badArity), std::invalid_argument);
+}
+
+TEST(VQLQueryErrorTest, BudgetAndRuntimeFailuresAreRefusals) {
+  Fixture f;
+  constexpr const char *recursion =
+      "def pure loop($node: Cell): Cell := loop($node); loop(##)";
+  const auto budget = f.engine.tryExecute(recursion);
+  ASSERT_FALSE(budget);
+  EXPECT_EQ(budget.error().category, QueryErrorCategory::Budget);
+  EXPECT_THROW(std::ignore = f.engine.execute(recursion), QueryRefusal);
+
+  constexpr const char *multiCell =
+      "def choose($item: Cell { +d.value: $value: Cell := $fallback }): "
+      "Cell := $value; let $fallback := ##/d.fallbacks; "
+      "let $item := %\"item\"; choose($item)";
+  const auto first  = f.arena.makeCell("first");
+  const auto second = f.arena.makeCell("second");
+  const auto dim    = f.engine.resolveDimension("d.fallbacks");
+  ASSERT_TRUE(f.arena.link(f.core.home(), dim, zigzag::DimVector::POS, first));
+  ASSERT_TRUE(f.arena.link(first, dim, zigzag::DimVector::POS, second));
+  const auto runtime = f.engine.tryExecute(multiCell);
+  ASSERT_FALSE(runtime);
+  EXPECT_EQ(runtime.error().category, QueryErrorCategory::Runtime);
+  EXPECT_THROW(std::ignore = f.engine.execute(multiCell), QueryRefusal);
+}
+
 } // namespace

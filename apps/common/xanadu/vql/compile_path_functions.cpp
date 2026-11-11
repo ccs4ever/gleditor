@@ -17,7 +17,14 @@ VQLCompiler::compilePathFunctionStep(const PathStep &step,
 std::vector<CellRef>
 VQLCompiler::compilePathFunctionCall(const FunctionInvocation &fn,
                                      const std::optional<CellRef> /*context*/) {
-  throw QueryRefusal(QueryErrorCategory::Unknown,
+  throw QueryRefusal(QueryErrorCategory::Unsupported,
+                     "unknown compiled function: " + fn.name);
+}
+
+std::optional<CellRef>
+VQLCompiler::compilePathFunctionValue(const FunctionInvocation &fn,
+                                      const CellRef /*ctxCell*/) {
+  throw QueryRefusal(QueryErrorCategory::Unsupported,
                      "unknown compiled function: " + fn.name);
 }
 

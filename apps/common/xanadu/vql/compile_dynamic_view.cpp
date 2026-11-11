@@ -11,10 +11,26 @@ void VQLCompiler::compileDynamicShapeProjection(
       "read-only simple path targets");
 }
 
+std::vector<CellRef> VQLCompiler::compileLensStep(const PathStep &step,
+                                                  const CellRef /*current*/,
+                                                  const bool /*hasContext*/) {
+  const auto &fn = std::get<FunctionInvocation>(step.selector);
+  throw QueryRefusal(QueryErrorCategory::Unsupported,
+                     "VQL path function '" + fn.name +
+                         "' is not compiled to Vortex yet");
+}
+
 std::vector<CellRef>
 VQLCompiler::compileLensCall(const FunctionInvocation &fn,
                              const std::optional<CellRef> /*context*/) {
-  throw QueryRefusal(QueryErrorCategory::Unknown,
+  throw QueryRefusal(QueryErrorCategory::Unsupported,
+                     "unknown compiled function: " + fn.name);
+}
+
+std::optional<CellRef>
+VQLCompiler::compileLensValue(const FunctionInvocation &fn,
+                              const CellRef /*ctxCell*/) {
+  throw QueryRefusal(QueryErrorCategory::Unsupported,
                      "unknown compiled function: " + fn.name);
 }
 

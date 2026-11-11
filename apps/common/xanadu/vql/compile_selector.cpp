@@ -247,13 +247,16 @@ std::vector<CellRef> VQLCompiler::compileSelector(const PathStep &step,
         nextStream = compileSemanticShapeStep(step, current, hasContext);
       } else if (isSemanticQuantifierBuiltin(fn.name)) {
         nextStream = compileSemanticQuantifierStep(step, current, hasContext);
+      } else if (isLensFunction(fn.name)) {
+        nextStream = compileLensStep(step, current, hasContext);
       } else if (isPathFunction(fn.name)) {
         nextStream = compilePathFunctionStep(step, current, hasContext);
       } else {
-        // delta is planned but owned by no lowering card; any other name is
-        // not a VQL function at all.
-        throw QueryRefusal(fn.name == "delta" ? QueryErrorCategory::Unsupported
-                                              : QueryErrorCategory::Unknown,
+        // Specified names with no owning card (delta, the store generators)
+        // are Unsupported; any other name is not a VQL function at all.
+        throw QueryRefusal(isKnownUnloweredFunction(fn.name)
+                               ? QueryErrorCategory::Unsupported
+                               : QueryErrorCategory::Unknown,
                            "VQL path function '" + fn.name +
                                "' is not compiled to Vortex yet");
       }

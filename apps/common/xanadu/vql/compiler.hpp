@@ -125,6 +125,12 @@ public:
   [[nodiscard]] static bool isSemanticShapeBuiltin(std::string_view name);
   [[nodiscard]] static bool isSemanticQuantifierBuiltin(std::string_view name);
   [[nodiscard]] static bool isPathFunction(std::string_view name);
+  /// lens and its UFCS sugar docs and files (Q5).
+  [[nodiscard]] static bool isLensFunction(std::string_view name);
+  /// Every name the language specifies but no lowering exists for yet, owned
+  /// by a card or not. A refusal for one is Unsupported; any other unbound
+  /// name is Unknown.
+  [[nodiscard]] static bool isKnownUnloweredFunction(std::string_view name);
 
   /// Resolves a dimension name to its DimRef, minting if non-existent.
   zigzag::DimRef resolveDimension(std::string_view name);
@@ -321,6 +327,9 @@ private:
   std::vector<zigzag::CellRef>
   compilePathFunctionCall(const FunctionInvocation &fn,
                           std::optional<zigzag::CellRef> context);
+  std::optional<zigzag::CellRef>
+  compilePathFunctionValue(const FunctionInvocation &fn,
+                           zigzag::CellRef ctxCell);
   /// Q2, compile_root_selectors.cpp: RootSelectorStep, GenesisSelector,
   /// PerspectiveStep, MacroDimensionGroup.
   std::vector<zigzag::CellRef> compileRootSelectorStep(const PathStep &step,
@@ -343,9 +352,14 @@ private:
   void compileMountDeclarations(const QueryExpression &query);
   /// Q5, compile_dynamic_view.cpp.
   void compileDynamicShapeProjection(const ShapeLiteral &shape);
+  std::vector<zigzag::CellRef> compileLensStep(const PathStep &step,
+                                               zigzag::CellRef current,
+                                               bool hasContext);
   std::vector<zigzag::CellRef>
   compileLensCall(const FunctionInvocation &fn,
                   std::optional<zigzag::CellRef> context);
+  std::optional<zigzag::CellRef> compileLensValue(const FunctionInvocation &fn,
+                                                  zigzag::CellRef ctxCell);
   std::optional<zigzag::CellRef> compileShapeValue(const ShapeLiteral &shape,
                                                    zigzag::CellRef ctxCell);
   /// Q9, compile_field_weave.cpp.
@@ -357,6 +371,9 @@ private:
   std::vector<zigzag::CellRef>
   compileSemanticShapeCall(const FunctionInvocation &fn,
                            std::optional<zigzag::CellRef> context);
+  std::optional<zigzag::CellRef>
+  compileSemanticShapeValue(const FunctionInvocation &fn,
+                            zigzag::CellRef ctxCell);
   /// S2, compile_semantic_quantifiers.cpp: any, all, none, one, optional_one,
   /// first, same_cell.
   std::vector<zigzag::CellRef>
@@ -365,6 +382,9 @@ private:
   std::vector<zigzag::CellRef>
   compileSemanticQuantifierCall(const FunctionInvocation &fn,
                                 std::optional<zigzag::CellRef> context);
+  std::optional<zigzag::CellRef>
+  compileSemanticQuantifierValue(const FunctionInvocation &fn,
+                                 zigzag::CellRef ctxCell);
 
   // AST compilation subroutines
   std::optional<zigzag::CellRef> compileQuery(const QueryExpression &query);

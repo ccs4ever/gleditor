@@ -115,6 +115,8 @@ QueryExecutor::execute(const QueryExpression &query,
         .category = QueryExecutionError::Category::TypeContract,
         .message  = error.what(),
     });
+  } catch (const std::exception &error) {
+    return std::unexpected(runtimeError(error));
   }
   if (options_.mode != QueryExecutionMode::Vortex)
     return std::unexpected(QueryExecutionError{

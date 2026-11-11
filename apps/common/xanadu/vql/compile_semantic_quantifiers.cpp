@@ -16,4 +16,12 @@ std::vector<CellRef> VQLCompiler::compileSemanticQuantifierCall(
   refuseSemanticBuiltin(fn.name);
 }
 
+std::optional<CellRef>
+VQLCompiler::compileSemanticQuantifierValue(const FunctionInvocation &fn,
+                                            const CellRef /*ctxCell*/) {
+  // A value-position use has never had the semantic-builtin message; keep it.
+  throw QueryRefusal(QueryErrorCategory::Unsupported,
+                     "unknown compiled function: " + fn.name);
+}
+
 } // namespace xanadu::vql
