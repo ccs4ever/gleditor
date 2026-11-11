@@ -349,8 +349,6 @@ TEST(VQLShapeProjectionVMTest,
   const auto other = h.dim("d.other");
 
   for (const std::string_view source : {
-           "$owners{+d.keep: string(\"value\")}",
-           "$owners{+d.keep: 1 + 2}",
            "$owners{+d.keep: ./d.keep/value(\"changed\")}",
            "$owners{+d.keep: {+d.nested}}",
            "$owners{~d.keep: \"value\"}",

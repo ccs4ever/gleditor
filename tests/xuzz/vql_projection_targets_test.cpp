@@ -366,15 +366,12 @@ TEST(VQLProjectionTargetsTest,
   EXPECT_EQ(h.arena.outstandingMarks(), 0U);
 }
 
-TEST(VQLProjectionTargetsTest,
-     EffectfulPathsCallsAndBinaryTargetsRefuseBeforeGraphEffects) {
+TEST(VQLProjectionTargetsTest, EffectfulPathsAndCallsRefuseBeforeGraphEffects) {
   Harness h;
   const CellRef owner = h.cell("owner");
   const CellRef old   = h.cell("old");
   h.link(owner, "d.keep", old);
   for (const std::string_view source : {
-           "$owners{+d.copy: string(\"value\")}",
-           "$owners{+d.copy: 1 + 2}",
            "$owners{+d.copy: ./d.keep/value(\"changed\")}",
        }) {
     SCOPED_TRACE(source);

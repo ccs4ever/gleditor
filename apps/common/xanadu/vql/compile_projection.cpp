@@ -1,7 +1,9 @@
 #include "common/xanadu/vql/compiler.hpp"
 #include "common/xanadu/vql/projection_syntax.hpp"
 
+#include <algorithm>
 #include <array>
+#include <functional>
 #include <limits>
 #include <map>
 #include <stdexcept>
@@ -14,12 +16,36 @@ using zigzag::DimRef;
 using zigzag::DimVector;
 using zigzag::vortex::OpcodeKind;
 
+namespace {
+
+bool hasStaticProjectionRuleShape(const ShapeLiteral &shape) {
+  for (const ShapeRule &entry : shape.rules) {
+    if (const auto *wildcard = std::get_if<ShapeWildcard>(&entry.rule)) {
+      if (*wildcard != ShapeWildcard::Everything &&
+          *wildcard != ShapeWildcard::Nothing)
+        return false;
+      continue;
+    }
+    const auto *rule = std::get_if<DimensionShapeRule>(&entry.rule);
+    if (!rule || !rule->dimName.starts_with("d.") ||
+        rule->dimName.size() <= 2 ||
+        (rule->direction != DimVector::POS &&
+         rule->direction != DimVector::NEG) ||
+        (rule->targetValue && (rule->negated || rule->isBidir)))
+      return false;
+  }
+  return true;
+}
+
+} // namespace
+
 void VQLCompiler::validateShapeProjection(const ShapeLiteral &shape) {
   if (shape.rules.size() > remainingShapeProjectionRules_)
     throw std::invalid_argument(
         "compiled query exceeds maximum shape projection size 4096");
   remainingShapeProjectionRules_ -= shape.rules.size();
-  if (!isStaticShapeProjectionSyntax(shape))
+  if (!isStaticShapeProjectionSyntax(shape) &&
+      !hasStaticProjectionRuleShape(shape))
     throw std::invalid_argument(
         "shape projection requires static rules and scalar, alias, or "
         "read-only simple path targets");
@@ -32,11 +58,9 @@ void VQLCompiler::validateShapeProjection(const ShapeLiteral &shape) {
     if (!rule->targetValue) continue;
 
     const ValueExpr &target = *rule->targetValue;
-    if (std::holds_alternative<ScalarLiteral>(target.kind)) continue;
-
     const auto rejectTarget = [&] {
-      throw std::invalid_argument(
-          "shape projection target must be an alias or read-only simple path");
+      throw std::invalid_argument("shape projection target is not read-only "
+                                  "or graph-supported");
     };
     const auto rejectPipelines = [this](const std::span<const CellRef> cells) {
       for (const CellRef cell : cells)
@@ -44,6 +68,119 @@ void VQLCompiler::validateShapeProjection(const ShapeLiteral &shape) {
           throw std::invalid_argument(
               "shape projection target cannot use attached pipelines");
     };
+
+    std::function<void(const ValueExpr &)> validateComputedTarget;
+    validateComputedTarget = [&](const ValueExpr &expression) {
+      if (std::holds_alternative<ScalarLiteral>(expression.kind)) return;
+      if (const auto *binary =
+              std::get_if<std::shared_ptr<BinaryValueExpr>>(&expression.kind)) {
+        if (!*binary || !(*binary)->left || !(*binary)->right) rejectTarget();
+        validateComputedTarget(*(*binary)->left);
+        validateComputedTarget(*(*binary)->right);
+        return;
+      }
+      if (const auto *function =
+              std::get_if<std::shared_ptr<FunctionInvocation>>(
+                  &expression.kind)) {
+        if (!*function || (*function)->isSliceRead ||
+            std::ranges::any_of(
+                (*function)->argNames,
+                [](const std::string &name) { return !name.empty(); }))
+          rejectTarget();
+        const auto &call = **function;
+        if (call.name == "#vql-current-timestamp") {
+          if (!call.args.empty()) rejectTarget();
+        } else if (call.name == "now" && !definitions_.contains(call.name)) {
+          if (!call.args.empty()) rejectTarget();
+        } else if (call.name == "string" && !definitions_.contains(call.name)) {
+          if (call.args.size() != 1) rejectTarget();
+          validateComputedTarget(call.args.front());
+        } else if (readOnlyDefinitions_.contains(call.name)) {
+          if (const auto captures = frameFreeCaptureNames_.find(call.name);
+              captures != frameFreeCaptureNames_.end()) {
+            for (const auto &name : captures->second) {
+              if (const auto found = streamBindings_.find(name);
+                  found != streamBindings_.end()) {
+                rejectPipelines(found->second);
+              } else if (const auto found = varBindings_.find(name);
+                         found != varBindings_.end() && found->second) {
+                const std::array<CellRef, 1> cells{*found->second};
+                rejectPipelines(cells);
+              } else {
+                rejectTarget();
+              }
+            }
+          }
+          for (const auto &argument : call.args)
+            validateComputedTarget(argument);
+        } else {
+          rejectTarget();
+        }
+        return;
+      }
+      if (const auto *path =
+              std::get_if<std::shared_ptr<PathExpression>>(&expression.kind)) {
+        if (!*path || !isSimpleProjectionPath(**path)) rejectTarget();
+        const PathExpression &pathExpression = **path;
+        switch (pathExpression.anchor.kind) {
+        case AnchorKind::Context:
+          break;
+        case AnchorKind::Home:
+        case AnchorKind::Root:
+          if (core_.hasPipeline(core_.home()))
+            throw std::invalid_argument(
+                "shape projection target cannot use attached pipelines");
+          break;
+        case AnchorKind::LiteralCellId: {
+          if (pathExpression.anchor.cellId >
+              std::numeric_limits<CellRef>::max())
+            rejectTarget();
+          const CellRef cell =
+              static_cast<CellRef>(pathExpression.anchor.cellId);
+          if (!core_.arena().contains(cell)) rejectTarget();
+          const std::array<CellRef, 1> cells{cell};
+          rejectPipelines(cells);
+          break;
+        }
+        case AnchorKind::Variable:
+          if (functorBindings_.contains(pathExpression.anchor.name))
+            rejectTarget();
+          if (const auto found =
+                  streamBindings_.find(pathExpression.anchor.name);
+              found != streamBindings_.end()) {
+            rejectPipelines(found->second);
+          } else if (const auto found =
+                         varBindings_.find(pathExpression.anchor.name);
+                     found != varBindings_.end() && found->second) {
+            const std::array<CellRef, 1> cells{*found->second};
+            rejectPipelines(cells);
+          } else {
+            rejectTarget();
+          }
+          break;
+        default:
+          rejectTarget();
+        }
+        return;
+      }
+      if (const auto *name = std::get_if<std::string>(&expression.kind)) {
+        if (functorBindings_.contains(*name)) rejectTarget();
+        if (const auto found = streamBindings_.find(*name);
+            found != streamBindings_.end()) {
+          rejectPipelines(found->second);
+        } else if (const auto found = varBindings_.find(*name);
+                   found != varBindings_.end() && found->second) {
+          const std::array<CellRef, 1> cells{*found->second};
+          rejectPipelines(cells);
+        } else {
+          rejectTarget();
+        }
+        return;
+      }
+      rejectTarget();
+    };
+
+    validateComputedTarget(target);
 
     if (const auto *name = std::get_if<std::string>(&target.kind)) {
       if (functorBindings_.contains(*name)) rejectTarget();
@@ -99,7 +236,11 @@ void VQLCompiler::validateShapeProjection(const ShapeLiteral &shape) {
         break;
       }
 
-    } else {
+    } else if (!std::holds_alternative<ScalarLiteral>(target.kind) &&
+               !std::holds_alternative<std::shared_ptr<FunctionInvocation>>(
+                   target.kind) &&
+               !std::holds_alternative<std::shared_ptr<BinaryValueExpr>>(
+                   target.kind)) {
       rejectTarget();
     }
 

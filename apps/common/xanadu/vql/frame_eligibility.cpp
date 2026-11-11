@@ -303,6 +303,10 @@ public:
     return std::move(callSites_);
   }
 
+  [[nodiscard]] bool readOnlyCandidate() const noexcept {
+    return readOnlyCandidate_;
+  }
+
   [[nodiscard]] FrameClosureScope scanClosure(const PathLambda &lambda) {
     tick(0);
     pathLambda(lambda, Scope{}, 1, true);
@@ -420,6 +424,7 @@ private:
   void tick(const std::size_t depth) { budget_.tick(depth); }
 
   void refuse(std::string message) {
+    readOnlyCandidate_ = false;
     if (!refusal_) refusal_ = std::move(message);
   }
 
@@ -556,6 +561,7 @@ private:
                 });
           } else if constexpr (std::same_as<Part,
                                             std::shared_ptr<PathLambda>>) {
+            readOnlyCandidate_ = false;
             pointer(
                 part, depth + 1,
                 [&](const PathLambda &lambda, const std::size_t childDepth) {
@@ -633,6 +639,9 @@ private:
         }))
       refuse("named function arguments are not reusable frame calls");
     const auto target = definitions_.find(call.name);
+    if (target == definitions_.end() && call.name != "string" &&
+        call.name != "now")
+      readOnlyCandidate_ = false;
     for (std::size_t index = 0; index < call.args.size(); ++index) {
       tick(depth + 1);
       const auto &argument = call.args[index];
@@ -761,6 +770,7 @@ private:
                       const std::size_t depth,
                       const bool allowLeadingSlashPath = false) {
     tick(depth);
+    if (path.isFunctor) readOnlyCandidate_ = false;
     if (path.isFunctor && !allowLeadingSlashPath &&
         &path != recognizedDefaultPath_)
       refuse("partial path functors are not reusable frame bodies");
@@ -823,7 +833,8 @@ private:
   void signedStep(const SignedDimensionStep &step, const Scope &scope,
                   const std::size_t depth) {
     if (step.dimName.starts_with('$')) {
-      const auto name = step.dimName.substr(1);
+      readOnlyCandidate_ = false;
+      const auto name    = step.dimName.substr(1);
       if (const auto found = functorFormalIndicesByName_.find(name);
           found != functorFormalIndicesByName_.end() && scope.contains(name) &&
           !shadowedFunctorFormalNames_.contains(name)) {
@@ -914,6 +925,7 @@ private:
                           });
               } else if constexpr (std::same_as<Selector,
                                                 std::shared_ptr<PathLambda>>) {
+                readOnlyCandidate_ = false;
                 pointer(selector, depth + 1,
                         [&](const PathLambda &lambda,
                             const std::size_t childDepth) {
@@ -987,6 +999,7 @@ private:
               refuse("perspective selectors are not frame eligible");
             } else if constexpr (std::same_as<Selector,
                                               std::shared_ptr<PathLambda>>) {
+              readOnlyCandidate_ = false;
               pointer(
                   selector, depth + 1,
                   [&](const PathLambda &lambda, const std::size_t childDepth) {
@@ -1010,6 +1023,7 @@ private:
                                        step.yieldMode == YieldMode::Last))
       refuse("non-default path yield modes are not frame eligible");
     if (step.capturedFunctor && !staticFunctorProgramMode_) {
+      readOnlyCandidate_ = false;
       refuse("captured path functors are not frame eligible");
       const auto &captured = step.capturedFunctor;
       const void *identity = captured.get();
@@ -1580,6 +1594,7 @@ private:
   bool scanningConditionalRestType_{false};
   bool scanningOmittedRestDefault_{false};
   bool staticFunctorProgramMode_{false};
+  bool readOnlyCandidate_{true};
   const PathExpression *recognizedDefaultPath_{nullptr};
   std::optional<std::string> refusal_;
 };
@@ -1594,6 +1609,7 @@ analyzeFrameEligibility(const QueryExpression &query,
   try {
     TraversalBudget budget(limits);
     std::unordered_map<std::string, std::vector<std::string>> callersByCallee;
+    std::unordered_map<std::string, bool> readOnlyDirect;
     std::unordered_map<std::string, std::vector<CaptureDependency>>
         captureCallersByCallee;
     std::unordered_map<std::string, std::string> lazyDefaultRefusals;
@@ -1673,26 +1689,48 @@ analyzeFrameEligibility(const QueryExpression &query,
         ordinaryFunctorFormals.insert(index);
       }
       auto callSites = std::move(scanner).takeCallSites();
+      bool readOnly  = scanner.readOnlyCandidate();
       for (auto &callSite : callSites) {
-        if (!names.contains(callSite.callee)) continue;
-        budget.tick(1);
-        callersByCallee[callSite.callee].push_back(definition.name);
-        captureCallersByCallee[callSite.callee].push_back(
-            {.caller       = definition.name,
-             .visibleNames = std::move(callSite.visibleNames),
-             .functorArgumentSources =
-                 std::move(callSite.functorArgumentSources),
-             .inParameterDefault     = callSite.inParameterDefault,
-             .conditionalOnTypedRest = callSite.conditionalOnTypedRest,
-             .conditionalOnOmittedRestDefault =
-                 callSite.conditionalOnOmittedRestDefault,
-             .mayInjectContext = callSite.mayInjectContext,
-             .argumentCount    = callSite.argumentCount});
+        if (names.contains(callSite.callee)) {
+          budget.tick(1);
+          callersByCallee[callSite.callee].push_back(definition.name);
+          captureCallersByCallee[callSite.callee].push_back(
+              {.caller       = definition.name,
+               .visibleNames = std::move(callSite.visibleNames),
+               .functorArgumentSources =
+                   std::move(callSite.functorArgumentSources),
+               .inParameterDefault     = callSite.inParameterDefault,
+               .conditionalOnTypedRest = callSite.conditionalOnTypedRest,
+               .conditionalOnOmittedRestDefault =
+                   callSite.conditionalOnOmittedRestDefault,
+               .mayInjectContext = callSite.mayInjectContext,
+               .argumentCount    = callSite.argumentCount});
+        } else if (callSite.callee != "string" && callSite.callee != "now" &&
+                   callSite.callee != "#vql-current-timestamp") {
+          readOnly = false;
+        }
       }
+      readOnlyDirect[definition.name] = readOnly;
       if (reason)
         result.refusalReasons.emplace(definition.name, *reason);
       else
         result.reusableDefinitions.insert(definition.name);
+    }
+
+    for (const auto &[name, eligible] : readOnlyDirect)
+      if (eligible) result.readOnlyDefinitions.insert(name);
+    bool readOnlyChanged = true;
+    while (readOnlyChanged) {
+      budget.tick(1);
+      readOnlyChanged = false;
+      for (const auto &[callee, callers] : callersByCallee) {
+        budget.tick(1);
+        if (result.readOnlyDefinitions.contains(callee)) continue;
+        for (const auto &caller : callers) {
+          budget.tick(1);
+          readOnlyChanged |= result.readOnlyDefinitions.erase(caller) != 0;
+        }
+      }
     }
 
     // Forwarded functor formals become part of the caller's static signature.

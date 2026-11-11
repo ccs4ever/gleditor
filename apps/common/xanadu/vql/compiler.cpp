@@ -340,6 +340,7 @@ CompilationResult VQLCompiler::compile(const QueryExpression &query,
   frameDefinitions_.clear();
   reusableFrameDefinitions_.clear();
   frameFreeCaptureNames_.clear();
+  readOnlyDefinitions_.clear();
   frameFunctorFormalIndices_.clear();
   frameFunctorApplicationScopes_.clear();
   frameRequiredDefaultCaptureBindings_.clear();
@@ -484,6 +485,7 @@ std::optional<CellRef> VQLCompiler::compileQuery(const QueryExpression &query) {
   if (!frameEligibility)
     throw std::invalid_argument(frameEligibility.error().message);
   reusableFrameDefinitions_      = frameEligibility->reusableDefinitions;
+  readOnlyDefinitions_           = frameEligibility->readOnlyDefinitions;
   frameFreeCaptureNames_         = frameEligibility->freeCaptureNames;
   frameFunctorFormalIndices_     = frameEligibility->functorFormalIndices;
   frameFunctorApplicationScopes_ = frameEligibility->functorApplicationScopes;
@@ -500,6 +502,9 @@ std::optional<CellRef> VQLCompiler::compileQuery(const QueryExpression &query) {
     throw std::invalid_argument(error.what());
   }
   for (const auto &definition : query.defs) {
+    if (definition.name == "#vql-current-timestamp")
+      throw std::invalid_argument(
+          "reserved VQL intrinsic name: #vql-current-timestamp");
     if (!definitions_.emplace(definition.name, definition).second)
       throw std::invalid_argument("duplicate function definition: " +
                                   definition.name);

@@ -33,6 +33,10 @@ struct FunctorApplicationScope {
 
 struct FrameEligibility {
   std::unordered_set<std::string> reusableDefinitions;
+  /// Conservative definitions whose complete owned graph is read-only.
+  /// This is intentionally narrower than reusableDefinitions: guarded writes
+  /// remain available at ordinary call sites, but not in computed targets.
+  std::unordered_set<std::string> readOnlyDefinitions;
   /// Sorted free lexical aliases captured from each call site's current scope.
   std::unordered_map<std::string, std::vector<std::string>> freeCaptureNames;
   /// Formal indices that reusable activations bind as closed functors.

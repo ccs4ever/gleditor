@@ -1509,6 +1509,13 @@ ValueExpr Parser::parseValueExpr() {
 }
 
 ValueExpr Parser::parseValueAtom() {
+  if (check(TokenKind::At) && peekToken().is(TokenKind::Identifier) &&
+      peekToken().text == "now") {
+    advance();
+    advance();
+    return ValueExpr{.kind = std::make_shared<FunctionInvocation>(
+                         FunctionInvocation{.name = "#vql-current-timestamp"})};
+  }
   if (check(TokenKind::KwLens) && peekToken().is(TokenKind::OpenParen)) {
     return ValueExpr{.kind = std::make_shared<FunctionInvocation>(
                          parseFunctionInvocation())};

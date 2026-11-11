@@ -360,6 +360,7 @@ private:
   std::unordered_map<std::string, DefDeclaration> definitions_;
   std::unordered_map<std::string, std::vector<std::string>>
       frameFreeCaptureNames_;
+  std::unordered_set<std::string> readOnlyDefinitions_;
   std::unordered_map<std::string, std::vector<std::string>>
       frameRequiredDefaultCaptureBindings_;
   std::unordered_map<std::string, std::vector<std::string>>

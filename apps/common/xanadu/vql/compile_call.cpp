@@ -155,6 +155,20 @@ VQLCompiler::emitContractDefaultSlots(const TypeExpr &type) {
 std::optional<CellRef>
 VQLCompiler::compileBuiltinInvocation(const FunctionInvocation &invocation,
                                       const std::optional<CellRef> context) {
+  if (invocation.name == "#vql-current-timestamp" ||
+      (invocation.name == "now" && !definitions_.contains(invocation.name))) {
+    if (invocation.isSliceRead)
+      throw std::invalid_argument("now() does not support slice reads");
+    requirePositionalArguments(invocation);
+    if (!invocation.args.empty())
+      throw std::invalid_argument("now() requires no arguments");
+    const CellRef op =
+        emitOp(OpcodeKind::CurrentTimestamp, "#CURRENT_TIMESTAMP");
+    const CellRef result = core_.arena().makeCell();
+    emitOutput(op, result);
+    return result;
+  }
+
   if (invocation.name != "string" || definitions_.contains(invocation.name))
     return std::nullopt;
   if (invocation.isSliceRead)
