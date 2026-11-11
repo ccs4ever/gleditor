@@ -7,9 +7,11 @@ TEST(VQLGeneratorsTest, MissingLocalStoreAndFilteredSlicesHaveNoFallback) {
   zigzag::ArenaManifold arena;
   xanadu::vql::VQLEngine engine(arena);
   EXPECT_FALSE(engine.execute("current()").empty());
-  EXPECT_TRUE(engine.execute("local(\"missing\")").empty());
-  EXPECT_TRUE(engine.execute("slices(\"missing\")").empty());
-  EXPECT_TRUE(engine.execute("current()/slices(\"missing\")").empty());
+  // R-GEN: a store that is not selected never answers with the ambient home.
+  EXPECT_THROW(engine.execute("local(\"missing\")"), std::runtime_error);
+  EXPECT_THROW(engine.execute("slices(\"missing\")"), std::runtime_error);
+  EXPECT_THROW(engine.execute("current()/slices(\"missing\")"),
+               std::runtime_error);
   EXPECT_THROW(engine.execute("topic(\"missing\")"), std::runtime_error);
 }
 } // namespace
