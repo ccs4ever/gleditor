@@ -232,47 +232,20 @@ private:
   FrameLimits saved_;
 };
 
-// Per-frame reuse without a field in FrameScope (the header is frozen): two
-// reserved keys of scope.variableSlots, which no cell master can equal because
-// they are not arena cells. kScratchOkKey holds the one local every head
-// unify writes its Bool to (consumed by the very next branch); kFreeHeadKey
-// heads a free list of term temporaries whose own entries (keyed by the freed
-// local) point at the next. emitClause clears the map per clause and restores
-// the scratch local, so the free list simply restarts.
-constexpr CellRef kScratchOkKey = noCell;
-constexpr CellRef kFreeHeadKey  = noCell - 1;
-
 [[nodiscard]] CellRef scratchOk(CompileContext &ctx, FrameScope &scope) {
-  if (const auto it = scope.variableSlots.find(kScratchOkKey);
-      it != scope.variableSlots.end())
-    return it->second;
-  const CellRef local = newLocal(ctx, scope);
-  scope.variableSlots.emplace(kScratchOkKey, local);
-  return local;
+  if (!scope.scratchOk) scope.scratchOk = newLocal(ctx, scope);
+  return *scope.scratchOk;
 }
 
 [[nodiscard]] CellRef takeTemp(CompileContext &ctx, FrameScope &scope) {
-  const auto head = scope.variableSlots.find(kFreeHeadKey);
-  if (head == scope.variableSlots.end()) return newLocal(ctx, scope);
-  const CellRef taken = head->second;
-  if (const auto next = scope.variableSlots.find(taken);
-      next != scope.variableSlots.end()) {
-    head->second = next->second;
-    scope.variableSlots.erase(next);
-  } else {
-    scope.variableSlots.erase(head);
-  }
+  if (scope.freeTemps.empty()) return newLocal(ctx, scope);
+  const CellRef taken = scope.freeTemps.back();
+  scope.freeTemps.pop_back();
   return taken;
 }
 
 void freeTemp(FrameScope &scope, CellRef temp) {
-  if (const auto head = scope.variableSlots.find(kFreeHeadKey);
-      head != scope.variableSlots.end()) {
-    scope.variableSlots[temp] = head->second;
-    head->second              = temp;
-  } else {
-    scope.variableSlots.emplace(kFreeHeadKey, temp);
-  }
+  scope.freeTemps.push_back(temp);
 }
 
 [[nodiscard]] bool isQueryScope(const FrameScope &scope) {
@@ -662,13 +635,10 @@ void emitUnknownPredicate(CompileContext &ctx, FrameScope &scope, Chain &chain,
 
 void emitClause(CompileContext &ctx, FrameScope &scope, Chain &chain,
                 CellRef clause, bool last) {
-  const auto scratch = scope.variableSlots.find(kScratchOkKey);
-  const std::optional<CellRef> keepOk =
-      scratch == scope.variableSlots.end()
-          ? std::nullopt
-          : std::optional<CellRef>{scratch->second};
+  // scratchOk survives (a frame property); the free list restarts with the
+  // renaming, as it always has.
   scope.variableSlots.clear();
-  if (keepOk) scope.variableSlots.emplace(kScratchOkKey, *keepOk);
+  scope.freeTemps.clear();
   auto &arena = arenaOf(ctx);
 
   std::optional<Label> next;
