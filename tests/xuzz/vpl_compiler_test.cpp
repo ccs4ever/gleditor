@@ -5,6 +5,7 @@
  */
 #include <chrono>
 #include <filesystem>
+#include <functional>
 #include <gtest/gtest.h>
 #include <memory>
 
@@ -264,13 +265,54 @@ TEST_F(VPLCompilerTest, RejectsUnsupportedDimensionValue) {
             std::string::npos);
 }
 
-TEST_F(VPLCompilerTest, DirectEvaluationEntryPointsRefuseAstExecution) {
+// Intent (rewritten from "both entry points throw"): the facade's AST and
+// source entry points must be the VM and nothing else. Evaluation advances the
+// VM's cycle counter, a tiny cycle budget stops it (a host interpreter has no
+// such budget), and forms the compiler does not lower are refused through the
+// same path at compile time.
+TEST_F(VPLCompilerTest, DirectEvaluationEntryPointsRunOnTheVmOnly) {
   VPLEngine engine(*core);
   Parser parser("1 + 2");
   const auto ast = parser.parseProgram();
   ASSERT_NE(ast, nullptr);
-  EXPECT_THROW(engine.evaluate(*ast), std::runtime_error);
-  EXPECT_THROW(engine.evaluate("1 + 2"), std::runtime_error);
+
+  const auto before = engine.totalCycles();
+  EXPECT_EQ(engine.evaluate(*ast).scalarInt(), 3);
+  const auto afterAst = engine.totalCycles();
+  EXPECT_GT(afterAst, before);
+  EXPECT_EQ(engine.evaluate("1 + 2").scalarInt(), 3);
+  EXPECT_GT(engine.totalCycles(), afterAst);
+
+  engine.setCycleBudget(1);
+  for (const auto &attempt :
+       {std::function<VplView()>{[&] { return engine.evaluate(*ast); }},
+        std::function<VplView()>{[&] { return engine.evaluate("1 + 2"); }}}) {
+    try {
+      static_cast<void>(attempt());
+      FAIL() << "a one-cycle budget must stop the VM";
+    } catch (const VPLExecutionError &error) {
+      EXPECT_EQ(error.stage(), ExecutionError::Stage::Budget) << error.what();
+    }
+  }
+  engine.setCycleBudget(kDefaultCycleBudget);
+
+  try {
+    static_cast<void>(engine.evaluate("1 2 ⍤ 1 3"));
+    FAIL() << "an unlowered verb must be refused";
+  } catch (const VPLExecutionError &error) {
+    EXPECT_EQ(error.stage(), ExecutionError::Stage::Compile);
+    EXPECT_NE(std::string(error.what()).find("conjunction"), std::string::npos);
+    EXPECT_EQ(std::string(error.what()).find("unbound"), std::string::npos);
+  }
+  try {
+    static_cast<void>(engine.evaluate("missing"));
+    FAIL() << "an unbound name must be refused";
+  } catch (const VPLExecutionError &error) {
+    EXPECT_EQ(error.stage(), ExecutionError::Stage::Compile);
+    EXPECT_NE(
+        std::string(error.what()).find("unbound VPL identifier 'missing'"),
+        std::string::npos);
+  }
 }
 
 TEST_F(VPLCompilerTest, RenderASTFormatting) {

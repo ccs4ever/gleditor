@@ -19,6 +19,7 @@
 #include "common/xanadu/vortex/vortex_core.hpp"
 #include "common/xanadu/vortex/vortex_vm.hpp"
 #include "common/xanadu/vpl/compiler.hpp"
+#include "common/xanadu/vpl/execution.hpp"
 #include "common/xanadu/vpl/parser.hpp"
 
 // Catches std::exception and reports it; anything else (a real bug, not a
@@ -137,6 +138,14 @@ int main(int argc, char *argv[]) {
   auto result = compiler.compile(*ast, options);
   if (!result.success) {
     std::cerr << "Compilation failed: " << result.errorMessage << "\n";
+    return 1;
+  }
+
+  // vplc exports the program without running it, so Executor::run's check
+  // never sees it.
+  if (const auto unplaced =
+          xanadu::vpl::unplacedBranchTarget(vm, result.generatedOpcodes)) {
+    std::cerr << "Compilation failed: " << *unplaced << "\n";
     return 1;
   }
 
