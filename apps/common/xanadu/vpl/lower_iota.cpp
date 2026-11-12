@@ -64,7 +64,7 @@ CellRef readNext(LowerContext &ctx, CellRef from, DimRef dimension) {
 // starts at `anchor` on `dimension`; returns a register for the first one.
 CellRef mintIota(LowerContext &ctx, CellRef count, CellRef anchor,
                  DimRef dimension) {
-  auto &arena = ctx.core().arena();
+  auto &arena     = ctx.core().arena();
   const auto tail = emit::extreme(ctx, anchor, dimension, DimVector::POS);
   // The register `tail` is advanced by every mint, so the old tail is kept
   // to find the first new cell afterwards.
@@ -139,9 +139,9 @@ Maybe lowerRhoMonadic(LowerContext &ctx, const MonadicExpr &expr) {
     emit::copyValue(ctx, extent, cell);
     cells.push_back(cell);
   }
-  zigzag::expectWritten(ctx.core().arena().linkChain(
-      cells, dimension, zigzag::DimVector::POS));
-  const auto head = cells.front();
+  zigzag::expectWritten(
+      ctx.core().arena().linkChain(cells, dimension, zigzag::DimVector::POS));
+  const auto head      = cells.front();
   ctx.rankAxes()[head] = {DirectedDim{dimension, DimVector::POS}};
   const std::array inputs{operand};
   emit::mergeRankInputDependencies(ctx, head, inputs);

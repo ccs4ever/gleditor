@@ -112,8 +112,9 @@ TEST_F(VPLCompilerTest, CompileLibraryStore) {
   EXPECT_EQ(*kind, OpcodeKind::Return);
 }
 
-TEST_F(VPLCompilerTest, CompilesDyadicIotaToAGraphInBothSyntaxesWithoutRunningIt) {
-  const auto dimension = core->findOrMintDimension("d.1");
+TEST_F(VPLCompilerTest,
+       CompilesDyadicIotaToAGraphInBothSyntaxesWithoutRunningIt) {
+  const auto dimension   = core->findOrMintDimension("d.1");
   const auto expectGraph = [&](const std::string &source, std::size_t count,
                                std::size_t &opcodeCount) {
     VPLCompiler compiler(*core, *vm);
@@ -128,8 +129,8 @@ TEST_F(VPLCompilerTest, CompilesDyadicIotaToAGraphInBothSyntaxesWithoutRunningIt
     EXPECT_EQ(result.resultAxes.front().dim, dimension);
     EXPECT_EQ(result.resultAxes.front().dir, zigzag::DimVector::POS);
     // Compiling mints no element: the work waits for the VM.
-    EXPECT_FALSE(core->arena().linked(core->home(), dimension,
-                                      zigzag::DimVector::POS))
+    EXPECT_FALSE(
+        core->arena().linked(core->home(), dimension, zigzag::DimVector::POS))
         << "N=" << count;
     opcodeCount = result.generatedOpcodes.size();
   };
