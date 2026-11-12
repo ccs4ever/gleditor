@@ -108,15 +108,18 @@ TEST_F(VQLWatchVmTest, RemoteMountNamesItsAnchor) {
   EXPECT_THAT(message, HasSubstr("ZZ9P"));
 }
 
-TEST_F(VQLWatchVmTest, LocalMountRefusalNamesTheMissingDispatch) {
-  const auto message =
-      refusalOf("mount current() as +d.cluster; ##/+d.cluster");
-  EXPECT_THAT(message, HasSubstr("mount d.cluster has no compiled dispatch"));
+TEST_F(VQLWatchVmTest, LocalMountWalksToItsRoot) {
+  engine.execute("mount current() as +d.x; ##");
+  EXPECT_EQ(engine.execute("##/+d.x"),
+            std::vector<zigzag::CellRef>{core.home()});
 }
 
-TEST_F(VQLWatchVmTest, UnmountRefusalNamesTheForm) {
-  EXPECT_THAT(refusalOf("unmount +d.cluster; ##"),
-              HasSubstr("unmount d.cluster has no compiled dispatch"));
+TEST_F(VQLWatchVmTest, UnmountRemovesTheMountAndRefusesAnUnmountedAlias) {
+  engine.execute("mount current() as +d.x; ##");
+  EXPECT_TRUE(engine.execute("unmount +d.x; ##/+d.x").empty());
+  EXPECT_THAT(refusalOf("unmount +d.x; ##"),
+              HasSubstr("no mount is registered for d.x in the requested "
+                        "direction"));
 }
 
 TEST_F(VQLWatchVmTest, WatchInsideAPerspectiveBlockIsRefusedByName) {
