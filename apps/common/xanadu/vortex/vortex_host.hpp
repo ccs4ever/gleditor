@@ -57,6 +57,9 @@ struct VortexHostConfig {
   /// §6.4 / design/vicon-andor-parallelism.md).
   bool orParallelSearch{false};
 
+  /// VM cycles one logic solve may spend (`vortex.logic_max_cycles`).
+  std::size_t logicMaxCycles{kDefaultLogicCycleBudget};
+
   [[nodiscard]] static VortexHostConfig fromStore(const xanadu::Store &store);
 };
 

@@ -45,6 +45,13 @@ class Store;
 
 namespace zigzag::vortex {
 
+/// VM cycles one logic solve may spend when no session supplies the
+/// `vortex.logic_max_cycles` setting. system_docs seeds the setting with the
+/// same number (vortex_host.cpp asserts they agree); the 100000 the VM runs
+/// with by default is too small for a recursive search over a few thousand
+/// facts.
+inline constexpr std::size_t kDefaultLogicCycleBudget = 10'000'000;
+
 class VortexWorkerPool;
 namespace logic {
 struct CompileContext;
@@ -532,7 +539,7 @@ private:
   const xanadu::Store *boundStore_{nullptr};
   /// Matches VortexVM::run's default so behaviour is unchanged until a caller
   /// (the mesh evaluator's budget.maxCycles) sets it.
-  std::size_t logicMaxCycles_{100000};
+  std::size_t logicMaxCycles_{kDefaultLogicCycleBudget};
 
   // Stage 2 data-parallel hook: borrowed, not owned. Null => serial.
   VortexWorkerPool *workerPool_{nullptr};
