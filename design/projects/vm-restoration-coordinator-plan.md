@@ -451,6 +451,43 @@ Gate A (2026-11-11, shared branch at `98ecab03`, cards P0, V1.0, L0, Q1, Q3, Q4 
 usage limit twice, and four exhausted it again. By the owner's instruction (2026-11-12), run at most
 two agents at a time, workers and reviewers counted together.
 
+Ruled by the owner on 2026-11-12, after the second batch (W1.1, V3, L1 and P1 reviews):
+
+- **`<=` and `>=` on versions:** ancestor-or-equal, so `@a <= @a` is true; unrelated branches are
+  false for all four ordering operators. The spec's hypertime operator table gains the two rows.
+  **Wider ruling:** comparison is to be harmonized as a *goal* (it succeeds or fails, as a Vlog test
+  does) and not as a boolean-valued operator, across VQL and the other front ends. This needs its
+  own design card (H-CMP, below) before any code; until it lands, new comparison lowering must not
+  add boolean-operator behaviour beyond what exists.
+- **Program cells after a VQL run:** fix in O2 with the approved arena undo. Mark before compile,
+  release after the run, and copy out result cells the program itself minted before the release. The
+  same mechanism is Q3's failed-compile cleanup.
+- **`Mount` and `SessionMount`:** unify; the engine's type becomes an alias of the compiler's. Rides
+  on Q2.
+- **VLace reference copies (L1 D2):** no new opcode. `emitCopy` stays a value copy; L2 adds
+  `emitCopyReference` over `CopyCellRefs` for operands the lowering knows are references. A
+  value-preserving copy opcode is reconsidered only if L2 meets an operand whose kind is unknown
+  while lowering.
+- **`CompileError::ArithFault`:** approved and added (division by zero). No type-test opcode for
+  `++`/`+`: the type checker owns it, and lowering refuses untyped input by name.
+- **`FrameScope` in the frozen `logic_compile.hpp`:** one amendment approved, two fields
+  (`scratchOk`, `freeTemps`), so `variableSlots` holds no sentinel keys. It lands with P1, before P2
+  and P3 start.
+- **`⍴ ⊂ …`:** the `kRhoEnclosed` guard stays; V10 makes it reachable and adds the source-level
+  test.
+- **VLace parser defect** (`1 > 2 || 3 < 4` drops the tail, `parser.cpp:624-627`): fix in this work,
+  as its own small card (L-PARSE) ahead of L2.
+- **Prolog cycle budget:** the default is read from `system://settings`, with a 10,000,000 fallback
+  in place of 100,000. Rides on P2.
+
+New cards from these rulings:
+
+| Card    | What                                                                                    | After |
+| :------ | :-------------------------------------------------------------------------------------- | :---- |
+| H-CMP   | Design note: comparison as a goal across VQL, VLace, VPL and logic; no code             | —     |
+| L-PARSE | Fix the VLace comparison-chain parse defect, with tests                                 | L1    |
+| O2      | Cell-identity compare, `PinHistorical`, arena space undo, program-cell release, project | O1    |
+
 ## 5a. Original decision table (before W0)
 
 | Id  | Before | Decision                                                                                                                   | Recommendation                                                                                                                                                          |
