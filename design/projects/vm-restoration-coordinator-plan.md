@@ -456,6 +456,10 @@ outside the baseline failed under load from two concurrent worker builds
 and the drag test passed three of four runs alone, so they are timing-sensitive and not regressions.
 L-PARSE (`893eec8d`) was merged after the gate, on its own VLace run.
 
+Gate D (2026-11-12, shared branch at `687bacf7`, adding L-PARSE and P1): `xuzz_test` 176 failures of
+4081, nothing newly failing, 30 turned green against the baseline; `gleditor_test` and `zigzag_test`
+unchanged. The current failing list is `/data/git/gleditor-restore/.logs/w1/gate-d-xuzz-failed.txt`.
+
 **Model usage is a capacity limit too.** Eight mid-tier workers at once exhausted the five-hour
 usage limit twice, and four exhausted it again. By the owner's instruction (2026-11-12), run at most
 two agents at a time, workers and reviewers counted together.
