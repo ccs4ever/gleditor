@@ -99,8 +99,32 @@ TEST_F(VQLHooksTest, ARunTimeVersionComparisonRefusesInsteadOfComparingText) {
   const auto item = arena.makeCell("3");
   ASSERT_TRUE(arena.link(core.home(), dim, DimVector::POS, item));
   EXPECT_THAT(refusalOf("for $c in ##/d.items/count() return ##[$c < @5]"),
-              HasSubstr("version comparison of a run-time version is not "
-                        "lowered"));
+              HasSubstr("version comparison '<' against a run-time variable is "
+                        "not lowered"));
+}
+
+TEST_F(VQLHooksTest, AliasedVersionKeepsVersionSemantics) {
+  // "10" sorts before "9" as text; causally 9 precedes 10.
+  EXPECT_EQ(
+      engine.execute("let $a := @9 let $b := $a return ##[$b < @10]").size(),
+      1U);
+  EXPECT_TRUE(
+      engine.execute("let $a := @10 let $b := $a return ##[$b < @9]").empty());
+}
+
+TEST_F(VQLHooksTest, VersionReturnedFromADefRefusesAgainstAVersionLiteral) {
+  EXPECT_THAT(refusalOf("def v(): Cell := @10; ##[v() < @9]"),
+              HasSubstr("version comparison '<' against a run-time function "
+                        "result is not lowered"));
+}
+
+TEST_F(VQLHooksTest, VersionPassedAsAnArgumentRefusesInsteadOfTextOrder) {
+  // The parameter is a run-time cell at compile time, so no causal comparison
+  // is lowered; the refusal names the form rather than falling back to text.
+  EXPECT_THAT(
+      refusalOf("def before($x: Cell): Cell := ##[$x < @9]; before(@8)"),
+      HasSubstr("version comparison '<' against a run-time variable is "
+                "not lowered"));
 }
 
 // H3

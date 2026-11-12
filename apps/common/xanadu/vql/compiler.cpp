@@ -56,6 +56,27 @@ QueryErrorCategory classifyCompilerFailure(const std::exception &error) {
   return QueryErrorCategory::Unsupported;
 }
 
+/// Names the syntactic form of an operand for a refusal message, so the user
+/// sees which construct could not be lowered.
+std::string valueFormName(const ValueExpr &expr) {
+  const auto &kind = expr.kind;
+  if (std::holds_alternative<std::shared_ptr<PathExpression>>(kind))
+    return "path";
+  if (std::holds_alternative<ScalarLiteral>(kind)) return "literal";
+  if (std::holds_alternative<std::string>(kind)) return "variable";
+  if (std::holds_alternative<std::shared_ptr<FunctionInvocation>>(kind))
+    return "function result";
+  if (std::holds_alternative<std::shared_ptr<ShapeLiteral>>(kind))
+    return "shape";
+  if (std::holds_alternative<std::shared_ptr<VersionExpr>>(kind))
+    return "version expression";
+  if (std::holds_alternative<std::shared_ptr<PathLambda>>(kind))
+    return "closure";
+  if (std::holds_alternative<std::shared_ptr<BooleanExpr>>(kind))
+    return "boolean expression";
+  return "expression";
+}
+
 } // namespace
 
 using zigzag::CellRef;
@@ -995,16 +1016,25 @@ VQLCompiler::compileComparison(const ComparisonExpr &comp, CellRef ctxCell) {
     return emitConstant(CellValue(
         compareVersionsCausally(comp.op, *leftVersion, *rightVersion)));
   if (leftVersion || rightVersion) {
-    // The other side is a variable bound at run time (a call parameter, say):
-    // its text may or may not be a version, and comparing it as text would
-    // order versions wrongly.
-    const auto *other    = leftVersion ? comp.right.get() : comp.left.get();
-    const auto otherCell = boundCell(other, leftVersion ? *rhs : *lhs);
-    if (other && std::holds_alternative<std::string>(other->kind) &&
-        otherCell && !constantCells_.contains(*otherCell))
-      throw QueryRefusal(QueryErrorCategory::Unsupported,
-                         "version comparison of a run-time version is not "
-                         "lowered");
+    // The other side is neither a known version nor a compile-time constant
+    // (a run-time string, a function's result, a path): its text may or may
+    // not be a version, and comparing it as text would order versions wrongly.
+    // Refuse by name rather than answer in text order.
+    const auto *other = leftVersion ? comp.right.get() : comp.left.get();
+    const CellRef compiledOther = leftVersion ? *rhs : *lhs;
+    const CellRef otherCell =
+        boundCell(other, compiledOther).value_or(compiledOther);
+    if (other && !constantCells_.contains(otherCell)) {
+      constexpr std::array<std::string_view, 6> opNames{"=", "!=", "<",
+                                                        ">", "<=", ">="};
+      const auto opName = opNames[static_cast<std::size_t>(comp.op)];
+      throw QueryRefusal(
+          QueryErrorCategory::Unsupported,
+          "version comparison '" + std::string(opName) +
+              "' against a run-time " + valueFormName(*other) +
+              " is not lowered; compare against a version literal or a "
+              "constant");
+    }
   }
 
   zigzag::vortex::VqlComparisonKind comparison =
