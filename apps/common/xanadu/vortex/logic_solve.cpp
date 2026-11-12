@@ -2,12 +2,12 @@
  * @file logic_solve.cpp
  * @brief VortexStdLib's logic entry points (solve, solveOnce, solveQuery).
  *
- * These still refuse: the compiled resolution behind them is the P1 card
- * (logic_compile_core.cpp). They were moved here unchanged so that card, and
- * only that card, edits this file to forward to logic::compileAndRunQuery.
+ * Every entry compiles the goals to a Vortex graph and runs it on the stdlib's
+ * VM through logic::compileAndRunQuery (logic_compile_core.cpp). The callback
+ * sees each solution's bindings while they are live; after the call returns
+ * the cells minted during the search are gone, as they always were, and only
+ * LogicSolution::formatted outlives it.
  */
-#include <stdexcept>
-
 #include "common/xanadu/vortex/logic_compile.hpp"
 #include "common/xanadu/vortex/vortex_stdlib.hpp"
 
@@ -90,13 +90,8 @@ bool VortexStdLib::solve(std::span<const CellRef> goals,
                          std::function<bool(const LogicSolution &)> onSolution,
                          std::span<const CellRef> customPredicates,
                          std::size_t maxSolutions) {
-  static_cast<void>(goals);
-  static_cast<void>(onSolution);
-  static_cast<void>(customPredicates);
-  static_cast<void>(maxSolutions);
-  throw std::logic_error(
-      "Vortex logic execution is unavailable: VM resolution lowering is not "
-      "implemented");
+  auto context = makeLogicContext(customPredicates);
+  return logic::compileAndRunQuery(context, goals, onSolution, maxSolutions);
 }
 
 } // namespace zigzag::vortex

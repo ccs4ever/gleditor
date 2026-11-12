@@ -945,32 +945,16 @@ VortexHost::solveLogicBatchParallel(const std::vector<std::string> &goalQueries,
 
   // Render one solution's variable bindings to a stable, context-independent
   // string so solutions compare across worker arenas: "name=value" pairs
-  // sorted by variable name, joined. The cell values are rendered through the
-  // owning context's core (a pure const read).
-  const auto renderSolution = [](WorkerContext &ctx,
+  // sorted by variable name, joined. The strings come from
+  // LogicSolution::formatted, which the solver renders while the bindings are
+  // live: solve() releases its arena mark before returning, so the binding
+  // cells themselves no longer exist by the time this runs.
+  const auto renderSolution = [](WorkerContext &,
                                  const LogicSolution &sol) -> std::string {
     std::vector<std::string> parts;
-    parts.reserve(sol.bindings.size());
-    for (const auto &[nameCell, valueCell] : sol.bindings) {
-      const auto render = [&ctx](CellRef c) -> std::string {
-        if (c == noCell || !ctx.arena.contains(c)) {
-          return "_";
-        }
-        return std::visit(
-            [](const auto &held) -> std::string {
-              using T = std::remove_cvref_t<decltype(held)>;
-              if constexpr (std::is_same_v<T, std::string>) {
-                return held;
-              } else if constexpr (std::is_same_v<T, bool>) {
-                return held ? "true" : "false";
-              } else {
-                return std::to_string(held);
-              }
-            },
-            ctx.core.render(c).value());
-      };
-      parts.push_back(render(nameCell) + "=" + render(valueCell));
-    }
+    parts.reserve(sol.formatted.size());
+    for (const auto &[name, value] : sol.formatted)
+      parts.push_back(name + "=" + value);
     std::ranges::sort(parts);
     std::string joined;
     for (std::size_t i = 0; i < parts.size(); ++i) {

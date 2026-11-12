@@ -191,6 +191,16 @@ struct FrameScope {
   /// clears it on entry (every clause is a fresh renaming per activation) and
   /// nothing else clears it.
   std::unordered_map<CellRef, CellRef> variableSlots;
+  /// The frame's one shared unify-result local: every head unify writes its
+  /// Bool here and the very next branch consumes it, so one slot serves the
+  /// whole frame instead of one per unify. Survives emitClause's clear of
+  /// variableSlots (it is a frame property, not a clause renaming).
+  std::optional<CellRef> scratchOk;
+  /// Term temporaries free for reuse: a slot whose value was consumed is
+  /// handed back instead of growing the frame. Reset by emitClause together
+  /// with variableSlots, because a temporary freed in one clause may still be
+  /// live on the other clause's branch.
+  std::vector<CellRef> freeTemps;
 };
 
 // -- Compilation services (Owner: P1, logic_compile_core.cpp) -----------------
