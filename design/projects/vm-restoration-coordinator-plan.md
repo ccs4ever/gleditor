@@ -447,6 +447,15 @@ Gate A (2026-11-11, shared branch at `98ecab03`, cards P0, V1.0, L0, Q1, Q3, Q4 
 `gleditor_test` and `zigzag_test` unchanged. The current failing list is
 `/data/git/gleditor-restore/.logs/w1/gate-a-xuzz-failed.txt`.
 
+Gate C (2026-11-12, shared branch at `895e2204`, adding O1, V2, W1.1, V3 and L1): `xuzz_test` 192
+failures of 4058, 17 more turned green; `gleditor_test` and `zigzag_test` unchanged. Three names
+outside the baseline failed under load from two concurrent worker builds
+(`ArrayfiladeBenchmarkTest.Subscripting10000Cells`,
+`VortexBenchmarkTest.MemoizedVsUnmemoizedExecution`,
+`E2EBinaryOrchestrationTest.ForeignRunDragCreatesAReaderOwnedStore`); the two benchmarks pass alone
+and the drag test passed three of four runs alone, so they are timing-sensitive and not regressions.
+L-PARSE (`893eec8d`) was merged after the gate, on its own VLace run.
+
 **Model usage is a capacity limit too.** Eight mid-tier workers at once exhausted the five-hour
 usage limit twice, and four exhausted it again. By the owner's instruction (2026-11-12), run at most
 two agents at a time, workers and reviewers counted together.
