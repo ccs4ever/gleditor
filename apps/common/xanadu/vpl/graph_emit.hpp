@@ -182,8 +182,9 @@ CellRef countedLoop(LowerContext &ctx, CellRef count,
  * referenced by `to` (one Value opcode whose replacement is the reference
  * register, so int, double and text keep their type). It never creates a
  * cell: `to` must reference a cell at run time (for instance a mintAfter
- * result); if it is absent the VM refuses at run time, and the helper emits no
- * guard. Allocates one opcode; clobbers only the target cell's value.
+ * result). If `to` is absent at run time the Value op is a silent no-op:
+ * nothing is written and nothing fails (verified on the VM), and the helper
+ * emits no guard, so a caller that needs the cell must mint it first. Allocates one opcode; clobbers only the target cell's value.
  */
 void copyValue(LowerContext &ctx, CellRef from, CellRef to);
 

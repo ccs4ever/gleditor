@@ -204,7 +204,7 @@ TEST(VPLEngineTest, DISABLED_TakeAndDrop) {
   EXPECT_EQ(dropAscii.extents()[0], 3u);
 }
 
-TEST(VPLEngineTest, DISABLED_ReductionsAndScans) {
+TEST(VPLEngineTest, ReductionsAndScans) {
   VPLEngine engine;
 
   // Sum reduction: +/ 1 2 3 4 5 -> 15
@@ -303,7 +303,7 @@ TEST(VPLEngineTest, DISABLED_HypertimeAndTransclusion) {
   EXPECT_TRUE(htAscii.isScalar());
 }
 
-TEST(VPLEngineTest, DISABLED_SysArrayStdLibIntegration) {
+TEST(VPLEngineTest, SysArrayStdLibIntegration) {
   VPLEngine engine;
 
   EXPECT_TRUE(engine.stdlib().has("sys:array"));
@@ -347,17 +347,93 @@ TEST(VPLEngineCellPresenceTest,
               testing::ElementsAre(text));
 }
 
-TEST(VPLEngineTest, SourceEvaluationRefusesDirectInterpretation) {
+// Intent (rewritten from "evaluation throws"): VPLEngine::evaluate is a facade,
+// so everything it answers must come from the Vortex VM. A host-side
+// interpreter would not spend VM cycles, would not hit a VM cycle budget, and
+// would not be refused by the compiler's named messages; each of the three
+// checks below is something only the VM path does.
+TEST(VPLEngineTest, SourceEvaluationRunsOnTheVmAndNothingElse) {
   zigzag::ArenaManifold arena;
   VPLEngine engine(arena);
-  EXPECT_THROW(engine.evaluate("1 + 2"), std::runtime_error);
+
+  const auto before = engine.totalCycles();
+  const auto sum    = engine.evaluate("1 + 2");
+  EXPECT_TRUE(sum.isScalar());
+  EXPECT_EQ(sum.scalarInt(), 3);
+  EXPECT_GT(engine.totalCycles(), before);
+
+  engine.setCycleBudget(1);
+  try {
+    static_cast<void>(engine.evaluate("1 + 2"));
+    FAIL() << "a one-cycle budget must stop the VM";
+  } catch (const VPLExecutionError &error) {
+    EXPECT_EQ(error.stage(), ExecutionError::Stage::Budget) << error.what();
+  }
+  engine.setCycleBudget(kDefaultCycleBudget);
+
+  // Forms the compiler does not lower are refused at compile time, by name,
+  // and never interpreted: a rank conjunction (⍤) has no lowering, and an
+  // unbound name has no cell to read.
+  try {
+    static_cast<void>(engine.evaluate("1 2 ⍤ 1 3"));
+    FAIL() << "an unlowered verb must be refused";
+  } catch (const VPLExecutionError &error) {
+    EXPECT_EQ(error.stage(), ExecutionError::Stage::Compile);
+    EXPECT_THAT(error.what(), testing::HasSubstr("conjunction"));
+    EXPECT_THAT(error.what(), testing::Not(testing::HasSubstr("unbound")));
+  }
+  try {
+    static_cast<void>(engine.evaluate("missing"));
+    FAIL() << "an unbound name must be refused";
+  } catch (const VPLExecutionError &error) {
+    EXPECT_EQ(error.stage(), ExecutionError::Stage::Compile);
+    EXPECT_THAT(error.what(),
+                testing::HasSubstr("unbound VPL identifier 'missing'"));
+  }
 }
 
-TEST(VPLEngineTest, AstEvaluationRefusesDirectInterpretation) {
+TEST(VPLEngineTest, AstEvaluationRunsOnTheVmAndNothingElse) {
   zigzag::ArenaManifold arena;
   VPLEngine engine(arena);
   Parser parser("1 + 2");
   const auto ast = parser.parseProgram();
   ASSERT_NE(ast, nullptr);
-  EXPECT_THROW(engine.evaluate(*ast), std::runtime_error);
+
+  const auto before = engine.totalCycles();
+  const auto sum    = engine.evaluate(*ast);
+  EXPECT_TRUE(sum.isScalar());
+  EXPECT_EQ(sum.scalarInt(), 3);
+  EXPECT_GT(engine.totalCycles(), before);
+
+  engine.setCycleBudget(1);
+  try {
+    static_cast<void>(engine.evaluate(*ast));
+    FAIL() << "a one-cycle budget must stop the VM";
+  } catch (const VPLExecutionError &error) {
+    EXPECT_EQ(error.stage(), ExecutionError::Stage::Budget) << error.what();
+  }
+  engine.setCycleBudget(kDefaultCycleBudget);
+
+  Parser scrubParser("1 2 ⍤ 1 3");
+  const auto scrub = scrubParser.parseProgram();
+  ASSERT_NE(scrub, nullptr);
+  try {
+    static_cast<void>(engine.evaluate(*scrub));
+    FAIL() << "an unlowered verb must be refused";
+  } catch (const VPLExecutionError &error) {
+    EXPECT_EQ(error.stage(), ExecutionError::Stage::Compile);
+    EXPECT_THAT(error.what(), testing::HasSubstr("conjunction"));
+    EXPECT_THAT(error.what(), testing::Not(testing::HasSubstr("unbound")));
+  }
+  Parser unboundParser("missing");
+  const auto unbound = unboundParser.parseProgram();
+  ASSERT_NE(unbound, nullptr);
+  try {
+    static_cast<void>(engine.evaluate(*unbound));
+    FAIL() << "an unbound name must be refused";
+  } catch (const VPLExecutionError &error) {
+    EXPECT_EQ(error.stage(), ExecutionError::Stage::Compile);
+    EXPECT_THAT(error.what(),
+                testing::HasSubstr("unbound VPL identifier 'missing'"));
+  }
 }
