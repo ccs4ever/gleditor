@@ -18,6 +18,7 @@
  * reference in the VM's maps.
  */
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <limits>
 #include <optional>
@@ -46,6 +47,72 @@ constexpr std::string_view kQueryName = "<query>";
 // bounded by the cycle budget, and this cap only keeps a runaway frame stack
 // from exhausting memory before the budget does.
 constexpr std::size_t kLogicMaxFrameDepth = 1'000'000;
+
+// Frame size caps. All of a predicate's clauses share one frame, so a fact
+// table of thousands of clauses or a large list literal puts thousands of
+// locals in one descriptor; the VM defaults (4096 locals, 8192 records) are
+// sized for hand-written graphs, and the old solver had no such cap. Locals
+// are pooled and the unify flag is shared, so these only bound genuinely many
+// distinct clause variables.
+constexpr std::size_t kLogicMaxLocalsPerFrame    = 65'536;
+constexpr std::size_t kLogicMaxDescriptorRecords = 2 * kLogicMaxLocalsPerFrame;
+
+// The VM reports a spent cycle budget only as this text (ExecutionResult has
+// no structured field for it), so the driver matches it by name here.
+constexpr std::string_view kVmCycleBudgetMessage = "Exceeded max cycles";
+
+// Goals the old solver answered with a C++ arm checked BEFORE any clause (see
+// e9090999^ vortex_stdlib.cpp, solveQueryHelper). Each is owned by a later
+// card (P2: control and arithmetic, P3/P4: relations). Until its card lowers
+// it, a goal naming one must REFUSE by name, not fail like an unknown user
+// predicate, or the query silently has no answers. Delete an entry when its
+// card lands; the dispatch then reaches that card's emitter first. `=` is not
+// listed: it is a stdlib clause predicate that P1 lowers itself.
+struct OwnedGoal {
+  std::string_view name;
+  std::size_t arity;
+};
+constexpr std::array kOwnedGoals{
+    OwnedGoal{"true", 0},
+    OwnedGoal{"fail", 0},
+    OwnedGoal{"!", 0},
+    OwnedGoal{"is", 2},
+    OwnedGoal{"<", 2},
+    OwnedGoal{">", 2},
+    OwnedGoal{"=<", 2},
+    OwnedGoal{">=", 2},
+    OwnedGoal{"=:=", 2},
+    OwnedGoal{"=\\=", 2},
+    OwnedGoal{"\\+", 1},
+    OwnedGoal{"\\=", 2},
+    OwnedGoal{"vortex_module", 1},
+    OwnedGoal{"stdlib_module", 1},
+    OwnedGoal{"vortex_function", 1},
+    OwnedGoal{"vortex_function", 2},
+    OwnedGoal{"vortex_function", 3},
+    OwnedGoal{"stdlib_function", 1},
+    OwnedGoal{"stdlib_function", 2},
+    OwnedGoal{"stdlib_function", 3},
+    OwnedGoal{"vortex_instruction", 3},
+    OwnedGoal{"vortex_contract", 3},
+    OwnedGoal{"vortex_param", 4},
+    OwnedGoal{"setting", 2},
+    OwnedGoal{"setting_shape", 2},
+    OwnedGoal{"setting_default", 2},
+    OwnedGoal{"transclude", 3},
+    OwnedGoal{"xanalink", 3},
+    OwnedGoal{"cell_value", 2},
+    OwnedGoal{"cell_link", 4},
+    OwnedGoal{"cell_span", 2},
+    OwnedGoal{"bridge_edge", 2},
+    OwnedGoal{"bridge_edge", 3},
+};
+
+[[nodiscard]] bool isOwnedGoal(const PredicateKey &key) {
+  return std::ranges::any_of(kOwnedGoals, [&](const OwnedGoal &owned) {
+    return owned.name == key.name && owned.arity == key.arity;
+  });
+}
 
 // Per-label state, kept in a cell the label's Nop op takes as its input so it
 // lives in the arena (and so is undone with it) rather than in a side table
@@ -150,6 +217,10 @@ public:
     // Never decremented by the VM, so a long-lived VM would otherwise run out
     // across many solves.
     raised.maxBackingCells = std::numeric_limits<std::size_t>::max();
+    raised.maxLocalsPerFrame =
+        std::max(raised.maxLocalsPerFrame, kLogicMaxLocalsPerFrame);
+    raised.maxDescriptorRecords =
+        std::max(raised.maxDescriptorRecords, kLogicMaxDescriptorRecords);
     vm_.setFrameLimits(raised);
   }
   ~FrameLimitScope() { vm_.setFrameLimits(saved_); }
@@ -161,9 +232,69 @@ private:
   FrameLimits saved_;
 };
 
+// Per-frame reuse without a field in FrameScope (the header is frozen): two
+// reserved keys of scope.variableSlots, which no cell master can equal because
+// they are not arena cells. kScratchOkKey holds the one local every head
+// unify writes its Bool to (consumed by the very next branch); kFreeHeadKey
+// heads a free list of term temporaries whose own entries (keyed by the freed
+// local) point at the next. emitClause clears the map per clause and restores
+// the scratch local, so the free list simply restarts.
+constexpr CellRef kScratchOkKey = noCell;
+constexpr CellRef kFreeHeadKey  = noCell - 1;
+
+[[nodiscard]] CellRef scratchOk(CompileContext &ctx, FrameScope &scope) {
+  if (const auto it = scope.variableSlots.find(kScratchOkKey);
+      it != scope.variableSlots.end())
+    return it->second;
+  const CellRef local = newLocal(ctx, scope);
+  scope.variableSlots.emplace(kScratchOkKey, local);
+  return local;
+}
+
+[[nodiscard]] CellRef takeTemp(CompileContext &ctx, FrameScope &scope) {
+  const auto head = scope.variableSlots.find(kFreeHeadKey);
+  if (head == scope.variableSlots.end()) return newLocal(ctx, scope);
+  const CellRef taken = head->second;
+  if (const auto next = scope.variableSlots.find(taken);
+      next != scope.variableSlots.end()) {
+    head->second = next->second;
+    scope.variableSlots.erase(next);
+  } else {
+    scope.variableSlots.erase(head);
+  }
+  return taken;
+}
+
+void freeTemp(FrameScope &scope, CellRef temp) {
+  if (const auto head = scope.variableSlots.find(kFreeHeadKey);
+      head != scope.variableSlots.end()) {
+    scope.variableSlots[temp] = head->second;
+    head->second              = temp;
+  } else {
+    scope.variableSlots.emplace(kFreeHeadKey, temp);
+  }
+}
+
 [[nodiscard]] bool isQueryScope(const FrameScope &scope) {
   return scope.predicate.name == kQueryName;
 }
+
+// True when @p term reaches itself. Unification has no occurs check, so
+// `X = f(X)` binds a rational tree; rendering one recurses without end.
+[[nodiscard]] bool isCyclic(const VortexStdLib &stdlib, CellRef term,
+                            std::unordered_set<CellRef> &path,
+                            std::unordered_set<CellRef> &cleared) {
+  const auto actual = stdlib.deref(term);
+  if (!actual || cleared.contains(*actual)) return false;
+  if (!path.insert(*actual).second) return true;
+  for (const CellRef arg : stdlib.argumentsOf(*actual))
+    if (isCyclic(stdlib, arg, path, cleared)) return true;
+  path.erase(*actual);
+  cleared.insert(*actual);
+  return false;
+}
+
+constexpr std::string_view kCyclicText = "<cyclic>";
 
 // Depth-first variables of @p term as the old solver's collectVariables found
 // them: the cell as met (not its master), first occurrence per master, cycle
@@ -283,8 +414,13 @@ CellRef variableSlot(CompileContext &ctx, FrameScope &scope, Chain &chain,
   return slot;
 }
 
-CellRef emitTerm(CompileContext &ctx, FrameScope &scope, Chain &chain,
-                 CellRef term) {
+namespace {
+
+// emitTerm, also reporting whether the returned slot is a temporary this call
+// made (so its consumer may hand it back to the free list).
+CellRef emitTermTracked(CompileContext &ctx, FrameScope &scope, Chain &chain,
+                        CellRef term, bool &fresh) {
+  fresh             = false;
   const auto actual = ctx.stdlib.deref(term);
   if (!actual) throw LogicRefusal("logic term is not a cell");
   if (ctx.stdlib.isVar(*actual))
@@ -318,19 +454,34 @@ CellRef emitTerm(CompileContext &ctx, FrameScope &scope, Chain &chain,
   }
 
   std::vector<CellRef> inputs;
+  std::vector<CellRef> consumed;
   inputs.reserve(parts.size() + 1);
   inputs.push_back(emitConstant(ctx, chain, arena.textOf(*actual)));
-  for (const CellRef part : parts)
-    inputs.push_back(emitTerm(ctx, scope, chain, part));
-  const CellRef built = newLocal(ctx, scope);
+  for (const CellRef part : parts) {
+    bool partFresh = false;
+    inputs.push_back(emitTermTracked(ctx, scope, chain, part, partFresh));
+    if (partFresh) consumed.push_back(inputs.back());
+  }
+  const CellRef built = takeTemp(ctx, scope);
   const std::array<CellRef, 1> outputs{built};
   appendOp(ctx, chain, OpcodeKind::MakeTerm, inputs, outputs);
+  // The op has read its arguments; later terms may reuse their slots.
+  for (const CellRef spent : consumed) freeTemp(scope, spent);
+  fresh = true;
   return built;
+}
+
+} // namespace
+
+CellRef emitTerm(CompileContext &ctx, FrameScope &scope, Chain &chain,
+                 CellRef term) {
+  bool fresh = false;
+  return emitTermTracked(ctx, scope, chain, term, fresh);
 }
 
 void emitUnifyOrFail(CompileContext &ctx, FrameScope &scope, Chain &chain,
                      CellRef a, CellRef b) {
-  const CellRef ok = newLocal(ctx, scope);
+  const CellRef ok = scratchOk(ctx, scope);
   const std::array<CellRef, 2> inputs{a, b};
   const std::array<CellRef, 1> outputs{ok};
   appendOp(ctx, chain, OpcodeKind::Unify, inputs, outputs);
@@ -404,8 +555,18 @@ NegationScope openNegationScope(CompileContext &ctx, FrameScope &scope,
   const CellRef slot = newLocal(ctx, scope);
   const std::array<CellRef, 1> outputs{slot};
   appendOp(ctx, chain, OpcodeKind::ChoiceDepth, {}, outputs);
+  // `slot` is the depth BEFORE the caller's `Choice CONT`, so cutting to it
+  // (emitCutTo, after the negated goal succeeds) removes CONT too, which is
+  // wanted. A `!` inside the negated goal must spare CONT: `\+ (!, fail)`
+  // succeeds, because the cut is local to the goal. It therefore cuts to
+  // slot + 1, the depth once CONT is pushed.
+  const CellRef afterChoice = newLocal(ctx, scope);
+  const std::array<CellRef, 2> addInputs{
+      slot, emitConstant(ctx, chain, std::int64_t{1})};
+  const std::array<CellRef, 1> addOutputs{afterChoice};
+  appendOp(ctx, chain, OpcodeKind::Add, addInputs, addOutputs);
   NegationScope negation{.barrier = slot, .outer = scope.barrier};
-  scope.barrier = slot;
+  scope.barrier = afterChoice;
   return negation;
 }
 
@@ -421,6 +582,9 @@ CellRef emitCutTo(CompileContext &ctx, Chain &chain, CellRef barrier) {
 // -- User predicates ----------------------------------------------------------
 
 bool hasUserClauses(const CompileContext &ctx, const PredicateKey &key) {
+  // The old solver tried its builtin arms before any clause, so a user clause
+  // named like a builtin never replaced it; the same holds here.
+  if (isOwnedGoal(key)) return false;
   auto &arena = arenaOf(ctx);
   return std::ranges::any_of(ctx.candidatePredicates, [&](const CellRef pred) {
     return pred != noCell && arena.contains(pred) &&
@@ -436,6 +600,8 @@ void emitNonTermGoal(CompileContext &, FrameScope &, Chain &, CellRef) {
 
 void emitUnknownPredicate(CompileContext &ctx, FrameScope &scope, Chain &chain,
                           const PredicateKey &key) {
+  if (isOwnedGoal(key))
+    refuseUnlowered("P1", key.display() + " awaits P2/P3/P4");
   GLEDITOR_LOG_DEBUG("vortex.logic",
                      "unknown predicate {} fails without an error",
                      key.display());
@@ -444,7 +610,13 @@ void emitUnknownPredicate(CompileContext &ctx, FrameScope &scope, Chain &chain,
 
 void emitClause(CompileContext &ctx, FrameScope &scope, Chain &chain,
                 CellRef clause, bool last) {
+  const auto scratch = scope.variableSlots.find(kScratchOkKey);
+  const std::optional<CellRef> keepOk =
+      scratch == scope.variableSlots.end()
+          ? std::nullopt
+          : std::optional<CellRef>{scratch->second};
   scope.variableSlots.clear();
+  if (keepOk) scope.variableSlots.emplace(kScratchOkKey, *keepOk);
   auto &arena = arenaOf(ctx);
 
   std::optional<Label> next;
@@ -474,8 +646,11 @@ void emitClause(CompileContext &ctx, FrameScope &scope, Chain &chain,
     }
   }
   for (const std::size_t i : compound) {
-    const CellRef built = emitTerm(ctx, scope, chain, headArgs[i]);
+    bool fresh = false;
+    const CellRef built =
+        emitTermTracked(ctx, scope, chain, headArgs[i], fresh);
     emitUnifyOrFail(ctx, scope, chain, *argumentPort(scope, i), built);
+    if (fresh) freeTemp(scope, built);
   }
 
   std::vector<CellRef> goals;
@@ -569,11 +744,16 @@ void emitUserCall(CompileContext &ctx, FrameScope &scope, Chain &chain,
   if (!descriptor)
     throw LogicRefusal("no clauses for " + key.display() + " to call");
   std::vector<CellRef> inputs{*descriptor};
-  for (const CellRef arg : ctx.stdlib.argumentsOf(goal))
-    inputs.push_back(emitTerm(ctx, scope, chain, arg));
+  std::vector<CellRef> consumed;
+  for (const CellRef arg : ctx.stdlib.argumentsOf(goal)) {
+    bool fresh = false;
+    inputs.push_back(emitTermTracked(ctx, scope, chain, arg, fresh));
+    if (fresh) consumed.push_back(inputs.back());
+  }
   // The op after this one is the call's continuation; the caller always
   // appends something (the next goal, ReturnFrame or the query's return).
   appendOp(ctx, chain, OpcodeKind::InvokeFrame, inputs);
+  for (const CellRef spent : consumed) freeTemp(scope, spent);
 }
 
 // -- Query lowering -----------------------------------------------------------
@@ -641,10 +821,9 @@ struct SolutionDriver::Impl {
   Impl(CompileContext &context, const LoweredQuery &lowered)
       : ctx(context), query(lowered), limits(context.vm),
         mark(context.core.arena().mark()), baseDepth(context.vm.choiceDepth()),
-        startCycles(context.vm.totalCycles()) {
-    sentinel = ctx.vm.mintOpcode(OpcodeKind::Halt, "#LOGIC_EXHAUSTED");
-    cursor   = ctx.vm.spawnCursor(query.entry, "logic.query");
-  }
+        startCycles(context.vm.totalCycles()),
+        sentinel(context.vm.mintOpcode(OpcodeKind::Halt, "#LOGIC_EXHAUSTED")),
+        cursor(context.vm.spawnCursor(lowered.entry, "logic.query")) {}
 
   CompileContext &ctx;
   LoweredQuery query;
@@ -652,11 +831,10 @@ struct SolutionDriver::Impl {
   zigzag::Mark mark;
   std::size_t baseDepth;
   std::uint64_t startCycles;
-  CellRef sentinel{noCell};
-  CellRef cursor{noCell};
+  CellRef sentinel;
+  CellRef cursor;
   bool started{false};
   bool finished{false};
-  bool released{false};
 };
 
 SolutionDriver::SolutionDriver(CompileContext &ctx, const LoweredQuery &query)
@@ -700,7 +878,7 @@ DriveOutcome SolutionDriver::next() {
 
   const auto result = vm.run(impl.cursor, remaining);
   if (!result.success) {
-    if (result.errorMessage == "Exceeded max cycles")
+    if (result.errorMessage == kVmCycleBudgetMessage)
       return DriveOutcome::BudgetSpent;
     throw std::runtime_error("Prolog resolution failed: " +
                              result.errorMessage);
@@ -732,8 +910,13 @@ LogicSolution SolutionDriver::solution() const {
     } else {
       name = "_G" + std::to_string(original);
     }
-    if (const auto rendered = ctx.stdlib.renderTerm(original))
+    std::unordered_set<CellRef> path;
+    std::unordered_set<CellRef> cleared;
+    if (isCyclic(ctx.stdlib, original, path, cleared)) {
+      sol.formatted[name] = std::string(kCyclicText);
+    } else if (const auto rendered = ctx.stdlib.renderTerm(original)) {
       sol.formatted[name] = *rendered;
+    }
   }
   return sol;
 }

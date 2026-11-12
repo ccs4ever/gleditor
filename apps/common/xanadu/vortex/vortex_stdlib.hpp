@@ -293,28 +293,40 @@ public:
   [[nodiscard]] logic::CompileContext
   makeLogicContext(std::span<const CellRef> customPredicates);
 
-  /// Throws std::logic_error until logic resolution is lowered to VM code.
+  /// Compiles the goals to a Vortex graph and runs it on this VM; a spent cycle
+  /// budget or any VM failure throws std::runtime_error, and a builtin or
+  /// relation not yet lowered refuses by name (std::logic_error).
   bool solveOnce(CellRef goal, std::span<const CellRef> customPredicates = {});
-  /// Throws std::logic_error until logic resolution is lowered to VM code.
+  /// Compiles the goals to a Vortex graph and runs it on this VM; a spent cycle
+  /// budget or any VM failure throws std::runtime_error, and a builtin or
+  /// relation not yet lowered refuses by name (std::logic_error).
   bool solveOnce(std::span<const CellRef> goals,
                  std::span<const CellRef> customPredicates = {});
 
-  /// Throws std::logic_error until logic resolution is lowered to VM code.
+  /// Compiles the goals to a Vortex graph and runs it on this VM; a spent cycle
+  /// budget or any VM failure throws std::runtime_error, and a builtin or
+  /// relation not yet lowered refuses by name (std::logic_error).
   std::vector<LogicSolution>
   solveQuery(CellRef goal, std::span<const CellRef> customPredicates = {},
              std::size_t maxSolutions = 100);
-  /// Throws std::logic_error until logic resolution is lowered to VM code.
+  /// Compiles the goals to a Vortex graph and runs it on this VM; a spent cycle
+  /// budget or any VM failure throws std::runtime_error, and a builtin or
+  /// relation not yet lowered refuses by name (std::logic_error).
   std::vector<LogicSolution>
   solveQuery(std::span<const CellRef> goals,
              std::span<const CellRef> customPredicates = {},
              std::size_t maxSolutions                  = 100);
 
-  /// Throws std::logic_error until logic resolution is lowered to VM code.
+  /// Compiles the goals to a Vortex graph and runs it on this VM; a spent cycle
+  /// budget or any VM failure throws std::runtime_error, and a builtin or
+  /// relation not yet lowered refuses by name (std::logic_error).
   bool solve(CellRef goal,
              std::function<bool(const LogicSolution &)> onSolution,
              std::span<const CellRef> customPredicates = {},
              std::size_t maxSolutions                  = 100);
-  /// Throws std::logic_error until logic resolution is lowered to VM code.
+  /// Compiles the goals to a Vortex graph and runs it on this VM; a spent cycle
+  /// budget or any VM failure throws std::runtime_error, and a builtin or
+  /// relation not yet lowered refuses by name (std::logic_error).
   bool solve(std::span<const CellRef> goals,
              std::function<bool(const LogicSolution &)> onSolution,
              std::span<const CellRef> customPredicates = {},

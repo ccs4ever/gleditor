@@ -235,34 +235,308 @@ TEST(LogicCompileCoreTest, LabelMisuseIsRefused) {
   EXPECT_THROW(placeLabel(ctx, chain, label), LogicRefusal);
 }
 
-TEST(LogicCompileCoreTest, DeepRecursionAndLargeFactTableMeasurement) {
+TEST(LogicCompileCoreTest, CycleCostIsLinearInClausesAndDepth) {
   PrologHarness h;
   std::string facts;
   for (int i = 0; i < 1000; ++i) facts += "fact(" + std::to_string(i) + ").\n";
   h.consult(facts + "len2([], z).\nlen2([_|T], s(N)) :- len2(T, N).\n");
   h.compiler.stdlib().setLogicCycleBudget(100'000'000);
 
-  using Clock = std::chrono::steady_clock;
-  auto ctx    = h.compiler.stdlib().makeLogicContext({});
-  auto t0     = Clock::now();
-  auto c0     = ctx.vm.totalCycles();
-  EXPECT_EQ(h.all("fact(999).", "X").size(), 1u);
-  auto ms = [](auto d) {
+  using Clock   = std::chrono::steady_clock;
+  auto ctx      = h.compiler.stdlib().makeLogicContext({});
+  const auto ms = [](auto d) {
     return std::chrono::duration_cast<std::chrono::milliseconds>(d).count();
   };
-  std::cout << "[measure] fact(999) over 1000 clauses: "
-            << ctx.vm.totalCycles() - c0 << " cycles, " << ms(Clock::now() - t0)
-            << " ms\n";
+  const auto list = [](int n) {
+    std::string out = "[";
+    for (int i = 0; i < n; ++i) out += (i ? ",a" : "a");
+    return out + "]";
+  };
+  const auto measure = [&](const std::string &query, const char *label) {
+    const auto t0 = Clock::now();
+    const auto c0 = ctx.vm.totalCycles();
+    EXPECT_EQ(h.all(query, "N").size(), 1u) << label;
+    const auto cycles = ctx.vm.totalCycles() - c0;
+    std::cout << "[measure] " << label << ": " << cycles << " cycles, "
+              << ms(Clock::now() - t0) << " ms (information only)\n";
+    return cycles;
+  };
 
-  std::string list = "[";
-  for (int i = 0; i < 1000; ++i) list += (i ? ",a" : "a");
-  list += "]";
-  t0 = Clock::now();
-  c0 = ctx.vm.totalCycles();
-  EXPECT_EQ(h.all("len2(" + list + ", N).", "N").size(), 1u);
-  std::cout << "[measure] len2 over a 1000-element list: "
-            << ctx.vm.totalCycles() - c0 << " cycles, " << ms(Clock::now() - t0)
-            << " ms\n";
+  // Cycle bounds, not wall time: a quadratic regression shows in cycles too.
+  EXPECT_LT(measure("fact(999), N = 1.", "fact(999) of 1000 clauses"),
+            20u * 1000u);
+  const auto c1000 = measure("len2(" + list(1000) + ", N).", "len2 1000");
+  const auto c2000 = measure("len2(" + list(2000) + ", N).", "len2 2000");
+  EXPECT_LT(c1000, 50u * 1000u);
+  EXPECT_LT(c2000 * 2, c1000 * 5) << "doubling the list must cost under 2.5x";
+}
+
+TEST(LogicCompileCoreTest, ThousandsOfClausesAndLargeLiteralsFitOneFrame) {
+  PrologHarness h;
+  std::string facts;
+  for (int i = 0; i < 5000; ++i) facts += "wide(" + std::to_string(i) + ").\n";
+  std::string literal = "big([";
+  for (int i = 0; i < 5000; ++i) literal += (i ? ",x" : "x");
+  literal += "]).\n";
+  h.consult(facts + literal);
+  h.compiler.stdlib().setLogicCycleBudget(10'000'000);
+  EXPECT_EQ(h.all("wide(4999), N = 1.", "N").size(), 1u);
+  EXPECT_EQ(h.all("wide(X).", "X", 10000).size(), 5000u);
+  EXPECT_EQ(h.all("big(L), N = 1.", "N").size(), 1u);
+  EXPECT_EQ(h.all("big([x|T]), N = 1.", "N").size(), 1u);
+}
+
+TEST(LogicCompileCoreTest, UnloweredBuiltinsRefuseByNameButUnknownNamesFail) {
+  PrologHarness h;
+  // A user clause named like a builtin does not replace it: the old solver
+  // tried its builtin arms before any clause. Until the owning card lowers
+  // them these refuse by name.
+  h.consult("true.\nknown(1).\n");
+  for (const char *goal :
+       {"X is 1.", "true.", "cell_value(1, X).", "setting(a, B).",
+        "vortex_function(F).", "known(X), \\+ known(2)."}) {
+    try {
+      (void)h.all(goal, "X");
+      ADD_FAILURE() << goal << " did not refuse";
+    } catch (const logic::LogicRefusal &refusal) {
+      EXPECT_NE(std::string(refusal.what()).find("awaits P2/P3/P4"),
+                std::string::npos)
+          << goal;
+    }
+  }
+  EXPECT_TRUE(h.all("nosuch(X).", "X").empty());
+  EXPECT_TRUE(h.all("nosuch(X, 1, 2).", "X").empty());
+  EXPECT_EQ(h.all("known(X).", "X").size(), 1u);
+}
+
+TEST(LogicCompileCoreTest, RepeatedHeadVariablesAndPerActivationRenaming) {
+  PrologHarness h;
+  h.consult("same(X, X).\nmk(f(X)).\ntwo(P, Q) :- mk(P), mk(Q).\n");
+  EXPECT_EQ(h.all("same(a, a).", "V").size(), 1u);
+  EXPECT_TRUE(h.all("same(a, b).", "V").empty());
+  EXPECT_EQ(h.all("same(f(Y), f(b)).", "Y"), (std::vector<std::string>{"b"}));
+  // Two calls of one clause must not share their X.
+  EXPECT_EQ(h.all("two(P, Q), P = f(a), Q = f(b).", "P"),
+            (std::vector<std::string>{"f(a)"}));
+}
+
+TEST(LogicCompileCoreTest, BudgetThrowRestoresFrameLimitsAndLeavesVmUsable) {
+  PrologHarness h;
+  h.consult("loop :- loop.\nok(1).\n");
+  auto ctx          = h.compiler.stdlib().makeLogicContext({});
+  const auto before = ctx.vm.frameLimits();
+  h.compiler.stdlib().setLogicCycleBudget(500);
+  EXPECT_THROW((void)h.compiler.solveOnce(h.compiler.compileQuery("loop.")),
+               std::runtime_error);
+  const auto after = ctx.vm.frameLimits();
+  EXPECT_EQ(before.maxDepth, after.maxDepth);
+  EXPECT_EQ(before.maxBackingCells, after.maxBackingCells);
+  EXPECT_EQ(before.maxLocalsPerFrame, after.maxLocalsPerFrame);
+  EXPECT_EQ(before.maxDescriptorRecords, after.maxDescriptorRecords);
+  h.compiler.stdlib().setLogicCycleBudget(100000);
+  EXPECT_EQ(h.all("ok(X).", "X").size(), 1u);
+}
+
+// -- Hand-built service graphs
+// -------------------------------------------------
+
+// One zero-argument frame built from the services, run under a sentinel
+// choice, reporting `watch` at every solution. Variables are static cells made
+// by the test, bound in place like a query's.
+struct Rig {
+  ArenaManifold arena;
+  VortexCore core{arena};
+  VortexVM vm{core};
+  VortexStdLib stdlib{core, vm};
+  CompileContext ctx = stdlib.makeLogicContext({});
+  FrameScope scope;
+  Chain chain;
+  CellRef desc{};
+  std::vector<std::string> out;
+
+  explicit Rig(std::string_view name = "rig") {
+    vm.setFrameLimits({.maxDepth = 4096});
+    scope.predicate     = {std::string(name), 0};
+    const auto reserved = vm.reserveFrameDescriptor();
+    desc                = *reserved;
+    scope.failOp        = vm.mintOpcode(OpcodeKind::Fail);
+    EXPECT_TRUE(arena.link(scope.failOp, core.dims().spin, DimVector::POS,
+                           vm.mintOpcode(OpcodeKind::Nop)));
+    const CellRef barrier = arena.makeCell();
+    scope.locals.push_back(barrier);
+    scope.barrier = barrier;
+    const std::array<CellRef, 1> o{barrier};
+    appendOp(ctx, chain, OpcodeKind::ChoiceDepth, {}, o);
+  }
+
+  CellRef atom(std::string_view t) { return arena.makeCell(t); }
+  void bind(CellRef var, std::string_view t) {
+    emitUnifyOrFail(ctx, scope, chain, var, atom(t));
+  }
+  // var is bound to each of ts in turn: Choice L2; ..; Jump END; L2: ...
+  void alt(CellRef var, std::initializer_list<const char *> ts) {
+    const Label end  = newLabel(ctx);
+    std::size_t left = ts.size();
+    for (const char *t : ts) {
+      --left;
+      std::optional<Label> next;
+      if (left > 0) {
+        next = newLabel(ctx);
+        emitChoice(ctx, chain, *next);
+      }
+      bind(var, t);
+      if (left > 0) {
+        emitJump(ctx, chain, end);
+        placeLabel(ctx, chain, *next);
+      }
+    }
+    placeLabel(ctx, chain, end);
+  }
+  void finish() {
+    const std::array<CellRef, 1> self{desc};
+    appendOp(ctx, chain, OpcodeKind::ReturnFrame, self);
+    const FrameDescriptorSpec spec{.entry = chain.head, .locals = scope.locals};
+    ASSERT_TRUE(vm.finalizeFrameDescriptor(desc, spec));
+  }
+  std::vector<std::string> run(CellRef watch) {
+    finish();
+    Chain entry;
+    const std::array<CellRef, 1> call{desc};
+    const CellRef start = appendOp(ctx, entry, OpcodeKind::InvokeFrame, call);
+    const CellRef halt  = appendOp(ctx, entry, OpcodeKind::Halt);
+    const CellRef sentinel = vm.mintOpcode(OpcodeKind::Halt);
+    const CellRef cursor   = vm.spawnCursor(start);
+    vm.pushChoicePoint(cursor, sentinel);
+    std::vector<std::string> results;
+    for (std::size_t i = 0; i < 100; ++i) {
+      const auto res = vm.run(cursor, 100000);
+      EXPECT_TRUE(res.success) << res.errorMessage;
+      if (!res.success || vm.getCursorOpcode(cursor) != halt) break;
+      results.push_back(stdlib.renderTerm(watch).value_or("<none>"));
+      vm.setCursorOpcode(cursor, scope.failOp);
+    }
+    EXPECT_EQ(vm.getCursorOpcode(cursor), sentinel);
+    return results;
+  }
+};
+
+TEST(LogicCompileCoreTest, ClauseBodyCutPrunesEarlierChoicesAndKeepsBindings) {
+  Rig rig;
+  const CellRef x = rig.stdlib.makeVar("X"), y = rig.stdlib.makeVar("Y");
+  rig.alt(x, {"a", "b", "c"});
+  rig.alt(y, {"p", "q"});
+  emitCut(rig.ctx, rig.scope, rig.chain);
+  // Both earlier goals' alternatives are gone; the bindings stay.
+  EXPECT_EQ(rig.run(rig.stdlib.makeTerm("r", {x, y})),
+            (std::vector<std::string>{"r(a, p)"}));
+}
+
+TEST(LogicCompileCoreTest, CutKeepsGoalsAfterItAndQueryLevelCutBehavesTheSame) {
+  Rig rig("<query>");
+  const CellRef x = rig.stdlib.makeVar("X"), y = rig.stdlib.makeVar("Y");
+  rig.alt(x, {"a", "b"});
+  emitCut(rig.ctx, rig.scope, rig.chain);
+  rig.alt(y, {"p", "q"});
+  EXPECT_EQ(rig.run(rig.stdlib.makeTerm("r", {x, y})),
+            (std::vector<std::string>{"r(a, p)", "r(a, q)"}));
+}
+
+TEST(LogicCompileCoreTest, CutInACalleeLeavesTheCallersChoices) {
+  Rig rig;
+  const CellRef z = rig.stdlib.makeVar("Z"), x = rig.stdlib.makeVar("X"),
+                y = rig.stdlib.makeVar("Y");
+  // callee: alt(X); cut; alt(Y)
+  const auto calleeDesc = rig.vm.reserveFrameDescriptor();
+  ASSERT_TRUE(calleeDesc);
+  {
+    FrameScope inner;
+    inner.predicate       = {"callee", 0};
+    inner.failOp          = rig.scope.failOp;
+    const CellRef barrier = rig.arena.makeCell();
+    inner.locals.push_back(barrier);
+    inner.barrier = barrier;
+    Chain body;
+    const std::array<CellRef, 1> o{barrier};
+    appendOp(rig.ctx, body, OpcodeKind::ChoiceDepth, {}, o);
+    auto &chain = rig.chain;
+    auto &scope = rig.scope;
+    std::swap(chain, body);
+    std::swap(scope, inner);
+    rig.alt(x, {"a", "b"});
+    emitCut(rig.ctx, rig.scope, rig.chain);
+    rig.alt(y, {"p", "q"});
+    const std::array<CellRef, 1> self{*calleeDesc};
+    appendOp(rig.ctx, rig.chain, OpcodeKind::ReturnFrame, self);
+    const FrameDescriptorSpec spec{.entry  = rig.chain.head,
+                                   .locals = rig.scope.locals};
+    ASSERT_TRUE(rig.vm.finalizeFrameDescriptor(*calleeDesc, spec));
+    std::swap(chain, body);
+    std::swap(scope, inner);
+  }
+  rig.alt(z, {"1", "2"});
+  const std::array<CellRef, 1> call{*calleeDesc};
+  appendOp(rig.ctx, rig.chain, OpcodeKind::InvokeFrame, call);
+  EXPECT_EQ(rig.run(rig.stdlib.makeTerm("r", {z, x, y})),
+            (std::vector<std::string>{"r(1, a, p)", "r(1, a, q)", "r(2, a, p)",
+                                      "r(2, a, q)"}));
+}
+
+TEST(LogicCompileCoreTest, CutInsideANegationIsLocalToIt) {
+  Rig rig;
+  const CellRef x = rig.stdlib.makeVar("X");
+  rig.alt(x, {"a", "b"});
+  // \+ (!, fail): the cut must not remove the negation's own continuation.
+  const NegationScope neg = openNegationScope(rig.ctx, rig.scope, rig.chain);
+  const Label cont        = newLabel(rig.ctx);
+  emitChoice(rig.ctx, rig.chain, cont);
+  emitCut(rig.ctx, rig.scope, rig.chain);
+  emitUnifyOrFail(rig.ctx, rig.scope, rig.chain, rig.atom("u"), rig.atom("v"));
+  emitCutTo(rig.ctx, rig.chain, neg.barrier);
+  appendOp(rig.ctx, rig.chain, OpcodeKind::Jump,
+           std::array<CellRef, 1>{rig.arena.makeScalarCell(
+               static_cast<std::int64_t>(rig.scope.failOp))});
+  closeNegationScope(rig.scope, neg);
+  placeLabel(rig.ctx, rig.chain, cont);
+  EXPECT_EQ(rig.scope.barrier, neg.outer);
+  // Succeeds for both alternatives of X: the caller's choices survived.
+  EXPECT_EQ(rig.run(x), (std::vector<std::string>{"a", "b"}));
+}
+
+TEST(LogicCompileCoreTest, JumpAndBranchesSkipAndFallThrough) {
+  Rig rig;
+  const CellRef x = rig.stdlib.makeVar("X");
+  const auto skip = [&](auto emit) {
+    const Label over = newLabel(rig.ctx);
+    emit(over);
+    rig.bind(x, "bad"); // would bind X wrongly if reached
+    emitUnifyOrFail(rig.ctx, rig.scope, rig.chain, rig.atom("u"),
+                    rig.atom("v"));
+    placeLabel(rig.ctx, rig.chain, over);
+  };
+  const CellRef yes = emitConstant(rig.ctx, rig.chain, true);
+  const CellRef no  = emitConstant(rig.ctx, rig.chain, false);
+  skip([&](Label l) { emitJump(rig.ctx, rig.chain, l); });
+  skip([&](Label l) { emitBranchIf(rig.ctx, rig.chain, yes, l); });
+  skip([&](Label l) { emitBranchUnless(rig.ctx, rig.chain, no, l); });
+  // Not taken: falls through to the next op.
+  const Label unused = newLabel(rig.ctx);
+  emitBranchIf(rig.ctx, rig.chain, no, unused);
+  emitBranchUnless(rig.ctx, rig.chain, yes, unused);
+  rig.bind(x, "ok");
+  placeLabel(rig.ctx, rig.chain, unused);
+  EXPECT_EQ(rig.run(x), (std::vector<std::string>{"ok"}));
+}
+
+TEST(LogicCompileCoreTest, UnifyingAVariableWithATermContainingItTerminates) {
+  PrologHarness h;
+  h.consult("same(X, X).\n");
+  // Rational trees: unification binds with no occurs check and returns; the
+  // solution is reported as cyclic text instead of recursing in the renderer.
+  const auto sols =
+      h.compiler.solve(h.compiler.compileQuery("same(Y, f(Y))."), 5);
+  ASSERT_EQ(sols.size(), 1u);
+  ASSERT_FALSE(sols.front().formatted.empty());
+  EXPECT_EQ(sols.front().formatted.begin()->second, "<cyclic>");
 }
 
 } // namespace
