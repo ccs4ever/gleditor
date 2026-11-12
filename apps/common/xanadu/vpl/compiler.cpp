@@ -340,6 +340,14 @@ VPLCompiler::opcodeMnemonic(zigzag::vortex::OpcodeKind kind) noexcept {
     return "RUNCALL";
   case OpcodeKind::RunResume:
     return "RUNRESUME";
+  case OpcodeKind::RelationNext:
+    return "RELATIONNEXT";
+  case OpcodeKind::DimByName:
+    return "DIMBYNAME";
+  case OpcodeKind::Hypertime:
+    return "HYPERTIME";
+  case OpcodeKind::Pow:
+    return "POW";
   default:
     return "UNKNOWN";
   }

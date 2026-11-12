@@ -170,7 +170,64 @@ enum class OpcodeKind : std::uint8_t {
   // spins on; unproduced lands on the failure target. Appended last
   // for the same persisted-kind reason.
   RunResume,
+
+  // Read-only accessor over a registered relation provider: given a relation
+  // key, a position, a scan bound and the goal's argument cells, returns the
+  // first matching tuple at or after the position. Appended last for the
+  // persisted-kind reason; it holds no resolution logic.
+  RelationNext,
+
+  // (name, mintFlag) -> the dimension's number as an Int64, or noCell in the
+  // Int64 box when the name is unknown and the flag says do not mint.
+  DimByName,
+
+  // No inputs; one Int64 output, the arena's operation high-water mark.
+  Hypertime,
+
+  // Numeric power for any exponent. Appended last: the enum's tail, which the
+  // decode bounds and the vagent ceiling track.
+  Pow,
 };
+
+/// One RelationNext lookup, as handed to a relation provider.
+///
+/// `position` is where the scan resumes; its meaning is the provider's (an
+/// index, a cell number, a clause ordinal). `limit` is opaque to the VM too: a
+/// provider that must not chase answers it mints itself returns the bound it
+/// fixed on the first call, and the graph feeds it back unchanged. The graph
+/// starts a scan with position 0 and limit 0.
+///
+/// `arguments` are the goal's argument cells as the graph named them (an
+/// unbound variable is a wildcard, a bound one filters or looks up a point);
+/// the provider dereferences them. `arena` is where answer cells are minted.
+struct RelationQuery {
+  std::string_view relation;
+  std::int64_t position{};
+  std::int64_t limit{};
+  std::span<const CellRef> arguments;
+  ArenaManifold &arena;
+};
+
+/// A matching tuple. `answers` holds exactly one cell per argument, in
+/// argument order; the VM publishes each as a cell reference. `nextPosition`
+/// and `limit` are what the graph passes to the next RelationNext to continue
+/// after this tuple.
+struct RelationAnswer {
+  std::int64_t nextPosition{};
+  std::int64_t limit{};
+  std::vector<CellRef> answers;
+};
+
+/// A provider must not re-enter the VM (`step`/`run` fail explicitly while one
+/// runs) and may mint arena cells only for its answers; the VM undoes them if
+/// the step fails. It may replace or remove providers, itself included.
+///
+/// An empty optional means the relation is exhausted at that position; the
+/// string is an explicit failure (unknown arity, ill-formed argument) that
+/// fails the step.
+using RelationResult =
+    std::expected<std::optional<RelationAnswer>, std::string>;
+using RelationProvider = std::function<RelationResult(const RelationQuery &)>;
 
 struct ProjectionLimits {
   std::size_t maxRules{4096};
@@ -602,6 +659,15 @@ public:
   [[nodiscard]] std::expected<FrameDescriptor, FrameDescriptorError>
   frameDescriptor(CellRef descriptor) const;
   VortexVM *setFrameLimits(FrameLimits limits);
+
+  /// Registers the provider RelationNext asks for `relation`; an empty
+  /// function removes it. Providers are per relation name so the stdlib
+  /// registry, a store and an arena can each register theirs without knowing
+  /// of the others; the arity is the provider's to check. See RelationProvider
+  /// for what a provider may not do. Host registration,
+  /// not VM state: it is not trailed by backtracking.
+  VortexVM *setRelationProvider(std::string relation,
+                                RelationProvider provider);
   [[nodiscard]] FrameLimits frameLimits() const noexcept {
     return frameLimits_;
   }
@@ -722,6 +788,7 @@ private:
                                           std::vector<CellValue> &outputs);
   ExecutionResult executeProbeLink(CellRef opcode,
                                    std::vector<CellValue> &outputs);
+  ExecutionResult executeRelationNext(CellRef opcode);
   ExecutionResult executeVqlMaskLinks(CellRef opcode,
                                       std::vector<CellValue> &outputs);
   ExecutionResult executeClosureOpcodeBody(OpcodeKind kind, CellRef opcode,
@@ -794,6 +861,8 @@ private:
   std::uint64_t nextMutationGroupId_{1};
   std::uint64_t nextChoiceId_{1};
   FrameLimits frameLimits_;
+  bool relationProviderActive_{false};
+  std::unordered_map<std::string, RelationProvider> relationProviders_;
   LogicalClosureLimits closureLimits_;
   std::size_t closureValuesCreated_{};
   std::size_t closureEnvironmentCellsCreated_{};

@@ -245,6 +245,8 @@ bool pureOpcode(OpcodeKind opcode) {
   case OpcodeKind::FieldSet:
   case OpcodeKind::RunCall:
   case OpcodeKind::RunResume:
+  // Pow is a function of its operands alone.
+  case OpcodeKind::Pow:
     return true;
   case OpcodeKind::StreamClear:
   case OpcodeKind::StreamAppend:
@@ -273,6 +275,13 @@ bool pureOpcode(OpcodeKind opcode) {
   case OpcodeKind::ApplyClosure:
   case OpcodeKind::RestoreBindings:
   case OpcodeKind::CurrentTimestamp:
+  // RelationNext asks a host-registered provider that a shipped artifact
+  // does not carry; Hypertime reads the evaluating arena's position;
+  // DimByName reads the arena's dimension table and, when its mint flag is
+  // set (a run-time value, so never provably clear), writes to it.
+  case OpcodeKind::RelationNext:
+  case OpcodeKind::DimByName:
+  case OpcodeKind::Hypertime:
     return false;
   }
   return false;
@@ -531,7 +540,7 @@ VortexProgram decodeProgram(std::string_view bytes, SyntaxLimits limits) {
   for (const auto &item : instructions) {
     dictionary(item, 5);
     const auto opcode = required(item, "opcode").asInteger();
-    if (opcode < 0 || opcode > static_cast<std::int64_t>(OpcodeKind::RunResume))
+    if (opcode < 0 || opcode > static_cast<std::int64_t>(OpcodeKind::Pow))
       throw std::runtime_error("Unknown Vortex artifact opcode");
     const auto &next = required(item, "next").asList();
     if (next.size() > 1)
