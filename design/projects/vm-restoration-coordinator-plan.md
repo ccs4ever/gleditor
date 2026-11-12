@@ -455,10 +455,6 @@ Ruled by the owner on 2026-11-12, after the second batch (W1.1, V3, L1 and P1 re
 
 - **`<=` and `>=` on versions:** ancestor-or-equal, so `@a <= @a` is true; unrelated branches are
   false for all four ordering operators. The spec's hypertime operator table gains the two rows.
-  **Wider ruling:** comparison is to be harmonized as a *goal* (it succeeds or fails, as a Vlog test
-  does) and not as a boolean-valued operator, across VQL and the other front ends. This needs its
-  own design card (H-CMP, below) before any code; until it lands, new comparison lowering must not
-  add boolean-operator behaviour beyond what exists.
 - **Program cells after a VQL run:** fix in O2 with the approved arena undo. Mark before compile,
   release after the run, and copy out result cells the program itself minted before the release. The
   same mechanism is Q3's failed-compile cleanup.
@@ -484,7 +480,6 @@ New cards from these rulings:
 
 | Card    | What                                                                                    | After |
 | :------ | :-------------------------------------------------------------------------------------- | :---- |
-| H-CMP   | Design note: comparison as a goal across VQL, VLace, VPL and logic; no code             | —     |
 | L-PARSE | Fix the VLace comparison-chain parse defect, with tests                                 | L1    |
 | O2      | Cell-identity compare, `PinHistorical`, arena space undo, program-cell release, project | O1    |
 
