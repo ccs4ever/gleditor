@@ -1946,6 +1946,10 @@ VQL maps arithmetic operators directly to the OSMIC hypertime tree:
 | `$v / "a"`   | `$v.branch(1)`           | Forks a new child branch off `$v` (e.g. `@2 / "a"` $\to$ `@2a1`, `@88 / "b"` $\to$ `@88b1`). |
 | `$v1 .. $v2` | `versionRange($v1, $v2)` | Lazily streams the causal ancestry sequence from ancestor `$v1` to descendant `$v2`.         |
 | `$v1 < $v2`  | `$v1.isAncestorOf($v2)`  | Lineage test: true if `$v1` is an ancestor of `$v2` along its hypertime path.                |
+| `$v1 <= $v2` | ancestor or equal        | True if `$v1 < $v2` or the two are the same version. `>` and `>=` mirror `<` and `<=`.       |
+
+Versions on unrelated branches are unordered: all four ordering operators are false for them, and
+only `!=` is true.
 
 Inline MicroversionId coordinates can avoid allocation within their shallow bounds. Deep coordinates
 need the general representation; no production distribution or universal timing bound is
