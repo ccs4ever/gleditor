@@ -61,6 +61,31 @@ QueryExecutionError runtimeError(const std::exception &error) {
           .message  = error.what()};
 }
 
+bool declaresOnly(const QueryExpression &query) {
+  if (!query.defs.empty() || !query.body.statements.empty()) return false;
+  if (query.mounts.empty() && query.namespaceDeclarations.empty()) return false;
+  const auto *block = std::get_if<ExecutionBlock>(&query.expr);
+  if (block == nullptr || !block->bindings.empty() || block->where)
+    return false;
+  const auto *ret = std::get_if<ReturnClause>(&block->action.clause);
+  return ret != nullptr && ret->items.empty();
+}
+
+void publishMounts(
+    VQLEngine *session,
+    const std::vector<CompilationResult::SessionBinding> &events) {
+  if (session == nullptr) return;
+  using Kind = CompilationResult::SessionBinding::Kind;
+  for (const auto &event : events) {
+    if (event.kind == Kind::Mount)
+      session->publishMount(
+          event.name, VQLEngine::SessionMount{.direction = event.direction,
+                                              .roots     = event.slots});
+    else if (event.kind == Kind::Unmount)
+      session->publishUnmount(event.name);
+  }
+}
+
 } // namespace
 
 QueryExecutor::QueryExecutor(MultiStoreCoordinator &coordinator,
@@ -142,12 +167,28 @@ QueryExecutor::executeVortex(const QueryExpression &query,
         vm_.setContractCoordinator(priorContractCoordinator);
       }};
   try {
+    // PROSE-HITS REGISTRATION SITE: the card that lowers `find` with
+    // RelationNext registers a provider here that calls proseHits()
+    // (vql/prose_hits.hpp) with coordinator_ and its arena.
     VQLCompiler compiler(coordinator_, vm_);
     CompilationOptions compilation;
     compilation.contextCells = contextCells;
     compilation.initialBindings =
         bindingSource_ ? bindingSource_->get() : bindings_;
-    if (session_) compilation.initialFunctors = session_->compilerFunctors();
+    if (session_) {
+      compilation.initialFunctors = session_->compilerFunctors();
+      for (const auto &[name, mount] : session_->compilerMounts())
+        compilation.mounts.emplace(
+            name, CompilationOptions::Mount{.direction = mount.direction,
+                                            .roots     = mount.roots});
+    }
+    if (declaresOnly(query)) {
+      // Mounts and unmounts alone are session state; compiling a program for
+      // them would mint cells in the arena for nothing.
+      const auto events = compiler.declareMounts(query, compilation);
+      publishMounts(session_, events);
+      return std::vector<zigzag::CellRef>{};
+    }
     const auto result = compiler.compile(query, compilation);
     disassembly_      = result.disassembly;
     if (!result.success) {
@@ -194,7 +235,11 @@ QueryExecutor::executeVortex(const QueryExpression &query,
     if (session_) {
       ContractBindings published;
       std::unordered_map<std::string, std::vector<PathStep>> functors;
+      publishMounts(session_, result.sessionBindings);
       for (const auto &binding : result.sessionBindings) {
+        using Kind = CompilationResult::SessionBinding::Kind;
+        if (binding.kind == Kind::Mount || binding.kind == Kind::Unmount)
+          continue;
         if (binding.kind == CompilationResult::SessionBinding::Kind::Functor) {
           functors.emplace(binding.name, binding.functor);
           continue;

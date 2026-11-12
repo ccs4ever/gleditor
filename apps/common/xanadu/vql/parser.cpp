@@ -228,6 +228,7 @@ PerspectiveBlock Parser::parsePerspectiveBlock() {
   consume(TokenKind::OpenParen, "Expected '(' after 'perspective'");
 
   std::string name;
+  bool fromVariable = false;
   if (check(TokenKind::StringLiteral)) {
     Token sTok = advance();
     name       = sTok.stringValue;
@@ -235,8 +236,9 @@ PerspectiveBlock Parser::parsePerspectiveBlock() {
     Token idTok = advance();
     name        = std::string(idTok.text);
   } else if (check(TokenKind::Variable)) {
-    Token vTok = advance();
-    name       = vTok.stringValue;
+    Token vTok   = advance();
+    name         = vTok.stringValue;
+    fromVariable = true;
   } else {
     throw ParseError("Expected perspective name in perspective block",
                      current_.loc);
@@ -258,8 +260,9 @@ PerspectiveBlock Parser::parsePerspectiveBlock() {
   consume(TokenKind::CloseBrace, "Expected '}' to close perspective body");
 
   return PerspectiveBlock{
-      .perspectiveName = std::move(name),
-      .body            = std::make_shared<ScriptBody>(std::move(body)),
+      .perspectiveName       = std::move(name),
+      .perspectiveIsVariable = fromVariable,
+      .body                  = std::make_shared<ScriptBody>(std::move(body)),
   };
 }
 

@@ -108,10 +108,10 @@ TEST_F(PathFunctionFixture, CountArityIsCheckedBeforeArgumentsRun) {
   expectRefusal(R"(##/d.items/count(##/d.items, "x"))", "count");
 }
 
-TEST_F(PathFunctionFixture, ArgumentFreeCountAsPathStepIsRefusedByName) {
+TEST_F(PathFunctionFixture, ArgumentFreeCountAsPathStepCountsTheWalk) {
   linkItems(2);
-  expectRefusal("##/d.items/count()", "count");
-  expectRefusal("##/d.absent/count()", "count");
+  EXPECT_EQ(countOf("##/d.items/count()"), 2);
+  EXPECT_EQ(countOf("##/d.absent/count()"), 0);
 }
 
 TEST_F(PathFunctionFixture, CountWithArgumentRunsPerCurrentCell) {

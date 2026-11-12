@@ -8,13 +8,8 @@
 #include <gtest/gtest.h>
 
 #include "common/xanadu/multi_store.hpp"
+#include "common/xanadu/vql/compiler.hpp"
 #include "common/xanadu/vql/vql_engine.hpp"
-
-namespace xanadu::vql {
-// Declared in compile_history.cpp; belongs in compiler.hpp.
-bool compareVersionsCausally(CompOp op, const MicroversionId &lhs,
-                             const MicroversionId &rhs);
-} // namespace xanadu::vql
 
 namespace {
 

@@ -61,6 +61,15 @@ struct CompilationOptions {
     std::size_t maxClosureCaptureWork{1'000'000};
   };
 
+  /// A dimension a session has mounted: a walk along it that finds nothing
+  /// continues from `roots` when the step's direction matches (or is both).
+  /// Both the short and the `d.`-qualified name are keys, as the oracle's
+  /// session table kept them.
+  struct Mount {
+    zigzag::DimVector direction{zigzag::DimVector::POS};
+    std::vector<zigzag::CellRef> roots;
+  };
+
   bool targetLibrary{false};            ///< Emit library store instead of exec
   std::string moduleName{"std:custom"}; ///< Module name for library store
   std::string symbolName{"query"};      ///< Exported symbol name
@@ -68,17 +77,24 @@ struct CompilationOptions {
   std::vector<zigzag::CellRef> contextCells;
   std::unordered_map<std::string, std::vector<zigzag::CellRef>> initialBindings;
   std::unordered_map<std::string, std::vector<PathStep>> initialFunctors;
+  /// The session's mounts, by dimension name; the compiler consults them for
+  /// every dimension step and adds the query's own declarations in order.
+  std::unordered_map<std::string, Mount> mounts;
   std::size_t maxContractEmissions{65536};
   Limits limits{};
 };
 
 struct CompilationResult {
   struct SessionBinding {
-    enum class Kind : std::uint8_t { Stream, Functor };
+    /// Mount and Unmount are session events in declaration order: `name` is
+    /// the dimension, `direction` its direction, and for Mount `slots` are the
+    /// root cells resolved while compiling (no run-time cells, no arena cells).
+    enum class Kind : std::uint8_t { Stream, Functor, Mount, Unmount };
     std::string name;
     Kind kind{Kind::Stream};
     std::vector<zigzag::CellRef> slots;
     std::vector<PathStep> functor;
+    zigzag::DimVector direction{zigzag::DimVector::POS};
   };
   bool success{true};
   std::optional<zigzag::CellRef> entryOpcode;
@@ -93,6 +109,12 @@ struct CompilationResult {
   std::optional<QueryErrorCategory> category;
 };
 
+/// Compares two microversions by causal ancestry: `<` is strict ancestor and
+/// `<=` ancestor-or-equal; siblings are unordered. Defined in
+/// compile_history.cpp.
+bool compareVersionsCausally(CompOp op, const xanadu::MicroversionId &lhs,
+                             const xanadu::MicroversionId &rhs);
+
 class VQLCompiler {
 public:
   VQLCompiler(zigzag::vortex::VortexCore &core, zigzag::vortex::VortexVM &vm);
@@ -101,6 +123,13 @@ public:
   /// Compiles a parsed QueryExpression AST into Vortex bytecode.
   CompilationResult compile(const QueryExpression &query,
                             const CompilationOptions &options = {});
+
+  /// Resolves only the mount and unmount declarations of @p query against
+  /// the mount table in @p options and returns them as session events. Emits
+  /// no operation and mints no cell; throws QueryRefusal like compile().
+  [[nodiscard]] std::vector<CompilationResult::SessionBinding>
+  declareMounts(const QueryExpression &query,
+                const CompilationOptions &options = {});
 
   /// Lexes, parses, and compiles a query string into Vortex bytecode.
   CompilationResult compile(std::string_view queryString,
@@ -314,6 +343,33 @@ private:
                                                zigzag::CellRef current,
                                                bool hasContext);
   std::unordered_set<zigzag::CellRef> dynamicStreams_;
+  /// Mounts in force while compiling: the session's, then the query's own.
+  std::unordered_map<std::string, CompilationOptions::Mount> mounts_;
+  /// The query's mount and unmount declarations as session events.
+  std::vector<CompilationResult::SessionBinding> mountBindings_;
+  /// Continues a dimension step's walk from its mount's roots when the walk
+  /// found nothing, as a branch on the emitted stream.
+  std::vector<zigzag::CellRef>
+  emitMountFallback(const SignedDimensionStep &step,
+                    std::vector<zigzag::CellRef> walked);
+  /// Constant cells that hold a resolved microversion, and the version each
+  /// holds. A `let` binds its variable to such a cell, so membership is how a
+  /// variable is known to be version-valued (the oracle kept the same map in
+  /// versionValues_); the let handling itself is not this file's to edit.
+  std::unordered_map<zigzag::CellRef, xanadu::MicroversionId> versionVars_;
+  /// Cells written by emitConstant and the session's bound cells: the only
+  /// ones whose value is known while compiling.
+  std::unordered_set<zigzag::CellRef> constantCells_;
+
+  /// Steps that consume the whole incoming walk instead of one cell at a time
+  /// (a per-cell emitMap cannot express a count or a quantifier). Called from
+  /// compileSteps ahead of the per-cell dispatch, only for names that are not
+  /// user definitions.
+  [[nodiscard]] static bool isWholeWalkStep(const FunctionInvocation &fn);
+  std::vector<zigzag::CellRef>
+  compileWholeWalkStep(const FunctionInvocation &fn,
+                       std::span<const zigzag::CellRef> stream,
+                       bool hasContext);
 
   // Lowering stubs, one file per card. Each throws today's refusal until its
   // card fills it in. "Step" stubs are called from compileSelector with the
@@ -330,9 +386,18 @@ private:
   std::optional<zigzag::CellRef>
   compilePathFunctionValue(const FunctionInvocation &fn,
                            zigzag::CellRef ctxCell);
+  /// Q1, compile_path_functions.cpp: argument-free count() over the whole walk.
+  std::vector<zigzag::CellRef>
+  compilePathFunctionWalk(const FunctionInvocation &fn,
+                          std::span<const zigzag::CellRef> stream);
   /// Q2, compile_root_selectors.cpp: RootSelectorStep, GenesisSelector,
   /// PerspectiveStep, MacroDimensionGroup.
   std::vector<zigzag::CellRef> compileRootSelectorStep(const PathStep &step,
+                                                       zigzag::CellRef current,
+                                                       bool hasContext);
+  /// Q10, compile_path_morphism.cpp: `$p/+d.x => [ ... ]`, in or out of a
+  /// perspective block.
+  std::vector<zigzag::CellRef> compilePathMorphismStep(const PathStep &step,
                                                        zigzag::CellRef current,
                                                        bool hasContext);
   /// Q3, compile_history.cpp.
@@ -385,6 +450,12 @@ private:
   std::optional<zigzag::CellRef>
   compileSemanticQuantifierValue(const FunctionInvocation &fn,
                                  zigzag::CellRef ctxCell);
+  /// Argument-free any(), all(), none(), one(), optional_one(), first() over
+  /// the whole incoming walk.
+  std::vector<zigzag::CellRef>
+  compileSemanticQuantifierWalk(const FunctionInvocation &fn,
+                                std::span<const zigzag::CellRef> stream,
+                                bool hasContext);
 
   // AST compilation subroutines
   std::optional<zigzag::CellRef> compileQuery(const QueryExpression &query);

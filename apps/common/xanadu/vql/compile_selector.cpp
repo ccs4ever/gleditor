@@ -267,6 +267,8 @@ std::vector<CellRef> VQLCompiler::compileSelector(const PathStep &step,
              std::holds_alternative<std::shared_ptr<MacroDimensionGroup>>(
                  step.selector)) {
     nextStream = compileRootSelectorStep(step, current, hasContext);
+  } else if (std::holds_alternative<PathMorphism>(step.selector)) {
+    nextStream = compilePathMorphismStep(step, current, hasContext);
   } else {
     throw std::invalid_argument(
         "this VQL path selector does not have Vortex graph lowering yet");

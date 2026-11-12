@@ -490,6 +490,9 @@ struct WatchStatement {
 
 struct PerspectiveBlock {
   std::string perspectiveName;
+  /// The name was written as `$variable`, so perspectiveName is the
+  /// variable's name and not a perspective's.
+  bool perspectiveIsVariable{false};
   std::shared_ptr<ScriptBody> body{nullptr};
 };
 
