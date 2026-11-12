@@ -503,7 +503,8 @@ int main(int argc, char *argv[]) {
     }
 
     if (dumpAsm || engineMode == "vortex") {
-      const auto execution = executor.execute(*ast, 100000, optimize);
+      const auto execution =
+          executor.execute(*ast, kDefaultCycleBudget, optimize);
       if (!execution) {
         std::cerr << (execution.error().stage == ExecutionError::Stage::Compile
                           ? "Compilation failed: "
@@ -798,8 +799,9 @@ int main(int argc, char *argv[]) {
       auto pAst = p.parseProgram();
       if (!pAst) continue;
 
-      hasView              = false;
-      const auto execution = executor.execute(*pAst, 100000, optimize);
+      hasView = false;
+      const auto execution =
+          executor.execute(*pAst, kDefaultCycleBudget, optimize);
       if (!execution) {
         std::cerr << (execution.error().stage == ExecutionError::Stage::Compile
                           ? "Compilation error: "

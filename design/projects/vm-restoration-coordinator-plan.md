@@ -448,7 +448,8 @@ Gate A (2026-11-11, shared branch at `98ecab03`, cards P0, V1.0, L0, Q1, Q3, Q4 
 `/data/git/gleditor-restore/.logs/w1/gate-a-xuzz-failed.txt`.
 
 **Model usage is a capacity limit too.** Eight mid-tier workers at once exhausted the five-hour
-usage limit twice. Hold concurrent mid-tier agents (workers plus reviewers) to about four.
+usage limit twice, and four exhausted it again. By the owner's instruction (2026-11-12), run at most
+two agents at a time, workers and reviewers counted together.
 
 ## 5a. Original decision table (before W0)
 
