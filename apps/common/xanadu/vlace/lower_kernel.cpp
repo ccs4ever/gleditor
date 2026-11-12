@@ -979,7 +979,11 @@ Lowered<Operand> applyOperand(LowerContext &ctx, Operand fn, Operand arg,
 
 std::expected<ValuePtr, EvalError> forceValueOnVm(Compiler &compiler,
                                                   ValuePtr value) {
-  if (!value || !value->cell || value->kind != Value::Kind::Thunk) return value;
+  if (!value) {
+    return fail(CompileError::UnexpectedToken,
+                "VM thunk forcing needs a value to force");
+  }
+  if (!value->cell || value->kind != Value::Kind::Thunk) return value;
   LowerContext ctx(compiler);
   try {
     auto forced = forceOperand(ctx, Operand(*value->cell), {});
