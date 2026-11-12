@@ -1028,6 +1028,7 @@ evaluate(Frontend frontend, std::string_view source, EvaluationBudget budget,
         if (!clause.isQuery) continue;
         queried    = true;
         auto query = compiler.compileQuery(clause);
+        compiler.stdlib().setLogicCycleBudget(budget.maxCycles);
         compiler.stdlib().solve(
             query.goals,
             [&](const LogicSolution &solution) {
