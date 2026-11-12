@@ -4,6 +4,7 @@
  */
 #include <cstdint>
 #include <gtest/gtest.h>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -40,12 +41,25 @@ protected:
     return std::move(*result);
   }
 
-  std::vector<std::int64_t> values(const VplView &view) {
+  // The integers of a view's cells in order, or nullopt when a cell holds no
+  // integer; a test comparing against nullopt fails rather than matching a
+  // placeholder value.
+  std::optional<std::vector<std::int64_t>> values(const VplView &view) {
     std::vector<std::int64_t> out;
     for (const auto cell : view.collectCells(arena)) {
-      out.push_back(arena.asInt64(cell).value_or(-999));
+      const auto value = arena.asInt64(cell);
+      if (!value) return std::nullopt;
+      out.push_back(*value);
     }
     return out;
+  }
+
+  // Asserts that a program is refused, and that the refusal names `text`.
+  void expectRefusal(const std::string &source, const std::string &text) {
+    const auto result = executor->execute(source);
+    ASSERT_FALSE(result.has_value()) << source;
+    EXPECT_NE(result.error().message.find(text), std::string::npos)
+        << source << ": " << result.error().message;
   }
 
   zigzag::ArenaManifold arena;
@@ -78,8 +92,14 @@ TEST_F(VplIotaTest, SizesZeroOneAndFive) {
   EXPECT_EQ(empty.view.shape(arena), std::vector<std::size_t>{0});
   EXPECT_EQ(values(run("1⍳d.1").view), countUp(1));
   EXPECT_EQ(values(run("5⍳d.1").view), countUp(5));
-  // A negative count is an empty array, not an error.
-  EXPECT_FALSE(run("n ← 0 - 3; n ⍳ d.1").view.origin());
+  // A negative count is a DOMAIN ERROR. The literal form is refused at compile
+  // time; a computed count is checked by the VM when the program runs.
+  expectRefusal("⍳ -3", "DOMAIN ERROR");
+  const auto negative = executor->execute("n ← 0 - 3; n ⍳ d.1");
+  ASSERT_FALSE(negative.has_value());
+  EXPECT_EQ(negative.error().stage, ExecutionError::Stage::Runtime);
+  EXPECT_NE(negative.error().message.find("DOMAIN ERROR"), std::string::npos)
+      << negative.error().message;
 }
 
 TEST_F(VplIotaTest, CountComputedAtRunTimeDrivesTheLoop) {
@@ -142,10 +162,12 @@ TEST_F(VplIotaTest, ShapeOfEachIotaIsItsExtent) {
   EXPECT_EQ(values(run("⍴ 4⍳d.2").view), Values{4});
   // The shape of an empty array is its length, zero.
   EXPECT_EQ(values(run("⍴ 0⍳d.1").view), Values{0});
-  // A scalar has no axes to measure.
+  // A scalar has no axes to measure: its shape is an empty rank-1 array.
   const auto scalar = run("⍴ 42");
-  EXPECT_TRUE(scalar.view.isScalar());
-  EXPECT_EQ(scalar.view.scalarInt(), 0);
+  EXPECT_FALSE(scalar.view.isScalar());
+  EXPECT_EQ(scalar.view.valence(), 1U);
+  EXPECT_EQ(scalar.view.shape(arena), std::vector<std::size_t>{0});
+  EXPECT_EQ(values(scalar.view), Values{});
 }
 
 TEST_F(VplIotaTest, ShapeOfABoundRankIsOneRankedNumberWithScalarPayload) {
@@ -203,22 +225,50 @@ TEST_F(VplIotaTest, CountersStayIntegersWhenNExceedsTheLiveCells) {
   // element.
   const auto result = run("3000⍳d.1", 5000000);
   const auto got    = values(result.view);
-  ASSERT_EQ(got.size(), 3000U);
-  EXPECT_EQ(got, countUp(3000));
+  ASSERT_TRUE(got.has_value());
+  ASSERT_EQ(got->size(), 3000U);
+  EXPECT_EQ(*got, countUp(3000));
   EXPECT_EQ(values(run("⍴ 3000⍳d.2", 5000000).view), Values{3000});
 }
 
+TEST_F(VplIotaTest, NonIntegerAndNegativeLiteralCountsAreRefusedAtCompile) {
+  expectRefusal("2.5 ⍳ d.1", "non-integer count is a DOMAIN ERROR");
+  expectRefusal("⍳ 2.5", "non-integer count is a DOMAIN ERROR");
+  expectRefusal("¯3 ⍳ d.1", "negative count is a DOMAIN ERROR");
+  expectRefusal("(-3) ⍳ d.1", "negative count is a DOMAIN ERROR");
+  expectRefusal("⍳ ¯1", "negative count is a DOMAIN ERROR");
+}
+
+TEST_F(VplIotaTest, DimensionValueCountIsRefusedAsADimension) {
+  expectRefusal("⍳ d.1", "iota of a dimension value is unsupported");
+  expectRefusal("d.1 ⍳ d.1", "iota of a dimension value is unsupported");
+}
+
 TEST_F(VplIotaTest, UnsupportedFormsStillRefuseByName) {
-  const auto check = [&](const std::string &source, const std::string &text) {
-    const auto result = executor->execute(source);
-    ASSERT_FALSE(result.has_value()) << source;
-    EXPECT_NE(result.error().message.find(text), std::string::npos)
-        << result.error().message;
-  };
-  check("1 2 ⍳ d.1", "iota of a rank argument");
-  check("⍳ 2 3", "iota of a rank argument");
-  check("5 ⍳ 3", "single dimension");
-  check("⍴ ⊂ 1 2 3", "VPL");
+  expectRefusal("1 2 ⍳ d.1", "iota of a rank argument");
+  expectRefusal("⍳ 2 3", "iota of a rank argument");
+  expectRefusal("5 ⍳ 3", "single dimension");
+  // A literal enclosure is refused by the enclose lowering before the shape
+  // sees it; an enclosed variable reaches the shape refusal in full.
+  expectRefusal("⍴ ⊂ 1 2 3", "unsupported VPL monadic verb in VM compiler");
+  VplView boxed = VplView::makeScalar(std::int64_t{0});
+  boxed.enclose(
+      std::make_shared<VplView>(VplView::makeScalar(std::int64_t{1})));
+  executor->setVariable("E", boxed);
+  expectRefusal(
+      "⍴ E", "VPL monadic shape of an enclosed value is unsupported by the VM");
+}
+
+TEST_F(VplIotaTest, ZeroCountOnANonEmptyHomeRankLinksNothing) {
+  const auto first = run("3⍳d.1");
+  const auto cells = first.view.collectCells(arena);
+  ASSERT_EQ(cells.size(), 3U);
+  const auto dimension = core->findOrMintDimension("d.1");
+  const auto empty     = run("0⍳d.1");
+  EXPECT_FALSE(empty.view.origin());
+  EXPECT_EQ(empty.view.valence(), 1U);
+  EXPECT_FALSE(arena.linked(cells.back(), dimension, DimVector::POS));
+  EXPECT_EQ(values(first.view), countUp(3));
 }
 
 } // namespace
