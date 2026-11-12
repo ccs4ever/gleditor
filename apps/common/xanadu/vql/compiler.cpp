@@ -15,6 +15,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <unordered_set>
+#include <utility>
 
 #include "common/xanadu/vql/closure_lambda_syntax.hpp"
 #include "common/xanadu/vql/contract_codec.hpp"
@@ -376,6 +377,7 @@ CellRef VQLCompiler::emitConstant(const CellValue &val,
                                   std::optional<CellRef> designatedCell) {
   CellRef c = designatedCell ? *designatedCell : core_.arena().makeCell();
   core_.writeValue(c, 0, std::nullopt, val);
+  constantCells_.insert(c);
   return c;
 }
 
@@ -407,6 +409,12 @@ CompilationResult VQLCompiler::compile(const QueryExpression &query,
   currentOp_.reset();
   allOps_.clear();
   varBindings_.clear();
+  versionVars_.clear();
+  constantCells_.clear();
+  for (const auto &[name, cells] : options.initialBindings)
+    constantCells_.insert(cells.begin(), cells.end());
+  mounts_ = options.mounts;
+  mountBindings_.clear();
   streamBindings_ = options.initialBindings;
   for (const auto &[name, cells] : streamBindings_)
     varBindings_[name] =
@@ -496,6 +504,8 @@ CompilationResult VQLCompiler::compile(const QueryExpression &query,
           .functor = steps,
       });
     }
+    result.sessionBindings.insert(result.sessionBindings.end(),
+                                  mountBindings_.begin(), mountBindings_.end());
     transaction.commit();
     return result;
   } catch (const std::invalid_argument &refused) {
@@ -503,6 +513,15 @@ CompilationResult VQLCompiler::compile(const QueryExpression &query,
   } catch (const QueryRefusal &refused) {
     return failCompilation(refused);
   }
+}
+
+std::vector<CompilationResult::SessionBinding>
+VQLCompiler::declareMounts(const QueryExpression &query,
+                           const CompilationOptions &options) {
+  mounts_ = options.mounts;
+  mountBindings_.clear();
+  compileMountDeclarations(query);
+  return std::exchange(mountBindings_, {});
 }
 
 CompilationResult VQLCompiler::failCompilation(const std::exception &refused) {
@@ -942,6 +961,52 @@ VQLCompiler::compileComparison(const ComparisonExpr &comp, CellRef ctxCell) {
                               : std::optional<CellRef>{core_.home()};
   if (!lhs || !rhs) return std::nullopt;
 
+  // Versions form a tree, so text or numeric order would answer where history
+  // cannot ("10" is after "9"; siblings "2a1" and "2b1" are unordered).
+  // A variable operand is judged by the cell it is bound to; compiling the
+  // reference itself reads it through a fresh cell.
+  const auto boundCell = [&](const ValueExpr *operand,
+                             const CellRef compiled) -> std::optional<CellRef> {
+    if (!operand) return std::nullopt;
+    if (const auto *name = std::get_if<std::string>(&operand->kind)) {
+      const auto found = varBindings_.find(*name);
+      if (found == varBindings_.end()) return std::nullopt;
+      return found->second;
+    }
+    return compiled;
+  };
+  const auto versionOf =
+      [&](const ValueExpr *operand,
+          const CellRef compiled) -> std::optional<MicroversionId> {
+    if (!operand) return std::nullopt;
+    const bool written =
+        std::holds_alternative<std::shared_ptr<VersionExpr>>(operand->kind);
+    if (!written && !std::holds_alternative<std::string>(operand->kind))
+      return std::nullopt;
+    const auto cell = boundCell(operand, compiled);
+    if (!cell) return std::nullopt;
+    const auto known = versionVars_.find(*cell);
+    if (known == versionVars_.end()) return std::nullopt;
+    return known->second;
+  };
+  const auto leftVersion  = versionOf(comp.left.get(), *lhs);
+  const auto rightVersion = versionOf(comp.right.get(), *rhs);
+  if (leftVersion && rightVersion)
+    return emitConstant(CellValue(
+        compareVersionsCausally(comp.op, *leftVersion, *rightVersion)));
+  if (leftVersion || rightVersion) {
+    // The other side is a variable bound at run time (a call parameter, say):
+    // its text may or may not be a version, and comparing it as text would
+    // order versions wrongly.
+    const auto *other    = leftVersion ? comp.right.get() : comp.left.get();
+    const auto otherCell = boundCell(other, leftVersion ? *rhs : *lhs);
+    if (other && std::holds_alternative<std::string>(other->kind) &&
+        otherCell && !constantCells_.contains(*otherCell))
+      throw QueryRefusal(QueryErrorCategory::Unsupported,
+                         "version comparison of a run-time version is not "
+                         "lowered");
+  }
+
   zigzag::vortex::VqlComparisonKind comparison =
       zigzag::vortex::VqlComparisonKind::Equal;
   switch (comp.op) {
@@ -1062,7 +1127,19 @@ std::optional<CellRef> VQLCompiler::compileValueExpr(const ValueExpr &expr,
           return compileShapeValue(*val, ctxCell);
         } else if constexpr (std::is_same_v<T, std::shared_ptr<VersionExpr>>) {
           if (!val) throw std::invalid_argument("null compiled version value");
-          return compileVersionValue(*val, ctxCell);
+          const auto cell = compileVersionValue(*val, ctxCell);
+          if (cell) {
+            if (const auto text = core_.render(*cell);
+                text && std::holds_alternative<std::string>(*text)) {
+              try {
+                versionVars_.insert_or_assign(
+                    *cell, MicroversionId::parse(std::get<std::string>(*text)));
+              } catch (const std::invalid_argument &) {
+                // Not a version after all; it compares as the text it is.
+              }
+            }
+          }
+          return cell;
         } else {
           throw std::invalid_argument(
               "value expression requires Vortex graph lowering");

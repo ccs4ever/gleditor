@@ -18,9 +18,8 @@
 //
 // find refuses: it reads store documents and answers quote cells, and no
 // opcode does either (see .logs/w1/q1b-text-opcode-proposal.md). Zero-argument
-// count() as a path step needs the whole incoming walk, but compileSteps
-// lowers a step once per cell inside emitMap, so it refuses until that loop
-// gains a whole-walk hook.
+// count() as a path step needs the whole incoming walk, so compileSteps hands
+// it to compilePathFunctionWalk ahead of the per-cell emitMap.
 #include "common/xanadu/vql/compiler.hpp"
 
 #include <algorithm>
@@ -86,6 +85,38 @@ std::vector<CellRef> VQLCompiler::compilePathFunctionStep(
   // current cell, as the string builtin and user calls are.
   return compilePathFunctionCall(fn, hasContext ? std::optional{current}
                                                 : std::nullopt);
+}
+
+std::vector<CellRef>
+VQLCompiler::compilePathFunctionWalk(const FunctionInvocation &fn,
+                                     const std::span<const CellRef> stream) {
+  if (fn.name != "count" || !fn.args.empty())
+    throw QueryRefusal(QueryErrorCategory::Unsupported,
+                       "unknown compiled function: " + fn.name);
+  // The counting loop of count(path) over the incoming walk. The counter is
+  // minted by an Add so an empty walk leaves a present zero, which boxes to a
+  // present 0 rather than an absent result.
+  const auto fresh = [&] { return core_.arena().makeCell(); };
+  const auto add   = [&](CellRef left, CellRef right, CellRef destination) {
+    const auto opcode = emitOp(OpcodeKind::Add, "#COUNT_WALK_ADD");
+    emitInput(opcode, left);
+    emitInput(opcode, right);
+    emitOutput(opcode, destination);
+  };
+  const auto zero  = emitConstant(std::int64_t{0});
+  const auto one   = emitConstant(std::int64_t{1});
+  const auto count = fresh();
+  add(zero, zero, count);
+  const auto begin = emitOp(OpcodeKind::StreamBegin, "#COUNT_WALK_BEGIN");
+  for (const auto cell : stream) emitInput(begin, cell);
+  const auto iterator = fresh();
+  emitOutput(begin, iterator);
+  emitIteratorLoop(iterator, [&](CellRef) { add(count, one, count); });
+  const auto box = emitOp(OpcodeKind::VqlBoxScalar, "#COUNT_WALK_BOX");
+  emitInput(box, count);
+  const auto boxed = fresh();
+  emitOutput(box, boxed);
+  return {boxed};
 }
 
 std::vector<CellRef>

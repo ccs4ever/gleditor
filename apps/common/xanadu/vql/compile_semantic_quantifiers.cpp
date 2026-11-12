@@ -16,6 +16,12 @@ std::vector<CellRef> VQLCompiler::compileSemanticQuantifierCall(
   refuseSemanticBuiltin(fn.name);
 }
 
+std::vector<CellRef> VQLCompiler::compileSemanticQuantifierWalk(
+    const FunctionInvocation &fn, const std::span<const CellRef> /*stream*/,
+    const bool /*hasContext*/) {
+  refuseSemanticBuiltin(fn.name);
+}
+
 std::optional<CellRef>
 VQLCompiler::compileSemanticQuantifierValue(const FunctionInvocation &fn,
                                             const CellRef /*ctxCell*/) {

@@ -85,6 +85,22 @@ public:
   using FunctorSteps = std::shared_ptr<const std::vector<PathStep>>;
   [[nodiscard]] std::unordered_map<std::string, std::vector<PathStep>>
   compilerFunctors() const;
+  /// A dimension mounted for this session: a walk along it that finds nothing
+  /// continues from `roots` when the step's direction matches.
+  struct SessionMount {
+    zigzag::DimVector direction{zigzag::DimVector::POS};
+    std::vector<zigzag::CellRef> roots;
+  };
+  /// The mount table, keyed by both the short and the `d.`-qualified name.
+  [[nodiscard]] const std::unordered_map<std::string, SessionMount> &
+  compilerMounts() const noexcept {
+    return sessionMounts_;
+  }
+  /// Records a mount under both spellings of @p dimName. Private to this
+  /// session: it adds no cell to the arena.
+  void publishMount(const std::string &dimName, SessionMount mount);
+  /// Removes both spellings of @p dimName.
+  void publishUnmount(const std::string &dimName);
   void publishCompilerBindings(
       ContractBindings bindings,
       std::unordered_map<std::string, std::vector<PathStep>> functors);
@@ -193,11 +209,6 @@ private:
   std::vector<zigzag::CellRef>
   performCreates(const SignedDimensionStep &dimStep,
                  const std::vector<zigzag::CellRef> &inputs);
-
-  /// find()'s second half: the lines of @p info's current documents that
-  /// hold @p needle, each a cell linked along d.source to where it was found.
-  void findInDocuments(const StoreInfo &info, std::string_view needle,
-                       std::vector<zigzag::CellRef> &out);
 
   // Predicate & Boolean Evaluation
   bool evaluatePredicate(const BooleanExpr &expr,
@@ -321,10 +332,6 @@ private:
   std::unordered_map<std::string,
                      std::unordered_map<zigzag::CellRef, zigzag::CellRef>>
       perspectiveClones_;
-  struct SessionMount {
-    zigzag::DimVector direction{zigzag::DimVector::POS};
-    std::vector<zigzag::CellRef> roots;
-  };
   // Runtime-only aliases; mount dispatch must never mint persistent structure.
   std::unordered_map<std::string, SessionMount> sessionMounts_;
   using WatchSourceKey = std::pair<const xanadu::Store *, zigzag::CellRef>;

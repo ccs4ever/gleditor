@@ -15,6 +15,7 @@
 
 #include "common/xanadu/multi_store.hpp"
 #include "common/xanadu/vql/compiler.hpp"
+#include "common/xanadu/zigzag/query_clone_master.hpp"
 
 namespace xanadu::vql {
 using zigzag::CellRef;
@@ -162,7 +163,23 @@ VQLCompiler::compileWatchOrPerspectiveStatement(const Statement &statement) {
   };
 
   const auto lowerPerspective = [&](const PerspectiveBlock &block) {
-    const auto name = normalizePerspective(block.perspectiveName);
+    auto name = block.perspectiveName;
+    if (block.perspectiveIsVariable) {
+      // perspective($p) names the perspective held in $p, not one called "p".
+      // The qualifier is part of the emitted steps, so the value has to be
+      // known while compiling.
+      const auto bound = varBindings_.find(block.perspectiveName);
+      const auto value = bound != varBindings_.end() && bound->second
+                             ? core_.render(*bound->second)
+                             : std::nullopt;
+      if (!value || !std::holds_alternative<std::string>(*value))
+        refuseUnsupported("perspective($" + block.perspectiveName +
+                          ") needs a variable bound to a text constant while "
+                          "the query is compiled; a run-time perspective name "
+                          "is not lowered");
+      name = std::get<std::string>(*value);
+    }
+    name = normalizePerspective(std::move(name));
     std::optional<CellRef> result;
     lastResultCells_.clear();
     if (block.body) {
@@ -191,26 +208,107 @@ VQLCompiler::compileWatchOrPerspectiveStatement(const Statement &statement) {
 }
 
 void VQLCompiler::compileMountDeclarations(const QueryExpression &query) {
-  const auto refuse = [](const std::string &method, const std::string &dim) {
+  const auto literalText =
+      [](const StoreAnchor &anchor) -> std::optional<std::string> {
+    if (anchor.args.empty()) return std::nullopt;
+    const auto *literal = std::get_if<ScalarLiteral>(&anchor.args.front().kind);
+    if (literal == nullptr)
+      refuseUnsupported(
+          "a mount anchor argument must be a text literal: the mount roots are "
+          "resolved while the query is compiled");
+    const auto *text = std::get_if<std::string>(&literal->value);
+    if (text == nullptr)
+      refuseUnsupported("a mount anchor argument must be a text literal");
+    return *text;
+  };
+  // The oracle's resolveStoreAnchor for the anchors that name this process's
+  // own stores; the roots are cells that already exist, so a mount mints none.
+  const auto resolveRoots =
+      [&](const StoreAnchor &anchor) -> std::vector<CellRef> {
+    std::vector<CellRef> roots;
+    if (!coordinator_) return roots;
+    const auto &method = anchor.method;
+    const auto text    = literalText(anchor);
+    if (method == "current") {
+      if (const auto home = coordinator_->homeAnchor()) roots.push_back(*home);
+    } else if (method == "local" && text) {
+      for (const auto &info : coordinator_->stores()) {
+        if (info.path != *text && info.label != *text) continue;
+        if (info.homeCell) roots.push_back(*info.homeCell);
+        break;
+      }
+    } else if (method == "system" && text) {
+      if (const auto home = coordinator_->resolveNamedStore(*text))
+        roots.push_back(*home);
+    } else if (method.empty() && !anchor.sliceName.empty()) {
+      if (const auto home = coordinator_->resolveNamedStore(anchor.sliceName))
+        roots.push_back(*home);
+    }
+    if (method.empty() && roots.empty() && text) {
+      if (const auto home = coordinator_->resolveNamedStore(*text))
+        roots.push_back(*home);
+    }
+    if (method.empty() && roots.empty()) {
+      if (const auto home = coordinator_->homeAnchor()) roots.push_back(*home);
+    }
+    if (anchor.derefMaster) {
+      for (auto &root : roots)
+        root = zigzag::queryCloneMaster(core_.arena(), root, core_.dims().clone)
+                   .value_or(root);
+    }
+    return roots;
+  };
+  const auto qualified = [](const std::string &name) {
+    return name.starts_with("d.") ? name : "d." + name;
+  };
+  const auto mount = [&](const MountDeclaration &declaration) {
+    const auto &method = declaration.storeAnchor.method;
     if (!isLocalStoreName(method) && !method.empty())
       refuseUnsupported("mount over remote store anchor '" + method + "' as " +
-                        dim + " requires a connected ZZ9P session");
-    refuseUnsupported(
-        "mount " + dim +
-        " has no compiled dispatch: dimension steps cannot consult a "
-        "session mount table yet, and a mount that resolves nothing would "
-        "silently read as an empty dimension");
+                        declaration.dimName +
+                        " requires a connected ZZ9P session");
+    auto roots = resolveRoots(declaration.storeAnchor);
+    if (roots.empty())
+      throw QueryRefusal(QueryErrorCategory::Runtime,
+                         "mount anchor for " + declaration.dimName +
+                             " did not resolve in the local coordinator");
+    CompilationOptions::Mount entry{.direction = declaration.direction,
+                                    .roots     = roots};
+    mounts_[declaration.dimName]            = entry;
+    mounts_[qualified(declaration.dimName)] = std::move(entry);
+    mountBindings_.push_back(CompilationResult::SessionBinding{
+        .name      = declaration.dimName,
+        .kind      = CompilationResult::SessionBinding::Kind::Mount,
+        .slots     = std::move(roots),
+        .direction = declaration.direction});
   };
-  for (const auto &mount : query.mounts)
-    refuse(mount.storeAnchor.method, mount.dimName);
+  const auto unmount = [&](const UnmountDeclaration &declaration) {
+    const auto canonical = qualified(declaration.dimName);
+    const auto shortName = canonical.substr(2);
+    const auto found     = mounts_.find(canonical);
+    if (found == mounts_.end() ||
+        found->second.direction != declaration.direction)
+      throw QueryRefusal(QueryErrorCategory::Runtime,
+                         "no mount is registered for " + canonical +
+                             " in the requested direction");
+    mounts_.erase(canonical);
+    mounts_.erase(shortName);
+    mountBindings_.push_back(CompilationResult::SessionBinding{
+        .name      = declaration.dimName,
+        .kind      = CompilationResult::SessionBinding::Kind::Unmount,
+        .direction = declaration.direction});
+  };
+  // As the oracle ran them: the ordered declarations when there are any,
+  // otherwise the legacy mount list.
+  if (query.namespaceDeclarations.empty()) {
+    for (const auto &declaration : query.mounts) mount(declaration);
+    return;
+  }
   for (const auto &declaration : query.namespaceDeclarations) {
-    if (const auto *mount = std::get_if<MountDeclaration>(&declaration))
-      refuse(mount->storeAnchor.method, mount->dimName);
+    if (const auto *entry = std::get_if<MountDeclaration>(&declaration))
+      mount(*entry);
     else
-      refuseUnsupported(
-          "unmount " + std::get<UnmountDeclaration>(declaration).dimName +
-          " has no compiled dispatch: no mount table exists to remove it "
-          "from");
+      unmount(std::get<UnmountDeclaration>(declaration));
   }
 }
 

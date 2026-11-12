@@ -30,6 +30,46 @@ void validatePathLambdaSignature(const PathLambda &lambda) {
 
 } // namespace
 
+bool VQLCompiler::isWholeWalkStep(const FunctionInvocation &fn) {
+  if (!fn.args.empty()) return false;
+  return fn.name == "count" || fn.name == "any" || fn.name == "all" ||
+         fn.name == "none" || fn.name == "one" || fn.name == "optional_one" ||
+         fn.name == "first";
+}
+
+std::vector<CellRef>
+VQLCompiler::compileWholeWalkStep(const FunctionInvocation &fn,
+                                  const std::span<const CellRef> stream,
+                                  const bool hasContext) {
+  if (fn.name == "count") return compilePathFunctionWalk(fn, stream);
+  return compileSemanticQuantifierWalk(fn, stream, hasContext);
+}
+
+std::vector<CellRef>
+VQLCompiler::emitMountFallback(const SignedDimensionStep &step,
+                               std::vector<CellRef> walked) {
+  const auto mounted = mounts_.find(step.dimName);
+  if (mounted == mounts_.end() || mounted->second.roots.empty() ||
+      walked.empty())
+    return walked;
+  if (!step.isBidir && step.direction != mounted->second.direction)
+    return walked;
+  // The walk is empty only as a whole (every input found nothing), which is
+  // known at run time, so the fallback is a branch around an append.
+  const auto present = emitStreamPresence(walked);
+  const auto absent  = core_.arena().makeCell();
+  const auto negate  = emitOp(OpcodeKind::Not, "#MOUNT_FALLBACK_NOT");
+  emitInput(negate, present);
+  emitOutput(negate, absent);
+  const auto end    = mintOpcode(OpcodeKind::Nop, "#MOUNT_FALLBACK_END");
+  const auto branch = emitOp(OpcodeKind::BranchFalseCell, "#MOUNT_FALLBACK");
+  emitInput(branch, absent);
+  emitInput(branch, end);
+  emitAppendStream(walked.front(), mounted->second.roots);
+  appendOpcode(end);
+  return walked;
+}
+
 std::vector<CellRef> VQLCompiler::compileSteps(std::span<const PathStep> steps,
                                                std::vector<CellRef> stream,
                                                bool hasContext) {
@@ -98,10 +138,19 @@ std::vector<CellRef> VQLCompiler::compileSteps(std::span<const PathStep> steps,
         throw std::invalid_argument("unbound point-free functor '" +
                                     dimension->dimName + "'");
       }
+    } else if (function && !userCall && hasContext &&
+               isWholeWalkStep(*function)) {
+      // Ahead of the user-call empty-stream fallback and the per-cell emitMap:
+      // an empty walk must still reach the step (count() answers a present 0).
+      // Without a context there is no walk to count, so the step keeps the
+      // per-cell path and its refusal.
+      nextStream = compileWholeWalkStep(*function, stream, hasContext);
     } else {
       nextStream = emitMap(stream, [&](CellRef current) {
         return compileSelector(step, current, hasContext);
       });
+      if (dimension && dimension->creates.empty())
+        nextStream = emitMountFallback(*dimension, std::move(nextStream));
     }
     // User calls may produce a value without a flowing context. Preserve the
     // direct evaluator's one context-free call when the input stream is empty.
