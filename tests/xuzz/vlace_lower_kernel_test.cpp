@@ -97,6 +97,13 @@ TEST(VlaceLowerKernelTest,
       "106");
 }
 
+TEST(VlaceLowerKernelTest, ThunksInsideFramesCaptureFromEveryFrameOut) {
+  EXPECT_EQ(run("(fn a => let t = a * 2 in t + a) 5"), "15");
+  EXPECT_EQ(run("(fn a => let t = (let u = a + 1 in u * 2) in t + a) 5"), "17");
+  // One variable used many times is captured once and read consistently.
+  EXPECT_EQ(run("let x = 3 in (fn y => x + x + x * y) 2"), "12");
+}
+
 TEST(VlaceLowerKernelTest, ClosureValuesReadBackAsFunctions) {
   Rig rig;
   auto v = rig.eval("fn x => x");

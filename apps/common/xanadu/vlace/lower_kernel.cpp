@@ -63,7 +63,6 @@ constexpr std::size_t closureEnvironmentCeiling = 1U << 28;
 constexpr std::string_view captureNamePrefix = "#capture:";
 
 // -- Small emission helpers
-// -----------------------------------------------------
 
 std::unexpected<EvalError> internalError(std::string detail,
                                          SourceLocation loc = {}) {
@@ -135,7 +134,6 @@ private:
 };
 
 // -- Copying a declaration out of its Program
-// -----------------------------------------
 
 /// A top-level declaration, copied out of the Program because the Program only
 /// lives for one evaluation and a Compiler outlives it.
@@ -233,7 +231,6 @@ Expr cloneExpr(const ExprNode &e) {
 }
 
 // -- Per-Compiler kernel state
-// ----------------------------------------------------------
 
 /// One variable a closure frame under construction captured from outside.
 struct CaptureRecord {
@@ -322,7 +319,6 @@ void emitUnpackFirst(LowerContext &ctx, CellRef streamPort, CellRef dst) {
 }
 
 // -- Shared frames: the identity box and force
-// --------------------------------------------
 
 /// The closure descriptor of the memo box: one captured cell, returned when
 /// applied.
@@ -438,7 +434,6 @@ Lowered<CellRef> forceFrameDescriptor(LowerContext &ctx) {
 }
 
 // -- Closure frames
-// ----------------------------------------------------------------------
 
 /// A closure whose frame is built: its descriptor and what it captures.
 struct BuiltClosure {
@@ -644,7 +639,6 @@ Lowered<BuiltClosure> buildLambdaClosure(LowerContext &ctx,
 }
 
 // -- Thunks
-// ----------------------------------------------------------------------------
 
 /// A fresh cell to be a thunk. VqlBoxScalar mints a new cell per execution
 /// holding the scalar read from its input, which is how a frame that runs many
@@ -885,6 +879,15 @@ std::optional<Lowered<Operand>> topLevelOperand(LowerContext &ctx,
       }
     } catch (const LoweringBudgetExceeded &budget) {
       fail(budget.error());
+      throw;
+    } catch (const std::exception &error) {
+      // Leave no entry stuck in Lowering: a later use must see the failure,
+      // not an operand for a cell that never got code.
+      fail(rewordBudgetFailure(error.what())
+               .value_or(
+                   EvalError{.code   = CompileError::UnexpectedToken,
+                             .detail = std::string("vlace: ") + error.what(),
+                             .loc    = {}}));
       throw;
     }
     entry.phase = Phase::Ready;
