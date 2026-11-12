@@ -28,10 +28,6 @@
 #include "common/xanadu/zigzag/arena_manifold.hpp"
 #include "common/xanadu/zigzag/dim_vector.hpp"
 
-namespace xanadu {
-class Store;
-} // namespace xanadu
-
 namespace xanadu::vpl {
 
 /// Thrown by VPLEngine::evaluate when compiling or running fails. A
@@ -53,16 +49,10 @@ public:
   VPLEngine();
   explicit VPLEngine(zigzag::ArenaManifold &arena);
   explicit VPLEngine(zigzag::vortex::VortexCore &core);
-  explicit VPLEngine(Store &store);
   ~VPLEngine();
 
   VPLEngine(const VPLEngine &)            = delete;
   VPLEngine &operator=(const VPLEngine &) = delete;
-
-  VPLEngine *withConsoleEffects(bool enabled) noexcept {
-    consoleEffects_ = enabled;
-    return this;
-  }
 
   /// Compiles an AST node and runs it on the VM. Throws VPLExecutionError.
   VplView evaluate(const AstNode &node);
@@ -111,11 +101,6 @@ public:
   [[nodiscard]] zigzag::vortex::VortexStdLib &stdlib() noexcept {
     return *stdlib_;
   }
-  [[nodiscard]] Store *store() const noexcept { return store_; }
-  VPLEngine *setStore(Store *store) noexcept {
-    store_ = store;
-    return this;
-  }
 
   /// Default dimension for 1D arrays (defaults to "d.1").
   [[nodiscard]] zigzag::DimRef defaultDim();
@@ -134,8 +119,6 @@ private:
   zigzag::vortex::VortexCore *core_{nullptr};
   zigzag::vortex::VortexVM *vm_{nullptr};
   zigzag::vortex::VortexStdLib *stdlib_{nullptr};
-  Store *store_{nullptr};
-  bool consoleEffects_{true};
   std::size_t cycleBudget_{kDefaultCycleBudget};
 
   std::optional<zigzag::DimRef> defaultDim_;

@@ -4,8 +4,6 @@
  */
 #include "common/xanadu/vpl/vpl_engine.hpp"
 
-#include "common/xanadu/store.hpp"
-
 namespace xanadu::vpl {
 
 // core_/vm_/stdlib_ are raw aliases into unique_ptrs built in the constructor
@@ -48,21 +46,6 @@ VPLEngine::VPLEngine(zigzag::vortex::VortexCore &core) : core_(&core) {
       std::make_unique<zigzag::vortex::VortexStdLib>(*core_, *ownedVm_);
 
   // NOLINTBEGIN(cppcoreguidelines-prefer-member-initializer)
-  vm_     = ownedVm_.get();
-  stdlib_ = ownedStdlib_.get();
-  // NOLINTEND(cppcoreguidelines-prefer-member-initializer)
-  wire();
-}
-
-VPLEngine::VPLEngine(Store &store) : store_(&store) {
-  ownedArena_ = std::make_unique<zigzag::ArenaManifold>();
-  ownedCore_  = std::make_unique<zigzag::vortex::VortexCore>(*ownedArena_);
-  ownedVm_    = std::make_unique<zigzag::vortex::VortexVM>(*ownedCore_);
-  ownedStdlib_ =
-      std::make_unique<zigzag::vortex::VortexStdLib>(*ownedCore_, *ownedVm_);
-
-  // NOLINTBEGIN(cppcoreguidelines-prefer-member-initializer)
-  core_   = ownedCore_.get();
   vm_     = ownedVm_.get();
   stdlib_ = ownedStdlib_.get();
   // NOLINTEND(cppcoreguidelines-prefer-member-initializer)

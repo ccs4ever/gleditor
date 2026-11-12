@@ -600,14 +600,12 @@ TEST_F(GraphEmitTest, CopyValueIntoAnAbsentTargetNeverCreatesACell) {
   const auto cursor = vm_.spawnCursor(entry_, "absent-target");
   const auto before = arena_.cellCount();
   const auto result = vm_.run(cursor, kCycleBudget);
-  // The helper emits no guard, so the VM decides. It must neither mint a cell
-  // for the absent target nor disturb the source.
+  // The helper emits no guard and the Value op is a silent no-op on an absent
+  // target: the run succeeds, mints no cell and writes nothing.
+  EXPECT_TRUE(result.success) << result.errorMessage;
   EXPECT_EQ(arena_.cellCount(), before);
   EXPECT_EQ(arena_.asInt64(number), 42);
   EXPECT_FALSE(vm_.resultCell(gone).has_value());
-  RecordProperty("absent_target_run_success",
-                 result.success ? "true" : "false");
-  RecordProperty("absent_target_run_message", result.errorMessage);
 }
 
 TEST_F(GraphEmitTest, AliasRegisterIsIndependentOfItsSourceAfterwards) {
@@ -643,6 +641,51 @@ TEST_F(GraphEmitTest, MergeRankInputDependenciesMergesAndNeverReplaces) {
   emit::mergeRankInputDependencies(ctx_, result, inputs);
   EXPECT_EQ(ctx_.rankDependencies()[result],
             (std::vector<CellRef>{a, x, y, z}));
+}
+
+TEST_F(GraphEmitTest, ALoopBodyCannotBranchToALabelOutsideItsLoop) {
+  const auto outside = emit::mintLabel(ctx_, "#OUTSIDE");
+  const auto count   = constant(2);
+  EXPECT_THROW(emit::countedLoop(
+                   ctx_, count,
+                   [&](CellRef) { emit::branchAlways(ctx_, outside, "#OUT"); }),
+               std::invalid_argument);
+  emit::placeLabel(ctx_, outside);
+}
+
+TEST_F(GraphEmitTest, AnInnerLoopCannotBranchToALabelOfTheOuterBody) {
+  const auto count = constant(2);
+  EXPECT_THROW(emit::countedLoop(ctx_, count,
+                                 [&](CellRef) {
+                                   const auto mine =
+                                       emit::mintLabel(ctx_, "#MINE");
+                                   emit::countedLoop(ctx_, count, [&](CellRef) {
+                                     emit::branchAlways(ctx_, mine, "#OUT");
+                                   });
+                                   emit::placeLabel(ctx_, mine);
+                                 }),
+               std::invalid_argument);
+}
+
+TEST_F(GraphEmitTest, JumpAndCallToALabelNeverPlacedAreRefusedAtAssembly) {
+  for (const auto kind : {OpcodeKind::Jump, OpcodeKind::Call}) {
+    const auto label = emit::mintLabel(ctx_, "#NEVER");
+    const auto op    = ctx_.emitOp(kind, "#TRANSFER");
+    ctx_.emitInput(op, label);
+    (void)ctx_.emitOp(OpcodeKind::Halt, "#HALT");
+    const auto message = unplacedBranchTarget(vm_, programOps());
+    ASSERT_TRUE(message.has_value()) << static_cast<int>(kind);
+    EXPECT_NE(message->find("never placed"), std::string::npos);
+  }
+}
+
+TEST_F(GraphEmitTest, JumpToAPlacedLabelPassesTheAssemblyCheck) {
+  const auto label = emit::mintLabel(ctx_, "#THERE");
+  const auto op    = ctx_.emitOp(OpcodeKind::Jump, "#TRANSFER");
+  ctx_.emitInput(op, label);
+  emit::placeLabel(ctx_, label);
+  (void)ctx_.emitOp(OpcodeKind::Halt, "#HALT");
+  EXPECT_FALSE(unplacedBranchTarget(vm_, programOps()).has_value());
 }
 
 // --- Executor: results the lowering cards hand back -------------------------

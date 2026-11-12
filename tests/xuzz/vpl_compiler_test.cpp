@@ -5,6 +5,7 @@
  */
 #include <chrono>
 #include <filesystem>
+#include <functional>
 #include <gtest/gtest.h>
 #include <memory>
 
@@ -283,16 +284,25 @@ TEST_F(VPLCompilerTest, DirectEvaluationEntryPointsRunOnTheVmOnly) {
   EXPECT_GT(engine.totalCycles(), afterAst);
 
   engine.setCycleBudget(1);
-  EXPECT_THROW(static_cast<void>(engine.evaluate(*ast)), VPLExecutionError);
-  EXPECT_THROW(static_cast<void>(engine.evaluate("1 + 2")), VPLExecutionError);
+  for (const auto &attempt :
+       {std::function<VplView()>{[&] { return engine.evaluate(*ast); }},
+        std::function<VplView()>{[&] { return engine.evaluate("1 + 2"); }}}) {
+    try {
+      static_cast<void>(attempt());
+      FAIL() << "a one-cycle budget must stop the VM";
+    } catch (const VPLExecutionError &error) {
+      EXPECT_EQ(error.stage(), ExecutionError::Stage::Budget) << error.what();
+    }
+  }
   engine.setCycleBudget(kDefaultCycleBudget);
 
   try {
-    static_cast<void>(engine.evaluate("⍫ 1 2"));
+    static_cast<void>(engine.evaluate("1 2 ⍤ 1 3"));
     FAIL() << "an unlowered verb must be refused";
   } catch (const VPLExecutionError &error) {
     EXPECT_EQ(error.stage(), ExecutionError::Stage::Compile);
-    EXPECT_EQ(std::string(error.what()).rfind("Compilation error: ", 0), 0U);
+    EXPECT_NE(std::string(error.what()).find("conjunction"), std::string::npos);
+    EXPECT_EQ(std::string(error.what()).find("unbound"), std::string::npos);
   }
   try {
     static_cast<void>(engine.evaluate("missing"));

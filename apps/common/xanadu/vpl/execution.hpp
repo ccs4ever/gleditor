@@ -45,7 +45,9 @@ inline constexpr std::string_view enclosureDimensionName = "d.enclosure";
 unplacedBranchTarget(const zigzag::vortex::VortexVM &vm,
                      std::span<const zigzag::CellRef> chain);
 
-/// The cycle budget an evaluation gets unless the caller sets one.
+/// The cycle budget an evaluation gets unless the caller sets one. It mirrors
+/// the default of VortexVM::run (vortex_vm.hpp), which this layer does not own;
+/// keep the two equal.
 inline constexpr std::size_t kDefaultCycleBudget = 100000;
 
 class Executor {

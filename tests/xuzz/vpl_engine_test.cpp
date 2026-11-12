@@ -372,14 +372,15 @@ TEST(VPLEngineTest, SourceEvaluationRunsOnTheVmAndNothingElse) {
   engine.setCycleBudget(kDefaultCycleBudget);
 
   // Forms the compiler does not lower are refused at compile time, by name,
-  // and never interpreted: scrub needs a historical fold the VM cannot re-base
-  // (blocked on VQL version pins), and an unbound name has no cell to read.
+  // and never interpreted: a rank conjunction (⍤) has no lowering, and an
+  // unbound name has no cell to read.
   try {
-    static_cast<void>(engine.evaluate("⍫ 1 2"));
+    static_cast<void>(engine.evaluate("1 2 ⍤ 1 3"));
     FAIL() << "an unlowered verb must be refused";
   } catch (const VPLExecutionError &error) {
     EXPECT_EQ(error.stage(), ExecutionError::Stage::Compile);
-    EXPECT_THAT(error.what(), testing::StartsWith("Compilation error: "));
+    EXPECT_THAT(error.what(), testing::HasSubstr("conjunction"));
+    EXPECT_THAT(error.what(), testing::Not(testing::HasSubstr("unbound")));
   }
   try {
     static_cast<void>(engine.evaluate("missing"));
@@ -413,7 +414,7 @@ TEST(VPLEngineTest, AstEvaluationRunsOnTheVmAndNothingElse) {
   }
   engine.setCycleBudget(kDefaultCycleBudget);
 
-  Parser scrubParser("⍫ 1 2");
+  Parser scrubParser("1 2 ⍤ 1 3");
   const auto scrub = scrubParser.parseProgram();
   ASSERT_NE(scrub, nullptr);
   try {
@@ -421,7 +422,8 @@ TEST(VPLEngineTest, AstEvaluationRunsOnTheVmAndNothingElse) {
     FAIL() << "an unlowered verb must be refused";
   } catch (const VPLExecutionError &error) {
     EXPECT_EQ(error.stage(), ExecutionError::Stage::Compile);
-    EXPECT_THAT(error.what(), testing::StartsWith("Compilation error: "));
+    EXPECT_THAT(error.what(), testing::HasSubstr("conjunction"));
+    EXPECT_THAT(error.what(), testing::Not(testing::HasSubstr("unbound")));
   }
   Parser unboundParser("missing");
   const auto unbound = unboundParser.parseProgram();

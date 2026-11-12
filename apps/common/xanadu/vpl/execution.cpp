@@ -247,15 +247,26 @@ unplacedBranchTarget(const zigzag::vortex::VortexVM &vm,
   const std::unordered_set<zigzag::CellRef> placed(chain.begin(), chain.end());
   for (const auto op : chain) {
     const auto kind = vm.getOpcodeKind(op);
-    if (!kind ||
-        (*kind != OpcodeKind::BranchFalseCell && *kind != OpcodeKind::Branch)) {
+    if (!kind) continue;
+    // Branch and BranchFalseCell take the target second; Jump and Call first.
+    std::size_t targetInput{};
+    switch (*kind) {
+    case OpcodeKind::BranchFalseCell:
+    case OpcodeKind::Branch:
+      targetInput = 1;
+      break;
+    case OpcodeKind::Jump:
+    case OpcodeKind::Call:
+      targetInput = 0;
+      break;
+    default:
       continue;
     }
     const auto inputs = vm.core().inputsOf(op);
-    if (inputs.size() < 2) continue;
-    if (!placed.contains(inputs[1])) {
+    if (inputs.size() <= targetInput) continue;
+    if (!placed.contains(inputs[targetInput])) {
       return "VPL graph branch " + std::to_string(op) + " targets label " +
-             std::to_string(inputs[1]) + " that was never placed";
+             std::to_string(inputs[targetInput]) + " that was never placed";
     }
   }
   return std::nullopt;

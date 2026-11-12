@@ -13,26 +13,42 @@ namespace {
 using zigzag::vortex::OpcodeKind;
 
 // A label is a Nop outside the chain, so the VM cannot tell a branch to an
-// unplaced label from a branch to the end of the program. Compile time can: the
-// registry remembers which labels some branch targets, and a loop helper checks
-// the labels minted inside its body once the body returns. Labels minted
-// outside any loop are checked where the whole graph is assembled (see
-// unplacedBranchTarget in execution.hpp).
+// unplaced label from a branch to the end of the program. Compile time can:
+// labels minted inside a loop body are registered with the loop depth they
+// belong to, a branch from a deeper loop to one of them (or to a label minted
+// outside every loop) is refused because a body cannot branch out of its loop,
+// and the loop helper checks that every targeted label of its body was placed.
+// Labels minted outside any loop are not registered at all; their forward
+// branches are checked where the whole graph is assembled (see
+// unplacedBranchTarget in execution.hpp). The registry only holds labels of
+// loop bodies that are still being emitted, so it does not grow with the
+// number of compiles.
 struct LabelKey {
   const void *arena;
   CellRef label;
   bool operator==(const LabelKey &) const = default;
 };
 
+// 2^64 divided by the golden ratio, the usual odd multiplier for mixing two
+// hashes: the arena pointer and the cell id are both low-entropy, aligned or
+// small, and a plain xor would collide for every (arena, label) pair of equal
+// bit patterns.
+constexpr std::uint64_t kHashMixMultiplier = 0x9e3779b97f4a7c15ULL;
+
 struct LabelKeyHash {
   std::size_t operator()(const LabelKey &key) const noexcept {
     return std::hash<const void *>{}(key.arena) ^
-           (std::hash<CellRef>{}(key.label) * 0x9e3779b97f4a7c15ULL);
+           (std::hash<CellRef>{}(key.label) * kHashMixMultiplier);
   }
 };
 
+struct LabelState {
+  std::size_t depth{0};
+  bool targeted{false};
+};
+
 struct LabelRegistry {
-  std::unordered_map<LabelKey, bool, LabelKeyHash> targeted;
+  std::unordered_map<LabelKey, LabelState, LabelKeyHash> labels;
   std::vector<LabelKey> mintedInLoops;
   std::size_t loopDepth{0};
 };
@@ -52,7 +68,15 @@ bool isPlaced(LowerContext &ctx, CellRef label) {
 }
 
 void noteTarget(LowerContext &ctx, CellRef target) {
-  registry().targeted[LabelKey{arenaKey(ctx), target}] = true;
+  auto &state = registry();
+  if (state.loopDepth == 0) return;
+  const auto found = state.labels.find(LabelKey{arenaKey(ctx), target});
+  if (found == state.labels.end() || found->second.depth < state.loopDepth) {
+    throw std::invalid_argument(
+        "VPL graph emit: a loop body cannot branch to a label outside its "
+        "loop");
+  }
+  found->second.targeted = true;
 }
 
 // Brackets a loop body: every label minted while it runs must be placed
@@ -67,6 +91,9 @@ public:
   ~BodyScope() {
     auto &state = registry();
     --state.loopDepth;
+    for (std::size_t i = mark_; i < state.mintedInLoops.size(); ++i) {
+      state.labels.erase(state.mintedInLoops[i]);
+    }
     state.mintedInLoops.resize(mark_);
   }
   BodyScope(const BodyScope &)            = delete;
@@ -77,8 +104,8 @@ public:
     for (std::size_t i = mark_; i < state.mintedInLoops.size(); ++i) {
       const auto &key = state.mintedInLoops[i];
       if (key.arena != arenaKey(ctx_)) continue;
-      const auto found = state.targeted.find(key);
-      if (found != state.targeted.end() && found->second &&
+      const auto found = state.labels.find(key);
+      if (found != state.labels.end() && found->second.targeted &&
           !isPlaced(ctx_, key.label)) {
         throw std::invalid_argument(
             "VPL graph emit: a loop body branches to a label it never placed");
@@ -90,6 +117,8 @@ private:
   LowerContext &ctx_;
   std::size_t mark_;
 };
+
+constexpr std::int64_t kReplaceWholeValue = -1;
 
 CellRef freshRegister(LowerContext &ctx) {
   return ctx.core().arena().makeCell();
@@ -157,8 +186,10 @@ CellRef mintLabel(LowerContext &ctx, std::string_view label) {
   const auto op = ctx.mintOpcode(OpcodeKind::Nop, label);
   auto &state   = registry();
   const LabelKey key{arenaKey(ctx), op};
-  state.targeted[key] = false;
-  if (state.loopDepth > 0) state.mintedInLoops.push_back(key);
+  if (state.loopDepth > 0) {
+    state.labels[key] = LabelState{.depth = state.loopDepth};
+    state.mintedInLoops.push_back(key);
+  }
   return op;
 }
 
@@ -337,7 +368,8 @@ void copyValue(LowerContext &ctx, CellRef from, CellRef to) {
   const auto write = ctx.emitOp(OpcodeKind::Value, "#COPY_VALUE");
   ctx.emitInput(write, to);
   ctx.emitInputConstant(write, std::int64_t{0});
-  ctx.emitInputConstant(write, std::int64_t{-1});
+  // Length -1 is the Value opcode's "replace the whole content".
+  ctx.emitInputConstant(write, kReplaceWholeValue);
   ctx.emitInput(write, from);
 }
 
