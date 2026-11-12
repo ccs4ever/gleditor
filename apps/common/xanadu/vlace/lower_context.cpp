@@ -37,8 +37,7 @@ constexpr std::string_view budgetTexts[] = {
 
 std::optional<CompileError> codeFromName(std::string_view name) {
   constexpr auto first = static_cast<std::uint8_t>(CompileError::LexicalError);
-  constexpr auto last =
-      static_cast<std::uint8_t>(CompileError::BudgetExhausted);
+  constexpr auto last  = static_cast<std::uint8_t>(CompileError::ArithFault);
   for (std::uint8_t c = first; c <= last; ++c) {
     const auto code = static_cast<CompileError>(c);
     if (compileErrorName(code) == name) return code;

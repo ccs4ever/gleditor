@@ -104,8 +104,7 @@ void emitDivisorGuard(LowerContext &ctx, Operand divisor, SourceLocation loc) {
         emitBinary(ctx, OpcodeKind::Eq, divisor, ctx.emitConstant(zero));
     const auto nonZero = ctx.mintLabel("#vlace_nonzero");
     ctx.branchIfFalse(isZero, nonZero);
-    ctx.emitRuntimeFailure(CompileError::UnexpectedToken, loc,
-                           "division by zero");
+    ctx.emitRuntimeFailure(CompileError::ArithFault, loc, "division by zero");
     ctx.placeLabel(nonZero);
   }
 }

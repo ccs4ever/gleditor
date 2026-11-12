@@ -252,6 +252,7 @@ TEST(VlaceLowerScalarsTest, DivisionByZeroFailsForIntAndFloat) {
        {"7 / 0", "7 % 0", "7.0 / 0.0", "7 / 0.0", "7.5 / (1.0 - 1.0)"}) {
     auto v = rig.eval(src);
     ASSERT_FALSE(v.has_value()) << src;
+    EXPECT_EQ(v.error().code, CompileError::ArithFault) << src;
     EXPECT_NE(v.error().detail.find("division by zero"), std::string::npos)
         << src;
   }
