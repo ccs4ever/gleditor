@@ -116,7 +116,7 @@ TEST(VPLEngineTest, DISABLED_ScalarArithmeticAndScalarExtension) {
   EXPECT_EQ(engine.arena().asInt64(cells7[2]).value_or(0), 13);
 }
 
-TEST(VPLEngineTest, DISABLED_IotaShapeAndValenceDualSyntax) {
+TEST(VPLEngineTest, IotaShapeAndValenceDualSyntax) {
   VPLEngine engine;
 
   // APL syntax: A ← 5⍳d.1
@@ -145,7 +145,7 @@ TEST(VPLEngineTest, DISABLED_IotaShapeAndValenceDualSyntax) {
   EXPECT_EQ(rankB.valence(), 1u);
 }
 
-TEST(VPLEngineTest, DISABLED_ZeroLengthIotaKeepsItsArrayShapeWithoutAnOrigin) {
+TEST(VPLEngineTest, ZeroLengthIotaKeepsItsArrayShapeWithoutAnOrigin) {
   VPLEngine engine;
   const auto empty = engine.evaluate("0 ⍳ d.1");
 

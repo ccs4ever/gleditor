@@ -73,9 +73,9 @@ TEST_F(VPLE2ETest, VplcHelpFlag) {
   EXPECT_NE(res.output.find("--library"), std::string::npos);
 }
 
-TEST_F(VPLE2ETest, VplcDumpsAstBeforeRefusingUnloweredCode) {
+TEST_F(VPLE2ETest, VplcDumpsAstAndCompilesIotaToAGraph) {
   auto res = runCommand("./build/vplc --dump-ast -e \"A ← 5⍳d.1\"");
-  EXPECT_NE(res.exitCode, 0) << res.output;
+  EXPECT_EQ(res.exitCode, 0) << res.output;
   EXPECT_NE(res.output.find("Program"), std::string::npos);
   EXPECT_NE(res.output.find("AssignExpr: A"), std::string::npos);
   EXPECT_NE(res.output.find("DyadicExpr: ⍳"), std::string::npos);
@@ -83,13 +83,24 @@ TEST_F(VPLE2ETest, VplcDumpsAstBeforeRefusingUnloweredCode) {
   EXPECT_NE(res.output.find("DimensionExpr: d.1"), std::string::npos);
 }
 
-TEST_F(VPLE2ETest, VplcRefusesUnloweredIotaInBothSyntaxes) {
-  for (const auto &expression : {"A ← 5⍳d.1", "A =. 5 i. d.1"}) {
-    const auto result = runCommand("./build/vplc --dump-asm -e \"" +
-                                   std::string(expression) + "\"");
-    EXPECT_NE(result.exitCode, 0) << result.output;
-    EXPECT_NE(result.output.find("VM"), std::string::npos);
-  }
+TEST_F(VPLE2ETest, VplcCompilesIotaInBothSyntaxesToALoopWhoseSizeIgnoresN) {
+  const auto dump = [&](const std::string &expression) {
+    return runCommand("./build/vplc --dump-asm -e \"" + expression + "\"");
+  };
+  const auto lines = [](const std::string &text) {
+    return std::ranges::count(text, '\n');
+  };
+  const auto small = dump("A ← 5⍳d.1");
+  EXPECT_EQ(small.exitCode, 0) << small.output;
+  EXPECT_NE(small.output.find("#MINT_CELL"), std::string::npos);
+  const auto large = dump("A ← 500⍳d.1");
+  EXPECT_EQ(large.exitCode, 0) << large.output;
+  // Unrolled work would grow with N; a loop does not.
+  EXPECT_EQ(lines(small.output), lines(large.output));
+  const auto jSyntax = dump("A =. 5 i. d.1");
+  EXPECT_EQ(jSyntax.exitCode, 0) << jSyntax.output;
+  EXPECT_NE(jSyntax.output.find("#MINT_CELL"), std::string::npos);
+  EXPECT_EQ(lines(jSyntax.output), lines(small.output));
 }
 
 TEST_F(VPLE2ETest, VplcConstantFoldingOptimization) {
@@ -133,12 +144,13 @@ TEST_F(VPLE2ETest, VplDefaultVmReduction) {
   EXPECT_NE(res.output.find("15"), std::string::npos);
 }
 
-TEST_F(VPLE2ETest, VplRefusesUnloweredIotaInBothSyntaxes) {
+TEST_F(VPLE2ETest, VplEvaluatesIotaInBothSyntaxesOnTheVm) {
   for (const auto &expression : {"5⍳d.1", "5 i. d.1"}) {
     const auto result = runCommand("./build/vpl --headless -e \"" +
                                    std::string(expression) + "\"");
-    EXPECT_NE(result.exitCode, 0) << result.output;
-    EXPECT_NE(result.output.find("VM"), std::string::npos);
+    EXPECT_EQ(result.exitCode, 0) << result.output;
+    EXPECT_NE(result.output.find("1 2 3 4 5"), std::string::npos)
+        << result.output;
   }
 }
 

@@ -202,8 +202,8 @@ expression evaluator all along, and nobody wrote the language.
 ### 4.3 Reduction Along a Walk
 
 ```apl
-      +/ 10⍳d.1              ⍝ sum ten freshly minted (empty) cells
-0
+      +/ 10⍳d.1              ⍝ sum the ten cells 1 to 10 that the iota mints
+55
       C ← 1 2 3 4 5 ⍴ d.1    ⍝ five scalar cells on a rank
       +/C
 15

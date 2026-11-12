@@ -112,20 +112,38 @@ TEST_F(VPLCompilerTest, CompileLibraryStore) {
   EXPECT_EQ(*kind, OpcodeKind::Return);
 }
 
-TEST_F(VPLCompilerTest, RejectsDyadicIotaInsteadOfCompilingItAtCompileTime) {
-  VPLCompiler compiler(*core, *vm);
+TEST_F(VPLCompilerTest,
+       CompilesDyadicIotaToAGraphInBothSyntaxesWithoutRunningIt) {
+  const auto dimension   = core->findOrMintDimension("d.1");
+  const auto expectGraph = [&](const std::string &source, std::size_t count,
+                               std::size_t &opcodeCount) {
+    VPLCompiler compiler(*core, *vm);
+    const auto result = compiler.compile(source);
+    ASSERT_TRUE(result.success) << source << ": " << result.errorMessage;
+    ASSERT_TRUE(result.entryOpcode);
+    EXPECT_NE(result.disassembly.find("#MINT_CELL"), std::string::npos);
+    EXPECT_NE(result.disassembly.find("#BIND A"), std::string::npos);
+    ASSERT_TRUE(result.terminalOpcode);
+    EXPECT_EQ(vm->getOpcodeKind(*result.terminalOpcode), OpcodeKind::Halt);
+    ASSERT_EQ(result.resultAxes.size(), 1U);
+    EXPECT_EQ(result.resultAxes.front().dim, dimension);
+    EXPECT_EQ(result.resultAxes.front().dir, zigzag::DimVector::POS);
+    // Compiling mints no element: the work waits for the VM.
+    EXPECT_FALSE(
+        core->arena().linked(core->home(), dimension, zigzag::DimVector::POS))
+        << "N=" << count;
+    opcodeCount = result.generatedOpcodes.size();
+  };
 
-  const auto resultApl = compiler.compile("A ← 5⍳d.1");
-  EXPECT_FALSE(resultApl.success);
-  EXPECT_NE(resultApl.errorMessage.find("unsupported VPL dyadic verb"),
-            std::string::npos);
-  EXPECT_FALSE(resultApl.entryOpcode);
-  EXPECT_TRUE(resultApl.generatedOpcodes.empty());
-
-  const auto resultJ = compiler.compile("A =. 5 i. d.1");
-  EXPECT_FALSE(resultJ.success);
-  EXPECT_NE(resultJ.errorMessage.find("unsupported VPL dyadic verb"),
-            std::string::npos);
+  std::size_t small{};
+  std::size_t large{};
+  expectGraph("A ← 5⍳d.1", 5, small);
+  expectGraph("A ← 500⍳d.1", 500, large);
+  // The program size does not grow with N, so the elements are a loop.
+  EXPECT_EQ(small, large);
+  std::size_t jSyntax{};
+  expectGraph("A =. 5 i. d.1", 5, jSyntax);
+  EXPECT_EQ(jSyntax, small);
 }
 
 TEST_F(VPLCompilerTest, CompileMonadicOperations) {
