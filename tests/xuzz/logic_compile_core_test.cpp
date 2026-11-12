@@ -7,9 +7,14 @@
 
 #include <array>
 #include <chrono>
-#include <iostream>
+#include <cstddef>
+#include <span>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
+
+#include <gleditor/logging.hpp>
 
 #include "common/xanadu/vortex/logic_compile.hpp"
 #include "common/xanadu/vortex/vortex_core.hpp"
@@ -18,6 +23,12 @@
 #include "common/xanadu/vprolog/compiler.hpp"
 #include "common/xanadu/vprolog/parser.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
+
+namespace zigzag::vortex::logic {
+// Defined in apps/common/xanadu/vortex/logic_compile_core.cpp: the owned-goal
+// table is file-local there, and the header that would declare it is frozen.
+std::vector<std::pair<std::string_view, std::size_t>> ownedGoalSignatures();
+} // namespace zigzag::vortex::logic
 
 namespace {
 
@@ -195,18 +206,31 @@ TEST(LogicCompileCoreTest, BudgetHitIsAnErrorNotExhaustion) {
   h.consult("gen(z).\ngen(s(X)) :- gen(X).\nloop :- loop.\n");
   h.compiler.stdlib().setLogicCycleBudget(2000);
   const auto query = h.compiler.compileQuery("gen(X).");
+  // A budget hit is reported by its own text, distinct from a resolution
+  // failure: callers that treat "no more solutions" as success must not see it.
+  const auto expectBudgetError = [](const auto &run) {
+    try {
+      run();
+      ADD_FAILURE() << "the cycle budget was not reported";
+    } catch (const std::runtime_error &err) {
+      EXPECT_NE(std::string(err.what()).find("exceeded its cycle budget"),
+                std::string::npos)
+          << err.what();
+    }
+  };
   std::size_t seen = 0;
-  EXPECT_THROW(h.compiler.stdlib().solve(
-                   query.goals,
-                   [&](const LogicSolution &) {
-                     ++seen;
-                     return true;
-                   },
-                   h.compiler.customPredicates(), 1'000'000),
-               std::runtime_error);
+  expectBudgetError([&] {
+    h.compiler.stdlib().solve(
+        query.goals,
+        [&](const LogicSolution &) {
+          ++seen;
+          return true;
+        },
+        h.compiler.customPredicates(), 1'000'000);
+  });
   EXPECT_GT(seen, 0u);
-  EXPECT_THROW(h.compiler.solveOnce(h.compiler.compileQuery("loop.")),
-               std::runtime_error);
+  expectBudgetError(
+      [&] { h.compiler.solveOnce(h.compiler.compileQuery("loop.")); });
   // The VM and arena are usable afterwards.
   h.compiler.stdlib().setLogicCycleBudget(100000);
   EXPECT_EQ(h.all("gen(X).", "X", 2).size(), 2u);
@@ -257,8 +281,8 @@ TEST(LogicCompileCoreTest, CycleCostIsLinearInClausesAndDepth) {
     const auto c0 = ctx.vm.totalCycles();
     EXPECT_EQ(h.all(query, "N").size(), 1u) << label;
     const auto cycles = ctx.vm.totalCycles() - c0;
-    std::cout << "[measure] " << label << ": " << cycles << " cycles, "
-              << ms(Clock::now() - t0) << " ms (information only)\n";
+    GLEDITOR_LOG_INFO("vortex.logic", "measure {}: {} cycles, {} ms", label,
+                      cycles, ms(Clock::now() - t0));
     return cycles;
   };
 
@@ -286,23 +310,91 @@ TEST(LogicCompileCoreTest, ThousandsOfClausesAndLargeLiteralsFitOneFrame) {
   EXPECT_EQ(h.all("big([x|T]), N = 1.", "N").size(), 1u);
 }
 
+TEST(LogicCompileCoreTest, ClauseLocalsPastTheVmDefaultShareOneFrame) {
+  // 1000 facts of five distinct variables each: 5000 locals in the one frame
+  // the predicate's clauses share, above the VM's 4096 default. The raised
+  // per-frame limit must be in force for this to solve.
+  PrologHarness h;
+  std::string facts;
+  for (int i = 0; i < 1000; ++i) facts += "quad(A, B, C, D, E).\n";
+  h.consult(facts);
+  h.compiler.stdlib().setLogicCycleBudget(10'000'000);
+  EXPECT_EQ(h.all("quad(1, 2, 3, 4, 5), N = 1.", "N", 5000).size(), 1000u);
+}
+
+TEST(LogicCompileCoreTest, DeepAcyclicListSolvesWithoutRecursion) {
+  // A 100,000-deep list: a recursive cycle check overflows the stack on it,
+  // the iterative one walks it. The term is built on the arena rather than
+  // parsed, because vprolog's lowering recurses once per element and would
+  // overflow before the solver is reached. The list is the solved variable, so
+  // the renderer walks it too (lists render iteratively).
+  constexpr std::size_t kDepth = 100'000;
+  PrologHarness h;
+  auto &stdlib = h.compiler.stdlib();
+  stdlib.setLogicCycleBudget(50'000'000);
+  // One cell per element, as a parse yields: sharing a single atom cell would
+  // make every dereference walk that cell's 100,000-long rank.
+  std::vector<CellRef> elements;
+  elements.reserve(kDepth);
+  for (std::size_t i = 0; i < kDepth; ++i)
+    elements.push_back(h.core.arena().makeCell("x"));
+  const CellRef list = stdlib.makeList(elements);
+  const CellRef var  = stdlib.makeVar("L");
+  const CellRef goal = stdlib.makeTerm("=", {var, list});
+  const auto sols    = stdlib.solveQuery(std::span<const CellRef>{&goal, 1},
+                                         h.compiler.customPredicates(), 5);
+  ASSERT_EQ(sols.size(), 1u);
+  // renderTerm separates elements with ", ".
+  std::string rendered = "[x";
+  for (std::size_t i = 1; i < kDepth; ++i) rendered += ", x";
+  rendered += "]";
+  ASSERT_TRUE(sols.front().formatted.contains("L"));
+  EXPECT_EQ(sols.front().formatted.at("L"), rendered);
+}
+
 TEST(LogicCompileCoreTest, UnloweredBuiltinsRefuseByNameButUnknownNamesFail) {
   PrologHarness h;
   // A user clause named like a builtin does not replace it: the old solver
   // tried its builtin arms before any clause. Until the owning card lowers
   // them these refuse by name.
   h.consult("true.\nknown(1).\n");
-  for (const char *goal :
-       {"X is 1.", "true.", "cell_value(1, X).", "setting(a, B).",
-        "vortex_function(F).", "known(X), \\+ known(2)."}) {
+  // Every entry of the owned table, at its arity, quoted so the parser reads
+  // symbolic names as atoms. An entry deleted when its card lands drops out of
+  // this sweep by itself.
+  const auto owned = ownedGoalSignatures();
+  ASSERT_FALSE(owned.empty());
+  for (const auto &[name, arity] : owned) {
+    // Inside a quoted atom a backslash is an escape, so it is doubled.
+    std::string quoted;
+    for (const char c : name) {
+      if (c == '\\') quoted += '\\';
+      quoted += c;
+    }
+    std::string goal = "'" + quoted + "'";
+    if (arity > 0) {
+      goal += "(";
+      for (std::size_t i = 0; i < arity; ++i)
+        goal += (i ? ", " : "") + std::to_string(i + 1);
+      goal += ")";
+    }
+    goal += ".";
+    const std::string signature =
+        std::string(name) + "/" + std::to_string(arity);
     try {
       (void)h.all(goal, "X");
       ADD_FAILURE() << goal << " did not refuse";
     } catch (const logic::LogicRefusal &refusal) {
-      EXPECT_NE(std::string(refusal.what()).find("awaits P2/P3/P4"),
-                std::string::npos)
-          << goal;
+      const std::string what = refusal.what();
+      EXPECT_NE(what.find(signature + " awaits P2/P3/P4"), std::string::npos)
+          << goal << ": " << what;
     }
+  }
+  try {
+    (void)h.all("known(X), \\+ known(2).", "X");
+    ADD_FAILURE() << "a conjunction through \\+ did not refuse";
+  } catch (const logic::LogicRefusal &refusal) {
+    EXPECT_NE(std::string(refusal.what()).find("awaits P2/P3/P4"),
+              std::string::npos);
   }
   EXPECT_TRUE(h.all("nosuch(X).", "X").empty());
   EXPECT_TRUE(h.all("nosuch(X, 1, 2).", "X").empty());

@@ -281,16 +281,38 @@ void freeTemp(FrameScope &scope, CellRef temp) {
 
 // True when @p term reaches itself. Unification has no occurs check, so
 // `X = f(X)` binds a rational tree; rendering one recurses without end.
+// Iterative on purpose: a 100,000-element acyclic list is a term depth of
+// 100,000, which a recursive walk would take down the stack with.
 [[nodiscard]] bool isCyclic(const VortexStdLib &stdlib, CellRef term,
                             std::unordered_set<CellRef> &path,
                             std::unordered_set<CellRef> &cleared) {
-  const auto actual = stdlib.deref(term);
-  if (!actual || cleared.contains(*actual)) return false;
-  if (!path.insert(*actual).second) return true;
-  for (const CellRef arg : stdlib.argumentsOf(*actual))
-    if (isCyclic(stdlib, arg, path, cleared)) return true;
-  path.erase(*actual);
-  cleared.insert(*actual);
+  struct Pending {
+    CellRef cell;
+    std::vector<CellRef> args;
+    std::size_t next;
+  };
+  std::vector<Pending> stack;
+  // Returns true when @p ref closes a cycle; otherwise opens a stack entry for
+  // a term not yet proven acyclic.
+  const auto enter = [&](CellRef ref) {
+    const auto actual = stdlib.deref(ref);
+    if (!actual || cleared.contains(*actual)) return false;
+    if (!path.insert(*actual).second) return true;
+    stack.push_back(Pending{*actual, stdlib.argumentsOf(*actual), 0});
+    return false;
+  };
+  if (enter(term)) return true;
+  while (!stack.empty()) {
+    Pending &top = stack.back();
+    if (top.next == top.args.size()) {
+      path.erase(top.cell);
+      cleared.insert(top.cell);
+      stack.pop_back();
+      continue;
+    }
+    const CellRef arg = top.args[top.next++];
+    if (enter(arg)) return true;
+  }
   return false;
 }
 
@@ -299,19 +321,38 @@ constexpr std::string_view kCyclicText = "<cyclic>";
 // Depth-first variables of @p term as the old solver's collectVariables found
 // them: the cell as met (not its master), first occurrence per master, cycle
 // safe.
+// Explicit stack, not recursion: a list query is as deep as its length.
 void collectVariables(const VortexStdLib &stdlib, CellRef term,
                       std::vector<CellRef> &vars,
                       std::unordered_set<CellRef> &seenVars,
                       std::unordered_set<CellRef> &visitedTerms) {
-  const auto actual = stdlib.deref(term);
-  if (!actual) return;
-  if (stdlib.isVar(*actual)) {
-    if (seenVars.insert(*actual).second) vars.push_back(term);
-    return;
+  struct Pending {
+    std::vector<CellRef> args;
+    std::size_t next;
+  };
+  std::vector<Pending> stack;
+  // Visits @p ref in the order the recursive walk did: a variable is recorded
+  // at its first occurrence, a compound opens its arguments.
+  const auto enter = [&](CellRef ref) {
+    const auto actual = stdlib.deref(ref);
+    if (!actual) return;
+    if (stdlib.isVar(*actual)) {
+      if (seenVars.insert(*actual).second) vars.push_back(ref);
+      return;
+    }
+    if (!visitedTerms.insert(*actual).second) return;
+    stack.push_back(Pending{stdlib.argumentsOf(*actual), 0});
+  };
+  enter(term);
+  while (!stack.empty()) {
+    Pending &top = stack.back();
+    if (top.next == top.args.size()) {
+      stack.pop_back();
+      continue;
+    }
+    const CellRef arg = top.args[top.next++];
+    enter(arg);
   }
-  if (!visitedTerms.insert(*actual).second) return;
-  for (const CellRef arg : stdlib.argumentsOf(*actual))
-    collectVariables(stdlib, arg, vars, seenVars, visitedTerms);
 }
 
 [[nodiscard]] std::vector<CellRef> clausesOf(const CompileContext &ctx,
@@ -340,6 +381,17 @@ void collectVariables(const VortexStdLib &stdlib, CellRef term,
 }
 
 } // namespace
+
+// Test seam: the (name, arity) of every goal kOwnedGoals refuses, in table
+// order. Declared by the tests that sweep the table; the header is frozen, so
+// it is not declared in logic_compile.hpp.
+std::vector<std::pair<std::string_view, std::size_t>> ownedGoalSignatures() {
+  std::vector<std::pair<std::string_view, std::size_t>> out;
+  out.reserve(kOwnedGoals.size());
+  for (const OwnedGoal &owned : kOwnedGoals)
+    out.emplace_back(owned.name, owned.arity);
+  return out;
+}
 
 // -- Emission primitives ------------------------------------------------------
 
