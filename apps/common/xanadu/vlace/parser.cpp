@@ -86,6 +86,8 @@ std::string_view compileErrorName(CompileError e) noexcept {
     return "UnknownModule";
   case CompileError::BudgetExhausted:
     return "BudgetExhausted";
+  case CompileError::ArithFault:
+    return "ArithFault";
   }
   return "Unknown";
 }

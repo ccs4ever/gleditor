@@ -225,6 +225,8 @@ enum class CompileError : std::uint8_t {
   UnknownModule,
   /// Appended: evaluation ran out of frame depth, cycles or arena work.
   BudgetExhausted,
+  /// Appended: a run-time arithmetic fault (spec §6.6), division by zero.
+  ArithFault,
 };
 
 [[nodiscard]] std::string_view compileErrorName(CompileError err) noexcept;
