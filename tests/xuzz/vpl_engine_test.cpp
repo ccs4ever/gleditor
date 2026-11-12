@@ -156,7 +156,7 @@ TEST(VPLEngineTest, ZeroLengthIotaKeepsItsArrayShapeWithoutAnOrigin) {
   EXPECT_TRUE(empty.collectCells(engine.arena()).empty());
 }
 
-TEST(VPLEngineTest, DISABLED_TransposeAndReverse) {
+TEST(VPLEngineTest, TransposeAndReverse) {
   VPLEngine engine;
 
   engine.evaluate("A ← 5⍳d.1");
